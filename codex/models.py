@@ -156,6 +156,57 @@ CAPTION_POSITION_CHOICES = [
 ]
 
 
+class ReportRecipe(models.Model):
+    """A recipe for generating a periodic Codex manual from contributions.
+
+    Each recipe specifies a list of contributor app slugs (in order),
+    a time window in days, and metadata for the resulting manual. The
+    `build_report` management command walks the contributors and
+    composes the result into a Manual row that can be re-rendered to
+    PDF on demand.
+
+    Phase 1 supports user-defined recipes seeded with one default
+    weekly recipe. Phase 2 will add cron-driven scheduling and email
+    delivery via the mailboxes app.
+    """
+
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=120, unique=True)
+    description = models.TextField(blank=True)
+    contributors = models.CharField(
+        max_length=500,
+        help_text='Comma-separated list of contributor slugs '
+                  '(matching modules in codex/contributions/), in '
+                  'the order they should appear in the report.',
+    )
+    period_days = models.IntegerField(
+        default=7,
+        help_text='How many days back the report covers.',
+    )
+    enabled = models.BooleanField(default=True)
+    output_manual_slug = models.SlugField(
+        max_length=160, blank=True,
+        help_text='Slug of the Manual produced by build_report. '
+                  'Auto-derived from the recipe slug if blank.',
+    )
+    last_built_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def output_slug(self):
+        return self.output_manual_slug or f'report-{self.slug}'
+
+    @property
+    def contributor_list(self):
+        return [c.strip() for c in self.contributors.split(',') if c.strip()]
+
+
 class Figure(models.Model):
     """An image or generated diagram embedded in a Section.
 

@@ -14,9 +14,15 @@
 (function () {
     const map = L.map('map').setView([{{ prefs.default_lat }}, {{ prefs.default_lon }}], {{ prefs.default_zoom }});
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // CartoDB Voyager — same OpenStreetMap data underneath, served
+    // from CartoDB's CDN which doesn't enforce the strict Referer /
+    // rate-limit policies the OSM volunteer-run servers do. Free for
+    // moderate use; for heavy/commercial traffic upgrade to a paid
+    // CartoDB plan or self-host an OSM tile server.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
-        attribution: '© OpenStreetMap contributors',
+        subdomains: 'abcd',
+        attribution: '© OpenStreetMap contributors © CARTO',
     }).addTo(map);
 
     // Live coordinate / zoom display in the meta strip.
