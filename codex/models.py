@@ -3,18 +3,23 @@
 A `Manual` is a top-level document. A `Section` is a chapter or
 sub-chapter of a manual; sections have a markdown body and an
 optional bag of sidenotes that the renderer hangs in the right
-margin alongside the section's body.
+margin alongside the section's body. A `Figure` is an image or
+generated diagram embedded in a section by a `!fig:slug` reference.
 
-Phase 1 supports a flat list of sections per manual, paragraphs +
-headings + lists, and PDF output via fpdf2 with Tufte-style page
-geometry (wide right margin for sidenotes, small italic page
-numbers, quiet headings).
+Phase 1: flat sections, paragraphs + headings + lists, PDF via
+fpdf2 with built-in Times.
 
-Phase 2 will add: parent/child sections (true chapters and
-sub-chapters), inline sidenote anchors, figures with captions in
-the margin, and optional weasyprint rendering for richer typography.
+Phase 2 (current): ET Book font, inline sidenote anchors via
+`^[note]` syntax, figures with margin captions, Mermaid diagrams
+generated via Kroki.
+
+Phase 3 (planned): parent/child sections (chapters), tables,
+sparklines, callout/admonition blocks.
 """
 
+import hashlib
+
+from django.core.files.base import ContentFile
 from django.db import models
 from django.utils.text import slugify
 
@@ -138,3 +143,84 @@ class Section(models.Model):
     def sidenote_list(self):
         """Return sidenotes as a list of stripped non-empty lines."""
         return [ln.strip() for ln in self.sidenotes.splitlines() if ln.strip()]
+
+
+FIGURE_KIND_CHOICES = [
+    ('image',   'Uploaded image (PNG/JPG/SVG)'),
+    ('mermaid', 'Mermaid diagram (rendered via Kroki)'),
+]
+
+
+class Figure(models.Model):
+    """An image or generated diagram embedded in a Section.
+
+    Two kinds:
+      - 'image':   uploaded by the user, stored in `image`.
+      - 'mermaid': source kept in `source`, rendered to PNG via the
+                   Kroki HTTP API on save (and re-rendered when the
+                   source text changes), with the resulting PNG
+                   cached in `image`.
+
+    Embedded in section bodies by writing `!fig:slug` on its own
+    line; the renderer looks the slug up in the section's figures
+    and inserts the image inline with the caption hanging in the
+    right margin.
+    """
+
+    section = models.ForeignKey(
+        Section, on_delete=models.CASCADE, related_name='figures',
+    )
+    slug = models.SlugField(
+        max_length=120,
+        help_text='Stable identifier referenced from section bodies as '
+                  '`!fig:<slug>`.',
+    )
+    kind = models.CharField(
+        max_length=16, choices=FIGURE_KIND_CHOICES, default='image',
+    )
+    image = models.FileField(upload_to='codex/figures/', blank=True)
+    source = models.TextField(
+        blank=True,
+        help_text='For Mermaid figures: the diagram source. Re-rendered '
+                  'whenever this text changes.',
+    )
+    source_hash = models.CharField(max_length=64, blank=True)
+    caption = models.TextField(
+        blank=True,
+        help_text='Hangs in the right margin alongside the figure.',
+    )
+    sort_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sort_order', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['section', 'slug'],
+                name='codex_unique_figure_slug_per_section',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.section}: {self.slug} ({self.kind})'
+
+    def save(self, *args, **kwargs):
+        if self.kind == 'mermaid' and self.source.strip():
+            new_hash = hashlib.sha256(
+                self.source.strip().encode('utf-8')
+            ).hexdigest()[:32]
+            if new_hash != self.source_hash or not self.image:
+                # Re-render via Kroki. Import locally so the model
+                # module doesn't depend on the rendering layer at
+                # import time.
+                from .rendering.diagrams import render_mermaid_to_png
+                png = render_mermaid_to_png(self.source)
+                if png:
+                    self.image.save(
+                        f'{self.slug or "diagram"}.png',
+                        ContentFile(png),
+                        save=False,
+                    )
+                    self.source_hash = new_hash
+        super().save(*args, **kwargs)

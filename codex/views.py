@@ -3,9 +3,10 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from .models import FORMAT_CHOICES, Manual, Section
+from .models import FIGURE_KIND_CHOICES, FORMAT_CHOICES, Figure, Manual, Section
 from .rendering import render_manual_to_pdf
 
 
@@ -136,9 +137,10 @@ def section_edit(request, manual_slug, section_slug):
         else:
             s.save()
             messages.success(request, f'Updated section "{s.title}".')
-            return redirect('codex:manual_detail', slug=m.slug)
+            return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)
     return render(request, 'codex/section_form.html', {
         'manual': m, 'section': s, 'action': 'Edit',
+        'figures': s.figures.all(),
     })
 
 
@@ -151,3 +153,89 @@ def section_delete(request, manual_slug, section_slug):
     s.delete()
     messages.success(request, f'Removed section "{title}".')
     return redirect('codex:manual_detail', slug=m.slug)
+
+
+# --- Figure CRUD ----------------------------------------------------------
+
+def _apply_figure_post(f, post, files):
+    raw_slug = post.get('slug', '').strip()
+    f.slug = slugify(raw_slug)[:120] if raw_slug else slugify(f.section.title + '-fig')[:120]
+    f.kind = post.get('kind', 'image')
+    f.source = post.get('source', '')
+    f.caption = post.get('caption', '').strip()
+    raw = post.get('sort_order', '0').strip()
+    try:
+        f.sort_order = int(raw)
+    except ValueError:
+        f.sort_order = 0
+    if 'image' in files:
+        f.image = files['image']
+
+
+@login_required
+def figure_add(request, manual_slug, section_slug):
+    m = get_object_or_404(Manual, slug=manual_slug)
+    s = get_object_or_404(Section, manual=m, slug=section_slug)
+    f = Figure(section=s)
+    if request.method == 'POST':
+        _apply_figure_post(f, request.POST, request.FILES)
+        if not f.slug:
+            messages.error(request, 'Slug is required.')
+        elif f.kind == 'image' and not f.image:
+            messages.error(request, 'Upload an image, or switch kind to Mermaid.')
+        elif f.kind == 'mermaid' and not f.source.strip():
+            messages.error(request, 'Mermaid source is required.')
+        else:
+            try:
+                if not request.POST.get('sort_order', '').strip():
+                    last = s.figures.order_by('-sort_order').first()
+                    f.sort_order = ((last.sort_order + 10) if last else 0)
+                f.save()
+                if f.kind == 'mermaid' and not f.image:
+                    messages.warning(request, f'Saved "{f.slug}", but Mermaid render via Kroki failed (network or bad source). Edit and re-save to retry.')
+                else:
+                    messages.success(request, f'Added figure "{f.slug}".')
+                return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)
+            except Exception as e:
+                messages.error(request, f'Could not save: {e}')
+    return render(request, 'codex/figure_form.html', {
+        'manual': m, 'section': s, 'figure': f,
+        'action': 'New', 'kind_choices': FIGURE_KIND_CHOICES,
+    })
+
+
+@login_required
+def figure_edit(request, manual_slug, section_slug, figure_slug):
+    m = get_object_or_404(Manual, slug=manual_slug)
+    s = get_object_or_404(Section, manual=m, slug=section_slug)
+    f = get_object_or_404(Figure, section=s, slug=figure_slug)
+    if request.method == 'POST':
+        _apply_figure_post(f, request.POST, request.FILES)
+        if not f.slug:
+            messages.error(request, 'Slug is required.')
+        else:
+            try:
+                f.save()
+                if f.kind == 'mermaid' and not f.image:
+                    messages.warning(request, f'Saved "{f.slug}", but Mermaid render failed.')
+                else:
+                    messages.success(request, f'Updated figure "{f.slug}".')
+                return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)
+            except Exception as e:
+                messages.error(request, f'Could not save: {e}')
+    return render(request, 'codex/figure_form.html', {
+        'manual': m, 'section': s, 'figure': f,
+        'action': 'Edit', 'kind_choices': FIGURE_KIND_CHOICES,
+    })
+
+
+@login_required
+@require_POST
+def figure_delete(request, manual_slug, section_slug, figure_slug):
+    m = get_object_or_404(Manual, slug=manual_slug)
+    s = get_object_or_404(Section, manual=m, slug=section_slug)
+    f = get_object_or_404(Figure, section=s, slug=figure_slug)
+    slug = f.slug
+    f.delete()
+    messages.success(request, f'Removed figure "{slug}".')
+    return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)

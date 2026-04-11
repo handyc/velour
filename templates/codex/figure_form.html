@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Figure - {{ section.title }} - Codex{% endblock %}
+
+{% block extra_head %}
+<style>
+    .codex-form { max-width: 900px; }
+    .codex-form .field { margin-bottom: 1rem; }
+    .codex-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .codex-form input[type=text], .codex-form input[type=number], .codex-form select, .codex-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .codex-form textarea { min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+    .codex-form textarea.caption { min-height: 80px; font-family: inherit; }
+    .codex-form .row { display: flex; gap: 0.75rem; }
+    .codex-form .row .field { flex: 1 1 0; }
+    .codex-form .row .field.narrow { flex: 0 0 140px; }
+    .codex-form small { color: #6e7681; font-size: 0.72rem; }
+    .codex-form .preview { margin-top: 0.5rem; padding: 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; }
+    .codex-form .preview img { max-width: 100%; display: block; }
+    .kind-block { display: none; }
+    .kind-block.active { display: block; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Figure</h1>
+<p style="color:#8b949e;">In <a href="{% url 'codex:section_edit' manual.slug section.slug %}">{{ section.title }}</a> &middot; <a href="{% url 'codex:manual_detail' manual.slug %}">{{ manual.title }}</a></p>
+
+<form method="post" enctype="multipart/form-data" class="codex-form">
+    {% csrf_token %}
+
+    <div class="row">
+        <div class="field">
+            <label for="slug">Slug</label>
+            <input type="text" id="slug" name="slug" value="{{ figure.slug }}" required maxlength="120">
+            <small>Used in section bodies as <code>!fig:{{ figure.slug|default:"slug" }}</code></small>
+        </div>
+        <div class="field narrow">
+            <label for="sort_order">Sort order</label>
+            <input type="number" id="sort_order" name="sort_order" value="{{ figure.sort_order|default_if_none:'' }}" placeholder="auto">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="kind">Kind</label>
+        <select id="kind" name="kind" onchange="updateKindBlocks()">
+            {% for k, v in kind_choices %}
+            <option value="{{ k }}" {% if figure.kind == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="block-image" class="kind-block">
+        <div class="field">
+            <label for="image">Image file</label>
+            <input type="file" id="image" name="image" accept="image/*" style="color:#c9d1d9;">
+            {% if figure.image %}
+            <small>Current: <code>{{ figure.image.name }}</code> — uploading replaces it.</small>
+            <div class="preview"><img src="{{ figure.image.url }}" alt="current"></div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="block-mermaid" class="kind-block">
+        <div class="field">
+            <label for="source">Mermaid source</label>
+            <textarea id="source" name="source" placeholder="graph TD&#10;    A[Start] --> B{Decision}&#10;    B -->|Yes| C[Do thing]&#10;    B -->|No| D[Other thing]">{{ figure.source }}</textarea>
+            <small>Rendered to PNG via <a href="https://kroki.io" target="_blank" style="color:#58a6ff;">kroki.io</a> when you save. <a href="https://mermaid.js.org/intro/" target="_blank" style="color:#58a6ff;">Mermaid syntax docs</a>.</small>
+        </div>
+        {% if figure.image and figure.kind == 'mermaid' %}
+        <div class="field">
+            <small>Current render:</small>
+            <div class="preview"><img src="{{ figure.image.url }}" alt="rendered"></div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="field">
+        <label for="caption">Caption</label>
+        <textarea id="caption" name="caption" class="caption">{{ figure.caption }}</textarea>
+        <small>Hangs in the right margin alongside the figure.</small>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'codex:section_edit' manual.slug section.slug %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+function updateKindBlocks() {
+    var kind = document.getElementById('kind').value;
+    document.getElementById('block-image').classList.toggle('active', kind === 'image');
+    document.getElementById('block-mermaid').classList.toggle('active', kind === 'mermaid');
+}
+updateKindBlocks();
+</script>
+{% endblock %}

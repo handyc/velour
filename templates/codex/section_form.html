@@ -52,7 +52,36 @@
 
     <div style="display:flex; gap:0.5rem;">
         <button type="submit" class="btn">Save</button>
-        <a href="{% url 'codex:manual_detail' manual.slug %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'codex:manual_detail' manual.slug %}" class="btn btn-secondary">Back to Manual</a>
     </div>
 </form>
+
+{% if section.pk %}
+<h2 style="margin-top:2rem;">Figures</h2>
+<p style="color:#8b949e;font-size:0.85rem;">Embed in this section's body with <code>!fig:&lt;slug&gt;</code> on its own line.</p>
+<div style="display:flex; gap:0.5rem; margin-bottom: 0.75rem;">
+    <a href="{% url 'codex:figure_add' manual.slug section.slug %}" class="btn btn-secondary">Add Figure</a>
+</div>
+{% if figures %}
+<div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem;">
+{% for f in figures %}
+    <div class="card" style="padding:0.75rem;">
+        <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; color:#c9d1d9;">!fig:{{ f.slug }}</div>
+        <div style="font-size:0.7rem; color:#6e7681; margin: 0.15rem 0 0.4rem;">{{ f.get_kind_display }}</div>
+        {% if f.image %}<img src="{{ f.image.url }}" alt="{{ f.slug }}" style="max-width:100%; max-height:160px; display:block; background:#0d1117; border:1px solid #30363d; border-radius:3px;">{% endif %}
+        {% if f.caption %}<div style="font-size:0.72rem; color:#8b949e; font-style:italic; margin-top:0.4rem;">{{ f.caption|truncatechars:120 }}</div>{% endif %}
+        <div style="display:flex; gap:0.3rem; margin-top:0.5rem;">
+            <a href="{% url 'codex:figure_edit' manual.slug section.slug f.slug %}" class="btn btn-secondary" style="font-size:0.72rem;">Edit</a>
+            <form method="post" action="{% url 'codex:figure_delete' manual.slug section.slug f.slug %}" style="display:inline;" onsubmit="return confirm('Delete figure {{ f.slug|escapejs }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;">Delete</button>
+            </form>
+        </div>
+    </div>
+{% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;font-size:0.85rem;">No figures yet.</p>
+{% endif %}
+{% endif %}
 {% endblock %}

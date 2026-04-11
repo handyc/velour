@@ -151,6 +151,20 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# Media files (user uploads, codex figures, etc.). Like STATIC_ROOT,
+# resolves to /var/www/webapps/<user>/media/ on a provisioned server,
+# falls back to BASE_DIR/media/ in local dev.
+MEDIA_URL = 'media/'
+_media_prod_parent = Path(f'/var/www/webapps/{getpass.getuser()}')
+if _media_prod_parent.is_dir():
+    MEDIA_ROOT = _media_prod_parent / 'media'
+else:
+    MEDIA_ROOT = BASE_DIR / 'media'
+
+# Codex Mermaid renderer talks to Kroki by default. Override with a
+# self-hosted instance via the CODEX_KROKI_URL env var when desired.
+CODEX_KROKI_URL = os.environ.get('CODEX_KROKI_URL', 'https://kroki.io')
 # STATIC_ROOT resolves to /var/www/webapps/<user>/static/ on a provisioned
 # server (where adminsetup.sh created the directory and chown'd it to the
 # project user), matching the path nginx.conf serves from. Local dev — where

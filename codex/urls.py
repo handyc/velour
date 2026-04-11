@@ -18,4 +18,10 @@ urlpatterns = [
          views.section_edit, name='section_edit'),
     path('<slug:manual_slug>/sections/<slug:section_slug>/delete/',
          views.section_delete, name='section_delete'),
+    path('<slug:manual_slug>/sections/<slug:section_slug>/figures/add/',
+         views.figure_add, name='figure_add'),
+    path('<slug:manual_slug>/sections/<slug:section_slug>/figures/<slug:figure_slug>/edit/',
+         views.figure_edit, name='figure_edit'),
+    path('<slug:manual_slug>/sections/<slug:section_slug>/figures/<slug:figure_slug>/delete/',
+         views.figure_delete, name='figure_delete'),
 ]

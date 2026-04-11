@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import include, path
@@ -47,3 +49,8 @@ urlpatterns = [
          auth_views.PasswordResetCompleteView.as_view(),
          name='password_reset_complete'),
 ]
+
+# Serve uploaded media files (codex figures, etc.) in dev. In production
+# nginx is responsible for /media/ — see app_factory deploy templates.
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -31,6 +31,7 @@ db.sqlite3
 db.sqlite3-journal
 local_settings.py
 staticfiles/
+media/
 
 # --- Velour secrets (per the secret-file protocol) -------------------------
 secret_key.txt

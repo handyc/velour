@@ -6,38 +6,56 @@ Supports a deliberately small subset:
   - `### Heading`   → H3 block
   - `- item`        → bullet list item (consecutive lines collapse into one list)
   - `> quote`       → blockquote line (consecutive lines collapse)
+  - `!fig:slug`     → figure reference (looks up Figure with that slug in section)
   - blank line      → paragraph break
   - everything else → paragraph block
-  - inline `**bold**` and `*italic*` (no nesting)
 
-The output is a list of (kind, payload) tuples that the PDF renderer
-walks. Inline formatting is represented as a list of (style, text)
-runs where style is one of '', 'B', 'I', 'BI'.
+Inline:
+  - `**bold**` and `*italic*`
+  - `^[note text]` — inline sidenote (Pandoc syntax). The renderer
+    emits a small raised number at the anchor point and hangs the
+    note in the right margin.
+
+The parser output is a list of (kind, payload) tuples. For paragraph
+and quote blocks the payload is a list of "runs" — each run is a tuple
+where the first element is a tag ('text' / 'note') and the rest depend
+on the tag:
+  - ('text', style, text) — style is '' / 'B' / 'I'
+  - ('note', text)        — sidenote text; renderer assigns a number
+
+Figure blocks: ('fig', slug)
 """
 
 import re
 
 
-# Match **bold** or *italic*. Non-greedy. Can be on the same line.
-_INLINE_RE = re.compile(r'(\*\*[^*\n]+\*\*|\*[^*\n]+\*)')
+# Tokenizer regex: match either an inline sidenote ^[...] (allows nested
+# brackets via simple non-greedy matching), or **bold**, or *italic*.
+# Order matters — the sidenote alternative is tried first.
+_TOKEN_RE = re.compile(
+    r'(\^\[[^\]]+\]|\*\*[^*\n]+\*\*|\*[^*\n]+\*)'
+)
 
 
 def parse_inline(text):
-    """Convert a string with **bold** / *italic* into runs.
+    """Convert a string with formatting markers into a list of runs.
 
-    Returns a list of (style, text) tuples where style is '' / 'B' /
-    'I' as understood by fpdf2's set_font().
+    Each run is one of:
+      ('text', style, text) — style is '' / 'B' / 'I'
+      ('note', text)         — inline sidenote
     """
     runs = []
-    for piece in _INLINE_RE.split(text):
+    for piece in _TOKEN_RE.split(text):
         if not piece:
             continue
-        if piece.startswith('**') and piece.endswith('**'):
-            runs.append(('B', piece[2:-2]))
+        if piece.startswith('^[') and piece.endswith(']'):
+            runs.append(('note', piece[2:-1]))
+        elif piece.startswith('**') and piece.endswith('**'):
+            runs.append(('text', 'B', piece[2:-2]))
         elif piece.startswith('*') and piece.endswith('*'):
-            runs.append(('I', piece[1:-1]))
+            runs.append(('text', 'I', piece[1:-1]))
         else:
-            runs.append(('', piece))
+            runs.append(('text', '', piece))
     return runs
 
 
@@ -73,6 +91,12 @@ def parse(body):
             continue
         if line.startswith('# '):
             blocks.append(('h1', line[2:].strip()))
+            i += 1
+            continue
+
+        # Figure reference: !fig:slug-of-figure
+        if line.startswith('!fig:'):
+            blocks.append(('fig', line[5:].strip()))
             i += 1
             continue
 
