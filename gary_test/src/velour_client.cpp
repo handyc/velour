@@ -129,3 +129,132 @@ int VelourClient::report() {
     _count = 0;
     return status;
 }
+
+
+// Tiny "find the value after this key" helper for the OTA check response.
+// The JSON is small and well-known (server-emitted, not attacker-controlled),
+// so we don't need a real parser. We locate `"key"` then skip a colon and
+// optional whitespace, so both compact JSON (`"key":true`) and pretty-
+// printed JSON (`"key": true`) are accepted.
+static int jsonFindValueStart(const String& body, const char* key) {
+    String needle = "\"";
+    needle += key;
+    needle += "\"";
+    int i = body.indexOf(needle);
+    if (i < 0) return -1;
+    int p = i + needle.length();
+    // Skip whitespace, colon, whitespace.
+    while (p < (int)body.length() && (body[p] == ' ' || body[p] == '\t')) p++;
+    if (p >= (int)body.length() || body[p] != ':') return -1;
+    p++;
+    while (p < (int)body.length() && (body[p] == ' ' || body[p] == '\t')) p++;
+    return p;
+}
+
+static String jsonStringAfter(const String& body, const char* key) {
+    int p = jsonFindValueStart(body, key);
+    if (p < 0 || p >= (int)body.length() || body[p] != '"') return String();
+    int start = p + 1;
+    int end = body.indexOf('"', start);
+    if (end < 0) return String();
+    return body.substring(start, end);
+}
+
+static bool jsonHasTrue(const String& body, const char* key) {
+    int p = jsonFindValueStart(body, key);
+    if (p < 0) return false;
+    return body.substring(p, p + 4) == "true";
+}
+
+
+VelourClient::OtaResult VelourClient::checkForUpdate() {
+    if (WiFi.status() != WL_CONNECTED) {
+        return VELOUR_OTA_NO_NETWORK;
+    }
+
+    // Build the check URL: <base>/api/nodes/<slug>/firmware/check?current=<v>
+    String checkUrl = _baseUrl;
+    while (checkUrl.endsWith("/")) checkUrl.remove(checkUrl.length() - 1);
+    checkUrl += "/api/nodes/";
+    checkUrl += _slug;
+    checkUrl += "/firmware/check";
+    if (_firmwareVersion && _firmwareVersion[0]) {
+        checkUrl += "?current=";
+        checkUrl += _firmwareVersion;
+    }
+
+    HTTPClient http;
+    WiFiClient client;
+
+#if defined(ESP32)
+    if (!http.begin(checkUrl)) {
+        return VELOUR_OTA_CHECK_FAILED;
+    }
+#elif defined(ESP8266)
+    if (!http.begin(client, checkUrl)) {
+        return VELOUR_OTA_CHECK_FAILED;
+    }
+#endif
+
+    String auth = "Bearer ";
+    auth += _apiToken;
+    http.addHeader("Authorization", auth);
+    http.setUserAgent("velour-node/1");
+    http.setTimeout(10000);
+
+    int status = http.GET();
+    String body = (status == 200) ? http.getString() : String();
+    http.end();
+
+    if (status != 200) {
+        return VELOUR_OTA_CHECK_FAILED;
+    }
+
+    if (jsonHasTrue(body, "no_firmware")) {
+        return VELOUR_OTA_NO_FIRMWARE;
+    }
+    if (jsonHasTrue(body, "up_to_date")) {
+        return VELOUR_OTA_UP_TO_DATE;
+    }
+    if (!jsonHasTrue(body, "update")) {
+        // Unexpected shape — treat as check failed so the operator sees a
+        // retry next interval rather than silently doing nothing.
+        return VELOUR_OTA_CHECK_FAILED;
+    }
+
+    String binUrl = jsonStringAfter(body, "url");
+    if (binUrl.length() == 0) {
+        return VELOUR_OTA_CHECK_FAILED;
+    }
+
+    // The OTA library downloads to a temporary flash slot, verifies the
+    // ESP magic byte, then atomically swaps and reboots. We need to pass
+    // the Authorization header because the bin endpoint is also bearer-
+    // gated. Both ESP8266HTTPUpdate and HTTPUpdate support this via
+    // setAuthorization() (ESP32) / addHeader-equivalent on ESP8266.
+
+#if defined(ESP32)
+    httpUpdate.setLedPin(LED_BUILTIN, LOW);
+    httpUpdate.rebootOnUpdate(true);
+    t_httpUpdate_return ret = httpUpdate.update(client, binUrl, _firmwareVersion);
+    if (ret == HTTP_UPDATE_OK) {
+        // unreachable — ESP has rebooted by now
+        return VELOUR_OTA_UP_TO_DATE;
+    }
+    return VELOUR_OTA_UPDATE_FAILED;
+#elif defined(ESP8266)
+    ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
+    ESPhttpUpdate.rebootOnUpdate(true);
+    // Pass the Authorization header along for the bin download. The
+    // ESP8266httpUpdate API takes a WiFiClient, a URL, and an optional
+    // "current version" string used for its own If-Match header. We use
+    // our own version check instead, so we just pass an empty string.
+    ESPhttpUpdate.setAuthorization(String("Bearer ") + _apiToken);
+    t_httpUpdate_return ret = ESPhttpUpdate.update(client, binUrl, "");
+    if (ret == HTTP_UPDATE_OK) {
+        // unreachable — ESP has rebooted by now
+        return VELOUR_OTA_UP_TO_DATE;
+    }
+    return VELOUR_OTA_UPDATE_FAILED;
+#endif
+}

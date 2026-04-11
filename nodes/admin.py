@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import HardwareProfile, Node
+from .models import Firmware, HardwareProfile, Node
 
 
 @admin.register(HardwareProfile)
@@ -17,3 +17,11 @@ class NodeAdmin(admin.ModelAdmin):
     search_fields = ('nickname', 'slug', 'mac_address', 'hostname', 'notes')
     readonly_fields = ('api_token', 'commissioned_at', 'last_seen_at')
     prepopulated_fields = {'slug': ('nickname',)}
+
+
+@admin.register(Firmware)
+class FirmwareAdmin(admin.ModelAdmin):
+    list_display = ('name', 'hardware_profile', 'version', 'size_bytes', 'is_active', 'uploaded_at')
+    list_filter = ('hardware_profile', 'is_active')
+    search_fields = ('name', 'version', 'notes')
+    readonly_fields = ('sha256', 'size_bytes', 'uploaded_at')

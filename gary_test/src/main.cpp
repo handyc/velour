@@ -31,7 +31,12 @@
 #include "velour_client.h"
 
 #define REPORT_INTERVAL_MS  (30UL * 1000UL)
-#define FIRMWARE_VERSION    "gary-test-0.2.0-aht"
+// How often to ask Velour whether a new firmware is available. 60 minutes
+// is a reasonable balance between "operator doesn't wait forever after an
+// upload" and "we don't hammer the server". First check also runs once
+// shortly after boot so a fresh flash picks up any pending update fast.
+#define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
+#define FIRMWARE_VERSION    "gary-test-0.3.1-ota-delivered"
 
 #define AHT_ADDR        0x38
 #define AHT10_INIT_CMD  0xE1
@@ -40,6 +45,7 @@
 VelourClient velour(VELOUR_URL, NODE_SLUG, NODE_TOKEN);
 
 unsigned long lastReportAt = 0;
+unsigned long lastOtaCheckAt = 0;
 unsigned long bootMs = 0;
 int reportCount = 0;
 
@@ -235,6 +241,43 @@ static void connectWiFi() {
 // the pending count after, and the elapsed time.
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// OTA check wrapper. Logs the result of the check — if an update is
+// available, velour.checkForUpdate() won't return (the ESP reboots into
+// the new firmware mid-call).
+// ---------------------------------------------------------------------
+
+static void velourOtaCheck(const char* reason) {
+    Serial.println();
+    Serial.print("[ota] ");
+    Serial.print(reason);
+    Serial.println(" — checking for update...");
+    VelourClient::OtaResult r = velour.checkForUpdate();
+    switch (r) {
+        case VelourClient::VELOUR_OTA_UP_TO_DATE:
+            Serial.println("[ota] up to date.");
+            break;
+        case VelourClient::VELOUR_OTA_NO_FIRMWARE:
+            Serial.println("[ota] no firmware assigned to this hardware profile.");
+            break;
+        case VelourClient::VELOUR_OTA_NO_NETWORK:
+            Serial.println("[ota] no network — will retry next interval.");
+            break;
+        case VelourClient::VELOUR_OTA_CHECK_FAILED:
+            Serial.println("[ota] check failed — HTTP or parse error.");
+            break;
+        case VelourClient::VELOUR_OTA_UPDATE_FAILED:
+            Serial.print("[ota] update attempted but failed: ");
+#if defined(ESP8266)
+            Serial.println(ESPhttpUpdate.getLastErrorString());
+#else
+            Serial.println(httpUpdate.getLastErrorString());
+#endif
+            break;
+    }
+}
+
+
 static void velourReport(const char* label) {
     int pendingBefore = velour.pending();
     unsigned long t0 = millis();
@@ -310,6 +353,14 @@ void setup() {
         velour.addReading("aht_present", 1.0f);
     }
     velourReport("BOOT");
+
+    // Opportunistic OTA check shortly after boot. If a newer firmware
+    // has been uploaded while this one was offline, we pick it up on
+    // the first post-boot wake — no need to wait an hour. If the call
+    // finds an update, it never returns (ESP reboots).
+    delay(2000);
+    velourOtaCheck("boot");
+    lastOtaCheckAt = millis();
 }
 
 
@@ -344,10 +395,19 @@ void loop() {
             velour.addReading("aht_humidity", ahtHumidityPct);
         }
         velour.addReading("test_pulse", test_pulse);
+        // Marker channel that didn't exist in 0.3.0 — its appearance in
+        // the live panel is visual proof the OTA update landed.
+        velour.addReading("ota_delivered", 1.0f);
 
         char label[32];
         snprintf(label, sizeof(label), "tick #%d", reportCount);
         velourReport(label);
+    }
+
+    // Periodic OTA check, once per OTA_CHECK_INTERVAL_MS.
+    if (millis() - lastOtaCheckAt >= OTA_CHECK_INTERVAL_MS) {
+        lastOtaCheckAt = millis();
+        velourOtaCheck("periodic");
     }
 
     // If Wi-Fi drops, try to reconnect. (autoReconnect handles most of

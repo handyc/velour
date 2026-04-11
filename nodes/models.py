@@ -223,3 +223,63 @@ class SensorReading(models.Model):
 
     def __str__(self):
         return f'{self.node.slug}/{self.channel} = {self.value}'
+
+
+def _firmware_upload_path(instance, filename):
+    profile_slug = slugify(instance.hardware_profile.name) if instance.hardware_profile else 'unknown'
+    return f'firmware/{profile_slug}/{instance.version}.bin'
+
+
+class Firmware(models.Model):
+    """A compiled firmware binary targeting a specific HardwareProfile.
+
+    One `is_active=True` row per HardwareProfile at a time. The OTA
+    check endpoint picks that row for a node of matching profile. To
+    roll back, upload the previous bin as a new version (bumped) and
+    mark it active — rollback history is just the row list, ordered
+    by uploaded_at.
+    """
+
+    name = models.CharField(
+        max_length=120,
+        help_text='Human label, e.g. "gary-aht20-sensor" or "greenhouse-monitor".',
+    )
+    hardware_profile = models.ForeignKey(
+        HardwareProfile, on_delete=models.CASCADE, related_name='firmwares',
+        help_text='Any Node with this hardware profile is eligible to pull this firmware.',
+    )
+    version = models.CharField(
+        max_length=32,
+        help_text='Version string the sketch reports via firmware_version, e.g. "0.1.2". '
+                  'Compared byte-for-byte against what the node currently runs.',
+    )
+    bin_file = models.FileField(upload_to=_firmware_upload_path)
+    sha256 = models.CharField(max_length=64, blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(
+        default=False,
+        help_text='Exactly one row per HardwareProfile should be active. '
+                  'Enabling a new row clears the flag on siblings in save().',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['hardware_profile', 'version'],
+                name='nodes_firmware_unique_profile_version',
+            ),
+        ]
+
+    def __str__(self):
+        active = ' [active]' if self.is_active else ''
+        return f'{self.name} {self.version} ({self.hardware_profile}){active}'
+
+    def save(self, *args, **kwargs):
+        if self.is_active and self.hardware_profile_id:
+            Firmware.objects.filter(
+                hardware_profile=self.hardware_profile, is_active=True,
+            ).exclude(pk=self.pk).update(is_active=False)
+        super().save(*args, **kwargs)

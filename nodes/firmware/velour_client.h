@@ -42,9 +42,11 @@
 #if defined(ESP32)
   #include <WiFi.h>
   #include <HTTPClient.h>
+  #include <HTTPUpdate.h>
 #elif defined(ESP8266)
   #include <ESP8266WiFi.h>
   #include <ESP8266HTTPClient.h>
+  #include <ESP8266httpUpdate.h>
   #include <WiFiClient.h>
 #else
   #error "velour_client requires ESP8266 or ESP32 (Arduino core)"
@@ -78,6 +80,30 @@ public:
     // Velour stores it in Node.firmware_version so you can tell which
     // version each device is actually running.
     void setFirmwareVersion(const char* version);
+
+    // Ask velour whether a newer firmware is available for this node's
+    // hardware profile, and if so, download and apply it. On success the
+    // ESP reboots into the new firmware and this call never returns.
+    //
+    // Return values (when it DOES return, meaning no update was applied):
+    //   VELOUR_OTA_UP_TO_DATE   — running firmware matches the active one
+    //   VELOUR_OTA_NO_FIRMWARE  — velour has no active firmware for this profile
+    //   VELOUR_OTA_NO_NETWORK   — WiFi down
+    //   VELOUR_OTA_CHECK_FAILED — HTTP error on the check endpoint
+    //   VELOUR_OTA_UPDATE_FAILED — update was attempted but failed (bad bin,
+    //                              insufficient flash, etc.). Serial output
+    //                              from ESPhttpUpdate has the details.
+    //
+    // Call this periodically from loop() — maybe once per hour — after you
+    // know WiFi is up. Requires setFirmwareVersion() to have been called.
+    enum OtaResult {
+        VELOUR_OTA_UP_TO_DATE = 0,
+        VELOUR_OTA_NO_FIRMWARE = 1,
+        VELOUR_OTA_NO_NETWORK = 2,
+        VELOUR_OTA_CHECK_FAILED = 3,
+        VELOUR_OTA_UPDATE_FAILED = 4,
+    };
+    OtaResult checkForUpdate();
 
     // How many readings are currently queued.
     int pending() const { return _count; }

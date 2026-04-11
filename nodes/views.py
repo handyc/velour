@@ -1,9 +1,10 @@
+import hashlib
 import hmac
 import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import Http404, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -11,7 +12,7 @@ from django.views.decorators.http import require_POST
 
 from experiments.models import Experiment
 
-from .models import HardwareProfile, Node, SensorReading
+from .models import Firmware, HardwareProfile, Node, SensorReading
 
 
 # --- field helpers --------------------------------------------------
@@ -304,6 +305,78 @@ def hardware_edit(request, pk):
     })
 
 
+# --- firmware views (human-facing) ---------------------------------
+
+@login_required
+def firmware_list(request):
+    firmwares = Firmware.objects.select_related('hardware_profile').all()
+    profiles = HardwareProfile.objects.all()
+    return render(request, 'nodes/firmware_list.html', {
+        'firmwares': firmwares,
+        'profiles': profiles,
+    })
+
+
+@login_required
+def firmware_upload(request):
+    if request.method == 'POST':
+        name = request.POST.get('name', '').strip()
+        version = request.POST.get('version', '').strip()
+        hp_id = request.POST.get('hardware_profile', '').strip()
+        notes = request.POST.get('notes', '').strip()
+        is_active = bool(request.POST.get('is_active'))
+        bin_file = request.FILES.get('bin_file')
+
+        hp = HardwareProfile.objects.filter(pk=hp_id).first() if hp_id else None
+
+        if not name or not version or not hp or not bin_file:
+            messages.error(request, 'Name, version, hardware profile, and bin file are all required.')
+        elif Firmware.objects.filter(hardware_profile=hp, version=version).exists():
+            messages.error(request, f'Version "{version}" already exists for {hp.name}. Bump the version number.')
+        else:
+            sha = hashlib.sha256()
+            size = 0
+            for chunk in bin_file.chunks():
+                sha.update(chunk)
+                size += len(chunk)
+            bin_file.seek(0)
+
+            fw = Firmware(
+                name=name, version=version, hardware_profile=hp,
+                notes=notes, is_active=is_active,
+                sha256=sha.hexdigest(), size_bytes=size,
+                bin_file=bin_file,
+            )
+            fw.save()
+            messages.success(request, f'Uploaded "{fw.name}" {fw.version} ({size} bytes).')
+            return redirect('nodes:firmware_list')
+
+    return render(request, 'nodes/firmware_upload.html', {
+        'profiles': HardwareProfile.objects.all(),
+    })
+
+
+@login_required
+@require_POST
+def firmware_activate(request, pk):
+    fw = get_object_or_404(Firmware, pk=pk)
+    fw.is_active = True
+    fw.save()
+    messages.success(request, f'Activated {fw.name} {fw.version} for {fw.hardware_profile.name}.')
+    return redirect('nodes:firmware_list')
+
+
+@login_required
+@require_POST
+def firmware_delete(request, pk):
+    fw = get_object_or_404(Firmware, pk=pk)
+    label = f'{fw.name} {fw.version}'
+    fw.bin_file.delete(save=False)
+    fw.delete()
+    messages.success(request, f'Deleted {label}.')
+    return redirect('nodes:firmware_list')
+
+
 @login_required
 @require_POST
 def hardware_delete(request, pk):
@@ -440,3 +513,109 @@ def api_report(request, slug):
         'stored': stored,
         'node': node.slug,
     })
+
+
+def _auth_node_or_401(request, slug):
+    """Shared auth check for the firmware OTA endpoints. Returns (node, None)
+    on success or (None, JsonResponse) on failure so the caller can early-return.
+
+    Accepts the token via either `Authorization: Bearer <token>` OR the
+    `?token=<token>` query parameter. The query-param path exists because
+    ESP8266httpUpdate's setAuthorization() only supports HTTP Basic, so
+    the check endpoint returns the bin URL with ?token= baked in and the
+    library follows it as-is. Tokens in URLs are leakier (they show up in
+    access logs) but for a LAN-only OTA flow that's acceptable."""
+    try:
+        node = Node.objects.select_related('hardware_profile').get(slug=slug)
+    except Node.DoesNotExist:
+        return None, JsonResponse({'error': 'unknown node'}, status=404)
+    if not node.enabled:
+        return None, JsonResponse({'error': 'node disabled'}, status=403)
+    client_token = _extract_bearer(request) or request.GET.get('token', '').strip()
+    if not client_token or not hmac.compare_digest(node.api_token, client_token):
+        return None, JsonResponse({'error': 'unauthorized'}, status=401)
+    return node, None
+
+
+def _active_firmware_for(node):
+    if not node.hardware_profile_id:
+        return None
+    return Firmware.objects.filter(
+        hardware_profile=node.hardware_profile, is_active=True,
+    ).first()
+
+
+@csrf_exempt
+def api_firmware_check(request, slug):
+    """Node asks: 'is there a newer firmware for me?'
+
+    GET /api/nodes/<slug>/firmware/check?current=<version>
+    Headers: Authorization: Bearer <node.api_token>
+
+    Returns one of:
+      200 {"up_to_date": true, "current": "0.1.2"}
+      200 {"update": true, "version": "0.1.3", "size": 458752,
+           "sha256": "ab12...", "url": "https://host/api/nodes/gary/firmware.bin"}
+      200 {"no_firmware": true}  — no active firmware assigned
+    """
+    node, err = _auth_node_or_401(request, slug)
+    if err:
+        return err
+
+    fw = _active_firmware_for(node)
+    if fw is None:
+        return JsonResponse({'no_firmware': True},
+                            json_dumps_params={'separators': (',', ':')})
+
+    current = request.GET.get('current', '').strip()
+    # Compact JSON (no whitespace) is intentional: the ESP-side parser
+    # in velour_client.cpp uses a literal substring search for
+    # `"key":"value"` / `"key":true` to avoid pulling in ArduinoJson,
+    # and Django's default JsonResponse emits `"key": "value"` with a
+    # space that would defeat that match. json_dumps_params fixes it.
+    compact = {'separators': (',', ':')}
+    if current and current == fw.version:
+        return JsonResponse({'up_to_date': True, 'current': current},
+                            json_dumps_params=compact)
+
+    # Token in the URL so the ESP8266httpUpdate library, which doesn't
+    # support arbitrary Authorization headers, can still authenticate.
+    # See _auth_node_or_401 for the rationale.
+    bin_url = request.build_absolute_uri(
+        f'/api/nodes/{node.slug}/firmware.bin?token={node.api_token}'
+    )
+    return JsonResponse({
+        'update':  True,
+        'version': fw.version,
+        'size':    fw.size_bytes,
+        'sha256':  fw.sha256,
+        'url':     bin_url,
+    }, json_dumps_params=compact)
+
+
+@csrf_exempt
+def api_firmware_bin(request, slug):
+    """Stream the currently-active firmware binary for this node's hardware
+    profile. Accepts the token via either Authorization: Bearer header or
+    ?token= query param (the latter exists for ESP8266httpUpdate which
+    doesn't support arbitrary headers). Response headers include
+    x-Velour-Version and x-SHA256 for client-side sanity checking.
+    """
+    node, err = _auth_node_or_401(request, slug)
+    if err:
+        return err
+
+    fw = _active_firmware_for(node)
+    if fw is None:
+        return JsonResponse({'error': 'no firmware available'}, status=404)
+
+    try:
+        f = fw.bin_file.open('rb')
+    except FileNotFoundError:
+        return JsonResponse({'error': 'firmware file missing on disk'}, status=500)
+
+    response = FileResponse(f, content_type='application/octet-stream')
+    response['Content-Length'] = str(fw.size_bytes)
+    response['x-Velour-Version'] = fw.version
+    response['x-SHA256'] = fw.sha256
+    return response

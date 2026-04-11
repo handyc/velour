@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Firmware - Fleet - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fw-form { max-width: 640px; }
+    .fw-form .field { margin-bottom: 1rem; }
+    .fw-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .fw-form input[type=text], .fw-form textarea, .fw-form select {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .fw-form input[type=file] { color: #c9d1d9; font: inherit; }
+    .fw-form textarea { min-height: 80px; }
+    .fw-form small { color: #6e7681; font-size: 0.72rem; display: block; margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Upload Firmware</h1>
+<p style="color:#8b949e;">Upload a PlatformIO-built <code>.bin</code> file. Nodes with the matching hardware profile will see it on their next OTA check if marked active.</p>
+
+<form method="post" enctype="multipart/form-data" class="fw-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required maxlength="120" placeholder="gary-aht20-sensor">
+        <small>A human label for this firmware — not used by nodes, just for your reference.</small>
+    </div>
+
+    <div class="field">
+        <label for="hardware_profile">Hardware Profile</label>
+        <select id="hardware_profile" name="hardware_profile" required>
+            <option value="">— Select —</option>
+            {% for p in profiles %}
+            <option value="{{ p.pk }}">{{ p.name }} ({{ p.get_mcu_display }})</option>
+            {% endfor %}
+        </select>
+        <small>Nodes with this hardware profile are eligible to pull this firmware.</small>
+    </div>
+
+    <div class="field">
+        <label for="version">Version</label>
+        <input type="text" id="version" name="version" required maxlength="32" placeholder="0.1.2">
+        <small>Version string the sketch reports via <code>firmware_version</code>. Compared byte-for-byte against what the node currently runs.</small>
+    </div>
+
+    <div class="field">
+        <label for="bin_file">Bin File</label>
+        <input type="file" id="bin_file" name="bin_file" accept=".bin" required>
+        <small>PlatformIO output, typically <code>.pio/build/&lt;env&gt;/firmware.bin</code>.</small>
+    </div>
+
+    <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" placeholder="What changed in this version? Anything operators should know?"></textarea>
+    </div>
+
+    <div class="field">
+        <label>
+            <input type="checkbox" name="is_active" value="1" checked>
+            Mark active (deactivates any previous active firmware for this hardware profile)
+        </label>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Upload</button>
+        <a href="{% url 'nodes:firmware_list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

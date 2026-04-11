@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}Firmware - Fleet - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fw-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    .fw-table th, .fw-table td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; font-size: 0.875rem; }
+    .fw-table th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+    .fw-table .name { font-weight: 600; color: #c9d1d9; }
+    .fw-table .version { color: #58a6ff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .fw-table .sha { color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+    .fw-table .active { color: #2ea043; font-weight: 600; }
+    .fw-table .inactive { color: #484f58; }
+    .fw-table .size { color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Firmware</h1>
+<p style="color:#8b949e;">Compiled <code>.bin</code> files for over-the-air updates. Each hardware profile can have one active firmware at a time — nodes of that profile will pull it on their next check interval.</p>
+
+<div style="margin: 0.75rem 0;">
+    <a href="{% url 'nodes:firmware_upload' %}" class="btn">Upload Firmware</a>
+    <a href="{% url 'nodes:list' %}" class="btn btn-secondary">Back to Fleet</a>
+</div>
+
+{% if firmwares %}
+<table class="fw-table card">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Hardware</th>
+            <th>Version</th>
+            <th>Size</th>
+            <th>SHA256</th>
+            <th>Uploaded</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for fw in firmwares %}
+        <tr>
+            <td class="name">{{ fw.name }}</td>
+            <td>{{ fw.hardware_profile.name }}</td>
+            <td class="version">{{ fw.version }}</td>
+            <td class="size">{{ fw.size_bytes }} B</td>
+            <td class="sha">{{ fw.sha256|slice:":16" }}…</td>
+            <td style="color:#6e7681;">{{ fw.uploaded_at|date:"Y-m-d H:i" }}</td>
+            <td>
+                {% if fw.is_active %}
+                <span class="active">● active</span>
+                {% else %}
+                <span class="inactive">○ inactive</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if not fw.is_active %}
+                <form method="post" action="{% url 'nodes:firmware_activate' fw.pk %}" style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" style="background:none;border:none;color:#58a6ff;cursor:pointer;font:inherit;font-size:0.8125rem;padding:0;">activate</button>
+                </form>
+                &nbsp;
+                {% endif %}
+                <form method="post" action="{% url 'nodes:firmware_delete' fw.pk %}" style="display:inline;" onsubmit="return confirm('Delete {{ fw.name }} {{ fw.version }}? The .bin file will be removed from disk.');">
+                    {% csrf_token %}
+                    <button type="submit" style="background:none;border:none;color:#8b949e;cursor:pointer;font:inherit;font-size:0.8125rem;padding:0;">delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No firmware uploaded yet. <a href="{% url 'nodes:firmware_upload' %}">Upload a .bin file</a> compiled by PlatformIO to get started.</p>
+{% endif %}
+{% endblock %}

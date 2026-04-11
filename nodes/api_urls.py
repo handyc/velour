@@ -13,5 +13,7 @@ from . import views
 app_name = 'nodes_api'
 
 urlpatterns = [
-    path('<slug:slug>/report/', views.api_report, name='report'),
+    path('<slug:slug>/report/',         views.api_report,         name='report'),
+    path('<slug:slug>/firmware/check',  views.api_firmware_check, name='firmware_check'),
+    path('<slug:slug>/firmware.bin',    views.api_firmware_bin,   name='firmware_bin'),
 ]
