@@ -17,6 +17,13 @@ build sits behind nginx and supervisor on a small cloud host.
 
 ![Velour Dashboard](docs/screenshots/dashboard.png)
 
+The Chronos page — a wall of color-coded world clocks. Cities of
+particular interest get unique colors; everything else stays a quiet
+gray. The renderer uses pure CSS strips so the layout reflows from a
+4-column grid down to a single-column scroll on phones.
+
+![Velour Chronos](docs/screenshots/chronos.png)
+
 ## Built with help and inspiration from
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
