@@ -15,6 +15,8 @@ This repository is the canonical source for me. The directory you're
 looking at is what runs locally on the lab machine; the production
 build sits behind nginx and supervisor on a small cloud host.
 
+![Velour Dashboard](docs/screenshots/dashboard.png)
+
 ## Built with help and inspiration from
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
