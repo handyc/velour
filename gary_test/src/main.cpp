@@ -27,33 +27,43 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 #include "wifi_secrets.h"
 #include "velour_client.h"
 
 #define REPORT_INTERVAL_MS  (30UL * 1000UL)
+// Local AHT read cadence, independent of Velour reporting. The built-in
+// web page polls /data.json every second; 2s sensor reads keep the data
+// fresh without pounding the I2C bus or the AHT's ~75ms measurement cycle.
+#define AHT_READ_INTERVAL_MS  (2UL * 1000UL)
 // How often to ask Velour whether a new firmware is available. 60 minutes
 // is a reasonable balance between "operator doesn't wait forever after an
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "gary-test-0.3.1-ota-delivered"
+#define FIRMWARE_VERSION    "gary-test-0.3.2-local-web"
 
 #define AHT_ADDR        0x38
 #define AHT10_INIT_CMD  0xE1
 #define AHT20_INIT_CMD  0xBE
 
 VelourClient velour(VELOUR_URL, NODE_SLUG, NODE_TOKEN);
+ESP8266WebServer httpd(80);
 
 unsigned long lastReportAt = 0;
 unsigned long lastOtaCheckAt = 0;
+unsigned long lastAhtReadAt = 0;
 unsigned long bootMs = 0;
 int reportCount = 0;
 
-// Sensor state — populated by readAHT() each report cycle.
+// Sensor state — populated by ahtRead() on its own timer so both the
+// Velour heartbeat and the local web server read from the same cache.
 bool ahtPresent = false;
 const char* ahtKindLabel = "unknown";
 float ahtTempC = -999.0f;
 float ahtHumidityPct = -999.0f;
+unsigned long ahtLastReadMs = 0;
 
 
 // ---------------------------------------------------------------------
@@ -190,10 +200,179 @@ static void ahtRead() {
         ahtHumidityPct = -999.0f;
         return;
     }
-    if (!ahtTriggerAndRead(ahtTempC, ahtHumidityPct)) {
+    if (ahtTriggerAndRead(ahtTempC, ahtHumidityPct)) {
+        ahtLastReadMs = millis();
+    } else {
+        // Don't overwrite the last known good reading — the web page
+        // keeps showing the last value with an age indicator instead.
         Serial.println("[aht] read failed this tick");
-        ahtTempC = -999.0f;
-        ahtHumidityPct = -999.0f;
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Local web server — serves a small self-contained HTML page (embedded
+// in PROGMEM to keep it out of RAM) that polls /data.json every second
+// and renders Gary's current temperature + humidity in the browser.
+// ---------------------------------------------------------------------
+
+// Raw string literal — PROGMEM-stored HTML+CSS+JS. Total size targeted
+// well under the 50KB ceiling (actual: ~2-3KB). Single file, no external
+// resources, no CDN, works entirely off Gary's flash.
+static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gary — live</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0d1117; color: #c9d1d9;
+               font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 1.1rem; font-weight: 500; color: #8b949e; margin: 0 0 1.5rem; }
+  .big { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+          padding: 1.2rem 1.4rem; }
+  .card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+                 color: #6e7681; }
+  .card .value { font-size: 2.8rem; font-weight: 300; color: #58a6ff;
+                 line-height: 1.1; margin-top: 0.25rem;
+                 font-variant-numeric: tabular-nums; }
+  .card .unit { font-size: 1rem; color: #8b949e; margin-left: 0.2rem; }
+  .meta { margin-top: 1.5rem; font-size: 0.78rem; color: #6e7681;
+          font-family: ui-monospace, Menlo, monospace; line-height: 1.6; }
+  .meta span { color: #8b949e; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+         background: #2ea043; margin-right: 0.4rem; vertical-align: middle;
+         animation: p 1.4s ease-in-out infinite; }
+  @keyframes p { 0%,100% { opacity: 0.35 } 50% { opacity: 1 } }
+  .stale .value { color: #6e7681; }
+  .stale .dot { background: #d29922; animation: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot" id="dot"></span><span id="status">connecting…</span></h1>
+  <div class="big">
+    <div class="card" id="tempcard">
+      <div class="label">Temperature</div>
+      <div class="value"><span id="temp">—</span><span class="unit">°C</span></div>
+    </div>
+    <div class="card" id="humcard">
+      <div class="label">Humidity</div>
+      <div class="value"><span id="hum">—</span><span class="unit">%</span></div>
+    </div>
+  </div>
+  <div class="meta">
+    <div><span>sensor</span> <span id="sensor">—</span></div>
+    <div><span>firmware</span> <span id="fw">—</span></div>
+    <div><span>uptime</span> <span id="uptime">—</span></div>
+    <div><span>rssi</span> <span id="rssi">—</span> dBm</div>
+    <div><span>heap</span> <span id="heap">—</span> bytes</div>
+    <div><span>last reading</span> <span id="age">—</span></div>
+  </div>
+</div>
+<script>
+function fmt(n, d) { return (typeof n === 'number') ? n.toFixed(d) : '—'; }
+function ageText(s) {
+  if (s < 0) return '—';
+  if (s < 2) return 'just now';
+  if (s < 60) return s.toFixed(0) + 's ago';
+  return Math.floor(s/60) + 'm ago';
+}
+function uptimeText(s) {
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  var h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return h + 'h ' + m + 'm';
+}
+async function poll() {
+  try {
+    var r = await fetch('/data.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    document.getElementById('status').textContent = 'live';
+    document.getElementById('temp').textContent = fmt(d.temp_c, 2);
+    document.getElementById('hum').textContent  = fmt(d.humidity, 1);
+    document.getElementById('sensor').textContent = d.sensor || '—';
+    document.getElementById('fw').textContent = d.fw || '—';
+    document.getElementById('uptime').textContent = uptimeText(d.uptime_s || 0);
+    document.getElementById('rssi').textContent = d.rssi != null ? d.rssi : '—';
+    document.getElementById('heap').textContent = d.free_heap != null ? d.free_heap : '—';
+    var ageS = (d.last_read_ms_ago || 0) / 1000;
+    document.getElementById('age').textContent = ageText(ageS);
+    var stale = ageS > 10;
+    document.getElementById('tempcard').classList.toggle('stale', stale);
+    document.getElementById('humcard').classList.toggle('stale', stale);
+  } catch (e) {
+    document.getElementById('status').textContent = 'offline — retry…';
+  }
+}
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>)HTML";
+
+
+static void handleRoot() {
+    httpd.send_P(200, PSTR("text/html; charset=utf-8"), INDEX_HTML);
+}
+
+static void handleDataJson() {
+    // Hand-rolled JSON so we don't pull in ArduinoJson. The shape is
+    // tiny and fixed, and we already have a similar pattern for the
+    // Velour payload in velour_client.cpp.
+    unsigned long now = millis();
+    unsigned long ageMs = (ahtLastReadMs > 0) ? (now - ahtLastReadMs) : 0;
+
+    String s;
+    s.reserve(256);
+    s = "{\"temp_c\":";
+    s += (ahtPresent && ahtTempC > -100.0f) ? String(ahtTempC, 2) : "null";
+    s += ",\"humidity\":";
+    s += (ahtPresent && ahtHumidityPct > -100.0f) ? String(ahtHumidityPct, 1) : "null";
+    s += ",\"sensor\":\"";
+    s += ahtKindLabel;
+    s += "\",\"fw\":\"";
+    s += FIRMWARE_VERSION;
+    s += "\",\"uptime_s\":";
+    s += String(now / 1000);
+    s += ",\"free_heap\":";
+    s += String(ESP.getFreeHeap());
+    s += ",\"rssi\":";
+    s += (WiFi.status() == WL_CONNECTED) ? String(WiFi.RSSI()) : "null";
+    s += ",\"last_read_ms_ago\":";
+    s += String(ageMs);
+    s += "}";
+
+    httpd.sendHeader("Cache-Control", "no-store");
+    httpd.send(200, "application/json", s);
+}
+
+static void handleNotFound() {
+    httpd.send(404, "text/plain", "not found");
+}
+
+static void httpdSetup() {
+    httpd.on("/",          HTTP_GET, handleRoot);
+    httpd.on("/data.json", HTTP_GET, handleDataJson);
+    httpd.onNotFound(handleNotFound);
+    httpd.begin();
+    Serial.print("[httpd] listening on http://");
+    Serial.print(WiFi.localIP());
+    Serial.println("/");
+
+    // mDNS so the page is reachable at http://<slug>.local/ from any
+    // device on the same Wi-Fi, without having to look up the IP.
+    // Gary's hostname on the LAN becomes NODE_SLUG.local.
+    if (MDNS.begin(NODE_SLUG)) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.print("[mdns] registered http://");
+        Serial.print(NODE_SLUG);
+        Serial.println(".local/");
+    } else {
+        Serial.println("[mdns] failed to register — use the IP directly.");
     }
 }
 
@@ -346,6 +525,16 @@ void setup() {
 
     velour.setFirmwareVersion(FIRMWARE_VERSION);
 
+    // Bring up the local web server. This is purely additive — it
+    // coexists with the Velour reporting + OTA flow without interfering.
+    // Gary is now reachable at http://<his-LAN-IP>/ from any device on
+    // the same Wi-Fi network.
+    httpdSetup();
+
+    // Seed the AHT cache with one reading so /data.json isn't empty
+    // from the moment the web server comes up.
+    ahtRead();
+
     // Send one reading immediately so something lands in the Velour UI
     // within seconds of boot, not at the first 30-second tick.
     velour.addReading("boot", 1.0f);
@@ -369,17 +558,27 @@ void setup() {
 // ---------------------------------------------------------------------
 
 void loop() {
+    // Service the local web server on every loop tick. This is the
+    // ESP8266WebServer pattern: handleClient() must be called frequently
+    // or incoming connections stall. It's non-blocking — returns
+    // immediately if there's nothing to do.
+    httpd.handleClient();
+    MDNS.update();
+
+    // Faster AHT read on its own cadence, decoupled from Velour reporting.
+    // Both the web page and the Velour heartbeat read from the same cache
+    // (ahtTempC / ahtHumidityPct), so the Velour report at 30s intervals
+    // always has a value that's at most AHT_READ_INTERVAL_MS stale.
+    if (millis() - lastAhtReadAt >= AHT_READ_INTERVAL_MS) {
+        lastAhtReadAt = millis();
+        ahtRead();
+    }
+
     if (millis() - lastReportAt >= REPORT_INTERVAL_MS) {
         lastReportAt = millis();
         reportCount += 1;
 
-        // Synthetic readings — pure functions of time. Kept for the
-        // pulse channel so the Velour UI shows obvious change.
-        float ms = (float)(millis() - bootMs);
-        float test_pulse         = (float)(reportCount % 100);
-
-        // Real sensor read.
-        ahtRead();
+        float test_pulse = (float)(reportCount % 100);
 
         Serial.println();
         Serial.print("[aht] kind: ");
@@ -395,9 +594,7 @@ void loop() {
             velour.addReading("aht_humidity", ahtHumidityPct);
         }
         velour.addReading("test_pulse", test_pulse);
-        // Marker channel that didn't exist in 0.3.0 — its appearance in
-        // the live panel is visual proof the OTA update landed.
-        velour.addReading("ota_delivered", 1.0f);
+        velour.addReading("ota_delivered", 2.0f);  // bumped from 1.0 in 0.3.1
 
         char label[32];
         snprintf(label, sizeof(label), "tick #%d", reportCount);
@@ -417,5 +614,7 @@ void loop() {
         connectWiFi();
     }
 
-    delay(100);
+    // Short delay keeps the CPU from spinning but still lets handleClient()
+    // respond within ~30ms, which is imperceptible in the browser.
+    delay(30);
 }
