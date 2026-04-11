@@ -1,6 +1,7 @@
 import os
 import platform
 import random
+import socket
 import subprocess
 from datetime import datetime
 
@@ -10,6 +11,37 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import Identity, Mood
+
+
+def _get_main_ip():
+    """Detect the local IP address used as the source for outbound
+    traffic. Standard trick: open a UDP socket to a public address
+    (no packets are actually sent) and read getsockname() to see
+    which local interface the kernel would use.
+
+    Returns None on any failure (e.g. no network at all).
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('1.1.1.1', 80))
+        return s.getsockname()[0]
+    except Exception:
+        return None
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _client_ip(request):
+    """Best-effort client IP from a Django request. Honours one hop
+    of X-Forwarded-For for the production behind-nginx case, falls
+    back to REMOTE_ADDR otherwise."""
+    xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', '')
 
 
 REFLECTIONS = {
@@ -164,6 +196,8 @@ def identity_home(request):
         vitals['hostname'] = platform.node()
         vitals['uptime'] = subprocess.check_output(['uptime', '-p'], text=True).strip()
         vitals['user'] = os.environ.get('USER', 'unknown')
+        vitals['ip'] = _get_main_ip()
+        vitals['client_ip'] = _client_ip(request)
     except Exception:
         pass
 
