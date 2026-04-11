@@ -279,6 +279,150 @@ def calendar_day(request, year, month, day):
     })
 
 
+# --- Deep-time browsing (Phase 2d) ----------------------------------------
+
+
+def _events_in_range(start_dt, end_dt):
+    """Return all events whose start falls within the half-open range."""
+    return CalendarEvent.objects.filter(
+        start__gte=start_dt, start__lt=end_dt,
+    ).order_by('start')
+
+
+@login_required
+def calendar_year(request, year):
+    """12 mini-month grids on one page."""
+    tz = _home_tz()
+    year = int(year)
+    today = datetime.now(tz).date()
+
+    cal = pycal.Calendar(firstweekday=0)
+    months = []
+    year_start = datetime(year, 1, 1, tzinfo=tz)
+    year_end = datetime(year + 1, 1, 1, tzinfo=tz)
+    all_events = list(_events_in_range(year_start, year_end))
+
+    by_day = {}
+    for ev in all_events:
+        d = ev.start.astimezone(tz).date()
+        by_day.setdefault(d, []).append(ev)
+
+    for m in range(1, 13):
+        weeks = cal.monthdatescalendar(year, m)
+        rows = []
+        for week in weeks:
+            row = []
+            for d in week:
+                row.append({
+                    'date': d,
+                    'in_month': d.month == m,
+                    'is_today': d == today,
+                    'event_count': len(by_day.get(d, [])),
+                })
+            rows.append(row)
+        months.append({
+            'month': m,
+            'name': pycal.month_name[m],
+            'rows': rows,
+        })
+
+    return render(request, 'chronos/calendar_year.html', {
+        'year': year,
+        'months': months,
+        'today': today,
+        'event_count': len(all_events),
+        'prev_year': year - 1,
+        'next_year': year + 1,
+        'decade_start': (year // 10) * 10,
+    })
+
+
+@login_required
+def calendar_decade(request, decade_start):
+    """10 year cells with event counts. decade_start is e.g. 2020."""
+    tz = _home_tz()
+    decade_start = int(decade_start)
+    today = datetime.now(tz).date()
+    years = []
+    for y in range(decade_start, decade_start + 10):
+        s = datetime(y, 1, 1, tzinfo=tz)
+        e = datetime(y + 1, 1, 1, tzinfo=tz)
+        count = CalendarEvent.objects.filter(start__gte=s, start__lt=e).count()
+        years.append({
+            'year': y,
+            'count': count,
+            'is_current': y == today.year,
+        })
+
+    return render(request, 'chronos/calendar_decade.html', {
+        'decade_start': decade_start,
+        'decade_end': decade_start + 9,
+        'years': years,
+        'prev_decade': decade_start - 10,
+        'next_decade': decade_start + 10,
+        'century_start': (decade_start // 100) * 100,
+    })
+
+
+@login_required
+def calendar_century(request, century_start):
+    """10 decade cells with event counts."""
+    tz = _home_tz()
+    century_start = int(century_start)
+    today = datetime.now(tz).date()
+    decades = []
+    for d in range(century_start, century_start + 100, 10):
+        s = datetime(d, 1, 1, tzinfo=tz)
+        e = datetime(d + 10, 1, 1, tzinfo=tz)
+        count = CalendarEvent.objects.filter(start__gte=s, start__lt=e).count()
+        decades.append({
+            'decade_start': d,
+            'decade_end': d + 9,
+            'count': count,
+            'is_current': d <= today.year < d + 10,
+        })
+
+    return render(request, 'chronos/calendar_century.html', {
+        'century_start': century_start,
+        'century_end': century_start + 99,
+        'decades': decades,
+        'prev_century': century_start - 100,
+        'next_century': century_start + 100,
+        'millennium_start': (century_start // 1000) * 1000,
+    })
+
+
+@login_required
+def calendar_millennium(request, millennium_start):
+    """10 century cells. At this scale astronomical events dominate."""
+    tz = _home_tz()
+    millennium_start = int(millennium_start)
+    today = datetime.now(tz).date()
+    centuries = []
+    for c in range(millennium_start, millennium_start + 1000, 100):
+        s = datetime(c, 1, 1, tzinfo=tz)
+        e = datetime(c + 100, 1, 1, tzinfo=tz)
+        count = CalendarEvent.objects.filter(start__gte=s, start__lt=e).count()
+        centuries.append({
+            'century_start': c,
+            'century_end': c + 99,
+            'count': count,
+            'is_current': c <= today.year < c + 100,
+        })
+
+    return render(request, 'chronos/calendar_century_grid.html', {
+        'scale_name': 'millennium',
+        'unit_name': 'century',
+        'span_label': f'{millennium_start}–{millennium_start + 999}',
+        'units': centuries,
+        'unit_attr_start': 'century_start',
+        'unit_attr_end': 'century_end',
+        'parent_url': None,
+        'prev_start': millennium_start - 1000,
+        'next_start': millennium_start + 1000,
+    })
+
+
 _EVENT_TEXT_FIELDS = ('title', 'notes', 'tags', 'color')
 
 

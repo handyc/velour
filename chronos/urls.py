@@ -19,6 +19,16 @@ urlpatterns = [
          views.calendar_month, name='calendar_month'),
     path('calendar/<int:year>/<int:month>/<int:day>/',
          views.calendar_day, name='calendar_day'),
+    # Deep-time browsing (Phase 2d)
+    path('calendar/year/<int:year>/',
+         views.calendar_year, name='calendar_year'),
+    path('calendar/decade/<int:decade_start>/',
+         views.calendar_decade, name='calendar_decade'),
+    path('calendar/century/<int:century_start>/',
+         views.calendar_century, name='calendar_century'),
+    path('calendar/millennium/<int:millennium_start>/',
+         views.calendar_millennium, name='calendar_millennium'),
+
     path('events/add/',              views.event_add,    name='event_add'),
     path('events/<slug:slug>/edit/', views.event_edit,   name='event_edit'),
     path('events/<slug:slug>/delete/', views.event_delete, name='event_delete'),

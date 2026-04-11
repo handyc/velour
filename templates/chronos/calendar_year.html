@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ year }} — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .yr-toolbar { display: flex; align-items: baseline; gap: 0.85rem; margin: 0.75rem 0 1rem; }
+    .yr-toolbar h1 { margin: 0; font-size: 1.5rem; }
+    .yr-toolbar .nav-link { color: #58a6ff; text-decoration: none; padding: 0.25rem 0.55rem; border: 1px solid #30363d; border-radius: 4px; font-size: 0.85rem; }
+    .yr-toolbar .nav-link:hover { background: #161b22; }
+    .yr-toolbar .spacer { flex: 1; }
+    .yr-toolbar .count { color: #6e7681; font-size: 0.78rem; }
+
+    .yr-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+    .yr-month { padding: 0.55rem 0.65rem; border: 1px solid #30363d; background: #0d1117; border-radius: 4px; }
+    .yr-month .name { font-size: 0.78rem; color: #c9d1d9; font-weight: 600; margin-bottom: 0.25rem; text-align: center; }
+    .yr-month .name a { color: inherit; text-decoration: none; }
+    .yr-month .name a:hover { color: #58a6ff; }
+    .mini { display: grid; grid-template-columns: repeat(7, 1fr); font-size: 0.6rem; line-height: 1.1; gap: 0; }
+    .mini .h { text-align: center; color: #6e7681; padding: 0.15rem 0; }
+    .mini .d { text-align: center; padding: 0.15rem 0; color: #c9d1d9; cursor: pointer; }
+    .mini .d.out { color: #353a40; }
+    .mini .d.today { background: #58a6ff; color: #fff; border-radius: 2px; }
+    .mini .d.has-events { background: rgba(88, 166, 255, 0.2); border-radius: 2px; }
+    .mini .d a { color: inherit; text-decoration: none; }
+    @media (max-width: 900px) {
+        .yr-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 600px) {
+        .yr-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="yr-toolbar">
+    <h1>{{ year }}</h1>
+    <a href="{% url 'chronos:calendar_year' prev_year %}" class="nav-link">‹ {{ prev_year }}</a>
+    <a href="{% url 'chronos:calendar_year' next_year %}" class="nav-link">{{ next_year }} ›</a>
+    <a href="{% url 'chronos:calendar_decade' decade_start %}" class="nav-link">{{ decade_start }}s</a>
+    <a href="{% url 'chronos:calendar' %}" class="nav-link">Month view</a>
+    <span class="spacer"></span>
+    <span class="count">{{ event_count }} event{{ event_count|pluralize }} this year</span>
+</div>
+
+<div class="yr-grid">
+    {% for m in months %}
+    <div class="yr-month">
+        <div class="name">
+            <a href="{% url 'chronos:calendar_month' year m.month %}">{{ m.name }}</a>
+        </div>
+        <div class="mini">
+            <div class="h">M</div><div class="h">T</div><div class="h">W</div><div class="h">T</div><div class="h">F</div><div class="h">S</div><div class="h">S</div>
+            {% for week in m.rows %}
+                {% for cell in week %}
+                <div class="d{% if not cell.in_month %} out{% endif %}{% if cell.is_today %} today{% endif %}{% if cell.event_count and cell.in_month %} has-events{% endif %}">
+                    {% if cell.in_month %}
+                    <a href="{% url 'chronos:calendar_day' year m.month cell.date.day %}">{{ cell.date.day }}</a>
+                    {% else %}{{ cell.date.day }}{% endif %}
+                </div>
+                {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Back to Chronos</a>
+</div>
+{% endblock %}

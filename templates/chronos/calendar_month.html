@@ -59,6 +59,7 @@
     <a href="{% url 'chronos:calendar_month' prev_year prev_month %}" class="nav-link">‹ {{ prev_year }}-{{ prev_month }}</a>
     <a href="{% url 'chronos:calendar_month' today.year today.month %}" class="nav-link">Today</a>
     <a href="{% url 'chronos:calendar_month' next_year next_month %}" class="nav-link">{{ next_year }}-{{ next_month }} ›</a>
+    <a href="{% url 'chronos:calendar_year' year %}" class="nav-link">{{ year }}</a>
     <span class="spacer"></span>
     <a href="{% url 'chronos:event_add' %}" class="btn">New Event</a>
     <span class="count">{{ event_count }} event{{ event_count|pluralize }} this month</span>
