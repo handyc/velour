@@ -377,6 +377,32 @@ class TufteManualPDF(FPDF):
 
     # --- code blocks ------------------------------------------------------
 
+    # Unicode → latin-1 substitutions for code blocks. fpdf2's built-in
+    # Courier is latin-1 only, so any Unicode characters that snuck into
+    # a code block would crash the renderer. We normalize the source
+    # before drawing it (lossy but stable).
+    _CODE_LATIN1_SUBS = {
+        '\u2014': '--',     # em dash
+        '\u2013': '-',      # en dash
+        '\u2018': "'",      # left single curly quote
+        '\u2019': "'",      # right single curly quote / apostrophe
+        '\u201c': '"',      # left double curly quote
+        '\u201d': '"',      # right double curly quote
+        '\u2026': '...',    # ellipsis
+        '\u2022': '*',      # bullet
+        '\u00a0': ' ',      # non-breaking space
+        '\u202f': ' ',      # narrow no-break space
+        '\u2009': ' ',      # thin space
+    }
+
+    @classmethod
+    def _normalize_for_courier(cls, text):
+        for k, v in cls._CODE_LATIN1_SUBS.items():
+            if k in text:
+                text = text.replace(k, v)
+        # Strip any remaining non-latin-1 chars rather than crash.
+        return text.encode('latin-1', 'replace').decode('latin-1')
+
     def emit_code(self, source):
         """Monospace code block with a quiet light-gray background."""
         if not source:
@@ -384,10 +410,11 @@ class TufteManualPDF(FPDF):
         self.ln(1)
         # We don't have a real monospace TTF in the bundle yet — fpdf2's
         # built-in Courier is latin-1 only, but for code that's usually
-        # fine. Use it.
+        # fine. Use it, after normalizing Unicode chars.
         prev_font = (self.font_family, self.font_style, self.font_size)
         self.set_font('Courier', '', 9)
         leading = 4.0
+        source = self._normalize_for_courier(source)
         lines = source.split('\n')
 
         # Background block: rect spanning full body width.
