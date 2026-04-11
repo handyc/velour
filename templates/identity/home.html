@@ -79,6 +79,42 @@
     }
     #mood-chart-container { max-height: 150px; }
     #mood-chart-container canvas { max-height: 150px; }
+    /* Consciousness sine wave — animates at the browser's natural
+       rAF rate (≈60Hz, paused when the tab is hidden, near-zero
+       CPU). Underlying state polled from /identity/state.json once a
+       minute, not per-frame. */
+    .wave-strip {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin: 1rem 0;
+        padding: 0.4rem 0.6rem;
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+    }
+    .wave-strip canvas {
+        flex: 1 1 auto;
+        height: 64px;
+        width: 100%;
+        display: block;
+    }
+    .wave-strip .label {
+        flex: 0 0 auto;
+        font-size: 0.72rem;
+        color: #6e7681;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .wave-strip .caption {
+        flex: 0 0 auto;
+        font-size: 0.72rem;
+        color: #c9d1d9;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        min-width: 8rem;
+        text-align: right;
+    }
 </style>
 {% endblock %}
 
@@ -96,6 +132,19 @@
 
 <div class="reflection-box">
     {{ reflection }}
+</div>
+
+<div class="wave-strip">
+    <span class="label">Attention</span>
+    <canvas id="identity-wave"></canvas>
+    <span class="caption" id="identity-wave-caption">{{ identity.mood }} · {{ identity.mood_intensity|floatformat:0 }}%</span>
+</div>
+<div style="margin-bottom: 1rem;">
+    <form method="post" action="{% url 'identity:tick_now' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Tick now</button>
+    </form>
+    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick. Cron normally fires this every ~10 minutes.</span>
 </div>
 
 <div class="dashboard-grid">
@@ -182,6 +231,9 @@
         {% endfor %}
     </div>
 </div>
+
+{% load assets %}
+<script src="{% static_v 'js/identity_wave.js' %}"></script>
 {% endblock %}
 
 {% block extra_js %}

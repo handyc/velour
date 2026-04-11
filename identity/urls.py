@@ -9,4 +9,6 @@ urlpatterns = [
     path('journal/', views.identity_journal, name='journal'),
     path('update/', views.identity_update, name='update'),
     path('mood-data/', views.mood_data, name='mood_data'),
+    path('state.json', views.state_json, name='state_json'),
+    path('tick/', views.tick_now, name='tick_now'),
 ]

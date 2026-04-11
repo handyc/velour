@@ -145,17 +145,11 @@ def _assess_mood(identity):
 def identity_home(request):
     identity = Identity.get_self()
 
-    # Assess current mood
-    mood, intensity, trigger = _assess_mood(identity)
-    identity.mood = mood
-    identity.mood_intensity = intensity
-    identity.save(update_fields=['mood', 'mood_intensity'])
-
-    # Log mood
-    Mood.objects.create(mood=mood, intensity=intensity, trigger=trigger)
-
-    # Generate a reflection
-    reflections = REFLECTIONS.get(mood, REFLECTIONS['contemplative'])
+    # Page loads no longer auto-tick. Mood updates come from the cron-
+    # driven `manage.py identity_tick` command (or the "Tick now" button
+    # on this page, which posts to /identity/tick/). Visiting this page
+    # is a passive read of current Identity state.
+    reflections = REFLECTIONS.get(identity.mood, REFLECTIONS['contemplative'])
     reflection = random.choice(reflections)
 
     # Recent mood history
@@ -249,3 +243,43 @@ def mood_data(request):
         'values': mood_values,
         'moods': mood_names,
     })
+
+
+# --- attention engine endpoints (Phase 2) --------------------------------
+
+# A 'state' snapshot is the small parameter set the JS sine wave needs:
+# the current mood label, an intensity (0-1), the color, and a couple of
+# raw signals (load, hour) the wave can derive frequency from. Returned
+# as JSON. Cheap to fetch — the JS polls this every 30-60 seconds, not
+# every frame.
+
+@login_required
+def state_json(request):
+    from .ticking import gather_snapshot
+    identity = Identity.get_self()
+    snap = gather_snapshot()
+    # We don't trigger a tick on every state poll — that would defeat
+    # the purpose of cron-driven ticking. Just return whatever is already
+    # stored on the Identity row plus the live sensor inputs the JS uses
+    # to drive its wave parameters.
+    return JsonResponse({
+        'name':            identity.name,
+        'mood':            identity.mood,
+        'mood_intensity':  identity.mood_intensity,
+        'color':           identity.color_preference,
+        'load':            snap.get('load', {}).get('load_1', 0),
+        'mem_pct':         snap.get('memory', {}).get('used_pct', 0),
+        'disk_pct':        snap.get('disk', {}).get('used_pct', 0),
+        'hour':            snap.get('chronos', {}).get('hour', 0),
+        'tod':             snap.get('chronos', {}).get('tod', ''),
+        'moon':            snap.get('chronos', {}).get('moon', ''),
+    })
+
+
+@login_required
+@require_POST
+def tick_now(request):
+    """Manually fire one tick from a button on the identity page."""
+    from .ticking import tick as do_tick
+    do_tick(triggered_by='manual')
+    return redirect('identity:home')
