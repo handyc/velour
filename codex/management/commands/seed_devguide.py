@@ -305,30 +305,11 @@ The recovery is the same in all four cases:
 The third point is worth emphasizing. The git rewrite is necessary but not sufficient. Always assume the leaked value is in someone else's hands and act accordingly.""",
         sidenotes='The protocol was settled early because the alternative — an environment-variable convention — kept producing inconsistencies between dev and prod.\nThe `init_*_token` commands intentionally refuse to overwrite without `--force` because rotating a token mid-session is the kind of mistake that breaks downstream integrations silently.')
 
-    # Stub chapters with substantive intros
-    stubs_part1 = [
-        ('ch4-app-layout', 140, 'Chapter 4 — App layout conventions',
-         """Every Velour app follows the same on-disk layout. The conventions are not unusual but they ARE strict, and the strictness is what lets the meta-layer (app_factory templates, codex introspection) work without per-app exceptions.
+    upsert_section(m, 'ch4-app-layout', 140, 'Chapter 4 — App layout conventions',
+        _ch4_app_layout())
 
-The minimum app directory contains `__init__.py`, `apps.py`, `admin.py`, `models.py`, `views.py`, `urls.py`, and a `migrations/` folder with its own `__init__.py`. Some apps add `management/commands/` for management commands, `templatetags/` for template tag libraries, or sub-packages for non-trivial logic (codex has `codex/rendering/`, chronos has `chronos/holiday_sources/` and `chronos/astro_sources/`).
-
-Templates do NOT live inside the app directory. They live under `templates/<appname>/` at the project root. Static files do NOT live inside the app directory either — source CSS in `static/css/style.css`, source JS in `static/js/`, fonts under `static/fonts/`. The collectstatic output goes to `staticfiles/` which is gitignored.
-
-This chapter expands on each of those rules and explains why they matter for the meta-layer."""),
-
-        ('ch5-templates', 150, 'Chapter 5 — The template system',
-         """Django's template engine is used for two completely different jobs in Velour, and the trick that makes it work is that Django doesn't know or care which job it's doing.
-
-**Job one** is the conventional one: rendering HTML for a browser. Every page extends `templates/base.html` and outputs HTML through the standard `render()` view helper.
-
-**Job two** is rendering shell scripts and config files for the deploy pipeline. The `app_factory` app uses `render_to_string` to load files from `app_factory/templates/deploy/*.tmpl` and substitute values like the project name, the user, the hostname, the port. The output is a gunicorn config, a supervisor unit, an nginx vhost, or a bash script — written to disk rather than served over HTTP.
-
-The naming convention `templates/deploy/*.{conf,sh,py}.tmpl` keeps the two sets visually separate. The Django template engine handles them identically.
-
-This chapter unpacks the implications: how to write a deploy template, how to invoke `render_to_string` from a management command, how to handle escaping when the output is a shell script (mostly: don't trust user input in deploy templates), and where the line between the two template families should be drawn."""),
-    ]
-    for slug, sort, title, body in stubs_part1:
-        upsert_section(m, slug, sort, title, body)
+    upsert_section(m, 'ch5-templates', 150, 'Chapter 5 — The template system',
+        _ch5_template_system())
 
     # Part II — The system of self
     upsert_section(m, 'part-2', 200, 'Part II — The system of self',
@@ -351,24 +332,18 @@ The combination of internal model and external sensor means Velour can describe 
 
 Chapters 12-14 in Part IV walk through a complete worked example end-to-end. This part explains the mechanics; Part IV demonstrates them.""")
 
-    stubs_part3 = [
-        ('ch9-generate-deploy', 310, 'Chapter 9 — generate_deploy in detail',
-         """The `generate_deploy` management command is the entry point for the deploy pipeline. It takes optional `--server-name`, `--user`, and `--project` arguments and writes four to six files into `BASE_DIR/deploy/`.
+    upsert_section(m, 'ch9-generate-deploy', 310, 'Chapter 9 — generate_deploy in detail',
+        _ch9_generate_deploy())
 
-This chapter walks through the command end-to-end: the argument parsing, the value resolution (where each variable comes from when not passed explicitly), the template loading, the rendering pass, and the file writing. The reading order matches the order of operations in the source code so you can follow along."""),
+    upsert_section(m, 'ch10-setup', 320, 'Chapter 10 — Setup and provisioning',
+        """`setup.sh` is the one-shot bootstrap script the operator runs as root on the target host once. This chapter walks through every line of the generated script and explains what it does and why.
 
-        ('ch10-setup', 320, 'Chapter 10 — Setup and provisioning',
-         """`setup.sh` is the one-shot bootstrap script the operator runs as root on the target host once. This chapter walks through every line of the generated script and explains what it does and why.
+Topics covered: package installation, user creation, directory tree creation, supervisor and nginx file installation, the reload sequence, and what setup.sh deliberately does NOT do (clone source, install Python deps, run migrations, create the superuser — those are per-deploy decisions).""")
 
-Topics covered: package installation, user creation, directory tree creation, supervisor and nginx file installation, the reload sequence, and what setup.sh deliberately does NOT do (clone source, install Python deps, run migrations, create the superuser — those are per-deploy decisions)."""),
+    upsert_section(m, 'ch11-hotswap', 330, 'Chapter 11 — The hot-swap workflow',
+        """`hotswap.sh` is the operator's daily-use script. After `setup.sh` has finished on the target, hot-swap is how code changes propagate.
 
-        ('ch11-hotswap', 330, 'Chapter 11 — The hot-swap workflow',
-         """`hotswap.sh` is the operator's daily-use script. After `setup.sh` has finished on the target, hot-swap is how code changes propagate.
-
-This chapter covers the rsync invocation, the exclusion list (which files NOT to push), the supervisor restart, and the limits of the hot-swap model — specifically, that hot-swap is not safe for database migrations and the operator needs to run them by hand after the rsync but before the restart."""),
-    ]
-    for slug, sort, title, body in stubs_part3:
-        upsert_section(m, slug, sort, title, body)
+This chapter covers the rsync invocation, the exclusion list (which files NOT to push), the supervisor restart, and the limits of the hot-swap model — specifically, that hot-swap is not safe for database migrations and the operator needs to run them by hand after the rsync but before the restart.""")
 
     # Part IV — Worked example (stubs)
     upsert_section(m, 'part-4', 400, 'Part IV — A complete worked example',
@@ -456,6 +431,485 @@ Tufte: Edward Tufte, whose books on information design are the aesthetic touchst
 {urls_for_app('hosts')}
 
 {commands_for_app('hosts')}""")
+
+
+# =====================================================================
+# Hand-written chapters for Volume 1 Part I (continued: Chapters 4-5)
+# =====================================================================
+
+def _ch4_app_layout():
+    return """Every Velour app follows the same on-disk layout. The conventions are not unusual but they are *strict*, and the strictness is exactly what lets the meta-layer — `app_factory`'s deploy templates, `codex`'s introspection, the `oracle` app's auto-discovery (when it lands) — work without per-app exceptions. This chapter is the canonical reference for the conventions, and the rationale for why each one is the way it is.
+
+## The minimum app
+
+A new Velour app is a directory at the project root containing seven files:
+
+```
+appname/
+    __init__.py
+    apps.py
+    admin.py
+    models.py
+    views.py
+    urls.py
+    migrations/
+        __init__.py
+        0001_initial.py
+```
+
+That's the floor. Several apps have nothing more than this. The `agricola` app (the board game, unrelated to the lab) is essentially this shape. So is `landingpage`, the chronicle masthead.
+
+Optional sub-directories appear in apps that need them:
+
+- `management/commands/` for `python manage.py <command>` entry points. Most apps that maintain state externally (like `chronos` for holidays, `codex` for manuals, `identity` for the attention tick) ship one or more management commands.
+- `templatetags/` for custom template tags. Only `dashboard` uses this so far, for the `static_v` cache-busting tag.
+- Sub-packages for non-trivial logic. `codex` has `codex/rendering/` (the PDF renderer broken into `tufte.py`, `markdown.py`, `sparklines.py`, `diagrams.py`). `chronos` has `chronos/holiday_sources/` (eleven traditions, one module each) and `chronos/astro_sources/` (equinoxes, eclipses, moon phases, meteors, plus a lazy ephemeris loader). The pattern is: if the logic is more than one file's worth, give it a sub-package with its own `__init__.py`.
+
+## What does NOT live in the app directory
+
+This is the part that surprises Django developers coming from other projects. Velour deviates from Django's defaults in two specific places.
+
+**Templates do not live inside the app directory.** They live under `templates/<appname>/` at the project root. Django's default template loading would look in `appname/templates/appname/` first; Velour overrides `TEMPLATES['DIRS']` in `settings.py` to include the project-level `templates/` directory, and individual apps' template directories are not on the template search path. The result: when you read `views.py` and see `render(request, 'chronos/calendar_month.html', ...)`, the template is at `templates/chronos/calendar_month.html`, not `chronos/templates/chronos/calendar_month.html`.
+
+Why? Two reasons. First, having one top-level templates directory makes the `base.html` inheritance chain visually obvious — every page extends one file, and that file is in one place. Second, it makes template inheritance across apps trivial: a `chronos` template can extend `cartography/_base.html` without any special path configuration. The inter-app coupling is minimal but it exists, and one templates root makes it explicit.
+
+The cost of this convention is that you can't drop an app into Velour from outside (like a third-party Django app) without restructuring its templates. Velour is an application, not a framework that hosts arbitrary apps — the convention is a feature, not a bug.
+
+**Static files do not live inside the app directory either.** Source CSS lives in `static/css/style.css` (one file for the whole project — Velour does not use per-app CSS). Source JS lives in `static/js/`, with one file per identifiable concern (`chronos.js`, `identity_wave.js`, etc.). Bundled fonts live under `static/fonts/`, currently just `et-book/` for the Codex PDF renderer. Images for the README and other docs live under `docs/screenshots/` — separate from `static/` because they're documentation assets, not assets the app serves over HTTP.
+
+The collectstatic output (`STATIC_ROOT`) is `staticfiles/` in dev (gitignored) or `/var/www/webapps/<user>/static/` in production.
+
+The `static/css/style.css` "one file for the whole project" rule is the same kind of decision as templates-at-the-root: it pushes against modularity in favour of a single source of truth that's easy to grep and easy to keep visually consistent. If a future iteration introduces hundreds of pages of styling, it might split into per-app CSS files; right now it's small enough that one file is the right shape.
+
+## Naming and the app_label
+
+A Django *app label* is the short identifier used for migrations, foreign keys, and admin URLs. By convention it's the directory name. Velour follows this strictly: every app's directory name is its app label, and there are no `label = ...` overrides in any of the `apps.py` files.
+
+The implication: don't use hyphens or capital letters in app directory names. Use snake_case exclusively. Most Velour apps are one word (`chronos`, `codex`, `attic`, `cartography`, `nodes`); the multi-word ones use snake_case (`app_factory`, `landingpage` happens to be one word, `mailroom` is one word). When the meta-layer reads `apps.get_app_configs()` and iterates the result, the directory name is the value it gets, and it gets used unmodified in URL paths, template paths, and codex chapter slugs. Consistency here saves a lot of edge-case handling downstream.
+
+## Migrations
+
+Each app has its own `migrations/` directory. Velour does not use a centralized migrations location. Each migration file is committed to git with the schema change it represents — including the seeded data migrations for things like the chronos holiday traditions.
+
+The `BigAutoField` is the default primary key everywhere. This is set in each app's `apps.py`:
+
+```python
+class CodexConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'codex'
+```
+
+Velour was started after Django moved to BigAutoField as the default, and there's no reason to use the older AutoField. Mixing the two within a project is also possible but creates pointless cognitive load.
+
+Migrations are created by `python manage.py makemigrations <appname>` (almost always with the explicit app name, to avoid running it on every app). They're committed to git immediately after generation. They should not be edited by hand after creation; if a migration is wrong, the right move is `python manage.py migrate <appname> <previous_migration_name>`, delete the bad migration, and re-create.
+
+Data migrations (the kind that populate seed data, like the chronos `Tradition` rows or the `nodes.HardwareProfile` catalog) live in the same `migrations/` directory as schema migrations, with the standard Django `RunPython` helper. Reading the migration directory of each app gives you a complete history of how the schema and seed data evolved.
+
+## URL configuration
+
+Each app has a `urls.py` that defines an `app_name` namespace and a list of `urlpatterns`. The project-level `velour/urls.py` includes each app under a single URL prefix:
+
+```python
+path('chronos/', include('chronos.urls')),
+path('codex/',   include('codex.urls')),
+path('attic/',   include('attic.urls')),
+```
+
+Cross-app URL references use the namespace, like `{% url 'chronos:home' %}` or `reverse('codex:manual_detail', args=[slug])`. Hard-coded URL strings should not appear anywhere; if you find one, either replace it with a `reverse()` call or document why the hard-code is unavoidable (e.g., HTTP redirects from external services where the URL is contractually fixed).
+
+The `nodes` app is a slight exception: it has both `nodes/urls.py` (for the human-facing /nodes/ pages) AND `nodes/api_urls.py` (for the /api/nodes/ machine-facing endpoint that ESP devices POST to). This is a deliberate split because the two URL families have different authentication requirements (login_required vs Bearer token) and different design goals (HTML vs JSON). When an app has both human and machine surfaces, splitting `urls.py` into two files is the right move.
+
+## Models
+
+Models are CamelCase singular. `MediaItem`, not `MediaItems` or `media_item`. Foreign keys use string references to avoid circular imports:
+
+```python
+experiment = models.ForeignKey(
+    'experiments.Experiment',
+    on_delete=models.SET_NULL,
+    null=True, blank=True,
+    related_name='nodes',
+)
+```
+
+`related_name` is set explicitly on every foreign key. The default Django reverse-accessor name (`<lowercase model>_set`) is fine but ugly; spelling out the related_name once at the field definition makes the code that uses it readable. So `experiment.nodes.all()` instead of `experiment.node_set.all()`.
+
+`on_delete` is always specified (Django requires it now, but Velour was strict about it from the start). The choices in actual use:
+
+- `CASCADE` for child rows that should die with their parent (a `Section` dies with its `Manual`).
+- `SET_NULL` for soft references that should survive even if the parent goes away (a `Node` keeps existing even if its `Experiment` is deleted; the FK just becomes null).
+- `PROTECT` for FKs where the parent should not be deletable while children exist (rare, used for the `HardwareProfile` foreign key on `Node` — if you try to delete a hardware profile that has nodes pointing at it, Velour refuses).
+
+## Why the conventions are strict
+
+The conventions look opinionated to a Django newcomer. They are. The reason is the meta-layer.
+
+`codex.introspection` walks every app via `apps.get_app_configs()` and produces reference tables for every model, every URL pattern, every management command. If the conventions were soft, the introspection would have to handle edge cases. Instead, the introspection is a 250-line module that assumes every app follows the rules — and produces accurate reference content because every app actually does.
+
+`app_factory.generate_deploy` reads the project name and computes file paths like `/var/www/webapps/<user>/apps/<projectname>/`. Strict conventions mean this path is computable; loose conventions would mean the operator has to specify it per-deploy.
+
+The `oracle` app (in the planning sketch) will auto-discover lobes by reading every app's `lobes.py` if it exists. Strict naming means this auto-discovery is one line of glob; loose naming would require a registry.
+
+In short: every convention in this chapter exists to make the meta-layer trivially small. If you ever find yourself wanting to break a convention, the right question to ask is "what meta-layer code does this change make harder to write?" — and only break the convention if the answer is "none".
+"""
+
+
+def _ch5_template_system():
+    return """Django's template engine is used in Velour for two completely different jobs, and the trick that makes the dual use work is that Django doesn't know or care which job it's doing. The same `render_to_string()` function call that produces an HTML page for a browser also produces a gunicorn config for a production server. The template files for the two jobs live side by side in the same directory tree. The variable substitution rules are identical. The escaping behaviour is identical (with one important footnote we'll get to). Django's template engine is, at heart, just a parameterized text producer, and Velour leans into that fact.
+
+This chapter walks through the architecture: which templates produce HTML, which produce shell scripts and config files, how the two are kept distinguishable, what conventions exist for safety, and where the line between them should sit when you add new templates.
+
+## The two template families
+
+**Family one: HTML for browsers.** These are the conventional Django templates. They live under `templates/<appname>/` at the project root. They extend `templates/base.html`, which is the project-wide HTML chassis containing the navbar, the chronos topbar, the messages strip, and the body block. They're rendered by view functions that return `HttpResponse` objects via the `render()` shortcut. They reference static files via the `{% static %}` and `{% static_v %}` template tags. Output goes to a browser via HTTP.
+
+This is exactly the way Django was designed to be used. Nothing unusual about it. Velour has hundreds of these templates across all the apps.
+
+**Family two: deploy artifacts.** These templates live exclusively under `app_factory/templates/deploy/`. Their filenames have unusual extensions: `gunicorn.conf.py.tmpl`, `supervisor.conf.tmpl`, `nginx.conf.tmpl`, `setup.sh.tmpl`, `adminsetup.sh.tmpl`, `hotswap.sh.tmpl`. They're loaded via `render_to_string('deploy/gunicorn.conf.py.tmpl', context)` from inside the `generate_deploy` management command. The output is a string of bash, Python, or nginx configuration syntax. That string is written to disk in the project's `deploy/` directory. From there, the operator scp's the files to a target host and runs `setup.sh` once.
+
+Django's template engine renders both families with the same code path. It doesn't know that one is HTML and the other is shell. It just substitutes variables.
+
+## Why this works at all
+
+The reason this dual use is even possible is that Django's template syntax (`{{ var }}`, `{% tag %}`, `{# comment #}`) is sparse. The four characters `{`, `}`, `%`, `#` are the only ones with special meaning, and even those only when paired in specific orders. A bash script can mention `{` and `}` freely without colliding with template syntax (the only collision would be a literal `{{` or `{%`, which is genuinely rare in shell scripts). A Python file can mention dictionaries without escape problems because dict literals use `{key:value}`, not `{{key}}`. An nginx config uses `;` and `{ }` for blocks but never `{{` or `{%`.
+
+In the rare case where a literal `{{` would appear in a deploy template (e.g., a Python f-string template line that uses `{{` to mean a literal `{`), Django's `{% verbatim %}` tag escapes a region from template processing.
+
+## The two render entry points
+
+For HTML templates, the conventional Django pattern:
+
+```python
+def my_view(request):
+    return render(request, 'myapp/page.html', {'foo': bar})
+```
+
+For deploy templates, the same primitive but invoked manually:
+
+```python
+from django.template.loader import render_to_string
+
+def generate_one_artifact(template_name, context, out_path):
+    text = render_to_string(template_name, context)
+    out_path.write_text(text)
+```
+
+Note the difference: `render()` returns an `HttpResponse` (with content-type, status code, etc.); `render_to_string()` returns just the string. The deploy pipeline uses `render_to_string()` because it doesn't need the HTTP wrapping.
+
+The `generate_deploy` management command (covered in detail in chapter 9) calls `render_to_string()` six times — once per artifact in the bundle. Each call gets a context dict with the same handful of values: `project_name`, `user`, `hostname`, `socket_path`, `python_version`, etc. The templates substitute these values and produce the final config files.
+
+## The naming convention
+
+Deploy templates live under `app_factory/templates/deploy/`. Their filenames carry the *target* file extension before `.tmpl`:
+
+- `gunicorn.conf.py.tmpl` → renders to `gunicorn.conf.py`
+- `supervisor.conf.tmpl` → renders to `supervisor.conf`
+- `nginx.conf.tmpl` → renders to `nginx.conf`
+- `setup.sh.tmpl` → renders to `setup.sh`
+- `adminsetup.sh.tmpl` → renders to `adminsetup.sh`
+- `hotswap.sh.tmpl` → renders to `hotswap.sh`
+
+The `.tmpl` suffix is a flag, not a Django requirement. Django doesn't care about file extensions; the suffix is purely for the human reading the directory. Without it, an editor might syntax-highlight the file as bash and complain about the `{% if %}` markers; with it, editors recognize the file as a template and either highlight nothing or highlight the template syntax separately.
+
+The `templates/deploy/` subdirectory is also not load-bearing — Django would find the templates anywhere under `app_factory/templates/`. The subdirectory is a human convention to separate "templates that produce HTML for users" from "templates that produce configs for servers". As of this writing `app_factory` only has `templates/deploy/`, no other template subdirectories, but the convention is established for future growth.
+
+## Variables and context
+
+Both template families use the same `{{ var }}` and `{% if %}` and `{% for %}` syntax. The HTML templates also use `{% load %}` to pull in tag libraries (`{% load static %}`, `{% load assets %}`, `{% load humanize %}`) and `{% url 'name' arg %}` to generate URL paths. The deploy templates rarely need either of those — they're stamping out config files, not generating links — but the syntax is available if needed.
+
+A typical deploy template body looks like:
+
+```
+[program:{{ user }}]
+command={{ venv_path }}/bin/gunicorn -c gunicorn.conf.py {{ project }}.wsgi
+directory={{ apps_dir }}/{{ project }}
+user={{ user }}
+group={{ user }}
+autostart=true
+autorestart=true
+stopwaitsecs=10
+redirect_stderr=true
+stdout_logfile={{ log_dir }}/{{ project }}.log
+stdout_logfile_maxbytes=10MB
+stdout_logfile_backups=5
+```
+
+Pure key-value substitution. No control flow, no loops. The deploy templates rarely need anything more sophisticated because the structure of the output files is always the same — only the values change.
+
+## Escaping and safety
+
+Here's where the dual use needs care.
+
+Django's HTML template engine *automatically escapes* string variables when rendering. If `name = "<script>alert(1)</script>"` and the template says `{{ name }}`, the output is `&lt;script&gt;alert(1)&lt;/script&gt;`. This is the correct behaviour for HTML to prevent XSS. It's also the wrong behaviour for shell scripts, where `&lt;` is a literal four-character sequence and not what bash expects.
+
+The fix is to mark deploy templates as autoescape-disabled, either with `{% autoescape off %}...{% endautoescape %}` blocks or by wrapping each variable in `{{ name|safe }}`. The current convention in Velour is to use the block form at the top of every deploy template:
+
+```
+{% autoescape off %}
+[program:{{ user }}]
+...
+{% endautoescape %}
+```
+
+The `{% autoescape off %}` opens at the top of the file and never closes — Django handles the implicit close at end-of-file. This puts the entire file in autoescape-off mode without per-variable annotation.
+
+**Now the safety footnote.** With autoescape off, any user input that flows into a deploy template can do command injection. If `user = "; rm -rf /"` and the template renders to a bash script that says `chown -R {{ user }}:{{ user }} /var/www/`, you've created a shell injection in your own deploy script. The defense is layered:
+
+1. **Don't accept user input into deploy template variables.** `generate_deploy` takes its values from `Identity.hostname`, the project's `BASE_DIR`, and a few command-line arguments. Identity.hostname is set by the operator via the web UI and trusted; the command-line args are also trusted. None of the values come from web request data, which is the main untrusted source in a Django app.
+2. **Validate at the boundary.** When `Identity.hostname` is updated via the web UI, the form validation rejects any character that isn't valid in a hostname (alphanumeric, dot, dash). So even if a malicious admin tried to set `hostname = "evil; rm -rf /"`, the form would reject it before it landed in the database.
+3. **Read every generated artifact before installing it.** The deploy pipeline writes the artifacts to `BASE_DIR/deploy/` and then waits for the operator to scp them and run them. The operator should `cat` each file before installing. This is the same review step that happens with any auto-generated config — `terraform plan` before `terraform apply`, etc.
+
+The combination of "trusted values only" + "validation at the boundary" + "human review before installation" makes the autoescape-off pattern safe in practice. It would not be safe in a context where untrusted user input could reach the templates.
+
+## The base.html chassis
+
+The HTML template family has one architectural piece worth singling out: `templates/base.html` is the chassis that every page extends. It contains:
+
+- The HTML5 doctype + viewport meta
+- The `<title>` block with the per-page override
+- The CSS link via `{% static_v %}` for cache-busting
+- The chronos topbar row (the world clock that floats at the top of every page)
+- The navbar with links to every app (a single hardcoded list — every new app needs a manual `<a>` tag added)
+- The messages strip (Django's flash messages)
+- The `{% block content %}{% endblock %}` where the per-page content goes
+- The chronos JS script tag, also via `{% static_v %}`
+
+A page template looks like:
+
+```
+{% extends "base.html" %}
+{% block title %}My page — Velour{% endblock %}
+{% block extra_head %}<style>...</style>{% endblock %}
+{% block content %}
+  <h1>Hello</h1>
+  ...
+{% endblock %}
+```
+
+The `extra_head` block lets a page inject its own CSS or `<script>` tags into the document head. The `content` block is the body. Most templates use both blocks; a few use only `content`.
+
+There is no `extra_body_end` block as a place to put scripts that should load after the content. Scripts that need to run after DOM ready use `DOMContentLoaded` listeners or are placed at the bottom of the `content` block. This is a slight inconvenience that could be fixed by adding an explicit block, and may be at some point — file under "small refactor".
+
+## Cross-app template extension
+
+A Velour app's template can extend another app's template. For example, the `cartography` app's per-scale templates (`earth.html`, `mars.html`, `moon.html`) extend `cartography/_base.html` which itself extends `base.html`. The per-scale templates only need to override the `map_content` block.
+
+```
+{% extends "cartography/_base.html" %}
+{% block map_content %}
+  <div id="map" class="map-container"></div>
+  ...
+{% endblock %}
+```
+
+Underscore-prefix template names (`_base.html`, `_topbar_clock.html`) signal that the file is a partial — meant to be included or extended by other templates, not rendered directly by a view. This is a Rails convention that Velour adopts because it's clear and the tooling doesn't care.
+
+## When to add a third template family
+
+The current rule is: only two template families, HTML and deploy. If you find yourself wanting to add a third (say, for generating LaTeX, or for emitting Markdown to be re-rendered elsewhere), the right question is whether the new family really needs Django templates or whether a simpler tool (Python f-strings, Jinja2 directly, just string concatenation) would do.
+
+For generating short, structured output (a few hundred lines, a handful of variables), Django templates are overkill. Python f-strings are more readable and don't require a template loader. The deploy templates are only worth the Django infrastructure because they're long, the variables are reused across files, and the project already has Django running.
+
+If you need a third template family that meets all of those criteria (long, repeated, variables-rich, in a project that already runs Django), put it in a new subdirectory like `app_factory/templates/<purpose>/` and follow the same naming convention. Otherwise, use a simpler tool.
+
+## Summary
+
+Two template families, one engine. The HTML family is conventional Django; the deploy family stretches the engine to render config files. The two coexist because Django's template syntax is sparse enough not to collide with shell or config syntax in practice. The escape rules differ — HTML autoescapes, deploy doesn't — and the safety of the autoescape-off pattern depends on never letting untrusted user input reach the deploy templates.
+
+This is one of the load-bearing tricks in the Velour meta-layer. It's also a good demonstration of the principle that a tool designed for one job can be re-used for a closely-related job if you understand the tool well enough to know which guarantees still hold. Django's template engine was designed for HTML; we use it for shell because the parts that matter (parameter substitution, file loading, escape control) work the same way for both.
+"""
+
+
+# =====================================================================
+# Hand-written chapter for Volume 1 Part III (Chapter 9)
+# =====================================================================
+
+def _ch9_generate_deploy():
+    return """The `generate_deploy` management command is the entry point of the entire deploy pipeline. From the operator's perspective, it's a single line typed into a shell that produces a directory full of config files ready to scp onto a target host. From the inside, it's about 200 lines of Python that compose six template renders into one coherent deploy bundle. This chapter walks through the command end-to-end: the argument parsing, the value resolution chain (where each variable comes from when not passed explicitly), the template loading, the rendering pass, the file writing, and the testing strategy.
+
+## The command signature
+
+```
+python manage.py generate_deploy
+    [--server-name DOMAIN]
+    [--user USERNAME]
+    [--project NAME]
+    [--port PORT]
+    [--out-dir PATH]
+```
+
+All arguments are optional. If the operator passes none, the command derives sensible defaults from the running Velour project itself. If the operator passes some, the explicit values override the defaults. If the operator passes all, the defaults are bypassed entirely.
+
+This argument-resolution behaviour is the most important thing to understand about `generate_deploy`. It's not "you must always specify these things"; it's "specify only what differs from the project's own configuration". For the common case of "I want to generate a deploy bundle for this exact velour", the command needs no arguments at all. For the edge cases (cloning a velour to a different domain, generating a child app under a different project name), the arguments override the defaults.
+
+## The value resolution chain
+
+For each variable used by the deploy templates, here's where the value comes from:
+
+| Variable | Source (in priority order) |
+|---|---|
+| `server_name` | `--server-name` arg → `Identity.get_self().hostname` → `'example.com'` |
+| `user` | `--user` arg → `BASE_DIR.name` (the project directory's name) → `getpass.getuser()` |
+| `project` | `--project` arg → derived from `BASE_DIR.name` |
+| `port` | `--port` arg → 7777 (the velour default) |
+| `out_dir` | `--out-dir` arg → `BASE_DIR / 'deploy'` |
+| `apps_dir` | computed: `/var/www/webapps/{user}/apps` |
+| `static_dir` | computed: `/var/www/webapps/{user}/static` |
+| `media_dir` | computed: `/var/www/webapps/{user}/media` |
+| `run_dir` | computed: `/var/www/webapps/{user}/run` |
+| `log_dir` | computed: `/var/www/webapps/{user}/log` |
+| `socket_path` | computed: `{run_dir}/{project}.sock` |
+| `venv_path` | computed: `{apps_dir}/{project}/venv` |
+| `python_version` | `sys.version_info` of the running Python |
+
+The point is: only the top 4 entries can be overridden. Everything below is computed deterministically from those 4. This is the strict-conventions payoff. The operator never has to remember "where does the supervisor program file want the gunicorn socket to live". It's always `/var/www/webapps/{user}/run/{project}.sock`. The deploy template just substitutes the value.
+
+The most important entry in the table is the second row of the `server_name` resolution chain: it pulls from `Identity.get_self().hostname`. This is the load-bearing connection between the Identity model and the deploy pipeline that chapters 1, 2, and 6 keep mentioning. The whole chain is one line of Python:
+
+```python
+server_name = options['server_name'] or Identity.get_self().hostname or 'example.com'
+```
+
+Three sources, in order, with fallback to a placeholder. If you change Identity.hostname via the web UI and re-run `generate_deploy` with no arguments, the next nginx config has the new server_name. That's the entire mechanism.
+
+## The render loop
+
+After resolving all the values, the command builds a single context dictionary and passes it to `render_to_string` six times, once per artifact:
+
+```python
+context = {
+    'project_name':  project,
+    'user':          user,
+    'server_name':   server_name,
+    'port':          port,
+    'apps_dir':      apps_dir,
+    'static_dir':    static_dir,
+    'media_dir':     media_dir,
+    'run_dir':       run_dir,
+    'log_dir':       log_dir,
+    'socket_path':   socket_path,
+    'venv_path':     venv_path,
+    'python_version': python_version,
+    'base_dir':      str(settings.BASE_DIR),
+}
+
+artifacts = [
+    ('deploy/gunicorn.conf.py.tmpl', 'gunicorn.conf.py'),
+    ('deploy/supervisor.conf.tmpl',  'supervisor.conf'),
+    ('deploy/nginx.conf.tmpl',       'nginx.conf'),
+    ('deploy/setup.sh.tmpl',         'setup.sh'),
+    ('deploy/adminsetup.sh.tmpl',    'adminsetup.sh'),
+    ('deploy/hotswap.sh.tmpl',       'hotswap.sh'),
+]
+
+out_dir.mkdir(parents=True, exist_ok=True)
+for tmpl, out_name in artifacts:
+    text = render_to_string(tmpl, context)
+    (out_dir / out_name).write_text(text)
+```
+
+That's the heart of the command. Six templates, one context, six output files. The context has fewer than 15 keys; the loop has six iterations; the operation is fundamentally simple.
+
+The `render_to_string` import is the Django template loader hook covered in chapter 5. Each call walks Django's template directories looking for the named template, finds it under `app_factory/templates/deploy/`, parses it once (cached on subsequent calls), substitutes the context variables, and returns the resulting string. The text goes straight to disk via `Path.write_text()`.
+
+After the loop, the shell scripts get marked executable:
+
+```python
+for script in ['setup.sh', 'adminsetup.sh', 'hotswap.sh']:
+    (out_dir / script).chmod(0o755)
+```
+
+`gunicorn.conf.py` and the conf files don't need executable bit. Only the shell scripts.
+
+## The output directory layout
+
+After a successful run, `BASE_DIR/deploy/` looks like:
+
+```
+deploy/
+    gunicorn.conf.py
+    supervisor.conf
+    nginx.conf
+    setup.sh         (chmod 755)
+    adminsetup.sh    (chmod 755)
+    hotswap.sh       (chmod 755)
+```
+
+Six files, totalling maybe 200 lines of text. The operator inspects them, scp's them to the target host, runs `setup.sh` once as root, and the new velour instance is up.
+
+The `deploy/` directory is committed to git in some velour instances and gitignored in others. The current convention is to NOT commit it, because the file contents change every time `generate_deploy` runs and committing the output creates noisy diffs. The trade-off is that a fresh clone doesn't have a deploy/ directory ready to use; the operator runs `generate_deploy` on the clone first. This is fine because they were going to inspect the artifacts anyway.
+
+## Error handling
+
+The command's error handling is minimal because most things that can go wrong are obvious:
+
+- **Missing template file**: Django raises `TemplateDoesNotExist`. The operator's fix is to check that `app_factory/templates/deploy/` exists and has the expected `.tmpl` files. This usually means a partial git checkout.
+- **Missing context variable**: Django raises `VariableDoesNotExist` if a template references a variable not in the context. The fix is to add the variable to the context dict at the top of the command.
+- **No Identity row**: `Identity.get_self()` would auto-create a row with default `hostname='example.com'`. The deploy artifacts then have `example.com` as the server_name, which is obviously a placeholder. The operator notices and either passes `--server-name` or sets the real hostname in the Identity admin first.
+- **Permission denied writing to out_dir**: standard file system error. The fix is to ensure the user running `manage.py` has write permission to the deploy directory.
+- **Invalid characters in user/project**: not currently validated. If the operator passes `--user 'evil; rm -rf /'`, the bad characters end up in the bash scripts. Don't do that. The defense is the trust model laid out in chapter 5: don't pass untrusted values to deploy templates.
+
+The command does NOT validate the generated artifacts (e.g., it doesn't try to parse the rendered nginx.conf with nginx). It just emits text. Validation is the operator's job, done by reading the files before installing them.
+
+## Idempotence
+
+Running `generate_deploy` twice produces identical output (modulo timestamps in comments, if any). The command makes no record of having run; it's safe to invoke as many times as you want. There's no notion of "clean before generating" — each run overwrites the existing files.
+
+This matters because the typical workflow is:
+
+1. Edit `Identity.hostname` in the admin
+2. Run `generate_deploy` to regenerate
+3. `cat deploy/nginx.conf` to confirm
+4. scp `deploy/nginx.conf` to the target host
+5. Realize you wanted port 8888 instead of 7777
+6. Run `generate_deploy --port 8888` to regenerate
+7. scp again
+
+The operator iterates until satisfied, then deploys. The command supports this by being cheap and idempotent.
+
+## Testing the command
+
+There's no automated test suite for `generate_deploy` in the current codebase. The reason is that the output is text, the inputs are well-defined, and the operator inspects every generated artifact before installing it. A unit test would be testing that the templates substitute variables correctly, which Django's template engine already tests.
+
+That said, if you wanted to add tests, the right shape would be:
+
+```python
+def test_generate_deploy_basic():
+    out_dir = tmp_path / 'deploy'
+    call_command('generate_deploy', '--out-dir', str(out_dir),
+                 '--server-name', 'test.example.com',
+                 '--user', 'testuser',
+                 '--project', 'testproj')
+    assert (out_dir / 'gunicorn.conf.py').exists()
+    assert (out_dir / 'supervisor.conf').exists()
+    nginx = (out_dir / 'nginx.conf').read_text()
+    assert 'server_name test.example.com;' in nginx
+    assert '/var/www/webapps/testuser/' in nginx
+```
+
+A handful of these would catch most regressions. The hot path is so simple that the bugs that escape are usually template-side (a wrong variable name, a missing semicolon in nginx syntax) rather than command-side, and template bugs are caught by inspection.
+
+## What generate_deploy does NOT do
+
+The command writes deploy artifacts. It does not:
+
+- **Push them to the target host.** That's `adminsetup.sh`'s job (covered in chapter 10).
+- **Run setup.sh on the target.** That's the operator's job (covered in chapter 10).
+- **Install Python dependencies.** That's the operator running `pip install -r requirements.txt` after rsync.
+- **Run database migrations.** That's the operator running `python manage.py migrate`.
+- **Create the superuser.** That's the operator running `python manage.py createsuperuser` once on the target.
+- **Configure SSL.** That's the operator running `certbot` after the basic deploy is up. The generated `nginx.conf` has placeholder SSL paths that the operator fills in, OR an HTTP-only fallback that works without SSL for initial bring-up.
+
+The split between "what `generate_deploy` does" and "what the operator does manually" is deliberate. Auto-generation is the right tool for the boilerplate that's identical across deploys (~95% of the work). The remaining 5% is per-deploy decisions that require operator judgement: what's my superuser email, do I want HTTPS yet, does this server have an existing nginx that needs coordination. Trying to automate the 5% would create an automation that's complicated enough to break when the operator's situation differs slightly from the assumed default.
+
+`generate_deploy` is what's called a "scaffold generator" in some frameworks: it produces files that the operator then customizes. The customization is part of the workflow; the auto-generated starting point is the part that saves the most time.
+
+## Where this fits in Volume 1
+
+Chapter 9 covers the command's internals; chapter 10 covers `setup.sh` and the bootstrap sequence on the target host; chapter 11 covers the `hotswap.sh` daily workflow. Together they describe the entire deploy pipeline from "I want to set up a new velour" to "I just pushed a code change and the new version is live in 15 seconds". Chapters 12-14 in Part IV walk through a fully concrete worked example using all three.
+
+If you're reading the volume in order, this is also where the meta-app idea from chapter 1 starts to feel concrete rather than abstract. Up to here, "Velour generates other Django projects" was a phrase. From here on, it's a Python function that runs in 200ms and writes six files.
+"""
 
 
 # =====================================================================
