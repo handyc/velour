@@ -353,7 +353,7 @@ The example is intentionally concrete: real commands, real output, real edge cas
 
     stubs_part4 = [
         ('ch12-clone', 410, 'Chapter 12 — Cloning Velour to a new host',
-         """A walkthrough of `git clone` → `pip install` → `migrate` → `createsuperuser` → `runserver 7777` on a fresh Ubuntu 24.04 server. Every command is shown with its expected output. Every error you'll encounter the first time is mentioned with its fix."""),
+         _ch12_clone()),
 
         ('ch13-generate', 420, 'Chapter 13 — Generating a new app',
          """A walkthrough of using `app_factory` to create a new child Django project under the same Velour parent. The example creates a small "lab forms" app that captures research subject data — chosen because it's representative of the kind of one-off internal tool app_factory exists to make trivial."""),
@@ -1599,6 +1599,292 @@ The deliberate choice here is: trust the developer to not push broken code, and 
 ## Where this fits in Volume 1
 
 This chapter closes Part III. Part IV (chapters 12-14) walks through the whole bootstrap sequence — `generate_deploy`, scp, `adminsetup.sh`, `setup.sh`, first boot — in fully concrete detail with real commands and real output. The reader who has made it through Part III should have enough conceptual understanding to follow Part IV without needing to pause and look things up.
+"""
+
+
+def _ch12_clone():
+    return """The next three chapters are a worked example. You are going to take a freshly-installed Ubuntu 24.04 server, put Velour on it, and have a working instance you can open in a browser. Every command is shown. Every expected piece of output is shown. The edge cases you will hit the first time — Python version drift, missing system packages, SQLite permission quirks, that one pip wheel that doesn't exist for your architecture — are called out with their fixes.
+
+This is meant to be read with a terminal open. If you type along, by the end of chapter 14 you will have Velour running in production, behind nginx, on a real domain, with an SSL certificate, and a second Velour-generated child app living alongside it under the same `/var/www/webapps/` tree. It should take you about 45 minutes.
+
+Chapter 12 is the local bring-up: clone the source, install Python dependencies, migrate the database, create a superuser, and run the dev server. Chapter 13 generates a new app using `app_factory`. Chapter 14 deploys both Velour and the generated app to real hardware.
+
+## Target environment
+
+This walkthrough assumes:
+- **OS**: Ubuntu 24.04 LTS (Server or Desktop — both work). Other Debian-family distros are fine with minor package-name adjustments. RHEL/Rocky/Fedora will need `dnf` in place of `apt-get`. NixOS is left as an exercise.
+- **Hardware**: anything with ≥512MB RAM and ≥2GB free disk. A $5 VPS works. A Raspberry Pi 3B+ works. A 2010 ThinkPad works.
+- **Network**: any internet connection. Velour talks to GitHub once during clone and PyPI once during pip install; after that, it works entirely offline.
+- **User**: a non-root user with sudo. Do not run any of these commands as root directly.
+
+If you're on a different OS, substitute your package manager as appropriate — `apt-get` → `dnf install`, `pacman -S`, `apk add`, etc. Nothing Velour uses is exotic.
+
+## Step 1 — System packages
+
+Velour is a Django project, so the host needs a Python 3 interpreter, venv support, pip, and git. Ubuntu 24.04 ships with Python 3.12 pre-installed but not the venv tooling. Install the four packages in one apt run:
+
+```
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-pip git
+```
+
+Expected output:
+
+```
+Reading package lists... Done
+Building dependency tree... Done
+The following additional packages will be installed:
+  python3-pip-whl python3-setuptools-whl
+The following NEW packages will be installed:
+  git python3-pip python3-pip-whl python3-setuptools-whl python3-venv
+0 upgraded, 5 newly installed, 0 to remove, 0 not upgraded.
+Need to get 3452 kB of archives.
+After this operation, 9341 kB of additional disk space will be used.
+...
+Setting up python3-venv (3.12.3-0ubuntu2) ...
+```
+
+On Ubuntu 24.04, `python3` is 3.12. Velour works on 3.10+. If you're on an older Ubuntu where the default is 3.10 or 3.11, those are also fine. If you're somewhere with 3.9 or earlier, you'll need to either install a newer Python via `deadsnakes` PPA or pick a different host — Velour's codebase uses 3.10 syntax like `match` statements and union-type hints.
+
+## Step 2 — Clone the source
+
+Pick a directory you're comfortable living in. For a dev setup, `~/velour-dev` is the convention used in this guide. For a production deploy, the source will ultimately end up in `/home/<user>/` owned by the project user, but that's chapter 14 territory — for now, just clone it wherever you'll be editing.
+
+```
+cd ~
+git clone https://github.com/handyc/velour.git velour-dev
+cd velour-dev
+```
+
+Expected output:
+
+```
+Cloning into 'velour-dev'...
+remote: Enumerating objects: 4829, done.
+remote: Counting objects: 100% (4829/4829), done.
+remote: Compressing objects: 100% (2143/2143), done.
+remote: Total 4829 (delta 2687), reused 4829 (delta 2687), pack-reused 0
+Receiving objects: 100% (4829/4829), 8.42 MiB | 5.8 MiB/s, done.
+Resolving deltas: 100% (2687/2687), done.
+```
+
+The clone is ~10MB because most of the repo is source code; the ET Book font adds ~1MB and the Skyfield JPL ephemeris (`de421.bsp`) adds another ~16MB — that's the single heaviest asset in the whole tree. If that bothers you for disk reasons, you can shallow-clone with `--depth 1` to skip the history.
+
+**Common error**: `fatal: unable to access 'https://github.com/handyc/velour.git/': Could not resolve host: github.com`. This means you have no internet. Check `ping 8.8.8.8` first; if that works, your DNS is broken and you need to configure `/etc/resolv.conf`.
+
+**Common error**: `Permission denied (publickey)`. You tried to clone via SSH (`git@github.com:...`) without having a key registered on GitHub. Use the HTTPS URL instead (as shown above).
+
+## Step 3 — Create a virtualenv
+
+Velour installs its Python dependencies into a project-local venv to avoid polluting the system Python or conflicting with other projects on the same host.
+
+```
+python3 -m venv venv
+source venv/bin/activate
+```
+
+After `source venv/bin/activate`, your shell prompt changes to show `(venv)` as a prefix. Every `python` or `pip` command in the rest of this chapter runs inside the venv from now on. If you log out and back in, you need to re-source the activation script — or prefix commands with `venv/bin/python` and `venv/bin/pip`.
+
+The venv directory (`venv/`) is gitignored. It lives in your project directory and is rebuilt from scratch if you ever delete it. Do not commit it.
+
+## Step 4 — Upgrade pip and install the requirements
+
+```
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
+
+This is where most first-time installs spend their time. `pip install -r requirements.txt` downloads and installs ~40 Python packages. The heavy hitters are Django itself, Skyfield (for astronomical calculations in the chronos app), psutil (for sysinfo), pymysql and psycopg (for the databases app), and fpdf2 (for codex PDF rendering).
+
+Expected output (abbreviated):
+
+```
+Collecting Django>=5.0
+  Downloading Django-5.0.6-py3-none-any.whl (8.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.2/8.2 MB 14.3 MB/s eta 0:00:00
+Collecting skyfield>=1.47
+  Downloading skyfield-1.48-py3-none-any.whl (479 kB)
+...
+Installing collected packages: sqlparse, six, psutil, pillow, asgiref,
+  Django, skyfield, pymysql, psycopg, fpdf2, ...
+Successfully installed Django-5.0.6 Pillow-10.3.0 asgiref-3.8.1 ...
+```
+
+A clean install on a fast connection takes about 90 seconds. Slow networks or constrained CPUs can push this to 5 minutes or more — the longest single step is Pillow, which often builds from source because there's no prebuilt wheel for your platform.
+
+**Common error**: `error: externally-managed-environment`. Ubuntu 24.04's system Python marks itself as "externally managed" to discourage pip installing to it. This error means you forgot to activate the venv. Run `source venv/bin/activate` first.
+
+**Common error**: some package in requirements.txt fails with `ERROR: Could not find a version that satisfies the requirement`. This usually means you're on an old Python where the required minimum isn't available. `pip install Django` alone (without the version pin) often succeeds — then try `pip install -r requirements.txt` again.
+
+**Common error**: `error: Microsoft Visual C++ 14.0 or greater is required`. You're on Windows, not Linux. Velour is tested on Linux and Mac. Windows works via WSL2 — install Ubuntu via WSL and run everything inside the Ubuntu shell.
+
+## Step 5 — Database migrations
+
+Velour uses SQLite by default for development. The database file is `db.sqlite3` at the project root, gitignored, created on first `migrate`. All ~30 Velour apps contribute tables. The first `migrate` creates roughly 80 tables and finishes in a couple of seconds.
+
+```
+python manage.py migrate
+```
+
+Expected output (abbreviated):
+
+```
+Operations to perform:
+  Apply all migrations: admin, agricola, app_factory, auth, chronos,
+  codex, contenttypes, dashboard, databases, experiments, hosts, identity,
+  landingpage, logs, mailboxes, mailroom, maintenance, messages, nodes,
+  security, services, sessions, sysinfo, terminal, winctl
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying agricola.0001_initial... OK
+  Applying app_factory.0001_initial... OK
+  ...
+  Applying nodes.0001_initial... OK
+  Applying nodes.0002_seed_hardware_profiles... OK
+  Applying nodes.0003_sensor_reading... OK
+  Applying nodes.0004_firmware... OK
+  ...
+```
+
+The data migrations at the end of `nodes.0002_seed_hardware_profiles` and a few other places are how Velour seeds the initial catalog of hardware profiles, timezones, tradition rows for chronos, and so on. If you see those lines, your database is populated with a working starting set.
+
+**Common error**: `django.db.utils.OperationalError: unable to open database file`. Velour tried to create `db.sqlite3` but the process couldn't write to the current directory. `chmod u+w .` or check you're in a directory you own.
+
+## Step 6 — Create a superuser
+
+Without a superuser, nobody can log in, which means the dashboard will redirect every request to the login page and the login page will reject every credential. Create one:
+
+```
+python manage.py createsuperuser
+```
+
+It prompts for a username, email, and password. Pick whatever you want — for dev, `admin` / `admin@example.com` / `admin` is fine and nobody will judge you. For prod, use something you'd actually call secure.
+
+Expected interaction:
+
+```
+Username (leave blank to use 'yourname'): admin
+Email address: admin@example.com
+Password:
+Password (again):
+The password is too similar to the username.
+This password is too short. It must contain at least 8 characters.
+This password is too common.
+Bypass password validation and create user anyway? [y/N]: y
+Superuser created successfully.
+```
+
+Django warns you in dev but lets you override. In prod you'd pick a real password.
+
+## Step 7 — Health and mail tokens
+
+Velour has two bearer-token files that get generated by management commands:
+
+```
+python manage.py init_health_token
+python manage.py init_mail_relay_token
+```
+
+Expected output:
+
+```
+Wrote /home/yourname/velour-dev/health_token.txt (48 chars).
+Remember: this token grants read access to /sysinfo/health.json. Keep it private.
+
+Wrote /home/yourname/velour-dev/mail_relay_token.txt (48 chars).
+Remember: this token authenticates inbound mail relay POSTs. Keep it private.
+```
+
+Both commands are idempotent in the safe direction: they refuse to overwrite an existing token unless you pass `--force`, so if you re-run them on a configured host, nothing bad happens. Chapter 3 covers the secret-file protocol in detail; for now, just run both.
+
+If you skip these two commands, the sysinfo health endpoint returns 500 and the mailroom inbound relay returns 401 for every request. Everything else in Velour still works. You can come back and run them later.
+
+## Step 8 — Run the dev server
+
+```
+python manage.py runserver 7777
+```
+
+7777 is Velour's conventional dev port. Expected output:
+
+```
+Watching for file changes with StatReloader
+Performing system checks...
+
+System check identified no issues (0 silenced).
+April 12, 2026 - 14:23:01
+Django version 5.0.6, using settings 'velour.settings'
+Starting development server at http://127.0.0.1:7777/
+Quit the server with CONTROL-C.
+```
+
+Open `http://127.0.0.1:7777/` in a browser. You should see the Velour login page.
+
+Log in with the superuser you created in step 6. You should land on the Dashboard — a 4x4 grid of cards, one per app. The sysinfo card should show the host's current load average. The Identity card should show "Velour" as the name and "(unnamed host)" as the hostname.
+
+**If the Dashboard loads:** you're done with chapter 12. Velour is working locally on this host.
+
+**If you get a 500 error:** the stack trace should show the actual failure. The most common ones on first boot are missing migrations (go back to step 5 and re-run migrate), missing static files (run `python manage.py collectstatic --noinput`), or a database permission issue (see step 5's common errors).
+
+**If you get a connection refused:** check that runserver is still running. It runs in the foreground — the terminal needs to stay open. If you want to free the terminal, see step 9.
+
+## Step 9 — Backgrounding the dev server (optional)
+
+The dev server runs in the foreground by default. If you want to keep working in the same terminal, you have three options:
+
+**Option a**: Run it in another terminal tab/pane. Simplest.
+
+**Option b**: Run it in the background with `&` and redirect output:
+
+```
+python manage.py runserver 7777 > runserver.log 2>&1 &
+```
+
+Check the PID with `jobs`, stop it with `kill %1`.
+
+**Option c**: Use tmux or screen. `tmux new -s velour`, start runserver, detach with `Ctrl-b d`, come back later with `tmux attach -t velour`.
+
+None of these are how you'd run Velour in production. Production uses gunicorn + supervisor + nginx (chapter 14). But for dev, runserver in a tmux session is fine.
+
+## Step 10 — Setting the hostname in Identity
+
+The Identity app's `hostname` field is load-bearing — it's the ground truth for the nginx `server_name` directive in the deploy bundle. On a fresh install it's blank, so `generate_deploy` will complain about a missing hostname.
+
+Set it now, even if you don't yet have a real domain. You can use the dev placeholder `localhost` and update it later.
+
+Navigate in your browser to `http://127.0.0.1:7777/identity/edit/`. Fill in:
+- **Name**: whatever you want to call this instance (e.g. "Velour Dev")
+- **Hostname**: the public DNS name this instance will be reachable at (e.g. `velour.mydomain.com`), or `localhost` for pure dev
+- **Admin email**: where prod errors will be emailed to (leave blank for dev)
+
+Click Save. The Dashboard now shows your name at the top.
+
+The hostname you entered will flow into `generate_deploy` → `nginx.conf` in chapter 14. That's the entire mechanism from chapter 2's "ground truth" diagram, made concrete.
+
+## Where you are now
+
+You have:
+- A working Velour instance on `http://127.0.0.1:7777/` (dev server only — not reachable from other machines on your LAN yet; bind to `0.0.0.0:7777` if you need that)
+- A superuser you can log in as
+- Health and mail relay tokens generated
+- An Identity row with a hostname you control
+- Every app's migrations applied and its initial seed data (hardware profiles, timezones, traditions, etc.) loaded
+
+You do NOT yet have:
+- Any nodes registered in the fleet (that comes when you flash an ESP device — see the nodes firmware docs)
+- Any documentation manuals seeded (run `python manage.py seed_quickstart` and `seed_devguide` to populate Codex)
+- Any deployment artifacts (chapter 14)
+- A child app generated by app_factory (chapter 13)
+
+## Where this fits in Volume 1
+
+Chapter 12 is the local bring-up. Chapter 13 is the generation of a sibling project under the meta-app model: using `app_factory` to create a new Django child project that Velour itself manages. Chapter 14 is the final deploy step — taking both Velour and the child app from the local dev machine out to a real production host.
+
+By the end of chapter 14, you will have the equivalent of the author's own production setup: one Velour instance visible at `velour.mydomain.tld`, one child app at `labforms.mydomain.tld`, both hot-swappable with a two-line rsync-and-restart workflow.
+
+If at any point during the remaining two chapters you hit an error that isn't mentioned in the "common errors" callouts, the fastest debugging path is `tail -f runserver.log` on whichever terminal has the dev server. Django's tracebacks are verbose and usually tell you exactly what's wrong; the fix is almost always in the last five lines of the traceback.
 """
 
 
