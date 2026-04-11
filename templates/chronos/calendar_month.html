@@ -4,33 +4,48 @@
 
 {% block extra_head %}
 <style>
-    .cal-toolbar { display: flex; align-items: baseline; gap: 1rem; margin: 0.75rem 0 1rem; flex-wrap: wrap; }
-    .cal-toolbar h1 { margin: 0; font-size: 1.4rem; }
-    .cal-toolbar .nav-link { color: #58a6ff; text-decoration: none; padding: 0.25rem 0.55rem; border: 1px solid #30363d; border-radius: 4px; font-size: 0.85rem; }
+    /* The cell-size formula: pick the smaller of (available width / 7)
+       and (available height / 6.6). The 6.6 leaves room for the header
+       row (≈0.6 of a cell) plus 6 week rows (a max month has 6 rows).
+       --cal-chrome is the vertical space eaten by everything ABOVE the
+       calendar grid: chronos topbar (~40px) + navbar (~70px on a wide
+       screen, more if it wraps) + container padding (~24px) + the
+       toolbar below (~58px). 200px is a safe approximation; tune if
+       needed. */
+    :root {
+        --cal-chrome: 200px;
+        --cell:
+            min(
+                calc((100vw - 4rem) / 7),
+                calc((100dvh - var(--cal-chrome)) / 6.6)
+            );
+    }
+
+    .container { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+
+    .cal-toolbar {
+        display: flex; align-items: baseline; gap: 0.85rem;
+        margin: 0.4rem 0 0.5rem;
+        flex-wrap: wrap;
+    }
+    .cal-toolbar h1 { margin: 0; font-size: 1.25rem; }
+    .cal-toolbar .nav-link { color: #58a6ff; text-decoration: none; padding: 0.2rem 0.5rem; border: 1px solid #30363d; border-radius: 4px; font-size: 0.8rem; }
     .cal-toolbar .nav-link:hover { background: #161b22; }
     .cal-toolbar .spacer { flex: 1; }
-    .cal-toolbar .count { color: #6e7681; font-size: 0.78rem; }
-
-    /* The grid fills 100% of the available content width. Cells are
-       always square via aspect-ratio: 1 — their size scales naturally
-       with the column width, which is 1/7th of the grid width.
-
-       Font sizes use clamp() so day numbers and event labels shrink
-       gracefully on narrow screens; on a phone, the cells become small
-       enough that only the day number fits, and the events are clipped
-       by overflow: hidden. */
+    .cal-toolbar .count { color: #6e7681; font-size: 0.75rem; }
 
     .cal-grid {
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        grid-template-columns: repeat(7, var(--cell));
         gap: 0;
-        width: 100%;
+        width: max-content;
+        margin: 0 auto;
         border: 1px solid #30363d;
     }
     .cal-grid .head {
         background: #0d1117;
-        padding: clamp(0.2rem, 0.6vw, 0.4rem) clamp(0.2rem, 0.7vw, 0.55rem);
-        font-size: clamp(0.55rem, 1vw, 0.7rem);
+        padding: 0.25rem 0.4rem;
+        font-size: clamp(0.55rem, 0.9vw, 0.7rem);
         color: #8b949e;
         text-transform: uppercase;
         letter-spacing: 0.05em;
@@ -38,8 +53,9 @@
         text-align: center;
     }
     .cal-cell {
-        aspect-ratio: 1 / 1;
-        padding: clamp(0.15rem, 0.45vw, 0.4rem) clamp(0.2rem, 0.55vw, 0.5rem);
+        width: var(--cell);
+        height: var(--cell);
+        padding: 0.2rem 0.3rem;
         border-right: 1px solid #21262d;
         border-bottom: 1px solid #21262d;
         background: #0d1117;
@@ -49,6 +65,7 @@
         display: flex;
         flex-direction: column;
         min-width: 0;
+        box-sizing: border-box;
     }
     .cal-cell:nth-child(7n) { border-right: none; }
     .cal-cell.out-of-month { color: #4a5258; background: #08090b; }
@@ -56,7 +73,7 @@
     .cal-cell.is-today .day-num { color: #58a6ff; font-weight: 600; }
     .cal-cell .day-num {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: clamp(0.62rem, 1.05vw, 0.82rem);
+        font-size: clamp(0.6rem, 1vw, 0.82rem);
         color: inherit;
         flex: 0 0 auto;
         line-height: 1.1;
@@ -64,17 +81,17 @@
     .cal-cell .day-num a { color: inherit; text-decoration: none; }
     .cal-cell .day-num a:hover { color: #58a6ff; }
     .cal-cell .ev-list {
-        margin-top: clamp(0.1rem, 0.3vw, 0.25rem);
+        margin-top: 0.15rem;
         flex: 1 1 auto;
         overflow: hidden;
         min-height: 0;
     }
     .cal-cell .ev {
         display: block;
-        font-size: clamp(0.5rem, 0.85vw, 0.7rem);
+        font-size: clamp(0.5rem, 0.8vw, 0.68rem);
         line-height: 1.2;
         padding: 0.04rem 0.28rem;
-        margin-top: 0.08rem;
+        margin-top: 0.07rem;
         background: rgba(88, 166, 255, 0.15);
         color: #58a6ff;
         border-radius: 2px;
@@ -94,9 +111,10 @@
     <a href="{% url 'chronos:calendar_month' today.year today.month %}" class="nav-link">Today</a>
     <a href="{% url 'chronos:calendar_month' next_year next_month %}" class="nav-link">{{ next_year }}-{{ next_month }} ›</a>
     <a href="{% url 'chronos:calendar_year' year %}" class="nav-link">{{ year }}</a>
+    <a href="{% url 'chronos:home' %}" class="nav-link">Chronos</a>
     <span class="spacer"></span>
     <a href="{% url 'chronos:event_add' %}" class="btn">New Event</a>
-    <span class="count">{{ event_count }} event{{ event_count|pluralize }} this month</span>
+    <span class="count">{{ event_count }} event{{ event_count|pluralize }}</span>
 </div>
 
 <div class="cal-grid">
@@ -130,7 +148,4 @@
     {% endfor %}
 </div>
 
-<div style="margin-top: 1.5rem;">
-    <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Back to Chronos</a>
-</div>
 {% endblock %}
