@@ -70,6 +70,7 @@ INSTALLED_APPS = [
     'nodes',
     'chronos',
     'databases',
+    'codex',
 ]
 
 MIDDLEWARE = [

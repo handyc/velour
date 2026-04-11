@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Codex - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .codex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .codex-card { padding: 1rem 1.25rem; border-left: 4px solid #58a6ff; }
+    .codex-card.quickstart { border-left-color: #2ea043; }
+    .codex-card.short      { border-left-color: #d29922; }
+    .codex-card.complete   { border-left-color: #bc8cff; }
+    .codex-card .title    { font-size: 1.15rem; font-weight: 600; color: #c9d1d9; margin-bottom: 0.1rem; }
+    .codex-card .subtitle { font-size: 0.85rem; color: #8b949e; font-style: italic; margin-bottom: 0.55rem; }
+    .codex-card .meta     { font-size: 0.75rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .codex-card .badges   { margin: 0.5rem 0; display: flex; gap: 0.4rem; }
+    .badge.format         { font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; background: #21262d; color: #c9d1d9; }
+    .badge.format.quickstart { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
+    .badge.format.short      { background: rgba(210, 153, 34, 0.18); color: #d29922; }
+    .badge.format.complete   { background: rgba(188, 140, 255, 0.18); color: #bc8cff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Codex</h1>
+<p style="color:#8b949e;">Manuals about Velour, written by Velour and rendered into Tufte-style PDFs on demand. Each Manual has a sequence of Sections; sections carry a markdown body and an optional bag of margin notes.</p>
+
+<div style="display:flex; gap:0.5rem; margin: 1rem 0;">
+    <a href="{% url 'codex:manual_add' %}" class="btn">New Manual</a>
+</div>
+
+{% if manuals %}
+<div class="codex-grid">
+    {% for m in manuals %}
+    <div class="card codex-card {{ m.format }}">
+        <div class="title">{{ m.title }}</div>
+        {% if m.subtitle %}<div class="subtitle">{{ m.subtitle }}</div>{% endif %}
+        <div class="badges">
+            <span class="badge format {{ m.format }}">{{ m.get_format_display }}</span>
+        </div>
+        <div class="meta">
+            v{{ m.version|default:"—" }} · {{ m.section_count }} section{{ m.section_count|pluralize }}<br>
+            updated {{ m.updated_at|date:"D d M Y H:i" }}
+            {% if m.last_built_at %}<br>last built {{ m.last_built_at|date:"D d M Y H:i" }}{% endif %}
+        </div>
+        <div style="margin-top:0.7rem; display:flex; gap:0.4rem;">
+            <a href="{% url 'codex:manual_detail' m.slug %}" class="btn" style="font-size:0.8rem;">Open</a>
+            <a href="{% url 'codex:manual_pdf' m.slug %}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem;">PDF</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No manuals yet. <a href="{% url 'codex:manual_add' %}">Write the first one</a>.</p>
+{% endif %}
+
+<div style="margin-top:1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

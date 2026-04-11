@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ manual.title }} - Codex - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .manual-meta { color: #8b949e; font-size: 0.85rem; margin-bottom: 1rem; }
+    .manual-abstract { color: #c9d1d9; font-style: italic; margin: 1rem 0; padding-left: 1rem; border-left: 2px solid #30363d; }
+    .section-row { padding: 0.75rem 1rem; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 1rem; }
+    .section-row .order { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: #6e7681; min-width: 2.4rem; }
+    .section-row .title { flex: 1 1 auto; font-weight: 600; color: #c9d1d9; }
+    .section-row .preview { flex: 2 1 auto; color: #8b949e; font-size: 0.8rem; max-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .section-row .actions { display: flex; gap: 0.35rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ manual.title }}</h1>
+{% if manual.subtitle %}<p style="color:#8b949e;font-style:italic;font-size:1rem;margin-top:-0.3rem;">{{ manual.subtitle }}</p>{% endif %}
+
+<div class="manual-meta">
+    {{ manual.get_format_display }} · {{ manual.author }} · v{{ manual.version|default:"—" }}
+    {% if manual.last_built_at %} · last built {{ manual.last_built_at|date:"D d M Y H:i" }}{% endif %}
+</div>
+
+{% if manual.abstract %}
+<div class="manual-abstract">{{ manual.abstract|linebreaksbr }}</div>
+{% endif %}
+
+<div style="display:flex; gap:0.5rem; margin: 1rem 0;">
+    <a href="{% url 'codex:manual_pdf' manual.slug %}" target="_blank" class="btn">Render PDF</a>
+    <a href="{% url 'codex:manual_edit' manual.slug %}" class="btn btn-secondary">Edit Manual</a>
+    <a href="{% url 'codex:section_add' manual.slug %}" class="btn btn-secondary">New Section</a>
+    <form method="post" action="{% url 'codex:manual_delete' manual.slug %}" style="display:inline;" onsubmit="return confirm('Delete manual {{ manual.title|escapejs }}?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Delete Manual</button>
+    </form>
+</div>
+
+<h2 style="margin-top:1.5rem;">Sections</h2>
+{% if sections %}
+{% for s in sections %}
+<div class="card section-row">
+    <span class="order">{{ s.sort_order }}</span>
+    <span class="title">{{ s.title }}</span>
+    <span class="preview">{{ s.body|truncatechars:80 }}</span>
+    <span class="actions">
+        <a href="{% url 'codex:section_edit' manual.slug s.slug %}" class="btn btn-secondary" style="font-size:0.78rem;">Edit</a>
+        <form method="post" action="{% url 'codex:section_delete' manual.slug s.slug %}" style="display:inline;" onsubmit="return confirm('Delete section {{ s.title|escapejs }}?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Delete</button>
+        </form>
+    </span>
+</div>
+{% endfor %}
+{% else %}
+<p style="color:#8b949e;">No sections yet. <a href="{% url 'codex:section_add' manual.slug %}">Add the first one</a>.</p>
+{% endif %}
+
+<div style="margin-top:1.5rem;">
+    <a href="{% url 'codex:list' %}" class="btn btn-secondary">Back to Codex</a>
+</div>
+{% endblock %}

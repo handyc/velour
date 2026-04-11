@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Section - {{ manual.title }} - Codex{% endblock %}
+
+{% block extra_head %}
+<style>
+    .codex-form { max-width: 900px; }
+    .codex-form .field { margin-bottom: 1rem; }
+    .codex-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .codex-form input, .codex-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .codex-form textarea { min-height: 280px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; line-height: 1.5; }
+    .codex-form textarea.sidenotes { min-height: 100px; }
+    .codex-form .row { display: flex; gap: 0.75rem; }
+    .codex-form .row .field { flex: 1 1 0; }
+    .codex-form .field.narrow { flex: 0 0 120px; }
+    .codex-form small { color: #6e7681; font-size: 0.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Section</h1>
+<p style="color:#8b949e;">In <a href="{% url 'codex:manual_detail' manual.slug %}">{{ manual.title }}</a></p>
+
+<form method="post" class="codex-form">
+    {% csrf_token %}
+
+    <div class="row">
+        <div class="field">
+            <label for="title">Title</label>
+            <input type="text" id="title" name="title" value="{{ section.title }}" required maxlength="200">
+        </div>
+        <div class="field narrow">
+            <label for="sort_order">Sort order</label>
+            <input type="number" id="sort_order" name="sort_order" value="{{ section.sort_order|default_if_none:'' }}" placeholder="auto">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="body">Body (markdown)</label>
+        <textarea id="body" name="body" placeholder="# Heading&#10;&#10;A paragraph with **bold** and *italic*.&#10;&#10;- bullet&#10;- another bullet">{{ section.body }}</textarea>
+        <small>Subset: # ## ### headings, paragraphs, "- " bullets, **bold**, *italic*, "&gt; " blockquote.</small>
+    </div>
+
+    <div class="field">
+        <label for="sidenotes">Sidenotes (one per line)</label>
+        <textarea id="sidenotes" name="sidenotes" class="sidenotes" placeholder="A short remark in the margin.&#10;Another one.">{{ section.sidenotes }}</textarea>
+        <small>Each line becomes a numbered note in the right margin alongside this section.</small>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'codex:manual_detail' manual.slug %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

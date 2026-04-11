@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Manual - Codex - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .codex-form { max-width: 720px; }
+    .codex-form .field { margin-bottom: 1rem; }
+    .codex-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .codex-form input, .codex-form select, .codex-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .codex-form textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+    .codex-form .row { display: flex; gap: 0.75rem; }
+    .codex-form .row .field { flex: 1 1 0; }
+    .codex-form small { color: #6e7681; font-size: 0.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Manual</h1>
+
+<form method="post" class="codex-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ manual.title }}" required maxlength="200">
+    </div>
+
+    <div class="field">
+        <label for="subtitle">Subtitle (optional)</label>
+        <input type="text" id="subtitle" name="subtitle" value="{{ manual.subtitle }}" maxlength="300">
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label for="format">Format</label>
+            <select id="format" name="format">
+                {% for k, v in format_choices %}
+                <option value="{{ k }}" {% if manual.format == k %}selected{% endif %}>{{ v }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="version">Version</label>
+            <input type="text" id="version" name="version" value="{{ manual.version|default:'0.1' }}" maxlength="32">
+        </div>
+        <div class="field">
+            <label for="author">Author</label>
+            <input type="text" id="author" name="author" value="{{ manual.author|default:'Velour' }}" maxlength="200">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="abstract">Abstract</label>
+        <textarea id="abstract" name="abstract">{{ manual.abstract }}</textarea>
+        <small>Optional. Renders below the title on the cover page.</small>
+    </div>
+
+    <div class="field">
+        <label style="display:flex;align-items:center;gap:0.4rem;text-transform:none;font-size:0.85rem;color:#c9d1d9;">
+            <input type="checkbox" name="double_spaced" value="1" {% if manual.double_spaced %}checked{% endif %} style="width:auto;">
+            Double-spaced (Tufte's preferred ~1.27 leading is the default; only turn this on for manuscript-style output)
+        </label>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        {% if manual.pk %}
+        <a href="{% url 'codex:manual_detail' manual.slug %}" class="btn btn-secondary">Cancel</a>
+        {% else %}
+        <a href="{% url 'codex:list' %}" class="btn btn-secondary">Cancel</a>
+        {% endif %}
+    </div>
+</form>
+{% endblock %}
