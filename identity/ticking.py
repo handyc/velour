@@ -455,36 +455,76 @@ def _pick_named_subject(snapshot):
     return None
 
 
+def _pick_template_family(snapshot, mood, open_concerns):
+    """Choose which kind of thought to compose — 'concern', 'subject',
+    'holiday', or 'observation'.
+
+    If the Oracle rumination_template lobe is trained and loadable,
+    the pick comes from the decision tree walk. If not, fall back to
+    the hand-tuned probabilistic rules that compose_thought used
+    before Oracle existed.
+    """
+    try:
+        from oracle.inference import (
+            load_lobe, predict_class, build_features_from_snapshot,
+        )
+        lobe = load_lobe('rumination_template')
+    except Exception:
+        lobe = None
+
+    if lobe:
+        features = build_features_from_snapshot(
+            snapshot, mood,
+            open_concern_count=len(open_concerns) if open_concerns else 0,
+        )
+        predicted = predict_class(lobe, features)
+        if predicted:
+            # The lobe picks a category but we still bail out when the
+            # category is empty — e.g., if it says 'concern' but there
+            # are no open concerns, we fall through to the next option.
+            if predicted == 'concern' and not open_concerns:
+                predicted = 'subject'
+            if predicted == 'holiday' and not snapshot.get('calendar', {}).get('holidays'):
+                predicted = 'subject'
+            return predicted
+
+    # Fallback — no trained lobe, use the pre-Oracle heuristic.
+    if open_concerns and random.random() < 0.3:
+        return 'concern'
+    if random.random() < 0.35:
+        return 'subject'
+    return 'observation'
+
+
 def compose_thought(snapshot, mood, open_concerns=None):
     """Compose the first-person thought for this tick.
 
-    Picks one of three modes:
-      1. Reference an open Concern (~30% when concerns exist)
-      2. Reference a named subject — a node, experiment, or calendar
-         event (~35% when any exist)
-      3. Generic observation from OBSERVATIONS templates (remainder)
-
-    Concerns take priority because they're about memory-across-ticks
-    and the whole point of the Concern model is to make Identity feel
-    continuous. Named subjects come second because they make the voice
-    feel attached to specific things in the operator's world. Generic
-    observations are the fallback for quiet moments.
+    The template family (concern / subject / holiday / observation)
+    is picked by _pick_template_family, which prefers a trained
+    Oracle lobe when available and falls back to hand-tuned
+    probabilistic rules otherwise. The template itself is then drawn
+    from the matching library below.
     """
     opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
+    family = _pick_template_family(snapshot, mood, open_concerns)
 
-    # Concern reference — up to 30% chance when there's at least one.
-    if open_concerns and random.random() < 0.3:
+    if family == 'concern' and open_concerns:
         concern = random.choice(open_concerns)
         refrain = random.choice(CONCERN_REFRAINS).format(
             concern=concern.name or concern.aspect.replace('_', ' '),
         )
         return f'{opening} {refrain}'.strip()
 
-    # Named-subject reference — up to 35% chance if any subjects exist.
-    if random.random() < 0.35:
+    if family == 'subject':
         subject_text = _pick_named_subject(snapshot)
         if subject_text:
             return f'{opening} {subject_text}'.strip()
+
+    if family == 'holiday':
+        holidays = snapshot.get('calendar', {}).get('holidays', [])
+        if holidays:
+            h = random.choice(holidays[:3])
+            return f"{opening} I am thinking about {h['title']}, {h.get('days_away', 0)} days away.".strip()
 
     # Generic observation fallback.
     obs_template = random.choice(OBSERVATIONS)
