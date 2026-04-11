@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Concerns — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .concern-wrap { max-width: 800px; }
+    .concern-header { margin-bottom: 1rem; }
+    .concern-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .concern-header .count { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .concern-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin-bottom: 0.5rem;
+    }
+    .concern-row.closed { opacity: 0.55; }
+    .concern-row .name {
+        color: #c9d1d9; font-weight: 500; font-size: 0.95rem;
+    }
+    .concern-row .aspect {
+        color: #6e7681; font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.72rem; margin-left: 0.4rem;
+    }
+    .concern-row .meta {
+        color: #6e7681; font-size: 0.75rem; margin-top: 0.25rem;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .concern-row .severity-bar {
+        height: 4px; margin-top: 0.5rem; background: #0d1117;
+        border-radius: 2px; overflow: hidden;
+    }
+    .concern-row .severity-bar .fill {
+        height: 100%; background: #f85149;
+    }
+    .concern-row form { align-self: center; }
+
+    .toggle-bar {
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .toggle-bar a {
+        color: #8b949e; padding: 0.25rem 0.6rem;
+        border: 1px solid #30363d; border-radius: 4px;
+        text-decoration: none; margin-right: 0.25rem;
+    }
+    .toggle-bar a.active { color: #58a6ff; border-color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="concern-wrap">
+    <div class="concern-header">
+        <h1>Concerns</h1>
+        <span class="count">
+            {{ total_open }} open · {{ total_all }} total
+        </span>
+    </div>
+
+    <p style="color:#8b949e;font-size:0.85rem;">
+        Concerns are Identity's persistent preoccupations — worries that were
+        opened by a tick noticing something and that survive across subsequent
+        ticks until either the triggering condition stops being true for 45
+        minutes, or an operator manually resolves them here.
+    </p>
+
+    <div class="toggle-bar">
+        <a href="{% url 'identity:concerns_list' %}"
+           class="{% if not show_closed %}active{% endif %}">open only</a>
+        <a href="?closed=1"
+           class="{% if show_closed %}active{% endif %}">include closed</a>
+    </div>
+
+    {% for c in concerns %}
+    <div class="concern-row {% if c.closed_at %}closed{% endif %}">
+        <div>
+            <span class="name">{{ c.name|default:c.aspect }}</span>
+            <span class="aspect">{{ c.aspect }}</span>
+            <div class="meta">
+                opened {{ c.opened_at|date:"Y-m-d H:i" }}
+                · reconfirmed {{ c.reconfirm_count }} tick{{ c.reconfirm_count|pluralize }}
+                {% if c.closed_at %} · closed {{ c.closed_at|date:"Y-m-d H:i" }}{% else %} · last seen {{ c.last_seen_at|timesince }} ago{% endif %}
+            </div>
+            <div class="severity-bar">
+                <div class="fill" style="width: {{ c.severity|floatformat:2 }}00%;"></div>
+            </div>
+        </div>
+        {% if not c.closed_at %}
+        <form method="post" action="{% url 'identity:concern_close' c.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Resolve</button>
+        </form>
+        {% endif %}
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.9rem;">
+        {% if show_closed %}No concerns recorded yet.
+        {% else %}No open concerns. Identity is at ease.
+        {% endif %}
+    </p>
+    {% endfor %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

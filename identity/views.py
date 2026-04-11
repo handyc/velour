@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Identity, Mood, Tick
+from .models import Concern, Identity, Mood, Tick
 
 
 def _get_main_ip():
@@ -220,6 +220,10 @@ def identity_home(request):
     # of the page.
     recent_ticks = Tick.objects.all()[:20]
 
+    # Open concerns — Identity's persistent preoccupations. Each one is
+    # a worry that was opened by some tick and hasn't been resolved.
+    open_concerns = Concern.objects.filter(closed_at=None).order_by('-severity')
+
     # Legacy journal still rendered as a fallback for historical entries
     # that pre-date the Tick model and weren't fully backfilled. Newer
     # output goes through the Tick stream instead.
@@ -241,6 +245,7 @@ def identity_home(request):
         'identity': identity,
         'reflection': reflection,
         'recent_ticks': recent_ticks,
+        'open_concerns': open_concerns,
         'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
@@ -323,6 +328,37 @@ def mood_data(request):
         'values': mood_values,
         'moods': mood_names,
     })
+
+
+@login_required
+def concerns_list(request):
+    """All Concern rows, most recent first. Shows both open and closed
+    preoccupations — closed ones are historical, open ones are live
+    worries Identity is currently holding."""
+    show_closed = request.GET.get('closed') == '1'
+    qs = Concern.objects.all()
+    if not show_closed:
+        qs = qs.filter(closed_at=None)
+    return render(request, 'identity/concerns_list.html', {
+        'concerns': qs,
+        'show_closed': show_closed,
+        'total_open': Concern.objects.filter(closed_at=None).count(),
+        'total_all':  Concern.objects.count(),
+    })
+
+
+@login_required
+@require_POST
+def concern_close(request, pk):
+    """Operator-initiated concern close. Shows up as a button on the
+    concerns list — when the operator knows a concern is resolved and
+    doesn't want to wait for the staleness sweep."""
+    try:
+        concern = Concern.objects.get(pk=pk)
+    except Concern.DoesNotExist:
+        return redirect('identity:concerns_list')
+    concern.close(reason='manual')
+    return redirect('identity:concerns_list')
 
 
 @login_required

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Identity, Mood, Tick
+from .models import Concern, Identity, Mood, Tick
 
 
 @admin.register(Identity)
@@ -24,3 +24,12 @@ class TickAdmin(admin.ModelAdmin):
     date_hierarchy = 'at'
     readonly_fields = ('at', 'snapshot', 'aspects')
     search_fields = ('thought', 'rule_label')
+
+
+@admin.register(Concern)
+class ConcernAdmin(admin.ModelAdmin):
+    list_display = ('aspect', 'name', 'severity', 'reconfirm_count',
+                    'opened_at', 'closed_at')
+    list_filter = ('aspect', 'closed_at')
+    readonly_fields = ('opened_at', 'last_seen_at', 'origin_tick')
+    search_fields = ('aspect', 'name', 'description')

@@ -196,3 +196,96 @@ class Tick(models.Model):
         choice list doesn't know this one — keeps the view safe in the
         face of operator-added rules producing novel mood strings."""
         return dict(Mood.MOOD_CHOICES).get(self.mood, self.mood)
+
+
+class Concern(models.Model):
+    """A persistent preoccupation that survives across ticks.
+
+    Where a Tick is one discrete moment of attention, a Concern is
+    Identity's memory-between-ticks — a worry that was opened by a
+    rule noticing something (disk nearly full, Gary silent for an
+    hour, an unusually high load average) and kept alive across
+    subsequent ticks until the triggering condition stops being true.
+
+    Concerns are the piece that makes Identity feel like it
+    *remembers*. Without them, each tick is stateless and the system
+    looks forgetful — a rule about disk-full fires, Identity says
+    "the disk is nearly full", the next tick fires, a different rule
+    wins, and the disk concern is gone from the thought stream even
+    though the disk is still nearly full. With concerns, the open
+    concern lives on and gets referenced by later thoughts:
+    "I am still uneasy about the disk."
+
+    Keyed by `aspect` — the tag-like string that rules emit (see
+    identity/ticking.py RULES). At most one open Concern per aspect.
+    When a tick re-triggers an aspect that already has an open
+    concern, the concern's `last_seen_at` gets bumped and no new
+    row is created. When a tick *doesn't* trigger a previously-
+    active aspect for longer than the staleness threshold, the
+    concern closes automatically via a sweep call that runs on every
+    tick.
+
+    Session 2 of the Identity expansion. Session 3 will move rules
+    into the database; Session 4 will wire concerns into the thought
+    template library so Identity's voice can reference them by name.
+    """
+
+    aspect = models.CharField(max_length=64, db_index=True,
+        help_text='The aspect tag from identity/ticking.py RULES that '
+                  'opened this concern, e.g. "disk_critical".')
+    name = models.CharField(max_length=120, blank=True,
+        help_text='Human-readable name for the operator — the rule label '
+                  'that originally fired, e.g. "disk dangerously full".')
+    description = models.TextField(blank=True,
+        help_text='Longer free-form context. Usually set by the rule '
+                  'that opened the concern.')
+
+    severity = models.FloatField(default=0.5,
+        help_text='0-1 scalar, same scale as mood intensity. Drives UI '
+                  'color and thought-composition weight.')
+
+    opened_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    last_seen_at = models.DateTimeField(auto_now=True, db_index=True,
+        help_text='Most recent tick that re-confirmed this concern. A '
+                  'concern closes automatically when last_seen_at gets '
+                  'stale relative to the tick interval.')
+    closed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    origin_tick = models.ForeignKey(Tick, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='opened_concerns',
+        help_text='The Tick row that first observed this concern.')
+
+    # Accumulator of how many ticks have confirmed this concern since
+    # it opened. Useful for UI ("Velour has been worried about this for
+    # 37 ticks") and for eventual reflection synthesis ("the disk
+    # concern was the dominant worry of the week").
+    reconfirm_count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ['-opened_at']
+        indexes = [
+            models.Index(fields=['aspect', 'closed_at']),
+            models.Index(fields=['-opened_at']),
+        ]
+
+    def __str__(self):
+        status = 'closed' if self.closed_at else 'open'
+        return f'{self.aspect} ({status}, {self.reconfirm_count} ticks)'
+
+    @property
+    def is_open(self):
+        return self.closed_at is None
+
+    @property
+    def age_seconds(self):
+        from django.utils import timezone
+        return int((timezone.now() - self.opened_at).total_seconds())
+
+    def close(self, reason='stale'):
+        """Mark this concern as resolved. Idempotent — closing an
+        already-closed concern is a no-op."""
+        if self.closed_at:
+            return
+        from django.utils import timezone
+        self.closed_at = timezone.now()
+        self.save(update_fields=['closed_at'])

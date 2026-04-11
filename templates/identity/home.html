@@ -203,6 +203,32 @@
         </div>
     </div>
 
+    <!-- Open concerns — Identity's persistent preoccupations -->
+    <div class="card">
+        <h3>Open concerns
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ open_concerns|length }} active
+            </span>
+        </h3>
+        {% if open_concerns %}
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+            {% for c in open_concerns %}
+            <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid {% if c.severity >= 0.85 %}#f85149{% elif c.severity >= 0.6 %}#d29922{% else %}#8b949e{% endif %}; border-radius: 3px;">
+                <div style="color: #c9d1d9; font-size: 0.85rem;">{{ c.name|default:c.aspect }}</div>
+                <div style="color: #6e7681; font-size: 0.7rem; font-family: ui-monospace, Menlo, monospace; margin-top: 0.15rem;">
+                    {{ c.aspect }} · {{ c.reconfirm_count }} tick{{ c.reconfirm_count|pluralize }} · severity {{ c.severity|floatformat:2 }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">Identity is at ease. No open preoccupations.</p>
+        {% endif %}
+        <div style="margin-top: 0.75rem;">
+            <a href="{% url 'identity:concerns_list' %}" style="font-size: 0.78rem; color: #58a6ff;">View all concerns →</a>
+        </div>
+    </div>
+
     <!-- Mood History Chart -->
     <div class="card">
         <h3>Mood Over Time</h3>

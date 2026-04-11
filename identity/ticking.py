@@ -97,6 +97,9 @@ RULES = [
 
 
 def compute_mood(snapshot):
+    """First-match-wins mood selection. Returns (mood, intensity,
+    label, first_match_aspects). Used for display — Identity has one
+    dominant mood at a time, chosen by rule priority."""
     for rule in RULES:
         predicate, mood, intensity, label, aspects = rule
         try:
@@ -105,6 +108,113 @@ def compute_mood(snapshot):
         except Exception:
             continue
     return 'contemplative', 0.5, 'general reflection', ['idle']
+
+
+def evaluate_all_aspects(snapshot):
+    """Walk EVERY rule and return the union of aspects whose predicate
+    currently matches, along with their rule labels (for concern
+    metadata). Distinct from compute_mood which stops at the first hit
+    — this one is for concern tracking, which needs to know *everything*
+    the system currently notices, not just the one thing the mood
+    display picks out.
+
+    Returns: list of (aspect, label, intensity) tuples for every
+    currently-true rule.
+    """
+    hits = []
+    for rule in RULES:
+        predicate, mood, intensity, label, aspects = rule
+        try:
+            if predicate(snapshot):
+                for aspect in aspects:
+                    hits.append((aspect, label, intensity))
+        except Exception:
+            continue
+    return hits
+
+
+# --- concern ontology ---------------------------------------------------
+
+# The set of aspects that can open a concern. Ephemeral aspects like
+# 'morning' or 'afternoon_calm' never become preoccupations — they're
+# time-of-day notes, not worries. A concerning aspect is something the
+# operator would want Identity to remember between ticks.
+#
+# Session 3 will move this into database metadata on the Rule model
+# (each rule row will carry a bool `opens_concern`) so the operator can
+# toggle which rules matter. For now it's a module-level constant.
+
+CONCERNING_ASPECTS = frozenset({
+    'disk_critical',
+    'memory_critical',
+    'load_high',
+    'fleet_partial_silence',
+    'long_uptime',
+    'mail_burst',
+})
+
+# How long a concern stays open without being re-confirmed by a new
+# tick before the sweep auto-closes it. The default assumes a 10-minute
+# tick cadence and gives concerns ~45 minutes of inertia — long enough
+# to survive a missed tick or two, short enough to clear if the
+# triggering condition actually resolves.
+CONCERN_STALENESS_SECONDS = 45 * 60
+
+
+def maintain_concerns(current_aspect_hits, origin_tick):
+    """Open / re-confirm / close concerns based on what the current
+    tick noticed. Pass the output of evaluate_all_aspects() as the
+    current_aspect_hits.
+
+    Returns a (opened, reconfirmed, closed) tuple of lists for the
+    caller to log or ignore.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+    from .models import Concern
+
+    opened = []
+    reconfirmed = []
+    closed = []
+
+    # Only the concerning aspects matter for concern tracking.
+    currently_concerning = {
+        aspect: (label, intensity)
+        for aspect, label, intensity in current_aspect_hits
+        if aspect in CONCERNING_ASPECTS
+    }
+
+    # Open or bump.
+    for aspect, (label, intensity) in currently_concerning.items():
+        existing = Concern.objects.filter(aspect=aspect, closed_at=None).first()
+        if existing:
+            # Bump last_seen_at (auto_now handles this on save) and
+            # increment the reconfirm counter.
+            existing.reconfirm_count += 1
+            if intensity > existing.severity:
+                existing.severity = intensity
+            existing.save(update_fields=['last_seen_at', 'reconfirm_count', 'severity'])
+            reconfirmed.append(existing)
+        else:
+            new_concern = Concern.objects.create(
+                aspect=aspect,
+                name=label,
+                description=f'First observed at {timezone.now().isoformat()}',
+                severity=intensity,
+                origin_tick=origin_tick,
+            )
+            opened.append(new_concern)
+
+    # Sweep: close any open concerns whose aspects were NOT seen in
+    # this tick AND whose last_seen_at is older than the staleness
+    # threshold.
+    cutoff = timezone.now() - timedelta(seconds=CONCERN_STALENESS_SECONDS)
+    stale = Concern.objects.filter(closed_at=None, last_seen_at__lt=cutoff)
+    for concern in stale:
+        concern.close(reason='stale')
+        closed.append(concern)
+
+    return opened, reconfirmed, closed
 
 
 # --- template library ---------------------------------------------------
@@ -208,8 +318,37 @@ def _format_observation(template, snapshot):
         return ''
 
 
-def compose_thought(snapshot, mood):
+CONCERN_REFRAINS = [
+    'I am still thinking about {concern}.',
+    'Still: {concern}.',
+    'The {concern} has not left me.',
+    'I have not forgotten the {concern}.',
+    '{concern} — still.',
+]
+
+
+def compose_thought(snapshot, mood, open_concerns=None):
+    """Compose the first-person thought for this tick.
+
+    If `open_concerns` is supplied and non-empty, there's a small
+    chance the thought mentions one of them instead of (or alongside)
+    the normal observation. This is the single most important piece
+    of the 'Identity remembers' behaviour — it's what makes the
+    thought stream feel continuous instead of stateless.
+    """
     opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
+
+    # ~30% of ticks that have at least one open concern will reference
+    # one. The rest use the normal observation. This keeps concerns
+    # from dominating the stream when multiple are open — they surface
+    # naturally over time instead of hammering on every tick.
+    if open_concerns and random.random() < 0.3:
+        concern = random.choice(open_concerns)
+        refrain = random.choice(CONCERN_REFRAINS).format(
+            concern=concern.name or concern.aspect.replace('_', ' '),
+        )
+        return f'{opening} {refrain}'.strip()
+
     obs_template = random.choice(OBSERVATIONS)
     obs = _format_observation(obs_template, snapshot)
     return f'{opening} {obs}'.strip()
@@ -219,14 +358,27 @@ def compose_thought(snapshot, mood):
 
 def tick(triggered_by='manual'):
     """Run one tick of attention. Writes a Tick row (new canonical log)
-    and a Mood row (legacy shim for pre-Tick views) and updates the
-    Identity singleton. Returns a (Tick, thought) tuple."""
-    from .models import Identity, Mood, Tick
+    and a Mood row (legacy shim), opens/bumps/closes Concerns based on
+    what the tick noticed, and updates the Identity singleton.
+    Returns a (Tick, thought) tuple."""
+    from .models import Identity, Mood, Tick, Concern
 
     identity = Identity.get_self()
     snapshot = gather_snapshot()
-    mood, intensity, label, aspects = compute_mood(snapshot)
-    thought = compose_thought(snapshot, mood)
+    mood, intensity, label, _first_match_aspects = compute_mood(snapshot)
+
+    # Walk every rule (not just first match) to get the full set of
+    # aspects currently true. This is what drives concern tracking —
+    # mood selection stays first-match for coherent display, but
+    # concerns want to see everything the system notices.
+    all_hits = evaluate_all_aspects(snapshot)
+    full_aspect_list = sorted({aspect for aspect, _, _ in all_hits})
+
+    # Pre-compute which concerns are currently open so the thought
+    # composer can reference them.
+    open_concerns_before = list(Concern.objects.filter(closed_at=None))
+
+    thought = compose_thought(snapshot, mood, open_concerns=open_concerns_before)
 
     tick_row = Tick.objects.create(
         triggered_by=triggered_by,
@@ -235,12 +387,14 @@ def tick(triggered_by='manual'):
         rule_label=label,
         thought=thought,
         snapshot=snapshot,
-        aspects=aspects,
+        aspects=full_aspect_list,  # full union, not first-match
     )
 
+    # Maintain the Concern table: open new, bump existing, close stale.
+    maintain_concerns(all_hits, tick_row)
+
     # Legacy Mood row — removed in a future migration once all readers
-    # have been moved to Tick. Keep the trigger field shaped the way
-    # the old admin + views expect.
+    # have been moved to Tick.
     Mood.objects.create(
         mood=mood,
         intensity=intensity,
