@@ -56,7 +56,13 @@
 
     if (topbar) {
         topbarTz = topbar.dataset.tz;
-        topbarFormat24 = topbar.dataset.format24h === '1';
+        // NB: must use data-hour-format and not data-format-24h. Per HTML5,
+        // a dash followed by a digit (the "2" in 24h) is NOT collapsed in
+        // the dataset conversion, so the property name retains the dash
+        // (`dataset["format-24h"]`), which dot-notation can't reach. The
+        // result was a silent default to 12h for both topbar and every
+        // world clock card on /chronos/.
+        topbarFormat24 = topbar.dataset.hourFormat === '24';
         topbarShowSeconds = topbar.dataset.showSeconds === '1';
         topbarAutoSyncMs = parseInt(topbar.dataset.autoSyncMs || '0', 10);
         const baseline = parseInt(topbar.dataset.epochMs || '0', 10);

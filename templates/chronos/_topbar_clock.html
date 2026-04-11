@@ -2,7 +2,7 @@
 <div id="chronos-topbar"
      data-tz="{{ chronos_topbar.tz_name }}"
      data-epoch-ms="{{ chronos_topbar.epoch_ms }}"
-     data-format-24h="{% if chronos_topbar.format_24h %}1{% else %}0{% endif %}"
+     data-hour-format="{% if chronos_topbar.format_24h %}24{% else %}12{% endif %}"
      data-show-seconds="{% if chronos_topbar.show_seconds %}1{% else %}0{% endif %}"
      data-auto-sync-ms="{{ chronos_topbar.auto_sync_ms }}"
      title="Click to open Chronos">
