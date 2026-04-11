@@ -184,23 +184,35 @@ def node_rotate_token(request, slug):
 def node_live_json(request, slug):
     """Live readings JSON for the node detail page poller.
 
-    Returns the most-recent value per channel, plus a small rolling
-    window of recent values per channel for inline sparklines. The
-    JS on the detail page polls this every few seconds and replaces
-    the DOM. Cheap — one indexed query per channel.
-    """
-    node = get_object_or_404(Node, slug=slug)
-    history_n = 30  # how many recent values per channel to send
+    Returns the most-recent value per *currently active* channel, plus
+    a small rolling window of recent values per channel for inline
+    sparklines. A channel is considered active if it has at least one
+    reading in the last LIVE_WINDOW_SECONDS (default 5 minutes); this
+    keeps historical channels (e.g., test channels from earlier
+    sketch versions) from cluttering the live display once the node
+    has stopped reporting them.
 
-    channel_names = list(
+    The JS on the detail page polls this every few seconds and updates
+    a stable set of card elements in place — the card DOM is created
+    once and the values + sparklines mutate, no replacement.
+    """
+    from datetime import timedelta
+
+    node = get_object_or_404(Node, slug=slug)
+    history_n = 30
+    LIVE_WINDOW_SECONDS = 300
+
+    cutoff = timezone.now() - timedelta(seconds=LIVE_WINDOW_SECONDS)
+
+    active_channels = list(
         SensorReading.objects
-        .filter(node=node)
+        .filter(node=node, received_at__gte=cutoff)
         .values_list('channel', flat=True)
         .distinct()
     )
 
     channels = []
-    for ch in sorted(channel_names):
+    for ch in sorted(active_channels):
         latest = (SensorReading.objects
                   .filter(node=node, channel=ch)
                   .order_by('-received_at')
@@ -209,7 +221,7 @@ def node_live_json(request, slug):
                       .filter(node=node, channel=ch)
                       .order_by('-received_at')[:history_n])
         history = list(history_qs)
-        history.reverse()  # oldest → newest, suitable for sparkline
+        history.reverse()
         channels.append({
             'channel':      ch,
             'latest_value': latest.value if latest else None,
@@ -219,12 +231,13 @@ def node_live_json(request, slug):
         })
 
     return JsonResponse({
-        'node':         node.slug,
-        'nickname':     node.nickname,
-        'last_seen_at': node.last_seen_at.isoformat() if node.last_seen_at else None,
-        'last_ip':      node.last_ip,
-        'firmware':    node.firmware_version,
-        'channels':     channels,
+        'node':            node.slug,
+        'nickname':        node.nickname,
+        'last_seen_at':    node.last_seen_at.isoformat() if node.last_seen_at else None,
+        'last_ip':         node.last_ip,
+        'firmware':        node.firmware_version,
+        'live_window_sec': LIVE_WINDOW_SECONDS,
+        'channels':        channels,
     })
 
 
