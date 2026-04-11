@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ date|date:"D d M Y" }} — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .day-toolbar { display: flex; align-items: baseline; gap: 1rem; margin: 0.75rem 0 1rem; }
+    .day-toolbar h1 { margin: 0; font-size: 1.4rem; }
+    .day-events { display: flex; flex-direction: column; gap: 0.4rem; }
+    .day-event { padding: 0.6rem 0.85rem; border-left: 4px solid #58a6ff; }
+    .day-event.all-day { border-left-color: #2ea043; }
+    .day-event .title { font-size: 1rem; font-weight: 600; color: #c9d1d9; }
+    .day-event .time { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: #8b949e; }
+    .day-event .tags { font-size: 0.7rem; color: #6e7681; margin-top: 0.2rem; }
+    .day-event .notes { font-size: 0.82rem; color: #8b949e; margin-top: 0.4rem; white-space: pre-wrap; }
+    .day-event .actions { margin-top: 0.5rem; display: flex; gap: 0.35rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="day-toolbar">
+    <h1>{{ date|date:"D d M Y" }}</h1>
+    <a href="{% url 'chronos:calendar_month' date.year date.month %}" class="btn btn-secondary">‹ Month</a>
+    <a href="{% url 'chronos:event_add' %}?date={{ date|date:'Y-m-d' }}" class="btn">New Event</a>
+</div>
+
+{% if events %}
+<div class="day-events">
+    {% for ev in events %}
+    <div class="card day-event{% if ev.all_day %} all-day{% endif %}"{% if ev.color %} style="border-left-color: {{ ev.color }};"{% endif %}>
+        <div class="title"{% if ev.color %} style="color: {{ ev.color }};"{% endif %}>{{ ev.title }}</div>
+        <div class="time">
+            {% if ev.all_day %}
+                all day
+            {% else %}
+                {{ ev.start|date:"H:i" }}{% if ev.end %} – {{ ev.end|date:"H:i" }}{% endif %}
+            {% endif %}
+        </div>
+        {% if ev.tag_list %}<div class="tags">{% for t in ev.tag_list %}#{{ t }} {% endfor %}</div>{% endif %}
+        {% if ev.notes %}<div class="notes">{{ ev.notes }}</div>{% endif %}
+        <div class="actions">
+            <a href="{% url 'chronos:event_edit' ev.slug %}" class="btn btn-secondary" style="font-size:0.78rem;">Edit</a>
+            <form method="post" action="{% url 'chronos:event_delete' ev.slug %}" style="display:inline;" onsubmit="return confirm('Delete event {{ ev.title|escapejs }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;">No events on this day. <a href="{% url 'chronos:event_add' %}?date={{ date|date:'Y-m-d' }}">Add one</a>.</p>
+{% endif %}
+{% endblock %}

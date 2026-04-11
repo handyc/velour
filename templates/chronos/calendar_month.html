@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}{{ month_name }} {{ year }} — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cal-toolbar { display: flex; align-items: baseline; gap: 1rem; margin: 0.75rem 0 1rem; }
+    .cal-toolbar h1 { margin: 0; font-size: 1.4rem; }
+    .cal-toolbar .nav-link { color: #58a6ff; text-decoration: none; padding: 0.25rem 0.55rem; border: 1px solid #30363d; border-radius: 4px; font-size: 0.85rem; }
+    .cal-toolbar .nav-link:hover { background: #161b22; }
+    .cal-toolbar .spacer { flex: 1; }
+    .cal-toolbar .count { color: #6e7681; font-size: 0.78rem; }
+
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; border: 1px solid #30363d; }
+    .cal-grid .head { background: #0d1117; padding: 0.4rem 0.55rem; font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #30363d; }
+    .cal-cell {
+        min-height: 90px;
+        padding: 0.35rem 0.5rem;
+        border-right: 1px solid #21262d;
+        border-bottom: 1px solid #21262d;
+        font-size: 0.78rem;
+        background: #0d1117;
+        color: #c9d1d9;
+        position: relative;
+    }
+    .cal-cell:nth-child(7n) { border-right: none; }
+    .cal-cell.out-of-month { color: #4a5258; background: #08090b; }
+    .cal-cell.is-today { background: #161b22; }
+    .cal-cell.is-today .day-num { color: #58a6ff; font-weight: 600; }
+    .cal-cell .day-num {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem;
+        color: inherit;
+    }
+    .cal-cell .day-num a { color: inherit; text-decoration: none; }
+    .cal-cell .day-num a:hover { color: #58a6ff; }
+    .cal-cell .ev-list { margin-top: 0.25rem; }
+    .cal-cell .ev {
+        display: block;
+        font-size: 0.7rem;
+        line-height: 1.25;
+        padding: 0.08rem 0.32rem;
+        margin-top: 0.12rem;
+        background: rgba(88, 166, 255, 0.15);
+        color: #58a6ff;
+        border-radius: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .cal-cell .ev a { color: inherit; text-decoration: none; }
+    .cal-cell .ev.all-day { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cal-toolbar">
+    <h1>{{ month_name }} {{ year }}</h1>
+    <a href="{% url 'chronos:calendar_month' prev_year prev_month %}" class="nav-link">‹ {{ prev_year }}-{{ prev_month }}</a>
+    <a href="{% url 'chronos:calendar_month' today.year today.month %}" class="nav-link">Today</a>
+    <a href="{% url 'chronos:calendar_month' next_year next_month %}" class="nav-link">{{ next_year }}-{{ next_month }} ›</a>
+    <span class="spacer"></span>
+    <a href="{% url 'chronos:event_add' %}" class="btn">New Event</a>
+    <span class="count">{{ event_count }} event{{ event_count|pluralize }} this month</span>
+</div>
+
+<div class="cal-grid">
+    <div class="head">Mon</div>
+    <div class="head">Tue</div>
+    <div class="head">Wed</div>
+    <div class="head">Thu</div>
+    <div class="head">Fri</div>
+    <div class="head">Sat</div>
+    <div class="head">Sun</div>
+    {% for week in rows %}
+        {% for cell in week %}
+        <div class="cal-cell{% if not cell.in_month %} out-of-month{% endif %}{% if cell.is_today %} is-today{% endif %}">
+            <div class="day-num">
+                <a href="{% url 'chronos:calendar_day' cell.date.year cell.date.month cell.date.day %}">{{ cell.date.day }}</a>
+            </div>
+            {% if cell.events %}
+            <div class="ev-list">
+                {% for ev in cell.events|slice:":4" %}
+                <span class="ev{% if ev.all_day %} all-day{% endif %}"{% if ev.color %} style="background: {{ ev.color }}33; color: {{ ev.color }};"{% endif %}>
+                    <a href="{% url 'chronos:event_edit' ev.slug %}">{{ ev.title }}</a>
+                </span>
+                {% endfor %}
+                {% if cell.events|length > 4 %}
+                <span class="ev" style="background:transparent;color:#6e7681;">+{{ cell.events|length|add:"-4" }} more</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% endfor %}
+</div>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Back to Chronos</a>
+</div>
+{% endblock %}

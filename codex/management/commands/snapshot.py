@@ -184,8 +184,12 @@ class Command(BaseCommand):
                         page.goto(url, wait_until='networkidle', timeout=15000)
                         page.screenshot(path=str(out_path), full_page=full_page)
                         size = out_path.stat().st_size
+                        try:
+                            display = out_path.relative_to(settings.BASE_DIR)
+                        except ValueError:
+                            display = out_path
                         self.stdout.write(self.style.SUCCESS(
-                            f'  ✓ {target}: {url} → {out_path.relative_to(settings.BASE_DIR)} ({size:,} bytes)'
+                            f'  ✓ {target}: {url} → {display} ({size:,} bytes)'
                         ))
                     except Exception as e:
                         self.stderr.write(self.style.ERROR(

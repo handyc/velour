@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Event — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ev-form { max-width: 720px; }
+    .ev-form .field { margin-bottom: 1rem; }
+    .ev-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .ev-form input[type=text], .ev-form input[type=datetime-local], .ev-form input[type=color], .ev-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .ev-form input[type=color] { padding: 0.15rem; height: 36px; max-width: 80px; }
+    .ev-form textarea { min-height: 120px; }
+    .ev-form .row { display: flex; gap: 0.75rem; }
+    .ev-form .row .field { flex: 1 1 0; }
+    .ev-form small { color: #6e7681; font-size: 0.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Event</h1>
+<form method="post" class="ev-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ event.title }}" required maxlength="200">
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label for="start">Start</label>
+            <input type="datetime-local" id="start" name="start"
+                   value="{{ event.start|date:'Y-m-d\TH:i' }}" required>
+            <small>Local time ({{ tz.key }}).</small>
+        </div>
+        <div class="field">
+            <label for="end">End (optional)</label>
+            <input type="datetime-local" id="end" name="end"
+                   value="{{ event.end|date:'Y-m-d\TH:i' }}">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field" style="flex: 0 0 auto;">
+            <label>
+                <input type="checkbox" name="all_day" value="1" {% if event.all_day %}checked{% endif %} style="width:auto;">
+                All day
+            </label>
+        </div>
+        <div class="field" style="flex: 0 0 auto;">
+            <label for="color">Color</label>
+            <input type="color" id="color" name="color" value="{{ event.color|default:'#58a6ff' }}">
+        </div>
+        <div class="field">
+            <label for="tags">Tags</label>
+            <input type="text" id="tags" name="tags" value="{{ event.tags }}" maxlength="200">
+            <small>Comma-separated.</small>
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes">{{ event.notes }}</textarea>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'chronos:calendar' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
