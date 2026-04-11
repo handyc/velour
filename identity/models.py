@@ -368,3 +368,72 @@ class Rule(models.Model):
         state = '' if self.is_active else ' [inactive]'
         concerning = ' [concerning]' if self.opens_concern else ''
         return f'{self.name} → {self.mood}{concerning}{state}'
+
+
+class Reflection(models.Model):
+    """A composed synthesis of many Ticks over a period of time.
+
+    Where a Tick is one unit of attention (10 minutes of cadence), a
+    Reflection is a rollup — a first-person prose paragraph about
+    what happened during a day, a week, or a month. Reflections are
+    how Identity appears to *remember*: the operator can flip through
+    them like diary entries, and the Codex rendering layer turns them
+    into PDFs that live in an "Identity's Journal" manual alongside
+    every other codex manual.
+
+    Composed deterministically from aggregate sensor + tick data:
+    mood distribution, aspect frequency, concerns opened/closed,
+    named subjects mentioned most often, upcoming/passed holidays
+    with tradition context, comparison to previous periods. No LLM,
+    no GPU. The output feels reflective because the inputs are real
+    and the template library is rich, not because any model invented
+    the words.
+    """
+
+    PERIOD_CHOICES = [
+        ('hourly',  'Hour'),
+        ('daily',   'Day'),
+        ('weekly',  'Week'),
+        ('monthly', 'Month'),
+        ('yearly',  'Year'),
+    ]
+
+    period = models.CharField(max_length=16, choices=PERIOD_CHOICES)
+    period_start = models.DateTimeField(db_index=True,
+        help_text='Beginning of the period this reflection covers.')
+    period_end = models.DateTimeField(db_index=True,
+        help_text='End of the period (exclusive).')
+    composed_at = models.DateTimeField(auto_now_add=True, db_index=True,
+        help_text='When the reflection was actually generated.')
+
+    title = models.CharField(max_length=200, blank=True,
+        help_text='Human-readable title, usually derived from the '
+                  'period, e.g. "Week of 2026-04-06" or "April 2026".')
+    body = models.TextField(
+        help_text='Markdown prose paragraph, first-person voice.')
+
+    ticks_referenced = models.PositiveIntegerField(default=0)
+    metrics = models.JSONField(default=dict, blank=True,
+        help_text='Computed aggregates used to compose the body: mood '
+                  'distribution, top aspects, etc. Kept for debugging '
+                  'and for re-rendering if the template library changes.')
+
+    # If the reflection has been pushed into Codex as a Section, this
+    # field records the codex Section slug — lets the UI link to the
+    # PDF rendering.
+    codex_section_slug = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ['-period_start']
+        indexes = [
+            models.Index(fields=['period', '-period_start']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['period', 'period_start'],
+                name='identity_reflection_unique_period',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.title or self.period}'

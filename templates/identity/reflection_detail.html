@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}{{ reflection.title }} — Reflections — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ref-wrap { max-width: 720px; }
+    .ref-wrap h1 {
+        font-size: 1.25rem; font-weight: 500; color: #c9d1d9;
+        margin: 0 0 0.25rem;
+    }
+    .ref-wrap .meta {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 1.5rem;
+    }
+    .ref-wrap .body {
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 6px; padding: 1.5rem 1.75rem;
+    }
+    .ref-wrap .body p {
+        color: #c9d1d9; font-size: 0.95rem;
+        line-height: 1.7; margin: 0 0 1rem;
+    }
+    .ref-wrap .body p:last-child { margin-bottom: 0; }
+
+    details.metrics {
+        margin-top: 1rem;
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.75rem 1rem;
+        font-size: 0.78rem;
+    }
+    details.metrics summary {
+        color: #8b949e; cursor: pointer;
+    }
+    details.metrics pre {
+        color: #c9d1d9; font-size: 0.72rem;
+        background: transparent; padding: 0.5rem 0;
+        overflow-x: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ref-wrap">
+    <h1>{{ reflection.title }}</h1>
+    <div class="meta">
+        {{ reflection.period }} reflection
+        · covers {{ reflection.period_start|date:"Y-m-d H:i" }} → {{ reflection.period_end|date:"Y-m-d H:i" }}
+        · {{ reflection.ticks_referenced }} tick{{ reflection.ticks_referenced|pluralize }}
+        · composed {{ reflection.composed_at|date:"Y-m-d H:i" }}
+    </div>
+
+    <div class="body">
+        {{ reflection.body|linebreaks }}
+    </div>
+
+    {% if reflection.metrics %}
+    <details class="metrics">
+        <summary>Metrics used to compose this reflection</summary>
+        <pre>{{ reflection.metrics }}</pre>
+    </details>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+        <a href="{% url 'identity:reflections_list' %}" class="btn btn-secondary">← All reflections</a>
+        {% if reflection.codex_section_slug %}
+        <a href="/codex/manuals/identitys-journal/" class="btn btn-secondary">Open in Identity's Journal</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

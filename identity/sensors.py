@@ -201,31 +201,173 @@ def sense_experiments():
 
 
 def sense_calendar():
-    """Upcoming chronos events within the next week, as a list of
-    names. Session 4 uses these so Identity can anticipate and
-    reference them in thought ('the calendar shows Ramadan ends on
-    Saturday')."""
+    """Upcoming chronos events + holidays. Session 4 used a 7-day
+    window; Session 5 widens it to 30 days and separates user-created
+    CalendarEvents from tradition-tagged holidays so the reflection
+    composer can talk about them differently. Each holiday carries
+    its Tradition name when known — Identity can reference "the
+    Christian tradition of Easter" or "the Wiccan tradition of Imbolc"
+    without needing an LLM to look up what those words mean."""
     try:
         from datetime import timedelta
         from django.utils import timezone as djtz
         from chronos.models import CalendarEvent
-        cutoff = djtz.now() + timedelta(days=7)
-        upcoming = CalendarEvent.objects.filter(
-            start__gte=djtz.now(),
-            start__lte=cutoff,
-        ).order_by('start')[:10]
+        now = djtz.now()
+        cutoff = now + timedelta(days=30)
+
+        upcoming_events = []
+        upcoming_holidays = []
+
+        qs = CalendarEvent.objects.filter(
+            start__gte=now, start__lte=cutoff
+        ).select_related('tradition').order_by('start')[:30]
+
+        for e in qs:
+            entry = {
+                'title': e.title,
+                'when':  e.start.isoformat(),
+                'days_away': max(0, (e.start - now).days),
+            }
+            if getattr(e, 'tradition', None):
+                entry['tradition'] = e.tradition.name
+                upcoming_holidays.append(entry)
+            else:
+                upcoming_events.append(entry)
+
+        # Limit to the first handful of each so the thought composer
+        # doesn't have too much to choose from
         return {
-            'upcoming': [
-                {'title': e.title, 'when': e.start.isoformat()}
-                for e in upcoming
-            ],
+            'upcoming':  upcoming_events[:10],
+            'holidays':  upcoming_holidays[:10],
+            'total_upcoming': len(upcoming_events) + len(upcoming_holidays),
+        }
+    except Exception:
+        return {}
+
+
+def sense_mailboxes():
+    """Outgoing mail activity. Zero-cost count query, useful for
+    reflection aggregation ('this week I sent N messages')."""
+    try:
+        from datetime import timedelta
+        from django.utils import timezone as djtz
+        from mailboxes.models import MailAccount
+        cutoff = djtz.now() - timedelta(days=7)
+        # mailboxes app may or may not have a Sent model — guard.
+        try:
+            from mailboxes.models import SentMessage
+            sent_week = SentMessage.objects.filter(sent_at__gte=cutoff).count()
+        except Exception:
+            sent_week = 0
+        return {
+            'accounts': MailAccount.objects.count(),
+            'sent_7d':  sent_week,
+        }
+    except Exception:
+        return {}
+
+
+def sense_hosts():
+    """Other Velour instances this one polls. Counts only."""
+    try:
+        from hosts.models import RemoteHost
+        total = RemoteHost.objects.count()
+        healthy = RemoteHost.objects.filter(last_ok=True).count() if total else 0
+        return {
+            'total':   total,
+            'healthy': healthy,
+            'unhealthy': total - healthy,
+        }
+    except Exception:
+        return {}
+
+
+def sense_services():
+    """Whether supervisor-managed services appear running. Cheap enough
+    since we just ask systemd (via sysinfo-style helpers) for counts."""
+    try:
+        import subprocess
+        out = subprocess.run(
+            ['supervisorctl', 'status'],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return {}
+        lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
+        running = sum(1 for ln in lines if 'RUNNING' in ln)
+        return {'total': len(lines), 'running': running}
+    except Exception:
+        return {}
+
+
+def sense_logs():
+    """Rough error volume from syslog/dmesg over the last 15 minutes.
+    Grep-and-count. Cheap if logs are small; can be slow on busy hosts
+    so we cap and time out fast."""
+    try:
+        import subprocess
+        # Use dmesg as the cheapest source — it's a kernel ring buffer
+        # and doesn't require reading arbitrarily large syslog files.
+        out = subprocess.run(
+            ['dmesg', '--ctime', '--level=err,crit,alert,emerg'],
+            capture_output=True, text=True, timeout=3,
+        )
+        if out.returncode != 0:
+            return {}
+        errs = [ln for ln in out.stdout.splitlines() if ln.strip()]
+        return {'dmesg_errors': len(errs)}
+    except Exception:
+        return {}
+
+
+def sense_terminal():
+    """How many terminal commands the operator has run lately —
+    a signal of how 'actively worked on' the system is."""
+    try:
+        from datetime import timedelta
+        from django.utils import timezone as djtz
+        from terminal.models import TerminalSession, TerminalCommand
+        cutoff = djtz.now() - timedelta(hours=24)
+        cmds = TerminalCommand.objects.filter(executed_at__gte=cutoff).count()
+        sessions = TerminalSession.objects.count()
+        return {'commands_24h': cmds, 'sessions': sessions}
+    except Exception:
+        return {}
+
+
+def sense_identity_self():
+    """Identity's own recent tick activity — a meta-sensor that lets
+    the system reflect on its own attention cadence. 'This week I
+    ticked 97 times, up from 83 last week.'"""
+    try:
+        from datetime import timedelta
+        from django.utils import timezone as djtz
+        from .models import Tick, Concern
+        now = djtz.now()
+        ticks_24h = Tick.objects.filter(at__gte=now - timedelta(hours=24)).count()
+        ticks_7d  = Tick.objects.filter(at__gte=now - timedelta(days=7)).count()
+        open_concerns = Concern.objects.filter(closed_at=None).count()
+        total_concerns_7d = Concern.objects.filter(
+            opened_at__gte=now - timedelta(days=7)
+        ).count()
+        return {
+            'ticks_24h': ticks_24h,
+            'ticks_7d':  ticks_7d,
+            'open_concerns': open_concerns,
+            'concerns_opened_7d': total_concerns_7d,
         }
     except Exception:
         return {}
 
 
 def gather_snapshot():
-    """Run every sensor and return the merged snapshot dict."""
+    """Run every sensor and return the merged snapshot dict.
+
+    Sensor modules that can fail for environmental reasons (dmesg not
+    accessible, supervisor not installed, etc.) return {} from their
+    try/except and the corresponding snapshot key just has an empty
+    dict — the rule evaluator treats missing metrics as not-matching,
+    so a broken sensor can't crash the tick."""
     return {
         'load':        sense_load(),
         'memory':      sense_memory(),
@@ -234,7 +376,13 @@ def gather_snapshot():
         'chronos':     sense_chronos(),
         'nodes':       sense_nodes(),
         'mailroom':    sense_mailroom(),
+        'mailboxes':   sense_mailboxes(),
         'codex':       sense_codex(),
         'experiments': sense_experiments(),
         'calendar':    sense_calendar(),
+        'hosts':       sense_hosts(),
+        'services':    sense_services(),
+        'logs':        sense_logs(),
+        'terminal':    sense_terminal(),
+        'self':        sense_identity_self(),
     }

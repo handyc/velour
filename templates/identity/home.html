@@ -203,6 +203,34 @@
         </div>
     </div>
 
+    <!-- Recent reflections — synthesized period summaries -->
+    <div class="card">
+        <h3>Recent reflections
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ recent_reflections|length }} shown
+            </span>
+        </h3>
+        {% if recent_reflections %}
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+            {% for r in recent_reflections %}
+            <a href="{% url 'identity:reflection_detail' r.pk %}" style="text-decoration: none; color: inherit;">
+                <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #58a6ff; border-radius: 3px;">
+                    <div style="color: #c9d1d9; font-size: 0.82rem;">{{ r.title }}</div>
+                    <div style="color: #6e7681; font-size: 0.7rem; font-family: ui-monospace, Menlo, monospace; margin-top: 0.15rem;">
+                        {{ r.period }} · {{ r.ticks_referenced }} tick{{ r.ticks_referenced|pluralize }}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">No reflections yet.</p>
+        {% endif %}
+        <div style="margin-top: 0.75rem;">
+            <a href="{% url 'identity:reflections_list' %}" style="font-size: 0.78rem; color: #58a6ff;">View all reflections →</a>
+        </div>
+    </div>
+
     <!-- Open concerns — Identity's persistent preoccupations -->
     <div class="card">
         <h3>Open concerns

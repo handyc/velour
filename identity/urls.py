@@ -14,4 +14,7 @@ urlpatterns = [
     path('ticks/', views.tick_log, name='tick_log'),
     path('concerns/', views.concerns_list, name='concerns_list'),
     path('concerns/<int:pk>/close/', views.concern_close, name='concern_close'),
+    path('reflections/', views.reflections_list, name='reflections_list'),
+    path('reflections/<int:pk>/', views.reflection_detail, name='reflection_detail'),
+    path('reflections/compose/', views.reflection_compose, name='reflection_compose'),
 ]

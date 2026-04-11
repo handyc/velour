@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Concern, Identity, Mood, Tick
+from .models import Concern, Identity, Mood, Reflection, Tick
 
 
 def _get_main_ip():
@@ -224,6 +224,10 @@ def identity_home(request):
     # a worry that was opened by some tick and hasn't been resolved.
     open_concerns = Concern.objects.filter(closed_at=None).order_by('-severity')
 
+    # Most recent reflections — latest first, capped at 4 so the home
+    # page stays scannable. Full list lives at /identity/reflections/.
+    recent_reflections = Reflection.objects.all()[:4]
+
     # Legacy journal still rendered as a fallback for historical entries
     # that pre-date the Tick model and weren't fully backfilled. Newer
     # output goes through the Tick stream instead.
@@ -246,6 +250,7 @@ def identity_home(request):
         'reflection': reflection,
         'recent_ticks': recent_ticks,
         'open_concerns': open_concerns,
+        'recent_reflections': recent_reflections,
         'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
@@ -328,6 +333,45 @@ def mood_data(request):
         'values': mood_values,
         'moods': mood_names,
     })
+
+
+@login_required
+def reflections_list(request):
+    """All Reflections, newest first, with an optional period filter."""
+    period_filter = request.GET.get('period', '').strip()
+    qs = Reflection.objects.all()
+    if period_filter:
+        qs = qs.filter(period=period_filter)
+    return render(request, 'identity/reflections_list.html', {
+        'reflections': qs,
+        'period_filter': period_filter,
+        'periods': [c[0] for c in Reflection.PERIOD_CHOICES],
+    })
+
+
+@login_required
+def reflection_detail(request, pk):
+    try:
+        reflection = Reflection.objects.get(pk=pk)
+    except Reflection.DoesNotExist:
+        return redirect('identity:reflections_list')
+    return render(request, 'identity/reflection_detail.html', {
+        'reflection': reflection,
+    })
+
+
+@login_required
+@require_POST
+def reflection_compose(request):
+    """Operator-initiated reflection composition — button on the
+    Identity home page. Writes (or re-writes) a Reflection row for
+    the most recently completed period of the selected kind."""
+    from .reflection import reflect
+    period = request.POST.get('period', 'daily').strip()
+    if period not in dict(Reflection.PERIOD_CHOICES):
+        period = 'daily'
+    reflect(period=period, push_to_codex=True)
+    return redirect('identity:reflections_list')
 
 
 @login_required

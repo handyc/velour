@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Reflections — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ref-wrap { max-width: 880px; }
+    .ref-header { margin-bottom: 1rem; }
+    .ref-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .ref-header .count { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+    .filter-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .filter-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .filter-bar a.active { color: #58a6ff; border-color: #58a6ff; }
+    .filter-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .compose-form {
+        padding: 0.75rem 1rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem;
+        display: flex; gap: 0.5rem; align-items: center;
+        font-size: 0.85rem;
+    }
+    .compose-form select {
+        padding: 0.35rem 0.5rem;
+        background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+
+    .reflection-card {
+        background: #161b22;
+        border: 1px solid #30363d; border-left: 3px solid #58a6ff;
+        border-radius: 6px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.75rem;
+    }
+    .reflection-card h3 {
+        font-size: 0.95rem; margin: 0 0 0.25rem;
+        color: #c9d1d9; font-weight: 500;
+    }
+    .reflection-card .meta {
+        color: #6e7681; font-size: 0.72rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 0.6rem;
+    }
+    .reflection-card .body p {
+        color: #c9d1d9; font-size: 0.88rem;
+        line-height: 1.55; margin: 0.4rem 0;
+    }
+    .reflection-card .body p:first-child { margin-top: 0; }
+    .reflection-card a.codex-link {
+        display: inline-block;
+        font-size: 0.75rem; color: #58a6ff;
+        margin-top: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ref-wrap">
+    <div class="ref-header">
+        <h1>Reflections</h1>
+        <span class="count">{{ reflections|length }} total</span>
+    </div>
+
+    <p style="color: #8b949e; font-size: 0.85rem;">
+        Reflections are composed syntheses of many ticks over a period —
+        daily, weekly, monthly, yearly. Each one aggregates moods,
+        aspects, concerns, named subjects, and upcoming calendar events
+        into a first-person paragraph that gets rendered as a Codex
+        section in the <em>Identity's Journal</em> manual.
+    </p>
+
+    <div class="filter-bar">
+        <span class="label">period</span>
+        <a href="{% url 'identity:reflections_list' %}" class="{% if not period_filter %}active{% endif %}">all</a>
+        {% for p in periods %}
+        <a href="?period={{ p }}" class="{% if period_filter == p %}active{% endif %}">{{ p }}</a>
+        {% endfor %}
+    </div>
+
+    <form method="post" action="{% url 'identity:reflection_compose' %}" class="compose-form">
+        {% csrf_token %}
+        <span style="color:#8b949e;">Compose a</span>
+        <select name="period">
+            {% for p in periods %}<option value="{{ p }}"{% if p == 'daily' %} selected{% endif %}>{{ p }}</option>{% endfor %}
+        </select>
+        <span style="color:#8b949e;">reflection now</span>
+        <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.3rem 0.8rem;">Compose</button>
+    </form>
+
+    {% for r in reflections %}
+    <div class="reflection-card">
+        <h3><a href="{% url 'identity:reflection_detail' r.pk %}" style="color: #c9d1d9; text-decoration: none;">{{ r.title }}</a></h3>
+        <div class="meta">
+            {{ r.period }} · {{ r.ticks_referenced }} tick{{ r.ticks_referenced|pluralize }}
+            · composed {{ r.composed_at|date:"Y-m-d H:i" }}
+        </div>
+        <div class="body">
+            {% for para in r.body|linebreaks %}{{ para }}{% endfor %}
+        </div>
+        {% if r.codex_section_slug %}
+        <a class="codex-link" href="/codex/manuals/identitys-journal/">View in Identity's Journal →</a>
+        {% endif %}
+    </div>
+    {% empty %}
+    <p style="color: #6e7681; font-size: 0.9rem;">
+        No reflections yet. Use the Compose form above or run
+        <code>python manage.py identity_reflect --period daily</code>.
+    </p>
+    {% endfor %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

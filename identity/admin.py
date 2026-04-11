@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Concern, Identity, Mood, Rule, Tick
+from .models import Concern, Identity, Mood, Reflection, Rule, Tick
 
 
 @admin.register(Identity)
@@ -33,6 +33,16 @@ class ConcernAdmin(admin.ModelAdmin):
     list_filter = ('aspect', 'closed_at')
     readonly_fields = ('opened_at', 'last_seen_at', 'origin_tick')
     search_fields = ('aspect', 'name', 'description')
+
+
+@admin.register(Reflection)
+class ReflectionAdmin(admin.ModelAdmin):
+    list_display = ('title', 'period', 'period_start', 'ticks_referenced',
+                    'composed_at')
+    list_filter = ('period',)
+    date_hierarchy = 'period_start'
+    readonly_fields = ('composed_at', 'metrics', 'codex_section_slug')
+    search_fields = ('title', 'body')
 
 
 @admin.register(Rule)
