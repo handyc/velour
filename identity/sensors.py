@@ -121,21 +121,37 @@ def _moon_phase(now):
 
 def sense_nodes():
     """How many physical microcontrollers exist and how recently they
-    last reported in. Returns counts only — no per-node detail, since
-    Identity doesn't need to know names."""
+    last reported in. Returns both aggregate counts AND a `details`
+    list of per-node info so Session 4's thought composer can reference
+    specific nodes by name ('Gary has been quiet since noon')."""
     try:
         from datetime import timedelta
         from django.utils import timezone as djtz
         from nodes.models import Node
         total = Node.objects.count()
         if total == 0:
-            return {'total': 0, 'recently_seen': 0, 'silent': 0}
+            return {'total': 0, 'recently_seen': 0, 'silent': 0, 'details': []}
         recent_cutoff = djtz.now() - timedelta(hours=2)
         recent = Node.objects.filter(last_seen_at__gte=recent_cutoff).count()
+
+        details = []
+        now = djtz.now()
+        for n in Node.objects.all()[:30]:  # cap for tick cost
+            last_seen_ago = None
+            if n.last_seen_at:
+                last_seen_ago = int((now - n.last_seen_at).total_seconds())
+            details.append({
+                'slug':          n.slug,
+                'nickname':      n.nickname,
+                'last_seen_sec': last_seen_ago,
+                'silent':        last_seen_ago is None or last_seen_ago > 7200,
+            })
+
         return {
             'total':         total,
             'recently_seen': recent,
             'silent':        total - recent,
+            'details':       details,
         }
     except Exception:
         return {}
@@ -168,15 +184,57 @@ def sense_codex():
         return {}
 
 
+def sense_experiments():
+    """Named experiments the user has registered. Session 4 uses these
+    as a source of subject names — 'I have been watching {experiment}'.
+    Returns the experiment names and recent activity counts, not a
+    count-only aggregate."""
+    try:
+        from experiments.models import Experiment
+        exps = list(Experiment.objects.all()[:20])
+        return {
+            'total': len(exps),
+            'names': [e.name for e in exps if e.name],
+        }
+    except Exception:
+        return {}
+
+
+def sense_calendar():
+    """Upcoming chronos events within the next week, as a list of
+    names. Session 4 uses these so Identity can anticipate and
+    reference them in thought ('the calendar shows Ramadan ends on
+    Saturday')."""
+    try:
+        from datetime import timedelta
+        from django.utils import timezone as djtz
+        from chronos.models import CalendarEvent
+        cutoff = djtz.now() + timedelta(days=7)
+        upcoming = CalendarEvent.objects.filter(
+            start__gte=djtz.now(),
+            start__lte=cutoff,
+        ).order_by('start')[:10]
+        return {
+            'upcoming': [
+                {'title': e.title, 'when': e.start.isoformat()}
+                for e in upcoming
+            ],
+        }
+    except Exception:
+        return {}
+
+
 def gather_snapshot():
     """Run every sensor and return the merged snapshot dict."""
     return {
-        'load':     sense_load(),
-        'memory':   sense_memory(),
-        'disk':     sense_disk(),
-        'uptime':   sense_uptime(),
-        'chronos':  sense_chronos(),
-        'nodes':    sense_nodes(),
-        'mailroom': sense_mailroom(),
-        'codex':    sense_codex(),
+        'load':        sense_load(),
+        'memory':      sense_memory(),
+        'disk':        sense_disk(),
+        'uptime':      sense_uptime(),
+        'chronos':     sense_chronos(),
+        'nodes':       sense_nodes(),
+        'mailroom':    sense_mailroom(),
+        'codex':       sense_codex(),
+        'experiments': sense_experiments(),
+        'calendar':    sense_calendar(),
     }

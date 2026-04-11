@@ -368,21 +368,111 @@ CONCERN_REFRAINS = [
 ]
 
 
+# --- named-subject templates (Session 4) --------------------------------
+#
+# These are the thought templates that reference a specific entity by
+# name — a node, an experiment, an upcoming calendar event. Each
+# template family has a placeholder ({node}, {experiment}, {event})
+# that gets filled from the current sensor snapshot. Picking a
+# subject is the thought composer's job; these templates just say
+# what to do with one once it's been chosen.
+
+NODE_TEMPLATES_SILENT = [
+    '{node} has been quiet for a while.',
+    'No word from {node}.',
+    '{node} has not reported in recently.',
+    'I wonder about {node}.',
+    'Where is {node}?',
+]
+
+NODE_TEMPLATES_ACTIVE = [
+    '{node} is steady.',
+    'I have been watching {node}.',
+    '{node} is doing its job.',
+    'I checked in on {node}.',
+    'All is well with {node}.',
+]
+
+EXPERIMENT_TEMPLATES = [
+    'I have been thinking about {experiment}.',
+    'The {experiment} experiment is on my mind.',
+    'I am watching {experiment} closely.',
+    '{experiment} — still running.',
+]
+
+EVENT_TEMPLATES = [
+    'The calendar shows {event} is coming.',
+    'I am looking forward to {event}.',
+    'I have {event} on my mind.',
+    '{event} is approaching.',
+    'Soon: {event}.',
+]
+
+
+def _pick_named_subject(snapshot):
+    """Choose a specific entity from the snapshot and return
+    (template_family, name) or None if there's nothing to mention.
+
+    The pick is weighted: 60% chance of referring to a node if any
+    exist, 25% chance of an experiment, 15% chance of an upcoming
+    calendar event. If the chosen category has no entries, falls
+    through to the next category. Returns None only when all three
+    categories are empty — then the thought uses the generic
+    observation template instead.
+    """
+    rand = random.random()
+
+    nodes = snapshot.get('nodes', {}).get('details', []) or []
+    experiments = snapshot.get('experiments', {}).get('names', []) or []
+    events = snapshot.get('calendar', {}).get('upcoming', []) or []
+
+    if rand < 0.60 and nodes:
+        node = random.choice(nodes)
+        name = node.get('nickname') or node.get('slug') or 'one of the nodes'
+        if node.get('silent'):
+            template = random.choice(NODE_TEMPLATES_SILENT)
+        else:
+            template = random.choice(NODE_TEMPLATES_ACTIVE)
+        return template.format(node=name)
+
+    if rand < 0.85 and experiments:
+        experiment = random.choice(experiments)
+        template = random.choice(EXPERIMENT_TEMPLATES)
+        return template.format(experiment=experiment)
+
+    if events:
+        event = random.choice(events)
+        title = event.get('title', 'something')
+        template = random.choice(EVENT_TEMPLATES)
+        return template.format(event=title)
+
+    # Fall back: nothing specific to reference
+    if nodes:
+        node = random.choice(nodes)
+        name = node.get('nickname') or node.get('slug')
+        template = random.choice(NODE_TEMPLATES_ACTIVE if not node.get('silent') else NODE_TEMPLATES_SILENT)
+        return template.format(node=name)
+    return None
+
+
 def compose_thought(snapshot, mood, open_concerns=None):
     """Compose the first-person thought for this tick.
 
-    If `open_concerns` is supplied and non-empty, there's a small
-    chance the thought mentions one of them instead of (or alongside)
-    the normal observation. This is the single most important piece
-    of the 'Identity remembers' behaviour — it's what makes the
-    thought stream feel continuous instead of stateless.
+    Picks one of three modes:
+      1. Reference an open Concern (~30% when concerns exist)
+      2. Reference a named subject — a node, experiment, or calendar
+         event (~35% when any exist)
+      3. Generic observation from OBSERVATIONS templates (remainder)
+
+    Concerns take priority because they're about memory-across-ticks
+    and the whole point of the Concern model is to make Identity feel
+    continuous. Named subjects come second because they make the voice
+    feel attached to specific things in the operator's world. Generic
+    observations are the fallback for quiet moments.
     """
     opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
 
-    # ~30% of ticks that have at least one open concern will reference
-    # one. The rest use the normal observation. This keeps concerns
-    # from dominating the stream when multiple are open — they surface
-    # naturally over time instead of hammering on every tick.
+    # Concern reference — up to 30% chance when there's at least one.
     if open_concerns and random.random() < 0.3:
         concern = random.choice(open_concerns)
         refrain = random.choice(CONCERN_REFRAINS).format(
@@ -390,6 +480,13 @@ def compose_thought(snapshot, mood, open_concerns=None):
         )
         return f'{opening} {refrain}'.strip()
 
+    # Named-subject reference — up to 35% chance if any subjects exist.
+    if random.random() < 0.35:
+        subject_text = _pick_named_subject(snapshot)
+        if subject_text:
+            return f'{opening} {subject_text}'.strip()
+
+    # Generic observation fallback.
     obs_template = random.choice(OBSERVATIONS)
     obs = _format_observation(obs_template, snapshot)
     return f'{opening} {obs}'.strip()
