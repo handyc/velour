@@ -411,20 +411,30 @@ class TufteManualPDF(FPDF):
 
     # --- tables -----------------------------------------------------------
 
-    def emit_table(self, header, rows):
-        """Tufte minimal-rule table.
+    def emit_table(self, header, rows, bordered=False):
+        """Render a table.
 
-        No vertical lines. Horizontal rules only above the header, below
-        the header, and below the last row. Generous interior padding.
+        Two styles:
+          - Tufte minimal-rule (default): no vertical lines, horizontal
+            rules only above/below the header and below the last row.
+          - Bordered (for linguistic/spreadsheet data): every cell has
+            full borders. Headers are bold and slightly tinted.
+
+        If `header` is None the table is rendered without a header
+        row (all rows are data) — useful for noheader tables.
         """
-        if not header:
-            return
-        ncols = max(len(header), max((len(r) for r in rows), default=0))
+        widths_source = []
+        if header:
+            widths_source.append(header)
+        widths_source.extend(rows)
+        ncols = max((len(r) for r in widths_source), default=0)
         if ncols == 0:
             return
+
         col_w = BODY_W / ncols
         cell_h = self.body_leading * 1.05
         cell_pad = 1.4
+        full_cell_h = cell_h + cell_pad * 2
 
         self.ln(1.5)
         top_y = self.get_y()
@@ -436,35 +446,115 @@ class TufteManualPDF(FPDF):
             self.set_draw_color(0, 0, 0)
             self.set_line_width(0.2)
 
-        # Top rule
-        _draw_rule(top_y, weight=0.4)
+        cur_y = top_y
 
-        # Header row
-        self.set_xy(LEFT_MARGIN, top_y + cell_pad)
-        for i in range(ncols):
-            cell_runs = header[i] if i < len(header) else []
-            cx = LEFT_MARGIN + i * col_w
-            self.set_xy(cx + cell_pad, top_y + cell_pad)
-            self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                  cell_h, bold=True)
+        if bordered:
+            # Header tinted background.
+            if header:
+                self.set_fill_color(240, 240, 240)
+                self.rect(LEFT_MARGIN, cur_y, BODY_W, full_cell_h, style='F')
+                for i in range(ncols):
+                    cell_runs = header[i] if i < len(header) else []
+                    cx = LEFT_MARGIN + i * col_w
+                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
+                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                          cell_h, bold=True)
+                cur_y += full_cell_h
+            for row in rows:
+                for i in range(ncols):
+                    cell_runs = row[i] if i < len(row) else []
+                    cx = LEFT_MARGIN + i * col_w
+                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
+                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                          cell_h, bold=False)
+                cur_y += full_cell_h
+            # Draw the grid AFTER content so cell text isn't hidden.
+            self.set_draw_color(120, 120, 120)
+            self.set_line_width(0.18)
+            n_rows_drawn = (1 if header else 0) + len(rows)
+            total_h = n_rows_drawn * full_cell_h
+            # Outer rectangle
+            self.rect(LEFT_MARGIN, top_y, BODY_W, total_h)
+            # Horizontal interior rules
+            for r in range(1, n_rows_drawn):
+                y = top_y + r * full_cell_h
+                self.line(LEFT_MARGIN, y, LEFT_MARGIN + BODY_W, y)
+            # Vertical interior rules
+            for c in range(1, ncols):
+                x = LEFT_MARGIN + c * col_w
+                self.line(x, top_y, x, top_y + total_h)
+            self.set_draw_color(0, 0, 0)
+            self.set_line_width(0.2)
+        else:
+            # Tufte minimal-rule.
+            _draw_rule(top_y, weight=0.4)
+            if header:
+                self.set_xy(LEFT_MARGIN, top_y + cell_pad)
+                for i in range(ncols):
+                    cell_runs = header[i] if i < len(header) else []
+                    cx = LEFT_MARGIN + i * col_w
+                    self.set_xy(cx + cell_pad, top_y + cell_pad)
+                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                          cell_h, bold=True)
+                cur_y = top_y + full_cell_h
+                _draw_rule(cur_y, weight=0.25)
+            for row in rows:
+                for i in range(ncols):
+                    cell_runs = row[i] if i < len(row) else []
+                    cx = LEFT_MARGIN + i * col_w
+                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
+                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                          cell_h, bold=False)
+                cur_y += full_cell_h
+            _draw_rule(cur_y, weight=0.4)
 
-        header_bot = top_y + cell_h + cell_pad * 2
-        _draw_rule(header_bot, weight=0.25)
-
-        # Data rows
-        cur_y = header_bot
-        for row in rows:
-            for i in range(ncols):
-                cell_runs = row[i] if i < len(row) else []
-                cx = LEFT_MARGIN + i * col_w
-                self.set_xy(cx + cell_pad, cur_y + cell_pad)
-                self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                      cell_h, bold=False)
-            cur_y += cell_h + cell_pad * 2
-
-        _draw_rule(cur_y, weight=0.4)
         self.set_xy(LEFT_MARGIN, cur_y + 2)
         self.ln(0)
+
+    # --- definition list --------------------------------------------------
+
+    def emit_def_list(self, pairs):
+        """A list of bold-label / plain-value pairs.
+
+        Used for linguistic gloss data, glossaries, key-value lists.
+        Layout: bold label on the left, value flowing to the right of
+        the label on the same line. If the value wraps, the wrapped
+        lines are hung-indented under the value start (not the label).
+        """
+        if not pairs:
+            return
+        self.ln(1)
+
+        # Compute label column width based on the longest label, capped.
+        self.set_font(FONT, 'B', BODY_FONT_SIZE)
+        max_label_w = max(self.get_string_width(label) for label, _ in pairs)
+        label_w = min(max_label_w + 3, BODY_W * 0.35)
+        value_x = LEFT_MARGIN + label_w + 1
+
+        for label, value_runs in pairs:
+            row_top = self.get_y()
+            # Label
+            self.set_xy(LEFT_MARGIN, row_top)
+            self.set_font(FONT, 'B', BODY_FONT_SIZE)
+            self.set_text_color(*BLACK)
+            self.cell(label_w, self.body_leading, label, align='L')
+
+            # Value — wrap to remaining width.
+            self.set_xy(value_x, row_top)
+            self.set_font(FONT, '', BODY_FONT_SIZE)
+            # Save the right margin and set a temporary one so wraps
+            # respect the value column.
+            prev_l = self.l_margin
+            self.set_left_margin(value_x)
+            for run in value_runs or [('text', '', '')]:
+                if run[0] == 'text':
+                    _, style, text = run
+                    self.set_font(FONT, style, BODY_FONT_SIZE)
+                    self.write(self.body_leading, text)
+            self.ln(self.body_leading)
+            self.set_left_margin(prev_l)
+
+        self.ln(self.body_leading * 0.4)
 
     def _write_cell_runs(self, runs, max_w, line_h, bold=False):
         """Render a sequence of inline runs into a single-line table cell.
@@ -647,8 +737,14 @@ class TufteManualPDF(FPDF):
     # --- figures ----------------------------------------------------------
 
     def emit_figure(self, figure):
-        """Embed an image inline in the body column. Caption hangs in
-        the right margin alongside the figure's vertical extent."""
+        """Embed an image inline in the body column.
+
+        Caption position depends on the figure's caption_position field:
+          - 'margin' (default): hangs in the right margin alongside the
+            figure's vertical extent. Tufte's preferred form.
+          - 'below': appears underneath the image, italic and centered
+            below the figure block. Academic-paper style.
+        """
         if not figure.image:
             return
 
@@ -659,18 +755,23 @@ class TufteManualPDF(FPDF):
         self.ln(2)
         anchor_y = self.get_y()
 
-        # Cap image width to body column.
         max_w = BODY_W
         try:
             self.image(str(path), x=LEFT_MARGIN, w=max_w)
         except Exception:
-            # Bad image — skip silently rather than crashing the whole render.
             return
 
         end_y = self.get_y()
+        position = getattr(figure, 'caption_position', 'margin')
 
-        # Caption in the margin, top-aligned with the figure.
-        if figure.caption:
+        if figure.caption and position == 'below':
+            self.ln(0.5)
+            self.set_font(FONT, 'I', SIDENOTE_FONT_SIZE + 0.5)
+            self.set_text_color(*DARK_GRAY)
+            self.multi_cell(BODY_W, SIDENOTE_LEADING + 0.5,
+                            figure.caption, align='C')
+            self.set_text_color(*BLACK)
+        elif figure.caption:
             saved_x = self.get_x()
             saved_y = self.get_y()
             sx = LEFT_MARGIN + BODY_W + SIDENOTE_GAP
@@ -753,7 +854,12 @@ class TufteManualPDF(FPDF):
         elif kind == 'code':
             self.emit_code(payload)
         elif kind == 'table':
-            self.emit_table(payload['header'], payload['rows'])
+            self.emit_table(
+                payload['header'], payload['rows'],
+                bordered=payload.get('bordered', False),
+            )
+        elif kind == 'def':
+            self.emit_def_list(payload['pairs'])
         elif kind == 'slope':
             self.emit_slope(
                 payload['left_label'], payload['right_label'],

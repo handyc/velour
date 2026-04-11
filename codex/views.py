@@ -6,7 +6,10 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from .models import FIGURE_KIND_CHOICES, FORMAT_CHOICES, Figure, Manual, Section
+from .models import (
+    CAPTION_POSITION_CHOICES, FIGURE_KIND_CHOICES, FORMAT_CHOICES,
+    Figure, Manual, Section,
+)
 from .rendering import render_manual_to_pdf
 
 
@@ -163,6 +166,7 @@ def _apply_figure_post(f, post, files):
     f.kind = post.get('kind', 'image')
     f.source = post.get('source', '')
     f.caption = post.get('caption', '').strip()
+    f.caption_position = post.get('caption_position', 'margin')
     raw = post.get('sort_order', '0').strip()
     try:
         f.sort_order = int(raw)
@@ -201,6 +205,7 @@ def figure_add(request, manual_slug, section_slug):
     return render(request, 'codex/figure_form.html', {
         'manual': m, 'section': s, 'figure': f,
         'action': 'New', 'kind_choices': FIGURE_KIND_CHOICES,
+        'position_choices': CAPTION_POSITION_CHOICES,
     })
 
 
@@ -226,6 +231,7 @@ def figure_edit(request, manual_slug, section_slug, figure_slug):
     return render(request, 'codex/figure_form.html', {
         'manual': m, 'section': s, 'figure': f,
         'action': 'Edit', 'kind_choices': FIGURE_KIND_CHOICES,
+        'position_choices': CAPTION_POSITION_CHOICES,
     })
 
 

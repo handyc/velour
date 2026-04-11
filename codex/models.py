@@ -150,6 +150,11 @@ FIGURE_KIND_CHOICES = [
     ('mermaid', 'Mermaid diagram (rendered via Kroki)'),
 ]
 
+CAPTION_POSITION_CHOICES = [
+    ('margin', 'In the right margin (Tufte default)'),
+    ('below',  'Underneath the figure (academic style)'),
+]
+
 
 class Figure(models.Model):
     """An image or generated diagram embedded in a Section.
@@ -187,7 +192,14 @@ class Figure(models.Model):
     source_hash = models.CharField(max_length=64, blank=True)
     caption = models.TextField(
         blank=True,
-        help_text='Hangs in the right margin alongside the figure.',
+        help_text='Caption text. Where it appears is controlled by '
+                  'caption_position.',
+    )
+    caption_position = models.CharField(
+        max_length=8, choices=CAPTION_POSITION_CHOICES, default='margin',
+        help_text='Margin = the Tufte default (caption hangs in the '
+                  'right sidenote area). Below = academic style with '
+                  'a "Figure N: …" caption underneath the image.',
     )
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)

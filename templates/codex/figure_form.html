@@ -80,7 +80,16 @@
     <div class="field">
         <label for="caption">Caption</label>
         <textarea id="caption" name="caption" class="caption">{{ figure.caption }}</textarea>
-        <small>Hangs in the right margin alongside the figure.</small>
+    </div>
+
+    <div class="field">
+        <label for="caption_position">Caption position</label>
+        <select id="caption_position" name="caption_position">
+            {% for k, v in position_choices %}
+            <option value="{{ k }}" {% if figure.caption_position == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+        <small>Margin is the Tufte default. Below is academic style ("Figure N: …" under the image).</small>
     </div>
 
     <div style="display:flex; gap:0.5rem;">

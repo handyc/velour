@@ -132,23 +132,41 @@ def parse_inline(text):
 _CALLOUT_KINDS = {'note', 'tip', 'warn', 'warning', 'danger', 'info'}
 
 
-def _parse_table_lines(lines, start):
+def _parse_table_lines(lines, start, options=None):
     """Try to parse a markdown pipe-syntax table starting at lines[start].
 
-    Returns (table_block, next_index) on success, or (None, start) if
-    the lines don't form a valid table.
+    `options` is a set of flags ('bordered', 'noheader') that affect
+    rendering. Returns (table_block, next_index) on success, or
+    (None, start) if the lines don't form a valid table.
     """
+    options = options or set()
     first = lines[start].strip()
     if not first.startswith('|') or not first.endswith('|'):
         return None, start
+
+    def _split_row(row):
+        return [c.strip() for c in row.strip().strip('|').split('|')]
+
+    if 'noheader' in options:
+        # All rows are data; there's no separator line.
+        rows = []
+        i = start
+        while i < len(lines):
+            ln = lines[i].rstrip()
+            if not ln.strip().startswith('|'):
+                break
+            rows.append([parse_inline(c) for c in _split_row(ln)])
+            i += 1
+        return ('table', {
+            'header': None, 'rows': rows,
+            'bordered': 'bordered' in options,
+        }), i
+
     if start + 1 >= len(lines):
         return None, start
     sep = lines[start + 1].strip()
     if not sep.startswith('|') or not all(c in ' |-:' for c in sep):
         return None, start
-
-    def _split_row(row):
-        return [c.strip() for c in row.strip().strip('|').split('|')]
 
     header = [parse_inline(c) for c in _split_row(first)]
     rows = []
@@ -159,7 +177,58 @@ def _parse_table_lines(lines, start):
             break
         rows.append([parse_inline(c) for c in _split_row(ln)])
         i += 1
-    return ('table', {'header': header, 'rows': rows}), i
+    return ('table', {
+        'header': header, 'rows': rows,
+        'bordered': 'bordered' in options,
+    }), i
+
+
+def _parse_table_directive(lines, start):
+    """Handle `!table:options` followed by a markdown table."""
+    head = lines[start].strip()
+    if not head.startswith('!table'):
+        return None, start
+    rest = head[len('!table'):].lstrip(':').strip()
+    options = {tok.strip() for tok in rest.split() if tok.strip()}
+    # The actual table starts on the next non-blank line.
+    i = start + 1
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines) or not lines[i].strip().startswith('|'):
+        return None, start
+    return _parse_table_lines(lines, i, options=options)
+
+
+def _parse_def_block(lines, start):
+    """Parse a `:::def ... :::` definition list block.
+
+    Each line inside is a `Label: value` pair. Empty lines are
+    skipped. The output payload is a list of (label, runs) tuples.
+    """
+    head = lines[start].strip()
+    if head not in (':::def', ':::deflist'):
+        return None, start
+
+    pairs = []
+    i = start + 1
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        if ln.strip() == ':::':
+            i += 1
+            break
+        if not ln.strip():
+            i += 1
+            continue
+        if ':' in ln:
+            label, value = ln.split(':', 1)
+            pairs.append((label.strip(), parse_inline(value.strip())))
+        else:
+            # No colon → treat as a label-only entry.
+            pairs.append((ln.strip(), []))
+        i += 1
+    if not pairs:
+        return None, start
+    return ('def', {'pairs': pairs}), i
 
 
 def _parse_slope(lines, start):
@@ -315,6 +384,14 @@ def parse(body):
                 i = ni
                 continue
 
+        # Definition list (:::def ... :::)
+        if stripped in (':::def', ':::deflist'):
+            blk, ni = _parse_def_block(lines, i)
+            if blk:
+                blocks.append(blk)
+                i = ni
+                continue
+
         # Small multiples
         if stripped.startswith('!figs'):
             blk = _parse_figs(stripped)
@@ -329,7 +406,15 @@ def parse(body):
             i += 1
             continue
 
-        # Table
+        # Table directive (!table:bordered etc) followed by | rows
+        if stripped.startswith('!table'):
+            blk, ni = _parse_table_directive(lines, i)
+            if blk:
+                blocks.append(blk)
+                i = ni
+                continue
+
+        # Plain pipe table
         if stripped.startswith('|'):
             blk, ni = _parse_table_lines(lines, i)
             if blk:
@@ -367,7 +452,7 @@ def parse(body):
                 ln.startswith('### ') or ln.startswith('- ') or
                 ln.startswith('> ') or ls.startswith('```') or
                 ls.startswith(':::') or ls.startswith('!') or
-                ls.startswith('|')):
+                ls.startswith('|') or ls.startswith('!table')):
                 break
             para_lines.append(ln)
             i += 1
