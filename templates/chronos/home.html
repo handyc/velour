@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .clock-grid { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem; }
+    .clock-card {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        width: 100%;
+        padding: 0.5rem 0.9rem;
+        border-left: 4px solid #58a6ff;
+        min-height: 0;
+    }
+    .clock-card.home { border-left-color: #2ea043; }
+    .clock-card .label-block { flex: 0 0 auto; min-width: 0; }
+    .clock-card .label { font-size: 1rem; font-weight: 600; color: #c9d1d9; line-height: 1.15; }
+    .clock-card .tz { font-size: 0.65rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.1; }
+    .clock-card .date-time-block { flex: 1 1 auto; display: flex; align-items: baseline; gap: 0.85rem; min-width: 0; justify-content: flex-end; }
+    .clock-card .date { font-size: 0.8rem; color: #8b949e; }
+    .clock-card .time { font-size: 1.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9d1d9; letter-spacing: 0.04em; line-height: 1.1; }
+    .clock-card .offset { font-size: 0.65rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex: 0 0 auto; }
+    .clock-card .actions { display: flex; gap: 0.3rem; flex: 0 0 auto; }
+    .clock-card .actions .btn { font-size: 0.7rem; padding: 0.2rem 0.5rem; }
+    .clock-card .notes { display: none; }
+    @media (max-width: 600px) {
+        .clock-card { flex-wrap: wrap; gap: 0.4rem 0.85rem; }
+        .clock-card .date-time-block { justify-content: flex-start; flex: 1 1 100%; }
+        .clock-card .actions { flex: 0 0 auto; margin-left: auto; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Chronos</h1>
+<p style="color:#8b949e;">Velour's sense of time. The clock in the top-right of every page is your home time ({{ prefs.home_tz }}). Below: the same clock, plus every world clock you've pinned.</p>
+
+<div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+    <a href="{% url 'chronos:watched_add' %}" class="btn">Add World Clock</a>
+    <a href="{% url 'chronos:settings' %}" class="btn btn-secondary">Settings</a>
+    <button type="button" class="btn btn-secondary" onclick="window.location.reload()">Re-sync now</button>
+</div>
+
+<h2 style="margin-top: 1.25rem; margin-bottom: 0.25rem;">Home</h2>
+<div class="clock-grid">
+    <div class="card clock-card home"
+         data-clock-tz="{{ home_clock.tz_name }}"
+         data-clock-epoch-ms="{{ home_clock.epoch_ms }}">
+        <div class="label-block">
+            <div class="label">Home</div>
+            <div class="tz">{{ home_clock.tz_name }}</div>
+        </div>
+        <div class="date-time-block">
+            <span class="date js-clock-date">{{ home_clock.date_str }}</span>
+            <span class="time js-clock-time">{{ home_clock.time_str }}</span>
+        </div>
+        <div class="offset">UTC{{ home_clock.utc_offset }}</div>
+    </div>
+</div>
+
+<h2 style="margin-top: 1.25rem; margin-bottom: 0.25rem;">World Clocks</h2>
+{% if watched %}
+<div class="clock-grid">
+    {% for w in watched %}
+    <div class="card clock-card"
+         data-clock-tz="{{ w.tz_name }}"
+         data-clock-epoch-ms="{{ w.epoch_ms }}">
+        <div class="label-block">
+            <div class="label"{% if w.color %} style="color: {{ w.color }};"{% endif %}>{{ w.label }}</div>
+            <div class="tz">{{ w.tz_name }}</div>
+        </div>
+        <div class="date-time-block"{% if w.color %} style="color: {{ w.color }};"{% endif %}>
+            <span class="date js-clock-date">{{ w.date_str }}</span>
+            <span class="time js-clock-time"{% if w.color %} style="color: {{ w.color }};"{% endif %}>{{ w.time_str }}</span>
+        </div>
+        <div class="offset">UTC{{ w.utc_offset }}</div>
+        <div class="actions">
+            <a href="{% url 'chronos:watched_edit' w.pk %}" class="btn btn-secondary">Edit</a>
+            <form method="post" action="{% url 'chronos:watched_delete' w.pk %}" style="display:inline;" onsubmit="return confirm('Remove {{ w.label|escapejs }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;">No world clocks pinned yet. <a href="{% url 'chronos:watched_add' %}">Add one</a> — try America/New_York or America/Denver.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

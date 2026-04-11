@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Security - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { padding: 0.75rem 2rem; }
+    .platform-banner {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.75rem;
+        color: #8b949e;
+        margin-bottom: 0.6rem;
+        display: inline-block;
+    }
+    .platform-banner strong { color: #c9d1d9; }
+    .category-section { margin-bottom: 0.8rem; }
+    .category-title {
+        font-size: 0.78rem;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.3rem;
+        padding-left: 0.1rem;
+    }
+    .tool-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+        gap: 0.5rem;
+    }
+    .tool-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.5rem 0.7rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .tool-card h3 { color: #58a6ff; font-size: 0.82rem; margin-bottom: 0.15rem; }
+    .tool-card p { color: #8b949e; font-size: 0.7rem; line-height: 1.3; margin-bottom: 0.25rem; flex: 1; }
+    .tool-card a { font-size: 0.7rem; padding: 0.18rem 0.45rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+    <h1 style="font-size: 1.1rem; margin: 0;">Security</h1>
+    <a href="{% url 'security:audit' %}" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.3rem 0.8rem;">Run Full Audit</a>
+</div>
+
+<div class="platform-banner">
+    Detected: <strong>{{ platform.distro_name|default:platform.os_family }}</strong>
+    {% if platform.pkg_manager %} &middot; {{ platform.pkg_manager }}{% endif %}
+    {% if platform.init_system %} &middot; {{ platform.init_system }}{% endif %}
+    {% if platform.is_container %} &middot; Container{% endif %}
+    {% if platform.is_wsl %} &middot; WSL{% endif %}
+</div>
+
+{% regroup checks by category as grouped_checks %}
+{% for group in grouped_checks %}
+<div class="category-section">
+    <div class="category-title">{{ group.grouper }}</div>
+    <div class="tool-grid">
+        {% for check in group.list %}
+        <div class="tool-card">
+            <h3>{{ check.name }}</h3>
+            <p>{{ check.desc }}</p>
+            <a href="{% url 'security:audit' %}#{{ check.id }}" class="btn btn-secondary">{{ check.action }}</a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endfor %}
+{% endblock %}

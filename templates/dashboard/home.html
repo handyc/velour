@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { padding: 0.75rem 2rem; }
+    .dash-header { margin-bottom: 0.5rem; }
+    .dash-header h1 { font-size: 1.2rem; margin-bottom: 0; display: inline; }
+    .dash-header span { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+    }
+    .dashboard-grid .card {
+        padding: 0.9rem 1.1rem;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .dashboard-grid .card h3 {
+        font-size: 0.95rem;
+        margin-bottom: 0.3rem;
+    }
+    .dashboard-grid .card p {
+        font-size: 0.82rem;
+        line-height: 1.4;
+        margin-bottom: 0.25rem;
+        flex: 1;
+    }
+    .dashboard-grid .card a {
+        font-size: 0.82rem;
+        margin-top: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dash-header">
+    <h1>Dashboard</h1>
+    <span>Welcome back, {{ user.username }}</span>
+</div>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <h3>Web Terminal</h3>
+        <p>Interactive shell session on the host system.</p>
+        <a href="{% url 'terminal:terminal' %}">Open Terminal</a>
+    </div>
+    <div class="card">
+        <h3>App Factory</h3>
+        <p>Create, deploy, and manage Django applications.</p>
+        <a href="{% url 'app_factory:list' %}">Manage Apps</a>
+    </div>
+    <div class="card">
+        <h3>System Info</h3>
+        <p>{{ system_info.hostname }} &middot; Load: {{ system_info.load }}</p>
+        <a href="{% url 'sysinfo:home' %}">Full Details</a>
+    </div>
+    <div class="card">
+        <h3>Security</h3>
+        <p>Audit SSH, firewall, ports, users, and updates.</p>
+        <a href="{% url 'security:home' %}">Security Tools</a>
+    </div>
+    <div class="card">
+        <h3>Logs</h3>
+        <p>View and analyze system logs with filtering.</p>
+        <a href="{% url 'logs:home' %}">View Logs</a>
+    </div>
+    <div class="card">
+        <h3>Services</h3>
+        <p>Nginx sites, Supervisor programs, Gunicorn.</p>
+        <a href="{% url 'services:home' %}">View Services</a>
+    </div>
+    <div class="card">
+        <h3>Databases</h3>
+        <p>MySQL and PostgreSQL connections — credentials and live test.</p>
+        <a href="{% url 'databases:list' %}">Open Databases</a>
+    </div>
+    <div class="card">
+        <h3>Graphs</h3>
+        <p>Live and historical system usage graphs.</p>
+        <a href="{% url 'graphs:home' %}">View Graphs</a>
+    </div>
+    <div class="card">
+        <h3>Identity</h3>
+        <p>The system's self-awareness and personality.</p>
+        <a href="{% url 'identity:home' %}">View Identity</a>
+    </div>
+    <div class="card">
+        <h3>Maintenance</h3>
+        <p>Backup and restore /home directories as tarballs.</p>
+        <a href="{% url 'maintenance:home' %}">Maintenance</a>
+    </div>
+    <div class="card">
+        <h3>Windows</h3>
+        <p>Control Windows from WSL — processes, services, firewall, PowerShell.</p>
+        <a href="{% url 'winctl:home' %}">Windows Control</a>
+    </div>
+    <div class="card">
+        <h3>Agricola</h3>
+        <p>Agar.io clone — eat cells to grow.</p>
+        <a href="{% url 'agricola:game' %}">Play Now</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,534 @@
+{% extends "base.html" %}
+
+{% block title %}Security Audit - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .platform-info {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.75rem;
+        color: #8b949e;
+        margin-bottom: 0.8rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .platform-info strong { color: #c9d1d9; }
+
+    /* ── Progress panel ─────────────────────────────────── */
+    .progress-panel {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.8rem 1rem;
+        margin-bottom: 1rem;
+    }
+    .progress-panel.done { border-color: #3fb950; }
+    .progress-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    .progress-title {
+        font-size: 0.88rem;
+        font-weight: bold;
+        color: #c9d1d9;
+    }
+    .progress-pct {
+        font-size: 0.82rem;
+        color: #58a6ff;
+        font-weight: bold;
+    }
+    .progress-bar-track {
+        width: 100%;
+        height: 6px;
+        background: #21262d;
+        border-radius: 3px;
+        overflow: hidden;
+        margin-bottom: 0.5rem;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: #58a6ff;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+        width: 0%;
+    }
+    .progress-bar-fill.complete { background: #3fb950; }
+
+    .progress-log {
+        max-height: 160px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 0.72rem;
+        line-height: 1.55;
+        color: #8b949e;
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        padding: 0.5rem 0.7rem;
+    }
+    .progress-log .log-entry { display: flex; gap: 0.5rem; }
+    .log-time { color: #484f58; min-width: 5.5ch; }
+    .log-status { min-width: 2ch; }
+    .log-status.running { color: #58a6ff; }
+    .log-status.done { color: #3fb950; }
+    .log-status.err { color: #f85149; }
+    .log-check { color: #c9d1d9; }
+    .log-elapsed { color: #484f58; margin-left: auto; }
+    .log-counts { color: #8b949e; }
+    .log-entry.current { color: #58a6ff; }
+    .log-entry.current .log-check { color: #58a6ff; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .spinner { animation: pulse 1s infinite; }
+
+    /* ── Summary & filters ──────────────────────────────── */
+    .audit-summary {
+        display: flex;
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    .summary-badge {
+        padding: 0.4rem 1rem;
+        border-radius: 6px;
+        font-weight: bold;
+        font-size: 0.9rem;
+        transition: all 0.3s;
+    }
+    .badge-pass { background: rgba(63,185,80,0.15); color: #3fb950; }
+    .badge-fail { background: rgba(248,81,73,0.15); color: #f85149; }
+    .badge-warn { background: rgba(210,153,34,0.15); color: #d29922; }
+    .badge-info { background: rgba(88,166,255,0.15); color: #58a6ff; }
+
+    .filter-bar {
+        display: flex;
+        gap: 0.4rem;
+        margin-bottom: 0.8rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-group { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+    .filter-label {
+        font-size: 0.72rem;
+        color: #8b949e;
+        margin-right: 0.2rem;
+        align-self: center;
+    }
+    .filter-btn {
+        padding: 0.25rem 0.65rem;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+    .filter-btn:hover { background: #21262d; color: #c9d1d9; }
+    .filter-btn.active { background: #30363d; color: #c9d1d9; }
+    .filter-sep {
+        width: 1px;
+        height: 1.2rem;
+        background: #30363d;
+        margin: 0 0.4rem;
+    }
+
+    /* ── Findings ────────────────────────────────────────── */
+    .finding {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.8rem 1rem;
+        margin-bottom: 0.5rem;
+        border-left: 3px solid #30363d;
+        animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .finding-pass { border-left-color: #3fb950; }
+    .finding-fail { border-left-color: #f85149; }
+    .finding-warn { border-left-color: #d29922; }
+    .finding-info { border-left-color: #58a6ff; }
+    .finding-unknown { border-left-color: #8b949e; }
+    .finding-skip { border-left-color: #8b949e; }
+
+    .finding-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.35rem;
+    }
+    .finding-name { font-weight: bold; color: #c9d1d9; font-size: 0.88rem; }
+    .finding-status {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.72rem;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+    .status-pass { background: rgba(63,185,80,0.2); color: #3fb950; }
+    .status-fail { background: rgba(248,81,73,0.2); color: #f85149; }
+    .status-warn { background: rgba(210,153,34,0.2); color: #d29922; }
+    .status-info { background: rgba(88,166,255,0.2); color: #58a6ff; }
+    .status-unknown { background: rgba(139,148,158,0.2); color: #8b949e; }
+    .status-skip { background: rgba(139,148,158,0.2); color: #8b949e; }
+
+    .finding-detail {
+        color: #8b949e;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        margin-bottom: 0.35rem;
+    }
+    .finding-fix {
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        padding: 0.5rem 0.7rem;
+        font-family: monospace;
+        font-size: 0.78rem;
+        color: #3fb950;
+        margin-top: 0.35rem;
+    }
+    .finding-fix-label {
+        color: #58a6ff;
+        font-family: sans-serif;
+        font-size: 0.72rem;
+        font-weight: bold;
+        margin-bottom: 0.2rem;
+    }
+    .severity-tag {
+        font-size: 0.68rem;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 0.4rem;
+        text-transform: uppercase;
+    }
+    .sev-critical { background: #da3633; color: #fff; }
+    .sev-high { background: rgba(248,81,73,0.3); color: #f85149; }
+    .sev-medium { background: rgba(210,153,34,0.3); color: #d29922; }
+    .sev-low { background: rgba(88,166,255,0.2); color: #58a6ff; }
+    .sev-ok { background: rgba(63,185,80,0.2); color: #3fb950; }
+    .sev-info { background: rgba(139,148,158,0.2); color: #8b949e; }
+
+    .export-btn {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.6rem;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .export-btn:hover { background: #21262d; color: #c9d1d9; }
+    .hidden { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1 style="font-size: 1.1rem;">Security Audit</h1>
+    <div style="display: flex; gap: 0.4rem;">
+        <button class="export-btn hidden" id="export-btn" onclick="exportJSON()">Export JSON</button>
+        <a href="{% url 'security:audit' %}" class="btn btn-primary" style="font-size: 0.78rem; padding: 0.25rem 0.7rem;">Re-Run</a>
+        <a href="{% url 'security:home' %}" class="btn btn-secondary" style="font-size: 0.78rem; padding: 0.25rem 0.7rem;">Back</a>
+    </div>
+</div>
+
+<div class="platform-info">
+    <span>
+        Platform: <strong>{{ platform.distro_name|default:platform.os_family }}</strong>
+        {% if platform.arch %} &middot; {{ platform.arch }}{% endif %}
+        {% if platform.pkg_manager %} &middot; {{ platform.pkg_manager }}{% endif %}
+        {% if platform.init_system %} &middot; {{ platform.init_system }}{% endif %}
+        {% if platform.is_container %} &middot; Container{% endif %}
+        {% if platform.is_wsl %} &middot; WSL{% endif %}
+    </span>
+    <span id="check-count"></span>
+</div>
+
+<!-- Progress panel -->
+<div class="progress-panel" id="progress-panel">
+    <div class="progress-header">
+        <span class="progress-title" id="progress-title">
+            <span class="spinner">&#9654;</span> Starting audit...
+        </span>
+        <span class="progress-pct" id="progress-pct">0%</span>
+    </div>
+    <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progress-bar"></div>
+    </div>
+    <div class="progress-log" id="progress-log"></div>
+</div>
+
+<!-- Summary (hidden until first results) -->
+<div class="audit-summary hidden" id="summary-bar">
+    <span class="summary-badge badge-pass" id="sum-pass">0 Passed</span>
+    <span class="summary-badge badge-fail" id="sum-fail">0 Failed</span>
+    <span class="summary-badge badge-warn" id="sum-warn">0 Warnings</span>
+    <span class="summary-badge badge-info" id="sum-info">0 Info</span>
+</div>
+
+<!-- Filters (hidden until complete) -->
+<div class="filter-bar hidden" id="filter-bar">
+    <span class="filter-label">Status:</span>
+    <div class="filter-group" id="status-filters">
+        <button class="filter-btn active" onclick="filterStatus('all', this)">All</button>
+        <button class="filter-btn" onclick="filterStatus('fail', this)">Failures</button>
+        <button class="filter-btn" onclick="filterStatus('warn', this)">Warnings</button>
+        <button class="filter-btn" onclick="filterStatus('pass', this)">Passed</button>
+        <button class="filter-btn" onclick="filterStatus('info', this)">Info</button>
+    </div>
+    <div class="filter-sep"></div>
+    <span class="filter-label">Category:</span>
+    <div class="filter-group" id="cat-filters">
+        <button class="filter-btn active" onclick="filterCategory('all', this)">All</button>
+        {% for cat in categories %}
+        <button class="filter-btn" onclick="filterCategory('{{ cat }}', this)">{{ cat }}</button>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Findings (populated live via JS) -->
+<div id="findings"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const streamUrl = "{% url 'security:audit_stream' %}";
+let activeStatus = 'all';
+let activeCategory = 'all';
+let startTime = null;
+let logIndex = 0;
+
+function startAudit() {
+    startTime = Date.now();
+    const evtSource = new EventSource(streamUrl);
+
+    evtSource.addEventListener('platform', (e) => {
+        // Platform info received — audit is starting
+    });
+
+    evtSource.addEventListener('progress', (e) => {
+        const d = JSON.parse(e.data);
+        const bar = document.getElementById('progress-bar');
+        const pct = document.getElementById('progress-pct');
+        const title = document.getElementById('progress-title');
+
+        bar.style.width = d.percent + '%';
+        pct.textContent = d.percent + '%';
+        title.innerHTML = '<span class="spinner">&#9654;</span> Running: <strong>' +
+            escapeHtml(d.check_name) + '</strong> <span style="color:#484f58">(' +
+            (d.index + 1) + '/' + d.total + ')</span>';
+
+        // Add "running" entry to log
+        addLogEntry(d.check_name, d.category, 'running', null);
+    });
+
+    evtSource.addEventListener('findings', (e) => {
+        const d = JSON.parse(e.data);
+
+        // Update last log entry with completion info
+        updateLastLogEntry(d.check_name, d.elapsed, d.findings.length, d.summary);
+
+        // Update progress bar
+        const bar = document.getElementById('progress-bar');
+        const pct = document.getElementById('progress-pct');
+        bar.style.width = d.percent + '%';
+        pct.textContent = d.percent + '%';
+
+        // Show summary bar
+        const summaryBar = document.getElementById('summary-bar');
+        summaryBar.classList.remove('hidden');
+        document.getElementById('sum-pass').textContent = d.summary.pass + ' Passed';
+        document.getElementById('sum-fail').textContent = d.summary.fail + ' Failed';
+        document.getElementById('sum-warn').textContent = d.summary.warn + ' Warnings';
+        document.getElementById('sum-info').textContent = (d.summary.info || 0) + ' Info';
+
+        // Render findings
+        const container = document.getElementById('findings');
+        for (const f of d.findings) {
+            container.appendChild(createFindingEl(f));
+        }
+
+        // Update check count
+        document.getElementById('check-count').textContent =
+            d.index + '/' + d.total + ' checks';
+
+        // Auto-scroll log
+        const log = document.getElementById('progress-log');
+        log.scrollTop = log.scrollHeight;
+    });
+
+    evtSource.addEventListener('complete', (e) => {
+        const d = JSON.parse(e.data);
+        evtSource.close();
+
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        const panel = document.getElementById('progress-panel');
+        const bar = document.getElementById('progress-bar');
+        const pct = document.getElementById('progress-pct');
+        const title = document.getElementById('progress-title');
+
+        bar.style.width = '100%';
+        bar.classList.add('complete');
+        pct.textContent = '100%';
+        panel.classList.add('done');
+        title.innerHTML = '&#10003; Audit complete &mdash; ' +
+            d.total_findings + ' findings in ' + elapsed + 's';
+
+        // Show filters and export
+        document.getElementById('filter-bar').classList.remove('hidden');
+        document.getElementById('export-btn').classList.remove('hidden');
+        document.getElementById('check-count').textContent = d.total_findings + ' findings';
+
+        // Add completion line to log
+        const log = document.getElementById('progress-log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = '<span class="log-time">' + formatTime() + '</span>' +
+            '<span class="log-status done">&#10003;</span>' +
+            '<span class="log-check" style="color:#3fb950">Audit complete (' + elapsed + 's)</span>';
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+    });
+
+    evtSource.onerror = () => {
+        evtSource.close();
+        const title = document.getElementById('progress-title');
+        title.innerHTML = '&#10007; Connection lost — <a href="" style="color:#58a6ff">reload</a>';
+    };
+}
+
+function addLogEntry(name, category, status, elapsed) {
+    const log = document.getElementById('progress-log');
+
+    // Un-highlight previous "current" entry
+    const prev = log.querySelector('.current');
+    if (prev) prev.classList.remove('current');
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry current';
+    entry.dataset.check = name;
+    entry.innerHTML =
+        '<span class="log-time">' + formatTime() + '</span>' +
+        '<span class="log-status running spinner">&#8226;</span>' +
+        '<span class="log-check">' + escapeHtml(name) + '</span>' +
+        '<span class="log-elapsed"></span>';
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+function updateLastLogEntry(name, elapsed, findingCount, summary) {
+    const log = document.getElementById('progress-log');
+    const entries = log.querySelectorAll('.log-entry');
+    // Find the entry for this check
+    for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].dataset.check === name) {
+            const statusEl = entries[i].querySelector('.log-status');
+            statusEl.className = 'log-status done';
+            statusEl.innerHTML = '&#10003;';
+            statusEl.classList.remove('spinner');
+            entries[i].classList.remove('current');
+
+            const elapsedEl = entries[i].querySelector('.log-elapsed');
+            let detail = elapsed + 's';
+            if (summary.fail > 0 || summary.warn > 0) {
+                const parts = [];
+                if (summary.fail) parts.push(summary.fail + ' fail');
+                if (summary.warn) parts.push(summary.warn + ' warn');
+            }
+            elapsedEl.textContent = findingCount + ' findings, ' + detail;
+            break;
+        }
+    }
+}
+
+function createFindingEl(f) {
+    const div = document.createElement('div');
+    div.className = 'finding finding-' + f.status;
+    div.dataset.status = f.status;
+    div.dataset.category = f.category || '';
+
+    // Check current filters
+    const matchStatus = activeStatus === 'all' || f.status === activeStatus;
+    const matchCat = activeCategory === 'all' || f.category === activeCategory;
+    if (!matchStatus || !matchCat) div.style.display = 'none';
+
+    let html = '<div class="finding-header"><div>' +
+        '<span class="finding-name">' + escapeHtml(f.name) + '</span>' +
+        '<span class="severity-tag sev-' + f.severity + '">' + f.severity + '</span>' +
+        '</div>' +
+        '<span class="finding-status status-' + f.status + '">' + f.status + '</span></div>' +
+        '<div class="finding-detail">' + escapeHtml(f.detail) + '</div>';
+
+    if (f.fix) {
+        html += '<div class="finding-fix-label">Recommended Fix:</div>' +
+            '<div class="finding-fix">' + escapeHtml(f.fix) + '</div>';
+    }
+
+    div.innerHTML = html;
+    return div;
+}
+
+function formatTime() {
+    if (!startTime) return '0.0s';
+    return ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+}
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text || '';
+    return d.innerHTML;
+}
+
+// ── Filters ────────────────────────────────────────────
+
+function filterStatus(status, btn) {
+    activeStatus = status;
+    document.querySelectorAll('#status-filters .filter-btn')
+        .forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilters();
+}
+
+function filterCategory(cat, btn) {
+    activeCategory = cat;
+    document.querySelectorAll('#cat-filters .filter-btn')
+        .forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilters();
+}
+
+function applyFilters() {
+    document.querySelectorAll('.finding').forEach(f => {
+        const matchStatus = activeStatus === 'all' || f.dataset.status === activeStatus;
+        const matchCat = activeCategory === 'all' || f.dataset.category === activeCategory;
+        f.style.display = (matchStatus && matchCat) ? 'block' : 'none';
+    });
+}
+
+function exportJSON() {
+    fetch("{% url 'security:audit' %}", {
+        headers: {'Accept': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'security-audit.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+// Start immediately on page load
+startAudit();
+</script>
+{% endblock %}

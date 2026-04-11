@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source_name }} Analysis - Logs - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .viz-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    .viz-grid .card { min-height: 280px; }
+    .viz-grid .card.full { grid-column: 1 / -1; }
+    #top-messages { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; }
+    #top-messages td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #21262d; }
+    #top-messages td.count { text-align: right; color: #8b949e; width: 4rem; }
+    #loading { color: #8b949e; font-style: italic; }
+    #total-lines { color: #58a6ff; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ source_name }} &mdash; Analysis</h1>
+<p><span id="loading">Loading…</span><span id="stats" style="display:none;">Analyzed <span id="total-lines">0</span> lines.</span></p>
+
+<div class="viz-grid">
+    <div class="card">
+        <h3>Severity Breakdown</h3>
+        <canvas id="severity-chart"></canvas>
+    </div>
+    <div class="card">
+        <h3>Hourly Distribution</h3>
+        <canvas id="hourly-chart"></canvas>
+    </div>
+    <div class="card full">
+        <h3>Top Repeated Patterns</h3>
+        <table id="top-messages" style="width:100%;">
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'logs:view' %}?source={{ source_id }}" class="btn">View Raw Log</a>
+    <a href="{% url 'logs:viz_pdf' %}?source={{ source_id }}" class="btn btn-secondary">Export PDF</a>
+    <a href="{% url 'logs:home' %}" class="btn btn-secondary">All Log Sources</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    const SOURCE_ID = "{{ source_id|escapejs }}";
+    const ANALYZE_URL = "{% url 'logs:analyze' %}?source=" + encodeURIComponent(SOURCE_ID);
+
+    const SEVERITY_COLORS = {
+        error:   '#f85149',
+        warning: '#d29922',
+        info:    '#58a6ff',
+    };
+
+    fetch(ANALYZE_URL)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('stats').style.display = '';
+            document.getElementById('total-lines').textContent = data.total_lines || 0;
+
+            // Severity chart (doughnut)
+            const sev = data.severity || {};
+            if (sev.labels && sev.labels.length) {
+                new Chart(document.getElementById('severity-chart'), {
+                    type: 'doughnut',
+                    data: {
+                        labels: sev.labels,
+                        datasets: [{
+                            data: sev.values,
+                            backgroundColor: sev.labels.map(l => SEVERITY_COLORS[l] || '#8b949e'),
+                        }],
+                    },
+                    options: { responsive: true, plugins: { legend: { labels: { color: '#c9d1d9' } } } },
+                });
+            }
+
+            // Hourly chart (bar, all vs errors)
+            const hourly = data.hourly || {};
+            if (hourly.labels && hourly.labels.length) {
+                new Chart(document.getElementById('hourly-chart'), {
+                    type: 'bar',
+                    data: {
+                        labels: hourly.labels,
+                        datasets: [
+                            { label: 'All',    data: hourly.all,    backgroundColor: '#58a6ff' },
+                            { label: 'Errors', data: hourly.errors, backgroundColor: '#f85149' },
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            x: { ticks: { color: '#c9d1d9' }, grid: { color: '#21262d' } },
+                            y: { ticks: { color: '#c9d1d9' }, grid: { color: '#21262d' } },
+                        },
+                        plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                    },
+                });
+            }
+
+            // Top messages table
+            const top = data.top_messages || [];
+            const tbody = document.querySelector('#top-messages tbody');
+            if (top.length) {
+                top.forEach(item => {
+                    const tr = document.createElement('tr');
+                    const msg = document.createElement('td');
+                    msg.textContent = item.msg;
+                    const count = document.createElement('td');
+                    count.className = 'count';
+                    count.textContent = item.count + '×';
+                    tr.appendChild(count);
+                    tr.appendChild(msg);
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="2" style="color:#8b949e;">No repeated patterns detected.</td></tr>';
+            }
+        })
+        .catch(err => {
+            document.getElementById('loading').textContent = 'Failed to load analysis: ' + err;
+        });
+})();
+</script>
+{% endblock %}

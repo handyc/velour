@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}{{ snapshot.title }} - Graph History{% endblock %}
+
+{% block extra_head %}
+<style>
+    .graph-container {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 1rem;
+        position: relative;
+    }
+    .graph-container canvas { max-width: 100%; max-height: 250px; }
+    #three-container { width: 100%; height: 250px; display: none; }
+    #chart-container { display: block; max-height: 250px; }
+    #treemap-container { width: 100%; height: 220px; display: none; position: relative; }
+    .treemap-item {
+        position: absolute; border: 1px solid rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px; color: #fff; text-shadow: 0 0 3px rgba(0,0,0,0.8);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    <div>
+        <h1 style="margin-bottom: 0.25rem;">{{ snapshot.title }}</h1>
+        <p style="color: #8b949e;">
+            Saved {{ snapshot.created_at|date:"M d, Y H:i:s" }}
+            {% if snapshot.created_by %}by {{ snapshot.created_by.username }}{% endif %}
+        </p>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{% url 'graphs:history_pdf' snapshot.pk %}?type={{ snapshot.graph_type }}&snapshot={{ snapshot.pk }}" class="btn btn-primary" target="_blank">Export PDF</a>
+        <a href="{% url 'graphs:history' %}" class="btn btn-secondary">Back to History</a>
+    </div>
+</div>
+
+<div class="graph-container">
+    <div id="chart-container"><canvas id="chart-canvas"></canvas></div>
+    <div id="three-container"></div>
+    <div id="treemap-container"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function() {
+    const chartContainer = document.getElementById('chart-container');
+    const threeContainer = document.getElementById('three-container');
+    const treemapContainer = document.getElementById('treemap-container');
+    const CHART_COLORS = [
+        '#58a6ff','#3fb950','#d29922','#f85149','#bc8cff',
+        '#42d4f4','#f032e6','#bfef45','#ff6eb4','#469990',
+    ];
+
+    function getCanvas() { return document.getElementById('chart-canvas'); }
+    function showContainer(which) {
+        chartContainer.style.display = which === 'chart' ? 'block' : 'none';
+        threeContainer.style.display = which === 'three' ? 'block' : 'none';
+        treemapContainer.style.display = which === 'treemap' ? 'block' : 'none';
+    }
+
+    const graphType = '{{ snapshot.graph_type }}';
+
+    fetch('{% url "graphs:history_data" snapshot.pk %}')
+        .then(r => r.json())
+        .then(data => {
+            const ct = getChartType(graphType);
+            if (ct === 'line') renderLine(data);
+            else if (ct === 'doughnut') renderDoughnut(data);
+            else if (ct === 'bar') renderBar(data);
+            else if (ct === 'treemap') renderTreemap(data);
+            else showContainer('chart');
+        });
+
+    function getChartType(t) {
+        if (['memory_history','swap_usage','user_sessions'].includes(t)) return 'doughnut';
+        if (['disk_usage','network_io','disk_io','top_processes'].includes(t)) return 'bar';
+        if (t === 'filesystem_tree') return 'treemap';
+        return 'line';
+    }
+
+    function renderLine(data) {
+        showContainer('chart');
+        const ds = [{ label: data.ylabel||'', data: data.values, borderColor: '#58a6ff',
+                      backgroundColor: 'rgba(88,166,255,0.1)', fill: true, tension: 0.3, pointRadius: 2 }];
+        if (data.threshold) ds.push({ label: 'Threshold', data: data.labels.map(()=>data.threshold),
+            borderColor: '#f85149', borderDash: [5,5], pointRadius: 0, fill: false });
+        new Chart(getCanvas(), { type: 'line', data: { labels: data.labels, datasets: ds },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } } } });
+    }
+
+    function renderDoughnut(data) {
+        showContainer('chart');
+        new Chart(getCanvas(), { type: 'doughnut', data: { labels: data.labels, datasets: [{
+            data: data.values, backgroundColor: CHART_COLORS.slice(0, data.labels.length),
+            borderColor: '#161b22', borderWidth: 2 }] },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' }, position: 'right' } } } });
+    }
+
+    function renderBar(data) {
+        showContainer('chart');
+        const ds = (data.datasets||[]).map((d,i) => ({
+            label: d.label, data: d.values, backgroundColor: CHART_COLORS[i%CHART_COLORS.length] }));
+        new Chart(getCanvas(), { type: 'bar', data: { labels: data.labels, datasets: ds },
+            options: { responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                scales: { x: { ticks: { color: '#8b949e' } }, y: { ticks: { color: '#8b949e' } } } } });
+    }
+
+    function renderTreemap(data) {
+        showContainer('treemap');
+        const items = (data.items||[]).sort((a,b) => b.size - a.size);
+        const total = items.reduce((s,i) => s + i.size, 0);
+        const W = treemapContainer.clientWidth, H = treemapContainer.clientHeight;
+        let x = 0, y = 0, rowH = 0;
+        items.forEach((item, i) => {
+            let w = Math.max(30, (item.size/total)*W);
+            let h = Math.max(20, (item.size/total)*W*H / w);
+            if (x + w > W) { x = 0; y += rowH; rowH = 0; }
+            rowH = Math.max(rowH, h);
+            if (y + h > H) h = H - y;
+            if (h <= 0) return;
+            const div = document.createElement('div');
+            div.className = 'treemap-item';
+            Object.assign(div.style, { left: x+'px', top: y+'px', width: w+'px', height: h+'px',
+                background: CHART_COLORS[i%CHART_COLORS.length] });
+            div.title = `${item.path}: ${item.size} MB`;
+            div.textContent = w > 60 ? `${item.path.split('/').pop()} (${item.size}M)` : '';
+            treemapContainer.appendChild(div);
+            x += w;
+        });
+    }
+})();
+</script>
+{% endblock %}

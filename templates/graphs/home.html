@@ -1,0 +1,528 @@
+{% extends "base.html" %}
+
+{% block title %}Graphs - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .graph-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+    .graph-controls select {
+        padding: 0.5rem 1rem;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #c9d1d9;
+        font-size: 0.95rem;
+        min-width: 280px;
+    }
+    .graph-controls optgroup { color: #8b949e; }
+    .graph-controls option { color: #c9d1d9; background: #161b22; }
+    .graph-container {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 1rem;
+        position: relative;
+    }
+    .graph-container canvas { max-width: 100%; max-height: 250px; }
+    #three-container {
+        width: 100%;
+        height: 250px;
+        display: none;
+    }
+    #chart-container { display: block; max-height: 250px; }
+    .graph-title {
+        color: #58a6ff;
+        font-size: 1.1rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+    }
+    .loading {
+        color: #8b949e;
+        text-align: center;
+        padding: 3rem;
+        font-size: 1rem;
+    }
+    .graph-description {
+        color: #8b949e;
+        font-size: 0.85rem;
+        margin-top: 1rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #21262d;
+    }
+    #treemap-container {
+        width: 100%;
+        height: 220px;
+        display: none;
+        position: relative;
+    }
+    .treemap-item {
+        position: absolute;
+        border: 1px solid rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: #fff;
+        text-shadow: 0 0 3px rgba(0,0,0,0.8);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        padding: 2px 4px;
+        cursor: default;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Graphs</h1>
+
+<div class="graph-controls">
+    <select id="graph-selector">
+        <optgroup label="2D Line / Area">
+            <option value="cpu_history">CPU Usage (Live Sampled ~3s)</option>
+            <option value="load_average">Load Average</option>
+            <option value="entropy">Kernel Entropy Pool (Live)</option>
+        </optgroup>
+        <optgroup label="Pie / Doughnut">
+            <option value="memory_history" selected>Memory Breakdown</option>
+            <option value="swap_usage">Swap Usage</option>
+            <option value="user_sessions">Active User Sessions</option>
+        </optgroup>
+        <optgroup label="Bar / Stacked Bar">
+            <option value="disk_usage">Disk Usage by Mount Point</option>
+            <option value="network_io">Network I/O by Interface</option>
+            <option value="disk_io">Disk I/O by Device</option>
+            <option value="top_processes">Top 15 Processes</option>
+        </optgroup>
+        <optgroup label="Treemap">
+            <option value="filesystem_tree">Filesystem Usage (Treemap)</option>
+        </optgroup>
+        <optgroup label="3D Network">
+            <option value="process_tree">Process Tree (3D Network)</option>
+        </optgroup>
+    </select>
+    <button class="btn btn-primary" id="refresh-btn">Refresh</button>
+    <button class="btn btn-secondary" id="save-btn">Save Snapshot</button>
+    <a class="btn btn-secondary" id="pdf-btn" href="#" target="_blank">Export PDF</a>
+    <a class="btn btn-secondary" href="{% url 'graphs:history' %}">History</a>
+    <span class="loading" id="loading" style="display:none; padding:0;">Loading...</span>
+    <span id="save-msg" style="color: #3fb950; font-size: 0.85rem; display:none;"></span>
+</div>
+
+<div class="graph-container">
+    <div class="graph-title" id="graph-title"></div>
+    <div id="chart-container"><canvas id="chart-canvas"></canvas></div>
+    <div id="three-container"></div>
+    <div id="treemap-container"></div>
+    <div class="graph-description" id="graph-description"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function() {
+    const selector = document.getElementById('graph-selector');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const loading = document.getElementById('loading');
+    const titleEl = document.getElementById('graph-title');
+    const descEl = document.getElementById('graph-description');
+    const chartContainer = document.getElementById('chart-container');
+    const threeContainer = document.getElementById('three-container');
+    const treemapContainer = document.getElementById('treemap-container');
+
+    function getCanvas() { return document.getElementById('chart-canvas'); }
+
+    let currentChart = null;
+    let threeCleanup = null;
+
+    const DESCRIPTIONS = {
+        cpu_history: 'Samples /proc/stat every 150ms to build a live CPU usage trace. Useful for spotting transient spikes.',
+        memory_history: 'Breakdown of physical memory into used, buffers, cached, and free from /proc/meminfo.',
+        disk_usage: 'Used vs available space per mount point from df. Watch for mounts approaching capacity.',
+        network_io: 'Cumulative bytes received and transmitted per network interface since boot, from /proc/net/dev.',
+        process_tree: 'Interactive 3D visualization of the process hierarchy. Drag to rotate, scroll to zoom.',
+        load_average: 'System load average over 1, 5, and 15 minutes. The red line marks the CPU core count threshold.',
+        swap_usage: 'Swap space breakdown. High swap usage may indicate memory pressure.',
+        disk_io: 'Cumulative disk read/write volume per block device from /proc/diskstats.',
+        top_processes: 'Top 15 processes ranked by RSS memory, also showing CPU usage.',
+        filesystem_tree: 'Treemap of directory sizes under /home, sized proportionally to disk usage.',
+        user_sessions: 'Currently logged-in users and their active session count from the who command.',
+        entropy: 'Available kernel entropy (randomness) sampled every 100ms. Low entropy can stall crypto operations.',
+    };
+
+    const CHART_COLORS = [
+        '#58a6ff','#3fb950','#d29922','#f85149','#bc8cff',
+        '#42d4f4','#f032e6','#bfef45','#ff6eb4','#469990',
+        '#e6194b','#3cb44b','#ffe119','#4363d8','#f58231',
+    ];
+
+    function showContainer(which) {
+        chartContainer.style.display = which === 'chart' ? 'block' : 'none';
+        threeContainer.style.display = which === 'three' ? 'block' : 'none';
+        treemapContainer.style.display = which === 'treemap' ? 'block' : 'none';
+    }
+
+    function destroyChart() {
+        if (currentChart) { currentChart.destroy(); currentChart = null; }
+        if (threeCleanup) { threeCleanup(); threeCleanup = null; }
+        treemapContainer.innerHTML = '';
+    }
+
+    function getChartType(graphType) {
+        if (['memory_history', 'swap_usage', 'user_sessions'].includes(graphType)) return 'doughnut';
+        if (['disk_usage', 'network_io', 'disk_io', 'top_processes'].includes(graphType)) return 'bar';
+        if (graphType === 'process_tree') return '3d_network';
+        if (graphType === 'filesystem_tree') return 'treemap';
+        return 'line';
+    }
+
+    function renderLineChart(data) {
+        showContainer('chart');
+        const datasets = [{
+            label: data.ylabel || 'Value',
+            data: data.values,
+            borderColor: '#58a6ff',
+            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2,
+        }];
+
+        // Threshold line (for load average)
+        if (data.threshold) {
+            datasets.push({
+                label: `Core count (${data.threshold})`,
+                data: data.labels.map(() => data.threshold),
+                borderColor: '#f85149',
+                borderDash: [5, 5],
+                pointRadius: 0,
+                fill: false,
+            });
+        }
+
+        currentChart = new Chart(getCanvas(), {
+            type: 'line',
+            data: { labels: data.labels, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                scales: {
+                    x: { ticks: { color: '#8b949e' }, grid: { color: 'rgba(48,54,61,0.5)' } },
+                    y: { ticks: { color: '#8b949e' }, grid: { color: 'rgba(48,54,61,0.5)' },
+                         title: { display: true, text: data.ylabel, color: '#8b949e' } },
+                },
+            },
+        });
+    }
+
+    function renderDoughnutChart(data) {
+        showContainer('chart');
+        currentChart = new Chart(getCanvas(), {
+            type: 'doughnut',
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    data: data.values,
+                    backgroundColor: CHART_COLORS.slice(0, data.labels.length),
+                    borderColor: '#161b22',
+                    borderWidth: 2,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#c9d1d9' }, position: 'right' },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${ctx.label}: ${ctx.parsed} ${data.ylabel || ''}`,
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    function renderBarChart(data) {
+        showContainer('chart');
+        const datasets = data.datasets.map((ds, i) => ({
+            label: ds.label,
+            data: ds.values,
+            backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+            borderColor: CHART_COLORS[i % CHART_COLORS.length],
+            borderWidth: 1,
+        }));
+
+        currentChart = new Chart(getCanvas(), {
+            type: 'bar',
+            data: { labels: data.labels, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                scales: {
+                    x: { ticks: { color: '#8b949e', maxRotation: 45 }, grid: { color: 'rgba(48,54,61,0.3)' } },
+                    y: { ticks: { color: '#8b949e' }, grid: { color: 'rgba(48,54,61,0.5)' },
+                         title: { display: true, text: data.ylabel, color: '#8b949e' } },
+                },
+            },
+        });
+    }
+
+    function renderTreemap(data) {
+        showContainer('treemap');
+        treemapContainer.innerHTML = '';
+        const items = data.items.sort((a, b) => b.size - a.size);
+        const totalSize = items.reduce((s, i) => s + i.size, 0);
+        const W = treemapContainer.clientWidth;
+        const H = treemapContainer.clientHeight;
+
+        // Simple squarified treemap layout
+        let x = 0, y = 0, rowH = 0, rowW = W;
+        let remaining = totalSize;
+
+        items.forEach((item, i) => {
+            const frac = item.size / Math.max(remaining, 1);
+            const area = (item.size / totalSize) * W * H;
+            let w, h;
+
+            if (rowW > 0) {
+                w = Math.max(30, (item.size / totalSize) * W);
+                h = Math.max(20, area / w);
+                if (x + w > W) { x = 0; y += rowH; rowH = 0; }
+                rowH = Math.max(rowH, h);
+            } else {
+                w = 60; h = 30;
+            }
+
+            if (y + h > H) h = H - y;
+            if (h <= 0) return;
+
+            const div = document.createElement('div');
+            div.className = 'treemap-item';
+            div.style.left = x + 'px';
+            div.style.top = y + 'px';
+            div.style.width = w + 'px';
+            div.style.height = h + 'px';
+            div.style.background = CHART_COLORS[i % CHART_COLORS.length];
+            div.title = `${item.path}: ${item.size} MB`;
+            div.textContent = w > 60 ? `${item.path.split('/').pop()} (${item.size}M)` : '';
+            treemapContainer.appendChild(div);
+
+            x += w;
+        });
+    }
+
+    function render3DNetwork(data) {
+        showContainer('three');
+        threeContainer.innerHTML = '';
+        const W = threeContainer.clientWidth;
+        const H = threeContainer.clientHeight;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a1a);
+        const camera3d = new THREE.PerspectiveCamera(60, W / H, 0.1, 2000);
+        camera3d.position.set(0, 0, 200);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(W, H);
+        threeContainer.appendChild(renderer.domElement);
+
+        const nodes = data.nodes || [];
+        const links = data.links || [];
+
+        // Assign random 3D positions
+        const positions = {};
+        const meshes = {};
+        const groups = {};
+        let groupIdx = 0;
+
+        nodes.forEach(n => {
+            if (!groups[n.group]) groups[n.group] = groupIdx++;
+            const color = new THREE.Color(CHART_COLORS[groups[n.group] % CHART_COLORS.length]);
+            const geo = new THREE.SphereGeometry(1.5, 12, 12);
+            const mat = new THREE.MeshBasicMaterial({ color });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(
+                (Math.random() - 0.5) * 300,
+                (Math.random() - 0.5) * 300,
+                (Math.random() - 0.5) * 300,
+            );
+            positions[n.id] = mesh.position;
+            meshes[n.id] = mesh;
+            scene.add(mesh);
+        });
+
+        // Links as lines
+        links.forEach(l => {
+            if (positions[l.source] && positions[l.target]) {
+                const geo = new THREE.BufferGeometry().setFromPoints([
+                    positions[l.source], positions[l.target],
+                ]);
+                const mat = new THREE.LineBasicMaterial({ color: 0x30363d, transparent: true, opacity: 0.4 });
+                scene.add(new THREE.Line(geo, mat));
+            }
+        });
+
+        // Simple force simulation (a few iterations)
+        for (let iter = 0; iter < 50; iter++) {
+            const nodeArr = Object.keys(positions);
+            // Repulsion
+            for (let i = 0; i < nodeArr.length; i++) {
+                for (let j = i+1; j < nodeArr.length; j++) {
+                    const a = positions[nodeArr[i]], b = positions[nodeArr[j]];
+                    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+                    const dist = Math.max(1, Math.sqrt(dx*dx + dy*dy + dz*dz));
+                    const force = 50 / (dist * dist);
+                    a.x += (dx/dist) * force;
+                    a.y += (dy/dist) * force;
+                    a.z += (dz/dist) * force;
+                    b.x -= (dx/dist) * force;
+                    b.y -= (dy/dist) * force;
+                    b.z -= (dz/dist) * force;
+                }
+            }
+            // Attraction along links
+            links.forEach(l => {
+                const a = positions[l.source], b = positions[l.target];
+                if (!a || !b) return;
+                const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+                const dist = Math.max(1, Math.sqrt(dx*dx + dy*dy + dz*dz));
+                const force = (dist - 20) * 0.01;
+                a.x += (dx/dist) * force;
+                a.y += (dy/dist) * force;
+                a.z += (dz/dist) * force;
+                b.x -= (dx/dist) * force;
+                b.y -= (dy/dist) * force;
+                b.z -= (dz/dist) * force;
+            });
+        }
+
+        // Rebuild link geometries after simulation
+        // (they were created before simulation, so recreate)
+        scene.children = scene.children.filter(c => !(c instanceof THREE.Line));
+        links.forEach(l => {
+            if (positions[l.source] && positions[l.target]) {
+                const geo = new THREE.BufferGeometry().setFromPoints([
+                    positions[l.source].clone(), positions[l.target].clone(),
+                ]);
+                const mat = new THREE.LineBasicMaterial({ color: 0x30363d, transparent: true, opacity: 0.4 });
+                scene.add(new THREE.Line(geo, mat));
+            }
+        });
+
+        // Orbit controls (manual)
+        let isDragging = false, prevX = 0, prevY = 0;
+        let rotX = 0, rotY = 0;
+        const pivot = new THREE.Object3D();
+        scene.add(pivot);
+
+        renderer.domElement.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
+        renderer.domElement.addEventListener('mouseup', () => isDragging = false);
+        renderer.domElement.addEventListener('mouseleave', () => isDragging = false);
+        renderer.domElement.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            rotY += (e.clientX - prevX) * 0.005;
+            rotX += (e.clientY - prevY) * 0.005;
+            prevX = e.clientX; prevY = e.clientY;
+        });
+        renderer.domElement.addEventListener('wheel', e => {
+            camera3d.position.z = Math.max(50, Math.min(500, camera3d.position.z + e.deltaY * 0.5));
+        });
+
+        let animId;
+        function animate() {
+            animId = requestAnimationFrame(animate);
+            camera3d.position.x = camera3d.position.z * Math.sin(rotY) * Math.cos(rotX);
+            camera3d.position.y = camera3d.position.z * Math.sin(rotX);
+            camera3d.position.z = camera3d.position.z * Math.cos(rotY) * Math.cos(rotX);
+            camera3d.lookAt(0, 0, 0);
+            renderer.render(scene, camera3d);
+        }
+        animate();
+
+        threeCleanup = () => {
+            cancelAnimationFrame(animId);
+            renderer.dispose();
+            threeContainer.innerHTML = '';
+        };
+    }
+
+    async function loadGraph() {
+        const graphType = selector.value;
+        loading.style.display = 'inline';
+        destroyChart();
+        descEl.textContent = '';
+        titleEl.textContent = '';
+
+        // Reset canvas (Chart.js needs a fresh one each time)
+        chartContainer.innerHTML = '<canvas id="chart-canvas"></canvas>';
+
+        try {
+            const resp = await fetch(`{% url 'graphs:data' %}?type=${graphType}`);
+            const data = await resp.json();
+            const chartType = getChartType(graphType);
+
+            titleEl.textContent = data.title || graphType;
+            descEl.textContent = DESCRIPTIONS[graphType] || '';
+
+            if (chartType === 'line') renderLineChart(data);
+            else if (chartType === 'doughnut') renderDoughnutChart(data);
+            else if (chartType === 'bar') renderBarChart(data);
+            else if (chartType === '3d_network') render3DNetwork(data);
+            else if (chartType === 'treemap') renderTreemap(data);
+        } catch (err) {
+            titleEl.textContent = 'Error';
+            descEl.textContent = err.message;
+        }
+
+        loading.style.display = 'none';
+    }
+
+    const saveBtn = document.getElementById('save-btn');
+    const pdfBtn = document.getElementById('pdf-btn');
+    const saveMsg = document.getElementById('save-msg');
+
+    // Update PDF link when graph changes
+    function updatePdfLink() {
+        pdfBtn.href = `{% url 'graphs:pdf' %}?type=${selector.value}`;
+    }
+
+    selector.addEventListener('change', () => { loadGraph(); updatePdfLink(); });
+    refreshBtn.addEventListener('click', loadGraph);
+
+    saveBtn.addEventListener('click', async () => {
+        const graphType = selector.value;
+        try {
+            const resp = await fetch(`{% url 'graphs:data' %}?type=${graphType}`);
+            const data = await resp.json();
+            const saveResp = await fetch('{% url "graphs:save" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}',
+                },
+                body: JSON.stringify({ type: graphType, data: data }),
+            });
+            const result = await saveResp.json();
+            saveMsg.textContent = result.message || 'Saved!';
+            saveMsg.style.display = 'inline';
+            setTimeout(() => saveMsg.style.display = 'none', 3000);
+        } catch (err) {
+            saveMsg.textContent = 'Error saving: ' + err.message;
+            saveMsg.style.color = '#f85149';
+            saveMsg.style.display = 'inline';
+        }
+    });
+
+    updatePdfLink();
+    loadGraph();
+})();
+</script>
+{% endblock %}

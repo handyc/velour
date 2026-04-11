@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Mail Accounts - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .mail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .mail-card { border-left: 4px solid #30363d; padding: 1rem 1.25rem; position: relative; }
+    .mail-card.ok    { border-left-color: #2ea043; }
+    .mail-card.error { border-left-color: #f85149; }
+    .mail-card.never { border-left-color: #58a6ff; border-left-style: dashed; }
+    .mail-card.disabled { opacity: 0.55; }
+    .mail-card h3 { margin: 0 0 0.25rem; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
+    .mail-card .addr { font-size: 0.8125rem; color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mail-card .host { font-size: 0.8125rem; color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 0.4rem; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge.default  { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+    .badge.disabled { background: #21262d; color: #8b949e; }
+    .badge.ok       { background: rgba(46, 160, 67, 0.15); color: #2ea043; }
+    .badge.error    { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+    .actions { margin-top: 0.9rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .actions form { display: inline; }
+    .actions button, .actions a { font-size: 0.8125rem; }
+    .last-test { margin-top: 0.5rem; font-size: 0.8125rem; color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Mail Accounts</h1>
+<p style="color:#8b949e;">Configured SMTP (and optionally IMAP) endpoints. One is marked default and used by Django's built-in mail paths; arbitrary Django apps can route through others explicitly. Legacy / external apps can relay via <code>POST /mailboxes/relay/</code>.</p>
+
+<div style="margin-bottom: 0.5rem;">
+    <a href="{% url 'mailboxes:add' %}" class="btn">Add Account</a>
+</div>
+
+{% if accounts %}
+<div class="mail-grid">
+    {% for a in accounts %}
+    <div class="card mail-card {{ a.last_test_status|default:'never' }}{% if not a.enabled %} disabled{% endif %}">
+        <h3>
+            {{ a.name }}
+            {% if a.is_default %}<span class="badge default">default</span>{% endif %}
+            {% if not a.enabled %}<span class="badge disabled">disabled</span>{% endif %}
+            {% if a.last_test_status == 'ok' %}<span class="badge ok">ok</span>{% endif %}
+            {% if a.last_test_status == 'error' %}<span class="badge error">error</span>{% endif %}
+        </h3>
+        <div class="addr">{{ a.from_name }}{% if a.from_name %} {% endif %}&lt;{{ a.from_email }}&gt;</div>
+        <div class="host">{{ a.smtp_host }}:{{ a.smtp_port }}{% if a.smtp_use_ssl %} ssl{% elif a.smtp_use_tls %} tls{% endif %}</div>
+
+        {% if a.last_tested_at %}
+        <div class="last-test">
+            Tested {{ a.last_tested_at|date:"Y-m-d H:i" }}
+            {% if a.last_test_error %} &middot; <span style="color:#f85149;">{{ a.last_test_error|truncatechars:60 }}</span>{% endif %}
+        </div>
+        {% endif %}
+
+        <div class="actions">
+            <a href="{% url 'mailboxes:detail' a.pk %}" class="btn">Details</a>
+            <a href="{% url 'mailboxes:edit' a.pk %}" class="btn btn-secondary">Edit</a>
+            <form method="post" action="{% url 'mailboxes:delete' a.pk %}" onsubmit="return confirm('Remove {{ a.name }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No mail accounts configured. <a href="{% url 'mailboxes:add' %}">Add one</a> — you'll need the SMTP hostname, port (usually 587), username, password, and the From: address the account sends from.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

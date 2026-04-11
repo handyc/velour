@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ article.title }} - {{ settings.newspaper_name }}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Source+Sans+3:wght@300;400;600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Source Serif 4', Georgia, serif; background: #faf9f6; color: #1a1a1a; line-height: 1.8; }
+        .top-bar { text-align: center; padding: 0.75rem; border-bottom: 1px solid #ddd; }
+        .top-bar a { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700; color: #1a1a1a; text-decoration: none; }
+        .top-bar-date { font-family: 'Source Sans 3', sans-serif; font-size: 0.7rem; color: #999; letter-spacing: 1.5px; text-transform: uppercase; }
+        .article-wrap { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+        .article-section { font-family: 'Source Sans 3', sans-serif; font-size: 0.7rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #b22222; margin-bottom: 0.5rem; }
+        .article-section a { color: inherit; text-decoration: none; }
+        .article-title { font-family: 'Playfair Display', serif; font-size: 2.5rem; font-weight: 700; line-height: 1.15; margin-bottom: 0.75rem; }
+        .article-subtitle { font-size: 1.2rem; color: #555; line-height: 1.5; margin-bottom: 1rem; font-style: italic; }
+        .article-meta { font-family: 'Source Sans 3', sans-serif; font-size: 0.8rem; color: #999; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid #ddd; }
+        .article-img { width: 100%; max-height: 450px; object-fit: cover; margin-bottom: 0.5rem; border-radius: 2px; }
+        .article-caption { font-family: 'Source Sans 3', sans-serif; font-size: 0.75rem; color: #999; font-style: italic; margin-bottom: 2rem; }
+        .article-body { font-size: 1.1rem; line-height: 1.85; }
+        .article-body p { margin-bottom: 1.25rem; }
+        .related { margin-top: 3rem; padding-top: 2rem; border-top: 2px solid #1a1a1a; }
+        .related h3 { font-family: 'Source Sans 3', sans-serif; font-size: 0.75rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #b22222; margin-bottom: 1rem; }
+        .related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem; }
+        .related-title { font-family: 'Playfair Display', serif; font-size: 0.95rem; font-weight: 700; margin-top: 0.4rem; }
+        .related-title a { color: #1a1a1a; text-decoration: none; }
+        .related-title a:hover { color: #8b0000; }
+        .related-img { width: 100%; height: 130px; object-fit: cover; }
+        .back-link { display: inline-block; margin-top: 2rem; font-family: 'Source Sans 3', sans-serif; font-size: 0.85rem; color: #b22222; text-decoration: none; }
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <div class="top-bar-date">{{ now|date:"l, F j, Y" }}</div>
+        <a href="{% url 'landingpage:home' %}">{{ settings.newspaper_name }}</a>
+    </div>
+
+    <div class="article-wrap">
+        {% if article.section %}
+            <div class="article-section"><a href="{% url 'landingpage:section' article.section.slug %}">{{ article.section.name }}</a></div>
+        {% endif %}
+        <h1 class="article-title">{{ article.title }}</h1>
+        {% if article.subtitle %}
+            <p class="article-subtitle">{{ article.subtitle }}</p>
+        {% endif %}
+        <div class="article-meta">
+            By {{ article.author }} &middot; {{ article.created_at|date:"F j, Y" }} &middot; {{ article.reading_time }} min read
+        </div>
+
+        {% if article.image_url %}
+            <img src="{{ article.image_url }}" alt="{{ article.title }}" class="article-img">
+            {% if article.image_caption %}
+                <div class="article-caption">{{ article.image_caption }}</div>
+            {% endif %}
+        {% endif %}
+
+        <div class="article-body">
+            {{ article.body|linebreaks }}
+        </div>
+
+        {% if related %}
+        <div class="related">
+            <h3>More in {{ article.section.name }}</h3>
+            <div class="related-grid">
+                {% for art in related %}
+                <div>
+                    {% if art.image_url %}
+                        <img src="{{ art.image_url }}" class="related-img" alt="{{ art.title }}">
+                    {% endif %}
+                    <div class="related-title"><a href="{% url 'landingpage:article' art.pk %}">{{ art.title }}</a></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <a href="{% url 'landingpage:home' %}" class="back-link">&larr; Back to {{ settings.newspaper_name }}</a>
+    </div>
+</body>
+</html>

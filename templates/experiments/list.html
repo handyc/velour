@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Experiments - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .exp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .exp-card { border-left: 4px solid #30363d; padding: 1rem 1.25rem; position: relative; }
+    .exp-card.active   { border-left-color: #2ea043; }
+    .exp-card.paused   { border-left-color: #d29922; }
+    .exp-card.archived { border-left-color: #8b949e; opacity: 0.65; }
+    .exp-card h3 { margin: 0 0 0.3rem; font-size: 1.1rem; }
+    .exp-card .desc { color: #8b949e; font-size: 0.875rem; margin-bottom: 0.6rem; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; }
+    .badge.intermittent { background: rgba(255, 200, 50, 0.15); color: #ffc832; }
+    .node-count { color: #58a6ff; font-size: 0.875rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Lab Experiments</h1>
+<p style="color:#8b949e;">Physical experiments in the lab. Attach <a href="{% url 'nodes:list' %}">ESP nodes</a> to each one to collect data and drive actuators.</p>
+
+<div style="margin-bottom: 0.75rem;">
+    <a href="{% url 'experiments:add' %}" class="btn">Add Experiment</a>
+</div>
+
+{% if experiments %}
+<div class="exp-grid">
+    {% for e in experiments %}
+    <div class="card exp-card {{ e.status }}">
+        <h3>{{ e.name }}
+            {% if e.is_intermittent %}<span class="badge intermittent">intermittent</span>{% endif %}
+        </h3>
+        {% if e.description %}<div class="desc">{{ e.description|truncatewords:22 }}</div>{% endif %}
+        <div class="node-count">{{ e.nodes.count }} node{{ e.nodes.count|pluralize }} attached</div>
+        <div style="margin-top: 0.75rem; display: flex; gap: 0.4rem;">
+            <a href="{% url 'experiments:detail' e.slug %}" class="btn">Open</a>
+            <a href="{% url 'experiments:edit' e.slug %}" class="btn btn-secondary">Edit</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No experiments yet. <a href="{% url 'experiments:add' %}">Add the first one</a>.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

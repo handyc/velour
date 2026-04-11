@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Databases - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .db-card { padding: 1rem 1.25rem; border-left: 4px solid #58a6ff; }
+    .db-card.mysql      { border-left-color: #f29111; }
+    .db-card.postgresql { border-left-color: #336791; }
+    .db-card.failed     { border-left-color: #f85149; }
+    .db-card .nickname  { font-size: 1.1rem; font-weight: 600; color: #c9d1d9; }
+    .db-card .slug      { font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 0.5rem; }
+    .db-card .meta      { font-size: 0.78rem; color: #8b949e; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .db-card .badges    { display: flex; gap: 0.4rem; margin: 0.45rem 0 0.55rem; flex-wrap: wrap; }
+    .badge              { font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; background: #21262d; color: #c9d1d9; }
+    .badge.engine       { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+    .badge.engine.mysql      { background: rgba(242, 145, 17, 0.18); color: #f29111; }
+    .badge.engine.postgresql { background: rgba(51, 103, 145, 0.25); color: #6aa8d8; }
+    .badge.status.ok      { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
+    .badge.status.failed  { background: rgba(248, 81, 73, 0.18); color: #f85149; }
+    .badge.status.untested { background: #21262d; color: #6e7681; }
+    .db-actions { margin-top: 0.7rem; display: flex; gap: 0.4rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Databases</h1>
+<p style="color:#8b949e;">MySQL and PostgreSQL connections velour knows about. Each record stores credentials and remembers the last connection-test result. Phase 2 will add table browsing, row editing, and a raw SQL shell — for now this is the registry + test layer.</p>
+
+<div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'databases:add' %}" class="btn">Add Database</a>
+</div>
+
+{% if databases %}
+<div class="db-grid">
+    {% for d in databases %}
+    <div class="card db-card {{ d.engine }}{% if d.last_test_status == 'failed' %} failed{% endif %}">
+        <div class="nickname">{{ d.nickname }}</div>
+        <div class="slug">{{ d.slug }}</div>
+
+        <div class="badges">
+            <span class="badge engine {{ d.engine }}">{{ d.get_engine_display }}</span>
+            <span class="badge status {{ d.last_test_status }}">
+                {% if d.last_test_status == 'ok' %}&#x25CF; OK
+                {% elif d.last_test_status == 'failed' %}&#x25CF; Failed
+                {% else %}&#x25CB; Untested{% endif %}
+            </span>
+        </div>
+
+        <div class="meta">
+            {{ d.host }}:{{ d.effective_port }}{% if d.database_name %}/{{ d.database_name }}{% endif %}<br>
+            {% if d.username %}user: {{ d.username }}<br>{% endif %}
+            {% if d.last_tested_at %}last test: {{ d.last_tested_at|date:"D d M Y H:i" }}{% endif %}
+        </div>
+
+        <div class="db-actions">
+            <a href="{% url 'databases:detail' d.slug %}" class="btn" style="font-size:0.8rem;">Details</a>
+            <a href="{% url 'databases:edit' d.slug %}" class="btn btn-secondary" style="font-size:0.8rem;">Edit</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No databases registered yet. <a href="{% url 'databases:add' %}">Add the first one</a>.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

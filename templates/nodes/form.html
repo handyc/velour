@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Node - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .nf { max-width: 640px; }
+    .nf label { display: block; margin-bottom: 0.9rem; }
+    .nf label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .nf input[type="text"], .nf input[type="number"], .nf select, .nf textarea {
+        width: 100%;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.9375rem;
+        box-sizing: border-box;
+        font-family: inherit;
+    }
+    .nf .row { display: flex; gap: 0.75rem; }
+    .nf .row > label { flex: 1; }
+    .nf .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .nf .checkbox-row label { margin: 0; }
+    .nf .section { border: 1px solid #21262d; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .nf .section h3 { margin: 0 0 0.75rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #58a6ff; }
+    .nf .hint { font-size: 0.75rem; color: #6e7681; margin-top: 0.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Node</h1>
+
+<form method="post" class="nf">
+    {% csrf_token %}
+
+    <div class="section">
+        <h3>Identity</h3>
+        <label>
+            <span>Nickname</span>
+            <input type="text" name="nickname" value="{{ node.nickname }}" required autofocus placeholder="Gary">
+            <div class="hint">Human name. Doesn't have to be unique — you can have two Garys in different labs.</div>
+        </label>
+        <label>
+            <span>Slug (machine ID)</span>
+            <input type="text" name="slug" value="{{ node.slug }}" placeholder="auto from nickname">
+            <div class="hint">URL-safe unique ID. Auto-derived from nickname if left blank.</div>
+        </label>
+        <div class="row">
+            <label>
+                <span>MAC address</span>
+                <input type="text" name="mac_address" value="{{ node.mac_address }}" placeholder="AA:BB:CC:DD:EE:FF">
+            </label>
+            <label>
+                <span>Hostname</span>
+                <input type="text" name="hostname" value="{{ node.hostname }}" placeholder="gary.local">
+            </label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Hardware</h3>
+        <label>
+            <span>Hardware profile</span>
+            <select name="hardware_profile">
+                <option value="">— none —</option>
+                {% for hp in hardware_profiles %}
+                <option value="{{ hp.pk }}" {% if node.hardware_profile_id == hp.pk %}selected{% endif %}>{{ hp.name }} ({{ hp.short_capabilities }})</option>
+                {% endfor %}
+            </select>
+            <div class="hint">Don't see the right board? <a href="{% url 'nodes:hardware_add' %}">Add a hardware profile</a>.</div>
+        </label>
+        <div class="row">
+            <label>
+                <span>Power mode</span>
+                <select name="power_mode">
+                    {% for k, v in power_choices %}
+                    <option value="{{ k }}" {% if node.power_mode == k %}selected{% endif %}>{{ v }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                <span>Firmware version</span>
+                <input type="text" name="firmware_version" value="{{ node.firmware_version }}" placeholder="0.1.0">
+            </label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Assignment</h3>
+        <label>
+            <span>Experiment</span>
+            <select name="experiment">
+                <option value="">— unassigned (inventory) —</option>
+                {% for e in experiments %}
+                <option value="{{ e.pk }}" {% if node.experiment_id == e.pk %}selected{% endif %}>{{ e.name }}{% if e.is_intermittent %} (intermittent){% endif %}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+
+    <div class="section">
+        <h3>Network (last seen)</h3>
+        <label>
+            <span>Last known IP</span>
+            <input type="text" name="last_ip" value="{{ node.last_ip|default:'' }}" placeholder="192.168.1.42">
+            <div class="hint">Usually filled in automatically by heartbeats once Phase 2 is wired. You can seed it manually if you know it.</div>
+        </label>
+    </div>
+
+    <div class="section">
+        <h3>Status</h3>
+        <div class="checkbox-row">
+            <input type="checkbox" name="enabled" id="enabled" {% if node.enabled or not node.pk %}checked{% endif %}>
+            <label for="enabled">Enabled (uncheck to pause without deleting)</label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Notes</h3>
+        <label>
+            <span>Free text — wiring, location, quirks, history, anything</span>
+            <textarea name="notes" rows="4">{{ node.notes }}</textarea>
+        </label>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem;">
+        <button type="submit" class="btn">{{ action }}</button>
+        <a href="{% url 'nodes:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

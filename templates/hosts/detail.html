@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ host.name }} - Remote Hosts - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .snapshot-pre {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        padding: 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8125rem;
+        color: #c9d1d9;
+        max-height: 70vh;
+        overflow: auto;
+    }
+    .meta { color: #8b949e; font-size: 0.875rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ host.name }}</h1>
+<p class="meta">
+    <code>{{ host.url }}</code> &middot;
+    endpoint: <code>{{ host.health_url }}</code>
+</p>
+
+<div class="meta" style="margin-bottom: 1rem;">
+    Status: <strong style="color:#c9d1d9;">{{ host.last_status|default:"(never polled)" }}</strong>
+    {% if host.last_polled_at %} &middot; last poll {{ host.last_polled_at|date:"Y-m-d H:i:s" }}{% endif %}
+</div>
+
+{% if host.last_error %}
+<div class="card" style="border-left: 4px solid #f85149; margin-bottom: 1rem;">
+    <strong style="color:#f85149;">Last error:</strong>
+    <div style="margin-top: 0.5rem; font-family: ui-monospace; font-size: 0.875rem;">{{ host.last_error }}</div>
+</div>
+{% endif %}
+
+<div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+    <form method="post" action="{% url 'hosts:refresh' host.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn">Refresh Now</button>
+    </form>
+    <a href="{% url 'hosts:edit' host.pk %}" class="btn btn-secondary">Edit</a>
+    <a href="{% url 'hosts:list' %}" class="btn btn-secondary">Back to Hosts</a>
+</div>
+
+<h2 style="margin-top: 1.5rem;">Snapshot</h2>
+{% if host.last_snapshot %}
+<pre class="snapshot-pre">{{ host.last_snapshot|pprint }}</pre>
+{% else %}
+<p class="meta">No snapshot captured yet. Click <strong>Refresh Now</strong> to poll the remote.</p>
+{% endif %}
+{% endblock %}

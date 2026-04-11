@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}{{ experiment.name }} - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .kv { border: 1px solid #21262d; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.875rem; }
+    .kv div { padding: 0.15rem 0; }
+    .kv .k { color: #8b949e; display: inline-block; min-width: 8rem; }
+    .kv .v { color: #c9d1d9; }
+    .node-row { display: flex; align-items: center; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+    .node-row:last-child { border-bottom: none; }
+    .node-row .nickname { font-weight: 600; color: #c9d1d9; margin-right: 0.75rem; }
+    .node-row .slug { color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; margin-right: auto; }
+    .node-row .meta { font-size: 0.75rem; color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ experiment.name }}
+    {% if experiment.is_intermittent %}<span style="font-size:0.7rem;color:#ffc832;text-transform:uppercase;">intermittent</span>{% endif %}
+</h1>
+
+{% if experiment.description %}
+<p style="color:#c9d1d9;">{{ experiment.description|linebreaksbr }}</p>
+{% endif %}
+
+<div class="kv" style="margin-top: 1rem;">
+    <div><span class="k">Status</span><span class="v">{{ experiment.get_status_display }}</span></div>
+    <div><span class="k">Intermittent</span><span class="v">{{ experiment.is_intermittent|yesno:"yes,no" }}</span></div>
+    <div><span class="k">Created</span><span class="v">{{ experiment.created_at|date:"Y-m-d H:i" }}</span></div>
+    <div><span class="k">Updated</span><span class="v">{{ experiment.updated_at|date:"Y-m-d H:i" }}</span></div>
+</div>
+
+<h2 style="margin-top: 1.5rem;">Attached Nodes ({{ nodes.count }})</h2>
+{% if nodes %}
+<div class="card" style="padding: 0;">
+    {% for n in nodes %}
+    <div class="node-row">
+        <span class="nickname">{{ n.nickname }}</span>
+        <span class="slug">{{ n.slug }}</span>
+        <span class="meta">
+            {% if n.hardware_profile %}{{ n.hardware_profile.name }} &middot; {% endif %}
+            {{ n.get_power_mode_display }}
+        </span>
+        <a href="{% url 'nodes:detail' n.slug %}" style="margin-left: 0.75rem; font-size: 0.8125rem;">open →</a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;">No nodes attached yet. <a href="{% url 'nodes:add' %}">Add a node</a> and pick this experiment in the assignment dropdown.</p>
+{% endif %}
+
+{% if experiment.notes %}
+<h2 style="margin-top: 1.5rem;">Notes</h2>
+<div class="card" style="white-space: pre-wrap; color: #c9d1d9;">{{ experiment.notes }}</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'experiments:edit' experiment.slug %}" class="btn">Edit</a>
+    <form method="post" action="{% url 'experiments:delete' experiment.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ experiment.name }}? Attached nodes become unassigned.');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Delete</button>
+    </form>
+    <a href="{% url 'experiments:list' %}" class="btn btn-secondary">Back to Experiments</a>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Deploy to Cloud - {{ app.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { padding: 1rem 2rem; }
+    .deploy-form .form-group { margin-bottom: 0.6rem; }
+    .deploy-form .form-group label { font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .deploy-form .form-group input { padding: 0.45rem 0.6rem; font-size: 0.9rem; }
+    .deploy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 1.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="font-size: 1.2rem; margin-bottom: 0.4rem;">Deploy to Cloud: {{ app.name }}</h1>
+<p style="color: #8b949e; font-size: 0.8rem; margin-bottom: 1rem;">
+    Uploads project files via SSH. Credentials are used only for this transfer and never stored.
+</p>
+
+<div class="card deploy-form" style="max-width: 650px; padding: 1rem 1.25rem;">
+    <form method="post" action="{% url 'app_factory:cloud_deploy_run' app.pk %}">
+        {% csrf_token %}
+        <div class="deploy-grid">
+            <div class="form-group">
+                <label for="hostname">Hostname / IP</label>
+                <input type="text" id="hostname" name="hostname" required placeholder="lucdh.nl">
+            </div>
+            <div class="form-group">
+                <label for="port">SSH Port</label>
+                <input type="number" id="port" name="port" value="22">
+            </div>
+            <div class="form-group">
+                <label for="username">SSH Username</label>
+                <input type="text" id="username" name="username" required placeholder="handyc">
+            </div>
+            <div class="form-group">
+                <label for="password">Password <span style="color: #484f58; font-size: 0.7rem;">(blank = use key)</span></label>
+                <input type="password" id="password" name="password">
+            </div>
+            <div class="form-group">
+                <label for="key_path">SSH Key <span style="color: #484f58; font-size: 0.7rem;">(auto-detects if blank)</span></label>
+                <input type="text" id="key_path" name="key_path" placeholder="~/.ssh/id_ed25519">
+            </div>
+            <div class="form-group">
+                <label for="remote_dir">Remote Dir <span style="color: #484f58; font-size: 0.7rem;">(auto if blank)</span></label>
+                <input type="text" id="remote_dir" name="remote_dir" placeholder="/home/{{ app.deploy_user|default:app.name|lower }}">
+            </div>
+        </div>
+        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary">Deploy to Cloud</button>
+            <a href="{% url 'app_factory:detail' app.pk %}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

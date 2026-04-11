@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Host - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .host-form { max-width: 560px; }
+    .host-form label { display: block; margin-bottom: 1rem; }
+    .host-form label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .host-form input[type="text"], .host-form input[type="url"] {
+        width: 100%;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.9375rem;
+        box-sizing: border-box;
+    }
+    .host-form .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; }
+    .host-form .hint { font-size: 0.8125rem; color: #8b949e; margin-top: 0.25rem; }
+    .host-form .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Remote Host</h1>
+
+<form method="post" class="host-form">
+    {% csrf_token %}
+
+    <label>
+        <span>Name</span>
+        <input type="text" name="name" value="{{ host.name|default:'' }}" required autofocus>
+        <div class="hint">Any human label — e.g. "lucdh.nl prod", "raspberry pi", "work laptop".</div>
+    </label>
+
+    <label>
+        <span>URL</span>
+        <input type="url" name="url" value="{{ host.url|default:'' }}" placeholder="https://swibliq.lucdh.nl" required>
+        <div class="hint">Base URL of the remote velour. Do not include <code>/sysinfo/health.json</code>; that's appended automatically.</div>
+    </label>
+
+    <label>
+        <span>Token {% if host %}<em>(leave blank to keep the existing token)</em>{% endif %}</span>
+        <input type="text" name="token" value="" placeholder="{% if host %}••••••••••••{% else %}paste the remote's health_token.txt contents{% endif %}" {% if not host %}required{% endif %}>
+        <div class="hint">Generated on the remote with <code>python manage.py init_health_token</code>.</div>
+    </label>
+
+    <div class="checkbox-row">
+        <input type="checkbox" name="enabled" id="enabled-checkbox" {% if host.enabled or not host %}checked{% endif %}>
+        <label for="enabled-checkbox" style="margin:0;"><span style="color:#c9d1d9;">Include in "Refresh all"</span></label>
+    </div>
+
+    <div class="buttons">
+        <button type="submit" class="btn">{{ action }}</button>
+        <a href="{% url 'hosts:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

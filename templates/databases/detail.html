@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{{ db.nickname }} - Databases - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .db-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; font-size: 0.85rem; }
+    .db-detail dt { color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.15rem; }
+    .db-detail dd { color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    .status-pill { display: inline-block; font-size: 0.78rem; padding: 0.2rem 0.65rem; border-radius: 10px; }
+    .status-pill.ok       { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
+    .status-pill.failed   { background: rgba(248, 81, 73, 0.18); color: #f85149; }
+    .status-pill.untested { background: #21262d; color: #8b949e; }
+    .test-error { background: #1d1212; border: 1px solid #4a1a1a; color: #f85149; padding: 0.6rem 0.8rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; white-space: pre-wrap; margin-top: 0.5rem; }
+    .test-version { color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; margin-top: 0.4rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ db.nickname }}</h1>
+<p style="color:#8b949e;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.78rem;">{{ db.slug }}</p>
+
+<div class="card db-detail">
+    <dl>
+        <dt>Engine</dt><dd>{{ db.get_engine_display }}</dd>
+        <dt>Host</dt><dd>{{ db.host }}</dd>
+        <dt>Port</dt><dd>{{ db.effective_port }}</dd>
+        <dt>Username</dt><dd>{{ db.username|default:'(none)' }}</dd>
+        <dt>Database</dt><dd>{{ db.database_name|default:'(none)' }}</dd>
+        <dt>SSL mode</dt><dd>{{ db.ssl_mode|default:'(default)' }}</dd>
+        <dt>Created</dt><dd>{{ db.created_at|date:"D d M Y H:i" }}</dd>
+        <dt>Updated</dt><dd>{{ db.updated_at|date:"D d M Y H:i" }}</dd>
+    </dl>
+
+    {% if db.notes %}
+    <div style="margin-top:1rem; color:#8b949e; font-style:italic; white-space:pre-wrap;">{{ db.notes }}</div>
+    {% endif %}
+</div>
+
+<div class="card db-detail" style="margin-top:1rem;">
+    <h3 style="margin-top:0;">Connection test</h3>
+    <p>
+        Last status:
+        <span class="status-pill {{ db.last_test_status }}">
+            {% if db.last_test_status == 'ok' %}&#x25CF; OK
+            {% elif db.last_test_status == 'failed' %}&#x25CF; Failed
+            {% else %}&#x25CB; Not tested{% endif %}
+        </span>
+        {% if db.last_tested_at %}
+            <span style="color:#8b949e;font-size:0.78rem;margin-left:0.5rem;">at {{ db.last_tested_at|date:"D d M Y H:i:s" }}</span>
+        {% endif %}
+    </p>
+    {% if db.last_test_status == 'ok' and db.last_test_server_version %}
+    <div class="test-version">{{ db.last_test_server_version }}</div>
+    {% endif %}
+    {% if db.last_test_status == 'failed' and db.last_test_error %}
+    <div class="test-error">{{ db.last_test_error }}</div>
+    {% endif %}
+
+    <form method="post" action="{% url 'databases:test' db.slug %}" style="margin-top:0.75rem;">
+        {% csrf_token %}
+        <button type="submit" class="btn">Test connection</button>
+    </form>
+</div>
+
+<p style="color:#6e7681;font-size:0.8rem;margin-top:1rem;">
+    <em>Coming in Phase 2:</em> table browser, row editor, raw SQL shell.
+</p>
+
+<div style="margin-top: 1.5rem; display:flex; gap:0.5rem;">
+    <a href="{% url 'databases:edit' db.slug %}" class="btn">Edit</a>
+    <form method="post" action="{% url 'databases:delete' db.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ db.nickname|escapejs }}?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Delete</button>
+    </form>
+    <a href="{% url 'databases:list' %}" class="btn btn-secondary">Back to list</a>
+</div>
+{% endblock %}

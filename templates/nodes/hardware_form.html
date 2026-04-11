@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Hardware Profile - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .hpf { max-width: 640px; }
+    .hpf label { display: block; margin-bottom: 0.9rem; }
+    .hpf label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .hpf input, .hpf select, .hpf textarea {
+        background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.9375rem;
+        box-sizing: border-box; font-family: inherit; width: 100%;
+    }
+    .hpf .row { display: flex; gap: 0.75rem; }
+    .hpf .row > label { flex: 1; }
+    .hpf .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .hpf .checkbox-row label { margin: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Hardware Profile</h1>
+
+<form method="post" class="hpf">
+    {% csrf_token %}
+    <label>
+        <span>Name</span>
+        <input type="text" name="name" value="{{ profile.name }}" required autofocus placeholder="ESP32-WROOM-32">
+    </label>
+    <label>
+        <span>MCU family</span>
+        <select name="mcu">
+            {% for k, v in mcu_choices %}
+            <option value="{{ k }}" {% if profile.mcu == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <div class="row">
+        <label>
+            <span>Flash (MB)</span>
+            <input type="number" name="flash_mb" value="{{ profile.flash_mb|default:'' }}" min="0">
+        </label>
+        <label>
+            <span>RAM (KB)</span>
+            <input type="number" name="ram_kb" value="{{ profile.ram_kb|default:'' }}" min="0">
+        </label>
+        <label>
+            <span>ADC bits</span>
+            <input type="number" name="adc_bits" value="{{ profile.adc_bits|default:'' }}" min="0" max="24">
+        </label>
+        <label>
+            <span>GPIO count</span>
+            <input type="number" name="gpio_count" value="{{ profile.gpio_count|default:'' }}" min="0">
+        </label>
+    </div>
+
+    <div class="checkbox-row">
+        <input type="checkbox" name="has_wifi" id="wifi" {% if profile.has_wifi or not profile.pk %}checked{% endif %}>
+        <label for="wifi" style="color:#c9d1d9;">Has WiFi</label>
+    </div>
+    <div class="checkbox-row">
+        <input type="checkbox" name="has_bluetooth" id="bt" {% if profile.has_bluetooth %}checked{% endif %}>
+        <label for="bt" style="color:#c9d1d9;">Has Bluetooth</label>
+    </div>
+    <div class="checkbox-row">
+        <input type="checkbox" name="has_lora" id="lora" {% if profile.has_lora %}checked{% endif %}>
+        <label for="lora" style="color:#c9d1d9;">Has LoRa radio</label>
+    </div>
+    <div class="checkbox-row">
+        <input type="checkbox" name="has_psram" id="psram" {% if profile.has_psram %}checked{% endif %}>
+        <label for="psram" style="color:#c9d1d9;">Has PSRAM</label>
+    </div>
+
+    <label style="margin-top: 0.75rem;">
+        <span>Notes</span>
+        <textarea name="notes" rows="3">{{ profile.notes }}</textarea>
+    </label>
+
+    <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <button type="submit" class="btn">{{ action }}</button>
+        <a href="{% url 'nodes:hardware_list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

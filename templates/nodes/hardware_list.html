@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Hardware Profiles - Fleet - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .hp-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    .hp-table th, .hp-table td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; font-size: 0.875rem; }
+    .hp-table th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+    .hp-table .name { font-weight: 600; color: #c9d1d9; }
+    .hp-table .mcu { color: #58a6ff; }
+    .hp-table .caps { color: #8b949e; font-size: 0.8125rem; }
+    .hp-table .caps span { display: inline-block; margin-right: 0.5rem; }
+    .hp-table .yes { color: #2ea043; }
+    .hp-table .no  { color: #484f58; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Hardware Profiles</h1>
+<p style="color:#8b949e;">Catalog of microcontroller board variants. <a href="{% url 'nodes:list' %}">Nodes</a> pick one of these from a dropdown. Add a profile once per board family you own.</p>
+
+<div style="margin: 0.75rem 0;">
+    <a href="{% url 'nodes:hardware_add' %}" class="btn">Add Hardware Profile</a>
+    <a href="{% url 'nodes:list' %}" class="btn btn-secondary">Back to Fleet</a>
+</div>
+
+{% if profiles %}
+<table class="hp-table card">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>MCU</th>
+            <th>Flash</th>
+            <th>RAM</th>
+            <th>WiFi</th>
+            <th>BT</th>
+            <th>LoRa</th>
+            <th>PSRAM</th>
+            <th>Nodes</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in profiles %}
+        <tr>
+            <td class="name">{{ p.name }}</td>
+            <td class="mcu">{{ p.get_mcu_display }}</td>
+            <td>{% if p.flash_mb %}{{ p.flash_mb }} MB{% else %}—{% endif %}</td>
+            <td>{% if p.ram_kb %}{{ p.ram_kb }} KB{% else %}—{% endif %}</td>
+            <td>{% if p.has_wifi %}<span class="yes">✓</span>{% else %}<span class="no">—</span>{% endif %}</td>
+            <td>{% if p.has_bluetooth %}<span class="yes">✓</span>{% else %}<span class="no">—</span>{% endif %}</td>
+            <td>{% if p.has_lora %}<span class="yes">✓</span>{% else %}<span class="no">—</span>{% endif %}</td>
+            <td>{% if p.has_psram %}<span class="yes">✓</span>{% else %}<span class="no">—</span>{% endif %}</td>
+            <td>{{ p.nodes.count }}</td>
+            <td>
+                <a href="{% url 'nodes:hardware_edit' p.pk %}" style="font-size: 0.8125rem;">edit</a>
+                {% if p.nodes.count == 0 %}
+                &nbsp;
+                <form method="post" action="{% url 'nodes:hardware_delete' p.pk %}" style="display:inline;" onsubmit="return confirm('Delete {{ p.name }}?');">
+                    {% csrf_token %}
+                    <button type="submit" style="background:none;border:none;color:#8b949e;cursor:pointer;font:inherit;font-size:0.8125rem;padding:0;">delete</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No hardware profiles defined yet. <a href="{% url 'nodes:hardware_add' %}">Add one</a> for each board family you own.</p>
+{% endif %}
+{% endblock %}

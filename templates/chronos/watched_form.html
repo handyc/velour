@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} World Clock - Velour{% endblock %}
+
+{% block content %}
+<h1>{{ action }} World Clock</h1>
+
+<form method="post" style="max-width: 560px;">
+    {% csrf_token %}
+
+    <div style="margin-bottom: 1rem;">
+        <label for="label">Label</label><br>
+        <input type="text" id="label" name="label" value="{{ watched.label }}" required maxlength="80" style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+        <small style="color:#6e7681;">Display name, e.g. "NYC", "Denver", "Tokyo office".</small>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label for="tz_name">Timezone (IANA)</label><br>
+        <input list="tz-list" id="tz_name" name="tz_name" value="{{ watched.tz_name }}" required style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+        <datalist id="tz-list">
+            {% for tz in tz_names %}
+            <option value="{{ tz }}">
+            {% endfor %}
+        </datalist>
+        <small style="color:#6e7681;">e.g. <code>America/New_York</code>, <code>America/Denver</code>, <code>Asia/Tokyo</code>.</small>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label for="color">Color (optional)</label><br>
+        <input type="color" id="color-picker" value="{{ watched.color|default:'#c9d1d9' }}" style="vertical-align:middle;width:48px;height:32px;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:0;" oninput="document.getElementById('color').value = this.value">
+        <input type="text" id="color" name="color" value="{{ watched.color }}" placeholder="#B7410E (blank = default grey)" maxlength="9" style="width:200px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+        <small style="color:#6e7681;display:block;margin-top:0.25rem;">Hex code applied to the city name + time on the world-clocks page. Leave blank for default.</small>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label for="sort_order">Sort order</label><br>
+        <input type="number" id="sort_order" name="sort_order" value="{{ watched.sort_order|default:0 }}" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+        <small style="color:#6e7681;">Lower numbers shown first.</small>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label for="notes">Notes</label><br>
+        <textarea id="notes" name="notes" rows="3" style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">{{ watched.notes }}</textarea>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

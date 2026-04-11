@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - Velour{% endblock %}
+
+{% block content %}
+<h1>System Logs</h1>
+<p>Pick a log source to view, filter, visualize, or export.</p>
+
+<div class="dashboard-grid">
+    {% for source in sources %}
+    <div class="card">
+        <h3>{{ source.name }}</h3>
+        <table class="info-table">
+            <tr>
+                <td class="info-label">Status</td>
+                <td>
+                    {% if source.readable %}
+                        <span style="color:#2ea043;">readable</span>
+                    {% else %}
+                        <span style="color:#f85149;">unreadable / not found</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td class="info-label">Paths</td>
+                <td>
+                    <pre class="info-pre" style="margin:0;padding:0.25rem 0.5rem;">{% for p in source.paths %}{{ p }}
+{% endfor %}</pre>
+                </td>
+            </tr>
+        </table>
+        <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            {% if source.readable %}
+                <a href="{% url 'logs:view' %}?source={{ source.id }}" class="btn">View</a>
+                <a href="{% url 'logs:viz' %}?source={{ source.id }}" class="btn btn-secondary">Visualize</a>
+                <a href="{% url 'logs:pdf' %}?source={{ source.id }}" class="btn btn-secondary">PDF</a>
+            {% else %}
+                <span style="color:#8b949e;font-size:0.875rem;">(no readable source)</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

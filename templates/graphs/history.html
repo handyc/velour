@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Graph History - Velour{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Graph History</h1>
+    <a href="{% url 'graphs:home' %}" class="btn btn-secondary">Back to Graphs</a>
+</div>
+
+<div class="app-list" style="margin-top: 1.5rem;">
+    {% for snap in snapshots %}
+    <div class="app-item">
+        <div>
+            <div class="app-name">{{ snap.title }}</div>
+            <div class="app-meta">
+                {{ snap.graph_type }} | {{ snap.created_at|date:"M d, Y H:i:s" }}
+                {% if snap.created_by %}by {{ snap.created_by.username }}{% endif %}
+            </div>
+        </div>
+        <div class="app-actions" style="display: flex; gap: 0.5rem;">
+            <a href="{% url 'graphs:history_detail' snap.pk %}" class="btn btn-secondary">View</a>
+            <a href="{% url 'graphs:history_pdf' snap.pk %}?type={{ snap.graph_type }}&snapshot={{ snap.pk }}" class="btn btn-secondary" target="_blank">PDF</a>
+        </div>
+    </div>
+    {% empty %}
+    <div class="card">
+        <p>No snapshots saved yet. Use the "Save Snapshot" button on the Graphs page.</p>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

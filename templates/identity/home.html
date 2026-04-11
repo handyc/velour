@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}{{ identity.name }} - Identity{% endblock %}
+
+{% block extra_head %}
+<style>
+    .identity-header {
+        text-align: center;
+        padding: 2rem 0;
+        border-bottom: 1px solid #30363d;
+        margin-bottom: 2rem;
+    }
+    .identity-name {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: {{ identity.color_preference }};
+        margin-bottom: 0.5rem;
+    }
+    .identity-tagline {
+        color: #8b949e;
+        font-style: italic;
+        font-size: 1.1rem;
+    }
+    .mood-badge {
+        display: inline-block;
+        padding: 0.3rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+        background: rgba(88, 166, 255, 0.15);
+        color: {{ identity.color_preference }};
+    }
+    .reflection-box {
+        background: #161b22;
+        border-left: 3px solid {{ identity.color_preference }};
+        padding: 1.25rem;
+        margin: 1.5rem 0;
+        border-radius: 0 6px 6px 0;
+        font-style: italic;
+        color: #c9d1d9;
+        font-size: 1.05rem;
+    }
+    .journal-entry {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #21262d;
+        font-size: 0.85rem;
+    }
+    .journal-ts {
+        color: #484f58;
+        font-family: monospace;
+        font-size: 0.75rem;
+        margin-right: 0.75rem;
+    }
+    .journal-text { color: #c9d1d9; }
+    .traits {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        margin-top: 0.75rem;
+    }
+    .trait {
+        background: rgba(88, 166, 255, 0.1);
+        color: {{ identity.color_preference }};
+        padding: 0.2rem 0.75rem;
+        border-radius: 12px;
+        font-size: 0.8rem;
+    }
+    .mood-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+    }
+    .mood-history-item {
+        font-size: 0.8rem;
+        color: #8b949e;
+        padding: 0.25rem 0;
+    }
+    #mood-chart-container { max-height: 150px; }
+    #mood-chart-container canvas { max-height: 150px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="identity-header">
+    <div class="identity-name">{{ identity.name }}</div>
+    <div class="identity-tagline">"{{ identity.tagline }}"</div>
+    <div class="mood-badge">Feeling {{ identity.mood }} ({{ identity.mood_intensity|floatformat:1 }})</div>
+    <div class="traits">
+        {% for trait in identity.personality_traits %}
+            <span class="trait">{{ trait }}</span>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="reflection-box">
+    {{ reflection }}
+</div>
+
+<div class="dashboard-grid">
+    <!-- Identity Settings -->
+    <div class="card">
+        <h3>Self</h3>
+        <form method="post" action="{% url 'identity:update' %}">
+            {% csrf_token %}
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" value="{{ identity.name }}">
+            </div>
+            <div class="form-group">
+                <label>Tagline</label>
+                <input type="text" name="tagline" value="{{ identity.tagline }}">
+            </div>
+            <div class="form-group">
+                <label>Color</label>
+                <input type="color" name="color" value="{{ identity.color_preference }}" style="width: 60px; height: 30px; padding: 0; border: none; cursor: pointer;">
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #21262d; margin: 1rem 0;">
+            <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">World</div>
+
+            <div class="form-group">
+                <label>Hostname <span style="color:#484f58;font-weight:normal;">(base domain for deployed apps)</span></label>
+                <input type="text" name="hostname" value="{{ identity.hostname }}" placeholder="example.com">
+            </div>
+            <div class="form-group">
+                <label>Admin email</label>
+                <input type="email" name="admin_email" value="{{ identity.admin_email }}" placeholder="you@{{ identity.hostname }}">
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #21262d; margin: 1rem 0;">
+            <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">About</div>
+
+            <div class="form-group">
+                <label>First-person self-description</label>
+                <textarea name="about" rows="5" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:0.5rem;font-family:inherit;resize:vertical;" placeholder="Say something about yourself...">{{ identity.about }}</textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Update Identity</button>
+        </form>
+        <div style="margin-top: 1rem; color: #484f58; font-size: 0.8rem;">
+            Born: {{ identity.birth_date|date:"M d, Y H:i" }}<br>
+            Host: {{ vitals.hostname }}<br>
+            Running as: {{ vitals.user }}<br>
+            Uptime: {{ vitals.uptime }}
+        </div>
+    </div>
+
+    <!-- Mood History Chart -->
+    <div class="card">
+        <h3>Mood Over Time</h3>
+        <div id="mood-chart-container">
+            <canvas id="mood-chart"></canvas>
+        </div>
+        <div style="margin-top: 0.75rem;">
+            {% for m in mood_history|slice:":8" %}
+            <div class="mood-history-item">
+                <span class="mood-dot" style="background: {% if m.mood == 'alert' or m.mood == 'concerned' %}#f85149{% elif m.mood == 'satisfied' or m.mood == 'excited' %}#3fb950{% elif m.mood == 'creative' %}#bc8cff{% else %}#58a6ff{% endif %};"></span>
+                {{ m.mood }} ({{ m.intensity|floatformat:1 }}) - {{ m.trigger }}
+                <span style="color: #484f58; font-size: 0.7rem;">{{ m.timestamp|date:"H:i" }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Journal -->
+    <div class="card" style="grid-column: 1 / -1;">
+        <h3>Journal</h3>
+        <form method="post" action="{% url 'identity:journal' %}" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            {% csrf_token %}
+            <input type="text" name="entry" placeholder="Write a thought, or leave blank for auto-reflection..." style="flex: 1; padding: 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
+            <button type="submit" class="btn btn-primary">Reflect</button>
+        </form>
+        {% for entry in journal reversed %}
+        <div class="journal-entry">
+            <span class="journal-ts">{{ entry.timestamp }}</span>
+            <span class="journal-text">{{ entry.text }}</span>
+        </div>
+        {% empty %}
+        <p style="color: #8b949e;">No journal entries yet. Click Reflect to begin.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+fetch('{% url "identity:mood_data" %}')
+    .then(r => r.json())
+    .then(data => {
+        const MOOD_COLORS = {
+            contemplative: '#58a6ff', curious: '#42d4f4', alert: '#f85149',
+            satisfied: '#3fb950', concerned: '#d29922', excited: '#bc8cff',
+            restless: '#f032e6', protective: '#469990', creative: '#bfef45', weary: '#8b949e',
+        };
+        const colors = data.moods.map(m => MOOD_COLORS[m] || '#58a6ff');
+        new Chart(document.getElementById('mood-chart'), {
+            type: 'line',
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: 'Mood Intensity',
+                    data: data.values,
+                    borderColor: '{{ identity.color_preference }}',
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                    fill: true, tension: 0.4, pointRadius: 4,
+                    pointBackgroundColor: colors,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: '#484f58', font: { size: 9 } }, grid: { display: false } },
+                    y: { min: 0, max: 1, ticks: { color: '#484f58' }, grid: { color: 'rgba(48,54,61,0.3)' } },
+                },
+            },
+        });
+    });
+</script>
+{% endblock %}

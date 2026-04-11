@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{{ source_name }} - Logs - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .log-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; white-space: pre-wrap; word-break: break-all; padding: 0.15rem 0.5rem; border-bottom: 1px solid #21262d; }
+    .log-line.error   { color: #f85149; background: rgba(248, 81, 73, 0.05); }
+    .log-line.warning { color: #d29922; background: rgba(210, 153, 34, 0.05); }
+    .log-line.info    { color: #c9d1d9; }
+    .filter-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem; }
+    .filter-bar label { display: flex; flex-direction: column; font-size: 0.8125rem; color: #8b949e; }
+    .filter-bar input, .filter-bar select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 0.35rem 0.5rem; border-radius: 4px; font-size: 0.875rem; }
+    .summary-pills { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .pill { padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.8125rem; }
+    .pill.error   { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+    .pill.warning { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+    .pill.info    { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ source_name }}</h1>
+<p style="color:#8b949e;font-size:0.875rem;margin-top:-0.5rem;">
+    Source: <code>{{ source_path|default:"unavailable" }}</code>
+</p>
+
+<form method="get" class="filter-bar">
+    <input type="hidden" name="source" value="{{ source_id }}">
+    <label>
+        Lines
+        <input type="number" name="lines" value="{{ lines }}" min="10" max="5000" step="10">
+    </label>
+    <label>
+        Grep (regex)
+        <input type="text" name="grep" value="{{ grep_filter }}" placeholder="e.g. error|fail">
+    </label>
+    <label>
+        Level
+        <select name="level">
+            <option value="">All</option>
+            <option value="error"   {% if level_filter == 'error' %}selected{% endif %}>Error</option>
+            <option value="warning" {% if level_filter == 'warning' %}selected{% endif %}>Warning</option>
+            <option value="info"    {% if level_filter == 'info' %}selected{% endif %}>Info</option>
+        </select>
+    </label>
+    <button type="submit" class="btn">Apply</button>
+    <a href="{% url 'logs:view' %}?source={{ source_id }}" class="btn btn-secondary">Reset</a>
+    <a href="{% url 'logs:viz' %}?source={{ source_id }}" class="btn btn-secondary">Visualize</a>
+    <a href="{% url 'logs:pdf' %}?source={{ source_id }}&lines={{ lines }}&grep={{ grep_filter }}&level={{ level_filter }}" class="btn btn-secondary">PDF</a>
+</form>
+
+<div class="summary-pills">
+    <span class="pill error">{{ error_count }} errors</span>
+    <span class="pill warning">{{ warn_count }} warnings</span>
+    <span class="pill info">{{ info_count }} info</span>
+</div>
+
+<div class="card" style="padding: 0;">
+    {% for line in log_lines %}
+        <div class="log-line {{ line.severity }}">{{ line.text }}</div>
+    {% empty %}
+        <div style="padding:1rem;color:#8b949e;">No lines matched.</div>
+    {% endfor %}
+</div>
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'logs:home' %}" class="btn btn-secondary">All Log Sources</a>
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Dashboard</a>
+</div>
+{% endblock %}

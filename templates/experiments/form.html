@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Experiment - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ef { max-width: 640px; }
+    .ef label { display: block; margin-bottom: 0.9rem; }
+    .ef label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .ef input, .ef select, .ef textarea {
+        width: 100%; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; padding: 0.5rem 0.75rem;
+        border-radius: 4px; box-sizing: border-box; font-family: inherit;
+    }
+    .ef .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .ef .hint { font-size: 0.75rem; color: #6e7681; margin-top: 0.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Experiment</h1>
+
+<form method="post" class="ef">
+    {% csrf_token %}
+    <label>
+        <span>Name</span>
+        <input type="text" name="name" value="{{ experiment.name }}" required autofocus placeholder="Aquarium 3 — Basil">
+    </label>
+    <label>
+        <span>Slug</span>
+        <input type="text" name="slug" value="{{ experiment.slug }}" placeholder="auto from name">
+        <div class="hint">URL-safe identifier. Auto-derived from name if blank.</div>
+    </label>
+    <label>
+        <span>Status</span>
+        <select name="status">
+            {% for k, v in status_choices %}
+            <option value="{{ k }}" {% if experiment.status == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <div class="checkbox-row">
+        <input type="checkbox" name="is_intermittent" id="intermittent" {% if experiment.is_intermittent %}checked{% endif %}>
+        <label for="intermittent" style="color:#c9d1d9;">Intermittent operation</label>
+    </div>
+    <div class="hint" style="margin-top:-0.5rem; margin-bottom: 1rem;">Check this if the experiment only runs sometimes (e.g. solar-powered). Attached nodes will be treated as "dormant" rather than "offline" when quiet.</div>
+
+    <label>
+        <span>Description</span>
+        <textarea name="description" rows="3" placeholder="What does this experiment do?">{{ experiment.description }}</textarea>
+    </label>
+    <label>
+        <span>Notes</span>
+        <textarea name="notes" rows="4" placeholder="Wiring, history, running concerns, anything">{{ experiment.notes }}</textarea>
+    </label>
+
+    <div style="display: flex; gap: 0.5rem;">
+        <button type="submit" class="btn">{{ action }}</button>
+        <a href="{% url 'experiments:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Fleet - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fleet-toolbar { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem; }
+    .fleet-toolbar label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+    .fleet-toolbar select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 0.35rem 0.5rem; border-radius: 4px; font-size: 0.875rem; display: block; margin-top: 0.25rem; }
+    .fleet-toolbar .count { color: #8b949e; font-size: 0.8125rem; margin-left: auto; align-self: center; }
+
+    .fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .node-card { border-left: 4px solid #30363d; padding: 1rem 1.25rem; position: relative; }
+    .node-card.online    { border-left-color: #2ea043; }
+    .node-card.dormant   { border-left-color: #8b949e; border-left-style: dashed; }
+    .node-card.offline   { border-left-color: #f85149; }
+    .node-card.unknown   { border-left-color: #58a6ff; border-left-style: dashed; }
+    .node-card.disabled  { opacity: 0.55; }
+    .node-card .nickname { font-size: 1.2rem; font-weight: 600; color: #c9d1d9; margin-bottom: 0.1rem; }
+    .node-card .slug     { font-size: 0.75rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 0.5rem; }
+    .badges { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; background: #21262d; color: #c9d1d9; }
+    .badge.hw       { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+    .badge.exp      { background: rgba(139, 92, 246, 0.15); color: #bc8cff; }
+    .badge.power    { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+    .badge.power.solar    { background: rgba(255, 200, 50, 0.15); color: #ffc832; }
+    .badge.power.battery  { background: rgba(46, 160, 67, 0.15); color: #2ea043; }
+    .badge.power.on_demand{ background: rgba(139, 148, 158, 0.15); color: #8b949e; }
+    .badge.disabled { background: #21262d; color: #6e7681; }
+    .node-meta { font-size: 0.75rem; color: #8b949e; line-height: 1.5; margin-top: 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .node-meta a { color: inherit; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Fleet</h1>
+<p style="color:#8b949e;">Physical microcontroller nodes — ESPs, Picos, and anything else attached to a <a href="{% url 'experiments:list' %}">lab experiment</a>. Each node has a nickname (Gary, etc.) and an API token used by the device to talk back to velour.</p>
+
+<form method="get" class="fleet-toolbar">
+    <label>Hardware
+        <select name="hardware">
+            <option value="">all</option>
+            {% for hp in hardware_profiles %}
+            <option value="{{ hp.pk }}" {% if hp_filter == hp.pk|stringformat:"s" %}selected{% endif %}>{{ hp.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Experiment
+        <select name="experiment">
+            <option value="">all</option>
+            {% for e in experiments %}
+            <option value="{{ e.pk }}" {% if exp_filter == e.pk|stringformat:"s" %}selected{% endif %}>{{ e.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>Power
+        <select name="power_mode">
+            <option value="">all</option>
+            {% for k, v in power_choices %}
+            <option value="{{ k }}" {% if pm_filter == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="display:flex;align-items:center;gap:0.35rem;margin-bottom:0.35rem;text-transform:none;font-size:0.8125rem;color:#c9d1d9;">
+        <input type="checkbox" name="enabled_only" value="1" {% if enabled_only %}checked{% endif %}> enabled only
+    </label>
+    <button type="submit" class="btn">Apply</button>
+    <a href="{% url 'nodes:list' %}" class="btn btn-secondary">Reset</a>
+    <span class="count">{{ node_count }} of {{ total_count }} nodes</span>
+</form>
+
+<div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'nodes:add' %}" class="btn">Add Node</a>
+    <a href="{% url 'nodes:hardware_list' %}" class="btn btn-secondary">Hardware Profiles</a>
+</div>
+
+{% if nodes %}
+<div class="fleet-grid">
+    {% for n in nodes %}
+    {% if not n.enabled %}
+        {% with classification='unknown' %}
+        <div class="card node-card disabled {{ classification }}">
+    {% endwith %}
+    {% elif not n.last_seen_at and n.is_dormant_expected %}
+        <div class="card node-card dormant">
+    {% elif not n.last_seen_at %}
+        <div class="card node-card unknown">
+    {% else %}
+        <div class="card node-card online">
+    {% endif %}
+
+        <div class="nickname">{{ n.nickname }}</div>
+        <div class="slug">{{ n.slug }}{% if n.mac_address %} &middot; {{ n.mac_address }}{% endif %}</div>
+
+        <div class="badges">
+            {% if n.hardware_profile %}<span class="badge hw">{{ n.hardware_profile.name }}</span>{% endif %}
+            {% if n.experiment %}<span class="badge exp">{{ n.experiment.name }}</span>{% endif %}
+            <span class="badge power {{ n.power_mode }}">{{ n.get_power_mode_display }}</span>
+            {% if not n.enabled %}<span class="badge disabled">disabled</span>{% endif %}
+        </div>
+
+        <div class="node-meta">
+            {% if n.hostname %}host: {{ n.hostname }}<br>{% endif %}
+            {% if n.last_ip %}ip: {{ n.last_ip }}<br>{% endif %}
+            {% if n.firmware_version %}fw: {{ n.firmware_version }}<br>{% endif %}
+            {% if n.last_seen_at %}seen: {{ n.last_seen_at|date:"Y-m-d H:i" }}{% else %}<em>never seen</em>{% endif %}
+        </div>
+
+        <div style="margin-top: 0.75rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">
+            <a href="{% url 'nodes:detail' n.slug %}" class="btn" style="font-size:0.8125rem;">Details</a>
+            <a href="{% url 'nodes:edit' n.slug %}" class="btn btn-secondary" style="font-size:0.8125rem;">Edit</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No nodes match those filters.{% if total_count == 0 %} <a href="{% url 'nodes:add' %}">Add the first one</a> — you might want to start by <a href="{% url 'nodes:hardware_list' %}">registering a hardware profile</a> so new nodes can pick it from a dropdown.{% endif %}</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

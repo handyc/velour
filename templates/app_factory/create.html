@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Create App - Velour{% endblock %}
+
+{% block content %}
+<h1>Create New App</h1>
+
+<div class="card" style="max-width: 600px;">
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="name">App Name</label>
+            <input type="text" id="name" name="name" required placeholder="my_new_app">
+        </div>
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea id="description" name="description" placeholder="What does this app do?"></textarea>
+        </div>
+        <div class="form-group">
+            <label for="app_type">Type</label>
+            <select id="app_type" name="app_type">
+                <option value="blank">Blank Django App</option>
+                <option value="clone">Clone of Velour</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="deploy_user">Deploy User (Linux username for isolation)</label>
+            <input type="text" id="deploy_user" name="deploy_user" placeholder="auto-generated from name">
+        </div>
+        <button type="submit" class="btn btn-primary">Create App</button>
+        <a href="{% url 'app_factory:list' %}" class="btn btn-secondary" style="margin-left: 0.5rem;">Cancel</a>
+    </form>
+</div>
+{% endblock %}

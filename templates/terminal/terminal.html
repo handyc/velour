@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Terminal - Velour{% endblock %}
+
+{% block content %}
+<div class="terminal-container">
+    <div class="terminal-header">
+        <span>Web Terminal</span>
+        <span>
+            <label style="color: #8b949e; font-size: 0.85rem;">
+                <input type="checkbox" id="sudo-toggle" {% if not user.is_superuser %}disabled{% endif %}>
+                sudo mode {% if not user.is_superuser %}(superuser only){% endif %}
+            </label>
+        </span>
+    </div>
+    <div class="terminal-output" id="terminal-output">
+        <span class="output-stdout">Velour Terminal ready.\nType commands below.\n\n</span>
+    </div>
+    <div class="terminal-input-line">
+        <span class="terminal-prompt" id="terminal-prompt">$</span>
+        <input type="text" class="terminal-input" id="terminal-input" autofocus
+               placeholder="Enter command..." autocomplete="off" spellcheck="false">
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const output = document.getElementById('terminal-output');
+    const input = document.getElementById('terminal-input');
+    const sudoToggle = document.getElementById('sudo-toggle');
+    const prompt = document.getElementById('terminal-prompt');
+    const history = [];
+    let historyIndex = -1;
+    let cwd = null;
+
+    function appendOutput(text, cls) {
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = text;
+        output.appendChild(span);
+        output.scrollTop = output.scrollHeight;
+    }
+
+    async function executeCommand(command) {
+        appendOutput((sudoToggle.checked ? '# ' : '$ ') + command + '\n', 'output-cmd');
+
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
+            || '{{ csrf_token }}';
+
+        try {
+            const response = await fetch('{% url "terminal:execute" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({
+                    command: command,
+                    sudo: sudoToggle.checked,
+                    cwd: cwd,
+                }),
+            });
+
+            const data = await response.json();
+
+            if (data.stdout) appendOutput(data.stdout, 'output-stdout');
+            if (data.stderr) appendOutput(data.stderr, 'output-stderr');
+            if (data.error)  appendOutput(data.error + '\n', 'output-stderr');
+        } catch (err) {
+            appendOutput('Network error: ' + err.message + '\n', 'output-stderr');
+        }
+    }
+
+    input.addEventListener('keydown', async function(e) {
+        if (e.key === 'Enter') {
+            const command = input.value.trim();
+            input.value = '';
+            if (!command) return;
+
+            history.unshift(command);
+            historyIndex = -1;
+
+            // Handle cd locally
+            if (command.startsWith('cd ')) {
+                const dir = command.slice(3).trim();
+                cwd = dir.startsWith('/') ? dir : ((cwd || '') + '/' + dir);
+                appendOutput('$ ' + command + '\n', 'output-cmd');
+                return;
+            }
+
+            await executeCommand(command);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (historyIndex < history.length - 1) {
+                historyIndex++;
+                input.value = history[historyIndex];
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (historyIndex > 0) {
+                historyIndex--;
+                input.value = history[historyIndex];
+            } else {
+                historyIndex = -1;
+                input.value = '';
+            }
+        }
+    });
+
+    sudoToggle.addEventListener('change', function() {
+        prompt.textContent = sudoToggle.checked ? '#' : '$';
+    });
+})();
+</script>
+{% endblock %}

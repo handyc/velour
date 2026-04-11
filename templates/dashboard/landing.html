@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Velour - Welcome{% endblock %}
+
+{% block content %}
+<div class="landing">
+    <h1>Velour</h1>
+    <p>A centralized administration panel for your server. Manage apps, access a web terminal, and create new Django projects — all from one place.</p>
+    <a href="{% url 'login' %}" class="cta-btn">Sign In</a>
+</div>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <h3>Web Terminal</h3>
+        <p>Access your server's command line directly through the browser with full shell capabilities.</p>
+    </div>
+    <div class="card">
+        <h3>App Factory</h3>
+        <p>Create and deploy new Django applications with automated setup, including Supervisor and Nginx configuration.</p>
+    </div>
+    <div class="card">
+        <h3>Server Management</h3>
+        <p>Monitor system resources, manage services, and administer your server with an intuitive interface.</p>
+    </div>
+</div>
+{% endblock %}

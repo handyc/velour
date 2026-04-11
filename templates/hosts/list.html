@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Remote Hosts - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .host-card { border-left: 4px solid #30363d; padding: 1rem 1.25rem; position: relative; }
+    .host-card.green       { border-left-color: #2ea043; }
+    .host-card.yellow      { border-left-color: #d29922; }
+    .host-card.red         { border-left-color: #f85149; }
+    .host-card.unreachable { border-left-color: #8b949e; }
+    .host-card.never       { border-left-color: #58a6ff; border-left-style: dashed; }
+    .host-card.disabled    { opacity: 0.55; }
+    .host-card h3 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+    .host-card .url { font-size: 0.8125rem; color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+    .host-card .status-row { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; display: inline-block; }
+    .dot.green       { background: #2ea043; }
+    .dot.yellow      { background: #d29922; }
+    .dot.red         { background: #f85149; }
+    .dot.unreachable { background: #8b949e; }
+    .dot.never       { background: #58a6ff; }
+    .status-label { font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; }
+    .host-meta { margin-top: 0.6rem; font-size: 0.8125rem; color: #8b949e; }
+    .reasons { margin-top: 0.4rem; font-size: 0.8125rem; color: #c9d1d9; }
+    .reasons li { margin-left: 1.1rem; }
+    .actions { margin-top: 0.9rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .actions form { display: inline; }
+    .actions button, .actions a { font-size: 0.8125rem; }
+    .toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Remote Hosts</h1>
+<p style="color:#8b949e;">Registered velour instances polled via their <code>/sysinfo/health.json</code> endpoints.</p>
+
+<div class="toolbar">
+    <a href="{% url 'hosts:add' %}" class="btn">Add Host</a>
+    {% if hosts %}
+    <form method="post" action="{% url 'hosts:refresh_all' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Refresh All</button>
+    </form>
+    {% endif %}
+</div>
+
+{% if hosts %}
+<div class="host-grid">
+    {% for host in hosts %}
+    <div class="card host-card {{ host.last_status|default:'never' }}{% if not host.enabled %} disabled{% endif %}">
+        <h3>{{ host.name }}{% if not host.enabled %} <span style="font-size:0.7rem;color:#8b949e;">(disabled)</span>{% endif %}</h3>
+        <div class="url">{{ host.url }}</div>
+
+        <div class="status-row">
+            <span class="dot {{ host.last_status|default:'never' }}"></span>
+            <span class="status-label">
+                {% if host.last_status %}{{ host.last_status }}{% else %}never polled{% endif %}
+            </span>
+        </div>
+
+        {% if host.last_polled_at %}
+        <div class="host-meta">
+            Last poll: {{ host.last_polled_at|date:"Y-m-d H:i:s" }}
+            {% if host.last_snapshot.hostname and host.last_snapshot.hostname != host.name %}
+                &middot; uname: {{ host.last_snapshot.hostname }}
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% with reasons=host.status_reasons %}
+        {% if reasons %}
+        <ul class="reasons">
+            {% for reason in reasons %}<li>{{ reason }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% endwith %}
+
+        {% if host.last_snapshot %}
+        <div class="host-meta">
+            {% with snap=host.last_snapshot %}
+            {% if snap.cpu.load_average %}load {{ snap.cpu.load_average.0 }}/{{ snap.cpu.cores }}c{% endif %}
+            {% if snap.memory.percent_used is not None %} &middot; mem {{ snap.memory.percent_used }}%{% endif %}
+            {% if snap.disk.percent_used is not None %} &middot; disk {{ snap.disk.percent_used }}%{% endif %}
+            {% if snap.supervisor.counts.running is not None %} &middot; sup {{ snap.supervisor.counts.running }}/{{ snap.supervisor.counts.total }}{% endif %}
+            {% endwith %}
+        </div>
+        {% endif %}
+
+        <div class="actions">
+            <form method="post" action="{% url 'hosts:refresh' host.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn">Refresh</button>
+            </form>
+            <a href="{% url 'hosts:detail' host.pk %}" class="btn btn-secondary">Details</a>
+            <a href="{% url 'hosts:edit' host.pk %}" class="btn btn-secondary">Edit</a>
+            <form method="post" action="{% url 'hosts:delete' host.pk %}" onsubmit="return confirm('Remove {{ host.name }}?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No hosts registered yet. <a href="{% url 'hosts:add' %}">Add one</a> — you'll need its base URL and the token from <code>manage.py init_health_token</code> on the remote.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

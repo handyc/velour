@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Cloud Deploy Result - {{ app.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .deploy-log {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 1rem;
+        font-family: monospace;
+        font-size: 0.8rem;
+        line-height: 1.6;
+        max-height: 60vh;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .log-line { color: #8b949e; }
+    .log-line-error { color: #f85149; }
+    .log-line-success { color: #3fb950; }
+    .log-line-cmd { color: #58a6ff; }
+    .next-steps {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 1.25rem;
+        margin-top: 1.5rem;
+    }
+    .next-steps h3 { color: #58a6ff; margin-bottom: 0.75rem; }
+    .next-steps code {
+        background: #0d1117;
+        padding: 0.2rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+    }
+    .next-steps pre {
+        background: #0d1117;
+        padding: 0.75rem;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        overflow-x: auto;
+        margin: 0.5rem 0;
+        color: #c9d1d9;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Cloud Deploy: {{ app.name }}</h1>
+
+<div class="deploy-log">
+{% for line in log %}{% if 'ERROR' in line %}<div class="log-line-error">{{ line }}</div>{% elif 'Complete' in line or 'Connected' in line or 'Uploaded' in line %}<div class="log-line-success">{{ line }}</div>{% elif line.strip.startswith == '  ' %}<div class="log-line-cmd">{{ line }}</div>{% else %}<div class="log-line">{{ line }}</div>{% endif %}
+{% endfor %}
+</div>
+
+{% if remote_dir %}
+<div class="next-steps">
+    <h3>Next Steps (Human Administrator)</h3>
+    <p>The files have been uploaded. To finalize deployment, SSH into the server and run:</p>
+    <pre>ssh {{ username }}@{{ hostname }}
+cd {{ remote_dir }}
+bash setup.sh</pre>
+
+    <p style="margin-top: 1rem;">Then, to activate in production:</p>
+    <pre># Link Supervisor config
+sudo ln -sf {{ remote_dir }}/deploy/supervisor.conf /etc/supervisor/conf.d/{{ unique_name }}.conf
+sudo supervisorctl reread && sudo supervisorctl update
+
+# Link Nginx config
+sudo ln -sf {{ remote_dir }}/deploy/nginx.conf /etc/nginx/sites-enabled/{{ unique_name }}
+sudo nginx -t && sudo systemctl reload nginx</pre>
+</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'app_factory:detail' app.pk %}" class="btn btn-secondary">Back to App</a>
+    <a href="{% url 'app_factory:cloud_deploy' app.pk %}" class="btn btn-secondary" style="margin-left: 0.5rem;">Deploy Again</a>
+</div>
+{% endblock %}

@@ -1,0 +1,649 @@
+{% extends "base.html" %}
+
+{% block title %}Agricola - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { max-width: none; padding: 0; }
+    .game-wrapper {
+        position: relative;
+        width: 100%;
+        height: calc(100vh - 56px);
+        overflow: hidden;
+        background: #0a0a1a;
+    }
+    canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    .hud {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #c9d1d9;
+        font-family: monospace;
+        font-size: 14px;
+        pointer-events: none;
+        text-shadow: 0 0 4px rgba(0,0,0,0.8);
+    }
+    .hud div { margin-bottom: 4px; }
+    .leaderboard {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background: rgba(13, 17, 23, 0.85);
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 10px 14px;
+        color: #c9d1d9;
+        font-family: monospace;
+        font-size: 12px;
+        pointer-events: none;
+        min-width: 150px;
+    }
+    .leaderboard h4 {
+        color: #58a6ff;
+        margin: 0 0 6px 0;
+        font-size: 13px;
+    }
+    .leaderboard .entry { margin-bottom: 2px; }
+    .leaderboard .entry.player { color: #3fb950; }
+    .start-screen {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: #c9d1d9;
+    }
+    .start-screen h1 {
+        font-size: 3rem;
+        color: #58a6ff;
+        margin-bottom: 0.5rem;
+    }
+    .start-screen p {
+        color: #8b949e;
+        margin-bottom: 1.5rem;
+    }
+    .start-screen button {
+        padding: 0.75rem 2.5rem;
+        background: #238636;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        font-size: 1.1rem;
+        cursor: pointer;
+    }
+    .start-screen button:hover { background: #2ea043; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="game-wrapper">
+    <canvas id="game-canvas"></canvas>
+    <div class="hud" id="hud" style="display:none;">
+        <div>Mass: <span id="hud-mass">0</span></div>
+        <div>Score: <span id="hud-score">0</span></div>
+    </div>
+    <div class="leaderboard" id="leaderboard" style="display:none;">
+        <h4>Leaderboard</h4>
+        <div id="lb-entries"></div>
+    </div>
+    <div class="start-screen" id="start-screen">
+        <h1>Agricola</h1>
+        <p>Eat smaller cells to grow. Avoid bigger ones.<br>
+           Move with your mouse. Space to split. W to eject mass.</p>
+        <button id="start-btn">Play</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    const canvas = document.getElementById('game-canvas');
+    const ctx = canvas.getContext('2d');
+    const startScreen = document.getElementById('start-screen');
+    const startBtn = document.getElementById('start-btn');
+    const hud = document.getElementById('hud');
+    const leaderboard = document.getElementById('leaderboard');
+    const hudMass = document.getElementById('hud-mass');
+    const hudScore = document.getElementById('hud-score');
+    const lbEntries = document.getElementById('lb-entries');
+
+    // World config
+    const WORLD_W = 5000;
+    const WORLD_H = 5000;
+    const GRID_SIZE = 50;
+    const PELLET_COUNT = 800;
+    const BOT_COUNT = 25;
+    const VIRUS_COUNT = 8;
+
+    let running = false;
+    let mouseX = 0, mouseY = 0;
+    let camera = { x: 0, y: 0, zoom: 1 };
+    let player = null;
+    let pellets = [];
+    let bots = [];
+    let viruses = [];
+    let score = 0;
+    let highScore = 0;
+
+    const COLORS = [
+        '#e6194b','#3cb44b','#ffe119','#4363d8','#f58231',
+        '#911eb4','#42d4f4','#f032e6','#bfef45','#fabed4',
+        '#469990','#dcbeff','#9A6324','#800000','#aaffc3',
+        '#808000','#ffd8b1','#000075','#a9a9a9','#ff6eb4',
+    ];
+
+    function randomColor() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+
+    function radiusFromMass(mass) { return Math.sqrt(mass) * 4; }
+
+    function resize() {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Pellets
+    function spawnPellet() {
+        return {
+            x: Math.random() * WORLD_W,
+            y: Math.random() * WORLD_H,
+            mass: 1 + Math.random() * 2,
+            color: randomColor(),
+        };
+    }
+
+    function initPellets() {
+        pellets = [];
+        for (let i = 0; i < PELLET_COUNT; i++) pellets.push(spawnPellet());
+    }
+
+    // Viruses (green spiky things)
+    function spawnVirus() {
+        return {
+            x: 100 + Math.random() * (WORLD_W - 200),
+            y: 100 + Math.random() * (WORLD_H - 200),
+            mass: 100,
+            color: '#33ff33',
+        };
+    }
+
+    function initViruses() {
+        viruses = [];
+        for (let i = 0; i < VIRUS_COUNT; i++) viruses.push(spawnVirus());
+    }
+
+    // Cell class for player and bots
+    function makeCell(x, y, mass, name, color, isPlayer) {
+        return {
+            x, y, mass, name, color, isPlayer,
+            vx: 0, vy: 0,
+            // Bot AI
+            targetX: Math.random() * WORLD_W,
+            targetY: Math.random() * WORLD_H,
+            aiTimer: 0,
+        };
+    }
+
+    function initBots() {
+        const names = [
+            'Blob','Chomper','Nomnom','Gulper','Muncher','Squishy',
+            'Wobble','Goober','Nibbler','Snacker','Morsel','Devourer',
+            'Blobby','Globule','Ameba','Nucleus','Ooze','Slimer',
+            'Gloop','Splat','Jelly','Bouncer','Rolly','Wiggles','Puff',
+        ];
+        bots = [];
+        for (let i = 0; i < BOT_COUNT; i++) {
+            const mass = 10 + Math.random() * 150;
+            bots.push(makeCell(
+                Math.random() * WORLD_W,
+                Math.random() * WORLD_H,
+                mass,
+                names[i % names.length],
+                randomColor(),
+                false,
+            ));
+        }
+    }
+
+    function initPlayer() {
+        player = makeCell(
+            WORLD_W / 2, WORLD_H / 2, 30,
+            '{{ user.username }}', '#58a6ff', true,
+        );
+        score = 0;
+    }
+
+    // Movement
+    function moveCell(cell, tx, ty, dt) {
+        const r = radiusFromMass(cell.mass);
+        const speed = Math.max(2, 14 - Math.sqrt(cell.mass) * 0.3);
+        const dx = tx - cell.x;
+        const dy = ty - cell.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1) return;
+        const nx = dx / dist;
+        const ny = dy / dist;
+        cell.x += nx * speed * dt * 60;
+        cell.y += ny * speed * dt * 60;
+        // Clamp to world
+        cell.x = Math.max(r, Math.min(WORLD_W - r, cell.x));
+        cell.y = Math.max(r, Math.min(WORLD_H - r, cell.y));
+    }
+
+    // Bot AI
+    function updateBotAI(bot, dt) {
+        bot.aiTimer -= dt;
+        if (bot.aiTimer <= 0) {
+            bot.aiTimer = 2 + Math.random() * 3;
+            // Find nearest threat or food
+            let nearest = null;
+            let nearDist = 600;
+            const allCells = [player, ...bots];
+            for (const c of allCells) {
+                if (c === bot) continue;
+                const d = Math.hypot(c.x - bot.x, c.y - bot.y);
+                if (d < nearDist) {
+                    nearest = c;
+                    nearDist = d;
+                }
+            }
+            if (nearest) {
+                if (nearest.mass > bot.mass * 1.15) {
+                    // Flee
+                    bot.targetX = bot.x - (nearest.x - bot.x) * 2;
+                    bot.targetY = bot.y - (nearest.y - bot.y) * 2;
+                } else if (bot.mass > nearest.mass * 1.15) {
+                    // Chase
+                    bot.targetX = nearest.x;
+                    bot.targetY = nearest.y;
+                } else {
+                    bot.targetX = Math.random() * WORLD_W;
+                    bot.targetY = Math.random() * WORLD_H;
+                }
+            } else {
+                bot.targetX = Math.random() * WORLD_W;
+                bot.targetY = Math.random() * WORLD_H;
+            }
+        }
+        moveCell(bot, bot.targetX, bot.targetY, dt);
+    }
+
+    // Collision detection
+    function checkEat(eater, prey) {
+        const er = radiusFromMass(eater.mass);
+        const pr = radiusFromMass(prey.mass);
+        const dist = Math.hypot(eater.x - prey.x, eater.y - prey.y);
+        return eater.mass > prey.mass * 1.15 && dist < er - pr * 0.4;
+    }
+
+    // Drawing
+    function worldToScreen(wx, wy) {
+        return {
+            x: (wx - camera.x) * camera.zoom + canvas.width / 2,
+            y: (wy - camera.y) * camera.zoom + canvas.height / 2,
+        };
+    }
+
+    function screenToWorld(sx, sy) {
+        return {
+            x: (sx - canvas.width / 2) / camera.zoom + camera.x,
+            y: (sy - canvas.height / 2) / camera.zoom + camera.y,
+        };
+    }
+
+    function drawGrid() {
+        ctx.strokeStyle = 'rgba(50, 60, 80, 0.3)';
+        ctx.lineWidth = 1;
+        const startX = Math.floor((camera.x - canvas.width / 2 / camera.zoom) / GRID_SIZE) * GRID_SIZE;
+        const startY = Math.floor((camera.y - canvas.height / 2 / camera.zoom) / GRID_SIZE) * GRID_SIZE;
+        const endX = camera.x + canvas.width / 2 / camera.zoom;
+        const endY = camera.y + canvas.height / 2 / camera.zoom;
+        for (let x = startX; x <= endX; x += GRID_SIZE) {
+            const s = worldToScreen(x, 0);
+            ctx.beginPath(); ctx.moveTo(s.x, 0); ctx.lineTo(s.x, canvas.height); ctx.stroke();
+        }
+        for (let y = startY; y <= endY; y += GRID_SIZE) {
+            const s = worldToScreen(0, y);
+            ctx.beginPath(); ctx.moveTo(0, s.y); ctx.lineTo(canvas.width, s.y); ctx.stroke();
+        }
+    }
+
+    function drawBorder() {
+        ctx.strokeStyle = '#f85149';
+        ctx.lineWidth = 4 * camera.zoom;
+        const tl = worldToScreen(0, 0);
+        const br = worldToScreen(WORLD_W, WORLD_H);
+        ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+    }
+
+    function drawCell(cell) {
+        const r = radiusFromMass(cell.mass);
+        const s = worldToScreen(cell.x, cell.y);
+        const sr = r * camera.zoom;
+
+        if (s.x + sr < 0 || s.x - sr > canvas.width ||
+            s.y + sr < 0 || s.y - sr > canvas.height) return;
+
+        // Glow
+        ctx.save();
+        ctx.shadowColor = cell.color;
+        ctx.shadowBlur = sr * 0.3;
+
+        // Body
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, sr, 0, Math.PI * 2);
+        ctx.fillStyle = cell.color;
+        ctx.fill();
+
+        // Lighter edge
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, sr, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+
+        // Name
+        if (sr > 15) {
+            ctx.fillStyle = '#fff';
+            ctx.font = `bold ${Math.max(12, sr * 0.4)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+            ctx.lineWidth = 3;
+            ctx.strokeText(cell.name, s.x, s.y);
+            ctx.fillText(cell.name, s.x, s.y);
+
+            // Mass below name
+            if (sr > 25) {
+                ctx.font = `${Math.max(10, sr * 0.25)}px monospace`;
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.strokeText(Math.floor(cell.mass), s.x, s.y + sr * 0.45);
+                ctx.fillText(Math.floor(cell.mass), s.x, s.y + sr * 0.45);
+            }
+        }
+    }
+
+    function drawPellet(p) {
+        const s = worldToScreen(p.x, p.y);
+        const sr = radiusFromMass(p.mass) * camera.zoom;
+        if (s.x + sr < -5 || s.x - sr > canvas.width + 5 ||
+            s.y + sr < -5 || s.y - sr > canvas.height + 5) return;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, Math.max(2, sr), 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+    }
+
+    function drawVirus(v) {
+        const r = radiusFromMass(v.mass);
+        const s = worldToScreen(v.x, v.y);
+        const sr = r * camera.zoom;
+        if (s.x + sr < 0 || s.x - sr > canvas.width ||
+            s.y + sr < 0 || s.y - sr > canvas.height) return;
+
+        const spikes = 20;
+        ctx.beginPath();
+        for (let i = 0; i < spikes * 2; i++) {
+            const angle = (i * Math.PI) / spikes;
+            const rad = i % 2 === 0 ? sr * 1.15 : sr * 0.85;
+            const px = s.x + Math.cos(angle) * rad;
+            const py = s.y + Math.sin(angle) * rad;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(51, 255, 51, 0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#33ff33';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    function drawMinimap() {
+        const mw = 150, mh = 150, mx = canvas.width - mw - 10, my = canvas.height - mh - 10;
+        ctx.fillStyle = 'rgba(13, 17, 23, 0.7)';
+        ctx.fillRect(mx, my, mw, mh);
+        ctx.strokeStyle = '#30363d';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(mx, my, mw, mh);
+
+        // Player dot
+        const px = mx + (player.x / WORLD_W) * mw;
+        const py = my + (player.y / WORLD_H) * mh;
+        ctx.fillStyle = '#58a6ff';
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Bot dots
+        for (const b of bots) {
+            const bx = mx + (b.x / WORLD_W) * mw;
+            const by = my + (b.y / WORLD_H) * mh;
+            ctx.fillStyle = 'rgba(200,200,200,0.4)';
+            ctx.beginPath();
+            ctx.arc(bx, by, 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    function updateLeaderboard() {
+        const all = [player, ...bots].sort((a, b) => b.mass - a.mass).slice(0, 10);
+        let html = '';
+        all.forEach((c, i) => {
+            const cls = c.isPlayer ? 'entry player' : 'entry';
+            html += `<div class="${cls}">${i + 1}. ${c.name} (${Math.floor(c.mass)})</div>`;
+        });
+        lbEntries.innerHTML = html;
+    }
+
+    // Main loop
+    let lastTime = 0;
+
+    function update(dt) {
+        // Move player toward mouse (in world coords)
+        const target = screenToWorld(mouseX, mouseY);
+        moveCell(player, target.x, target.y, dt);
+
+        // Camera follows player
+        camera.x += (player.x - camera.x) * 0.1;
+        camera.y += (player.y - camera.y) * 0.1;
+        const targetZoom = Math.max(0.15, Math.min(1.5, 30 / radiusFromMass(player.mass)));
+        camera.zoom += (targetZoom - camera.zoom) * 0.05;
+
+        // Update bots
+        for (const bot of bots) {
+            updateBotAI(bot, dt);
+        }
+
+        // Player eats pellets
+        for (let i = pellets.length - 1; i >= 0; i--) {
+            const p = pellets[i];
+            const pr = radiusFromMass(p.mass);
+            const plr = radiusFromMass(player.mass);
+            const dist = Math.hypot(player.x - p.x, player.y - p.y);
+            if (dist < plr) {
+                player.mass += p.mass;
+                score += Math.floor(p.mass);
+                pellets.splice(i, 1);
+                pellets.push(spawnPellet());
+            }
+        }
+
+        // Bots eat pellets
+        for (const bot of bots) {
+            for (let i = pellets.length - 1; i >= 0; i--) {
+                const p = pellets[i];
+                const br = radiusFromMass(bot.mass);
+                const dist = Math.hypot(bot.x - p.x, bot.y - p.y);
+                if (dist < br) {
+                    bot.mass += p.mass;
+                    pellets.splice(i, 1);
+                    pellets.push(spawnPellet());
+                }
+            }
+        }
+
+        // Cell-cell eating (player vs bots, bots vs bots)
+        const allCells = [player, ...bots];
+        for (let i = allCells.length - 1; i >= 0; i--) {
+            for (let j = allCells.length - 1; j >= 0; j--) {
+                if (i === j) continue;
+                const a = allCells[i], b = allCells[j];
+                if (checkEat(a, b)) {
+                    a.mass += b.mass * 0.8;
+                    if (b.isPlayer) {
+                        // Player died
+                        highScore = Math.max(highScore, score);
+                        initPlayer();
+                        return;
+                    } else {
+                        // Bot died, respawn
+                        if (a.isPlayer) score += Math.floor(b.mass * 10);
+                        const idx = bots.indexOf(b);
+                        if (idx !== -1) {
+                            bots[idx] = makeCell(
+                                Math.random() * WORLD_W,
+                                Math.random() * WORLD_H,
+                                10 + Math.random() * 60,
+                                b.name,
+                                randomColor(),
+                                false,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Virus: if player hits virus and is big enough, split mass
+        for (const v of viruses) {
+            const dist = Math.hypot(player.x - v.x, player.y - v.y);
+            const pr = radiusFromMass(player.mass);
+            const vr = radiusFromMass(v.mass);
+            if (dist < pr && player.mass > v.mass * 1.15) {
+                player.mass = Math.max(30, player.mass * 0.6);
+                v.x = 100 + Math.random() * (WORLD_W - 200);
+                v.y = 100 + Math.random() * (WORLD_H - 200);
+            }
+        }
+
+        // Slow mass decay for large cells
+        if (player.mass > 100) player.mass *= (1 - 0.002 * dt);
+        for (const bot of bots) {
+            if (bot.mass > 100) bot.mass *= (1 - 0.002 * dt);
+        }
+    }
+
+    function render() {
+        ctx.fillStyle = '#0a0a1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawGrid();
+        drawBorder();
+
+        for (const p of pellets) drawPellet(p);
+        for (const v of viruses) drawVirus(v);
+
+        // Sort cells by mass so big ones render on top
+        const allCells = [player, ...bots].sort((a, b) => a.mass - b.mass);
+        for (const c of allCells) drawCell(c);
+
+        drawMinimap();
+
+        hudMass.textContent = Math.floor(player.mass);
+        hudScore.textContent = score;
+    }
+
+    function gameLoop(timestamp) {
+        if (!running) return;
+        const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+        lastTime = timestamp;
+
+        update(dt);
+        render();
+
+        if (++frameCount % 30 === 0) updateLeaderboard();
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    let frameCount = 0;
+
+    function startGame() {
+        startScreen.style.display = 'none';
+        hud.style.display = 'block';
+        leaderboard.style.display = 'block';
+
+        initPellets();
+        initViruses();
+        initBots();
+        initPlayer();
+
+        camera.x = player.x;
+        camera.y = player.y;
+        camera.zoom = 1;
+
+        running = true;
+        lastTime = performance.now();
+        requestAnimationFrame(gameLoop);
+    }
+
+    canvas.addEventListener('mousemove', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = e.clientX - rect.left;
+        mouseY = e.clientY - rect.top;
+    });
+
+    // Space to split (eject half mass forward)
+    document.addEventListener('keydown', (e) => {
+        if (!running || !player) return;
+        if (e.code === 'Space' && player.mass > 40) {
+            e.preventDefault();
+            const target = screenToWorld(mouseX, mouseY);
+            const dx = target.x - player.x;
+            const dy = target.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 1) return;
+            const nx = dx / dist, ny = dy / dist;
+            const ejected = player.mass * 0.4;
+            player.mass -= ejected;
+
+            // Create a new bot-like cell that drifts
+            const fragment = makeCell(
+                player.x + nx * radiusFromMass(player.mass),
+                player.y + ny * radiusFromMass(player.mass),
+                ejected, player.name, player.color, false,
+            );
+            fragment.x += nx * 100;
+            fragment.y += ny * 100;
+            bots.push(fragment);
+        }
+        if (e.code === 'KeyW' && player.mass > 20) {
+            e.preventDefault();
+            const target = screenToWorld(mouseX, mouseY);
+            const dx = target.x - player.x;
+            const dy = target.y - player.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 1) return;
+            const nx = dx / dist, ny = dy / dist;
+            player.mass -= 5;
+            pellets.push({
+                x: player.x + nx * radiusFromMass(player.mass) * 1.2,
+                y: player.y + ny * radiusFromMass(player.mass) * 1.2,
+                mass: 5,
+                color: player.color,
+            });
+        }
+    });
+
+    startBtn.addEventListener('click', startGame);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Velour{% endblock %}
+
+{% block content %}
+<div class="auth-form">
+    <h2>Sign In</h2>
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+        <div class="form-group">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+        </div>
+        {% if field.errors %}
+            {% for error in field.errors %}
+                <p style="color: #f85149; font-size: 0.85rem;">{{ error }}</p>
+            {% endfor %}
+        {% endif %}
+        {% endfor %}
+        {% if form.non_field_errors %}
+            {% for error in form.non_field_errors %}
+                <p style="color: #f85149;">{{ error }}</p>
+            {% endfor %}
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Login</button>
+    </form>
+    <p style="margin-top: 1rem; font-size: 0.875rem;">
+        <a href="{% url 'password_reset' %}" style="color: #8b949e;">Forgot your password?</a>
+    </p>
+</div>
+{% endblock %}

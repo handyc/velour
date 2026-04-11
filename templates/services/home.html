@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}Services - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .service-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    .status-badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    .status-running { background: rgba(63, 185, 80, 0.2); color: #3fb950; }
+    .status-stopped { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+    .status-unknown { background: rgba(139, 148, 158, 0.2); color: #8b949e; }
+    .config-toggle {
+        cursor: pointer;
+        color: #58a6ff;
+        font-size: 0.85rem;
+        background: none;
+        border: none;
+        padding: 0;
+    }
+    .config-toggle:hover { text-decoration: underline; }
+    .config-content {
+        display: none;
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        padding: 0.75rem;
+        margin-top: 0.5rem;
+        font-family: monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        overflow-x: auto;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .config-content.visible { display: block; }
+    .section-status {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Services</h1>
+
+<!-- Nginx Section -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">Nginx</h2>
+        <div class="section-status">
+            {% if nginx_version %}<span style="color: #8b949e; font-size: 0.85rem;">{{ nginx_version }}</span>{% endif %}
+            {% if nginx_running %}
+                <span class="status-badge status-running">Running</span>
+            {% else %}
+                <span class="status-badge status-stopped">Not Detected</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if nginx_sites %}
+    {% for site in nginx_sites %}
+    <div class="card" style="margin-bottom: 0.75rem; background: #0d1117;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <strong style="color: #58a6ff;">{{ site.name }}</strong>
+                {% if site.is_symlink %}
+                    <span style="color: #8b949e; font-size: 0.8rem;">(symlink)</span>
+                {% endif %}
+                <div style="margin-top: 0.4rem;">
+                    {% for sn in site.server_names %}
+                        <span style="color: #3fb950; font-size: 0.9rem;">{{ sn }}</span>
+                    {% endfor %}
+                </div>
+                <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.3rem;">
+                    {% if site.listens %}Listen: {{ site.listens|join:", " }}{% endif %}
+                    {% if site.proxy_passes %}<br>Proxy: {{ site.proxy_passes|join:", " }}{% endif %}
+                    {% if site.roots %}<br>Root: {{ site.roots|join:", " }}{% endif %}
+                    {% if site.aliases %}<br>Alias: {{ site.aliases|join:", " }}{% endif %}
+                </div>
+                <div style="color: #484f58; font-size: 0.8rem; margin-top: 0.2rem;">
+                    {{ site.path }}
+                    {% if site.is_symlink %} &rarr; {{ site.real_path }}{% endif %}
+                </div>
+            </div>
+            <button class="config-toggle" onclick="this.parentNode.parentNode.querySelector('.config-content').classList.toggle('visible')">
+                Show Config
+            </button>
+        </div>
+        <div class="config-content">{{ site.content }}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color: #8b949e;">No Nginx sites found in /etc/nginx/sites-enabled/ or /etc/nginx/conf.d/. This is expected on a local development machine.</p>
+    {% endif %}
+</div>
+
+<!-- Supervisor Section -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">Supervisor</h2>
+        <div class="section-status">
+            {% if supervisor_running %}
+                <span class="status-badge status-running">Running</span>
+            {% else %}
+                <span class="status-badge status-stopped">Not Detected</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if supervisor_programs %}
+    {% for prog in supervisor_programs %}
+    <div class="card" style="margin-bottom: 0.75rem; background: #0d1117;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <strong style="color: #58a6ff;">{{ prog.name }}</strong>
+                {% if prog.state == 'RUNNING' %}
+                    <span class="status-badge status-running">{{ prog.state }}</span>
+                {% elif prog.state == 'STOPPED' or prog.state == 'FATAL' %}
+                    <span class="status-badge status-stopped">{{ prog.state }}</span>
+                {% else %}
+                    <span class="status-badge status-unknown">{{ prog.state }}</span>
+                {% endif %}
+                {% if prog.detail %}
+                    <span style="color: #8b949e; font-size: 0.8rem; margin-left: 0.5rem;">{{ prog.detail }}</span>
+                {% endif %}
+                <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.4rem;">
+                    {% if prog.command %}<strong>Command:</strong> {{ prog.command }}<br>{% endif %}
+                    {% if prog.directory %}<strong>Directory:</strong> {{ prog.directory }}<br>{% endif %}
+                    {% if prog.user %}<strong>User:</strong> {{ prog.user }}<br>{% endif %}
+                    {% if prog.autostart %}<strong>Autostart:</strong> {{ prog.autostart }}{% endif %}
+                    {% if prog.autorestart %} | <strong>Autorestart:</strong> {{ prog.autorestart }}{% endif %}
+                    {% if prog.stdout_logfile %}<br><strong>Log:</strong> {{ prog.stdout_logfile }}{% endif %}
+                </div>
+                <div style="color: #484f58; font-size: 0.8rem; margin-top: 0.2rem;">
+                    {{ prog.config_file }}
+                </div>
+            </div>
+            {% if prog.content %}
+            <button class="config-toggle" onclick="this.parentNode.parentNode.querySelector('.config-content').classList.toggle('visible')">
+                Show Config
+            </button>
+            {% endif %}
+        </div>
+        {% if prog.content %}
+        <div class="config-content">{{ prog.content }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color: #8b949e;">No Supervisor programs found in /etc/supervisor/conf.d/. This is expected on a local development machine.</p>
+    {% endif %}
+</div>
+
+<!-- Running Gunicorn Instances -->
+<div class="card">
+    <div class="service-header">
+        <h2 style="margin: 0;">Gunicorn Instances</h2>
+    </div>
+
+    {% if gunicorn_instances %}
+    <table class="info-table">
+        <tr style="color: #8b949e; font-size: 0.85rem;">
+            <td><strong>User</strong></td>
+            <td><strong>PID</strong></td>
+            <td><strong>CPU %</strong></td>
+            <td><strong>Mem %</strong></td>
+            <td><strong>Command</strong></td>
+        </tr>
+        {% for inst in gunicorn_instances %}
+        <tr>
+            <td>{{ inst.user }}</td>
+            <td>{{ inst.pid }}</td>
+            <td>{{ inst.cpu }}</td>
+            <td>{{ inst.mem }}</td>
+            <td style="font-family: monospace; font-size: 0.8rem;">{{ inst.command }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p style="color: #8b949e;">No Gunicorn master processes detected.</p>
+    {% endif %}
+</div>
+{% endblock %}

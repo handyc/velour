@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}System Info - Velour{% endblock %}
+
+{% block content %}
+<h1>System Information</h1>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <h3>General</h3>
+        <table class="info-table">
+            {% for key, val in basic.items %}
+            <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>CPU</h3>
+        <table class="info-table">
+            {% for key, val in cpu.items %}
+            <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>Memory</h3>
+        <table class="info-table">
+            {% for key, val in memory.items %}
+            <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+
+<h2 style="margin-top: 2rem;">Disk Usage</h2>
+<div class="card">
+    <pre class="info-pre">{% for line in disk_lines %}{{ line }}
+{% endfor %}</pre>
+</div>
+
+<h2 style="margin-top: 2rem;">Network Interfaces</h2>
+<div class="card">
+    <pre class="info-pre">{% for line in net_lines %}{{ line }}
+{% endfor %}</pre>
+</div>
+
+<h2 style="margin-top: 2rem;">Top Processes (by CPU)</h2>
+<div class="card">
+    <pre class="info-pre">{% for line in ps_lines %}{{ line }}
+{% endfor %}</pre>
+</div>
+
+{% if who_lines %}
+<h2 style="margin-top: 2rem;">Logged-In Users</h2>
+<div class="card">
+    <pre class="info-pre">{% for line in who_lines %}{{ line }}
+{% endfor %}</pre>
+</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app.name }} - App Factory{% endblock %}
+
+{% block content %}
+<h1>{{ app.name }}</h1>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <h3>Details</h3>
+        <p><strong>Type:</strong> {{ app.get_app_type_display }}</p>
+        <p><strong>Status:</strong> <span class="status-{{ app.status }}">{{ app.get_status_display }}</span></p>
+        <p><strong>Directory:</strong> {{ app.directory }}</p>
+        <p><strong>Deploy User:</strong> {{ app.deploy_user }}</p>
+        <p><strong>Created:</strong> {{ app.created_at|date:"M d, Y H:i" }}</p>
+        {% if app.description %}
+            <p><strong>Description:</strong> {{ app.description }}</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h3>Actions</h3>
+
+        <!-- Rename -->
+        <form method="post" action="{% url 'app_factory:rename' app.pk %}" style="margin-bottom: 1rem;">
+            {% csrf_token %}
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="text" name="name" placeholder="New name" value="{{ app.name }}"
+                       style="flex:1; padding: 0.4rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
+                <button type="submit" class="btn btn-secondary">Rename</button>
+            </div>
+        </form>
+
+        <!-- Status actions -->
+        {% if app.status == 'pending' %}
+        <form method="post" action="{% url 'app_factory:approve' app.pk %}" style="margin-bottom: 0.75rem;">
+            {% csrf_token %}
+            <button type="submit" name="action" value="approve" class="btn btn-primary">Approve</button>
+            <button type="submit" name="action" value="reject" class="btn btn-danger" style="margin-left: 0.5rem;">Reject</button>
+        </form>
+        <p style="color: #8b949e; font-size: 0.85rem;">
+            Review the generated code before approving for deployment.
+        </p>
+
+        {% elif app.status == 'rejected' %}
+        <form method="post" action="{% url 'app_factory:approve' app.pk %}" style="margin-bottom: 0.75rem;">
+            {% csrf_token %}
+            <button type="submit" name="action" value="unreject" class="btn btn-primary">Restore to Pending</button>
+        </form>
+        <p style="color: #8b949e; font-size: 0.85rem;">
+            This app was rejected. You can restore it for re-review.
+        </p>
+
+        {% elif app.status == 'approved' %}
+        <form method="post" action="{% url 'app_factory:deploy' app.pk %}" style="margin-bottom: 0.75rem;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Deploy (Start Dev Server)</button>
+        </form>
+        <p style="color: #8b949e; font-size: 0.85rem;">
+            Runs migrations, collects static files, and spawns a local dev server on an open port.
+        </p>
+
+        {% elif app.status == 'deployed' %}
+        {% if app.dev_port and dev_server_running %}
+        <p style="color: #3fb950; font-weight: bold; margin-bottom: 0.75rem;">
+            Running on port {{ app.dev_port }}
+        </p>
+        <p style="margin-bottom: 0.75rem;">
+            <a href="http://localhost:{{ app.dev_port }}/" target="_blank"
+               style="color: #58a6ff; font-size: 1rem;">
+                Open http://localhost:{{ app.dev_port }}/ &rarr;
+            </a>
+        </p>
+        <div style="display: flex; gap: 0.5rem;">
+            <form method="post" action="{% url 'app_factory:stop' app.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">Stop Server</button>
+            </form>
+            <form method="post" action="{% url 'app_factory:deploy' app.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary">Restart Server</button>
+            </form>
+        </div>
+        {% else %}
+        <p style="color: #f85149; margin-bottom: 0.75rem;">Server is not running.</p>
+        <form method="post" action="{% url 'app_factory:deploy' app.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Start Dev Server</button>
+        </form>
+        {% endif %}
+        {% endif %}
+
+        <!-- Cloud Deploy -->
+        <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #21262d;">
+            <a href="{% url 'app_factory:cloud_deploy' app.pk %}" class="btn btn-primary">Deploy to Cloud</a>
+            <p style="color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem;">
+                Upload files via SSH. Nginx/Supervisor configs stay in the project directory for a human to activate.
+            </p>
+        </div>
+
+        <!-- Delete -->
+        <form method="post" action="{% url 'app_factory:delete' app.pk %}"
+              style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #21262d;"
+              onsubmit="return confirm('Permanently delete {{ app.name }} and all its files?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Delete App</button>
+        </form>
+    </div>
+</div>
+
+<!-- Runtime info for deployed apps -->
+{% if runtime %}
+<h2 style="margin-top: 2rem;">Runtime Status</h2>
+<div class="dashboard-grid">
+    <div class="card">
+        <h3>Process</h3>
+        {% if runtime.running %}
+            <p style="color: #3fb950;"><strong>Status:</strong> Running</p>
+            <p><strong>Master PID:</strong> {{ runtime.pid }}</p>
+            <p><strong>Total Memory:</strong> {{ runtime.memory_mb }} MB</p>
+            <p><strong>Total CPU:</strong> {{ runtime.cpu_percent }}%</p>
+        {% else %}
+            <p style="color: #f85149;"><strong>Status:</strong> Not running</p>
+            <p style="color: #8b949e; font-size: 0.85rem;">
+                To start: symlink the supervisor.conf into /etc/supervisor/conf.d/
+                and run "sudo supervisorctl reread && sudo supervisorctl update".
+            </p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h3>Disk &amp; Logs</h3>
+        <p><strong>Disk Usage:</strong> {{ runtime.disk_usage }}</p>
+        {% if runtime.logs %}
+            <p style="margin-top: 0.5rem;"><strong>Log Files:</strong></p>
+            {% for fname, size in runtime.logs.items %}
+                <p style="color: #8b949e; font-size: 0.85rem; margin-left: 1rem;">{{ fname }}: {{ size }}</p>
+            {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+{% if runtime.processes %}
+<div class="card" style="margin-top: 1rem;">
+    <h3>Worker Processes</h3>
+    <table class="info-table" style="margin-top: 0.5rem;">
+        <tr style="color: #8b949e; font-size: 0.85rem;">
+            <td><strong>PID</strong></td>
+            <td><strong>Memory</strong></td>
+            <td><strong>CPU</strong></td>
+            <td><strong>Uptime</strong></td>
+            <td><strong>Command</strong></td>
+        </tr>
+        {% for proc in runtime.processes %}
+        <tr>
+            <td>{{ proc.pid }}</td>
+            <td>{{ proc.memory_kb }} KB</td>
+            <td>{{ proc.cpu_percent }}%</td>
+            <td>{{ proc.elapsed }}</td>
+            <td>{{ proc.command }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+{% endif %}
+
+{% if configs %}
+<h2 style="margin-top: 2rem;">Deployment Configs</h2>
+<div class="dashboard-grid">
+    {% for filename, content in configs.items %}
+    <div class="card">
+        <h3>{{ filename }}</h3>
+        <pre style="background: #0d1117; padding: 1rem; border-radius: 4px; overflow-x: auto; font-size: 0.85rem; margin-top: 0.5rem;">{{ content }}</pre>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'app_factory:list' %}" class="btn btn-secondary">Back to List</a>
+</div>
+{% endblock %}

@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Windows Control - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { padding: 0.75rem 2rem; }
+    .win-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+    .win-header h1 { font-size: 1.1rem; margin: 0; }
+
+    .win-info {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+    .win-info .card { padding: 0.5rem 0.75rem; }
+    .win-info .card h3 { font-size: 0.8rem; margin-bottom: 0.2rem; }
+    .win-info .card p { font-size: 0.75rem; line-height: 1.35; }
+
+    .panel-tabs {
+        display: flex;
+        gap: 0.25rem;
+        border-bottom: 1px solid #30363d;
+        margin-bottom: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .panel-tab {
+        padding: 0.3rem 0.7rem;
+        font-size: 0.75rem;
+        background: transparent;
+        border: 1px solid transparent;
+        border-bottom: none;
+        border-radius: 4px 4px 0 0;
+        color: #8b949e;
+        cursor: pointer;
+    }
+    .panel-tab:hover { color: #c9d1d9; background: #161b22; }
+    .panel-tab.active { color: #58a6ff; background: #161b22; border-color: #30363d; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .panel-content {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 0 6px 6px 6px;
+        padding: 0.6rem;
+        max-height: calc(100vh - 300px);
+        overflow-y: auto;
+        font-size: 0.75rem;
+    }
+    .panel-content table { width: 100%; border-collapse: collapse; }
+    .panel-content th {
+        text-align: left; color: #8b949e; font-size: 0.7rem;
+        padding: 0.25rem 0.4rem; border-bottom: 1px solid #21262d;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .panel-content td {
+        padding: 0.2rem 0.4rem; border-bottom: 1px solid #0d1117;
+        font-size: 0.73rem; color: #c9d1d9;
+    }
+    .panel-content td.mono { font-family: monospace; font-size: 0.7rem; }
+
+    .status-running { color: #3fb950; }
+    .status-stopped { color: #f85149; }
+
+    .ps-bar {
+        display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;
+    }
+    .ps-input {
+        flex: 1; padding: 0.3rem 0.5rem; background: #0d1117; border: 1px solid #30363d;
+        border-radius: 4px; color: #c9d1d9; font-family: monospace; font-size: 0.8rem;
+    }
+    .ps-output {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.5rem; font-family: monospace; font-size: 0.7rem;
+        white-space: pre-wrap; color: #c9d1d9; max-height: 200px; overflow-y: auto;
+    }
+    .loading-msg { color: #8b949e; font-style: italic; padding: 0.5rem; }
+    .no-wsl {
+        text-align: center; padding: 3rem; color: #8b949e;
+    }
+    .no-wsl h2 { color: #f85149; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if not wsl %}
+<div class="no-wsl">
+    <h2>Not Running in WSL</h2>
+    <p>Windows Control requires Velour to be running inside WSL2 to access the Windows host.</p>
+</div>
+{% else %}
+
+<div class="win-header">
+    <h1>Windows Control</h1>
+    <span style="color: #3fb950; font-size: 0.75rem;">WSL2 Detected</span>
+</div>
+
+<!-- System summary -->
+<div class="win-info">
+    <div class="card">
+        <h3>Operating System</h3>
+        {% if info.os %}
+        <p>{{ info.os.Caption }}<br>
+           Version {{ info.os.Version }} ({{ info.os.OSArchitecture }})</p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h3>Hardware</h3>
+        {% if info.cpu %}
+        <p>{{ info.cpu.Name }}<br>
+           {{ info.cpu.NumberOfCores }} cores / {{ info.cpu.NumberOfLogicalProcessors }} threads</p>
+        {% endif %}
+    </div>
+    <div class="card">
+        <h3>System</h3>
+        {% if info.system %}
+        <p>{{ info.system.Manufacturer }} {{ info.system.Model }}<br>
+           {{ info.system.Name }} \ {{ info.system.UserName }}</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="panel-tabs">
+    <button class="panel-tab active" onclick="showPanel('processes', this)">Processes</button>
+    <button class="panel-tab" onclick="showPanel('services', this)">Services</button>
+    <button class="panel-tab" onclick="showPanel('disks', this)">Disks</button>
+    <button class="panel-tab" onclick="showPanel('network', this)">Network</button>
+    <button class="panel-tab" onclick="showPanel('firewall', this)">Firewall</button>
+    <button class="panel-tab" onclick="showPanel('installed', this)">Programs</button>
+    <button class="panel-tab" onclick="showPanel('startup', this)">Startup</button>
+    <button class="panel-tab" onclick="showPanel('tasks', this)">Scheduled Tasks</button>
+    <button class="panel-tab" onclick="showPanel('eventlog', this)">Event Log</button>
+    <button class="panel-tab" onclick="showPanel('env', this)">Environment</button>
+    <button class="panel-tab" onclick="showPanel('powershell', this)">PowerShell</button>
+</div>
+
+<!-- Panels -->
+<div class="panel active" id="panel-processes">
+    <div class="panel-content"><div class="loading-msg">Loading processes...</div></div>
+</div>
+<div class="panel" id="panel-services">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-disks">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-network">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-firewall">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-installed">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-startup">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-tasks">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-eventlog">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-env">
+    <div class="panel-content"><div class="loading-msg">Click tab to load...</div></div>
+</div>
+<div class="panel" id="panel-powershell">
+    <div class="panel-content">
+        <div class="ps-bar">
+            <input type="text" class="ps-input" id="ps-cmd" placeholder="Enter PowerShell command..." autocomplete="off">
+            <button class="btn btn-primary" style="font-size:0.75rem; padding:0.3rem 0.7rem;" onclick="runPS()">Run</button>
+        </div>
+        <div class="ps-output" id="ps-output">Ready. Type a PowerShell command above.</div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const loaded = {};
+
+function showPanel(name, btn) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.panel-tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('panel-' + name).classList.add('active');
+    btn.classList.add('active');
+    if (!loaded[name] && name !== 'powershell') {
+        loadPanel(name);
+    }
+}
+
+async function loadPanel(name) {
+    const panel = document.getElementById('panel-' + name).querySelector('.panel-content');
+    panel.innerHTML = '<div class="loading-msg">Loading...</div>';
+    loaded[name] = true;
+
+    const endpoints = {
+        processes: '{% url "winctl:processes" %}',
+        services: '{% url "winctl:services" %}',
+        disks: '{% url "winctl:disks" %}',
+        network: '{% url "winctl:network" %}',
+        firewall: '{% url "winctl:firewall" %}',
+        installed: '{% url "winctl:installed" %}',
+        startup: '{% url "winctl:startup" %}',
+        tasks: '{% url "winctl:tasks" %}',
+        eventlog: '{% url "winctl:eventlog" %}',
+        env: '{% url "winctl:env" %}',
+    };
+
+    try {
+        const resp = await fetch(endpoints[name]);
+        const data = await resp.json();
+        if (data.error) { panel.innerHTML = `<div style="color:#f85149;">${data.error}</div>`; return; }
+        panel.innerHTML = renderers[name](data);
+    } catch (err) {
+        panel.innerHTML = `<div style="color:#f85149;">Error: ${err.message}</div>`;
+    }
+}
+
+const renderers = {
+    processes(data) {
+        let rows = (data.processes || []).map(p =>
+            `<tr><td>${p.Name}</td><td class="mono">${p.Id}</td><td>${(p.CPU||0).toFixed?.(1)||p.CPU||0}</td><td>${p.MemMB} MB</td></tr>`
+        ).join('');
+        return `<table><tr><th>Name</th><th>PID</th><th>CPU</th><th>Memory</th></tr>${rows}</table>`;
+    },
+    services(data) {
+        let rows = (data.services || []).map(s => {
+            const cls = s.Status === 'Running' ? 'status-running' : s.Status === 'Stopped' ? 'status-stopped' : '';
+            return `<tr><td>${s.DisplayName}</td><td class="mono">${s.Name}</td><td class="${cls}">${s.Status}</td></tr>`;
+        }).join('');
+        return `<table><tr><th>Display Name</th><th>Service</th><th>Status</th></tr>${rows}</table>`;
+    },
+    disks(data) {
+        let rows = (data.disks || []).map(d =>
+            `<tr><td>${d.DeviceID}</td><td>${d.VolumeName||''}</td><td>${d.SizeGB} GB</td><td>${d.FreeGB} GB</td><td>${d.SizeGB>0?Math.round((1-d.FreeGB/d.SizeGB)*100):0}%</td></tr>`
+        ).join('');
+        return `<table><tr><th>Drive</th><th>Label</th><th>Size</th><th>Free</th><th>Used</th></tr>${rows}</table>`;
+    },
+    network(data) {
+        let rows = (data.adapters || []).map(a =>
+            `<tr><td>${a.Name}</td><td>${a.InterfaceDescription}</td><td class="mono">${a.MacAddress}</td><td>${a.LinkSpeed}</td></tr>`
+        ).join('');
+        return `<table><tr><th>Name</th><th>Description</th><th>MAC</th><th>Speed</th></tr>${rows}</table>`;
+    },
+    firewall(data) {
+        let rows = (data.profiles || []).map(p => {
+            const cls = p.Enabled ? 'status-running' : 'status-stopped';
+            return `<tr><td>${p.Name}</td><td class="${cls}">${p.Enabled?'Enabled':'Disabled'}</td><td>${p.DefaultInboundAction}</td><td>${p.DefaultOutboundAction}</td></tr>`;
+        }).join('');
+        return `<table><tr><th>Profile</th><th>Status</th><th>Inbound</th><th>Outbound</th></tr>${rows}</table>`;
+    },
+    installed(data) {
+        let rows = (data.programs || []).map(p =>
+            `<tr><td>${p.DisplayName}</td><td>${p.DisplayVersion||''}</td><td>${p.Publisher||''}</td></tr>`
+        ).join('');
+        return `<table><tr><th>Program</th><th>Version</th><th>Publisher</th></tr>${rows}</table>`;
+    },
+    startup(data) {
+        let rows = (data.startup || []).map(s =>
+            `<tr><td>${s.Name}</td><td class="mono" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${s.Command||''}</td><td>${s.User||''}</td></tr>`
+        ).join('');
+        return rows ? `<table><tr><th>Name</th><th>Command</th><th>User</th></tr>${rows}</table>`
+            : '<div style="color:#8b949e;">No startup programs found.</div>';
+    },
+    tasks(data) {
+        let rows = (data.tasks || []).map(t =>
+            `<tr><td>${t.TaskName}</td><td class="mono">${t.TaskPath||''}</td><td>${t.State}</td><td>${t.NextRun||''}</td></tr>`
+        ).join('');
+        return `<table><tr><th>Task</th><th>Path</th><th>State</th><th>Next Run</th></tr>${rows}</table>`;
+    },
+    eventlog(data) {
+        let rows = (data.events || []).map(e => {
+            const cls = e.EntryType === 'Error' ? 'status-stopped' : '';
+            const msg = (e.Message||'').substring(0, 120);
+            return `<tr><td style="white-space:nowrap;">${e.TimeGenerated||''}</td><td class="${cls}">${e.EntryType}</td><td>${e.Source}</td><td>${msg}</td></tr>`;
+        }).join('');
+        return rows ? `<table><tr><th>Time</th><th>Type</th><th>Source</th><th>Message</th></tr>${rows}</table>`
+            : '<div style="color:#8b949e;">No errors or warnings found.</div>';
+    },
+    env(data) {
+        const env = data.env || {};
+        let rows = Object.entries(env).sort((a,b) => a[0].localeCompare(b[0])).map(([k,v]) =>
+            `<tr><td style="white-space:nowrap;color:#58a6ff;">${k}</td><td class="mono" style="word-break:break-all;">${v}</td></tr>`
+        ).join('');
+        return `<table><tr><th>Variable</th><th>Value</th></tr>${rows}</table>`;
+    },
+};
+
+// PowerShell console
+const psInput = document.getElementById('ps-cmd');
+const psOutput = document.getElementById('ps-output');
+
+async function runPS() {
+    const cmd = psInput.value.trim();
+    if (!cmd) return;
+    psOutput.textContent += '\nPS> ' + cmd + '\n';
+    psInput.value = '';
+    try {
+        const resp = await fetch('{% url "winctl:run" %}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ command: cmd }),
+        });
+        const data = await resp.json();
+        if (data.stdout) psOutput.textContent += data.stdout + '\n';
+        if (data.stderr) psOutput.textContent += data.stderr + '\n';
+        if (data.error) psOutput.textContent += 'ERROR: ' + data.error + '\n';
+    } catch (err) {
+        psOutput.textContent += 'Network error: ' + err.message + '\n';
+    }
+    psOutput.scrollTop = psOutput.scrollHeight;
+}
+
+if (psInput) {
+    psInput.addEventListener('keydown', e => { if (e.key === 'Enter') runPS(); });
+}
+
+// Auto-load first panel
+loadPanel('processes');
+</script>
+{% endblock %}
