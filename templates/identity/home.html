@@ -257,7 +257,46 @@
         </div>
     </div>
 
-    <!-- Mood History Chart -->
+    <!-- 2D mood circumplex (Session 6) -->
+    <div class="card">
+        <h3>Mood trajectory</h3>
+        <p style="color: #6e7681; font-size: 0.72rem; margin: 0 0 0.5rem;">
+            Valence × arousal. Older ticks fade; the brightest dot is now.
+        </p>
+        <svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg"
+             style="width: 100%; height: auto; display: block; background: #0d1117; border-radius: 6px;">
+            <!-- Axis lines -->
+            <line x1="150" y1="15" x2="150" y2="285" stroke="#21262d" stroke-width="1"/>
+            <line x1="15" y1="150" x2="285" y2="150" stroke="#21262d" stroke-width="1"/>
+            <!-- Quadrant labels -->
+            <text x="290" y="146" text-anchor="end" fill="#484f58" font-size="8"
+                  font-family="ui-monospace, monospace">pleasant →</text>
+            <text x="10" y="146" text-anchor="start" fill="#484f58" font-size="8"
+                  font-family="ui-monospace, monospace">← unpleasant</text>
+            <text x="154" y="20" text-anchor="start" fill="#484f58" font-size="8"
+                  font-family="ui-monospace, monospace">↑ aroused</text>
+            <text x="154" y="293" text-anchor="start" fill="#484f58" font-size="8"
+                  font-family="ui-monospace, monospace">↓ calm</text>
+            <!-- Mood labels at their canonical coordinates -->
+            {% for m in mood_labels %}
+            <text x="{{ m.x }}" y="{{ m.y }}" text-anchor="middle"
+                  fill="#30363d" font-size="7"
+                  font-family="ui-monospace, monospace">{{ m.label }}</text>
+            {% endfor %}
+            <!-- Tick dots — oldest first so newer draw on top -->
+            {% for d in mood_trail %}
+            <circle cx="{{ d.x }}" cy="{{ d.y }}" r="{{ d.r }}"
+                    fill="#58a6ff" fill-opacity="{{ d.opacity }}"/>
+            {% endfor %}
+            <!-- Crosshair at origin -->
+            <circle cx="150" cy="150" r="1.5" fill="#30363d"/>
+        </svg>
+        <div style="margin-top: 0.5rem;">
+            <a href="{% url 'identity:tick_log' %}" style="font-size: 0.78rem; color: #58a6ff;">View full tick log →</a>
+        </div>
+    </div>
+
+    <!-- Mood History Chart (legacy 1D sine wave) -->
     <div class="card">
         <h3>Mood Over Time</h3>
         <div id="mood-chart-container">

@@ -203,6 +203,67 @@ def _assess_mood(identity):
     return mood, min(1.0, intensity), '; '.join(triggers) if triggers else 'General reflection'
 
 
+# Russell-circumplex coordinates for each mood. Valence runs left
+# (unpleasant) to right (pleasant), arousal runs bottom (calm) to top
+# (aroused). These are hand-tuned for Velour's mood vocabulary — the
+# goal isn't psychological rigor, it's giving each mood a consistent
+# position on a 2D plane so the operator can see trajectory over
+# time. Any mood not in this map falls back to the center.
+MOOD_COORDINATES = {
+    'contemplative': (0.00, -0.30),
+    'curious':       (0.35,  0.30),
+    'alert':         (-0.20, 0.70),
+    'satisfied':     (0.70, -0.20),
+    'concerned':     (-0.50, 0.50),
+    'excited':       (0.60,  0.80),
+    'restless':      (-0.30, 0.40),
+    'protective':    (0.20,  0.40),
+    'creative':      (0.50,  0.50),
+    'weary':         (-0.30, -0.60),
+}
+
+
+def _mood_trajectory(recent_ticks):
+    """Build the list of 2D dots the template will plot. Each entry is
+    {x, y, opacity, r} — x/y in screen coordinates (0-300), opacity
+    fading out for older ticks, radius bigger for higher intensity.
+
+    The list is oldest-first so the SVG draws older ticks behind newer
+    ones and the most recent tick sits on top."""
+    if not recent_ticks:
+        return []
+    # recent_ticks is newest-first; reverse to oldest-first
+    ordered = list(reversed(list(recent_ticks)))
+    n = len(ordered)
+    dots = []
+    for i, t in enumerate(ordered):
+        coord = MOOD_COORDINATES.get(t.mood, (0.0, 0.0))
+        # Jitter by intensity — higher intensity = further from the
+        # mood's canonical center. Seeded off the tick id so the
+        # jitter is stable across page reloads.
+        import random as _r
+        rng = _r.Random(t.pk or 0)
+        jx = (rng.random() - 0.5) * 0.15 * t.mood_intensity
+        jy = (rng.random() - 0.5) * 0.15 * t.mood_intensity
+        vx = coord[0] + jx
+        vy = coord[1] + jy
+        # Convert from [-1, 1] to screen 0-300 (SVG viewBox)
+        sx = 150 + vx * 130
+        sy = 150 - vy * 130  # y inverted (SVG y grows downward)
+        # Opacity: newest = 1.0, oldest = 0.2
+        opacity = 0.2 + 0.8 * (i / max(1, n - 1))
+        radius = 2.5 + 4.0 * t.mood_intensity
+        dots.append({
+            'x': round(sx, 1),
+            'y': round(sy, 1),
+            'opacity': round(opacity, 2),
+            'r': round(radius, 1),
+            'mood': t.mood,
+            'at': t.at,
+        })
+    return dots
+
+
 @login_required
 def identity_home(request):
     identity = Identity.get_self()
@@ -219,6 +280,11 @@ def identity_home(request):
     # drive both the mood sparkline and the thought stream at the bottom
     # of the page.
     recent_ticks = Tick.objects.all()[:20]
+
+    # 2D mood trajectory for the circumplex visualization — Session 6.
+    # Oldest→newest order so the SVG draws older dots behind newer ones.
+    # Capped at 40 so the trail is visible but not cluttered.
+    mood_trail = _mood_trajectory(Tick.objects.all()[:40])
 
     # Open concerns — Identity's persistent preoccupations. Each one is
     # a worry that was opened by some tick and hasn't been resolved.
@@ -249,6 +315,11 @@ def identity_home(request):
         'identity': identity,
         'reflection': reflection,
         'recent_ticks': recent_ticks,
+        'mood_trail': mood_trail,
+        'mood_labels': [
+            {'label': k, 'x': 150 + v[0] * 130, 'y': 150 - v[1] * 130}
+            for k, v in MOOD_COORDINATES.items()
+        ],
         'open_concerns': open_concerns,
         'recent_reflections': recent_reflections,
         'legacy_journal': legacy_journal,
