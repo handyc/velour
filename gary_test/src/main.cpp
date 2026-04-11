@@ -32,6 +32,14 @@
 #include "wifi_secrets.h"
 #include "velour_client.h"
 
+// Default HTTP port for the local web server. Per-device overrides go in
+// wifi_secrets.h — each node in the fleet can have its own port so the
+// same binary can be reverse-proxied cleanly by a front-end velour later.
+// Gary uses the default (80); Larry is the first with a custom port.
+#ifndef NODE_HTTP_PORT
+#define NODE_HTTP_PORT 80
+#endif
+
 #define REPORT_INTERVAL_MS  (30UL * 1000UL)
 // Local AHT read cadence, independent of Velour reporting. The built-in
 // web page polls /data.json every second; 2s sensor reads keep the data
@@ -49,7 +57,7 @@
 #define AHT20_INIT_CMD  0xBE
 
 VelourClient velour(VELOUR_URL, NODE_SLUG, NODE_TOKEN);
-ESP8266WebServer httpd(80);
+ESP8266WebServer httpd(NODE_HTTP_PORT);
 
 unsigned long lastReportAt = 0;
 unsigned long lastOtaCheckAt = 0;
@@ -361,16 +369,25 @@ static void httpdSetup() {
     httpd.begin();
     Serial.print("[httpd] listening on http://");
     Serial.print(WiFi.localIP());
+    Serial.print(":");
+    Serial.print(NODE_HTTP_PORT);
     Serial.println("/");
 
-    // mDNS so the page is reachable at http://<slug>.local/ from any
-    // device on the same Wi-Fi, without having to look up the IP.
-    // Gary's hostname on the LAN becomes NODE_SLUG.local.
+    // mDNS so the page is reachable at http://<slug>.local:<port>/ from
+    // any device on the same Wi-Fi, without having to look up the IP.
+    // Gary's hostname on the LAN becomes NODE_SLUG.local. Non-port-80
+    // nodes need the explicit port in the URL (browsers don't honor the
+    // port hint from mDNS service discovery on their own).
     if (MDNS.begin(NODE_SLUG)) {
-        MDNS.addService("http", "tcp", 80);
+        MDNS.addService("http", "tcp", NODE_HTTP_PORT);
         Serial.print("[mdns] registered http://");
         Serial.print(NODE_SLUG);
-        Serial.println(".local/");
+        Serial.print(".local");
+        if (NODE_HTTP_PORT != 80) {
+            Serial.print(":");
+            Serial.print(NODE_HTTP_PORT);
+        }
+        Serial.println("/");
     } else {
         Serial.println("[mdns] failed to register — use the IP directly.");
     }
