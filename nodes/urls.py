@@ -16,4 +16,5 @@ urlpatterns = [
     path('<slug:slug>/edit/',        views.node_edit,       name='edit'),
     path('<slug:slug>/delete/',      views.node_delete,     name='delete'),
     path('<slug:slug>/rotate-token/',views.node_rotate_token, name='rotate_token'),
+    path('<slug:slug>/live.json',    views.node_live_json,  name='live_json'),
 ]

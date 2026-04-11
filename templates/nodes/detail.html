@@ -10,6 +10,65 @@
     .kv .v { color: #c9d1d9; }
     .token-box { background: #0d1117; border: 1px solid #30363d; padding: 0.75rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; word-break: break-all; color: #58a6ff; }
     .notes { white-space: pre-wrap; color: #c9d1d9; font-size: 0.875rem; }
+
+    /* Live readings panel — populated by JS polling /live.json. */
+    .live-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 0.6rem;
+        margin-top: 0.5rem;
+    }
+    .live-card {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.7rem 0.85rem;
+    }
+    .live-card .channel {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        color: #6e7681;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.15rem;
+    }
+    .live-card .value {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 1.4rem;
+        color: #58a6ff;
+        line-height: 1.1;
+    }
+    .live-card .age {
+        font-size: 0.7rem;
+        color: #6e7681;
+        margin-top: 0.2rem;
+    }
+    .live-card.stale .value { color: #6e7681; }
+    .live-card .spark {
+        margin-top: 0.4rem;
+        height: 28px;
+        width: 100%;
+    }
+    .live-status {
+        font-size: 0.72rem;
+        color: #6e7681;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-top: 0.4rem;
+    }
+    .live-status .pulse {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #2ea043;
+        margin-right: 0.4rem;
+        vertical-align: middle;
+        animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1.0; }
+    }
 </style>
 {% endblock %}
 
@@ -37,7 +96,101 @@
     <button type="submit" class="btn btn-secondary" style="font-size: 0.8125rem;">Rotate token</button>
 </form>
 
-<h2 style="margin-top: 1.5rem;">Recent Telemetry</h2>
+<h2 style="margin-top: 1.5rem;">Live</h2>
+<div class="live-status">
+    <span class="pulse"></span>
+    <span id="live-status-text">connecting…</span>
+</div>
+<div id="live-grid" class="live-grid">
+    {# JS populates this from /live.json every few seconds #}
+</div>
+
+<script>
+(function () {
+    const grid = document.getElementById('live-grid');
+    const statusText = document.getElementById('live-status-text');
+    const url = '{% url "nodes:live_json" node.slug %}';
+    const POLL_MS = 3000;
+    const STALE_AFTER_SEC = 90;
+
+    // Format value compactly: integers stay as integers, decimals use 3 places.
+    function fmtValue(v) {
+        if (v === null || v === undefined) return '—';
+        const a = Math.abs(v);
+        if (a >= 1000) return v.toFixed(0);
+        if (a >= 10)   return v.toFixed(2);
+        if (a >= 1)    return v.toFixed(3);
+        return v.toFixed(4);
+    }
+
+    function ageText(iso) {
+        if (!iso) return 'never';
+        const t = new Date(iso).getTime();
+        const sec = Math.floor((Date.now() - t) / 1000);
+        if (sec < 60)   return sec + 's ago';
+        if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+        if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+        return Math.floor(sec / 86400) + 'd ago';
+    }
+
+    function ageSeconds(iso) {
+        if (!iso) return Infinity;
+        return Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    }
+
+    // Build a tiny inline SVG sparkline from a numeric history array.
+    function sparkSVG(values) {
+        if (!values || values.length < 2) return '';
+        const w = 240, h = 28, pad = 2;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min || 1;
+        const step = (w - 2 * pad) / (values.length - 1);
+        let d = '';
+        for (let i = 0; i < values.length; i++) {
+            const x = pad + i * step;
+            const y = pad + (h - 2 * pad) * (1 - (values[i] - min) / range);
+            d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+        }
+        return '<svg class="spark" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+             + '<path d="' + d + '" fill="none" stroke="#58a6ff" stroke-width="1.4"/>'
+             + '</svg>';
+    }
+
+    function render(data) {
+        if (!data.channels || data.channels.length === 0) {
+            grid.innerHTML = '<div style="color:#6e7681;font-size:0.85rem;">No readings from this node yet.</div>';
+            return;
+        }
+        const html = data.channels.map(function (ch) {
+            const stale = ageSeconds(ch.latest_at) > STALE_AFTER_SEC;
+            return '<div class="live-card' + (stale ? ' stale' : '') + '">'
+                 + '<div class="channel">' + ch.channel + '</div>'
+                 + '<div class="value">' + fmtValue(ch.latest_value) + '</div>'
+                 + '<div class="age">' + ageText(ch.latest_at) + '</div>'
+                 + sparkSVG(ch.history)
+                 + '</div>';
+        }).join('');
+        grid.innerHTML = html;
+    }
+
+    function poll() {
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                statusText.textContent = 'live · last seen ' + ageText(data.last_seen_at) + ' · ' + (data.firmware || 'no firmware');
+                render(data);
+            })
+            .catch(function () {
+                statusText.textContent = 'offline (will retry)';
+            });
+    }
+    poll();
+    setInterval(poll, POLL_MS);
+})();
+</script>
+
+<h2 style="margin-top: 1.5rem;">Recent Telemetry (cached on page load)</h2>
 {% if channel_summary %}
 <div class="card" style="padding: 0;">
     <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">

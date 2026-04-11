@@ -1,0 +1,6 @@
+# PlatformIO build output and toolchain cache.
+.pio/
+
+# Wi-Fi credentials and the Gary API token live in this file.
+# Never committed. The .example template IS committed.
+include/wifi_secrets.h

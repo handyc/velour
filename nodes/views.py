@@ -180,6 +180,54 @@ def node_rotate_token(request, slug):
     return redirect('nodes:detail', slug=slug)
 
 
+@login_required
+def node_live_json(request, slug):
+    """Live readings JSON for the node detail page poller.
+
+    Returns the most-recent value per channel, plus a small rolling
+    window of recent values per channel for inline sparklines. The
+    JS on the detail page polls this every few seconds and replaces
+    the DOM. Cheap — one indexed query per channel.
+    """
+    node = get_object_or_404(Node, slug=slug)
+    history_n = 30  # how many recent values per channel to send
+
+    channel_names = list(
+        SensorReading.objects
+        .filter(node=node)
+        .values_list('channel', flat=True)
+        .distinct()
+    )
+
+    channels = []
+    for ch in sorted(channel_names):
+        latest = (SensorReading.objects
+                  .filter(node=node, channel=ch)
+                  .order_by('-received_at')
+                  .first())
+        history_qs = (SensorReading.objects
+                      .filter(node=node, channel=ch)
+                      .order_by('-received_at')[:history_n])
+        history = list(history_qs)
+        history.reverse()  # oldest → newest, suitable for sparkline
+        channels.append({
+            'channel':      ch,
+            'latest_value': latest.value if latest else None,
+            'latest_at':    latest.received_at.isoformat() if latest else None,
+            'history':      [r.value for r in history],
+            'history_at':   [r.received_at.isoformat() for r in history],
+        })
+
+    return JsonResponse({
+        'node':         node.slug,
+        'nickname':     node.nickname,
+        'last_seen_at': node.last_seen_at.isoformat() if node.last_seen_at else None,
+        'last_ip':      node.last_ip,
+        'firmware':    node.firmware_version,
+        'channels':     channels,
+    })
+
+
 # --- hardware profile views ----------------------------------------
 
 @login_required
