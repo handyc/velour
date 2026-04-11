@@ -12,16 +12,22 @@ Supports a deliberately small subset:
 
 Inline:
   - `**bold**` and `*italic*`
-  - `^[note text]` — inline sidenote (Pandoc syntax). The renderer
-    emits a small raised number at the anchor point and hangs the
-    note in the right margin.
+  - `^[note text]`        — inline sidenote (Pandoc syntax)
+  - `[[spark:DATA|OPTS]]` — inline Tufte sparkline
+
+  Sparkline syntax:
+    [[spark:1,2,3,4,5]]                 — bare line sparkline
+    [[spark:1,2,3,4,5 | end]]           — with endpoint dot
+    [[spark:1,2,3,4,5 | end min max]]   — with min/max markers
+    [[spark:1,2,3,4,5 | end band(2,4)]] — with normal-range band
+    [[spark:1,2,3,4,5 | bar]]           — bar variant
 
 The parser output is a list of (kind, payload) tuples. For paragraph
 and quote blocks the payload is a list of "runs" — each run is a tuple
-where the first element is a tag ('text' / 'note') and the rest depend
-on the tag:
+where the first element is a tag and the rest depend on the tag:
   - ('text', style, text) — style is '' / 'B' / 'I'
   - ('note', text)        — sidenote text; renderer assigns a number
+  - ('spark', spec_dict)  — sparkline; spec has data, options, band
 
 Figure blocks: ('fig', slug)
 """
@@ -29,12 +35,58 @@ Figure blocks: ('fig', slug)
 import re
 
 
-# Tokenizer regex: match either an inline sidenote ^[...] (allows nested
-# brackets via simple non-greedy matching), or **bold**, or *italic*.
-# Order matters — the sidenote alternative is tried first.
+# Tokenizer regex: match sparkline, sidenote, bold, italic — in that
+# order so the longest/most specific patterns win.
 _TOKEN_RE = re.compile(
-    r'(\^\[[^\]]+\]|\*\*[^*\n]+\*\*|\*[^*\n]+\*)'
+    r'(\[\[spark:[^\]]+\]\]'
+    r'|\^\[[^\]]+\]'
+    r'|\*\*[^*\n]+\*\*'
+    r'|\*[^*\n]+\*)'
 )
+
+
+_BAND_RE = re.compile(r'band\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)')
+
+
+def _parse_spark(body):
+    """Parse the inside of [[spark:...]] into a spec dict.
+
+    Returns None on parse failure (caller should fall through to
+    rendering the original token as plain text or just skipping).
+    """
+    if '|' in body:
+        data_str, opts_str = body.split('|', 1)
+    else:
+        data_str, opts_str = body, ''
+
+    try:
+        data = [float(x.strip()) for x in data_str.split(',') if x.strip()]
+    except ValueError:
+        return None
+    if len(data) < 2:
+        return None
+
+    options = set()
+    band = None
+    for token in opts_str.replace(',', ' ').split():
+        token = token.strip()
+        if not token:
+            continue
+        if token in ('end', 'min', 'max', 'bar'):
+            options.add(token)
+            continue
+        m = _BAND_RE.match(token)
+        if m:
+            band = (float(m.group(1)), float(m.group(2)))
+            continue
+        # Check for "band(LO" stub from over-eager comma split — try to
+        # rejoin it. The simpler approach: re-search the whole opts_str.
+    if band is None:
+        m = _BAND_RE.search(opts_str)
+        if m:
+            band = (float(m.group(1)), float(m.group(2)))
+
+    return {'data': data, 'options': options, 'band': band}
 
 
 def parse_inline(text):
@@ -43,12 +95,21 @@ def parse_inline(text):
     Each run is one of:
       ('text', style, text) — style is '' / 'B' / 'I'
       ('note', text)         — inline sidenote
+      ('spark', spec_dict)   — inline sparkline
     """
     runs = []
     for piece in _TOKEN_RE.split(text):
         if not piece:
             continue
-        if piece.startswith('^[') and piece.endswith(']'):
+        if piece.startswith('[[spark:') and piece.endswith(']]'):
+            spec = _parse_spark(piece[len('[[spark:'):-2])
+            if spec:
+                runs.append(('spark', spec))
+            else:
+                # Malformed — render the literal token so the author can
+                # see something is off, rather than silently dropping it.
+                runs.append(('text', '', piece))
+        elif piece.startswith('^[') and piece.endswith(']'):
             runs.append(('note', piece[2:-1]))
         elif piece.startswith('**') and piece.endswith('**'):
             runs.append(('text', 'B', piece[2:-2]))

@@ -37,6 +37,9 @@ from django.conf import settings
 from fpdf import FPDF
 
 from .markdown import parse
+from .sparklines import DEFAULT_H as SPARK_H
+from .sparklines import DEFAULT_W as SPARK_W
+from .sparklines import draw_sparkline
 
 
 # --- page geometry constants (mm) -----------------------------------------
@@ -197,6 +200,41 @@ class TufteManualPDF(FPDF):
         self.set_font(FONT, '', prev_size)
         return anchor_y
 
+    def _write_sparkline(self, spec, leading):
+        """Draw an inline sparkline at the current cursor position and
+        advance the cursor x by the sparkline's width.
+
+        The sparkline is positioned to sit centered around the
+        x-height of the surrounding text — drawn slightly below the
+        cursor y, since fpdf2's cursor y is the *top* of the line and
+        the visual baseline is roughly y + leading * 0.78.
+        """
+        cur_x = self.get_x()
+        cur_y = self.get_y()
+
+        # If the remaining horizontal space on this line is too small
+        # to fit the sparkline, push it onto the next line first by
+        # writing a soft break.
+        body_right = LEFT_MARGIN + BODY_W
+        if cur_x + SPARK_W > body_right + 0.5:
+            self.ln(leading)
+            cur_x = self.get_x()
+            cur_y = self.get_y()
+
+        # Vertically center the sparkline within the line: top edge
+        # sits at y + (leading - SPARK_H) / 2.
+        top_y = cur_y + max(0, (leading - SPARK_H) / 2)
+
+        # Add a hair of horizontal padding before/after so it doesn't
+        # collide with neighbouring letterforms.
+        cur_x += 0.6
+        consumed = draw_sparkline(self, spec, cur_x, top_y)
+        new_x = cur_x + consumed + 0.6
+
+        # Restore the cursor to the same baseline y, but at the new x
+        # so subsequent text continues on the same line.
+        self.set_xy(new_x, cur_y)
+
     def emit_runs_with_notes(self, runs, leading):
         """Walk a paragraph's runs, writing text inline and queuing any
         inline sidenote anchors. Returns the list of (anchor_y, text)
@@ -212,6 +250,9 @@ class TufteManualPDF(FPDF):
                 _, note_text = run
                 anchor_y = self._write_anchor(leading)
                 notes_in_para.append((anchor_y, self._note_counter, note_text))
+            elif tag == 'spark':
+                _, spec = run
+                self._write_sparkline(spec, leading)
         self.ln(leading)
         return notes_in_para
 
@@ -251,6 +292,9 @@ class TufteManualPDF(FPDF):
                 self.render_inline_sidenote(
                     anchor_y, self._note_counter, note_text,
                 )
+            elif tag == 'spark':
+                _, spec = run
+                self._write_sparkline(spec, self.body_leading)
         self.ln(self.body_leading)
         self.set_left_margin(prev_left)
         self.set_text_color(*BLACK)
