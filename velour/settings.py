@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'databases',
     'codex',
     'attic',
+    'cartography',
 ]
 
 MIDDLEWARE = [

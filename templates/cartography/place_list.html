@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Saved places — Cartography{% endblock %}
+
+{% block extra_head %}
+<style>
+    .place-row {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        padding: 0.5rem 0.85rem;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        margin-bottom: 0.4rem;
+        background: #0d1117;
+    }
+    .place-row .name { flex: 1; font-weight: 600; color: #c9d1d9; }
+    .place-row .scale {
+        font-size: 0.7rem;
+        padding: 0.1rem 0.5rem;
+        border-radius: 8px;
+        background: #21262d;
+        color: #8b949e;
+    }
+    .place-row .coords {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.72rem;
+        color: #6e7681;
+    }
+    .place-row .actions { display: flex; gap: 0.3rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Saved places</h1>
+<p style="color:#8b949e;">Bookmarked coordinates across all map scales.</p>
+
+<div style="display:flex; gap:0.5rem; margin: 0.75rem 0 1rem;">
+    <a href="{% url 'cartography:place_add' %}" class="btn">New place</a>
+    <a href="{% url 'cartography:home' %}" class="btn btn-secondary">Earth</a>
+    <a href="{% url 'cartography:mars' %}" class="btn btn-secondary">Mars</a>
+    <a href="{% url 'cartography:moon' %}" class="btn btn-secondary">Moon</a>
+    <a href="{% url 'cartography:sky' %}" class="btn btn-secondary">Sky</a>
+</div>
+
+{% if places %}
+{% for p in places %}
+<div class="place-row">
+    <span class="scale">{{ p.get_scale_display }}</span>
+    <span class="name">{{ p.name }}</span>
+    <span class="coords">{{ p.lat|floatformat:4 }}, {{ p.lon|floatformat:4 }} · z{{ p.zoom }}</span>
+    <span class="actions">
+        <a href="{% url 'cartography:place_edit' p.slug %}" class="btn btn-secondary" style="font-size:0.72rem;">Edit</a>
+        <form method="post" action="{% url 'cartography:place_delete' p.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ p.name|escapejs }}?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;">Delete</button>
+        </form>
+    </span>
+</div>
+{% endfor %}
+{% else %}
+<p style="color:#8b949e;">No saved places yet. Click on any map to save a coordinate.</p>
+{% endif %}
+{% endblock %}

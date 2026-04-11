@@ -1,0 +1,11 @@
+{# Scale switcher used at the top of every cartography page. #}
+<div class="scale-bar">
+    <a href="{% url 'cartography:home' %}" class="scale-link {% if scale == 'earth' %}active{% endif %}">Earth</a>
+    <a href="{% url 'cartography:mars' %}" class="scale-link {% if scale == 'mars' %}active{% endif %}">Mars</a>
+    <a href="{% url 'cartography:moon' %}" class="scale-link {% if scale == 'moon' %}active{% endif %}">Moon</a>
+    <a href="{% url 'cartography:solar' %}" class="scale-link {% if scale == 'solar_system' %}active{% endif %}">Solar System</a>
+    <a href="{% url 'cartography:sky' %}" class="scale-link {% if scale == 'sky' %}active{% endif %}">Sky / Universe</a>
+    <span class="spacer"></span>
+    <a href="{% url 'cartography:place_list' %}" class="scale-link">Saved places</a>
+    <a href="{% url 'cartography:place_add' %}?scale={{ scale }}" class="scale-link">+ Save place</a>
+</div>

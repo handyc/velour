@@ -1,0 +1,68 @@
+{% extends "cartography/_base.html" %}
+
+{% block title %}Mars — Cartography{% endblock %}
+
+{% block map_content %}
+<div id="map" class="map-container"></div>
+<div class="map-meta">
+    Mars · NASA Trek Viking color mosaic · 232m/pixel ·
+    centered at <span id="map-coords">0, 0</span>
+    · zoom <span id="map-zoom">2</span>
+</div>
+
+<script>
+(function () {
+    // Mars uses an equirectangular projection. Leaflet handles this
+    // via L.CRS.EPSG4326 which is the same lat/lon system as Earth
+    // but reinterpreted for the Martian surface.
+    const map = L.map('map', {
+        crs: L.CRS.EPSG4326,
+        center: [0, 0],
+        zoom: 2,
+        maxZoom: 7,
+    });
+
+    L.tileLayer(
+        'https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg',
+        {
+            attribution: 'NASA/JPL-Caltech/USGS',
+            maxZoom: 7,
+            minZoom: 0,
+            tms: false,
+            noWrap: true,
+        }
+    ).addTo(map);
+
+    function updateMeta() {
+        const c = map.getCenter();
+        document.getElementById('map-coords').textContent =
+            c.lat.toFixed(4) + ', ' + c.lng.toFixed(4);
+        document.getElementById('map-zoom').textContent = map.getZoom();
+    }
+    map.on('moveend', updateMeta);
+    map.on('zoomend', updateMeta);
+
+    fetch('{% url "cartography:places_json" %}?scale=mars', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            (data.places || []).forEach(function (p) {
+                L.marker([p.lat, p.lon]).addTo(map)
+                    .bindPopup('<b>' + p.name + '</b><br>' + (p.notes || ''));
+            });
+        });
+
+    map.on('click', function (e) {
+        L.popup()
+            .setLatLng(e.latlng)
+            .setContent(
+                '<div style="font-size:0.78rem;">' +
+                e.latlng.lat.toFixed(4) + ', ' + e.latlng.lng.toFixed(4) +
+                '<br><a href="/cartography/places/add/?scale=mars&lat=' +
+                e.latlng.lat + '&lon=' + e.latlng.lng + '&zoom=' + map.getZoom() +
+                '">save place</a></div>'
+            )
+            .openOn(map);
+    });
+})();
+</script>
+{% endblock %}

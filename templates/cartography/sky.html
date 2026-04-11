@@ -1,0 +1,42 @@
+{% extends "cartography/_base.html" %}
+
+{% block title %}Sky — Cartography{% endblock %}
+
+{% block map_extra_head %}
+{# Aladin Lite is a sky-survey viewer with HiPS tile layers covering
+   many wavelengths. Loaded only on this page because the bundle is
+   ~2MB — too heavy for every cartography view. #}
+<script src="https://aladin.cds.unistra.fr/AladinLite/api/v3/3.6.0/aladin.js"></script>
+{% endblock %}
+
+{% block map_content %}
+<div id="aladin-lite-div" class="map-container"></div>
+<div class="map-meta">
+    Sky / Galaxy / Universe ·
+    Aladin Lite v3 · DSS color survey by default · drag to look around · scroll to zoom from individual stars to large-scale structure
+</div>
+
+<script>
+A.init.then(function () {
+    const aladin = A.aladin('#aladin-lite-div', {
+        survey: 'P/DSS2/color',
+        fov: 60,
+        target: 'galactic center',
+        cooFrame: 'ICRS',
+    });
+
+    // Saved sky places: lat is dec, lon is RA in degrees.
+    fetch('{% url "cartography:places_json" %}?scale=sky', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            const cat = A.catalog({ name: 'Saved', sourceSize: 14 });
+            aladin.addCatalog(cat);
+            (data.places || []).forEach(function (p) {
+                cat.addSources([
+                    A.source(p.lon, p.lat, { name: p.name, notes: p.notes }),
+                ]);
+            });
+        });
+});
+</script>
+{% endblock %}

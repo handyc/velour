@@ -1,0 +1,32 @@
+{% extends "cartography/_base.html" %}
+
+{% block title %}Solar System — Cartography{% endblock %}
+
+{% block map_content %}
+<div class="map-container" style="display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:2rem;">
+    <h2 style="margin: 0 0 1rem; color: #c9d1d9;">Solar System</h2>
+    <p style="color:#8b949e; max-width: 600px; line-height:1.6;">
+        The Solar System view is the trickiest scale to get right. v1 of cartography
+        intentionally leaves it as a placeholder rather than rendering a half-finished
+        2D toy view. Either of the following external viewers will give you what you
+        want until v2:
+    </p>
+
+    <div style="display:flex; gap:1rem; margin-top:1.5rem; flex-wrap: wrap; justify-content: center;">
+        <a href="https://eyes.nasa.gov/apps/orrery/" target="_blank" rel="noopener" class="btn">
+            NASA Eyes on the Solar System
+        </a>
+        <a href="https://www.heavens-above.com/SolarSys.aspx" target="_blank" rel="noopener" class="btn btn-secondary">
+            Heavens-Above Solar System
+        </a>
+        <a href="https://theskylive.com/3dsolarsystem" target="_blank" rel="noopener" class="btn btn-secondary">
+            TheSkyLive 3D
+        </a>
+    </div>
+
+    <p style="color:#6e7681; font-size:0.78rem; margin-top:2rem;">
+        v2 will use skyfield (already in requirements after chronos Phase 2c) to compute
+        live planet positions and render a 2D top-down view with selectable date.
+    </p>
+</div>
+{% endblock %}

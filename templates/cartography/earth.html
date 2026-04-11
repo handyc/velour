@@ -1,0 +1,59 @@
+{% extends "cartography/_base.html" %}
+
+{% block title %}Earth — Cartography{% endblock %}
+
+{% block map_content %}
+<div id="map" class="map-container"></div>
+<div class="map-meta">
+    Earth · OpenStreetMap tiles ·
+    centered at <span id="map-coords">{{ prefs.default_lat }}, {{ prefs.default_lon }}</span>
+    · zoom <span id="map-zoom">{{ prefs.default_zoom }}</span>
+</div>
+
+<script>
+(function () {
+    const map = L.map('map').setView([{{ prefs.default_lat }}, {{ prefs.default_lon }}], {{ prefs.default_zoom }});
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+
+    // Live coordinate / zoom display in the meta strip.
+    function updateMeta() {
+        const c = map.getCenter();
+        document.getElementById('map-coords').textContent =
+            c.lat.toFixed(4) + ', ' + c.lng.toFixed(4);
+        document.getElementById('map-zoom').textContent = map.getZoom();
+    }
+    map.on('moveend', updateMeta);
+    map.on('zoomend', updateMeta);
+
+    // Pull saved places for this scale and drop pins.
+    fetch('{% url "cartography:places_json" %}?scale=earth', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            (data.places || []).forEach(function (p) {
+                const m = L.marker([p.lat, p.lon]).addTo(map);
+                m.bindPopup('<b>' + p.name + '</b><br>' + (p.notes || '') +
+                            '<br><a href="/cartography/places/' + p.slug + '/edit/">edit</a>');
+            });
+        })
+        .catch(function () { /* offline; fine */ });
+
+    // Click anywhere to show coordinates and offer to save.
+    map.on('click', function (e) {
+        L.popup()
+            .setLatLng(e.latlng)
+            .setContent(
+                '<div style="font-size:0.78rem;">' +
+                e.latlng.lat.toFixed(4) + ', ' + e.latlng.lng.toFixed(4) +
+                '<br><a href="/cartography/places/add/?scale=earth&lat=' +
+                e.latlng.lat + '&lon=' + e.latlng.lng + '&zoom=' + map.getZoom() +
+                '">save place</a></div>'
+            )
+            .openOn(map);
+    });
+})();
+</script>
+{% endblock %}

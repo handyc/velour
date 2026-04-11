@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+{# Leaflet from unpkg CDN. ~150KB JS + ~14KB CSS. Pinned version. #}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<style>
+    .scale-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0.5rem 0;
+        flex-wrap: wrap;
+    }
+    .scale-bar .scale-link {
+        color: #8b949e;
+        text-decoration: none;
+        padding: 0.25rem 0.65rem;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        font-size: 0.78rem;
+    }
+    .scale-bar .scale-link:hover {
+        background: #161b22;
+        color: #c9d1d9;
+    }
+    .scale-bar .scale-link.active {
+        background: #161b22;
+        color: #58a6ff;
+        border-color: #58a6ff;
+    }
+    .scale-bar .spacer { flex: 1; }
+    .map-container {
+        width: 100%;
+        height: calc(100dvh - 200px);
+        min-height: 500px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+    }
+    .map-meta {
+        font-size: 0.75rem;
+        color: #6e7681;
+        margin: 0.5rem 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+</style>
+{% block map_extra_head %}{% endblock %}
+{% endblock %}
+
+{% block content %}
+{% include "cartography/_scale_bar.html" %}
+{% block map_content %}{% endblock %}
+{% endblock %}
