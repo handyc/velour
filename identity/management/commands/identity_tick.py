@@ -32,8 +32,10 @@ class Command(BaseCommand):
                             help='Label for the Mood.trigger field.')
 
     def handle(self, *args, **opts):
-        row, thought = tick(triggered_by=opts['triggered_by'])
+        tick_row, thought = tick(triggered_by=opts['triggered_by'])
         self.stdout.write(self.style.SUCCESS(
-            f'mood={row.mood} intensity={row.intensity:.2f}'
+            f'mood={tick_row.mood} intensity={tick_row.mood_intensity:.2f} '
+            f'aspects={tick_row.aspects}'
         ))
+        self.stdout.write(f'rule: {tick_row.rule_label}')
         self.stdout.write(f'thought: {thought}')

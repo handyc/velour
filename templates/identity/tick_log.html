@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Tick log — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .tick-wrap { max-width: 960px; }
+    .tick-header { margin-bottom: 1rem; }
+    .tick-header h1 { font-size: 1.1rem; font-weight: 500; margin: 0; display: inline; }
+    .tick-header .count { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .filter-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .filter-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .filter-bar a.active { color: #58a6ff; border-color: #58a6ff; }
+    .filter-bar a:hover { color: #c9d1d9; }
+    .filter-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .tick-list { list-style: none; padding: 0; margin: 0; }
+    .tick-row {
+        display: grid;
+        grid-template-columns: 140px 110px 1fr;
+        gap: 0.75rem;
+        padding: 0.55rem 0.75rem;
+        border-bottom: 1px solid #21262d;
+        font-size: 0.85rem;
+    }
+    .tick-row:hover { background: #0d1117; }
+    .tick-row .when {
+        color: #6e7681;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.78rem;
+    }
+    .tick-row .mood-cell { display: flex; align-items: center; gap: 0.4rem; }
+    .tick-row .mood-dot {
+        display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    }
+    .tick-row .mood-name { color: #c9d1d9; font-size: 0.8rem; }
+    .tick-row .mood-intensity { color: #6e7681; font-size: 0.7rem; margin-left: 0.2rem; }
+    .tick-row .thought { color: #c9d1d9; }
+    .tick-row .thought .why { color: #6e7681; font-size: 0.72rem; margin-top: 0.15rem; font-family: ui-monospace, Menlo, monospace; }
+    .tick-row .thought .aspects { margin-top: 0.2rem; }
+    .tick-row .thought .aspects a {
+        display: inline-block;
+        color: #8b949e; background: #161b22;
+        border: 1px solid #30363d; border-radius: 3px;
+        padding: 0.05rem 0.35rem; font-size: 0.68rem;
+        text-decoration: none;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-right: 0.25rem;
+    }
+    .tick-row .thought .aspects a:hover { color: #58a6ff; border-color: #58a6ff; }
+
+    .pager { margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center; color: #8b949e; font-size: 0.85rem; }
+    .pager .btn-sm { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
+
+    /* Mood → dot color mapping. Deliberately muted; the mood is a
+       background signal, not the focus. */
+    .m-contemplative { background: #8b949e; }
+    .m-curious       { background: #58a6ff; }
+    .m-alert         { background: #f85149; }
+    .m-satisfied     { background: #2ea043; }
+    .m-concerned     { background: #d29922; }
+    .m-excited       { background: #bc8cff; }
+    .m-restless      { background: #db61a2; }
+    .m-protective    { background: #3fb950; }
+    .m-creative      { background: #ff7b72; }
+    .m-weary         { background: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tick-wrap">
+    <div class="tick-header">
+        <h1>Tick log</h1>
+        <span class="count">
+            {{ page.paginator.count }} matching tick{{ page.paginator.count|pluralize }}
+            {% if mood_filter or aspect_filter %} · filtered {% endif %}
+            of {{ total_ticks }} total
+        </span>
+    </div>
+
+    <div class="filter-bar">
+        <span class="label">mood</span>
+        <a href="{% url 'identity:tick_log' %}" class="{% if not mood_filter %}active{% endif %}">all</a>
+        {% for m in all_moods %}
+        <a href="?mood={{ m }}" class="{% if mood_filter == m %}active{% endif %}">{{ m }}</a>
+        {% endfor %}
+    </div>
+
+    {% if mood_counts %}
+    <div class="filter-bar">
+        <span class="label">distribution</span>
+        {% for name, count in mood_counts %}
+        <span style="color:#8b949e;padding:0.2rem 0.55rem;">
+            <span class="mood-dot m-{{ name }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle;margin-right:0.3rem;"></span>
+            {{ name }} × {{ count }}
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if aspect_filter %}
+    <div class="filter-bar">
+        <span class="label">aspect filter</span>
+        <a href="{% url 'identity:tick_log' %}" class="active">× {{ aspect_filter }}</a>
+    </div>
+    {% endif %}
+
+    <ul class="tick-list">
+        {% for t in page.object_list %}
+        <li class="tick-row">
+            <div class="when">{{ t.at|date:"Y-m-d H:i:s" }}</div>
+            <div class="mood-cell">
+                <span class="mood-dot m-{{ t.mood }}"></span>
+                <span class="mood-name">{{ t.mood }}</span>
+                <span class="mood-intensity">{{ t.mood_intensity|floatformat:2 }}</span>
+            </div>
+            <div class="thought">
+                {% if t.thought %}{{ t.thought }}{% else %}<span style="color:#484f58;">(no thought recorded)</span>{% endif %}
+                {% if t.rule_label %}<div class="why">{{ t.rule_label }} · {{ t.triggered_by }}</div>{% endif %}
+                {% if t.aspects %}
+                <div class="aspects">
+                    {% for a in t.aspects %}
+                    <a href="?aspect={{ a }}">{{ a }}</a>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </li>
+        {% empty %}
+        <li style="color:#6e7681;padding:1rem 0.75rem;">No ticks match.</li>
+        {% endfor %}
+    </ul>
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="pager">
+        {% if page.has_previous %}
+        <a class="btn btn-secondary btn-sm" href="?page={{ page.previous_page_number }}{% if mood_filter %}&mood={{ mood_filter }}{% endif %}{% if aspect_filter %}&aspect={{ aspect_filter }}{% endif %}">← prev</a>
+        {% endif %}
+        <span>page {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+        <a class="btn btn-secondary btn-sm" href="?page={{ page.next_page_number }}{% if mood_filter %}&mood={{ mood_filter }}{% endif %}{% if aspect_filter %}&aspect={{ aspect_filter }}{% endif %}">next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

@@ -11,4 +11,5 @@ urlpatterns = [
     path('mood-data/', views.mood_data, name='mood_data'),
     path('state.json', views.state_json, name='state_json'),
     path('tick/', views.tick_now, name='tick_now'),
+    path('ticks/', views.tick_log, name='tick_log'),
 ]

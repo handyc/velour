@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Identity, Mood
+from .models import Identity, Mood, Tick
 
 
 def _get_main_ip():
@@ -214,11 +214,16 @@ def identity_home(request):
     reflections = REFLECTIONS.get(identity.mood, REFLECTIONS['contemplative'])
     reflection = random.choice(reflections)
 
-    # Recent mood history
-    mood_history = Mood.objects.all()[:20]
+    # Recent tick history — Tick is the new canonical source, replacing
+    # the old Mood + journal-text-blob split. The 20 most recent ticks
+    # drive both the mood sparkline and the thought stream at the bottom
+    # of the page.
+    recent_ticks = Tick.objects.all()[:20]
 
-    # Journal entries (last 15)
-    journal = identity.get_journal_entries()[-15:]
+    # Legacy journal still rendered as a fallback for historical entries
+    # that pre-date the Tick model and weren't fully backfilled. Newer
+    # output goes through the Tick stream instead.
+    legacy_journal = identity.get_journal_entries()[-10:]
 
     # System vitals for context
     vitals = {}
@@ -235,8 +240,8 @@ def identity_home(request):
     return render(request, 'identity/home.html', {
         'identity': identity,
         'reflection': reflection,
-        'mood_history': mood_history,
-        'journal': journal,
+        'recent_ticks': recent_ticks,
+        'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
 
@@ -298,7 +303,17 @@ def identity_update(request):
 
 @login_required
 def mood_data(request):
-    """Return mood history as JSON for charting."""
+    """Return mood history as JSON for charting. Reads from Tick (new
+    canonical source) and falls back to Mood (legacy table) if Tick
+    is empty — shouldn't happen post-backfill but belt-and-braces."""
+    ticks = list(Tick.objects.all()[:100])
+    if ticks:
+        ticks_oldest_first = list(reversed(ticks))
+        return JsonResponse({
+            'labels': [t.at.strftime('%H:%M') for t in ticks_oldest_first],
+            'values': [t.mood_intensity for t in ticks_oldest_first],
+            'moods':  [t.mood for t in ticks_oldest_first],
+        })
     moods = Mood.objects.all()[:100]
     mood_labels = [m.timestamp.strftime('%H:%M') for m in reversed(list(moods))]
     mood_values = [m.intensity for m in reversed(list(moods))]
@@ -307,6 +322,41 @@ def mood_data(request):
         'labels': mood_labels,
         'values': mood_values,
         'moods': mood_names,
+    })
+
+
+@login_required
+def tick_log(request):
+    """The structured tick log — dedicated page showing every Tick row
+    with its mood, intensity, rule label, thought, and aspects. Paginates
+    and supports mood/aspect filtering via query params."""
+    from django.core.paginator import Paginator
+
+    qs = Tick.objects.all()
+
+    mood_filter = request.GET.get('mood', '').strip()
+    if mood_filter:
+        qs = qs.filter(mood=mood_filter)
+
+    aspect_filter = request.GET.get('aspect', '').strip()
+    if aspect_filter:
+        qs = qs.filter(aspects__contains=[aspect_filter])
+
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get('page', 1))
+
+    # Mood counts over the filtered queryset — so the operator can see
+    # "this week Velour was satisfied 60% of the time, alert 15%, …"
+    from collections import Counter
+    mood_counts = Counter(qs.values_list('mood', flat=True))
+
+    return render(request, 'identity/tick_log.html', {
+        'page': page,
+        'mood_counts': mood_counts.most_common(),
+        'mood_filter': mood_filter,
+        'aspect_filter': aspect_filter,
+        'all_moods': [c[0] for c in Mood.MOOD_CHOICES],
+        'total_ticks': Tick.objects.count(),
     })
 
 

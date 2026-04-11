@@ -210,32 +210,48 @@
             <canvas id="mood-chart"></canvas>
         </div>
         <div style="margin-top: 0.75rem;">
-            {% for m in mood_history|slice:":8" %}
+            {% for t in recent_ticks|slice:":8" %}
             <div class="mood-history-item">
-                <span class="mood-dot" style="background: {% if m.mood == 'alert' or m.mood == 'concerned' %}#f85149{% elif m.mood == 'satisfied' or m.mood == 'excited' %}#3fb950{% elif m.mood == 'creative' %}#bc8cff{% else %}#58a6ff{% endif %};"></span>
-                {{ m.mood }} ({{ m.intensity|floatformat:1 }}) - {{ m.trigger }}
-                <span style="color: #484f58; font-size: 0.7rem;">{{ m.timestamp|date:"H:i" }}</span>
+                <span class="mood-dot" style="background: {% if t.mood == 'alert' or t.mood == 'concerned' %}#f85149{% elif t.mood == 'satisfied' or t.mood == 'excited' %}#3fb950{% elif t.mood == 'creative' %}#bc8cff{% else %}#58a6ff{% endif %};"></span>
+                {{ t.mood }} ({{ t.mood_intensity|floatformat:1 }}) - {{ t.rule_label }}
+                <span style="color: #484f58; font-size: 0.7rem;">{{ t.at|date:"H:i" }}</span>
             </div>
             {% endfor %}
         </div>
+        <div style="margin-top: 0.5rem;">
+            <a href="{% url 'identity:tick_log' %}" style="font-size: 0.78rem; color: #58a6ff;">View full tick log →</a>
+        </div>
     </div>
 
-    <!-- Journal -->
+    <!-- Thought stream (replaces the old journal text blob) -->
     <div class="card" style="grid-column: 1 / -1;">
-        <h3>Journal</h3>
+        <h3>Thought stream</h3>
         <form method="post" action="{% url 'identity:journal' %}" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
             {% csrf_token %}
             <input type="text" name="entry" placeholder="Write a thought, or leave blank for auto-reflection..." style="flex: 1; padding: 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
             <button type="submit" class="btn btn-primary">Reflect</button>
         </form>
-        {% for entry in journal reversed %}
+        {% for t in recent_ticks %}
         <div class="journal-entry">
-            <span class="journal-ts">{{ entry.timestamp }}</span>
-            <span class="journal-text">{{ entry.text }}</span>
+            <span class="journal-ts">{{ t.at|date:"Y-m-d H:i" }}</span>
+            <span class="journal-text">{% if t.thought %}{{ t.thought }}{% else %}<em style="color:#484f58;">(no thought)</em>{% endif %}</span>
         </div>
         {% empty %}
-        <p style="color: #8b949e;">No journal entries yet. Click Reflect to begin.</p>
+        <p style="color: #8b949e;">No ticks yet. Run <code>python manage.py identity_tick</code> or click Tick now above.</p>
         {% endfor %}
+        {% if legacy_journal %}
+        <details style="margin-top: 1rem;">
+            <summary style="cursor:pointer;color:#8b949e;font-size:0.8rem;">Show legacy journal entries ({{ legacy_journal|length }})</summary>
+            <div style="margin-top: 0.5rem;">
+                {% for entry in legacy_journal reversed %}
+                <div class="journal-entry">
+                    <span class="journal-ts">{{ entry.timestamp }}</span>
+                    <span class="journal-text">{{ entry.text }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
     </div>
 </div>
 

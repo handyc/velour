@@ -1,10 +1,11 @@
 """Identity tick engine — turn-based attention without an LLM.
 
 A tick is one unit of attention: gather a snapshot of every sensor,
-walk a rule chain to derive a mood and a `mood_intensity` (a 0-1
-scalar that drives the JS sine wave's amplitude), compose a one-line
-first-person thought from a template library, write a Mood row, and
-update the Identity singleton.
+walk a rule chain to derive a mood and `mood_intensity` (a 0-1 scalar
+that drives the JS sine wave's amplitude), compose a one-line first-
+person thought from a template library, write a Tick row (the new
+structured log) + a Mood row (legacy shim), and update the Identity
+singleton.
 
 Computationally trivial — Python rules + a few SQL writes — so the
 whole tick is a fraction of a CPU-millisecond. The fan stays quiet.
@@ -12,6 +13,14 @@ whole tick is a fraction of a CPU-millisecond. The fan stays quiet.
 Triggered manually via `python manage.py identity_tick`, or via cron
 on whatever cadence the operator prefers (default 10 minutes is the
 right starting point).
+
+Session-1 note: rules are still hardcoded Python lambdas. Moving them
+to Rule rows in the database with a safe expression language is
+Session 3 of the Identity expansion. This file stays shaped for that
+future: each rule in RULES emits an `aspects` list alongside the
+mood/intensity/label, and the tick engine stores those aspects on the
+Tick row so later concerns (Session 2) and reflections (Session 5) can
+reference them.
 """
 
 import os
@@ -22,9 +31,12 @@ from .sensors import gather_snapshot
 
 # --- rule chain ----------------------------------------------------------
 
-# Each rule is (predicate, mood, intensity, label). The first matching
-# rule wins. The label gets stored in Mood.trigger so the operator can
-# see why Identity feels how it feels.
+# Each rule is (predicate, mood, intensity, label, aspects). The first
+# matching rule wins. `aspects` is a list of tag-like strings that
+# describe what the rule noticed — they get stored on Tick.aspects and
+# on Mood.trigger. Aspects are the glue for concerns and reflections:
+# Session 2 opens a concern when an aspect like 'gary_silent' fires;
+# Session 5 groups reflections by aspect counts over a period.
 
 def _cores():
     return os.cpu_count() or 1
@@ -32,54 +44,67 @@ def _cores():
 
 RULES = [
     (lambda s: s.get('disk', {}).get('used_pct', 0) > 0.95,
-     'concerned', 0.9, 'disk dangerously full'),
+     'concerned', 0.9, 'disk dangerously full',
+     ['disk_critical']),
 
     (lambda s: s.get('memory', {}).get('used_pct', 0) > 0.90,
-     'concerned', 0.85, 'memory pressure'),
+     'concerned', 0.85, 'memory pressure',
+     ['memory_critical']),
 
     (lambda s: s.get('load', {}).get('load_1', 0) > _cores() * 1.5,
-     'alert', 0.85, 'unusually high load'),
+     'alert', 0.85, 'unusually high load',
+     ['load_high']),
 
     (lambda s: s.get('nodes', {}).get('total', 0) > 0
                and s.get('nodes', {}).get('silent', 0) > s.get('nodes', {}).get('total', 1) / 2,
-     'concerned', 0.7, 'half the fleet has gone silent'),
+     'concerned', 0.7, 'half the fleet has gone silent',
+     ['fleet_partial_silence']),
 
     (lambda s: s.get('uptime', {}).get('days', 0) > 60,
-     'weary', 0.4, 'long uptime — feeling run-down'),
+     'weary', 0.4, 'long uptime — feeling run-down',
+     ['long_uptime']),
 
     (lambda s: s.get('chronos', {}).get('moon') == 'full',
-     'creative', 0.7, 'the moon is full'),
+     'creative', 0.7, 'the moon is full',
+     ['moon_full']),
 
     (lambda s: s.get('chronos', {}).get('moon') == 'new',
-     'contemplative', 0.5, 'the moon is new'),
+     'contemplative', 0.5, 'the moon is new',
+     ['moon_new']),
 
     (lambda s: s.get('chronos', {}).get('tod') == 'night'
                and s.get('load', {}).get('load_1', 0) < _cores() * 0.2,
-     'restless', 0.4, 'late and quiet'),
+     'restless', 0.4, 'late and quiet',
+     ['night_quiet']),
 
     (lambda s: s.get('chronos', {}).get('tod') == 'morning',
-     'curious', 0.6, 'morning energy'),
+     'curious', 0.6, 'morning energy',
+     ['morning']),
 
     (lambda s: s.get('chronos', {}).get('tod') == 'afternoon'
                and s.get('load', {}).get('load_1', 0) < _cores() * 0.5,
-     'satisfied', 0.7, 'a comfortable afternoon'),
+     'satisfied', 0.7, 'a comfortable afternoon',
+     ['afternoon_calm']),
 
     (lambda s: s.get('codex', {}).get('sections', 0) > 50,
-     'satisfied', 0.7, 'much has been written'),
+     'satisfied', 0.7, 'much has been written',
+     ['codex_rich']),
 
     (lambda s: s.get('mailroom', {}).get('last_24h', 0) > 50,
-     'alert', 0.6, 'a lot of mail has come in'),
+     'alert', 0.6, 'a lot of mail has come in',
+     ['mail_burst']),
 ]
 
 
 def compute_mood(snapshot):
-    for predicate, mood, intensity, label in RULES:
+    for rule in RULES:
+        predicate, mood, intensity, label, aspects = rule
         try:
             if predicate(snapshot):
-                return mood, intensity, label
+                return mood, intensity, label, list(aspects)
         except Exception:
             continue
-    return 'contemplative', 0.5, 'general reflection'
+    return 'contemplative', 0.5, 'general reflection', ['idle']
 
 
 # --- template library ---------------------------------------------------
@@ -193,15 +218,30 @@ def compose_thought(snapshot, mood):
 # --- the tick itself ----------------------------------------------------
 
 def tick(triggered_by='manual'):
-    """Run one tick of attention. Returns the resulting Mood row."""
-    from .models import Identity, Mood
+    """Run one tick of attention. Writes a Tick row (new canonical log)
+    and a Mood row (legacy shim for pre-Tick views) and updates the
+    Identity singleton. Returns a (Tick, thought) tuple."""
+    from .models import Identity, Mood, Tick
 
     identity = Identity.get_self()
     snapshot = gather_snapshot()
-    mood, intensity, label = compute_mood(snapshot)
+    mood, intensity, label, aspects = compute_mood(snapshot)
     thought = compose_thought(snapshot, mood)
 
-    row = Mood.objects.create(
+    tick_row = Tick.objects.create(
+        triggered_by=triggered_by,
+        mood=mood,
+        mood_intensity=intensity,
+        rule_label=label,
+        thought=thought,
+        snapshot=snapshot,
+        aspects=aspects,
+    )
+
+    # Legacy Mood row — removed in a future migration once all readers
+    # have been moved to Tick. Keep the trigger field shaped the way
+    # the old admin + views expect.
+    Mood.objects.create(
         mood=mood,
         intensity=intensity,
         trigger=f'{label} ({triggered_by})',
@@ -211,7 +251,4 @@ def tick(triggered_by='manual'):
     identity.mood_intensity = intensity
     identity.save(update_fields=['mood', 'mood_intensity', 'last_reflection'])
 
-    # Add the thought to the journal so it accumulates over time.
-    identity.add_journal_entry(thought)
-
-    return row, thought
+    return tick_row, thought
