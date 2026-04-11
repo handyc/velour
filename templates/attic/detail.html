@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.title }} — Attic{% endblock %}
+
+{% block extra_head %}
+<style>
+    .attic-detail { max-width: 900px; }
+    .attic-detail .preview {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        text-align: center;
+    }
+    .attic-detail .preview img,
+    .attic-detail .preview video,
+    .attic-detail .preview audio {
+        max-width: 100%;
+        max-height: 70vh;
+        display: block;
+        margin: 0 auto;
+    }
+    .attic-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; font-size: 0.85rem; margin: 1rem 0; }
+    .attic-detail dt { color: #8b949e; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; padding-top: 0.15rem; }
+    .attic-detail dd { color: #c9d1d9; word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+    .attic-detail .caption { color: #c9d1d9; font-style: italic; margin: 1rem 0; }
+    .tag-pills { display:flex; gap:0.35rem; flex-wrap:wrap; margin-top: 0.4rem; }
+    .tag-pill { background: rgba(88,166,255,0.12); color: #58a6ff; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ item.title }}</h1>
+
+<div class="attic-detail">
+    <div class="preview">
+        {% if item.kind == 'image' %}
+            <img src="{{ item.file.url }}" alt="{{ item.alt_text|default:item.title }}">
+        {% elif item.kind == 'video' %}
+            <video src="{{ item.file.url }}" controls preload="metadata"></video>
+        {% elif item.kind == 'audio' %}
+            <audio src="{{ item.file.url }}" controls preload="metadata"></audio>
+        {% else %}
+            <p style="color:#8b949e;">No inline preview for this kind.<br>
+            <a href="{{ item.file.url }}" class="btn" style="margin-top:0.5rem;">Download</a></p>
+        {% endif %}
+    </div>
+
+    {% if item.caption %}<div class="caption">{{ item.caption|linebreaksbr }}</div>{% endif %}
+
+    {% if item.tag_list %}
+    <div class="tag-pills">
+        {% for t in item.tag_list %}<span class="tag-pill">#{{ t }}</span>{% endfor %}
+    </div>
+    {% endif %}
+
+    <dl>
+        <dt>Kind</dt><dd>{{ item.get_kind_display }}</dd>
+        <dt>Mime</dt><dd>{{ item.mime }}</dd>
+        <dt>Size</dt><dd>{{ item.size_h }} ({{ item.size_bytes }} bytes)</dd>
+        <dt>SHA-256</dt><dd>{{ item.sha256 }}</dd>
+        <dt>Uploaded</dt><dd>{{ item.uploaded_at|date:"D d M Y H:i" }}{% if item.uploaded_by %} by {{ item.uploaded_by.username }}{% endif %}</dd>
+        <dt>File</dt><dd><a href="{{ item.file.url }}" style="color:#58a6ff;">{{ item.file.name }}</a></dd>
+        {% if item.alt_text %}<dt>Alt text</dt><dd>{{ item.alt_text }}</dd>{% endif %}
+    </dl>
+
+    {% if item.notes %}
+    <div style="background:#161b22;border-left:3px solid #58a6ff;padding:0.75rem 1rem;margin:1rem 0;font-size:0.85rem;color:#c9d1d9;white-space:pre-wrap;">{{ item.notes }}</div>
+    {% endif %}
+
+    <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+        <a href="{% url 'attic:edit' item.slug %}" class="btn">Edit</a>
+        <form method="post" action="{% url 'attic:delete' item.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ item.title|escapejs }}? This removes the file from disk.');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary">Delete</button>
+        </form>
+        <a href="{% url 'attic:list' %}" class="btn btn-secondary">Back to list</a>
+    </div>
+</div>
+{% endblock %}

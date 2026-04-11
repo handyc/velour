@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ item.title }} — Attic{% endblock %}
+
+{% block extra_head %}
+<style>
+    .upl { max-width: 640px; }
+    .upl .field { margin-bottom: 1rem; }
+    .upl label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .upl input[type=text], .upl textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Edit metadata</h1>
+<p style="color:#8b949e;">For <a href="{% url 'attic:detail' item.slug %}">{{ item.title }}</a></p>
+
+<form method="post" class="upl">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ item.title }}" maxlength="200">
+    </div>
+
+    <div class="field">
+        <label for="caption">Caption</label>
+        <textarea id="caption" name="caption" rows="3">{{ item.caption }}</textarea>
+    </div>
+
+    <div class="field">
+        <label for="alt_text">Alt text (accessibility)</label>
+        <input type="text" id="alt_text" name="alt_text" value="{{ item.alt_text }}" maxlength="300">
+    </div>
+
+    <div class="field">
+        <label for="tags">Tags</label>
+        <input type="text" id="tags" name="tags" value="{{ item.tags }}" maxlength="300">
+    </div>
+
+    <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="5">{{ item.notes }}</textarea>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'attic:detail' item.slug %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

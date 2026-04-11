@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Upload — Attic{% endblock %}
+
+{% block extra_head %}
+<style>
+    .upl { max-width: 640px; }
+    .upl .field { margin-bottom: 1rem; }
+    .upl label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .upl input[type=text], .upl textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .upl input[type=file] {
+        background: #0d1117; color: #c9d1d9; border: 1px dashed #30363d;
+        border-radius: 4px; padding: 1rem; width: 100%;
+    }
+    .upl small { color: #6e7681; font-size: 0.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Upload to Attic</h1>
+
+<form method="post" enctype="multipart/form-data" class="upl">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="files">Files</label>
+        <input type="file" id="files" name="files" multiple required>
+        <small>Multi-select supported. Mime type and kind are auto-detected.</small>
+    </div>
+
+    <div class="field">
+        <label for="title">Title (optional, applies only when uploading one file)</label>
+        <input type="text" id="title" name="title" maxlength="200">
+        <small>If blank, the filename is used.</small>
+    </div>
+
+    <div class="field">
+        <label for="caption">Caption (applied to all uploaded files)</label>
+        <textarea id="caption" name="caption" rows="3"></textarea>
+    </div>
+
+    <div class="field">
+        <label for="tags">Tags (comma-separated, applied to all)</label>
+        <input type="text" id="tags" name="tags" maxlength="300">
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Upload</button>
+        <a href="{% url 'attic:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

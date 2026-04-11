@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Attic — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .attic-toolbar { display: flex; align-items: baseline; gap: 0.85rem; margin: 0.75rem 0 1rem; flex-wrap: wrap; }
+    .attic-toolbar h1 { margin: 0; font-size: 1.4rem; }
+    .attic-toolbar select, .attic-toolbar input { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 0.3rem 0.5rem; font: inherit; font-size: 0.85rem; }
+    .attic-toolbar .spacer { flex: 1; }
+    .attic-toolbar .count { color: #6e7681; font-size: 0.78rem; }
+
+    .attic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; }
+    .attic-item {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+    .attic-item .thumb {
+        aspect-ratio: 1;
+        background: #161b22;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+    }
+    .attic-item .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .attic-item .thumb .placeholder {
+        font-size: 0.72rem;
+        color: #6e7681;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+    .attic-item .meta {
+        padding: 0.55rem 0.7rem;
+        border-top: 1px solid #21262d;
+        font-size: 0.78rem;
+    }
+    .attic-item .meta .title { color: #c9d1d9; font-weight: 600; line-height: 1.2; margin-bottom: 0.15rem; word-break: break-word; }
+    .attic-item .meta .info { color: #6e7681; font-size: 0.7rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .attic-item a { text-decoration: none; color: inherit; }
+    .kind-badge {
+        display: inline-block;
+        font-size: 0.62rem;
+        padding: 0.08rem 0.4rem;
+        border-radius: 8px;
+        background: #21262d;
+        color: #8b949e;
+        margin-right: 0.3rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .kind-badge.image    { background: rgba(88, 166, 255, 0.18); color: #58a6ff; }
+    .kind-badge.video    { background: rgba(188, 140, 255, 0.18); color: #bc8cff; }
+    .kind-badge.audio    { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
+    .kind-badge.document { background: rgba(210, 153, 34, 0.18); color: #d29922; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="attic-toolbar">
+    <h1>Attic</h1>
+    <a href="{% url 'attic:upload' %}" class="btn">Upload</a>
+    <form method="get" style="display:flex;gap:0.5rem;align-items:baseline;">
+        <select name="kind" onchange="this.form.submit()">
+            <option value="">all kinds</option>
+            {% for k, label in kind_choices %}
+            <option value="{{ k }}" {% if kind_filter == k %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="q" value="{{ search }}" placeholder="search title, caption, tags">
+        <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Filter</button>
+    </form>
+    <span class="spacer"></span>
+    <span class="count">{{ item_count }} of {{ total_count }} items</span>
+</div>
+
+{% if items %}
+<div class="attic-grid">
+    {% for item in items %}
+    <div class="attic-item">
+        <a href="{% url 'attic:detail' item.slug %}">
+            <div class="thumb">
+                {% if item.thumbnail %}
+                    <img src="{{ item.thumbnail.url }}" alt="{{ item.alt_text|default:item.title }}">
+                {% else %}
+                    <span class="placeholder">{{ item.kind }}</span>
+                {% endif %}
+            </div>
+            <div class="meta">
+                <div class="title">{{ item.title }}</div>
+                <div class="info">
+                    <span class="kind-badge {{ item.kind }}">{{ item.kind }}</span>
+                    {{ item.size_h }} &middot; {{ item.uploaded_at|date:"D d M" }}
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No items match those filters. {% if total_count == 0 %}<a href="{% url 'attic:upload' %}">Upload the first thing</a>.{% endif %}</p>
+{% endif %}
+
+<div style="margin-top:1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

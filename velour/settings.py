@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     'chronos',
     'databases',
     'codex',
+    'attic',
 ]
 
 MIDDLEWARE = [
