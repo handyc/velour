@@ -1347,6 +1347,261 @@ This makes sysinfo a useful template for understanding the meta-app philosophy. 
 """
 
 
+def _ch10_setup():
+    return """Chapter 9 covered `generate_deploy`, the command that renders the deploy bundle on the developer's machine. This chapter covers what happens next: the operator scp's the rendered bundle to a target host and runs `adminsetup.sh` once. Three minutes later, the target host is running Velour behind nginx and the operator can open it in a browser.
+
+The bootstrap flow is two shell scripts, not one. The privileged half — the "admin" part that installs system packages, creates users, and touches `/etc` — lives in `adminsetup.sh`. The unprivileged half — the part that only needs to write files in the project user's home directory — lives in `setup.sh`. Together they're the "setup.sh" of the chapter title, but the split matters, so this chapter treats them as two scripts.
+
+## Why two scripts, not one
+
+The first version of Velour's deploy pipeline had a single `setup.sh` that did everything. It ran as root (so it could `apt-get install` and `useradd` and symlink into `/etc/nginx/sites-enabled/`) and then dropped privileges via `sudo -u` to do the pip-install and the migrate and the collectstatic.
+
+This worked, but it had an irritating property: any time the operator wanted to run "just the unprivileged half" — say, after pushing new code that needed a fresh `pip install -r requirements.txt` and a `migrate` — they had to either run the whole `setup.sh` again as root, which re-did the root work and re-prompted for a sudo password, or reach into the script and copy out just the project-user steps manually.
+
+So the single file was split in two. `adminsetup.sh` is the one-shot bootstrap, run once ever per host. `setup.sh` is a small idempotent helper that runs as the project user, called both by `adminsetup.sh` during bootstrap AND by the operator directly for routine post-rsync updates. The split has a nice property: the more dangerous script (the one with `sudo`) is the one the operator runs less often; the script the operator runs daily is unprivileged and can't break the host.
+
+## adminsetup.sh — the eight-step bootstrap
+
+`adminsetup.sh` is run as a regular sudoer account on the target host, not as root. It refuses to run as root directly (there's an explicit `if [ "$(id -u)" = "0" ]; then exit 1; fi` check near the top). The reason is that running it as root would mask a real problem: `sudo` is how the script earns the right to do privileged things, and `sudo`-authenticated work leaves an audit trail in `/var/log/auth.log`. Running it as root bypasses that trail. Better to insist the operator use sudo.
+
+The eight steps:
+
+**[1/8] system packages.** `apt-get update && apt-get install -y python3 python3-venv python3-pip rsync nginx supervisor`. These are the five packages every Velour host needs. The list is short because Velour tries hard to keep its system-level footprint small. `python3` is the interpreter. `python3-venv` is what lets `python3 -m venv` work on a Debian/Ubuntu box where venv support is packaged separately. `python3-pip` is pip. `rsync` is for future hot-swaps. `nginx` is the front door. `supervisor` is the process manager.
+
+Not in the list: anything database (Velour's default deploy uses SQLite), anything monitoring (Velour *is* the monitoring), anything mail (see the mailroom app chapter), anything SSL-related (SSL is a post-install step, done by certbot after the basic deploy is up).
+
+**[2/8] project user.** The script creates a Linux user named after the project. If the user already exists, the creation is skipped. Either way, `$HOME` is locked down to mode 700 and owned by the user. This is the user the gunicorn worker will run as and the user Velour's own file operations are done as.
+
+**[3/8] /var tree.** Create `/var/www/webapps/$USER/{run,static,log,apps}` with the correct ownership. `run/` is for the gunicorn Unix socket that nginx proxies to. `static/` is where `collectstatic` writes its output. `log/` is for gunicorn's access and error logs. `apps/` is the hook for the meta-app idea: this is where `app_factory` writes generated child projects on this host. It sits alongside the other three directories and is owned by the project user so Velour can create subdirectories there without needing root.
+
+This step also sets up `/var/www/maintenance/index.html` — a host-wide static fallback page. Nginx is configured to serve this page if the upstream gunicorn socket is unreachable (app stopped, supervisor stopped, etc.). It's shared across every app on the host, owned by root, readable by nginx. The script only writes the default HTML if the file doesn't already exist, so a hand-edited maintenance page survives subsequent `adminsetup.sh` runs.
+
+**[4/8] rsync source.** The operator uploaded the source tree to a staging directory before running `adminsetup.sh`; step 4 is the script rsyncing that staging tree into `/home/$USER/`. The rsync uses `-a --delete` (archive mode, including deletions, so the target ends up as an exact mirror of the staging directory) and a long exclude list:
+
+```
+venv/, __pycache__/, *.pyc, *.pyo, staticfiles/,
+db.sqlite3, db.sqlite3-*,
+secret_key.txt, health_token.txt, mail_relay_token.txt,
+.env, .env.*,
+.git/, .claude/, memory/,
+*.swp, .*.swo, .DS_Store
+```
+
+Three classes of things in there. First, generated caches the target should rebuild on its own (venv, pyc, staticfiles). Second, secrets that must NEVER flow from dev to prod (the three `*_token.txt` files, plus `.env*`). Third, junk the developer shouldn't have been tracking anyway (swap files, .DS_Store, .claude/, memory/).
+
+The exclude list is the load-bearing piece of the whole rsync. A hand-edited prod `secret_key.txt` that got clobbered by a dev one is a silent catastrophe — suddenly every signed session cookie is invalid and every logged-in user is logged out. The exclude list prevents that.
+
+The rsync step handles `rsync` exit code 24 specially ("some files vanished before they could be transferred"). This happens when the source tree has files being written to mid-rsync — typically SQLite WAL/SHM sidecars if a Django process is touching the DB during the rsync. The script downgrades exit 24 to a warning: any file that vanished was, by definition, transient and not something the target needed.
+
+**[5/8] symlink nginx + supervisor configs.** Two symlinks:
+
+```bash
+ln -sfn $APP_HOME/deploy/nginx.conf       /etc/nginx/sites-enabled/$USER
+ln -sfn $APP_HOME/deploy/supervisor.conf  /etc/supervisor/conf.d/$USER.conf
+```
+
+The deploy bundle's `nginx.conf` and `supervisor.conf` live inside the app's own directory (under `/home/$USER/deploy/`). The symlinks make them visible to nginx and supervisor at their expected config-include locations. Using symlinks instead of copies has a nice property: if the operator edits `deploy/nginx.conf` after the fact (e.g., to add a certbot SSL block), the change is picked up by nginx on next reload, no second install step needed.
+
+After the symlinks go in, `nginx -t` validates the config. If the generated nginx.conf has a syntax error, the script halts here before the supervisor and gunicorn steps run. The operator sees the nginx error message and fixes the template.
+
+**[6/8] hand off to setup.sh.** `sudo -u $USER -H bash $APP_HOME/setup.sh`. This is where `adminsetup.sh` drops privileges and runs the unprivileged helper. setup.sh does venv creation, pip install, secret_key.txt generation, migrations, and collectstatic — all the things that only need access to the project user's home directory.
+
+The `-H` flag tells sudo to set `$HOME` to the target user's home, which is important because pip's cache directory defaults to `$HOME/.cache/pip` and if `$HOME` is still the sudoer's home, pip tries to write into someone else's cache and fails.
+
+Control returns from setup.sh after collectstatic finishes. By that point, every file the app needs is on disk in the right place: venv exists, deps are installed, secret_key exists, the SQLite db is migrated, staticfiles/ has been populated.
+
+**[7/8] reload nginx.** `systemctl reload nginx`. Reload, not restart — we want graceful handling of in-flight requests. At this point, nginx knows about the new site (via the symlink from step 5) and the static files it needs to serve (populated by step 6).
+
+**[8/8] supervisor.** `supervisorctl reread && supervisorctl update`, then start or restart the program depending on whether supervisor has seen it before. `reread` makes supervisor notice the new config file (via the symlink from step 5); `update` makes it apply the change. Start vs restart is decided by `supervisorctl status $USER`: if the program is unknown, start it; if it's already known, restart it.
+
+This is the step that actually brings the app online. Up to here, nothing has been running — the app's files are on disk but no gunicorn worker exists. After step 8, there's a gunicorn process, bound to a Unix socket, supervising the Django app, proxied by nginx.
+
+Three minutes, start to finish, on a fresh Ubuntu box.
+
+## setup.sh — the unprivileged helper
+
+`setup.sh` is shorter (five steps, not eight) and simpler (no sudo, no system packages, no `/etc` writes). It runs as the project user and its only side effects are inside `/home/$USER/`. The operator can run it freely without worrying about breaking the host.
+
+**[1/5] virtualenv.** `python3 -m venv venv` if `venv/` doesn't exist. If it does, skip. Then `source venv/bin/activate` and upgrade pip/setuptools/wheel. Standard Python project setup.
+
+**[2/5] dependencies.** First attempt: `pip install -r requirements.txt` in one shot. If this succeeds, great, done. If it fails (typically because some package in requirements.txt has an exact version pin that isn't available for the target platform — the `PyMySQL==1.1.2` problem), fall back to per-package install with version fallback.
+
+The per-package fallback is the interesting part. For each line in requirements.txt, try installing it verbatim (respecting the pin). If that fails, try installing just the package name without the pin (letting pip pick the newest compatible version). If that also fails, log a warning and continue. The goal is "install as much as possible" rather than "install exactly this version set or nothing".
+
+This is a deliberate trade-off. Strict version-pinning is best practice for reproducibility, but Velour's deploy target is heterogeneous — a fresh Ubuntu 24.04 with Python 3.12 on one host, a Raspberry Pi with Python 3.11 on another, an older Debian with Python 3.10 on a third. A pin that works on one platform can fail on another. The fallback trades reproducibility for deployability: a Velour that "mostly works" is strictly better than a Velour that fails to install at all.
+
+After the requirements install, there's an explicit `pip install gunicorn` if gunicorn isn't already installed, because the supervisor config references gunicorn unconditionally and will fail to start without it.
+
+**[3/5] Django SECRET_KEY.** If `$APP_HOME/secret_key.txt` doesn't exist, generate a 64-character random string (letters + digits + a small set of punctuation that's shell-safe). Write it to the file. chmod 600. If the file already exists, keep it.
+
+The idempotence direction matters. "Generate if missing, keep if present" means re-running `setup.sh` never rotates the secret, which is good: rotating the SECRET_KEY invalidates every active session cookie, and a silent rotation during a routine re-run would log everyone out without warning.
+
+**[4/5] migrations.** `python manage.py makemigrations --noinput && python manage.py migrate --noinput`. `makemigrations` before `migrate` is intentional — it guarantees the deploy is self-contained even if the source tree is missing a generated migration file. If every migration file is already in place (as it should be for a well-maintained repo), `makemigrations` is a no-op and `migrate` applies zero new migrations.
+
+**[5/5] collectstatic.** `python manage.py collectstatic --noinput`. Collects all static files from all installed apps into `/var/www/webapps/$USER/static/`. Nginx serves this directory directly, bypassing Django entirely for static asset requests.
+
+`--noinput` is there because the default behavior of collectstatic is to prompt "this will overwrite existing files, proceed? [y/n]" and a deploy script obviously can't answer an interactive prompt. The flag is mandatory in automated deploy contexts.
+
+That's all five steps. After collectstatic, `setup.sh` exits. If it was called from `adminsetup.sh`, control returns there for the final two steps (reload nginx, reload supervisor). If it was called directly by the operator as part of a hot-swap flow, control returns to the operator's shell.
+
+## What setup.sh deliberately does NOT do
+
+As promised in the stub version of this chapter, here's the explicit negative space. `setup.sh` does not:
+
+- **Create the superuser.** Per-deploy decision. The operator runs `venv/bin/python manage.py createsuperuser` once by hand after the first successful deploy.
+- **Configure SSL.** Per-deploy decision. The operator runs `certbot` after the basic HTTP-only deploy is working, then edits `deploy/nginx.conf` to reference the new cert paths.
+- **Install system packages.** That's `adminsetup.sh`'s job, done once per host.
+- **Touch `/etc`.** Same reason.
+- **Download external assets.** No calls to Kroki, no font downloads, no API fetches. Everything the app needs to boot is in the rsync'd source tree.
+- **Run tests.** Tests run on the developer's machine before deploy; re-running them on the target is redundant and risks failing the deploy for an environmental difference (e.g., a timezone assumption that happens to hold on dev but not on the target).
+- **Create or seed demo data.** That's a separate management command (`seed_devguide`, `seed_holidays`, etc.) the operator runs by hand after the first successful deploy.
+
+The principle is: `setup.sh` handles everything that's the same across deploys, and leaves everything that's a per-deploy decision to the operator.
+
+## The operator checklist
+
+After `adminsetup.sh` finishes, the target host is running Velour but the operator still has three things to do:
+
+1. **createsuperuser.** `sudo -u $USER /home/$USER/venv/bin/python /home/$USER/manage.py createsuperuser`. Without this, nobody can log in.
+2. **Set up SSL.** `sudo certbot --nginx -d your.domain.tld`. Edit `deploy/nginx.conf` if certbot's autoconfig doesn't survive a regenerate.
+3. **Visit the site.** `https://your.domain.tld/`. Log in as the superuser. Confirm the Dashboard loads. Confirm sysinfo shows the host's load and memory. Confirm the Identity row exists with the right hostname.
+
+If all three steps pass, the deploy is done and the operator's work is over. If any of them fails, chapter 14 (the worked example) has a troubleshooting section for common failure modes.
+
+## Where this fits in Volume 1
+
+Chapter 9 covered the command that writes the deploy bundle. This chapter covered the scripts that consume the bundle to produce a running Velour instance. Chapter 11 covers `hotswap.sh` — the much-shorter daily-use script that skips most of `adminsetup.sh`'s work and just rsyncs new source + restarts supervisor.
+
+Chapters 12-14 in Part IV walk through the whole bootstrap sequence in fully concrete detail for a fresh Ubuntu server, so the description in this chapter is more at the "why" level and the walkthrough is at the "what" level. If you want to follow along with real commands and real output, jump to chapter 12.
+"""
+
+
+def _ch11_hotswap():
+    return """`hotswap.sh` is the operator's daily-use script. After `adminsetup.sh` has run once on the target host and the Velour instance is up, hot-swap is how code changes propagate from the developer's machine to production.
+
+The script is deliberately small. Most of `adminsetup.sh`'s work was one-shot-per-host — installing system packages, creating a user, symlinking configs — and doesn't need to be redone on every deploy. What's left for daily use is: rsync the new source, run a subset of `setup.sh`'s idempotent housekeeping (fresh deps, fresh migrations, fresh static files), and restart the gunicorn workers.
+
+This chapter walks through the whole thing, explains why it's safe for code changes but NOT for schema changes, and covers the three-line workflow the operator actually types.
+
+## The hotswap script
+
+The rendered `hotswap.sh` is about 40 lines. The core is:
+
+```bash
+# [1/4] rsync the source tree with the same exclude list adminsetup.sh uses
+rsync -a --delete --exclude='venv/' --exclude='*.pyc' \\
+      --exclude='db.sqlite3*' --exclude='secret_key.txt' \\
+      --exclude='health_token.txt' --exclude='.git/' \\
+      "$STAGING_DIR/" "$APP_HOME/"
+sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" "$APP_HOME"
+
+# [2/4] re-run setup.sh as the project user
+sudo -u "$DEPLOY_USER" -H bash "$APP_HOME/setup.sh"
+
+# [3/4] reload nginx
+sudo systemctl reload nginx
+
+# [4/4] restart gunicorn
+sudo supervisorctl restart "$DEPLOY_USER"
+```
+
+The exclude list for the rsync is the same list `adminsetup.sh` uses, for the same reasons. Prod secrets stay on prod. Dev caches stay on dev.
+
+The call to `setup.sh` is the "subset of adminsetup.sh's work" mentioned above. Since `setup.sh` is idempotent (venv skipped if present, secret_key skipped if present, migrations run only if new ones exist), re-running it on every hot-swap is cheap and safe. The only step that does meaningful work on a typical hot-swap is the pip install (which skips everything already installed, installs any new requirements) and collectstatic (which re-copies static files that changed).
+
+The final `supervisorctl restart` is the load-bearing step. gunicorn has been running with the old code loaded into memory; restarting it forks new worker processes that read the new source tree. The restart is graceful (supervisor's default is SIGTERM followed by SIGKILL after a timeout) and in-flight requests get up to 10 seconds to finish before the worker is killed.
+
+Total hot-swap time on a typical deploy: 10-20 seconds for the rsync, 5-10 seconds for `setup.sh` (mostly collectstatic), 2 seconds for supervisor restart. Call it 30 seconds end-to-end for a code-only change.
+
+## When hot-swap is safe
+
+Hot-swap is safe when:
+
+- The change is Python code only. Views, URLs, templates, static assets, management commands, utility modules.
+- The change includes new migrations that are purely additive and non-destructive. "Add a new model", "add a new field with a default", "create a new index".
+- The change adds new static files or modifies existing ones. collectstatic handles this.
+- The change adds new pip dependencies. `setup.sh` reruns `pip install -r requirements.txt` and picks them up.
+
+That's the common case. Most deploys in practice are of this shape: small edits to views or templates, occasional new features that add a model or two, periodic dependency bumps.
+
+## When hot-swap is NOT safe
+
+Hot-swap is NOT safe when:
+
+- **The change is a destructive migration.** Dropping a column, dropping a table, renaming a field (which Django treats as drop + add). The hot-swap runs migrations under its own control, before supervisor restart, which means there's a window where the new schema is live but the old gunicorn process is still serving old code that references the dropped column. Result: 500 errors until the restart completes a few seconds later.
+
+- **The change requires data migration.** A custom RunPython migration that needs to touch existing rows. Django's `migrate` command runs these inline as part of the migration, which might take minutes on a large table, and the hot-swap waits for it. The hot-swap is fine; the outage window is just longer.
+
+- **The change modifies static file hashes that are embedded in old templates.** Django's `ManifestStaticFilesStorage` hashes filenames, and if a template served by the old gunicorn references `main.abc123.css` while collectstatic has replaced it with `main.def456.css`, the user sees a 404 for the stylesheet until the gunicorn restart.
+
+- **The change includes nginx config updates.** `hotswap.sh` reloads nginx (step 3), so it picks up changes to `deploy/nginx.conf` if those exist in the rsync'd source. But if the nginx config is syntactically invalid, the reload fails and nginx keeps serving the old config. The operator should run `sudo nginx -t` manually after any nginx config change to catch this.
+
+- **The change includes a new supervisor config.** `hotswap.sh` restarts supervisor's gunicorn program but does NOT re-run `supervisorctl reread && supervisorctl update`. If `deploy/supervisor.conf` has changed, the changes are ignored. The operator needs to run `sudo supervisorctl reread && sudo supervisorctl update` by hand after the hot-swap.
+
+The way to read this list: hot-swap is optimized for the common case (fast, safe, code-only) and assumes anything unusual is the operator's problem to handle manually. It doesn't try to detect the unsafe cases and bail out because the detection logic would be bigger than the script itself.
+
+## The three-line operator workflow
+
+From the developer's machine, the whole hot-swap is three commands:
+
+```
+rsync -a --delete ./velour-dev/ swibliq@snel.com:/home/swibliq/staging/
+ssh swibliq@snel.com 'cd /home/swibliq/staging && bash hotswap.sh'
+ssh swibliq@snel.com 'tail -f /var/www/webapps/swibliq/log/gunicorn.log'
+```
+
+Three lines. First line pushes the source. Second line runs the hot-swap. Third line is optional — it's just so the operator sees any startup errors in real time.
+
+Some operators alias this as a shell function called `deploy`:
+
+```bash
+deploy() {
+    rsync -a --delete ./velour-dev/ swibliq@snel.com:/home/swibliq/staging/
+    ssh swibliq@snel.com 'cd /home/swibliq/staging && bash hotswap.sh'
+}
+```
+
+After that, `deploy` from any terminal in the velour source tree, wait 30 seconds, done. This is the workflow the system is optimized for.
+
+## What hot-swap deliberately skips
+
+Compared to `adminsetup.sh`, `hotswap.sh` skips:
+
+- System package installation (already done)
+- User creation (already done)
+- `/var` tree creation (already done)
+- nginx + supervisor symlink creation (already done, and the symlinks point into `$APP_HOME/deploy/` so rsyncing new configs updates them automatically)
+- nginx config validation (the operator's responsibility if they changed the config)
+- supervisor `reread + update`
+
+Everything in this list is "done once at bootstrap, not needed on code updates". The hot-swap's only job is to change the Python that gunicorn is serving.
+
+## Why not zero-downtime
+
+Hot-swap has a sub-second outage window where supervisor has killed the old gunicorn and the new one hasn't finished starting yet. Nginx handles the gap by serving the `/var/www/maintenance/index.html` fallback page, so a request that hits that window sees "Service temporarily unavailable" briefly.
+
+For zero-downtime deploys, you'd need to run two gunicorn instances (blue/green), drain traffic from the old one via nginx config changes, start the new one, and then cut over. This is standard production practice for high-traffic sites. Velour doesn't do it because:
+
+- The use case is personal + small-lab, not high-traffic. A sub-second outage during a deploy is fine.
+- The implementation complexity is substantial (nginx upstream config, two supervisor programs, state coordination between them).
+- The failure modes are subtle (blue and green pointing at the same SQLite file simultaneously is a correctness hazard).
+
+If a future Velour grows into a use case where sub-second outages matter, this is where the deploy pipeline will need to change. For now, it's out of scope.
+
+## Rollback
+
+There is no built-in rollback. If a hot-swap breaks the app, the fix is to fix the source on the developer's machine and re-run the hot-swap. This is equivalent to "rollback" in the sense that you end up back at a working state, but it's not the same as "instantly revert to the previous deploy" because it requires the developer to know what the previous working state was.
+
+If the operator wants real rollback, the standard technique is: keep the last N deploys in separate directories and swap the `/home/$USER/` symlink to the desired version. Velour's hot-swap doesn't do this because the overhead (disk space, N×SQLite databases, the question of "which SQLite is authoritative after a rollback") is bigger than the value.
+
+The deliberate choice here is: trust the developer to not push broken code, and when they do, trust them to fix it forward rather than rolling back. This is appropriate for a single-developer lab tool. It would not be appropriate for a team of ten.
+
+## Where this fits in Volume 1
+
+This chapter closes Part III. Part IV (chapters 12-14) walks through the whole bootstrap sequence — `generate_deploy`, scp, `adminsetup.sh`, `setup.sh`, first boot — in fully concrete detail with real commands and real output. The reader who has made it through Part III should have enough conceptual understanding to follow Part IV without needing to pause and look things up.
+"""
+
+
 SEEDERS = {
     1: seed_volume_1,
 }
