@@ -253,6 +253,17 @@ class TufteManualPDF(FPDF):
             elif tag == 'spark':
                 _, spec = run
                 self._write_sparkline(spec, leading)
+            elif tag == 'link':
+                _, text, url = run
+                # Render the link text inline (italic so the reader sees
+                # it's special) and queue the URL itself as a sidenote so
+                # the printed page is self-contained — no opaque [1]
+                # markers, no half-shown URLs in the body.
+                self.set_font(FONT, 'I', BODY_FONT_SIZE)
+                self.write(leading, text)
+                self.set_font(FONT, '', BODY_FONT_SIZE)
+                anchor_y = self._write_anchor(leading)
+                notes_in_para.append((anchor_y, self._note_counter, url))
         self.ln(leading)
         return notes_in_para
 
@@ -295,10 +306,343 @@ class TufteManualPDF(FPDF):
             elif tag == 'spark':
                 _, spec = run
                 self._write_sparkline(spec, self.body_leading)
+            elif tag == 'link':
+                _, text, url = run
+                self.set_font(FONT, 'I', BODY_FONT_SIZE)
+                self.write(self.body_leading, text)
+                anchor_y = self._write_anchor(self.body_leading)
+                self.render_inline_sidenote(
+                    anchor_y, self._note_counter, url,
+                )
+                self.set_text_color(*DARK_GRAY)
         self.ln(self.body_leading)
         self.set_left_margin(prev_left)
         self.set_text_color(*BLACK)
         self.ln(self.body_leading * 0.5)
+
+    # --- callout / admonition ---------------------------------------------
+
+    def emit_callout(self, kind, blocks):
+        """A bordered note/tip/warn/danger box.
+
+        The Tufte-flavored choice: no big colored backgrounds, no icons,
+        no chunky borders. Just a thin colored bar on the left edge, the
+        kind label as small italic gray at the top, and the body text
+        slightly indented. Quiet, scannable, no chartjunk.
+        """
+        # Map kinds to bar colors (muted, not screaming).
+        bar_colors = {
+            'note':    (88, 166, 255),    # blue
+            'info':    (88, 166, 255),
+            'tip':     (46, 160, 67),     # green
+            'warn':    (210, 153, 34),    # amber
+            'warning': (210, 153, 34),
+            'danger':  (200, 50, 50),     # red
+        }
+        bar = bar_colors.get(kind, (130, 130, 130))
+
+        self.ln(1.5)
+        bar_top = self.get_y()
+        bar_x = LEFT_MARGIN
+
+        # Indent the body slightly so it's visually separated from the bar.
+        prev_left = self.l_margin
+        self.set_left_margin(LEFT_MARGIN + 5)
+        self.set_x(LEFT_MARGIN + 5)
+
+        # Label.
+        self.set_font(FONT, 'I', SIDENOTE_FONT_SIZE)
+        self.set_text_color(*GRAY)
+        self.write(SIDENOTE_LEADING, kind.upper())
+        self.ln(SIDENOTE_LEADING + 0.5)
+        self.set_text_color(*BLACK)
+
+        # Body — recursively render each inner block. We keep nesting
+        # simple: paragraphs and lists work; nested callouts would also
+        # work via recursion but probably never happen in practice.
+        for inner_kind, inner_payload in blocks:
+            self._dispatch_block(inner_kind, inner_payload, figure_map={})
+
+        bar_bot = self.get_y()
+        # Draw the colored bar AFTER the body so we know how tall to make it.
+        self.set_draw_color(*bar)
+        self.set_line_width(0.6)
+        self.line(bar_x, bar_top, bar_x, bar_bot)
+        self.set_line_width(0.2)
+        self.set_draw_color(0, 0, 0)
+
+        self.set_left_margin(prev_left)
+        self.set_x(prev_left)
+        self.ln(2)
+
+    # --- code blocks ------------------------------------------------------
+
+    def emit_code(self, source):
+        """Monospace code block with a quiet light-gray background."""
+        if not source:
+            return
+        self.ln(1)
+        # We don't have a real monospace TTF in the bundle yet — fpdf2's
+        # built-in Courier is latin-1 only, but for code that's usually
+        # fine. Use it.
+        prev_font = (self.font_family, self.font_style, self.font_size)
+        self.set_font('Courier', '', 9)
+        leading = 4.0
+        lines = source.split('\n')
+
+        # Background block: rect spanning full body width.
+        block_top = self.get_y()
+        block_h = leading * len(lines) + 2
+        self.set_fill_color(245, 245, 245)
+        self.rect(LEFT_MARGIN - 1, block_top - 0.5,
+                  BODY_W + 2, block_h, style='F')
+
+        self.set_text_color(40, 40, 40)
+        self.set_xy(LEFT_MARGIN + 1, block_top + 1)
+        for line in lines:
+            self.set_x(LEFT_MARGIN + 1)
+            # Manual width clipping — Courier is fixed-pitch, ~1.7mm/char
+            # at 9pt, so 130mm fits ~76 characters comfortably.
+            self.write(leading, line)
+            self.ln(leading)
+        self.set_text_color(*BLACK)
+        self.ln(1.5)
+        self.set_font(*prev_font[:2], prev_font[2])
+
+    # --- tables -----------------------------------------------------------
+
+    def emit_table(self, header, rows):
+        """Tufte minimal-rule table.
+
+        No vertical lines. Horizontal rules only above the header, below
+        the header, and below the last row. Generous interior padding.
+        """
+        if not header:
+            return
+        ncols = max(len(header), max((len(r) for r in rows), default=0))
+        if ncols == 0:
+            return
+        col_w = BODY_W / ncols
+        cell_h = self.body_leading * 1.05
+        cell_pad = 1.4
+
+        self.ln(1.5)
+        top_y = self.get_y()
+
+        def _draw_rule(y, weight=0.25, color=(80, 80, 80)):
+            self.set_draw_color(*color)
+            self.set_line_width(weight)
+            self.line(LEFT_MARGIN, y, LEFT_MARGIN + BODY_W, y)
+            self.set_draw_color(0, 0, 0)
+            self.set_line_width(0.2)
+
+        # Top rule
+        _draw_rule(top_y, weight=0.4)
+
+        # Header row
+        self.set_xy(LEFT_MARGIN, top_y + cell_pad)
+        for i in range(ncols):
+            cell_runs = header[i] if i < len(header) else []
+            cx = LEFT_MARGIN + i * col_w
+            self.set_xy(cx + cell_pad, top_y + cell_pad)
+            self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                  cell_h, bold=True)
+
+        header_bot = top_y + cell_h + cell_pad * 2
+        _draw_rule(header_bot, weight=0.25)
+
+        # Data rows
+        cur_y = header_bot
+        for row in rows:
+            for i in range(ncols):
+                cell_runs = row[i] if i < len(row) else []
+                cx = LEFT_MARGIN + i * col_w
+                self.set_xy(cx + cell_pad, cur_y + cell_pad)
+                self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                      cell_h, bold=False)
+            cur_y += cell_h + cell_pad * 2
+
+        _draw_rule(cur_y, weight=0.4)
+        self.set_xy(LEFT_MARGIN, cur_y + 2)
+        self.ln(0)
+
+    def _write_cell_runs(self, runs, max_w, line_h, bold=False):
+        """Render a sequence of inline runs into a single-line table cell.
+        Truncates if the rendered string overflows the column."""
+        # Concatenate plain text from runs (we ignore inline sidenotes /
+        # sparklines / links inside table cells in Phase 3 — keep cells
+        # simple).
+        flat = ''
+        bold_segments = []
+        italic_segments = []
+        for run in runs:
+            if run[0] == 'text':
+                _, style, text = run
+                start = len(flat)
+                flat += text
+                end = len(flat)
+                if 'B' in style:
+                    bold_segments.append((start, end))
+                if 'I' in style:
+                    italic_segments.append((start, end))
+
+        if not flat:
+            return
+
+        # Single-font rendering for simplicity: use bold if any of the
+        # cell content is bold, italic if any is italic. Cells are
+        # short enough that mixed styles within a single cell are rare.
+        style = ''
+        if bold or bold_segments:
+            style += 'B'
+        if italic_segments:
+            style += 'I'
+        self.set_font(FONT, style, BODY_FONT_SIZE - 1)
+        self.set_text_color(*BLACK)
+        # Trim to fit width (rough — Courier-style estimate isn't right
+        # for proportional fonts but the truncation is a safety net).
+        text = flat
+        while text and self.get_string_width(text) > max_w:
+            text = text[:-2] + '…' if len(text) > 2 else ''
+        self.write(line_h, text)
+
+    # --- slope graphs -----------------------------------------------------
+
+    def emit_slope(self, left_label, right_label, series):
+        """Tufte slope graph: two columns of points connected by lines.
+
+        Series is a list of (name, left_value, right_value).
+        """
+        if not series:
+            return
+        self.ln(2)
+        # Block geometry within the body column.
+        block_top = self.get_y()
+        block_h = 50.0  # mm
+        gutter_left = 30  # mm reserved for left labels + values
+        gutter_right = 35  # mm reserved for right labels + values
+        plot_left = LEFT_MARGIN + gutter_left
+        plot_right = LEFT_MARGIN + BODY_W - gutter_right
+        plot_top = block_top + 8
+        plot_bot = block_top + block_h - 6
+
+        # Header labels for the two columns.
+        self.set_font(FONT, 'I', SIDENOTE_FONT_SIZE)
+        self.set_text_color(*GRAY)
+        if left_label:
+            self.set_xy(plot_left - 22, plot_top - 6)
+            self.cell(20, 4, left_label, align='R')
+        if right_label:
+            self.set_xy(plot_right + 2, plot_top - 6)
+            self.cell(28, 4, right_label, align='L')
+        self.set_text_color(*BLACK)
+
+        all_values = [v for _, l, r in series for v in (l, r)]
+        v_min = min(all_values)
+        v_max = max(all_values)
+
+        def _y(v):
+            if v_max == v_min:
+                return (plot_top + plot_bot) / 2
+            return plot_bot - (v - v_min) / (v_max - v_min) * (plot_bot - plot_top)
+
+        # Draw all the lines first (so labels overlay).
+        self.set_draw_color(80, 80, 80)
+        self.set_line_width(0.25)
+        for name, left_v, right_v in series:
+            self.line(plot_left, _y(left_v), plot_right, _y(right_v))
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.2)
+
+        # Endpoint labels: name + value on each side.
+        self.set_font(FONT, '', BODY_FONT_SIZE - 2)
+        self.set_text_color(*BLACK)
+
+        # To avoid overlapping labels, sort by y and bump down if too close.
+        def _layout(side):
+            placed = []
+            for name, left_v, right_v in series:
+                v = left_v if side == 'left' else right_v
+                placed.append([name, v, _y(v)])
+            placed.sort(key=lambda p: p[2])
+            min_gap = 3.2  # mm
+            for i in range(1, len(placed)):
+                if placed[i][2] - placed[i - 1][2] < min_gap:
+                    placed[i][2] = placed[i - 1][2] + min_gap
+            return placed
+
+        for name, v, y in _layout('left'):
+            txt = f'{name}  {self._fmt_num(v)}'
+            self.set_xy(LEFT_MARGIN, y - 1.4)
+            self.cell(gutter_left - 1.5, 3, txt, align='R')
+        for name, v, y in _layout('right'):
+            txt = f'{self._fmt_num(v)}  {name}'
+            self.set_xy(plot_right + 1.5, y - 1.4)
+            self.cell(gutter_right - 1.5, 3, txt, align='L')
+
+        self.set_xy(LEFT_MARGIN, block_top + block_h + 1)
+        self.ln(0)
+
+    @staticmethod
+    def _fmt_num(v):
+        if v == int(v):
+            return str(int(v))
+        return f'{v:g}'
+
+    # --- small multiples (figs grid) --------------------------------------
+
+    def emit_figs(self, cols, slugs, figure_map):
+        """Arrange N figures in a grid of `cols` columns."""
+        figures = [figure_map.get(s) for s in slugs]
+        figures = [f for f in figures if f and f.image]
+        if not figures:
+            return
+
+        cell_w = BODY_W / cols
+        cell_pad = 2.0
+        img_max_w = cell_w - cell_pad * 2
+
+        self.ln(1.5)
+        row_top = self.get_y()
+        row_max_h = 0
+        col_idx = 0
+
+        for f in figures:
+            try:
+                path = Path(f.image.path)
+                if not path.is_file():
+                    continue
+            except Exception:
+                continue
+
+            cx = LEFT_MARGIN + col_idx * cell_w + cell_pad
+            self.set_xy(cx, row_top)
+            try:
+                self.image(str(path), x=cx, y=row_top, w=img_max_w)
+            except Exception:
+                continue
+            after_y = self.get_y()
+            img_h = after_y - row_top
+            if f.caption:
+                self.set_xy(cx, after_y + 0.5)
+                self.set_font(FONT, 'I', SIDENOTE_FONT_SIZE - 0.5)
+                self.set_text_color(*GRAY)
+                self.multi_cell(img_max_w, SIDENOTE_LEADING - 0.5,
+                                f.caption)
+                self.set_text_color(*BLACK)
+                cap_h = self.get_y() - (after_y + 0.5)
+                img_h += 0.5 + cap_h
+            row_max_h = max(row_max_h, img_h)
+            col_idx += 1
+            if col_idx >= cols:
+                col_idx = 0
+                row_top = row_top + row_max_h + 2.5
+                row_max_h = 0
+                self.set_xy(LEFT_MARGIN, row_top)
+
+        # Move cursor below the last row.
+        self.set_xy(LEFT_MARGIN, row_top + row_max_h + 2)
+        self.ln(0)
 
     # --- figures ----------------------------------------------------------
 
@@ -385,6 +729,39 @@ class TufteManualPDF(FPDF):
 
     # --- section walker ---------------------------------------------------
 
+    def _dispatch_block(self, kind, payload, figure_map):
+        if kind == 'h1':
+            self.emit_h2(payload)
+        elif kind == 'h2':
+            self.emit_h2(payload)
+        elif kind == 'h3':
+            self.emit_h3(payload)
+        elif kind == 'p':
+            self.emit_paragraph(payload)
+        elif kind == 'ul':
+            self.emit_bullet_list(payload)
+        elif kind == 'quote':
+            self.emit_quote(payload)
+        elif kind == 'fig':
+            fig = figure_map.get(payload)
+            if fig:
+                self.emit_figure(fig)
+        elif kind == 'figs':
+            self.emit_figs(payload['cols'], payload['slugs'], figure_map)
+        elif kind == 'callout':
+            self.emit_callout(payload['kind'], payload['blocks'])
+        elif kind == 'code':
+            self.emit_code(payload)
+        elif kind == 'table':
+            self.emit_table(payload['header'], payload['rows'])
+        elif kind == 'slope':
+            self.emit_slope(
+                payload['left_label'], payload['right_label'],
+                payload['series'],
+            )
+        elif kind == 'blank':
+            self.ln(self.body_leading * 0.3)
+
     def render_section(self, section):
         # Reset per-section sidenote state.
         self._note_counter = 0
@@ -403,24 +780,7 @@ class TufteManualPDF(FPDF):
 
         blocks = parse(section.body)
         for kind, payload in blocks:
-            if kind == 'h1':
-                self.emit_h2(payload)
-            elif kind == 'h2':
-                self.emit_h2(payload)
-            elif kind == 'h3':
-                self.emit_h3(payload)
-            elif kind == 'p':
-                self.emit_paragraph(payload)
-            elif kind == 'ul':
-                self.emit_bullet_list(payload)
-            elif kind == 'quote':
-                self.emit_quote(payload)
-            elif kind == 'fig':
-                fig = figure_map.get(payload)
-                if fig:
-                    self.emit_figure(fig)
-            elif kind == 'blank':
-                self.ln(self.body_leading * 0.3)
+            self._dispatch_block(kind, payload, figure_map)
 
 
 def render_manual_to_pdf(manual):
