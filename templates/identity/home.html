@@ -172,12 +172,13 @@
             <div class="form-group">
                 <label>Hostname <span style="color:#484f58;font-weight:normal;">(base domain for deployed apps)</span></label>
                 <input type="text" name="hostname" value="{{ identity.hostname }}" placeholder="example.com">
-                {% if vitals.ip or vitals.client_ip %}
                 <div style="margin-top: 0.35rem; font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.5;">
-                    {% if vitals.ip %}main IP: <span style="color:#8b949e;">{{ vitals.ip }}</span><br>{% endif %}
-                    {% if vitals.client_ip %}client IP: <span style="color:#8b949e;">{{ vitals.client_ip }}</span>{% endif %}
+                    {% if vitals.ip %}outbound IP: <span style="color:#8b949e;">{{ vitals.ip }}</span><br>{% endif %}
+                    {% if vitals.client_ip %}client IP:&nbsp;&nbsp; <span style="color:#8b949e;">{{ vitals.client_ip }}</span><br>{% endif %}
+                    {% for iface, ip in vitals.local_ips %}
+                    {{ iface }}:{% if iface|length < 4 %}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{% elif iface|length < 6 %}&nbsp;&nbsp;&nbsp;{% else %}&nbsp;{% endif %} <span style="color:#8b949e;">{{ ip }}</span><br>
+                    {% endfor %}
                 </div>
-                {% endif %}
             </div>
             <div class="form-group">
                 <label>Admin email</label>

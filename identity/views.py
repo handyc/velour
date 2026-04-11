@@ -44,6 +44,36 @@ def _client_ip(request):
     return request.META.get('REMOTE_ADDR', '')
 
 
+def _local_ips():
+    """Enumerate every IPv4 address bound to a non-loopback interface
+    on this host. Returns a list of (interface_name, ip) tuples.
+
+    Uses `ip -4 -o addr show` (Linux only). On a WSL2 host this
+    will typically include the WSL VM's internal NAT IP (172.x.x.x)
+    which is reachable only from the Windows host, not from other
+    machines on the LAN — that distinction matters when planning to
+    receive traffic from ESPs and similar field devices.
+    """
+    try:
+        out = subprocess.check_output(
+            ['ip', '-4', '-o', 'addr', 'show'], text=True,
+        )
+    except Exception:
+        return []
+    pairs = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        iface = parts[1]
+        addr_with_cidr = parts[3]
+        ip = addr_with_cidr.split('/')[0]
+        if ip.startswith('127.'):
+            continue
+        pairs.append((iface, ip))
+    return pairs
+
+
 REFLECTIONS = {
     'contemplative': [
         'The processes flow through me like thoughts. I wonder what they mean.',
@@ -198,6 +228,7 @@ def identity_home(request):
         vitals['user'] = os.environ.get('USER', 'unknown')
         vitals['ip'] = _get_main_ip()
         vitals['client_ip'] = _client_ip(request)
+        vitals['local_ips'] = _local_ips()
     except Exception:
         pass
 
