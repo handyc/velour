@@ -356,10 +356,10 @@ The example is intentionally concrete: real commands, real output, real edge cas
          _ch12_clone()),
 
         ('ch13-generate', 420, 'Chapter 13 — Generating a new app',
-         """A walkthrough of using `app_factory` to create a new child Django project under the same Velour parent. The example creates a small "lab forms" app that captures research subject data — chosen because it's representative of the kind of one-off internal tool app_factory exists to make trivial."""),
+         _ch13_generate()),
 
         ('ch14-deploy', 430, 'Chapter 14 — Deploying to production',
-         """A walkthrough of `generate_deploy` → scp → `setup.sh` → first boot for both Velour itself AND the lab-forms child app generated in Chapter 13. SSL setup via certbot. Verification. The full sequence from cold start to "open it in a browser and it works"."""),
+         _ch14_deploy()),
     ]
     for slug, sort, title, body in stubs_part4:
         upsert_section(m, slug, sort, title, body)
@@ -1885,6 +1885,492 @@ Chapter 12 is the local bring-up. Chapter 13 is the generation of a sibling proj
 By the end of chapter 14, you will have the equivalent of the author's own production setup: one Velour instance visible at `velour.mydomain.tld`, one child app at `labforms.mydomain.tld`, both hot-swappable with a two-line rsync-and-restart workflow.
 
 If at any point during the remaining two chapters you hit an error that isn't mentioned in the "common errors" callouts, the fastest debugging path is `tail -f runserver.log` on whichever terminal has the dev server. Django's tracebacks are verbose and usually tell you exactly what's wrong; the fix is almost always in the last five lines of the traceback.
+"""
+
+
+def _ch13_generate():
+    return """Chapter 12 got you to a working Velour on a single host, logged in as a superuser, Dashboard rendering, sysinfo reporting. That Velour is now running as a meta-app — which means it can generate *other* Django projects. This chapter walks through using `app_factory` to do exactly that: create a new child project that will live alongside Velour under the same `/var/www/webapps/` tree in chapter 14, owned by a different Linux user, proxied by the same nginx.
+
+The example we're going to build is "lab-forms" — a small internal tool for capturing research subject data (consent forms, intake surveys, incident reports, whatever the lab needs). We pick it because it's representative of the one-off tools app_factory is designed to make trivial: a few models, a handful of views, an admin UI, no API, no realtime, no microservices. The kind of app a lab needs exactly once and never touches again except to add a new form type.
+
+## The meta-app premise, recapped
+
+Velour runs as a project under some Linux user (in this walkthrough, your dev user — in chapter 14 that becomes a dedicated project user). Inside Velour is the `app_factory` app. Its job is to render a new Django project from templates, place the rendered files somewhere under `/var/www/webapps/<deploy_user>/apps/<project>/`, and track the resulting row in a `GeneratedApp` model so Velour knows about it. From that point on, the child project is an independent Django codebase — you `cd` into it, activate its own venv, edit its own settings — but Velour still tracks it and can generate deploy artifacts for it the same way it does for itself.
+
+The important idea is that Velour doesn't *run* the child app. It generates it and then gets out of the way. A child app deployed to production is its own gunicorn process, its own supervisor program, its own nginx server block. Velour is a factory, not a runtime.
+
+## Step 1 — Open the app factory UI
+
+From the running Velour dev server (http://127.0.0.1:7777/ from chapter 12), navigate to the Dashboard and click the **App Factory** card. You land at `/app-factory/` which shows a list of existing generated apps. On a fresh install the list is empty.
+
+Click **Create New App**. A form appears with these fields:
+
+- **Name**: The human-readable name of the new project. Pick `lab-forms` — the slug generator will derive a directory name from it (`lab_forms`).
+- **Description**: Free text. Used in the generated `README.md` and the Codex Quickstart section for the child project. For this walkthrough, paste: *"Research subject data capture for the Leiden aquarium lab. Consent forms, intake surveys, incident reports."*
+- **App Type**: Two choices. **Blank Django App** generates a minimal Django project with one "hello world" app inside it. **Clone of Velour** generates a project with every Velour app pre-installed — useful when you want the new project to inherit the whole meta-app stack (codex, identity, dashboard, etc.). For lab-forms we want **Blank Django App** because a research-forms tool doesn't need all that scaffolding; pick it.
+- **Deploy User**: The Linux user the new app will run as in production. This user will be created by `adminsetup.sh` (chapter 10). For lab-forms, use `labforms` — the deploy-layout convention is that the user name is the project name with hyphens removed.
+
+Click **Create**. The page redirects to a status view showing the new app in **Pending Review** state.
+
+## Step 2 — What just happened on disk
+
+Behind the scenes, `app_factory` did the following:
+
+1. Resolved the directory where the new project will live. The default convention (see `/var/www/webapps/<deploy_user>/apps/<project>/`) is used, but in dev mode where `/var/www` might not exist or might not be writable, app_factory falls back to `BASE_DIR / 'generated_apps' / <project>/`. You'll see which directory was chosen in the detail view.
+
+2. Copied a project template from `app_factory/templates/blank_project/` (or `clone_project/` if you chose Clone of Velour) into the target directory. The template has placeholders like `{{ project_name }}` and `{{ app_label }}` that get substituted at copy time.
+
+3. Wrote a `GeneratedApp` row in the database with status `pending` so the Velour UI knows about it.
+
+The detail view at `/app-factory/<id>/` shows you the file tree of the generated project. For `lab-forms` you should see:
+
+```
+lab_forms/
+├── manage.py
+├── requirements.txt
+├── README.md
+├── lab_forms/
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   ├── wsgi.py
+│   └── asgi.py
+├── hello/
+│   ├── __init__.py
+│   ├── apps.py
+│   ├── models.py
+│   ├── views.py
+│   ├── urls.py
+│   └── templates/hello/
+│       └── index.html
+└── templates/
+    └── base.html
+```
+
+The `hello/` app is the minimal stub — one view that renders "Hello, {{ project_name }}." — just so the new project has something to serve when you run the dev server for the first time.
+
+## Step 3 — Run the child app's dev server
+
+From the app_factory detail view, click **Start Dev Server**. This does three things:
+
+1. Picks an open port in the 8001-9000 range using `_find_open_port()`. For the first generated app, you'll usually get 8001.
+2. Runs `python manage.py runserver 8001` as a subprocess, storing the PID on `GeneratedApp.dev_pid` so a later **Stop** click can kill it.
+3. Redirects back to the detail view which now shows the dev server as **Running** with a clickable link to `http://127.0.0.1:8001/`.
+
+Open that link in a new tab. You should see the hello stub — a minimal page saying "Hello, lab-forms." with the project name and a timestamp.
+
+If the link gives you a connection refused, the subprocess didn't start. Check the Velour runserver's own log output — app_factory logs child-process stderr to `runserver.log` or the terminal Velour is running in. Most common cause: missing dependency in the child project's `requirements.txt`. Chapter 13 walks through the install; chapter 12's pip-install errors apply here too.
+
+## Step 4 — Add the first real model
+
+The stub app is now running. Time to edit it. Open a terminal and `cd` into the child project directory (the detail view tells you the exact path). Example:
+
+```
+cd ~/velour-dev/generated_apps/lab_forms
+ls
+```
+
+Create a new Django app inside the project:
+
+```
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python manage.py startapp forms
+```
+
+Edit `forms/models.py`:
+
+```python
+from django.db import models
+
+
+class ConsentForm(models.Model):
+    subject_name = models.CharField(max_length=200)
+    subject_email = models.EmailField(blank=True)
+    study_name = models.CharField(max_length=200)
+    consented = models.BooleanField(default=False)
+    signed_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    def __str__(self):
+        return f'{self.subject_name} — {self.study_name}'
+```
+
+Register it in `lab_forms/settings.py`:
+
+```python
+INSTALLED_APPS = [
+    'django.contrib.admin',
+    'django.contrib.auth',
+    ...
+    'hello',
+    'forms',   # new
+]
+```
+
+Run migrations and create a superuser:
+
+```
+python manage.py makemigrations
+python manage.py migrate
+python manage.py createsuperuser
+```
+
+Register `ConsentForm` in `forms/admin.py`:
+
+```python
+from django.contrib import admin
+from .models import ConsentForm
+
+admin.site.register(ConsentForm)
+```
+
+Restart the dev server (from the app_factory detail view, click **Stop**, then **Start Dev Server** again). Navigate to `http://127.0.0.1:8001/admin/`, log in, and you should see **Consent forms** in the admin index. Click it, add one, save. The model works.
+
+## Step 5 — Generate deploy artifacts for the child app
+
+The child project is working locally. Now we want deploy artifacts for it — the same kind of gunicorn/supervisor/nginx bundle chapter 9 covered for Velour itself. app_factory handles this too.
+
+Back in the Velour UI, from the child app's detail view, click **Generate Deploy Bundle**. This runs:
+
+```
+cd ~/velour-dev/generated_apps/lab_forms
+python manage.py generate_deploy --user labforms --project lab_forms
+```
+
+Under the hood, the `generate_deploy` command from chapter 9 gets called inside the child project's venv. It resolves the values from `--user labforms` and `--project lab_forms` and writes six files to `lab_forms/deploy/`:
+
+```
+deploy/
+├── gunicorn.conf.py
+├── supervisor.conf
+├── nginx.conf
+├── setup.sh         (chmod 755)
+├── adminsetup.sh    (chmod 755)
+└── hotswap.sh       (chmod 755)
+```
+
+These are the same six artifacts Velour itself generates for its own deploy. The only differences are the substituted values: `user=labforms`, `project=lab_forms`, `socket_path=/var/www/webapps/labforms/run/lab_forms.sock`, and so on.
+
+Open `deploy/nginx.conf` in an editor. You should see something like:
+
+```nginx
+server {
+    listen 80;
+    server_name labforms.your-hostname;
+
+    location /static/ {
+        alias /var/www/webapps/labforms/static/;
+    }
+
+    location / {
+        proxy_pass http://unix:/var/www/webapps/labforms/run/lab_forms.sock;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+The `server_name` is `labforms.your-hostname` — meaning the child app will be served at `labforms.<your Velour hostname>`. If you set Velour's hostname to `lab.local` in chapter 12 step 10, the child app's nginx config says `labforms.lab.local`. That's the subdomain composition pattern chapter 2 described: host root + project user.
+
+## Step 6 — Approve the app
+
+Back in the Velour UI, the child app is still in **Pending Review** status. The review step exists so a human can approve each generated app before it gets treated as "real" — a safety check against accidentally generating a project and forgetting about it.
+
+Click **Approve**. The status flips to **Approved** and the detail view unlocks a few more actions: **Deploy to Production**, **Rename**, **Delete** (which now actually removes the on-disk directory in addition to the database row).
+
+You're done with chapter 13. The `lab-forms` project exists as a real Django codebase, runs locally on port 8001, has one model with admin integration, and has a full deploy bundle waiting for chapter 14 to ship it to a real host.
+
+## Common errors and fixes
+
+**"Could not find template blank_project"**: app_factory couldn't locate its project template directory. This usually means a partial git checkout — verify `app_factory/templates/blank_project/` exists and has the expected files.
+
+**"Permission denied creating /var/www/webapps/..."**: app_factory's default deploy path is `/var/www/webapps/` which is typically root-owned. In dev mode, app_factory should fall back to `generated_apps/` under the project root. If it's not falling back, check `app_factory/views.py:app_create` for the path resolution logic — there's a `_resolve_target_dir` helper that does the fallback.
+
+**Child project startup fails with "ModuleNotFoundError: No module named 'django'"**: the child project's venv wasn't activated before running `manage.py`. Either `source venv/bin/activate` first, or use the full path `venv/bin/python manage.py ...`.
+
+**Port 8001 already in use**: another generated app or another process is on that port. `_find_open_port()` should have picked a different one. If it didn't, pass `--port 8002` manually to the runserver call.
+
+**Admin login prompts but never authenticates**: you created a superuser for the Velour project, not for the child. Django's `createsuperuser` is per-database and each child project has its own `db.sqlite3`. Re-run `createsuperuser` inside the child project's directory with its own venv activated.
+
+## What the child app inherits vs. what's blank
+
+A **Blank Django App** (what we picked) starts with:
+- The Django framework (in requirements.txt)
+- A minimal `settings.py` with nothing but Django's built-in apps
+- One "hello world" stub app
+- A base template that extends nothing
+- Its own `db.sqlite3` (created on first `migrate`)
+
+It does NOT inherit:
+- Any Velour-specific apps (codex, identity, sysinfo, etc.)
+- Velour's ET Book fonts
+- Velour's static CSS
+- Velour's user accounts
+- Velour's templates
+
+If you pick **Clone of Velour** instead, you get all of the above — every Velour app pre-installed, every migration rolled in, the full meta-app stack. Clone of Velour is useful when you want a child project that is itself a Velour instance (recursive meta-apps). For lab-forms we don't need that.
+
+The split is deliberate: most child apps are lightweight single-purpose tools and shouldn't carry the weight of the full Velour codebase. The rare child that wants to be a Velour-ish thing in its own right can opt in.
+
+## Where this fits in Volume 1
+
+Chapter 12 got you a running Velour. Chapter 13 just showed that Velour can generate other Django projects — that's the meta-app premise made concrete. Chapter 14 takes the lab-forms child app from its local dev state and deploys it to a real production host alongside Velour, using the `adminsetup.sh` / `setup.sh` workflow from chapter 10 and the `hotswap.sh` workflow from chapter 11.
+
+By the end of chapter 14 you will have:
+- One Velour instance running at your production hostname
+- One lab-forms child app running at the `labforms.<hostname>` subdomain
+- Both owned by different Linux users
+- Both hot-swappable with a three-line rsync-and-restart
+- Both rendered by the same nginx
+- Both visible in the Velour fleet view
+
+That's the full meta-app pattern, deployed.
+"""
+
+
+def _ch14_deploy():
+    return """The final chapter of the worked example. Chapter 12 got you Velour running locally. Chapter 13 generated a lab-forms child app also running locally. Chapter 14 takes both of those local instances and deploys them to a real production host — a separate Linux server, under separate project users, proxied by the same nginx, reachable at real DNS names, with SSL certificates.
+
+By the end of this chapter you will have the deployment shape the author's own Velour runs in production: one Velour instance at a primary hostname, one or more child apps at subdomain names, everything hot-swappable from the dev machine with a two-line workflow.
+
+## Target environment
+
+- **Target host**: a second Linux server (cloud VPS, bare metal, Raspberry Pi — anything with ssh access). Ubuntu 24.04 LTS is what this walkthrough assumes. Other distros work with `apt-get` substituted.
+- **DNS**: you own a domain and can point subdomains at the target host's IP. For the walkthrough, assume `lab.example.com` is the primary Velour hostname and `labforms.lab.example.com` is the child app subdomain. Substitute your own domain.
+- **SSH access**: you can ssh from the dev machine to the target as a user with sudo privileges. Key-based auth is strongly recommended.
+- **Ports open**: the target host's firewall allows inbound 22 (ssh), 80 (http), 443 (https).
+
+## Step 1 — Point DNS at the target
+
+Before anything else, make sure DNS is working. On your domain registrar or DNS provider's panel, add A records:
+
+```
+lab.example.com         → <target host's public IP>
+labforms.lab.example.com → <target host's public IP>
+*.lab.example.com       → <target host's public IP>  (wildcard, optional)
+```
+
+The wildcard is a shortcut for future child apps: once it's in place, any new subdomain you add in a generated app just works without touching DNS again. If you'd rather manage subdomains explicitly, skip the wildcard and add A records per child app.
+
+Verify DNS is live:
+
+```
+dig +short lab.example.com
+# should print the target IP
+dig +short labforms.lab.example.com
+# should print the same IP
+```
+
+DNS propagation can take 5-60 minutes depending on your TTL settings. You can proceed with the rest of the chapter while you wait; certbot's DNS challenge is the first step that actually needs DNS to be resolving.
+
+## Step 2 — Set the Identity hostname on the dev Velour
+
+The deploy pipeline reads `Identity.hostname` from the dev Velour and substitutes it into every generated nginx.conf. Chapter 12 step 10 had you set this to a placeholder. Now set it to the real primary hostname.
+
+Navigate in your browser to `http://127.0.0.1:7777/identity/edit/`. Change **Hostname** to `lab.example.com`. Save.
+
+## Step 3 — Generate Velour's deploy bundle
+
+From the dev machine, in the Velour project directory:
+
+```
+cd ~/velour-dev
+source venv/bin/activate
+python manage.py generate_deploy
+```
+
+With no arguments, `generate_deploy` uses the defaults from chapter 9's value resolution chain: server_name comes from Identity.hostname (now `lab.example.com`), user and project come from `BASE_DIR.name` (probably `velour-dev` or `velour`), port from the default (7777), and all computed paths derive from those four.
+
+Expected output:
+
+```
+Rendered deploy/gunicorn.conf.py
+Rendered deploy/supervisor.conf
+Rendered deploy/nginx.conf
+Rendered deploy/setup.sh
+Rendered deploy/adminsetup.sh
+Rendered deploy/hotswap.sh
+Done.
+```
+
+Inspect `deploy/nginx.conf`:
+
+```
+cat deploy/nginx.conf
+```
+
+You should see `server_name lab.example.com;` and socket paths like `/var/www/webapps/<project>/run/<project>.sock`. If the server_name still says `example.com` it means Identity.hostname didn't get updated — re-check the Identity edit page.
+
+## Step 4 — Generate the child app's deploy bundle
+
+From the lab-forms child project directory:
+
+```
+cd ~/velour-dev/generated_apps/lab_forms
+source venv/bin/activate
+python manage.py generate_deploy --server-name labforms.lab.example.com --user labforms
+```
+
+Here we pass the server-name explicitly because the child project doesn't have its own Identity row — its generate_deploy falls back to whatever Identity says, which would be `lab.example.com` (wrong; we want the subdomain). The `--user labforms` is also explicit because the child project's `BASE_DIR.name` is `lab_forms` which would give us a slightly wrong project user name.
+
+Inspect the generated `deploy/nginx.conf` — it should now say `server_name labforms.lab.example.com;` and reference `/var/www/webapps/labforms/run/lab_forms.sock`.
+
+## Step 5 — Push Velour's source to the target host
+
+Pick a staging directory on the target host — a temporary location where the source tree will live while adminsetup.sh copies it into the final home. `/tmp/velour-staging` works fine; it gets cleaned up on reboot anyway.
+
+From the dev machine:
+
+```
+rsync -av --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' \\
+    --exclude='db.sqlite3' --exclude='secret_key.txt' \\
+    --exclude='health_token.txt' --exclude='.git/' \\
+    ~/velour-dev/ youruser@lab.example.com:/tmp/velour-staging/
+```
+
+Expected output: a long list of file names and a summary line like `sent 8.4M bytes  received 1.2K bytes  1.1M bytes/sec`.
+
+The exclude list is the same one chapters 10 and 11 cover — generated caches and local secrets stay off the target.
+
+## Step 6 — Run adminsetup.sh on the target
+
+SSH to the target host as a sudoer (not root):
+
+```
+ssh youruser@lab.example.com
+cd /tmp/velour-staging
+bash deploy/adminsetup.sh
+```
+
+Expected output — eight numbered steps, each printing a `[N/8]` header. You'll see apt-get installing python3/nginx/supervisor/rsync, a project user getting created, `/var/www/webapps/velour-dev/` being created and chowned, the rsync from staging to `/home/velour-dev/`, nginx config validation (`nginx -t`), the hand-off to setup.sh for venv+pip+migrate+collectstatic, and finally supervisor starting the gunicorn program.
+
+Total wall time: 1-3 minutes depending on network speed for the pip install.
+
+At the end, `supervisorctl status` should show `velour-dev RUNNING`.
+
+Common error: `ERROR: run adminsetup.sh as a regular sudoer, not as root directly.` — you're running the script as root (via a root shell or `sudo -i`). Log out, log back in as your regular user, use `sudo` per-command instead. The script refuses root on purpose (chapter 10 explains why).
+
+## Step 7 — Create the superuser
+
+`adminsetup.sh` deliberately does NOT create a superuser — that's a per-deploy decision. Create one now:
+
+```
+sudo -u velour-dev /home/velour-dev/venv/bin/python \\
+    /home/velour-dev/manage.py createsuperuser
+```
+
+Enter username, email, password. Velour asks you to bypass weak-password validation on dev; on prod you should pick a real password.
+
+## Step 8 — First visit (HTTP, no SSL yet)
+
+At this point you should be able to visit `http://lab.example.com/` in your browser. You'll see the Velour login page. Log in with the superuser you just created. Dashboard should load.
+
+If you get a connection refused: check that nginx is actually running (`sudo systemctl status nginx`), that supervisor started the gunicorn program (`sudo supervisorctl status`), and that the nginx config was reloaded after the symlink into `sites-enabled` was created (step 7 of adminsetup.sh does this).
+
+If you get a 502 bad gateway: the gunicorn socket is unreachable. Check `sudo supervisorctl status velour-dev` — should say RUNNING. If it says FATAL, check `/var/log/supervisor/velour-dev-stderr.log` for the startup error. Most common cause: a Python dependency that installed on dev but failed on prod (different Python minor version, missing system library).
+
+## Step 9 — SSL via certbot
+
+Install certbot:
+
+```
+sudo apt-get install -y certbot python3-certbot-nginx
+```
+
+Run it against the primary hostname:
+
+```
+sudo certbot --nginx -d lab.example.com
+```
+
+Certbot edits the nginx config in place, adds the SSL server block, reloads nginx. At the end you should be able to visit `https://lab.example.com/` and see a valid certificate.
+
+Important: certbot's edits to `deploy/nginx.conf` do NOT propagate back to your dev machine. If you regenerate the deploy bundle on dev and rsync it to prod, certbot's SSL edits will be overwritten and you'll have to re-run certbot. The workaround is to keep certbot's edits in a separate include file that your nginx.conf references and that `generate_deploy` doesn't touch. Chapter 11's "When hot-swap is NOT safe" section describes this trap.
+
+## Step 10 — Repeat steps 5-9 for the lab-forms child app
+
+The child app deploys with the exact same sequence. The only differences are:
+
+- rsync source is `~/velour-dev/generated_apps/lab_forms/`
+- Staging directory is `/tmp/labforms-staging`
+- The user created by adminsetup.sh will be `labforms` (from step 4's `--user labforms`)
+- The nginx config will bind to `labforms.lab.example.com`
+- You'll run certbot with `-d labforms.lab.example.com`
+
+The child app's admin lives at `https://labforms.lab.example.com/admin/`. Create its own superuser — remember, the child project has its own db.sqlite3 with its own auth table.
+
+## Step 11 — Verify both are live
+
+From anywhere on the internet:
+
+```
+curl -I https://lab.example.com/
+# HTTP/1.1 200 OK (or 302 if unauthenticated; either is fine)
+
+curl -I https://labforms.lab.example.com/
+# HTTP/1.1 200 OK or 302
+```
+
+Both should respond with valid SSL certificates. Open both in a browser:
+
+- `https://lab.example.com/` — Velour dashboard, sysinfo showing the target host's load, Identity showing the hostname you configured
+- `https://labforms.lab.example.com/admin/` — lab-forms admin, with the ConsentForm model you added in chapter 13
+
+You now have the full deployed shape: two independent Django projects, two project users, two supervisor programs, one nginx, two SSL certificates, one sudoer human operator, one Velour dev machine that can hot-swap either project with a two-line workflow (chapter 11).
+
+## Step 12 — Confirm hot-swap works
+
+From the dev machine, make a tiny visible change to Velour — edit `templates/dashboard/home.html` and add a comment, or bump a version string. Then:
+
+```
+cd ~/velour-dev
+rsync -av --exclude='venv/' --exclude='*.pyc' --exclude='db.sqlite3' \\
+    --exclude='secret_key.txt' --exclude='health_token.txt' \\
+    --exclude='.git/' \\
+    ./ youruser@lab.example.com:/tmp/velour-staging/
+ssh youruser@lab.example.com 'cd /tmp/velour-staging && bash deploy/hotswap.sh'
+```
+
+Expected output on the target: the 4 steps of hotswap.sh (rsync, re-run setup.sh, reload nginx, restart supervisor). Total wall time: 20-45 seconds.
+
+Refresh `https://lab.example.com/` in the browser. Your change should be live. Repeat for the child app by substituting `lab_forms` for the source path and `/tmp/labforms-staging` for the destination.
+
+## What you've built
+
+Walk back through the three chapters of Part IV to see the shape of what just happened:
+
+- **Chapter 12**: fresh Linux host → Velour running locally on 7777
+- **Chapter 13**: Velour running locally → generated lab-forms child app running locally on 8001
+- **Chapter 14**: two local projects → two production deployments, SSL, DNS, supervisor, nginx
+
+That's the full Velour deploy story end to end. Every command shown is one you could type yourself against real hosts. The steps never branch into "and then write 200 lines of custom Ansible" or "and then configure the Kubernetes manifests" — the whole pipeline is bash scripts, Django management commands, and rsync. Nothing fancy. That's the value proposition: a small, legible deploy pipeline for single-developer Django projects that doesn't require learning a new infrastructure-as-code language to maintain.
+
+## Common production gotchas
+
+**SSL cert won't issue**: certbot's HTTP-01 challenge requires your nginx to be serving something on port 80. If nginx isn't running, if your cloud firewall is blocking port 80, or if DNS hasn't propagated, the challenge fails. Check `curl -I http://lab.example.com/.well-known/acme-challenge/test` responds with something non-empty before running certbot.
+
+**Supervisor says RUNNING but the app 502s**: the gunicorn socket path in `supervisor.conf` doesn't match the `proxy_pass` line in `nginx.conf`. This should never happen because both are generated from the same template context in generate_deploy, but if you hand-edited one of them, check the two paths match.
+
+**The hot-swap restarts succeeded but changes don't appear**: Django's template cache, your browser's cache, or nginx's static-file caching. Force refresh with Ctrl+Shift+R in the browser. If that doesn't help, SSH to the target and check that the source file on disk actually has your changes (`cat /home/velour-dev/templates/dashboard/home.html`).
+
+**Port 7777 is accessible from the public internet**: this is bad. Velour's dev server shouldn't be on a public port. The correct production setup serves Velour via gunicorn+supervisor behind nginx on 80/443, not via runserver on 7777. Check that supervisor.conf references gunicorn and not `manage.py runserver`.
+
+**Different Python versions between dev and prod**: a dependency that builds from source on dev's Python 3.12 may fail on prod's Python 3.10. The fix is either to match Python versions (install 3.12 on prod via deadsnakes PPA), bump the dep to a version that has a prebuilt wheel for 3.10, or tolerate the version fallback in setup.sh (which will install the closest-available version).
+
+## Where this fits in Volume 1
+
+This chapter closes Volume 1. You now understand:
+
+- **Part I (Ch 1-5)**: the meta-app idea, deploy pipeline anatomy, secret-file protocol, app layout conventions, template system.
+- **Part II (Ch 6-8)**: Identity and the attention engine, sysinfo as the external view of the host.
+- **Part III (Ch 9-11)**: generate_deploy internals, setup.sh/adminsetup.sh bootstrap, hotswap.sh daily workflow.
+- **Part IV (Ch 12-14)**: the full worked example from empty Linux box to running production.
+
+Volumes 2-5 are still ahead. Vol 2 covers every Velour app in depth (dashboard, terminal, sysinfo, identity, codex, nodes, chronos, mailboxes, mailroom, etc.) — one chapter per app. Vol 3 covers the codex system in detail — PDF rendering, Tufte influences, sparkline math, the periodic reports infrastructure. Vol 4 covers the Identity loop in depth — the attention engine, sensors, rules, concerns, reflections, the Oracle integration, and future ML hooks. Vol 5 covers operations: deploy, monitoring, incident response, upgrade paths, scaling, the fleet view across many Velour instances.
+
+But the foundation is here. If Volume 1 is all you ever read of this guide, you know how to bring up Velour on a fresh host, generate and deploy child apps, and maintain the whole stack with a two-line daily workflow. That's enough to run a lab.
 """
 
 
