@@ -32,6 +32,23 @@
 #include "wifi_secrets.h"
 #include "velour_client.h"
 
+// Optional OLED display support. Enable by defining NODE_HAS_OLED in
+// wifi_secrets.h (or via build_flags) for nodes that have an SSD1306
+// 128x64 screen wired to software I2C. The pins default to SCL=14
+// (D5) and SDA=12 (D6), matching the user's verified u8g2 demo; both
+// are overridable via NODE_OLED_SCL / NODE_OLED_SDA.
+#ifdef NODE_HAS_OLED
+  #include <U8g2lib.h>
+  #ifndef NODE_OLED_SCL
+    #define NODE_OLED_SCL 14
+  #endif
+  #ifndef NODE_OLED_SDA
+    #define NODE_OLED_SDA 12
+  #endif
+  U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(
+      U8G2_R0, NODE_OLED_SCL, NODE_OLED_SDA, U8X8_PIN_NONE);
+#endif
+
 // Default HTTP port for the local web server. Per-device overrides go in
 // wifi_secrets.h — each node in the fleet can have its own port so the
 // same binary can be reverse-proxied cleanly by a front-end velour later.
@@ -216,6 +233,87 @@ static void ahtRead() {
         Serial.println("[aht] read failed this tick");
     }
 }
+
+
+// ---------------------------------------------------------------------
+// OLED display — optional per-node. Software I2C pins, 128x64
+// SSD1306. Renders a tiny dashboard: slug + IP + fw version at the
+// top, live temp/humidity in big digits if the AHT is present,
+// uptime + rssi at the bottom.
+// ---------------------------------------------------------------------
+
+#ifdef NODE_HAS_OLED
+
+static void oledSetup() {
+    u8g2.begin();
+    u8g2.setContrast(180);
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x10_tf);
+    u8g2.drawStr(0, 10, "Velour node");
+    u8g2.drawStr(0, 24, NODE_SLUG);
+    u8g2.drawStr(0, 38, FIRMWARE_VERSION);
+    u8g2.drawStr(0, 58, "booting...");
+    u8g2.sendBuffer();
+    Serial.println("[oled] initialized");
+}
+
+// Called from loop() at a modest cadence — redrawing at 60 fps is
+// pointless for a status page and would burn CPU cycles that the
+// web server and velour client need.
+static unsigned long lastOledRedrawAt = 0;
+#define OLED_REDRAW_INTERVAL_MS 500
+
+static void oledRedraw() {
+    if (millis() - lastOledRedrawAt < OLED_REDRAW_INTERVAL_MS) return;
+    lastOledRedrawAt = millis();
+
+    u8g2.clearBuffer();
+
+    // Line 1: slug (big) + firmware version (small)
+    u8g2.setFont(u8g2_font_6x13B_tf);
+    u8g2.drawStr(0, 12, NODE_SLUG);
+    u8g2.setFont(u8g2_font_5x8_tf);
+    u8g2.drawStr(68, 12, FIRMWARE_VERSION);
+
+    // Line 2: IP address (monospace)
+    u8g2.setFont(u8g2_font_5x8_tf);
+    if (WiFi.status() == WL_CONNECTED) {
+        String ip = WiFi.localIP().toString();
+        u8g2.drawStr(0, 23, ip.c_str());
+    } else {
+        u8g2.drawStr(0, 23, "no wifi");
+    }
+
+    // Big temp / humidity block in the middle.
+    u8g2.setFont(u8g2_font_logisoso16_tf);
+    char tbuf[16];
+    char hbuf[16];
+    if (ahtPresent && ahtTempC > -100.0f) {
+        snprintf(tbuf, sizeof(tbuf), "%.1fC", ahtTempC);
+        snprintf(hbuf, sizeof(hbuf), "%.0f%%", ahtHumidityPct);
+    } else {
+        snprintf(tbuf, sizeof(tbuf), "-- C");
+        snprintf(hbuf, sizeof(hbuf), "-- %%");
+    }
+    u8g2.drawStr(0,  46, tbuf);
+    u8g2.drawStr(70, 46, hbuf);
+
+    // Footer: uptime + rssi
+    u8g2.setFont(u8g2_font_5x8_tf);
+    unsigned long upS = (millis() - bootMs) / 1000;
+    char footer[32];
+    if (WiFi.status() == WL_CONNECTED) {
+        snprintf(footer, sizeof(footer), "up %lus  rssi %d",
+                 upS, WiFi.RSSI());
+    } else {
+        snprintf(footer, sizeof(footer), "up %lus  offline", upS);
+    }
+    u8g2.drawStr(0, 62, footer);
+
+    u8g2.sendBuffer();
+}
+
+#endif  // NODE_HAS_OLED
 
 
 // ---------------------------------------------------------------------
@@ -537,6 +635,9 @@ void setup() {
     Serial.println("===========================================");
 
     bootMs = millis();
+#ifdef NODE_HAS_OLED
+    oledSetup();
+#endif
     ahtSetup();
     connectWiFi();
 
@@ -581,6 +682,12 @@ void loop() {
     // immediately if there's nothing to do.
     httpd.handleClient();
     MDNS.update();
+
+#ifdef NODE_HAS_OLED
+    // Redraw the OLED on its own cadence (every 500ms). Non-blocking —
+    // it early-returns until the interval has elapsed.
+    oledRedraw();
+#endif
 
     // Faster AHT read on its own cadence, decoupled from Velour reporting.
     // Both the web page and the Velour heartbeat read from the same cache
