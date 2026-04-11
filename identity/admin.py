@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Concern, Identity, Mood, Tick
+from .models import Concern, Identity, Mood, Rule, Tick
 
 
 @admin.register(Identity)
@@ -33,3 +33,27 @@ class ConcernAdmin(admin.ModelAdmin):
     list_filter = ('aspect', 'closed_at')
     readonly_fields = ('opened_at', 'last_seen_at', 'origin_tick')
     search_fields = ('aspect', 'name', 'description')
+
+
+@admin.register(Rule)
+class RuleAdmin(admin.ModelAdmin):
+    list_display = ('priority', 'name', 'aspect', 'mood', 'intensity',
+                    'opens_concern', 'is_active')
+    list_display_links = ('name',)
+    list_filter = ('is_active', 'mood', 'opens_concern')
+    list_editable = ('priority', 'is_active')
+    search_fields = ('name', 'aspect')
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'aspect', 'priority', 'is_active'),
+        }),
+        ('When it fires', {
+            'fields': ('condition',),
+            'description': 'JSON condition. Leaf: {"metric": "path.to.value", '
+                           '"op": ">", "value": 0.95}. Compound: {"all": [...]} '
+                           'or {"any": [...]}.',
+        }),
+        ('What it produces', {
+            'fields': ('mood', 'intensity', 'opens_concern'),
+        }),
+    )

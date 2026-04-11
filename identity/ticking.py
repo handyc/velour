@@ -1,45 +1,41 @@
 """Identity tick engine — turn-based attention without an LLM.
 
 A tick is one unit of attention: gather a snapshot of every sensor,
-walk a rule chain to derive a mood and `mood_intensity` (a 0-1 scalar
-that drives the JS sine wave's amplitude), compose a one-line first-
-person thought from a template library, write a Tick row (the new
-structured log) + a Mood row (legacy shim), and update the Identity
-singleton.
+walk the Rule chain (Rule rows in the database as of Session 3) to
+derive a mood and `mood_intensity` (a 0-1 scalar that drives the JS
+sine wave's amplitude), compose a one-line first-person thought from
+a template library, open/bump/close Concerns, write a Tick row and a
+Mood row (legacy shim), and update the Identity singleton.
 
-Computationally trivial — Python rules + a few SQL writes — so the
-whole tick is a fraction of a CPU-millisecond. The fan stays quiet.
+Computationally trivial — a handful of SQL reads, one short rule
+evaluation loop, and a few SQL writes. The whole tick is ~5ms. The
+fan stays quiet.
 
 Triggered manually via `python manage.py identity_tick`, or via cron
 on whatever cadence the operator prefers (default 10 minutes is the
 right starting point).
-
-Session-1 note: rules are still hardcoded Python lambdas. Moving them
-to Rule rows in the database with a safe expression language is
-Session 3 of the Identity expansion. This file stays shaped for that
-future: each rule in RULES emits an `aspects` list alongside the
-mood/intensity/label, and the tick engine stores those aspects on the
-Tick row so later concerns (Session 2) and reflections (Session 5) can
-reference them.
 """
 
 import os
 import random
 
+from .rule_eval import evaluate as _eval_condition
 from .sensors import gather_snapshot
 
 
-# --- rule chain ----------------------------------------------------------
-
-# Each rule is (predicate, mood, intensity, label, aspects). The first
-# matching rule wins. `aspects` is a list of tag-like strings that
-# describe what the rule noticed — they get stored on Tick.aspects and
-# on Mood.trigger. Aspects are the glue for concerns and reflections:
-# Session 2 opens a concern when an aspect like 'gary_silent' fires;
-# Session 5 groups reflections by aspect counts over a period.
-
 def _cores():
     return os.cpu_count() or 1
+
+
+# --- fallback rule chain (pre-Session-3 hardcoded lambdas) ---------------
+#
+# This module-level list is consulted only when the Rule database
+# table has no rows — i.e., a fresh install where the data migration
+# hasn't run yet, or a test environment that cleared the table. In
+# normal operation, rules come from the Rule model and this list is
+# ignored.
+#
+# Each entry is (predicate, mood, intensity, label, aspects).
 
 
 RULES = [
@@ -96,10 +92,31 @@ RULES = [
 ]
 
 
+def _db_rules():
+    """Fetch active Rule rows ordered by priority. Imported lazily so
+    this module is importable before migrations have run."""
+    from .models import Rule
+    return list(Rule.objects.filter(is_active=True).order_by('priority'))
+
+
 def compute_mood(snapshot):
     """First-match-wins mood selection. Returns (mood, intensity,
     label, first_match_aspects). Used for display — Identity has one
-    dominant mood at a time, chosen by rule priority."""
+    dominant mood at a time, chosen by rule priority.
+
+    Prefers DB-backed Rule rows; falls back to the module-level RULES
+    list only if the Rule table is empty (fresh install edge case)."""
+    db_rules = _db_rules()
+    if db_rules:
+        for rule in db_rules:
+            try:
+                if _eval_condition(rule.condition, snapshot):
+                    return rule.mood, rule.intensity, rule.name, [rule.aspect]
+            except Exception:
+                continue
+        return 'contemplative', 0.5, 'general reflection', ['idle']
+
+    # Fallback: pre-Session-3 hardcoded lambdas
     for rule in RULES:
         predicate, mood, intensity, label, aspects = rule
         try:
@@ -111,23 +128,38 @@ def compute_mood(snapshot):
 
 
 def evaluate_all_aspects(snapshot):
-    """Walk EVERY rule and return the union of aspects whose predicate
-    currently matches, along with their rule labels (for concern
-    metadata). Distinct from compute_mood which stops at the first hit
-    — this one is for concern tracking, which needs to know *everything*
-    the system currently notices, not just the one thing the mood
-    display picks out.
+    """Walk EVERY rule and return the union of aspects whose condition
+    currently matches, along with their rule labels and intensities
+    (for concern metadata). Distinct from compute_mood which stops at
+    the first hit — this one is for concern tracking, which needs to
+    know *everything* the system currently notices.
 
-    Returns: list of (aspect, label, intensity) tuples for every
-    currently-true rule.
+    Returns a list of (aspect, label, intensity, opens_concern) tuples
+    for every currently-true rule. opens_concern is the rule's
+    configured flag; in DB mode it's Rule.opens_concern, in fallback
+    mode it's True for aspects in the legacy CONCERNING_ASPECTS set
+    and False otherwise.
     """
     hits = []
+    db_rules = _db_rules()
+    if db_rules:
+        for rule in db_rules:
+            try:
+                if _eval_condition(rule.condition, snapshot):
+                    hits.append((rule.aspect, rule.name, rule.intensity,
+                                 rule.opens_concern))
+            except Exception:
+                continue
+        return hits
+
+    # Fallback: pre-Session-3 hardcoded lambdas
     for rule in RULES:
         predicate, mood, intensity, label, aspects = rule
         try:
             if predicate(snapshot):
                 for aspect in aspects:
-                    hits.append((aspect, label, intensity))
+                    hits.append((aspect, label, intensity,
+                                 aspect in CONCERNING_ASPECTS))
         except Exception:
             continue
     return hits
@@ -164,7 +196,8 @@ CONCERN_STALENESS_SECONDS = 45 * 60
 def maintain_concerns(current_aspect_hits, origin_tick):
     """Open / re-confirm / close concerns based on what the current
     tick noticed. Pass the output of evaluate_all_aspects() as the
-    current_aspect_hits.
+    current_aspect_hits — a list of (aspect, label, intensity,
+    opens_concern) tuples.
 
     Returns a (opened, reconfirmed, closed) tuple of lists for the
     caller to log or ignore.
@@ -177,12 +210,20 @@ def maintain_concerns(current_aspect_hits, origin_tick):
     reconfirmed = []
     closed = []
 
-    # Only the concerning aspects matter for concern tracking.
-    currently_concerning = {
-        aspect: (label, intensity)
-        for aspect, label, intensity in current_aspect_hits
-        if aspect in CONCERNING_ASPECTS
-    }
+    # Only aspects flagged as concerning matter for concern tracking.
+    # In DB mode the flag is Rule.opens_concern; in fallback mode the
+    # flag is derived from the legacy CONCERNING_ASPECTS set.
+    currently_concerning = {}
+    for hit in current_aspect_hits:
+        # Support both the new 4-tuple and the old 3-tuple shape in
+        # case any caller is still passing the pre-Session-3 format.
+        if len(hit) == 4:
+            aspect, label, intensity, opens_concern = hit
+        else:
+            aspect, label, intensity = hit
+            opens_concern = aspect in CONCERNING_ASPECTS
+        if opens_concern:
+            currently_concerning[aspect] = (label, intensity)
 
     # Open or bump.
     for aspect, (label, intensity) in currently_concerning.items():
@@ -372,7 +413,10 @@ def tick(triggered_by='manual'):
     # mood selection stays first-match for coherent display, but
     # concerns want to see everything the system notices.
     all_hits = evaluate_all_aspects(snapshot)
-    full_aspect_list = sorted({aspect for aspect, _, _ in all_hits})
+    # Each hit is (aspect, label, intensity, opens_concern). We only
+    # need the aspect strings for Tick.aspects — maintain_concerns
+    # gets the full tuples.
+    full_aspect_list = sorted({hit[0] for hit in all_hits})
 
     # Pre-compute which concerns are currently open so the thought
     # composer can reference them.

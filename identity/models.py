@@ -289,3 +289,82 @@ class Concern(models.Model):
         from django.utils import timezone
         self.closed_at = timezone.now()
         self.save(update_fields=['closed_at'])
+
+
+class Rule(models.Model):
+    """A single rule in Identity's attention engine — one condition
+    plus the mood/intensity/aspect to emit when the condition matches.
+
+    Before Session 3, rules lived as Python lambdas in a module-level
+    RULES list inside identity/ticking.py. Operators couldn't add,
+    tune, or disable rules without editing source and restarting. This
+    model moves them into the database so the admin can tune them in
+    place.
+
+    The `condition` field is a small JSON expression language:
+
+      Leaf:     {"metric": "disk.used_pct", "op": ">", "value": 0.95}
+      All-of:   {"all": [leaf, leaf, ...]}
+      Any-of:   {"any": [leaf, leaf, ...]}
+
+    `metric` is a dot-notation path into the sensor snapshot dict.
+    `op` is one of: == != > >= < <= (plus "in" for membership).
+    `value` is a JSON-serializable constant: number, string, bool, or
+    a list for the "in" operator.
+
+    Nothing in this evaluator accepts arbitrary code. Operators can
+    author rules safely — the worst thing a malformed condition can
+    do is return False or raise an exception that the evaluator
+    catches and treats as "rule did not match".
+    """
+
+    name = models.CharField(max_length=200,
+        help_text='Human-readable label shown on the tick log and in '
+                  'concern names when this rule fires, e.g. '
+                  '"disk dangerously full".')
+
+    aspect = models.CharField(max_length=64,
+        help_text='Tag-like string stored on Tick.aspects when this '
+                  'rule matches, e.g. "disk_critical". Lower-snake case '
+                  'by convention. If `opens_concern` is true, this also '
+                  'becomes the aspect key on the resulting Concern row.')
+
+    condition = models.JSONField(default=dict, blank=True,
+        help_text='JSON expression. Top-level {metric, op, value} for '
+                  'a simple comparison, or {all: [...]} / {any: [...]} '
+                  'for compound conditions. See Rule.__doc__ for the '
+                  'full grammar.')
+
+    mood = models.CharField(max_length=50, default='contemplative',
+        help_text='Mood this rule selects when it wins first-match '
+                  'mood evaluation. Does not have to match '
+                  'Mood.MOOD_CHOICES — novel mood strings are fine, '
+                  'they just do not get a display translation.')
+    intensity = models.FloatField(default=0.5,
+        help_text='0-1 scalar, same scale as Tick.mood_intensity.')
+
+    priority = models.IntegerField(default=100,
+        help_text='Lower numbers evaluate first. The first matching '
+                  'rule wins mood selection. Aspect tagging considers '
+                  'every matching rule regardless of priority.')
+
+    opens_concern = models.BooleanField(default=False,
+        help_text='If true, matches of this rule can open a persistent '
+                  'Concern that survives across subsequent ticks until '
+                  'the condition clears for the staleness window.')
+
+    is_active = models.BooleanField(default=True,
+        help_text='Operator toggle. Inactive rules are skipped during '
+                  'evaluation but not deleted — so you can pause a '
+                  'noisy rule without losing its definition.')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'name']
+
+    def __str__(self):
+        state = '' if self.is_active else ' [inactive]'
+        concerning = ' [concerning]' if self.opens_concern else ''
+        return f'{self.name} → {self.mood}{concerning}{state}'
