@@ -3,11 +3,13 @@
 Creates three Manual records (idempotent — re-runs update rather
 than duplicate):
 
-  velour-quickstart           Quickstart, ~6 sections, ~7 pages
-  velour-working-tour         Medium tour, ~9 sections, ~12 pages
-  velour-complete-reference   Large reference, 32 sections in a
-                              4-part structure (most chapters are
-                              still stubs)
+  velour-quickstart           Quickstart, ~6 sections
+  velour-working-tour         Medium tour, ~9 sections
+  velour-complete-reference   Large reference. Part IV is
+                              auto-generated from live introspection
+                              of settings, urls, models, commands,
+                              env vars — re-running this command
+                              picks up code changes automatically.
 
 Usage:
 
@@ -25,6 +27,10 @@ if it gets accidentally deleted.
 
 from django.core.management.base import BaseCommand
 
+from codex.introspection import (
+    commands_for_app, commands_section, env_section, models_for_app,
+    models_section, settings_section, urls_for_app, urls_section,
+)
 from codex.models import Manual, Section
 
 
@@ -291,12 +297,29 @@ It works because `render_to_string` doesn't care whether the template is HTML or
 *This chapter has more sections to be written: how the templates pass values, how the rendering knows the target user/host, and how the generated project then becomes a parent for further generations.*""",
         sidenotes='The meta-app concept isn\'t unique to Velour — Django\'s own admin app is meta in the same way. But Velour leans into it harder.')
 
-    # Per-app chapter stubs
+    # Per-app chapter stubs. Chronos is hand-written; the others get
+    # a brief intro stub plus auto-introspected models / urls / commands
+    # for that app — so each chapter has real content even before the
+    # narrative is written.
     for i, (slug, title) in enumerate(APPS_TOC, start=1):
         sort = 200 + i * 10
-        body = f"""This chapter covers the **{slug}** app in depth. Topics: model reference, view reference, URL reference, configuration, conventions specific to this app, and at least one worked tutorial.
+        if slug == 'chronos':
+            body = _chronos_chapter()
+        else:
+            intro = f"""This chapter covers the **{slug}** app. The narrative section is still a stub — the model, URL, and command tables below are auto-generated from the live codebase by `python manage.py seed_manuals`, so they update automatically when the code changes.
 
-{STUB_NOTE} The chapter framework is in place so the table of contents and the section ordering are stable."""
+{STUB_NOTE}"""
+            sections = [intro]
+            m_block = models_for_app(slug)
+            if m_block:
+                sections.append(m_block)
+            u_block = urls_for_app(slug)
+            if u_block:
+                sections.append(u_block)
+            c_block = commands_for_app(slug)
+            if c_block:
+                sections.append(c_block)
+            body = '\n\n'.join(sections)
         upsert_section(m, f'chapter-{slug}', sort, title, body)
 
     # Part III tutorials
@@ -327,11 +350,173 @@ Tutorials currently planned (most are stubs):
 
 *Most reference subsections are stubs. They will be auto-generated from introspection in a future iteration via Codex periodic reports.*""")
 
-    upsert_section(m, 'ref-settings', 710, 'Reference A — settings.py', STUB_NOTE)
-    upsert_section(m, 'ref-urls',     720, 'Reference B — URL routes', STUB_NOTE)
-    upsert_section(m, 'ref-models',   730, 'Reference C — Models', STUB_NOTE)
-    upsert_section(m, 'ref-commands', 740, 'Reference D — Management commands', STUB_NOTE)
-    upsert_section(m, 'ref-env',      750, 'Reference E — Environment variables', STUB_NOTE)
+    upsert_section(m, 'ref-settings', 710, 'Reference A — settings.py',
+        f"""Selected entries from `velour/settings.py`. The full file has
+many more lines than this — these are the ones most often touched
+by an operator.
+
+{settings_section()}
+
+*This section is auto-generated from live settings introspection
+by `python manage.py seed_manuals`. Re-running picks up changes.*""")
+
+    upsert_section(m, 'ref-urls', 720, 'Reference B — URL routes',
+        f"""Every URL pattern registered in the project, walked from the
+root resolver. Admin sub-URLs are excluded for brevity.
+
+{urls_section()}
+
+*Auto-generated from `django.urls.get_resolver()` walking.*""")
+
+    upsert_section(m, 'ref-models', 730, 'Reference C — Models',
+        f"""Every Django model in every non-builtin app. For each model:
+the docstring (if any), the field table, and ordering / index
+metadata. Reverse relations are omitted.
+
+{models_section()}
+
+*Auto-generated from `django.apps.apps.get_app_configs()`.*""")
+
+    upsert_section(m, 'ref-commands', 740, 'Reference D — Management commands',
+        f"""Every `python manage.py <command>` registered by a non-builtin
+app, with its short help text. Run any of these with `--help` for
+the full argument list.
+
+{commands_section()}
+
+*Auto-generated from `django.core.management.get_commands()`.*""")
+
+    upsert_section(m, 'ref-env', 750, 'Reference E — Environment variables',
+        f"""Environment variables that `velour/settings.py` reads via
+`os.environ.get(...)`. The defaults and exact lookup logic live
+in settings.py — this is just a quick index.
+
+{env_section()}
+
+*Auto-generated by grepping settings.py for os.environ.get patterns.*""")
+
+
+# --- hand-written sample chapter (chronos) -------------------------------
+
+
+def _chronos_chapter():
+    return """The **chronos** app is Velour's sense of time. It started as a small home-clock display in the navbar and grew into a full calendar with religious and astronomical events stretching deep into the past and the future. This chapter walks through every part of it: the data model, the rendering pipeline, the holiday and astronomy adapters, and the deep-time browsing modes.
+
+## Why chronos exists
+
+A lab control panel needs to know what time it is, but it usually needs to know that in *several* timezones at once. The lab might be in Leiden but the people the operator collaborates with are in NYC, Denver, Auckland, and Bangkok. The aquarium controller (Gary) might be on UTC. The data analysis batch jobs might be on whatever the cloud server happens to be set to.
+
+Chronos solves this with a singleton `ClockPrefs` row that stores the operator's home timezone, plus a `WatchedTimezone` table that pins additional cities. Both are exposed via a context processor that injects a small clock into every page render — so the operator always knows the local time without leaving whatever page they're working on.
+
+The calendar layer was added later, in Phase 2 of the chronos roadmap. It reuses the `ClockPrefs.home_tz` setting to know which timezone to interpret event start/end times in.
+
+## Models
+
+There are five models in chronos:
+
+:::def
+ClockPrefs: singleton, stores home timezone, 12/24h preference, show-seconds, auto-resync interval, and a country code used by the civic holiday adapter
+WatchedTimezone: pinned world clocks shown on the /chronos/ page
+Tradition: a holiday tradition (civic, christianity, judaism, etc) — color, enabled flag, description
+CalendarEvent: one scheduled event with start/end/all_day/color/tags/source/tradition FK
+:::
+
+The `CalendarEvent` model is shared between user-scheduled events and auto-seeded holidays / astronomical events. The `source` enum distinguishes them (`user`, `holiday`, `astro`, `feed`) and the optional `tradition` foreign key ties holiday/astro rows to their parent grouping. User events have `source='user'` and `tradition=None`.
+
+This unified model means the calendar grid view doesn't have to special-case anything — it queries `CalendarEvent` once and renders everything that touches the visible date range.
+
+## The topbar context processor
+
+The clock that appears in the top-right of every page is rendered by `chronos.context_processors.topbar_clock`. It runs on every request, loads the singleton `ClockPrefs` row, computes the current time in the home timezone, and returns a context dict that the `_topbar_clock.html` partial uses.
+
+The partial sets four data attributes on the topbar div: the IANA timezone name, the server-side epoch_ms baseline, the 12/24-hour format flag, and the auto-sync interval. A small piece of JavaScript in `static/js/chronos.js` then ticks the clock every second by adding `Date.now()` to the offset captured at page load. Every N seconds (default 600) it re-syncs against `/chronos/now.json` so accumulated drift never exceeds the configured interval.
+
+There's a subtle browser quirk worth knowing about. The data attribute name was originally `data-format-24h`, but per the HTML5 dataset spec, when a dash is followed by an ASCII digit (the "2" in "24h") the dash is *not* removed in the JavaScript dataset conversion — so `topbar.dataset.format24h` returned undefined and the clock silently rendered in 12-hour format regardless of the prefs. The fix was to rename the attribute to `data-hour-format` with values "24" or "12".
+
+## The world clocks page
+
+`/chronos/` shows the home clock first (in green) followed by every `WatchedTimezone` row in user-defined sort order. Each clock is a horizontal strip filling the full available width: city name on the left, IANA timezone in small grey monospace below it, current date and time in the middle, UTC offset on the right, and edit/delete buttons at the far right.
+
+Each strip is rendered server-side at page load time with the actual current time, then taken over by the same JavaScript ticker that handles the topbar.
+
+Cities of special interest can be tinted with a per-row hex color. The original use case was marking the cities the operator's project collaborators live in: Tampa in saffron, Sao Paulo in forest green, London in brick orange, Leiden in moss green, and so on. Untinted clocks display in the default neutral grey.
+
+## The calendar grid
+
+`/chronos/calendar/` is a 7-column month grid with day cells that are always perfect squares. The cell size is computed by a single CSS `min()` expression in the page CSS: it picks the smaller of `(viewport width − margin) / 7` and `(viewport height − chrome) / 6.6`, so the entire calendar always fits within the visible viewport on both axes — no horizontal or vertical scrolling, on either a desktop or a phone.
+
+The 6.6 row count covers six possible week rows (the maximum any month can have) plus 0.6 of a cell for the header row above them.
+
+## Holiday adapters
+
+Phase 2b of chronos added eleven holiday source adapters under `chronos/holiday_sources/`. Each is a small module exposing `get(year)` that returns a list of `(date, name)` tuples for the requested Gregorian year. The seeder iterates the registry and creates `CalendarEvent` rows attached to the matching `Tradition`.
+
+Sources used:
+
+| Tradition | Library | Notes |
+|---|---|---|
+| civic | `holidays` | Country selected via `ClockPrefs.country` |
+| christianity | `dateutil.easter` | Easter + dependent feasts + fixed feasts |
+| judaism | `pyluach` | Hebrew calendar |
+| islam | `hijridate` | Hijri calendar |
+| hinduism | `holidays.India` | With fallback to fixed approximate dates |
+| buddhism | `holidays.Sri Lanka` | Filtered by Buddhist keyword |
+| chinese | `cnlunar` | Lunisolar walker |
+| shinto | hand-curated | Fixed Gregorian dates per modern Japanese practice |
+| daoism | `cnlunar` | Lunisolar walker for deity birthdays |
+| confucianism | hand-curated | Fixed Gregorian dates |
+| wicca | hand-curated | Eight sabbats (4 fixed + 4 approximate solar) |
+
+Run `python manage.py seed_holidays --year-from 2026 --year-to 2030` to populate five years of holidays in one shot.
+
+## Astronomy adapters
+
+Phase 2c added astronomical events via skyfield using the JPL DE421 ephemeris (downloaded automatically on first use to `chronos/data/`, ~17MB, gitignored).
+
+Five sources in `chronos/astro_sources/`:
+
+- **equinoxes.py**: vernal/autumnal equinoxes, summer/winter solstices via `skyfield.almanac.seasons`
+- **moon_phases.py**: full moons (with traditional names — Wolf, Snow, Worm, Pink, Flower, Strawberry, Buck, Sturgeon, Harvest, Hunter's, Beaver, Cold) and new moons; first/last quarters omitted to keep the calendar uncluttered
+- **eclipses.py**: solar and lunar eclipses, computed by checking sun/moon angular separation at each new and full moon
+- **meteors.py**: hand-curated table of major annual meteor shower peaks
+- **_skyfield_loader.py**: lazy ephemeris loading + caching across calls
+
+Run `python manage.py seed_astronomy --year-from 2026 --year-to 2030` to populate.
+
+## Deep-time browsing
+
+Phase 2d added scale modes that drill from a single day all the way out to a millennium:
+
+| Scale | URL | What you see |
+|---|---|---|
+| month | `/chronos/calendar/<y>/<m>/` | 7×6 day grid, the default |
+| day | `/chronos/calendar/<y>/<m>/<d>/` | event list for one day |
+| year | `/chronos/calendar/year/<y>/` | 12 mini month grids in a 4×3 layout |
+| decade | `/chronos/calendar/decade/<start>/` | 10 year cells with event counts |
+| century | `/chronos/calendar/century/<start>/` | 10 decade cells |
+| millennium | `/chronos/calendar/millennium/<start>/` | 10 century cells |
+
+Each scale's toolbar links upward to the next-larger scale and downward to the next-smaller. Click a cell at any level to drill in.
+
+The current scale chain stops at the millennium. 10K-year and 100K-year scales are not implemented because nothing in the existing data sources extrapolates cleanly that far — only astronomical events would still be meaningful, and their accuracy degrades over geological timescales. The UI pattern is identical, so adding them is a small change when needed.
+
+## Event CRUD
+
+Users create events through `/chronos/events/add/` (or by clicking "New Event" from the calendar toolbar). The form uses HTML `datetime-local` inputs interpreted in the user's home timezone — no naive UTC trap. Events are referenced everywhere by their auto-generated slug, not their numeric primary key, so URLs stay readable.
+
+A `?date=YYYY-MM-DD` query parameter on the add form pre-fills the start date to the clicked day. Clicking "Add one" from a day-detail view that has no events takes you to the form already pre-filled.
+
+## Recommended reading order
+
+If you're new to chronos and want to understand it from the inside out:
+
+- Read `chronos/models.py` to see the five models and how they relate.
+- Open `/chronos/` in a browser to see the world clocks page — the simplest view.
+- Open `/chronos/calendar/` to see the month grid — the most complex view.
+- Read `chronos/views.py` end-to-end. It's about 350 lines and covers everything.
+- Run `python manage.py seed_holidays` and `python manage.py seed_astronomy` to populate a year of events, then re-open the calendar.
+- Read `chronos/holiday_sources/__init__.py` to see how the eleven traditions are registered.
+"""
 
 
 SEEDERS = {

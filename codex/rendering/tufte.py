@@ -422,6 +422,14 @@ class TufteManualPDF(FPDF):
 
         If `header` is None the table is rendered without a header
         row (all rows are data) — useful for noheader tables.
+
+        Long tables that overflow the page are paginated: when a row
+        won't fit in the remaining vertical space, the renderer
+        manually closes the current table chunk, starts a new page,
+        re-emits the header (with rules), and continues drawing the
+        rest of the rows. The auto-page-break is disabled inside the
+        table body so fpdf2 doesn't fire spurious cascading breaks
+        during cell writes.
         """
         widths_source = []
         if header:
@@ -439,6 +447,20 @@ class TufteManualPDF(FPDF):
         self.ln(1.5)
         top_y = self.get_y()
 
+        # Disable auto-page-break inside the table body — we paginate
+        # manually so we can re-emit the header at the top of each new
+        # chunk. Restore at the end.
+        prev_apb = self.auto_page_break
+        prev_apb_margin = self.b_margin
+        self.set_auto_page_break(auto=False, margin=BOTTOM_MARGIN)
+
+        page_bottom = A4_H - BOTTOM_MARGIN
+
+        def _page_break_and_reseat():
+            """Start a new page and return the new top_y for the table."""
+            self.add_page()
+            return TOP_MARGIN
+
         def _draw_rule(y, weight=0.25, color=(80, 80, 80)):
             self.set_draw_color(*color)
             self.set_line_width(weight)
@@ -448,68 +470,95 @@ class TufteManualPDF(FPDF):
 
         cur_y = top_y
 
+        def _draw_header_at(y):
+            """Draw the header row at vertical position y. Returns the
+            y just below the header (where data rows start)."""
+            if bordered:
+                if header:
+                    self.set_fill_color(240, 240, 240)
+                    self.rect(LEFT_MARGIN, y, BODY_W, full_cell_h, style='F')
+                    for i in range(ncols):
+                        cell_runs = header[i] if i < len(header) else []
+                        cx = LEFT_MARGIN + i * col_w
+                        self.set_xy(cx + cell_pad, y + cell_pad)
+                        self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                              cell_h, bold=True)
+                    return y + full_cell_h
+                return y
+            else:
+                _draw_rule(y, weight=0.4)
+                if header:
+                    for i in range(ncols):
+                        cell_runs = header[i] if i < len(header) else []
+                        cx = LEFT_MARGIN + i * col_w
+                        self.set_xy(cx + cell_pad, y + cell_pad)
+                        self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                              cell_h, bold=True)
+                    bot = y + full_cell_h
+                    _draw_rule(bot, weight=0.25)
+                    return bot
+                return y
+
+        def _draw_row_at(y, row):
+            for i in range(ncols):
+                cell_runs = row[i] if i < len(row) else []
+                cx = LEFT_MARGIN + i * col_w
+                self.set_xy(cx + cell_pad, y + cell_pad)
+                self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
+                                      cell_h, bold=False)
+
+        # --- header for the first chunk ---
+        chunk_top = top_y
+        cur_y = _draw_header_at(top_y)
+
+        # --- data rows with manual pagination ---
+        for row in rows:
+            if cur_y + full_cell_h > page_bottom:
+                # Close out the current chunk before paginating.
+                if bordered:
+                    self._draw_table_grid(chunk_top, cur_y, ncols, col_w,
+                                          full_cell_h, header)
+                else:
+                    _draw_rule(cur_y, weight=0.4)
+                # New page, redraw the header.
+                cur_y = _page_break_and_reseat()
+                chunk_top = cur_y
+                cur_y = _draw_header_at(cur_y)
+
+            _draw_row_at(cur_y, row)
+            cur_y += full_cell_h
+
+        # --- close out the final chunk ---
         if bordered:
-            # Header tinted background.
-            if header:
-                self.set_fill_color(240, 240, 240)
-                self.rect(LEFT_MARGIN, cur_y, BODY_W, full_cell_h, style='F')
-                for i in range(ncols):
-                    cell_runs = header[i] if i < len(header) else []
-                    cx = LEFT_MARGIN + i * col_w
-                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
-                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                          cell_h, bold=True)
-                cur_y += full_cell_h
-            for row in rows:
-                for i in range(ncols):
-                    cell_runs = row[i] if i < len(row) else []
-                    cx = LEFT_MARGIN + i * col_w
-                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
-                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                          cell_h, bold=False)
-                cur_y += full_cell_h
-            # Draw the grid AFTER content so cell text isn't hidden.
-            self.set_draw_color(120, 120, 120)
-            self.set_line_width(0.18)
-            n_rows_drawn = (1 if header else 0) + len(rows)
-            total_h = n_rows_drawn * full_cell_h
-            # Outer rectangle
-            self.rect(LEFT_MARGIN, top_y, BODY_W, total_h)
-            # Horizontal interior rules
-            for r in range(1, n_rows_drawn):
-                y = top_y + r * full_cell_h
-                self.line(LEFT_MARGIN, y, LEFT_MARGIN + BODY_W, y)
-            # Vertical interior rules
-            for c in range(1, ncols):
-                x = LEFT_MARGIN + c * col_w
-                self.line(x, top_y, x, top_y + total_h)
-            self.set_draw_color(0, 0, 0)
-            self.set_line_width(0.2)
+            self._draw_table_grid(chunk_top, cur_y, ncols, col_w,
+                                  full_cell_h, header)
         else:
-            # Tufte minimal-rule.
-            _draw_rule(top_y, weight=0.4)
-            if header:
-                self.set_xy(LEFT_MARGIN, top_y + cell_pad)
-                for i in range(ncols):
-                    cell_runs = header[i] if i < len(header) else []
-                    cx = LEFT_MARGIN + i * col_w
-                    self.set_xy(cx + cell_pad, top_y + cell_pad)
-                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                          cell_h, bold=True)
-                cur_y = top_y + full_cell_h
-                _draw_rule(cur_y, weight=0.25)
-            for row in rows:
-                for i in range(ncols):
-                    cell_runs = row[i] if i < len(row) else []
-                    cx = LEFT_MARGIN + i * col_w
-                    self.set_xy(cx + cell_pad, cur_y + cell_pad)
-                    self._write_cell_runs(cell_runs, col_w - cell_pad * 2,
-                                          cell_h, bold=False)
-                cur_y += full_cell_h
             _draw_rule(cur_y, weight=0.4)
+
+        # Restore auto-page-break.
+        self.set_auto_page_break(auto=prev_apb, margin=prev_apb_margin)
 
         self.set_xy(LEFT_MARGIN, cur_y + 2)
         self.ln(0)
+
+    def _draw_table_grid(self, top_y, bot_y, ncols, col_w, full_cell_h, header):
+        """Draw the bordered-table grid lines for one table chunk."""
+        self.set_draw_color(120, 120, 120)
+        self.set_line_width(0.18)
+        height = bot_y - top_y
+        # Outer rectangle
+        self.rect(LEFT_MARGIN, top_y, BODY_W, height)
+        # Horizontal interior rules — one per row boundary
+        n_rows = round(height / full_cell_h)
+        for r in range(1, n_rows):
+            y = top_y + r * full_cell_h
+            self.line(LEFT_MARGIN, y, LEFT_MARGIN + BODY_W, y)
+        # Vertical interior rules
+        for c in range(1, ncols):
+            x = LEFT_MARGIN + c * col_w
+            self.line(x, top_y, x, bot_y)
+        self.set_draw_color(0, 0, 0)
+        self.set_line_width(0.2)
 
     # --- definition list --------------------------------------------------
 
