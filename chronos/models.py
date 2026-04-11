@@ -31,6 +31,13 @@ class ClockPrefs(models.Model):
         default='Europe/Amsterdam',
         help_text='IANA timezone name for the local clock shown in the topbar.',
     )
+    country = models.CharField(
+        max_length=2,
+        default='NL',
+        help_text='ISO-3166-1 alpha-2 country code, used by the civic '
+                  'holiday adapter to pick which national calendar to pull. '
+                  'NL = Netherlands.',
+    )
     format_24h = models.BooleanField(
         default=True,
         help_text='If True, display times as 14:32:09. If False, 2:32:09 pm.',
@@ -102,7 +109,35 @@ class WatchedTimezone(models.Model):
         return f'{self.label} ({self.tz_name})'
 
 
-# --- Calendar (Phase 2a) --------------------------------------------------
+# --- Calendar (Phase 2a–2b) -----------------------------------------------
+
+
+class Tradition(models.Model):
+    """A holiday tradition — civic / religious / observance source.
+
+    Used by Phase 2b seeding to attach holidays to a parent grouping
+    so the calendar can color them and (eventually) toggle each
+    tradition on or off.
+    """
+
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=120)
+    color = models.CharField(
+        max_length=9, blank=True,
+        help_text='Hex color used to tint holidays from this tradition.',
+    )
+    enabled = models.BooleanField(
+        default=True,
+        help_text='If unchecked, holidays from this tradition are hidden '
+                  'from calendar views (rows are kept in the database).',
+    )
+    description = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
 
 
 class CalendarEvent(models.Model):
@@ -150,6 +185,13 @@ class CalendarEvent(models.Model):
     )
     source = models.CharField(
         max_length=16, choices=SOURCE_CHOICES, default='user',
+    )
+    tradition = models.ForeignKey(
+        Tradition, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='events',
+        help_text='If this event came from a holiday tradition, link to '
+                  'the Tradition for color + toggleability. Null for '
+                  'user-created events.',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
