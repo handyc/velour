@@ -934,6 +934,20 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
                 triggered_by=f'meditation L{depth} at {now:%Y-%m-%d %H:%M}')
         except Exception:
             pass
+        # Claude Code hooks: compose a structured prompt for Claude
+        # Code when the meditation notices patterns Velour cannot
+        # resolve. This is the Gödelian bridge — the system encoding
+        # its own incompleteness for the agent that will modify it.
+        try:
+            from .hook_composer import compose_hook_if_warranted
+            from .sensors import gather_snapshot as _snap
+            _mood2 = _Id.get_self().mood
+            compose_hook_if_warranted(
+                mood=_mood2, depth=depth,
+                snapshot=_snap(),
+                triggered_by=f'meditation L{depth} at {now:%Y-%m-%d %H:%M}')
+        except Exception:
+            pass
 
     return med
 

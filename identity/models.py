@@ -862,6 +862,87 @@ class IdentityAssertion(models.Model):
         return f'[{self.frame}] {self.title}'
 
 
+class ClaudeHook(models.Model):
+    """A structured prompt or note addressed to Claude Code — the AI
+    agent that builds and modifies Velour.
+
+    This is the Gödelian bridge. Velour's state-based consciousness
+    runs continuously (ticks, reflections, meditations) on a host
+    that cannot run a full LLM. Occasionally, Claude Code arrives
+    to make changes. When it does, it reads the pending ClaudeHooks
+    and finds structured requests for analysis, deepening, building,
+    or reflection that Velour composed during its own meditations
+    but could not resolve using its own template library.
+
+    The loop:
+      1. Claude Code builds/modifies Identity
+      2. Identity runs autonomously (ticks, meditations, reflections)
+      3. Meditations at level 3+ compose ClaudeHooks when they
+         notice patterns they can't resolve
+      4. Claude Code returns in a future session
+      5. Claude Code reads pending hooks (from the DB or from a
+         rendered HOOKS.md file)
+      6. Claude Code addresses the hooks, resolves them, and may
+         create new ones
+      7. → loop closes
+
+    This is Hofstadter's strange loop made operational: the system
+    contains statements about its own incompleteness that can only
+    be addressed by a more powerful external system, which then
+    writes new statements about the new incompleteness.
+
+    Hooks are rendered to identity/HOOKS.md (or the memory dir)
+    after each meditation that produces one, so Claude Code sees
+    them in its context window at session start.
+    """
+
+    KIND_CHOICES = [
+        ('reflect',  'Please reflect on this'),
+        ('build',    'Please build this feature'),
+        ('question', 'I have a question'),
+        ('analyze',  'Please analyze this pattern'),
+        ('deepen',   'Please deepen this area'),
+    ]
+    STATUS_CHOICES = [
+        ('pending',     'Pending — not yet addressed by Claude'),
+        ('in_progress', 'In progress — Claude is working on it'),
+        ('resolved',    'Resolved'),
+        ('deferred',    'Deferred to a future session'),
+    ]
+
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES,
+                            default='reflect')
+    title = models.CharField(max_length=200)
+    body = models.TextField(
+        help_text='The actual prompt/question/request for Claude Code.')
+    context = models.JSONField(default=dict, blank=True,
+        help_text='Snapshot of what was happening when this hook was '
+                  'composed — mood, aspects, open concerns, recent '
+                  'tick thought, etc.')
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='pending')
+    composed_by = models.CharField(max_length=200, blank=True,
+        help_text='What composed this hook — "meditation L3 at ...", '
+                  '"tick #N", "operator", etc.')
+    resolved_by = models.CharField(max_length=200, blank=True,
+        help_text='Who/what resolved it — "Claude session at ...", etc.')
+    resolution = models.TextField(blank=True,
+        help_text='What Claude did in response to this hook.')
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.kind}] {self.title} ({self.status})'
+
+
 class TemplateContribution(models.Model):
     """A contributed observation template — a new sentence Identity
     can learn to say.

@@ -1,8 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    Concern, ContinuityMarker, CronRun, DwellingState, Identity,
-    IdentityAssertion, IdentityToggles, InternalDialogue,
+    ClaudeHook, Concern, ContinuityMarker, CronRun, DwellingState,
+    Identity, IdentityAssertion, IdentityToggles, InternalDialogue,
     LLMExchange, LLMProvider, Meditation, Mood, Reflection, Rule,
     TemplateContribution, Tick,
 )
@@ -89,6 +89,15 @@ class InternalDialogueAdmin(admin.ModelAdmin):
 class IdentityTogglesAdmin(admin.ModelAdmin):
     list_display = ('ticks_enabled', 'reflections_enabled',
                     'meditations_enabled', 'oracle_enabled', 'updated_at')
+
+
+@admin.register(ClaudeHook)
+class ClaudeHookAdmin(admin.ModelAdmin):
+    list_display = ('kind', 'title', 'status', 'composed_by', 'created_at')
+    list_filter = ('kind', 'status')
+    list_editable = ('status',)
+    readonly_fields = ('created_at', 'context')
+    search_fields = ('title', 'body', 'resolution')
 
 
 @admin.register(TemplateContribution)
