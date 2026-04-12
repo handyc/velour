@@ -92,6 +92,53 @@ def tileset_generate(request, slug):
     })
 
 
+@login_required
+@require_POST
+def tileset_save_generated(request, slug):
+    """Save a generated tiling as a new tileset.
+
+    Receives the unique tiles from the JS grid and creates a new TileSet
+    with those tiles. The new set is named after the source + dimensions.
+    """
+    source = get_object_or_404(TileSet, slug=slug)
+    grid_w = request.POST.get('grid_w', '16')
+    grid_h = request.POST.get('grid_h', '16')
+
+    try:
+        tiles_data = json.loads(request.POST.get('grid_json', '[]'))
+    except (json.JSONDecodeError, TypeError):
+        messages.error(request, 'Invalid grid data.')
+        return redirect('tiles:generate', slug=slug)
+
+    if not tiles_data:
+        messages.error(request, 'No tiles in the generated grid.')
+        return redirect('tiles:generate', slug=slug)
+
+    name = f'{source.name} ({grid_w}×{grid_h} blocks)'
+    ts = TileSet(
+        name=name,
+        description=f'Meta-tiles derived from {source.name}: each tile represents a block of the original tiling.',
+        palette=source.palette,
+        source='operator',
+        notes=f'Derived from tileset "{source.slug}".',
+    )
+    ts.save()
+
+    for i, td in enumerate(tiles_data):
+        Tile.objects.create(
+            tileset=ts,
+            name=f'T{i+1}',
+            n_color=td.get('n', ''),
+            e_color=td.get('e', ''),
+            s_color=td.get('s', ''),
+            w_color=td.get('w', ''),
+            sort_order=i,
+        )
+
+    messages.success(request, f'Created "{ts.name}" with {len(tiles_data)} unique tiles.')
+    return redirect('tiles:detail', slug=ts.slug)
+
+
 def _greedy_tile_grid(tiles, width=6, height=4):
     """Attempt a greedy Wang tiling from the top-left. Returns a 2D
     list (rows of tile dicts or None). Does NOT guarantee a valid

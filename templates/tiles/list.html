@@ -6,31 +6,31 @@
 <style>
     .ts-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 0.5rem;
-        margin-top: 1rem;
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 0.35rem;
+        margin-top: 0.75rem;
     }
     .ts-card {
         background: #161b22; border: 1px solid #30363d;
-        border-left: 3px solid #bc8cff;
-        border-radius: 6px; padding: 0.6rem 0.8rem;
+        border-left: 2px solid #bc8cff;
+        border-radius: 4px; padding: 0.35rem 0.5rem;
     }
     .ts-card h3 {
-        font-size: 0.88rem; margin: 0 0 0.15rem;
+        font-size: 0.75rem; margin: 0;
         color: #c9d1d9; font-weight: 500;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .ts-card h3 a { color: #c9d1d9; text-decoration: none; }
-    .ts-card .meta { color: #6e7681; font-size: 0.68rem; margin-bottom: 0.3rem; font-family: ui-monospace, Menlo, monospace; }
-    .ts-card .desc { color: #8b949e; font-size: 0.76rem; line-height: 1.4; }
-    .ts-card .palette { margin-top: 0.4rem; display: flex; gap: 0.15rem; flex-wrap: wrap; }
-    .ts-card .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #30363d; }
-    .ts-card .tile-preview { margin-top: 0.4rem; display: flex; gap: 1px; flex-wrap: wrap; max-width: 180px; }
+    .ts-card .meta { color: #6e7681; font-size: 0.6rem; font-family: ui-monospace, Menlo, monospace; }
+    .ts-card .desc { display: none; }
+    .ts-card .palette { margin-top: 0.2rem; display: flex; gap: 1px; flex-wrap: wrap; }
+    .ts-card .swatch { width: 7px; height: 7px; border-radius: 1px; border: 1px solid #30363d; }
+    .ts-card .tile-preview { margin-top: 0.2rem; display: flex; gap: 1px; flex-wrap: wrap; max-width: 120px; }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>Tiles</h1>
-<p style="color: #8b949e;">Wang tile sets — square tiles with colored edges that must match when placed adjacent. Hao Wang (1961). Famous for aperiodic tile sets and Turing-completeness. Phase 1 is a catalog + SVG renderer + greedy tiling attempt. Phase 2 will connect the tile substrate to Identity as a basis for germs of ideas.</p>
 
 <div style="margin: 0.75rem 0; display: flex; gap: 0.5rem; align-items: center;">
     <a href="{% url 'tiles:add' %}" class="btn">Add Tile Set</a>
@@ -55,7 +55,7 @@
         {% if ts.tiles.all %}
         <div class="tile-preview">
             {% for t in ts.tiles.all|slice:":12" %}
-            <svg width="20" height="20" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+            <svg width="12" height="12" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
                 <rect x="0" y="0" width="56" height="56" fill="#161b22"/>
                 <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
                 <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>

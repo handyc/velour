@@ -32,10 +32,19 @@
     <label>Tile px <input type="number" id="tile-px" value="24" min="8" max="80"></label>
     <button class="btn" id="btn-generate">Generate</button>
     <button class="btn btn-secondary" id="btn-download">Save as PNG</button>
+    <label>Block size <input type="number" id="block-size" value="4" min="2" max="16"></label>
+    <button class="btn btn-secondary" id="btn-save-tileset">Save as Tileset</button>
 </div>
 
 <canvas id="tiling-canvas"></canvas>
 <div class="gen-status" id="gen-status"></div>
+
+<form id="save-tileset-form" method="post" action="{% url 'tiles:save_generated' tileset.slug %}" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="grid_json" id="grid-json-field">
+    <input type="hidden" name="grid_w" id="grid-w-field">
+    <input type="hidden" name="grid_h" id="grid-h-field">
+</form>
 
 <div style="margin-top: 1.5rem;">
     <a href="{% url 'tiles:detail' tileset.slug %}" class="btn btn-secondary">Back to {{ tileset.name }}</a>
@@ -44,6 +53,8 @@
 <script>
 (function() {
     var TILES = {{ tiles_json|safe }};
+    var lastGrid = null;
+    var lastW = 0, lastH = 0;
 
     function generate() {
         var gw = parseInt(document.getElementById('grid-w').value) || 16;
@@ -115,6 +126,10 @@
             }
         }
 
+        lastGrid = grid;
+        lastW = gw;
+        lastH = gh;
+
         document.getElementById('gen-status').textContent =
             gw + ' x ' + gh + ' = ' + (gw*gh) + ' cells. ' +
             filled + ' filled, ' + stuck + ' stuck.';
@@ -128,6 +143,71 @@
         link.download = '{{ tileset.slug }}-tiling.png';
         link.href = canvas.toDataURL('image/png');
         link.click();
+    });
+
+    document.getElementById('btn-save-tileset').addEventListener('click', function() {
+        if (!lastGrid) { alert('Generate a tiling first.'); return; }
+        var bs = parseInt(document.getElementById('block-size').value) || 4;
+        bs = Math.max(2, Math.min(16, bs));
+
+        // Subdivide the grid into bs x bs blocks. Each block becomes a meta-tile.
+        // Edge colors: most common edge color along that border of the block.
+        function mode(arr) {
+            var counts = {};
+            arr.forEach(function(v) { counts[v] = (counts[v]||0) + 1; });
+            var best = arr[0], max = 0;
+            for (var k in counts) { if (counts[k] > max) { max = counts[k]; best = k; } }
+            return best;
+        }
+
+        var blocksW = Math.floor(lastW / bs);
+        var blocksH = Math.floor(lastH / bs);
+        if (blocksW < 1 || blocksH < 1) { alert('Grid too small for block size ' + bs); return; }
+
+        var tiles = [];
+        var seen = {};
+        for (var br = 0; br < blocksH; br++) {
+            for (var bc = 0; bc < blocksW; bc++) {
+                var r0 = br * bs, c0 = bc * bs;
+                // North edge: n_color of top row tiles
+                var nEdge = [];
+                for (var c = c0; c < c0+bs; c++) {
+                    var t = lastGrid[r0][c];
+                    if (t) nEdge.push(t.n);
+                }
+                // South edge: s_color of bottom row tiles
+                var sEdge = [];
+                for (var c = c0; c < c0+bs; c++) {
+                    var t = lastGrid[r0+bs-1][c];
+                    if (t) sEdge.push(t.s);
+                }
+                // West edge: w_color of left column tiles
+                var wEdge = [];
+                for (var r = r0; r < r0+bs; r++) {
+                    var t = lastGrid[r][c0];
+                    if (t) wEdge.push(t.w);
+                }
+                // East edge: e_color of right column tiles
+                var eEdge = [];
+                for (var r = r0; r < r0+bs; r++) {
+                    var t = lastGrid[r][c0+bs-1];
+                    if (t) eEdge.push(t.e);
+                }
+                if (!nEdge.length || !sEdge.length || !wEdge.length || !eEdge.length) continue;
+                var n = mode(nEdge), e = mode(eEdge), s = mode(sEdge), w = mode(wEdge);
+                var key = n + '|' + e + '|' + s + '|' + w;
+                if (!seen[key]) {
+                    seen[key] = true;
+                    tiles.push({n:n, e:e, s:s, w:w});
+                }
+            }
+        }
+
+        if (!tiles.length) { alert('No valid blocks found.'); return; }
+        document.getElementById('grid-json-field').value = JSON.stringify(tiles);
+        document.getElementById('grid-w-field').value = blocksW;
+        document.getElementById('grid-h-field').value = blocksH;
+        document.getElementById('save-tileset-form').submit();
     });
 
     // Generate on load
