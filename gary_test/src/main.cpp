@@ -64,12 +64,11 @@
   // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
   // Hazel sends 2000-char screen every 20 min.
   // Mabel sends 2000-char screen every 30 min.
-  // TESTING: offset intervals so they don't transmit simultaneously.
   #ifdef NODE_LORA_ROLE_SENDER
-    #define LORA_SCREEN_INTERVAL_MS 60000   // Mabel: 1 min (test)
-    #define LORA_SCREEN_OFFSET_MS   30000   // start 30s after boot
+    #define LORA_SCREEN_INTERVAL_MS 30000   // Mabel: 30s
+    #define LORA_SCREEN_OFFSET_MS   15000   // start 15s after boot
   #else
-    #define LORA_SCREEN_INTERVAL_MS 60000   // Hazel: 1 min (test)
+    #define LORA_SCREEN_INTERVAL_MS 30000   // Hazel: 30s
     #define LORA_SCREEN_OFFSET_MS       0   // start immediately
   #endif
   unsigned long lastLoraScreenAt = 0;
@@ -77,8 +76,7 @@
   #define LORA_MAX_PAYLOAD 222
 
   // Reassembly buffer for incoming multi-packet screens
-  // TESTING: reduced to 100 chars to minimize TX power draw
-  #define LORA_SCREEN_SIZE 101
+  #define LORA_SCREEN_SIZE 501  // 500 chars — fits in ~3 packets
   static char loraScreenBuf[LORA_SCREEN_SIZE];   // received screen (null-terminated)
   static uint8_t loraRxFragBuf[4096];             // compressed fragment accumulator
   static int loraRxFragCount = 0;
@@ -86,7 +84,7 @@
   static size_t loraRxFragLen = 0;
 
   // Ticker scroll state — pixel-level smooth scrolling.
-  // Scrolls 1px every 5ms = 200px/sec = 50 chars/sec at 4px/char.
+  // Scrolls 2px every 5ms = 400px/sec = 100 chars/sec at 4px/char.
   static int loraTickerPx = 0;         // pixel offset (negative = scrolled left)
   static unsigned long lastTickerScrollAt = 0;
   static bool loraScreenReady = true;  // start true for test message
@@ -239,7 +237,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.3"
+#define FIRMWARE_VERSION    "v0.6.4"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -754,7 +752,7 @@ static void oledRedraw() {
     if (loraScreenReady && loraScreenBuf[0]) {
         if (millis() - lastTickerScrollAt >= 5) {
             lastTickerScrollAt = millis();
-            loraTickerPx--;
+            loraTickerPx -= 2;
             int totalWidth = strlen(loraScreenBuf) * 4;  // 4px per char
             if (loraTickerPx < -totalWidth) loraTickerPx = 128;
         }
