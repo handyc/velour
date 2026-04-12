@@ -9,32 +9,31 @@
     .fleet-toolbar select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 0.35rem 0.5rem; border-radius: 4px; font-size: 0.875rem; display: block; margin-top: 0.25rem; }
     .fleet-toolbar .count { color: #8b949e; font-size: 0.8125rem; margin-left: auto; align-self: center; }
 
-    .fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-    .node-card { border-left: 4px solid #30363d; padding: 1rem 1.25rem; position: relative; }
-    .node-card.online    { border-left-color: #2ea043; }
-    .node-card.dormant   { border-left-color: #8b949e; border-left-style: dashed; }
-    .node-card.offline   { border-left-color: #f85149; }
-    .node-card.unknown   { border-left-color: #58a6ff; border-left-style: dashed; }
-    .node-card.disabled  { opacity: 0.55; }
-    .node-card .nickname { font-size: 1.2rem; font-weight: 600; color: #c9d1d9; margin-bottom: 0.1rem; }
-    .node-card .slug     { font-size: 0.75rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-bottom: 0.5rem; }
-    .badges { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; background: #21262d; color: #c9d1d9; }
-    .badge.hw       { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
-    .badge.exp      { background: rgba(139, 92, 246, 0.15); color: #bc8cff; }
-    .badge.power    { background: rgba(210, 153, 34, 0.15); color: #d29922; }
-    .badge.power.solar    { background: rgba(255, 200, 50, 0.15); color: #ffc832; }
-    .badge.power.battery  { background: rgba(46, 160, 67, 0.15); color: #2ea043; }
-    .badge.power.on_demand{ background: rgba(139, 148, 158, 0.15); color: #8b949e; }
-    .badge.disabled { background: #21262d; color: #6e7681; }
-    .node-meta { font-size: 0.75rem; color: #8b949e; line-height: 1.5; margin-top: 0.5rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .node-meta a { color: inherit; }
+    .fleet-list { display: flex; flex-direction: column; gap: 2px; }
+    .node-row {
+        display: flex; align-items: center; gap: 0.5rem;
+        border-left: 3px solid #30363d; padding: 0.3rem 0.6rem;
+        background: #161b22; border-radius: 0 3px 3px 0;
+        font-size: 0.78rem; flex-wrap: wrap;
+    }
+    .node-row.online    { border-left-color: #2ea043; }
+    .node-row.dormant   { border-left-color: #8b949e; border-left-style: dashed; }
+    .node-row.offline   { border-left-color: #f85149; }
+    .node-row.unknown   { border-left-color: #58a6ff; border-left-style: dashed; }
+    .node-row.disabled  { opacity: 0.5; }
+    .node-row .nickname { font-weight: 600; color: #c9d1d9; min-width: 5rem; }
+    .node-row .nickname a { color: #c9d1d9; text-decoration: none; }
+    .node-row .nickname a:hover { color: #58a6ff; }
+    .node-row .mono { color: #6e7681; font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem; }
+    .node-row .badge { display: inline-block; font-size: 0.62rem; padding: 0.1rem 0.4rem; border-radius: 8px; background: #21262d; color: #c9d1d9; }
+    .node-row .badge.hw   { background: rgba(88, 166, 255, 0.12); color: #58a6ff; }
+    .node-row .badge.exp  { background: rgba(139, 92, 246, 0.12); color: #bc8cff; }
+    .node-row .meta { color: #8b949e; font-size: 0.7rem; font-family: ui-monospace, Menlo, monospace; margin-left: auto; text-align: right; white-space: nowrap; }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>Fleet</h1>
-<p style="color:#8b949e;">Physical microcontroller nodes — ESPs, Picos, and anything else attached to a <a href="{% url 'experiments:list' %}">lab experiment</a>. Each node has a nickname (Gary, etc.) and an API token used by the device to talk back to velour.</p>
 
 <form method="get" class="fleet-toolbar">
     <label>Hardware
@@ -76,41 +75,16 @@
 </div>
 
 {% if nodes %}
-<div class="fleet-grid">
+<div class="fleet-list">
     {% for n in nodes %}
-    {% if not n.enabled %}
-        {% with classification='unknown' %}
-        <div class="card node-card disabled {{ classification }}">
-    {% endwith %}
-    {% elif not n.last_seen_at and n.is_dormant_expected %}
-        <div class="card node-card dormant">
-    {% elif not n.last_seen_at %}
-        <div class="card node-card unknown">
-    {% else %}
-        <div class="card node-card online">
-    {% endif %}
-
-        <div class="nickname">{{ n.nickname }}</div>
-        <div class="slug">{{ n.slug }}{% if n.mac_address %} &middot; {{ n.mac_address }}{% endif %}</div>
-
-        <div class="badges">
-            {% if n.hardware_profile %}<span class="badge hw">{{ n.hardware_profile.name }}</span>{% endif %}
-            {% if n.experiment %}<span class="badge exp">{{ n.experiment.name }}</span>{% endif %}
-            <span class="badge power {{ n.power_mode }}">{{ n.get_power_mode_display }}</span>
-            {% if not n.enabled %}<span class="badge disabled">disabled</span>{% endif %}
-        </div>
-
-        <div class="node-meta">
-            {% if n.hostname %}host: {{ n.hostname }}<br>{% endif %}
-            {% if n.last_ip %}ip: {{ n.last_ip }}<br>{% endif %}
-            {% if n.firmware_version %}fw: {{ n.firmware_version }}<br>{% endif %}
-            {% if n.last_seen_at %}seen: {{ n.last_seen_at|date:"Y-m-d H:i" }}{% else %}<em>never seen</em>{% endif %}
-        </div>
-
-        <div style="margin-top: 0.75rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">
-            <a href="{% url 'nodes:detail' n.slug %}" class="btn" style="font-size:0.8125rem;">Details</a>
-            <a href="{% url 'nodes:edit' n.slug %}" class="btn btn-secondary" style="font-size:0.8125rem;">Edit</a>
-        </div>
+    <div class="node-row {% if not n.enabled %}disabled unknown{% elif not n.last_seen_at %}unknown{% else %}online{% endif %}">
+        <span class="nickname"><a href="{% url 'nodes:detail' n.slug %}">{{ n.nickname }}</a></span>
+        <span class="mono">{{ n.slug }}</span>
+        {% if n.hardware_profile %}<span class="badge hw">{{ n.hardware_profile.name }}</span>{% endif %}
+        {% if n.experiment %}<span class="badge exp">{{ n.experiment.name }}</span>{% endif %}
+        {% if n.last_ip %}<span class="mono">{{ n.last_ip }}</span>{% endif %}
+        {% if n.firmware_version %}<span class="mono">{{ n.firmware_version }}</span>{% endif %}
+        <span class="meta">{% if n.last_seen_at %}{{ n.last_seen_at|date:"Y-m-d H:i" }}{% else %}never seen{% endif %}</span>
     </div>
     {% endfor %}
 </div>
