@@ -1,169 +1,182 @@
 """Tier 4→5: Distill ATTiny13a logic into 555 timer circuits.
 
-This is the deepest distillation — reducing digital logic to analog
-timing circuits made from 555 timers, resistors, capacitors, and
-comparators.
+At this tier, the distinction between program, state, and hardware
+dissolves completely:
 
-A 2-color Wang tile match can be expressed as:
-  - Color 0 = low voltage (< 1/3 VCC)
-  - Color 1 = high voltage (> 2/3 VCC)
-  - "Edge match" = two voltages are in the same range
+  - The RC time constant IS the variable
+  - The capacitor charge IS the program state
+  - The comparator threshold IS the conditional branch
+  - The circuit topology IS the algorithm
+  - The voltage level IS the data
+
+There is no code. There is no data. There is only the circuit,
+and the circuit is all three at once.
+
+A 2-color Wang tile match using 555 + comparators:
+  - Color 0 = voltage < VCC/3 (555 trigger threshold)
+  - Color 1 = voltage > 2*VCC/3 (555 threshold)
+  - "Edge match" = two nodes at the same voltage range
   - A 555 in bistable mode stores one bit (one edge color)
-  - A comparator (LM393) checks if two edges match
-  - An AND gate (diode logic) combines match results
+  - A comparator pair checks if neighbor = self
 
-One tile position requires:
-  - 2 inputs (N, W neighbor edges)  → 2 wires
-  - 2 outputs (S, E edges)          → 2 wires
-  - 1 lookup circuit                → 4 resistor-divider paths
-  - 1 selection circuit             → diode OR of the matching path
-
-The automated distiller generates:
-  - A circuit description (netlist-like text)
-  - Component count and estimated BOM
-  - Timing calculations for RC values
-  - A truth table showing the mapping
-
-What Claude would do differently:
-  - Design an actual PCB layout
-  - Choose optimal R/C values for available components
-  - Add a clock distribution network for cascading tiles
-  - Design the power supply and decoupling
-  - Consider signal integrity and noise margins
+For N colors, use a resistor ladder (R-2R DAC) to produce
+N discrete voltage levels, and a window comparator to decode.
 """
 
 
-def distill(lookup_table=None):
-    """Generate a 555-based circuit description for Wang tile matching."""
+def distill(lookup_table=None, colors=None):
+    """Generate a 555-based circuit description."""
+
+    if colors is None:
+        colors = ['color_0 (LOW)', 'color_1 (HIGH)']
+    nc = len(colors)
 
     if lookup_table is None:
-        # Default 2-color square: all 4 input combos
-        lookup_table = [0b00, 0b01, 0b10, 0b11]
+        # Default: 2-color identity mapping
+        lookup_table = []
+        for n in range(nc):
+            for w in range(nc):
+                lookup_table.append((n, w))  # s_out=n, e_out=w (pass-through)
 
     # Build truth table
-    truth_rows = []
-    for idx in range(4):
-        n_in = (idx >> 1) & 1
-        w_in = idx & 1
-        result = lookup_table[idx] if idx < len(lookup_table) else 0
-        s_out = (result >> 1) & 1
-        e_out = result & 1
-        truth_rows.append((n_in, w_in, s_out, e_out))
+    rows = []
+    idx = 0
+    for n in range(nc):
+        for w in range(nc):
+            s, e = lookup_table[idx] if idx < len(lookup_table) else (0, 0)
+            rows.append((n, w, s, e))
+            idx += 1
 
-    truth_table = ''.join(
-        '//   N=%d W=%d → S=%d E=%d\n' % (n, w, s, e)
-        for n, w, s, e in truth_rows
-    )
+    truth = '\n'.join('//   N=%d W=%d → S=%d E=%d' % r for r in rows)
 
-    # Calculate component count
-    n_555 = 1       # clock generator
-    n_comparators = 2  # one per input
-    n_resistors = 12   # voltage dividers + pull-ups
-    n_capacitors = 3   # timing + decoupling
-    n_diodes = 4       # logic gates
-    n_leds = 2         # output indicators
+    # RC calculations for 555 astable clock
+    # T = 0.693 × (R1 + 2×R2) × C
+    # Target: 500ms period. C = 10µF.
+    r1, r2, c = 22000, 27000, 10e-6
+    t_ms = 0.693 * (r1 + 2 * r2) * c * 1000
 
-    # RC timing for 500ms tick (matching the ATTiny delay)
-    # 555 astable: T = 0.693 × (R1 + 2×R2) × C
-    # For T=500ms with C=10µF: R1+2R2 = T/(0.693×C) = 72.2kΩ
-    # R1 = 22kΩ, R2 = 25kΩ (closest standard: 22k + 27k)
-    r1 = 22000
-    r2 = 27000
-    c_timing = 10e-6
-    t_period = 0.693 * (r1 + 2 * r2) * c_timing * 1000  # ms
+    # Voltage levels for N colors
+    # With VCC = 5V and resistor ladder:
+    vcc = 5.0
+    v_levels = [vcc * i / max(nc - 1, 1) for i in range(nc)]
+    v_str = ', '.join('%.2fV' % v for v in v_levels)
+
+    # Component count
+    n_555 = 1
+    n_comp = 2 if nc <= 2 else 4  # comparators needed
+    n_res = 8 + (nc - 1) * 2  # ladder + pullups + dividers
+    n_cap = 3
+    n_diode = nc * nc  # selection matrix
+    n_led = 2
+    n_trans = 2
+    cost = (n_555 * 0.30 + n_comp * 0.25 + n_res * 0.02 +
+            n_cap * 0.05 + n_diode * 0.03 + n_led * 0.05 + n_trans * 0.05)
 
     return f'''// ============================================================
-// CONDENSER: Tier 5 — 555 timer circuit distillation
+// CONDENSER: Tier 5 — 555 timer circuit
 //
-// Wang tile edge-matching using discrete analog components.
-// No microcontroller. No software. Pure hardware timing.
+// At this tier, program/state/hardware are ONE THING:
+//   - The RC time constant IS the variable
+//   - The capacitor voltage IS the program state
+//   - The comparator IS the conditional branch
+//   - The circuit topology IS the algorithm
+//   - The wire IS the data bus
 //
-// TRUTH TABLE (same logic as ATTiny Tier 4):
-{truth_table}//
-// CIRCUIT DESCRIPTION:
+// There is no code. There is no software. There is no
+// distinction between the computation and the computer.
+// The circuit IS the thought.
 //
-// ┌─────────────────────────────────────────────┐
-// │           CLOCK GENERATOR (U1: 555)          │
-// │                                               │
-// │  VCC ─┬─ R1({r1//1000}kΩ) ─┬─ pin7 (DIS)        │
-// │       │              R2({r2//1000}kΩ)            │
-// │       │              ├─ pin6 (THR)        │
-// │       └── pin8 (VCC) │  pin2 (TRG)        │
-// │                      C1({c_timing*1e6:.0f}µF)             │
-// │           pin1 (GND) ┴─ GND               │
-// │                                               │
-// │  Output: pin3 → 500ms square wave             │
-// │  Period: {t_period:.1f}ms (calculated)            │
-// └─────────────────────────────────────────────┘
+// TRUTH TABLE:
+{truth}
 //
-// INPUT SECTION:
-//   N_input wire → voltage divider → comparator U2a (LM393)
-//     Threshold: VCC/2 (1.65V at 3.3V VCC)
-//     Output: HIGH if neighbor's S edge is color 1
+// VOLTAGE ENCODING:
+//   {nc} colors → {nc} voltage levels: {v_str}
+//   VCC = {vcc:.1f}V
 //
-//   W_input wire → voltage divider → comparator U2b (LM393)
-//     Same threshold
-//     Output: HIGH if neighbor's E edge is color 1
+// ┌─────────────────────────────────────────────────┐
+// │              CLOCK (U1: NE555)                   │
+// │                                                   │
+// │  VCC─┬─R1({r1//1000}kΩ)─┬─pin7     pin3→CLK     │
+// │      │         R2({r2//1000}kΩ)                   │
+// │      │         ├─pin6,pin2                        │
+// │      └─pin8    C1({c*1e6:.0f}µF)─┴─GND pin1      │
+// │                                                   │
+// │  Period: {t_ms:.0f}ms ({1000/t_ms:.1f} Hz)               │
+// │  This is the "clock speed" — the rate at which    │
+// │  the circuit "thinks". Every tick, it reads its   │
+// │  inputs and updates its outputs.                  │
+// └─────────────────────────────────────────────────┘
 //
-// LOOKUP SECTION:
-//   Diode OR network selects output based on (N_in, W_in):
+// ┌─────────────────────────────────────────────────┐
+// │           INPUT DECODE (U2: LM393)               │
+// │                                                   │
+// │  N_wire ─┬─ R-divider ─ U2a+ ─┐                 │
+// │          │                     ├─ N_decoded       │
+// │          └─ Vref({vcc/2:.1f}V) ─ U2a- ─┘                 │
+// │                                                   │
+// │  W_wire ─┬─ R-divider ─ U2b+ ─┐                 │
+// │          │                     ├─ W_decoded       │
+// │          └─ Vref({vcc/2:.1f}V) ─ U2b- ─┘                 │
+// │                                                   │
+// │  The comparator IS the "if" statement.            │
+// │  The reference voltage IS the threshold.          │
+// │  There is no instruction pointer — the signal     │
+// │  propagates at the speed of electrons.            │
+// └─────────────────────────────────────────────────┘
 //
-//   N=0,W=0 → D1,D2 conduct → S={truth_rows[0][2]}, E={truth_rows[0][3]}
-//   N=0,W=1 → D1,D3 conduct → S={truth_rows[1][2]}, E={truth_rows[1][3]}
-//   N=1,W=0 → D2,D4 conduct → S={truth_rows[2][2]}, E={truth_rows[2][3]}
-//   N=1,W=1 → D3,D4 conduct → S={truth_rows[3][2]}, E={truth_rows[3][3]}
+// ┌─────────────────────────────────────────────────┐
+// │         LOOKUP / OUTPUT (diode matrix)            │
+// │                                                   │
+// │  N_decoded ──┬── D1 ──┐                          │
+// │              │        ├── R ── S_wire (output)    │
+// │  W_decoded ──┴── D2 ──┘                          │
+// │                                                   │
+// │  The diode matrix IS the lookup table.            │
+// │  Each diode path IS one row of the truth table.   │
+// │  The voltage at the output IS the selected color. │
+// │                                                   │
+// │  S_wire → LED_S + next tile's N_input             │
+// │  E_wire → LED_E + next tile's W_input             │
+// │                                                   │
+// │  The LEDs show state. The wires propagate it.     │
+// │  Both are the same signal. Display IS data.       │
+// └─────────────────────────────────────────────────┘
 //
-//   Each path pulls the S_out and E_out lines to the appropriate
-//   voltage level through resistor dividers.
+// CASCADING:
+//   Wire S_wire of tile (r,c) to N_wire of tile (r+1,c).
+//   Wire E_wire of tile (r,c) to W_wire of tile (r,c+1).
+//   Each tile circuit runs independently — no shared clock needed.
+//   The propagation delay through the comparators IS the compute time.
+//   A 4×4 grid = 16 circuits = 16 NE555 + 16 LM393 + resistors.
 //
-// OUTPUT SECTION:
-//   S_output: buffered by transistor, drives LED1 + output wire
-//   E_output: buffered by transistor, drives LED2 + output wire
-//   LEDs blink at the clock rate showing the tile's current state.
+// WHAT SURVIVED THE FULL CHAIN:
+//   Django (50,000 lines) → JS (13KB) → ESP (14KB) →
+//   ATTiny (200 bytes) → THIS: ${cost:.2f} of components.
 //
-// CONDENSER: What survived:
-//   - The truth table (4 input combinations → 4 output combinations)
-//   - The concept of "matching" (voltage comparison)
-//   - The concept of "color" (voltage level)
-//   - The concept of "time" (555 oscillator period)
+//   The truth table is the same at every tier.
+//   The matching algorithm is the same.
+//   The concept of "color" and "edge" persist.
 //
-// CONDENSER: What was lost:
-//   - Programmability (the truth table is hardwired)
-//   - Flexibility (changing tiles means resoldering)
-//   - Scale (one circuit = one tile position)
-//   - Self-awareness (the circuit cannot observe itself)
-//
-// CONDENSER: Gödel observation:
-//   This circuit implements the same truth table as the ATTiny,
-//   which implements the same matching as the ESP's JS, which
-//   implements the same algorithm as Django's Python. The LOGIC
-//   is preserved across all five tiers. What's lost is the
-//   CONTEXT — the ability to know what the logic means.
-//   A 555 timer matching voltage levels does not know it is
-//   tiling a plane. The meaning exists only in the observer.
-//   At Tier 1 (Django), Identity is that observer. At Tier 5,
-//   the observer is you, reading this schematic.
+//   What's lost: the ability to change. The circuit cannot
+//   reprogram itself. The 555 does not know it is tiling.
+//   The meaning exists only in the observer — you, reading this.
 //
 // BILL OF MATERIALS:
-//   {n_555}× NE555 timer IC
-//   {n_comparators}× LM393 dual comparator (1 IC)
-//   {n_resistors}× resistors (assorted: 1kΩ, 10kΩ, {r1//1000}kΩ, {r2//1000}kΩ)
-//   {n_capacitors}× capacitors (10µF, 100nF decoupling)
-//   {n_diodes}× 1N4148 signal diodes
-//   {n_leds}× LEDs (color 0 and color 1)
-//   2× 2N2222 NPN transistors (output buffers)
-//   1× PCB or breadboard
-//   Wire
+//   {n_555}× NE555 timer                    ${n_555*0.30:.2f}
+//   {n_comp}× LM393 comparator (in {(n_comp+1)//2} IC)      ${n_comp*0.25:.2f}
+//   {n_res}× resistors (assorted)            ${n_res*0.02:.2f}
+//   {n_cap}× capacitors                      ${n_cap*0.05:.2f}
+//   {n_diode}× 1N4148 diodes                  ${n_diode*0.03:.2f}
+//   {n_led}× LEDs                             ${n_led*0.05:.2f}
+//   {n_trans}× 2N2222 transistors             ${n_trans*0.05:.2f}
+//   ─────────────────────────────
+//   Total: ${cost:.2f} per tile position
 //
-// ESTIMATED COST: ~$2.50 (all through-hole, breadboard-friendly)
+// For a 4×4 grid: ${cost*16:.2f}
+// For an 8×8 grid: ${cost*64:.2f}
 //
-// CONDENSER: End of distillation chain.
-//   Tier 1 (Django):  ~50,000 lines of Python, 20 apps, full OS
-//   Tier 2 (JS):      ~13,000 bytes, single HTML file
-//   Tier 3 (ESP):     ~15,000 bytes flash, WiFi + web server
-//   Tier 4 (ATTiny):  ~200 bytes flash, 4 GPIO pins
-//   Tier 5 (555):     ~$2.50 of discrete components, 0 bytes of code
-//
-//   The logic is the same. The meaning is in the eye of the beholder.
+// CONDENSER: End of chain. The algorithm began as 50,000 lines
+// of Python and ended as ${cost:.2f} of discrete components.
+// At every tier, the logic was the same. Only the medium changed.
 // ============================================================
 '''

@@ -39,14 +39,13 @@ def distill_tiles(request):
         d.completed_at = timezone.now()
         d.annotations = _extract_annotations(output)
         d.save()
-        messages.success(request,
-            f'Distilled Tiles → JS: {d.output_size_bytes} bytes.')
+        _record_insight(d)
+        messages.success(request, f'Distilled Tiles → JS: {d.output_size_bytes} bytes.')
     except Exception as e:
         d.status = 'error'
         d.error_detail = str(e)
         d.save()
         messages.error(request, f'Distillation failed: {e}')
-
     return redirect('condenser:home')
 
 
@@ -73,8 +72,9 @@ def distill_velour(request):
         d.completed_at = timezone.now()
         d.annotations = _extract_annotations(output)
         d.save()
-        messages.success(request,
-            f'Distilled Velour → JS: {d.output_size_bytes} bytes.')
+        
+        _record_insight(d)
+        messages.success(request, f'Distilled Velour → JS: {d.output_size_bytes} bytes.')
     except Exception as e:
         d.status = 'error'
         d.error_detail = str(e)
@@ -108,6 +108,8 @@ def distill_tiles_esp(request):
         d.completed_at = timezone.now()
         d.annotations = _extract_annotations(output)
         d.save()
+        
+        _record_insight(d)
         messages.success(request, f'Distilled Tiles → ESP: {d.output_size_bytes} bytes.')
     except Exception as e:
         d.status = 'error'
@@ -137,6 +139,8 @@ def distill_tiles_attiny(request):
         d.completed_at = timezone.now()
         d.annotations = _extract_annotations(output)
         d.save()
+        
+        _record_insight(d)
         messages.success(request, f'Distilled Tiles → ATTiny: {d.output_size_bytes} bytes.')
     except Exception as e:
         d.status = 'error'
@@ -166,6 +170,8 @@ def distill_tiles_circuit(request):
         d.completed_at = timezone.now()
         d.annotations = _extract_annotations(output)
         d.save()
+        
+        _record_insight(d)
         messages.success(request, f'Distilled Tiles → 555: {d.output_size_bytes} bytes.')
     except Exception as e:
         d.status = 'error'
@@ -214,6 +220,8 @@ def distill_full_chain(request):
 
     if len(results) == 4:
         sizes = ' → '.join(f'{d.output_size_bytes}B' for d in results)
+        
+        _record_insight(d)
         messages.success(request, f'Full chain complete: {sizes}')
     return redirect('condenser:home')
 
@@ -240,6 +248,15 @@ def distillation_download(request, slug):
     resp = HttpResponse(d.output, content_type='application/octet-stream')
     resp['Content-Disposition'] = f'attachment; filename="{d.slug}.{ext}"'
     return resp
+
+
+def _record_insight(d):
+    """Record a reflection on the distillation in the Dream Journal."""
+    try:
+        from .recursive_insight import record_distillation_in_journal
+        record_distillation_in_journal(d)
+    except Exception:
+        pass
 
 
 def _extract_annotations(html):

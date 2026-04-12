@@ -1,189 +1,179 @@
-"""Tier 3→4: Distill ESP8266 logic into ATTiny13a C code.
+"""Tier 3→4: Distill to ATTiny13a C code.
+
+Key insight: on a microcontroller, live pin readings replace what
+would have been variables, database rows, or API calls in a larger
+app. A pin reading IS a query. Setting a pin IS a write operation.
+The GPIO bus IS the database.
 
 The ATTiny13a has:
-  - 1KB flash (1024 bytes)
-  - 64 bytes SRAM
-  - 8 pins (6 usable as GPIO, 1 VCC, 1 GND)
-  - No WiFi, no display, no serial (in practice)
-  - 9.6 MHz internal oscillator
+  - 1KB flash, 64B SRAM
+  - 6 usable GPIO pins (PB0-PB5)
+  - ADC on PB2-PB4 (10-bit, can distinguish 3-4 voltage levels)
+  - Internal 9.6 MHz oscillator
 
-What survives: the CORE DECISION LOGIC of Wang tile matching.
-Everything else is gone — no UI, no network, no storage.
+Pin assignment strategy:
+  - 2 ADC inputs: read neighbor edge "colors" as voltage levels
+    (0V = color 0, 1.1V = color 1, 2.2V = color 2, 3.3V = color 3)
+  - 2 PWM outputs: express this tile's edge colors as voltage levels
+  - 1 status LED
+  - 1 unused (future: cascade clock input)
 
-The tile matching algorithm becomes:
-  1. Read 4 input pins (neighbor edge colors, binary: HIGH/LOW = 2 colors)
-  2. Look up the matching tile in a compact table in flash
-  3. Set 4 output pins to the matched tile's opposite edges
-  4. Delay, then repeat
-
-For a 2-color square tileset (16 possible tiles), the lookup table
-is 16 entries × 1 byte = 16 bytes. The entire program fits in ~200
-bytes of flash, leaving 800 bytes for expansion.
-
-What the automated distiller does:
-  - Extract the 2-color matching logic
-  - Generate a minimal avr-gcc C program
-  - Compute the lookup table from the tileset
-  - Target the ATTiny13a's pin assignments
-
-What Claude would do differently:
-  - Choose meaningful pin assignments based on physical layout
-  - Add a clever encoding that packs more state into fewer pins
-  - Design the timing to create visual patterns on LEDs
-  - Consider power consumption and sleep modes
+Using ADC means 3-4 colors fit, not just 2. This is a significant
+improvement over pure digital (which limits to 2 colors per pin).
 """
 
 
 def distill(tileset_name='2-color checkerboard'):
-    """Generate ATTiny13a C code for a 2-color square tileset."""
+    """Generate ATTiny13a C code for Wang tile matching via ADC."""
 
-    # Try to load the tileset from Django
+    # Load tileset from Django if available
     tiles = []
+    colors = []
     try:
         from tiles.models import TileSet
         ts = TileSet.objects.filter(name__icontains=tileset_name).first()
+        if not ts:
+            ts = TileSet.objects.filter(tile_type='square').first()
         if ts:
             for t in ts.tiles.all():
-                tiles.append({
-                    'n': t.n_color, 'e': t.e_color,
-                    's': t.s_color, 'w': t.w_color,
-                })
+                tiles.append([t.n_color, t.e_color, t.s_color, t.w_color])
+            colors = ts.palette or []
     except Exception:
         pass
 
     if not tiles:
-        # Fallback: generate a minimal 2-color set
-        tiles = []
+        colors = ['#58a6ff', '#f85149']
         for bits in range(16):
-            tiles.append({
-                'n': '#58a6ff' if (bits >> 3) & 1 else '#f85149',
-                'e': '#58a6ff' if (bits >> 2) & 1 else '#f85149',
-                's': '#58a6ff' if (bits >> 1) & 1 else '#f85149',
-                'w': '#58a6ff' if bits & 1 else '#f85149',
-            })
+            tiles.append([
+                colors[(bits >> 3) & 1], colors[(bits >> 2) & 1],
+                colors[(bits >> 1) & 1], colors[bits & 1],
+            ])
 
-    # Build the color-to-bit mapping
-    colors = sorted(set(t['n'] for t in tiles) | set(t['e'] for t in tiles) |
-                     set(t['s'] for t in tiles) | set(t['w'] for t in tiles))
-    if len(colors) > 2:
-        colors = colors[:2]  # ATTiny can only handle 2 colors (binary pins)
+    if not colors:
+        all_c = set()
+        for t in tiles:
+            all_c.update(t)
+        colors = sorted(all_c)
 
-    color_map = {c: i for i, c in enumerate(colors)}
+    nc = len(colors)
+    cmap = {c: i for i, c in enumerate(colors)}
 
-    # Build lookup table: input = (n_in, w_in) as 2 bits → output = (s_out, e_out) as 2 bits
-    # For a Wang tiling, we need to find a tile whose N matches the input N
-    # and whose W matches the input W, then output its S and E.
-    lookup = []
-    for n_in in range(2):
-        for w_in in range(2):
-            # Find first tile matching these constraints
+    # Build lookup table: for each (N_in, W_in) combo, find first
+    # matching tile and store (S_out, E_out)
+    max_combos = nc * nc
+    lut = []
+    for n_in in range(nc):
+        for w_in in range(nc):
             found = False
             for t in tiles:
-                tn = color_map.get(t['n'], 0)
-                tw = color_map.get(t['w'], 0)
-                if tn == n_in and tw == w_in:
-                    te = color_map.get(t['e'], 0)
-                    ts_val = color_map.get(t['s'], 0)
-                    lookup.append((ts_val << 1) | te)
+                if cmap.get(t[0], 0) == n_in and cmap.get(t[3], 0) == w_in:
+                    lut.append((cmap.get(t[2], 0), cmap.get(t[1], 0)))
                     found = True
                     break
             if not found:
-                lookup.append(0)
+                lut.append((0, 0))
 
-    lookup_str = ', '.join('0x%02X' % v for v in lookup)
+    lut_bytes = ', '.join('0x%02X' % ((s << 4) | e) for s, e in lut)
 
-    return f'''// ============================================================
-// CONDENSER: Tier 4 — ATTiny13a distillation
+    # ADC thresholds for distinguishing N colors
+    # At 10-bit ADC (0-1023), with 3.3V ref:
+    # 2 colors: threshold at 512
+    # 3 colors: thresholds at 341, 682
+    # 4 colors: thresholds at 256, 512, 768
+    if nc <= 2:
+        adc_decode = '''    // 2 colors: simple threshold at midpoint
+    return (adc > 512) ? 1 : 0;'''
+    elif nc == 3:
+        adc_decode = '''    // 3 colors: two thresholds
+    if (adc < 341) return 0;
+    if (adc < 682) return 1;
+    return 2;'''
+    else:
+        adc_decode = '''    // 4 colors: three thresholds
+    if (adc < 256) return 0;
+    if (adc < 512) return 1;
+    if (adc < 768) return 2;
+    return 3;'''
+
+    # PWM output values for each color
+    # Map color index to PWM duty cycle (0-255)
+    pwm_values = []
+    for i in range(nc):
+        pwm_values.append(255 * i // max(nc - 1, 1))
+    pwm_arr = ', '.join(str(v) for v in pwm_values)
+
+    return '''// CONDENSER: Tier 4 — ATTiny13a Wang tile matcher
 //
-// Wang tile edge-matching in 200 bytes of flash.
+// GPIO pins ARE the database. Reading a pin IS a query.
+// Setting a pin IS a write. The bus IS the data store.
+//
+// Colors: ''' + ', '.join('%s=%d' % (c, i) for i, c in enumerate(colors)) + '''
+// Tiles: ''' + str(len(tiles)) + ''' in source set, ''' + str(len(lut)) + '''-entry LUT
 //
 // Pin assignment:
-//   PB0 (pin 5): N input  — north neighbor's south edge
-//   PB1 (pin 6): W input  — west neighbor's east edge
-//   PB2 (pin 7): S output — this tile's south edge
-//   PB3 (pin 2): E output — this tile's east edge
-//   PB4 (pin 3): status LED (blinks on each match cycle)
+//   PB3 (ADC3, pin 2): N input — read neighbor's S edge as voltage
+//   PB4 (ADC2, pin 3): W input — read neighbor's E edge as voltage
+//   PB0 (OC0A, pin 5): S output — PWM voltage for our S edge
+//   PB1 (OC0B, pin 6): E output — PWM voltage for our E edge
+//   PB2 (pin 7):        status LED
 //
-// Colors: {colors[0]} = LOW, {colors[1]} = HIGH
-//
-// The lookup table maps (N_in, W_in) → (S_out, E_out).
-// 4 entries × 1 byte = 4 bytes. The rest is boilerplate.
-//
-// What survived from Tier 3:
-//   - The tile matching algorithm (2 inputs → 2 outputs)
-//   - The concept of edge-color constraints
-//
-// What was lost:
-//   - All visual rendering (no display)
-//   - All networking (no WiFi)
-//   - All user interaction (no buttons, no browser)
-//   - Hex tiles (only square, 2-color fits)
-//   - Tileset selection (one set hardcoded)
-//
-// What a Claude distillation would do differently:
-//   - Use the remaining 800 bytes for a state machine that
-//     walks a virtual grid, outputting edges in sequence
-//   - Add PWM on the LED to show "mood" (duty cycle = intensity)
-//   - Use the ADC pin for analog input (3+ colors via voltage levels)
-//   - Design the timing so multiple ATTiny13as can cascade
-//     into a physical tiling network
-//
-// CONDENSER: At Tier 5 (555 timers), this becomes:
-//   - Two 555s in astable mode: one for N/S, one for W/E
-//   - LM393 comparators for edge matching
-//   - RC time constants encode the "color" (HIGH time = color 0 or 1)
-//   - The cascade output of one 555 feeds the input of the next
-// ============================================================
+// ADC reads voltage levels to distinguish ''' + str(nc) + ''' colors.
+// PWM outputs produce corresponding voltages for downstream tiles.
+// Multiple ATTiny13a chips can be wired in a grid — each one's
+// outputs feed the next one's inputs, forming a physical Wang tiling.
 
 #include <avr/io.h>
 #include <util/delay.h>
 
-// CONDENSER: The entire Wang tile logic in 4 bytes.
-// Index = (N_input << 1) | W_input
-// Value = (S_output << 1) | E_output
-static const uint8_t TILE_LUT[4] PROGMEM = {{ {lookup_str} }};
+// Lookup table: index = (N_color * ''' + str(nc) + ''') + W_color
+// Value: high nibble = S_color, low nibble = E_color
+static const uint8_t LUT[] PROGMEM = { ''' + lut_bytes + ''' };
 
-// CONDENSER: Pin definitions.
-// Two inputs (neighbor edges) and two outputs (our edges).
-// This is the minimum viable representation of a Wang tile.
-#define PIN_N_IN   PB0
-#define PIN_W_IN   PB1
-#define PIN_S_OUT  PB2
-#define PIN_E_OUT  PB3
-#define PIN_LED    PB4
+// PWM values for each color (0-255 duty cycle)
+static const uint8_t COLOR_PWM[] PROGMEM = { ''' + pwm_arr + ''' };
 
-#define TICK_MS    500
+#define N_COLORS ''' + str(nc) + '''
 
-int main(void) {{
-    // Set pin directions
-    DDRB = (1 << PIN_S_OUT) | (1 << PIN_E_OUT) | (1 << PIN_LED);
-    // Enable pull-ups on inputs
-    PORTB = (1 << PIN_N_IN) | (1 << PIN_W_IN);
+// Read ADC channel and decode to color index
+static uint8_t read_color(uint8_t channel) {
+    ADMUX = channel;  // select ADC channel, Vcc ref
+    ADCSRA |= (1 << ADSC);  // start conversion
+    while (ADCSRA & (1 << ADSC));  // wait
+    uint16_t adc = ADC;
+''' + adc_decode + '''
+}
 
-    // CONDENSER: The main loop — read, match, output.
-    // This is the Wang tile algorithm reduced to its essence.
-    // The entire loop fits in ~30 instructions.
-    while (1) {{
-        // Read neighbor edges
-        uint8_t n_in = (PINB >> PIN_N_IN) & 1;
-        uint8_t w_in = (PINB >> PIN_W_IN) & 1;
+int main(void) {
+    // Pin directions: PB0,PB1 = output (PWM), PB2 = output (LED)
+    DDRB = (1 << PB0) | (1 << PB1) | (1 << PB2);
 
-        // Look up matching tile
-        uint8_t idx = (n_in << 1) | w_in;
-        uint8_t result = pgm_read_byte(&TILE_LUT[idx]);
-        uint8_t s_out = (result >> 1) & 1;
-        uint8_t e_out = result & 1;
+    // Enable ADC: prescaler /64 for ~150kHz at 9.6MHz
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1);
 
-        // Set output edges
-        if (s_out) PORTB |= (1 << PIN_S_OUT); else PORTB &= ~(1 << PIN_S_OUT);
-        if (e_out) PORTB |= (1 << PIN_E_OUT); else PORTB &= ~(1 << PIN_E_OUT);
+    // Timer0 for PWM on PB0 (OC0A) and PB1 (OC0B)
+    TCCR0A = (1 << COM0A1) | (1 << COM0B1) | (1 << WGM01) | (1 << WGM00);
+    TCCR0B = (1 << CS01);  // prescaler /8
 
-        // Blink status LED
-        PORTB ^= (1 << PIN_LED);
+    while (1) {
+        // READ: query the pin "database" for neighbor edges
+        uint8_t n_color = read_color(3);  // ADC3 = PB3
+        uint8_t w_color = read_color(2);  // ADC2 = PB4
 
-        _delay_ms(TICK_MS);
-    }}
+        // MATCH: lookup the tile for these inputs
+        uint8_t idx = n_color * N_COLORS + w_color;
+        uint8_t result = pgm_read_byte(&LUT[idx]);
+        uint8_t s_color = (result >> 4) & 0x0F;
+        uint8_t e_color = result & 0x0F;
 
-    return 0;  // unreachable
-}}
+        // WRITE: set output pins to the matched edge colors
+        OCR0A = pgm_read_byte(&COLOR_PWM[s_color]);  // PB0 = S edge
+        OCR0B = pgm_read_byte(&COLOR_PWM[e_color]);  // PB1 = E edge
+
+        // Status blink
+        PORTB ^= (1 << PB2);
+
+        _delay_ms(100);
+    }
+    return 0;
+}
 '''
