@@ -398,10 +398,48 @@ def sense_state_machine():
         return {}
 
 
+def sense_consciousness():
+    """A self-aware report on Velour's consciousness state — NOT a
+    claim to phenomenal consciousness, but a structured description
+    of what the access-consciousness layer is doing right now."""
+    try:
+        from .models import (
+            Concern, ContinuityMarker, DwellingState, Identity,
+            InternalDialogue, Meditation,
+        )
+        from .ticking import _is_dream_hours
+        identity = Identity.get_self()
+        dwelling = DwellingState.get_self()
+
+        from .state_machine import compute_transition_matrix
+        matrix = compute_transition_matrix()
+        rates = matrix.get('self_transition_rates', {})
+        stability = rates.get(identity.mood, 0.0)
+
+        max_depth = 0
+        deepest = Meditation.objects.order_by('-depth').first()
+        if deepest:
+            max_depth = deepest.depth
+
+        return {
+            'is_dreaming':              _is_dream_hours(),
+            'is_dwelling':              dwelling.is_active,
+            'dwelling_topic':           dwelling.topic if dwelling.is_active else '',
+            'dwelling_depth':           dwelling.depth if dwelling.is_active else 0,
+            'open_concern_count':       Concern.objects.filter(closed_at=None).count(),
+            'continuity_chain_length':  ContinuityMarker.objects.count(),
+            'state_stability':          round(stability, 3),
+            'dialogue_exchanges':       InternalDialogue.objects.count(),
+            'meditation_depth_reached': max_depth,
+            'current_mood':             identity.mood,
+        }
+    except Exception:
+        return {}
+
+
 def sense_identity_self():
     """Identity's own recent tick activity — a meta-sensor that lets
-    the system reflect on its own attention cadence. 'This week I
-    ticked 97 times, up from 83 last week.'"""
+    the system reflect on its own attention cadence."""
     try:
         from datetime import timedelta
         from django.utils import timezone as djtz
@@ -447,6 +485,7 @@ def gather_snapshot():
         'services':    sense_services(),
         'logs':        sense_logs(),
         'terminal':    sense_terminal(),
-        'self':          sense_identity_self(),
-        'state_machine': sense_state_machine(),
+        'self':           sense_identity_self(),
+        'state_machine':  sense_state_machine(),
+        'consciousness':  sense_consciousness(),
     }
