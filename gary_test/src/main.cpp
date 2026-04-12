@@ -37,6 +37,19 @@
 // 128x64 screen wired to software I2C. The pins default to SCL=14
 // (D5) and SDA=12 (D6), matching the user's verified u8g2 demo; both
 // are overridable via NODE_OLED_SCL / NODE_OLED_SDA.
+// Optional decision tree inference. Enable via NODE_HAS_DECISION_TREE
+// in build_flags. The tree is downloaded from Velour's
+// /api/nodes/<slug>/model.json endpoint on boot and inference runs
+// locally every tick cycle. Results are reported back in the heartbeat.
+#ifdef NODE_HAS_DECISION_TREE
+  #include "tiny_tree.h"
+  TinyTree decisionTree;
+  bool treeLoaded = false;
+  int lastPrediction = -1;
+  int lastConfidence = 0;
+  const char* lastClassName = "?";
+#endif
+
 #ifdef NODE_HAS_OLED
   #include <U8g2lib.h>
   #ifndef NODE_OLED_SCL
@@ -236,6 +249,120 @@ static void ahtRead() {
 
 
 // ---------------------------------------------------------------------
+// Decision tree download + inference. Optional per-node.
+// Downloads the tree from /api/nodes/<slug>/model.json on boot,
+// parses it into TinyTree, and runs inference every report cycle.
+// Results are reported back in the heartbeat via velour_client.
+// ---------------------------------------------------------------------
+
+#ifdef NODE_HAS_DECISION_TREE
+
+static void downloadDecisionTree() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    String url = VELOUR_URL;
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    url += "/api/nodes/";
+    url += NODE_SLUG;
+    url += "/model.json?token=";
+    url += NODE_TOKEN;
+
+    Serial.print("[tree] downloading from ");
+    Serial.println(url);
+
+    HTTPClient http;
+    WiFiClient client;
+#if defined(ESP32)
+    http.begin(url);
+#elif defined(ESP8266)
+    http.begin(client, url);
+#endif
+    http.setTimeout(15000);
+    int status = http.GET();
+    if (status != 200) {
+        Serial.print("[tree] HTTP ");
+        Serial.println(status);
+        http.end();
+        return;
+    }
+
+    String body = http.getString();
+    http.end();
+
+    Serial.print("[tree] received ");
+    Serial.print(body.length());
+    Serial.println(" bytes");
+
+    if (decisionTree.loadFromJson(body.c_str(), body.length())) {
+        treeLoaded = true;
+        Serial.print("[tree] loaded ");
+        Serial.print(decisionTree.nodeCount());
+        Serial.print(" nodes, ");
+        Serial.print(decisionTree.classCount());
+        Serial.println(" classes");
+        for (int i = 0; i < decisionTree.classCount(); i++) {
+            Serial.print("[tree]   class ");
+            Serial.print(i);
+            Serial.print(": ");
+            Serial.println(decisionTree.className(i));
+        }
+    } else {
+        Serial.println("[tree] parse failed");
+    }
+}
+
+static void runDecisionTreeInference() {
+    if (!treeLoaded) return;
+
+    // Build feature vector — same order as
+    // oracle/inference.py:FEATURE_NAMES
+    float features[8];
+    // mood_group — use 0 (contemplative) as default since the node
+    // doesn't know its own mood (that's a Velour-side concept)
+    features[0] = 0.0f;
+    // tod_group — approximate from hour
+    int hour = (millis() / 3600000UL) % 24;  // crude; no RTC
+    features[1] = (hour < 11) ? 0.0f : (hour < 17) ? 1.0f : (hour < 22) ? 2.0f : 3.0f;
+    // moon_group — unknown on device, use 0
+    features[2] = 0.0f;
+    // open_concern_count — unknown on device
+    features[3] = 0.0f;
+    // nodes_total — device doesn't know fleet size
+    features[4] = 1.0f;
+    // nodes_silent
+    features[5] = 0.0f;
+    // upcoming_events — unknown
+    features[6] = 0.0f;
+    // upcoming_holidays — unknown
+    features[7] = 0.0f;
+
+    // Override with real sensor data when available
+    if (ahtPresent && ahtTempC > -100.0f) {
+        // Use temp as a proxy for a more useful feature in the
+        // future when per-node lobes are trained on real data.
+        // For now this just exercises the inference path.
+        features[0] = ahtTempC / 10.0f;  // scale to ~2.0 range
+    }
+
+    lastPrediction = decisionTree.predict(features);
+    lastConfidence = decisionTree.leafSamples();
+    if (lastPrediction >= 0) {
+        lastClassName = decisionTree.className(lastPrediction);
+    } else {
+        lastClassName = "?";
+    }
+
+    Serial.print("[tree] prediction: ");
+    Serial.print(lastClassName);
+    Serial.print(" (confidence: ");
+    Serial.print(lastConfidence);
+    Serial.println(" samples)");
+}
+
+#endif  // NODE_HAS_DECISION_TREE
+
+
+// ---------------------------------------------------------------------
 // OLED display — optional per-node. Software I2C pins, 128x64
 // SSD1306. Renders a tiny dashboard: slug + IP + fw version at the
 // top, live temp/humidity in big digits if the AHT is present,
@@ -297,6 +424,17 @@ static void oledRedraw() {
     }
     u8g2.drawStr(0,  46, tbuf);
     u8g2.drawStr(70, 46, hbuf);
+
+    // Decision tree output (if active)
+#ifdef NODE_HAS_DECISION_TREE
+    if (treeLoaded && lastPrediction >= 0) {
+        u8g2.setFont(u8g2_font_5x8_tf);
+        char dbuf[40];
+        snprintf(dbuf, sizeof(dbuf), "AI: %s (%d)",
+                 lastClassName, lastConfidence);
+        u8g2.drawStr(0, 54, dbuf);
+    }
+#endif
 
     // Footer: uptime + rssi
     u8g2.setFont(u8g2_font_5x8_tf);
@@ -653,6 +791,14 @@ void setup() {
     // from the moment the web server comes up.
     ahtRead();
 
+#ifdef NODE_HAS_DECISION_TREE
+    // Download the trained decision tree from Velour's model.json
+    // endpoint. This is the edge-AI deployment path: Velour trains
+    // centrally, the node downloads the result, and runs inference
+    // locally.
+    downloadDecisionTree();
+#endif
+
     // Send one reading immediately so something lands in the Velour UI
     // within seconds of boot, not at the first 30-second tick.
     velour.addReading("boot", 1.0f);
@@ -718,7 +864,17 @@ void loop() {
             velour.addReading("aht_humidity", ahtHumidityPct);
         }
         velour.addReading("test_pulse", test_pulse);
-        velour.addReading("ota_delivered", 2.0f);  // bumped from 1.0 in 0.3.1
+        velour.addReading("ota_delivered", 2.0f);
+
+#ifdef NODE_HAS_DECISION_TREE
+        // Run inference on the loaded decision tree and report the
+        // decision back to Velour alongside the sensor readings.
+        runDecisionTreeInference();
+        if (lastPrediction >= 0) {
+            velour.addReading("tree_prediction", (float)lastPrediction);
+            velour.addReading("tree_confidence", (float)lastConfidence);
+        }
+#endif
 
         char label[32];
         snprintf(label, sizeof(label), "tick #%d", reportCount);

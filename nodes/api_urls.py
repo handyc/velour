@@ -16,4 +16,5 @@ urlpatterns = [
     path('<slug:slug>/report/',         views.api_report,         name='report'),
     path('<slug:slug>/firmware/check',  views.api_firmware_check, name='firmware_check'),
     path('<slug:slug>/firmware.bin',    views.api_firmware_bin,   name='firmware_bin'),
+    path('<slug:slug>/model.json',      views.api_model_json,     name='model_json'),
 ]

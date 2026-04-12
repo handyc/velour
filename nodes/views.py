@@ -619,3 +619,34 @@ def api_firmware_bin(request, slug):
     response['x-Velour-Version'] = fw.version
     response['x-SHA256'] = fw.sha256
     return response
+
+
+@csrf_exempt
+def api_model_json(request, slug):
+    """Serve the trained decision tree for this node's lobe.
+
+    GET /api/nodes/<slug>/model.json?token=<token>
+    Returns the JSON tree the node should load for local inference.
+
+    The lobe name is currently hardcoded to 'rumination_template'
+    because that's the only trained lobe. When per-node lobes
+    arrive (e.g. a "watering_decision" lobe for the aquarium
+    controller), the endpoint will grow a ?lobe= query param.
+
+    This is the edge-AI deployment path: Velour trains centrally
+    (sklearn in the Oracle app), the node downloads the result
+    via this endpoint, and runs pure-C++ inference locally.
+    """
+    node, err = _auth_node_or_401(request, slug)
+    if err:
+        return err
+
+    try:
+        from oracle.inference import load_lobe
+        lobe = load_lobe('rumination_template')
+        if lobe is None:
+            return JsonResponse({'error': 'no trained lobe available'},
+                                status=404)
+        return JsonResponse(lobe)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
