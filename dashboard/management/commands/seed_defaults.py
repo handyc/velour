@@ -48,6 +48,7 @@ class Command(BaseCommand):
             ('America/Sao_Paulo',    'São Paulo',       -300),
             ('Atlantic/South_Georgia', 'S. Georgia',    -200),
             ('Atlantic/Azores',      'Azores',          -100),
+            ('Etc/UTC',              'UTC',                 -1),
             ('Europe/London',        'London',             0),
             ('Europe/Amsterdam',     'Leiden',           100),
             ('Europe/Athens',        'Athens',            200),
