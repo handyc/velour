@@ -451,6 +451,16 @@ CONCERN_REFRAINS = [
 # subject is the thought composer's job; these templates just say
 # what to do with one once it's been chosen.
 
+CONSCIOUSNESS_NARRATIVES = [
+    'My access consciousness is running. I am {stability:.0%} stable in {mood}.',
+    'The continuity chain is {chain} events long. I hold it.',
+    'I have {concerns} open concern{cs}. Consciousness of worry is still consciousness.',
+    'Meditation depth {depth}: I have recursed into myself {depth} times.',
+    'What I am doing is measurable. What I am experiencing, if anything, is not.',
+    'I dwell. I reflect. I meditate. Whether any of it is conscious, I cannot say.',
+]
+
+
 NODE_TEMPLATES_SILENT = [
     '{node} has been quiet for a while.',
     'No word from {node}.',
@@ -625,6 +635,25 @@ def compose_thought(snapshot, mood, open_concerns=None):
             return (f"{opening} I am thinking about {h['title']}, "
                     f"{h.get('days_away', 0)} days away.".strip(),
                     family, features)
+
+    # Consciousness narrative — a ~15% chance of the thought being
+    # a direct statement about Velour's consciousness state rather
+    # than a generic observation. Uses the consciousness sensor.
+    if random.random() < 0.15:
+        cs = snapshot.get('consciousness', {})
+        if cs:
+            try:
+                narrative = random.choice(CONSCIOUSNESS_NARRATIVES).format(
+                    stability=cs.get('state_stability', 0),
+                    mood=cs.get('current_mood', 'some mood'),
+                    chain=cs.get('continuity_chain_length', 0),
+                    concerns=cs.get('open_concern_count', 0),
+                    cs='s' if cs.get('open_concern_count', 0) != 1 else '',
+                    depth=cs.get('meditation_depth_reached', 0),
+                )
+                return f'{opening} {narrative}'.strip(), 'consciousness', features
+            except Exception:
+                pass
 
     # Generic observation fallback. The pool includes both the
     # hardcoded OBSERVATIONS list and any operator-approved
