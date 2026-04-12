@@ -22,6 +22,7 @@ def get_app_renderer(app_name):
         'tiles': _tiles_renderer,
         'automaton': _automaton_renderer,
         'chronos': _chronos_renderer,
+        'nodes': _nodes_renderer,
     }
     fn = renderers.get(app_name)
     return fn() if fn else ''
@@ -150,28 +151,83 @@ def _chronos_renderer():
     """Live clock display for the Chronos app."""
     return '''
 // --- App-specific: Chronos live clocks ---
-function renderClocks() {
-    var items = list_watchedtimezone();
-    if (!items.length) return;
-    var el = document.getElementById('app');
-    el.innerHTML += '<h2>Clocks</h2><div id="clocks" style="display:flex;flex-wrap:wrap;gap:0.3rem"></div>';
-
-    function update() {
-        var h = '';
-        items.forEach(function(tz) {
-            try {
-                var t = new Date().toLocaleTimeString('en-GB', {
-                    timeZone: tz.tz_name, hour: '2-digit', minute: '2-digit'
-                });
-                var style = tz.color ? 'color:' + tz.color : '';
-                h += '<div style="background:#161b22;border-radius:4px;padding:0.2rem 0.5rem;' +
-                    'font-size:0.72rem;font-family:monospace;' + style + '">' +
-                    tz.label + ' ' + t + '</div>';
-            } catch(e) {}
+// Override the WatchedTimezone list view to show live clocks
+var _orig_wt_list = typeof view_list_watchedtimezone === 'function' ? view_list_watchedtimezone : null;
+if (_orig_wt_list) {
+    view_list_watchedtimezone = function(q) {
+        var items = list_watchedtimezone();
+        if (q) items = items.filter(function(x) {
+            return JSON.stringify(x).toLowerCase().indexOf(q.toLowerCase()) >= 0;
         });
-        document.getElementById('clocks').innerHTML = h;
-    }
-    update();
-    setInterval(update, 30000);
+        items.sort(function(a,b) { return (a.sort_order||0) - (b.sort_order||0); });
+        var h = '<h2>World Clocks (' + items.length + ')</h2>';
+        h += '<div style="display:flex;gap:0.3rem;margin:0.3rem 0">';
+        h += '<input type="text" placeholder="search..." onkeyup="view_list_watchedtimezone(this.value)" style="width:10rem">';
+        h += '<button class="primary" onclick="view_add_watchedtimezone()">Add</button></div>';
+        h += '<div id="clocks" style="display:flex;flex-wrap:wrap;gap:0.3rem;margin:0.5rem 0"></div>';
+        document.getElementById('app').innerHTML = h;
+
+        function updateClocks() {
+            var ch = '';
+            items.forEach(function(tz) {
+                try {
+                    var t = new Date().toLocaleTimeString('en-GB', {
+                        timeZone: tz.tz_name, hour:'2-digit', minute:'2-digit', second:'2-digit'
+                    });
+                    var d = new Date().toLocaleDateString('en-GB', {
+                        timeZone: tz.tz_name, weekday:'short', day:'numeric', month:'short'
+                    });
+                    var style = tz.color ? 'color:' + tz.color : 'color:#c9d1d9';
+                    ch += '<div style="background:#161b22;border-left:2px solid ' +
+                        (tz.color || '#30363d') + ';border-radius:0 4px 4px 0;padding:0.25rem 0.5rem;min-width:120px">' +
+                        '<div style="font-size:0.72rem;font-weight:500;' + style + '">' + tz.label + '</div>' +
+                        '<div style="font-size:1rem;font-family:monospace;' + style + '">' + t + '</div>' +
+                        '<div style="font-size:0.62rem;color:#6e7681">' + d + '</div>' +
+                        '<div style="font-size:0.58rem;color:#484f58">' + tz.tz_name + '</div></div>';
+                } catch(e) {}
+            });
+            var el = document.getElementById('clocks');
+            if (el) el.innerHTML = ch;
+        }
+        updateClocks();
+        if (window._clockInterval) clearInterval(window._clockInterval);
+        window._clockInterval = setInterval(updateClocks, 1000);
+    };
+}
+'''
+
+
+def _nodes_renderer():
+    """Fleet status display for the Nodes app."""
+    return '''
+// --- App-specific: Fleet status ---
+var _orig_node_list = typeof view_list_node === 'function' ? view_list_node : null;
+if (_orig_node_list) {
+    view_list_node = function(q) {
+        var items = list_node();
+        if (q) items = items.filter(function(x) {
+            return JSON.stringify(x).toLowerCase().indexOf(q.toLowerCase()) >= 0;
+        });
+        var h = '<h2>Fleet (' + items.length + ' nodes)</h2>';
+        h += '<div style="display:flex;gap:0.3rem;margin:0.3rem 0">';
+        h += '<input type="text" placeholder="search..." onkeyup="view_list_node(this.value)" style="width:10rem">';
+        h += '<button class="primary" onclick="view_add_node()">Add</button></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:2px">';
+        items.forEach(function(n) {
+            var age = n.last_seen_at ? 'seen ' + n.last_seen_at.substring(11, 16) : 'never';
+            h += '<div style="background:#161b22;border-left:3px solid ' +
+                (n.enabled ? '#2ea043' : '#f85149') +
+                ';border-radius:0 3px 3px 0;padding:0.3rem 0.5rem;display:flex;gap:0.5rem;align-items:center;font-size:0.78rem">';
+            h += '<b style="color:#c9d1d9;min-width:4rem">' + n.nickname + '</b>';
+            h += '<span style="color:#6e7681;font-family:monospace;font-size:0.7rem">' + n.slug + '</span>';
+            if (n.last_ip) h += '<span style="color:#6e7681;font-family:monospace;font-size:0.7rem">' + n.last_ip + '</span>';
+            if (n.firmware_version) h += '<span style="color:#6e7681;font-family:monospace;font-size:0.65rem">' + n.firmware_version + '</span>';
+            if (n.hardware_profile) h += '<span style="background:rgba(88,166,255,0.12);color:#58a6ff;font-size:0.62rem;padding:0.1rem 0.3rem;border-radius:8px">' + n.hardware_profile + '</span>';
+            h += '<span style="color:#8b949e;font-size:0.68rem;margin-left:auto">' + age + '</span>';
+            h += '</div>';
+        });
+        h += '</div>';
+        document.getElementById('app').innerHTML = h;
+    };
 }
 '''

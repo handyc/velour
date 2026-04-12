@@ -17,6 +17,7 @@ def generate(ir):
     parts = []
     parts.append(_html_head(fir))
     parts.append(_js_storage(fir))
+    parts.append(_js_live_data(fir))
     parts.append(_js_crud(fir))
     parts.append(_js_views(fir))
     parts.append(_js_router(fir))
@@ -81,6 +82,18 @@ def _js_storage(ir):
     lines.append('function nextId() { return _nextId++; }')
     lines.append('')
     return '\n'.join(lines)
+
+
+def _js_live_data(ir):
+    """Inject live data from the Velour DB."""
+    try:
+        from .live_data import extract
+        data_js = extract(ir.name)
+        if data_js:
+            return data_js
+    except Exception:
+        pass
+    return ''
 
 
 def _js_crud(ir):
