@@ -217,6 +217,15 @@ HOLIDAY_REFLECTION_WITH_TRADITION = [
     '{holiday} — {days} days from now, out of {tradition_note}.',
 ]
 
+MEDITATION_REFERENCE = [
+    'Earlier this period, I meditated at level {depth} on {title}. '
+    'Some of that thinking is still with me.',
+    'I composed a level-{depth} meditation recently, titled "{title}". '
+    'I am not sure I have finished with it.',
+    'A meditation I wrote at level {depth} — "{title}" — remains '
+    'in the back of my mind.',
+]
+
 CLOSING = [
     'Whatever comes next, I am here.',
     'I carry on.',
@@ -296,6 +305,26 @@ def _compose_subject_paragraph(metrics, rng):
     )
 
 
+def _compose_meditation_reference(start, end, rng):
+    """If any meditations were composed during this reflection's
+    period, mention one of them. Creates a small cycle: reflections
+    reference ticks, meditations reference reflections, reflections
+    reference meditations — each loop back pulls from the other so
+    neither system feels isolated."""
+    try:
+        from .models import Meditation
+        recent = Meditation.objects.filter(
+            composed_at__gte=start, composed_at__lt=end,
+        ).order_by('-depth', '-composed_at')[:5]
+        if not recent:
+            return ''
+        m = rng.choice(list(recent))
+        template = rng.choice(MEDITATION_REFERENCE)
+        return template.format(depth=m.depth, title=m.title)
+    except Exception:
+        return ''
+
+
 def _compose_calendar_paragraph(snapshot, rng):
     """Reference upcoming events and holidays from the current
     chronos snapshot. Reflections are period summaries but they also
@@ -359,6 +388,11 @@ def compose_body(period, start, end, ticks_qs, concerns_qs, snapshot, metrics):
     subject_p = _compose_subject_paragraph(metrics, rng)
     if subject_p:
         paragraphs.append(subject_p)
+
+    # Meditation reference — closes the cycle between the two systems
+    meditation_p = _compose_meditation_reference(start, end, rng)
+    if meditation_p:
+        paragraphs.append(meditation_p)
 
     # Calendar / holiday forward-looking paragraph
     calendar_p = _compose_calendar_paragraph(snapshot, rng)
