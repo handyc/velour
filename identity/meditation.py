@@ -801,6 +801,19 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     if push_to_codex and toggles.codex_push_enabled:
         _push_to_codex(med)
 
+    # Self-modifying data: at depth 3+, the meditation examines
+    # recurring aspects that don't yet have rules and proposes new
+    # ones. Proposals sit in status='proposed' until operator
+    # approval. Safe version of self-modifying functions — data
+    # modifies itself through a gate the operator controls.
+    if depth >= 3:
+        try:
+            from .rule_proposer import propose_rule_if_warranted
+            propose_rule_if_warranted(
+                triggered_by=f'meditation L{depth} at {now:%Y-%m-%d %H:%M}')
+        except Exception:
+            pass
+
     return med
 
 

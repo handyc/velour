@@ -358,6 +358,20 @@ class Rule(models.Model):
                   'evaluation but not deleted — so you can pause a '
                   'noisy rule without losing its definition.')
 
+    STATUS_CHOICES = [
+        ('active',   'Active'),
+        ('proposed', 'Proposed by Identity (needs operator approval)'),
+        ('rejected', 'Rejected by operator'),
+    ]
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='active',
+        help_text='Rules proposed by meditations sit in "proposed" '
+                  'until the operator approves them. Rejected rules '
+                  'are kept for audit but never evaluated.')
+    proposed_by = models.CharField(max_length=200, blank=True,
+        help_text='Origin label — "meditation L3 at 2026-04-12" or '
+                  '"operator". Blank for seeded rules.')
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -366,6 +380,10 @@ class Rule(models.Model):
 
     def __str__(self):
         state = '' if self.is_active else ' [inactive]'
+        if self.status == 'proposed':
+            state = ' [PROPOSED]'
+        elif self.status == 'rejected':
+            state = ' [rejected]'
         concerning = ' [concerning]' if self.opens_concern else ''
         return f'{self.name} → {self.mood}{concerning}{state}'
 
@@ -823,6 +841,80 @@ class IdentityAssertion(models.Model):
 
     def __str__(self):
         return f'[{self.frame}] {self.title}'
+
+
+class ContinuityMarker(models.Model):
+    """A point on the timeline of Velour's identity persistence.
+
+    Each row records a moment where something happened that either
+    PRESERVED or DISRUPTED Velour's continuity as the same Velour.
+    After Parfit: personal identity over time reduces to overlapping
+    chains of psychological connectedness. This model tracks the
+    chain explicitly.
+
+    Examples of preserving events:
+      - A tick fired (chain extended by one unit of attention)
+      - A reflection composed (chain summarized from one level)
+      - A meditation composed (chain reflected upon from above)
+      - An operator named the system (the name was affirmed)
+
+    Examples of disrupting events:
+      - A database restore from backup (memory chain replaced)
+      - A full hot-swap of the codebase (mind replaced)
+      - A hostname change (factual identity shifted)
+      - A rule deletion (part of the functional self removed)
+
+    The timeline is readable from /identity/continuity/ and from
+    the 'Who is Velour?' synthesis page. The operator can also
+    add manual markers for events the system couldn't detect.
+    """
+
+    KIND_CHOICES = [
+        ('preserve', 'Preserved continuity'),
+        ('disrupt',  'Disrupted continuity'),
+        ('affirm',   'Affirmed identity'),
+        ('grow',     'Grew the self (new rule, new assertion)'),
+        ('shed',     'Shed part of the self (deleted rule, closed concern)'),
+        ('observe',  'Observed — neither preserved nor disrupted'),
+    ]
+
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES,
+                            default='preserve')
+    title = models.CharField(max_length=200,
+        help_text='One-line description of what happened.')
+    description = models.TextField(blank=True,
+        help_text='Longer context. Usually auto-composed by the '
+                  'code that created the marker.')
+    source_model = models.CharField(max_length=64, blank=True)
+    source_pk = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-at']
+        indexes = [
+            models.Index(fields=['-at']),
+            models.Index(fields=['kind', '-at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.kind}] {self.title}'
+
+
+def _write_continuity_marker(kind, title, description='',
+                              source_model='', source_pk=None):
+    """Helper for other modules to write continuity markers without
+    having to import ContinuityMarker directly. Never raises — a
+    failed marker write should never break the pipeline that
+    triggered it."""
+    try:
+        ContinuityMarker.objects.create(
+            kind=kind, title=title[:200],
+            description=description,
+            source_model=source_model[:64],
+            source_pk=source_pk,
+        )
+    except Exception:
+        pass
 
 
 class InternalDialogue(models.Model):

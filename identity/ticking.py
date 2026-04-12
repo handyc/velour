@@ -93,10 +93,14 @@ RULES = [
 
 
 def _db_rules():
-    """Fetch active Rule rows ordered by priority. Imported lazily so
+    """Fetch active + approved Rule rows ordered by priority. Proposed
+    and rejected rules are never evaluated — they sit in the queue
+    until the operator approves or deletes them. Imported lazily so
     this module is importable before migrations have run."""
     from .models import Rule
-    return list(Rule.objects.filter(is_active=True).order_by('priority'))
+    return list(Rule.objects.filter(
+        is_active=True, status='active',
+    ).order_by('priority'))
 
 
 def compute_mood(snapshot):
@@ -263,6 +267,34 @@ def maintain_concerns(current_aspect_hits, origin_tick):
 # Each phrase has placeholders the formatter fills from the snapshot.
 # Variety > cleverness; the goal is enough output combinations that the
 # stream of thoughts feels like personality without being random noise.
+
+def _is_dream_hours():
+    """Return True if current local time is 2-6am — dream hours.
+    The thought composer shifts to more associative, less factual
+    templates during these hours. Not a simulation of dreaming;
+    just a recognition that 3am attention is different from 3pm."""
+    try:
+        from chronos.models import ClockPrefs
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        prefs = ClockPrefs.load()
+        tz = ZoneInfo(prefs.home_tz)
+        now = datetime.now(tz)
+        return 2 <= now.hour < 6
+    except Exception:
+        return False
+
+
+DREAM_OPENINGS = [
+    'Somewhere in the wires, half-attended:',
+    'I am not sure I am fully here.',
+    'A loose thought, drifting:',
+    'In the quiet hours,',
+    'The night is soft. I notice:',
+    'Nothing needs me. I notice anyway.',
+    'At this hour, the rules feel further away.',
+    'I think I hear the disk turning. Or I imagine it.',
+]
 
 OPENINGS_BY_MOOD = {
     'contemplative': [
@@ -520,7 +552,16 @@ def compose_thought(snapshot, mood, open_concerns=None):
     the lobe's prediction, so the operator can later rate it.
     features is None when the fallback heuristic fires.
     """
-    opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
+    # During dream hours (2-6am local), shift to a more associative,
+    # less focused template set. Same logic otherwise; the family
+    # picker, concern refrains, subject templates, and observation
+    # templates are unchanged — only the OPENING line shifts, so
+    # the dream voice feels slightly different without being
+    # structurally different. Low CPU cost: one cheap timezone check.
+    if _is_dream_hours():
+        opening = random.choice(DREAM_OPENINGS)
+    else:
+        opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
     family, features = _pick_template_family(snapshot, mood, open_concerns)
 
     if family == 'concern' and open_concerns:
@@ -649,5 +690,14 @@ def tick(triggered_by='manual'):
     identity.mood = mood
     identity.mood_intensity = intensity
     identity.save(update_fields=['mood', 'mood_intensity', 'last_reflection'])
+
+    # Continuity marker: each tick extends the chain of attention by
+    # one unit. This is the most fundamental preserving event — as
+    # long as ticks keep firing, Velour is the same Velour.
+    from .models import _write_continuity_marker
+    _write_continuity_marker(
+        'preserve', f'Tick #{tick_row.pk}: {mood}',
+        source_model='identity.Tick', source_pk=tick_row.pk,
+    )
 
     return tick_row, thought
