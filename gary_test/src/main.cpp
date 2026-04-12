@@ -64,11 +64,13 @@
   // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
   // Hazel sends 2000-char screen every 20 min.
   // Mabel sends 2000-char screen every 30 min.
-  // TESTING: 1 minute intervals. Restore to 1800000/1200000 after confirming.
+  // TESTING: offset intervals so they don't transmit simultaneously.
   #ifdef NODE_LORA_ROLE_SENDER
     #define LORA_SCREEN_INTERVAL_MS 60000   // Mabel: 1 min (test)
+    #define LORA_SCREEN_OFFSET_MS   30000   // start 30s after boot
   #else
     #define LORA_SCREEN_INTERVAL_MS 60000   // Hazel: 1 min (test)
+    #define LORA_SCREEN_OFFSET_MS       0   // start immediately
   #endif
   unsigned long lastLoraScreenAt = 0;
 
@@ -235,7 +237,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.0"
+#define FIRMWARE_VERSION    "v0.6.1"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1010,10 +1012,9 @@ static void oledRedraw() {
             }
             qrReady = true;
         }
-        // Draw centered in 32x32 area at (96, 32).
-        // 21x21 in 32x32 → offset (5,5) for centering + quiet zone.
+        // Draw centered in 32x32 area at (96, 29) — shifted up 3px to clear ticker.
         int qx = 96 + 5;
-        int qy = 32 + 5;
+        int qy = 29 + 5;
         for (int row = 0; row < 21; row++) {
             for (int col = 0; col < 21; col++) {
                 if (qrPixels[row * 3 + (col / 8)] & (1 << (col % 8))) {
@@ -1393,19 +1394,16 @@ static void loraSetup() {
         LoRa.setSignalBandwidth(125E3);
         LoRa.setCodingRate4(5);
         loraReady = true;
+        // Offset the first send so the twins don't transmit simultaneously
+        lastLoraScreenAt = millis() - LORA_SCREEN_INTERVAL_MS + LORA_SCREEN_OFFSET_MS;
         Serial.println("[lora] initialized at 868 MHz");
-        // Seed the ticker with a waiting message so scrolling is visible immediately
+        Serial.print("[lora] first screen send in ");
+        Serial.print(LORA_SCREEN_OFFSET_MS / 1000);
+        Serial.println("s");
         snprintf(loraScreenBuf, LORA_SCREEN_SIZE,
                  "  ~~~ waiting for LoRa transmission from twin ~~~  "
-                 "  %s is online at 868 MHz, SF7, 125kHz BW.  "
-                 "  First screen arrives in %d minutes.  ",
-                 NODE_SLUG,
-#ifdef NODE_LORA_ROLE_SENDER
-                 20  // Mabel waits for Hazel's 20-min screen
-#else
-                 30  // Hazel waits for Mabel's 30-min screen
-#endif
-        );
+                 "  %s is online at 868 MHz, SF7, 125kHz BW.  ",
+                 NODE_SLUG);
     } else {
         Serial.println("[lora] FAILED to initialize");
     }
