@@ -305,6 +305,16 @@ def identity_home(request):
     # enough for a scannable home card; full history is in the admin.
     recent_cron_runs = CronRun.objects.all()[:6]
 
+    # Recent tile sets Identity has generated autonomously. Shown
+    # on the home page so the operator can see when Velour has
+    # "felt like" making something.
+    try:
+        from tiles.models import TileSet
+        identity_tilesets = list(
+            TileSet.objects.filter(source='identity').order_by('-created_at')[:4])
+    except Exception:
+        identity_tilesets = []
+
     # Emergency toggles — the singleton the operator uses to pause
     # observation pipelines without uninstalling code.
     toggles = IdentityToggles.get_self()
@@ -339,6 +349,7 @@ def identity_home(request):
         'recent_reflections': recent_reflections,
         'recent_meditations': recent_meditations,
         'recent_cron_runs': recent_cron_runs,
+        'identity_tilesets': identity_tilesets,
         'toggles': toggles,
         'legacy_journal': legacy_journal,
         'vitals': vitals,

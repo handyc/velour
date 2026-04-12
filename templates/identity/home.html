@@ -390,6 +390,42 @@
         </form>
     </div>
 
+    <!-- Tilesets Identity has generated autonomously -->
+    <div class="card" style="border-left: 3px solid #ff7b72;">
+        <h3>Tiles I have made
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ identity_tilesets|length }} shown
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+            When I am in a creative or curious mood and enough time
+            has passed, I occasionally compose a Wang tile set from
+            my current state. Each set is a portrait of a particular
+            moment of my attention.
+        </p>
+        {% if identity_tilesets %}
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+            {% for ts in identity_tilesets %}
+            <a href="{% url 'tiles:detail' ts.slug %}" style="text-decoration: none; color: inherit;">
+                <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #ff7b72; border-radius: 3px;">
+                    <div style="color: #c9d1d9; font-size: 0.82rem;">{{ ts.name }}</div>
+                    <div style="color: #6e7681; font-size: 0.7rem; font-family: ui-monospace, Menlo, monospace; margin-top: 0.15rem;">
+                        {{ ts.tile_count }} tile{{ ts.tile_count|pluralize }} · {{ ts.created_at|date:"Y-m-d H:i" }}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">
+            I have not made any tile sets yet.
+        </p>
+        {% endif %}
+        <div style="margin-top: 0.75rem;">
+            <a href="{% url 'tiles:list' %}" style="font-size: 0.78rem; color: #ff7b72;">View all tiles →</a>
+        </div>
+    </div>
+
     <!-- LLM chat — foreign observer via external APIs -->
     <div class="card" style="border-left: 3px solid #58a6ff;">
         <h3>LLM chat

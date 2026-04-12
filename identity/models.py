@@ -556,6 +556,7 @@ class CronRun(models.Model):
         ('reflect_monthly',  'Reflection — monthly'),
         ('meditate_ladder',  'Meditation ladder (weekly)'),
         ('rebuild_document', 'Rebuild identity document (weekly)'),
+        ('tile_reflect',     'Tile reflection / autonomous generation'),
         ('dispatch',         'Full cron dispatch'),
     ]
     STATUS_CHOICES = [

@@ -56,7 +56,7 @@ def dispatch(force=None):
         force = {
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
-            'rebuild_document',
+            'rebuild_document', 'tile_reflect',
         }
 
     results = {}
@@ -98,6 +98,14 @@ def dispatch(force=None):
             now.minute < 10 and now.hour == 0 and now.weekday() == 6):
         results['rebuild_document'] = _run_pipeline(
             'rebuild_document', _do_rebuild_document)
+
+    # --- Tile reflection: hourly check, probabilistic fire ----------
+    # This one is checked on every hourly cadence (minute < 10), but
+    # the actual generation is gated by identity_feels_like_making_tiles
+    # which rolls a state-driven probability. Most checks do nothing.
+    if 'tile_reflect' in force or (now.minute < 10):
+        results['tile_reflect'] = _run_pipeline(
+            'tile_reflect', _do_tile_reflect)
 
     # Single dispatch row summarizing the whole run
     parts = [f'{k}={v[0]}' for k, v in results.items()]
@@ -163,3 +171,18 @@ def _do_rebuild_document():
     count = rebuild_document()
     push_document_to_codex()
     return f'Rebuilt identity document with {count} auto assertions'
+
+
+def _do_tile_reflect():
+    """Check if Identity feels like making a tile set. If so, make
+    one. If not, return the reason — cron logs the no-op so the
+    operator can see the decision."""
+    from .tiles_reflection import (
+        identity_feels_like_making_tiles,
+        generate_tileset_from_identity,
+    )
+    should, reason = identity_feels_like_making_tiles()
+    if not should:
+        return f'did not feel like it — {reason}'
+    ts = generate_tileset_from_identity()
+    return f'made {ts.slug} (tiles={ts.tile_count}) — {reason}'

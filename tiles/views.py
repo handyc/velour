@@ -22,10 +22,22 @@ def tileset_detail(request, slug):
     tiles = list(tileset.tiles.all())
     # Also compute a small greedy tiling attempt for the detail view
     greedy = _greedy_tile_grid(tiles, width=6, height=4)
+
+    # Ask Identity for a short philosophical commentary on this
+    # tile set. Silently swallow any failure — the tiles page
+    # should still work if the identity app is broken or missing.
+    identity_reflection = ''
+    try:
+        from identity.tiles_reflection import reflect_on_tileset
+        identity_reflection = reflect_on_tileset(tileset)
+    except Exception:
+        pass
+
     return render(request, 'tiles/detail.html', {
-        'tileset': tileset,
-        'tiles':   tiles,
-        'greedy':  greedy,
+        'tileset':            tileset,
+        'tiles':              tiles,
+        'greedy':             greedy,
+        'identity_reflection': identity_reflection,
     })
 
 

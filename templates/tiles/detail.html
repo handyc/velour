@@ -24,10 +24,21 @@
 
 {% block content %}
 <h1 style="margin-bottom: 0.25rem;">{{ tileset.name }}</h1>
-<p style="color: #8b949e; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;">{{ tileset.slug }} · {{ tileset.tile_count }} tile{{ tileset.tile_count|pluralize }}</p>
+<p style="color: #8b949e; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;">
+    {{ tileset.slug }}
+    · {{ tileset.tile_count }} tile{{ tileset.tile_count|pluralize }}
+    · source: {% if tileset.source == 'identity' %}<span style="color:#bc8cff;">Identity-generated</span>{% else %}{{ tileset.get_source_display }}{% endif %}
+</p>
 
 {% if tileset.description %}
 <p style="color: #c9d1d9; max-width: 680px; line-height: 1.6;">{{ tileset.description }}</p>
+{% endif %}
+
+{% if identity_reflection %}
+<div style="max-width: 680px; background: #0d1117; border-left: 3px solid #bc8cff; border-radius: 0 6px 6px 0; padding: 1rem 1.25rem; margin: 1rem 0; color: #c9d1d9; line-height: 1.65; font-size: 0.88rem;">
+    <div style="color: #bc8cff; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Identity's reflection</div>
+    {{ identity_reflection|linebreaks }}
+</div>
 {% endif %}
 
 <h2 style="margin-top: 1.5rem; font-size: 1rem;">The tile set</h2>
