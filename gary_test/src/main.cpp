@@ -55,7 +55,10 @@
   unsigned long loraPacketsRecv = 0;
   int loraLastRssi = 0;
   char loraLastMsg[64] = "";
-  #define LORA_SEND_INTERVAL_MS 5000
+  // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
+  // Hazel: "awake" ping every 10 min + 2KB report every hour.
+  // Mabel: small confirmations only. Well within budget.
+  #define LORA_SEND_INTERVAL_MS 600000   // 10 minutes
 #endif
 
 // Optional OLED display support. Enable by defining NODE_HAS_OLED in
@@ -1253,65 +1256,47 @@ static void loraSetup() {
 static void loraLoop() {
     if (!loraReady) return;
 
+    // Both roles: listen for incoming packets
+    int packetSize = LoRa.parsePacket();
+    if (packetSize > 0) {
+        int i = 0;
+        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
+            loraLastMsg[i++] = (char)LoRa.read();
+        }
+        loraLastMsg[i] = '\0';
+        loraLastRssi = LoRa.packetRssi();
+        loraPacketsRecv++;
+        Serial.print("[lora] recv: ");
+        Serial.print(loraLastMsg);
+        Serial.print(" rssi=");
+        Serial.println(loraLastRssi);
+        velour.addReading("lora_rx", (float)loraPacketsRecv);
+        velour.addReading("lora_rssi", (float)loraLastRssi);
+
 #ifdef NODE_LORA_ROLE_SENDER
-    // Mabel: send a ping every LORA_SEND_INTERVAL_MS
+        // Mabel: send small ACK when she receives from Hazel
+        loraPacketsSent++;
+        char ack[32];
+        snprintf(ack, sizeof(ack), "ack %lu", loraPacketsSent);
+        LoRa.beginPacket();
+        LoRa.print(ack);
+        LoRa.endPacket();
+#endif
+    }
+
+#ifndef NODE_LORA_ROLE_SENDER
+    // Hazel (base station): send "awake" beacon every 10 minutes
     if (millis() - lastLoraSendAt >= LORA_SEND_INTERVAL_MS) {
         lastLoraSendAt = millis();
         loraPacketsSent++;
         char msg[48];
-        snprintf(msg, sizeof(msg), "ping %lu from %s", loraPacketsSent, NODE_SLUG);
+        snprintf(msg, sizeof(msg), "awake %lu %s", loraPacketsSent, NODE_SLUG);
         LoRa.beginPacket();
         LoRa.print(msg);
         LoRa.endPacket();
         Serial.print("[lora] sent: ");
         Serial.println(msg);
-
-        // Report to Velour
         velour.addReading("lora_tx", (float)loraPacketsSent);
-    }
-
-    // Also listen for replies
-    int packetSize = LoRa.parsePacket();
-    if (packetSize > 0) {
-        int i = 0;
-        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
-            loraLastMsg[i++] = (char)LoRa.read();
-        }
-        loraLastMsg[i] = '\0';
-        loraLastRssi = LoRa.packetRssi();
-        loraPacketsRecv++;
-        Serial.print("[lora] recv: ");
-        Serial.print(loraLastMsg);
-        Serial.print(" rssi=");
-        Serial.println(loraLastRssi);
-    }
-#else
-    // Hazel: listen for packets, send pong reply
-    int packetSize = LoRa.parsePacket();
-    if (packetSize > 0) {
-        int i = 0;
-        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
-            loraLastMsg[i++] = (char)LoRa.read();
-        }
-        loraLastMsg[i] = '\0';
-        loraLastRssi = LoRa.packetRssi();
-        loraPacketsRecv++;
-        Serial.print("[lora] recv: ");
-        Serial.print(loraLastMsg);
-        Serial.print(" rssi=");
-        Serial.println(loraLastRssi);
-
-        // Send pong
-        loraPacketsSent++;
-        char reply[48];
-        snprintf(reply, sizeof(reply), "pong %lu from %s", loraPacketsSent, NODE_SLUG);
-        LoRa.beginPacket();
-        LoRa.print(reply);
-        LoRa.endPacket();
-
-        // Report to Velour
-        velour.addReading("lora_rx", (float)loraPacketsRecv);
-        velour.addReading("lora_rssi", (float)loraLastRssi);
     }
 #endif
 }
