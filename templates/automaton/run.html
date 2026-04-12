@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}{{ sim.name }} — Automaton{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ctrl{display:flex;gap:0.5rem;align-items:center;margin:0.5rem 0;flex-wrap:wrap}
+    .ctrl button{font-size:0.78rem}
+    .ctrl .stat{font-size:0.72rem;color:#8b949e;font-family:ui-monospace,Menlo,monospace}
+    canvas{border:1px solid #30363d;display:block;margin:0.3rem 0;image-rendering:pixelated}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom:0.2rem">{{ sim.name }}</h1>
+<p style="color:#8b949e;font-size:0.75rem">
+    {{ sim.ruleset.name }} · {{ sim.width }}×{{ sim.height }} · {{ sim.ruleset.n_colors }} colors
+</p>
+
+<div class="ctrl">
+    <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
+    <button class="btn btn-secondary" onclick="step()">Step</button>
+    <button class="btn btn-secondary" onclick="randomize()">Randomize</button>
+    <label style="font-size:0.72rem;color:#8b949e">Speed
+        <input type="range" id="speed" min="1" max="30" value="10" style="width:80px;vertical-align:middle">
+    </label>
+    <span class="stat" id="tick-count">tick 0</span>
+    <span class="stat" id="pop-count"></span>
+</div>
+
+<canvas id="grid"></canvas>
+
+<div style="margin-top:0.5rem">
+    <a href="{% url 'automaton:home' %}" class="btn btn-secondary">Back</a>
+</div>
+
+<script>
+(function() {
+    var W = {{ sim.width }}, H = {{ sim.height }};
+    var PALETTE = {{ palette_json|safe }};
+    var RULES = {{ rules_json|safe }};
+    var NC = PALETTE.length;
+    var grid = {{ grid_json|safe }};
+    var tick = 0;
+    var playing = false;
+    var timer = null;
+
+    // Ensure grid is initialized
+    if (!grid || !grid.length) {
+        grid = [];
+        for (var r = 0; r < H; r++) {
+            grid[r] = [];
+            for (var c = 0; c < W; c++) grid[r][c] = Math.floor(Math.random() * NC);
+        }
+    }
+
+    var PX = Math.max(6, Math.min(16, Math.floor(800 / W)));
+    var canvas = document.getElementById('grid');
+    var ctx = canvas.getContext('2d');
+
+    // Hex geometry
+    var sz = PX / 2;
+    var hh = Math.sqrt(3) * sz;
+    canvas.width = Math.ceil(W * sz * 2 * 0.75 + sz * 0.5);
+    canvas.height = Math.ceil(H * hh + hh / 2 + 1);
+
+    function hexCenter(r, c) {
+        return [c * sz * 2 * 0.75 + sz, r * hh + hh / 2 + (c % 2 === 1 ? hh / 2 : 0)];
+    }
+
+    function hexCorners(cx, cy) {
+        var pts = [];
+        for (var i = 0; i < 6; i++) {
+            var a = Math.PI / 3 * i;
+            pts.push([cx + sz * Math.cos(a), cy + sz * Math.sin(a)]);
+        }
+        return pts;
+    }
+
+    // Hex neighbors (offset columns, flat-top)
+    function neighbors(r, c) {
+        var even = c % 2 === 0;
+        var nb = [
+            [r-1, c],                          // N
+            [even ? r-1 : r, c+1],             // NE
+            [even ? r : r+1, c+1],             // SE
+            [r+1, c],                          // S
+            [even ? r : r+1, c-1],             // SW
+            [even ? r-1 : r, c-1],             // NW
+        ];
+        return nb.filter(function(p) { return p[0] >= 0 && p[0] < H && p[1] >= 0 && p[1] < W; });
+    }
+
+    function draw() {
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (var r = 0; r < H; r++) {
+            for (var c = 0; c < W; c++) {
+                var color = PALETTE[grid[r][c]] || '#333';
+                var ctr = hexCenter(r, c);
+                var pts = hexCorners(ctr[0], ctr[1]);
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(pts[0][0], pts[0][1]);
+                for (var i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+    }
+
+    function step() {
+        var next = [];
+        var counts = new Array(NC).fill(0);
+
+        for (var r = 0; r < H; r++) {
+            next[r] = [];
+            for (var c = 0; c < W; c++) {
+                var self = grid[r][c];
+                var nbs = neighbors(r, c);
+
+                // Count neighbors of each color
+                var ncount = new Array(NC).fill(0);
+                for (var i = 0; i < nbs.length; i++) {
+                    ncount[grid[nbs[i][0]][nbs[i][1]]]++;
+                }
+
+                // Apply rules in priority order — first match wins
+                var result = self; // default: no change
+                for (var ri = 0; ri < RULES.length; ri++) {
+                    var rule = RULES[ri];
+                    if (rule.self_color >= 0 && rule.self_color !== self) continue;
+                    var cnt = ncount[rule.neighbor_color] || 0;
+                    if (cnt >= rule.min_count && cnt <= rule.max_count) {
+                        result = rule.result_color;
+                        break;
+                    }
+                }
+                next[r][c] = result;
+                counts[result]++;
+            }
+        }
+        grid = next;
+        tick++;
+        document.getElementById('tick-count').textContent = 'tick ' + tick;
+        document.getElementById('pop-count').textContent =
+            counts.map(function(n, i) { return 'c' + i + ':' + n; }).join(' ');
+        draw();
+    }
+
+    function randomize() {
+        for (var r = 0; r < H; r++)
+            for (var c = 0; c < W; c++)
+                grid[r][c] = Math.floor(Math.random() * NC);
+        tick = 0;
+        draw();
+        document.getElementById('tick-count').textContent = 'tick 0';
+    }
+
+    function togglePlay() {
+        playing = !playing;
+        document.getElementById('btn-play').textContent = playing ? '⏸ Pause' : '▶ Play';
+        if (playing) runLoop();
+        else if (timer) { clearTimeout(timer); timer = null; }
+    }
+
+    function runLoop() {
+        if (!playing) return;
+        step();
+        var speed = parseInt(document.getElementById('speed').value) || 10;
+        var delay = Math.max(16, 1000 / speed);
+        timer = setTimeout(runLoop, delay);
+    }
+
+    // Expose to onclick
+    window.togglePlay = togglePlay;
+    window.step = step;
+    window.randomize = randomize;
+
+    draw();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Automaton — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sim-list{display:flex;flex-direction:column;gap:2px;margin:0.5rem 0}
+    .sim-row{background:#161b22;border-left:2px solid #2ea043;border-radius:0 3px 3px 0;
+        padding:0.3rem 0.5rem;font-size:0.78rem;display:flex;align-items:center;gap:0.5rem}
+    .sim-row .name{color:#c9d1d9;font-weight:500}
+    .sim-row .meta{color:#6e7681;font-size:0.68rem;font-family:monospace;margin-left:auto}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Automaton</h1>
+<p style="color:#8b949e;font-size:0.78rem;margin-bottom:0.5rem">
+    Hexagonal cellular automata — 4-color Game of Life on hex grids.
+    Rules determine how cells evolve based on neighbor colors.
+</p>
+
+<div style="display:flex;gap:0.5rem;margin:0.5rem 0;flex-wrap:wrap">
+    <form method="post" action="{% url 'automaton:create_life_rules' %}" style="display:inline">
+        {% csrf_token %}
+        <button type="submit" class="btn">Create Life Rules</button>
+    </form>
+</div>
+
+{% if rulesets %}
+<h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">New simulation</h2>
+<form method="post" action="{% url 'automaton:create' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
+    {% csrf_token %}
+    <label style="color:#8b949e;font-size:0.72rem">Rules
+        <select name="ruleset">
+            {% for rs in rulesets %}
+            <option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="color:#8b949e;font-size:0.72rem">W <input type="number" name="width" value="32" min="8" max="128" style="width:3.5rem"></label>
+    <label style="color:#8b949e;font-size:0.72rem">H <input type="number" name="height" value="32" min="8" max="128" style="width:3.5rem"></label>
+    <label style="color:#8b949e;font-size:0.72rem">Name <input type="text" name="name" placeholder="optional" style="width:8rem"></label>
+    <button type="submit" class="btn" style="background:#238636;border-color:#2ea043">Run</button>
+</form>
+{% endif %}
+
+{% if simulations %}
+<h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Simulations</h2>
+<div class="sim-list">
+    {% for sim in simulations %}
+    <a href="{% url 'automaton:run' sim.slug %}" class="sim-row" style="text-decoration:none">
+        <span class="name">{{ sim.name }}</span>
+        <span class="meta">{{ sim.width }}×{{ sim.height }} · tick {{ sim.tick_count }} · {{ sim.created_at|date:"Y-m-d H:i" }}</span>
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="margin-top:1rem">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

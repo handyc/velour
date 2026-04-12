@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     'hpc',
     'tiles',
     'condenser',
+    'automaton',
 ]
 
 MIDDLEWARE = [

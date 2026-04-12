@@ -34,6 +34,7 @@ urlpatterns = [
     path('hpc/', include('hpc.urls')),
     path('tiles/', include('tiles.urls')),
     path('condenser/', include('condenser.urls')),
+    path('automaton/', include('automaton.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),
