@@ -58,6 +58,29 @@
     }
     .tick-row .thought .aspects a:hover { color: #58a6ff; border-color: #58a6ff; }
 
+    .feedback {
+        display: inline-flex; gap: 0.2rem; margin-left: 0.4rem;
+        vertical-align: middle;
+    }
+    .feedback button {
+        background: transparent;
+        border: 1px solid #30363d;
+        border-radius: 3px;
+        color: #484f58;
+        cursor: pointer;
+        font-size: 0.7rem;
+        padding: 0.05rem 0.35rem;
+        line-height: 1.3;
+    }
+    .feedback button:hover { color: #c9d1d9; border-color: #8b949e; }
+    .feedback button.active-good { color: #3fb950; border-color: #3fb950; }
+    .feedback button.active-bad  { color: #f85149; border-color: #f85149; }
+    .feedback button.active-meh  { color: #d29922; border-color: #d29922; }
+    .feedback .predicted {
+        color: #bc8cff; font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.65rem; padding: 0 0.3rem 0 0.1rem;
+    }
+
     .pager { margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center; color: #8b949e; font-size: 0.85rem; }
     .pager .btn-sm { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
 
@@ -125,6 +148,16 @@
             </div>
             <div class="thought">
                 {% if t.thought %}{{ t.thought }}{% else %}<span style="color:#484f58;">(no thought recorded)</span>{% endif %}
+                {% if t.oracle_label %}
+                <form class="feedback" method="post" action="{% url 'identity:rumination_feedback' t.pk %}" style="display:inline-flex;">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <span class="predicted" title="Oracle predicted this template family">→ {{ t.oracle_label.predicted }}</span>
+                    <button type="submit" name="verdict" value="good" class="{% if t.oracle_label.verdict == 'good' %}active-good{% endif %}" title="Good rumination — keep as training data">👍</button>
+                    <button type="submit" name="verdict" value="meh"  class="{% if t.oracle_label.verdict == 'meh' %}active-meh{% endif %}" title="Neither good nor bad">~</button>
+                    <button type="submit" name="verdict" value="bad"  class="{% if t.oracle_label.verdict == 'bad' %}active-bad{% endif %}" title="Bad rumination — do not reinforce">👎</button>
+                </form>
+                {% endif %}
                 {% if t.rule_label %}<div class="why">{{ t.rule_label }} · {{ t.triggered_by }}</div>{% endif %}
                 {% if t.aspects %}
                 <div class="aspects">

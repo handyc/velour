@@ -82,24 +82,68 @@ class Command(BaseCommand):
                             help='Number of synthetic examples to train on.')
         parser.add_argument('--max-depth', type=int, default=6,
                             help='Max depth of the decision tree.')
+        parser.add_argument('--from-labels', action='store_true',
+                            help='Augment (or replace) the synthetic '
+                                 'bootstrap with OracleLabel rows where '
+                                 'the operator gave positive feedback.')
+        parser.add_argument('--labels-only', action='store_true',
+                            help='Use ONLY OracleLabel rows, no '
+                                 'synthetic bootstrap. Fails if there '
+                                 "aren't at least one labeled example "
+                                 'per class.')
 
     def handle(self, *args, **opts):
         n = opts['samples']
-        rng = random.Random(42)  # deterministic bootstrap
         random.seed(42)
 
         X = []
         y = []
         label_counts = {c: 0 for c in CLASSES}
-        for _ in range(n):
-            features, label = _synthesize_one()
-            X.append(features)
-            y.append(CLASSES.index(label))
-            label_counts[label] += 1
 
-        self.stdout.write(f'Generated {n} synthetic training examples:')
-        for label, count in label_counts.items():
-            self.stdout.write(f'  {label:12s} {count:4d}  ({count/n:.1%})')
+        # --- Real labels from OracleLabel (when --from-labels) ----------
+        if opts['from_labels'] or opts['labels_only']:
+            from oracle.models import OracleLabel
+            qs = OracleLabel.objects.filter(
+                lobe_name='rumination_template',
+                verdict='good',
+            ).exclude(actual='')
+            real_count = 0
+            for lb in qs:
+                if lb.actual not in CLASSES:
+                    continue
+                X.append(list(lb.features))
+                y.append(CLASSES.index(lb.actual))
+                label_counts[lb.actual] += 1
+                real_count += 1
+            self.stdout.write(self.style.SUCCESS(
+                f'Loaded {real_count} real labeled examples from OracleLabel'))
+
+            if opts['labels_only'] and real_count == 0:
+                self.stderr.write(self.style.ERROR(
+                    '--labels-only requested but no labeled examples '
+                    'exist yet. Give some 👍 feedback on recent ticks '
+                    'first, or omit --labels-only to mix with synthetic '
+                    'bootstrap.'))
+                return
+
+        # --- Synthetic bootstrap (default) -----------------------------
+        if not opts['labels_only']:
+            for _ in range(n):
+                features, label = _synthesize_one()
+                X.append(features)
+                y.append(CLASSES.index(label))
+                label_counts[label] += 1
+
+            self.stdout.write(f'Training set composition '
+                              f'({len(X)} total examples):')
+            for label, count in label_counts.items():
+                pct = count / max(1, len(X))
+                self.stdout.write(f'  {label:12s} {count:4d}  ({pct:.1%})')
+        else:
+            self.stdout.write(f'Training on {len(X)} labeled examples only:')
+            for label, count in label_counts.items():
+                if count:
+                    self.stdout.write(f'  {label:12s} {count:4d}')
 
         lobe = train_lobe(
             name='rumination_template',

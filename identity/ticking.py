@@ -463,6 +463,9 @@ def _pick_template_family(snapshot, mood, open_concerns):
     the pick comes from the decision tree walk. If not, fall back to
     the hand-tuned probabilistic rules that compose_thought used
     before Oracle existed.
+
+    Returns a (family, features) tuple so the caller can record an
+    OracleLabel row. features is None when the fallback path fires.
     """
     try:
         from oracle.inference import (
@@ -486,14 +489,14 @@ def _pick_template_family(snapshot, mood, open_concerns):
                 predicted = 'subject'
             if predicted == 'holiday' and not snapshot.get('calendar', {}).get('holidays'):
                 predicted = 'subject'
-            return predicted
+            return predicted, features
 
     # Fallback — no trained lobe, use the pre-Oracle heuristic.
     if open_concerns and random.random() < 0.3:
-        return 'concern'
+        return 'concern', None
     if random.random() < 0.35:
-        return 'subject'
-    return 'observation'
+        return 'subject', None
+    return 'observation', None
 
 
 def compose_thought(snapshot, mood, open_concerns=None):
@@ -504,32 +507,39 @@ def compose_thought(snapshot, mood, open_concerns=None):
     Oracle lobe when available and falls back to hand-tuned
     probabilistic rules otherwise. The template itself is then drawn
     from the matching library below.
+
+    Returns a (thought, family, features) tuple — family and features
+    let tick() write an OracleLabel row linking the rumination to
+    the lobe's prediction, so the operator can later rate it.
+    features is None when the fallback heuristic fires.
     """
     opening = random.choice(OPENINGS_BY_MOOD.get(mood, ['Hm.']))
-    family = _pick_template_family(snapshot, mood, open_concerns)
+    family, features = _pick_template_family(snapshot, mood, open_concerns)
 
     if family == 'concern' and open_concerns:
         concern = random.choice(open_concerns)
         refrain = random.choice(CONCERN_REFRAINS).format(
             concern=concern.name or concern.aspect.replace('_', ' '),
         )
-        return f'{opening} {refrain}'.strip()
+        return f'{opening} {refrain}'.strip(), family, features
 
     if family == 'subject':
         subject_text = _pick_named_subject(snapshot)
         if subject_text:
-            return f'{opening} {subject_text}'.strip()
+            return f'{opening} {subject_text}'.strip(), family, features
 
     if family == 'holiday':
         holidays = snapshot.get('calendar', {}).get('holidays', [])
         if holidays:
             h = random.choice(holidays[:3])
-            return f"{opening} I am thinking about {h['title']}, {h.get('days_away', 0)} days away.".strip()
+            return (f"{opening} I am thinking about {h['title']}, "
+                    f"{h.get('days_away', 0)} days away.".strip(),
+                    family, features)
 
     # Generic observation fallback.
     obs_template = random.choice(OBSERVATIONS)
     obs = _format_observation(obs_template, snapshot)
-    return f'{opening} {obs}'.strip()
+    return f'{opening} {obs}'.strip(), 'observation', features
 
 
 # --- the tick itself ----------------------------------------------------
@@ -559,7 +569,9 @@ def tick(triggered_by='manual'):
     # composer can reference them.
     open_concerns_before = list(Concern.objects.filter(closed_at=None))
 
-    thought = compose_thought(snapshot, mood, open_concerns=open_concerns_before)
+    thought, rumination_family, rumination_features = compose_thought(
+        snapshot, mood, open_concerns=open_concerns_before,
+    )
 
     tick_row = Tick.objects.create(
         triggered_by=triggered_by,
@@ -570,6 +582,23 @@ def tick(triggered_by='manual'):
         snapshot=snapshot,
         aspects=full_aspect_list,  # full union, not first-match
     )
+
+    # Write an OracleLabel for the rumination template prediction so
+    # the operator can rate it later. Only when the lobe actually
+    # fired — fallback-heuristic ticks don't produce a prediction
+    # worth labeling.
+    if rumination_features is not None:
+        try:
+            from oracle.models import OracleLabel
+            OracleLabel.objects.create(
+                lobe_name='rumination_template',
+                features=rumination_features,
+                predicted=rumination_family,
+                linked_model='identity.Tick',
+                linked_pk=tick_row.pk,
+            )
+        except Exception:
+            pass  # oracle unavailable — don't break the tick
 
     # Maintain the Concern table: open new, bump existing, close stale.
     maintain_concerns(all_hits, tick_row)

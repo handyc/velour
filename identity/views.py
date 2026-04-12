@@ -418,6 +418,43 @@ def mood_data(request):
 
 @login_required
 @require_POST
+def rumination_feedback(request, tick_pk):
+    """Operator judges whether the rumination at the given tick was
+    good or bad. Finds the linked OracleLabel row and writes the
+    verdict + (if positive) the actual class for future retraining."""
+    verdict = request.POST.get('verdict', '').strip()
+    if verdict not in ('good', 'bad', 'meh'):
+        return redirect('identity:tick_log')
+
+    try:
+        from oracle.models import OracleLabel
+        label = OracleLabel.objects.filter(
+            lobe_name='rumination_template',
+            linked_model='identity.Tick',
+            linked_pk=tick_pk,
+        ).first()
+        if label:
+            label.verdict = verdict
+            # 'good' → the predicted class was correct, so use it as
+            # ground truth for retraining. 'bad' and 'meh' leave
+            # `actual` empty; retraining treats them as signal that
+            # the example should NOT reinforce the prediction.
+            if verdict == 'good':
+                label.actual = label.predicted
+            label.actual_source = 'operator'
+            label.save(update_fields=['verdict', 'actual', 'actual_source'])
+    except Exception:
+        pass
+
+    # Return to wherever the operator came from, with a fallback
+    next_url = request.POST.get('next', '')
+    if next_url and next_url.startswith('/'):
+        return redirect(next_url)
+    return redirect('identity:tick_log')
+
+
+@login_required
+@require_POST
 def cron_run_now(request):
     """Operator-initiated cron dispatch — 'Run cron now' button.
     Runs with --force all so every pipeline fires regardless of
@@ -554,7 +591,9 @@ def concern_close(request, pk):
 def tick_log(request):
     """The structured tick log — dedicated page showing every Tick row
     with its mood, intensity, rule label, thought, and aspects. Paginates
-    and supports mood/aspect filtering via query params."""
+    and supports mood/aspect filtering via query params. Also looks
+    up the matching OracleLabel per tick so the operator can rate
+    the rumination template pick with good/bad/meh buttons."""
     from django.core.paginator import Paginator
 
     qs = Tick.objects.all()
@@ -570,6 +609,23 @@ def tick_log(request):
     paginator = Paginator(qs, 50)
     page = paginator.get_page(request.GET.get('page', 1))
 
+    # Look up OracleLabel rows for the visible ticks and attach each
+    # one to its Tick as .oracle_label so the template can render the
+    # feedback buttons inline without a dict lookup.
+    try:
+        from oracle.models import OracleLabel
+        tick_ids = [t.pk for t in page.object_list]
+        labels = OracleLabel.objects.filter(
+            lobe_name='rumination_template',
+            linked_model='identity.Tick',
+            linked_pk__in=tick_ids,
+        )
+        label_by_tick = {lb.linked_pk: lb for lb in labels}
+    except Exception:
+        label_by_tick = {}
+    for t in page.object_list:
+        t.oracle_label = label_by_tick.get(t.pk)
+
     # Mood counts over the filtered queryset — so the operator can see
     # "this week Velour was satisfied 60% of the time, alert 15%, …"
     from collections import Counter
@@ -582,6 +638,7 @@ def tick_log(request):
         'aspect_filter': aspect_filter,
         'all_moods': [c[0] for c in Mood.MOOD_CHOICES],
         'total_ticks': Tick.objects.count(),
+        'label_by_tick': label_by_tick,
     })
 
 
