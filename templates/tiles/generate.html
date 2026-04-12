@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Generate — {{ tileset.name }} — Tiles — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .gen-controls { display: flex; gap: 0.75rem; align-items: center; margin: 1rem 0; flex-wrap: wrap; }
+    .gen-controls label { color: #8b949e; font-size: 0.8rem; }
+    .gen-controls input[type=number] {
+        width: 4rem; padding: 0.3rem 0.4rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit; font-size: 0.85rem;
+    }
+    .gen-controls select {
+        padding: 0.3rem 0.4rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit; font-size: 0.85rem;
+    }
+    #tiling-canvas { border: 1px solid #30363d; margin-top: 0.5rem; display: block; }
+    .gen-status { color: #6e7681; font-size: 0.78rem; margin-top: 0.5rem; font-family: ui-monospace, Menlo, monospace; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 0.25rem;">Generate tiling: {{ tileset.name }}</h1>
+<p style="color: #8b949e; font-size: 0.85rem;">
+    Greedy Wang tiling on a canvas. Tiles are placed left-to-right, top-to-bottom. Each cell picks a random tile
+    whose edges match its already-placed neighbors. Empty (dark) cells mean the greedy search got stuck.
+</p>
+
+<div class="gen-controls">
+    <label>Width <input type="number" id="grid-w" value="16" min="1" max="64"></label>
+    <label>Height <input type="number" id="grid-h" value="16" min="1" max="64"></label>
+    <label>Tile px <input type="number" id="tile-px" value="24" min="8" max="80"></label>
+    <button class="btn" id="btn-generate">Generate</button>
+    <button class="btn btn-secondary" id="btn-download">Save as PNG</button>
+</div>
+
+<canvas id="tiling-canvas"></canvas>
+<div class="gen-status" id="gen-status"></div>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'tiles:detail' tileset.slug %}" class="btn btn-secondary">Back to {{ tileset.name }}</a>
+</div>
+
+<script>
+(function() {
+    var TILES = {{ tiles_json|safe }};
+
+    function generate() {
+        var gw = parseInt(document.getElementById('grid-w').value) || 16;
+        var gh = parseInt(document.getElementById('grid-h').value) || 16;
+        var px = parseInt(document.getElementById('tile-px').value) || 24;
+        gw = Math.max(1, Math.min(64, gw));
+        gh = Math.max(1, Math.min(64, gh));
+        px = Math.max(8, Math.min(80, px));
+
+        var canvas = document.getElementById('tiling-canvas');
+        canvas.width = gw * px;
+        canvas.height = gh * px;
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (!TILES.length) {
+            document.getElementById('gen-status').textContent = 'No tiles in this set.';
+            return;
+        }
+
+        // Build the grid with greedy placement
+        var grid = [];
+        var filled = 0, stuck = 0;
+        for (var r = 0; r < gh; r++) {
+            grid[r] = [];
+            for (var c = 0; c < gw; c++) {
+                var candidates = TILES.slice();
+                // Match west neighbor's east edge
+                if (c > 0 && grid[r][c-1]) {
+                    var leftE = grid[r][c-1].e;
+                    candidates = candidates.filter(function(t) { return t.w === leftE; });
+                }
+                // Match north neighbor's south edge
+                if (r > 0 && grid[r-1][c]) {
+                    var upS = grid[r-1][c].s;
+                    candidates = candidates.filter(function(t) { return t.n === upS; });
+                }
+                if (candidates.length === 0) {
+                    grid[r][c] = null;
+                    stuck++;
+                } else {
+                    grid[r][c] = candidates[Math.floor(Math.random() * candidates.length)];
+                    filled++;
+                }
+            }
+        }
+
+        // Draw
+        var half = px / 2;
+        for (var r = 0; r < gh; r++) {
+            for (var c = 0; c < gw; c++) {
+                var t = grid[r][c];
+                if (!t) continue;
+                var x = c * px, y = r * px;
+                var cx = x + half, cy = y + half;
+                // North triangle
+                ctx.fillStyle = t.n;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                // East triangle
+                ctx.fillStyle = t.e;
+                ctx.beginPath(); ctx.moveTo(x + px, y); ctx.lineTo(x + px, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                // South triangle
+                ctx.fillStyle = t.s;
+                ctx.beginPath(); ctx.moveTo(x + px, y + px); ctx.lineTo(x, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                // West triangle
+                ctx.fillStyle = t.w;
+                ctx.beginPath(); ctx.moveTo(x, y + px); ctx.lineTo(x, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+            }
+        }
+
+        document.getElementById('gen-status').textContent =
+            gw + ' x ' + gh + ' = ' + (gw*gh) + ' cells. ' +
+            filled + ' filled, ' + stuck + ' stuck.';
+    }
+
+    document.getElementById('btn-generate').addEventListener('click', generate);
+
+    document.getElementById('btn-download').addEventListener('click', function() {
+        var canvas = document.getElementById('tiling-canvas');
+        var link = document.createElement('a');
+        link.download = '{{ tileset.slug }}-tiling.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+    });
+
+    // Generate on load
+    generate();
+})();
+</script>
+{% endblock %}

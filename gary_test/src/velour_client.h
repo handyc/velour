@@ -111,14 +111,28 @@ public:
     // Drop the pending batch without sending it.
     void clear() { _count = 0; }
 
+    // Port discovery: probe a list of candidate ports on the configured
+    // host for the /api/nodes/discover endpoint. If one responds with
+    // {"velour":true}, update _baseUrl in place. Call once after WiFi
+    // connects. Returns true if a working port was found.
+    //
+    // Default candidate list: 7777, 7778, 7779, 8000, 8080, 8888.
+    // Override with VELOUR_DISCOVER_PORTS in build_flags if needed.
+    bool discover();
+
+    // The base URL currently in use (after discover() may have changed it).
+    const char* baseUrl() const { return _resolvedUrl.length() ? _resolvedUrl.c_str() : _baseUrl; }
+
 private:
     const char* _baseUrl;
     const char* _slug;
     const char* _apiToken;
     const char* _firmwareVersion;
+    String _resolvedUrl;   // set by discover() if the port changed
     VelourReading _readings[VELOUR_MAX_READINGS];
     int _count;
 
+    String _effectiveBase() const;
     String _buildUrl() const;
     String _buildPayload() const;
 };

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ account.name }} - Mail Accounts - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .meta { color: #8b949e; font-size: 0.875rem; }
+    .test-form { max-width: 560px; }
+    .test-form label { display: block; margin-bottom: 0.75rem; }
+    .test-form label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .test-form input, .test-form textarea {
+        width: 100%;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        box-sizing: border-box;
+        font-family: inherit;
+    }
+    .kv { border: 1px solid #21262d; border-radius: 6px; padding: 0.75rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; }
+    .kv .k { color: #8b949e; display: inline-block; min-width: 10rem; }
+    .kv .v { color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ account.name }}{% if account.is_default %} <span style="font-size:0.7rem;color:#58a6ff;text-transform:uppercase;">default</span>{% endif %}</h1>
+<p class="meta">{{ account.from_name }}{% if account.from_name %} {% endif %}&lt;{{ account.from_email }}&gt;</p>
+
+<div class="kv" style="margin: 1rem 0;">
+    <div><span class="k">Enabled</span><span class="v">{{ account.enabled|yesno:"yes,no" }}</span></div>
+    <div><span class="k">SMTP host</span><span class="v">{{ account.smtp_host }}:{{ account.smtp_port }}</span></div>
+    <div><span class="k">SMTP username</span><span class="v">{{ account.smtp_username|default:"(none)" }}</span></div>
+    <div><span class="k">SMTP TLS/SSL</span><span class="v">{% if account.smtp_use_ssl %}SSL{% elif account.smtp_use_tls %}STARTTLS{% else %}plain{% endif %}</span></div>
+    {% if account.imap_host %}
+    <div><span class="k">IMAP host</span><span class="v">{{ account.imap_host }}:{{ account.imap_port }}</span></div>
+    <div><span class="k">IMAP username</span><span class="v">{{ account.imap_username|default:"(none)" }}</span></div>
+    {% endif %}
+    <div><span class="k">Last tested</span><span class="v">{{ account.last_tested_at|date:"Y-m-d H:i:s"|default:"never" }}</span></div>
+    {% if account.last_test_status %}
+    <div><span class="k">Last test status</span><span class="v">{{ account.last_test_status }}</span></div>
+    {% endif %}
+    {% if account.last_test_error %}
+    <div><span class="k">Last error</span><span class="v" style="color:#f85149;">{{ account.last_test_error }}</span></div>
+    {% endif %}
+</div>
+
+{% if account.notes %}
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top:0;">Notes</h3>
+    <div style="white-space: pre-wrap;">{{ account.notes }}</div>
+</div>
+{% endif %}
+
+<h2 style="margin-top: 1.5rem;">Send Test</h2>
+<form method="post" action="{% url 'mail:test' account.pk %}" class="test-form card">
+    {% csrf_token %}
+    <label>
+        <span>To</span>
+        <input type="email" name="to" value="" required placeholder="someone@example.com">
+    </label>
+    <label>
+        <span>Subject (optional)</span>
+        <input type="text" name="subject" value="" placeholder="Velour test from {{ account.name }}">
+    </label>
+    <label>
+        <span>Body (optional)</span>
+        <textarea name="body" rows="4" placeholder="Leave blank for default message..."></textarea>
+    </label>
+    <button type="submit" class="btn">Send Test Message</button>
+</form>
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    <a href="{% url 'mail:edit' account.pk %}" class="btn btn-secondary">Edit</a>
+    {% if account.imap_host %}
+    <form method="post" action="{% url 'mail:poll_mailbox' account.pk %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn">Poll inbox now</button>
+    </form>
+    <a href="{% url 'mail:inbound_list' %}?mailbox={{ account.name }}" class="btn btn-secondary">View inbox</a>
+    {% endif %}
+    <a href="{% url 'mail:list' %}" class="btn btn-secondary">Back to Mail</a>
+</div>
+{% endblock %}

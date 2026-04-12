@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}{{ experiment.name }} — Thought experiment — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .exp-wrap { max-width: 780px; }
+    .exp-wrap h1 { font-size: 1.2rem; font-weight: 500; color: #c9d1d9; margin: 0 0 0.25rem; }
+    .exp-wrap .meta {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 1.5rem;
+    }
+    .premise {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #d29922;
+        padding: 1rem 1.25rem; border-radius: 0 6px 6px 0;
+        color: #c9d1d9; line-height: 1.65; font-style: italic;
+        font-size: 0.9rem; margin-bottom: 1.5rem;
+    }
+
+    .trace {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+    }
+    .trace-step {
+        padding: 0.6rem 0;
+        border-bottom: 1px solid #21262d;
+    }
+    .trace-step:last-child { border-bottom: none; }
+    .trace-step .kicker {
+        font-size: 0.65rem; color: #6e7681;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .trace-step .output {
+        color: #c9d1d9; font-size: 0.85rem;
+        line-height: 1.6; margin-top: 0.3rem;
+    }
+
+    .conclusion {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #3fb950;
+        padding: 1rem 1.25rem; border-radius: 0 6px 6px 0;
+        color: #c9d1d9; font-size: 0.88rem; line-height: 1.65;
+        margin-bottom: 1.5rem;
+    }
+
+    .run-form {
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 6px; padding: 0.75rem 1rem;
+        margin-bottom: 1.5rem; text-align: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="exp-wrap">
+    <h1>{{ experiment.name }}</h1>
+    <div class="meta">
+        status: <strong>{{ experiment.get_status_display }}</strong>
+        {% if experiment.exit_reason %} · exit: {{ experiment.exit_reason }}{% endif %}
+        · seed: {{ experiment.seed_layer }}
+        · max_depth: {{ experiment.max_depth }}
+        {% if experiment.exit_condition %}<br>exit_condition: "{{ experiment.exit_condition }}"{% endif %}
+    </div>
+
+    <div class="premise">{{ experiment.premise }}</div>
+
+    {% if experiment.status == 'pending' %}
+    <form method="post" action="{% url 'identity:hof_experiment_run' experiment.slug %}" class="run-form">
+        {% csrf_token %}
+        <button type="submit" class="btn">Run this experiment now</button>
+    </form>
+    {% else %}
+    <form method="post" action="{% url 'identity:hof_experiment_run' experiment.slug %}" class="run-form">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Run again (replaces trace)</button>
+    </form>
+    {% endif %}
+
+    {% if experiment.trace %}
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Trace</h2>
+    <div class="trace">
+        {% for step in experiment.trace %}
+        <div class="trace-step">
+            <div class="kicker">step {{ step.step }} — layer {{ step.layer }}</div>
+            <div class="output">{{ step.output|linebreaks }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if experiment.conclusion %}
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Conclusion</h2>
+    <div class="conclusion">{{ experiment.conclusion|linebreaks }}</div>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:hof_experiment_list' %}" class="btn btn-secondary">← All experiments</a>
+        <a href="{% url 'identity:hof_home' %}" class="btn btn-secondary">Hofstadter home</a>
+    </div>
+</div>
+{% endblock %}

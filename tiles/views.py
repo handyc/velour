@@ -1,3 +1,5 @@
+import json
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,7 +10,7 @@ from .models import Tile, TileSet
 
 @login_required
 def tileset_list(request):
-    tilesets = TileSet.objects.all()
+    tilesets = TileSet.objects.prefetch_related('tiles').all()
     return render(request, 'tiles/list.html', {
         'tilesets':    tilesets,
         'total_count': tilesets.count(),
@@ -73,6 +75,21 @@ def tileset_delete(request, slug):
     tileset.delete()
     messages.success(request, f'Removed "{name}".')
     return redirect('tiles:list')
+
+
+@login_required
+def tileset_generate(request, slug):
+    tileset = get_object_or_404(TileSet, slug=slug)
+    tiles = list(tileset.tiles.all())
+    tiles_json = json.dumps([
+        {'id': t.pk, 'name': t.name, 'n': t.n_color, 'e': t.e_color,
+         's': t.s_color, 'w': t.w_color}
+        for t in tiles
+    ])
+    return render(request, 'tiles/generate.html', {
+        'tileset':    tileset,
+        'tiles_json': tiles_json,
+    })
 
 
 def _greedy_tile_grid(tiles, width=6, height=4):

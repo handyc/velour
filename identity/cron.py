@@ -200,7 +200,7 @@ def _refresh_consciousness_layer():
     with the current consciousness sensor reading. Keeps the layer
     current rather than seeded-and-frozen. Never raises."""
     try:
-        from hofstadter.models import IntrospectiveLayer
+        from .models import IntrospectiveLayer
         from .sensors import sense_consciousness
         from .state_machine import prose_summary, compute_transition_matrix
 

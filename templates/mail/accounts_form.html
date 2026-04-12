@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} Mail Account - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .mf { max-width: 640px; }
+    .mf label { display: block; margin-bottom: 0.9rem; }
+    .mf label > span { display: block; font-size: 0.8125rem; color: #8b949e; margin-bottom: 0.25rem; }
+    .mf input[type="text"], .mf input[type="email"], .mf input[type="password"], .mf input[type="number"], .mf textarea {
+        width: 100%;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.9375rem;
+        box-sizing: border-box;
+        font-family: inherit;
+    }
+    .mf .row { display: flex; gap: 0.75rem; }
+    .mf .row > label { flex: 1; }
+    .mf .checkbox-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .mf .checkbox-row label { margin: 0; }
+    .mf .section { border: 1px solid #21262d; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .mf .section h3 { margin: 0 0 0.75rem; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em; color: #58a6ff; }
+    .mf .hint { font-size: 0.75rem; color: #6e7681; margin-top: 0.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} Mail Account</h1>
+
+<form method="post" class="mf">
+    {% csrf_token %}
+
+    <div class="section">
+        <h3>Identity</h3>
+        <label>
+            <span>Name</span>
+            <input type="text" name="name" value="{{ account.name }}" required autofocus placeholder="snel-relay">
+            <div class="hint">Used for routing — e.g. <code>mailbox='snel-relay'</code> in Django, or <code>"mailbox": "snel-relay"</code> in a POST to the HTTP relay.</div>
+        </label>
+        <div class="row">
+            <label>
+                <span>From email</span>
+                <input type="email" name="from_email" value="{{ account.from_email }}" required placeholder="velour@example.com">
+            </label>
+            <label>
+                <span>From name (optional)</span>
+                <input type="text" name="from_name" value="{{ account.from_name }}" placeholder="Velour">
+            </label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" name="enabled" id="enabled" {% if account.enabled or not account.pk %}checked{% endif %}>
+            <label for="enabled">Enabled</label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" name="is_default" id="is_default" {% if account.is_default %}checked{% endif %}>
+            <label for="is_default">Default (used by Django built-ins like password reset)</label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Outgoing (SMTP)</h3>
+        <div class="row">
+            <label style="flex: 2;">
+                <span>SMTP host</span>
+                <input type="text" name="smtp_host" value="{{ account.smtp_host }}" required placeholder="smtp.snel.com">
+            </label>
+            <label style="flex: 1;">
+                <span>Port</span>
+                <input type="number" name="smtp_port" value="{{ account.smtp_port|default:587 }}" required>
+            </label>
+        </div>
+        <label>
+            <span>Username</span>
+            <input type="text" name="smtp_username" value="{{ account.smtp_username }}" placeholder="velour@example.com">
+        </label>
+        <label>
+            <span>Password {% if account.pk %}<em>(leave blank to keep existing)</em>{% endif %}</span>
+            <input type="password" name="smtp_password" value="" {% if not account.pk %}required{% endif %} autocomplete="new-password">
+        </label>
+        <div class="checkbox-row">
+            <input type="checkbox" name="smtp_use_tls" id="use_tls" {% if account.smtp_use_tls or not account.pk %}checked{% endif %}>
+            <label for="use_tls">Use STARTTLS (standard on port 587)</label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" name="smtp_use_ssl" id="use_ssl" {% if account.smtp_use_ssl %}checked{% endif %}>
+            <label for="use_ssl">Use implicit SSL (alternative on port 465 — do NOT combine with STARTTLS)</label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Incoming (IMAP) <span style="color:#6e7681;font-weight:normal;">— optional, not wired yet</span></h3>
+        <div class="row">
+            <label style="flex: 2;">
+                <span>IMAP host</span>
+                <input type="text" name="imap_host" value="{{ account.imap_host }}" placeholder="imap.snel.com">
+            </label>
+            <label style="flex: 1;">
+                <span>Port</span>
+                <input type="number" name="imap_port" value="{{ account.imap_port|default:993 }}">
+            </label>
+        </div>
+        <label>
+            <span>Username</span>
+            <input type="text" name="imap_username" value="{{ account.imap_username }}">
+        </label>
+        <label>
+            <span>Password {% if account.pk %}<em>(leave blank to keep existing)</em>{% endif %}</span>
+            <input type="password" name="imap_password" value="" autocomplete="new-password">
+        </label>
+        <div class="checkbox-row">
+            <input type="checkbox" name="imap_use_ssl" id="imap_ssl" {% if account.imap_use_ssl or not account.pk %}checked{% endif %}>
+            <label for="imap_ssl">Use SSL</label>
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>Notes</h3>
+        <label>
+            <span>Anything worth remembering about this account</span>
+            <textarea name="notes" rows="3">{{ account.notes }}</textarea>
+        </label>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem;">
+        <button type="submit" class="btn">{{ action }}</button>
+        <a href="{% url 'mail:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

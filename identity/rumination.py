@@ -116,7 +116,7 @@ def _random_calendar_event():
 
 def _random_strange_loop():
     try:
-        from hofstadter.models import StrangeLoop
+        from .models import StrangeLoop
     except Exception:
         return None
     if _safe_count(StrangeLoop.objects.filter(is_active=True)) == 0:
@@ -126,7 +126,7 @@ def _random_strange_loop():
 
 def _random_introspective_layer():
     try:
-        from hofstadter.models import IntrospectiveLayer
+        from .models import IntrospectiveLayer
     except Exception:
         return None
     if _safe_count(IntrospectiveLayer.objects.filter(is_active=True)) == 0:

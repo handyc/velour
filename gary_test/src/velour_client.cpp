@@ -23,10 +23,16 @@ void VelourClient::setFirmwareVersion(const char* version) {
 }
 
 
+String VelourClient::_effectiveBase() const {
+    if (_resolvedUrl.length()) return _resolvedUrl;
+    return String(_baseUrl);
+}
+
+
 String VelourClient::_buildUrl() const {
     // URL shape is fixed by velour's api_urls.py:
     //   <base>/api/nodes/<slug>/report/
-    String url = _baseUrl;
+    String url = _effectiveBase();
     while (url.endsWith("/")) url.remove(url.length() - 1);
     url += "/api/nodes/";
     url += _slug;
@@ -173,7 +179,7 @@ VelourClient::OtaResult VelourClient::checkForUpdate() {
     }
 
     // Build the check URL: <base>/api/nodes/<slug>/firmware/check?current=<v>
-    String checkUrl = _baseUrl;
+    String checkUrl = _effectiveBase();
     while (checkUrl.endsWith("/")) checkUrl.remove(checkUrl.length() - 1);
     checkUrl += "/api/nodes/";
     checkUrl += _slug;
@@ -257,4 +263,58 @@ VelourClient::OtaResult VelourClient::checkForUpdate() {
     }
     return VELOUR_OTA_UPDATE_FAILED;
 #endif
+}
+
+
+// Default candidate ports — same list as smart_runserver on the server.
+#ifndef VELOUR_DISCOVER_PORTS
+#define VELOUR_DISCOVER_PORTS {7777, 7778, 7779, 8000, 8080, 8888}
+#endif
+
+bool VelourClient::discover() {
+    if (WiFi.status() != WL_CONNECTED) return false;
+
+    // Extract the host (IP or hostname) from _baseUrl.
+    // Expected shapes: "http://192.168.1.50:7777" or "http://host:port"
+    String base = String(_baseUrl);
+    // Strip scheme
+    int schemeEnd = base.indexOf("://");
+    String hostPort = (schemeEnd >= 0) ? base.substring(schemeEnd + 3) : base;
+    // Strip trailing path
+    int slash = hostPort.indexOf('/');
+    if (slash >= 0) hostPort = hostPort.substring(0, slash);
+    // Strip existing port
+    String host = hostPort;
+    int colon = hostPort.lastIndexOf(':');
+    if (colon > 0) host = hostPort.substring(0, colon);
+
+    int ports[] = VELOUR_DISCOVER_PORTS;
+    int nPorts = sizeof(ports) / sizeof(ports[0]);
+
+    for (int i = 0; i < nPorts; i++) {
+        String url = "http://" + host + ":" + String(ports[i]) + "/api/nodes/discover";
+
+        HTTPClient http;
+        WiFiClient client;
+
+#if defined(ESP32)
+        if (!http.begin(url)) continue;
+#elif defined(ESP8266)
+        if (!http.begin(client, url)) continue;
+#endif
+        http.setTimeout(2000);  // short timeout — we're scanning
+        int status = http.GET();
+        String body = (status == 200) ? http.getString() : String();
+        http.end();
+
+        if (status == 200 && body.indexOf("\"velour\":true") >= 0) {
+            _resolvedUrl = "http://" + host + ":" + String(ports[i]);
+            Serial.print("[velour] Discovered on port ");
+            Serial.println(ports[i]);
+            return true;
+        }
+    }
+
+    Serial.println("[velour] Discovery failed — using default URL");
+    return false;
 }

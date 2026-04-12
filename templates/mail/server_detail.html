@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}{{ msg.subject|default:"(no subject)" }} — Internal Mail — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .msg-wrap { max-width: 780px; }
+    .msg-wrap h1 { font-size: 1.15rem; font-weight: 500; color: #c9d1d9; margin: 0 0 0.25rem; }
+    .msg-wrap .meta {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 1.5rem;
+    }
+    .msg-body {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 1.25rem 1.5rem;
+        color: #c9d1d9; font-size: 0.9rem; line-height: 1.65;
+        white-space: pre-wrap; font-family: inherit;
+    }
+    details.raw-source {
+        margin-top: 1rem;
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.75rem 1rem;
+    }
+    details.raw-source summary {
+        color: #8b949e; cursor: pointer; font-size: 0.78rem;
+    }
+    details.raw-source pre {
+        color: #6e7681; font-size: 0.7rem;
+        overflow-x: auto; padding: 0.5rem 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="msg-wrap">
+    <h1>{{ msg.subject|default:"(no subject)" }}</h1>
+    <div class="meta">
+        from: {{ msg.from_addr }}<br>
+        to: {{ msg.recipient_display }}<br>
+        received: {{ msg.received_at|date:"Y-m-d H:i:s" }}
+        {% if msg.peer_ip %} · peer: {{ msg.peer_ip }}{% endif %}
+    </div>
+
+    <div class="msg-body">{{ msg.best_body }}</div>
+
+    {% if msg.raw %}
+    <details class="raw-source">
+        <summary>Raw RFC822 source</summary>
+        <pre>{{ msg.raw }}</pre>
+    </details>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+        <a href="{% url 'mail:server_inbox' %}" class="btn btn-secondary">&larr; Back to inbox</a>
+        <form method="post" action="{% url 'mail:server_delete' msg.pk %}" style="display:inline;" onsubmit="return confirm('Delete this message?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary">Delete</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -64,8 +64,7 @@ INSTALLED_APPS = [
     'winctl',
     'maintenance',
     'hosts',
-    'mailboxes',
-    'mailroom',
+    'mail',
     'experiments',
     'nodes',
     'chronos',
@@ -76,8 +75,6 @@ INSTALLED_APPS = [
     'oracle',
     'hpc',
     'tiles',
-    'hofstadter',
-    'mailserver',
 ]
 
 MIDDLEWARE = [
@@ -197,7 +194,7 @@ ASGI_APPLICATION = 'velour.asgi.application'
 # credentials, and From: address are all editable from /mailboxes/ in the
 # web UI. If no account is configured (fresh install), the backend falls
 # through to console output so local dev stays functional.
-EMAIL_BACKEND = 'mailboxes.backends.DynamicMailboxBackend'
+EMAIL_BACKEND = 'mail.backends.DynamicMailboxBackend'
 DEFAULT_FROM_EMAIL = 'velour@example.com'
 
 # Directory where the app factory writes newly generated projects. On a

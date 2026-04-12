@@ -5,7 +5,7 @@ from . import SectionContribution
 
 def contribute(start_dt, end_dt, **opts):
     try:
-        from mailroom.models import InboundMessage
+        from mail.models import InboundMessage
     except ImportError:
         return []
 

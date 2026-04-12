@@ -6,24 +6,25 @@
 <style>
     .ts-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 0.5rem;
         margin-top: 1rem;
     }
     .ts-card {
         background: #161b22; border: 1px solid #30363d;
         border-left: 3px solid #bc8cff;
-        border-radius: 6px; padding: 1rem 1.25rem;
+        border-radius: 6px; padding: 0.6rem 0.8rem;
     }
     .ts-card h3 {
-        font-size: 1rem; margin: 0 0 0.25rem;
+        font-size: 0.88rem; margin: 0 0 0.15rem;
         color: #c9d1d9; font-weight: 500;
     }
     .ts-card h3 a { color: #c9d1d9; text-decoration: none; }
-    .ts-card .meta { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; font-family: ui-monospace, Menlo, monospace; }
-    .ts-card .desc { color: #8b949e; font-size: 0.82rem; line-height: 1.5; }
-    .ts-card .palette { margin-top: 0.75rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
-    .ts-card .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #30363d; }
+    .ts-card .meta { color: #6e7681; font-size: 0.68rem; margin-bottom: 0.3rem; font-family: ui-monospace, Menlo, monospace; }
+    .ts-card .desc { color: #8b949e; font-size: 0.76rem; line-height: 1.4; }
+    .ts-card .palette { margin-top: 0.4rem; display: flex; gap: 0.15rem; flex-wrap: wrap; }
+    .ts-card .swatch { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #30363d; }
+    .ts-card .tile-preview { margin-top: 0.4rem; display: flex; gap: 1px; flex-wrap: wrap; max-width: 180px; }
 </style>
 {% endblock %}
 
@@ -48,6 +49,19 @@
         <div class="palette">
             {% for c in ts.palette %}
             <span class="swatch" style="background: {{ c }};" title="{{ c }}"></span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if ts.tiles.all %}
+        <div class="tile-preview">
+            {% for t in ts.tiles.all|slice:":12" %}
+            <svg width="20" height="20" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0" y="0" width="56" height="56" fill="#161b22"/>
+                <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
+                <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>
+                <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
+                <polygon points="0,56 0,0 28,28" fill="{{ t.w_color }}"/>
+            </svg>
             {% endfor %}
         </div>
         {% endif %}

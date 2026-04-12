@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import FileResponse, Http404, JsonResponse
@@ -408,6 +409,27 @@ def _extract_bearer(request):
 
 
 @csrf_exempt
+def api_discover(request):
+    """Lightweight discovery endpoint — no auth required.
+
+    GET /api/nodes/discover
+    Returns {"velour": true, "port": <port>} so field nodes can find
+    Velour when it starts on a non-default port (e.g. 7778 if 7777
+    was blocked). The port value is read from velour_port.txt, falling
+    back to the port the request actually arrived on.
+    """
+    port_file = settings.BASE_DIR / 'velour_port.txt'
+    if port_file.is_file():
+        try:
+            port = int(port_file.read_text().strip())
+        except (ValueError, OSError):
+            port = request.META.get('SERVER_PORT', 7777)
+    else:
+        port = request.META.get('SERVER_PORT', 7777)
+    return JsonResponse({'velour': True, 'port': int(port)})
+
+
+@csrf_exempt
 @require_POST
 def api_report(request, slug):
     """Single telemetry + heartbeat endpoint for field nodes.
@@ -650,3 +672,31 @@ def api_model_json(request, slug):
         return JsonResponse(lobe)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+@csrf_exempt
+def api_identity_json(request, slug):
+    """Lightweight Identity snapshot for field nodes.
+
+    GET /api/nodes/<slug>/identity.json?token=<token>
+    Returns the current mood, intensity, and name so nodes with
+    displays can reflect Velour's emotional state.
+    """
+    node, err = _auth_node_or_401(request, slug)
+    if err:
+        return err
+
+    try:
+        from identity.models import Identity
+        identity = Identity.get_self()
+        return JsonResponse({
+            'mood':           identity.mood,
+            'mood_intensity': identity.mood_intensity,
+            'name':           identity.name,
+        })
+    except Exception:
+        return JsonResponse({
+            'mood':           'unknown',
+            'mood_intensity': 0.5,
+            'name':           'Velour',
+        })

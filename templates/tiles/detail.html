@@ -4,21 +4,18 @@
 
 {% block extra_head %}
 <style>
-    /* Each tile is a 56px square with colored triangles on each of
-       the four edges — the classical Wang visualization. Pure SVG,
-       no image assets. */
     .tile-box { display: inline-block; text-align: center; }
-    .tile-box .label { font-size: 0.7rem; color: #6e7681; margin-top: 0.25rem; font-family: ui-monospace, Menlo, monospace; }
+    .tile-box .label { font-size: 0.62rem; color: #6e7681; margin-top: 0.15rem; font-family: ui-monospace, Menlo, monospace; }
     .tile-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(72px, 72px));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fill, minmax(48px, 48px));
+        gap: 0.4rem;
         margin-top: 1rem;
     }
 
     .tiling-grid { display: grid; gap: 0; margin-top: 1rem; }
     .tiling-grid svg { display: block; }
-    .tiling-empty { width: 56px; height: 56px; background: #0d1117; border: 1px dashed #30363d; }
+    .tiling-empty { width: 36px; height: 36px; background: #0d1117; border: 1px dashed #30363d; }
 </style>
 {% endblock %}
 
@@ -46,11 +43,8 @@
 <div class="tile-grid">
     {% for t in tiles %}
     <div class="tile-box">
-        <svg width="56" height="56" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
-            <!-- Background -->
+        <svg width="36" height="36" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
             <rect x="0" y="0" width="56" height="56" fill="#161b22" stroke="#30363d" stroke-width="1"/>
-            <!-- Four colored triangles meeting at the center. The
-                 classical Wang visualization. -->
             <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
             <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>
             <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
@@ -67,11 +61,11 @@
 {% if greedy %}
 <h2 style="margin-top: 1.75rem; font-size: 1rem;">Greedy tiling attempt (6×4)</h2>
 <p style="color: #8b949e; font-size: 0.85rem;">A greedy top-left tiling that picks the first matching candidate at each cell. Empty cells mean the greedy search got stuck — the tile set may still admit valid tilings via backtracking.</p>
-<div class="tiling-grid" style="grid-template-columns: repeat({{ greedy.0|length }}, 56px);">
+<div class="tiling-grid" style="grid-template-columns: repeat({{ greedy.0|length }}, 36px);">
     {% for row in greedy %}
         {% for t in row %}
             {% if t %}
-            <svg width="56" height="56" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+            <svg width="36" height="36" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
                 <rect x="0" y="0" width="56" height="56" fill="#161b22"/>
                 <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
                 <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>
@@ -92,6 +86,7 @@
 {% endif %}
 
 <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    {% if tiles %}<a href="{% url 'tiles:generate' tileset.slug %}" class="btn">Generate Large Tiling</a>{% endif %}
     <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;" onsubmit="return confirm('Delete {{ tileset.name }}?');">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>

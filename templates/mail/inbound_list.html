@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Inbox - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .filter-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
+    .filter-bar select, .filter-bar button, .filter-bar a { font-size: 0.875rem; }
+    .msg-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+    .msg-table th, .msg-table td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; vertical-align: top; font-size: 0.875rem; }
+    .msg-table th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+    .msg-table tr.unread td { background: rgba(88, 166, 255, 0.04); }
+    .msg-table tr.unread .subject { font-weight: 600; color: #c9d1d9; }
+    .msg-table .subject { color: #8b949e; }
+    .msg-table .from { color: #8b949e; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .msg-table .date { color: #6e7681; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+    .msg-table .mailbox { color: #58a6ff; font-size: 0.75rem; }
+    .msg-table a { color: inherit; text-decoration: none; }
+    .msg-table tr:hover td { background: rgba(88, 166, 255, 0.06); }
+    .flag { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; margin-right: 0.25rem; }
+    .flag.unread { background: #58a6ff; }
+    .flag.handled { background: #2ea043; }
+    .pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; font-size: 0.875rem; }
+    .pager a { color: #58a6ff; }
+    .pager .current { color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Inbox</h1>
+<p style="color:#8b949e;">Messages fetched from configured <a href="{% url 'mail:list' %}">mail accounts</a> via IMAP.</p>
+
+<form method="get" class="filter-bar">
+    <label style="color:#8b949e;font-size:0.8125rem;">Mailbox
+        <select name="mailbox" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.35rem 0.5rem;border-radius:4px;margin-left:0.5rem;">
+            <option value="">all</option>
+            {% for a in accounts %}
+                <option value="{{ a }}" {% if mailbox_filter == a %}selected{% endif %}>{{ a }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label style="color:#8b949e;font-size:0.8125rem;">
+        <input type="checkbox" name="unread" value="1" {% if unread_only %}checked{% endif %}> unread only
+    </label>
+    <label style="color:#8b949e;font-size:0.8125rem;">
+        <input type="checkbox" name="unhandled" value="1" {% if unhandled_only %}checked{% endif %}> unhandled only
+    </label>
+    <button type="submit" class="btn">Apply</button>
+    <a href="{% url 'mail:inbound_list' %}" class="btn btn-secondary">Reset</a>
+</form>
+
+{% if page.object_list %}
+<table class="msg-table card">
+    <thead>
+        <tr>
+            <th style="width: 1.5rem;"></th>
+            <th>Mailbox</th>
+            <th>From</th>
+            <th>Subject</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for m in page.object_list %}
+        <tr class="{% if not m.read %}unread{% endif %}">
+            <td>
+                {% if not m.read %}<span class="flag unread" title="unread"></span>{% endif %}
+                {% if m.handled %}<span class="flag handled" title="handled"></span>{% endif %}
+            </td>
+            <td class="mailbox">{{ m.mailbox.name }}</td>
+            <td class="from"><a href="{% url 'mail:inbound_detail' m.pk %}">{{ m.from_addr|default:"(unknown)" }}</a></td>
+            <td class="subject"><a href="{% url 'mail:inbound_detail' m.pk %}">{{ m.subject|default:"(no subject)" }}</a></td>
+            <td class="date">{{ m.received_at|date:"Y-m-d H:i"|default:m.fetched_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+
+<div class="pager">
+    {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}{% if mailbox_filter %}&mailbox={{ mailbox_filter }}{% endif %}{% if unread_only %}&unread=1{% endif %}{% if unhandled_only %}&unhandled=1{% endif %}">&larr; prev</a>
+    {% endif %}
+    <span class="current">page {{ page.number }} of {{ page.paginator.num_pages }} &middot; {{ page.paginator.count }} messages</span>
+    {% if page.has_next %}
+        <a href="?page={{ page.next_page_number }}{% if mailbox_filter %}&mailbox={{ mailbox_filter }}{% endif %}{% if unread_only %}&unread=1{% endif %}{% if unhandled_only %}&unhandled=1{% endif %}">next &rarr;</a>
+    {% endif %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No messages yet. Add IMAP credentials to a mail account in <a href="{% url 'mail:list' %}">Mail</a>, then click "Poll now" on the account detail page — or run <code>python manage.py poll_inbox</code>.</p>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

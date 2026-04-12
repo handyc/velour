@@ -36,4 +36,12 @@ urlpatterns = [
          name='llm_exchange_ingest'),
     path('ticks/<int:tick_pk>/feedback/', views.rumination_feedback,
          name='rumination_feedback'),
+
+    # Hofstadter routes — absorbed from the standalone hofstadter app.
+    path('hofstadter/', views.hof_home, name='hof_home'),
+    path('hofstadter/experiments/', views.hof_experiment_list, name='hof_experiment_list'),
+    path('hofstadter/experiments/<slug:slug>/', views.hof_experiment_detail, name='hof_experiment_detail'),
+    path('hofstadter/experiments/<slug:slug>/run/', views.hof_experiment_run, name='hof_experiment_run'),
+    path('hofstadter/loops/<slug:slug>/', views.hof_loop_detail, name='hof_loop_detail'),
+    path('hofstadter/loops/<slug:slug>/traverse/', views.hof_loop_traverse, name='hof_loop_traverse'),
 ]

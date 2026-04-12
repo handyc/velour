@@ -22,8 +22,7 @@ urlpatterns = [
     path('windows/', include('winctl.urls')),
     path('maintenance/', include('maintenance.urls')),
     path('hosts/', include('hosts.urls')),
-    path('mailboxes/', include('mailboxes.urls')),
-    path('mailroom/', include('mailroom.urls')),
+    path('mail/', include('mail.urls')),
     path('nodes/', include('nodes.urls')),
     path('api/nodes/', include('nodes.api_urls')),
     path('experiments/', include('experiments.urls')),
@@ -34,13 +33,12 @@ urlpatterns = [
     path('cartography/', include('cartography.urls')),
     path('hpc/', include('hpc.urls')),
     path('tiles/', include('tiles.urls')),
-    path('hofstadter/', include('hofstadter.urls')),
-    path('mailserver/', include('mailserver.urls')),
+
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),
     path('accounts/logout/', auth_views.LogoutView.as_view(), name='logout'),
     # Password reset flow — uses Django's built-in views. The actual email
-    # goes out via EMAIL_BACKEND = 'mailboxes.backends.DynamicMailboxBackend',
+    # goes out via EMAIL_BACKEND = 'mail.backends.DynamicMailboxBackend',
     # so whatever MailAccount is marked default sends the reset message.
     path('accounts/password_reset/',
          auth_views.PasswordResetView.as_view(),

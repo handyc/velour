@@ -702,7 +702,7 @@ def who_is_velour(request):
     entire self-understanding."""
     identity = Identity.get_self()
     try:
-        from hofstadter.models import IntrospectiveLayer, StrangeLoop
+        from .models import IntrospectiveLayer, StrangeLoop
         layers = IntrospectiveLayer.objects.filter(is_active=True)
         loops = StrangeLoop.objects.filter(is_active=True)[:4]
     except Exception:
@@ -1005,3 +1005,93 @@ def tick_now(request):
     from .ticking import tick as do_tick
     do_tick(triggered_by='manual')
     return redirect('identity:home')
+
+
+# =====================================================================
+# Hofstadter views — absorbed from the standalone hofstadter app.
+# Prefixed with hof_ to avoid name collisions.
+# =====================================================================
+
+from django.contrib import messages
+from django.shortcuts import get_object_or_404
+
+from .models import (
+    IntrospectiveLayer, LoopTraversal, StrangeLoop, ThoughtExperiment,
+)
+
+
+@login_required
+def hof_home(request):
+    loops = StrangeLoop.objects.filter(is_active=True)
+    experiments = ThoughtExperiment.objects.all()[:10]
+    layers = IntrospectiveLayer.objects.filter(is_active=True)
+    return render(request, 'identity/hof_home.html', {
+        'loops': loops,
+        'experiments': experiments,
+        'layers_by_layer': {
+            'brain':         layers.filter(layer='brain'),
+            'mind':          layers.filter(layer='mind'),
+            'consciousness': layers.filter(layer='consciousness'),
+            'self':          layers.filter(layer='self'),
+        },
+    })
+
+
+@login_required
+def hof_loop_detail(request, slug):
+    loop = get_object_or_404(StrangeLoop, slug=slug)
+    traversals = loop.traversals.all()[:10]
+    return render(request, 'identity/hof_loop_detail.html', {
+        'loop':       loop,
+        'traversals': traversals,
+    })
+
+
+@login_required
+@require_POST
+def hof_loop_traverse(request, slug):
+    from .recursion import traverse_loop
+    loop = get_object_or_404(StrangeLoop, slug=slug)
+    try:
+        max_depth = int(request.POST.get('max_depth', 7))
+    except ValueError:
+        max_depth = 7
+    exit_content = request.POST.get('exit_content', '').strip() or None
+    traversal = traverse_loop(loop, max_depth=max_depth,
+                              exit_content=exit_content)
+    messages.success(
+        request,
+        f'Traversal complete: {traversal.steps_taken} steps, '
+        f'exited via {traversal.exit_reason}.',
+    )
+    return redirect('identity:hof_loop_detail', slug=slug)
+
+
+@login_required
+def hof_experiment_list(request):
+    experiments = ThoughtExperiment.objects.all()
+    return render(request, 'identity/hof_experiment_list.html', {
+        'experiments': experiments,
+    })
+
+
+@login_required
+def hof_experiment_detail(request, slug):
+    experiment = get_object_or_404(ThoughtExperiment, slug=slug)
+    return render(request, 'identity/hof_experiment_detail.html', {
+        'experiment': experiment,
+    })
+
+
+@login_required
+@require_POST
+def hof_experiment_run(request, slug):
+    from .recursion import run_thought_experiment
+    experiment = get_object_or_404(ThoughtExperiment, slug=slug)
+    run_thought_experiment(experiment)
+    messages.success(
+        request,
+        f'Ran "{experiment.name}" — {len(experiment.trace)} steps, '
+        f'exit {experiment.exit_reason}.',
+    )
+    return redirect('identity:hof_experiment_detail', slug=slug)

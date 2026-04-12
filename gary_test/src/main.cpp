@@ -27,8 +27,13 @@
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
+#if defined(ESP32)
+  #include <WebServer.h>
+  #include <ESPmDNS.h>
+#elif defined(ESP8266)
+  #include <ESP8266WebServer.h>
+  #include <ESP8266mDNS.h>
+#endif
 #include "wifi_secrets.h"
 #include "velour_client.h"
 
@@ -52,14 +57,21 @@
 
 #ifdef NODE_HAS_OLED
   #include <U8g2lib.h>
-  #ifndef NODE_OLED_SCL
-    #define NODE_OLED_SCL 14
+  #include <qrcode.h>
+  #if defined(NODE_OLED_HW_I2C)
+    // ESP32 boards with HW I2C (e.g. TTGO T3 V1.6.1: SDA=21, SCL=22)
+    U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+  #else
+    // ESP8266 boards with SW I2C (e.g. Terry: SCL=14, SDA=12)
+    #ifndef NODE_OLED_SCL
+      #define NODE_OLED_SCL 14
+    #endif
+    #ifndef NODE_OLED_SDA
+      #define NODE_OLED_SDA 12
+    #endif
+    U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(
+        U8G2_R0, NODE_OLED_SCL, NODE_OLED_SDA, U8X8_PIN_NONE);
   #endif
-  #ifndef NODE_OLED_SDA
-    #define NODE_OLED_SDA 12
-  #endif
-  U8G2_SSD1306_128X64_NONAME_F_SW_I2C u8g2(
-      U8G2_R0, NODE_OLED_SCL, NODE_OLED_SDA, U8X8_PIN_NONE);
 #endif
 
 // Default HTTP port for the local web server. Per-device overrides go in
@@ -80,20 +92,56 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "gary-test-0.3.2-local-web"
+#define FIRMWARE_VERSION    "velour-0.5.0-pixel-sprite"
+
+// How often to fetch Identity's mood from Velour. 60 seconds keeps the
+// display reasonably fresh without hammering the server.
+#define MOOD_FETCH_INTERVAL_MS  (60UL * 1000UL)
 
 #define AHT_ADDR        0x38
 #define AHT10_INIT_CMD  0xE1
 #define AHT20_INIT_CMD  0xBE
 
 VelourClient velour(VELOUR_URL, NODE_SLUG, NODE_TOKEN);
+#if defined(ESP32)
+WebServer httpd(NODE_HTTP_PORT);
+#elif defined(ESP8266)
 ESP8266WebServer httpd(NODE_HTTP_PORT);
+#endif
 
 unsigned long lastReportAt = 0;
 unsigned long lastOtaCheckAt = 0;
 unsigned long lastAhtReadAt = 0;
 unsigned long bootMs = 0;
 int reportCount = 0;
+
+// Identity mood state — fetched from Velour's /api/nodes/<slug>/identity.json
+// on a 60-second cadence. Nodes with OLEDs use this to reflect Velour's
+// emotional state on the display.
+char identityMood[24] = "unknown";
+float identityIntensity = 0.5f;
+unsigned long lastMoodFetchAt = 0;
+bool moodFetched = false;
+
+// Mood category for the sprite expression. Computed from identityMood[]
+// after each successful fetch.
+enum MoodCategory { MOOD_HAPPY, MOOD_WORRIED, MOOD_NEUTRAL };
+MoodCategory moodCategory = MOOD_NEUTRAL;
+
+static void categorizeMood() {
+    if (strcmp(identityMood, "contemplative") == 0 ||
+        strcmp(identityMood, "content") == 0 ||
+        strcmp(identityMood, "curious") == 0 ||
+        strcmp(identityMood, "serene") == 0) {
+        moodCategory = MOOD_HAPPY;
+    } else if (strcmp(identityMood, "concerned") == 0 ||
+               strcmp(identityMood, "anxious") == 0 ||
+               strcmp(identityMood, "restless") == 0) {
+        moodCategory = MOOD_WORRIED;
+    } else {
+        moodCategory = MOOD_NEUTRAL;
+    }
+}
 
 // Sensor state — populated by ahtRead() on its own timer so both the
 // Velour heartbeat and the local web server read from the same cache.
@@ -260,7 +308,7 @@ static void ahtRead() {
 static void downloadDecisionTree() {
     if (WiFi.status() != WL_CONNECTED) return;
 
-    String url = VELOUR_URL;
+    String url = velour.baseUrl();
     while (url.endsWith("/")) url.remove(url.length() - 1);
     url += "/api/nodes/";
     url += NODE_SLUG;
@@ -363,6 +411,86 @@ static void runDecisionTreeInference() {
 
 
 // ---------------------------------------------------------------------
+// Identity mood fetch — lightweight GET to /api/nodes/<slug>/identity.json
+// to find out how Velour is feeling. Same auth as every other node API
+// endpoint (bearer token in the query string).
+// ---------------------------------------------------------------------
+
+static void fetchIdentityMood() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    String url = velour.baseUrl();
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    url += "/api/nodes/";
+    url += NODE_SLUG;
+    url += "/identity.json?token=";
+    url += NODE_TOKEN;
+
+    HTTPClient http;
+    WiFiClient client;
+#if defined(ESP32)
+    http.begin(url);
+#elif defined(ESP8266)
+    http.begin(client, url);
+#endif
+    http.setTimeout(10000);
+    int status = http.GET();
+    if (status != 200) {
+        Serial.print("[mood] HTTP ");
+        Serial.println(status);
+        http.end();
+        return;
+    }
+
+    String body = http.getString();
+    http.end();
+
+    // Minimal JSON parse — we only need "mood" and "mood_intensity".
+    // The response is small and shaped like:
+    //   {"mood": "contemplative", "mood_intensity": 0.72, "name": "Velour"}
+    // Hand-parsing avoids pulling in ArduinoJson.
+    int moodIdx = body.indexOf("\"mood\"");
+    if (moodIdx < 0) return;
+    int colonIdx = body.indexOf(':', moodIdx + 5);
+    if (colonIdx < 0) return;
+    int quoteStart = body.indexOf('"', colonIdx);
+    if (quoteStart < 0) return;
+    int quoteEnd = body.indexOf('"', quoteStart + 1);
+    if (quoteEnd < 0 || quoteEnd - quoteStart - 1 <= 0) return;
+
+    String mood = body.substring(quoteStart + 1, quoteEnd);
+    mood.toCharArray(identityMood, sizeof(identityMood));
+
+    // Parse mood_intensity (float after "mood_intensity":)
+    int intIdx = body.indexOf("\"mood_intensity\"");
+    if (intIdx >= 0) {
+        int ic = body.indexOf(':', intIdx + 15);
+        if (ic >= 0) {
+            // Skip whitespace after colon
+            int vs = ic + 1;
+            while (vs < (int)body.length() && body[vs] == ' ') vs++;
+            int ve = vs;
+            while (ve < (int)body.length() &&
+                   (body[ve] == '.' || (body[ve] >= '0' && body[ve] <= '9')))
+                ve++;
+            if (ve > vs) {
+                identityIntensity = body.substring(vs, ve).toFloat();
+            }
+        }
+    }
+
+    moodFetched = true;
+    categorizeMood();
+
+    Serial.print("[mood] ");
+    Serial.print(identityMood);
+    Serial.print(" (intensity ");
+    Serial.print(identityIntensity, 2);
+    Serial.println(")");
+}
+
+
+// ---------------------------------------------------------------------
 // OLED display — optional per-node. Software I2C pins, 128x64
 // SSD1306. Renders a tiny dashboard: slug + IP + fw version at the
 // top, live temp/humidity in big digits if the AHT is present,
@@ -375,11 +503,9 @@ static void oledSetup() {
     u8g2.begin();
     u8g2.setContrast(180);
     u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_6x10_tf);
-    u8g2.drawStr(0, 10, "Velour node");
-    u8g2.drawStr(0, 24, NODE_SLUG);
-    u8g2.drawStr(0, 38, FIRMWARE_VERSION);
-    u8g2.drawStr(0, 58, "booting...");
+    u8g2.setFont(u8g2_font_4x6_mr);
+    u8g2.setFontPosTop();
+    u8g2.drawStr(0, 0, "booting...");
     u8g2.sendBuffer();
     Serial.println("[oled] initialized");
 }
@@ -394,117 +520,335 @@ static void oledRedraw() {
     if (millis() - lastOledRedrawAt < OLED_REDRAW_INTERVAL_MS) return;
     lastOledRedrawAt = millis();
 
-    u8g2.clearBuffer();
+    // ---- Display: SSD1306 128x64 ----
+    // Coordinates: (0,0) = top-left, x: 0-127, y: 0-63
+    // Using setFontPosTop() so y = top edge of glyph (not baseline).
+    //
+    // Font: u8g2_font_4x6_tf — 4px wide, 6px total height.
+    // With setFontPosTop(), each glyph occupies y to y+5 (6 rows).
+    // Line spacing: 10px → 6 lines at y = 0, 10, 20, 30, 40, 50.
+    // Bottom of last line: 50+5 = 55, leaving 8px margin at bottom.
+    // Max chars per full line: 128/4 = 32.
+    // Sprite at x=112 → lines 2-3 text stops at x=108 → 27 chars.
+    //
+    // Sprite: 14px wide at x=114, starts y=10, spans to y=24.
 
-    // Line 1: slug (big) + firmware version (small)
-    u8g2.setFont(u8g2_font_6x13B_tf);
-    u8g2.drawStr(0, 12, NODE_SLUG);
-    u8g2.setFont(u8g2_font_5x8_tf);
-    u8g2.drawStr(68, 12, FIRMWARE_VERSION);
+    // u8g2_font_4x6_mr: 4px wide monospaced, 6px cell height, reduced
+    // ASCII (32-127). Guaranteed fixed-width on the 128x64 SSD1306.
+    //
+    // setFontPosTop() makes y = top edge of glyph. Each glyph is 6px
+    // tall. Line spacing of 11px guarantees 5px gap between lines.
+    // 5 lines at y = 0, 11, 22, 33, 44. Bottom of last: 44+5 = 49.
+    // Remaining 15px (y=50-63) is empty bottom margin.
+    // Max chars per line: 128 / 4 = 32.
+    // Lines 2-3 near sprite: 108 / 4 = 27 chars max.
+    u8g2.setFont(u8g2_font_4x6_mr);
+    u8g2.setFontPosTop();
 
-    // Line 2: IP address (monospace)
-    u8g2.setFont(u8g2_font_5x8_tf);
+    // Line 1 (y=0): node name + version — single string
+    {
+        static char line1[33];
+        snprintf(line1, sizeof(line1), "%s  v0.5.0", NODE_SLUG);
+        u8g2.drawStr(0, 0, line1);
+    }
+
+    // Line 2 (y=11): IP + rssi
     if (WiFi.status() == WL_CONNECTED) {
-        String ip = WiFi.localIP().toString();
-        u8g2.drawStr(0, 23, ip.c_str());
+        static char ipline[33];
+        WiFi.localIP().toString().toCharArray(ipline, 16);
+        // Append rssi to IP line to save a row
+        {
+            int len = strlen(ipline);
+            snprintf(ipline + len, sizeof(ipline) - len,
+                     " rssi %d", WiFi.RSSI());
+        }
+        u8g2.drawStr(0, 10, ipline);
     } else {
-        u8g2.drawStr(0, 23, "no wifi");
+        u8g2.drawStr(0, 10, "no wifi");
     }
 
-    // Big temp / humidity block in the middle.
-    u8g2.setFont(u8g2_font_logisoso16_tf);
-    char tbuf[16];
-    char hbuf[16];
-    if (ahtPresent && ahtTempC > -100.0f) {
-        snprintf(tbuf, sizeof(tbuf), "%.1fC", ahtTempC);
-        snprintf(hbuf, sizeof(hbuf), "%.0f%%", ahtHumidityPct);
-    } else {
-        snprintf(tbuf, sizeof(tbuf), "-- C");
-        snprintf(hbuf, sizeof(hbuf), "-- %%");
+    // Line 3 (y=22): Identity mood
+    if (moodFetched) {
+        static char mbuf[28];
+        snprintf(mbuf, sizeof(mbuf), "mood: %s", identityMood);
+        u8g2.drawStr(0, 22, mbuf);
     }
-    u8g2.drawStr(0,  46, tbuf);
-    u8g2.drawStr(70, 46, hbuf);
 
-    // Decision tree output (if active)
+    // Line 4 (y=33): decision tree
 #ifdef NODE_HAS_DECISION_TREE
     if (treeLoaded && lastPrediction >= 0) {
-        u8g2.setFont(u8g2_font_5x8_tf);
-        char dbuf[40];
+        static char dbuf[33];
         snprintf(dbuf, sizeof(dbuf), "AI: %s (%d)",
                  lastClassName, lastConfidence);
-        u8g2.drawStr(0, 54, dbuf);
+        u8g2.drawStr(0, 33, dbuf);
     }
 #endif
 
-    // Animated sprite — a little happy robot in the top-right corner.
-    // Cycles through: neutral → bounce → wave → blink. Drawn with
-    // u8g2 primitives (no bitmap data). The frame counter advances
-    // on every OLED redraw (500ms), so the animation is ~2 seconds
-    // per cycle. Constant resources: no allocation, no timers.
+    // Line 5 (y=44): uptime
+    {
+        unsigned long upS = (millis() - bootMs) / 1000;
+        static char footer[33];
+        snprintf(footer, sizeof(footer), "up %lus", upS);
+        u8g2.drawStr(0, 44, footer);
+    }
+
+    // --- Animated sprite ---
+    //
+    // Two styles selected at compile time:
+    //   Terry: Space Invaders / Lego robot (yellow head, blue body)
+    //   Mabel/Hazel: chibi 1960s flight attendant (NODE_SPRITE_MABEL)
+    //
+    // Both use the same animation phases: 0=idle, 1=nod, 2=wave, 3=blink
     {
         static uint8_t spriteFrame = 0;
-        spriteFrame = (spriteFrame + 1) % 16;  // 16 half-seconds = 8 second cycle
-        int phase = spriteFrame / 4;  // 0=neutral, 1=bounce, 2=wave, 3=blink
+        spriteFrame = (spriteFrame + 1) % 16;
+        int phase = spriteFrame / 4;
 
-        int sx = 110;  // top-right corner
-        int sy = 1;
-        int bounce = (phase == 1) ? -2 : 0;
+#ifdef NODE_SPRITE_MABEL
+        // ---- Chibi flight attendant (Mabel / Hazel) ----
+        // 24px wide, ~32px tall. Enormous kawaii head, tiny body.
+        // Cute mini pillbox hat, styled hair with flips, huge sparkle
+        // eyes, rosy cheeks, peter-pan collar, fitted dress, tiny shoes.
+        int sx = 100;       // x anchor (24px wide, ends at x=123)
+        int hy = 0;         // head anchor (20 rows)
+        int by = 20;        // body anchor (12 rows)
+        int nod = (phase == 1) ? -1 : 0;
 
-        // Head
-        u8g2.drawCircle(sx + 8, sy + 7 + bounce, 7);
+        // ---- HEAD (20 rows, chibi oversized) ----
 
-        // Eyes
+        // Mini pillbox hat (hy+0 to hy+1): small and cute
+        u8g2.drawBox(sx + 7, hy + nod, 10, 1);      // hat top
+        u8g2.drawBox(sx + 6, hy + nod + 1, 12, 1);   // hat brim
+
+        // Hair top (hy+2 to hy+3): voluminous, rounded
+        u8g2.drawBox(sx + 4, hy + nod + 2, 16, 1);
+        u8g2.drawBox(sx + 3, hy + nod + 3, 18, 1);
+
+        // Hair + forehead (hy+4 to hy+6)
+        u8g2.drawBox(sx + 2, hy + nod + 4, 20, 3);
+
+        // Face + hair frame (hy+7 to hy+15): big round face
+        u8g2.drawBox(sx + 1, hy + nod + 7, 22, 9);
+
+        // Eyes (hy+8 to hy+12): huge 6x5 kawaii eyes
+        u8g2.setDrawColor(0);
         if (phase == 3) {
-            // Blink — horizontal lines
-            u8g2.drawHLine(sx + 4, sy + 6 + bounce, 3);
-            u8g2.drawHLine(sx + 10, sy + 6 + bounce, 3);
+            // Blink: happy ^_^ squint
+            u8g2.drawBox(sx + 4, hy + nod + 10, 6, 1);
+            u8g2.drawPixel(sx + 3, hy + nod + 11);
+            u8g2.drawPixel(sx + 10, hy + nod + 11);
+            u8g2.drawBox(sx + 14, hy + nod + 10, 6, 1);
+            u8g2.drawPixel(sx + 13, hy + nod + 11);
+            u8g2.drawPixel(sx + 20, hy + nod + 11);
         } else {
-            // Open — dots
-            u8g2.drawDisc(sx + 5, sy + 5 + bounce, 1);
-            u8g2.drawDisc(sx + 11, sy + 5 + bounce, 1);
+            // Open: 6x5 big sparkly eyes
+            u8g2.drawBox(sx + 4, hy + nod + 8, 6, 5);
+            u8g2.drawBox(sx + 14, hy + nod + 8, 6, 5);
+        }
+        u8g2.setDrawColor(1);
+        if (phase != 3) {
+            // Big sparkle: 3x2 highlight upper-left + 1px lower-right
+            u8g2.drawBox(sx + 4, hy + nod + 8, 3, 2);
+            u8g2.drawPixel(sx + 9, hy + nod + 12);
+            u8g2.drawBox(sx + 14, hy + nod + 8, 3, 2);
+            u8g2.drawPixel(sx + 19, hy + nod + 12);
         }
 
-        // Smile
-        u8g2.drawPixel(sx + 5, sy + 10 + bounce);
-        u8g2.drawHLine(sx + 6, sy + 11 + bounce, 5);
-        u8g2.drawPixel(sx + 11, sy + 10 + bounce);
+        // Rosy cheeks — 2px blush spots
+        u8g2.drawBox(sx + 2, hy + nod + 13, 2, 1);
+        u8g2.drawBox(sx + 20, hy + nod + 13, 2, 1);
 
-        // Body (vertical line from neck)
-        int by = sy + 15 + bounce;
-        u8g2.drawVLine(sx + 8, by, 6);
+        // Mouth (hy+14): tiny kawaii mouth — single row
+        u8g2.setDrawColor(0);
+        if (moodCategory == MOOD_HAPPY) {
+            // Happy: ω cat-mouth
+            u8g2.drawPixel(sx + 9, hy + nod + 14);
+            u8g2.drawPixel(sx + 14, hy + nod + 14);
+            u8g2.drawPixel(sx + 11, hy + nod + 15);
+            u8g2.drawPixel(sx + 12, hy + nod + 15);
+        } else if (moodCategory == MOOD_WORRIED) {
+            u8g2.drawBox(sx + 10, hy + nod + 14, 4, 1);
+            u8g2.drawPixel(sx + 9, hy + nod + 15);
+            u8g2.drawPixel(sx + 14, hy + nod + 15);
+        } else {
+            u8g2.drawBox(sx + 10, hy + nod + 14, 4, 1);
+        }
+        u8g2.setDrawColor(1);
+
+        // Chin (hy+16 to hy+17): face rounds off
+        u8g2.drawBox(sx + 2, hy + nod + 16, 20, 1);
+        u8g2.drawBox(sx + 4, hy + nod + 17, 16, 1);
+
+        // Hair flips (hy+18 to hy+19): cute styled ends
+        u8g2.drawBox(sx + 1, hy + nod + 16, 2, 3);   // left hair
+        u8g2.drawBox(sx + 21, hy + nod + 16, 2, 3);   // right hair
+        u8g2.drawPixel(sx, hy + nod + 18);             // left flip out
+        u8g2.drawPixel(sx + 23, hy + nod + 18);        // right flip out
+        u8g2.drawPixel(sx, hy + nod + 19);             // left flip tip
+        u8g2.drawPixel(sx + 23, hy + nod + 19);        // right flip tip
+
+        // ---- BODY (12 rows, never moves) ----
+
+        // Neck (by+0)
+        u8g2.drawBox(sx + 9, by, 6, 1);
+
+        // Peter-pan collar (by+1)
+        u8g2.drawBox(sx + 6, by + 1, 12, 1);
+        u8g2.drawPixel(sx + 5, by + 1);
+        u8g2.drawPixel(sx + 18, by + 1);
+
+        // Fitted dress bodice (by+2 to by+5)
+        u8g2.drawBox(sx + 6, by + 2, 12, 4);
 
         // Arms
         if (phase == 2) {
-            // Wave — right arm raised, left arm down
-            u8g2.drawLine(sx + 8, by + 1, sx + 15, by - 3);
-            u8g2.drawPixel(sx + 15, by - 4);  // hand wave
-            u8g2.drawLine(sx + 8, by + 1, sx + 2, by + 4);
+            u8g2.drawBox(sx + 4, by + 3, 2, 3);
+            u8g2.drawPixel(sx + 18, by + 3);
+            u8g2.drawPixel(sx + 19, by + 2);
+            u8g2.drawPixel(sx + 20, by + 1);
+            u8g2.drawPixel(sx + 21, by + 1);
         } else {
-            // Both arms down
-            u8g2.drawLine(sx + 8, by + 1, sx + 3, by + 5);
-            u8g2.drawLine(sx + 8, by + 1, sx + 13, by + 5);
+            u8g2.drawBox(sx + 4, by + 3, 2, 3);
+            u8g2.drawBox(sx + 18, by + 3, 2, 3);
         }
 
-        // Legs
-        u8g2.drawLine(sx + 8, by + 5, sx + 5, by + 10);
-        u8g2.drawLine(sx + 8, by + 5, sx + 11, by + 10);
+        // Cute short skirt (by+6 to by+8): gentle flare
+        u8g2.drawBox(sx + 5, by + 6, 14, 1);
+        u8g2.drawBox(sx + 4, by + 7, 16, 1);
+        u8g2.drawBox(sx + 3, by + 8, 18, 1);
 
-        // Feet
-        u8g2.drawHLine(sx + 3, by + 10, 3);
-        u8g2.drawHLine(sx + 10, by + 10, 3);
+        // Slim legs (by+9 to by+10)
+        u8g2.drawBox(sx + 8, by + 9, 2, 2);
+        u8g2.drawBox(sx + 14, by + 9, 2, 2);
+
+        // Tiny shoes (by+11)
+        u8g2.drawBox(sx + 7, by + 11, 3, 1);
+        u8g2.drawBox(sx + 14, by + 11, 3, 1);
+
+#else
+        // ---- Terry: Space Invaders / Lego robot ----
+        // 20px wide. Head in yellow zone (y=1-15), body in blue (y=16+).
+        int sx = 103;
+        int hy = 1;
+        int by = 16;
+        int nod = (phase == 1) ? -1 : 0;
+
+        // Horns
+        u8g2.drawPixel(sx + 5, hy + nod);
+        u8g2.drawPixel(sx + 5, hy + nod + 1);
+        if (phase == 2) {
+            u8g2.drawPixel(sx + 13, hy + nod);
+            u8g2.drawPixel(sx + 14, hy + nod + 1);
+        } else {
+            u8g2.drawPixel(sx + 14, hy + nod);
+            u8g2.drawPixel(sx + 14, hy + nod + 1);
+        }
+
+        // Cranium
+        u8g2.drawBox(sx + 3, hy + nod + 2, 14, 1);
+        u8g2.drawBox(sx + 2, hy + nod + 3, 16, 1);
+        u8g2.drawBox(sx + 1, hy + nod + 4, 18, 2);
+
+        // Eyes
+        u8g2.drawBox(sx + 1, hy + nod + 6, 18, 4);
+        u8g2.setDrawColor(0);
+        if (phase == 3) {
+            u8g2.drawBox(sx + 3, hy + nod + 7, 5, 1);
+            u8g2.drawPixel(sx + 2, hy + nod + 8);
+            u8g2.drawPixel(sx + 8, hy + nod + 8);
+            u8g2.drawBox(sx + 12, hy + nod + 7, 5, 1);
+            u8g2.drawPixel(sx + 11, hy + nod + 8);
+            u8g2.drawPixel(sx + 17, hy + nod + 8);
+        } else {
+            u8g2.drawBox(sx + 3, hy + nod + 6, 5, 4);
+            u8g2.drawBox(sx + 12, hy + nod + 6, 5, 4);
+        }
+        u8g2.setDrawColor(1);
+        if (phase != 3) {
+            u8g2.drawBox(sx + 3, hy + nod + 6, 2, 2);
+            u8g2.drawBox(sx + 12, hy + nod + 6, 2, 2);
+        }
+
+        // Mouth
+        u8g2.drawBox(sx + 1, hy + nod + 10, 18, 3);
+        u8g2.setDrawColor(0);
+        if (moodCategory == MOOD_HAPPY) {
+            u8g2.drawPixel(sx + 7, hy + nod + 10);
+            u8g2.drawPixel(sx + 12, hy + nod + 10);
+            u8g2.drawBox(sx + 8, hy + nod + 11, 4, 1);
+        } else if (moodCategory == MOOD_WORRIED) {
+            u8g2.drawBox(sx + 8, hy + nod + 10, 4, 1);
+            u8g2.drawPixel(sx + 7, hy + nod + 11);
+            u8g2.drawPixel(sx + 12, hy + nod + 11);
+        } else {
+            u8g2.drawBox(sx + 8, hy + nod + 11, 4, 1);
+        }
+        u8g2.setDrawColor(1);
+
+        // Jaw
+        u8g2.drawBox(sx + 2, hy + nod + 13, 16, 1);
+        u8g2.drawBox(sx + 3, hy + nod + 14, 14, 1);
+
+        // Body
+        u8g2.drawBox(sx + 6, by, 8, 1);
+        u8g2.drawBox(sx + 2, by + 1, 16, 7);
+        if (phase == 2) {
+            u8g2.drawBox(sx, by + 4, 2, 4);
+            u8g2.drawPixel(sx + 18, by + 3);
+            u8g2.drawPixel(sx + 19, by + 2);
+            u8g2.drawPixel(sx + 19, by + 1);
+        } else {
+            u8g2.drawBox(sx, by + 4, 2, 4);
+            u8g2.drawBox(sx + 18, by + 4, 2, 4);
+        }
+        u8g2.drawBox(sx + 3, by + 8, 14, 1);
+        u8g2.drawBox(sx + 4, by + 9, 4, 1);
+        u8g2.drawBox(sx + 12, by + 9, 4, 1);
+        u8g2.drawBox(sx + 3, by + 10, 4, 1);
+        u8g2.drawBox(sx + 13, by + 10, 4, 1);
+        u8g2.drawBox(sx + 2, by + 11, 4, 1);
+        u8g2.drawBox(sx + 14, by + 11, 4, 1);
+        u8g2.drawBox(sx + 1, by + 12, 5, 1);
+        u8g2.drawBox(sx + 14, by + 12, 5, 1);
+#endif
     }
 
-    // Footer: uptime + rssi
-    u8g2.setFont(u8g2_font_5x8_tf);
-    unsigned long upS = (millis() - bootMs) / 1000;
-    char footer[32];
-    if (WiFi.status() == WL_CONNECTED) {
-        snprintf(footer, sizeof(footer), "up %lus  rssi %d",
-                 upS, WiFi.RSSI());
-    } else {
-        snprintf(footer, sizeof(footer), "up %lus  offline", upS);
+    // --- QR code (32x32 area, bottom-right) ---
+    // QR Version 1 = 21x21 modules. Drawn at 1px per module, centered
+    // in the 32x32 area with a quiet zone border. Generated once on
+    // boot, cached as pixel flags.
+    {
+        static bool qrReady = false;
+        static uint8_t qrPixels[21 * 3];  // 21 rows × 21 bits → 3 bytes/row
+        if (!qrReady) {
+            QRCode qrcode;
+            uint8_t qrcodeData[qrcode_getBufferSize(1)];
+            qrcode_initText(&qrcode, qrcodeData, 1, ECC_LOW, "http://h8r.nl");
+            // Pack into bit array for fast redraw
+            for (int y = 0; y < 21; y++) {
+                qrPixels[y * 3] = 0;
+                qrPixels[y * 3 + 1] = 0;
+                qrPixels[y * 3 + 2] = 0;
+                for (int x = 0; x < 21; x++) {
+                    if (qrcode_getModule(&qrcode, x, y)) {
+                        qrPixels[y * 3 + (x / 8)] |= (1 << (x % 8));
+                    }
+                }
+            }
+            qrReady = true;
+        }
+        // Draw centered in 32x32 area at (96, 32).
+        // 21x21 in 32x32 → offset (5,5) for centering + quiet zone.
+        int qx = 96 + 5;
+        int qy = 32 + 5;
+        for (int row = 0; row < 21; row++) {
+            for (int col = 0; col < 21; col++) {
+                if (qrPixels[row * 3 + (col / 8)] & (1 << (col % 8))) {
+                    u8g2.drawPixel(qx + col, qy + row);
+                }
+            }
+        }
     }
-    u8g2.drawStr(0, 62, footer);
 
     u8g2.sendBuffer();
 }
@@ -541,6 +885,14 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
                  line-height: 1.1; margin-top: 0.25rem;
                  font-variant-numeric: tabular-nums; }
   .card .unit { font-size: 1rem; color: #8b949e; margin-left: 0.2rem; }
+  .mood { margin-top: 1rem; background: #161b22; border: 1px solid #30363d;
+          border-radius: 8px; padding: 0.8rem 1.2rem; }
+  .mood .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
+                 color: #6e7681; }
+  .mood .value { font-size: 1.4rem; font-weight: 300; color: #d2a8ff;
+                 line-height: 1.3; margin-top: 0.15rem; }
+  .mood .intensity { font-size: 0.78rem; color: #6e7681;
+                     font-family: ui-monospace, Menlo, monospace; margin-top: 0.2rem; }
   .meta { margin-top: 1.5rem; font-size: 0.78rem; color: #6e7681;
           font-family: ui-monospace, Menlo, monospace; line-height: 1.6; }
   .meta span { color: #8b949e; }
@@ -564,6 +916,11 @@ static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html>
       <div class="label">Humidity</div>
       <div class="value"><span id="hum">—</span><span class="unit">%</span></div>
     </div>
+  </div>
+  <div class="mood" id="moodcard" style="display:none">
+    <div class="label">Velour's mood</div>
+    <div class="value" id="mood">—</div>
+    <div class="intensity">intensity <span id="mood_int">—</span></div>
   </div>
   <div class="meta">
     <div><span>sensor</span> <span id="sensor">—</span></div>
@@ -601,6 +958,11 @@ async function poll() {
     document.getElementById('uptime').textContent = uptimeText(d.uptime_s || 0);
     document.getElementById('rssi').textContent = d.rssi != null ? d.rssi : '—';
     document.getElementById('heap').textContent = d.free_heap != null ? d.free_heap : '—';
+    if (d.identity_mood) {
+      document.getElementById('moodcard').style.display = '';
+      document.getElementById('mood').textContent = d.identity_mood;
+      document.getElementById('mood_int').textContent = fmt(d.identity_intensity, 2);
+    }
     var ageS = (d.last_read_ms_ago || 0) / 1000;
     document.getElementById('age').textContent = ageText(ageS);
     var stale = ageS > 10;
@@ -646,6 +1008,12 @@ static void handleDataJson() {
     s += (WiFi.status() == WL_CONNECTED) ? String(WiFi.RSSI()) : "null";
     s += ",\"last_read_ms_ago\":";
     s += String(ageMs);
+    if (moodFetched) {
+        s += ",\"identity_mood\":\"";
+        s += identityMood;
+        s += "\",\"identity_intensity\":";
+        s += String(identityIntensity, 2);
+    }
 
 #ifdef NODE_HAS_DECISION_TREE
     s += ",\"tree_loaded\":";
@@ -794,7 +1162,7 @@ static void velourReport(const char* label) {
     Serial.print("[velour] ");
     Serial.print(label);
     Serial.print(" → POST ");
-    Serial.print(VELOUR_URL);
+    Serial.print(velour.baseUrl());
     Serial.print("/api/nodes/");
     Serial.print(NODE_SLUG);
     Serial.println("/report/");
@@ -855,6 +1223,10 @@ void setup() {
 
     velour.setFirmwareVersion(FIRMWARE_VERSION);
 
+    // Discover Velour's actual port — it may not be on the default if
+    // another process was holding that port when Velour last started.
+    velour.discover();
+
     // Bring up the local web server. This is purely additive — it
     // coexists with the Velour reporting + OTA flow without interfering.
     // Gary is now reachable at http://<his-LAN-IP>/ from any device on
@@ -872,6 +1244,11 @@ void setup() {
     // locally.
     downloadDecisionTree();
 #endif
+
+    // Fetch Identity's mood on boot so the OLED has something to show
+    // before the first periodic fetch fires.
+    fetchIdentityMood();
+    lastMoodFetchAt = millis();
 
     // Send one reading immediately so something lands in the Velour UI
     // within seconds of boot, not at the first 30-second tick.
@@ -901,7 +1278,9 @@ void loop() {
     // or incoming connections stall. It's non-blocking — returns
     // immediately if there's nothing to do.
     httpd.handleClient();
-    MDNS.update();
+#if defined(ESP8266)
+    MDNS.update();  // ESP32 mDNS doesn't need this
+#endif
 
 #ifdef NODE_HAS_OLED
     // Redraw the OLED on its own cadence (every 500ms). Non-blocking —
@@ -916,6 +1295,13 @@ void loop() {
     if (millis() - lastAhtReadAt >= AHT_READ_INTERVAL_MS) {
         lastAhtReadAt = millis();
         ahtRead();
+    }
+
+    // Periodic Identity mood fetch — keeps the OLED sprite in sync with
+    // Velour's emotional state.
+    if (millis() - lastMoodFetchAt >= MOOD_FETCH_INTERVAL_MS) {
+        lastMoodFetchAt = millis();
+        fetchIdentityMood();
     }
 
     if (millis() - lastReportAt >= REPORT_INTERVAL_MS) {

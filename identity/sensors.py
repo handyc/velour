@@ -162,7 +162,7 @@ def sense_mailroom():
     try:
         from datetime import timedelta
         from django.utils import timezone as djtz
-        from mailroom.models import InboundMessage
+        from mail.models import InboundMessage
         cutoff = djtz.now() - timedelta(hours=24)
         return {
             'last_24h': InboundMessage.objects.filter(received_at__gte=cutoff).count(),
@@ -251,11 +251,11 @@ def sense_mailboxes():
     try:
         from datetime import timedelta
         from django.utils import timezone as djtz
-        from mailboxes.models import MailAccount
+        from mail.models import MailAccount
         cutoff = djtz.now() - timedelta(days=7)
         # mailboxes app may or may not have a Sent model — guard.
         try:
-            from mailboxes.models import SentMessage
+            from mail.models import SentMessage
             sent_week = SentMessage.objects.filter(sent_at__gte=cutoff).count()
         except Exception:
             sent_week = 0

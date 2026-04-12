@@ -8,17 +8,90 @@
     .dash-header { margin-bottom: 0.5rem; }
     .dash-header h1 { font-size: 1.2rem; margin-bottom: 0; display: inline; }
     .dash-header span { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    /* ── Office Suite bar ─────────────────────────────────── */
+    .suite-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8b949e;
+        margin: 0.75rem 0 0.35rem 0.1rem;
+    }
+    .suite-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.6rem;
+        margin-bottom: 1rem;
+    }
+    @media (min-width: 600px) {
+        .suite-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (min-width: 900px) {
+        .suite-grid { grid-template-columns: repeat(4, 1fr); }
+    }
+    .suite-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.9rem 1rem 0.8rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        border-left: 3px solid transparent;
+        transition: border-color 0.15s;
+    }
+    .suite-card:hover { border-color: currentColor; }
+    .suite-card--mail    { border-left-color: #58a6ff; color: #58a6ff; }
+    .suite-card--cal     { border-left-color: #56d364; color: #56d364; }
+    .suite-card--docs    { border-left-color: #d2a8ff; color: #d2a8ff; }
+    .suite-card--files   { border-left-color: #e3b341; color: #e3b341; }
+    .suite-icon {
+        font-size: 1.5rem;
+        line-height: 1;
+        flex: 0 0 auto;
+        width: 2rem;
+        text-align: center;
+    }
+    .suite-body { flex: 1; min-width: 0; }
+    .suite-body h3 {
+        font-size: 0.95rem;
+        margin: 0 0 0.15rem 0;
+        color: #c9d1d9;
+    }
+    .suite-body p {
+        font-size: 0.75rem;
+        color: #8b949e;
+        margin: 0;
+        line-height: 1.3;
+    }
+    .suite-card a {
+        display: block;
+        text-decoration: none;
+        color: inherit;
+    }
+    .suite-card a:hover { text-decoration: none; }
+
+    /* ── System & Tools grid ──────────────────────────────── */
+    .tools-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8b949e;
+        margin: 0 0 0.35rem 0.1rem;
+    }
     .dashboard-grid {
         display: grid;
-        grid-template-columns: 1fr;          /* mobile: 1 column */
+        grid-template-columns: 1fr;
         gap: 0.5rem;
-        margin-top: 0.75rem;
     }
     @media (min-width: 600px) {
         .dashboard-grid { grid-template-columns: repeat(2, 1fr); gap: 0.55rem; }
     }
     @media (min-width: 900px) {
         .dashboard-grid { grid-template-columns: repeat(4, 1fr); gap: 0.6rem; }
+    }
+    @media (min-width: 1200px) {
+        .dashboard-grid { grid-template-columns: repeat(5, 1fr); }
     }
     .dashboard-grid .card {
         padding: 0.7rem 0.9rem;
@@ -40,11 +113,13 @@
         font-size: 0.78rem;
         margin-top: 0.2rem;
     }
-    /* Phone: collapse cards into compact horizontal strips —
-       title on the left, link on the right, description hidden
-       so the whole dashboard fits on one screen without scrolling
-       through 13 large boxes. */
+
+    /* Phone: compact strips */
     @media (max-width: 599px) {
+        .suite-card {
+            padding: 0.6rem 0.85rem;
+        }
+        .suite-body p { display: none; }
         .dashboard-grid .card {
             flex-direction: row;
             align-items: center;
@@ -75,6 +150,47 @@
     <span>Welcome back, {{ user.username }}</span>
 </div>
 
+<div class="suite-label">Office Suite</div>
+<div class="suite-grid">
+    <div class="suite-card suite-card--mail">
+        <a href="{% url 'mail:inbound_list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+            <div class="suite-icon">&#9993;</div>
+            <div class="suite-body">
+                <h3>Mail</h3>
+                <p>Inbound messages and mail accounts</p>
+            </div>
+        </a>
+    </div>
+    <div class="suite-card suite-card--cal">
+        <a href="{% url 'chronos:home' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+            <div class="suite-icon">&#128339;</div>
+            <div class="suite-body">
+                <h3>Calendar</h3>
+                <p>Clocks, timezones, and calendar</p>
+            </div>
+        </a>
+    </div>
+    <div class="suite-card suite-card--docs">
+        <a href="{% url 'codex:list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+            <div class="suite-icon">&#128214;</div>
+            <div class="suite-body">
+                <h3>Documents</h3>
+                <p>Manuals rendered into Tufte-style PDFs</p>
+            </div>
+        </a>
+    </div>
+    <div class="suite-card suite-card--files">
+        <a href="{% url 'attic:list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+            <div class="suite-icon">&#128193;</div>
+            <div class="suite-body">
+                <h3>Files</h3>
+                <p>Images, audio, video, documents</p>
+            </div>
+        </a>
+    </div>
+</div>
+
+<div class="tools-label">System &amp; Tools</div>
 <div class="dashboard-grid">
     <div class="card">
         <h3>Web Terminal</h3>
@@ -108,7 +224,7 @@
     </div>
     <div class="card">
         <h3>Databases</h3>
-        <p>MySQL and PostgreSQL connections — credentials and live test.</p>
+        <p>MySQL and PostgreSQL connections.</p>
         <a href="{% url 'databases:list' %}">Open Databases</a>
     </div>
     <div class="card">
@@ -118,33 +234,38 @@
     </div>
     <div class="card">
         <h3>Identity</h3>
-        <p>The system's self-awareness and personality.</p>
+        <p>Self-awareness, personality, and strange loops.</p>
         <a href="{% url 'identity:home' %}">View Identity</a>
     </div>
     <div class="card">
         <h3>Maintenance</h3>
-        <p>Backup and restore /home directories as tarballs.</p>
+        <p>Backup and restore /home directories.</p>
         <a href="{% url 'maintenance:home' %}">Maintenance</a>
     </div>
     <div class="card">
         <h3>Windows</h3>
-        <p>Control Windows from WSL — processes, services, firewall, PowerShell.</p>
+        <p>Control Windows from WSL.</p>
         <a href="{% url 'winctl:home' %}">Windows Control</a>
+    </div>
+    <div class="card">
+        <h3>Nodes</h3>
+        <p>ESP8266 / ESP32 microcontroller fleet.</p>
+        <a href="{% url 'nodes:list' %}">View Nodes</a>
+    </div>
+    <div class="card">
+        <h3>Experiments</h3>
+        <p>Lightweight experiment tracker.</p>
+        <a href="{% url 'experiments:list' %}">View Experiments</a>
+    </div>
+    <div class="card">
+        <h3>Tiles</h3>
+        <p>Wang tile sets as substrate for ideas.</p>
+        <a href="{% url 'tiles:list' %}">Open Tiles</a>
     </div>
     <div class="card">
         <h3>Agricola</h3>
         <p>Agar.io clone — eat cells to grow.</p>
         <a href="{% url 'agricola:game' %}">Play Now</a>
-    </div>
-    <div class="card">
-        <h3>Codex</h3>
-        <p>Manuals about Velour, rendered into Tufte-style PDFs.</p>
-        <a href="{% url 'codex:list' %}">Open Codex</a>
-    </div>
-    <div class="card">
-        <h3>Attic</h3>
-        <p>Media library — images, audio, video, documents.</p>
-        <a href="{% url 'attic:list' %}">Open Attic</a>
     </div>
     <div class="card">
         <h3>Maps</h3>
@@ -153,23 +274,18 @@
     </div>
     <div class="card">
         <h3>HPC</h3>
-        <p>Registry of high-performance computing clusters.</p>
+        <p>High-performance computing clusters.</p>
         <a href="{% url 'hpc:list' %}">Open HPC</a>
     </div>
     <div class="card">
-        <h3>Tiles</h3>
-        <p>Wang tile sets — edge-matching tiles as substrate for ideas.</p>
-        <a href="{% url 'tiles:list' %}">Open Tiles</a>
+        <h3>Landing Page</h3>
+        <p>Newspaper-style chronicle.</p>
+        <a href="{% url 'landingpage:home' %}">View News</a>
     </div>
     <div class="card">
-        <h3>Hofstadter</h3>
-        <p>Strange loops, thought experiments, recursive self-reference.</p>
-        <a href="{% url 'hofstadter:home' %}">Open Hofstadter</a>
-    </div>
-    <div class="card">
-        <h3>Mail Server</h3>
-        <p>Internal SMTP — test mail without an external relay.</p>
-        <a href="{% url 'mailserver:inbox' %}">Open inbox</a>
+        <h3>Hosts</h3>
+        <p>Remote Velour instances and health polling.</p>
+        <a href="{% url 'hosts:list' %}">View Hosts</a>
     </div>
 </div>
 {% endblock %}
