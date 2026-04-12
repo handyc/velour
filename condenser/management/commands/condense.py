@@ -1,90 +1,114 @@
-"""Run a distillation from the command line and write files to disk.
+"""Run a Condenser distillation from the command line.
 
 Usage:
-    python manage.py condense tiles --tier js --output /tmp/tiles.html
-    python manage.py condense tiles --tier esp --output /tmp/tiles.ino
-    python manage.py condense tiles --tier attiny --output /tmp/tiles.c
-    python manage.py condense tiles --tier circuit --output /tmp/tiles.txt
-    python manage.py condense tiles --tier all    # writes all tiers
-    python manage.py condense velour --tier js --output /tmp/velour.html
+    python manage.py condense tiles --tier js
+    python manage.py condense tiles --tier all
+    python manage.py condense chronos --tier js
+    python manage.py condense automaton --tier attiny
+    python manage.py condense velour --tier js
 """
 
 from django.core.management.base import BaseCommand
 
 
+TIER_EXTS = {'js': 'html', 'esp': 'ino', 'attiny': 'c', 'circuit': 'txt'}
+
+
 class Command(BaseCommand):
-    help = 'Run a Condenser distillation and write output to file.'
+    help = 'Condense a Django app through the distillation tiers.'
 
     def add_arguments(self, parser):
-        parser.add_argument('source', choices=['tiles', 'velour'],
-                            help='Source to distill.')
+        parser.add_argument('source',
+            help='App label to condense (e.g. tiles, chronos, nodes, automaton) or "velour".')
         parser.add_argument('--tier', default='js',
-                            choices=['js', 'esp', 'attiny', 'circuit', 'all'],
-                            help='Target tier (default: js).')
-        parser.add_argument('--output', '-o', default='',
-                            help='Output file path (default: auto).')
+                            choices=['js', 'esp', 'attiny', 'circuit', 'all'])
+        parser.add_argument('--output', '-o', default='')
 
     def handle(self, *args, **options):
         source = options['source']
         tier = options['tier']
 
-        if tier == 'all':
-            self._run_all(source)
-            return
-
-        output = self._distill(source, tier)
-        if output is None:
-            return
-
-        path = options['output']
-        if not path:
-            ext = {'js': 'html', 'esp': 'ino', 'attiny': 'c', 'circuit': 'txt'}[tier]
-            path = f'/tmp/{source}_{tier}.{ext}'
-
-        with open(path, 'w') as f:
-            f.write(output)
-        self.stdout.write(self.style.SUCCESS(
-            f'{source} → {tier}: {len(output)} bytes → {path}'))
-
-    def _run_all(self, source):
-        tiers = ['js', 'esp', 'attiny', 'circuit']
-        exts = {'js': 'html', 'esp': 'ino', 'attiny': 'c', 'circuit': 'txt'}
-        prev = None
-        for tier in tiers:
-            output = self._distill(source, tier, prev_output=prev)
-            if output is None:
-                break
-            path = f'/tmp/{source}_{tier}.{exts[tier]}'
+        if source == 'velour':
+            # Special case: Velour self-distillation
+            from condenser.distill_velour import distill
+            output = distill()
+            path = options['output'] or '/tmp/velour_condensed.html'
             with open(path, 'w') as f:
                 f.write(output)
-            self.stdout.write(f'  {tier}: {len(output)} bytes → {path}')
-            prev = output
+            self.stdout.write(self.style.SUCCESS(
+                f'velour → js: {len(output)} bytes → {path}'))
+            return
+
+        if tier == 'all':
+            self._run_all(source)
+        else:
+            self._run_one(source, tier, options['output'])
+
+    def _run_one(self, source, tier, output_path):
+        from condenser.parser import parse_app, summarize
+
+        ir = parse_app(source)
+        if not ir:
+            self.stderr.write(self.style.ERROR(f'App "{source}" not found.'))
+            return
+
+        gen = self._get_generator(tier)
+        if not gen:
+            self.stderr.write(self.style.ERROR(f'No generator for tier "{tier}".'))
+            return
+
+        output = gen(ir)
+        path = output_path or f'/tmp/{source}_{tier}.{TIER_EXTS[tier]}'
+        with open(path, 'w') as f:
+            f.write(output)
+
+        self.stdout.write(f'{source} → {tier}: {len(output)} bytes → {path}')
+
+    def _run_all(self, source):
+        from condenser.parser import parse_app, summarize
+
+        ir = parse_app(source)
+        if not ir:
+            self.stderr.write(self.style.ERROR(f'App "{source}" not found.'))
+            return
+
+        self.stdout.write(summarize(ir))
+        self.stdout.write('')
+
+        for tier in ['js', 'esp', 'attiny', 'circuit']:
+            gen = self._get_generator(tier)
+            if gen:
+                try:
+                    output = gen(ir)
+                    path = f'/tmp/{source}_{tier}.{TIER_EXTS[tier]}'
+                    with open(path, 'w') as f:
+                        f.write(output)
+                    self.stdout.write(f'  {tier}: {len(output)} bytes → {path}')
+                except Exception as e:
+                    self.stderr.write(f'  {tier}: FAILED — {e}')
+
         self.stdout.write(self.style.SUCCESS('Done.'))
 
-    def _distill(self, source, tier, prev_output=None):
+    def _get_generator(self, tier):
+        generators = {}
         try:
-            if source == 'tiles':
-                if tier == 'js':
-                    from condenser.distill_tiles import distill
-                    return distill()
-                elif tier == 'esp':
-                    from condenser.distill_tiles import distill as d_js
-                    from condenser.distill_esp import distill as d_esp
-                    js = prev_output or d_js()
-                    return d_esp(js)
-                elif tier == 'attiny':
-                    from condenser.distill_attiny import distill
-                    return distill()
-                elif tier == 'circuit':
-                    from condenser.distill_circuit import distill
-                    return distill()
-            elif source == 'velour':
-                if tier == 'js':
-                    from condenser.distill_velour import distill
-                    return distill()
-                else:
-                    self.stderr.write(f'Velour → {tier} not yet implemented.')
-                    return None
-        except Exception as e:
-            self.stderr.write(self.style.ERROR(f'Failed: {e}'))
-            return None
+            from condenser.gen_js import generate as g_js
+            generators['js'] = g_js
+        except ImportError:
+            pass
+        try:
+            from condenser.gen_esp import generate as g_esp
+            generators['esp'] = g_esp
+        except ImportError:
+            pass
+        try:
+            from condenser.gen_attiny import generate as g_attiny
+            generators['attiny'] = g_attiny
+        except ImportError:
+            pass
+        try:
+            from condenser.gen_circuit import generate as g_circuit
+            generators['circuit'] = g_circuit
+        except ImportError:
+            pass
+        return generators.get(tier)
