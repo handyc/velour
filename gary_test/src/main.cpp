@@ -107,8 +107,21 @@
       return (r == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) ? 0 : r;
   }
 
+  // Packet type markers — first byte of every LoRa packet.
+  #define LORA_PKT_BEACON  0x01   // short text message
+  #define LORA_PKT_SCREEN  0x02   // compressed screen fragment
+
+  // Send a short beacon/ack message (prefixed with type byte).
+  static void loraSendBeacon(const char* msg) {
+      LoRa.beginPacket();
+      LoRa.write(LORA_PKT_BEACON);
+      LoRa.print(msg);
+      LoRa.endPacket();
+      loraPacketsSent++;
+  }
+
   // Send a (possibly large) buffer over LoRa in multiple packets.
-  // Each packet: [seq:1][total:1][payload:up to 220]
+  // Each packet: [type:1][seq:1][total:1][payload:up to 219]
   // Compresses first, then fragments.
   static int loraSendCompressed(const char* data, size_t len) {
       static uint8_t compBuf[4096];
@@ -122,9 +135,9 @@
       Serial.print(compLen);
       Serial.println(" bytes");
 
-      int maxPayload = LORA_MAX_PAYLOAD - 2;  // 2 bytes for seq+total header
+      int maxPayload = LORA_MAX_PAYLOAD - 3;  // 3 bytes header: type+seq+total
       int totalPkts = (compLen + maxPayload - 1) / maxPayload;
-      if (totalPkts > 255) return -2;  // too large
+      if (totalPkts > 255) return -2;
 
       for (int i = 0; i < totalPkts; i++) {
           int offset = i * maxPayload;
@@ -132,13 +145,13 @@
           if (chunk > maxPayload) chunk = maxPayload;
 
           LoRa.beginPacket();
-          LoRa.write((uint8_t)i);           // sequence number
-          LoRa.write((uint8_t)totalPkts);    // total packets
+          LoRa.write(LORA_PKT_SCREEN);
+          LoRa.write((uint8_t)i);
+          LoRa.write((uint8_t)totalPkts);
           LoRa.write(compBuf + offset, chunk);
           LoRa.endPacket();
           loraPacketsSent++;
 
-          // Small delay between packets to avoid overwhelming receiver
           if (i < totalPkts - 1) delay(50);
       }
       return totalPkts;
@@ -200,7 +213,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.3"
+#define FIRMWARE_VERSION    "v0.5.4"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1371,28 +1384,25 @@ static void loraSetup() {
 static void loraLoop() {
     if (!loraReady) return;
 
-    // --- Receive: multi-packet reassembly ---
+    // --- Receive: type-tagged packets ---
     int packetSize = LoRa.parsePacket();
     if (packetSize >= 2) {
-        uint8_t seq = LoRa.read();
-        uint8_t total = LoRa.read();
+        uint8_t pktType = LoRa.read();
         loraLastRssi = LoRa.packetRssi();
         loraPacketsRecv++;
 
-        if (total > 1) {
-            // Multi-packet screen transfer
+        if (pktType == LORA_PKT_SCREEN && packetSize >= 4) {
+            // Screen fragment: [type][seq][total][payload...]
+            uint8_t seq = LoRa.read();
+            uint8_t total = LoRa.read();
+
             if (seq == 0) {
-                // First fragment — reset reassembly
                 loraRxFragCount = 0;
                 loraRxFragTotal = total;
                 loraRxFragLen = 0;
             }
-            // Append fragment data
-            int remaining = packetSize - 2;
-            while (LoRa.available() && remaining > 0 &&
-                   loraRxFragLen < sizeof(loraRxFragBuf)) {
+            while (LoRa.available() && loraRxFragLen < sizeof(loraRxFragBuf)) {
                 loraRxFragBuf[loraRxFragLen++] = LoRa.read();
-                remaining--;
             }
             loraRxFragCount++;
 
@@ -1405,7 +1415,6 @@ static void loraLoop() {
             Serial.print(" bytes) rssi=");
             Serial.println(loraLastRssi);
 
-            // All fragments received? Decompress.
             if (loraRxFragCount >= loraRxFragTotal) {
                 static uint8_t decompBuf[LORA_SCREEN_SIZE + 64];
                 size_t decompLen = loraDecompress(
@@ -1415,7 +1424,7 @@ static void loraLoop() {
                     memcpy(loraScreenBuf, decompBuf, decompLen);
                     loraScreenBuf[decompLen] = '\0';
                     loraScreenReady = true;
-                    loraTickerOffset = 0;  // reset scroll
+                    loraTickerOffset = 0;
                     loraScreensRecv++;
                     Serial.print("[lora] screen received: ");
                     Serial.print(decompLen);
@@ -1427,7 +1436,7 @@ static void loraLoop() {
                 loraRxFragCount = 0;
             }
         } else {
-            // Single-packet message (beacon/ack)
+            // Beacon or ACK: [type][text...]
             int i = 0;
             while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
                 loraLastMsg[i++] = (char)LoRa.read();
