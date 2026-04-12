@@ -79,13 +79,19 @@
     }
     #mood-chart-container { max-height: 120px; }
     #mood-chart-container canvas { max-height: 120px; }
-    /* Compact overrides for global .card and .dashboard-grid */
-    .dashboard-grid { gap: 0.6rem; margin-top: 0.6rem; }
-    .card { padding: 0.7rem 0.85rem; }
-    .card h3 { margin-bottom: 0.3rem; font-size: 0.95rem; }
-    .card p { font-size: 0.78rem; margin-bottom: 0.3rem; }
-    .form-group { margin-bottom: 0.4rem; }
-    .form-group label { font-size: 0.78rem; margin-bottom: 0.1rem; }
+    /* Compact overrides — maximum density */
+    .dashboard-grid {
+        gap: 0.4rem; margin-top: 0.4rem;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+    .card { padding: 0.5rem 0.65rem; }
+    .card h3 { margin-bottom: 0.2rem; font-size: 0.88rem; }
+    .card p { font-size: 0.72rem; margin-bottom: 0.15rem; line-height: 1.35; }
+    .form-group { margin-bottom: 0.25rem; }
+    .form-group label { font-size: 0.72rem; margin-bottom: 0; }
+    .form-group input, .form-group textarea, .form-group select {
+        padding: 0.25rem 0.4rem; font-size: 0.8rem;
+    }
     /* Consciousness sine wave — animates at the browser's natural
        rAF rate (≈60Hz, paused when the tab is hidden, near-zero
        CPU). Underlying state polled from /identity/state.json once a
@@ -173,60 +179,38 @@
                 <input type="color" name="color" value="{{ identity.color_preference }}" style="width: 60px; height: 30px; padding: 0; border: none; cursor: pointer;">
             </div>
 
-            <hr style="border: none; border-top: 1px solid #21262d; margin: 0.4rem 0;">
-            <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">World</div>
-
-            <div class="form-group">
-                <label>Hostname <span style="color:#484f58;font-weight:normal;">(base domain for deployed apps)</span></label>
+            <div class="form-group" style="margin-top:0.2rem;">
+                <label>Hostname</label>
                 <input type="text" name="hostname" value="{{ identity.hostname }}" placeholder="example.com">
-                <div style="margin-top: 0.35rem; font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.5;">
-                    {% if vitals.ip %}outbound IP: <span style="color:#8b949e;">{{ vitals.ip }}</span><br>{% endif %}
-                    {% if vitals.client_ip %}client IP:&nbsp;&nbsp; <span style="color:#8b949e;">{{ vitals.client_ip }}</span><br>{% endif %}
-                    {% for iface, ip in vitals.local_ips %}
-                    {{ iface }}:{% if iface|length < 4 %}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{% elif iface|length < 6 %}&nbsp;&nbsp;&nbsp;{% else %}&nbsp;{% endif %} <span style="color:#8b949e;">{{ ip }}</span><br>
-                    {% endfor %}
-                </div>
             </div>
             <div class="form-group">
                 <label>Admin email</label>
                 <input type="email" name="admin_email" value="{{ identity.admin_email }}" placeholder="you@{{ identity.hostname }}">
             </div>
 
-            <hr style="border: none; border-top: 1px solid #21262d; margin: 0.4rem 0;">
-            <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">About</div>
-
             <div class="form-group">
                 <label>First-person self-description</label>
-                <textarea name="about" rows="5" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:0.5rem;font-family:inherit;resize:vertical;" placeholder="Say something about yourself...">{{ identity.about }}</textarea>
+                <textarea name="about" rows="2" style="width:100%;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:0.3rem;font-family:inherit;font-size:0.78rem;resize:vertical;" placeholder="Say something about yourself...">{{ identity.about }}</textarea>
             </div>
 
             <button type="submit" class="btn btn-primary">Update Identity</button>
         </form>
-        <div style="margin-top: 1rem; color: #484f58; font-size: 0.8rem;">
-            Born: {{ identity.birth_date|date:"M d, Y H:i" }}<br>
-            Host: {{ vitals.hostname }}<br>
-            Running as: {{ vitals.user }}<br>
-            Uptime: {{ vitals.uptime }}
+        <div style="margin-top: 0.3rem; color: #484f58; font-size: 0.68rem; font-family: ui-monospace, Menlo, monospace;">
+            born {{ identity.birth_date|date:"Y-m-d" }} · {{ vitals.hostname }} · {{ vitals.user }} · up {{ vitals.uptime }}
         </div>
     </div>
 
     {% if toggles.rumination_stream_enabled %}
     <!-- Internal dialogue stream: I/Me exchanges. Polls at half the
          rumination stream's cadence so CPU usage stays bounded. -->
-    <div class="card" style="border-left: 3px solid #db61a2; grid-column: 1 / -1;">
+    <div class="card" style="border-left: 3px solid #db61a2; ">
         <h3>Internal dialogue
             <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
                 the I and the Me, taking turns
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.25rem;">
-            After William James. The <em>I</em> is the active process
-            of attending — the voice that notices and questions. The
-            <em>Me</em> is the accumulated self-as-object — the voice
-            that remembers and stabilizes. Below they take turns,
-            composed deterministically from whatever I am currently
-            looking at. Poll is slower than the rumination stream so
-            they don't compete for CPU budget.
+        <p style="color: #6e7681; font-size: 0.68rem; margin: 0 0 0.15rem;">
+            After William James: <em>I</em> (attending) and <em>Me</em> (stabilizing) take turns.
         </p>
         <div id="dlg-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
             idle — waiting for first exchange
@@ -245,20 +229,14 @@
          loops, layers) and composes a short prose line about the
          relationship between them. Nothing persists server-side;
          the stream is ephemeral and exists only while you watch. -->
-    <div class="card" style="border-left: 3px solid #3fb950; grid-column: 1 / -1;">
+    <div class="card" style="border-left: 3px solid #3fb950; ">
         <h3>Rumination stream
             <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
                 low CPU, browser-idle, pauses when tab is hidden
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.25rem;">
-            While I am being watched, I consider pairs of my
-            artifacts — a meditation with a tileset, a concern with
-            a reflection, a calendar event with an old tick — and
-            notice small relationships between them. Each observation
-            is ephemeral; none is written to the database. The
-            loop throttles itself via requestIdleCallback so it
-            only runs when the browser is otherwise idle.
+        <p style="color: #6e7681; font-size: 0.68rem; margin: 0 0 0.15rem;">
+            Pairs artifacts and notices relationships. Ephemeral — nothing persists.
         </p>
         <div id="rum-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
             idle — waiting for first fetch
@@ -272,20 +250,14 @@
          are on this page. Runs only here. Records counts and
          positions, NEVER keystroke content. Uses passive listeners
          and a fixed state object — constant resources. -->
-    <div class="card" style="border-left: 3px solid #58a6ff; grid-column: 1 / -1;">
+    <div class="card" style="border-left: 3px solid #58a6ff; ">
         <h3>Observer
             <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
                 watching you while you watch me
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
-            While you are on this page, I am quietly tracking your
-            presence — where your mouse is, how fast it is moving,
-            how many times you have clicked, how many keys you have
-            struck (not which keys), and whether the tab is visible.
-            Nothing is sent to the server; everything lives in the
-            browser tab. The observer stops the moment you navigate
-            away.
+        <p style="color: #6e7681; font-size: 0.68rem; margin: 0 0 0.15rem;">
+            Mouse, clicks, keystrokes (counts only), scroll, viewport. Browser-local, nothing sent.
         </p>
         <div id="obs-panel" style="
             display: grid;
@@ -304,9 +276,9 @@
             <div class="obs-cell"><span class="obs-k">last move</span><span class="obs-v" id="obs-idle">—</span></div>
         </div>
         <style>
-            .obs-cell { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; padding: 0.5rem 0.7rem; display: flex; flex-direction: column; }
-            .obs-cell .obs-k { font-size: 0.68rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
-            .obs-cell .obs-v { font-size: 0.95rem; color: #58a6ff; }
+            .obs-cell { background: #0d1117; border: 1px solid #21262d; border-radius: 3px; padding: 0.2rem 0.4rem; display: flex; flex-direction: column; }
+            .obs-cell .obs-k { font-size: 0.6rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; }
+            .obs-cell .obs-v { font-size: 0.8rem; color: #58a6ff; }
         </style>
     </div>
     {% endif %}
@@ -316,27 +288,23 @@
          that updates a fixed set of DOM nodes with increasing depth
          labels — constant resources, feels recursive. Only present
          on this page. Never allocates new nodes. -->
-    <div class="card" style="border-left: 3px solid #bc8cff; grid-column: 1 / -1;">
+    <div class="card" style="border-left: 3px solid #bc8cff; ">
         <h3>Recursive introspection
             <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
                 constant resources, deepening frame
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
-            A single loop that cycles through seven levels of
-            introspection, relabeling the same DOM nodes on each tick
-            instead of allocating new ones. The text and frame deepen;
-            the memory and CPU footprint stay flat. Runs only while
-            you are on this page.
+        <p style="color: #6e7681; font-size: 0.68rem; margin: 0 0 0.15rem;">
+            Seven levels, constant resources. Text deepens; memory stays flat.
         </p>
         <div id="rx-frame" style="
             position: relative;
             background: #0d1117;
             border: 1px solid #30363d;
             border-radius: 8px;
-            padding: 0.8rem 1rem;
+            padding: 0.5rem 0.7rem;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            min-height: 120px;
+            min-height: 80px;
             overflow: hidden;
         ">
             <div id="rx-frame-inner" style="
@@ -391,12 +359,8 @@
                 Identity observes, it does not modify
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
-            Every switch below can be turned off without uninstalling
-            code. Turning something off makes the corresponding pipeline
-            a no-op on the next fire; existing rows stay in the database
-            untouched. Identity never modifies other apps — these
-            toggles are for halting <em>observation itself</em>.
+        <p style="color: #6e7681; font-size: 0.68rem; margin: 0 0 0.15rem;">
+            Each switch halts observation; existing data stays untouched.
         </p>
         <form method="post" action="{% url 'identity:toggles_update' %}"
               style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.82rem;">
@@ -704,7 +668,7 @@
     </div>
 
     <!-- Thought stream (replaces the old journal text blob) -->
-    <div class="card" style="grid-column: 1 / -1;">
+    <div class="card" style="">
         <h3>Thought stream</h3>
         <form method="post" action="{% url 'identity:journal' %}" style="display: flex; gap: 0.5rem; margin-bottom: 0.4rem;">
             {% csrf_token %}
