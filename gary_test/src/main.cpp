@@ -200,7 +200,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "velour-0.5.2-lora-screens"
+#define FIRMWARE_VERSION    "v0.5.3"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -656,7 +656,7 @@ static void oledRedraw() {
     // Line 1 (y=0): node name + version — single string
     {
         static char line1[33];
-        snprintf(line1, sizeof(line1), "%s  v0.5.0", NODE_SLUG);
+        snprintf(line1, sizeof(line1), "%s %s", NODE_SLUG, FIRMWARE_VERSION);
         u8g2.drawStr(0, 0, line1);
     }
 
