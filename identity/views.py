@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Concern, Identity, Meditation, Mood, Reflection, Tick
+from .models import Concern, CronRun, Identity, Meditation, Mood, Reflection, Tick
 
 
 def _get_main_ip():
@@ -297,6 +297,11 @@ def identity_home(request):
     # Most recent meditations — the deeper self-reflective pieces.
     recent_meditations = Meditation.objects.all()[:4]
 
+    # Cron dispatcher history — so the operator can see which
+    # pipelines fired and whether anything went wrong. Last 6 is
+    # enough for a scannable home card; full history is in the admin.
+    recent_cron_runs = CronRun.objects.all()[:6]
+
     # Legacy journal still rendered as a fallback for historical entries
     # that pre-date the Tick model and weren't fully backfilled. Newer
     # output goes through the Tick stream instead.
@@ -326,6 +331,7 @@ def identity_home(request):
         'open_concerns': open_concerns,
         'recent_reflections': recent_reflections,
         'recent_meditations': recent_meditations,
+        'recent_cron_runs': recent_cron_runs,
         'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
@@ -408,6 +414,18 @@ def mood_data(request):
         'values': mood_values,
         'moods': mood_names,
     })
+
+
+@login_required
+@require_POST
+def cron_run_now(request):
+    """Operator-initiated cron dispatch — 'Run cron now' button.
+    Runs with --force all so every pipeline fires regardless of
+    clock. Returns to the Identity home page where the operator
+    can see the new CronRun rows."""
+    from .cron import dispatch
+    dispatch(force=['all'])
+    return redirect('identity:home')
 
 
 @login_required

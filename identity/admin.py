@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import Concern, Identity, Meditation, Mood, Reflection, Rule, Tick
+from .models import (
+    Concern, CronRun, Identity, Meditation, Mood, Reflection, Rule, Tick,
+)
 
 
 @admin.register(Identity)
@@ -52,6 +54,15 @@ class ReflectionAdmin(admin.ModelAdmin):
     date_hierarchy = 'period_start'
     readonly_fields = ('composed_at', 'metrics', 'codex_section_slug')
     search_fields = ('title', 'body')
+
+
+@admin.register(CronRun)
+class CronRunAdmin(admin.ModelAdmin):
+    list_display = ('at', 'kind', 'status', 'summary')
+    list_filter = ('kind', 'status')
+    date_hierarchy = 'at'
+    readonly_fields = ('at', 'kind', 'status', 'summary', 'details')
+    search_fields = ('summary', 'details')
 
 
 @admin.register(Rule)

@@ -20,4 +20,5 @@ urlpatterns = [
     path('meditations/', views.meditations_list, name='meditations_list'),
     path('meditations/<int:pk>/', views.meditation_detail, name='meditation_detail'),
     path('meditations/compose/', views.meditation_compose, name='meditation_compose'),
+    path('cron/run-now/', views.cron_run_now, name='cron_run_now'),
 ]

@@ -520,3 +520,65 @@ class Meditation(models.Model):
 
     def __str__(self):
         return f'[L{self.depth} {self.voice}] {self.title or self.body[:60]}'
+
+
+class CronRun(models.Model):
+    """Audit log for the Identity cron dispatcher.
+
+    The scheduler's contract is simple: the operator wires ONE crontab
+    entry ('*/10 * * * * python manage.py identity_cron') and the
+    dispatcher inside identity/cron.py decides which of tick /
+    reflection / meditation pipelines to run based on the current wall
+    clock. Each dispatch writes a CronRun row so the operator can see
+    what fired, when, and whether anything went wrong without having
+    to dig through cron logs.
+
+    kind is one of:
+      - tick             always fires on the 10-minute cadence
+      - reflect_hourly   top of the hour
+      - reflect_daily    midnight (or first dispatch after)
+      - reflect_weekly   Monday midnight
+      - reflect_monthly  first of the month
+      - meditate_ladder  Sunday at midnight (weekly ladder L1-L4)
+
+    Each row stores what it did (summary), a status (ok / error /
+    skipped), and the exception text if something blew up. A
+    failing dispatch never breaks the cron — the runner catches
+    everything at the top level and writes the row before re-raising
+    nothing.
+    """
+
+    KIND_CHOICES = [
+        ('tick',            'Tick'),
+        ('reflect_hourly',  'Reflection — hourly'),
+        ('reflect_daily',   'Reflection — daily'),
+        ('reflect_weekly',  'Reflection — weekly'),
+        ('reflect_monthly', 'Reflection — monthly'),
+        ('meditate_ladder', 'Meditation ladder (weekly)'),
+        ('dispatch',        'Full cron dispatch'),
+    ]
+    STATUS_CHOICES = [
+        ('ok',      'OK'),
+        ('error',   'Error'),
+        ('skipped', 'Skipped'),
+    ]
+
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='ok')
+    summary = models.CharField(max_length=300, blank=True,
+        help_text='One-line description of what ran or why it was '
+                  'skipped.')
+    details = models.TextField(blank=True,
+        help_text='Longer output — exception traceback on error, or '
+                  'the composed thought / reflection title on success.')
+
+    class Meta:
+        ordering = ['-at']
+        indexes = [
+            models.Index(fields=['-at']),
+            models.Index(fields=['kind', '-at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.status}] {self.kind} @ {self.at:%Y-%m-%d %H:%M}'

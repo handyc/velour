@@ -203,6 +203,45 @@
         </div>
     </div>
 
+    <!-- Cron dispatcher status -->
+    <div class="card">
+        <h3>Cron pulse
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ recent_cron_runs|length }} recent
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+            Ticks, reflections, and meditations fire automatically via
+            a single <code>*/10 * * * * python manage.py identity_cron</code>
+            crontab entry. Each fire is logged here.
+        </p>
+        {% if recent_cron_runs %}
+        <div style="display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem;">
+            {% for run in recent_cron_runs %}
+            <div style="padding: 0.35rem 0.6rem; background: #0d1117; border-left: 3px solid {% if run.status == 'ok' %}#3fb950{% elif run.status == 'error' %}#f85149{% else %}#8b949e{% endif %}; border-radius: 3px; font-size: 0.75rem;">
+                <div style="color: #c9d1d9; font-family: ui-monospace, Menlo, monospace;">
+                    <span style="color: #8b949e;">[{{ run.kind }}]</span>
+                    {{ run.summary|truncatechars:80 }}
+                </div>
+                <div style="color: #484f58; font-size: 0.68rem; margin-top: 0.15rem;">
+                    {{ run.at|date:"Y-m-d H:i:s" }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">
+            Cron has not fired yet.
+        </p>
+        {% endif %}
+        <form method="post" action="{% url 'identity:cron_run_now' %}" style="margin-top: 0.75rem;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="font-size: 0.78rem; padding: 0.3rem 0.7rem;">
+                Run cron now (force all)
+            </button>
+        </form>
+    </div>
+
     <!-- Recent meditations — recursive self-reflections -->
     <div class="card">
         <h3>Recent meditations
