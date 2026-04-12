@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ identity.name }} — Identity Document{% endblock %}
+
+{% block extra_head %}
+<style>
+    .doc-wrap { max-width: 880px; }
+    .doc-header {
+        border-bottom: 1px solid #30363d;
+        padding-bottom: 1.25rem; margin-bottom: 2rem;
+    }
+    .doc-header h1 {
+        font-size: 1.6rem; font-weight: 500; margin: 0 0 0.25rem;
+        color: #c9d1d9;
+    }
+    .doc-header .meta {
+        color: #6e7681; font-size: 0.8rem;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .doc-intro {
+        color: #8b949e; font-size: 0.85rem; line-height: 1.6;
+        margin: 1rem 0 2rem;
+    }
+
+    .frame {
+        margin-bottom: 2.5rem;
+        border-left: 3px solid #30363d;
+        padding-left: 1.5rem;
+    }
+    .frame.philosophical { border-left-color: #bc8cff; }
+    .frame.social        { border-left-color: #3fb950; }
+    .frame.mathematical  { border-left-color: #58a6ff; }
+    .frame.documentary   { border-left-color: #d29922; }
+
+    .frame h2 {
+        font-size: 1.15rem; font-weight: 500;
+        color: #c9d1d9; margin: 0 0 0.25rem;
+    }
+    .frame .subtitle {
+        color: #6e7681; font-size: 0.8rem;
+        font-style: italic; margin-bottom: 1.25rem;
+    }
+
+    .assertion {
+        margin-bottom: 1.25rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #21262d;
+    }
+    .assertion:last-child { border-bottom: none; }
+    .assertion .title {
+        font-size: 0.95rem; color: #c9d1d9;
+        font-weight: 500; margin: 0 0 0.35rem;
+    }
+    .assertion .body {
+        font-size: 0.85rem; color: #8b949e;
+        line-height: 1.65; margin: 0 0 0.5rem;
+    }
+    .assertion .meta {
+        font-size: 0.7rem; color: #484f58;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .assertion .meta .source-seed      { color: #d29922; }
+    .assertion .meta .source-auto      { color: #58a6ff; }
+    .assertion .meta .source-operator  { color: #3fb950; }
+    .assertion .meta .source-meditation { color: #bc8cff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="doc-wrap">
+    <div class="doc-header">
+        <h1>{{ identity.name }} — Identity Document</h1>
+        <div class="meta">
+            hostname {{ identity.hostname }}
+            · commissioned {{ identity.birth_date|date:"Y-m-d H:i" }}
+            · 4 frames
+        </div>
+    </div>
+
+    <p class="doc-intro">
+        A structured card of the claims Velour makes about who it is,
+        organized by the four frames from Wikipedia's Identity
+        disambiguation — philosophical, social, mathematical,
+        documentary. Each assertion below is either seeded at install
+        time (operator's initial voice), auto-derived from current
+        system state (updates whenever the document regenerates), or
+        operator-authored directly (sticky, never clobbered by
+        auto-regen).
+    </p>
+
+    {% for frame in frames %}
+    <section class="frame {{ frame.slug }}">
+        <h2>{{ frame.title }}</h2>
+        <div class="subtitle">{{ frame.subtitle }}</div>
+        {% for a in frame.rows %}
+        <div class="assertion">
+            <div class="title">{{ a.title }}</div>
+            <div class="body">{{ a.body|linebreaks }}</div>
+            <div class="meta">
+                kind <em>{{ a.kind }}</em> ·
+                source <span class="source-{{ a.source }}">{{ a.get_source_display }}</span> ·
+                strength {{ a.strength|floatformat:2 }}
+            </div>
+        </div>
+        {% empty %}
+        <p style="color:#6e7681; font-style: italic;">
+            (no active assertions in this frame)
+        </p>
+        {% endfor %}
+    </section>
+    {% endfor %}
+
+    <div style="margin-top: 2rem; display: flex; gap: 0.5rem; align-items: center;">
+        <form method="post" action="{% url 'identity:identity_document_regenerate' %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn">Regenerate now</button>
+        </form>
+        <a href="{% url 'codex:manual_detail' 'velours-identity-document' %}" class="btn btn-secondary">Open in Codex</a>
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

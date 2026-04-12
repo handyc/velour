@@ -56,6 +56,7 @@ def dispatch(force=None):
         force = {
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
+            'rebuild_document',
         }
 
     results = {}
@@ -91,6 +92,12 @@ def dispatch(force=None):
             now.minute < 10 and now.hour == 0 and now.weekday() == 6):
         results['meditate_ladder'] = _run_pipeline(
             'meditate_ladder', _do_meditation_ladder)
+
+    # --- Identity document rebuild: Sunday midnight -----------------
+    if 'rebuild_document' in force or (
+            now.minute < 10 and now.hour == 0 and now.weekday() == 6):
+        results['rebuild_document'] = _run_pipeline(
+            'rebuild_document', _do_rebuild_document)
 
     # Single dispatch row summarizing the whole run
     parts = [f'{k}={v[0]}' for k, v in results.items()]
@@ -149,3 +156,10 @@ def _do_meditation_ladder():
         composed.append(f'L{depth}')
         prior = med
     return f'Composed ladder {",".join(composed)}'
+
+
+def _do_rebuild_document():
+    from .identity_document import rebuild_document, push_document_to_codex
+    count = rebuild_document()
+    push_document_to_codex()
+    return f'Rebuilt identity document with {count} auto assertions'

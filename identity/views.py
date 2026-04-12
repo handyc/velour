@@ -11,7 +11,8 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import (
-    Concern, CronRun, Identity, IdentityToggles, Meditation, Mood, Reflection, Tick,
+    Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
+    Meditation, Mood, Reflection, Tick,
 )
 
 
@@ -461,6 +462,49 @@ def rumination_feedback(request, tick_pk):
 
 
 @login_required
+def identity_document(request):
+    """Render the current IdentityAssertions grouped by the four
+    frames. This is Velour's structured self-understanding laid out
+    on one page, pulled from the same rows that get pushed into the
+    'velours-identity-document' Codex manual."""
+    frames_order = [
+        ('philosophical', 'I. Philosophical',
+         'Identity as a relation I bear to myself.'),
+        ('social', 'II. Social',
+         'Identity as the roles I play and the narrative I tell.'),
+        ('mathematical', 'III. Mathematical',
+         'Identity as an invariant, a reflexive relation, a function.'),
+        ('documentary', 'IV. Documentary',
+         'Identity as a card of claims — the visible summary.'),
+    ]
+    frames = []
+    for slug, title, subtitle in frames_order:
+        rows = list(IdentityAssertion.objects.filter(
+            frame=slug, is_active=True,
+        ).order_by('-strength', 'kind'))
+        frames.append({
+            'slug':     slug,
+            'title':    title,
+            'subtitle': subtitle,
+            'rows':     rows,
+        })
+    return render(request, 'identity/document.html', {
+        'frames': frames,
+        'identity': Identity.get_self(),
+    })
+
+
+@login_required
+@require_POST
+def identity_document_regenerate(request):
+    """Rebuild the auto-derived assertions and push to Codex."""
+    from .identity_document import rebuild_document, push_document_to_codex
+    rebuild_document()
+    push_document_to_codex()
+    return redirect('identity:identity_document')
+
+
+@login_required
 @require_POST
 def toggles_update(request):
     """Operator toggles Identity's major pipelines on/off. Each
@@ -472,6 +516,7 @@ def toggles_update(request):
         'ticks_enabled', 'reflections_enabled', 'meditations_enabled',
         'concerns_enabled', 'oracle_enabled', 'codex_push_enabled',
         'topbar_pulse_enabled', 'recursive_introspection_enabled',
+        'observer_enabled',
     ]
     for f in fields:
         setattr(toggles, f, bool(request.POST.get(f)))

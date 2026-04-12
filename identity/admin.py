@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    Concern, CronRun, Identity, Meditation, Mood, Reflection, Rule, Tick,
+    Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
+    Meditation, Mood, Reflection, Rule, Tick,
 )
 
 
@@ -44,6 +45,27 @@ class MeditationAdmin(admin.ModelAdmin):
     date_hierarchy = 'composed_at'
     readonly_fields = ('composed_at', 'sources', 'codex_section_slug')
     search_fields = ('title', 'body')
+
+
+@admin.register(IdentityAssertion)
+class IdentityAssertionAdmin(admin.ModelAdmin):
+    list_display = ('frame', 'title', 'kind', 'source', 'strength',
+                    'is_active')
+    list_filter = ('frame', 'source', 'is_active')
+    list_editable = ('is_active',)
+    search_fields = ('title', 'body', 'kind')
+    readonly_fields = ('first_asserted_at', 'last_confirmed_at')
+    fieldsets = (
+        (None, {'fields': ('frame', 'kind', 'title', 'body', 'is_active')}),
+        ('Provenance', {'fields': ('source', 'strength',
+                                   'first_asserted_at', 'last_confirmed_at')}),
+    )
+
+
+@admin.register(IdentityToggles)
+class IdentityTogglesAdmin(admin.ModelAdmin):
+    list_display = ('ticks_enabled', 'reflections_enabled',
+                    'meditations_enabled', 'oracle_enabled', 'updated_at')
 
 
 @admin.register(Reflection)

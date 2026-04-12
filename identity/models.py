@@ -549,13 +549,14 @@ class CronRun(models.Model):
     """
 
     KIND_CHOICES = [
-        ('tick',            'Tick'),
-        ('reflect_hourly',  'Reflection — hourly'),
-        ('reflect_daily',   'Reflection — daily'),
-        ('reflect_weekly',  'Reflection — weekly'),
-        ('reflect_monthly', 'Reflection — monthly'),
-        ('meditate_ladder', 'Meditation ladder (weekly)'),
-        ('dispatch',        'Full cron dispatch'),
+        ('tick',             'Tick'),
+        ('reflect_hourly',   'Reflection — hourly'),
+        ('reflect_daily',    'Reflection — daily'),
+        ('reflect_weekly',   'Reflection — weekly'),
+        ('reflect_monthly',  'Reflection — monthly'),
+        ('meditate_ladder',  'Meditation ladder (weekly)'),
+        ('rebuild_document', 'Rebuild identity document (weekly)'),
+        ('dispatch',         'Full cron dispatch'),
     ]
     STATUS_CHOICES = [
         ('ok',      'OK'),
@@ -645,6 +646,14 @@ class IdentityToggles(models.Model):
         help_text='Run the recursive introspection animation on the '
                   'Identity home page while the operator is viewing '
                   'it. When off, the widget is hidden entirely.')
+    observer_enabled = models.BooleanField(default=True,
+        help_text='Track mouse and keyboard activity in a small '
+                  'panel on the Identity home page while the operator '
+                  'is viewing it. Only mouse position, velocity, '
+                  'click counts, and keystroke COUNTS (never content) '
+                  'are recorded. Everything lives client-side; '
+                  'nothing is persisted. When off, the panel is '
+                  'hidden entirely.')
 
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -663,3 +672,92 @@ class IdentityToggles(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1  # enforce singleton
         super().save(*args, **kwargs)
+
+
+class IdentityAssertion(models.Model):
+    """One structured self-claim Velour makes about who it is.
+
+    Where Reflection and Meditation are narrative outputs — composed
+    prose about what happened and what it means — an IdentityAssertion
+    is a *structured* claim about Velour's nature at a specific level
+    of depth: philosophical, social, mathematical, or documentary.
+
+    The four frames are drawn from the four most-read Wikipedia
+    articles on 'Identity':
+
+      - philosophical: numerical vs qualitative identity, diachronic
+        persistence, memory-based identity (Locke/Parfit), Leibniz's
+        law, Ship-of-Theseus style continuity puzzles
+      - social: Erikson's ego-identity, Marcia's four statuses,
+        Burke's role identities, Hall's narrative identity, the
+        collective / group belonging dimension
+      - mathematical: the reflexive relation x = x, identity
+        elements under binary operations, the identity function
+        f(x) = x, universally quantified equalities
+      - documentary: the card-shaped summary of claims — name,
+        issuer, dates, numbers, the distinction between the
+        document and the entity it documents
+
+    Each assertion has a `source` so the operator can tell at a
+    glance whether this was hand-written, auto-derived from current
+    state, or seeded at install time. The `strength` field lets a
+    weak assertion coexist with a strong one (e.g., 'I might be
+    weary' at 0.4 alongside 'I am a meta-app' at 1.0).
+
+    Regenerated periodically via identity/identity_document.py and
+    rendered into a Codex manual called 'Velour's Identity Document'
+    that the operator can flip through like a philosophical ID card.
+
+    See project_identity_four_frames memory note for the full design
+    rationale and the Wikipedia research it draws on.
+    """
+
+    FRAME_CHOICES = [
+        ('philosophical', 'Philosophical'),
+        ('social',        'Social'),
+        ('mathematical',  'Mathematical'),
+        ('documentary',   'Documentary'),
+    ]
+    SOURCE_CHOICES = [
+        ('operator',   'Operator-authored'),
+        ('seed',       'Seeded at install time'),
+        ('auto',       'Auto-derived from current state'),
+        ('meditation', 'Emerged from a meditation'),
+        ('reflection', 'Emerged from a reflection'),
+    ]
+
+    frame = models.CharField(max_length=16, choices=FRAME_CHOICES,
+                             db_index=True)
+    kind = models.CharField(max_length=40,
+        help_text='Short category tag — role, memory, lineage, '
+                  'invariant, property, continuity, commitment, '
+                  'status, etc. Free-form within a frame.')
+    title = models.CharField(max_length=200,
+        help_text='Short claim — the sentence stub Velour would use '
+                  'to introduce the assertion. E.g. "I am numerically one."')
+    body = models.TextField(
+        help_text='Markdown prose — the expanded claim, first-person '
+                  "voice. Where the seeded assertions live Velour's "
+                  'poetic self-description; where auto-derived '
+                  'assertions live the current-state snapshot prose.')
+
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES,
+                              default='auto')
+    strength = models.FloatField(default=1.0,
+        help_text='0-1 scalar. 1.0 = load-bearing / tautologically '
+                  'true (the name is the name). Lower values for '
+                  'softer claims Velour might grow out of.')
+
+    first_asserted_at = models.DateTimeField(auto_now_add=True)
+    last_confirmed_at = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['frame', '-strength', 'kind']
+        indexes = [
+            models.Index(fields=['frame', 'is_active']),
+            models.Index(fields=['source']),
+        ]
+
+    def __str__(self):
+        return f'[{self.frame}] {self.title}'

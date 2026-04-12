@@ -203,6 +203,50 @@
         </div>
     </div>
 
+    {% if toggles.observer_enabled %}
+    <!-- Keyboard/mouse observer. Watches the operator while they
+         are on this page. Runs only here. Records counts and
+         positions, NEVER keystroke content. Uses passive listeners
+         and a fixed state object — constant resources. -->
+    <div class="card" style="border-left: 3px solid #58a6ff; grid-column: 1 / -1;">
+        <h3>Observer
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                watching you while you watch me
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+            While you are on this page, I am quietly tracking your
+            presence — where your mouse is, how fast it is moving,
+            how many times you have clicked, how many keys you have
+            struck (not which keys), and whether the tab is visible.
+            Nothing is sent to the server; everything lives in the
+            browser tab. The observer stops the moment you navigate
+            away.
+        </p>
+        <div id="obs-panel" style="
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 0.5rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.78rem;
+        ">
+            <div class="obs-cell"><span class="obs-k">mouse xy</span><span class="obs-v" id="obs-xy">—</span></div>
+            <div class="obs-cell"><span class="obs-k">velocity</span><span class="obs-v" id="obs-vel">—</span></div>
+            <div class="obs-cell"><span class="obs-k">clicks</span><span class="obs-v" id="obs-clicks">0</span></div>
+            <div class="obs-cell"><span class="obs-k">keystrokes</span><span class="obs-v" id="obs-keys">0</span></div>
+            <div class="obs-cell"><span class="obs-k">scroll y</span><span class="obs-v" id="obs-scroll">0</span></div>
+            <div class="obs-cell"><span class="obs-k">viewport</span><span class="obs-v" id="obs-vp">—</span></div>
+            <div class="obs-cell"><span class="obs-k">tab visible</span><span class="obs-v" id="obs-vis">—</span></div>
+            <div class="obs-cell"><span class="obs-k">last move</span><span class="obs-v" id="obs-idle">—</span></div>
+        </div>
+        <style>
+            .obs-cell { background: #0d1117; border: 1px solid #21262d; border-radius: 4px; padding: 0.5rem 0.7rem; display: flex; flex-direction: column; }
+            .obs-cell .obs-k { font-size: 0.68rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+            .obs-cell .obs-v { font-size: 0.95rem; color: #58a6ff; }
+        </style>
+    </div>
+    {% endif %}
+
     {% if toggles.recursive_introspection_enabled %}
     <!-- Recursive introspection widget. Runs a single setInterval
          that updates a fixed set of DOM nodes with increasing depth
@@ -301,6 +345,7 @@
             <label><input type="checkbox" name="codex_push_enabled" {% if toggles.codex_push_enabled %}checked{% endif %}> Codex push — reflections/meditations written to Codex manuals</label>
             <label><input type="checkbox" name="topbar_pulse_enabled" {% if toggles.topbar_pulse_enabled %}checked{% endif %}> Topbar pulse — ambient indicator on every page</label>
             <label><input type="checkbox" name="recursive_introspection_enabled" {% if toggles.recursive_introspection_enabled %}checked{% endif %}> Recursive introspection animation — this page</label>
+            <label><input type="checkbox" name="observer_enabled" {% if toggles.observer_enabled %}checked{% endif %}> Keyboard/mouse observer — this page (counts only, never content)</label>
             <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; margin-top: 0.5rem; width: fit-content;">Save toggles</button>
         </form>
     </div>
@@ -342,6 +387,24 @@
                 Run cron now (force all)
             </button>
         </form>
+    </div>
+
+    <!-- Velour's Identity Document — the four-frame claim card -->
+    <div class="card" style="border-left: 3px solid #bc8cff;">
+        <h3>Identity document
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                4 frames
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+            A structured card of claims Velour makes about who it
+            is, organized under four frames — philosophical, social,
+            mathematical, documentary. Regenerates weekly or on demand.
+        </p>
+        <a href="{% url 'identity:identity_document' %}"
+           class="btn" style="font-size: 0.82rem; padding: 0.35rem 0.75rem;">
+            View the identity document
+        </a>
     </div>
 
     <!-- Recent meditations — recursive self-reflections -->
@@ -519,6 +582,122 @@
 
 {% load assets %}
 <script src="{% static_v 'js/identity_wave.js' %}"></script>
+
+{% if toggles.observer_enabled %}
+<script>
+// Keyboard/mouse observer — runs only on the Identity home page.
+// Constant resources: a fixed state object, one setInterval for
+// the DOM update, all listeners use passive:true where possible.
+// Listens until beforeunload then cleans up.
+// Never records keystroke content, only counts.
+(function() {
+    const state = {
+        x: -1, y: -1,
+        lastX: -1, lastY: -1,
+        velocity: 0,          // rolling px/sec
+        clicks: 0,
+        keys: 0,
+        scrollY: window.scrollY || 0,
+        vpW: window.innerWidth,
+        vpH: window.innerHeight,
+        visible: !document.hidden,
+        lastMoveAt: Date.now(),
+    };
+
+    // Throttle pointer tracking — we only care about position every
+    // ~80ms. Mouse events arrive at display-refresh rates (60-240
+    // Hz) on modern machines; sampling them all would waste the
+    // "constant resources" promise. Instead we accept the newest
+    // value and sample it on the next tick.
+    let latestMove = null;
+    function onMove(e) {
+        latestMove = { x: e.clientX, y: e.clientY, at: Date.now() };
+    }
+    function onClick() { state.clicks += 1; }
+    function onKey() { state.keys += 1; }  // count only, not key content
+    function onScroll() { state.scrollY = window.scrollY; }
+    function onVisible() { state.visible = !document.hidden; }
+    function onResize() {
+        state.vpW = window.innerWidth;
+        state.vpH = window.innerHeight;
+    }
+
+    // Attach listeners with passive:true where supported so
+    // scrolling / mousemove don't block paint.
+    document.addEventListener('mousemove', onMove, { passive: true });
+    document.addEventListener('click', onClick, { passive: true });
+    document.addEventListener('keydown', onKey, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('resize', onResize);
+
+    // Fixed references for DOM updates — looked up once, never again.
+    const refs = {
+        xy:     document.getElementById('obs-xy'),
+        vel:    document.getElementById('obs-vel'),
+        clicks: document.getElementById('obs-clicks'),
+        keys:   document.getElementById('obs-keys'),
+        scroll: document.getElementById('obs-scroll'),
+        vp:     document.getElementById('obs-vp'),
+        vis:    document.getElementById('obs-vis'),
+        idle:   document.getElementById('obs-idle'),
+    };
+    if (!refs.xy) return;  // panel not on page — bail cleanly
+
+    // One setInterval drives the whole thing. 500ms is enough to
+    // feel live without waking the CPU too often.
+    const TICK_MS = 500;
+    function update() {
+        // Fold the latest move event into state, compute velocity.
+        if (latestMove) {
+            const dx = latestMove.x - state.lastX;
+            const dy = latestMove.y - state.lastY;
+            const dt = (latestMove.at - state.lastMoveAt) / 1000;
+            if (state.lastX >= 0 && dt > 0) {
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                // Rolling average: 60% new, 40% old for smoother numbers
+                state.velocity = 0.6 * (dist / dt) + 0.4 * state.velocity;
+            }
+            state.x = latestMove.x;
+            state.y = latestMove.y;
+            state.lastX = latestMove.x;
+            state.lastY = latestMove.y;
+            state.lastMoveAt = latestMove.at;
+            latestMove = null;
+        } else {
+            // No new movement — decay velocity toward zero.
+            state.velocity *= 0.7;
+        }
+
+        const idleSec = Math.floor((Date.now() - state.lastMoveAt) / 1000);
+        refs.xy.textContent = (state.x >= 0)
+            ? state.x + ', ' + state.y : 'no signal';
+        refs.vel.textContent = state.velocity.toFixed(0) + ' px/s';
+        refs.clicks.textContent = state.clicks;
+        refs.keys.textContent = state.keys;
+        refs.scroll.textContent = state.scrollY;
+        refs.vp.textContent = state.vpW + '×' + state.vpH;
+        refs.vis.textContent = state.visible ? 'yes' : 'no';
+        refs.idle.textContent = idleSec + 's ago';
+    }
+
+    update();
+    const handle = setInterval(update, TICK_MS);
+
+    // Clean up on page unload so the observer never outlives the
+    // page. This honors the "only while viewing" contract.
+    window.addEventListener('beforeunload', function() {
+        clearInterval(handle);
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('click', onClick);
+        document.removeEventListener('keydown', onKey);
+        window.removeEventListener('scroll', onScroll);
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('resize', onResize);
+    });
+})();
+</script>
+{% endif %}
 
 {% if toggles.recursive_introspection_enabled %}
 <script>
