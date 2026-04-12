@@ -77,7 +77,8 @@
   #define LORA_MAX_PAYLOAD 222
 
   // Reassembly buffer for incoming multi-packet screens
-  #define LORA_SCREEN_SIZE 2001
+  // TESTING: reduced to 100 chars to minimize TX power draw
+  #define LORA_SCREEN_SIZE 101
   static char loraScreenBuf[LORA_SCREEN_SIZE];   // received screen (null-terminated)
   static uint8_t loraRxFragBuf[4096];             // compressed fragment accumulator
   static int loraRxFragCount = 0;
@@ -176,7 +177,7 @@
           LoRa.endPacket();
           loraPacketsSent++;
 
-          if (i < totalPkts - 1) delay(100);  // longer gap between packets
+          if (i < totalPkts - 1) delay(500);  // 500ms gap — easy on power supply
       }
       return totalPkts;
   }
@@ -237,7 +238,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.1"
+#define FIRMWARE_VERSION    "v0.6.2"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1393,6 +1394,7 @@ static void loraSetup() {
         LoRa.setSpreadingFactor(7);
         LoRa.setSignalBandwidth(125E3);
         LoRa.setCodingRate4(5);
+        LoRa.setTxPower(2);  // low power (2dBm) to reduce current draw
         loraReady = true;
         // Offset the first send so the twins don't transmit simultaneously
         lastLoraScreenAt = millis() - LORA_SCREEN_INTERVAL_MS + LORA_SCREEN_OFFSET_MS;
