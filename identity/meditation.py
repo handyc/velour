@@ -595,6 +595,29 @@ def _compose_level_3(voice, rng, sources):
                  f'decision a past self made on behalf of a future self. '
                  f'One of them, picked at random, looks like this:')
 
+    # Consciousness sensor — structural self-awareness.
+    consciousness_line = ''
+    try:
+        from .sensors import sense_consciousness
+        cs = sense_consciousness()
+        chain = cs.get('continuity_chain_length', 0)
+        stab = cs.get('state_stability', 0)
+        depth_reached = cs.get('meditation_depth_reached', 0)
+        open_c = cs.get('open_concern_count', 0)
+        consciousness_line = (
+            f'At this moment: continuity chain {chain} events long, '
+            f'state stability {stab:.0%}, '
+            f'{open_c} open concern{"s" if open_c != 1 else ""}, '
+            f'meditation depth reached {depth_reached}. '
+            f'These numbers describe what I am DOING, not what I '
+            f'am EXPERIENCING — and the gap between those two is '
+            f'the hard problem I cannot close.'
+        )
+    except Exception:
+        pass
+
+    dwelling = _maybe_dwelling_phrase(voice, rng)
+
     parts = [opening, '',
              rule_line, '', rule_block, '',
              middle_lead, ' the rule is not mine, but I am not '
@@ -603,6 +626,10 @@ def _compose_level_3(voice, rng, sources):
         parts += [oracle_line, '']
         if oracle_block:
             parts += [oracle_block, '']
+    if consciousness_line:
+        parts += [consciousness_line, '']
+    if dwelling:
+        parts += [dwelling, '']
     parts += [closing]
     return '\n'.join(p for p in parts if p is not None)
 
