@@ -8,18 +8,77 @@
     {% load assets %}
     <link rel="stylesheet" href="{% static_v 'css/style.css' %}">
     <style>
-        .chronos-topbar-row { width: 100%; display: flex; justify-content: flex-end; padding: 0.35rem 1.5rem 0; background: transparent; }
+        .chronos-topbar-row { width: 100%; display: flex; justify-content: flex-end; gap: 0.5rem; padding: 0.35rem 1.5rem 0; background: transparent; }
         #chronos-topbar { padding: 0.25rem 0.7rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; line-height: 1.3; white-space: nowrap; }
         #chronos-topbar a { color: #c9d1d9; text-decoration: none; display: flex; align-items: baseline; gap: 0.65rem; }
         #chronos-topbar a:hover { color: #58a6ff; }
         #chronos-topbar .chronos-time { font-size: 1rem; color: #c9d1d9; letter-spacing: 0.04em; }
         #chronos-topbar .chronos-date { font-size: 0.78rem; color: #8b949e; }
         #chronos-topbar .chronos-tz { font-size: 0.65rem; color: #6e7681; }
+
+        /* Identity pulse — a small ambient mood indicator that lives
+           alongside the chronos clock on every page. Hover reveals the
+           latest Tick thought, click opens Identity home. */
+        #identity-pulse {
+            padding: 0.25rem 0.7rem;
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 6px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.78rem; line-height: 1.3;
+            display: flex; align-items: center; gap: 0.5rem;
+            text-decoration: none;
+            max-width: 320px;
+            position: relative;
+        }
+        #identity-pulse:hover { border-color: #8b949e; }
+        #identity-pulse .pulse-dot {
+            display: inline-block;
+            width: 8px; height: 8px; border-radius: 50%;
+            animation: identity-pulse-anim 2.6s ease-in-out infinite;
+        }
+        @keyframes identity-pulse-anim {
+            0%, 100% { opacity: 0.45; transform: scale(0.95); }
+            50%      { opacity: 1.0;  transform: scale(1.1);  }
+        }
+        #identity-pulse .pulse-mood {
+            color: #c9d1d9;
+            text-transform: none;
+            font-weight: 500;
+        }
+        #identity-pulse .pulse-thought {
+            color: #6e7681;
+            font-size: 0.7rem;
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        /* Mood → pulse dot color. Matches the tick-log palette. */
+        .pulse-dot.m-contemplative { background: #8b949e; }
+        .pulse-dot.m-curious       { background: #58a6ff; }
+        .pulse-dot.m-alert         { background: #f85149; }
+        .pulse-dot.m-satisfied     { background: #2ea043; }
+        .pulse-dot.m-concerned     { background: #d29922; }
+        .pulse-dot.m-excited       { background: #bc8cff; }
+        .pulse-dot.m-restless      { background: #db61a2; }
+        .pulse-dot.m-protective    { background: #3fb950; }
+        .pulse-dot.m-creative      { background: #ff7b72; }
+        .pulse-dot.m-weary         { background: #6e7681; }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
 <body>
     <div class="chronos-topbar-row">
+        {% if identity_pulse %}
+        <a id="identity-pulse" href="{% url 'identity:home' %}"
+           title="{{ identity_pulse.thought }}">
+            <span class="pulse-dot m-{{ identity_pulse.mood }}"></span>
+            <span class="pulse-mood">{{ identity_pulse.mood }}</span>
+            {% if identity_pulse.thought %}
+            <span class="pulse-thought">· {{ identity_pulse.thought }}</span>
+            {% endif %}
+        </a>
+        {% endif %}
         {% include "chronos/_topbar_clock.html" %}
     </div>
     <nav class="navbar">
