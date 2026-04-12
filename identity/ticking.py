@@ -258,6 +258,17 @@ def maintain_concerns(current_aspect_hits, origin_tick):
     for concern in stale:
         concern.close(reason='stale')
         closed.append(concern)
+        from .models import _write_continuity_marker
+        _write_continuity_marker(
+            'shed', f'Concern closed: {concern.name or concern.aspect}',
+            source_model='identity.Concern', source_pk=concern.pk,
+        )
+
+    # New concerns opened are also continuity events — the self grew.
+    for concern in opened:
+        from .models import _write_continuity_marker as _wcm2
+        _wcm2('grow', f'Concern opened: {concern.name or concern.aspect}',
+              source_model='identity.Concern', source_pk=concern.pk)
 
     return opened, reconfirmed, closed
 

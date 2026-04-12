@@ -94,6 +94,13 @@ def propose_rule_if_warranted(triggered_by='meditation'):
                 status='proposed',
                 proposed_by=f'{triggered_by} at {timezone.now():%Y-%m-%d %H:%M}',
             )
+            # Continuity: self-modification is a growth event.
+            from .models import _write_continuity_marker
+            _write_continuity_marker(
+                'grow',
+                f'Rule proposed: {name} (aspect={aspect})',
+                source_model='identity.Rule', source_pk=rule.pk,
+            )
             return rule
 
     except Exception:
