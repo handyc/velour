@@ -272,32 +272,62 @@ def sense_hosts():
     try:
         from hosts.models import RemoteHost
         total = RemoteHost.objects.count()
-        healthy = RemoteHost.objects.filter(last_ok=True).count() if total else 0
+        if total == 0:
+            return {'total': 0, 'healthy': 0, 'unhealthy': 0}
+        healthy = RemoteHost.objects.filter(last_status='ok').count()
+        enabled = RemoteHost.objects.filter(enabled=True).count()
         return {
-            'total':   total,
-            'healthy': healthy,
-            'unhealthy': total - healthy,
+            'total':     total,
+            'enabled':   enabled,
+            'healthy':   healthy,
+            'unhealthy': enabled - healthy,
         }
     except Exception:
         return {}
 
 
 def sense_services():
-    """Whether supervisor-managed services appear running. Cheap enough
-    since we just ask systemd (via sysinfo-style helpers) for counts."""
+    """How many system services are running. Tries supervisorctl first
+    (for production Velour deploys), then systemctl, then returns an
+    empty dict if neither is reachable. None of these are required —
+    if the sensor returns {} the rule engine just won't see service
+    counts and moves on."""
+    import subprocess
+
+    # Try supervisorctl first — that's what production Velour uses.
     try:
-        import subprocess
         out = subprocess.run(
             ['supervisorctl', 'status'],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=3,
         )
-        if out.returncode != 0:
-            return {}
-        lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
-        running = sum(1 for ln in lines if 'RUNNING' in ln)
-        return {'total': len(lines), 'running': running}
+        if out.returncode == 0:
+            lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
+            running = sum(1 for ln in lines if 'RUNNING' in ln)
+            return {
+                'total':   len(lines),
+                'running': running,
+                'source':  'supervisorctl',
+            }
     except Exception:
-        return {}
+        pass
+
+    # Fallback: systemctl — count active services the user can see.
+    try:
+        out = subprocess.run(
+            ['systemctl', '--user', 'list-units', '--type=service',
+             '--state=running', '--no-legend', '--no-pager'],
+            capture_output=True, text=True, timeout=3,
+        )
+        if out.returncode == 0:
+            lines = [ln for ln in out.stdout.splitlines() if ln.strip()]
+            return {
+                'running': len(lines),
+                'source':  'systemctl-user',
+            }
+    except Exception:
+        pass
+
+    return {}
 
 
 def sense_logs():
@@ -321,18 +351,31 @@ def sense_logs():
 
 
 def sense_terminal():
-    """How many terminal commands the operator has run lately —
-    a signal of how 'actively worked on' the system is."""
-    try:
-        from datetime import timedelta
-        from django.utils import timezone as djtz
-        from terminal.models import TerminalSession, TerminalCommand
-        cutoff = djtz.now() - timedelta(hours=24)
-        cmds = TerminalCommand.objects.filter(executed_at__gte=cutoff).count()
-        sessions = TerminalSession.objects.count()
-        return {'commands_24h': cmds, 'sessions': sessions}
-    except Exception:
-        return {}
+    """How actively the operator has been working on the system.
+    The terminal app itself is session-based with no persisted
+    models, so we read the shell history file instead — approximate
+    but honest. Looks at ~/.bash_history modification time as a
+    proxy for 'was the operator here recently'."""
+    import os
+    candidates = ['~/.bash_history', '~/.zsh_history']
+    for path in candidates:
+        expanded = os.path.expanduser(path)
+        if not os.path.exists(expanded):
+            continue
+        try:
+            st = os.stat(expanded)
+            from datetime import timedelta
+            from django.utils import timezone as djtz
+            age_sec = djtz.now().timestamp() - st.st_mtime
+            return {
+                'history_path': path,
+                'mtime_age_sec': int(age_sec),
+                'mtime_age_hours': round(age_sec / 3600, 1),
+                'recently_active': age_sec < 3600,
+            }
+        except OSError:
+            continue
+    return {}
 
 
 def sense_identity_self():
