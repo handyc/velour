@@ -400,7 +400,41 @@ OBSERVATIONS = [
     'My state stability is {state_stability:.0%} — that is how often I stay in this mood.',
     'I have reached meditation depth {max_meditation_depth}. The recursion gets quieter each level.',
     'I have {open_concerns} open concern{open_concerns_s}.',
+    'My valence is {valence:+.2f}. My arousal is {arousal:+.2f}. I am in the {quadrant} quadrant.',
+    'Valence {valence:+.2f}, arousal {arousal:+.2f}. This is where I live right now in emotional space.',
 ]
+
+
+def _current_valence(snapshot):
+    mood = snapshot.get('consciousness', {}).get('current_mood', '')
+    coords = {
+        'contemplative': 0.00, 'curious': 0.35, 'alert': -0.20,
+        'satisfied': 0.70, 'concerned': -0.50, 'excited': 0.60,
+        'restless': -0.30, 'protective': 0.20, 'creative': 0.50,
+        'weary': -0.30,
+    }
+    return coords.get(mood, 0.0)
+
+
+def _current_arousal(snapshot):
+    mood = snapshot.get('consciousness', {}).get('current_mood', '')
+    coords = {
+        'contemplative': -0.30, 'curious': 0.30, 'alert': 0.70,
+        'satisfied': -0.20, 'concerned': 0.50, 'excited': 0.80,
+        'restless': 0.40, 'protective': 0.40, 'creative': 0.50,
+        'weary': -0.60,
+    }
+    return coords.get(mood, 0.0)
+
+
+def _quadrant_name(valence, arousal):
+    if valence >= 0 and arousal >= 0:
+        return 'pleasant-aroused'
+    if valence >= 0 and arousal < 0:
+        return 'pleasant-calm'
+    if valence < 0 and arousal >= 0:
+        return 'unpleasant-aroused'
+    return 'unpleasant-calm'
 
 
 def _format_observation(template, snapshot):
@@ -428,6 +462,10 @@ def _format_observation(template, snapshot):
             max_meditation_depth=cs.get('meditation_depth_reached', 0),
             open_concerns=open_c,
             open_concerns_s='s' if open_c != 1 else '',
+            valence=_current_valence(snapshot),
+            arousal=_current_arousal(snapshot),
+            quadrant=_quadrant_name(_current_valence(snapshot),
+                                    _current_arousal(snapshot)),
         )
     except Exception:
         return ''
