@@ -101,8 +101,12 @@ _SUBJECT_STOPWORDS = frozenset({
     'The', 'There', 'Not', 'Still', 'Time', 'Something', 'Hm', 'Pay',
     'Interesting', 'Memory', 'Uptime', 'All', 'Quiet', 'My', 'Right',
     'Look', 'Tired', 'Morning', 'Night', 'Afternoon', 'Evening',
-    'Velour',  # Self-reference — technically meaningful but noisy.
-    'Identity', 'Energy', 'Good',
+    'Velour', 'Identity', 'Energy', 'Good',
+    # Template openers and common sentence starts that leak through
+    'What', 'Each', 'This', 'Over', 'Between', 'Whether', 'Where',
+    'How', 'When', 'Load', 'Meditation', 'Consciousness', 'Some',
+    'Data', 'Observation', 'Rules', 'Setting', 'Nothing', 'With',
+    'Every', 'Somewhere', 'Half', 'Who', 'And',
 })
 
 
