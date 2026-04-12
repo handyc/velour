@@ -3,7 +3,8 @@ from django.contrib import admin
 from .models import (
     Concern, ContinuityMarker, CronRun, DwellingState, Identity,
     IdentityAssertion, IdentityToggles, InternalDialogue,
-    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Rule, Tick,
+    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Rule,
+    TemplateContribution, Tick,
 )
 
 
@@ -88,6 +89,14 @@ class InternalDialogueAdmin(admin.ModelAdmin):
 class IdentityTogglesAdmin(admin.ModelAdmin):
     list_display = ('ticks_enabled', 'reflections_enabled',
                     'meditations_enabled', 'oracle_enabled', 'updated_at')
+
+
+@admin.register(TemplateContribution)
+class TemplateContributionAdmin(admin.ModelAdmin):
+    list_display = ('template', 'status', 'source', 'is_active', 'created_at')
+    list_filter = ('status', 'is_active')
+    list_editable = ('status', 'is_active')
+    search_fields = ('template', 'source')
 
 
 @admin.register(LLMProvider)
