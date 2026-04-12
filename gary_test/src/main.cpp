@@ -81,10 +81,10 @@
   static int loraRxFragTotal = 0;
   static size_t loraRxFragLen = 0;
 
-  // Ticker scroll state
+  // Ticker scroll state — starts with a test message immediately
   static int loraTickerOffset = 0;
   static unsigned long lastTickerScrollAt = 0;
-  static bool loraScreenReady = false;  // true once first screen received
+  static bool loraScreenReady = true;  // start true for test message
 
   // Compress a buffer using deflate (ESP32 ROM miniz).
   // Returns compressed size, or 0 on failure. Output buffer must
@@ -213,7 +213,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.4"
+#define FIRMWARE_VERSION    "v0.5.5"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1376,6 +1376,18 @@ static void loraSetup() {
         LoRa.setCodingRate4(5);
         loraReady = true;
         Serial.println("[lora] initialized at 868 MHz");
+        // Seed the ticker with a waiting message so scrolling is visible immediately
+        snprintf(loraScreenBuf, LORA_SCREEN_SIZE,
+                 "  ~~~ waiting for LoRa transmission from twin ~~~  "
+                 "  %s is online at 868 MHz, SF7, 125kHz BW.  "
+                 "  First screen arrives in %d minutes.  ",
+                 NODE_SLUG,
+#ifdef NODE_LORA_ROLE_SENDER
+                 20  // Mabel waits for Hazel's 20-min screen
+#else
+                 30  // Hazel waits for Mabel's 30-min screen
+#endif
+        );
     } else {
         Serial.println("[lora] FAILED to initialize");
     }
