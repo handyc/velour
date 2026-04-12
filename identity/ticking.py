@@ -718,6 +718,22 @@ def tick(triggered_by='manual'):
     from .micro_meditation import compose_micro_meditation
     micro = compose_micro_meditation(snapshot, mood)
 
+    # Russell circumplex coordinates — map mood → (valence, arousal).
+    # Stored on the Tick so the 2D emotional space is queryable.
+    MOOD_COORDS = {
+        'contemplative': (0.00, -0.30),
+        'curious':       (0.35,  0.30),
+        'alert':         (-0.20, 0.70),
+        'satisfied':     (0.70, -0.20),
+        'concerned':     (-0.50, 0.50),
+        'excited':       (0.60,  0.80),
+        'restless':      (-0.30, 0.40),
+        'protective':    (0.20,  0.40),
+        'creative':      (0.50,  0.50),
+        'weary':         (-0.30, -0.60),
+    }
+    valence, arousal = MOOD_COORDS.get(mood, (0.0, 0.0))
+
     tick_row = Tick.objects.create(
         triggered_by=triggered_by,
         mood=mood,
@@ -725,6 +741,8 @@ def tick(triggered_by='manual'):
         rule_label=label,
         thought=thought,
         micro_meditation=micro,
+        valence=valence,
+        arousal=arousal,
         snapshot=snapshot,
         aspects=full_aspect_list,  # full union, not first-match
     )

@@ -179,6 +179,16 @@ class Tick(models.Model):
     micro_meditation = models.TextField(blank=True,
         help_text='Optional inline self-reflection, ~10% of ticks.')
 
+    # Russell circumplex: valence (pleasant/unpleasant) and arousal
+    # (calm/excited) computed from the mood at tick time. Each mood
+    # has a canonical (valence, arousal) coordinate from the
+    # MOOD_COORDINATES dict in identity/views.py. Storing them on
+    # the Tick makes the 2D emotional space queryable across history.
+    valence = models.FloatField(default=0.0,
+        help_text='-1 (unpleasant) to +1 (pleasant)')
+    arousal = models.FloatField(default=0.0,
+        help_text='-1 (calm) to +1 (aroused)')
+
     snapshot = models.JSONField(default=dict, blank=True,
         help_text='Raw sensor inputs this tick saw.')
 
