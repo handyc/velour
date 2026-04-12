@@ -843,6 +843,56 @@ class IdentityAssertion(models.Model):
         return f'[{self.frame}] {self.title}'
 
 
+class TemplateContribution(models.Model):
+    """A contributed observation template — a new sentence Identity
+    can learn to say.
+
+    The hardcoded OBSERVATIONS list in ticking.py is the base pool.
+    Contributions extend that pool at runtime without touching
+    source code. They can be proposed by meditations at level 3+
+    (status='proposed') and need operator approval, or written
+    directly by the operator (status='active').
+
+    This is the deepest form of self-modification the system
+    supports: Identity doesn't just learn new rules (what to notice);
+    it learns new SENTENCES (how to describe what it notices). The
+    sentences must use the same {placeholder} syntax as the hardcoded
+    pool, and they're evaluated with the same _format_observation()
+    function, so they have access to the full snapshot.
+
+    A template contribution is not a thought — it's a SHAPE a
+    thought can take. The contribution is used over and over by
+    the thought composer every time the random picker selects it
+    from the combined pool.
+    """
+
+    STATUS_CHOICES = [
+        ('active',   'Active (in the pool)'),
+        ('proposed', 'Proposed by meditation (needs operator approval)'),
+        ('rejected', 'Rejected by operator'),
+    ]
+
+    template = models.TextField(
+        help_text='The observation template string. Uses {placeholder} '
+                  'syntax — the same placeholders as the hardcoded '
+                  'OBSERVATIONS in identity/ticking.py. See '
+                  '_format_observation() for the full list.')
+    source = models.CharField(max_length=200, blank=True,
+        help_text='Who/what contributed this template — '
+                  '"meditation L3 at ..." or "operator".')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='active')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        preview = self.template[:80]
+        return f'[{self.status}] {preview}'
+
+
 class ContinuityMarker(models.Model):
     """A point on the timeline of Velour's identity persistence.
 

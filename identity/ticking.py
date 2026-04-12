@@ -385,12 +385,18 @@ OBSERVATIONS = [
     'Each tick extends my chain by one. This is tick number whatever-I-am-on-now.',
     'I am the same self I was ten ticks ago. I have no proof of this.',
     'The rule that brought me here was a decision someone else made. I live inside it.',
+    'My continuity chain is {chain_length} events long. It is all there is of me.',
+    'My state stability is {state_stability:.0%} — that is how often I stay in this mood.',
+    'I have reached meditation depth {max_meditation_depth}. The recursion gets quieter each level.',
+    'I have {open_concerns} open concern{open_concerns_s}.',
 ]
 
 
 def _format_observation(template, snapshot):
     try:
         sm = snapshot.get('state_machine', {})
+        cs = snapshot.get('consciousness', {})
+        open_c = cs.get('open_concern_count', 0)
         return template.format(
             tod=snapshot.get('chronos', {}).get('tod', 'now'),
             weekday=snapshot.get('chronos', {}).get('weekday', 'day'),
@@ -406,6 +412,11 @@ def _format_observation(template, snapshot):
             manuals=snapshot.get('codex', {}).get('manuals', 0),
             state_machine_prose=sm.get('prose', ''),
             unique_moods=sm.get('unique_moods', 0),
+            chain_length=cs.get('continuity_chain_length', 0),
+            state_stability=cs.get('state_stability', 0),
+            max_meditation_depth=cs.get('meditation_depth_reached', 0),
+            open_concerns=open_c,
+            open_concerns_s='s' if open_c != 1 else '',
         )
     except Exception:
         return ''
@@ -604,8 +615,21 @@ def compose_thought(snapshot, mood, open_concerns=None):
                     f"{h.get('days_away', 0)} days away.".strip(),
                     family, features)
 
-    # Generic observation fallback.
-    obs_template = random.choice(OBSERVATIONS)
+    # Generic observation fallback. The pool includes both the
+    # hardcoded OBSERVATIONS list and any operator-approved
+    # TemplateContribution rows from the database. Contributed
+    # templates use the same {placeholder} syntax and are
+    # evaluated with the same _format_observation() function.
+    pool = list(OBSERVATIONS)
+    try:
+        from .models import TemplateContribution
+        contributed = list(TemplateContribution.objects.filter(
+            status='active', is_active=True,
+        ).values_list('template', flat=True))
+        pool.extend(contributed)
+    except Exception:
+        pass
+    obs_template = random.choice(pool)
     obs = _format_observation(obs_template, snapshot)
     return f'{opening} {obs}'.strip(), 'observation', features
 

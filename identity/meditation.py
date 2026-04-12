@@ -855,15 +855,26 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
         source_model='identity.Meditation', source_pk=med.pk,
     )
 
-    # Self-modifying data: at depth 3+, the meditation examines
-    # recurring aspects that don't yet have rules and proposes new
-    # ones. Proposals sit in status='proposed' until operator
-    # approval. Safe version of self-modifying functions — data
-    # modifies itself through a gate the operator controls.
+    # Self-modifying data: at depth 3+, the meditation examines its
+    # own state and may propose new rules (for aspects without
+    # dedicated rules) AND new observation templates (new sentences
+    # the thought composer can learn to say). Both sit in
+    # status='proposed' until the operator approves them. This is
+    # the safe version of self-modifying functions — the data
+    # modifies itself, but only through a gate the operator controls.
     if depth >= 3:
         try:
             from .rule_proposer import propose_rule_if_warranted
             propose_rule_if_warranted(
+                triggered_by=f'meditation L{depth} at {now:%Y-%m-%d %H:%M}')
+        except Exception:
+            pass
+        try:
+            from .template_proposer import propose_template_if_warranted
+            from .models import Identity as _Id
+            _mood = _Id.get_self().mood
+            propose_template_if_warranted(
+                mood=_mood, voice=voice,
                 triggered_by=f'meditation L{depth} at {now:%Y-%m-%d %H:%M}')
         except Exception:
             pass
