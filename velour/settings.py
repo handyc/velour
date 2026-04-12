@@ -76,6 +76,7 @@ INSTALLED_APPS = [
     'oracle',
     'hpc',
     'tiles',
+    'hofstadter',
 ]
 
 MIDDLEWARE = [

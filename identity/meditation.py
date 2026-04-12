@@ -703,7 +703,7 @@ def _title_for(depth, voice, now):
 
 
 def meditate(depth=1, voice='contemplative', push_to_codex=True,
-             recursive_of=None):
+             recursive_of=None, originating_tileset_slug=None):
     """Compose one meditation at the given depth + voice. Returns the
     saved Meditation row. If push_to_codex is True, also writes a
     Codex section in the "Identity's Mirror" manual.
@@ -714,6 +714,15 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     (depth, voice, hour) tuple should produce the same output so the
     operator can hand-edit without worrying that running the command
     again will clobber their changes.
+
+    When `originating_tileset_slug` is passed, this meditation was
+    composed AS A RESPONSE to a newly-generated tileset. The
+    meditation records the origin in its `sources` field and will
+    NOT spawn a tileset in return. This is the bounded-recursion
+    guardrail that prevents the tileset ↔ meditation loop from
+    running forever — every bounce is exactly one hop, because the
+    side that was 'caused by' the other side does not cause
+    another response.
     """
     from .models import IdentityToggles, Meditation
 
@@ -771,6 +780,14 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
         body = _compose_level_5_plus(depth, voice, rng, sources)
 
     title = _title_for(depth, voice, now)
+
+    # Thread the originating tileset slug through the sources dict
+    # so the traversal tools can see where this meditation came
+    # from. The presence of this key also signals to the tileset
+    # generator that a responding meditation already exists and
+    # another tileset should not be spawned.
+    if originating_tileset_slug:
+        source_refs['originating_tileset_slug'] = originating_tileset_slug
 
     med = Meditation.objects.create(
         depth=depth,

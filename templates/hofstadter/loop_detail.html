@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}{{ loop.name }} — Hofstadter — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .loop-wrap { max-width: 780px; }
+    .loop-wrap h1 { font-size: 1.2rem; font-weight: 500; color: #c9d1d9; margin: 0 0 0.25rem; }
+    .loop-wrap .meta {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, Menlo, monospace; margin-bottom: 1.5rem;
+    }
+    .loop-wrap .desc { color: #c9d1d9; line-height: 1.65; font-size: 0.9rem; margin-bottom: 2rem; }
+
+    .levels { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 2rem; }
+    .level {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #bc8cff;
+        border-radius: 4px; padding: 0.6rem 0.85rem;
+    }
+    .level .name {
+        font-size: 0.8rem; color: #c9d1d9; font-weight: 500;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .level .desc { color: #8b949e; font-size: 0.82rem; line-height: 1.55; margin-top: 0.2rem; }
+    .level .arrow { color: #484f58; font-size: 0.7rem; margin-top: 0.3rem; font-family: ui-monospace, Menlo, monospace; }
+
+    .traverse-form {
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 6px; padding: 1rem 1.25rem;
+        display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+        margin-bottom: 1.5rem;
+    }
+    .traverse-form label { font-size: 0.78rem; color: #8b949e; }
+    .traverse-form input {
+        background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.35rem 0.5rem; font: inherit; font-size: 0.85rem;
+    }
+    .traverse-form input[type=number] { width: 70px; }
+    .traverse-form input[type=text] { width: 240px; }
+
+    .traversal {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 4px; padding: 0.75rem 1rem;
+        margin-bottom: 0.5rem; font-size: 0.82rem;
+    }
+    .traversal .meta {
+        color: #6e7681; font-size: 0.7rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 0.4rem;
+    }
+    .traversal.completed     { border-left: 3px solid #3fb950; }
+    .traversal.max_depth     { border-left: 3px solid #d29922; }
+    .traversal.repeat_detected { border-left: 3px solid #58a6ff; }
+    .traversal.timeout       { border-left: 3px solid #f85149; }
+    .traversal.stability     { border-left: 3px solid #bc8cff; }
+    .traversal.exit_condition { border-left: 3px solid #8b949e; }
+    .traversal.contradiction { border-left: 3px solid #f85149; }
+    .traversal .steps ol { margin: 0.5rem 0; padding-left: 1.5rem; color: #c9d1d9; }
+    .traversal .steps li { margin-bottom: 0.3rem; font-size: 0.78rem; }
+    .traversal .steps .note { color: #6e7681; font-style: italic; margin-left: 0.3rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="loop-wrap">
+    <h1>{{ loop.name }}</h1>
+    <div class="meta">
+        kind: <strong style="color:#bc8cff;">{{ loop.get_kind_display }}</strong>
+        · {{ loop.level_count }} level{{ loop.level_count|pluralize }}
+        · discovered by {{ loop.get_discovered_by_display }}
+    </div>
+
+    <div class="desc">{{ loop.description|linebreaks }}</div>
+
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Levels</h2>
+    <div class="levels">
+        {% for level in loop.levels %}
+        <div class="level">
+            <div class="name">{{ forloop.counter0 }}. {{ level.name }}</div>
+            <div class="desc">{{ level.description }}</div>
+            <div class="arrow">→ refers_to: level {{ level.refers_to }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Traverse</h2>
+    <p style="color: #6e7681; font-size: 0.8rem;">
+        Walk the loop following refers_to pointers. Hard exits: max depth,
+        30-second wall clock, repeat detection, exit condition match,
+        contradiction.
+    </p>
+    <form method="post" action="{% url 'hofstadter:loop_traverse' loop.slug %}" class="traverse-form">
+        {% csrf_token %}
+        <label>max depth: <input type="number" name="max_depth" value="7" min="1" max="12"></label>
+        <label>exit content (optional): <input type="text" name="exit_content" placeholder="substring"></label>
+        <button type="submit" class="btn">Run traversal</button>
+    </form>
+
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Recent traversals</h2>
+    {% for t in traversals %}
+    <div class="traversal {{ t.exit_reason }}">
+        <div class="meta">
+            {{ t.started_at|date:"Y-m-d H:i:s" }}
+            · {{ t.steps_taken }} step{{ t.steps_taken|pluralize }}
+            · exit: <strong>{{ t.get_exit_reason_display }}</strong>
+            {% if t.exit_detail %}· {{ t.exit_detail }}{% endif %}
+        </div>
+        <div class="steps">
+            <ol>
+                {% for step in t.steps %}
+                <li>
+                    <strong>{{ step.level_name }}</strong>: {{ step.content|truncatechars:140 }}
+                    {% if step.note %}<span class="note">{{ step.note }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+        </div>
+    </div>
+    {% empty %}
+    <p style="color: #6e7681;">No traversals yet.</p>
+    {% endfor %}
+
+    <div style="margin-top: 2rem;">
+        <a href="{% url 'hofstadter:home' %}" class="btn btn-secondary">← All strange loops</a>
+    </div>
+</div>
+{% endblock %}
