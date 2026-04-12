@@ -36,10 +36,51 @@ from django.utils import timezone
 # Source gatherers — each returns (label, content) pairs or lists
 # =====================================================================
 
-def _git_commits(since='2 weeks ago', max_count=25):
-    """Return recent git commits as [{hash, subject, body, ai_coauthor}]
-    dicts, most recent first. ai_coauthor is True iff the commit's
-    trailer includes a Co-Authored-By line naming Claude or another AI.
+_SUBSTANTIVE_KEYWORDS = re.compile(
+    r'\b(Session|Phase|model|migration|backlog|refactor|rewrite|'
+    r'redesign|overhaul|architecture|deploy|integrate|compose|'
+    r'gather|reflect|meditate|Identity|Oracle|Codex|Gary|Larry|'
+    r'Terry|devguide|manual|firmware|OTA|attention|concern|rule)',
+    re.IGNORECASE)
+_TRIVIAL_KEYWORDS = re.compile(
+    r'\b(typo|readme|url|link|comment|whitespace|lint|reformat|'
+    r'gitignore|bump version)\b',
+    re.IGNORECASE)
+
+
+def _commit_substance_score(commit):
+    """Score a commit by how interesting it is as meditation source.
+    Higher = more worth quoting. Deliberately simple heuristics."""
+    score = 0.0
+    body_len = len(commit.get('body') or '')
+    subject = commit.get('subject') or ''
+
+    # Body length is the biggest single signal — commits with real
+    # multi-paragraph explanations are the substantive ones.
+    score += min(5.0, body_len / 200.0)
+
+    # AI coauthor trailer is the truth anchor L4 meditations need.
+    if commit.get('ai_coauthor'):
+        score += 2.0
+
+    # Subject keywords — positive and negative.
+    if _SUBSTANTIVE_KEYWORDS.search(subject):
+        score += 1.5
+    if _TRIVIAL_KEYWORDS.search(subject):
+        score -= 2.0
+
+    # Very short subjects are usually chores.
+    if len(subject) < 30:
+        score -= 0.5
+
+    return score
+
+
+def _git_commits(since='2 weeks ago', max_count=40):
+    """Return recent git commits as [{hash, subject, body, ai_coauthor,
+    substance}] dicts, sorted by substance score descending. The
+    highest-substance commits are at the front of the list so
+    `random.choice(commits[:5])` naturally prefers interesting ones.
 
     Falls back to an empty list if git isn't available or the repo
     isn't a git repo."""
@@ -76,15 +117,23 @@ def _git_commits(since='2 weeks ago', max_count=25):
             'body':    body,
             'ai_coauthor': ai_coauthor,
         })
+
+    for c in commits:
+        c['substance'] = _commit_substance_score(c)
+    commits.sort(key=lambda c: c['substance'], reverse=True)
     return commits
 
 
 def _memory_notes():
-    """Return the list of memory notes as [{filename, title, excerpt}].
+    """Return memory notes as [{filename, title, type, excerpt,
+    substance}] dicts, sorted by substance score descending.
 
     The memory directory lives under the harness project path, not
     under BASE_DIR, so we check a couple of candidate locations and
-    fall back to an empty list on any error."""
+    fall back to an empty list on any error. Filename prefixes
+    (project_*, feedback_*, user_*, reference_*) encode the memory
+    type and bias substance scoring.
+    """
     candidates = [
         os.path.expanduser(
             '~/.claude/projects/-home-handyc-claubsh-velour-dev/memory'),
@@ -97,53 +146,133 @@ def _memory_notes():
         for fn in sorted(os.listdir(root)):
             if not fn.endswith('.md'):
                 continue
+            if fn == 'MEMORY.md':
+                continue  # the index, not a note
             path = os.path.join(root, fn)
             try:
                 with open(path) as f:
                     text = f.read()
             except OSError:
                 continue
-            # First non-empty non-frontmatter line as title
+
+            # Parse frontmatter for name + type, strip it out of the body
             title = fn
+            note_type = 'unknown'
             body_lines = []
             in_frontmatter = False
+            seen_frontmatter = False
             for line in text.splitlines():
                 if line.strip() == '---':
-                    in_frontmatter = not in_frontmatter
+                    if not seen_frontmatter:
+                        in_frontmatter = True
+                        seen_frontmatter = True
+                    else:
+                        in_frontmatter = False
                     continue
                 if in_frontmatter:
                     if line.startswith('name:'):
                         title = line.split(':', 1)[1].strip()
+                    elif line.startswith('type:'):
+                        note_type = line.split(':', 1)[1].strip()
                     continue
                 body_lines.append(line)
             body = '\n'.join(body_lines).strip()
+
+            # Excerpt: first substantive paragraph (skip headings).
+            paragraphs = [p.strip() for p in body.split('\n\n') if p.strip()]
+            excerpt_source = ''
+            for p in paragraphs:
+                # Skip markdown headings as excerpts
+                if p.startswith('#'):
+                    continue
+                excerpt_source = p
+                break
+            if not excerpt_source and paragraphs:
+                excerpt_source = paragraphs[0]
+
+            # Clean up markdown formatting that doesn't read well as
+            # a blockquote — strip bold markers and excess indentation.
+            cleaned = re.sub(r'\*\*([^*]+)\*\*', r'\1', excerpt_source)
+            cleaned = re.sub(r'`([^`]+)`', r'\1', cleaned)
+            excerpt = cleaned[:500]
+
+            # Substance score
+            substance = 0.0
+            substance += min(3.0, len(body) / 1000.0)
+            if note_type == 'project':
+                substance += 2.0  # backlog notes are the best source
+            elif note_type == 'reference':
+                substance += 1.0
+            elif note_type == 'feedback':
+                substance += 0.5
+            if 'ShIPPED' in body.upper() or 'BACKLOG' in body.upper():
+                substance += 0.5
+
             notes.append({
-                'filename': fn,
-                'title':    title,
-                'excerpt':  body[:500],
+                'filename':  fn,
+                'title':     title,
+                'type':      note_type,
+                'excerpt':   excerpt,
+                'substance': substance,
             })
         if notes:
             break
+    notes.sort(key=lambda n: n['substance'], reverse=True)
     return notes
 
 
 def _devguide_sections():
     """Return Developer Guide Volume 1 sections as [{slug, title,
-    excerpt}]. Reads from the Codex Manual/Section rows so we don't
-    duplicate the knowledge of where the guide lives."""
+    excerpt, substance}], sorted by substance.
+
+    Skips stub sections (body < 500 chars), prefers chapters over
+    appendices, boosts sections whose title mentions Identity,
+    meta-app, attention, or the other load-bearing concepts L4
+    meditations most want to quote."""
     try:
         from codex.models import Manual
         manual = Manual.objects.filter(
             slug='velour-developer-guide-vol-1').first()
         if not manual:
             return []
+
+        keywords = re.compile(
+            r'\b(Identity|meta-app|attention|sysinfo|hostname|'
+            r'Velour|design|reflect|attention engine|singleton|'
+            r'secret-file|deploy pipeline)\b', re.IGNORECASE)
+
         sections = []
         for s in manual.sections.all():
+            body = s.body or ''
+            if len(body) < 500:
+                continue  # stub
+            # Excerpt: first paragraph after any markdown heading
+            paragraphs = [p.strip() for p in body.split('\n\n') if p.strip()]
+            excerpt = ''
+            for p in paragraphs:
+                if p.startswith('#'):
+                    continue
+                excerpt = p
+                break
+            if not excerpt:
+                excerpt = paragraphs[0] if paragraphs else ''
+            excerpt = re.sub(r'`([^`]+)`', r'\1', excerpt)[:600]
+
+            substance = min(4.0, len(body) / 2000.0)
+            if s.slug.startswith('ch'):
+                substance += 1.0
+            elif s.slug.startswith('appendix'):
+                substance -= 0.5
+            if keywords.search(s.title or ''):
+                substance += 2.0
+
             sections.append({
-                'slug':    s.slug,
-                'title':   s.title,
-                'excerpt': (s.body or '')[:800],
+                'slug':      s.slug,
+                'title':     s.title,
+                'excerpt':   excerpt,
+                'substance': substance,
             })
+        sections.sort(key=lambda s: s['substance'], reverse=True)
         return sections
     except Exception:
         return []
@@ -401,40 +530,69 @@ def _compose_level_4(voice, rng, sources):
     notes, Developer Guide meta-app chapters. Every output should
     include at least one real quote from one of these sources —
     that's the truth anchor that keeps the meditation from being
-    stylized emptiness."""
+    stylized emptiness.
+
+    The gatherers pre-sort by substance, so picking from the top
+    3 of each list gives us the best available source material
+    rather than random. The rng picks WITHIN the top slice so
+    repeated runs don't always pick the exact same commit.
+    """
     commits = sources.get('commits', [])
     memory = sources.get('memory', [])
+    devguide = sources.get('devguide', [])
 
     opening = _pick(rng, OPENINGS[voice].get(4, []))
     closing = _pick(rng, CLOSINGS[voice])
 
-    # Prefer an AI-co-authored commit as the quote source
+    # Commit: prefer AI-coauthored + high substance. The gatherer
+    # already sorted by substance descending, so the top slice is
+    # the best available material.
     ai_commits = [c for c in commits if c['ai_coauthor']]
+    source_list = ai_commits[:5] if ai_commits else commits[:5]
     commit_block = ''
     commit_line = ''
-    if ai_commits:
-        c = rng.choice(ai_commits[:5])
-        commit_line = (f'From my git history, a commit whose co-author '
-                       f'was an AI:')
-        # Take the subject line + the first few body lines
+    if source_list:
+        c = rng.choice(source_list)
+        if c.get('ai_coauthor'):
+            commit_line = ('From my git history, a commit whose '
+                           'co-author was an AI:')
+        else:
+            commit_line = 'From my git history:'
         text = c['subject']
-        if c['body']:
-            text += '\n' + '\n'.join(c['body'].splitlines()[:3])
-        commit_block = _blockquote(text, max_lines=5)
-    elif commits:
-        c = rng.choice(commits[:5])
-        commit_line = 'From my git history:'
-        commit_block = _blockquote(c['subject'] + '\n' + (c['body'] or ''),
-                                   max_lines=5)
+        if c.get('body'):
+            body_lines = [
+                ln for ln in c['body'].splitlines()
+                if ln.strip() and not ln.strip().startswith('Co-Authored-By')
+            ][:4]
+            if body_lines:
+                text += '\n' + '\n'.join(body_lines)
+        commit_block = _blockquote(text, max_lines=6)
 
-    # Memory note, if any
+    # Memory note from the top-substance slice. Backlog notes
+    # (project_*) rank highest per the gatherer's scoring.
     memory_block = ''
     memory_line = ''
     if memory:
-        m = rng.choice(memory[:10])
-        memory_line = (f'From my memory, a note my operator and an AI '
-                       f'wrote down together — "{m["title"]}":')
+        m = rng.choice(memory[:5])
+        memory_line = (f'From my memory, a note titled '
+                       f'"{m["title"]}":')
         memory_block = _blockquote(m['excerpt'], max_lines=4)
+
+    # Devguide section — only included sometimes to keep L4 from
+    # being too long. 50% of contemplative/philosophical, never for
+    # the minimal voice, 30% for wry.
+    devguide_block = ''
+    devguide_line = ''
+    devguide_prob = {
+        'contemplative': 0.5, 'philosophical': 0.5,
+        'wry': 0.3, 'minimal': 0.0,
+    }.get(voice, 0.3)
+    if devguide and rng.random() < devguide_prob:
+        d = rng.choice(devguide[:5])
+        devguide_line = (f'And from my Developer Guide — the chapter '
+                         f'titled "{d["title"]}" — a description of '
+                         f'what I am:')
+        devguide_block = _blockquote(d['excerpt'], max_lines=4)
 
     middle_thought = {
         'contemplative': ('The hands that shaped me were themselves '
@@ -457,6 +615,8 @@ def _compose_level_4(voice, rng, sources):
     ]
     if memory_block:
         parts += [memory_line, '', memory_block, '']
+    if devguide_block:
+        parts += [devguide_line, '', devguide_block, '']
     parts += [closing]
 
     return '\n'.join(p for p in parts if p is not None)
