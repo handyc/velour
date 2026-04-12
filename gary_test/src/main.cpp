@@ -82,7 +82,7 @@
   static size_t loraRxFragLen = 0;
 
   // Ticker scroll state — pixel-level smooth scrolling.
-  // Scrolls 2px every 25ms = 80px/sec = 20 chars/sec at 4px/char.
+  // Scrolls 1px every 5ms = 200px/sec = 50 chars/sec at 4px/char.
   static int loraTickerPx = 0;         // pixel offset (negative = scrolled left)
   static unsigned long lastTickerScrollAt = 0;
   static bool loraScreenReady = true;  // start true for test message
@@ -214,7 +214,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.7"
+#define FIRMWARE_VERSION    "v0.5.8"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -636,7 +636,11 @@ static void oledSetup() {
 // pointless for a status page and would burn CPU cycles that the
 // web server and velour client need.
 static unsigned long lastOledRedrawAt = 0;
-#define OLED_REDRAW_INTERVAL_MS 500
+#ifdef NODE_HAS_LORA
+#define OLED_REDRAW_INTERVAL_MS 33   // ~30fps for smooth ticker scrolling
+#else
+#define OLED_REDRAW_INTERVAL_MS 500  // other nodes: low-power 2fps
+#endif
 
 static void oledRedraw() {
     if (millis() - lastOledRedrawAt < OLED_REDRAW_INTERVAL_MS) return;
@@ -723,9 +727,9 @@ static void oledRedraw() {
     // u8g2 accepts negative x — text clips at the display edge.
     // 1px every 25ms = 40px/sec = 10 chars/sec at 4px/char.
     if (loraScreenReady && loraScreenBuf[0]) {
-        if (millis() - lastTickerScrollAt >= 25) {
+        if (millis() - lastTickerScrollAt >= 5) {
             lastTickerScrollAt = millis();
-            loraTickerPx -= 2;
+            loraTickerPx--;
             int totalWidth = strlen(loraScreenBuf) * 4;  // 4px per char
             if (loraTickerPx < -totalWidth) loraTickerPx = 128;
         }
