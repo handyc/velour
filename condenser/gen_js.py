@@ -115,27 +115,65 @@ def _js_crud(ir):
     return '\n'.join(lines)
 
 
+def _pick_list_fields(fields, max_cols=6):
+    """Pick the best fields to show in a list view."""
+    # Skip internal/auto fields
+    skip = {'id', 'created_at', 'updated_at', 'source_metadata', 'grid_state',
+            'raw_json', 'bin_file', 'sha256', 'api_token'}
+    visible = [f for f in fields if f.name not in skip]
+    # Prioritize: name/title/label first, then short strings, then ints, then bools
+    def sort_key(f):
+        if f.name in ('name', 'title', 'label', 'nickname'):
+            return (0, f.name)
+        if f.name in ('slug', 'description', 'notes'):
+            return (3, f.name)
+        if f.type == 'str' and f.max_length and f.max_length <= 100:
+            return (1, f.name)
+        if f.type in ('int', 'float'):
+            return (2, f.name)
+        if f.type == 'bool':
+            return (2, f.name)
+        return (4, f.name)
+    visible.sort(key=sort_key)
+    return visible[:max_cols]
+
+
 def _js_views(ir):
     """Generate view functions that render into #app."""
     lines = ['// --- Views ---']
 
     for model in ir.models:
         key = model.name.lower()
-        fields = [f for f in model.fields if f.name not in ('id', 'created_at', 'updated_at')]
+        all_fields = [f for f in model.fields if f.name != 'id']
+        list_fields = _pick_list_fields(model.fields)
+        form_fields = [f for f in all_fields
+                       if f.name not in ('created_at', 'updated_at', 'source_metadata',
+                                         'grid_state', 'raw_json', 'bin_file', 'sha256')]
 
-        # List view
-        lines.append(f'function view_list_{key}() {{')
+        # List view with search
+        lines.append(f'function view_list_{key}(query) {{')
         lines.append(f'  var items = list_{key}();')
+        lines.append(f'  if (query) {{ items = items.filter(function(x) {{')
+        lines.append(f'    return JSON.stringify(x).toLowerCase().indexOf(query.toLowerCase()) >= 0;')
+        lines.append(f'  }}); }}')
         lines.append(f'  var h = "<h2>{model.name} (" + items.length + ")</h2>";')
-        lines.append(f'  h += \'<button class="primary" onclick="view_add_{key}()">Add</button>\';')
+        lines.append(f'  h += \'<div style="display:flex;gap:0.3rem;margin:0.3rem 0">\';')
+        lines.append(f'  h += \'<input type="text" id="search_{key}" placeholder="search..." \';')
+        lines.append(f'  h += \'onkeyup="view_list_{key}(this.value)" style="width:10rem">\';')
+        lines.append(f'  h += \'<button class="primary" onclick="view_add_{key}()">Add</button></div>\';')
         lines.append(f'  h += "<table><tr>";')
-        for f in fields[:8]:  # limit visible columns
+        for f in list_fields:
             lines.append(f'  h += "<th>{f.name}</th>";')
         lines.append(f'  h += "<th></th></tr>";')
         lines.append(f'  items.forEach(function(item) {{')
         lines.append(f'    h += "<tr>";')
-        for f in fields[:8]:
-            lines.append(f'    h += "<td>" + (item.{f.name} != null ? item.{f.name} : "") + "</td>";')
+        for f in list_fields:
+            if f.type == 'bool':
+                lines.append(f'    h += "<td>" + (item.{f.name} ? "✓" : "") + "</td>";')
+            elif f.type == 'str' and (f.max_length == 0 or f.max_length > 60):
+                lines.append(f'    h += "<td>" + String(item.{f.name}||"").substring(0,40) + "</td>";')
+            else:
+                lines.append(f'    h += "<td>" + (item.{f.name} != null ? item.{f.name} : "") + "</td>";')
         lines.append(f'    h += \'<td><button class="danger" onclick="delete_{key}(\' + item.id + \');view_list_{key}()">×</button></td>\';')
         lines.append(f'    h += "</tr>";')
         lines.append(f'  }});')
@@ -148,21 +186,35 @@ def _js_views(ir):
         lines.append(f'function view_add_{key}() {{')
         lines.append(f'  var h = "<h2>Add {model.name}</h2>";')
         lines.append(f'  h += \'<form onsubmit="return save_new_{key}()">\';')
-        for f in fields:
-            if f.name in ('created_at', 'updated_at'):
-                continue
+        for f in form_fields:
+            label = f.name.replace('_', ' ')
             if f.choices:
-                lines.append(f'  h += \'<div class="form-row"><label>{f.name}</label><select id="f_{f.name}">\';')
-                for c in f.choices:
-                    lines.append(f'  h += \'<option value="{c}">{c}</option>\';')
-                lines.append(f'  h += "</select></div>";')
+                opts = ''.join(f'<option value=\\"{c}\\">{c}</option>' for c in f.choices)
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<select id="f_{f.name}">{opts}</select></div>\';')
             elif f.type == 'bool':
-                lines.append(f'  h += \'<div class="form-row"><label>{f.name}</label><input type="checkbox" id="f_{f.name}"></div>\';')
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<input type="checkbox" id="f_{f.name}"></div>\';')
             elif f.type in ('int', 'float'):
-                lines.append(f'  h += \'<div class="form-row"><label>{f.name}</label><input type="number" id="f_{f.name}" value="0"></div>\';')
+                dflt = f.default if f.default is not None else 0
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<input type="number" id="f_{f.name}" value="{dflt}" '
+                             f'style="width:5rem"></div>\';')
+            elif f.type == 'str' and (f.max_length == 0 or f.max_length > 200):
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<textarea id="f_{f.name}" rows="2" '
+                             f'style="width:20rem"></textarea></div>\';')
+            elif f.type == 'json':
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<textarea id="f_{f.name}" rows="2" placeholder="[]" '
+                             f'style="width:20rem;font-family:monospace"></textarea></div>\';')
             else:
-                lines.append(f'  h += \'<div class="form-row"><label>{f.name}</label><input type="text" id="f_{f.name}"></div>\';')
-        lines.append(f'  h += \'<div class="form-row"><button type="submit" class="primary">Save</button>\';')
+                w = min(f.max_length, 30) if f.max_length else 20
+                lines.append(f'  h += \'<div class="form-row"><label>{label}</label>'
+                             f'<input type="text" id="f_{f.name}" '
+                             f'style="width:{w}ch"></div>\';')
+        lines.append(f'  h += \'<div class="form-row" style="margin-top:0.5rem">'
+                     f'<button type="submit" class="primary">Save</button> \';')
         lines.append(f'  h += \'<button type="button" onclick="view_list_{key}()">Cancel</button></div>\';')
         lines.append(f'  h += "</form>";')
         lines.append(f'  document.getElementById("app").innerHTML = h;')
@@ -172,15 +224,20 @@ def _js_views(ir):
         # Save handler
         lines.append(f'function save_new_{key}() {{')
         lines.append(f'  var obj = {{}};')
-        for f in fields:
-            if f.name in ('created_at', 'updated_at'):
-                lines.append(f'  obj.{f.name} = new Date().toISOString();')
-            elif f.type == 'bool':
+        for f in form_fields:
+            if f.type == 'bool':
                 lines.append(f'  obj.{f.name} = document.getElementById("f_{f.name}").checked;')
             elif f.type in ('int', 'float'):
-                lines.append(f'  obj.{f.name} = Number(document.getElementById("f_{f.name}").value);')
+                lines.append(f'  obj.{f.name} = Number(document.getElementById("f_{f.name}").value) || 0;')
+            elif f.type == 'json':
+                lines.append(f'  try {{ obj.{f.name} = JSON.parse(document.getElementById("f_{f.name}").value || "[]"); }}'
+                             f' catch(e) {{ obj.{f.name} = []; }}')
             else:
                 lines.append(f'  obj.{f.name} = document.getElementById("f_{f.name}").value;')
+        # Auto-fill timestamps
+        for f in all_fields:
+            if f.name in ('created_at', 'updated_at'):
+                lines.append(f'  obj.{f.name} = new Date().toISOString();')
         lines.append(f'  create_{key}(obj);')
         lines.append(f'  view_list_{key}();')
         lines.append(f'  return false;')

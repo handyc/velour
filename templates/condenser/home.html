@@ -65,6 +65,18 @@ Each tier strips away what can't survive, preserving only the essential logic.
     </div>
 </div>
 
+    <div class="avail-card">
+        <h3>Live condensation (any app → JS)</h3>
+        <p>Open a condensed version of any Velour app in a new tab. Generated on the fly from the IR.</p>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;margin-top:0.3rem">
+            <a href="{% url 'condenser:live' 'tiles' %}" class="btn btn-secondary" target="_blank">Tiles</a>
+            <a href="{% url 'condenser:live' 'chronos' %}" class="btn btn-secondary" target="_blank">Chronos</a>
+            <a href="{% url 'condenser:live' 'nodes' %}" class="btn btn-secondary" target="_blank">Nodes</a>
+            <a href="{% url 'condenser:live' 'automaton' %}" class="btn btn-secondary" target="_blank">Automaton</a>
+            <a href="{% url 'condenser:live' 'identity' %}" class="btn btn-secondary" target="_blank">Identity</a>
+            <a href="{% url 'condenser:live' 'mail' %}" class="btn btn-secondary" target="_blank">Mail</a>
+        </div>
+    </div>
     <div class="avail-card" style="border-left:3px solid #bc8cff">
         <h3>Full chain: Tiles → JS → ESP → ATTiny → 555</h3>
         <p>Run the entire distillation pipeline in one click. Produces all 4 tiers,

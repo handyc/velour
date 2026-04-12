@@ -227,6 +227,18 @@ def distill_full_chain(request):
 
 
 @login_required
+def live_condense(request, app_label):
+    """Generate and serve a condensed app on the fly.
+    Visit /condenser/live/tiles/ to see the tiles app condensed to JS."""
+    from .parser import parse_app
+    from .gen_js import generate as gen_js
+    ir = parse_app(app_label)
+    if not ir:
+        return HttpResponse(f'App "{app_label}" not found.', status=404)
+    return HttpResponse(gen_js(ir), content_type='text/html; charset=utf-8')
+
+
+@login_required
 def distillation_view(request, slug):
     """View a distillation's output."""
     d = get_object_or_404(Distillation, slug=slug)
