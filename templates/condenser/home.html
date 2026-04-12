@@ -65,6 +65,28 @@ Each tier strips away what can't survive, preserving only the essential logic.
     </div>
 </div>
 
+    <div class="avail-card" style="border-left:3px solid #bc8cff">
+        <h3>Full chain: Tiles → JS → ESP → ATTiny → 555</h3>
+        <p>Run the entire distillation pipeline in one click. Produces all 4 tiers,
+        each annotated with what was lost and what the next tier would need.</p>
+        <div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap">
+            <span class="tier-badge tier-django">Django</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-js">JS</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-esp">ESP</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-attiny">ATTiny</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-circuit">555</span>
+        </div>
+        <form method="post" action="{% url 'condenser:distill_full_chain' %}" style="margin-top:0.4rem">
+            {% csrf_token %}
+            <button type="submit" class="btn primary" style="background:#238636;border-color:#2ea043">Run full chain</button>
+        </form>
+    </div>
+</div>
+
 {% if distillations %}
 <h2 style="font-size:0.95rem;margin:1rem 0 0.3rem">Previous distillations</h2>
 <div class="dist-list">

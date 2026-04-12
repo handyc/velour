@@ -85,6 +85,140 @@ def distill_velour(request):
 
 
 @login_required
+@require_POST
+def distill_tiles_esp(request):
+    """Tiles JS → ESP8266 distillation."""
+    from .distill_esp import distill as esp_distill
+    from .distill_tiles import distill as tiles_distill
+
+    # First get the Tier 2 output
+    tier2 = tiles_distill()
+
+    d = Distillation(
+        name='Tiles → ESP8266 (Tier 2→3)',
+        source_app='tiles', source_tier='js', target_tier='esp',
+        status='running',
+    )
+    d.save()
+    try:
+        output = esp_distill(tier2)
+        d.output = output
+        d.output_size_bytes = len(output.encode('utf-8'))
+        d.status = 'completed'
+        d.completed_at = timezone.now()
+        d.annotations = _extract_annotations(output)
+        d.save()
+        messages.success(request, f'Distilled Tiles → ESP: {d.output_size_bytes} bytes.')
+    except Exception as e:
+        d.status = 'error'
+        d.error_detail = str(e)
+        d.save()
+        messages.error(request, f'Distillation failed: {e}')
+    return redirect('condenser:home')
+
+
+@login_required
+@require_POST
+def distill_tiles_attiny(request):
+    """Tiles → ATTiny13a distillation."""
+    from .distill_attiny import distill as attiny_distill
+
+    d = Distillation(
+        name='Tiles → ATTiny13a (Tier 3→4)',
+        source_app='tiles', source_tier='esp', target_tier='attiny',
+        status='running',
+    )
+    d.save()
+    try:
+        output = attiny_distill()
+        d.output = output
+        d.output_size_bytes = len(output.encode('utf-8'))
+        d.status = 'completed'
+        d.completed_at = timezone.now()
+        d.annotations = _extract_annotations(output)
+        d.save()
+        messages.success(request, f'Distilled Tiles → ATTiny: {d.output_size_bytes} bytes.')
+    except Exception as e:
+        d.status = 'error'
+        d.error_detail = str(e)
+        d.save()
+        messages.error(request, f'Distillation failed: {e}')
+    return redirect('condenser:home')
+
+
+@login_required
+@require_POST
+def distill_tiles_circuit(request):
+    """Tiles → 555 timer circuit distillation."""
+    from .distill_circuit import distill as circuit_distill
+
+    d = Distillation(
+        name='Tiles → 555 circuit (Tier 4→5)',
+        source_app='tiles', source_tier='attiny', target_tier='circuit',
+        status='running',
+    )
+    d.save()
+    try:
+        output = circuit_distill()
+        d.output = output
+        d.output_size_bytes = len(output.encode('utf-8'))
+        d.status = 'completed'
+        d.completed_at = timezone.now()
+        d.annotations = _extract_annotations(output)
+        d.save()
+        messages.success(request, f'Distilled Tiles → 555: {d.output_size_bytes} bytes.')
+    except Exception as e:
+        d.status = 'error'
+        d.error_detail = str(e)
+        d.save()
+        messages.error(request, f'Distillation failed: {e}')
+    return redirect('condenser:home')
+
+
+@login_required
+@require_POST
+def distill_full_chain(request):
+    """Run the entire Tiles distillation chain: Django→JS→ESP→ATTiny→555."""
+    from .distill_tiles import distill as tiles_distill
+    from .distill_esp import distill as esp_distill
+    from .distill_attiny import distill as attiny_distill
+    from .distill_circuit import distill as circuit_distill
+
+    results = []
+    tiers = [
+        ('Tiles → JS', 'django', 'js', lambda: tiles_distill()),
+        ('Tiles → ESP', 'js', 'esp', lambda: esp_distill(results[-1].output)),
+        ('Tiles → ATTiny', 'esp', 'attiny', lambda: attiny_distill()),
+        ('Tiles → 555', 'attiny', 'circuit', lambda: circuit_distill()),
+    ]
+
+    for name, src, tgt, fn in tiers:
+        d = Distillation(name=name, source_app='tiles',
+                         source_tier=src, target_tier=tgt, status='running')
+        d.save()
+        try:
+            output = fn()
+            d.output = output
+            d.output_size_bytes = len(output.encode('utf-8'))
+            d.status = 'completed'
+            d.completed_at = timezone.now()
+            d.annotations = _extract_annotations(output)
+            d.save()
+            results.append(d)
+        except Exception as e:
+            d.status = 'error'
+            d.error_detail = str(e)
+            d.save()
+            messages.error(request, f'{name} failed: {e}')
+            break
+
+    if len(results) == 4:
+        sizes = ' → '.join(f'{d.output_size_bytes}B' for d in results)
+        messages.success(request, f'Full chain complete: {sizes}')
+    return redirect('condenser:home')
+
+
+@login_required
 def distillation_view(request, slug):
     """View a distillation's output."""
     d = get_object_or_404(Distillation, slug=slug)
