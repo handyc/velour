@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cluster.nickname }} — HPC — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .kv { border: 1px solid #21262d; border-radius: 6px; padding: 0.75rem 1rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; }
+    .kv div { padding: 0.15rem 0; }
+    .kv .k { color: #8b949e; display: inline-block; min-width: 9rem; }
+    .kv .v { color: #c9d1d9; }
+    .ssh-box { background: #0d1117; border: 1px solid #30363d; padding: 0.75rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem; color: #58a6ff; }
+    .notes { white-space: pre-wrap; color: #c9d1d9; font-size: 0.875rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 0.25rem;">{{ cluster.nickname }}</h1>
+<p style="color:#8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875rem;">{{ cluster.hostname }}{% if cluster.ssh_port != 22 %}:{{ cluster.ssh_port }}{% endif %}{% if cluster.institution %} &middot; {{ cluster.institution }}{% endif %}</p>
+
+<div class="kv" style="margin-top: 1rem;">
+    <div><span class="k">Active</span><span class="v">{{ cluster.is_active|yesno:"yes,no" }}</span></div>
+    <div><span class="k">Scheduler</span><span class="v">{{ cluster.get_scheduler_display }}</span></div>
+    <div><span class="k">SSH user</span><span class="v">{{ cluster.ssh_user|default:"(uses ~/.ssh/config)" }}</span></div>
+    <div><span class="k">Grant code</span><span class="v">{{ cluster.grant_code|default:"(none)" }}</span></div>
+    <div><span class="k">Registered</span><span class="v">{{ cluster.created_at|date:"Y-m-d H:i" }}</span></div>
+    <div><span class="k">Last touched</span><span class="v">{{ cluster.last_touched_at|date:"Y-m-d H:i" }}</span></div>
+</div>
+
+<h2 style="margin-top: 1.5rem;">SSH command</h2>
+<p style="color:#8b949e; font-size: 0.875rem;">Copy/paste this into your terminal. Phase 2 will submit jobs via this connection; phase 1 just shows you the command.</p>
+<div class="ssh-box">{{ cluster.ssh_command }}</div>
+
+{% if cluster.description %}
+<h2 style="margin-top: 1.5rem;">Description</h2>
+<div class="card notes">{{ cluster.description }}</div>
+{% endif %}
+
+{% if cluster.notes %}
+<h2 style="margin-top: 1.5rem;">Operator notes</h2>
+<div class="card notes">{{ cluster.notes }}</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    <a href="{% url 'hpc:edit' cluster.slug %}" class="btn">Edit</a>
+    <form method="post" action="{% url 'hpc:delete' cluster.slug %}" style="display:inline;" onsubmit="return confirm('Remove {{ cluster.nickname }}?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Delete</button>
+    </form>
+    <a href="{% url 'hpc:list' %}" class="btn btn-secondary">Back to HPC</a>
+</div>
+{% endblock %}

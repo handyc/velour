@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     'attic',
     'cartography',
     'oracle',
+    'hpc',
 ]
 
 MIDDLEWARE = [

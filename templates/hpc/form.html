@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} cluster — HPC — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .hpc-form { max-width: 720px; }
+    .hpc-form .field { margin-bottom: 1rem; }
+    .hpc-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .hpc-form input[type=text], .hpc-form input[type=number], .hpc-form select, .hpc-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .hpc-form textarea { min-height: 90px; font-family: inherit; }
+    .hpc-form .row { display: flex; gap: 0.75rem; }
+    .hpc-form .row .field { flex: 1 1 0; }
+    .hpc-form small { color: #6e7681; font-size: 0.72rem; display: block; margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} HPC cluster</h1>
+<form method="post" class="hpc-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="nickname">Nickname</label>
+        <input type="text" id="nickname" name="nickname" value="{{ cluster.nickname }}" required maxlength="100" placeholder="Leiden Alice">
+        <small>Human-friendly name you use in conversation.</small>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label for="hostname">Hostname</label>
+            <input type="text" id="hostname" name="hostname" value="{{ cluster.hostname }}" required maxlength="253" placeholder="alice.leidenuniv.nl">
+        </div>
+        <div class="field" style="flex: 0 0 100px;">
+            <label for="ssh_port">SSH port</label>
+            <input type="number" id="ssh_port" name="ssh_port" value="{{ cluster.ssh_port|default:22 }}" min="1" max="65535">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label for="ssh_user">SSH user</label>
+            <input type="text" id="ssh_user" name="ssh_user" value="{{ cluster.ssh_user }}" maxlength="64">
+            <small>Leave blank to use ~/.ssh/config.</small>
+        </div>
+        <div class="field">
+            <label for="scheduler">Scheduler</label>
+            <select id="scheduler" name="scheduler">
+                {% for value, label in scheduler_choices %}
+                <option value="{{ value }}"{% if cluster.scheduler == value %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label for="institution">Institution</label>
+            <input type="text" id="institution" name="institution" value="{{ cluster.institution }}" maxlength="200" placeholder="Leiden University">
+        </div>
+        <div class="field">
+            <label for="grant_code">Grant / allocation code</label>
+            <input type="text" id="grant_code" name="grant_code" value="{{ cluster.grant_code }}" maxlength="100" placeholder="NWO-EW.2026.1234">
+        </div>
+    </div>
+
+    <div class="field">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="What kinds of jobs you run here.">{{ cluster.description }}</textarea>
+    </div>
+
+    <div class="field">
+        <label for="notes">Operator notes</label>
+        <textarea id="notes" name="notes" placeholder="Quirks, login steps, module loads, lessons learned.">{{ cluster.notes }}</textarea>
+    </div>
+
+    <div class="field">
+        <label>
+            <input type="checkbox" name="is_active" value="1" {% if cluster.is_active or not cluster.pk %}checked{% endif %}>
+            Active (uncheck to archive without deleting)
+        </label>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'hpc:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

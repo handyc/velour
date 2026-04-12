@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}HPC — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .hpc-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    .hpc-table th, .hpc-table td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; font-size: 0.875rem; }
+    .hpc-table th { color: #8b949e; font-weight: 500; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+    .hpc-table .name { font-weight: 600; color: #c9d1d9; }
+    .hpc-table .host { color: #58a6ff; font-family: ui-monospace, Menlo, monospace; font-size: 0.8125rem; }
+    .hpc-table .scheduler { color: #8b949e; font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem; }
+    .hpc-table .institution { color: #6e7681; font-size: 0.78rem; }
+    .hpc-table tr.inactive { opacity: 0.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>HPC clusters</h1>
+<p style="color:#8b949e;">High-performance computing clusters this lab has access to. Phase 1 is a registry — a place to catalog cluster identities, SSH endpoints, scheduler types, and operator notes. Remote job submission and queue monitoring are planned for phase 2.</p>
+
+<div style="margin: 0.75rem 0; display: flex; gap: 0.5rem; align-items: center;">
+    <a href="{% url 'hpc:add' %}" class="btn">Add Cluster</a>
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+    <span style="color:#6e7681;font-size:0.8rem;margin-left:0.5rem;">{{ active_count }} active / {{ total_count }} total</span>
+</div>
+
+{% if clusters %}
+<table class="hpc-table card">
+    <thead>
+        <tr>
+            <th>Nickname</th>
+            <th>Host</th>
+            <th>Scheduler</th>
+            <th>Institution</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in clusters %}
+        <tr class="{% if not c.is_active %}inactive{% endif %}">
+            <td class="name">
+                <a href="{% url 'hpc:detail' c.slug %}" style="color: #c9d1d9; text-decoration: none;">{{ c.nickname }}</a>
+            </td>
+            <td class="host">{{ c.hostname }}{% if c.ssh_port != 22 %}:{{ c.ssh_port }}{% endif %}</td>
+            <td class="scheduler">{{ c.get_scheduler_display }}</td>
+            <td class="institution">{{ c.institution|default:"—" }}</td>
+            <td>
+                <a href="{% url 'hpc:edit' c.slug %}" style="font-size: 0.8125rem;">edit</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No HPC clusters registered yet. <a href="{% url 'hpc:add' %}">Add one</a> to catalog a cluster you have SSH access to.</p>
+{% endif %}
+{% endblock %}
