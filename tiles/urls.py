@@ -13,4 +13,5 @@ urlpatterns = [
     path('<slug:slug>/generate/',       views.tileset_generate,      name='generate'),
     path('<slug:slug>/save-generated/',       views.tileset_save_generated,       name='save_generated'),
     path('<slug:slug>/generate-complete-hex/', views.tileset_generate_complete_hex, name='generate_complete_hex'),
+    path('<slug:slug>/render-artwork/',       views.tileset_render_artwork,       name='render_artwork'),
 ]

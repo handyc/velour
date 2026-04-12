@@ -271,6 +271,22 @@ def generate_tileset_from_identity(force_name=None,
                 sort_order=i,
             )
 
+    # Render the tileset as a large tiling artwork and save to Attic.
+    # This is the visual portrait: Identity's state made visible as
+    # a formal arrangement of colored constraints.
+    try:
+        from .tile_artwork import generate_artwork_from_tileset
+        artwork = generate_artwork_from_tileset(
+            tileset, mood=mood, mood_intensity=identity.mood_intensity)
+        if artwork:
+            meta = tileset.source_metadata or {}
+            meta['artwork_slug'] = artwork.slug
+            meta['artwork_title'] = artwork.title
+            tileset.source_metadata = meta
+            tileset.save(update_fields=['source_metadata'])
+    except Exception:
+        pass  # artwork failure should not break tileset creation
+
     # Bounce: if this tileset was NOT caused by a meditation, it
     # spawns exactly one short meditation about itself. That
     # meditation will not spawn a tileset in return (because it

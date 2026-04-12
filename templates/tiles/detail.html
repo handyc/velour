@@ -96,6 +96,16 @@
 </div>
 {% endif %}
 
+{% if artwork %}
+<h2 style="margin-top: 1.75rem; font-size: 1rem;">Rendered artwork</h2>
+<p style="color: #8b949e; font-size: 0.85rem;">{{ artwork.caption }}</p>
+<a href="{{ artwork.file.url }}">
+    <img src="{% if artwork.thumbnail %}{{ artwork.thumbnail.url }}{% else %}{{ artwork.file.url }}{% endif %}"
+         alt="{{ artwork.alt_text }}"
+         style="max-width: 480px; border: 1px solid #30363d; border-radius: 6px; image-rendering: pixelated;">
+</a>
+{% endif %}
+
 {% if tileset.notes %}
 <h2 style="margin-top: 1.5rem; font-size: 1rem;">Notes</h2>
 <div class="card" style="white-space: pre-wrap;">{{ tileset.notes }}</div>
@@ -109,6 +119,12 @@
     </form>
     {% endif %}
     {% if tiles %}<a href="{% url 'tiles:generate' tileset.slug %}" class="btn">Generate Large Tiling</a>{% endif %}
+    {% if tiles %}
+    <form method="post" action="{% url 'tiles:render_artwork' tileset.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn">Render Artwork</button>
+    </form>
+    {% endif %}
     <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;" onsubmit="return confirm('Delete {{ tileset.name }}?');">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>

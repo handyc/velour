@@ -35,11 +35,20 @@ def tileset_detail(request, slug):
     except Exception:
         pass
 
+    # Check if there's a rendered artwork in the Attic
+    artwork = None
+    try:
+        from attic.models import MediaItem
+        artwork = MediaItem.objects.filter(slug=f'artwork-{tileset.slug}').first()
+    except Exception:
+        pass
+
     return render(request, 'tiles/detail.html', {
         'tileset':            tileset,
         'tiles':              tiles,
         'greedy':             greedy,
         'identity_reflection': identity_reflection,
+        'artwork':            artwork,
     })
 
 
@@ -189,6 +198,28 @@ def tileset_generate_complete_hex(request, slug):
         count += 1
 
     messages.success(request, f'Generated {count} tiles (complete 2-color hex set).')
+    return redirect('tiles:detail', slug=slug)
+
+
+@login_required
+@require_POST
+def tileset_render_artwork(request, slug):
+    """Render a tileset as a PNG artwork and save to Attic."""
+    tileset = get_object_or_404(TileSet, slug=slug)
+    try:
+        from identity.tile_artwork import generate_artwork_from_tileset
+        from identity.models import Identity
+        identity = Identity.get_self()
+        item = generate_artwork_from_tileset(
+            tileset, mood=identity.mood,
+            mood_intensity=identity.mood_intensity)
+        if item:
+            messages.success(request,
+                f'Rendered artwork "{item.title}" ({item.size_bytes} bytes).')
+        else:
+            messages.error(request, 'No tiles to render.')
+    except Exception as e:
+        messages.error(request, f'Artwork render failed: {e}')
     return redirect('tiles:detail', slug=slug)
 
 
