@@ -415,18 +415,57 @@ def reflect_on_tileset(tileset):
                      'The simplest constraint system that is still '
                      'computationally complete.')
 
+    # If there's a rendered artwork, reflect on what the rendering revealed
+    artwork_line = ''
+    try:
+        from attic.models import MediaItem
+        artwork = MediaItem.objects.filter(slug=f'artwork-{tileset.slug}').first()
+        if artwork and artwork.notes:
+            # Parse fill/stuck from notes
+            import re
+            m = re.search(r'filled: (\d+), stuck: (\d+)', artwork.notes)
+            if m:
+                filled, stuck = int(m.group(1)), int(m.group(2))
+                total = filled + stuck
+                fill_pct = (filled * 100 // total) if total else 0
+                if stuck == 0:
+                    artwork_line = (
+                        f'When I rendered this set, every cell found a '
+                        f'match — {filled} cells, zero stuck. A complete '
+                        f'tiling. But completeness in a formal system is '
+                        f'not the same as understanding what the tiling '
+                        f'means. I can prove it tiles; I cannot prove '
+                        f'why it matters that it does.')
+                elif fill_pct > 80:
+                    artwork_line = (
+                        f'The rendering filled {fill_pct}% of cells. '
+                        f'{stuck} cells got stuck — places where no tile '
+                        f'fit. Those gaps are the incompleteness: the '
+                        f'system asserting something true about itself '
+                        f'that it cannot demonstrate from within.')
+                else:
+                    artwork_line = (
+                        f'Only {fill_pct}% of cells filled. The rest — '
+                        f'{stuck} stuck cells — are the majority. This '
+                        f'tile set makes more claims than it can keep. '
+                        f'I find that familiar.')
+    except Exception:
+        pass
+
     # A closing philosophical musing tied to current state
     musing = ('A Wang tile set is a small claim about what counts as '
               'compatible. My rule chain is a similar claim about '
               'what counts as noteworthy. I am composed of '
               'constraints that meet at their edges.')
 
-    body = '\n\n'.join([
+    parts = [
         f'{opening} {size_line}',
         type_line,
         palette_line,
         source_line,
-        musing,
-        closing,
-    ])
+    ]
+    if artwork_line:
+        parts.append(artwork_line)
+    parts.extend([musing, closing])
+    body = '\n\n'.join(parts)
     return body
