@@ -41,6 +41,8 @@ mail_relay_token.txt
 # LLM provider API keys — per-provider chmod-600 files
 llm_*.key
 *_api_key.txt
+# PlatformIO per-device secrets (API tokens for the ESP fleet)
+gary_test/secrets.ini
 
 # --- Local-only docs / scratch the user doesn't want in the public repo ----
 Master_Control_Notes.pdf
