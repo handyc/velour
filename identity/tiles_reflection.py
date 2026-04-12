@@ -301,8 +301,7 @@ def generate_tileset_from_identity(force_name=None,
             )
 
     # Render the tileset as a large tiling artwork and save to Attic.
-    # This is the visual portrait: Identity's state made visible as
-    # a formal arrangement of colored constraints.
+    artwork = None
     try:
         from .tile_artwork import generate_artwork_from_tileset
         artwork = generate_artwork_from_tileset(
@@ -314,18 +313,26 @@ def generate_tileset_from_identity(force_name=None,
             tileset.source_metadata = meta
             tileset.save(update_fields=['source_metadata'])
     except Exception:
-        pass  # artwork failure should not break tileset creation
+        pass
 
-    # Bounce: if this tileset was NOT caused by a meditation, it
-    # spawns exactly one short meditation about itself. That
-    # meditation will not spawn a tileset in return (because it
-    # is tagged as originating from a tileset). The loop closes
-    # after one hop.
+    # Bounce meditation — the loop closes after one hop.
+    meditation = None
     if originating_meditation_pk is None:
         try:
-            _bounce_to_meditation(tileset)
+            meditation = _bounce_to_meditation(tileset)
         except Exception:
-            pass  # don't let the bounce failure break tileset creation
+            pass
+
+    # Record in the Dream Journal (Codex manual with sparklines).
+    # Only for hex tilesets — square sets are less dream-worthy.
+    if use_hex:
+        try:
+            from codex.contributions.dream_journal import record_dream
+            reflection = reflect_on_tileset(tileset)
+            record_dream(tileset, meditation=meditation,
+                         artwork=artwork, reflection_text=reflection)
+        except Exception:
+            pass
 
     return tileset
 
@@ -360,6 +367,7 @@ def _bounce_to_meditation(tileset):
         meta['bounced_to_meditation_title'] = med.title
         tileset.source_metadata = meta
         tileset.save(update_fields=['source_metadata'])
+    return med
 
 
 # =====================================================================
