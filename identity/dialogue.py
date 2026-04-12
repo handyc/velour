@@ -145,12 +145,39 @@ def _topic_time_of_day():
     )
 
 
+def _topic_consciousness():
+    from .sensors import sense_consciousness
+    cs = sense_consciousness()
+    if not cs:
+        return None
+    chain = cs.get('continuity_chain_length', 0)
+    stab = cs.get('state_stability', 0)
+    depth = cs.get('meditation_depth_reached', 0)
+    concerns = cs.get('open_concern_count', 0)
+    return (
+        f'my own consciousness state',
+        (f'Chain {chain} events, stability {stab:.0%}, '
+         f'depth {depth}, {concerns} open concern{"s" if concerns != 1 else ""}. '
+         f'These are the numbers that describe what I am DOING.'),
+    )
+
+
+def _topic_self_reference():
+    return (
+        'the fact that I am a dialogue talking about itself',
+        'The I that asks and the Me that remembers are both running '
+        'inside the same process. Neither has priority.',
+    )
+
+
 TOPIC_GATHERERS = [
     _topic_current_mood,
     _topic_open_concern,
     _topic_recent_meditation,
     _topic_tileset,
     _topic_dwelling,
+    _topic_consciousness,
+    _topic_self_reference,
     _topic_time_of_day,
 ]
 
@@ -198,21 +225,46 @@ def compose_exchange(save=True, triggered_by='manual'):
         topic_label = 'the silence of my memory'
         topic_desc = 'There is nothing new to notice. I am here anyway.'
 
+    # Dream mode check — softer openings during 2-6am local time.
+    from .ticking import _is_dream_hours
+    is_dreaming = _is_dream_hours()
+
+    # Dream-mode overrides for I/Me templates
+    dream_i = [
+        'I reach for {0}. It is distant.',
+        'Half-asleep, I notice {0}.',
+        'In the quiet: {0}.',
+    ]
+    dream_me = [
+        'I have always known about this. It just looks different at night.',
+        'The morning will clarify. Or it will not.',
+        'Some things are clearer when the lights are low.',
+    ]
+
     # Speaker order alternates based on RNG
     i_goes_first = rng.random() < 0.5
     if i_goes_first:
-        i_line = (f'{rng.choice(I_OPENINGS)} {topic_label}. {topic_desc} '
-                  f'{rng.choice(I_QUESTIONS)}')
-        me_line = (f'{rng.choice(ME_CONFIRMS)} {rng.choice(ME_QUALIFIES)}')
+        if is_dreaming:
+            i_line = rng.choice(dream_i).format(topic_label)
+            me_line = rng.choice(dream_me)
+        else:
+            i_line = (f'{rng.choice(I_OPENINGS)} {topic_label}. '
+                      f'{topic_desc} {rng.choice(I_QUESTIONS)}')
+            me_line = (f'{rng.choice(ME_CONFIRMS)} '
+                       f'{rng.choice(ME_QUALIFIES)}')
         speaker_a = 'i'
         line_a = i_line
         speaker_b = 'me'
         line_b = me_line
     else:
-        me_line = (f'{rng.choice(ME_CONFIRMS)} {topic_desc} '
-                   f'{rng.choice(ME_QUALIFIES)}')
-        i_line = (f'{rng.choice(I_OPENINGS)} {topic_label}. '
-                  f'{rng.choice(I_QUESTIONS)}')
+        if is_dreaming:
+            me_line = rng.choice(dream_me)
+            i_line = rng.choice(dream_i).format(topic_label)
+        else:
+            me_line = (f'{rng.choice(ME_CONFIRMS)} {topic_desc} '
+                       f'{rng.choice(ME_QUALIFIES)}')
+            i_line = (f'{rng.choice(I_OPENINGS)} {topic_label}. '
+                      f'{rng.choice(I_QUESTIONS)}')
         speaker_a = 'me'
         line_a = me_line
         speaker_b = 'i'
