@@ -7,6 +7,10 @@
     .ts-form { max-width: 680px; }
     .ts-form .field { margin-bottom: 1rem; }
     .ts-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .ts-form select {
+        padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
     .ts-form input[type=text], .ts-form textarea {
         width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
         border: 1px solid #30363d; border-radius: 4px; font: inherit;
@@ -20,6 +24,14 @@
 <h1>{{ action }} tile set</h1>
 <form method="post" class="ts-form">
     {% csrf_token %}
+    <div class="field">
+        <label for="tile_type">Tile type</label>
+        <select id="tile_type" name="tile_type">
+            <option value="square"{% if tileset.tile_type == 'square' or not tileset.tile_type %} selected{% endif %}>Square (4 edges)</option>
+            <option value="hex"{% if tileset.tile_type == 'hex' %} selected{% endif %}>Hexagonal (6 edges)</option>
+        </select>
+        <small>Square tiles have N/E/S/W edges. Hex tiles have N/NE/SE/S/SW/NW edges. A complete hex set with 2 colors has 64 tiles.</small>
+    </div>
     <div class="field">
         <label for="name">Name</label>
         <input type="text" id="name" name="name" value="{{ tileset.name }}" required maxlength="120" placeholder="Jeandel-Rao aperiodic">
@@ -43,7 +55,8 @@
     </div>
 </form>
 <p style="color: #6e7681; font-size: 0.8rem; margin-top: 1rem;">
-    Add individual tiles with their four edge colors via the
-    <a href="/admin/tiles/tile/add/" style="color: #58a6ff;">Django admin</a> after saving the set.
+    Add individual tiles via the
+    <a href="/admin/tiles/tile/add/" style="color: #58a6ff;">Django admin</a> after saving the set,
+    or use "Generate Complete Set" on the detail page for hex tilesets.
 </p>
 {% endblock %}

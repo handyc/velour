@@ -55,6 +55,16 @@
         {% if ts.tiles.all %}
         <div class="tile-preview">
             {% for t in ts.tiles.all|slice:":12" %}
+            {% if ts.tile_type == 'hex' %}
+            <svg width="14" height="12" viewBox="0 0 100 87" xmlns="http://www.w3.org/2000/svg">
+                <polygon points="25,0 75,0 50,43.5" fill="{{ t.n_color }}"/>
+                <polygon points="75,0 100,43.5 50,43.5" fill="{{ t.ne_color }}"/>
+                <polygon points="100,43.5 75,87 50,43.5" fill="{{ t.se_color }}"/>
+                <polygon points="75,87 25,87 50,43.5" fill="{{ t.s_color }}"/>
+                <polygon points="25,87 0,43.5 50,43.5" fill="{{ t.sw_color }}"/>
+                <polygon points="0,43.5 25,0 50,43.5" fill="{{ t.nw_color }}"/>
+            </svg>
+            {% else %}
             <svg width="12" height="12" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
                 <rect x="0" y="0" width="56" height="56" fill="#161b22"/>
                 <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
@@ -62,6 +72,7 @@
                 <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
                 <polygon points="0,56 0,0 28,28" fill="{{ t.w_color }}"/>
             </svg>
+            {% endif %}
             {% endfor %}
         </div>
         {% endif %}

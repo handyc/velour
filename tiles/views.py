@@ -52,10 +52,12 @@ def tileset_add(request):
         notes = request.POST.get('notes', '').strip()
         palette_raw = request.POST.get('palette', '').strip()
         palette = [p.strip() for p in palette_raw.split(',') if p.strip()]
+        tile_type = request.POST.get('tile_type', 'square')
         if not name:
             messages.error(request, 'Name is required.')
         else:
             tileset.name = name
+            tileset.tile_type = tile_type if tile_type in ('square', 'hex') else 'square'
             tileset.description = description
             tileset.notes = notes
             tileset.palette = palette
@@ -81,14 +83,23 @@ def tileset_delete(request, slug):
 def tileset_generate(request, slug):
     tileset = get_object_or_404(TileSet, slug=slug)
     tiles = list(tileset.tiles.all())
-    tiles_json = json.dumps([
-        {'id': t.pk, 'name': t.name, 'n': t.n_color, 'e': t.e_color,
-         's': t.s_color, 'w': t.w_color}
-        for t in tiles
-    ])
+    if tileset.tile_type == 'hex':
+        tiles_json = json.dumps([
+            {'id': t.pk, 'name': t.name,
+             'n': t.n_color, 'ne': t.ne_color, 'se': t.se_color,
+             's': t.s_color, 'sw': t.sw_color, 'nw': t.nw_color}
+            for t in tiles
+        ])
+    else:
+        tiles_json = json.dumps([
+            {'id': t.pk, 'name': t.name, 'n': t.n_color, 'e': t.e_color,
+             's': t.s_color, 'w': t.w_color}
+            for t in tiles
+        ])
     return render(request, 'tiles/generate.html', {
         'tileset':    tileset,
         'tiles_json': tiles_json,
+        'tile_type':  tileset.tile_type,
     })
 
 
@@ -137,6 +148,48 @@ def tileset_save_generated(request, slug):
 
     messages.success(request, f'Created "{ts.name}" with {len(tiles_data)} unique tiles.')
     return redirect('tiles:detail', slug=ts.slug)
+
+
+@login_required
+@require_POST
+def tileset_generate_complete_hex(request, slug):
+    """Generate all 64 tiles for a complete 2-color hex Wang tileset."""
+    tileset = get_object_or_404(TileSet, slug=slug)
+    if tileset.tile_type != 'hex':
+        messages.error(request, 'Only hex tilesets can generate a complete set.')
+        return redirect('tiles:detail', slug=slug)
+
+    palette = tileset.palette
+    if len(palette) < 2:
+        messages.error(request, 'Need at least 2 colors in the palette.')
+        return redirect('tiles:detail', slug=slug)
+
+    c0, c1 = palette[0], palette[1]
+    colors = [c0, c1]
+
+    # Delete existing tiles to regenerate
+    tileset.tiles.all().delete()
+
+    # Generate all 2^6 = 64 combinations
+    count = 0
+    for bits in range(64):
+        n  = colors[(bits >> 5) & 1]
+        ne = colors[(bits >> 4) & 1]
+        se = colors[(bits >> 3) & 1]
+        s  = colors[(bits >> 2) & 1]
+        sw = colors[(bits >> 1) & 1]
+        nw = colors[bits & 1]
+        Tile.objects.create(
+            tileset=tileset,
+            name=f'H{count+1}',
+            n_color=n, ne_color=ne, se_color=se,
+            s_color=s, sw_color=sw, nw_color=nw,
+            sort_order=count,
+        )
+        count += 1
+
+    messages.success(request, f'Generated {count} tiles (complete 2-color hex set).')
+    return redirect('tiles:detail', slug=slug)
 
 
 def _greedy_tile_grid(tiles, width=6, height=4):

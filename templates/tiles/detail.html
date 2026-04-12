@@ -8,7 +8,7 @@
     .tile-box .label { font-size: 0.62rem; color: #6e7681; margin-top: 0.15rem; font-family: ui-monospace, Menlo, monospace; }
     .tile-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(48px, 48px));
+        grid-template-columns: repeat(auto-fill, minmax({% if tileset.tile_type == 'hex' %}52px{% else %}48px{% endif %}, max-content));
         gap: 0.4rem;
         margin-top: 1rem;
     }
@@ -23,6 +23,7 @@
 <h1 style="margin-bottom: 0.25rem;">{{ tileset.name }}</h1>
 <p style="color: #8b949e; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;">
     {{ tileset.slug }}
+    · {{ tileset.get_tile_type_display }}
     · {{ tileset.tile_count }} tile{{ tileset.tile_count|pluralize }}
     · source: {% if tileset.source == 'identity' %}<span style="color:#bc8cff;">Identity-generated</span>{% else %}{{ tileset.get_source_display }}{% endif %}
 </p>
@@ -43,6 +44,18 @@
 <div class="tile-grid">
     {% for t in tiles %}
     <div class="tile-box">
+        {% if tileset.tile_type == 'hex' %}
+        {# Flat-top hexagon: 6 triangles meeting at center. viewBox sized for pointy-top-like aspect. #}
+        <svg width="44" height="38" viewBox="0 0 100 87" xmlns="http://www.w3.org/2000/svg">
+            {# Hex vertices (flat-top): (25,0) (75,0) (100,43.5) (75,87) (25,87) (0,43.5) center=(50,43.5) #}
+            <polygon points="25,0 75,0 50,43.5" fill="{{ t.n_color }}"/>
+            <polygon points="75,0 100,43.5 50,43.5" fill="{{ t.ne_color }}"/>
+            <polygon points="100,43.5 75,87 50,43.5" fill="{{ t.se_color }}"/>
+            <polygon points="75,87 25,87 50,43.5" fill="{{ t.s_color }}"/>
+            <polygon points="25,87 0,43.5 50,43.5" fill="{{ t.sw_color }}"/>
+            <polygon points="0,43.5 25,0 50,43.5" fill="{{ t.nw_color }}"/>
+        </svg>
+        {% else %}
         <svg width="36" height="36" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
             <rect x="0" y="0" width="56" height="56" fill="#161b22" stroke="#30363d" stroke-width="1"/>
             <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
@@ -50,17 +63,20 @@
             <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
             <polygon points="0,56 0,0 28,28" fill="{{ t.w_color }}"/>
         </svg>
+        {% endif %}
         <div class="label">{{ t.name|default:t.pk }}</div>
     </div>
     {% endfor %}
 </div>
 {% else %}
-<p style="color: #6e7681;">No tiles yet. Add some in the admin.</p>
+<p style="color: #6e7681;">No tiles yet.
+{% if tileset.tile_type == 'hex' %}Use "Generate Complete Set" below or add tiles in the admin.{% else %}Add some in the admin.{% endif %}
+</p>
 {% endif %}
 
-{% if greedy %}
+{% if greedy and tileset.tile_type == 'square' %}
 <h2 style="margin-top: 1.75rem; font-size: 1rem;">Greedy tiling attempt (6×4)</h2>
-<p style="color: #8b949e; font-size: 0.85rem;">A greedy top-left tiling that picks the first matching candidate at each cell. Empty cells mean the greedy search got stuck — the tile set may still admit valid tilings via backtracking.</p>
+<p style="color: #8b949e; font-size: 0.85rem;">Greedy top-left placement. Empty cells = stuck.</p>
 <div class="tiling-grid" style="grid-template-columns: repeat({{ greedy.0|length }}, 36px);">
     {% for row in greedy %}
         {% for t in row %}
@@ -85,7 +101,13 @@
 <div class="card" style="white-space: pre-wrap;">{{ tileset.notes }}</div>
 {% endif %}
 
-<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+    {% if tileset.tile_type == 'hex' and tileset.palette|length >= 2 %}
+    <form method="post" action="{% url 'tiles:generate_complete_hex' tileset.slug %}" style="display:inline;" onsubmit="return confirm('This replaces all existing tiles with a complete 64-tile set. Continue?');">
+        {% csrf_token %}
+        <button type="submit" class="btn">Generate Complete Set (64 tiles)</button>
+    </form>
+    {% endif %}
     {% if tiles %}<a href="{% url 'tiles:generate' tileset.slug %}" class="btn">Generate Large Tiling</a>{% endif %}
     <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;" onsubmit="return confirm('Delete {{ tileset.name }}?');">
         {% csrf_token %}

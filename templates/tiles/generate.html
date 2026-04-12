@@ -53,8 +53,57 @@
 <script>
 (function() {
     var TILES = {{ tiles_json|safe }};
+    var TILE_TYPE = '{{ tile_type }}';
     var lastGrid = null;
     var lastW = 0, lastH = 0;
+
+    // ---- Hex drawing helpers (flat-top) ----
+    function hexCorners(cx, cy, size) {
+        var pts = [];
+        for (var i = 0; i < 6; i++) {
+            var angle = Math.PI / 3 * i;
+            pts.push([cx + size * Math.cos(angle), cy + size * Math.sin(angle)]);
+        }
+        return pts; // [E, NE, NW, W, SW, SE]
+    }
+    function hexCenter(r, c, size) {
+        var w = size * 2;
+        var h = Math.sqrt(3) * size;
+        var x = c * w * 0.75 + size;
+        var y = r * h + h / 2 + (c % 2 === 1 ? h / 2 : 0);
+        return [x, y];
+    }
+    function drawHexTri(ctx, cx, cy, pts, i0, i1, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(pts[i0][0], pts[i0][1]);
+        ctx.lineTo(pts[i1][0], pts[i1][1]);
+        ctx.lineTo(cx, cy);
+        ctx.closePath();
+        ctx.fill();
+    }
+    // Hex neighbor offsets for offset-column (flat-top, odd-column-down)
+    // Edge mapping: my edge → neighbor edge it must match
+    //   N  (pts 1-2) → neighbor's S
+    //   NE (pts 0-1) → neighbor's SW
+    //   SE (pts 5-0) → neighbor's NW
+    //   S  (pts 4-5) → neighbor's N
+    //   SW (pts 3-4) → neighbor's NE
+    //   NW (pts 2-3) → neighbor's SE
+    function hexNeighbor(r, c, dir) {
+        var even = (c % 2 === 0);
+        // Returns [nr, nc] or null if out of bounds
+        switch (dir) {
+            case 'n':  return [r - 1, c];
+            case 's':  return [r + 1, c];
+            case 'ne': return even ? [r - 1, c + 1] : [r, c + 1];
+            case 'se': return even ? [r, c + 1] : [r + 1, c + 1];
+            case 'sw': return even ? [r, c - 1] : [r + 1, c - 1];
+            case 'nw': return even ? [r - 1, c - 1] : [r, c - 1];
+        }
+        return null;
+    }
+    var HEX_OPPOSITE = {n:'s', ne:'sw', se:'nw', s:'n', sw:'ne', nw:'se'};
 
     function generate() {
         var gw = parseInt(document.getElementById('grid-w').value) || 16;
@@ -65,74 +114,134 @@
         px = Math.max(8, Math.min(80, px));
 
         var canvas = document.getElementById('tiling-canvas');
-        canvas.width = gw * px;
-        canvas.height = gh * px;
         var ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#0d1117';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         if (!TILES.length) {
             document.getElementById('gen-status').textContent = 'No tiles in this set.';
             return;
         }
 
-        // Build the grid with greedy placement
-        var grid = [];
-        var filled = 0, stuck = 0;
-        for (var r = 0; r < gh; r++) {
-            grid[r] = [];
-            for (var c = 0; c < gw; c++) {
-                var candidates = TILES.slice();
-                // Match west neighbor's east edge
-                if (c > 0 && grid[r][c-1]) {
-                    var leftE = grid[r][c-1].e;
-                    candidates = candidates.filter(function(t) { return t.w === leftE; });
-                }
-                // Match north neighbor's south edge
-                if (r > 0 && grid[r-1][c]) {
-                    var upS = grid[r-1][c].s;
-                    candidates = candidates.filter(function(t) { return t.n === upS; });
-                }
-                if (candidates.length === 0) {
-                    grid[r][c] = null;
-                    stuck++;
-                } else {
-                    grid[r][c] = candidates[Math.floor(Math.random() * candidates.length)];
-                    filled++;
+        if (TILE_TYPE === 'hex') {
+            // Hex grid: flat-top, offset columns
+            var size = px / 2;
+            var hexW = size * 2;
+            var hexH = Math.sqrt(3) * size;
+            canvas.width = Math.ceil(gw * hexW * 0.75 + size * 0.5);
+            canvas.height = Math.ceil(gh * hexH + hexH / 2 + 1);
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            var grid = [];
+            var filled = 0, stuck = 0;
+            for (var r = 0; r < gh; r++) {
+                grid[r] = [];
+                for (var c = 0; c < gw; c++) {
+                    var candidates = TILES.slice();
+                    // Check each of the 6 directions for placed neighbors
+                    var dirs = ['n', 'ne', 'se', 's', 'sw', 'nw'];
+                    for (var d = 0; d < dirs.length; d++) {
+                        var dir = dirs[d];
+                        var nb = hexNeighbor(r, c, dir);
+                        if (nb && nb[0] >= 0 && nb[0] < gh && nb[1] >= 0 && nb[1] < gw) {
+                            var nbTile = grid[nb[0]] && grid[nb[0]][nb[1]];
+                            if (nbTile) {
+                                var opp = HEX_OPPOSITE[dir];
+                                candidates = candidates.filter(function(t) {
+                                    return t[dir] === nbTile[opp];
+                                });
+                            }
+                        }
+                    }
+                    if (candidates.length === 0) {
+                        grid[r][c] = null;
+                        stuck++;
+                    } else {
+                        grid[r][c] = candidates[Math.floor(Math.random() * candidates.length)];
+                        filled++;
+                    }
                 }
             }
-        }
 
-        // Draw
-        var half = px / 2;
-        for (var r = 0; r < gh; r++) {
-            for (var c = 0; c < gw; c++) {
-                var t = grid[r][c];
-                if (!t) continue;
-                var x = c * px, y = r * px;
-                var cx = x + half, cy = y + half;
-                // North triangle
-                ctx.fillStyle = t.n;
-                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
-                // East triangle
-                ctx.fillStyle = t.e;
-                ctx.beginPath(); ctx.moveTo(x + px, y); ctx.lineTo(x + px, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
-                // South triangle
-                ctx.fillStyle = t.s;
-                ctx.beginPath(); ctx.moveTo(x + px, y + px); ctx.lineTo(x, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
-                // West triangle
-                ctx.fillStyle = t.w;
-                ctx.beginPath(); ctx.moveTo(x, y + px); ctx.lineTo(x, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+            // Draw hex tiles
+            for (var r = 0; r < gh; r++) {
+                for (var c = 0; c < gw; c++) {
+                    var t = grid[r][c];
+                    if (!t) continue;
+                    var ctr = hexCenter(r, c, size);
+                    var cx = ctr[0], cy = ctr[1];
+                    var pts = hexCorners(cx, cy, size);
+                    // pts: [E(0), NE(1), NW(2), W(3), SW(4), SE(5)]
+                    // Edge triangles: each edge is 2 adjacent corners → center
+                    drawHexTri(ctx, cx, cy, pts, 1, 2, t.n);   // N: NE→NW
+                    drawHexTri(ctx, cx, cy, pts, 0, 1, t.ne);  // NE: E→NE
+                    drawHexTri(ctx, cx, cy, pts, 5, 0, t.se);  // SE: SE→E
+                    drawHexTri(ctx, cx, cy, pts, 4, 5, t.s);   // S: SW→SE
+                    drawHexTri(ctx, cx, cy, pts, 3, 4, t.sw);  // SW: W→SW
+                    drawHexTri(ctx, cx, cy, pts, 2, 3, t.nw);  // NW: NW→W
+                }
             }
+
+            lastGrid = grid;
+            lastW = gw; lastH = gh;
+            document.getElementById('gen-status').textContent =
+                gw + ' x ' + gh + ' = ' + (gw*gh) + ' hex cells. ' +
+                filled + ' filled, ' + stuck + ' stuck.';
+
+        } else {
+            // Square grid (original logic)
+            canvas.width = gw * px;
+            canvas.height = gh * px;
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            var grid = [];
+            var filled = 0, stuck = 0;
+            for (var r = 0; r < gh; r++) {
+                grid[r] = [];
+                for (var c = 0; c < gw; c++) {
+                    var candidates = TILES.slice();
+                    if (c > 0 && grid[r][c-1]) {
+                        var leftE = grid[r][c-1].e;
+                        candidates = candidates.filter(function(t) { return t.w === leftE; });
+                    }
+                    if (r > 0 && grid[r-1][c]) {
+                        var upS = grid[r-1][c].s;
+                        candidates = candidates.filter(function(t) { return t.n === upS; });
+                    }
+                    if (candidates.length === 0) {
+                        grid[r][c] = null;
+                        stuck++;
+                    } else {
+                        grid[r][c] = candidates[Math.floor(Math.random() * candidates.length)];
+                        filled++;
+                    }
+                }
+            }
+
+            var half = px / 2;
+            for (var r = 0; r < gh; r++) {
+                for (var c = 0; c < gw; c++) {
+                    var t = grid[r][c];
+                    if (!t) continue;
+                    var x = c * px, y = r * px;
+                    var cx = x + half, cy = y + half;
+                    ctx.fillStyle = t.n;
+                    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = t.e;
+                    ctx.beginPath(); ctx.moveTo(x + px, y); ctx.lineTo(x + px, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = t.s;
+                    ctx.beginPath(); ctx.moveTo(x + px, y + px); ctx.lineTo(x, y + px); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle = t.w;
+                    ctx.beginPath(); ctx.moveTo(x, y + px); ctx.lineTo(x, y); ctx.lineTo(cx, cy); ctx.closePath(); ctx.fill();
+                }
+            }
+
+            lastGrid = grid;
+            lastW = gw; lastH = gh;
+            document.getElementById('gen-status').textContent =
+                gw + ' x ' + gh + ' = ' + (gw*gh) + ' cells. ' +
+                filled + ' filled, ' + stuck + ' stuck.';
         }
-
-        lastGrid = grid;
-        lastW = gw;
-        lastH = gh;
-
-        document.getElementById('gen-status').textContent =
-            gw + ' x ' + gh + ' = ' + (gw*gh) + ' cells. ' +
-            filled + ' filled, ' + stuck + ' stuck.';
     }
 
     document.getElementById('btn-generate').addEventListener('click', generate);
