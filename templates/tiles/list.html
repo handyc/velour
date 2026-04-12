@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Tiles — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+    .ts-card {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #bc8cff;
+        border-radius: 6px; padding: 1rem 1.25rem;
+    }
+    .ts-card h3 {
+        font-size: 1rem; margin: 0 0 0.25rem;
+        color: #c9d1d9; font-weight: 500;
+    }
+    .ts-card h3 a { color: #c9d1d9; text-decoration: none; }
+    .ts-card .meta { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; font-family: ui-monospace, Menlo, monospace; }
+    .ts-card .desc { color: #8b949e; font-size: 0.82rem; line-height: 1.5; }
+    .ts-card .palette { margin-top: 0.75rem; display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .ts-card .swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #30363d; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Tiles</h1>
+<p style="color: #8b949e;">Wang tile sets — square tiles with colored edges that must match when placed adjacent. Hao Wang (1961). Famous for aperiodic tile sets and Turing-completeness. Phase 1 is a catalog + SVG renderer + greedy tiling attempt. Phase 2 will connect the tile substrate to Identity as a basis for germs of ideas.</p>
+
+<div style="margin: 0.75rem 0; display: flex; gap: 0.5rem; align-items: center;">
+    <a href="{% url 'tiles:add' %}" class="btn">Add Tile Set</a>
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+    <span style="color:#6e7681;font-size:0.8rem;margin-left:0.5rem;">{{ total_count }} sets · {{ total_tiles }} tiles total</span>
+</div>
+
+{% if tilesets %}
+<div class="ts-grid">
+    {% for ts in tilesets %}
+    <div class="ts-card">
+        <h3><a href="{% url 'tiles:detail' ts.slug %}">{{ ts.name }}</a></h3>
+        <div class="meta">{{ ts.slug }} · {{ ts.tile_count }} tile{{ ts.tile_count|pluralize }}</div>
+        {% if ts.description %}<div class="desc">{{ ts.description }}</div>{% endif %}
+        {% if ts.palette %}
+        <div class="palette">
+            {% for c in ts.palette %}
+            <span class="swatch" style="background: {{ c }};" title="{{ c }}"></span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No tile sets yet. <a href="{% url 'tiles:add' %}">Add one</a>.</p>
+{% endif %}
+{% endblock %}

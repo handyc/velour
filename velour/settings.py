@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'cartography',
     'oracle',
     'hpc',
+    'tiles',
 ]
 
 MIDDLEWARE = [

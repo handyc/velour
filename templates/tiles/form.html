@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}{{ action }} tile set — Tiles — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ts-form { max-width: 680px; }
+    .ts-form .field { margin-bottom: 1rem; }
+    .ts-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .ts-form input[type=text], .ts-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .ts-form textarea { min-height: 80px; }
+    .ts-form small { color: #6e7681; font-size: 0.72rem; display: block; margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ action }} tile set</h1>
+<form method="post" class="ts-form">
+    {% csrf_token %}
+    <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{ tileset.name }}" required maxlength="120" placeholder="Jeandel-Rao aperiodic">
+    </div>
+    <div class="field">
+        <label for="description">Description</label>
+        <textarea id="description" name="description" placeholder="What this tile set is for.">{{ tileset.description }}</textarea>
+    </div>
+    <div class="field">
+        <label for="palette">Palette (comma-separated)</label>
+        <input type="text" id="palette" name="palette" value="{{ tileset.palette|join:', ' }}" placeholder="#58a6ff, #3fb950, #f85149, #d29922">
+        <small>Hex codes or CSS color names. Purely documentary — the edge colors on individual Tiles are the actual constraint.</small>
+    </div>
+    <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" placeholder="Provenance, references, anything the operator wants to record.">{{ tileset.notes }}</textarea>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+        <button type="submit" class="btn">Save</button>
+        <a href="{% url 'tiles:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+<p style="color: #6e7681; font-size: 0.8rem; margin-top: 1rem;">
+    Add individual tiles with their four edge colors via the
+    <a href="/admin/tiles/tile/add/" style="color: #58a6ff;">Django admin</a> after saving the set.
+</p>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tileset.name }} — Tiles — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Each tile is a 56px square with colored triangles on each of
+       the four edges — the classical Wang visualization. Pure SVG,
+       no image assets. */
+    .tile-box { display: inline-block; text-align: center; }
+    .tile-box .label { font-size: 0.7rem; color: #6e7681; margin-top: 0.25rem; font-family: ui-monospace, Menlo, monospace; }
+    .tile-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(72px, 72px));
+        gap: 0.75rem;
+        margin-top: 1rem;
+    }
+
+    .tiling-grid { display: grid; gap: 0; margin-top: 1rem; }
+    .tiling-grid svg { display: block; }
+    .tiling-empty { width: 56px; height: 56px; background: #0d1117; border: 1px dashed #30363d; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="margin-bottom: 0.25rem;">{{ tileset.name }}</h1>
+<p style="color: #8b949e; font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;">{{ tileset.slug }} · {{ tileset.tile_count }} tile{{ tileset.tile_count|pluralize }}</p>
+
+{% if tileset.description %}
+<p style="color: #c9d1d9; max-width: 680px; line-height: 1.6;">{{ tileset.description }}</p>
+{% endif %}
+
+<h2 style="margin-top: 1.5rem; font-size: 1rem;">The tile set</h2>
+{% if tiles %}
+<div class="tile-grid">
+    {% for t in tiles %}
+    <div class="tile-box">
+        <svg width="56" height="56" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+            <!-- Background -->
+            <rect x="0" y="0" width="56" height="56" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+            <!-- Four colored triangles meeting at the center. The
+                 classical Wang visualization. -->
+            <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
+            <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>
+            <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
+            <polygon points="0,56 0,0 28,28" fill="{{ t.w_color }}"/>
+        </svg>
+        <div class="label">{{ t.name|default:t.pk }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color: #6e7681;">No tiles yet. Add some in the admin.</p>
+{% endif %}
+
+{% if greedy %}
+<h2 style="margin-top: 1.75rem; font-size: 1rem;">Greedy tiling attempt (6×4)</h2>
+<p style="color: #8b949e; font-size: 0.85rem;">A greedy top-left tiling that picks the first matching candidate at each cell. Empty cells mean the greedy search got stuck — the tile set may still admit valid tilings via backtracking.</p>
+<div class="tiling-grid" style="grid-template-columns: repeat({{ greedy.0|length }}, 56px);">
+    {% for row in greedy %}
+        {% for t in row %}
+            {% if t %}
+            <svg width="56" height="56" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0" y="0" width="56" height="56" fill="#161b22"/>
+                <polygon points="0,0 56,0 28,28" fill="{{ t.n_color }}"/>
+                <polygon points="56,0 56,56 28,28" fill="{{ t.e_color }}"/>
+                <polygon points="56,56 0,56 28,28" fill="{{ t.s_color }}"/>
+                <polygon points="0,56 0,0 28,28" fill="{{ t.w_color }}"/>
+            </svg>
+            {% else %}
+            <div class="tiling-empty"></div>
+            {% endif %}
+        {% endfor %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if tileset.notes %}
+<h2 style="margin-top: 1.5rem; font-size: 1rem;">Notes</h2>
+<div class="card" style="white-space: pre-wrap;">{{ tileset.notes }}</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+    <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;" onsubmit="return confirm('Delete {{ tileset.name }}?');">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary">Delete</button>
+    </form>
+    <a href="{% url 'tiles:list' %}" class="btn btn-secondary">Back to Tiles</a>
+</div>
+{% endblock %}
