@@ -609,6 +609,29 @@ def identity_document_regenerate(request):
 
 
 @login_required
+def rumination_json(request):
+    """Low-cost JSON endpoint for the continuous rumination stream.
+
+    Called by the Identity home page's requestIdleCallback loop.
+    Returns one composed observation (or an empty-payload response
+    if nothing can be composed). Does not touch any model writes;
+    the composer reads only.
+
+    Silently returns an empty response if the operator has disabled
+    the rumination_stream_enabled toggle — the frontend then backs
+    off and stops polling on its own."""
+    toggles = IdentityToggles.get_self()
+    if not toggles.rumination_stream_enabled:
+        return JsonResponse({'enabled': False})
+    from .rumination import compose_rumination
+    payload = compose_rumination()
+    if payload is None:
+        return JsonResponse({'enabled': True, 'text': None})
+    payload['enabled'] = True
+    return JsonResponse(payload)
+
+
+@login_required
 @require_POST
 def toggles_update(request):
     """Operator toggles Identity's major pipelines on/off. Each
@@ -621,6 +644,7 @@ def toggles_update(request):
         'concerns_enabled', 'oracle_enabled', 'codex_push_enabled',
         'topbar_pulse_enabled', 'recursive_introspection_enabled',
         'observer_enabled', 'llm_chat_enabled',
+        'rumination_stream_enabled',
     ]
     # Tile generation frequency slider — integer 0-8
     try:

@@ -22,6 +22,7 @@ urlpatterns = [
     path('meditations/compose/', views.meditation_compose, name='meditation_compose'),
     path('cron/run-now/', views.cron_run_now, name='cron_run_now'),
     path('toggles/', views.toggles_update, name='toggles_update'),
+    path('ruminate.json', views.rumination_json, name='rumination_json'),
     path('document/', views.identity_document, name='identity_document'),
     path('document/regenerate/', views.identity_document_regenerate,
          name='identity_document_regenerate'),

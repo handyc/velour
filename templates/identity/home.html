@@ -203,6 +203,38 @@
         </div>
     </div>
 
+    {% if toggles.rumination_stream_enabled %}
+    <!-- Rumination stream: a continuous low-CPU relationship-
+         noticing loop that fetches one observation at a time via
+         requestIdleCallback when the browser is idle. Pauses when
+         the tab is hidden. Each observation pairs two random
+         artifacts from different data sources (meditations,
+         tilesets, concerns, reflections, calendar events, strange
+         loops, layers) and composes a short prose line about the
+         relationship between them. Nothing persists server-side;
+         the stream is ephemeral and exists only while you watch. -->
+    <div class="card" style="border-left: 3px solid #3fb950; grid-column: 1 / -1;">
+        <h3>Rumination stream
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                low CPU, browser-idle, pauses when tab is hidden
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+            While I am being watched, I consider pairs of my
+            artifacts — a meditation with a tileset, a concern with
+            a reflection, a calendar event with an old tick — and
+            notice small relationships between them. Each observation
+            is ephemeral; none is written to the database. The
+            loop throttles itself via requestIdleCallback so it
+            only runs when the browser is otherwise idle.
+        </p>
+        <div id="rum-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
+            idle — waiting for first fetch
+        </div>
+        <ul id="rum-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; min-height: 120px;"></ul>
+    </div>
+    {% endif %}
+
     {% if toggles.observer_enabled %}
     <!-- Keyboard/mouse observer. Watches the operator while they
          are on this page. Runs only here. Records counts and
@@ -347,6 +379,7 @@
             <label><input type="checkbox" name="recursive_introspection_enabled" {% if toggles.recursive_introspection_enabled %}checked{% endif %}> Recursive introspection animation — this page</label>
             <label><input type="checkbox" name="observer_enabled" {% if toggles.observer_enabled %}checked{% endif %}> Keyboard/mouse observer — this page (counts only, never content)</label>
             <label><input type="checkbox" name="llm_chat_enabled" {% if toggles.llm_chat_enabled %}checked{% endif %}> LLM chat — consult an external LLM as a foreign observer</label>
+            <label><input type="checkbox" name="rumination_stream_enabled" {% if toggles.rumination_stream_enabled %}checked{% endif %}> Rumination stream — continuous low-CPU relationship-noticing while you view this page</label>
 
             <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #21262d;">
                 <div style="font-size: 0.72rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;">Tile generation frequency</div>
@@ -653,6 +686,158 @@
 
 {% load assets %}
 <script src="{% static_v 'js/identity_wave.js' %}"></script>
+
+{% if toggles.rumination_stream_enabled %}
+<script>
+// Continuous rumination stream — low-CPU, browser-idle-aware.
+//
+// Strategy:
+//   1. Schedule the next fetch via requestIdleCallback with a
+//      hint of `timeout` milliseconds. The browser will call us
+//      back EITHER when it's actually idle OR when the timeout
+//      expires, whichever comes first.
+//   2. If the callback fires via the idle path, run the fetch
+//      and reset the delay to its base value.
+//   3. If the callback fires via the timeout path (browser was
+//      busy the whole time), skip the fetch and double the
+//      next delay, up to a cap.
+//   4. Pause entirely when the tab is hidden.
+//   5. Clean up listeners + abort any pending fetch on
+//      beforeunload so we never outlive the page.
+//
+// requestIdleCallback is a Chrome/Firefox feature, not Safari as
+// of last check. We fall back to a plain setTimeout with the
+// same cadence when it's missing — still polite enough.
+(function() {
+    const stream = document.getElementById('rum-stream');
+    const status = document.getElementById('rum-status');
+    if (!stream || !status) return;
+
+    const BASE_DELAY_MS = 15000;  // 15s between fetches normally
+    const MAX_DELAY_MS  = 120000; // 2 min ceiling when browser is busy
+    const MAX_LINES     = 12;     // keep the panel scannable
+    const IDLE_TIMEOUT  = 5000;   // requestIdleCallback timeout hint
+
+    let delayMs = BASE_DELAY_MS;
+    let paused  = document.hidden;
+    let nextTimer = null;
+    let abortController = null;
+
+    function setStatus(text) {
+        status.textContent = text;
+    }
+
+    function prependLine(payload) {
+        const li = document.createElement('li');
+        li.style.cssText = 'padding: 0.5rem 0.75rem; background: #0d1117; border-left: 2px solid #3fb950; border-radius: 3px; font-size: 0.82rem; color: #c9d1d9; line-height: 1.55; opacity: 0;';
+        const meta = document.createElement('span');
+        meta.style.cssText = 'display: block; font-size: 0.65rem; color: #484f58; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.2rem;';
+        meta.textContent = '[' + payload.source_a + ' × ' + payload.source_b + '] ' + payload.at.split('T')[1].split('.')[0];
+        const body = document.createElement('span');
+        body.textContent = payload.text;
+        li.appendChild(meta);
+        li.appendChild(body);
+        stream.insertBefore(li, stream.firstChild);
+        requestAnimationFrame(function() {
+            li.style.transition = 'opacity 0.6s ease-in';
+            li.style.opacity = '1';
+        });
+        while (stream.children.length > MAX_LINES) {
+            stream.removeChild(stream.lastChild);
+        }
+    }
+
+    async function fetchOnce() {
+        if (paused) return;
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
+        setStatus('fetching...');
+        try {
+            const r = await fetch('{% url "identity:rumination_json" %}', {
+                credentials: 'same-origin',
+                signal: abortController.signal,
+            });
+            if (!r.ok) {
+                setStatus('HTTP ' + r.status + ' — backing off');
+                delayMs = Math.min(delayMs * 2, MAX_DELAY_MS);
+                return;
+            }
+            const payload = await r.json();
+            if (payload.enabled === false) {
+                setStatus('rumination disabled in toggles — stopping');
+                paused = true;
+                return;
+            }
+            if (!payload.text) {
+                setStatus('no rumination this cycle (empty state)');
+                return;
+            }
+            prependLine(payload);
+            setStatus('idle — next in ~' + Math.round(delayMs / 1000) + 's');
+            delayMs = BASE_DELAY_MS;
+        } catch (e) {
+            if (e.name === 'AbortError') return;
+            setStatus('fetch error — backing off');
+            delayMs = Math.min(delayMs * 2, MAX_DELAY_MS);
+        }
+    }
+
+    function schedule() {
+        if (paused) return;
+        clearTimeout(nextTimer);
+        nextTimer = setTimeout(function() {
+            if (paused) return;
+            if ('requestIdleCallback' in window) {
+                // Use the browser's idle API. If we get called via
+                // the idle path, we run the fetch. If we get called
+                // via the timeout path, the browser was busy — skip
+                // this cycle and back off slightly.
+                requestIdleCallback(function(deadline) {
+                    if (deadline.didTimeout) {
+                        setStatus('browser was busy — skipping this cycle');
+                        delayMs = Math.min(delayMs * 1.5, MAX_DELAY_MS);
+                    } else {
+                        fetchOnce().finally(schedule);
+                        return;
+                    }
+                    schedule();
+                }, { timeout: IDLE_TIMEOUT });
+            } else {
+                // Fallback: plain setTimeout. Less polite but still
+                // bounded by the delayMs cadence.
+                fetchOnce().finally(schedule);
+            }
+        }, delayMs);
+    }
+
+    function onVisibility() {
+        paused = document.hidden;
+        if (paused) {
+            setStatus('paused — tab is hidden');
+            clearTimeout(nextTimer);
+            if (abortController) abortController.abort();
+        } else {
+            setStatus('resuming');
+            delayMs = BASE_DELAY_MS;
+            schedule();
+        }
+    }
+
+    document.addEventListener('visibilitychange', onVisibility);
+
+    window.addEventListener('beforeunload', function() {
+        paused = true;
+        clearTimeout(nextTimer);
+        if (abortController) abortController.abort();
+        document.removeEventListener('visibilitychange', onVisibility);
+    });
+
+    // Kick things off
+    setStatus('scheduling first fetch');
+    schedule();
+})();
+</script>
+{% endif %}
 
 <script>
 // Tile generation frequency slider — live label update. The value

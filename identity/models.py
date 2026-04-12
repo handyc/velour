@@ -674,6 +674,16 @@ class IdentityToggles(models.Model):
                   '(once per minute). Intervals below the cron '
                   'cadence fire at the cron cadence rate.')
 
+    rumination_stream_enabled = models.BooleanField(default=True,
+        help_text='Continuous low-CPU rumination stream on the '
+                  'Identity home page. When the page is open and '
+                  'the browser is idle, Velour pairs random artifacts '
+                  'from different data sources (meditations, tilesets, '
+                  'concerns, reflections, calendar events, strange '
+                  'loops, layers) and composes short prose observations '
+                  'about relationships between them. Uses '
+                  'requestIdleCallback and pauses on tab hidden.')
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
