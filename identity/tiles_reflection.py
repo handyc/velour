@@ -158,7 +158,7 @@ def generate_tileset_from_identity(force_name=None,
     # Deterministic per-moment name — snapshot hash as suffix.
     key = f'{mood}:{identity.mood_intensity:.2f}:{aspects}:{len(open_concerns)}'
     short = hashlib.sha256(key.encode()).hexdigest()[:8]
-    name = force_name or f'{mood.capitalize()} at {timezone.now():%Y-%m-%d %H:%M} · {short}'
+    name = force_name or f'{mood.capitalize()} at {timezone.now():%Y-%m-%d %H:%M:%S} · {short}'
 
     # Build the palette. Start with the mood's dominant color, then
     # sprinkle related-mood accents based on open concerns + aspects.
