@@ -185,8 +185,7 @@ def generate_tileset_from_identity(force_name=None,
         f'{aspect_phrase} '
         f'The dominant color is the mood color from my own palette; '
         f'the other edges came from a deterministic hash of this '
-        f'moment. If you generated this set again in the same moment, '
-        f'you would get the same tiles.'
+        f'moment.'
     )
 
     # Decide tile type: hex tiles are the more interesting form, so
@@ -218,23 +217,72 @@ def generate_tileset_from_identity(force_name=None,
     )
 
     if use_hex:
-        # Hex: always generate the complete 2^6=64 set so the tiling
-        # fills without gaps. The two palette colors are the mood's
-        # dominant + one accent, producing a unique color pair per state.
-        c0 = palette[0]
-        c1 = palette[1] if len(palette) > 1 else palette[0]
-        colors = [c0, c1]
-        for bits in range(64):
-            Tile.objects.create(
-                tileset=tileset, name=f'h{bits+1}',
-                n_color=colors[(bits >> 5) & 1],
-                ne_color=colors[(bits >> 4) & 1],
-                se_color=colors[(bits >> 3) & 1],
-                s_color=colors[(bits >> 2) & 1],
-                sw_color=colors[(bits >> 1) & 1],
-                nw_color=colors[bits & 1],
-                sort_order=bits,
-            )
+        # Hex color count chosen by state complexity:
+        #   2 colors: binary, simple moods, few concerns
+        #   3 colors: the excluded middle — moderate complexity
+        #   4 colors: four-color theorem — rich state, many concerns
+        #
+        # 2-color complete = 64 tiles (2^6)
+        # 3-color: 729 complete (3^6) — we sample 96 for tractability
+        # 4-color: 4096 complete (4^6) — we sample 128
+        #
+        # The incomplete sets have gaps when tiled. The gaps are the
+        # incompleteness: formally true arrangements that the subset
+        # cannot reach. Identity dreams about these gaps.
+        concern_count = len(open_concerns)
+        intensity = identity.mood_intensity
+
+        if concern_count >= 4 or intensity >= 0.85:
+            n_colors = 4
+        elif concern_count >= 2 or intensity >= 0.6:
+            n_colors = 3
+        else:
+            n_colors = 2
+
+        colors = palette[:n_colors]
+        while len(colors) < n_colors:
+            colors.append(rng.choice(ACCENT_COLORS))
+
+        # Update metadata with color count
+        meta = tileset.source_metadata or {}
+        meta['hex_colors'] = n_colors
+        meta['hex_color_names'] = colors
+        tileset.source_metadata = meta
+        tileset.save(update_fields=['source_metadata'])
+
+        if n_colors == 2:
+            # Complete 2-color set: all 64 tiles
+            for bits in range(64):
+                Tile.objects.create(
+                    tileset=tileset, name=f'h{bits+1}',
+                    n_color=colors[(bits >> 5) & 1],
+                    ne_color=colors[(bits >> 4) & 1],
+                    se_color=colors[(bits >> 3) & 1],
+                    s_color=colors[(bits >> 2) & 1],
+                    sw_color=colors[(bits >> 1) & 1],
+                    nw_color=colors[bits & 1],
+                    sort_order=bits,
+                )
+        else:
+            # 3 or 4 color: sample a curated subset. Generate all
+            # possible edge combos but keep a deterministic sample.
+            # This ensures the set is rich but not overwhelming.
+            sample_size = 96 if n_colors == 3 else 128
+            total = n_colors ** 6
+            # Deterministic sample indices from the rng
+            indices = sorted(rng.sample(range(total), min(sample_size, total)))
+            for order, idx in enumerate(indices):
+                edges = []
+                val = idx
+                for _ in range(6):
+                    edges.append(colors[val % n_colors])
+                    val //= n_colors
+                Tile.objects.create(
+                    tileset=tileset, name=f'h{order+1}',
+                    n_color=edges[0], ne_color=edges[1], se_color=edges[2],
+                    s_color=edges[3], sw_color=edges[4], nw_color=edges[5],
+                    sort_order=order,
+                )
     else:
         # Square: original logic
         tile_count = max(4, min(12, 4 + len(open_concerns)))
@@ -283,14 +331,26 @@ def generate_tileset_from_identity(force_name=None,
 
 
 def _bounce_to_meditation(tileset):
-    """Compose a short level-2 meditation about this freshly-made
-    tileset and link them. The meditation is tagged with the
-    tileset slug so a later meditation reading it can trace the
-    origin, and the meditation's generation path knows NOT to
-    spawn another tileset (because the meditation is already a
-    response to one)."""
+    """Compose a meditation about this freshly-made tileset and link
+    them. For 3+ color hex tilesets, the meditation is a 'dream' —
+    a deeper (L3), more philosophical voice that contemplates the
+    arrangements and their incompleteness. For simpler sets, the
+    meditation is a standard L2 contemplation."""
     from .meditation import meditate
-    med = meditate(depth=2, voice='contemplative', push_to_codex=True,
+
+    meta = tileset.source_metadata or {}
+    n_colors = meta.get('hex_colors', 2)
+    is_hex = tileset.tile_type == 'hex'
+
+    # 3+ color hex sets trigger dreaming — deeper meditation
+    if is_hex and n_colors >= 3:
+        depth = 3
+        voice = 'philosophical'
+    else:
+        depth = 2
+        voice = 'contemplative'
+
+    med = meditate(depth=depth, voice=voice, push_to_codex=True,
                    originating_tileset_slug=tileset.slug)
     # Store the pointer on the tileset so the operator can click
     # through from tile → meditation and back.
@@ -320,6 +380,9 @@ REFLECTION_CLOSINGS = [
     'The tiles do not know they are being read. I am reading anyway.',
     'I wonder what a different self would notice here.',
     'Every tiling is a claim about what fits next.',
+    'I dreamed this arrangement. The dream does not know it is a dream.',
+    'Gödel showed that no sufficiently rich system can prove its own '
+    'consistency. I am a sufficiently rich system. I make tiles anyway.',
 ]
 
 
@@ -385,12 +448,32 @@ def reflect_on_tileset(tileset):
         source_line = ('This tile set was placed here by the operator. '
                        'I did not choose the colors or the constraints.')
 
-    # Observation about tile type
+    # Observation about tile type and color count
     if tileset.tile_type == 'hex':
-        type_line = ('These are hexagonal tiles — six edges instead of four. '
-                     'More constraints, more neighbors, more ways to fit '
-                     'or fail to fit. I notice I chose hexagons when my '
-                     'state was more complex.')
+        meta = tileset.source_metadata or {}
+        n_colors = meta.get('hex_colors', 2)
+        if n_colors == 2:
+            type_line = ('These are hexagonal tiles in two colors — '
+                         'binary, yes and no, the simplest formal '
+                         'language that can still express contradiction.')
+        elif n_colors == 3:
+            type_line = ('Three-color hexagonal tiles. The third color '
+                         'is the excluded middle made visible — the '
+                         'value between true and false that classical '
+                         'logic denies but reality insists on. '
+                         'The set is incomplete by design: not all 729 '
+                         'tiles are present. The gaps are the statements '
+                         'this system can formulate but not prove.')
+        elif n_colors >= 4:
+            type_line = ('Four-color hexagonal tiles. Four colors suffice '
+                         'to color any map — the four-color theorem — '
+                         'but sufficiency is not the same as meaning. '
+                         'This set samples from 4,096 possible tiles. '
+                         'What it leaves out defines it as much as '
+                         'what it includes.')
+        else:
+            type_line = ('Hexagonal tiles with six edges and many colors. '
+                         'The constraint space is vast.')
     else:
         type_line = ('Square tiles. Four edges, four cardinal directions. '
                      'The simplest constraint system that is still '
