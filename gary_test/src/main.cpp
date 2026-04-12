@@ -126,35 +126,55 @@
   // Each packet: [type:1][seq:1][total:1][payload:up to 219]
   // Compresses first, then fragments.
   static int loraSendCompressed(const char* data, size_t len) {
+      // Try compression; fall back to raw if it fails
       static uint8_t compBuf[4096];
       size_t compLen = loraCompress((const uint8_t*)data, len,
                                     compBuf, sizeof(compBuf));
-      if (compLen == 0) return -1;
+      const uint8_t* sendBuf;
+      size_t sendLen;
 
-      Serial.print("[lora] compressed ");
-      Serial.print(len);
-      Serial.print(" -> ");
-      Serial.print(compLen);
-      Serial.println(" bytes");
+      if (compLen > 0 && compLen < len) {
+          sendBuf = compBuf;
+          sendLen = compLen;
+          Serial.print("[lora] compressed ");
+          Serial.print(len);
+          Serial.print(" -> ");
+          Serial.print(compLen);
+          Serial.println(" bytes");
+      } else {
+          // Compression failed or expanded — send raw
+          sendBuf = (const uint8_t*)data;
+          sendLen = len;
+          Serial.print("[lora] sending raw ");
+          Serial.print(len);
+          Serial.println(" bytes (compression failed/expanded)");
+      }
 
       int maxPayload = LORA_MAX_PAYLOAD - 3;  // 3 bytes header: type+seq+total
-      int totalPkts = (compLen + maxPayload - 1) / maxPayload;
-      if (totalPkts > 255) return -2;
+      int totalPkts = (sendLen + maxPayload - 1) / maxPayload;
+      if (totalPkts > 255) {
+          Serial.println("[lora] too many packets, truncating");
+          totalPkts = 255;
+      }
+
+      Serial.print("[lora] sending ");
+      Serial.print(totalPkts);
+      Serial.println(" packets");
 
       for (int i = 0; i < totalPkts; i++) {
           int offset = i * maxPayload;
-          int chunk = compLen - offset;
+          int chunk = sendLen - offset;
           if (chunk > maxPayload) chunk = maxPayload;
 
           LoRa.beginPacket();
           LoRa.write(LORA_PKT_SCREEN);
           LoRa.write((uint8_t)i);
           LoRa.write((uint8_t)totalPkts);
-          LoRa.write(compBuf + offset, chunk);
+          LoRa.write(sendBuf + offset, chunk);
           LoRa.endPacket();
           loraPacketsSent++;
 
-          if (i < totalPkts - 1) delay(50);
+          if (i < totalPkts - 1) delay(100);  // longer gap between packets
       }
       return totalPkts;
   }
@@ -215,7 +235,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.9"
+#define FIRMWARE_VERSION    "v0.6.0"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1426,6 +1446,13 @@ static void loraLoop() {
             Serial.println(loraLastRssi);
 
             if (loraRxFragCount >= loraRxFragTotal) {
+                Serial.print("[lora] all ");
+                Serial.print(loraRxFragTotal);
+                Serial.print(" fragments, ");
+                Serial.print(loraRxFragLen);
+                Serial.println(" bytes");
+
+                // Try decompress; fall back to raw
                 static uint8_t decompBuf[LORA_SCREEN_SIZE + 64];
                 size_t decompLen = loraDecompress(
                     loraRxFragBuf, loraRxFragLen,
@@ -1433,15 +1460,22 @@ static void loraLoop() {
                 if (decompLen > 0 && decompLen < LORA_SCREEN_SIZE) {
                     memcpy(loraScreenBuf, decompBuf, decompLen);
                     loraScreenBuf[decompLen] = '\0';
-                    loraScreenReady = true;
-                    loraTickerPx = 128;  // start from right edge
-                    loraScreensRecv++;
-                    Serial.print("[lora] screen received: ");
-                    Serial.print(decompLen);
-                    Serial.println(" chars");
+                    Serial.print("[lora] decompressed: ");
+                    Serial.println(decompLen);
+                } else if (loraRxFragLen > 0 && loraRxFragLen < LORA_SCREEN_SIZE) {
+                    memcpy(loraScreenBuf, loraRxFragBuf, loraRxFragLen);
+                    loraScreenBuf[loraRxFragLen] = '\0';
+                    Serial.print("[lora] raw fallback: ");
+                    Serial.println(loraRxFragLen);
                 } else {
-                    Serial.println("[lora] decompress failed");
+                    Serial.println("[lora] discard — too large or empty");
+                    loraRxFragLen = 0;
+                    loraRxFragCount = 0;
+                    return;
                 }
+                loraScreenReady = true;
+                loraTickerPx = 128;
+                loraScreensRecv++;
                 loraRxFragLen = 0;
                 loraRxFragCount = 0;
             }
