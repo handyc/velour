@@ -64,10 +64,11 @@
   // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
   // Hazel sends 2000-char screen every 20 min.
   // Mabel sends 2000-char screen every 30 min.
+  // TESTING: 1 minute intervals. Restore to 1800000/1200000 after confirming.
   #ifdef NODE_LORA_ROLE_SENDER
-    #define LORA_SCREEN_INTERVAL_MS 1800000  // Mabel: 30 min
+    #define LORA_SCREEN_INTERVAL_MS 60000   // Mabel: 1 min (test)
   #else
-    #define LORA_SCREEN_INTERVAL_MS 1200000  // Hazel: 20 min
+    #define LORA_SCREEN_INTERVAL_MS 60000   // Hazel: 1 min (test)
   #endif
   unsigned long lastLoraScreenAt = 0;
 
@@ -214,7 +215,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.8"
+#define FIRMWARE_VERSION    "v0.5.9"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
