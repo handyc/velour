@@ -715,7 +715,11 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     operator can hand-edit without worrying that running the command
     again will clobber their changes.
     """
-    from .models import Meditation
+    from .models import IdentityToggles, Meditation
+
+    toggles = IdentityToggles.get_self()
+    if not toggles.meditations_enabled:
+        return None
 
     now = timezone.now()
     rng = _seeded_rng(depth, voice, now)
@@ -777,7 +781,7 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
         recursive_of=recursive_of,
     )
 
-    if push_to_codex:
+    if push_to_codex and toggles.codex_push_enabled:
         _push_to_codex(med)
 
     return med

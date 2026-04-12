@@ -582,3 +582,84 @@ class CronRun(models.Model):
 
     def __str__(self):
         return f'[{self.status}] {self.kind} @ {self.at:%Y-%m-%d %H:%M}'
+
+
+class IdentityToggles(models.Model):
+    """Emergency toggles for Identity's major functions.
+
+    Identity is a program that observes the system and itself. It
+    does not impose changes on other apps (observes, does not modify).
+    These toggles let the operator halt specific observation or
+    composition pipelines at will without uninstalling code.
+
+    Singleton — pk=1. Get via IdentityToggles.get_self().
+
+    Design principle: every toggle defaults to True on a fresh install.
+    Turning a toggle OFF is an active choice the operator makes. No
+    toggle can turn Identity INTO something that modifies other apps
+    — they can only further restrict what Identity is already allowed
+    to do.
+    """
+
+    # Core pipelines
+    ticks_enabled = models.BooleanField(default=True,
+        help_text='Run ticks. When off, the tick engine is a no-op '
+                  'and neither Tick rows nor Mood rows nor concerns '
+                  'are written. The rest of Identity still renders '
+                  'based on whatever history already exists.')
+    reflections_enabled = models.BooleanField(default=True,
+        help_text='Compose reflections. When off, the reflection '
+                  'composer refuses to write new Reflection rows. '
+                  'Existing reflections are still readable.')
+    meditations_enabled = models.BooleanField(default=True,
+        help_text='Compose meditations. When off, the meditation '
+                  'composer refuses to write new Meditation rows. '
+                  'Existing meditations are still readable.')
+
+    # Subsystems
+    concerns_enabled = models.BooleanField(default=True,
+        help_text='Maintain the Concern table. When off, ticks do '
+                  'not open, bump, or close concerns. Existing open '
+                  'concerns stay open until the toggle is turned '
+                  'back on and a sweep happens.')
+    oracle_enabled = models.BooleanField(default=True,
+        help_text='Use the trained Oracle lobe for rumination '
+                  'template selection. When off, compose_thought '
+                  'falls back to the pre-Oracle heuristic and no '
+                  'OracleLabel rows are written.')
+
+    # Output pipelines
+    codex_push_enabled = models.BooleanField(default=True,
+        help_text="Push reflections into Identity's Journal and "
+                  "meditations into Identity's Mirror as Codex "
+                  "sections. When off, rows still get written to "
+                  "the Reflection and Meditation tables but Codex "
+                  "stays untouched.")
+    topbar_pulse_enabled = models.BooleanField(default=True,
+        help_text='Show the mood pulse indicator in the topbar on '
+                  'every page. When off, the topbar only shows the '
+                  'chronos clock.')
+
+    # UI-side effects
+    recursive_introspection_enabled = models.BooleanField(default=True,
+        help_text='Run the recursive introspection animation on the '
+                  'Identity home page while the operator is viewing '
+                  'it. When off, the widget is hidden entirely.')
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'identity toggles'
+
+    def __str__(self):
+        return 'IdentityToggles'
+
+    @classmethod
+    def get_self(cls):
+        """Get or create the singleton toggles row."""
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # enforce singleton
+        super().save(*args, **kwargs)

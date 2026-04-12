@@ -21,6 +21,7 @@ urlpatterns = [
     path('meditations/<int:pk>/', views.meditation_detail, name='meditation_detail'),
     path('meditations/compose/', views.meditation_compose, name='meditation_compose'),
     path('cron/run-now/', views.cron_run_now, name='cron_run_now'),
+    path('toggles/', views.toggles_update, name='toggles_update'),
     path('ticks/<int:tick_pk>/feedback/', views.rumination_feedback,
          name='rumination_feedback'),
 ]

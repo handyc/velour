@@ -418,8 +418,12 @@ def reflect(period='weekly', push_to_codex=True):
     period+period_start ensures no duplicates). Regeneration is
     useful when the template library changes.
     """
-    from .models import Reflection, Tick, Concern
+    from .models import IdentityToggles, Reflection, Tick, Concern
     from .sensors import gather_snapshot
+
+    toggles = IdentityToggles.get_self()
+    if not toggles.reflections_enabled:
+        return None
 
     start, end = _period_range(period)
     ticks = Tick.objects.filter(at__gte=start, at__lt=end)
@@ -445,7 +449,7 @@ def reflect(period='weekly', push_to_codex=True):
         },
     )
 
-    if push_to_codex:
+    if push_to_codex and toggles.codex_push_enabled:
         _push_to_codex(row)
 
     return row

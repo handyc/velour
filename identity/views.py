@@ -10,7 +10,9 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Concern, CronRun, Identity, Meditation, Mood, Reflection, Tick
+from .models import (
+    Concern, CronRun, Identity, IdentityToggles, Meditation, Mood, Reflection, Tick,
+)
 
 
 def _get_main_ip():
@@ -302,6 +304,10 @@ def identity_home(request):
     # enough for a scannable home card; full history is in the admin.
     recent_cron_runs = CronRun.objects.all()[:6]
 
+    # Emergency toggles — the singleton the operator uses to pause
+    # observation pipelines without uninstalling code.
+    toggles = IdentityToggles.get_self()
+
     # Legacy journal still rendered as a fallback for historical entries
     # that pre-date the Tick model and weren't fully backfilled. Newer
     # output goes through the Tick stream instead.
@@ -332,6 +338,7 @@ def identity_home(request):
         'recent_reflections': recent_reflections,
         'recent_meditations': recent_meditations,
         'recent_cron_runs': recent_cron_runs,
+        'toggles': toggles,
         'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
@@ -451,6 +458,25 @@ def rumination_feedback(request, tick_pk):
     if next_url and next_url.startswith('/'):
         return redirect(next_url)
     return redirect('identity:tick_log')
+
+
+@login_required
+@require_POST
+def toggles_update(request):
+    """Operator toggles Identity's major pipelines on/off. Each
+    checkbox becomes a boolean field on the IdentityToggles
+    singleton. Unchecked checkboxes aren't in request.POST so we
+    check each field name explicitly."""
+    toggles = IdentityToggles.get_self()
+    fields = [
+        'ticks_enabled', 'reflections_enabled', 'meditations_enabled',
+        'concerns_enabled', 'oracle_enabled', 'codex_push_enabled',
+        'topbar_pulse_enabled', 'recursive_introspection_enabled',
+    ]
+    for f in fields:
+        setattr(toggles, f, bool(request.POST.get(f)))
+    toggles.save()
+    return redirect('identity:home')
 
 
 @login_required

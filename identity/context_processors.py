@@ -10,9 +10,17 @@ brings down unrelated pages.
 
 
 def topbar_pulse(request):
-    """Return {'identity_pulse': {...}} for the base template."""
+    """Return {'identity_pulse': {...}} for the base template.
+
+    Returns an empty dict (effectively hiding the pulse widget) when
+    the operator has turned the topbar_pulse_enabled toggle off. This
+    is an emergency kill switch for the ambient indicator that
+    normally appears on every page."""
     try:
-        from .models import Identity, Tick
+        from .models import Identity, IdentityToggles, Tick
+        toggles = IdentityToggles.get_self()
+        if not toggles.topbar_pulse_enabled:
+            return {}
         identity = Identity.get_self()
         latest = Tick.objects.first()
         thought = (latest.thought if latest else '') or identity.tagline or ''

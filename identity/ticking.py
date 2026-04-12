@@ -467,11 +467,18 @@ def _pick_template_family(snapshot, mood, open_concerns):
     Returns a (family, features) tuple so the caller can record an
     OracleLabel row. features is None when the fallback path fires.
     """
+    # Check the operator's Oracle toggle first — if off, skip the
+    # lobe entirely and fall through to the heuristic even when the
+    # lobe file exists.
     try:
-        from oracle.inference import (
-            load_lobe, predict_class, build_features_from_snapshot,
-        )
-        lobe = load_lobe('rumination_template')
+        from .models import IdentityToggles
+        if not IdentityToggles.get_self().oracle_enabled:
+            lobe = None
+        else:
+            from oracle.inference import (
+                load_lobe, predict_class, build_features_from_snapshot,
+            )
+            lobe = load_lobe('rumination_template')
     except Exception:
         lobe = None
 
@@ -548,8 +555,13 @@ def tick(triggered_by='manual'):
     """Run one tick of attention. Writes a Tick row (new canonical log)
     and a Mood row (legacy shim), opens/bumps/closes Concerns based on
     what the tick noticed, and updates the Identity singleton.
-    Returns a (Tick, thought) tuple."""
-    from .models import Identity, Mood, Tick, Concern
+    Returns a (Tick, thought) tuple — or (None, None) if ticks are
+    disabled via IdentityToggles."""
+    from .models import Identity, IdentityToggles, Mood, Tick, Concern
+
+    toggles = IdentityToggles.get_self()
+    if not toggles.ticks_enabled:
+        return None, None
 
     identity = Identity.get_self()
     snapshot = gather_snapshot()
@@ -601,7 +613,8 @@ def tick(triggered_by='manual'):
             pass  # oracle unavailable — don't break the tick
 
     # Maintain the Concern table: open new, bump existing, close stale.
-    maintain_concerns(all_hits, tick_row)
+    if toggles.concerns_enabled:
+        maintain_concerns(all_hits, tick_row)
 
     # Legacy Mood row — removed in a future migration once all readers
     # have been moved to Tick.
