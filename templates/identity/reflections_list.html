@@ -107,7 +107,7 @@
             {% for para in r.body|linebreaks %}{{ para }}{% endfor %}
         </div>
         {% if r.codex_section_slug %}
-        <a class="codex-link" href="/codex/manuals/identitys-journal/">View in Identity's Journal →</a>
+        <a class="codex-link" href="{% url 'codex:manual_detail' 'identitys-journal' %}">View in Identity's Journal →</a>
         {% endif %}
     </div>
     {% empty %}

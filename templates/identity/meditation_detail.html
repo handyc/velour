@@ -100,7 +100,7 @@
     <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
         <a href="{% url 'identity:meditations_list' %}" class="btn btn-secondary">← All meditations</a>
         {% if meditation.codex_section_slug %}
-        <a href="/codex/manuals/identitys-mirror/" class="btn btn-secondary">Open in Identity's Mirror</a>
+        <a href="{% url 'codex:manual_detail' 'identitys-mirror' %}" class="btn btn-secondary">Open in Identity's Mirror</a>
         {% endif %}
     </div>
 </div>

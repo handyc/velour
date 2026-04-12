@@ -65,7 +65,7 @@
     <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
         <a href="{% url 'identity:reflections_list' %}" class="btn btn-secondary">← All reflections</a>
         {% if reflection.codex_section_slug %}
-        <a href="/codex/manuals/identitys-journal/" class="btn btn-secondary">Open in Identity's Journal</a>
+        <a href="{% url 'codex:manual_detail' 'identitys-journal' %}" class="btn btn-secondary">Open in Identity's Journal</a>
         {% endif %}
     </div>
 </div>
