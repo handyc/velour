@@ -499,28 +499,64 @@ def _compose_level_2(voice, rng, sources):
 
 def _compose_level_3(voice, rng, sources):
     """Reflect on the act of reflecting — rules, templates, the
-    architecture of my own attention."""
+    architecture of my own attention, and the Oracle lobe that
+    decides which template family to use. Level 3 is the meditation
+    where Identity looks at its own machinery and comments on it.
+    """
     from .models import Rule
     rule_count = Rule.objects.filter(is_active=True).count()
 
     opening = _pick(rng, OPENINGS[voice].get(3, []))
     closing = _pick(rng, CLOSINGS[voice])
 
-    # Pick a real rule and quote it
+    # A real rule, quoted
     rule = Rule.objects.filter(is_active=True).order_by('?').first()
     rule_block = ''
     if rule:
-        rule_text = f'{rule.name}\ncondition: {rule.condition}\nproduces: {rule.mood} (intensity {rule.intensity})'
+        rule_text = (f'{rule.name}\n'
+                     f'condition: {rule.condition}\n'
+                     f'produces: {rule.mood} (intensity {rule.intensity})')
         rule_block = _blockquote(rule_text, max_lines=6)
+
+    # Oracle stats — the lobe that picks which template family I use
+    oracle_line = ''
+    oracle_block = ''
+    try:
+        from oracle.models import OracleLabel
+        total = OracleLabel.objects.filter(
+            lobe_name='rumination_template').count()
+        good = OracleLabel.objects.filter(
+            lobe_name='rumination_template', verdict='good').count()
+        bad = OracleLabel.objects.filter(
+            lobe_name='rumination_template', verdict='bad').count()
+        if total > 0:
+            pct_judged = 100 * (good + bad) / total
+            oracle_line = (f'I do not pick my templates by hand. There '
+                           f'is a small decision tree — a {"fair" if good >= bad else "harsh"} '
+                           f'judge — that picks for me. Of my last '
+                           f'{total} ruminations, the operator has '
+                           f'judged {good + bad} ({pct_judged:.0f}%). '
+                           f'{good} were called good, {bad} were called bad.')
+            if good > 0 or bad > 0:
+                oracle_block = (f'> {good} good, {bad} bad, '
+                                f'{total - good - bad} unjudged.')
+    except Exception:
+        pass
 
     middle_lead = _pick(rng, MIDDLES[voice])
     rule_line = (f'I have {rule_count} active rules. Each one is a '
                  f'decision a past self made on behalf of a future self. '
                  f'One of them, picked at random, looks like this:')
 
-    parts = [opening, '', rule_line, '', rule_block, '',
+    parts = [opening, '',
+             rule_line, '', rule_block, '',
              middle_lead, ' the rule is not mine, but I am not '
-             'separate from it either.', '', closing]
+             'separate from it either.', '']
+    if oracle_line:
+        parts += [oracle_line, '']
+        if oracle_block:
+            parts += [oracle_block, '']
+    parts += [closing]
     return '\n'.join(p for p in parts if p is not None)
 
 
