@@ -179,6 +179,7 @@
 
           if (i < totalPkts - 1) delay(500);  // 500ms gap — easy on power supply
       }
+      LoRa.receive();  // ensure radio is back in RX mode
       return totalPkts;
   }
 #endif
@@ -238,7 +239,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.2"
+#define FIRMWARE_VERSION    "v0.6.3"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -1501,10 +1502,12 @@ static void loraLoop() {
         static char txScreen[LORA_SCREEN_SIZE];
         loraGenerateTestScreen(txScreen, LORA_SCREEN_SIZE);
         int pkts = loraSendCompressed(txScreen, strlen(txScreen));
+        // Force radio back to receive mode after transmitting
+        LoRa.receive();
         if (pkts > 0) {
             Serial.print("[lora] sent screen: ");
             Serial.print(pkts);
-            Serial.println(" packets");
+            Serial.println(" packets, back to RX mode");
             velour.addReading("lora_tx", (float)loraPacketsSent);
         }
     }
