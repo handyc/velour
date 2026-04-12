@@ -65,18 +65,18 @@
   // Hazel sends 2000-char screen every 20 min.
   // Mabel sends 2000-char screen every 30 min.
   #ifdef NODE_LORA_ROLE_SENDER
-    #define LORA_SCREEN_INTERVAL_MS 30000   // Mabel: 30s
-    #define LORA_SCREEN_OFFSET_MS   15000   // start 15s after boot
+    #define LORA_SCREEN_INTERVAL_MS 600000  // Mabel→Hazel: 10 min
+    #define LORA_SCREEN_OFFSET_MS   300000  // start 5 min after boot
   #else
-    #define LORA_SCREEN_INTERVAL_MS 30000   // Hazel: 30s
-    #define LORA_SCREEN_OFFSET_MS       0   // start immediately
+    #define LORA_SCREEN_INTERVAL_MS 1200000 // Hazel→Mabel: 20 min
+    #define LORA_SCREEN_OFFSET_MS        0  // start immediately
   #endif
   unsigned long lastLoraScreenAt = 0;
 
   #define LORA_MAX_PAYLOAD 222
 
   // Reassembly buffer for incoming multi-packet screens
-  #define LORA_SCREEN_SIZE 501  // 500 chars — fits in ~3 packets
+  #define LORA_SCREEN_SIZE 701
   static char loraScreenBuf[LORA_SCREEN_SIZE];   // received screen (null-terminated)
   static uint8_t loraRxFragBuf[4096];             // compressed fragment accumulator
   static int loraRxFragCount = 0;
@@ -84,7 +84,7 @@
   static size_t loraRxFragLen = 0;
 
   // Ticker scroll state — pixel-level smooth scrolling.
-  // Scrolls 2px every 5ms = 400px/sec = 100 chars/sec at 4px/char.
+  // Scrolls 4px every 5ms = 800px/sec = 200 chars/sec at 4px/char.
   static int loraTickerPx = 0;         // pixel offset (negative = scrolled left)
   static unsigned long lastTickerScrollAt = 0;
   static bool loraScreenReady = true;  // start true for test message
@@ -237,7 +237,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.4"
+#define FIRMWARE_VERSION    "v0.6.5"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -752,7 +752,7 @@ static void oledRedraw() {
     if (loraScreenReady && loraScreenBuf[0]) {
         if (millis() - lastTickerScrollAt >= 5) {
             lastTickerScrollAt = millis();
-            loraTickerPx -= 2;
+            loraTickerPx -= 4;
             int totalWidth = strlen(loraScreenBuf) * 4;  // 4px per char
             if (loraTickerPx < -totalWidth) loraTickerPx = 128;
         }
