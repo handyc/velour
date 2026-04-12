@@ -37,6 +37,27 @@
 #include "wifi_secrets.h"
 #include "velour_client.h"
 
+#ifdef NODE_HAS_LORA
+  #include <SPI.h>
+  #include <LoRa.h>
+  // TTGO T3 V1.6.1 LoRa pins
+  #define LORA_SCK   5
+  #define LORA_MISO  19
+  #define LORA_MOSI  27
+  #define LORA_CS    18
+  #define LORA_RST   23
+  #define LORA_DIO0  26
+  #define LORA_FREQ  868E6
+
+  bool loraReady = false;
+  unsigned long lastLoraSendAt = 0;
+  unsigned long loraPacketsSent = 0;
+  unsigned long loraPacketsRecv = 0;
+  int loraLastRssi = 0;
+  char loraLastMsg[64] = "";
+  #define LORA_SEND_INTERVAL_MS 5000
+#endif
+
 // Optional OLED display support. Enable by defining NODE_HAS_OLED in
 // wifi_secrets.h (or via build_flags) for nodes that have an SSD1306
 // 128x64 screen wired to software I2C. The pins default to SCL=14
@@ -584,13 +605,26 @@ static void oledRedraw() {
     }
 #endif
 
-    // Line 5 (y=44): uptime
+    // Line 5 (y=44): LoRa status or uptime
+#ifdef NODE_HAS_LORA
+    {
+        static char lbuf[33];
+        if (loraReady) {
+            snprintf(lbuf, sizeof(lbuf), "LoRa tx:%lu rx:%lu %ddB",
+                     loraPacketsSent, loraPacketsRecv, loraLastRssi);
+        } else {
+            snprintf(lbuf, sizeof(lbuf), "LoRa: offline");
+        }
+        u8g2.drawStr(0, 44, lbuf);
+    }
+#else
     {
         unsigned long upS = (millis() - bootMs) / 1000;
         static char footer[33];
         snprintf(footer, sizeof(footer), "up %lus", upS);
         u8g2.drawStr(0, 44, footer);
     }
+#endif
 
     // --- Animated sprite ---
     //
@@ -1197,6 +1231,95 @@ static void velourReport(const char* label) {
 
 
 // ---------------------------------------------------------------------
+// LoRa — ping/pong between Mabel (sender) and Hazel (receiver)
+// ---------------------------------------------------------------------
+
+#ifdef NODE_HAS_LORA
+
+static void loraSetup() {
+    SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
+    LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
+    if (LoRa.begin(LORA_FREQ)) {
+        LoRa.setSpreadingFactor(7);
+        LoRa.setSignalBandwidth(125E3);
+        LoRa.setCodingRate4(5);
+        loraReady = true;
+        Serial.println("[lora] initialized at 868 MHz");
+    } else {
+        Serial.println("[lora] FAILED to initialize");
+    }
+}
+
+static void loraLoop() {
+    if (!loraReady) return;
+
+#ifdef NODE_LORA_ROLE_SENDER
+    // Mabel: send a ping every LORA_SEND_INTERVAL_MS
+    if (millis() - lastLoraSendAt >= LORA_SEND_INTERVAL_MS) {
+        lastLoraSendAt = millis();
+        loraPacketsSent++;
+        char msg[48];
+        snprintf(msg, sizeof(msg), "ping %lu from %s", loraPacketsSent, NODE_SLUG);
+        LoRa.beginPacket();
+        LoRa.print(msg);
+        LoRa.endPacket();
+        Serial.print("[lora] sent: ");
+        Serial.println(msg);
+
+        // Report to Velour
+        velour.addReading("lora_tx", (float)loraPacketsSent);
+    }
+
+    // Also listen for replies
+    int packetSize = LoRa.parsePacket();
+    if (packetSize > 0) {
+        int i = 0;
+        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
+            loraLastMsg[i++] = (char)LoRa.read();
+        }
+        loraLastMsg[i] = '\0';
+        loraLastRssi = LoRa.packetRssi();
+        loraPacketsRecv++;
+        Serial.print("[lora] recv: ");
+        Serial.print(loraLastMsg);
+        Serial.print(" rssi=");
+        Serial.println(loraLastRssi);
+    }
+#else
+    // Hazel: listen for packets, send pong reply
+    int packetSize = LoRa.parsePacket();
+    if (packetSize > 0) {
+        int i = 0;
+        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
+            loraLastMsg[i++] = (char)LoRa.read();
+        }
+        loraLastMsg[i] = '\0';
+        loraLastRssi = LoRa.packetRssi();
+        loraPacketsRecv++;
+        Serial.print("[lora] recv: ");
+        Serial.print(loraLastMsg);
+        Serial.print(" rssi=");
+        Serial.println(loraLastRssi);
+
+        // Send pong
+        loraPacketsSent++;
+        char reply[48];
+        snprintf(reply, sizeof(reply), "pong %lu from %s", loraPacketsSent, NODE_SLUG);
+        LoRa.beginPacket();
+        LoRa.print(reply);
+        LoRa.endPacket();
+
+        // Report to Velour
+        velour.addReading("lora_rx", (float)loraPacketsRecv);
+        velour.addReading("lora_rssi", (float)loraLastRssi);
+    }
+#endif
+}
+
+#endif  // NODE_HAS_LORA
+
+
+// ---------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------
 
@@ -1235,6 +1358,10 @@ void setup() {
     // Gary is now reachable at http://<his-LAN-IP>/ from any device on
     // the same Wi-Fi network.
     httpdSetup();
+
+#ifdef NODE_HAS_LORA
+    loraSetup();
+#endif
 
     // Seed the AHT cache with one reading so /data.json isn't empty
     // from the moment the web server comes up.
@@ -1290,14 +1417,15 @@ void loop() {
 #endif
 
 #ifdef NODE_HAS_HEARTBEAT
-    // Human heartbeat on the built-in LED: lub-DUB...pause (~72 BPM).
-    // Total cycle ~830ms. Non-blocking — uses millis() phase check.
     {
         unsigned long phase = millis() % 830;
-        // lub: 0-80ms on, DUB: 180-300ms on, rest: off
         bool on = (phase < 80) || (phase >= 180 && phase < 300);
-        digitalWrite(LED_BUILTIN, on ? LOW : HIGH);  // active-low on most ESPs
+        digitalWrite(LED_BUILTIN, on ? LOW : HIGH);
     }
+#endif
+
+#ifdef NODE_HAS_LORA
+    loraLoop();
 #endif
 
     // Faster AHT read on its own cadence, decoupled from Velour reporting.
