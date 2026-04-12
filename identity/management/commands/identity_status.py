@@ -164,12 +164,34 @@ class Command(BaseCommand):
             self.stdout.write(f'  (lobe file unreadable: {e})')
         self.stdout.write('')
 
+        # --- Self-model accuracy check ---------------------------------
+        self.stdout.write(self.style.SUCCESS(
+            '--- self-model accuracy check ---'))
+        try:
+            from identity.self_check import check_self_model, prose_summary
+            results = check_self_model()
+            self.stdout.write(f'  {prose_summary(results)}')
+            inaccurate = [(t, d) for t, d, ok in results if not ok]
+            if inaccurate:
+                for title, desc in inaccurate:
+                    self.stdout.write(self.style.WARNING(
+                        f'  ✗ {title}: {desc}'))
+            else:
+                self.stdout.write(
+                    f'  all {len(results)} checks pass')
+        except Exception as e:
+            self.stdout.write(f'  (check failed: {e})')
+        self.stdout.write('')
+
         # --- Recent ticks tail ----------------------------------------
         tail_n = 10 if opts['verbose'] else 5
         self.stdout.write(self.style.SUCCESS(
             f'--- last {tail_n} ticks ---'))
         for t in Tick.objects.all()[:tail_n]:
+            micro = ' [μ]' if t.micro_meditation else ''
             self.stdout.write(
-                f'  {t.at:%Y-%m-%d %H:%M:%S}  [{t.mood:14s}] {t.thought[:90]}'
+                f'  {t.at:%Y-%m-%d %H:%M:%S}  [{t.mood:14s}] '
+                f'v={t.valence:+.1f} a={t.arousal:+.1f}{micro} '
+                f'{t.thought[:70]}'
             )
         self.stdout.write('')
