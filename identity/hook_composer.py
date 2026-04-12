@@ -205,9 +205,33 @@ def _render_hooks_file():
         lines.append('---')
         lines.append('')
 
+    # Write to the project root so it's visible alongside CLAUDE.md
     path = os.path.join(str(settings.BASE_DIR), 'IDENTITY_HOOKS.md')
     try:
         with open(path, 'w') as f:
             f.write('\n'.join(lines))
     except OSError:
         pass
+
+    # Also write to the Claude memory directory so it shows up
+    # in the memory index at session start.
+    memory_dir = os.path.expanduser(
+        '~/.claude/projects/-home-handyc-claubsh-velour-dev/memory')
+    if os.path.isdir(memory_dir):
+        try:
+            mem_lines = [
+                '---',
+                'name: Identity hooks for Claude Code (live, auto-generated)',
+                'description: Structured prompts from Velour Identity — '
+                'patterns noticed during meditations that Velour cannot '
+                'resolve itself. Read and act on pending hooks.',
+                'type: project',
+                '---',
+                '',
+            ] + lines[2:]  # skip the markdown H1 + blank
+            mem_path = os.path.join(memory_dir,
+                                     'project_identity_hooks_live.md')
+            with open(mem_path, 'w') as f:
+                f.write('\n'.join(mem_lines))
+        except OSError:
+            pass
