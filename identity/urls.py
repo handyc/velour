@@ -26,6 +26,7 @@ urlpatterns = [
     path('dialogue.json', views.internal_dialogue_json, name='internal_dialogue_json'),
     path('who/', views.who_is_velour, name='who'),
     path('continuity/', views.continuity_timeline, name='continuity'),
+    path('state-machine/', views.state_machine_view, name='state_machine'),
     path('document/', views.identity_document, name='identity_document'),
     path('document/regenerate/', views.identity_document_regenerate,
          name='identity_document_regenerate'),

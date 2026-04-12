@@ -378,6 +378,26 @@ def sense_terminal():
     return {}
 
 
+def sense_state_machine():
+    """State-machine summary — how often each mood transitions to
+    each other mood. Used by the meditation composer to reference
+    transition patterns in its prose. Computed from Tick history
+    on every tick; cheap because the table is small."""
+    try:
+        from .state_machine import compute_transition_matrix, prose_summary
+        matrix = compute_transition_matrix()
+        return {
+            'total_ticks':   matrix['total_ticks'],
+            'unique_moods':  len(matrix['unique_moods']),
+            'most_common':   matrix['most_common_transition'],
+            'most_stable':   matrix['most_stable_mood'],
+            'most_volatile': matrix['most_volatile_mood'],
+            'prose':         prose_summary(matrix),
+        }
+    except Exception:
+        return {}
+
+
 def sense_identity_self():
     """Identity's own recent tick activity — a meta-sensor that lets
     the system reflect on its own attention cadence. 'This week I
@@ -427,5 +447,6 @@ def gather_snapshot():
         'services':    sense_services(),
         'logs':        sense_logs(),
         'terminal':    sense_terminal(),
-        'self':        sense_identity_self(),
+        'self':          sense_identity_self(),
+        'state_machine': sense_state_machine(),
     }

@@ -368,11 +368,14 @@ OBSERVATIONS = [
     'It is {season}.',
     'My fleet has {nodes_total} nodes; {nodes_recent} have reported recently.',
     'There are {sections} sections across {manuals} codex manuals.',
+    '{state_machine_prose}',
+    'I have visited {unique_moods} distinct moods.',
 ]
 
 
 def _format_observation(template, snapshot):
     try:
+        sm = snapshot.get('state_machine', {})
         return template.format(
             tod=snapshot.get('chronos', {}).get('tod', 'now'),
             weekday=snapshot.get('chronos', {}).get('weekday', 'day'),
@@ -386,6 +389,8 @@ def _format_observation(template, snapshot):
             nodes_recent=snapshot.get('nodes', {}).get('recently_seen', 0),
             sections=snapshot.get('codex', {}).get('sections', 0),
             manuals=snapshot.get('codex', {}).get('manuals', 0),
+            state_machine_prose=sm.get('prose', ''),
+            unique_moods=sm.get('unique_moods', 0),
         )
     except Exception:
         return ''

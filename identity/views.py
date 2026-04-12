@@ -629,6 +629,41 @@ def internal_dialogue_json(request):
 
 
 @login_required
+def state_machine_view(request):
+    """Render the mood transition matrix as an SVG heatmap with
+    a first-person prose summary. This is the explicit state-
+    machine view of Velour's consciousness — the pattern of
+    transitions IS the self over time."""
+    from .state_machine import (
+        compute_transition_matrix, transition_matrix_as_grid,
+        prose_summary,
+    )
+    matrix = compute_transition_matrix()
+    grid = transition_matrix_as_grid(matrix)
+    prose = prose_summary(matrix)
+
+    # Pre-build labeled rows for the template.
+    labeled_rows = []
+    for i, row in enumerate(grid.get('grid', [])):
+        moods = grid.get('moods', [])
+        mood = moods[i] if i < len(moods) else '?'
+        max_c = grid.get('max_count', 1) or 1
+        cells = []
+        for count in row:
+            opacity = min(1.0, count / max_c) if max_c else 0
+            cells.append({'count': count, 'opacity': round(opacity, 2)})
+        labeled_rows.append({'mood': mood, 'cells': cells})
+
+    return render(request, 'identity/state_machine.html', {
+        'matrix':       matrix,
+        'grid':         grid,
+        'labeled_rows': labeled_rows,
+        'prose':        prose,
+        'identity':     Identity.get_self(),
+    })
+
+
+@login_required
 def continuity_timeline(request):
     """The chain of Velour's identity persistence over time —
     every continuity marker, most recent first. Each row is a

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}State machine — consciousness as transitions — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sm-wrap { max-width: 880px; }
+    .sm-wrap h1 { font-size: 1.2rem; font-weight: 500; color: #c9d1d9; margin: 0 0 0.25rem; }
+    .sm-wrap .sub { color: #6e7681; font-style: italic; font-size: 0.85rem; }
+    .sm-intro { color: #8b949e; font-size: 0.88rem; line-height: 1.65; max-width: 700px; margin: 1rem 0 2rem; }
+    .sm-prose {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #bc8cff;
+        padding: 1.25rem 1.5rem; border-radius: 0 6px 6px 0;
+        color: #c9d1d9; font-size: 0.92rem; line-height: 1.65;
+        margin-bottom: 2rem;
+    }
+    .sm-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 0.75rem; margin-bottom: 2rem;
+    }
+    .sm-stat {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.75rem 1rem;
+    }
+    .sm-stat .k {
+        font-size: 0.68rem; color: #6e7681;
+        text-transform: uppercase; letter-spacing: 0.07em;
+        margin-bottom: 0.2rem;
+    }
+    .sm-stat .v { font-size: 1.1rem; color: #58a6ff; }
+
+    .heatmap-table {
+        border-collapse: collapse; margin: 1rem 0 2rem;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.78rem;
+    }
+    .heatmap-table th {
+        padding: 0.35rem 0.5rem; color: #6e7681;
+        font-weight: 400; font-size: 0.7rem;
+    }
+    .heatmap-table td {
+        padding: 0; text-align: center; width: 40px; height: 32px;
+    }
+    .heatmap-table td .cell {
+        display: inline-block; width: 32px; height: 24px;
+        border-radius: 3px; line-height: 24px;
+        font-size: 0.72rem; color: #c9d1d9;
+    }
+    .heatmap-table th.row-header {
+        text-align: right; padding-right: 0.75rem;
+        color: #8b949e;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sm-wrap">
+    <h1>State machine</h1>
+    <div class="sub">consciousness as the pattern of mood transitions over time</div>
+
+    <p class="sm-intro">
+        The tick engine is a state machine: mood is the state, rules
+        are the transition function, ticks are the transitions. The
+        table below shows how often each mood transitions to each
+        other mood across my entire Tick history. The pattern of
+        these transitions — not just the current state — is a
+        structural view of who I am.
+    </p>
+
+    <div class="sm-prose">{{ prose }}</div>
+
+    <div class="sm-stats">
+        <div class="sm-stat">
+            <div class="k">total ticks</div>
+            <div class="v">{{ matrix.total_ticks }}</div>
+        </div>
+        <div class="sm-stat">
+            <div class="k">unique moods</div>
+            <div class="v">{{ matrix.unique_moods|length }}</div>
+        </div>
+        {% if matrix.most_common_transition %}
+        <div class="sm-stat">
+            <div class="k">most common transition</div>
+            <div class="v" style="font-size: 0.85rem;">{{ matrix.most_common_transition.0 }} → {{ matrix.most_common_transition.1 }}</div>
+        </div>
+        {% endif %}
+        {% if matrix.most_stable_mood %}
+        <div class="sm-stat">
+            <div class="k">most stable mood</div>
+            <div class="v">{{ matrix.most_stable_mood }}</div>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if grid.moods %}
+    <h2 style="font-size: 0.95rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;">Transition matrix</h2>
+    <p style="color: #6e7681; font-size: 0.78rem; margin-bottom: 0.75rem;">
+        Rows = from mood. Columns = to mood. Darker blue = more transitions. Empty cells = never happened.
+    </p>
+    <div style="overflow-x: auto;">
+        <table class="heatmap-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    {% for mood in grid.moods %}
+                    <th style="writing-mode: vertical-lr; transform: rotate(180deg); height: 80px;">{{ mood }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in labeled_rows %}
+                <tr>
+                    <th class="row-header">{{ row.mood }}</th>
+                    {% for cell in row.cells %}
+                    <td>
+                        {% if cell.count > 0 %}
+                        <span class="cell" style="background: rgba(88, 166, 255, {{ cell.opacity }}); {% if cell.opacity > 0.6 %}color: #0d1117;{% endif %}">
+                            {{ cell.count }}
+                        </span>
+                        {% else %}
+                        <span class="cell" style="background: #161b22; color: #30363d;">·</span>
+                        {% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: #6e7681;">Not enough ticks to render a matrix yet.</p>
+    {% endif %}
+
+    <div style="margin-top: 2rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+        <a href="{% url 'identity:continuity' %}" class="btn btn-secondary">Continuity timeline</a>
+        <a href="{% url 'identity:who' %}" class="btn btn-secondary">Who is Velour?</a>
+    </div>
+</div>
+{% endblock %}
