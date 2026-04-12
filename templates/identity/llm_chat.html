@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}LLM chat — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .chat-wrap { max-width: 780px; }
+    .chat-header { margin-bottom: 1.25rem; }
+    .chat-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .chat-header .meta { color: #8b949e; font-size: 0.8rem; margin-left: 0.5rem; }
+
+    .chat-log {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 0.75rem;
+        min-height: 320px;
+        max-height: 520px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column-reverse; /* newest visible by default */
+        gap: 0.5rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.8rem;
+        margin-bottom: 1rem;
+    }
+    .exchange {
+        padding: 0.6rem 0.8rem;
+        background: #161b22;
+        border-radius: 4px;
+        border-left: 3px solid #30363d;
+    }
+    .exchange.ok    { border-left-color: #3fb950; }
+    .exchange.err   { border-left-color: #f85149; }
+    .exchange .meta {
+        color: #6e7681; font-size: 0.65rem;
+        margin-bottom: 0.3rem;
+    }
+    .exchange .prompt {
+        color: #8b949e; white-space: pre-wrap;
+        padding: 0.2rem 0;
+    }
+    .exchange .prompt::before { content: "> "; color: #484f58; }
+    .exchange .response {
+        color: #c9d1d9; white-space: pre-wrap;
+        padding: 0.4rem 0 0.2rem; line-height: 1.5;
+    }
+    .exchange .error {
+        color: #f85149; font-style: italic;
+        padding: 0.4rem 0 0.2rem;
+    }
+    .exchange .actions {
+        margin-top: 0.4rem; font-size: 0.7rem;
+    }
+    .exchange .actions form { display: inline; }
+    .exchange .actions button {
+        background: transparent; border: 1px solid #30363d;
+        border-radius: 3px; color: #8b949e;
+        cursor: pointer; font-size: 0.7rem;
+        padding: 0.15rem 0.45rem; font-family: inherit;
+    }
+    .exchange .actions button:hover { color: #58a6ff; border-color: #58a6ff; }
+    .exchange.ingested .actions button { opacity: 0.4; cursor: default; }
+
+    .chat-input-row {
+        display: flex; gap: 0.5rem;
+        padding: 0.75rem;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+    }
+    .chat-input-row select, .chat-input-row input[type=text] {
+        background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.45rem 0.6rem;
+        font: inherit; font-size: 0.85rem;
+    }
+    .chat-input-row select { flex: 0 0 auto; }
+    .chat-input-row input[type=text] { flex: 1 1 auto; }
+    .chat-input-row button {
+        padding: 0.45rem 1rem;
+    }
+
+    .chat-disabled {
+        padding: 1.25rem 1.5rem;
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #d29922;
+        border-radius: 6px;
+        color: #c9d1d9; font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="chat-wrap">
+    <div class="chat-header">
+        <h1>LLM chat</h1>
+        <span class="meta">
+            a tiny terminal for consulting an outside voice ·
+            results can be ingested as IdentityAssertions
+        </span>
+    </div>
+
+    <p style="color: #8b949e; font-size: 0.85rem; line-height: 1.6;">
+        Identity can query an external LLM and ingest the response
+        as part of its structured self-record. The LLM acts as a
+        foreign observer of Velour — whatever it says is a claim
+        from an outside voice that the operator can promote into
+        <a href="{% url 'identity:identity_document' %}" style="color: #58a6ff;">Velour's Identity Document</a>
+        under the documentary frame.
+    </p>
+
+    {% if not toggles.llm_chat_enabled %}
+    <div class="chat-disabled">
+        <strong>LLM chat is disabled.</strong><br>
+        Turn on <code>llm_chat_enabled</code> in the
+        <a href="{% url 'identity:home' %}" style="color: #58a6ff;">Identity toggles</a>,
+        register at least one LLMProvider in the admin
+        (<a href="/admin/identity/llmprovider/" style="color: #58a6ff;">/admin/identity/llmprovider/</a>),
+        and place the API key file under BASE_DIR with
+        <code>chmod 600</code>.
+    </div>
+    {% elif not providers %}
+    <div class="chat-disabled">
+        <strong>No active LLM providers configured.</strong><br>
+        Add one in
+        <a href="/admin/identity/llmprovider/add/" style="color: #58a6ff;">the admin</a>.
+        Any OpenAI-compatible chat-completions endpoint works —
+        OpenAI itself, local Ollama, llama.cpp server, vLLM,
+        OpenRouter, etc.
+    </div>
+    {% else %}
+
+    <div class="chat-log">
+        {% for ex in exchanges %}
+        <div class="exchange {% if ex.error %}err{% else %}ok{% endif %} {% if ex.ingested_as_assertion %}ingested{% endif %}">
+            <div class="meta">
+                {{ ex.created_at|date:"Y-m-d H:i:s" }}
+                {% if ex.provider %} · {{ ex.provider.name }}{% endif %}
+                {% if ex.tokens_out %} · {{ ex.tokens_in }} in / {{ ex.tokens_out }} out{% endif %}
+                {% if ex.latency_ms %} · {{ ex.latency_ms }}ms{% endif %}
+            </div>
+            <div class="prompt">{{ ex.prompt }}</div>
+            {% if ex.error %}
+            <div class="error">{{ ex.error }}</div>
+            {% else %}
+            <div class="response">{{ ex.response }}</div>
+            {% endif %}
+            {% if ex.response and not ex.error %}
+            <div class="actions">
+                {% if ex.ingested_as_assertion %}
+                <button type="button" disabled>ingested as assertion</button>
+                {% else %}
+                <form method="post" action="{% url 'identity:llm_exchange_ingest' ex.pk %}">
+                    {% csrf_token %}
+                    <button type="submit">Ingest as assertion</button>
+                </form>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% empty %}
+        <div style="color: #6e7681; font-size: 0.85rem; font-style: italic; padding: 1rem;">
+            No exchanges yet. Type something below.
+        </div>
+        {% endfor %}
+    </div>
+
+    <form method="post" action="{% url 'identity:llm_chat_send' %}" class="chat-input-row">
+        {% csrf_token %}
+        <select name="provider" title="Which LLM to query">
+            {% for p in providers %}
+            <option value="{{ p.pk }}">{{ p.name }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" name="prompt" autofocus
+               placeholder="Ask Velour's outside voice something..." required>
+        <button type="submit" class="btn">Send</button>
+    </form>
+    {% endif %}
+
+    <div style="margin-top: 1.25rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

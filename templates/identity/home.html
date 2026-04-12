@@ -346,6 +346,7 @@
             <label><input type="checkbox" name="topbar_pulse_enabled" {% if toggles.topbar_pulse_enabled %}checked{% endif %}> Topbar pulse — ambient indicator on every page</label>
             <label><input type="checkbox" name="recursive_introspection_enabled" {% if toggles.recursive_introspection_enabled %}checked{% endif %}> Recursive introspection animation — this page</label>
             <label><input type="checkbox" name="observer_enabled" {% if toggles.observer_enabled %}checked{% endif %}> Keyboard/mouse observer — this page (counts only, never content)</label>
+            <label><input type="checkbox" name="llm_chat_enabled" {% if toggles.llm_chat_enabled %}checked{% endif %}> LLM chat — consult an external LLM as a foreign observer</label>
             <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; margin-top: 0.5rem; width: fit-content;">Save toggles</button>
         </form>
     </div>
@@ -387,6 +388,24 @@
                 Run cron now (force all)
             </button>
         </form>
+    </div>
+
+    <!-- LLM chat — foreign observer via external APIs -->
+    <div class="card" style="border-left: 3px solid #58a6ff;">
+        <h3>LLM chat
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                outside voice
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+            A tiny terminal for consulting an external LLM as a
+            foreign observer of Velour. Responses can be ingested as
+            IdentityAssertions under the documentary frame.
+        </p>
+        <a href="{% url 'identity:llm_chat' %}"
+           class="btn" style="font-size: 0.82rem; padding: 0.35rem 0.75rem;">
+            Open chat
+        </a>
     </div>
 
     <!-- Velour's Identity Document — the four-frame claim card -->

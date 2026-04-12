@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
-    Meditation, Mood, Reflection, Rule, Tick,
+    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Rule, Tick,
 )
 
 
@@ -66,6 +66,24 @@ class IdentityAssertionAdmin(admin.ModelAdmin):
 class IdentityTogglesAdmin(admin.ModelAdmin):
     list_display = ('ticks_enabled', 'reflections_enabled',
                     'meditations_enabled', 'oracle_enabled', 'updated_at')
+
+
+@admin.register(LLMProvider)
+class LLMProviderAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'model', 'is_active', 'created_at')
+    list_filter = ('is_active',)
+    search_fields = ('name', 'slug', 'model', 'base_url')
+    prepopulated_fields = {'slug': ('name',)}
+
+
+@admin.register(LLMExchange)
+class LLMExchangeAdmin(admin.ModelAdmin):
+    list_display = ('created_at', 'provider', 'tokens_in', 'tokens_out',
+                    'latency_ms', 'ingested_as_assertion')
+    list_filter = ('provider', 'ingested_as_assertion')
+    readonly_fields = ('created_at', 'prompt', 'system_prompt',
+                       'response', 'tokens_in', 'tokens_out',
+                       'latency_ms', 'error')
 
 
 @admin.register(Reflection)

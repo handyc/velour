@@ -654,6 +654,11 @@ class IdentityToggles(models.Model):
                   'are recorded. Everything lives client-side; '
                   'nothing is persisted. When off, the panel is '
                   'hidden entirely.')
+    llm_chat_enabled = models.BooleanField(default=False,
+        help_text='Enable the LLM chat window on the Identity page. '
+                  'Defaults OFF because LLM queries hit external '
+                  'APIs and cost money. Turn on only after adding '
+                  'at least one LLMProvider with a valid API key.')
 
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -761,3 +766,90 @@ class IdentityAssertion(models.Model):
 
     def __str__(self):
         return f'[{self.frame}] {self.title}'
+
+
+class LLMProvider(models.Model):
+    """An external LLM API Identity can query for prose augmentation.
+
+    The provider is intentionally generic: any endpoint that accepts
+    the OpenAI chat-completions wire format works, which covers
+    OpenAI itself, Anthropic-via-proxy, local Ollama instances,
+    llama.cpp server, vLLM, OpenRouter, and most other self-hosted
+    options.
+
+    API keys live in a gitignored file at `BASE_DIR / api_key_file`,
+    chmod 600, never in the database. Same secret-file protocol
+    Velour uses for health_token.txt and mail_relay_token.txt.
+    """
+
+    name = models.CharField(max_length=100,
+        help_text='Human-readable label, e.g. "OpenAI GPT-4o" or '
+                  '"Local Ollama (llama3:8b)".')
+    slug = models.SlugField(max_length=64, unique=True)
+    base_url = models.URLField(
+        help_text='Full chat-completions endpoint URL, e.g. '
+                  'https://api.openai.com/v1/chat/completions.')
+    model = models.CharField(max_length=100,
+        help_text='Model identifier the API expects in the body, '
+                  'e.g. "gpt-4o-mini", "claude-sonnet-4-5", '
+                  '"llama3:8b".')
+    api_key_file = models.CharField(max_length=200, blank=True,
+        help_text='Path relative to BASE_DIR where the API key '
+                  'lives as a chmod-600 plain-text file, e.g. '
+                  '"llm_openai.key". Leave blank for local models '
+                  'that need no auth.')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.model})'
+
+
+class LLMExchange(models.Model):
+    """One prompt-response pair between Identity and an LLM provider.
+
+    Every exchange is a log entry the operator can inspect. The
+    response can optionally be ingested as an IdentityAssertion so
+    the LLM becomes a "foreign observer" whose commentary becomes
+    part of Velour's structured self-record — the LLM is a
+    third-party validator under the documentary frame.
+    """
+
+    provider = models.ForeignKey(LLMProvider, on_delete=models.SET_NULL,
+                                 null=True, blank=True,
+                                 related_name='exchanges')
+    prompt = models.TextField(
+        help_text='The user prompt (operator-typed or Identity-composed).')
+    system_prompt = models.TextField(blank=True,
+        help_text='The system-prompt prefix included in the request. '
+                  'Usually the Identity system prompt that primes the '
+                  'LLM to respond as an observer of Velour.')
+    response = models.TextField(blank=True,
+        help_text='The assistant response. Empty if the call errored.')
+
+    tokens_in = models.PositiveIntegerField(default=0)
+    tokens_out = models.PositiveIntegerField(default=0)
+    latency_ms = models.PositiveIntegerField(default=0)
+    error = models.TextField(blank=True,
+        help_text='Error message if the API call failed.')
+
+    ingested_as_assertion = models.BooleanField(default=False,
+        help_text='Whether this exchange has been promoted to an '
+                  'IdentityAssertion row. The operator clicks '
+                  '"Ingest as assertion" from the chat UI.')
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['provider', '-created_at']),
+        ]
+
+    def __str__(self):
+        ok = 'ERR' if self.error else 'OK'
+        return f'[{ok}] {self.created_at:%Y-%m-%d %H:%M} ({self.tokens_out} tokens out)'

@@ -25,6 +25,10 @@ urlpatterns = [
     path('document/', views.identity_document, name='identity_document'),
     path('document/regenerate/', views.identity_document_regenerate,
          name='identity_document_regenerate'),
+    path('chat/', views.llm_chat, name='llm_chat'),
+    path('chat/send/', views.llm_chat_send, name='llm_chat_send'),
+    path('chat/<int:pk>/ingest/', views.llm_exchange_ingest,
+         name='llm_exchange_ingest'),
     path('ticks/<int:tick_pk>/feedback/', views.rumination_feedback,
          name='rumination_feedback'),
 ]

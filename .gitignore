@@ -38,6 +38,9 @@ secret_key.txt
 health_token.txt
 mail_relay_token.txt
 *.token
+# LLM provider API keys — per-provider chmod-600 files
+llm_*.key
+*_api_key.txt
 
 # --- Local-only docs / scratch the user doesn't want in the public repo ----
 Master_Control_Notes.pdf

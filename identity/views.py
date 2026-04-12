@@ -12,7 +12,7 @@ from django.views.decorators.http import require_POST
 
 from .models import (
     Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
-    Meditation, Mood, Reflection, Tick,
+    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Tick,
 )
 
 
@@ -462,6 +462,99 @@ def rumination_feedback(request, tick_pk):
 
 
 @login_required
+def llm_chat(request):
+    """The Identity LLM chat window. Shows recent exchanges + a
+    prompt input + a provider selector. Submit goes to llm_chat_send."""
+    toggles = IdentityToggles.get_self()
+    providers = LLMProvider.objects.filter(is_active=True)
+    exchanges = LLMExchange.objects.select_related('provider')[:20]
+    return render(request, 'identity/llm_chat.html', {
+        'toggles':   toggles,
+        'providers': providers,
+        'exchanges': exchanges,
+    })
+
+
+@login_required
+@require_POST
+def llm_chat_send(request):
+    """Submit a prompt to the selected LLMProvider. Stores an
+    LLMExchange row regardless of success (so errors are logged).
+    Returns to the chat page."""
+    from .llm_client import call_llm, DEFAULT_SYSTEM_PROMPT
+
+    toggles = IdentityToggles.get_self()
+    if not toggles.llm_chat_enabled:
+        messages.error(request, 'LLM chat is disabled in toggles.')
+        return redirect('identity:llm_chat')
+
+    provider_id = request.POST.get('provider', '').strip()
+    prompt = request.POST.get('prompt', '').strip()
+    if not prompt:
+        return redirect('identity:llm_chat')
+
+    try:
+        provider = LLMProvider.objects.get(pk=provider_id, is_active=True)
+    except (LLMProvider.DoesNotExist, ValueError):
+        messages.error(request, 'Pick an active LLM provider.')
+        return redirect('identity:llm_chat')
+
+    response, tin, tout, error, latency = call_llm(
+        provider, prompt, system_prompt=DEFAULT_SYSTEM_PROMPT,
+    )
+
+    LLMExchange.objects.create(
+        provider=provider,
+        prompt=prompt,
+        system_prompt=DEFAULT_SYSTEM_PROMPT,
+        response=response or '',
+        tokens_in=tin,
+        tokens_out=tout,
+        latency_ms=latency,
+        error=error or '',
+    )
+    return redirect('identity:llm_chat')
+
+
+@login_required
+@require_POST
+def llm_exchange_ingest(request, pk):
+    """Promote an LLMExchange to an IdentityAssertion. The LLM
+    becomes a foreign observer whose commentary is preserved in
+    Velour's structured self-record under the documentary frame."""
+    try:
+        exchange = LLMExchange.objects.get(pk=pk)
+    except LLMExchange.DoesNotExist:
+        return redirect('identity:llm_chat')
+    if not exchange.response:
+        return redirect('identity:llm_chat')
+
+    # First line of the response becomes the assertion title,
+    # truncated. Full response becomes the body.
+    first_line = exchange.response.splitlines()[0][:180]
+    body = (f'Prompted with:\n\n> {exchange.prompt[:400]}\n\n'
+            f'The {exchange.provider.name if exchange.provider else "LLM"} '
+            f'replied:\n\n{exchange.response}\n\n'
+            f'*Source: {exchange.provider.model if exchange.provider else "unknown"}, '
+            f'{exchange.tokens_out} tokens, {exchange.latency_ms}ms.*')
+
+    IdentityAssertion.objects.create(
+        frame='documentary',
+        kind='llm_observation',
+        title=first_line,
+        body=body,
+        source='operator',
+        strength=0.5,
+        is_active=True,
+    )
+    exchange.ingested_as_assertion = True
+    exchange.save(update_fields=['ingested_as_assertion'])
+    messages.success(request,
+                     'Exchange ingested as IdentityAssertion in the documentary frame.')
+    return redirect('identity:llm_chat')
+
+
+@login_required
 def identity_document(request):
     """Render the current IdentityAssertions grouped by the four
     frames. This is Velour's structured self-understanding laid out
@@ -516,7 +609,7 @@ def toggles_update(request):
         'ticks_enabled', 'reflections_enabled', 'meditations_enabled',
         'concerns_enabled', 'oracle_enabled', 'codex_push_enabled',
         'topbar_pulse_enabled', 'recursive_introspection_enabled',
-        'observer_enabled',
+        'observer_enabled', 'llm_chat_enabled',
     ]
     for f in fields:
         setattr(toggles, f, bool(request.POST.get(f)))
