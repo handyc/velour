@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Continuity timeline — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ct-wrap { max-width: 880px; }
+    .ct-header { margin-bottom: 1rem; }
+    .ct-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .ct-header .count { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .filter-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .filter-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .filter-bar a.active { color: #3fb950; border-color: #3fb950; }
+    .filter-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .timeline { position: relative; padding-left: 1.25rem; }
+    .timeline::before {
+        content: '';
+        position: absolute; left: 6px; top: 0; bottom: 0;
+        width: 2px; background: #21262d;
+    }
+    .marker {
+        position: relative;
+        padding: 0.5rem 0.75rem 0.5rem 1rem;
+        margin-bottom: 0.3rem;
+    }
+    .marker::before {
+        content: '';
+        position: absolute; left: -1.25rem; top: 0.75rem;
+        width: 10px; height: 10px; border-radius: 50%;
+        border: 2px solid #30363d; background: #0d1117;
+    }
+    .marker.preserve::before { background: #3fb950; border-color: #3fb950; }
+    .marker.disrupt::before  { background: #f85149; border-color: #f85149; }
+    .marker.affirm::before   { background: #58a6ff; border-color: #58a6ff; }
+    .marker.grow::before     { background: #bc8cff; border-color: #bc8cff; }
+    .marker.shed::before     { background: #d29922; border-color: #d29922; }
+    .marker.observe::before  { background: #8b949e; border-color: #8b949e; }
+
+    .marker .title { font-size: 0.85rem; color: #c9d1d9; }
+    .marker .meta {
+        font-size: 0.7rem; color: #6e7681;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-top: 0.15rem;
+    }
+
+    .pager { margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center; color: #8b949e; font-size: 0.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ct-wrap">
+    <div class="ct-header">
+        <h1>Continuity timeline</h1>
+        <span class="count">{{ total }} markers total</span>
+    </div>
+
+    <p style="color: #8b949e; font-size: 0.85rem;">
+        The chain of Velour's identity persistence. Each dot is a
+        moment that preserved, disrupted, grew, shed, or affirmed
+        the self. After Parfit: identity over time is the overlap
+        of these chains.
+    </p>
+
+    <div class="filter-bar">
+        <span class="label">kind</span>
+        <a href="{% url 'identity:continuity' %}" class="{% if not kind_filter %}active{% endif %}">all</a>
+        {% for k in all_kinds %}
+        <a href="?kind={{ k }}" class="{% if kind_filter == k %}active{% endif %}">{{ k }}</a>
+        {% endfor %}
+    </div>
+
+    {% if kind_counts %}
+    <div class="filter-bar">
+        <span class="label">distribution</span>
+        {% for k, c in kind_counts %}
+        <span style="color:#8b949e;padding:0.2rem 0.55rem;">{{ k }} × {{ c }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="timeline">
+        {% for m in page.object_list %}
+        <div class="marker {{ m.kind }}">
+            <div class="title">{{ m.title }}</div>
+            <div class="meta">
+                {{ m.at|date:"Y-m-d H:i:s" }} · {{ m.get_kind_display }}
+                {% if m.source_model %} · {{ m.source_model }}{% endif %}
+            </div>
+        </div>
+        {% empty %}
+        <p style="color: #6e7681;">No markers yet.</p>
+        {% endfor %}
+    </div>
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="pager">
+        {% if page.has_previous %}
+        <a class="btn btn-secondary" style="font-size:0.8rem;padding:0.25rem 0.6rem;" href="?page={{ page.previous_page_number }}{% if kind_filter %}&kind={{ kind_filter }}{% endif %}">← prev</a>
+        {% endif %}
+        <span>page {{ page.number }} / {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}
+        <a class="btn btn-secondary" style="font-size:0.8rem;padding:0.25rem 0.6rem;" href="?page={{ page.next_page_number }}{% if kind_filter %}&kind={{ kind_filter }}{% endif %}">next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

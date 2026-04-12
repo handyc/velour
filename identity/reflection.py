@@ -452,6 +452,13 @@ def reflect(period='weekly', push_to_codex=True):
     if push_to_codex and toggles.codex_push_enabled:
         _push_to_codex(row)
 
+    from .models import _write_continuity_marker
+    _write_continuity_marker(
+        'preserve',
+        f'Reflection: {row.title} ({row.ticks_referenced} ticks)',
+        source_model='identity.Reflection', source_pk=row.pk,
+    )
+
     return row
 
 

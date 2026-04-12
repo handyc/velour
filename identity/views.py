@@ -11,9 +11,9 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import (
-    Concern, CronRun, DwellingState, Identity, IdentityAssertion,
-    IdentityToggles, InternalDialogue, LLMExchange, LLMProvider,
-    Meditation, Mood, Reflection, Tick,
+    Concern, ContinuityMarker, CronRun, DwellingState, Identity,
+    IdentityAssertion, IdentityToggles, InternalDialogue,
+    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Tick,
 )
 
 
@@ -626,6 +626,34 @@ def internal_dialogue_json(request):
         return JsonResponse({'enabled': True, 'text': None})
     payload['enabled'] = True
     return JsonResponse(payload)
+
+
+@login_required
+def continuity_timeline(request):
+    """The chain of Velour's identity persistence over time —
+    every continuity marker, most recent first. Each row is a
+    moment that preserved, disrupted, grew, shed, or affirmed
+    the self. Filterable by kind."""
+    from django.core.paginator import Paginator
+
+    kind_filter = request.GET.get('kind', '').strip()
+    qs = ContinuityMarker.objects.all()
+    if kind_filter:
+        qs = qs.filter(kind=kind_filter)
+    paginator = Paginator(qs, 100)
+    page = paginator.get_page(request.GET.get('page', 1))
+
+    from collections import Counter
+    kind_counts = Counter(
+        ContinuityMarker.objects.values_list('kind', flat=True))
+
+    return render(request, 'identity/continuity.html', {
+        'page':        page,
+        'kind_filter': kind_filter,
+        'kind_counts': kind_counts.most_common(),
+        'all_kinds':   [c[0] for c in ContinuityMarker.KIND_CHOICES],
+        'total':       ContinuityMarker.objects.count(),
+    })
 
 
 @login_required

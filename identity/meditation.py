@@ -801,6 +801,13 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     if push_to_codex and toggles.codex_push_enabled:
         _push_to_codex(med)
 
+    from .models import _write_continuity_marker
+    _write_continuity_marker(
+        'grow',
+        f'Meditation L{depth} {voice}: {title[:80]}',
+        source_model='identity.Meditation', source_pk=med.pk,
+    )
+
     # Self-modifying data: at depth 3+, the meditation examines
     # recurring aspects that don't yet have rules and proposes new
     # ones. Proposals sit in status='proposed' until operator

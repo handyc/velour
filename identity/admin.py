@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
+    Concern, ContinuityMarker, CronRun, DwellingState, Identity,
+    IdentityAssertion, IdentityToggles, InternalDialogue,
     LLMExchange, LLMProvider, Meditation, Mood, Reflection, Rule, Tick,
 )
 
@@ -60,6 +61,27 @@ class IdentityAssertionAdmin(admin.ModelAdmin):
         ('Provenance', {'fields': ('source', 'strength',
                                    'first_asserted_at', 'last_confirmed_at')}),
     )
+
+
+@admin.register(ContinuityMarker)
+class ContinuityMarkerAdmin(admin.ModelAdmin):
+    list_display = ('at', 'kind', 'title', 'source_model')
+    list_filter = ('kind',)
+    date_hierarchy = 'at'
+    readonly_fields = ('at',)
+    search_fields = ('title', 'description')
+
+
+@admin.register(DwellingState)
+class DwellingStateAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'is_active', 'depth', 'opened_at')
+    readonly_fields = ('last_touched_at', 'updated_at')
+
+
+@admin.register(InternalDialogue)
+class InternalDialogueAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'speaker_a', 'speaker_b', 'created_at')
+    date_hierarchy = 'created_at'
 
 
 @admin.register(IdentityToggles)
