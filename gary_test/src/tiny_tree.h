@@ -318,17 +318,18 @@ inline bool TinyTree::loadFromJson(const char* json, size_t len) {
         p = _skipWhitespace(json, p, (int)len);
         int valPos;
         if (_matchKey(json, p, (int)len, "root", valPos)) {
+            int origValPos = valPos;
             rootStart = valPos;
-            // Parse the tree recursively
             _parseNode(json, valPos, (int)len);
-            p = _skipValue(json, valPos, (int)len);
+            p = _skipValue(json, origValPos, (int)len);
         } else if (_matchKey(json, p, (int)len, "classes", valPos)) {
+            int origValPos = valPos;
             // Parse the classes array: ["obs", "concern", ...]
             if (valPos < (int)len && json[valPos] == '[') {
                 valPos++;
                 while (valPos < (int)len && json[valPos] != ']' && _classCount < TINY_TREE_MAX_CLASSES) {
                     valPos = _skipWhitespace(json, valPos, (int)len);
-                    if (json[valPos] == '"') {
+                    if (valPos < (int)len && json[valPos] == '"') {
                         valPos++;
                         int start = valPos;
                         while (valPos < (int)len && json[valPos] != '"') valPos++;
@@ -338,13 +339,15 @@ inline bool TinyTree::loadFromJson(const char* json, size_t len) {
                         _classNameBuf[_classCount][nameLen] = '\0';
                         _classNames[_classCount] = _classNameBuf[_classCount];
                         _classCount++;
-                        if (valPos < (int)len) valPos++; // skip closing "
+                        if (valPos < (int)len) valPos++;
                     }
                     valPos = _skipWhitespace(json, valPos, (int)len);
                     if (valPos < (int)len && json[valPos] == ',') valPos++;
                 }
             }
-            p = _skipValue(json, valPos, (int)len);
+            // Always skip from the ORIGINAL position so we don't
+            // double-advance past the next key.
+            p = _skipValue(json, origValPos, (int)len);
         } else {
             // Skip unknown top-level key
             p = _skipWhitespace(json, p, (int)len);

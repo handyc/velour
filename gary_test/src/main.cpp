@@ -588,6 +588,22 @@ static void handleDataJson() {
     s += (WiFi.status() == WL_CONNECTED) ? String(WiFi.RSSI()) : "null";
     s += ",\"last_read_ms_ago\":";
     s += String(ageMs);
+
+#ifdef NODE_HAS_DECISION_TREE
+    s += ",\"tree_loaded\":";
+    s += treeLoaded ? "true" : "false";
+    s += ",\"tree_nodes\":";
+    s += String(decisionTree.nodeCount());
+    s += ",\"tree_classes\":";
+    s += String(decisionTree.classCount());
+    if (lastPrediction >= 0) {
+        s += ",\"tree_prediction\":\"";
+        s += lastClassName;
+        s += "\",\"tree_confidence\":";
+        s += String(lastConfidence);
+    }
+#endif
+
     s += "}";
 
     httpd.sendHeader("Cache-Control", "no-store");
