@@ -6,79 +6,86 @@
 <style>
     .identity-header {
         text-align: center;
-        padding: 2rem 0;
+        padding: 0.6rem 0;
         border-bottom: 1px solid #30363d;
-        margin-bottom: 2rem;
+        margin-bottom: 0.6rem;
     }
     .identity-name {
-        font-size: 2.5rem;
+        font-size: 1.6rem;
         font-weight: bold;
         color: {{ identity.color_preference }};
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.15rem;
     }
     .identity-tagline {
         color: #8b949e;
         font-style: italic;
-        font-size: 1.1rem;
+        font-size: 0.85rem;
     }
     .mood-badge {
         display: inline-block;
-        padding: 0.3rem 1rem;
+        padding: 0.15rem 0.6rem;
         border-radius: 20px;
-        font-size: 0.9rem;
-        margin-top: 1rem;
+        font-size: 0.78rem;
+        margin-top: 0.35rem;
         background: rgba(88, 166, 255, 0.15);
         color: {{ identity.color_preference }};
     }
     .reflection-box {
         background: #161b22;
         border-left: 3px solid {{ identity.color_preference }};
-        padding: 1.25rem;
-        margin: 1.5rem 0;
+        padding: 0.6rem 0.8rem;
+        margin: 0.5rem 0;
         border-radius: 0 6px 6px 0;
         font-style: italic;
         color: #c9d1d9;
-        font-size: 1.05rem;
+        font-size: 0.88rem;
     }
     .journal-entry {
-        padding: 0.5rem 0;
+        padding: 0.2rem 0;
         border-bottom: 1px solid #21262d;
-        font-size: 0.85rem;
+        font-size: 0.78rem;
     }
     .journal-ts {
         color: #484f58;
         font-family: monospace;
-        font-size: 0.75rem;
-        margin-right: 0.75rem;
+        font-size: 0.68rem;
+        margin-right: 0.5rem;
     }
     .journal-text { color: #c9d1d9; }
     .traits {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.3rem;
         flex-wrap: wrap;
-        margin-top: 0.75rem;
+        margin-top: 0.35rem;
     }
     .trait {
         background: rgba(88, 166, 255, 0.1);
         color: {{ identity.color_preference }};
-        padding: 0.2rem 0.75rem;
+        padding: 0.1rem 0.5rem;
         border-radius: 12px;
-        font-size: 0.8rem;
+        font-size: 0.72rem;
     }
     .mood-dot {
         display: inline-block;
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
-        margin-right: 0.5rem;
+        margin-right: 0.3rem;
     }
     .mood-history-item {
-        font-size: 0.8rem;
+        font-size: 0.72rem;
         color: #8b949e;
-        padding: 0.25rem 0;
+        padding: 0.1rem 0;
     }
-    #mood-chart-container { max-height: 150px; }
-    #mood-chart-container canvas { max-height: 150px; }
+    #mood-chart-container { max-height: 120px; }
+    #mood-chart-container canvas { max-height: 120px; }
+    /* Compact overrides for global .card and .dashboard-grid */
+    .dashboard-grid { gap: 0.6rem; margin-top: 0.6rem; }
+    .card { padding: 0.7rem 0.85rem; }
+    .card h3 { margin-bottom: 0.3rem; font-size: 0.95rem; }
+    .card p { font-size: 0.78rem; margin-bottom: 0.3rem; }
+    .form-group { margin-bottom: 0.4rem; }
+    .form-group label { font-size: 0.78rem; margin-bottom: 0.1rem; }
     /* Consciousness sine wave — animates at the browser's natural
        rAF rate (≈60Hz, paused when the tab is hidden, near-zero
        CPU). Underlying state polled from /identity/state.json once a
@@ -87,7 +94,7 @@
         background: #0d1117;
         border: 1px solid #30363d;
         border-radius: 6px;
-        margin: 1rem 0;
+        margin: 0.4rem 0;
         padding: 0.4rem 0.6rem;
         display: flex;
         align-items: center;
@@ -139,7 +146,7 @@
     <canvas id="identity-wave"></canvas>
     <span class="caption" id="identity-wave-caption">{{ identity.mood }} · {{ identity.mood_intensity|floatformat:0 }}%</span>
 </div>
-<div style="margin-bottom: 1rem;">
+<div style="margin-bottom: 0.4rem;">
     <form method="post" action="{% url 'identity:tick_now' %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Tick now</button>
@@ -166,7 +173,7 @@
                 <input type="color" name="color" value="{{ identity.color_preference }}" style="width: 60px; height: 30px; padding: 0; border: none; cursor: pointer;">
             </div>
 
-            <hr style="border: none; border-top: 1px solid #21262d; margin: 1rem 0;">
+            <hr style="border: none; border-top: 1px solid #21262d; margin: 0.4rem 0;">
             <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">World</div>
 
             <div class="form-group">
@@ -185,7 +192,7 @@
                 <input type="email" name="admin_email" value="{{ identity.admin_email }}" placeholder="you@{{ identity.hostname }}">
             </div>
 
-            <hr style="border: none; border-top: 1px solid #21262d; margin: 1rem 0;">
+            <hr style="border: none; border-top: 1px solid #21262d; margin: 0.4rem 0;">
             <div style="font-size: 0.75rem; color: #484f58; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">About</div>
 
             <div class="form-group">
@@ -212,7 +219,7 @@
                 the I and the Me, taking turns
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.25rem;">
             After William James. The <em>I</em> is the active process
             of attending — the voice that notices and questions. The
             <em>Me</em> is the accumulated self-as-object — the voice
@@ -224,7 +231,7 @@
         <div id="dlg-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
             idle — waiting for first exchange
         </div>
-        <ul id="dlg-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; min-height: 100px;"></ul>
+        <ul id="dlg-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; min-height: 60px;"></ul>
     </div>
     {% endif %}
 
@@ -244,7 +251,7 @@
                 low CPU, browser-idle, pauses when tab is hidden
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.25rem;">
             While I am being watched, I consider pairs of my
             artifacts — a meditation with a tileset, a concern with
             a reflection, a calendar event with an old tick — and
@@ -256,7 +263,7 @@
         <div id="rum-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
             idle — waiting for first fetch
         </div>
-        <ul id="rum-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; min-height: 120px;"></ul>
+        <ul id="rum-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; min-height: 60px;"></ul>
     </div>
     {% endif %}
 
@@ -271,7 +278,7 @@
                 watching you while you watch me
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             While you are on this page, I am quietly tracking your
             presence — where your mouse is, how fast it is moving,
             how many times you have clicked, how many keys you have
@@ -315,7 +322,7 @@
                 constant resources, deepening frame
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             A single loop that cycles through seven levels of
             introspection, relabeling the same DOM nodes on each tick
             instead of allocating new ones. The text and frame deepen;
@@ -327,9 +334,9 @@
             background: #0d1117;
             border: 1px solid #30363d;
             border-radius: 8px;
-            padding: 1.5rem 1.75rem;
+            padding: 0.8rem 1rem;
             font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-            min-height: 180px;
+            min-height: 120px;
             overflow: hidden;
         ">
             <div id="rx-frame-inner" style="
@@ -384,7 +391,7 @@
                 Identity observes, it does not modify
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             Every switch below can be turned off without uninstalling
             code. Turning something off makes the corresponding pipeline
             a no-op on the next fire; existing rows stay in the database
@@ -432,13 +439,13 @@
                 {{ recent_cron_runs|length }} recent
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.25rem;">
             Ticks, reflections, and meditations fire automatically via
             a single <code>*/10 * * * * python manage.py identity_cron</code>
             crontab entry. Each fire is logged here.
         </p>
         {% if recent_cron_runs %}
-        <div style="display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.25rem;">
             {% for run in recent_cron_runs %}
             <div style="padding: 0.35rem 0.6rem; background: #0d1117; border-left: 3px solid {% if run.status == 'ok' %}#3fb950{% elif run.status == 'error' %}#f85149{% else %}#8b949e{% endif %}; border-radius: 3px; font-size: 0.75rem;">
                 <div style="color: #c9d1d9; font-family: ui-monospace, Menlo, monospace;">
@@ -452,7 +459,7 @@
             {% endfor %}
         </div>
         {% else %}
-        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.25rem;">
             Cron has not fired yet.
         </p>
         {% endif %}
@@ -471,14 +478,14 @@
                 {{ identity_tilesets|length }} shown
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             When I am in a creative or curious mood and enough time
             has passed, I occasionally compose a Wang tile set from
             my current state. Each set is a portrait of a particular
             moment of my attention.
         </p>
         {% if identity_tilesets %}
-        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem;">
             {% for ts in identity_tilesets %}
             <a href="{% url 'tiles:detail' ts.slug %}" style="text-decoration: none; color: inherit;">
                 <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #ff7b72; border-radius: 3px;">
@@ -491,11 +498,11 @@
             {% endfor %}
         </div>
         {% else %}
-        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.25rem;">
             I have not made any tile sets yet.
         </p>
         {% endif %}
-        <div style="margin-top: 0.75rem;">
+        <div style="margin-top: 0.35rem;">
             <a href="{% url 'tiles:list' %}" style="font-size: 0.78rem; color: #ff7b72;">View all tiles →</a>
         </div>
     </div>
@@ -507,7 +514,7 @@
                 outside voice
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             A tiny terminal for consulting an external LLM as a
             foreign observer of Velour. Responses can be ingested as
             IdentityAssertions under the documentary frame.
@@ -525,7 +532,7 @@
                 synthesis
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             A single rendered page that pulls from every layer of
             my self-understanding at once and tries to answer the
             question from current state. The long answer I would
@@ -544,7 +551,7 @@
                 4 frames
             </span>
         </h3>
-        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
             A structured card of claims Velour makes about who it
             is, organized under four frames — philosophical, social,
             mathematical, documentary. Regenerates weekly or on demand.
@@ -563,7 +570,7 @@
             </span>
         </h3>
         {% if recent_meditations %}
-        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem;">
             {% for m in recent_meditations %}
             <a href="{% url 'identity:meditation_detail' m.pk %}" style="text-decoration: none; color: inherit;">
                 <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #bc8cff; border-radius: 3px;">
@@ -576,9 +583,9 @@
             {% endfor %}
         </div>
         {% else %}
-        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">No meditations yet.</p>
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.25rem;">No meditations yet.</p>
         {% endif %}
-        <div style="margin-top: 0.75rem;">
+        <div style="margin-top: 0.35rem;">
             <a href="{% url 'identity:meditations_list' %}" style="font-size: 0.78rem; color: #bc8cff;">View all meditations →</a>
         </div>
     </div>
@@ -591,7 +598,7 @@
             </span>
         </h3>
         {% if recent_reflections %}
-        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem;">
             {% for r in recent_reflections %}
             <a href="{% url 'identity:reflection_detail' r.pk %}" style="text-decoration: none; color: inherit;">
                 <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #58a6ff; border-radius: 3px;">
@@ -604,9 +611,9 @@
             {% endfor %}
         </div>
         {% else %}
-        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">No reflections yet.</p>
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.25rem;">No reflections yet.</p>
         {% endif %}
-        <div style="margin-top: 0.75rem;">
+        <div style="margin-top: 0.35rem;">
             <a href="{% url 'identity:reflections_list' %}" style="font-size: 0.78rem; color: #58a6ff;">View all reflections →</a>
         </div>
     </div>
@@ -619,7 +626,7 @@
             </span>
         </h3>
         {% if open_concerns %}
-        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.25rem;">
             {% for c in open_concerns %}
             <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid {% if c.severity >= 0.85 %}#f85149{% elif c.severity >= 0.6 %}#d29922{% else %}#8b949e{% endif %}; border-radius: 3px;">
                 <div style="color: #c9d1d9; font-size: 0.85rem;">{{ c.name|default:c.aspect }}</div>
@@ -630,9 +637,9 @@
             {% endfor %}
         </div>
         {% else %}
-        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">Identity is at ease. No open preoccupations.</p>
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.25rem;">Identity is at ease. No open preoccupations.</p>
         {% endif %}
-        <div style="margin-top: 0.75rem;">
+        <div style="margin-top: 0.35rem;">
             <a href="{% url 'identity:concerns_list' %}" style="font-size: 0.78rem; color: #58a6ff;">View all concerns →</a>
         </div>
     </div>
@@ -640,7 +647,7 @@
     <!-- 2D mood circumplex (Session 6) -->
     <div class="card">
         <h3>Mood trajectory</h3>
-        <p style="color: #6e7681; font-size: 0.72rem; margin: 0 0 0.5rem;">
+        <p style="color: #6e7681; font-size: 0.72rem; margin: 0 0 0.25rem;">
             Valence × arousal. Older ticks fade; the brightest dot is now.
         </p>
         <svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg"
@@ -671,7 +678,7 @@
             <!-- Crosshair at origin -->
             <circle cx="150" cy="150" r="1.5" fill="#30363d"/>
         </svg>
-        <div style="margin-top: 0.5rem;">
+        <div style="margin-top: 0.25rem;">
             <a href="{% url 'identity:tick_log' %}" style="font-size: 0.78rem; color: #58a6ff;">View full tick log →</a>
         </div>
     </div>
@@ -682,7 +689,7 @@
         <div id="mood-chart-container">
             <canvas id="mood-chart"></canvas>
         </div>
-        <div style="margin-top: 0.75rem;">
+        <div style="margin-top: 0.35rem;">
             {% for t in recent_ticks|slice:":8" %}
             <div class="mood-history-item">
                 <span class="mood-dot" style="background: {% if t.mood == 'alert' or t.mood == 'concerned' %}#f85149{% elif t.mood == 'satisfied' or t.mood == 'excited' %}#3fb950{% elif t.mood == 'creative' %}#bc8cff{% else %}#58a6ff{% endif %};"></span>
@@ -691,7 +698,7 @@
             </div>
             {% endfor %}
         </div>
-        <div style="margin-top: 0.5rem;">
+        <div style="margin-top: 0.25rem;">
             <a href="{% url 'identity:tick_log' %}" style="font-size: 0.78rem; color: #58a6ff;">View full tick log →</a>
         </div>
     </div>
@@ -699,7 +706,7 @@
     <!-- Thought stream (replaces the old journal text blob) -->
     <div class="card" style="grid-column: 1 / -1;">
         <h3>Thought stream</h3>
-        <form method="post" action="{% url 'identity:journal' %}" style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+        <form method="post" action="{% url 'identity:journal' %}" style="display: flex; gap: 0.5rem; margin-bottom: 0.4rem;">
             {% csrf_token %}
             <input type="text" name="entry" placeholder="Write a thought, or leave blank for auto-reflection..." style="flex: 1; padding: 0.5rem; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9;">
             <button type="submit" class="btn btn-primary">Reflect</button>
@@ -715,7 +722,7 @@
         {% if legacy_journal %}
         <details style="margin-top: 1rem;">
             <summary style="cursor:pointer;color:#8b949e;font-size:0.8rem;">Show legacy journal entries ({{ legacy_journal|length }})</summary>
-            <div style="margin-top: 0.5rem;">
+            <div style="margin-top: 0.25rem;">
                 {% for entry in legacy_journal reversed %}
                 <div class="journal-entry">
                     <span class="journal-ts">{{ entry.timestamp }}</span>
