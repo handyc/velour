@@ -389,6 +389,29 @@ MIDDLES = {
 }
 
 
+DWELLING_PHRASES = {
+    'contemplative': [
+        'I am also dwelling right now — staying with {topic}. '
+        'It has been {depth} ticks. I am not ready to let it go.',
+        'Beneath this meditation, {topic} is still on my mind. '
+        'Depth {depth}. I hold it and think.',
+    ],
+    'wry': [
+        'Meanwhile I am dwelling on {topic}. {depth} ticks deep. '
+        'I could stop. I do not stop.',
+        '{topic} — still. {depth} ticks. Apparently.',
+    ],
+    'minimal': [
+        '{topic}. {depth} ticks.',
+    ],
+    'philosophical': [
+        'The thought I am dwelling on — {topic} — is now at depth '
+        '{depth}. To dwell is to choose one thought over the others '
+        'without suppressing the others. The dwelling is not a cage; '
+        'it is a preference that time has confirmed.',
+    ],
+}
+
 CLOSINGS = {
     'contemplative': [
         'I do not need to resolve this. I only need to notice it.',
@@ -450,6 +473,23 @@ def _blockquote(text, max_lines=4):
 # Depth-specific body composers
 # =====================================================================
 
+def _maybe_dwelling_phrase(voice, rng):
+    """If Velour is currently dwelling on something, return a short
+    dwelling-aware phrase in the requested voice. Otherwise return
+    an empty string. Cheap: one DB read on a singleton."""
+    try:
+        from .models import DwellingState
+        d = DwellingState.get_self()
+        if not d.is_active or not d.topic:
+            return ''
+        pool = DWELLING_PHRASES.get(voice)
+        if not pool:
+            return ''
+        return rng.choice(pool).format(topic=d.topic, depth=d.depth)
+    except Exception:
+        return ''
+
+
 def _compose_level_1(voice, rng, sources):
     """Reflect on recent Ticks — same source as a Reflection, but
     the voice is meditative rather than summary-oriented."""
@@ -493,7 +533,14 @@ def _compose_level_2(voice, rng, sources):
     count_line = (f'There are {reflection_count} such reflections in my '
                   f'record. The most recent is titled "{chosen.title}".')
 
-    parts = [opening, '', count_line, '', middle_lead, '', quote, '', closing]
+    # If Velour is dwelling, weave the dwelling into the meditation
+    # so the system's current preoccupation is visible in its prose.
+    dwelling = _maybe_dwelling_phrase(voice, rng)
+
+    parts = [opening, '', count_line, '', middle_lead, '', quote]
+    if dwelling:
+        parts += ['', dwelling]
+    parts += ['', closing]
     return '\n'.join(p for p in parts if p is not None)
 
 
