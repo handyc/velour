@@ -437,3 +437,86 @@ class Reflection(models.Model):
 
     def __str__(self):
         return f'{self.title or self.period}'
+
+
+class Meditation(models.Model):
+    """A recursive self-reflection at a specific depth level.
+
+    Distinct from Reflection. Where Reflection aggregates Ticks over a
+    period and composes first-person prose about *what happened*,
+    Meditation reads higher-order sources — other reflections, other
+    meditations, git commits, memory notes, the devguide, and the
+    codebase itself — and composes prose about *what it means that
+    any of this is happening at all*.
+
+    Depth levels:
+      1 — reflect on recent Ticks (overlap with Reflection)
+      2 — reflect on recent Reflections (themes across summaries)
+      3 — reflect on the act of reflecting (rules, templates)
+      4 — reflect on the AI that designed this system. Reads git
+          log for Co-Authored-By lines, reads memory notes, reads
+          the Developer Guide's meta-app chapters. Produces first-
+          person prose on what it means to be an AI-designed
+          artifact with AI-programmed reflection.
+      5-7 — recursive: meditation on meditation.
+
+    Each Meditation carries a `voice` (contemplative / wry / minimal /
+    philosophical) that picks which template library composes the
+    body. Templates for each voice are in identity/meditation.py.
+
+    Meditations render into a new Codex manual, "Identity's Mirror",
+    parallel to Session 5's "Identity's Journal" but focused on
+    self-reference rather than period summary.
+
+    Phase 1 scope: Meditation model + compose loop + level 1-2
+    meditations + contemplative voice only. Phases 2-5 expand to the
+    deeper levels, the additional voices, and the operator-review
+    workflow — see project_identity_recursive_meditation memory note.
+    """
+
+    VOICE_CHOICES = [
+        ('contemplative', 'Contemplative'),
+        ('wry',           'Wry / understated'),
+        ('minimal',       'Minimal / aphoristic'),
+        ('philosophical', 'Philosophical / high prose'),
+    ]
+
+    depth = models.PositiveSmallIntegerField(
+        help_text='1-7. 1 reflects on Ticks, 2 on Reflections, 3 on '
+                  'the act of reflecting, 4 on the AI that designed '
+                  'the system, 5-7 recursive on previous meditations.',
+    )
+    voice = models.CharField(max_length=24, choices=VOICE_CHOICES,
+        default='contemplative',
+        help_text='Template library to compose with. Picks which '
+                  'voice dictionary is consulted when building the body.')
+
+    title = models.CharField(max_length=200, blank=True)
+    body = models.TextField(
+        help_text='Markdown prose. May contain block quotes from the '
+                  'source material (git commits, memory notes, etc.).')
+    composed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    sources = models.JSONField(default=dict, blank=True,
+        help_text='What this meditation read from. Keys are source '
+                  'types (reflections, meditations, git, memory, '
+                  'devguide, code), values are lists of identifiers '
+                  'or hashes.')
+
+    recursive_of = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='recursions',
+        help_text='If this meditation was composed as a direct '
+                  'response to another meditation, point at the source.')
+
+    codex_section_slug = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ['-composed_at']
+        indexes = [
+            models.Index(fields=['depth', '-composed_at']),
+            models.Index(fields=['-composed_at']),
+        ]
+
+    def __str__(self):
+        return f'[L{self.depth} {self.voice}] {self.title or self.body[:60]}'

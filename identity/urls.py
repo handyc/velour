@@ -17,4 +17,7 @@ urlpatterns = [
     path('reflections/', views.reflections_list, name='reflections_list'),
     path('reflections/<int:pk>/', views.reflection_detail, name='reflection_detail'),
     path('reflections/compose/', views.reflection_compose, name='reflection_compose'),
+    path('meditations/', views.meditations_list, name='meditations_list'),
+    path('meditations/<int:pk>/', views.meditation_detail, name='meditation_detail'),
+    path('meditations/compose/', views.meditation_compose, name='meditation_compose'),
 ]

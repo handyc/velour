@@ -203,6 +203,34 @@
         </div>
     </div>
 
+    <!-- Recent meditations — recursive self-reflections -->
+    <div class="card">
+        <h3>Recent meditations
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ recent_meditations|length }} shown
+            </span>
+        </h3>
+        {% if recent_meditations %}
+        <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem;">
+            {% for m in recent_meditations %}
+            <a href="{% url 'identity:meditation_detail' m.pk %}" style="text-decoration: none; color: inherit;">
+                <div style="padding: 0.5rem 0.7rem; background: #0d1117; border-left: 3px solid #bc8cff; border-radius: 3px;">
+                    <div style="color: #c9d1d9; font-size: 0.82rem;">{{ m.title }}</div>
+                    <div style="color: #6e7681; font-size: 0.7rem; font-family: ui-monospace, Menlo, monospace; margin-top: 0.15rem;">
+                        L{{ m.depth }} · {{ m.voice }} · {{ m.composed_at|date:"Y-m-d H:i" }}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color: #6e7681; font-size: 0.85rem; margin-top: 0.5rem;">No meditations yet.</p>
+        {% endif %}
+        <div style="margin-top: 0.75rem;">
+            <a href="{% url 'identity:meditations_list' %}" style="font-size: 0.78rem; color: #bc8cff;">View all meditations →</a>
+        </div>
+    </div>
+
     <!-- Recent reflections — synthesized period summaries -->
     <div class="card">
         <h3>Recent reflections

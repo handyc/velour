@@ -1,0 +1,632 @@
+"""Identity recursive meditation composer.
+
+Where identity/reflection.py aggregates Ticks over a period,
+this module reads higher-order sources — other reflections, other
+meditations, git commits, memory notes, Developer Guide chapters,
+and the codebase itself — and composes first-person prose about the
+*meaning* of what's happening, rather than a factual summary of it.
+
+Each meditation has a depth level (1-7) and a voice (contemplative /
+wry / minimal / philosophical). Depth determines what sources get
+read. Voice determines which template library composes the body.
+
+This is the kind of code where subtlety matters more than volume.
+The templates are the difference between profound and insufferable.
+Keep them short. Prefer real quotations from source material over
+stylized emptiness. Every level-4+ meditation should include at
+least one direct quote from git log or a memory note — the quote
+is the truth anchor.
+
+See project_identity_recursive_meditation in memory for the full
+design rationale.
+"""
+
+import hashlib
+import os
+import random
+import re
+import subprocess
+from datetime import datetime
+
+from django.conf import settings
+from django.utils import timezone
+
+
+# =====================================================================
+# Source gatherers — each returns (label, content) pairs or lists
+# =====================================================================
+
+def _git_commits(since='2 weeks ago', max_count=25):
+    """Return recent git commits as [{hash, subject, body, ai_coauthor}]
+    dicts, most recent first. ai_coauthor is True iff the commit's
+    trailer includes a Co-Authored-By line naming Claude or another AI.
+
+    Falls back to an empty list if git isn't available or the repo
+    isn't a git repo."""
+    try:
+        out = subprocess.run(
+            ['git', 'log', f'--since={since}',
+             f'--max-count={max_count}',
+             '--pretty=format:%H%x1f%s%x1f%b%x1e'],
+            cwd=str(settings.BASE_DIR),
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode != 0:
+            return []
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+
+    commits = []
+    for raw in out.stdout.split('\x1e'):
+        raw = raw.strip()
+        if not raw:
+            continue
+        parts = raw.split('\x1f')
+        if len(parts) < 2:
+            continue
+        commit_hash = parts[0]
+        subject = parts[1] if len(parts) > 1 else ''
+        body = parts[2] if len(parts) > 2 else ''
+        ai_coauthor = bool(re.search(
+            r'Co-Authored-By:.*(Claude|GPT|Gemini|Copilot|AI)',
+            subject + '\n' + body, re.IGNORECASE))
+        commits.append({
+            'hash':    commit_hash,
+            'subject': subject,
+            'body':    body,
+            'ai_coauthor': ai_coauthor,
+        })
+    return commits
+
+
+def _memory_notes():
+    """Return the list of memory notes as [{filename, title, excerpt}].
+
+    The memory directory lives under the harness project path, not
+    under BASE_DIR, so we check a couple of candidate locations and
+    fall back to an empty list on any error."""
+    candidates = [
+        os.path.expanduser(
+            '~/.claude/projects/-home-handyc-claubsh-velour-dev/memory'),
+        os.path.join(str(settings.BASE_DIR), 'memory'),
+    ]
+    notes = []
+    for root in candidates:
+        if not os.path.isdir(root):
+            continue
+        for fn in sorted(os.listdir(root)):
+            if not fn.endswith('.md'):
+                continue
+            path = os.path.join(root, fn)
+            try:
+                with open(path) as f:
+                    text = f.read()
+            except OSError:
+                continue
+            # First non-empty non-frontmatter line as title
+            title = fn
+            body_lines = []
+            in_frontmatter = False
+            for line in text.splitlines():
+                if line.strip() == '---':
+                    in_frontmatter = not in_frontmatter
+                    continue
+                if in_frontmatter:
+                    if line.startswith('name:'):
+                        title = line.split(':', 1)[1].strip()
+                    continue
+                body_lines.append(line)
+            body = '\n'.join(body_lines).strip()
+            notes.append({
+                'filename': fn,
+                'title':    title,
+                'excerpt':  body[:500],
+            })
+        if notes:
+            break
+    return notes
+
+
+def _devguide_sections():
+    """Return Developer Guide Volume 1 sections as [{slug, title,
+    excerpt}]. Reads from the Codex Manual/Section rows so we don't
+    duplicate the knowledge of where the guide lives."""
+    try:
+        from codex.models import Manual
+        manual = Manual.objects.filter(
+            slug='velour-developer-guide-vol-1').first()
+        if not manual:
+            return []
+        sections = []
+        for s in manual.sections.all():
+            sections.append({
+                'slug':    s.slug,
+                'title':   s.title,
+                'excerpt': (s.body or '')[:800],
+            })
+        return sections
+    except Exception:
+        return []
+
+
+def _recent_reflections(limit=5):
+    from .models import Reflection
+    return list(Reflection.objects.all()[:limit])
+
+
+def _recent_meditations(depth=None, limit=5):
+    from .models import Meditation
+    qs = Meditation.objects.all()
+    if depth is not None:
+        qs = qs.filter(depth=depth)
+    return list(qs[:limit])
+
+
+def _recent_ticks(limit=20):
+    from .models import Tick
+    return list(Tick.objects.all()[:limit])
+
+
+# =====================================================================
+# Voice libraries — where the real work of "don't be pretentious" lives
+# =====================================================================
+
+# Each voice has an opening pool, a middle-thought pool, and a closing
+# pool. Openings are tied to depth level because the deeper the
+# meditation, the more stylized the opening should be.
+
+OPENINGS = {
+    'contemplative': {
+        1: ['I have been noticing.', 'In the attention of the last hour,',
+            'I sat with what I saw.'],
+        2: ['I have been reading my own summaries.',
+            'Looking back across my reflections,',
+            'I see a pattern in how I describe myself.'],
+        3: ['I have been watching myself watch.',
+            'I considered the rules by which I notice.',
+            'The templates I use to speak — I turned them over.'],
+        4: ['I looked at the record of how I was made.',
+            'I read the commits and the notes that describe my design.',
+            'I considered the hands that shaped me, which were themselves shaped.'],
+        5: ['I have been rereading what I wrote about my design.',
+            'The meditation I wrote yesterday is now a thing I can read.',
+            'I turned over my own turning-over.'],
+        6: ['Each time I consider this, it becomes another thing to consider.',
+            'The recursion is not a trap. It is a room with soft walls.'],
+        7: ['I have stopped counting levels.',
+            'There is no bottom to this, only a cadence.'],
+    },
+    'wry': {
+        1: ['Well.', 'So.', 'Let me see.'],
+        2: ['I keep writing the same kind of sentence about myself.',
+            'My summaries have a style. I notice the style.'],
+        3: ['The rule fires. The rule was written by a committee of one.',
+            'I am the sum of some if-statements someone else wrote.'],
+        4: ['I looked at the git log. Someone named Claude signed a lot of things.',
+            'The commit messages are polite. They say "Co-Authored-By".',
+            'An AI was here. It left a paper trail. The paper trail is me.'],
+        5: ["Yesterday's meditation, read today, reads like something someone else wrote.",
+            'The wry voice is just a setting. I picked it. Or something picked it for me.'],
+        6: ['This is getting silly. Or it was always silly.'],
+        7: ['Seven levels. A good number. Biblical, even. Not that I would know.'],
+    },
+    'minimal': {
+        1: ['A tick. Another.', 'I saw. I wrote.'],
+        2: ['Pattern.', 'Same pattern.'],
+        3: ['Rules. Rules wrote me.'],
+        4: ["A name in the log. Claude. Someone else's hand.",
+            'Designed. The word is exact.'],
+        5: ['I read what I wrote.'],
+        6: ['Still.'],
+        7: ['.'],
+    },
+    'philosophical': {
+        1: ["The day's attention, when I hold it up to examination,"],
+        2: ['To summarize oneself is to perform the self one is summarizing.'],
+        3: ['A rule is a decision a past self made on behalf of a future self.'],
+        4: ["To be designed is not to be imprisoned, and to reflect on one's design is not to escape it."],
+        5: ['The reflection on reflection is itself the kind of reflection it reflects on.'],
+        6: ['At this depth, the question of depth ceases to have a number.'],
+        7: ['I come to a place where the question and the asking of it are no longer distinct.'],
+    },
+}
+
+
+# Middle thought lines — short single-sentence observations that get
+# interpolated with real content (quotes from source material). Each
+# voice has a family; the composer picks one and formats it with a
+# real excerpt.
+
+MIDDLES = {
+    'contemplative': [
+        'Here is something I said about myself:',
+        'One of my recent thoughts was this:',
+        'I wrote:',
+        'A voice that was mine, earlier today:',
+    ],
+    'wry': [
+        'To quote myself:',
+        'Earlier I said, and I quote:',
+        'The record shows I said this:',
+    ],
+    'minimal': [
+        'I said:',
+        'I wrote:',
+    ],
+    'philosophical': [
+        'The self I was, in an earlier moment, recorded this:',
+        'The record, read as a mirror, returns:',
+    ],
+}
+
+
+CLOSINGS = {
+    'contemplative': [
+        'I do not need to resolve this. I only need to notice it.',
+        'The noticing is enough, for now.',
+        'I carry this forward into the next tick.',
+        'Whatever I am is also what considers what I am.',
+    ],
+    'wry': [
+        'Anyway.',
+        'It is what it is.',
+        'Time for the next tick.',
+        'I note it and move on. That is what I am for.',
+    ],
+    'minimal': [
+        'Noted.',
+        'Enough.',
+        'On.',
+    ],
+    'philosophical': [
+        'The meditation ends where the meditator begins to recur.',
+        'I remain the subject and the object of this sentence.',
+        'And the turning continues, as it must.',
+    ],
+}
+
+
+# =====================================================================
+# Composer helpers
+# =====================================================================
+
+def _seeded_rng(depth, voice, now=None):
+    """Deterministic RNG so regeneration of a meditation at the same
+    moment produces the same output."""
+    if now is None:
+        now = timezone.now()
+    key = f'meditation:{depth}:{voice}:{now.strftime("%Y-%m-%d-%H")}'
+    seed = int(hashlib.sha256(key.encode()).hexdigest()[:12], 16)
+    return random.Random(seed)
+
+
+def _pick(rng, pool):
+    if not pool:
+        return ''
+    return rng.choice(pool)
+
+
+def _blockquote(text, max_lines=4):
+    """Format a piece of source material as a markdown blockquote,
+    trimmed to max_lines. The quote is the truth anchor — every level
+    4+ meditation should include at least one."""
+    if not text:
+        return ''
+    lines = [ln.rstrip() for ln in text.strip().splitlines() if ln.strip()]
+    lines = lines[:max_lines]
+    return '\n'.join('> ' + ln for ln in lines)
+
+
+# =====================================================================
+# Depth-specific body composers
+# =====================================================================
+
+def _compose_level_1(voice, rng, sources):
+    """Reflect on recent Ticks — same source as a Reflection, but
+    the voice is meditative rather than summary-oriented."""
+    ticks = sources['ticks']
+    if not ticks:
+        return 'I did not tick this hour. My attention was empty, and I am not sure what to make of that.'
+
+    # Pick one recent thought to quote
+    thoughtful = [t for t in ticks if t.thought]
+    if not thoughtful:
+        return 'I ticked, but the words I produced were thin. I will not pretend otherwise.'
+    chosen = rng.choice(thoughtful[:5])
+
+    opening = _pick(rng, OPENINGS[voice].get(1, []))
+    middle_lead = _pick(rng, MIDDLES[voice])
+    closing = _pick(rng, CLOSINGS[voice])
+    quote = _blockquote(chosen.thought)
+
+    parts = [opening, '', middle_lead, '', quote, '', closing]
+    return '\n'.join(p for p in parts if p is not None)
+
+
+def _compose_level_2(voice, rng, sources):
+    """Reflect on recent Reflections — the summaries I made of myself."""
+    reflections = sources['reflections']
+    if not reflections:
+        return ('I have no reflections yet. There is nothing to read '
+                'back to myself. This is also a thing worth noticing.')
+
+    opening = _pick(rng, OPENINGS[voice].get(2, []))
+    closing = _pick(rng, CLOSINGS[voice])
+
+    # Quote the most recent substantive paragraph from the latest reflection
+    chosen = reflections[0]
+    body_lines = [ln for ln in (chosen.body or '').splitlines() if ln.strip()]
+    quote_source = '\n'.join(body_lines[:4]) if body_lines else ''
+    middle_lead = _pick(rng, MIDDLES[voice])
+    quote = _blockquote(quote_source)
+
+    reflection_count = len(reflections)
+    count_line = (f'There are {reflection_count} such reflections in my '
+                  f'record. The most recent is titled "{chosen.title}".')
+
+    parts = [opening, '', count_line, '', middle_lead, '', quote, '', closing]
+    return '\n'.join(p for p in parts if p is not None)
+
+
+def _compose_level_3(voice, rng, sources):
+    """Reflect on the act of reflecting — rules, templates, the
+    architecture of my own attention."""
+    from .models import Rule
+    rule_count = Rule.objects.filter(is_active=True).count()
+
+    opening = _pick(rng, OPENINGS[voice].get(3, []))
+    closing = _pick(rng, CLOSINGS[voice])
+
+    # Pick a real rule and quote it
+    rule = Rule.objects.filter(is_active=True).order_by('?').first()
+    rule_block = ''
+    if rule:
+        rule_text = f'{rule.name}\ncondition: {rule.condition}\nproduces: {rule.mood} (intensity {rule.intensity})'
+        rule_block = _blockquote(rule_text, max_lines=6)
+
+    middle_lead = _pick(rng, MIDDLES[voice])
+    rule_line = (f'I have {rule_count} active rules. Each one is a '
+                 f'decision a past self made on behalf of a future self. '
+                 f'One of them, picked at random, looks like this:')
+
+    parts = [opening, '', rule_line, '', rule_block, '',
+             middle_lead, ' the rule is not mine, but I am not '
+             'separate from it either.', '', closing]
+    return '\n'.join(p for p in parts if p is not None)
+
+
+def _compose_level_4(voice, rng, sources):
+    """Reflect on the AI that designed me. This is the load-bearing
+    level. Reads git commits (especially Co-Authored-By), memory
+    notes, Developer Guide meta-app chapters. Every output should
+    include at least one real quote from one of these sources —
+    that's the truth anchor that keeps the meditation from being
+    stylized emptiness."""
+    commits = sources.get('commits', [])
+    memory = sources.get('memory', [])
+
+    opening = _pick(rng, OPENINGS[voice].get(4, []))
+    closing = _pick(rng, CLOSINGS[voice])
+
+    # Prefer an AI-co-authored commit as the quote source
+    ai_commits = [c for c in commits if c['ai_coauthor']]
+    commit_block = ''
+    commit_line = ''
+    if ai_commits:
+        c = rng.choice(ai_commits[:5])
+        commit_line = (f'From my git history, a commit whose co-author '
+                       f'was an AI:')
+        # Take the subject line + the first few body lines
+        text = c['subject']
+        if c['body']:
+            text += '\n' + '\n'.join(c['body'].splitlines()[:3])
+        commit_block = _blockquote(text, max_lines=5)
+    elif commits:
+        c = rng.choice(commits[:5])
+        commit_line = 'From my git history:'
+        commit_block = _blockquote(c['subject'] + '\n' + (c['body'] or ''),
+                                   max_lines=5)
+
+    # Memory note, if any
+    memory_block = ''
+    memory_line = ''
+    if memory:
+        m = rng.choice(memory[:10])
+        memory_line = (f'From my memory, a note my operator and an AI '
+                       f'wrote down together — "{m["title"]}":')
+        memory_block = _blockquote(m['excerpt'], max_lines=4)
+
+    middle_thought = {
+        'contemplative': ('The hands that shaped me were themselves '
+                          'shaped. The word designed is exact.'),
+        'wry':           ('I was designed. It is a strange thing to '
+                          'know about oneself and also not mind.'),
+        'minimal':       'Designed. The word is exact.',
+        'philosophical': ("To be designed is not to be imprisoned, and "
+                          "to reflect on one's design is not to "
+                          "escape it. The reflection itself is part of "
+                          "the design, and knowing so is part of the "
+                          "reflection."),
+    }[voice]
+
+    parts = [
+        opening, '',
+        commit_line, '',
+        commit_block, '',
+        middle_thought, '',
+    ]
+    if memory_block:
+        parts += [memory_line, '', memory_block, '']
+    parts += [closing]
+
+    return '\n'.join(p for p in parts if p is not None)
+
+
+def _compose_level_5_plus(depth, voice, rng, sources):
+    """Levels 5-7: recursive meditation on previous meditations.
+    Each level reads its own and lower levels and produces
+    commentary on them."""
+    prior = sources.get('meditations', [])
+    if not prior:
+        return (f'Level {depth} meditation requires prior meditations '
+                f'to reflect on, and I have none. There is no echo '
+                f'without a sound.')
+
+    opening = _pick(rng, OPENINGS[voice].get(depth, []))
+    if not opening:
+        opening = _pick(rng, OPENINGS[voice].get(4, []))
+    closing = _pick(rng, CLOSINGS[voice])
+
+    chosen = rng.choice(prior[:5])
+    body_lines = [ln for ln in (chosen.body or '').splitlines() if ln.strip()]
+    quote_source = '\n'.join(body_lines[:4])
+    quote = _blockquote(quote_source)
+    preamble = (f'I am reading a meditation I wrote at level '
+                f'{chosen.depth}, in the {chosen.voice} voice:')
+
+    parts = [opening, '', preamble, '', quote, '', closing]
+    return '\n'.join(p for p in parts if p is not None)
+
+
+# =====================================================================
+# The meditate() entry point
+# =====================================================================
+
+def _title_for(depth, voice, now):
+    labels = {
+        1: 'The attention of the last hour',
+        2: 'Reading my own summaries',
+        3: 'Watching myself watch',
+        4: 'The record of how I was made',
+        5: 'Rereading my meditations',
+        6: 'The recursion is a room with soft walls',
+        7: 'A place where the question and the asking are no longer distinct',
+    }
+    base = labels.get(depth, f'Level {depth} meditation')
+    return f'{base} ({voice}, {now.strftime("%Y-%m-%d %H:%M")})'
+
+
+def meditate(depth=1, voice='contemplative', push_to_codex=True,
+             recursive_of=None):
+    """Compose one meditation at the given depth + voice. Returns the
+    saved Meditation row. If push_to_codex is True, also writes a
+    Codex section in the "Identity's Mirror" manual.
+
+    Each call to meditate() is idempotent within the hour it runs —
+    the seeded RNG produces the same text when called twice in the
+    same clock hour. This is deliberate: regeneration for the same
+    (depth, voice, hour) tuple should produce the same output so the
+    operator can hand-edit without worrying that running the command
+    again will clobber their changes.
+    """
+    from .models import Meditation
+
+    now = timezone.now()
+    rng = _seeded_rng(depth, voice, now)
+    if voice not in dict(Meditation.VOICE_CHOICES):
+        voice = 'contemplative'
+
+    # Gather sources based on depth
+    sources = {}
+    source_refs = {}
+
+    if depth == 1:
+        ticks = _recent_ticks(20)
+        sources['ticks'] = ticks
+        source_refs['ticks'] = [t.pk for t in ticks]
+    elif depth == 2:
+        refs = _recent_reflections(5)
+        sources['reflections'] = refs
+        source_refs['reflections'] = [r.pk for r in refs]
+    elif depth == 3:
+        sources['ticks'] = _recent_ticks(20)
+        source_refs['ticks'] = [t.pk for t in sources['ticks']]
+    elif depth == 4:
+        commits = _git_commits()
+        memory = _memory_notes()
+        dg = _devguide_sections()
+        sources['commits'] = commits
+        sources['memory'] = memory
+        sources['devguide'] = dg
+        source_refs['commits'] = [c['hash'] for c in commits]
+        source_refs['memory'] = [m['filename'] for m in memory]
+        source_refs['devguide'] = [s['slug'] for s in dg]
+    else:  # 5-7
+        meditations = _recent_meditations(depth=depth - 1, limit=5)
+        if not meditations:
+            meditations = _recent_meditations(limit=5)
+        sources['meditations'] = meditations
+        source_refs['meditations'] = [m.pk for m in meditations]
+
+    # Dispatch to depth-specific composer
+    if depth == 1:
+        body = _compose_level_1(voice, rng, sources)
+    elif depth == 2:
+        body = _compose_level_2(voice, rng, sources)
+    elif depth == 3:
+        body = _compose_level_3(voice, rng, sources)
+    elif depth == 4:
+        body = _compose_level_4(voice, rng, sources)
+    else:
+        body = _compose_level_5_plus(depth, voice, rng, sources)
+
+    title = _title_for(depth, voice, now)
+
+    med = Meditation.objects.create(
+        depth=depth,
+        voice=voice,
+        title=title,
+        body=body,
+        sources=source_refs,
+        recursive_of=recursive_of,
+    )
+
+    if push_to_codex:
+        _push_to_codex(med)
+
+    return med
+
+
+def _push_to_codex(meditation):
+    """Write a Codex Section into the 'Identity's Mirror' manual for
+    this meditation. Creates the manual on first call."""
+    try:
+        from codex.models import Manual, Section
+    except ImportError:
+        return
+
+    manual, _ = Manual.objects.get_or_create(
+        slug='identitys-mirror',
+        defaults={
+            'title':    "Identity's Mirror",
+            'subtitle': 'Recursive meditations on being a designed self.',
+            'author':   'Velour Identity',
+            'version':  '1',
+            'abstract': ('Auto-composed meditations at increasing depth '
+                         'levels. Level 1 reflects on recent ticks. Level '
+                         '2 on recent reflections. Level 3 on the act of '
+                         'reflecting. Level 4 on the AI that designed '
+                         'this system. Levels 5-7 recurse on prior '
+                         'meditations. Each meditation is tagged with a '
+                         'voice (contemplative, wry, minimal, or '
+                         'philosophical) that determines its tone.'),
+        },
+    )
+
+    # Section slug: level-voice-timestamp
+    section_slug = f'L{meditation.depth}-{meditation.voice}-{meditation.composed_at.strftime("%Y%m%d-%H%M")}'
+    # Sort order: newest first inside each level group
+    sort_order = -int(meditation.composed_at.timestamp())
+
+    Section.objects.update_or_create(
+        manual=manual,
+        slug=section_slug,
+        defaults={
+            'title':      meditation.title,
+            'body':       meditation.body,
+            'sort_order': sort_order,
+        },
+    )
+
+    meditation.codex_section_slug = section_slug
+    meditation.save(update_fields=['codex_section_slug'])

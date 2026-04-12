@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import Concern, Identity, Mood, Reflection, Tick
+from .models import Concern, Identity, Meditation, Mood, Reflection, Tick
 
 
 def _get_main_ip():
@@ -294,6 +294,9 @@ def identity_home(request):
     # page stays scannable. Full list lives at /identity/reflections/.
     recent_reflections = Reflection.objects.all()[:4]
 
+    # Most recent meditations — the deeper self-reflective pieces.
+    recent_meditations = Meditation.objects.all()[:4]
+
     # Legacy journal still rendered as a fallback for historical entries
     # that pre-date the Tick model and weren't fully backfilled. Newer
     # output goes through the Tick stream instead.
@@ -322,6 +325,7 @@ def identity_home(request):
         ],
         'open_concerns': open_concerns,
         'recent_reflections': recent_reflections,
+        'recent_meditations': recent_meditations,
         'legacy_journal': legacy_journal,
         'vitals': vitals,
     })
@@ -404,6 +408,58 @@ def mood_data(request):
         'values': mood_values,
         'moods': mood_names,
     })
+
+
+@login_required
+def meditations_list(request):
+    """All Meditation rows, newest first, with an optional depth filter."""
+    depth_filter = request.GET.get('depth', '').strip()
+    voice_filter = request.GET.get('voice', '').strip()
+    qs = Meditation.objects.all()
+    if depth_filter:
+        try:
+            qs = qs.filter(depth=int(depth_filter))
+        except ValueError:
+            pass
+    if voice_filter:
+        qs = qs.filter(voice=voice_filter)
+    return render(request, 'identity/meditations_list.html', {
+        'meditations': qs,
+        'depth_filter': depth_filter,
+        'voice_filter': voice_filter,
+        'depths': range(1, 8),
+        'voices': [c[0] for c in Meditation.VOICE_CHOICES],
+    })
+
+
+@login_required
+def meditation_detail(request, pk):
+    try:
+        med = Meditation.objects.get(pk=pk)
+    except Meditation.DoesNotExist:
+        return redirect('identity:meditations_list')
+    return render(request, 'identity/meditation_detail.html', {
+        'meditation': med,
+        'recursions': Meditation.objects.filter(recursive_of=med),
+    })
+
+
+@login_required
+@require_POST
+def meditation_compose(request):
+    """Operator-initiated meditation composition — button on the
+    meditations list page. Takes depth + voice and composes a single
+    Meditation row, pushing into Identity's Mirror manual."""
+    from .meditation import meditate
+    try:
+        depth = int(request.POST.get('depth', 1))
+    except ValueError:
+        depth = 1
+    voice = request.POST.get('voice', 'contemplative').strip()
+    if voice not in dict(Meditation.VOICE_CHOICES):
+        voice = 'contemplative'
+    meditate(depth=depth, voice=voice, push_to_codex=True)
+    return redirect('identity:meditations_list')
 
 
 @login_required

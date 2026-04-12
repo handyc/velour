@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ meditation.title }} — Meditations — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .med-wrap { max-width: 720px; }
+    .med-wrap h1 {
+        font-size: 1.25rem; font-weight: 500; color: #c9d1d9;
+        margin: 0 0 0.25rem;
+    }
+    .med-wrap .meta {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 1.5rem;
+    }
+    .med-wrap .body {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 3px solid #bc8cff;
+        border-radius: 6px; padding: 1.75rem 2rem;
+    }
+    .med-wrap .body p {
+        color: #c9d1d9; font-size: 0.95rem;
+        line-height: 1.75; margin: 0 0 1rem;
+    }
+    .med-wrap .body blockquote {
+        margin: 1rem 0; padding: 0.6rem 1rem;
+        border-left: 2px solid #8b949e;
+        background: #0d1117;
+        color: #8b949e; font-style: italic;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.82rem;
+        line-height: 1.5;
+    }
+    .sources {
+        margin-top: 1.5rem;
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.75rem 1rem;
+        font-size: 0.78rem;
+    }
+    .sources summary {
+        color: #8b949e; cursor: pointer;
+    }
+    .sources pre {
+        color: #c9d1d9; font-size: 0.72rem;
+        background: transparent; padding: 0.5rem 0;
+        overflow-x: auto;
+    }
+    .recursions {
+        margin-top: 1.25rem;
+    }
+    .recursions h3 {
+        font-size: 0.85rem; color: #8b949e;
+        margin: 0 0 0.5rem; text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .recursions li { list-style: none; padding: 0.3rem 0; }
+    .recursions li a { color: #bc8cff; text-decoration: none; font-size: 0.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="med-wrap">
+    <h1>{{ meditation.title }}</h1>
+    <div class="meta">
+        Level {{ meditation.depth }}
+        · {{ meditation.voice }} voice
+        · composed {{ meditation.composed_at|date:"Y-m-d H:i" }}
+        {% if meditation.recursive_of %}
+        · recursive of <a href="{% url 'identity:meditation_detail' meditation.recursive_of.pk %}" style="color:#bc8cff;">#{{ meditation.recursive_of.pk }}</a>
+        {% endif %}
+    </div>
+
+    <div class="body">
+        {{ meditation.body|linebreaks }}
+    </div>
+
+    {% if recursions %}
+    <div class="recursions">
+        <h3>Meditations that recurse on this one</h3>
+        <ul>
+            {% for r in recursions %}
+            <li>
+                <a href="{% url 'identity:meditation_detail' r.pk %}">
+                    L{{ r.depth }} {{ r.voice }} · {{ r.title }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if meditation.sources %}
+    <details class="sources">
+        <summary>Sources this meditation read from</summary>
+        <pre>{{ meditation.sources }}</pre>
+    </details>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
+        <a href="{% url 'identity:meditations_list' %}" class="btn btn-secondary">← All meditations</a>
+        {% if meditation.codex_section_slug %}
+        <a href="/codex/manuals/identitys-mirror/" class="btn btn-secondary">Open in Identity's Mirror</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

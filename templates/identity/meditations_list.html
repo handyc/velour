@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Meditations — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .med-wrap { max-width: 880px; }
+    .med-header { margin-bottom: 1rem; }
+    .med-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .med-header .count { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .filter-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .filter-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .filter-bar a.active { color: #bc8cff; border-color: #bc8cff; }
+    .filter-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .compose-form {
+        padding: 0.75rem 1rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem;
+        display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+        font-size: 0.85rem;
+    }
+    .compose-form select {
+        padding: 0.35rem 0.5rem;
+        background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+
+    .med-card {
+        background: #161b22;
+        border: 1px solid #30363d; border-left: 3px solid #bc8cff;
+        border-radius: 6px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.75rem;
+    }
+    .med-card h3 {
+        font-size: 0.95rem; margin: 0 0 0.25rem;
+        color: #c9d1d9; font-weight: 500;
+    }
+    .med-card h3 a { color: #c9d1d9; text-decoration: none; }
+    .med-card .meta {
+        color: #6e7681; font-size: 0.72rem;
+        font-family: ui-monospace, Menlo, monospace;
+        margin-bottom: 0.6rem;
+    }
+    .med-card .depth-badge {
+        display: inline-block; color: #bc8cff;
+        background: #221a2f; padding: 0.1rem 0.45rem;
+        border-radius: 3px; font-weight: 600; margin-right: 0.3rem;
+    }
+    .med-card .voice-badge {
+        display: inline-block; color: #8b949e;
+        background: #0d1117; padding: 0.1rem 0.45rem;
+        border-radius: 3px; margin-right: 0.3rem;
+    }
+    .med-card .body {
+        color: #c9d1d9; font-size: 0.88rem;
+        line-height: 1.55;
+    }
+    .med-card .body blockquote {
+        margin: 0.5rem 0; padding: 0.4rem 0.75rem;
+        border-left: 2px solid #30363d;
+        background: #0d1117;
+        color: #8b949e; font-style: italic;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.78rem;
+    }
+
+    .depth-1 { border-left-color: #58a6ff; }
+    .depth-1 .depth-badge { color: #58a6ff; background: #0d1a2b; }
+    .depth-2 { border-left-color: #3fb950; }
+    .depth-2 .depth-badge { color: #3fb950; background: #0f2417; }
+    .depth-3 { border-left-color: #d29922; }
+    .depth-3 .depth-badge { color: #d29922; background: #2a1e05; }
+    .depth-4 { border-left-color: #bc8cff; }
+    .depth-4 .depth-badge { color: #bc8cff; background: #221a2f; }
+    .depth-5, .depth-6, .depth-7 { border-left-color: #f85149; }
+    .depth-5 .depth-badge, .depth-6 .depth-badge, .depth-7 .depth-badge {
+        color: #f85149; background: #2a0e0c;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="med-wrap">
+    <div class="med-header">
+        <h1>Meditations</h1>
+        <span class="count">{{ meditations|length }} total · reading from git, memory, devguide, and prior meditations</span>
+    </div>
+
+    <p style="color: #8b949e; font-size: 0.85rem;">
+        Meditations are recursive self-reflections, distinct from
+        <a href="{% url 'identity:reflections_list' %}">Reflections</a>.
+        Where a Reflection aggregates Ticks over a period, a Meditation
+        reads higher-order sources — prior Reflections, prior Meditations,
+        git commits, memory notes, the Developer Guide — and composes
+        first-person prose about the meaning of what's happening. Each
+        one has a <em>depth level</em> (1-7) and a <em>voice</em>
+        (contemplative, wry, minimal, philosophical).
+    </p>
+
+    <div class="filter-bar">
+        <span class="label">depth</span>
+        <a href="{% url 'identity:meditations_list' %}" class="{% if not depth_filter %}active{% endif %}">all</a>
+        {% for d in depths %}
+        <a href="?depth={{ d }}" class="{% if depth_filter == d|stringformat:'s' %}active{% endif %}">L{{ d }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="filter-bar">
+        <span class="label">voice</span>
+        <a href="{% url 'identity:meditations_list' %}" class="{% if not voice_filter %}active{% endif %}">all</a>
+        {% for v in voices %}
+        <a href="?voice={{ v }}" class="{% if voice_filter == v %}active{% endif %}">{{ v }}</a>
+        {% endfor %}
+    </div>
+
+    <form method="post" action="{% url 'identity:meditation_compose' %}" class="compose-form">
+        {% csrf_token %}
+        <span style="color:#8b949e;">Compose a level</span>
+        <select name="depth">
+            {% for d in depths %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+        </select>
+        <span style="color:#8b949e;">meditation in the</span>
+        <select name="voice">
+            {% for v in voices %}<option value="{{ v }}"{% if v == 'contemplative' %} selected{% endif %}>{{ v }}</option>{% endfor %}
+        </select>
+        <span style="color:#8b949e;">voice</span>
+        <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.3rem 0.8rem;">Compose</button>
+    </form>
+
+    {% for m in meditations %}
+    <div class="med-card depth-{{ m.depth }}">
+        <h3><a href="{% url 'identity:meditation_detail' m.pk %}">{{ m.title }}</a></h3>
+        <div class="meta">
+            <span class="depth-badge">L{{ m.depth }}</span>
+            <span class="voice-badge">{{ m.voice }}</span>
+            composed {{ m.composed_at|date:"Y-m-d H:i" }}
+            {% if m.recursive_of %} · recursive of #{{ m.recursive_of.pk }}{% endif %}
+        </div>
+        <div class="body">
+            {{ m.body|linebreaks }}
+        </div>
+    </div>
+    {% empty %}
+    <p style="color: #6e7681; font-size: 0.9rem;">
+        No meditations yet. Use the Compose form above or run
+        <code>python manage.py identity_meditate --ladder 1-4</code>.
+    </p>
+    {% endfor %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

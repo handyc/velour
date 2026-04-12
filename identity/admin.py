@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Concern, Identity, Mood, Reflection, Rule, Tick
+from .models import Concern, Identity, Meditation, Mood, Reflection, Rule, Tick
 
 
 @admin.register(Identity)
@@ -33,6 +33,15 @@ class ConcernAdmin(admin.ModelAdmin):
     list_filter = ('aspect', 'closed_at')
     readonly_fields = ('opened_at', 'last_seen_at', 'origin_tick')
     search_fields = ('aspect', 'name', 'description')
+
+
+@admin.register(Meditation)
+class MeditationAdmin(admin.ModelAdmin):
+    list_display = ('title', 'depth', 'voice', 'composed_at', 'recursive_of')
+    list_filter = ('depth', 'voice')
+    date_hierarchy = 'composed_at'
+    readonly_fields = ('composed_at', 'sources', 'codex_section_slug')
+    search_fields = ('title', 'body')
 
 
 @admin.register(Reflection)
