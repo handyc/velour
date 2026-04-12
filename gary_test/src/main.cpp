@@ -436,6 +436,64 @@ static void oledRedraw() {
     }
 #endif
 
+    // Animated sprite — a little happy robot in the top-right corner.
+    // Cycles through: neutral → bounce → wave → blink. Drawn with
+    // u8g2 primitives (no bitmap data). The frame counter advances
+    // on every OLED redraw (500ms), so the animation is ~2 seconds
+    // per cycle. Constant resources: no allocation, no timers.
+    {
+        static uint8_t spriteFrame = 0;
+        spriteFrame = (spriteFrame + 1) % 16;  // 16 half-seconds = 8 second cycle
+        int phase = spriteFrame / 4;  // 0=neutral, 1=bounce, 2=wave, 3=blink
+
+        int sx = 110;  // top-right corner
+        int sy = 1;
+        int bounce = (phase == 1) ? -2 : 0;
+
+        // Head
+        u8g2.drawCircle(sx + 8, sy + 7 + bounce, 7);
+
+        // Eyes
+        if (phase == 3) {
+            // Blink — horizontal lines
+            u8g2.drawHLine(sx + 4, sy + 6 + bounce, 3);
+            u8g2.drawHLine(sx + 10, sy + 6 + bounce, 3);
+        } else {
+            // Open — dots
+            u8g2.drawDisc(sx + 5, sy + 5 + bounce, 1);
+            u8g2.drawDisc(sx + 11, sy + 5 + bounce, 1);
+        }
+
+        // Smile
+        u8g2.drawPixel(sx + 5, sy + 10 + bounce);
+        u8g2.drawHLine(sx + 6, sy + 11 + bounce, 5);
+        u8g2.drawPixel(sx + 11, sy + 10 + bounce);
+
+        // Body (vertical line from neck)
+        int by = sy + 15 + bounce;
+        u8g2.drawVLine(sx + 8, by, 6);
+
+        // Arms
+        if (phase == 2) {
+            // Wave — right arm raised, left arm down
+            u8g2.drawLine(sx + 8, by + 1, sx + 15, by - 3);
+            u8g2.drawPixel(sx + 15, by - 4);  // hand wave
+            u8g2.drawLine(sx + 8, by + 1, sx + 2, by + 4);
+        } else {
+            // Both arms down
+            u8g2.drawLine(sx + 8, by + 1, sx + 3, by + 5);
+            u8g2.drawLine(sx + 8, by + 1, sx + 13, by + 5);
+        }
+
+        // Legs
+        u8g2.drawLine(sx + 8, by + 5, sx + 5, by + 10);
+        u8g2.drawLine(sx + 8, by + 5, sx + 11, by + 10);
+
+        // Feet
+        u8g2.drawHLine(sx + 3, by + 10, 3);
+        u8g2.drawHLine(sx + 10, by + 10, 3);
+    }
+
     // Footer: uptime + rssi
     u8g2.setFont(u8g2_font_5x8_tf);
     unsigned long upS = (millis() - bootMs) / 1000;
