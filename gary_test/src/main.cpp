@@ -84,7 +84,7 @@
   static size_t loraRxFragLen = 0;
 
   // Ticker scroll state — pixel-level smooth scrolling.
-  // Scrolls 4px every 5ms = 800px/sec = 200 chars/sec at 4px/char.
+  // Scrolls 2px every 5ms = 400px/sec = 100 chars/sec at 4px/char.
   static int loraTickerPx = 0;         // pixel offset (negative = scrolled left)
   static unsigned long lastTickerScrollAt = 0;
   static bool loraScreenReady = true;  // start true for test message
@@ -237,7 +237,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.6.5"
+#define FIRMWARE_VERSION    "v0.6.6"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -752,7 +752,7 @@ static void oledRedraw() {
     if (loraScreenReady && loraScreenBuf[0]) {
         if (millis() - lastTickerScrollAt >= 5) {
             lastTickerScrollAt = millis();
-            loraTickerPx -= 4;
+            loraTickerPx -= 2;
             int totalWidth = strlen(loraScreenBuf) * 4;  // 4px per char
             if (loraTickerPx < -totalWidth) loraTickerPx = 128;
         }

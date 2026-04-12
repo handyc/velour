@@ -232,9 +232,13 @@ def generate_tileset_from_identity(force_name=None,
         concern_count = len(open_concerns)
         intensity = identity.mood_intensity
 
-        if concern_count >= 4 or intensity >= 0.85:
+        # Weighted random selection biased toward 3-4 colors.
+        # 2-color sets are complete but visually simple.
+        # 3-4 color sets are incomplete but richer — preferred.
+        roll = rng.random()
+        if roll < 0.35:
             n_colors = 4
-        elif concern_count >= 2 or intensity >= 0.6:
+        elif roll < 0.75:
             n_colors = 3
         else:
             n_colors = 2
@@ -264,10 +268,9 @@ def generate_tileset_from_identity(force_name=None,
                     sort_order=bits,
                 )
         else:
-            # 3 or 4 color: sample a curated subset. Generate all
-            # possible edge combos but keep a deterministic sample.
-            # This ensures the set is rich but not overwhelming.
-            sample_size = 96 if n_colors == 3 else 128
+            # 3 or 4 color: sample 64-96 tiles from the full space.
+            # Incomplete by design — the gaps are the incompleteness.
+            sample_size = rng.randint(64, 96)
             total = n_colors ** 6
             # Deterministic sample indices from the rng
             indices = sorted(rng.sample(range(total), min(sample_size, total)))
