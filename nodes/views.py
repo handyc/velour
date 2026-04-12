@@ -41,6 +41,28 @@ def _apply_node_post(node, post):
 # --- node views ----------------------------------------------------
 
 @login_required
+def fleet_json(request):
+    """Live fleet status for the JS poller on the list page."""
+    from django.utils import timezone as tz
+    nodes = Node.objects.select_related('hardware_profile').all()
+    now = tz.now()
+    data = {}
+    for n in nodes:
+        if n.last_seen_at:
+            age = (now - n.last_seen_at).total_seconds()
+            if age < 60:
+                ago = f'{int(age)}s ago'
+            elif age < 3600:
+                ago = f'{int(age // 60)}m ago'
+            else:
+                ago = f'{int(age // 3600)}h ago'
+        else:
+            ago = 'never'
+        data[n.slug] = {'ago': ago, 'ip': n.last_ip or '', 'fw': n.firmware_version or ''}
+    return JsonResponse(data)
+
+
+@login_required
 def node_list(request):
     """Fleet grid. Supports filters by hardware profile, experiment,
     power mode, and enabled flag via query params."""

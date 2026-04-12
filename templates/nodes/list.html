@@ -84,7 +84,7 @@
         {% if n.experiment %}<span class="badge exp">{{ n.experiment.name }}</span>{% endif %}
         {% if n.last_ip %}<span class="mono">{{ n.last_ip }}</span>{% endif %}
         {% if n.firmware_version %}<span class="mono">{{ n.firmware_version }}</span>{% endif %}
-        <span class="meta">{% if n.last_seen_at %}{{ n.last_seen_at|date:"Y-m-d H:i" }}{% else %}never seen{% endif %}</span>
+        <span class="meta" data-fleet-slug="{{ n.slug }}">{% if n.last_seen_at %}{{ n.last_seen_at|timesince }} ago{% else %}never seen{% endif %}</span>
     </div>
     {% endfor %}
 </div>
@@ -95,4 +95,21 @@
 <div style="margin-top: 1.5rem;">
     <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
 </div>
+
+<script>
+(function() {
+    function refresh() {
+        fetch('{% url "nodes:fleet_json" %}')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                document.querySelectorAll('[data-fleet-slug]').forEach(function(el) {
+                    var slug = el.dataset.fleetSlug;
+                    if (data[slug]) el.textContent = data[slug].ago;
+                });
+            })
+            .catch(function() {});
+    }
+    setInterval(refresh, 10000);  // every 10 seconds
+})();
+</script>
 {% endblock %}

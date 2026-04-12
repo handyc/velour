@@ -16,6 +16,7 @@ urlpatterns = [
     path('firmware/upload/',         views.firmware_upload, name='firmware_upload'),
     path('firmware/<int:pk>/activate/', views.firmware_activate, name='firmware_activate'),
     path('firmware/<int:pk>/delete/',   views.firmware_delete,   name='firmware_delete'),
+    path('fleet.json',               views.fleet_json,      name='fleet_json'),
     path('<slug:slug>/',             views.node_detail,     name='detail'),
     path('<slug:slug>/edit/',        views.node_edit,       name='edit'),
     path('<slug:slug>/delete/',      views.node_delete,     name='delete'),
