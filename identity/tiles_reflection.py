@@ -189,10 +189,11 @@ def generate_tileset_from_identity(force_name=None,
         f'you would get the same tiles.'
     )
 
-    # Decide tile type: hex tiles emerge from more complex or excited
-    # states. The decision is deterministic per-moment via the rng.
+    # Decide tile type: hex tiles are the more interesting form, so
+    # they appear frequently. Every mood has at least 50% hex chance;
+    # creative/excited/curious moods lean even higher.
     hex_moods = {'creative', 'excited', 'curious', 'restless'}
-    hex_chance = 0.6 if mood in hex_moods else 0.2
+    hex_chance = 0.85 if mood in hex_moods else 0.5
     use_hex = rng.random() < hex_chance
     tile_type = 'hex' if use_hex else 'square'
 
@@ -217,43 +218,23 @@ def generate_tileset_from_identity(force_name=None,
     )
 
     if use_hex:
-        # Hex: generate a complete set (2^6=64) using the first 2
-        # palette colors, or a partial set sized like the square path.
-        c0, c1 = palette[0], palette[1] if len(palette) > 1 else palette[0]
+        # Hex: always generate the complete 2^6=64 set so the tiling
+        # fills without gaps. The two palette colors are the mood's
+        # dominant + one accent, producing a unique color pair per state.
+        c0 = palette[0]
+        c1 = palette[1] if len(palette) > 1 else palette[0]
         colors = [c0, c1]
-        # Full set when creative/excited, partial otherwise
-        full_set = mood in ('creative', 'excited')
-        if full_set:
-            tile_count = 64
-            for bits in range(64):
-                n  = colors[(bits >> 5) & 1]
-                ne = colors[(bits >> 4) & 1]
-                se = colors[(bits >> 3) & 1]
-                s  = colors[(bits >> 2) & 1]
-                sw = colors[(bits >> 1) & 1]
-                nw = colors[bits & 1]
-                Tile.objects.create(
-                    tileset=tileset, name=f'h{bits+1}',
-                    n_color=n, ne_color=ne, se_color=se,
-                    s_color=s, sw_color=sw, nw_color=nw,
-                    sort_order=bits,
-                )
-        else:
-            # Partial hex set — same count logic as square
-            tile_count = max(6, min(16, 6 + len(open_concerns)))
-            for i in range(tile_count):
-                edges = []
-                for edge_idx in range(6):
-                    h = hashlib.sha256(
-                        f'{short}:{i}:{edge_idx}'.encode()).hexdigest()
-                    pick = int(h[:2], 16) % len(colors)
-                    edges.append(colors[pick])
-                Tile.objects.create(
-                    tileset=tileset, name=f'h{i+1}',
-                    n_color=edges[0], ne_color=edges[1], se_color=edges[2],
-                    s_color=edges[3], sw_color=edges[4], nw_color=edges[5],
-                    sort_order=i,
-                )
+        for bits in range(64):
+            Tile.objects.create(
+                tileset=tileset, name=f'h{bits+1}',
+                n_color=colors[(bits >> 5) & 1],
+                ne_color=colors[(bits >> 4) & 1],
+                se_color=colors[(bits >> 3) & 1],
+                s_color=colors[(bits >> 2) & 1],
+                sw_color=colors[(bits >> 1) & 1],
+                nw_color=colors[bits & 1],
+                sort_order=bits,
+            )
     else:
         # Square: original logic
         tile_count = max(4, min(12, 4 + len(open_concerns)))
