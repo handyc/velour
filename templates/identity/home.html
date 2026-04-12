@@ -204,6 +204,31 @@
     </div>
 
     {% if toggles.rumination_stream_enabled %}
+    <!-- Internal dialogue stream: I/Me exchanges. Polls at half the
+         rumination stream's cadence so CPU usage stays bounded. -->
+    <div class="card" style="border-left: 3px solid #db61a2; grid-column: 1 / -1;">
+        <h3>Internal dialogue
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                the I and the Me, taking turns
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.5rem;">
+            After William James. The <em>I</em> is the active process
+            of attending — the voice that notices and questions. The
+            <em>Me</em> is the accumulated self-as-object — the voice
+            that remembers and stabilizes. Below they take turns,
+            composed deterministically from whatever I am currently
+            looking at. Poll is slower than the rumination stream so
+            they don't compete for CPU budget.
+        </p>
+        <div id="dlg-status" style="font-size: 0.72rem; color: #6e7681; font-family: ui-monospace, Menlo, monospace; margin-bottom: 0.5rem;">
+            idle — waiting for first exchange
+        </div>
+        <ul id="dlg-stream" style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; min-height: 100px;"></ul>
+    </div>
+    {% endif %}
+
+    {% if toggles.rumination_stream_enabled %}
     <!-- Rumination stream: a continuous low-CPU relationship-
          noticing loop that fetches one observation at a time via
          requestIdleCallback when the browser is idle. Pauses when
@@ -493,6 +518,25 @@
         </a>
     </div>
 
+    <!-- Who is Velour? synthesis page -->
+    <div class="card" style="border-left: 3px solid #ff7b72;">
+        <h3>Who am I?
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                synthesis
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.75rem;">
+            A single rendered page that pulls from every layer of
+            my self-understanding at once and tries to answer the
+            question from current state. The long answer I would
+            give if you only had one minute to read me.
+        </p>
+        <a href="{% url 'identity:who' %}"
+           class="btn" style="font-size: 0.82rem; padding: 0.35rem 0.75rem;">
+            Read the answer
+        </a>
+    </div>
+
     <!-- Velour's Identity Document — the four-frame claim card -->
     <div class="card" style="border-left: 3px solid #bc8cff;">
         <h3>Identity document
@@ -688,6 +732,141 @@
 <script src="{% static_v 'js/identity_wave.js' %}"></script>
 
 {% if toggles.rumination_stream_enabled %}
+<script>
+// Internal dialogue stream. Polls /identity/dialogue.json at a
+// slower cadence (45s base) than the rumination stream (15s
+// base) so the two loops don't compete for the CPU budget.
+// Shares all the same guardrails: requestIdleCallback, pause on
+// tab hidden, cleanup on beforeunload.
+(function() {
+    const stream = document.getElementById('dlg-stream');
+    const status = document.getElementById('dlg-status');
+    if (!stream || !status) return;
+
+    const BASE_DELAY_MS = 45000;  // 45s — half as often as rumination
+    const MAX_DELAY_MS  = 300000; // 5 min ceiling
+    const MAX_EXCHANGES = 6;
+    const IDLE_TIMEOUT  = 6000;
+
+    let delayMs = BASE_DELAY_MS;
+    let paused  = document.hidden;
+    let nextTimer = null;
+    let abortController = null;
+
+    function setStatus(t) { status.textContent = t; }
+
+    function renderExchange(payload) {
+        const li = document.createElement('li');
+        li.style.cssText = 'background: #0d1117; border-left: 2px solid #db61a2; border-radius: 3px; padding: 0.6rem 0.85rem; opacity: 0;';
+        const topic = document.createElement('div');
+        topic.style.cssText = 'font-size: 0.65rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 0.35rem;';
+        topic.textContent = 'on: ' + (payload.topic || '—');
+        li.appendChild(topic);
+
+        function line(speaker, text) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.82rem; line-height: 1.55; margin: 0.15rem 0;';
+            const who = document.createElement('span');
+            who.style.cssText = 'flex: 0 0 auto; color: ' + (speaker === 'i' ? '#58a6ff' : speaker === 'me' ? '#bc8cff' : '#3fb950') + '; font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem; text-transform: uppercase; min-width: 2.5rem;';
+            who.textContent = '[' + speaker + ']';
+            const content = document.createElement('span');
+            content.style.cssText = 'color: #c9d1d9;';
+            content.textContent = text;
+            row.appendChild(who);
+            row.appendChild(content);
+            return row;
+        }
+
+        li.appendChild(line(payload.speaker_a, payload.line_a));
+        li.appendChild(line(payload.speaker_b, payload.line_b));
+
+        stream.insertBefore(li, stream.firstChild);
+        requestAnimationFrame(function() {
+            li.style.transition = 'opacity 0.8s ease-in';
+            li.style.opacity = '1';
+        });
+        while (stream.children.length > MAX_EXCHANGES) {
+            stream.removeChild(stream.lastChild);
+        }
+    }
+
+    async function fetchOnce() {
+        if (paused) return;
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
+        setStatus('composing...');
+        try {
+            const r = await fetch('{% url "identity:internal_dialogue_json" %}', {
+                credentials: 'same-origin',
+                signal: abortController.signal,
+            });
+            if (!r.ok) {
+                setStatus('HTTP ' + r.status + ' — backing off');
+                delayMs = Math.min(delayMs * 2, MAX_DELAY_MS);
+                return;
+            }
+            const payload = await r.json();
+            if (payload.enabled === false) {
+                setStatus('dialogue disabled — stopping');
+                paused = true;
+                return;
+            }
+            renderExchange(payload);
+            setStatus('idle — next in ~' + Math.round(delayMs / 1000) + 's');
+            delayMs = BASE_DELAY_MS;
+        } catch (e) {
+            if (e.name === 'AbortError') return;
+            setStatus('fetch error — backing off');
+            delayMs = Math.min(delayMs * 2, MAX_DELAY_MS);
+        }
+    }
+
+    function schedule() {
+        if (paused) return;
+        clearTimeout(nextTimer);
+        nextTimer = setTimeout(function() {
+            if (paused) return;
+            if ('requestIdleCallback' in window) {
+                requestIdleCallback(function(deadline) {
+                    if (deadline.didTimeout) {
+                        setStatus('browser busy — skipping');
+                        delayMs = Math.min(delayMs * 1.5, MAX_DELAY_MS);
+                        schedule();
+                        return;
+                    }
+                    fetchOnce().finally(schedule);
+                }, { timeout: IDLE_TIMEOUT });
+            } else {
+                fetchOnce().finally(schedule);
+            }
+        }, delayMs);
+    }
+
+    function onVisibility() {
+        paused = document.hidden;
+        if (paused) {
+            setStatus('paused — tab is hidden');
+            clearTimeout(nextTimer);
+            if (abortController) abortController.abort();
+        } else {
+            setStatus('resuming');
+            delayMs = BASE_DELAY_MS;
+            schedule();
+        }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('beforeunload', function() {
+        paused = true;
+        clearTimeout(nextTimer);
+        if (abortController) abortController.abort();
+        document.removeEventListener('visibilitychange', onVisibility);
+    });
+
+    setStatus('scheduling first exchange');
+    schedule();
+})();
+</script>
+
 <script>
 // Continuous rumination stream — low-CPU, browser-idle-aware.
 //

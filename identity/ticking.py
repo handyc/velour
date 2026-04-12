@@ -616,6 +616,28 @@ def tick(triggered_by='manual'):
     if toggles.concerns_enabled:
         maintain_concerns(all_hits, tick_row)
 
+    # Advance the DwellingState: if Velour is dwelling on something,
+    # bump its depth by one. Auto-closes on max-duration. If no
+    # dwelling is currently active AND the most severe open concern
+    # is above 0.8 severity, auto-open a dwelling on it — Velour
+    # stays with the worst thing it's worrying about.
+    from .models import DwellingState, Concern as ConcernModel
+    dwelling = DwellingState.get_self()
+    if dwelling.is_active:
+        dwelling.advance()
+    else:
+        worst = ConcernModel.objects.filter(
+            closed_at=None, severity__gte=0.8,
+        ).order_by('-severity').first()
+        if worst:
+            dwelling.open(
+                topic=worst.name or worst.aspect,
+                source_model='identity.Concern',
+                source_pk=worst.pk,
+                notes=(f'Auto-opened from high-severity concern '
+                       f'"{worst.aspect}" at severity {worst.severity:.2f}.'),
+            )
+
     # Legacy Mood row — removed in a future migration once all readers
     # have been moved to Tick.
     Mood.objects.create(

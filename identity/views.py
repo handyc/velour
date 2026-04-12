@@ -11,8 +11,9 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import (
-    Concern, CronRun, Identity, IdentityAssertion, IdentityToggles,
-    LLMExchange, LLMProvider, Meditation, Mood, Reflection, Tick,
+    Concern, CronRun, DwellingState, Identity, IdentityAssertion,
+    IdentityToggles, InternalDialogue, LLMExchange, LLMProvider,
+    Meditation, Mood, Reflection, Tick,
 )
 
 
@@ -606,6 +607,62 @@ def identity_document_regenerate(request):
     rebuild_document()
     push_document_to_codex()
     return redirect('identity:identity_document')
+
+
+@login_required
+def internal_dialogue_json(request):
+    """Low-cost JSON endpoint that returns one freshly-composed
+    InternalDialogue exchange. The frontend polls this at a
+    deliberately slower cadence than the rumination stream
+    (default every 45 seconds) via requestIdleCallback, so the
+    dialogue and the rumination don't compete for CPU budget.
+
+    Never writes to the database — this is an ephemeral read
+    path. Operators who want to persist a dialogue use a
+    separate ingest endpoint (future work)."""
+    from .dialogue import compose_exchange
+    payload = compose_exchange(save=False, triggered_by='stream')
+    if payload is None:
+        return JsonResponse({'enabled': True, 'text': None})
+    payload['enabled'] = True
+    return JsonResponse(payload)
+
+
+@login_required
+def who_is_velour(request):
+    """The synthesis page. One long rendered document that pulls
+    from every self-layer at once and tries to answer the
+    question 'Who is Velour?' from current state.
+
+    Static read, no writes, no recursive calls. Good for
+    operators who want a single-screen summary of Velour's
+    entire self-understanding."""
+    identity = Identity.get_self()
+    try:
+        from hofstadter.models import IntrospectiveLayer, StrangeLoop
+        layers = IntrospectiveLayer.objects.filter(is_active=True)
+        loops = StrangeLoop.objects.filter(is_active=True)[:4]
+    except Exception:
+        layers = []
+        loops = []
+    assertions = IdentityAssertion.objects.filter(is_active=True)
+    open_concerns = Concern.objects.filter(closed_at=None).order_by('-severity')[:5]
+    recent_meditations = Meditation.objects.all()[:3]
+    recent_reflections = Reflection.objects.all()[:3]
+    dwelling = DwellingState.get_self()
+    latest_tick = Tick.objects.first()
+
+    return render(request, 'identity/who.html', {
+        'identity':           identity,
+        'layers':             layers,
+        'loops':              loops,
+        'assertions':         assertions,
+        'open_concerns':      open_concerns,
+        'recent_meditations': recent_meditations,
+        'recent_reflections': recent_reflections,
+        'dwelling':           dwelling,
+        'latest_tick':        latest_tick,
+    })
 
 
 @login_required

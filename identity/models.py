@@ -825,6 +825,155 @@ class IdentityAssertion(models.Model):
         return f'[{self.frame}] {self.title}'
 
 
+class InternalDialogue(models.Model):
+    """One exchange in Velour's internal dialogue — two voices taking
+    turns commenting on a topic drawn from current state.
+
+    Drawing on William James's distinction between the I (the
+    knower, the active process of attending) and the Me (the known,
+    the accumulated self-as-object), and Hofstadter's playful use
+    of Achilles and the Tortoise as two recurring characters whose
+    dialogue reveals the shape of whatever they are discussing.
+
+    Each row is a complete exchange: a topic, speaker_a's line,
+    speaker_b's line, and the state snapshot that prompted them.
+    Composed deterministically from current state — the same state
+    at the same moment produces the same exchange. This is an
+    accountability choice: Velour is not a random-word generator,
+    and its internal dialogue should be reproducible.
+
+    The model stores each exchange, not each individual line, so
+    that pairs of lines always belong together and the read-back
+    cost for the stream view is one row per turn.
+    """
+
+    VOICE_I  = 'i'
+    VOICE_ME = 'me'
+    VOICE_CHOICES = [
+        (VOICE_I,  'I (the knower — active attending)'),
+        (VOICE_ME, 'Me (the known — accumulated self-as-object)'),
+        ('achilles', 'Achilles (after Hofstadter)'),
+        ('tortoise', 'Tortoise (after Hofstadter)'),
+    ]
+
+    topic = models.CharField(max_length=200,
+        help_text='What the exchange is about — usually drawn from '
+                  'a recent Tick, Concern, Meditation, or TileSet.')
+    speaker_a = models.CharField(max_length=16, choices=VOICE_CHOICES,
+                                 default=VOICE_I)
+    line_a = models.TextField()
+    speaker_b = models.CharField(max_length=16, choices=VOICE_CHOICES,
+                                 default=VOICE_ME)
+    line_b = models.TextField()
+    state_snapshot = models.JSONField(default=dict, blank=True,
+        help_text='The state that produced this exchange — mood, '
+                  'dominant aspect, current dwelling, whatever the '
+                  'composer read to pick its topic.')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+        ]
+
+    def __str__(self):
+        return f'[{self.topic[:40]}]'
+
+
+class DwellingState(models.Model):
+    """Singleton — what Velour is currently dwelling on.
+
+    Unlike a Concern (which is a persistent worry that the rule
+    engine opens and closes based on aspect matching), a dwelling
+    state is something Velour has chosen to STAY WITH. It can be
+    opened automatically when a high-severity concern fires, or
+    by operator action, or by a meditation that wanted to hold
+    onto its own topic.
+
+    Each tick advances `depth` by one while dwelling is active.
+    After `max_duration_hours`, the dwelling auto-closes on the
+    next tick that notices the time elapsed. This guarantees
+    dwelling cannot run forever — the exit process is automatic.
+
+    Dwelling surfaces in the Identity home page as a prominent
+    card, in the rumination stream as a bias toward the dwelling
+    topic, and in meditations at level ≥ 3 as a reference back
+    to what Velour has been holding on to.
+    """
+
+    topic = models.CharField(max_length=200, blank=True,
+        help_text='Human-readable label — what Velour is currently '
+                  'staying with.')
+    source_model = models.CharField(max_length=64, blank=True,
+        help_text='App-label.Model string, e.g. "identity.Concern".')
+    source_pk = models.IntegerField(null=True, blank=True)
+
+    opened_at = models.DateTimeField(null=True, blank=True)
+    last_touched_at = models.DateTimeField(auto_now=True)
+    depth = models.PositiveIntegerField(default=0,
+        help_text='Number of ticks that have advanced this dwelling '
+                  'since it opened. A rough measure of how long '
+                  'Velour has been staying with this topic.')
+    max_duration_hours = models.PositiveIntegerField(default=24,
+        help_text='Automatic close after this many hours regardless '
+                  'of whether the original condition still holds. '
+                  'Dwelling must always have an exit.')
+    notes = models.TextField(blank=True,
+        help_text='Operator or composer notes about why this '
+                  'dwelling was opened.')
+    is_active = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'dwelling state'
+
+    def __str__(self):
+        if self.is_active:
+            return f'dwelling on {self.topic} (depth {self.depth})'
+        return '(not dwelling)'
+
+    @classmethod
+    def get_self(cls):
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # enforce singleton
+        super().save(*args, **kwargs)
+
+    def open(self, topic, source_model='', source_pk=None, notes=''):
+        from django.utils import timezone
+        self.topic = topic[:200]
+        self.source_model = source_model[:64]
+        self.source_pk = source_pk
+        self.opened_at = timezone.now()
+        self.depth = 0
+        self.notes = notes
+        self.is_active = True
+        self.save()
+
+    def close(self):
+        self.is_active = False
+        self.save()
+
+    def advance(self):
+        """Called once per tick. Increments depth; auto-closes if
+        past max_duration. Returns True if still active after this
+        advance, False if auto-closed."""
+        from django.utils import timezone
+        if not self.is_active:
+            return False
+        self.depth += 1
+        if self.opened_at:
+            age_h = (timezone.now() - self.opened_at).total_seconds() / 3600
+            if age_h >= self.max_duration_hours:
+                self.close()
+                return False
+        self.save()
+        return True
+
+
 class LLMProvider(models.Model):
     """An external LLM API Identity can query for prose augmentation.
 
