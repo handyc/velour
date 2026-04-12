@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'hpc',
     'tiles',
     'hofstadter',
+    'mailserver',
 ]
 
 MIDDLEWARE = [
