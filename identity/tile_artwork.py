@@ -202,13 +202,14 @@ def generate_artwork_from_tileset(tileset, mood=None, mood_intensity=None):
     if tile_count == 0:
         return None
 
-    # Scale grid size: more tiles = denser patterns at moderate size
+    # Scale grid size: larger grids produce more striking images.
+    # Tile pixel size kept large enough for color detail to show.
     if tile_count >= 64:
-        w, h, px = 32, 32, 16
+        w, h, px = 48, 48, 12
     elif tile_count >= 16:
-        w, h, px = 24, 24, 20
+        w, h, px = 36, 36, 16
     else:
-        w, h, px = 16, 16, 24
+        w, h, px = 24, 24, 20
 
     # Seed from tileset slug so the same tileset always produces
     # the same artwork (deterministic portraits)
