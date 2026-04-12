@@ -75,6 +75,7 @@ INSTALLED_APPS = [
     'oracle',
     'hpc',
     'tiles',
+    'condenser',
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Condenser — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .tier-badge { display:inline-block; font-size:0.65rem; padding:0.1rem 0.4rem;
+        border-radius:8px; font-family:ui-monospace,Menlo,monospace; }
+    .tier-django  { background:rgba(46,160,67,0.15); color:#2ea043; }
+    .tier-js      { background:rgba(210,153,34,0.15); color:#d29922; }
+    .tier-esp     { background:rgba(88,166,255,0.15); color:#58a6ff; }
+    .tier-attiny  { background:rgba(248,81,73,0.15); color:#f85149; }
+    .tier-circuit { background:rgba(188,140,255,0.15); color:#bc8cff; }
+    .dist-list { display:flex; flex-direction:column; gap:0.3rem; margin:0.75rem 0; }
+    .dist-row { background:#161b22; border-left:2px solid #30363d; border-radius:0 3px 3px 0;
+        padding:0.35rem 0.6rem; display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; }
+    .dist-row.completed { border-left-color:#2ea043; }
+    .dist-row.error { border-left-color:#f85149; }
+    .dist-row .name { color:#c9d1d9; font-weight:500; }
+    .dist-row .meta { color:#6e7681; font-size:0.68rem; font-family:ui-monospace,Menlo,monospace; margin-left:auto; }
+    .avail { display:flex; flex-direction:column; gap:0.4rem; margin:0.75rem 0; }
+    .avail-card { background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.5rem 0.7rem; }
+    .avail-card h3 { font-size:0.88rem; margin:0 0 0.2rem; color:#c9d1d9; }
+    .avail-card p { font-size:0.72rem; color:#8b949e; margin:0 0 0.3rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Condenser</h1>
+<p style="color:#8b949e;font-size:0.78rem;margin-bottom:0.5rem">
+Progressive distillation — reduce software through increasingly constrained platforms.
+Each tier strips away what can't survive, preserving only the essential logic.
+</p>
+
+<h2 style="font-size:0.95rem;margin:1rem 0 0.3rem">Available distillations</h2>
+<div class="avail">
+    <div class="avail-card">
+        <h3>Tiles → JS (browser)</h3>
+        <p>Distill the full Tiles app into a single HTML file with canvas rendering,
+        greedy tiling, and localStorage persistence. ~13KB output.</p>
+        <div style="display:flex;gap:0.3rem;align-items:center">
+            <span class="tier-badge tier-django">Django</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-js">JS</span>
+        </div>
+        <form method="post" action="{% url 'condenser:distill_tiles' %}" style="margin-top:0.4rem">
+            {% csrf_token %}
+            <button type="submit" class="btn">Distill</button>
+        </form>
+    </div>
+    <div class="avail-card">
+        <h3>Velour → JS (self-distillation)</h3>
+        <p>Condense the entire Velour system into a single read-only HTML snapshot.
+        Fleet status, world clocks, Identity mood, and a hex tiling — all in one file.
+        The map claiming to be the territory.</p>
+        <div style="display:flex;gap:0.3rem;align-items:center">
+            <span class="tier-badge tier-django">Django</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-js">JS</span>
+        </div>
+        <form method="post" action="{% url 'condenser:distill_velour' %}" style="margin-top:0.4rem">
+            {% csrf_token %}
+            <button type="submit" class="btn">Distill</button>
+        </form>
+    </div>
+</div>
+
+{% if distillations %}
+<h2 style="font-size:0.95rem;margin:1rem 0 0.3rem">Previous distillations</h2>
+<div class="dist-list">
+    {% for d in distillations %}
+    <div class="dist-row {{ d.status }}">
+        <span class="tier-badge tier-{{ d.source_tier }}">{{ d.get_source_tier_display }}</span>
+        <span style="color:#6e7681">→</span>
+        <span class="tier-badge tier-{{ d.target_tier }}">{{ d.get_target_tier_display }}</span>
+        <a href="{% url 'condenser:detail' d.slug %}" class="name">{{ d.name }}</a>
+        <span class="meta">{{ d.output_size_bytes }} bytes · {{ d.created_at|date:"Y-m-d H:i" }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="margin-top:1rem">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}
