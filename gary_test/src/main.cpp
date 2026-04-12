@@ -57,13 +57,34 @@
   unsigned long lastLoraSendAt = 0;
   unsigned long loraPacketsSent = 0;
   unsigned long loraPacketsRecv = 0;
+  unsigned long loraScreensRecv = 0;
   int loraLastRssi = 0;
   char loraLastMsg[64] = "";
+
   // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
-  // Hazel: "awake" beacon every 10 min. Reports use compression.
-  // Mabel: small ACKs only.
-  #define LORA_SEND_INTERVAL_MS 600000   // 10 minutes
-  #define LORA_MAX_PAYLOAD 222           // practical max per packet
+  // Hazel sends 2000-char screen every 20 min.
+  // Mabel sends 2000-char screen every 30 min.
+  #ifdef NODE_LORA_ROLE_SENDER
+    #define LORA_SCREEN_INTERVAL_MS 1800000  // Mabel: 30 min
+  #else
+    #define LORA_SCREEN_INTERVAL_MS 1200000  // Hazel: 20 min
+  #endif
+  unsigned long lastLoraScreenAt = 0;
+
+  #define LORA_MAX_PAYLOAD 222
+
+  // Reassembly buffer for incoming multi-packet screens
+  #define LORA_SCREEN_SIZE 2001
+  static char loraScreenBuf[LORA_SCREEN_SIZE];   // received screen (null-terminated)
+  static uint8_t loraRxFragBuf[4096];             // compressed fragment accumulator
+  static int loraRxFragCount = 0;
+  static int loraRxFragTotal = 0;
+  static size_t loraRxFragLen = 0;
+
+  // Ticker scroll state
+  static int loraTickerOffset = 0;
+  static unsigned long lastTickerScrollAt = 0;
+  static bool loraScreenReady = false;  // true once first screen received
 
   // Compress a buffer using deflate (ESP32 ROM miniz).
   // Returns compressed size, or 0 on failure. Output buffer must
@@ -179,7 +200,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "velour-0.5.1-lora-compress"
+#define FIRMWARE_VERSION    "velour-0.5.2-lora-screens"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -682,6 +703,27 @@ static void oledRedraw() {
             snprintf(lbuf, sizeof(lbuf), "LoRa: offline");
         }
         u8g2.drawStr(0, 44, lbuf);
+    }
+
+    // Line 6 (y=55): scrolling ticker of last received screen
+    if (loraScreenReady) {
+        int screenLen = strlen(loraScreenBuf);
+        if (screenLen > 0) {
+            // 32 chars visible at 4px wide = 128px
+            // Scroll at 10 chars/sec = advance offset every 100ms
+            if (millis() - lastTickerScrollAt >= 100) {
+                lastTickerScrollAt = millis();
+                loraTickerOffset++;
+                if (loraTickerOffset >= screenLen) loraTickerOffset = 0;
+            }
+            // Extract 32-char window with wraparound
+            static char tickerWin[33];
+            for (int i = 0; i < 32; i++) {
+                tickerWin[i] = loraScreenBuf[(loraTickerOffset + i) % screenLen];
+            }
+            tickerWin[32] = '\0';
+            u8g2.drawStr(0, 55, tickerWin);
+        }
     }
 #else
     {
@@ -1302,6 +1344,16 @@ static void velourReport(const char* label) {
 
 #ifdef NODE_HAS_LORA
 
+// Generate 2000 random A-Za-z0-9 characters for testing
+static void loraGenerateTestScreen(char* buf, int len) {
+    static const char charset[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (int i = 0; i < len - 1; i++) {
+        buf[i] = charset[random(sizeof(charset) - 1)];
+    }
+    buf[len - 1] = '\0';
+}
+
 static void loraSetup() {
     SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
     LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
@@ -1319,49 +1371,90 @@ static void loraSetup() {
 static void loraLoop() {
     if (!loraReady) return;
 
-    // Both roles: listen for incoming packets
+    // --- Receive: multi-packet reassembly ---
     int packetSize = LoRa.parsePacket();
-    if (packetSize > 0) {
-        int i = 0;
-        while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
-            loraLastMsg[i++] = (char)LoRa.read();
-        }
-        loraLastMsg[i] = '\0';
+    if (packetSize >= 2) {
+        uint8_t seq = LoRa.read();
+        uint8_t total = LoRa.read();
         loraLastRssi = LoRa.packetRssi();
         loraPacketsRecv++;
-        Serial.print("[lora] recv: ");
-        Serial.print(loraLastMsg);
-        Serial.print(" rssi=");
-        Serial.println(loraLastRssi);
+
+        if (total > 1) {
+            // Multi-packet screen transfer
+            if (seq == 0) {
+                // First fragment — reset reassembly
+                loraRxFragCount = 0;
+                loraRxFragTotal = total;
+                loraRxFragLen = 0;
+            }
+            // Append fragment data
+            int remaining = packetSize - 2;
+            while (LoRa.available() && remaining > 0 &&
+                   loraRxFragLen < sizeof(loraRxFragBuf)) {
+                loraRxFragBuf[loraRxFragLen++] = LoRa.read();
+                remaining--;
+            }
+            loraRxFragCount++;
+
+            Serial.print("[lora] frag ");
+            Serial.print(seq + 1);
+            Serial.print("/");
+            Serial.print(total);
+            Serial.print(" (");
+            Serial.print(loraRxFragLen);
+            Serial.print(" bytes) rssi=");
+            Serial.println(loraLastRssi);
+
+            // All fragments received? Decompress.
+            if (loraRxFragCount >= loraRxFragTotal) {
+                static uint8_t decompBuf[LORA_SCREEN_SIZE + 64];
+                size_t decompLen = loraDecompress(
+                    loraRxFragBuf, loraRxFragLen,
+                    decompBuf, sizeof(decompBuf));
+                if (decompLen > 0 && decompLen < LORA_SCREEN_SIZE) {
+                    memcpy(loraScreenBuf, decompBuf, decompLen);
+                    loraScreenBuf[decompLen] = '\0';
+                    loraScreenReady = true;
+                    loraTickerOffset = 0;  // reset scroll
+                    loraScreensRecv++;
+                    Serial.print("[lora] screen received: ");
+                    Serial.print(decompLen);
+                    Serial.println(" chars");
+                } else {
+                    Serial.println("[lora] decompress failed");
+                }
+                loraRxFragLen = 0;
+                loraRxFragCount = 0;
+            }
+        } else {
+            // Single-packet message (beacon/ack)
+            int i = 0;
+            while (LoRa.available() && i < (int)sizeof(loraLastMsg) - 1) {
+                loraLastMsg[i++] = (char)LoRa.read();
+            }
+            loraLastMsg[i] = '\0';
+            Serial.print("[lora] recv: ");
+            Serial.print(loraLastMsg);
+            Serial.print(" rssi=");
+            Serial.println(loraLastRssi);
+        }
         velour.addReading("lora_rx", (float)loraPacketsRecv);
         velour.addReading("lora_rssi", (float)loraLastRssi);
-
-#ifdef NODE_LORA_ROLE_SENDER
-        // Mabel: send small ACK when she receives from Hazel
-        loraPacketsSent++;
-        char ack[32];
-        snprintf(ack, sizeof(ack), "ack %lu", loraPacketsSent);
-        LoRa.beginPacket();
-        LoRa.print(ack);
-        LoRa.endPacket();
-#endif
     }
 
-#ifndef NODE_LORA_ROLE_SENDER
-    // Hazel (base station): send "awake" beacon every 10 minutes
-    if (millis() - lastLoraSendAt >= LORA_SEND_INTERVAL_MS) {
-        lastLoraSendAt = millis();
-        loraPacketsSent++;
-        char msg[48];
-        snprintf(msg, sizeof(msg), "awake %lu %s", loraPacketsSent, NODE_SLUG);
-        LoRa.beginPacket();
-        LoRa.print(msg);
-        LoRa.endPacket();
-        Serial.print("[lora] sent: ");
-        Serial.println(msg);
-        velour.addReading("lora_tx", (float)loraPacketsSent);
+    // --- Send: 2000-char screen at the node's interval ---
+    if (millis() - lastLoraScreenAt >= LORA_SCREEN_INTERVAL_MS) {
+        lastLoraScreenAt = millis();
+        static char txScreen[LORA_SCREEN_SIZE];
+        loraGenerateTestScreen(txScreen, LORA_SCREEN_SIZE);
+        int pkts = loraSendCompressed(txScreen, strlen(txScreen));
+        if (pkts > 0) {
+            Serial.print("[lora] sent screen: ");
+            Serial.print(pkts);
+            Serial.println(" packets");
+            velour.addReading("lora_tx", (float)loraPacketsSent);
+        }
     }
-#endif
 }
 
 #endif  // NODE_HAS_LORA
