@@ -81,8 +81,11 @@
   static int loraRxFragTotal = 0;
   static size_t loraRxFragLen = 0;
 
-  // Ticker scroll state — starts with a test message immediately
-  static int loraTickerOffset = 0;
+  // Ticker scroll state — pixel-level smooth scrolling.
+  // Scrolls 1px every 25ms = 40px/sec = 10 chars/sec at 4px/char.
+  // Broadcast news tickers use the same technique: pixel-by-pixel,
+  // not character-by-character.
+  static int loraTickerPx = 0;         // pixel offset (negative = scrolled left)
   static unsigned long lastTickerScrollAt = 0;
   static bool loraScreenReady = true;  // start true for test message
 
@@ -213,7 +216,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "v0.5.5"
+#define FIRMWARE_VERSION    "v0.5.6"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
@@ -718,25 +721,17 @@ static void oledRedraw() {
         u8g2.drawStr(0, 44, lbuf);
     }
 
-    // Line 6 (y=55): scrolling ticker of last received screen
-    if (loraScreenReady) {
-        int screenLen = strlen(loraScreenBuf);
-        if (screenLen > 0) {
-            // 32 chars visible at 4px wide = 128px
-            // Scroll at 10 chars/sec = advance offset every 100ms
-            if (millis() - lastTickerScrollAt >= 100) {
-                lastTickerScrollAt = millis();
-                loraTickerOffset++;
-                if (loraTickerOffset >= screenLen) loraTickerOffset = 0;
-            }
-            // Extract 32-char window with wraparound
-            static char tickerWin[33];
-            for (int i = 0; i < 32; i++) {
-                tickerWin[i] = loraScreenBuf[(loraTickerOffset + i) % screenLen];
-            }
-            tickerWin[32] = '\0';
-            u8g2.drawStr(0, 55, tickerWin);
+    // Line 6 (y=55): smooth pixel-scrolling ticker of last received screen.
+    // u8g2 accepts negative x — text clips at the display edge.
+    // 1px every 25ms = 40px/sec = 10 chars/sec at 4px/char.
+    if (loraScreenReady && loraScreenBuf[0]) {
+        if (millis() - lastTickerScrollAt >= 25) {
+            lastTickerScrollAt = millis();
+            loraTickerPx--;
+            int totalWidth = strlen(loraScreenBuf) * 4;  // 4px per char
+            if (loraTickerPx < -totalWidth) loraTickerPx = 128;
         }
+        u8g2.drawStr(loraTickerPx, 55, loraScreenBuf);
     }
 #else
     {
@@ -1436,7 +1431,7 @@ static void loraLoop() {
                     memcpy(loraScreenBuf, decompBuf, decompLen);
                     loraScreenBuf[decompLen] = '\0';
                     loraScreenReady = true;
-                    loraTickerOffset = 0;
+                    loraTickerPx = 128;  // start from right edge
                     loraScreensRecv++;
                     Serial.print("[lora] screen received: ");
                     Serial.print(decompLen);
