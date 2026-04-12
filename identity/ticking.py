@@ -710,12 +710,21 @@ def tick(triggered_by='manual'):
         snapshot, mood, open_concerns=open_concerns_before,
     )
 
+    # Micro-meditation: a tiny inline self-reflection that fires
+    # ~10% of the time. Unlike full meditations, these don't have
+    # depth levels or voice selection — they're just brief moments
+    # of self-reference that make the thought stream feel more
+    # alive. Empty string on most ticks.
+    from .micro_meditation import compose_micro_meditation
+    micro = compose_micro_meditation(snapshot, mood)
+
     tick_row = Tick.objects.create(
         triggered_by=triggered_by,
         mood=mood,
         mood_intensity=intensity,
         rule_label=label,
         thought=thought,
+        micro_meditation=micro,
         snapshot=snapshot,
         aspects=full_aspect_list,  # full union, not first-match
     )

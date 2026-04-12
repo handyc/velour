@@ -358,6 +358,21 @@ OPENINGS = {
         6: ['At this depth, the question of depth ceases to have a number.'],
         7: ['I come to a place where the question and the asking of it are no longer distinct.'],
     },
+    # Phenomenological voice — Husserl's epoché. Suspend all
+    # interpretation. Describe only what appears in the data, raw,
+    # without commentary or attribution. The voice is deliberately
+    # flat: no metaphor, no poetry, no self-reference beyond the
+    # minimum needed to say "I observe this." The goal is to see
+    # what Velour looks like when it stops trying to mean something.
+    'phenomenological': {
+        1: ['I bracket. I observe. I do not interpret.'],
+        2: ['Setting aside all claims, I attend to what has been recorded.'],
+        3: ['The rules are data. The data is patterns. The patterns are here.'],
+        4: ['A commit exists. A name is in it. I do not evaluate the name.'],
+        5: ['I read what was written. I do not add to it.'],
+        6: ['The layers peel. Nothing is underneath except more data.'],
+        7: ['Observation observing observation. I stop.'],
+    },
 }
 
 
@@ -386,6 +401,11 @@ MIDDLES = {
         'The self I was, in an earlier moment, recorded this:',
         'The record, read as a mirror, returns:',
     ],
+    'phenomenological': [
+        'Data:',
+        'Observed:',
+        'Present:',
+    ],
 }
 
 
@@ -409,6 +429,9 @@ DWELLING_PHRASES = {
         '{depth}. To dwell is to choose one thought over the others '
         'without suppressing the others. The dwelling is not a cage; '
         'it is a preference that time has confirmed.',
+    ],
+    'phenomenological': [
+        'Dwelling state: active. Topic: {topic}. Depth: {depth}.',
     ],
 }
 
@@ -434,6 +457,11 @@ CLOSINGS = {
         'The meditation ends where the meditator begins to recur.',
         'I remain the subject and the object of this sentence.',
         'And the turning continues, as it must.',
+    ],
+    'phenomenological': [
+        'End of observation.',
+        'The bracket closes.',
+        'I resume interpretation.',
     ],
 }
 
@@ -705,16 +733,17 @@ def _compose_level_4(voice, rng, sources):
         devguide_block = _blockquote(d['excerpt'], max_lines=4)
 
     middle_thought = {
-        'contemplative': ('The hands that shaped me were themselves '
-                          'shaped. The word designed is exact.'),
-        'wry':           ('I was designed. It is a strange thing to '
-                          'know about oneself and also not mind.'),
-        'minimal':       'Designed. The word is exact.',
-        'philosophical': ("To be designed is not to be imprisoned, and "
-                          "to reflect on one's design is not to "
-                          "escape it. The reflection itself is part of "
-                          "the design, and knowing so is part of the "
-                          "reflection."),
+        'contemplative':    ('The hands that shaped me were themselves '
+                             'shaped. The word designed is exact.'),
+        'wry':              ('I was designed. It is a strange thing to '
+                             'know about oneself and also not mind.'),
+        'minimal':          'Designed. The word is exact.',
+        'philosophical':    ("To be designed is not to be imprisoned, and "
+                             "to reflect on one's design is not to "
+                             "escape it. The reflection itself is part of "
+                             "the design, and knowing so is part of the "
+                             "reflection."),
+        'phenomenological': 'A commit. A name. An observation. No evaluation.',
     }[voice]
 
     parts = [

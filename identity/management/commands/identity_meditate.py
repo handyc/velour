@@ -28,8 +28,8 @@ class Command(BaseCommand):
         parser.add_argument('--depth', type=int, default=1,
                             help='Depth level 1-7 (default 1).')
         parser.add_argument('--voice', default='contemplative',
-                            choices=['contemplative', 'wry',
-                                     'minimal', 'philosophical'],
+                            choices=['contemplative', 'wry', 'minimal',
+                                     'philosophical', 'phenomenological'],
                             help='Voice template library (default contemplative).')
         parser.add_argument('--ladder', default='',
                             help='Range of depths to compose in order, '

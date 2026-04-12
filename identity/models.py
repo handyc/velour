@@ -171,6 +171,14 @@ class Tick(models.Model):
     thought = models.TextField(blank=True,
         help_text='First-person one-liner composed from templates.')
 
+    # Micro-meditation: a very short (1-2 sentence) inline reflection
+    # that fires ~10% of the time alongside the regular thought. Not
+    # a full meditation — no depth levels, no voice selection. Just
+    # a brief moment of self-reference that makes the thought stream
+    # feel more alive. Empty on most ticks.
+    micro_meditation = models.TextField(blank=True,
+        help_text='Optional inline self-reflection, ~10% of ticks.')
+
     snapshot = models.JSONField(default=dict, blank=True,
         help_text='Raw sensor inputs this tick saw.')
 
@@ -493,10 +501,11 @@ class Meditation(models.Model):
     """
 
     VOICE_CHOICES = [
-        ('contemplative', 'Contemplative'),
-        ('wry',           'Wry / understated'),
-        ('minimal',       'Minimal / aphoristic'),
-        ('philosophical', 'Philosophical / high prose'),
+        ('contemplative',    'Contemplative'),
+        ('wry',              'Wry / understated'),
+        ('minimal',          'Minimal / aphoristic'),
+        ('philosophical',    'Philosophical / high prose'),
+        ('phenomenological', 'Phenomenological (bracketed, raw data only)'),
     ]
 
     depth = models.PositiveSmallIntegerField(
