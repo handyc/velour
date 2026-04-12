@@ -20,6 +20,7 @@ def generate(ir):
     parts.append(_js_crud(fir))
     parts.append(_js_views(fir))
     parts.append(_js_router(fir))
+    parts.append(_js_app_specific(fir))
     parts.append(_js_init(fir))
     parts.append(_html_foot())
 
@@ -200,6 +201,15 @@ def _js_router(ir):
     lines.append('  document.getElementById("nav").innerHTML = h;')
     lines.append('}')
     return '\n'.join(lines)
+
+
+def _js_app_specific(ir):
+    """App-specific rendering code."""
+    from .app_specific import get_app_renderer
+    code = get_app_renderer(ir.name)
+    if code:
+        return f'// --- App-specific rendering ---\n{code}'
+    return ''
 
 
 def _js_init(ir):

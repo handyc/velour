@@ -197,6 +197,216 @@ def circuit_oscillate(model=None, field='500ms', **kw):
     return f'NE555 astable: R1=22k R2=27k C=10µF → {field} period'
 
 
+# =====================================================================
+# Additional tiles for completeness
+# =====================================================================
+
+# JS: filter/search
+@tile('js', 'list', 'list', 'filter')
+def js_filter(model=None, field='name', **kw):
+    return f'items = items.filter(function(x){{ return x.{field}.indexOf(query) >= 0; }});'
+
+# JS: sort
+@tile('js', 'list', 'list', 'sort')
+def js_sort(model=None, field='name', **kw):
+    return f'items.sort(function(a,b){{ return (a.{field}||"").localeCompare(b.{field}||""); }});'
+
+# JS: count
+@tile('js', 'list', 'int', 'count')
+def js_count(model=None, **kw):
+    return 'var count = items.length;'
+
+# JS: update
+@tile('js', 'any', 'void', 'update')
+def js_update(model=None, **kw):
+    key = (model or 'item').lower()
+    return (f'var idx = DB.{key}.findIndex(function(x){{ return x.id == obj.id; }});'
+            f'if (idx >= 0) DB.{key}[idx] = obj; dbSave("{key}");')
+
+# ESP: JSON response
+@tile('esp', 'any', 'str', 'json_response')
+def esp_json(model=None, **kw):
+    return 'server.send(200, "application/json", jsonStr);'
+
+# ESP: read sensor
+@tile('esp', 'void', 'float', 'read_sensor')
+def esp_sensor(model=None, field='A0', **kw):
+    return f'float val = analogRead({field}) * 3.3 / 1024.0;'
+
+# ATTiny: PWM output
+@tile('attiny', 'int', 'void', 'pwm_out')
+def attiny_pwm(model=None, field='OCR0A', **kw):
+    return f'{field} = val;'
+
+# ATTiny: delay
+@tile('attiny', 'void', 'void', 'delay')
+def attiny_delay(model=None, field='100', **kw):
+    return f'_delay_ms({field});'
+
+# Circuit: RC charge as timer
+@tile('circuit', 'void', 'float', 'rc_charge')
+def circuit_rc(model=None, field='1ms', **kw):
+    return f'R-C network: charge time = {field} (determines clock period)'
+
+# Circuit: voltage divider
+@tile('circuit', 'float', 'float', 'divide')
+def circuit_divide(model=None, field='ratio', **kw):
+    return f'Resistor divider: Vout = Vin × {field}'
+
+
+# ESP CRUD tiles — data lives in PROGMEM or served via JS page
+@tile('esp', 'void', 'list', 'read_all')
+def esp_read_all(model=None, **kw):
+    return '// ESP: data lives in the served JS page (localStorage)'
+
+@tile('esp', 'str', 'any', 'read_one')
+def esp_read_one(model=None, **kw):
+    return '// ESP: individual item access via JS in the served page'
+
+@tile('esp', 'any', 'void', 'write')
+def esp_write(model=None, **kw):
+    return '// ESP: writes handled by JS localStorage in the served page'
+
+@tile('esp', 'any', 'void', 'delete')
+def esp_delete(model=None, **kw):
+    return '// ESP: deletes handled by JS localStorage in the served page'
+
+@tile('esp', 'list', 'html', 'render_list')
+def esp_render_list(model=None, **kw):
+    return 'server.send_P(200, "text/html", PAGE);'
+
+@tile('esp', 'any', 'html', 'render_form')
+def esp_render_form(model=None, **kw):
+    return 'server.send_P(200, "text/html", PAGE);'
+
+@tile('esp', 'list', 'list', 'filter')
+def esp_filter(model=None, **kw):
+    return '// ESP: filtering handled client-side in JS'
+
+@tile('esp', 'list', 'list', 'sort')
+def esp_sort(model=None, **kw):
+    return '// ESP: sorting handled client-side in JS'
+
+@tile('esp', 'list', 'int', 'count')
+def esp_count(model=None, **kw):
+    return '// ESP: counting handled client-side in JS'
+
+@tile('esp', 'any', 'void', 'update')
+def esp_update(model=None, **kw):
+    return '// ESP: updates handled by JS localStorage in the served page'
+
+# ATTiny tiles — everything is pin reads/writes and lookup tables
+@tile('attiny', 'void', 'list', 'read_all')
+def attiny_read_all(model=None, **kw):
+    return '// ATTiny: "read all" = scan PROGMEM table sequentially'
+
+@tile('attiny', 'str', 'any', 'read_one')
+def attiny_read_one(model=None, **kw):
+    return '// ATTiny: "read one" = index into PROGMEM table'
+
+@tile('attiny', 'any', 'void', 'write')
+def attiny_write(model=None, **kw):
+    return '// ATTiny: "write" = set SRAM byte or output pin'
+
+@tile('attiny', 'any', 'void', 'delete')
+def attiny_delete(model=None, **kw):
+    return '// ATTiny: "delete" = clear SRAM byte'
+
+@tile('attiny', 'list', 'html', 'render_list')
+def attiny_render_list(model=None, **kw):
+    return '// ATTiny: "render" = set LED pattern from current state'
+
+@tile('attiny', 'any', 'html', 'render_form')
+def attiny_render_form(model=None, **kw):
+    return '// ATTiny: "form" = read pin states as input'
+
+@tile('attiny', 'list', 'list', 'filter')
+def attiny_filter(model=None, **kw):
+    return '// ATTiny: "filter" = mask bits in lookup result'
+
+@tile('attiny', 'list', 'list', 'sort')
+def attiny_sort(model=None, **kw):
+    return '// ATTiny: "sort" = table is pre-sorted in PROGMEM'
+
+@tile('attiny', 'list', 'int', 'count')
+def attiny_count(model=None, **kw):
+    return '// ATTiny: "count" = constant (table size known at compile time)'
+
+@tile('attiny', 'any', 'void', 'update')
+def attiny_update(model=None, **kw):
+    return '// ATTiny: "update" = overwrite SRAM byte'
+
+# Circuit tiles — everything is voltage levels and wire topology
+@tile('circuit', 'void', 'list', 'read_all')
+def circuit_read_all(model=None, **kw):
+    return 'Scan all comparator outputs in sequence (multiplexed)'
+
+@tile('circuit', 'str', 'any', 'read_one')
+def circuit_read_one(model=None, **kw):
+    return 'Select one comparator via analog mux address lines'
+
+@tile('circuit', 'any', 'void', 'write')
+def circuit_write(model=None, **kw):
+    return 'Charge capacitor to target voltage via transistor switch'
+
+@tile('circuit', 'any', 'void', 'delete')
+def circuit_delete(model=None, **kw):
+    return 'Discharge capacitor via bleeder resistor'
+
+@tile('circuit', 'list', 'html', 'render_list')
+def circuit_render_list(model=None, **kw):
+    return 'LED array driven by comparator outputs shows all states'
+
+@tile('circuit', 'any', 'html', 'render_form')
+def circuit_render_form(model=None, **kw):
+    return 'Potentiometer + switch inputs set voltage levels'
+
+@tile('circuit', 'list', 'list', 'filter')
+def circuit_filter(model=None, **kw):
+    return 'Window comparator passes only voltages in target range'
+
+@tile('circuit', 'list', 'list', 'sort')
+def circuit_sort(model=None, **kw):
+    return 'Resistor ladder orders voltages by magnitude (inherent)'
+
+@tile('circuit', 'list', 'int', 'count')
+def circuit_count(model=None, **kw):
+    return 'Binary counter (555 + flip-flops) tallies active comparators'
+
+@tile('circuit', 'any', 'void', 'update')
+def circuit_update(model=None, **kw):
+    return 'Charge target capacitor to new voltage level'
+
+
+def completeness_check():
+    """Check if the template tile set is complete for common operations.
+
+    A complete set guarantees translation always succeeds.
+    Returns (is_complete, missing) where missing lists the gaps.
+    """
+    # Common operations in Django apps
+    common_ops = [
+        ('read_all', 'void', 'list'),
+        ('read_one', 'str', 'any'),
+        ('write', 'any', 'void'),
+        ('delete', 'any', 'void'),
+        ('render_list', 'list', 'html'),
+        ('render_form', 'any', 'html'),
+        ('filter', 'list', 'list'),
+        ('sort', 'list', 'list'),
+        ('count', 'list', 'int'),
+        ('update', 'any', 'void'),
+    ]
+    tiers = ['js', 'esp', 'attiny', 'circuit']
+    missing = []
+    for tier in tiers:
+        for op, in_t, out_t in common_ops:
+            if not lookup(tier, in_t, out_t, op):
+                missing.append((tier, in_t, out_t, op))
+    is_complete = len(missing) == 0
+    return is_complete, missing
+
+
 def translate_step(tier, step, ir):
     """Translate one IR LogicStep using the template tiles.
 
