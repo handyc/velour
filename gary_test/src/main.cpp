@@ -40,6 +40,10 @@
 #ifdef NODE_HAS_LORA
   #include <SPI.h>
   #include <LoRa.h>
+  // ESP32 ROM miniz — tdefl (compress) and tinfl (decompress)
+  // without malloc. We use tdefl_compress_mem_to_mem() which works
+  // with caller-provided buffers.
+  #include <esp32/rom/miniz.h>
   // TTGO T3 V1.6.1 LoRa pins
   #define LORA_SCK   5
   #define LORA_MISO  19
@@ -56,9 +60,68 @@
   int loraLastRssi = 0;
   char loraLastMsg[64] = "";
   // 868 MHz EU duty cycle: 1% = 36s airtime/hour max.
-  // Hazel: "awake" ping every 10 min + 2KB report every hour.
-  // Mabel: small confirmations only. Well within budget.
+  // Hazel: "awake" beacon every 10 min. Reports use compression.
+  // Mabel: small ACKs only.
   #define LORA_SEND_INTERVAL_MS 600000   // 10 minutes
+  #define LORA_MAX_PAYLOAD 222           // practical max per packet
+
+  // Compress a buffer using deflate (ESP32 ROM miniz).
+  // Returns compressed size, or 0 on failure. Output buffer must
+  // be at least as large as input (compressed can occasionally be
+  // larger for tiny inputs).
+  // tdefl flags: best compression, zlib-compatible output
+  #define LORA_TDEFL_FLAGS (TDEFL_WRITE_ZLIB_HEADER | 4095)
+
+  static size_t loraCompress(const uint8_t* in, size_t inLen,
+                              uint8_t* out, size_t outCap) {
+      size_t r = tdefl_compress_mem_to_mem(out, outCap, in, inLen,
+                                            LORA_TDEFL_FLAGS);
+      return (r == 0 && inLen > 0) ? 0 : r;  // 0 = failure
+  }
+
+  static size_t loraDecompress(const uint8_t* in, size_t inLen,
+                                uint8_t* out, size_t outCap) {
+      size_t r = tinfl_decompress_mem_to_mem(out, outCap, in, inLen,
+                                              TINFL_FLAG_PARSE_ZLIB_HEADER);
+      return (r == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) ? 0 : r;
+  }
+
+  // Send a (possibly large) buffer over LoRa in multiple packets.
+  // Each packet: [seq:1][total:1][payload:up to 220]
+  // Compresses first, then fragments.
+  static int loraSendCompressed(const char* data, size_t len) {
+      static uint8_t compBuf[4096];
+      size_t compLen = loraCompress((const uint8_t*)data, len,
+                                    compBuf, sizeof(compBuf));
+      if (compLen == 0) return -1;
+
+      Serial.print("[lora] compressed ");
+      Serial.print(len);
+      Serial.print(" -> ");
+      Serial.print(compLen);
+      Serial.println(" bytes");
+
+      int maxPayload = LORA_MAX_PAYLOAD - 2;  // 2 bytes for seq+total header
+      int totalPkts = (compLen + maxPayload - 1) / maxPayload;
+      if (totalPkts > 255) return -2;  // too large
+
+      for (int i = 0; i < totalPkts; i++) {
+          int offset = i * maxPayload;
+          int chunk = compLen - offset;
+          if (chunk > maxPayload) chunk = maxPayload;
+
+          LoRa.beginPacket();
+          LoRa.write((uint8_t)i);           // sequence number
+          LoRa.write((uint8_t)totalPkts);    // total packets
+          LoRa.write(compBuf + offset, chunk);
+          LoRa.endPacket();
+          loraPacketsSent++;
+
+          // Small delay between packets to avoid overwhelming receiver
+          if (i < totalPkts - 1) delay(50);
+      }
+      return totalPkts;
+  }
 #endif
 
 // Optional OLED display support. Enable by defining NODE_HAS_OLED in
@@ -116,7 +179,7 @@
 // upload" and "we don't hammer the server". First check also runs once
 // shortly after boot so a fresh flash picks up any pending update fast.
 #define OTA_CHECK_INTERVAL_MS  (60UL * 60UL * 1000UL)
-#define FIRMWARE_VERSION    "velour-0.5.0-pixel-sprite"
+#define FIRMWARE_VERSION    "velour-0.5.1-lora-compress"
 
 // How often to fetch Identity's mood from Velour. 60 seconds keeps the
 // display reasonably fresh without hammering the server.
