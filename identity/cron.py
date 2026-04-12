@@ -1,36 +1,38 @@
 """Identity cron dispatcher.
 
-The operator wires ONE crontab entry:
+The operator wires ONE crontab entry, firing every minute:
 
-    */10 * * * * /path/to/venv/bin/python /path/to/manage.py identity_cron
+    * * * * * /path/to/venv/bin/python /path/to/manage.py identity_cron
 
-Everything else is this module's job. On each invocation, dispatch()
-looks at the current wall clock and decides which Identity pipelines
-to fire:
+On each invocation, dispatch() looks at the last successful CronRun
+of each pipeline kind and decides what to run. Each pipeline has an
+interval; whichever ones have gone longer than their interval since
+their last successful run are fired this dispatch, the rest skipped.
 
-  - Tick: always (on the 10-minute cadence)
-  - Hourly reflection: top of the hour (minute < 10, i.e. first
-    dispatch after the hour rolled over)
-  - Daily reflection: minute < 10 AND hour == 0 (midnight)
-  - Weekly reflection: minute < 10 AND hour == 0 AND weekday == Monday
-  - Monthly reflection: minute < 10 AND hour == 0 AND day == 1
-  - Meditation ladder (L1-L4): minute < 10 AND hour == 0 AND
-    weekday == Sunday
+Default intervals:
+  - tick             — 10 min
+  - reflect_hourly   — 1 h
+  - reflect_daily    — 24 h
+  - reflect_weekly   — 7 d
+  - reflect_monthly  — 30 d
+  - meditate_ladder  — 7 d
+  - rebuild_document — 7 d
+  - tile_reflect     — operator-configurable via IdentityToggles
+                       tile_generation_slider (0 = never up to
+                       1 second in principle; in practice capped
+                       by the cron cadence which is 1 minute)
 
-The "minute < 10" guard is how we turn a */10 crontab entry into a
-single-dispatch-per-period fire. Because cron only fires every 10
-minutes, the first dispatch after the period boundary gets the
-reflection; subsequent dispatches that same hour just do ticks.
+This design replaced an earlier `minute < 10` bucket-guard approach.
+The bucket approach relied on the cron entry being */10 so each
+pipeline had exactly one chance per natural period. Moving to
+per-minute cron cadence (required for the tile generation slider
+at 1/min) broke those buckets — so we now gate each pipeline on
+"has enough time passed since the last successful run of this
+kind", which works at any cron cadence.
 
-A stronger version of this would track the last-run timestamp per
-pipeline in the database and refuse to double-fire even if the cron
-schedule drifted — but the minute<10 guard is good enough for the
-single-operator single-host case and doesn't require extra state.
-
-Each decision is logged to a CronRun row so the operator can see
-what fired and what was skipped. A failure in one pipeline does not
-prevent the others from running — each pipeline is wrapped in its
-own try/except that writes a CronRun row with status='error'.
+A failure in one pipeline does not prevent the others from running.
+Each is wrapped in its own try/except that writes a CronRun row
+with status='error' and the traceback for later inspection.
 """
 
 import traceback
@@ -38,19 +40,44 @@ import traceback
 from django.utils import timezone
 
 
+# Default intervals per pipeline (seconds). tile_reflect is an
+# exception — its interval is read from IdentityToggles at
+# dispatch time so the operator can change it via the slider on
+# the Identity home page without touching code.
+DEFAULT_INTERVALS = {
+    'tick':             600,         # 10 min
+    'reflect_hourly':   3_600,       # 1 h
+    'reflect_daily':    86_400,      # 1 d
+    'reflect_weekly':   604_800,     # 1 w
+    'reflect_monthly':  2_592_000,   # 30 d
+    'meditate_ladder':  604_800,     # 1 w
+    'rebuild_document': 604_800,     # 1 w
+}
+
+
+def _last_success_age(kind):
+    """Seconds since the most recent successful CronRun of this
+    kind. Returns a huge number if there has never been one, so
+    the gating logic treats the pipeline as overdue on first
+    dispatch after install."""
+    from .models import CronRun
+    last = CronRun.objects.filter(
+        kind=kind, status='ok',
+    ).order_by('-at').first()
+    if not last:
+        return 10 ** 12  # effectively infinite
+    return (timezone.now() - last.at).total_seconds()
+
+
 def dispatch(force=None):
     """Run the cron dispatcher once. Returns a dict of pipeline
     name → (status, summary) for the caller to log or print.
 
-    `force` is an optional set of pipeline kinds to run regardless of
-    the clock — useful for the 'run cron now' button in the UI and
-    for testing. Accepted values: 'tick', 'reflect_hourly',
-    'reflect_daily', 'reflect_weekly', 'reflect_monthly',
-    'meditate_ladder', or 'all' to run everything.
+    `force` is a collection of pipeline kinds to run regardless of
+    last-run gating. 'all' expands to every pipeline.
     """
-    from .models import CronRun
+    from .models import CronRun, IdentityToggles
 
-    now = timezone.now()
     force = set(force or [])
     if 'all' in force:
         force = {
@@ -59,61 +86,47 @@ def dispatch(force=None):
             'rebuild_document', 'tile_reflect',
         }
 
+    # Pull the operator-set tile_reflect interval from the toggles
+    # singleton. If the slider is at 0 (never), the pipeline is
+    # disabled and dispatch() treats it as never-overdue.
+    try:
+        toggles = IdentityToggles.get_self()
+        tile_interval = toggles.tile_generation_interval_seconds
+    except Exception:
+        tile_interval = 60
+
+    intervals = dict(DEFAULT_INTERVALS)
+    intervals['tile_reflect'] = tile_interval
+
+    def _overdue(kind):
+        if kind in force:
+            return True
+        interval = intervals.get(kind, 0)
+        if interval <= 0:
+            return False  # disabled
+        return _last_success_age(kind) >= interval
+
     results = {}
+    pipelines = [
+        ('tick',             _do_tick),
+        ('reflect_hourly',   lambda: _do_reflect('hourly')),
+        ('reflect_daily',    lambda: _do_reflect('daily')),
+        ('reflect_weekly',   lambda: _do_reflect('weekly')),
+        ('reflect_monthly',  lambda: _do_reflect('monthly')),
+        ('meditate_ladder',  _do_meditation_ladder),
+        ('rebuild_document', _do_rebuild_document),
+        ('tile_reflect',     _do_tile_reflect),
+    ]
+    for kind, fn in pipelines:
+        if _overdue(kind):
+            results[kind] = _run_pipeline(kind, fn)
 
-    # --- Tick: always (every 10 minutes under */10 cron) -------------
-    if 'tick' in force or True:  # ticks always run
-        results['tick'] = _run_pipeline('tick', _do_tick)
-
-    # --- Hourly reflection: first dispatch after hour boundary -------
-    if 'reflect_hourly' in force or (now.minute < 10):
-        results['reflect_hourly'] = _run_pipeline(
-            'reflect_hourly', lambda: _do_reflect('hourly'))
-
-    # --- Daily reflection: midnight ---------------------------------
-    if 'reflect_daily' in force or (now.minute < 10 and now.hour == 0):
-        results['reflect_daily'] = _run_pipeline(
-            'reflect_daily', lambda: _do_reflect('daily'))
-
-    # --- Weekly reflection: Monday midnight -------------------------
-    if 'reflect_weekly' in force or (
-            now.minute < 10 and now.hour == 0 and now.weekday() == 0):
-        results['reflect_weekly'] = _run_pipeline(
-            'reflect_weekly', lambda: _do_reflect('weekly'))
-
-    # --- Monthly reflection: first of the month midnight ------------
-    if 'reflect_monthly' in force or (
-            now.minute < 10 and now.hour == 0 and now.day == 1):
-        results['reflect_monthly'] = _run_pipeline(
-            'reflect_monthly', lambda: _do_reflect('monthly'))
-
-    # --- Meditation ladder: Sunday midnight -------------------------
-    if 'meditate_ladder' in force or (
-            now.minute < 10 and now.hour == 0 and now.weekday() == 6):
-        results['meditate_ladder'] = _run_pipeline(
-            'meditate_ladder', _do_meditation_ladder)
-
-    # --- Identity document rebuild: Sunday midnight -----------------
-    if 'rebuild_document' in force or (
-            now.minute < 10 and now.hour == 0 and now.weekday() == 6):
-        results['rebuild_document'] = _run_pipeline(
-            'rebuild_document', _do_rebuild_document)
-
-    # --- Tile reflection: hourly check, probabilistic fire ----------
-    # This one is checked on every hourly cadence (minute < 10), but
-    # the actual generation is gated by identity_feels_like_making_tiles
-    # which rolls a state-driven probability. Most checks do nothing.
-    if 'tile_reflect' in force or (now.minute < 10):
-        results['tile_reflect'] = _run_pipeline(
-            'tile_reflect', _do_tile_reflect)
-
-    # Single dispatch row summarizing the whole run
-    parts = [f'{k}={v[0]}' for k, v in results.items()]
+    # Single summary dispatch row.
     CronRun.objects.create(
         kind='dispatch',
         status='ok',
-        summary=f'Dispatched {len(results)} pipelines',
-        details='\n'.join(parts),
+        summary=f'Dispatched {len(results)} pipeline(s)',
+        details='\n'.join(f'{k}={v[0]}' for k, v in results.items()),
     )
 
     return results
@@ -145,12 +158,16 @@ def _run_pipeline(kind, fn):
 def _do_tick():
     from .ticking import tick as tick_fn
     row, thought = tick_fn(triggered_by='cron')
+    if row is None:
+        return 'ticks disabled'
     return f'{row.mood} — {thought[:80]}'
 
 
 def _do_reflect(period):
     from .reflection import reflect as reflect_fn
     row = reflect_fn(period=period, push_to_codex=True)
+    if row is None:
+        return 'reflections disabled'
     return f'{row.title} ({row.ticks_referenced} ticks)'
 
 
@@ -160,7 +177,9 @@ def _do_meditation_ladder():
     composed = []
     for depth in range(1, 5):
         med = meditate(depth=depth, voice='contemplative',
-                        push_to_codex=True, recursive_of=prior)
+                       push_to_codex=True, recursive_of=prior)
+        if med is None:
+            return 'meditations disabled'
         composed.append(f'L{depth}')
         prior = med
     return f'Composed ladder {",".join(composed)}'
@@ -174,15 +193,12 @@ def _do_rebuild_document():
 
 
 def _do_tile_reflect():
-    """Check if Identity feels like making a tile set. If so, make
-    one. If not, return the reason — cron logs the no-op so the
-    operator can see the decision."""
-    from .tiles_reflection import (
-        identity_feels_like_making_tiles,
-        generate_tileset_from_identity,
-    )
-    should, reason = identity_feels_like_making_tiles()
-    if not should:
-        return f'did not feel like it — {reason}'
+    """Generate a new Identity tile set. Called only when the
+    since-last-run interval check in dispatch() has decided we're
+    overdue. The previous "feels like it" probability gate has
+    been retired in favor of the explicit operator-set slider —
+    the slider IS the operator saying how often Velour feels
+    like it."""
+    from .tiles_reflection import generate_tileset_from_identity
     ts = generate_tileset_from_identity()
-    return f'made {ts.slug} (tiles={ts.tile_count}) — {reason}'
+    return f'made {ts.slug} ({ts.tile_count} tiles)'

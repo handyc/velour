@@ -622,6 +622,12 @@ def toggles_update(request):
         'topbar_pulse_enabled', 'recursive_introspection_enabled',
         'observer_enabled', 'llm_chat_enabled',
     ]
+    # Tile generation frequency slider — integer 0-8
+    try:
+        raw = int(request.POST.get('tile_generation_slider', 7))
+    except (TypeError, ValueError):
+        raw = 7
+    toggles.tile_generation_slider = max(0, min(8, raw))
     for f in fields:
         setattr(toggles, f, bool(request.POST.get(f)))
     toggles.save()

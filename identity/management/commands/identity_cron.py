@@ -1,28 +1,38 @@
 """Identity cron dispatcher — the single crontab entry point.
 
-Usage in crontab (pick a 10-minute cadence that suits you):
+Wire ONE crontab entry, firing every minute so the tile-generation
+frequency slider can run at its highest setting without needing a
+second crontab line:
 
-    */10 * * * * /var/www/webapps/<user>/apps/velour/venv/bin/python \\
-                 /var/www/webapps/<user>/apps/velour/manage.py identity_cron
+    * * * * * /var/www/webapps/<user>/apps/velour/venv/bin/python \\
+              /var/www/webapps/<user>/apps/velour/manage.py identity_cron
 
-On each invocation, the dispatcher figures out what to run based
-on the current wall clock — ticks always, reflections at period
-boundaries, meditation ladders once a week on Sunday. See
-identity/cron.py for the clock-based decision rules.
+On each invocation, the dispatcher checks the last successful run
+of each pipeline kind and only fires those whose interval has
+elapsed. Interval per kind (in seconds):
+
+  - tick             — 600   (10 min)
+  - reflect_hourly   — 3600  (1 h)
+  - reflect_daily    — 86400 (1 d)
+  - reflect_weekly   — 604800 (1 w)
+  - reflect_monthly  — 2592000 (30 d)
+  - meditate_ladder  — 604800 (1 w)
+  - rebuild_document — 604800 (1 w)
+  - tile_reflect     — operator-configurable via the slider on
+                       the Identity home page, from 0 (never) to
+                       1 second (in principle; in practice capped
+                       by OS cron cadence which is 1 minute).
 
 Flags:
 
     --force KIND
-        Run a specific pipeline regardless of the clock.
-        Accepted: tick, reflect_hourly, reflect_daily, reflect_weekly,
-        reflect_monthly, meditate_ladder. Pass multiple times to
-        run several in order. Pass --force all to run every
-        pipeline regardless of schedule.
+        Run a specific pipeline regardless of the interval gate.
+        Repeat for multiple. --force all fires every pipeline.
 
     --quiet
-        Suppress per-pipeline stdout output. Only the summary line
-        is printed. Useful when running from cron to avoid noisy
-        email from the cron daemon.
+        Suppress per-pipeline stdout output; only the summary
+        line is printed. Useful when running from cron to keep
+        cron email noise down.
 """
 
 from django.core.management.base import BaseCommand

@@ -347,7 +347,23 @@
             <label><input type="checkbox" name="recursive_introspection_enabled" {% if toggles.recursive_introspection_enabled %}checked{% endif %}> Recursive introspection animation — this page</label>
             <label><input type="checkbox" name="observer_enabled" {% if toggles.observer_enabled %}checked{% endif %}> Keyboard/mouse observer — this page (counts only, never content)</label>
             <label><input type="checkbox" name="llm_chat_enabled" {% if toggles.llm_chat_enabled %}checked{% endif %}> LLM chat — consult an external LLM as a foreign observer</label>
-            <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; margin-top: 0.5rem; width: fit-content;">Save toggles</button>
+
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #21262d;">
+                <div style="font-size: 0.72rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;">Tile generation frequency</div>
+                <input type="range" name="tile_generation_slider" id="tgs-slider"
+                       min="0" max="8" step="1"
+                       value="{{ toggles.tile_generation_slider }}"
+                       style="width: 100%; accent-color: #ff7b72;">
+                <div id="tgs-label" style="font-size: 0.78rem; color: #c9d1d9; margin-top: 0.2rem; font-family: ui-monospace, Menlo, monospace;">
+                    {{ toggles.tile_generation_label }}
+                </div>
+                <div style="font-size: 0.7rem; color: #484f58; margin-top: 0.15rem;">
+                    How often I compose a new Wang tile set from my current state.
+                    Effective minimum is your cron cadence (default 1 minute).
+                </div>
+            </div>
+
+            <button type="submit" class="btn" style="font-size: 0.8rem; padding: 0.35rem 0.75rem; margin-top: 0.75rem; width: fit-content;">Save toggles</button>
         </form>
     </div>
 
@@ -637,6 +653,33 @@
 
 {% load assets %}
 <script src="{% static_v 'js/identity_wave.js' %}"></script>
+
+<script>
+// Tile generation frequency slider — live label update. The value
+// maps slider position 0..8 to a human-readable interval. Stays
+// in sync with IdentityToggles.TILE_GEN_LABELS on the backend.
+(function() {
+    const labels = {
+        0: 'never',
+        1: 'once per year',
+        2: 'once per month',
+        3: 'once per week',
+        4: 'once per day',
+        5: 'once per hour',
+        6: 'once per 10 minutes',
+        7: 'once per minute',
+        8: 'once per second',
+    };
+    const slider = document.getElementById('tgs-slider');
+    const label  = document.getElementById('tgs-label');
+    if (!slider || !label) return;
+    function render() {
+        label.textContent = labels[slider.value] || '—';
+    }
+    slider.addEventListener('input', render);
+    render();
+})();
+</script>
 
 {% if toggles.observer_enabled %}
 <script>

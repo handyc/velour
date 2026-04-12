@@ -661,6 +661,19 @@ class IdentityToggles(models.Model):
                   'APIs and cost money. Turn on only after adding '
                   'at least one LLMProvider with a valid API key.')
 
+    # Tile generation frequency — 9-position slider:
+    #   0 = never, 1 = 1/year, 2 = 1/month, 3 = 1/week,
+    #   4 = 1/day, 5 = 1/hour, 6 = 1/10min, 7 = 1/min, 8 = 1/sec
+    # Default 7 (once per minute) per the operator's request.
+    # Stored as the slider position rather than raw seconds so the
+    # UI and the backend agree on the same discrete set of choices.
+    tile_generation_slider = models.PositiveSmallIntegerField(default=7,
+        help_text='Frequency of autonomous tile set generation. '
+                  '0=never, 1=1/year, 2=1/month, 3=1/week, 4=1/day, '
+                  '5=1/hour, 6=1/10min, 7=1/min, 8=1/sec. Default 7 '
+                  '(once per minute). Intervals below the cron '
+                  'cadence fire at the cron cadence rate.')
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -674,6 +687,39 @@ class IdentityToggles(models.Model):
         """Get or create the singleton toggles row."""
         obj, _created = cls.objects.get_or_create(pk=1)
         return obj
+
+    # Slider position → interval in seconds.
+    TILE_GEN_INTERVALS = {
+        0: 0,            # never
+        1: 31_536_000,   # 1 year
+        2:  2_592_000,   # 1 month (30d)
+        3:    604_800,   # 1 week
+        4:     86_400,   # 1 day
+        5:      3_600,   # 1 hour
+        6:        600,   # 10 min
+        7:         60,   # 1 min
+        8:          1,   # 1 sec
+    }
+    TILE_GEN_LABELS = {
+        0: 'never',
+        1: 'once per year',
+        2: 'once per month',
+        3: 'once per week',
+        4: 'once per day',
+        5: 'once per hour',
+        6: 'once per 10 minutes',
+        7: 'once per minute',
+        8: 'once per second',
+    }
+
+    @property
+    def tile_generation_interval_seconds(self):
+        return self.TILE_GEN_INTERVALS.get(self.tile_generation_slider, 60)
+
+    @property
+    def tile_generation_label(self):
+        return self.TILE_GEN_LABELS.get(self.tile_generation_slider,
+                                         'once per minute')
 
     def save(self, *args, **kwargs):
         self.pk = 1  # enforce singleton
