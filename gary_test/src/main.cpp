@@ -1215,6 +1215,9 @@ void setup() {
     Serial.println("===========================================");
 
     bootMs = millis();
+#ifdef NODE_HAS_HEARTBEAT
+    pinMode(LED_BUILTIN, OUTPUT);
+#endif
 #ifdef NODE_HAS_OLED
     oledSetup();
 #endif
@@ -1283,9 +1286,18 @@ void loop() {
 #endif
 
 #ifdef NODE_HAS_OLED
-    // Redraw the OLED on its own cadence (every 500ms). Non-blocking —
-    // it early-returns until the interval has elapsed.
     oledRedraw();
+#endif
+
+#ifdef NODE_HAS_HEARTBEAT
+    // Human heartbeat on the built-in LED: lub-DUB...pause (~72 BPM).
+    // Total cycle ~830ms. Non-blocking — uses millis() phase check.
+    {
+        unsigned long phase = millis() % 830;
+        // lub: 0-80ms on, DUB: 180-300ms on, rest: off
+        bool on = (phase < 80) || (phase >= 180 && phase < 300);
+        digitalWrite(LED_BUILTIN, on ? LOW : HIGH);  // active-low on most ESPs
+    }
 #endif
 
     // Faster AHT read on its own cadence, decoupled from Velour reporting.

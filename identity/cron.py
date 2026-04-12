@@ -93,7 +93,7 @@ def dispatch(force=None):
         toggles = IdentityToggles.get_self()
         tile_interval = toggles.tile_generation_interval_seconds
     except Exception:
-        tile_interval = 60
+        tile_interval = 86_400  # 1 day fallback if toggles don't exist
 
     intervals = dict(DEFAULT_INTERVALS)
     intervals['tile_reflect'] = tile_interval

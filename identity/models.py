@@ -705,12 +705,11 @@ class IdentityToggles(models.Model):
     # Default 7 (once per minute) per the operator's request.
     # Stored as the slider position rather than raw seconds so the
     # UI and the backend agree on the same discrete set of choices.
-    tile_generation_slider = models.PositiveSmallIntegerField(default=7,
+    tile_generation_slider = models.PositiveSmallIntegerField(default=4,
         help_text='Frequency of autonomous tile set generation. '
                   '0=never, 1=1/year, 2=1/month, 3=1/week, 4=1/day, '
-                  '5=1/hour, 6=1/10min, 7=1/min, 8=1/sec. Default 7 '
-                  '(once per minute). Intervals below the cron '
-                  'cadence fire at the cron cadence rate.')
+                  '5=1/hour, 6=1/10min, 7=1/min, 8=1/sec. Default 4 '
+                  '(once per day).')
 
     rumination_stream_enabled = models.BooleanField(default=True,
         help_text='Continuous low-CPU rumination stream on the '
@@ -762,7 +761,7 @@ class IdentityToggles(models.Model):
 
     @property
     def tile_generation_interval_seconds(self):
-        return self.TILE_GEN_INTERVALS.get(self.tile_generation_slider, 60)
+        return self.TILE_GEN_INTERVALS.get(self.tile_generation_slider, 86_400)
 
     @property
     def tile_generation_label(self):
