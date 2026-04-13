@@ -13,21 +13,35 @@
     .status-pill.untested { background: #21262d; color: #8b949e; }
     .test-error { background: #1d1212; border: 1px solid #4a1a1a; color: #f85149; padding: 0.6rem 0.8rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; white-space: pre-wrap; margin-top: 0.5rem; }
     .test-version { color: #8b949e; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; margin-top: 0.4rem; }
+    .tbl-list { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+    .tbl-list th { text-align: left; color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.35rem 0.6rem; border-bottom: 1px solid #21262d; }
+    .tbl-list td { padding: 0.35rem 0.6rem; color: #c9d1d9; border-bottom: 1px solid #161b22; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .tbl-list tr:hover td { background: rgba(88,166,255,0.04); }
+    .tbl-list .num { text-align: right; color: #8b949e; }
 </style>
 {% endblock %}
 
 {% block content %}
-<h1>{{ db.nickname }}</h1>
-<p style="color:#8b949e;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.78rem;">{{ db.slug }}</p>
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'databases:list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Databases</a>
+    <h1 style="margin:0;">{{ db.nickname }}</h1>
+</div>
+<p style="color:#8b949e;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.78rem;margin-top:0;">{{ db.slug }}</p>
 
 <div class="card db-detail">
     <dl>
         <dt>Engine</dt><dd>{{ db.get_engine_display }}</dd>
+        {% if db.is_sqlite %}
+        <dt>File</dt><dd>{{ db.file_path }}</dd>
+        <dt>Size</dt><dd>{{ db.file_size_display }}</dd>
+        <dt>Exists</dt><dd>{% if db.file_exists %}yes{% else %}no — file missing{% endif %}</dd>
+        {% else %}
         <dt>Host</dt><dd>{{ db.host }}</dd>
         <dt>Port</dt><dd>{{ db.effective_port }}</dd>
         <dt>Username</dt><dd>{{ db.username|default:'(none)' }}</dd>
         <dt>Database</dt><dd>{{ db.database_name|default:'(none)' }}</dd>
         <dt>SSL mode</dt><dd>{{ db.ssl_mode|default:'(default)' }}</dd>
+        {% endif %}
         <dt>Created</dt><dd>{{ db.created_at|date:"D d M Y H:i" }}</dd>
         <dt>Updated</dt><dd>{{ db.updated_at|date:"D d M Y H:i" }}</dd>
     </dl>
@@ -37,7 +51,33 @@
     {% endif %}
 </div>
 
-<div class="card db-detail" style="margin-top:1rem;">
+{% if db.is_sqlite and tables is not None %}
+<div class="card" style="margin-top:1rem;">
+    <h3 style="margin-top:0;">Tables ({{ tables|length }})</h3>
+    {% if tables %}
+    <table class="tbl-list">
+        <thead><tr><th>Table</th><th class="num">Columns</th><th class="num">Rows</th><th></th></tr></thead>
+        <tbody>
+        {% for t in tables %}
+        <tr>
+            <td><a href="{% url 'databases:table_browse' db.slug t.name %}" style="color:#58a6ff;">{{ t.name }}</a></td>
+            <td class="num">{{ t.col_count }}</td>
+            <td class="num">{{ t.row_count }}</td>
+            <td><a href="{% url 'databases:table_browse' db.slug t.name %}" style="color:#8b949e;font-size:0.78rem;">Browse</a></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#6e7681;font-size:0.82rem;">Empty database — no tables yet.</p>
+    {% endif %}
+    <div style="margin-top:0.75rem;">
+        <a href="{% url 'databases:sql_query' db.slug %}" class="btn" style="font-size:0.82rem;">SQL Shell</a>
+    </div>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top:1rem;">
     <h3 style="margin-top:0;">Connection test</h3>
     <p>
         Last status:
@@ -63,14 +103,18 @@
     </form>
 </div>
 
-<p style="color:#6e7681;font-size:0.8rem;margin-top:1rem;">
-    <em>Coming in Phase 2:</em> table browser, row editor, raw SQL shell.
-</p>
-
-<div style="margin-top: 1.5rem; display:flex; gap:0.5rem;">
+<div style="margin-top: 1.5rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
     <a href="{% url 'databases:edit' db.slug %}" class="btn">Edit</a>
-    <form method="post" action="{% url 'databases:delete' db.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ db.nickname|escapejs }}?');">
+    {% if db.is_sqlite and db.file_exists %}
+    <a href="{% url 'databases:download' db.slug %}" class="btn">Download .sqlite3</a>
+    {% endif %}
+    <form method="post" action="{% url 'databases:delete' db.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ db.nickname|escapejs }}?{% if db.is_sqlite %}\n\nCheck the box to also delete the .sqlite3 file.{% endif %}');">
         {% csrf_token %}
+        {% if db.is_sqlite and db.file_exists %}
+        <label style="font-size:0.78rem;color:#8b949e;margin-right:0.3rem;">
+            <input type="checkbox" name="delete_file" value="1"> Also delete file
+        </label>
+        {% endif %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>
     <a href="{% url 'databases:list' %}" class="btn btn-secondary">Back to list</a>

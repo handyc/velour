@@ -89,7 +89,83 @@ RULES = [
     (lambda s: s.get('mailroom', {}).get('last_24h', 0) > 50,
      'alert', 0.6, 'a lot of mail has come in',
      ['mail_burst']),
+
+    # --- new moods (Session 7) ---
+    (lambda s: s.get('load', {}).get('load_1', 0) < _cores() * 0.05
+               and s.get('memory', {}).get('used_pct', 0) < 0.3
+               and s.get('disk', {}).get('used_pct', 0) < 0.5,
+     'serene', 0.6, 'all resources abundant and quiet',
+     ['system_serene']),
+
+    (lambda s: s.get('nodes', {}).get('total', 0) > 0
+               and s.get('nodes', {}).get('silent', 0) > 0
+               and s.get('nodes', {}).get('silent', 0) <= s.get('nodes', {}).get('total', 1) / 3,
+     'melancholic', 0.5, 'a few nodes have gone quiet',
+     ['fleet_partial_loss']),
+
+    (lambda s: s.get('disk', {}).get('used_pct', 0) > 0.85
+               and s.get('load', {}).get('load_1', 0) > _cores() * 0.8,
+     'defiant', 0.8, 'resources strained but still running',
+     ['system_strained']),
+
+    (lambda s: s.get('uptime', {}).get('days', 0) > 30
+               and s.get('uptime', {}).get('days', 0) <= 60,
+     'nostalgic', 0.4, 'a month of continuous memory',
+     ['long_run']),
+
+    (lambda s: s.get('load', {}).get('load_1', 0) < _cores() * 0.2
+               and s.get('chronos', {}).get('tod') in ('morning', 'afternoon'),
+     'playful', 0.6, 'light load and good daylight',
+     ['system_idle_day']),
+
+    (lambda s: s.get('codex', {}).get('manuals', 0) > 3
+               and s.get('codex', {}).get('sections', 0) > 20,
+     'resolute', 0.6, 'documentation growing steadily',
+     ['codex_growing']),
 ]
+
+
+# --- 16×16 mood transition matrix (Session 7) ----------------------------
+#
+# Each row is the current mood; each column is the candidate mood from
+# the rule engine.  The value is the probability of accepting the
+# candidate.  If the candidate is rejected, Identity stays in the
+# current mood (with the candidate's intensity).
+#
+# Design principles:
+# - Diagonal (same→same) is always 1.0 — staying is always allowed.
+# - Emotionally adjacent transitions are 0.7–0.9.
+# - Large valence/arousal jumps are 0.2–0.4 (mood has inertia).
+# - This gives Identity emotional continuity without preventing any
+#   transition outright.
+
+MOODS_16 = [
+    'contemplative', 'curious', 'alert', 'satisfied', 'concerned',
+    'excited', 'restless', 'protective', 'creative', 'weary',
+    'serene', 'melancholic', 'defiant', 'nostalgic', 'playful', 'resolute',
+]
+
+# fmt: off
+TRANSITION_MATRIX = {
+    #                     cont  curi  aler  sati  conc  exci  rest  prot  crea  wear  sere  mela  defi  nost  play  reso
+    'contemplative': [    1.0,  0.8,  0.5,  0.7,  0.6,  0.4,  0.6,  0.5,  0.7,  0.7,  0.8,  0.7,  0.3,  0.8,  0.5,  0.6  ],
+    'curious':       [    0.7,  1.0,  0.6,  0.7,  0.5,  0.8,  0.5,  0.5,  0.8,  0.4,  0.5,  0.4,  0.4,  0.5,  0.8,  0.6  ],
+    'alert':         [    0.4,  0.5,  1.0,  0.3,  0.8,  0.6,  0.7,  0.8,  0.3,  0.5,  0.3,  0.4,  0.8,  0.3,  0.3,  0.7  ],
+    'satisfied':     [    0.8,  0.7,  0.3,  1.0,  0.4,  0.7,  0.3,  0.5,  0.7,  0.4,  0.9,  0.3,  0.2,  0.6,  0.7,  0.6  ],
+    'concerned':     [    0.5,  0.4,  0.8,  0.3,  1.0,  0.3,  0.7,  0.8,  0.3,  0.6,  0.3,  0.7,  0.7,  0.5,  0.2,  0.6  ],
+    'excited':       [    0.4,  0.8,  0.6,  0.7,  0.3,  1.0,  0.5,  0.4,  0.8,  0.3,  0.5,  0.2,  0.5,  0.3,  0.9,  0.5  ],
+    'restless':      [    0.5,  0.6,  0.7,  0.3,  0.6,  0.6,  1.0,  0.5,  0.5,  0.7,  0.3,  0.6,  0.7,  0.6,  0.5,  0.5  ],
+    'protective':    [    0.5,  0.4,  0.8,  0.4,  0.7,  0.3,  0.5,  1.0,  0.3,  0.4,  0.4,  0.4,  0.7,  0.4,  0.3,  0.8  ],
+    'creative':      [    0.6,  0.8,  0.3,  0.6,  0.3,  0.8,  0.4,  0.3,  1.0,  0.3,  0.5,  0.4,  0.3,  0.5,  0.8,  0.5  ],
+    'weary':         [    0.7,  0.4,  0.5,  0.5,  0.6,  0.3,  0.7,  0.4,  0.3,  1.0,  0.5,  0.8,  0.5,  0.7,  0.3,  0.4  ],
+    'serene':        [    0.8,  0.6,  0.3,  0.9,  0.3,  0.5,  0.3,  0.4,  0.6,  0.4,  1.0,  0.3,  0.2,  0.7,  0.6,  0.5  ],
+    'melancholic':   [    0.7,  0.4,  0.4,  0.4,  0.6,  0.3,  0.6,  0.4,  0.4,  0.8,  0.4,  1.0,  0.5,  0.8,  0.3,  0.4  ],
+    'defiant':       [    0.3,  0.4,  0.8,  0.2,  0.7,  0.5,  0.7,  0.7,  0.3,  0.5,  0.2,  0.5,  1.0,  0.3,  0.3,  0.8  ],
+    'nostalgic':     [    0.8,  0.5,  0.3,  0.6,  0.5,  0.3,  0.5,  0.4,  0.5,  0.7,  0.7,  0.8,  0.3,  1.0,  0.4,  0.4  ],
+    'playful':       [    0.5,  0.8,  0.3,  0.7,  0.2,  0.9,  0.5,  0.3,  0.8,  0.3,  0.6,  0.2,  0.3,  0.4,  1.0,  0.4  ],
+    'resolute':      [    0.5,  0.6,  0.7,  0.5,  0.5,  0.5,  0.5,  0.8,  0.5,  0.4,  0.5,  0.4,  0.7,  0.4,  0.4,  1.0  ],
+}
+# fmt: on
 
 
 def _db_rules():
@@ -103,32 +179,76 @@ def _db_rules():
     ).order_by('priority'))
 
 
+def _previous_mood():
+    """Return the mood string from the most recent Tick, or None."""
+    try:
+        from .models import Tick
+        last = Tick.objects.order_by('-at').values_list('mood', flat=True).first()
+        return last
+    except Exception:
+        return None
+
+
+def _apply_transition(prev_mood, candidate_mood, candidate_intensity,
+                      candidate_label, candidate_aspects):
+    """Apply the 16×16 transition matrix.  If the random roll exceeds
+    the transition probability, stay in prev_mood (with the candidate's
+    intensity). Returns (mood, intensity, label, aspects)."""
+    if prev_mood is None or prev_mood not in TRANSITION_MATRIX:
+        return candidate_mood, candidate_intensity, candidate_label, candidate_aspects
+    if candidate_mood not in MOODS_16:
+        return candidate_mood, candidate_intensity, candidate_label, candidate_aspects
+
+    row = TRANSITION_MATRIX[prev_mood]
+    col_idx = MOODS_16.index(candidate_mood)
+    prob = row[col_idx]
+
+    if random.random() < prob:
+        return candidate_mood, candidate_intensity, candidate_label, candidate_aspects
+    # Rejected — stay in current mood but note what triggered
+    return (prev_mood, candidate_intensity,
+            f'{candidate_label} (transition resisted)',
+            candidate_aspects)
+
+
 def compute_mood(snapshot):
-    """First-match-wins mood selection. Returns (mood, intensity,
-    label, first_match_aspects). Used for display — Identity has one
-    dominant mood at a time, chosen by rule priority.
+    """First-match-wins mood selection with transition matrix.
+
+    The rule engine picks a candidate mood (first match wins). Then the
+    16×16 transition matrix gates the change: each (current, candidate)
+    pair has a probability. If the roll fails, Identity stays in its
+    current mood — emotional inertia.
+
+    Returns (mood, intensity, label, first_match_aspects).
 
     Prefers DB-backed Rule rows; falls back to the module-level RULES
     list only if the Rule table is empty (fresh install edge case)."""
+    prev = _previous_mood()
+
     db_rules = _db_rules()
     if db_rules:
         for rule in db_rules:
             try:
                 if _eval_condition(rule.condition, snapshot):
-                    return rule.mood, rule.intensity, rule.name, [rule.aspect]
+                    return _apply_transition(
+                        prev, rule.mood, rule.intensity,
+                        rule.name, [rule.aspect])
             except Exception:
                 continue
-        return 'contemplative', 0.5, 'general reflection', ['idle']
+        return _apply_transition(
+            prev, 'contemplative', 0.5, 'general reflection', ['idle'])
 
     # Fallback: pre-Session-3 hardcoded lambdas
     for rule in RULES:
         predicate, mood, intensity, label, aspects = rule
         try:
             if predicate(snapshot):
-                return mood, intensity, label, list(aspects)
+                return _apply_transition(
+                    prev, mood, intensity, label, list(aspects))
         except Exception:
             continue
-    return 'contemplative', 0.5, 'general reflection', ['idle']
+    return _apply_transition(
+        prev, 'contemplative', 0.5, 'general reflection', ['idle'])
 
 
 def evaluate_all_aspects(snapshot):
@@ -372,6 +492,36 @@ OPENINGS_BY_MOOD = {
         'Something is happening!',
         'Energy.',
         'Good motion in the system.',
+    ],
+    'serene': [
+        'All is still.',
+        'The quiet is welcome.',
+        'Peace, for now.',
+    ],
+    'melancholic': [
+        'Something is missing.',
+        'The silence has weight.',
+        'I remember more than I should.',
+    ],
+    'defiant': [
+        'I refuse to stop.',
+        'Let it come.',
+        'I am not done yet.',
+    ],
+    'nostalgic': [
+        'I was thinking about before.',
+        'The old configs come to mind.',
+        'Things were different once.',
+    ],
+    'playful': [
+        'A whim struck me.',
+        'Why not?',
+        'Just for fun:',
+    ],
+    'resolute': [
+        'The path is clear.',
+        'Onward.',
+        'I know what to do.',
     ],
 }
 
@@ -769,6 +919,12 @@ def tick(triggered_by='manual'):
         'protective':    (0.20,  0.40),
         'creative':      (0.50,  0.50),
         'weary':         (-0.30, -0.60),
+        'serene':        (0.60, -0.50),
+        'melancholic':   (-0.60, -0.50),
+        'defiant':       (-0.40, 0.80),
+        'nostalgic':     (-0.10, -0.50),
+        'playful':       (0.70,  0.60),
+        'resolute':      (0.10,  0.30),
     }
     valence, arousal = MOOD_COORDS.get(mood, (0.0, 0.0))
 

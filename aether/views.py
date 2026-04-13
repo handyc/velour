@@ -616,15 +616,55 @@ def generate_random_world(request):
 
     Entity.objects.bulk_create(entities)
 
-    # --- Procedural buildings ---
+    # --- Buildings: mix procedural + L-system architecture ---
     building_script = Script.objects.filter(slug='procedural-building').first()
-    if building_script:
-        _BTYPES = ['house', 'shop', 'skyscraper', 'factory', 'warehouse',
-                   'church', 'tower']
-        _BCOLORS = ['#c8b8a0', '#d0c0a8', '#b0a890', '#909088', '#607080',
-                     '#506878', '#e0d0b8', '#808878']
-        n_buildings = random.randint(3, 10)
-        for i in range(n_buildings):
+    plant_script_for_arch = Script.objects.filter(slug='l-system-plant').first()
+
+    # Gather L-system architecture presets from the library
+    lsystem_buildings = []
+    try:
+        from lsystem.models import PlantSpecies
+        lsystem_buildings = list(
+            PlantSpecies.objects.filter(
+                category__in=PlantSpecies.ARCHITECTURE_CATEGORIES
+            )
+        )
+    except Exception:
+        pass
+
+    n_buildings = random.randint(3, 10)
+    for i in range(n_buildings):
+        bx = round(random.uniform(-half*0.8, half*0.8), 1)
+        bz = round(random.uniform(-half*0.8, half*0.8), 1)
+        brot = round(random.uniform(-30, 30), 1)
+
+        # 50/50 split between procedural and L-system buildings
+        # (fall back to procedural if no L-system presets exist)
+        use_lsystem = (lsystem_buildings and plant_script_for_arch
+                       and random.random() < 0.5)
+
+        if use_lsystem:
+            preset = random.choice(lsystem_buildings)
+            props = preset.to_aether_props(
+                scale=round(random.uniform(1.5, 3.5), 2),
+                seed=random.randint(1, 9999),
+            )
+            e = Entity.objects.create(
+                world=world, name=f'L-Building {i}: {preset.name}',
+                primitive='box', primitive_color='#000000',
+                pos_x=bx, pos_y=0, pos_z=bz, rot_y=brot,
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            EntityScript.objects.create(
+                entity=e, script=plant_script_for_arch, props=props)
+
+        elif building_script:
+            _BTYPES = ['house', 'shop', 'skyscraper', 'factory', 'warehouse',
+                       'church', 'tower']
+            _BCOLORS = ['#c8b8a0', '#d0c0a8', '#b0a890', '#909088', '#607080',
+                         '#506878', '#e0d0b8', '#808878']
             btype = random.choice(_BTYPES)
             floors = {'house': random.randint(1, 3),
                       'shop': random.randint(1, 2),
@@ -638,10 +678,7 @@ def generate_random_world(request):
             e = Entity.objects.create(
                 world=world, name=f'Building {i}', primitive='box',
                 primitive_color='#000000',
-                pos_x=round(random.uniform(-half*0.8, half*0.8), 1),
-                pos_y=0,
-                pos_z=round(random.uniform(-half*0.8, half*0.8), 1),
-                rot_y=round(random.uniform(-30, 30), 1),
+                pos_x=bx, pos_y=0, pos_z=bz, rot_y=brot,
                 scale_x=1, scale_y=1, scale_z=1,
                 cast_shadow=False, receive_shadow=False,
                 behavior='scripted',

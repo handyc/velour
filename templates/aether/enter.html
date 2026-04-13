@@ -465,21 +465,19 @@ let gravity = -9.81;
 let playerY = 1.6;
 
 function updateMovement(dt) {
-    // Desktop FPS movement — operates on cameraGroup (camera is child at origin)
+    // Tank-style movement: W/S = forward/reverse, A/D = turn left/right
     const speed = 6.0;
-    const dir = new THREE.Vector3();
-    if (keys['KeyW']) dir.z -= 1;
-    if (keys['KeyS']) dir.z += 1;
-    if (keys['KeyA']) dir.x -= 1;
-    if (keys['KeyD']) dir.x += 1;
-    dir.normalize();
+    const turnSpeed = 2.0;
 
-    const sin = Math.sin(yaw), cos = Math.cos(yaw);
-    const mx = dir.x * cos - dir.z * sin;
-    const mz = dir.x * sin + dir.z * cos;
+    if (keys['KeyA']) yaw += turnSpeed * dt;
+    if (keys['KeyD']) yaw -= turnSpeed * dt;
 
-    velocity.x = mx * speed;
-    velocity.z = mz * speed;
+    let forward = 0;
+    if (keys['KeyW']) forward += 1;
+    if (keys['KeyS']) forward -= 1;
+
+    velocity.x = -Math.sin(yaw) * forward * speed;
+    velocity.z = -Math.cos(yaw) * forward * speed;
 
     if (keys['Space'] && onGround) {
         velocity.y = 5.0;

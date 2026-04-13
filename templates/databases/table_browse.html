@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}{{ table_name }} - {{ db.nickname }} - Databases{% endblock %}
+
+{% block extra_head %}
+<style>
+    .data-tbl { border-collapse: collapse; width: 100%; font-size: 0.78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .data-tbl th { text-align: left; color: #8b949e; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.3rem 0.5rem; border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #0d1117; }
+    .data-tbl td { padding: 0.25rem 0.5rem; color: #c9d1d9; border-bottom: 1px solid #161b22; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .data-tbl tr:hover td { background: rgba(88,166,255,0.04); }
+    .data-tbl td.null { color: #484f58; font-style: italic; }
+    .col-info { font-size: 0.72rem; color: #6e7681; margin-bottom: 1rem; }
+    .col-info span { display: inline-block; margin-right: 1rem; }
+    .col-info .pk { color: #d29922; }
+    .pager { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; font-size: 0.82rem; }
+    .pager a { color: #58a6ff; }
+    .pager .current { color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'databases:detail' db.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; {{ db.nickname }}</a>
+    <h2 style="margin:0;">{{ table_name }}</h2>
+    <span style="color:#6e7681;font-size:0.78rem;">{{ total_rows }} rows</span>
+</div>
+
+<div class="col-info">
+    {% for c in columns %}
+    <span{% if c.pk %} class="pk"{% endif %}>{{ c.name }} <em>{{ c.type }}{% if c.pk %} PK{% endif %}{% if c.notnull %} NOT NULL{% endif %}</em></span>
+    {% endfor %}
+</div>
+
+{% if rows %}
+<div style="overflow-x:auto;">
+<table class="data-tbl">
+    <thead><tr>{% for c in col_names %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in rows %}
+    <tr>{% for val in row %}<td{% if val is None %} class="null"{% endif %}>{% if val is None %}NULL{% else %}{{ val }}{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="pager">
+    {% if has_prev %}<a href="?page={{ page|add:"-1" }}">&larr; Prev</a>{% endif %}
+    <span class="current">Page {{ page }} / {{ total_pages }}</span>
+    {% if has_next %}<a href="?page={{ page|add:"1" }}">Next &rarr;</a>{% endif %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No rows in this table.</p>
+{% endif %}
+
+<div style="margin-top:1rem;">
+    <a href="{% url 'databases:sql_query' db.slug %}" class="btn" style="font-size:0.82rem;">SQL Shell</a>
+</div>
+{% endblock %}

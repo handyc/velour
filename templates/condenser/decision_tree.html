@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block title %}Decision Tree → ATTiny13a — Condenser{% endblock %}
+
+{% block extra_head %}
+<style>
+    .dt-form { max-width: 720px; }
+    .dt-form label { display:block; font-size:0.78rem; color:#8b949e; margin:0.6rem 0 0.15rem; }
+    .dt-form input, .dt-form select { background:#0d1117; border:1px solid #30363d; color:#c9d1d9;
+        padding:0.3rem 0.5rem; border-radius:3px; font-size:0.82rem; font-family:ui-monospace,Menlo,monospace; }
+    .dt-form input:focus, .dt-form select:focus { border-color:#58a6ff; outline:none; }
+    .rule-row { display:flex; gap:0.4rem; align-items:center; margin-bottom:0.3rem; }
+    .rule-row input, .rule-row select { flex:1; }
+    .rule-row select.ch { max-width:130px; }
+    .rule-row input.thr { max-width:90px; }
+    .rule-row input.val { max-width:70px; }
+    .rule-row .rm { background:none; border:none; color:#f85149; cursor:pointer; font-size:0.9rem; padding:0.2rem; }
+    #rules-list { margin:0.4rem 0; }
+    .info-box { background:#161b22; border:1px solid #30363d; border-radius:4px;
+        padding:0.6rem 0.8rem; margin:0.8rem 0; font-size:0.75rem; color:#8b949e; line-height:1.5; }
+    .info-box code { color:#58a6ff; }
+    .pin-diagram { font-family:ui-monospace,Menlo,monospace; font-size:0.7rem; color:#6e7681;
+        white-space:pre; line-height:1.4; margin:0.5rem 0; }
+    .size-est { font-size:0.72rem; color:#2ea043; margin-top:0.3rem; }
+    .toggle-row { display:flex; gap:1.5rem; margin:0.6rem 0; }
+    .toggle-row label { display:inline-flex; align-items:center; gap:0.3rem; margin:0; cursor:pointer; }
+    .toggle-row input[type=checkbox] { accent-color:#58a6ff; }
+    .goedel-box { background:#0d1117; border:1px solid #d2a8ff33; border-left:3px solid #d2a8ff;
+        border-radius:4px; padding:0.5rem 0.7rem; margin:0.8rem 0; font-size:0.72rem; color:#d2a8ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1 style="font-size:1.1rem">Decision Tree → ATTiny13a</h1>
+<p style="color:#8b949e;font-size:0.78rem;margin-bottom:0.3rem">
+    Multi-channel ADC decision tree + <a href="https://github.com/nerdralph/picoUART" style="color:#58a6ff">picoUART</a> TX + Gödel self-reference.
+    Sub-1KB firmware that reads sensors, makes decisions, and can describe its own logic.
+</p>
+
+<div class="info-box">
+    <strong style="color:#c9d1d9">ATTiny13a:</strong> 1KB flash, 64B SRAM, 10-bit ADC, 6 GPIO.<br>
+    3 ADC channels with RESET intact (PB2/PB3/PB4). 4th channel (PB5) requires RSTDISBL fuse.<br>
+    picoUART TX uses ~40 bytes. Decision tree + Gödel self-reference fits in ~800 bytes total.
+    <div class="pin-diagram">
+        ┌──────────┐
+  RST ──┤1  T13a  8├── VCC
+  PB3 ──┤2        7├── PB2 (ADC1, ch0)
+  PB4 ──┤3        6├── PB1 (LED or OC0B audio)
+  GND ──┤4        5├── PB0 (TX → ESP)
+        └──────────┘
+  PB3 = ADC3 (ch1)    PB4 = ADC2 (ch2)
+  PB5 = ADC0 (ch3, needs RSTDISBL)
+  PB1 = OC0B (Timer0 PWM — bytebeat audio output)
+    </div>
+</div>
+
+<div class="goedel-box">
+    <strong>Gödel self-reference:</strong> The chip stores a compressed description of its own
+    decision tree in flash. Ground all sensor inputs (the "who are you?" gesture) and it
+    transmits its self-description + a CRC-8 of its own program memory. The ESP can
+    reconstruct the entire tree without the source code. The code IS its own documentation.
+</div>
+
+<form method="post" class="dt-form">
+    {% csrf_token %}
+
+    <label>Firmware name</label>
+    <input type="text" name="name" value="sensor_decision" style="width:100%">
+
+    <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <div>
+            <label>Baud rate</label>
+            <select name="baud">
+                <option value="4800">4800</option>
+                <option value="9600" selected>9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+            </select>
+        </div>
+        <div>
+            <label>Loop delay (ms)</label>
+            <input type="number" name="loop_delay" value="500" min="50" max="10000" style="width:80px">
+        </div>
+    </div>
+
+    <div class="toggle-row">
+        <label><input type="checkbox" name="median_filter" checked> Median-of-3 filter (~50B)</label>
+        <label><input type="checkbox" name="framed" checked> Framed packets + XOR (~30B)</label>
+        <label><input type="checkbox" name="goedel" checked> Gödel self-ref (~400B)</label>
+        <label><input type="checkbox" name="bytebeat" id="bb-toggle"> Bytebeat audio (~120B)</label>
+        <label><input type="checkbox" name="led" checked id="led-toggle"> Status LED (PB1)</label>
+    </div>
+
+    <div id="bb-info" style="display:none;background:#161b22;border:1px solid #d2922233;border-left:3px solid #d29922;
+        border-radius:4px;padding:0.5rem 0.7rem;margin:0.3rem 0;font-size:0.72rem;color:#d29922;">
+        <strong>Bytebeat:</strong> PB1 becomes a PWM audio output. Each decision tree leaf value
+        selects a bytebeat formula — the chip plays different music depending on what it senses.
+        Overrides the LED. <strong>Do not connect a speaker directly</strong> — PB1 can only
+        source ~40mA. Use one of the three wiring options below.
+        <div style="color:#8b949e;margin-top:0.3rem;font-family:ui-monospace,Menlo,monospace;font-size:0.65rem">
+            Formulas: sierpinski · crowd · acid · bells · drums · underwater · alarm
+        </div>
+        <details style="margin-top:0.5rem;color:#c9d1d9">
+            <summary style="cursor:pointer;color:#d29922;font-weight:500">Wiring diagrams (3 options)</summary>
+<pre style="color:#8b949e;font-size:0.62rem;line-height:1.35;margin:0.5rem 0;overflow-x:auto">
+<span style="color:#d29922">── Option A: Piezo buzzer (simplest, no extra parts) ───────────</span>
+
+  Piezo elements are high impedance — safe to drive directly.
+  Tinny sound, but audible. Good for alarms and notification tones.
+
+                 ┌──────────┐
+  sensor ──PB2 ──┤7  T13a  8├── VCC (5V)
+  sensor ──PB3 ──┤2        7├── PB2
+  sensor ──PB4 ──┤3        6├── PB1 (OC0B)──┐
+           GND ──┤4        5├── PB0 (TX)     │
+                 └──────────┘                │
+                                             │
+                     ┌───────────────────────┘
+                     │
+                     ├───[ piezo + ]
+                     │     ┊
+                     │   ┌─┴─┐
+                     │   │ ◎ │  piezo buzzer
+                     │   └─┬─┘  (any passive piezo)
+                     │     ┊
+                     └───[ piezo - ]──── GND
+
+  Parts: 1× passive piezo buzzer (not active/driven type)
+
+
+<span style="color:#d29922">── Option B: RC low-pass → ESP ADC or line-in (quiet, clean) ──</span>
+
+  Smooths the PWM into analog audio. Feed into the ESP's ADC
+  for digital capture, or into a powered speaker's line/aux input.
+  The 1K + 100nF filter gives a ~1.6kHz cutoff — removes the
+  37.5kHz PWM carrier, keeps the 0-8kHz audio content.
+
+                 ┌──────────┐
+  sensor ──PB2 ──┤7  T13a  8├── VCC
+  sensor ──PB3 ──┤2        7├──
+  sensor ──PB4 ──┤3        6├── PB1 (OC0B)
+           GND ──┤4        5├── PB0 (TX)
+                 └──────────┘       │
+                                    │ (TX → ESP RX for UART data)
+                  PB1 (OC0B)        │
+                      │             │
+                      ├──[1KΩ]──┬───────── audio out ──→ ESP ADC
+                      │         │                        or line-in
+                      │       ──┴──
+                      │       ──┬── 100nF
+                      │         │   (ceramic cap)
+                      │         │
+                      GND ──────┘
+
+  Parts: 1× 1KΩ resistor, 1× 100nF ceramic capacitor
+  Note: For headphones, add a 10µF coupling cap in series
+        with audio out to block the DC offset:
+
+        audio out ──┤├──[10µF]──→ headphone tip
+                                  headphone sleeve → GND
+
+
+<span style="color:#d29922">── Option C: NPN transistor amp → 8Ω speaker (loud) ───────────</span>
+
+  Class A amplifier using a single 2N2222 or BC547. Drives an
+  8Ω speaker at ~100mW — audible across a room. The 10µF cap
+  blocks DC so the speaker only sees the audio signal.
+
+                 ┌──────────┐
+  sensor ──PB2 ──┤7  T13a  8├── VCC (5V)
+  sensor ──PB3 ──┤2        7├──          VCC (5V)
+  sensor ──PB4 ──┤3        6├── PB1       │
+           GND ──┤4        5├── PB0(TX)   │
+                 └──────────┘             ├──[100Ω]── collector
+                                          │
+           PB1 (OC0B)                     │
+              │                      ┌────┘
+              ├──[1KΩ]──── base ─────┤ NPN
+              │                      │ (2N2222
+              │                      │  or BC547)
+              │                      └────┐
+              │                           │
+              │                       emitter
+              │                           │
+              │                           ├──[10Ω]
+              │                           │
+              │                          GND
+              │
+              │         collector
+              │             │
+              │           ──┴──
+              │           ──┬── 10µF electrolytic
+              │             │   (+ toward collector)
+              │             │
+              │             ├──→ speaker + (8Ω)
+              │             │      ┊
+              │             │    ┌─┴──────┐
+              │             │    │   ))   │
+              │             │    └─┬──────┘
+              │             │      ┊
+              │             └──→ speaker - ── GND
+
+  Parts: 1× 2N2222/BC547 NPN, 1× 1KΩ, 1× 100Ω, 1× 10Ω,
+         1× 10µF electrolytic cap, 1× 8Ω speaker
+
+  Gain is set by the 100Ω collector resistor. For less volume
+  increase to 220Ω. For battery operation, power from 3×AA (4.5V).
+</pre>
+        </details>
+    </div>
+
+    <label>Decision rules <span style="color:#6e7681">(each rule: channel + ADC threshold 0-1023 + result byte)</span></label>
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.2rem;font-size:0.65rem;color:#6e7681">
+        <span style="flex:1;max-width:130px">Channel</span>
+        <span style="flex:1;max-width:90px">Threshold</span>
+        <span style="flex:1">Label</span>
+        <span style="flex:1;max-width:70px">TX byte</span>
+        <span style="width:24px"></span>
+    </div>
+    <div id="rules-list">
+        <div class="rule-row">
+            <select name="channel" class="ch"><option value="0" selected>ch0 (PB2)</option><option value="1">ch1 (PB3)</option><option value="2">ch2 (PB4)</option><option value="3">ch3 (PB5/RST)</option></select>
+            <input type="number" name="threshold" class="thr" value="200" min="0" max="1023">
+            <input type="text" name="label" value="COLD" placeholder="Label">
+            <input type="text" name="value" class="val" value="C" placeholder="Byte" maxlength="3">
+            <button type="button" class="rm" onclick="this.parentElement.remove();updateEst()">&times;</button>
+        </div>
+        <div class="rule-row">
+            <select name="channel" class="ch"><option value="0" selected>ch0 (PB2)</option><option value="1">ch1 (PB3)</option><option value="2">ch2 (PB4)</option><option value="3">ch3 (PB5/RST)</option></select>
+            <input type="number" name="threshold" class="thr" value="400" min="0" max="1023">
+            <input type="text" name="label" value="COOL" placeholder="Label">
+            <input type="text" name="value" class="val" value="O" placeholder="Byte" maxlength="3">
+            <button type="button" class="rm" onclick="this.parentElement.remove();updateEst()">&times;</button>
+        </div>
+        <div class="rule-row">
+            <select name="channel" class="ch"><option value="0" selected>ch0 (PB2)</option><option value="1">ch1 (PB3)</option><option value="2">ch2 (PB4)</option><option value="3">ch3 (PB5/RST)</option></select>
+            <input type="number" name="threshold" class="thr" value="600" min="0" max="1023">
+            <input type="text" name="label" value="WARM" placeholder="Label">
+            <input type="text" name="value" class="val" value="W" placeholder="Byte" maxlength="3">
+            <button type="button" class="rm" onclick="this.parentElement.remove();updateEst()">&times;</button>
+        </div>
+        <div class="rule-row">
+            <select name="channel" class="ch"><option value="0" selected>ch0 (PB2)</option><option value="1">ch1 (PB3)</option><option value="2">ch2 (PB4)</option><option value="3">ch3 (PB5/RST)</option></select>
+            <input type="number" name="threshold" class="thr" value="800" min="0" max="1023">
+            <input type="text" name="label" value="HOT" placeholder="Label">
+            <input type="text" name="value" class="val" value="H" placeholder="Byte" maxlength="3">
+            <button type="button" class="rm" onclick="this.parentElement.remove();updateEst()">&times;</button>
+        </div>
+    </div>
+
+    <button type="button" onclick="addRule()" style="background:none;border:1px solid #30363d;color:#58a6ff;
+        padding:0.2rem 0.6rem;border-radius:3px;font-size:0.78rem;cursor:pointer;margin-top:0.2rem">+ Add rule</button>
+
+    <div class="size-est" id="size-est">Est. flash: ~810 bytes / 1024 (79%)</div>
+
+    <div style="margin-top:1rem;display:flex;gap:0.5rem">
+        <button type="submit" class="btn primary" style="background:#238636;border-color:#2ea043">Generate C code</button>
+        <a href="{% url 'condenser:home' %}" class="btn btn-secondary">Back</a>
+    </div>
+</form>
+
+<script>
+const CH_OPTIONS = '<option value="0">ch0 (PB2)</option><option value="1">ch1 (PB3)</option>' +
+    '<option value="2">ch2 (PB4)</option><option value="3">ch3 (PB5/RST)</option>';
+
+function addRule() {
+    const list = document.getElementById('rules-list');
+    const row = document.createElement('div');
+    row.className = 'rule-row';
+    row.innerHTML = `
+        <select name="channel" class="ch">${CH_OPTIONS}</select>
+        <input type="number" name="threshold" class="thr" value="" min="0" max="1023" placeholder="ADC">
+        <input type="text" name="label" value="" placeholder="Label">
+        <input type="text" name="value" class="val" value="" placeholder="Byte" maxlength="3">
+        <button type="button" class="rm" onclick="this.parentElement.remove();updateEst()">&times;</button>
+    `;
+    list.appendChild(row);
+    row.querySelector('.thr').focus();
+    updateEst();
+}
+
+function updateEst() {
+    const n = document.querySelectorAll('#rules-list .rule-row').length;
+    const nodes = Math.max(2 * n - 1, 1);
+    const treeBytes = nodes * 5;
+    let base = 175 + treeBytes;
+    if (document.querySelector('[name=median_filter]').checked) base += 50;
+    if (document.querySelector('[name=framed]').checked) base += 30;
+    if (document.querySelector('[name=goedel]').checked) base += 400;
+    if (document.querySelector('[name=bytebeat]').checked) base += 120;
+    const pct = Math.round(base / 1024 * 100);
+    const el = document.getElementById('size-est');
+    el.textContent = `Est. flash: ~${base} bytes / 1024 (${pct}%)`;
+    el.style.color = base > 950 ? '#f85149' : base > 800 ? '#d29922' : '#2ea043';
+
+    // Warn about ch3 (RESET pin)
+    const ch3Used = Array.from(document.querySelectorAll('[name=channel]')).some(s => s.value === '3');
+    let warn = document.getElementById('rst-warn');
+    if (ch3Used && !warn) {
+        warn = document.createElement('div');
+        warn.id = 'rst-warn';
+        warn.style.cssText = 'font-size:0.7rem;color:#f85149;margin-top:0.2rem';
+        warn.textContent = '⚠ Channel 3 uses PB5 (RESET). Requires RSTDISBL fuse — needs HV programmer to reflash.';
+        el.parentElement.insertBefore(warn, el.nextSibling);
+    } else if (!ch3Used && warn) {
+        warn.remove();
+    }
+}
+
+// Bytebeat ↔ LED mutual exclusion (both use PB1)
+const bbToggle = document.getElementById('bb-toggle');
+const ledToggle = document.getElementById('led-toggle');
+const bbInfo = document.getElementById('bb-info');
+
+bbToggle.addEventListener('change', function() {
+    bbInfo.style.display = this.checked ? 'block' : 'none';
+    if (this.checked) {
+        ledToggle.checked = false;
+        ledToggle.disabled = true;
+        ledToggle.parentElement.style.opacity = '0.4';
+    } else {
+        ledToggle.disabled = false;
+        ledToggle.parentElement.style.opacity = '1';
+    }
+    updateEst();
+});
+
+ledToggle.addEventListener('change', function() {
+    if (this.checked && bbToggle.checked) {
+        this.checked = false;
+    }
+    updateEst();
+});
+
+document.querySelectorAll('.dt-form input, .dt-form select').forEach(el =>
+    el.addEventListener('change', updateEst));
+updateEst();
+</script>
+{% endblock %}

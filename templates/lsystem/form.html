@@ -20,7 +20,7 @@
             </label>
             <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
                 Category<br>
-                <select name="category" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                <select name="category" id="id_category" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
                     {% for val, label in categories %}
                     <option value="{{ val }}" {% if species.category == val %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
@@ -72,15 +72,15 @@
                 <label style="color:#8b949e;font-size:0.78rem;">Trunk radius<br>
                     <input type="number" name="trunk_radius" value="{{ species.trunk_radius|default:'0.06' }}" step="0.005" min="0.01" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
                 </label>
-                <label style="color:#8b949e;font-size:0.78rem;">Droop<br>
+                <label class="plant-field" style="color:#8b949e;font-size:0.78rem;">Droop<br>
                     <input type="number" name="droop" value="{{ species.droop|default:'0' }}" step="0.01" min="0" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
                 </label>
             </div>
         </fieldset>
 
-        {# Appearance #}
-        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
-            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Appearance</legend>
+        {# Plant appearance #}
+        <fieldset class="plant-section" style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Plant Appearance</legend>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
                 <label style="color:#8b949e;font-size:0.78rem;">Trunk<br>
                     <input type="color" name="trunk_color" value="{{ species.trunk_color|default:'#5a4020' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
@@ -92,7 +92,7 @@
                     <input type="color" name="leaf_color2" value="{{ species.leaf_color2|default:'#3a7828' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
                 </label>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;">
                 <label style="color:#8b949e;font-size:0.78rem;">Leaf shape<br>
                     <select name="leaf_shape" style="width:100%;padding:0.2rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
                         {% for val, label in leaf_shapes %}
@@ -109,8 +109,76 @@
             </div>
         </fieldset>
 
-        {# Flowers #}
-        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+        {# Architecture appearance #}
+        <fieldset class="arch-section" style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#d29922;font-size:0.78rem;padding:0 0.3rem;">Architecture Appearance</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Wall<br>
+                    <input type="color" name="wall_color" value="{{ species.wall_color|default:'#a08870' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Wall 2<br>
+                    <input type="color" name="wall_color2" value="{{ species.wall_color2|default:'#8a7860' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Roof<br>
+                    <input type="color" name="roof_color" value="{{ species.roof_color|default:'#6a3020' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Window<br>
+                    <input type="color" name="window_color" value="{{ species.window_color|default:'#ffe880' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Door<br>
+                    <input type="color" name="door_color" value="{{ species.door_color|default:'#5a3818' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Wall width<br>
+                    <input type="number" name="wall_width" value="{{ species.wall_width|default:'1.0' }}" step="0.1" min="0.2" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Floor height<br>
+                    <input type="number" name="floor_height" value="{{ species.floor_height|default:'1.2' }}" step="0.1" min="0.3" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Win density<br>
+                    <input type="number" name="window_density" value="{{ species.window_density|default:'0.6' }}" step="0.05" min="0" max="1" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Roof style<br>
+                    <select name="roof_style" style="width:100%;padding:0.2rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                        {% for val, label in roof_styles %}
+                        <option value="{{ val }}" {% if species.roof_style == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Arch style<br>
+                    <select name="arch_style" style="width:100%;padding:0.2rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                        {% for val, label in arch_styles %}
+                        <option value="{{ val }}" {% if species.arch_style == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+        </fieldset>
+
+        {# Architecture features #}
+        <fieldset class="arch-section" style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#d29922;font-size:0.78rem;padding:0 0.3rem;">Architecture Features</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;">
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_windows" {% if species.has_windows %}checked{% elif not species %}checked{% endif %}> Windows
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_chimney" {% if species.has_chimney %}checked{% endif %}> Chimney
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_balcony" {% if species.has_balcony %}checked{% endif %}> Balcony
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_columns" {% if species.has_columns %}checked{% endif %}> Columns
+                </label>
+            </div>
+        </fieldset>
+
+        {# Flowers (plants) #}
+        <fieldset class="plant-section" style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
             <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Flowers</legend>
             <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem;">
                 <input type="checkbox" name="has_flowers" {% if species.has_flowers %}checked{% endif %}> Has flowers
@@ -125,9 +193,9 @@
             </div>
         </fieldset>
 
-        {# Special features #}
-        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
-            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Special Features</legend>
+        {# Special features (plants) #}
+        <fieldset class="plant-section" style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Special Plant Features</legend>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;">
                 <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
                     <input type="checkbox" name="trunk_is_green" {% if species.trunk_is_green %}checked{% endif %}> Green trunk
@@ -164,4 +232,20 @@
         {% if species %}Save Changes{% else %}Create Species{% endif %}
     </button>
 </form>
+
+<script>
+const catSelect = document.getElementById('id_category');
+const archCats = new Set(['building', 'tower', 'bridge', 'wall']);
+function toggleSections() {
+    const isArch = archCats.has(catSelect.value);
+    document.querySelectorAll('.plant-section, .plant-field').forEach(el => {
+        el.style.display = isArch ? 'none' : '';
+    });
+    document.querySelectorAll('.arch-section').forEach(el => {
+        el.style.display = isArch ? '' : 'none';
+    });
+}
+catSelect.addEventListener('change', toggleSections);
+toggleSections();
+</script>
 {% endblock %}

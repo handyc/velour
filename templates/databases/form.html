@@ -14,6 +14,8 @@
     .db-form .row { display: flex; gap: 0.75rem; }
     .db-form .row .field { flex: 1 1 0; }
     .db-form small { color: #6e7681; font-size: 0.72rem; }
+    .remote-fields { transition: opacity 0.15s; }
+    .remote-fields.hidden { opacity: 0.3; pointer-events: none; }
 </style>
 {% endblock %}
 
@@ -29,51 +31,58 @@
         <small>Human label, e.g. "Production users", "Gary aquarium logs".</small>
     </div>
 
-    <div class="row">
+    <div class="field">
+        <label for="engine">Engine</label>
+        <select id="engine" name="engine">
+            {% for k, v in engine_choices %}
+            <option value="{{ k }}" {% if db.engine == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="sqlite-fields" class="field" style="display:none;">
+        <label for="file_path">File path (optional)</label>
+        <input type="text" id="file_path" name="file_path" value="{{ db.file_path }}" maxlength="500">
+        <small>Leave blank to auto-create under the databases directory. Or point to an existing .sqlite3 file.</small>
+    </div>
+
+    <div id="remote-fields" class="remote-fields">
+        <div class="row">
+            <div class="field">
+                <label for="host">Host</label>
+                <input type="text" id="host" name="host" value="{{ db.host|default:'localhost' }}" maxlength="253">
+            </div>
+            <div class="field">
+                <label for="port">Port</label>
+                <input type="number" id="port" name="port" value="{{ db.port|default_if_none:'' }}" min="1" max="65535">
+                <small>Blank = engine default.</small>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="field">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" value="{{ db.username }}" maxlength="120" autocomplete="off">
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" value="{{ db.password }}" maxlength="255" autocomplete="off">
+            </div>
+        </div>
+
         <div class="field">
-            <label for="engine">Engine</label>
-            <select id="engine" name="engine">
-                {% for k, v in engine_choices %}
-                <option value="{{ k }}" {% if db.engine == k %}selected{% endif %}>{{ v }}</option>
+            <label for="database_name">Database / schema name</label>
+            <input type="text" id="database_name" name="database_name" value="{{ db.database_name }}" maxlength="120">
+        </div>
+
+        <div class="field">
+            <label for="ssl_mode">SSL mode</label>
+            <select id="ssl_mode" name="ssl_mode">
+                {% for k, v in ssl_mode_choices %}
+                <option value="{{ k }}" {% if db.ssl_mode == k %}selected{% endif %}>{{ v }}</option>
                 {% endfor %}
             </select>
         </div>
-        <div class="field">
-            <label for="port">Port</label>
-            <input type="number" id="port" name="port" value="{{ db.port|default_if_none:'' }}" min="1" max="65535">
-            <small>Blank = engine default (3306 / 5432).</small>
-        </div>
-    </div>
-
-    <div class="field">
-        <label for="host">Host</label>
-        <input type="text" id="host" name="host" value="{{ db.host|default:'localhost' }}" required maxlength="253">
-    </div>
-
-    <div class="row">
-        <div class="field">
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" value="{{ db.username }}" maxlength="120" autocomplete="off">
-        </div>
-        <div class="field">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" value="{{ db.password }}" maxlength="255" autocomplete="off">
-        </div>
-    </div>
-
-    <div class="field">
-        <label for="database_name">Database / schema name</label>
-        <input type="text" id="database_name" name="database_name" value="{{ db.database_name }}" maxlength="120">
-        <small>Blank to connect without selecting one.</small>
-    </div>
-
-    <div class="field">
-        <label for="ssl_mode">SSL mode</label>
-        <select id="ssl_mode" name="ssl_mode">
-            {% for k, v in ssl_mode_choices %}
-            <option value="{{ k }}" {% if db.ssl_mode == k %}selected{% endif %}>{{ v }}</option>
-            {% endfor %}
-        </select>
     </div>
 
     <div class="field">
@@ -90,4 +99,17 @@
         {% endif %}
     </div>
 </form>
+
+<script>
+const eng = document.getElementById('engine');
+const remote = document.getElementById('remote-fields');
+const sqliteF = document.getElementById('sqlite-fields');
+function toggle() {
+    const isSqlite = eng.value === 'sqlite';
+    remote.classList.toggle('hidden', isSqlite);
+    sqliteF.style.display = isSqlite ? '' : 'none';
+}
+eng.addEventListener('change', toggle);
+toggle();
+</script>
 {% endblock %}

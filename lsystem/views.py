@@ -37,6 +37,8 @@ def species_add(request):
         'species': None,
         'categories': PlantSpecies.CATEGORY_CHOICES,
         'leaf_shapes': PlantSpecies.LEAF_SHAPE_CHOICES,
+        'roof_styles': PlantSpecies.ROOF_STYLE_CHOICES,
+        'arch_styles': PlantSpecies.ARCH_STYLE_CHOICES,
     })
 
 
@@ -60,6 +62,8 @@ def species_edit(request, slug):
         'species': sp,
         'categories': PlantSpecies.CATEGORY_CHOICES,
         'leaf_shapes': PlantSpecies.LEAF_SHAPE_CHOICES,
+        'roof_styles': PlantSpecies.ROOF_STYLE_CHOICES,
+        'arch_styles': PlantSpecies.ARCH_STYLE_CHOICES,
     })
 
 
@@ -101,10 +105,11 @@ def species_duplicate(request, slug):
 @login_required
 @require_POST
 def species_randomize(request):
-    """Generate a random plant species with plausible parameters."""
+    """Generate a random plant or building with plausible parameters."""
     rng = random.Random()
+    mode = request.POST.get('mode', 'any')
 
-    templates = [
+    plant_templates = [
         ('Random Oak Variant', 'tree', 'F', [{'F': 'FF+[+F-F-F]-[-F+F+F]'}],
          (18, 30), (0.55, 0.75), (0.6, 1.0), (0.6, 0.8)),
         ('Random Pine Variant', 'tree', 'F', [{'F': 'F[+F][-F]F[+F][-F]'}],
@@ -119,37 +124,86 @@ def species_randomize(request):
          (22, 35), (0.5, 0.7), (0.4, 0.6), (0.6, 0.75)),
     ]
 
-    tmpl = rng.choice(templates)
-    name, cat, axiom, rules, angle_r, lf_r, sl_r, tt_r = tmpl
+    building_templates = [
+        # (name, category, axiom, rules, angle, iterations, arch_style, roof_style)
+        ('Random Cottage', 'building', 'F', [{'F': 'F[+F][-F]'}],
+         90, (2, 3), 'cottage', 'gable'),
+        ('Random Tower', 'tower', 'F', [{'F': 'FF[+F][-F]'}],
+         90, (3, 5), 'tower', 'spire'),
+        ('Random Modern', 'building', 'F', [{'F': 'F[+F]F[-F]'}],
+         90, (2, 3), 'modern', 'flat'),
+        ('Random Medieval', 'building', 'F', [{'F': 'FF[+F][-F][+F]'}],
+         90, (2, 4), 'medieval', 'gable'),
+        ('Random Gothic', 'building', 'F', [{'F': 'FFF[+F][-F]'}],
+         90, (3, 5), 'gothic', 'spire'),
+        ('Random Industrial', 'building', 'F', [{'F': 'FF[+F][-F]F'}],
+         90, (2, 3), 'industrial', 'flat'),
+        ('Random Classical', 'building', 'F', [{'F': 'F[+F][-F]F[+F][-F]'}],
+         90, (2, 3), 'classical', 'hip'),
+        ('Random Wall', 'wall', 'F', [{'F': 'FF[+F]'}],
+         90, (2, 3), '', 'none'),
+    ]
 
-    trunk_colors = ['#5a4020', '#4a3018', '#6a5838', '#3a2810', '#5a3818',
-                    '#8a7868', '#4a3828', '#6a4828']
-    leaf_colors = ['#2a6818', '#1a4810', '#4a8830', '#3a7020', '#2a7818',
-                   '#308830', '#506838']
+    use_building = mode == 'building' or (mode == 'any' and rng.random() > 0.6)
 
-    sp = PlantSpecies(
-        name=name,
-        category=cat,
-        axiom=axiom,
-        rules=rules,
-        iterations=rng.randint(3, 5),
-        angle=round(rng.uniform(*angle_r), 1),
-        length_factor=round(rng.uniform(*lf_r), 2),
-        start_length=round(rng.uniform(*sl_r), 2),
-        trunk_taper=round(rng.uniform(*tt_r), 2),
-        trunk_radius=round(rng.uniform(0.04, 0.10), 3),
-        trunk_color=rng.choice(trunk_colors),
-        leaf_color=rng.choice(leaf_colors),
-        leaf_color2='#%02x%02x%02x' % tuple(rng.randint(40, 160) for _ in range(3)),
-        leaf_size=round(rng.uniform(0.1, 0.5), 2),
-        leaf_density=round(rng.uniform(0.3, 0.9), 2),
-        leaf_shape=rng.choice(['sphere', 'cone', 'star']),
-        droop=round(rng.uniform(0, 0.2), 2) if rng.random() > 0.6 else 0,
-        has_flowers=cat == 'flower' or rng.random() > 0.7,
-        flower_color='#%02x%02x%02x' % (
-            rng.randint(180, 255), rng.randint(60, 180), rng.randint(60, 200)),
-        flower_density=round(rng.uniform(0.1, 0.4), 2),
-    )
+    if use_building:
+        tmpl = rng.choice(building_templates)
+        name, cat, axiom, rules, angle, iter_r, astyle, rstyle = tmpl
+        wall_colors = ['#a08870', '#c8b898', '#e0d0b8', '#8a7860',
+                       '#706050', '#b0a090', '#d0c0a0', '#908070']
+        roof_colors = ['#6a3020', '#4a2818', '#8a5040', '#504038',
+                       '#384048', '#3a4830', '#605848']
+        sp = PlantSpecies(
+            name=name, category=cat, axiom=axiom, rules=rules,
+            angle=angle,
+            iterations=rng.randint(*iter_r),
+            length_factor=round(rng.uniform(0.6, 0.9), 2),
+            start_length=round(rng.uniform(0.8, 1.5), 2),
+            trunk_taper=1.0,
+            trunk_radius=0.5,
+            arch_style=astyle,
+            roof_style=rstyle,
+            wall_color=rng.choice(wall_colors),
+            wall_color2=rng.choice(wall_colors),
+            roof_color=rng.choice(roof_colors),
+            window_color=rng.choice(['#ffe880', '#e0d0a0', '#80c0ff', '#ffffff']),
+            door_color=rng.choice(['#5a3818', '#4a2810', '#6a4828', '#3a2010']),
+            wall_width=round(rng.uniform(0.6, 1.4), 2),
+            floor_height=round(rng.uniform(0.8, 1.5), 2),
+            has_windows=True,
+            window_density=round(rng.uniform(0.3, 0.8), 2),
+            has_chimney=rng.random() > 0.6 and rstyle in ('gable', 'hip'),
+            has_balcony=rng.random() > 0.7,
+            has_columns=astyle == 'classical' or rng.random() > 0.85,
+        )
+    else:
+        tmpl = rng.choice(plant_templates)
+        name, cat, axiom, rules, angle_r, lf_r, sl_r, tt_r = tmpl
+        trunk_colors = ['#5a4020', '#4a3018', '#6a5838', '#3a2810', '#5a3818',
+                        '#8a7868', '#4a3828', '#6a4828']
+        leaf_colors = ['#2a6818', '#1a4810', '#4a8830', '#3a7020', '#2a7818',
+                       '#308830', '#506838']
+        sp = PlantSpecies(
+            name=name, category=cat, axiom=axiom, rules=rules,
+            iterations=rng.randint(3, 5),
+            angle=round(rng.uniform(*angle_r), 1),
+            length_factor=round(rng.uniform(*lf_r), 2),
+            start_length=round(rng.uniform(*sl_r), 2),
+            trunk_taper=round(rng.uniform(*tt_r), 2),
+            trunk_radius=round(rng.uniform(0.04, 0.10), 3),
+            trunk_color=rng.choice(trunk_colors),
+            leaf_color=rng.choice(leaf_colors),
+            leaf_color2='#%02x%02x%02x' % tuple(rng.randint(40, 160) for _ in range(3)),
+            leaf_size=round(rng.uniform(0.1, 0.5), 2),
+            leaf_density=round(rng.uniform(0.3, 0.9), 2),
+            leaf_shape=rng.choice(['sphere', 'cone', 'star']),
+            droop=round(rng.uniform(0, 0.2), 2) if rng.random() > 0.6 else 0,
+            has_flowers=cat == 'flower' or rng.random() > 0.7,
+            flower_color='#%02x%02x%02x' % (
+                rng.randint(180, 255), rng.randint(60, 180), rng.randint(60, 200)),
+            flower_density=round(rng.uniform(0.1, 0.4), 2),
+        )
+
     sp.save()
     messages.success(request, f'Generated "{sp.name}".')
     return redirect('lsystem:species_detail', slug=sp.slug)
@@ -378,6 +432,63 @@ def seed_defaults(request):
             sp.save()
             created += 1
 
+    # ── Architecture defaults ─────────────────────────────
+    ARCH_DEFAULTS = [
+        # (name, cat, axiom, rules, angle, iters, lf, sl, style, roof,
+        #  wall, wall2, roofC, winC, doorC, ww, fh, chimney, balcony, columns)
+        ('Cottage', 'building', 'F', [{'F': 'F[+F][-F]'}],
+         90, 3, 0.7, 1.0, 'cottage', 'gable',
+         '#c8b898', '#b0a080', '#6a3020', '#ffe880', '#5a3818',
+         1.0, 1.2, True, False, False),
+        ('Tower Keep', 'tower', 'F', [{'F': 'FF[+F][-F]'}],
+         90, 4, 0.8, 1.2, 'tower', 'spire',
+         '#8a7860', '#706050', '#504038', '#ffe880', '#4a2810',
+         0.8, 1.0, False, False, False),
+        ('Modern Office', 'building', 'F', [{'F': 'F[+F]F[-F]'}],
+         90, 3, 0.85, 1.4, 'modern', 'flat',
+         '#b0b8c0', '#a0a8b0', '#606870', '#80c0ff', '#384048',
+         1.2, 1.5, False, True, False),
+        ('Gothic Cathedral', 'building', 'F', [{'F': 'FFF[+F][-F]'}],
+         90, 4, 0.75, 1.5, 'gothic', 'spire',
+         '#908070', '#807060', '#384838', '#ffe880', '#3a2010',
+         0.9, 1.8, False, False, True),
+        ('Classical Villa', 'building', 'F', [{'F': 'F[+F][-F]F[+F][-F]'}],
+         90, 2, 0.65, 1.2, 'classical', 'hip',
+         '#e0d0b8', '#d0c0a0', '#6a3020', '#ffe880', '#5a3818',
+         1.1, 1.3, True, True, True),
+        ('Medieval House', 'building', 'F', [{'F': 'FF[+F][-F][+F]'}],
+         90, 3, 0.7, 1.0, 'medieval', 'gable',
+         '#a08870', '#8a7860', '#504038', '#e0d0a0', '#4a2810',
+         0.9, 1.1, True, False, False),
+        ('Industrial Block', 'building', 'F', [{'F': 'FF[+F][-F]F'}],
+         90, 2, 0.8, 1.3, 'industrial', 'flat',
+         '#706860', '#605850', '#484048', '#c0d0e0', '#384048',
+         1.4, 1.6, True, False, False),
+        ('Castle Wall', 'wall', 'F', [{'F': 'FF[+F]'}],
+         90, 3, 0.85, 1.0, '', 'none',
+         '#807060', '#706050', '#504038', '#ffe880', '#4a2810',
+         1.2, 0.8, False, False, False),
+    ]
+
+    for row in ARCH_DEFAULTS:
+        (name, cat, axiom, rules, angle, iters, lf, sl, style, roof,
+         wall, wall2, roofC, winC, doorC, ww, fh, chimney, balcony, columns) = row
+        if not PlantSpecies.objects.filter(name=name).exists():
+            sp = PlantSpecies(
+                name=name, category=cat, axiom=axiom, rules=rules,
+                angle=angle, iterations=iters, length_factor=lf,
+                start_length=sl, trunk_taper=1.0, trunk_radius=0.5,
+                arch_style=style, roof_style=roof,
+                wall_color=wall, wall_color2=wall2, roof_color=roofC,
+                window_color=winC, door_color=doorC,
+                wall_width=ww, floor_height=fh,
+                has_windows=True, window_density=0.6,
+                has_chimney=chimney, has_balcony=balcony,
+                has_columns=columns,
+            )
+            sp.save()
+            created += 1
+
     messages.success(request, f'Seeded {created} default species.')
     return redirect('lsystem:species_list')
 
@@ -397,6 +508,9 @@ def _save_from_post(request, sp):
     sp.start_length = float(request.POST.get('start_length', 0.8))
     sp.trunk_taper = float(request.POST.get('trunk_taper', 0.7))
     sp.trunk_radius = float(request.POST.get('trunk_radius', 0.06))
+    sp.tags = request.POST.get('tags', '')
+
+    # Plant-specific
     sp.trunk_color = request.POST.get('trunk_color', '#5a4020')
     sp.trunk_is_green = 'trunk_is_green' in request.POST
     sp.bark_stripes = 'bark_stripes' in request.POST
@@ -416,7 +530,22 @@ def _save_from_post(request, sp):
     sp.has_culms = 'has_culms' in request.POST
     sp.has_rosette = 'has_rosette' in request.POST
     sp.is_ground_cover = 'is_ground_cover' in request.POST
-    sp.tags = request.POST.get('tags', '')
+
+    # Architecture-specific
+    sp.wall_color = request.POST.get('wall_color', '#a08870')
+    sp.wall_color2 = request.POST.get('wall_color2', '#8a7860')
+    sp.roof_color = request.POST.get('roof_color', '#6a3020')
+    sp.window_color = request.POST.get('window_color', '#ffe880')
+    sp.door_color = request.POST.get('door_color', '#5a3818')
+    sp.wall_width = float(request.POST.get('wall_width', 1.0))
+    sp.floor_height = float(request.POST.get('floor_height', 1.2))
+    sp.has_windows = 'has_windows' in request.POST
+    sp.window_density = float(request.POST.get('window_density', 0.6))
+    sp.roof_style = request.POST.get('roof_style', 'gable')
+    sp.has_chimney = 'has_chimney' in request.POST
+    sp.has_balcony = 'has_balcony' in request.POST
+    sp.has_columns = 'has_columns' in request.POST
+    sp.arch_style = request.POST.get('arch_style', '')
 
     # Parse rules JSON
     rules_raw = request.POST.get('rules', '')

@@ -77,6 +77,30 @@ Each tier strips away what can't survive, preserving only the essential logic.
             <a href="{% url 'condenser:live' 'mail' %}" class="btn btn-secondary" target="_blank">Mail</a>
         </div>
     </div>
+    <div class="avail-card" style="border-left:3px solid #f85149">
+        <h3>Decision Tree → ATTiny13a + picoUART</h3>
+        <p>Design a sub-1KB binary decision tree in C. The ATTiny reads an analog sensor,
+        walks the tree, and sends the decision byte via picoUART TX to a connected ESP.
+        Entire firmware fits in ~250-300 bytes.</p>
+        <div style="display:flex;gap:0.3rem;align-items:center">
+            <span class="tier-badge tier-attiny">ATTiny13a</span>
+            <span style="color:#6e7681">→ picoUART TX →</span>
+            <span class="tier-badge tier-esp">ESP RX</span>
+        </div>
+        <a href="{% url 'condenser:decision_tree' %}" class="btn" style="margin-top:0.4rem;display:inline-block">Design tree</a>
+    </div>
+    <div class="avail-card" style="border-left:3px solid #bc8cff">
+        <h3>Decision Tree → 555 Timer ICs</h3>
+        <p>The final tier: binary decision trees in pure analog hardware.
+        Each 555 comparator is one branch node — no code, no clock, no firmware to corrupt.
+        Wiring diagrams, sensor front-ends, bills of materials, and scaling limits.</p>
+        <div style="display:flex;gap:0.3rem;align-items:center">
+            <span class="tier-badge tier-attiny">ATTiny13a</span>
+            <span style="color:#6e7681">→ distill →</span>
+            <span class="tier-badge tier-circuit">555 timers</span>
+        </div>
+        <a href="{% url 'condenser:decision_tree_555' %}" class="btn btn-secondary" style="margin-top:0.4rem;display:inline-block">Reference guide</a>
+    </div>
     <div class="avail-card" style="border-left:3px solid #bc8cff">
         <h3>Full chain: Tiles → JS → ESP → ATTiny → 555</h3>
         <p>Run the entire distillation pipeline in one click. Produces all 4 tiers,

@@ -6,6 +6,7 @@
 <style>
     .db-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
     .db-card { padding: 1rem 1.25rem; border-left: 4px solid #58a6ff; }
+    .db-card.sqlite     { border-left-color: #3fb950; }
     .db-card.mysql      { border-left-color: #f29111; }
     .db-card.postgresql { border-left-color: #336791; }
     .db-card.failed     { border-left-color: #f85149; }
@@ -15,6 +16,7 @@
     .db-card .badges    { display: flex; gap: 0.4rem; margin: 0.45rem 0 0.55rem; flex-wrap: wrap; }
     .badge              { font-size: 0.7rem; padding: 0.15rem 0.55rem; border-radius: 10px; background: #21262d; color: #c9d1d9; }
     .badge.engine       { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+    .badge.engine.sqlite     { background: rgba(63, 185, 80, 0.18); color: #3fb950; }
     .badge.engine.mysql      { background: rgba(242, 145, 17, 0.18); color: #f29111; }
     .badge.engine.postgresql { background: rgba(51, 103, 145, 0.25); color: #6aa8d8; }
     .badge.status.ok      { background: rgba(46, 160, 67, 0.18); color: #2ea043; }
@@ -26,7 +28,7 @@
 
 {% block content %}
 <h1>Databases</h1>
-<p style="color:#8b949e;">MySQL and PostgreSQL connections velour knows about. Each record stores credentials and remembers the last connection-test result. Phase 2 will add table browsing, row editing, and a raw SQL shell — for now this is the registry + test layer.</p>
+<p style="color:#8b949e;">SQLite, MySQL, and PostgreSQL databases. SQLite databases are first-class local files you can browse, query, create, download, and pipe through Datalift.</p>
 
 <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
     <a href="{% url 'databases:add' %}" class="btn">Add Database</a>
@@ -41,21 +43,33 @@
 
         <div class="badges">
             <span class="badge engine {{ d.engine }}">{{ d.get_engine_display }}</span>
+            {% if d.is_sqlite %}
+                {% if d.file_exists %}
+                <span class="badge status ok">&#x25CF; {{ d.file_size_display }}</span>
+                {% else %}
+                <span class="badge status failed">&#x25CF; File missing</span>
+                {% endif %}
+            {% else %}
             <span class="badge status {{ d.last_test_status }}">
                 {% if d.last_test_status == 'ok' %}&#x25CF; OK
                 {% elif d.last_test_status == 'failed' %}&#x25CF; Failed
                 {% else %}&#x25CB; Untested{% endif %}
             </span>
+            {% endif %}
         </div>
 
         <div class="meta">
-            {{ d.host }}:{{ d.effective_port }}{% if d.database_name %}/{{ d.database_name }}{% endif %}<br>
-            {% if d.username %}user: {{ d.username }}<br>{% endif %}
-            {% if d.last_tested_at %}last test: {{ d.last_tested_at|date:"D d M Y H:i" }}{% endif %}
+            {% if d.is_sqlite %}
+                {{ d.file_path|truncatechars:60 }}
+            {% else %}
+                {{ d.host }}:{{ d.effective_port }}{% if d.database_name %}/{{ d.database_name }}{% endif %}<br>
+                {% if d.username %}user: {{ d.username }}<br>{% endif %}
+                {% if d.last_tested_at %}last test: {{ d.last_tested_at|date:"D d M Y H:i" }}{% endif %}
+            {% endif %}
         </div>
 
         <div class="db-actions">
-            <a href="{% url 'databases:detail' d.slug %}" class="btn" style="font-size:0.8rem;">Details</a>
+            <a href="{% url 'databases:detail' d.slug %}" class="btn" style="font-size:0.8rem;">{% if d.is_sqlite %}Browse{% else %}Details{% endif %}</a>
             <a href="{% url 'databases:edit' d.slug %}" class="btn btn-secondary" style="font-size:0.8rem;">Edit</a>
         </div>
     </div>

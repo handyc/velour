@@ -1,15 +1,21 @@
 {% extends "base.html" %}
-{% block title %}L-System — Plant Species{% endblock %}
+{% block title %}L-System — Species Library{% endblock %}
 
 {% block content %}
 <h2 style="margin-bottom:0.3rem;">L-System</h2>
-<p style="color:#8b949e;margin-top:0;">Procedural plant generation</p>
+<p style="color:#8b949e;margin-top:0;">Procedural plants and architecture</p>
 
 <div style="margin-bottom:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
     <a href="{% url 'lsystem:species_add' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">+ New Species</a>
     <form method="post" action="{% url 'lsystem:species_randomize' %}" style="display:inline;">
         {% csrf_token %}
-        <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Random Species</button>
+        <input type="hidden" name="mode" value="plant">
+        <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Random Plant</button>
+    </form>
+    <form method="post" action="{% url 'lsystem:species_randomize' %}" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="mode" value="building">
+        <button type="submit" style="background:#9e6a03;color:#fff;border:1px solid #d29922;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Random Building</button>
     </form>
     <form method="post" action="{% url 'lsystem:seed_defaults' %}" style="display:inline;">
         {% csrf_token %}
@@ -32,11 +38,17 @@
     {% for sp in species %}
     <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.45rem 0.8rem;display:flex;align-items:center;gap:0.8rem;">
         <a href="{% url 'lsystem:species_detail' sp.slug %}" style="color:#c9d1d9;text-decoration:none;font-weight:500;font-size:0.88rem;white-space:nowrap;">{{ sp.name }}</a>
-        <span style="color:#6e7681;font-size:0.72rem;border:1px solid #30363d;padding:0.1rem 0.4rem;border-radius:3px;">{{ sp.get_category_display }}</span>
+        <span style="color:{% if sp.is_architecture %}#d29922{% else %}#6e7681{% endif %};font-size:0.72rem;border:1px solid #30363d;padding:0.1rem 0.4rem;border-radius:3px;">{{ sp.get_category_display }}</span>
         <span style="color:#8b949e;font-size:0.78rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ sp.axiom }} &rarr; {{ sp.iterations }}x</span>
+        {% if sp.is_architecture %}
+        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ sp.wall_color }};border:1px solid #30363d;flex-shrink:0;" title="Wall"></span>
+        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ sp.roof_color }};border:1px solid #30363d;flex-shrink:0;" title="Roof"></span>
+        <span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:{{ sp.window_color }};border:1px solid #30363d;flex-shrink:0;" title="Window"></span>
+        {% else %}
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ sp.trunk_color }};border:1px solid #30363d;flex-shrink:0;" title="Trunk"></span>
         <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ sp.leaf_color }};border:1px solid #30363d;flex-shrink:0;" title="Leaf"></span>
         {% if sp.has_flowers %}<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{{ sp.flower_color }};border:1px solid #30363d;flex-shrink:0;" title="Flower"></span>{% endif %}
+        {% endif %}
         {% if sp.featured %}<span style="color:#f0c040;font-size:0.68rem;white-space:nowrap;">FEATURED</span>{% endif %}
     </div>
     {% endfor %}

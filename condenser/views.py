@@ -336,6 +336,103 @@ def distill_aether_stereokit(request, slug):
         return redirect('condenser:home')
 
 
+@login_required
+def decision_tree_555(request):
+    """Information page: decision trees built from 555 timer ICs."""
+    return render(request, 'condenser/decision_tree_555.html', {})
+
+
+@login_required
+def decision_tree_form(request):
+    """Form for defining a decision tree for ATTiny13a + picoUART."""
+    if request.method == 'POST':
+        return _distill_decision_tree(request)
+    return render(request, 'condenser/decision_tree.html', {})
+
+
+@login_required
+@require_POST
+def _distill_decision_tree(request):
+    """Generate ATTiny13a decision tree C code from form data."""
+    from .distill_decision_tree import distill
+
+    # Parse rules from form
+    channels = request.POST.getlist('channel')
+    thresholds = request.POST.getlist('threshold')
+    labels = request.POST.getlist('label')
+    values = request.POST.getlist('value')
+
+    rules = []
+    for ch, thr, label, val in zip(channels, thresholds, labels, values):
+        thr = thr.strip()
+        val = val.strip()
+        if not thr or not val:
+            continue
+        try:
+            v = int(val)
+        except ValueError:
+            v = ord(val[0]) if val else 0
+        rules.append({
+            'channel': int(ch),
+            'threshold': int(thr),
+            'label': label.strip(),
+            'value': v,
+        })
+
+    if not rules:
+        messages.error(request, 'No valid rules provided.')
+        return redirect('condenser:decision_tree')
+
+    name = request.POST.get('name', 'sensor_decision').strip() or 'sensor_decision'
+    baud = int(request.POST.get('baud', 9600))
+    loop_delay = int(request.POST.get('loop_delay', 500))
+    median_filter = 'median_filter' in request.POST
+    framed = 'framed' in request.POST
+    goedel = 'goedel' in request.POST
+    led = 'led' in request.POST
+    bytebeat = 'bytebeat' in request.POST
+
+    d = Distillation(
+        name=f'Decision Tree → ATTiny13a: {name}',
+        source_app='condenser',
+        source_tier='django',
+        target_tier='attiny',
+        status='running',
+    )
+    d.save()
+
+    try:
+        output = distill(
+            rules=rules,
+            baud=baud,
+            loop_delay_ms=loop_delay,
+            name=name,
+            median_filter=median_filter,
+            framed=framed,
+            goedel=goedel,
+            led=led,
+            bytebeat=bytebeat,
+        )
+        d.output = output
+        d.output_size_bytes = len(output.encode('utf-8'))
+        d.status = 'completed'
+        d.completed_at = timezone.now()
+        d.annotations = _extract_annotations(output)
+        d.save()
+        _record_insight(d)
+        messages.success(
+            request,
+            f'Decision tree "{name}": {d.output_size_bytes} bytes C code, '
+            f'{len(rules)} rules, fits ATTiny13a 1KB flash.')
+    except Exception as e:
+        d.status = 'error'
+        d.error_detail = str(e)
+        d.save()
+        messages.error(request, f'Decision tree generation failed: {e}')
+
+    return redirect('condenser:detail', slug=d.slug)
+
+
 def _extract_annotations(html):
     """Pull CONDENSER comments from the output."""
     lines = []

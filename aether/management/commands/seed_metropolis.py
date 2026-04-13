@@ -418,6 +418,9 @@ const preset = species === '_custom' ? {
     culms: P.culms || false,
     rosette: P.rosette || false,
     isGroundCover: P.isGroundCover || false,
+    trunk: P.trunk || '#5a4020',
+    leaf: P.leaf || '#2a6818',
+    leaf2: P.leaf2 || '#3a7828',
 } : (presets[species] || presets.oak);
 
 // Stochastic rule selection: if multiple rule sets, pick per-iteration
@@ -432,6 +435,178 @@ function rewrite(str) {
 
 let str = preset.axiom;
 for (let i = 0; i < iterations; i++) str = rewrite(str);
+
+// ── Architecture mode ──────────────────────────────────────
+if (P.isArchitecture) {
+    const root = new THREE.Group();
+    ctx.entity.add(root);
+
+    const wallM = new THREE.MeshStandardMaterial({color: P.wallColor || '#a08870', roughness: 0.85});
+    const wall2M = new THREE.MeshStandardMaterial({color: P.wallColor2 || '#8a7860', roughness: 0.85});
+    const roofM = new THREE.MeshStandardMaterial({color: P.roofColor || '#6a3020', roughness: 0.7});
+    const winM = new THREE.MeshStandardMaterial({
+        color: P.windowColor || '#ffe880',
+        emissive: new THREE.Color(P.windowColor || '#ffe880'),
+        emissiveIntensity: 0.3, roughness: 0.2
+    });
+    const doorM = new THREE.MeshStandardMaterial({color: P.doorColor || '#5a3818', roughness: 0.9});
+
+    const ww = (P.wallWidth || 1.0) * scale;
+    const fh = (P.floorHeight || 1.2) * scale;
+    const winDensity = P.windowDensity || 0.6;
+    const roofStyle = P.roofStyle || 'gable';
+    const aAngle = preset.angle * Math.PI / 180;
+    const aLF = preset.lengthFactor;
+
+    const aStack = [];
+    let aPos = new THREE.Vector3(0, 0, 0);
+    let aDir = new THREE.Vector3(0, 1, 0);
+    let aFwd = new THREE.Vector3(0, 0, 1);
+    let aLen = preset.startLength * scale;
+    let aDepth = 0;
+    let aSegs = 0;
+    const aMax = 800;
+    const tips = [];
+
+    for (const ch of str) {
+        if (aSegs >= aMax) break;
+        if (ch === 'F') {
+            const h = fh * aLen / (preset.startLength * scale) || fh;
+            const w = ww * Math.pow(aLF, aDepth * 0.3);
+            const d = w * (0.6 + rnd() * 0.4);
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = rnd() > 0.5 ? wallM : wall2M;
+            const mesh = new THREE.Mesh(geo, mat);
+            const center = aPos.clone().add(aDir.clone().multiplyScalar(h / 2));
+            mesh.position.copy(center);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            root.add(mesh); aSegs++;
+
+            // Windows
+            if (P.hasWindows && aDepth < 4 && h > 0.4) {
+                const nWin = Math.floor(w / 0.35);
+                for (let wi = 0; wi < nWin; wi++) {
+                    if (rnd() > winDensity) continue;
+                    const wW = 0.15 * scale, wH = 0.22 * scale;
+                    const wGeo = new THREE.PlaneGeometry(wW, wH);
+                    const xOff = (wi - nWin / 2 + 0.5) * (w / nWin);
+                    const yOff = h * (0.3 + rnd() * 0.35);
+                    for (let face = 0; face < 2; face++) {
+                        const wMesh = new THREE.Mesh(wGeo, winM);
+                        wMesh.position.copy(aPos.clone());
+                        wMesh.position.x += xOff;
+                        wMesh.position.y += yOff;
+                        wMesh.position.z += face === 0 ? d/2+0.01 : -(d/2+0.01);
+                        if (face === 1) wMesh.rotation.y = Math.PI;
+                        root.add(wMesh); aSegs++;
+                    }
+                }
+            }
+
+            // Door at ground level
+            if (aDepth === 0 && aPos.y < 0.1 && rnd() > 0.5) {
+                const dW = 0.3*scale, dH = 0.5*scale;
+                const dGeo = new THREE.PlaneGeometry(dW, dH);
+                const dMesh = new THREE.Mesh(dGeo, doorM);
+                dMesh.position.copy(aPos.clone());
+                dMesh.position.y += dH/2;
+                dMesh.position.z += d/2 + 0.01;
+                root.add(dMesh); aSegs++;
+            }
+
+            const end = aPos.clone().add(aDir.clone().multiplyScalar(h));
+            aPos.copy(end);
+            tips.push({pos: aPos.clone(), w: w, d: d, depth: aDepth});
+        } else if (ch === '+') {
+            aDir.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(0,1,0), aAngle + (rnd()-0.5)*0.1));
+        } else if (ch === '-') {
+            aDir.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(
+                new THREE.Vector3(0,1,0), -aAngle + (rnd()-0.5)*0.1));
+        } else if (ch === '[') {
+            aStack.push({pos:aPos.clone(), dir:aDir.clone(), fwd:aFwd.clone(), len:aLen, depth:aDepth});
+            aLen *= aLF; aDepth++;
+        } else if (ch === ']') {
+            if (aStack.length > 0) {
+                const s = aStack.pop();
+                aPos.copy(s.pos); aDir.copy(s.dir); aFwd.copy(s.fwd);
+                aLen = s.len; aDepth = s.depth;
+            }
+        }
+    }
+
+    // Roofs at branch tips
+    if (roofStyle !== 'none' && tips.length > 0) {
+        const roofTips = tips.filter(t =>
+            !tips.some(t2 => t2.pos.y > t.pos.y + 0.1 &&
+                Math.abs(t2.pos.x - t.pos.x) < t.w &&
+                Math.abs(t2.pos.z - t.pos.z) < t.d));
+        for (const tip of roofTips) {
+            if (aSegs >= aMax) break;
+            const rw = tip.w * 1.15, rd = tip.d * 1.15;
+            if (roofStyle === 'gable') {
+                const shape = new THREE.Shape();
+                shape.moveTo(-rw/2, 0); shape.lineTo(0, rw*0.4); shape.lineTo(rw/2, 0);
+                shape.closePath();
+                const geo = new THREE.ExtrudeGeometry(shape, {depth:rd, bevelEnabled:false});
+                const mesh = new THREE.Mesh(geo, roofM);
+                mesh.position.copy(tip.pos); mesh.position.z -= rd/2;
+                mesh.castShadow = true; root.add(mesh);
+            } else if (roofStyle === 'hip') {
+                const geo = new THREE.ConeGeometry(Math.max(rw,rd)*0.6, rw*0.4, 4);
+                const mesh = new THREE.Mesh(geo, roofM);
+                mesh.position.copy(tip.pos); mesh.position.y += rw*0.2;
+                mesh.rotation.y = Math.PI/4; mesh.castShadow = true; root.add(mesh);
+            } else if (roofStyle === 'dome') {
+                const r = Math.max(rw,rd)*0.45;
+                const geo = new THREE.SphereGeometry(r, 12, 8, 0, Math.PI*2, 0, Math.PI/2);
+                const mesh = new THREE.Mesh(geo, roofM);
+                mesh.position.copy(tip.pos); mesh.castShadow = true; root.add(mesh);
+            } else if (roofStyle === 'spire') {
+                const r = Math.max(rw,rd)*0.3;
+                const geo = new THREE.ConeGeometry(r, rw*0.9, 6);
+                const mesh = new THREE.Mesh(geo, roofM);
+                mesh.position.copy(tip.pos); mesh.position.y += rw*0.45;
+                mesh.castShadow = true; root.add(mesh);
+            } else if (roofStyle === 'flat') {
+                const geo = new THREE.BoxGeometry(rw, 0.08*scale, rd);
+                const mesh = new THREE.Mesh(geo, roofM);
+                mesh.position.copy(tip.pos); mesh.position.y += 0.04*scale;
+                root.add(mesh);
+            }
+            aSegs++;
+        }
+    }
+
+    // Chimney
+    if (P.hasChimney && tips.length > 0) {
+        const highest = tips.reduce((a, b) => a.pos.y > b.pos.y ? a : b);
+        const cGeo = new THREE.BoxGeometry(0.15*scale, 0.5*scale, 0.15*scale);
+        const cMat = new THREE.MeshStandardMaterial({color: '#604040', roughness: 0.9});
+        const cMesh = new THREE.Mesh(cGeo, cMat);
+        cMesh.position.copy(highest.pos);
+        cMesh.position.x += highest.w * 0.3;
+        cMesh.position.y += 0.35 * scale;
+        cMesh.castShadow = true; root.add(cMesh);
+    }
+
+    // Columns
+    if (P.hasColumns) {
+        const colM2 = new THREE.MeshStandardMaterial({color: '#d0c8b8', roughness: 0.6});
+        for (let ci = 0; ci < 4; ci++) {
+            const cGeo = new THREE.CylinderGeometry(0.06*scale, 0.08*scale, fh*1.2, 8);
+            const cMesh = new THREE.Mesh(cGeo, colM2);
+            const xOff = ((ci%2) - 0.5) * ww * 0.8;
+            const zOff = ww * 0.5 + 0.15 * scale;
+            cMesh.position.set(xOff, fh*0.6, ci < 2 ? zOff : -zOff);
+            cMesh.castShadow = true; root.add(cMesh);
+        }
+    }
+
+    S.built = true;
+    S.plant = root;
+} else {
+// ── Plant mode (original) ──────────────────────────────────
 
 // Colors (allow prop overrides)
 const trunkColor = new THREE.Color(P.trunk || preset.trunk);
@@ -800,6 +975,7 @@ if (!preset.isGroundCover && scale > 0.8 && rnd() > 0.4) {
 
 S.built = true;
 S.plant = root;
+} // end plant mode else
 """
 
 

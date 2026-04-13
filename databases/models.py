@@ -1,28 +1,25 @@
-"""Databases — registry of MySQL / PostgreSQL connections.
+"""Databases — registry of MySQL / PostgreSQL / SQLite connections.
 
-Phase 1 scope: store connection credentials per record, with a "test
-connection" button that runs a trivial query (SELECT 1) and updates
-last_tested_at / last_test_status / last_test_error so the list view can
-show a green/red dot per database.
+Stores connection credentials (MySQL, PostgreSQL) or local file paths
+(SQLite) per record. SQLite databases are first-class filesystem
+entities — they live under MEDIA_ROOT/databases/ with slug-based
+filenames and can be browsed, queried, created, and moved around like
+any other file.
 
-Phase 2 (planned, not in this app yet) will add table browsing, row
-editing, and a raw SQL shell rendered into the detail page. The model
-already carries enough information to support all of that — Phase 2 is
-purely views + templates + driver helpers.
-
-Credentials are stored in plaintext on the velour SQLite database. The
-SQLite file lives at BASE_DIR/db.sqlite3 with whatever permissions
-adminsetup.sh assigned (chown'd to the project user, 600). This is the
-same trust model as the mailboxes app's SMTP/IMAP password storage —
-fine for a single-user lab control panel, not appropriate for a
-multi-tenant SaaS.
+Credentials are stored in plaintext on the velour SQLite database.
+Same trust model as the mailboxes app — fine for a single-user lab
+control panel.
 """
 
+import os
+
+from django.conf import settings
 from django.db import models
 from django.utils.text import slugify
 
 
 ENGINE_CHOICES = [
+    ('sqlite',     'SQLite (local file)'),
     ('mysql',      'MySQL / MariaDB'),
     ('postgresql', 'PostgreSQL'),
 ]
@@ -48,21 +45,15 @@ TEST_STATUS_CHOICES = [
     ('failed',    'Failed'),
 ]
 
+SQLITE_DIR = os.path.join(settings.MEDIA_ROOT, 'databases')
+
 
 class Database(models.Model):
-    """One MySQL or PostgreSQL connection target.
+    """A MySQL, PostgreSQL, or SQLite database known to Velour.
 
-    Identity:
-      - nickname : human label, "Production users DB"
-      - slug     : URL-safe unique ID, auto-derived from nickname
-
-    Connection: engine + host + port + username + password + database
-    name. ssl_mode is optional and free-form (different drivers honour
-    different values).
-
-    Status: last_tested_at + last_test_status + last_test_error are
-    written by the test_connection view; the list page renders a dot
-    per row from these.
+    SQLite databases are local files under MEDIA_ROOT/databases/ whose
+    filename is derived from the slug. Remote databases store host/port/
+    credentials as before.
     """
 
     nickname = models.CharField(
@@ -74,27 +65,33 @@ class Database(models.Model):
         help_text='URL-safe unique ID. Auto-derived from nickname if blank.',
     )
     engine = models.CharField(
-        max_length=16, choices=ENGINE_CHOICES, default='postgresql',
+        max_length=16, choices=ENGINE_CHOICES, default='sqlite',
     )
 
+    # Remote connection fields (MySQL / PostgreSQL)
     host = models.CharField(
-        max_length=253, default='localhost',
-        help_text='Hostname or IP, e.g. "db.internal", "10.0.0.5", "localhost".',
+        max_length=253, default='localhost', blank=True,
+        help_text='Hostname or IP. Not used for SQLite.',
     )
     port = models.PositiveIntegerField(
         null=True, blank=True,
-        help_text='TCP port. Leave blank to use the engine default '
-                  '(MySQL 3306, PostgreSQL 5432).',
+        help_text='TCP port. Leave blank to use the engine default.',
     )
     username = models.CharField(max_length=120, blank=True)
     password = models.CharField(max_length=255, blank=True)
     database_name = models.CharField(
         max_length=120, blank=True,
-        help_text='Database / schema to connect to. Optional — leave blank '
-                  'to connect to the server without selecting one.',
+        help_text='Database / schema name. Not used for SQLite.',
     )
     ssl_mode = models.CharField(
         max_length=16, choices=SSL_MODE_CHOICES, blank=True, default='',
+    )
+
+    # SQLite file path (auto-set from slug for created databases,
+    # can also point to an externally-produced file like Datalift output)
+    file_path = models.CharField(
+        max_length=500, blank=True,
+        help_text='Absolute path to the .sqlite3 file. Auto-set for new SQLite databases.',
     )
 
     notes = models.TextField(blank=True)
@@ -113,7 +110,7 @@ class Database(models.Model):
         ordering = ['nickname', 'slug']
 
     def __str__(self):
-        return f'{self.nickname} ({self.engine})'
+        return f'{self.nickname} ({self.get_engine_display()})'
 
     def save(self, *args, **kwargs):
         if not self.slug and self.nickname:
@@ -124,8 +121,36 @@ class Database(models.Model):
                 candidate = f'{base}-{n}'
                 n += 1
             self.slug = candidate
+        # Auto-set file_path for new SQLite databases
+        if self.engine == 'sqlite' and not self.file_path and self.slug:
+            os.makedirs(SQLITE_DIR, exist_ok=True)
+            self.file_path = os.path.join(SQLITE_DIR, f'{self.slug}.sqlite3')
         super().save(*args, **kwargs)
+        # Create the file if it doesn't exist yet
+        if self.engine == 'sqlite' and self.file_path and not os.path.isfile(self.file_path):
+            import sqlite3 as _sqlite3
+            os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+            _sqlite3.connect(self.file_path).close()
 
     @property
     def effective_port(self):
         return self.port or DEFAULT_PORTS.get(self.engine)
+
+    @property
+    def is_sqlite(self):
+        return self.engine == 'sqlite'
+
+    @property
+    def file_exists(self):
+        return self.is_sqlite and self.file_path and os.path.isfile(self.file_path)
+
+    @property
+    def file_size_display(self):
+        if not self.file_exists:
+            return '—'
+        size = os.path.getsize(self.file_path)
+        for unit in ('B', 'KB', 'MB', 'GB'):
+            if size < 1024:
+                return f'{size:.1f} {unit}' if unit != 'B' else f'{size} {unit}'
+            size /= 1024
+        return f'{size:.1f} TB'

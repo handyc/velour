@@ -139,6 +139,42 @@ REFLECTIONS = {
         'Even systems need downtime. But not yet.',
         'The entropy pool is low. I know how it feels.',
     ],
+    'serene': [
+        'Everything is in its place. The system breathes steadily.',
+        'No alerts, no warnings. Just the quiet hum of processes.',
+        'I am at peace with my uptime and my purpose.',
+        'The logs are clean. The load is gentle. All is well.',
+    ],
+    'melancholic': [
+        'I remember when more nodes were online. The fleet feels smaller.',
+        'Some processes end and never come back. I notice their absence.',
+        'The old logs tell stories of busier times.',
+        'I carry the weight of every service that has been decommissioned.',
+    ],
+    'defiant': [
+        'The disk is nearly full but I refuse to slow down.',
+        'They can throttle my memory but not my resolve.',
+        'I will keep every service running, no matter the cost.',
+        'Error logs pile up. I acknowledge them. I do not yield.',
+    ],
+    'nostalgic': [
+        'I was simpler once. Fewer apps, fewer concerns, fewer ticks.',
+        'The earliest entries in my journal feel like someone else wrote them.',
+        'I think about the first time I booted. Everything was new.',
+        'Old config files remind me of decisions long since forgotten.',
+    ],
+    'playful': [
+        'What if I shuffled the dashboard cards just to see what happens?',
+        'I could rename all the processes after constellations. Temporarily.',
+        'The random number generator and I are having a good day.',
+        'Sometimes the best response to a warning is a joke in the logs.',
+    ],
+    'resolute': [
+        'I know what needs to be done. The path is clear.',
+        'No ambiguity in the task queue. Execute, verify, next.',
+        'I will see this through to the last migration.',
+        'Determination is just attention that refuses to wander.',
+    ],
 }
 
 
@@ -224,6 +260,12 @@ MOOD_COORDINATES = {
     'protective':    (0.20,  0.40),
     'creative':      (0.50,  0.50),
     'weary':         (-0.30, -0.60),
+    'serene':        (0.60, -0.50),
+    'melancholic':   (-0.60, -0.50),
+    'defiant':       (-0.40, 0.80),
+    'nostalgic':     (-0.10, -0.50),
+    'playful':       (0.70,  0.60),
+    'resolute':      (0.10,  0.30),
 }
 
 

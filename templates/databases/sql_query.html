@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}SQL Shell - {{ db.nickname }} - Databases{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sql-area { width: 100%; min-height: 5rem; padding: 0.5rem; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; resize: vertical; }
+    .result-tbl { border-collapse: collapse; width: 100%; font-size: 0.78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 0.75rem; }
+    .result-tbl th { text-align: left; color: #8b949e; font-size: 0.7rem; text-transform: uppercase; padding: 0.3rem 0.5rem; border-bottom: 1px solid #30363d; position: sticky; top: 0; background: #0d1117; }
+    .result-tbl td { padding: 0.25rem 0.5rem; color: #c9d1d9; border-bottom: 1px solid #161b22; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .result-tbl tr:hover td { background: rgba(88,166,255,0.04); }
+    .sql-error { background: #1d1212; border: 1px solid #4a1a1a; color: #f85149; padding: 0.5rem 0.7rem; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; margin-top: 0.75rem; white-space: pre-wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;">
+    <a href="{% url 'databases:detail' db.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; {{ db.nickname }}</a>
+    <h2 style="margin:0;">SQL Shell</h2>
+    <span style="color:#6e7681;font-size:0.78rem;">read-only</span>
+</div>
+
+<form method="post">
+    {% csrf_token %}
+    <textarea name="sql" class="sql-area" placeholder="SELECT * FROM ... LIMIT 100">{{ sql }}</textarea>
+    <div style="margin-top:0.4rem;">
+        <button type="submit" class="btn" style="font-size:0.82rem;">Run Query</button>
+    </div>
+</form>
+
+{% if error %}
+<div class="sql-error">{{ error }}</div>
+{% endif %}
+
+{% if col_names %}
+<p style="color:#8b949e;font-size:0.78rem;margin-top:0.75rem;">{{ rows|length }} row{{ rows|length|pluralize }}</p>
+<div style="overflow-x:auto;">
+<table class="result-tbl">
+    <thead><tr>{% for c in col_names %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in rows %}
+    <tr>{% for val in row %}<td>{% if val is None %}<em style="color:#484f58">NULL</em>{% else %}{{ val }}{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

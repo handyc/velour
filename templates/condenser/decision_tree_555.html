@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+{% block title %}Decision Tree → 555 Timer ICs — Condenser{% endblock %}
+
+{% block extra_head %}
+<style>
+    .info-555 { max-width: 820px; }
+    .info-555 h2 { font-size:0.95rem; margin:1.2rem 0 0.3rem; color:#c9d1d9; border-bottom:1px solid #21262d; padding-bottom:0.2rem; }
+    .info-555 h3 { font-size:0.85rem; margin:0.8rem 0 0.2rem; color:#bc8cff; }
+    .info-555 p, .info-555 li { font-size:0.78rem; color:#8b949e; line-height:1.6; }
+    .info-555 ul { padding-left:1.2rem; margin:0.3rem 0; }
+    .info-555 code { color:#58a6ff; font-family:ui-monospace,Menlo,monospace; font-size:0.75rem; }
+    .diagram-box { background:#0d1117; border:1px solid #30363d; border-radius:4px;
+        padding:0.6rem 0.8rem; margin:0.5rem 0; overflow-x:auto; }
+    .diagram-box pre { font-family:ui-monospace,Menlo,monospace; font-size:0.62rem; color:#8b949e;
+        line-height:1.35; margin:0; white-space:pre; }
+    .diagram-box .label { color:#bc8cff; }
+    .diagram-box .pin { color:#58a6ff; }
+    .diagram-box .note { color:#d29922; }
+    .diagram-box .val { color:#2ea043; }
+    .pinout-box { background:#161b22; border:1px solid #30363d; border-radius:4px;
+        padding:0.5rem 0.7rem; margin:0.5rem 0; font-size:0.72rem; color:#8b949e; }
+    .pinout-box code { color:#58a6ff; }
+    .concept-box { background:#161b22; border:1px solid #d2a8ff33; border-left:3px solid #bc8cff;
+        border-radius:4px; padding:0.5rem 0.7rem; margin:0.6rem 0; font-size:0.75rem; color:#c9d1d9; line-height:1.6; }
+    .parts-table { font-size:0.72rem; border-collapse:collapse; margin:0.5rem 0; width:100%; }
+    .parts-table th { text-align:left; color:#c9d1d9; border-bottom:1px solid #30363d; padding:0.25rem 0.5rem; font-weight:500; }
+    .parts-table td { color:#8b949e; border-bottom:1px solid #21262d; padding:0.25rem 0.5rem; }
+    .parts-table td code { color:#58a6ff; }
+    .tier-badge { display:inline-block; font-size:0.65rem; padding:0.1rem 0.4rem;
+        border-radius:8px; font-family:ui-monospace,Menlo,monospace; }
+    .tier-circuit { background:rgba(188,140,255,0.15); color:#bc8cff; }
+    .tier-attiny  { background:rgba(248,81,73,0.15); color:#f85149; }
+    .bom-note { font-size:0.68rem; color:#6e7681; font-style:italic; margin-top:0.3rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="info-555">
+
+<h1 style="font-size:1.1rem">Decision Tree → 555 Timer ICs</h1>
+<p style="color:#8b949e;font-size:0.78rem;margin-bottom:0.3rem">
+    The final tier of the Condenser pipeline: binary decision trees implemented
+    entirely in analog hardware. No code, no microcontroller — just comparators,
+    resistors, and capacitors.
+</p>
+
+<div style="display:flex;gap:0.3rem;align-items:center;margin:0.5rem 0">
+    <span class="tier-badge tier-attiny">ATTiny13a</span>
+    <span style="color:#6e7681">→ distill →</span>
+    <span class="tier-badge tier-circuit">555 timers</span>
+    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem">Same decision logic, zero lines of code</span>
+</div>
+
+<div class="concept-box">
+    <strong>Core insight:</strong> A 555 timer in comparator mode is a single branch node
+    in a decision tree. It answers one question: <em>is this voltage above or below
+    a threshold?</em> Chain N&minus;1 of them together and you classify an analog signal
+    into N discrete states — exactly like the ATTiny's binary decision tree, but with
+    no instruction set, no clock, no program memory. The logic is the circuit.
+</div>
+
+<h2>The 555 as a comparator</h2>
+
+<p>
+    The 555 has two internal comparators fixed at 1/3 VCC and 2/3 VCC.
+    But <strong>pin 5 (CONTROL)</strong> lets you override the upper threshold
+    with any voltage — set it with a resistor divider and each 555 becomes
+    a voltage comparator with an arbitrary trip point.
+</p>
+
+<div class="pinout-box">
+<pre style="font-family:ui-monospace,Menlo,monospace;font-size:0.68rem;line-height:1.4;margin:0;color:#8b949e">
+        ┌────────────┐
+ GND ───┤1   555    8├─── VCC (5V)
+TRIG ───┤2          7├─── DISCH (unused)
+ OUT ───┤3          6├─── THRESH ─── tied to TRIG
+ RST ───┤4          5├─── CTRL ←── voltage divider sets threshold
+        └────────────┘
+
+<span style="color:#bc8cff">Comparator mode wiring:</span>
+  • Tie pins 2 (TRIGGER) and 6 (THRESHOLD) together → analog input
+  • Pin 5 (CONTROL) → set threshold via R1/R2 divider from VCC
+  • Pin 4 (RESET) → VCC (or driven by upstream 555 for gating)
+  • Pin 3 (OUTPUT) → HIGH when input &lt; threshold, LOW when above
+  • Pin 7 (DISCHARGE) → leave floating (unused in comparator mode)
+</pre>
+</div>
+
+<p>
+    When the input on pins 2+6 is below the CONTROL voltage, the output goes HIGH.
+    When above, it goes LOW. That's one if/else branch — one node of the tree.
+</p>
+
+<h2>4-leaf decision tree (3 × 555)</h2>
+
+<p>
+    The simplest useful tree: one root comparator splits the input into two halves,
+    then a second level of two comparators subdivides each half. Four output states
+    from a single analog sensor.
+</p>
+
+<div class="diagram-box">
+<pre>
+<span class="note">── 4-leaf decision tree: 3 comparator 555s + 2 inverter/gate 555s ──</span>
+
+                            VCC (5V)
+                              │
+                              │
+     sensor voltage ──────────┼──────────────────────────────┐
+     (0-5V analog)            │                              │
+                              │                              │
+                        ┌─────┴─────┐                        │
+                        │  555 #1   │                        │
+              R1┐       │  (root)   │                        │
+      VCC──100K├──┐     │           │                        │
+              R2│ ├──5  │  thr=2.5V │                        │
+      GND──100K┘  │  ┌──┤2      3├──┼──── root_out           │
+                  │  │  │6      4├──┘VCC                     │
+                  │  │  └───────────┘                        │
+     sensor ──────┘──┘       │                               │
+                             │ root_out                      │
+                    ┌────────┴────────┐                      │
+                    │                 │                      │
+                  HIGH              LOW                     │
+               (below 2.5V)     (above 2.5V)               │
+                    │                 │                      │
+              ┌─────┴─────┐    ┌─────┴─────┐                │
+              │  555 #2   │    │  555 #3   │                │
+              │  thr=1.2V │    │  thr=3.8V │                │
+    sensor ──┤2       3├──┘  ┌─┤2       3├──┘                │
+              │6      4├──┐  │ │6      4├──┐                │
+              └───────────┘  │ └───────────┘  │              │
+                    │     root_out    │    inverted root     │
+                    │     gates      │    gates              │
+                    │     RESET      │    RESET              │
+                    │                │                       │
+               ┌────┴────┐    ┌─────┴────┐                  │
+             HIGH      LOW   HIGH      LOW                  │
+                                                            │
+              ▼         ▼     ▼         ▼                   │
+           <span class="val">LED-A</span>    <span class="val">LED-B</span>  <span class="val">LED-C</span>    <span class="val">LED-D</span>                │
+           <span class="val">COLD</span>     <span class="val">COOL</span>   <span class="val">WARM</span>     <span class="val">HOT</span>
+          <span class="note">(&lt;1.2V)</span> <span class="note">(1.2-2.5V)</span> <span class="note">(2.5-3.8V)</span> <span class="note">(&gt;3.8V)</span>
+
+
+<span class="label">Gating logic:</span>
+
+  555 #1 output HIGH → 555 #2 RESET pin = VCC (enabled)
+                     → 555 #3 RESET pin = GND (disabled)
+
+  555 #1 output LOW  → 555 #2 RESET pin = GND (disabled)
+                     → 555 #3 RESET pin = VCC (enabled)
+
+  The RESET pin (pin 4) enables/disables each downstream 555.
+  When RESET is LOW, the 555 output is forced LOW regardless of input.
+  When RESET is HIGH, the 555 operates normally.
+
+  To invert the root output for gating, use a simple NPN transistor
+  inverter (1× 2N2222 + 2× resistors) or dedicate another 555 as
+  an inverter by tying its TRIGGER to the signal and THRESHOLD to VCC.
+</pre>
+</div>
+
+<h2>Setting arbitrary thresholds</h2>
+
+<p>
+    The CONTROL pin (pin 5) accepts any voltage between GND and VCC.
+    Use a resistor divider to set the exact comparison threshold:
+</p>
+
+<div class="diagram-box">
+<pre>
+<span class="note">── Threshold setting via CONTROL pin ──</span>
+
+     VCC (5V)
+       │
+      [R1]   ← upper resistor
+       │
+       ├──────── pin 5 (CONTROL)
+       │
+      [R2]   ← lower resistor
+       │
+      GND
+
+  <span class="label">Threshold = VCC × R2 / (R1 + R2)</span>
+
+  <span class="note">Common thresholds with standard resistor values:</span>
+
+  <span class="val">1.0V</span>  →  R1=<span class="pin">390KΩ</span>, R2=<span class="pin">100KΩ</span>  (1.02V)
+  <span class="val">1.5V</span>  →  R1=<span class="pin">220KΩ</span>, R2=<span class="pin">100KΩ</span>  (1.56V)
+  <span class="val">2.0V</span>  →  R1=<span class="pin">150KΩ</span>, R2=<span class="pin">100KΩ</span>  (2.00V)
+  <span class="val">2.5V</span>  →  R1=<span class="pin">100KΩ</span>, R2=<span class="pin">100KΩ</span>  (2.50V)
+  <span class="val">3.0V</span>  →  R1=<span class="pin">100KΩ</span>, R2=<span class="pin">150KΩ</span>  (3.00V)
+  <span class="val">3.5V</span>  →  R1=<span class="pin">100KΩ</span>, R2=<span class="pin">220KΩ</span>  (3.44V)
+  <span class="val">4.0V</span>  →  R1=<span class="pin">100KΩ</span>, R2=<span class="pin">390KΩ</span>  (3.98V)
+
+  Use 100KΩ+ values to keep current draw under 50µA per divider.
+  Add a 100nF bypass cap from pin 5 to GND for noise immunity.
+</pre>
+</div>
+
+<h2>8-leaf environmental classifier</h2>
+
+<p>
+    A practical 3-level tree using 7 comparator 555s that classifies the environment
+    into 8 states using three sensors: temperature (thermistor), light (LDR),
+    and moisture (soil probe).
+</p>
+
+<div class="diagram-box">
+<pre>
+<span class="note">── 8-leaf tree: 3 sensors, 7 comparator 555s, 8 output states ──</span>
+
+                        Level 0 (root)
+                     ┌───────────────────┐
+                     │      555 #1       │
+  thermistor ───────┤  threshold: 2.5V  │
+                     │     (~25°C)       │
+                     └────────┬──────────┘
+                         HIGH │ LOW
+                 ┌────────────┴──────────────┐
+            <span class="pin">COLD side</span>                    <span class="pin">WARM side</span>
+                 │                            │
+           Level 1                      Level 1
+      ┌──────────────┐            ┌──────────────┐
+      │    555 #2    │            │    555 #3    │
+  LDR┤  thr: 1.5V  │        LDR┤  thr: 1.5V  │
+      │   (~dim)     │            │   (~dim)     │
+      └──────┬───────┘            └──────┬───────┘
+        HIGH │ LOW                  HIGH │ LOW
+        ┌────┴────┐                ┌────┴────┐
+      <span class="pin">DARK</span>      <span class="pin">BRIGHT</span>           <span class="pin">DARK</span>      <span class="pin">BRIGHT</span>
+        │         │                │         │
+   Level 2   Level 2         Level 2   Level 2
+   ┌────────┐ ┌────────┐    ┌────────┐ ┌────────┐
+   │555 #4  │ │555 #5  │    │555 #6  │ │555 #7  │
+   │thr:2.0V│ │thr:2.0V│    │thr:2.0V│ │thr:2.0V│
+   └───┬────┘ └───┬────┘    └───┬────┘ └───┬────┘
+   H   │  L   H   │  L      H   │  L   H   │  L
+   │   │      │   │          │   │      │   │
+   ▼   ▼      ▼   ▼          ▼   ▼      ▼   ▼
+
+  <span class="val">DRY</span>  <span class="val">WET</span>   <span class="val">DRY</span>  <span class="val">WET</span>     <span class="val">DRY</span>  <span class="val">WET</span>   <span class="val">DRY</span>  <span class="val">WET</span>
+   │    │     │    │       │    │     │    │
+   ▼    ▼     ▼    ▼       ▼    ▼     ▼    ▼
+
+  <span class="val">A</span>    <span class="val">B</span>     <span class="val">C</span>    <span class="val">D</span>       <span class="val">E</span>    <span class="val">F</span>     <span class="val">G</span>    <span class="val">H</span>
+
+  A = cold + dark + dry    → <span class="note">"winter night"    → blue LED</span>
+  B = cold + dark + wet    → <span class="note">"rain at night"   → blue+green LED</span>
+  C = cold + bright + dry  → <span class="note">"clear winter day" → white LED</span>
+  D = cold + bright + wet  → <span class="note">"snow/sleet"      → white+blue LED</span>
+  E = warm + dark + dry    → <span class="note">"summer evening"  → amber LED</span>
+  F = warm + dark + wet    → <span class="note">"tropical night"  → amber+green LED</span>
+  G = warm + bright + dry  → <span class="note">"sunny day"       → yellow LED</span>
+  H = warm + bright + wet  → <span class="note">"greenhouse"      → green LED</span>
+</pre>
+</div>
+
+<h2>Sensor front-ends</h2>
+
+<p>
+    Each sensor type needs a voltage divider to produce a 0-5V analog signal
+    that the 555 comparator can read.
+</p>
+
+<div class="diagram-box">
+<pre>
+<span class="note">── Thermistor (NTC 10K) ──</span>          <span class="note">── LDR (photoresistor) ──</span>
+
+     VCC                                  VCC
+      │                                    │
+    [10KΩ]  fixed                        [10KΩ]  fixed
+      │                                    │
+      ├──── to 555 pin 2+6                ├──── to 555 pin 2+6
+      │                                    │
+    [NTC]   ~10KΩ @ 25°C                 [LDR]   ~10KΩ in daylight
+      │     high temp → low R              │     bright → low R
+     GND    → high voltage                GND    → high voltage
+
+
+<span class="note">── Soil moisture probe ──</span>           <span class="note">── Generic potentiometer ──</span>
+
+     VCC                                  VCC
+      │                                    │
+    [100KΩ] fixed                        ┌─┴─┐
+      │                                  │   │
+      ├──── to 555 pin 2+6              ├──── to 555 pin 2+6
+      │                                  │   │
+    [probe] two nails in soil            └─┬─┘  10KΩ pot
+      │     wet → low R                    │    (manual threshold
+     GND    → high voltage                GND    adjustment / testing)
+</pre>
+</div>
+
+<h2>Output stage: driving LEDs from tree leaves</h2>
+
+<div class="diagram-box">
+<pre>
+<span class="note">── Each leaf output drives an LED through a current-limiting resistor ──</span>
+
+  555 output (pin 3) ──[330Ω]──┤►├── GND
+                                LED
+                            (any color)
+
+  The 555 can source ~200mA on pin 3 — more than enough for LEDs.
+  For multiple LEDs per state, wire in parallel with separate resistors.
+
+<span class="note">── For driving a relay (e.g. turn on a heater, fan, pump) ──</span>
+
+  555 output ──[1KΩ]──┐ base
+                       │
+                  ┌────┤ NPN (2N2222)
+                  │    │
+                  │    └──── emitter → GND
+                  │
+              collector
+                  │
+              ┌───┴───┐
+              │ relay  │     ┌──┤◄├── VCC
+              │  coil  │─────┘  flyback diode
+              └───┬───┘        (1N4001)
+                  │
+                 VCC
+</pre>
+</div>
+
+<h2>Equivalence to the ATTiny decision tree</h2>
+
+<div class="concept-box">
+    <strong>The same logic, zero abstraction layers apart:</strong>
+    <ul style="margin:0.3rem 0;padding-left:1.2rem">
+        <li>The ATTiny's <code>if (adc_reading < threshold)</code> becomes a 555 comparator</li>
+        <li>The ATTiny's tree array in PROGMEM becomes the physical wiring topology</li>
+        <li>The ATTiny's <code>decide()</code> tree walker becomes signal propagation through the cascade</li>
+        <li>Response time: ATTiny ~100µs (ADC + tree walk) vs. 555 ~10µs (pure analog)</li>
+        <li>Power: ATTiny ~5mA active vs. 555 tree ~1mA per chip (all quiescent)</li>
+    </ul>
+    <p style="margin:0.4rem 0 0;color:#8b949e;font-size:0.72rem">
+        The 555 tree has no firmware to corrupt, no clock to fail, no registers to overflow.
+        It will keep classifying as long as the power supply holds.
+        The logic <em>is</em> the hardware.
+    </p>
+</div>
+
+<h2>Bill of materials: 4-leaf tree</h2>
+
+<table class="parts-table">
+    <tr><th>Qty</th><th>Part</th><th>Role</th><th>~Cost</th></tr>
+    <tr><td>3</td><td>NE555 (or 1× NE556 + 1× NE555)</td><td>Comparator nodes</td><td>$0.60</td></tr>
+    <tr><td>1</td><td>2N2222 NPN transistor</td><td>Inverter for gating</td><td>$0.05</td></tr>
+    <tr><td>6</td><td>100KΩ resistors</td><td>Threshold dividers</td><td>$0.10</td></tr>
+    <tr><td>4</td><td>330Ω resistors</td><td>LED current limiting</td><td>$0.05</td></tr>
+    <tr><td>2</td><td>1KΩ + 10KΩ resistors</td><td>Inverter biasing</td><td>$0.02</td></tr>
+    <tr><td>4</td><td>100nF ceramic capacitors</td><td>Bypass on CONTROL pins</td><td>$0.10</td></tr>
+    <tr><td>4</td><td>LEDs (different colors)</td><td>Output indicators</td><td>$0.20</td></tr>
+    <tr><td>1</td><td>NTC 10K thermistor</td><td>Temperature sensor</td><td>$0.30</td></tr>
+    <tr><td>1</td><td>10KΩ resistor</td><td>Thermistor divider</td><td>$0.02</td></tr>
+    <tr><td></td><td></td><td><strong>Total</strong></td><td><strong>~$1.50</strong></td></tr>
+</table>
+<div class="bom-note">All parts are through-hole and available from any electronics supplier. Build on a breadboard first.</div>
+
+<h2>Bill of materials: 8-leaf tree</h2>
+
+<table class="parts-table">
+    <tr><th>Qty</th><th>Part</th><th>Role</th><th>~Cost</th></tr>
+    <tr><td>7</td><td>NE555 (or 3× NE556 + 1× NE555)</td><td>Comparator nodes</td><td>$1.40</td></tr>
+    <tr><td>3</td><td>2N2222 NPN transistors</td><td>Inverters for gating</td><td>$0.15</td></tr>
+    <tr><td>14</td><td>100KΩ resistors</td><td>Threshold dividers (7 nodes × 2)</td><td>$0.20</td></tr>
+    <tr><td>8</td><td>330Ω resistors</td><td>LED current limiting</td><td>$0.10</td></tr>
+    <tr><td>6</td><td>1KΩ + 10KΩ resistors</td><td>Inverter biasing</td><td>$0.06</td></tr>
+    <tr><td>7</td><td>100nF ceramic capacitors</td><td>Bypass on CONTROL pins</td><td>$0.15</td></tr>
+    <tr><td>8</td><td>LEDs (assorted colors)</td><td>Output indicators</td><td>$0.40</td></tr>
+    <tr><td>1</td><td>NTC 10K thermistor</td><td>Temperature sensor</td><td>$0.30</td></tr>
+    <tr><td>1</td><td>LDR photoresistor</td><td>Light sensor</td><td>$0.20</td></tr>
+    <tr><td>1</td><td>Soil moisture probe (2 nails)</td><td>Moisture sensor</td><td>$0.00</td></tr>
+    <tr><td>3</td><td>10KΩ resistors</td><td>Sensor dividers</td><td>$0.05</td></tr>
+    <tr><td></td><td></td><td><strong>Total</strong></td><td><strong>~$3.00</strong></td></tr>
+</table>
+<div class="bom-note">
+    The 556 is a dual 555 in one package — using 3× NE556 + 1× NE555 saves board space.
+    Soil moisture probe: literally two stainless steel nails 2cm apart pushed into soil.
+</div>
+
+<h2>Scaling limits</h2>
+
+<p>Practical upper bounds for 555-based decision trees:</p>
+<ul>
+    <li><strong>4 leaves (3 nodes):</strong> Breadboard-friendly. 3 ICs. Runs on a 9V battery for weeks.</li>
+    <li><strong>8 leaves (7 nodes):</strong> Still practical. 4 DIP-14 packages (using 556 duals). ~35mA total.</li>
+    <li><strong>16 leaves (15 nodes):</strong> Pushing it. 8 packages, gating logic gets complex, signal integrity matters. Consider a PCB.</li>
+    <li><strong>32+ leaves:</strong> Use an ATTiny13a instead. You've crossed the threshold where a $0.50 microcontroller with 1KB of flash is simpler, cheaper, and more reliable than the equivalent discrete circuit.</li>
+</ul>
+
+<div class="concept-box" style="border-left-color:#d29922;color:#d29922">
+    <strong>The crossover point:</strong> A 555 decision tree beats a microcontroller when
+    you need zero firmware, instant response (~10µs), or absolute reliability in harsh
+    environments (no clock to drift, no registers to corrupt, no code to crash).
+    Above ~16 leaves the wiring complexity exceeds the firmware complexity, and the
+    ATTiny wins on every axis — that's exactly where the Condenser pipeline's
+    ATTiny tier begins.
+</div>
+
+<div style="margin-top:1.2rem;display:flex;gap:0.5rem">
+    <a href="{% url 'condenser:decision_tree' %}" class="btn" style="display:inline-block">Design ATTiny13a tree</a>
+    <a href="{% url 'condenser:home' %}" class="btn btn-secondary">Back to Condenser</a>
+</div>
+
+</div>
+{% endblock %}

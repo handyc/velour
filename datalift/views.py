@@ -111,6 +111,23 @@ def job_run(request, slug):
         conn.close()
         job.status = 'done'
         job.save()
+
+        # Auto-register the output SQLite as a Database record
+        if job.job_type == 'convert' and job.output_sqlite:
+            try:
+                from databases.models import Database
+                abs_path = os.path.join(settings.MEDIA_ROOT, job.output_sqlite.name)
+                Database.objects.create(
+                    nickname=f'{job.name} (Datalift)',
+                    engine='sqlite',
+                    file_path=abs_path,
+                    notes=f'Auto-created by Datalift job "{job.name}".\n'
+                          f'{job.tables_found} tables, {job.rows_converted} rows.\n'
+                          f'Source: {job.source_database}@{job.source_host}',
+                )
+            except Exception:
+                pass  # non-critical
+
         messages.success(request,
             f'Job complete: {job.tables_found} tables, {job.rows_converted} rows.')
 

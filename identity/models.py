@@ -113,6 +113,12 @@ class Mood(models.Model):
         ('protective', 'Protective'),
         ('creative', 'Creative'),
         ('weary', 'Weary'),
+        ('serene', 'Serene'),
+        ('melancholic', 'Melancholic'),
+        ('defiant', 'Defiant'),
+        ('nostalgic', 'Nostalgic'),
+        ('playful', 'Playful'),
+        ('resolute', 'Resolute'),
     ]
 
     mood = models.CharField(max_length=50, choices=MOOD_CHOICES)
