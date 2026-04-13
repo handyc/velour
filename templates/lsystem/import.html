@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Import from Aether — L-System{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+    <a href="{% url 'lsystem:species_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Species</a>
+    <h2 style="margin:0;">Import from Aether</h2>
+</div>
+<p style="color:#8b949e;margin-top:0;">Select plants from Aether worlds to import into the L-System library.</p>
+
+{% if plant_worlds %}
+<form method="post">
+    {% csrf_token %}
+    {% for pw in plant_worlds %}
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.8rem;margin-bottom:0.8rem;">
+        <h3 style="margin:0 0 0.5rem 0;color:#c9d1d9;font-size:0.9rem;">{{ pw.world.title }}</h3>
+        {% for plant in pw.plants %}
+        <label style="display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0;color:#8b949e;font-size:0.82rem;cursor:pointer;">
+            <input type="checkbox" name="entities" value="{{ plant.entity.pk }}">
+            <span style="color:#c9d1d9;">{{ plant.entity.name }}</span>
+            <span style="color:#6e7681;font-size:0.72rem;">
+                {% if plant.props.species %}{{ plant.props.species }}{% endif %}
+                {% if plant.props.scale %} &times;{{ plant.props.scale }}{% endif %}
+            </span>
+        </label>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.5rem 1.5rem;border-radius:4px;font-size:0.88rem;cursor:pointer;font-weight:600;">Import Selected</button>
+</form>
+{% else %}
+<p style="color:#6e7681;">No Aether worlds contain L-system plants.</p>
+{% endif %}
+{% endblock %}

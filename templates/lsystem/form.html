@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}{% if species %}Edit {{ species.name }}{% else %}New Species{% endif %} — L-System{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+    <a href="{% url 'lsystem:species_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Species</a>
+    <h2 style="margin:0;">{% if species %}Edit {{ species.name }}{% else %}New Species{% endif %}</h2>
+</div>
+
+<form method="post" action="{% if species %}{% url 'lsystem:species_edit' species.slug %}{% else %}{% url 'lsystem:species_add' %}{% endif %}">
+    {% csrf_token %}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+
+        {# Identity #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Identity</legend>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+                Name<br>
+                <input type="text" name="name" value="{{ species.name|default:'' }}" required style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+                Category<br>
+                <select name="category" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                    {% for val, label in categories %}
+                    <option value="{{ val }}" {% if species.category == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+                Description<br>
+                <textarea name="description" rows="2" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">{{ species.description|default:'' }}</textarea>
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;">
+                Tags<br>
+                <input type="text" name="tags" value="{{ species.tags|default:'' }}" placeholder="deciduous, temperate" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+        </fieldset>
+
+        {# Grammar #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">L-System Grammar</legend>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+                Axiom<br>
+                <input type="text" name="axiom" value="{{ species.axiom|default:'F' }}" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;font-family:monospace;box-sizing:border-box;">
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+                Rules (JSON array)<br>
+                <textarea name="rules" rows="3" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;font-family:monospace;box-sizing:border-box;">{% if species %}{{ species.rules|safe }}{% else %}[{"F": "FF+[+F-F-F]-[-F+F+F]"}]{% endif %}</textarea>
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;display:block;">
+                Iterations<br>
+                <input type="number" name="iterations" value="{{ species.iterations|default:4 }}" min="1" max="6" style="width:5rem;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+            </label>
+        </fieldset>
+
+        {# Geometry #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Geometry</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Angle (&deg;)<br>
+                    <input type="number" name="angle" value="{{ species.angle|default:'22.5' }}" step="0.5" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Length factor<br>
+                    <input type="number" name="length_factor" value="{{ species.length_factor|default:'0.65' }}" step="0.01" min="0.1" max="1" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Start length<br>
+                    <input type="number" name="start_length" value="{{ species.start_length|default:'0.8' }}" step="0.05" min="0.05" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Trunk taper<br>
+                    <input type="number" name="trunk_taper" value="{{ species.trunk_taper|default:'0.7' }}" step="0.01" min="0.1" max="1" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Trunk radius<br>
+                    <input type="number" name="trunk_radius" value="{{ species.trunk_radius|default:'0.06' }}" step="0.005" min="0.01" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Droop<br>
+                    <input type="number" name="droop" value="{{ species.droop|default:'0' }}" step="0.01" min="0" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+            </div>
+        </fieldset>
+
+        {# Appearance #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Appearance</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Trunk<br>
+                    <input type="color" name="trunk_color" value="{{ species.trunk_color|default:'#5a4020' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Leaf 1<br>
+                    <input type="color" name="leaf_color" value="{{ species.leaf_color|default:'#2a6818' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Leaf 2<br>
+                    <input type="color" name="leaf_color2" value="{{ species.leaf_color2|default:'#3a7828' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Leaf shape<br>
+                    <select name="leaf_shape" style="width:100%;padding:0.2rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                        {% for val, label in leaf_shapes %}
+                        <option value="{{ val }}" {% if species.leaf_shape == val %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Leaf size<br>
+                    <input type="number" name="leaf_size" value="{{ species.leaf_size|default:'0.35' }}" step="0.01" min="0" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Leaf density<br>
+                    <input type="number" name="leaf_density" value="{{ species.leaf_density|default:'0.6' }}" step="0.05" min="0" max="1" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+            </div>
+        </fieldset>
+
+        {# Flowers #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Flowers</legend>
+            <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem;">
+                <input type="checkbox" name="has_flowers" {% if species.has_flowers %}checked{% endif %}> Has flowers
+            </label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;">
+                <label style="color:#8b949e;font-size:0.78rem;">Flower color<br>
+                    <input type="color" name="flower_color" value="{{ species.flower_color|default:'#ff80a0' }}" style="width:100%;height:2rem;border:1px solid #30363d;border-radius:3px;background:#0d1117;cursor:pointer;">
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;">Flower density<br>
+                    <input type="number" name="flower_density" value="{{ species.flower_density|default:'0.15' }}" step="0.05" min="0" max="1" style="width:100%;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+                </label>
+            </div>
+        </fieldset>
+
+        {# Special features #}
+        <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0;">
+            <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Special Features</legend>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;">
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="trunk_is_green" {% if species.trunk_is_green %}checked{% endif %}> Green trunk
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="bark_stripes" {% if species.bark_stripes %}checked{% endif %}> Bark stripes
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="narrow" {% if species.narrow %}checked{% endif %}> Narrow form
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="fat_trunk" {% if species.fat_trunk %}checked{% endif %}> Fat trunk
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_fronds" {% if species.has_fronds %}checked{% endif %}> Palm fronds
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_coconuts" {% if species.has_coconuts %}checked{% endif %}> Coconuts
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_culms" {% if species.has_culms %}checked{% endif %}> Bamboo culms
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="has_rosette" {% if species.has_rosette %}checked{% endif %}> Rosette
+                </label>
+                <label style="color:#8b949e;font-size:0.78rem;display:flex;align-items:center;gap:0.3rem;">
+                    <input type="checkbox" name="is_ground_cover" {% if species.is_ground_cover %}checked{% endif %}> Ground cover
+                </label>
+            </div>
+        </fieldset>
+    </div>
+
+    <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.5rem 1.5rem;border-radius:4px;font-size:0.88rem;cursor:pointer;font-weight:600;">
+        {% if species %}Save Changes{% else %}Create Species{% endif %}
+    </button>
+</form>
+{% endblock %}

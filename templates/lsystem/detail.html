@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}{{ species.name }} — L-System{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'lsystem:species_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Species</a>
+    <h2 style="margin:0;">{{ species.name }}</h2>
+    <span style="color:#6e7681;font-size:0.72rem;border:1px solid #30363d;padding:0.1rem 0.4rem;border-radius:3px;">{{ species.get_category_display }}</span>
+</div>
+{% if species.description %}<p style="color:#8b949e;margin-top:0;">{{ species.description }}</p>{% endif %}
+
+<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center;">
+    <a href="{% url 'lsystem:species_edit' species.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Edit</a>
+    <form method="post" action="{% url 'lsystem:species_duplicate' species.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Duplicate</button>
+    </form>
+    <form method="post" action="{% url 'lsystem:export_to_aether' species.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Export to Aether</button>
+    </form>
+    <form method="post" action="{% url 'lsystem:species_delete' species.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ species.name }}?');">
+        {% csrf_token %}
+        <button type="submit" style="background:transparent;color:#f85149;border:1px solid #f85149;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Delete</button>
+    </form>
+</div>
+
+{# Parameters #}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.8rem;margin-bottom:1.5rem;">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Grammar</div>
+        <div style="color:#c9d1d9;font-size:0.85rem;font-family:monospace;">{{ species.axiom }}</div>
+        <div style="color:#8b949e;font-size:0.75rem;margin-top:0.2rem;">{{ species.iterations }} iterations</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Geometry</div>
+        <div style="color:#c9d1d9;font-size:0.82rem;">
+            Angle: {{ species.angle }}&deg;<br>
+            Length: {{ species.start_length }} &times;{{ species.length_factor }}<br>
+            Taper: {{ species.trunk_taper }}
+        </div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Colors</div>
+        <div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;">
+            <span style="display:inline-block;width:20px;height:20px;border-radius:3px;background:{{ species.trunk_color }};border:1px solid #30363d;" title="Trunk"></span>
+            <span style="display:inline-block;width:20px;height:20px;border-radius:3px;background:{{ species.leaf_color }};border:1px solid #30363d;" title="Leaf 1"></span>
+            <span style="display:inline-block;width:20px;height:20px;border-radius:3px;background:{{ species.leaf_color2 }};border:1px solid #30363d;" title="Leaf 2"></span>
+            {% if species.has_flowers %}<span style="display:inline-block;width:20px;height:20px;border-radius:50%;background:{{ species.flower_color }};border:1px solid #30363d;" title="Flower"></span>{% endif %}
+        </div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Features</div>
+        <div style="color:#8b949e;font-size:0.78rem;">
+            Leaf: {{ species.get_leaf_shape_display }} ({{ species.leaf_size }}, d={{ species.leaf_density }})<br>
+            {% if species.droop %}Droop: {{ species.droop }}<br>{% endif %}
+            {% if species.has_flowers %}Flowers ({{ species.flower_density }})<br>{% endif %}
+            {% if species.has_fronds %}Palm fronds{% endif %}
+            {% if species.has_culms %}Bamboo culms{% endif %}
+            {% if species.has_rosette %}Rosette{% endif %}
+            {% if species.narrow %}Narrow{% endif %}
+            {% if species.fat_trunk %}Fat trunk{% endif %}
+        </div>
+    </div>
+</div>
+
+{# Rules display #}
+<h3 style="margin-bottom:0.5rem;">Rules</h3>
+<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;margin-bottom:1.5rem;font-family:monospace;font-size:0.82rem;color:#c9d1d9;">
+    {% for ruleset in species.rules %}
+    <div style="{% if not forloop.first %}margin-top:0.3rem;padding-top:0.3rem;border-top:1px solid #21262d;{% endif %}">
+        {% for var, prod in ruleset.items %}
+        <span style="color:#ff7b72;">{{ var }}</span> &rarr; <span style="color:#a5d6ff;">{{ prod }}</span><br>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+
+{% if species.tags %}<p style="color:#6e7681;font-size:0.78rem;">Tags: {{ species.tags }}</p>{% endif %}
+
+{# 3D Preview #}
+<h3 style="margin-bottom:0.5rem;">Preview</h3>
+<div id="preview-container" style="background:#0d1117;border:1px solid #30363d;border-radius:6px;width:100%;height:400px;position:relative;">
+    <div id="preview-loading" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6e7681;font-size:0.85rem;">Loading preview...</div>
+</div>
+<div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;">
+    <label style="color:#8b949e;font-size:0.78rem;">Seed:</label>
+    <input type="number" id="preview-seed" value="42" min="1" max="9999" style="width:5rem;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.82rem;">
+    <label style="color:#8b949e;font-size:0.78rem;">Scale:</label>
+    <input type="number" id="preview-scale" value="1.0" min="0.1" max="5" step="0.1" style="width:5rem;padding:0.2rem 0.4rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.82rem;">
+    <button id="preview-refresh" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.2rem 0.6rem;border-radius:3px;font-size:0.82rem;cursor:pointer;">Refresh</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+    const container = document.getElementById('preview-container');
+    const loading = document.getElementById('preview-loading');
+    const w = container.clientWidth, h = container.clientHeight;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#0d1117');
+    scene.fog = new THREE.Fog('#0d1117', 8, 25);
+
+    const camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 100);
+    camera.position.set(3, 3, 5);
+    camera.lookAt(0, 1.5, 0);
+
+    const renderer = new THREE.WebGLRenderer({antialias: true});
+    renderer.setSize(w, h);
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    // Lights
+    const amb = new THREE.AmbientLight('#404040', 0.6);
+    scene.add(amb);
+    const dir = new THREE.DirectionalLight('#ffffff', 0.8);
+    dir.position.set(5, 8, 4);
+    dir.castShadow = true;
+    scene.add(dir);
+
+    // Ground plane
+    const gnd = new THREE.Mesh(
+        new THREE.PlaneGeometry(20, 20),
+        new THREE.MeshStandardMaterial({color: '#2a3a20', roughness: 0.9})
+    );
+    gnd.rotation.x = -Math.PI/2;
+    gnd.receiveShadow = true;
+    scene.add(gnd);
+
+    // Simple orbit
+    let angle = 0, radius = 5, dragging = false, lastX = 0;
+    container.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; });
+    window.addEventListener('mouseup', () => { dragging = false; });
+    container.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        angle += (e.clientX - lastX) * 0.01;
+        lastX = e.clientX;
+    });
+    container.addEventListener('wheel', e => {
+        radius = Math.max(2, Math.min(15, radius + e.deltaY * 0.01));
+        e.preventDefault();
+    }, {passive: false});
+
+    let plantGroup = null;
+
+    function buildPlant(props) {
+        if (plantGroup) scene.remove(plantGroup);
+        plantGroup = new THREE.Group();
+        scene.add(plantGroup);
+
+        // Re-implement L-system rendering client-side using the props
+        let rngState = (props.seed || 42) * 127.1;
+        function rnd() { rngState = (rngState * 16807 + 0.5) % 2147483647; return rngState / 2147483647; }
+
+        const iterations = Math.min(props.iterations || 4, 6);
+        const scale = props.scale || 1.0;
+        const pAngle = (props.angle || 22.5) * Math.PI / 180;
+        const rules = props.rules || [{'F': 'FF+[+F-F-F]-[-F+F+F]'}];
+        const axiom = props.axiom || 'F';
+        const lengthFactor = props.lengthFactor || 0.65;
+        const startLength = props.startLength || 0.8;
+        const trunkTaper = props.trunkTaper || 0.7;
+        const pDroop = props.droop || 0;
+
+        // Rewrite
+        let str = axiom;
+        for (let i = 0; i < iterations; i++) {
+            let next = '';
+            const ruleSet = rules[Math.floor(rnd() * rules.length)];
+            for (const ch of str) next += ruleSet[ch] || ch;
+            str = next;
+        }
+
+        const trunkColor = props.trunkIsGreen ? (props.trunk || '#2a6030') : (props.trunk || '#5a4020');
+        const trunkM = new THREE.MeshStandardMaterial({color: trunkColor, roughness: 0.85});
+        const leafM = new THREE.MeshStandardMaterial({color: props.leaf || '#2a6818', roughness: 0.7});
+        const leafM2 = new THREE.MeshStandardMaterial({color: props.leaf2 || '#3a7828', roughness: 0.7});
+
+        const stack = [];
+        let pos = new THREE.Vector3(0, 0, 0);
+        let dir = new THREE.Vector3(0, 1, 0);
+        let right = new THREE.Vector3(1, 0, 0);
+        let len = startLength * scale;
+        let rad = (props.fatTrunk ? 0.15 : (props.trunkRadius || 0.06)) * scale;
+        let depth = 0;
+        let segs = 0;
+        const maxSegs = 600;
+
+        function addBranch(from, to, r) {
+            if (segs >= maxSegs) return;
+            const diff = new THREE.Vector3().subVectors(to, from);
+            const length = diff.length();
+            if (length < 0.01) return;
+            const geo = new THREE.CylinderGeometry(r * trunkTaper, r, length, 5, 1);
+            const mesh = new THREE.Mesh(geo, trunkM);
+            mesh.position.copy(from.clone().add(to).multiplyScalar(0.5));
+            mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), diff.normalize());
+            mesh.castShadow = true;
+            plantGroup.add(mesh);
+            segs++;
+        }
+
+        function addLeaf(p, size) {
+            if (segs >= maxSegs || (props.leafSize || 0.35) <= 0) return;
+            const geo = props.leafShape === 'cone'
+                ? new THREE.ConeGeometry(size, size*2, 6)
+                : new THREE.SphereGeometry(size, 6, 4);
+            const mesh = new THREE.Mesh(geo, rnd()>0.5 ? leafM : leafM2);
+            mesh.position.copy(p);
+            mesh.rotation.set((rnd()-0.5)*0.8, rnd()*Math.PI*2, (rnd()-0.5)*0.5);
+            plantGroup.add(mesh);
+            segs++;
+        }
+
+        for (const ch of str) {
+            if (segs >= maxSegs) break;
+            if (ch === 'F') {
+                const droopV = new THREE.Vector3(0, -pDroop * depth, 0);
+                const jitter = new THREE.Vector3((rnd()-0.5)*0.05, 0, (rnd()-0.5)*0.05);
+                if (props.narrow) { jitter.x *= 0.3; jitter.z *= 0.3; }
+                const end = pos.clone().add(dir.clone().multiplyScalar(len)).add(droopV).add(jitter);
+                addBranch(pos, end, rad);
+                pos.copy(end);
+                if (depth >= 2 && rnd() < (props.leafDensity || 0.6)) {
+                    addLeaf(pos, (props.leafSize || 0.35) * scale * (0.7 + rnd()*0.6));
+                }
+            } else if (ch === '+') {
+                const rotAxis = new THREE.Vector3().crossVectors(dir, right).normalize();
+                if (rotAxis.length() < 0.01) rotAxis.set(0, 0, 1);
+                dir.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(rotAxis, pAngle + (rnd()-0.5)*pAngle*0.3)).normalize();
+            } else if (ch === '-') {
+                const rotAxis = new THREE.Vector3().crossVectors(dir, right).normalize();
+                if (rotAxis.length() < 0.01) rotAxis.set(0, 0, 1);
+                dir.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(rotAxis, -pAngle + (rnd()-0.5)*pAngle*0.3)).normalize();
+            } else if (ch === '[') {
+                stack.push({pos: pos.clone(), dir: dir.clone(), right: right.clone(), len, radius: rad, depth});
+                len *= lengthFactor;
+                rad *= trunkTaper;
+                depth++;
+                right.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(dir, (rnd()-0.5)*Math.PI*0.5)).normalize();
+            } else if (ch === ']') {
+                if (stack.length > 0) {
+                    if (depth >= 2 && (props.leafDensity || 0.6) > 0) {
+                        addLeaf(pos, (props.leafSize || 0.35) * scale * (0.8 + rnd()*0.4));
+                    }
+                    const s = stack.pop();
+                    pos.copy(s.pos); dir.copy(s.dir); right.copy(s.right);
+                    len = s.len; rad = s.radius; depth = s.depth;
+                }
+            }
+        }
+
+        loading.style.display = 'none';
+    }
+
+    // Initial build with embedded props
+    const initialProps = {{ props_json|safe }};
+    buildPlant(initialProps);
+
+    // Refresh button
+    document.getElementById('preview-refresh').addEventListener('click', function() {
+        const seed = parseInt(document.getElementById('preview-seed').value) || 42;
+        const scale = parseFloat(document.getElementById('preview-scale').value) || 1.0;
+        fetch('{% url "lsystem:species_preview_json" species.slug %}?seed=' + seed + '&scale=' + scale)
+            .then(r => r.json())
+            .then(props => buildPlant(props));
+    });
+
+    // Animate
+    function animate() {
+        requestAnimationFrame(animate);
+        camera.position.x = Math.sin(angle) * radius;
+        camera.position.z = Math.cos(angle) * radius;
+        camera.position.y = 3;
+        camera.lookAt(0, 1.5, 0);
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // Resize
+    window.addEventListener('resize', () => {
+        const w2 = container.clientWidth, h2 = container.clientHeight;
+        camera.aspect = w2/h2;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w2, h2);
+    });
+})();
+</script>
+{% endblock %}

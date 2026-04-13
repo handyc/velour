@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     'condenser',
     'automaton',
     'aether',
+    'lsystem',
 ]
 
 MIDDLEWARE = [

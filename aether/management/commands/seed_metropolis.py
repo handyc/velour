@@ -393,7 +393,32 @@ const presets = {
     },
 };
 
-const preset = presets[species] || presets.oak;
+// Support custom species from L-System app: all params come from props
+const preset = species === '_custom' ? {
+    axiom: P.axiom || 'F',
+    rules: P.rules || [{'F': 'FF+[+F-F-F]-[-F+F+F]'}],
+    angle: P.angle || 22.5,
+    lengthFactor: P.lengthFactor || 0.65,
+    startLength: P.startLength || 0.8,
+    trunkTaper: P.trunkTaper || 0.7,
+    trunkRadius: P.trunkRadius || 0.06,
+    leafSize: P.leafSize || 0.35,
+    leafDensity: P.leafDensity || 0.6,
+    leafShape: P.leafShape || 'sphere',
+    droop: P.droop || 0,
+    narrow: P.narrow || false,
+    fatTrunk: P.fatTrunk || false,
+    trunkIsGreen: P.trunkIsGreen || false,
+    barkStripes: P.barkStripes || false,
+    flower: P.flower || false,
+    flowerColor: P.flowerColor || '#ff80a0',
+    flowerDensity: P.flowerDensity || 0.15,
+    fronds: P.fronds || false,
+    coconuts: P.coconuts || false,
+    culms: P.culms || false,
+    rosette: P.rosette || false,
+    isGroundCover: P.isGroundCover || false,
+} : (presets[species] || presets.oak);
 
 // Stochastic rule selection: if multiple rule sets, pick per-iteration
 function rewrite(str) {
