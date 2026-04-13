@@ -551,8 +551,8 @@ const jaw = ns(part(
     new THREE.SphereGeometry(0.1*KH, 24, 12, 0, Math.PI*2, Math.PI*0.55, Math.PI*0.45),
     faceSkinM
 ));
-jaw.position.set(0, 0.05*KH, 0.01*KH);
-jaw.scale.set(JW*0.95, 0.7, 0.85);
+jaw.position.set(0, 0.05*KH, -0.02*KH);
+jaw.scale.set(JW*0.95, 0.7, 0.55); // pulled back so eyes show through
 headPivot.add(jaw);
 
 // Chin
@@ -569,14 +569,15 @@ const forehead = ns(part(
     new THREE.SphereGeometry(0.11*KH, 20, 10, 0, Math.PI*2, 0, Math.PI*0.35),
     faceSkinM
 ));
-forehead.position.set(0, 0.2*KH*FH, 0.02*KH);
+forehead.position.set(0, 0.2*KH*FH, -0.02*KH);
+forehead.scale.set(1.0, 1.0, 0.45); // flattened so eyes aren't occluded
 headPivot.add(forehead);
 
-// Cheeks (kawaii: puffier)
+// Cheeks (kawaii: puffier — pulled back from eye plane)
 for (const side of [-1, 1]) {
     const cheek = ns(part(new THREE.SphereGeometry(0.04*KH, 10, 8), faceSkinM));
-    cheek.position.set(side*0.065*KH, 0.09*KH, 0.08*KH);
-    cheek.scale.set(1.0*CF, 0.7, 0.6);
+    cheek.position.set(side*0.065*KH, 0.09*KH, 0.06*KH);
+    cheek.scale.set(1.0*CF, 0.7, 0.4);
     cheek.name = 'cheek_' + (side < 0 ? 'L' : 'R');
     headPivot.add(cheek);
 }

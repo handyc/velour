@@ -536,7 +536,7 @@ const jaw = ns(part(
     new THREE.SphereGeometry(0.1, 24, 12, 0, Math.PI*2, Math.PI*0.55, Math.PI*0.45),
     faceSkinM
 ));
-jaw.position.set(0, 0.06, 0.01); jaw.scale.set(JW, 0.8, 0.9);
+jaw.position.set(0, 0.06, -0.02); jaw.scale.set(JW, 0.8, 0.55);
 headPivot.add(jaw);
 
 // Chin with cleft suggestion
@@ -557,7 +557,8 @@ const forehead = ns(part(
     new THREE.SphereGeometry(0.11, 20, 10, 0, Math.PI*2, 0, Math.PI*0.35),
     faceSkinM
 ));
-forehead.position.set(0, 0.18*FH, 0.02);
+forehead.position.set(0, 0.18*FH, -0.02);
+forehead.scale.set(1.0, 1.0, 0.45);
 headPivot.add(forehead);
 
 // Temples
@@ -573,8 +574,8 @@ for (const side of [-1, 1]) {
 // Cheekbones
 for (const side of [-1, 1]) {
     const cheek = ns(part(new THREE.SphereGeometry(0.034, 10, 8), faceSkinM));
-    cheek.position.set(side*0.068, 0.1, 0.074);
-    cheek.scale.set(1.0*CF, 0.65, 0.55);
+    cheek.position.set(side*0.068, 0.1, 0.055);
+    cheek.scale.set(1.0*CF, 0.65, 0.38);
     headPivot.add(cheek);
 }
 

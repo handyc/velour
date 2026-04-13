@@ -602,7 +602,7 @@ if (ULTRA) {
             new THREE.BoxGeometry(0.04, 0.008, 0.015),
             new THREE.MeshStandardMaterial({color: new THREE.Color().copy(skinC).multiplyScalar(0.92), roughness: 0.8})
         );
-        brow.position.set(side * 0.04, 0.155, 0.1);
+        brow.position.set(side * 0.04, 0.155, 0.085);
         brow.rotation.z = side * -0.15;
         brow.castShadow = false;
         headPivot.add(brow);
@@ -635,8 +635,8 @@ if (ULTRA) {
         const cheek = part(
             new THREE.SphereGeometry(0.03, 8, 6), skinM
         );
-        cheek.position.set(side * 0.065, 0.1, 0.08);
-        cheek.scale.set(1, 0.7, 0.5);
+        cheek.position.set(side * 0.065, 0.1, 0.055);
+        cheek.scale.set(1, 0.7, 0.35);
         cheek.castShadow = false;
         headPivot.add(cheek);
     }

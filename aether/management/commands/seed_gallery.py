@@ -556,8 +556,8 @@ headPivot.add(head);
 // Jaw — separate piece for definition
 const jawGeo = new THREE.SphereGeometry(0.1, 24, 12, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.45);
 const jaw = noShadow(part(jawGeo, skinM));
-jaw.position.set(0, 0.06, 0.01);
-jaw.scale.set(JW, 0.8, 0.9);
+jaw.position.set(0, 0.06, -0.02);
+jaw.scale.set(JW, 0.8, 0.55);
 headPivot.add(jaw);
 
 // Chin
@@ -574,7 +574,8 @@ const forehead = noShadow(part(
     new THREE.SphereGeometry(0.11, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.35),
     skinM
 ));
-forehead.position.set(0, 0.18 * FH, 0.02);
+forehead.position.set(0, 0.18 * FH, -0.02);
+forehead.scale.set(1.0, 1.0, 0.45);
 headPivot.add(forehead);
 
 // Temple indentations (slightly darker depressions)
@@ -592,8 +593,8 @@ for (const side of [-1, 1]) {
     const cheek = noShadow(part(
         new THREE.SphereGeometry(0.035, 10, 8), skinM
     ));
-    cheek.position.set(side * 0.07, 0.1, 0.075);
-    cheek.scale.set(1.0 * CF, 0.65, 0.55);
+    cheek.position.set(side * 0.07, 0.1, 0.055);
+    cheek.scale.set(1.0 * CF, 0.65, 0.38);
     headPivot.add(cheek);
 }
 
