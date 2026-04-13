@@ -616,9 +616,70 @@ def generate_random_world(request):
 
     Entity.objects.bulk_create(entities)
 
+    # --- Procedural buildings ---
+    building_script = Script.objects.filter(slug='procedural-building').first()
+    if building_script:
+        _BTYPES = ['house', 'shop', 'skyscraper', 'factory', 'warehouse',
+                   'church', 'tower']
+        _BCOLORS = ['#c8b8a0', '#d0c0a8', '#b0a890', '#909088', '#607080',
+                     '#506878', '#e0d0b8', '#808878']
+        n_buildings = random.randint(3, 10)
+        for i in range(n_buildings):
+            btype = random.choice(_BTYPES)
+            floors = {'house': random.randint(1, 3),
+                      'shop': random.randint(1, 2),
+                      'skyscraper': random.randint(8, 25),
+                      'factory': random.randint(1, 3),
+                      'warehouse': random.randint(1, 2),
+                      'church': random.randint(2, 4),
+                      'tower': random.randint(3, 6)}[btype]
+            w = random.uniform(5, 14)
+            d = random.uniform(5, 10)
+            e = Entity.objects.create(
+                world=world, name=f'Building {i}', primitive='box',
+                primitive_color='#000000',
+                pos_x=round(random.uniform(-half*0.8, half*0.8), 1),
+                pos_y=0,
+                pos_z=round(random.uniform(-half*0.8, half*0.8), 1),
+                rot_y=round(random.uniform(-30, 30), 1),
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            EntityScript.objects.create(entity=e, script=building_script, props={
+                'type': btype, 'floors': floors,
+                'width': round(w, 1), 'depth': round(d, 1),
+                'color': random.choice(_BCOLORS),
+                'trim': '#%02x%02x%02x' % tuple(random.randint(60, 130) for _ in range(3)),
+                'roof': '#%02x%02x%02x' % tuple(random.randint(50, 100) for _ in range(3)),
+            })
+
+    # --- L-system plants ---
+    plant_script = Script.objects.filter(slug='l-system-plant').first()
+    if plant_script:
+        _SPECIES = ['oak', 'pine', 'birch', 'palm', 'bush', 'willow', 'cactus']
+        n_plants = random.randint(6, 20)
+        for i in range(n_plants):
+            species = random.choice(_SPECIES)
+            e = Entity.objects.create(
+                world=world, name=f'Plant {i}', primitive='box',
+                primitive_color='#000000',
+                pos_x=round(random.uniform(-half*0.9, half*0.9), 1),
+                pos_y=0,
+                pos_z=round(random.uniform(-half*0.9, half*0.9), 1),
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            EntityScript.objects.create(entity=e, script=plant_script, props={
+                'species': species,
+                'scale': round(random.uniform(0.6, 1.5), 2),
+            })
+
     # --- NPCs ---
-    # Find the best available scripts
+    # Find the best available scripts (prefer V6 > V5 > V4 etc.)
     motion_lib = Script.objects.filter(slug='motion-quality-library').first()
+    lod_mgr = Script.objects.filter(slug='npc-lod-manager').first()
     builder = (Script.objects.filter(slug__startswith='humanoid-builder')
                .order_by('-slug').first())
     react = Script.objects.filter(slug='plaza-react-v5').first()
@@ -662,6 +723,8 @@ def generate_random_world(request):
                 'cheekFull': round(random.uniform(0.9, 1.12), 2),
                 'foreheadH': round(random.uniform(0.94, 1.05), 2),
             }))
+            if lod_mgr:
+                attachments.append(EntityScript(entity=e, script=lod_mgr, props={}))
             reaction = random.choice(_REACTIONS)
             if react:
                 attachments.append(EntityScript(entity=e, script=react, props={
@@ -676,8 +739,7 @@ def generate_random_world(request):
         EntityScript.objects.bulk_create(attachments)
 
     total = Entity.objects.filter(world=world).count()
-    messages.success(request,
-        f'Generated "{title}" — {total} entities, {n_npcs} NPCs.')
+    messages.success(request, f'Generated "{title}" — {total} entities.')
     return redirect('aether:world_enter', slug=world.slug)
 
 
