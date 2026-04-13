@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Attach Script — {{ entity.name|default:"Entity" }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'aether:world_detail' world.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; {{ world.title }}</a>
+<h2 style="margin-top:0.5rem;">Attach Script to {{ entity.name|default:"Entity" }}</h2>
+
+<form method="post" style="max-width:600px;">
+    {% csrf_token %}
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Script</label>
+    <select name="script" required style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        {% for s in scripts %}
+        <option value="{{ s.pk }}">{{ s.name }} ({{ s.event }}){% if s.is_builtin %} [built-in]{% endif %}</option>
+        {% endfor %}
+    </select>
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Properties (JSON)</label>
+    <p style="color:#6e7681;font-size:0.72rem;margin:0.2rem 0 0.4rem;">
+        Override default script properties. E.g. <code>{"speed": 2, "radius": 10}</code>
+    </p>
+    <textarea name="props" rows="4"
+              style="width:100%;padding:0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.82rem;">{}</textarea>
+
+    <button type="submit" style="margin-top:1rem;padding:0.5rem 1.5rem;background:#238636;border:none;border-radius:6px;color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;">
+        Attach Script
+    </button>
+</form>
+{% endblock %}

@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{{ world.title }} — Aether</title>
+<style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { overflow:hidden; background:#000; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+    canvas { display:block; }
+    #hud {
+        position:fixed; top:0; left:0; right:0;
+        display:flex; justify-content:space-between; align-items:center;
+        padding:0.6rem 1rem;
+        background:linear-gradient(180deg,rgba(0,0,0,0.6) 0%,transparent 100%);
+        pointer-events:none; z-index:10;
+    }
+    #hud > * { pointer-events:auto; }
+    #hud .title { color:#fff; font-size:0.85rem; font-weight:600; opacity:0.8; }
+    #hud a { color:rgba(255,255,255,0.6); text-decoration:none; font-size:0.75rem; }
+    #hud a:hover { color:#fff; }
+    #crosshair {
+        position:fixed; top:50%; left:50%;
+        transform:translate(-50%,-50%);
+        width:20px; height:20px;
+        pointer-events:none; z-index:10;
+    }
+    #crosshair::before, #crosshair::after {
+        content:''; position:absolute; background:rgba(255,255,255,0.4);
+    }
+    #crosshair::before { left:50%; top:0; width:1px; height:100%; transform:translateX(-0.5px); }
+    #crosshair::after { top:50%; left:0; height:1px; width:100%; transform:translateY(-0.5px); }
+    #coords {
+        position:fixed; bottom:0.8rem; left:1rem;
+        color:rgba(255,255,255,0.4); font-size:0.7rem;
+        pointer-events:none; z-index:10;
+    }
+    #instructions {
+        position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+        background:rgba(0,0,0,0.85); color:#c9d1d9; padding:2rem 3rem;
+        border-radius:12px; text-align:center; z-index:20;
+        font-size:0.9rem; line-height:1.6;
+    }
+    #instructions h2 { margin-bottom:0.5rem; font-size:1.2rem; color:#fff; }
+    #instructions .key { background:#21262d; padding:0.15rem 0.4rem; border-radius:3px; font-size:0.8rem; }
+    #vr-btn { display:none; }
+    #vr-btn button {
+        background:#238636; color:#fff; border:none; padding:0.5rem 1.2rem;
+        border-radius:6px; font-size:0.9rem; font-weight:600; cursor:pointer;
+        margin-top:0.8rem;
+    }
+    #vr-btn button:hover { background:#2ea043; }
+    .portal-label {
+        position:absolute; color:#58a6ff; font-size:0.75rem;
+        text-align:center; pointer-events:none;
+        text-shadow:0 0 8px rgba(88,166,255,0.5);
+    }
+</style>
+</head>
+<body>
+<div id="hud">
+    <span class="title">{{ world.title }}</span>
+    <div style="display:flex;gap:1rem;align-items:center;">
+        <a href="#" id="mute-btn" style="font-size:0.8rem;" title="Toggle audio">&#9834;</a>
+        <a href="{% url 'aether:world_detail' world.slug %}">Edit</a>
+        <a href="{% url 'aether:world_list' %}">Exit</a>
+    </div>
+</div>
+<div id="crosshair"></div>
+<div id="coords"></div>
+<div id="instructions">
+    <h2>{{ world.title }}</h2>
+    <p>Click to enter</p>
+    <p style="margin-top:0.8rem;font-size:0.78rem;color:#8b949e;">
+        <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> move
+        &nbsp;&middot;&nbsp; mouse look
+        &nbsp;&middot;&nbsp; <span class="key">Space</span> jump
+        &nbsp;&middot;&nbsp; <span class="key">Esc</span> release cursor
+    </p>
+    <div id="vr-btn"></div>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+// ---- Scene data from Django ----
+const SCENE_URL = '{% url "aether:world_scene_json" world.slug %}';
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+
+// ---- WebXR setup (Quest 3 browser + any WebXR device) ----
+// Additive: desktop path is unchanged. VR activates only on session start.
+let vrMode = false;
+const cameraGroup = new THREE.Group();
+cameraGroup.add(camera);
+scene.add(cameraGroup);
+
+// Saved desktop settings for restore on VR exit
+const desktopSettings = {
+    shadowMapSize: 2048,
+    pixelRatio: Math.min(devicePixelRatio, 2),
+    toneMapping: THREE.ACESFilmicToneMapping,
+    groundSegments: 64,
+};
+
+// Detect WebXR and show VR button
+if (navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+        if (!supported) return;
+        renderer.xr.enabled = true;
+        renderer.xr.setReferenceSpaceType('local-floor');
+        const vrBtnDiv = document.getElementById('vr-btn');
+        vrBtnDiv.style.display = 'block';
+        const btn = document.createElement('button');
+        btn.textContent = 'Enter VR';
+        btn.addEventListener('click', () => {
+            navigator.xr.requestSession('immersive-vr', {
+                optionalFeatures: ['local-floor', 'hand-tracking'],
+            }).then(session => {
+                renderer.xr.setSession(session);
+            });
+        });
+        vrBtnDiv.appendChild(btn);
+    });
+}
+
+// VR performance adaptations — activate on session start, restore on end
+let vrSun = null; // reference set during scene load
+renderer.xr.addEventListener('sessionstart', () => {
+    vrMode = true;
+    // Hide DOM overlays (invisible in VR anyway)
+    document.getElementById('hud').style.display = 'none';
+    document.getElementById('crosshair').style.display = 'none';
+    document.getElementById('coords').style.display = 'none';
+    instructions.style.display = 'none';
+    // Reduce shadow map for mobile GPU
+    if (vrSun) {
+        vrSun.shadow.mapSize.setScalar(512);
+        if (vrSun.shadow.map) { vrSun.shadow.map.dispose(); vrSun.shadow.map = null; }
+    }
+    // Lower pixel ratio (XR compositor handles final resolution)
+    renderer.setPixelRatio(0.8);
+    // Cheaper tone mapping
+    renderer.toneMapping = THREE.LinearToneMapping;
+    // Pull fog closer to reduce overdraw
+    if (scene.fog) {
+        scene.fog._desktopNear = scene.fog.near;
+        scene.fog._desktopFar = scene.fog.far;
+        scene.fog.near = Math.min(scene.fog.near, 30);
+        scene.fog.far = Math.min(scene.fog.far, 120);
+    }
+    startAmbientAudio();
+});
+
+renderer.xr.addEventListener('sessionend', () => {
+    vrMode = false;
+    document.getElementById('hud').style.display = '';
+    document.getElementById('crosshair').style.display = '';
+    document.getElementById('coords').style.display = '';
+    // Restore desktop settings
+    if (vrSun) {
+        vrSun.shadow.mapSize.setScalar(desktopSettings.shadowMapSize);
+        if (vrSun.shadow.map) { vrSun.shadow.map.dispose(); vrSun.shadow.map = null; }
+    }
+    renderer.setPixelRatio(desktopSettings.pixelRatio);
+    renderer.toneMapping = desktopSettings.toneMapping;
+    if (scene.fog && scene.fog._desktopNear !== undefined) {
+        scene.fog.near = scene.fog._desktopNear;
+        scene.fog.far = scene.fog._desktopFar;
+    }
+});
+
+// VR controller input — thumbstick locomotion + trigger interact
+let vrControllers = [];
+const controllerModelFactory = new XRControllerModelFactory();
+
+for (let i = 0; i < 2; i++) {
+    const controller = renderer.xr.getController(i);
+    cameraGroup.add(controller);
+    const grip = renderer.xr.getControllerGrip(i);
+    grip.add(controllerModelFactory.createControllerModel(grip));
+    cameraGroup.add(grip);
+    // Visible ray for pointing
+    const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -4),
+        ]),
+        new THREE.LineBasicMaterial({color: 0x58a6ff, transparent: true, opacity: 0.5}),
+    );
+    line.visible = false;
+    controller.add(line);
+    vrControllers.push({controller, grip, line});
+    // Trigger fires raycaster interact
+    controller.addEventListener('selectstart', () => {
+        if (!vrMode) return;
+        const tempMatrix = new THREE.Matrix4();
+        tempMatrix.identity().extractRotation(controller.matrixWorld);
+        raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+        raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+        const hits = raycaster.intersectObjects(scene.children, true);
+        if (!hits.length) return;
+        let target = hits[0].object;
+        while (target && !target.userData.entityId && target.parent) target = target.parent;
+        if (!target?.userData.entityId) return;
+        const eid = target.userData.entityId;
+        for (const inst of scriptInstances) {
+            if (inst.event === 'interact' && inst.ctx.entityId === eid) {
+                inst.ctx.hitPoint = hits[0].point;
+                try { inst.fn(inst.ctx, THREE); } catch(e) {}
+            }
+        }
+        eventBus.emit('interact', {entityId: eid, point: hits[0].point});
+    });
+}
+
+// VR thumbstick movement — read gamepad axes each frame
+let vrSnapCooldown = 0;
+function updateVRMovement(dt) {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+    for (const source of session.inputSources) {
+        if (!source.gamepad) continue;
+        const axes = source.gamepad.axes;
+        // axes[2] = X (strafe/turn), axes[3] = Y (forward/back)
+        if (source.handedness === 'left') {
+            // Left stick: locomotion
+            const mx = (axes[2] || 0);
+            const mz = (axes[3] || 0);
+            if (Math.abs(mx) > 0.15 || Math.abs(mz) > 0.15) {
+                const speed = 4.0 * dt;
+                const cam = renderer.xr.getCamera();
+                const dir = new THREE.Vector3(mx, 0, mz);
+                // Rotate movement by camera yaw
+                const q = new THREE.Quaternion();
+                cam.getWorldQuaternion(q);
+                const euler = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+                dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), euler.y);
+                cameraGroup.position.add(dir.multiplyScalar(speed));
+            }
+        } else if (source.handedness === 'right') {
+            // Right stick X: snap turn (30 degrees)
+            const turn = axes[2] || 0;
+            vrSnapCooldown -= dt;
+            if (Math.abs(turn) > 0.6 && vrSnapCooldown <= 0) {
+                const angle = turn > 0 ? -Math.PI / 6 : Math.PI / 6;
+                cameraGroup.rotateY(angle);
+                vrSnapCooldown = 0.3;
+            } else if (Math.abs(turn) < 0.3) {
+                vrSnapCooldown = 0;
+            }
+        }
+    }
+}
+
+const gltfLoader = new GLTFLoader();
+const rgbeLoader = new RGBELoader();
+
+// ---- Ambient audio ----
+// Supports three modes:
+//   1. URL/stream — HTML5 Audio element with loop
+//   2. Procedural — Web Audio API synthesised soundscapes (no external files)
+//   3. None — silent
+let ambientAudio = null;   // Audio element (URL mode)
+let ambientCtx = null;     // AudioContext (procedural mode)
+let ambientGain = null;    // master gain node
+let ambientMuted = false;
+
+function initAmbientAudio(src, volume, soundscape) {
+    if (src) {
+        // URL/stream mode
+        ambientAudio = new Audio(src);
+        ambientAudio.loop = true;
+        ambientAudio.volume = Math.max(0, Math.min(1, volume));
+        ambientAudio.crossOrigin = 'anonymous';
+    } else if (soundscape) {
+        // Procedural mode — will init AudioContext on user gesture
+        ambientAudio = {_procedural: soundscape, _volume: volume};
+    }
+}
+
+function startAmbientAudio() {
+    if (!ambientAudio) return;
+    if (ambientAudio._procedural) {
+        // Start procedural soundscape (needs user gesture)
+        const scape = ambientAudio._procedural;
+        const vol = ambientAudio._volume || 0.4;
+        ambientAudio = null; // consumed
+        _startProceduralAudio(scape, vol);
+    } else if (ambientAudio.paused) {
+        ambientAudio.play().catch(() => {});
+    }
+}
+
+// Procedural ambient soundscapes via Web Audio API
+function _startProceduralAudio(scape, volume) {
+    ambientCtx = new (window.AudioContext || window.webkitAudioContext)();
+    ambientGain = ambientCtx.createGain();
+    ambientGain.gain.value = volume;
+    ambientGain.connect(ambientCtx.destination);
+
+    // Noise generator (wind/rain base)
+    function makeNoise(type, filterFreq, filterQ, gain) {
+        const bufSize = ambientCtx.sampleRate * 4;
+        const buf = ambientCtx.createBuffer(1, bufSize, ambientCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+        const src = ambientCtx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        const filter = ambientCtx.createBiquadFilter();
+        filter.type = type;
+        filter.frequency.value = filterFreq;
+        filter.Q.value = filterQ;
+        const g = ambientCtx.createGain();
+        g.gain.value = gain;
+        src.connect(filter);
+        filter.connect(g);
+        g.connect(ambientGain);
+        src.start();
+        return {src, filter, gain: g};
+    }
+
+    // Tone generator (birds/crickets/hum)
+    function makeTone(freq, type, gain, detune) {
+        const osc = ambientCtx.createOscillator();
+        osc.type = type || 'sine';
+        osc.frequency.value = freq;
+        if (detune) osc.detune.value = detune;
+        const g = ambientCtx.createGain();
+        g.gain.value = gain;
+        osc.connect(g);
+        g.connect(ambientGain);
+        osc.start();
+        return {osc, gain: g};
+    }
+
+    // Bird chirp scheduler
+    function scheduleBirds(minFreq, maxFreq, interval, chirpGain) {
+        function chirp() {
+            const freq = minFreq + Math.random() * (maxFreq - minFreq);
+            const osc = ambientCtx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            const g = ambientCtx.createGain();
+            const now = ambientCtx.currentTime;
+            g.gain.setValueAtTime(0, now);
+            g.gain.linearRampToValueAtTime(chirpGain, now + 0.05);
+            g.gain.linearRampToValueAtTime(chirpGain * 0.6, now + 0.1);
+            g.gain.linearRampToValueAtTime(chirpGain, now + 0.15);
+            g.gain.linearRampToValueAtTime(0, now + 0.25);
+            osc.connect(g);
+            g.connect(ambientGain);
+            osc.start(now);
+            osc.stop(now + 0.3);
+            setTimeout(chirp, interval * (0.5 + Math.random()) * 1000);
+        }
+        setTimeout(chirp, Math.random() * 2000);
+    }
+
+    const scapes = {
+        forest() {
+            makeNoise('lowpass', 400, 1, 0.08);        // gentle wind
+            scheduleBirds(2000, 4500, 2, 0.12);          // bird 1
+            scheduleBirds(3000, 5500, 3.5, 0.08);        // bird 2
+            scheduleBirds(1500, 2500, 5, 0.06);           // distant bird
+            makeTone(180, 'sine', 0.02);                  // deep forest hum
+        },
+        cafe() {
+            makeNoise('bandpass', 800, 0.5, 0.15);     // conversation murmur
+            makeNoise('highpass', 3000, 1, 0.03);       // clinking/ambient
+            makeTone(220, 'sine', 0.01);                 // room tone
+        },
+        'city-street'() {
+            makeNoise('lowpass', 600, 0.8, 0.12);       // traffic rumble
+            makeNoise('bandpass', 2000, 0.5, 0.06);     // mid-range city hum
+            makeTone(85, 'sawtooth', 0.015);              // engine drone
+        },
+        rainy() {
+            makeNoise('highpass', 1000, 0.5, 0.2);      // rain hiss
+            makeNoise('lowpass', 200, 1, 0.08);          // distant thunder rumble
+            makeTone(60, 'sine', 0.03);                   // low rumble
+        },
+        winter() {
+            makeNoise('bandpass', 500, 2, 0.1);         // wind
+            makeNoise('highpass', 4000, 1, 0.04);        // snow crunch texture
+        },
+        beach() {
+            // Wave cycle: low surge + high wash
+            makeNoise('lowpass', 300, 0.8, 0.12);       // wave body
+            makeNoise('bandpass', 1200, 0.5, 0.08);     // wave wash
+            scheduleBirds(2500, 3500, 6, 0.05);           // seagulls
+        },
+        night() {
+            makeNoise('bandpass', 3500, 3, 0.04);       // crickets texture
+            makeTone(3800, 'sine', 0.015);                // cricket tone 1
+            makeTone(4200, 'sine', 0.01);                 // cricket tone 2
+            makeTone(100, 'sine', 0.01);                  // night hum
+        },
+        'space-station'() {
+            makeTone(60, 'sawtooth', 0.03);               // reactor hum
+            makeTone(120, 'sine', 0.02);                   // harmonic
+            makeNoise('bandpass', 200, 3, 0.05);          // ventilation
+            makeNoise('highpass', 6000, 2, 0.02);          // electronic hiss
+        },
+    };
+
+    if (scapes[scape]) {
+        scapes[scape]();
+    }
+}
+
+// ---- Pointer lock ----
+const instructions = document.getElementById('instructions');
+const coords = document.getElementById('coords');
+let locked = false;
+
+instructions.addEventListener('click', () => {
+    renderer.domElement.requestPointerLock();
+});
+document.addEventListener('pointerlockchange', () => {
+    locked = !!document.pointerLockElement;
+    instructions.style.display = locked ? 'none' : 'block';
+    if (locked) startAmbientAudio();
+});
+
+// ---- Mouse look ----
+let yaw = 0, pitch = 0;
+document.addEventListener('mousemove', e => {
+    if (!locked) return;
+    yaw -= e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+    pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, pitch));
+});
+
+// ---- Movement ----
+const keys = {};
+document.addEventListener('keydown', e => keys[e.code] = true);
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+const velocity = new THREE.Vector3();
+let onGround = true;
+let gravity = -9.81;
+let playerY = 1.6;
+
+function updateMovement(dt) {
+    // Desktop FPS movement — operates on cameraGroup (camera is child at origin)
+    const speed = 6.0;
+    const dir = new THREE.Vector3();
+    if (keys['KeyW']) dir.z -= 1;
+    if (keys['KeyS']) dir.z += 1;
+    if (keys['KeyA']) dir.x -= 1;
+    if (keys['KeyD']) dir.x += 1;
+    dir.normalize();
+
+    const sin = Math.sin(yaw), cos = Math.cos(yaw);
+    const mx = dir.x * cos - dir.z * sin;
+    const mz = dir.x * sin + dir.z * cos;
+
+    velocity.x = mx * speed;
+    velocity.z = mz * speed;
+
+    if (keys['Space'] && onGround) {
+        velocity.y = 5.0;
+        onGround = false;
+    }
+    if (!onGround) {
+        velocity.y += gravity * dt;
+    }
+
+    cameraGroup.position.x += velocity.x * dt;
+    cameraGroup.position.z += velocity.z * dt;
+    cameraGroup.position.y += velocity.y * dt;
+
+    if (cameraGroup.position.y <= playerY) {
+        cameraGroup.position.y = playerY;
+        velocity.y = 0;
+        onGround = true;
+    }
+
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+
+    const p = cameraGroup.position;
+    coords.textContent = `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`;
+}
+
+// ---- Script execution engine ----
+// Inspired by Meta Horizon Worlds component patterns:
+// entity registry, typed event bus, state machines, throttled AI
+
+// Global entity registry: id → {obj3d, name, scripts[]}
+const entityRegistry = new Map();
+
+// Event bus for inter-entity communication
+const eventBus = {
+    _listeners: new Map(),
+    on(event, callback) {
+        if (!this._listeners.has(event)) this._listeners.set(event, []);
+        this._listeners.get(event).push(callback);
+    },
+    off(event, callback) {
+        const arr = this._listeners.get(event);
+        if (arr) this._listeners.set(event, arr.filter(cb => cb !== callback));
+    },
+    emit(event, data) {
+        const arr = this._listeners.get(event);
+        if (arr) for (const cb of arr) { try { cb(data); } catch(e) { console.warn('Event error:', event, e); } }
+    },
+};
+
+// State machine (declarative config, per-entity)
+class StateMachine {
+    constructor(states, initialState) {
+        this.states = {};
+        for (const s of states) this.states[s.name] = s;
+        this.current = null;
+        this.transition(initialState);
+    }
+    transition(name) {
+        if (this.current && this.states[this.current]?.onExit) {
+            try { this.states[this.current].onExit(); } catch(e) {}
+        }
+        this.current = name;
+        if (this.states[name]?.onEnter) {
+            try { this.states[name].onEnter(); } catch(e) {}
+        }
+    }
+    update(dt) {
+        const s = this.states[this.current];
+        if (!s) return;
+        if (s.onUpdate) { try { s.onUpdate(dt); } catch(e) {} }
+        if (s.edges) {
+            for (const edge of s.edges) {
+                if (edge.condition && edge.condition()) {
+                    this.transition(edge.target);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+// Each running script instance
+const scriptInstances = [];
+
+function compileScript(code) {
+    return new Function('ctx', 'THREE', code);
+}
+
+function findNearby(obj3d, radius) {
+    const pos = obj3d.position;
+    const result = [];
+    scene.traverse(child => {
+        if (child === obj3d || !(child.isMesh || child.isGroup)) return;
+        const d = pos.distanceTo(child.position);
+        if (d < radius) result.push({object: child, distance: d});
+    });
+    result.sort((a, b) => a.distance - b.distance);
+    return result;
+}
+
+function distToPlayer(obj3d) {
+    // In VR, camera.position is local to cameraGroup; use world position
+    const playerPos = new THREE.Vector3();
+    camera.getWorldPosition(playerPos);
+    return playerPos.distanceTo(obj3d.position);
+}
+
+// Shared state per entity — all scripts on the same entity share one state
+const entitySharedState = new Map();
+
+function createCtx(obj3d, scriptDef, entityId) {
+    if (!entitySharedState.has(entityId)) entitySharedState.set(entityId, {});
+    return {
+        entity: obj3d,
+        entityId,
+        deltaTime: 0,
+        elapsed: 0,
+        state: entitySharedState.get(entityId),
+        camera,
+        scene,
+        events: eventBus,
+        nearby: [],
+        props: scriptDef.props || {},
+        player: camera,
+        distToPlayer: () => distToPlayer(obj3d),
+        findNearby: (r) => findNearby(obj3d, r || 10),
+        getEntity: (id) => entityRegistry.get(id),
+        StateMachine,
+    };
+}
+
+// AI tick throttling: scripts with event='update' run at 60fps,
+// but 'player_near' and 'timer' checks run at ~4Hz for performance
+let aiTickAccum = 0;
+const AI_TICK_INTERVAL = 0.25;
+
+// Raycaster for click interactions
+const raycaster = new THREE.Raycaster();
+const screenCenter = new THREE.Vector2(0, 0);
+
+document.addEventListener('click', () => {
+    if (!locked) return;
+    raycaster.setFromCamera(screenCenter, camera);
+    const hits = raycaster.intersectObjects(scene.children, true);
+    if (!hits.length) return;
+    // Walk up to find the entity root (has userData.entityId)
+    let target = hits[0].object;
+    while (target && !target.userData.entityId && target.parent) target = target.parent;
+    if (!target?.userData.entityId) return;
+    const eid = target.userData.entityId;
+    // Fire 'interact' scripts on this entity
+    for (const inst of scriptInstances) {
+        if (inst.event === 'interact' && inst.ctx.entityId === eid) {
+            inst.ctx.hitPoint = hits[0].point;
+            try { inst.fn(inst.ctx, THREE); } catch (e) {
+                console.warn('Script interact error:', e);
+            }
+        }
+    }
+    // Also emit on event bus
+    eventBus.emit('interact', {entityId: eid, point: hits[0].point});
+});
+
+// ---- HDRI skybox loader ----
+function loadHDRI(hdriName) {
+    const url = `https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/${hdriName}_1k.hdr`;
+    rgbeLoader.load(url, texture => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = texture;
+        scene.environment = texture;
+    }, undefined, () => {
+        console.warn('HDRI load failed, keeping solid sky color');
+    });
+}
+
+// ---- Build scene from JSON ----
+async function loadScene() {
+    const resp = await fetch(SCENE_URL);
+    const data = await resp.json();
+    const env = data.environment;
+
+    // Sky
+    const skyColor = new THREE.Color(env.skyColor);
+    scene.background = skyColor;
+
+    // Ambient audio — URL takes priority, then procedural soundscape
+    if (env.ambientAudio) {
+        initAmbientAudio(env.ambientAudio, env.ambientVolume || 0.4, null);
+    } else if (env.soundscape) {
+        initAmbientAudio(null, env.ambientVolume || 0.4, env.soundscape);
+    }
+
+    // HDRI skybox — overrides solid color if configured
+    if (env.skybox === 'hdri') {
+        // Use sky_color field as HDRI asset name (e.g. "kloofendal_48d_partly_cloudy")
+        // or fall back to a default outdoor HDRI
+        const hdriName = env.hdriAsset || 'kloofendal_48d_partly_cloudy';
+        loadHDRI(hdriName);
+    }
+
+    // Fog
+    scene.fog = new THREE.Fog(new THREE.Color(env.fogColor), env.fogNear, env.fogFar);
+
+    // Ambient light
+    const ambient = new THREE.AmbientLight(0xffffff, env.ambientLight);
+    scene.add(ambient);
+
+    // Directional light (sun)
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+    sun.position.set(30, 50, 20);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -50;
+    sun.shadow.camera.right = 50;
+    sun.shadow.camera.top = 50;
+    sun.shadow.camera.bottom = -50;
+    scene.add(sun);
+    vrSun = sun; // reference for VR shadow downgrade
+
+    // Hemisphere light for natural sky bounce
+    const hemi = new THREE.HemisphereLight(skyColor, new THREE.Color(env.groundColor), 0.3);
+    scene.add(hemi);
+
+    // Ground plane
+    const groundGeo = new THREE.CircleGeometry(env.groundSize, 64);
+    const groundMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(env.groundColor),
+        roughness: 0.9,
+    });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Gravity
+    gravity = env.gravity;
+
+    // Spawn — set on cameraGroup so VR and desktop both work
+    cameraGroup.position.set(data.spawn.x, data.spawn.y, data.spawn.z);
+    if (!renderer.xr.enabled) {
+        // Desktop: camera is at group origin, no offset needed
+        camera.position.set(0, 0, 0);
+    }
+    playerY = data.spawn.y;
+
+    // Primitives map
+    const primitiveGeo = {
+        box: () => new THREE.BoxGeometry(1, 1, 1),
+        sphere: () => new THREE.SphereGeometry(0.5, 32, 32),
+        cylinder: () => new THREE.CylinderGeometry(0.5, 0.5, 1, 32),
+        cone: () => new THREE.ConeGeometry(0.5, 1, 32),
+        plane: () => new THREE.PlaneGeometry(1, 1),
+        torus: () => new THREE.TorusGeometry(0.5, 0.15, 16, 48),
+        ring: () => new THREE.RingGeometry(0.3, 0.5, 32),
+    };
+
+    // Entities
+    const behaviorObjects = [];
+    const gltfPromises = [];
+
+    for (const ent of data.entities) {
+        let mesh;
+        if (ent.primitive && primitiveGeo[ent.primitive]) {
+            const geo = primitiveGeo[ent.primitive]();
+            const mat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(ent.primitiveColor),
+                roughness: 0.7,
+                metalness: 0.1,
+            });
+            mesh = new THREE.Mesh(geo, mat);
+        } else if (ent.asset) {
+            // GLTF model — load asynchronously, use placeholder until ready
+            const placeholder = new THREE.Group();
+            mesh = placeholder;
+            const p = new Promise(resolve => {
+                gltfLoader.load(ent.asset, gltf => {
+                    const model = gltf.scene;
+                    model.traverse(child => {
+                        if (child.isMesh) {
+                            child.castShadow = ent.castShadow;
+                            child.receiveShadow = ent.receiveShadow;
+                        }
+                    });
+                    placeholder.add(model);
+                    resolve();
+                }, undefined, err => {
+                    console.warn('GLTF load error:', ent.name, err);
+                    const geo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+                    const mat = new THREE.MeshStandardMaterial({color: 0xff4444, wireframe: true});
+                    placeholder.add(new THREE.Mesh(geo, mat));
+                    resolve();
+                });
+            });
+            gltfPromises.push(p);
+        } else {
+            continue;
+        }
+
+        mesh.position.set(...ent.position);
+        mesh.rotation.set(
+            ent.rotation[0] * Math.PI / 180,
+            ent.rotation[1] * Math.PI / 180,
+            ent.rotation[2] * Math.PI / 180,
+        );
+        mesh.scale.set(...ent.scale);
+        if (mesh.isMesh) {
+            mesh.castShadow = ent.castShadow;
+            mesh.receiveShadow = ent.receiveShadow;
+        }
+        scene.add(mesh);
+
+        // Register in entity registry
+        mesh.userData.entityId = ent.id;
+        mesh.userData.entityName = ent.name;
+        entityRegistry.set(ent.id, {obj3d: mesh, name: ent.name, scripts: []});
+
+        if (ent.behavior !== 'static') {
+            behaviorObjects.push({mesh, behavior: ent.behavior, speed: ent.behaviorSpeed});
+        }
+
+        // Compile and register entity scripts
+        if (ent.scripts && ent.scripts.length) {
+            for (const scriptDef of ent.scripts) {
+                try {
+                    const fn = compileScript(scriptDef.code);
+                    const ctx = createCtx(mesh, scriptDef, ent.id);
+                    const inst = {fn, ctx, event: scriptDef.event, fired: false};
+                    scriptInstances.push(inst);
+                    entityRegistry.get(ent.id).scripts.push(inst);
+                    // Custom event scripts listen on the event bus
+                    if (scriptDef.event === 'custom' && scriptDef.props.eventName) {
+                        eventBus.on(scriptDef.props.eventName, (data) => {
+                            ctx.eventData = data;
+                            try { fn(ctx, THREE); } catch(e) {
+                                console.warn('Script custom event error:', e);
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Script compile error:', ent.name, e);
+                }
+            }
+        }
+    }
+
+    // Wait for all GLTF models to finish loading
+    if (gltfPromises.length) {
+        await Promise.all(gltfPromises);
+    }
+
+    // Fire 'start' scripts once
+    for (const inst of scriptInstances) {
+        if (inst.event === 'start' && !inst.fired) {
+            inst.fired = true;
+            try { inst.fn(inst.ctx, THREE); } catch (e) {
+                console.warn('Script start error:', e);
+            }
+        }
+    }
+
+    // Portals — glowing rectangles
+    for (const portal of data.portals) {
+        const portalGeo = new THREE.PlaneGeometry(portal.width, portal.height);
+        const portalMat = new THREE.MeshBasicMaterial({
+            color: 0x58a6ff,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide,
+        });
+        const portalMesh = new THREE.Mesh(portalGeo, portalMat);
+        portalMesh.position.set(...portal.position);
+        portalMesh.position.y += portal.height / 2;
+        scene.add(portalMesh);
+
+        const frameGeo = new THREE.EdgesGeometry(portalGeo);
+        const frameMat = new THREE.LineBasicMaterial({color: 0x58a6ff, linewidth: 2});
+        const frame = new THREE.LineSegments(frameGeo, frameMat);
+        frame.position.copy(portalMesh.position);
+        scene.add(frame);
+
+        behaviorObjects.push({
+            mesh: portalMesh,
+            behavior: '_portal_glow',
+            speed: 1,
+            portalData: portal,
+        });
+    }
+
+    return behaviorObjects;
+}
+
+// ---- Animation loop ----
+let behaviorObjects = [];
+loadScene().then(objs => { behaviorObjects = objs; });
+
+const clock = new THREE.Clock();
+
+function animate() {
+    const dt = Math.min(clock.getDelta(), 0.1);
+    const t = clock.elapsedTime;
+
+    // Movement: desktop uses keyboard, VR uses thumbsticks
+    if (vrMode) {
+        updateVRMovement(dt);
+        // Show controller rays
+        for (const vc of vrControllers) vc.line.visible = true;
+    } else {
+        if (locked) updateMovement(dt);
+        for (const vc of vrControllers) vc.line.visible = false;
+    }
+
+    // Built-in behaviors
+    for (const obj of behaviorObjects) {
+        const m = obj.mesh;
+        const s = obj.speed;
+        switch (obj.behavior) {
+            case 'rotate':
+                m.rotation.y += s * dt;
+                break;
+            case 'bob':
+                m.position.y += Math.sin(t * s * 2) * 0.003;
+                break;
+            case 'orbit':
+                m.position.x = Math.cos(t * s) * 3;
+                m.position.z = Math.sin(t * s) * 3;
+                break;
+            case 'billboard':
+                m.lookAt(camera.position);
+                break;
+            case '_portal_glow':
+                m.material.opacity = 0.2 + 0.15 * Math.sin(t * 2);
+                break;
+        }
+    }
+
+    // Execute entity scripts
+    aiTickAccum += dt;
+    const aiTick = aiTickAccum >= AI_TICK_INTERVAL;
+    if (aiTick) aiTickAccum -= AI_TICK_INTERVAL;
+
+    for (const inst of scriptInstances) {
+        inst.ctx.deltaTime = dt;
+        inst.ctx.elapsed = t;
+
+        if (inst.event === 'update') {
+            // Full-rate: every frame
+            try { inst.fn(inst.ctx, THREE); } catch (e) {
+                console.warn('Script update error:', e);
+            }
+        } else if (aiTick) {
+            // Throttled events: ~4 Hz
+            if (inst.event === 'player_near' || inst.event === 'player_far') {
+                const d = distToPlayer(inst.ctx.entity);
+                const radius = inst.ctx.props.radius || 5;
+                const wasNear = inst._wasNear || false;
+                const isNear = d < radius;
+                inst._wasNear = isNear;
+                if (inst.event === 'player_near' && isNear) {
+                    try { inst.fn(inst.ctx, THREE); } catch (e) {
+                        console.warn('Script player_near error:', e);
+                    }
+                } else if (inst.event === 'player_far' && wasNear && !isNear) {
+                    try { inst.fn(inst.ctx, THREE); } catch (e) {
+                        console.warn('Script player_far error:', e);
+                    }
+                }
+            } else if (inst.event === 'timer') {
+                const interval = inst.ctx.props.interval || 2;
+                if (!inst.lastTimer) inst.lastTimer = 0;
+                if (t - inst.lastTimer >= interval) {
+                    inst.lastTimer = t;
+                    try { inst.fn(inst.ctx, THREE); } catch (e) {
+                        console.warn('Script timer error:', e);
+                    }
+                }
+            }
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+// setAnimationLoop works for both desktop (uses rAF) and VR (uses XR frame)
+renderer.setAnimationLoop(animate);
+
+// ---- Resize ----
+addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+});
+
+// ---- Mute toggle ----
+const muteBtn = document.getElementById('mute-btn');
+muteBtn.addEventListener('click', e => {
+    e.preventDefault();
+    ambientMuted = !ambientMuted;
+    if (ambientAudio && ambientAudio instanceof Audio) {
+        ambientAudio.muted = ambientMuted;
+    }
+    if (ambientGain) {
+        ambientGain.gain.value = ambientMuted ? 0 : (ambientAudio?._volume || 0.4);
+    }
+    muteBtn.style.opacity = ambientMuted ? '0.3' : '1';
+});
+</script>
+</body>
+</html>

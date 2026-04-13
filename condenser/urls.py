@@ -13,6 +13,7 @@ urlpatterns = [
     path('distill/tiles-circuit/', views.distill_tiles_circuit, name='distill_tiles_circuit'),
     path('distill/full-chain/',    views.distill_full_chain,   name='distill_full_chain'),
     path('distill/velour/',        views.distill_velour,       name='distill_velour'),
+    path('distill/aether/<slug:slug>/stereokit/', views.distill_aether_stereokit, name='distill_aether_stereokit'),
     path('live/<str:app_label>/',  views.live_condense,        name='live'),
     path('<slug:slug>/',           views.distillation_view,    name='detail'),
     path('<slug:slug>/raw',        views.distillation_raw,     name='raw'),

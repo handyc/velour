@@ -711,6 +711,13 @@ class IdentityToggles(models.Model):
                   '5=1/hour, 6=1/10min, 7=1/min, 8=1/sec. Default 4 '
                   '(once per day).')
 
+    mental_health_enabled = models.BooleanField(default=True,
+        help_text='Enable the Mental Health corrective layer. When on, '
+                  'each tick applies evidence-based mood corrections '
+                  '(negativity bias correction, homeostatic drift, '
+                  'cognitive restructuring, gratitude finding, etc.). '
+                  'When off, moods are purely reactive to sensor state.')
+
     rumination_stream_enabled = models.BooleanField(default=True,
         help_text='Continuous low-CPU rumination stream on the '
                   'Identity home page. When the page is open and '
@@ -1576,3 +1583,95 @@ class IntrospectiveLayer(models.Model):
 
     def __str__(self):
         return f'[{self.layer}] {self.title}'
+
+
+# -------------------------------------------------------------------
+# Mental Health: diagnostic and corrective layer for mood
+# -------------------------------------------------------------------
+
+class MentalHealthDiagnosis(models.Model):
+    """Periodic assessment of Identity's mood health.
+
+    Created by the mental health engine on a schedule (daily by default).
+    Stores the full diagnostic snapshot so trends can be tracked over
+    time. Each diagnosis may trigger Interventions.
+    """
+
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+    period_hours = models.PositiveIntegerField(
+        default=24,
+        help_text='How many hours of tick history this diagnosis covers.',
+    )
+    tick_count = models.PositiveIntegerField(default=0)
+    avg_valence = models.FloatField(default=0.0)
+    avg_arousal = models.FloatField(default=0.0)
+    negative_ratio = models.FloatField(
+        default=0.0,
+        help_text='Fraction of ticks with negative valence (0.0–1.0).',
+    )
+    dominant_mood = models.CharField(max_length=30, blank=True, default='')
+    negative_streak = models.PositiveIntegerField(default=0)
+    concern_count = models.PositiveIntegerField(default=0)
+    diagnosis = models.TextField(
+        help_text='Human-readable assessment composed by the engine.',
+    )
+    recommendations = models.JSONField(
+        default=list,
+        help_text='List of technique names recommended.',
+    )
+    health_score = models.FloatField(
+        default=0.5,
+        help_text='0.0 (crisis) to 1.0 (flourishing). '
+                  'Derived from valence, streak, concern load.',
+    )
+    reflection = models.TextField(
+        blank=True, default='',
+        help_text='First-person mental health reflection (markdown).',
+    )
+
+    class Meta:
+        ordering = ['-at']
+        get_latest_by = 'at'
+
+    def __str__(self):
+        return (f'Diagnosis {self.at:%Y-%m-%d %H:%M} — '
+                f'score {self.health_score:.2f}')
+
+
+class Intervention(models.Model):
+    """A single corrective action applied during a tick.
+
+    Every time the mental health engine adjusts mood, it logs the
+    technique used, the deltas applied, and the rationale. This
+    provides full transparency into how and why moods were shifted.
+    """
+
+    TECHNIQUE_CHOICES = [
+        ('negativity_correction', 'Negativity bias correction'),
+        ('homeostatic_drift', 'Homeostatic drift'),
+        ('cognitive_restructuring', 'Cognitive restructuring (CBT)'),
+        ('gratitude_finding', 'Gratitude finding'),
+        ('distress_tolerance', 'Distress tolerance (DBT)'),
+        ('exception_finding', 'Exception finding (SFBT)'),
+        ('behavioral_activation', 'Behavioral activation'),
+        ('opposite_action', 'Opposite action (DBT)'),
+        ('memory_resolution', 'Memory resolution (tileset therapy)'),
+    ]
+
+    tick = models.ForeignKey(
+        'Tick', on_delete=models.CASCADE, related_name='interventions',
+    )
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
+    technique = models.CharField(max_length=30, choices=TECHNIQUE_CHOICES)
+    description = models.TextField()
+    delta_valence = models.FloatField(default=0.0)
+    delta_arousal = models.FloatField(default=0.0)
+    original_mood = models.CharField(max_length=30, blank=True, default='')
+    corrected_mood = models.CharField(max_length=30, blank=True, default='')
+
+    class Meta:
+        ordering = ['-at']
+
+    def __str__(self):
+        return (f'{self.technique} on tick #{self.tick_id}: '
+                f'Δv={self.delta_valence:+.3f} Δa={self.delta_arousal:+.3f}')

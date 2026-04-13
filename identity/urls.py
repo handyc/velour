@@ -37,6 +37,8 @@ urlpatterns = [
     path('ticks/<int:tick_pk>/feedback/', views.rumination_feedback,
          name='rumination_feedback'),
 
+    path('mental-health/', views.mental_health, name='mental_health'),
+
     # Hofstadter routes — absorbed from the standalone hofstadter app.
     path('hofstadter/', views.hof_home, name='hof_home'),
     path('hofstadter/experiments/', views.hof_experiment_list, name='hof_experiment_list'),

@@ -40,7 +40,29 @@ def _apply_node_post(node, post):
 
 # --- node views ----------------------------------------------------
 
-@login_required
+
+def _node_status(age_seconds, enabled, is_dormant_expected):
+    """Classify a node as online/stale/offline/dormant/unknown.
+
+    Thresholds are fixed:
+      < 5 min   → online  (green)
+      5-30 min  → stale   (yellow)
+      > 30 min  → offline (red), or dormant (gray) if power mode is
+                  solar/battery/on_demand
+      never     → unknown (blue dashed)
+      disabled  → unknown + disabled
+    """
+    if not enabled:
+        return 'disabled unknown'
+    if age_seconds is None:
+        return 'unknown'
+    if age_seconds < 300:
+        return 'online'
+    if age_seconds < 1800:
+        return 'stale'
+    return 'dormant' if is_dormant_expected else 'offline'
+
+
 def fleet_json(request):
     """Live fleet status for the JS poller on the list page."""
     from django.utils import timezone as tz
@@ -57,8 +79,14 @@ def fleet_json(request):
             else:
                 ago = f'{int(age // 3600)}h ago'
         else:
+            age = None
             ago = 'never'
-        data[n.slug] = {'ago': ago, 'ip': n.last_ip or '', 'fw': n.firmware_version or ''}
+        data[n.slug] = {
+            'ago': ago,
+            'ip': n.last_ip or '',
+            'fw': n.firmware_version or '',
+            'status': _node_status(age, n.enabled, n.is_dormant_expected),
+        }
     return JsonResponse(data)
 
 
@@ -83,8 +111,15 @@ def node_list(request):
     if request.GET.get('enabled_only'):
         qs = qs.filter(enabled=True)
 
+    from django.utils import timezone as tz
+    now = tz.now()
+    nodes = list(qs)
+    for n in nodes:
+        age = (now - n.last_seen_at).total_seconds() if n.last_seen_at else None
+        n.fleet_status = _node_status(age, n.enabled, n.is_dormant_expected)
+
     return render(request, 'nodes/list.html', {
-        'nodes': qs,
+        'nodes': nodes,
         'hardware_profiles': HardwareProfile.objects.all(),
         'experiments': Experiment.objects.all(),
         'power_choices': Node.POWER_CHOICES,
@@ -92,7 +127,7 @@ def node_list(request):
         'exp_filter': exp_filter,
         'pm_filter': pm_filter,
         'enabled_only': bool(request.GET.get('enabled_only')),
-        'node_count': qs.count(),
+        'node_count': len(nodes),
         'total_count': Node.objects.count(),
     })
 

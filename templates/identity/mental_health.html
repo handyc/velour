@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+
+{% block title %}Mental Health — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .mh-wrap { max-width: 960px; }
+    .mh-header { margin-bottom: 1rem; }
+    .mh-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; margin: 0; }
+    .mh-header .period { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .period-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .period-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .period-bar a.active { color: #58a6ff; border-color: #58a6ff; }
+    .period-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .score-ring {
+        width: 120px; height: 120px; margin: 0 auto;
+        position: relative;
+    }
+    .score-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .score-ring .value {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        font-size: 1.6rem; font-weight: 600; color: #c9d1d9;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+
+    .stat-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 0.5rem; margin: 1rem 0;
+    }
+    .stat-box {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.6rem 0.75rem; text-align: center;
+    }
+    .stat-box .num {
+        font-size: 1.3rem; font-weight: 600; color: #c9d1d9;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .stat-box .lbl { font-size: 0.7rem; color: #6e7681; margin-top: 0.15rem; }
+
+    .mh-card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .mh-card h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #c9d1d9; font-weight: 500; }
+
+    .diag-text { color: #c9d1d9; font-size: 0.88rem; line-height: 1.6; }
+
+    .technique-bar {
+        display: flex; align-items: center; gap: 0.5rem;
+        margin: 0.3rem 0; font-size: 0.8rem;
+    }
+    .technique-bar .name { color: #8b949e; min-width: 160px; font-size: 0.78rem; }
+    .technique-bar .bar {
+        height: 14px; background: #238636; border-radius: 3px;
+        min-width: 4px;
+    }
+    .technique-bar .count { color: #6e7681; font-size: 0.72rem; min-width: 2rem; }
+
+    .intervention-row {
+        padding: 0.4rem 0.6rem; background: #0d1117;
+        border-left: 3px solid #238636; border-radius: 3px;
+        margin-bottom: 0.4rem; font-size: 0.8rem;
+    }
+    .intervention-row .meta {
+        color: #6e7681; font-size: 0.7rem;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .intervention-row .desc { color: #c9d1d9; margin-top: 0.2rem; font-size: 0.82rem; }
+    .intervention-row .deltas { color: #8b949e; font-size: 0.72rem; margin-top: 0.15rem; }
+
+    .mood-dist-row {
+        display: flex; align-items: center; gap: 0.5rem;
+        margin: 0.2rem 0; font-size: 0.8rem;
+    }
+    .mood-dist-row .mood-name { color: #8b949e; min-width: 120px; }
+    .mood-dist-row .mood-bar { height: 12px; background: #58a6ff; border-radius: 3px; min-width: 2px; }
+    .mood-dist-row .mood-count { color: #6e7681; font-size: 0.72rem; }
+
+    .reflection-text {
+        background: #0d1117; border-left: 3px solid #bc8cff;
+        padding: 0.75rem 1rem; border-radius: 0 6px 6px 0;
+        color: #c9d1d9; font-size: 0.88rem; line-height: 1.6;
+        font-style: italic; white-space: pre-line;
+    }
+
+    .exception-item {
+        padding: 0.3rem 0.5rem; background: #0d1117;
+        border-left: 2px solid #3fb950; border-radius: 3px;
+        margin: 0.3rem 0; font-size: 0.78rem; color: #c9d1d9;
+    }
+
+    .memory-card {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.6rem 0.85rem; margin-bottom: 0.5rem;
+    }
+    .memory-card .mem-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 0.3rem;
+    }
+    .memory-card .mem-name { color: #c9d1d9; font-size: 0.82rem; font-weight: 500; }
+    .memory-card .mem-meta { color: #6e7681; font-size: 0.7rem; }
+    .memory-card .mem-mood {
+        display: inline-block; padding: 0.1rem 0.4rem;
+        border-radius: 3px; font-size: 0.72rem; font-weight: 500;
+    }
+    .memory-card .mem-mood.negative { background: rgba(248,81,73,0.15); color: #f85149; }
+    .memory-card .mem-mood.positive { background: rgba(63,185,80,0.15); color: #3fb950; }
+    .memory-card .mem-mood.neutral { background: rgba(139,148,158,0.15); color: #8b949e; }
+
+    .resolution-card {
+        background: #0d1117; border-left: 3px solid #a371f7;
+        padding: 0.6rem 0.85rem; margin-bottom: 0.5rem; border-radius: 0 6px 6px 0;
+    }
+    .resolution-card .res-technique {
+        font-size: 0.72rem; color: #a371f7; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 0.2rem;
+    }
+    .resolution-card .res-text { color: #c9d1d9; font-size: 0.82rem; line-height: 1.55; font-style: italic; }
+
+    .session-narrative {
+        background: #0d1117; border-left: 3px solid #d2a8ff;
+        padding: 0.75rem 1rem; border-radius: 0 6px 6px 0;
+        color: #c9d1d9; font-size: 0.85rem; line-height: 1.6;
+        white-space: pre-line;
+    }
+
+    .trend-chart { width: 100%; height: 80px; display: block; }
+
+    .rec-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+    .rec-list li {
+        padding: 0.3rem 0.5rem; margin: 0.2rem 0;
+        background: #0d1117; border-radius: 4px;
+        font-size: 0.82rem; color: #c9d1d9;
+        border-left: 2px solid #d29922;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mh-wrap">
+    <div class="mh-header">
+        <h1>Mental Health</h1>
+        <span class="period">{{ hours }}h window &middot; {{ diag.tick_count|default:0 }} ticks analysed</span>
+    </div>
+
+    <div class="period-bar">
+        <span class="label">window</span>
+        <a href="?hours=1" class="{% if hours == 1 %}active{% endif %}">1h</a>
+        <a href="?hours=6" class="{% if hours == 6 %}active{% endif %}">6h</a>
+        <a href="?hours=24" class="{% if hours == 24 %}active{% endif %}">24h</a>
+        <a href="?hours=72" class="{% if hours == 72 %}active{% endif %}">3d</a>
+        <a href="?hours=168" class="{% if hours == 168 %}active{% endif %}">7d</a>
+    </div>
+
+    {% if diag.tick_count %}
+
+    <!-- Score + key stats -->
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-start; margin-bottom: 1rem;">
+        {% if health_score is not None %}
+        <div class="mh-card" style="flex: 0 0 auto; text-align: center; min-width: 160px;">
+            <h3>Health score</h3>
+            <div class="score-ring">
+                {% widthratio health_score 1 327 as arc_len %}
+                <svg viewBox="0 0 120 120">
+                    <circle cx="60" cy="60" r="52" fill="none" stroke="#21262d" stroke-width="8"/>
+                    <circle cx="60" cy="60" r="52" fill="none"
+                            stroke="{% if health_score >= 0.7 %}#3fb950{% elif health_score >= 0.4 %}#d29922{% else %}#f85149{% endif %}"
+                            stroke-width="8" stroke-linecap="round"
+                            stroke-dasharray="{{ arc_len }} 327"
+                            style="transition: stroke-dasharray 0.6s ease;"/>
+                </svg>
+                <span class="value">{{ health_score|floatformat:2 }}</span>
+            </div>
+        </div>
+        {% endif %}
+
+        <div style="flex: 1 1 0; min-width: 300px;">
+            <div class="stat-grid">
+                <div class="stat-box">
+                    <div class="num" style="color: {% if diag.avg_valence >= 0 %}#3fb950{% else %}#f85149{% endif %};">{{ diag.avg_valence|floatformat:2 }}</div>
+                    <div class="lbl">avg valence</div>
+                </div>
+                <div class="stat-box">
+                    <div class="num">{{ diag.avg_arousal|floatformat:2 }}</div>
+                    <div class="lbl">avg arousal</div>
+                </div>
+                <div class="stat-box">
+                    {% widthratio diag.negative_ratio 1 100 as neg_pct %}
+                    <div class="num" style="color: {% if diag.negative_ratio > 0.5 %}#f85149{% elif diag.negative_ratio > 0.3 %}#d29922{% else %}#3fb950{% endif %};">{{ neg_pct }}%</div>
+                    <div class="lbl">negative ratio</div>
+                </div>
+                <div class="stat-box">
+                    <div class="num">{{ diag.negative_streak }}</div>
+                    <div class="lbl">neg. streak</div>
+                </div>
+                <div class="stat-box">
+                    <div class="num">{{ diag.dominant_mood }}</div>
+                    <div class="lbl">dominant mood</div>
+                </div>
+                <div class="stat-box">
+                    <div class="num">{{ diag.concern_count }}</div>
+                    <div class="lbl">open concerns</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Diagnosis -->
+    <div class="mh-card">
+        <h3>Diagnosis</h3>
+        <div class="diag-text">{{ diag.diagnosis }}</div>
+
+        {% if diag.recommendations %}
+        <h3 style="margin-top: 0.75rem;">Recommended interventions</h3>
+        <ul class="rec-list">
+            {% for r in diag.recommendations %}
+            <li>{{ r|cut:"_" }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <!-- Health score trend -->
+    {% if past_diagnoses %}
+    <div class="mh-card">
+        <h3>Health score trend
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                last {{ past_diagnoses|length }} diagnoses
+            </span>
+        </h3>
+        <svg class="trend-chart" viewBox="0 0 600 80" preserveAspectRatio="none">
+            {% for d in past_diagnoses reversed %}
+            {% widthratio forloop.counter0 past_diagnoses|length 600 as x %}
+            {% widthratio d.health_score 1 80 as y_raw %}
+            <circle cx="{{ x }}" cy="{% widthratio d.health_score 1 80 as yv %}{{ yv }}" r="3"
+                    fill="{% if d.health_score >= 0.7 %}#3fb950{% elif d.health_score >= 0.4 %}#d29922{% else %}#f85149{% endif %}"
+                    transform="translate(0, 80) scale(1, -1)"/>
+            {% endfor %}
+            <!-- Baseline at 0.5 -->
+            <line x1="0" y1="40" x2="600" y2="40" stroke="#30363d" stroke-width="0.5" stroke-dasharray="4,4"/>
+        </svg>
+    </div>
+    {% endif %}
+
+    <!-- Mood distribution -->
+    {% if diag.mood_distribution %}
+    <div class="mh-card">
+        <h3>Mood distribution</h3>
+        {% for mood, count in diag.mood_distribution.items %}
+        <div class="mood-dist-row">
+            <span class="mood-name">{{ mood }}</span>
+            <div class="mood-bar" style="width: {% widthratio count diag.tick_count 200 %}px;"></div>
+            <span class="mood-count">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Technique usage -->
+    {% if technique_counts %}
+    <div class="mh-card">
+        <h3>Technique frequency
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                last 200 interventions
+            </span>
+        </h3>
+        {% for tech, count in technique_counts.items %}
+        <div class="technique-bar">
+            <span class="name">{{ tech }}</span>
+            <div class="bar" style="width: {{ count }}px;"></div>
+            <span class="count">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Exception finding -->
+    {% if exceptions %}
+    <div class="mh-card">
+        <h3>Exception finding
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                when were concerns absent during positive periods?
+            </span>
+        </h3>
+        {% for aspect, exc_list in exceptions.items %}
+        <div style="margin-bottom: 0.5rem;">
+            <div style="font-size: 0.82rem; color: #8b949e; margin-bottom: 0.25rem;">{{ aspect }}</div>
+            {% for ex in exc_list %}
+            <div class="exception-item">
+                {{ ex.at|date:"M d H:i" }} &mdash; {{ ex.mood }}, valence {{ ex.valence|floatformat:2 }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Recent interventions -->
+    {% if recent_interventions %}
+    <div class="mh-card">
+        <h3>Recent interventions
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ recent_interventions|length }} shown
+            </span>
+        </h3>
+        {% for iv in recent_interventions %}
+        <div class="intervention-row">
+            <div class="meta">
+                {{ iv.at|date:"Y-m-d H:i" }} &middot; {{ iv.technique }}
+                &middot; tick #{{ iv.tick_id }}
+            </div>
+            <div class="desc">{{ iv.description }}</div>
+            <div class="deltas">
+                &Delta;v={{ iv.delta_valence|floatformat:3 }}
+                &Delta;a={{ iv.delta_arousal|floatformat:3 }}
+                {% if iv.original_mood != iv.corrected_mood %}
+                &middot; {{ iv.original_mood }} &rarr; {{ iv.corrected_mood }}
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Memory Therapy -->
+    {% if memory_session.memories %}
+    <div class="mh-card">
+        <h3>Memory Therapy
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ memory_session.memories|length }} tile-memories scanned
+                {% if memory_session.negative_memories %} &middot; {{ memory_session.negative_memories|length }} negative{% endif %}
+            </span>
+        </h3>
+
+        {% if memory_session.resolutions %}
+        <div style="margin-bottom: 0.6rem;">
+            {% for res in memory_session.resolutions %}
+            <div class="resolution-card">
+                <div class="res-technique">{{ res.technique }}</div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.2rem;">
+                    <span style="font-size: 0.78rem; color: #8b949e;">
+                        <a href="{% url 'tiles:detail' res.tileset_slug %}" style="color: #58a6ff; text-decoration: none;">{{ res.tileset_name|truncatechars:40 }}</a>
+                    </span>
+                    <span class="mem-mood negative">{{ res.original_mood }}</span>
+                </div>
+                <div class="res-text">{{ res.resolution_text }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if memory_session.session_narrative %}
+        <h3 style="margin-top: 0.75rem;">Session narrative</h3>
+        <div class="session-narrative">{{ memory_session.session_narrative }}</div>
+        {% endif %}
+
+        {% if memory_session.memories %}
+        <details style="margin-top: 0.6rem;">
+            <summary style="font-size: 0.78rem; color: #8b949e; cursor: pointer;">
+                All tile-memories ({{ memory_session.memories|length }})
+            </summary>
+            <div style="margin-top: 0.4rem;">
+                {% for mem in memory_session.memories %}
+                <div class="memory-card">
+                    <div class="mem-header">
+                        <span class="mem-name">
+                            <a href="{% url 'tiles:detail' mem.tileset.slug %}" style="color: #58a6ff; text-decoration: none;">{{ mem.tileset.name|truncatechars:50 }}</a>
+                        </span>
+                        <span class="mem-mood {% if mem.valence is not None %}{% if mem.valence < -0.1 %}negative{% elif mem.valence > 0.1 %}positive{% else %}neutral{% endif %}{% else %}neutral{% endif %}">
+                            {{ mem.mood }}
+                        </span>
+                    </div>
+                    <div class="mem-meta">
+                        {{ mem.created_at|date:"M d H:i" }}
+                        &middot; {{ mem.tile_count }} {{ mem.tile_type }} tiles
+                        {% if mem.valence is not None %}&middot; v={{ mem.valence|floatformat:2 }}{% endif %}
+                        {% if mem.concerns %}&middot; {{ mem.concerns|length }} concerns{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Reflection -->
+    {% if reflection %}
+    <div class="mh-card">
+        <h3>Reflection</h3>
+        <div class="reflection-text">{{ reflection }}</div>
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="mh-card">
+        <h3>No data</h3>
+        <p style="color: #8b949e; font-size: 0.88rem;">
+            No ticks in the last {{ hours }} hours. Run
+            <code>python manage.py identity_tick</code> or click
+            "Tick now" on the <a href="{% url 'identity:home' %}" style="color: #58a6ff;">Identity home</a>
+            to generate data.
+        </p>
+    </div>
+    {% endif %}
+
+    <div style="margin-top: 1.5rem;">
+        <a href="{% url 'identity:home' %}" class="btn btn-secondary">← Back to Identity</a>
+    </div>
+</div>
+{% endblock %}

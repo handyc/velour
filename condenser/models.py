@@ -29,6 +29,7 @@ TIER_CHOICES = [
     ('esp',      'Tier 3: ESP8266 (microcontroller)'),
     ('attiny',   'Tier 4: ATTiny13a (1KB flash)'),
     ('circuit',  'Tier 5: 555 timer circuits'),
+    ('stereokit', 'StereoKit (Quest 3 native)'),
 ]
 
 

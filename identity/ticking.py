@@ -772,6 +772,14 @@ def tick(triggered_by='manual'):
     }
     valence, arousal = MOOD_COORDS.get(mood, (0.0, 0.0))
 
+    # Mental Health corrective layer — apply evidence-based mood
+    # adjustments between rule evaluation and Tick creation.
+    from .mental_health import apply_corrections
+    original_mood = mood
+    mood, intensity, valence, arousal, mh_interventions = (
+        apply_corrections(mood, intensity, valence, arousal, snapshot)
+    )
+
     tick_row = Tick.objects.create(
         triggered_by=triggered_by,
         mood=mood,
@@ -784,6 +792,20 @@ def tick(triggered_by='manual'):
         snapshot=snapshot,
         aspects=full_aspect_list,  # full union, not first-match
     )
+
+    # Log mental health interventions applied to this tick.
+    if mh_interventions:
+        from .models import Intervention
+        for iv in mh_interventions:
+            Intervention.objects.create(
+                tick=tick_row,
+                technique=iv['technique'],
+                description=iv['description'],
+                delta_valence=iv['delta_v'],
+                delta_arousal=iv['delta_a'],
+                original_mood=original_mood,
+                corrected_mood=mood,
+            )
 
     # Write an OracleLabel for the rumination template prediction so
     # the operator can rate it later. Only when the lobe actually

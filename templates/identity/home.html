@@ -376,6 +376,7 @@
             <label><input type="checkbox" name="observer_enabled" {% if toggles.observer_enabled %}checked{% endif %}> Keyboard/mouse observer — this page (counts only, never content)</label>
             <label><input type="checkbox" name="llm_chat_enabled" {% if toggles.llm_chat_enabled %}checked{% endif %}> LLM chat — consult an external LLM as a foreign observer</label>
             <label><input type="checkbox" name="rumination_stream_enabled" {% if toggles.rumination_stream_enabled %}checked{% endif %}> Rumination stream — continuous low-CPU relationship-noticing while you view this page</label>
+            <label><input type="checkbox" name="mental_health_enabled" {% if toggles.mental_health_enabled %}checked{% endif %}> Mental health — corrective mood adjustments between rules and output</label>
 
             <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #21262d;">
                 <div style="font-size: 0.72rem; color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem;">Tile generation frequency</div>
@@ -605,6 +606,24 @@
         {% endif %}
         <div style="margin-top: 0.35rem;">
             <a href="{% url 'identity:concerns_list' %}" style="font-size: 0.78rem; color: #58a6ff;">View all concerns →</a>
+        </div>
+    </div>
+
+    <!-- Mental Health — diagnostic + corrective layer -->
+    <div class="card" style="border-left: 3px solid #238636;">
+        <h3>Mental health
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                corrective layer
+            </span>
+        </h3>
+        <p style="color: #6e7681; font-size: 0.75rem; margin: 0 0 0.35rem;">
+            Diagnoses negative-mood bias and applies evidence-based
+            corrections: negativity discounting, homeostatic drift,
+            cognitive restructuring, gratitude finding, distress
+            tolerance, and behavioral activation.
+        </p>
+        <div style="margin-top: 0.35rem;">
+            <a href="{% url 'identity:mental_health' %}" style="font-size: 0.78rem; color: #3fb950;">View mental health dashboard →</a>
         </div>
     </div>
 

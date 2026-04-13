@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Upload Asset — {{ world.title }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'aether:world_detail' world.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; {{ world.title }}</a>
+<h2 style="margin-top:0.5rem;">Upload Asset</h2>
+
+<form method="post" enctype="multipart/form-data" style="max-width:600px;">
+    {% csrf_token %}
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Name</label>
+    <input type="text" name="name" required
+           style="width:100%;padding:0.5rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Type</label>
+    <select name="asset_type" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <option value="model">GLTF/GLB 3D model</option>
+        <option value="texture">Image texture</option>
+        <option value="audio">Audio clip</option>
+        <option value="hdri">HDRI environment</option>
+    </select>
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">File</label>
+    <input type="file" name="file" required
+           style="color:#c9d1d9;font-size:0.85rem;margin-top:0.3rem;">
+
+    <button type="submit" style="margin-top:1.2rem;padding:0.5rem 1.5rem;background:#238636;border:none;border-radius:6px;color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;">
+        Upload
+    </button>
+</form>
+{% endblock %}

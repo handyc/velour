@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Object Library — Aether{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Worlds</a>
+    <h2 style="margin:0;">Object Library</h2>
+    <span style="color:#6e7681;font-size:0.8rem;">{{ total }} objects</span>
+</div>
+
+<form method="get" style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search objects..."
+           style="flex:1;min-width:200px;padding:0.4rem 0.7rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;">
+    <select name="source" style="padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.82rem;">
+        <option value="">All sources</option>
+        <option value="sketchfab" {% if source == 'sketchfab' %}selected{% endif %}>Sketchfab</option>
+        <option value="polyhaven" {% if source == 'polyhaven' %}selected{% endif %}>Poly Haven</option>
+        <option value="local" {% if source == 'local' %}selected{% endif %}>Local</option>
+    </select>
+    <button type="submit" style="padding:0.4rem 1rem;background:#238636;border:none;border-radius:4px;color:#fff;font-size:0.82rem;cursor:pointer;">Search</button>
+</form>
+
+{% if categories %}
+<div style="display:flex;gap:0.4rem;margin-bottom:1rem;flex-wrap:wrap;">
+    <a href="{% url 'aether:library_list' %}" style="color:{% if not cat_slug %}#58a6ff{% else %}#8b949e{% endif %};text-decoration:none;font-size:0.75rem;padding:0.2rem 0.5rem;border:1px solid #30363d;border-radius:3px;">All</a>
+    {% for cat in categories %}
+    <a href="{% url 'aether:library_list' %}?cat={{ cat.slug }}{% if q %}&q={{ q }}{% endif %}"
+       style="color:{% if cat_slug == cat.slug %}#58a6ff{% else %}#8b949e{% endif %};text-decoration:none;font-size:0.75rem;padding:0.2rem 0.5rem;border:1px solid #30363d;border-radius:3px;">{{ cat.name }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if objects %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.8rem;">
+    {% for obj in objects %}
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;overflow:hidden;">
+        {% if obj.thumbnail %}
+        <div style="height:120px;background:#0d1117;display:flex;align-items:center;justify-content:center;">
+            <img src="{{ obj.thumbnail }}" alt="{{ obj.name }}" style="max-width:100%;max-height:120px;object-fit:contain;">
+        </div>
+        {% else %}
+        <div style="height:120px;background:#0d1117;display:flex;align-items:center;justify-content:center;color:#30363d;font-size:2rem;">&#9724;</div>
+        {% endif %}
+        <div style="padding:0.5rem;">
+            <div style="color:#c9d1d9;font-size:0.8rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ obj.name }}</div>
+            <div style="display:flex;gap:0.3rem;margin-top:0.2rem;align-items:center;">
+                <span style="color:#6e7681;font-size:0.65rem;">{{ obj.get_source_display }}</span>
+                <span style="color:#6e7681;font-size:0.65rem;">&middot;</span>
+                <span style="color:#6e7681;font-size:0.65rem;">{{ obj.get_license_display }}</span>
+            </div>
+            {% if obj.author %}<div style="color:#6e7681;font-size:0.65rem;margin-top:0.1rem;">by {{ obj.author|truncatewords:3 }}</div>{% endif %}
+            {% if obj.downloaded %}
+            <span style="color:#238636;font-size:0.65rem;margin-top:0.3rem;display:inline-block;">&#10003; Downloaded</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div style="display:flex;gap:1rem;margin-top:1rem;justify-content:center;">
+    {% if page > 1 %}
+    <a href="?q={{ q }}&cat={{ cat_slug }}&source={{ source }}&page={{ page|add:"-1" }}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">&larr; Previous</a>
+    {% endif %}
+    <span style="color:#6e7681;font-size:0.82rem;">Page {{ page }}</span>
+    {% if has_next %}
+    <a href="?q={{ q }}&cat={{ cat_slug }}&source={{ source }}&page={{ page|add:"1" }}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">Next &rarr;</a>
+    {% endif %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No objects found. Import some with: <code style="background:#161b22;padding:0.2rem 0.4rem;border-radius:3px;font-size:0.8rem;">python manage.py import_library --source sketchfab --query chair</code></p>
+{% endif %}
+{% endblock %}

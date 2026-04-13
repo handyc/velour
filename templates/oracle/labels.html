@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Labels — Oracle — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .oracle-wrap { max-width: 960px; }
+    .oracle-header { margin-bottom: 1rem; }
+    .oracle-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; }
+    .oracle-header .sub { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .filter-bar {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+        padding: 0.6rem 0.75rem;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        margin-bottom: 1rem; font-size: 0.8rem;
+    }
+    .filter-bar a {
+        color: #8b949e; text-decoration: none; padding: 0.2rem 0.55rem;
+        border: 1px solid #30363d; border-radius: 4px;
+    }
+    .filter-bar a.active { color: #58a6ff; border-color: #58a6ff; }
+    .filter-bar .label { color: #6e7681; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem; padding-top: 0.35rem; }
+
+    .card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .card h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #c9d1d9; font-weight: 500; }
+
+    .label-row {
+        display: grid; grid-template-columns: 1fr 100px 80px 70px 90px;
+        gap: 0.5rem; padding: 0.35rem 0.6rem;
+        font-size: 0.78rem; border-bottom: 1px solid #21262d;
+        align-items: center;
+    }
+    .label-row .pred { color: #c9d1d9; font-weight: 500; }
+    .label-row .lobe-name { color: #8b949e; font-size: 0.72rem; }
+    .label-row .time { color: #6e7681; font-size: 0.7rem; }
+    .verdict-badge {
+        display: inline-block; padding: 0.1rem 0.35rem;
+        border-radius: 3px; font-size: 0.7rem; font-weight: 500;
+    }
+    .verdict-good { background: rgba(63,185,80,0.15); color: #3fb950; }
+    .verdict-bad { background: rgba(248,81,73,0.15); color: #f85149; }
+    .verdict-meh { background: rgba(210,169,34,0.15); color: #d29922; }
+    .verdict-none { background: rgba(139,148,158,0.1); color: #484f58; }
+    .verdict-btns { display: flex; gap: 0.25rem; }
+    .verdict-btns button {
+        background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+        color: #8b949e; font-size: 0.68rem; padding: 0.15rem 0.4rem; cursor: pointer;
+    }
+    .verdict-btns button:hover { border-color: #58a6ff; color: #c9d1d9; }
+    .verdict-btns button.active { border-color: #58a6ff; color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oracle-wrap">
+    <div class="oracle-header">
+        <h1>Labels</h1>
+        <span class="sub">
+            <a href="{% url 'oracle:home' %}" style="color: #58a6ff; text-decoration: none;">&larr; Oracle</a>
+        </span>
+    </div>
+
+    <div class="filter-bar">
+        <span class="label">lobe</span>
+        <a href="{% url 'oracle:labels' %}{% if current_verdict %}?verdict={{ current_verdict }}{% endif %}"
+           class="{% if not current_lobe %}active{% endif %}">all</a>
+        {% for ln in lobe_names %}
+        <a href="?lobe={{ ln }}{% if current_verdict %}&verdict={{ current_verdict }}{% endif %}"
+           class="{% if current_lobe == ln %}active{% endif %}">{{ ln }}</a>
+        {% endfor %}
+    </div>
+
+    <div class="filter-bar">
+        <span class="label">verdict</span>
+        <a href="{% url 'oracle:labels' %}{% if current_lobe %}?lobe={{ current_lobe }}{% endif %}"
+           class="{% if not current_verdict %}active{% endif %}">all</a>
+        {% for v in "good,bad,meh,unlabeled"|make_list %}{% endfor %}
+        <a href="?{% if current_lobe %}lobe={{ current_lobe }}&{% endif %}verdict=good"
+           class="{% if current_verdict == 'good' %}active{% endif %}">good</a>
+        <a href="?{% if current_lobe %}lobe={{ current_lobe }}&{% endif %}verdict=bad"
+           class="{% if current_verdict == 'bad' %}active{% endif %}">bad</a>
+        <a href="?{% if current_lobe %}lobe={{ current_lobe }}&{% endif %}verdict=meh"
+           class="{% if current_verdict == 'meh' %}active{% endif %}">meh</a>
+        <a href="?{% if current_lobe %}lobe={{ current_lobe }}&{% endif %}verdict=unlabeled"
+           class="{% if current_verdict == 'unlabeled' %}active{% endif %}">unlabeled</a>
+    </div>
+
+    <div class="card">
+        <h3>{{ labels|length }} labels</h3>
+        {% for label in labels %}
+        <div class="label-row">
+            <div>
+                <span class="pred">{{ label.predicted }}</span>
+                <span class="lobe-name">{{ label.lobe_name }}</span>
+            </div>
+            <div class="time">{{ label.happened_at|date:"M d H:i" }}</div>
+            <div>
+                {% if label.verdict %}
+                <span class="verdict-badge verdict-{{ label.verdict }}">{{ label.verdict }}</span>
+                {% else %}
+                <span class="verdict-badge verdict-none">unlabeled</span>
+                {% endif %}
+            </div>
+            <div>
+                {% if label.actual %}<span style="font-size: 0.72rem; color: #8b949e;">actual: {{ label.actual }}</span>{% endif %}
+            </div>
+            <div class="verdict-btns">
+                <form method="post" action="{% url 'oracle:label_verdict' label.pk %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button name="verdict" value="good" type="submit" class="{% if label.verdict == 'good' %}active{% endif %}">&#10003;</button>
+                    <button name="verdict" value="bad" type="submit" class="{% if label.verdict == 'bad' %}active{% endif %}">&#10007;</button>
+                    <button name="verdict" value="meh" type="submit" class="{% if label.verdict == 'meh' %}active{% endif %}">~</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+        {% if not labels %}
+        <p style="color: #8b949e; font-size: 0.82rem;">No labels match the current filter.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

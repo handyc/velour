@@ -18,10 +18,19 @@
     Rules determine how cells evolve based on neighbor colors.
 </p>
 
-<div style="display:flex;gap:0.5rem;margin:0.5rem 0;flex-wrap:wrap">
+<div style="display:flex;gap:0.5rem;margin:0.5rem 0;flex-wrap:wrap;align-items:end">
     <form method="post" action="{% url 'automaton:create_life_rules' %}" style="display:inline">
         {% csrf_token %}
         <button type="submit" class="btn">Create Life Rules</button>
+    </form>
+
+    <form method="post" action="{% url 'automaton:create_exact_rules' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background:#6e40c9;border-color:#8957e5">Create Exact 7-tuple Rules</button>
+        <label style="color:#8b949e;font-size:0.7rem">rules <input type="number" name="n_rules" value="100" min="20" max="500" style="width:4rem"></label>
+        <label style="color:#8b949e;font-size:0.7rem">colors <select name="n_colors"><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option></select></label>
+        <label style="color:#8b949e;font-size:0.7rem">wildcards% <input type="number" name="wildcard_pct" value="15" min="0" max="80" style="width:3rem"></label>
+        <input type="text" name="name" placeholder="name (optional)" style="width:8rem;font-size:0.72rem">
     </form>
 </div>
 

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Lobe not found — Oracle — Velour{% endblock %}
+{% block content %}
+<div style="max-width: 960px;">
+    <h1 style="font-size: 1.1rem; font-weight: 500;">Lobe "{{ name }}" not found</h1>
+    <p style="color: #8b949e; font-size: 0.85rem; margin-top: 0.5rem;">
+        No trained lobe file exists for "{{ name }}". Train it with:<br>
+        <code>python manage.py train_rumination_lobe</code>
+    </p>
+    <a href="{% url 'oracle:home' %}" style="color: #58a6ff;">&larr; Back to Oracle</a>
+</div>
+{% endblock %}

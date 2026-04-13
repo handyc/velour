@@ -99,6 +99,55 @@ class Rule(models.Model):
                 f'→ c{self.result_color}')
 
 
+class ExactRule(models.Model):
+    """A 7-tuple exact match rule: [self n0 n1 n2 n3 n4 n5] -> result.
+
+    Each field specifies the exact color of the cell and each of its
+    6 neighbors (in the canonical order N, NE, SE, S, SW, NW).
+    If a cell + its neighbors match this exact pattern, the cell
+    becomes result_color. -1 means "any" (wildcard).
+
+    With 4 color states, the full rule space is 4^7 = 16384 possible
+    7-tuples. Rulesets typically use a small random subset (50-500 rules).
+    Unmatched cells keep their current color.
+    """
+
+    ruleset = models.ForeignKey(RuleSet, on_delete=models.CASCADE,
+                                related_name='exact_rules')
+    self_color = models.SmallIntegerField(
+        help_text='Cell color (0-3, or -1 for any).')
+    n0_color = models.SmallIntegerField(default=-1,
+        help_text='N neighbor color (-1 = any).')
+    n1_color = models.SmallIntegerField(default=-1,
+        help_text='NE neighbor color (-1 = any).')
+    n2_color = models.SmallIntegerField(default=-1,
+        help_text='SE neighbor color (-1 = any).')
+    n3_color = models.SmallIntegerField(default=-1,
+        help_text='S neighbor color (-1 = any).')
+    n4_color = models.SmallIntegerField(default=-1,
+        help_text='SW neighbor color (-1 = any).')
+    n5_color = models.SmallIntegerField(default=-1,
+        help_text='NW neighbor color (-1 = any).')
+    result_color = models.SmallIntegerField(
+        help_text='Cell becomes this color.')
+    priority = models.IntegerField(default=0,
+        help_text='Lower = higher priority. First match wins.')
+
+    class Meta:
+        ordering = ['ruleset', 'priority']
+
+    def __str__(self):
+        def c(v): return str(v) if v >= 0 else '*'
+        return (f'[{c(self.self_color)} {c(self.n0_color)} {c(self.n1_color)} '
+                f'{c(self.n2_color)} {c(self.n3_color)} {c(self.n4_color)} '
+                f'{c(self.n5_color)}] -> {self.result_color}')
+
+    @property
+    def pattern_tuple(self):
+        return (self.self_color, self.n0_color, self.n1_color,
+                self.n2_color, self.n3_color, self.n4_color, self.n5_color)
+
+
 class Simulation(models.Model):
     """A saved simulation: initial grid + ruleset + palette."""
 

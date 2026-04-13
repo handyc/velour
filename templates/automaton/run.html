@@ -14,6 +14,7 @@
 <h1 style="margin-bottom:0.2rem">{{ sim.name }}</h1>
 <p style="color:#8b949e;font-size:0.75rem">
     {{ sim.ruleset.name }} · {{ sim.width }}×{{ sim.height }} · {{ sim.ruleset.n_colors }} colors
+    {% if rule_mode == 'exact' %} · {{ n_exact_rules }} exact 7-tuple rules{% endif %}
 </p>
 
 <div class="ctrl">
@@ -29,8 +30,15 @@
 
 <canvas id="grid"></canvas>
 
-<div style="margin-top:0.5rem">
+<div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
     <a href="{% url 'automaton:home' %}" class="btn btn-secondary">Back</a>
+    <a href="{% url 'automaton:export_json' sim.slug %}" class="btn btn-secondary">Export JSON</a>
+    <button class="btn btn-secondary" onclick="document.getElementById('rename-form').style.display='flex'" style="font-size:0.78rem">Rename</button>
+    <form id="rename-form" method="post" action="{% url 'automaton:rename' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
+        {% csrf_token %}
+        <input type="text" name="name" value="{{ sim.name }}" style="width:12rem;font-size:0.75rem">
+        <button type="submit" class="btn" style="font-size:0.75rem;background:#238636;border-color:#2ea043">Save</button>
+    </form>
 </div>
 
 <script>
@@ -38,7 +46,42 @@
     var W = {{ sim.width }}, H = {{ sim.height }};
     var PALETTE = {{ palette_json|safe }};
     var RULES = {{ rules_json|safe }};
+    var EXACT = {{ exact_json|safe }};
+    var RULE_MODE = '{{ rule_mode|default:"count" }}';
     var NC = PALETTE.length;
+
+    // Build a lookup map for exact rules: key = "s,n0,n1,n2,n3,n4,n5" -> result
+    // Also handle wildcards (-1) by storing them separately for fallback
+    var exactMap = {};
+    var exactWild = [];
+    for (var ei = 0; ei < EXACT.length; ei++) {
+        var er = EXACT[ei];
+        var hasWild = er.s < 0;
+        for (var ni = 0; ni < 6; ni++) { if (er.n[ni] < 0) hasWild = true; }
+        if (!hasWild) {
+            var key = er.s + ',' + er.n.join(',');
+            exactMap[key] = er.r;
+        } else {
+            exactWild.push(er);
+        }
+    }
+
+    function matchExact(self, nbs) {
+        // Try exact match first (no wildcards)
+        var key = self + ',' + nbs.join(',');
+        if (key in exactMap) return exactMap[key];
+        // Try wildcard rules in priority order
+        for (var i = 0; i < exactWild.length; i++) {
+            var r = exactWild[i];
+            if (r.s >= 0 && r.s !== self) continue;
+            var match = true;
+            for (var j = 0; j < 6; j++) {
+                if (r.n[j] >= 0 && r.n[j] !== nbs[j]) { match = false; break; }
+            }
+            if (match) return r.r;
+        }
+        return -1; // no match
+    }
     var grid = {{ grid_json|safe }};
     var tick = 0;
     var playing = false;
@@ -118,23 +161,48 @@
                 var self = grid[r][c];
                 var nbs = neighbors(r, c);
 
-                // Count neighbors of each color
-                var ncount = new Array(NC).fill(0);
-                for (var i = 0; i < nbs.length; i++) {
-                    ncount[grid[nbs[i][0]][nbs[i][1]]]++;
-                }
-
-                // Apply rules in priority order — first match wins
                 var result = self; // default: no change
-                for (var ri = 0; ri < RULES.length; ri++) {
-                    var rule = RULES[ri];
-                    if (rule.self_color >= 0 && rule.self_color !== self) continue;
-                    var cnt = ncount[rule.neighbor_color] || 0;
-                    if (cnt >= rule.min_count && cnt <= rule.max_count) {
-                        result = rule.result_color;
-                        break;
+
+                if (RULE_MODE === 'exact') {
+                    // Get actual neighbor colors in canonical order (N, NE, SE, S, SW, NW)
+                    // Pad with 0 for edge cells that have fewer than 6 neighbors
+                    var nbColors = [0, 0, 0, 0, 0, 0];
+                    // neighbors() filters out of bounds, so we need to recompute
+                    // to get exactly 6 with proper indices
+                    var even = c % 2 === 0;
+                    var allNbs = [
+                        [r-1, c],                       // N
+                        [even ? r-1 : r, c+1],          // NE
+                        [even ? r : r+1, c+1],          // SE
+                        [r+1, c],                       // S
+                        [even ? r : r+1, c-1],          // SW
+                        [even ? r-1 : r, c-1],          // NW
+                    ];
+                    for (var ni = 0; ni < 6; ni++) {
+                        var nr = allNbs[ni][0], nc2 = allNbs[ni][1];
+                        if (nr >= 0 && nr < H && nc2 >= 0 && nc2 < W) {
+                            nbColors[ni] = grid[nr][nc2];
+                        }
+                    }
+                    var matched = matchExact(self, nbColors);
+                    if (matched >= 0) result = matched;
+                } else {
+                    // Count-based rules (legacy)
+                    var ncount = new Array(NC).fill(0);
+                    for (var i = 0; i < nbs.length; i++) {
+                        ncount[grid[nbs[i][0]][nbs[i][1]]]++;
+                    }
+                    for (var ri = 0; ri < RULES.length; ri++) {
+                        var rule = RULES[ri];
+                        if (rule.self_color >= 0 && rule.self_color !== self) continue;
+                        var cnt = ncount[rule.neighbor_color] || 0;
+                        if (cnt >= rule.min_count && cnt <= rule.max_count) {
+                            result = rule.result_color;
+                            break;
+                        }
                     }
                 }
+
                 next[r][c] = result;
                 counts[result]++;
             }

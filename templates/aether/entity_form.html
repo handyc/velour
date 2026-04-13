@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Add Entity — {{ world.title }}{% endblock %}
+
+{% block content %}
+<a href="{% url 'aether:world_detail' world.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; {{ world.title }}</a>
+<h2 style="margin-top:0.5rem;">Add Entity</h2>
+
+<form method="post" style="max-width:600px;">
+    {% csrf_token %}
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Name</label>
+    <input type="text" name="name" placeholder="Optional name"
+           style="width:100%;padding:0.5rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+
+    {% if assets %}
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Asset (optional — leave blank for primitive)</label>
+    <select name="asset" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <option value="">— Use primitive geometry —</option>
+        {% for a in assets %}<option value="{{ a.pk }}">{{ a.name }} ({{ a.asset_type }})</option>{% endfor %}
+    </select>
+    {% endif %}
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Primitive shape</label>
+    <select name="primitive" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <option value="box">Box</option>
+        <option value="sphere">Sphere</option>
+        <option value="cylinder">Cylinder</option>
+        <option value="cone">Cone</option>
+        <option value="plane">Plane</option>
+        <option value="torus">Torus</option>
+    </select>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-top:0.8rem;">
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Color</label>
+            <input type="color" name="primitive_color" value="#808080"
+                   style="width:100%;height:34px;border:1px solid #30363d;border-radius:4px;background:#161b22;">
+        </div>
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Behavior</label>
+            <select name="behavior" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+                <option value="static">Static</option>
+                <option value="rotate">Rotate</option>
+                <option value="bob">Bob</option>
+                <option value="clickable">Clickable</option>
+                <option value="orbit">Orbit</option>
+                <option value="billboard">Billboard</option>
+            </select>
+        </div>
+    </div>
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Position (x, y, z)</label>
+    <div style="display:flex;gap:0.4rem;">
+        <input type="number" name="pos_x" value="0" step="0.5" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="pos_y" value="0.5" step="0.5" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="pos_z" value="-5" step="0.5" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+    </div>
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Rotation (degrees: x, y, z)</label>
+    <div style="display:flex;gap:0.4rem;">
+        <input type="number" name="rot_x" value="0" step="15" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="rot_y" value="0" step="15" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="rot_z" value="0" step="15" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+    </div>
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Scale (x, y, z)</label>
+    <div style="display:flex;gap:0.4rem;">
+        <input type="number" name="scale_x" value="1" step="0.1" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="scale_y" value="1" step="0.1" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+        <input type="number" name="scale_z" value="1" step="0.1" style="width:33%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+    </div>
+
+    <button type="submit" style="margin-top:1.2rem;padding:0.5rem 1.5rem;background:#238636;border:none;border-radius:6px;color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;">
+        Add Entity
+    </button>
+</form>
+{% endblock %}

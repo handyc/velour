@@ -10,6 +10,7 @@ Block syntax:
   ```                      (fenced code block; opens until next ```)
   | a | b |                (markdown table; needs separator row of |---|)
   :::note ... :::          (callout / admonition; kinds: note tip warn danger)
+  :::chart TYPE ... :::    (quantitative chart block)
   blank line               (paragraph break)
   anything else            (paragraph)
 
@@ -26,6 +27,33 @@ Sparkline forms:
     [[spark:1,2,3,4,5 | end min max]]
     [[spark:1,2,3,4,5 | end band(2,4)]]
     [[spark:1,2,3,4,5 | bar]]
+    [[spark:1,2,3,4,5 | area]]
+    [[spark:1,2,3,4,5 | dot]]
+    [[spark:1,1,-1,1,-1 | winloss]]
+
+Chart block forms:
+    :::chart bar
+    title: Server response times (ms)
+    data: API=120, Web=95, WS=340, DB=42
+    :::
+
+    :::chart bullet
+    title: CPU load
+    actual: 72
+    target: 80
+    ranges: 50,80,100
+    :::
+
+    :::chart sparkstrip
+    title: Weekly trends
+    Disk: 40,42,45,43,48,52,55
+    CPU:  12,15,14,18,22,19,16
+    :::
+
+    :::chart line
+    title: Requests per hour
+    data: 120,135,142,138,156,170,165,180,192,188
+    :::
 
 Output: list of (kind, payload) tuples consumed by the renderer.
 
@@ -41,6 +69,7 @@ Block kinds and payloads:
   code           payload = source str (untouched, monospace)
   table          payload = {'header': list[runs], 'rows': list[list[runs]]}
   callout        payload = {'kind': str, 'blocks': list[block]}
+  chart          payload = {'chart_type': str, ...spec keys}
 
 Inline run tags:
   ('text', style, text)   style is '' / 'B' / 'I'
@@ -84,7 +113,7 @@ def _parse_spark(body):
     band = None
     for token in opts_str.replace(',', ' ').split():
         token = token.strip()
-        if token in ('end', 'min', 'max', 'bar'):
+        if token in ('end', 'min', 'max', 'bar', 'area', 'dot', 'winloss'):
             options.add(token)
             continue
         m = _BAND_RE.match(token)
@@ -130,6 +159,9 @@ def parse_inline(text):
 # --- block-level parsers ---------------------------------------------------
 
 _CALLOUT_KINDS = {'note', 'tip', 'warn', 'warning', 'danger', 'info'}
+
+_CHART_TYPES = {'bar', 'line', 'bullet', 'scatter', 'histogram',
+                'sparkstrip', 'column'}
 
 
 def _parse_table_lines(lines, start, options=None):
@@ -294,6 +326,138 @@ def _parse_figs(line):
     return ('figs', {'cols': cols, 'slugs': slugs})
 
 
+def _parse_chart(lines, start):
+    """Parse a `:::chart TYPE ... :::` block into a chart spec.
+
+    Supports these key formats inside the block:
+      title: Chart Title
+      data: Label=Value, Label=Value, ...      (for bar/column)
+      data: 1,2,3,4,5                          (for line/histogram)
+      actual: 72                               (for bullet)
+      target: 80                               (for bullet)
+      ranges: 50,80,100                        (for bullet)
+      label: Some Label                        (for bullet)
+      bins: 10                                 (for histogram)
+      highlight: 2                             (for bar)
+      Label: 1,2,3,4                           (for sparkstrip — unnamed key = series)
+      series: Name=1,2,3;Other=4,5,6           (for line multi-series)
+    """
+    head = lines[start].strip()
+    if not head.startswith(':::chart'):
+        return None, start
+
+    rest = head[len(':::chart'):].strip()
+    parts = rest.split(None, 1)
+    chart_type = parts[0].lower() if parts else ''
+    if chart_type not in _CHART_TYPES:
+        return None, start
+
+    spec = {'chart_type': chart_type}
+    sparkstrip_series = []
+    i = start + 1
+
+    while i < len(lines):
+        ln = lines[i].rstrip()
+        if ln.strip() == ':::':
+            i += 1
+            break
+        if not ln.strip():
+            i += 1
+            continue
+
+        if ':' in ln:
+            key, val = ln.split(':', 1)
+            key = key.strip()
+            val = val.strip()
+            key_lower = key.lower()
+
+            if key_lower == 'title':
+                spec['title'] = val
+            elif key_lower == 'data':
+                if '=' in val:
+                    # Label=Value pairs
+                    pairs = []
+                    for item in val.split(','):
+                        item = item.strip()
+                        if '=' in item:
+                            k, v = item.split('=', 1)
+                            try:
+                                pairs.append((k.strip(), float(v.strip())))
+                            except ValueError:
+                                pass
+                    spec['data'] = pairs
+                else:
+                    # Plain numeric list
+                    try:
+                        spec['data'] = [float(x.strip())
+                                        for x in val.split(',') if x.strip()]
+                    except ValueError:
+                        pass
+            elif key_lower == 'actual':
+                try:
+                    spec['actual'] = float(val)
+                except ValueError:
+                    pass
+            elif key_lower == 'target':
+                try:
+                    spec['target'] = float(val)
+                except ValueError:
+                    pass
+            elif key_lower == 'ranges':
+                try:
+                    spec['ranges'] = [float(x.strip())
+                                      for x in val.split(',') if x.strip()]
+                except ValueError:
+                    pass
+            elif key_lower == 'label':
+                spec['label'] = val
+            elif key_lower == 'bins':
+                try:
+                    spec['bins'] = int(val)
+                except ValueError:
+                    pass
+            elif key_lower == 'highlight':
+                try:
+                    spec['highlight'] = int(val)
+                except ValueError:
+                    pass
+            elif key_lower == 'labels':
+                spec['labels'] = [x.strip() for x in val.split(',')]
+            elif key_lower == 'series':
+                # Multi-series: Name=1,2,3;Other=4,5,6
+                series_list = []
+                for part in val.split(';'):
+                    part = part.strip()
+                    if '=' in part:
+                        sname, svals = part.split('=', 1)
+                        try:
+                            series_list.append((
+                                sname.strip(),
+                                [float(x.strip()) for x in svals.split(',')
+                                 if x.strip()]
+                            ))
+                        except ValueError:
+                            pass
+                spec['series'] = series_list
+            else:
+                # Unknown key — if chart_type is sparkstrip, treat as
+                # a named series (e.g. "CPU: 12,15,14")
+                if chart_type == 'sparkstrip':
+                    try:
+                        values = [float(x.strip())
+                                  for x in val.split(',') if x.strip()]
+                        if values:
+                            sparkstrip_series.append((key, values))
+                    except ValueError:
+                        pass
+        i += 1
+
+    if chart_type == 'sparkstrip' and sparkstrip_series:
+        spec['series'] = sparkstrip_series
+
+    return ('chart', spec), i
+
+
 def _parse_callout(lines, start):
     """Parse a `:::kind ... :::` block. Content is recursively parsed."""
     head = lines[start].strip()
@@ -363,6 +527,14 @@ def parse(body):
         # Code fence
         if stripped.startswith('```'):
             blk, ni = _parse_code_fence(lines, i)
+            if blk:
+                blocks.append(blk)
+                i = ni
+                continue
+
+        # Chart block (:::chart TYPE ... :::) — check before callout
+        if stripped.startswith(':::chart'):
+            blk, ni = _parse_chart(lines, i)
             if blk:
                 blocks.append(blk)
                 i = ni

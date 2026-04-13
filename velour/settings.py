@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     'tiles',
     'condenser',
     'automaton',
+    'aether',
 ]
 
 MIDDLEWARE = [

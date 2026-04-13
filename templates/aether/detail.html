@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ world.title }} — Aether{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Worlds</a>
+    <h2 style="margin:0;">{{ world.title }}</h2>
+    {% if not world.published %}<span style="color:#f85149;font-size:0.75rem;border:1px solid #f85149;padding:0.15rem 0.4rem;border-radius:3px;">DRAFT</span>{% endif %}
+</div>
+{% if world.description %}<p style="color:#8b949e;margin-top:0;">{{ world.description }}</p>{% endif %}
+
+<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center;">
+    <a href="{% url 'aether:world_enter' world.slug %}" style="color:#0d1117;background:#58a6ff;padding:0.4rem 1rem;border-radius:4px;text-decoration:none;font-size:0.85rem;font-weight:600;">Enter World</a>
+    <a href="{% url 'aether:world_edit' world.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Edit</a>
+    <a href="{% url 'aether:world_delete' world.slug %}" style="color:#f85149;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Delete</a>
+    <form method="post" action="{% url 'condenser:distill_aether_stereokit' world.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#238636;color:#fff;border:none;padding:0.4rem 1rem;border-radius:4px;font-size:0.85rem;font-weight:600;cursor:pointer;" title="Generate a StereoKit C# project and download as ZIP">Export to Quest 3</button>
+    </form>
+</div>
+
+{# Environment summary #}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:0.8rem;margin-bottom:1.5rem;">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Sky</div>
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <span style="display:inline-block;width:16px;height:16px;border-radius:3px;background:{{ world.sky_color }};border:1px solid #30363d;"></span>
+            <span style="color:#c9d1d9;font-size:0.85rem;">{{ world.get_skybox_display }}</span>
+        </div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Ground</div>
+        <div style="display:flex;align-items:center;gap:0.4rem;">
+            <span style="display:inline-block;width:16px;height:16px;border-radius:3px;background:{{ world.ground_color }};border:1px solid #30363d;"></span>
+            <span style="color:#c9d1d9;font-size:0.85rem;">{{ world.ground_size }}m</span>
+        </div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Spawn</div>
+        <span style="color:#c9d1d9;font-size:0.85rem;">{{ world.spawn_x }}, {{ world.spawn_y }}, {{ world.spawn_z }}</span>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Physics</div>
+        <span style="color:#c9d1d9;font-size:0.85rem;">g={{ world.gravity }} {% if world.allow_flight %}fly{% endif %}</span>
+    </div>
+</div>
+
+{# Entities #}
+<h3 style="margin-bottom:0.5rem;">Entities ({{ entities.count }})</h3>
+<div style="display:flex;gap:0.8rem;margin-bottom:0.5rem;">
+    <a href="{% url 'aether:entity_add' world.slug %}" style="color:#58a6ff;text-decoration:none;font-size:0.8rem;">+ Add Entity</a>
+    <a href="#" id="open-library-picker" style="color:#d2a8ff;text-decoration:none;font-size:0.8rem;">+ Place from Library</a>
+</div>
+{% if entities %}
+<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin-bottom:1.5rem;">
+    <thead>
+        <tr style="color:#8b949e;border-bottom:1px solid #30363d;">
+            <th style="text-align:left;padding:0.3rem 0.5rem;">Name</th>
+            <th style="text-align:left;padding:0.3rem 0.5rem;">Type</th>
+            <th style="text-align:left;padding:0.3rem 0.5rem;">Position</th>
+            <th style="text-align:left;padding:0.3rem 0.5rem;">Behavior</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in entities %}
+        <tr style="border-bottom:1px solid #21262d;">
+            <td style="padding:0.3rem 0.5rem;color:#c9d1d9;">{{ e.name|default:"(unnamed)" }}</td>
+            <td style="padding:0.3rem 0.5rem;color:#8b949e;">{% if e.asset %}{{ e.asset.name }}{% else %}{{ e.primitive|default:"—" }}{% endif %}</td>
+            <td style="padding:0.3rem 0.5rem;color:#6e7681;">{{ e.pos_x }}, {{ e.pos_y }}, {{ e.pos_z }}</td>
+            <td style="padding:0.3rem 0.5rem;color:#6e7681;">{{ e.behavior }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{# Assets #}
+<h3 style="margin-bottom:0.5rem;">Assets ({{ assets.count }})</h3>
+<a href="{% url 'aether:asset_add' world.slug %}" style="color:#58a6ff;text-decoration:none;font-size:0.8rem;display:inline-block;margin-bottom:0.5rem;">+ Upload Asset</a>
+{% if assets %}
+<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1.5rem;">
+    {% for a in assets %}
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.5rem 0.8rem;font-size:0.8rem;">
+        <span style="color:#c9d1d9;">{{ a.name }}</span>
+        <span style="color:#6e7681;font-size:0.7rem;margin-left:0.3rem;">{{ a.asset_type }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{# Portals #}
+{% if portals %}
+<h3 style="margin-bottom:0.5rem;">Portals</h3>
+{% for p in portals %}
+<div style="color:#8b949e;font-size:0.82rem;margin-bottom:0.3rem;">
+    &rarr; <a href="{% url 'aether:world_detail' p.to_world.slug %}" style="color:#58a6ff;text-decoration:none;">{{ p.label|default:p.to_world.title }}</a>
+    at ({{ p.pos_x }}, {{ p.pos_y }}, {{ p.pos_z }})
+</div>
+{% endfor %}
+{% endif %}
+
+{# Library picker modal #}
+<div id="library-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;width:90%;max-width:640px;max-height:80vh;display:flex;flex-direction:column;">
+        <div style="padding:0.8rem 1rem;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:0.5rem;">
+            <h3 style="margin:0;flex:1;">Place from Library</h3>
+            <a href="#" id="close-library-modal" style="color:#8b949e;text-decoration:none;font-size:1.2rem;">&times;</a>
+        </div>
+        <div style="padding:0.6rem 1rem;">
+            <input type="text" id="lib-search" placeholder="Search objects..." style="width:100%;padding:0.4rem 0.7rem;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+        </div>
+        <div id="lib-results" style="padding:0.5rem 1rem;overflow-y:auto;flex:1;min-height:200px;">
+            <p style="color:#6e7681;font-size:0.82rem;">Type to search...</p>
+        </div>
+    </div>
+</div>
+<script>
+(function(){
+    const modal = document.getElementById('library-modal');
+    const search = document.getElementById('lib-search');
+    const results = document.getElementById('lib-results');
+    let timer = null;
+
+    document.getElementById('open-library-picker').addEventListener('click', function(e){
+        e.preventDefault();
+        modal.style.display = 'flex';
+        search.value = '';
+        search.focus();
+        doSearch('');
+    });
+    document.getElementById('close-library-modal').addEventListener('click', function(e){
+        e.preventDefault();
+        modal.style.display = 'none';
+    });
+    modal.addEventListener('click', function(e){
+        if (e.target === modal) modal.style.display = 'none';
+    });
+
+    search.addEventListener('input', function(){
+        clearTimeout(timer);
+        timer = setTimeout(function(){ doSearch(search.value); }, 300);
+    });
+
+    function doSearch(q){
+        fetch('{% url "aether:library_json" %}?q=' + encodeURIComponent(q) + '&count=24')
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+                if (!data.results.length){
+                    results.innerHTML = '<p style="color:#6e7681;font-size:0.82rem;">No objects found.</p>';
+                    return;
+                }
+                results.innerHTML = data.results.map(function(obj){
+                    var thumb = obj.thumbnail
+                        ? '<img src="'+obj.thumbnail+'" style="width:48px;height:48px;object-fit:contain;border-radius:3px;">'
+                        : '<span style="display:inline-block;width:48px;height:48px;background:#0d1117;border-radius:3px;text-align:center;line-height:48px;color:#30363d;font-size:1.2rem;">&#9724;</span>';
+                    return '<div class="lib-item" data-id="'+obj.id+'" style="display:flex;gap:0.6rem;align-items:center;padding:0.4rem 0;border-bottom:1px solid #21262d;cursor:pointer;">'
+                        + thumb
+                        + '<div style="flex:1;overflow:hidden;">'
+                        + '<div style="color:#c9d1d9;font-size:0.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+obj.name+'</div>'
+                        + '<div style="color:#6e7681;font-size:0.65rem;">'+obj.source+(obj.author ? ' &middot; '+obj.author : '')+'</div>'
+                        + '</div>'
+                        + '<span style="color:#6e7681;font-size:0.65rem;">'+(obj.downloaded ? '&#10003;' : '')+'</span>'
+                        + '</div>';
+                }).join('');
+
+                results.querySelectorAll('.lib-item').forEach(function(el){
+                    el.addEventListener('click', function(){
+                        placeObject(el.dataset.id);
+                    });
+                });
+            });
+    }
+
+    function placeObject(objId){
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{% url "aether:library_place" world.slug %}';
+        form.innerHTML = '<input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">'
+            + '<input type="hidden" name="library_object" value="'+objId+'">';
+        document.body.appendChild(form);
+        form.submit();
+    }
+})();
+</script>
+{% endblock %}

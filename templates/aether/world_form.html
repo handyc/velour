@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}{% if world %}Edit {{ world.title }}{% else %}New World{% endif %} — Aether{% endblock %}
+
+{% block content %}
+<a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Worlds</a>
+<h2 style="margin-top:0.5rem;">{% if world %}Edit {{ world.title }}{% else %}New World{% endif %}</h2>
+
+{% if presets %}
+<div style="margin-bottom:1rem;">
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-bottom:0.3rem;">Quick start from preset</label>
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;" id="preset-bar">
+        {% for p in presets %}
+        <button type="button" data-slug="{{ p.slug }}"
+                style="padding:0.3rem 0.7rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.78rem;cursor:pointer;">{{ p.name }}</button>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" style="max-width:600px;" id="world-form">
+    {% csrf_token %}
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:1rem;">Title</label>
+    <input type="text" name="title" value="{{ world.title|default:'' }}" required
+           style="width:100%;padding:0.5rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9rem;">
+
+    <label style="display:block;color:#8b949e;font-size:0.78rem;margin-top:0.8rem;">Description</label>
+    <textarea name="description" rows="3"
+              style="width:100%;padding:0.5rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;resize:vertical;">{{ world.description|default:'' }}</textarea>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-top:0.8rem;">
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Skybox</label>
+            <select name="skybox" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;">
+                <option value="procedural" {% if world.skybox == 'procedural' %}selected{% endif %}>Procedural sky</option>
+                <option value="color" {% if world.skybox == 'color' %}selected{% endif %}>Solid color</option>
+                <option value="gradient" {% if world.skybox == 'gradient' %}selected{% endif %}>Gradient</option>
+                <option value="hdri" {% if world.skybox == 'hdri' %}selected{% endif %}>HDRI environment</option>
+            </select>
+        </div>
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">HDRI asset name</label>
+            <input type="text" name="hdri_asset" value="{{ world.hdri_asset|default:'' }}" placeholder="kloofendal_48d_partly_cloudy"
+                   style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.8rem;">
+            <span style="color:#6e7681;font-size:0.65rem;">From polyhaven.com — leave blank for default</span>
+        </div>
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Sky color</label>
+            <input type="color" name="sky_color" value="{{ world.sky_color|default:'#87CEEB' }}"
+                   style="width:100%;height:34px;border:1px solid #30363d;border-radius:4px;background:#161b22;cursor:pointer;">
+        </div>
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Ground color</label>
+            <input type="color" name="ground_color" value="{{ world.ground_color|default:'#3d5c3a' }}"
+                   style="width:100%;height:34px;border:1px solid #30363d;border-radius:4px;background:#161b22;cursor:pointer;">
+        </div>
+        <div>
+            <label style="display:block;color:#8b949e;font-size:0.78rem;">Ground size (m)</label>
+            <input type="number" name="ground_size" value="{{ world.ground_size|default:'100' }}" step="10"
+                   style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;">
+        </div>
+    </div>
+
+    <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;margin-top:1rem;">
+        <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Ambient Audio</legend>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;">
+            <div style="grid-column:1/-1;">
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Stream URL or direct MP3 link</label>
+                <input type="url" name="ambient_audio_url" value="{{ world.ambient_audio_url|default:'' }}"
+                       placeholder="https://example.com/ambient.mp3"
+                       style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.82rem;">
+                <span style="color:#6e7681;font-size:0.65rem;">Icecast stream, internet radio, or direct audio file URL</span>
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Or upload MP3/OGG</label>
+                <input type="file" name="ambient_audio" accept="audio/*"
+                       style="width:100%;font-size:0.78rem;color:#8b949e;">
+                {% if world.ambient_audio %}
+                <div style="margin-top:0.2rem;font-size:0.72rem;">
+                    <span style="color:#238636;">Current: {{ world.ambient_audio.name }}</span>
+                    <label style="color:#8b949e;margin-left:0.5rem;">
+                        <input type="checkbox" name="clear_ambient_audio"> Remove
+                    </label>
+                </div>
+                {% endif %}
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Volume (0–1)</label>
+                <input type="range" name="ambient_volume" min="0" max="1" step="0.05"
+                       value="{{ world.ambient_volume|default:'0.4' }}"
+                       style="width:100%;accent-color:#238636;">
+                <span style="color:#6e7681;font-size:0.7rem;" id="vol-label">{{ world.ambient_volume|default:'0.4' }}</span>
+            </div>
+            <div style="grid-column:1/-1;">
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Procedural soundscape (fallback if no file/URL)</label>
+                <select name="soundscape" style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.82rem;">
+                    <option value="">None</option>
+                    <option value="forest" {% if world.soundscape == 'forest' %}selected{% endif %}>Forest — birdsong + rustling leaves</option>
+                    <option value="cafe" {% if world.soundscape == 'cafe' %}selected{% endif %}>Cafe — conversation murmur</option>
+                    <option value="city-street" {% if world.soundscape == 'city-street' %}selected{% endif %}>City Street — traffic + pedestrians</option>
+                    <option value="rainy" {% if world.soundscape == 'rainy' %}selected{% endif %}>Rainy — rain + distant thunder</option>
+                    <option value="winter" {% if world.soundscape == 'winter' %}selected{% endif %}>Winter — wind + snow</option>
+                    <option value="beach" {% if world.soundscape == 'beach' %}selected{% endif %}>Beach — ocean waves + seagulls</option>
+                    <option value="night" {% if world.soundscape == 'night' %}selected{% endif %}>Night — crickets + stillness</option>
+                    <option value="space-station" {% if world.soundscape == 'space-station' %}selected{% endif %}>Space Station — mechanical hum</option>
+                </select>
+            </div>
+        </div>
+    </fieldset>
+
+    {% if world %}
+    <details style="margin-top:1rem;">
+        <summary style="color:#8b949e;font-size:0.8rem;cursor:pointer;">Advanced settings</summary>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.8rem;margin-top:0.5rem;">
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Ambient light (0-1)</label>
+                <input type="number" name="ambient_light" value="{{ world.ambient_light }}" step="0.1" min="0" max="1"
+                       style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Gravity</label>
+                <input type="number" name="gravity" value="{{ world.gravity }}" step="0.5"
+                       style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Fog near (m)</label>
+                <input type="number" name="fog_near" value="{{ world.fog_near }}" step="10"
+                       style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Fog far (m)</label>
+                <input type="number" name="fog_far" value="{{ world.fog_far }}" step="10"
+                       style="width:100%;padding:0.4rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;">
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Fog color</label>
+                <input type="color" name="fog_color" value="{{ world.fog_color }}"
+                       style="width:100%;height:34px;border:1px solid #30363d;border-radius:4px;background:#161b22;">
+            </div>
+            <div>
+                <label style="display:block;color:#8b949e;font-size:0.78rem;">Spawn (x, y, z)</label>
+                <div style="display:flex;gap:0.3rem;">
+                    <input type="number" name="spawn_x" value="{{ world.spawn_x }}" step="0.5" style="width:33%;padding:0.3rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.8rem;">
+                    <input type="number" name="spawn_y" value="{{ world.spawn_y }}" step="0.5" style="width:33%;padding:0.3rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.8rem;">
+                    <input type="number" name="spawn_z" value="{{ world.spawn_z }}" step="0.5" style="width:33%;padding:0.3rem;background:#161b22;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.8rem;">
+                </div>
+            </div>
+        </div>
+        <div style="margin-top:0.6rem;display:flex;gap:1.5rem;">
+            <label style="color:#c9d1d9;font-size:0.82rem;">
+                <input type="checkbox" name="allow_flight" {% if world.allow_flight %}checked{% endif %}> Allow flight
+            </label>
+            <label style="color:#c9d1d9;font-size:0.82rem;">
+                <input type="checkbox" name="published" {% if world.published %}checked{% endif %}> Published
+            </label>
+            <label style="color:#c9d1d9;font-size:0.82rem;">
+                <input type="checkbox" name="featured" {% if world.featured %}checked{% endif %}> Featured
+            </label>
+        </div>
+    </details>
+    {% endif %}
+
+    <button type="submit" style="margin-top:1.2rem;padding:0.5rem 1.5rem;background:#238636;border:none;border-radius:6px;color:#fff;font-size:0.85rem;font-weight:600;cursor:pointer;">
+        {% if world %}Save{% else %}Create World{% endif %}
+    </button>
+</form>
+
+<script>
+// Volume slider label
+const volSlider = document.querySelector('[name="ambient_volume"]');
+const volLabel = document.getElementById('vol-label');
+if (volSlider && volLabel) {
+    volSlider.addEventListener('input', () => { volLabel.textContent = volSlider.value; });
+}
+
+// Preset auto-fill
+document.getElementById('preset-bar')?.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-slug]');
+    if (!btn) return;
+    const resp = await fetch(`/aether/presets/${btn.dataset.slug}.json`);
+    if (!resp.ok) return;
+    const p = await resp.json();
+    const f = document.getElementById('world-form');
+    if (p.skybox) f.skybox.value = p.skybox;
+    if (p.hdriAsset) f.hdri_asset.value = p.hdriAsset;
+    if (p.skyColor) f.sky_color.value = p.skyColor;
+    if (p.groundColor) f.ground_color.value = p.groundColor;
+    if (p.ambientAudioUrl) f.ambient_audio_url.value = p.ambientAudioUrl;
+    if (p.soundscape) f.soundscape.value = p.soundscape;
+    if (p.ambientVolume != null) {
+        f.ambient_volume.value = p.ambientVolume;
+        if (volLabel) volLabel.textContent = p.ambientVolume;
+    }
+    // Advanced fields (only if visible)
+    if (f.fog_color) f.fog_color.value = p.fogColor || '#c8d8e4';
+    if (f.fog_near) f.fog_near.value = p.fogNear || 50;
+    if (f.fog_far) f.fog_far.value = p.fogFar || 200;
+    if (f.ambient_light) f.ambient_light.value = p.ambientLight || 0.4;
+    btn.style.borderColor = '#238636';
+    btn.style.color = '#238636';
+    setTimeout(() => { btn.style.borderColor = ''; btn.style.color = ''; }, 1200);
+});
+</script>
+{% endblock %}

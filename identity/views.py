@@ -765,6 +765,7 @@ def toggles_update(request):
         'topbar_pulse_enabled', 'recursive_introspection_enabled',
         'observer_enabled', 'llm_chat_enabled',
         'rumination_stream_enabled',
+        'mental_health_enabled',
     ]
     # Tile generation frequency slider — integer 0-8
     try:
@@ -1095,3 +1096,73 @@ def hof_experiment_run(request, slug):
         f'exit {experiment.exit_reason}.',
     )
     return redirect('identity:hof_experiment_detail', slug=slug)
+
+
+# --- Mental Health view ---------------------------------------------------
+
+def mental_health(request):
+    """Dashboard showing Identity's mental health diagnosis, recent
+    interventions, health score trend, and technique breakdown."""
+    from .mental_health import (diagnose, find_exceptions,
+                                compose_health_reflection, memory_therapy_session)
+    from .models import MentalHealthDiagnosis, Intervention
+
+    hours = int(request.GET.get('hours', 24))
+    diag = diagnose(hours)
+
+    # Recent diagnoses for the trend chart
+    past_diagnoses = list(
+        MentalHealthDiagnosis.objects.order_by('-at')[:20]
+    )
+
+    # Recent interventions
+    recent_interventions = list(
+        Intervention.objects.select_related('tick')
+        .order_by('-at')[:30]
+    )
+
+    # Technique frequency
+    technique_counts = {}
+    for iv in Intervention.objects.order_by('-at')[:200]:
+        technique_counts[iv.technique] = technique_counts.get(iv.technique, 0) + 1
+
+    # Exception finding for top concerns
+    exceptions = {}
+    for concern in (diag.get('top_concerns') or [])[:3]:
+        exc = find_exceptions(concern['aspect'])
+        if exc:
+            exceptions[concern['aspect']] = exc[:3]
+
+    # Compose reflection text
+    reflection = compose_health_reflection(diag) if diag.get('tick_count', 0) > 0 else ''
+
+    # Health score from the management command formula
+    score = _compute_health_score(diag) if diag.get('tick_count', 0) > 0 else None
+
+    # Memory therapy session (uses tilesets as emotional memories)
+    memory_session = memory_therapy_session(hours=max(hours, 168))
+
+    return render(request, 'identity/mental_health.html', {
+        'diag': diag,
+        'hours': hours,
+        'past_diagnoses': past_diagnoses,
+        'recent_interventions': recent_interventions,
+        'technique_counts': technique_counts,
+        'exceptions': exceptions,
+        'reflection': reflection,
+        'health_score': score,
+        'memory_session': memory_session,
+    })
+
+
+def _compute_health_score(diag):
+    score = 0.5
+    v = diag.get('avg_valence', 0)
+    score += v * 0.3
+    neg = diag.get('negative_ratio', 0)
+    score -= max(0, neg - 0.3) * 0.3
+    streak = diag.get('negative_streak', 0)
+    score -= min(0.15, streak * 0.025)
+    concerns = diag.get('concern_count', 0)
+    score -= min(0.1, concerns * 0.025)
+    return max(0.0, min(1.0, round(score, 3)))

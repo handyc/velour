@@ -3,9 +3,9 @@ from django.contrib import admin
 from .models import (
     ClaudeHook, Concern, ContinuityMarker, CronRun, DwellingState,
     Identity, IdentityAssertion, IdentityToggles, InternalDialogue,
-    IntrospectiveLayer, LLMExchange, LLMProvider, LoopTraversal,
-    Meditation, Mood, Reflection, Rule, StrangeLoop,
-    TemplateContribution, ThoughtExperiment, Tick,
+    Intervention, IntrospectiveLayer, LLMExchange, LLMProvider,
+    LoopTraversal, Meditation, MentalHealthDiagnosis, Mood, Reflection,
+    Rule, StrangeLoop, TemplateContribution, ThoughtExperiment, Tick,
 )
 
 
@@ -30,6 +30,7 @@ class TickAdmin(admin.ModelAdmin):
     date_hierarchy = 'at'
     readonly_fields = ('at', 'snapshot', 'aspects')
     search_fields = ('thought', 'rule_label')
+    inlines = []  # InterventionInline added after definition below
 
 
 @admin.register(Concern)
@@ -205,3 +206,29 @@ class IntrospectiveLayerAdmin(admin.ModelAdmin):
     list_display = ('layer', 'title', 'source', 'strength', 'is_active')
     list_filter = ('layer', 'source', 'is_active')
     search_fields = ('title', 'body')
+
+
+@admin.register(MentalHealthDiagnosis)
+class MentalHealthDiagnosisAdmin(admin.ModelAdmin):
+    list_display = ('at', 'health_score', 'avg_valence', 'negative_ratio',
+                    'dominant_mood', 'concern_count')
+    list_filter = ('dominant_mood',)
+    readonly_fields = ('at',)
+
+
+class InterventionInline(admin.TabularInline):
+    model = Intervention
+    extra = 0
+    readonly_fields = ('technique', 'description', 'delta_valence',
+                       'delta_arousal', 'original_mood', 'corrected_mood')
+
+
+@admin.register(Intervention)
+class InterventionAdmin(admin.ModelAdmin):
+    list_display = ('at', 'tick', 'technique', 'delta_valence',
+                    'delta_arousal', 'original_mood', 'corrected_mood')
+    list_filter = ('technique',)
+
+
+# Wire InterventionInline into TickAdmin (defined earlier)
+TickAdmin.inlines = [InterventionInline]

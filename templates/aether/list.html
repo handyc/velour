@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Aether — Worlds{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:0.3rem;">Aether</h2>
+<p style="color:#8b949e;margin-top:0;">Immersive browser worlds</p>
+
+<div style="margin-bottom:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+    <a href="{% url 'aether:world_add' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">+ New World</a>
+    <form method="post" action="{% url 'aether:generate_random' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Generate Random</button>
+    </form>
+    <a href="{% url 'aether:world_merge' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">Merge Worlds</a>
+</div>
+
+{% if worlds %}
+<div style="display:flex;flex-direction:column;gap:0.35rem;">
+    {% for w in worlds %}
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.45rem 0.8rem;display:flex;align-items:center;gap:0.8rem;">
+        <a href="{% url 'aether:world_enter' w.slug %}" style="color:#0d1117;background:#58a6ff;padding:0.2rem 0.6rem;border-radius:3px;text-decoration:none;font-size:0.75rem;font-weight:600;white-space:nowrap;">Enter</a>
+        <a href="{% url 'aether:world_detail' w.slug %}" style="color:#c9d1d9;text-decoration:none;font-weight:500;font-size:0.88rem;white-space:nowrap;">{{ w.title }}</a>
+        <span style="color:#8b949e;font-size:0.78rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ w.description|truncatewords:12|default:"" }}</span>
+        <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ w.sky_color }};border:1px solid #30363d;flex-shrink:0;"></span>
+        <span style="color:#6e7681;font-size:0.72rem;white-space:nowrap;">{{ w.skybox }}</span>
+        {% if w.featured %}<span style="color:#f0c040;font-size:0.68rem;white-space:nowrap;">FEATURED</span>{% endif %}
+        {% if not w.published %}<span style="color:#f85149;font-size:0.68rem;white-space:nowrap;">DRAFT</span>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No worlds yet. Create one to get started.</p>
+{% endif %}
+{% endblock %}

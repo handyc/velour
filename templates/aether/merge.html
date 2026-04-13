@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Aether — Merge Worlds{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:0.3rem;">Merge Worlds</h2>
+<p style="color:#8b949e;margin-top:0;">
+    Copy all entities, assets, portals, and scripts from a source world
+    into a base world. The base world keeps its sky, fog, and audio settings.
+</p>
+
+<form method="post" style="max-width:480px;">
+    {% csrf_token %}
+
+    <label style="display:block;margin-bottom:0.4rem;color:#c9d1d9;font-size:0.85rem;">Base world (keeps environment)</label>
+    <select name="base" required style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;margin-bottom:1rem;">
+        {% for w in worlds %}
+        <option value="{{ w.pk }}">{{ w.title }} ({{ w.entities.count }} entities)</option>
+        {% endfor %}
+    </select>
+
+    <label style="display:block;margin-bottom:0.4rem;color:#c9d1d9;font-size:0.85rem;">Source world (entities copied from here)</label>
+    <select name="source" required style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;margin-bottom:1rem;">
+        {% for w in worlds %}
+        <option value="{{ w.pk }}">{{ w.title }} ({{ w.entities.count }} entities)</option>
+        {% endfor %}
+    </select>
+
+    <div style="display:flex;gap:1rem;margin-bottom:1rem;">
+        <div style="flex:1;">
+            <label style="display:block;margin-bottom:0.3rem;color:#c9d1d9;font-size:0.85rem;">X offset</label>
+            <input type="number" name="offset_x" value="0" step="0.1" style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+        </div>
+        <div style="flex:1;">
+            <label style="display:block;margin-bottom:0.3rem;color:#c9d1d9;font-size:0.85rem;">Z offset</label>
+            <input type="number" name="offset_z" value="0" step="0.1" style="width:100%;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+        </div>
+    </div>
+
+    <p style="color:#6e7681;font-size:0.78rem;margin-bottom:1rem;">
+        Offset shifts source entities so they don't overlap with the base world's content.
+        The source world is not deleted.
+    </p>
+
+    <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.4rem 1.2rem;border-radius:4px;cursor:pointer;">Merge</button>
+    <a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;margin-left:1rem;">Cancel</a>
+</form>
+{% endblock %}

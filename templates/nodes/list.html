@@ -17,6 +17,7 @@
         font-size: 0.78rem; flex-wrap: wrap;
     }
     .node-row.online    { border-left-color: #2ea043; }
+    .node-row.stale     { border-left-color: #d29922; }
     .node-row.dormant   { border-left-color: #8b949e; border-left-style: dashed; }
     .node-row.offline   { border-left-color: #f85149; }
     .node-row.unknown   { border-left-color: #58a6ff; border-left-style: dashed; }
@@ -77,7 +78,7 @@
 {% if nodes %}
 <div class="fleet-list">
     {% for n in nodes %}
-    <div class="node-row {% if not n.enabled %}disabled unknown{% elif not n.last_seen_at %}unknown{% else %}online{% endif %}">
+    <div class="node-row {{ n.fleet_status }}" data-fleet-row="{{ n.slug }}">
         <span class="nickname"><a href="{% url 'nodes:detail' n.slug %}">{{ n.nickname }}</a></span>
         <span class="mono">{{ n.slug }}</span>
         {% if n.hardware_profile %}<span class="badge hw">{{ n.hardware_profile.name }}</span>{% endif %}
@@ -98,6 +99,7 @@
 
 <script>
 (function() {
+    var STATUS_CLASSES = ['online', 'stale', 'dormant', 'offline', 'unknown', 'disabled'];
     function refresh() {
         fetch('{% url "nodes:fleet_json" %}')
             .then(function(r) { return r.json(); })
@@ -106,10 +108,19 @@
                     var slug = el.dataset.fleetSlug;
                     if (data[slug]) el.textContent = data[slug].ago;
                 });
+                document.querySelectorAll('[data-fleet-row]').forEach(function(row) {
+                    var slug = row.dataset.fleetRow;
+                    if (!data[slug]) return;
+                    for (var i = 0; i < STATUS_CLASSES.length; i++)
+                        row.classList.remove(STATUS_CLASSES[i]);
+                    data[slug].status.split(' ').forEach(function(c) {
+                        if (c) row.classList.add(c);
+                    });
+                });
             })
             .catch(function() {});
     }
-    setInterval(refresh, 10000);  // every 10 seconds
+    setInterval(refresh, 10000);
 })();
 </script>
 {% endblock %}

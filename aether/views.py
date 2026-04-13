@@ -1,0 +1,766 @@
+import json
+import random
+
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.db.models import Q
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
+
+from .models import (
+    Asset, Entity, EntityScript, LibraryObject, ObjectCategory,
+    Portal, Script, World, WorldPreset,
+)
+
+
+@login_required
+def world_list(request):
+    if request.user.is_staff:
+        worlds = World.objects.all()
+    else:
+        worlds = World.objects.filter(published=True)
+    return render(request, 'aether/list.html', {'worlds': worlds})
+
+
+@login_required
+def world_enter(request, slug):
+    """The immersive 3D view — the main experience."""
+    world = get_object_or_404(World, slug=slug)
+    if not world.published and not request.user.is_staff:
+        return redirect('aether:world_list')
+    entities = world.entities.filter(visible=True).select_related('asset')
+    portals = world.portals_out.select_related('to_world')
+    return render(request, 'aether/enter.html', {
+        'world': world,
+        'entities': entities,
+        'portals': portals,
+    })
+
+
+@login_required
+def world_detail(request, slug):
+    """Editor / detail view for a world."""
+    world = get_object_or_404(World, slug=slug)
+    entities = world.entities.select_related('asset')
+    assets = world.assets.all()
+    portals = world.portals_out.select_related('to_world')
+    return render(request, 'aether/detail.html', {
+        'world': world,
+        'entities': entities,
+        'assets': assets,
+        'portals': portals,
+    })
+
+
+@login_required
+def world_add(request):
+    if request.method == 'POST':
+        world = World(
+            title=request.POST.get('title', 'Untitled World'),
+            description=request.POST.get('description', ''),
+            skybox=request.POST.get('skybox', 'procedural'),
+            sky_color=request.POST.get('sky_color', '#87CEEB'),
+            ground_color=request.POST.get('ground_color', '#3d5c3a'),
+            hdri_asset=request.POST.get('hdri_asset', ''),
+            ambient_audio_url=request.POST.get('ambient_audio_url', ''),
+            ambient_volume=float(request.POST.get('ambient_volume', 0.4)),
+            soundscape=request.POST.get('soundscape', ''),
+        )
+        if request.FILES.get('ambient_audio'):
+            world.ambient_audio = request.FILES['ambient_audio']
+        world.save()
+        return redirect('aether:world_detail', slug=world.slug)
+    presets = WorldPreset.objects.all()
+    return render(request, 'aether/world_form.html', {'presets': presets})
+
+
+@login_required
+def world_edit(request, slug):
+    world = get_object_or_404(World, slug=slug)
+    if request.method == 'POST':
+        world.title = request.POST.get('title', world.title)
+        world.description = request.POST.get('description', '')
+        world.skybox = request.POST.get('skybox', world.skybox)
+        world.sky_color = request.POST.get('sky_color', world.sky_color)
+        world.ground_color = request.POST.get('ground_color', world.ground_color)
+        world.ground_size = float(request.POST.get('ground_size', world.ground_size))
+        world.ambient_light = float(request.POST.get('ambient_light', world.ambient_light))
+        world.fog_near = float(request.POST.get('fog_near', world.fog_near))
+        world.fog_far = float(request.POST.get('fog_far', world.fog_far))
+        world.fog_color = request.POST.get('fog_color', world.fog_color)
+        world.gravity = float(request.POST.get('gravity', world.gravity))
+        world.allow_flight = request.POST.get('allow_flight') == 'on'
+        world.spawn_x = float(request.POST.get('spawn_x', world.spawn_x))
+        world.spawn_y = float(request.POST.get('spawn_y', world.spawn_y))
+        world.spawn_z = float(request.POST.get('spawn_z', world.spawn_z))
+        world.hdri_asset = request.POST.get('hdri_asset', '')
+        world.ambient_audio_url = request.POST.get('ambient_audio_url', '')
+        world.ambient_volume = float(request.POST.get('ambient_volume', world.ambient_volume))
+        world.soundscape = request.POST.get('soundscape', '')
+        if request.FILES.get('ambient_audio'):
+            world.ambient_audio = request.FILES['ambient_audio']
+        if request.POST.get('clear_ambient_audio'):
+            world.ambient_audio = ''
+        world.published = request.POST.get('published') == 'on'
+        world.featured = request.POST.get('featured') == 'on'
+        world.save()
+        return redirect('aether:world_detail', slug=world.slug)
+    presets = WorldPreset.objects.all()
+    return render(request, 'aether/world_form.html', {'world': world, 'presets': presets})
+
+
+@login_required
+def preset_json(request, slug):
+    """Return preset data as JSON for form auto-fill."""
+    p = get_object_or_404(WorldPreset, slug=slug)
+    return JsonResponse({
+        'skybox': p.skybox,
+        'hdriAsset': p.hdri_asset,
+        'skyColor': p.sky_color,
+        'groundColor': p.ground_color,
+        'fogColor': p.fog_color,
+        'fogNear': p.fog_near,
+        'fogFar': p.fog_far,
+        'ambientLight': p.ambient_light,
+        'ambientAudioUrl': p.ambient_audio_url,
+        'ambientVolume': p.ambient_volume,
+        'soundscape': p.slug,
+    })
+
+
+@login_required
+def world_delete(request, slug):
+    world = get_object_or_404(World, slug=slug)
+    if request.method == 'POST':
+        world.delete()
+        return redirect('aether:world_list')
+    return render(request, 'aether/confirm_delete.html', {'world': world})
+
+
+@login_required
+def entity_add(request, slug):
+    world = get_object_or_404(World, slug=slug)
+    if request.method == 'POST':
+        asset = None
+        asset_id = request.POST.get('asset')
+        if asset_id:
+            asset = Asset.objects.filter(pk=asset_id, world=world).first()
+        entity = Entity(
+            world=world,
+            name=request.POST.get('name', ''),
+            asset=asset,
+            primitive=request.POST.get('primitive', 'box'),
+            primitive_color=request.POST.get('primitive_color', '#808080'),
+            pos_x=float(request.POST.get('pos_x', 0)),
+            pos_y=float(request.POST.get('pos_y', 0)),
+            pos_z=float(request.POST.get('pos_z', -5)),
+            rot_x=float(request.POST.get('rot_x', 0)),
+            rot_y=float(request.POST.get('rot_y', 0)),
+            rot_z=float(request.POST.get('rot_z', 0)),
+            scale_x=float(request.POST.get('scale_x', 1)),
+            scale_y=float(request.POST.get('scale_y', 1)),
+            scale_z=float(request.POST.get('scale_z', 1)),
+            behavior=request.POST.get('behavior', 'static'),
+        )
+        entity.save()
+        return redirect('aether:world_detail', slug=world.slug)
+    return render(request, 'aether/entity_form.html', {
+        'world': world,
+        'assets': world.assets.all(),
+    })
+
+
+@login_required
+def asset_add(request, slug):
+    world = get_object_or_404(World, slug=slug)
+    if request.method == 'POST' and request.FILES.get('file'):
+        asset = Asset(
+            world=world,
+            name=request.POST.get('name', 'Unnamed'),
+            asset_type=request.POST.get('asset_type', 'model'),
+            file=request.FILES['file'],
+        )
+        asset.save()
+        return redirect('aether:world_detail', slug=world.slug)
+    return render(request, 'aether/asset_form.html', {'world': world})
+
+
+@login_required
+def world_scene_json(request, slug):
+    """JSON endpoint: the full scene graph for the three.js renderer."""
+    world = get_object_or_404(World, slug=slug)
+    entities = world.entities.filter(visible=True).select_related('asset')
+    portals = world.portals_out.select_related('to_world')
+
+    # Prefetch scripts for all entities
+    entity_scripts = {}
+    for es in EntityScript.objects.filter(
+        entity__world=world, enabled=True
+    ).select_related('script'):
+        entity_scripts.setdefault(es.entity_id, []).append({
+            'event': es.script.event,
+            'code': es.script.code,
+            'props': es.props or {},
+        })
+
+    scene = {
+        'title': world.title,
+        'environment': {
+            'skybox': world.skybox,
+            'skyColor': world.sky_color,
+            'groundColor': world.ground_color,
+            'groundSize': world.ground_size,
+            'ambientLight': world.ambient_light,
+            'fogNear': world.fog_near,
+            'fogFar': world.fog_far,
+            'fogColor': world.fog_color,
+            'gravity': world.gravity,
+            'allowFlight': world.allow_flight,
+            'hdriAsset': world.hdri_asset or '',
+            'ambientAudio': world.audio_src(),
+            'ambientVolume': world.ambient_volume,
+            'soundscape': world.soundscape or '',
+        },
+        'spawn': {
+            'x': world.spawn_x,
+            'y': world.spawn_y,
+            'z': world.spawn_z,
+        },
+        'entities': [
+            {
+                'id': e.pk,
+                'name': e.name,
+                'asset': e.asset.file.url if e.asset and e.asset.file else None,
+                'assetType': e.asset.asset_type if e.asset else None,
+                'primitive': e.primitive or None,
+                'primitiveColor': e.primitive_color,
+                'position': [e.pos_x, e.pos_y, e.pos_z],
+                'rotation': [e.rot_x, e.rot_y, e.rot_z],
+                'scale': [e.scale_x, e.scale_y, e.scale_z],
+                'behavior': e.behavior,
+                'behaviorSpeed': e.behavior_speed,
+                'castShadow': e.cast_shadow,
+                'receiveShadow': e.receive_shadow,
+                'scripts': entity_scripts.get(e.pk, []),
+            }
+            for e in entities
+        ],
+        'portals': [
+            {
+                'label': p.label or p.to_world.title,
+                'targetSlug': p.to_world.slug,
+                'targetUrl': f'/aether/{p.to_world.slug}/enter/',
+                'position': [p.pos_x, p.pos_y, p.pos_z],
+                'width': p.width,
+                'height': p.height,
+            }
+            for p in portals
+        ],
+    }
+    return JsonResponse(scene)
+
+
+# -----------------------------------------------------------------------
+# Object Library
+# -----------------------------------------------------------------------
+
+@login_required
+def library_list(request):
+    """Browse the object library with search and category filtering."""
+    q = request.GET.get('q', '').strip()
+    cat_slug = request.GET.get('cat', '')
+    source = request.GET.get('source', '')
+    page = int(request.GET.get('page', 1))
+    per_page = 48
+
+    objects = LibraryObject.objects.all()
+    if q:
+        objects = objects.filter(Q(name__icontains=q) | Q(tags__icontains=q))
+    if cat_slug:
+        objects = objects.filter(category__slug=cat_slug)
+    if source:
+        objects = objects.filter(source=source)
+
+    total = objects.count()
+    objects = objects[(page - 1) * per_page:page * per_page]
+    categories = ObjectCategory.objects.filter(parent__isnull=True)
+
+    return render(request, 'aether/library.html', {
+        'objects': objects,
+        'categories': categories,
+        'q': q,
+        'cat_slug': cat_slug,
+        'source': source,
+        'page': page,
+        'total': total,
+        'has_next': page * per_page < total,
+    })
+
+
+@login_required
+def library_json(request):
+    """JSON search endpoint for the library (used by in-world object picker)."""
+    q = request.GET.get('q', '').strip()
+    cat = request.GET.get('cat', '')
+    count = min(int(request.GET.get('count', 24)), 100)
+
+    objects = LibraryObject.objects.all()
+    if q:
+        objects = objects.filter(Q(name__icontains=q) | Q(tags__icontains=q))
+    if cat:
+        objects = objects.filter(category__slug=cat)
+    objects = objects[:count]
+
+    return JsonResponse({'results': [
+        {
+            'id': obj.pk,
+            'name': obj.name,
+            'slug': obj.slug,
+            'source': obj.source,
+            'thumbnail': obj.thumbnail,
+            'license': obj.license,
+            'author': obj.author,
+            'tags': obj.tag_list,
+            'downloaded': obj.downloaded,
+            'fileUrl': obj.file.url if obj.file else None,
+        }
+        for obj in objects
+    ]})
+
+
+@login_required
+def library_place(request, slug):
+    """Place a LibraryObject into a world: download if needed, create Asset + Entity."""
+    world = get_object_or_404(World, slug=slug)
+    if request.method != 'POST':
+        return redirect('aether:world_detail', slug=world.slug)
+
+    obj = get_object_or_404(LibraryObject, pk=request.POST.get('library_object'))
+
+    # Lazy download: if the file hasn't been fetched yet, download it now
+    if not obj.downloaded and obj.source_url:
+        _download_library_file(obj)
+
+    # Create an Asset in this world from the library object's file
+    asset = None
+    if obj.file:
+        from django.core.files.base import ContentFile
+        content = obj.file.read()
+        obj.file.seek(0)
+        asset = Asset(
+            world=world,
+            name=obj.name,
+            asset_type='model',
+        )
+        fname = obj.file.name.split('/')[-1]
+        asset.file.save(fname, ContentFile(content), save=False)
+        asset.save()
+
+    # Create the Entity referencing the new asset
+    entity = Entity(
+        world=world,
+        name=obj.name,
+        asset=asset,
+        primitive='' if asset else 'box',
+        pos_x=float(request.POST.get('pos_x', 0)),
+        pos_y=float(request.POST.get('pos_y', 0)),
+        pos_z=float(request.POST.get('pos_z', -5)),
+    )
+    entity.save()
+
+    # Track usage
+    LibraryObject.objects.filter(pk=obj.pk).update(use_count=obj.use_count + 1)
+
+    return redirect('aether:world_detail', slug=world.slug)
+
+
+def _download_library_file(obj):
+    """Download the remote file for a LibraryObject and save it locally."""
+    import urllib.request
+    from django.core.files.base import ContentFile
+
+    try:
+        req = urllib.request.Request(obj.source_url, headers={
+            'User-Agent': 'Velour/1.0 (Aether ObjectLibrary)',
+        })
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read(50 * 1024 * 1024)  # cap at 50MB
+        ext = obj.source_url.split('.')[-1].split('?')[0][:10]
+        if ext not in ('glb', 'gltf', 'zip'):
+            ext = 'glb'
+        fname = f'{obj.slug}.{ext}'
+        obj.file.save(fname, ContentFile(data), save=False)
+        obj.file_size = len(data)
+        obj.downloaded = True
+        obj.save()
+    except Exception:
+        pass  # file stays NULL; entity gets created without asset
+
+
+# -----------------------------------------------------------------------
+# Script management
+# -----------------------------------------------------------------------
+
+@login_required
+def script_list(request):
+    """Browse and manage behavior scripts."""
+    scripts = Script.objects.all()
+    return render(request, 'aether/scripts.html', {'scripts': scripts})
+
+
+@login_required
+def script_add(request):
+    if request.method == 'POST':
+        script = Script(
+            name=request.POST.get('name', 'Untitled Script'),
+            description=request.POST.get('description', ''),
+            code=request.POST.get('code', ''),
+            event=request.POST.get('event', 'update'),
+        )
+        script.save()
+        return redirect('aether:script_list')
+    return render(request, 'aether/script_form.html', {})
+
+
+@login_required
+def script_edit(request, slug):
+    script = get_object_or_404(Script, slug=slug)
+    if request.method == 'POST':
+        script.name = request.POST.get('name', script.name)
+        script.description = request.POST.get('description', '')
+        script.code = request.POST.get('code', script.code)
+        script.event = request.POST.get('event', script.event)
+        script.save()
+        return redirect('aether:script_list')
+    return render(request, 'aether/script_form.html', {'script': script})
+
+
+@login_required
+def entity_script_add(request, slug, entity_pk):
+    """Attach a script to an entity."""
+    world = get_object_or_404(World, slug=slug)
+    entity = get_object_or_404(Entity, pk=entity_pk, world=world)
+    if request.method == 'POST':
+        script = get_object_or_404(Script, pk=request.POST.get('script'))
+        props_str = request.POST.get('props', '{}')
+        try:
+            props = json.loads(props_str)
+        except (json.JSONDecodeError, ValueError):
+            props = {}
+        EntityScript.objects.create(
+            entity=entity, script=script, props=props,
+        )
+        return redirect('aether:world_detail', slug=world.slug)
+    scripts = Script.objects.all()
+    return render(request, 'aether/entity_script_form.html', {
+        'world': world,
+        'entity': entity,
+        'scripts': scripts,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Random world generator
+# ---------------------------------------------------------------------------
+
+# Palette of options the generator picks from
+_THEMES = [
+    {'name': 'Forest Clearing', 'sky': '#88b8e8', 'ground': '#3a5020',
+     'fog': '#c0d0e0', 'soundscape': 'forest', 'trees': True, 'flowers': True},
+    {'name': 'Desert Oasis', 'sky': '#e0c898', 'ground': '#c8a868',
+     'fog': '#e8d8c0', 'soundscape': 'desert', 'trees': False, 'flowers': False},
+    {'name': 'Night City', 'sky': '#0a0a18', 'ground': '#1a1a24',
+     'fog': '#141420', 'soundscape': 'city', 'trees': False, 'flowers': False},
+    {'name': 'Seaside', 'sky': '#70a8d8', 'ground': '#c8b888',
+     'fog': '#b0c8e0', 'soundscape': 'ocean', 'trees': True, 'flowers': True},
+    {'name': 'Mountain Top', 'sky': '#90a8c8', 'ground': '#686058',
+     'fog': '#a0a8b8', 'soundscape': 'wind', 'trees': False, 'flowers': False},
+    {'name': 'Garden Party', 'sky': '#a0c8e8', 'ground': '#3a6828',
+     'fog': '#c8d8e8', 'soundscape': 'birds', 'trees': True, 'flowers': True},
+    {'name': 'Cave', 'sky': '#080808', 'ground': '#282020',
+     'fog': '#181418', 'soundscape': 'cave', 'trees': False, 'flowers': False},
+    {'name': 'Snow Field', 'sky': '#c0c8d8', 'ground': '#e0e0e8',
+     'fog': '#d0d4e0', 'soundscape': 'wind', 'trees': True, 'flowers': False},
+    {'name': 'Town Square', 'sky': '#90b8e0', 'ground': '#807868',
+     'fog': '#c8d4e0', 'soundscape': 'town', 'trees': True, 'flowers': True},
+    {'name': 'Space Station', 'sky': '#000008', 'ground': '#202028',
+     'fog': '#08080c', 'soundscape': '', 'trees': False, 'flowers': False},
+]
+
+_SKYBOXES = ['color', 'gradient', 'hdri', 'procedural']
+_HDRIS = ['kloofendal_48d_partly_cloudy', '']
+
+_FURNITURE = [
+    ('Bench', 'box', '#5c4828', 1.8, 0.06, 0.45),
+    ('Table', 'box', '#484038', 1.2, 0.04, 0.8),
+    ('Pillar', 'cylinder', '#808888', 0.2, 2.0, 0.2),
+    ('Crate', 'box', '#5a4828', 0.6, 0.6, 0.6),
+    ('Barrel', 'cylinder', '#5a3820', 0.3, 0.7, 0.3),
+    ('Lamp Post', 'cylinder', '#2a2a2a', 0.06, 4.0, 0.06),
+    ('Boulder', 'sphere', '#686060', 0.8, 0.6, 0.8),
+    ('Planter', 'box', '#504838', 0.8, 0.4, 0.8),
+    ('Wall Segment', 'box', '#505058', 3.0, 2.5, 0.2),
+    ('Arch', 'torus', '#707078', 1.5, 0.5, 1.5),
+]
+
+_NPC_NAMES = [
+    'Ash', 'Blake', 'Cedar', 'Drew', 'Ellis', 'Fern', 'Gray', 'Haven',
+    'Iris', 'Jade', 'Kit', 'Lark', 'Moss', 'Nova', 'Oak', 'Pine',
+    'Quinn', 'Reed', 'Sky', 'Thorn', 'Vale', 'Wren', 'Yew', 'Zara',
+]
+
+_REACTIONS = ['flee', 'approach', 'follow', 'notice', 'ignore',
+              'shy', 'curious', 'wave', 'mimic', 'startle']
+
+_SKINS = ['#c89870', '#704020', '#a87040', '#d4a470', '#e8c898',
+           '#f0d4b0', '#8b5030', '#b88050', '#d0ac80', '#b06038']
+_SHIRTS = ['#f0e8e0', '#2a4060', '#6a3838', '#385838', '#483858',
+            '#684038', '#364050', '#584830', '#385058', '#5a4440']
+_PANTS = ['#1c1c28', '#282830', '#323240', '#1e1e30', '#2a2a38']
+_SHOES = ['#181818', '#3a2418', '#1a1a1a', '#3e2c1e', '#242424']
+_HAIRS = ['#1a1008', '#080808', '#301a0e', '#b89040', '#4a2818',
+           '#7a3c10', '#201008']
+_EYES = ['#3a2818', '#1e4a1e', '#3868a8', '#4a7a4a', '#5a3418',
+          '#284050', '#386888']
+_FLOWERS = ['#cc3040', '#e0a020', '#8040b0', '#e06080', '#40a0c0',
+             '#f0c040', '#60b060', '#c060c0']
+
+
+@login_required
+@require_POST
+def generate_random_world(request):
+    """Generate a random world from template options."""
+    theme = random.choice(_THEMES)
+    skybox = random.choice(_SKYBOXES)
+    n_npcs = random.randint(3, 12)
+    n_furniture = random.randint(4, 20)
+    n_trees = random.randint(4, 12) if theme['trees'] else 0
+    n_flowers = random.randint(0, 8) if theme['flowers'] else 0
+    ground_size = random.choice([30, 40, 50, 60])
+
+    adjectives = ['Quiet', 'Hidden', 'Ancient', 'Twilight', 'Wandering',
+                  'Silver', 'Crystal', 'Misty', 'Golden', 'Hollow']
+    nouns = ['Glade', 'Crossing', 'Haven', 'Outpost', 'Passage',
+             'Landing', 'Terrace', 'Hollow', 'Summit', 'Alcove']
+    title = f'{random.choice(adjectives)} {theme["name"]} {random.choice(nouns)}'
+
+    world = World.objects.create(
+        title=title,
+        description=f'Randomly generated world. Theme: {theme["name"]}. '
+                    f'{n_npcs} NPCs, {n_furniture} objects.',
+        skybox=skybox,
+        hdri_asset=random.choice(_HDRIS) if skybox == 'hdri' else '',
+        sky_color=theme['sky'],
+        ground_color=theme['ground'],
+        ground_size=ground_size,
+        ambient_light=round(random.uniform(0.3, 0.65), 2),
+        fog_near=round(random.uniform(25, 50), 1),
+        fog_far=round(random.uniform(80, 150), 1),
+        fog_color=theme['fog'],
+        gravity=-9.81,
+        spawn_x=0, spawn_y=1.6, spawn_z=round(ground_size * 0.2, 1),
+        soundscape=theme['soundscape'],
+        ambient_volume=round(random.uniform(0.1, 0.3), 2),
+        published=True, featured=False,
+    )
+
+    entities = []
+    half = ground_size * 0.35
+
+    def ent(name, prim, color, x, y, z, sx=1, sy=1, sz=1, **kw):
+        entities.append(Entity(
+            world=world, name=name, primitive=prim, primitive_color=color,
+            pos_x=x, pos_y=y, pos_z=z,
+            scale_x=sx, scale_y=sy, scale_z=sz,
+            cast_shadow=kw.get('shadow', True),
+            receive_shadow=kw.get('shadow', True),
+            behavior='static',
+        ))
+
+    # Ground
+    ent('Ground', 'box', theme['ground'], 0, -0.05, 0,
+        ground_size, 0.1, ground_size, shadow=False)
+
+    # Trees
+    for i in range(n_trees):
+        tx = random.uniform(-half, half)
+        tz = random.uniform(-half, half)
+        h = random.uniform(2.5, 5.0)
+        ent(f'Trunk {i}', 'cylinder', '#5a4020', tx, h/2, tz, 0.3, h, 0.3)
+        cr = random.uniform(1.5, 3.5)
+        ent(f'Canopy {i}', 'sphere',
+            random.choice(['#2a5818', '#3a6828', '#1a4810', '#4a7838']),
+            tx, h + cr*0.4, tz, cr, cr*0.7, cr)
+
+    # Flowers
+    for i in range(n_flowers):
+        fx = random.uniform(-half*0.6, half*0.6)
+        fz = random.uniform(-half*0.6, half*0.6)
+        for j in range(random.randint(2, 5)):
+            ent(f'Flower {i}-{j}', 'sphere', random.choice(_FLOWERS),
+                fx + (j-2)*0.15, 0.15 + random.random()*0.1,
+                fz + random.uniform(-0.1, 0.1),
+                0.08, 0.08, 0.08, shadow=False)
+
+    # Furniture / architecture
+    for i in range(n_furniture):
+        fname, fprim, fcolor, fsx, fsy, fsz = random.choice(_FURNITURE)
+        fx = random.uniform(-half*0.7, half*0.7)
+        fz = random.uniform(-half*0.7, half*0.7)
+        ent(f'{fname} {i}', fprim, fcolor, fx, fsy/2, fz, fsx, fsy, fsz)
+        # Lamp bulb on top of lamp posts
+        if 'Lamp' in fname:
+            ent(f'LampBulb {i}', 'sphere', '#ffe880',
+                fx, fsy + 0.1, fz, 0.12, 0.12, 0.12, shadow=False)
+
+    Entity.objects.bulk_create(entities)
+
+    # --- NPCs ---
+    # Find the best available scripts
+    motion_lib = Script.objects.filter(slug='motion-quality-library').first()
+    builder = (Script.objects.filter(slug__startswith='humanoid-builder')
+               .order_by('-slug').first())
+    react = Script.objects.filter(slug='plaza-react-v5').first()
+    idle = (Script.objects.filter(slug__in=[
+                'studio-idle-v4', 'garden-idle-v3', 'gallery-idle-v2'])
+            .order_by('-slug').first())
+
+    if builder:
+        names = random.sample(_NPC_NAMES, min(n_npcs, len(_NPC_NAMES)))
+        npc_ents = []
+        for i, name in enumerate(names):
+            x = random.uniform(-half*0.5, half*0.5)
+            z = random.uniform(-half*0.5, half*0.5)
+            ry = random.uniform(-180, 180)
+            e = Entity.objects.create(
+                world=world, name=name, primitive='box',
+                primitive_color='#000000',
+                pos_x=x, pos_y=0, pos_z=z, rot_y=ry,
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            npc_ents.append(e)
+
+        attachments = []
+        for i, e in enumerate(npc_ents):
+            # Motion library first (injects M utilities for ballet-quality movement)
+            if motion_lib:
+                attachments.append(EntityScript(entity=e, script=motion_lib, props={}))
+            attachments.append(EntityScript(entity=e, script=builder, props={
+                'skin': random.choice(_SKINS),
+                'shirt': random.choice(_SHIRTS),
+                'pants': random.choice(_PANTS),
+                'shoes': random.choice(_SHOES),
+                'hair': random.choice(_HAIRS),
+                'eyes': random.choice(_EYES),
+                'shoulderW': round(random.uniform(0.83, 1.08), 2),
+                'hipW': round(random.uniform(0.88, 1.04), 2),
+                'heightScale': round(random.uniform(0.91, 1.04), 2),
+                'jawW': round(random.uniform(0.85, 1.1), 2),
+                'cheekFull': round(random.uniform(0.9, 1.12), 2),
+                'foreheadH': round(random.uniform(0.94, 1.05), 2),
+            }))
+            reaction = random.choice(_REACTIONS)
+            if react:
+                attachments.append(EntityScript(entity=e, script=react, props={
+                    'reaction': reaction,
+                    'bounds': [-half*0.8, -half*0.8, half*0.8, half*0.8],
+                    'speed': round(random.uniform(0.4, 1.0), 2),
+                }))
+            elif idle:
+                attachments.append(EntityScript(entity=e, script=idle, props={
+                    'seated': False,
+                }))
+        EntityScript.objects.bulk_create(attachments)
+
+    total = Entity.objects.filter(world=world).count()
+    messages.success(request,
+        f'Generated "{title}" — {total} entities, {n_npcs} NPCs.')
+    return redirect('aether:world_enter', slug=world.slug)
+
+
+# ---------------------------------------------------------------------------
+# World merge
+# ---------------------------------------------------------------------------
+
+@login_required
+def world_merge(request):
+    """Merge two worlds into one. The 'base' world keeps its environment
+    settings (sky, fog, ground, audio, spawn). Entities, assets, portals,
+    and scripts from the 'source' world are copied into the base world
+    with an optional position offset so they don't overlap.
+
+    The source world is NOT deleted — the user can delete it manually.
+    Works for any pair of worlds, including previously-merged ones.
+    """
+    worlds = World.objects.all()
+
+    if request.method == 'POST':
+        base = get_object_or_404(World, pk=request.POST.get('base'))
+        source = get_object_or_404(World, pk=request.POST.get('source'))
+
+        if base.pk == source.pk:
+            messages.error(request, 'Cannot merge a world with itself.')
+            return redirect('aether:world_merge')
+
+        # Position offset so source entities don't pile on top of base
+        off_x = float(request.POST.get('offset_x', 0))
+        off_z = float(request.POST.get('offset_z', 0))
+
+        # Respect ground_size as a soft max — the larger of the two
+        base.ground_size = max(base.ground_size, source.ground_size)
+        base.fog_far = max(base.fog_far, source.fog_far)
+        base.save()
+
+        # Copy assets (map old pk → new asset for entity re-linking)
+        asset_map = {}  # old pk → new Asset
+        for a in source.assets.all():
+            old_pk = a.pk
+            a.pk = None
+            a.slug = ''  # let save() generate a unique slug
+            a.world = base
+            a.save()
+            asset_map[old_pk] = a
+
+        # Copy entities + their scripts
+        for e in source.entities.all():
+            old_pk = e.pk
+            old_scripts = list(EntityScript.objects.filter(
+                entity_id=old_pk, enabled=True,
+            ).select_related('script'))
+
+            e.pk = None
+            e.world = base
+            e.pos_x += off_x
+            e.pos_z += off_z
+            if e.asset_id and e.asset_id in asset_map:
+                e.asset = asset_map[e.asset_id]
+            elif e.asset_id:
+                e.asset = None  # asset wasn't in source world
+            e.save()
+
+            for es in old_scripts:
+                EntityScript.objects.create(
+                    entity=e, script=es.script,
+                    props=es.props, sort_order=es.sort_order,
+                )
+
+        # Copy portals (rewire from_world to base)
+        for p in source.portals_out.all():
+            Portal.objects.create(
+                from_world=base, to_world=p.to_world,
+                label=p.label,
+                pos_x=p.pos_x + off_x, pos_y=p.pos_y,
+                pos_z=p.pos_z + off_z,
+                width=p.width, height=p.height,
+            )
+
+        total = Entity.objects.filter(world=base).count()
+        messages.success(request,
+            f'Merged "{source.title}" into "{base.title}" — '
+            f'{total} total entities.')
+        return redirect('aether:world_detail', slug=base.slug)
+
+    return render(request, 'aether/merge.html', {'worlds': worlds})

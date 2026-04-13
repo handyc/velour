@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ world.title }}? — Aether{% endblock %}
+
+{% block content %}
+<h2>Delete "{{ world.title }}"?</h2>
+<p style="color:#f85149;margin:1rem 0;">This will permanently delete the world and all its entities, assets, and portals.</p>
+<form method="post" style="display:flex;gap:0.8rem;">
+    {% csrf_token %}
+    <button type="submit" style="padding:0.5rem 1.2rem;background:#da3633;border:none;border-radius:6px;color:#fff;font-size:0.85rem;cursor:pointer;">Delete</button>
+    <a href="{% url 'aether:world_detail' world.slug %}" style="color:#8b949e;text-decoration:none;padding:0.5rem 0;">Cancel</a>
+</form>
+{% endblock %}

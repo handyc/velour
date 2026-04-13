@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Oracle — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .oracle-wrap { max-width: 960px; }
+    .oracle-header { margin-bottom: 1rem; }
+    .oracle-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; }
+    .oracle-header .sub { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .lobe-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.75rem; margin-bottom: 1.5rem;
+    }
+    .lobe-card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.85rem 1rem;
+    }
+    .lobe-card h3 {
+        font-size: 0.95rem; margin: 0 0 0.4rem; color: #58a6ff;
+        font-weight: 500;
+    }
+    .lobe-card h3 a { color: inherit; text-decoration: none; }
+    .lobe-card h3 a:hover { text-decoration: underline; }
+    .lobe-card .meta { font-size: 0.75rem; color: #6e7681; margin-bottom: 0.4rem; }
+
+    .lobe-stats {
+        display: flex; gap: 0.6rem; flex-wrap: wrap; font-size: 0.78rem;
+    }
+    .lobe-stats .stat {
+        background: #0d1117; padding: 0.3rem 0.5rem; border-radius: 4px;
+        text-align: center;
+    }
+    .lobe-stats .stat .num {
+        font-weight: 600; color: #c9d1d9;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .lobe-stats .stat .lbl { color: #6e7681; font-size: 0.68rem; }
+
+    .accuracy-good { color: #3fb950; }
+    .accuracy-ok { color: #d29922; }
+    .accuracy-bad { color: #f85149; }
+
+    .card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .card h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #c9d1d9; font-weight: 500; }
+
+    .label-row {
+        display: grid; grid-template-columns: 1fr 100px 90px 90px;
+        gap: 0.5rem; padding: 0.4rem 0.6rem;
+        font-size: 0.78rem; border-bottom: 1px solid #21262d;
+        align-items: center;
+    }
+    .label-row:first-child { border-top: 1px solid #21262d; }
+    .label-row .pred { color: #c9d1d9; font-weight: 500; }
+    .label-row .lobe-name { color: #8b949e; font-size: 0.72rem; }
+    .label-row .time { color: #6e7681; font-size: 0.7rem; }
+    .label-row .verdict-badge {
+        display: inline-block; padding: 0.1rem 0.35rem;
+        border-radius: 3px; font-size: 0.7rem; font-weight: 500;
+    }
+    .verdict-good { background: rgba(63,185,80,0.15); color: #3fb950; }
+    .verdict-bad { background: rgba(248,81,73,0.15); color: #f85149; }
+    .verdict-meh { background: rgba(210,169,34,0.15); color: #d29922; }
+    .verdict-none { background: rgba(139,148,158,0.1); color: #484f58; }
+
+    .verdict-btns { display: flex; gap: 0.25rem; }
+    .verdict-btns button {
+        background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+        color: #8b949e; font-size: 0.68rem; padding: 0.15rem 0.4rem;
+        cursor: pointer;
+    }
+    .verdict-btns button:hover { border-color: #58a6ff; color: #c9d1d9; }
+    .verdict-btns button.active { border-color: #58a6ff; color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oracle-wrap">
+    <div class="oracle-header">
+        <h1>Oracle</h1>
+        <span class="sub">decision trees &middot; poor-man's AI</span>
+    </div>
+
+    {% if lobes %}
+    <div class="lobe-grid">
+        {% for lobe in lobes %}
+        <div class="lobe-card">
+            <h3><a href="{% url 'oracle:lobe_detail' lobe.name %}">{{ lobe.name }}</a></h3>
+            <div class="meta">
+                {{ lobe.n_features }} features &middot; {{ lobe.n_classes }} classes
+                {% if lobe.trained_at %}&middot; trained {{ lobe.trained_at }}{% endif %}
+            </div>
+            {% with stats=lobe_stats|default_if_none:"" %}
+            {% if lobe.name in lobe_stats %}
+            {% with s=lobe_stats %}
+            <div class="lobe-stats">
+                <div class="stat">
+                    <div class="num">{{ s|dictsort:"total" }}</div>
+                </div>
+            </div>
+            {% endwith %}
+            {% endif %}
+            {% endwith %}
+            <div class="lobe-stats">
+                {% for name, s in lobe_stats.items %}
+                {% if name == lobe.name %}
+                <div class="stat"><div class="num">{{ s.total }}</div><div class="lbl">predictions</div></div>
+                <div class="stat"><div class="num">{{ s.labeled }}</div><div class="lbl">labeled</div></div>
+                <div class="stat">
+                    <div class="num {% if s.accuracy is not None %}{% if s.accuracy >= 70 %}accuracy-good{% elif s.accuracy >= 50 %}accuracy-ok{% else %}accuracy-bad{% endif %}{% endif %}">
+                        {% if s.accuracy is not None %}{{ s.accuracy|floatformat:0 }}%{% else %}&mdash;{% endif %}
+                    </div>
+                    <div class="lbl">accuracy</div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card">
+        <h3>No lobes trained</h3>
+        <p style="color: #8b949e; font-size: 0.85rem;">
+            Run <code>python manage.py train_rumination_lobe</code> to train the first lobe.
+        </p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>Recent predictions
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                <a href="{% url 'oracle:labels' %}" style="color: #58a6ff; text-decoration: none;">view all &rarr;</a>
+            </span>
+        </h3>
+        {% if recent %}
+        {% for label in recent %}
+        <div class="label-row">
+            <div>
+                <span class="pred">{{ label.predicted }}</span>
+                <span class="lobe-name">{{ label.lobe_name }}</span>
+            </div>
+            <div class="time">{{ label.happened_at|date:"M d H:i" }}</div>
+            <div>
+                {% if label.verdict %}
+                <span class="verdict-badge verdict-{{ label.verdict }}">{{ label.verdict }}</span>
+                {% else %}
+                <span class="verdict-badge verdict-none">unlabeled</span>
+                {% endif %}
+            </div>
+            <div class="verdict-btns">
+                <form method="post" action="{% url 'oracle:label_verdict' label.pk %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button name="verdict" value="good" type="submit" class="{% if label.verdict == 'good' %}active{% endif %}" title="Good prediction">&#10003;</button>
+                    <button name="verdict" value="bad" type="submit" class="{% if label.verdict == 'bad' %}active{% endif %}" title="Bad prediction">&#10007;</button>
+                    <button name="verdict" value="meh" type="submit" class="{% if label.verdict == 'meh' %}active{% endif %}" title="Meh">~</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p style="color: #8b949e; font-size: 0.82rem;">No predictions yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

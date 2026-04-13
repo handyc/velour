@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} — Oracle — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .oracle-wrap { max-width: 960px; }
+    .oracle-header { margin-bottom: 1rem; }
+    .oracle-header h1 { font-size: 1.1rem; font-weight: 500; display: inline; }
+    .oracle-header .sub { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .stat-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 0.5rem; margin: 1rem 0;
+    }
+    .stat-box {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.5rem 0.65rem; text-align: center;
+    }
+    .stat-box .num {
+        font-size: 1.2rem; font-weight: 600; color: #c9d1d9;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .stat-box .lbl { font-size: 0.68rem; color: #6e7681; margin-top: 0.1rem; }
+
+    .card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .card h3 { font-size: 0.95rem; margin: 0 0 0.5rem; color: #c9d1d9; font-weight: 500; }
+
+    .bar-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.2rem 0; font-size: 0.8rem; }
+    .bar-row .name { color: #8b949e; min-width: 120px; font-size: 0.78rem; }
+    .bar-row .bar { height: 14px; border-radius: 3px; min-width: 3px; }
+    .bar-row .count { color: #6e7681; font-size: 0.72rem; }
+
+    .feature-list { list-style: none; padding: 0; margin: 0; columns: 2; }
+    .feature-list li {
+        font-size: 0.78rem; color: #c9d1d9; padding: 0.15rem 0;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .feature-list li .idx { color: #6e7681; }
+
+    .label-row {
+        display: grid; grid-template-columns: 1fr 80px 70px 90px;
+        gap: 0.5rem; padding: 0.35rem 0.6rem;
+        font-size: 0.78rem; border-bottom: 1px solid #21262d;
+        align-items: center;
+    }
+    .label-row .pred { color: #c9d1d9; font-weight: 500; }
+    .label-row .time { color: #6e7681; font-size: 0.7rem; }
+    .verdict-badge {
+        display: inline-block; padding: 0.1rem 0.35rem;
+        border-radius: 3px; font-size: 0.7rem; font-weight: 500;
+    }
+    .verdict-good { background: rgba(63,185,80,0.15); color: #3fb950; }
+    .verdict-bad { background: rgba(248,81,73,0.15); color: #f85149; }
+    .verdict-meh { background: rgba(210,169,34,0.15); color: #d29922; }
+    .verdict-none { background: rgba(139,148,158,0.1); color: #484f58; }
+    .verdict-btns { display: flex; gap: 0.25rem; }
+    .verdict-btns button {
+        background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+        color: #8b949e; font-size: 0.68rem; padding: 0.15rem 0.4rem; cursor: pointer;
+    }
+    .verdict-btns button:hover { border-color: #58a6ff; color: #c9d1d9; }
+    .verdict-btns button.active { border-color: #58a6ff; color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oracle-wrap">
+    <div class="oracle-header">
+        <h1>{{ name }}</h1>
+        <span class="sub">
+            <a href="{% url 'oracle:home' %}" style="color: #58a6ff; text-decoration: none;">&larr; Oracle</a>
+        </span>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-box"><div class="num">{{ depth }}</div><div class="lbl">tree depth</div></div>
+        <div class="stat-box"><div class="num">{{ n_leaves }}</div><div class="lbl">leaf nodes</div></div>
+        <div class="stat-box"><div class="num">{{ feature_names|length }}</div><div class="lbl">features</div></div>
+        <div class="stat-box"><div class="num">{{ lobe.classes|length }}</div><div class="lbl">classes</div></div>
+        <div class="stat-box"><div class="num">{{ labels|length }}</div><div class="lbl">predictions</div></div>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <!-- Features -->
+        <div class="card" style="flex: 1 1 0; min-width: 280px;">
+            <h3>Features</h3>
+            <ul class="feature-list">
+                {% for f in feature_names %}
+                <li><span class="idx">[{{ forloop.counter0 }}]</span> {{ f }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <!-- Classes -->
+        <div class="card" style="flex: 1 1 0; min-width: 280px;">
+            <h3>Classes</h3>
+            <ul class="feature-list">
+                {% for c in lobe.classes %}
+                <li>{{ c }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- Prediction distribution -->
+    {% if class_counts %}
+    <div class="card">
+        <h3>Prediction distribution</h3>
+        {% for cls, count in class_counts.items %}
+        <div class="bar-row">
+            <span class="name">{{ cls }}</span>
+            <div class="bar" style="width: {{ count }}px; background: #58a6ff;"></div>
+            <span class="count">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Verdict distribution -->
+    {% if verdict_counts %}
+    <div class="card">
+        <h3>Verdict distribution</h3>
+        {% for v, count in verdict_counts.items %}
+        {% if count > 0 %}
+        <div class="bar-row">
+            <span class="name">{{ v }}</span>
+            <div class="bar" style="width: {{ count }}px; background: {% if v == 'good' %}#3fb950{% elif v == 'bad' %}#f85149{% elif v == 'meh' %}#d29922{% else %}#484f58{% endif %};"></div>
+            <span class="count">{{ count }}</span>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Recent labels -->
+    <div class="card">
+        <h3>Predictions
+            <span style="font-size: 0.7rem; color: #6e7681; font-weight: 400; margin-left: 0.3rem;">
+                {{ labels|length }} shown
+            </span>
+        </h3>
+        {% for label in labels %}
+        <div class="label-row">
+            <div><span class="pred">{{ label.predicted }}</span></div>
+            <div class="time">{{ label.happened_at|date:"M d H:i" }}</div>
+            <div>
+                {% if label.verdict %}
+                <span class="verdict-badge verdict-{{ label.verdict }}">{{ label.verdict }}</span>
+                {% else %}
+                <span class="verdict-badge verdict-none">unlabeled</span>
+                {% endif %}
+            </div>
+            <div class="verdict-btns">
+                <form method="post" action="{% url 'oracle:label_verdict' label.pk %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button name="verdict" value="good" type="submit" class="{% if label.verdict == 'good' %}active{% endif %}">&#10003;</button>
+                    <button name="verdict" value="bad" type="submit" class="{% if label.verdict == 'bad' %}active{% endif %}">&#10007;</button>
+                    <button name="verdict" value="meh" type="submit" class="{% if label.verdict == 'meh' %}active{% endif %}">~</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

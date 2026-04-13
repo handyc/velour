@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Scripts — Aether{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Worlds</a>
+    <h2 style="margin:0;">Behavior Scripts</h2>
+</div>
+<a href="{% url 'aether:script_add' %}" style="color:#58a6ff;text-decoration:none;font-size:0.82rem;display:inline-block;margin-bottom:1rem;">+ New Script</a>
+
+{% if scripts %}
+<table style="width:100%;border-collapse:collapse;font-size:0.82rem;">
+    <thead>
+        <tr style="color:#8b949e;border-bottom:1px solid #30363d;">
+            <th style="text-align:left;padding:0.4rem 0.5rem;">Name</th>
+            <th style="text-align:left;padding:0.4rem 0.5rem;">Event</th>
+            <th style="text-align:left;padding:0.4rem 0.5rem;">Description</th>
+            <th style="text-align:left;padding:0.4rem 0.5rem;">Type</th>
+            <th style="text-align:left;padding:0.4rem 0.5rem;"></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in scripts %}
+        <tr style="border-bottom:1px solid #21262d;">
+            <td style="padding:0.4rem 0.5rem;color:#c9d1d9;font-weight:500;">{{ s.name }}</td>
+            <td style="padding:0.4rem 0.5rem;"><span style="color:#58a6ff;font-size:0.75rem;background:#161b22;padding:0.15rem 0.4rem;border-radius:3px;">{{ s.event }}</span></td>
+            <td style="padding:0.4rem 0.5rem;color:#8b949e;">{{ s.description|truncatewords:12 }}</td>
+            <td style="padding:0.4rem 0.5rem;">{% if s.is_builtin %}<span style="color:#238636;font-size:0.7rem;">built-in</span>{% else %}<span style="color:#6e7681;font-size:0.7rem;">custom</span>{% endif %}</td>
+            <td style="padding:0.4rem 0.5rem;"><a href="{% url 'aether:script_edit' s.slug %}" style="color:#58a6ff;text-decoration:none;font-size:0.78rem;">Edit</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p style="color:#6e7681;">No scripts yet. Seed built-ins with: <code style="background:#161b22;padding:0.2rem 0.4rem;border-radius:3px;font-size:0.8rem;">python manage.py import_library --seed-scripts</code></p>
+{% endif %}
+{% endblock %}

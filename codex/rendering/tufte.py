@@ -36,6 +36,7 @@ from pathlib import Path
 from django.conf import settings
 from fpdf import FPDF
 
+from .charts import CHART_W, draw_chart
 from .markdown import parse
 from .sparklines import DEFAULT_H as SPARK_H
 from .sparklines import DEFAULT_W as SPARK_W
@@ -904,6 +905,25 @@ class TufteManualPDF(FPDF):
         self.set_text_color(*BLACK)
         self.set_xy(saved_x, saved_y)
 
+    # --- charts -----------------------------------------------------------
+
+    def emit_chart(self, spec):
+        """Render a quantitative chart block.
+
+        The spec dict contains chart_type plus type-specific keys,
+        parsed from a :::chart block in the markdown.
+        """
+        chart_type = spec.get('chart_type', '')
+        if not chart_type:
+            return
+        self.ln(2)
+        chart_x = LEFT_MARGIN
+        chart_y = self.get_y()
+        height = draw_chart(self, chart_type, spec, chart_x, chart_y,
+                            width=BODY_W)
+        self.set_xy(LEFT_MARGIN, chart_y + height + 2)
+        self.ln(0)
+
     # --- section walker ---------------------------------------------------
 
     def _dispatch_block(self, kind, payload, figure_map):
@@ -941,6 +961,8 @@ class TufteManualPDF(FPDF):
                 payload['left_label'], payload['right_label'],
                 payload['series'],
             )
+        elif kind == 'chart':
+            self.emit_chart(payload)
         elif kind == 'blank':
             self.ln(self.body_leading * 0.3)
 
