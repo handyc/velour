@@ -9,6 +9,7 @@ urlpatterns = [
     path('add/', views.world_add, name='world_add'),
     path('generate-random/', views.generate_random_world, name='generate_random'),
     path('merge/', views.world_merge, name='world_merge'),
+    path('boogaloo/', views.boogaloo, name='boogaloo'),
     path('library/', views.library_list, name='library_list'),
     path('library/json/', views.library_json, name='library_json'),
     path('presets/<slug:slug>.json', views.preset_json, name='preset_json'),

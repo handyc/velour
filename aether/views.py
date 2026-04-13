@@ -764,3 +764,106 @@ def world_merge(request):
         return redirect('aether:world_detail', slug=base.slug)
 
     return render(request, 'aether/merge.html', {'worlds': worlds})
+
+
+# ---------------------------------------------------------------------------
+# Boogaloo — random merge of two random worlds into a new world
+# ---------------------------------------------------------------------------
+
+@login_required
+@require_POST
+def boogaloo(request):
+    """Pick two random existing worlds, create a new world with one's
+    environment settings, copy entities from both with random offsets,
+    and enter the result."""
+    all_worlds = list(World.objects.all())
+    if len(all_worlds) < 2:
+        messages.error(request, 'Need at least 2 existing worlds for a Boogaloo.')
+        return redirect('aether:world_list')
+
+    base_src, donor_src = random.sample(all_worlds, 2)
+
+    # New world gets the base's environment
+    adjectives = ['Electric', 'Neon', 'Wild', 'Funky', 'Cosmic',
+                  'Fever', 'Turbo', 'Mega', 'Ultra', 'Hyper']
+    title = f'{random.choice(adjectives)} Boogaloo'
+
+    ground_size = max(base_src.ground_size, donor_src.ground_size)
+
+    world = World.objects.create(
+        title=title,
+        description=f'Boogaloo: {base_src.title} + {donor_src.title}',
+        skybox=base_src.skybox,
+        sky_color=base_src.sky_color,
+        ground_color=base_src.ground_color,
+        ground_size=ground_size,
+        ambient_light=base_src.ambient_light,
+        fog_near=base_src.fog_near,
+        fog_far=max(base_src.fog_far, donor_src.fog_far),
+        fog_color=base_src.fog_color,
+        hdri_asset=base_src.hdri_asset,
+        gravity=base_src.gravity,
+        allow_flight=base_src.allow_flight or donor_src.allow_flight,
+        spawn_x=0, spawn_y=1.6, spawn_z=round(ground_size * 0.15, 1),
+        soundscape=base_src.soundscape or donor_src.soundscape,
+        ambient_audio_url=base_src.ambient_audio_url or donor_src.ambient_audio_url,
+        ambient_volume=base_src.ambient_volume,
+        published=True, featured=False,
+    )
+
+    # Copy entities from both sources into the new world.
+    # Base entities go at center, donor entities are offset so they
+    # don't pile on top.
+    half = ground_size * 0.3
+    donor_off_x = random.uniform(-half, half)
+    donor_off_z = random.uniform(-half, half)
+
+    def _copy_world_entities(source, off_x, off_z):
+        asset_map = {}
+        for a in source.assets.all():
+            old_pk = a.pk
+            a.pk = None
+            a.slug = ''
+            a.world = world
+            a.save()
+            asset_map[old_pk] = a
+
+        for e in source.entities.all():
+            old_pk = e.pk
+            old_scripts = list(EntityScript.objects.filter(
+                entity_id=old_pk, enabled=True,
+            ).select_related('script'))
+
+            e.pk = None
+            e.world = world
+            e.pos_x += off_x
+            e.pos_z += off_z
+            if e.asset_id and e.asset_id in asset_map:
+                e.asset = asset_map[e.asset_id]
+            elif e.asset_id:
+                e.asset = None
+            e.save()
+
+            for es in old_scripts:
+                EntityScript.objects.create(
+                    entity=e, script=es.script,
+                    props=es.props, sort_order=es.sort_order,
+                )
+
+        for p in source.portals_out.all():
+            Portal.objects.create(
+                from_world=world, to_world=p.to_world,
+                label=p.label,
+                pos_x=p.pos_x + off_x, pos_y=p.pos_y,
+                pos_z=p.pos_z + off_z,
+                width=p.width, height=p.height,
+            )
+
+    _copy_world_entities(base_src, 0, 0)
+    _copy_world_entities(donor_src, donor_off_x, donor_off_z)
+
+    total = Entity.objects.filter(world=world).count()
+    messages.success(request,
+        f'Boogaloo! "{base_src.title}" + "{donor_src.title}" → '
+        f'"{title}" — {total} entities.')
+    return redirect('aether:world_enter', slug=world.slug)
