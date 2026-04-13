@@ -38,6 +38,8 @@ meditations, strange loops, introspective layers, assertions).
 **Creative:** tiles (Wang tiles — square + hexagonal), app_factory,
 lsystem (procedural L-system plant species with 3D preview + Aether export/import).
 
+**Data:** datalift (MySQL→Django models+SQLite conversion, data anonymization).
+
 **Other:** agricola (game), cartography (maps), hpc (clusters).
 
 ## Secrets

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}New Job — Datalift{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+    <a href="{% url 'datalift:job_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Jobs</a>
+    <h2 style="margin:0;">New Datalift Job</h2>
+</div>
+
+<form method="post" action="{% url 'datalift:job_add' %}">
+    {% csrf_token %}
+
+    <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0 0 1rem 0;">
+        <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Job Settings</legend>
+        <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+            Name<br>
+            <input type="text" name="name" required placeholder="My database conversion" style="width:100%;max-width:400px;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+        </label>
+        <label style="color:#8b949e;font-size:0.78rem;display:block;margin-bottom:0.5rem;">
+            Job Type<br>
+            <select name="job_type" style="padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                <option value="convert">MySQL &rarr; Django + SQLite</option>
+                <option value="anonymize">Anonymize Database</option>
+            </select>
+        </label>
+    </fieldset>
+
+    {% if db_refs %}
+    <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0 0 1rem 0;">
+        <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Use Existing Connection</legend>
+        <label style="color:#8b949e;font-size:0.78rem;display:block;">
+            <select name="source_db_ref" style="padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;">
+                <option value="">— Manual entry below —</option>
+                {% for db in db_refs %}
+                <option value="{{ db.pk }}">{{ db.nickname }} ({{ db.database_name }}@{{ db.host }})</option>
+                {% endfor %}
+            </select>
+        </label>
+    </fieldset>
+    {% endif %}
+
+    <fieldset style="border:1px solid #30363d;border-radius:6px;padding:0.8rem;background:#161b22;margin:0 0 1rem 0;">
+        <legend style="color:#8b949e;font-size:0.78rem;padding:0 0.3rem;">Manual Connection</legend>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+            <label style="color:#8b949e;font-size:0.78rem;">Host<br>
+                <input type="text" name="source_host" value="localhost" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;">Port<br>
+                <input type="number" name="source_port" value="3306" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem;">
+            <label style="color:#8b949e;font-size:0.78rem;">Username<br>
+                <input type="text" name="source_user" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+            <label style="color:#8b949e;font-size:0.78rem;">Password<br>
+                <input type="password" name="source_password" style="width:100%;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+            </label>
+        </div>
+        <label style="color:#8b949e;font-size:0.78rem;display:block;">
+            Database Name<br>
+            <input type="text" name="source_database" style="width:100%;max-width:300px;padding:0.3rem 0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:3px;color:#c9d1d9;font-size:0.85rem;box-sizing:border-box;">
+        </label>
+    </fieldset>
+
+    <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.5rem 1.5rem;border-radius:4px;font-size:0.88rem;cursor:pointer;font-weight:600;">Create Job</button>
+</form>
+{% endblock %}

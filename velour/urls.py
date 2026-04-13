@@ -38,6 +38,7 @@ urlpatterns = [
     path('aether/', include('aether.urls')),
     path('oracle/', include('oracle.urls')),
     path('lsystem/', include('lsystem.urls')),
+    path('datalift/', include('datalift.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

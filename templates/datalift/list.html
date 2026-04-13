@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Datalift — Jobs{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:0.3rem;">Datalift</h2>
+<p style="color:#8b949e;margin-top:0;">MySQL/MariaDB to Django + SQLite conversion and data anonymization</p>
+
+<div style="margin-bottom:1rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+    <a href="{% url 'datalift:job_add' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">+ New Job</a>
+    <a href="{% url 'datalift:anonymize_upload' %}" style="color:#d2a8ff;text-decoration:none;font-size:0.85rem;">Anonymize a File</a>
+</div>
+
+{% if jobs %}
+<div style="display:flex;flex-direction:column;gap:0.35rem;">
+    {% for job in jobs %}
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.45rem 0.8rem;display:flex;align-items:center;gap:0.8rem;">
+        <a href="{% url 'datalift:job_detail' job.slug %}" style="color:#c9d1d9;text-decoration:none;font-weight:500;font-size:0.88rem;white-space:nowrap;">{{ job.name }}</a>
+        <span style="color:#6e7681;font-size:0.72rem;border:1px solid #30363d;padding:0.1rem 0.4rem;border-radius:3px;">{{ job.get_job_type_display }}</span>
+        <span style="color:#8b949e;font-size:0.78rem;flex:1;">{{ job.source_database }}@{{ job.source_host }}</span>
+        <span style="font-size:0.72rem;padding:0.1rem 0.4rem;border-radius:3px;white-space:nowrap;
+            {% if job.status == 'done' %}color:#3fb950;border:1px solid #238636;
+            {% elif job.status == 'failed' %}color:#f85149;border:1px solid #da3633;
+            {% elif job.status == 'running' %}color:#d29922;border:1px solid #9e6a03;
+            {% else %}color:#8b949e;border:1px solid #30363d;{% endif %}">{{ job.get_status_display }}</span>
+        <span style="color:#6e7681;font-size:0.72rem;white-space:nowrap;">{{ job.tables_found }}T / {{ job.rows_converted }}R</span>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No jobs yet. Create one to get started.</p>
+{% endif %}
+{% endblock %}

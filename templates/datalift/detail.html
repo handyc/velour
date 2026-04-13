@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }} — Datalift{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.5rem;">
+    <a href="{% url 'datalift:job_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Jobs</a>
+    <h2 style="margin:0;">{{ job.name }}</h2>
+    <span style="font-size:0.72rem;padding:0.1rem 0.4rem;border-radius:3px;
+        {% if job.status == 'done' %}color:#3fb950;border:1px solid #238636;
+        {% elif job.status == 'failed' %}color:#f85149;border:1px solid #da3633;
+        {% elif job.status == 'running' %}color:#d29922;border:1px solid #9e6a03;
+        {% else %}color:#8b949e;border:1px solid #30363d;{% endif %}">{{ job.get_status_display }}</span>
+</div>
+
+<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center;">
+    {% if job.status == 'pending' or job.status == 'failed' %}
+    <form method="post" action="{% url 'datalift:job_run' job.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.4rem 1rem;border-radius:4px;font-size:0.85rem;font-weight:600;cursor:pointer;">
+            {% if job.status == 'failed' %}Retry{% else %}Run Job{% endif %}
+        </button>
+    </form>
+    {% endif %}
+    {% if job.output_models_py %}
+    <a href="{% url 'datalift:download_models' job.slug %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Download models.py</a>
+    {% endif %}
+    {% if job.output_sqlite %}
+    <a href="{% url 'datalift:download_sqlite' job.slug %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Download SQLite</a>
+    {% endif %}
+    {% if job.output_anonymized %}
+    <a href="{% url 'datalift:download_anonymized' job.slug %}" style="color:#d2a8ff;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Download Anonymized</a>
+    {% endif %}
+    <form method="post" action="{% url 'datalift:job_delete' job.slug %}" style="display:inline;" onsubmit="return confirm('Delete this job?');">
+        {% csrf_token %}
+        <button type="submit" style="background:transparent;color:#f85149;border:1px solid #f85149;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Delete</button>
+    </form>
+</div>
+
+{# Job info #}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.8rem;margin-bottom:1.5rem;">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Type</div>
+        <div style="color:#c9d1d9;font-size:0.85rem;">{{ job.get_job_type_display }}</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Source</div>
+        <div style="color:#c9d1d9;font-size:0.85rem;">{{ job.source_database }}</div>
+        <div style="color:#8b949e;font-size:0.75rem;">{{ job.source_user }}@{{ job.source_host }}:{{ job.source_port }}</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Tables</div>
+        <div style="color:#c9d1d9;font-size:0.85rem;">{{ job.tables_found }}</div>
+    </div>
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.7rem;">
+        <div style="color:#6e7681;font-size:0.7rem;text-transform:uppercase;margin-bottom:0.2rem;">Rows</div>
+        <div style="color:#c9d1d9;font-size:0.85rem;">{{ job.rows_converted|default:"—" }}</div>
+    </div>
+</div>
+
+{% if job.error_message %}
+<div style="background:#2d1214;border:1px solid #da3633;border-radius:6px;padding:0.7rem;margin-bottom:1.5rem;">
+    <div style="color:#f85149;font-size:0.78rem;font-weight:600;margin-bottom:0.3rem;">Error</div>
+    <pre style="color:#f0c0c0;font-size:0.78rem;margin:0;white-space:pre-wrap;word-break:break-all;">{{ job.error_message }}</pre>
+</div>
+{% endif %}
+
+{% if job.output_models_py %}
+<h3 style="margin-bottom:0.5rem;">Generated Models</h3>
+<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:0.8rem;margin-bottom:1.5rem;max-height:500px;overflow-y:auto;">
+    <pre style="color:#c9d1d9;font-size:0.78rem;margin:0;font-family:'Cascadia Code','Fira Code',monospace;line-height:1.5;white-space:pre-wrap;">{{ job.output_models_py }}</pre>
+</div>
+{% endif %}
+{% endblock %}

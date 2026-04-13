@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Anonymize a File — Datalift{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+    <a href="{% url 'datalift:job_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Jobs</a>
+    <h2 style="margin:0;">Anonymize a Database File</h2>
+</div>
+<p style="color:#8b949e;margin-top:0;">Upload any SQLite database file. Datalift will anonymize all non-primary-key data and return the anonymized version for download.</p>
+<p style="color:#6e7681;font-size:0.82rem;">Strings are replaced character-by-character (uppercase&rarr;uppercase, lowercase&rarr;lowercase, digit&rarr;digit). Numbers preserve magnitude. Dates shift randomly. Primary keys are preserved for referential integrity.</p>
+
+<form method="post" enctype="multipart/form-data" style="margin-top:1rem;">
+    {% csrf_token %}
+    <label style="color:#8b949e;font-size:0.85rem;display:block;margin-bottom:1rem;">
+        SQLite file (.sqlite3, .db)<br>
+        <input type="file" name="sqlite_file" accept=".sqlite3,.db,.sqlite" required style="margin-top:0.3rem;color:#c9d1d9;font-size:0.85rem;">
+    </label>
+    <button type="submit" style="background:#8957e5;color:#fff;border:1px solid #a371f7;padding:0.5rem 1.5rem;border-radius:4px;font-size:0.88rem;cursor:pointer;font-weight:600;">Anonymize &amp; Download</button>
+</form>
+{% endblock %}
