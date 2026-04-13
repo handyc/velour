@@ -903,3 +903,90 @@ def boogaloo(request):
         f'Boogaloo! "{base_src.title}" + "{donor_src.title}" → '
         f'"{title}" — {total} entities.')
     return redirect('aether:world_enter', slug=world.slug)
+
+
+# ---------------------------------------------------------------------------
+# Reduce — thin out a world for performance
+# ---------------------------------------------------------------------------
+
+@login_required
+@require_POST
+def world_reduce(request, slug):
+    """Create a lighter copy of a world by removing ~50% of non-essential
+    entities. Keeps ground, spawn-area entities, and scripted NPCs;
+    randomly culls static decoration (furniture, plants, etc.).
+    Original world is preserved."""
+    src = get_object_or_404(World, slug=slug)
+
+    reduced = World(
+        title=f'{src.title} (Reduced)',
+        description=f'Lighter version of "{src.title}".',
+        skybox=src.skybox, hdri_asset=src.hdri_asset,
+        sky_color=src.sky_color, ground_color=src.ground_color,
+        ground_size=src.ground_size, ambient_light=src.ambient_light,
+        fog_near=src.fog_near, fog_far=src.fog_far, fog_color=src.fog_color,
+        gravity=src.gravity,
+        spawn_x=src.spawn_x, spawn_y=src.spawn_y, spawn_z=src.spawn_z,
+        soundscape=src.soundscape, ambient_volume=src.ambient_volume,
+        published=True, featured=False,
+    )
+    reduced.save()
+
+    # Copy assets
+    asset_map = {}
+    for a in src.assets.all():
+        old_pk = a.pk
+        a.pk = None
+        a.slug = ''
+        a.world = reduced
+        a.save()
+        asset_map[old_pk] = a
+
+    src_entities = list(src.entities.all())
+    original_count = len(src_entities)
+    kept = 0
+
+    for e in src_entities:
+        # Always keep: ground planes, scripted entities (NPCs, buildings, plants)
+        is_ground = 'ground' in e.name.lower()
+        is_road = 'road' in e.name.lower() or 'sidewalk' in e.name.lower()
+        is_scripted = e.behavior == 'scripted'
+
+        keep = is_ground or is_road or is_scripted or random.random() > 0.5
+
+        if not keep:
+            continue
+
+        old_pk = e.pk
+        old_scripts = list(EntityScript.objects.filter(
+            entity_id=old_pk, enabled=True,
+        ).select_related('script'))
+
+        e.pk = None
+        e.world = reduced
+        if e.asset_id and e.asset_id in asset_map:
+            e.asset = asset_map[e.asset_id]
+        elif e.asset_id:
+            e.asset = None
+        e.save()
+        kept += 1
+
+        for es in old_scripts:
+            EntityScript.objects.create(
+                entity=e, script=es.script,
+                props=es.props, sort_order=es.sort_order,
+            )
+
+    # Copy portals
+    for p in src.portals_out.all():
+        Portal.objects.create(
+            from_world=reduced, to_world=p.to_world,
+            label=p.label,
+            pos_x=p.pos_x, pos_y=p.pos_y, pos_z=p.pos_z,
+            width=p.width, height=p.height,
+        )
+
+    messages.success(request,
+        f'Reduced "{src.title}" → "{reduced.title}" '
+        f'({kept}/{original_count} entities kept).')
+    return redirect('aether:world_detail', slug=reduced.slug)

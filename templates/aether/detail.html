@@ -12,6 +12,10 @@
 <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;flex-wrap:wrap;align-items:center;">
     <a href="{% url 'aether:world_enter' world.slug %}" style="color:#0d1117;background:#58a6ff;padding:0.4rem 1rem;border-radius:4px;text-decoration:none;font-size:0.85rem;font-weight:600;">Enter World</a>
     <a href="{% url 'aether:world_edit' world.slug %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Edit</a>
+    <form method="post" action="{% url 'aether:world_reduce' world.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Reduce</button>
+    </form>
     <a href="{% url 'aether:world_delete' world.slug %}" style="color:#f85149;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Delete</a>
     <form method="post" action="{% url 'condenser:distill_aether_stereokit' world.slug %}" style="display:inline;">
         {% csrf_token %}

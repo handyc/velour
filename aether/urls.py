@@ -19,6 +19,7 @@ urlpatterns = [
     path('<slug:slug>/', views.world_detail, name='world_detail'),
     path('<slug:slug>/edit/', views.world_edit, name='world_edit'),
     path('<slug:slug>/delete/', views.world_delete, name='world_delete'),
+    path('<slug:slug>/reduce/', views.world_reduce, name='world_reduce'),
     path('<slug:slug>/enter/', views.world_enter, name='world_enter'),
     path('<slug:slug>/scene.json', views.world_scene_json, name='world_scene_json'),
     path('<slug:slug>/entities/add/', views.entity_add, name='entity_add'),
