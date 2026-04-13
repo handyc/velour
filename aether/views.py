@@ -747,15 +747,59 @@ def generate_random_world(request):
 # World merge
 # ---------------------------------------------------------------------------
 
+def _copy_world_entities(src_world, dest_world, off_x=0.0, off_z=0.0):
+    """Copy all assets, entities (with scripts), and portals from src_world
+    into dest_world with a position offset. Returns count of entities copied."""
+    asset_map = {}
+    for a in src_world.assets.all():
+        old_pk = a.pk
+        a.pk = None
+        a.slug = ''
+        a.world = dest_world
+        a.save()
+        asset_map[old_pk] = a
+
+    copied = 0
+    for e in src_world.entities.all():
+        old_pk = e.pk
+        old_scripts = list(EntityScript.objects.filter(
+            entity_id=old_pk, enabled=True,
+        ).select_related('script'))
+
+        e.pk = None
+        e.world = dest_world
+        e.pos_x += off_x
+        e.pos_z += off_z
+        if e.asset_id and e.asset_id in asset_map:
+            e.asset = asset_map[e.asset_id]
+        elif e.asset_id:
+            e.asset = None
+        e.save()
+        copied += 1
+
+        for es in old_scripts:
+            EntityScript.objects.create(
+                entity=e, script=es.script,
+                props=es.props, sort_order=es.sort_order,
+            )
+
+    for p in src_world.portals_out.all():
+        Portal.objects.create(
+            from_world=dest_world, to_world=p.to_world,
+            label=p.label,
+            pos_x=p.pos_x + off_x, pos_y=p.pos_y,
+            pos_z=p.pos_z + off_z,
+            width=p.width, height=p.height,
+        )
+    return copied
+
+
 @login_required
 def world_merge(request):
-    """Merge two worlds into one. The 'base' world keeps its environment
-    settings (sky, fog, ground, audio, spawn). Entities, assets, portals,
-    and scripts from the 'source' world are copied into the base world
-    with an optional position offset so they don't overlap.
-
-    The source world is NOT deleted — the user can delete it manually.
-    Works for any pair of worlds, including previously-merged ones.
+    """Create a new world by merging two existing worlds. The 'base' world
+    provides environment settings (sky, fog, ground, audio, spawn). Entities,
+    assets, portals, and scripts from both worlds are copied into the new world.
+    Neither original world is modified.
     """
     worlds = World.objects.all()
 
@@ -767,63 +811,37 @@ def world_merge(request):
             messages.error(request, 'Cannot merge a world with itself.')
             return redirect('aether:world_merge')
 
-        # Position offset so source entities don't pile on top of base
         off_x = float(request.POST.get('offset_x', 0))
         off_z = float(request.POST.get('offset_z', 0))
 
-        # Respect ground_size as a soft max — the larger of the two
-        base.ground_size = max(base.ground_size, source.ground_size)
-        base.fog_far = max(base.fog_far, source.fog_far)
-        base.save()
+        # Create new world with base's environment settings
+        merged = World(
+            title=f'{base.title} + {source.title}',
+            description=f'Merged from "{base.title}" and "{source.title}".',
+            skybox=base.skybox,
+            hdri_asset=base.hdri_asset,
+            sky_color=base.sky_color,
+            ground_color=base.ground_color,
+            ground_size=max(base.ground_size, source.ground_size),
+            ambient_light=base.ambient_light,
+            fog_near=base.fog_near,
+            fog_far=max(base.fog_far, source.fog_far),
+            fog_color=base.fog_color,
+            gravity=base.gravity,
+            spawn_x=base.spawn_x, spawn_y=base.spawn_y, spawn_z=base.spawn_z,
+            soundscape=base.soundscape,
+            ambient_volume=base.ambient_volume,
+            published=True, featured=False,
+        )
+        merged.save()
 
-        # Copy assets (map old pk → new asset for entity re-linking)
-        asset_map = {}  # old pk → new Asset
-        for a in source.assets.all():
-            old_pk = a.pk
-            a.pk = None
-            a.slug = ''  # let save() generate a unique slug
-            a.world = base
-            a.save()
-            asset_map[old_pk] = a
+        _copy_world_entities(base, merged, 0.0, 0.0)
+        _copy_world_entities(source, merged, off_x, off_z)
 
-        # Copy entities + their scripts
-        for e in source.entities.all():
-            old_pk = e.pk
-            old_scripts = list(EntityScript.objects.filter(
-                entity_id=old_pk, enabled=True,
-            ).select_related('script'))
-
-            e.pk = None
-            e.world = base
-            e.pos_x += off_x
-            e.pos_z += off_z
-            if e.asset_id and e.asset_id in asset_map:
-                e.asset = asset_map[e.asset_id]
-            elif e.asset_id:
-                e.asset = None  # asset wasn't in source world
-            e.save()
-
-            for es in old_scripts:
-                EntityScript.objects.create(
-                    entity=e, script=es.script,
-                    props=es.props, sort_order=es.sort_order,
-                )
-
-        # Copy portals (rewire from_world to base)
-        for p in source.portals_out.all():
-            Portal.objects.create(
-                from_world=base, to_world=p.to_world,
-                label=p.label,
-                pos_x=p.pos_x + off_x, pos_y=p.pos_y,
-                pos_z=p.pos_z + off_z,
-                width=p.width, height=p.height,
-            )
-
-        total = Entity.objects.filter(world=base).count()
+        total = Entity.objects.filter(world=merged).count()
         messages.success(request,
-            f'Merged "{source.title}" into "{base.title}" — '
-            f'{total} total entities.')
-        return redirect('aether:world_detail', slug=base.slug)
+            f'Created "{merged.title}" — {total} total entities.')
+        return redirect('aether:world_detail', slug=merged.slug)
 
     return render(request, 'aether/merge.html', {'worlds': worlds})
 
@@ -873,56 +891,12 @@ def boogaloo(request):
         published=True, featured=False,
     )
 
-    # Copy entities from both sources into the new world.
-    # Base entities go at center, donor entities are offset so they
-    # don't pile on top.
     half = ground_size * 0.3
     donor_off_x = random.uniform(-half, half)
     donor_off_z = random.uniform(-half, half)
 
-    def _copy_world_entities(source, off_x, off_z):
-        asset_map = {}
-        for a in source.assets.all():
-            old_pk = a.pk
-            a.pk = None
-            a.slug = ''
-            a.world = world
-            a.save()
-            asset_map[old_pk] = a
-
-        for e in source.entities.all():
-            old_pk = e.pk
-            old_scripts = list(EntityScript.objects.filter(
-                entity_id=old_pk, enabled=True,
-            ).select_related('script'))
-
-            e.pk = None
-            e.world = world
-            e.pos_x += off_x
-            e.pos_z += off_z
-            if e.asset_id and e.asset_id in asset_map:
-                e.asset = asset_map[e.asset_id]
-            elif e.asset_id:
-                e.asset = None
-            e.save()
-
-            for es in old_scripts:
-                EntityScript.objects.create(
-                    entity=e, script=es.script,
-                    props=es.props, sort_order=es.sort_order,
-                )
-
-        for p in source.portals_out.all():
-            Portal.objects.create(
-                from_world=world, to_world=p.to_world,
-                label=p.label,
-                pos_x=p.pos_x + off_x, pos_y=p.pos_y,
-                pos_z=p.pos_z + off_z,
-                width=p.width, height=p.height,
-            )
-
-    _copy_world_entities(base_src, 0, 0)
-    _copy_world_entities(donor_src, donor_off_x, donor_off_z)
+    _copy_world_entities(base_src, world, 0, 0)
+    _copy_world_entities(donor_src, world, donor_off_x, donor_off_z)
 
     total = Entity.objects.filter(world=world).count()
     messages.success(request,
