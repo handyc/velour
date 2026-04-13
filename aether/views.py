@@ -657,7 +657,9 @@ def generate_random_world(request):
     # --- L-system plants ---
     plant_script = Script.objects.filter(slug='l-system-plant').first()
     if plant_script:
-        _SPECIES = ['oak', 'pine', 'birch', 'palm', 'bush', 'willow', 'cactus']
+        _SPECIES = ['oak', 'pine', 'birch', 'palm', 'bush', 'willow', 'cactus',
+                    'maple', 'cherry', 'bamboo', 'fern', 'succulent', 'cypress',
+                    'baobab', 'vine']
         n_plants = random.randint(6, 20)
         for i in range(n_plants):
             species = random.choice(_SPECIES)
@@ -674,6 +676,49 @@ def generate_random_world(request):
             EntityScript.objects.create(entity=e, script=plant_script, props={
                 'species': species,
                 'scale': round(random.uniform(0.6, 1.5), 2),
+            })
+
+    # --- Animals (light population) ---
+    animal_script = Script.objects.filter(slug='animal-builder').first()
+    animal_anim = Script.objects.filter(slug='animal-animate').first()
+    if animal_script and animal_anim:
+        _TINY = ['gnat', 'midge', 'fruit_fly']
+        _INSECT = ['bee', 'butterfly', 'beetle', 'dragonfly', 'ladybug']
+        _PET = ['mouse', 'rabbit', 'cat', 'frog', 'turtle']
+        _LARGE = ['horse', 'cow', 'deer', 'dog']
+        # 2-6 animals total, weighted toward smaller
+        n_animals = random.randint(2, 6)
+        for i in range(n_animals):
+            r = random.random()
+            if r < 0.3:
+                sp = random.choice(_INSECT)
+                ascale = round(random.uniform(0.8, 1.5), 2)
+            elif r < 0.55:
+                sp = random.choice(_PET)
+                ascale = round(random.uniform(0.7, 1.2), 2)
+            elif r < 0.75:
+                sp = random.choice(_LARGE)
+                ascale = round(random.uniform(0.8, 1.1), 2)
+            else:
+                sp = random.choice(_TINY)
+                ascale = round(random.uniform(0.8, 1.5), 2)
+            e = Entity.objects.create(
+                world=world, name=f'Animal {i}', primitive='box',
+                primitive_color='#000000',
+                pos_x=round(random.uniform(-half*0.7, half*0.7), 1),
+                pos_y=0,
+                pos_z=round(random.uniform(-half*0.7, half*0.7), 1),
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            EntityScript.objects.create(entity=e, script=animal_script, props={
+                'species': sp, 'animalScale': ascale,
+                'seed': random.randint(1, 9999),
+            })
+            EntityScript.objects.create(entity=e, script=animal_anim, props={
+                'bounds': round(half * 0.6, 1),
+                'speed': round(random.uniform(0.2, 0.8), 2),
             })
 
     # --- NPCs ---

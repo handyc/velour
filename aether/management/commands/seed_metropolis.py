@@ -275,98 +275,212 @@ const P = ctx.props;
 const species = P.species || 'oak';
 const iterations = Math.min(P.iterations || 4, 6);
 const scale = P.scale || 1.0;
-const trunkColor = new THREE.Color(P.trunk || '#5a4020');
-const leafColor = new THREE.Color(P.leaf || '#2a6818');
-const leafColor2 = new THREE.Color(P.leaf2 || '#3a7828');
 
 if (ctx.entity.isMesh) {
     ctx.entity.material.visible = false;
     ctx.entity.castShadow = false;
 }
 
-// --- L-system presets ---
+// Deterministic RNG
+let rngState = (P.seed || 42) * 127.1;
+function rnd() { rngState = (rngState * 16807 + 0.5) % 2147483647; return rngState / 2147483647; }
+
+// --- 15 species presets ---
 const presets = {
     oak: {
-        axiom: 'F',
-        rules: {'F': 'FF+[+F-F-F]-[-F+F+F]'},
+        axiom: 'F', rules: [{'F': 'FF+[+F-F-F]-[-F+F+F]'}],
         angle: 22.5, lengthFactor: 0.65, startLength: 0.8,
         trunkTaper: 0.7, leafSize: 0.35, leafDensity: 0.6,
+        trunk: '#5a4020', leaf: '#2a6818', leaf2: '#3a7828',
     },
     pine: {
-        axiom: 'F',
-        rules: {'F': 'F[+F][-F]F[+F][-F]'},
+        axiom: 'F', rules: [{'F': 'F[+F][-F]F[+F][-F]'}],
         angle: 25, lengthFactor: 0.55, startLength: 0.6,
         trunkTaper: 0.65, leafSize: 0.25, leafDensity: 0.8,
-        leafShape: 'cone',
+        leafShape: 'cone', trunk: '#4a3018', leaf: '#1a4810', leaf2: '#2a5818',
     },
     birch: {
-        axiom: 'F',
-        rules: {'F': 'F[-F][+F]F'},
+        axiom: 'F', rules: [{'F': 'F[-F][+F]F'}],
         angle: 30, lengthFactor: 0.7, startLength: 0.7,
         trunkTaper: 0.75, leafSize: 0.2, leafDensity: 0.5,
+        trunk: '#d0c8b8', leaf: '#4a8830', leaf2: '#5a9838',
+        barkStripes: true,
     },
     palm: {
-        axiom: 'FFFFF',
-        rules: {'F': 'F'},
+        axiom: 'FFFFF', rules: [{'F': 'F'}],
         angle: 0, lengthFactor: 1.0, startLength: 0.9,
         trunkTaper: 0.92, leafSize: 0.5, leafDensity: 0,
-        fronds: true,
+        fronds: true, trunk: '#6a5838', leaf: '#2a7818', leaf2: '#3a8828',
+        coconuts: true,
     },
     bush: {
-        axiom: 'F',
-        rules: {'F': 'F[+F]F[-F][F]'},
+        axiom: 'F', rules: [{'F': 'F[+F]F[-F][F]'}],
         angle: 35, lengthFactor: 0.6, startLength: 0.3,
         trunkTaper: 0.6, leafSize: 0.18, leafDensity: 0.9,
+        trunk: '#4a3818', leaf: '#2a6020', leaf2: '#3a7028',
     },
     willow: {
-        axiom: 'F',
-        rules: {'F': 'FF[-F+F+F][+F-F]'},
+        axiom: 'F', rules: [{'F': 'FF[-F+F+F][+F-F]'}],
         angle: 18, lengthFactor: 0.68, startLength: 0.75,
         trunkTaper: 0.72, leafSize: 0.15, leafDensity: 0.7,
-        droop: 0.15,
+        droop: 0.15, trunk: '#5a4828', leaf: '#6aa840', leaf2: '#7ab848',
     },
     cactus: {
-        axiom: 'F',
-        rules: {'F': 'F[+F][-F]'},
+        axiom: 'F', rules: [{'F': 'F[+F][-F]'}],
         angle: 90, lengthFactor: 0.5, startLength: 0.6,
         trunkTaper: 0.85, leafSize: 0, leafDensity: 0,
-        trunkIsGreen: true,
+        trunkIsGreen: true, trunk: '#2a6030', leaf: '#2a6030', leaf2: '#2a6030',
+        flower: true, flowerColor: '#e84080',
+    },
+    maple: {
+        axiom: 'F', rules: [
+            {'F': 'FF+[+F-F]-[-F+F]'},
+            {'F': 'F[+F][-F]FF[-F+F]'},
+        ],
+        angle: 25, lengthFactor: 0.62, startLength: 0.75,
+        trunkTaper: 0.68, leafSize: 0.3, leafDensity: 0.65,
+        trunk: '#5a3818', leaf: '#c83020', leaf2: '#e86030',
+        leafShape: 'star',
+    },
+    cherry: {
+        axiom: 'F', rules: [{'F': 'FF[-F+F][+F-F]F'}],
+        angle: 28, lengthFactor: 0.6, startLength: 0.55,
+        trunkTaper: 0.7, leafSize: 0.22, leafDensity: 0.55,
+        trunk: '#6a3028', leaf: '#ffa0b0', leaf2: '#ff80a0',
+        flower: true, flowerColor: '#ffc0d0', flowerDensity: 0.4,
+    },
+    bamboo: {
+        axiom: 'FFFFF', rules: [{'F': 'F'}],
+        angle: 5, lengthFactor: 1.0, startLength: 0.6,
+        trunkTaper: 0.98, leafSize: 0.2, leafDensity: 0,
+        trunkIsGreen: true, trunk: '#4a8830', leaf: '#3a7020', leaf2: '#4a8030',
+        culms: true,
+    },
+    fern: {
+        axiom: 'X', rules: [{'X': 'F+[[X]-X]-F[-FX]+X', 'F': 'FF'}],
+        angle: 25, lengthFactor: 0.55, startLength: 0.15,
+        trunkTaper: 0.5, leafSize: 0.08, leafDensity: 0.85,
+        trunk: '#2a4818', leaf: '#2a7818', leaf2: '#3a8828',
+        isGroundCover: true,
+    },
+    succulent: {
+        axiom: 'F', rules: [{'F': 'F[+F][-F]'}],
+        angle: 137.5, lengthFactor: 0.75, startLength: 0.1,
+        trunkTaper: 0.9, leafSize: 0.12, leafDensity: 0.95,
+        trunkIsGreen: true, trunk: '#508848', leaf: '#70a860', leaf2: '#80b870',
+        isGroundCover: true, rosette: true,
+    },
+    cypress: {
+        axiom: 'F', rules: [{'F': 'F[+F]F[-F]F'}],
+        angle: 12, lengthFactor: 0.6, startLength: 0.7,
+        trunkTaper: 0.7, leafSize: 0.3, leafDensity: 0.75,
+        leafShape: 'cone', trunk: '#4a3018', leaf: '#1a3810', leaf2: '#2a4818',
+        narrow: true,
+    },
+    baobab: {
+        axiom: 'F', rules: [{'F': 'FFF[+F][-F][+F-F]'}],
+        angle: 40, lengthFactor: 0.45, startLength: 0.5,
+        trunkTaper: 0.55, leafSize: 0.25, leafDensity: 0.35,
+        trunk: '#8a7868', leaf: '#4a7828', leaf2: '#5a8838',
+        fatTrunk: true,
+    },
+    vine: {
+        axiom: 'F', rules: [{'F': 'F[-F][+F]F[-F]'}],
+        angle: 35, lengthFactor: 0.72, startLength: 0.4,
+        trunkTaper: 0.5, leafSize: 0.12, leafDensity: 0.6,
+        droop: 0.2, trunk: '#3a5020', leaf: '#4a8030', leaf2: '#5a9040',
+        isGroundCover: true,
     },
 };
 
 const preset = presets[species] || presets.oak;
 
-// --- L-system string rewriting ---
-let str = preset.axiom;
-for (let i = 0; i < iterations; i++) {
+// Stochastic rule selection: if multiple rule sets, pick per-iteration
+function rewrite(str) {
     let next = '';
+    const ruleSet = preset.rules[Math.floor(rnd() * preset.rules.length)];
     for (const ch of str) {
-        next += preset.rules[ch] || ch;
+        next += ruleSet[ch] || ch;
     }
-    str = next;
+    return next;
 }
 
-// --- Turtle interpretation ---
+let str = preset.axiom;
+for (let i = 0; i < iterations; i++) str = rewrite(str);
+
+// Colors (allow prop overrides)
+const trunkColor = new THREE.Color(P.trunk || preset.trunk);
+const leafColor = new THREE.Color(P.leaf || preset.leaf);
+const leafColor2 = new THREE.Color(P.leaf2 || preset.leaf2);
+
+// --- Canvas bark texture ---
+function makeBarkTexture() {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 128;
+    const g = c.getContext('2d');
+    const base = preset.trunkIsGreen ? preset.trunk : (P.trunk || preset.trunk);
+    g.fillStyle = base;
+    g.fillRect(0, 0, 64, 128);
+    // Vertical grain lines
+    for (let i = 0; i < 20; i++) {
+        const x = rnd() * 64;
+        g.strokeStyle = `rgba(0,0,0,${0.1 + rnd()*0.15})`;
+        g.lineWidth = 0.5 + rnd() * 1.5;
+        g.beginPath(); g.moveTo(x, 0); g.lineTo(x + (rnd()-0.5)*8, 128); g.stroke();
+    }
+    // Horizontal cracks for birch
+    if (preset.barkStripes) {
+        for (let i = 0; i < 12; i++) {
+            const y = rnd() * 128;
+            g.strokeStyle = `rgba(40,30,20,${0.2 + rnd()*0.3})`;
+            g.lineWidth = 0.5 + rnd();
+            g.beginPath(); g.moveTo(0, y); g.lineTo(64, y + (rnd()-0.5)*4); g.stroke();
+        }
+    }
+    // Knots
+    for (let i = 0; i < 3; i++) {
+        g.fillStyle = `rgba(50,30,15,${0.15 + rnd()*0.15})`;
+        g.beginPath();
+        g.ellipse(rnd()*64, rnd()*128, 2+rnd()*3, 3+rnd()*5, rnd()*Math.PI, 0, Math.PI*2);
+        g.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+const barkTex = makeBarkTexture();
+const trunkM = new THREE.MeshStandardMaterial({
+    map: barkTex, roughness: 0.85, color: trunkColor,
+});
+const leafM = new THREE.MeshStandardMaterial({color: leafColor, roughness: 0.7, side: THREE.DoubleSide});
+const leafM2 = new THREE.MeshStandardMaterial({color: leafColor2, roughness: 0.7, side: THREE.DoubleSide});
+
+// Flower material
+const hasFlowers = preset.flower || preset.flowerDensity;
+let flowerM;
+if (hasFlowers) {
+    flowerM = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(preset.flowerColor || '#ff80a0'), roughness: 0.5,
+        emissive: new THREE.Color(preset.flowerColor || '#ff80a0'), emissiveIntensity: 0.1,
+    });
+}
+
+// --- Turtle ---
 const root = new THREE.Group();
 ctx.entity.add(root);
-
-const trunkM = new THREE.MeshStandardMaterial({
-    color: preset.trunkIsGreen ? '#2a6030' : trunkColor, roughness: 0.85
-});
-const leafM = new THREE.MeshStandardMaterial({color: leafColor, roughness: 0.7});
-const leafM2 = new THREE.MeshStandardMaterial({color: leafColor2, roughness: 0.7});
 
 const stack = [];
 let pos = new THREE.Vector3(0, 0, 0);
 let dir = new THREE.Vector3(0, 1, 0);
 let right = new THREE.Vector3(1, 0, 0);
 let len = preset.startLength * scale;
-let radius = 0.06 * scale;
+let radius = (preset.fatTrunk ? 0.15 : 0.06) * scale;
 let depth = 0;
 
 const angle = preset.angle * Math.PI / 180;
 const droop = preset.droop || 0;
-const maxSegs = 800; // budget cap
+const maxSegs = 1000;
 let segCount = 0;
 
 function addBranch(from, to, r) {
@@ -374,12 +488,13 @@ function addBranch(from, to, r) {
     const diff = new THREE.Vector3().subVectors(to, from);
     const length = diff.length();
     if (length < 0.01) return;
-    const geo = new THREE.CylinderGeometry(r * preset.trunkTaper, r, length, 5, 1);
+    const topR = r * preset.trunkTaper;
+    const segs = depth === 0 ? 6 : 5;
+    const geo = new THREE.CylinderGeometry(topR, r, length, segs, 1);
     const mesh = new THREE.Mesh(geo, trunkM);
     mesh.castShadow = true; mesh.receiveShadow = true;
     const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
     mesh.position.copy(mid);
-    // Orient cylinder to point from→to
     const axis = new THREE.Vector3(0, 1, 0);
     const q = new THREE.Quaternion().setFromUnitVectors(axis, diff.clone().normalize());
     mesh.quaternion.copy(q);
@@ -388,37 +503,100 @@ function addBranch(from, to, r) {
 }
 
 function addLeaf(p, size) {
-    if (segCount >= maxSegs) return;
-    if (preset.leafSize <= 0) return;
-    const geo = preset.leafShape === 'cone'
-        ? new THREE.ConeGeometry(size, size*2, 6)
-        : new THREE.SphereGeometry(size, 6, 4);
-    const m = Math.random() > 0.5 ? leafM : leafM2;
+    if (segCount >= maxSegs || preset.leafSize <= 0) return;
+    let geo;
+    if (preset.leafShape === 'cone') {
+        geo = new THREE.ConeGeometry(size, size*2, 6);
+    } else if (preset.leafShape === 'star') {
+        // Star-shaped leaf (flat pentagon)
+        const shape = new THREE.Shape();
+        for (let i = 0; i < 5; i++) {
+            const a1 = (i/5)*Math.PI*2 - Math.PI/2;
+            const a2 = ((i+0.5)/5)*Math.PI*2 - Math.PI/2;
+            const r1 = size, r2 = size*0.45;
+            if (i === 0) shape.moveTo(Math.cos(a1)*r1, Math.sin(a1)*r1);
+            else shape.lineTo(Math.cos(a1)*r1, Math.sin(a1)*r1);
+            shape.lineTo(Math.cos(a2)*r2, Math.sin(a2)*r2);
+        }
+        shape.closePath();
+        geo = new THREE.ShapeGeometry(shape);
+    } else {
+        geo = new THREE.SphereGeometry(size, 6, 4);
+    }
+    const m = rnd() > 0.5 ? leafM : leafM2;
     const mesh = new THREE.Mesh(geo, m);
     mesh.castShadow = true; mesh.receiveShadow = false;
     mesh.position.copy(p);
+    // Random tilt for organic look
+    mesh.rotation.set((rnd()-0.5)*0.8, rnd()*Math.PI*2, (rnd()-0.5)*0.5);
     root.add(mesh);
     segCount++;
 }
 
-// Simple deterministic seed for variation
-let rngState = (P.seed || 42) * 127.1;
-function rnd() { rngState = (rngState * 16807 + 0.5) % 2147483647; return rngState / 2147483647; }
+function addFlower(p) {
+    if (segCount >= maxSegs || !flowerM) return;
+    const fd = preset.flowerDensity || 0.15;
+    if (rnd() > fd) return;
+    // Small cluster of petals
+    const nPetals = 4 + Math.floor(rnd() * 3);
+    const fSize = 0.04 * scale + rnd() * 0.03 * scale;
+    for (let i = 0; i < nPetals; i++) {
+        if (segCount >= maxSegs) break;
+        const a = (i / nPetals) * Math.PI * 2;
+        const off = 0.02 * scale;
+        const geo = new THREE.SphereGeometry(fSize, 4, 3);
+        const mesh = new THREE.Mesh(geo, flowerM);
+        mesh.position.set(
+            p.x + Math.cos(a) * off,
+            p.y + rnd() * 0.01,
+            p.z + Math.sin(a) * off
+        );
+        mesh.scale.set(1, 0.6, 1);
+        root.add(mesh);
+        segCount++;
+    }
+    // Center pistil
+    if (segCount < maxSegs) {
+        const cGeo = new THREE.SphereGeometry(fSize*0.5, 4, 3);
+        const cM = new THREE.MeshStandardMaterial({color: '#f0e040', roughness: 0.6});
+        const cm = new THREE.Mesh(cGeo, cM);
+        cm.position.copy(p);
+        root.add(cm);
+        segCount++;
+    }
+}
+
+function addFruit(p) {
+    if (segCount >= maxSegs) return;
+    if (!preset.coconuts || rnd() > 0.3) return;
+    const geo = new THREE.SphereGeometry(0.08 * scale, 6, 5);
+    const m = new THREE.MeshStandardMaterial({color: '#6a4828', roughness: 0.7});
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.position.copy(p);
+    root.add(mesh);
+    segCount++;
+}
 
 for (const ch of str) {
     if (segCount >= maxSegs) break;
     if (ch === 'F') {
         const droopV = new THREE.Vector3(0, -droop * depth, 0);
         const jitter = new THREE.Vector3((rnd()-0.5)*0.05, 0, (rnd()-0.5)*0.05);
+        // Narrow species constrain horizontal spread
+        if (preset.narrow) { jitter.x *= 0.3; jitter.z *= 0.3; }
         const end = pos.clone().add(dir.clone().multiplyScalar(len)).add(droopV).add(jitter);
         addBranch(pos, end, radius);
         pos.copy(end);
-        // Leaves at branch tips / along branches
         if (depth >= 2 && rnd() < preset.leafDensity) {
             addLeaf(pos, preset.leafSize * scale * (0.7 + rnd()*0.6));
+            if (hasFlowers) addFlower(pos);
+        }
+    } else if (ch === 'X') {
+        // X is a growth variable (used by fern) — treated as F for geometry
+        if (depth >= 1 && rnd() < preset.leafDensity) {
+            addLeaf(pos, preset.leafSize * scale * (0.5 + rnd()*0.5));
         }
     } else if (ch === '+') {
-        // Rotate direction around a random-ish axis incorporating 'right'
         const rotAxis = new THREE.Vector3().crossVectors(dir, right).normalize();
         if (rotAxis.length() < 0.01) rotAxis.set(0, 0, 1);
         const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, angle + (rnd()-0.5)*angle*0.3);
@@ -436,14 +614,13 @@ for (const ch of str) {
         len *= preset.lengthFactor;
         radius *= preset.trunkTaper;
         depth++;
-        // Slight random twist on branch
         const twist = new THREE.Quaternion().setFromAxisAngle(dir, (rnd()-0.5)*Math.PI*0.5);
         right.applyQuaternion(twist).normalize();
     } else if (ch === ']') {
         if (stack.length > 0) {
-            // Leaf cluster at branch tip
             if (depth >= 2 && preset.leafDensity > 0) {
                 addLeaf(pos, preset.leafSize * scale * (0.8 + rnd()*0.4));
+                if (hasFlowers) addFlower(pos);
             }
             const s = stack.pop();
             pos.copy(s.pos); dir.copy(s.dir); right.copy(s.right);
@@ -452,7 +629,7 @@ for (const ch of str) {
     }
 }
 
-// Palm fronds (special case)
+// Palm fronds with coconuts
 if (preset.fronds) {
     const topY = pos.y;
     const nFronds = 8 + Math.floor(rnd() * 5);
@@ -460,7 +637,7 @@ if (preset.fronds) {
         const a = (i / nFronds) * Math.PI * 2 + rnd() * 0.3;
         const frondLen = (1.5 + rnd()) * scale;
         const droop2 = 0.3 + rnd() * 0.4;
-        const segs = 5;
+        const segs = 6;
         let fp = new THREE.Vector3(0, topY, 0);
         for (let s = 0; s < segs; s++) {
             const t = s / segs;
@@ -471,13 +648,128 @@ if (preset.fronds) {
             );
             addBranch(fp, ep, 0.02 * scale * (1 - t*0.5));
             fp = ep;
-            // Leaf segments along frond
             if (s >= 1) {
-                const lp = ep.clone();
-                lp.y += 0.05;
-                addLeaf(lp, 0.2 * scale * (1 - t*0.3));
+                // Alternating leaflets along frond
+                for (let side = -1; side <= 1; side += 2) {
+                    if (segCount >= maxSegs) break;
+                    const leafOff = new THREE.Vector3(
+                        Math.cos(a) * 0.15 * scale * side,
+                        0.02,
+                        -Math.sin(a) * 0.15 * scale * side
+                    );
+                    const lp = ep.clone().add(leafOff);
+                    addLeaf(lp, 0.15 * scale * (1 - t*0.3));
+                }
             }
         }
+    }
+    // Coconut cluster at crown
+    if (preset.coconuts) {
+        for (let i = 0; i < 3 + Math.floor(rnd()*3); i++) {
+            const cp = new THREE.Vector3(
+                (rnd()-0.5)*0.15*scale, topY - 0.1*scale, (rnd()-0.5)*0.15*scale
+            );
+            addFruit(cp);
+        }
+    }
+}
+
+// Bamboo: multiple culms
+if (preset.culms) {
+    const nCulms = 4 + Math.floor(rnd() * 6);
+    for (let c = 0; c < nCulms; c++) {
+        if (segCount >= maxSegs) break;
+        const cx = (rnd()-0.5) * 0.5 * scale;
+        const cz = (rnd()-0.5) * 0.5 * scale;
+        const height = (2 + rnd() * 2) * scale;
+        const segs = 6 + Math.floor(rnd()*3);
+        let bp = new THREE.Vector3(cx, 0, cz);
+        const sway = (rnd()-0.5)*0.1;
+        for (let s = 0; s < segs; s++) {
+            if (segCount >= maxSegs) break;
+            const segH = height / segs;
+            const ep = new THREE.Vector3(
+                cx + sway * (s/segs), bp.y + segH, cz + sway * 0.5 * (s/segs)
+            );
+            addBranch(bp, ep, 0.025 * scale);
+            bp = ep;
+            // Node ring
+            if (segCount < maxSegs) {
+                const nGeo = new THREE.TorusGeometry(0.03*scale, 0.005*scale, 4, 8);
+                const nMesh = new THREE.Mesh(nGeo, trunkM);
+                nMesh.position.copy(ep);
+                nMesh.rotation.x = Math.PI/2;
+                root.add(nMesh);
+                segCount++;
+            }
+            // Leaf sprays at top nodes
+            if (s >= segs - 3 && rnd() > 0.3) {
+                for (let l = 0; l < 2 + Math.floor(rnd()*2); l++) {
+                    const la = rnd() * Math.PI * 2;
+                    const lp = ep.clone().add(new THREE.Vector3(
+                        Math.cos(la)*0.2*scale, 0.05, Math.sin(la)*0.2*scale
+                    ));
+                    addLeaf(lp, 0.12*scale);
+                }
+            }
+        }
+    }
+}
+
+// Succulent rosette
+if (preset.rosette) {
+    const nLeaves = 12 + Math.floor(rnd()*8);
+    const layers = 3;
+    for (let layer = 0; layer < layers; layer++) {
+        const layerR = (0.08 + layer * 0.06) * scale;
+        const layerH = layer * 0.03 * scale;
+        const nInLayer = Math.floor(nLeaves / layers);
+        for (let i = 0; i < nInLayer; i++) {
+            if (segCount >= maxSegs) break;
+            const a = (i / nInLayer) * Math.PI * 2 + layer * 0.3;
+            const geo = new THREE.SphereGeometry(0.04*scale, 5, 4);
+            geo.scale(1.8, 0.5, 1);
+            const m = rnd() > 0.5 ? leafM : leafM2;
+            const mesh = new THREE.Mesh(geo, m);
+            mesh.position.set(Math.cos(a)*layerR, layerH, Math.sin(a)*layerR);
+            mesh.rotation.set(0, -a, layer * 0.3);
+            root.add(mesh);
+            segCount++;
+        }
+    }
+}
+
+// Ground cover: scatter small leaves/moss around base
+if (!preset.isGroundCover && rnd() > 0.5) {
+    const nGround = 3 + Math.floor(rnd() * 5);
+    for (let i = 0; i < nGround; i++) {
+        if (segCount >= maxSegs) break;
+        const gx = (rnd()-0.5) * 1.5 * scale;
+        const gz = (rnd()-0.5) * 1.5 * scale;
+        const gSize = 0.06 * scale + rnd() * 0.08 * scale;
+        const geo = new THREE.SphereGeometry(gSize, 4, 3);
+        geo.scale(1.5, 0.3, 1.5);
+        const gM = new THREE.MeshStandardMaterial({
+            color: new THREE.Color().lerpColors(leafColor, new THREE.Color('#3a5020'), rnd()),
+            roughness: 0.8,
+        });
+        const mesh = new THREE.Mesh(geo, gM);
+        mesh.position.set(gx, 0.01, gz);
+        root.add(mesh);
+        segCount++;
+    }
+}
+
+// Exposed roots for large trees
+if (!preset.isGroundCover && scale > 0.8 && rnd() > 0.4) {
+    const nRoots = 3 + Math.floor(rnd()*3);
+    for (let i = 0; i < nRoots; i++) {
+        if (segCount >= maxSegs) break;
+        const ra = (i / nRoots) * Math.PI * 2 + rnd() * 0.5;
+        const rLen = (0.3 + rnd() * 0.5) * scale;
+        const rp = new THREE.Vector3(0, 0.02, 0);
+        const re = new THREE.Vector3(Math.cos(ra)*rLen, -0.05, Math.sin(ra)*rLen);
+        addBranch(rp, re, 0.03 * scale);
     }
 }
 
@@ -487,7 +779,463 @@ S.plant = root;
 
 
 # ===================================================================
-# 3. NPC LOD MANAGER SCRIPT (update)
+# 3. ANIMAL BUILDER SCRIPT (start)
+# ===================================================================
+
+ANIMAL_SCRIPT = r"""
+const S = ctx.state;
+const P = ctx.props;
+const species = P.species || 'dog';
+
+if (ctx.entity.isMesh) {
+    ctx.entity.material.visible = false;
+    ctx.entity.castShadow = false;
+}
+
+let rngState = (P.seed || 1) * 127.1;
+function rnd() { rngState = (rngState * 16807 + 0.5) % 2147483647; return rngState / 2147483647; }
+
+// 4 size tiers
+const tiers = {
+    // --- TINY INSECTS (gnat-sized, ~2mm) ---
+    gnat:       {tier:'tiny',  bodyLen:0.003, bodyW:0.001, legs:6, wings:2, color:'#303030'},
+    midge:      {tier:'tiny',  bodyLen:0.003, bodyW:0.0008, legs:6, wings:2, color:'#404040'},
+    fruit_fly:  {tier:'tiny',  bodyLen:0.003, bodyW:0.001, legs:6, wings:2, color:'#604020'},
+    // --- INSECTS (bee-sized, ~1-3cm) ---
+    bee:        {tier:'insect', bodyLen:0.015, bodyW:0.008, legs:6, wings:2, color:'#c8a020',
+                 stripes:true, stripeColor:'#181010'},
+    butterfly:  {tier:'insect', bodyLen:0.012, bodyW:0.003, legs:6, wings:2, color:'#2040a0',
+                 bigWings:true, wingColor:'#e08020', wingColor2:'#3060c0'},
+    beetle:     {tier:'insect', bodyLen:0.02, bodyW:0.012, legs:6, wings:0, color:'#1a3020',
+                 shell:true, shellColor:'#2a6030'},
+    ant:        {tier:'insect', bodyLen:0.008, bodyW:0.003, legs:6, wings:0, color:'#201010',
+                 segments:3},
+    dragonfly:  {tier:'insect', bodyLen:0.04, bodyW:0.003, legs:6, wings:4, color:'#2080a0',
+                 longBody:true},
+    ladybug:    {tier:'insect', bodyLen:0.008, bodyW:0.006, legs:6, wings:0, color:'#d03020',
+                 shell:true, shellColor:'#d03020', spots:true},
+    // --- PET-SIZED (mouse to cat, ~5-40cm) ---
+    mouse:      {tier:'pet', bodyLen:0.06, bodyW:0.025, legs:4, color:'#a09080', tail:true,
+                 ears:'round', earSize:0.015},
+    rat:        {tier:'pet', bodyLen:0.1, bodyW:0.04, legs:4, color:'#706050', tail:true,
+                 ears:'round', earSize:0.018},
+    rabbit:     {tier:'pet', bodyLen:0.15, bodyW:0.08, legs:4, color:'#c8b8a0', tail:false,
+                 ears:'long', earSize:0.06},
+    cat:        {tier:'pet', bodyLen:0.35, bodyW:0.12, legs:4, color:'#806040', tail:true,
+                 ears:'pointed', earSize:0.025},
+    chicken:    {tier:'pet', bodyLen:0.2, bodyW:0.12, legs:2, color:'#c8a878',
+                 beak:true, beakColor:'#e0a020', comb:true},
+    frog:       {tier:'pet', bodyLen:0.06, bodyW:0.05, legs:4, color:'#308830',
+                 eyes:'bulge', flat:true},
+    turtle:     {tier:'pet', bodyLen:0.12, bodyW:0.1, legs:4, color:'#506838',
+                 shell:true, shellColor:'#607848', flat:true},
+    snake:      {tier:'pet', bodyLen:0.4, bodyW:0.02, legs:0, color:'#506030',
+                 segments:8},
+    // --- LARGE (horse-sized, 1-3m) ---
+    horse:      {tier:'large', bodyLen:1.8, bodyW:0.5, legs:4, color:'#6a4828',
+                 head:0.3, tail:true, mane:true, ears:'pointed', earSize:0.08},
+    cow:        {tier:'large', bodyLen:1.6, bodyW:0.55, legs:4, color:'#e0d0c0',
+                 head:0.28, ears:'round', earSize:0.06, spots:true, spotColor:'#302018'},
+    deer:       {tier:'large', bodyLen:1.2, bodyW:0.35, legs:4, color:'#a08050',
+                 head:0.22, tail:false, ears:'pointed', earSize:0.06, antlers:true},
+    pig:        {tier:'large', bodyLen:0.9, bodyW:0.4, legs:4, color:'#e0a8a0',
+                 head:0.2, ears:'floppy', earSize:0.06, snout:true},
+    dog:        {tier:'large', bodyLen:0.6, bodyW:0.2, legs:4, color:'#8a6838',
+                 head:0.15, tail:true, ears:'floppy', earSize:0.04},
+    bear:       {tier:'large', bodyLen:1.5, bodyW:0.65, legs:4, color:'#4a3018',
+                 head:0.3, ears:'round', earSize:0.07},
+};
+
+const spec = tiers[species] || tiers.dog;
+const sc = P.animalScale || 1.0;
+const root = new THREE.Group();
+ctx.entity.add(root);
+
+const bodyColor = new THREE.Color(P.color || spec.color);
+const bodyM = new THREE.MeshStandardMaterial({color: bodyColor, roughness: 0.75});
+
+const bL = spec.bodyLen * sc;
+const bW = spec.bodyW * sc;
+const bH = bW * (spec.flat ? 0.5 : 0.8);
+
+// Leg height: insect/tiny legs are short, pets medium, large animals taller
+const legH = spec.tier === 'tiny' ? bH*0.5
+    : spec.tier === 'insect' ? bH*0.8
+    : spec.tier === 'pet' ? bH * 1.2
+    : bH * 1.5;
+const legR = spec.tier === 'large' ? bW*0.1 : bW*0.12;
+
+const baseY = legH + bH/2;
+
+// Body
+if (spec.segments && spec.segments > 2) {
+    // Segmented body (ant, snake)
+    const segLen = bL / spec.segments;
+    for (let i = 0; i < spec.segments; i++) {
+        const segW = bW * (i === 0 ? 0.7 : i === spec.segments-1 ? 0.6 : 1.0);
+        const geo = new THREE.SphereGeometry(segW/2, 6, 5);
+        geo.scale(segLen/segW, spec.flat ? 0.5 : 0.8, 1);
+        const mesh = new THREE.Mesh(geo, bodyM);
+        mesh.position.set(-bL/2 + segLen*(i+0.5), baseY, 0);
+        mesh.castShadow = true;
+        root.add(mesh);
+    }
+} else {
+    // Ellipsoid body
+    const geo = new THREE.SphereGeometry(bL/2, 8, 6);
+    geo.scale(1, bH/bL, bW/bL);
+    const mesh = new THREE.Mesh(geo, bodyM);
+    mesh.position.set(0, baseY, 0);
+    mesh.castShadow = true;
+    root.add(mesh);
+}
+
+// Shell overlay (beetle, turtle, ladybug)
+if (spec.shell) {
+    const sColor = new THREE.Color(spec.shellColor || spec.color);
+    const shellM = new THREE.MeshStandardMaterial({color: sColor, roughness: 0.4, metalness: 0.1});
+    const sGeo = new THREE.SphereGeometry(bL*0.48, 8, 6, 0, Math.PI*2, 0, Math.PI*0.55);
+    sGeo.scale(1, bH*0.9/bL, bW*1.05/(bL*0.96));
+    const sMesh = new THREE.Mesh(sGeo, shellM);
+    sMesh.position.set(0, baseY + bH*0.05, 0);
+    sMesh.castShadow = true;
+    root.add(sMesh);
+    // Spots for ladybug
+    if (spec.spots && !spec.spotColor) {
+        const spotM = new THREE.MeshStandardMaterial({color:'#101010', roughness:0.6});
+        for (let i = 0; i < 5; i++) {
+            const sGeo2 = new THREE.SphereGeometry(bL*0.05, 4, 3);
+            const sm = new THREE.Mesh(sGeo2, spotM);
+            const sa = rnd()*Math.PI*0.8 + 0.1;
+            sm.position.set(
+                (rnd()-0.5)*bL*0.5, baseY + bH*0.4,
+                (rnd()-0.5)*bW*0.4
+            );
+            root.add(sm);
+        }
+    }
+}
+
+// Stripes (bee)
+if (spec.stripes) {
+    const stripeM = new THREE.MeshStandardMaterial({color: new THREE.Color(spec.stripeColor), roughness: 0.7});
+    const nStripes = 3;
+    for (let i = 0; i < nStripes; i++) {
+        const sx = -bL*0.2 + i * bL*0.2;
+        const sGeo = new THREE.TorusGeometry(bW*0.55, bW*0.08, 6, 12);
+        const sm = new THREE.Mesh(sGeo, stripeM);
+        sm.position.set(sx, baseY, 0);
+        sm.rotation.y = Math.PI/2;
+        root.add(sm);
+    }
+}
+
+// Legs
+const legM = new THREE.MeshStandardMaterial({
+    color: bodyColor.clone().multiplyScalar(0.8), roughness: 0.8
+});
+if (spec.legs > 0) {
+    const pairs = Math.ceil(spec.legs / 2);
+    for (let i = 0; i < pairs; i++) {
+        const lx = -bL*0.3 + (i / Math.max(pairs-1, 1)) * bL*0.6;
+        for (let side = -1; side <= 1; side += 2) {
+            const lz = side * bW * 0.4;
+            // Upper leg
+            const geo = new THREE.CylinderGeometry(legR*0.7, legR, legH, 5);
+            const mesh = new THREE.Mesh(geo, legM);
+            mesh.position.set(lx, legH/2, lz);
+            mesh.castShadow = true;
+            root.add(mesh);
+            // For insects, add angled segments
+            if (spec.tier === 'insect' || spec.tier === 'tiny') {
+                const geo2 = new THREE.CylinderGeometry(legR*0.5, legR*0.7, legH*0.7, 4);
+                const m2 = new THREE.Mesh(geo2, legM);
+                m2.position.set(lx + side*bW*0.1, legH*0.15, lz + side*bW*0.2);
+                m2.rotation.z = side * 0.4;
+                root.add(m2);
+            }
+        }
+    }
+}
+
+// Head
+const headSize = spec.head ? spec.head * sc : bW * 0.8;
+const headY = baseY + (spec.tier === 'large' ? bH*0.3 : 0);
+const headX = bL/2 + headSize*0.3;
+const headM = new THREE.MeshStandardMaterial({color: bodyColor, roughness: 0.7});
+const headGeo = new THREE.SphereGeometry(headSize/2, 7, 5);
+const headMesh = new THREE.Mesh(headGeo, headM);
+headMesh.position.set(headX, headY, 0);
+headMesh.castShadow = true;
+root.add(headMesh);
+
+// Eyes
+const eyeSize = headSize * (spec.eyes === 'bulge' ? 0.25 : 0.12);
+const eyeM = new THREE.MeshStandardMaterial({color:'#101010', roughness:0.3});
+const eyeWhiteM = new THREE.MeshStandardMaterial({color:'#e8e8e0', roughness:0.4});
+for (let side = -1; side <= 1; side += 2) {
+    if (spec.eyes === 'bulge') {
+        // Frog bulging eyes
+        const eGeo = new THREE.SphereGeometry(eyeSize, 6, 5);
+        const em = new THREE.Mesh(eGeo, eyeWhiteM);
+        em.position.set(headX + headSize*0.15, headY + headSize*0.35, side * headSize*0.25);
+        root.add(em);
+        const pGeo = new THREE.SphereGeometry(eyeSize*0.5, 5, 4);
+        const pm = new THREE.Mesh(pGeo, eyeM);
+        pm.position.set(headX + headSize*0.25, headY + headSize*0.38, side * headSize*0.25);
+        root.add(pm);
+    } else {
+        const eGeo = new THREE.SphereGeometry(eyeSize, 5, 4);
+        const em = new THREE.Mesh(eGeo, eyeM);
+        em.position.set(headX + headSize*0.3, headY + headSize*0.15, side * headSize*0.25);
+        root.add(em);
+    }
+}
+
+// Ears
+if (spec.ears) {
+    const eSize = (spec.earSize || 0.03) * sc;
+    const earM = new THREE.MeshStandardMaterial({
+        color: bodyColor.clone().multiplyScalar(0.9), roughness: 0.7
+    });
+    for (let side = -1; side <= 1; side += 2) {
+        let geo;
+        if (spec.ears === 'long') {
+            geo = new THREE.CylinderGeometry(eSize*0.3, eSize*0.4, eSize, 6);
+        } else if (spec.ears === 'pointed') {
+            geo = new THREE.ConeGeometry(eSize*0.4, eSize, 5);
+        } else if (spec.ears === 'floppy') {
+            geo = new THREE.SphereGeometry(eSize*0.5, 5, 4);
+            geo.scale(1, 1.5, 0.5);
+        } else {
+            geo = new THREE.SphereGeometry(eSize*0.5, 5, 4);
+        }
+        const em = new THREE.Mesh(geo, earM);
+        const ex = headX - headSize*0.1;
+        const ey = headY + headSize*0.35;
+        const ez = side * headSize*0.3;
+        em.position.set(ex, ey, ez);
+        if (spec.ears === 'floppy') em.rotation.z = side * 0.5;
+        root.add(em);
+    }
+}
+
+// Beak (chicken)
+if (spec.beak) {
+    const bkM = new THREE.MeshStandardMaterial({color: new THREE.Color(spec.beakColor||'#e0a020'), roughness:0.6});
+    const bkGeo = new THREE.ConeGeometry(headSize*0.12, headSize*0.3, 5);
+    const bk = new THREE.Mesh(bkGeo, bkM);
+    bk.position.set(headX + headSize*0.4, headY - headSize*0.05, 0);
+    bk.rotation.z = -Math.PI/2;
+    root.add(bk);
+}
+if (spec.comb) {
+    const combM = new THREE.MeshStandardMaterial({color:'#d02020', roughness:0.6});
+    const cGeo = new THREE.SphereGeometry(headSize*0.15, 5, 4);
+    cGeo.scale(0.5, 1, 1);
+    const cm = new THREE.Mesh(cGeo, combM);
+    cm.position.set(headX, headY + headSize*0.4, 0);
+    root.add(cm);
+}
+
+// Snout (pig)
+if (spec.snout) {
+    const snM = new THREE.MeshStandardMaterial({color: bodyColor.clone().multiplyScalar(0.85), roughness:0.7});
+    const snGeo = new THREE.CylinderGeometry(headSize*0.15, headSize*0.12, headSize*0.15, 6);
+    const sn = new THREE.Mesh(snGeo, snM);
+    sn.position.set(headX + headSize*0.4, headY - headSize*0.05, 0);
+    sn.rotation.z = Math.PI/2;
+    root.add(sn);
+    // Nostrils
+    const nM = new THREE.MeshStandardMaterial({color:'#303030', roughness:0.5});
+    for (let s = -1; s <= 1; s += 2) {
+        const nGeo = new THREE.SphereGeometry(headSize*0.03, 4, 3);
+        const nm = new THREE.Mesh(nGeo, nM);
+        nm.position.set(headX + headSize*0.47, headY - headSize*0.03, s*headSize*0.06);
+        root.add(nm);
+    }
+}
+
+// Antlers (deer)
+if (spec.antlers) {
+    const aM = new THREE.MeshStandardMaterial({color:'#8a7060', roughness:0.8});
+    for (let side = -1; side <= 1; side += 2) {
+        const aBase = new THREE.Vector3(headX - headSize*0.1, headY + headSize*0.4, side*headSize*0.2);
+        const aTip = new THREE.Vector3(headX - headSize*0.3, headY + headSize*1.0, side*headSize*0.5);
+        const diff = new THREE.Vector3().subVectors(aTip, aBase);
+        const aLen = diff.length();
+        const aGeo = new THREE.CylinderGeometry(0.008*sc, 0.015*sc, aLen, 5);
+        const am = new THREE.Mesh(aGeo, aM);
+        am.position.copy(aBase.clone().add(aTip).multiplyScalar(0.5));
+        const q = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0,1,0), diff.normalize());
+        am.quaternion.copy(q);
+        root.add(am);
+        // One tine
+        const tGeo = new THREE.CylinderGeometry(0.005*sc, 0.01*sc, aLen*0.4, 4);
+        const tm = new THREE.Mesh(tGeo, aM);
+        const tBase = aBase.clone().lerp(aTip, 0.6);
+        tm.position.set(tBase.x, tBase.y + aLen*0.15, tBase.z + side*0.05*sc);
+        tm.rotation.z = side * 0.4;
+        root.add(tm);
+    }
+}
+
+// Mane (horse)
+if (spec.mane) {
+    const maneM = new THREE.MeshStandardMaterial({color: bodyColor.clone().multiplyScalar(0.6), roughness:0.8});
+    for (let i = 0; i < 6; i++) {
+        const mx = headX - headSize*0.3 - i * bL*0.06;
+        const my = baseY + bH*0.45 - i*0.01;
+        const mGeo = new THREE.SphereGeometry(0.03*sc, 4, 3);
+        mGeo.scale(1.5, 2, 0.5);
+        const mm = new THREE.Mesh(mGeo, maneM);
+        mm.position.set(mx, my, 0);
+        root.add(mm);
+    }
+}
+
+// Tail
+if (spec.tail) {
+    const tailM = new THREE.MeshStandardMaterial({
+        color: bodyColor.clone().multiplyScalar(0.7), roughness: 0.8
+    });
+    const tLen = bL * (spec.tier === 'large' ? 0.5 : 0.6);
+    const tR = spec.tier === 'large' ? bW*0.06 : bW*0.1;
+    const tGeo = new THREE.CylinderGeometry(tR*0.3, tR, tLen, 5);
+    const tm = new THREE.Mesh(tGeo, tailM);
+    tm.position.set(-bL/2 - tLen*0.3, baseY + bH*0.1, 0);
+    tm.rotation.z = 0.6;
+    tm.castShadow = true;
+    root.add(tm);
+}
+
+// Wings (insects)
+if (spec.wings && spec.wings > 0) {
+    const wingM = new THREE.MeshStandardMaterial({
+        color: spec.bigWings ? new THREE.Color(spec.wingColor || '#e08020')
+            : new THREE.Color('#c0d0e0'),
+        transparent: !spec.bigWings, opacity: spec.bigWings ? 0.85 : 0.3,
+        side: THREE.DoubleSide, roughness: 0.3,
+    });
+    const wingSize = spec.bigWings ? bL*1.2 : bL*0.6;
+    const nWings = spec.wings;
+    for (let i = 0; i < nWings; i++) {
+        for (let side = -1; side <= 1; side += 2) {
+            let geo;
+            if (spec.bigWings) {
+                // Butterfly wings — rounded triangle
+                const shape = new THREE.Shape();
+                shape.moveTo(0, 0);
+                shape.quadraticCurveTo(wingSize*0.5, wingSize*0.6, wingSize*0.1, wingSize);
+                shape.quadraticCurveTo(-wingSize*0.3, wingSize*0.5, 0, 0);
+                geo = new THREE.ShapeGeometry(shape);
+            } else {
+                geo = new THREE.PlaneGeometry(wingSize, wingSize*0.25);
+            }
+            const wM2 = (spec.bigWings && i === 1)
+                ? new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(spec.wingColor2 || spec.wingColor || '#3060c0'),
+                    side: THREE.DoubleSide, roughness: 0.3, opacity: 0.85, transparent: false,
+                }) : wingM;
+            const wm = new THREE.Mesh(geo, wM2);
+            const wx = -bL*0.1 + i * bL*0.15;
+            wm.position.set(wx, baseY + bH*0.4, side * bW*0.3);
+            wm.rotation.set(0, side * 0.3, spec.bigWings ? side*0.2 : side * 0.5);
+            root.add(wm);
+        }
+    }
+}
+
+// Cow spots
+if (spec.spots && spec.spotColor) {
+    const spotM = new THREE.MeshStandardMaterial({color: new THREE.Color(spec.spotColor), roughness:0.7});
+    for (let i = 0; i < 6; i++) {
+        const sGeo = new THREE.SphereGeometry(bL*0.08+rnd()*bL*0.06, 5, 4);
+        sGeo.scale(1, 0.3, 1);
+        const sm = new THREE.Mesh(sGeo, spotM);
+        sm.position.set(
+            (rnd()-0.5)*bL*0.6,
+            baseY + bH*0.3 + rnd()*bH*0.2,
+            (rnd()-0.5)*bW*0.6
+        );
+        root.add(sm);
+    }
+}
+
+// Store for animation
+S.built = true;
+S.animal = root;
+S.baseY = baseY;
+S.bodyLen = bL;
+S.tier = spec.tier;
+S.hasWings = (spec.wings || 0) > 0;
+S.bigWings = !!spec.bigWings;
+"""
+
+# ===================================================================
+# 3b. ANIMAL ANIMATE SCRIPT (update)
+# ===================================================================
+
+ANIMAL_ANIM_SCRIPT = r"""
+const S = ctx.state;
+if (!S.built || !S.animal) return;
+const t = ctx.time;
+const dt = ctx.deltaTime;
+const P = ctx.props;
+
+// Movement bounds
+const bounds = P.bounds || 10;
+const speed = P.speed || 0.5;
+
+// Wander
+if (!S.wx) { S.wx = 0; S.wz = 0; S.targetX = 0; S.targetZ = 0; S.timer = 0; }
+S.timer -= dt;
+if (S.timer <= 0) {
+    S.targetX = (Math.random()-0.5) * bounds * 2;
+    S.targetZ = (Math.random()-0.5) * bounds * 2;
+    S.timer = 2 + Math.random() * 5;
+}
+const dx = S.targetX - S.wx;
+const dz = S.targetZ - S.wz;
+const dist = Math.sqrt(dx*dx + dz*dz);
+if (dist > 0.05) {
+    const step = Math.min(speed * dt, dist);
+    S.wx += (dx/dist) * step;
+    S.wz += (dz/dist) * step;
+    // Face direction of movement
+    S.animal.rotation.y = Math.atan2(dx, dz);
+}
+S.animal.position.x = S.wx;
+S.animal.position.z = S.wz;
+
+// Bobbing walk animation
+const walkPhase = t * speed * 8;
+const bobAmt = S.tier === 'large' ? 0.03 : S.tier === 'pet' ? 0.01 : 0.002;
+S.animal.position.y = Math.abs(Math.sin(walkPhase)) * bobAmt;
+
+// Wing flap for flying insects
+if (S.hasWings) {
+    const wings = [];
+    S.animal.traverse(c => {
+        if (c.isMesh && c.geometry && c.geometry.type === 'ShapeGeometry') wings.push(c);
+        if (c.isMesh && c.geometry && c.geometry.type === 'PlaneGeometry') wings.push(c);
+    });
+    const flapSpeed = S.bigWings ? 3 : 20;
+    const flapAmt = S.bigWings ? 0.4 : 0.8;
+    wings.forEach((w, i) => {
+        const side = i % 2 === 0 ? 1 : -1;
+        w.rotation.z = side * (0.3 + Math.sin(t * flapSpeed) * flapAmt);
+    });
+    // Tiny/insect hover
+    if (S.tier === 'tiny' || S.tier === 'insect') {
+        S.animal.position.y = S.baseY * 0.5 + Math.sin(t * 2) * S.bodyLen * 0.5;
+    }
+}
+"""
+
+# ===================================================================
+# 4. NPC LOD MANAGER SCRIPT (update)
 # ===================================================================
 
 LOD_MANAGER_SCRIPT = r"""
@@ -1393,6 +2141,10 @@ class Command(BaseCommand):
             'Generates parameterized buildings: house, shop, skyscraper, factory, warehouse, church, tower.')
         plant_script = _script('L-System Plant', 'start', PLANT_SCRIPT,
             'L-system trees/bushes: oak, pine, birch, palm, bush, willow, cactus.')
+        animal_script = _script('Animal Builder', 'start', ANIMAL_SCRIPT,
+            'Procedural animals: 4 size tiers (tiny/insect/pet/large), 22 species.')
+        animal_anim = _script('Animal Animate', 'update', ANIMAL_ANIM_SCRIPT,
+            'Wander + walk bob + wing flap animation for animals.')
         lod_script = _script('NPC LOD Manager', 'update', LOD_MANAGER_SCRIPT,
             'FPS + distance LOD switching for V6 humanoid faces.')
         v6_script = _script('Humanoid Builder V6', 'start', HUMANOID_V6_SCRIPT,
@@ -1589,13 +2341,42 @@ class Command(BaseCommand):
                     'speed': round(0.4 + rng.random() * 0.5, 2),
                 }))
 
+        # --- Animals ---
+        ANIMAL_CONFIGS = [
+            ('City Pigeon', 'chicken', 5, 12, 0.15, 8),
+            ('Park Dog', 'dog', 30, 30, 1.0, 12),
+            ('Alley Cat', 'cat', -20, 5, 1.0, 10),
+            ('Stray Cat', 'cat', 15, -15, 1.0, 8),
+            ('Park Squirrel', 'mouse', 32, 36, 0.8, 6),
+            ('Butterfly 1', 'butterfly', 8, 20, 1.0, 5),
+            ('Butterfly 2', 'butterfly', -5, 25, 1.0, 5),
+            ('Bee', 'bee', -8, 18, 1.0, 4),
+        ]
+
+        for name, sp, x, z, ascale, bounds in ANIMAL_CONFIGS:
+            e = Entity.objects.create(
+                world=world, name=name, primitive='box',
+                primitive_color='#000000',
+                pos_x=x, pos_y=0, pos_z=z,
+                scale_x=1, scale_y=1, scale_z=1,
+                cast_shadow=False, receive_shadow=False,
+                behavior='scripted',
+            )
+            attachments.append(EntityScript(entity=e, script=animal_script, props={
+                'species': sp, 'animalScale': ascale, 'seed': hash(name) % 10000,
+            }))
+            attachments.append(EntityScript(entity=e, script=animal_anim, props={
+                'bounds': bounds, 'speed': round(0.2 + rng.random() * 0.6, 2),
+            }))
+
         EntityScript.objects.bulk_create(attachments)
 
         total = Entity.objects.filter(world=world).count()
+        n_animals = len(ANIMAL_CONFIGS)
         self.stdout.write(self.style.SUCCESS(
             f'Velour Metropolis created: {total} entities, '
             f'{len(BUILDING_CONFIGS)} buildings, {len(PLANT_CONFIGS)} plants, '
-            f'{len(NAMES)} V6 NPCs.'
+            f'{len(NAMES)} V6 NPCs, {n_animals} animals.'
         ))
 
 
