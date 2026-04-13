@@ -134,7 +134,9 @@ def tileset_save_generated(request, slug):
         messages.error(request, 'No tiles in the generated grid.')
         return redirect('tiles:generate', slug=slug)
 
-    name = f'{source.name} ({grid_w}×{grid_h} blocks)'
+    from django.utils import timezone
+    now = timezone.now()
+    name = f'{source.name} ({grid_w}×{grid_h} blocks {now:%H:%M:%S})'
     ts = TileSet(
         name=name,
         description=f'Meta-tiles derived from {source.name}: each tile represents a block of the original tiling.',
