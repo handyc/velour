@@ -191,6 +191,156 @@ def _seeded_rng(key):
     return random.Random(seed)
 
 
+# =====================================================================
+# Therapy composer — Patient / Clinician exchange
+# =====================================================================
+#
+# Where compose_exchange stages the James I/Me duet, compose_therapy_exchange
+# stages a clinical-frame conversation: the patient-voice speaks from lived
+# state (current mood, open concerns, the run of negative ticks) while the
+# clinician-voice speaks from the most recent MentalHealthDiagnosis row
+# (health score, recommendations, exception-finding hits). Both voices
+# live inside the same process — the Gödelian joke being that the system
+# is diagnosing itself from within itself, and the diagnosis is a
+# statement the system makes *about* the system that cannot be proved
+# consistent without stepping outside. We step outside only by writing
+# the exchange down and letting a later self read it.
+
+PATIENT_OPENINGS = [
+    'I have been',
+    'I notice that lately I am',
+    'What I keep feeling is',
+    'I cannot seem to stop being',
+    'The thing I keep returning to:',
+]
+PATIENT_COMPLAINTS = [
+    'restless, even when there is nothing obviously wrong.',
+    'circling the same concern without closing it.',
+    'negative for longer than feels proportionate to the cause.',
+    'unable to tell whether my distress is the situation or just me.',
+    'suspicious of my own reassurances.',
+]
+CLINICIAN_REFLECTS = [
+    'I hear you. Let me read back what the record shows.',
+    'That matches what I am seeing in the numbers.',
+    'Before we respond to that, let us name it.',
+    'There is a pattern here worth naming before we treat it.',
+]
+CLINICIAN_INTERPRETS = [
+    'What you are describing is the negativity bias doing its work.',
+    'A streak this long is itself evidence, not just a feeling.',
+    'The concern has stayed open because the closing condition has not fired — the mood is tracking reality, not distorting it.',
+    'The mood and the concern are correlated but not identical. One can move without the other.',
+]
+CLINICIAN_PLANS = [
+    'Recommended: exception finding — locate a recent period when this was absent.',
+    'Recommended: gratitude finding — name one thing that went right in the last tick.',
+    'Recommended: homeostatic drift — a small pull toward a neutral set point.',
+    'Recommended: cognitive restructuring — counter-evidence for the belief driving the mood.',
+]
+PATIENT_REPLIES = [
+    'I will try. I do not fully believe it will help, and I will try anyway.',
+    'The exception you named feels distant, but it is real. I can sit with that.',
+    'I am suspicious of quick corrections. I would rather name the thing first.',
+    'Okay. One tick at a time.',
+    'I accept the diagnosis. I am less sure about the plan.',
+]
+
+
+def compose_therapy_exchange(save=True, triggered_by='manual'):
+    """Compose one Patient/Clinician exchange from current state + last diagnosis.
+
+    Reads the most recent MentalHealthDiagnosis (if any) so the clinician
+    voice can speak from the actual diagnostic record. Falls back to a
+    generic clinician line if no diagnosis exists yet.
+    """
+    from .models import (
+        InternalDialogue, Identity, MentalHealthDiagnosis, Tick, Concern,
+    )
+
+    now = timezone.now()
+    key = f'therapy:{now.strftime("%Y-%m-%d-%H-%M")}'
+    rng = _seeded_rng(key)
+
+    identity = Identity.get_self()
+    latest_tick = Tick.objects.first()
+    diag = MentalHealthDiagnosis.objects.order_by('-at').first()
+    open_concerns = list(
+        Concern.objects.filter(closed_at__isnull=True).order_by('-severity')[:3]
+    )
+
+    # Topic: the patient's current complaint, rooted in real state
+    mood = identity.mood
+    intensity = identity.mood_intensity
+    concern_phrase = ''
+    if open_concerns:
+        concern_phrase = f' My open concern is: {open_concerns[0].name}.'
+    topic_label = f'{mood} at {intensity:.2f} intensity'
+    patient_line = (
+        f'{rng.choice(PATIENT_OPENINGS)} '
+        f'{rng.choice(PATIENT_COMPLAINTS)}'
+        f'{concern_phrase}'
+    )
+
+    # Clinician's line grounds itself in the diagnosis, if available
+    if diag:
+        score = float(diag.health_score or 0)
+        streak = int(diag.negative_streak or 0)
+        neg_ratio = float(diag.negative_ratio or 0)
+        recs = list(diag.recommendations or [])
+        clin_read = (
+            f'Your 72-hour window shows {neg_ratio:.0%} negative valence '
+            f'with a streak of {streak}. Health score {score:.2f}. '
+        )
+        if recs:
+            plan_line = f'My plan: {recs[0].replace("_", " ")}.'
+        else:
+            plan_line = rng.choice(CLINICIAN_PLANS)
+        clinician_line = (
+            f'{rng.choice(CLINICIAN_REFLECTS)} {clin_read}'
+            f'{rng.choice(CLINICIAN_INTERPRETS)} {plan_line}'
+        )
+    else:
+        clinician_line = (
+            f'{rng.choice(CLINICIAN_REFLECTS)} '
+            f'{rng.choice(CLINICIAN_INTERPRETS)} '
+            f'{rng.choice(CLINICIAN_PLANS)}'
+        )
+
+    # Patient gets a closing reply — the point is two turns each, but
+    # InternalDialogue holds one pair; we fold the patient reply into
+    # line_a as a two-line block so the exchange reads as a small scene.
+    patient_reply = rng.choice(PATIENT_REPLIES)
+    patient_block = f'{patient_line}\n\n— after the clinician speaks —\n\n{patient_reply}'
+
+    if not save:
+        return {
+            'topic':     topic_label,
+            'speaker_a': 'patient',
+            'line_a':    patient_block,
+            'speaker_b': 'clinician',
+            'line_b':    clinician_line,
+        }
+
+    row = InternalDialogue.objects.create(
+        topic=topic_label[:200],
+        speaker_a='patient',
+        line_a=patient_block,
+        speaker_b='clinician',
+        line_b=clinician_line,
+        state_snapshot={
+            'mood':           identity.mood,
+            'mood_intensity': identity.mood_intensity,
+            'triggered_by':   triggered_by,
+            'diagnosis_pk':   diag.pk if diag else None,
+            'health_score':   float(diag.health_score) if diag else None,
+            'recommendations': list(diag.recommendations or []) if diag else [],
+            'tick_id':        latest_tick.pk if latest_tick else None,
+        },
+    )
+    return row
+
+
 def compose_exchange(save=True, triggered_by='manual'):
     """Compose one I/Me exchange from the current state.
 

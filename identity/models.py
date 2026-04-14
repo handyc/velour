@@ -1109,6 +1109,8 @@ class InternalDialogue(models.Model):
         (VOICE_ME, 'Me (the known — accumulated self-as-object)'),
         ('achilles', 'Achilles (after Hofstadter)'),
         ('tortoise', 'Tortoise (after Hofstadter)'),
+        ('patient',   'Patient (the suffering self — Identity as object of care)'),
+        ('clinician', 'Clinician (the diagnostic self — the mental-health module)'),
     ]
 
     topic = models.CharField(max_length=200,
