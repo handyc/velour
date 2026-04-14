@@ -636,10 +636,13 @@ def generate_random_world(request):
     Entity.objects.bulk_create(entities)
 
     # --- Buildings: mix procedural + L-system architecture ---
+    # L-system architecture species now render via the l-system-building
+    # script, which actually runs the species grammar (axiom/rules/iter/
+    # angle) to grow recursive box-based geometry. Random procedural
+    # buildings still use the procedural-building script for variety.
     building_script = Script.objects.filter(slug='procedural-building').first()
-    plant_script_for_arch = Script.objects.filter(slug='l-system-plant').first()
+    lsys_building_script = Script.objects.filter(slug='l-system-building').first()
 
-    # Gather L-system architecture presets from the library
     lsystem_buildings = []
     try:
         from lsystem.models import PlantSpecies
@@ -657,15 +660,16 @@ def generate_random_world(request):
         bz = round(random.uniform(-half*0.8, half*0.8), 1)
         brot = round(random.uniform(-30, 30), 1)
 
-        # 50/50 split between procedural and L-system buildings
-        # (fall back to procedural if no L-system presets exist)
-        use_lsystem = (lsystem_buildings and plant_script_for_arch
+        # 50/50 split between grown L-system architecture and random
+        # procedural buildings (fall back to procedural if no species
+        # or renderer is available).
+        use_lsystem = (lsystem_buildings and lsys_building_script
                        and random.random() < 0.5)
 
         if use_lsystem:
             preset = random.choice(lsystem_buildings)
             props = preset.to_aether_props(
-                scale=round(random.uniform(1.5, 3.5), 2),
+                scale=round(random.uniform(0.8, 1.4), 2),
                 seed=random.randint(1, 9999),
             )
             e = Entity.objects.create(
@@ -677,7 +681,7 @@ def generate_random_world(request):
                 behavior='scripted',
             )
             EntityScript.objects.create(
-                entity=e, script=plant_script_for_arch, props=props)
+                entity=e, script=lsys_building_script, props=props)
 
         elif building_script:
             _BTYPES = ['house', 'shop', 'skyscraper', 'factory', 'warehouse',

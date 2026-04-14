@@ -180,6 +180,70 @@ class PlantSpecies(models.Model):
             })
         return props
 
+    def to_building_props(self, scale=1.0, seed=42):
+        """Translate an architecture species into props for Aether's
+        `procedural-building` script, which actually knows how to render
+        houses/towers/churches etc.
+
+        The `l-system-plant` script ignores `isArchitecture`, so feeding
+        architecture species through it produces plant-shaped geometry.
+        Until a true L-system architecture renderer exists, we treat each
+        architecture species as a curated *preset* for procedural-building:
+        colors and intent come from the species; type/floors/dimensions
+        are derived from arch_style and category.
+        """
+        import random as _r
+        rng = _r.Random(seed)
+
+        if self.category == 'tower':
+            btype = 'tower'
+        elif self.category == 'wall':
+            # No native wall type; warehouse is the closest single-story form.
+            btype = 'warehouse'
+        elif self.arch_style == 'gothic':
+            btype = 'church'
+        elif self.arch_style == 'industrial':
+            btype = 'factory'
+        elif self.arch_style == 'modern':
+            btype = 'skyscraper'
+        else:
+            # medieval / cottage / classical / generic — all "house"-shaped
+            btype = 'house'
+
+        if btype == 'tower':
+            floors = rng.randint(4, 7)
+        elif btype == 'skyscraper':
+            floors = rng.randint(6, 14)
+        elif btype == 'church':
+            floors = 2
+        elif btype == 'warehouse':
+            floors = 1
+        elif btype == 'factory':
+            floors = rng.randint(1, 2)
+        else:
+            floors = rng.randint(1, 3)
+
+        base_w = max(4.0, self.wall_width * 6 * scale)
+        base_d = max(4.0, self.wall_width * 5 * scale)
+        if btype in ('skyscraper', 'tower'):
+            sq = max(base_w, base_d) * 0.7
+            base_w = base_d = sq
+        width = round(min(base_w, 22.0), 1)
+        depth = round(min(base_d, 18.0), 1)
+
+        return {
+            'type':        btype,
+            'floors':      floors,
+            'width':       width,
+            'depth':       depth,
+            'floorHeight': 3.2,
+            'color':       self.wall_color or '#b0a898',
+            'trim':        self.wall_color2 or '#808080',
+            'roof':        self.roof_color or '#6a4030',
+            'windowColor': self.window_color or '#a8c8e0',
+            'windowLit':   0.3,
+        }
+
     @classmethod
     def from_aether_props(cls, name, props):
         """Create a PlantSpecies from Aether entity script props."""
