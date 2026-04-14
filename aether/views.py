@@ -10,7 +10,7 @@ from django.views.decorators.http import require_POST
 
 from .models import (
     Asset, Entity, EntityScript, LibraryObject, ObjectCategory,
-    Portal, Script, World, WorldPreset,
+    Portal, SavedFace, Script, World, WorldPreset,
 )
 
 
@@ -1098,3 +1098,75 @@ def world_reduce(request, slug):
         f'Reduced "{src.title}" → "{reduced.title}" '
         f'({kept}/{original_count} entities kept).')
     return redirect('aether:world_detail', slug=reduced.slug)
+
+
+# -----------------------------------------------------------------------
+# Face Forge — procedurally bred kawaii faces
+# -----------------------------------------------------------------------
+
+@login_required
+def face_forge(request):
+    """The breeding/forge page. All generation + animation is client-side."""
+    count = SavedFace.objects.count()
+    return render(request, 'aether/face_forge.html', {'saved_count': count})
+
+
+@login_required
+@require_POST
+def face_save(request):
+    """Persist a face genome submitted by the forge JS."""
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError:
+        return JsonResponse({'ok': False, 'error': 'bad json'}, status=400)
+    genome = payload.get('genome')
+    name = (payload.get('name') or '').strip()
+    if not isinstance(genome, dict):
+        return JsonResponse({'ok': False, 'error': 'missing genome'}, status=400)
+    if not name:
+        # Autoname from traits so the library stays browsable.
+        traits = genome.get('traits') or {}
+        seed = genome.get('seed') or random.randint(1, 9_999_999)
+        name = f"Face {seed % 100000:05d}"
+        if traits.get('hat_kind'):
+            name += f" ({traits['hat_kind']})"
+    face = SavedFace.objects.create(
+        name=name[:120],
+        genome=genome,
+        lineage=int(payload.get('lineage') or 0),
+    )
+    return JsonResponse({
+        'ok': True,
+        'id': face.pk, 'slug': face.slug, 'name': face.name,
+    })
+
+
+@login_required
+def face_library(request):
+    faces = SavedFace.objects.all()
+    return render(request, 'aether/face_library.html', {'faces': faces})
+
+
+@login_required
+def face_library_json(request):
+    faces = SavedFace.objects.all().values(
+        'pk', 'name', 'slug', 'genome', 'lineage', 'favorite', 'created_at',
+    )
+    return JsonResponse({'faces': list(faces)}, safe=False)
+
+
+@login_required
+@require_POST
+def face_delete(request, slug):
+    face = get_object_or_404(SavedFace, slug=slug)
+    face.delete()
+    return redirect('aether:face_library')
+
+
+@login_required
+@require_POST
+def face_favorite(request, slug):
+    face = get_object_or_404(SavedFace, slug=slug)
+    face.favorite = not face.favorite
+    face.save()
+    return redirect('aether:face_library')

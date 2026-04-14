@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from .models import (
     Asset, Entity, EntityScript, LibraryObject, ObjectCategory,
-    Portal, Script, World, WorldPreset,
+    Portal, SavedFace, Script, World, WorldPreset,
 )
 
 
@@ -86,4 +86,11 @@ class LibraryObjectAdmin(admin.ModelAdmin):
 @admin.register(WorldPreset)
 class WorldPresetAdmin(admin.ModelAdmin):
     list_display = ('name', 'skybox', 'hdri_asset', 'ambient_audio_url')
+    search_fields = ('name',)
+
+
+@admin.register(SavedFace)
+class SavedFaceAdmin(admin.ModelAdmin):
+    list_display = ('name', 'lineage', 'use_count', 'favorite', 'created_at')
+    list_filter = ('favorite',)
     search_fields = ('name',)

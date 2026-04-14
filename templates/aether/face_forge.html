@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Aether — Face Forge{% endblock %}
+
+{% block content %}
+<style>
+ .forge-wrap { max-width: 960px; margin: 0 auto; }
+ .forge-hdr { display:flex; gap:1rem; align-items:baseline; flex-wrap:wrap; margin-bottom:.4rem;}
+ .forge-hdr h2 { margin:0; }
+ .forge-hdr .sub { color:#8b949e; font-size:.82rem; }
+ .forge-hdr a { color:#58a6ff; text-decoration:none; font-size:.82rem; }
+ .forge-actions { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; margin:.4rem 0 1rem; }
+ .forge-actions button, .forge-actions .pill {
+   background:#161b22; color:#c9d1d9; border:1px solid #30363d;
+   padding:.3rem .8rem; border-radius:4px; font-size:.8rem; cursor:pointer;
+ }
+ .forge-actions button.primary { background:#238636; border-color:#2ea043; color:#fff; }
+ .forge-actions .pill { cursor:default; color:#8b949e; }
+ .grid9 {
+   display:grid; grid-template-columns: repeat(3, 1fr); gap:.5rem;
+   background:#0d1117; padding:.5rem; border:1px solid #30363d; border-radius:6px;
+ }
+ .cell { position:relative; background:#161b22; border:1px solid #30363d; border-radius:4px;
+         aspect-ratio:1/1; overflow:hidden; cursor:pointer; transition: box-shadow .2s, border-color .2s; }
+ .cell canvas { display:block; width:100%; height:100%; }
+ .cell:hover { border-color:#58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,.25); }
+ .cell.parent { border-color:#f0c040; box-shadow: 0 0 0 2px rgba(240,192,64,.3); }
+ .cell .tag {
+   position:absolute; top:4px; left:4px; font-size:.65rem;
+   background:rgba(13,17,23,.85); color:#8b949e; padding:1px 5px; border-radius:3px;
+   font-family: ui-monospace, monospace;
+ }
+ .cell .gen {
+   position:absolute; top:4px; right:4px; font-size:.65rem;
+   background:rgba(13,17,23,.85); color:#8b949e; padding:1px 5px; border-radius:3px;
+   font-family: ui-monospace, monospace;
+ }
+ .cell .save-btn {
+   position:absolute; bottom:4px; right:4px; font-size:.65rem;
+   background:rgba(35,134,54,.92); color:#fff; border:0;
+   padding:3px 7px; border-radius:3px; cursor:pointer; opacity:0; transition:opacity .15s;
+ }
+ .cell:hover .save-btn { opacity:1; }
+ .cell .saved { position:absolute; bottom:4px; right:4px; font-size:.65rem;
+   background:rgba(240,192,64,.9); color:#0d1117; padding:1px 5px; border-radius:3px; font-weight:600; }
+ .panel { margin-top:1rem; padding:.7rem .9rem; background:#161b22; border:1px solid #30363d; border-radius:6px; font-size:.8rem; color:#8b949e; }
+ .panel h3 { margin:0 0 .4rem; color:#c9d1d9; font-size:.9rem; }
+ .panel code { color:#c9d1d9; background:#0d1117; padding:1px 5px; border-radius:3px; font-family: ui-monospace, monospace; font-size:.78rem; }
+ #anim-readout { font-family: ui-monospace, monospace; color:#f0c040; font-size:.72rem; word-break:break-all; opacity:.85; }
+ #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); padding:.5rem 1rem;
+          background:#238636; color:#fff; border-radius:4px; font-size:.82rem; opacity:0;
+          transition:opacity .3s; pointer-events:none; z-index:999; }
+ #toast.show { opacity:1; }
+</style>
+
+<div class="forge-wrap">
+ <div class="forge-hdr">
+  <h2>Face Forge</h2>
+  <span class="sub">breed kawaii faces · 60fps · L-system animation</span>
+  <span style="flex:1"></span>
+  <a href="{% url 'aether:face_library' %}">Library ({{ saved_count }})</a>
+  <a href="{% url 'aether:world_list' %}">← Worlds</a>
+ </div>
+
+ <div class="forge-actions">
+  <button class="primary" id="btn-reseed">New batch (random)</button>
+  <button id="btn-back" disabled>← Back to previous</button>
+  <button id="btn-mutate-all">Mutate from center</button>
+  <label class="pill"><input type="checkbox" id="chk-parallax" checked style="vertical-align:middle;"> parallax on mouse</label>
+  <label class="pill"><input type="checkbox" id="chk-anim" checked style="vertical-align:middle;"> animate faces</label>
+  <span class="pill" id="lineage-pill">generation 0</span>
+ </div>
+
+ <div class="grid9" id="grid"></div>
+
+ <div class="panel">
+  <h3>How it works</h3>
+  <p style="margin:.3rem 0;">Click any face to breed 9 new mutations from it. The parent sits in the
+  center (highlighted). <b>Save</b> stores the genome — use saved faces as avatars in
+  future worlds. Every face is drawn from <code>~20</code> stacked 2D layers at 60fps, with a
+  per-face L-system animation program: symbols like <code>b</code> (blink),
+  <code>S</code> (smile), <code>L/R</code> (look), <code>W</code> (wink), <code>P/p</code> (pupil), <code>E</code>
+  (brow raise), <code>H</code> (head tilt) expanded through each face's own production rules.</p>
+  <p style="margin:.3rem 0;">Center face animation tape: <span id="anim-readout">…</span></p>
+ </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="{% static 'aether/face_render.js' %}?v={% now 'U' %}"></script>
+<script>
+const SAVE_URL = "{% url 'aether:face_save' %}";
+const GRID_SIZE = 9;
+const FR = window.FaceRender;
+
+const state = {
+  genomes: [], anims: [], saved: new Set(),
+  parentIdx: null, history: [], generation: 0,
+  mouse: { x:0, y:0 }, parallax: true, animate: true,
+};
+
+function freshBatch() {
+  state.genomes = []; state.anims = []; state.saved.clear();
+  state.parentIdx = null; state.generation = 0;
+  document.getElementById('lineage-pill').textContent = 'generation 0';
+  for (let i=0;i<GRID_SIZE;i++) {
+    const g = FR.randomGenome(Math.floor(Math.random()*2_147_000_000));
+    state.genomes.push(g);
+    state.anims.push(FR.makeAnimState(g));
+  }
+  updateGridDOM();
+}
+
+function breedFrom(i) {
+  const parent = state.genomes[i];
+  state.history.push({ genomes: state.genomes, gen: state.generation });
+  const newG = [], newA = [];
+  for (let j=0;j<GRID_SIZE;j++) {
+    newG.push(j === 4 ? JSON.parse(JSON.stringify(parent))
+      : FR.mutateGenome(parent, Math.floor(Math.random()*2_147_000_000), 0.55));
+    newA.push(FR.makeAnimState(newG[j]));
+  }
+  state.genomes = newG; state.anims = newA;
+  state.saved.clear(); state.parentIdx = 4;
+  state.generation++;
+  document.getElementById('lineage-pill').textContent = `generation ${state.generation}`;
+  document.getElementById('btn-back').disabled = false;
+  updateGridDOM();
+}
+
+function goBack() {
+  if (!state.history.length) return;
+  const last = state.history.pop();
+  state.genomes = last.genomes;
+  state.anims = state.genomes.map(FR.makeAnimState);
+  state.saved.clear(); state.parentIdx = null;
+  state.generation = last.gen;
+  document.getElementById('lineage-pill').textContent = `generation ${state.generation}`;
+  document.getElementById('btn-back').disabled = state.history.length === 0;
+  updateGridDOM();
+}
+
+function updateGridDOM() {
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  for (let i=0;i<GRID_SIZE;i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell' + (state.parentIdx === i ? ' parent' : '');
+    cell.dataset.idx = i;
+    const gen = state.genomes[i].lineage || 0;
+    cell.innerHTML = `
+      <canvas width="300" height="300"></canvas>
+      <span class="tag">#${String(state.genomes[i].seed).slice(-5)}</span>
+      <span class="gen">L${gen}</span>
+      ${state.saved.has(i)
+        ? '<span class="saved">★ saved</span>'
+        : '<button class="save-btn" data-save="'+i+'">Save Face</button>'}
+    `;
+    cell.addEventListener('click', (ev) => {
+      if (ev.target.matches('[data-save]')) return;
+      breedFrom(i);
+    });
+    grid.appendChild(cell);
+  }
+  grid.querySelectorAll('[data-save]').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const i = parseInt(btn.dataset.save);
+      await saveFace(i);
+    });
+  });
+}
+
+async function saveFace(i) {
+  const genome = state.genomes[i];
+  const name = prompt('Name this face (leave blank for auto):', '') || '';
+  try {
+    const res = await fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ genome, name, lineage: genome.lineage||0 }),
+    });
+    const json = await res.json();
+    if (json.ok) {
+      state.saved.add(i);
+      showToast(`Saved as "${json.name}" ✓`);
+      updateGridDOM();
+    } else {
+      showToast('Save failed: ' + (json.error||'?'));
+    }
+  } catch (e) { showToast('Save error: ' + e.message); }
+}
+
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp('(^|;\\s*)'+name+'=([^;]+)'));
+  return m ? decodeURIComponent(m[2]) : '';
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._tm);
+  showToast._tm = setTimeout(() => t.classList.remove('show'), 1800);
+}
+
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000);
+  lastT = now;
+  const tSec = now / 1000;
+  const grid = document.getElementById('grid');
+  const cells = grid.children;
+  for (let i=0;i<cells.length;i++) {
+    const cell = cells[i];
+    const cv = cell.querySelector('canvas');
+    if (!cv) continue;
+    const ctx = cv.getContext('2d');
+    const g = state.genomes[i];
+    const anim = state.anims[i];
+    try {
+      if (state.animate) FR.advanceAnim(anim, dt, g, tSec);
+      let hp;
+      if (state.parallax) {
+        const rect = cell.getBoundingClientRect();
+        const cxp = rect.left + rect.width/2;
+        const cyp = rect.top + rect.height/2;
+        hp = {
+          x: Math.max(-1, Math.min(1, (state.mouse.x - cxp) / 180)),
+          y: Math.max(-1, Math.min(1, (state.mouse.y - cyp) / 180)),
+        };
+      } else {
+        hp = { x: Math.sin(tSec*0.6 + i*1.3)*0.4, y: Math.cos(tSec*0.5 + i*0.9)*0.3 };
+      }
+      FR.renderFace(ctx, cv.width, cv.height, g, anim, tSec, hp);
+    } catch (err) {
+      if (!cell.dataset.errored) {
+        cell.dataset.errored = '1';
+        console.error('Face render failed for cell', i, err, g);
+      }
+    }
+  }
+  const centerAnim = state.anims[4];
+  if (centerAnim) {
+    const readout = document.getElementById('anim-readout');
+    const tape = centerAnim.tape;
+    const pos = centerAnim.pos % tape.length;
+    const window_ = 60;
+    const start = Math.max(0, pos - window_/2);
+    const end   = Math.min(tape.length, start + window_);
+    const snippet = tape.substring(start, end);
+    const localPos = pos - start;
+    readout.innerHTML = escapeHTML(snippet.substring(0,localPos)) +
+      '<span style="background:#f0c040;color:#0d1117;padding:0 1px;">' +
+      escapeHTML(snippet.charAt(localPos)||' ') + '</span>' +
+      escapeHTML(snippet.substring(localPos+1));
+  }
+  requestAnimationFrame(frame);
+}
+function escapeHTML(s) { return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+document.addEventListener('mousemove', (e) => { state.mouse.x = e.clientX; state.mouse.y = e.clientY; });
+document.getElementById('btn-reseed').addEventListener('click', () => {
+  state.history = [];
+  document.getElementById('btn-back').disabled = true;
+  freshBatch();
+});
+document.getElementById('btn-back').addEventListener('click', goBack);
+document.getElementById('btn-mutate-all').addEventListener('click', () => breedFrom(4));
+document.getElementById('chk-parallax').addEventListener('change', (e) => { state.parallax = e.target.checked; });
+document.getElementById('chk-anim').addEventListener('change', (e) => { state.animate = e.target.checked; });
+
+freshBatch();
+requestAnimationFrame(frame);
+</script>
+{% endblock %}

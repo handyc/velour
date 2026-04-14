@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Aether — Face Library{% endblock %}
+
+{% block content %}
+<style>
+ .lib-wrap { max-width: 1100px; margin: 0 auto; }
+ .lib-hdr { display:flex; gap:1rem; align-items:baseline; flex-wrap:wrap; margin-bottom:.8rem;}
+ .lib-hdr h2 { margin:0; }
+ .lib-hdr .sub { color:#8b949e; font-size:.82rem; }
+ .lib-hdr a { color:#58a6ff; text-decoration:none; font-size:.82rem; }
+ .lib-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:.6rem; }
+ .face-card {
+   background:#0d1117; border:1px solid #30363d; border-radius:6px;
+   position:relative; overflow:hidden; padding:0;
+ }
+ .face-card.fav { border-color:#f0c040; box-shadow: 0 0 0 1px rgba(240,192,64,.25); }
+ .face-card canvas { display:block; width:100%; aspect-ratio:1/1; }
+ .face-card .meta {
+   padding:.3rem .5rem; font-size:.75rem; color:#c9d1d9;
+   display:flex; justify-content:space-between; gap:.3rem; align-items:center;
+   background:#161b22; border-top:1px solid #30363d;
+ }
+ .face-card .meta .name { font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+ .face-card .meta .gen { color:#8b949e; font-family: ui-monospace, monospace; font-size:.68rem; }
+ .face-card .actions {
+   display:flex; gap:.2rem; padding:.3rem .5rem .45rem; background:#161b22;
+   border-top:1px solid #30363d;
+ }
+ .face-card .actions form { display:inline; }
+ .face-card .actions button {
+   flex:1; background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+   padding:2px 6px; font-size:.7rem; border-radius:3px; cursor:pointer;
+ }
+ .face-card .actions button.fav { color:#f0c040; }
+ .face-card .actions button.danger { color:#f85149; }
+ .empty { color:#6e7681; padding: 2rem; text-align:center; background:#0d1117; border:1px dashed #30363d; border-radius:6px; }
+</style>
+
+<div class="lib-wrap">
+ <div class="lib-hdr">
+  <h2>Face Library</h2>
+  <span class="sub">{{ faces|length }} saved face{{ faces|length|pluralize }} · hover to animate</span>
+  <span style="flex:1"></span>
+  <a href="{% url 'aether:face_forge' %}">← Back to Forge</a>
+ </div>
+
+ {% if faces %}
+ <div class="lib-grid">
+  {% for f in faces %}
+  <div class="face-card {% if f.favorite %}fav{% endif %}"
+       data-genome='{{ f.genome|safe }}' data-slug="{{ f.slug }}">
+   <canvas width="240" height="240"></canvas>
+   <div class="meta">
+    <span class="name">{{ f.name }}</span>
+    <span class="gen">L{{ f.lineage }}</span>
+   </div>
+   <div class="actions">
+    <form method="post" action="{% url 'aether:face_favorite' f.slug %}">
+     {% csrf_token %}
+     <button type="submit" class="fav" title="toggle favorite">{% if f.favorite %}★{% else %}☆{% endif %}</button>
+    </form>
+    <form method="post" action="{% url 'aether:face_delete' f.slug %}"
+          onsubmit="return confirm('Delete {{ f.name|escapejs }}?');">
+     {% csrf_token %}
+     <button type="submit" class="danger" title="delete">✕</button>
+    </form>
+   </div>
+  </div>
+  {% endfor %}
+ </div>
+ {% else %}
+ <div class="empty">
+  No faces saved yet. <a href="{% url 'aether:face_forge' %}" style="color:#58a6ff;">Open the Forge</a> and save some.
+ </div>
+ {% endif %}
+</div>
+
+<script src="{% static 'aether/face_render.js' %}?v={% now 'U' %}"></script>
+<script>
+const FR = window.FaceRender;
+const cards = Array.from(document.querySelectorAll('.face-card'));
+const entries = cards.map(card => {
+  let genome;
+  try { genome = JSON.parse(card.dataset.genome); }
+  catch (e) { return null; }
+  // Legacy safety: top-level genome should already have traits/palette/anim.
+  if (!genome.anim) genome.anim = { axiom: '.', rules: {}, iters: 1, tempo: 1.0 };
+  const anim = FR.makeAnimState(genome);
+  const cv = card.querySelector('canvas');
+  return { card, genome, anim, canvas: cv, ctx: cv.getContext('2d'), hovered: false };
+}).filter(Boolean);
+
+cards.forEach((card, i) => {
+  card.addEventListener('mouseenter', () => { if (entries[i]) entries[i].hovered = true; });
+  card.addEventListener('mouseleave', () => { if (entries[i]) entries[i].hovered = false; });
+});
+
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - lastT) / 1000);
+  lastT = now;
+  const tSec = now / 1000;
+  for (const e of entries) {
+    try {
+      FR.advanceAnim(e.anim, dt, e.genome, tSec);
+      const rect = e.card.getBoundingClientRect();
+      let hp;
+      if (e.hovered) {
+        hp = {
+          x: Math.max(-1, Math.min(1, (mouseX - (rect.left + rect.width/2)) / 120)),
+          y: Math.max(-1, Math.min(1, (mouseY - (rect.top + rect.height/2)) / 120)),
+        };
+      } else {
+        hp = { x: Math.sin(tSec*0.4 + e.genome.seed*0.001)*0.3,
+               y: Math.cos(tSec*0.35 + e.genome.seed*0.0007)*0.2 };
+      }
+      FR.renderFace(e.ctx, e.canvas.width, e.canvas.height, e.genome, e.anim, tSec, hp);
+    } catch (err) {
+      if (!e.errored) { e.errored = true; console.error('Face render failed', err, e.genome); }
+    }
+  }
+  requestAnimationFrame(frame);
+}
+let mouseX = 0, mouseY = 0;
+document.addEventListener('mousemove', (e) => { mouseX = e.clientX; mouseY = e.clientY; });
+requestAnimationFrame(frame);
+</script>
+{% endblock %}

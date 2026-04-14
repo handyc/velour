@@ -563,3 +563,61 @@ class LibraryObject(models.Model):
     @property
     def tag_list(self):
         return [t.strip() for t in self.tags.split(',') if t.strip()]
+
+
+# -----------------------------------------------------------------------
+# Face Forge — procedurally bred kawaii faces for Aether avatars
+# -----------------------------------------------------------------------
+
+class SavedFace(models.Model):
+    """A face genome saved from the Face Forge.
+
+    The genome is the complete recipe for reconstructing the face:
+    trait values (eye shape, nose width, lip fullness, scar position,
+    tattoo, hat, jewelry, wrinkle count, etc.), palette (skin tone,
+    hair color, iris color), and an L-system animation program
+    (axiom + production rules + per-symbol param deltas).
+
+    Rendering is purely client-side: the face viewer reads the genome
+    and composes ~20 stacked 2D layers on a canvas, parallax-shifted
+    by layer depth to fake 3D. At 60fps the animation pointer walks
+    through the expanded L-system string and each symbol nudges the
+    face parameters (blink, smile-curve, pupil-drift, brow-raise).
+
+    Saved faces become candidate avatars for world entities. The
+    binding lives outside this model (see Entity) — SavedFace is
+    just the recipe.
+    """
+
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=140, unique=True, blank=True)
+    genome = models.JSONField(
+        help_text='Trait dict + palette + L-system rules. Fully '
+                  'reconstructs the face; no image stored.',
+    )
+    lineage = models.IntegerField(
+        default=0,
+        help_text='How many breeding generations deep this face is.',
+    )
+    use_count = models.IntegerField(
+        default=0, help_text='How many entities use this face as an avatar.',
+    )
+    favorite = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-favorite', '-created_at']
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:120] or 'face'
+            candidate = base
+            n = 2
+            while SavedFace.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
