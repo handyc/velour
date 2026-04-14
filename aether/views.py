@@ -842,10 +842,9 @@ def generate_random_world(request):
     total = Entity.objects.filter(world=world).count()
     messages.success(
         request,
-        f'Generated and saved: "{title}" — {total} entities. '
-        f'Click Enter to step inside.',
+        f'Generated and saved: "{title}" — {total} entities.',
     )
-    return redirect('aether:world_list')
+    return redirect('aether:world_enter', slug=world.slug)
 
 
 # ---------------------------------------------------------------------------
@@ -1006,8 +1005,8 @@ def boogaloo(request):
     total = Entity.objects.filter(world=world).count()
     messages.success(request,
         f'Boogaloo! "{base_src.title}" + "{donor_src.title}" → '
-        f'"{title}" — {total} entities. Click Enter to step inside.')
-    return redirect('aether:world_list')
+        f'"{title}" — {total} entities.')
+    return redirect('aether:world_enter', slug=world.slug)
 
 
 # ---------------------------------------------------------------------------
