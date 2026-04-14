@@ -552,10 +552,10 @@ def generate_random_world(request):
     """Generate a random world from template options."""
     theme = random.choice(_THEMES)
     skybox = random.choice(_SKYBOXES)
-    n_npcs = random.randint(3, 12)
-    n_furniture = random.randint(4, 20)
-    n_trees = random.randint(4, 12) if theme['trees'] else 0
-    n_flowers = random.randint(0, 8) if theme['flowers'] else 0
+    n_npcs = random.randint(2, 6)
+    n_furniture = random.randint(2, 10)
+    n_trees = random.randint(2, 6) if theme['trees'] else 0
+    n_flowers = random.randint(0, 4) if theme['flowers'] else 0
     ground_size = random.choice([30, 40, 50, 60])
 
     adjectives = ['Quiet', 'Hidden', 'Ancient', 'Twilight', 'Wandering',
@@ -654,7 +654,7 @@ def generate_random_world(request):
     except Exception:
         pass
 
-    n_buildings = random.randint(3, 10)
+    n_buildings = random.randint(2, 5)
     for i in range(n_buildings):
         bx = round(random.uniform(-half*0.8, half*0.8), 1)
         bz = round(random.uniform(-half*0.8, half*0.8), 1)
@@ -720,7 +720,7 @@ def generate_random_world(request):
         _SPECIES = ['oak', 'pine', 'birch', 'palm', 'bush', 'willow', 'cactus',
                     'maple', 'cherry', 'bamboo', 'fern', 'succulent', 'cypress',
                     'baobab', 'vine']
-        n_plants = random.randint(6, 20)
+        n_plants = random.randint(3, 10)
         for i in range(n_plants):
             species = random.choice(_SPECIES)
             e = Entity.objects.create(
@@ -747,7 +747,7 @@ def generate_random_world(request):
         _PET = ['mouse', 'rabbit', 'cat', 'frog', 'turtle']
         _LARGE = ['horse', 'cow', 'deer', 'dog']
         # 2-6 animals total, weighted toward smaller
-        n_animals = random.randint(2, 6)
+        n_animals = random.randint(1, 3)
         for i in range(n_animals):
             r = random.random()
             if r < 0.3:

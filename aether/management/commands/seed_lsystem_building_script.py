@@ -17,9 +17,17 @@ from aether.models import Script
 
 
 SCRIPT_CODE = r"""
+// Architecture interpretation of an L-system grammar. Unlike plants,
+// buildings stay VERTICAL — the `F` token always grows up. `+` and `-`
+// rotate a horizontal `right` vector in the XZ plane. On entering a
+// branch (`[`), the branch anchors at the current trunk height and the
+// next `F` shifts laterally by (parentW + childW)/2 in the `right`
+// direction before rising vertically — producing an attached wing, not
+// an angled tree branch.
+
 const S = ctx.state;
 const P = ctx.props;
-const iterations = Math.min(P.iterations || 3, 4);
+const iterations = Math.min(P.iterations || 3, 3);
 const scale = P.scale || 1.0;
 
 if (ctx.entity.isMesh) {
@@ -30,7 +38,6 @@ if (ctx.entity.isMesh) {
 let rngState = (P.seed || 42) * 127.1;
 function rnd() { rngState = (rngState * 16807 + 0.5) % 2147483647; return rngState / 2147483647; }
 
-// Parse rules — support both "F=FF[+F]" strings and [{F:'FF'}] lists.
 function parseRules(r) {
     if (!r) return [{F: 'F'}];
     if (typeof r === 'string') {
@@ -48,7 +55,6 @@ function parseRules(r) {
 
 const axiom = P.axiom || 'F';
 const ruleSets = parseRules(P.rules);
-const angle = (P.angle || 90) * Math.PI / 180;
 const lengthFactor = P.lengthFactor || 0.65;
 const startLen = P.startLength || 0.8;
 const taper = P.trunkTaper || 0.7;
@@ -88,57 +94,58 @@ const root = new THREE.Group();
 ctx.entity.add(root);
 S.building = root;
 
+// Turtle state. `dir` is always (0,1,0) in this interpretation —
+// buildings rise. `right` is a horizontal unit vector that `+`/`-`
+// rotate around Y, used for wing offsets.
 const stack = [];
 let pos = new THREE.Vector3(0, 0, 0);
-let dir = new THREE.Vector3(0, 1, 0);
 let right = new THREE.Vector3(1, 0, 0);
 let len = startLen * floorH;
 let width = wallW;
+let parentWidth = wallW;
 let depth = 0;
+// Set to true after `[`; the first F in a branch applies a lateral
+// offset before drawing. Subsequent F's in the branch rise directly.
+let branchFresh = false;
 
-const maxSegs = 600;
+const maxSegs = 300;
 let segCount = 0;
 
-function addWallSegment(from, to, w) {
+function addWallSegment(basePos, h, w) {
     if (segCount >= maxSegs) return;
-    const diff = new THREE.Vector3().subVectors(to, from);
-    const length = diff.length();
-    if (length < 0.05) return;
-    const geo = new THREE.BoxGeometry(w, length, w);
+    if (h < 0.05) return;
+    const geo = new THREE.BoxGeometry(w, h, w);
     const mat = (depth % 2 === 0) ? wallM : wallM2;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true; mesh.receiveShadow = true;
-    const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
-    mesh.position.copy(mid);
-    const axis = new THREE.Vector3(0, 1, 0);
-    const q = new THREE.Quaternion().setFromUnitVectors(axis, diff.clone().normalize());
-    mesh.quaternion.copy(q);
+    mesh.position.set(basePos.x, basePos.y + h / 2, basePos.z);
     root.add(mesh);
     segCount++;
 
-    // Windows on the four side faces (perpendicular to the segment axis).
-    if (hasWindows && length > 0.3) {
-        // Build two perpendicular axes that are perpendicular to diff.
-        const up = diff.clone().normalize();
-        let ax1 = new THREE.Vector3(1, 0, 0);
-        if (Math.abs(ax1.dot(up)) > 0.9) ax1.set(0, 0, 1);
-        ax1 = ax1.sub(up.clone().multiplyScalar(ax1.dot(up))).normalize();
-        const ax2 = new THREE.Vector3().crossVectors(up, ax1).normalize();
-
-        const nWin = Math.max(1, Math.floor(length / (floorH * 0.95)));
-        for (let i = 0; i < nWin; i++) {
-            for (const [axis2, sign] of [[ax1, 1], [ax1, -1], [ax2, 1], [ax2, -1]]) {
+    if (hasWindows && h > 0.3) {
+        const nFloors = Math.max(1, Math.floor(h / Math.max(0.9, floorH * 0.9)));
+        const half = w / 2 + 0.02;
+        const faces = [
+            {axis: new THREE.Vector3( 1, 0, 0), sign:  1},
+            {axis: new THREE.Vector3( 1, 0, 0), sign: -1},
+            {axis: new THREE.Vector3( 0, 0, 1), sign:  1},
+            {axis: new THREE.Vector3( 0, 0, 1), sign: -1},
+        ];
+        for (let f = 0; f < nFloors; f++) {
+            const yMid = basePos.y + (f + 0.5) * (h / nFloors);
+            for (const face of faces) {
                 if (rnd() > winDensity) continue;
                 if (segCount >= maxSegs) return;
-                const t = (i + 0.5) / nWin;
-                const along = new THREE.Vector3().lerpVectors(from, to, t);
-                const out = axis2.clone().multiplyScalar(sign * (w / 2 + 0.02));
                 const winW = w * 0.45;
-                const winH = (length / nWin) * 0.55;
+                const winH = (h / nFloors) * 0.55;
                 const wGeo = new THREE.BoxGeometry(winW, winH, 0.05);
                 const wm = new THREE.Mesh(wGeo, winM);
-                wm.position.copy(along).add(out);
-                wm.lookAt(along.clone().add(axis2.clone().multiplyScalar(sign * 2)));
+                wm.position.set(
+                    basePos.x + face.axis.x * face.sign * half,
+                    yMid,
+                    basePos.z + face.axis.z * face.sign * half,
+                );
+                if (face.axis.x !== 0) wm.rotation.y = Math.PI / 2;
                 root.add(wm);
                 segCount++;
             }
@@ -168,39 +175,48 @@ function addRoofCap(p, w, style) {
     segCount++;
 }
 
+function rotRight(sign) {
+    // Rotate `right` 90° around Y (horizontal plane) — architecture
+    // angles are always right-angles regardless of species `angle`.
+    const c = 0, s = sign;
+    const nx = right.x * c - right.z * s;
+    const nz = right.x * s + right.z * c;
+    right.set(nx, 0, nz).normalize();
+}
+
 for (const ch of str) {
     if (segCount >= maxSegs) break;
     if (ch === 'F') {
-        const end = pos.clone().add(dir.clone().multiplyScalar(len));
-        addWallSegment(pos, end, width);
-        pos.copy(end);
+        if (branchFresh) {
+            const off = (parentWidth + width) / 2;
+            pos.x += right.x * off;
+            pos.z += right.z * off;
+            branchFresh = false;
+        }
+        addWallSegment(pos, len, width);
+        pos.y += len;
     } else if (ch === '+') {
-        const rotAxis = new THREE.Vector3().crossVectors(dir, right).normalize();
-        if (rotAxis.length() < 0.01) rotAxis.set(0, 0, 1);
-        const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, angle);
-        dir.applyQuaternion(q).normalize();
+        rotRight(+1);
     } else if (ch === '-') {
-        const rotAxis = new THREE.Vector3().crossVectors(dir, right).normalize();
-        if (rotAxis.length() < 0.01) rotAxis.set(0, 0, 1);
-        const q = new THREE.Quaternion().setFromAxisAngle(rotAxis, -angle);
-        dir.applyQuaternion(q).normalize();
+        rotRight(-1);
     } else if (ch === '[') {
         stack.push({
-            pos: pos.clone(), dir: dir.clone(), right: right.clone(),
-            len, width, depth
+            pos: pos.clone(), right: right.clone(),
+            len, width, parentWidth, depth, branchFresh,
         });
+        parentWidth = width;
         len *= lengthFactor;
         width *= taper;
         depth++;
-        // Small twist so branches don't all align
-        const twist = new THREE.Quaternion().setFromAxisAngle(dir, (rnd()-0.5) * Math.PI * 0.25);
-        right.applyQuaternion(twist).normalize();
+        branchFresh = true;
     } else if (ch === ']') {
         if (stack.length > 0) {
             addRoofCap(pos, width, roofStyle);
             const s = stack.pop();
-            pos.copy(s.pos); dir.copy(s.dir); right.copy(s.right);
-            len = s.len; width = s.width; depth = s.depth;
+            pos.copy(s.pos); right.copy(s.right);
+            len = s.len; width = s.width;
+            parentWidth = s.parentWidth;
+            depth = s.depth; branchFresh = s.branchFresh;
         }
     }
 }
