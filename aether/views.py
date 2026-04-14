@@ -14,13 +14,32 @@ from .models import (
 )
 
 
+SORT_OPTIONS = [
+    ('featured_first', 'Featured first',   ('-featured', '-updated_at')),
+    ('featured_last',  'Featured last',    ('featured', '-updated_at')),
+    ('newest',         'Newest first',     ('-created_at',)),
+    ('oldest',         'Oldest first',     ('created_at',)),
+]
+
+
 @login_required
 def world_list(request):
+    sort_key = request.GET.get('sort', 'featured_first')
+    order = next(
+        (o for k, _, o in SORT_OPTIONS if k == sort_key),
+        SORT_OPTIONS[0][2],
+    )
+    if sort_key not in {k for k, _, _ in SORT_OPTIONS}:
+        sort_key = 'featured_first'
     if request.user.is_staff:
-        worlds = World.objects.all()
+        worlds = World.objects.all().order_by(*order)
     else:
-        worlds = World.objects.filter(published=True)
-    return render(request, 'aether/list.html', {'worlds': worlds})
+        worlds = World.objects.filter(published=True).order_by(*order)
+    return render(request, 'aether/list.html', {
+        'worlds': worlds,
+        'sort_options': [(k, label) for k, label, _ in SORT_OPTIONS],
+        'current_sort': sort_key,
+    })
 
 
 @login_required
@@ -821,8 +840,12 @@ def generate_random_world(request):
         EntityScript.objects.bulk_create(attachments)
 
     total = Entity.objects.filter(world=world).count()
-    messages.success(request, f'Generated "{title}" — {total} entities.')
-    return redirect('aether:world_enter', slug=world.slug)
+    messages.success(
+        request,
+        f'Generated and saved: "{title}" — {total} entities. '
+        f'Click Enter to step inside.',
+    )
+    return redirect('aether:world_list')
 
 
 # ---------------------------------------------------------------------------
@@ -983,8 +1006,8 @@ def boogaloo(request):
     total = Entity.objects.filter(world=world).count()
     messages.success(request,
         f'Boogaloo! "{base_src.title}" + "{donor_src.title}" → '
-        f'"{title}" — {total} entities.')
-    return redirect('aether:world_enter', slug=world.slug)
+        f'"{title}" — {total} entities. Click Enter to step inside.')
+    return redirect('aether:world_list')
 
 
 # ---------------------------------------------------------------------------

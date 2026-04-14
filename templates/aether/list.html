@@ -16,6 +16,14 @@
         {% csrf_token %}
         <button type="submit" style="background:#8957e5;color:#fff;border:1px solid #a371f7;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Boogaloo</button>
     </form>
+    <form method="get" style="margin-left:auto;display:flex;align-items:center;gap:0.4rem;">
+        <label for="sort" style="color:#8b949e;font-size:0.78rem;">Sort:</label>
+        <select name="sort" id="sort" onchange="this.form.submit()" style="background:#161b22;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:0.25rem 0.5rem;font-size:0.8rem;">
+            {% for key, label in sort_options %}
+            <option value="{{ key }}"{% if key == current_sort %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </form>
 </div>
 
 {% if worlds %}
