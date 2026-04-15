@@ -208,12 +208,18 @@ def asset_add(request, slug):
 @login_required
 def world_scene_json(request, slug):
     """JSON endpoint: the full scene graph for the three.js renderer."""
+    import hashlib
+    from django.db.models import F
+    from django.utils import timezone
+    from grammar_engine.models import Language
+
     world = get_object_or_404(World, slug=slug)
     entities = world.entities.filter(visible=True).select_related('asset', 'face')
     portals = world.portals_out.select_related('to_world')
 
     # Prefetch scripts for all entities
     entity_scripts = {}
+    npc_entity_ids = set()
     for es in EntityScript.objects.filter(
         entity__world=world, enabled=True
     ).select_related('script'):
@@ -222,6 +228,78 @@ def world_scene_json(request, slug):
             'code': es.script.code,
             'props': es.props or {},
         })
+        if es.script.slug.startswith('humanoid-builder'):
+            npc_entity_ids.add(es.entity_id)
+
+    # Resolve NPC languages. Three-tier:
+    #   1. Entity has explicit language_slug — use that.
+    #   2. Otherwise inherit from the planet (5% chance of diversity:
+    #      one of the other languages picked weighted by use_count).
+    #   3. If the slug is missing from the Language table, fall back
+    #      to the most-popular surviving language.
+    #   4. If neither entity nor planet has any slug, NPC stays silent.
+    planet_id = (request.GET.get('planet') or '').strip()
+    planet_lang = ''
+    planet_seed = 0
+    if planet_id.isdigit():
+        from bridge.models import Planet
+        planet = Planet.objects.filter(pk=int(planet_id)).first()
+        if planet:
+            planet_lang = planet.primary_language_slug or ''
+            planet_seed = planet.id
+
+    # Build alt-language pool weighted by use_count for diversity rolls.
+    lang_rows = list(Language.objects.values_list('slug', 'use_count'))
+    lang_index = {s: c for s, c in lang_rows}
+    most_popular = (max(lang_rows, key=lambda r: r[1])[0]
+                    if lang_rows else '')
+
+    def diversity_pick(entity_id, exclude_slug):
+        pool = [(s, c) for s, c in lang_rows if s != exclude_slug]
+        if not pool:
+            return exclude_slug
+        weights = [max(1, c + 1) for _, c in pool]
+        total = sum(weights)
+        h = int(hashlib.md5(
+            f'npc-alt:{entity_id}:{planet_seed}'.encode()
+        ).hexdigest(), 16)
+        pick = (h % 1_000_000) / 1_000_000 * total
+        acc = 0.0
+        for (slug, _), w in zip(pool, weights):
+            acc += w
+            if pick <= acc:
+                return slug
+        return pool[-1][0]
+
+    npc_languages = {}   # entity_id -> resolved slug (may be '')
+    for e in entities:
+        if e.pk not in npc_entity_ids:
+            continue
+        chosen = (e.language_slug or '').strip()
+        if not chosen and planet_lang:
+            # 5% diversity roll, deterministic per entity+planet.
+            roll_seed = f'npc-roll:{e.pk}:{planet_seed}'
+            roll = (int(hashlib.md5(roll_seed.encode()).hexdigest(), 16)
+                    % 10_000) / 10_000
+            chosen = (diversity_pick(e.pk, planet_lang)
+                      if roll < 0.05 else planet_lang)
+        if chosen and chosen not in lang_index:
+            chosen = most_popular
+        npc_languages[e.pk] = chosen or ''
+
+    # Preload spec dicts for every language actually used; bump usage.
+    used_slugs = sorted({s for s in npc_languages.values() if s})
+    languages_payload = {}
+    for lang in Language.objects.filter(slug__in=used_slugs):
+        languages_payload[lang.slug] = {
+            'name': lang.name,
+            'seed': lang.seed,
+            'spec': lang.spec or {},
+        }
+    if used_slugs:
+        Language.objects.filter(slug__in=used_slugs).update(
+            use_count=F('use_count') + 1, last_used=timezone.now(),
+        )
 
     scene = {
         'title': world.title,
@@ -263,9 +341,15 @@ def world_scene_json(request, slug):
                 'receiveShadow': e.receive_shadow,
                 'faceGenome': e.face.genome if e.face_id else None,
                 'scripts': entity_scripts.get(e.pk, []),
+                'languageSlug': npc_languages.get(e.pk, ''),
             }
             for e in entities
         ],
+        'languages': languages_payload,
+        'planet': {
+            'id': int(planet_id) if planet_id.isdigit() else None,
+            'languageSlug': planet_lang,
+        },
         'portals': [
             {
                 'label': p.label or p.to_world.title,

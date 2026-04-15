@@ -88,6 +88,28 @@ def home(request):
     return render(request, 'bridge/home.html', context)
 
 
+def _pick_planet_language(seed):
+    """Choose a language for a fresh planet, weighted by Language use_count.
+
+    Returns the slug or '' if there are no languages yet (the planet is
+    preverbal — its NPCs will stay silent).
+    """
+    from grammar_engine.models import Language
+    rows = list(Language.objects.values_list('slug', 'use_count'))
+    if not rows:
+        return ''
+    rng = random.Random(f'planet-lang:{seed}')
+    weights = [max(1, c + 1) for _, c in rows]
+    total = sum(weights)
+    pick = rng.uniform(0, total)
+    acc = 0.0
+    for (slug, _), w in zip(rows, weights):
+        acc += w
+        if pick <= acc:
+            return slug
+    return rows[-1][0]
+
+
 @login_required
 @require_POST
 def warp(request):
@@ -98,11 +120,13 @@ def warp(request):
         seed=features['seed'],
         ptype=features['type'],
         features=features,
+        primary_language_slug=_pick_planet_language(features['seed']),
     )
     return JsonResponse({
-        'id':      planet.id,
-        'planet':  features,
-        'library': Planet.objects.count(),
+        'id':       planet.id,
+        'planet':   features,
+        'language': planet.primary_language_slug,
+        'library':  Planet.objects.count(),
     })
 
 
@@ -114,6 +138,9 @@ def beam_down(request):
     exploration happens. Beam Down bridges the two — pick a random
     World and redirect to its enter view. If there are no worlds yet,
     nudge the user toward the Aether list so they can generate one.
+
+    The optional `?planet=<id>` query param tags the world with a
+    planet so its NPCs adopt that planet's primary language.
     """
     from aether.models import World   # lazy: avoid circular at import time
     world = World.objects.order_by('?').first()
@@ -123,7 +150,11 @@ def beam_down(request):
             'No Aether worlds to beam down to yet — generate one first.',
         )
         return redirect('aether:world_list')
-    return redirect(reverse('aether:world_enter', args=[world.slug]))
+    target = reverse('aether:world_enter', args=[world.slug])
+    planet_id = (request.GET.get('planet') or '').strip()
+    if planet_id.isdigit():
+        target = f'{target}?planet={planet_id}'
+    return redirect(target)
 
 
 @login_required

@@ -21,6 +21,14 @@ class Planet(models.Model):
     last_visited = models.DateTimeField(default=timezone.now)
     visit_count = models.PositiveIntegerField(default=1)
 
+    # Slug, not FK: planets survive language deletion. If the language
+    # is gone at beam-down time, NPCs fall back to the most-popular
+    # language. An empty slug means the planet is preverbal — its
+    # NPCs say nothing at all.
+    primary_language_slug = models.CharField(
+        max_length=140, blank=True, default='',
+    )
+
     class Meta:
         ordering = ['-last_visited']
 

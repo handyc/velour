@@ -306,6 +306,14 @@ class Entity(models.Model):
         help_text='Face Forge avatar to display on this entity\'s head.',
     )
 
+    # Optional NPC language. Slug, not FK — empty means "no language
+    # assigned, take the planet default". If the planet is preverbal
+    # the NPC stays silent; if the named language has been deleted, the
+    # scene serializer falls back to the most-popular surviving language.
+    language_slug = models.CharField(
+        max_length=140, blank=True, default='',
+    )
+
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 

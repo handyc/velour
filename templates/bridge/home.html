@@ -571,7 +571,9 @@
         <a class="lib-link" href="{% url 'bridge:library' %}">
             Atlas <strong id="library-count">{{ library_count }}</strong>
         </a>
-        <a class="beam-link" href="{% url 'bridge:beam_down' %}"
+        <a class="beam-link" id="beam-down-link"
+           href="{% url 'bridge:beam_down' %}"
+           data-base="{% url 'bridge:beam_down' %}"
            title="Transport to the surface of a random Aether world">
             ⏬ Beam&nbsp;Down
         </a>
@@ -1441,8 +1443,16 @@ import { Inspector } from "{% static 'grammar_engine/inspector.mjs' %}";
             body: '{}',
         }).then(r => r.json()).then(data => {
             warp.next = data.planet;
+            warp.nextId = data.id || null;
             const lib = document.getElementById('library-count');
             if (lib) lib.textContent = data.library;
+            const beam = document.getElementById('beam-down-link');
+            if (beam && data.id) {
+                beam.href = beam.dataset.base + '?planet=' + data.id;
+                beam.title = data.language
+                    ? `Beam down to ${data.planet.name} — primary language: ${data.language}`
+                    : `Beam down to ${data.planet.name} (preverbal)`;
+            }
             commLine('urg', 'Ensign Ilya Demchuk · Astrometrics',
                 `nav lock acquired — ${data.planet.name}, type ${data.planet.type}`);
         }).catch(() => {

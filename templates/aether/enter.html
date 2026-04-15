@@ -115,9 +115,14 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+import { GrammarEngine } from '{% static "grammar_engine/engine.mjs" %}';
 
 // ---- Scene data from Django ----
-const SCENE_URL = '{% url "aether:world_scene_json" world.slug %}';
+const PLANET_QS = (() => {
+    const p = new URLSearchParams(location.search).get('planet');
+    return (p && /^\d+$/.test(p)) ? `?planet=${p}` : '';
+})();
+const SCENE_URL = '{% url "aether:world_scene_json" world.slug %}' + PLANET_QS;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
@@ -676,6 +681,98 @@ function loadHDRI(hdriName) {
     });
 }
 
+// ---- NPC speech bubbles (3D billboards over each speaking NPC) ----
+const speakers = [];   // [{sprite, engine, slug, cooldown, holdRemain}]
+
+function makeSpeechBubble() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false,
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.renderOrder = 999;
+    spr.scale.set(1.6, 0.4, 1);
+    spr.userData.canvas = canvas;
+    spr.userData.tex = tex;
+    return spr;
+}
+
+function paintBubble(sprite, text, alpha) {
+    const canvas = sprite.userData.canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (alpha <= 0 || !text) {
+        sprite.userData.tex.needsUpdate = true;
+        return;
+    }
+    // Trim very long L-system strings; they're symbolic, not literal.
+    const display = text.length > 40 ? text.slice(0, 38) + '…' : text;
+    ctx.globalAlpha = alpha;
+    // Bubble background
+    const padX = 24, padY = 18, r = 28;
+    const w = canvas.width - 2 * padX;
+    const h = canvas.height - 2 * padY;
+    ctx.fillStyle = 'rgba(8, 12, 20, 0.78)';
+    ctx.strokeStyle = 'rgba(120, 180, 220, 0.65)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(padX + r, padY);
+    ctx.lineTo(padX + w - r, padY);
+    ctx.quadraticCurveTo(padX + w, padY, padX + w, padY + r);
+    ctx.lineTo(padX + w, padY + h - r);
+    ctx.quadraticCurveTo(padX + w, padY + h, padX + w - r, padY + h);
+    ctx.lineTo(padX + r, padY + h);
+    ctx.quadraticCurveTo(padX, padY + h, padX, padY + h - r);
+    ctx.lineTo(padX, padY + r);
+    ctx.quadraticCurveTo(padX, padY, padX + r, padY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Text
+    ctx.fillStyle = '#e8f1ff';
+    ctx.font = '600 56px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(display, canvas.width / 2, canvas.height / 2);
+    ctx.globalAlpha = 1;
+    sprite.userData.tex.needsUpdate = true;
+}
+
+function tickSpeakers(dt) {
+    for (const sp of speakers) {
+        if (sp.holdRemain > 0) {
+            sp.holdRemain -= dt;
+            // simple linear fade for last 0.6s
+            const fade = Math.min(1, sp.holdRemain / 0.6);
+            sp.sprite.material.opacity = fade;
+            if (sp.holdRemain <= 0) {
+                sp.sprite.visible = false;
+                // Random silence between utterances: 7-18s
+                sp.cooldown = 7 + Math.random() * 11;
+            }
+            continue;
+        }
+        sp.cooldown -= dt;
+        if (sp.cooldown <= 0) {
+            let phrase = '';
+            try { phrase = sp.engine.generateVocabPhrase() || ''; }
+            catch (e) { phrase = ''; }
+            if (!phrase) {
+                sp.cooldown = 5 + Math.random() * 5;
+                continue;
+            }
+            paintBubble(sp.sprite, phrase, 1);
+            sp.sprite.material.opacity = 1;
+            sp.sprite.visible = true;
+            // Hold time scales with phrase length — at least 2.5s
+            sp.holdRemain = Math.min(6, 2.5 + phrase.length * 0.05);
+        }
+    }
+}
+
 // ---- Build scene from JSON ----
 async function loadScene() {
     const resp = await fetch(SCENE_URL);
@@ -850,6 +947,41 @@ async function loadScene() {
         }
     }
 
+    // ---- NPC speech: build per-language grammar engines and attach
+    //      a billboard sprite + cooldown timer to each speaking NPC.
+    const langEngines = {};
+    if (data.languages) {
+        for (const [slug, info] of Object.entries(data.languages)) {
+            try {
+                langEngines[slug] = new GrammarEngine({
+                    name: info.name || slug,
+                    seed: info.seed | 0,
+                    spec: info.spec || {},
+                });
+            } catch (e) {
+                console.warn('GrammarEngine init failed for', slug, e);
+            }
+        }
+    }
+    for (const ent of data.entities) {
+        if (!ent.languageSlug) continue;
+        const engine = langEngines[ent.languageSlug];
+        if (!engine) continue;
+        const reg = entityRegistry.get(ent.id);
+        if (!reg) continue;
+        const sprite = makeSpeechBubble();
+        sprite.position.set(0, 2.4, 0);
+        sprite.visible = false;
+        reg.obj3d.add(sprite);
+        // First utterance arrives 4-12s after spawn, deterministic per id
+        // so groups don't all chime at once.
+        const stagger = 4 + ((ent.id * 1373) % 8000) / 1000;
+        speakers.push({
+            sprite, engine, slug: ent.languageSlug,
+            cooldown: stagger, holdRemain: 0,
+        });
+    }
+
     // Wait for all GLTF models to finish loading
     if (gltfPromises.length) {
         await Promise.all(gltfPromises);
@@ -983,6 +1115,8 @@ function animate() {
             }
         }
     }
+
+    if (speakers.length) tickSpeakers(dt);
 
     renderer.render(scene, camera);
 }
