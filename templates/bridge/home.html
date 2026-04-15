@@ -2531,10 +2531,6 @@ import * as THREE from 'three';
         }
     }
 
-    // A tiny random-choice helper used throughout the presets
-    // (mirrors legolith's rng.choice usage).
-    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
     // ── Preset grammars — each returns an expanded terminal string.
     //    The shapes mirror legolith's make_tree/make_flower/etc: pick
     //    a variant, build rules, expand, return.
