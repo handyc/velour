@@ -74,6 +74,19 @@ def world_detail(request, slug):
 
 
 @login_required
+def world_random(request):
+    """Redirect to a random published world. If ``exclude`` query param is
+    given, that world's slug is skipped so a repeat pick is avoided."""
+    exclude = request.GET.get('exclude', '')
+    qs = World.objects.filter(published=True).exclude(slug=exclude)
+    w = qs.order_by('?').first() or World.objects.filter(published=True).first()
+    if not w:
+        messages.warning(request, 'No published worlds available.')
+        return redirect('aether:world_list')
+    return redirect('aether:world_enter', slug=w.slug)
+
+
+@login_required
 def world_add(request):
     if request.method == 'POST':
         world = World(

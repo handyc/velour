@@ -35,19 +35,22 @@
         color:rgba(255,255,255,0.4); font-size:0.7rem;
         pointer-events:none; z-index:10;
     }
-    #instructions {
-        position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-        background:rgba(0,0,0,0.85); color:#c9d1d9; padding:2rem 3rem;
-        border-radius:12px; text-align:center; z-index:20;
-        font-size:0.9rem; line-height:1.6;
+    #splash {
+        position:fixed; inset:0; background:#000; color:#fff;
+        display:flex; align-items:center; justify-content:center;
+        flex-direction:column; z-index:20;
+        font-size:1.3rem; letter-spacing:0.03em; font-weight:500;
+        opacity:1; transition:opacity 0.6s ease-out;
+        pointer-events:none;
     }
-    #instructions h2 { margin-bottom:0.5rem; font-size:1.2rem; color:#fff; }
-    #instructions .key { background:#21262d; padding:0.15rem 0.4rem; border-radius:3px; font-size:0.8rem; }
+    #splash.fade { opacity:0; }
+    #splash h2 { font-size:1.6rem; margin-bottom:0.4rem; font-weight:500; }
+    #splash .sub { color:#8b949e; font-size:0.8rem; }
     #vr-btn { display:none; }
     #vr-btn button {
-        background:#238636; color:#fff; border:none; padding:0.5rem 1.2rem;
-        border-radius:6px; font-size:0.9rem; font-weight:600; cursor:pointer;
-        margin-top:0.8rem;
+        background:rgba(35,134,54,0.85); color:#fff; border:none;
+        padding:0.3rem 0.8rem; border-radius:4px;
+        font-size:0.75rem; font-weight:500; cursor:pointer;
     }
     #vr-btn button:hover { background:#2ea043; }
     .portal-label {
@@ -76,6 +79,7 @@
 <div id="hud">
     <span class="title">{{ world.title }}</span>
     <div style="display:flex;gap:1rem;align-items:center;">
+        <div id="vr-btn"></div>
         <a href="#" id="mute-btn" style="font-size:0.8rem;" title="Toggle audio">&#9834;</a>
         <a href="{% url 'aether:world_detail' world.slug %}">Edit</a>
         <a href="{% url 'aether:world_list' %}">Exit</a>
@@ -87,16 +91,9 @@
 {% endif %}
 <div id="crosshair"></div>
 <div id="coords"></div>
-<div id="instructions">
+<div id="splash">
     <h2>{{ world.title }}</h2>
-    <p>Click to enter</p>
-    <p style="margin-top:0.8rem;font-size:0.78rem;color:#8b949e;">
-        <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> move
-        &nbsp;&middot;&nbsp; mouse look
-        &nbsp;&middot;&nbsp; <span class="key">Space</span> jump
-        &nbsp;&middot;&nbsp; <span class="key">Esc</span> release cursor
-    </p>
-    <div id="vr-btn"></div>
+    <div class="sub">loading…</div>
 </div>
 
 <script src="{% static 'aether/face_render.js' %}?v={% now 'U' %}"></script>
@@ -179,7 +176,8 @@ renderer.xr.addEventListener('sessionstart', () => {
     document.getElementById('hud').style.display = 'none';
     document.getElementById('crosshair').style.display = 'none';
     document.getElementById('coords').style.display = 'none';
-    instructions.style.display = 'none';
+    const s = document.getElementById('splash');
+    if (s) s.style.display = 'none';
     // Reduce shadow map for mobile GPU
     if (vrSun) {
         vrSun.shadow.mapSize.setScalar(512);
@@ -458,16 +456,15 @@ function _startProceduralAudio(scape, volume) {
 }
 
 // ---- Pointer lock ----
-const instructions = document.getElementById('instructions');
 const coords = document.getElementById('coords');
 let locked = false;
 
-instructions.addEventListener('click', () => {
-    renderer.domElement.requestPointerLock();
+// Click anywhere on the canvas to capture mouse look + unlock audio.
+renderer.domElement.addEventListener('click', () => {
+    if (!locked) renderer.domElement.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
     locked = !!document.pointerLockElement;
-    instructions.style.display = locked ? 'none' : 'block';
     if (locked) {
         startAmbientAudio();
         initSpeechAudio();
@@ -1070,7 +1067,57 @@ async function loadScene() {
 
 // ---- Animation loop ----
 let behaviorObjects = [];
-loadScene().then(objs => { behaviorObjects = objs; });
+let doorMeshes = [];
+let doorTriggered = false;
+const CURRENT_SLUG = '{{ world.slug }}';
+const RANDOM_URL = '{% url "aether:world_random" %}';
+const splash = document.getElementById('splash');
+const splashShownAt = performance.now();
+loadScene().then(objs => {
+    behaviorObjects = objs;
+    // Collect any entity whose name starts with "Door" so walking into
+    // one teleports the player to a random world.
+    for (const [id, reg] of entityRegistry) {
+        if (/^door\b/i.test(reg.name || '')) {
+            doorMeshes.push(reg.obj3d);
+        }
+    }
+    // Keep the title card visible for at least 700 ms so it registers even
+    // on instant loads, then fade it out over 600 ms (CSS transition) and
+    // remove it from the DOM so it never blocks clicks on the canvas.
+    const wait = Math.max(0, 700 - (performance.now() - splashShownAt));
+    setTimeout(() => {
+        splash.classList.add('fade');
+        setTimeout(() => splash.remove(), 700);
+    }, wait);
+});
+
+function checkDoorTeleport() {
+    if (doorTriggered || doorMeshes.length === 0) return;
+    const px = cameraGroup.position.x;
+    const pz = cameraGroup.position.z;
+    const py = cameraGroup.position.y;
+    for (const d of doorMeshes) {
+        const dx = px - d.position.x;
+        const dz = pz - d.position.z;
+        const horiz = Math.sqrt(dx * dx + dz * dz);
+        // Door half-height ≈ (scale_y * 1) / 2 + margin, so anything under
+        // 2.5m in Y is close enough.
+        if (horiz < 1.0 && py < 2.5) {
+            doorTriggered = true;
+            // Brief flash before redirect so the teleport reads as intent.
+            const fade = document.createElement('div');
+            fade.style.cssText = 'position:fixed;inset:0;background:#000;'
+                + 'opacity:0;transition:opacity 0.35s ease-in;z-index:50;';
+            document.body.appendChild(fade);
+            requestAnimationFrame(() => { fade.style.opacity = '1'; });
+            setTimeout(() => {
+                location.href = RANDOM_URL + '?exclude=' + encodeURIComponent(CURRENT_SLUG);
+            }, 380);
+            return;
+        }
+    }
+}
 
 const clock = new THREE.Clock();
 
@@ -1087,6 +1134,8 @@ function animate() {
         if (locked) updateMovement(dt);
         for (const vc of vrControllers) vc.line.visible = false;
     }
+
+    checkDoorTeleport();
 
     // Built-in behaviors
     for (const obj of behaviorObjects) {

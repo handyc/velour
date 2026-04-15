@@ -56,6 +56,18 @@ def build_cafe_shell(world, entities, wall_color='#8b7355', floor_color='#6b4226
     E('Cash Register', 'box', '#2a2a2a', 1.5, 1.25, -6, sx=0.4, sy=0.3, sz=0.3)
     E('Menu Board', 'box', '#1a1a1a', 0, 2.5, -10.4, sx=2.5, sy=1.2, sz=0.05)
 
+    # Door — a dark panel at the street side of the cafe. Named "Door" so
+    # the Aether viewer's door-teleport logic picks it up and warps the
+    # player to a random world when they walk through it.
+    E('Door', 'box', '#3a2a1c', 0, 1.0, 5.9, sx=1.4, sy=2.0, sz=0.08,
+      shadow=False)
+    E('Door Frame Top', 'box', '#2a1a0c', 0, 2.05, 5.9, sx=1.6, sy=0.1, sz=0.1,
+      shadow=False)
+    E('Door Frame L', 'box', '#2a1a0c', -0.78, 1.05, 5.9, sx=0.1, sy=2.1, sz=0.1,
+      shadow=False)
+    E('Door Frame R', 'box', '#2a1a0c', 0.78, 1.05, 5.9, sx=0.1, sy=2.1, sz=0.1,
+      shadow=False)
+
     table_positions = []
     for i, (tx, tz, seats) in enumerate(CAFE_TABLES):
         table_positions.append((tx, tz))

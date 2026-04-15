@@ -7,6 +7,7 @@ app_name = 'aether'
 urlpatterns = [
     path('', views.world_list, name='world_list'),
     path('add/', views.world_add, name='world_add'),
+    path('random/', views.world_random, name='world_random'),
     path('generate-random/', views.generate_random_world, name='generate_random'),
     path('generate-legoworld/', views.legoworld_generate, name='generate_legoworld'),
     path('generate-megalegoworld/', views.megalegoworld_generate, name='generate_megalegoworld'),
