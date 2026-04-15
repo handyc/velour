@@ -776,6 +776,50 @@
         color: #c8d4e0;
         margin-bottom: 0.1rem;
     }
+
+    /* Scrolling utterance log — terminal aesthetic. */
+    .gi-log-wrap {
+        margin-top: 1rem;
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .gi-log-head {
+        padding: 0.35rem 0.7rem;
+        background: #0e1824;
+        border-bottom: 1px solid var(--edge);
+        color: var(--cyan);
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .gi-log-head .gi-log-actions {
+        display: flex;
+        gap: 0.35rem;
+    }
+    #gi-log-box {
+        height: 240px;
+        overflow-y: auto;
+        padding: 0.3rem 0.5rem;
+        background: #020608;
+        font-family: 'SF Mono', 'Consolas', monospace;
+        font-size: 0.72rem;
+        line-height: 1.35;
+    }
+    .gi-log-row {
+        white-space: pre;
+        padding: 0.05rem 0;
+        border-bottom: 1px dotted #0f1824;
+    }
+    .gi-log-row .t   { color: #566270; }
+    .gi-log-row .k   { color: var(--amber); }
+    .gi-log-row .k.vocab { color: var(--cyan); }
+    .gi-log-row .sym { color: #c8d4e0; }
+    .gi-log-row .brk { color: #7a8a95; }
+    .gi-log-row .brk em { color: var(--green); font-style: normal; }
 </style>
 {% endblock %}
 
@@ -3033,18 +3077,23 @@ import * as THREE from 'three';
 
     // Resolve a variant's rules (arrays → one chosen string each),
     // then run LSystem.expand() with the axiom / iterations.
-    function expandGrammar(kind) {
-        const g = kind ? SPEECH_GRAMMARS[kind]
-                       : SPEECH_GRAMMARS[pick(Object.keys(SPEECH_GRAMMARS))];
-        if (!g) return '';
-        const variantNames = Object.keys(g.variants);
-        const variant = g.variants[pick(variantNames)];
+    // The Meta variant returns the grammar / variant name too, so the
+    // inspector log can show "greeting/cheerful" rather than just
+    // the raw symbols.
+    function expandGrammarMeta(kind) {
+        const chosenKind = kind || pick(Object.keys(SPEECH_GRAMMARS));
+        const g = SPEECH_GRAMMARS[chosenKind];
+        if (!g) return { symbols: '', kind: chosenKind, variant: null, words: null };
+        const variantName = pick(Object.keys(g.variants));
+        const variant = g.variants[variantName];
         const rules = {};
         for (const [key, val] of Object.entries(variant)) {
             rules[key] = Array.isArray(val) ? pick(val) : val;
         }
-        return new LSystem(g.axiom || 'S', rules, g.iterations || 4).expand();
+        const symbols = new LSystem(g.axiom || 'S', rules, g.iterations || 4).expand();
+        return { symbols, kind: chosenKind, variant: variantName, words: null };
     }
+    function expandGrammar(kind) { return expandGrammarMeta(kind).symbols; }
 
     // Backward-compatible alias — prior code and window export used this.
     function generatePhrase(kind) { return expandGrammar(kind); }
@@ -3148,15 +3197,28 @@ import * as THREE from 'three';
     // About 15% of phrases flip the final punctuation to '?', which
     // makes the intonation contour rise. Gives the overall soundscape
     // something like natural declarative/interrogative alternation.
-    function genVocabPhrase() {
+    //
+    // The Meta variant returns the picked words too so the Grammar
+    // Inspector log can render the breakdown. genVocabPhrase() is
+    // kept as a thin string-returning wrapper for external callers.
+    function genVocabPhraseMeta() {
         const wordCount = 2 + Math.floor(Math.random() * 4);   // 2..5
+        const wordsPicked = [];
         const parts = [];
         for (let i = 0; i < wordCount; i++) {
-            parts.push(wordToSymbols(pickWordByPopularity()));
+            const w = pickWordByPopularity();
+            wordsPicked.push(w);
+            parts.push(wordToSymbols(w));
         }
         const ending = Math.random() < 0.15 ? '?' : (Math.random() < 0.08 ? '!' : ',');
-        return parts.join('.') + ending;
+        return {
+            symbols: parts.join('.') + ending,
+            words: wordsPicked,
+            kind: 'vocab',
+            variant: null,
+        };
     }
+    function genVocabPhrase() { return genVocabPhraseMeta().symbols; }
 
     // ── Evolution — mutate and prune on a slow tick ─────────
     // Called every ~30 speech events. Duplicates a handful of popular
@@ -3243,6 +3305,32 @@ import * as THREE from 'three';
     // accent drifts even when the tab is backgrounded less aggressively.
     setInterval(() => { if (audio.on) evolveLanguage(); }, 45000);
 
+    // Rolling log of spoken utterances — feeds the Inspector's terminal.
+    // Capped so long sessions don't leak memory. Newest last.
+    const UTTERANCE_LOG = [];
+    const UTTERANCE_LOG_CAP = 400;
+
+    function logUtterance(entry) {
+        UTTERANCE_LOG.push(entry);
+        if (UTTERANCE_LOG.length > UTTERANCE_LOG_CAP) {
+            UTTERANCE_LOG.splice(0, UTTERANCE_LOG.length - UTTERANCE_LOG_CAP);
+        }
+        // If the Stats tab's log box is live, append a row immediately
+        // for terminal-style responsiveness (don't wait for the 1s tick).
+        const box = document.getElementById('gi-log-box');
+        if (box) {
+            const atBottom = (box.scrollTop + box.clientHeight) >= (box.scrollHeight - 6);
+            box.appendChild(giLogRow(entry));
+            while (box.children.length > UTTERANCE_LOG_CAP) {
+                box.removeChild(box.firstChild);
+            }
+            const pauseBtn = document.getElementById('gi-log-pause');
+            const paused = pauseBtn && pauseBtn.dataset.paused === '1';
+            if (atBottom && !paused) box.scrollTop = box.scrollHeight;
+        }
+    }
+    window.__bridgeUtteranceLog = UTTERANCE_LOG;
+
     function scheduleSpeech(delay) {
         setTimeout(() => {
             if (!audio.on) { scheduleSpeech(rng(8, 22)); return; }
@@ -3254,10 +3342,19 @@ import * as THREE from 'three';
                     // 80% vocab-tier phrases (recurring words → evolving
                     // "language"); 20% fresh L-system grammars (keeps
                     // cadences varied while the vocab warms up).
-                    const syms = Math.random() < 0.8
-                        ? genVocabPhrase()
-                        : generatePhrase();
-                    speakPhrase(syms, rng(0.3, 0.95));
+                    const meta = Math.random() < 0.8
+                        ? genVocabPhraseMeta()
+                        : expandGrammarMeta();
+                    const distance = rng(0.3, 0.95);
+                    speakPhrase(meta.symbols, distance);
+                    logUtterance({
+                        ts: Date.now(),
+                        kind: meta.kind,
+                        variant: meta.variant,
+                        symbols: meta.symbols,
+                        words: meta.words,
+                        distance,
+                    });
                 }, i * rng(700, 1600));
             }
             scheduleSpeech(rng(5, 18));
@@ -3581,59 +3678,140 @@ import * as THREE from 'three';
     }
 
     // ── Stats tab ────────────────────────────────────────────
+    // First call: build the full layout. Later calls: only refresh
+    // the card numbers so we don't clobber the live-appended log box.
     function giRenderStats() {
         const pane = giPanes.stats;
-        const topSubs = [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
-        const topWords = [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
-        const usedSubs = SUBWORDS.filter(s => s.useCount > 0).length;
-        const usedWords = WORDS.filter(w => w.useCount > 0).length;
-        const totalSpeakEvents = WORDS.reduce((s, w) => s + w.useCount, 0);
+        if (pane.querySelector('#gi-log-box')) {
+            giUpdateStatsCards(pane);
+            return;
+        }
         pane.innerHTML = `
             <div class="gi-stats">
                 <div class="gi-stat-card">
                     <h4>Subwords</h4>
-                    <div class="big">${SUBWORDS.length}</div>
-                    <div style="color:#8b95a0;font-size:0.7rem;">
-                        ${usedSubs} used · ${SUBWORDS.length - usedSubs} idle
-                        · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}
-                    </div>
+                    <div class="big" data-stat="sub-count"></div>
+                    <div style="color:#8b95a0;font-size:0.7rem;" data-stat="sub-usage"></div>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Words</h4>
-                    <div class="big">${WORDS.length}</div>
-                    <div style="color:#8b95a0;font-size:0.7rem;">
-                        ${usedWords} used · ${WORDS.length - usedWords} idle
-                    </div>
+                    <div class="big" data-stat="word-count"></div>
+                    <div style="color:#8b95a0;font-size:0.7rem;" data-stat="word-usage"></div>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Speech events</h4>
-                    <div class="big">${totalSpeakEvents}</div>
+                    <div class="big" data-stat="events"></div>
                     <div style="color:#8b95a0;font-size:0.7rem;">
                         total word-utterances since page load
                     </div>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Top 10 subwords</h4>
-                    <ol>${topSubs.map(s =>
-                        `<li><span style="color:var(--amber);">${s.pattern}</span> ×${s.useCount}</li>`
-                    ).join('')}</ol>
+                    <ol data-stat="top-subs"></ol>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Top 10 words</h4>
-                    <ol>${topWords.map(w => {
-                        const chain = w.subIds.map(i => (SUBWORDS[i]||{pattern:'?'}).pattern).join('-');
-                        return `<li><span style="color:var(--cyan);">${chain}</span> ×${w.useCount}</li>`;
-                    }).join('')}</ol>
+                    <ol data-stat="top-words"></ol>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Grammar presets</h4>
-                    <ol>${Object.entries(SPEECH_GRAMMARS).map(([k, g]) =>
-                        `<li><span style="color:var(--amber);">${k}</span>
-                         — ${Object.keys(g.variants).length} variant(s)</li>`
-                    ).join('')}</ol>
+                    <ol data-stat="grammars"></ol>
                 </div>
             </div>
+            <div class="gi-log-wrap">
+                <div class="gi-log-head">
+                    <span>Utterance Log
+                        <span style="color:#566270;font-weight:normal;letter-spacing:0;">
+                            — newest at the bottom, auto-scrolls
+                        </span>
+                    </span>
+                    <div class="gi-log-actions">
+                        <button class="gi-btn" id="gi-log-pause">Pause autoscroll</button>
+                        <button class="gi-btn danger" id="gi-log-clear">Clear</button>
+                    </div>
+                </div>
+                <div id="gi-log-box"></div>
+            </div>
         `;
+        const box = pane.querySelector('#gi-log-box');
+        for (const entry of UTTERANCE_LOG) box.appendChild(giLogRow(entry));
+        box.scrollTop = box.scrollHeight;
+        pane.querySelector('#gi-log-pause').onclick = (e) => {
+            const btn = e.currentTarget;
+            btn.dataset.paused = btn.dataset.paused === '1' ? '0' : '1';
+            btn.textContent = btn.dataset.paused === '1'
+                ? 'Resume autoscroll' : 'Pause autoscroll';
+        };
+        pane.querySelector('#gi-log-clear').onclick = () => {
+            UTTERANCE_LOG.length = 0;
+            box.innerHTML = '';
+        };
+        giUpdateStatsCards(pane);
+    }
+
+    // Refresh just the card numbers / top-N lists. Log box untouched.
+    function giUpdateStatsCards(pane) {
+        const topSubs = [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
+        const topWords = [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
+        const usedSubs = SUBWORDS.filter(s => s.useCount > 0).length;
+        const usedWords = WORDS.filter(w => w.useCount > 0).length;
+        const totalSpeakEvents = WORDS.reduce((s, w) => s + w.useCount, 0);
+        const set = (k, v) => {
+            const el = pane.querySelector(`[data-stat="${k}"]`);
+            if (el) el.textContent = v;
+        };
+        const setHTML = (k, v) => {
+            const el = pane.querySelector(`[data-stat="${k}"]`);
+            if (el) el.innerHTML = v;
+        };
+        set('sub-count',  SUBWORDS.length);
+        set('sub-usage',  `${usedSubs} used · ${SUBWORDS.length - usedSubs} idle · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}`);
+        set('word-count', WORDS.length);
+        set('word-usage', `${usedWords} used · ${WORDS.length - usedWords} idle`);
+        set('events',     totalSpeakEvents);
+        setHTML('top-subs', topSubs.map(s =>
+            `<li><span style="color:var(--amber);">${s.pattern}</span> ×${s.useCount}</li>`
+        ).join(''));
+        setHTML('top-words', topWords.map(w => {
+            const chain = w.subIds.map(i => (SUBWORDS[i]||{pattern:'?'}).pattern).join('-');
+            return `<li><span style="color:var(--cyan);">${chain}</span> ×${w.useCount}</li>`;
+        }).join(''));
+        setHTML('grammars', Object.entries(SPEECH_GRAMMARS).map(([k, g]) =>
+            `<li><span style="color:var(--amber);">${k}</span>
+             — ${Object.keys(g.variants).length} variant(s)</li>`
+        ).join(''));
+    }
+
+    // Render a single log row. Each line shows:
+    //   [HH:MM:SS]  kind/variant   symbols           word-breakdown
+    // For vocab phrases, word-breakdown is "[sub-sub-sub] · [sub-sub] ·…"
+    // For L-system phrases, word-breakdown is an em-dash.
+    function giLogRow(entry) {
+        const el = document.createElement('div');
+        el.className = 'gi-log-row';
+        const d = new Date(entry.ts);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        const tag = entry.variant ? `${entry.kind}/${entry.variant}` : entry.kind;
+        const tagClass = entry.kind === 'vocab' ? 'k vocab' : 'k';
+        const tagPadded = tag.padEnd(22, ' ').slice(0, 22);
+        const symPadded = entry.symbols.padEnd(36, ' ');
+        let breakdown;
+        if (entry.words && entry.words.length) {
+            breakdown = entry.words.map(w => {
+                const chain = w.subIds.map(i => (SUBWORDS[i] || {pattern:'?'}).pattern).join('-');
+                return `[<em>${chain}</em>]`;
+            }).join(' · ');
+        } else {
+            breakdown = '—';
+        }
+        el.innerHTML =
+            `<span class="t">[${hh}:${mm}:${ss}]</span> ` +
+            `<span class="${tagClass}">${tagPadded}</span> ` +
+            `<span class="sym">${symPadded}</span> ` +
+            `<span class="brk">${breakdown}</span>`;
+        return el;
     }
 })();
 </script>
