@@ -3447,8 +3447,14 @@ import * as THREE from 'three';
     // that get used more often become more likely parents for new
     // words — the vocabulary concentrates on the syllables people
     // actually say rather than drifting into uniform noise.
+    //
+    // Length distribution: since each subword now expands to several
+    // phonic particles, words are shorter at the subword tier. 85% of
+    // words are 1-5 subwords (typical); 15% run 6-10 (polysyllabic).
     function genWord() {
-        const n = 3 + Math.floor(Math.random() * 4);       // 3..6 subwords
+        const n = Math.random() < 0.85
+            ? 1 + Math.floor(Math.random() * 5)        // 1..5 typical
+            : 6 + Math.floor(Math.random() * 5);       // 6..10 rare
         const subIds = [];
         for (let i = 0; i < n; i++) {
             const sub = pickPopularSubword();
