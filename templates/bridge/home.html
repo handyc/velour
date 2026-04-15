@@ -515,6 +515,20 @@
         font-family: inherit;
     }
     .grammar-pill:hover { color: var(--amber); border-color: #50401a; }
+    .pink-pill {
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: transparent;
+        color: var(--dim);
+        border: 1px solid var(--edge);
+        padding: 0.15rem 0.4rem;
+        border-radius: 2px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .pink-pill:hover { color: #ff9ec3; border-color: #553040; }
+    .pink-pill.live  { color: #ff9ec3; border-color: #553040; }
 
     /* ── Grammar Inspector modal ────────────────────────────── */
     .gi-backdrop {
@@ -869,6 +883,10 @@
         <button class="grammar-pill" id="grammar-toggle" type="button"
                 title="Inspect the grammar engine, subwords, words, and live stats">
             ⚙ grammar
+        </button>
+        <button class="pink-pill" id="pink-toggle" type="button"
+                title="Toggle between frozen-buffer and continuously-flowing pink noise for phonic particles">
+            ▒ buffer
         </button>
     </div>
 </div>
@@ -2271,8 +2289,27 @@ import * as THREE from 'three';
     const audio = {
         ctx: null, master: null, engine: null, on: false,
         started: false, stopEngine: null,
+        // Phonic-particle noise source mode:
+        //   'buffer' — each particle reads its frozen offset into the
+        //              shared pink buffer. Same slice every time → the
+        //              particle has a stable acoustic fingerprint.
+        //   'live'   — the pink buffer is treated as a continuously
+        //              cycling stream. offsetFrac still provides
+        //              phase-spread between simultaneous particles,
+        //              but the underlying slice drifts with wall-clock
+        //              time, so each utterance reads new noise.
+        pinkMode: 'buffer',
     };
     const audioBtn = document.getElementById('audio-toggle');
+    const pinkBtn = document.getElementById('pink-toggle');
+    if (pinkBtn) {
+        pinkBtn.onclick = () => {
+            audio.pinkMode = audio.pinkMode === 'buffer' ? 'live' : 'buffer';
+            pinkBtn.classList.toggle('live', audio.pinkMode === 'live');
+            pinkBtn.textContent =
+                audio.pinkMode === 'live' ? '░ live pink' : '▒ buffer';
+        };
+    }
 
     function rng(lo, hi) { return lo + Math.random() * (hi - lo); }
 
@@ -2956,7 +2993,14 @@ import * as THREE from 'three';
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.loop = false;
-        const offset = pp.offsetFrac * (buf.duration - 0.3);
+        // In 'buffer' mode the offset is frozen — same slice every time.
+        // In 'live' mode the buffer acts as a cycling stream: wall-clock
+        // time advances the read position, so each utterance pulls fresh
+        // noise. offsetFrac still phase-spreads simultaneous particles.
+        const span = buf.duration - 0.3;
+        const offset = audio.pinkMode === 'live'
+            ? ((ctx.currentTime + pp.offsetFrac * span) % span)
+            : pp.offsetFrac * span;
 
         const bp1 = ctx.createBiquadFilter();
         bp1.type = 'bandpass';
