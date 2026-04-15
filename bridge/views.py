@@ -10,9 +10,11 @@ import hashlib
 import json
 import random
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -102,6 +104,26 @@ def warp(request):
         'planet':  features,
         'library': Planet.objects.count(),
     })
+
+
+@login_required
+def beam_down(request):
+    """Land on a random Aether world.
+
+    The bridge is an instruments UI; Aether is where actual 3D surface
+    exploration happens. Beam Down bridges the two — pick a random
+    World and redirect to its enter view. If there are no worlds yet,
+    nudge the user toward the Aether list so they can generate one.
+    """
+    from aether.models import World   # lazy: avoid circular at import time
+    world = World.objects.order_by('?').first()
+    if world is None:
+        messages.info(
+            request,
+            'No Aether worlds to beam down to yet — generate one first.',
+        )
+        return redirect('aether:world_list')
+    return redirect(reverse('aether:world_enter', args=[world.slug]))
 
 
 @login_required

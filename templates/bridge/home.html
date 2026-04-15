@@ -461,6 +461,45 @@
     }
     .lib-link:hover { color: var(--cyan); border-color: var(--edge-hi); }
     .lib-link strong { color: var(--amber); margin-left: 0.25rem; }
+
+    /* Beam Down — the "leave the bridge, land on a world" button.
+       Transporter chime colors: cyan + a hint of amber when hot. */
+    .beam-link {
+        font-size: 0.62rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        text-decoration: none;
+        color: var(--cyan);
+        border: 1px solid var(--edge-hi);
+        background: linear-gradient(180deg, #0f2430 0%, #0a1520 100%);
+        padding: 0.2rem 0.55rem;
+        border-radius: 2px;
+        box-shadow: 0 0 6px rgba(89,208,255,0.12);
+        transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .beam-link:hover {
+        color: #e6fbff;
+        border-color: var(--cyan);
+        box-shadow: 0 0 10px rgba(89,208,255,0.45);
+    }
+
+    /* Audio pill — click once to start ambient ship sounds, click
+       again to mute. The button has two resting states (.on / .off)
+       so the icon + colour always reflects reality. */
+    .audio-pill {
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: transparent;
+        color: var(--dim);
+        border: 1px solid var(--edge);
+        padding: 0.15rem 0.4rem;
+        border-radius: 2px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .audio-pill:hover { color: var(--cyan); border-color: var(--edge-hi); }
+    .audio-pill.on { color: var(--green); border-color: #2a4a3a; }
 </style>
 {% endblock %}
 
@@ -495,10 +534,18 @@
         <span class="k">Commander</span>
         <span class="v cyan">{{ commander }}</span>
     </div>
-    <div class="cell" style="display:flex;align-items:center;justify-content:flex-end;">
+    <div class="cell" style="display:flex;align-items:center;justify-content:flex-end;gap:0.35rem;flex-wrap:wrap;">
         <a class="lib-link" href="{% url 'bridge:library' %}">
             Atlas <strong id="library-count">{{ library_count }}</strong>
         </a>
+        <a class="beam-link" href="{% url 'bridge:beam_down' %}"
+           title="Transport to the surface of a random Aether world">
+            ⏬ Beam&nbsp;Down
+        </a>
+        <button class="audio-pill" id="audio-toggle" type="button"
+                title="Ambient ship sounds (click to enable)">
+            🔈 audio
+        </button>
     </div>
 </div>
 
@@ -1865,6 +1912,332 @@ import * as THREE from 'three';
         requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
+
+    // ── Ambient ship soundscape ────────────────────────────
+    // A busy-office-on-a-starship feel, built from Web Audio
+    // primitives: a low droning engine, stray beeps and boops at
+    // varying distances, occasional "shave and a haircut" style
+    // ring melodies, and passing footsteps that sweep across the
+    // stereo field. Starts silent; first user gesture (or the
+    // audio-toggle button) flips it on.
+    const audio = {
+        ctx: null, master: null, engine: null, on: false,
+        started: false, stopEngine: null,
+    };
+    const audioBtn = document.getElementById('audio-toggle');
+
+    function rng(lo, hi) { return lo + Math.random() * (hi - lo); }
+
+    function startAudio() {
+        if (audio.started) { return; }
+        audio.started = true;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) { return; }
+        audio.ctx = new Ctx();
+        audio.master = audio.ctx.createGain();
+        audio.master.gain.value = 0.0001;
+        audio.master.connect(audio.ctx.destination);
+        // Gentle fade-in so nothing slaps the user on load.
+        audio.master.gain.exponentialRampToValueAtTime(
+            0.55, audio.ctx.currentTime + 2.5);
+        audio.on = true;
+        audioBtn.classList.add('on');
+        audioBtn.textContent = '🔊 audio';
+        audioBtn.title = 'Ambient ship sounds (click to mute)';
+        startEngine();
+        scheduleBeep(rng(2, 6));
+        scheduleBeep(rng(4, 9));   // second beep channel, different cadence
+        scheduleRing(rng(35, 70));
+        scheduleFootsteps(rng(12, 25));
+        scheduleChatter(rng(20, 45));
+    }
+
+    audioBtn.addEventListener('click', () => {
+        if (!audio.started) { startAudio(); return; }
+        audio.on = !audio.on;
+        const t = audio.ctx.currentTime;
+        audio.master.gain.cancelScheduledValues(t);
+        audio.master.gain.exponentialRampToValueAtTime(
+            audio.on ? 0.55 : 0.0001, t + 0.4);
+        audioBtn.classList.toggle('on', audio.on);
+        audioBtn.textContent = audio.on ? '🔊 audio' : '🔇 muted';
+    });
+
+    // Any first-gesture also boots audio (autoplay policy) — but only
+    // if the user hasn't explicitly left it off by pressing the pill.
+    function firstGesture() {
+        if (!audio.started) { startAudio(); }
+        window.removeEventListener('pointerdown', firstGesture);
+        window.removeEventListener('keydown', firstGesture);
+    }
+    window.addEventListener('pointerdown', firstGesture);
+    window.addEventListener('keydown', firstGesture);
+
+    // ── Engine drone — three detuned oscillators + brown noise,
+    //    all low-passed hard. Mimics a vacuum cleaner turned way down.
+    function startEngine() {
+        const ctx = audio.ctx;
+        const bus = ctx.createGain();
+        bus.gain.value = 0.28;
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 220;
+        lp.Q.value = 0.6;
+        bus.connect(lp).connect(audio.master);
+
+        const oscs = [];
+        [45, 68, 92].forEach((f, i) => {
+            const o = ctx.createOscillator();
+            o.type = i === 2 ? 'triangle' : 'sawtooth';
+            o.frequency.value = f;
+            // slow LFO on pitch so it never sits perfectly still
+            const lfo = ctx.createOscillator();
+            const lfoGain = ctx.createGain();
+            lfo.frequency.value = 0.07 + i * 0.05;
+            lfoGain.gain.value = 0.8 + i * 0.3;
+            lfo.connect(lfoGain).connect(o.frequency);
+            const g = ctx.createGain();
+            g.gain.value = 0.22 - i * 0.05;
+            o.connect(g).connect(bus);
+            o.start(); lfo.start();
+            oscs.push(o, lfo);
+        });
+
+        // Brown noise bed
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        let last = 0;
+        for (let i = 0; i < data.length; i++) {
+            const w = (Math.random() * 2 - 1) * 0.08;
+            last = (last + w) / 1.02;
+            data[i] = last * 2.5;
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buf;
+        noise.loop = true;
+        const ng = ctx.createGain();
+        ng.gain.value = 0.45;
+        noise.connect(ng).connect(bus);
+        noise.start();
+
+        // Very slow volume wobble (ship's hum breathing)
+        const wob = ctx.createOscillator();
+        const wobGain = ctx.createGain();
+        wob.frequency.value = 0.14;
+        wobGain.gain.value = 0.06;
+        wob.connect(wobGain).connect(bus.gain);
+        wob.start();
+
+        audio.engine = { bus, oscs, noise };
+    }
+
+    // ── Distance helper: returns a lowpass + pan node pair that
+    //    a caller can patch a signal through to simulate far-off
+    //    vs nearby source. 1.0 = right next to you, 0.0 = distant.
+    function distanceNodes(distance) {
+        const ctx = audio.ctx;
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 800 + distance * 5000;
+        const pan = ctx.createStereoPanner();
+        pan.pan.value = rng(-0.9, 0.9);
+        const g = ctx.createGain();
+        g.gain.value = 0.25 + distance * 0.55;
+        lp.connect(pan).connect(g).connect(audio.master);
+        return { input: lp, gain: g };
+    }
+
+    // ── Beeps and boops — intermittent console chirps.
+    function playBeep(freq, dur, distance, shape) {
+        const ctx = audio.ctx;
+        const o = ctx.createOscillator();
+        o.type = shape || 'sine';
+        o.frequency.value = freq;
+        const env = ctx.createGain();
+        env.gain.value = 0.0001;
+        const t = ctx.currentTime;
+        env.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+        env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        const d = distanceNodes(distance);
+        o.connect(env).connect(d.input);
+        o.start(t);
+        o.stop(t + dur + 0.02);
+    }
+
+    function scheduleBeep(delay) {
+        setTimeout(() => {
+            if (!audio.on) { scheduleBeep(rng(3, 10)); return; }
+            const distance = Math.random();  // 0=far, 1=close
+            const kind = Math.random();
+            if (kind < 0.45) {
+                // single chirp
+                playBeep(rng(520, 1800), rng(0.06, 0.16), distance,
+                         Math.random() < 0.3 ? 'square' : 'sine');
+            } else if (kind < 0.75) {
+                // two-tone boop (ascending or descending minor second)
+                const f = rng(420, 900);
+                const step = Math.random() < 0.5 ? 1.059 : 0.94;
+                playBeep(f, 0.09, distance, 'sine');
+                setTimeout(() => playBeep(f * step, 0.11, distance, 'sine'), 110);
+            } else if (kind < 0.9) {
+                // three-tone ack
+                const f = rng(600, 1100);
+                playBeep(f, 0.07, distance, 'triangle');
+                setTimeout(() => playBeep(f * 1.26, 0.07, distance, 'triangle'), 90);
+                setTimeout(() => playBeep(f * 1.5, 0.10, distance, 'triangle'), 180);
+            } else {
+                // low boop (heavier console)
+                playBeep(rng(110, 230), rng(0.2, 0.4), distance, 'square');
+            }
+            scheduleBeep(rng(2, 12));
+        }, delay * 1000);
+    }
+
+    // ── Ringtone melodies — classic short tones. First one is
+    //    literally "shave and a haircut" (7 notes, the stinger
+    //    resolves two bars later so we stop at the setup half
+    //    sometimes to suggest someone picked up mid-ring).
+    //    Notes are [semitones relative to middle C, duration beats].
+    const BEAT = 0.16;
+    const MELODIES = [
+        // shave and a haircut — C C G C D  ..  C .. (classic setup)
+        [[0,1],[7,1.5],[7,0.5],[9,1],[7,1],[11,1],[12,1.5]],
+        // NBC chimes (G-E-C)
+        [[7,1],[4,1],[0,2]],
+        // close encounters (G-A-F-F-C)
+        [[7,1],[9,1],[5,1],[-7,1],[0,2]],
+        // ding-dong doorbell
+        [[9,1],[4,2]],
+        // two bars of "for he's a jolly good fellow" opener
+        [[0,0.5],[4,0.5],[4,1],[4,0.5],[5,0.5],[7,2]],
+    ];
+
+    function playMelody(notes, distance) {
+        const ctx = audio.ctx;
+        const base = 523.25;  // C5 — a phone-ish register
+        const d = distanceNodes(distance * 0.65);  // rings are mostly mid-to-far
+        let t = ctx.currentTime + 0.02;
+        notes.forEach(([semi, beats]) => {
+            const f = base * Math.pow(2, semi / 12);
+            const dur = beats * BEAT;
+            const o = ctx.createOscillator();
+            o.type = 'triangle';
+            o.frequency.value = f;
+            const env = ctx.createGain();
+            env.gain.value = 0.0001;
+            env.gain.exponentialRampToValueAtTime(0.55, t + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.2, t + dur * 0.4);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.98);
+            o.connect(env).connect(d.input);
+            o.start(t);
+            o.stop(t + dur + 0.02);
+            t += dur;
+        });
+    }
+
+    function scheduleRing(delay) {
+        setTimeout(() => {
+            if (!audio.on) { scheduleRing(rng(45, 120)); return; }
+            const melody = MELODIES[Math.floor(Math.random() * MELODIES.length)];
+            const distance = rng(0.15, 0.75);
+            const rings = Math.floor(rng(2, 5));
+            // Sometimes someone "picks up" after only a couple of rings.
+            const actual = Math.random() < 0.25 ? Math.min(2, rings) : rings;
+            let i = 0;
+            const doOne = () => {
+                if (!audio.on || i >= actual) {
+                    scheduleRing(rng(45, 135));
+                    return;
+                }
+                playMelody(melody, distance);
+                i++;
+                setTimeout(doOne, rng(1800, 2600));
+            };
+            doOne();
+        }, delay * 1000);
+    }
+
+    // ── Footsteps — filtered noise thumps sweeping across stereo.
+    //    Gives the impression of crew walking past the workstation.
+    function playFootsteps() {
+        const ctx = audio.ctx;
+        const steps = Math.floor(rng(4, 9));
+        const startPan = Math.random() < 0.5 ? -1 : 1;
+        const endPan = -startPan;
+        const cadence = rng(0.28, 0.42);  // seconds per step
+        for (let i = 0; i < steps; i++) {
+            setTimeout(() => {
+                if (!audio.on) { return; }
+                const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+                const d = buf.getChannelData(0);
+                for (let j = 0; j < d.length; j++) {
+                    d[j] = (Math.random() * 2 - 1) * Math.exp(-j / (ctx.sampleRate * 0.03));
+                }
+                const src = ctx.createBufferSource();
+                src.buffer = buf;
+                const bp = ctx.createBiquadFilter();
+                bp.type = 'bandpass';
+                bp.frequency.value = rng(180, 380);
+                bp.Q.value = 1.4;
+                const pan = ctx.createStereoPanner();
+                const p = startPan + (endPan - startPan) * (i / (steps - 1));
+                pan.pan.value = p * 0.85;
+                const g = ctx.createGain();
+                // Louder in the middle, quieter at edges (far = faint).
+                const closeness = 1 - Math.abs(p) * 0.7;
+                g.gain.value = 0.22 * closeness;
+                src.connect(bp).connect(pan).connect(g).connect(audio.master);
+                src.start();
+            }, i * cadence * 1000);
+        }
+    }
+
+    function scheduleFootsteps(delay) {
+        setTimeout(() => {
+            if (!audio.on) { scheduleFootsteps(rng(20, 45)); return; }
+            playFootsteps();
+            scheduleFootsteps(rng(15, 55));
+        }, delay * 1000);
+    }
+
+    // ── Ambient chatter — a handful of muffled mid-frequency tones
+    //    that suggest indistinct voices a few corridors away.
+    function scheduleChatter(delay) {
+        setTimeout(() => {
+            if (!audio.on) { scheduleChatter(rng(30, 90)); return; }
+            const ctx = audio.ctx;
+            const count = Math.floor(rng(3, 7));
+            for (let i = 0; i < count; i++) {
+                setTimeout(() => {
+                    if (!audio.on) { return; }
+                    const o = ctx.createOscillator();
+                    o.type = 'sawtooth';
+                    o.frequency.value = rng(140, 280);
+                    const lfo = ctx.createOscillator();
+                    const lfoG = ctx.createGain();
+                    lfo.frequency.value = rng(3, 7);
+                    lfoG.gain.value = rng(15, 40);
+                    lfo.connect(lfoG).connect(o.frequency);
+                    const lp = ctx.createBiquadFilter();
+                    lp.type = 'lowpass';
+                    lp.frequency.value = 520;
+                    const env = ctx.createGain();
+                    const t = ctx.currentTime;
+                    const dur = rng(0.25, 0.8);
+                    env.gain.value = 0.0001;
+                    env.gain.exponentialRampToValueAtTime(0.08, t + 0.05);
+                    env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+                    const pan = ctx.createStereoPanner();
+                    pan.pan.value = rng(-0.7, 0.7);
+                    o.connect(lp).connect(env).connect(pan).connect(audio.master);
+                    o.start(t); lfo.start(t);
+                    o.stop(t + dur + 0.05);
+                    lfo.stop(t + dur + 0.05);
+                }, i * rng(220, 480));
+            }
+            scheduleChatter(rng(25, 80));
+        }, delay * 1000);
+    }
 })();
 </script>
 {% endblock %}
