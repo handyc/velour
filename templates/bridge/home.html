@@ -2396,41 +2396,119 @@ import * as THREE from 'three';
         [ 500, 1500],  // neutral
     ];
 
-    function speakSymbol(sym, t, distance, pan) {
+    // A "speaker" is a loose identity held for one phrase — base pitch,
+    // formant shift (shorter/longer vocal tract), rate, breathiness,
+    // vibrato. Bimodal pitch distribution suggests two voice registers
+    // without committing to gender labels.
+    function makeSpeaker() {
+        const lower = Math.random() < 0.5;
+        return {
+            pitch:        lower ? rng(88, 138)  : rng(170, 245),
+            formantShift: lower ? rng(0.92, 1.02) : rng(1.05, 1.20),
+            rate:         rng(0.9, 1.15),
+            breathiness:  rng(0.08, 0.22),
+            vibrato:      rng(3.5, 5.5),        // Hz
+            vibratoDepth: rng(0.006, 0.020),    // fraction of f0
+        };
+    }
+
+    // Phrase-level intonation contour. Returns a multiplier on the
+    // speaker's base pitch as the phrase progresses. Shape depends on
+    // the phrase's final punctuation: declarative falls, question
+    // rises on a concave curve, exclamation peaks early then drops.
+    function makePitchContour(phraseStart, phraseDur, ending) {
+        const dur = Math.max(phraseDur, 0.05);
+        return (t) => {
+            const x = Math.max(0, Math.min(1, (t - phraseStart) / dur));
+            if (ending === '?') {
+                return 0.92 + 0.40 * Math.pow(x, 1.6);
+            } else if (ending === '!') {
+                return 1.15 - 0.30 * x;
+            } else {
+                return 1.06 - 0.24 * x;
+            }
+        };
+    }
+
+    // Rough mean duration per symbol — used to estimate phrase length
+    // up front so the pitch contour can span the full utterance.
+    const SYMBOL_MEAN_DUR = {
+        V: 0.18, v: 0.09, n: 0.09, l: 0.09, C: 0.055,
+        s: 0.045, p: 0.03, '.': 0.09, ',': 0.33,
+    };
+    function estimatePhraseDur(symbols, speaker) {
+        let total = 0;
+        for (const c of symbols) total += (SYMBOL_MEAN_DUR[c] || 0) * speaker.rate;
+        return total + 0.02 * symbols.length;   // inter-symbol gaps
+    }
+
+    function speakSymbol(sym, t, distance, pan, speaker, pitchAt) {
         const ctx = audio.ctx;
+        const fs = speaker.formantShift;
+        const rate = speaker.rate;
         const buf = getPinkBuffer();
         const src = ctx.createBufferSource();
         src.buffer = buf;
         src.loop = true;
-        // Random offset into the buffer — avoids repeating textures.
         const offset = Math.random() * (buf.duration - 1);
 
-        // Per-symbol parameters
+        // Per-symbol parameters. `voiced` routes an additional pitched
+        // glottal source through the formant filters, transforming the
+        // character from "whispered" into "spoken."
         let dur, bp1Freq, bp1Q, bp2Freq, bp2Q, gain, shape;
+        let bp1End, bp2End, voiced = false;
         if (sym === 'V' || sym === 'v') {
             const [f1, f2] = VOWEL_FORMANTS[
                 Math.floor(Math.random() * VOWEL_FORMANTS.length)];
-            bp1Freq = f1; bp1Q = 8;
-            bp2Freq = f2; bp2Q = 10;
-            dur = sym === 'V' ? rng(0.14, 0.22) : rng(0.07, 0.11);
+            bp1Freq = f1 * fs; bp1Q = 10;
+            bp2Freq = f2 * fs; bp2Q = 12;
+            // Diphthong: long vowels sometimes glide toward a second
+            // formant pair within the same envelope.
+            if (sym === 'V' && Math.random() < 0.28) {
+                const [g1, g2] = VOWEL_FORMANTS[
+                    Math.floor(Math.random() * VOWEL_FORMANTS.length)];
+                bp1End = g1 * fs;
+                bp2End = g2 * fs;
+            } else {
+                bp1End = bp1Freq * rng(0.95, 1.08);
+                bp2End = bp2Freq * rng(0.92, 1.10);
+            }
+            dur = (sym === 'V' ? rng(0.14, 0.22) : rng(0.07, 0.11)) * rate;
             gain = 0.9;
             shape = 'vowel';
+            voiced = true;
+        } else if (sym === 'n') {
+            // Nasal — low F1, strong F2, voiced, attenuated.
+            bp1Freq = 260 * fs; bp1End = bp1Freq * rng(0.96, 1.04); bp1Q = 12;
+            bp2Freq = 2100 * fs; bp2End = bp2Freq * rng(0.94, 1.08); bp2Q = 8;
+            dur = rng(0.07, 0.11) * rate;
+            gain = 0.55;
+            shape = 'nasal';
+            voiced = true;
+        } else if (sym === 'l') {
+            // Liquid — voiced, formants slide toward a clear F2.
+            bp1Freq = 360 * fs; bp1End = 330 * fs; bp1Q = 9;
+            bp2Freq = 1100 * fs; bp2End = 1400 * fs; bp2Q = 8;
+            dur = rng(0.06, 0.10) * rate;
+            gain = 0.6;
+            shape = 'liquid';
+            voiced = true;
         } else if (sym === 'C') {
-            bp1Freq = rng(1200, 2400); bp1Q = 3;
-            bp2Freq = rng(2800, 4500); bp2Q = 3;
-            dur = rng(0.045, 0.07);
+            bp1Freq = rng(1200, 2400) * fs; bp1Q = 3;
+            bp2Freq = rng(2800, 4500) * fs; bp2Q = 3;
+            dur = rng(0.045, 0.07) * rate;
             gain = 0.55;
             shape = 'consonant';
         } else if (sym === 's') {
             bp1Freq = rng(3800, 6500); bp1Q = 2;
             bp2Freq = rng(5000, 8000); bp2Q = 2;
-            dur = rng(0.035, 0.06);
+            dur = rng(0.035, 0.06) * rate;
             gain = 0.5;
             shape = 'sibilant';
         } else if (sym === 'p') {
             bp1Freq = rng(400, 800); bp1Q = 1.5;
             bp2Freq = rng(1200, 2000); bp2Q = 1.5;
-            dur = rng(0.02, 0.035);
+            dur = rng(0.02, 0.035) * rate;
             gain = 0.7;
             shape = 'plosive';
         } else {
@@ -2445,20 +2523,19 @@ import * as THREE from 'three';
         bp2.type = 'bandpass';
         bp2.frequency.value = bp2Freq; bp2.Q.value = bp2Q;
         const mix = ctx.createGain();
-        mix.gain.value = 0.5;
+        mix.gain.value = 0.45;
 
         // Envelope per shape
         const env = ctx.createGain();
         env.gain.value = 0.0001;
-        if (shape === 'vowel') {
+        if (shape === 'vowel' || shape === 'nasal' || shape === 'liquid') {
             env.gain.exponentialRampToValueAtTime(gain, t + 0.015);
-            env.gain.setValueAtTime(gain, t + dur - 0.03);
+            env.gain.setValueAtTime(gain, t + Math.max(0.01, dur - 0.03));
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            // Tiny formant drift during vowel — makes it feel spoken.
             bp1.frequency.setValueAtTime(bp1Freq, t);
-            bp1.frequency.linearRampToValueAtTime(bp1Freq * rng(0.92, 1.12), t + dur);
+            bp1.frequency.linearRampToValueAtTime(bp1End, t + dur);
             bp2.frequency.setValueAtTime(bp2Freq, t);
-            bp2.frequency.linearRampToValueAtTime(bp2Freq * rng(0.90, 1.15), t + dur);
+            bp2.frequency.linearRampToValueAtTime(bp2End, t + dur);
         } else if (shape === 'plosive') {
             env.gain.linearRampToValueAtTime(gain, t + 0.004);
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -2469,13 +2546,47 @@ import * as THREE from 'three';
 
         const panN = ctx.createStereoPanner();
         panN.pan.value = pan;
-        // Distance: speech is usually mid-to-close for that
-        // overheard-office feel, but never right in your ear.
         const distG = ctx.createGain();
         distG.gain.value = 0.35 + distance * 0.5;
 
-        src.connect(bp1).connect(mix);
-        src.connect(bp2).connect(mix);
+        // Noise path — carries aspiration/friction. Full gain for
+        // unvoiced sounds; reduced to a breathy whisper for voiced.
+        const breath = ctx.createGain();
+        breath.gain.value = voiced ? speaker.breathiness : 1.0;
+        src.connect(breath);
+        breath.connect(bp1);
+        breath.connect(bp2);
+        bp1.connect(mix);
+        bp2.connect(mix);
+
+        // Voiced path — sawtooth glottal source at f0, vibrato-modulated,
+        // routed through the same formants. Pitch follows the phrase
+        // intonation contour (ramp across the syllable).
+        if (voiced) {
+            const osc = ctx.createOscillator();
+            osc.type = 'sawtooth';
+            const f0a = speaker.pitch * pitchAt(t);
+            const f0b = speaker.pitch * pitchAt(t + dur);
+            osc.frequency.setValueAtTime(f0a, t);
+            osc.frequency.linearRampToValueAtTime(f0b, t + dur);
+
+            const lfo = ctx.createOscillator();
+            lfo.frequency.value = speaker.vibrato;
+            const lfoGain = ctx.createGain();
+            lfoGain.gain.value = f0a * speaker.vibratoDepth;
+            lfo.connect(lfoGain).connect(osc.frequency);
+
+            const voiceGain = ctx.createGain();
+            voiceGain.gain.value = shape === 'nasal' ? 0.55
+                                 : shape === 'liquid' ? 0.75 : 0.9;
+            osc.connect(voiceGain);
+            voiceGain.connect(bp1);
+            voiceGain.connect(bp2);
+
+            osc.start(t); osc.stop(t + dur + 0.03);
+            lfo.start(t); lfo.stop(t + dur + 0.03);
+        }
+
         mix.connect(env).connect(panN).connect(distG).connect(audio.master);
         src.start(t, offset);
         src.stop(t + dur + 0.02);
@@ -2485,15 +2596,29 @@ import * as THREE from 'three';
     function speakPhrase(symbols, distance) {
         const ctx = audio.ctx;
         const pan = rng(-0.85, 0.85);
-        let t = ctx.currentTime + 0.02;
-        // Tiny overall pitch/timing jitter per speaker
+        const speaker = makeSpeaker();
+
+        // Find the phrase's final punctuation — drives the pitch shape.
+        let ending = '.';
+        for (let i = symbols.length - 1; i >= 0; i--) {
+            const c = symbols[i];
+            if (c === '?' || c === '!' || c === '.' || c === ',') {
+                ending = c; break;
+            }
+        }
+
+        const phraseStart = ctx.currentTime + 0.02;
+        const phraseDur = estimatePhraseDur(symbols, speaker);
+        const pitchAt = makePitchContour(phraseStart, phraseDur, ending);
+
+        let t = phraseStart;
         for (const sym of symbols) {
             if (sym === '.') {
                 t += rng(0.06, 0.13);
             } else if (sym === ',') {
                 t += rng(0.22, 0.45);
             } else {
-                const dur = speakSymbol(sym, t, distance, pan);
+                const dur = speakSymbol(sym, t, distance, pan, speaker, pitchAt);
                 t += dur + rng(0.01, 0.04);
             }
         }
@@ -2548,7 +2673,7 @@ import * as THREE from 'three';
                 S: 'W.W,',
                 W: 'XX',
                 X: 'ON',        // syllable = onset + nucleus
-                O: pick(['C', 's', '']),
+                O: pick(['C', 'n', 'l', '']),
                 N: 'V',         // open, bright long vowel
             };
         } else if (variant === 'tired') {
@@ -2556,7 +2681,7 @@ import * as THREE from 'three';
                 S: 'W,W,',
                 W: 'X',
                 X: 'ON',
-                O: pick(['C', '']),
+                O: pick(['n', 'l', '']),
                 N: 'v',         // short, sparse
             };
         } else {  // formal
@@ -2564,9 +2689,9 @@ import * as THREE from 'three';
                 S: 'W.W.W,',
                 W: 'XX',
                 X: 'OND',
-                O: pick(['Cp', 'Cs', 'C']),
+                O: pick(['Cl', 'Cn', 'C']),
                 N: 'V',
-                D: pick(['C', 's', '']),
+                D: pick(['n', 's', '']),
             };
         }
         return new LSystem('S', rules, 4).expand();
@@ -2615,26 +2740,25 @@ import * as THREE from 'three';
             ? {
                 S: 'W.W.W,',
                 W: 'XX',
-                X: pick(['CV', 'VC', 'CVC', 'V']),
+                X: pick(['CV', 'VC', 'CVC', 'nV', 'Vn', 'lV', 'V']),
             }
             : {
                 S: 'W,W,',
                 W: 'XXX',
-                X: pick(['Vv', 'CVv', 'VCV']),
+                X: pick(['Vv', 'nVv', 'VnV', 'VlV']),
             };
         return new LSystem('S', rules, 4).expand();
     }
 
-    // question — ends on a short rise (the speakPhrase engine doesn't
-    // do pitch, so "rise" is encoded as a short bright-vowel tail).
+    // question — pitch contour rises to the final '?'. The '?' is kept
+    // as the last character so speakPhrase can detect the question and
+    // apply the rising intonation shape; speakSymbol ignores '?' so it
+    // doesn't generate its own sound.
     function gen_question() {
         const rules = {
-            S: 'W.W?',
+            S: 'W.Wv?',
             W: 'XX',
-            X: pick(['CV', 'CVC', 'Vs']),
-            // Token '?' is not in the terminal alphabet; remap it to
-            // a bright short vowel that speakPhrase will render.
-            '?': 'v',
+            X: pick(['CV', 'nV', 'Vn', 'CVC', 'lV']),
         };
         return new LSystem('S', rules, 4).expand();
     }
