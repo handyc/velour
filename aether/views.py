@@ -897,12 +897,26 @@ def generate_random_world(request):
         names = random.sample(_NPC_NAMES, min(n_npcs, len(_NPC_NAMES)))
         # Pull a random sample of SavedFace rows as avatar bindings.
         face_pool = list(SavedFace.objects.order_by('?').values_list('pk', flat=True)[:n_npcs])
+        # Pull a small pool of existing Grammar Engine languages — most
+        # NPCs share the world's "local" tongue, with occasional outliers
+        # so each random world feels like a place with its own voice but
+        # the odd visitor or diaspora speaker mixed in.
+        from grammar_engine.models import Language
+        lang_slugs = list(
+            Language.objects.order_by('?').values_list('slug', flat=True)[:4]
+        )
+        local_lang = lang_slugs[0] if lang_slugs else ''
         npc_ents = []
         for i, name in enumerate(names):
             x = random.uniform(-half*0.5, half*0.5)
             z = random.uniform(-half*0.5, half*0.5)
             ry = random.uniform(-180, 180)
             face_id = face_pool[i] if i < len(face_pool) else None
+            # 80% local, 20% an outlier from the rest of the pool.
+            if lang_slugs and random.random() < 0.2 and len(lang_slugs) > 1:
+                lang = random.choice(lang_slugs[1:])
+            else:
+                lang = local_lang
             e = Entity.objects.create(
                 world=world, name=name, primitive='box',
                 primitive_color='#000000',
@@ -911,6 +925,7 @@ def generate_random_world(request):
                 cast_shadow=False, receive_shadow=False,
                 behavior='scripted',
                 face_id=face_id,
+                language_slug=lang,
             )
             npc_ents.append(e)
 

@@ -1254,6 +1254,7 @@ if (!S.wn_init) {
     S.walkT = 0;
     S.replanTimer = 0;
     S.stuckTimer = 0;
+    S.stuckCount = 0;
     S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
 }
 
@@ -1273,6 +1274,41 @@ function planPath(S, from, to) {
     }
     // Fallback: straight-line single waypoint
     return [{x: to.x, z: to.z}];
+}
+
+// Pick a random detour point offset perpendicular to the bee-line
+// from `from` to `to`. Used when an NPC has gotten stuck enough times
+// that the planner keeps producing the same hopeless path — a random
+// "go around the long way" usually breaks the loop.
+function pickDetour(S, from, to, attempt) {
+    const dx = to.x - from.x, dz = to.z - from.z;
+    const d = Math.hypot(dx, dz) || 1;
+    // Unit perpendicular (rotated 90° in XZ plane).
+    const px = -dz / d, pz = dx / d;
+    // Mid-point shifted sideways by 1.5–4m, side chosen randomly.
+    const mag = 1.5 + Math.random() * 2.5;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const mx = from.x + dx * (0.3 + Math.random() * 0.4) + px * mag * side;
+    const mz = from.z + dz * (0.3 + Math.random() * 0.4) + pz * mag * side;
+    // Clamp to bounds.
+    const bnd = S.bounds;
+    return {
+        x: Math.max(bnd.minX, Math.min(bnd.maxX, mx)),
+        z: Math.max(bnd.minZ, Math.min(bnd.maxZ, mz)),
+    };
+}
+
+function planDetourPath(S, from, to) {
+    // Try a few random detours; keep the first that reaches the goal.
+    for (let attempt = 0; attempt < 4; attempt++) {
+        const via = pickDetour(S, from, to, attempt);
+        const a = planPath(S, from, via);
+        if (!a || !a.length) continue;
+        const b = planPath(S, via, to);
+        if (!b || !b.length) continue;
+        return a.concat(b);
+    }
+    return null;
 }
 
 if (!S.walking) {
@@ -1302,6 +1338,7 @@ if (!S.walking) {
         S.walkT = 0;
         S.replanTimer = 0;
         S.stuckTimer = 0;
+        S.stuckCount = 0;
         S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
     }
 } else {
@@ -1323,22 +1360,40 @@ if (!S.walking) {
         walkCycle(S, S.walkT, S.speed);
 
         // Stuck detection: if we've barely moved over the last second,
-        // assume an obstacle (NPC, dynamic object) is in the way and
-        // replan from our current position.
+        // assume an obstacle (NPC, dynamic object) is in the way.
+        // First stuck → replan straight to target.
+        // Second/third → random detour (perpendicular via-point) to
+        // break out of "keep bumping the same chair leg" loops.
+        // Fourth → give up on this target and pick a brand-new one.
         S.stuckTimer += ctx.deltaTime;
         if (S.stuckTimer > 1.0) {
             const moved = Math.hypot(
                 ctx.entity.position.x - S.lastPos.x,
                 ctx.entity.position.z - S.lastPos.z);
             if (moved < 0.15) {
-                const wp2 = planPath(S, ctx.entity.position, S.target);
+                S.stuckCount = (S.stuckCount || 0) + 1;
+                let wp2 = null;
+                if (S.stuckCount === 1) {
+                    wp2 = planPath(S, ctx.entity.position, S.target);
+                } else if (S.stuckCount <= 3) {
+                    wp2 = planDetourPath(
+                        S, ctx.entity.position, S.target);
+                    if (!wp2) {
+                        wp2 = planPath(S, ctx.entity.position, S.target);
+                    }
+                }
                 if (wp2 && wp2.length) {
                     S.waypoints = wp2;
                     S.wpIndex = 0;
                 } else {
-                    // Goal unreachable from here — abandon and idle
+                    // Repeated jam against the same obstacle — abandon
+                    // this target and let the idle phase pick a new one.
                     S.walking = false;
+                    S.stuckCount = 0;
                 }
+            } else {
+                // Made progress — reset the stuck counter.
+                S.stuckCount = 0;
             }
             S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
             S.stuckTimer = 0;
