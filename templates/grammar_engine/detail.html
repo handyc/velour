@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ language.name }} — Grammar Engine · Velour{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'grammar_engine/inspector.css' %}">
+<style>
+    :root {
+        --cyan: #59d0ff; --amber: #ffb84d; --green: #6ee07d;
+        --dim: #8b95a0; --edge: #223040; --edge-hi: #3a556e;
+    }
+    .ge-detail { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem;
+                 color: #c9d1d9; }
+    .ge-crumbs {
+        font-size: 0.78rem; color: #6e7681; margin-bottom: 0.4rem;
+    }
+    .ge-crumbs a { color: #58a6ff; text-decoration: none; }
+    .ge-crumbs a:hover { text-decoration: underline; }
+    .ge-detail h1 {
+        margin: 0 0 0.2rem 0; font-size: 1.4rem; letter-spacing: 0.05em;
+        color: var(--cyan);
+    }
+    .ge-detail h1 .seed {
+        font-family: 'SF Mono', 'Consolas', monospace;
+        color: #6e7681; font-size: 0.85rem; margin-left: 0.6rem;
+        letter-spacing: 0;
+    }
+    .ge-toolbar {
+        display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+        padding: 0.6rem 0.8rem; margin: 1.2rem 0;
+        background: #0f1620; border: 1px solid #30363d; border-radius: 4px;
+    }
+    .ge-toolbar .ge-btn {
+        background: transparent; color: var(--cyan);
+        border: 1px solid var(--edge-hi); padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.72rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    }
+    .ge-toolbar .ge-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-toolbar .ge-btn.primary { color: var(--amber); border-color: #50401a; }
+    .ge-toolbar .ge-btn.on { color: var(--green); border-color: #2a4a3a; }
+    .ge-toolbar .ge-btn.churn-on { color: #ff9ec3; border-color: #553040; }
+    .ge-toolbar .ge-status {
+        font-size: 0.72rem; color: #8b949e; margin-left: auto;
+    }
+    .ge-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.5rem; margin-bottom: 0.8rem;
+    }
+    .ge-summary .card {
+        border: 1px solid #30363d; border-radius: 3px;
+        padding: 0.4rem 0.6rem; background: #0b131c;
+    }
+    .ge-summary .card h4 {
+        margin: 0 0 0.15rem 0; font-size: 0.62rem;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--cyan); font-weight: normal;
+    }
+    .ge-summary .card .big {
+        font-size: 1.2rem; color: var(--amber);
+        font-family: 'SF Mono', 'Consolas', monospace;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ge-detail">
+    <div class="ge-crumbs">
+        <a href="{% url 'grammar_engine:list' %}">Grammar Engine</a> ·
+        {{ language.name }}
+    </div>
+    <h1>
+        {{ language.name }}
+        <span class="seed">seed={{ language.seed }} · slug={{ language.slug }}</span>
+    </h1>
+
+    <div class="ge-summary" id="ge-summary">
+        <div class="card"><h4>Particles</h4><div class="big" data-k="particles">–</div></div>
+        <div class="card"><h4>Subwords</h4><div class="big" data-k="subwords">–</div></div>
+        <div class="card"><h4>Words</h4><div class="big" data-k="words">–</div></div>
+        <div class="card"><h4>Grammars</h4><div class="big" data-k="grammars">–</div></div>
+        <div class="card"><h4>Speak events</h4><div class="big" data-k="events">–</div></div>
+    </div>
+
+    <div class="ge-toolbar">
+        <button class="ge-btn" id="ge-audio">🔈 audio off</button>
+        <button class="ge-btn primary" id="ge-inspect">⚙ inspect</button>
+        <button class="ge-btn" id="ge-speak">▶ speak sample</button>
+        <button class="ge-btn" id="ge-churn">↻ churn off</button>
+        <button class="ge-btn" id="ge-save">💾 save spec</button>
+        <span class="ge-status" id="ge-status">ready</span>
+    </div>
+
+    {% include "grammar_engine/_inspector.html" %}
+</div>
+
+<script id="ge-spec" type="application/json">{{ spec_json|safe }}</script>
+
+<script type="module">
+import { GrammarEngine, LSystem } from "{% static 'grammar_engine/engine.mjs' %}";
+import { Inspector } from "{% static 'grammar_engine/inspector.mjs' %}";
+
+const LANG = {
+    id: {{ language.id }},
+    slug: "{{ language.slug }}",
+    name: "{{ language.name|escapejs }}",
+    seed: {{ language.seed }},
+    regenerateUrl: "{% url 'grammar_engine:regenerate' slug=language.slug %}",
+    csrf: "{{ csrf_token }}",
+};
+const spec = JSON.parse(document.getElementById('ge-spec').textContent || '{}');
+
+const engine = new GrammarEngine({
+    name: LANG.name,
+    seed: LANG.seed,
+    spec: (spec && Object.keys(spec).length) ? spec : null,
+});
+
+// Audio is lazy — only hooked up after the user clicks "audio on".
+let audioCtx = null;
+let master = null;
+const audioBtn = document.getElementById('ge-audio');
+audioBtn.addEventListener('click', () => {
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        master = audioCtx.createGain();
+        master.gain.value = 0.7;
+        master.connect(audioCtx.destination);
+        engine.attachAudio(audioCtx, master);
+        audioBtn.textContent = '🔈 audio on';
+        audioBtn.classList.add('on');
+    } else {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+            audioBtn.textContent = '🔈 audio on';
+            audioBtn.classList.add('on');
+        } else {
+            audioCtx.suspend();
+            audioBtn.textContent = '🔈 audio off';
+            audioBtn.classList.remove('on');
+        }
+    }
+});
+
+// Inspector modal.
+const inspector = new Inspector({
+    root: document.getElementById('gi-backdrop'),
+    engine, LSystem,
+});
+inspector.wireOpener(document.getElementById('ge-inspect'));
+
+// "Speak sample" — resumes audio and speaks one vocab phrase.
+document.getElementById('ge-speak').addEventListener('click', async () => {
+    if (!audioCtx) audioBtn.click();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const meta = engine.generateVocabPhraseMeta();
+    if (meta.kind === 'vocab' && meta.units) {
+        engine.speakUnits(meta.units, 0.5);
+    } else {
+        engine.speakPhrase(meta.symbols, 0.5);
+    }
+    engine.logUtterance({
+        ts: Date.now(), kind: meta.kind, variant: meta.variant,
+        symbols: meta.symbols, words: meta.words, distance: 0.5,
+    });
+});
+
+// Churn toggle — lets the language mutate itself on the usual cadences.
+const churnBtn = document.getElementById('ge-churn');
+let churnOn = false;
+churnBtn.addEventListener('click', () => {
+    churnOn = !churnOn;
+    if (churnOn) {
+        engine.startChurn();
+        churnBtn.textContent = '↻ churn on';
+        churnBtn.classList.add('churn-on');
+    } else {
+        engine.stopChurn();
+        churnBtn.textContent = '↻ churn off';
+        churnBtn.classList.remove('churn-on');
+    }
+});
+
+// Save spec back to the server — whatever you've edited in the Inspector
+// becomes the persistent language.
+const statusEl = document.getElementById('ge-status');
+document.getElementById('ge-save').addEventListener('click', async () => {
+    statusEl.textContent = 'saving…';
+    try {
+        const body = JSON.stringify(engine.serialize());
+        const res = await fetch(LANG.regenerateUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': LANG.csrf,
+            },
+            body,
+        });
+        statusEl.textContent = res.ok ? 'saved' : ('save failed: ' + res.status);
+    } catch (e) {
+        statusEl.textContent = 'save error: ' + e.message;
+    }
+});
+
+// Summary tickers — refresh the five cards every second.
+function refreshSummary() {
+    const s = engine.stats();
+    const set = (k, v) => {
+        const el = document.querySelector(`#ge-summary [data-k="${k}"]`);
+        if (el) el.textContent = v;
+    };
+    set('particles', s.particles);
+    set('subwords',  s.subwords);
+    set('words',     s.words);
+    set('grammars',  s.grammars);
+    set('events',    s.totalSpeakEvents);
+}
+refreshSummary();
+setInterval(refreshSummary, 1000);
+
+// Expose for quick console poking.
+window.__engine = engine;
+window.__inspector = inspector;
+</script>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Grammar Engine — Languages · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ge-wrap { max-width: 1000px; margin: 2rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ge-wrap h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ge-wrap .ge-lede {
+        color: #8b949e; font-size: 0.85rem; max-width: 62ch;
+        margin-bottom: 1.6rem;
+    }
+    .ge-newbar {
+        display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+        padding: 0.6rem 0.8rem; margin-bottom: 1.5rem;
+        background: #0f1620; border: 1px solid #30363d; border-radius: 4px;
+    }
+    .ge-newbar label { font-size: 0.72rem; letter-spacing: 0.06em;
+                       color: #8b949e; text-transform: uppercase; }
+    .ge-newbar input[type=text], .ge-newbar input[type=number] {
+        background: #060a12; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.25rem 0.45rem; font-family: inherit; font-size: 0.8rem;
+    }
+    .ge-newbar input[type=text] { min-width: 14em; }
+    .ge-newbar input[type=number] { width: 10em; }
+    .ge-btn {
+        background: transparent; color: #58a6ff;
+        border: 1px solid #30363d; padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.75rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    }
+    .ge-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-btn.danger { color: #f85149; border-color: #703030; }
+    .ge-btn.primary { color: #ffb84d; border-color: #50401a; }
+    .ge-list {
+        width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    }
+    .ge-list th, .ge-list td {
+        padding: 0.45rem 0.65rem;
+        border-bottom: 1px solid #1a2230; text-align: left;
+    }
+    .ge-list th {
+        color: #8b949e; text-transform: uppercase;
+        font-size: 0.68rem; letter-spacing: 0.06em;
+        border-bottom: 1px solid #30363d;
+    }
+    .ge-list td.meta { color: #6e7681; font-size: 0.75rem; }
+    .ge-list td.name a {
+        color: #58a6ff; text-decoration: none; font-weight: 500;
+    }
+    .ge-list td.name a:hover { color: #e6fbff; text-decoration: underline; }
+    .ge-empty {
+        padding: 2rem; text-align: center; color: #6e7681;
+        border: 1px dashed #30363d; border-radius: 4px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ge-wrap">
+    <h1>Grammar Engine</h1>
+    <p class="ge-lede">
+        Languages are deterministic from a seed — same seed, same particles,
+        subwords, words, and L-system grammars. Bridge, Aether worlds and
+        planets draw from this shared library.
+    </p>
+
+    <form class="ge-newbar" method="post" action="{% url 'grammar_engine:new' %}">
+        {% csrf_token %}
+        <label>New language</label>
+        <input type="text" name="name" placeholder="name (optional)" maxlength="120">
+        <input type="number" name="seed" placeholder="seed (optional)">
+        <button type="submit" class="ge-btn primary">+ Create</button>
+        <span style="color:#6e7681;font-size:0.72rem;margin-left:auto;">
+            {{ total }} language{{ total|pluralize }}
+        </span>
+    </form>
+
+    {% if languages %}
+    <table class="ge-list">
+        <thead><tr>
+            <th>Name</th><th>Seed</th><th>Modified</th><th>Notes</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for lang in languages %}
+        <tr>
+            <td class="name">
+                <a href="{% url 'grammar_engine:detail' slug=lang.slug %}">
+                    {{ lang.name }}
+                </a>
+            </td>
+            <td class="meta"><code>{{ lang.seed }}</code></td>
+            <td class="meta">{{ lang.modified|date:"Y-m-d H:i" }}</td>
+            <td class="meta">{{ lang.notes|truncatechars:50 }}</td>
+            <td style="text-align:right;">
+                <form method="post"
+                      action="{% url 'grammar_engine:delete' slug=lang.slug %}"
+                      onsubmit="return confirm('Delete {{ lang.name|escapejs }}?');"
+                      style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="ge-btn danger">✕</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="ge-empty">
+        No languages yet. Create one above — it'll generate from its seed
+        on first open.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     'zoetrope',
     'reckoner',
     'screen_gubi',
+    'grammar_engine',
 ]
 
 MIDDLEWARE = [

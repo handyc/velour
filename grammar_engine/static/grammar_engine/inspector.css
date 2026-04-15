@@ -1,0 +1,314 @@
+/* Grammar Engine — Language Inspector styles.
+ * Standalone: uses a minimal set of CSS variables with fallbacks so the
+ * inspector renders the same in Bridge, in Aether, or on a bare page.
+ */
+
+.gi-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 8, 16, 0.82);
+    backdrop-filter: blur(3px);
+    display: none;
+    z-index: 1000;
+    --gi-cyan: var(--cyan, #59d0ff);
+    --gi-amber: var(--amber, #ffb84d);
+    --gi-green: var(--green, #6ee07d);
+    --gi-dim: var(--dim, #8b95a0);
+    --gi-edge: var(--edge, #223040);
+    --gi-edge-hi: var(--edge-hi, #3a556e);
+}
+.gi-backdrop.open { display: flex; align-items: center; justify-content: center; }
+.gi-modal {
+    width: min(1100px, 96vw);
+    height: min(800px, 92vh);
+    background: #0a1018;
+    border: 1px solid var(--gi-edge-hi);
+    border-radius: 4px;
+    box-shadow: 0 0 30px rgba(89,208,255,0.15);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+    font-family: inherit;
+    color: #c8d4e0;
+}
+.gi-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--gi-edge);
+    background: linear-gradient(180deg, #0f1a28 0%, #0a1018 100%);
+}
+.gi-header h2 {
+    margin: 0;
+    font-size: 0.85rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--gi-cyan);
+}
+.gi-header .gi-close {
+    background: transparent;
+    border: 1px solid var(--gi-edge);
+    color: var(--gi-dim);
+    padding: 0.15rem 0.5rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+}
+.gi-header .gi-close:hover { color: #ff8080; border-color: #703030; }
+
+.gi-tabs {
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.5rem 1rem 0;
+    border-bottom: 1px solid var(--gi-edge);
+}
+.gi-tab {
+    background: transparent;
+    border: 1px solid var(--gi-edge);
+    border-bottom: none;
+    color: var(--gi-dim);
+    padding: 0.25rem 0.7rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.gi-tab:hover { color: var(--gi-cyan); }
+.gi-tab.active {
+    color: var(--gi-amber);
+    border-color: var(--gi-edge-hi);
+    background: #13202f;
+}
+
+.gi-body {
+    grid-row: 2;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+}
+.gi-pane {
+    padding: 0.8rem 1rem;
+    overflow: auto;
+    font-size: 0.78rem;
+    display: none;
+}
+.gi-pane.active { display: block; }
+
+/* Grammar tab */
+.gi-grammar {
+    margin-bottom: 1.2rem;
+    border: 1px solid var(--gi-edge);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.gi-grammar-head {
+    padding: 0.4rem 0.8rem;
+    background: #0e1824;
+    border-bottom: 1px solid var(--gi-edge);
+}
+.gi-grammar-head .gname {
+    color: var(--gi-cyan);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.78rem;
+    margin-right: 0.5rem;
+}
+.gi-grammar-head .gnote {
+    color: #8b95a0;
+    font-size: 0.72rem;
+}
+.gi-variant {
+    padding: 0.5rem 0.8rem;
+    border-top: 1px solid var(--gi-edge);
+}
+.gi-variant:first-of-type { border-top: none; }
+.gi-variant-name {
+    color: var(--gi-amber);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.7rem;
+    margin-bottom: 0.3rem;
+}
+.gi-rules-editor {
+    width: 100%;
+    background: #050a10;
+    color: #c8d4e0;
+    border: 1px solid var(--gi-edge);
+    padding: 0.4rem 0.5rem;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.74rem;
+    resize: vertical;
+    min-height: 5em;
+}
+.gi-rules-editor.bad { border-color: #703030; }
+.gi-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+    align-items: center;
+}
+.gi-btn {
+    background: transparent;
+    color: var(--gi-cyan);
+    border: 1px solid var(--gi-edge-hi);
+    padding: 0.2rem 0.6rem;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.gi-btn:hover { color: #e6fbff; background: #0f2430; }
+.gi-btn.danger { color: #ff8080; border-color: #703030; }
+.gi-btn.danger:hover { background: #1a0808; }
+.gi-btn.primary { color: var(--gi-amber); border-color: #50401a; }
+.gi-btn.primary:hover { background: #1a1405; }
+.gi-msg { font-size: 0.7rem; color: #8b95a0; }
+.gi-msg.ok { color: var(--gi-green); }
+.gi-msg.bad { color: #ff8080; }
+
+/* Subwords + Words tabs */
+.gi-toolbar {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.gi-toolbar input[type=text],
+.gi-toolbar select {
+    background: #050a10;
+    color: #c8d4e0;
+    border: 1px solid var(--gi-edge);
+    padding: 0.2rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.75rem;
+    min-width: 8em;
+}
+.gi-toolbar .gi-count {
+    font-size: 0.7rem;
+    color: #8b95a0;
+    margin-left: auto;
+}
+.gi-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.72rem;
+    font-family: 'SF Mono', 'Consolas', monospace;
+}
+.gi-table th, .gi-table td {
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid #13202f;
+    text-align: left;
+    vertical-align: top;
+}
+.gi-table th {
+    color: var(--gi-dim);
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--gi-edge);
+    position: sticky;
+    top: 0;
+    background: #0a1018;
+}
+.gi-table td.pat { color: var(--gi-amber); }
+.gi-table td.use { color: var(--gi-green); text-align: right; }
+.gi-table td.id  { color: #566270; text-align: right; width: 4em; }
+.gi-table input[type=text] {
+    background: #050a10;
+    color: var(--gi-amber);
+    border: 1px solid var(--gi-edge);
+    padding: 0.1rem 0.3rem;
+    font-family: inherit;
+    font-size: 0.72rem;
+    width: 12em;
+}
+.gi-table .row-del {
+    background: transparent;
+    color: #7a3030;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+}
+.gi-table .row-del:hover { color: #ff8080; border-color: #703030; }
+
+/* Stats tab */
+.gi-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.8rem;
+}
+.gi-stat-card {
+    border: 1px solid var(--gi-edge);
+    border-radius: 3px;
+    padding: 0.5rem 0.7rem;
+    background: #0b131c;
+}
+.gi-stat-card h4 {
+    margin: 0 0 0.3rem 0;
+    color: var(--gi-cyan);
+    font-size: 0.75rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.gi-stat-card .big {
+    font-size: 1.5rem;
+    color: var(--gi-amber);
+    font-family: 'SF Mono', 'Consolas', monospace;
+}
+.gi-stat-card ol {
+    margin: 0.3rem 0 0 1.2rem;
+    padding: 0;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+}
+.gi-stat-card ol li {
+    color: #c8d4e0;
+    margin-bottom: 0.1rem;
+}
+
+.gi-log-wrap {
+    margin-top: 1rem;
+    border: 1px solid var(--gi-edge);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.gi-log-head {
+    padding: 0.35rem 0.7rem;
+    background: #0e1824;
+    border-bottom: 1px solid var(--gi-edge);
+    color: var(--gi-cyan);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.gi-log-head .gi-log-actions {
+    display: flex;
+    gap: 0.35rem;
+}
+.gi-log-box {
+    height: 240px;
+    overflow-y: auto;
+    padding: 0.3rem 0.5rem;
+    background: #020608;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+    line-height: 1.35;
+}
+.gi-log-row {
+    white-space: pre;
+    padding: 0.05rem 0;
+    border-bottom: 1px dotted #0f1824;
+}
+.gi-log-row .t   { color: #566270; }
+.gi-log-row .k   { color: var(--gi-amber); }
+.gi-log-row .k.vocab { color: var(--gi-cyan); }
+.gi-log-row .sym { color: #c8d4e0; }
+.gi-log-row .brk { color: #7a8a95; }
+.gi-log-row .brk em { color: var(--gi-green); font-style: normal; }

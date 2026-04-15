@@ -1,0 +1,31 @@
+{% comment %}
+Grammar Engine — Language Inspector modal partial.
+Include this wherever you need the inspector UI:
+    {% include "grammar_engine/_inspector.html" %}
+Pair it with inspector.css + inspector.mjs, then:
+    new Inspector({ root: document.getElementById('gi-backdrop'),
+                    engine }).wireOpener(document.getElementById('my-btn'));
+The element id is fixed so multiple opener buttons can share one modal.
+{% endcomment %}
+<div class="gi-backdrop" id="gi-backdrop">
+  <div class="gi-modal">
+    <div class="gi-header">
+      <h2>Grammar Engine — Language Inspector</h2>
+      <button class="gi-close" id="gi-close" type="button">✕ close</button>
+    </div>
+    <div class="gi-body">
+      <div class="gi-tabs">
+        <button class="gi-tab active" data-tab="grammar">L-System Rules</button>
+        <button class="gi-tab"        data-tab="particles">Phonic Particles</button>
+        <button class="gi-tab"        data-tab="subwords">Subwords</button>
+        <button class="gi-tab"        data-tab="words">Words</button>
+        <button class="gi-tab"        data-tab="stats">Live Stats</button>
+      </div>
+      <div class="gi-pane active" id="gi-pane-grammar"></div>
+      <div class="gi-pane" id="gi-pane-particles"></div>
+      <div class="gi-pane" id="gi-pane-subwords"></div>
+      <div class="gi-pane" id="gi-pane-words"></div>
+      <div class="gi-pane" id="gi-pane-stats"></div>
+    </div>
+  </div>
+</div>
