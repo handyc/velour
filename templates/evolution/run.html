@@ -37,7 +37,12 @@
         target ≥ {{ run.target_score|floatformat:2 }} ·
         max gen {{ run.generations_target }}
         {% if run.goal_species %}
-        · goal:&nbsp;<code>{{ run.goal_species.name }}</code>
+        · goal species:&nbsp;<code>{{ run.goal_species.name }}</code>
+        {% endif %}
+        {% if run.goal_language %}
+        · goal language:&nbsp;<a href="{% url 'grammar_engine:detail' slug=run.goal_language.slug %}"
+                                 style="color:#c9d1d9;"><code>{{ run.goal_language.name }}</code></a>
+          {% if run.goal_variant %}<code>/{{ run.goal_variant }}</code>{% endif %}
         {% endif %}
     </div>
 

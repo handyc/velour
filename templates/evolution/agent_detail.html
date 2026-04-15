@@ -92,6 +92,12 @@
                 {% csrf_token %}
                 <button type="submit" class="ev-btn primary">→ Export to L-System</button>
             </form>
+            <form method="post"
+                  action="{% url 'evolution:agent_export_grammar' slug=agent.slug %}"
+                  onsubmit="return confirm('Export {{ agent.name|escapejs }} to Grammar Engine as a new language?');">
+                {% csrf_token %}
+                <button type="submit" class="ev-btn primary">→ Export to Grammar Engine</button>
+            </form>
             {% endif %}
             <a href="{% url 'evolution:list' %}#seed={{ agent.id }}" class="ev-btn">Seed new run</a>
             <a href="{% url 'evolution:agent_json' slug=agent.slug %}" class="ev-btn">JSON</a>

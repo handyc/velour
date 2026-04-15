@@ -42,6 +42,17 @@ class EvolutionRun(models.Model):
         on_delete=models.SET_NULL, related_name='evolution_runs',
         help_text='If set, goal_string was expanded from this species.'
     )
+    goal_language = models.ForeignKey(
+        'grammar_engine.Language', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='evolution_runs',
+        help_text='If set, goal_string was expanded from a variant of '
+                  'this Grammar Engine language.'
+    )
+    goal_variant = models.CharField(
+        max_length=160, blank=True,
+        help_text='"<category>/<variant>" — identifies which variant of '
+                  'goal_language was expanded.'
+    )
     population_size = models.PositiveSmallIntegerField(default=24)
     generations_target = models.PositiveIntegerField(default=200)
     target_score = models.FloatField(

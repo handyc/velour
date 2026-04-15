@@ -136,6 +136,21 @@
             {% endfor %}
         </select>
 
+        <label>Goal language</label>
+        <input type="text" name="goal_language" list="ev-lang-list"
+               placeholder="slug or name (overrides species)"
+               autocomplete="off">
+        <datalist id="ev-lang-list">
+            {% for l in popular_languages %}
+            <option value="{{ l.slug }}">{{ l.name }}</option>
+            {% endfor %}
+        </datalist>
+
+        <label>Goal variant</label>
+        <input type="text" name="goal_variant"
+               placeholder="category/variant (blank = first)"
+               autocomplete="off">
+
         <label>Seed agent</label>
         <select name="seed_agent">
             <option value="">— random founders —</option>

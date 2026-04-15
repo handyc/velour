@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Grammar Engine — Housekeeping · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ge-wrap { max-width: 1000px; margin: 2rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ge-wrap h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ge-wrap .ge-lede {
+        color: #8b949e; font-size: 0.85rem; max-width: 64ch;
+        margin-bottom: 1.2rem;
+    }
+    .ge-toolbar { display: flex; gap: 0.6rem; align-items: center;
+                  margin-bottom: 0.8rem; }
+    .ge-toolbar a { color: #8b949e; font-size: 0.75rem; text-decoration: none;
+                    border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+                    border-radius: 3px; text-transform: uppercase;
+                    letter-spacing: 0.05em; }
+    .ge-toolbar a:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-filter {
+        display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+        padding: 0.6rem 0.8rem; margin-bottom: 1rem;
+        background: #0f1620; border: 1px solid #30363d; border-radius: 4px;
+    }
+    .ge-filter label { font-size: 0.7rem; letter-spacing: 0.06em;
+                       color: #8b949e; text-transform: uppercase; }
+    .ge-filter input[type=number] {
+        background: #060a12; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.25rem 0.45rem; font-family: inherit; font-size: 0.8rem;
+        width: 6em;
+    }
+    .ge-summary {
+        color: #ffb84d; font-size: 0.82rem; margin-bottom: 1rem;
+        padding: 0.5rem 0.8rem;
+        background: #160f0a; border: 1px solid #50401a; border-radius: 4px;
+    }
+    .ge-btn {
+        background: transparent; color: #58a6ff;
+        border: 1px solid #30363d; padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.75rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    }
+    .ge-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-btn.danger { color: #f85149; border-color: #703030; }
+    .ge-list { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .ge-list th, .ge-list td {
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid #1a2230; text-align: left;
+    }
+    .ge-list th {
+        color: #8b949e; text-transform: uppercase;
+        font-size: 0.68rem; letter-spacing: 0.06em;
+        border-bottom: 1px solid #30363d;
+    }
+    .ge-list td.meta { color: #6e7681; font-size: 0.75rem; }
+    .ge-list td.name a { color: #58a6ff; text-decoration: none; font-weight: 500; }
+    .ge-list td.name a:hover { color: #e6fbff; text-decoration: underline; }
+    .ge-empty {
+        padding: 2rem; text-align: center; color: #6e7681;
+        border: 1px dashed #30363d; border-radius: 4px;
+    }
+    .ge-pager { margin-top: 1rem; display: flex; gap: 0.6rem;
+                align-items: center; font-size: 0.78rem; }
+    .ge-pager a {
+        color: #58a6ff; text-decoration: none;
+        border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+        border-radius: 3px;
+    }
+    .ge-pager a:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-pager .ge-pager-info { color: #6e7681; margin: 0 auto; }
+    .ge-sweep-bar {
+        position: sticky; bottom: 0; padding: 0.8rem 1rem;
+        background: #0b1018; border-top: 1px solid #50401a;
+        display: flex; gap: 0.6rem; align-items: center;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ge-wrap">
+    <h1>Grammar Engine — Housekeeping</h1>
+    <p class="ge-lede">
+        Languages that have never been fetched and are older than the cutoff
+        are candidates for sweep. Usage is counted when a consumer (Bridge,
+        Aether, Evolution) fetches the language spec.
+    </p>
+
+    <div class="ge-toolbar">
+        <a href="{% url 'grammar_engine:list' %}">← all languages</a>
+    </div>
+
+    <form class="ge-filter" method="get">
+        <label>Min uses</label>
+        <input type="number" name="uses" value="{{ min_uses }}" min="0" max="1000">
+        <label>Min age (days)</label>
+        <input type="number" name="age" value="{{ min_age_days }}" min="0" max="3650">
+        <button type="submit" class="ge-btn">Recalculate</button>
+    </form>
+
+    <div class="ge-summary">
+        {{ total_candidates }} candidate{{ total_candidates|pluralize }} of
+        {{ total_languages }} total — less than {{ min_uses }} use{{ min_uses|pluralize }},
+        older than {{ min_age_days }} day{{ min_age_days|pluralize }}.
+    </div>
+
+    {% if candidates %}
+    <form method="post" id="ge-sweep-form">
+        {% csrf_token %}
+        <table class="ge-list">
+            <thead><tr>
+                <th style="width:2em;">
+                    <input type="checkbox" id="ge-check-all">
+                </th>
+                <th>Name</th><th>Uses</th><th>Last used</th><th>Created</th>
+            </tr></thead>
+            <tbody>
+            {% for l in candidates %}
+            <tr>
+                <td><input type="checkbox" name="slugs" value="{{ l.slug }}"></td>
+                <td class="name">
+                    <a href="{% url 'grammar_engine:detail' slug=l.slug %}">{{ l.name }}</a>
+                </td>
+                <td class="meta">{{ l.use_count }}</td>
+                <td class="meta">{{ l.last_used|date:"Y-m-d H:i"|default:"—" }}</td>
+                <td class="meta">{{ l.created|date:"Y-m-d" }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="ge-sweep-bar">
+            <span style="color:#8b949e;font-size:0.78rem;">
+                <span id="ge-sel-count">0</span> selected
+            </span>
+            <span style="margin-left:auto;"></span>
+            <button type="button" class="ge-btn" id="ge-select-all">Select page</button>
+            <button type="submit" class="ge-btn danger"
+                    onclick="return confirm('Delete all selected languages? This cannot be undone.');">
+                ✕ Sweep selected
+            </button>
+        </div>
+    </form>
+    {% else %}
+    <div class="ge-empty">
+        Nothing to sweep with these thresholds.
+    </div>
+    {% endif %}
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="ge-pager">
+        {% if page.has_previous %}
+        <a href="?uses={{ min_uses }}&age={{ min_age_days }}&page=1">« first</a>
+        <a href="?uses={{ min_uses }}&age={{ min_age_days }}&page={{ page.previous_page_number }}">‹ prev</a>
+        {% endif %}
+        <span class="ge-pager-info">
+            page {{ page.number }} of {{ page.paginator.num_pages }}
+            ({{ page.paginator.count }} candidates)
+        </span>
+        {% if page.has_next %}
+        <a href="?uses={{ min_uses }}&age={{ min_age_days }}&page={{ page.next_page_number }}">next ›</a>
+        <a href="?uses={{ min_uses }}&age={{ min_age_days }}&page={{ page.paginator.num_pages }}">last »</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+(function() {
+    const form = document.getElementById('ge-sweep-form');
+    if (!form) return;
+    const countEl = document.getElementById('ge-sel-count');
+    const allBox = document.getElementById('ge-check-all');
+    const btnAll = document.getElementById('ge-select-all');
+
+    function refreshCount() {
+        const n = form.querySelectorAll('input[name=slugs]:checked').length;
+        countEl.textContent = n;
+    }
+    form.addEventListener('change', refreshCount);
+    allBox.addEventListener('change', () => {
+        form.querySelectorAll('input[name=slugs]').forEach(cb => {
+            cb.checked = allBox.checked;
+        });
+        refreshCount();
+    });
+    btnAll.addEventListener('click', () => {
+        const boxes = form.querySelectorAll('input[name=slugs]');
+        const allChecked = Array.from(boxes).every(cb => cb.checked);
+        boxes.forEach(cb => { cb.checked = !allChecked; });
+        refreshCount();
+    });
+})();
+</script>
+{% endblock %}

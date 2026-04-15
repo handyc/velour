@@ -95,7 +95,12 @@ def language_delete(request, slug):
 @login_required
 def language_spec(request, slug):
     """JSON endpoint — Bridge and Aether fetch the spec for playback."""
+    from django.utils import timezone
+    from django.db.models import F
     language = get_object_or_404(Language, slug=slug)
+    Language.objects.filter(pk=language.pk).update(
+        use_count=F('use_count') + 1, last_used=timezone.now(),
+    )
     return HttpResponse(
         json.dumps({
             'id': language.id,
@@ -106,3 +111,48 @@ def language_spec(request, slug):
         }),
         content_type='application/json',
     )
+
+
+@login_required
+def sweep_view(request):
+    """Housekeeping: show unused / rarely-used languages and let the
+    user bulk-delete them. Candidates are languages with use_count == 0
+    older than `min_age_days` (default 7) or with use_count below
+    `min_uses` (default 1). POST with `slugs` list triggers deletion.
+    """
+    from django.utils import timezone
+    from datetime import timedelta
+
+    try:
+        min_age_days = max(0, int(request.GET.get('age') or 7))
+    except (TypeError, ValueError):
+        min_age_days = 7
+    try:
+        min_uses = max(0, int(request.GET.get('uses') or 1))
+    except (TypeError, ValueError):
+        min_uses = 1
+
+    cutoff = timezone.now() - timedelta(days=min_age_days)
+    candidates = (Language.objects
+                  .filter(use_count__lt=min_uses, created__lt=cutoff)
+                  .order_by('use_count', 'created'))
+
+    if request.method == 'POST':
+        slugs = request.POST.getlist('slugs')
+        deleted = 0
+        if slugs:
+            deleted = candidates.filter(slug__in=slugs).count()
+            candidates.filter(slug__in=slugs).delete()
+        messages.info(request, f'Swept {deleted} language{"s" if deleted != 1 else ""}.')
+        return redirect('grammar_engine:sweep')
+
+    paginator = Paginator(candidates, 100)
+    page = paginator.get_page(request.GET.get('page'))
+    return render(request, 'grammar_engine/sweep.html', {
+        'page': page,
+        'candidates': page.object_list,
+        'total_candidates': candidates.count(),
+        'total_languages': Language.objects.count(),
+        'min_age_days': min_age_days,
+        'min_uses': min_uses,
+    })

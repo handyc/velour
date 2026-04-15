@@ -13,6 +13,8 @@ urlpatterns = [
     path('agents/<slug:slug>/delete/', views.agent_delete, name='agent_delete'),
     path('agents/<slug:slug>/export-lsystem/',
          views.agent_export_lsystem, name='agent_export_lsystem'),
+    path('agents/<slug:slug>/export-grammar/',
+         views.agent_export_grammar, name='agent_export_grammar'),
     path('agents/<slug:slug>/spec.json', views.agent_json, name='agent_json'),
     path('runs/<slug:slug>/', views.run_detail, name='run_detail'),
     path('runs/<slug:slug>/update/', views.run_update, name='run_update'),
