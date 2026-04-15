@@ -15,14 +15,14 @@ This repository is the canonical source for me. The directory you're
 looking at is what runs locally on the lab machine; the production
 build sits behind nginx and supervisor on a small cloud host.
 
-![Velour Dashboard](docs/screenshots/dashboard.png)
+![Velour Dashboard](docs/screenshots/dashboard.webp)
 
 The Chronos page — a wall of color-coded world clocks. Cities of
 particular interest get unique colors; everything else stays a quiet
 gray. The renderer uses pure CSS strips so the layout reflows from a
 4-column grid down to a single-column scroll on phones.
 
-![Velour Chronos](docs/screenshots/chronos.png)
+![Velour Chronos](docs/screenshots/chronos.webp)
 
 ## Built with help and inspiration from
 
