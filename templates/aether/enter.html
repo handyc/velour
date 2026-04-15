@@ -527,8 +527,11 @@ function initRain(startOn) {
 
 function setRain(on) {
     if (!rainPoints) return;
+    const wasActive = rainActive;
     rainActive = !!on;
     rainPoints.visible = rainActive;
+    if (rainActive && !wasActive) eventBus.emit('rain-start');
+    else if (!rainActive && wasActive) eventBus.emit('rain-stop');
 }
 
 function scheduleRainCycle() {
@@ -833,6 +836,291 @@ function flashNpcHpBar(n) {
 const LABEL_RANGE = 10.0;            // NPC labels appear within this distance
 const LABEL_LIFETIME = 5.0;          // sec the label stays after triggering
 const LABEL_FADE = 0.5;              // sec of fade tail at the end
+
+// ---- NPC routines / schedules ----
+// A routine is a sequence of activities (goto an anchor, idle, wander
+// near home). NPCs pick routines from a daily schedule that cycles
+// through phases; events (e.g. rain) can push a temporary routine that
+// preempts the schedule until it completes. Combat intents from
+// tickNpcAi take precedence over everything here.
+const ROUTINE_DEFS = {
+    'waiter-rounds': {
+        loop: true,
+        activities: [
+            {kind: 'goto-anchor', anchor: 'counter',      tolerance: 1.4, timeout: 25},
+            {kind: 'idle',        durMin: 5, durMax: 9},
+            {kind: 'goto-anchor', anchor: 'random-table', tolerance: 1.4, timeout: 25},
+            {kind: 'idle',        durMin: 4, durMax: 7},
+            {kind: 'goto-anchor', anchor: 'random-table', tolerance: 1.4, timeout: 25},
+            {kind: 'idle',        durMin: 3, durMax: 6},
+        ],
+    },
+    'patron-leisure': {
+        loop: true,
+        activities: [
+            {kind: 'idle',        durMin: 18, durMax: 45},
+            {kind: 'goto-anchor', anchor: 'random-table', tolerance: 1.1, timeout: 25},
+            {kind: 'idle',        durMin: 12, durMax: 30},
+        ],
+    },
+    'evening-stroll': {
+        loop: true,
+        activities: [
+            {kind: 'wander-near', radius: 7, durMin: 8, durMax: 14},
+            {kind: 'idle',        durMin: 3, durMax: 7},
+            {kind: 'wander-near', radius: 7, durMin: 8, durMax: 14},
+            {kind: 'idle',        durMin: 5, durMax: 10},
+        ],
+    },
+    'go-home': {
+        loop: false,
+        activities: [
+            {kind: 'goto-anchor', anchor: 'home', tolerance: 1.0, timeout: 30},
+            {kind: 'idle',        durMin: 25, durMax: 60},
+        ],
+    },
+    'shelter-from-rain': {
+        loop: false,
+        activities: [
+            {kind: 'goto-anchor', anchor: 'nearest-shelter', tolerance: 1.4, timeout: 30},
+            {kind: 'idle',        durMin: 25, durMax: 50},
+        ],
+    },
+};
+
+function getWanderState(n) {
+    const reg = entityRegistry.get(n.mesh.userData.entityId);
+    if (!reg) return null;
+    for (const inst of reg.scripts) {
+        if (inst.ctx && inst.ctx.state && inst.ctx.state.wn_init) {
+            return inst.ctx.state;
+        }
+    }
+    return null;
+}
+
+function buildNpcAnchors(npc) {
+    const home = {x: npc.mesh.position.x, z: npc.mesh.position.z};
+    const tables = [];
+    let counter = null, counterD = Infinity;
+    let shelter = null, shelterD = Infinity;
+    for (const [id, reg] of entityRegistry) {
+        if (!reg.obj3d || reg.obj3d === npc.mesh) continue;
+        const nm = (reg.name || '').toLowerCase();
+        const dx = reg.obj3d.position.x - home.x;
+        const dz = reg.obj3d.position.z - home.z;
+        const d2 = dx*dx + dz*dz;
+        if (nm === 'table' || nm === 'tabletop') {
+            if (d2 < 16 * 16) {
+                tables.push({x: reg.obj3d.position.x,
+                             z: reg.obj3d.position.z + 0.9});
+            }
+        }
+        if ((nm === 'counter' || nm === 'kitchen counter') && d2 < counterD) {
+            counter = {x: reg.obj3d.position.x,
+                       z: reg.obj3d.position.z + 1.2};
+            counterD = d2;
+        }
+        // Doors and counters both serve as shelter from rain.
+        if ((nm.startsWith('door') || nm === 'counter') && d2 < shelterD) {
+            shelter = {x: reg.obj3d.position.x,
+                       z: reg.obj3d.position.z + 1.0};
+            shelterD = d2;
+        }
+    }
+    return {home, tables, counter, shelter};
+}
+
+function detectNpcRole(npc) {
+    if (npc.anchors.counter) {
+        const dx = npc.anchors.counter.x - npc.anchors.home.x;
+        const dz = npc.anchors.counter.z - npc.anchors.home.z;
+        if (Math.sqrt(dx * dx + dz * dz) < 4) return 'waiter';
+    }
+    if (npc.anchors.tables.length) {
+        for (const t of npc.anchors.tables) {
+            const dx = t.x - npc.anchors.home.x;
+            const dz = t.z - npc.anchors.home.z;
+            if (Math.sqrt(dx * dx + dz * dz) < 2.5) return 'patron';
+        }
+    }
+    return 'wanderer';
+}
+
+function buildSchedule(role, alignment) {
+    // A daily plan is a list of {routine, duration} the NPC cycles
+    // through. Alignment biases routine choices: good NPCs are more
+    // likely to do active routines, evil to lurk via stroll.
+    const pools = {
+        'waiter':   ['waiter-rounds', 'patron-leisure', 'waiter-rounds',
+                     'evening-stroll'],
+        'patron':   ['patron-leisure', 'evening-stroll', 'patron-leisure',
+                     'go-home'],
+        'wanderer': ['evening-stroll', 'patron-leisure', 'go-home',
+                     'evening-stroll'],
+    };
+    let plan = pools[role] || pools['wanderer'];
+    if (isEvil(alignment)) {
+        plan = plan.map(r => r === 'patron-leisure' ? 'evening-stroll' : r);
+    }
+    return plan.map(r => ({
+        routine: r,
+        duration: 50 + Math.random() * 120,
+    }));
+}
+
+function resolveAnchor(npc, name) {
+    const a = npc.anchors;
+    if (name === 'home')             return a.home;
+    if (name === 'counter')          return a.counter || a.home;
+    if (name === 'random-table') {
+        if (!a.tables.length) return a.home;
+        return a.tables[Math.floor(Math.random() * a.tables.length)];
+    }
+    if (name === 'nearest-shelter')  return a.shelter || a.counter || a.home;
+    return a.home;
+}
+
+function pushWanderTarget(n, target, speed) {
+    const ws = getWanderState(n);
+    if (!ws || !target) return;
+    const wp = (window.AetherNav && window.AetherNav.grid)
+        ? window.AetherNav.findPath(n.mesh.position, target)
+        : null;
+    ws.target = target;
+    ws.waypoints = (wp && wp.length) ? wp : [target];
+    ws.wpIndex = 0;
+    ws.walking = true;
+    ws.waitTimer = 0;
+    ws.stuckTimer = 0;
+    if (speed) ws.speed = speed;
+}
+
+function startRoutine(n, routineName) {
+    const def = ROUTINE_DEFS[routineName];
+    if (!def) return;
+    n.routine = def;
+    n.routineName = routineName;
+    n.actIndex = 0;
+    startActivity(n, def.activities[0]);
+}
+
+function startActivity(n, act) {
+    n.act = act;
+    n.actTimer = 0;
+    if (act.kind === 'idle') {
+        n.actDuration = act.durMin + Math.random() * (act.durMax - act.durMin);
+        const ws = getWanderState(n);
+        if (ws) {
+            ws.walking = false;
+            ws.waitTimer = 0;
+        }
+    } else if (act.kind === 'goto-anchor') {
+        const target = resolveAnchor(n, act.anchor);
+        n.actTarget = target;
+        n.actTolerance = act.tolerance || 0.8;
+        n.actDuration = act.timeout || 30;
+        const speed = (n.routineName === 'waiter-rounds') ? 1.4 : 1.0;
+        pushWanderTarget(n, target, speed);
+    } else if (act.kind === 'wander-near') {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * (act.radius || 6);
+        const target = {
+            x: n.anchors.home.x + Math.cos(a) * r,
+            z: n.anchors.home.z + Math.sin(a) * r,
+        };
+        n.actTarget = target;
+        n.actTolerance = 1.0;
+        n.actDuration = act.durMin + Math.random() * (act.durMax - act.durMin);
+        pushWanderTarget(n, target, 0.9);
+    }
+}
+
+function tickActivity(n, dt) {
+    if (!n.act) return false;
+    n.actTimer += dt;
+    const a = n.act;
+    let done = false;
+    if (a.kind === 'idle') {
+        // Hold the wander script in idle every frame so it doesn't pick
+        // its own target mid-rest.
+        const ws = getWanderState(n);
+        if (ws) { ws.walking = false; ws.waitTimer = 0; }
+        if (n.actTimer >= n.actDuration) done = true;
+    } else {
+        const dx = n.actTarget.x - n.mesh.position.x;
+        const dz = n.actTarget.z - n.mesh.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < n.actTolerance) done = true;
+        else if (n.actTimer >= n.actDuration) done = true;  // timeout safety
+    }
+    if (done) {
+        n.actIndex++;
+        if (n.actIndex >= n.routine.activities.length) {
+            if (n.routine.loop) {
+                n.actIndex = 0;
+            } else {
+                n.act = null;
+                return true;
+            }
+        }
+        startActivity(n, n.routine.activities[n.actIndex]);
+    }
+    return false;
+}
+
+function tickNpcRoutines(dt) {
+    if (!collisionEnabled) return;
+    for (const n of npcColliders) {
+        if (n.hp <= 0) continue;
+        if (!n.schedule) continue;
+        // Combat / aid / fleeing intents own the wander state — yield.
+        if (n.intent === 'attacking' || n.intent === 'rushing-aid'
+            || n.intent === 'healing' || n.intent === 'fleeing') {
+            n.routinePaused = true;
+            continue;
+        }
+        if (n.routinePaused) {
+            // Just resumed normal life — restart the current schedule slot
+            // so the NPC has a clear next move instead of standing dazed.
+            n.routinePaused = false;
+            startRoutine(n, n.tempRoutine || n.schedule[n.schedIndex].routine);
+        }
+
+        // Temp event-driven routine completes → fall back to schedule.
+        if (n.tempRoutine && !n.act) {
+            n.tempRoutine = null;
+            startRoutine(n, n.schedule[n.schedIndex].routine);
+        }
+
+        // Schedule advancement (only when no temp routine in flight).
+        if (!n.tempRoutine) {
+            n.schedClock += dt;
+            if (n.schedClock >= n.schedule[n.schedIndex].duration) {
+                n.schedClock = 0;
+                n.schedIndex = (n.schedIndex + 1) % n.schedule.length;
+                startRoutine(n, n.schedule[n.schedIndex].routine);
+            }
+            if (!n.routine) {
+                startRoutine(n, n.schedule[n.schedIndex].routine);
+            }
+        }
+
+        const finished = tickActivity(n, dt);
+        if (finished && n.tempRoutine) {
+            n.tempRoutine = null;
+        }
+    }
+}
+
+function applyEventRoutine(routineName, predicate) {
+    for (const n of npcColliders) {
+        if (n.hp <= 0) continue;
+        if (predicate && !predicate(n)) continue;
+        n.tempRoutine = routineName;
+        startRoutine(n, routineName);
+    }
+}
 
 function tickNpcAi(dt) {
     if (!collisionEnabled) return;
@@ -1906,6 +2194,14 @@ async function loadScene() {
                 labelEnteredRange: false,
                 labelDirty: true,
                 lastIntent: null,
+                // Routine fields filled in after the scene loads (we need
+                // the full entityRegistry to compute anchors).
+                anchors: null, role: null,
+                schedule: null, schedIndex: 0, schedClock: 0,
+                routine: null, routineName: null,
+                act: null, actIndex: 0, actTimer: 0,
+                actTarget: null, actTolerance: 0, actDuration: 0,
+                tempRoutine: null, routinePaused: false,
             });
         }
 
@@ -2038,6 +2334,36 @@ loadScene().then(objs => {
     }
     rebuildStaticColliders();
     AetherNav.build(staticColliders, NPC_RADIUS, {cellSize: 0.75});
+
+    // Per-NPC routine setup needs the full entity registry, so it runs
+    // after loadScene resolves rather than during entity creation.
+    for (const n of npcColliders) {
+        n.anchors  = buildNpcAnchors(n);
+        n.role     = detectNpcRole(n);
+        n.schedule = buildSchedule(n.role, n.alignment);
+        // Each NPC starts in a randomly-offset slot so a cell of three
+        // doesn't move in lockstep.
+        n.schedIndex = Math.floor(Math.random() * n.schedule.length);
+        n.schedClock = Math.random() * 20;
+        startRoutine(n, n.schedule[n.schedIndex].routine);
+    }
+
+    // Rain triggers a temporary "shelter-from-rain" routine for any NPC
+    // that has a usable shelter anchor. When rain stops, the temp
+    // routine completes naturally (its idle phase ends) and NPCs slide
+    // back to their schedule.
+    eventBus.on('rain-start', () => {
+        applyEventRoutine('shelter-from-rain', n => !!n.anchors.shelter);
+    });
+    eventBus.on('rain-stop', () => {
+        // Cut the idle short so NPCs leave shelter sooner than ~30s.
+        for (const n of npcColliders) {
+            if (n.tempRoutine === 'shelter-from-rain' && n.act
+                && n.act.kind === 'idle') {
+                n.actDuration = Math.min(n.actDuration, n.actTimer + 2);
+            }
+        }
+    });
     // Keep the title card visible for at least 700 ms so it registers even
     // on instant loads, then fade it out over 600 ms (CSS transition) and
     // remove it from the DOM so it never blocks clicks on the canvas.
@@ -2166,6 +2492,7 @@ function animate() {
 
     resolveNpcCollisions(dt);
     tickNpcAi(dt);
+    tickNpcRoutines(dt);
     tickHpBars(dt);
     tickPlayerRespawn(dt);
 
