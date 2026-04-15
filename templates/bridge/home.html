@@ -1,0 +1,1870 @@
+{% extends "base.html" %}
+
+{% block title %}Bridge — {{ ship_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* ── Bridge: a spacefleet commander's workspace ────────────
+       Palette: submarine navy + CRT amber + hacker green.
+       Type:    monospace everywhere, to signal "instruments".    */
+
+    :root {
+        --bg:       #060a0e;
+        --panel:    #0d141b;
+        --panel2:   #101921;
+        --edge:     #1f3041;
+        --edge-hi:  #2d4b66;
+        --amber:    #ffb200;
+        --amber-d:  #8b6100;
+        --green:    #37ff8b;
+        --green-d:  #0e4a2a;
+        --red:      #ff4d4d;
+        --cyan:     #59d0ff;
+        --dim:      #6c8090;
+        --text:     #c5d4df;
+    }
+
+    body { background: var(--bg); }
+    .chronos-topbar-row { background: var(--bg); }
+    .navbar { border-bottom: 1px solid var(--edge); }
+
+    main.container { max-width: 100%; padding: 0.4rem 0.6rem 0.6rem; }
+
+    /* ── top ship-status strip ─────────────────────────────── */
+    .bridge-strip {
+        display: grid;
+        grid-template-columns: 1.4fr repeat(5, 1fr) 1.1fr 0.7fr;
+        gap: 0.4rem;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        padding: 0.4rem 0.55rem;
+        margin-bottom: 0.45rem;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.72rem;
+        color: var(--text);
+    }
+    .bridge-strip .cell {
+        border-left: 1px solid var(--edge);
+        padding-left: 0.5rem;
+        line-height: 1.15;
+    }
+    .bridge-strip .cell:first-child { border-left: 0; padding-left: 0; }
+    .bridge-strip .k {
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        font-size: 0.62rem;
+        display: block;
+    }
+    .bridge-strip .v {
+        color: var(--amber);
+        font-size: 0.95rem;
+        letter-spacing: 0.04em;
+    }
+    .bridge-strip .v.green { color: var(--green); }
+    .bridge-strip .v.cyan  { color: var(--cyan); }
+    .bridge-strip .v.red   { color: var(--red); }
+
+    /* ── main 3-column grid (radar | viewport | comms) ─────── */
+    .bridge-grid {
+        display: grid;
+        grid-template-columns: 240px 1fr 320px;
+        gap: 0.45rem;
+        margin-bottom: 0.45rem;
+    }
+    @media (max-width: 1200px) {
+        .bridge-grid { grid-template-columns: 200px 1fr 280px; }
+    }
+    @media (max-width: 900px) {
+        .bridge-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        padding: 0.5rem 0.55rem;
+        color: var(--text);
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .panel h4 {
+        margin: 0 0 0.4rem;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--dim);
+        font-weight: 500;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+    }
+    .panel h4 .hz {
+        color: var(--green-d);
+        font-size: 0.6rem;
+    }
+
+    /* ── radar ─────────────────────────────────────────────── */
+    .radar-wrap {
+        position: relative;
+        aspect-ratio: 1 / 1;
+        margin: 0 auto 0.4rem;
+        max-width: 220px;
+    }
+    canvas.radar { width: 100%; height: 100%; display: block; }
+    .radar-legend {
+        font-size: 0.62rem;
+        color: var(--dim);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.2rem 0.45rem;
+        margin-top: 0.25rem;
+    }
+    .radar-legend .dot {
+        display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+        margin-right: 0.3rem; vertical-align: middle;
+    }
+    .dot.friend { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot.hostile { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .dot.junk    { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+    .dot.civvy   { background: var(--cyan);  box-shadow: 0 0 4px var(--cyan); }
+
+    .gauge-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.3rem;
+        margin-top: 0.3rem;
+    }
+    .gauge {
+        position: relative;
+        aspect-ratio: 1 / 1;
+    }
+    .gauge canvas { width: 100%; height: 100%; display: block; }
+    .gauge .label {
+        position: absolute;
+        bottom: 0.1rem; left: 0; right: 0;
+        text-align: center;
+        font-size: 0.58rem;
+        color: var(--dim);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+
+    /* ── viewport ──────────────────────────────────────────── */
+    .viewport-wrap {
+        position: relative;
+        background: #000;
+        border: 1px solid var(--edge-hi);
+        border-radius: 4px;
+        overflow: hidden;
+        aspect-ratio: 16 / 9;
+        min-height: 360px;
+    }
+    canvas.viewport, .viewport-3d { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .viewport-3d canvas { display: block; width: 100% !important; height: 100% !important; }
+    /* HUD overlays inside the viewport */
+    .hud { position: absolute; pointer-events: none; font-family: ui-monospace, Menlo, monospace; color: var(--green); text-shadow: 0 0 4px rgba(55,255,139,0.5); font-size: 0.7rem; letter-spacing: 0.08em; }
+    .hud.tl { top: 0.55rem; left: 0.6rem; }
+    .hud.tr { top: 0.55rem; right: 0.6rem; text-align: right; }
+    .hud.bl { bottom: 0.55rem; left: 0.6rem; }
+    .hud.br { bottom: 0.55rem; right: 0.6rem; text-align: right; }
+    .hud .tgt {
+        width: 48px; height: 48px;
+        border: 1px solid var(--green);
+        position: absolute;
+        box-sizing: border-box;
+        box-shadow: 0 0 4px rgba(55,255,139,0.4) inset;
+    }
+    .hud .tgt::before, .hud .tgt::after {
+        content: ''; position: absolute; background: var(--green);
+    }
+    .hud .tgt::before { left: 50%; top: -6px; width: 1px; height: 12px; }
+    .hud .tgt::after  { top: 50%; left: -6px; height: 1px; width: 12px; }
+    /* bright reticule in the center */
+    .reticule {
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 120px; height: 120px;
+        transform: translate(-50%, -50%);
+        border: 1px solid rgba(55,255,139,0.5);
+        border-radius: 50%;
+        pointer-events: none;
+    }
+    .reticule::before, .reticule::after {
+        content: ''; position: absolute; background: rgba(55,255,139,0.5);
+    }
+    .reticule::before { top: 50%; left: -20px; right: -20px; height: 1px; }
+    .reticule::after  { left: 50%; top: -20px; bottom: -20px; width: 1px; }
+    .reticule .dot-c {
+        position: absolute; left: 50%; top: 50%;
+        width: 4px; height: 4px; background: var(--green);
+        transform: translate(-50%, -50%); border-radius: 50%;
+        box-shadow: 0 0 6px var(--green);
+    }
+
+    /* scanline overlay */
+    .scan {
+        position: absolute; inset: 0; pointer-events: none;
+        background: repeating-linear-gradient(
+            to bottom,
+            rgba(0,0,0,0) 0, rgba(0,0,0,0) 2px,
+            rgba(255,255,255,0.025) 2px, rgba(255,255,255,0.025) 3px
+        );
+        mix-blend-mode: overlay;
+    }
+    .vignette {
+        position: absolute; inset: 0; pointer-events: none;
+        box-shadow: inset 0 0 120px rgba(0,0,0,0.9);
+        border-radius: 4px;
+    }
+
+    /* ── comms terminal ────────────────────────────────────── */
+    .comms {
+        background: #000;
+        border: 1px solid var(--green-d);
+        border-radius: 4px;
+        padding: 0.5rem 0.6rem;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.72rem;
+        color: var(--green);
+        height: 100%;
+        min-height: 360px;
+        display: flex;
+        flex-direction: column;
+        box-shadow: inset 0 0 40px rgba(55,255,139,0.06);
+    }
+    .comms header {
+        font-size: 0.62rem;
+        color: var(--green-d);
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        border-bottom: 1px dashed var(--green-d);
+        padding-bottom: 0.25rem;
+        margin-bottom: 0.4rem;
+        display: flex; justify-content: space-between;
+    }
+    .comms header .blinking::after {
+        content: '_';
+        animation: caret 1s steps(2, end) infinite;
+    }
+    @keyframes caret { 50% { opacity: 0; } }
+    #comms-feed {
+        flex: 1;
+        overflow-y: auto;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        scrollbar-width: thin;
+        scrollbar-color: var(--green-d) transparent;
+    }
+    #comms-feed .ts   { color: var(--green-d); }
+    #comms-feed .from { color: #b6ffd4; }
+    #comms-feed .urg  { color: var(--amber); }
+    #comms-feed .crit { color: var(--red); }
+    #comms-feed .line { opacity: 0; animation: commfade 0.4s ease forwards; }
+    @keyframes commfade { to { opacity: 1; } }
+
+    /* ── bottom controls (submarine + F-14) ────────────────── */
+    .control-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1.2fr 1fr;
+        gap: 0.45rem;
+    }
+    @media (max-width: 900px) { .control-row { grid-template-columns: 1fr; } }
+
+    .subpanel {
+        background: linear-gradient(180deg, #0f1a22 0%, #0a1117 100%);
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        padding: 0.45rem 0.55rem;
+    }
+    .subpanel h4 {
+        margin: 0 0 0.4rem;
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--dim);
+        font-weight: 500;
+    }
+
+    /* brass-ringed submarine dial */
+    .dials { display: flex; gap: 0.5rem; align-items: center; justify-content: space-around; flex-wrap: wrap; }
+    .dial-mini { width: 78px; text-align: center; }
+    .dial-mini canvas { width: 78px; height: 78px; display: block; margin: 0 auto; }
+    .dial-mini .lbl { font-size: 0.58rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.15rem; }
+
+    /* toggle bank — chunky metal switches */
+    .switchbank { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem; }
+    .toggle {
+        background: #0b1217;
+        border: 1px solid var(--edge);
+        border-top-color: var(--edge-hi);
+        border-radius: 3px;
+        padding: 0.25rem 0.35rem;
+        display: flex; flex-direction: column;
+        align-items: center; gap: 0.25rem;
+        cursor: pointer;
+        user-select: none;
+    }
+    .toggle .rocker {
+        width: 38px; height: 20px;
+        background: #1a2129;
+        border: 1px solid #2a3742;
+        border-radius: 3px;
+        position: relative;
+        box-shadow: inset 0 0 4px rgba(0,0,0,0.6);
+    }
+    .toggle .rocker::after {
+        content: ''; position: absolute; top: 1px; bottom: 1px;
+        width: 16px; left: 1px;
+        background: linear-gradient(180deg, #cfd8dc, #6c7a83);
+        border-radius: 2px;
+        transition: left 0.12s ease;
+        box-shadow: 0 1px 1px rgba(0,0,0,0.6);
+    }
+    .toggle.on .rocker { background: #153828; border-color: var(--green-d); }
+    .toggle.on .rocker::after { left: 19px; background: linear-gradient(180deg, #b7ffd6, var(--green)); }
+    .toggle .lbl {
+        font-size: 0.56rem; color: var(--dim);
+        text-transform: uppercase; letter-spacing: 0.08em;
+        text-align: center;
+    }
+    .toggle.on .lbl { color: var(--green); }
+    .toggle .led {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: #3a0707; box-shadow: inset 0 0 2px rgba(0,0,0,0.6);
+    }
+    .toggle.on .led { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    /* F-14 throttle + HUD knob cluster */
+    .throttle-wrap { display: flex; align-items: center; gap: 0.7rem; }
+    .throttle {
+        width: 42px; height: 140px;
+        background: #14191f;
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        position: relative;
+        box-shadow: inset 0 0 6px rgba(0,0,0,0.8);
+    }
+    .throttle .scale {
+        position: absolute; inset: 6px 6px 6px 28px;
+        border-left: 1px solid var(--edge-hi);
+    }
+    .throttle .tick {
+        position: absolute; left: -4px; width: 6px;
+        height: 1px; background: var(--dim);
+    }
+    .throttle .handle {
+        position: absolute; left: 2px; right: 12px; height: 18px;
+        background: linear-gradient(180deg, #d24a2f, #8b1c0c);
+        border-radius: 3px;
+        box-shadow: 0 2px 2px rgba(0,0,0,0.6);
+        cursor: grab;
+    }
+    .throttle .handle::after {
+        content: ''; position: absolute;
+        right: -8px; top: 50%; transform: translateY(-50%);
+        width: 6px; height: 1px; background: var(--amber);
+        box-shadow: 0 0 4px var(--amber);
+    }
+    .throttle-meta {
+        flex: 1;
+        font-size: 0.72rem;
+    }
+    .throttle-meta .row { display: flex; justify-content: space-between; margin-bottom: 0.2rem; }
+    .throttle-meta .k { color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.6rem; }
+    .throttle-meta .v { color: var(--amber); }
+
+    .hudline {
+        margin-top: 0.4rem;
+        font-size: 0.64rem;
+        color: var(--green);
+        border-top: 1px dashed var(--green-d);
+        padding-top: 0.3rem;
+        line-height: 1.4;
+    }
+    .hudline .k { color: var(--green-d); letter-spacing: 0.08em; }
+
+    /* small util */
+    .flex { display: flex; }
+    .spacer { flex: 1; }
+    .pill { display: inline-block; padding: 0.05rem 0.35rem; border: 1px solid currentColor; border-radius: 2px; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    .pill.green { color: var(--green); }
+    .pill.red   { color: var(--red); }
+    .pill.amber { color: var(--amber); }
+    .pill.cyan  { color: var(--cyan); }
+    .pill.dim   { color: var(--dim); }
+
+    /* ── planet dossier ─────────────────────────────────────── */
+    .dossier {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        padding: 0.5rem 0.6rem;
+        margin-bottom: 0.45rem;
+        font-family: ui-monospace, Menlo, monospace;
+        color: var(--text);
+        font-size: 0.7rem;
+    }
+    .dossier-head {
+        display: flex; justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px dashed var(--edge);
+        padding-bottom: 0.35rem;
+        margin-bottom: 0.4rem;
+    }
+    .dossier-head .dh-l { display: flex; align-items: center; gap: 0.55rem; }
+    .dossier-head .dh-r { display: flex; gap: 0.3rem; align-items: center; }
+    .dossier .swatch {
+        display: inline-block; width: 22px; height: 22px;
+        border-radius: 50%; border: 1px solid var(--edge-hi);
+        box-shadow: 0 0 8px rgba(255,255,255,0.04) inset;
+        flex-shrink: 0;
+    }
+    .dossier .swatch.sm {
+        width: 9px; height: 9px; border-radius: 2px;
+        border-color: var(--edge); margin-right: 0.2rem;
+        vertical-align: middle;
+    }
+    .dossier .pname { color: var(--cyan); font-size: 0.92rem; letter-spacing: 0.04em; }
+    .dossier .pmeta { color: var(--dim); font-size: 0.62rem; letter-spacing: 0.06em; }
+    .dossier .pmeta .ptype { color: var(--amber); }
+
+    .dossier-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.25rem 0.7rem;
+    }
+    .dossier-grid > div { display: flex; gap: 0.4rem; align-items: baseline; min-width: 0; }
+    .dossier-grid .span2 { grid-column: span 2; }
+    .dossier-grid .span4 { grid-column: span 4; }
+    .dossier-grid .k {
+        color: var(--dim); font-size: 0.58rem;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        flex-shrink: 0; min-width: 5.4rem;
+    }
+    .dossier-grid .v { color: var(--text); }
+    .dossier-grid .v.notes { color: #b6c8d3; font-style: italic; opacity: 0.85; }
+    @media (max-width: 900px) {
+        .dossier-grid { grid-template-columns: 1fr 1fr; }
+        .dossier-grid .span2, .dossier-grid .span4 { grid-column: span 2; }
+    }
+
+    .lib-link {
+        font-size: 0.62rem;
+        color: var(--dim);
+        text-decoration: none;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border: 1px solid var(--edge);
+        padding: 0.15rem 0.4rem;
+        border-radius: 2px;
+    }
+    .lib-link:hover { color: var(--cyan); border-color: var(--edge-hi); }
+    .lib-link strong { color: var(--amber); margin-left: 0.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="bridge-strip">
+    <div class="cell">
+        <span class="k">Vessel</span>
+        <span class="v cyan">{{ ship_name }}</span>
+    </div>
+    <div class="cell">
+        <span class="k">Sector</span>
+        <span class="v">{{ sector }}</span>
+    </div>
+    <div class="cell">
+        <span class="k">Heading</span>
+        <span class="v">{{ heading|stringformat:"03d" }}°<span style="color:var(--dim);font-size:0.7rem;"> MK2</span></span>
+    </div>
+    <div class="cell">
+        <span class="k">Velocity</span>
+        <span class="v green">{{ speed_c }} c</span>
+    </div>
+    <div class="cell">
+        <span class="k">Destination</span>
+        <span class="v">{{ destination }}</span>
+    </div>
+    <div class="cell">
+        <span class="k">ETA</span>
+        <span class="v">{{ eta }}</span>
+    </div>
+    <div class="cell">
+        <span class="k">Commander</span>
+        <span class="v cyan">{{ commander }}</span>
+    </div>
+    <div class="cell" style="display:flex;align-items:center;justify-content:flex-end;">
+        <a class="lib-link" href="{% url 'bridge:library' %}">
+            Atlas <strong id="library-count">{{ library_count }}</strong>
+        </a>
+    </div>
+</div>
+
+<div class="bridge-grid">
+    <!-- ── LEFT: radar + gauges ─────────────────────────── -->
+    <div class="panel">
+        <h4>Tactical Radar <span class="hz">12 Hz</span></h4>
+        <div class="radar-wrap">
+            <canvas class="radar" id="radar" width="400" height="400"></canvas>
+        </div>
+        <div class="radar-legend">
+            <span><span class="dot friend"></span>Friendly</span>
+            <span><span class="dot hostile"></span>Hostile</span>
+            <span><span class="dot junk"></span>Salvage</span>
+            <span><span class="dot civvy"></span>Civvy</span>
+        </div>
+
+        <h4 style="margin-top:0.6rem;">Hull Systems</h4>
+        <div class="gauge-row">
+            <div class="gauge">
+                <canvas id="g-fuel"    width="120" height="120"></canvas>
+                <div class="label">Fuel</div>
+            </div>
+            <div class="gauge">
+                <canvas id="g-hull"    width="120" height="120"></canvas>
+                <div class="label">Hull</div>
+            </div>
+            <div class="gauge">
+                <canvas id="g-shields" width="120" height="120"></canvas>
+                <div class="label">Shields</div>
+            </div>
+            <div class="gauge">
+                <canvas id="g-reactor" width="120" height="120"></canvas>
+                <div class="label">Reactor</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── CENTER: viewport ─────────────────────────────── -->
+    <div class="panel" style="padding:0.4rem;">
+        <div class="viewport-wrap">
+            <div id="viewport-3d" class="viewport-3d"></div>
+            <div class="reticule"><span class="dot-c"></span></div>
+            <div class="hud tl" id="hud-tl">
+                <div>BEARING <span id="hud-bear">000</span>° · MK2</div>
+                <div>VEL <span id="hud-vel">{{ speed_c }}</span>c</div>
+                <div style="color:var(--amber);">CONTACTS <span id="hud-cnt">0</span></div>
+            </div>
+            <div class="hud tr">
+                <div>VIEWPORT 01 — FWD</div>
+                <div id="hud-clock">T+00:00:00</div>
+                <div id="hud-mode" style="color:var(--amber);">AUTO-NAV · HOLDING ORBIT</div>
+            </div>
+            <div class="hud bl">
+                <div id="hud-dest">DEST · {{ destination }}</div>
+                <div>ETA · {{ eta }}</div>
+            </div>
+            <div class="hud br">
+                <div>ZOOM 1.0×</div>
+                <div id="hud-nearest">NEAREST · —</div>
+            </div>
+            <div class="scan"></div>
+            <div class="vignette"></div>
+        </div>
+    </div>
+
+    <!-- ── RIGHT: comms ─────────────────────────────────── -->
+    <div>
+        <div class="comms">
+            <header>
+                <span>COMMS // SUBSPACE CH-4</span>
+                <span class="blinking">LIVE</span>
+            </header>
+            <div id="comms-feed"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ── target planet dossier (filled by JS via renderPlanetPanel) ── -->
+<div class="dossier" id="planet-dossier"></div>
+
+<!-- ── BOTTOM: submarine dials + F-14 throttle + switch bank ── -->
+<div class="control-row">
+
+    <div class="subpanel">
+        <h4>Helm · Submarine Bank</h4>
+        <div class="dials">
+            <div class="dial-mini">
+                <canvas id="d-depth" width="120" height="120"></canvas>
+                <div class="lbl">Plane Pitch</div>
+            </div>
+            <div class="dial-mini">
+                <canvas id="d-trim" width="120" height="120"></canvas>
+                <div class="lbl">Trim</div>
+            </div>
+            <div class="dial-mini">
+                <canvas id="d-rudder" width="120" height="120"></canvas>
+                <div class="lbl">Rudder</div>
+            </div>
+            <div class="dial-mini">
+                <canvas id="d-revs" width="120" height="120"></canvas>
+                <div class="lbl">Reactor RPM</div>
+            </div>
+            <div class="dial-mini">
+                <canvas id="d-press" width="120" height="120"></canvas>
+                <div class="lbl">Hull Pressure</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="subpanel">
+        <h4>Weapons &amp; Systems Bank</h4>
+        <div class="switchbank">
+            <div class="toggle on"  data-k="shields"><div class="rocker"></div><div class="led"></div><div class="lbl">Shields</div></div>
+            <div class="toggle"     data-k="weapons"><div class="rocker"></div><div class="led"></div><div class="lbl">Weapons Hot</div></div>
+            <div class="toggle on"  data-k="irwrn"><div class="rocker"></div><div class="led"></div><div class="lbl">IR Warn</div></div>
+            <div class="toggle"     data-k="cloak"><div class="rocker"></div><div class="led"></div><div class="lbl">Cloak</div></div>
+            <div class="toggle on"  data-k="saniv"><div class="rocker"></div><div class="led"></div><div class="lbl">Sanitary VAC</div></div>
+            <div class="toggle"     data-k="trpdo"><div class="rocker"></div><div class="led"></div><div class="lbl">Torpedo Arm</div></div>
+            <div class="toggle on"  data-k="beacon"><div class="rocker"></div><div class="led"></div><div class="lbl">IFF Beacon</div></div>
+            <div class="toggle on"  data-k="autnv"><div class="rocker"></div><div class="led"></div><div class="lbl">Auto-Nav</div></div>
+            <div class="toggle"     data-k="jump"><div class="rocker"></div><div class="led"></div><div class="lbl">Warp Charge</div></div>
+        </div>
+    </div>
+
+    <div class="subpanel">
+        <h4>F-14 Flight Bank</h4>
+        <div class="throttle-wrap">
+            <div class="throttle" id="throttle">
+                <div class="scale"></div>
+                <div class="handle" id="throttle-handle"></div>
+            </div>
+            <div class="throttle-meta">
+                <div class="row"><span class="k">Thrust</span><span class="v" id="thr-v">72%</span></div>
+                <div class="row"><span class="k">AoA</span>   <span class="v" id="thr-a">+3.2°</span></div>
+                <div class="row"><span class="k">G-load</span><span class="v" id="thr-g">1.04 g</span></div>
+                <div class="row"><span class="k">Wing</span>  <span class="v" id="thr-w">Swept 44°</span></div>
+                <div class="hudline">
+                    <div><span class="k">MASTER</span> ARM · <span style="color:var(--amber)">SAFE</span></div>
+                    <div><span class="k">TID LOCK</span> · NONE</div>
+                    <div><span class="k">PHOENIX</span> · 4/4 · READY</div>
+                    <div><span class="k">CHAFF/FLARE</span> · 30 / 30</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+    }
+}
+</script>
+
+<script type="module">
+/* ══════════════════════════════════════════════════════════════
+   Bridge — animated instrument bundle.
+   Radar / gauges / dials / comms / throttle: plain canvas + rAF.
+   Viewport: three.js (real 3D — the commander is in orbit).
+   ══════════════════════════════════════════════════════════ */
+
+import * as THREE from 'three';
+
+(() => {
+    const INITIAL = {
+        fuel:    {{ fuel }},
+        hull:    {{ hull }},
+        shields: {{ shields }},
+        heading: {{ heading }},
+        speed_c: {{ speed_c }},
+    };
+
+    // ── helpers ────────────────────────────────────────────
+    const TAU = Math.PI * 2;
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const pick = xs => xs[Math.floor(Math.random() * xs.length)];
+    const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+    // ══════════════════════════════════════════════════════
+    //  RADAR
+    // ══════════════════════════════════════════════════════
+    const radar = document.getElementById('radar');
+    const rctx = radar.getContext('2d');
+    const contacts = [];
+    const CONTACT_KINDS = [
+        { kind: 'friend',  color: '#37ff8b', freq: 5 },
+        { kind: 'hostile', color: '#ff4d4d', freq: 2 },
+        { kind: 'junk',    color: '#ffb200', freq: 8 },
+        { kind: 'civvy',   color: '#59d0ff', freq: 4 },
+    ];
+    function seedContacts(n = 24) {
+        contacts.length = 0;
+        for (let i = 0; i < n; i++) {
+            const k = (() => {
+                const pool = CONTACT_KINDS.flatMap(c => Array(c.freq).fill(c));
+                return pool[Math.floor(Math.random() * pool.length)];
+            })();
+            const r = Math.sqrt(Math.random()) * 0.95;  // prefer outer ring
+            const a = Math.random() * TAU;
+            contacts.push({
+                kind:  k.kind,
+                color: k.color,
+                r, a,
+                vr: rand(-0.00018, 0.00018),
+                va: rand(-0.0014, 0.0014),
+                pulse: Math.random() * TAU,
+            });
+        }
+    }
+    seedContacts();
+
+    let sweep = 0;
+    const sweepSpeed = 0.012;  // rad/frame
+    const ping = (contact) => {
+        // A contact "pings" when the sweep passes it.
+        contact.pulse = 1.0;
+    };
+
+    function drawRadar() {
+        const w = radar.width, h = radar.height;
+        const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 8;
+        // persistent fade (trails)
+        rctx.fillStyle = 'rgba(6, 10, 14, 0.25)';
+        rctx.fillRect(0, 0, w, h);
+
+        // grid
+        rctx.strokeStyle = 'rgba(55,255,139,0.18)';
+        rctx.lineWidth = 1;
+        for (let i = 1; i <= 4; i++) {
+            rctx.beginPath(); rctx.arc(cx, cy, R * i / 4, 0, TAU); rctx.stroke();
+        }
+        rctx.beginPath();
+        rctx.moveTo(cx - R, cy); rctx.lineTo(cx + R, cy);
+        rctx.moveTo(cx, cy - R); rctx.lineTo(cx, cy + R);
+        rctx.stroke();
+
+        // crosshair axis labels
+        rctx.fillStyle = 'rgba(55,255,139,0.4)';
+        rctx.font = '10px ui-monospace, monospace';
+        rctx.textAlign = 'center';
+        rctx.fillText('N', cx, 14);
+        rctx.fillText('S', cx, h - 4);
+        rctx.textAlign = 'right'; rctx.fillText('W', 12, cy + 4);
+        rctx.textAlign = 'left';  rctx.fillText('E', w - 12, cy + 4);
+
+        // sweep wedge
+        const sweepWidth = 0.55;
+        const grad = rctx.createConicGradient(sweep, cx, cy);
+        grad.addColorStop(0.00, 'rgba(55,255,139,0.40)');
+        grad.addColorStop(0.08, 'rgba(55,255,139,0.05)');
+        grad.addColorStop(1.00, 'rgba(55,255,139,0.00)');
+        rctx.fillStyle = grad;
+        rctx.beginPath();
+        rctx.moveTo(cx, cy);
+        rctx.arc(cx, cy, R, sweep - sweepWidth, sweep);
+        rctx.closePath();
+        rctx.fill();
+
+        // contacts
+        for (const c of contacts) {
+            c.r = clamp(c.r + c.vr, 0.05, 0.98);
+            c.a += c.va;
+            const px = cx + Math.cos(c.a) * c.r * R;
+            const py = cy + Math.sin(c.a) * c.r * R;
+
+            // trigger ping if sweep passes within window
+            const da = ((c.a - sweep) % TAU + TAU) % TAU;
+            if (da < 0.07) c.pulse = 1.0;
+
+            const size = c.pulse * 4 + 1.4;
+            rctx.beginPath();
+            rctx.arc(px, py, size, 0, TAU);
+            rctx.fillStyle = c.color;
+            rctx.globalAlpha = 0.4 + c.pulse * 0.6;
+            rctx.fill();
+            // faint halo on fresh pings
+            if (c.pulse > 0.4) {
+                rctx.beginPath();
+                rctx.arc(px, py, size * 2.4, 0, TAU);
+                rctx.strokeStyle = c.color;
+                rctx.globalAlpha = c.pulse * 0.4;
+                rctx.stroke();
+            }
+            rctx.globalAlpha = 1.0;
+            c.pulse *= 0.94;
+        }
+
+        // own ship at center
+        rctx.beginPath();
+        rctx.arc(cx, cy, 3, 0, TAU);
+        rctx.fillStyle = '#c5d4df'; rctx.fill();
+
+        sweep = (sweep + sweepSpeed) % TAU;
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  GAUGES (circular bar)
+    // ══════════════════════════════════════════════════════
+    function drawGauge(canvas, value, max = 100, color = '#ffb200', label = '') {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 10;
+        ctx.clearRect(0, 0, w, h);
+
+        // outer arc background
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0.75 * Math.PI, 0.25 * Math.PI);
+        ctx.stroke();
+
+        // value arc
+        const frac = clamp(value / max, 0, 1);
+        const end = 0.75 * Math.PI + frac * 1.5 * Math.PI;
+        ctx.strokeStyle = color;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(cx, cy, R, 0.75 * Math.PI, end);
+        ctx.stroke();
+
+        // value text
+        ctx.fillStyle = color;
+        ctx.font = 'bold 22px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(Math.round(value), cx, cy - 4);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.font = '10px ui-monospace, monospace';
+        ctx.fillText('%', cx, cy + 16);
+    }
+
+    const gFuel    = document.getElementById('g-fuel');
+    const gHull    = document.getElementById('g-hull');
+    const gShields = document.getElementById('g-shields');
+    const gReactor = document.getElementById('g-reactor');
+
+    const gaugeState = {
+        fuel: INITIAL.fuel,
+        hull: INITIAL.hull,
+        shields: INITIAL.shields,
+        reactor: 88,
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  SUBMARINE DIALS (brass ring, needle, tick marks)
+    // ══════════════════════════════════════════════════════
+    function drawDial(canvas, angleDeg, opts = {}) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        const cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 3;
+        ctx.clearRect(0, 0, w, h);
+
+        // brass outer ring
+        const grad = ctx.createRadialGradient(cx - 6, cy - 6, 2, cx, cy, R);
+        grad.addColorStop(0, '#7a5d28');
+        grad.addColorStop(0.7, '#3a2c12');
+        grad.addColorStop(1, '#150e06');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
+
+        // inner face
+        ctx.fillStyle = '#0a0f13';
+        ctx.beginPath(); ctx.arc(cx, cy, R - 6, 0, TAU); ctx.fill();
+
+        // tick marks
+        ctx.strokeStyle = '#ffb200';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 24; i++) {
+            const t = i / 24 * TAU - Math.PI / 2;
+            const r1 = R - 7, r2 = R - (i % 6 === 0 ? 14 : 10);
+            ctx.beginPath();
+            ctx.moveTo(cx + Math.cos(t) * r1, cy + Math.sin(t) * r1);
+            ctx.lineTo(cx + Math.cos(t) * r2, cy + Math.sin(t) * r2);
+            ctx.stroke();
+        }
+
+        // numerical readout
+        ctx.fillStyle = '#ffb200';
+        ctx.font = '9px ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(opts.readout ?? Math.round(angleDeg) + '°', cx, cy + R - 18);
+
+        // needle
+        const a = (angleDeg - 90) * Math.PI / 180;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(a);
+        ctx.fillStyle = '#ff4d4d';
+        ctx.beginPath();
+        ctx.moveTo(-2, 4); ctx.lineTo(2, 4);
+        ctx.lineTo(1, -R + 12); ctx.lineTo(-1, -R + 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // hub
+        ctx.fillStyle = '#c9a341';
+        ctx.beginPath(); ctx.arc(cx, cy, 4, 0, TAU); ctx.fill();
+    }
+
+    const dials = {
+        depth:  { el: document.getElementById('d-depth'),  a:  0, target:  30 },
+        trim:   { el: document.getElementById('d-trim'),   a:  0, target: -12 },
+        rudder: { el: document.getElementById('d-rudder'), a:  0, target:   8 },
+        revs:   { el: document.getElementById('d-revs'),   a:  0, target: 240 },
+        press:  { el: document.getElementById('d-press'),  a:  0, target: 178 },
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  VIEWPORT — three.js scene (real 3D)
+    //  We're in a parking orbit around a ringed planet. Camera
+    //  sits at the origin, planet is a real sphere some distance
+    //  ahead, ships are real meshes moving through the volume.
+    //  bridge.dollyTo(t) is exposed for later "approach" features.
+    // ══════════════════════════════════════════════════════
+    const viewportWrap = document.querySelector('.viewport-wrap');
+    const vpHost = document.getElementById('viewport-3d');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x020309);
+
+    const camera = new THREE.PerspectiveCamera(55, 16/9, 0.1, 20000);
+    camera.position.set(0, 0, 0);
+    camera.lookAt(0, 0, -1);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    vpHost.appendChild(renderer.domElement);
+
+    function resize3D() {
+        const rect = viewportWrap.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) return;
+        renderer.setSize(rect.width, rect.height, false);
+        camera.aspect = rect.width / rect.height;
+        camera.updateProjectionMatrix();
+    }
+    window.addEventListener('resize', resize3D);
+    resize3D();
+
+    // ── lighting: a nearby sun + soft fill so the night side isn't pitch black
+    scene.add(new THREE.AmbientLight(0x334455, 0.35));
+    const sun = new THREE.DirectionalLight(0xffeac8, 1.6);
+    sun.position.set(300, 160, -100);
+    scene.add(sun);
+    const fill = new THREE.DirectionalLight(0x2a4470, 0.4);
+    fill.position.set(-200, -60, 60);
+    scene.add(fill);
+
+    // ── starfield: points on a huge sphere, stationary (we're in orbit)
+    {
+        const starCount = 3000;
+        const pos = new Float32Array(starCount * 3);
+        const col = new Float32Array(starCount * 3);
+        const tints = [
+            [1, 1, 1], [1, 0.92, 0.75],
+            [0.85, 0.92, 1], [1, 0.82, 0.7], [0.8, 1, 0.95],
+        ];
+        for (let i = 0; i < starCount; i++) {
+            const u = Math.random(), v = Math.random();
+            const theta = TAU * u, phi = Math.acos(2 * v - 1);
+            const r = 6000;
+            pos[i*3  ] = r * Math.sin(phi) * Math.cos(theta);
+            pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+            pos[i*3+2] = r * Math.cos(phi);
+            const tc = tints[Math.floor(Math.random() * tints.length)];
+            const b = 0.35 + Math.random() * 0.65;
+            col[i*3  ] = tc[0] * b;
+            col[i*3+1] = tc[1] * b;
+            col[i*3+2] = tc[2] * b;
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const m = new THREE.PointsMaterial({
+            size: 2.2, sizeAttenuation: false,
+            vertexColors: true, transparent: true,
+            opacity: 0.95, depthWrite: false,
+        });
+        scene.add(new THREE.Points(g, m));
+    }
+
+    // ── nebula washes: a handful of additive sprite clouds far out
+    {
+        function nebTex(color) {
+            const s = 256;
+            const c = document.createElement('canvas');
+            c.width = c.height = s;
+            const g = c.getContext('2d');
+            const grd = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+            grd.addColorStop(0, color);
+            grd.addColorStop(0.5, color.replace(/[\d.]+\)$/, '0.15)'));
+            grd.addColorStop(1, 'rgba(0,0,0,0)');
+            g.fillStyle = grd; g.fillRect(0, 0, s, s);
+            return new THREE.CanvasTexture(c);
+        }
+        const nebs = [
+            'rgba(160,80,200,0.55)',
+            'rgba(80,130,200,0.45)',
+            'rgba(180,90,110,0.40)',
+        ];
+        for (const col of nebs) {
+            const m = new THREE.SpriteMaterial({
+                map: nebTex(col),
+                transparent: true, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const sp = new THREE.Sprite(m);
+            const R = 3500;
+            const th = Math.random() * TAU;
+            const ph = (Math.random() - 0.5) * 0.7;
+            sp.position.set(
+                R * Math.cos(ph) * Math.cos(th),
+                R * Math.sin(ph),
+                R * Math.cos(ph) * Math.sin(th),
+            );
+            sp.scale.set(2500, 2500, 1);
+            scene.add(sp);
+        }
+    }
+
+    // ── planet system (data-driven; rebuilt on every warp) ────
+    // Planets come in via a `features` dict (see bridge/planets.py).
+    // We keep a single `planetSystem` group in the scene; warp
+    // swaps the group for a freshly-built one.
+    const PLANET_HOME_POS = new THREE.Vector3(220, 40, -520);
+    let planetSystem = null;       // THREE.Group
+    let currentFeatures = null;    // the features dict in use
+
+    function hexToColor(h) { return new THREE.Color(h); }
+
+    function buildPlanetSystem(features) {
+        const group = new THREE.Group();
+        group.position.copy(PLANET_HOME_POS);
+        const r = features.radius;
+
+        // core planet
+        const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(r, 64, 48),
+            new THREE.MeshStandardMaterial({
+                color: hexToColor(features.color),
+                roughness: features.roughness ?? 0.85,
+                metalness: features.metalness ?? 0.02,
+            })
+        );
+        group.add(mesh);
+        group.userData.mesh = mesh;
+
+        // atmosphere glow
+        if (features.atmosphere) {
+            const atm = new THREE.Mesh(
+                new THREE.SphereGeometry(r * 1.035, 48, 32),
+                new THREE.MeshBasicMaterial({
+                    color: hexToColor(features.atmosphere.color),
+                    transparent: true,
+                    opacity: features.atmosphere.opacity,
+                    side: THREE.BackSide,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                })
+            );
+            group.add(atm);
+        }
+
+        // rings
+        if (features.ring) {
+            const ring1 = new THREE.Mesh(
+                new THREE.RingGeometry(features.ring.inner, features.ring.outer, 128, 1),
+                new THREE.MeshBasicMaterial({
+                    color: hexToColor(features.ring.color),
+                    side: THREE.DoubleSide,
+                    transparent: true, opacity: features.ring.opacity,
+                    depthWrite: false,
+                })
+            );
+            ring1.rotation.x = Math.PI / 2 - features.ring.tilt;
+            ring1.rotation.z = features.ring.roll;
+            group.add(ring1);
+
+            const outer = features.ring.outer;
+            const ring2 = new THREE.Mesh(
+                new THREE.RingGeometry(outer, outer * 1.12, 128, 1),
+                new THREE.MeshBasicMaterial({
+                    color: hexToColor(features.ring.color),
+                    side: THREE.DoubleSide,
+                    transparent: true, opacity: features.ring.opacity * 0.35,
+                    depthWrite: false,
+                })
+            );
+            ring2.rotation.x = Math.PI / 2 - features.ring.tilt;
+            ring2.rotation.z = features.ring.roll;
+            group.add(ring2);
+        }
+
+        // moons
+        const moons = [];
+        for (const m of (features.moons || [])) {
+            const moon = new THREE.Mesh(
+                new THREE.SphereGeometry(m.radius, 24, 18),
+                new THREE.MeshStandardMaterial({
+                    color: hexToColor(m.color), roughness: 0.95, metalness: 0.0,
+                })
+            );
+            moon.userData = { ...m };
+            group.add(moon);
+            moons.push(moon);
+        }
+        group.userData.moons = moons;
+
+        // artificial satellites — tiny boxes with antenna
+        const sats = [];
+        const satBody = new THREE.BoxGeometry(1.6, 0.55, 1.6);
+        const satPanelGeo = new THREE.BoxGeometry(3.4, 0.08, 1.0);
+        const antGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.3, 6);
+        for (const s of (features.satellites || [])) {
+            const sat = new THREE.Group();
+            const body = new THREE.Mesh(
+                satBody,
+                new THREE.MeshStandardMaterial({
+                    color: hexToColor(s.color), roughness: 0.3, metalness: 0.75,
+                })
+            );
+            const panel = new THREE.Mesh(
+                satPanelGeo,
+                new THREE.MeshStandardMaterial({
+                    color: 0x1b2a55, roughness: 0.2, metalness: 0.4,
+                    emissive: 0x0a143a, emissiveIntensity: 0.3,
+                })
+            );
+            const ant = new THREE.Mesh(
+                antGeo,
+                new THREE.MeshBasicMaterial({ color: 0xffffff })
+            );
+            ant.position.y = 0.8;
+            sat.add(body); sat.add(panel); sat.add(ant);
+            sat.userData = { ...s };
+            group.add(sat);
+            sats.push(sat);
+        }
+        group.userData.satellites = sats;
+
+        group.userData.features = features;
+        return group;
+    }
+
+    function setPlanetFromFeatures(features) {
+        if (planetSystem) scene.remove(planetSystem);
+        planetSystem = buildPlanetSystem(features);
+        scene.add(planetSystem);
+        currentFeatures = features;
+        renderPlanetPanel(features);
+    }
+
+    // ── animate the current planet (rotation + moon/sat orbits) ──
+    let _planetT = 0;
+    function updatePlanetSystem(dt) {
+        if (!planetSystem) return;
+        const ud = planetSystem.userData;
+        _planetT += dt * 0.001;
+        if (ud.mesh) ud.mesh.rotation.y += dt * 0.00004;
+
+        for (const m of (ud.moons || [])) {
+            const md = m.userData;
+            const a = (md.phase || 0) + _planetT * (md.orbit_speed || 0.2);
+            const r = md.orbit_r || 140;
+            const tilt = md.tilt || 0.2;
+            m.position.set(
+                Math.cos(a) * r,
+                Math.sin(a) * r * Math.sin(tilt),
+                Math.sin(a) * r * Math.cos(tilt),
+            );
+            m.rotation.y += dt * 0.0001;
+        }
+
+        for (const s of (ud.satellites || [])) {
+            const sd = s.userData;
+            const a = (sd.phase || 0) + _planetT * (sd.orbit_speed || 0.6);
+            const r = sd.orbit_r || (ud.features.radius * 1.4);
+            const tilt = sd.tilt || 0.5;
+            s.position.set(
+                Math.cos(a) * r,
+                Math.sin(a) * r * Math.sin(tilt) * 0.6,
+                Math.sin(a) * r * Math.cos(tilt),
+            );
+            s.lookAt(planetSystem.position);
+            s.rotation.z += dt * 0.0008;
+        }
+    }
+
+    // ── civilization info panel (DOM, beneath viewport) ──────
+    // The civilization dict shape is fixed by bridge/planets.py:
+    //   level, descriptor, population (pre-formatted string or null),
+    //   government, polity, language, civ_age_years,
+    //   economy (dict with style/health/tax/index) or null,
+    //   exports[], imports[], disposition, notes.
+    function _esc(s) {
+        return String(s).replace(/[&<>"']/g, c => ({
+            '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+        }[c]));
+    }
+    function renderPlanetPanel(f) {
+        const root = document.getElementById('planet-dossier');
+        if (!root) return;
+        const civ = f.civilization || {};
+        const ringTxt = f.ring ? `ring (${f.ring.color})` : 'no ring';
+        const atmTxt = f.atmosphere
+            ? `present (${f.atmosphere.color}, opacity ${f.atmosphere.opacity})`
+            : 'negligible';
+        const exp = (civ.exports || []).map(_esc).join(', ') || '—';
+        const imp = (civ.imports || []).map(_esc).join(', ') || '—';
+        const govt = civ.government || '—';
+        const econ = civ.economy
+            ? `${_esc(civ.economy.style)} · ${_esc(civ.economy.health)} · idx ${civ.economy.index}`
+            : '—';
+        const disp = civ.disposition || 'unknown';
+        const dispCls = {
+            hostile: 'red', wary: 'amber', neutral: 'dim',
+            xenophobic: 'red', opportunistic: 'amber',
+            friendly: 'green', unknown: 'dim',
+        }[disp] || 'dim';
+        const lvl = civ.level || 'uninhabited';
+        const polity = civ.polity || '—';
+        const lang = civ.language || '—';
+        const age = civ.civ_age_years
+            ? civ.civ_age_years.toLocaleString() + ' yr'
+            : '—';
+        const notes = civ.notes || '';
+        const swatch = `<span class="swatch" style="background:${_esc(f.color)}"></span>`;
+        const ringSw = f.ring
+            ? `<span class="swatch sm" style="background:${_esc(f.ring.color)}"></span>`
+            : '';
+        root.innerHTML = `
+          <div class="dossier-head">
+            <div class="dh-l">
+              ${swatch}
+              <div>
+                <div class="pname">${_esc(f.name)}</div>
+                <div class="pmeta">
+                  <span class="ptype">${_esc((f.type || '').toUpperCase())}</span> ·
+                  r=${(f.radius || 0).toFixed(1)} ·
+                  ${ringSw}${ringTxt} ·
+                  ${(f.moons || []).length} moons ·
+                  ${(f.satellites || []).length} sats
+                </div>
+              </div>
+            </div>
+            <div class="dh-r">
+              <span class="pill ${dispCls}">${_esc(disp.toUpperCase())}</span>
+              <span class="pill amber">${_esc(lvl.toUpperCase())}</span>
+            </div>
+          </div>
+          <div class="dossier-grid">
+            <div><span class="k">Polity</span><span class="v">${_esc(polity)}</span></div>
+            <div><span class="k">Government</span><span class="v">${_esc(govt)}</span></div>
+            <div><span class="k">Population</span><span class="v">${_esc(civ.population || '—')}</span></div>
+            <div><span class="k">Civ age</span><span class="v">${age}</span></div>
+            <div class="span2"><span class="k">Economy</span><span class="v">${econ}</span></div>
+            <div><span class="k">Atmosphere</span><span class="v">${atmTxt}</span></div>
+            <div><span class="k">Language</span><span class="v">${_esc(lang)}</span></div>
+            <div class="span2"><span class="k">Exports</span><span class="v">${exp}</span></div>
+            <div class="span2"><span class="k">Imports</span><span class="v">${imp}</span></div>
+            ${notes ? `<div class="span4"><span class="k">Field notes</span><span class="v notes">${_esc(notes)}</span></div>` : ''}
+            <div class="span4"><span class="k">Status</span><span class="v">${_esc(civ.descriptor || '')}</span></div>
+          </div>
+        `;
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  WARP — hyperdrive streaks + state machine
+    //  Stars stretch toward forward motion (aberration-flavored).
+    //  We render this as LineSegments in a Group parented to the
+    //  camera, so the streaks always frame the view regardless of
+    //  WASD heading. Real relativity has stars compress toward the
+    //  forward axis + blueshift; we approximate that with line
+    //  density biased forward and per-vertex blue tints.
+    // ══════════════════════════════════════════════════════
+    const WARP_COUNT = 1500;
+    const warpGroup = new THREE.Group();
+    camera.add(warpGroup);
+    scene.add(camera);   // camera must be in scene for child to render
+
+    const warpPos = new Float32Array(WARP_COUNT * 6);
+    const warpCol = new Float32Array(WARP_COUNT * 6);
+    const warpOrigins = [];   // per-streak base XY in camera space
+    for (let i = 0; i < WARP_COUNT; i++) {
+        // Bias toward the forward axis: small radii cluster around the
+        // direction of travel, longer ones spread to the periphery.
+        const r = Math.pow(Math.random(), 0.7) * 80;
+        const a = Math.random() * TAU;
+        const x = Math.cos(a) * r;
+        const y = Math.sin(a) * r;
+        const z0 = -10 - Math.random() * 220;     // initial z (forward)
+        warpOrigins.push({ x, y, z0, len: 0, hue: Math.random() });
+        // start as zero-length segments at z0
+        warpPos[i*6  ] = x; warpPos[i*6+1] = y; warpPos[i*6+2] = z0;
+        warpPos[i*6+3] = x; warpPos[i*6+4] = y; warpPos[i*6+5] = z0;
+        warpCol[i*6  ] = 1; warpCol[i*6+1] = 1; warpCol[i*6+2] = 1;
+        warpCol[i*6+3] = 1; warpCol[i*6+4] = 1; warpCol[i*6+5] = 1;
+    }
+    const warpGeo = new THREE.BufferGeometry();
+    warpGeo.setAttribute('position', new THREE.BufferAttribute(warpPos, 3));
+    warpGeo.setAttribute('color',    new THREE.BufferAttribute(warpCol, 3));
+    const warpMat = new THREE.LineBasicMaterial({
+        vertexColors: true, transparent: true, opacity: 0.0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    const warpLines = new THREE.LineSegments(warpGeo, warpMat);
+    warpLines.frustumCulled = false;
+    warpGroup.add(warpLines);
+
+    // state machine
+    const warp = {
+        phase: 'idle',           // idle | charge | accel | cruise | decel
+        t: 0,                    // ms in current phase
+        next: null,              // features dict to swap in mid-warp
+        timings: { charge: 1500, accel: 1200, cruise: 2200, decel: 1500 },
+        prevAutoNav: true,       // remember toggle states to restore after
+    };
+
+    function getCsrf() {
+        const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return m ? m[1] : '';
+    }
+
+    function startWarp() {
+        if (warp.phase !== 'idle') return;
+        warp.phase = 'charge';
+        warp.t = 0;
+        warp.next = null;
+        // ensure Auto-Nav is on during warp (no manual flight while jumping)
+        const autnv = document.querySelector('.toggle[data-k="autnv"]');
+        warp.prevAutoNav = autnv.classList.contains('on');
+        autnv.classList.add('on');
+        keys.clear();
+
+        commLine('crit', 'Cmdr. Aldric Voss · Fleet HQ',
+            'spooling subspace coils — coordinates unknown, hold for telemetry');
+
+        fetch('{% url "bridge:warp" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCsrf(),
+                'Content-Type': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: '{}',
+        }).then(r => r.json()).then(data => {
+            warp.next = data.planet;
+            const lib = document.getElementById('library-count');
+            if (lib) lib.textContent = data.library;
+            commLine('urg', 'Ensign Ilya Demchuk · Astrometrics',
+                `nav lock acquired — ${data.planet.name}, type ${data.planet.type}`);
+        }).catch(() => {
+            // abort warp on failure
+            warp.phase = 'decel'; warp.t = warp.timings.decel * 0.6;
+            commLine('crit', 'Chief Tomás Lindqvist · Engineering',
+                'coil lock failed — aborting jump');
+        });
+    }
+
+    // hyperdrive look: streak length curves from 0 to long during accel,
+    // hold during cruise, collapse during decel. Blueshift the colors
+    // as we approach c by tilting toward cyan/white.
+    function updateWarp(dt) {
+        if (warp.phase === 'idle') return;
+        warp.t += dt;
+        const T = warp.timings;
+        let intensity = 0;          // 0..1 streak length scale
+        let mode = '';
+
+        if (warp.phase === 'charge') {
+            intensity = 0;
+            mode = `WARP CHARGE · ${Math.round((1 - warp.t/T.charge)*100)}%`;
+            if (warp.t >= T.charge) { warp.phase = 'accel'; warp.t = 0; }
+        } else if (warp.phase === 'accel') {
+            intensity = warp.t / T.accel;
+            mode = 'WARP · ACCEL';
+            if (warp.t >= T.accel) { warp.phase = 'cruise'; warp.t = 0; }
+        } else if (warp.phase === 'cruise') {
+            intensity = 1.0;
+            mode = 'WARP · CRUISE';
+            // swap planet halfway through cruise (out of the streaks)
+            if (warp.next && warp.t >= T.cruise * 0.55) {
+                setPlanetFromFeatures(warp.next);
+                commLine('routine', 'Lt. Yara Nakashima · Intel Desk',
+                    `arrival in subspace bubble — ${warp.next.name} dossier inbound`);
+                warp.next = null;
+            }
+            if (warp.t >= T.cruise) { warp.phase = 'decel'; warp.t = 0; }
+        } else if (warp.phase === 'decel') {
+            intensity = 1.0 - warp.t / T.decel;
+            mode = 'WARP · DECEL';
+            if (warp.t >= T.decel) {
+                warp.phase = 'idle';
+                warpMat.opacity = 0;
+                shipGroup.visible = true;
+                // pop the Warp Charge toggle back off
+                const j = document.querySelector('.toggle[data-k="jump"]');
+                if (j) j.classList.remove('on');
+                if (!warp.prevAutoNav) {
+                    document.querySelector('.toggle[data-k="autnv"]')
+                        .classList.remove('on');
+                }
+                return;
+            }
+        }
+        intensity = clamp(intensity, 0, 1);
+
+        // hide ships during cruise + decel so streaks dominate
+        shipGroup.visible = intensity < 0.15;
+
+        // streak geometry update
+        const maxLen = 600;
+        const baseLen = intensity * maxLen;
+        for (let i = 0; i < WARP_COUNT; i++) {
+            const o = warpOrigins[i];
+            const jitter = 0.6 + Math.sin(performance.now() * 0.004 + i) * 0.4;
+            const len = baseLen * jitter;
+            // tail end (further forward, more negative z)
+            warpPos[i*6+5] = o.z0 - len;
+            // head color = bright/white; tail = blueshifted dim
+            const k = intensity;
+            warpCol[i*6  ] = 0.7 + 0.3 * (1 - k);  // less red as we accelerate
+            warpCol[i*6+1] = 0.85 + 0.15 * (1 - k * 0.5);
+            warpCol[i*6+2] = 1.0;
+            warpCol[i*6+3] = 0.2 * k;
+            warpCol[i*6+4] = 0.5 * k;
+            warpCol[i*6+5] = 0.95 * k;
+        }
+        warpGeo.attributes.position.needsUpdate = true;
+        warpGeo.attributes.color.needsUpdate    = true;
+        warpMat.opacity = 0.15 + 0.75 * intensity;
+
+        // HUD override during warp
+        const hud = document.getElementById('hud-mode');
+        hud.style.color = intensity > 0.2 ? 'var(--cyan)' : 'var(--amber)';
+        hud.textContent = mode;
+    }
+
+    // post a single comm line (extracted so warp events can speak)
+    let commLine;   // assigned later when feed setup runs
+
+    // seed the view with the home planet generated server-side
+    const HOME_PLANET = {{ home_planet_json|safe }};
+    setPlanetFromFeatures(HOME_PLANET || {
+        name: 'Home Orbit', type: 'gas_giant', radius: 80,
+        color: '#4a76a8', roughness: 0.85, metalness: 0.02,
+        atmosphere: null,
+        ring: {inner: 110, outer: 165, color: '#d5b37a',
+               tilt: 0.28, roll: 0.35, opacity: 0.55},
+        moons: [{radius: 14, color: '#8b8f94',
+                 orbit_r: 140, orbit_speed: 0.2,
+                 tilt: 0.3, phase: 0}],
+        satellites: [],
+        civilization: {level: 'uninhabited',
+                       descriptor: 'home orbit', notes: ''},
+    });
+
+    // ── ships (real meshes) ───────────────────────────────
+    const shipGroup = new THREE.Group();
+    scene.add(shipGroup);
+
+    const SHIP_COLORS = {
+        freighter: 0x9cb0c4,
+        patrol:    0x37ff8b,
+        hostile:   0xff4d4d,
+        corvette:  0x59d0ff,
+        bulk:      0xd5b37a,
+        yacht:     0xe6c9ff,
+    };
+
+    // Shared geometries (cheap — instance them via clones of a Mesh
+    // whose geometry is reused). Cone points down +X after rotate.
+    const hullGeo = new THREE.ConeGeometry(1, 3.2, 7);
+    hullGeo.rotateZ(-Math.PI / 2);
+    const engineGeo = new THREE.SphereGeometry(0.6, 10, 8);
+    const finGeo = new THREE.BoxGeometry(1.2, 0.12, 0.9);
+
+    function spawnShip3D() {
+        const kinds = Object.keys(SHIP_COLORS);
+        const kind = pick(kinds);
+        const color = SHIP_COLORS[kind];
+        const base = kind === 'bulk' ? 3.0 : kind === 'yacht' ? 0.9 : 1.6;
+        const sz = base * rand(0.9, 1.5);
+
+        const hullMat = new THREE.MeshStandardMaterial({
+            color, roughness: 0.5, metalness: 0.35,
+        });
+        const hull = new THREE.Mesh(hullGeo, hullMat);
+        hull.scale.setScalar(sz);
+
+        const engineMat = new THREE.MeshBasicMaterial({
+            color: kind === 'hostile' ? 0xff7070 : 0xa7eaff,
+            transparent: true, opacity: 0.9,
+        });
+        const engine = new THREE.Mesh(engineGeo, engineMat);
+        engine.position.set(-1.7, 0, 0);
+        hull.add(engine);
+
+        // stubby dorsal fin so ships read as "ships" and not "cones"
+        const fin = new THREE.Mesh(
+            finGeo,
+            new THREE.MeshStandardMaterial({
+                color, roughness: 0.7, metalness: 0.2,
+            })
+        );
+        fin.position.set(-0.2, 0.6, 0);
+        hull.add(fin);
+
+        const script = pick(['linear','linear','linear','sine','orbit','linear']);
+        const dist = rand(80, 480);
+        hull.position.set(
+            rand(-220, 220),
+            rand(-90, 90),
+            -dist,
+        );
+        const dir = new THREE.Vector3(
+            rand(-1, 1), rand(-0.25, 0.25), rand(-1, 1),
+        ).normalize();
+        const speed = rand(4, 14);
+
+        hull.userData = {
+            kind, script,
+            vel: dir.clone().multiplyScalar(speed),
+            phase: Math.random() * TAU,
+            omega: rand(0.4, 1.6),
+            amp:   rand(2, 10),
+            y0:    hull.position.y,
+            cx:    hull.position.x,
+            cy:    hull.position.y,
+            cz:    hull.position.z,
+            r:     rand(25, 80),
+            engine,
+        };
+
+        hull.lookAt(hull.position.clone().add(hull.userData.vel));
+        shipGroup.add(hull);
+        return hull;
+    }
+    for (let i = 0; i < 70; i++) spawnShip3D();
+
+    const _tmpVec = new THREE.Vector3();
+    function updateShips(dt) {
+        const s_dt = dt * 0.001;  // seconds
+        for (const s of shipGroup.children) {
+            const u = s.userData;
+            if (u.script === 'linear') {
+                s.position.addScaledVector(u.vel, s_dt);
+            } else if (u.script === 'sine') {
+                u.phase += s_dt * u.omega;
+                s.position.x += u.vel.x * s_dt;
+                s.position.z += u.vel.z * s_dt;
+                s.position.y = u.y0 + Math.sin(u.phase) * u.amp;
+            } else if (u.script === 'orbit') {
+                u.phase += s_dt * u.omega * 0.6;
+                s.position.x = u.cx + Math.cos(u.phase) * u.r;
+                s.position.z = u.cz + Math.sin(u.phase) * u.r;
+            }
+
+            // face velocity so the ship looks like it's going somewhere
+            if (u.script === 'orbit') {
+                _tmpVec.set(
+                    s.position.x + -Math.sin(u.phase),
+                    s.position.y,
+                    s.position.z +  Math.cos(u.phase),
+                );
+                s.lookAt(_tmpVec);
+            } else {
+                _tmpVec.copy(s.position).add(u.vel);
+                s.lookAt(_tmpVec);
+            }
+
+            // engine flicker
+            u.engine.material.opacity = 0.7 + Math.sin(performance.now() * 0.01 + u.phase) * 0.25;
+
+            // respawn if drifted out of volume
+            if (s.position.length() > 900 || s.position.z > 80) {
+                shipGroup.remove(s);
+                spawnShip3D();
+            }
+        }
+    }
+
+    // ── camera: bob when Auto-Nav is ON, WASD flight when OFF ──
+    let camT = 0;
+    const keys = new Set();
+    const MANUAL_KEYS = new Set(['w', 'a', 's', 'd']);
+    window.addEventListener('keydown', e => {
+        const k = e.key.toLowerCase();
+        if (MANUAL_KEYS.has(k)) {
+            // don't hijack keys while the user is typing in a form field
+            const tag = (document.activeElement || {}).tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            keys.add(k);
+            e.preventDefault();
+        }
+    });
+    window.addEventListener('keyup', e => {
+        keys.delete(e.key.toLowerCase());
+    });
+    // drop all held keys if the window loses focus (prevents stuck motion)
+    window.addEventListener('blur', () => keys.clear());
+
+    function isAutoNavOn() {
+        const t = document.querySelector('.toggle[data-k="autnv"]');
+        return !!(t && t.classList.contains('on'));
+    }
+
+    const _fwd = new THREE.Vector3();
+    const _right = new THREE.Vector3();
+    function updateCamera(dt) {
+        camT += dt;
+        if (isAutoNavOn()) {
+            // autopilot: gentle "living bridge" bob near home orbit
+            camera.position.x = Math.sin(camT * 0.00035) * 0.6;
+            camera.position.y = Math.cos(camT * 0.00028) * 0.35;
+        } else {
+            // manual flight — WASD translates the bridge through space
+            const speed = 0.08 * dt;   // units/ms
+            camera.getWorldDirection(_fwd);
+            _right.crossVectors(_fwd, camera.up).normalize();
+            if (keys.has('w')) camera.position.addScaledVector(_fwd,    speed);
+            if (keys.has('s')) camera.position.addScaledVector(_fwd,   -speed);
+            if (keys.has('d')) camera.position.addScaledVector(_right,  speed);
+            if (keys.has('a')) camera.position.addScaledVector(_right, -speed);
+        }
+    }
+
+    function render3D(dt) {
+        updateCamera(dt);
+        updateShips(dt);
+
+        // HUD: mode indicator reflects Auto-Nav toggle
+        const mode = document.getElementById('hud-mode');
+        if (isAutoNavOn()) {
+            mode.style.color = 'var(--amber)';
+            mode.textContent = 'AUTO-NAV · HOLDING ORBIT';
+        } else {
+            mode.style.color = 'var(--green)';
+            mode.textContent = 'MANUAL · WASD FLIGHT';
+        }
+
+        updatePlanetSystem(dt);
+        updateWarp(dt);
+
+        renderer.render(scene, camera);
+
+        // HUD: contacts + nearest
+        document.getElementById('hud-cnt').textContent = shipGroup.children.length;
+        let nearest = null, nd = Infinity;
+        for (const s of shipGroup.children) {
+            const d = s.position.distanceToSquared(camera.position);
+            if (d < nd) { nd = d; nearest = s; }
+        }
+        if (nearest) {
+            document.getElementById('hud-nearest').textContent =
+                `NEAREST · ${nearest.userData.kind.toUpperCase()} · ${Math.round(Math.sqrt(nd))}m`;
+        }
+    }
+
+    // Expose handles for future features (approach burns, free-look,
+    // spawn hostiles on cue, etc.). bridge.dollyTo(t ∈ [0..1]) lerps the
+    // camera toward whatever planet is currently in the scene.
+    const _dollyHome = camera.position.clone();
+    const _dollyTmp = new THREE.Vector3();
+    window.bridge = {
+        THREE, scene, camera, renderer, shipGroup,
+        get planet() { return planetSystem; },
+        get features() { return currentFeatures; },
+        spawnShip: spawnShip3D,
+        warp() { startWarp(); },
+        dollyTo(t) {
+            if (!planetSystem) return;
+            const p = planetSystem.position;
+            const stop = _dollyTmp.copy(p).sub(
+                p.clone().normalize().multiplyScalar(120)
+            );
+            camera.position.lerpVectors(_dollyHome, stop, t);
+            camera.lookAt(p);
+        },
+    };
+
+    // ══════════════════════════════════════════════════════
+    //  COMMS FEED — rotating "check-ins" from human operators
+    // ══════════════════════════════════════════════════════
+    const OPERATORS = [
+        ['Lt. Connie Ortega',    'Beacon-7'],
+        ['Cmdr. Aldric Voss',    'Sector-12'],
+        ['Ensign Pilar Kováč',   'Hydra Station'],
+        ['Dr. Mei Okafor',       'Medical Wing'],
+        ['Chief Tomás Lindqvist','Engineering'],
+        ['Lt. Yara Nakashima',   'Intel Desk'],
+        ['Warrant Bo Fitzsimmons','Drone Ops'],
+        ['Major Elspeth Graves', 'Fleet HQ'],
+        ['Ensign Ilya Demchuk',  'Astrometrics'],
+        ['Petty Off. Ruan Sato', 'Hangar-3'],
+        ['Cmdr. Priya Acharya',  'Kuiper Relay'],
+        ['Lt. Sven Halvorsen',   'Deep-Space Obs.'],
+        ['Dr. Aurelio Bonetti',  'Xenobio Lab'],
+        ['Chief Nadia Beaumont', 'Quartermaster'],
+        ['Ensign Kiyoshi Park',  'Nav Office'],
+    ];
+    const LINES = [
+        ['routine', 'radiation gradient nominal, delta 0.02 Sv/h'],
+        ['routine', 'inventory reconciled — fuel cells logged'],
+        ['routine', 'no contact, local volume clear for {HOURS}h'],
+        ['routine', 'shift change acknowledged, watch standing'],
+        ['routine', 'diagnostics green on array 4, re-spooled'],
+        ['routine', 'thermals within 0.4° of projected'],
+        ['routine', 'handshake verified — IFF token matches'],
+        ['routine', 'plotting correction filed, heading true'],
+        ['urg', 'anomalous neutrino burst, bearing 214° MK2 — classifying'],
+        ['urg', 'civilian freighter reports engine flare, advising course change'],
+        ['urg', 'requesting handshake — gate transit queue at {MIN} min'],
+        ['urg', 'salvage ping: derelict tug, mass ~9kT, bearing 071°'],
+        ['urg', 'your wake is drawing hostiles on parallel vector, mind the tail'],
+        ['crit','unidentified silhouette crossing inner screen, tracking'],
+        ['crit','beacon cluster went dark 40s ago — treat as suspect'],
+        ['crit','we have movement on channel 12 — not ours'],
+    ];
+    const feed = document.getElementById('comms-feed');
+
+    function now() {
+        const d = new Date();
+        const p = n => String(n).padStart(2, '0');
+        return p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+    }
+    // exposed to warp / dossier code so they can post specific lines
+    commLine = function(cls, from, body) {
+        const div = document.createElement('div');
+        div.className = 'line';
+        const prefix = cls === 'crit' ? '!! ' : (cls === 'urg' ? '>> ' : '.. ');
+        div.innerHTML =
+            `<span class="ts">[${now()}Z]</span> ` +
+            `<span class="from">${from}</span>\n` +
+            `  <span class="${cls}">${prefix}${body}</span>\n`;
+        feed.appendChild(div);
+        while (feed.childElementCount > 60) feed.removeChild(feed.firstChild);
+        feed.scrollTop = feed.scrollHeight;
+    };
+    function postComm() {
+        const op = pick(OPERATORS);
+        const [cls, tmpl] = pick(LINES);
+        const body = tmpl
+            .replace('{HOURS}', (2 + Math.floor(Math.random() * 10)))
+            .replace('{MIN}',   (3 + Math.floor(Math.random() * 18)));
+        commLine(cls, `${op[0]} · ${op[1]}`, body);
+    }
+    // seed a few immediately
+    for (let i = 0; i < 4; i++) postComm();
+    setInterval(postComm, 2400);
+
+    // ══════════════════════════════════════════════════════
+    //  CLOCK in viewport HUD
+    // ══════════════════════════════════════════════════════
+    const missionStart = Date.now();
+    function updateHudClock() {
+        const e = Math.floor((Date.now() - missionStart) / 1000);
+        const h = Math.floor(e / 3600), m = Math.floor(e / 60) % 60, s = e % 60;
+        const p = n => String(n).padStart(2, '0');
+        document.getElementById('hud-clock').textContent =
+            `T+${p(h)}:${p(m)}:${p(s)}`;
+    }
+
+    // ══════════════════════════════════════════════════════
+    //  TOGGLE SWITCHES
+    // ══════════════════════════════════════════════════════
+    document.querySelectorAll('.toggle').forEach(t => {
+        t.addEventListener('click', () => {
+            // Warp Charge is special: clicking it commits the jump and the
+            // state machine drives the toggle back off when decel completes.
+            if (t.dataset.k === 'jump') {
+                if (warp.phase !== 'idle') return;   // mid-warp: ignore
+                t.classList.add('on');
+                startWarp();
+                return;
+            }
+            t.classList.toggle('on');
+            if (t.dataset.k === 'weapons' && t.classList.contains('on')) {
+                document.querySelector('.throttle-meta .hudline').innerHTML =
+                    '<div><span class="k">MASTER</span> ARM · <span style="color:var(--red)">ARMED</span></div>' +
+                    '<div><span class="k">TID LOCK</span> · ACQUIRING</div>' +
+                    '<div><span class="k">PHOENIX</span> · 4/4 · READY</div>' +
+                    '<div><span class="k">CHAFF/FLARE</span> · 30 / 30</div>';
+            }
+        });
+    });
+
+    // ══════════════════════════════════════════════════════
+    //  THROTTLE (drag)
+    // ══════════════════════════════════════════════════════
+    const throttle = document.getElementById('throttle');
+    const handle = document.getElementById('throttle-handle');
+    let thrPct = 0.72;
+    function layoutThrottle() {
+        const h = throttle.clientHeight - 18 - 12;
+        handle.style.top = (6 + (1 - thrPct) * h) + 'px';
+    }
+    layoutThrottle();
+    let dragging = false;
+    handle.addEventListener('pointerdown', e => {
+        dragging = true; handle.setPointerCapture(e.pointerId);
+        handle.style.cursor = 'grabbing';
+    });
+    handle.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        const rect = throttle.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const usable = rect.height - 18 - 12;
+        thrPct = clamp(1 - (y - 6) / usable, 0, 1);
+        layoutThrottle();
+        updateThrottleMeta();
+    });
+    handle.addEventListener('pointerup', e => {
+        dragging = false; handle.style.cursor = 'grab';
+    });
+    function updateThrottleMeta() {
+        document.getElementById('thr-v').textContent = Math.round(thrPct * 100) + '%';
+        const aoa = (thrPct - 0.5) * 8;
+        document.getElementById('thr-a').textContent =
+            (aoa >= 0 ? '+' : '') + aoa.toFixed(1) + '°';
+        document.getElementById('thr-g').textContent =
+            (1 + thrPct * 1.8).toFixed(2) + ' g';
+        const swept = Math.round(20 + thrPct * 48);
+        document.getElementById('thr-w').textContent = 'Swept ' + swept + '°';
+    }
+    updateThrottleMeta();
+
+    // ══════════════════════════════════════════════════════
+    //  MAIN LOOP
+    // ══════════════════════════════════════════════════════
+    let last = performance.now();
+    function tick(now) {
+        const dt = now - last; last = now;
+        drawRadar();
+
+        // gauges slowly wobble
+        gaugeState.fuel    = clamp(gaugeState.fuel    + rand(-0.03, 0.01), 0, 100);
+        gaugeState.hull    = clamp(gaugeState.hull    + rand(-0.01, 0.02), 0, 100);
+        gaugeState.shields = clamp(gaugeState.shields + rand(-0.3,  0.3),  0, 100);
+        gaugeState.reactor = clamp(gaugeState.reactor + rand(-0.4,  0.4),  0, 100);
+        drawGauge(gFuel,    gaugeState.fuel,    100, '#ffb200');
+        drawGauge(gHull,    gaugeState.hull,    100, '#37ff8b');
+        drawGauge(gShields, gaugeState.shields, 100, '#59d0ff');
+        drawGauge(gReactor, gaugeState.reactor, 100, '#ff7070');
+
+        // dial needles ease toward targets, which drift slowly
+        for (const [k, d] of Object.entries(dials)) {
+            d.target += rand(-0.4, 0.4);
+            d.a += (d.target - d.a) * 0.04;
+            drawDial(d.el, d.a);
+        }
+
+        render3D(dt);
+
+        // heading slowly drifts
+        INITIAL.heading = (INITIAL.heading + 0.02) % 360;
+        document.getElementById('hud-bear').textContent =
+            String(Math.round(INITIAL.heading)).padStart(3, '0');
+
+        updateHudClock();
+        requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+})();
+</script>
+{% endblock %}

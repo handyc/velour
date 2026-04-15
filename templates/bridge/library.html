@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Bridge — Atlas ({{ total }}){% endblock %}
+
+{% block extra_head %}
+<style>
+    :root {
+        --bg:    #060a0e;
+        --panel: #0d141b;
+        --edge:  #1f3041;
+        --amber: #ffb200;
+        --green: #37ff8b;
+        --red:   #ff4d4d;
+        --cyan:  #59d0ff;
+        --dim:   #6c8090;
+        --text:  #c5d4df;
+    }
+    body { background: var(--bg); }
+    main.container { max-width: 1400px; }
+    .atlas-head {
+        font-family: ui-monospace, Menlo, monospace;
+        color: var(--text);
+        display: flex; align-items: baseline; gap: 0.8rem;
+        border-bottom: 1px solid var(--edge);
+        padding-bottom: 0.5rem;
+        margin-bottom: 0.8rem;
+    }
+    .atlas-head h1 {
+        margin: 0;
+        font-size: 1.05rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--cyan);
+    }
+    .atlas-head .count {
+        color: var(--amber);
+        font-size: 0.78rem;
+    }
+    .atlas-head a {
+        color: var(--dim);
+        text-decoration: none;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        border: 1px solid var(--edge);
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        margin-left: auto;
+    }
+    .atlas-head a:hover { color: var(--cyan); }
+
+    .atlas-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 0.7rem;
+    }
+    .pcard {
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        border-radius: 4px;
+        padding: 0.55rem 0.65rem;
+        font-family: ui-monospace, Menlo, monospace;
+        color: var(--text);
+        font-size: 0.7rem;
+        display: flex; flex-direction: column; gap: 0.35rem;
+    }
+    .pcard .head {
+        display: flex; align-items: center; gap: 0.5rem;
+        border-bottom: 1px dashed var(--edge);
+        padding-bottom: 0.35rem;
+    }
+    .pcard .swatch {
+        display: inline-block; width: 32px; height: 32px;
+        border-radius: 50%; border: 1px solid #222;
+        position: relative;
+        flex-shrink: 0;
+        box-shadow: inset 0 0 6px rgba(0,0,0,0.5);
+    }
+    .pcard .swatch::after {
+        content: ''; position: absolute; inset: -3px;
+        border-radius: 50%;
+        border: 1px solid currentColor;
+        opacity: 0.4;
+        display: var(--ring-display, none);
+    }
+    .pcard .swatch.has-ring::after { display: block; }
+    .pcard .name { color: var(--cyan); letter-spacing: 0.04em; font-size: 0.86rem; }
+    .pcard .meta { color: var(--dim); font-size: 0.6rem; letter-spacing: 0.06em; }
+    .pcard .meta .ptype { color: var(--amber); }
+    .pcard .row { display: flex; justify-content: space-between; }
+    .pcard .row .k {
+        color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em;
+        font-size: 0.56rem;
+    }
+    .pcard .row .v { color: var(--text); }
+    .pcard .row .v.green { color: var(--green); }
+    .pcard .row .v.red   { color: var(--red); }
+    .pcard .row .v.amber { color: var(--amber); }
+    .pcard .notes {
+        color: #b6c8d3; font-style: italic; opacity: 0.85;
+        font-size: 0.62rem;
+        border-top: 1px dashed var(--edge);
+        padding-top: 0.3rem;
+        margin-top: auto;
+    }
+    .empty {
+        color: var(--dim);
+        font-family: ui-monospace, Menlo, monospace;
+        text-align: center;
+        padding: 4rem 1rem;
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="atlas-head">
+    <h1>Atlas</h1>
+    <span class="count">{{ total }} planet{{ total|pluralize }} catalogued</span>
+    <a href="{% url 'bridge:home' %}">← Bridge</a>
+</div>
+
+{% if planets %}
+<div class="atlas-grid">
+    {% for p in planets %}
+    {% with f=p.obj.features civ=p.obj.features.civilization %}
+    <div class="pcard">
+        <div class="head">
+            <span class="swatch {% if p.has_ring %}has-ring{% endif %}"
+                  style="background: {{ p.color }}; color: {{ p.ring_color|default:'#888' }};"></span>
+            <div style="min-width:0;">
+                <div class="name">{{ p.obj.name }}</div>
+                <div class="meta">
+                    <span class="ptype">{{ p.obj.ptype|upper }}</span> ·
+                    r={{ f.radius }} ·
+                    {{ p.moon_count }} moons ·
+                    {{ p.sat_count }} sats
+                </div>
+            </div>
+        </div>
+
+        <div class="row"><span class="k">Polity</span>
+            <span class="v">{{ civ.polity|default:"—" }}</span></div>
+        <div class="row"><span class="k">Civ level</span>
+            <span class="v amber">{{ civ.level|default:"uninhabited" }}</span></div>
+        {% if civ.population %}
+        <div class="row"><span class="k">Population</span>
+            <span class="v">{{ civ.population }}</span></div>
+        {% endif %}
+        {% if civ.government %}
+        <div class="row"><span class="k">Government</span>
+            <span class="v">{{ civ.government }}</span></div>
+        {% endif %}
+        {% if civ.disposition %}
+        <div class="row"><span class="k">Disposition</span>
+            <span class="v {% if civ.disposition == 'hostile' or civ.disposition == 'xenophobic' %}red{% elif civ.disposition == 'friendly' %}green{% elif civ.disposition == 'wary' or civ.disposition == 'opportunistic' %}amber{% endif %}">
+                {{ civ.disposition }}</span></div>
+        {% endif %}
+        {% if civ.economy %}
+        <div class="row"><span class="k">Economy</span>
+            <span class="v">{{ civ.economy.style }} · {{ civ.economy.health }}</span></div>
+        {% endif %}
+        {% if civ.exports %}
+        <div class="row"><span class="k">Exports</span>
+            <span class="v">{{ civ.exports|join:", " }}</span></div>
+        {% endif %}
+        {% if civ.notes %}
+        <div class="notes">{{ civ.notes }}</div>
+        {% endif %}
+        <div class="row" style="opacity:0.6;">
+            <span class="k">Visited {{ p.obj.visit_count }}×</span>
+            <span class="v" style="font-size:0.58rem;">{{ p.obj.last_visited|date:"Y-m-d H:i" }}</span>
+        </div>
+    </div>
+    {% endwith %}
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+    No planets in the atlas yet — initiate a warp jump from the bridge.
+</div>
+{% endif %}
+
+{% endblock %}
