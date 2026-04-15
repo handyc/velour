@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}{{ reel.title }} — Zoetrope{% endblock %}
+
+{% block extra_head %}
+<style>
+    .zoe-detail { max-width: 900px; margin: 0.5rem auto 3rem; }
+    .zoe-detail h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    .zoe-detail .sub { color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; margin-bottom: 1.2rem; }
+    .zoe-detail video { width: 100%; background: #000; border-radius: 6px; display: block; margin-bottom: 1rem; }
+    .zoe-detail .placeholder {
+        aspect-ratio: 16/9; background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center; color: #6e7681;
+        font-size: 0.85rem; margin-bottom: 1rem;
+    }
+
+    .zoe-props {
+        display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem;
+        font-size: 0.82rem; color: #c9d1d9; margin-bottom: 1.2rem;
+    }
+    .zoe-props dt { color: #8b949e; }
+    .zoe-props dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+
+    .zoe-preview { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1.4rem; }
+    .zoe-preview img { width: 90px; height: 90px; object-fit: cover; border-radius: 3px; }
+
+    .zoe-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .status-pill {
+        display: inline-block; font-size: 0.7rem; padding: 0.1rem 0.5rem;
+        border-radius: 8px; background: #21262d; color: #8b949e;
+        text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .status-pill.ready { background: rgba(46,160,67,0.18); color: #2ea043; }
+    .status-pill.rendering { background: rgba(210,153,34,0.18); color: #d29922; }
+    .status-pill.error { background: rgba(248,81,73,0.2); color: #f85149; }
+    .error-msg {
+        background: #1b0f0f; border: 1px solid #5a2020; color: #f85149;
+        padding: 0.7rem 0.9rem; border-radius: 4px; font-size: 0.78rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre-wrap; word-break: break-word; margin-bottom: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="zoe-detail">
+    <h1>{{ reel.title }}</h1>
+    <div class="sub">
+        <span class="status-pill {{ reel.status }}">{{ reel.status }}</span>
+        created {{ reel.created_at|date:"D d M H:i" }}
+        {% if reel.rendered_at %} · rendered {{ reel.rendered_at|date:"D d M H:i" }}{% endif %}
+    </div>
+
+    {% if reel.status == 'error' and reel.status_message %}
+    <div class="error-msg">{{ reel.status_message }}</div>
+    {% endif %}
+
+    {% if reel.output %}
+        <video controls {% if reel.poster %}poster="{{ reel.poster.url }}"{% endif %}>
+            <source src="{{ reel.output.url }}" type="video/mp4">
+        </video>
+    {% else %}
+        <div class="placeholder">No rendered output yet.</div>
+    {% endif %}
+
+    <dl class="zoe-props">
+        <dt>Duration</dt><dd>{{ reel.duration_seconds|floatformat:1 }} s @ {{ reel.fps }} fps</dd>
+        <dt>Resolution</dt><dd>{{ reel.width }} × {{ reel.height }}</dd>
+        <dt>Selection</dt><dd>{{ reel.get_selection_mode_display }}, {{ reel.image_count }} image{{ reel.image_count|pluralize }}</dd>
+        <dt>Tag filter</dt><dd>{% if reel.tag_filter %}{{ reel.tag_filter }}{% else %}(any){% endif %}</dd>
+        {% if reel.frames_used %}<dt>Frames used</dt><dd>{{ reel.frames_used }} source image{{ reel.frames_used|pluralize }}</dd>{% endif %}
+        {% if reel.size_bytes %}<dt>File size</dt><dd>{{ reel.size_h }}</dd>{% endif %}
+        {% if reel.share_url %}
+        <dt>Shared</dt>
+        <dd><a href="{{ reel.share_url }}" target="_blank" rel="noopener">{{ reel.share_url }}</a>
+            <span style="color:#6e7681;"> · {{ reel.shared_at|date:"D d M H:i" }} (expires ~4h after upload)</span></dd>
+        {% endif %}
+    </dl>
+
+    {% if preview %}
+    <h3 style="font-size:0.85rem;color:#8b949e;margin:1rem 0 0.4rem;font-weight:500;">Sources (first {{ preview|length }})</h3>
+    <div class="zoe-preview">
+        {% for item in preview %}
+            {% if item.thumbnail %}
+                <a href="{% url 'attic:detail' item.slug %}" title="{{ item.title }}">
+                    <img src="{{ item.thumbnail.url }}" alt="{{ item.alt_text|default:item.title }}">
+                </a>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="zoe-actions">
+        <form method="post" action="{% url 'zoetrope:render' reel.slug %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn">{% if reel.output %}Re-render{% else %}Render now{% endif %}</button>
+        </form>
+        {% if reel.output %}
+            <a href="{{ reel.output.url }}" download class="btn btn-secondary">Download mp4</a>
+            <form method="post" action="{% url 'zoetrope:share' reel.slug %}" style="display:inline;" target="_blank">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary"
+                        title="Upload to s.h4ks.com (public, expires in ~4h, 64MB limit) and open the link in a new tab.">
+                    Share via h4ks &#8599;
+                </button>
+            </form>
+        {% endif %}
+        <a href="{% url 'zoetrope:list' %}" class="btn btn-secondary">Back</a>
+        <form method="post" action="{% url 'zoetrope:delete' reel.slug %}" style="margin-left:auto;" onsubmit="return confirm('Delete this reel?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

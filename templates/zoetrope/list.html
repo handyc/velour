@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Zoetrope — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .zoe-wrap { max-width: 1100px; margin: 0 auto; padding: 0.5rem 0 3rem; }
+    .zoe-header { display: flex; align-items: baseline; gap: 0.85rem; margin: 0.5rem 0 0.25rem; flex-wrap: wrap; }
+    .zoe-header h1 { margin: 0; font-size: 1.4rem; }
+    .zoe-header .spacer { flex: 1; }
+    .zoe-lede { color: #8b949e; font-size: 0.85rem; max-width: 62ch; line-height: 1.45; margin: 0 0 1.4rem; }
+
+    .zoe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
+    .zoe-card {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        overflow: hidden; display: flex; flex-direction: column;
+    }
+    .zoe-card a { text-decoration: none; color: inherit; display: block; }
+    .zoe-poster {
+        aspect-ratio: 16 / 9; background: #161b22;
+        display: flex; align-items: center; justify-content: center;
+        overflow: hidden; position: relative;
+    }
+    .zoe-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .zoe-poster .glyph { color: #6e7681; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
+    .zoe-play {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: rgba(255,255,255,0.85); font-size: 2.5rem; text-shadow: 0 2px 12px rgba(0,0,0,0.7);
+        pointer-events: none;
+    }
+    .zoe-meta { padding: 0.6rem 0.75rem; border-top: 1px solid #21262d; font-size: 0.78rem; }
+    .zoe-meta .title { color: #c9d1d9; font-weight: 600; margin-bottom: 0.2rem; }
+    .zoe-meta .info { color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.7rem; }
+
+    .status-pill {
+        display: inline-block; font-size: 0.62rem; padding: 0.08rem 0.4rem;
+        border-radius: 8px; background: #21262d; color: #8b949e;
+        text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.3rem;
+    }
+    .status-pill.ready { background: rgba(46,160,67,0.18); color: #2ea043; }
+    .status-pill.rendering { background: rgba(210,153,34,0.18); color: #d29922; }
+    .status-pill.error { background: rgba(248,81,73,0.2); color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="zoe-wrap">
+<div class="zoe-header">
+    <h1>Zoetrope</h1>
+    <a href="{% url 'zoetrope:create' %}" class="btn">New Reel</a>
+    <form method="post" action="{% url 'zoetrope:quick_random' %}" style="display:inline-flex;align-items:center;gap:0.35rem;">
+        {% csrf_token %}
+        <input type="number" name="duration_seconds" min="2" max="30" step="1" value="6"
+               style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:0.3rem 0.4rem;font:inherit;font-size:0.85rem;">
+        <span style="color:#6e7681;font-size:0.78rem;">s</span>
+        <button type="submit" class="btn btn-secondary" title="Render a random reel: N seconds × 30 fps = N*30 random Attic images, each shown for one frame.">Random Reel</button>
+    </form>
+    <span class="spacer"></span>
+    <span style="color:#6e7681;font-size:0.78rem;">{{ reels|length }} reel{{ reels|length|pluralize }} · {{ image_count }} image{{ image_count|pluralize }} in Attic</span>
+</div>
+<p class="zoe-lede">Compile Attic images into short films. Each reel is a recipe — pick a tag, duration, and frame rate; Zoetrope selects the images and renders an mp4 with ffmpeg. Or click <em>Random Reel</em> for a flicker-book of N × 30 random images.</p>
+
+{% if reels %}
+<div class="zoe-grid">
+    {% for reel in reels %}
+    <div class="zoe-card">
+        <a href="{% url 'zoetrope:detail' reel.slug %}">
+            <div class="zoe-poster">
+                {% if reel.poster %}
+                    <img src="{{ reel.poster.url }}" alt="">
+                    {% if reel.output %}<div class="zoe-play">&#9654;</div>{% endif %}
+                {% else %}
+                    <span class="glyph">{{ reel.get_status_display }}</span>
+                {% endif %}
+            </div>
+            <div class="zoe-meta">
+                <div class="title">{{ reel.title }}</div>
+                <div class="info">
+                    <span class="status-pill {{ reel.status }}">{{ reel.status }}</span>
+                    {{ reel.duration_seconds|floatformat:1 }}s · {{ reel.fps }}fps
+                    {% if reel.output %}· {{ reel.size_h }}{% endif %}
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e;margin-top:1.5rem;">No reels yet. <a href="{% url 'zoetrope:create' %}">Spin the first one</a>.</p>
+{% endif %}
+
+<div style="margin-top:1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+</div>
+{% endblock %}

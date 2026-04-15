@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}New Reel — Zoetrope{% endblock %}
+
+{% block extra_head %}
+<style>
+    .zoe-form { max-width: 640px; margin: 1rem auto 3rem; }
+    .zoe-form h1 { font-size: 1.3rem; margin: 0 0 0.25rem; }
+    .zoe-form p.lede { color: #8b949e; font-size: 0.85rem; margin: 0 0 1.4rem; line-height: 1.45; }
+    .zoe-form label { display: block; color: #8b949e; font-size: 0.78rem; margin: 0.8rem 0 0.25rem; }
+    .zoe-form input[type=text], .zoe-form input[type=number], .zoe-form select {
+        background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.4rem 0.55rem; font: inherit; font-size: 0.9rem;
+        width: 100%; box-sizing: border-box;
+    }
+    .zoe-form .row { display: flex; gap: 0.75rem; }
+    .zoe-form .row > div { flex: 1; }
+    .zoe-form .hint { color: #6e7681; font-size: 0.72rem; margin-top: 0.2rem; }
+    .zoe-form .actions { margin-top: 1.4rem; display: flex; gap: 0.5rem; align-items: center; }
+    .zoe-form .actions label { margin: 0; color: #c9d1d9; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 0.35rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="post" class="zoe-form">
+    {% csrf_token %}
+    <h1>New Reel</h1>
+    <p class="lede">A reel is a declarative recipe. Zoetrope queries Attic at render time, so the same recipe re-rendered next week may pull in newer photos.</p>
+
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" placeholder="e.g. Lab — April" required>
+
+    <label for="tag_filter">Tag filter <span class="hint">(comma-separated; blank = all images)</span></label>
+    <input type="text" id="tag_filter" name="tag_filter" placeholder="e.g. aquarium, gary">
+
+    <div class="row">
+        <div>
+            <label for="selection_mode">Selection</label>
+            <select id="selection_mode" name="selection_mode">
+                {% for v, label in selection_modes %}
+                <option value="{{ v }}" {% if v == 'recent' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="image_count">Image count</label>
+            <input type="number" id="image_count" name="image_count" min="1" max="300" value="10">
+            <div class="hint">{{ image_count }} image{{ image_count|pluralize }} available in Attic</div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div>
+            <label for="duration_seconds">Duration (s)</label>
+            <input type="number" id="duration_seconds" name="duration_seconds" min="2" max="15" step="0.5" value="6">
+        </div>
+        <div>
+            <label for="fps">Frame rate</label>
+            <select id="fps" name="fps">
+                <option value="24">24 fps (cinema)</option>
+                <option value="30" selected>30 fps</option>
+                <option value="60">60 fps</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="row">
+        <div>
+            <label for="width">Width</label>
+            <input type="number" id="width" name="width" min="320" max="3840" step="2" value="1280">
+        </div>
+        <div>
+            <label for="height">Height</label>
+            <input type="number" id="height" name="height" min="240" max="2160" step="2" value="720">
+        </div>
+    </div>
+
+    <div class="actions">
+        <button type="submit" class="btn">Create</button>
+        <label><input type="checkbox" name="render_now" checked> Render immediately</label>
+        <a href="{% url 'zoetrope:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
