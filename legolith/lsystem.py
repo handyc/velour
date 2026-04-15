@@ -39,6 +39,8 @@ import random
 from dataclasses import dataclass
 from typing import Callable
 
+from lsystem.core import Grammar
+
 from .brick_render import (
     Brick, BRICK_H, PLATE_H,
     BRICK_RED, BRICK_BLUE, BRICK_YELLOW, BRICK_GREEN, BRICK_ORANGE,
@@ -68,38 +70,22 @@ Placement = tuple[Brick, tuple[float, float, float]]
 # ---------------------------------------------------------------------------
 # L-System core: string expansion
 # ---------------------------------------------------------------------------
+# The legacy Legolith `LSystem` class is now a thin facade over the shared
+# `lsystem.core.Grammar` so every Velour app expands grammars identically.
+# Legolith's brick alphabet still rides through untouched because Grammar
+# copies unknown symbols verbatim and preserves `{…}` pragmas as literal
+# terminals.
 class LSystem:
-    """Simple deterministic L-System.
-
-    ``rules`` is a dict mapping single characters to replacement strings.
-    Characters not present in ``rules`` are copied through unchanged — those
-    are the terminal symbols the turtle will interpret.
-
-    Multi-character tokens like ``{C:rrggbb}`` are treated as literal
-    terminals (never matched as a rule key) and passed through intact.
-    """
+    """Deterministic L-System (Legolith facade over lsystem.core.Grammar)."""
 
     def __init__(self, axiom: str, rules: dict[str, str], iterations: int = 3):
         self.axiom = axiom
         self.rules = rules
         self.iterations = iterations
+        self._grammar = Grammar(axiom, rules, iterations=iterations)
 
     def expand(self) -> str:
-        s = self.axiom
-        for _ in range(self.iterations):
-            out: list[str] = []
-            i = 0
-            while i < len(s):
-                c = s[i]
-                if c == "{":
-                    j = s.index("}", i)
-                    out.append(s[i:j + 1])
-                    i = j + 1
-                    continue
-                out.append(self.rules.get(c, c))
-                i += 1
-            s = "".join(out)
-        return s
+        return self._grammar.expand()
 
 
 # ---------------------------------------------------------------------------

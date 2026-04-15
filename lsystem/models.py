@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils.text import slugify
 
+from .core import Grammar
+
 
 class PlantSpecies(models.Model):
     """A reusable L-system definition — plants or architecture."""
@@ -112,6 +114,18 @@ class PlantSpecies(models.Model):
     @property
     def is_architecture(self):
         return self.category in self.ARCHITECTURE_CATEGORIES
+
+    def expand(self, seed: int | None = None, max_len: int = 200_000) -> str:
+        """Python-side expansion via the shared lsystem.core.Grammar.
+
+        The Aether `l-system-plant` script is still the production
+        renderer; this method exists for parity with other Velour apps
+        (Legolith, Screen Gubi) and for tests / previews.
+        """
+        return Grammar(
+            self.axiom, self.rules, iterations=self.iterations,
+            seed=seed, max_len=max_len,
+        ).expand()
 
     def save(self, *args, **kwargs):
         if not self.slug:

@@ -43,3 +43,19 @@ class GubiWorld(models.Model):
 
     def scene(self):
         return G.lsystem_scene(self.gubified())
+
+    def expand_lsystem(self, seed: int | None = None,
+                       max_len: int = 200_000) -> str:
+        """Expand this world's L-system via the shared core Grammar.
+
+        The visible tree scene is still expanded client-side in three.js
+        so reloads stay snappy; this mirror lets other Velour apps —
+        Legolith, the lsystem app — consume a Gubi grammar in Python.
+        """
+        from lsystem.core import Grammar
+        scene = self.scene()
+        return Grammar(
+            scene['axiom'], scene['rules'], iterations=scene['iterations'],
+            seed=seed if seed is not None else scene.get('seed'),
+            max_len=max_len,
+        ).expand()
