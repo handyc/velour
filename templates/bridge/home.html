@@ -1950,6 +1950,7 @@ import * as THREE from 'three';
         scheduleRing(rng(8, 20));
         scheduleFootsteps(rng(12, 25));
         scheduleChatter(rng(20, 45));
+        scheduleSpeech(rng(6, 14));
     }
 
     audioBtn.addEventListener('click', () => {
@@ -2336,6 +2337,216 @@ import * as THREE from 'three';
                 }, i * rng(220, 480));
             }
             scheduleChatter(rng(25, 80));
+        }, delay * 1000);
+    }
+
+    // ── Pink-noise "speech" — brief filtered-noise bursts arranged
+    //    into phrases. Each symbol in a phrase picks an envelope,
+    //    duration, and formant-like filter pair; sequenced together
+    //    they read like overheard conversation a few corridors away.
+    //
+    //    The phrase alphabet is intentionally L-system friendly:
+    //      V — vowel (medium burst, two-formant bandpass, ~180ms)
+    //      v — short vowel (~90ms)
+    //      C — consonant (short noisy burst, high bandpass, ~55ms)
+    //      s — sibilant (very short, 3-6kHz bandpass, ~40ms)
+    //      p — plosive (very short transient, ~25ms)
+    //      . — pause
+    //      , — long pause / breath
+    //
+    //    speakPhrase() takes a string of these symbols, so a future
+    //    L-system can produce the string — "FvF" / "aVbCbv" / whatever
+    //    grammar feels right. generatePhrase() is the current
+    //    stochastic placeholder.
+
+    // Lazily build one long pink-noise buffer (Paul Kellet's filter
+    // on white noise). We sample random windows from it per burst,
+    // so many bursts share one underlying buffer.
+    function getPinkBuffer() {
+        if (audio.pink) { return audio.pink; }
+        const ctx = audio.ctx;
+        const secs = 8;
+        const buf = ctx.createBuffer(1, ctx.sampleRate * secs, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
+        for (let i = 0; i < d.length; i++) {
+            const w = Math.random() * 2 - 1;
+            b0 = 0.99886 * b0 + w * 0.0555179;
+            b1 = 0.99332 * b1 + w * 0.0750759;
+            b2 = 0.96900 * b2 + w * 0.1538520;
+            b3 = 0.86650 * b3 + w * 0.3104856;
+            b4 = 0.55000 * b4 + w * 0.5329522;
+            b5 = -0.7616 * b5 - w * 0.0168980;
+            d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+            b6 = w * 0.115926;
+        }
+        audio.pink = buf;
+        return buf;
+    }
+
+    // Two formant frequencies per vowel — F1 and F2, very loosely.
+    // Picking a random pair each time gives the illusion of different
+    // vowels across a phrase.
+    const VOWEL_FORMANTS = [
+        [ 300,  870],  // /u/
+        [ 390, 2300],  // /i/
+        [ 730, 1100],  // /ɑ/
+        [ 570, 1700],  // /e/
+        [ 440, 1020],  // /ʌ/
+        [ 500, 1500],  // neutral
+    ];
+
+    function speakSymbol(sym, t, distance, pan) {
+        const ctx = audio.ctx;
+        const buf = getPinkBuffer();
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        // Random offset into the buffer — avoids repeating textures.
+        const offset = Math.random() * (buf.duration - 1);
+
+        // Per-symbol parameters
+        let dur, bp1Freq, bp1Q, bp2Freq, bp2Q, gain, shape;
+        if (sym === 'V' || sym === 'v') {
+            const [f1, f2] = VOWEL_FORMANTS[
+                Math.floor(Math.random() * VOWEL_FORMANTS.length)];
+            bp1Freq = f1; bp1Q = 8;
+            bp2Freq = f2; bp2Q = 10;
+            dur = sym === 'V' ? rng(0.14, 0.22) : rng(0.07, 0.11);
+            gain = 0.9;
+            shape = 'vowel';
+        } else if (sym === 'C') {
+            bp1Freq = rng(1200, 2400); bp1Q = 3;
+            bp2Freq = rng(2800, 4500); bp2Q = 3;
+            dur = rng(0.045, 0.07);
+            gain = 0.55;
+            shape = 'consonant';
+        } else if (sym === 's') {
+            bp1Freq = rng(3800, 6500); bp1Q = 2;
+            bp2Freq = rng(5000, 8000); bp2Q = 2;
+            dur = rng(0.035, 0.06);
+            gain = 0.5;
+            shape = 'sibilant';
+        } else if (sym === 'p') {
+            bp1Freq = rng(400, 800); bp1Q = 1.5;
+            bp2Freq = rng(1200, 2000); bp2Q = 1.5;
+            dur = rng(0.02, 0.035);
+            gain = 0.7;
+            shape = 'plosive';
+        } else {
+            return 0;  // '.' and ',' are handled as gap in speakPhrase
+        }
+
+        // Parallel bandpass formants
+        const bp1 = ctx.createBiquadFilter();
+        bp1.type = 'bandpass';
+        bp1.frequency.value = bp1Freq; bp1.Q.value = bp1Q;
+        const bp2 = ctx.createBiquadFilter();
+        bp2.type = 'bandpass';
+        bp2.frequency.value = bp2Freq; bp2.Q.value = bp2Q;
+        const mix = ctx.createGain();
+        mix.gain.value = 0.5;
+
+        // Envelope per shape
+        const env = ctx.createGain();
+        env.gain.value = 0.0001;
+        if (shape === 'vowel') {
+            env.gain.exponentialRampToValueAtTime(gain, t + 0.015);
+            env.gain.setValueAtTime(gain, t + dur - 0.03);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            // Tiny formant drift during vowel — makes it feel spoken.
+            bp1.frequency.setValueAtTime(bp1Freq, t);
+            bp1.frequency.linearRampToValueAtTime(bp1Freq * rng(0.92, 1.12), t + dur);
+            bp2.frequency.setValueAtTime(bp2Freq, t);
+            bp2.frequency.linearRampToValueAtTime(bp2Freq * rng(0.90, 1.15), t + dur);
+        } else if (shape === 'plosive') {
+            env.gain.linearRampToValueAtTime(gain, t + 0.004);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        } else {
+            env.gain.exponentialRampToValueAtTime(gain, t + 0.008);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        }
+
+        const panN = ctx.createStereoPanner();
+        panN.pan.value = pan;
+        // Distance: speech is usually mid-to-close for that
+        // overheard-office feel, but never right in your ear.
+        const distG = ctx.createGain();
+        distG.gain.value = 0.35 + distance * 0.5;
+
+        src.connect(bp1).connect(mix);
+        src.connect(bp2).connect(mix);
+        mix.connect(env).connect(panN).connect(distG).connect(audio.master);
+        src.start(t, offset);
+        src.stop(t + dur + 0.02);
+        return dur;
+    }
+
+    function speakPhrase(symbols, distance) {
+        const ctx = audio.ctx;
+        const pan = rng(-0.85, 0.85);
+        let t = ctx.currentTime + 0.02;
+        // Tiny overall pitch/timing jitter per speaker
+        for (const sym of symbols) {
+            if (sym === '.') {
+                t += rng(0.06, 0.13);
+            } else if (sym === ',') {
+                t += rng(0.22, 0.45);
+            } else {
+                const dur = speakSymbol(sym, t, distance, pan);
+                t += dur + rng(0.01, 0.04);
+            }
+        }
+    }
+
+    // Stochastic phrase generator (placeholder for future L-system).
+    // Builds CV-ish syllables, joins 2–5 of them with short internal
+    // gaps, and optionally adds a breath at the end.
+    function generatePhrase() {
+        const consonants = ['C', 's', 'p'];
+        const sylCount = Math.floor(rng(2, 6));
+        let out = '';
+        for (let i = 0; i < sylCount; i++) {
+            // onset: sometimes none, sometimes 1-2 consonants
+            const onset = Math.random();
+            if (onset > 0.35) {
+                out += consonants[Math.floor(Math.random() * consonants.length)];
+            }
+            if (onset > 0.85) {
+                out += consonants[Math.floor(Math.random() * consonants.length)];
+            }
+            // nucleus: vowel, occasionally short
+            out += Math.random() < 0.72 ? 'V' : 'v';
+            // coda: sometimes a consonant
+            if (Math.random() < 0.35) {
+                out += consonants[Math.floor(Math.random() * consonants.length)];
+            }
+            // inter-syllable micro-pause
+            if (i < sylCount - 1 && Math.random() < 0.4) {
+                out += '.';
+            }
+        }
+        if (Math.random() < 0.2) { out += ','; }
+        return out;
+    }
+
+    // Expose for future L-system hookup: any external code can call
+    // window.__bridgeSpeak("CvCVsV", 0.6) once audio has started.
+    window.__bridgeSpeak = speakPhrase;
+    window.__bridgeGenPhrase = generatePhrase;
+
+    function scheduleSpeech(delay) {
+        setTimeout(() => {
+            if (!audio.on) { scheduleSpeech(rng(8, 22)); return; }
+            // Usually one phrase; sometimes an exchange (two quick phrases).
+            const burst = Math.random() < 0.25 ? 2 : 1;
+            for (let i = 0; i < burst; i++) {
+                setTimeout(() => {
+                    if (!audio.on) { return; }
+                    speakPhrase(generatePhrase(), rng(0.3, 0.95));
+                }, i * rng(700, 1600));
+            }
+            scheduleSpeech(rng(5, 18));
         }, delay * 1000);
     }
 })();
