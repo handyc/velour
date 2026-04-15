@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Screen Gubi{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;">
+  <div>
+    <h1 style="margin:0;">Screen Gubi</h1>
+    <p style="color:#8b949e;margin:0.25rem 0 0 0;font-size:0.88rem;">
+      An 80×25 text screen in; an L-System tree world out. Edit the
+      screen, watch the world change.
+    </p>
+  </div>
+  <a href="{% url 'screen_gubi:new' %}" class="btn btn-secondary">+ New world</a>
+</div>
+
+<form method="get"
+      style="margin:1rem 0;display:flex;gap:0.5rem;align-items:center;">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search title or screen text…"
+         style="flex:1;max-width:30rem;padding:0.35rem 0.6rem;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-family:ui-monospace,Menlo,monospace;font-size:0.88rem;">
+  <select name="sort"
+          style="padding:0.35rem 0.6rem;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.85rem;">
+    <option value="updated" {% if sort == 'updated' %}selected{% endif %}>Recently updated</option>
+    <option value="created" {% if sort == 'created' %}selected{% endif %}>Recently created</option>
+    <option value="title"   {% if sort == 'title'   %}selected{% endif %}>Title A → Z</option>
+    <option value="-title"  {% if sort == '-title'  %}selected{% endif %}>Title Z → A</option>
+  </select>
+  <button type="submit" class="btn btn-secondary">Apply</button>
+</form>
+
+{% if worlds %}
+<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">
+  <thead>
+    <tr style="text-align:left;color:#8b949e;border-bottom:1px solid #30363d;">
+      <th style="padding:0.4rem 0.5rem;">Title</th>
+      <th style="padding:0.4rem 0.5rem;">First line</th>
+      <th style="padding:0.4rem 0.5rem;">Updated</th>
+      <th style="padding:0.4rem 0.5rem;"></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for w in worlds %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.5rem;">
+        <a href="{% url 'screen_gubi:detail' w.slug %}" style="color:#58a6ff;">{{ w.title }}</a>
+      </td>
+      <td style="padding:0.4rem 0.5rem;color:#8b949e;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40rem;">
+        {{ w.text|linebreaksbr|truncatechars:80 }}
+      </td>
+      <td style="padding:0.4rem 0.5rem;color:#8b949e;font-size:0.82rem;">
+        {{ w.updated_at|date:"Y-m-d H:i" }}
+      </td>
+      <td style="padding:0.4rem 0.5rem;text-align:right;">
+        <a href="{% url 'screen_gubi:edit' w.slug %}" style="color:#6e7681;font-size:0.82rem;">edit</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#6e7681;">No worlds yet. <a href="{% url 'screen_gubi:new' %}">Make the first one.</a></p>
+{% endif %}
+{% endblock %}

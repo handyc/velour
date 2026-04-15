@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_new %}New world{% else %}Edit {{ title }}{% endif %} — Screen Gubi{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+  <a href="{% url 'screen_gubi:index' %}" style="color:#6e7681;">&larr; all worlds</a>
+</div>
+
+<h1 style="margin:0 0 0.75rem 0;">{% if is_new %}New world{% else %}Edit world{% endif %}</h1>
+
+<form method="post" style="display:flex;flex-direction:column;gap:0.75rem;max-width:fit-content;">
+  {% csrf_token %}
+
+  <label style="display:flex;align-items:center;gap:0.5rem;color:#8b949e;font-size:0.85rem;">
+    Title
+    <input type="text" name="title" value="{{ title }}" required
+           style="flex:1;min-width:30rem;padding:0.35rem 0.6rem;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;font-size:0.9rem;">
+  </label>
+
+  <div>
+    <div style="color:#8b949e;font-size:0.82rem;margin-bottom:0.35rem;display:flex;justify-content:space-between;">
+      <span>80 × 25 screen — 2000 chars, short inputs padded with spaces, long inputs truncated</span>
+      <span id="charcount" style="font-family:ui-monospace,Menlo,monospace;">0 / 2000</span>
+    </div>
+    <textarea name="text" id="screen" cols="80" rows="25" wrap="off"
+              spellcheck="false"
+              style="display:block;background:#000;color:#00d000;font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.25;padding:0.75rem;border:1px solid #30363d;border-radius:4px;tab-size:4;caret-color:#00ff00;resize:none;white-space:pre;overflow:auto;">{{ text }}</textarea>
+  </div>
+
+  <div style="display:flex;gap:0.5rem;">
+    <button type="submit" class="btn btn-secondary">Save</button>
+    {% if world %}
+    <a href="{% url 'screen_gubi:detail' world.slug %}" class="btn btn-secondary" style="background:transparent;">Cancel</a>
+    {% else %}
+    <a href="{% url 'screen_gubi:index' %}" class="btn btn-secondary" style="background:transparent;">Cancel</a>
+    {% endif %}
+  </div>
+</form>
+
+{% if world %}
+<form method="post" action="{% url 'screen_gubi:delete' world.slug %}"
+      style="margin-top:1rem;">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-secondary"
+          onclick="return confirm('Delete this world?');"
+          style="color:#f85149;">Delete</button>
+</form>
+{% endif %}
+
+<script>
+(function(){
+  const ta = document.getElementById('screen');
+  const counter = document.getElementById('charcount');
+  function update(){
+    const n = Array.from(ta.value).length; // count code points
+    counter.textContent = n + ' / 2000';
+    counter.style.color = n > 2000 ? '#f85149' : (n < 2000 ? '#8b949e' : '#3fb950');
+  }
+  ta.addEventListener('input', update);
+  update();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}{{ world.title }} — Screen Gubi{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+  <a href="{% url 'screen_gubi:index' %}" style="color:#6e7681;">&larr; all worlds</a>
+</div>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;">
+  <h1 style="margin:0;">{{ world.title }}</h1>
+  <div style="display:flex;gap:0.5rem;">
+    <a href="{% url 'screen_gubi:edit' world.slug %}" class="btn btn-secondary">Edit screen</a>
+  </div>
+</div>
+
+<div style="color:#8b949e;font-family:ui-monospace,Menlo,monospace;font-size:0.8rem;margin:0.25rem 0 0.8rem 0;">
+  seed <b>{{ shared.seed }}</b> &middot;
+  mood <b>{{ shared.mood }}</b> &middot;
+  {{ scene.trees|length }} tree{{ scene.trees|length|pluralize }} &middot;
+  axiom <code style="color:#c9d1d9;">{{ scene.axiom }}</code> &middot;
+  {{ scene.iterations }} iters &middot;
+  angle <b>{{ scene.branch_angle_deg|floatformat:1 }}°</b> &middot;
+  branch <b>{{ scene.branch_draw }}</b>
+</div>
+
+<div id="gubi-scene"
+     style="background:#0d1117;border:1px solid #30363d;border-radius:6px;width:100%;height:500px;position:relative;overflow:hidden;">
+  <div id="gubi-loading"
+       style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#6e7681;font-size:0.85rem;">
+    Growing world…
+  </div>
+</div>
+
+<details style="margin-top:1rem;">
+  <summary style="color:#8b949e;cursor:pointer;font-size:0.85rem;">Shared variables (for other Velour apps)</summary>
+  <div style="margin-top:0.5rem;display:grid;grid-template-columns:max-content 1fr;gap:0.35rem 1rem;font-size:0.82rem;font-family:ui-monospace,Menlo,monospace;color:#c9d1d9;">
+    <div style="color:#8b949e;">palette</div>
+    <div>
+      {% for c in shared.palette %}
+        <span style="display:inline-block;width:1rem;height:1rem;background:{{ c }};border:1px solid #30363d;vertical-align:middle;margin-right:0.1rem;"></span>
+      {% endfor %}
+      <span style="margin-left:0.5rem;color:#6e7681;">{{ shared.palette|join:" " }}</span>
+    </div>
+    <div style="color:#8b949e;">bg / fg</div>
+    <div>
+      <span style="display:inline-block;width:1rem;height:1rem;background:{{ shared.bg_color }};border:1px solid #30363d;vertical-align:middle;"></span>
+      {{ shared.bg_color }}
+      <span style="display:inline-block;width:1rem;height:1rem;background:{{ shared.fg_color }};border:1px solid #30363d;vertical-align:middle;margin-left:0.75rem;"></span>
+      {{ shared.fg_color }}
+    </div>
+    <div style="color:#8b949e;">title hint</div>
+    <div>{{ shared.title_hint }}</div>
+    <div style="color:#8b949e;">tags</div>
+    <div>{{ shared.tags|join:", " }}</div>
+    <div style="color:#8b949e;">booleans</div>
+    <div>{{ shared.booleans|join:" " }}</div>
+  </div>
+</details>
+
+{{ scene|json_script:"scene-data" }}
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  const scene_data = JSON.parse(document.getElementById('scene-data').textContent);
+  const container = document.getElementById('gubi-scene');
+  const loading = document.getElementById('gubi-loading');
+  const W = container.clientWidth, H = container.clientHeight;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(scene_data.sky_top);
+  scene.fog = new THREE.Fog(scene_data.sky_bottom, scene_data.fog_near, scene_data.fog_far);
+
+  const camera = new THREE.PerspectiveCamera(55, W/H, 0.1, 200);
+
+  const renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setSize(W, H);
+  renderer.shadowMap.enabled = true;
+  container.appendChild(renderer.domElement);
+
+  // Sky dome (inverted sphere with two-color vertical gradient).
+  const skyGeom = new THREE.SphereGeometry(100, 24, 16);
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {
+      top:    { value: new THREE.Color(scene_data.sky_top) },
+      bottom: { value: new THREE.Color(scene_data.sky_bottom) },
+    },
+    vertexShader: `varying float vY; void main(){ vY = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `varying float vY; uniform vec3 top; uniform vec3 bottom; void main(){ float t = clamp(vY*0.5 + 0.5, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, t), 1.0); }`,
+  });
+  scene.add(new THREE.Mesh(skyGeom, skyMat));
+
+  // Ground.
+  const gnd = new THREE.Mesh(
+    new THREE.PlaneGeometry(80, 80),
+    new THREE.MeshStandardMaterial({color: scene_data.ground_color, roughness: 0.95}),
+  );
+  gnd.rotation.x = -Math.PI/2;
+  gnd.receiveShadow = true;
+  scene.add(gnd);
+
+  // Lights.
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+  sun.position.set(10, 18, 8);
+  sun.castShadow = true;
+  scene.add(sun);
+
+  // Seeded RNG so every reload is identical for the same scene.
+  let rngState = scene_data.seed || 1;
+  function rnd(){ rngState = (rngState * 16807 + 1) % 2147483647; return rngState / 2147483647; }
+
+  function expandLSystem(axiom, rules, iters){
+    let s = axiom;
+    for (let i = 0; i < iters; i++){
+      let next = '';
+      for (const ch of s){
+        next += (rules[ch] !== undefined ? rules[ch] : ch);
+      }
+      s = next;
+      if (s.length > 12000) { s = s.slice(0, 12000); break; }
+    }
+    return s;
+  }
+
+  const DEG = Math.PI / 180;
+
+  function buildTree(tree, sharedGroup){
+    const g = new THREE.Group();
+    g.position.set(tree.x, 0, tree.z);
+
+    const str = expandLSystem(scene_data.axiom, scene_data.rules, scene_data.iterations);
+    const angle = scene_data.branch_angle_deg * DEG;
+    const lf = scene_data.length_factor;
+    const taper = scene_data.taper;
+    const droop = scene_data.droop;
+    const draw = scene_data.branch_draw;
+
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: tree.trunk_color, roughness: 0.85,
+    });
+    const leafMat = new THREE.MeshStandardMaterial({
+      color: tree.leaf_color, roughness: 0.8,
+    });
+
+    // Turtle state: pos vec3, dir vec3, up vec3, length, thickness, depth.
+    const state = {
+      pos: new THREE.Vector3(0, 0, 0),
+      dir: new THREE.Vector3(0, 1, 0),
+      up:  new THREE.Vector3(0, 0, 1),
+      length: scene_data.start_length * tree.scale,
+      thickness: tree.trunk_thickness * tree.scale,
+      depth: 0,
+    };
+    const stack = [];
+    let segs = 0;
+    const maxSegs = 900;
+
+    // Helpers.
+    function rot(axis, theta){
+      state.dir.applyAxisAngle(axis, theta);
+      state.up.applyAxisAngle(axis, theta);
+    }
+    function sideAxis(){
+      return new THREE.Vector3().crossVectors(state.dir, state.up).normalize();
+    }
+
+    for (const ch of str){
+      if (segs >= maxSegs) break;
+      if (ch === 'F'){
+        const end = state.pos.clone().addScaledVector(state.dir, state.length);
+        if (droop > 0 && state.depth > 0){
+          const d = new THREE.Vector3().subVectors(end, state.pos);
+          d.y -= droop * d.length();
+          end.copy(state.pos).add(d);
+        }
+        if (draw === 'jitter'){
+          end.x += (rnd() - 0.5) * 0.12 * state.length;
+          end.z += (rnd() - 0.5) * 0.12 * state.length;
+        }
+        const segVec = new THREE.Vector3().subVectors(end, state.pos);
+        const segLen = segVec.length();
+        const thick = Math.max(0.02, state.thickness);
+        const topThick = (draw === 'fan') ? thick * 1.15 : thick * 0.92;
+        const geo = new THREE.CylinderGeometry(topThick, thick, segLen, 6);
+        const mesh = new THREE.Mesh(geo, trunkMat);
+        mesh.castShadow = true;
+        const upY = new THREE.Vector3(0,1,0);
+        const quat = new THREE.Quaternion().setFromUnitVectors(upY, segVec.clone().normalize());
+        mesh.quaternion.copy(quat);
+        mesh.position.copy(new THREE.Vector3().addVectors(state.pos, end).multiplyScalar(0.5));
+        g.add(mesh);
+        state.pos.copy(end);
+        segs += 1;
+        if (draw === 'curl') rot(state.up, angle * 0.18);
+      }
+      else if (ch === 'L'){
+        const leaf = new THREE.Mesh(
+          new THREE.SphereGeometry(Math.max(0.12, state.thickness * 3.5), 6, 5),
+          leafMat,
+        );
+        leaf.position.copy(state.pos);
+        leaf.castShadow = true;
+        g.add(leaf);
+        segs += 1;
+      }
+      else if (ch === '+') rot(state.up, angle);
+      else if (ch === '-') rot(state.up, -angle);
+      else if (ch === '<') rot(state.dir, angle);
+      else if (ch === '>') rot(state.dir, -angle);
+      else if (ch === '['){
+        stack.push({
+          pos: state.pos.clone(), dir: state.dir.clone(), up: state.up.clone(),
+          length: state.length, thickness: state.thickness, depth: state.depth,
+        });
+        // Entering a child branch: shrink length/thickness.
+        state.length *= lf;
+        state.thickness *= taper;
+        state.depth += 1;
+      }
+      else if (ch === ']') {
+        // End of branch: always drop a leaf at the tip.
+        const leaf = new THREE.Mesh(
+          new THREE.SphereGeometry(Math.max(0.14, state.thickness * 4.0), 6, 5),
+          leafMat,
+        );
+        leaf.position.copy(state.pos);
+        leaf.castShadow = true;
+        g.add(leaf);
+        const s = stack.pop();
+        if (s){ state.pos = s.pos; state.dir = s.dir; state.up = s.up;
+                state.length = s.length; state.thickness = s.thickness;
+                state.depth = s.depth; }
+      }
+    }
+
+    // Always cap the last point with a leaf (handles axioms that don't
+    // close with ']').
+    const cap = new THREE.Mesh(
+      new THREE.SphereGeometry(0.22 * tree.scale, 8, 6), leafMat);
+    cap.position.copy(state.pos);
+    cap.castShadow = true;
+    g.add(cap);
+
+    return g;
+  }
+
+  const worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+  for (const t of scene_data.trees) worldGroup.add(buildTree(t));
+
+  loading.style.display = 'none';
+
+  // Camera: orbit, mouse-drag, scroll to zoom.
+  let theta = 0.6, phi = 1.05, radius = 22;
+  let dragging = false, lastX = 0, lastY = 0;
+  container.addEventListener('mousedown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  container.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    theta += (e.clientX - lastX) * 0.008;
+    phi = Math.max(0.15, Math.min(Math.PI/2 - 0.05, phi - (e.clientY - lastY) * 0.008));
+    lastX = e.clientX; lastY = e.clientY;
+  });
+  container.addEventListener('wheel', e => {
+    radius = Math.max(4, Math.min(45, radius + e.deltaY * 0.02));
+    e.preventDefault();
+  }, {passive: false});
+
+  function tick(){
+    const cx = radius * Math.sin(phi) * Math.cos(theta);
+    const cz = radius * Math.sin(phi) * Math.sin(theta);
+    const cy = radius * Math.cos(phi);
+    camera.position.set(cx, Math.max(2.5, cy), cz);
+    camera.lookAt(0, 3, 0);
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  // Handle resize.
+  window.addEventListener('resize', () => {
+    const w = container.clientWidth, h = container.clientHeight;
+    renderer.setSize(w, h);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  });
+})();
+</script>
+{% endblock %}

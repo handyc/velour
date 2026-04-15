@@ -43,6 +43,7 @@ urlpatterns = [
     path('bridge/', include('bridge.urls')),
     path('zoetrope/', include('zoetrope.urls')),
     path('reckoner/', include('reckoner.urls')),
+    path('gubi/', include('screen_gubi.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

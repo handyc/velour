@@ -84,6 +84,7 @@ INSTALLED_APPS = [
     'bridge',
     'zoetrope',
     'reckoner',
+    'screen_gubi',
 ]
 
 MIDDLEWARE = [
