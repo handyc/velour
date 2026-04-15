@@ -570,7 +570,9 @@ let playerY = 1.6;
 
 // ---- Collision world ----
 // staticColliders: {mesh, box (world-space AABB), top}
-// npcColliders:    {mesh, radius, height, kbVx, kbVz, kbTime}
+// npcColliders:    {mesh, radius, height, kbVx, kbVz, kbTime,
+//                   hp, maxHp, hpBar, hpVisibleUntil, hpFlashUntil,
+//                   hpDirty, dmgCooldown}
 const staticColliders = [];
 const npcColliders = [];
 let collisionEnabled = true;
@@ -580,6 +582,83 @@ const PLAYER_HEAD = 0.25;          // head above eye (for ceiling clearance)
 const STEP_HEIGHT = 0.45;          // max height the player can step up
 const NPC_RADIUS = 0.38;
 const NPC_HEIGHT = 1.75;
+const NPC_MAX_HP = 100;
+const BUMP_DAMAGE = 8;             // hp lost per bump
+const BUMP_COOLDOWN = 0.4;         // sec between bumps from sustained contact
+const HP_BAR_LIFETIME = 1.0;       // sec the bar stays after a change
+const HP_BAR_FLASH = 0.18;         // sec of bright flash on a change
+
+function makeHpBar() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 80;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.scale.set(0.9, 0.28, 1);
+    spr.position.set(0, 2.75, 0);
+    spr.visible = false;
+    spr.renderOrder = 999;
+    spr.userData.canvas = canvas;
+    spr.userData.tex = tex;
+    return spr;
+}
+
+function drawHpBar(spr, hp, maxHp) {
+    const c = spr.userData.canvas;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, c.width, c.height);
+    const pad = 8;
+    const w = c.width - pad * 2;
+    const h = 24;
+    // Frame
+    g.fillStyle = 'rgba(0,0,0,0.65)';
+    g.fillRect(pad - 3, pad - 3, w + 6, h + 6);
+    // Filled portion (always green per spec)
+    const ratio = Math.max(0, hp / maxHp);
+    g.fillStyle = '#22cc44';
+    g.fillRect(pad, pad, w * ratio, h);
+    // Numeric remaining hp, in green
+    g.fillStyle = '#39ff7a';
+    g.font = 'bold 30px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'top';
+    g.fillText(Math.max(0, Math.round(hp)).toString(),
+               c.width / 2, pad + h + 6);
+    spr.userData.tex.needsUpdate = true;
+}
+
+function flashNpcHpBar(n) {
+    const now = performance.now() / 1000;
+    n.hpVisibleUntil = now + HP_BAR_LIFETIME;
+    n.hpFlashUntil = now + HP_BAR_FLASH;
+    n.hpDirty = true;
+}
+
+function tickHpBars(dt) {
+    const now = performance.now() / 1000;
+    for (const n of npcColliders) {
+        if (n.dmgCooldown > 0) {
+            n.dmgCooldown -= dt;
+            if (n.dmgCooldown < 0) n.dmgCooldown = 0;
+        }
+        if (!n.hpBar) continue;
+        if (n.hpDirty) {
+            drawHpBar(n.hpBar, n.hp, n.maxHp);
+            n.hpDirty = false;
+        }
+        if (n.hpVisibleUntil > now) {
+            n.hpBar.visible = true;
+            // Bright pop during the flash window, then settle.
+            const flashRemain = n.hpFlashUntil - now;
+            n.hpBar.material.opacity = flashRemain > 0 ? 1.0 : 0.85;
+        } else {
+            n.hpBar.visible = false;
+        }
+    }
+}
 
 document.addEventListener('keydown', e => {
     if (e.code === 'KeyC') {
@@ -638,6 +717,13 @@ function resolvePlayerHorizontal() {
         n.kbVx = -nx * 2.6;
         n.kbVz = -nz * 2.6;
         n.kbTime = 0.35;
+        // Bump damage with a short cooldown so sustained overlap doesn't
+        // shred the NPC in a single second.
+        if (n.dmgCooldown <= 0 && n.hp > 0) {
+            n.hp = Math.max(0, n.hp - BUMP_DAMAGE);
+            n.dmgCooldown = BUMP_COOLDOWN;
+            flashNpcHpBar(n);
+        }
     }
 }
 
@@ -1426,9 +1512,14 @@ async function loadScene() {
         mesh.userData.isNPC = !!ent.isNpc;
         entityRegistry.set(ent.id, {obj3d: mesh, name: ent.name, scripts: []});
         if (ent.isNpc) {
+            const hpBar = makeHpBar();
+            mesh.add(hpBar);
             npcColliders.push({
                 mesh, radius: NPC_RADIUS, height: NPC_HEIGHT,
                 kbVx: 0, kbVz: 0, kbTime: 0,
+                hp: NPC_MAX_HP, maxHp: NPC_MAX_HP,
+                hpBar, hpVisibleUntil: 0, hpFlashUntil: 0,
+                hpDirty: true, dmgCooldown: 0,
             });
         }
 
@@ -1688,6 +1779,7 @@ function animate() {
     if (speakers.length) tickSpeakers(dt);
 
     resolveNpcCollisions(dt);
+    tickHpBars(dt);
 
     renderer.render(scene, camera);
 }
