@@ -52,8 +52,62 @@
 (function(){
   const ta = document.getElementById('screen');
   const counter = document.getElementById('charcount');
+  const LINE_W = 80, MAX_LINES = 25;
+
+  // Normalize a string into a ≤25-line grid of ≤80 code points each.
+  // Overflow on a line spills to the next line (hard wrap); text past
+  // row 25 is dropped. Newlines are preserved between rows.
+  function normalize(str){
+    const segs = str.replace(/\r\n?/g, '\n').split('\n');
+    const out = [];
+    for (const seg of segs){
+      const chars = Array.from(seg);
+      if (chars.length === 0){
+        out.push('');
+      } else {
+        for (let i = 0; i < chars.length; i += LINE_W){
+          out.push(chars.slice(i, i + LINE_W).join(''));
+          if (out.length >= MAX_LINES) break;
+        }
+      }
+      if (out.length >= MAX_LINES) break;
+    }
+    return out.slice(0, MAX_LINES).join('\n');
+  }
+
+  // Logical position = count of code points up to (but not including)
+  // the absolute UTF-16 offset `pos`, treating all characters equally
+  // (newlines count as 1). Robust to surrogate pairs.
+  function logicalFromAbs(str, pos){
+    return Array.from(str.slice(0, pos)).length;
+  }
+
+  // Inverse: given a logical (code-point) count into `str`, return the
+  // UTF-16 offset. Clamps at string end.
+  function absFromLogical(str, logical){
+    const chars = Array.from(str);
+    const clipped = chars.slice(0, Math.max(0, Math.min(logical, chars.length)));
+    return clipped.join('').length;
+  }
+
   function update(){
-    const n = Array.from(ta.value).length; // count code points
+    const before = ta.value;
+    const selStart = ta.selectionStart;
+    const selEnd = ta.selectionEnd;
+    const logicalStart = logicalFromAbs(before, selStart);
+    const logicalEnd = logicalFromAbs(before, selEnd);
+
+    const after = normalize(before);
+    if (after !== before){
+      ta.value = after;
+      const newStart = absFromLogical(after, logicalStart);
+      const newEnd = absFromLogical(after, logicalEnd);
+      ta.setSelectionRange(newStart, newEnd);
+    }
+
+    // Count code points excluding newlines — this is what gubify sees
+    // after server-side padding to 2000.
+    const n = Array.from(ta.value).filter(c => c !== '\n').length;
     counter.textContent = n + ' / 2000';
     counter.style.color = n > 2000 ? '#f85149' : (n < 2000 ? '#8b949e' : '#3fb950');
   }
