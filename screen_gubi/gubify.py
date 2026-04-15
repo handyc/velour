@@ -20,14 +20,36 @@ from dataclasses import dataclass
 from typing import Any, Callable, List
 
 PAD = ' '
-TOTAL = 2000
+LINE_W = 80
+MAX_LINES = 25
+TOTAL = LINE_W * MAX_LINES  # 2000
 LSYS_ALPHABET = list('FFFFFF+-[]X+-[]<>L')
 
 
 def normalize(text: str) -> str:
-    if len(text) >= TOTAL:
-        return text[:TOTAL]
-    return text + PAD * (TOTAL - len(text))
+    """Reduce text to a flat 2000-char string laid out as a 25×80 grid.
+
+    Rows are split on newlines. A row longer than 80 chars spills into
+    the next row (same hard-wrap the editor enforces client-side).
+    Short rows are padded with spaces; fewer than 25 rows are padded
+    with blank rows. Newlines don't appear in the output.
+    """
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    grid_rows = []
+    for line in text.split('\n'):
+        if len(grid_rows) >= MAX_LINES:
+            break
+        if not line:
+            grid_rows.append('')
+            continue
+        for i in range(0, len(line), LINE_W):
+            grid_rows.append(line[i:i + LINE_W])
+            if len(grid_rows) >= MAX_LINES:
+                break
+    padded = [row.ljust(LINE_W, PAD)[:LINE_W] for row in grid_rows[:MAX_LINES]]
+    while len(padded) < MAX_LINES:
+        padded.append(PAD * LINE_W)
+    return ''.join(padded)
 
 
 def _slice_sum(text: str, start: int, end: int) -> int:
