@@ -40,6 +40,9 @@ urlpatterns = [
     path('lsystem/', include('lsystem.urls')),
     path('legolith/', include('legolith.urls')),
     path('datalift/', include('datalift.urls')),
+    path('bridge/', include('bridge.urls')),
+    path('zoetrope/', include('zoetrope.urls')),
+    path('reckoner/', include('reckoner.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

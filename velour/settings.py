@@ -81,6 +81,9 @@ INSTALLED_APPS = [
     'lsystem',
     'legolith',
     'datalift',
+    'bridge',
+    'zoetrope',
+    'reckoner',
 ]
 
 MIDDLEWARE = [
