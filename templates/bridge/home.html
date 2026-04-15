@@ -500,6 +500,282 @@
     }
     .audio-pill:hover { color: var(--cyan); border-color: var(--edge-hi); }
     .audio-pill.on { color: var(--green); border-color: #2a4a3a; }
+
+    /* Grammar Inspector pill — opens the language debugger modal. */
+    .grammar-pill {
+        font-size: 0.62rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        background: transparent;
+        color: var(--dim);
+        border: 1px solid var(--edge);
+        padding: 0.15rem 0.4rem;
+        border-radius: 2px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .grammar-pill:hover { color: var(--amber); border-color: #50401a; }
+
+    /* ── Grammar Inspector modal ────────────────────────────── */
+    .gi-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(0, 8, 16, 0.82);
+        backdrop-filter: blur(3px);
+        display: none;
+        z-index: 1000;
+    }
+    .gi-backdrop.open { display: flex; align-items: center; justify-content: center; }
+    .gi-modal {
+        width: min(1100px, 96vw);
+        height: min(800px, 92vh);
+        background: #0a1018;
+        border: 1px solid var(--edge-hi);
+        border-radius: 4px;
+        box-shadow: 0 0 30px rgba(89,208,255,0.15);
+        display: grid;
+        grid-template-rows: auto 1fr;
+        overflow: hidden;
+        font-family: inherit;
+        color: #c8d4e0;
+    }
+    .gi-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6rem 1rem;
+        border-bottom: 1px solid var(--edge);
+        background: linear-gradient(180deg, #0f1a28 0%, #0a1018 100%);
+    }
+    .gi-header h2 {
+        margin: 0;
+        font-size: 0.85rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--cyan);
+    }
+    .gi-header .gi-close {
+        background: transparent;
+        border: 1px solid var(--edge);
+        color: var(--dim);
+        padding: 0.15rem 0.5rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.7rem;
+    }
+    .gi-header .gi-close:hover { color: #ff8080; border-color: #703030; }
+
+    .gi-tabs {
+        display: flex;
+        gap: 0.3rem;
+        padding: 0.5rem 1rem 0;
+        border-bottom: 1px solid var(--edge);
+    }
+    .gi-tab {
+        background: transparent;
+        border: 1px solid var(--edge);
+        border-bottom: none;
+        color: var(--dim);
+        padding: 0.25rem 0.7rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .gi-tab:hover { color: var(--cyan); }
+    .gi-tab.active {
+        color: var(--amber);
+        border-color: var(--edge-hi);
+        background: #13202f;
+    }
+
+    .gi-body {
+        grid-row: 2;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        overflow: hidden;
+    }
+    .gi-pane {
+        padding: 0.8rem 1rem;
+        overflow: auto;
+        font-size: 0.78rem;
+        display: none;
+    }
+    .gi-pane.active { display: block; }
+
+    /* Grammar tab */
+    .gi-grammar {
+        margin-bottom: 1.2rem;
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .gi-grammar-head {
+        padding: 0.4rem 0.8rem;
+        background: #0e1824;
+        border-bottom: 1px solid var(--edge);
+    }
+    .gi-grammar-head .gname {
+        color: var(--cyan);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.78rem;
+        margin-right: 0.5rem;
+    }
+    .gi-grammar-head .gnote {
+        color: #8b95a0;
+        font-size: 0.72rem;
+    }
+    .gi-variant {
+        padding: 0.5rem 0.8rem;
+        border-top: 1px solid var(--edge);
+    }
+    .gi-variant:first-of-type { border-top: none; }
+    .gi-variant-name {
+        color: var(--amber);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.7rem;
+        margin-bottom: 0.3rem;
+    }
+    .gi-rules-editor {
+        width: 100%;
+        background: #050a10;
+        color: #c8d4e0;
+        border: 1px solid var(--edge);
+        padding: 0.4rem 0.5rem;
+        font-family: 'SF Mono', 'Consolas', monospace;
+        font-size: 0.74rem;
+        resize: vertical;
+        min-height: 5em;
+    }
+    .gi-rules-editor.bad { border-color: #703030; }
+    .gi-actions {
+        display: flex;
+        gap: 0.4rem;
+        margin-top: 0.35rem;
+        align-items: center;
+    }
+    .gi-btn {
+        background: transparent;
+        color: var(--cyan);
+        border: 1px solid var(--edge-hi);
+        padding: 0.2rem 0.6rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.7rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .gi-btn:hover { color: #e6fbff; background: #0f2430; }
+    .gi-btn.danger { color: #ff8080; border-color: #703030; }
+    .gi-btn.danger:hover { background: #1a0808; }
+    .gi-btn.primary { color: var(--amber); border-color: #50401a; }
+    .gi-btn.primary:hover { background: #1a1405; }
+    .gi-msg { font-size: 0.7rem; color: #8b95a0; }
+    .gi-msg.ok { color: var(--green); }
+    .gi-msg.bad { color: #ff8080; }
+
+    /* Subwords + Words tabs */
+    .gi-toolbar {
+        display: flex;
+        gap: 0.4rem;
+        margin-bottom: 0.6rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .gi-toolbar input[type=text] {
+        background: #050a10;
+        color: #c8d4e0;
+        border: 1px solid var(--edge);
+        padding: 0.2rem 0.4rem;
+        font-family: inherit;
+        font-size: 0.75rem;
+        min-width: 8em;
+    }
+    .gi-toolbar .gi-count {
+        font-size: 0.7rem;
+        color: #8b95a0;
+        margin-left: auto;
+    }
+    .gi-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.72rem;
+        font-family: 'SF Mono', 'Consolas', monospace;
+    }
+    .gi-table th, .gi-table td {
+        padding: 0.25rem 0.5rem;
+        border-bottom: 1px solid #13202f;
+        text-align: left;
+        vertical-align: top;
+    }
+    .gi-table th {
+        color: var(--dim);
+        text-transform: uppercase;
+        font-size: 0.65rem;
+        letter-spacing: 0.06em;
+        border-bottom: 1px solid var(--edge);
+        position: sticky;
+        top: 0;
+        background: #0a1018;
+    }
+    .gi-table td.pat { color: var(--amber); }
+    .gi-table td.use { color: var(--green); text-align: right; }
+    .gi-table td.id  { color: #566270; text-align: right; width: 4em; }
+    .gi-table input[type=text] {
+        background: #050a10;
+        color: var(--amber);
+        border: 1px solid var(--edge);
+        padding: 0.1rem 0.3rem;
+        font-family: inherit;
+        font-size: 0.72rem;
+        width: 12em;
+    }
+    .gi-table .row-del {
+        background: transparent;
+        color: #7a3030;
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.75rem;
+    }
+    .gi-table .row-del:hover { color: #ff8080; border-color: #703030; }
+
+    /* Stats tab */
+    .gi-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 0.8rem;
+    }
+    .gi-stat-card {
+        border: 1px solid var(--edge);
+        border-radius: 3px;
+        padding: 0.5rem 0.7rem;
+        background: #0b131c;
+    }
+    .gi-stat-card h4 {
+        margin: 0 0 0.3rem 0;
+        color: var(--cyan);
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .gi-stat-card .big {
+        font-size: 1.5rem;
+        color: var(--amber);
+        font-family: 'SF Mono', 'Consolas', monospace;
+    }
+    .gi-stat-card ol {
+        margin: 0.3rem 0 0 1.2rem;
+        padding: 0;
+        font-family: 'SF Mono', 'Consolas', monospace;
+        font-size: 0.72rem;
+    }
+    .gi-stat-card ol li {
+        color: #c8d4e0;
+        margin-bottom: 0.1rem;
+    }
 </style>
 {% endblock %}
 
@@ -546,7 +822,33 @@
                 title="Ambient ship sounds (click to enable)">
             🔈 audio
         </button>
+        <button class="grammar-pill" id="grammar-toggle" type="button"
+                title="Inspect the grammar engine, subwords, words, and live stats">
+            ⚙ grammar
+        </button>
     </div>
+</div>
+
+<!-- ── Grammar Inspector modal ───────────────────────────────── -->
+<div class="gi-backdrop" id="gi-backdrop">
+  <div class="gi-modal">
+    <div class="gi-header">
+      <h2>Grammar Engine — Language Inspector</h2>
+      <button class="gi-close" id="gi-close" type="button">✕ close</button>
+    </div>
+    <div class="gi-body">
+      <div class="gi-tabs">
+        <button class="gi-tab active" data-tab="grammar">L-System Rules</button>
+        <button class="gi-tab"        data-tab="subwords">Subwords</button>
+        <button class="gi-tab"        data-tab="words">Words</button>
+        <button class="gi-tab"        data-tab="stats">Live Stats</button>
+      </div>
+      <div class="gi-pane active" id="gi-pane-grammar"></div>
+      <div class="gi-pane" id="gi-pane-subwords"></div>
+      <div class="gi-pane" id="gi-pane-words"></div>
+      <div class="gi-pane" id="gi-pane-stats"></div>
+    </div>
+  </div>
 </div>
 
 <div class="bridge-grid">
@@ -2656,127 +2958,96 @@ import * as THREE from 'three';
         }
     }
 
-    // ── Preset grammars — each returns an expanded terminal string.
-    //    The shapes mirror legolith's make_tree/make_flower/etc: pick
-    //    a variant, build rules, expand, return.
-
-    // greeting — short two-word exchange, soft onsets, trailing breath.
-    // Variants (like bushy/conifer/blossom):
-    //   cheerful  — many open vowels
-    //   tired     — short vowels, longer breath
-    //   formal    — consonant-heavy
-    function gen_greeting() {
-        const variant = pick(['cheerful', 'tired', 'formal']);
-        let rules;
-        if (variant === 'cheerful') {
-            rules = {
-                S: 'W.W,',
-                W: 'XX',
-                X: 'ON',        // syllable = onset + nucleus
-                O: pick(['C', 'n', 'l', '']),
-                N: 'V',         // open, bright long vowel
-            };
-        } else if (variant === 'tired') {
-            rules = {
-                S: 'W,W,',
-                W: 'X',
-                X: 'ON',
-                O: pick(['n', 'l', '']),
-                N: 'v',         // short, sparse
-            };
-        } else {  // formal
-            rules = {
-                S: 'W.W.W,',
-                W: 'XX',
-                X: 'OND',
-                O: pick(['Cl', 'Cn', 'C']),
-                N: 'V',
-                D: pick(['n', 's', '']),
-            };
-        }
-        return new LSystem('S', rules, 4).expand();
-    }
-
-    // command — short, clipped, plosive-heavy; one or two words.
-    function gen_command() {
-        const variant = pick(['short', 'double']);
-        const rules = variant === 'short'
-            ? { S: 'W', W: 'XX', X: 'pVs', }
-            : { S: 'W.W', W: 'XX', X: pick(['pVC', 'CVp', 'pVp']), };
-        return new LSystem('S', rules, 4).expand();
-    }
-
-    // technical — dense consonant clusters, dictation-style.
-    // Variants: readout (numbers), jargon (cluster-heavy), chatter.
-    function gen_technical() {
-        const variant = pick(['readout', 'jargon', 'chatter']);
-        let rules;
-        if (variant === 'readout') {
-            rules = {
-                S: 'W.W.W.W,',
-                W: 'X',
-                X: 'CvC',
-            };
-        } else if (variant === 'jargon') {
-            rules = {
-                S: 'W.W,',
-                W: 'XXX',
-                X: pick(['CsV', 'sCV', 'pCV', 'CVs']),
-            };
-        } else {  // chatter
-            rules = {
-                S: 'WWWW,',
-                W: 'X.',
-                X: 'CvC',
-            };
-        }
-        return new LSystem('S', rules, 4).expand();
-    }
-
-    // casual — open, vowelly, conversational.
-    function gen_casual() {
-        const variant = pick(['relaxed', 'musing']);
-        const rules = variant === 'relaxed'
-            ? {
-                S: 'W.W.W,',
-                W: 'XX',
-                X: pick(['CV', 'VC', 'CVC', 'nV', 'Vn', 'lV', 'V']),
-            }
-            : {
-                S: 'W,W,',
-                W: 'XXX',
-                X: pick(['Vv', 'nVv', 'VnV', 'VlV']),
-            };
-        return new LSystem('S', rules, 4).expand();
-    }
-
-    // question — pitch contour rises to the final '?'. The '?' is kept
-    // as the last character so speakPhrase can detect the question and
-    // apply the rising intonation shape; speakSymbol ignores '?' so it
-    // doesn't generate its own sound.
-    function gen_question() {
-        const rules = {
-            S: 'W.Wv?',
-            W: 'XX',
-            X: pick(['CV', 'nV', 'Vn', 'CVC', 'lV']),
-        };
-        return new LSystem('S', rules, 4).expand();
-    }
-
-    // Registry — same shape as legolith's GENERATORS dict.
+    // ── Preset grammars — data-driven registry ────────────────
+    // Each entry is a production-rule set with variants. A rule value
+    // can be a string (single expansion) or an array of strings (pick
+    // one at expansion time, same as the previous `pick([...])` idiom).
+    // The Grammar Inspector modal reads and writes this structure
+    // directly so users can tweak rules live.
     const SPEECH_GRAMMARS = {
-        greeting:  gen_greeting,
-        command:   gen_command,
-        technical: gen_technical,
-        casual:    gen_casual,
-        question:  gen_question,
+        greeting: {
+            note: 'Short two-word exchange. Soft onsets, trailing breath.',
+            axiom: 'S',
+            iterations: 4,
+            variants: {
+                cheerful: {
+                    S: 'W.W,', W: 'XX', X: 'ON',
+                    O: ['C', 'n', 'l', ''],
+                    N: 'V',
+                },
+                tired: {
+                    S: 'W,W,', W: 'X', X: 'ON',
+                    O: ['n', 'l', ''],
+                    N: 'v',
+                },
+                formal: {
+                    S: 'W.W.W,', W: 'XX', X: 'OND',
+                    O: ['Cl', 'Cn', 'C'],
+                    N: 'V',
+                    D: ['n', 's', ''],
+                },
+            },
+        },
+        command: {
+            note: 'Short, clipped, plosive-heavy; one or two words.',
+            axiom: 'S',
+            iterations: 4,
+            variants: {
+                short:  { S: 'W',   W: 'XX', X: 'pVs' },
+                double: { S: 'W.W', W: 'XX', X: ['pVC', 'CVp', 'pVp'] },
+            },
+        },
+        technical: {
+            note: 'Dense consonant clusters, dictation-style.',
+            axiom: 'S',
+            iterations: 4,
+            variants: {
+                readout: { S: 'W.W.W.W,', W: 'X',   X: 'CvC' },
+                jargon:  { S: 'W.W,',     W: 'XXX', X: ['CsV', 'sCV', 'pCV', 'CVs'] },
+                chatter: { S: 'WWWW,',    W: 'X.',  X: 'CvC' },
+            },
+        },
+        casual: {
+            note: 'Open, vowelly, conversational.',
+            axiom: 'S',
+            iterations: 4,
+            variants: {
+                relaxed: { S: 'W.W.W,', W: 'XX',  X: ['CV', 'VC', 'CVC', 'nV', 'Vn', 'lV', 'V'] },
+                musing:  { S: 'W,W,',   W: 'XXX', X: ['Vv', 'nVv', 'VnV', 'VlV'] },
+            },
+        },
+        question: {
+            note: 'Pitch contour rises to the final "?". The "?" is kept as '
+                + 'the last character so speakPhrase detects the question; '
+                + 'speakSymbol ignores it so it doesn\'t generate a sound.',
+            axiom: 'S',
+            iterations: 4,
+            variants: {
+                plain: {
+                    S: 'W.Wv?', W: 'XX',
+                    X: ['CV', 'nV', 'Vn', 'CVC', 'lV'],
+                },
+            },
+        },
     };
 
-    function generatePhrase(kind) {
-        const gens = Object.values(SPEECH_GRAMMARS);
-        const gen = kind ? SPEECH_GRAMMARS[kind] : pick(gens);
-        return gen();
+    // Resolve a variant's rules (arrays → one chosen string each),
+    // then run LSystem.expand() with the axiom / iterations.
+    function expandGrammar(kind) {
+        const g = kind ? SPEECH_GRAMMARS[kind]
+                       : SPEECH_GRAMMARS[pick(Object.keys(SPEECH_GRAMMARS))];
+        if (!g) return '';
+        const variantNames = Object.keys(g.variants);
+        const variant = g.variants[pick(variantNames)];
+        const rules = {};
+        for (const [key, val] of Object.entries(variant)) {
+            rules[key] = Array.isArray(val) ? pick(val) : val;
+        }
+        return new LSystem(g.axiom || 'S', rules, g.iterations || 4).expand();
     }
+
+    // Backward-compatible alias — prior code and window export used this.
+    function generatePhrase(kind) { return expandGrammar(kind); }
 
     // ── Tiered vocabulary ──────────────────────────────────
     // The L-system grammars above produce one-off phrases from scratch.
@@ -2991,6 +3262,378 @@ import * as THREE from 'three';
             }
             scheduleSpeech(rng(5, 18));
         }, delay * 1000);
+    }
+
+    // ── Grammar Inspector modal wiring ────────────────────────
+    // Opens on the "⚙ grammar" pill, renders the active tab, lets
+    // the user view & edit the engine's internals. All edits mutate
+    // live state directly — there's no server round-trip and no
+    // persistence, so refreshing the page re-seeds the language.
+    const giBackdrop = document.getElementById('gi-backdrop');
+    const giOpenBtn = document.getElementById('grammar-toggle');
+    const giCloseBtn = document.getElementById('gi-close');
+    const giTabs = document.querySelectorAll('.gi-tab');
+    const giPanes = {
+        grammar:  document.getElementById('gi-pane-grammar'),
+        subwords: document.getElementById('gi-pane-subwords'),
+        words:    document.getElementById('gi-pane-words'),
+        stats:    document.getElementById('gi-pane-stats'),
+    };
+    let giActiveTab = 'grammar';
+    let giStatsTimer = null;
+
+    function giOpen() {
+        giBackdrop.classList.add('open');
+        giRender(giActiveTab);
+        if (giActiveTab === 'stats') giStartStatsTimer();
+    }
+    function giClose() {
+        giBackdrop.classList.remove('open');
+        giStopStatsTimer();
+    }
+    function giStartStatsTimer() {
+        giStopStatsTimer();
+        giStatsTimer = setInterval(() => giRender('stats'), 1000);
+    }
+    function giStopStatsTimer() {
+        if (giStatsTimer) { clearInterval(giStatsTimer); giStatsTimer = null; }
+    }
+
+    giOpenBtn.addEventListener('click', giOpen);
+    giCloseBtn.addEventListener('click', giClose);
+    giBackdrop.addEventListener('click', (e) => {
+        if (e.target === giBackdrop) giClose();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && giBackdrop.classList.contains('open')) giClose();
+    });
+    giTabs.forEach(t => t.addEventListener('click', () => {
+        giTabs.forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        Object.values(giPanes).forEach(p => p.classList.remove('active'));
+        giActiveTab = t.dataset.tab;
+        giPanes[giActiveTab].classList.add('active');
+        giRender(giActiveTab);
+        if (giActiveTab === 'stats') giStartStatsTimer();
+        else giStopStatsTimer();
+    }));
+
+    function giRender(tab) {
+        if (tab === 'grammar')  giRenderGrammar();
+        else if (tab === 'subwords') giRenderSubwords();
+        else if (tab === 'words')    giRenderWords();
+        else if (tab === 'stats')    giRenderStats();
+    }
+
+    // ── Grammar tab ──────────────────────────────────────────
+    // Each variant's rules are shown as a JSON object in a textarea.
+    // Rule values: string (single expansion) or array (pick-one).
+    function giRenderGrammar() {
+        const pane = giPanes.grammar;
+        pane.innerHTML = '';
+        const header = document.createElement('div');
+        header.style.marginBottom = '0.8rem';
+        header.style.fontSize = '0.72rem';
+        header.style.color = '#8b95a0';
+        header.innerHTML = 'Rules are applied for <b>iterations</b> passes over '
+            + 'the <b>axiom</b>. A value that is a <b>string</b> expands to that '
+            + 'string; a value that is an <b>array</b> picks one entry at '
+            + 'expansion time. Edit the JSON and click <b>Apply</b>.';
+        pane.appendChild(header);
+
+        for (const [kind, grammar] of Object.entries(SPEECH_GRAMMARS)) {
+            const box = document.createElement('div');
+            box.className = 'gi-grammar';
+            box.innerHTML = `
+                <div class="gi-grammar-head">
+                    <span class="gname">${kind}</span>
+                    <span style="color:#566270;font-size:0.7rem;">
+                        axiom=<b>${grammar.axiom}</b>
+                        · iter=<b>${grammar.iterations}</b>
+                    </span>
+                    <div class="gnote">${grammar.note || ''}</div>
+                </div>
+            `;
+            for (const [vname, rules] of Object.entries(grammar.variants)) {
+                const v = document.createElement('div');
+                v.className = 'gi-variant';
+                const json = JSON.stringify(rules, null, 2);
+                v.innerHTML = `
+                    <div class="gi-variant-name">${vname}</div>
+                    <textarea class="gi-rules-editor" rows="${json.split('\n').length}"></textarea>
+                    <div class="gi-actions">
+                        <button class="gi-btn primary" data-action="apply">Apply</button>
+                        <button class="gi-btn" data-action="sample">Sample</button>
+                        <button class="gi-btn" data-action="reset">Revert</button>
+                        <span class="gi-msg"></span>
+                    </div>
+                `;
+                const ta = v.querySelector('textarea');
+                ta.value = json;
+                const msg = v.querySelector('.gi-msg');
+                const original = json;
+                v.querySelector('[data-action=apply]').onclick = () => {
+                    try {
+                        const parsed = JSON.parse(ta.value);
+                        grammar.variants[vname] = parsed;
+                        ta.classList.remove('bad');
+                        msg.textContent = 'Applied.';
+                        msg.className = 'gi-msg ok';
+                    } catch (e) {
+                        ta.classList.add('bad');
+                        msg.textContent = 'Bad JSON: ' + e.message;
+                        msg.className = 'gi-msg bad';
+                    }
+                };
+                v.querySelector('[data-action=sample]').onclick = () => {
+                    // Temporarily force this variant and show a live expansion.
+                    try {
+                        const parsed = JSON.parse(ta.value);
+                        const resolved = {};
+                        for (const [k, val] of Object.entries(parsed)) {
+                            resolved[k] = Array.isArray(val) ? pick(val) : val;
+                        }
+                        const out = new LSystem(
+                            grammar.axiom || 'S', resolved,
+                            grammar.iterations || 4).expand();
+                        msg.textContent = 'Sample: ' + out;
+                        msg.className = 'gi-msg ok';
+                    } catch (e) {
+                        msg.textContent = 'Bad JSON: ' + e.message;
+                        msg.className = 'gi-msg bad';
+                    }
+                };
+                v.querySelector('[data-action=reset]').onclick = () => {
+                    ta.value = original;
+                    ta.classList.remove('bad');
+                    msg.textContent = 'Reverted (textarea only — click Apply to commit).';
+                    msg.className = 'gi-msg';
+                };
+                box.appendChild(v);
+            }
+            pane.appendChild(box);
+        }
+    }
+
+    // ── Subwords tab ─────────────────────────────────────────
+    function giRenderSubwords() {
+        const pane = giPanes.subwords;
+        pane.innerHTML = `
+            <div class="gi-toolbar">
+                <input type="text" id="gi-sub-new" placeholder="new pattern (e.g. nVl)" />
+                <button class="gi-btn primary" id="gi-sub-add">Add</button>
+                <button class="gi-btn" id="gi-sub-evolve">Run evolve cycle now</button>
+                <span class="gi-count"></span>
+            </div>
+            <table class="gi-table">
+                <thead><tr>
+                    <th>ID</th><th>Pattern</th><th>Used</th>
+                    <th>Age (s)</th><th></th>
+                </tr></thead>
+                <tbody id="gi-sub-body"></tbody>
+            </table>
+        `;
+        const body = pane.querySelector('#gi-sub-body');
+        const countEl = pane.querySelector('.gi-count');
+        const now = Date.now();
+        const sorted = [...SUBWORDS].sort((a, b) => b.useCount - a.useCount);
+        countEl.textContent = `${SUBWORDS.length} subwords · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}`;
+        sorted.slice(0, 400).forEach(s => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="id">${s.id}</td>
+                <td><input type="text" value="${s.pattern}"></td>
+                <td class="use">${s.useCount}</td>
+                <td>${((now - s.born) / 1000).toFixed(0)}</td>
+                <td><button class="row-del" title="Delete this subword">✕</button></td>
+            `;
+            const input = tr.querySelector('input');
+            input.addEventListener('change', () => {
+                const v = input.value.trim();
+                if (v) { s.pattern = v; }
+                else   { input.value = s.pattern; }
+            });
+            tr.querySelector('.row-del').onclick = () => {
+                // Remove from SUBWORDS, remap WORDS subIds.
+                const idx = SUBWORDS.indexOf(s);
+                if (idx < 0) return;
+                SUBWORDS.splice(idx, 1);
+                const idMap = new Map();
+                SUBWORDS.forEach((ss, i) => { idMap.set(ss.id, i); });
+                SUBWORDS.forEach((ss, i) => { ss.id = i; });
+                for (const w of WORDS) {
+                    w.subIds = w.subIds.map(id =>
+                        idMap.has(id) ? idMap.get(id)
+                                      : (Math.random() * SUBWORDS.length) | 0);
+                }
+                giRenderSubwords();
+            };
+            body.appendChild(tr);
+        });
+
+        pane.querySelector('#gi-sub-add').onclick = () => {
+            const inp = pane.querySelector('#gi-sub-new');
+            const v = inp.value.trim();
+            if (!v) return;
+            if (SUBWORDS.length >= SUBWORD_CAP) {
+                alert('Subword cap reached (' + SUBWORD_CAP + ').'); return;
+            }
+            addSubword(v);
+            inp.value = '';
+            giRenderSubwords();
+        };
+        pane.querySelector('#gi-sub-evolve').onclick = () => {
+            evolveLanguage();
+            giRenderSubwords();
+        };
+    }
+
+    // ── Words tab ────────────────────────────────────────────
+    function giRenderWords() {
+        const pane = giPanes.words;
+        pane.innerHTML = `
+            <div class="gi-toolbar">
+                <input type="text" id="gi-word-search"
+                       placeholder="search (substring of expanded pattern)" />
+                <button class="gi-btn" id="gi-word-new">+ new random word</button>
+                <span class="gi-count"></span>
+            </div>
+            <table class="gi-table">
+                <thead><tr>
+                    <th>ID</th><th>Subword chain</th><th>Symbols</th><th>Used</th><th></th>
+                </tr></thead>
+                <tbody id="gi-word-body"></tbody>
+            </table>
+        `;
+        const countEl = pane.querySelector('.gi-count');
+        const body = pane.querySelector('#gi-word-body');
+        const search = pane.querySelector('#gi-word-search');
+
+        function renderRows() {
+            body.innerHTML = '';
+            const q = search.value.trim();
+            let list = [...WORDS].sort((a, b) => b.useCount - a.useCount);
+            if (q) {
+                list = list.filter(w => wordFlat(w).includes(q));
+            }
+            countEl.textContent = `${WORDS.length} words`
+                + (q ? ` · ${list.length} match` : '')
+                + ` · showing top 300`;
+            list.slice(0, 300).forEach(w => {
+                const flat = wordFlat(w);
+                const chain = w.subIds.map(id => {
+                    const s = SUBWORDS[id];
+                    return s ? s.pattern : '?';
+                }).join('-');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="id">${w.id}</td>
+                    <td><input type="text" value="${chain}"></td>
+                    <td class="pat">${flat}</td>
+                    <td class="use">${w.useCount}</td>
+                    <td><button class="row-del" title="Delete this word">✕</button></td>
+                `;
+                const input = tr.querySelector('input');
+                const patCell = tr.querySelectorAll('td')[2];
+                input.addEventListener('change', () => {
+                    // Parse "pat-pat-pat" — for each segment, find or create
+                    // a subword with that exact pattern. Missing ones get
+                    // added (within cap) so round-tripping edits works.
+                    const segs = input.value.split('-').map(x => x.trim()).filter(Boolean);
+                    const ids = [];
+                    for (const seg of segs) {
+                        let found = SUBWORDS.findIndex(s => s.pattern === seg);
+                        if (found < 0 && SUBWORDS.length < SUBWORD_CAP) {
+                            const added = addSubword(seg);
+                            found = added.id;
+                        }
+                        if (found >= 0) ids.push(found);
+                    }
+                    if (ids.length) {
+                        w.subIds = ids;
+                        patCell.textContent = wordFlat(w);
+                    } else {
+                        input.value = w.subIds.map(i => (SUBWORDS[i]||{pattern:'?'}).pattern).join('-');
+                    }
+                });
+                tr.querySelector('.row-del').onclick = () => {
+                    const idx = WORDS.indexOf(w);
+                    if (idx < 0) return;
+                    WORDS.splice(idx, 1);
+                    WORDS.forEach((ww, i) => { ww.id = i; });
+                    renderRows();
+                };
+                body.appendChild(tr);
+            });
+        }
+        function wordFlat(w) {
+            let s = '';
+            for (const id of w.subIds) s += (SUBWORDS[id] || {pattern:''}).pattern;
+            return s;
+        }
+
+        search.addEventListener('input', renderRows);
+        pane.querySelector('#gi-word-new').onclick = () => {
+            WORDS.push(genWord());
+            renderRows();
+        };
+        renderRows();
+    }
+
+    // ── Stats tab ────────────────────────────────────────────
+    function giRenderStats() {
+        const pane = giPanes.stats;
+        const topSubs = [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
+        const topWords = [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
+        const usedSubs = SUBWORDS.filter(s => s.useCount > 0).length;
+        const usedWords = WORDS.filter(w => w.useCount > 0).length;
+        const totalSpeakEvents = WORDS.reduce((s, w) => s + w.useCount, 0);
+        pane.innerHTML = `
+            <div class="gi-stats">
+                <div class="gi-stat-card">
+                    <h4>Subwords</h4>
+                    <div class="big">${SUBWORDS.length}</div>
+                    <div style="color:#8b95a0;font-size:0.7rem;">
+                        ${usedSubs} used · ${SUBWORDS.length - usedSubs} idle
+                        · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}
+                    </div>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Words</h4>
+                    <div class="big">${WORDS.length}</div>
+                    <div style="color:#8b95a0;font-size:0.7rem;">
+                        ${usedWords} used · ${WORDS.length - usedWords} idle
+                    </div>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Speech events</h4>
+                    <div class="big">${totalSpeakEvents}</div>
+                    <div style="color:#8b95a0;font-size:0.7rem;">
+                        total word-utterances since page load
+                    </div>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Top 10 subwords</h4>
+                    <ol>${topSubs.map(s =>
+                        `<li><span style="color:var(--amber);">${s.pattern}</span> ×${s.useCount}</li>`
+                    ).join('')}</ol>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Top 10 words</h4>
+                    <ol>${topWords.map(w => {
+                        const chain = w.subIds.map(i => (SUBWORDS[i]||{pattern:'?'}).pattern).join('-');
+                        return `<li><span style="color:var(--cyan);">${chain}</span> ×${w.useCount}</li>`;
+                    }).join('')}</ol>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Grammar presets</h4>
+                    <ol>${Object.entries(SPEECH_GRAMMARS).map(([k, g]) =>
+                        `<li><span style="color:var(--amber);">${k}</span>
+                         — ${Object.keys(g.variants).length} variant(s)</li>`
+                    ).join('')}</ol>
+                </div>
+            </div>
+        `;
     }
 })();
 </script>
