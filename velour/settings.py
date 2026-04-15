@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     'reckoner',
     'screen_gubi',
     'grammar_engine',
+    'evolution',
 ]
 
 MIDDLEWARE = [

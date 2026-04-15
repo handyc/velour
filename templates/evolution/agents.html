@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Evolution — Agents · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ev-wrap { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ev-wrap h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ev-wrap .ev-lede {
+        color: #8b949e; font-size: 0.85rem; max-width: 64ch;
+        margin-bottom: 1.6rem;
+    }
+    .ev-toolbar { display: flex; gap: 0.6rem; align-items: center;
+                  margin-bottom: 0.8rem; }
+    .ev-toolbar a { color: #8b949e; font-size: 0.75rem; text-decoration: none;
+                    border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+                    border-radius: 3px; text-transform: uppercase;
+                    letter-spacing: 0.05em; }
+    .ev-toolbar a:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-search {
+        display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+        padding: 0.6rem 0.8rem; margin-bottom: 1.2rem;
+        background: #0f1620; border: 1px solid #30363d; border-radius: 4px;
+    }
+    .ev-search label { font-size: 0.7rem; letter-spacing: 0.06em;
+                       color: #8b949e; text-transform: uppercase; }
+    .ev-search input[type=text] {
+        background: #060a12; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.25rem 0.45rem; font-family: inherit; font-size: 0.8rem;
+        min-width: 14em;
+    }
+    .ev-btn {
+        background: transparent; color: #58a6ff;
+        border: 1px solid #30363d; padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.75rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    }
+    .ev-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-btn.danger { color: #f85149; border-color: #703030; }
+    .ev-list { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .ev-list th, .ev-list td {
+        padding: 0.45rem 0.65rem;
+        border-bottom: 1px solid #1a2230; text-align: left;
+    }
+    .ev-list th {
+        color: #8b949e; text-transform: uppercase;
+        font-size: 0.68rem; letter-spacing: 0.06em;
+        border-bottom: 1px solid #30363d;
+    }
+    .ev-list td.meta { color: #6e7681; font-size: 0.75rem; }
+    .ev-list td.name a {
+        color: #58a6ff; text-decoration: none; font-weight: 500;
+    }
+    .ev-list td.name a:hover { color: #e6fbff; text-decoration: underline; }
+    .ev-list td.score { font-variant-numeric: tabular-nums; color: #ffb84d; }
+    .ev-empty {
+        padding: 2rem; text-align: center; color: #6e7681;
+        border: 1px dashed #30363d; border-radius: 4px;
+    }
+    .ev-pager {
+        margin-top: 1.2rem;
+        display: flex; gap: 0.6rem; align-items: center;
+        font-size: 0.78rem;
+    }
+    .ev-pager a {
+        color: #58a6ff; text-decoration: none;
+        border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+        border-radius: 3px;
+    }
+    .ev-pager a:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-pager .ev-pager-info { color: #6e7681; margin: 0 auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ev-wrap">
+    <h1>Agent Library</h1>
+    <p class="ev-lede">
+        Saved agents from past runs. Use one as a seed for a new run, or
+        export an L0 agent into the L-System library to render it as a
+        plant or building.
+    </p>
+
+    <div class="ev-toolbar">
+        <a href="{% url 'evolution:list' %}">← runs</a>
+    </div>
+
+    <form class="ev-search" method="get">
+        <label>Search</label>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="name / slug / notes" autocomplete="off">
+        <button type="submit" class="ev-btn">Filter</button>
+        {% if q %}
+        <a href="{% url 'evolution:agents' %}" class="ev-btn">Clear</a>
+        {% endif %}
+        <span style="color:#6e7681;font-size:0.72rem;margin-left:auto;">
+            {% if q %}{{ total }} match{{ total|pluralize }} of
+            {{ grand_total }}{% else %}{{ grand_total }} agent{{ grand_total|pluralize }}{% endif %}
+        </span>
+    </form>
+
+    {% if agents %}
+    <table class="ev-list">
+        <thead><tr>
+            <th>Name</th><th>Level</th><th>Score</th>
+            <th>Source run</th><th>Created</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for a in agents %}
+        <tr>
+            <td class="name">
+                <a href="{% url 'evolution:agent_detail' slug=a.slug %}">{{ a.name }}</a>
+            </td>
+            <td class="meta">L{{ a.level }}</td>
+            <td class="score">{{ a.score|floatformat:3 }}</td>
+            <td class="meta">
+                {% if a.source_run %}<a href="{% url 'evolution:run_detail' slug=a.source_run.slug %}"
+                                         style="color:#8b949e;">{{ a.source_run.name }}</a>{% endif %}
+            </td>
+            <td class="meta">{{ a.created|date:"Y-m-d H:i" }}</td>
+            <td style="text-align:right;">
+                <form method="post"
+                      action="{% url 'evolution:agent_delete' slug=a.slug %}"
+                      onsubmit="return confirm('Delete {{ a.name|escapejs }}?');"
+                      style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="ev-btn danger">✕</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="ev-empty">
+        {% if q %}No agents match "{{ q }}".
+        {% else %}No saved agents yet. Run an evolution and click "save".{% endif %}
+    </div>
+    {% endif %}
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="ev-pager">
+        {% if page.has_previous %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page=1">« first</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.previous_page_number }}">‹ prev</a>
+        {% endif %}
+        <span class="ev-pager-info">
+            page {{ page.number }} of {{ page.paginator.num_pages }}
+            ({{ page.paginator.count }} total)
+        </span>
+        {% if page.has_next %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.next_page_number }}">next ›</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.paginator.num_pages }}">last »</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

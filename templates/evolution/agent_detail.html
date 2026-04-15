@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ agent.name }} · Agent · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ev-page { max-width: 900px; margin: 1.6rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ev-page h1 { margin: 0; font-size: 1.3rem; letter-spacing: 0.06em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ev-meta { color: #6e7681; font-size: 0.78rem; margin: 0.2rem 0 1rem 0; }
+    .ev-meta a { color: #8b949e; text-decoration: none;
+                 border: 1px solid #30363d; padding: 0 0.4rem;
+                 border-radius: 2px; margin-right: 0.3rem; }
+    .ev-meta a:hover { color: #58a6ff; }
+    .ev-section { margin: 1.4rem 0; }
+    .ev-section h2 { font-size: 0.78rem; letter-spacing: 0.08em;
+                     color: #8b949e; text-transform: uppercase;
+                     border-bottom: 1px solid #30363d;
+                     padding-bottom: 0.3rem; margin-bottom: 0.6rem; }
+    .ev-card-row {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem;
+    }
+    .ev-stat {
+        background: #0b1018; border: 1px solid #1a2230; border-radius: 4px;
+        padding: 0.5rem 0.7rem;
+    }
+    .ev-stat .k { color: #6e7681; font-size: 0.65rem; text-transform: uppercase;
+                  letter-spacing: 0.05em; }
+    .ev-stat .v { color: #c9d1d9; font-size: 1rem; font-variant-numeric: tabular-nums; }
+    .ev-stat.score .v { color: #ffb84d; }
+    pre.ev-gene {
+        background: #0b1018; border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.7rem 0.9rem; font-size: 0.78rem; color: #c9d1d9;
+        overflow-x: auto; max-height: 30rem;
+    }
+    .ev-actions {
+        display: flex; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .ev-btn {
+        background: transparent; color: #58a6ff;
+        border: 1px solid #30363d; padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.75rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+        text-decoration: none; display: inline-block;
+    }
+    .ev-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-btn.primary { color: #ffb84d; border-color: #50401a; }
+    .ev-btn.danger { color: #f85149; border-color: #703030; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ev-page">
+    <h1>{{ agent.name }}</h1>
+    <div class="ev-meta">
+        <a href="{% url 'evolution:agents' %}">← library</a>
+        L{{ agent.level }}
+        {% if agent.source_run %}
+        · run <a href="{% url 'evolution:run_detail' slug=agent.source_run.slug %}"
+                style="color:#8b949e;">{{ agent.source_run.name }}</a>
+        {% endif %}
+        {% if agent.parent %}
+        · parent <a href="{% url 'evolution:agent_detail' slug=agent.parent.slug %}"
+                    style="color:#8b949e;">{{ agent.parent.name }}</a>
+        {% endif %}
+        · created {{ agent.created|date:"Y-m-d H:i" }}
+    </div>
+
+    <div class="ev-section">
+        <h2>Stats</h2>
+        <div class="ev-card-row">
+            <div class="ev-stat score"><div class="k">score</div>
+                <div class="v">{{ agent.score|floatformat:3 }}</div></div>
+            <div class="ev-stat"><div class="k">level</div>
+                <div class="v">L{{ agent.level }}</div></div>
+            <div class="ev-stat"><div class="k">descendants</div>
+                <div class="v">{{ agent.descendants.count }}</div></div>
+            <div class="ev-stat"><div class="k">runs seeded</div>
+                <div class="v">{{ agent.runs_seeded.count }}</div></div>
+        </div>
+    </div>
+
+    <div class="ev-section">
+        <h2>Actions</h2>
+        <div class="ev-actions">
+            {% if agent.level == 0 %}
+            <form method="post"
+                  action="{% url 'evolution:agent_export_lsystem' slug=agent.slug %}"
+                  onsubmit="return confirm('Export {{ agent.name|escapejs }} to L-System library?');">
+                {% csrf_token %}
+                <button type="submit" class="ev-btn primary">→ Export to L-System</button>
+            </form>
+            {% endif %}
+            <a href="{% url 'evolution:list' %}#seed={{ agent.id }}" class="ev-btn">Seed new run</a>
+            <a href="{% url 'evolution:agent_json' slug=agent.slug %}" class="ev-btn">JSON</a>
+            <form method="post"
+                  action="{% url 'evolution:agent_delete' slug=agent.slug %}"
+                  onsubmit="return confirm('Delete {{ agent.name|escapejs }}?');"
+                  style="margin-left:auto;">
+                {% csrf_token %}
+                <button type="submit" class="ev-btn danger">✕ Delete</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="ev-section">
+        <h2>Gene</h2>
+        <pre class="ev-gene">{{ gene_json }}</pre>
+    </div>
+
+    {% if agent.seed_string %}
+    <div class="ev-section">
+        <h2>Seed string</h2>
+        <pre class="ev-gene">{{ agent.seed_string }}</pre>
+    </div>
+    {% endif %}
+
+    {% if agent.script %}
+    <div class="ev-section">
+        <h2>Script</h2>
+        <pre class="ev-gene">{{ agent.script }}</pre>
+    </div>
+    {% endif %}
+
+    {% if agent.notes %}
+    <div class="ev-section">
+        <h2>Notes</h2>
+        <pre class="ev-gene">{{ agent.notes }}</pre>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

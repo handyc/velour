@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ run.name }} · Evolution · Velour{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'evolution/ui.css' %}">
+<style>
+    .ev-page { max-width: 1200px; margin: 1.6rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ev-page h1 { margin: 0; font-size: 1.3rem; letter-spacing: 0.06em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ev-meta { color: #6e7681; font-size: 0.78rem; margin: 0.2rem 0 1rem 0; }
+    .ev-meta a { color: #8b949e; text-decoration: none;
+                 border: 1px solid #30363d; padding: 0 0.4rem;
+                 border-radius: 2px; margin-right: 0.3rem; }
+    .ev-meta a:hover { color: #58a6ff; }
+    .ev-meta code { color: #c9d1d9; background: #0b1018; padding: 0 0.3rem; }
+    .ev-goal {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 0.72rem; color: #ffb84d;
+        background: #0b1018; padding: 0.5rem 0.7rem;
+        border: 1px solid #30363d; border-radius: 4px;
+        max-height: 5rem; overflow-y: auto; word-break: break-all;
+        margin-bottom: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ev-page">
+    <h1>{{ run.name }}</h1>
+    <div class="ev-meta">
+        <a href="{% url 'evolution:list' %}">← all runs</a>
+        <a href="{% url 'evolution:agents' %}">agent library</a>
+        L{{ run.level }} · pop {{ run.population_size }} ·
+        target ≥ {{ run.target_score|floatformat:2 }} ·
+        max gen {{ run.generations_target }}
+        {% if run.goal_species %}
+        · goal:&nbsp;<code>{{ run.goal_species.name }}</code>
+        {% endif %}
+    </div>
+
+    <div class="ev-goal" title="goal string (truncated to 400 chars)">
+        {{ run.goal_string|slice:":400"|default:"(empty)" }}{% if run.goal_string|length > 400 %}…{% endif %}
+    </div>
+
+    <div id="ev-app"></div>
+</div>
+
+<script type="module">
+    import { EvolutionEngine } from "{% static 'evolution/engine.mjs' %}";
+    import { EvolutionUI } from "{% static 'evolution/ui.mjs' %}";
+
+    const RUN = {{ run_json|safe }};
+    const csrfToken = document.cookie
+        .split('; ').find(r => r.startsWith('csrftoken='))?.split('=')[1] || '';
+
+    const engine = new EvolutionEngine({
+        run: RUN,
+        level: RUN.level,
+        goal: RUN.goal_string || '',
+        population_size: RUN.population_size,
+        generations_target: RUN.generations_target,
+        target_score: RUN.target_score,
+        params: RUN.params || {},
+        seedAgent: RUN.seed_agent || null,
+    });
+    engine.init();
+
+    const ui = new EvolutionUI({
+        root: document.getElementById('ev-app'),
+        engine,
+        csrfToken,
+        runId: RUN.slug,
+    });
+    window.__evolution = { engine, ui };
+</script>
+{% endblock %}

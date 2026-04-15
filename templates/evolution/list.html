@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Evolution Engine — Runs · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ev-wrap { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem;
+               color: #c9d1d9; }
+    .ev-wrap h1 { margin: 0 0 0.2rem 0; font-size: 1.4rem; letter-spacing: 0.08em;
+                  text-transform: uppercase; color: #58a6ff; }
+    .ev-wrap .ev-lede {
+        color: #8b949e; font-size: 0.85rem; max-width: 64ch;
+        margin-bottom: 1.6rem;
+    }
+    .ev-newbar {
+        display: grid; gap: 0.5rem 0.7rem; align-items: center;
+        grid-template-columns: auto 1fr auto 1fr;
+        padding: 0.8rem 1rem; margin-bottom: 1.5rem;
+        background: #0f1620; border: 1px solid #30363d; border-radius: 4px;
+    }
+    .ev-newbar label { font-size: 0.7rem; letter-spacing: 0.06em;
+                       color: #8b949e; text-transform: uppercase; }
+    .ev-newbar input[type=text], .ev-newbar input[type=number],
+    .ev-newbar select, .ev-newbar textarea {
+        background: #060a12; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.25rem 0.45rem; font-family: inherit; font-size: 0.8rem;
+        width: 100%; box-sizing: border-box;
+    }
+    .ev-newbar textarea { grid-column: 2 / -1; min-height: 3em; resize: vertical; }
+    .ev-newbar .ev-actions {
+        grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 0.5rem;
+    }
+    .ev-btn {
+        background: transparent; color: #58a6ff;
+        border: 1px solid #30363d; padding: 0.3rem 0.7rem;
+        font-family: inherit; font-size: 0.75rem;
+        letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+    }
+    .ev-btn:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-btn.primary { color: #ffb84d; border-color: #50401a; }
+    .ev-btn.danger { color: #f85149; border-color: #703030; }
+    .ev-list {
+        width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    }
+    .ev-list th, .ev-list td {
+        padding: 0.45rem 0.65rem;
+        border-bottom: 1px solid #1a2230; text-align: left;
+    }
+    .ev-list th {
+        color: #8b949e; text-transform: uppercase;
+        font-size: 0.68rem; letter-spacing: 0.06em;
+        border-bottom: 1px solid #30363d;
+    }
+    .ev-list td.meta { color: #6e7681; font-size: 0.75rem; }
+    .ev-list td.name a {
+        color: #58a6ff; text-decoration: none; font-weight: 500;
+    }
+    .ev-list td.name a:hover { color: #e6fbff; text-decoration: underline; }
+    .ev-list td.score { font-variant-numeric: tabular-nums; color: #ffb84d; }
+    .ev-empty {
+        padding: 2rem; text-align: center; color: #6e7681;
+        border: 1px dashed #30363d; border-radius: 4px;
+    }
+    .ev-pager {
+        margin-top: 1.2rem;
+        display: flex; gap: 0.6rem; align-items: center;
+        font-size: 0.78rem;
+    }
+    .ev-pager a {
+        color: #58a6ff; text-decoration: none;
+        border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+        border-radius: 3px;
+    }
+    .ev-pager a:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-pager .ev-pager-info { color: #6e7681; margin: 0 auto; }
+    .ev-toolbar { display: flex; gap: 0.6rem; align-items: center;
+                  margin-bottom: 0.8rem; }
+    .ev-toolbar a { color: #8b949e; font-size: 0.75rem; text-decoration: none;
+                    border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+                    border-radius: 3px; text-transform: uppercase;
+                    letter-spacing: 0.05em; }
+    .ev-toolbar a:hover { background: #0f2a40; color: #e6fbff; }
+    .ev-status-pill {
+        display: inline-block; padding: 0 0.4rem;
+        border: 1px solid #30363d; border-radius: 2px;
+        font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase;
+        color: #8b949e;
+    }
+    .ev-status-running { color: #58a6ff; border-color: #1f4060; }
+    .ev-status-finished { color: #7be88a; border-color: #1f6030; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ev-wrap">
+    <h1>Evolution Engine</h1>
+    <p class="ev-lede">
+        Populations of agents evolve toward an L-system goal string. The
+        engine runs in your browser. Save any agent at any moment to the
+        library — saved agents can seed future runs or export to the
+        L-System library as a plant or building.
+    </p>
+
+    <div class="ev-toolbar">
+        <a href="{% url 'evolution:agents' %}">Agent library →</a>
+    </div>
+
+    <form class="ev-newbar" method="post" action="{% url 'evolution:new' %}">
+        {% csrf_token %}
+
+        <label>Name</label>
+        <input type="text" name="name" maxlength="120" placeholder="Run-…">
+
+        <label>Level</label>
+        <select name="level">
+            <option value="0">L0 — worker</option>
+            <option value="1">L1 — meta</option>
+            <option value="2">L2 — meta-meta</option>
+        </select>
+
+        <label>Population</label>
+        <input type="number" name="population_size" value="24" min="2" max="200">
+
+        <label>Generations</label>
+        <input type="number" name="generations_target" value="200" min="1" max="100000">
+
+        <label>Target score</label>
+        <input type="number" name="target_score" value="0.95" min="0" max="1" step="0.01">
+
+        <label>Goal species</label>
+        <select name="goal_species">
+            <option value="">— pasted goal below —</option>
+            {% for sp in species %}
+            <option value="{{ sp.id }}">{{ sp.name }} ({{ sp.category }})</option>
+            {% endfor %}
+        </select>
+
+        <label>Seed agent</label>
+        <select name="seed_agent">
+            <option value="">— random founders —</option>
+            {% for a in seed_agents %}
+            <option value="{{ a.id }}">{{ a.name }} (L{{ a.level }} · {{ a.score|floatformat:3 }})</option>
+            {% endfor %}
+        </select>
+
+        <label>Goal string</label>
+        <textarea name="goal_string" placeholder="leave blank to expand from species"></textarea>
+
+        <div class="ev-actions">
+            <button type="submit" class="ev-btn primary">+ Create run</button>
+        </div>
+    </form>
+
+    <form class="ev-newbar" method="get"
+          style="grid-template-columns: auto 1fr auto auto;">
+        <label>Search</label>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="name / slug / notes" autocomplete="off">
+        <button type="submit" class="ev-btn">Filter</button>
+        {% if q %}
+        <a href="{% url 'evolution:list' %}" class="ev-btn">Clear</a>
+        {% endif %}
+    </form>
+
+    <div style="color:#6e7681;font-size:0.72rem;margin:-0.5rem 0 0.8rem 0;text-align:right;">
+        {% if q %}{{ total }} match{{ total|pluralize }} of
+        {{ grand_total }}{% else %}{{ grand_total }} run{{ grand_total|pluralize }}{% endif %}
+    </div>
+
+    {% if runs %}
+    <table class="ev-list">
+        <thead><tr>
+            <th>Name</th><th>Level</th><th>Status</th><th>Gen</th>
+            <th>Best</th><th>Goal</th><th>Modified</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for run in runs %}
+        <tr>
+            <td class="name">
+                <a href="{% url 'evolution:run_detail' slug=run.slug %}">{{ run.name }}</a>
+            </td>
+            <td class="meta">L{{ run.level }}</td>
+            <td><span class="ev-status-pill ev-status-{{ run.status }}">{{ run.status }}</span></td>
+            <td class="meta">{{ run.generation }}/{{ run.generations_target }}</td>
+            <td class="score">{{ run.best_score|floatformat:3 }}</td>
+            <td class="meta">
+                {% if run.goal_species %}{{ run.goal_species.name }}
+                {% else %}<code>{{ run.goal_string|truncatechars:30 }}</code>{% endif %}
+            </td>
+            <td class="meta">{{ run.modified|date:"Y-m-d H:i" }}</td>
+            <td style="text-align:right;">
+                <form method="post"
+                      action="{% url 'evolution:run_delete' slug=run.slug %}"
+                      onsubmit="return confirm('Delete {{ run.name|escapejs }}?');"
+                      style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="ev-btn danger">✕</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="ev-empty">
+        {% if q %}No runs match "{{ q }}".
+        {% else %}No runs yet. Create one above.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="ev-pager">
+        {% if page.has_previous %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page=1">« first</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.previous_page_number }}">‹ prev</a>
+        {% endif %}
+        <span class="ev-pager-info">
+            page {{ page.number }} of {{ page.paginator.num_pages }}
+            ({{ page.paginator.count }} total)
+        </span>
+        {% if page.has_next %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.next_page_number }}">next ›</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.paginator.num_pages }}">last »</a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
