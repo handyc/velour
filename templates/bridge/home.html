@@ -3037,8 +3037,26 @@ import * as THREE from 'three';
             axiom: 'S',
             iterations: 4,
             variants: {
-                short:  { S: 'W',   W: 'XX', X: 'pVs' },
-                double: { S: 'W.W', W: 'XX', X: ['pVC', 'CVp', 'pVp'] },
+                short:         { S: 'W',          W: 'XX', X: 'pVs' },
+                double:        { S: 'W.W',        W: 'XX', X: ['pVC', 'CVp', 'pVp'] },
+                barked:        { S: 'W',          W: 'X',  X: 'pVp' },
+                hailed:        { S: 'W.W',        W: 'X',  X: ['pV', 'nV'] },
+                shouted:       { S: 'W.W.W',      W: 'X',  X: 'pV' },
+                terse:         { S: 'W',          W: 'X',  X: 'Cv' },
+                affirmed:      { S: 'W',          W: 'XX', X: ['pVs', 'Vs'] },
+                dismissive:    { S: 'W',          W: 'XX', X: ['Vp', 'Vs'] },
+                snapped:       { S: 'W',          W: 'X',  X: 'spV' },
+                declarative:   { S: 'W.W',        W: 'XX', X: ['CVC', 'pVC', 'pVp'] },
+                tense:         { S: 'W,W',        W: 'X',  X: 'psV' },
+                rhythmic:      { S: 'W.W.W',      W: 'XX', X: 'pVs' },
+                countdown:     { S: 'W.W.W.W.W,', W: 'X',  X: 'CV' },
+                warning:       { S: 'W.W,',       W: 'XX', X: ['pV', 'sV'] },
+                quiet_urgent:  { S: 'W,W',        W: 'X',  X: ['sVn', 'nVs'] },
+                confirmation:  { S: 'W',          W: 'XX', X: ['pV', 'Vp'] },
+                refusal:       { S: 'W',          W: 'X',  X: ['nVC', 'nV'] },
+                ordered:       { S: 'W.W.W',      W: 'XX', X: 'pVp' },
+                relayed:       { S: 'W,W.W',      W: 'X',  X: ['CV', 'pV'] },
+                staccato:      { S: 'WWW,',       W: 'X.', X: 'pV' },
             },
         },
         technical: {
@@ -3046,9 +3064,34 @@ import * as THREE from 'three';
             axiom: 'S',
             iterations: 4,
             variants: {
-                readout: { S: 'W.W.W.W,', W: 'X',   X: 'CvC' },
-                jargon:  { S: 'W.W,',     W: 'XXX', X: ['CsV', 'sCV', 'pCV', 'CVs'] },
-                chatter: { S: 'WWWW,',    W: 'X.',  X: 'CvC' },
+                readout:        { S: 'W.W.W.W,',    W: 'X',   X: 'CvC' },
+                jargon:         { S: 'W.W,',        W: 'XXX', X: ['CsV', 'sCV', 'pCV', 'CVs'] },
+                chatter:        { S: 'WWWW,',       W: 'X.',  X: 'CvC' },
+                spec:           { S: 'W.W.W.W,',    W: 'X',   X: 'CsV' },
+                coordinates:    { S: 'W.W.W,',      W: 'X',   X: 'CvCv' },
+                checklist:      { S: 'WWWW,',       W: 'X.',  X: 'CV' },
+                status:         { S: 'W.W,',        W: 'XX',  X: 'sVC' },
+                report:         { S: 'W.W.W.W.W,',  W: 'X',   X: 'nVs' },
+                alert:          { S: 'W,W,W,',      W: 'X',   X: 'pVs' },
+                diagnostic:     { S: 'W.W.W,',      W: 'XX',  X: 'CsC' },
+                telemetry:      { S: 'WWWWW,',      W: 'X',   X: 'Cv' },
+                measurement:    { S: 'W.W.W,',      W: 'X',   X: 'VsC' },
+                sequence:       { S: 'W.W.W.W,',    W: 'X',   X: 'CVC' },
+                query_tech:     { S: 'W.W,',        W: 'XX',  X: 'sV' },
+                verify:         { S: 'W.W,',        W: 'XX',  X: 'CVn' },
+                acknowledged:   { S: 'W.W,',        W: 'X',   X: 'nVC' },
+                update:         { S: 'W.W.W,',     W: 'XX',  X: 'pvC' },
+                schematic:      { S: 'W.W.W,',      W: 'X',   X: 'spV' },
+                survey:         { S: 'W.W.W.W,',    W: 'X',   X: 'sVs' },
+                handoff:        { S: 'W,W,W,',      W: 'XX',  X: ['CV', 'pV'] },
+                checksum:       { S: 'W.W.W,',      W: 'X',   X: 'Cvs' },
+                manifest:       { S: 'WW.WW.WW,',   W: 'X',   X: 'CV' },
+                triangulation:  { S: 'W.W.W.W.W,',  W: 'XX',  X: 'CVs' },
+                calibration:    { S: 'W.W.W.W,',    W: 'X',   X: 'sCv' },
+                parameter:      { S: 'W.W.W,',      W: 'XX',  X: ['CV', 'CvC'] },
+                routing:        { S: 'W.W,',        W: 'XXX', X: 'CV' },
+                timing:         { S: 'W.W,',        W: 'X',   X: 'pvp' },
+                transmission:   { S: 'WW,WW,WW,',   W: 'X',   X: 'sCv' },
             },
         },
         casual: {
@@ -3067,10 +3110,15 @@ import * as THREE from 'three';
             axiom: 'S',
             iterations: 4,
             variants: {
-                plain: {
-                    S: 'W.Wv?', W: 'XX',
-                    X: ['CV', 'nV', 'Vn', 'CVC', 'lV'],
-                },
+                plain:         { S: 'W.Wv?',     W: 'XX',  X: ['CV', 'nV', 'Vn', 'CVC', 'lV'] },
+                curious:       { S: 'W.W.Wv?',   W: 'XX',  X: ['lV', 'nV', 'VnV'] },
+                incredulous:   { S: 'W.Wv?',     W: 'XX',  X: ['pV', 'CV', 'CVC'] },
+                polite:        { S: 'W,W.Wv?',   W: 'XX',  X: ['lV', 'CV', 'nV'] },
+                brief:         { S: 'Wv?',       W: 'XXX', X: ['CV', 'nV'] },
+                rhetorical:    { S: 'W.W,Wv?',   W: 'XX',  X: ['VnV', 'VlV', 'V'] },
+                probing:       { S: 'W.W.W.Wv?', W: 'X',   X: ['CV', 'nV', 'lV'] },
+                echo:          { S: 'W?',        W: 'XX',  X: ['CV', 'nV'] },
+                challenge:     { S: 'W.Wv?',     W: 'XX',  X: ['pV', 'CVp', 'pVC'] },
             },
         },
     };
@@ -3304,6 +3352,65 @@ import * as THREE from 'three';
     // Schedule the evolution cycle on a slow wall-clock tick so the
     // accent drifts even when the tab is backgrounded less aggressively.
     setInterval(() => { if (audio.on) evolveLanguage(); }, 45000);
+
+    // ── Auto-invented grammars ──────────────────────────────
+    // Every 30s, synthesise a brand-new Speech Event type with a
+    // pronounceable pseudo-name and 1-3 randomly-composed variants.
+    // The registry grows over the session; the inspector picks them
+    // up automatically since it reads SPEECH_GRAMMARS directly.
+    const INVENT_SYLL = ['ka','ne','so','ri','mu','lo','te','pa','zi','vo',
+                         'ki','na','ju','be','fe','xo','qu','dy','gra','ush'];
+    const INVENT_S_PATTERNS = ['W','W.W','W.W.W','W,W','W.W,','W.W.W,',
+                               'WW,','W.W.W.W,','WWW,','W,W.W,'];
+    const INVENT_W_PATTERNS = ['X','XX','XXX','X.','XXXX','X,'];
+    const INVENT_X_POOL = ['CV','VC','CVC','nV','Vn','lV','Vl','pV','sV',
+                           'Vp','Vs','CsV','CVs','sCv','pCv','nVC','VlV',
+                           'VnV','Cv','vC','pVp','nVl','lVn'];
+
+    function inventGrammar() {
+        let name = '';
+        for (let i = 0; i < 3; i++) name += pick(INVENT_SYLL);
+        while (SPEECH_GRAMMARS[name]) name += pick(INVENT_SYLL);
+        const nVariants = 1 + Math.floor(Math.random() * 3);
+        const variants = {};
+        for (let v = 0; v < nVariants; v++) {
+            const choices = [];
+            const nChoices = 1 + Math.floor(Math.random() * 4);
+            for (let j = 0; j < nChoices; j++) choices.push(pick(INVENT_X_POOL));
+            variants['v' + (v + 1)] = {
+                S: pick(INVENT_S_PATTERNS),
+                W: pick(INVENT_W_PATTERNS),
+                X: choices.length === 1 ? choices[0] : choices,
+            };
+        }
+        SPEECH_GRAMMARS[name] = {
+            note: 'auto-invented at ' + new Date().toLocaleTimeString(),
+            axiom: 'S', iterations: 4, variants,
+            born: Date.now(),
+            invented: true,
+        };
+        return name;
+    }
+    setInterval(inventGrammar, 30000);
+
+    // ── Word churn ─────────────────────────────────────────
+    // +1 word every 60s; prune the 3 least-used (and >120s old) every
+    // 120s. The pair keeps the vocabulary lightly growing while
+    // retiring ballast nobody has picked up.
+    setInterval(() => { WORDS.push(genWord()); }, 60000);
+
+    setInterval(() => {
+        const grace = Date.now() - 120000;
+        const candidates = WORDS
+            .filter(w => w.useCount === 0 && w.born < grace)
+            .sort((a, b) => a.born - b.born);
+        const victims = new Set(candidates.slice(0, 3));
+        if (victims.size === 0) return;
+        const kept = WORDS.filter(w => !victims.has(w));
+        kept.forEach((w, i) => { w.id = i; });
+        WORDS.length = 0;
+        WORDS.push(...kept);
+    }, 120000);
 
     // Rolling log of spoken utterances — feeds the Inspector's terminal.
     // Capped so long sessions don't leak memory. Newest last.
