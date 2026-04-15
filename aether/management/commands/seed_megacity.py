@@ -215,13 +215,15 @@ class Command(BaseCommand):
         hdri = options['hdri']
         music = options['music'] or random.choice(MUSIC_POOL)
 
+        # Allow multiple MegaCities to exist side by side — find the next
+        # free slug rather than counting (count is wrong if some have been
+        # deleted or if a half-built one already squats on the base name).
         slug = 'megacity'
-        # Allow multiple MegaCities to exist side by side — give each its
-        # own slug so the button can be pressed repeatedly without
-        # wiping the previous one.
-        existing = World.objects.filter(slug__startswith=slug).count()
-        if existing:
-            slug = f'megacity-{existing + 1}'
+        n = 1
+        while World.objects.filter(slug=slug).exists():
+            n += 1
+            slug = f'megacity-{n}'
+        existing = n - 1
 
         tourist_lang, _ = _ensure_language(
             TOURIST_LANG_SLUG, 'Tourist Creole', '')
