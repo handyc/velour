@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Reckoner — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .reck-wrap { max-width: 1100px; margin: 0 auto; padding: 0.5rem 0.5rem 3rem; }
+    .reck-wrap h1 { font-size: 1.25rem; margin: 0.2rem 0 0.1rem; }
+    .reck-lede {
+        color: #8b949e; font-size: 0.85rem;
+        max-width: 62ch; line-height: 1.45;
+        margin: 0 0 1.4rem;
+    }
+
+    /* Unit toggle */
+    .reck-units {
+        display: inline-flex; gap: 0; margin: 0 0 1.2rem;
+        border: 1px solid #30363d; border-radius: 6px;
+        overflow: hidden; font-size: 0.75rem;
+    }
+    .reck-units button {
+        background: #0d1117; color: #8b949e; border: 0;
+        padding: 0.3rem 0.7rem; cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        border-right: 1px solid #30363d;
+    }
+    .reck-units button:last-child { border-right: 0; }
+    .reck-units button.active {
+        background: #161b22; color: #c9d1d9;
+    }
+
+    /* Log-scale strip — data-ink forward, minimum chrome. */
+    .reck-axis {
+        position: relative; height: 26px;
+        border-top: 1px solid #30363d;
+        margin: 0.2rem 0 1.8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.66rem; color: #6e7681;
+    }
+    .reck-axis .tick {
+        position: absolute; top: 0; height: 7px;
+        border-left: 1px solid #30363d;
+        padding: 9px 0 0 3px;
+        white-space: nowrap;
+    }
+
+    /* Category block */
+    .reck-cat {
+        margin: 0 0 1.4rem;
+        padding: 0.65rem 0.7rem 0.8rem;
+        border: 1px solid #21262d; border-radius: 6px;
+        background: #0d1117;
+    }
+    .reck-cat h2 {
+        font-size: 0.78rem; text-transform: uppercase;
+        letter-spacing: 0.08em; color: #8b949e;
+        margin: 0 0 0.55rem; font-weight: 600;
+    }
+
+    /* Each task row: label | strip | icon | energy */
+    .reck-row {
+        display: grid;
+        grid-template-columns: minmax(180px, 1.3fr) 3fr 1.6rem minmax(120px, 1fr);
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.25rem 0;
+        text-decoration: none; color: inherit;
+        border-radius: 4px;
+    }
+    .reck-row:hover { background: #161b22; }
+    .reck-row .reck-name { font-size: 0.85rem; color: #c9d1d9; }
+    .reck-row .reck-strip {
+        position: relative; height: 8px;
+        background: #161b22; border-radius: 2px;
+        overflow: hidden;
+    }
+    .reck-row .reck-mark {
+        position: absolute; top: 0; bottom: 0;
+        width: 2px; background: #58a6ff;
+    }
+    .reck-row .reck-match-icon {
+        text-align: center; font-size: 1rem;
+    }
+    .reck-row .reck-energy {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem; color: #c9d1d9;
+        white-space: nowrap;
+    }
+    .reck-row .reck-energy .unit { color: #6e7681; margin-left: 0.15rem; }
+
+    /* Category colors on the bar mark */
+    .cat-arithmetic .reck-mark { background: #8b949e; }
+    .cat-scripting  .reck-mark { background: #56d364; }
+    .cat-web        .reck-mark { background: #58a6ff; }
+    .cat-db         .reck-mark { background: #e3b341; }
+    .cat-media      .reck-mark { background: #d2a8ff; }
+    .cat-llm        .reck-mark { background: #ff7b72; }
+    .cat-training   .reck-mark { background: #db61a2; }
+    .cat-industrial .reck-mark { background: #f85149; }
+
+    .reck-legend {
+        margin: 0.3rem 0 1.2rem;
+        font-size: 0.72rem; color: #6e7681;
+    }
+    .reck-legend b { color: #c9d1d9; font-weight: 500; }
+
+    /* Signpost strip at the bottom */
+    .reck-signposts {
+        margin-top: 1.5rem;
+        padding: 0.7rem 0.8rem 1rem;
+        background: #0d1117;
+        border: 1px solid #21262d; border-radius: 6px;
+    }
+    .reck-signposts h2 {
+        font-size: 0.78rem; text-transform: uppercase;
+        letter-spacing: 0.08em; color: #8b949e;
+        margin: 0 0 0.6rem;
+    }
+    .sign-grid {
+        display: grid; gap: 0.4rem 0.8rem;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+    .sign-row { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.78rem; }
+    .sign-row .ic { font-size: 1rem; width: 1.4rem; text-align: center; }
+    .sign-row .nm { color: #c9d1d9; flex: 1; }
+    .sign-row .j  { color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="reck-wrap">
+    <h1>Reckoner</h1>
+    <p class="reck-lede">
+        Every computing task has a cost. Energy is the anchor: from a
+        single integer add (~40 picojoules) to a frontier cluster
+        running for a year (~10<sup>18</sup> joules) — thirty orders
+        of magnitude, matched at each step to a real-world signpost
+        you already know the shape of. Environmental, political,
+        economic, and social factors live on the detail page.
+        <a href="{% url 'reckoner:apps' %}" style="color:#58a6ff;text-decoration:none;white-space:nowrap;margin-left:0.3rem;">
+            Velour, reckoned with itself &rarr;
+        </a>
+    </p>
+
+    <div class="reck-units" data-unit-toggle>
+        <button type="button" class="active" data-unit="J">joules</button>
+        <button type="button" data-unit="cal">calories</button>
+        <button type="button" data-unit="kcal">Calories (kcal)</button>
+    </div>
+
+    {# Log-scale axis from 10^-12 J to 10^17 J. #}
+    <div class="reck-axis" aria-hidden="true">
+        {% for p in axis_ticks %}
+        <div class="tick" style="left: {{ p.pct }}%">10<sup>{{ p.exp }}</sup></div>
+        {% endfor %}
+    </div>
+
+    {% for cat, rows in by_category.items %}
+    <div class="reck-cat">
+        <h2>{{ cat }}</h2>
+        {% for t in rows %}
+        <a class="reck-row cat-{{ t.category }}" href="{% url 'reckoner:detail' t.slug %}">
+            <div class="reck-name">{{ t.name }}</div>
+            <div class="reck-strip">
+                <div class="reck-mark" style="left: {{ t.strip_pct|floatformat:3 }}%"></div>
+            </div>
+            <div class="reck-match-icon" title="{% if t.match %}{{ t.match.name }} — ≈{{ t.match.energy_joules }} J{% endif %}">
+                {% if t.match %}{{ t.match.icon }}{% endif %}
+            </div>
+            <div class="reck-energy"
+                 data-joules="{{ t.energy_joules }}">
+                <span class="val"></span><span class="unit"></span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+
+    <div class="reck-legend">
+        Vertical marks plot each task by log<sub>10</sub>(joules).
+        Tick axis spans 10<sup>-12</sup> to 10<sup>17</sup> J.
+        Icons are the nearest real-world signpost —
+        a <b>💓 heartbeat</b>, a <b>🍫 candy bar</b>,
+        a <b>🚀 shuttle launch</b>, and so on.
+    </div>
+
+    <div class="reck-signposts">
+        <h2>Signposts on the joule number line</h2>
+        <div class="sign-grid">
+        {% for c in comparables %}
+            <div class="sign-row">
+                <div class="ic">{{ c.icon }}</div>
+                <div class="nm">{{ c.name }}</div>
+                <div class="j">{{ c.energy_joules|stringformat:".1e" }} J</div>
+            </div>
+        {% endfor %}
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    // SI-style formatting for joules across 30 orders of magnitude.
+    // Falls back to scientific notation when outside prefix range.
+    const PREFIXES = [
+        [1e18, 'EJ'], [1e15, 'PJ'], [1e12, 'TJ'], [1e9, 'GJ'],
+        [1e6,  'MJ'], [1e3,  'kJ'], [1,    'J'],  [1e-3, 'mJ'],
+        [1e-6, 'µJ'], [1e-9, 'nJ'], [1e-12, 'pJ'],
+    ];
+    function fmt(j, unit) {
+        // Convert joules → the chosen unit first.
+        let v = j;
+        let u = 'J';
+        if (unit === 'cal')  { v = j / 4.184;   u = 'cal'; }
+        if (unit === 'kcal') { v = j / 4184.0;  u = 'kcal'; }
+
+        // Below-zero value safety.
+        if (!isFinite(v) || v <= 0) return { val: '0', unit: u };
+
+        // For J, use SI prefixes. For cal/kcal, scientific notation
+        // is easier to read across the gradient.
+        if (unit === 'J') {
+            for (const [scale, pref] of PREFIXES) {
+                if (v >= scale) {
+                    const shown = v / scale;
+                    const digits = shown >= 100 ? 0 : shown >= 10 ? 1 : 2;
+                    return { val: shown.toFixed(digits), unit: pref };
+                }
+            }
+            return { val: v.toExponential(2), unit: u };
+        }
+        if (v >= 1e4 || v < 1e-2) {
+            return { val: v.toExponential(2), unit: u };
+        }
+        const digits = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+        return { val: v.toFixed(digits), unit: u };
+    }
+
+    function render(unit) {
+        document.querySelectorAll('.reck-energy').forEach(el => {
+            const j = parseFloat(el.dataset.joules);
+            const { val, unit: u } = fmt(j, unit);
+            el.querySelector('.val').textContent = val;
+            el.querySelector('.unit').textContent = ' ' + u;
+        });
+    }
+
+    const toggle = document.querySelector('[data-unit-toggle]');
+    toggle.addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        render(btn.dataset.unit);
+    });
+    render('J');
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,366 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ task.name }} — Reckoner{% endblock %}
+
+{% block extra_head %}
+<style>
+    .reck-detail { max-width: 880px; margin: 0 auto; padding: 0.3rem 0.5rem 3rem; }
+    .reck-detail .back {
+        font-size: 0.78rem; color: #58a6ff; text-decoration: none;
+    }
+    .reck-detail h1 {
+        font-size: 1.35rem; margin: 0.35rem 0 0.15rem;
+    }
+    .reck-detail .cat {
+        font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.1em; color: #8b949e;
+    }
+    .reck-detail .desc {
+        color: #c9d1d9; font-size: 0.92rem;
+        line-height: 1.55; max-width: 62ch;
+        margin: 0.9rem 0 1.4rem;
+    }
+
+    /* Headline energy + matched signpost */
+    .headline {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin: 0 0 1.6rem;
+    }
+    .headline .card {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 1rem;
+    }
+    .headline .card h3 {
+        font-size: 0.7rem; text-transform: uppercase;
+        letter-spacing: 0.1em; color: #8b949e;
+        margin: 0 0 0.4rem; font-weight: 600;
+    }
+    .headline .num {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 1.3rem; color: #c9d1d9;
+    }
+    .headline .num small { color: #6e7681; font-size: 0.78rem; margin-left: 0.4rem; }
+    .headline .sub {
+        color: #8b949e; font-size: 0.78rem;
+        margin-top: 0.3rem;
+    }
+    .headline .match-icon {
+        font-size: 2.2rem; line-height: 1; margin-bottom: 0.3rem;
+    }
+    .headline .match-name { color: #c9d1d9; font-size: 0.92rem; }
+    .headline .match-ratio {
+        color: #6e7681; font-size: 0.78rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-top: 0.15rem;
+    }
+
+    .reck-units {
+        display: inline-flex; margin: 0 0 0.7rem;
+        border: 1px solid #30363d; border-radius: 6px;
+        overflow: hidden; font-size: 0.72rem;
+    }
+    .reck-units button {
+        background: #0d1117; color: #8b949e; border: 0;
+        padding: 0.25rem 0.6rem; cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        border-right: 1px solid #30363d;
+    }
+    .reck-units button:last-child { border-right: 0; }
+    .reck-units button.active {
+        background: #161b22; color: #c9d1d9;
+    }
+
+    /* Neighbour-signposts ruler.
+       The bar's height is driven by --ruler-lanes so narrow ±2-
+       decade windows (many close pegs) get extra vertical room
+       automatically. Self sits above the axis; signpost pegs
+       stack downward in lane order. */
+    .ruler {
+        margin: 0 0 1.6rem;
+        padding: 0.75rem 0.9rem 1rem;
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px;
+    }
+    .ruler h3 {
+        font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.1em; color: #8b949e;
+        margin: 0 0 0.5rem; font-weight: 600;
+    }
+    .ruler .bar {
+        --self-h: 38px;
+        --lane-h: 44px;
+        position: relative;
+        height: calc(var(--self-h) + var(--ruler-lanes) * var(--lane-h));
+        margin-top: 0.8rem;
+    }
+    .ruler .axis {
+        position: absolute; left: 0; right: 0;
+        top: var(--self-h);
+        border-top: 1px solid #30363d;
+    }
+    .ruler .peg {
+        position: absolute;
+        transform: translateX(-50%);
+        display: flex; flex-direction: column; align-items: center;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        width: 96px;
+    }
+    .ruler .peg .ic { font-size: 1.15rem; line-height: 1; }
+    .ruler .peg .nm {
+        font-size: 0.62rem; color: #6e7681;
+        text-align: center; line-height: 1.2;
+        margin-top: 2px;
+    }
+    .ruler .peg.self {
+        color: #58a6ff;
+        top: 0;
+        height: var(--self-h);
+        justify-content: flex-end;
+    }
+    .ruler .peg.self .ic { font-size: 0.95rem; }
+    .ruler .peg.self .nm { color: #58a6ff; }
+    .ruler .peg.self::after {
+        content: ''; position: absolute;
+        top: 100%; left: 50%; transform: translateX(-50%);
+        width: 2px; height: 7px; background: #58a6ff;
+    }
+    .ruler .peg.sign {
+        /* Lane 0 starts right under the axis. */
+        top: calc(var(--self-h) + var(--lane) * var(--lane-h) + 2px);
+        height: var(--lane-h);
+    }
+    .ruler .peg.sign::before {
+        content: ''; position: absolute;
+        bottom: 100%; left: 50%; transform: translateX(-50%);
+        width: 1px; height: 5px; background: #30363d;
+    }
+
+    /* Four-factor grid */
+    .factors {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 0.7rem;
+        margin: 0 0 1.6rem;
+    }
+    .fac {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.8rem 0.9rem 0.9rem;
+    }
+    .fac h3 {
+        font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.1em; margin: 0 0 0.55rem;
+        display: flex; align-items: center; justify-content: space-between;
+        font-weight: 600;
+    }
+    .fac.env h3 { color: #3fb950; }
+    .fac.pol h3 { color: #d2a8ff; }
+    .fac.eco h3 { color: #e3b341; }
+    .fac.soc h3 { color: #58a6ff; }
+    .fac .bar {
+        height: 10px; background: #161b22; border-radius: 2px;
+        overflow: hidden; position: relative; margin-bottom: 0.55rem;
+    }
+    .fac .fill {
+        position: absolute; top: 0; bottom: 0; left: 50%;
+        background: #30363d;
+    }
+    .fac.env .fill { background: #238636; }
+    .fac.pol .fill { background: #8957e5; }
+    .fac.eco .fill { background: #bb8009; }
+    .fac.soc .fill.pos { background: #2ea043; }
+    .fac.soc .fill.neg { background: #da3633; }
+    .fac .score {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem; color: #8b949e;
+    }
+    .fac .note {
+        color: #c9d1d9; font-size: 0.86rem; line-height: 1.5;
+        margin: 0.4rem 0 0;
+    }
+
+    .peers {
+        margin-top: 1.4rem;
+        padding: 0.75rem 0.9rem;
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px;
+    }
+    .peers h3 {
+        font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.1em; color: #8b949e;
+        margin: 0 0 0.5rem; font-weight: 600;
+    }
+    .peers a {
+        display: grid; grid-template-columns: 1.4rem 1fr auto;
+        gap: 0.5rem; padding: 0.3rem 0;
+        text-decoration: none; color: inherit;
+        border-bottom: 1px dashed #21262d;
+    }
+    .peers a:last-child { border-bottom: 0; }
+    .peers .ic { font-size: 0.95rem; text-align: center; }
+    .peers .nm { color: #c9d1d9; font-size: 0.86rem; }
+    .peers .j  {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem; color: #8b949e;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="reck-detail">
+    <a class="back" href="{% url 'reckoner:index' %}">&larr; all tasks</a>
+    <div class="cat">{{ task.get_category_display }}</div>
+    <h1>{{ task.name }}</h1>
+    <p class="desc">{{ task.description }}</p>
+
+    <div class="reck-units" data-unit-toggle>
+        <button type="button" class="active" data-unit="J">joules</button>
+        <button type="button" data-unit="cal">calories</button>
+        <button type="button" data-unit="kcal">Calories (kcal)</button>
+    </div>
+
+    <div class="headline">
+        <div class="card">
+            <h3>Estimated energy</h3>
+            <div class="num" data-joules="{{ task.energy_joules }}">
+                <span class="val"></span><span class="unit"></span>
+            </div>
+            <div class="sub">
+                {{ task.energy_joules|stringformat:".3e" }} J ·
+                {{ task.energy_cal|stringformat:".3e" }} cal ·
+                {{ task.energy_kcal|stringformat:".3e" }} kcal
+            </div>
+            {% if task.cost_eur or task.cost_usd %}
+            <div class="sub" style="margin-top:0.5rem">
+                ≈ €{{ task.cost_eur|stringformat:".2f" }} ·
+                ${{ task.cost_usd|stringformat:".2f" }}
+            </div>
+            {% endif %}
+        </div>
+        <div class="card">
+            <h3>Closest real-world signpost</h3>
+            {% if task.match %}
+                <div class="match-icon">{{ task.match.icon }}</div>
+                <div class="match-name">{{ task.match.name }}</div>
+                <div class="match-ratio">
+                    ≈ {{ task.match_ratio|stringformat:".2g" }} × one signpost
+                </div>
+                {% if task.match.note %}
+                <div class="sub" style="margin-top:0.45rem">{{ task.match.note }}</div>
+                {% endif %}
+            {% else %}
+                <div class="sub">No signpost match.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if nearby %}
+    <div class="ruler">
+        <h3>On the scale ruler <small style="color:#6e7681;font-weight:400;text-transform:none;letter-spacing:0;margin-left:0.4rem;">— ±2 decades around this task</small></h3>
+        <div class="bar" style="--ruler-lanes: {{ ruler_lanes }}">
+            <div class="axis"></div>
+            <div class="peg self" style="left: {{ task_pct }}%">
+                <span class="ic">◆</span>
+                <span class="nm">this task</span>
+            </div>
+            {% for c in nearby %}
+                <div class="peg sign" style="left: {{ c.pct }}%; --lane: {{ c.lane }}" title="{{ c.name }} · {{ c.energy_joules|stringformat:".1e" }} J">
+                    <span class="ic">{{ c.icon }}</span>
+                    <span class="nm">{{ c.name }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="factors">
+        <div class="fac env">
+            <h3>Environmental <span class="score">{{ task.environmental_score }} / 5</span></h3>
+            <div class="bar"><div class="fill" style="left: 50%; width: {{ env_pct }}%"></div></div>
+            <p class="note">{{ task.environmental_note|default:"—" }}</p>
+        </div>
+        <div class="fac pol">
+            <h3>Political <span class="score">{{ task.political_score }} / 5</span></h3>
+            <div class="bar"><div class="fill" style="left: 50%; width: {{ pol_pct }}%"></div></div>
+            <p class="note">{{ task.political_note|default:"—" }}</p>
+        </div>
+        <div class="fac eco">
+            <h3>Economic <span class="score">{{ task.economic_score }} / 5</span></h3>
+            <div class="bar"><div class="fill" style="left: 50%; width: {{ eco_pct }}%"></div></div>
+            <p class="note">{{ task.economic_note|default:"—" }}</p>
+        </div>
+        <div class="fac soc">
+            <h3>Social <span class="score">{{ task.social_score }} / ±5</span></h3>
+            <div class="bar">
+                {% if task.social_score >= 0 %}
+                    <div class="fill pos" style="left: 50%; width: {{ soc_pct }}%"></div>
+                {% else %}
+                    <div class="fill neg" style="right: 50%; left: auto; width: {{ soc_pct }}%"></div>
+                {% endif %}
+            </div>
+            <p class="note">{{ task.social_note|default:"—" }}</p>
+        </div>
+    </div>
+
+    {% if peers %}
+    <div class="peers">
+        <h3>Other tasks in the same category</h3>
+        {% for p in peers %}
+        <a href="{% url 'reckoner:detail' p.slug %}">
+            <div class="ic">{% if p.match %}{{ p.match.icon }}{% endif %}</div>
+            <div class="nm">{{ p.name }}</div>
+            <div class="j">{{ p.energy_joules|stringformat:".2e" }} J</div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    const PREFIXES = [
+        [1e18, 'EJ'], [1e15, 'PJ'], [1e12, 'TJ'], [1e9, 'GJ'],
+        [1e6,  'MJ'], [1e3,  'kJ'], [1,    'J'],  [1e-3, 'mJ'],
+        [1e-6, 'µJ'], [1e-9, 'nJ'], [1e-12, 'pJ'],
+    ];
+    function fmt(j, unit) {
+        let v = j;
+        if (unit === 'cal')  v = j / 4.184;
+        if (unit === 'kcal') v = j / 4184.0;
+        if (!isFinite(v) || v <= 0) return { val: '0', unit: unit };
+        if (unit === 'J') {
+            for (const [scale, pref] of PREFIXES) {
+                if (v >= scale) {
+                    const shown = v / scale;
+                    const d = shown >= 100 ? 0 : shown >= 10 ? 1 : 2;
+                    return { val: shown.toFixed(d), unit: pref };
+                }
+            }
+            return { val: v.toExponential(2), unit: 'J' };
+        }
+        if (v >= 1e4 || v < 1e-2) return { val: v.toExponential(2), unit: unit };
+        const d = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+        return { val: v.toFixed(d), unit: unit };
+    }
+    function render(unit) {
+        document.querySelectorAll('[data-joules]').forEach(el => {
+            const j = parseFloat(el.dataset.joules);
+            const { val, unit: u } = fmt(j, unit);
+            el.querySelector('.val').textContent = val;
+            el.querySelector('.unit').textContent = ' ' + u;
+        });
+    }
+    const toggle = document.querySelector('[data-unit-toggle]');
+    toggle.addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        render(btn.dataset.unit);
+    });
+    render('J');
+})();
+</script>
+{% endblock %}

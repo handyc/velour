@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Velour, reckoned — Reckoner{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ra { max-width: 1100px; margin: 0 auto; padding: 0.4rem 0.5rem 3rem; }
+    .ra .back { font-size: 0.78rem; color: #58a6ff; text-decoration: none; }
+    .ra h1 { font-size: 1.3rem; margin: 0.3rem 0 0.2rem; }
+    .ra .lede {
+        color: #8b949e; font-size: 0.88rem;
+        max-width: 64ch; line-height: 1.5;
+        margin: 0 0 1.4rem;
+    }
+
+    /* Headline — Velour's own total */
+    .totals {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 0.8rem;
+        margin: 0 0 1.6rem;
+    }
+    .totals .card {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.9rem 1rem;
+    }
+    .totals .card h3 {
+        font-size: 0.7rem; text-transform: uppercase;
+        letter-spacing: 0.1em; color: #8b949e;
+        margin: 0 0 0.4rem; font-weight: 600;
+    }
+    .totals .num {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 1.25rem; color: #c9d1d9;
+    }
+    .totals .sub { color: #8b949e; font-size: 0.78rem; margin-top: 0.25rem; }
+    .totals .match-icon { font-size: 2rem; line-height: 1.1; }
+    .totals .match-name { color: #c9d1d9; font-size: 0.9rem; margin-top: 0.15rem; }
+
+    @media (max-width: 800px) { .totals { grid-template-columns: 1fr; } }
+
+    /* App rows */
+    .app-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .app-row {
+        background: #0d1117; border: 1px solid #21262d;
+        border-radius: 6px; padding: 0.7rem 0.9rem;
+    }
+    .app-head {
+        display: grid;
+        grid-template-columns: minmax(140px, 1.3fr) 2.5fr 1.4rem minmax(150px, auto);
+        gap: 0.7rem; align-items: center;
+    }
+    .app-head .nm {
+        font-size: 0.95rem; color: #c9d1d9; font-weight: 500;
+    }
+    .app-head .nm .cat {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.65rem; color: #6e7681;
+        text-transform: lowercase; letter-spacing: 0.04em;
+        display: block; margin-top: 1px;
+    }
+    .app-head .strip {
+        position: relative; height: 10px;
+        background: #161b22; border-radius: 2px;
+        overflow: hidden;
+    }
+    .app-head .strip .fill {
+        position: absolute; left: 0; top: 0; bottom: 0;
+        background: linear-gradient(90deg, #1f6feb 0%, #d29922 60%, #f85149 100%);
+        opacity: 0.9;
+    }
+    .app-head .match-icon {
+        text-align: center; font-size: 1.2rem;
+    }
+    .app-head .energy {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem; color: #c9d1d9;
+        text-align: right; white-space: nowrap;
+    }
+    .app-head .energy .unit { color: #6e7681; margin-left: 0.15rem; }
+    .app-head .energy .match { color: #6e7681; font-size: 0.7rem; display: block; margin-top: 1px; }
+
+    .app-desc {
+        color: #8b949e; font-size: 0.78rem;
+        margin: 0.55rem 0 0;
+        padding-left: 0.1rem;
+    }
+
+    /* Per-task breakdown (<details> disclosure) */
+    .app-row details { margin-top: 0.55rem; }
+    .app-row summary {
+        cursor: pointer; color: #58a6ff;
+        font-size: 0.72rem;
+        list-style: none;
+        user-select: none;
+        padding: 0.15rem 0;
+    }
+    .app-row summary::-webkit-details-marker { display: none; }
+    .app-row summary::before {
+        content: '▸ '; color: #6e7681;
+    }
+    .app-row details[open] summary::before { content: '▾ '; }
+
+    .breakdown {
+        margin-top: 0.5rem;
+        border-top: 1px dashed #21262d;
+        padding-top: 0.55rem;
+    }
+    .brk-row {
+        display: grid;
+        grid-template-columns: minmax(160px, 1.4fr) minmax(90px, auto) 2.4fr minmax(110px, auto);
+        gap: 0.6rem; align-items: center;
+        padding: 0.25rem 0;
+        font-size: 0.78rem;
+    }
+    .brk-row + .brk-row { border-top: 1px dotted #161b22; }
+    .brk-row .task-name { color: #c9d1d9; }
+    .brk-row .task-name a { color: inherit; text-decoration: none; }
+    .brk-row .task-name a:hover { color: #58a6ff; }
+    .brk-row .task-name small {
+        display: block; color: #6e7681; font-size: 0.7rem;
+    }
+    .brk-row .count {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #8b949e; font-size: 0.78rem;
+        text-align: right;
+    }
+    .brk-row .share-bar {
+        position: relative; height: 6px;
+        background: #161b22; border-radius: 2px;
+        overflow: hidden;
+    }
+    .brk-row .share-bar .fill {
+        position: absolute; top: 0; bottom: 0; left: 0;
+        background: #3fb950;
+    }
+    .brk-row .contrib {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #c9d1d9; font-size: 0.78rem;
+        text-align: right; white-space: nowrap;
+    }
+    .brk-row .contrib .unit { color: #6e7681; margin-left: 0.15rem; }
+    .brk-row .contrib small { color: #6e7681; font-size: 0.68rem; display: block; }
+
+    .reck-units {
+        display: inline-flex; margin: 0 0 1rem;
+        border: 1px solid #30363d; border-radius: 6px;
+        overflow: hidden; font-size: 0.72rem;
+    }
+    .reck-units button {
+        background: #0d1117; color: #8b949e; border: 0;
+        padding: 0.25rem 0.6rem; cursor: pointer;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        border-right: 1px solid #30363d;
+    }
+    .reck-units button:last-child { border-right: 0; }
+    .reck-units button.active { background: #161b22; color: #c9d1d9; }
+
+    @media (max-width: 720px) {
+        .app-head { grid-template-columns: 1fr auto; }
+        .app-head .strip, .app-head .match-icon { display: none; }
+        .brk-row { grid-template-columns: 1fr auto; }
+        .brk-row .count, .brk-row .share-bar { display: none; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ra">
+    <a class="back" href="{% url 'reckoner:index' %}">&larr; Reckoner</a>
+    <h1>Velour, reckoned with itself</h1>
+    <p class="lede">
+        Every Velour app profiled as a typical-user-day mix of
+        Reckoner tasks — Django requests, SQL selects, PDF renders,
+        three.js frames, IMAP fetches — multiplied by a rough
+        per-day frequency. The totals let each app sit next to the
+        same real-world signposts as everything else in Reckoner:
+        a heartbeat, a candy bar, a house-day of electricity.
+        Click any app to see how its bundle decomposes.
+    </p>
+
+    <div class="reck-units" data-unit-toggle>
+        <button type="button" class="active" data-unit="J">joules</button>
+        <button type="button" data-unit="cal">calories</button>
+        <button type="button" data-unit="kcal">Calories (kcal)</button>
+    </div>
+
+    <div class="totals">
+        <div class="card">
+            <h3>Velour total · per user · per day</h3>
+            <div class="num" data-joules="{{ total_velour }}">
+                <span class="val"></span><span class="unit"></span>
+            </div>
+            <div class="sub">
+                {{ total_velour|stringformat:".2e" }} J summed across
+                {{ n_apps }} apps.
+            </div>
+        </div>
+        <div class="card">
+            <h3>Closest signpost</h3>
+            {% if velour_match %}
+                <div class="match-icon">{{ velour_match.icon }}</div>
+                <div class="match-name">{{ velour_match.name }}</div>
+                {% if velour_match.note %}
+                <div class="sub">{{ velour_match.note }}</div>
+                {% endif %}
+            {% else %}
+                <div class="sub">No data.</div>
+            {% endif %}
+        </div>
+        <div class="card">
+            <h3>Reading this page</h3>
+            <div class="sub" style="line-height:1.45">
+                Heaviest apps first. The gradient bar shows each
+                app's total on a three-decade log axis anchored to
+                the heaviest. Icons are matched real-world signposts.
+                Breakdown rows link back to the Reckoner task page.
+            </div>
+        </div>
+    </div>
+
+    <div class="app-list">
+        {% for p in profiles %}
+        <div class="app-row">
+            <div class="app-head">
+                <div class="nm">
+                    {{ p.app.name }}
+                    <span class="cat">{{ p.app.slug }}</span>
+                </div>
+                <div class="strip">
+                    <div class="fill" style="width: {{ p.strip_pct }}%"></div>
+                </div>
+                <div class="match-icon" title="{% if p.match %}{{ p.match.name }}{% endif %}">
+                    {% if p.match %}{{ p.match.icon }}{% endif %}
+                </div>
+                <div class="energy" data-joules="{{ p.total }}">
+                    <span class="val"></span><span class="unit"></span>
+                    {% if p.match %}
+                    <span class="match">≈ {{ p.match.name|lower }}</span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <p class="app-desc">{{ p.app.description }}</p>
+
+            {% if p.rows %}
+            <details>
+                <summary>breakdown ({{ p.rows|length }} task{{ p.rows|length|pluralize }})</summary>
+                <div class="breakdown">
+                {% for r in p.rows %}
+                    <div class="brk-row">
+                        <div class="task-name">
+                            <a href="{% url 'reckoner:detail' r.task.slug %}">{{ r.task.name }}</a>
+                            {% if r.note %}<small>{{ r.note }}</small>{% endif %}
+                        </div>
+                        <div class="count">× {{ r.count|floatformat:"-2" }}/day</div>
+                        <div class="share-bar" title="{{ r.share_pct|floatformat:1 }}% of this app">
+                            <div class="fill" style="width: {{ r.share_pct|floatformat:1 }}%"></div>
+                        </div>
+                        <div class="contrib" data-joules="{{ r.contrib }}">
+                            <span class="val"></span><span class="unit"></span>
+                            <small>{{ r.share_pct|floatformat:1 }}%</small>
+                        </div>
+                    </div>
+                {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+(function () {
+    const PREFIXES = [
+        [1e18, 'EJ'], [1e15, 'PJ'], [1e12, 'TJ'], [1e9, 'GJ'],
+        [1e6,  'MJ'], [1e3,  'kJ'], [1,    'J'],  [1e-3, 'mJ'],
+        [1e-6, 'µJ'], [1e-9, 'nJ'], [1e-12, 'pJ'],
+    ];
+    function fmt(j, unit) {
+        let v = j;
+        if (unit === 'cal')  v = j / 4.184;
+        if (unit === 'kcal') v = j / 4184.0;
+        if (!isFinite(v) || v <= 0) return { val: '0', unit: unit };
+        if (unit === 'J') {
+            for (const [scale, pref] of PREFIXES) {
+                if (v >= scale) {
+                    const shown = v / scale;
+                    const d = shown >= 100 ? 0 : shown >= 10 ? 1 : 2;
+                    return { val: shown.toFixed(d), unit: pref };
+                }
+            }
+            return { val: v.toExponential(2), unit: 'J' };
+        }
+        if (v >= 1e4 || v < 1e-2) return { val: v.toExponential(2), unit: unit };
+        const d = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+        return { val: v.toFixed(d), unit: unit };
+    }
+    function render(unit) {
+        document.querySelectorAll('[data-joules]').forEach(el => {
+            const j = parseFloat(el.dataset.joules);
+            const { val, unit: u } = fmt(j, unit);
+            const vEl = el.querySelector('.val');
+            const uEl = el.querySelector('.unit');
+            if (vEl) vEl.textContent = val;
+            if (uEl) uEl.textContent = ' ' + u;
+        });
+    }
+    const toggle = document.querySelector('[data-unit-toggle]');
+    toggle.addEventListener('click', e => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        toggle.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        render(btn.dataset.unit);
+    });
+    render('J');
+})();
+</script>
+{% endblock %}
