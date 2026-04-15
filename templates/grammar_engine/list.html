@@ -56,6 +56,18 @@
         padding: 2rem; text-align: center; color: #6e7681;
         border: 1px dashed #30363d; border-radius: 4px;
     }
+    .ge-pager {
+        margin-top: 1.2rem;
+        display: flex; gap: 0.6rem; align-items: center;
+        font-size: 0.78rem;
+    }
+    .ge-pager a {
+        color: #58a6ff; text-decoration: none;
+        border: 1px solid #30363d; padding: 0.25rem 0.55rem;
+        border-radius: 3px;
+    }
+    .ge-pager a:hover { background: #0f2a40; color: #e6fbff; }
+    .ge-pager .ge-pager-info { color: #6e7681; margin: 0 auto; }
 </style>
 {% endblock %}
 
@@ -74,8 +86,19 @@
         <input type="text" name="name" placeholder="name (optional)" maxlength="120">
         <input type="number" name="seed" placeholder="seed (optional)">
         <button type="submit" class="ge-btn primary">+ Create</button>
+    </form>
+
+    <form class="ge-newbar" method="get" style="margin-top:-0.8rem;">
+        <label>Search</label>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="name / slug / notes" autocomplete="off">
+        <button type="submit" class="ge-btn">Filter</button>
+        {% if q %}
+        <a href="{% url 'grammar_engine:list' %}" class="ge-btn">Clear</a>
+        {% endif %}
         <span style="color:#6e7681;font-size:0.72rem;margin-left:auto;">
-            {{ total }} language{{ total|pluralize }}
+            {% if q %}{{ total }} match{{ total|pluralize }} of
+            {{ grand_total }}{% else %}{{ grand_total }} language{{ grand_total|pluralize }}{% endif %}
         </span>
     </form>
 
@@ -110,8 +133,26 @@
     </table>
     {% else %}
     <div class="ge-empty">
-        No languages yet. Create one above — it'll generate from its seed
-        on first open.
+        {% if q %}No languages match "{{ q }}".
+        {% else %}No languages yet. Create one above — it'll generate from
+        its seed on first open.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if page.paginator.num_pages > 1 %}
+    <div class="ge-pager">
+        {% if page.has_previous %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page=1">« first</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.previous_page_number }}">‹ prev</a>
+        {% endif %}
+        <span class="ge-pager-info">
+            page {{ page.number }} of {{ page.paginator.num_pages }}
+            ({{ page.paginator.count }} total)
+        </span>
+        {% if page.has_next %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.next_page_number }}">next ›</a>
+        <a href="?{% if q %}q={{ q }}&{% endif %}page={{ page.paginator.num_pages }}">last »</a>
+        {% endif %}
     </div>
     {% endif %}
 </div>

@@ -9,6 +9,8 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -20,10 +22,21 @@ from .models import Language
 
 @login_required
 def language_list(request):
-    languages = Language.objects.all()
+    qs = Language.objects.all()
+    q = (request.GET.get('q') or '').strip()
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(slug__icontains=q)
+                       | Q(notes__icontains=q))
+    total = qs.count()
+    grand_total = Language.objects.count()
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get('page'))
     return render(request, 'grammar_engine/list.html', {
-        'languages': languages,
-        'total': languages.count(),
+        'page': page,
+        'languages': page.object_list,
+        'total': total,
+        'grand_total': grand_total,
+        'q': q,
     })
 
 
