@@ -883,11 +883,13 @@
     <div class="gi-body">
       <div class="gi-tabs">
         <button class="gi-tab active" data-tab="grammar">L-System Rules</button>
+        <button class="gi-tab"        data-tab="particles">Phonic Particles</button>
         <button class="gi-tab"        data-tab="subwords">Subwords</button>
         <button class="gi-tab"        data-tab="words">Words</button>
         <button class="gi-tab"        data-tab="stats">Live Stats</button>
       </div>
       <div class="gi-pane active" id="gi-pane-grammar"></div>
+      <div class="gi-pane" id="gi-pane-particles"></div>
       <div class="gi-pane" id="gi-pane-subwords"></div>
       <div class="gi-pane" id="gi-pane-words"></div>
       <div class="gi-pane" id="gi-pane-stats"></div>
@@ -2939,6 +2941,132 @@ import * as THREE from 'three';
         return dur;
     }
 
+    // Phonic Particle renderer — like speakSymbol, but every acoustic
+    // parameter is read from the PP record instead of randomised per
+    // call. formantShift and the glottal pitch contour still come from
+    // the speaker, so one PP sounds recognisably the same across
+    // speakers while still inheriting voice colour.
+    function speakParticle(pp, t, distance, pan, speaker, pitchAt) {
+        const ctx = audio.ctx;
+        const fs = speaker.formantShift;
+        const rate = speaker.rate;
+        const buf = getPinkBuffer();
+        const dur = pp.dur * rate;
+
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = false;
+        const offset = pp.offsetFrac * (buf.duration - 0.3);
+
+        const bp1 = ctx.createBiquadFilter();
+        bp1.type = 'bandpass';
+        bp1.frequency.value = pp.bp1Freq * fs; bp1.Q.value = pp.bp1Q;
+        const bp2 = ctx.createBiquadFilter();
+        bp2.type = 'bandpass';
+        bp2.frequency.value = pp.bp2Freq * fs; bp2.Q.value = pp.bp2Q;
+        const mix = ctx.createGain();
+        mix.gain.value = 0.45;
+
+        const env = ctx.createGain();
+        env.gain.value = 0.0001;
+        const shape = pp.shape;
+        const gain = pp.gain;
+        if (shape === 'vowel' || shape === 'nasal' || shape === 'liquid') {
+            env.gain.exponentialRampToValueAtTime(gain, t + 0.015);
+            env.gain.setValueAtTime(gain, t + Math.max(0.01, dur - 0.03));
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            bp1.frequency.setValueAtTime(pp.bp1Freq * fs, t);
+            bp1.frequency.linearRampToValueAtTime((pp.bp1End || pp.bp1Freq) * fs, t + dur);
+            bp2.frequency.setValueAtTime(pp.bp2Freq * fs, t);
+            bp2.frequency.linearRampToValueAtTime((pp.bp2End || pp.bp2Freq) * fs, t + dur);
+        } else if (shape === 'plosive') {
+            env.gain.linearRampToValueAtTime(gain, t + 0.004);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        } else {
+            env.gain.exponentialRampToValueAtTime(gain, t + 0.008);
+            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        }
+
+        const panN = ctx.createStereoPanner();
+        panN.pan.value = pan;
+        const distG = ctx.createGain();
+        distG.gain.value = 0.35 + distance * 0.5;
+
+        const breath = ctx.createGain();
+        breath.gain.value = pp.voiced ? speaker.breathiness : 1.0;
+        src.connect(breath);
+        breath.connect(bp1); breath.connect(bp2);
+        bp1.connect(mix); bp2.connect(mix);
+
+        if (pp.voiced) {
+            const osc = ctx.createOscillator();
+            osc.type = 'sawtooth';
+            const f0a = speaker.pitch * pitchAt(t);
+            const f0b = speaker.pitch * pitchAt(t + dur);
+            osc.frequency.setValueAtTime(f0a, t);
+            osc.frequency.linearRampToValueAtTime(f0b, t + dur);
+
+            const lfo = ctx.createOscillator();
+            lfo.frequency.value = speaker.vibrato;
+            const lfoGain = ctx.createGain();
+            lfoGain.gain.value = f0a * speaker.vibratoDepth;
+            lfo.connect(lfoGain).connect(osc.frequency);
+
+            const voiceGain = ctx.createGain();
+            voiceGain.gain.value = shape === 'nasal' ? 0.55
+                                 : shape === 'liquid' ? 0.75 : 0.9;
+            osc.connect(voiceGain);
+            voiceGain.connect(bp1); voiceGain.connect(bp2);
+
+            osc.start(t); osc.stop(t + dur + 0.03);
+            lfo.start(t); lfo.stop(t + dur + 0.03);
+        }
+
+        mix.connect(env).connect(panN).connect(distG).connect(audio.master);
+        src.start(t, offset);
+        src.stop(t + dur + 0.02);
+        pp.useCount++;
+        return dur;
+    }
+
+    // Render a sequence of units — [{kind:'pp',id}, {kind:'punct',char}].
+    // Used for vocab-tier phrases; grammars still go through speakPhrase.
+    function speakUnits(units, distance) {
+        const ctx = audio.ctx;
+        const pan = rng(-0.85, 0.85);
+        const speaker = makeSpeaker();
+
+        let ending = '.';
+        for (let i = units.length - 1; i >= 0; i--) {
+            const u = units[i];
+            if (u.kind === 'punct') { ending = u.char; break; }
+        }
+
+        const phraseStart = ctx.currentTime + 0.02;
+        let est = 0;
+        for (const u of units) {
+            if (u.kind === 'pp' && PARTICLES[u.id]) {
+                est += PARTICLES[u.id].dur * speaker.rate + 0.02;
+            } else if (u.kind === 'punct') {
+                est += u.char === ',' ? 0.33 : 0.09;
+            }
+        }
+        const pitchAt = makePitchContour(phraseStart, est, ending);
+
+        let t = phraseStart;
+        for (const u of units) {
+            if (u.kind === 'pp') {
+                const pp = PARTICLES[u.id];
+                if (!pp) continue;
+                const dur = speakParticle(pp, t, distance, pan, speaker, pitchAt);
+                t += dur + rng(0.01, 0.04);
+            } else if (u.kind === 'punct') {
+                if (u.char === '.') t += rng(0.06, 0.13);
+                else if (u.char === ',') t += rng(0.22, 0.45);
+            }
+        }
+    }
+
     function speakPhrase(symbols, distance) {
         const ctx = audio.ctx;
         const pan = rng(-0.85, 0.85);
@@ -3166,8 +3294,98 @@ import * as THREE from 'three';
     const SUBWORD_SEED = 300;
     const WORD_COUNT = 10000;
 
-    const SUBWORDS = [];   // {id, pattern, useCount, born}
+    const SUBWORDS = [];   // {id, particleIds, pattern, useCount, born}
     const WORDS = [];      // {id, subIds, useCount, born}
+
+    // ── Phonic Particles ──────────────────────────────────
+    // One tier below subwords: each PP is a unique pink-noise
+    // segment with frozen offset/duration/formant params. Two
+    // subwords that reference the same particle will share the
+    // same acoustic fingerprint at that position — repetition
+    // becomes audible. Mutating a particle-id within a subword
+    // nudges timbre without changing its symbol type (accent
+    // drift); inserting/deleting changes the syllable shape.
+    const PARTICLE_SEED = 140;
+    const PARTICLE_CAP = 400;
+    const PARTICLE_MIN = 90;
+    const PARTICLES = [];  // {id, type, dur, offsetFrac, bp1/2Freq/End/Q,
+                           //  gain, shape, voiced, useCount, born}
+
+    // Particle durations are deliberately shorter than the old
+    // per-symbol ranges: many PPs compose to the same perceived
+    // syllable length, with sharper articulation.
+    const PARTICLE_DUR = {
+        V: [0.055, 0.090], v: [0.028, 0.055],
+        C: [0.020, 0.038], s: [0.015, 0.032],
+        n: [0.028, 0.055], l: [0.025, 0.050],
+        p: [0.010, 0.022],
+    };
+    // Weighted type bag — vowels dominate (as in most languages),
+    // plosives rare, nasals/liquids in between.
+    const PARTICLE_TYPE_BAG = 'VVVVVvvvnnllCCsp';
+
+    function newParticle(type) {
+        const [dLo, dHi] = PARTICLE_DUR[type];
+        const pp = {
+            id: PARTICLES.length, type,
+            dur: rng(dLo, dHi),
+            offsetFrac: Math.random() * 0.9 + 0.02,
+            useCount: 0, born: Date.now(),
+        };
+        if (type === 'V' || type === 'v') {
+            const [f1, f2] = VOWEL_FORMANTS[
+                Math.floor(Math.random() * VOWEL_FORMANTS.length)];
+            pp.bp1Freq = f1; pp.bp1Q = 10;
+            pp.bp2Freq = f2; pp.bp2Q = 12;
+            if (type === 'V' && Math.random() < 0.28) {
+                const [g1, g2] = VOWEL_FORMANTS[
+                    Math.floor(Math.random() * VOWEL_FORMANTS.length)];
+                pp.bp1End = g1; pp.bp2End = g2;
+            } else {
+                pp.bp1End = pp.bp1Freq * rng(0.95, 1.08);
+                pp.bp2End = pp.bp2Freq * rng(0.92, 1.10);
+            }
+            pp.gain = 0.9; pp.shape = 'vowel'; pp.voiced = true;
+        } else if (type === 'n') {
+            pp.bp1Freq = 260; pp.bp1End = pp.bp1Freq * rng(0.96, 1.04); pp.bp1Q = 12;
+            pp.bp2Freq = 2100; pp.bp2End = pp.bp2Freq * rng(0.94, 1.08); pp.bp2Q = 8;
+            pp.gain = 0.55; pp.shape = 'nasal'; pp.voiced = true;
+        } else if (type === 'l') {
+            pp.bp1Freq = 360; pp.bp1End = 330; pp.bp1Q = 9;
+            pp.bp2Freq = 1100; pp.bp2End = 1400; pp.bp2Q = 8;
+            pp.gain = 0.6; pp.shape = 'liquid'; pp.voiced = true;
+        } else if (type === 'C') {
+            pp.bp1Freq = rng(1200, 2400); pp.bp1Q = 3;
+            pp.bp2Freq = rng(2800, 4500); pp.bp2Q = 3;
+            pp.gain = 0.55; pp.shape = 'consonant'; pp.voiced = false;
+        } else if (type === 's') {
+            pp.bp1Freq = rng(3800, 6500); pp.bp1Q = 2;
+            pp.bp2Freq = rng(5000, 8000); pp.bp2Q = 2;
+            pp.gain = 0.5; pp.shape = 'sibilant'; pp.voiced = false;
+        } else if (type === 'p') {
+            pp.bp1Freq = rng(400, 800); pp.bp1Q = 1.5;
+            pp.bp2Freq = rng(1200, 2000); pp.bp2Q = 1.5;
+            pp.gain = 0.7; pp.shape = 'plosive'; pp.voiced = false;
+        }
+        PARTICLES.push(pp);
+        return pp;
+    }
+
+    function randParticleType() {
+        return PARTICLE_TYPE_BAG[
+            Math.floor(Math.random() * PARTICLE_TYPE_BAG.length)];
+    }
+
+    function pickParticleOfType(type) {
+        const pool = [];
+        for (const pp of PARTICLES) if (pp.type === type) pool.push(pp);
+        if (pool.length === 0) return newParticle(type);
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function seedParticles() {
+        while (PARTICLES.length < PARTICLE_SEED) newParticle(randParticleType());
+    }
 
     function randSym() { return SYMS[Math.floor(Math.random() * SYMS.length)]; }
 
@@ -3190,27 +3408,99 @@ import * as THREE from 'three';
         return p;
     }
 
-    function addSubword(pattern) {
-        const s = { id: SUBWORDS.length, pattern, useCount: 0, born: Date.now() };
+    // addSubword accepts either a pattern string ("CVn") — translated
+    // by picking a popular particle of each type — or an explicit
+    // particleIds array (used by mutation to preserve identity drift).
+    // The .pattern field is always derived from the particle types so
+    // the Inspector can render subwords as before.
+    function addSubword(input) {
+        let particleIds;
+        if (Array.isArray(input)) {
+            particleIds = input.slice();
+        } else {
+            particleIds = [];
+            for (const ch of String(input)) {
+                if (!PARTICLE_DUR[ch]) continue;
+                particleIds.push(pickPopularParticleOfType(ch).id);
+            }
+        }
+        if (particleIds.length === 0) return null;
+        const pattern = particleIds
+            .map(i => (PARTICLES[i] || {type:'?'}).type).join('');
+        const s = {
+            id: SUBWORDS.length,
+            particleIds, pattern,
+            useCount: 0, born: Date.now(),
+        };
         SUBWORDS.push(s);
         return s;
     }
 
     function seedSubwords() {
-        while (SUBWORDS.length < SUBWORD_SEED) addSubword(genSubwordPattern());
+        while (SUBWORDS.length < SUBWORD_SEED) {
+            const s = addSubword(genSubwordPattern());
+            if (s) s.useCount = seedPopularity();
+        }
     }
 
+    // genWord now picks subwords by popularity (tournament). Subwords
+    // that get used more often become more likely parents for new
+    // words — the vocabulary concentrates on the syllables people
+    // actually say rather than drifting into uniform noise.
     function genWord() {
         const n = 3 + Math.floor(Math.random() * 4);       // 3..6 subwords
         const subIds = [];
         for (let i = 0; i < n; i++) {
-            subIds.push(Math.floor(Math.random() * SUBWORDS.length));
+            const sub = pickPopularSubword();
+            subIds.push(sub ? sub.id : Math.floor(Math.random() * SUBWORDS.length));
         }
         return { id: WORDS.length, subIds, useCount: 0, born: Date.now() };
     }
 
     function seedWords() {
-        while (WORDS.length < WORD_COUNT) WORDS.push(genWord());
+        while (WORDS.length < WORD_COUNT) {
+            const w = genWord();
+            w.useCount = seedPopularity();
+            WORDS.push(w);
+        }
+    }
+
+    // Power-law-ish seed popularity. Used at init for both particles
+    // (so addSubword's pickPopular works from moment zero), subwords
+    // (so genWord gravitates toward recognisable syllables), and
+    // words (so pickWordByPopularity finds a coherent base language
+    // instead of drawing from a uniform sea of nothings). Runtime-
+    // born entries always start at 0 — they earn their popularity.
+    function seedPopularity() {
+        const r = Math.random();
+        if (r < 0.70) return 2 + Math.floor(Math.random() * 4);   // 2..5
+        if (r < 0.95) return 6 + Math.floor(Math.random() * 8);   // 6..13
+        return 15 + Math.floor(Math.random() * 20);                // 15..34
+    }
+
+    function pickPopularParticleOfType(type, k) {
+        k = k || 5;
+        let best = null, bestScore = -1;
+        const pool = PARTICLES.filter(p => p.type === type);
+        if (pool.length === 0) return newParticle(type);
+        for (let i = 0; i < k; i++) {
+            const pp = pool[Math.floor(Math.random() * pool.length)];
+            const score = pp.useCount + Math.random() * 0.8;
+            if (score > bestScore) { bestScore = score; best = pp; }
+        }
+        return best;
+    }
+
+    function pickPopularSubword(k) {
+        k = k || 5;
+        if (SUBWORDS.length === 0) return null;
+        let best = null, bestScore = -1;
+        for (let i = 0; i < k; i++) {
+            const s = SUBWORDS[Math.floor(Math.random() * SUBWORDS.length)];
+            const score = s.useCount + Math.random() * 0.8;
+            if (score > bestScore) { bestScore = score; best = s; }
+        }
+        return best;
     }
 
     // Tournament selection — k random candidates, highest score wins.
@@ -3228,16 +3518,14 @@ import * as THREE from 'three';
         return best;
     }
 
+    // Read-only version kept for the Inspector — doesn't bump
+    // useCount, just joins the subword patterns for display.
     function wordToSymbols(word) {
         let s = '';
         for (const sid of word.subIds) {
             const sub = SUBWORDS[sid];
-            if (sub) {
-                s += sub.pattern;
-                sub.useCount++;
-            }
+            if (sub) s += sub.pattern;
         }
-        word.useCount++;
         return s;
     }
 
@@ -3246,21 +3534,37 @@ import * as THREE from 'three';
     // makes the intonation contour rise. Gives the overall soundscape
     // something like natural declarative/interrogative alternation.
     //
-    // The Meta variant returns the picked words too so the Grammar
-    // Inspector log can render the breakdown. genVocabPhrase() is
-    // kept as a thin string-returning wrapper for external callers.
+    // Emits both a symbol string (for the Inspector log) and a units
+    // stream (particle refs + punctuation, consumed by speakUnits).
+    // Particle ids are stable, so two phrases using the same words
+    // sound like the same phrase twice — the language is recognisable.
     function genVocabPhraseMeta() {
         const wordCount = 2 + Math.floor(Math.random() * 4);   // 2..5
         const wordsPicked = [];
+        const units = [];
         const parts = [];
         for (let i = 0; i < wordCount; i++) {
             const w = pickWordByPopularity();
             wordsPicked.push(w);
-            parts.push(wordToSymbols(w));
+            let syms = '';
+            for (const sid of w.subIds) {
+                const sub = SUBWORDS[sid];
+                if (!sub) continue;
+                sub.useCount++;
+                syms += sub.pattern;
+                for (const pid of sub.particleIds) {
+                    if (PARTICLES[pid]) units.push({ kind: 'pp', id: pid });
+                }
+            }
+            w.useCount++;
+            parts.push(syms);
+            if (i < wordCount - 1) units.push({ kind: 'punct', char: '.' });
         }
         const ending = Math.random() < 0.15 ? '?' : (Math.random() < 0.08 ? '!' : ',');
+        units.push({ kind: 'punct', char: ending });
         return {
             symbols: parts.join('.') + ending,
+            units,
             words: wordsPicked,
             kind: 'vocab',
             variant: null,
@@ -3273,32 +3577,88 @@ import * as THREE from 'three';
     // subwords with a single mutation applied (substitute / insert /
     // delete / duplicate) — those variants seed accent drift. Unused
     // old subwords get pruned to keep the library within the cap.
-    function mutateSubword(pattern) {
+    // Mutation operates on particleIds rather than pattern strings.
+    // Substitute prefers a same-type particle (accent drift — same
+    // syllable shape, different timbre); the rest change the shape
+    // outright by adding/removing/duplicating a particle slot.
+    function mutateSubword(particleIds) {
+        const arr = particleIds.slice();
         const op = Math.random();
-        if (op < 0.3 && pattern.length > 2) {
-            const i = Math.floor(Math.random() * pattern.length);
-            return pattern.slice(0, i) + pattern.slice(i + 1);
-        } else if (op < 0.55 && pattern.length < 5) {
-            const i = Math.floor(Math.random() * (pattern.length + 1));
-            return pattern.slice(0, i) + randSym() + pattern.slice(i);
-        } else if (op < 0.8) {
-            const i = Math.floor(Math.random() * pattern.length);
-            return pattern.slice(0, i) + randSym() + pattern.slice(i + 1);
-        } else {
-            const i = Math.floor(Math.random() * pattern.length);
-            return pattern.slice(0, i + 1) + pattern[i] + pattern.slice(i + 1);
+        if (op < 0.3 && arr.length > 2) {
+            const i = Math.floor(Math.random() * arr.length);
+            arr.splice(i, 1);
+        } else if (op < 0.55 && arr.length < 5) {
+            const i = Math.floor(Math.random() * (arr.length + 1));
+            const t = randParticleType();
+            arr.splice(i, 0, pickPopularParticleOfType(t).id);
+        } else if (op < 0.8 && arr.length) {
+            const i = Math.floor(Math.random() * arr.length);
+            const oldPP = PARTICLES[arr[i]];
+            const t = (oldPP && Math.random() < 0.7) ? oldPP.type : randParticleType();
+            arr[i] = pickPopularParticleOfType(t).id;
+        } else if (arr.length) {
+            const i = Math.floor(Math.random() * arr.length);
+            arr.splice(i + 1, 0, arr[i]);
         }
+        return arr;
     }
 
     function evolveLanguage() {
-        // Duplicate-and-mutate the top ~2% by usage.
+        // Duplicate-and-mutate the top ~3% of particles (pure timbre
+        // drift — same type, different frozen offset/formants).
+        const sortedP = [...PARTICLES].sort((a, b) => b.useCount - a.useCount);
+        const topPN = Math.max(2, Math.floor(PARTICLES.length * 0.03));
+        for (let i = 0; i < topPN; i++) {
+            if (PARTICLES.length >= PARTICLE_CAP) break;
+            const parent = sortedP[i];
+            if (!parent) break;
+            newParticle(parent.type);
+        }
+        // Prune unused old particles, keeping at least PARTICLE_MIN.
+        const pAgeT = Date.now() - 120000;
+        const freshP = PARTICLES.filter(p => !(p.useCount === 0 && p.born < pAgeT));
+        const staleP = PARTICLES.filter(p =>   p.useCount === 0 && p.born < pAgeT);
+        const neededP = Math.max(0, PARTICLE_MIN - freshP.length);
+        const keepP = freshP.concat(staleP.slice(0, neededP));
+        if (keepP.length !== PARTICLES.length) {
+            // Build remap BEFORE mutating. For pruned particles, find a
+            // surviving replacement of the same type so subwords keep
+            // their syllable shape.
+            const idMap = new Map();
+            keepP.forEach((p, i) => { idMap.set(p.id, i); });
+            const typeSurvivors = {};
+            keepP.forEach((p, i) => {
+                if (!typeSurvivors[p.type]) typeSurvivors[p.type] = [];
+                typeSurvivors[p.type].push(i);
+            });
+            for (const s of SUBWORDS) {
+                s.particleIds = s.particleIds.map(oldId => {
+                    if (idMap.has(oldId)) return idMap.get(oldId);
+                    const t = (PARTICLES[oldId] || {type: 'V'}).type;
+                    const pool = typeSurvivors[t];
+                    if (pool && pool.length) {
+                        return pool[Math.floor(Math.random() * pool.length)];
+                    }
+                    return Math.floor(Math.random() * keepP.length);
+                });
+            }
+            keepP.forEach((p, i) => { p.id = i; });
+            PARTICLES.length = 0;
+            PARTICLES.push(...keepP);
+            for (const s of SUBWORDS) {
+                s.pattern = s.particleIds
+                    .map(i => (PARTICLES[i] || {type:'?'}).type).join('');
+            }
+        }
+
+        // Duplicate-and-mutate the top ~2% of subwords by usage.
         const sorted = [...SUBWORDS].sort((a, b) => b.useCount - a.useCount);
         const topN = Math.max(2, Math.floor(SUBWORDS.length * 0.02));
         for (let i = 0; i < topN; i++) {
             if (SUBWORDS.length >= SUBWORD_CAP) break;
             const parent = sorted[i];
             if (!parent) break;
-            addSubword(mutateSubword(parent.pattern));
+            addSubword(mutateSubword(parent.particleIds));
         }
         // Prune unused old subwords, keeping at least SUBWORD_MIN.
         const ageThreshold = Date.now() - 120000;        // 2 min grace
@@ -3322,6 +3682,10 @@ import * as THREE from 'three';
         }
     }
 
+    seedParticles();
+    // Boost seeded particles so pickPopularParticleOfType has a real
+    // gradient to draw from during subword seeding.
+    for (const pp of PARTICLES) pp.useCount = seedPopularity();
     seedSubwords();
     seedWords();
 
@@ -3331,17 +3695,23 @@ import * as THREE from 'three';
     //   window.__bridgeGenVocabPhrase()                // vocab-tier phrase
     //   window.__bridgeLang                            // live inspection
     window.__bridgeSpeak = speakPhrase;
+    window.__bridgeSpeakUnits = speakUnits;
     window.__bridgeGenPhrase = generatePhrase;
     window.__bridgeGenVocabPhrase = genVocabPhrase;
+    window.__bridgeGenVocabPhraseMeta = genVocabPhraseMeta;
     window.__bridgeLSystem = LSystem;
     window.__bridgeSpeechGrammars = SPEECH_GRAMMARS;
     window.__bridgeLang = {
+        particles: PARTICLES,
         subwords: SUBWORDS,
         words: WORDS,
         evolve: evolveLanguage,
         stats: () => ({
+            particles: PARTICLES.length,
             subwords: SUBWORDS.length,
             words: WORDS.length,
+            topParticles: [...PARTICLES].sort((a,b)=>b.useCount-a.useCount).slice(0,10)
+                .map(p => `${p.type}#${p.id}×${p.useCount}`),
             topSubwords: [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10)
                 .map(s => `${s.pattern}×${s.useCount}`),
             topWords: [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10)
@@ -3453,7 +3823,11 @@ import * as THREE from 'three';
                         ? genVocabPhraseMeta()
                         : expandGrammarMeta();
                     const distance = rng(0.3, 0.95);
-                    speakPhrase(meta.symbols, distance);
+                    if (meta.kind === 'vocab' && meta.units) {
+                        speakUnits(meta.units, distance);
+                    } else {
+                        speakPhrase(meta.symbols, distance);
+                    }
                     logUtterance({
                         ts: Date.now(),
                         kind: meta.kind,
@@ -3478,10 +3852,11 @@ import * as THREE from 'three';
     const giCloseBtn = document.getElementById('gi-close');
     const giTabs = document.querySelectorAll('.gi-tab');
     const giPanes = {
-        grammar:  document.getElementById('gi-pane-grammar'),
-        subwords: document.getElementById('gi-pane-subwords'),
-        words:    document.getElementById('gi-pane-words'),
-        stats:    document.getElementById('gi-pane-stats'),
+        grammar:   document.getElementById('gi-pane-grammar'),
+        particles: document.getElementById('gi-pane-particles'),
+        subwords:  document.getElementById('gi-pane-subwords'),
+        words:     document.getElementById('gi-pane-words'),
+        stats:     document.getElementById('gi-pane-stats'),
     };
     let giActiveTab = 'grammar';
     let giStatsTimer = null;
@@ -3524,6 +3899,7 @@ import * as THREE from 'three';
 
     function giRender(tab) {
         if (tab === 'grammar')  giRenderGrammar();
+        else if (tab === 'particles') giRenderParticles();
         else if (tab === 'subwords') giRenderSubwords();
         else if (tab === 'words')    giRenderWords();
         else if (tab === 'stats')    giRenderStats();
@@ -3619,6 +3995,102 @@ import * as THREE from 'three';
         }
     }
 
+    // ── Particles tab ────────────────────────────────────────
+    // One row per phonic particle. Type is fixed at birth (altering
+    // it would break every subword referencing it), but duration +
+    // offset are editable — useful for nudging a timbre without
+    // waiting for the evolve cycle.
+    function giRenderParticles() {
+        const pane = giPanes.particles;
+        pane.innerHTML = `
+            <div class="gi-toolbar">
+                <select id="gi-pp-type">
+                    <option value="V">V (long vowel)</option>
+                    <option value="v">v (short vowel)</option>
+                    <option value="n">n (nasal)</option>
+                    <option value="l">l (liquid)</option>
+                    <option value="C">C (consonant)</option>
+                    <option value="s">s (sibilant)</option>
+                    <option value="p">p (plosive)</option>
+                </select>
+                <button class="gi-btn primary" id="gi-pp-add">Add particle</button>
+                <span class="gi-count"></span>
+            </div>
+            <table class="gi-table">
+                <thead><tr>
+                    <th>ID</th><th>Type</th><th>Dur (ms)</th>
+                    <th>Offset</th><th>F1 / F2 (Hz)</th>
+                    <th>Used</th><th>Age (s)</th><th></th>
+                </tr></thead>
+                <tbody id="gi-pp-body"></tbody>
+            </table>
+        `;
+        const body = pane.querySelector('#gi-pp-body');
+        const countEl = pane.querySelector('.gi-count');
+        const now = Date.now();
+        countEl.textContent =
+            `${PARTICLES.length} particles · cap ${PARTICLE_CAP} · floor ${PARTICLE_MIN}`;
+        const sorted = [...PARTICLES].sort((a, b) => b.useCount - a.useCount);
+        sorted.slice(0, 400).forEach(p => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="id">${p.id}</td>
+                <td class="pat">${p.type}</td>
+                <td><input type="number" step="1" min="5" max="200"
+                     value="${Math.round(p.dur * 1000)}" style="width:4.5em"></td>
+                <td><input type="number" step="0.01" min="0" max="1"
+                     value="${p.offsetFrac.toFixed(2)}" style="width:4.5em"></td>
+                <td style="color:#566270;font-size:0.75rem">
+                    ${Math.round(p.bp1Freq)} / ${Math.round(p.bp2Freq)}
+                </td>
+                <td class="use">${p.useCount}</td>
+                <td>${((now - p.born) / 1000).toFixed(0)}</td>
+                <td><button class="row-del" title="Delete this particle">✕</button></td>
+            `;
+            const [durI, offI] = tr.querySelectorAll('input');
+            durI.addEventListener('change', () => {
+                const v = parseFloat(durI.value);
+                if (!isNaN(v) && v >= 5 && v <= 500) p.dur = v / 1000;
+            });
+            offI.addEventListener('change', () => {
+                const v = parseFloat(offI.value);
+                if (!isNaN(v) && v >= 0 && v <= 1) p.offsetFrac = v;
+            });
+            tr.querySelector('.row-del').onclick = () => {
+                const idx = PARTICLES.indexOf(p);
+                if (idx < 0) return;
+                PARTICLES.splice(idx, 1);
+                // Repair subword references: any subword pointing at
+                // the deleted particle gets a same-type replacement.
+                const idMap = new Map();
+                PARTICLES.forEach((pp, i) => { idMap.set(pp.id, i); });
+                PARTICLES.forEach((pp, i) => { pp.id = i; });
+                for (const s of SUBWORDS) {
+                    s.particleIds = s.particleIds.map(oldId => {
+                        if (idMap.has(oldId)) return idMap.get(oldId);
+                        const pool = PARTICLES.filter(pp => pp.type === p.type);
+                        if (pool.length) return pool[
+                            Math.floor(Math.random() * pool.length)].id;
+                        return Math.floor(Math.random() * PARTICLES.length);
+                    });
+                    s.pattern = s.particleIds
+                        .map(i => (PARTICLES[i] || {type:'?'}).type).join('');
+                }
+                giRenderParticles();
+            };
+            body.appendChild(tr);
+        });
+
+        pane.querySelector('#gi-pp-add').onclick = () => {
+            if (PARTICLES.length >= PARTICLE_CAP) {
+                alert('Particle cap reached (' + PARTICLE_CAP + ').'); return;
+            }
+            const t = pane.querySelector('#gi-pp-type').value;
+            newParticle(t);
+            giRenderParticles();
+        };
+    }
+
     // ── Subwords tab ─────────────────────────────────────────
     function giRenderSubwords() {
         const pane = giPanes.subwords;
@@ -3631,7 +4103,7 @@ import * as THREE from 'three';
             </div>
             <table class="gi-table">
                 <thead><tr>
-                    <th>ID</th><th>Pattern</th><th>Used</th>
+                    <th>ID</th><th>Pattern</th><th>Particles</th><th>Used</th>
                     <th>Age (s)</th><th></th>
                 </tr></thead>
                 <tbody id="gi-sub-body"></tbody>
@@ -3644,9 +4116,13 @@ import * as THREE from 'three';
         countEl.textContent = `${SUBWORDS.length} subwords · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}`;
         sorted.slice(0, 400).forEach(s => {
             const tr = document.createElement('tr');
+            const chainTxt = s.particleIds.map(
+                pid => (PARTICLES[pid] || {type:'?'}).type + '#' + pid
+            ).join(' · ');
             tr.innerHTML = `
                 <td class="id">${s.id}</td>
                 <td><input type="text" value="${s.pattern}"></td>
+                <td style="color:#566270;font-size:0.75rem">${chainTxt}</td>
                 <td class="use">${s.useCount}</td>
                 <td>${((now - s.born) / 1000).toFixed(0)}</td>
                 <td><button class="row-del" title="Delete this subword">✕</button></td>
@@ -3654,8 +4130,18 @@ import * as THREE from 'three';
             const input = tr.querySelector('input');
             input.addEventListener('change', () => {
                 const v = input.value.trim();
-                if (v) { s.pattern = v; }
-                else   { input.value = s.pattern; }
+                if (!v) { input.value = s.pattern; return; }
+                // Re-translate pattern → fresh particleIds, then update.
+                const newIds = [];
+                for (const ch of v) {
+                    if (!PARTICLE_DUR[ch]) continue;
+                    newIds.push(pickPopularParticleOfType(ch).id);
+                }
+                if (newIds.length === 0) { input.value = s.pattern; return; }
+                s.particleIds = newIds;
+                s.pattern = newIds
+                    .map(i => (PARTICLES[i] || {type:'?'}).type).join('');
+                giRenderSubwords();
             });
             tr.querySelector('.row-del').onclick = () => {
                 // Remove from SUBWORDS, remap WORDS subIds.
@@ -3796,6 +4282,11 @@ import * as THREE from 'three';
         pane.innerHTML = `
             <div class="gi-stats">
                 <div class="gi-stat-card">
+                    <h4>Particles</h4>
+                    <div class="big" data-stat="pp-count"></div>
+                    <div style="color:#8b95a0;font-size:0.7rem;" data-stat="pp-usage"></div>
+                </div>
+                <div class="gi-stat-card">
                     <h4>Subwords</h4>
                     <div class="big" data-stat="sub-count"></div>
                     <div style="color:#8b95a0;font-size:0.7rem;" data-stat="sub-usage"></div>
@@ -3811,6 +4302,10 @@ import * as THREE from 'three';
                     <div style="color:#8b95a0;font-size:0.7rem;">
                         total word-utterances since page load
                     </div>
+                </div>
+                <div class="gi-stat-card">
+                    <h4>Top 10 particles</h4>
+                    <ol data-stat="top-pps"></ol>
                 </div>
                 <div class="gi-stat-card">
                     <h4>Top 10 subwords</h4>
@@ -3858,8 +4353,10 @@ import * as THREE from 'three';
 
     // Refresh just the card numbers / top-N lists. Log box untouched.
     function giUpdateStatsCards(pane) {
+        const topPPs = [...PARTICLES].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
         const topSubs = [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
         const topWords = [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10);
+        const usedPPs = PARTICLES.filter(p => p.useCount > 0).length;
         const usedSubs = SUBWORDS.filter(s => s.useCount > 0).length;
         const usedWords = WORDS.filter(w => w.useCount > 0).length;
         const totalSpeakEvents = WORDS.reduce((s, w) => s + w.useCount, 0);
@@ -3871,11 +4368,16 @@ import * as THREE from 'three';
             const el = pane.querySelector(`[data-stat="${k}"]`);
             if (el) el.innerHTML = v;
         };
+        set('pp-count',   PARTICLES.length);
+        set('pp-usage',   `${usedPPs} used · ${PARTICLES.length - usedPPs} idle · cap ${PARTICLE_CAP} · floor ${PARTICLE_MIN}`);
         set('sub-count',  SUBWORDS.length);
         set('sub-usage',  `${usedSubs} used · ${SUBWORDS.length - usedSubs} idle · cap ${SUBWORD_CAP} · floor ${SUBWORD_MIN}`);
         set('word-count', WORDS.length);
         set('word-usage', `${usedWords} used · ${WORDS.length - usedWords} idle`);
         set('events',     totalSpeakEvents);
+        setHTML('top-pps', topPPs.map(p =>
+            `<li><span style="color:var(--amber);">${p.type}#${p.id}</span> ×${p.useCount}</li>`
+        ).join(''));
         setHTML('top-subs', topSubs.map(s =>
             `<li><span style="color:var(--amber);">${s.pattern}</span> ×${s.useCount}</li>`
         ).join(''));
