@@ -651,34 +651,134 @@ function damagePlayer(amount) {
     }
 }
 
-// NPC dispositions. Friendly NPCs ignore the player; antagonistic ones
-// attack on touch but don't pursue; violent ones chase via pathfinding;
-// fearful ones flee; curious ones approach but don't damage.
-const DISPOSITIONS = [
-    {name: 'friendly',     w: 0.50, color: '#88cc88'},
-    {name: 'antagonistic', w: 0.20, color: '#cc8844'},
-    {name: 'violent',      w: 0.15, color: '#cc3333'},
-    {name: 'fearful',      w: 0.10, color: '#88aaff'},
-    {name: 'curious',      w: 0.05, color: '#cc88cc'},
+// AD&D-style 9-square alignment for NPCs. Good ones tend toward
+// healing, evil ones toward violence; lawful ones are stable in their
+// chosen behaviour, chaotic ones can flip for any reason.
+const ALIGNMENTS = [
+    {code: 'LG', name: 'Lawful Good',     w: 0.10, color: '#aad8ff'},
+    {code: 'NG', name: 'Neutral Good',    w: 0.10, color: '#a8f0a0'},
+    {code: 'CG', name: 'Chaotic Good',    w: 0.08, color: '#e8f470'},
+    {code: 'LN', name: 'Lawful Neutral',  w: 0.10, color: '#dddddd'},
+    {code: 'TN', name: 'True Neutral',    w: 0.18, color: '#9a9a9a'},
+    {code: 'CN', name: 'Chaotic Neutral', w: 0.10, color: '#e0c08a'},
+    {code: 'LE', name: 'Lawful Evil',     w: 0.08, color: '#d088e0'},
+    {code: 'NE', name: 'Neutral Evil',    w: 0.10, color: '#e85890'},
+    {code: 'CE', name: 'Chaotic Evil',    w: 0.06, color: '#ff5044'},
 ];
 
-function rollDisposition() {
+function isGood(a)    { return a[1] === 'G'; }
+function isEvil(a)    { return a[1] === 'E'; }
+function isLawful(a)  { return a[0] === 'L'; }
+function isChaotic(a) { return a[0] === 'C'; }
+
+function rollAlignment() {
     const r = Math.random();
     let acc = 0;
-    for (const d of DISPOSITIONS) {
+    for (const d of ALIGNMENTS) {
         acc += d.w;
-        if (r <= acc) return d.name;
+        if (r <= acc) return d.code;
     }
-    return 'friendly';
+    return 'TN';
 }
 
-function escalate(disposition) {
-    // Damage hardens an NPC: friendly→antagonistic→violent.
-    if (disposition === 'friendly') return 'antagonistic';
-    if (disposition === 'curious')  return 'antagonistic';
-    if (disposition === 'fearful')  return 'fearful';   // stays scared
-    if (disposition === 'antagonistic') return 'violent';
-    return disposition;
+function alignmentMeta(code) {
+    return ALIGNMENTS.find(a => a.code === code) || ALIGNMENTS[4];
+}
+
+// Affection toward the user: -2 hate, -1 dislike, 0 ambivalent,
+// 1 like, 2 love.
+const AFFECTION_LABELS = ['hateful', 'wary', 'ambivalent', 'fond', 'loving'];
+function affectionLabel(v) {
+    return AFFECTION_LABELS[Math.max(0, Math.min(4, v + 2))];
+}
+
+// Initial affection biased by alignment.
+function rollInitialAffection(alignment) {
+    if (isEvil(alignment))  return Math.random() < 0.3 ? -1 : -2;
+    if (isGood(alignment))  return Math.random() < 0.3 ? 2 : 1;
+    return Math.random() < 0.3 ? (Math.random() < 0.5 ? -1 : 1) : 0;
+}
+
+// Initial fear of player.
+function rollInitialFear(alignment) {
+    if (isLawful(alignment))  return Math.random() * 0.3;
+    if (isChaotic(alignment)) return Math.random();
+    return Math.random() * 0.6;
+}
+
+// Compute current intent string from alignment + state. Possible values:
+//  'attacking', 'rushing-aid', 'healing', 'fleeing', 'observing',
+//  'wandering', 'ambivalent'.
+function computeIntent(n, playerHpRatio, distToPlayer) {
+    if (n.hp <= 0) return 'wandering';
+    // Fear overrides almost everything.
+    if (n.fear > 0.75 && distToPlayer < 18) return 'fleeing';
+    if (isEvil(n.alignment)) {
+        // CE attacks on sight; LE/NE attack when provoked or close.
+        const provoked = n.affection <= -2 || n.attackedByPlayer;
+        if (n.alignment === 'CE' && distToPlayer < 35) return 'attacking';
+        if (provoked && distToPlayer < 25) return 'attacking';
+        return 'wandering';
+    }
+    if (isGood(n.alignment)) {
+        // Heal injured player on sight. Lawful good will rush in further.
+        const healRange = isLawful(n.alignment) ? 40 : 25;
+        if (playerHpRatio < 0.95 && distToPlayer < healRange) {
+            return distToPlayer < 1.6 ? 'healing' : 'rushing-aid';
+        }
+        return 'wandering';
+    }
+    // Neutral
+    if (n.affection <= -1 && distToPlayer < 20) return 'observing';
+    return 'ambivalent';
+}
+
+const INTENT_LABELS = {
+    'attacking':    'attacking you',
+    'rushing-aid':  'rushing to help',
+    'healing':      'healing you',
+    'fleeing':      'fleeing',
+    'observing':    'watching warily',
+    'wandering':    'going about their day',
+    'ambivalent':   'indifferent',
+};
+
+function makeAlignLabel() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 96;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, depthWrite: false,
+    });
+    const spr = new THREE.Sprite(mat);
+    spr.scale.set(1.2, 0.36, 1);
+    spr.position.set(0, 3.05, 0);
+    spr.visible = false;
+    spr.renderOrder = 999;
+    spr.userData.canvas = canvas;
+    spr.userData.tex = tex;
+    return spr;
+}
+
+function drawAlignLabel(spr, alignmentCode, alignmentName, intent, affection) {
+    const c = spr.userData.canvas;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, c.width, c.height);
+    g.fillStyle = 'rgba(0,0,0,0.72)';
+    g.fillRect(4, 4, c.width - 8, c.height - 8);
+    g.fillStyle = alignmentMeta(alignmentCode).color;
+    g.font = 'bold 26px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'top';
+    g.fillText(`${alignmentCode} · ${alignmentName}`, c.width / 2, 8);
+    g.fillStyle = '#ffffff';
+    g.font = '20px sans-serif';
+    g.fillText(INTENT_LABELS[intent] || intent, c.width / 2, 38);
+    g.fillStyle = '#bbbbbb';
+    g.font = '16px sans-serif';
+    g.fillText(affectionLabel(affection), c.width / 2, 64);
+    spr.userData.tex.needsUpdate = true;
 }
 
 function makeHpBar() {
@@ -730,33 +830,97 @@ function flashNpcHpBar(n) {
     n.hpDirty = true;
 }
 
+const LABEL_RANGE = 10.0;            // NPC labels appear within this distance
+const LABEL_LIFETIME = 5.0;          // sec the label stays after triggering
+const LABEL_FADE = 0.5;              // sec of fade tail at the end
+
 function tickNpcAi(dt) {
     if (!collisionEnabled) return;
     const p = cameraGroup.position;
+    const playerHpRatio = playerHp / PLAYER_MAX_HP;
+    const now = performance.now() / 1000;
+
     for (const n of npcColliders) {
         if (n.attackCooldown > 0) n.attackCooldown -= dt;
-        // "At will" mood flicker — every few seconds, hostile-leaning NPCs
-        // may toggle their attack ability. Friendly NPCs stay friendly.
+        if (n.healCooldown > 0)   n.healCooldown   -= dt;
+
+        // "At will" mood flicker — chaotic NPCs flip more often than lawful.
         n.moodFlicker -= dt;
         if (n.moodFlicker <= 0) {
-            n.moodFlicker = 4 + Math.random() * 8;
-            if (n.disposition === 'antagonistic' || n.disposition === 'violent') {
-                if (Math.random() < 0.25) n.attackEnabled = !n.attackEnabled;
-            } else if (n.disposition === 'curious' && Math.random() < 0.1) {
-                // A curious NPC occasionally tries an attack — and instantly
-                // becomes antagonistic if it does.
-                n.attackEnabled = true;
-                n.disposition = 'antagonistic';
+            const cadence = isLawful(n.alignment) ? 8 + Math.random() * 12
+                                                   : 3 + Math.random() * 5;
+            n.moodFlicker = cadence;
+            // Affection drift over time toward equilibrium implied by alignment.
+            const target = isGood(n.alignment) ? 1
+                          : isEvil(n.alignment) ? -1 : 0;
+            if (n.affection < target) n.affection += 1;
+            else if (n.affection > target) n.affection -= 1;
+            // Fear decays when the player is far away.
+            const dx0 = p.x - n.mesh.position.x;
+            const dz0 = p.z - n.mesh.position.z;
+            const d0 = Math.sqrt(dx0 * dx0 + dz0 * dz0);
+            if (d0 > 25) n.fear = Math.max(0, n.fear - 0.15);
+            // Chaotic NPCs can flip attackEnabled at any time.
+            if (isChaotic(n.alignment) && Math.random() < 0.3) {
+                n.attackEnabled = !n.attackEnabled;
             }
         }
 
         if (n.hp <= 0) continue;
+
+        const dx = p.x - n.mesh.position.x;
+        const dz = p.z - n.mesh.position.z;
+        const distToPlayer = Math.sqrt(dx * dx + dz * dz);
+
+        // Recompute intent and reflect it on attackEnabled.
+        const newIntent = computeIntent(n, playerHpRatio, distToPlayer);
+        if (newIntent !== n.intent) {
+            n.intent = newIntent;
+            n.labelDirty = true;
+            // Force the label up so the player sees the change.
+            n.labelVisibleUntil = now + LABEL_LIFETIME;
+        }
+        n.attackEnabled = (n.intent === 'attacking');
+
+        // Trigger the alignment flash when the NPC enters the player's
+        // proximity ring — once per approach.
+        const inRange = distToPlayer < LABEL_RANGE;
+        if (inRange && !n.labelEnteredRange) {
+            n.labelEnteredRange = true;
+            n.labelVisibleUntil = now + LABEL_LIFETIME;
+            n.labelDirty = true;
+        } else if (!inRange && distToPlayer > LABEL_RANGE * 1.4) {
+            n.labelEnteredRange = false;
+        }
+
+        // Refresh the label canvas if state changed.
+        if (n.labelDirty && n.alignLabel) {
+            const meta = alignmentMeta(n.alignment);
+            drawAlignLabel(n.alignLabel, n.alignment, meta.name,
+                           n.intent, n.affection);
+            n.labelDirty = false;
+        }
+        // Visibility / fade.
+        if (n.alignLabel) {
+            const remain = n.labelVisibleUntil - now;
+            if (remain > 0) {
+                n.alignLabel.visible = true;
+                n.alignLabel.material.opacity =
+                    remain < LABEL_FADE ? Math.max(0, remain / LABEL_FADE) : 1.0;
+            } else {
+                n.alignLabel.visible = false;
+            }
+        }
+
+        // ---- Movement plan: hijack the wander state's target/path. ----
         n.aiReplan -= dt;
         if (n.aiReplan > 0) continue;
-        if (n.disposition !== 'violent' && n.disposition !== 'fearful') continue;
-        n.aiReplan = 0.8 + Math.random() * 0.4;
+        const movingIntent = (n.intent === 'attacking'
+                            || n.intent === 'rushing-aid'
+                            || n.intent === 'fleeing');
+        if (!movingIntent) continue;
+        n.aiReplan = 0.7 + Math.random() * 0.4;
 
-        // Find this NPC's wander script state so we can hijack its target.
         const reg = entityRegistry.get(n.mesh.userData.entityId);
         if (!reg) continue;
         let wanderState = null;
@@ -769,23 +933,18 @@ function tickNpcAi(dt) {
         if (!wanderState) continue;
 
         const npcPos = n.mesh.position;
-        const dx = p.x - npcPos.x;
-        const dz = p.z - npcPos.z;
-        const distToPlayer = Math.sqrt(dx * dx + dz * dz);
-
-        let target;
-        if (n.disposition === 'violent') {
-            // Only chase if within sense range, otherwise resume wandering.
-            if (distToPlayer > 35) continue;
-            target = {x: p.x, z: p.z};
-        } else {
-            // fearful: flee to a point ~10m on the opposite side of player.
-            if (distToPlayer > 14) continue;     // far enough, calm
+        let target, speed;
+        if (n.intent === 'fleeing') {
             const len = Math.max(0.001, distToPlayer);
             target = {
-                x: npcPos.x - (dx / len) * 10,
-                z: npcPos.z - (dz / len) * 10,
+                x: npcPos.x - (dx / len) * 12,
+                z: npcPos.z - (dz / len) * 12,
             };
+            speed = 2.8;
+        } else {
+            // attacking or rushing-aid both head straight for the player
+            target = {x: p.x, z: p.z};
+            speed = (n.intent === 'rushing-aid') ? 2.4 : 2.2;
         }
         const wp = (window.AetherNav && window.AetherNav.grid)
             ? window.AetherNav.findPath(npcPos, target)
@@ -796,8 +955,7 @@ function tickNpcAi(dt) {
         wanderState.walking = true;
         wanderState.waitTimer = 0;
         wanderState.stuckTimer = 0;
-        // Violent NPCs run; fearful NPCs sprint.
-        wanderState.speed = n.disposition === 'fearful' ? 2.6 : 2.0;
+        wanderState.speed = speed;
     }
 }
 
@@ -811,7 +969,11 @@ function tickPlayerRespawn(dt) {
         setPlayerHp(PLAYER_MAX_HP);
         // Calm hostile NPCs so they don't immediately farm the respawn.
         for (const n of npcColliders) {
-            if (n.disposition === 'violent') n.disposition = 'antagonistic';
+            n.attackedByPlayer = false;
+            n.attackEnabled = false;
+            n.attackCooldown = 1.0;
+            // Soften affection by one notch toward neutral.
+            if (n.affection < 0) n.affection += 1;
         }
     }
 }
@@ -902,19 +1064,30 @@ function resolvePlayerHorizontal() {
             n.hp = Math.max(0, n.hp - BUMP_DAMAGE);
             n.dmgCooldown = BUMP_COOLDOWN;
             flashNpcHpBar(n);
-            n.disposition = escalate(n.disposition);
-            n.attackEnabled = true;
+            n.attackedByPlayer = true;
+            n.affection = Math.max(-2, n.affection - 1);
+            // Lawful NPCs are slow to escalate; chaotic ones snap.
+            if (isChaotic(n.alignment) || Math.random() < 0.5) {
+                n.attackEnabled = true;
+            }
+            // Good NPCs may react with sorrow rather than violence; their
+            // fear ticks up but affection takes the bigger hit.
+            if (isEvil(n.alignment) || isChaotic(n.alignment)) {
+                n.fear = Math.min(1, n.fear + 0.15);
+            }
         }
-        // NPC strikes back if it has the ability and the cooldown is up.
-        if (n.attackEnabled && n.attackCooldown <= 0 && n.hp > 0
-            && playerHp > 0) {
+        // NPC strikes back / strikes first depending on intent.
+        const hostile = n.intent === 'attacking';
+        if (hostile && n.attackEnabled && n.attackCooldown <= 0
+            && n.hp > 0 && playerHp > 0) {
             damagePlayer(NPC_TOUCH_DAMAGE);
             n.attackCooldown = NPC_TOUCH_COOLDOWN;
-            // The act of attacking marks the NPC antagonistic if it
-            // wasn't already at least that hostile.
-            if (n.disposition === 'friendly' || n.disposition === 'curious') {
-                n.disposition = 'antagonistic';
-            }
+        }
+        // Good NPC adjacent to a wounded player heals them.
+        if ((n.intent === 'healing' || n.intent === 'rushing-aid')
+            && n.healCooldown <= 0 && n.hp > 0 && playerHp < PLAYER_MAX_HP) {
+            setPlayerHp(playerHp + 5);
+            n.healCooldown = 1.0;
         }
     }
 }
@@ -1709,19 +1882,30 @@ async function loadScene() {
         if (ent.isNpc) {
             const hpBar = makeHpBar();
             mesh.add(hpBar);
-            const disposition = rollDisposition();
+            const alignLabel = makeAlignLabel();
+            mesh.add(alignLabel);
+            const alignment = rollAlignment();
             npcColliders.push({
                 mesh, radius: NPC_RADIUS, height: NPC_HEIGHT,
                 kbVx: 0, kbVz: 0, kbTime: 0,
                 hp: NPC_MAX_HP, maxHp: NPC_MAX_HP,
                 hpBar, hpVisibleUntil: 0, hpFlashUntil: 0,
                 hpDirty: true, dmgCooldown: 0,
-                disposition,
-                attackEnabled: disposition === 'antagonistic'
-                              || disposition === 'violent',
+                alignment,
+                affection: rollInitialAffection(alignment),
+                fear: rollInitialFear(alignment),
+                intent: 'wandering',
+                attackedByPlayer: false,
+                attackEnabled: false,
                 attackCooldown: 0,
+                healCooldown: 0,
                 aiReplan: 0,
                 moodFlicker: 6 + Math.random() * 8,
+                alignLabel,
+                labelVisibleUntil: 0,
+                labelEnteredRange: false,
+                labelDirty: true,
+                lastIntent: null,
             });
         }
 
