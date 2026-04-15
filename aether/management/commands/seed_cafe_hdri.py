@@ -1246,35 +1246,74 @@ if (!S.wn_init) {
     const b = ctx.props.bounds || [-7, -4, 7, 5];
     S.bounds = {minX: b[0], minZ: b[1], maxX: b[2], maxZ: b[3]};
     S.target = null;
+    S.waypoints = null;
+    S.wpIndex = 0;
     S.waitTimer = 0;
     S.walking = false;
     S.speed = ctx.props.speed || 1.0;
     S.walkT = 0;
+    S.replanTimer = 0;
+    S.stuckTimer = 0;
+    S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
+}
+
+function pickTarget(S) {
+    const bnd = S.bounds;
+    return {
+        x: bnd.minX + Math.random() * (bnd.maxX - bnd.minX),
+        z: bnd.minZ + Math.random() * (bnd.maxZ - bnd.minZ),
+    };
+}
+
+function planPath(S, from, to) {
+    const Nav = window.AetherNav;
+    if (Nav && Nav.grid) {
+        const wp = Nav.findPath(from, to);
+        if (wp && wp.length) return wp;
+    }
+    // Fallback: straight-line single waypoint
+    return [{x: to.x, z: to.z}];
 }
 
 if (!S.walking) {
     S.waitTimer += ctx.deltaTime;
     idleBreathing(S, ctx.elapsed);
-    // Look around while waiting
     S.body.headPivot.rotation.y = Math.sin(ctx.elapsed * 0.5 + ctx.entity.position.x) * 0.5;
     S.body.headPivot.rotation.x = Math.sin(ctx.elapsed * 0.3) * 0.05;
 
     if (S.waitTimer > 2 + Math.random() * 4) {
-        const bnd = S.bounds;
-        S.target = {
-            x: bnd.minX + Math.random() * (bnd.maxX - bnd.minX),
-            z: bnd.minZ + Math.random() * (bnd.maxZ - bnd.minZ),
-        };
+        // Pick a target the pathfinder can actually reach. Try a few times
+        // before giving up — random points may land inside obstacles.
+        let target = null, waypoints = null;
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const t = pickTarget(S);
+            const wp = planPath(S, ctx.entity.position, t);
+            if (wp && wp.length) { target = t; waypoints = wp; break; }
+        }
+        if (!target) {
+            S.waitTimer = 0;
+            return;
+        }
+        S.target = target;
+        S.waypoints = waypoints;
+        S.wpIndex = 0;
         S.walking = true;
         S.waitTimer = 0;
         S.walkT = 0;
+        S.replanTimer = 0;
+        S.stuckTimer = 0;
+        S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
     }
 } else {
-    const dx = S.target.x - ctx.entity.position.x;
-    const dz = S.target.z - ctx.entity.position.z;
+    const wp = S.waypoints[S.wpIndex];
+    const dx = wp.x - ctx.entity.position.x;
+    const dz = wp.z - ctx.entity.position.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
-    if (dist < 0.3) {
-        S.walking = false;
+    if (dist < 0.4) {
+        S.wpIndex++;
+        if (S.wpIndex >= S.waypoints.length) {
+            S.walking = false;
+        }
     } else {
         const step = Math.min(S.speed * ctx.deltaTime, dist);
         ctx.entity.position.x += (dx / dist) * step;
@@ -1282,6 +1321,28 @@ if (!S.walking) {
         ctx.entity.rotation.y = Math.atan2(dx, dz);
         S.walkT += ctx.deltaTime;
         walkCycle(S, S.walkT, S.speed);
+
+        // Stuck detection: if we've barely moved over the last second,
+        // assume an obstacle (NPC, dynamic object) is in the way and
+        // replan from our current position.
+        S.stuckTimer += ctx.deltaTime;
+        if (S.stuckTimer > 1.0) {
+            const moved = Math.hypot(
+                ctx.entity.position.x - S.lastPos.x,
+                ctx.entity.position.z - S.lastPos.z);
+            if (moved < 0.15) {
+                const wp2 = planPath(S, ctx.entity.position, S.target);
+                if (wp2 && wp2.length) {
+                    S.waypoints = wp2;
+                    S.wpIndex = 0;
+                } else {
+                    // Goal unreachable from here — abandon and idle
+                    S.walking = false;
+                }
+            }
+            S.lastPos = {x: ctx.entity.position.x, z: ctx.entity.position.z};
+            S.stuckTimer = 0;
+        }
     }
 }
 """

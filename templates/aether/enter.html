@@ -755,6 +755,220 @@ function resolveNpcCollisions(dt) {
     }
 }
 
+// ---- Navigation grid + A* pathfinder (window.AetherNav) ----
+// Built after staticColliders are populated. NPC scripts call
+// AetherNav.findPath(from, to) to receive a list of waypoints that
+// route around boxes. Path smoothing collapses stair-steps where line
+// of sight is clear, so the final walk looks natural.
+const AetherNav = (function () {
+    let grid = null;
+
+    function build(colliders, npcRadius, opts) {
+        const cellSize = (opts && opts.cellSize) || 0.75;
+        const pad = npcRadius + 0.05;
+        // Find world XZ extent from colliders. Add a 4m skirt so NPCs can
+        // wander past the outermost obstacles without falling off-grid.
+        if (colliders.length === 0) {
+            grid = {minX: -50, minZ: -50, cellSize, w: 134, h: 134,
+                    blocked: new Uint8Array(134 * 134)};
+            return grid;
+        }
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (const c of colliders) {
+            if (c.box.min.x < minX) minX = c.box.min.x;
+            if (c.box.max.x > maxX) maxX = c.box.max.x;
+            if (c.box.min.z < minZ) minZ = c.box.min.z;
+            if (c.box.max.z > maxZ) maxZ = c.box.max.z;
+        }
+        minX -= 8; maxX += 8; minZ -= 8; maxZ += 8;
+        const w = Math.max(8, Math.ceil((maxX - minX) / cellSize));
+        const h = Math.max(8, Math.ceil((maxZ - minZ) / cellSize));
+        // Cap absurd worlds so we don't allocate hundreds of MB.
+        const totalCells = w * h;
+        if (totalCells > 200000) {
+            console.warn('AetherNav: grid too large', w, 'x', h, '— pathfinding disabled');
+            grid = null;
+            return null;
+        }
+        const blocked = new Uint8Array(totalCells);
+        // Rasterize each collider into cells (expanded by NPC radius +
+        // step-up: NPCs can't step up a 0.5m table edge, so anything
+        // taller than STEP_HEIGHT is considered an obstacle).
+        for (const c of colliders) {
+            const b = c.box;
+            if (b.max.y - b.min.y < 0.2) continue;        // very short — walkable
+            if (b.min.y > 1.7) continue;                  // overhead — walkable underneath
+            const x0 = Math.max(0, Math.floor((b.min.x - pad - minX) / cellSize));
+            const x1 = Math.min(w - 1, Math.floor((b.max.x + pad - minX) / cellSize));
+            const z0 = Math.max(0, Math.floor((b.min.z - pad - minZ) / cellSize));
+            const z1 = Math.min(h - 1, Math.floor((b.max.z + pad - minZ) / cellSize));
+            for (let z = z0; z <= z1; z++) {
+                for (let x = x0; x <= x1; x++) {
+                    blocked[z * w + x] = 1;
+                }
+            }
+        }
+        grid = {minX, minZ, cellSize, w, h, blocked};
+        return grid;
+    }
+
+    function worldToCell(x, z) {
+        if (!grid) return null;
+        const cx = Math.floor((x - grid.minX) / grid.cellSize);
+        const cz = Math.floor((z - grid.minZ) / grid.cellSize);
+        if (cx < 0 || cx >= grid.w || cz < 0 || cz >= grid.h) return null;
+        return [cx, cz];
+    }
+
+    function cellToWorld(cx, cz) {
+        return {
+            x: grid.minX + (cx + 0.5) * grid.cellSize,
+            z: grid.minZ + (cz + 0.5) * grid.cellSize,
+        };
+    }
+
+    function isBlocked(x, z) {
+        const c = worldToCell(x, z);
+        if (!c) return false;
+        return grid.blocked[c[1] * grid.w + c[0]] === 1;
+    }
+
+    // If the requested cell is blocked, snap to the nearest free cell within
+    // a small radius. NPC starts can sit inside chairs/tables otherwise.
+    function nearestFree(cx, cz, maxR) {
+        if (!grid.blocked[cz * grid.w + cx]) return [cx, cz];
+        for (let r = 1; r <= maxR; r++) {
+            for (let dz = -r; dz <= r; dz++) {
+                for (let dx = -r; dx <= r; dx++) {
+                    if (Math.abs(dx) !== r && Math.abs(dz) !== r) continue;
+                    const nx = cx + dx, nz = cz + dz;
+                    if (nx < 0 || nx >= grid.w || nz < 0 || nz >= grid.h) continue;
+                    if (!grid.blocked[nz * grid.w + nx]) return [nx, nz];
+                }
+            }
+        }
+        return null;
+    }
+
+    // Bresenham-ish line-of-sight on the grid: true if every cell along
+    // the segment is free. Used to smooth A* output.
+    function losClear(ax, az, bx, bz) {
+        let x0 = ax, y0 = az, x1 = bx, y1 = bz;
+        const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+        const sx = x0 < x1 ? 1 : -1;
+        const sy = y0 < y1 ? 1 : -1;
+        let err = dx - dy;
+        while (true) {
+            if (grid.blocked[y0 * grid.w + x0]) return false;
+            if (x0 === x1 && y0 === y1) return true;
+            const e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; x0 += sx; }
+            if (e2 < dx)  { err += dx; y0 += sy; }
+        }
+    }
+
+    function smooth(cells) {
+        if (!cells || cells.length <= 2) return cells;
+        const out = [cells[0]];
+        let i = 0;
+        while (i < cells.length - 1) {
+            let j = cells.length - 1;
+            while (j > i + 1 && !losClear(cells[i][0], cells[i][1],
+                                         cells[j][0], cells[j][1])) j--;
+            out.push(cells[j]);
+            i = j;
+        }
+        return out;
+    }
+
+    function findPath(start, end) {
+        if (!grid) return null;
+        const s = worldToCell(start.x, start.z);
+        const e = worldToCell(end.x, end.z);
+        if (!s || !e) return null;
+        const sFree = nearestFree(s[0], s[1], 4);
+        const eFree = nearestFree(e[0], e[1], 6);
+        if (!sFree || !eFree) return null;
+        const [sx, sz] = sFree, [ex, ez] = eFree;
+        if (sx === ex && sz === ez) return [{x: end.x, z: end.z}];
+
+        const w = grid.w, h = grid.h;
+        const idx = (x, z) => z * w + x;
+        // Octile heuristic
+        const heur = (x, z) => {
+            const dx = Math.abs(x - ex), dz = Math.abs(z - ez);
+            return (Math.SQRT2 - 1) * Math.min(dx, dz) + Math.max(dx, dz);
+        };
+
+        const open = [];      // [f, g, x, z, parent]
+        const came = new Map();
+        const gScore = new Map();
+        gScore.set(idx(sx, sz), 0);
+        open.push([heur(sx, sz), 0, sx, sz, -1]);
+        const NEI = [
+            [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
+            [1, 1, Math.SQRT2], [1, -1, Math.SQRT2],
+            [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
+        ];
+        const closed = new Uint8Array(w * h);
+        const limit = 8000;   // node-expansion cap
+        let expansions = 0;
+
+        while (open.length && expansions < limit) {
+            // Pop the lowest-f node. Linear scan is fine for these sizes.
+            let bi = 0;
+            for (let k = 1; k < open.length; k++) {
+                if (open[k][0] < open[bi][0]) bi = k;
+            }
+            const cur = open.splice(bi, 1)[0];
+            const [, g, cx, cz, parent] = cur;
+            const ci = idx(cx, cz);
+            if (closed[ci]) continue;
+            closed[ci] = 1;
+            came.set(ci, parent);
+            if (cx === ex && cz === ez) {
+                // Reconstruct path
+                const cells = [];
+                let pi = ci;
+                while (pi !== -1) {
+                    const px = pi % w, pz = (pi - px) / w;
+                    cells.push([px, pz]);
+                    pi = came.get(pi);
+                    if (pi === undefined) break;
+                }
+                cells.reverse();
+                const smoothed = smooth(cells);
+                // Convert to world-space waypoints; replace last with the
+                // exact requested target so NPCs land on goal precisely.
+                const wp = smoothed.map(c => cellToWorld(c[0], c[1]));
+                wp[wp.length - 1] = {x: end.x, z: end.z};
+                return wp;
+            }
+            for (const [dx, dz, cost] of NEI) {
+                const nx = cx + dx, nz = cz + dz;
+                if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+                const ni = idx(nx, nz);
+                if (closed[ni] || grid.blocked[ni]) continue;
+                // For diagonals, also require both adjacent cardinal cells free
+                if (dx !== 0 && dz !== 0) {
+                    if (grid.blocked[idx(cx + dx, cz)] ||
+                        grid.blocked[idx(cx, cz + dz)]) continue;
+                }
+                const ng = g + cost;
+                const prev = gScore.get(ni);
+                if (prev !== undefined && prev <= ng) continue;
+                gScore.set(ni, ng);
+                open.push([ng + heur(nx, nz), ng, nx, nz, ci]);
+            }
+            expansions++;
+        }
+        return null;     // unreachable
+    }
+
+    return {build, findPath, isBlocked, get grid() { return grid; }};
+})();
+window.AetherNav = AetherNav;
+
 function rebuildStaticColliders() {
     staticColliders.length = 0;
     for (const [id, reg] of entityRegistry) {
@@ -1346,6 +1560,7 @@ loadScene().then(objs => {
         }
     }
     rebuildStaticColliders();
+    AetherNav.build(staticColliders, NPC_RADIUS, {cellSize: 0.75});
     // Keep the title card visible for at least 700 ms so it registers even
     // on instant loads, then fade it out over 600 ms (CSS transition) and
     // remove it from the DOM so it never blocks clicks on the canvas.
