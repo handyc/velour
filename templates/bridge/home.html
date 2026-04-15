@@ -1947,7 +1947,7 @@ import * as THREE from 'three';
         startEngine();
         scheduleBeep(rng(2, 6));
         scheduleBeep(rng(4, 9));   // second beep channel, different cadence
-        scheduleRing(rng(35, 70));
+        scheduleRing(rng(8, 20));
         scheduleFootsteps(rng(12, 25));
         scheduleChatter(rng(20, 45));
     }
@@ -2115,45 +2115,145 @@ import * as THREE from 'three';
     function playMelody(notes, distance) {
         const ctx = audio.ctx;
         const base = 523.25;  // C5 — a phone-ish register
-        const d = distanceNodes(distance * 0.65);  // rings are mostly mid-to-far
+        // Rings should cut through the engine drone: clamp the
+        // distance floor high so even a "far" melody is audible.
+        const d = distanceNodes(0.55 + distance * 0.45);
         let t = ctx.currentTime + 0.02;
         notes.forEach(([semi, beats]) => {
             const f = base * Math.pow(2, semi / 12);
             const dur = beats * BEAT;
-            const o = ctx.createOscillator();
-            o.type = 'triangle';
-            o.frequency.value = f;
+            // Two detuned oscillators for body, plus a square for bite.
+            const o1 = ctx.createOscillator();
+            o1.type = 'triangle';
+            o1.frequency.value = f;
+            const o2 = ctx.createOscillator();
+            o2.type = 'square';
+            o2.frequency.value = f * 2;  // octave up for presence
+            const o2g = ctx.createGain();
+            o2g.gain.value = 0.18;
             const env = ctx.createGain();
             env.gain.value = 0.0001;
-            env.gain.exponentialRampToValueAtTime(0.55, t + 0.01);
-            env.gain.exponentialRampToValueAtTime(0.2, t + dur * 0.4);
+            env.gain.exponentialRampToValueAtTime(1.4, t + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.6, t + dur * 0.4);
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.98);
-            o.connect(env).connect(d.input);
-            o.start(t);
-            o.stop(t + dur + 0.02);
+            o1.connect(env);
+            o2.connect(o2g).connect(env);
+            env.connect(d.input);
+            o1.start(t); o2.start(t);
+            o1.stop(t + dur + 0.02); o2.stop(t + dur + 0.02);
             t += dur;
         });
     }
 
+    // ── Classic Bell System telephone ring: two sines (440/480 Hz)
+    //    summed with a ~20 Hz tremolo so the tone warbles. Real
+    //    North American ring cadence is 2s on / 4s off; we do one
+    //    burst per call here and let scheduleRing stack multiple.
+    function playPhoneBell(distance, burstSec) {
+        const ctx = audio.ctx;
+        const t0 = ctx.currentTime + 0.02;
+        const dur = burstSec || 1.8;
+        const d = distanceNodes(0.6 + distance * 0.4);
+        // Two sine partials
+        const o1 = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        o1.type = 'sine'; o2.type = 'sine';
+        o1.frequency.value = 440;
+        o2.frequency.value = 480;
+        // Tremolo via a shared gain driven by a 20Hz LFO
+        const trem = ctx.createGain();
+        trem.gain.value = 0.5;
+        const lfo = ctx.createOscillator();
+        const lfoG = ctx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.value = 20;
+        lfoG.gain.value = 0.5;  // swing 0.0 → 1.0
+        lfo.connect(lfoG).connect(trem.gain);
+        const env = ctx.createGain();
+        env.gain.value = 0.0001;
+        env.gain.exponentialRampToValueAtTime(1.6, t0 + 0.04);
+        env.gain.setValueAtTime(1.6, t0 + dur - 0.1);
+        env.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o1.connect(trem); o2.connect(trem);
+        trem.connect(env).connect(d.input);
+        o1.start(t0); o2.start(t0); lfo.start(t0);
+        o1.stop(t0 + dur + 0.05);
+        o2.stop(t0 + dur + 0.05);
+        lfo.stop(t0 + dur + 0.05);
+    }
+
+    // ── Klaxon — general quarters-ish. Sawtooth swept 180→320 Hz
+    //    with heavy AM, three short blasts.
+    function playKlaxon(distance) {
+        const ctx = audio.ctx;
+        const d = distanceNodes(0.65 + distance * 0.35);
+        for (let i = 0; i < 3; i++) {
+            const t0 = ctx.currentTime + 0.02 + i * 0.55;
+            const o = ctx.createOscillator();
+            o.type = 'sawtooth';
+            o.frequency.setValueAtTime(180, t0);
+            o.frequency.exponentialRampToValueAtTime(320, t0 + 0.18);
+            o.frequency.exponentialRampToValueAtTime(180, t0 + 0.42);
+            const am = ctx.createGain();
+            am.gain.value = 0.5;
+            const lfo = ctx.createOscillator();
+            const lfoG = ctx.createGain();
+            lfo.frequency.value = 8;
+            lfoG.gain.value = 0.35;
+            lfo.connect(lfoG).connect(am.gain);
+            const env = ctx.createGain();
+            env.gain.value = 0.0001;
+            env.gain.exponentialRampToValueAtTime(1.3, t0 + 0.03);
+            env.gain.setValueAtTime(1.3, t0 + 0.34);
+            env.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.44);
+            o.connect(am).connect(env).connect(d.input);
+            o.start(t0); lfo.start(t0);
+            o.stop(t0 + 0.5); lfo.stop(t0 + 0.5);
+        }
+    }
+
     function scheduleRing(delay) {
         setTimeout(() => {
-            if (!audio.on) { scheduleRing(rng(45, 120)); return; }
-            const melody = MELODIES[Math.floor(Math.random() * MELODIES.length)];
-            const distance = rng(0.15, 0.75);
-            const rings = Math.floor(rng(2, 5));
-            // Sometimes someone "picks up" after only a couple of rings.
-            const actual = Math.random() < 0.25 ? Math.min(2, rings) : rings;
-            let i = 0;
-            const doOne = () => {
-                if (!audio.on || i >= actual) {
-                    scheduleRing(rng(45, 135));
-                    return;
-                }
-                playMelody(melody, distance);
-                i++;
-                setTimeout(doOne, rng(1800, 2600));
-            };
-            doOne();
+            if (!audio.on) { scheduleRing(rng(20, 50)); return; }
+            const distance = rng(0.25, 1.0);
+            const kind = Math.random();
+            if (kind < 0.55) {
+                // Classic warbling phone bell — 2 to 5 rings,
+                // on/off cadence roughly matching US Bell system.
+                const rings = Math.floor(rng(2, 6));
+                const actual = Math.random() < 0.2 ? Math.min(2, rings) : rings;
+                let i = 0;
+                const doOne = () => {
+                    if (!audio.on || i >= actual) {
+                        scheduleRing(rng(15, 45));
+                        return;
+                    }
+                    playPhoneBell(distance, rng(1.4, 2.2));
+                    i++;
+                    setTimeout(doOne, rng(3800, 4600));
+                };
+                doOne();
+            } else if (kind < 0.9) {
+                // Short musical ringtone (shave-and-a-haircut, etc.)
+                const melody = MELODIES[Math.floor(Math.random() * MELODIES.length)];
+                const rings = Math.floor(rng(2, 5));
+                const actual = Math.random() < 0.25 ? Math.min(2, rings) : rings;
+                let i = 0;
+                const doOne = () => {
+                    if (!audio.on || i >= actual) {
+                        scheduleRing(rng(15, 45));
+                        return;
+                    }
+                    playMelody(melody, distance);
+                    i++;
+                    setTimeout(doOne, rng(1800, 2600));
+                };
+                doOne();
+            } else {
+                // Rare klaxon — something's going on down on deck 4
+                playKlaxon(distance);
+                scheduleRing(rng(40, 90));
+            }
         }, delay * 1000);
     }
 
