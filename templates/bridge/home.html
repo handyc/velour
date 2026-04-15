@@ -2499,41 +2499,174 @@ import * as THREE from 'three';
         }
     }
 
-    // Stochastic phrase generator (placeholder for future L-system).
-    // Builds CV-ish syllables, joins 2–5 of them with short internal
-    // gaps, and optionally adds a breath at the end.
-    function generatePhrase() {
-        const consonants = ['C', 's', 'p'];
-        const sylCount = Math.floor(rng(2, 6));
-        let out = '';
-        for (let i = 0; i < sylCount; i++) {
-            // onset: sometimes none, sometimes 1-2 consonants
-            const onset = Math.random();
-            if (onset > 0.35) {
-                out += consonants[Math.floor(Math.random() * consonants.length)];
-            }
-            if (onset > 0.85) {
-                out += consonants[Math.floor(Math.random() * consonants.length)];
-            }
-            // nucleus: vowel, occasionally short
-            out += Math.random() < 0.72 ? 'V' : 'v';
-            // coda: sometimes a consonant
-            if (Math.random() < 0.35) {
-                out += consonants[Math.floor(Math.random() * consonants.length)];
-            }
-            // inter-syllable micro-pause
-            if (i < sylCount - 1 && Math.random() < 0.4) {
-                out += '.';
-            }
+    // ── L-System phrase generator ──────────────────────────
+    // Direct port of the grammar machinery in legolith/lsystem.py
+    // (LSystem.expand() + preset generators). In Legolith, each
+    // preset rewrites an axiom into a turtle program that draws
+    // bricks; here, each preset rewrites an axiom into a terminal
+    // string over the speech alphabet (V v C s p . ,) that
+    // speakPhrase() renders as pink-noise syllables.
+    //
+    // Non-terminals we use (expanded away before rendering):
+    //   S  sentence      W  word        X  syllable
+    //   O  onset         N  nucleus     D  coda         H  filler
+    //
+    // Rules are applied for `iterations` passes, same as Legolith.
+    class LSystem {
+        constructor(axiom, rules, iterations) {
+            this.axiom = axiom;
+            this.rules = rules;
+            this.iterations = iterations || 2;
         }
-        if (Math.random() < 0.2) { out += ','; }
-        return out;
+        expand() {
+            let s = this.axiom;
+            for (let k = 0; k < this.iterations; k++) {
+                let out = '';
+                for (const c of s) {
+                    out += (c in this.rules) ? this.rules[c] : c;
+                }
+                s = out;
+            }
+            return s;
+        }
     }
 
-    // Expose for future L-system hookup: any external code can call
-    // window.__bridgeSpeak("CvCVsV", 0.6) once audio has started.
+    // A tiny random-choice helper used throughout the presets
+    // (mirrors legolith's rng.choice usage).
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+    // ── Preset grammars — each returns an expanded terminal string.
+    //    The shapes mirror legolith's make_tree/make_flower/etc: pick
+    //    a variant, build rules, expand, return.
+
+    // greeting — short two-word exchange, soft onsets, trailing breath.
+    // Variants (like bushy/conifer/blossom):
+    //   cheerful  — many open vowels
+    //   tired     — short vowels, longer breath
+    //   formal    — consonant-heavy
+    function gen_greeting() {
+        const variant = pick(['cheerful', 'tired', 'formal']);
+        let rules;
+        if (variant === 'cheerful') {
+            rules = {
+                S: 'W.W,',
+                W: 'XX',
+                X: 'ON',        // syllable = onset + nucleus
+                O: pick(['C', 's', '']),
+                N: 'V',         // open, bright long vowel
+            };
+        } else if (variant === 'tired') {
+            rules = {
+                S: 'W,W,',
+                W: 'X',
+                X: 'ON',
+                O: pick(['C', '']),
+                N: 'v',         // short, sparse
+            };
+        } else {  // formal
+            rules = {
+                S: 'W.W.W,',
+                W: 'XX',
+                X: 'OND',
+                O: pick(['Cp', 'Cs', 'C']),
+                N: 'V',
+                D: pick(['C', 's', '']),
+            };
+        }
+        return new LSystem('S', rules, 4).expand();
+    }
+
+    // command — short, clipped, plosive-heavy; one or two words.
+    function gen_command() {
+        const variant = pick(['short', 'double']);
+        const rules = variant === 'short'
+            ? { S: 'W', W: 'XX', X: 'pVs', }
+            : { S: 'W.W', W: 'XX', X: pick(['pVC', 'CVp', 'pVp']), };
+        return new LSystem('S', rules, 4).expand();
+    }
+
+    // technical — dense consonant clusters, dictation-style.
+    // Variants: readout (numbers), jargon (cluster-heavy), chatter.
+    function gen_technical() {
+        const variant = pick(['readout', 'jargon', 'chatter']);
+        let rules;
+        if (variant === 'readout') {
+            rules = {
+                S: 'W.W.W.W,',
+                W: 'X',
+                X: 'CvC',
+            };
+        } else if (variant === 'jargon') {
+            rules = {
+                S: 'W.W,',
+                W: 'XXX',
+                X: pick(['CsV', 'sCV', 'pCV', 'CVs']),
+            };
+        } else {  // chatter
+            rules = {
+                S: 'WWWW,',
+                W: 'X.',
+                X: 'CvC',
+            };
+        }
+        return new LSystem('S', rules, 4).expand();
+    }
+
+    // casual — open, vowelly, conversational.
+    function gen_casual() {
+        const variant = pick(['relaxed', 'musing']);
+        const rules = variant === 'relaxed'
+            ? {
+                S: 'W.W.W,',
+                W: 'XX',
+                X: pick(['CV', 'VC', 'CVC', 'V']),
+            }
+            : {
+                S: 'W,W,',
+                W: 'XXX',
+                X: pick(['Vv', 'CVv', 'VCV']),
+            };
+        return new LSystem('S', rules, 4).expand();
+    }
+
+    // question — ends on a short rise (the speakPhrase engine doesn't
+    // do pitch, so "rise" is encoded as a short bright-vowel tail).
+    function gen_question() {
+        const rules = {
+            S: 'W.W?',
+            W: 'XX',
+            X: pick(['CV', 'CVC', 'Vs']),
+            // Token '?' is not in the terminal alphabet; remap it to
+            // a bright short vowel that speakPhrase will render.
+            '?': 'v',
+        };
+        return new LSystem('S', rules, 4).expand();
+    }
+
+    // Registry — same shape as legolith's GENERATORS dict.
+    const SPEECH_GRAMMARS = {
+        greeting:  gen_greeting,
+        command:   gen_command,
+        technical: gen_technical,
+        casual:    gen_casual,
+        question:  gen_question,
+    };
+
+    function generatePhrase(kind) {
+        const gens = Object.values(SPEECH_GRAMMARS);
+        const gen = kind ? SPEECH_GRAMMARS[kind] : pick(gens);
+        return gen();
+    }
+
+    // Expose: any external code can call
+    //   window.__bridgeSpeak("CvCVsV", 0.6)            // raw string
+    //   window.__bridgeGenPhrase('technical')          // named preset
+    //   window.__bridgeLSystem                         // class
+    //   window.__bridgeSpeechGrammars                  // registry
     window.__bridgeSpeak = speakPhrase;
     window.__bridgeGenPhrase = generatePhrase;
+    window.__bridgeLSystem = LSystem;
+    window.__bridgeSpeechGrammars = SPEECH_GRAMMARS;
 
     function scheduleSpeech(delay) {
         setTimeout(() => {
