@@ -16,6 +16,10 @@
         {% csrf_token %}
         <button type="submit" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Reduce</button>
     </form>
+    <form method="post" action="{% url 'aether:world_mutate' world.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;" title="Clone this world with randomly mutated colors, fog, and NPC outfits">Mutate</button>
+    </form>
     <a href="{% url 'aether:world_delete' world.slug %}" style="color:#f85149;text-decoration:none;font-size:0.85rem;padding:0.4rem 0.5rem;">Delete</a>
     <form method="post" action="{% url 'condenser:distill_aether_stereokit' world.slug %}" style="display:inline;">
         {% csrf_token %}

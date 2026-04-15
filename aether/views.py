@@ -1,3 +1,4 @@
+import colorsys
 import json
 import random
 
@@ -1307,6 +1308,124 @@ def world_reduce(request, slug):
         f'Reduced "{src.title}" → "{reduced.title}" '
         f'({kept}/{original_count} entities kept).')
     return redirect('aether:world_detail', slug=reduced.slug)
+
+
+# ---------------------------------------------------------------------------
+# Mutate — clone a world with randomly varied environment + NPC palettes
+# ---------------------------------------------------------------------------
+
+_MUTATE_HDRI_POOL = [
+    'brown_photostudio_02', 'kloofendal_48d_partly_cloudy', 'forest_slope',
+    'potsdamer_platz', 'snowy_park_01',
+]
+
+
+def _hue_shift(hex_color, dh, ds=0.0, dv=0.0):
+    """Rotate a hex color's hue by ``dh`` (0..1), optionally nudging S/V."""
+    try:
+        c = hex_color.lstrip('#')
+        if len(c) != 6:
+            return hex_color
+        r, g, b = int(c[0:2], 16)/255, int(c[2:4], 16)/255, int(c[4:6], 16)/255
+    except (ValueError, AttributeError):
+        return hex_color
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    h = (h + dh) % 1.0
+    s = max(0.0, min(1.0, s + ds))
+    v = max(0.0, min(1.0, v + dv))
+    nr, ng, nb = colorsys.hsv_to_rgb(h, s, v)
+    return '#{:02x}{:02x}{:02x}'.format(
+        int(nr * 255), int(ng * 255), int(nb * 255))
+
+
+@login_required
+@require_POST
+def world_mutate(request, slug):
+    """Clone a world with random environmental + NPC-palette variation.
+
+    Preserves: entities, scripts, portals, assets, spawn location.
+    Varies: sky/ground/fog colors (hue shift), fog distances, ambient
+    light and audio volume, occasional HDRI swap, occasional gravity
+    quirk, and individual NPC outfit/hair colors on humanoid-builder
+    scripts (shuffled hue).
+    """
+    src = get_object_or_404(World, slug=slug)
+
+    # -- Environment mutation --
+    sky = _hue_shift(src.sky_color,
+                     random.uniform(-0.25, 0.25),
+                     random.uniform(-0.08, 0.08),
+                     random.uniform(-0.05, 0.05))
+    ground = _hue_shift(src.ground_color,
+                        random.uniform(-0.2, 0.2),
+                        random.uniform(-0.05, 0.05),
+                        random.uniform(-0.1, 0.1))
+    fog = _hue_shift(src.fog_color,
+                     random.uniform(-0.3, 0.3),
+                     random.uniform(-0.1, 0.1),
+                     random.uniform(-0.08, 0.08))
+    fog_near = max(2.0, src.fog_near * random.uniform(0.75, 1.3))
+    fog_far = max(fog_near + 5.0, src.fog_far * random.uniform(0.8, 1.25))
+    ambient = max(0.08, min(0.85, src.ambient_light + random.uniform(-0.12, 0.12)))
+    vol = max(0.0, min(1.0, src.ambient_volume + random.uniform(-0.2, 0.2)))
+
+    # Rare: swap HDRI to another cafe-friendly one (25% chance if src uses HDRI).
+    hdri = src.hdri_asset
+    if src.skybox == 'hdri' and random.random() < 0.25:
+        pool = [h for h in _MUTATE_HDRI_POOL if h != src.hdri_asset]
+        if pool:
+            hdri = random.choice(pool)
+
+    # Very rare: gravity quirk (10% chance).
+    gravity = src.gravity
+    if random.random() < 0.10:
+        gravity = random.choice([src.gravity * 0.5, src.gravity * 1.5,
+                                 src.gravity * -1])
+
+    mutated = World(
+        title=f'{src.title} (Mutated)',
+        description=f'Mutated clone of "{src.title}".',
+        skybox=src.skybox, hdri_asset=hdri,
+        sky_color=sky, ground_color=ground,
+        ground_size=src.ground_size, ambient_light=round(ambient, 2),
+        fog_near=round(fog_near, 1), fog_far=round(fog_far, 1),
+        fog_color=fog, gravity=round(gravity, 2),
+        allow_flight=src.allow_flight,
+        spawn_x=src.spawn_x, spawn_y=src.spawn_y, spawn_z=src.spawn_z,
+        soundscape=src.soundscape, ambient_volume=round(vol, 2),
+        ambient_audio_url=src.ambient_audio_url,
+        published=True, featured=False,
+    )
+    mutated.save()
+
+    copied = _copy_world_entities(src, mutated, 0, 0)
+
+    # -- NPC outfit mutation --
+    # Walk humanoid-builder EntityScripts in the new world and hue-shift
+    # every color prop. Each NPC gets its own shift so a crowd stays
+    # varied rather than collectively recoloured.
+    color_keys = ('skin', 'shirt', 'pants', 'shoes', 'hair', 'eyes')
+    hb_scripts = EntityScript.objects.filter(
+        entity__world=mutated,
+        script__slug__startswith='humanoid-builder',
+    )
+    shifted = 0
+    for es in hb_scripts:
+        props = dict(es.props or {})
+        shift = random.uniform(-0.18, 0.18)
+        for k in color_keys:
+            if isinstance(props.get(k), str) and props[k].startswith('#'):
+                # Skin shifts less so people don't turn green; hair can drift.
+                dh = shift * (0.25 if k == 'skin' else 1.0)
+                props[k] = _hue_shift(props[k], dh)
+        es.props = props
+        es.save(update_fields=['props'])
+        shifted += 1
+
+    messages.success(request,
+        f'Mutated "{src.title}" → "{mutated.title}" '
+        f'({copied} entities, {shifted} NPC palettes rerolled).')
+    return redirect('aether:world_detail', slug=mutated.slug)
 
 
 # -----------------------------------------------------------------------
