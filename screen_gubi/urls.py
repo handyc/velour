@@ -10,5 +10,6 @@ urlpatterns = [
     path('<slug:slug>/', views.detail, name='detail'),
     path('<slug:slug>/edit/', views.edit, name='edit'),
     path('<slug:slug>/delete/', views.delete, name='delete'),
+    path('<slug:slug>/export-aether/', views.export_aether, name='export_aether'),
     path('<slug:slug>/scene.json', views.scene_json, name='scene_json'),
 ]

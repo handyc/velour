@@ -11,6 +11,11 @@
   <h1 style="margin:0;">{{ world.title }}</h1>
   <div style="display:flex;gap:0.5rem;">
     <a href="{% url 'screen_gubi:edit' world.slug %}" class="btn btn-secondary">Edit screen</a>
+    <form method="post" action="{% url 'screen_gubi:export_aether' world.slug %}" style="display:inline;">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-secondary"
+              title="Create a new Aether world seeded from this Gubi screen">Export to Aether</button>
+    </form>
   </div>
 </div>
 
