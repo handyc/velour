@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ model.name }} — Legolith Library{% endblock %}
+
+{% block extra_head %}
+<style>
+    .detail { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem; }
+    .panel { background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.8rem 1rem; }
+    .panel img { max-width:100%; background:#0d1117; border-radius:4px; }
+    .kv { color:#8b949e; font-size:0.8rem; line-height: 1.7; font-family: ui-monospace, Menlo, monospace; }
+    .kv b { color:#c9d1d9; font-weight:500; }
+    pre { background:#0d1117;border:1px solid #30363d;border-radius:3px;padding:0.5rem;font-size:0.78rem;overflow-x:auto; }
+    .btn { background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.8rem;
+           border-radius:4px;font-size:0.82rem;text-decoration:none; }
+    .btn.edit { background:#d01712;color:#fff;border-color:#f5cd30;font-weight:600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'legolith:library_list' %}" style="color:#6e7681;">&larr; library</a>
+</div>
+<h2 style="margin-bottom:0.1rem;">{{ model.name }}</h2>
+<p style="color:#8b949e;margin-top:0;font-size:0.85rem;">
+    {{ model.kind }} · footprint {{ model.footprint_w }}×{{ model.footprint_d }} studs · slug <code>{{ model.slug }}</code>
+</p>
+
+<div style="display:flex;gap:0.5rem;margin-bottom:0.7rem;">
+    <a href="{% url 'legolith:library_edit' slug=model.slug %}" class="btn edit">Edit</a>
+    <a href="{% url 'legolith:library_bricks' slug=model.slug %}" class="btn">bricks.json</a>
+</div>
+
+<div class="detail">
+    <div class="panel">
+        <img src="{% url 'legolith:library_preview' slug=model.slug %}?v={{ model.updated_at|date:'U' }}" alt="{{ model.name }}">
+        {% if model.description %}
+        <p style="color:#c9d1d9;font-size:0.88rem;margin-top:0.7rem;">{{ model.description }}</p>
+        {% endif %}
+    </div>
+
+    <div class="panel">
+        <div class="kv">
+            <div><b>axiom:</b> {{ model.axiom }}</div>
+            <div><b>iterations:</b> {{ model.iterations }}</div>
+            <div><b>init color:</b> <span style="display:inline-block;width:12px;height:12px;background:{{ model.init_color }};border:1px solid #444;vertical-align:middle;"></span> {{ model.init_color }}</div>
+            <div><b>init shape:</b> {{ model.init_shape_w }}×{{ model.init_shape_d }}×{{ model.init_shape_plates }}p</div>
+            <div><b>footprint:</b> {{ model.footprint_w }}×{{ model.footprint_d }}</div>
+            <div><b>use count:</b> {{ model.use_count }}</div>
+        </div>
+        <div style="margin-top:0.5rem;">
+            <div style="color:#8b949e;font-size:0.75rem;margin-bottom:0.2rem;">Rules</div>
+            <pre>{{ rules_text }}</pre>
+        </div>
+    </div>
+</div>
+{% endblock %}

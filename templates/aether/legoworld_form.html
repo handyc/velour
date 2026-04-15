@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Generate Legoworld — Aether{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'aether:world_list' %}" style="color:#6e7681;">&larr; all worlds</a>
+</div>
+<h1 style="margin-bottom:0.2rem;">{% if classic %}Classic Legoworld{% else %}Generate Legoworld{% endif %}</h1>
+<p style="color:#8b949e;max-width:44rem;margin-top:0;">
+    A studded-brick scene grown from Legolith's L-system grammar, dropped into
+    an Aether world. Buildings, trees, flowers, people, lamps and rocks are
+    all built from generic studded bricks at LDraw-canonical ratios. You'll
+    walk it with the same Aether avatar, controls, and skybox as any other
+    world. Same seed + biome + counts ⇒ identical world.
+</p>
+
+<form method="post" style="max-width:34rem;">
+    {% csrf_token %}
+    <div style="display:grid;grid-template-columns:8rem 1fr;gap:0.5rem 0.75rem;align-items:center;">
+        <label for="name">Name</label>
+        <input name="name" id="name" placeholder="meadow" maxlength="60">
+
+        <label for="biome">Biome</label>
+        <select name="biome" id="biome">
+            {% for b in biomes %}
+            <option value="{{ b }}"{% if b == 'plains' %} selected{% endif %}>{{ b }}</option>
+            {% endfor %}
+        </select>
+
+        {% if hdri_options %}
+        <label for="hdri_asset">HDRI sky</label>
+        <select name="hdri_asset" id="hdri_asset">
+            {% for slug, label in hdri_options %}
+            <option value="{{ slug }}">{{ label }}</option>
+            {% endfor %}
+            <option value="__random__">Random HDRI</option>
+        </select>
+        {% else %}
+        <input type="hidden" name="classic" value="1">
+        {% endif %}
+
+        <label for="seed">Seed</label>
+        <input name="seed" id="seed" placeholder="random"
+               inputmode="numeric" pattern="[0-9]*">
+
+        <label for="n_buildings">Buildings</label>
+        <input name="n_buildings" id="n_buildings" type="number" min="0" max="16" value="4">
+
+        <label for="n_trees">Trees</label>
+        <input name="n_trees" id="n_trees" type="number" min="0" max="16" value="6">
+
+        <label for="n_flowers">Flowers</label>
+        <input name="n_flowers" id="n_flowers" type="number" min="0" max="16" value="4">
+
+        <label for="n_people">People</label>
+        <input name="n_people" id="n_people" type="number" min="0" max="16" value="2">
+
+        <label for="n_hills">Hills</label>
+        <input name="n_hills" id="n_hills" type="number" min="0" max="4" value="0">
+
+        <label for="n_lamps">Lamps</label>
+        <input name="n_lamps" id="n_lamps" type="number" min="0" max="8" value="2">
+
+        <label for="n_rocks">Rocks</label>
+        <input name="n_rocks" id="n_rocks" type="number" min="0" max="8" value="2">
+    </div>
+
+    {% if library_models %}
+    <h3 style="margin:1.2rem 0 0.3rem 0;font-size:0.95rem;">Library objects</h3>
+    <p style="color:#8b949e;margin:0 0 0.4rem 0;font-size:0.78rem;">
+        Counts per Legolith library model to sprinkle into this world (leave 0 to skip).
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 5rem;gap:0.3rem 0.6rem;align-items:center;max-height:18rem;overflow-y:auto;padding-right:0.3rem;">
+        {% for m in library_models %}
+        <label for="lib_{{ m.slug }}" style="font-size:0.82rem;color:#c9d1d9;">
+            {{ m.name }}
+            <span style="color:#6e7681;font-size:0.72rem;">({{ m.kind }})</span>
+        </label>
+        <input type="number" min="0" max="32" value="0" name="lib_{{ m.slug }}" id="lib_{{ m.slug }}">
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+        <button type="submit" style="background:#d01712;color:#fff;border:1px solid #f5cd30;padding:0.45rem 1rem;border-radius:4px;font-size:0.9rem;cursor:pointer;font-weight:600;">Build &amp; Enter</button>
+        <a href="{% url 'aether:world_list' %}" style="color:#8b949e;text-decoration:none;padding:0.45rem 1rem;">Cancel</a>
+    </div>
+</form>
+{% endblock %}

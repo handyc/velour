@@ -296,6 +296,16 @@ class Entity(models.Model):
     receive_shadow = models.BooleanField(default=True)
     visible = models.BooleanField(default=True)
 
+    # Avatar face — when set, the humanoid builder hides the procedural
+    # 3D face features and shows this Face Forge genome on a billboard
+    # plane attached to the head. Null = generate one deterministically
+    # from the entity id at render time.
+    face = models.ForeignKey(
+        'SavedFace', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='entities',
+        help_text='Face Forge avatar to display on this entity\'s head.',
+    )
+
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 

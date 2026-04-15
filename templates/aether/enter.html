@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+{% load static %}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -97,6 +97,8 @@
     </p>
     <div id="vr-btn"></div>
 </div>
+
+<script src="{% static 'aether/face_render.js' %}?v={% now 'U' %}"></script>
 
 <script type="importmap">
 {
@@ -815,6 +817,7 @@ async function loadScene() {
         // Register in entity registry
         mesh.userData.entityId = ent.id;
         mesh.userData.entityName = ent.name;
+        mesh.userData.faceGenome = ent.faceGenome || null;
         entityRegistry.set(ent.id, {obj3d: mesh, name: ent.name, scripts: []});
 
         if (ent.behavior !== 'static') {

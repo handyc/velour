@@ -38,6 +38,7 @@ urlpatterns = [
     path('aether/', include('aether.urls')),
     path('oracle/', include('oracle.urls')),
     path('lsystem/', include('lsystem.urls')),
+    path('legolith/', include('legolith.urls')),
     path('datalift/', include('datalift.urls')),
 
     path('admin/', admin.site.urls),

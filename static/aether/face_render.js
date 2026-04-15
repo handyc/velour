@@ -352,7 +352,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x+w, y, r);
 }
 
-function renderFace(ctx, W, H, genome, anim, tNow, headParallax) {
+function renderFace(ctx, W, H, genome, anim, tNow, headParallax, options) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
 
@@ -360,11 +360,13 @@ function renderFace(ctx, W, H, genome, anim, tNow, headParallax) {
   const p = genome.palette;
   const samp = sampleAnim(anim, tNow);
 
-  const bg = ctx.createRadialGradient(W/2, H*0.55, W*0.2, W/2, H*0.55, W*0.9);
-  bg.addColorStop(0, '#1a2030');
-  bg.addColorStop(1, '#0a0e14');
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
+  if (!(options && options.transparentBg)) {
+    const bg = ctx.createRadialGradient(W/2, H*0.55, W*0.2, W/2, H*0.55, W*0.9);
+    bg.addColorStop(0, '#1a2030');
+    bg.addColorStop(1, '#0a0e14');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+  }
 
   const tilt = samp.head_tilt * 0.08;
   const cx = W/2;

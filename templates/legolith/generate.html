@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Roll a world — Legolith{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'legolith:list' %}" style="color:#6e7681;">&larr; all worlds</a>
+</div>
+<h1>Roll a New World</h1>
+<p style="color:#8b949e;max-width:44rem;">
+    Everything is seeded. Same seed + counts + biome ⇒ identical world.
+    Leave the seed blank for a fresh random seed.
+</p>
+
+<form method="post" style="max-width:34rem;">
+    {% csrf_token %}
+    <div style="display:grid;grid-template-columns:8rem 1fr;gap:0.5rem 0.75rem;align-items:center;">
+        <label for="name">Name</label>
+        <input name="name" id="name" placeholder="meadow" maxlength="80">
+
+        <label for="biome">Biome</label>
+        <select name="biome" id="biome">
+            {% for b in biomes %}
+            <option value="{{ b }}">{{ b }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="seed">Seed</label>
+        <input name="seed" id="seed" placeholder="random"
+               inputmode="numeric" pattern="[0-9]*">
+
+        <label for="n_buildings">Buildings</label>
+        <input name="n_buildings" id="n_buildings" type="number" min="0" max="16" value="2">
+
+        <label for="n_trees">Trees</label>
+        <input name="n_trees" id="n_trees" type="number" min="0" max="16" value="4">
+
+        <label for="n_flowers">Flowers</label>
+        <input name="n_flowers" id="n_flowers" type="number" min="0" max="16" value="4">
+
+        <label for="n_people">People</label>
+        <input name="n_people" id="n_people" type="number" min="0" max="16" value="2">
+
+        <label for="n_hills">Hills</label>
+        <input name="n_hills" id="n_hills" type="number" min="0" max="4" value="0">
+
+        <label for="n_lamps">Lamps</label>
+        <input name="n_lamps" id="n_lamps" type="number" min="0" max="8" value="0">
+
+        <label for="n_rocks">Rocks</label>
+        <input name="n_rocks" id="n_rocks" type="number" min="0" max="8" value="0">
+    </div>
+
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;">
+        <button type="submit" class="btn">Build</button>
+        <a href="{% url 'legolith:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

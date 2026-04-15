@@ -209,7 +209,7 @@ def asset_add(request, slug):
 def world_scene_json(request, slug):
     """JSON endpoint: the full scene graph for the three.js renderer."""
     world = get_object_or_404(World, slug=slug)
-    entities = world.entities.filter(visible=True).select_related('asset')
+    entities = world.entities.filter(visible=True).select_related('asset', 'face')
     portals = world.portals_out.select_related('to_world')
 
     # Prefetch scripts for all entities
@@ -261,6 +261,7 @@ def world_scene_json(request, slug):
                 'behaviorSpeed': e.behavior_speed,
                 'castShadow': e.cast_shadow,
                 'receiveShadow': e.receive_shadow,
+                'faceGenome': e.face.genome if e.face_id else None,
                 'scripts': entity_scripts.get(e.pk, []),
             }
             for e in entities
@@ -788,17 +789,21 @@ def generate_random_world(request):
     builder = (Script.objects.filter(slug__startswith='humanoid-builder')
                .order_by('-slug').first())
     react = Script.objects.filter(slug='plaza-react-v5').first()
+    face_animator = Script.objects.filter(slug='face-animator').first()
     idle = (Script.objects.filter(slug__in=[
                 'studio-idle-v4', 'garden-idle-v3', 'gallery-idle-v2'])
             .order_by('-slug').first())
 
     if builder:
         names = random.sample(_NPC_NAMES, min(n_npcs, len(_NPC_NAMES)))
+        # Pull a random sample of SavedFace rows as avatar bindings.
+        face_pool = list(SavedFace.objects.order_by('?').values_list('pk', flat=True)[:n_npcs])
         npc_ents = []
         for i, name in enumerate(names):
             x = random.uniform(-half*0.5, half*0.5)
             z = random.uniform(-half*0.5, half*0.5)
             ry = random.uniform(-180, 180)
+            face_id = face_pool[i] if i < len(face_pool) else None
             e = Entity.objects.create(
                 world=world, name=name, primitive='box',
                 primitive_color='#000000',
@@ -806,6 +811,7 @@ def generate_random_world(request):
                 scale_x=1, scale_y=1, scale_z=1,
                 cast_shadow=False, receive_shadow=False,
                 behavior='scripted',
+                face_id=face_id,
             )
             npc_ents.append(e)
 
@@ -830,6 +836,8 @@ def generate_random_world(request):
             }))
             if lod_mgr:
                 attachments.append(EntityScript(entity=e, script=lod_mgr, props={}))
+            if face_animator:
+                attachments.append(EntityScript(entity=e, script=face_animator, props={}))
             reaction = random.choice(_REACTIONS)
             if react:
                 attachments.append(EntityScript(entity=e, script=react, props={
@@ -952,6 +960,123 @@ def world_merge(request):
         return redirect('aether:world_detail', slug=merged.slug)
 
     return render(request, 'aether/merge.html', {'worlds': worlds})
+
+
+# ---------------------------------------------------------------------------
+# Legoworld — Aether scene built from a Legolith brick payload
+# ---------------------------------------------------------------------------
+
+@login_required
+def legoworld_generate(request):
+    """GET: form to pick biome/seed/counts. POST: build + redirect to enter."""
+    from .legoworld import (
+        BIOMES as LEGO_BIOMES, DEFAULT_SCALE, HDRI_OPTIONS,
+        HDRI_SLUGS as LEGO_HDRI_SLUGS, build_legoworld_in_aether,
+    )
+
+    if request.method == 'POST':
+        def _int(name, default, lo=0, hi=16):
+            try:
+                return max(lo, min(hi, int(request.POST.get(name, default))))
+            except (TypeError, ValueError):
+                return default
+
+        seed_raw = (request.POST.get('seed') or '').strip()
+        try:
+            seed = int(seed_raw) if seed_raw else random.randint(1, 99999)
+        except ValueError:
+            seed = random.randint(1, 99999)
+
+        name = (request.POST.get('name') or 'meadow').strip()[:60] or 'meadow'
+        biome = request.POST.get('biome', 'plains')
+        if biome not in LEGO_BIOMES:
+            biome = 'plains'
+
+        classic = request.POST.get('classic') == '1' or request.GET.get('classic') == '1'
+        if classic:
+            hdri_asset = ''
+        else:
+            hdri_asset = (request.POST.get('hdri_asset') or '').strip()
+            if hdri_asset == '__random__':
+                hdri_asset = random.choice(LEGO_HDRI_SLUGS) if LEGO_HDRI_SLUGS else ''
+            elif hdri_asset and hdri_asset not in LEGO_HDRI_SLUGS:
+                hdri_asset = ''
+
+        # Parse library picks: each "lib_<slug>" input holds a count.
+        library_placements = []
+        for key, val in request.POST.items():
+            if not key.startswith('lib_'):
+                continue
+            slug = key[4:]
+            try:
+                count = max(0, min(32, int(val or 0)))
+            except (TypeError, ValueError):
+                count = 0
+            if count:
+                library_placements.append((slug, count))
+
+        try:
+            world, stats = build_legoworld_in_aether(
+                name=name, biome=biome, seed=seed,
+                n_buildings=_int('n_buildings', 4),
+                n_trees=_int('n_trees', 6),
+                n_flowers=_int('n_flowers', 4),
+                n_people=_int('n_people', 2),
+                n_hills=_int('n_hills', 0, hi=4),
+                n_lamps=_int('n_lamps', 2, hi=8),
+                n_rocks=_int('n_rocks', 2, hi=8),
+                scale=DEFAULT_SCALE,
+                library_placements=library_placements,
+                hdri_asset=hdri_asset,
+            )
+        except RuntimeError as exc:
+            messages.error(request, str(exc))
+            return redirect('aether:generate_legoworld')
+
+        messages.success(
+            request,
+            f'Built "{world.title}" — {stats["bricks"]} bricks, '
+            f'~{stats["studs_estimate"]} studs.',
+        )
+        return redirect('aether:world_enter', slug=world.slug)
+
+    from legolith.models import LegoModel
+    classic = request.GET.get('classic') == '1'
+    return render(request, 'aether/legoworld_form.html', {
+        'biomes': sorted(LEGO_BIOMES.keys()),
+        'library_models': LegoModel.objects.order_by('kind', 'name'),
+        'hdri_options': [] if classic else HDRI_OPTIONS,
+        'classic': classic,
+    })
+
+
+@login_required
+@require_POST
+def megalegoworld_generate(request):
+    """Build a 4x4 matrix of Legoworlds stitched into a single Aether world."""
+    from .legoworld import DEFAULT_SCALE, build_megalegoworld_in_aether
+
+    seed = random.randint(1, 99999)
+    name = (request.POST.get('name') or 'mega').strip()[:50] or 'mega'
+    classic = request.POST.get('classic') == '1'
+
+    try:
+        world, stats = build_megalegoworld_in_aether(
+            name=name, seed=seed, grid=4,
+            scale=DEFAULT_SCALE,
+            hdri_asset='' if classic else None,
+        )
+    except RuntimeError as exc:
+        messages.error(request, str(exc))
+        return redirect('aether:world_list')
+
+    messages.success(
+        request,
+        f'Built "{world.title}" — {stats["tiles"]} tiles, '
+        f'{stats["bricks"]} bricks (+{stats.get("library_placements", 0)} '
+        f'from library), ~{stats["studs_estimate"]} studs.',
+    )
+    return redirect('aether:world_enter', slug=world.slug)
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Legolith Library{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lg-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+    }
+    .lg-card {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 2px solid #f5cd30;
+        border-radius: 4px; padding: 0.4rem;
+    }
+    .lg-card a.thumb { display: block; line-height: 0; }
+    .lg-card img { width: 100%; height: auto; border-radius: 2px; background: #0d1117; }
+    .lg-card h3 {
+        font-size: 0.82rem; margin: 0.35rem 0 0 0;
+        color: #c9d1d9; font-weight: 500;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .lg-card h3 a { color: #c9d1d9; text-decoration: none; }
+    .lg-card .meta { color: #6e7681; font-size: 0.65rem;
+                     font-family: ui-monospace, Menlo, monospace;
+                     margin-top: 0.1rem; }
+    .lg-toolbar { display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; margin:0.4rem 0 0.2rem 0; }
+    .btn { background:#d01712;color:#fff;border:1px solid #f5cd30;padding:0.3rem 0.8rem;
+           border-radius:4px;font-size:0.82rem;text-decoration:none;font-weight:600; }
+    .btn-secondary { background:#21262d;color:#c9d1d9;border:1px solid #30363d; font-weight:500; }
+    .filter-pill { background:#21262d;color:#8b949e;border:1px solid #30363d;padding:0.15rem 0.5rem;
+                   border-radius:10px;font-size:0.72rem;text-decoration:none; }
+    .filter-pill.active { background:#f5cd30;color:#1a1a1a;border-color:#f5cd30;font-weight:600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'legolith:list' %}" style="color:#6e7681;">&larr; Legolith worlds</a>
+</div>
+<h2 style="margin-bottom:0.1rem;">Object Library</h2>
+<p style="color:#8b949e;margin-top:0;font-size:0.88rem;">
+    Reusable L-System Lego objects. Any Legolith world or Aether Legoworld
+    can place these by slug. Total: <strong>{{ total }}</strong>.
+</p>
+
+<div class="lg-toolbar">
+    <a href="{% url 'legolith:library_new' %}" class="btn">+ New Model</a>
+    <form method="post" action="{% url 'legolith:library_random' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background:#f5cd30;color:#1a1a1a;border-color:#d01712;">Generate Random</button>
+    </form>
+    <a href="{% url 'legolith:library_list' %}" class="filter-pill {% if not current_kind %}active{% endif %}">all</a>
+    {% for k in kinds %}
+    <a href="?kind={{ k }}" class="filter-pill {% if current_kind == k %}active{% endif %}">{{ k }}</a>
+    {% endfor %}
+</div>
+
+{% if models %}
+<div class="lg-grid">
+    {% for m in models %}
+    <div class="lg-card">
+        <a href="{% url 'legolith:library_detail' slug=m.slug %}" class="thumb">
+            <img src="{% url 'legolith:library_preview' slug=m.slug %}" alt="{{ m.name }}" loading="lazy">
+        </a>
+        <h3><a href="{% url 'legolith:library_detail' slug=m.slug %}">{{ m.name }}</a></h3>
+        <div class="meta">{{ m.kind }} · {{ m.footprint_w }}×{{ m.footprint_d }} · use {{ m.use_count }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No models yet. <a href="{% url 'legolith:library_new' %}">Create one</a>.</p>
+{% endif %}
+{% endblock %}

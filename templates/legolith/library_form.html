@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_new %}New Lego Model{% else %}Edit {{ model.name }}{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .modeler { display: grid; grid-template-columns: minmax(0, 1fr) 22rem; gap: 1rem; }
+    .modeler .panel { background:#161b22;border:1px solid #30363d;border-radius:4px;padding:0.7rem 0.85rem; }
+    .modeler label { font-size:0.75rem; color:#8b949e; display:block; margin-top:0.5rem; }
+    .modeler input, .modeler select, .modeler textarea {
+        background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;
+        padding:0.3rem 0.45rem; width:100%; font-size:0.82rem; box-sizing: border-box;
+    }
+    .modeler textarea { font-family: ui-monospace, Menlo, monospace; }
+    .modeler .row2 { display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem; }
+    .modeler .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0.5rem; }
+    .preview-img { background:#0d1117; border-radius:4px; max-width:100%; }
+    .btn { background:#d01712;color:#fff;border:1px solid #f5cd30;padding:0.4rem 1rem;
+           border-radius:4px;font-size:0.85rem;cursor:pointer;font-weight:600; }
+    .btn.ghost { background:#21262d; border-color:#30363d; color:#c9d1d9; text-decoration:none; }
+    .alphabet { color:#8b949e;font-size:0.72rem;line-height:1.5;margin-top:0.2rem; }
+    .alphabet code { background:#0d1117;padding:0 0.2rem;border-radius:2px;color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'legolith:library_list' %}" style="color:#6e7681;">&larr; library</a>
+</div>
+<h2 style="margin-bottom:0.2rem;">{% if is_new %}New Lego Model{% else %}Edit “{{ model.name }}”{% endif %}</h2>
+
+<form method="post" class="modeler">
+    {% csrf_token %}
+
+    <div class="panel">
+        <div class="row2">
+            <div>
+                <label for="name">Name</label>
+                <input name="name" id="name" value="{{ model.name }}" maxlength="120" required>
+            </div>
+            <div>
+                <label for="kind">Kind</label>
+                <select name="kind" id="kind">
+                    {% for k in kinds %}
+                    <option value="{{ k }}"{% if model.kind == k %} selected{% endif %}>{{ k }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <label for="description">Description</label>
+        <textarea name="description" id="description" rows="2">{{ model.description }}</textarea>
+
+        <label for="axiom">Axiom</label>
+        <input name="axiom" id="axiom" value="{{ model.axiom }}" maxlength="200">
+
+        <label for="rules">Rules (one per line: <code>SYMBOL -&gt; REPLACEMENT</code>)</label>
+        <textarea name="rules" id="rules" rows="8">{{ rules_text }}</textarea>
+
+        <div class="alphabet">
+            Turtle alphabet:
+            <code>F</code> brick+up ·
+            <code>P</code> plate+up ·
+            <code>L</code> brick no-advance ·
+            <code>W</code> 2×2 wall brick ·
+            <code>R</code> roof plate ·
+            <code>&gt; &lt; ^ &amp;</code> step x±/y± ·
+            <code>[ ]</code> push/pop ·
+            <code>{C:rrggbb}</code> color ·
+            <code>{S:w,d,h}</code> brick shape.
+            Any other character is a production symbol — define it in Rules.
+        </div>
+
+        <div class="row3">
+            <div>
+                <label for="iterations">Iterations</label>
+                <input type="number" min="1" max="8" name="iterations" id="iterations" value="{{ model.iterations }}">
+            </div>
+            <div>
+                <label for="init_color">Init color</label>
+                <input type="color" name="init_color" id="init_color" value="{{ model.init_color }}" style="height: 2rem;">
+            </div>
+            <div>
+                <label>Footprint (w × d)</label>
+                <div class="row2">
+                    <input type="number" min="1" max="32" name="footprint_w" value="{{ model.footprint_w }}">
+                    <input type="number" min="1" max="32" name="footprint_d" value="{{ model.footprint_d }}">
+                </div>
+            </div>
+        </div>
+
+        <label>Init brick shape (w × d × plates)</label>
+        <div class="row3">
+            <input type="number" min="1" max="8" name="init_shape_w" value="{{ model.init_shape_w }}">
+            <input type="number" min="1" max="8" name="init_shape_d" value="{{ model.init_shape_d }}">
+            <input type="number" min="1" max="30" name="init_shape_plates" value="{{ model.init_shape_plates }}">
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:0.9rem;align-items:center;">
+            <button type="submit" class="btn">{% if is_new %}Create{% else %}Save{% endif %}</button>
+            <a href="{% if is_new %}{% url 'legolith:library_list' %}{% else %}{% url 'legolith:library_detail' slug=model.slug %}{% endif %}" class="btn ghost">Cancel</a>
+            {% if not is_new %}
+            <span style="flex:1"></span>
+            <button type="submit" formaction="{% url 'legolith:library_delete' slug=model.slug %}"
+                    formmethod="post" class="btn ghost" style="color:#e3534d;border-color:#da3633;"
+                    onclick="return confirm('Delete {{ model.name|escapejs }}?')">Delete</button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="panel">
+        <label style="margin-top:0;">Preview</label>
+        {% if is_new %}
+        <p style="color:#6e7681;font-size:0.78rem;">Save first to render a preview.</p>
+        {% else %}
+        <img class="preview-img" src="{% url 'legolith:library_preview' slug=model.slug %}?v={{ model.updated_at|date:'U' }}" alt="preview">
+        <p style="color:#8b949e;font-size:0.72rem;margin-top:0.5rem;">
+            Bricks JSON: <a href="{% url 'legolith:library_bricks' slug=model.slug %}" style="color:#58a6ff;">{{ model.slug }}/bricks.json</a>
+        </p>
+        {% endif %}
+    </div>
+</form>
+{% endblock %}

@@ -11,6 +11,17 @@
         {% csrf_token %}
         <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Generate Random</button>
     </form>
+    <a href="{% url 'aether:generate_legoworld' %}" style="background:#d01712;color:#fff;border:1px solid #f5cd30;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;text-decoration:none;font-weight:600;">Generate Legoworld</a>
+    <a href="{% url 'aether:generate_legoworld' %}?classic=1" style="background:#21262d;color:#f5cd30;border:1px solid #d01712;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;text-decoration:none;font-weight:600;">Classic Legoworld</a>
+    <form method="post" action="{% url 'aether:generate_megalegoworld' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#f5cd30;color:#1a1a1a;border:1px solid #d01712;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;font-weight:600;">Generate MegaLegoworld</button>
+    </form>
+    <form method="post" action="{% url 'aether:generate_megalegoworld' %}" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="classic" value="1">
+        <button type="submit" style="background:#21262d;color:#f5cd30;border:1px solid #d01712;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;font-weight:600;">Classic MegaLegoworld</button>
+    </form>
     <a href="{% url 'aether:world_merge' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">Merge Worlds</a>
     <a href="{% url 'aether:face_forge' %}" style="color:#f0c040;text-decoration:none;font-size:0.85rem;">Face Forge</a>
     <form method="post" action="{% url 'aether:boogaloo' %}" style="display:inline;">

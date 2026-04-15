@@ -173,12 +173,11 @@ function updateGridDOM() {
 
 async function saveFace(i) {
   const genome = state.genomes[i];
-  const name = prompt('Name this face (leave blank for auto):', '') || '';
   try {
     const res = await fetch(SAVE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-      body: JSON.stringify({ genome, name, lineage: genome.lineage||0 }),
+      body: JSON.stringify({ genome, name: '', lineage: genome.lineage||0 }),
     });
     const json = await res.json();
     if (json.ok) {

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}{{ world.name }} — Legolith{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:0.5rem;">
+    <a href="{% url 'legolith:list' %}" style="color:#6e7681;">&larr; all worlds</a>
+</div>
+<h1 style="margin:0;">{{ world.name }}</h1>
+<div style="color:#8b949e;font-family:ui-monospace,Menlo,monospace;font-size:0.85rem;margin:0.25rem 0 0.8rem 0;">
+    biome: <b>{{ world.biome }}</b> &middot;
+    seed: <b>{{ world.seed }}</b> &middot;
+    baseplate:
+    <span style="display:inline-block;width:10px;height:10px;background:{{ world.baseplate_color }};border:1px solid #30363d;vertical-align:middle;"></span>
+    {{ world.baseplate_color }}
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(7,auto);gap:0.5rem;margin:0.5rem 0 0.8rem 0;font-size:0.8rem;color:#c9d1d9;max-width:44rem;">
+    <div><b>{{ world.n_buildings }}</b> buildings</div>
+    <div><b>{{ world.n_trees }}</b> trees</div>
+    <div><b>{{ world.n_flowers }}</b> flowers</div>
+    <div><b>{{ world.n_people }}</b> people</div>
+    <div><b>{{ world.n_hills }}</b> hills</div>
+    <div><b>{{ world.n_lamps }}</b> lamps</div>
+    <div><b>{{ world.n_rocks }}</b> rocks</div>
+</div>
+
+<img src="{% url 'legolith:png' world.slug %}" alt="{{ world.name }}"
+     style="max-width:100%;height:auto;background:#0d1117;border:1px solid #30363d;border-radius:4px;">
+
+<div style="margin-top:1rem;display:flex;gap:0.5rem;">
+    <form method="post" action="{% url 'legolith:delete' world.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary"
+                onclick="return confirm('Delete this world?');">Delete</button>
+    </form>
+    <a href="{% url 'legolith:generate' %}" class="btn btn-secondary">Roll another</a>
+</div>
+{% endblock %}

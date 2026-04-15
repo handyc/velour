@@ -102,6 +102,8 @@ class Command(BaseCommand):
         # Scripts
         humanoid_builder = _script('Humanoid Builder', 'start', HUMANOID_BUILDER_SCRIPT,
             'Builds a 15-segment articulated humanoid body on the root entity.')
+        face_animator = _script('Face Animator', 'update', FACE_ANIMATOR_SCRIPT,
+            'Advances the Face Forge anim and billboards the face plane.')
         waiter_anim = _script('Waiter Articulated', 'update', WAITER_ANIM_SCRIPT,
             'Walk cycle + pickup animation for the waiter.')
         seated_anim = _script('Seated Articulated', 'update', SEATED_ANIM_SCRIPT,
@@ -235,7 +237,7 @@ class Command(BaseCommand):
         def attach(entity, script, props=None):
             attachments.append(EntityScript(entity=entity, script=script, props=props or {}))
 
-        # All NPCs get the humanoid builder (start script)
+        # All NPCs get the humanoid builder (start script) + face animator
         for e in npc_ents:
             build = BUILDS[e._idx]
             attach(e, humanoid_builder, {
@@ -245,6 +247,7 @@ class Command(BaseCommand):
                 'ultra': ultra,
                 'shoulderW': build[0], 'hipW': build[1], 'heightScale': build[2],
             })
+            attach(e, face_animator)
 
         # Waiter
         attach(waiter, waiter_anim, {
@@ -542,142 +545,174 @@ const head = part(headGeo, skinM);
 head.position.y = 0.12;
 headPivot.add(head);
 
-// Hair
-const hairGeo = new THREE.SphereGeometry(0.125, ULTRA ? 32 : 16, ULTRA ? 16 : 8,
-    0, Math.PI * 2, 0, Math.PI * 0.55);
-const hairMesh = part(hairGeo, hairM);
-hairMesh.position.y = 0.14;
-hairMesh.castShadow = false;
-headPivot.add(hairMesh);
+// --- Face Forge billboard detection ---
+// When a Face Forge genome is available (bound SavedFace or deterministic
+// fallback from entity id), the 3D hair + face detail is skipped entirely
+// so the canvas face wraps onto a clean skin sphere.
+let faceGenome = ctx.entity.userData && ctx.entity.userData.faceGenome;
+if (!faceGenome && window.FaceRender) {
+    const seed = ((ctx.entity.userData && ctx.entity.userData.entityId) || 1) * 2654435761 | 0;
+    faceGenome = window.FaceRender.randomGenome(seed >>> 0);
+}
+const useFaceBillboard = !!(faceGenome && window.FaceRender);
 
-// --- Face ---
+// Hair (skipped when the Face Forge canvas will supply its own styled hair)
+if (!useFaceBillboard) {
+    const hairGeo = new THREE.SphereGeometry(0.125, ULTRA ? 32 : 16, ULTRA ? 16 : 8,
+        0, Math.PI * 2, 0, Math.PI * 0.55);
+    const hairMesh = part(hairGeo, hairM);
+    hairMesh.position.y = 0.14;
+    hairMesh.castShadow = false;
+    headPivot.add(hairMesh);
+}
+
+// Sync the face genome's skin palette to the avatar's 3D head skin so the
+// face base color matches the head sphere behind it. Recompute shade + hl
+// from the new base to keep face shading coherent.
+if (useFaceBillboard) {
+    const toHex = (c) => '#' + c.getHexString();
+    const base = new THREE.Color(P.skin || '#d4a373');
+    const shade = new THREE.Color().copy(base).multiplyScalar(0.75);
+    const hl = new THREE.Color().copy(base).lerp(new THREE.Color('#ffffff'), 0.15);
+    faceGenome.palette = faceGenome.palette || {};
+    faceGenome.palette.skin = toHex(base);
+    faceGenome.palette.skinShade = toHex(shade);
+    faceGenome.palette.skinHL = toHex(hl);
+}
+
 if (ULTRA) {
-    // Nose bridge + tip
-    const noseBridge = part(
-        new THREE.BoxGeometry(0.025, 0.04, 0.03), skinM
-    );
-    noseBridge.position.set(0, 0.12, 0.105);
-    noseBridge.castShadow = false;
-    headPivot.add(noseBridge);
-    const noseTip = part(
-        new THREE.SphereGeometry(0.018, 12, 8), skinM
-    );
-    noseTip.position.set(0, 0.1, 0.12);
-    noseTip.castShadow = false;
-    headPivot.add(noseTip);
-    // Nostrils
-    for (const side of [-1, 1]) {
-        const nostril = part(
-            new THREE.SphereGeometry(0.008, 6, 6),
-            new THREE.MeshStandardMaterial({
-                color: new THREE.Color().copy(skinC).multiplyScalar(0.7), roughness: 0.9
-            })
+    if (!useFaceBillboard) {
+        // Nose bridge + tip
+        const noseBridge = part(
+            new THREE.BoxGeometry(0.025, 0.04, 0.03), skinM
         );
-        nostril.position.set(side * 0.012, 0.095, 0.115);
-        nostril.castShadow = false;
-        headPivot.add(nostril);
+        noseBridge.position.set(0, 0.12, 0.105);
+        noseBridge.castShadow = false;
+        headPivot.add(noseBridge);
+        const noseTip = part(
+            new THREE.SphereGeometry(0.018, 12, 8), skinM
+        );
+        noseTip.position.set(0, 0.1, 0.12);
+        noseTip.castShadow = false;
+        headPivot.add(noseTip);
+        // Nostrils
+        for (const side of [-1, 1]) {
+            const nostril = part(
+                new THREE.SphereGeometry(0.008, 6, 6),
+                new THREE.MeshStandardMaterial({
+                    color: new THREE.Color().copy(skinC).multiplyScalar(0.7), roughness: 0.9
+                })
+            );
+            nostril.position.set(side * 0.012, 0.095, 0.115);
+            nostril.castShadow = false;
+            headPivot.add(nostril);
+        }
+
+        // Lips
+        const lipColor = new THREE.Color().copy(skinC).lerp(new THREE.Color('#cc5555'), 0.35);
+        const upperLip = part(
+            new THREE.TorusGeometry(0.022, 0.006, 6, 12, Math.PI),
+            new THREE.MeshPhysicalMaterial({color: lipColor, roughness: 0.5, sheen: 0.4, sheenColor: lipColor, clearcoat: 0.15})
+        );
+        upperLip.position.set(0, 0.075, 0.11);
+        upperLip.rotation.z = Math.PI;
+        upperLip.castShadow = false;
+        headPivot.add(upperLip);
+        const lowerLip = part(
+            new THREE.TorusGeometry(0.024, 0.007, 6, 12, Math.PI),
+            new THREE.MeshPhysicalMaterial({color: lipColor, roughness: 0.45, sheen: 0.5, sheenColor: lipColor, clearcoat: 0.2})
+        );
+        lowerLip.position.set(0, 0.068, 0.108);
+        lowerLip.castShadow = false;
+        headPivot.add(lowerLip);
+
+        // Brow ridges
+        for (const side of [-1, 1]) {
+            const brow = part(
+                new THREE.BoxGeometry(0.04, 0.008, 0.015),
+                new THREE.MeshStandardMaterial({color: new THREE.Color().copy(skinC).multiplyScalar(0.92), roughness: 0.8})
+            );
+            brow.position.set(side * 0.04, 0.155, 0.085);
+            brow.rotation.z = side * -0.15;
+            brow.castShadow = false;
+            headPivot.add(brow);
+        }
     }
 
-    // Lips
-    const lipColor = new THREE.Color().copy(skinC).lerp(new THREE.Color('#cc5555'), 0.35);
-    const upperLip = part(
-        new THREE.TorusGeometry(0.022, 0.006, 6, 12, Math.PI),
-        new THREE.MeshPhysicalMaterial({color: lipColor, roughness: 0.5, sheen: 0.4, sheenColor: lipColor, clearcoat: 0.15})
-    );
-    upperLip.position.set(0, 0.075, 0.11);
-    upperLip.rotation.z = Math.PI;
-    upperLip.castShadow = false;
-    headPivot.add(upperLip);
-    const lowerLip = part(
-        new THREE.TorusGeometry(0.024, 0.007, 6, 12, Math.PI),
-        new THREE.MeshPhysicalMaterial({color: lipColor, roughness: 0.45, sheen: 0.5, sheenColor: lipColor, clearcoat: 0.2})
-    );
-    lowerLip.position.set(0, 0.068, 0.108);
-    lowerLip.castShadow = false;
-    headPivot.add(lowerLip);
-
-    // Brow ridges
-    for (const side of [-1, 1]) {
-        const brow = part(
-            new THREE.BoxGeometry(0.04, 0.008, 0.015),
-            new THREE.MeshStandardMaterial({color: new THREE.Color().copy(skinC).multiplyScalar(0.92), roughness: 0.8})
-        );
-        brow.position.set(side * 0.04, 0.155, 0.085);
-        brow.rotation.z = side * -0.15;
-        brow.castShadow = false;
-        headPivot.add(brow);
+    // Ears (skipped when Face Forge billboard supplies its own ears)
+    if (!useFaceBillboard) {
+        for (const side of [-1, 1]) {
+            const ear = part(
+                new THREE.SphereGeometry(0.025, 8, 6, 0, Math.PI),
+                skinM
+            );
+            ear.position.set(side * 0.115, 0.12, 0);
+            ear.rotation.y = side * Math.PI / 2;
+            ear.scale.set(0.6, 1.2, 0.5);
+            ear.castShadow = false;
+            headPivot.add(ear);
+        }
     }
 
-    // Ears
-    for (const side of [-1, 1]) {
-        const ear = part(
-            new THREE.SphereGeometry(0.025, 8, 6, 0, Math.PI),
+    if (!useFaceBillboard) {
+        // Chin definition
+        const chin = part(
+            new THREE.SphereGeometry(0.03, 10, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
             skinM
         );
-        ear.position.set(side * 0.115, 0.12, 0);
-        ear.rotation.y = side * Math.PI / 2;
-        ear.scale.set(0.6, 1.2, 0.5);
-        ear.castShadow = false;
-        headPivot.add(ear);
-    }
+        chin.position.set(0, 0.04, 0.07);
+        chin.castShadow = false;
+        headPivot.add(chin);
 
-    // Chin definition
-    const chin = part(
-        new THREE.SphereGeometry(0.03, 10, 8, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5),
-        skinM
-    );
-    chin.position.set(0, 0.04, 0.07);
-    chin.castShadow = false;
-    headPivot.add(chin);
+        // Cheekbones
+        for (const side of [-1, 1]) {
+            const cheek = part(
+                new THREE.SphereGeometry(0.03, 8, 6), skinM
+            );
+            cheek.position.set(side * 0.065, 0.1, 0.055);
+            cheek.scale.set(1, 0.7, 0.35);
+            cheek.castShadow = false;
+            headPivot.add(cheek);
+        }
 
-    // Cheekbones
-    for (const side of [-1, 1]) {
-        const cheek = part(
-            new THREE.SphereGeometry(0.03, 8, 6), skinM
-        );
-        cheek.position.set(side * 0.065, 0.1, 0.055);
-        cheek.scale.set(1, 0.7, 0.35);
-        cheek.castShadow = false;
-        headPivot.add(cheek);
+        // Detailed eyes: white sclera + colored iris + dark pupil + eyelids
+        for (const side of [-1, 1]) {
+            // Sclera (white sphere, slightly indented)
+            const sclera = part(
+                new THREE.SphereGeometry(0.02, 12, 12),
+                new THREE.MeshPhysicalMaterial({color: '#f5f5f0', roughness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.1})
+            );
+            sclera.position.set(side * 0.04, 0.13, 0.095);
+            sclera.castShadow = false;
+            headPivot.add(sclera);
+            // Iris
+            const iris = part(
+                new THREE.CircleGeometry(0.012, 16),
+                new THREE.MeshPhysicalMaterial({color: eyeC, roughness: 0.2, clearcoat: 0.5})
+            );
+            iris.position.set(side * 0.04, 0.13, 0.115);
+            iris.castShadow = false;
+            headPivot.add(iris);
+            // Pupil
+            const pupil = part(
+                new THREE.CircleGeometry(0.006, 12),
+                new THREE.MeshStandardMaterial({color: '#050505', roughness: 0.1})
+            );
+            pupil.position.set(side * 0.04, 0.13, 0.1155);
+            pupil.castShadow = false;
+            headPivot.add(pupil);
+            // Upper eyelid
+            const lid = part(
+                new THREE.SphereGeometry(0.022, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.4),
+                skinM
+            );
+            lid.position.set(side * 0.04, 0.135, 0.095);
+            lid.castShadow = false;
+            headPivot.add(lid);
+        }
     }
-
-    // Detailed eyes: white sclera + colored iris + dark pupil + eyelids
-    for (const side of [-1, 1]) {
-        // Sclera (white sphere, slightly indented)
-        const sclera = part(
-            new THREE.SphereGeometry(0.02, 12, 12),
-            new THREE.MeshPhysicalMaterial({color: '#f5f5f0', roughness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.1})
-        );
-        sclera.position.set(side * 0.04, 0.13, 0.095);
-        sclera.castShadow = false;
-        headPivot.add(sclera);
-        // Iris
-        const iris = part(
-            new THREE.CircleGeometry(0.012, 16),
-            new THREE.MeshPhysicalMaterial({color: eyeC, roughness: 0.2, clearcoat: 0.5})
-        );
-        iris.position.set(side * 0.04, 0.13, 0.115);
-        iris.castShadow = false;
-        headPivot.add(iris);
-        // Pupil
-        const pupil = part(
-            new THREE.CircleGeometry(0.006, 12),
-            new THREE.MeshStandardMaterial({color: '#050505', roughness: 0.1})
-        );
-        pupil.position.set(side * 0.04, 0.13, 0.1155);
-        pupil.castShadow = false;
-        headPivot.add(pupil);
-        // Upper eyelid
-        const lid = part(
-            new THREE.SphereGeometry(0.022, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.4),
-            skinM
-        );
-        lid.position.set(side * 0.04, 0.135, 0.095);
-        lid.castShadow = false;
-        headPivot.add(lid);
-    }
-} else {
-    // Simple eyes (non-ultra)
+} else if (!useFaceBillboard) {
+    // Simple eyes (non-ultra, no face genome)
     for (const side of [-1, 1]) {
         const eye = part(new THREE.SphereGeometry(0.015, 8, 8),
             new THREE.MeshStandardMaterial({color: '#1a1a1a', roughness: 0.8}));
@@ -685,6 +720,49 @@ if (ULTRA) {
         eye.castShadow = false;
         headPivot.add(eye);
     }
+}
+
+// Face Forge billboard plane
+if (useFaceBillboard) {
+    const faceCanvas = document.createElement('canvas');
+    faceCanvas.width = 256; faceCanvas.height = 256;
+    const faceTex = new THREE.CanvasTexture(faceCanvas);
+    faceTex.minFilter = THREE.LinearFilter;
+    faceTex.magFilter = THREE.LinearFilter;
+    // Sphere-cap geometry that wraps the front of the head. 156° wide x 156°
+    // tall (1.3× the original 120°), centered on +Z (the head's forward
+    // direction). Radius slightly larger than the 0.12 head so it sits just
+    // outside without z-fighting.
+    const faceSpan = (2 * Math.PI / 3) * 1.3;
+    const faceStart = Math.PI / 2 - faceSpan / 2;
+    const faceGeo = new THREE.SphereGeometry(
+        0.126, 48, 48,
+        faceStart, faceSpan,
+        faceStart, faceSpan
+    );
+    const facePlane = new THREE.Mesh(
+        faceGeo,
+        // Lit material — so the face skin color is tinted by the same HDRI +
+        // tone mapping as the 3D head behind it, keeping the two in sync.
+        new THREE.MeshStandardMaterial({
+            map: faceTex, transparent: true, alphaTest: 0.01,
+            roughness: 0.8, metalness: 0.05,
+            depthWrite: false,
+        })
+    );
+    facePlane.position.set(0, 0.12, 0);  // concentric with the head sphere
+    facePlane.renderOrder = 10;
+    facePlane.castShadow = false;
+    if (!faceGenome.anim) {
+        faceGenome.anim = { axiom: '.', rules: {}, iters: 1, tempo: 1.0 };
+    }
+    const faceAnim = window.FaceRender.makeAnimState(faceGenome);
+    headPivot.add(facePlane);
+    S.face = {
+        canvas: faceCanvas, ctx2d: faceCanvas.getContext('2d'),
+        texture: faceTex, plane: facePlane,
+        genome: faceGenome, anim: faceAnim,
+    };
 }
 
 // --- Arms ---
@@ -905,6 +983,36 @@ S.body = {
     leftArm, rightArm, leftLeg, rightLeg,
 };
 S.built = true;
+"""
+
+# ---------------------------------------------------------------------------
+# Face animator — advances the Face Forge L-system anim, redraws the canvas
+# texture, and billboards the face plane toward the camera each frame.
+# Requires S.face (set by the humanoid builder) and window.FaceRender.
+# ---------------------------------------------------------------------------
+
+FACE_ANIMATOR_SCRIPT = r"""
+if (!ctx.state.face || !window.FaceRender) return;
+const F = ctx.state.face;
+const t = ctx.elapsed;
+try {
+    window.FaceRender.advanceAnim(F.anim, ctx.deltaTime, F.genome, t);
+    // Gaze: project camera into headPivot local space for a natural eye track.
+    let hp = {x: 0, y: 0};
+    const headPivot = ctx.state.body && ctx.state.body.headPivot;
+    if (headPivot && ctx.camera) {
+        const camLocal = headPivot.worldToLocal(ctx.camera.position.clone());
+        hp.x = Math.max(-1, Math.min(1, camLocal.x / 0.6));
+        hp.y = Math.max(-1, Math.min(1, camLocal.y / 0.6));
+    }
+    window.FaceRender.renderFace(
+        F.ctx2d, F.canvas.width, F.canvas.height,
+        F.genome, F.anim, t, hp, {transparentBg: true}
+    );
+    F.texture.needsUpdate = true;
+} catch (e) {
+    if (!F.errored) { F.errored = true; console.warn('Face render failed:', e); }
+}
 """
 
 # ---------------------------------------------------------------------------

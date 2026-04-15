@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Legolith — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lg-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+    }
+    .lg-card {
+        background: #161b22; border: 1px solid #30363d;
+        border-left: 2px solid #f5cd30;
+        border-radius: 4px; padding: 0.4rem;
+    }
+    .lg-card a.thumb { display: block; line-height: 0; }
+    .lg-card img { width: 100%; height: auto; border-radius: 2px; background: #0d1117; }
+    .lg-card h3 {
+        font-size: 0.82rem; margin: 0.35rem 0 0 0;
+        color: #c9d1d9; font-weight: 500;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .lg-card h3 a { color: #c9d1d9; text-decoration: none; }
+    .lg-card .meta { color: #6e7681; font-size: 0.65rem;
+                     font-family: ui-monospace, Menlo, monospace;
+                     margin-top: 0.1rem; }
+    .lg-card .counts { color: #8b949e; font-size: 0.65rem;
+                       font-family: ui-monospace, Menlo, monospace;
+                       margin-top: 0.15rem; }
+    .lg-toolbar { margin: 0.75rem 0;
+                  display: flex; gap: 0.5rem; align-items: center;
+                  flex-wrap: wrap; }
+    .lg-toolbar .count { color: #6e7681; font-size: 0.8rem;
+                         margin-left: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Legolith</h1>
+<p style="color:#8b949e;max-width:56rem;margin:0.25rem 0 0.75rem 0;">
+    Generic studded-brick worlds grown from an L-System grammar on a
+    32&times;32 baseplate. Every object — trees, flowers, buildings,
+    people, lamps, rocks, hills — is a production-rule expansion
+    interpreted by a 3D grid-turtle.
+</p>
+
+<div class="lg-toolbar">
+    <a href="{% url 'legolith:generate' %}" class="btn">Roll a New World</a>
+    <a href="{% url 'legolith:library_list' %}" class="btn btn-secondary">Object Library</a>
+    <a href="{% url 'legolith:pdf_math' %}?pages=50" class="btn btn-secondary">Math Book (50p)</a>
+    <a href="{% url 'legolith:pdf_gallery' %}?count=100" class="btn btn-secondary">Gallery PDF (100)</a>
+    <a href="{% url 'legolith:pdf_detailed' %}?count=16" class="btn btn-secondary">Detailed PDF (16)</a>
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+    <span class="count">{{ total_count }} world{{ total_count|pluralize }}</span>
+</div>
+
+{% if worlds %}
+<div class="lg-grid">
+    {% for w in worlds %}
+    <div class="lg-card">
+        <a class="thumb" href="{% url 'legolith:detail' w.slug %}">
+            <img src="{% url 'legolith:png' w.slug %}?thumb=1"
+                 alt="{{ w.name }}" loading="lazy" width="360" height="340">
+        </a>
+        <h3><a href="{% url 'legolith:detail' w.slug %}">{{ w.name }}</a></h3>
+        <div class="meta">{{ w.biome }} &middot; s{{ w.seed }}</div>
+        <div class="counts">b{{ w.n_buildings }} t{{ w.n_trees }} f{{ w.n_flowers }} p{{ w.n_people }} d{{ w.n_decor }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No worlds yet. <a href="{% url 'legolith:generate' %}">Roll one</a>.</p>
+{% endif %}
+{% endblock %}

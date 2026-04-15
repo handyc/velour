@@ -1442,6 +1442,8 @@ if (S.hasWings) {
 LOD_MANAGER_SCRIPT = r"""
 const S = ctx.state;
 if (!S.built || !S.faceLOD) return;
+// Face Forge billboard active — 3D face LODs stay hidden permanently.
+if (S.face) return;
 
 // --- Global FPS tracking (shared across all NPCs) ---
 if (!window._lodFPS) {
@@ -1548,6 +1550,17 @@ const KN = 0.7;
 const KM = 0.8;
 const HEAD_R = 0.12 * KH;
 const HEAD_CY = 0.13 * KH;
+
+// --- Face Forge billboard detection ---
+// Decide up front whether this entity gets a wrapped Face Forge avatar.
+// When true, we skip building hair + face detail on the 3D head so those
+// don't occlude the canvas face; the head stays as a plain skin sphere.
+let faceGenome = ctx.entity.userData && ctx.entity.userData.faceGenome;
+if (!faceGenome && window.FaceRender) {
+    const seedIn = ((ctx.entity.userData && ctx.entity.userData.entityId) || 1) * 2654435761 | 0;
+    faceGenome = window.FaceRender.randomGenome(seedIn >>> 0);
+}
+const useFaceBillboard = !!(faceGenome && window.FaceRender);
 
 function part(g, m) { const o = new THREE.Mesh(g, m); o.castShadow=true; o.receiveShadow=true; return o; }
 function ns(m) { m.castShadow=false; m.receiveShadow=false; return m; }
@@ -2180,48 +2193,52 @@ faceLow.add(mouthLow);
 
 // ============================================================
 // HAIR (same as V5 — shells centered at HEAD_CY)
+// Skipped when the Face Forge billboard is active: the wrapped 2D face
+// already includes hair styling, so 3D hair would occlude it.
 // ============================================================
-const hairM = new THREE.MeshStandardMaterial({color: hairC, roughness: 0.75});
+if (!useFaceBillboard) {
+    const hairM = new THREE.MeshStandardMaterial({color: hairC, roughness: 0.75});
 
-// Scalp cap
-const scalp = ns(part(new THREE.SphereGeometry(HEAD_R*1.02, 20, 10, 0, Math.PI*2, 0, Math.PI*0.5), hairM));
-scalp.position.y = HEAD_CY;
-headPivot.add(scalp);
+    // Scalp cap
+    const scalp = ns(part(new THREE.SphereGeometry(HEAD_R*1.02, 20, 10, 0, Math.PI*2, 0, Math.PI*0.5), hairM));
+    scalp.position.y = HEAD_CY;
+    headPivot.add(scalp);
 
-// Hair shells
-for (const [rMul, phiMax, yOff] of [[1.18, 0.65, 0.0], [1.24, 0.62, 0.005], [1.30, 0.58, 0.008]]) {
-    const shell = ns(part(
-        new THREE.SphereGeometry(HEAD_R*rMul, 20, 10, 0, Math.PI*2, 0, Math.PI*phiMax),
+    // Hair shells
+    for (const [rMul, phiMax, yOff] of [[1.18, 0.65, 0.0], [1.24, 0.62, 0.005], [1.30, 0.58, 0.008]]) {
+        const shell = ns(part(
+            new THREE.SphereGeometry(HEAD_R*rMul, 20, 10, 0, Math.PI*2, 0, Math.PI*phiMax),
+            hairM
+        ));
+        shell.position.y = HEAD_CY + yOff;
+        headPivot.add(shell);
+    }
+
+    // Hair back
+    const hairBack = ns(part(
+        new THREE.SphereGeometry(HEAD_R*1.12, 16, 8, 0, Math.PI*2, Math.PI*0.3, Math.PI*0.5),
         hairM
     ));
-    shell.position.y = HEAD_CY + yOff;
-    headPivot.add(shell);
-}
+    hairBack.position.set(0, HEAD_CY - 0.01, -0.02);
+    headPivot.add(hairBack);
 
-// Hair back
-const hairBack = ns(part(
-    new THREE.SphereGeometry(HEAD_R*1.12, 16, 8, 0, Math.PI*2, Math.PI*0.3, Math.PI*0.5),
-    hairM
-));
-hairBack.position.set(0, HEAD_CY - 0.01, -0.02);
-headPivot.add(hairBack);
+    // Bangs
+    const hairlineY = HEAD_CY + HEAD_R * 0.55;
+    const bangsGeo = new THREE.BoxGeometry(HEAD_R * 2.1, 0.02, HEAD_R * 0.6);
+    const bangs = ns(part(bangsGeo, hairM));
+    bangs.position.set(0, hairlineY, HEAD_R * 0.55);
+    bangs.rotation.x = 0.2;
+    headPivot.add(bangs);
 
-// Bangs
-const hairlineY = HEAD_CY + HEAD_R * 0.55;
-const bangsGeo = new THREE.BoxGeometry(HEAD_R * 2.1, 0.02, HEAD_R * 0.6);
-const bangs = ns(part(bangsGeo, hairM));
-bangs.position.set(0, hairlineY, HEAD_R * 0.55);
-bangs.rotation.x = 0.2;
-headPivot.add(bangs);
-
-// Side hair
-for (const side of [-1, 1]) {
-    const sideHair = ns(part(
-        new THREE.BoxGeometry(0.025, HEAD_R*1.2, HEAD_R*0.8),
-        hairM
-    ));
-    sideHair.position.set(side * HEAD_R * 1.05, HEAD_CY - 0.01, HEAD_R * 0.15);
-    headPivot.add(sideHair);
+    // Side hair
+    for (const side of [-1, 1]) {
+        const sideHair = ns(part(
+            new THREE.BoxGeometry(0.025, HEAD_R*1.2, HEAD_R*0.8),
+            hairM
+        ));
+        sideHair.position.set(side * HEAD_R * 1.05, HEAD_CY - 0.01, HEAD_R * 0.15);
+        headPivot.add(sideHair);
+    }
 }
 
 // ============================================================
@@ -2325,6 +2342,62 @@ S.faceLOD = {
     heads,
     skinMats: {physical: skinPhysM, standard: skinStdM},
 };
+
+// --- Face Forge billboard override ---
+// The detection lives at the top of the script so we can skip hair + LOD
+// face detail before they're built. Here we just hide the LOD face groups
+// (which are always constructed) and attach the wrapped canvas face.
+if (useFaceBillboard) {
+    faceUltra.visible = false;
+    faceHigh.visible = false;
+    faceMedium.visible = false;
+    faceLow.visible = false;
+
+    // Sync the face palette's skin to this entity's 3D skin so the
+    // wrapped face and the head sphere behind it match.
+    const toHex = (c) => '#' + c.getHexString();
+    const base = new THREE.Color(P.skin || '#c89870');
+    const shade = new THREE.Color().copy(base).multiplyScalar(0.75);
+    const hl = new THREE.Color().copy(base).lerp(new THREE.Color('#ffffff'), 0.15);
+    faceGenome.palette = faceGenome.palette || {};
+    faceGenome.palette.skin = toHex(base);
+    faceGenome.palette.skinShade = toHex(shade);
+    faceGenome.palette.skinHL = toHex(hl);
+    if (!faceGenome.anim) {
+        faceGenome.anim = { axiom: '.', rules: {}, iters: 1, tempo: 1.0 };
+    }
+
+    const faceCanvas = document.createElement('canvas');
+    faceCanvas.width = 256; faceCanvas.height = 256;
+    const faceTex = new THREE.CanvasTexture(faceCanvas);
+    faceTex.minFilter = THREE.LinearFilter;
+    faceTex.magFilter = THREE.LinearFilter;
+
+    // Sphere-cap: 156° wide, 156° tall (1.3× the original 120°), pushed just
+    // past the head surface so the wrapped face reads as a distinct layer.
+    const faceSpan = (2 * Math.PI / 3) * 1.3;
+    const faceStart = Math.PI / 2 - faceSpan / 2;
+    const faceGeo = new THREE.SphereGeometry(
+        HEAD_R * 1.05, 48, 48,
+        faceStart, faceSpan,
+        faceStart, faceSpan
+    );
+    const facePlane = new THREE.Mesh(faceGeo, new THREE.MeshStandardMaterial({
+        map: faceTex, transparent: true, alphaTest: 0.01,
+        roughness: 0.8, metalness: 0.05, depthWrite: false,
+    }));
+    facePlane.position.y = HEAD_CY;
+    facePlane.renderOrder = 10;
+    headPivot.add(facePlane);
+
+    const faceAnim = window.FaceRender.makeAnimState(faceGenome);
+    S.face = {
+        canvas: faceCanvas, ctx2d: faceCanvas.getContext('2d'),
+        texture: faceTex, plane: facePlane,
+        genome: faceGenome, anim: faceAnim,
+    };
+}
+
 S.built = true;
 """
 
