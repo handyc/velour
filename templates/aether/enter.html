@@ -468,7 +468,11 @@ instructions.addEventListener('click', () => {
 document.addEventListener('pointerlockchange', () => {
     locked = !!document.pointerLockElement;
     instructions.style.display = locked ? 'none' : 'block';
-    if (locked) startAmbientAudio();
+    if (locked) {
+        startAmbientAudio();
+        initSpeechAudio();
+        attachSpeechEngines();
+    }
 });
 
 // ---- Mouse look ----
@@ -681,8 +685,33 @@ function loadHDRI(hdriName) {
     });
 }
 
-// ---- NPC speech bubbles (3D billboards over each speaking NPC) ----
-const speakers = [];   // [{sprite, engine, slug, cooldown, holdRemain}]
+// ---- NPC speech: shared AudioContext + per-engine attachment.
+// Real formant-synthesis audio. The billboard above the NPC's head
+// acts as a subtitle so you can see what was said. AudioContext
+// must be created after a user gesture, so we lazily init on the
+// pointer-lock click that grabs the pointer.
+let speechCtx = null;
+let speechMaster = null;
+const speakers = [];   // [{sprite, engine, slug, mesh, cooldown, holdRemain}]
+let speechAttached = false;
+
+function initSpeechAudio() {
+    if (speechCtx) return;
+    try {
+        speechCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { return; }
+    speechMaster = speechCtx.createGain();
+    speechMaster.gain.value = 0.9;
+    speechMaster.connect(speechCtx.destination);
+}
+
+function attachSpeechEngines() {
+    if (speechAttached || !speechCtx) return;
+    for (const sp of speakers) {
+        try { sp.engine.attachAudio(speechCtx, speechMaster); } catch (e) {}
+    }
+    speechAttached = true;
+}
 
 function makeSpeechBubble() {
     const canvas = document.createElement('canvas');
@@ -741,34 +770,45 @@ function paintBubble(sprite, text, alpha) {
     sprite.userData.tex.needsUpdate = true;
 }
 
+const _tmpVec = new THREE.Vector3();
+
 function tickSpeakers(dt) {
     for (const sp of speakers) {
         if (sp.holdRemain > 0) {
             sp.holdRemain -= dt;
-            // simple linear fade for last 0.6s
             const fade = Math.min(1, sp.holdRemain / 0.6);
             sp.sprite.material.opacity = fade;
             if (sp.holdRemain <= 0) {
                 sp.sprite.visible = false;
-                // Random silence between utterances: 7-18s
                 sp.cooldown = 7 + Math.random() * 11;
             }
             continue;
         }
         sp.cooldown -= dt;
         if (sp.cooldown <= 0) {
-            let phrase = '';
-            try { phrase = sp.engine.generateVocabPhrase() || ''; }
-            catch (e) { phrase = ''; }
-            if (!phrase) {
+            let meta = null;
+            try { meta = sp.engine.generateVocabPhraseMeta(); }
+            catch (e) { meta = null; }
+            if (!meta || !meta.symbols) {
                 sp.cooldown = 5 + Math.random() * 5;
                 continue;
             }
-            paintBubble(sp.sprite, phrase, 1);
+            // Render subtitle bubble
+            paintBubble(sp.sprite, meta.symbols, 1);
             sp.sprite.material.opacity = 1;
             sp.sprite.visible = true;
-            // Hold time scales with phrase length — at least 2.5s
-            sp.holdRemain = Math.min(6, 2.5 + phrase.length * 0.05);
+            // Speak it — distance param is a 0..1 closeness factor,
+            // not physical distance (see engine's distG gain formula).
+            if (speechCtx && sp.engine.ctx) {
+                sp.mesh.getWorldPosition(_tmpVec);
+                const d = camera.position.distanceTo(_tmpVec);
+                const closeness = Math.max(0, Math.min(1, 1 - d / 25));
+                if (closeness > 0.05) {
+                    try { sp.engine.speakUnits(meta.units, closeness); }
+                    catch (e) { console.warn('speak failed:', e); }
+                }
+            }
+            sp.holdRemain = Math.min(6, 2.5 + meta.symbols.length * 0.05);
         }
     }
 }
@@ -977,7 +1017,7 @@ async function loadScene() {
         // so groups don't all chime at once.
         const stagger = 4 + ((ent.id * 1373) % 8000) / 1000;
         speakers.push({
-            sprite, engine, slug: ent.languageSlug,
+            sprite, engine, slug: ent.languageSlug, mesh: reg.obj3d,
             cooldown: stagger, holdRemain: 0,
         });
     }
@@ -1140,6 +1180,9 @@ muteBtn.addEventListener('click', e => {
     }
     if (ambientGain) {
         ambientGain.gain.value = ambientMuted ? 0 : (ambientAudio?._volume || 0.4);
+    }
+    if (speechMaster) {
+        speechMaster.gain.value = ambientMuted ? 0 : 0.9;
     }
     muteBtn.style.opacity = ambientMuted ? '0.3' : '1';
 });
