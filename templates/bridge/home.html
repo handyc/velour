@@ -2778,15 +2778,199 @@ import * as THREE from 'three';
         return gen();
     }
 
+    // ── Tiered vocabulary ──────────────────────────────────
+    // The L-system grammars above produce one-off phrases from scratch.
+    // The vocabulary below is a persistent tile system:
+    //
+    //   subwords — ~300 short patterns (2-4 speech symbols each),
+    //              the "tiles" words are built from
+    //   words    — ~10,000 entries, each a chain of 3-6 subword IDs
+    //   phrases  — 2-5 words joined with rhythmic pauses
+    //
+    // Both layers track usage and evolve. Subwords that nobody uses
+    // get pruned; popular ones are duplicated-and-mutated, seeding
+    // accent variants. Words are picked by tournament selection so
+    // frequent words trend toward the centre of the distribution
+    // while rare ones still surface.
+    const SYMS = 'VvCsnlp';
+    const SUBWORD_MIN = 100;
+    const SUBWORD_CAP = 1000;
+    const SUBWORD_SEED = 300;
+    const WORD_COUNT = 10000;
+
+    const SUBWORDS = [];   // {id, pattern, useCount, born}
+    const WORDS = [];      // {id, subIds, useCount, born}
+
+    function randSym() { return SYMS[Math.floor(Math.random() * SYMS.length)]; }
+
+    // Seed subwords — short syllable-ish shapes, 2-4 symbols each.
+    // The library skews toward CV / nV / lV / Vn etc. because those
+    // patterns sound most speech-like when voiced; pure-consonant
+    // subwords exist but are rarer.
+    function genSubwordPattern() {
+        const templates = [
+            'CV','VC','CVC','nV','Vn','lV','Vl','pV','Vp','sV','Vs',
+            'CVn','nVC','lVn','nVl','VnV','VlV','CVl','lVC',
+            'Cv','vC','vCv','nv','vn','lv','vl',
+            'pVC','CVs','sVn','nVs',
+        ];
+        // 70% use a canonical template; 30% build freeform from atoms.
+        if (Math.random() < 0.7) return pick(templates);
+        const len = 2 + Math.floor(Math.random() * 3);     // 2..4
+        let p = '';
+        for (let i = 0; i < len; i++) p += randSym();
+        return p;
+    }
+
+    function addSubword(pattern) {
+        const s = { id: SUBWORDS.length, pattern, useCount: 0, born: Date.now() };
+        SUBWORDS.push(s);
+        return s;
+    }
+
+    function seedSubwords() {
+        while (SUBWORDS.length < SUBWORD_SEED) addSubword(genSubwordPattern());
+    }
+
+    function genWord() {
+        const n = 3 + Math.floor(Math.random() * 4);       // 3..6 subwords
+        const subIds = [];
+        for (let i = 0; i < n; i++) {
+            subIds.push(Math.floor(Math.random() * SUBWORDS.length));
+        }
+        return { id: WORDS.length, subIds, useCount: 0, born: Date.now() };
+    }
+
+    function seedWords() {
+        while (WORDS.length < WORD_COUNT) WORDS.push(genWord());
+    }
+
+    // Tournament selection — k random candidates, highest score wins.
+    // Scores use useCount + small random jitter so new words still have
+    // a nonzero chance. With k=5 the top ~20% dominate the distribution
+    // without freezing it.
+    function pickWordByPopularity(k) {
+        k = k || 5;
+        let best = null, bestScore = -1;
+        for (let i = 0; i < k; i++) {
+            const w = WORDS[Math.floor(Math.random() * WORDS.length)];
+            const score = w.useCount + Math.random() * 0.8;
+            if (score > bestScore) { bestScore = score; best = w; }
+        }
+        return best;
+    }
+
+    function wordToSymbols(word) {
+        let s = '';
+        for (const sid of word.subIds) {
+            const sub = SUBWORDS[sid];
+            if (sub) {
+                s += sub.pattern;
+                sub.useCount++;
+            }
+        }
+        word.useCount++;
+        return s;
+    }
+
+    // Phrase engine — glue words with '.' (short gap) and a closing ','.
+    // About 15% of phrases flip the final punctuation to '?', which
+    // makes the intonation contour rise. Gives the overall soundscape
+    // something like natural declarative/interrogative alternation.
+    function genVocabPhrase() {
+        const wordCount = 2 + Math.floor(Math.random() * 4);   // 2..5
+        const parts = [];
+        for (let i = 0; i < wordCount; i++) {
+            parts.push(wordToSymbols(pickWordByPopularity()));
+        }
+        const ending = Math.random() < 0.15 ? '?' : (Math.random() < 0.08 ? '!' : ',');
+        return parts.join('.') + ending;
+    }
+
+    // ── Evolution — mutate and prune on a slow tick ─────────
+    // Called every ~30 speech events. Duplicates a handful of popular
+    // subwords with a single mutation applied (substitute / insert /
+    // delete / duplicate) — those variants seed accent drift. Unused
+    // old subwords get pruned to keep the library within the cap.
+    function mutateSubword(pattern) {
+        const op = Math.random();
+        if (op < 0.3 && pattern.length > 2) {
+            const i = Math.floor(Math.random() * pattern.length);
+            return pattern.slice(0, i) + pattern.slice(i + 1);
+        } else if (op < 0.55 && pattern.length < 5) {
+            const i = Math.floor(Math.random() * (pattern.length + 1));
+            return pattern.slice(0, i) + randSym() + pattern.slice(i);
+        } else if (op < 0.8) {
+            const i = Math.floor(Math.random() * pattern.length);
+            return pattern.slice(0, i) + randSym() + pattern.slice(i + 1);
+        } else {
+            const i = Math.floor(Math.random() * pattern.length);
+            return pattern.slice(0, i + 1) + pattern[i] + pattern.slice(i + 1);
+        }
+    }
+
+    function evolveLanguage() {
+        // Duplicate-and-mutate the top ~2% by usage.
+        const sorted = [...SUBWORDS].sort((a, b) => b.useCount - a.useCount);
+        const topN = Math.max(2, Math.floor(SUBWORDS.length * 0.02));
+        for (let i = 0; i < topN; i++) {
+            if (SUBWORDS.length >= SUBWORD_CAP) break;
+            const parent = sorted[i];
+            if (!parent) break;
+            addSubword(mutateSubword(parent.pattern));
+        }
+        // Prune unused old subwords, keeping at least SUBWORD_MIN.
+        const ageThreshold = Date.now() - 120000;        // 2 min grace
+        const fresh = SUBWORDS.filter(s => !(s.useCount === 0 && s.born < ageThreshold));
+        const stale = SUBWORDS.filter(s =>   s.useCount === 0 && s.born < ageThreshold);
+        const needed = Math.max(0, SUBWORD_MIN - fresh.length);
+        const keep = fresh.concat(stale.slice(0, needed));
+        if (keep.length !== SUBWORDS.length) {
+            // Reindex in place and remap WORDS so their subIds still
+            // point at the right patterns.
+            const idMap = new Map();
+            keep.forEach((s, i) => { idMap.set(s.id, i); });
+            keep.forEach((s, i) => { s.id = i; });
+            for (const w of WORDS) {
+                w.subIds = w.subIds.map(id =>
+                    idMap.has(id) ? idMap.get(id)
+                                  : (Math.random() * keep.length) | 0);
+            }
+            SUBWORDS.length = 0;
+            SUBWORDS.push(...keep);
+        }
+    }
+
+    seedSubwords();
+    seedWords();
+
     // Expose: any external code can call
     //   window.__bridgeSpeak("CvCVsV", 0.6)            // raw string
-    //   window.__bridgeGenPhrase('technical')          // named preset
-    //   window.__bridgeLSystem                         // class
-    //   window.__bridgeSpeechGrammars                  // registry
+    //   window.__bridgeGenPhrase('technical')          // L-system preset
+    //   window.__bridgeGenVocabPhrase()                // vocab-tier phrase
+    //   window.__bridgeLang                            // live inspection
     window.__bridgeSpeak = speakPhrase;
     window.__bridgeGenPhrase = generatePhrase;
+    window.__bridgeGenVocabPhrase = genVocabPhrase;
     window.__bridgeLSystem = LSystem;
     window.__bridgeSpeechGrammars = SPEECH_GRAMMARS;
+    window.__bridgeLang = {
+        subwords: SUBWORDS,
+        words: WORDS,
+        evolve: evolveLanguage,
+        stats: () => ({
+            subwords: SUBWORDS.length,
+            words: WORDS.length,
+            topSubwords: [...SUBWORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10)
+                .map(s => `${s.pattern}×${s.useCount}`),
+            topWords: [...WORDS].sort((a,b)=>b.useCount-a.useCount).slice(0,10)
+                .map(w => ({ text: w.subIds.map(i => (SUBWORDS[i]||{}).pattern).join('-'), used: w.useCount })),
+        }),
+    };
+
+    // Schedule the evolution cycle on a slow wall-clock tick so the
+    // accent drifts even when the tab is backgrounded less aggressively.
+    setInterval(() => { if (audio.on) evolveLanguage(); }, 45000);
 
     function scheduleSpeech(delay) {
         setTimeout(() => {
@@ -2796,7 +2980,13 @@ import * as THREE from 'three';
             for (let i = 0; i < burst; i++) {
                 setTimeout(() => {
                     if (!audio.on) { return; }
-                    speakPhrase(generatePhrase(), rng(0.3, 0.95));
+                    // 80% vocab-tier phrases (recurring words → evolving
+                    // "language"); 20% fresh L-system grammars (keeps
+                    // cadences varied while the vocab warms up).
+                    const syms = Math.random() < 0.8
+                        ? genVocabPhrase()
+                        : generatePhrase();
+                    speakPhrase(syms, rng(0.3, 0.95));
                 }, i * rng(700, 1600));
             }
             scheduleSpeech(rng(5, 18));
