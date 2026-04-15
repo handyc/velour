@@ -236,8 +236,9 @@ def agent_save(request):
         name = f'{base}-{n}'
         n += 1
 
-    run_id = body.get('run_id')
-    source_run = EvolutionRun.objects.filter(pk=run_id).first() if run_id else None
+    run_slug = body.get('run_slug') or body.get('run_id')
+    source_run = (EvolutionRun.objects.filter(slug=run_slug).first()
+                  if run_slug else None)
 
     parent_id = body.get('parent_id')
     parent = Agent.objects.filter(pk=parent_id).first() if parent_id else None

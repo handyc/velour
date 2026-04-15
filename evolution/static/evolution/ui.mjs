@@ -218,7 +218,7 @@ export class EvolutionUI {
             seed_string: snap.seed_string,
             script: snap.script,
             score: snap.score,
-            run_id: this.runId,
+            run_slug: this.runId,
         };
         try {
             const r = await fetch('/evolution/agents/save/', {
@@ -229,15 +229,43 @@ export class EvolutionUI {
                 },
                 body: JSON.stringify(body),
             });
+            if (!r.ok) {
+                this._toast(`save failed (${r.status})`, 'err');
+                return;
+            }
             const j = await r.json();
             if (j.ok) {
                 this._appendLog({
                     gen: this.engine.generation, best: snap.score, mean: 0,
                     elite_name: `saved: ${j.name}`,
                 });
+                this._toast(j.name, 'ok', j.url);
                 if (this.onSaved) this.onSaved(j);
+            } else {
+                this._toast(`save failed: ${j.error || 'unknown'}`, 'err');
             }
-        } catch (e) { /* noop */ }
+        } catch (e) {
+            this._toast(`save failed: ${e.message || e}`, 'err');
+        }
+    }
+
+    _toast(msg, kind = 'ok', href = null) {
+        let host = this.root.querySelector('.ev-toasts');
+        if (!host) {
+            host = document.createElement('div');
+            host.className = 'ev-toasts';
+            this.root.appendChild(host);
+        }
+        const el = document.createElement('div');
+        el.className = `ev-toast ev-toast-${kind}`;
+        if (href) {
+            el.innerHTML = `saved → <a href="${href}" target="_blank">${escapeHtml(msg)}</a>`;
+        } else {
+            el.textContent = msg;
+        }
+        host.appendChild(el);
+        setTimeout(() => { el.classList.add('ev-toast-fade'); }, 3000);
+        setTimeout(() => { el.remove(); }, 4200);
     }
 }
 

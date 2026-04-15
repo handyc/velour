@@ -32,7 +32,7 @@
     <h1>{{ run.name }}</h1>
     <div class="ev-meta">
         <a href="{% url 'evolution:list' %}">← all runs</a>
-        <a href="{% url 'evolution:agents' %}">agent library</a>
+        <a href="{% url 'evolution:agents' %}" style="color:#ffb84d;border-color:#50401a;">📚 saved agents</a>
         L{{ run.level }} · pop {{ run.population_size }} ·
         target ≥ {{ run.target_score|floatformat:2 }} ·
         max gen {{ run.generations_target }}
