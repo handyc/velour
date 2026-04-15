@@ -18,6 +18,18 @@ MOOD_TO_SOUNDSCAPE = {
     'wild':    'city-street',
 }
 
+# Gubi mood → Legolith biome. Each mood picks a biome whose palette
+# matches the feel; the remaining biomes aren't wasted — we fall through
+# to a hash if mood isn't recognised.
+MOOD_TO_BIOME = {
+    'calm':    'meadow',
+    'bright':  'plains',
+    'stormy':  'harbor',
+    'playful': 'town',
+    'solemn':  'dusk',
+    'wild':    'forest',
+}
+
 
 def _clip(lo, hi, x):
     return max(lo, min(hi, x))
@@ -30,12 +42,16 @@ def _byte_to_unit(b):
 def build_aether_world(gubi_world):
     """Create and save an aether.World seeded from a GubiWorld.
 
-    Consumes the full Gubi schema: mood → soundscape, sky/ground/fog
-    colors → environment, rng_stream bytes → ambient light / volume /
-    gravity, booleans → flight + skybox style, first tree position →
-    player spawn, title_hint + tags + axiom summary → description.
+    Runs the full Legolith → Aether pipeline so the result has real
+    visible geometry (brick-built buildings, trees, people, etc.). Every
+    major Gubi knob feeds a Legolith parameter: mood picks the biome,
+    seed drives reproducibility, n_trees comes straight from Gubi, the
+    rng_stream bytes set the other object counts, and booleans toggle
+    studs/flight. After Legolith builds the world we overlay Gubi's
+    sky/ground/fog colors, ambient light, gravity, soundscape, and
+    spawn point so the environment reflects the input screen too.
     """
-    from aether.models import World as AetherWorld
+    from aether.legoworld import build_legoworld_in_aether
 
     vars_ = gubi_world.gubified()
     shared = vars_['regions']['shared']
@@ -43,52 +59,77 @@ def build_aether_world(gubi_world):
     rng = shared['rng_stream']
     booleans = shared['booleans']
 
+    biome = MOOD_TO_BIOME.get(
+        shared['mood'],
+        ['meadow', 'plains', 'forest', 'town', 'dusk', 'harbor',
+         'autumn', 'desert', 'snow', 'island'][shared['seed'] % 10],
+    )
+
+    counts = dict(
+        n_buildings = 2 + (rng[3] % 6),
+        n_trees     = max(1, lsys['n_trees']),
+        n_flowers   = rng[4] % 10,
+        n_people    = rng[5] % 5,
+        n_hills     = 1 + (rng[6] % 3),
+        n_lamps     = rng[7] % 4,
+        n_rocks     = rng[8] % 5,
+    )
+
+    world, stats = build_legoworld_in_aether(
+        name=gubi_world.title or 'Gubi world',
+        biome=biome,
+        seed=shared['seed'],
+        show_studs=bool(booleans[4]),
+        hdri_asset='',
+        **counts,
+    )
+
+    # Overlay Gubi-specific environment on top of the Legolith defaults
+    # so the sky/fog/ground pick up the Gubi input's character.
     tags = [t for t in shared['tags'] if t]
-    description_parts = [
-        f'Grown from the Gubi world "{gubi_world.title}".',
-        f"Mood: {shared['mood']}. Seed: {shared['seed']}.",
+    desc_lines = [
+        f'Grown from the Gubi world "{gubi_world.title}" '
+        f'(mood: {shared["mood"]}, seed: {shared["seed"]}).',
     ]
     if shared['title_hint']:
-        description_parts.append(f"Hint: {shared['title_hint']}")
+        desc_lines.append(f'Hint: {shared["title_hint"]}')
     if tags:
-        description_parts.append('Tags: ' + ', '.join(tags))
-    description_parts.append(
-        f"{lsys['n_trees']} procedural trees, axiom '{lsys['axiom']}', "
-        f"{lsys['iterations']} iterations, branch angle "
-        f"{lsys['branch_angle']:.1f}°."
+        desc_lines.append('Tags: ' + ', '.join(tags))
+    desc_lines.append(
+        f'{counts["n_buildings"]} buildings · {counts["n_trees"]} trees · '
+        f'{counts["n_flowers"]} flowers · {counts["n_people"]} people · '
+        f'{counts["n_hills"]} hills · {counts["n_lamps"]} lamps · '
+        f'{counts["n_rocks"]} rocks on a {biome} baseplate '
+        f'({stats["bricks"]} bricks).'
+    )
+    desc_lines.append(
+        f'L-system axiom \'{lsys["axiom"]}\', {lsys["iterations"]} iters, '
+        f'branch angle {lsys["branch_angle"]:.1f}°.'
     )
 
-    skybox = 'gradient' if booleans[0] else 'color'
-    ambient_light = _clip(0.15, 0.85, 0.25 + _byte_to_unit(rng[0]) * 0.6)
-    ambient_volume = _clip(0.1, 0.8, 0.2 + _byte_to_unit(rng[1]) * 0.6)
-    gravity = -3.0 - _byte_to_unit(rng[2]) * 9.0
-    scales = lsys['tree_scales'][:lsys['n_trees']] or [1.0]
-    avg_scale = sum(scales) / len(scales)
-    ground_size = _clip(40.0, 240.0, 60.0 + avg_scale * 60.0)
-
+    world.title = f'{gubi_world.title} · Aether'[:200]
+    world.description = '\n'.join(desc_lines)
+    world.sky_color = lsys['sky_top']
+    world.ground_color = lsys['ground_color']
+    world.fog_color = lsys['sky_bottom']
+    world.fog_near = lsys['fog_near']
+    world.fog_far = lsys['fog_far']
+    world.ambient_light = _clip(
+        0.15, 0.85, 0.25 + _byte_to_unit(rng[0]) * 0.6)
+    world.ambient_volume = _clip(
+        0.1, 0.8, 0.2 + _byte_to_unit(rng[1]) * 0.6)
+    world.gravity = -3.0 - _byte_to_unit(rng[2]) * 9.0
+    world.allow_flight = bool(booleans[1])
+    world.soundscape = MOOD_TO_SOUNDSCAPE.get(shared['mood'], 'forest')
+    # Spawn at the first tree position if it'd keep the player on the
+    # baseplate; otherwise keep Legolith's safe default (edge of plate).
     positions = lsys['tree_positions'][:lsys['n_trees']]
-    spawn_x, spawn_z = positions[0] if positions else (0.0, 0.0)
-
-    world = AetherWorld(
-        title=f'{gubi_world.title} · Aether'[:200],
-        description='\n'.join(description_parts),
-        skybox=skybox,
-        sky_color=lsys['sky_top'],
-        ground_color=lsys['ground_color'],
-        fog_color=lsys['sky_bottom'],
-        fog_near=lsys['fog_near'],
-        fog_far=lsys['fog_far'],
-        ground_size=ground_size,
-        ambient_light=ambient_light,
-        soundscape=MOOD_TO_SOUNDSCAPE.get(shared['mood'], 'forest'),
-        ambient_volume=ambient_volume,
-        gravity=gravity,
-        allow_flight=bool(booleans[1]),
-        spawn_x=float(spawn_x),
-        spawn_y=1.6,
-        spawn_z=float(spawn_z),
-        published=False,
-    )
+    if positions:
+        px, pz = positions[0]
+        # Baseplate is ~12.8m (32 studs × 0.4), so 6.4m each side. Clamp.
+        if abs(px) < 6.0 and abs(pz) < 6.0:
+            world.spawn_x = float(px)
+            world.spawn_z = float(pz)
     world.save()
     return world
 
