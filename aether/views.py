@@ -356,6 +356,7 @@ def world_scene_json(request, slug):
                 'faceGenome': e.face.genome if e.face_id else None,
                 'scripts': entity_scripts.get(e.pk, []),
                 'languageSlug': npc_languages.get(e.pk, ''),
+                'isNpc': e.pk in npc_entity_ids,
             }
             for e in entities
         ],
@@ -1174,6 +1175,28 @@ def megalegoworld_generate(request):
         f'{stats["bricks"]} bricks (+{stats.get("library_placements", 0)} '
         f'from library), ~{stats["studs_estimate"]} studs.',
     )
+    return redirect('aether:world_enter', slug=world.slug)
+
+
+@login_required
+@require_POST
+def generate_megacity(request):
+    """Build a 4x4 matrix of cafe districts merged into one Aether world."""
+    from django.core.management import call_command
+    from aether.management.commands.seed_megacity import Command as MegaCity
+    cmd = MegaCity()
+    try:
+        call_command(cmd)
+        world = getattr(cmd, '_world', None)
+    except Exception as exc:
+        messages.error(request, f'MegaCity seed failed: {exc}')
+        return redirect('aether:world_list')
+
+    if world is None:
+        messages.error(request, 'MegaCity seed produced no world.')
+        return redirect('aether:world_list')
+
+    messages.success(request, f'Built "{world.title}" — 16 cafe cells, 48 NPCs.')
     return redirect('aether:world_enter', slug=world.slug)
 
 

@@ -22,6 +22,10 @@
         <input type="hidden" name="classic" value="1">
         <button type="submit" style="background:#21262d;color:#f5cd30;border:1px solid #d01712;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;font-weight:600;">Classic MegaLegoworld</button>
     </form>
+    <form method="post" action="{% url 'aether:generate_megacity' %}" style="display:inline;">
+        {% csrf_token %}
+        <button type="submit" style="background:#58a6ff;color:#0d1117;border:1px solid #2ea043;padding:0.3rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;font-weight:600;">Generate MegaCity</button>
+    </form>
     <a href="{% url 'aether:world_merge' %}" style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">Merge Worlds</a>
     <a href="{% url 'aether:face_forge' %}" style="color:#f0c040;text-decoration:none;font-size:0.85rem;">Face Forge</a>
     <form method="post" action="{% url 'aether:boogaloo' %}" style="display:inline;">
