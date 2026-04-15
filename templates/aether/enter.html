@@ -40,6 +40,32 @@
         color:rgba(255,255,255,0.4); font-size:0.7rem;
         pointer-events:none; z-index:10;
     }
+    #player-hp {
+        position:fixed; bottom:1.2rem; left:50%;
+        transform:translateX(-50%);
+        width:260px; height:24px;
+        background:rgba(0,0,0,0.65);
+        border:1px solid rgba(255,255,255,0.18);
+        z-index:15; pointer-events:none;
+        font-family:sans-serif;
+    }
+    #player-hp-bar {
+        position:absolute; inset:0;
+        width:100%; background:#22cc44;
+        transition:width 0.18s ease-out;
+    }
+    #player-hp-text {
+        position:absolute; inset:0;
+        color:#39ff7a; font-weight:bold;
+        text-align:center; line-height:24px;
+        text-shadow:0 0 4px #000, 0 0 2px #000;
+        font-size:0.85rem;
+    }
+    #player-hp.hit { animation: hpFlash 0.18s; }
+    @keyframes hpFlash {
+        0%   { background:rgba(255,80,80,0.85); }
+        100% { background:rgba(0,0,0,0.65); }
+    }
     #splash {
         position:fixed; inset:0; background:#000; color:#fff;
         display:flex; align-items:center; justify-content:center;
@@ -97,6 +123,10 @@
 <div id="crosshair"></div>
 <div id="coords"></div>
 <div id="collision-indicator" title="Press C to toggle collision">collision: on</div>
+<div id="player-hp">
+    <div id="player-hp-bar"></div>
+    <span id="player-hp-text">100</span>
+</div>
 <div id="splash">
     <h2>{{ world.title }}</h2>
     <div class="sub">loading…</div>
@@ -588,6 +618,69 @@ const BUMP_COOLDOWN = 0.4;         // sec between bumps from sustained contact
 const HP_BAR_LIFETIME = 1.0;       // sec the bar stays after a change
 const HP_BAR_FLASH = 0.18;         // sec of bright flash on a change
 
+// Player health
+const PLAYER_MAX_HP = 100;
+let playerHp = PLAYER_MAX_HP;
+const spawnPoint = {x: 0, y: 1.6, z: 0};
+const NPC_TOUCH_DAMAGE = 1;        // hp NPCs take from player on touch
+const NPC_TOUCH_COOLDOWN = 0.5;
+let respawnTimer = 0;
+
+function setPlayerHp(v) {
+    playerHp = Math.max(0, Math.min(PLAYER_MAX_HP, v));
+    const bar = document.getElementById('player-hp-bar');
+    const txt = document.getElementById('player-hp-text');
+    if (bar) bar.style.width = (playerHp / PLAYER_MAX_HP * 100) + '%';
+    if (txt) txt.textContent = Math.round(playerHp);
+}
+
+function damagePlayer(amount) {
+    if (playerHp <= 0) return;
+    setPlayerHp(playerHp - amount);
+    const wrap = document.getElementById('player-hp');
+    if (wrap) {
+        wrap.classList.remove('hit');
+        // Force reflow so the animation restarts on every hit.
+        void wrap.offsetWidth;
+        wrap.classList.add('hit');
+    }
+    if (playerHp <= 0) {
+        // Brief blackout then respawn at world spawn point. Resets HP and
+        // calms hostile NPCs so the player isn't instantly farmed again.
+        respawnTimer = 1.5;
+    }
+}
+
+// NPC dispositions. Friendly NPCs ignore the player; antagonistic ones
+// attack on touch but don't pursue; violent ones chase via pathfinding;
+// fearful ones flee; curious ones approach but don't damage.
+const DISPOSITIONS = [
+    {name: 'friendly',     w: 0.50, color: '#88cc88'},
+    {name: 'antagonistic', w: 0.20, color: '#cc8844'},
+    {name: 'violent',      w: 0.15, color: '#cc3333'},
+    {name: 'fearful',      w: 0.10, color: '#88aaff'},
+    {name: 'curious',      w: 0.05, color: '#cc88cc'},
+];
+
+function rollDisposition() {
+    const r = Math.random();
+    let acc = 0;
+    for (const d of DISPOSITIONS) {
+        acc += d.w;
+        if (r <= acc) return d.name;
+    }
+    return 'friendly';
+}
+
+function escalate(disposition) {
+    // Damage hardens an NPC: friendly→antagonistic→violent.
+    if (disposition === 'friendly') return 'antagonistic';
+    if (disposition === 'curious')  return 'antagonistic';
+    if (disposition === 'fearful')  return 'fearful';   // stays scared
+    if (disposition === 'antagonistic') return 'violent';
+    return disposition;
+}
+
 function makeHpBar() {
     const canvas = document.createElement('canvas');
     canvas.width = 256; canvas.height = 80;
@@ -635,6 +728,92 @@ function flashNpcHpBar(n) {
     n.hpVisibleUntil = now + HP_BAR_LIFETIME;
     n.hpFlashUntil = now + HP_BAR_FLASH;
     n.hpDirty = true;
+}
+
+function tickNpcAi(dt) {
+    if (!collisionEnabled) return;
+    const p = cameraGroup.position;
+    for (const n of npcColliders) {
+        if (n.attackCooldown > 0) n.attackCooldown -= dt;
+        // "At will" mood flicker — every few seconds, hostile-leaning NPCs
+        // may toggle their attack ability. Friendly NPCs stay friendly.
+        n.moodFlicker -= dt;
+        if (n.moodFlicker <= 0) {
+            n.moodFlicker = 4 + Math.random() * 8;
+            if (n.disposition === 'antagonistic' || n.disposition === 'violent') {
+                if (Math.random() < 0.25) n.attackEnabled = !n.attackEnabled;
+            } else if (n.disposition === 'curious' && Math.random() < 0.1) {
+                // A curious NPC occasionally tries an attack — and instantly
+                // becomes antagonistic if it does.
+                n.attackEnabled = true;
+                n.disposition = 'antagonistic';
+            }
+        }
+
+        if (n.hp <= 0) continue;
+        n.aiReplan -= dt;
+        if (n.aiReplan > 0) continue;
+        if (n.disposition !== 'violent' && n.disposition !== 'fearful') continue;
+        n.aiReplan = 0.8 + Math.random() * 0.4;
+
+        // Find this NPC's wander script state so we can hijack its target.
+        const reg = entityRegistry.get(n.mesh.userData.entityId);
+        if (!reg) continue;
+        let wanderState = null;
+        for (const inst of reg.scripts) {
+            if (inst.ctx && inst.ctx.state && inst.ctx.state.wn_init) {
+                wanderState = inst.ctx.state;
+                break;
+            }
+        }
+        if (!wanderState) continue;
+
+        const npcPos = n.mesh.position;
+        const dx = p.x - npcPos.x;
+        const dz = p.z - npcPos.z;
+        const distToPlayer = Math.sqrt(dx * dx + dz * dz);
+
+        let target;
+        if (n.disposition === 'violent') {
+            // Only chase if within sense range, otherwise resume wandering.
+            if (distToPlayer > 35) continue;
+            target = {x: p.x, z: p.z};
+        } else {
+            // fearful: flee to a point ~10m on the opposite side of player.
+            if (distToPlayer > 14) continue;     // far enough, calm
+            const len = Math.max(0.001, distToPlayer);
+            target = {
+                x: npcPos.x - (dx / len) * 10,
+                z: npcPos.z - (dz / len) * 10,
+            };
+        }
+        const wp = (window.AetherNav && window.AetherNav.grid)
+            ? window.AetherNav.findPath(npcPos, target)
+            : null;
+        wanderState.target = target;
+        wanderState.waypoints = (wp && wp.length) ? wp : [target];
+        wanderState.wpIndex = 0;
+        wanderState.walking = true;
+        wanderState.waitTimer = 0;
+        wanderState.stuckTimer = 0;
+        // Violent NPCs run; fearful NPCs sprint.
+        wanderState.speed = n.disposition === 'fearful' ? 2.6 : 2.0;
+    }
+}
+
+function tickPlayerRespawn(dt) {
+    if (respawnTimer <= 0) return;
+    respawnTimer -= dt;
+    if (respawnTimer <= 0) {
+        // Restore player at original spawn and reset HP.
+        cameraGroup.position.set(spawnPoint.x, spawnPoint.y, spawnPoint.z);
+        velocity.set(0, 0, 0);
+        setPlayerHp(PLAYER_MAX_HP);
+        // Calm hostile NPCs so they don't immediately farm the respawn.
+        for (const n of npcColliders) {
+            if (n.disposition === 'violent') n.disposition = 'antagonistic';
+        }
+    }
 }
 
 function tickHpBars(dt) {
@@ -723,6 +902,19 @@ function resolvePlayerHorizontal() {
             n.hp = Math.max(0, n.hp - BUMP_DAMAGE);
             n.dmgCooldown = BUMP_COOLDOWN;
             flashNpcHpBar(n);
+            n.disposition = escalate(n.disposition);
+            n.attackEnabled = true;
+        }
+        // NPC strikes back if it has the ability and the cooldown is up.
+        if (n.attackEnabled && n.attackCooldown <= 0 && n.hp > 0
+            && playerHp > 0) {
+            damagePlayer(NPC_TOUCH_DAMAGE);
+            n.attackCooldown = NPC_TOUCH_COOLDOWN;
+            // The act of attacking marks the NPC antagonistic if it
+            // wasn't already at least that hostile.
+            if (n.disposition === 'friendly' || n.disposition === 'curious') {
+                n.disposition = 'antagonistic';
+            }
         }
     }
 }
@@ -1433,6 +1625,9 @@ async function loadScene() {
 
     // Spawn — set on cameraGroup so VR and desktop both work
     cameraGroup.position.set(data.spawn.x, data.spawn.y, data.spawn.z);
+    spawnPoint.x = data.spawn.x;
+    spawnPoint.y = data.spawn.y;
+    spawnPoint.z = data.spawn.z;
     if (!renderer.xr.enabled) {
         // Desktop: camera is at group origin, no offset needed
         camera.position.set(0, 0, 0);
@@ -1514,12 +1709,19 @@ async function loadScene() {
         if (ent.isNpc) {
             const hpBar = makeHpBar();
             mesh.add(hpBar);
+            const disposition = rollDisposition();
             npcColliders.push({
                 mesh, radius: NPC_RADIUS, height: NPC_HEIGHT,
                 kbVx: 0, kbVz: 0, kbTime: 0,
                 hp: NPC_MAX_HP, maxHp: NPC_MAX_HP,
                 hpBar, hpVisibleUntil: 0, hpFlashUntil: 0,
                 hpDirty: true, dmgCooldown: 0,
+                disposition,
+                attackEnabled: disposition === 'antagonistic'
+                              || disposition === 'violent',
+                attackCooldown: 0,
+                aiReplan: 0,
+                moodFlicker: 6 + Math.random() * 8,
             });
         }
 
@@ -1779,7 +1981,9 @@ function animate() {
     if (speakers.length) tickSpeakers(dt);
 
     resolveNpcCollisions(dt);
+    tickNpcAi(dt);
     tickHpBars(dt);
+    tickPlayerRespawn(dt);
 
     renderer.render(scene, camera);
 }
