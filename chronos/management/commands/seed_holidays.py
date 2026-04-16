@@ -98,13 +98,17 @@ class Command(BaseCommand):
                 for d, name in items:
                     start_dt = dt.datetime.combine(d, dt.time(0, 0), tzinfo=tz)
                     end_dt = dt.datetime.combine(d, dt.time(23, 59), tzinfo=tz)
+                    # Dedup key must use concrete field values, NOT lookup
+                    # transforms like start__date — under USE_TZ=True the
+                    # __date transform compares in UTC, so an Amsterdam
+                    # midnight stored as Apr 26 22:00 UTC never matches
+                    # lookup date=Apr 27, and every re-run creates a dup.
                     obj, created = CalendarEvent.objects.update_or_create(
                         source='holiday',
                         tradition=tradition,
                         title=name,
-                        start__date=d,
+                        start=start_dt,
                         defaults={
-                            'start':   start_dt,
                             'end':     end_dt,
                             'all_day': True,
                             'color':   tradition.color,

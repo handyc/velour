@@ -114,6 +114,16 @@
     <a href="{% url 'chronos:home' %}" class="nav-link">Chronos</a>
     <span class="spacer"></span>
     <a href="{% url 'chronos:event_add' %}" class="btn">New Event</a>
+    <form method="post" action="{% url 'chronos:resync' %}"
+          style="display:inline; margin:0;"
+          onsubmit="this.querySelector('button').textContent='Resyncing…'; this.querySelector('button').disabled=true;">
+        {% csrf_token %}
+        <input type="hidden" name="year"  value="{{ year }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button type="submit" class="nav-link"
+                title="Re-run holiday + astronomy seeders for the next 3 years (idempotent)."
+                style="cursor:pointer; background:none; font:inherit;">↻ Resync</button>
+    </form>
     <span class="count">{{ event_count }} event{{ event_count|pluralize }}</span>
 </div>
 

@@ -79,13 +79,14 @@ class Command(BaseCommand):
             for d, name in events:
                 start_dt = dt.datetime.combine(d, dt.time(0, 0), tzinfo=tz)
                 end_dt = dt.datetime.combine(d, dt.time(23, 59), tzinfo=tz)
+                # See seed_holidays.py for the reason start=start_dt
+                # (not start__date=d): __date compares in UTC.
                 obj, created = CalendarEvent.objects.update_or_create(
                     source='astro',
                     tradition=tradition,
                     title=name,
-                    start__date=d,
+                    start=start_dt,
                     defaults={
-                        'start':   start_dt,
                         'end':     end_dt,
                         'all_day': True,
                         'color':   tradition.color,
