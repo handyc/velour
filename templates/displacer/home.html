@@ -1,0 +1,62 @@
+{% extends 'displacer/base.html' %}
+{% load static %}
+
+{% block title %}Homepage - Displace{% endblock %}
+{% block og_title %}Homepage{% endblock %}
+{% block og_title2 %}Homepage{% endblock %}
+{% block og_description %}{{ site.home_intro }}{% endblock %}
+{% block og_description2 %}{{ site.home_intro }}{% endblock %}
+
+{% block extra_meta %}
+    {% if featured_articles %}<meta name="keywords" content="{% for a in featured_articles %}{{ a.title }}, {% endfor %}" />{% endif %}
+    <meta name="description" content="{{ site.home_intro|truncatechars:200 }}" />
+{% endblock %}
+
+{% block body_class %}has-contentgroup collection t--home do_foundation do_base{% endblock %}
+
+{% block content %}
+    <article class="home-summary">
+        <div class="home-summary__content">
+            <p>{{ site.home_intro|linebreaksbr }}</p>
+            {% with about_page=menu_pages.last %}
+                {% if about_page %}
+                    <a lang="nl" href="{% url 'displacer:page_detail' about_page.slug %}" class="btn-arrow -white">
+                        <span>Lees meer</span><span class="visually-hidden">, over {{ about_page.title }}</span>
+                    </a>
+                {% endif %}
+            {% endwith %}
+        </div>
+    </article>
+
+    {% if featured_articles %}
+        <div class="home-featured">
+            <div class="main-container">
+                <h2 class="bordered-title -white">Uitgelicht</h2>
+
+                <ul id="list-featured" class="list -white">
+                    {% for article in featured_articles %}
+                        {% include 'displacer/_article_card.html' with article=article white=True %}
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    {% endif %}
+
+    <div class="home-blocks">
+        {% for blk in home_blocks %}
+            <div{% if blk.block_id %} id="{{ blk.block_id }}"{% endif %} class="block text-block">
+                <div class="main-container">
+                    <h2 class="bordered-title">{{ blk.title }}</h2>
+                    {% if blk.body_html %}
+                        <div class="block__body body-text">{{ blk.body_html|safe }}</div>
+                    {% endif %}
+                    {% if blk.link_url %}
+                        <a lang="nl" href="{{ blk.link_url }}" class="btn-arrow ">
+                            <span>Lees meer</span>{% if blk.link_label %}<span class="visually-hidden">, {{ blk.link_label }}</span>{% endif %}
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% endblock %}

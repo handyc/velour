@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Verify DisPLACE - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .container { padding: 0.75rem 2rem; max-width: 1100px; }
+    .verify-header { margin-bottom: 1rem; }
+    .verify-header h1 { font-size: 1.2rem; margin-bottom: 0; display: inline; }
+    .verify-header span { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
+
+    .verify-counts {
+        display: flex; gap: 1.25rem; flex-wrap: wrap;
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.85rem 1rem; margin-bottom: 1rem;
+        font-size: 0.85rem;
+    }
+    .verify-counts dt { color: #8b949e; font-size: 0.7rem;
+        text-transform: uppercase; letter-spacing: 0.06em; }
+    .verify-counts dd { margin: 0; color: #c9d1d9; font-size: 1rem; }
+
+    .verify-form { margin-bottom: 1.25rem; }
+    .verify-form button {
+        background: #1f6feb; color: #fff; border: 0;
+        border-radius: 6px; padding: 0.55rem 1.1rem;
+        font: inherit; cursor: pointer;
+    }
+    .verify-form button:hover { background: #388bfd; }
+    .verify-form button:disabled { background: #30363d; color: #8b949e; cursor: wait; }
+    .verify-form .hint { color: #8b949e; font-size: 0.78rem;
+        margin-left: 0.75rem; }
+
+    .verify-summary {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.85rem 1rem; margin-bottom: 1rem;
+        font-size: 0.9rem;
+    }
+    .verify-summary.ok    { border-left: 3px solid #2ea043; }
+    .verify-summary.bad   { border-left: 3px solid #d29922; }
+    .verify-summary .big  { font-size: 1.1rem; color: #c9d1d9; }
+    .verify-summary .lab  { color: #8b949e; font-size: 0.78rem; }
+
+    pre.verify-output {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.85rem 1rem; overflow: auto; max-height: 60vh;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem; line-height: 1.4; color: #c9d1d9;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="verify-header">
+    <h1>Verify DisPLACE</h1>
+    <span>Compare every ingested page against the live displace.nl source</span>
+</div>
+
+<dl class="verify-counts">
+    <div><dt>Articles</dt><dd>{{ counts.articles }}</dd></div>
+    <div><dt>Themes</dt><dd>{{ counts.themes }}</dd></div>
+    <div><dt>Pages</dt><dd>{{ counts.pages }}</dd></div>
+    <div><dt>Total checked</dt><dd>{{ counts.total }}</dd></div>
+    <div><dt>Media assets</dt><dd>{{ counts.assets }}</dd></div>
+</dl>
+
+<form method="post" class="verify-form">
+    {% csrf_token %}
+    <button type="submit"
+            onclick="this.disabled=true;this.textContent='Verifying — this takes ~30s…';this.form.submit();">
+        Run verification
+    </button>
+    <span class="hint">Fetches each page from displace.nl with a 0.1s delay between requests.</span>
+</form>
+
+{% if ran %}
+    {% if summary %}
+        <div class="verify-summary {% if summary.issues %}bad{% else %}ok{% endif %}">
+            <span class="big">
+                {% if summary.issues %}
+                    {{ summary.issues }} page(s) flagged
+                {% else %}
+                    All {{ summary.total }} pages match the source
+                {% endif %}
+            </span>
+            <span class="lab">
+                · {{ summary.ok }} ok / {{ summary.issues }} issues / {{ summary.total }} total
+            </span>
+        </div>
+    {% else %}
+        <div class="verify-summary bad">
+            <span class="big">Verification did not finish cleanly</span>
+            <span class="lab">· see the output below for what happened</span>
+        </div>
+    {% endif %}
+
+    <pre class="verify-output">{{ output }}</pre>
+{% endif %}
+{% endblock %}

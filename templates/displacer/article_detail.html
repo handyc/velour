@@ -1,0 +1,45 @@
+{% extends 'displacer/base.html' %}
+{% load static %}
+{% load displacer_extras %}
+
+{% block title %}{{ article.title }} - Displace{% endblock %}
+{% block og_title %}{{ article.title }}{% endblock %}
+{% block og_title2 %}{{ article.title }}{% endblock %}
+{% block og_description %}{{ article.summary }}{% endblock %}
+{% block og_description2 %}{{ article.summary }}{% endblock %}
+
+{% block body_class %}has-contentgroup event_story t--story do_foundation do_base{% endblock %}
+
+{% block content %}
+    <article class="main-container story">
+        {% for cat in categories %}
+            <strong class="uppercase-title">{{ cat.name }}</strong>
+        {% endfor %}
+        {% for theme in themes %}
+            <strong class="uppercase-title">{{ theme.title }}</strong>
+        {% endfor %}
+
+        <h1 class="page-title">{{ article.title }}</h1>
+
+        <div class="body-text">
+            {% if article.summary %}
+                <p class="summary">{{ article.summary }}</p>
+            {% endif %}
+
+            {{ article.body_html|clean_embeds }}
+
+            {% with thanks=article.thanks_to authors=article.authors %}
+                {% if thanks %}
+                    <p><span>Met dank aan:<br/>
+                        {% for p in thanks %}{{ p.name }}{% if not forloop.last %}<br/>{% endif %}{% endfor %}
+                    </span></p>
+                {% endif %}
+                {% if authors %}
+                    <p><span>Geschreven door:<br/>
+                        {% for p in authors %}{{ p.name }}{% if not forloop.last %}<br/>{% endif %}{% endfor %}
+                    </span></p>
+                {% endif %}
+            {% endwith %}
+        </div>
+    </article>
+{% endblock %}

@@ -87,6 +87,8 @@ INSTALLED_APPS = [
     'screen_gubi',
     'grammar_engine',
     'evolution',
+    'displacer',
+    'casting',
 ]
 
 MIDDLEWARE = [

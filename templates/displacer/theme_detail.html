@@ -1,0 +1,28 @@
+{% extends 'displacer/base.html' %}
+{% load static %}
+{% load displacer_extras %}
+
+{% block title %}{{ theme.title }} - Displace{% endblock %}
+{% block og_title %}{{ theme.title }}{% endblock %}
+{% block og_title2 %}{{ theme.title }}{% endblock %}
+{% block og_description %}{{ theme.summary }}{% endblock %}
+{% block og_description2 %}{{ theme.summary }}{% endblock %}
+
+{% block body_class %}has-contentgroup theme t--theme do_foundation do_base{% endblock %}
+
+{% block content %}
+    <h1 class="page-title">{{ theme.title }}</h1>
+
+    {{ theme.body_html|clean_embeds }}
+
+    {% if articles %}
+        <div id="verhalen" class="main-container">
+            <h2 class="bordered-title">Verhalen over {{ theme.title }}</h2>
+            <ul id="list--haspart" class="list ">
+                {% for article in articles %}
+                    {% include 'displacer/_article_card.html' with article=article white=False %}
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}

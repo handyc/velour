@@ -1,0 +1,38 @@
+{% extends 'displacer/base.html' %}
+{% load static %}
+
+{% block title %}THEMA'S - Displace{% endblock %}
+{% block og_title %}THEMA'S{% endblock %}
+{% block og_title2 %}THEMA'S{% endblock %}
+
+{% block body_class %}has-contentgroup theme t--themes do_foundation do_base{% endblock %}
+
+{% block content %}
+    <div class="main-container">
+        <h1 class="uppercase-title">THEMA&#39;S</h1>
+
+        <ul id="theme-list" class="list--vertical ">
+            {% for theme in themes %}
+                <li class=" list__item--vertical ">
+                    {% if theme.hero_image and theme.hero_image.file %}
+                        <div class="list__item--vertical__image"
+                             style="background-image: url({{ theme.hero_image.file.url }});"></div>
+                    {% else %}
+                        <div class="list__item--vertical__image"></div>
+                    {% endif %}
+                    <div class="list__item__content -vertical">
+                        <h2 class="list__item__content__title">{{ theme.title }}</h2>
+                        {% if theme.summary %}
+                            <p>{{ theme.summary|truncatechars:160 }}</p>
+                        {% endif %}
+                        <a href="{% url 'displacer:theme_detail' theme.slug %}">
+                            <span lang="nl" class="visually-hidden">Lees meer, over {{ theme.title }}</span>
+                        </a>
+                    </div>
+                </li>
+            {% empty %}
+                <li><p>Nog geen thema's.</p></li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

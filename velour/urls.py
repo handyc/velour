@@ -46,6 +46,8 @@ urlpatterns = [
     path('gubi/', include('screen_gubi.urls')),
     path('grammar/', include('grammar_engine.urls')),
     path('evolution/', include('evolution.urls')),
+    path('displacer/', include('displacer.urls')),
+    path('casting/', include('casting.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

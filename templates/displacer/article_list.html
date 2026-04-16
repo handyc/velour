@@ -1,0 +1,22 @@
+{% extends 'displacer/base.html' %}
+{% load static %}
+
+{% block title %}VERHALEN - Displace{% endblock %}
+{% block og_title %}VERHALEN{% endblock %}
+{% block og_title2 %}VERHALEN{% endblock %}
+
+{% block body_class %}has-contentgroup query t--query do_foundation do_base{% endblock %}
+
+{% block content %}
+    <div class="main-container">
+        <h1 class="uppercase-title">VERHALEN</h1>
+
+        <ul id="list--query" class="list ">
+            {% for article in articles %}
+                {% include 'displacer/_article_card.html' with article=article white=False %}
+            {% empty %}
+                <li><p>Nog geen verhalen gepubliceerd.</p></li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

@@ -1,0 +1,402 @@
+/*
+See: http://zotonic.com/docs/latest/manuals/templates/icons.html
+*/
+@font-face {
+  font-family: 'Zotonic';
+  src: url('z.icons/fonts/icomoon.eot@v=3');
+  src: url('z.icons/fonts/icomoon.eot@') format('embedded-opentype'), url('z.icons/fonts/icomoon.woff@v=3') format('woff'), url('z.icons/fonts/icomoon.ttf@v=3') format('truetype'), url('z.icons/fonts/icomoon.svg@v=3') format('svg');
+  font-weight: normal;
+  font-style: normal;
+}
+.z-icon,
+.fa-icon,
+.md-icon,
+.z-btn-remove:before,
+.z-btn-remove:hover:before,
+.z-btn-help:before,
+a.close:before,
+button.close:before,
+a.close:hover:before,
+button.close:hover:before,
+.zotonic-logo {
+  speak: none;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  line-height: 1;
+  display: inline-block;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a.z-icon:hover,
+a.fa-icon:hover,
+a.md-icon:hover,
+a.zotonic-logo:hover {
+  text-decoration: none;
+}
+.z-icon em,
+.fa-icon em,
+.md-icon em,
+.zotonic-logo em {
+  display: none;
+}
+.z-icon,
+.z-btn-remove:before,
+.z-btn-remove:hover:before,
+.z-btn-help:before,
+a.close:before,
+button.close:before,
+a.close:hover:before,
+button.close:hover:before,
+.zotonic-logo {
+  font-family: "Zotonic";
+}
+.fa-icon {
+  font-family: 'FontAwesome';
+}
+.md-icon {
+  font-family: 'Material Design Iconic Font';
+}
+.z-btn-remove,
+.z-btn-help {
+  display: block;
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-shadow: none;
+}
+.z-btn-remove > span,
+.z-btn-help > span,
+.z-btn-remove > em,
+.z-btn-help > em {
+  display: none;
+}
+.z-btn-remove {
+  background-color: transparent;
+}
+.z-btn-remove:before {
+  content: "\e60c";
+}
+.z-btn-remove:hover {
+  text-decoration: none;
+}
+.z-btn-remove:hover:before {
+  content: "\e609";
+}
+.z-btn-help:before {
+  content: "\e600";
+}
+a.close,
+button.close {
+  padding: 0;
+  font-size: 16px;
+}
+a.close:before,
+button.close:before {
+  content: "\e60c";
+}
+a.close:hover:before,
+button.close:hover:before {
+  content: "\e609";
+}
+a.close > span,
+button.close > span,
+a.close > em,
+button.close > em {
+  display: none;
+}
+.z-btn-social {
+  position: relative;
+}
+.z-btn-social,
+.z-btn-sociala,
+.z-btn-social:hover {
+  color: #fff;
+}
+.z-btn-social .z-icon,
+.z-btn-social .fa-icon,
+.z-btn-social .md-icon,
+.z-btn-social .zotonic-logo {
+  position: absolute;
+  display: block;
+  font-size: 16px;
+  line-height: 16px;
+  height: 16px;
+  width: 16px;
+  text-align: center;
+  top: 50%;
+  left: .5em;
+  margin-top: -7.5px;
+}
+@font-face {
+  font-family: 'FontAwesome';
+  src: url('../font-awesome-4/fonts/fontawesome-webfont.eot@v=4.2.0');
+  src: url('../font-awesome-4/fonts/fontawesome-webfont.eot@') format('embedded-opentype'), url('../font-awesome-4/fonts/fontawesome-webfont.woff@v=4.2.0') format('woff'), url('../font-awesome-4/fonts/fontawesome-webfont.ttf@v=4.2.0') format('truetype'), url('../font-awesome-4/fonts/fontawesome-webfont.svg@v=4.2.0') format('svg');
+  font-weight: normal;
+  font-style: normal;
+}
+.fa-icon {
+  display: inline-block;
+  font: normal normal normal 14px/1 FontAwesome;
+  font-size: inherit;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+@font-face {
+  font-family: 'Material Design Iconic Font';
+  src: url('../material-design/fonts/Material-Design-Iconic-Font.eot@v=1.0.1');
+  src: url('../material-design/fonts/Material-Design-Iconic-Font.eot@') format('embedded-opentype'), url('../material-design/fonts/Material-Design-Iconic-Font.woff@v=1.0.1') format('woff'), url('../material-design/fonts/Material-Design-Iconic-Font.ttf@v=1.0.1') format('truetype'), url('../material-design/fonts/Material-Design-Iconic-Font.svg@v=1.0.1') format('svg');
+  font-weight: normal;
+  font-style: normal;
+}
+.md-icon,
+[class^="md-icon-"],
+[class*=" md-icon-"] {
+  display: inline-block;
+  font: normal normal normal 14px/1 'Material Design Iconic Font';
+  font-size: inherit;
+  speak: none;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.md-icon {
+  line-height: inherit;
+  vertical-align: bottom;
+}
+.z-icon-cross:before {
+  content: "\e60c";
+}
+.z-icon-cross-circle:before {
+  content: "\e609";
+}
+.z-icon-drag:before {
+  content: "\e60b";
+}
+.z-icon-edit:before {
+  content: "\e606";
+}
+.z-icon-facebook:before {
+  content: "\e614";
+}
+.z-icon-github:before {
+  content: "\eab0";
+}
+.z-icon-google-plus:before {
+  content: "\e610";
+}
+.z-icon-help:before {
+  content: "\e60e";
+}
+.z-icon-help-circle:before {
+  content: "\e600";
+}
+.z-icon-info-circle:before {
+  content: "\e601";
+}
+.z-icon-instagram:before {
+  content: "\e612";
+}
+.z-icon-linkedin:before {
+  content: "\e611";
+}
+.z-icon-logo-z:before {
+  content: "\e607";
+}
+.z-icon-logo:before {
+  content: "\5a";
+}
+.z-icon-minus:before {
+  content: "\e60a";
+}
+.z-icon-minus-circle:before {
+  content: "\e603";
+}
+.z-icon-off:before {
+  content: "\e60f";
+}
+.z-icon-ok:before {
+  content: "\e608";
+}
+.z-icon-ok-circle:before {
+  content: "\e602";
+}
+.z-icon-plus:before {
+  content: "\e60d";
+}
+.z-icon-plus-circle:before {
+  content: "\e604";
+}
+.z-icon-share:before {
+  content: "\e615";
+}
+.z-icon-twitter:before {
+  content: "\e613";
+}
+.z-icon-user:before {
+  content: "\e605";
+}
+.zotonic-logo:before {
+  content: "\5a";
+}
+body.err403 {
+  background-color: #e8e8e8;
+}
+body.err403 .z-logon-box {
+  background-color: white;
+  padding: 20px 10px;
+}
+.z-logon-prompt {
+  text-align: center;
+  max-width: 300px;
+  margin: 40px auto;
+}
+.z-logon-back {
+  float: left;
+  margin: 40px 20px;
+}
+.z-logon-box {
+  float: none;
+  margin: 15px auto;
+  /* Extra login options */
+  /* Supporting options */
+  /* Sign up specific*/
+}
+.z-logon-box .passcode {
+  display: none;
+}
+.z-logon-box.z-logon-passcode .passcode {
+  display: block;
+}
+.z-logon-box.z-logon-set-passcode .set-passcode {
+  display: block;
+}
+.z-logon-box ul {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+}
+.z-logon-box p {
+  margin-bottom: 10px;
+}
+.z-logon-box button[type="submit"],
+.z-logon-box input[type="submit"] {
+  width: 100%;
+}
+.z-logon-box .z-logon-title:first-of-type,
+.z-logon-box h2:first-of-type,
+.z-logon-box h3:first-of-type,
+.z-logon-box h4:first-of-type {
+  margin-top: 0;
+}
+.z-logon-box .z-logon-form {
+  margin: 15px auto 0 auto;
+}
+.z-logon-box .z-logon-extra li {
+  margin: 0 0 10px 0;
+}
+.z-logon-box .z-logon-extra .z-btn-social {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+}
+.z-logon-box .z-logon-extra .z-logon-extra-separator {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  line-height: 16px;
+  margin: 15px 0;
+}
+.z-logon-box .z-logon-extra .z-logon-extra-separator:before {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 16px;
+  top: 8px;
+  width: 40px;
+  background-color: #fff;
+  content: "";
+  margin: -8px 0 0 -20px;
+  z-index: -1;
+}
+.z-logon-box .z-logon-extra .z-logon-extra-separator:after {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  content: " ";
+  width: 100%;
+  border-bottom: 1px solid #ddd;
+  z-index: -2;
+}
+.z-logon-box .z-logon-extra .z-logon-extra-separator:first-child {
+  display: none;
+}
+.z-logon-box .z-logon-support {
+  margin: 15px 0 0 0;
+  padding: 15px 0 0 0;
+}
+.z-logon-box .z-logon-support:empty {
+  display: none;
+}
+.z-logon-box .alert {
+  display: none;
+}
+.z-logon-box .alert :first-child {
+  margin-top: 0;
+}
+.z-logon-box .alert :last-child {
+  margin-bottom: 0;
+}
+.z-logon-box.z-logon-error .alert {
+  display: block;
+}
+.z-logon-box.z-logon-box-boxed .z-logon-form {
+  margin: 15px 0;
+  padding: 15px 20px;
+  background-color: #f2f2f2;
+}
+.z-logon-box.z-logon-box-boxed .z-logon-extra .z-logon-extra-separator {
+  margin-left: -20px;
+  margin-right: -20px;
+}
+.z-logon-box.z-logon-box-boxed .z-logon-extra .z-logon-extra-separator:before {
+  background-color: #f2f2f2;
+}
+.z-logon-box.z-logon-box-boxed .z-logon-support {
+  margin-left: -20px;
+  margin-right: -20px;
+  padding-left: 20px;
+  padding-right: 20px;
+  border-top: 1px solid #ddd;
+}
+.z-logon-box.z-logon-box-boxed .z-logon-support p:last-child {
+  margin-bottom: 0;
+}
+.z-logon-box #signup_verify {
+  display: none;
+}
+.z-logon-box input#surprefix {
+  width: 50px;
+}
+.z-logon-box #signup_error_tos_agree,
+.z-logon-box #signup_error_duplicate_username,
+.z-logon-box #signup_error_duplicate_identity {
+  display: none;
+}
+.z-logon-box .error_tos_agree #signup_error_tos_agree,
+.z-logon-box .error_duplicate_username #signup_error_duplicate_username,
+.z-logon-box .error_duplicate_identity #signup_error_duplicate_identity,
+.z-logon-box .error_custom_1 #signup_error_custom_1,
+.z-logon-box .error_custom_2 #signup_error_custom_2 {
+  display: block;
+}
+.z-logon-box .z_validation_message {
+  display: block;
+  margin: 5px 0 0 0;
+}

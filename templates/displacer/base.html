@@ -1,0 +1,89 @@
+{% load static %}{% load assets %}<!DOCTYPE html>
+<html lang="nl" class=" ">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <meta name="twitter:site" content="Displace">
+    <meta name="twitter:title" content="{% block og_title %}Displace{% endblock %}">
+    <meta name="twitter:description" content="{% block og_description %}{% endblock %}">
+    <meta name="twitter:card" content="summary">
+    <meta property="og:site_name" content="Displace"/>
+    <meta property="og:title" content="{% block og_title2 %}Displace{% endblock %}"/>
+    <meta property="og:description" content="{% block og_description2 %}{% endblock %}"/>
+    <meta property="og:url" content="{{ request.build_absolute_uri }}"/>
+    {% block extra_meta %}{% endblock %}
+
+    <title>{% block title %}Displace{% endblock %}</title>
+
+    <link rel="apple-touch-icon" sizes="144x144" href="{% static 'displacer/images/apple-touch-icon-144x144.png' %}" />
+    <link rel="apple-touch-icon" sizes="152x152" href="{% static 'displacer/images/apple-touch-icon-152x152.png' %}" />
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'displacer/images/favicon-32x32.png' %}" />
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'displacer/images/favicon-16x16.png' %}" />
+    <link rel="icon" href="{% static 'displacer/images/favicon.ico' %}">
+
+    <link href="{% static_v 'displacer/css/bootstrap.css' %}" type="text/css" media="all" rel="stylesheet"/>
+    <link href="{% static_v 'displacer/css/icons.css' %}" type="text/css" media="all" rel="stylesheet"/>
+    <link href="{% static_v 'displacer/css/screen.css' %}" type="text/css" media="all" rel="stylesheet"/>
+    <script src="{% static_v 'displacer/js/displace.js' %}" defer></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="{% block body_class %}do_foundation do_base{% endblock %}">
+    <a href="#main-content" class="visually-hidden focusable skip-link">
+        Sla de navigatie over en ga direct naar de inhoud
+    </a>
+
+    <nav class="global-nav do_global_nav">
+        {% if request.path == '/displace/' %}
+            <h1 class="global-nav__logo">
+                <span lang="nl" class="visually-hidden">Displace, verhalen over leven met beperkingen</span>
+            </h1>
+        {% else %}
+            <a href="{% url 'displacer:home' %}" class="global-nav__logo">
+                <span lang="nl" class="visually-hidden">Ga terug naar de homepagina</span>
+            </a>
+        {% endif %}
+
+        <ul class="global-nav__menu ">
+            <li class="{% if request.resolver_match.url_name == 'theme_list' or request.resolver_match.url_name == 'theme_detail' %}is-active{% endif %}">
+                <a href="{% url 'displacer:theme_list' %}" class="themes" data-target="#">THEMA&#39;S</a>
+            </li>
+            <li class="{% if request.resolver_match.url_name == 'article_list' or request.resolver_match.url_name == 'article_detail' %}is-active{% endif %}">
+                <a href="{% url 'displacer:article_list' %}" class="stories" data-target="#">VERHALEN</a>
+            </li>
+            {% for p in menu_pages %}
+                <li class="{% if request.resolver_match.url_name == 'page_detail' and request.resolver_match.kwargs.slug == p.slug %}is-active{% endif %}">
+                    <a href="{% url 'displacer:page_detail' p.slug %}" class="page_about" data-target="#">{{ p.title }}</a>
+                </li>
+            {% endfor %}
+        </ul>
+
+        <a href="#" id="toggle-menu" class="toggle-menu "><span>Menu</span></a>
+    </nav>
+
+    <main id="main-content" role="main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="main-footer">
+        <div class="main-container">
+            <img src="{% static 'displacer/images/logo-footer.svg' %}" alt="DisPLACE">
+
+            <div class="main-footer__contact">
+                <h2>Contact</h2>
+                <p><i class="icon--email"></i> <a href="mailto:{{ site.contact_email }}">{{ site.contact_email }}</a></p>
+            </div>
+
+            <ul class="main-footer__nav ">
+                {% for p in footer_pages %}
+                    <li>
+                        <a href="{% url 'displacer:page_detail' p.slug %}" data-target="#">{{ p.title }}</a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </footer>
+
+    {% block extra_body %}{% endblock %}
+</body>
+</html>

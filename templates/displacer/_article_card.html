@@ -1,0 +1,25 @@
+{# A single Article rendered as a list-card. Reused by home/list/theme detail. #}
+{% load static %}
+<li class="list__item {% if white %}-white{% endif %}">
+    {% with cat=article.primary_category %}
+        {% if cat %}
+            <strong class="list__item__cat">{{ cat.name }}</strong>
+        {% endif %}
+    {% endwith %}
+
+    {% if article.hero_image and article.hero_image.file %}
+        <img src="{{ article.hero_image.file.url }}"
+             class="list__item__image"
+             alt="{{ article.hero_image.alt_text }}"/>
+    {% else %}
+        <img src="{% static 'displacer/images/placeholder.png' %}"
+             class="list__item__image" alt=""/>
+    {% endif %}
+
+    <div class="list__item__content">
+        <h3 class="list__item__title">{{ article.title }}</h3>
+        <a href="{{ article.get_absolute_url }}">
+            <span lang="nl" class="visually-hidden">Lees meer, over: {{ article.title }}</span>
+        </a>
+    </div>
+</li>
