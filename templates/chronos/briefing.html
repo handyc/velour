@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Briefing — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .brief-head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+    .brief-head h1 { margin: 0; }
+    .brief-head .date { color: #8b949e; font-size: 0.95rem; }
+
+    .brief-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+        margin-top: 1rem;
+    }
+    @media (max-width: 720px) {
+        .brief-grid { grid-template-columns: 1fr; }
+    }
+
+    .brief-section { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 0.85rem 1rem; }
+    .brief-section h2 { margin: 0 0 0.5rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; }
+    .brief-section .empty { color: #6e7681; font-style: italic; font-size: 0.9rem; }
+
+    .mood-line { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+    .mood-line .word { font-size: 1.4rem; color: #c9d1d9; font-weight: 500; }
+    .mood-line .age { font-size: 0.75rem; color: #6e7681; }
+    .mood-line .intensity {
+        display: inline-block; height: 6px; width: 80px;
+        background: #21262d; border-radius: 3px; position: relative; overflow: hidden;
+    }
+    .mood-line .intensity .bar { position: absolute; left: 0; top: 0; height: 100%; background: #58a6ff; }
+    .because { color: #6e7681; font-size: 0.8rem; margin-top: 0.35rem; }
+
+    .concern-list, .event-list, .task-list-mini { list-style: none; padding: 0; margin: 0.4rem 0 0; }
+    .concern-list li, .event-list li, .task-list-mini li {
+        padding: 0.3rem 0;
+        border-bottom: 1px solid #161b22;
+        font-size: 0.9rem;
+        color: #c9d1d9;
+    }
+    .concern-list li:last-child, .event-list li:last-child, .task-list-mini li:last-child { border-bottom: 0; }
+    .meta { color: #6e7681; font-size: 0.78rem; }
+    .overdue-tag { color: #f85149; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.5em; }
+    .due-today-tag { color: #d29922; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.5em; }
+
+    .brief-actions { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="brief-head">
+    <h1>Today's briefing</h1>
+    <span class="date">{{ today|date:'l d M Y' }} · {{ now|date:'H:i' }}</span>
+</div>
+
+<div class="brief-grid">
+    <div class="brief-section">
+        <h2>Identity</h2>
+        {% if identity.available and identity.mood %}
+        <div class="mood-line">
+            <span class="word">{{ identity.mood }}</span>
+            <span class="intensity"><span class="bar" style="width: {{ identity.intensity|floatformat:2 }}00%;"></span></span>
+            <span class="age">{{ identity.mood_age }} min ago</span>
+        </div>
+        {% if identity.because %}<div class="because">↳ {{ identity.because }}</div>{% endif %}
+        {% else %}
+        <div class="empty">No mood reading yet.</div>
+        {% endif %}
+
+        {% if identity.concerns %}
+        <h2 style="margin-top:0.85rem;">Open concerns ({{ identity.concern_count }})</h2>
+        <ul class="concern-list">
+            {% for c in identity.concerns %}
+            <li>{{ c.aspect }} <span class="meta">since {{ c.opened_at|date:'d M' }}</span></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+
+    <div class="brief-section">
+        <h2>Today's calendar</h2>
+        {% if events %}
+        <ul class="event-list">
+            {% for ev in events %}
+            <li>
+                {% if not ev.all_day %}<span class="meta">{{ ev.start|date:'H:i' }}</span> {% endif %}
+                {{ ev.title }}
+                {% if ev.all_day %}<span class="meta">all day</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty">Nothing on the calendar today.</div>
+        {% endif %}
+    </div>
+
+    <div class="brief-section" style="grid-column: 1 / -1;">
+        <h2>Tasks ({{ open_count }} open)</h2>
+        {% if not overdue and not due_today and not upcoming %}
+        <div class="empty">Nothing on the list. <a href="{% url 'chronos:task_add' %}" style="color:#58a6ff;">Add one</a>.</div>
+        {% else %}
+        <ul class="task-list-mini">
+            {% for t in overdue %}
+            <li>
+                <span class="overdue-tag">overdue</span>
+                <a href="{% url 'chronos:task_edit' t.pk %}" style="color:inherit;">{{ t.title }}</a>
+                <span class="meta">· {{ t.due_at|date:'d M H:i' }}{% if t.source_app %} · {{ t.source_app }}{% endif %}</span>
+            </li>
+            {% endfor %}
+            {% for t in due_today %}
+            <li>
+                <span class="due-today-tag">today</span>
+                <a href="{% url 'chronos:task_edit' t.pk %}" style="color:inherit;">{{ t.title }}</a>
+                <span class="meta">· {{ t.due_at|date:'H:i' }}{% if t.source_app %} · {{ t.source_app }}{% endif %}</span>
+            </li>
+            {% endfor %}
+            {% for t in upcoming %}
+            <li>
+                <a href="{% url 'chronos:task_edit' t.pk %}" style="color:inherit;">{{ t.title }}</a>
+                <span class="meta">{% if t.due_at %}· due {{ t.due_at|date:'d M' }}{% else %}· no due date{% endif %}{% if t.source_app %} · {{ t.source_app }}{% endif %}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+</div>
+
+<div class="brief-actions">
+    <a href="{% url 'chronos:task_add' %}" class="btn">New task</a>
+    <a href="{% url 'chronos:task_list' %}" class="btn btn-secondary">All tasks</a>
+    <a href="{% url 'chronos:calendar' %}" class="btn btn-secondary">Calendar</a>
+</div>
+{% endblock %}

@@ -222,3 +222,77 @@ class CalendarEvent(models.Model):
     @property
     def tag_list(self):
         return [t.strip() for t in self.tags.split(',') if t.strip()]
+
+
+# --- Tasks (Phase 2e) ----------------------------------------------------
+
+
+class Task(models.Model):
+    """A thing to do. Lightweight on purpose: title + optional notes,
+    optional due date, a priority, and a status. `source_app` lets
+    other apps tag a task so it can be grouped (e.g. 'displacement',
+    'aether'); `source_url` jumps back to whatever the task is about.
+
+    Concerns in the Identity app already capture Velour's persistent
+    self-attention, so Tasks here are for the operator's own to-dos —
+    deliberately separate.
+    """
+
+    STATUS_OPEN = 'open'
+    STATUS_DONE = 'done'
+    STATUS_DROPPED = 'dropped'
+    STATUS_CHOICES = [
+        (STATUS_OPEN,    'Open'),
+        (STATUS_DONE,    'Done'),
+        (STATUS_DROPPED, 'Dropped'),
+    ]
+
+    PRIORITY_LOW = 'low'
+    PRIORITY_NORMAL = 'normal'
+    PRIORITY_HIGH = 'high'
+    PRIORITY_CHOICES = [
+        (PRIORITY_LOW,    'Low'),
+        (PRIORITY_NORMAL, 'Normal'),
+        (PRIORITY_HIGH,   'High'),
+    ]
+
+    title = models.CharField(max_length=200)
+    notes = models.TextField(blank=True)
+    source_app = models.CharField(
+        max_length=40, blank=True,
+        help_text='Free-text app/tag this task belongs to '
+                  '(e.g. "displacement", "aether"). Optional.',
+    )
+    source_url = models.URLField(
+        max_length=400, blank=True,
+        help_text='Jump-back URL — the page or admin row this task '
+                  'is about. Optional.',
+    )
+    due_at = models.DateTimeField(null=True, blank=True)
+    priority = models.CharField(
+        max_length=8, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL,
+    )
+    status = models.CharField(
+        max_length=8, choices=STATUS_CHOICES, default=STATUS_OPEN,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = [
+            models.F('due_at').asc(nulls_last=True),
+            'priority',
+            '-created_at',
+        ]
+        indexes = [
+            models.Index(fields=['status', 'due_at']),
+        ]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def is_open(self):
+        return self.status == self.STATUS_OPEN

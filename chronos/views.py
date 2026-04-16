@@ -1,17 +1,20 @@
 """Chronos views — world clocks, prefs editor, sync endpoint, calendar."""
 
 import calendar as pycal
+import io
+import re
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, available_timezones
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.management import call_command
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone as djtz
 from django.views.decorators.http import require_POST
 
-from .models import CalendarEvent, ClockPrefs, WatchedTimezone
+from .models import CalendarEvent, ClockPrefs, Task, WatchedTimezone
 
 
 def _all_tz_names():
@@ -514,3 +517,231 @@ def event_delete(request, slug):
     messages.success(request, f'Removed "{title}".')
     return redirect('chronos:calendar_day',
                     year=local.year, month=local.month, day=local.day)
+
+
+@login_required
+@require_POST
+def resync_calendar(request):
+    """Manually re-run seed_holidays + seed_astronomy for the current
+    year through +2. Both commands are idempotent. Used by the "Resync"
+    button in the calendar toolbar.
+
+    Optional POST params:
+      year, month — redirect target (defaults to today's month).
+      reset       — '1' to delete existing rows for those sources first.
+    """
+    today = datetime.now(_home_tz()).date()
+    y_from = today.year
+    y_to = today.year + 2
+    reset = request.POST.get('reset') == '1'
+
+    buf = io.StringIO()
+    summary = []
+    for cmd in ('seed_holidays', 'seed_astronomy'):
+        try:
+            call_command(cmd, year_from=y_from, year_to=y_to,
+                         reset=reset, stdout=buf, stderr=buf)
+            tail = buf.getvalue().rstrip().splitlines()[-1]
+            m = re.search(r'Created (\d+), updated (\d+)', tail)
+            if m:
+                summary.append(f'{cmd}: +{m.group(1)} new, {m.group(2)} updated')
+            else:
+                summary.append(f'{cmd}: ran')
+        except Exception as e:
+            messages.error(request, f'{cmd} failed: {type(e).__name__}: {e}')
+            break
+    else:
+        messages.success(
+            request,
+            f'Resynced {y_from}–{y_to}. ' + ' · '.join(summary),
+        )
+
+    try:
+        y = int(request.POST.get('year') or today.year)
+        m = int(request.POST.get('month') or today.month)
+        return redirect('chronos:calendar_month', year=y, month=m)
+    except (TypeError, ValueError):
+        return redirect('chronos:calendar')
+
+
+# --- Tasks (Phase 2e) ----------------------------------------------------
+
+
+def _parse_due(s, tz):
+    if not s:
+        return None
+    try:
+        naive = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if naive.tzinfo is None:
+        naive = naive.replace(tzinfo=tz)
+    return naive
+
+
+def _apply_task_post(task, post, tz):
+    task.title = post.get('title', '').strip()
+    task.notes = post.get('notes', '').strip()
+    task.source_app = post.get('source_app', '').strip()
+    task.source_url = post.get('source_url', '').strip()
+    task.priority = post.get('priority', Task.PRIORITY_NORMAL)
+    if task.priority not in dict(Task.PRIORITY_CHOICES):
+        task.priority = Task.PRIORITY_NORMAL
+    new_status = post.get('status', task.status or Task.STATUS_OPEN)
+    if new_status not in dict(Task.STATUS_CHOICES):
+        new_status = Task.STATUS_OPEN
+    if new_status != task.status and new_status != Task.STATUS_OPEN:
+        task.closed_at = djtz.now()
+    elif new_status == Task.STATUS_OPEN:
+        task.closed_at = None
+    task.status = new_status
+    task.due_at = _parse_due(post.get('due_at', '').strip(), tz)
+
+
+@login_required
+def task_list(request):
+    """All tasks. Default: open + overdue first, then upcoming, then
+    closed at the bottom. Operator can filter via ?status=."""
+    show = request.GET.get('status', 'open')
+    qs = Task.objects.all()
+    if show in dict(Task.STATUS_CHOICES):
+        qs = qs.filter(status=show)
+    tz = _home_tz()
+    now = datetime.now(tz)
+    counts = {
+        s: Task.objects.filter(status=s).count()
+        for s, _ in Task.STATUS_CHOICES
+    }
+    return render(request, 'chronos/tasks.html', {
+        'tasks': list(qs),
+        'show': show,
+        'now': now,
+        'counts': counts,
+    })
+
+
+@login_required
+def task_add(request):
+    tz = _home_tz()
+    task = Task()
+    if request.method == 'POST':
+        _apply_task_post(task, request.POST, tz)
+        if not task.title:
+            messages.error(request, 'Title is required.')
+        else:
+            task.save()
+            messages.success(request, f'Added task "{task.title}".')
+            return redirect('chronos:task_list')
+    return render(request, 'chronos/task_form.html', {
+        'task': task, 'action': 'New', 'tz': tz,
+    })
+
+
+@login_required
+def task_edit(request, pk):
+    tz = _home_tz()
+    task = get_object_or_404(Task, pk=pk)
+    if request.method == 'POST':
+        _apply_task_post(task, request.POST, tz)
+        if not task.title:
+            messages.error(request, 'Title is required.')
+        else:
+            task.save()
+            messages.success(request, f'Updated "{task.title}".')
+            return redirect('chronos:task_list')
+    return render(request, 'chronos/task_form.html', {
+        'task': task, 'action': 'Edit', 'tz': tz,
+    })
+
+
+@login_required
+@require_POST
+def task_done(request, pk):
+    task = get_object_or_404(Task, pk=pk)
+    task.status = Task.STATUS_DONE
+    task.closed_at = djtz.now()
+    task.save(update_fields=['status', 'closed_at', 'updated_at'])
+    messages.success(request, f'Marked done: "{task.title}".')
+    return redirect(request.POST.get('next') or 'chronos:task_list')
+
+
+@login_required
+@require_POST
+def task_reopen(request, pk):
+    task = get_object_or_404(Task, pk=pk)
+    task.status = Task.STATUS_OPEN
+    task.closed_at = None
+    task.save(update_fields=['status', 'closed_at', 'updated_at'])
+    messages.success(request, f'Reopened "{task.title}".')
+    return redirect(request.POST.get('next') or 'chronos:task_list')
+
+
+@login_required
+@require_POST
+def task_delete(request, pk):
+    task = get_object_or_404(Task, pk=pk)
+    title = task.title
+    task.delete()
+    messages.success(request, f'Deleted "{title}".')
+    return redirect('chronos:task_list')
+
+
+# --- Briefing ------------------------------------------------------------
+
+
+def _briefing_context(tz):
+    """Compose the morning-briefing payload: mood + concerns from
+    Identity, today's CalendarEvents, open Tasks (sorted)."""
+    now = datetime.now(tz)
+    today = now.date()
+
+    identity = {'available': False}
+    try:
+        from identity.models import Concern, Tick
+        tick = Tick.objects.order_by('-at').first()
+        if tick:
+            age_min = int((djtz.now() - tick.at).total_seconds() / 60)
+            identity = {
+                'available':  True,
+                'mood':       tick.mood,
+                'intensity':  tick.mood_intensity,
+                'because':    getattr(tick, 'rule_label', '') or '',
+                'mood_age':   age_min,
+            }
+        else:
+            identity = {'available': True, 'mood': None}
+        identity['concerns'] = list(
+            Concern.objects.filter(closed_at=None).order_by('-opened_at')[:5]
+        )
+        identity['concern_count'] = (
+            Concern.objects.filter(closed_at=None).count()
+        )
+    except Exception:
+        pass
+
+    events = _events_on_day(today, tz)
+    open_tasks = list(Task.objects.filter(status=Task.STATUS_OPEN)[:10])
+    overdue = [t for t in open_tasks
+               if t.due_at and t.due_at.astimezone(tz).date() < today]
+    due_today = [t for t in open_tasks
+                 if t.due_at and t.due_at.astimezone(tz).date() == today]
+    upcoming = [t for t in open_tasks if t not in overdue
+                and t not in due_today]
+
+    return {
+        'now':         now,
+        'today':       today,
+        'identity':    identity,
+        'events':      events,
+        'overdue':     overdue,
+        'due_today':   due_today,
+        'upcoming':    upcoming,
+        'open_count':  Task.objects.filter(status=Task.STATUS_OPEN).count(),
+    }
+
+
+@login_required
+def briefing(request):
+    """Today's briefing: mood + concerns + calendar + tasks on one page."""
+    tz = _home_tz()
+    return render(request, 'chronos/briefing.html', _briefing_context(tz))

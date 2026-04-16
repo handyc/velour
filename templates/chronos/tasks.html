@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Tasks — Chronos{% endblock %}
+
+{% block extra_head %}
+<style>
+    .task-bar { display: flex; align-items: baseline; gap: 0.75rem; margin: 0.75rem 0 0.5rem; }
+    .task-bar .filters { display: flex; gap: 0.4rem; }
+    .task-bar .filters a {
+        font-size: 0.75rem;
+        padding: 0.18rem 0.55rem;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        color: #8b949e;
+    }
+    .task-bar .filters a.active {
+        background: #161b22;
+        color: #c9d1d9;
+        border-color: #58a6ff;
+    }
+    .task-list { list-style: none; margin: 0; padding: 0; }
+    .task-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.85rem;
+        padding: 0.55rem 0.4rem;
+        border-bottom: 1px solid #21262d;
+    }
+    .task-row .pri {
+        flex: 0 0 auto;
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 0.1rem 0.4rem;
+        border-radius: 3px;
+        color: #6e7681;
+        border: 1px solid #30363d;
+        min-width: 3.6em;
+        text-align: center;
+    }
+    .task-row .pri.high   { color: #f85149; border-color: #6e2c2c; }
+    .task-row .pri.normal { color: #c9d1d9; }
+    .task-row .pri.low    { color: #6e7681; }
+    .task-row .body { flex: 1 1 auto; min-width: 0; }
+    .task-row .title { color: #c9d1d9; font-weight: 500; }
+    .task-row .meta { font-size: 0.72rem; color: #6e7681; margin-top: 0.15rem; }
+    .task-row .meta .due-overdue { color: #f85149; }
+    .task-row .meta .due-today { color: #d29922; }
+    .task-row .actions { display: flex; gap: 0.3rem; flex: 0 0 auto; }
+    .task-row .actions form { margin: 0; }
+    .task-row .actions .btn { font-size: 0.7rem; padding: 0.18rem 0.5rem; }
+    .task-row.done .title, .task-row.dropped .title { color: #6e7681; text-decoration: line-through; }
+    .empty { color: #6e7681; font-style: italic; padding: 0.75rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Tasks</h1>
+<p style="color:#8b949e;">Things to do. Distinct from Identity's Concerns (those are Velour's persistent self-attention) — Tasks are the operator's to-dos.</p>
+
+<div class="task-bar">
+    <a href="{% url 'chronos:task_add' %}" class="btn">New task</a>
+    <a href="{% url 'chronos:briefing' %}" class="btn btn-secondary">Today's briefing</a>
+    <span style="flex:1;"></span>
+    <div class="filters">
+        <a href="?status=open"    {% if show == 'open' %}class="active"{% endif %}>Open ({{ counts.open }})</a>
+        <a href="?status=done"    {% if show == 'done' %}class="active"{% endif %}>Done ({{ counts.done }})</a>
+        <a href="?status=dropped" {% if show == 'dropped' %}class="active"{% endif %}>Dropped ({{ counts.dropped }})</a>
+        <a href="?status=all"     {% if show == 'all' %}class="active"{% endif %}>All</a>
+    </div>
+</div>
+
+{% if tasks %}
+<ul class="task-list">
+    {% for t in tasks %}
+    <li class="task-row {{ t.status }}">
+        <span class="pri {{ t.priority }}">{{ t.get_priority_display }}</span>
+        <div class="body">
+            <div class="title"><a href="{% url 'chronos:task_edit' t.pk %}" style="color:inherit;">{{ t.title }}</a></div>
+            <div class="meta">
+                {% if t.due_at %}
+                    {% if t.is_open %}
+                        {% if t.due_at < now %}
+                            <span class="due-overdue">overdue · {{ t.due_at|date:'D d M H:i' }}</span>
+                        {% else %}
+                            <span>due {{ t.due_at|date:'D d M H:i' }}</span>
+                        {% endif %}
+                    {% else %}
+                        <span>was due {{ t.due_at|date:'D d M' }}</span>
+                    {% endif %}
+                {% else %}
+                    <span>no due date</span>
+                {% endif %}
+                {% if t.source_app %} · <span>{{ t.source_app }}</span>{% endif %}
+                {% if t.source_url %} · <a href="{{ t.source_url }}" style="color:#58a6ff;">link</a>{% endif %}
+                {% if not t.is_open and t.closed_at %} · {{ t.get_status_display|lower }} {{ t.closed_at|date:'d M' }}{% endif %}
+            </div>
+        </div>
+        <div class="actions">
+            {% if t.is_open %}
+            <form method="post" action="{% url 'chronos:task_done' t.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'chronos:task_list' %}?status={{ show }}">
+                <button type="submit" class="btn">Done</button>
+            </form>
+            {% else %}
+            <form method="post" action="{% url 'chronos:task_reopen' t.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'chronos:task_list' %}?status={{ show }}">
+                <button type="submit" class="btn btn-secondary">Reopen</button>
+            </form>
+            {% endif %}
+            <a href="{% url 'chronos:task_edit' t.pk %}" class="btn btn-secondary">Edit</a>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p class="empty">No tasks {% if show != 'all' %}with status “{{ show }}”{% endif %}.</p>
+{% endif %}
+{% endblock %}

@@ -52,6 +52,7 @@ DEFAULT_INTERVALS = {
     'reflect_monthly':  2_592_000,   # 30 d
     'meditate_ladder':  604_800,     # 1 w
     'rebuild_document': 604_800,     # 1 w
+    'morning_briefing': 86_400,      # 1 d (gated to fire near 06:00 local)
 }
 
 
@@ -83,7 +84,7 @@ def dispatch(force=None):
         force = {
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
-            'rebuild_document', 'tile_reflect',
+            'rebuild_document', 'tile_reflect', 'morning_briefing',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -116,9 +117,17 @@ def dispatch(force=None):
         ('meditate_ladder',  _do_meditation_ladder),
         ('rebuild_document', _do_rebuild_document),
         ('tile_reflect',     _do_tile_reflect),
+        ('morning_briefing', _do_morning_briefing),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
+            # The briefing is daily AND time-of-day gated: only fire
+            # in the local-morning window so it lands in the day's
+            # Codex section as an actual morning briefing rather than
+            # whenever cron first sees it.
+            if kind == 'morning_briefing' and 'morning_briefing' not in force:
+                if not _in_morning_window():
+                    continue
             results[kind] = _run_pipeline(kind, fn)
 
     # Single summary dispatch row.
@@ -254,6 +263,98 @@ def _refresh_consciousness_layer():
         layer.save(update_fields=['body', 'last_confirmed_at'])
     except Exception:
         pass
+
+
+def _in_morning_window():
+    """True iff the current local hour is in [6, 8)."""
+    try:
+        from chronos.models import ClockPrefs
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        tz = ZoneInfo(ClockPrefs.load().home_tz)
+        return datetime.now(tz).hour in (6, 7)
+    except Exception:
+        return False
+
+
+def _do_morning_briefing():
+    """Compose today's briefing as a Codex section in the
+    'Morning Briefings' manual. Reuses the same payload the public
+    /chronos/briefing/ view shows, rendered as plain markdown."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from chronos.models import ClockPrefs
+    from chronos.views import _briefing_context
+    from codex.models import Manual, Section
+
+    tz = ZoneInfo(ClockPrefs.load().home_tz)
+    ctx = _briefing_context(tz)
+    today = ctx['today']
+
+    lines = [f"_{today.strftime('%A %d %b %Y')} · {ctx['now'].strftime('%H:%M')}_", ""]
+
+    ident = ctx.get('identity') or {}
+    if ident.get('mood'):
+        lines.append(f"**Mood:** {ident['mood']} "
+                     f"({ident.get('intensity', 0):.2f}) — "
+                     f"{ident.get('mood_age', '?')} min ago")
+        if ident.get('because'):
+            lines.append(f"*↳ because:* {ident['because']}")
+    if ident.get('concerns'):
+        lines.append("")
+        lines.append(f"**Open concerns ({ident.get('concern_count', 0)}):**")
+        for c in ident['concerns']:
+            lines.append(f"- {c.aspect} _(since {c.opened_at.strftime('%d %b')})_")
+
+    lines.append("")
+    lines.append("**Today's calendar:**")
+    if ctx['events']:
+        for ev in ctx['events']:
+            when = 'all day' if ev.all_day else ev.start.astimezone(tz).strftime('%H:%M')
+            lines.append(f"- {when} — {ev.title}")
+    else:
+        lines.append("_Nothing on the calendar._")
+
+    lines.append("")
+    lines.append(f"**Tasks ({ctx['open_count']} open):**")
+    if not ctx['overdue'] and not ctx['due_today'] and not ctx['upcoming']:
+        lines.append("_Nothing to do — list is empty._")
+    for t in ctx['overdue']:
+        lines.append(f"- ⚠️ overdue · {t.title} _(due "
+                     f"{t.due_at.astimezone(tz).strftime('%d %b %H:%M')})_")
+    for t in ctx['due_today']:
+        lines.append(f"- 📌 today · {t.title} _("
+                     f"{t.due_at.astimezone(tz).strftime('%H:%M')})_")
+    for t in ctx['upcoming']:
+        due = (f' _(due {t.due_at.astimezone(tz).strftime("%d %b")})_'
+               if t.due_at else '')
+        lines.append(f"- {t.title}{due}")
+
+    body = '\n'.join(lines)
+
+    manual, _ = Manual.objects.get_or_create(
+        slug='morning-briefings',
+        defaults={
+            'title':    'Morning Briefings',
+            'subtitle': 'Daily snapshot: mood, calendar, tasks.',
+            'author':   'Velour Chronos',
+            'version':  '1',
+            'abstract': 'Auto-composed each morning by the Identity '
+                        'cron dispatcher. Pulls from Identity ticks, '
+                        'Chronos calendar events, and Chronos tasks.',
+        },
+    )
+    section_slug = f'briefing-{today.strftime("%Y-%m-%d")}'
+    Section.objects.update_or_create(
+        manual=manual, slug=section_slug,
+        defaults={
+            'title':      f"Briefing — {today.strftime('%a %d %b %Y')}",
+            'body':       body,
+            'sort_order': -int(datetime.combine(today,
+                              datetime.min.time()).timestamp()),
+        },
+    )
+    return f'Wrote {section_slug}'
 
 
 def _do_tile_reflect():

@@ -37,8 +37,10 @@
 <h1>Chronos</h1>
 <p style="color:#8b949e;">Velour's sense of time. The clock in the top-right of every page is your home time ({{ prefs.home_tz }}). Below: the same clock, plus every world clock you've pinned.</p>
 
-<div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
-    <a href="{% url 'chronos:calendar' %}" class="btn">Calendar</a>
+<div style="display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
+    <a href="{% url 'chronos:briefing' %}" class="btn">Today's briefing</a>
+    <a href="{% url 'chronos:task_list' %}" class="btn btn-secondary">Tasks</a>
+    <a href="{% url 'chronos:calendar' %}" class="btn btn-secondary">Calendar</a>
     <a href="{% url 'chronos:watched_add' %}" class="btn btn-secondary">Add World Clock</a>
     <a href="{% url 'chronos:settings' %}" class="btn btn-secondary">Settings</a>
     <button type="button" class="btn btn-secondary" onclick="window.location.reload()">Re-sync now</button>

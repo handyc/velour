@@ -32,4 +32,15 @@ urlpatterns = [
     path('events/add/',              views.event_add,    name='event_add'),
     path('events/<slug:slug>/edit/', views.event_edit,   name='event_edit'),
     path('events/<slug:slug>/delete/', views.event_delete, name='event_delete'),
+
+    path('resync/', views.resync_calendar, name='resync'),
+
+    # Tasks + briefing (Phase 2e)
+    path('briefing/',              views.briefing,     name='briefing'),
+    path('tasks/',                 views.task_list,    name='task_list'),
+    path('tasks/add/',             views.task_add,     name='task_add'),
+    path('tasks/<int:pk>/edit/',   views.task_edit,    name='task_edit'),
+    path('tasks/<int:pk>/done/',   views.task_done,    name='task_done'),
+    path('tasks/<int:pk>/reopen/', views.task_reopen,  name='task_reopen'),
+    path('tasks/<int:pk>/delete/', views.task_delete,  name='task_delete'),
 ]
