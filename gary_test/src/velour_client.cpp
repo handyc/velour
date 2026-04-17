@@ -3,10 +3,71 @@
 
 VelourClient::VelourClient(const char* baseUrl, const char* slug, const char* apiToken)
     : _baseUrl(baseUrl),
-      _slug(slug),
-      _apiToken(apiToken),
+      _slug(slug ? slug : ""),
+      _apiToken(apiToken ? apiToken : ""),
       _firmwareVersion(""),
-      _count(0) {}
+      _count(0),
+      _fsMounted(false) {}
+
+
+VelourClient::VelourClient(const char* baseUrl)
+    : _baseUrl(baseUrl),
+      _slug(""),
+      _apiToken(""),
+      _firmwareVersion(""),
+      _count(0),
+      _fsMounted(false) {}
+
+
+bool VelourClient::_ensureFs() {
+    if (_fsMounted) return true;
+    // LittleFS.begin() returns true on success. On ESP32 we pass true so
+    // the FS is auto-formatted on first boot; on ESP8266 begin() takes no
+    // args and auto-formats as needed.
+#if defined(ESP32)
+    _fsMounted = LittleFS.begin(true);
+#elif defined(ESP8266)
+    _fsMounted = LittleFS.begin();
+#endif
+    return _fsMounted;
+}
+
+
+bool VelourClient::loadStoredCredentials() {
+    if (!_ensureFs()) return false;
+    if (!LittleFS.exists(VELOUR_CREDS_PATH)) return false;
+    File f = LittleFS.open(VELOUR_CREDS_PATH, "r");
+    if (!f) return false;
+    // Two lines: slug, then token. Trim CRLF.
+    String slug = f.readStringUntil('\n');
+    String token = f.readStringUntil('\n');
+    f.close();
+    slug.trim();
+    token.trim();
+    if (!slug.length() || !token.length()) return false;
+    _slug = slug;
+    _apiToken = token;
+    return true;
+}
+
+
+bool VelourClient::saveCredentials() {
+    if (!_ensureFs()) return false;
+    if (!_slug.length() || !_apiToken.length()) return false;
+    File f = LittleFS.open(VELOUR_CREDS_PATH, "w");
+    if (!f) return false;
+    f.println(_slug);
+    f.println(_apiToken);
+    f.close();
+    return true;
+}
+
+
+bool VelourClient::clearStoredCredentials() {
+    if (!_ensureFs()) return false;
+    if (!LittleFS.exists(VELOUR_CREDS_PATH)) return true;
+    return LittleFS.remove(VELOUR_CREDS_PATH);
+}
 
 
 bool VelourClient::addReading(const char* channel, float value) {
@@ -96,6 +157,13 @@ String VelourClient::_buildPayload() const {
 
 
 int VelourClient::report() {
+    if (!hasIdentity()) {
+        // No slug/token yet — runtime-provisioned node hasn't registered
+        // or loaded credentials. Drop the batch so we don't stockpile
+        // unsendable readings indefinitely.
+        _count = 0;
+        return -1;
+    }
     if (WiFi.status() != WL_CONNECTED) {
         // No network — drop the batch so we don't leak memory forever.
         _count = 0;
@@ -174,6 +242,9 @@ static bool jsonHasTrue(const String& body, const char* key) {
 
 
 VelourClient::OtaResult VelourClient::checkForUpdate() {
+    if (!hasIdentity()) {
+        return VELOUR_OTA_CHECK_FAILED;
+    }
     if (WiFi.status() != WL_CONNECTED) {
         return VELOUR_OTA_NO_NETWORK;
     }
@@ -263,6 +334,74 @@ VelourClient::OtaResult VelourClient::checkForUpdate() {
     }
     return VELOUR_OTA_UPDATE_FAILED;
 #endif
+}
+
+
+VelourClient::RegisterResult VelourClient::registerSelf(
+    const char* provisioningSecret,
+    const char* hardwareProfile,
+    const char* fleet
+) {
+    if (WiFi.status() != WL_CONNECTED) {
+        return REG_NO_NETWORK;
+    }
+
+    // Build the MAC string. WiFi.macAddress() returns "AA:BB:CC:DD:EE:FF"
+    // already uppercase with colons — matches what the server expects.
+    String mac = WiFi.macAddress();
+
+    // Hand-rolled JSON so we stay dependency-free, same as _buildPayload().
+    String body;
+    body.reserve(256);
+    body = "{\"provisioning_secret\":";
+    appendEscaped(body, provisioningSecret);
+    body += ",\"mac\":";
+    appendEscaped(body, mac.c_str());
+    body += ",\"hardware_profile\":";
+    appendEscaped(body, hardwareProfile);
+    if (fleet && fleet[0]) {
+        body += ",\"fleet\":";
+        appendEscaped(body, fleet);
+    }
+    if (_firmwareVersion && _firmwareVersion[0]) {
+        body += ",\"firmware_version\":";
+        appendEscaped(body, _firmwareVersion);
+    }
+    body += '}';
+
+    String url = _effectiveBase();
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    url += "/api/nodes/register";
+
+    HTTPClient http;
+#if defined(ESP32)
+    if (!http.begin(url)) return REG_HTTP_FAILED;
+#elif defined(ESP8266)
+    WiFiClient client;
+    if (!http.begin(client, url)) return REG_HTTP_FAILED;
+#endif
+    http.addHeader("Content-Type", "application/json");
+    http.setUserAgent("velour-node/1");
+    http.setTimeout(10000);
+
+    int status = http.POST(body);
+    String resp = http.getString();
+    http.end();
+
+    if (status == 503) return REG_DISABLED;
+    if (status >= 400 && status < 500) return REG_REJECTED;
+    if (status != 200 && status != 201) return REG_HTTP_FAILED;
+
+    String slug = jsonStringAfter(resp, "slug");
+    String token = jsonStringAfter(resp, "api_token");
+    if (!slug.length() || !token.length()) {
+        return REG_BAD_RESPONSE;
+    }
+
+    _slug = slug;
+    _apiToken = token;
+    saveCredentials();  // best-effort; if flash is wedged the caller can retry
+    return REG_OK;
 }
 
 

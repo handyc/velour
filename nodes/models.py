@@ -146,6 +146,12 @@ class Node(models.Model):
     )
 
     enabled = models.BooleanField(default=True)
+    self_registered = models.BooleanField(
+        default=False,
+        help_text='True if this node was created via /api/nodes/register '
+                  'rather than the admin UI. Useful for spotting '
+                  'auto-provisioned fleet members in the node list.',
+    )
     notes = models.TextField(blank=True)
 
     commissioned_at = models.DateTimeField(auto_now_add=True)

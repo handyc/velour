@@ -34,6 +34,19 @@ else:
         'django-insecure-djorpl5_$%o*z6(+si93gmvz)j%4@%2whuxaug=umrtg-@p*+t',
     )
 
+# Provisioning secret for /api/nodes/register — lets identical-firmware
+# fleets (e.g. bodymap) self-register nodes instead of needing per-device
+# admin entries. Follows the same file-then-env fallback as SECRET_KEY so
+# setup.sh can write a generated value to provisioning_secret.txt. When
+# the secret is empty, /api/nodes/register returns 503 and registration
+# is effectively disabled — that's the default for existing deployments
+# so opting in requires an explicit action.
+_provisioning_file = BASE_DIR / 'provisioning_secret.txt'
+if _provisioning_file.is_file():
+    VELOUR_PROVISIONING_SECRET = _provisioning_file.read_text().strip()
+else:
+    VELOUR_PROVISIONING_SECRET = os.environ.get('VELOUR_PROVISIONING_SECRET', '')
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 

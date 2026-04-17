@@ -6,7 +6,7 @@
 // velour logs the data. Your control logic, pin assignments, and local
 // decision-making stay exactly where they are.
 //
-// Usage:
+// Usage (admin-provisioned, Gary-style):
 //
 //   #include "velour_client.h"
 //
@@ -20,6 +20,24 @@
 //     WiFi.begin(SSID, PASS);
 //     while (WiFi.status() != WL_CONNECTED) delay(250);
 //     velour.setFirmwareVersion("gary-0.3.0");
+//   }
+//
+// Usage (self-provisioned, identical-firmware fleets like bodymap):
+//
+//   VelourClient velour("http://velour.lucdh.nl");
+//
+//   void setup() {
+//     WiFi.begin(SSID, PASS);
+//     while (WiFi.status() != WL_CONNECTED) delay(250);
+//     if (!velour.loadStoredCredentials()) {
+//       velour.registerSelf(
+//           "shared-provisioning-secret",   // from velour settings
+//           "Bodymap Node v1",              // HardwareProfile.name
+//           "bodymap"                       // fleet / Experiment.slug
+//       );
+//       // Credentials are persisted to LittleFS; survives reboot.
+//     }
+//     velour.setFirmwareVersion("bodymap-0.1.0");
 //   }
 //
 //   void loop() {
@@ -43,17 +61,27 @@
   #include <WiFi.h>
   #include <HTTPClient.h>
   #include <HTTPUpdate.h>
+  #include <LittleFS.h>
 #elif defined(ESP8266)
   #include <ESP8266WiFi.h>
   #include <ESP8266HTTPClient.h>
   #include <ESP8266httpUpdate.h>
   #include <WiFiClient.h>
+  #include <LittleFS.h>
 #else
   #error "velour_client requires ESP8266 or ESP32 (Arduino core)"
 #endif
 
 #ifndef VELOUR_MAX_READINGS
 #define VELOUR_MAX_READINGS 16
+#endif
+
+// Path on LittleFS where self-registered nodes persist their credentials.
+// Two lines: slug, then api_token. Plain text — these values are already
+// per-device secrets and the flash isn't readable off-chip without physical
+// access anyway.
+#ifndef VELOUR_CREDS_PATH
+#define VELOUR_CREDS_PATH "/velour_creds.txt"
 #endif
 
 struct VelourReading {
@@ -63,7 +91,62 @@ struct VelourReading {
 
 class VelourClient {
 public:
+    // Admin-provisioned constructor: slug and api token are known at compile
+    // time (baked into build_flags / secrets.ini). This is the original
+    // usage pattern — Gary, Hazel, and Mabel all use it.
     VelourClient(const char* baseUrl, const char* slug, const char* apiToken);
+
+    // Runtime-provisioned constructor: starts with no identity. Call
+    // loadStoredCredentials() or registerSelf() in setup() before using
+    // the other methods. report() and checkForUpdate() no-op (return -1)
+    // when no identity is present.
+    explicit VelourClient(const char* baseUrl);
+
+    // True once slug + api token are set (either from the compile-time
+    // constructor, loadStoredCredentials(), or a successful registerSelf()).
+    bool hasIdentity() const { return _slug.length() && _apiToken.length(); }
+
+    const char* slug()  const { return _slug.c_str(); }
+    const char* token() const { return _apiToken.c_str(); }
+
+    // Load slug + token from LittleFS if a prior registerSelf() wrote them.
+    // Returns true on success. Mounts LittleFS on first call.
+    bool loadStoredCredentials();
+
+    // Persist the current slug + token to LittleFS. Called automatically
+    // after a successful registerSelf() but exposed for operators who want
+    // to pre-seed credentials over serial.
+    bool saveCredentials();
+
+    // Forget any stored credentials. Next registerSelf() will get a fresh
+    // entry from velour (unless the same MAC is still registered, in which
+    // case the server returns the existing slug+token — idempotent).
+    bool clearStoredCredentials();
+
+    enum RegisterResult {
+        REG_OK             = 0,  // slug + token received, stored to flash
+        REG_NO_NETWORK     = 1,  // WiFi not connected
+        REG_HTTP_FAILED    = 2,  // HTTP layer error or non-2xx from server
+        REG_BAD_RESPONSE   = 3,  // 2xx but body missing slug / api_token
+        REG_REJECTED       = 4,  // server returned 4xx (bad secret, bad MAC, etc.)
+        REG_DISABLED       = 5,  // server returned 503 (registration not enabled)
+    };
+
+    // Call velour's /api/nodes/register with this node's MAC address. On
+    // success, stores the returned slug + api_token to LittleFS and makes
+    // hasIdentity() true. Safe to call repeatedly — velour is idempotent
+    // on MAC, so a re-register returns the existing credentials.
+    //
+    // provisioningSecret must match settings.VELOUR_PROVISIONING_SECRET on
+    // the server. hardwareProfile must match an existing HardwareProfile.name
+    // (create it via the admin UI first). fleet is optional and corresponds
+    // to Experiment.slug — if it matches an existing Experiment, the new
+    // node attaches to it.
+    RegisterResult registerSelf(
+        const char* provisioningSecret,
+        const char* hardwareProfile,
+        const char* fleet = nullptr
+    );
 
     // Queue a reading for the next report() call. Returns false if the
     // buffer is full — flush with report() and try again if that happens.
@@ -125,16 +208,18 @@ public:
 
 private:
     const char* _baseUrl;
-    const char* _slug;
-    const char* _apiToken;
+    String _slug;           // mutable so registerSelf() / loadStoredCredentials() can set it
+    String _apiToken;       // ditto
     const char* _firmwareVersion;
-    String _resolvedUrl;   // set by discover() if the port changed
+    String _resolvedUrl;    // set by discover() if the port changed
     VelourReading _readings[VELOUR_MAX_READINGS];
     int _count;
+    bool _fsMounted;        // lazy LittleFS.begin()
 
     String _effectiveBase() const;
     String _buildUrl() const;
     String _buildPayload() const;
+    bool   _ensureFs();
 };
 
 #endif  // VELOUR_CLIENT_H

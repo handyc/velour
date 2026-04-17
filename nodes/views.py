@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 
 from django.conf import settings
 from django.contrib import messages
@@ -8,6 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -729,6 +731,158 @@ def api_model_json(request, slug):
         return JsonResponse(lobe)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+
+_MAC_RE = re.compile(r'^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$')
+
+
+def _hardware_profile_for(name_or_slug):
+    """Resolve a HardwareProfile from the string a self-registering ESP sent.
+
+    Tries exact name match first, then case-insensitive name match. Returns
+    None if nothing matches — the caller translates that into a 400 so the
+    operator can see the mismatch in the node's serial log and fix either
+    the firmware string or the Django admin entry.
+    """
+    exact = HardwareProfile.objects.filter(name=name_or_slug).first()
+    if exact:
+        return exact
+    return HardwareProfile.objects.filter(name__iexact=name_or_slug).first()
+
+
+@csrf_exempt
+@require_POST
+def api_register(request):
+    """Self-registration endpoint for identical-firmware fleets.
+
+    POST /api/nodes/register
+    Body JSON:
+      {
+        "provisioning_secret": "<shared secret from settings>",
+        "mac":                 "AA:BB:CC:DD:EE:FF",
+        "hardware_profile":    "Bodymap Node v1",    // HardwareProfile.name
+        "fleet":               "bodymap",             // optional Experiment.slug
+        "firmware_version":    "bodymap-0.1.0"       // optional
+      }
+
+    Response (201 on create, 200 on re-register):
+      {
+        "slug":       "bodymap-aabbcc",
+        "api_token":  "<48 chars>",
+        "registered": true,   // false if MAC was already known
+        "mac":        "AA:BB:CC:DD:EE:FF",
+        "nickname":   "bodymap-aabbcc"
+      }
+
+    Identity is MAC-derived: slug = "<fleet>-<last6MAChex>" so the same
+    physical device keeps the same slug across reboots, flash wipes, and
+    re-registration. Re-registering an existing MAC is idempotent — returns
+    the existing slug+token, which is how a node recovers its credentials
+    after LittleFS corruption or a firmware reflash that lost stored state.
+
+    Self-registration is gated on settings.VELOUR_PROVISIONING_SECRET. When
+    the secret is unset, this endpoint returns 503 — opting in requires an
+    explicit operator action (setting the env var or writing the file).
+    """
+    expected = getattr(settings, 'VELOUR_PROVISIONING_SECRET', '') or ''
+    if not expected:
+        return JsonResponse(
+            {'error': 'self-registration is disabled on this velour'},
+            status=503,
+        )
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except (ValueError, UnicodeDecodeError) as e:
+        return JsonResponse({'error': f'invalid JSON: {e}'}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({'error': 'JSON body must be an object'}, status=400)
+
+    supplied = str(payload.get('provisioning_secret', ''))
+    if not hmac.compare_digest(supplied, expected):
+        return JsonResponse({'error': 'invalid provisioning_secret'}, status=403)
+
+    mac = str(payload.get('mac', '')).strip().upper()
+    if not _MAC_RE.match(mac):
+        return JsonResponse(
+            {'error': 'invalid mac (expected AA:BB:CC:DD:EE:FF)'},
+            status=400,
+        )
+
+    profile_name = str(payload.get('hardware_profile', '')).strip()
+    if not profile_name:
+        return JsonResponse(
+            {'error': 'hardware_profile is required'}, status=400,
+        )
+    profile = _hardware_profile_for(profile_name)
+    if profile is None:
+        return JsonResponse(
+            {'error': f'unknown hardware_profile: {profile_name!r} '
+                      '(create it via the admin UI first)'},
+            status=400,
+        )
+
+    firmware_version = str(payload.get('firmware_version', '')).strip()[:64]
+    fleet_slug = slugify(str(payload.get('fleet', '')).strip())[:140]
+
+    # Idempotent re-registration: same MAC → same credentials back. A flashed
+    # bodymap node that lost LittleFS creds can call register again and
+    # recover its identity without operator intervention.
+    existing = Node.objects.filter(mac_address=mac).first()
+    if existing is not None:
+        updates = []
+        if firmware_version and existing.firmware_version != firmware_version:
+            existing.firmware_version = firmware_version
+            updates.append('firmware_version')
+        if updates:
+            existing.save(update_fields=updates)
+        return JsonResponse({
+            'slug':       existing.slug,
+            'api_token':  existing.api_token,
+            'registered': False,
+            'mac':        mac,
+            'nickname':   existing.nickname,
+        })
+
+    # MAC-derived slug: last 6 hex chars of the MAC, namespaced by fleet.
+    # Collisions are only possible if another fleet happens to collide on
+    # the same 6 hex, which is ~1-in-16M per existing node — but suffix-
+    # loop just in case, since a dupe here would hard-fail the insert.
+    suffix = mac.replace(':', '').lower()[-6:]
+    base_slug = f'{fleet_slug}-{suffix}' if fleet_slug else f'node-{suffix}'
+    slug = base_slug
+    n = 2
+    while Node.objects.filter(slug=slug).exists():
+        slug = f'{base_slug}-{n}'
+        n += 1
+
+    # Attach to an Experiment if the fleet name matches one — otherwise
+    # the node registers unattached and admin can group it later. We don't
+    # auto-create Experiments from self-registration because that lets any
+    # ESP with the provisioning secret spawn arbitrary experiment rows.
+    experiment = None
+    if fleet_slug:
+        experiment = Experiment.objects.filter(slug=fleet_slug).first()
+
+    node = Node(
+        nickname=slug,
+        slug=slug,
+        mac_address=mac,
+        hardware_profile=profile,
+        experiment=experiment,
+        firmware_version=firmware_version,
+        self_registered=True,
+        enabled=True,
+    )
+    node.save()
+
+    return JsonResponse({
+        'slug':       node.slug,
+        'api_token':  node.api_token,
+        'registered': True,
+        'mac':        mac,
+        'nickname':   node.nickname,
+    }, status=201)
 
 
 @csrf_exempt
