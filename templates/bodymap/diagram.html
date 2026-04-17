@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}{{ experiment.name }} — Bodymap{% endblock %}
+
+{% block extra_head %}
+<style>
+    .diag-wrap { display: grid; grid-template-columns: 340px 1fr; gap: 2rem; margin-top: 1rem; }
+    @media (max-width: 800px) { .diag-wrap { grid-template-columns: 1fr; } }
+    .diag-svg-box { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 1rem; }
+    .diag-svg { display: block; width: 100%; height: auto; max-height: 640px; }
+    .seg-shape { fill: #21262d; stroke: #30363d; stroke-width: 1; transition: fill 120ms; cursor: default; }
+    .seg-shape.assigned { fill: #2ea043; }
+    .seg-shape.assigned.low  { fill: #d29922; }
+    .seg-shape.assigned.locked { fill: #bc8cff; }
+    .seg-shape:hover { stroke: #58a6ff; stroke-width: 2; }
+    .seg-label { font-family: ui-monospace, Menlo, monospace; font-size: 9px; fill: #c9d1d9; pointer-events: none; }
+    .legend { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; font-size: 0.75rem; color: #8b949e; }
+    .legend-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+    .diag-side h2 { font-size: 1rem; color: #c9d1d9; margin-top: 0; }
+    .seg-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .seg-table th, .seg-table td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #21262d; }
+    .seg-table th { color: #8b949e; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.05em; font-weight: 500; }
+    .seg-row.locked { background: rgba(188, 140, 255, 0.08); }
+    .seg-none { color: #6e7681; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ experiment.name }} <span style="color:#6e7681;font-size:0.9rem;font-weight:normal;">· bodymap</span></h1>
+<p style="color:#8b949e;max-width:52rem;">
+    {% if experiment.description %}{{ experiment.description }}{% else %}Wearable biometric mesh, one node per body segment.{% endif %}
+</p>
+
+<div class="diag-wrap">
+    <div class="diag-svg-box">
+        <svg class="diag-svg" viewBox="0 0 240 520" xmlns="http://www.w3.org/2000/svg">
+            {% comment %}
+            Each shape carries a data-role so hovering the list highlights
+            the SVG and vice versa. Class picks color from the mapping below.
+            {% endcomment %}
+
+            {% for role, label in role_choices %}
+                {% if role != 'unassigned' %}
+                {% with s=by_role|default_if_none:'' %}{% endwith %}
+                {% endif %}
+            {% endfor %}
+
+            {# Head #}
+            <circle cx="120" cy="40" r="26"
+                    class="seg-shape {% if by_role.head %}assigned{% if by_role.head.confidence < 0.4 %} low{% endif %}{% if by_role.head.operator_locked %} locked{% endif %}{% endif %}"
+                    data-role="head" />
+            <text x="120" y="43" text-anchor="middle" class="seg-label">head</text>
+
+            {# Neck #}
+            <rect x="110" y="68" width="20" height="14" rx="3"
+                  class="seg-shape {% if by_role.neck %}assigned{% if by_role.neck.confidence < 0.4 %} low{% endif %}{% if by_role.neck.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="neck" />
+
+            {# Torso #}
+            <rect x="88" y="84" width="64" height="104" rx="6"
+                  class="seg-shape {% if by_role.torso %}assigned{% if by_role.torso.confidence < 0.4 %} low{% endif %}{% if by_role.torso.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="torso" />
+            <text x="120" y="140" text-anchor="middle" class="seg-label">torso</text>
+
+            {# Upper arms #}
+            <rect x="58" y="90" width="22" height="56" rx="8"
+                  class="seg-shape {% if by_role.upper_arm_l %}assigned{% if by_role.upper_arm_l.confidence < 0.4 %} low{% endif %}{% if by_role.upper_arm_l.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="upper_arm_l" />
+            <text x="69" y="120" text-anchor="middle" class="seg-label">uarm L</text>
+
+            <rect x="160" y="90" width="22" height="56" rx="8"
+                  class="seg-shape {% if by_role.upper_arm_r %}assigned{% if by_role.upper_arm_r.confidence < 0.4 %} low{% endif %}{% if by_role.upper_arm_r.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="upper_arm_r" />
+            <text x="171" y="120" text-anchor="middle" class="seg-label">uarm R</text>
+
+            {# Forearms #}
+            <rect x="54" y="150" width="22" height="56" rx="8"
+                  class="seg-shape {% if by_role.forearm_l %}assigned{% if by_role.forearm_l.confidence < 0.4 %} low{% endif %}{% if by_role.forearm_l.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="forearm_l" />
+            <text x="65" y="180" text-anchor="middle" class="seg-label">farm L</text>
+
+            <rect x="164" y="150" width="22" height="56" rx="8"
+                  class="seg-shape {% if by_role.forearm_r %}assigned{% if by_role.forearm_r.confidence < 0.4 %} low{% endif %}{% if by_role.forearm_r.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="forearm_r" />
+            <text x="175" y="180" text-anchor="middle" class="seg-label">farm R</text>
+
+            {# Upper legs #}
+            <rect x="90" y="196" width="26" height="90" rx="8"
+                  class="seg-shape {% if by_role.upper_leg_l %}assigned{% if by_role.upper_leg_l.confidence < 0.4 %} low{% endif %}{% if by_role.upper_leg_l.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="upper_leg_l" />
+            <text x="103" y="244" text-anchor="middle" class="seg-label">uleg L</text>
+
+            <rect x="124" y="196" width="26" height="90" rx="8"
+                  class="seg-shape {% if by_role.upper_leg_r %}assigned{% if by_role.upper_leg_r.confidence < 0.4 %} low{% endif %}{% if by_role.upper_leg_r.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="upper_leg_r" />
+            <text x="137" y="244" text-anchor="middle" class="seg-label">uleg R</text>
+
+            {# Lower legs #}
+            <rect x="94" y="292" width="22" height="100" rx="7"
+                  class="seg-shape {% if by_role.lower_leg_l %}assigned{% if by_role.lower_leg_l.confidence < 0.4 %} low{% endif %}{% if by_role.lower_leg_l.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="lower_leg_l" />
+            <text x="105" y="344" text-anchor="middle" class="seg-label">lleg L</text>
+
+            <rect x="128" y="292" width="22" height="100" rx="7"
+                  class="seg-shape {% if by_role.lower_leg_r %}assigned{% if by_role.lower_leg_r.confidence < 0.4 %} low{% endif %}{% if by_role.lower_leg_r.operator_locked %} locked{% endif %}{% endif %}"
+                  data-role="lower_leg_r" />
+            <text x="139" y="344" text-anchor="middle" class="seg-label">lleg R</text>
+        </svg>
+        <div class="legend">
+            <span><span class="legend-sw" style="background:#2ea043;"></span>assigned (conf ≥ 0.4)</span>
+            <span><span class="legend-sw" style="background:#d29922;"></span>low confidence</span>
+            <span><span class="legend-sw" style="background:#bc8cff;"></span>operator-locked</span>
+            <span><span class="legend-sw" style="background:#21262d;border:1px solid #30363d;"></span>unfilled</span>
+        </div>
+    </div>
+
+    <div class="diag-side">
+        <h2>Segment assignments</h2>
+        {% if segments %}
+        <table class="seg-table">
+            <thead>
+                <tr>
+                    <th>Role</th>
+                    <th>Node</th>
+                    <th>Conf.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in segments %}
+                <tr class="seg-row {% if s.operator_locked %}locked{% endif %}">
+                    <td><span style="font-family:ui-monospace,Menlo,monospace;color:#58a6ff;">{{ s.get_role_display }}</span>{% if s.operator_locked %} <span style="font-size:0.65rem;color:#bc8cff;">locked</span>{% endif %}</td>
+                    <td><a href="{% url 'nodes:detail' s.node.slug %}" style="color:#c9d1d9;text-decoration:none;">{{ s.node.nickname }}</a></td>
+                    <td style="font-family:ui-monospace,Menlo,monospace;color:#8b949e;">{{ s.confidence|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="seg-none">No nodes have reported a role in this fleet yet.</p>
+        {% endif %}
+
+        <p style="margin-top:1.5rem;">
+            <a href="{% url 'bodymap:list' %}" class="btn btn-secondary">All bodymap segments</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

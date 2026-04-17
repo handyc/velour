@@ -48,6 +48,7 @@ urlpatterns = [
     path('evolution/', include('evolution.urls')),
     path('displacer/', include('displacer.urls')),
     path('casting/', include('casting.urls')),
+    path('bodymap/', include('bodymap.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

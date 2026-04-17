@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Bodymap — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .bm-lede { color: #8b949e; max-width: 52rem; }
+    .bm-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.85rem; }
+    .bm-table th, .bm-table td { padding: 0.35rem 0.6rem; text-align: left; border-bottom: 1px solid #21262d; }
+    .bm-table th { color: #8b949e; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; font-weight: 500; }
+    .bm-table tr.locked td { background: rgba(210, 153, 34, 0.08); }
+    .bm-role { font-family: ui-monospace, Menlo, monospace; color: #58a6ff; }
+    .bm-role.unassigned { color: #6e7681; }
+    .bm-conf { font-family: ui-monospace, Menlo, monospace; color: #8b949e; font-size: 0.78rem; }
+    .bm-conf.high { color: #2ea043; }
+    .bm-conf.mid  { color: #d29922; }
+    .bm-conf.low  { color: #f85149; }
+    .bm-lock { font-size: 0.7rem; padding: 0.1rem 0.5rem; border-radius: 8px;
+               background: rgba(210, 153, 34, 0.15); color: #d29922; }
+    .bm-node a { color: #c9d1d9; text-decoration: none; }
+    .bm-node a:hover { color: #58a6ff; }
+    .bm-empty { color: #6e7681; margin-top: 1rem; }
+    h2.bm-sub { margin-top: 2rem; font-size: 1rem; color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Bodymap</h1>
+<p class="bm-lede">
+    Wearable biometric mesh. Each ESP32-S3 SuperMini sits on a body
+    segment (torso, forearm, upper leg…) and reports motion coherence
+    with its peers. The firmware clusters those observations into a
+    topology and posts its assigned role here. Operators can override
+    any role via the admin — the server will then ignore further
+    firmware assignments for that node.
+</p>
+
+{% if segments %}
+<table class="bm-table">
+    <thead>
+        <tr>
+            <th>Node</th>
+            <th>Role</th>
+            <th>Confidence</th>
+            <th>Experiment</th>
+            <th>Assigned</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for s in segments %}
+        {% with c=s.confidence %}
+        <tr class="{% if s.operator_locked %}locked{% endif %}">
+            <td class="bm-node">
+                <a href="{% url 'nodes:detail' s.node.slug %}">{{ s.node.nickname }}</a>
+                <span style="color:#6e7681;font-family:ui-monospace,Menlo,monospace;font-size:0.72rem;">· {{ s.node.slug }}</span>
+            </td>
+            <td>
+                <span class="bm-role {% if s.role == 'unassigned' %}unassigned{% endif %}">{{ s.get_role_display }}</span>
+                {% if s.operator_locked %}<span class="bm-lock">locked</span>{% endif %}
+            </td>
+            <td>
+                <span class="bm-conf {% if c >= 0.75 %}high{% elif c >= 0.4 %}mid{% else %}low{% endif %}">
+                    {{ c|floatformat:2 }}
+                </span>
+            </td>
+            <td>
+                {% if s.experiment %}
+                <a href="{% url 'bodymap:diagram' s.experiment.slug %}" style="color:#58a6ff;text-decoration:none;">{{ s.experiment.name }}</a>
+                {% else %}
+                <span style="color:#6e7681;">—</span>
+                {% endif %}
+            </td>
+            <td style="color:#8b949e;font-size:0.78rem;">{{ s.assigned_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% endwith %}
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="bm-empty">No segments yet. Flash a bodymap node and it will appear here after clustering stabilises.</p>
+{% endif %}
+
+{% if orphans %}
+<h2 class="bm-sub">Unassigned wearables ({{ orphans|length }})</h2>
+<p style="color:#8b949e;font-size:0.85rem;">
+    Nodes attached to a bodymap experiment that haven't yet reported a role.
+</p>
+<table class="bm-table">
+    <thead>
+        <tr>
+            <th>Node</th>
+            <th>Hardware</th>
+            <th>Experiment</th>
+            <th>Last seen</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for n in orphans %}
+        <tr>
+            <td class="bm-node">
+                <a href="{% url 'nodes:detail' n.slug %}">{{ n.nickname }}</a>
+            </td>
+            <td style="color:#8b949e;font-size:0.78rem;">
+                {% if n.hardware_profile %}{{ n.hardware_profile.name }}{% else %}—{% endif %}
+            </td>
+            <td style="color:#8b949e;font-size:0.78rem;">
+                {% if n.experiment %}{{ n.experiment.name }}{% else %}—{% endif %}
+            </td>
+            <td style="color:#6e7681;font-size:0.78rem;">
+                {% if n.last_seen_at %}{{ n.last_seen_at|date:"Y-m-d H:i" }}{% else %}never{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

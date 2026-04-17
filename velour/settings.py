@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     'evolution',
     'displacer',
     'casting',
+    'bodymap',
 ]
 
 MIDDLEWARE = [
