@@ -90,6 +90,44 @@ def attic_edit(request, slug):
 
 @login_required
 @require_POST
+def attic_splice(request):
+    """Take random slices from a random selection of existing Attic
+    images and splice them into a new image saved back to the Attic."""
+    from .splicer import pick_random_image_items, splice_to_attic
+
+    try:
+        count = int(request.POST.get('count', 8))
+    except ValueError:
+        count = 8
+    try:
+        slices = int(request.POST.get('slices', 24))
+    except ValueError:
+        slices = 24
+    count = max(1, min(32, count))
+    slices = max(4, min(80, slices))
+
+    sources = pick_random_image_items(count=count)
+    if not sources:
+        messages.error(request, 'No image items available to splice.')
+        return redirect('attic:list')
+
+    item = splice_to_attic(
+        sources, slices=slices,
+        uploaded_by=request.user if request.user.is_authenticated else None,
+    )
+    if item is None:
+        messages.error(request, 'Splice failed — no usable source images.')
+        return redirect('attic:list')
+
+    messages.success(
+        request,
+        f'Spliced {slices} slices from {len(sources)} sources into '
+        f'"{item.title}".')
+    return redirect('attic:detail', slug=item.slug)
+
+
+@login_required
+@require_POST
 def attic_delete(request, slug):
     item = get_object_or_404(MediaItem, slug=slug)
     title = item.title

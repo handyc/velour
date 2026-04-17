@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ experiment.title }} — Casting{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'casting/css/casting.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="cast-wrap cast-detail">
+    <a class="cast-back" href="{% url 'casting:index' %}">← Casting</a>
+    <h1>
+        <span class="cast-dot cast-dot-{{ experiment.status }} cast-dot-lg"
+              title="{{ experiment.get_status_display }}"></span>
+        {{ experiment.title }}
+    </h1>
+    <p class="cast-detail-tagline">{{ experiment.tagline }}</p>
+
+    <dl class="cast-specs">
+        <dt>weight bits</dt>   <dd>{{ experiment.weight_bits }}</dd>
+        <dt>search space</dt>  <dd>{{ experiment.search_space_display }}</dd>
+        <dt>target family</dt> <dd>{{ experiment.target_family }}</dd>
+        <dt>method</dt>        <dd>{{ experiment.search_method }}</dd>
+    </dl>
+
+    <div class="cast-body">{{ experiment.body_md|linebreaks }}</div>
+
+    {% if experiment.js_module_name %}
+    <div class="cast-runner">
+        <div class="cast-btn-row">
+            <button id="cast-run-btn" class="cast-run-btn">Run once</button>
+            <button id="cast-loop-btn" class="cast-run-btn">Run continuously</button>
+            <button id="cast-stop-btn" class="cast-run-btn" disabled>Stop</button>
+            <button id="cast-export-btn" class="cast-run-btn">Export as standalone HTML</button>
+        </div>
+        <pre id="cast-output" class="cast-output">click a button to execute in your browser.</pre>
+    </div>
+    <script src="{% static 'casting/js/'|add:experiment.js_module_name|add:'.js' %}"></script>
+    <script src="{% static 'casting/js/'|add:experiment.js_module_name|add:'_continuous.js' %}"></script>
+    <script>
+        (function () {
+            const runBtn    = document.getElementById('cast-run-btn');
+            const loopBtn   = document.getElementById('cast-loop-btn');
+            const stopBtn   = document.getElementById('cast-stop-btn');
+            const exportBtn = document.getElementById('cast-export-btn');
+            const out       = document.getElementById('cast-output');
+            const oneName  = 'Casting_{{ experiment.js_module_name }}';
+            const contName = 'Casting_{{ experiment.js_module_name }}_continuous';
+
+            const assetUrls = {
+                css:    '{% static "casting/css/casting.css" %}',
+                one:    '{% static "casting/js/"|add:experiment.js_module_name|add:".js" %}',
+                cont:   '{% static "casting/js/"|add:experiment.js_module_name|add:"_continuous.js" %}',
+                source: '{% url "casting:source" experiment.slug %}',
+            };
+            const exportMeta = {
+                slug:     '{{ experiment.slug }}',
+                title:    '{{ experiment.title|escapejs }}',
+                filename: '{{ experiment.c_source_filename }}',
+            };
+
+            function stopLoop() {
+                const cont = window[contName];
+                if (cont && cont.stop) cont.stop();
+                loopBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+
+            runBtn.addEventListener('click', function () {
+                stopLoop();
+                const mod = window[oneName];
+                if (!mod) {
+                    out.textContent = 'module ' + oneName + ' not loaded';
+                    return;
+                }
+                out.textContent = 'running...';
+                setTimeout(function () {
+                    const t0 = performance.now();
+                    try {
+                        const text = mod.run();
+                        const t1 = performance.now();
+                        out.textContent = text + '\n\nelapsed: ' + (t1 - t0).toFixed(1) + ' ms';
+                    } catch (e) {
+                        out.textContent = 'error: ' + (e.message || e);
+                    }
+                }, 10);
+            });
+
+            loopBtn.addEventListener('click', function () {
+                const mod = window[contName];
+                if (!mod || !mod.start) {
+                    out.textContent = 'continuous module ' + contName + ' not loaded';
+                    return;
+                }
+                loopBtn.disabled = true;
+                stopBtn.disabled = false;
+                mod.start(function (text) { out.textContent = text; });
+            });
+
+            stopBtn.addEventListener('click', stopLoop);
+            window.addEventListener('beforeunload', stopLoop);
+
+            function htmlEscape(s) {
+                return String(s).replace(/[&<>"]/g, function (c) {
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+                });
+            }
+
+            function bytesToBase64(str) {
+                const utf8 = new TextEncoder().encode(str);
+                let bin = '';
+                for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i]);
+                return btoa(bin);
+            }
+
+            async function buildStandalone() {
+                const [cssText, oneJs, contJs, srcText] = await Promise.all([
+                    fetch(assetUrls.css).then(r => r.text()),
+                    fetch(assetUrls.one).then(r => r.text()),
+                    fetch(assetUrls.cont).then(r => r.text()),
+                    fetch(assetUrls.source).then(r => r.text()),
+                ]);
+
+                const detail = document.querySelector('.cast-detail').cloneNode(true);
+                // drop back-link, the button row, the output <pre>, the download chip section
+                detail.querySelectorAll('.cast-back, .cast-runner, .cast-dl').forEach(n => n.remove());
+                const detailHtml = detail.innerHTML;
+
+                const srcDataUrl = 'data:text/plain;charset=utf-8;base64,' + bytesToBase64(srcText);
+
+                const page = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${htmlEscape(exportMeta.title)} — Casting (standalone)</title>
+<style>
+body { background:#0d1117; color:#c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; margin:0; }
+${cssText}
+</style>
+</head>
+<body>
+<div class="cast-wrap cast-detail">
+${detailHtml}
+<div class="cast-runner">
+  <div class="cast-btn-row">
+    <button id="cast-run-btn" class="cast-run-btn">Run once</button>
+    <button id="cast-loop-btn" class="cast-run-btn">Run continuously</button>
+    <button id="cast-stop-btn" class="cast-run-btn" disabled>Stop</button>
+  </div>
+  <pre id="cast-output" class="cast-output">click a button to execute in your browser.</pre>
+</div>
+<div class="cast-dl">
+  <a class="cast-chip" href="${srcDataUrl}" download="${htmlEscape(exportMeta.filename)}">
+    download ${htmlEscape(exportMeta.filename)}
+  </a>
+</div>
+</div>
+<script>
+${oneJs}
+<\/script>
+<script>
+${contJs}
+<\/script>
+<script>
+(function () {
+  const runBtn  = document.getElementById('cast-run-btn');
+  const loopBtn = document.getElementById('cast-loop-btn');
+  const stopBtn = document.getElementById('cast-stop-btn');
+  const out     = document.getElementById('cast-output');
+  const oneName  = ${JSON.stringify(oneName)};
+  const contName = ${JSON.stringify(contName)};
+  function stopLoop() {
+    const cont = window[contName];
+    if (cont && cont.stop) cont.stop();
+    loopBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+  runBtn.addEventListener('click', function () {
+    stopLoop();
+    const mod = window[oneName];
+    if (!mod) { out.textContent = 'module ' + oneName + ' not loaded'; return; }
+    out.textContent = 'running...';
+    setTimeout(function () {
+      const t0 = performance.now();
+      try {
+        const text = mod.run();
+        const t1 = performance.now();
+        out.textContent = text + '\\n\\nelapsed: ' + (t1 - t0).toFixed(1) + ' ms';
+      } catch (e) { out.textContent = 'error: ' + (e.message || e); }
+    }, 10);
+  });
+  loopBtn.addEventListener('click', function () {
+    const mod = window[contName];
+    if (!mod || !mod.start) { out.textContent = 'continuous module ' + contName + ' not loaded'; return; }
+    loopBtn.disabled = true;
+    stopBtn.disabled = false;
+    mod.start(function (text) { out.textContent = text; });
+  });
+  stopBtn.addEventListener('click', stopLoop);
+  window.addEventListener('beforeunload', stopLoop);
+})();
+<\/script>
+</body>
+</html>`;
+                return page;
+            }
+
+            exportBtn.addEventListener('click', async function () {
+                exportBtn.disabled = true;
+                const oldText = exportBtn.textContent;
+                exportBtn.textContent = 'packaging...';
+                try {
+                    const html = await buildStandalone();
+                    const blob = new Blob([html], {type: 'text/html;charset=utf-8'});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'casting-' + exportMeta.slug + '.html';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+                } catch (e) {
+                    out.textContent = 'export failed: ' + (e.message || e);
+                } finally {
+                    exportBtn.textContent = oldText;
+                    exportBtn.disabled = false;
+                }
+            });
+        })();
+    </script>
+    {% endif %}
+
+    <div class="cast-dl">
+        <a class="cast-chip" href="{% url 'casting:source' experiment.slug %}">
+            download {{ experiment.c_source_filename }}
+        </a>
+    </div>
+</div>
+{% endblock %}

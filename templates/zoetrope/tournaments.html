@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Reel Tournaments — Zoetrope{% endblock %}
+
+{% block extra_head %}
+<style>
+    .tt-wrap { max-width: 900px; margin: 0 auto; padding: 0.5rem 0 3rem; }
+    .tt-head { display: flex; align-items: baseline; gap: 0.75rem; margin: 0.5rem 0 0.25rem; flex-wrap: wrap; }
+    .tt-head h1 { margin: 0; font-size: 1.4rem; }
+    .tt-head .spacer { flex: 1; }
+    .tt-lede { color: #8b949e; font-size: 0.85rem; max-width: 68ch; line-height: 1.45; margin: 0 0 1.1rem; }
+
+    .tt-form {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.75rem 0.9rem; margin-bottom: 1.2rem;
+        display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap;
+    }
+    .tt-form label { color: #8b949e; font-size: 0.7rem; display: block; margin-bottom: 0.2rem; }
+    .tt-form input, .tt-form select {
+        background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.35rem 0.5rem; font: inherit; font-size: 0.85rem;
+    }
+
+    .tt-card {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.75rem 0.9rem; margin-bottom: 0.9rem;
+    }
+    .tt-card h3 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+    .tt-card .mode { color: #6e7681; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .tt-card .winner { color: #2ea043; font-weight: 600; }
+    .tt-card table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; font-size: 0.78rem; }
+    .tt-card th { text-align: left; color: #6e7681; font-weight: 400; padding: 0.2rem 0.4rem; border-bottom: 1px solid #21262d; }
+    .tt-card td { padding: 0.2rem 0.4rem; border-bottom: 1px solid #161b22; }
+    .tt-card td.score { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #d29922; text-align: right; }
+    .tt-card tr.win td { color: #2ea043; font-weight: 600; }
+    .tt-card .components { color: #6e7681; font-family: ui-monospace, Menlo, monospace; font-size: 0.68rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tt-wrap">
+    <div class="tt-head">
+        <h1>Reel Tournaments</h1>
+        <span class="spacer"></span>
+        <span style="color:#6e7681;font-size:0.78rem;">{{ ready_reel_count }} ready reel{{ ready_reel_count|pluralize }} · {{ tournaments|length }} tournament{{ tournaments|length|pluralize }}</span>
+    </div>
+    <p class="tt-lede">
+        Evolution-Engine-style competitions between rendered Zoetrope reels.
+        Each tournament picks a random sample, scores them under a chosen
+        fitness mode, and crowns the best one. Components: <em>density</em>
+        (frames per second of the cut), <em>sonority</em> (speech samples ×
+        volume), <em>entropy</em> (color richness of the first frame),
+        <em>size_per_s</em> (MB/second). <em>Aesthetic</em> is a weighted
+        blend with random noise so repeats don't always pick the same reel.
+    </p>
+
+    <form method="post" action="{% url 'zoetrope:tournament_run' %}" class="tt-form">
+        {% csrf_token %}
+        <div>
+            <label for="count">Participants</label>
+            <input type="number" id="count" name="count" min="3" max="16" value="6" style="width:5rem;">
+        </div>
+        <div>
+            <label for="fitness_mode">Fitness mode</label>
+            <select id="fitness_mode" name="fitness_mode">
+                {% for m, label in fitness_modes %}
+                <option value="{{ m }}" {% if m == 'aesthetic' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn">Run tournament</button>
+        <a href="{% url 'zoetrope:list' %}" class="btn btn-secondary">Back to Reels</a>
+    </form>
+
+    {% if tournaments %}
+    {% for t in tournaments %}
+    <div class="tt-card">
+        <h3>
+            {{ t.name }}
+            {% if t.winner %}· <span class="winner">winner: {{ t.winner.title }}</span>{% endif %}
+        </h3>
+        <div class="mode">{{ t.get_fitness_mode_display }} · {{ t.created_at|date:"Y-m-d H:i" }} · status {{ t.status }}</div>
+        {% if t.results %}
+        <table>
+            <tr><th>#</th><th>Reel</th><th style="text-align:right;">Score</th><th>Components</th></tr>
+            {% for row in t.results %}
+            <tr class="{% if forloop.first %}win{% endif %}">
+                <td>{{ forloop.counter }}</td>
+                <td>
+                    {% if row.reel_slug %}
+                    <a href="{% url 'zoetrope:detail' row.reel_slug %}">{{ row.reel_title }}</a>
+                    {% else %}{{ row.reel_title|default:row.error }}{% endif %}
+                </td>
+                <td class="score">{{ row.score }}</td>
+                <td class="components">{% if row.components %}d={{ row.components.density }} · s={{ row.components.sonority }} · e={{ row.components.entropy }} · m={{ row.components.size_per_s }}{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:#8b949e;">No tournaments yet. Render at least three reels and pit them against each other.</p>
+    {% endif %}
+</div>
+{% endblock %}

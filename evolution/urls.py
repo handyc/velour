@@ -7,6 +7,13 @@ app_name = 'evolution'
 urlpatterns = [
     path('', views.run_list, name='list'),
     path('new/', views.run_new, name='new'),
+    path('speciate/', views.speciate, name='speciate'),
+    path('populate-languages/', views.populate_languages,
+         name='populate_languages'),
+    path('tournament/', views.language_tournament,
+         name='language_tournament'),
+    path('championship/', views.language_championship,
+         name='language_championship'),
     path('agents/', views.agent_list, name='agents'),
     path('agents/save/', views.agent_save, name='agent_save'),
     path('agents/<slug:slug>/', views.agent_detail, name='agent_detail'),

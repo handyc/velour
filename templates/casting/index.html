@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Casting — Velour{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'casting/css/casting.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="cast-wrap">
+    <h1>Casting</h1>
+    <p class="cast-lede">
+        A library of model-search experiments. Each one asks how small a
+        working model can be, or how small solvers can be combined to
+        reach a bigger task. Run any experiment live in the browser, or
+        download its canonical C source.
+    </p>
+
+    <table class="cast-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th></th>
+                <th>experiment</th>
+                <th>bits</th>
+                <th>search&nbsp;space</th>
+                <th>method</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for exp in experiments %}
+            <tr>
+                <td class="cast-idx">{{ forloop.counter }}</td>
+                <td class="cast-status">
+                    <span class="cast-dot cast-dot-{{ exp.status }}" title="{{ exp.get_status_display }}"></span>
+                </td>
+                <td class="cast-title">
+                    <a href="{% url 'casting:detail' exp.slug %}">{{ exp.title }}</a>
+                    <div class="cast-tagline">{{ exp.tagline }}</div>
+                </td>
+                <td class="cast-num">{{ exp.weight_bits }}</td>
+                <td class="cast-num">{{ exp.search_space_display }}</td>
+                <td class="cast-method">{{ exp.search_method }}</td>
+                <td class="cast-links">
+                    <a class="cast-chip" href="{% url 'casting:detail' exp.slug %}">live</a>
+                    <a class="cast-chip" href="{% url 'casting:source' exp.slug %}">.c</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="cast-empty">no experiments yet — run <code>seed_casting</code></td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

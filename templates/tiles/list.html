@@ -32,8 +32,15 @@
 {% block content %}
 <h1>Tiles</h1>
 
-<div style="margin: 0.75rem 0; display: flex; gap: 0.5rem; align-items: center;">
+<div style="margin: 0.75rem 0; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
     <a href="{% url 'tiles:add' %}" class="btn">Add Tile Set</a>
+    <form method="post" action="{% url 'tiles:from_attic' %}" style="display:inline;"
+          title="Pick 16 random Attic images and quantize their edge colors into a Wang tileset.">
+        {% csrf_token %}
+        <input type="hidden" name="count" value="16">
+        <input type="hidden" name="palette_size" value="3">
+        <button type="submit" class="btn btn-secondary">From 16 Attic images</button>
+    </form>
     <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
     <span style="color:#6e7681;font-size:0.8rem;margin-left:0.5rem;">{{ total_count }} sets · {{ total_tiles }} tiles total</span>
 </div>

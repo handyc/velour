@@ -71,3 +71,11 @@ Thumbs.db
 .claude/
 memory/
 /oracle/models_dir/*.tree.json
+
+# --- Casting compiled byte_model artifacts (keep .c source, drop binaries) -
+/byte_model
+/byte_model_layered
+/byte_model_moe
+/byte_model_parity
+/byte_model_sampled
+/byte_model_*.ckpt

@@ -195,6 +195,10 @@ if _static_prod_parent.is_dir():
 else:
     STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# Allow large JSON bodies: Aether's world_film endpoint POSTs batches of
+# base64-encoded JPEG frames (a few MB is typical; 10s @ 30fps can be ~20MB).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 128 * 1024 * 1024
+
 # Login/logout redirects
 LOGIN_URL = '/accounts/login/'
 LOGIN_REDIRECT_URL = '/dashboard/'

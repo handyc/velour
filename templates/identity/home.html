@@ -157,7 +157,14 @@
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Tick now</button>
     </form>
-    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick. Cron normally fires this every ~10 minutes.</span>
+    <form method="post" action="{% url 'identity:stillness_now' %}" style="display:inline; margin-left:0.35rem;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;"
+                title="Compose a Stillness meditation and release any active dwelling. Makes the mind quieter, not fuller.">
+            Stillness
+        </button>
+    </form>
+    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick, or a quiet moment that sets down what's being held.</span>
 </div>
 
 <div class="dashboard-grid">

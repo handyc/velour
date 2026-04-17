@@ -64,6 +64,15 @@
 <div class="attic-toolbar">
     <h1>Attic</h1>
     <a href="{% url 'attic:upload' %}" class="btn">Upload</a>
+    <form method="post" action="{% url 'attic:splice' %}" style="display:inline;"
+          title="Slice random rectangles from random Attic images and splice them into a new image.">
+        {% csrf_token %}
+        <input type="hidden" name="count" value="8">
+        <input type="hidden" name="slices" value="24">
+        <button type="submit" class="btn btn-secondary" style="font-size:0.82rem;">
+            Splice random slices
+        </button>
+    </form>
     <form method="get" style="display:flex;gap:0.5rem;align-items:baseline;">
         <select name="kind" onchange="this.form.submit()">
             <option value="">all kinds</option>

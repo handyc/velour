@@ -44,6 +44,119 @@ def world_list(request):
 
 
 @login_required
+@require_POST
+def world_film(request, slug):
+    """Receive a batch of canvas frames captured client-side in the
+    three.js viewer and build a Zoetrope reel from them.
+
+    Request body: JSON
+        {
+            'frames': [dataurl, dataurl, ...],
+            'fps':    6,
+            'title':  'optional — falls back to World name + timestamp',
+            'duration': 6.0,  # optional; defaults to len(frames)/fps
+        }
+    Response: JSON {'reel_slug': '...', 'reel_url': '...', 'frames_used': N}
+    """
+    import base64
+    from datetime import datetime
+    from pathlib import Path
+
+    from django.core.files.base import ContentFile
+    from django.urls import reverse
+
+    from attic.models import MediaItem
+    from zoetrope.models import Reel
+
+    world = get_object_or_404(World, slug=slug)
+    if not world.published and not request.user.is_staff:
+        return JsonResponse({'error': 'not available'}, status=404)
+
+    from django.core.exceptions import RequestDataTooBig
+    try:
+        body = request.body
+    except RequestDataTooBig:
+        return JsonResponse({
+            'error': 'upload too large — reduce duration/fps or capture at lower resolution',
+        }, status=413)
+    try:
+        payload = json.loads(body.decode('utf-8') or '{}')
+    except Exception as exc:
+        return JsonResponse({'error': f'invalid JSON: {exc}'}, status=400)
+
+    frames = payload.get('frames') or []
+    if not frames:
+        return JsonResponse({'error': 'no frames'}, status=400)
+    # Clamp to prevent abuse — ≤ 300 frames is already a 10s reel at 30fps.
+    frames = frames[:300]
+    fps = int(payload.get('fps') or 6)
+    fps = max(4, min(60, fps))
+    title = (payload.get('title') or '').strip()
+    speech_n = int(payload.get('speech_sample_count') or 0)
+    speech_n = max(0, min(24, speech_n))
+
+    ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+    tag = f'aether-film-{world.slug}-{ts}'
+
+    stored = []
+    for i, durl in enumerate(frames):
+        if not isinstance(durl, str) or ',' not in durl:
+            continue
+        header, b64 = durl.split(',', 1)
+        if 'image/png' in header:
+            ext = 'png'; mime = 'image/png'
+        elif 'image/jpeg' in header:
+            ext = 'jpg'; mime = 'image/jpeg'
+        else:
+            continue
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            continue
+        item = MediaItem(
+            title=f'{world.title} · frame {i+1:04d}',
+            caption=f'Aether film frame from world "{world.title}"',
+            tags=f'aether-film, {tag}, {world.slug}',
+            uploaded_by=request.user if request.user.is_authenticated else None,
+            kind='image',
+            mime=mime,
+        )
+        item.file.save(f'{tag}-{i:04d}.{ext}', ContentFile(raw), save=False)
+        item.save()
+        stored.append(item)
+
+    if not stored:
+        return JsonResponse({'error': 'no valid frames decoded'}, status=400)
+
+    duration = float(payload.get('duration') or (len(stored) / fps))
+    duration = max(1.0, min(30.0, duration))
+
+    if not title:
+        title = f'{world.title} — film {ts}'
+
+    reel = Reel.objects.create(
+        title=title,
+        tag_filter=tag,
+        selection_mode='oldest',
+        image_count=len(stored),
+        fps=fps,
+        duration_seconds=duration,
+        width=1280, height=720,
+        speech_sample_count=speech_n,
+        speech_volume=0.7,
+    )
+    reel.render()
+
+    return JsonResponse({
+        'reel_slug':    reel.slug,
+        'reel_url':     reverse('zoetrope:detail', args=[reel.slug]),
+        'frames_used':  len(stored),
+        'status':       reel.status,
+        'status_message': reel.status_message,
+    })
+
+
+@login_required
 def world_enter(request, slug):
     """The immersive 3D view — the main experience."""
     world = get_object_or_404(World, slug=slug)

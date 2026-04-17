@@ -112,11 +112,13 @@
     <div style="display:flex;gap:1rem;align-items:center;">
         <div id="vr-btn"></div>
         <a href="#" id="mute-btn" style="font-size:0.8rem;" title="Toggle audio">&#9834;</a>
+        <a href="#" id="film-btn" title="Record a short Zoetrope film of this scene">&#x25CF; Film</a>
         <a href="{% url 'aether:world_detail' world.slug %}">Edit</a>
         <a href="{% url 'aether:world_list' %}">Exit</a>
         <a href="{% url 'bridge:home' %}" title="Beam up to the Bridge">&#x2B06; Bridge</a>
     </div>
 </div>
+<div id="film-status" style="position:fixed;top:3rem;right:1rem;z-index:25;color:#fff;background:rgba(220,50,50,0.75);padding:0.35rem 0.7rem;border-radius:4px;font-size:0.75rem;display:none;"></div>
 {% if messages %}
 {% for m in messages %}<div id="toast">{{ m }}</div>{% endfor %}
 {% endif %}
@@ -159,7 +161,7 @@ const SCENE_URL = '{% url "aether:world_scene_json" world.slug %}' + PLANET_QS;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({antialias:true});
+const renderer = new THREE.WebGLRenderer({antialias:true, preserveDrawingBuffer:true});
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
@@ -2524,6 +2526,98 @@ muteBtn.addEventListener('click', e => {
     }
     muteBtn.style.opacity = ambientMuted ? '0.3' : '1';
 });
+
+// ---- Film this scene as a Zoetrope reel ----
+// Captures N frames from the three.js canvas over D seconds, POSTs
+// them as data URLs to /aether/<slug>/film/, which saves them to
+// Attic and builds a Reel via ffmpeg. Uses preserveDrawingBuffer on
+// the renderer so canvas.toDataURL() returns the last rendered frame.
+const filmBtn = document.getElementById('film-btn');
+const filmStatus = document.getElementById('film-status');
+let filming = false;
+
+function getCsrf() {
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function runFilm({D = 6.0, targetFps = 8, autoOpen = true} = {}) {
+    if (filming) return null;
+    filming = true;
+    const total = Math.round(D * targetFps);
+    const frames = [];
+    filmStatus.style.display = 'block';
+    filmStatus.textContent = `Filming — 0 / ${total}`;
+    try {
+        for (let i = 0; i < total; i++) {
+            // Let the render loop do at least one rAF tick before grabbing.
+            await new Promise(r => requestAnimationFrame(() => r()));
+            try {
+                frames.push(renderer.domElement.toDataURL('image/jpeg', 0.82));
+            } catch (err) {
+                // First frame failure is fatal; otherwise just skip.
+                if (frames.length === 0) throw err;
+            }
+            filmStatus.textContent = `Filming — ${frames.length} / ${total}`;
+            await new Promise(r => setTimeout(r, Math.max(1, 1000 / targetFps - 16)));
+        }
+        filmStatus.textContent = `Uploading ${frames.length} frames…`;
+        const resp = await fetch('{% url "aether:world_film" world.slug %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrf(),
+            },
+            body: JSON.stringify({
+                frames: frames,
+                fps: 24,
+                duration: D,
+                title: `${document.title.split(' — ')[0]} — film`,
+                speech_sample_count: 3,
+            }),
+        });
+        const data = await resp.json();
+        if (data.reel_url) {
+            filmStatus.textContent = `Reel rendered (${data.frames_used} frames)`;
+            if (autoOpen) {
+                setTimeout(() => { window.location.href = data.reel_url; }, 500);
+            }
+            filming = false;
+            return data;
+        }
+        filmStatus.textContent = 'Film failed: ' + (data.error || 'unknown');
+    } catch (err) {
+        filmStatus.textContent = 'Film error: ' + err.message;
+    }
+    setTimeout(() => { filmStatus.style.display = 'none'; }, 5000);
+    filming = false;
+    return null;
+}
+
+filmBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    runFilm({D: 6.0, targetFps: 8, autoOpen: false}).then(data => {
+        if (data && data.reel_url) {
+            setTimeout(() => window.open(data.reel_url, '_blank'), 500);
+        }
+    });
+});
+
+// Autofilm: if launched with ?autofilm=1 (typically by the Zoetrope
+// "brief clip from a random Aether world" flow), wait for the splash
+// to clear and for the scene to finish loading, then record and
+// navigate to the resulting reel.
+(function maybeAutofilm() {
+    const q = new URLSearchParams(location.search);
+    if (q.get('autofilm') !== '1') return;
+    const D  = Math.max(2.0, Math.min(12.0, parseFloat(q.get('duration')) || 4.0));
+    const fr = Math.max(4, Math.min(30, parseInt(q.get('capture_fps')) || 8));
+    // Give the scene time to load assets, let entities spawn, let any
+    // faces/clothing generate, before we start capturing.
+    setTimeout(() => {
+        runFilm({D: D, targetFps: fr, autoOpen: true});
+    }, 3500);
+})();
 </script>
 </body>
 </html>

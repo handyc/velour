@@ -1,0 +1,6 @@
+Once upon a time there was a tiny model. It lived on a cluster. The cluster was warm.
+Every morning the model woke up. It ate gradients for breakfast and produced tokens for lunch.
+The model's favourite game was next-token prediction. It was not very good at first.
+But after four thousand steps, it could finish simple sentences. Like this one.
+
+The moral of the story is: small models trained on small corpora say small things coherently.

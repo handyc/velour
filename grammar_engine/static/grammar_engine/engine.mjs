@@ -227,6 +227,13 @@ const INVENT_X_POOL = ['CV','VC','CVC','nV','Vn','lV','Vl','pV','sV',
                        'Vp','Vs','CsV','CVs','sCv','pCv','nVC','VlV',
                        'VnV','Cv','vC','pVp','nVl','lVn'];
 
+// Symbols whose `_speakSymbol` / `_speakParticle` renderer produces a
+// voiced (continuously excited) output. Used by the phrase schedulers
+// to crossfade adjacent voiced particles rather than leaving a
+// silent gap between them — the single biggest cause of "choppy"
+// synthesis in the old scheduling path.
+const VOICED_SYMS = new Set(['V', 'v', 'n', 'l']);
+
 
 // ── GrammarEngine class ────────────────────────────────────
 export class GrammarEngine {
@@ -694,13 +701,59 @@ export class GrammarEngine {
         return total + 0.02 * symbols.length;
     }
 
-    _speakSymbol(sym, t, distance, pan, speaker, pitchAt) {
+    // Open a shared voiced-source context spanning one voiced run.
+    // One sawtooth oscillator + vibrato LFO + continuous pitch jitter,
+    // kept alive across consecutive voiced particles so the excitation
+    // is phase-continuous (no click at particle boundaries).
+    _openVoicedRun(t, speaker, pitchAt) {
         const ctx = this.ctx;
-        if (!ctx) return 0;
+        if (!ctx) return null;
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        const f0 = speaker.pitch * pitchAt(t);
+        osc.frequency.setValueAtTime(f0, t);
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = speaker.vibrato;
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.value = f0 * speaker.vibratoDepth;
+        lfo.connect(lfoGain).connect(osc.frequency);
+        // Continuous jitter: filtered noise modulates osc.frequency.
+        // ~12 Hz low-passed gives perceivable "aliveness" at <1% depth.
+        const buf = this._getPinkBuffer();
+        let jitterSrc = null;
+        if (buf) {
+            jitterSrc = ctx.createBufferSource();
+            jitterSrc.buffer = buf;
+            jitterSrc.loop = true;
+            jitterSrc.playbackRate.value = 0.25;
+            const jitLP = ctx.createBiquadFilter();
+            jitLP.type = 'lowpass';
+            jitLP.frequency.value = 12;
+            const jitGain = ctx.createGain();
+            jitGain.gain.value = f0 * 0.010;
+            jitterSrc.connect(jitLP).connect(jitGain).connect(osc.frequency);
+            jitterSrc.start(t);
+        }
+        osc.start(t);
+        lfo.start(t);
+        return { osc, lfo, jitterSrc };
+    }
+
+    _closeVoicedRun(run, t) {
+        if (!run) return;
+        const endT = t + 0.05;
+        try { run.osc.stop(endT); } catch (e) {}
+        try { run.lfo.stop(endT); } catch (e) {}
+        if (run.jitterSrc) { try { run.jitterSrc.stop(endT); } catch (e) {} }
+    }
+
+    _speakSymbol(sym, t, distance, pan, speaker, pitchAt, chain, voicedRun) {
+        const ctx = this.ctx;
+        if (!ctx) return { dur: 0, voiced: false };
         const fs = speaker.formantShift;
         const rate = speaker.rate;
         const buf = this._getPinkBuffer();
-        if (!buf) return 0;
+        if (!buf) return { dur: 0, voiced: false };
 
         const src = ctx.createBufferSource();
         src.buffer = buf;
@@ -750,7 +803,7 @@ export class GrammarEngine {
             dur = this._rng(0.02, 0.035) * rate;
             gain = 0.7; shape = 'plosive';
         } else {
-            return 0;
+            return { dur: 0, voiced: false };
         }
 
         const bp1 = ctx.createBiquadFilter();
@@ -759,19 +812,43 @@ export class GrammarEngine {
         const bp2 = ctx.createBiquadFilter();
         bp2.type = 'bandpass';
         bp2.frequency.value = bp2Freq; bp2.Q.value = bp2Q;
+        // Third formant — only for voiced shapes. F3 derived as 1.35 × F2
+        // clamped to [2200, 3300]. Fills in the "telephone" gap above F2
+        // and improves /r/, /l/ character.
+        let bp3 = null;
+        let bp3Target = 0, bp3EndVal = 0;
+        if (voiced) {
+            bp3 = ctx.createBiquadFilter();
+            bp3.type = 'bandpass';
+            bp3Target = Math.max(2200, Math.min(3300, bp2Freq * 1.35));
+            bp3EndVal = Math.max(2200, Math.min(3300, bp2End * 1.35));
+            bp3.frequency.value = bp3Target;
+            bp3.Q.value = shape === 'vowel' ? 9 : 6;
+        }
         const mix = ctx.createGain();
         mix.gain.value = 0.45;
 
         const env = ctx.createGain();
         env.gain.value = 0.0001;
+        const ramp = Math.min(0.020, Math.max(0.008, dur * 0.30));
         if (shape === 'vowel' || shape === 'nasal' || shape === 'liquid') {
-            env.gain.exponentialRampToValueAtTime(gain, t + 0.015);
-            env.gain.setValueAtTime(gain, t + Math.max(0.01, dur - 0.03));
-            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            bp1.frequency.setValueAtTime(bp1Freq, t);
+            env.gain.linearRampToValueAtTime(gain, t + ramp);
+            env.gain.setValueAtTime(gain, t + Math.max(ramp + 0.001, dur - ramp));
+            env.gain.linearRampToValueAtTime(0.0001, t + dur);
+            const startBp1 = (chain && chain.bp1) ? chain.bp1 : bp1Freq;
+            const startBp2 = (chain && chain.bp2) ? chain.bp2 : bp2Freq;
+            bp1.frequency.setValueAtTime(startBp1, t);
+            bp1.frequency.linearRampToValueAtTime(bp1Freq, t + ramp);
             bp1.frequency.linearRampToValueAtTime(bp1End, t + dur);
-            bp2.frequency.setValueAtTime(bp2Freq, t);
+            bp2.frequency.setValueAtTime(startBp2, t);
+            bp2.frequency.linearRampToValueAtTime(bp2Freq, t + ramp);
             bp2.frequency.linearRampToValueAtTime(bp2End, t + dur);
+            if (bp3) {
+                const startBp3 = (chain && chain.bp3) ? chain.bp3 : bp3Target;
+                bp3.frequency.setValueAtTime(startBp3, t);
+                bp3.frequency.linearRampToValueAtTime(bp3Target, t + ramp);
+                bp3.frequency.linearRampToValueAtTime(bp3EndVal, t + dur);
+            }
         } else if (shape === 'plosive') {
             env.gain.linearRampToValueAtTime(gain, t + 0.004);
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -789,42 +866,48 @@ export class GrammarEngine {
         breath.gain.value = voiced ? speaker.breathiness : 1.0;
         src.connect(breath);
         breath.connect(bp1); breath.connect(bp2);
+        if (bp3) breath.connect(bp3);
         bp1.connect(mix); bp2.connect(mix);
+        if (bp3) bp3.connect(mix);
 
         if (voiced) {
-            const osc = ctx.createOscillator();
-            osc.type = 'sawtooth';
-            const f0a = speaker.pitch * pitchAt(t);
-            const f0b = speaker.pitch * pitchAt(t + dur);
-            osc.frequency.setValueAtTime(f0a, t);
-            osc.frequency.linearRampToValueAtTime(f0b, t + dur);
-            const lfo = ctx.createOscillator();
-            lfo.frequency.value = speaker.vibrato;
-            const lfoGain = ctx.createGain();
-            lfoGain.gain.value = f0a * speaker.vibratoDepth;
-            lfo.connect(lfoGain).connect(osc.frequency);
-            const voiceGain = ctx.createGain();
-            voiceGain.gain.value = shape === 'nasal' ? 0.55
-                                 : shape === 'liquid' ? 0.75 : 0.9;
-            osc.connect(voiceGain);
-            voiceGain.connect(bp1); voiceGain.connect(bp2);
-            osc.start(t); osc.stop(t + dur + 0.03);
-            lfo.start(t); lfo.stop(t + dur + 0.03);
+            let run = voicedRun;
+            let needClose = false;
+            if (!run) {
+                run = this._openVoicedRun(t, speaker, pitchAt);
+                needClose = true;
+            }
+            if (run) {
+                // Jitter: ±0.6% per-particle pitch offset on the ramp target.
+                const f0b = speaker.pitch * pitchAt(t + dur)
+                          * (1 + (Math.random() - 0.5) * 0.012);
+                run.osc.frequency.linearRampToValueAtTime(f0b, t + dur);
+                // Shimmer: ±2.5% per-particle voice-gain offset.
+                const baseGain = shape === 'nasal' ? 0.55
+                               : shape === 'liquid' ? 0.75 : 0.9;
+                const shimmer = 1 + (Math.random() - 0.5) * 0.05;
+                const voiceGain = ctx.createGain();
+                voiceGain.gain.value = baseGain * shimmer;
+                run.osc.connect(voiceGain);
+                voiceGain.connect(bp1); voiceGain.connect(bp2);
+                if (bp3) voiceGain.connect(bp3);
+            }
+            if (needClose) this._closeVoicedRun(run, t + dur);
         }
 
         mix.connect(env).connect(panN).connect(distG).connect(this.master);
         src.start(t, offset);
         src.stop(t + dur + 0.02);
-        return dur;
+        return { dur, voiced, bp1End, bp2End, bp3End: bp3EndVal || 0 };
     }
 
-    _speakParticle(pp, t, distance, pan, speaker, pitchAt) {
+    _speakParticle(pp, t, distance, pan, speaker, pitchAt, chain, voicedRun) {
         const ctx = this.ctx;
-        if (!ctx) return 0;
+        if (!ctx) return { dur: 0, voiced: false };
         const fs = speaker.formantShift;
         const rate = speaker.rate;
         const buf = this._getPinkBuffer();
-        if (!buf) return 0;
+        if (!buf) return { dur: 0, voiced: false };
         const dur = pp.dur * rate;
 
         const src = ctx.createBufferSource();
@@ -841,21 +924,45 @@ export class GrammarEngine {
         const bp2 = ctx.createBiquadFilter();
         bp2.type = 'bandpass';
         bp2.frequency.value = pp.bp2Freq * fs; bp2.Q.value = pp.bp2Q;
+        const shape = pp.shape;
+        const gain = pp.gain;
+        const bp1Target = pp.bp1Freq * fs;
+        const bp2Target = pp.bp2Freq * fs;
+        const bp1EndVal = (pp.bp1End || pp.bp1Freq) * fs;
+        const bp2EndVal = (pp.bp2End || pp.bp2Freq) * fs;
+        let bp3 = null, bp3Target = 0, bp3EndVal = 0;
+        if (pp.voiced) {
+            bp3 = ctx.createBiquadFilter();
+            bp3.type = 'bandpass';
+            bp3Target = Math.max(2200, Math.min(3300, bp2Target * 1.35));
+            bp3EndVal = Math.max(2200, Math.min(3300, bp2EndVal * 1.35));
+            bp3.frequency.value = bp3Target;
+            bp3.Q.value = shape === 'vowel' ? 9 : 6;
+        }
         const mix = ctx.createGain();
         mix.gain.value = 0.45;
 
         const env = ctx.createGain();
         env.gain.value = 0.0001;
-        const shape = pp.shape;
-        const gain = pp.gain;
+        const ramp = Math.min(0.020, Math.max(0.008, dur * 0.30));
         if (shape === 'vowel' || shape === 'nasal' || shape === 'liquid') {
-            env.gain.exponentialRampToValueAtTime(gain, t + 0.015);
-            env.gain.setValueAtTime(gain, t + Math.max(0.01, dur - 0.03));
-            env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-            bp1.frequency.setValueAtTime(pp.bp1Freq * fs, t);
-            bp1.frequency.linearRampToValueAtTime((pp.bp1End || pp.bp1Freq) * fs, t + dur);
-            bp2.frequency.setValueAtTime(pp.bp2Freq * fs, t);
-            bp2.frequency.linearRampToValueAtTime((pp.bp2End || pp.bp2Freq) * fs, t + dur);
+            env.gain.linearRampToValueAtTime(gain, t + ramp);
+            env.gain.setValueAtTime(gain, t + Math.max(ramp + 0.001, dur - ramp));
+            env.gain.linearRampToValueAtTime(0.0001, t + dur);
+            const startBp1 = (chain && chain.bp1) ? chain.bp1 : bp1Target;
+            const startBp2 = (chain && chain.bp2) ? chain.bp2 : bp2Target;
+            bp1.frequency.setValueAtTime(startBp1, t);
+            bp1.frequency.linearRampToValueAtTime(bp1Target, t + ramp);
+            bp1.frequency.linearRampToValueAtTime(bp1EndVal, t + dur);
+            bp2.frequency.setValueAtTime(startBp2, t);
+            bp2.frequency.linearRampToValueAtTime(bp2Target, t + ramp);
+            bp2.frequency.linearRampToValueAtTime(bp2EndVal, t + dur);
+            if (bp3) {
+                const startBp3 = (chain && chain.bp3) ? chain.bp3 : bp3Target;
+                bp3.frequency.setValueAtTime(startBp3, t);
+                bp3.frequency.linearRampToValueAtTime(bp3Target, t + ramp);
+                bp3.frequency.linearRampToValueAtTime(bp3EndVal, t + dur);
+            }
         } else if (shape === 'plosive') {
             env.gain.linearRampToValueAtTime(gain, t + 0.004);
             env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
@@ -873,34 +980,41 @@ export class GrammarEngine {
         breath.gain.value = pp.voiced ? speaker.breathiness : 1.0;
         src.connect(breath);
         breath.connect(bp1); breath.connect(bp2);
+        if (bp3) breath.connect(bp3);
         bp1.connect(mix); bp2.connect(mix);
+        if (bp3) bp3.connect(mix);
 
         if (pp.voiced) {
-            const osc = ctx.createOscillator();
-            osc.type = 'sawtooth';
-            const f0a = speaker.pitch * pitchAt(t);
-            const f0b = speaker.pitch * pitchAt(t + dur);
-            osc.frequency.setValueAtTime(f0a, t);
-            osc.frequency.linearRampToValueAtTime(f0b, t + dur);
-            const lfo = ctx.createOscillator();
-            lfo.frequency.value = speaker.vibrato;
-            const lfoGain = ctx.createGain();
-            lfoGain.gain.value = f0a * speaker.vibratoDepth;
-            lfo.connect(lfoGain).connect(osc.frequency);
-            const voiceGain = ctx.createGain();
-            voiceGain.gain.value = shape === 'nasal' ? 0.55
-                                 : shape === 'liquid' ? 0.75 : 0.9;
-            osc.connect(voiceGain);
-            voiceGain.connect(bp1); voiceGain.connect(bp2);
-            osc.start(t); osc.stop(t + dur + 0.03);
-            lfo.start(t); lfo.stop(t + dur + 0.03);
+            let run = voicedRun;
+            let needClose = false;
+            if (!run) {
+                run = this._openVoicedRun(t, speaker, pitchAt);
+                needClose = true;
+            }
+            if (run) {
+                const f0b = speaker.pitch * pitchAt(t + dur)
+                          * (1 + (Math.random() - 0.5) * 0.012);
+                run.osc.frequency.linearRampToValueAtTime(f0b, t + dur);
+                const baseGain = shape === 'nasal' ? 0.55
+                               : shape === 'liquid' ? 0.75 : 0.9;
+                const shimmer = 1 + (Math.random() - 0.5) * 0.05;
+                const voiceGain = ctx.createGain();
+                voiceGain.gain.value = baseGain * shimmer;
+                run.osc.connect(voiceGain);
+                voiceGain.connect(bp1); voiceGain.connect(bp2);
+                if (bp3) voiceGain.connect(bp3);
+            }
+            if (needClose) this._closeVoicedRun(run, t + dur);
         }
 
         mix.connect(env).connect(panN).connect(distG).connect(this.master);
         src.start(t, offset);
         src.stop(t + dur + 0.02);
         pp.useCount++;
-        return dur;
+        return {
+            dur, voiced: !!pp.voiced,
+            bp1End: bp1EndVal, bp2End: bp2EndVal, bp3End: bp3EndVal || 0,
+        };
     }
 
     speakPhrase(symbols, distance) {
@@ -918,16 +1032,46 @@ export class GrammarEngine {
         const phraseDur = this._estimatePhraseDur(symbols, speaker);
         const pitchAt = this._makePitchContour(phraseStart, phraseDur, ending);
         let t = phraseStart;
-        for (const sym of symbols) {
+        let chain = null;   // {bp1, bp2, bp3} across adjacent voiced symbols
+        let voicedRun = null;  // shared osc/vibrato/jitter for a voiced run
+        const closeRun = (endT) => {
+            if (voicedRun) { this._closeVoicedRun(voicedRun, endT); voicedRun = null; }
+        };
+        for (let i = 0; i < symbols.length; i++) {
+            const sym = symbols[i];
             if (sym === '.') {
+                closeRun(t);
                 t += this._rng(0.06, 0.13);
-            } else if (sym === ',') {
-                t += this._rng(0.22, 0.45);
-            } else {
-                const dur = this._speakSymbol(sym, t, distance, pan, speaker, pitchAt);
-                t += dur + this._rng(0.01, 0.04);
+                chain = null;
+                continue;
             }
+            if (sym === ',') {
+                closeRun(t);
+                t += this._rng(0.22, 0.45);
+                chain = null;
+                continue;
+            }
+            if (VOICED_SYMS.has(sym) && !voicedRun) {
+                voicedRun = this._openVoicedRun(t, speaker, pitchAt);
+            } else if (!VOICED_SYMS.has(sym) && voicedRun) {
+                closeRun(t);
+            }
+            const r = this._speakSymbol(
+                sym, t, distance, pan, speaker, pitchAt, chain, voicedRun);
+            let nextSym = '';
+            for (let j = i + 1; j < symbols.length; j++) {
+                const s = symbols[j];
+                if (s === '.' || s === ',' || s === '?' || s === '!') break;
+                nextSym = s;
+                break;
+            }
+            const crossfade = r.voiced && VOICED_SYMS.has(nextSym);
+            t += r.dur + (crossfade ? -0.020 : this._rng(0.005, 0.020));
+            chain = crossfade
+                ? { bp1: r.bp1End, bp2: r.bp2End, bp3: r.bp3End }
+                : null;
         }
+        closeRun(t);
     }
 
     speakUnits(units, distance) {
@@ -951,17 +1095,45 @@ export class GrammarEngine {
         }
         const pitchAt = this._makePitchContour(phraseStart, est, ending);
         let t = phraseStart;
-        for (const u of units) {
-            if (u.kind === 'pp') {
-                const pp = this.PARTICLES[u.id];
-                if (!pp) continue;
-                const dur = this._speakParticle(pp, t, distance, pan, speaker, pitchAt);
-                t += dur + this._rng(0.01, 0.04);
-            } else if (u.kind === 'punct') {
+        let chain = null;
+        let voicedRun = null;
+        const closeRun = (endT) => {
+            if (voicedRun) { this._closeVoicedRun(voicedRun, endT); voicedRun = null; }
+        };
+        for (let i = 0; i < units.length; i++) {
+            const u = units[i];
+            if (u.kind === 'punct') {
+                closeRun(t);
                 if (u.char === '.') t += this._rng(0.06, 0.13);
                 else if (u.char === ',') t += this._rng(0.22, 0.45);
+                chain = null;
+                continue;
             }
+            if (u.kind !== 'pp') continue;
+            const pp = this.PARTICLES[u.id];
+            if (!pp) continue;
+            if (pp.voiced && !voicedRun) {
+                voicedRun = this._openVoicedRun(t, speaker, pitchAt);
+            } else if (!pp.voiced && voicedRun) {
+                closeRun(t);
+            }
+            const r = this._speakParticle(
+                pp, t, distance, pan, speaker, pitchAt, chain, voicedRun);
+            let nextPP = null;
+            for (let j = i + 1; j < units.length; j++) {
+                if (units[j].kind === 'punct') break;
+                if (units[j].kind === 'pp') {
+                    nextPP = this.PARTICLES[units[j].id] || null;
+                    break;
+                }
+            }
+            const crossfade = r.voiced && nextPP && nextPP.voiced;
+            t += r.dur + (crossfade ? -0.020 : this._rng(0.005, 0.020));
+            chain = crossfade
+                ? { bp1: r.bp1End, bp2: r.bp2End, bp3: r.bp3End }
+                : null;
         }
+        closeRun(t);
     }
 
     // ── Evolution + invention ───────────────────────────────

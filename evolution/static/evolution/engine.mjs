@@ -197,15 +197,154 @@ function mutateMeta(gene, rng, rate) {
     return next;
 }
 
+// ── LUT gene handler (Casting) ──────────────────────────────────────
+// A LUT agent's gene encodes a tiny n→h→1 MLP with ±1 weights and sign
+// activation — exactly the architecture family the Casting progressive
+// search uses. Weight bit layout matches byte_model_progressive.c:
+// per hidden unit [n input weights, 1 bias], then output [h weights, 1
+// bias]. For h=0 the gene is just [n input weights, 1 bias]. Input
+// bits are read MSB-first from `row` so truth-table encodings are
+// compatible with the exhaustive-search pool.
+const LUT_MAX_H = 4;
+
+function lutTotalBits(n, h) {
+    return h > 0 ? h * (n + 2) + 1 : (n + 1);
+}
+
+function lutForward(bits, n, h, row) {
+    const xi = new Array(n);
+    for (let i = 0; i < n; i++) xi[i] = ((row >> (n - 1 - i)) & 1) ? 1 : -1;
+    let idx = 0;
+    const wb = (k) => (((bits >> k) & 1) ? 1 : -1);
+    if (h === 0) {
+        let s = 0;
+        for (let i = 0; i < n; i++) s += wb(idx++) * xi[i];
+        const b = wb(idx++);
+        return (s + b) >= 0 ? 1 : -1;
+    }
+    const hid = new Array(h);
+    for (let j = 0; j < h; j++) {
+        let s = 0;
+        for (let i = 0; i < n; i++) s += wb(idx++) * xi[i];
+        const b = wb(idx++);
+        hid[j] = (s + b) >= 0 ? 1 : -1;
+    }
+    let s = 0;
+    for (let j = 0; j < h; j++) s += wb(idx++) * hid[j];
+    const b = wb(idx++);
+    return (s + b) >= 0 ? 1 : -1;
+}
+
+export function lutTruthTable(gene) {
+    const n = gene.n | 0, h = gene.h | 0, bits = gene.bits >>> 0;
+    const N = 1 << n;
+    let tt = 0;
+    for (let row = 0; row < N; row++) {
+        if (lutForward(bits, n, h, row) > 0) tt |= (1 << row);
+    }
+    return tt >>> 0;
+}
+
+function popcount(x) {
+    x = x | 0;
+    x = x - ((x >>> 1) & 0x55555555);
+    x = (x & 0x33333333) + ((x >>> 2) & 0x33333333);
+    return (((x + (x >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function lutRandom(rng, n) {
+    const h = ri(rng, LUT_MAX_H + 1);
+    const W = lutTotalBits(n, h);
+    let bits = 0;
+    for (let i = 0; i < W; i++) if (rnd(rng) < 0.5) bits |= (1 << i);
+    return { n, h, bits: bits >>> 0 };
+}
+
+function lutMutate(gene, rng, rate) {
+    const next = { n: gene.n, h: gene.h, bits: gene.bits >>> 0 };
+    let W = lutTotalBits(next.n, next.h);
+    for (let i = 0; i < W; i++) {
+        if (rnd(rng) < rate) next.bits ^= (1 << i);
+    }
+    next.bits >>>= 0;
+    if (rnd(rng) < rate * 0.15) {
+        const dir = (rnd(rng) < 0.5) ? -1 : 1;
+        const newH = Math.max(0, Math.min(LUT_MAX_H, next.h + dir));
+        if (newH !== next.h) {
+            const newW = lutTotalBits(next.n, newH);
+            if (newW < W) {
+                next.bits = next.bits & ((1 << newW) - 1);
+            } else {
+                for (let i = W; i < newW; i++) {
+                    if (rnd(rng) < 0.5) next.bits |= (1 << i);
+                }
+                next.bits >>>= 0;
+            }
+            next.h = newH;
+        }
+    }
+    return next;
+}
+
+async function lutWork(agent, ctx) {
+    const g = agent.gene || {};
+    const target = ctx.lut_target || null;
+    if (!target || target.n !== g.n) {
+        agent.output = 'no target or arch mismatch';
+        return 0;
+    }
+    const tt = lutTruthTable(g);
+    const N = 1 << target.n;
+    const mask = (N >= 32) ? 0xffffffff : ((1 << N) - 1);
+    const diff = (tt ^ (target.truth_table >>> 0)) & mask;
+    const wrong = popcount(diff);
+    const right = N - wrong;
+    const W = lutTotalBits(g.n, g.h);
+    agent.output = `n=${g.n} h=${g.h} W=${W} tt=0x${tt.toString(16)} ` +
+                   `target=0x${(target.truth_table >>> 0).toString(16)} ${right}/${N}`;
+    // Bonus: prefer smaller architectures when fitness ties. 1% knock per
+    // extra bit. Keeps the best solver compact.
+    let s = right / N;
+    if (s >= 1 - 1e-9) {
+        s = 1.0 - 0.0001 * W;
+    }
+    return s;
+}
+
+// ── Gene-type registry ──────────────────────────────────────────────
+// The L-system path above is the default. New types just register here.
+// Each handler provides random/mutate/work; the engine dispatches on
+// Agent.gene_type. Backward compat: gene_type omitted == 'lsystem'.
+export const GENE_TYPES = {
+    lsystem: {
+        random: (rng, ctx) => randomL0Gene(rng),
+        mutate: mutateL0,
+        work: async (agent, ctx) => {
+            const g = agent.gene || {};
+            const axiomFromSeed = (agent.seed_string && agent.seed_string.length)
+                ? agent.seed_string : (g.axiom || 'F');
+            agent.output = LSystem.expand(axiomFromSeed, g.rules || {},
+                                          g.iterations | 0);
+            return scoreString(agent.output, ctx.goal);
+        },
+    },
+    lut: {
+        random: (rng, ctx) => lutRandom(rng, (ctx && ctx.lut_target && ctx.lut_target.n) || 2),
+        mutate: lutMutate,
+        work: lutWork,
+    },
+};
+
 // ── Agent ───────────────────────────────────────────────────────────
 let _agentSeq = 0;
 
 export class Agent {
     constructor({ level = 0, gene = null, seed_string = '', script = '',
-                  parent = null, name = '' } = {}) {
+                  parent = null, name = '', gene_type = 'lsystem' } = {}) {
         this.id = ++_agentSeq;
         this.level = level;
         this.gene = gene;
+        this.gene_type = gene_type;
         this.seed_string = seed_string;
         this.script = script || '';
         this.parent_id = parent ? parent.id : null;
@@ -219,6 +358,7 @@ export class Agent {
         const child = new Agent({
             level: this.level,
             gene: deepClone(this.gene),
+            gene_type: this.gene_type,
             seed_string: this.seed_string,
             script: this.script,
             parent: this,
@@ -228,24 +368,22 @@ export class Agent {
 
     mutate(rng, rate) {
         if (this.level === 0) {
-            this.gene = mutateL0(this.gene, rng, rate);
+            const handler = GENE_TYPES[this.gene_type] || GENE_TYPES.lsystem;
+            this.gene = handler.mutate(this.gene, rng, rate);
         } else {
             this.gene = mutateMeta(this.gene, rng, rate);
         }
         return this;
     }
 
-    // L0: expand L-system from seed_string, append optional user-script
-    //     contribution, score against goal.
+    // L0: invoke the gene-type's work(). Default is L-system against
+    //     ctx.goal (edit distance). LUT gene type scores against
+    //     ctx.lut_target truth table. Script hook adds a bonus.
     // L1/L2: run an inner population, return its best score as the output.
     async work(ctx) {
         if (this.level === 0) {
-            const g = this.gene || {};
-            const axiomFromSeed = (this.seed_string && this.seed_string.length)
-                ? this.seed_string : (g.axiom || 'F');
-            this.output = LSystem.expand(axiomFromSeed, g.rules || {},
-                                         g.iterations | 0);
-            let s = scoreString(this.output, ctx.goal);
+            const handler = GENE_TYPES[this.gene_type] || GENE_TYPES.lsystem;
+            let s = await handler.work(this, ctx);
             if (this.script && this.script.trim()) {
                 try {
                     const fn = new Function('agent', 'ctx', this.script);
@@ -270,6 +408,8 @@ export class Agent {
             params: { mutation_rate: g.mutation_rate, tournament_k: g.tournament_k },
             seedAgent: ctx.innerSeed || null,
             rng: ctx.rng,
+            gene_type: ctx.gene_type || 'lsystem',
+            lut_target: ctx.lut_target || null,
         });
         inner.init();
         await inner.runUntilDone();
@@ -304,10 +444,13 @@ export class EvolutionEngine {
         population_size = 24, generations_target = 200,
         target_score = 0.95,
         params = {}, seedAgent = null, rng = null,
+        gene_type = 'lsystem', lut_target = null,
     } = {}) {
         this.run = run;
         this.level = level;
         this.goal = goal || '';
+        this.geneType = gene_type;
+        this.lutTarget = lut_target;
         this.populationSize = Math.max(2, population_size | 0);
         this.generationsTarget = Math.max(1, generations_target | 0);
         this.targetScore = target_score;
@@ -344,19 +487,22 @@ export class EvolutionEngine {
     }
 
     _makeFounder(i) {
+        const ctx = { lut_target: this.lutTarget };
         let gene;
         if (this.seedAgent && i === 0) {
             gene = deepClone(this.seedAgent.gene);
         } else if (this.seedAgent && this.rng() < 0.3) {
             gene = deepClone(this.seedAgent.gene);
+        } else if (this.level === 0) {
+            const handler = GENE_TYPES[this.geneType] || GENE_TYPES.lsystem;
+            gene = handler.random(this.rng, ctx);
         } else {
-            gene = (this.level === 0)
-                ? randomL0Gene(this.rng)
-                : randomMetaGene(this.rng);
+            gene = randomMetaGene(this.rng);
         }
         const a = new Agent({
             level: this.level,
             gene,
+            gene_type: this.geneType,
             seed_string: this.seedString,
             script: this.script,
         });
@@ -367,7 +513,11 @@ export class EvolutionEngine {
 
     // One generation: evaluate → select → reproduce.
     async tick() {
-        const ctx = { goal: this.goal, rng: this.rng };
+        const ctx = {
+            goal: this.goal, rng: this.rng,
+            gene_type: this.geneType,
+            lut_target: this.lutTarget,
+        };
         for (const a of this.population) {
             await a.work(ctx);
         }

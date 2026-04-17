@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+
+{% block title %}Edit frames — {{ reel.title }} — Zoetrope{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fx-wrap { max-width: 1100px; margin: 0.5rem auto 3rem; }
+    .fx-wrap h1 { margin: 0 0 0.25rem; font-size: 1.3rem; }
+    .fx-wrap .sub {
+        color: #8b949e; font-size: 0.8rem; margin: 0 0 1rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .fx-wrap .lede {
+        color: #8b949e; font-size: 0.8rem; max-width: 68ch; line-height: 1.5;
+        margin: 0 0 1rem;
+    }
+
+    .fx-toolbar {
+        display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center;
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 0.6rem 0.75rem; margin-bottom: 0.9rem;
+    }
+    .fx-toolbar .grow { flex: 1; }
+    .fx-toolbar .mini {
+        background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.3rem 0.55rem; font: inherit;
+        font-size: 0.78rem; cursor: pointer;
+    }
+    .fx-toolbar .mini:hover { background: #21262d; }
+    .fx-toolbar .count { color: #6e7681; font-size: 0.75rem; }
+
+    .fx-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+        gap: 4px; padding: 0.4rem; background: #0d1117; border: 1px solid #30363d;
+        border-radius: 6px; max-height: 640px; overflow: auto;
+    }
+    .fx-tile {
+        position: relative; aspect-ratio: 1; background: #161b22;
+        border: 1px solid #30363d; border-radius: 3px; overflow: hidden;
+        cursor: grab; user-select: none;
+    }
+    .fx-tile.dragging { opacity: 0.3; }
+    .fx-tile.drop-before { box-shadow: -3px 0 0 #58a6ff; }
+    .fx-tile.drop-after  { box-shadow:  3px 0 0 #58a6ff; }
+    .fx-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+    .fx-tile .idx {
+        position: absolute; left: 2px; top: 2px;
+        background: rgba(0,0,0,0.72); color: #fff;
+        font-size: 0.62rem; padding: 1px 4px; border-radius: 2px;
+        font-family: ui-monospace, Menlo, monospace;
+    }
+    .fx-tile .del {
+        position: absolute; right: 2px; top: 2px;
+        width: 18px; height: 18px; border: none; border-radius: 50%;
+        background: rgba(0,0,0,0.65); color: #f85149; cursor: pointer;
+        font-size: 0.7rem; line-height: 18px; padding: 0; text-align: center;
+        display: none;
+    }
+    .fx-tile:hover .del { display: block; }
+    .fx-tile .placeholder {
+        width: 100%; height: 100%; display: flex; align-items: center;
+        justify-content: center; font-size: 0.6rem; color: #6e7681;
+        text-transform: uppercase; letter-spacing: 0.05em;
+    }
+
+    .fx-bulk {
+        margin-top: 1rem; background: #0d1117; border: 1px solid #30363d;
+        border-radius: 6px; padding: 0.75rem 0.9rem;
+    }
+    .fx-bulk label { color: #8b949e; font-size: 0.74rem; display: block; margin-bottom: 0.25rem; }
+    .fx-bulk textarea {
+        width: 100%; box-sizing: border-box; min-height: 120px;
+        background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.45rem 0.55rem;
+        font: 0.75rem ui-monospace, SFMono-Regular, Menlo, monospace;
+        line-height: 1.35; resize: vertical;
+    }
+    .fx-bulk .hint { color: #6e7681; font-size: 0.7rem; margin-top: 0.3rem; line-height: 1.4; }
+
+    .fx-actions {
+        display: flex; gap: 0.5rem; margin-top: 1rem; align-items: center;
+    }
+    .fx-actions .render-check { color: #c9d1d9; font-size: 0.82rem; display: inline-flex; align-items: center; gap: 0.35rem; }
+    .fx-big-notice {
+        background: #1b140a; border: 1px solid #5a3f20; color: #d29922;
+        padding: 0.55rem 0.75rem; border-radius: 4px; font-size: 0.78rem;
+        margin-bottom: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fx-wrap">
+    <h1>Edit frames — {{ reel.title }}</h1>
+    <div class="sub">
+        <span id="count-label">{{ total }}</span> frame{{ total|pluralize }} ·
+        {{ reel.duration_seconds|floatformat:1 }}s @ {{ reel.fps }} fps
+        {% if seeded %} · <em>seeded from current tag selection, not yet saved</em>{% endif %}
+    </div>
+    <p class="lede">
+        Drag tiles to reorder. The order below is exactly the playback
+        order of the mp4 — duplicates allowed, a frame can be visited
+        many times. For large edits (up to 3000 frames) use the PK
+        textarea at the bottom: it accepts comma-, space-, or
+        newline-separated MediaItem PKs and wins over the drag order
+        on submit when non-empty.
+    </p>
+
+    {% if total > 600 %}
+    <div class="fx-big-notice">
+        This reel has {{ total }} frames. The grid still shows them all
+        but drag-sorting more than ~600 tiles gets sluggish — the
+        textarea below is much faster for bulk changes.
+    </div>
+    {% endif %}
+
+    <form method="post" id="fx-form">
+        {% csrf_token %}
+        <input type="hidden" name="order" id="fx-order" value="{{ order_pks_csv }}">
+
+        <div class="fx-toolbar">
+            <button type="button" class="mini" data-action="shuffle">Shuffle</button>
+            <button type="button" class="mini" data-action="reverse">Reverse</button>
+            <button type="button" class="mini" data-action="dedupe">Dedupe</button>
+            <button type="button" class="mini" data-action="sort-asc">Sort ↑ (by PK)</button>
+            <button type="button" class="mini" data-action="sort-desc">Sort ↓ (by PK)</button>
+            <button type="button" class="mini" data-action="sync-from-text">Load grid from textarea</button>
+            <span class="grow"></span>
+            <span class="count" id="count-label-right">{{ total }} frames</span>
+        </div>
+
+        <div class="fx-grid" id="fx-grid">
+            {% for item in items %}
+            <div class="fx-tile" draggable="true" data-pk="{{ item.pk }}">
+                {% if item.thumbnail %}
+                    <img src="{{ item.thumbnail.url }}" alt="" loading="lazy">
+                {% else %}
+                    <div class="placeholder">{{ item.kind }}</div>
+                {% endif %}
+                <span class="idx">{{ forloop.counter }}</span>
+                <button type="button" class="del" title="Remove this frame">&times;</button>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="fx-bulk">
+            <label for="order_text">PK list (authoritative on submit when non-empty)</label>
+            <textarea name="order_text" id="order_text" spellcheck="false">{{ order_text }}</textarea>
+            <div class="hint">
+                One attic.MediaItem PK per line, or comma/space-separated.
+                Unknown PKs are dropped on save. The grid above updates when
+                you click <em>Load grid from textarea</em>.
+            </div>
+        </div>
+
+        <div class="fx-actions">
+            <button type="submit" class="btn">Save order</button>
+            <label class="render-check"><input type="checkbox" name="render_now"> Re-render after saving</label>
+            <a href="{% url 'zoetrope:detail' reel.slug %}" class="btn btn-secondary">Back to reel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+(function() {
+    const grid = document.getElementById('fx-grid');
+    const orderInput = document.getElementById('fx-order');
+    const textarea = document.getElementById('order_text');
+    const countLabel = document.getElementById('count-label');
+    const countLabelR = document.getElementById('count-label-right');
+
+    function tilePks() {
+        return Array.from(grid.children).map(el => el.dataset.pk);
+    }
+
+    function refresh(syncTextarea) {
+        const pks = tilePks();
+        orderInput.value = pks.join(',');
+        if (syncTextarea) textarea.value = pks.join('\n');
+        countLabel.textContent = pks.length;
+        countLabelR.textContent = pks.length + ' frames';
+        Array.from(grid.children).forEach((el, i) => {
+            const idx = el.querySelector('.idx');
+            if (idx) idx.textContent = i + 1;
+        });
+    }
+
+    // Drag-and-drop reorder
+    let dragged = null;
+    grid.addEventListener('dragstart', (e) => {
+        const t = e.target.closest('.fx-tile');
+        if (!t) return;
+        dragged = t;
+        t.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+    });
+    grid.addEventListener('dragend', () => {
+        if (dragged) dragged.classList.remove('dragging');
+        Array.from(grid.children).forEach(c => c.classList.remove('drop-before', 'drop-after'));
+        dragged = null;
+    });
+    grid.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        const over = e.target.closest('.fx-tile');
+        if (!over || over === dragged) return;
+        Array.from(grid.children).forEach(c => c.classList.remove('drop-before', 'drop-after'));
+        const rect = over.getBoundingClientRect();
+        const after = (e.clientX - rect.left) > rect.width / 2;
+        over.classList.add(after ? 'drop-after' : 'drop-before');
+    });
+    grid.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const over = e.target.closest('.fx-tile');
+        if (!dragged || !over || over === dragged) return;
+        const rect = over.getBoundingClientRect();
+        const after = (e.clientX - rect.left) > rect.width / 2;
+        over.parentNode.insertBefore(dragged, after ? over.nextSibling : over);
+        refresh(true);
+    });
+
+    // Delete-tile button
+    grid.addEventListener('click', (e) => {
+        if (e.target.classList.contains('del')) {
+            const tile = e.target.closest('.fx-tile');
+            if (tile) { tile.remove(); refresh(true); }
+        }
+    });
+
+    // Toolbar actions
+    document.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = btn.dataset.action;
+            if (action === 'shuffle') {
+                const kids = Array.from(grid.children);
+                for (let i = kids.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [kids[i], kids[j]] = [kids[j], kids[i]];
+                }
+                kids.forEach(k => grid.appendChild(k));
+                refresh(true);
+            } else if (action === 'reverse') {
+                Array.from(grid.children).reverse().forEach(k => grid.appendChild(k));
+                refresh(true);
+            } else if (action === 'dedupe') {
+                const seen = new Set();
+                Array.from(grid.children).forEach(k => {
+                    if (seen.has(k.dataset.pk)) k.remove();
+                    else seen.add(k.dataset.pk);
+                });
+                refresh(true);
+            } else if (action === 'sort-asc' || action === 'sort-desc') {
+                const dir = action === 'sort-asc' ? 1 : -1;
+                const kids = Array.from(grid.children);
+                kids.sort((a, b) => dir * (parseInt(a.dataset.pk) - parseInt(b.dataset.pk)));
+                kids.forEach(k => grid.appendChild(k));
+                refresh(true);
+            } else if (action === 'sync-from-text') {
+                // Clear textarea intent: rebuild grid from textarea PK list.
+                // We can only show tiles for PKs already present in the
+                // initial grid — unknown PKs stay in the textarea and
+                // the server will resolve them on submit.
+                const wanted = textarea.value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+                const pool = new Map();
+                Array.from(grid.children).forEach(k => pool.set(k.dataset.pk, k));
+                grid.innerHTML = '';
+                wanted.forEach(pk => {
+                    const existing = pool.get(pk);
+                    if (existing) {
+                        grid.appendChild(existing.cloneNode(true));
+                    }
+                });
+                refresh(false);
+            }
+        });
+    });
+
+    // When the textarea is edited directly, update the hidden order
+    // field on submit so the server sees a consistent list.
+    document.getElementById('fx-form').addEventListener('submit', () => {
+        // Server prefers textarea when non-empty, but keep hidden order
+        // in sync for debugging / view-source clarity.
+        refresh(false);
+    });
+})();
+</script>
+{% endblock %}

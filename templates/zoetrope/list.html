@@ -55,6 +55,50 @@
         <span style="color:#6e7681;font-size:0.78rem;">s</span>
         <button type="submit" class="btn btn-secondary" title="Render a random reel: N seconds × 30 fps = N*30 random Attic images, each shown for one frame.">Random Reel</button>
     </form>
+    <form method="post" action="{% url 'zoetrope:aether_random' %}" style="display:inline;"
+          title="Pick a random published Aether world, drop you into it, and auto-record a brief clip.">
+        {% csrf_token %}
+        <input type="hidden" name="duration_seconds" value="4">
+        <input type="hidden" name="capture_fps" value="8">
+        <button type="submit" class="btn btn-secondary" style="font-size:0.82rem;">Clip from random Aether world</button>
+    </form>
+    <form method="post" action="{% url 'zoetrope:auto_edit' %}" style="display:inline;"
+          title="Fingerprint up to 500 Attic images by color and greedy-TSP them into a 10-second, 3000-frame, 300fps film. Smooth color transitions.">
+        {% csrf_token %}
+        <input type="hidden" name="count" value="3000">
+        <input type="hidden" name="duration_seconds" value="10">
+        <input type="hidden" name="fps" value="300">
+        <input type="hidden" name="speech_sample_count" value="6">
+        <button type="submit" class="btn btn-secondary" style="font-size:0.82rem;">Auto-edit 3000 frames</button>
+    </form>
+    {% if ready_reels|length >= 2 %}
+    <form method="post" action="{% url 'zoetrope:splice_random' %}"
+          style="display:inline-flex;align-items:center;gap:0.3rem;flex-wrap:wrap;"
+          title="Splice two reels — pick specific ones or leave as Random.">
+        {% csrf_token %}
+        <select name="reel_a_slug"
+                style="max-width:12rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:0.25rem 0.35rem;font:inherit;font-size:0.78rem;">
+            <option value="random">A: Random</option>
+            {% for r in ready_reels %}
+            <option value="{{ r.slug }}">{{ r.title|truncatechars:36 }}</option>
+            {% endfor %}
+        </select>
+        <span style="color:#6e7681;font-size:0.78rem;">+</span>
+        <select name="reel_b_slug"
+                style="max-width:12rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:0.25rem 0.35rem;font:inherit;font-size:0.78rem;">
+            <option value="random">B: Random</option>
+            {% for r in ready_reels %}
+            <option value="{{ r.slug }}">{{ r.title|truncatechars:36 }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" name="mode" value="concat" class="btn btn-secondary" style="font-size:0.82rem;"
+                title="Concatenate the two reels front-to-back.">Splice</button>
+        <button type="submit" name="mode" value="oscillate" class="btn btn-secondary" style="font-size:0.82rem;"
+                title="Oscillate between the two reels along a distorted sine wave.">Oscillate</button>
+    </form>
+    {% endif %}
+    <a href="{% url 'zoetrope:tournaments' %}" class="btn btn-secondary" style="font-size:0.82rem;"
+       title="Evolution-style scored competitions between reels.">Tournaments</a>
     <span class="spacer"></span>
     <span style="color:#6e7681;font-size:0.78rem;">{{ reels|length }} reel{{ reels|length|pluralize }} · {{ image_count }} image{{ image_count|pluralize }} in Attic</span>
 </div>

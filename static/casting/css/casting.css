@@ -1,0 +1,152 @@
+/* Casting — Tufte-thin experiment library. */
+
+.cast-wrap { max-width: 1100px; margin: 0 auto; padding: 0.5rem 1rem 3rem; }
+.cast-wrap h1 { font-size: 1.35rem; margin: 0.2rem 0 0.3rem; color: #c9d1d9; }
+.cast-lede {
+    color: #8b949e; font-size: 0.9rem;
+    max-width: 62ch; line-height: 1.5;
+    margin: 0 0 1.6rem;
+}
+.cast-back {
+    display: inline-block;
+    font-size: 0.78rem; color: #8b949e; text-decoration: none;
+    margin-bottom: 0.6rem;
+}
+.cast-back:hover { color: #58a6ff; }
+
+/* --- list table (index) ---------------------------------------------- */
+.cast-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    color: #c9d1d9;
+}
+.cast-table thead th {
+    text-align: left;
+    font-weight: 500;
+    color: #6e7681;
+    font-size: 0.7rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid #30363d;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.cast-table tbody td {
+    padding: 0.75rem 0.6rem;
+    border-bottom: 1px solid #21262d;
+    vertical-align: top;
+}
+.cast-idx {
+    color: #6e7681;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    width: 2ch;
+}
+.cast-title a {
+    color: #c9d1d9; text-decoration: none; font-weight: 500;
+}
+.cast-title a:hover { color: #58a6ff; }
+.cast-tagline {
+    color: #8b949e; font-size: 0.78rem; margin-top: 0.15rem;
+    max-width: 64ch; line-height: 1.4;
+}
+.cast-num {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #8b949e;
+    white-space: nowrap;
+}
+.cast-method {
+    color: #8b949e; font-size: 0.8rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cast-links { white-space: nowrap; }
+.cast-chip {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border: 1px solid #30363d; border-radius: 4px;
+    color: #8b949e; font-size: 0.72rem;
+    text-decoration: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-right: 0.3rem;
+}
+.cast-chip:hover { color: #c9d1d9; border-color: #8b949e; }
+.cast-empty {
+    color: #6e7681; font-style: italic;
+    padding: 1rem 0.5rem; text-align: center;
+}
+
+/* --- status dots ----------------------------------------------------- */
+.cast-status { width: 1rem; padding-right: 0; }
+.cast-dot {
+    display: inline-block;
+    width: 0.6rem; height: 0.6rem;
+    border-radius: 50%;
+    vertical-align: middle;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.3) inset;
+}
+.cast-dot-lg { width: 0.72rem; height: 0.72rem; margin-right: 0.4rem; }
+.cast-dot-pending { background: #d1b000; }
+.cast-dot-success { background: #2ea043; }
+.cast-dot-fail    { background: #da3633; }
+
+/* --- detail view ------------------------------------------------------ */
+.cast-detail .cast-detail-tagline {
+    color: #8b949e; font-size: 0.95rem;
+    max-width: 68ch; margin: 0.1rem 0 1.2rem;
+}
+.cast-specs {
+    display: grid; grid-template-columns: max-content 1fr;
+    gap: 0.15rem 1rem;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    padding: 0.7rem 0.95rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    margin: 0 0 1.4rem;
+    max-width: 48rem;
+}
+.cast-specs dt {
+    color: #6e7681;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.68rem;
+    align-self: center;
+}
+.cast-specs dd {
+    margin: 0; color: #c9d1d9;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cast-body {
+    color: #c9d1d9; max-width: 62ch;
+    line-height: 1.55; margin: 0 0 1.6rem;
+    font-size: 0.92rem;
+}
+.cast-runner { margin: 1rem 0 1.6rem; }
+.cast-btn-row {
+    display: flex; gap: 0.5rem; margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+}
+.cast-run-btn {
+    background: #161b22; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.35rem 0.95rem; font-size: 0.82rem;
+    cursor: pointer;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cast-run-btn:hover:not(:disabled) { border-color: #8b949e; }
+.cast-run-btn:disabled {
+    opacity: 0.4; cursor: not-allowed;
+}
+.cast-output {
+    margin: 0.6rem 0 0;
+    padding: 0.75rem 0.95rem;
+    background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+    color: #c9d1d9;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    min-height: 5em;
+    overflow-x: auto;
+}
+.cast-dl { margin-top: 1.4rem; }

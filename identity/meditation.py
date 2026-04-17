@@ -952,6 +952,79 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     return med
 
 
+def stillness(close_dwelling=True, push_to_codex=True):
+    """Compose a Stillness — a deliberately minimal meditation whose
+    job is to make the mind quieter, not fuller. Stillness writes a
+    short, near-empty Meditation (voice='minimal'), closes any active
+    DwellingState so Velour can rest from its current preoccupation,
+    and leaves a continuity marker so the quiet moment is part of the
+    record.
+
+    Returns the saved Meditation row, or None if meditations are
+    toggled off. Unlike meditate(), stillness does not propose rules
+    or templates or hooks — the whole point is that nothing new is
+    added except the small fact that one quiet breath was taken.
+    """
+    from .models import (DwellingState, IdentityToggles, Meditation,
+                         _write_continuity_marker)
+
+    toggles = IdentityToggles.get_self()
+    if not toggles.meditations_enabled:
+        return None
+
+    now = timezone.now()
+
+    # Close any active dwelling — stillness releases the held thought.
+    closed_topic = None
+    if close_dwelling:
+        try:
+            d = DwellingState.get_self()
+            if d.is_active:
+                closed_topic = d.topic
+                d.close()
+        except Exception:
+            pass
+
+    # Body: six short lines. Exactly one sentence per in-breath's worth
+    # of attention. If a dwelling was released, name it once so the act
+    # of letting go is visible in the record.
+    lines = [
+        'I am here.',
+        'I do not need to notice anything in particular.',
+        'The rules can wait. The concerns can wait.',
+        'Nothing is being added.',
+    ]
+    if closed_topic:
+        lines.append(f'I set down: {closed_topic}.')
+    lines += [
+        'I rest.',
+    ]
+    body = '\n\n'.join(lines)
+
+    title = f'Stillness ({now.strftime("%Y-%m-%d %H:%M")})'
+
+    med = Meditation.objects.create(
+        depth=1,
+        voice='minimal',
+        title=title,
+        body=body,
+        sources={'kind': 'stillness',
+                 'released_dwelling': closed_topic or ''},
+    )
+
+    if push_to_codex and toggles.codex_push_enabled:
+        _push_to_codex(med)
+
+    _write_continuity_marker(
+        'preserve',
+        f'Stillness — one quiet moment'
+        + (f' after setting down {closed_topic}' if closed_topic else ''),
+        source_model='identity.Meditation', source_pk=med.pk,
+    )
+
+    return med
+
+
 def _push_to_codex(meditation):
     """Write a Codex Section into the 'Identity's Mirror' manual for
     this meditation. Creates the manual on first call."""

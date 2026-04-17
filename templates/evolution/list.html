@@ -104,6 +104,8 @@
 
     <div class="ev-toolbar">
         <a href="{% url 'evolution:agents' %}">Agent library →</a>
+        <a href="{% url 'casting:detail' slug='evolution' %}">Casting · LUT evolution →</a>
+        <a href="{% url 'zoetrope:tournaments' %}">Reel tournaments →</a>
     </div>
 
     <form class="ev-newbar" method="post" action="{% url 'evolution:new' %}">
@@ -165,6 +167,101 @@
         <div class="ev-actions">
             <button type="submit" class="ev-btn primary">+ Create run</button>
         </div>
+    </form>
+
+    <form class="ev-newbar" method="post" action="{% url 'evolution:speciate' %}"
+          style="grid-template-columns: auto auto auto auto auto 1fr;">
+        {% csrf_token %}
+        <label title="One random-goal-from-Language evolution per round.">Speciate</label>
+        <label style="font-weight:normal">rounds</label>
+        <input type="number" name="rounds" value="1" min="1" max="10"
+               style="width:4em">
+        <label style="font-weight:normal">gens</label>
+        <input type="number" name="generations" value="60" min="10" max="400"
+               style="width:5em">
+        <label style="font-weight:normal">pop</label>
+        <input type="number" name="population" value="24" min="8" max="64"
+               style="width:4em">
+        <button type="submit" class="ev-btn"
+                title="Each round: pick a random Language + variant, expand to goal_string, run a Python-side GA, save best as a new Language. Synchronous — keep rounds × gens modest.">
+            auto-speciate from random Language
+        </button>
+    </form>
+
+    <form class="ev-newbar" method="post"
+          action="{% url 'evolution:populate_languages' %}"
+          style="grid-template-columns: auto auto auto auto auto 1fr;">
+        {% csrf_token %}
+        <label title="Fill in particles / subwords / words for Languages whose spec only carries grammars.">Populate</label>
+        <label style="font-weight:normal">scope</label>
+        <select name="scope" style="width:auto">
+            <option value="speciated">speciated only (evo-…)</option>
+            <option value="all">all empty-spec</option>
+        </select>
+        <label style="font-weight:normal">words</label>
+        <input type="number" name="word_count" value="2000" min="100" max="20000"
+               step="100" style="width:6em">
+        <span></span>
+        <button type="submit" class="ev-btn"
+                title="For each matching Language with no particles, deterministically build the full Grammar Engine stack (particles / subwords / words) from its seed. Existing grammars (e.g. the evolved variant) are preserved.">
+            populate particles + subwords + words
+        </button>
+    </form>
+
+    <form class="ev-newbar" method="post"
+          action="{% url 'evolution:language_tournament' %}"
+          style="grid-template-columns: auto auto auto auto auto auto 1fr;"
+          onsubmit="return confirm('This will delete the lowest-scoring Language(s) from Grammar Engine. Continue?');">
+        {% csrf_token %}
+        <label title="Pull N random Languages from Grammar Engine, score them against a neutral random goal, delete the lowest K.">Tournament</label>
+        <label style="font-weight:normal">competitors</label>
+        <input type="number" name="competitors" value="6" min="2" max="20"
+               style="width:4em">
+        <label style="font-weight:normal">eliminate</label>
+        <input type="number" name="eliminate" value="2" min="1" max="10"
+               style="width:4em">
+        <label style="font-weight:normal">gens</label>
+        <input type="number" name="generations" value="50" min="10" max="300"
+               style="width:5em">
+        <label style="font-weight:normal">floor</label>
+        <input type="number" name="floor" value="4" min="2" max="50"
+               style="width:4em"
+               title="Never let the Grammar Engine library drop below this many Languages.">
+        <button type="submit" class="ev-btn danger"
+                title="Competitors are pulled at random from Grammar Engine's library. Each runs a short GA seeded by (language.seed ⊕ goal). Lowest K are deleted; winners absorb the evolved variant as a tournament trophy.">
+            run language tournament
+        </button>
+    </form>
+
+    <form class="ev-newbar" method="post"
+          action="{% url 'evolution:language_championship' %}"
+          style="grid-template-columns: auto auto auto auto auto auto auto 1fr;"
+          onsubmit="return confirm('Championship deletes non-advancers across many tournaments — potentially most of the Grammar Engine library. Floor will hold the line. Continue?');">
+        {% csrf_token %}
+        <label title="Bracketed tournament-of-tournaments. Each level's winners advance to the next level's matches.">Championship</label>
+        <label style="font-weight:normal">levels</label>
+        <input type="number" name="levels" value="2" min="1" max="5"
+               style="width:4em"
+               title="Meta depth. 1 = a batch of tournaments. 2 = winners from level 1 fight in level 2. 3+ = tournaments of tournaments of tournaments.">
+        <label style="font-weight:normal">per group</label>
+        <input type="number" name="per_group" value="5" min="2" max="10"
+               style="width:4em"
+               title="Languages per match at every level.">
+        <label style="font-weight:normal">winners/group</label>
+        <input type="number" name="winners_per_group" value="2" min="1" max="9"
+               style="width:4em"
+               title="How many advance from each match. Must be < per_group.">
+        <label style="font-weight:normal">gens</label>
+        <input type="number" name="generations" value="40" min="10" max="200"
+               style="width:5em">
+        <label style="font-weight:normal">floor</label>
+        <input type="number" name="floor" value="4" min="2" max="50"
+               style="width:4em"
+               title="Total-deletion budget across the whole championship — Grammar Engine library never drops below this.">
+        <button type="submit" class="ev-btn danger"
+                title="Championship: shuffle, bracket into groups of `per_group`, run tournament in each, top `winners_per_group` advance. Repeat for `levels` levels. Each match's winners absorb the evolved grammar as a trophy variant — multi-level survivors collect stacks.">
+            run championship
+        </button>
     </form>
 
     <form class="ev-newbar" method="get"

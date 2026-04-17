@@ -5,6 +5,7 @@ import socket
 import subprocess
 from datetime import datetime
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
@@ -869,6 +870,29 @@ def meditation_detail(request, pk):
 
 @login_required
 @require_POST
+def stillness_now(request):
+    """Compose a Stillness — a quiet meditation that releases any
+    active DwellingState. Writes one short Meditation and a journal
+    line so the quiet moment is part of the record."""
+    from .meditation import stillness
+    identity = Identity.get_self()
+    med = stillness(close_dwelling=True, push_to_codex=True)
+    if med is not None:
+        identity.add_journal_entry(
+            'Stillness. I set down what I was holding. '
+            'Nothing is being added.')
+        messages.success(request, 'Stillness composed. The mind rests.')
+    else:
+        messages.error(request,
+            'Stillness is unavailable while meditations are disabled.')
+    next_url = request.POST.get('next', '')
+    if next_url and next_url.startswith('/'):
+        return redirect(next_url)
+    return redirect('identity:home')
+
+
+@login_required
+@require_POST
 def meditation_compose(request):
     """Operator-initiated meditation composition — button on the
     meditations list page. Takes depth + voice and composes a single
@@ -1055,7 +1079,6 @@ def tick_now(request):
 # Prefixed with hof_ to avoid name collisions.
 # =====================================================================
 
-from django.contrib import messages
 from django.shortcuts import get_object_or_404
 
 from .models import (

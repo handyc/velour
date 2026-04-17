@@ -80,6 +80,38 @@ def tileset_add(request):
 
 @login_required
 @require_POST
+def tileset_from_attic(request):
+    """Pick 16 random Attic images and build a Wang tileset from them."""
+    from .from_attic import build_tileset_from_attic
+
+    try:
+        count = int(request.POST.get('count', 16))
+    except (TypeError, ValueError):
+        count = 16
+    count = max(4, min(64, count))
+
+    try:
+        palette_size = int(request.POST.get('palette_size', 3))
+    except (TypeError, ValueError):
+        palette_size = 3
+    palette_size = max(2, min(6, palette_size))
+
+    tileset = build_tileset_from_attic(
+        count=count, palette_size=palette_size,
+    )
+    if tileset is None:
+        messages.error(request, 'Not enough image items in Attic to build a tileset.')
+        return redirect('tiles:list')
+    messages.success(
+        request,
+        f'Built "{tileset.name}" from {tileset.tile_count} Attic images '
+        f'(palette of {palette_size}).',
+    )
+    return redirect('tiles:detail', slug=tileset.slug)
+
+
+@login_required
+@require_POST
 def tileset_delete(request, slug):
     tileset = get_object_or_404(TileSet, slug=slug)
     name = tileset.name

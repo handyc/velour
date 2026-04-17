@@ -95,6 +95,8 @@
             {% csrf_token %}
             <button type="submit" class="btn">{% if reel.output %}Re-render{% else %}Render now{% endif %}</button>
         </form>
+        <a href="{% url 'zoetrope:frames' reel.slug %}" class="btn btn-secondary"
+           title="Drag-sort individual frames, remove duplicates, bulk-edit the PK list.">Edit frames</a>
         {% if reel.output %}
             <a href="{{ reel.output.url }}" download class="btn btn-secondary">Download mp4</a>
             <form method="post" action="{% url 'zoetrope:share' reel.slug %}" style="display:inline;" target="_blank">
