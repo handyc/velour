@@ -96,9 +96,12 @@ public:
     // calls this to get a stable view across all peers at once.
     size_t peerSnapshot(PeerObservation* out, size_t maxOut) const;
 
-private:
     // ESP-NOW's C-style receive callback lands here via a trampoline.
+    // Public only because the free-function trampoline needs to call it;
+    // not part of the user-facing API.
     void _onReceive(const uint8_t* mac, const uint8_t* data, int len);
+
+private:
 
     PeerObservation _peers[BODYMAP_MAX_PEERS];
     size_t _peerCount = 0;

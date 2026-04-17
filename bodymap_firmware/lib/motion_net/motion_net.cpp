@@ -7,13 +7,16 @@
 // ESP-NOW's receive callback signature changed between arduino-esp32 core
 // 2.x (raw mac pointer) and 3.x (esp_now_recv_info_t struct). Gate on the
 // version macro so the same file compiles against both.
+// The trampoline parameter is always named `info` so the call site
+// below stays compatible with both core versions; the type and the
+// way we reach the source MAC differs.
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
   #define BODYMAP_RECV_CB_SIG(name) \
       void name(const esp_now_recv_info_t* info, const uint8_t* data, int len)
   #define BODYMAP_RECV_CB_MAC(info_or_mac) info_or_mac->src_addr
 #else
   #define BODYMAP_RECV_CB_SIG(name) \
-      void name(const uint8_t* mac, const uint8_t* data, int len)
+      void name(const uint8_t* info, const uint8_t* data, int len)
   #define BODYMAP_RECV_CB_MAC(info_or_mac) info_or_mac
 #endif
 

@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+
+{% block title %}Flash a bodymap node — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fl-lede { color: #8b949e; max-width: 52rem; }
+    .fl-grid { display: grid; grid-template-columns: 320px 1fr; gap: 1.5rem; margin-top: 1rem; }
+    @media (max-width: 800px) { .fl-grid { grid-template-columns: 1fr; } }
+    .fl-panel { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 1rem; }
+    .fl-panel h2 { font-size: 0.9rem; color: #c9d1d9; margin: 0 0 0.6rem 0; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+    .fl-devices { list-style: none; padding: 0; margin: 0; }
+    .fl-devices li { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.6rem; border-radius: 4px; cursor: pointer; }
+    .fl-devices li:hover { background: #161b22; }
+    .fl-devices li.selected { background: rgba(88, 166, 255, 0.12); border: 1px solid #58a6ff; padding: calc(0.45rem - 1px) calc(0.6rem - 1px); }
+    .fl-devices li input { margin: 0; }
+    .fl-devices code { font-family: ui-monospace, Menlo, monospace; color: #c9d1d9; font-size: 0.82rem; }
+    .fl-empty { color: #6e7681; font-size: 0.85rem; padding: 0.4rem 0; }
+    .fl-fw { font-size: 0.8rem; color: #8b949e; }
+    .fl-fw .bin { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px dashed #21262d; font-family: ui-monospace, Menlo, monospace; }
+    .fl-fw .ok { color: #2ea043; }
+    .fl-fw .missing { color: #f85149; }
+    .fl-fw .stale { color: #d29922; }
+    .fl-actions { display: flex; gap: 0.6rem; margin-top: 0.8rem; flex-wrap: wrap; }
+    .fl-btn { background: #238636; color: #fff; border: none; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer; font-weight: 500; }
+    .fl-btn:hover { background: #2ea043; }
+    .fl-btn[disabled] { background: #30363d; color: #6e7681; cursor: not-allowed; }
+    .fl-btn.secondary { background: #21262d; color: #c9d1d9; }
+    .fl-btn.secondary:hover { background: #30363d; }
+    .fl-btn.danger { background: #da3633; }
+    .fl-btn.danger:hover { background: #f85149; }
+    .fl-log { background: #010409; border: 1px solid #21262d; border-radius: 6px; padding: 0.8rem; font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem; color: #c9d1d9; white-space: pre-wrap; line-height: 1.45; height: 420px; overflow-y: auto; }
+    .fl-log.idle { color: #6e7681; }
+    .fl-status { font-size: 0.8rem; margin-top: 0.6rem; }
+    .fl-status.running { color: #d29922; }
+    .fl-status.ok      { color: #2ea043; }
+    .fl-status.fail    { color: #f85149; }
+    .fl-hint { font-size: 0.8rem; color: #8b949e; background: rgba(210,153,34,0.08); border-left: 2px solid #d29922; padding: 0.6rem 0.8rem; border-radius: 0 4px 4px 0; margin-top: 0.6rem; }
+    .fl-hint code { background: #161b22; padding: 1px 6px; border-radius: 3px; font-family: ui-monospace, Menlo, monospace; color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Flash a bodymap node</h1>
+<p class="fl-lede">
+    Plug an ESP32-S3 SuperMini into USB, pick the device below, click
+    Flash. The server pushes the three pre-built binaries
+    (<code>bootloader.bin</code> / <code>partitions.bin</code> /
+    <code>firmware.bin</code>) through <code>esptool.py</code> over
+    serial — no PlatformIO compile step on click, so a re-flash is a
+    few seconds. If the firmware tree ever gets out of date, click
+    Rebuild first.
+</p>
+
+<div class="fl-grid">
+    <div>
+        <div class="fl-panel">
+            <h2>Serial devices</h2>
+            <ul class="fl-devices" id="fl-devices">
+                {% for d in devices %}
+                <li data-port="{{ d.path }}">
+                    <input type="radio" name="port" value="{{ d.path }}" id="port-{{ forloop.counter }}">
+                    <label for="port-{{ forloop.counter }}"><code>{{ d.path }}</code></label>
+                </li>
+                {% empty %}
+                <li class="fl-empty">No serial devices visible yet.</li>
+                {% endfor %}
+            </ul>
+            <div class="fl-actions">
+                <button type="button" class="fl-btn secondary" id="fl-refresh">Refresh</button>
+            </div>
+            <div class="fl-hint">
+                WSL2: devices only appear after <code>usbipd attach --wsl --busid&nbsp;&lt;X-Y&gt;</code>
+                runs on the Windows side. The bus ID is shown by
+                <code>usbipd list</code>.
+            </div>
+        </div>
+
+        <div class="fl-panel" style="margin-top: 1rem;">
+            <h2>Firmware build</h2>
+            <div class="fl-fw">
+                {% for name, b in firmware.bins.items %}
+                <div class="bin">
+                    <span>{{ name }}.bin</span>
+                    <span class="{% if b.exists %}ok{% else %}missing{% endif %}">
+                        {% if b.exists %}{{ b.size|filesizeformat }}{% else %}missing{% endif %}
+                    </span>
+                </div>
+                {% endfor %}
+                <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #6e7681;">
+                    Source tree: <code>{{ firmware_dir }}</code>
+                </div>
+            </div>
+            <div class="fl-actions">
+                <button type="button" class="fl-btn secondary" id="fl-build">Rebuild</button>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="fl-actions" style="margin-top: 0;">
+            <button type="button" class="fl-btn" id="fl-flash" disabled>Flash selected device</button>
+            <span class="fl-status" id="fl-status">ready</span>
+        </div>
+        <div class="fl-panel" style="margin-top: 0.8rem;">
+            <h2>Log</h2>
+            <div class="fl-log idle" id="fl-log">click Flash to begin</div>
+        </div>
+    </div>
+</div>
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'bodymap:list' %}" class="btn btn-secondary">Back to Bodymap</a>
+</div>
+
+<script>
+(function () {
+    const devicesUl   = document.getElementById('fl-devices');
+    const refreshBtn  = document.getElementById('fl-refresh');
+    const buildBtn    = document.getElementById('fl-build');
+    const flashBtn    = document.getElementById('fl-flash');
+    const statusEl    = document.getElementById('fl-status');
+    const logEl       = document.getElementById('fl-log');
+
+    const urls = {
+        devices: "{% url 'bodymap:flash_devices' %}",
+        run:     "{% url 'bodymap:flash_run' %}",
+        build:   "{% url 'bodymap:flash_build' %}",
+        log:     "{% url 'bodymap:flash_log' 'JOBID' %}",
+    };
+
+    let selectedPort = null;
+    let currentJob   = null;
+    let pollTimer    = null;
+
+    function syncFlashEnabled() {
+        flashBtn.disabled = !selectedPort || currentJob;
+    }
+
+    function selectPort(port) {
+        selectedPort = port;
+        [...devicesUl.querySelectorAll('li')].forEach(li => {
+            li.classList.toggle('selected', li.dataset.port === port);
+            const radio = li.querySelector('input');
+            if (radio) radio.checked = li.dataset.port === port;
+        });
+        syncFlashEnabled();
+    }
+
+    devicesUl.addEventListener('click', (ev) => {
+        const li = ev.target.closest('li[data-port]');
+        if (!li) return;
+        selectPort(li.dataset.port);
+    });
+
+    async function refreshDevices() {
+        const r = await fetch(urls.devices);
+        const j = await r.json();
+        devicesUl.innerHTML = '';
+        if (j.devices.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'fl-empty';
+            empty.textContent = 'No serial devices visible yet.';
+            devicesUl.appendChild(empty);
+            selectedPort = null;
+            syncFlashEnabled();
+            return;
+        }
+        j.devices.forEach((d, i) => {
+            const li = document.createElement('li');
+            li.dataset.port = d.path;
+            li.innerHTML = `<input type="radio" name="port" id="port-${i}"><label for="port-${i}"><code>${d.path}</code></label>`;
+            devicesUl.appendChild(li);
+        });
+        // Auto-reselect if still present.
+        if (selectedPort && j.devices.find(d => d.path === selectedPort)) {
+            selectPort(selectedPort);
+        } else {
+            selectedPort = null;
+            syncFlashEnabled();
+        }
+    }
+
+    refreshBtn.addEventListener('click', refreshDevices);
+
+    function setStatus(cls, text) {
+        statusEl.className = 'fl-status ' + cls;
+        statusEl.textContent = text;
+    }
+
+    function appendLog(chunk) {
+        if (!chunk) return;
+        if (logEl.classList.contains('idle')) {
+            logEl.classList.remove('idle');
+            logEl.textContent = '';
+        }
+        logEl.textContent += chunk;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function pollJob(jobId, offset) {
+        const r = await fetch(urls.log.replace('JOBID', jobId) + '?offset=' + offset);
+        const j = await r.json();
+        appendLog(j.chunk);
+        if (j.finished) {
+            currentJob = null;
+            if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            if (j.returncode === 0) {
+                setStatus('ok', j.label + ' — done');
+            } else {
+                setStatus('fail', j.label + ' — exit ' + j.returncode);
+            }
+            syncFlashEnabled();
+            // Re-probe devices post-flash (board may have re-enumerated).
+            refreshDevices();
+            return;
+        }
+        pollTimer = setTimeout(() => pollJob(jobId, j.offset), 500);
+    }
+
+    function startJob(jobId, label) {
+        currentJob = jobId;
+        logEl.classList.remove('idle');
+        logEl.textContent = '';
+        setStatus('running', label + ' — running…');
+        syncFlashEnabled();
+        pollJob(jobId, 0);
+    }
+
+    flashBtn.addEventListener('click', async () => {
+        if (!selectedPort) return;
+        const fd = new FormData();
+        fd.append('port', selectedPort);
+        const r = await fetch(urls.run, { method: 'POST', body: fd });
+        const j = await r.json();
+        if (j.error) { setStatus('fail', j.error); return; }
+        startJob(j.job, 'flash');
+    });
+
+    buildBtn.addEventListener('click', async () => {
+        const r = await fetch(urls.build, { method: 'POST' });
+        const j = await r.json();
+        if (j.error) { setStatus('fail', j.error); return; }
+        startJob(j.job, 'build');
+    });
+
+    syncFlashEnabled();
+})();
+</script>
+{% endblock %}

@@ -37,6 +37,7 @@ media/
 secret_key.txt
 health_token.txt
 mail_relay_token.txt
+provisioning_secret.txt
 *.token
 # LLM provider API keys — per-provider chmod-600 files
 llm_*.key
