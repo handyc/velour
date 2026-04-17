@@ -1,0 +1,12 @@
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# WiFi + provisioning secret live here — never commit. Matches the
+# pattern used by gary_test/.
+include/wifi_secrets.h
