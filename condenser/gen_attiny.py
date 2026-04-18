@@ -65,9 +65,14 @@ def generate(ir):
     lines.append('        // READ: query the pin database')
     lines.append('        uint8_t in0 = (PINB >> PIN_IN0) & 1;')
     lines.append('        uint8_t in1 = (PINB >> PIN_IN1) & 1;')
+    lines.append('        // Default pass-through; each view may override below.')
+    lines.append('        uint8_t out0 = in0;')
+    lines.append('        uint8_t out1 = in1;')
     lines.append('')
 
-    # Generate logic from views
+    # Generate logic from views. out0/out1 are declared once above; each
+    # view's output step reassigns them so multiple views don't fight the
+    # C "redefinition" rule.
     for view in fir.views:
         lines.append(f'        // View: {view.name}')
         for step in view.steps:
@@ -75,8 +80,8 @@ def generate(ir):
                 lines.append(f'        // read {step.target} → pins already read above')
             elif step.op == 'output':
                 lines.append(f'        // output: set pins based on state')
-                lines.append(f'        uint8_t out0 = in0;  // pass-through (customize)')
-                lines.append(f'        uint8_t out1 = in1;')
+                lines.append(f'        out0 = in0;  // pass-through (customize)')
+                lines.append(f'        out1 = in1;')
             elif step.op == 'compute':
                 lines.append(f'        // compute: transform input to output')
         lines.append('')
