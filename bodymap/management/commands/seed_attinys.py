@@ -145,6 +145,15 @@ TEMPLATES = [
      'the receive, so timing tolerance is wide even if the \'13a\'s '
      'clock drifts a percent or two. Flash footprint: ~250 bytes.'),
 
+    ('display_st7735s_13a', 'ST7735S display driver (13a)', 'attiny13a',
+     '0.96" 80x160 IPS panel driven by bit-banged SPI in the 1 KB flash of the \'13a.',
+     'PB0 = MOSI (SDA), PB2 = SCK (SCL), PB3 = RES, PB4 = DC. Module CS→GND, BLK→VCC.',
+     'Same panel the \'85 template drives, but with every SPI bit '
+     'toggled in software — the \'13a has no USI. Compiles to ~660 '
+     'bytes. Wants F_CPU=9.6 MHz (unprogram the CKDIV8 fuse); at the '
+     '1.2 MHz default, clearing the screen takes a visible 3 seconds '
+     'but the sweep animation still runs fine.'),
+
     ('ca_rule_13a', 'Cellular automaton rule (13a)', 'attiny13a',
      'Wolfram-style 3→1 elementary CA cell — pot picks one of 256 rules (Rule 30, 90, 110, …).',
      'PB0 = C_new out, PB1 = L in, PB2 = rule pot (ADC1), PB3 = C in, PB4 = R in.',
