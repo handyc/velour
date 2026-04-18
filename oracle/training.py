@@ -24,11 +24,20 @@ def _serialize_sklearn_tree(clf, feature_names, class_names):
     def node_to_dict(node_id):
         # Leaf node: left == right == -1
         if tree.children_left[node_id] == -1 and tree.children_right[node_id] == -1:
-            distribution = [int(c) for c in tree.value[node_id][0]]
-            predicted_class = int(distribution.index(max(distribution)))
+            # sklearn >=1.3 returns normalized fractions in tree_.value.
+            # Earlier versions returned raw weighted counts. Detect which
+            # and scale to integer counts either way.
+            raw     = list(tree.value[node_id][0])
+            total   = int(tree.n_node_samples[node_id])
+            raw_sum = sum(raw)
+            if raw_sum > 0 and raw_sum <= 1.01:
+                distribution = [int(round(v * total)) for v in raw]
+            else:
+                distribution = [int(v) for v in raw]
+            predicted_class = max(range(len(raw)), key=raw.__getitem__)
             return {
                 'value':    predicted_class,
-                'samples':  int(tree.n_node_samples[node_id]),
+                'samples':  total,
                 'distribution': distribution,
             }
         # Internal node: split
