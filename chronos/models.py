@@ -2,17 +2,13 @@
 
 Phase 1: ClockPrefs singleton + WatchedTimezone wall.
 
-Phase 2a (current): CalendarEvent model + month grid + day detail.
+Phase 2: CalendarEvent across month / day, religious + civic
+holidays, astronomical events from skyfield (equinoxes, solstices,
+eclipses, moon phases, meteor showers, planetary conjunctions), and
+the deep-time zoom chain day → month → year → decade → century →
+millennium → 10Ky → 100Ky.
 
-Phase 2b (planned): Holiday data from religious traditions
-(Vedic Hinduism, Daoism, Confucianism, Shinto, Buddhism, Chinese
-calendar, Islam, Judaism, Christianity, Wicca) and civic holidays.
-
-Phase 2c (planned): Astronomical events (eclipses, equinoxes,
-solstices, planetary conjunctions, meteor showers) via skyfield.
-
-Phase 2d (planned): Deep-time browsing modes — month → year →
-decade → century → millennium → 10K-yr → 100K-yr.
+Phase 2e: Task + morning Briefing, daily Codex push.
 """
 
 from django.db import models
