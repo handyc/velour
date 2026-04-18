@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}ATtiny workshop — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .aw-lede { color: #8b949e; max-width: 56rem; }
+    .aw-actions { margin-top: 0.8rem; display:flex; gap: 0.5rem; flex-wrap: wrap; }
+    .aw-btn { display:inline-block; padding: 0.4rem 0.9rem; border-radius: 6px;
+              text-decoration: none; font-size: 0.85rem; }
+    .aw-btn.primary { background: #238636; color: #fff; }
+    .aw-btn.secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+
+    h2.aw-sub { margin-top: 2rem; font-size: 1rem; color: #c9d1d9; }
+    .aw-mcu { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+              color: #6e7681; margin: 1.2rem 0 0.4rem; }
+
+    .aw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 0.8rem; }
+    .aw-card { background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+               padding: 0.9rem 1rem; display: flex; flex-direction: column;
+               min-height: 150px; }
+    .aw-card h3 { margin: 0 0 0.3rem 0; font-size: 0.95rem; color: #c9d1d9; }
+    .aw-card h3 a { color: inherit; text-decoration: none; }
+    .aw-card h3 a:hover { color: #58a6ff; }
+    .aw-card .aw-chip { display:inline-block; font-family: ui-monospace, Menlo, monospace;
+                        font-size: 0.68rem; padding: 1px 7px; border-radius: 10px;
+                        background: #161b22; color: #8b949e; margin-left: 0.4rem; }
+    .aw-card .aw-summary { color: #8b949e; font-size: 0.82rem; flex: 1; line-height: 1.4; }
+    .aw-card .aw-pinout { font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem;
+                          color: #6e7681; margin-top: 0.5rem; }
+    .aw-card-actions { display: flex; gap: 0.4rem; margin-top: 0.7rem; }
+    .aw-card-actions form { display: inline; }
+    .aw-card-actions button, .aw-card-actions a {
+        background: #238636; color: #fff; border: none; padding: 0.3rem 0.7rem;
+        border-radius: 4px; font-size: 0.78rem; cursor: pointer; font-weight: 500;
+        text-decoration: none; display: inline-block;
+    }
+    .aw-card-actions button:hover { background: #2ea043; }
+    .aw-card-actions a.secondary { background: #21262d; color: #c9d1d9;
+                                   border: 1px solid #30363d; }
+    .aw-card-actions a.secondary:hover { background: #30363d; }
+
+    .aw-table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; font-size: 0.85rem; }
+    .aw-table th, .aw-table td { padding: 0.4rem 0.6rem; text-align: left;
+                                 border-bottom: 1px solid #21262d; }
+    .aw-table th { color: #8b949e; text-transform: uppercase; font-size: 0.7rem;
+                   letter-spacing: 0.05em; font-weight: 500; }
+    .aw-table td.mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem;
+                        color: #8b949e; }
+    .aw-table td a { color: #58a6ff; text-decoration: none; }
+    .aw-table td a:hover { text-decoration: underline; }
+    .aw-table .ok   { color: #2ea043; }
+    .aw-table .stale { color: #d29922; }
+    .aw-table .bad  { color: #f85149; }
+    .aw-empty { color: #6e7681; margin: 0.6rem 0; font-size: 0.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>ATtiny workshop</h1>
+<p class="aw-lede">
+    Edit C source in the browser, compile via <code>avr-gcc</code>, download the
+    hex, burn it with <code>avrdude</code>. Templates are read-only starters —
+    fork one into a design to edit. The in-browser emulator runs any t13a
+    design before you ever socket a chip.
+</p>
+
+<div class="aw-actions">
+    <a href="{% url 'bodymap:list' %}" class="aw-btn secondary">← Bodymap</a>
+    <a href="{% url 'bodymap:attiny_emulate' %}" class="aw-btn secondary">t13a emulator →</a>
+</div>
+
+<h2 class="aw-sub">Templates</h2>
+
+{% regroup templates by get_mcu_display as tpl_groups %}
+{% for group in tpl_groups %}
+<div class="aw-mcu">{{ group.grouper }}</div>
+<div class="aw-cards">
+    {% for tpl in group.list %}
+    <div class="aw-card">
+        <h3>
+            <a href="{% url 'bodymap:attiny_template' tpl.slug %}">{{ tpl.name }}</a>
+            <span class="aw-chip">{{ tpl.mcu }}</span>
+        </h3>
+        <div class="aw-summary">{{ tpl.summary }}</div>
+        {% if tpl.pinout %}<div class="aw-pinout">{{ tpl.pinout }}</div>{% endif %}
+        <div class="aw-card-actions">
+            <form method="post" action="{% url 'bodymap:attiny_fork' tpl.slug %}">
+                {% csrf_token %}
+                <button type="submit">Fork</button>
+            </form>
+            <a class="secondary" href="{% url 'bodymap:attiny_template' tpl.slug %}">View source</a>
+            {% if tpl.mcu == 'attiny13a' %}
+            <a class="secondary" href="{% url 'bodymap:attiny_emulate_slug' tpl.slug %}">Emulate</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% empty %}
+<p class="aw-empty">No templates seeded yet. Run <code>manage.py seed_attinys</code>.</p>
+{% endfor %}
+
+<h2 class="aw-sub">Your designs</h2>
+{% if designs %}
+<table class="aw-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>MCU</th>
+            <th>From template</th>
+            <th>I2C</th>
+            <th>Size</th>
+            <th>Built</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in designs %}
+        <tr>
+            <td><a href="{% url 'bodymap:attiny_design' d.slug %}">{{ d.name }}</a></td>
+            <td class="mono">{{ d.mcu }}</td>
+            <td>
+                {% if d.template %}
+                <a href="{% url 'bodymap:attiny_template' d.template.slug %}" style="color:#8b949e;">{{ d.template.name }}</a>
+                {% else %}<span style="color:#6e7681;">—</span>{% endif %}
+            </td>
+            <td class="mono">0x{{ d.i2c_address|stringformat:"02x" }}</td>
+            <td class="mono">
+                {% if d.program_bytes is not None %}
+                    {% if d.compile_ok %}<span class="ok">{{ d.program_bytes }} B</span>
+                    {% else %}<span class="bad">fail</span>{% endif %}
+                    <span style="color:#6e7681;">/ {{ d.flash_limit_bytes }}</span>
+                {% else %}<span style="color:#6e7681;">not built</span>{% endif %}
+            </td>
+            <td class="mono">
+                {% if d.compiled_at %}{{ d.compiled_at|date:"m-d H:i" }}
+                {% else %}<span style="color:#6e7681;">—</span>{% endif %}
+            </td>
+            <td class="mono">
+                {% if d.mcu == 'attiny13a' and d.compile_ok %}
+                <a href="{% url 'bodymap:attiny_emulate_slug' d.slug %}">emulate</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="aw-empty">No designs yet. Fork a template above to start editing.</p>
+{% endif %}
+
+{% endblock %}

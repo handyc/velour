@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block title %}{{ design.name }} — ATtiny editor{% endblock %}
+
+{% block extra_head %}
+<style>
+    .de-head { display: flex; justify-content: space-between; align-items: flex-start;
+               gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+    .de-crumbs { color: #8b949e; font-size: 0.8rem; }
+    .de-crumbs a { color: #58a6ff; text-decoration: none; }
+    .de-crumbs a:hover { text-decoration: underline; }
+
+    .de-grid { display: grid; grid-template-columns: 1fr 320px; gap: 1.2rem; margin-top: 1rem; }
+    @media (max-width: 900px) { .de-grid { grid-template-columns: 1fr; } }
+
+    .de-panel { background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+                padding: 1rem; }
+    .de-panel h2 { font-size: 0.82rem; color: #8b949e; margin: 0 0 0.6rem 0;
+                   text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+
+    .de-field { display: flex; flex-direction: column; margin-bottom: 0.7rem; }
+    .de-field label { font-size: 0.72rem; color: #8b949e; text-transform: uppercase;
+                      letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .de-field input, .de-field textarea, .de-field select {
+        background: #010409; border: 1px solid #30363d; border-radius: 4px;
+        color: #c9d1d9; padding: 0.4rem 0.6rem; font-size: 0.85rem;
+        font-family: inherit;
+    }
+    .de-field input:focus, .de-field textarea:focus, .de-field select:focus {
+        outline: none; border-color: #58a6ff;
+    }
+    .de-field textarea { resize: vertical; min-height: 80px; }
+
+    .de-source {
+        width: 100%; min-height: 480px; background: #010409; border: 1px solid #30363d;
+        border-radius: 4px; color: #c9d1d9; padding: 0.8rem;
+        font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem;
+        line-height: 1.5; white-space: pre; resize: vertical;
+    }
+    .de-source:focus { outline: none; border-color: #58a6ff; }
+
+    .de-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.8rem; }
+    .de-btn { background: #238636; color: #fff; border: none; padding: 0.5rem 1rem;
+              border-radius: 5px; font-size: 0.85rem; cursor: pointer; font-weight: 500;
+              text-decoration: none; display: inline-block; }
+    .de-btn:hover { background: #2ea043; }
+    .de-btn[disabled] { background: #30363d; color: #6e7681; cursor: not-allowed; }
+    .de-btn.secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .de-btn.secondary:hover { background: #30363d; }
+    .de-btn.danger { background: #da3633; }
+    .de-btn.danger:hover { background: #f85149; }
+
+    .de-status { font-size: 0.8rem; margin-top: 0.5rem; min-height: 1.1em; color: #8b949e; }
+    .de-status.ok   { color: #2ea043; }
+    .de-status.bad  { color: #f85149; }
+    .de-status.run  { color: #d29922; }
+
+    .de-log { background: #010409; border: 1px solid #21262d; border-radius: 4px;
+              padding: 0.6rem 0.8rem; font-family: ui-monospace, Menlo, monospace;
+              font-size: 0.75rem; color: #c9d1d9; white-space: pre-wrap;
+              line-height: 1.45; max-height: 260px; overflow-y: auto; margin-top: 0.5rem; }
+    .de-log.idle { color: #6e7681; font-style: italic; }
+
+    .de-meta-row { font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem;
+                   color: #8b949e; padding: 0.25rem 0;
+                   display: flex; justify-content: space-between; gap: 0.5rem; }
+    .de-meta-row .v { color: #c9d1d9; }
+    .de-meta-row .v.ok { color: #2ea043; }
+    .de-meta-row .v.bad { color: #f85149; }
+    .de-meta-row .v.stale { color: #d29922; }
+
+    .de-tpl-link { font-size: 0.8rem; color: #8b949e; }
+    .de-tpl-link a { color: #58a6ff; text-decoration: none; }
+    .de-tpl-link a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="de-head">
+    <div>
+        <div class="de-crumbs">
+            <a href="{% url 'bodymap:attiny_index' %}">← Workshop</a>
+            {% if template %} ·
+            forked from <a href="{% url 'bodymap:attiny_template' template.slug %}">{{ template.name }}</a>
+            {% endif %}
+        </div>
+        <h1 id="de-title" style="margin: 0.3rem 0;">{{ design.name }}</h1>
+    </div>
+</div>
+
+<form id="de-form">
+    {% csrf_token %}
+    <div class="de-grid">
+        <div>
+            <div class="de-panel">
+                <h2>Source — {{ design.slug }}.c</h2>
+                <textarea id="de-source" name="c_source" class="de-source"
+                          spellcheck="false" autocomplete="off">{{ design.c_source }}</textarea>
+                <div class="de-actions">
+                    <button type="button" class="de-btn" id="de-build">Build</button>
+                    <button type="button" class="de-btn secondary" id="de-save">Save</button>
+                    {% if design.compile_ok %}
+                    <a class="de-btn secondary" id="de-hex"
+                       href="{% url 'bodymap:attiny_design_hex' design.slug %}">Download .hex</a>
+                    {% else %}
+                    <a class="de-btn secondary" id="de-hex" href="#" aria-disabled="true"
+                       style="background:#30363d;color:#6e7681;pointer-events:none;">Download .hex</a>
+                    {% endif %}
+                    {% if design.mcu == 'attiny13a' %}
+                    <a class="de-btn secondary" id="de-emu"
+                       href="{% url 'bodymap:attiny_emulate_slug' design.slug %}"
+                       {% if not design.compile_ok %}style="background:#30363d;color:#6e7681;pointer-events:none;" aria-disabled="true"{% endif %}>
+                        Emulate
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="de-status" id="de-status">
+                    {% if design.compile_ok %}
+                        Last build OK · {{ design.program_bytes }} B / {{ design.flash_limit_bytes }} · {{ design.compiled_at|date:"Y-m-d H:i" }}
+                    {% elif design.compiled_at %}
+                        Last build failed.
+                    {% else %}
+                        Not built yet.
+                    {% endif %}
+                </div>
+                {% if design.compile_log %}
+                <pre class="de-log" id="de-log">{{ design.compile_log }}</pre>
+                {% else %}
+                <pre class="de-log idle" id="de-log">Build log will appear here.</pre>
+                {% endif %}
+            </div>
+        </div>
+
+        <div>
+            <div class="de-panel">
+                <h2>Metadata</h2>
+                <div class="de-field">
+                    <label for="de-name">Name</label>
+                    <input type="text" id="de-name" name="name" value="{{ design.name }}">
+                </div>
+                <div class="de-field">
+                    <label for="de-mcu">Target MCU</label>
+                    <select id="de-mcu" name="mcu">
+                        <option value="attiny85"  {% if design.mcu == 'attiny85' %}selected{% endif %}>ATtiny85 (8 KB)</option>
+                        <option value="attiny13a" {% if design.mcu == 'attiny13a' %}selected{% endif %}>ATtiny13a (1 KB)</option>
+                    </select>
+                </div>
+                <div class="de-field">
+                    <label for="de-i2c">I2C slave address</label>
+                    <input type="number" id="de-i2c" name="i2c_address" min="8" max="119"
+                           value="{{ design.i2c_address }}">
+                </div>
+                <div class="de-field">
+                    <label for="de-desc">Description</label>
+                    <textarea id="de-desc" name="description">{{ design.description }}</textarea>
+                </div>
+
+                <div style="border-top: 1px dashed #21262d; padding-top: 0.6rem; margin-top: 0.4rem;">
+                    <div class="de-meta-row">
+                        <span>slug</span>
+                        <span class="v">{{ design.slug }}</span>
+                    </div>
+                    <div class="de-meta-row">
+                        <span>flash budget</span>
+                        <span class="v" id="de-budget">{{ design.flash_limit_bytes }} B</span>
+                    </div>
+                    <div class="de-meta-row">
+                        <span>last build</span>
+                        <span class="v {% if design.compile_ok %}ok{% elif design.compiled_at %}bad{% else %}stale{% endif %}"
+                              id="de-last">
+                            {% if design.program_bytes is not None %}{{ design.program_bytes }} B
+                            {% elif design.compiled_at %}failed
+                            {% else %}—
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="de-meta-row">
+                        <span>updated</span>
+                        <span class="v">{{ design.updated_at|date:"Y-m-d H:i" }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="de-panel" style="margin-top: 1rem;">
+                <h2>Delete</h2>
+                <p style="color: #8b949e; font-size: 0.8rem; margin: 0 0 0.6rem;">
+                    Removes this design and its built hex. Templates are untouched.
+                </p>
+                <form method="post" action="{% url 'bodymap:attiny_design_delete' design.slug %}"
+                      onsubmit="return confirm('Delete design {{ design.name|escapejs }}?');">
+                    {% csrf_token %}
+                    <button class="de-btn danger" type="submit">Delete design</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+(function () {
+    const form   = document.getElementById('de-form');
+    const source = document.getElementById('de-source');
+    const status = document.getElementById('de-status');
+    const logEl  = document.getElementById('de-log');
+    const hexA   = document.getElementById('de-hex');
+    const emuA   = document.getElementById('de-emu');
+    const lastEl = document.getElementById('de-last');
+    const budget = document.getElementById('de-budget');
+    const title  = document.getElementById('de-title');
+    const nameI  = document.getElementById('de-name');
+    const mcuS   = document.getElementById('de-mcu');
+
+    const csrf = form.querySelector('[name=csrfmiddlewaretoken]').value;
+    const SAVE_URL  = "{% url 'bodymap:attiny_design_save'  design.slug %}";
+    const BUILD_URL = "{% url 'bodymap:attiny_design_build' design.slug %}";
+    const HEX_URL   = "{% url 'bodymap:attiny_design_hex'   design.slug %}";
+    const EMU_URL   = "{% url 'bodymap:attiny_emulate_slug' design.slug %}";
+
+    function formBody() {
+        const fd = new FormData(form);
+        return fd;
+    }
+
+    function setStatus(cls, msg) {
+        status.className = 'de-status ' + cls;
+        status.textContent = msg;
+    }
+
+    function disableHex(disabled) {
+        if (!hexA) return;
+        if (disabled) {
+            hexA.setAttribute('aria-disabled', 'true');
+            hexA.style.background = '#30363d';
+            hexA.style.color = '#6e7681';
+            hexA.style.pointerEvents = 'none';
+        } else {
+            hexA.removeAttribute('aria-disabled');
+            hexA.style.background = '';
+            hexA.style.color = '';
+            hexA.style.pointerEvents = '';
+            hexA.href = HEX_URL;
+        }
+    }
+
+    mcuS.addEventListener('change', () => {
+        const is85 = mcuS.value === 'attiny85';
+        budget.textContent = (is85 ? 8192 : 1024) + ' B';
+        if (emuA) {
+            if (mcuS.value === 'attiny13a') {
+                emuA.style.display = '';
+            } else {
+                emuA.style.display = 'none';
+            }
+        }
+    });
+
+    document.getElementById('de-save').addEventListener('click', async () => {
+        setStatus('run', 'Saving…');
+        try {
+            const r = await fetch(SAVE_URL, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrf },
+                body: formBody(),
+            });
+            const j = await r.json();
+            if (j.ok) {
+                setStatus('ok', 'Saved. (Build invalidated — click Build to recompile.)');
+                disableHex(true);
+                title.textContent = nameI.value || title.textContent;
+            } else {
+                setStatus('bad', 'Save failed.');
+            }
+        } catch (e) {
+            setStatus('bad', 'Save error: ' + e);
+        }
+    });
+
+    document.getElementById('de-build').addEventListener('click', async () => {
+        setStatus('run', 'Compiling via avr-gcc…');
+        logEl.classList.remove('idle');
+        logEl.textContent = '…';
+        try {
+            const r = await fetch(BUILD_URL, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrf },
+                body: formBody(),
+            });
+            const j = await r.json();
+            logEl.textContent = j.log || '(no output)';
+            if (j.ok) {
+                setStatus('ok',
+                    'Build OK · ' + j.program_bytes + ' B / ' + j.flash_limit);
+                lastEl.textContent = j.program_bytes + ' B';
+                lastEl.className = 'v ok';
+                disableHex(false);
+                if (emuA) emuA.style.pointerEvents = '';
+                if (emuA && mcuS.value === 'attiny13a') {
+                    emuA.style.background = '';
+                    emuA.style.color = '';
+                    emuA.href = EMU_URL;
+                }
+            } else {
+                setStatus('bad', 'Build failed — see log.');
+                lastEl.textContent = 'failed';
+                lastEl.className = 'v bad';
+                disableHex(true);
+            }
+        } catch (e) {
+            setStatus('bad', 'Build error: ' + e);
+            logEl.textContent = String(e);
+        }
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}{{ template.name }} — ATtiny workshop{% endblock %}
+
+{% block extra_head %}
+<style>
+    .tpl-meta { color: #8b949e; font-size: 0.85rem; margin: 0.3rem 0 0.8rem; }
+    .tpl-meta .mono { font-family: ui-monospace, Menlo, monospace; }
+    .tpl-chip { display:inline-block; font-family: ui-monospace, Menlo, monospace;
+                font-size: 0.72rem; padding: 2px 8px; border-radius: 10px;
+                background: #161b22; color: #8b949e; }
+    .tpl-actions { display:flex; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+    .tpl-btn { display:inline-block; padding: 0.45rem 0.95rem; border-radius: 6px;
+               text-decoration: none; font-size: 0.85rem; border: none; cursor: pointer;
+               font-weight: 500; }
+    .tpl-btn.primary { background: #238636; color: #fff; }
+    .tpl-btn.primary:hover { background: #2ea043; }
+    .tpl-btn.secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .tpl-btn.secondary:hover { background: #30363d; }
+    .tpl-section { background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+                   padding: 0.9rem 1.1rem; margin-top: 1rem; }
+    .tpl-section h2 { font-size: 0.82rem; color: #8b949e; margin: 0 0 0.6rem 0;
+                      text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+    .tpl-pinout { font-family: ui-monospace, Menlo, monospace; color: #c9d1d9;
+                  font-size: 0.82rem; white-space: pre-wrap; }
+    .tpl-desc { color: #c9d1d9; font-size: 0.88rem; line-height: 1.55;
+                white-space: pre-wrap; max-width: 56rem; }
+    .tpl-source { background: #010409; border: 1px solid #21262d; border-radius: 6px;
+                  padding: 0.9rem; font-family: ui-monospace, Menlo, monospace;
+                  font-size: 0.78rem; color: #c9d1d9; white-space: pre; overflow: auto;
+                  line-height: 1.5; max-height: 600px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ template.name }} <span class="tpl-chip">{{ template.mcu }}</span></h1>
+<div class="tpl-meta">{{ template.summary }}</div>
+
+<div class="tpl-actions">
+    <form method="post" action="{% url 'bodymap:attiny_fork' template.slug %}" style="display:inline;">
+        {% csrf_token %}
+        <button class="tpl-btn primary" type="submit">Fork into a design</button>
+    </form>
+    {% if template.mcu == 'attiny13a' %}
+    <a class="tpl-btn secondary" href="{% url 'bodymap:attiny_emulate_slug' template.slug %}">Emulate</a>
+    {% endif %}
+    <a class="tpl-btn secondary" href="{% url 'bodymap:attiny_index' %}">← Back to workshop</a>
+</div>
+
+{% if template.pinout %}
+<div class="tpl-section">
+    <h2>Pinout</h2>
+    <div class="tpl-pinout">{{ template.pinout }}</div>
+</div>
+{% endif %}
+
+{% if template.description %}
+<div class="tpl-section">
+    <h2>Notes</h2>
+    <div class="tpl-desc">{{ template.description }}</div>
+</div>
+{% endif %}
+
+<div class="tpl-section">
+    <h2>Source — {{ template.slug }}.c</h2>
+    <pre class="tpl-source">{{ template.c_source }}</pre>
+</div>
+{% endblock %}

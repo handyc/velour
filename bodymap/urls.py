@@ -14,8 +14,16 @@ urlpatterns = [
     path('flash/log/<slug:job_id>/',         flash_views.flash_log,           name='flash_log'),
     path('flash/build/',                     flash_views.flash_build,         name='flash_build'),
 
-    path('attiny/emulate/',                  attiny_views.attiny_emulate,     name='attiny_emulate'),
-    path('attiny/emulate/<slug:slug>/',      attiny_views.attiny_emulate,     name='attiny_emulate_slug'),
+    path('attiny/',                          attiny_views.attiny_index,             name='attiny_index'),
+    path('attiny/emulate/',                  attiny_views.attiny_emulate,           name='attiny_emulate'),
+    path('attiny/emulate/<slug:slug>/',      attiny_views.attiny_emulate,           name='attiny_emulate_slug'),
+    path('attiny/template/<slug:slug>/',     attiny_views.attiny_template_detail,   name='attiny_template'),
+    path('attiny/template/<slug:slug>/fork/', attiny_views.attiny_fork_template,    name='attiny_fork'),
+    path('attiny/design/<slug:slug>/',       attiny_views.attiny_design_detail,     name='attiny_design'),
+    path('attiny/design/<slug:slug>/save/',  attiny_views.attiny_design_save,       name='attiny_design_save'),
+    path('attiny/design/<slug:slug>/build/', attiny_views.attiny_design_build,      name='attiny_design_build'),
+    path('attiny/design/<slug:slug>/hex/',   attiny_views.attiny_design_hex,        name='attiny_design_hex'),
+    path('attiny/design/<slug:slug>/delete/', attiny_views.attiny_design_delete,    name='attiny_design_delete'),
 
-    path('<slug:experiment_slug>/',          views.bodymap_diagram,           name='diagram'),
+    path('<slug:experiment_slug>/',          views.bodymap_diagram,                 name='diagram'),
 ]
