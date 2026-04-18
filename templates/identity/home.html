@@ -128,6 +128,77 @@
         min-width: 8rem;
         text-align: right;
     }
+    /* Collapse/expand per card. Compact by default; click a heading
+       to toggle. State persists per card in localStorage. */
+    .dash-toolbar {
+        display: flex;
+        gap: 0.8rem;
+        align-items: center;
+        font-size: 0.72rem;
+        color: #6e7681;
+        margin: 0.3rem 0 0.1rem 0;
+    }
+    .dash-toolbar a {
+        color: #58a6ff;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .dash-toolbar a:hover { text-decoration: underline; }
+    .dash-toolbar .hint { margin-left: auto; opacity: 0.75; }
+    .dashboard-grid .card > h3 {
+        cursor: pointer;
+        user-select: none;
+    }
+    .dashboard-grid .card > h3::after {
+        content: ' \25BE';  /* ▾ */
+        color: #6e7681;
+        font-size: 0.75em;
+        font-weight: normal;
+        margin-left: 0.2em;
+    }
+    .dashboard-grid .card.compact > h3::after {
+        content: ' \25B8';  /* ▸ */
+    }
+    .dashboard-grid .card.compact > *:not(h3):not(style) {
+        display: none !important;
+    }
+    /* Responsive column count. Phone: 1 col, tablet: 2, desktop: 3+. */
+    @media (max-width: 640px) {
+        .dashboard-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.25rem !important;
+        }
+        .card { padding: 0.3rem 0.55rem; }
+        .card h3 { font-size: 0.82rem; }
+        .identity-header { padding: 0.3rem 0; margin-bottom: 0.3rem; }
+        .identity-name { font-size: 1.1rem; }
+        .identity-tagline { font-size: 0.72rem; }
+        .mood-badge { font-size: 0.68rem; padding: 0.1rem 0.5rem; }
+        .trait { font-size: 0.65rem; padding: 0.08rem 0.4rem; }
+        .reflection-box {
+            padding: 0.35rem 0.55rem;
+            margin: 0.3rem 0;
+            font-size: 0.75rem;
+        }
+        .wave-strip {
+            padding: 0.2rem 0.45rem;
+            gap: 0.45rem;
+            margin: 0.25rem 0;
+        }
+        .wave-strip canvas { height: 36px; }
+        .wave-strip .label { font-size: 0.62rem; }
+        .wave-strip .caption { min-width: 5.5rem; font-size: 0.65rem; }
+    }
+    @media (min-width: 641px) and (max-width: 1024px) {
+        .dashboard-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+        }
+    }
+    @media (min-width: 1025px) {
+        .dashboard-grid {
+            grid-template-columns: repeat(3, 1fr) !important;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -165,6 +236,12 @@
         </button>
     </form>
     <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick, or a quiet moment that sets down what's being held.</span>
+</div>
+
+<div class="dash-toolbar">
+    <a id="dash-expand-all">expand all</a>
+    <a id="dash-collapse-all">collapse all</a>
+    <span class="hint">click a card heading to toggle</span>
 </div>
 
 <div class="dashboard-grid">
@@ -729,6 +806,60 @@
 
 {% load assets %}
 <script src="{% static_v 'js/identity_wave.js' %}"></script>
+
+<script>
+// Dashboard collapse/expand. Compact by default; click any card
+// heading to expand it inline. State persisted per card in
+// localStorage so the operator's reading layout survives reloads.
+(function() {
+    const grid = document.querySelector('.dashboard-grid');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll(':scope > .card'));
+    const PREFIX = 'id_dash_';
+
+    function keyFor(card, idx) {
+        const h3 = card.querySelector('h3');
+        const label = h3 ? h3.textContent.trim().split(/\s+/).slice(0, 3).join('_')
+                         : 'c' + idx;
+        return PREFIX + label.replace(/[^a-z0-9_]/gi, '').toLowerCase();
+    }
+
+    cards.forEach((card, idx) => {
+        const h3 = card.querySelector('h3');
+        if (!h3) return;
+        const key = keyFor(card, idx);
+        const saved = localStorage.getItem(key);
+        if (saved === 'expanded') {
+            card.classList.remove('compact');
+        } else {
+            card.classList.add('compact');
+        }
+        h3.addEventListener('click', (e) => {
+            if (e.target.closest('a, button, input, select, form, label')) return;
+            card.classList.toggle('compact');
+            localStorage.setItem(
+                key,
+                card.classList.contains('compact') ? 'compact' : 'expanded'
+            );
+        });
+    });
+
+    function setAll(compact) {
+        cards.forEach((card, idx) => {
+            card.classList.toggle('compact', compact);
+            localStorage.setItem(keyFor(card, idx), compact ? 'compact' : 'expanded');
+        });
+    }
+    const expandAll = document.getElementById('dash-expand-all');
+    const collapseAll = document.getElementById('dash-collapse-all');
+    if (expandAll) expandAll.addEventListener('click', (e) => {
+        e.preventDefault(); setAll(false);
+    });
+    if (collapseAll) collapseAll.addEventListener('click', (e) => {
+        e.preventDefault(); setAll(true);
+    });
+})();
+</script>
 
 {% if toggles.rumination_stream_enabled %}
 <script>
