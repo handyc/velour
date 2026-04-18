@@ -82,6 +82,11 @@ class ATtiny13aEmu {
 
         // Used by LDS/STS-triggered ADC start: we fake a 1-tick conversion.
         this._adcBusy = 0;
+
+        // Optional observer for display emulation (bit-banged SPI / I2C).
+        // Called with (portb, ddrb) after every write that could change
+        // an output-pin level. Decoders live in display_emu.js.
+        this.pinObserver = null;
     }
 
     // ---- Memory access ------------------------------------------------
@@ -109,8 +114,10 @@ class ATtiny13aEmu {
         val &= 0xFF;
         this.mem[0x20 + ioAddr] = val;
         switch (ioAddr) {
-        case IO.PORTB:  this.portb = val; this._recomputePwm(); break;
-        case IO.DDRB:   this.ddrb  = val; this._recomputePwm(); break;
+        case IO.PORTB:  this.portb = val; this._recomputePwm();
+                        if (this.pinObserver) this.pinObserver.onPins(this.portb, this.ddrb); break;
+        case IO.DDRB:   this.ddrb  = val; this._recomputePwm();
+                        if (this.pinObserver) this.pinObserver.onPins(this.portb, this.ddrb); break;
         case IO.TCCR0A: this._recomputePwm(); break;
         case IO.OCR0A:  this._recomputePwm(); break;
         case IO.OCR0B:  this._recomputePwm(); break;
@@ -192,6 +199,7 @@ class ATtiny13aEmu {
         this.mem[0x20 + IO.SPL] = RAMEND & 0xFF;
         // MCUSR latches reset source. Bit 0 = PORF, 1 = EXTRF.
         this.mem[0x20 + IO.MCUSR] = externalReset ? 0x02 : 0x01;
+        if (this.pinObserver && this.pinObserver.reset) this.pinObserver.reset();
     }
 
     // ---- Status register helpers -------------------------------------

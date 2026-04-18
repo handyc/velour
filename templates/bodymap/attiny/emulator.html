@@ -70,12 +70,21 @@
                  padding: 0.8rem; font-family: ui-monospace, Menlo, monospace;
                  font-size: 0.75rem; color: #c9d1d9; white-space: pre; overflow: auto;
                  max-height: 360px; line-height: 1.45; }
+
+    /* Virtual display panel (ST7735S / GM009605) */
+    .em-display { display: flex; flex-direction: column; align-items: flex-start;
+                  gap: 0.4rem; }
+    .em-display canvas { background: #000; border: 2px solid #30363d;
+                         border-radius: 3px; display: block; image-rendering: pixelated; }
+    .em-display-meta { font-family: ui-monospace, Menlo, monospace; font-size: 0.7rem;
+                       color: #6e7681; }
     .em-empty { color: #6e7681; font-size: 0.85rem; }
     .em-hint  { font-size: 0.78rem; color: #8b949e; background: rgba(88,166,255,0.06);
                 border-left: 2px solid #58a6ff; padding: 0.5rem 0.8rem; border-radius: 0 4px 4px 0;
                 margin-top: 0.8rem; }
 </style>
 <script src="{% static 'js/attiny_emu.js' %}"></script>
+<script src="{% static 'js/display_emu.js' %}"></script>
 {% endblock %}
 
 {% block content %}
@@ -202,8 +211,15 @@
         </div>
     </div>
 
-    <!-- Right: source -->
+    <!-- Right: display (if any) + source -->
     <div>
+        <div class="em-panel" id="em-display-panel" style="display:none; margin-bottom:1rem;">
+            <h2 id="em-display-title">Display</h2>
+            <div class="em-display">
+                <canvas id="em-display-canvas" width="320" height="240"></canvas>
+                <div class="em-display-meta" id="em-display-meta">—</div>
+            </div>
+        </div>
         <div class="em-panel">
             <h2>Source</h2>
             <pre class="em-source" id="em-src">{{ active_source }}</pre>
@@ -216,9 +232,33 @@
 <script>
 (function () {
     const HEX = document.getElementById('em-hex').textContent;
+    const ACTIVE_SLUG = "{{ active.slug|default:''|escapejs }}";
     const prog = AttinyEmu.parseIntelHex(HEX);
     const mcu  = new AttinyEmu.ATtiny13aEmu();
     mcu.loadProgram(prog);
+
+    // Wire a virtual display decoder if this template/design drives one.
+    // Decoders subscribe to pin-change events via mcu.pinObserver.
+    const display = (typeof DisplayEmu !== 'undefined')
+                    ? DisplayEmu.decoderForSlug(ACTIVE_SLUG) : null;
+    const displayPanel = document.getElementById('em-display-panel');
+    const displayCanvas = document.getElementById('em-display-canvas');
+    const displayMeta  = document.getElementById('em-display-meta');
+    const displayTitle = document.getElementById('em-display-title');
+    if (display) {
+        mcu.pinObserver = display;
+        displayPanel.style.display = '';
+        if (display instanceof DisplayEmu.ST7735SDecoder) {
+            displayCanvas.width = display.W * 2;    // 160×320 at 2× scale
+            displayTitle.textContent = 'ST7735S — 80×160 RGB565';
+            displayMeta.textContent  = 'SPI mode 0 · MOSI=PB0 · SCK=PB2 · DC=PB4 · RST=PB3';
+        } else {
+            displayCanvas.width = display.W * 2;    // 256×128
+            displayTitle.textContent = 'SSD1306 — 128×64 mono';
+            displayMeta.textContent  = 'I²C 0x3C · SDA=PB0 · SCL=PB2';
+        }
+    }
+
     mcu.reset(false);
 
     // --- UI handles --------------------------------------------------
@@ -367,6 +407,7 @@
             statusEl.textContent = mcu.halted ? 'halted' : 'paused';
             statusEl.className   = 'val' + (mcu.halted ? ' bad' : '');
         }
+        if (display && display.dirty) display.renderCanvas(displayCanvas);
     }
     render();
 })();
