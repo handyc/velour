@@ -35,10 +35,16 @@ def parse_bibtex(text: str) -> dict:
     entries = {}
     for entry_type, key, body in _iter_entries(text):
         fields = _parse_fields(body)
-        if 'author' in fields:
-            fields['author'] = _split_names(fields['author'])
-        if 'editor' in fields:
-            fields['editor'] = _split_names(fields['editor'])
+        # Author/editor need the raw brace-preserved form so corporate
+        # authors `{Atmel Corporation}` don't get parsed as `Last, First`.
+        # All other fields flatten braces now.
+        for fname in ('author', 'editor'):
+            if fname in fields:
+                fields[fname] = _split_names(fields[fname])
+        for fname, fval in list(fields.items()):
+            if fname in ('author', 'editor'):
+                continue
+            fields[fname] = _strip_braces(fval)
         fields['type'] = entry_type.lower()
         entries[key] = fields
     return entries
@@ -127,7 +133,10 @@ def _read_value(body, i):
         end = _match_brace(body, i)
         if end < 0:
             return body[i + 1:], n
-        return _strip_braces(body[i + 1:end]), end + 1
+        # Return the inner text verbatim; callers that want braces
+        # flattened run _strip_braces themselves. Author/editor fields
+        # need to see the braces to detect corporate authors.
+        return body[i + 1:end], end + 1
     if c == '"':
         j = i + 1
         while j < n and body[j] != '"':
@@ -198,7 +207,13 @@ def _split_names(s):
 
 
 def _parse_name(name):
-    name = _strip_braces(name.strip())
+    name = name.strip()
+    # Corporate / single-unit author: `{Atmel Corporation}` — put the
+    # whole bracketed string in the last-name slot so the formatter
+    # prints it as-is instead of splitting on commas or spaces.
+    if name.startswith('{') and name.endswith('}') and _match_brace(name, 0) == len(name) - 1:
+        return (_strip_braces(name[1:-1]).strip(), '', '')
+    name = _strip_braces(name)
     if ',' in name:
         last, rest = name.split(',', 1)
         rest = rest.strip()
