@@ -145,6 +145,16 @@ TEMPLATES = [
      'the receive, so timing tolerance is wide even if the \'13a\'s '
      'clock drifts a percent or two. Flash footprint: ~250 bytes.'),
 
+    ('display_gm009605_13a', 'GM009605 OLED driver (13a)', 'attiny13a',
+     '128x64 SSD1306 OLED over bit-banged I2C — only SDA and SCL out of the chip.',
+     'PB0 = SDA, PB2 = SCL. PB1 / PB3 / PB4 / PB5 free for other uses.',
+     'Ships to ~440 bytes flash. Needs 4.7k pullups on SDA and SCL. '
+     'Simpler wiring than the ST7735S template (no RES / DC / CS '
+     'lines) and leaves 4 GPIOs free for sensor / gate / LED duty. '
+     'At F_CPU=9.6 MHz the full-screen clear takes ~70 ms and the '
+     'sweep animation is lively; at the 1.2 MHz default it still '
+     'runs, just at ~1 Hz.'),
+
     ('display_st7735s_13a', 'ST7735S display driver (13a)', 'attiny13a',
      '0.96" 80x160 IPS panel driven by bit-banged SPI in the 1 KB flash of the \'13a.',
      'PB0 = MOSI (SDA), PB2 = SCK (SCL), PB3 = RES, PB4 = DC. Module CS→GND, BLK→VCC.',
