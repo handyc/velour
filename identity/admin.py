@@ -5,8 +5,27 @@ from .models import (
     Identity, IdentityAssertion, IdentityToggles, InternalDialogue,
     Intervention, IntrospectiveLayer, LLMExchange, LLMProvider,
     LoopTraversal, Meditation, MentalHealthDiagnosis, Mood, Reflection,
-    Rule, StrangeLoop, TemplateContribution, ThoughtExperiment, Tick,
+    ReflectionLoopState, Rule, SessionReflection, StrangeLoop,
+    TemplateContribution, ThoughtExperiment, Tick,
 )
+
+
+@admin.register(SessionReflection)
+class SessionReflectionAdmin(admin.ModelAdmin):
+    list_display = ('subject', 'status', 'trigger', 'started_at',
+                    'meditation', 'diagnosis')
+    list_filter = ('status', 'trigger')
+    date_hierarchy = 'started_at'
+    readonly_fields = ('started_at', 'completed_at', 'snapshot',
+                       'tileset_slug', 'reel_slug')
+    search_fields = ('subject', 'summary', 'journal_body')
+
+
+@admin.register(ReflectionLoopState)
+class ReflectionLoopStateAdmin(admin.ModelAdmin):
+    list_display = ('enabled', 'interval_seconds', 'subject_template',
+                    'last_run_at', 'enabled_at')
+    readonly_fields = ('updated_at',)
 
 
 @admin.register(Identity)

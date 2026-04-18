@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block title %}Session Reflection — Identity — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sr-wrap { max-width: 960px; }
+    .sr-wrap h1 { font-size: 1.1rem; font-weight: 500; margin: 0 0 0.25rem 0; }
+    .sr-wrap .lede { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.2rem; }
+
+    .sr-card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.1rem; margin-bottom: 1rem;
+    }
+    .sr-card h2 {
+        font-size: 0.85rem; font-weight: 500; color: #8b949e;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        margin: 0 0 0.75rem 0;
+    }
+
+    .sr-form label {
+        display: block; font-size: 0.75rem; color: #8b949e;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        margin: 0.6rem 0 0.25rem 0;
+    }
+    .sr-form input[type=text], .sr-form textarea {
+        width: 100%; box-sizing: border-box;
+        background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+        border-radius: 4px; padding: 0.5rem 0.6rem; font-size: 0.9rem;
+        font-family: inherit;
+    }
+    .sr-form textarea { min-height: 5rem; resize: vertical; }
+    .sr-form button {
+        margin-top: 0.8rem; padding: 0.45rem 0.9rem;
+        background: #238636; color: #fff; border: none; border-radius: 4px;
+        cursor: pointer; font-size: 0.85rem;
+    }
+    .sr-form button:hover { background: #2ea043; }
+
+    .sr-loop {
+        display: flex; flex-wrap: wrap; align-items: center;
+        gap: 0.8rem; font-size: 0.85rem;
+    }
+    .sr-loop .status-dot {
+        width: 0.6rem; height: 0.6rem; border-radius: 50%;
+        display: inline-block; margin-right: 0.4rem;
+        background: #6e7681;
+    }
+    .sr-loop .status-dot.on { background: #2ea043; box-shadow: 0 0 8px #2ea043; }
+
+    .sr-loop form { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .sr-loop input[type=number] { width: 6rem; }
+    .sr-loop input[type=text]   { width: 18rem; }
+    .sr-loop input {
+        background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+        border-radius: 4px; padding: 0.35rem 0.5rem; font-size: 0.85rem;
+    }
+    .sr-loop button {
+        padding: 0.35rem 0.9rem; border: 1px solid #30363d;
+        background: #21262d; color: #c9d1d9; border-radius: 4px;
+        cursor: pointer; font-size: 0.82rem;
+    }
+    .sr-loop button.primary { background: #238636; border-color: #238636; color: #fff; }
+    .sr-loop button.danger  { background: #da3633; border-color: #da3633; color: #fff; }
+
+    .sr-loop-status {
+        color: #8b949e; font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.8rem;
+    }
+
+    .sr-list { border-top: 1px solid #30363d; }
+    .sr-list .row {
+        display: grid; grid-template-columns: 11rem 1fr 6rem 4rem;
+        gap: 0.6rem; padding: 0.5rem 0;
+        border-bottom: 1px solid #21262d;
+        font-size: 0.85rem; align-items: baseline;
+    }
+    .sr-list .row a { color: #58a6ff; text-decoration: none; }
+    .sr-list .row a:hover { text-decoration: underline; }
+    .sr-list .when {
+        font-family: ui-monospace, Menlo, monospace;
+        color: #8b949e; font-size: 0.78rem;
+    }
+    .sr-list .status { font-size: 0.75rem; text-transform: uppercase;
+        letter-spacing: 0.05em; color: #8b949e; }
+    .sr-list .status.completed { color: #2ea043; }
+    .sr-list .status.failed    { color: #f85149; }
+    .sr-list .status.running   { color: #d29922; }
+    .sr-list .badges {
+        font-family: ui-monospace, Menlo, monospace; color: #6e7681;
+        font-size: 0.72rem; text-align: right;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sr-wrap">
+<h1>Session reflection</h1>
+<p class="lede">Close a piece of work: Velour walks itself through the Identity loop — tile, diagnose, dialogue, meditate — and writes a journal entry that threads the artifacts back into the subject.</p>
+
+{% if messages %}
+  <div class="sr-card">
+  {% for message in messages %}
+    <div style="color: {% if message.tags == 'error' %}#f85149{% else %}#2ea043{% endif %};">{{ message }}</div>
+  {% endfor %}
+  </div>
+{% endif %}
+
+<div class="sr-card">
+<h2>Run one now</h2>
+<form method="post" action="{% url 'identity:session_reflect_run' %}" class="sr-form">
+    {% csrf_token %}
+    <label for="subject">Subject</label>
+    <input type="text" name="subject" id="subject" required
+           placeholder="e.g. Bodymap ST7735S drivers"
+           maxlength="200">
+    <label for="summary">Summary (optional)</label>
+    <textarea name="summary" id="summary"
+              placeholder="Anything you want Velour to hold in mind while reflecting."></textarea>
+    <button type="submit">Run session reflection</button>
+</form>
+</div>
+
+<div class="sr-card">
+<h2>Continuous loop</h2>
+<form method="post" action="{% url 'identity:session_reflect_loop_toggle' %}" class="sr-loop">
+    {% csrf_token %}
+    <div>
+      <span class="status-dot {% if loop.enabled %}on{% endif %}"></span>
+      <strong>{{ loop.enabled|yesno:"ON,OFF" }}</strong>
+    </div>
+    <label for="interval_seconds" style="color:#8b949e; font-size:0.78rem;">every</label>
+    <input type="number" name="interval_seconds" id="interval_seconds"
+           value="{{ loop.interval_seconds }}" min="60" max="86400">
+    <span style="color:#8b949e; font-size:0.78rem;">sec</span>
+    <input type="text" name="subject_template"
+           value="{{ loop.subject_template }}"
+           placeholder="subject prefix for auto-sessions">
+    {% if loop.enabled %}
+      <button type="submit" name="enabled" value="0" class="danger">Stop loop</button>
+    {% else %}
+      <button type="submit" name="enabled" value="1" class="primary">Start loop</button>
+    {% endif %}
+</form>
+<div class="sr-loop-status" id="sr-loop-status" style="margin-top: 0.7rem;">
+    {% if loop.last_run_at %}
+      last fired {{ loop.last_run_at|date:"Y-m-d H:i:s" }}
+      {% if last_age_s is not None %} · {{ last_age_s }}s ago{% endif %}
+    {% else %}
+      never fired
+    {% endif %}
+</div>
+</div>
+
+<div class="sr-card">
+<h2>Recent sessions</h2>
+<div class="sr-list">
+{% for s in sessions %}
+    <div class="row">
+      <span class="when">{{ s.started_at|date:"Y-m-d H:i" }}</span>
+      <a href="{% url 'identity:session_reflect_detail' pk=s.pk %}">{{ s.subject }}</a>
+      <span class="status {{ s.status }}">{{ s.status }}</span>
+      <span class="badges">
+        {% if s.tileset_slug %}T{% endif %}{% if s.meditation_id %}M{% endif %}{% if s.diagnosis_id %}D{% endif %}{% if s.dialogue_id %}X{% endif %}{% if s.reel_slug %}R{% endif %}
+      </span>
+    </div>
+{% empty %}
+    <div style="color:#6e7681; padding:0.5rem 0;">No sessions yet.</div>
+{% endfor %}
+</div>
+</div>
+
+</div>
+
+<script>
+(function() {
+    // Cooperative browser-driven loop: POST /loop/tick/ every pollMs.
+    // The server only actually runs a session when `interval_seconds`
+    // have elapsed since the last one; this keeps the browser honest
+    // (can't run faster than the configured cadence) and makes
+    // shutoff trivial — unchecking the box on the server stops the
+    // next tick from starting anything.
+    const tickUrl = "{% url 'identity:session_reflect_loop_tick' %}";
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const statusEl = document.getElementById('sr-loop-status');
+    const loopEnabled = {{ loop.enabled|yesno:"true,false" }};
+    const pollMs = 15000;  // 15s — fast enough to pick up a manual
+                           // toggle, slow enough not to spam the server.
+
+    if (!loopEnabled) return;
+
+    function tick() {
+        fetch(tickUrl, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': csrf, 'Accept': 'application/json' },
+        }).then(r => r.json()).then(data => {
+            if (data.action === 'stop') {
+                statusEl.textContent = 'loop disabled on server — stopping poller';
+                return;  // do not schedule another tick
+            }
+            if (data.action === 'idle') {
+                statusEl.textContent =
+                    `waiting — ${data.seconds_left}s until next auto-session`;
+            } else if (data.action === 'ran') {
+                statusEl.textContent =
+                    `session #${data.session_id} ran (${data.status}) — "${data.subject}"`;
+            } else if (data.action === 'failed') {
+                statusEl.textContent = `session failed: ${data.error}`;
+            }
+            setTimeout(tick, pollMs);
+        }).catch(err => {
+            statusEl.textContent = `poll error: ${err}`;
+            setTimeout(tick, pollMs * 2);
+        });
+    }
+
+    setTimeout(tick, 2000);  // small initial delay so the page renders first
+})();
+</script>
+{% endblock %}

@@ -1683,3 +1683,126 @@ class Intervention(models.Model):
     def __str__(self):
         return (f'{self.technique} on tick #{self.tick_id}: '
                 f'Δv={self.delta_valence:+.3f} Δa={self.delta_arousal:+.3f}')
+
+
+class SessionReflection(models.Model):
+    """A bundled end-of-session reflection — Velour walking itself
+    through the Identity loop in response to a named piece of work.
+
+    Operator (or Claude Code) triggers one at the close of a session:
+    "we just shipped X." Velour then generates a tileset, a meditation,
+    a mental health diagnosis, and a patient/clinician exchange, then
+    composes a first-person journal entry that weaves them together
+    and situates the work in larger long-term implications.
+
+    Each row points back at the artifacts it produced; nothing is
+    duplicated. The journal text is the only original prose — the
+    rest is re-use of existing Identity plumbing.
+    """
+
+    STATUS_CHOICES = [
+        ('running',   'Running'),
+        ('completed', 'Completed'),
+        ('failed',    'Failed'),
+    ]
+
+    TRIGGER_CHOICES = [
+        ('manual',   'Manual (operator)'),
+        ('claude',   'Claude Code'),
+        ('loop',     'Continuous loop'),
+        ('cron',     'Scheduled'),
+    ]
+
+    subject = models.CharField(max_length=200,
+        help_text='Short label for what was worked on, e.g. '
+                  '"Bodymap ST7735S drivers" or "Aether cafe demo".')
+    summary = models.TextField(blank=True,
+        help_text='Optional free-text summary the operator passed in. '
+                  'Feeds into the journal composition as context.')
+    trigger = models.CharField(max_length=16, choices=TRIGGER_CHOICES,
+                               default='manual')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='running')
+    status_message = models.CharField(max_length=500, blank=True)
+
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    journal_body = models.TextField(blank=True,
+        help_text='Velour\'s first-person prose weaving the tileset, '
+                  'meditation, diagnosis, and dialogue together with '
+                  'the subject and long-term implications.')
+
+    tileset_slug = models.CharField(max_length=200, blank=True)
+    meditation = models.ForeignKey('Meditation', null=True, blank=True,
+                                   on_delete=models.SET_NULL,
+                                   related_name='session_reflections')
+    diagnosis = models.ForeignKey('MentalHealthDiagnosis',
+                                  null=True, blank=True,
+                                  on_delete=models.SET_NULL,
+                                  related_name='session_reflections')
+    dialogue = models.ForeignKey('InternalDialogue', null=True, blank=True,
+                                 on_delete=models.SET_NULL,
+                                 related_name='session_reflections')
+    reel_slug = models.CharField(max_length=200, blank=True,
+        help_text='Zoetrope Reel created to archive the moment. '
+                  'Empty if reel creation was skipped or failed.')
+
+    snapshot = models.JSONField(default=dict, blank=True,
+        help_text='Identity state at trigger time — mood, intensity, '
+                  'open-concern names. Kept for later comparison.')
+
+    class Meta:
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['-started_at']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        return f'{self.subject} ({self.started_at:%Y-%m-%d %H:%M})'
+
+
+class ReflectionLoopState(models.Model):
+    """Singleton — controls the continuous-mode reflection loop.
+
+    When `enabled` is True, the browser-side poller fires POSTs at
+    /identity/session-reflect/loop/tick/, and the server runs a new
+    SessionReflection if `interval_seconds` have elapsed since the
+    last one. Flipping `enabled` off from the UI stops the loop on
+    the next poll. The loop is cooperative — no background threads,
+    no daemons. The browser tab is the heartbeat.
+    """
+
+    enabled = models.BooleanField(default=False)
+    interval_seconds = models.PositiveIntegerField(default=900,
+        help_text='Minimum seconds between automatic sessions. The '
+                  'poller fires more often than this, but the server '
+                  'only starts a new session when enough time has '
+                  'elapsed.')
+    subject_template = models.CharField(max_length=200,
+        default='Continuous reflection',
+        help_text='Subject used for auto-triggered sessions. A '
+                  'timestamp is appended at run time.')
+    last_run_at = models.DateTimeField(null=True, blank=True,
+        help_text='When the most recent auto-session started. '
+                  'Null if the loop has never fired.')
+    enabled_at = models.DateTimeField(null=True, blank=True,
+        help_text='When the current enabled period began. Cleared '
+                  'when the loop is disabled.')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'reflection loop state'
+
+    def __str__(self):
+        return ('loop enabled' if self.enabled else 'loop idle')
+
+    @classmethod
+    def get_self(cls):
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # enforce singleton
+        super().save(*args, **kwargs)

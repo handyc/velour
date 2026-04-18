@@ -40,6 +40,18 @@ urlpatterns = [
 
     path('mental-health/', views.mental_health, name='mental_health'),
 
+    # Session-reflection — close-of-day loop, manual and continuous.
+    path('session-reflect/',
+         views.session_reflect_home, name='session_reflect'),
+    path('session-reflect/run/',
+         views.session_reflect_run, name='session_reflect_run'),
+    path('session-reflect/<int:pk>/',
+         views.session_reflect_detail, name='session_reflect_detail'),
+    path('session-reflect/loop/toggle/',
+         views.session_reflect_loop_toggle, name='session_reflect_loop_toggle'),
+    path('session-reflect/loop/tick/',
+         views.session_reflect_loop_tick, name='session_reflect_loop_tick'),
+
     # Hofstadter routes — absorbed from the standalone hofstadter app.
     path('hofstadter/', views.hof_home, name='hof_home'),
     path('hofstadter/experiments/', views.hof_experiment_list, name='hof_experiment_list'),

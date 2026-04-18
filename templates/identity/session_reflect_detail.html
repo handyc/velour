@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{{ session.subject }} — Session Reflection — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .srd-wrap { max-width: 860px; }
+    .srd-wrap h1 { font-size: 1.1rem; font-weight: 500; margin: 0 0 0.25rem 0; }
+    .srd-wrap .lede {
+        color: #8b949e; font-family: ui-monospace, Menlo, monospace;
+        font-size: 0.8rem; margin-bottom: 1rem;
+    }
+    .srd-wrap a { color: #58a6ff; text-decoration: none; }
+    .srd-wrap a:hover { text-decoration: underline; }
+
+    .srd-card {
+        background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.1rem; margin-bottom: 1rem;
+    }
+    .srd-card h2 {
+        font-size: 0.8rem; font-weight: 500; color: #8b949e;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        margin: 0 0 0.5rem 0;
+    }
+
+    .srd-meta {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.5rem; font-size: 0.8rem;
+    }
+    .srd-meta .cell { padding: 0.35rem 0; }
+    .srd-meta .label {
+        color: #6e7681; font-size: 0.7rem; text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .srd-meta .value { color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }
+
+    .srd-journal {
+        white-space: pre-wrap;
+        font-family: Georgia, 'Times New Roman', serif;
+        color: #c9d1d9; line-height: 1.55;
+    }
+    .srd-journal p { margin: 0 0 0.9rem 0; }
+
+    .srd-summary {
+        white-space: pre-wrap;
+        color: #8b949e;
+        font-size: 0.88rem;
+        border-left: 2px solid #30363d;
+        padding-left: 0.7rem;
+    }
+
+    .srd-status-running   { color: #d29922; }
+    .srd-status-completed { color: #2ea043; }
+    .srd-status-failed    { color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="srd-wrap">
+<h1>{{ session.subject }}</h1>
+<p class="lede">
+  #{{ session.pk }} ·
+  started {{ session.started_at|date:"Y-m-d H:i" }}
+  {% if session.completed_at %}· completed {{ session.completed_at|date:"H:i:s" }}{% endif %}
+  · trigger {{ session.trigger }}
+  · <span class="srd-status-{{ session.status }}">{{ session.status }}</span>
+  · <a href="{% url 'identity:session_reflect' %}">back</a>
+</p>
+
+{% if session.status_message %}
+<div class="srd-card" style="border-color:#f85149;">
+  <h2>Status message</h2>
+  <div style="color:#f85149; font-family: ui-monospace, Menlo, monospace; font-size:0.85rem;">{{ session.status_message }}</div>
+</div>
+{% endif %}
+
+{% if session.summary %}
+<div class="srd-card">
+  <h2>Operator summary</h2>
+  <div class="srd-summary">{{ session.summary }}</div>
+</div>
+{% endif %}
+
+<div class="srd-card">
+  <h2>Journal</h2>
+  <div class="srd-journal">{{ session.journal_body|linebreaksbr }}</div>
+</div>
+
+<div class="srd-card">
+  <h2>Artifacts</h2>
+  <div class="srd-meta">
+    {% if session.tileset_slug %}
+      <div class="cell"><div class="label">Tileset</div>
+        <div class="value"><a href="/tiles/{{ session.tileset_slug }}/">{{ session.tileset_slug }}</a></div>
+      </div>
+    {% endif %}
+    {% if session.meditation_id %}
+      <div class="cell"><div class="label">Meditation</div>
+        <div class="value"><a href="{% url 'identity:meditation_detail' pk=session.meditation_id %}">#{{ session.meditation_id }} — {{ session.meditation.title|truncatechars:60 }}</a></div>
+      </div>
+    {% endif %}
+    {% if session.diagnosis_id %}
+      <div class="cell"><div class="label">Diagnosis</div>
+        <div class="value">score {{ session.diagnosis.health_score|floatformat:2 }} · {{ session.diagnosis.dominant_mood }}</div>
+      </div>
+    {% endif %}
+    {% if session.dialogue_id %}
+      <div class="cell"><div class="label">Dialogue</div>
+        <div class="value">#{{ session.dialogue_id }} — {{ session.dialogue.topic|truncatechars:60 }}</div>
+      </div>
+    {% endif %}
+    {% if session.reel_slug %}
+      <div class="cell"><div class="label">Reel</div>
+        <div class="value"><a href="/zoetrope/">{{ session.reel_slug }}</a></div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="srd-card">
+  <h2>State snapshot at trigger</h2>
+  <div class="srd-meta">
+    <div class="cell"><div class="label">Mood</div>
+      <div class="value">{{ session.snapshot.mood }} · {{ session.snapshot.mood_intensity|floatformat:2 }}</div>
+    </div>
+    <div class="cell"><div class="label">Open concerns</div>
+      <div class="value">{{ session.snapshot.open_concerns|length }}</div>
+    </div>
+  </div>
+</div>
+
+</div>
+{% endblock %}

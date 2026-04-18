@@ -1231,3 +1231,147 @@ def _compute_health_score(diag):
     concerns = diag.get('concern_count', 0)
     score -= min(0.1, concerns * 0.025)
     return max(0.0, min(1.0, round(score, 3)))
+
+
+# =====================================================================
+# Session-reflection views — the "close of day" loop and its
+# browser-driven continuous mode.
+# =====================================================================
+
+def session_reflect_home(request):
+    from django.utils import timezone
+    from .models import ReflectionLoopState, SessionReflection
+
+    loop = ReflectionLoopState.get_self()
+    recent = SessionReflection.objects.all()[:30]
+
+    last_age_s = None
+    if loop.last_run_at:
+        last_age_s = int((timezone.now() - loop.last_run_at).total_seconds())
+
+    return render(request, 'identity/session_reflect.html', {
+        'loop': loop,
+        'last_age_s': last_age_s,
+        'sessions': recent,
+    })
+
+
+@require_POST
+def session_reflect_run(request):
+    from .session_reflection import run_session_reflection
+
+    subject = request.POST.get('subject', '').strip()
+    summary = request.POST.get('summary', '').strip()
+    if not subject:
+        messages.error(request, 'Subject is required.')
+        return redirect('identity:session_reflect')
+
+    try:
+        session = run_session_reflection(
+            subject=subject, summary=summary, trigger='manual',
+        )
+    except Exception as exc:
+        messages.error(request, f'Session failed: {type(exc).__name__}: {exc}')
+        return redirect('identity:session_reflect')
+
+    messages.success(request, f'Session #{session.pk} completed.')
+    return redirect('identity:session_reflect_detail', pk=session.pk)
+
+
+def session_reflect_detail(request, pk):
+    from django.shortcuts import get_object_or_404
+
+    from .models import SessionReflection
+
+    session = get_object_or_404(SessionReflection, pk=pk)
+    return render(request, 'identity/session_reflect_detail.html', {
+        'session': session,
+    })
+
+
+@require_POST
+def session_reflect_loop_toggle(request):
+    from django.utils import timezone
+    from .models import ReflectionLoopState
+
+    loop = ReflectionLoopState.get_self()
+    want_on = request.POST.get('enabled') == '1'
+
+    try:
+        interval = int(request.POST.get('interval_seconds') or loop.interval_seconds)
+    except ValueError:
+        interval = loop.interval_seconds
+    interval = max(60, min(24 * 3600, interval))
+
+    subject_template = request.POST.get('subject_template', '').strip()
+    if subject_template:
+        loop.subject_template = subject_template[:200]
+
+    loop.interval_seconds = interval
+    if want_on and not loop.enabled:
+        loop.enabled = True
+        loop.enabled_at = timezone.now()
+    elif not want_on and loop.enabled:
+        loop.enabled = False
+        loop.enabled_at = None
+    loop.save()
+
+    messages.success(request,
+        f'Loop {"ON" if loop.enabled else "OFF"} — interval {interval}s.')
+    return redirect('identity:session_reflect')
+
+
+@require_POST
+def session_reflect_loop_tick(request):
+    """Called by the browser poller. Starts a new session only when
+    the loop is enabled and the interval has elapsed. Returns JSON
+    describing what happened so the client can render a status line
+    and decide whether to keep polling."""
+    from django.utils import timezone
+    from .models import ReflectionLoopState
+    from .session_reflection import run_session_reflection
+
+    loop = ReflectionLoopState.get_self()
+
+    if not loop.enabled:
+        return JsonResponse({
+            'enabled': False,
+            'action':  'stop',
+            'reason':  'loop is disabled',
+        })
+
+    now = timezone.now()
+    if loop.last_run_at is not None:
+        elapsed = (now - loop.last_run_at).total_seconds()
+        if elapsed < loop.interval_seconds:
+            return JsonResponse({
+                'enabled':        True,
+                'action':         'idle',
+                'seconds_left':   int(loop.interval_seconds - elapsed),
+                'last_run_at':    loop.last_run_at.isoformat(),
+                'interval':       loop.interval_seconds,
+            })
+
+    # Fire a new session
+    subject = f'{loop.subject_template} — {now:%Y-%m-%d %H:%M}'
+    loop.last_run_at = now
+    loop.save(update_fields=['last_run_at', 'updated_at'])
+    try:
+        session = run_session_reflection(
+            subject=subject, summary='', trigger='loop',
+        )
+    except Exception as exc:
+        return JsonResponse({
+            'enabled': True,
+            'action':  'failed',
+            'error':   f'{type(exc).__name__}: {exc}'[:300],
+        }, status=500)
+
+    return JsonResponse({
+        'enabled':    True,
+        'action':     'ran',
+        'session_id': session.pk,
+        'subject':    session.subject,
+        'status':     session.status,
+        'interval':   loop.interval_seconds,
+    })
