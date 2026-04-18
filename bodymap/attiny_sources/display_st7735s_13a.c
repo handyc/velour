@@ -46,13 +46,14 @@
 #define DC_LO()   (PORTB &= ~_BV(PIN_DC))
 
 // ---- Panel geometry -------------------------------------------------------
-// Portrait after reset (MADCTL=0x00): 80 wide, 160 tall. The MINI
-// 0.96" wiring bakes in a 24-column offset, so addresses start at
-// x=24 not 0.
-#define PANEL_W     80
-#define PANEL_H    160
-#define COL_OFFSET  24
-#define ROW_OFFSET   0
+// Landscape orientation (MADCTL=0x60 below, MX+MV). 160 wide, 80 tall —
+// the computer-screen aspect ratio. Swapping the axes also swaps the
+// panel-wiring offset: the MINI 0.96"'s 24-px dead band moves from the
+// X start to the Y start, so addresses begin at (0, 24) instead of (24, 0).
+#define PANEL_W    160
+#define PANEL_H     80
+#define COL_OFFSET   0
+#define ROW_OFFSET  24
 
 // ---- Bit-banged SPI master -----------------------------------------------
 // SPI mode 0: CPOL=0, CPHA=0. SCK idles low. Data latched on SCK
@@ -93,8 +94,8 @@ static void panel_init(void) {
     write_cmd(0x3A);            // COLMOD — 16-bit RGB565
     write_data(0x05);
 
-    write_cmd(0x36);            // MADCTL — portrait, RGB
-    write_data(0x00);
+    write_cmd(0x36);            // MADCTL — landscape (MX+MV), RGB
+    write_data(0x60);
 
     write_cmd(0x21);            // INVON — required for MINI160x80
 

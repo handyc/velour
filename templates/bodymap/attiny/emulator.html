@@ -249,8 +249,8 @@
         mcu.pinObserver = display;
         displayPanel.style.display = '';
         if (display instanceof DisplayEmu.ST7735SDecoder) {
-            displayCanvas.width = display.W * 2;    // 160×320 at 2× scale
-            displayTitle.textContent = 'ST7735S — 80×160 RGB565';
+            displayCanvas.width = display.W * 2;    // 320×160 at 2× scale
+            displayTitle.textContent = 'ST7735S — 160×80 RGB565 (landscape)';
             displayMeta.textContent  = 'SPI mode 0 · MOSI=PB0 · SCK=PB2 · DC=PB4 · RST=PB3';
         } else {
             displayCanvas.width = display.W * 2;    // 256×128

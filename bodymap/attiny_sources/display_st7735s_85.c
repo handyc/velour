@@ -39,13 +39,14 @@
 #define DC_LO()   (PORTB &= ~_BV(PIN_DC))
 
 // ---- Panel geometry -------------------------------------------------------
-// Portrait orientation (the default after reset with MADCTL=0x00):
-// 80 px wide, 160 px tall. The MINI 0.96" variant has a 24-pixel column
-// offset baked into the panel wiring — addresses start at x=24, not 0.
-#define PANEL_W     80
-#define PANEL_H    160
-#define COL_OFFSET  24
-#define ROW_OFFSET   0
+// Landscape orientation (MADCTL=0x60 below): 160 px wide, 80 px tall —
+// the computer-screen aspect ratio. The MINI 0.96"'s 24-px dead band
+// lives on whichever axis corresponds to the panel's column lines, so
+// rotating the display moves the offset from X to Y.
+#define PANEL_W    160
+#define PANEL_H     80
+#define COL_OFFSET   0
+#define ROW_OFFSET  24
 
 // ---- USI SPI master (bit-banged, ~1 MHz at F_CPU=8 MHz) ------------------
 static void spi_init(void) {
@@ -92,7 +93,7 @@ static void panel_init(void) {
     write_data(0x05);           //   16-bit/pixel RGB565
 
     write_cmd(0x36);            // MADCTL — memory access control
-    write_data(0x00);           //   portrait, RGB, top-to-bottom
+    write_data(0x60);           //   landscape (MX+MV), RGB
 
     write_cmd(0x21);            // INVON — required for MINI160x80
                                 //   (IPS panels invert vs TN defaults)

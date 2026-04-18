@@ -25,10 +25,13 @@
 
 class ST7735SDecoder {
     constructor() {
-        this.W = 80;
-        this.H = 160;
-        this.COL_OFFSET = 24;
-        this.ROW_OFFSET = 0;
+        // Landscape: 160 wide × 80 tall. Matches the driver's MADCTL=0x60
+        // and the swapped COL_OFFSET / ROW_OFFSET baked into the '85/'13a
+        // templates.
+        this.W = 160;
+        this.H = 80;
+        this.COL_OFFSET = 0;
+        this.ROW_OFFSET = 24;
 
         this.fb = new Uint16Array(this.W * this.H);  // RGB565 framebuffer
         this.dirty = true;
