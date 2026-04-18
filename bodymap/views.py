@@ -12,7 +12,8 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
@@ -138,13 +139,8 @@ def bodymap_node_config(request, slug):
             cfg.channels = rows
             cfg.notes = request.POST.get('notes', '').strip()
             cfg.save()
-            return render(request, 'bodymap/config_wizard.html', {
-                'node':     node,
-                'cfg':      cfg,
-                'channels': rows,
-                'kinds':    _CHANNEL_KINDS,
-                'saved':    True,
-            })
+            url = reverse('bodymap:node_config', kwargs={'slug': node.slug})
+            return redirect(f'{url}?saved=1')
 
         # Errors: re-render with the submitted rows preserved so the
         # operator doesn't lose their edits.
@@ -161,6 +157,7 @@ def bodymap_node_config(request, slug):
         'cfg':      cfg,
         'channels': cfg.channels or [],
         'kinds':    _CHANNEL_KINDS,
+        'saved':    request.GET.get('saved') == '1',
     })
 
 
@@ -227,7 +224,7 @@ def api_node_config(request, slug):
         return JsonResponse({'error': 'GET only'}, status=405)
 
     try:
-        node = Node.objects.get(slug=slug)
+        node = Node.objects.select_related('bodymap_sensor_config').get(slug=slug)
     except Node.DoesNotExist:
         raise Http404('unknown node')
 

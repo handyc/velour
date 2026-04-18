@@ -132,17 +132,10 @@
         row.querySelectorAll('[data-field]').forEach(el => {
             const f = el.getAttribute('data-field');
             el.style.display = activeFields.includes(f) ? '' : 'none';
-            // Hidden fields still submit, but values are ignored by
-            // the server because _normalise_channel() only reads keys
-            // relevant to `kind`. Blank them defensively anyway so the
-            // form state matches what's visible.
-            if (!activeFields.includes(f)) {
-                const input = el.querySelector('input, select');
-                if (input && input.type !== 'hidden') {
-                    // Leave the value; we'll re-read if kind changes back.
-                }
-            }
         });
+        // Hidden fields still submit; the server ignores keys that aren't
+        // in _CHANNEL_KINDS[kind], so we leave the values in place for
+        // when the operator flips kind back.
         const hint = row.querySelector('.cfg-kind-hint');
         if (hint) hint.textContent = activeFields.join(' · ');
     }

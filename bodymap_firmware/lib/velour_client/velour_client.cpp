@@ -452,13 +452,29 @@ bool VelourClient::fetchSensorConfig(String& out) {
 
     out = body;
 
-    // Best-effort cache write. Failure here isn't fatal — we already
-    // have the live response to hand back to the caller.
+    // Best-effort cache write. Skip if the on-flash copy already matches
+    // byte-for-byte — otherwise every boot would rewrite the same bytes
+    // and chew through flash erase cycles for no reason.
     if (_ensureFs()) {
-        File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "w");
-        if (f) {
-            f.print(body);
-            f.close();
+        bool same = false;
+        if (LittleFS.exists(VELOUR_SENSOR_CONFIG_PATH)) {
+            File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "r");
+            if (f) {
+                if ((size_t)f.size() == (size_t)body.length()) {
+                    String existing;
+                    existing.reserve(f.size());
+                    while (f.available()) existing += (char)f.read();
+                    same = (existing == body);
+                }
+                f.close();
+            }
+        }
+        if (!same) {
+            File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "w");
+            if (f) {
+                f.print(body);
+                f.close();
+            }
         }
     }
     return true;

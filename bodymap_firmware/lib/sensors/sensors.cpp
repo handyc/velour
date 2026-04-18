@@ -275,9 +275,10 @@ bool AttinyPwmSensor::begin() {
 }
 
 float AttinyPwmSensor::sample() {
-    // At the '13a's default PWM of ~4.7 kHz (F_CPU/256 with CKDIV8),
-    // the period is ~213 µs — comfortably inside a 50 ms timeout.
-    // pulseIn returns 0 on timeout, which we translate to "no signal".
+    // Two pulseIn calls to compute duty = high / (high + low). Worst case
+    // is 2 × _timeoutUs when the line is stuck — budget accordingly when
+    // configuring multiple PWM sensors. At the '13a's default ~4.7 kHz the
+    // period is ~213 µs, comfortably inside the 50 ms default timeout.
     uint32_t high = pulseIn(_pin, HIGH, _timeoutUs);
     uint32_t low  = pulseIn(_pin, LOW,  _timeoutUs);
     uint32_t period = high + low;

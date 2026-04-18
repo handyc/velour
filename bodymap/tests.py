@@ -238,8 +238,10 @@ class ConfigWizardTests(TestCase):
             'baud':       ['',         ''],
             'notes':      'left forearm test rig',
         })
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'Saved 2 channel(s)')
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn('saved=1', resp['Location'])
+        self.assertContains(self.client.get(resp['Location']),
+                            'Saved 2 channel(s)')
 
         cfg = NodeSensorConfig.objects.get(node=self.node)
         self.assertEqual(cfg.notes, 'left forearm test rig')
@@ -296,7 +298,7 @@ class ConfigWizardTests(TestCase):
             'baud':       [''],
             'notes':      '',
         })
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
         cfg = NodeSensorConfig.objects.get(node=self.node)
         self.assertEqual(len(cfg.channels), 1)
         e = cfg.channels[0]
