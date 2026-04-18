@@ -1,23 +1,33 @@
-// bodymap display demo — ESP32-S3 SuperMini + ST7735S 80x160 IPS module
+// bodymap display demo — ST7735S 80x160 IPS module on ESP32-S3 SuperMini
+// or ESP8266 NodeMCU v2. Pick an env in platformio.ini and flash.
 //
 // Module:   generic 8-pin 0.96" IPS, 80x160, ST7735S controller, 4-wire SPI,
 //           3.3 V logic, 65K colors. The cheap AliExpress variant labelled
 //           either "ST7735S" or "ST7735" — same silicon behaviour.
 //
-// Wiring (module pin → SuperMini GPIO):
+// Wiring (module pin → MCU GPIO):
 //
-//   GND  ── GND
-//   VCC  ── 3V3
-//   SCL  ── GPIO 12   (HSPI / SPI clock)
-//   SDA  ── GPIO 11   (HSPI / SPI MOSI)
-//   RES  ── GPIO 6
-//   DC   ── GPIO 4
-//   CS   ── GPIO 5
-//   BLK  ── GPIO 7    (tie to 3V3 if you don't want PWM brightness control)
+//                           ESP32-S3 SuperMini     ESP8266 NodeMCU v2
+//   GND  ── GND              GND                    GND
+//   VCC  ── 3V3              3V3                    3V3
+//   SCL  ── SPI clock        GPIO 12                GPIO 14 (D5, HSPI CLK)
+//   SDA  ── SPI MOSI         GPIO 11                GPIO 13 (D7, HSPI MOSI)
+//   RES  ── reset            GPIO 6                 GPIO 16 (D0)
+//   DC   ── data/command     GPIO 4                 GPIO 5  (D1)
+//   CS   ── chip select      GPIO 5                 GPIO 4  (D2)
+//   BLK  ── backlight        GPIO 7 (PWM-capable)   tie to 3V3 direct
 //
-// These pins deliberately avoid GPIO 8/9 (reserved for I2C in the main
+// S3 pins deliberately avoid GPIO 8/9 (reserved for I2C in the main
 // bodymap firmware) and the ADC-heavy 0..3 range, so the same wiring can
 // live on a node that later runs the main firmware with an I2C sensor.
+//
+// NodeMCU pins avoid all boot-strap GPIOs (0, 2, 15) so power-up is
+// clean regardless of whether the display is plugged in. SCK/MOSI are
+// fixed to the HSPI pins (14/13) so hardware SPI stays available; RST
+// lives on D0 (GPIO 16) because it's the only remaining spare pin and
+// no PWM / interrupt is needed for reset; BL is tied directly to 3V3
+// because GPIO 16 can't PWM and there's no other strap-safe PWM pin
+// left.
 //
 // Demo content: splash → live scrolling sparkline + header/footer. Proves
 // the display works end-to-end and showcases a realistic "status panel"
@@ -29,16 +39,29 @@
 #include <SPI.h>
 
 // ---- Pin map --------------------------------------------------------------
-#define PIN_SCK   12
-#define PIN_MOSI  11
-#define PIN_DC     4
-#define PIN_CS     5
-#define PIN_RST    6
-#define PIN_BL     7
+#if defined(ARDUINO_ARCH_ESP32)
+  #define PIN_SCK   12
+  #define PIN_MOSI  11
+  #define PIN_DC     4
+  #define PIN_CS     5
+  #define PIN_RST    6
+  #define PIN_BL     7
+  #define SPI_HZ    27000000UL
+#elif defined(ARDUINO_ARCH_ESP8266)
+  #define PIN_SCK   14    // D5 — HSPI CLK (fixed)
+  #define PIN_MOSI  13    // D7 — HSPI MOSI (fixed)
+  #define PIN_DC     5    // D1
+  #define PIN_CS     4    // D2
+  #define PIN_RST   16    // D0
+  #define PIN_BL    -1    // tie module BLK pad to 3V3 directly
+  #define SPI_HZ    20000000UL
+#else
+  #error "Unsupported architecture — add a pin map for this board"
+#endif
 
-// Adafruit_ST7735 doesn't ship a COLOR_DARKGREY constant (only the
-// named primaries and a couple of pastels). Define the one we use for
-// muted labels — RGB565, ~50 % grey.
+// Adafruit_ST7735 doesn't ship a DARKGREY constant (only the named
+// primaries and a couple of pastels). Define the one we use for muted
+// labels — RGB565, ~50 % grey.
 #define COLOR_DARKGREY 0x7BEF
 
 // The 0.96" 80x160 module is wired with a 24-pixel column offset and a
@@ -178,11 +201,13 @@ void setup() {
     Serial.begin(115200);
     _bootMs = millis();
 
-    pinMode(PIN_BL, OUTPUT);
-    digitalWrite(PIN_BL, HIGH);   // backlight full-on; wire to LEDC for dimming
+    if (PIN_BL >= 0) {
+        pinMode(PIN_BL, OUTPUT);
+        digitalWrite(PIN_BL, HIGH);  // backlight full-on; wire to LEDC for dimming
+    }
 
     tft.initR(INITR_MINI160x80);
-    tft.setSPISpeed(27000000);    // 27 MHz — reliable across cheap modules
+    tft.setSPISpeed(SPI_HZ);
     tft.setRotation(3);           // landscape, ribbon at the left edge
     tft.invertDisplay(true);      // most 0.96" MINI160x80 panels ship inverted
 
