@@ -9,6 +9,7 @@ urlpatterns = [
     path('',                                 views.bodymap_list,              name='list'),
     path('api/segment/',                     views.api_report_segment,        name='api_segment'),
     path('api/config/<slug:slug>/',          views.api_node_config,           name='api_config'),
+    path('api/hud/<slug:slug>/',             views.api_hud,                   name='api_hud'),
     path('config/<slug:slug>/',              views.bodymap_node_config,       name='node_config'),
     path('flash/',                           flash_views.flash_page,          name='flash'),
     path('flash/devices/',                   flash_views.flash_devices,       name='flash_devices'),

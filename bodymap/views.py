@@ -243,6 +243,55 @@ def api_node_config(request, slug):
     })
 
 
+def api_hud(request, slug):
+    """Firmware fetches a small payload to paint on a HUD node's OLED.
+
+    GET /bodymap/api/hud/<slug>/
+    Headers: Authorization: Bearer <node.api_token>
+
+    Intended consumer is a beamsplitter-based heads-up display driven
+    by an ESP32-S3 + SSD1306. The payload is deliberately tiny — three
+    short lines plus time and mood — because the target display is
+    128x64 pixels refreshed by a cheap MCU over WiFi.
+    """
+    try:
+        node = Node.objects.get(slug=slug)
+    except Node.DoesNotExist:
+        raise Http404('unknown node')
+
+    if not node.enabled:
+        return JsonResponse({'error': 'node disabled'}, status=403)
+
+    client_token = _extract_bearer(request)
+    if not client_token or not hmac.compare_digest(node.api_token, client_token):
+        return JsonResponse({'error': 'unauthorized'}, status=401)
+
+    from django.utils import timezone
+    from identity.models import Concern, Tick
+
+    now = timezone.localtime()
+    latest = Tick.objects.order_by('-at').first()
+    open_concerns = Concern.objects.filter(closed_at__isnull=True).count()
+
+    lines = []
+    if latest and latest.rule_label:
+        lines.append(latest.rule_label[:21])
+    elif latest and latest.thought:
+        lines.append(latest.thought[:21])
+    if open_concerns:
+        lines.append(f'{open_concerns} concern' + ('s' if open_concerns != 1 else ''))
+    if latest:
+        lines.append(f'tick {latest.pk}')
+
+    return JsonResponse({
+        'slug': node.slug,
+        'time': now.strftime('%H:%M'),
+        'date': now.strftime('%a %d %b'),
+        'mood': latest.mood if latest else '',
+        'lines': lines[:3],
+    })
+
+
 @csrf_exempt
 @require_POST
 def api_report_segment(request):
