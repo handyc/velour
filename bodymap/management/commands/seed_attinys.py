@@ -48,6 +48,15 @@ TEMPLATES = [
      'Turns transient events (taps, snaps, footfall) into sustained '
      'levels a slower downstream reader can see.'),
 
+    ('display_st7735s_85', 'ST7735S display driver', 'attiny85',
+     '0.96" 80x160 IPS panel driven by a hand-rolled USI-SPI + minimal init sequence.',
+     'PB0 = MOSI (SDA), PB2 = SCK (SCL), PB3 = RES, PB4 = DC. Module CS→GND, BLK→VCC.',
+     'Proves an 8 KB MCU can drive the same ST7735S panel the ESP32-S3 '
+     'uses. Bit-banged USI SPI + a minimal init + fill_rect + a scanning '
+     'dot animation. No Adafruit_GFX — the whole thing is under 1 KB of '
+     'flash, so there is still plenty of room to add a font table or '
+     'sprite data if you want a readable status display for a sub-node.'),
+
     ('i2c_slave_skeleton', 'I2C slave skeleton', 'attiny85',
      'USI-based I2C slave exposing a single 16-bit register — the bodymap-mesh contract.',
      'PB0 = SDA, PB2 = SCL, PB3 = signal in (ADC3), PB4 = param pot (ADC2), PB1 free.',
