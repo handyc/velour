@@ -28,6 +28,10 @@ urlpatterns = [
          views.calendar_century, name='calendar_century'),
     path('calendar/millennium/<int:millennium_start>/',
          views.calendar_millennium, name='calendar_millennium'),
+    path('calendar/10ky/<int:start>/',
+         views.calendar_ten_ky, name='calendar_ten_ky'),
+    path('calendar/100ky/<int:start>/',
+         views.calendar_hundred_ky, name='calendar_hundred_ky'),
 
     path('events/add/',              views.event_add,    name='event_add'),
     path('events/<slug:slug>/edit/', views.event_edit,   name='event_edit'),

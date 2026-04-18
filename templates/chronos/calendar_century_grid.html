@@ -4,32 +4,47 @@
 
 {% block extra_head %}
 <style>
-    .gen-toolbar { display: flex; align-items: baseline; gap: 0.85rem; margin: 0.75rem 0 1rem; }
+    .gen-toolbar { display: flex; align-items: baseline; gap: 0.85rem; margin: 0.75rem 0 1rem; flex-wrap: wrap; }
     .gen-toolbar h1 { margin: 0; font-size: 1.5rem; }
-    .gen-toolbar .nav-link { color: #58a6ff; text-decoration: none; padding: 0.25rem 0.55rem; border: 1px solid #30363d; border-radius: 4px; font-size: 0.85rem; }
+    .gen-toolbar .nav-link {
+        color: #58a6ff; text-decoration: none;
+        padding: 0.25rem 0.55rem; border: 1px solid #30363d;
+        border-radius: 4px; font-size: 0.85rem;
+    }
     .gen-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.6rem; }
-    .gen-cell { padding: 1rem 1.25rem; border: 1px solid #30363d; background: #0d1117; border-radius: 4px; text-align: center; }
-    .gen-cell .y { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; font-weight: 600; color: #c9d1d9; }
+    .gen-cell {
+        padding: 1rem 1.25rem; border: 1px solid #30363d;
+        background: #0d1117; border-radius: 4px; text-align: center;
+    }
+    .gen-cell .y {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 1.05rem; font-weight: 600; color: #c9d1d9;
+    }
     .gen-cell .y a { color: inherit; text-decoration: none; }
+    .gen-cell .y a:hover { color: #58a6ff; }
     .gen-cell .c { font-size: 0.75rem; color: #6e7681; margin-top: 0.25rem; }
     .gen-cell.current { background: #161b22; border-color: #58a6ff; }
+    @media (max-width: 600px) {
+        .gen-grid { grid-template-columns: repeat(2, 1fr); }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="gen-toolbar">
     <h1>{{ span_label }}</h1>
-    <a href="{% url 'chronos:calendar_millennium' prev_start %}" class="nav-link">‹ prev</a>
-    <a href="{% url 'chronos:calendar_millennium' next_start %}" class="nav-link">next ›</a>
+    <a href="{{ prev_url }}" class="nav-link">‹ prev</a>
+    <a href="{{ next_url }}" class="nav-link">next ›</a>
+    {% if up_url %}<a href="{{ up_url }}" class="nav-link">up to {{ up_label }} ›</a>{% endif %}
 </div>
 
 <p style="color:#8b949e;font-size:0.85rem;">A {{ scale_name }} of ten {{ unit_name }}s. Click any cell to drill in. At this scale only astronomical events tend to be meaningful.</p>
 
 <div class="gen-grid">
-    {% for u in units %}
-    <div class="gen-cell{% if u.is_current %} current{% endif %}">
-        <div class="y"><a href="{% url 'chronos:calendar_century' u.century_start %}">{{ u.century_start }}–{{ u.century_end }}</a></div>
-        <div class="c">{{ u.count }} event{{ u.count|pluralize }}</div>
+    {% for cell in cells %}
+    <div class="gen-cell{% if cell.is_current %} current{% endif %}">
+        <div class="y"><a href="{{ cell.url }}">{{ cell.label }}</a></div>
+        <div class="c">{{ cell.count }} event{{ cell.count|pluralize }}</div>
     </div>
     {% endfor %}
 </div>

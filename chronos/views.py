@@ -4,6 +4,7 @@ import calendar as pycal
 import io
 import re
 from datetime import date, datetime, time, timedelta
+from datetime import timezone as dt_timezone
 from zoneinfo import ZoneInfo, available_timezones
 
 from django.contrib import messages
@@ -11,6 +12,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.management import call_command
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone as djtz
 from django.views.decorators.http import require_POST
 
@@ -395,34 +397,107 @@ def calendar_century(request, century_start):
     })
 
 
+def _count_in_year_range(y_from, y_until, tz):
+    """Count CalendarEvents whose start is in [y_from, y_until). Clamps
+    to the datetime year range — events can't physically be stored
+    outside [1, 9999] so out-of-range cells show zero. The boundary
+    datetimes use UTC so astimezone() in Django's SQLite backend
+    doesn't slide year=1 into year=0 via the home-tz offset."""
+    y0 = max(y_from, 2)  # leave a year of headroom for UTC shifts
+    y1 = min(y_until, 9999)
+    if y1 <= y0:
+        return 0
+    s = datetime(y0, 1, 1, tzinfo=dt_timezone.utc)
+    e = datetime(y1, 1, 1, tzinfo=dt_timezone.utc)
+    return CalendarEvent.objects.filter(start__gte=s, start__lt=e).count()
+
+
 @login_required
 def calendar_millennium(request, millennium_start):
     """10 century cells. At this scale astronomical events dominate."""
     tz = _home_tz()
-    millennium_start = int(millennium_start)
+    start = int(millennium_start)
     today = datetime.now(tz).date()
-    centuries = []
-    for c in range(millennium_start, millennium_start + 1000, 100):
-        s = datetime(c, 1, 1, tzinfo=tz)
-        e = datetime(c + 100, 1, 1, tzinfo=tz)
-        count = CalendarEvent.objects.filter(start__gte=s, start__lt=e).count()
-        centuries.append({
-            'century_start': c,
-            'century_end': c + 99,
-            'count': count,
+    cells = []
+    for c in range(start, start + 1000, 100):
+        cells.append({
+            'label': f'{c}s',
+            'count': _count_in_year_range(c, c + 100, tz),
             'is_current': c <= today.year < c + 100,
+            'url': reverse('chronos:calendar_century', args=[c]),
         })
-
+    ten_ky_start = (start // 10000) * 10000
     return render(request, 'chronos/calendar_century_grid.html', {
         'scale_name': 'millennium',
         'unit_name': 'century',
-        'span_label': f'{millennium_start}–{millennium_start + 999}',
-        'units': centuries,
-        'unit_attr_start': 'century_start',
-        'unit_attr_end': 'century_end',
-        'parent_url': None,
-        'prev_start': millennium_start - 1000,
-        'next_start': millennium_start + 1000,
+        'span_label': f'{start}–{start + 999}',
+        'cells': cells,
+        'prev_url': reverse('chronos:calendar_millennium',
+                            args=[max(0, start - 1000)]),
+        'next_url': reverse('chronos:calendar_millennium', args=[start + 1000]),
+        'up_url': reverse('chronos:calendar_ten_ky', args=[ten_ky_start]),
+        'up_label': '10-millennium',
+    })
+
+
+@login_required
+def calendar_ten_ky(request, start):
+    """10 millennium cells spanning 10,000 years. Mostly a navigation
+    scaffold — only astronomical events carry weight at this scale."""
+    tz = _home_tz()
+    start = int(start)
+    today = datetime.now(tz).date()
+    cells = []
+    for m in range(start, start + 10000, 1000):
+        cells.append({
+            'label': f'{m}s',
+            'count': _count_in_year_range(m, m + 1000, tz),
+            'is_current': m <= today.year < m + 1000,
+            'url': reverse('chronos:calendar_millennium', args=[m]),
+        })
+    hundred_ky_start = (start // 100000) * 100000
+    return render(request, 'chronos/calendar_century_grid.html', {
+        'scale_name': '10-millennium',
+        'unit_name': 'millennium',
+        'span_label': f'{start}–{start + 9999}',
+        'cells': cells,
+        'prev_url': reverse('chronos:calendar_ten_ky',
+                            args=[max(0, start - 10000)]),
+        'next_url': reverse('chronos:calendar_ten_ky', args=[start + 10000]),
+        'up_url': reverse('chronos:calendar_hundred_ky',
+                          args=[hundred_ky_start]),
+        'up_label': '100-millennium',
+    })
+
+
+@login_required
+def calendar_hundred_ky(request, start):
+    """10 10-millennium cells spanning 100,000 years. Pure deep-time
+    browsing — paleoanthropological scale. Event density is near zero
+    without a historical seed layer we don't have; the view exists so
+    the navigation ladder reaches human-genus horizons."""
+    tz = _home_tz()
+    start = int(start)
+    today = datetime.now(tz).date()
+    cells = []
+    for tk in range(start, start + 100000, 10000):
+        cells.append({
+            'label': f'{tk}–{tk + 9999}',
+            'count': _count_in_year_range(tk, tk + 10000, tz),
+            'is_current': tk <= today.year < tk + 10000,
+            'url': reverse('chronos:calendar_ten_ky', args=[tk]),
+        })
+    return render(request, 'chronos/calendar_century_grid.html', {
+        'scale_name': '100-millennium',
+        'unit_name': '10-millennium',
+        'span_label': f'{start}–{start + 99999}',
+        'cells': cells,
+        'prev_url': reverse('chronos:calendar_hundred_ky',
+                            args=[max(0, start - 100000)]),
+        'next_url': reverse('chronos:calendar_hundred_ky',
+                            args=[start + 100000]),
+        'up_url': None,
+        'up_label': '',
     })
 
 

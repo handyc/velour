@@ -10,7 +10,7 @@ Each adapter exposes get(year) -> [(date, name), ...] following
 the same protocol as the religious holiday adapters.
 """
 
-from . import equinoxes, eclipses, meteors, moon_phases
+from . import conjunctions, equinoxes, eclipses, meteors, moon_phases
 
 
 ASTRO_SOURCES = [
@@ -18,6 +18,7 @@ ASTRO_SOURCES = [
     moon_phases,
     eclipses,
     meteors,
+    conjunctions,
 ]
 
 
