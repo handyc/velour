@@ -186,17 +186,17 @@ def figure_add(request, manual_slug, section_slug):
         if not f.slug:
             messages.error(request, 'Slug is required.')
         elif f.kind == 'image' and not f.image:
-            messages.error(request, 'Upload an image, or switch kind to Mermaid.')
-        elif f.kind == 'mermaid' and not f.source.strip():
-            messages.error(request, 'Mermaid source is required.')
+            messages.error(request, 'Upload an image, or pick a diagram kind.')
+        elif f.kind != 'image' and not f.source.strip():
+            messages.error(request, f'{f.get_kind_display()} source is required.')
         else:
             try:
                 if not request.POST.get('sort_order', '').strip():
                     last = s.figures.order_by('-sort_order').first()
                     f.sort_order = ((last.sort_order + 10) if last else 0)
                 f.save()
-                if f.kind == 'mermaid' and not f.image:
-                    messages.warning(request, f'Saved "{f.slug}", but Mermaid render via Kroki failed (network or bad source). Edit and re-save to retry.')
+                if f.kind != 'image' and not f.image:
+                    messages.warning(request, f'Saved "{f.slug}", but {f.get_kind_display()} render via Kroki failed (network or bad source). Edit and re-save to retry.')
                 else:
                     messages.success(request, f'Added figure "{f.slug}".')
                 return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)
@@ -221,8 +221,8 @@ def figure_edit(request, manual_slug, section_slug, figure_slug):
         else:
             try:
                 f.save()
-                if f.kind == 'mermaid' and not f.image:
-                    messages.warning(request, f'Saved "{f.slug}", but Mermaid render failed.')
+                if f.kind != 'image' and not f.image:
+                    messages.warning(request, f'Saved "{f.slug}", but {f.get_kind_display()} render failed.')
                 else:
                     messages.success(request, f'Updated figure "{f.slug}".')
                 return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)

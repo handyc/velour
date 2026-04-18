@@ -63,13 +63,13 @@
         </div>
     </div>
 
-    <div id="block-mermaid" class="kind-block">
+    <div id="block-source" class="kind-block">
         <div class="field">
-            <label for="source">Mermaid source</label>
+            <label for="source">Diagram source</label>
             <textarea id="source" name="source" placeholder="graph TD&#10;    A[Start] --> B{Decision}&#10;    B -->|Yes| C[Do thing]&#10;    B -->|No| D[Other thing]">{{ figure.source }}</textarea>
-            <small>Rendered to PNG via <a href="https://kroki.io" target="_blank" style="color:#58a6ff;">kroki.io</a> when you save. <a href="https://mermaid.js.org/intro/" target="_blank" style="color:#58a6ff;">Mermaid syntax docs</a>.</small>
+            <small>Rendered to PNG via <a href="https://kroki.io" target="_blank" style="color:#58a6ff;">kroki.io</a> when you save. Syntax depends on the kind you picked — see Kroki's <a href="https://kroki.io/#support" target="_blank" style="color:#58a6ff;">per-language docs</a>.</small>
         </div>
-        {% if figure.image and figure.kind == 'mermaid' %}
+        {% if figure.image and figure.kind != 'image' %}
         <div class="field">
             <small>Current render:</small>
             <div class="preview"><img src="{{ figure.image.url }}" alt="rendered"></div>
@@ -102,7 +102,7 @@
 function updateKindBlocks() {
     var kind = document.getElementById('kind').value;
     document.getElementById('block-image').classList.toggle('active', kind === 'image');
-    document.getElementById('block-mermaid').classList.toggle('active', kind === 'mermaid');
+    document.getElementById('block-source').classList.toggle('active', kind !== 'image');
 }
 updateKindBlocks();
 </script>

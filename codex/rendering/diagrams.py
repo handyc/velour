@@ -1,17 +1,13 @@
 """Diagram rendering helpers.
 
-Currently implements Mermaid → PNG via the Kroki.io HTTP API.
+Source-text diagrams go to Kroki.io, which fronts a zoo of renderers
+(Mermaid, Graphviz, PlantUML, D2, the *diag family, WireViz, TikZ,
+and more). The hosted instance at https://kroki.io is free; point at
+a self-hosted one by setting `CODEX_KROKI_URL` in Django settings.
 
-Kroki is a lightweight diagram-rendering service that supports many
-text-based diagram formats (Mermaid, PlantUML, Graphviz, BlockDiag,
-etc.). The hosted instance at https://kroki.io is free and the
-service is open-source, so this renderer can be pointed at a
-self-hosted instance later by setting `CODEX_KROKI_URL` in Django
-settings.
-
-Network failures and bad input return None rather than raising —
-the caller (Figure.save) treats None as "couldn't render, keep
-whatever was there before".
+Network failures and bad input return None rather than raising — the
+caller (Figure.save) treats None as "couldn't render, keep whatever
+was there before".
 """
 
 import urllib.error
@@ -27,20 +23,22 @@ def _kroki_url():
     return getattr(settings, 'CODEX_KROKI_URL', DEFAULT_KROKI_URL).rstrip('/')
 
 
-def render_mermaid_to_png(source, timeout=15):
-    """POST mermaid source to Kroki and return the rendered PNG bytes.
+def render_diagram_to_png(source, kind='mermaid', timeout=15):
+    """POST diagram source to Kroki's `/<kind>/png` endpoint.
 
-    Returns None on any error (network down, bad source, timeout).
+    `kind` is a canonical Kroki language name (mermaid, graphviz,
+    plantuml, d2, blockdiag, …). Returns PNG bytes, or None on any
+    error (network down, bad source, unsupported kind, timeout).
     """
     if not source or not source.strip():
         return None
     try:
         req = urllib.request.Request(
-            f'{_kroki_url()}/mermaid/png',
+            f'{_kroki_url()}/{kind}/png',
             data=source.encode('utf-8'),
             headers={
                 'Content-Type': 'text/plain',
-                'User-Agent': 'velour-codex/0.2',
+                'User-Agent': 'velour-codex/0.3',
             },
             method='POST',
         )

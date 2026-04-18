@@ -145,9 +145,31 @@ class Section(models.Model):
         return [ln.strip() for ln in self.sidenotes.splitlines() if ln.strip()]
 
 
+# Every non-'image' kind is a Kroki language name — the value is POSTed
+# to kroki.io/<kind>/png verbatim. Adding a kind: append a row here and
+# nothing else (Figure.save dispatches uniformly).
 FIGURE_KIND_CHOICES = [
-    ('image',   'Uploaded image (PNG/JPG/SVG)'),
-    ('mermaid', 'Mermaid diagram (rendered via Kroki)'),
+    ('image',       'Uploaded image (PNG/JPG/SVG)'),
+    ('mermaid',     'Mermaid — flowcharts / sequences / state'),
+    ('graphviz',    'Graphviz (DOT) — directed graphs, wiring'),
+    ('plantuml',    'PlantUML — UML, sequence, architecture'),
+    ('d2',          'D2 — modern architecture diagrams'),
+    ('blockdiag',   'BlockDiag — block topology'),
+    ('nwdiag',      'NwDiag — network topology'),
+    ('packetdiag',  'PacketDiag — wire packet layout'),
+    ('rackdiag',    'RackDiag — server rack elevation'),
+    ('erd',         'ERD — entity-relationship'),
+    ('ditaa',       'Ditaa — ASCII art → polished'),
+    ('svgbob',      'SvgBob — ASCII art → SVG'),
+    ('wireviz',     'WireViz — cable harnesses'),
+    ('bytefield',   'Bytefield — byte / register layout'),
+    ('wavedrom',    'WaveDrom — timing diagrams'),
+    ('excalidraw',  'Excalidraw — hand-drawn style'),
+    ('nomnoml',     'Nomnoml — simple UML sketches'),
+    ('pikchr',      'Pikchr — compact diagrams'),
+    ('vegalite',    'Vega-Lite — data charts'),
+    ('bpmn',        'BPMN — business process'),
+    ('tikz',        'TikZ — LaTeX diagrams'),
 ]
 
 CAPTION_POSITION_CHOICES = [
@@ -210,12 +232,12 @@ class ReportRecipe(models.Model):
 class Figure(models.Model):
     """An image or generated diagram embedded in a Section.
 
-    Two kinds:
-      - 'image':   uploaded by the user, stored in `image`.
-      - 'mermaid': source kept in `source`, rendered to PNG via the
-                   Kroki HTTP API on save (and re-rendered when the
-                   source text changes), with the resulting PNG
-                   cached in `image`.
+    Either:
+      - 'image': uploaded by the user, stored in `image`.
+      - any Kroki language (mermaid, graphviz, plantuml, d2, ...):
+        source kept in `source`, rendered to PNG via Kroki on save
+        (and re-rendered when the source text changes), with the
+        resulting PNG cached in `image`.
 
     Embedded in section bodies by writing `!fig:slug` on its own
     line; the renderer looks the slug up in the section's figures
@@ -269,16 +291,15 @@ class Figure(models.Model):
         return f'{self.section}: {self.slug} ({self.kind})'
 
     def save(self, *args, **kwargs):
-        if self.kind == 'mermaid' and self.source.strip():
+        if self.kind != 'image' and self.source.strip():
             new_hash = hashlib.sha256(
                 self.source.strip().encode('utf-8')
             ).hexdigest()[:32]
             if new_hash != self.source_hash or not self.image:
-                # Re-render via Kroki. Import locally so the model
-                # module doesn't depend on the rendering layer at
-                # import time.
-                from .rendering.diagrams import render_mermaid_to_png
-                png = render_mermaid_to_png(self.source)
+                # Local import: the model module stays independent of
+                # the rendering layer at import time.
+                from .rendering.diagrams import render_diagram_to_png
+                png = render_diagram_to_png(self.source, kind=self.kind)
                 if png:
                     self.image.save(
                         f'{self.slug or "diagram"}.png',
