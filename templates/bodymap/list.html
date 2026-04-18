@@ -35,9 +35,11 @@
     firmware assignments for that node.
 </p>
 
-<div style="margin-top: 0.8rem;">
+<div style="margin-top: 0.8rem; display:flex; gap: 0.5rem; flex-wrap: wrap;">
     <a href="{% url 'bodymap:flash' %}"
        style="display:inline-block;background:#238636;color:#fff;padding:0.4rem 0.9rem;border-radius:6px;text-decoration:none;font-size:0.85rem;">Flash a bodymap node →</a>
+    <a href="{% url 'bodymap:attiny_emulate' %}"
+       style="display:inline-block;background:#21262d;color:#c9d1d9;padding:0.4rem 0.9rem;border-radius:6px;text-decoration:none;font-size:0.85rem;border:1px solid #30363d;">ATtiny13a emulator →</a>
 </div>
 
 {% if segments %}

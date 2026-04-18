@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}ATtiny13a emulator — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .em-lede { color: #8b949e; max-width: 52rem; }
+    .em-picker { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+    .em-picker a { display:inline-block; padding: 0.35rem 0.7rem; background: #161b22;
+                   color: #c9d1d9; text-decoration: none; border: 1px solid #21262d;
+                   border-radius: 4px; font-size: 0.8rem; }
+    .em-picker a:hover { background: #21262d; border-color: #30363d; }
+    .em-picker a.active { background: rgba(88,166,255,0.12); border-color: #58a6ff; color:#58a6ff; }
+    .em-picker .em-group { font-size: 0.72rem; color: #6e7681; text-transform: uppercase;
+                           letter-spacing: 0.05em; align-self: center; margin-right: 0.3rem; }
+
+    .em-grid { display: grid; grid-template-columns: 360px 1fr; gap: 1.5rem; margin-top: 1rem; }
+    @media (max-width: 900px) { .em-grid { grid-template-columns: 1fr; } }
+
+    .em-panel { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 1rem; }
+    .em-panel h2 { font-size: 0.9rem; color: #c9d1d9; margin: 0 0 0.8rem 0;
+                   text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+
+    /* Virtual pin panel */
+    .em-pin { display: grid; grid-template-columns: 70px 40px 1fr; gap: 0.5rem;
+              align-items: center; padding: 0.45rem 0; border-bottom: 1px dashed #21262d; }
+    .em-pin:last-child { border-bottom: none; }
+    .em-pin-name { font-family: ui-monospace, Menlo, monospace; color: #c9d1d9; font-size: 0.82rem; }
+    .em-pin-mode { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+                   color: #6e7681; text-align: right; }
+    .em-pin-mode.out { color: #2ea043; }
+    .em-pin-mode.in  { color: #58a6ff; }
+    .em-pin-body { min-height: 26px; display: flex; align-items: center; gap: 0.6rem; }
+    .em-led { width: 16px; height: 16px; border-radius: 50%; background: #1a1a1a;
+              border: 1px solid #30363d; box-shadow: inset 0 0 3px rgba(0,0,0,0.6);
+              flex-shrink: 0; transition: background-color 0.03s, box-shadow 0.03s; }
+    .em-led.on { background: #fbbf24; box-shadow: 0 0 10px rgba(251,191,36,0.8),
+                 inset 0 0 2px rgba(255,240,180,0.9); }
+    .em-pwmbar { flex: 1; height: 6px; background: #161b22; border-radius: 3px;
+                 overflow: hidden; position: relative; }
+    .em-pwmbar > div { height: 100%; background: #fbbf24; }
+    .em-btn-in { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+                 padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.72rem;
+                 font-family: ui-monospace, Menlo, monospace; cursor: pointer; user-select: none; }
+    .em-btn-in.pressed { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
+    .em-pot { flex: 1; }
+    .em-pot input[type=range] { width: 100%; }
+    .em-pot-label { font-family: ui-monospace, Menlo, monospace; color: #8b949e;
+                    font-size: 0.72rem; white-space: nowrap; }
+
+    .em-ctrls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.8rem; }
+    .em-btn { background: #238636; color: #fff; border: none; padding: 0.4rem 0.9rem;
+              border-radius: 5px; font-size: 0.82rem; cursor: pointer; font-weight: 500; }
+    .em-btn:hover { background: #2ea043; }
+    .em-btn[disabled] { background: #30363d; color: #6e7681; cursor: not-allowed; }
+    .em-btn.secondary { background: #21262d; color: #c9d1d9; }
+    .em-btn.secondary:hover { background: #30363d; }
+    .em-btn.danger { background: #da3633; }
+    .em-btn.danger:hover { background: #f85149; }
+
+    .em-speed { display:flex; align-items:center; gap:0.5rem; font-size:0.78rem; color:#8b949e; }
+    .em-speed input[type=range] { width: 140px; }
+    .em-stats { font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem;
+                color: #6e7681; margin-top: 0.5rem; }
+    .em-stats .val { color: #c9d1d9; }
+    .em-stats .bad { color: #f85149; }
+
+    .em-source { background: #010409; border: 1px solid #21262d; border-radius: 6px;
+                 padding: 0.8rem; font-family: ui-monospace, Menlo, monospace;
+                 font-size: 0.75rem; color: #c9d1d9; white-space: pre; overflow: auto;
+                 max-height: 360px; line-height: 1.45; }
+    .em-empty { color: #6e7681; font-size: 0.85rem; }
+    .em-hint  { font-size: 0.78rem; color: #8b949e; background: rgba(88,166,255,0.06);
+                border-left: 2px solid #58a6ff; padding: 0.5rem 0.8rem; border-radius: 0 4px 4px 0;
+                margin-top: 0.8rem; }
+</style>
+<script src="{% static 'js/attiny_emu.js' %}"></script>
+{% endblock %}
+
+{% block content %}
+<h1>ATtiny13a emulator</h1>
+<p class="em-lede">
+    Runs the compiled <code>.hex</code> from a workshop template or a
+    saved design against a virtual t13a. Wiggle the pot, press the
+    input buttons, watch the LEDs — no chip needed. Clock runs at whatever
+    speed the slider sets; real chip is 1.2 MHz.
+</p>
+
+<div class="em-picker">
+    <span class="em-group">Templates:</span>
+    {% for tpl in templates %}
+        <a href="{% url 'bodymap:attiny_emulate_slug' tpl.slug %}"
+           class="{% if active and active.slug == tpl.slug %}active{% endif %}">{{ tpl.name }}</a>
+    {% endfor %}
+</div>
+{% if designs %}
+<div class="em-picker">
+    <span class="em-group">Designs:</span>
+    {% for d in designs %}
+        <a href="{% url 'bodymap:attiny_emulate_slug' d.slug %}"
+           class="{% if active and active.slug == d.slug %}active{% endif %}">{{ d.name }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if active and active_hex %}
+<div class="em-grid">
+    <!-- Left: virtual panel -->
+    <div>
+        <div class="em-panel">
+            <h2>{{ active.name }}</h2>
+
+            <!-- Pin rows. Each row knows its pin number and whether it's
+                 a digital / PWM / input / ADC line — the JS decides what
+                 controls to render. -->
+            <div class="em-pin" data-pin="0">
+                <div class="em-pin-name">PB0</div>
+                <div class="em-pin-mode" id="em-mode-0">—</div>
+                <div class="em-pin-body">
+                    <span class="em-led" id="em-led-0"></span>
+                    <div class="em-pwmbar" id="em-pwm-0"><div style="width:0%"></div></div>
+                </div>
+            </div>
+            <div class="em-pin" data-pin="1">
+                <div class="em-pin-name">PB1</div>
+                <div class="em-pin-mode" id="em-mode-1">—</div>
+                <div class="em-pin-body">
+                    <span class="em-led" id="em-led-1"></span>
+                    <div class="em-pwmbar" id="em-pwm-1"><div style="width:0%"></div></div>
+                    <button class="em-btn-in" id="em-btn-1" data-pin="1">pull LOW</button>
+                </div>
+            </div>
+            <div class="em-pin" data-pin="2">
+                <div class="em-pin-name">PB2 / ADC1</div>
+                <div class="em-pin-mode" id="em-mode-2">—</div>
+                <div class="em-pin-body">
+                    <span class="em-led" id="em-led-2"></span>
+                    <div class="em-pot">
+                        <input type="range" min="0" max="1023" value="512" id="em-pot-2">
+                    </div>
+                    <span class="em-pot-label" id="em-pot-label-2">512 / 1023</span>
+                </div>
+            </div>
+            <div class="em-pin" data-pin="3">
+                <div class="em-pin-name">PB3 / ADC3</div>
+                <div class="em-pin-mode" id="em-mode-3">—</div>
+                <div class="em-pin-body">
+                    <span class="em-led" id="em-led-3"></span>
+                    <button class="em-btn-in" id="em-btn-3" data-pin="3">pull LOW</button>
+                    <div class="em-pot" style="flex:1;">
+                        <input type="range" min="0" max="1023" value="0" id="em-pot-3">
+                    </div>
+                    <span class="em-pot-label" id="em-pot-label-3">0 / 1023</span>
+                </div>
+            </div>
+            <div class="em-pin" data-pin="4">
+                <div class="em-pin-name">PB4 / ADC2</div>
+                <div class="em-pin-mode" id="em-mode-4">—</div>
+                <div class="em-pin-body">
+                    <span class="em-led" id="em-led-4"></span>
+                    <button class="em-btn-in" id="em-btn-4" data-pin="4">pull LOW</button>
+                    <div class="em-pot" style="flex:1;">
+                        <input type="range" min="0" max="1023" value="0" id="em-pot-4">
+                    </div>
+                    <span class="em-pot-label" id="em-pot-label-4">0 / 1023</span>
+                </div>
+            </div>
+            <div class="em-pin" data-pin="5">
+                <div class="em-pin-name">PB5 / RESET</div>
+                <div class="em-pin-mode in">reset</div>
+                <div class="em-pin-body">
+                    <button class="em-btn-in danger" id="em-reset-btn">press reset</button>
+                </div>
+            </div>
+
+            <div class="em-ctrls">
+                <button class="em-btn"           id="em-run">Run</button>
+                <button class="em-btn secondary" id="em-pause" disabled>Pause</button>
+                <button class="em-btn secondary" id="em-step" disabled>Step 1</button>
+                <button class="em-btn secondary" id="em-reset">Power-on reset</button>
+            </div>
+            <div class="em-ctrls">
+                <div class="em-speed">
+                    <label for="em-speed">speed:</label>
+                    <input type="range" min="1" max="7" value="5" id="em-speed">
+                    <span id="em-speed-label">100k cyc/frame</span>
+                </div>
+            </div>
+            <div class="em-stats" id="em-stats">
+                pc=<span class="val" id="em-pc">0000</span> ·
+                cycles=<span class="val" id="em-cycles">0</span> ·
+                status=<span class="val" id="em-status">idle</span>
+            </div>
+            <div class="em-hint">
+                Reads of <code>PB3</code>/<code>PB4</code> use the digital button
+                (default high via internal pull-up); the sliders feed the ADC (ADC2/ADC3)
+                for templates that read these pins as analog. <code>PB5</code> is RESET —
+                pressing it latches the MCUSR EXTRF bit so reset-aware templates like
+                <code>gpio_test_13a</code> see the button press.
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: source -->
+    <div>
+        <div class="em-panel">
+            <h2>Source</h2>
+            <pre class="em-source" id="em-src">{{ active_source }}</pre>
+        </div>
+    </div>
+</div>
+
+<script id="em-hex" type="text/plain">{{ active_hex }}</script>
+
+<script>
+(function () {
+    const HEX = document.getElementById('em-hex').textContent;
+    const prog = AttinyEmu.parseIntelHex(HEX);
+    const mcu  = new AttinyEmu.ATtiny13aEmu();
+    mcu.loadProgram(prog);
+    mcu.reset(false);
+
+    // --- UI handles --------------------------------------------------
+    const leds  = [0,1,2,3,4].map(i => document.getElementById('em-led-' + i));
+    const modes = [0,1,2,3,4].map(i => document.getElementById('em-mode-' + i));
+    const pwmBars = {
+        0: document.querySelector('#em-pwm-0 > div'),
+        1: document.querySelector('#em-pwm-1 > div'),
+    };
+    const pots = {
+        1: document.getElementById('em-pot-2'),        // ADC1 = PB2
+        2: document.getElementById('em-pot-4'),        // ADC2 = PB4
+        3: document.getElementById('em-pot-3'),        // ADC3 = PB3
+    };
+    const potLabels = {
+        1: document.getElementById('em-pot-label-2'),
+        2: document.getElementById('em-pot-label-4'),
+        3: document.getElementById('em-pot-label-3'),
+    };
+    const btns = {
+        1: document.getElementById('em-btn-1'),
+        3: document.getElementById('em-btn-3'),
+        4: document.getElementById('em-btn-4'),
+    };
+
+    function seedPots() {
+        // Adjust initial ADC values from current slider state.
+        for (const [ch, el] of Object.entries(pots)) {
+            mcu.adc[+ch] = +el.value;
+            potLabels[ch].textContent = el.value + ' / 1023';
+        }
+    }
+    seedPots();
+
+    // Button bindings: pressed = pin goes LOW (0), released = pull-up HIGH (1).
+    for (const [pin, btn] of Object.entries(btns)) {
+        const p = +pin;
+        btn.addEventListener('mousedown', () => {
+            mcu.pinInput[p] = 0;
+            btn.classList.add('pressed');
+        });
+        btn.addEventListener('mouseup', () => {
+            mcu.pinInput[p] = 1;
+            btn.classList.remove('pressed');
+        });
+        btn.addEventListener('mouseleave', () => {
+            if (btn.classList.contains('pressed')) {
+                mcu.pinInput[p] = 1;
+                btn.classList.remove('pressed');
+            }
+        });
+    }
+    for (const [ch, el] of Object.entries(pots)) {
+        el.addEventListener('input', () => {
+            mcu.adc[+ch] = +el.value;
+            potLabels[ch].textContent = el.value + ' / 1023';
+        });
+    }
+
+    // --- Reset buttons ----------------------------------------------
+    document.getElementById('em-reset-btn').addEventListener('click', () => {
+        mcu.reset(true);    // external reset — EXTRF bit latched in MCUSR
+        seedPots();
+        render();
+    });
+    document.getElementById('em-reset').addEventListener('click', () => {
+        mcu.reset(false);   // power-on reset
+        seedPots();
+        render();
+    });
+
+    // --- Run loop ----------------------------------------------------
+    const speedEl   = document.getElementById('em-speed');
+    const speedLbl  = document.getElementById('em-speed-label');
+    const stepsPerFrameForSlider = [0, 1000, 10000, 30000, 50000, 100000, 250000, 500000];
+    function budget() { return stepsPerFrameForSlider[+speedEl.value] || 100000; }
+    function speedLabelText(v) {
+        const n = stepsPerFrameForSlider[v] || 0;
+        return n >= 1000 ? (n/1000) + 'k cyc/frame' : n + ' cyc/frame';
+    }
+    speedEl.addEventListener('input', () => { speedLbl.textContent = speedLabelText(+speedEl.value); });
+    speedLbl.textContent = speedLabelText(+speedEl.value);
+
+    const runBtn    = document.getElementById('em-run');
+    const pauseBtn  = document.getElementById('em-pause');
+    const stepBtn   = document.getElementById('em-step');
+    const pcEl      = document.getElementById('em-pc');
+    const cyclesEl  = document.getElementById('em-cycles');
+    const statusEl  = document.getElementById('em-status');
+
+    let running = false, raf = 0;
+    function setRunning(v) {
+        running = v;
+        runBtn.disabled = v;
+        pauseBtn.disabled = !v;
+        stepBtn.disabled = v;
+        statusEl.textContent = v ? 'running' : (mcu.halted ? 'halted' : 'paused');
+        statusEl.className = 'val' + (mcu.halted ? ' bad' : '');
+    }
+    function tick() {
+        if (!running) return;
+        if (!mcu.halted) mcu.runFor(budget());
+        render();
+        if (mcu.halted) { setRunning(false); return; }
+        raf = requestAnimationFrame(tick);
+    }
+
+    runBtn  .addEventListener('click', () => { setRunning(true);  tick(); });
+    pauseBtn.addEventListener('click', () => { setRunning(false); });
+    stepBtn .addEventListener('click', () => { mcu.step(); render(); });
+
+    // --- Render ------------------------------------------------------
+    function render() {
+        const ddrb  = mcu.ddrb, portb = mcu.portb;
+        for (let i = 0; i < 5; i++) {
+            const isOut = (ddrb >> i) & 1;
+            let modeText = isOut ? 'out' : 'in';
+            let brightness = 0;
+
+            if (isOut) {
+                if (i === 0 && mcu.pwmA >= 0) { modeText = 'pwm'; brightness = mcu.pwmA; }
+                else if (i === 1 && mcu.pwmB >= 0) { modeText = 'pwm'; brightness = mcu.pwmB; }
+                else { brightness = ((portb >> i) & 1) ? 255 : 0; }
+            } else {
+                brightness = mcu.pinInput[i] ? 255 : 0;   // show input state on the LED too
+            }
+
+            modes[i].textContent = modeText;
+            modes[i].className   = 'em-pin-mode ' + (isOut ? 'out' : 'in');
+
+            if (brightness >= 8) {
+                leds[i].classList.add('on');
+                leds[i].style.opacity = String(brightness / 255);
+            } else {
+                leds[i].classList.remove('on');
+                leds[i].style.opacity = '1';
+            }
+
+            if (pwmBars[i]) {
+                pwmBars[i].style.width = ((brightness / 255) * 100).toFixed(1) + '%';
+            }
+        }
+        pcEl.textContent = mcu.pc.toString(16).padStart(4, '0');
+        cyclesEl.textContent = mcu.cycles.toLocaleString();
+        if (!running) {
+            statusEl.textContent = mcu.halted ? 'halted' : 'paused';
+            statusEl.className   = 'val' + (mcu.halted ? ' bad' : '');
+        }
+    }
+    render();
+})();
+</script>
+{% else %}
+<div class="em-panel" style="margin-top:1rem;">
+    <p class="em-empty">
+        {% if active %}
+            This design/template has no compiled hex yet.
+        {% else %}
+            Pick a template or design above to load it into the emulator.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'bodymap:list' %}" class="btn btn-secondary">Back to Bodymap</a>
+    <a href="{% url 'bodymap:flash' %}" class="btn btn-secondary">ESP flasher</a>
+</div>
+{% endblock %}

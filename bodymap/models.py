@@ -10,6 +10,11 @@ reboots and is visible to the dashboard. Operators can override a
 firmware assignment via the Segment admin — the override sets
 `operator_locked=True` and the server silently ignores further
 autogen updates for that node until cleared.
+
+Also hosts the ATtiny workshop (AttinyTemplate / AttinyDesign). Each
+ATtiny85 is a custom analog-to-digital filter the user hangs off the
+ESP32-S3's I2C bus; the workshop lets them edit C source in-browser,
+compile via avr-gcc, and (phase 2) flash via USBasp.
 """
 
 from django.db import models
@@ -84,3 +89,95 @@ class LinkObservation(models.Model):
 
     def __str__(self):
         return f'{self.reporter.slug} ↔ {self.peer_mac}: {self.strength:.2f}'
+
+
+MCU_CHOICES = [
+    ('attiny85', 'ATtiny85'),
+    ('attiny13a','ATtiny13a'),
+]
+
+
+class AttinyTemplate(models.Model):
+    """Read-only starter firmware for an ATtiny coprocessor.
+
+    Seed via `manage.py seed_attinys`. Each template is a complete,
+    compilable C program against avr-libc for the chosen MCU. Users
+    don't edit templates directly — they clone one into an
+    AttinyDesign, then edit there.
+    """
+
+    slug        = models.SlugField(primary_key=True, max_length=80)
+    name        = models.CharField(max_length=80)
+    summary     = models.CharField(max_length=240, blank=True)
+    description = models.TextField(
+        blank=True,
+        help_text='Longer explanation shown on the template card and in '
+                  'the editor. Markdown-lite (paragraphs, not headings).',
+    )
+    mcu         = models.CharField(max_length=12, choices=MCU_CHOICES, default='attiny85')
+    c_source    = models.TextField()
+    pinout      = models.TextField(
+        blank=True,
+        help_text='Free-text pin notes, e.g. "PB2 = pot, PB0 = PWM out".',
+    )
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class AttinyDesign(models.Model):
+    """User-editable ATtiny program. Clone of a template, plus edits.
+
+    i2c_address is the slave address the design will answer on once
+    flashed — defaults to 0x08 and increments per design so a fresh
+    workshop naturally assigns non-colliding addresses. Users can
+    override if they want to slot a design into an existing mesh.
+    """
+
+    slug        = models.SlugField(unique=True, max_length=80)
+    name        = models.CharField(max_length=80)
+    template    = models.ForeignKey(
+        AttinyTemplate,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='designs',
+    )
+    mcu         = models.CharField(max_length=12, choices=MCU_CHOICES, default='attiny85')
+    c_source    = models.TextField()
+    description = models.TextField(blank=True)
+
+    i2c_address = models.PositiveSmallIntegerField(
+        default=8,
+        help_text='7-bit I2C slave address (0x08–0x77). ESP reads this '
+                  'slot in the per-tick round-robin.',
+    )
+
+    # Compile artifacts — updated in place by the build view. Kept
+    # inline rather than on disk so the editor page can render the
+    # log alongside the source without chasing filesystem state.
+    compiled_hex  = models.TextField(blank=True)
+    compile_log   = models.TextField(blank=True)
+    compiled_at   = models.DateTimeField(null=True, blank=True)
+    compile_ok    = models.BooleanField(default=False)
+    # .text size in bytes, pulled from avr-size -A. Helps the user see
+    # at a glance whether they're running out of 8KB (ATtiny85) /
+    # 1KB (ATtiny13a) flash.
+    program_bytes = models.PositiveIntegerField(null=True, blank=True)
+
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.mcu})'
+
+    @property
+    def flash_limit_bytes(self):
+        return 8192 if self.mcu == 'attiny85' else 1024
