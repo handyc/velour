@@ -166,6 +166,11 @@ class Simulation(models.Model):
         help_text='2D array of color indices (0-3). Empty = random init.')
     tick_count = models.PositiveIntegerField(default=0)
     notes = models.TextField(blank=True)
+    analysis = models.JSONField(default=dict, blank=True,
+        help_text='Pattern-detection findings from detect_patterns: the '
+                  'tick at which the grid entered a cycle, the cycle '
+                  'period, and whether the cycle is a still life or '
+                  'oscillator. Empty until detect_patterns has run.')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
