@@ -359,11 +359,9 @@ void SensorRegistry::clear() {
 bool SensorRegistry::add(Sensor* s) {
     if (!s) return false;
     if (_count >= BODYMAP_MAX_SENSORS) return false;
-    if (!s->begin()) {
-        // Sensor chose not to come up (e.g. softuart on ESP8266).
-        // Keep it anyway so its channel still emits the last known
-        // value — some sensors report 0.0 as a legitimate default.
-    }
+    // begin() may refuse (e.g. softuart on ESP8266); keep the sensor
+    // anyway so its channel still emits a legitimate default of 0.0.
+    s->begin();
     _sensors[_count++] = s;
     return true;
 }
