@@ -410,10 +410,9 @@ bool VelourClient::fetchSensorConfig(String& out) {
 
     auto loadCached = [&]() -> bool {
         if (!_ensureFs()) return false;
-        if (!LittleFS.exists(VELOUR_SENSOR_CONFIG_PATH)) return false;
         File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "r");
         if (!f) return false;
-        while (f.available()) out += (char)f.read();
+        out = f.readString();
         f.close();
         return out.length() > 0;
     };
@@ -457,23 +456,18 @@ bool VelourClient::fetchSensorConfig(String& out) {
     // and chew through flash erase cycles for no reason.
     if (_ensureFs()) {
         bool same = false;
-        if (LittleFS.exists(VELOUR_SENSOR_CONFIG_PATH)) {
-            File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "r");
-            if (f) {
-                if ((size_t)f.size() == (size_t)body.length()) {
-                    String existing;
-                    existing.reserve(f.size());
-                    while (f.available()) existing += (char)f.read();
-                    same = (existing == body);
-                }
-                f.close();
+        File r = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "r");
+        if (r) {
+            if ((size_t)r.size() == (size_t)body.length()) {
+                same = (r.readString() == body);
             }
+            r.close();
         }
         if (!same) {
-            File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "w");
-            if (f) {
-                f.print(body);
-                f.close();
+            File w = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "w");
+            if (w) {
+                w.print(body);
+                w.close();
             }
         }
     }

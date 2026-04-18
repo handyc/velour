@@ -32,9 +32,6 @@ class NodeSensorConfigAdmin(admin.ModelAdmin):
 
     @admin.display(description='Wizard')
     def wizard_link(self, obj):
-        # Shortcut to the structured editor at /bodymap/config/<slug>/.
-        # The JSONField in the admin works for power users but is easy
-        # to malform; the wizard enforces per-kind field sets.
         if not obj.node_id:
             return '—'
         url = reverse('bodymap:node_config', kwargs={'slug': obj.node.slug})

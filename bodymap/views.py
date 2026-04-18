@@ -15,7 +15,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from experiments.models import Experiment
 from nodes.models import Node
@@ -84,9 +84,11 @@ def bodymap_node_config(request, slug):
     (no partial updates — the form is the source of truth).
     """
     node = get_object_or_404(Node, slug=slug)
-    cfg, _ = NodeSensorConfig.objects.get_or_create(node=node)
+    cfg = getattr(node, 'bodymap_sensor_config', None)
 
     if request.method == 'POST':
+        if cfg is None:
+            cfg = NodeSensorConfig(node=node)
         kinds = request.POST.getlist('kind')
         names = request.POST.getlist('channel')
         pins  = request.POST.getlist('pin')
@@ -155,7 +157,7 @@ def bodymap_node_config(request, slug):
     return render(request, 'bodymap/config_wizard.html', {
         'node':     node,
         'cfg':      cfg,
-        'channels': cfg.channels or [],
+        'channels': (cfg.channels if cfg else []) or [],
         'kinds':    _CHANNEL_KINDS,
         'saved':    request.GET.get('saved') == '1',
     })
@@ -201,6 +203,7 @@ def bodymap_diagram(request, experiment_slug):
     })
 
 
+@require_GET
 def api_node_config(request, slug):
     """Firmware fetches its per-node sensor channel list.
 
@@ -220,9 +223,6 @@ def api_node_config(request, slug):
     new hardware boots fine even if the operator hasn't filled in a
     config yet.
     """
-    if request.method != 'GET':
-        return JsonResponse({'error': 'GET only'}, status=405)
-
     try:
         node = Node.objects.select_related('bodymap_sensor_config').get(slug=slug)
     except Node.DoesNotExist:
@@ -235,18 +235,11 @@ def api_node_config(request, slug):
     if not client_token or not hmac.compare_digest(node.api_token, client_token):
         return JsonResponse({'error': 'unauthorized'}, status=401)
 
-    try:
-        cfg = node.bodymap_sensor_config
-        channels = cfg.channels or []
-        version = cfg.updated_at.isoformat()
-    except NodeSensorConfig.DoesNotExist:
-        channels = []
-        version = ''
-
+    cfg = getattr(node, 'bodymap_sensor_config', None)
     return JsonResponse({
         'slug':     node.slug,
-        'channels': channels,
-        'version':  version,
+        'channels': cfg.channels if cfg else [],
+        'version':  cfg.updated_at.isoformat() if cfg else '',
     })
 
 

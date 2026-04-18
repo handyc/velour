@@ -275,12 +275,13 @@ bool AttinyPwmSensor::begin() {
 }
 
 float AttinyPwmSensor::sample() {
-    // Two pulseIn calls to compute duty = high / (high + low). Worst case
-    // is 2 × _timeoutUs when the line is stuck — budget accordingly when
-    // configuring multiple PWM sensors. At the '13a's default ~4.7 kHz the
-    // period is ~213 µs, comfortably inside the 50 ms default timeout.
+    // Duty = high / (high + low). If the HIGH half times out we skip the
+    // second pulseIn so one stuck line costs _timeoutUs, not 2× — with
+    // many PWM sensors on a disconnected bus the difference is the
+    // heartbeat missing its report window.
     uint32_t high = pulseIn(_pin, HIGH, _timeoutUs);
-    uint32_t low  = pulseIn(_pin, LOW,  _timeoutUs);
+    if (high == 0) return 0.0f;
+    uint32_t low = pulseIn(_pin, LOW, _timeoutUs);
     uint32_t period = high + low;
     if (period == 0) return 0.0f;
     return (float)high / (float)period;
@@ -318,16 +319,13 @@ float AttinySoftUartSensor::sample() {
 
     // Frame format written by the '13a's softuart_tx template:
     //   0xA5, hi, lo   — a 16-bit unsigned value.
-    // Drain whatever is in the RX buffer, remember the newest complete
-    // frame, and return it normalised to [0, 1].
-    while (_serial->available()) {
+    // Only process frames whose three bytes are already buffered; a stray
+    // 0xA5 mid-noise must not stall the hot path waiting for companions
+    // that may never arrive (a disconnected '13a is a silent heartbeat).
+    while (_serial->available() >= 3) {
         uint8_t b = (uint8_t)_serial->read();
         if (b != 0xA5) continue;
-
-        uint32_t deadline = millis() + 20;
-        while (_serial->available() < 2 && millis() < deadline) delay(1);
         if (_serial->available() < 2) break;
-
         uint8_t hi = (uint8_t)_serial->read();
         uint8_t lo = (uint8_t)_serial->read();
         uint16_t v = ((uint16_t)hi << 8) | lo;
@@ -440,8 +438,6 @@ int SensorRegistry::loadFromJson(const String& json) {
                     } else {
                         if (!wireBegunOnce) {
                             // ESP32-S3 SuperMini defaults: SDA=8, SCL=9.
-                            // Wire.begin() is idempotent; guard anyway so
-                            // we don't spam reinits across reboots.
                             Wire.begin();
                             Wire.setClock(100000);
                             wireBegunOnce = true;

@@ -134,10 +134,8 @@ void setup() {
     // is a no-op and no readings flow through the loop below.
     // imu.begin(Serial1, 115200);
 
-    // Per-node sensor layout comes from the server's bodymap app
-    // (NodeSensorConfig.channels). fetchSensorConfig() also caches the
-    // response to LittleFS, so on the next boot we can come up with the
-    // last known layout even if the server is unreachable.
+    // fetchSensorConfig also caches to LittleFS so the next boot can come
+    // up with the last known layout even if the server is unreachable.
     String configJson;
     if (velour.fetchSensorConfig(configJson)) {
         int n = sensors.loadFromJson(configJson);
