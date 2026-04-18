@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Import Manuscript - Codex - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .codex-form { max-width: 720px; }
+    .codex-form .field { margin-bottom: 1rem; }
+    .codex-form label { display: block; font-size: 0.78rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+    .codex-form input, .codex-form select, .codex-form textarea {
+        width: 100%; padding: 0.45rem 0.55rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; font: inherit;
+    }
+    .codex-form textarea { min-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85rem; }
+    .codex-form .row { display: flex; gap: 0.75rem; }
+    .codex-form .row .field { flex: 1 1 0; }
+    .codex-form small { color: #6e7681; font-size: 0.72rem; }
+    .ext-list { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #c9d1d9; }
+    .or-sep { text-align: center; color: #6e7681; font-size: 0.8rem; margin: 1rem 0; letter-spacing: 0.1em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Import Manuscript</h1>
+<p style="color:#8b949e;">
+    Upload a file or paste text. The result is cut at top-level headings
+    (<code># </code> / <code>## </code>) into one Section per chunk.
+</p>
+
+<form method="post" enctype="multipart/form-data" class="codex-form">
+    {% csrf_token %}
+
+    <div class="field">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" value="{{ title }}" required maxlength="200">
+    </div>
+
+    <div class="field">
+        <label for="subtitle">Subtitle (optional)</label>
+        <input type="text" id="subtitle" name="subtitle" value="{{ subtitle }}" maxlength="300">
+    </div>
+
+    <div class="field">
+        <label for="format">Format</label>
+        <select id="format" name="format">
+            {% for k, v in format_choices %}
+            <option value="{{ k }}" {% if format == k %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="field">
+        <label for="source_file">Upload</label>
+        <input type="file" id="source_file" name="source_file">
+        <small>Supported: <span class="ext-list">{{ extensions|join:" " }}</span></small>
+    </div>
+
+    <div class="or-sep">— or —</div>
+
+    <div class="field">
+        <label for="pasted">Paste text (treated as markdown)</label>
+        <textarea id="pasted" name="pasted" placeholder="# Chapter one&#10;&#10;Text here…">{{ pasted }}</textarea>
+    </div>
+
+    <div style="display:flex; gap:0.5rem;">
+        <button type="submit" class="btn">Import</button>
+        <a href="{% url 'codex:list' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

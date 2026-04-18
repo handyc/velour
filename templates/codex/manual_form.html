@@ -60,6 +60,68 @@
     </div>
 
     <div class="field">
+        <label for="bibliography">Bibliography (BibTeX)</label>
+        <textarea id="bibliography" name="bibliography" style="min-height:180px;">{{ manual.bibliography }}</textarea>
+        <small>Paste BibTeX entries. Cite them from section bodies with <code>[@key]</code> or <code>[@key, p. 42]</code>. Cited entries appear in a References section at the end of the PDF.</small>
+    </div>
+
+    <fieldset style="border:1px solid #30363d; border-radius:4px; padding:0.75rem 1rem; margin-bottom:1rem;">
+        <legend style="font-size:0.8rem; color:#8b949e; padding:0 0.4rem; text-transform:uppercase; letter-spacing:0.05em;">Edition (optional)</legend>
+        <small style="display:block; margin-bottom:0.5rem;">
+            Fill any of these to get a colophon page after the title page. Leave all blank for no colophon.
+        </small>
+
+        <div class="row">
+            <div class="field">
+                <label for="edition">Edition</label>
+                <input type="text" id="edition" name="edition" value="{{ manual.edition }}" maxlength="80" placeholder="First edition">
+            </div>
+            <div class="field">
+                <label for="publication_date">Publication date</label>
+                <input type="date" id="publication_date" name="publication_date" value="{% if manual.publication_date %}{{ manual.publication_date|date:'Y-m-d' }}{% endif %}">
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="field">
+                <label for="isbn">ISBN</label>
+                <input type="text" id="isbn" name="isbn" value="{{ manual.isbn }}" maxlength="20">
+            </div>
+            <div class="field">
+                <label for="doi">DOI</label>
+                <input type="text" id="doi" name="doi" value="{{ manual.doi }}" maxlength="120">
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="field">
+                <label for="publisher">Publisher</label>
+                <input type="text" id="publisher" name="publisher" value="{{ manual.publisher }}" maxlength="200">
+            </div>
+            <div class="field">
+                <label for="publisher_city">City</label>
+                <input type="text" id="publisher_city" name="publisher_city" value="{{ manual.publisher_city }}" maxlength="120">
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="field">
+                <label for="copyright_year">Copyright year</label>
+                <input type="text" id="copyright_year" name="copyright_year" value="{{ manual.copyright_year }}" maxlength="16" placeholder="2026">
+            </div>
+            <div class="field">
+                <label for="copyright_holder">Copyright holder</label>
+                <input type="text" id="copyright_holder" name="copyright_holder" value="{{ manual.copyright_holder }}" maxlength="200" placeholder="(defaults to Author)">
+            </div>
+        </div>
+
+        <div class="field">
+            <label for="license">License</label>
+            <input type="text" id="license" name="license" value="{{ manual.license }}" maxlength="200" placeholder='e.g. "CC BY-SA 4.0" or "All rights reserved."'>
+        </div>
+    </fieldset>
+
+    <div class="field">
         <label style="display:flex;align-items:center;gap:0.4rem;text-transform:none;font-size:0.85rem;color:#c9d1d9;">
             <input type="checkbox" name="double_spaced" value="1" {% if manual.double_spaced %}checked{% endif %} style="width:auto;">
             Double-spaced (Tufte's preferred ~1.27 leading is the default; only turn this on for manuscript-style output)

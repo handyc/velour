@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Volumes - Codex - Velour{% endblock %}
+{% block extra_head %}
+<style>
+    .vol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+    .vol-card { padding: 1rem 1.25rem; border-left: 4px solid #bc8cff; }
+    .vol-card .title { font-size: 1.15rem; font-weight: 600; color: #c9d1d9; }
+    .vol-card .subtitle { font-size: 0.85rem; color: #8b949e; font-style: italic; margin: 0.1rem 0 0.5rem; }
+    .vol-card .meta { font-size: 0.75rem; color: #6e7681; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Volumes</h1>
+<p style="color:#8b949e;">Bind a sequence of manuals into one combined PDF — cover, table of contents, then each manual in order.</p>
+
+<div style="display:flex; gap:0.5rem; margin:1rem 0;">
+    <a href="{% url 'codex:volume_add' %}" class="btn">New Volume</a>
+    <a href="{% url 'codex:list' %}" class="btn btn-secondary">Back to Manuals</a>
+</div>
+
+{% if volumes %}
+<div class="vol-grid">
+    {% for v in volumes %}
+    <div class="card vol-card">
+        <div class="title">{{ v.title }}</div>
+        {% if v.subtitle %}<div class="subtitle">{{ v.subtitle }}</div>{% endif %}
+        <div class="meta">
+            {{ v.entries.count }} manual{{ v.entries.count|pluralize }} · updated {{ v.updated_at|date:"D d M Y H:i" }}
+            {% if v.last_built_at %}<br>last built {{ v.last_built_at|date:"D d M Y H:i" }}{% endif %}
+        </div>
+        <div style="margin-top:0.7rem; display:flex; gap:0.4rem;">
+            <a href="{% url 'codex:volume_detail' v.slug %}" class="btn" style="font-size:0.8rem;">Open</a>
+            <a href="{% url 'codex:volume_pdf' v.slug %}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem;">PDF</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p style="color:#8b949e; margin-top:1.5rem;">No volumes yet.</p>
+{% endif %}
+{% endblock %}

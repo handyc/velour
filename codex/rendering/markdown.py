@@ -19,6 +19,8 @@ Inline syntax:
   *italic*
   ^[note text]             (inline sidenote — Pandoc style)
   [text](url)              (link; rendered as text + a sidenote with the URL)
+  [@key] / [@key, p. 42]   (bibliography citation; author-year inline,
+                            full entry in the References section)
   [[spark:DATA|OPTS]]      (inline Tufte sparkline)
 
 Sparkline forms:
@@ -77,6 +79,8 @@ Inline run tags:
   ('spark', spec_dict)
   ('link', text, url)     renderer typically prints the text and queues
                           a sidenote containing the url
+  ('cite', key, locator)  renderer prints `(Author Year[, locator])` and
+                          records the key so it ends up in the References
 """
 
 import re
@@ -86,10 +90,13 @@ import re
 _TOKEN_RE = re.compile(
     r'(\[\[spark:[^\]]+\]\]'
     r'|\^\[[^\]]+\]'
+    r'|\[@[^\]]+\]'
     r'|\[[^\]]+\]\([^)]+\)'
     r'|\*\*[^*\n]+\*\*'
     r'|\*[^*\n]+\*)'
 )
+
+_CITE_RE = re.compile(r'^\[@([^,\]\s]+)(?:\s*,\s*(.*?))?\]$')
 
 _BAND_RE = re.compile(r'band\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)')
 
@@ -141,6 +148,12 @@ def parse_inline(text):
                 runs.append(('text', '', piece))
         elif piece.startswith('^[') and piece.endswith(']'):
             runs.append(('note', piece[2:-1]))
+        elif piece.startswith('[@') and piece.endswith(']'):
+            m = _CITE_RE.match(piece)
+            if m:
+                runs.append(('cite', m.group(1), (m.group(2) or '').strip()))
+            else:
+                runs.append(('text', '', piece))
         elif piece.startswith('[') and ')' in piece:
             m = _LINK_RE.match(piece)
             if m:

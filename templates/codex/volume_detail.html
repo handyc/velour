@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ volume.title }} - Codex - Velour{% endblock %}
+{% block extra_head %}
+<style>
+    .entry-list { list-style: none; padding: 0; margin: 1rem 0; }
+    .entry-row {
+        display: grid; grid-template-columns: 30px 1fr auto auto;
+        align-items: center; gap: 0.75rem;
+        padding: 0.6rem 0.9rem; background: #161b22;
+        border: 1px solid #30363d; border-radius: 4px;
+        margin-bottom: 0.4rem;
+    }
+    .entry-row .order { color: #6e7681; font-family: ui-monospace, Menlo, monospace; font-size: 0.82rem; }
+    .entry-row .title { color: #58a6ff; font-weight: 500; }
+    .entry-row .meta  { color: #6e7681; font-size: 0.75rem; }
+    .entry-row form { margin: 0; }
+    .entry-row button.remove {
+        background: transparent; border: 1px solid #30363d; color: #f85149;
+        padding: 0.25rem 0.55rem; border-radius: 3px; cursor: pointer;
+        font-size: 0.75rem;
+    }
+    .add-form { display: flex; gap: 0.4rem; align-items: center; margin-top: 1rem; }
+    .add-form select {
+        flex: 1 1 0; padding: 0.45rem 0.55rem; background: #0d1117;
+        color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<h1>{{ volume.title }}</h1>
+{% if volume.subtitle %}<p style="color:#8b949e; font-style:italic;">{{ volume.subtitle }}</p>{% endif %}
+
+<div style="display:flex; gap:0.5rem; margin:1rem 0;">
+    <a href="{% url 'codex:volume_edit' volume.slug %}" class="btn btn-secondary">Edit metadata</a>
+    <a href="{% url 'codex:volume_pdf' volume.slug %}" target="_blank" class="btn">Build PDF</a>
+    <a href="{% url 'codex:volume_pdf' volume.slug %}?print=1" target="_blank" class="btn btn-secondary" title="A4 + 3mm bleed + crop marks, RGB colour">Print-ready PDF</a>
+    <a href="{% url 'codex:volume_list' %}" class="btn btn-secondary">Back</a>
+    <form method="post" action="{% url 'codex:volume_delete' volume.slug %}" onsubmit="return confirm('Delete this volume? The underlying manuals are kept.');" style="margin-left:auto;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
+    </form>
+</div>
+
+<h2 style="font-size:0.95rem; color:#c9d1d9; margin-top:1.5rem;">Manuals in this volume</h2>
+{% if entries %}
+<ul class="entry-list">
+    {% for e in entries %}
+    <li class="entry-row">
+        <div class="order">{{ forloop.counter }}.</div>
+        <div>
+            <a href="{% url 'codex:manual_detail' e.manual.slug %}" class="title">{{ e.manual.title }}</a>
+            <div class="meta">{{ e.manual.section_count }} section{{ e.manual.section_count|pluralize }} · {{ e.manual.get_format_display }}</div>
+        </div>
+        <div class="meta">v{{ e.manual.version|default:"—" }}</div>
+        <form method="post" action="{% url 'codex:volume_remove_manual' volume.slug e.pk %}" onsubmit="return confirm('Remove from volume?');">
+            {% csrf_token %}
+            <button type="submit" class="remove">Remove</button>
+        </form>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p style="color:#8b949e;">No manuals bound into this volume yet.</p>
+{% endif %}
+
+{% if candidates %}
+<form method="post" action="{% url 'codex:volume_add_manual' volume.slug %}" class="add-form">
+    {% csrf_token %}
+    <select name="manual_id" required>
+        <option value="">— pick a manual to append —</option>
+        {% for m in candidates %}
+        <option value="{{ m.pk }}">{{ m.title }} ({{ m.get_format_display }})</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn">Append</button>
+</form>
+{% endif %}
+{% endblock %}

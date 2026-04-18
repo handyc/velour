@@ -6,11 +6,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
+from .importers import import_bytes, split_sections, supported_extensions
 from .models import (
     CAPTION_POSITION_CHOICES, FIGURE_KIND_CHOICES, FORMAT_CHOICES,
-    Figure, Manual, Section,
+    Figure, Manual, Section, Volume, VolumeManual,
 )
-from .rendering import render_manual_to_pdf
+from .rendering import render_manual_to_pdf, render_volume_to_pdf, wrap_print_ready
 
 
 # --- Manual CRUD ----------------------------------------------------------
@@ -21,7 +22,11 @@ def manual_list(request):
     return render(request, 'codex/list.html', {'manuals': manuals})
 
 
-_MANUAL_TEXT_FIELDS = ('title', 'subtitle', 'author', 'version', 'abstract')
+_MANUAL_TEXT_FIELDS = (
+    'title', 'subtitle', 'author', 'version', 'abstract',
+    'edition', 'isbn', 'doi', 'publisher', 'publisher_city',
+    'copyright_year', 'copyright_holder', 'license',
+)
 
 
 def _apply_manual_post(m, post):
@@ -29,6 +34,17 @@ def _apply_manual_post(m, post):
         setattr(m, f, post.get(f, '').strip())
     m.format = post.get('format', 'short')
     m.double_spaced = bool(post.get('double_spaced'))
+    m.bibliography = post.get('bibliography', '')
+    raw_date = post.get('publication_date', '').strip()
+    if raw_date:
+        from datetime import date
+        try:
+            y, mo, d = raw_date.split('-')
+            m.publication_date = date(int(y), int(mo), int(d))
+        except (ValueError, TypeError):
+            m.publication_date = None
+    else:
+        m.publication_date = None
 
 
 @login_required
@@ -74,6 +90,62 @@ def manual_delete(request, slug):
 
 
 @login_required
+def manual_import(request):
+    """Create a new Manual from an uploaded file or pasted text.
+
+    Sections are cut at H1/H2 boundaries in the converted markdown. A
+    chunk of content before the first heading becomes a leading
+    "Preamble" section. If the source has no headings at all, the
+    whole thing lands in one section named after the manual.
+    """
+    title = subtitle = pasted = ''
+    fmt = 'short'
+    if request.method == 'POST':
+        title    = request.POST.get('title', '').strip()
+        subtitle = request.POST.get('subtitle', '').strip()
+        fmt      = request.POST.get('format', 'short')
+        pasted   = request.POST.get('pasted', '')
+        upload   = request.FILES.get('source_file')
+
+        if not title:
+            messages.error(request, 'Title is required.')
+        elif not upload and not pasted.strip():
+            messages.error(request, 'Upload a file or paste some text.')
+        else:
+            try:
+                if upload:
+                    md = import_bytes(upload.read(), upload.name)
+                else:
+                    md = pasted
+            except (ValueError, ImportError, RuntimeError) as e:
+                messages.error(request, f'Import failed: {e}')
+                md = None
+
+            if md is not None:
+                m = Manual(title=title, subtitle=subtitle, format=fmt)
+                m.save()
+                pairs = split_sections(md) or [(None, md)]
+                for i, (sec_title, body) in enumerate(pairs):
+                    name = sec_title or ('Preamble' if i == 0 else m.title)
+                    Section.objects.create(
+                        manual=m, title=name[:200],
+                        body=body, sort_order=i * 10,
+                    )
+                messages.success(
+                    request,
+                    f'Imported "{m.title}" with {len(pairs)} section'
+                    f'{"" if len(pairs) == 1 else "s"}.',
+                )
+                return redirect('codex:manual_detail', slug=m.slug)
+
+    return render(request, 'codex/manual_import.html', {
+        'title': title, 'subtitle': subtitle, 'pasted': pasted,
+        'format': fmt, 'format_choices': FORMAT_CHOICES,
+        'extensions': supported_extensions(),
+    })
+
+
+@login_required
 def manual_detail(request, slug):
     m = get_object_or_404(Manual, slug=slug)
     return render(request, 'codex/detail.html', {
@@ -88,9 +160,23 @@ def manual_pdf(request, slug):
     pdf_bytes = render_manual_to_pdf(m)
     m.last_built_at = timezone.now()
     m.save(update_fields=['last_built_at'])
+    if request.GET.get('print') == '1':
+        bleed = _parse_bleed(request.GET.get('bleed'))
+        pdf_bytes = wrap_print_ready(pdf_bytes, bleed_mm=bleed)
+        filename = f'{m.slug}-print.pdf'
+    else:
+        filename = f'{m.slug}.pdf'
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'inline; filename="{m.slug}.pdf"'
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
     return response
+
+
+def _parse_bleed(raw):
+    try:
+        v = float(raw) if raw else 3.0
+    except (ValueError, TypeError):
+        return 3.0
+    return max(0.0, min(v, 10.0))
 
 
 # --- Section CRUD ---------------------------------------------------------
@@ -245,3 +331,131 @@ def figure_delete(request, manual_slug, section_slug, figure_slug):
     f.delete()
     messages.success(request, f'Removed figure "{slug}".')
     return redirect('codex:section_edit', manual_slug=m.slug, section_slug=s.slug)
+
+
+# --- Volume CRUD ----------------------------------------------------------
+
+_VOLUME_TEXT_FIELDS = ('title', 'subtitle', 'author', 'version', 'abstract')
+
+
+def _apply_volume_post(v, post):
+    for f in _VOLUME_TEXT_FIELDS:
+        setattr(v, f, post.get(f, '').strip())
+
+
+@login_required
+def volume_list(request):
+    return render(request, 'codex/volume_list.html', {
+        'volumes': Volume.objects.all(),
+    })
+
+
+@login_required
+def volume_add(request):
+    v = Volume()
+    if request.method == 'POST':
+        _apply_volume_post(v, request.POST)
+        if not v.title:
+            messages.error(request, 'Title is required.')
+        else:
+            v.save()
+            messages.success(request, f'Created Volume "{v.title}".')
+            return redirect('codex:volume_detail', slug=v.slug)
+    return render(request, 'codex/volume_form.html', {
+        'volume': v, 'action': 'New',
+    })
+
+
+@login_required
+def volume_edit(request, slug):
+    v = get_object_or_404(Volume, slug=slug)
+    if request.method == 'POST':
+        _apply_volume_post(v, request.POST)
+        if not v.title:
+            messages.error(request, 'Title is required.')
+        else:
+            v.save()
+            messages.success(request, f'Updated "{v.title}".')
+            return redirect('codex:volume_detail', slug=v.slug)
+    return render(request, 'codex/volume_form.html', {
+        'volume': v, 'action': 'Edit',
+    })
+
+
+@login_required
+@require_POST
+def volume_delete(request, slug):
+    v = get_object_or_404(Volume, slug=slug)
+    title = v.title
+    v.delete()
+    messages.success(request, f'Removed Volume "{title}".')
+    return redirect('codex:volume_list')
+
+
+@login_required
+def volume_detail(request, slug):
+    v = get_object_or_404(Volume, slug=slug)
+    entries = v.entries.select_related('manual').order_by('sort_order', 'pk')
+    # Manuals not yet in this volume (for the add picker).
+    in_ids = {e.manual_id for e in entries}
+    candidates = Manual.objects.exclude(pk__in=in_ids).order_by('title')
+    return render(request, 'codex/volume_detail.html', {
+        'volume': v, 'entries': entries, 'candidates': candidates,
+    })
+
+
+@login_required
+@require_POST
+def volume_add_manual(request, slug):
+    v = get_object_or_404(Volume, slug=slug)
+    manual_id = request.POST.get('manual_id')
+    m = get_object_or_404(Manual, pk=manual_id)
+    last = v.entries.order_by('-sort_order').first()
+    sort_order = (last.sort_order + 10) if last else 0
+    VolumeManual.objects.get_or_create(
+        volume=v, manual=m, defaults={'sort_order': sort_order},
+    )
+    messages.success(request, f'Added "{m.title}" to volume.')
+    return redirect('codex:volume_detail', slug=v.slug)
+
+
+@login_required
+@require_POST
+def volume_remove_manual(request, slug, entry_pk):
+    v = get_object_or_404(Volume, slug=slug)
+    entry = get_object_or_404(VolumeManual, pk=entry_pk, volume=v)
+    entry.delete()
+    messages.success(request, 'Removed from volume.')
+    return redirect('codex:volume_detail', slug=v.slug)
+
+
+@login_required
+@require_POST
+def volume_reorder(request, slug):
+    """Accepts a `order` POST field: CSV of VolumeManual PKs in new order."""
+    v = get_object_or_404(Volume, slug=slug)
+    raw = request.POST.get('order', '')
+    for i, pk in enumerate(p.strip() for p in raw.split(',') if p.strip()):
+        VolumeManual.objects.filter(volume=v, pk=pk).update(sort_order=i * 10)
+    messages.success(request, 'Reordered.')
+    return redirect('codex:volume_detail', slug=v.slug)
+
+
+@login_required
+def volume_pdf(request, slug):
+    v = get_object_or_404(Volume, slug=slug)
+    if not v.entries.exists():
+        messages.error(request, 'Add at least one manual before building.')
+        return redirect('codex:volume_detail', slug=v.slug)
+    pdf_bytes = render_volume_to_pdf(v)
+    v.last_built_at = timezone.now()
+    v.save(update_fields=['last_built_at'])
+    if request.GET.get('print') == '1':
+        bleed = _parse_bleed(request.GET.get('bleed'))
+        pdf_bytes = wrap_print_ready(pdf_bytes, bleed_mm=bleed)
+        filename = f'{v.slug}-print.pdf'
+    else:
+        filename = f'{v.slug}.pdf'
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{filename}"'
+    return response

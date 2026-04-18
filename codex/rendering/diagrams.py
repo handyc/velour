@@ -24,14 +24,19 @@ def _kroki_url():
 
 
 def render_diagram_to_png(source, kind='mermaid', timeout=15):
-    """POST diagram source to Kroki's `/<kind>/png` endpoint.
+    """Render a source-text diagram to PNG bytes.
 
-    `kind` is a canonical Kroki language name (mermaid, graphviz,
-    plantuml, d2, blockdiag, …). Returns PNG bytes, or None on any
-    error (network down, bad source, unsupported kind, timeout).
+    `kind='svg'` is handled locally via cairosvg — works offline and
+    keeps KiCad / Inkscape / hand-authored SVG schematics entirely
+    on-box. Every other kind goes to Kroki's `/<kind>/png` endpoint.
+
+    Returns PNG bytes, or None on any error (bad source, network
+    down, unsupported kind, timeout).
     """
     if not source or not source.strip():
         return None
+    if kind == 'svg':
+        return _render_svg_locally(source)
     try:
         req = urllib.request.Request(
             f'{_kroki_url()}/{kind}/png',
@@ -45,4 +50,20 @@ def render_diagram_to_png(source, kind='mermaid', timeout=15):
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read()
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        return None
+
+
+def _render_svg_locally(svg_text):
+    """Render a raw SVG string to PNG via cairosvg. The rasterisation
+    target is 2x scale so diagrams stay crisp at typical PDF dpi."""
+    try:
+        import cairosvg
+    except ImportError:
+        return None
+    try:
+        return cairosvg.svg2png(
+            bytestring=svg_text.encode('utf-8'),
+            scale=2.0,
+        )
+    except Exception:
         return None

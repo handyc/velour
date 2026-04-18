@@ -36,8 +36,9 @@ from pathlib import Path
 from django.conf import settings
 from fpdf import FPDF
 
+from ..bibliography import format_inline, format_reference, parse_bibtex
 from .charts import CHART_W, draw_chart
-from .markdown import parse
+from .markdown import parse, parse_inline
 from .sparklines import DEFAULT_H as SPARK_H
 from .sparklines import DEFAULT_W as SPARK_W
 from .sparklines import draw_sparkline
@@ -106,6 +107,12 @@ class TufteManualPDF(FPDF):
         # the next note can be placed below it instead of overlapping.
         self._next_sidenote_y = None
 
+        # Bibliography: parsed once up front; `_cited` records the keys
+        # touched by any [@key] runs so the References section only
+        # lists what was actually used.
+        self._bib = parse_bibtex(manual.bibliography) if manual.bibliography else {}
+        self._cited = []
+
     # --- footer override --------------------------------------------------
 
     def footer(self):
@@ -154,6 +161,71 @@ class TufteManualPDF(FPDF):
             self.multi_cell(BODY_W * 0.85, self.body_leading,
                             self.manual.abstract.strip())
 
+        self._is_title_page = False
+
+    def render_colophon(self):
+        """Emit a colophon page opposite the title (page 2).
+
+        Skipped entirely if no edition metadata is set — a plain
+        Quickstart manual shouldn't gain a mostly-blank copyright page.
+        """
+        m = self.manual
+        if not any([
+            m.edition, m.isbn, m.doi, m.publisher, m.publisher_city,
+            m.publication_date, m.copyright_year, m.copyright_holder,
+            m.license,
+        ]):
+            return
+
+        self._is_title_page = True  # suppress footer
+        self.add_page()
+        # Traditional copyright pages sit low on the verso. We match that.
+        self.set_y(A4_H - BOTTOM_MARGIN - 80)
+        self.set_font(FONT, '', 9)
+        self.set_text_color(*DARK_GRAY)
+
+        lines = []
+        if m.edition:
+            lines.append(m.edition)
+        if m.edition:
+            lines.append('')
+
+        holder = (m.copyright_holder or m.author or '').strip()
+        year = str(m.copyright_year or '').strip()
+        if year or holder:
+            bits = ['Copyright ©']
+            if year:
+                bits.append(year)
+            if holder:
+                bits.append(holder)
+            lines.append(' '.join(bits).rstrip(',. ') + '.')
+        if m.license:
+            lines.append(m.license)
+        if m.license or holder:
+            lines.append('')
+
+        if m.publisher:
+            pub = m.publisher
+            if m.publisher_city:
+                pub = f'{m.publisher_city}: {pub}'
+            lines.append(f'Published by {pub}.')
+        if m.isbn:
+            lines.append(f'ISBN {m.isbn}')
+        if m.doi:
+            lines.append(f'DOI {m.doi}')
+        if m.publication_date:
+            lines.append(m.publication_date.strftime('First published %-d %B %Y.'))
+        lines.append('')
+        lines.append('Typeset in ET Book with Codex.')
+
+        for ln in lines:
+            if ln:
+                self.multi_cell(BODY_W, 5, ln, align='L',
+                                new_x='LMARGIN', new_y='NEXT')
+            else:
+                self.ln(3)
+
+        self.set_text_color(*BLACK)
         self._is_title_page = False
 
     # --- block emitters ---------------------------------------------------
@@ -265,6 +337,18 @@ class TufteManualPDF(FPDF):
                 self.set_font(FONT, '', BODY_FONT_SIZE)
                 anchor_y = self._write_anchor(leading)
                 notes_in_para.append((anchor_y, self._note_counter, url))
+            elif tag == 'cite':
+                _, key, locator = run
+                entry = self._bib.get(key)
+                if entry:
+                    if key not in self._cited:
+                        self._cited.append(key)
+                    label = format_inline(entry, locator)
+                else:
+                    # Unknown key — render a visible hint so the author
+                    # notices, rather than swallowing the citation silently.
+                    label = f'(? {key})'
+                self._write_text_run('', label, leading)
         self.ln(leading)
         return notes_in_para
 
@@ -966,6 +1050,29 @@ class TufteManualPDF(FPDF):
         elif kind == 'blank':
             self.ln(self.body_leading * 0.3)
 
+    def render_references(self):
+        """Emit a References section listing every entry cited via [@key].
+
+        Entries are sorted by first-author surname + year. Unused entries
+        from the bibliography are not printed — this is a selective list,
+        not the raw .bib file dumped to paper.
+        """
+        if not self._cited:
+            return
+        self.add_page()
+        self.emit_h1('References')
+        entries = [(self._bib[k], k) for k in self._cited if k in self._bib]
+
+        def sort_key(pair):
+            e, _k = pair
+            authors = e.get('author') or e.get('editor') or [('', '', '')]
+            return (authors[0][0].lower(), e.get('year', ''))
+
+        entries.sort(key=sort_key)
+        for entry, _k in entries:
+            text = format_reference(entry)
+            self.emit_paragraph(parse_inline(text))
+
     def render_section(self, section):
         # Reset per-section sidenote state.
         self._note_counter = 0
@@ -991,10 +1098,12 @@ def render_manual_to_pdf(manual):
     """Build the PDF for a Manual and return its bytes."""
     pdf = TufteManualPDF(manual)
     pdf.render_title_page()
+    pdf.render_colophon()
     pdf.add_page()
     sections = manual.sections.all().order_by('sort_order', 'pk')
     for section in sections:
         pdf.render_section(section)
+    pdf.render_references()
     buf = BytesIO()
     pdf.output(buf)
     return buf.getvalue()

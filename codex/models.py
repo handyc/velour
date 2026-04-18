@@ -57,6 +57,37 @@ class Manual(models.Model):
                   'more readable in long form. Turn on for manuscript-style '
                   'output.',
     )
+    bibliography = models.TextField(
+        blank=True,
+        help_text='BibTeX source. Cite entries from section bodies with '
+                  '`[@key]` or `[@key, p. 42]`. Cited entries render in a '
+                  'References section at the end of the PDF.',
+    )
+
+    # Edition metadata — if any of these are set, a colophon page is
+    # inserted as page 2 (verso of the title page). All blank → no
+    # colophon, no change to the output.
+    edition = models.CharField(
+        max_length=80, blank=True,
+        help_text='e.g. "First edition" or "Second revised edition".',
+    )
+    isbn = models.CharField(max_length=20, blank=True)
+    doi  = models.CharField(max_length=120, blank=True)
+    publisher = models.CharField(max_length=200, blank=True)
+    publisher_city = models.CharField(max_length=120, blank=True)
+    publication_date = models.DateField(null=True, blank=True)
+    copyright_year = models.CharField(
+        max_length=16, blank=True,
+        help_text='Free text — typically a year or range like "2020–2026".',
+    )
+    copyright_holder = models.CharField(
+        max_length=200, blank=True,
+        help_text='Defaults to the manual\'s author if blank at render time.',
+    )
+    license = models.CharField(
+        max_length=200, blank=True,
+        help_text='e.g. "All rights reserved." or "CC BY-SA 4.0".',
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -150,6 +181,7 @@ class Section(models.Model):
 # nothing else (Figure.save dispatches uniformly).
 FIGURE_KIND_CHOICES = [
     ('image',       'Uploaded image (PNG/JPG/SVG)'),
+    ('svg',         'Raw SVG — paste / export from Inkscape, KiCad'),
     ('mermaid',     'Mermaid — flowcharts / sequences / state'),
     ('graphviz',    'Graphviz (DOT) — directed graphs, wiring'),
     ('plantuml',    'PlantUML — UML, sequence, architecture'),
@@ -227,6 +259,65 @@ class ReportRecipe(models.Model):
     @property
     def contributor_list(self):
         return [c.strip() for c in self.contributors.split(',') if c.strip()]
+
+
+class Volume(models.Model):
+    """A bound collection of Manuals rendered into one PDF.
+
+    Each VolumeManual row pins one Manual into the Volume with a
+    sort order. The Volume's PDF is produced by rendering each Manual
+    individually (via the usual Tufte renderer) and stitching the
+    resulting PDFs together with pypdf, prefixed by a Volume title
+    page + table of contents.
+    """
+
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    subtitle = models.CharField(max_length=300, blank=True)
+    author = models.CharField(max_length=200, default='Velour')
+    version = models.CharField(max_length=32, blank=True, default='0.1')
+    abstract = models.TextField(blank=True)
+    manuals = models.ManyToManyField(
+        'Manual', through='VolumeManual', related_name='volumes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_built_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['title']
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.title:
+            base = slugify(self.title)[:200] or 'volume'
+            candidate = base
+            n = 2
+            while Volume.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+
+class VolumeManual(models.Model):
+    volume = models.ForeignKey(Volume, on_delete=models.CASCADE, related_name='entries')
+    manual = models.ForeignKey(Manual, on_delete=models.CASCADE)
+    sort_order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['volume', 'manual'],
+                name='codex_unique_manual_per_volume',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.volume.title} / {self.manual.title}'
 
 
 class Figure(models.Model):

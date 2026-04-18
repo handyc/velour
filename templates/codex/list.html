@@ -26,6 +26,8 @@
 
 <div style="display:flex; gap:0.5rem; margin: 1rem 0;">
     <a href="{% url 'codex:manual_add' %}" class="btn">New Manual</a>
+    <a href="{% url 'codex:manual_import' %}" class="btn btn-secondary">Import Manuscript</a>
+    <a href="{% url 'codex:volume_list' %}" class="btn btn-secondary">Volumes</a>
 </div>
 
 {% if manuals %}

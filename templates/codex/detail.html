@@ -29,6 +29,7 @@
 
 <div style="display:flex; gap:0.5rem; margin: 1rem 0;">
     <a href="{% url 'codex:manual_pdf' manual.slug %}" target="_blank" class="btn">Render PDF</a>
+    <a href="{% url 'codex:manual_pdf' manual.slug %}?print=1" target="_blank" class="btn btn-secondary" title="A4 + 3mm bleed + crop marks, RGB colour (CMYK separation is your print shop's job)">Print-ready PDF</a>
     <a href="{% url 'codex:manual_edit' manual.slug %}" class="btn btn-secondary">Edit Manual</a>
     <a href="{% url 'codex:section_add' manual.slug %}" class="btn btn-secondary">New Section</a>
     <form method="post" action="{% url 'codex:manual_delete' manual.slug %}" style="display:inline;" onsubmit="return confirm('Delete manual {{ manual.title|escapejs }}?');">
