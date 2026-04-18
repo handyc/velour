@@ -34,6 +34,7 @@ urlpatterns = [
     path('<slug:slug>/enter/', views.world_enter, name='world_enter'),
     path('<slug:slug>/film/', views.world_film, name='world_film'),
     path('<slug:slug>/scene.json', views.world_scene_json, name='world_scene_json'),
+    path('<slug:slug>/visor.json', views.world_visor_json, name='world_visor_json'),
     path('<slug:slug>/entities/add/', views.entity_add, name='entity_add'),
     path('<slug:slug>/entities/<int:entity_pk>/scripts/add/',
          views.entity_script_add, name='entity_script_add'),

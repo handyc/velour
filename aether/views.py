@@ -493,6 +493,80 @@ def world_scene_json(request, slug):
     return JsonResponse(scene)
 
 
+# ---- Visor manifest -----------------------------------------------------
+# Curated subset of scene.json for the compiled native renderer that runs
+# on the Pi headgear node. Drops things the C/Rust renderer can't or won't
+# consume (JS script bodies, Grammar Engine language specs) and emits
+# absolute URLs so the Pi can fetch assets directly without URL-resolving.
+# The C side dispatches behavior tags to its own handlers — we never ship
+# code to the visor.
+
+def _abs(request, url):
+    if not url:
+        return ''
+    return request.build_absolute_uri(url)
+
+
+def world_visor_json(request, slug):
+    world = get_object_or_404(World, slug=slug)
+    if not world.published and not request.user.is_staff:
+        return JsonResponse({'error': 'not published'}, status=404)
+    entities = world.entities.filter(visible=True).select_related('asset', 'face')
+    portals = world.portals_out.select_related('to_world')
+
+    entity_behaviors = {}
+    for es in EntityScript.objects.filter(
+        entity__world=world, enabled=True
+    ).select_related('script'):
+        entity_behaviors.setdefault(es.entity_id, []).append(es.script.slug)
+
+    manifest = {
+        'world': {
+            'slug': world.slug,
+            'title': world.title,
+            'skybox': world.skybox,
+            'skyColor': world.sky_color,
+            'groundColor': world.ground_color,
+            'groundSize': world.ground_size,
+            'ambientLight': world.ambient_light,
+            'fogNear': world.fog_near,
+            'fogFar': world.fog_far,
+            'fogColor': world.fog_color,
+            'gravity': world.gravity,
+            'hdri': _abs(request, world.hdri_asset) if world.hdri_asset else '',
+        },
+        'spawn': [world.spawn_x, world.spawn_y, world.spawn_z],
+        'entities': [
+            {
+                'id': e.pk,
+                'name': e.name,
+                'mesh': _abs(request, e.asset.file.url) if e.asset and e.asset.file else '',
+                'meshType': e.asset.asset_type if e.asset else '',
+                'primitive': e.primitive or '',
+                'color': e.primitive_color,
+                'position': [e.pos_x, e.pos_y, e.pos_z],
+                'rotation': [e.rot_x, e.rot_y, e.rot_z],
+                'scale': [e.scale_x, e.scale_y, e.scale_z],
+                'behavior': e.behavior,
+                'behaviorSpeed': e.behavior_speed,
+                'behaviorTags': entity_behaviors.get(e.pk, []),
+            }
+            for e in entities
+        ],
+        'portals': [
+            {
+                'label': p.label or p.to_world.title,
+                'targetSlug': p.to_world.slug,
+                'manifest': _abs(request, f'/aether/{p.to_world.slug}/visor.json'),
+                'position': [p.pos_x, p.pos_y, p.pos_z],
+                'size': [p.width, p.height],
+            }
+            for p in portals
+        ],
+    }
+    return JsonResponse(manifest)
+
+
 # -----------------------------------------------------------------------
 # Object Library
 # -----------------------------------------------------------------------
