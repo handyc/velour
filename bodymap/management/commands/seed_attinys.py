@@ -125,6 +125,17 @@ TEMPLATES = [
      'wait for B before advancing. 256 LUTs on one pot — a very dense '
      'exploration space for reconfigurable glue logic.'),
 
+    ('softuart_tx_13a', 'Soft-UART TX (13a)', 'attiny13a',
+     'Bit-banged UART TX at 1200 baud — streams an ADC reading to the ESP32.',
+     'PB0 = TX (wire to ESP32 softuart RX pin), PB3 = signal in (ADC3).',
+     'Companion to the ESP32\'s attiny_softuart sensor kind. Since the '
+     '\'13a has no hardware UART, we time the bits in software: 833 µs '
+     'each at F_CPU=1.2 MHz. Every ~100 ms the chip emits a 3-byte '
+     'frame (0xA5, hi, lo) containing the ADC3 reading promoted to '
+     '16 bits. On the ESP32 side HardwareSerial UART1/UART2 handles '
+     'the receive, so timing tolerance is wide even if the \'13a\'s '
+     'clock drifts a percent or two. Flash footprint: ~250 bytes.'),
+
     ('ca_rule_13a', 'Cellular automaton rule (13a)', 'attiny13a',
      'Wolfram-style 3→1 elementary CA cell — pot picks one of 256 rules (Rule 30, 90, 110, …).',
      'PB0 = C_new out, PB1 = L in, PB2 = rule pot (ADC1), PB3 = C in, PB4 = R in.',

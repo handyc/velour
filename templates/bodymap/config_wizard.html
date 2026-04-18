@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block title %}Config · {{ node.nickname }} — Bodymap{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cfg-lede { color: #8b949e; max-width: 52rem; }
+    .cfg-meta { color: #6e7681; font-family: ui-monospace, Menlo, monospace;
+                font-size: 0.78rem; margin-top: 0.2rem; }
+    .cfg-row { display: grid; grid-template-columns: 11rem 9rem 1fr 2.4rem;
+               gap: 0.5rem; align-items: start;
+               padding: 0.6rem 0.8rem; border: 1px solid #21262d;
+               border-radius: 6px; margin-top: 0.5rem;
+               background: rgba(22, 27, 34, 0.55); }
+    .cfg-row label { display: block; color: #8b949e;
+                     font-size: 0.7rem; text-transform: uppercase;
+                     letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+    .cfg-row input, .cfg-row select, .cfg-row textarea {
+        width: 100%; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.3rem 0.5rem; font-size: 0.85rem;
+        font-family: ui-monospace, Menlo, monospace; box-sizing: border-box;
+    }
+    .cfg-row input:focus, .cfg-row select:focus { outline: 1px solid #58a6ff; }
+    .cfg-fields { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .cfg-field { flex: 1 1 7rem; min-width: 0; }
+    .cfg-drop { background: transparent; border: none; color: #f85149;
+                cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0; }
+    .cfg-drop:hover { color: #ff7b72; }
+    .cfg-actions { margin-top: 1rem; display: flex; gap: 0.5rem; }
+    .cfg-btn { padding: 0.4rem 0.9rem; border-radius: 6px; border: none;
+               cursor: pointer; font-size: 0.85rem; font-family: inherit; }
+    .cfg-btn.primary { background: #238636; color: #fff; }
+    .cfg-btn.primary:hover { background: #2ea043; }
+    .cfg-btn.ghost { background: #21262d; color: #c9d1d9;
+                     border: 1px solid #30363d; }
+    .cfg-btn.ghost:hover { background: #30363d; }
+    .cfg-flash { margin-top: 0.8rem; padding: 0.5rem 0.8rem; border-radius: 6px;
+                 font-size: 0.85rem; }
+    .cfg-flash.ok  { background: rgba(46, 160, 67, 0.12); color: #2ea043;
+                     border: 1px solid rgba(46, 160, 67, 0.3); }
+    .cfg-flash.err { background: rgba(248, 81, 73, 0.12); color: #f85149;
+                     border: 1px solid rgba(248, 81, 73, 0.3); }
+    .cfg-empty { color: #6e7681; margin: 1rem 0; font-style: italic; }
+    .cfg-notes { margin-top: 1.2rem; max-width: 52rem; }
+    .cfg-notes textarea { min-height: 5rem; width: 100%; }
+    .cfg-kind-hint { color: #6e7681; font-size: 0.72rem;
+                     font-family: ui-monospace, Menlo, monospace;
+                     margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Sensor config · {{ node.nickname }}</h1>
+<p class="cfg-lede">
+    What this node samples on every report tick. The firmware fetches
+    this list from <code>/bodymap/api/config/{{ node.slug }}/</code> at
+    boot, caches it to LittleFS, and pushes one reading per channel into
+    the telemetry batch. Edits apply on the node's next boot or
+    re-provision.
+</p>
+<p class="cfg-meta">
+    slug {{ node.slug }}
+    {% if node.hardware_profile %} · hardware {{ node.hardware_profile.name }}{% endif %}
+    {% if cfg.updated_at %} · last edited {{ cfg.updated_at|date:"Y-m-d H:i" }}{% endif %}
+</p>
+
+{% if saved %}
+<div class="cfg-flash ok">Saved {{ channels|length }} channel(s).</div>
+{% endif %}
+{% if errors %}
+<div class="cfg-flash err">
+    {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<form method="post" id="cfg-form">
+    {% csrf_token %}
+
+    <div id="cfg-rows">
+        {% for ch in channels %}
+            {% include "bodymap/_config_row.html" with ch=ch %}
+        {% endfor %}
+    </div>
+
+    {% if not channels %}
+    <p class="cfg-empty">No channels yet — click <em>Add channel</em> below.</p>
+    {% endif %}
+
+    <div class="cfg-notes">
+        <label for="cfg-notes" style="color:#8b949e;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;">Notes</label>
+        <textarea id="cfg-notes" name="notes" placeholder="What is soldered where, which ATtiny design sits at which I2C address, etc.">{{ cfg.notes }}</textarea>
+    </div>
+
+    <div class="cfg-actions">
+        <button type="button" class="cfg-btn ghost" id="cfg-add">Add channel</button>
+        <button type="submit" class="cfg-btn primary">Save config</button>
+        <a href="{% url 'nodes:detail' node.slug %}" class="cfg-btn ghost" style="text-decoration:none;display:inline-block;">Back to node</a>
+    </div>
+</form>
+
+{# Hidden row template — cloned by JS on "Add channel". Using a #}
+{# <template> block keeps the inner <input>/<select> elements inert #}
+{# so they don't get submitted by the surrounding form. #}
+<template id="cfg-row-template">
+    {% include "bodymap/_config_row.html" with ch=None %}
+</template>
+
+<script>
+(function () {
+    // Mirror of _CHANNEL_KINDS in bodymap/views.py. If you add a sensor
+    // kind to the firmware, update this list + the Python one together
+    // — the template renders every possible field, JS toggles which
+    // are visible per row, and Python validates them on POST.
+    const KINDS = {
+        digital:         ['pin', 'pull', 'active_low'],
+        analog:          ['pin', 'scale', 'offset', 'avg'],
+        attiny_i2c:      ['addr', 'bytes', 'scale', 'offset'],
+        attiny_pwm:      ['pin', 'timeout_us'],
+        attiny_softuart: ['pin', 'baud'],
+    };
+
+    const rowsContainer = document.getElementById('cfg-rows');
+    const addBtn = document.getElementById('cfg-add');
+    const tpl = document.getElementById('cfg-row-template');
+
+    // Show/hide kind-specific fields on a single row based on the
+    // row's current kind <select> value.
+    function applyKindVisibility(row) {
+        const kind = row.querySelector('.cfg-kind').value;
+        const activeFields = KINDS[kind] || [];
+        row.querySelectorAll('[data-field]').forEach(el => {
+            const f = el.getAttribute('data-field');
+            el.style.display = activeFields.includes(f) ? '' : 'none';
+            // Hidden fields still submit, but values are ignored by
+            // the server because _normalise_channel() only reads keys
+            // relevant to `kind`. Blank them defensively anyway so the
+            // form state matches what's visible.
+            if (!activeFields.includes(f)) {
+                const input = el.querySelector('input, select');
+                if (input && input.type !== 'hidden') {
+                    // Leave the value; we'll re-read if kind changes back.
+                }
+            }
+        });
+        const hint = row.querySelector('.cfg-kind-hint');
+        if (hint) hint.textContent = activeFields.join(' · ');
+    }
+
+    function wireRow(row) {
+        applyKindVisibility(row);
+        row.querySelector('.cfg-kind').addEventListener('change', () => {
+            applyKindVisibility(row);
+        });
+        const drop = row.querySelector('.cfg-drop');
+        if (drop) drop.addEventListener('click', () => {
+            row.remove();
+        });
+    }
+
+    // Initial wiring for server-rendered rows.
+    document.querySelectorAll('.cfg-row').forEach(wireRow);
+
+    addBtn.addEventListener('click', () => {
+        // Clone out of the <template> element so nested inputs exist
+        // in the DOM but haven't been part of the form until now.
+        const clone = tpl.content.firstElementChild.cloneNode(true);
+        rowsContainer.appendChild(clone);
+        wireRow(clone);
+        // Jump focus to the channel name of the new row.
+        const nameInput = clone.querySelector('input[name="channel"]');
+        if (nameInput) nameInput.focus();
+    });
+})();
+</script>
+{% endblock %}

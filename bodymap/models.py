@@ -66,6 +66,56 @@ class Segment(models.Model):
         return f'{self.node.slug} → {self.get_role_display()}'
 
 
+class NodeSensorConfig(models.Model):
+    """Per-node list of sensor channels the firmware should sample and
+    report. Served by `GET /bodymap/api/config/<slug>/` and cached on the
+    node's LittleFS so a reboot without server access still comes up with
+    the last known config.
+
+    `channels` is a JSON list of dicts, each describing one channel. A
+    missing or empty config means "sample nothing beyond the built-in
+    heartbeat / mesh channels". Example:
+
+    [
+      {"channel": "flex_inner",  "kind": "analog",   "pin": 1,
+       "scale": 0.000244, "offset": 0.0},
+      {"channel": "button",      "kind": "digital",  "pin": 3,
+       "pull": "up", "active_low": true},
+      {"channel": "skin_temp",   "kind": "attiny_i2c",
+       "addr": 8,  "bytes": 2, "scale": 0.01},
+      {"channel": "env_level",   "kind": "attiny_pwm", "pin": 5},
+      {"channel": "flex_outer",  "kind": "attiny_softuart",
+       "pin": 7, "baud": 1200}
+    ]
+
+    The firmware re-fetches config at boot and on demand; operator edits
+    propagate on the next reboot (or OTA cycle). Keep it small — every
+    entry costs heap + one reading slot per report tick, and
+    VELOUR_MAX_READINGS caps the batch at 16.
+    """
+
+    node = models.OneToOneField(
+        Node, on_delete=models.CASCADE, related_name='bodymap_sensor_config',
+    )
+    channels = models.JSONField(
+        default=list, blank=True,
+        help_text='List of {channel, kind, ...} dicts. See class docstring '
+                  'for supported kinds and their params.',
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text='Free-text operator notes — what is soldered where, '
+                  'which ATtiny design sits at which I2C address, etc.',
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['node__slug']
+
+    def __str__(self):
+        return f'{self.node.slug} ({len(self.channels or [])} channels)'
+
+
 class LinkObservation(models.Model):
     """One row per (reporter, peer_mac) per report cycle.
 

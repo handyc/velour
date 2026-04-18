@@ -405,6 +405,66 @@ VelourClient::RegisterResult VelourClient::registerSelf(
 }
 
 
+bool VelourClient::fetchSensorConfig(String& out) {
+    out = String();
+
+    auto loadCached = [&]() -> bool {
+        if (!_ensureFs()) return false;
+        if (!LittleFS.exists(VELOUR_SENSOR_CONFIG_PATH)) return false;
+        File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "r");
+        if (!f) return false;
+        while (f.available()) out += (char)f.read();
+        f.close();
+        return out.length() > 0;
+    };
+
+    if (!hasIdentity() || WiFi.status() != WL_CONNECTED) {
+        return loadCached();
+    }
+
+    String url = _effectiveBase();
+    while (url.endsWith("/")) url.remove(url.length() - 1);
+    url += "/bodymap/api/config/";
+    url += _slug;
+    url += "/";
+
+    HTTPClient http;
+#if defined(ESP32)
+    if (!http.begin(url)) return loadCached();
+#elif defined(ESP8266)
+    WiFiClient client;
+    if (!http.begin(client, url)) return loadCached();
+#endif
+
+    String auth = "Bearer ";
+    auth += _apiToken;
+    http.addHeader("Authorization", auth);
+    http.setUserAgent("velour-node/1");
+    http.setTimeout(10000);
+
+    int status = http.GET();
+    String body = (status == 200) ? http.getString() : String();
+    http.end();
+
+    if (status != 200 || body.length() == 0) {
+        return loadCached();
+    }
+
+    out = body;
+
+    // Best-effort cache write. Failure here isn't fatal — we already
+    // have the live response to hand back to the caller.
+    if (_ensureFs()) {
+        File f = LittleFS.open(VELOUR_SENSOR_CONFIG_PATH, "w");
+        if (f) {
+            f.print(body);
+            f.close();
+        }
+    }
+    return true;
+}
+
+
 // Default candidate ports — same list as smart_runserver on the server.
 #ifndef VELOUR_DISCOVER_PORTS
 #define VELOUR_DISCOVER_PORTS {7777, 7778, 7779, 8000, 8080, 8888}

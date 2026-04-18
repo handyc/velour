@@ -13,12 +13,14 @@
 #include "motion_buffer.h"
 #include "motion_net.h"
 #include "motion_cluster.h"
+#include "sensors.h"
 
 static VelourClient velour(VELOUR_BASE_URL);
 static GY95T imu;
 static MotionBuffer motion;
 static MotionNet net;
 static MotionCluster cluster;
+static SensorRegistry sensors;
 
 // IMU sampling target — matches GY-95T's advertised 100 Hz native rate.
 // Clustering math wants consistent cadence, not raw speed, so locking
@@ -131,6 +133,20 @@ void setup() {
     // TODO: wire up the GY-95T once it's soldered. Until then imu.update()
     // is a no-op and no readings flow through the loop below.
     // imu.begin(Serial1, 115200);
+
+    // Per-node sensor layout comes from the server's bodymap app
+    // (NodeSensorConfig.channels). fetchSensorConfig() also caches the
+    // response to LittleFS, so on the next boot we can come up with the
+    // last known layout even if the server is unreachable.
+    String configJson;
+    if (velour.fetchSensorConfig(configJson)) {
+        int n = sensors.loadFromJson(configJson);
+        Serial.print("[sensors] loaded ");
+        Serial.print(n);
+        Serial.println(" channel(s) from config");
+    } else {
+        Serial.println("[sensors] no config available (server + cache both empty)");
+    }
 }
 
 void loop() {
@@ -183,6 +199,10 @@ void loop() {
         const PeerLink* top = cluster.strongestLink();
         velour.addReading("top_rho",       top ? top->linkStrength : 0.0f);
         velour.addReading("n_strong_links", (float)cluster.strongLinkCount());
+
+        // Server-configured per-node channels (digital/analog/ATtiny
+        // peripherals). No-op if the config was empty or couldn't load.
+        sensors.sampleAll(velour);
 
         int status = velour.report();
         Serial.print("[velour] report -> ");

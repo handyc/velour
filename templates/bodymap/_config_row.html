@@ -1,0 +1,79 @@
+{# One channel row. Included by config_wizard.html for both server-rendered  #}
+{# existing channels and (via <template>) the client-side "Add channel"     #}
+{# clone. `ch` is either a dict from NodeSensorConfig.channels or None.     #}
+{# All fields render every time; the page's JS hides irrelevant ones based #}
+{# on the row's current kind <select>.                                     #}
+<div class="cfg-row">
+    <div>
+        <label>Kind</label>
+        <select name="kind" class="cfg-kind">
+            <option value="digital"         {% if ch.kind == 'digital' %}selected{% endif %}>digital</option>
+            <option value="analog"          {% if ch.kind == 'analog' or not ch %}selected{% endif %}>analog</option>
+            <option value="attiny_i2c"      {% if ch.kind == 'attiny_i2c' %}selected{% endif %}>attiny_i2c</option>
+            <option value="attiny_pwm"      {% if ch.kind == 'attiny_pwm' %}selected{% endif %}>attiny_pwm</option>
+            <option value="attiny_softuart" {% if ch.kind == 'attiny_softuart' %}selected{% endif %}>attiny_softuart</option>
+        </select>
+        <div class="cfg-kind-hint"></div>
+    </div>
+
+    <div>
+        <label>Channel</label>
+        <input type="text" name="channel" value="{{ ch.channel|default_if_none:'' }}"
+               placeholder="flex_inner" required>
+    </div>
+
+    <div class="cfg-fields">
+        <div class="cfg-field" data-field="pin">
+            <label>Pin</label>
+            <input type="number" name="pin" value="{{ ch.pin|default_if_none:'' }}" min="0" max="48" placeholder="GPIO">
+        </div>
+        <div class="cfg-field" data-field="pull">
+            <label>Pull</label>
+            <select name="pull">
+                <option value=""      {% if not ch.pull %}selected{% endif %}>—</option>
+                <option value="up"    {% if ch.pull == 'up' %}selected{% endif %}>up</option>
+                <option value="down"  {% if ch.pull == 'down' %}selected{% endif %}>down</option>
+            </select>
+        </div>
+        <div class="cfg-field" data-field="active_low">
+            <label>Active low</label>
+            <select name="active_low">
+                <option value="0" {% if not ch.active_low %}selected{% endif %}>no</option>
+                <option value="1" {% if ch.active_low %}selected{% endif %}>yes</option>
+            </select>
+        </div>
+        <div class="cfg-field" data-field="scale">
+            <label>Scale</label>
+            <input type="text" name="scale" value="{{ ch.scale|default_if_none:'' }}" placeholder="1.0">
+        </div>
+        <div class="cfg-field" data-field="offset">
+            <label>Offset</label>
+            <input type="text" name="offset" value="{{ ch.offset|default_if_none:'' }}" placeholder="0.0">
+        </div>
+        <div class="cfg-field" data-field="avg">
+            <label>Avg</label>
+            <input type="number" name="avg" value="{{ ch.avg|default_if_none:'' }}" min="1" max="256" placeholder="1">
+        </div>
+        <div class="cfg-field" data-field="addr">
+            <label>I2C addr</label>
+            <input type="number" name="addr" value="{{ ch.addr|default_if_none:'' }}" min="1" max="127" placeholder="8">
+        </div>
+        <div class="cfg-field" data-field="bytes">
+            <label>Bytes</label>
+            <input type="number" name="bytes" value="{{ ch.bytes|default_if_none:'' }}" min="1" max="4" placeholder="2">
+        </div>
+        <div class="cfg-field" data-field="timeout_us">
+            <label>Timeout µs</label>
+            <input type="number" name="timeout_us" value="{{ ch.timeout_us|default_if_none:'' }}" min="100" max="1000000" placeholder="50000">
+        </div>
+        <div class="cfg-field" data-field="baud">
+            <label>Baud</label>
+            <input type="number" name="baud" value="{{ ch.baud|default_if_none:'' }}" min="300" max="115200" placeholder="1200">
+        </div>
+    </div>
+
+    <div>
+        <label>&nbsp;</label>
+        <button type="button" class="cfg-drop" title="Remove">×</button>
+    </div>
+</div>

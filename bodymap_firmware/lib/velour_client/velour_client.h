@@ -84,6 +84,13 @@
 #define VELOUR_CREDS_PATH "/velour_creds.txt"
 #endif
 
+// Path on LittleFS where fetchSensorConfig() caches the last successful
+// response. Used on boot when the server is unreachable so the node
+// still comes up with its previously-known channel layout.
+#ifndef VELOUR_SENSOR_CONFIG_PATH
+#define VELOUR_SENSOR_CONFIG_PATH "/sensor_config.json"
+#endif
+
 struct VelourReading {
     const char* channel;
     float value;
@@ -205,6 +212,15 @@ public:
 
     // The base URL currently in use (after discover() may have changed it).
     const char* baseUrl() const { return _resolvedUrl.length() ? _resolvedUrl.c_str() : _baseUrl; }
+
+    // Fetch /bodymap/api/config/<slug>/ — the per-node sensor channel
+    // list served by the Velour bodymap app. On success the response is
+    // written into `out` and cached to LittleFS at VELOUR_SENSOR_CONFIG_PATH.
+    // On failure (no WiFi, HTTP error, no identity) the cached copy is
+    // loaded instead if one exists, so the node still comes up with its
+    // last known channel layout. Returns true when `out` has been
+    // populated either from the server or the cache.
+    bool fetchSensorConfig(String& out);
 
 private:
     const char* _baseUrl;

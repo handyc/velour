@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import AttinyDesign, AttinyTemplate, LinkObservation, Segment
+from .models import (
+    AttinyDesign, AttinyTemplate, LinkObservation, NodeSensorConfig, Segment,
+)
 
 
 @admin.register(Segment)
@@ -12,6 +14,18 @@ class SegmentAdmin(admin.ModelAdmin):
     search_fields = ('node__slug', 'node__nickname')
     readonly_fields = ('assigned_at',)
     autocomplete_fields = ('node', 'experiment')
+
+
+@admin.register(NodeSensorConfig)
+class NodeSensorConfigAdmin(admin.ModelAdmin):
+    list_display  = ('node', 'channel_count', 'updated_at')
+    search_fields = ('node__slug', 'node__nickname', 'notes')
+    autocomplete_fields = ('node',)
+    readonly_fields = ('updated_at',)
+
+    @admin.display(description='# channels')
+    def channel_count(self, obj):
+        return len(obj.channels or [])
 
 
 @admin.register(LinkObservation)

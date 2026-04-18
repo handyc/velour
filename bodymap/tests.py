@@ -14,7 +14,7 @@ from django.urls import reverse
 from experiments.models import Experiment
 from nodes.models import HardwareProfile, Node
 
-from .models import Segment
+from .models import NodeSensorConfig, Segment
 
 
 class ApiReportSegmentTests(TestCase):
@@ -197,3 +197,182 @@ class BodymapViewTests(TestCase):
         resp = self.client.get(reverse('bodymap:list'))
         # login_required redirects to /accounts/login/?next=...
         self.assertEqual(resp.status_code, 302)
+
+
+class ConfigWizardTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='op', password='pw')
+        self.client.force_login(self.user)
+
+        self.profile = HardwareProfile.objects.create(
+            name='Bodymap Node v1', mcu='esp32s3',
+        )
+        self.node = Node.objects.create(
+            nickname='bodymap-aabbcc',
+            mac_address='AA:BB:CC:DD:EE:03',
+            hardware_profile=self.profile,
+        )
+        self.url = reverse('bodymap:node_config',
+                           kwargs={'slug': self.node.slug})
+
+    def test_get_renders_empty_form_for_new_node(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'No channels yet')
+
+    def test_post_saves_analog_and_digital_rows(self):
+        resp = self.client.post(self.url, data={
+            'kind':       ['analog',   'digital'],
+            'channel':    ['flex',     'tap'],
+            'pin':        ['1',        '3'],
+            'pull':       ['',         'up'],
+            'active_low': ['0',        '1'],
+            'scale':      ['0.000244', ''],
+            'offset':     ['',         ''],
+            'avg':        ['4',        ''],
+            'addr':       ['',         ''],
+            'bytes':      ['',         ''],
+            'timeout_us': ['',         ''],
+            'baud':       ['',         ''],
+            'notes':      'left forearm test rig',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Saved 2 channel(s)')
+
+        cfg = NodeSensorConfig.objects.get(node=self.node)
+        self.assertEqual(cfg.notes, 'left forearm test rig')
+        self.assertEqual(len(cfg.channels), 2)
+        flex, tap = cfg.channels
+        self.assertEqual(flex['kind'], 'analog')
+        self.assertEqual(flex['pin'], 1)
+        self.assertAlmostEqual(flex['scale'], 0.000244)
+        self.assertEqual(flex['avg'], 4)
+        self.assertNotIn('pull', flex)   # not relevant to analog
+        self.assertEqual(tap['kind'], 'digital')
+        self.assertEqual(tap['pin'], 3)
+        self.assertEqual(tap['pull'], 'up')
+        self.assertTrue(tap['active_low'])
+
+    def test_post_rejects_duplicate_channel_names(self):
+        resp = self.client.post(self.url, data={
+            'kind':       ['analog',   'analog'],
+            'channel':    ['dup',      'dup'],
+            'pin':        ['1',        '2'],
+            'pull':       ['',         ''],
+            'active_low': ['0',        '0'],
+            'scale':      ['',         ''],
+            'offset':     ['',         ''],
+            'avg':        ['',         ''],
+            'addr':       ['',         ''],
+            'bytes':      ['',         ''],
+            'timeout_us': ['',         ''],
+            'baud':       ['',         ''],
+            'notes':      '',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'duplicate channel name')
+        # Nothing written because the POST had errors.
+        self.assertFalse(
+            NodeSensorConfig.objects.filter(node=self.node,
+                                            channels__len=2).exists()
+        )
+
+    def test_post_strips_irrelevant_fields_per_kind(self):
+        # i2c row: pull/active_low/avg/pin should be dropped.
+        resp = self.client.post(self.url, data={
+            'kind':       ['attiny_i2c'],
+            'channel':    ['skin_temp'],
+            'pin':        ['99'],         # should be ignored for i2c
+            'pull':       ['up'],         # ignored
+            'active_low': ['1'],          # ignored
+            'scale':      ['0.01'],
+            'offset':     ['0.0'],
+            'avg':        ['8'],          # ignored
+            'addr':       ['8'],
+            'bytes':      ['2'],
+            'timeout_us': [''],
+            'baud':       [''],
+            'notes':      '',
+        })
+        self.assertEqual(resp.status_code, 200)
+        cfg = NodeSensorConfig.objects.get(node=self.node)
+        self.assertEqual(len(cfg.channels), 1)
+        e = cfg.channels[0]
+        self.assertEqual(e['kind'], 'attiny_i2c')
+        self.assertEqual(e['addr'], 8)
+        self.assertEqual(e['bytes'], 2)
+        self.assertNotIn('pin', e)
+        self.assertNotIn('pull', e)
+        self.assertNotIn('avg', e)
+
+    def test_wizard_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+
+
+class ApiNodeConfigTests(TestCase):
+
+    def setUp(self):
+        self.profile = HardwareProfile.objects.create(
+            name='Bodymap Node v1', mcu='esp32s3',
+        )
+        self.experiment = Experiment.objects.create(
+            name='Bodymap', slug='bodymap',
+        )
+        self.node = Node.objects.create(
+            nickname='bodymap-aabbcc',
+            mac_address='AA:BB:CC:DD:EE:02',
+            hardware_profile=self.profile,
+            experiment=self.experiment,
+        )
+
+    def _get(self, token=None):
+        token = self.node.api_token if token is None else token
+        return self.client.get(
+            reverse('bodymap:api_config', kwargs={'slug': self.node.slug}),
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+
+    def test_returns_empty_when_no_config_row(self):
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['slug'], self.node.slug)
+        self.assertEqual(data['channels'], [])
+
+    def test_returns_configured_channels(self):
+        NodeSensorConfig.objects.create(
+            node=self.node,
+            channels=[
+                {'channel': 'flex', 'kind': 'analog', 'pin': 1,
+                 'scale': 0.000244, 'offset': 0.0},
+                {'channel': 'tap',  'kind': 'digital', 'pin': 3,
+                 'pull': 'up', 'active_low': True},
+            ],
+        )
+        resp = self._get()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data['channels']), 2)
+        self.assertEqual(data['channels'][0]['kind'], 'analog')
+
+    def test_rejects_bad_token(self):
+        resp = self._get(token='nope')
+        self.assertEqual(resp.status_code, 401)
+
+    def test_404_for_unknown_slug(self):
+        resp = self.client.get(
+            reverse('bodymap:api_config', kwargs={'slug': 'no-such-node'}),
+            HTTP_AUTHORIZATION=f'Bearer {self.node.api_token}',
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_rejects_post(self):
+        resp = self.client.post(
+            reverse('bodymap:api_config', kwargs={'slug': self.node.slug}),
+            HTTP_AUTHORIZATION=f'Bearer {self.node.api_token}',
+        )
+        self.assertEqual(resp.status_code, 405)
