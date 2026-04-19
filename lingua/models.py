@@ -141,13 +141,26 @@ class UserLanguagePreference(models.Model):
 LEITNER_INTERVAL_DAYS = [0, 1, 2, 4, 8, 16, 32]
 
 
-class FlashCard(models.Model):
-    """One word the user is learning, stored per-user.
+LEVEL_CHOICES = [
+    ('word',     'Single word'),
+    ('phrase',   'Phrase'),
+    ('sentence', 'Full sentence'),
+]
 
-    `lemma` holds the word in the target language (what the user is
+
+class FlashCard(models.Model):
+    """One word/phrase/sentence the user is learning, stored per-user.
+
+    `lemma` holds the string in the target language (what the user is
     trying to recognise). `gloss` holds the meaning in `source_lang`
     (usually English). `lingua_build_deck` populates `lemma` by running
-    a bundled source-language frequency list through the translator.
+    a bundled source-language wordlist through the translator.
+
+    Cards cluster into decks via `(language, theme, level)`. `theme` is
+    a slug like `body_parts` or empty (the general frequency deck).
+    `level` distinguishes single words from phrases from full sentences,
+    so the UI can render them differently (longer content gets smaller
+    type and smarter wrapping).
 
     Per-user so two people sharing a Velour deploy can progress at
     their own pace and mark different cards as known.
@@ -161,9 +174,9 @@ class FlashCard(models.Model):
                         related_name='flashcards',
                         help_text='Target language — the one being learned.')
     source_lang   = models.CharField(max_length=16, default='en')
-    lemma         = models.CharField(max_length=200,
-                        help_text='Word in the target language.')
-    pronunciation = models.CharField(max_length=200, blank=True,
+    lemma         = models.CharField(max_length=400,
+                        help_text='Word/phrase/sentence in the target language.')
+    pronunciation = models.CharField(max_length=400, blank=True,
                         help_text='Romanisation / transliteration (e.g. pinyin for zh, romaji for ja).')
     gloss         = models.CharField(max_length=400, blank=True,
                         help_text='Meaning in source_lang (usually English).')
@@ -173,6 +186,11 @@ class FlashCard(models.Model):
                         help_text='Rank in the source frequency list (1 = most common).')
     backend       = models.CharField(max_length=32, blank=True,
                         help_text='Which adapter produced the translation.')
+    theme         = models.CharField(max_length=60, blank=True, default='',
+                        help_text='Theme slug, e.g. "body_parts". Empty = general deck.')
+    level         = models.CharField(max_length=16, default='word',
+                        choices=LEVEL_CHOICES,
+                        help_text='word / phrase / sentence — controls rendering.')
 
     leitner_box   = models.PositiveSmallIntegerField(default=0)
     due_at        = models.DateTimeField(default=djtz.now)
@@ -184,8 +202,13 @@ class FlashCard(models.Model):
     updated_at    = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [('user', 'language', 'gloss', 'source_lang')]
-        indexes = [models.Index(fields=['user', 'language', 'due_at'])]
+        unique_together = [
+            ('user', 'language', 'gloss', 'source_lang', 'theme', 'level'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'language', 'due_at']),
+            models.Index(fields=['user', 'language', 'theme', 'level']),
+        ]
         ordering = ['due_at', 'freq_rank']
 
     def __str__(self):

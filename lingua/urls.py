@@ -9,6 +9,9 @@ urlpatterns = [
     path('translate/',               views.translate,       name='translate'),
     path('bootstrap/',               views.bootstrap,       name='bootstrap'),
     path('flashcards/',              views.flashcards,      name='flashcards'),
-    path('flashcards/study/<str:lang>/', views.study,       name='study'),
+    path('flashcards/study/<str:lang>/',
+         views.study, name='study'),
+    path('flashcards/study/<str:lang>/<str:theme>/<str:level>/',
+         views.study, name='study_theme'),
     path('flashcards/grade/',        views.grade,           name='grade'),
 ]

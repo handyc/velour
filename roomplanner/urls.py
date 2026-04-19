@@ -54,6 +54,14 @@ urlpatterns = [
     path('building/<slug:slug>/export-aether/',
          views.export_building_to_aether, name='export_building_to_aether'),
 
+    # Lego Aether export (studded-brick variant of the Aether export)
+    path('<slug:slug>/export-lego-aether/',
+         views.export_room_to_lego_aether,
+         name='export_room_to_lego_aether'),
+    path('building/<slug:slug>/export-lego-aether/',
+         views.export_building_to_lego_aether,
+         name='export_building_to_lego_aether'),
+
     # room page — keep last so the /api/ paths above don't collide
     path('<slug:slug>/', views.room_detail, name='room_detail'),
 ]

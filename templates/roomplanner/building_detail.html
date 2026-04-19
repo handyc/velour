@@ -58,7 +58,7 @@
   <div class="rp-notes">{{ building.notes }}</div>
   {% endif %}
 
-  <form method="post" style="margin: 0.75rem 0 1.25rem;"
+  <form method="post" style="margin: 0.75rem 0 0.4rem;"
         action="{% url 'roomplanner:export_building_to_aether' building.slug %}">
     {% csrf_token %}
     <button type="submit"
@@ -66,6 +66,16 @@
                    border-radius:6px;padding:0.4rem 0.9rem;cursor:pointer;
                    font:inherit;">
       Export building to Aether (walkable scene)
+    </button>
+  </form>
+  <form method="post" style="margin: 0 0 1.25rem;"
+        action="{% url 'roomplanner:export_building_to_lego_aether' building.slug %}">
+    {% csrf_token %}
+    <button type="submit"
+            style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;
+                   border-radius:6px;padding:0.4rem 0.9rem;cursor:pointer;
+                   font:inherit;">
+      Export building to Lego Aether (studded bricks)
     </button>
   </form>
 

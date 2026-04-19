@@ -1,0 +1,134 @@
+{
+  "body_parts": {
+    "name": "Body Parts",
+    "word": [
+      "head", "face", "hair", "eye", "ear", "nose", "mouth", "lip",
+      "tongue", "tooth", "cheek", "chin", "neck", "shoulder", "arm",
+      "elbow", "hand", "finger", "thumb", "wrist", "chest", "back",
+      "stomach", "waist", "hip", "leg", "knee", "ankle", "foot", "toe",
+      "heel", "skin", "bone", "heart", "brain", "muscle", "blood"
+    ],
+    "phrase": [
+      "my left hand", "my right hand", "the back of the head",
+      "the palm of the hand", "the sole of the foot", "the tip of the nose",
+      "a broken bone", "a sore throat", "a strong heart", "a long neck"
+    ]
+  },
+  "animals": {
+    "name": "Animals",
+    "word": [
+      "dog", "cat", "horse", "cow", "pig", "sheep", "goat", "chicken",
+      "duck", "goose", "rabbit", "mouse", "rat", "bird", "fish",
+      "shark", "whale", "dolphin", "octopus", "crab", "lobster", "snake",
+      "lizard", "turtle", "frog", "spider", "bee", "butterfly", "ant",
+      "lion", "tiger", "bear", "wolf", "fox", "deer", "monkey",
+      "elephant", "giraffe", "zebra", "kangaroo", "penguin", "owl",
+      "eagle", "parrot", "squirrel"
+    ]
+  },
+  "food_drink": {
+    "name": "Food and Drink",
+    "word": [
+      "bread", "rice", "pasta", "noodle", "egg", "cheese", "butter",
+      "milk", "water", "tea", "coffee", "juice", "wine", "beer",
+      "apple", "banana", "orange", "lemon", "grape", "strawberry",
+      "tomato", "potato", "onion", "garlic", "carrot", "cucumber",
+      "lettuce", "pepper", "salt", "sugar", "honey", "chocolate",
+      "chicken", "beef", "pork", "fish", "soup", "salad", "sandwich",
+      "cake", "ice cream"
+    ],
+    "phrase": [
+      "a glass of water", "a cup of tea", "a cup of coffee",
+      "a bottle of wine", "a piece of bread", "two eggs", "fresh fish",
+      "hot soup", "sweet fruit", "the dinner menu"
+    ]
+  },
+  "counting": {
+    "name": "Counting",
+    "word": [
+      "zero", "one", "two", "three", "four", "five", "six", "seven",
+      "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+      "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+      "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+      "hundred", "thousand", "million", "first", "second", "third"
+    ]
+  },
+  "outer_space": {
+    "name": "Outer Space",
+    "word": [
+      "star", "planet", "moon", "sun", "galaxy", "universe", "comet",
+      "asteroid", "meteor", "orbit", "gravity", "black hole",
+      "nebula", "constellation", "telescope", "satellite", "rocket",
+      "spaceship", "astronaut", "space station", "solar system",
+      "Milky Way", "Mars", "Venus", "Jupiter", "Saturn", "light year",
+      "eclipse", "supernova", "atmosphere"
+    ]
+  },
+  "quantum_physics": {
+    "name": "Quantum Physics",
+    "word": [
+      "atom", "electron", "proton", "neutron", "photon", "particle",
+      "wave", "energy", "frequency", "wavelength", "spin", "charge",
+      "field", "force", "mass", "momentum", "observation", "measurement",
+      "probability", "entanglement", "superposition", "uncertainty",
+      "quark", "boson", "fermion"
+    ]
+  },
+  "math_terms": {
+    "name": "Math Terms",
+    "word": [
+      "add", "subtract", "multiply", "divide", "sum", "difference",
+      "product", "equation", "number", "digit", "fraction", "decimal",
+      "angle", "triangle", "square", "circle", "rectangle", "line",
+      "point", "plane", "prime", "even", "odd", "average", "median",
+      "derivative", "integral", "variable", "function", "graph"
+    ]
+  },
+  "out_on_the_town": {
+    "name": "Out on the Town",
+    "word": [
+      "restaurant", "cafe", "bar", "cinema", "theatre", "museum",
+      "park", "shop", "market", "hotel", "station", "bus", "train",
+      "taxi", "map", "ticket", "menu", "waiter", "bill", "tip"
+    ],
+    "phrase": [
+      "good morning", "good afternoon", "good evening", "thank you",
+      "you're welcome", "excuse me", "how much", "over there", "to the left",
+      "to the right", "straight ahead", "the bill please", "one more",
+      "a table for two", "very good"
+    ],
+    "sentence": [
+      "Where is the bathroom?",
+      "Can I have the menu, please?",
+      "I would like a coffee, please.",
+      "How much does this cost?",
+      "Can you help me, please?",
+      "I don't understand.",
+      "Do you speak English?",
+      "Where is the nearest station?",
+      "One beer, please.",
+      "The bill, please.",
+      "Excuse me, where is the museum?",
+      "Is this seat taken?",
+      "Thank you very much."
+    ]
+  },
+  "greetings": {
+    "name": "Greetings & Small Talk",
+    "phrase": [
+      "hello", "hi", "goodbye", "see you later", "good night",
+      "how are you", "nice to meet you", "what is your name",
+      "my name is", "I am fine", "and you"
+    ],
+    "sentence": [
+      "Hello, how are you today?",
+      "My name is Alice.",
+      "Nice to meet you.",
+      "Where are you from?",
+      "I am from the Netherlands.",
+      "What do you do for work?",
+      "See you tomorrow.",
+      "Have a nice day."
+    ]
+  }
+}

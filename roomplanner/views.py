@@ -673,6 +673,30 @@ def export_building_to_aether(request, slug):
 
 @login_required
 @require_POST
+def export_room_to_lego_aether(request, slug):
+    """POST → render the room as studded Lego bricks in Aether."""
+    from django.shortcuts import redirect
+    from .lego_export import export_room_to_lego
+
+    room = get_object_or_404(Room, slug=slug)
+    world = export_room_to_lego(room)
+    return redirect(f'/aether/{world.slug}/enter/')
+
+
+@login_required
+@require_POST
+def export_building_to_lego_aether(request, slug):
+    """POST → render the building (all floors stacked) as studded Lego bricks."""
+    from django.shortcuts import redirect
+    from .lego_export import export_building_to_lego
+
+    building = get_object_or_404(Building, slug=slug)
+    world = export_building_to_lego(building)
+    return redirect(f'/aether/{world.slug}/enter/')
+
+
+@login_required
+@require_POST
 def api_piece_delete(request, piece_id):
     """Remove a catalog piece. PROTECT FK means this fails if placements
     still exist that use it — caller should delete placements first."""

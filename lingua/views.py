@@ -96,43 +96,120 @@ def translate(request):
     return JsonResponse(result, status=status)
 
 
+_THEME_LABELS = {
+    '':                'General (frequency list)',
+    'body_parts':      'Body Parts',
+    'animals':         'Animals',
+    'food_drink':      'Food and Drink',
+    'counting':        'Counting',
+    'outer_space':     'Outer Space',
+    'quantum_physics': 'Quantum Physics',
+    'math_terms':      'Math Terms',
+    'out_on_the_town': 'Out on the Town',
+    'greetings':       'Greetings & Small Talk',
+}
+
+
+def _theme_label(slug):
+    if slug in _THEME_LABELS:
+        return _THEME_LABELS[slug]
+    return slug.replace('_', ' ').title()
+
+
 @login_required
 def flashcards(request):
-    """Deck index: per-language totals, due counts, and a Start button."""
-    decks = (FlashCard.objects
-             .filter(user=request.user)
-             .values('language__code', 'language__name')
-             .annotate(
-                 total=Count('id'),
-                 due=Count('id', filter=Q(due_at__lte=djtz.now())),
-             )
-             .order_by('language__name'))
-    return render(request, 'lingua/flashcards.html', {'decks': list(decks)})
+    """Deck index grouped by language, then by (theme, level) within each.
+
+    One "deck" = one (language, theme, level) tuple. A user who only ran
+    the old general builder will still see a single deck per language
+    (theme='', level='word')."""
+    now = djtz.now()
+    rows = (FlashCard.objects
+            .filter(user=request.user)
+            .values('language__code', 'language__name',
+                    'language__low_resource', 'theme', 'level')
+            .annotate(
+                total=Count('id'),
+                due=Count('id', filter=Q(due_at__lte=now)),
+            )
+            .order_by('language__name', 'theme', 'level'))
+
+    # Fold into per-language blocks for template rendering.
+    level_order = {'word': 0, 'phrase': 1, 'sentence': 2}
+    by_language = {}
+    for r in rows:
+        code = r['language__code']
+        block = by_language.setdefault(code, {
+            'code':          code,
+            'name':          r['language__name'],
+            'low_resource':  r['language__low_resource'],
+            'decks':         [],
+            'total':         0,
+            'due':           0,
+        })
+        block['decks'].append({
+            'theme':       r['theme'],
+            'theme_label': _theme_label(r['theme']),
+            'level':       r['level'],
+            'total':       r['total'],
+            'due':         r['due'],
+        })
+        block['total'] += r['total']
+        block['due']   += r['due']
+
+    languages = list(by_language.values())
+    languages.sort(key=lambda b: (-b['due'], b['name']))
+    for block in languages:
+        block['decks'].sort(key=lambda d: (d['theme'] != '',
+                                           d['theme_label'].lower(),
+                                           level_order.get(d['level'], 9)))
+
+    return render(request, 'lingua/flashcards.html', {'languages': languages})
 
 
 @login_required
-def study(request, lang):
-    """Pick the most-overdue due card for this user + language and
-    render the flip-card. Grading happens via the `grade` POST endpoint
-    which redirects back here."""
+def study(request, lang, theme='', level=''):
+    """Flip-card study view for one (language, theme, level) deck.
+
+    `theme` and `level` are optional URL segments (defaults to "all" and
+    "all"). Passing "-" as the theme segment means "no theme" (the
+    general frequency deck). Omitting both studies across all decks for
+    that language."""
     language = get_object_or_404(Language, code=lang)
     now = djtz.now()
-    # Overdue first, then new cards by frequency rank.
+
+    filter_kwargs = {'user': request.user, 'language': language}
+    # URL convention: "-" in the theme slot means the empty-theme general
+    # deck; "all" (or missing) means "don't filter on theme".
+    if theme and theme != 'all':
+        filter_kwargs['theme'] = '' if theme == '-' else theme
+    if level and level != 'all':
+        filter_kwargs['level'] = level
+
     card = (FlashCard.objects
-            .filter(user=request.user, language=language, due_at__lte=now)
+            .filter(due_at__lte=now, **filter_kwargs)
             .order_by('due_at', 'freq_rank', 'id')
             .first())
 
-    total = FlashCard.objects.filter(user=request.user, language=language).count()
-    due_count = (FlashCard.objects
-                 .filter(user=request.user, language=language, due_at__lte=now)
-                 .count())
+    total     = FlashCard.objects.filter(**filter_kwargs).count()
+    due_count = FlashCard.objects.filter(due_at__lte=now,
+                                         **filter_kwargs).count()
+
+    # Used to build the "back to deck index" and UI header labels.
+    theme_slug  = filter_kwargs.get('theme', None)
+    theme_label = (_theme_label(theme_slug)
+                   if theme_slug is not None else 'All themes')
+    level_label = (filter_kwargs.get('level', None) or 'All levels').title()
 
     return render(request, 'lingua/study.html', {
-        'card':       card,
-        'language':   language,
-        'total':      total,
-        'due_count':  due_count,
+        'card':        card,
+        'language':    language,
+        'total':       total,
+        'due_count':   due_count,
+        'theme':       theme or 'all',
+        'level':       level or 'all',
+        'theme_label': theme_label,
+        'level_label': level_label,
     })
 
 

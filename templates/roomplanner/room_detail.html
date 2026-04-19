@@ -346,6 +346,25 @@
           </button>
         </form>
         {% endif %}
+        <p style="font-size:0.82rem;color:#8b949e;margin:0.75rem 0 0.4rem;line-height:1.4;">
+          Or render the same scene as studded Lego bricks — 1 stud = 40 cm.
+        </p>
+        <form method="post"
+              action="{% url 'roomplanner:export_room_to_lego_aether' room.slug %}">
+          {% csrf_token %}
+          <button type="submit" class="rp-btn rp-btn-neutral">
+            Export this room → Lego Aether
+          </button>
+        </form>
+        {% if room.floor and room.floor.building %}
+        <form method="post" style="margin-top:0.4rem;"
+              action="{% url 'roomplanner:export_building_to_lego_aether' room.floor.building.slug %}">
+          {% csrf_token %}
+          <button type="submit" class="rp-btn rp-btn-neutral">
+            Export whole building → Lego Aether
+          </button>
+        </form>
+        {% endif %}
       </div>
 
       <div class="rp-panel">
