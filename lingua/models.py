@@ -23,6 +23,7 @@ import hashlib
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone as djtz
 
 
 SCRIPT_CHOICES = [
@@ -131,3 +132,76 @@ class UserLanguagePreference(models.Model):
 
     def __str__(self):
         return f'{self.user}: {",".join(self.priority_codes) or "—"}'
+
+
+# Leitner intervals in days, indexed by box number. Box 0 = "new / just
+# failed": due immediately. Boxes climb to ~month spacing by box 6. The
+# choice is deliberately rough (not SM-2) — scholars can grade nuance
+# later; early on we just want each word to resurface periodically.
+LEITNER_INTERVAL_DAYS = [0, 1, 2, 4, 8, 16, 32]
+
+
+class FlashCard(models.Model):
+    """One word the user is learning, stored per-user.
+
+    `lemma` holds the word in the target language (what the user is
+    trying to recognise). `gloss` holds the meaning in `source_lang`
+    (usually English). `lingua_build_deck` populates `lemma` by running
+    a bundled source-language frequency list through the translator.
+
+    Per-user so two people sharing a Velour deploy can progress at
+    their own pace and mark different cards as known.
+    """
+
+    user          = models.ForeignKey(settings.AUTH_USER_MODEL,
+                        on_delete=models.CASCADE,
+                        related_name='lingua_cards')
+    language      = models.ForeignKey(Language,
+                        on_delete=models.CASCADE,
+                        related_name='flashcards',
+                        help_text='Target language — the one being learned.')
+    source_lang   = models.CharField(max_length=16, default='en')
+    lemma         = models.CharField(max_length=200,
+                        help_text='Word in the target language.')
+    pronunciation = models.CharField(max_length=200, blank=True,
+                        help_text='Romanisation / transliteration (e.g. pinyin for zh, romaji for ja).')
+    gloss         = models.CharField(max_length=400, blank=True,
+                        help_text='Meaning in source_lang (usually English).')
+    example_src   = models.TextField(blank=True)
+    example_trg   = models.TextField(blank=True)
+    freq_rank     = models.PositiveIntegerField(null=True, blank=True,
+                        help_text='Rank in the source frequency list (1 = most common).')
+    backend       = models.CharField(max_length=32, blank=True,
+                        help_text='Which adapter produced the translation.')
+
+    leitner_box   = models.PositiveSmallIntegerField(default=0)
+    due_at        = models.DateTimeField(default=djtz.now)
+    last_seen_at  = models.DateTimeField(null=True, blank=True)
+    review_count  = models.PositiveIntegerField(default=0)
+    correct_count = models.PositiveIntegerField(default=0)
+
+    created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('user', 'language', 'gloss', 'source_lang')]
+        indexes = [models.Index(fields=['user', 'language', 'due_at'])]
+        ordering = ['due_at', 'freq_rank']
+
+    def __str__(self):
+        return f'{self.lemma} ({self.language.code}) → {self.gloss}'
+
+    def promote(self):
+        import datetime as _dt
+        self.correct_count += 1
+        self.review_count  += 1
+        self.leitner_box = min(self.leitner_box + 1, len(LEITNER_INTERVAL_DAYS) - 1)
+        delta = _dt.timedelta(days=LEITNER_INTERVAL_DAYS[self.leitner_box])
+        self.due_at = djtz.now() + delta
+        self.last_seen_at = djtz.now()
+
+    def demote(self):
+        self.review_count += 1
+        self.leitner_box = 0
+        self.due_at = djtz.now()
+        self.last_seen_at = djtz.now()

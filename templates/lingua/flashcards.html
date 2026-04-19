@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Lingua — flashcards{% endblock %}
+
+{% block extra_head %}
+<style>
+    .fc-page { max-width: 720px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .fc-page h1 { margin-bottom: 0.25rem; }
+    .fc-page .hint { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.25rem; }
+
+    .fc-deck-list { list-style: none; padding: 0; margin: 0; }
+    .fc-deck-list li {
+        display: flex; align-items: center; gap: 1rem;
+        padding: 0.7rem 0.9rem; border: 1px solid #30363d;
+        background: #0d1117; border-radius: 6px; margin-bottom: 0.4rem;
+    }
+    .fc-deck-list .name { flex: 1; color: #c9d1d9; }
+    .fc-deck-list .counts {
+        color: #6e7681; font-size: 0.82rem; font-family: ui-monospace, monospace;
+    }
+    .fc-deck-list .counts .due { color: #d29922; }
+    .fc-deck-list a.btn {
+        background: #238636; color: #fff; text-decoration: none;
+        border-radius: 4px; padding: 0.3rem 0.8rem; font-size: 0.85rem;
+    }
+    .fc-deck-list a.btn:hover { background: #2ea043; }
+    .fc-deck-list a.btn.empty { background: #30363d; pointer-events: none; }
+
+    .fc-empty {
+        padding: 1.2rem; border: 1px dashed #30363d; border-radius: 6px;
+        color: #8b949e; font-size: 0.88rem;
+    }
+    .fc-empty code {
+        background: #161b22; padding: 0.1rem 0.4rem; border-radius: 3px;
+        color: #c9d1d9;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fc-page">
+    <h1>Flashcards</h1>
+    <p class="hint">
+        One deck per target language. Studied per-user; nobody else's
+        progress affects yours. <a href="{% url 'lingua:home' %}">Preferences</a>.
+    </p>
+
+    {% if decks %}
+    <ul class="fc-deck-list">
+        {% for d in decks %}
+        <li>
+            <span class="name">{{ d.language__name }}
+                <span style="color:#6e7681;font-family:ui-monospace,monospace;font-size:0.8rem;">
+                    ({{ d.language__code }})
+                </span>
+            </span>
+            <span class="counts">
+                <span class="due">{{ d.due }}</span> due · {{ d.total }} total
+            </span>
+            {% if d.due %}
+            <a class="btn" href="{% url 'lingua:study' d.language__code %}">Study →</a>
+            {% else %}
+            <a class="btn empty">all caught up</a>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="fc-empty">
+        You don't have any decks yet. Build one from a shell:<br><br>
+        <code>venv/bin/python manage.py lingua_build_deck --lang nl --size 100</code><br><br>
+        Substitute <code>nl</code> with any seeded language code. Argos
+        pairs other than <code>en→nl</code> need to be installed first —
+        run <code>manage.py lingua_pairs</code> to see what's available.
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

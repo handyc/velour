@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Language, TranslationCache, UserLanguagePreference
+from .models import FlashCard, Language, TranslationCache, UserLanguagePreference
 
 
 @admin.register(Language)
@@ -28,3 +28,13 @@ class TranslationCacheAdmin(admin.ModelAdmin):
 class UserLanguagePreferenceAdmin(admin.ModelAdmin):
     list_display  = ('user', 'auto_translate', 'hover_modifier', 'updated_at')
     search_fields = ('user__username',)
+
+
+@admin.register(FlashCard)
+class FlashCardAdmin(admin.ModelAdmin):
+    list_display  = ('user', 'language', 'gloss', 'lemma', 'leitner_box',
+                     'due_at', 'review_count', 'correct_count')
+    list_filter   = ('language', 'leitner_box', 'backend')
+    search_fields = ('lemma', 'gloss')
+    readonly_fields = ('created_at', 'updated_at', 'last_seen_at',
+                       'review_count', 'correct_count')
