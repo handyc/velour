@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ town.name }} — Agents{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ag-page  { max-width: 1080px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .ag-crumb { color: #6e7681; font-size: 0.8rem; margin-bottom: 0.4rem; }
+    .ag-crumb a { color: #58a6ff; text-decoration: none; }
+
+    .ag-cells {
+        display: flex; flex-wrap: wrap; gap: 0.4rem;
+        margin: 1rem 0 1.5rem;
+    }
+    .ag-cell {
+        background: #0d1117; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.35rem 0.55rem;
+        font-family: ui-monospace, monospace; font-size: 0.78rem;
+        color: #c9d1d9;
+    }
+    .ag-cell.empty { color: #6e7681; border-style: dashed; }
+
+    table.ag-residents { width: 100%; border-collapse: collapse; }
+    table.ag-residents th, table.ag-residents td {
+        text-align: left; padding: 0.35rem 0.6rem;
+        border-bottom: 1px solid #1e2329; font-size: 0.88rem;
+    }
+    table.ag-residents th { color: #8b949e; font-weight: 500; font-size: 0.75rem;
+        text-transform: uppercase; letter-spacing: 0.04em; }
+    table.ag-residents td a { color: #58a6ff; text-decoration: none; }
+    table.ag-residents td a:hover { text-decoration: underline; }
+
+    .ag-pager { margin-top: 1rem; color: #8b949e; font-size: 0.85rem; }
+    .ag-pager a { color: #58a6ff; text-decoration: none; margin: 0 0.4rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ag-page">
+    <div class="ag-crumb">
+        <a href="{% url 'agents:index' %}">Agents</a> /
+        {{ town.name }}
+    </div>
+    <h1>{{ town.name }}</h1>
+    {% if town.description %}<p style="color:#8b949e;">{{ town.description }}</p>{% endif %}
+    <p style="color:#6e7681;font-size:0.8rem;">
+        Founded {{ town.founded_year|default:"—" }}.
+        Population target: {{ town.population_target }}.
+        Currently: {{ total }} resident{{ total|pluralize }}.
+    </p>
+
+    <h2 style="font-size:1rem;margin-top:1rem;">Hex grid</h2>
+    <div class="ag-cells">
+        {% for c in cells %}
+        <div class="ag-cell {% if not c.world_id %}empty{% endif %}">
+            ({{ c.q }},{{ c.r }})
+            {% if c.label %} · {{ c.label }}{% endif %}
+            {% if c.world %} → {{ c.world.title }}{% endif %}
+        </div>
+        {% empty %}
+        <div class="ag-cell empty">no cells assigned</div>
+        {% endfor %}
+    </div>
+
+    <h2 style="font-size:1rem;">Residents</h2>
+    <table class="ag-residents">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Gender</th>
+                <th>Origin</th>
+                <th>Bio bytes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in page %}
+            <tr>
+                <td><a href="{% url 'agents:detail' a.slug %}">{{ a.display_name }}</a></td>
+                <td>{{ a.get_gender_display }}</td>
+                <td>{{ a.origin_world.title|default:"—" }}</td>
+                <td>{{ a.bio_size_bytes }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.has_other_pages %}
+    <div class="ag-pager">
+        {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">← prev</a>{% endif %}
+        page {{ page.number }} / {{ page.paginator.num_pages }}
+        {% if page.has_next %}<a href="?page={{ page.next_page_number }}">next →</a>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

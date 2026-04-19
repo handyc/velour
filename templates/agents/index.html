@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Agents{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ag-page  { max-width: 920px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .ag-page h1 { margin-bottom: 0.25rem; }
+    .ag-page .hint { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.25rem; }
+
+    table.ag-towns { width: 100%; border-collapse: collapse; }
+    table.ag-towns th, table.ag-towns td {
+        text-align: left; padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid #1e2329;
+    }
+    table.ag-towns th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+        text-transform: uppercase; letter-spacing: 0.04em; }
+    table.ag-towns td a { color: #58a6ff; text-decoration: none; }
+    table.ag-towns td a:hover { text-decoration: underline; }
+    table.ag-towns td.num { text-align: right; font-family: ui-monospace, monospace; }
+
+    .ag-totals { margin-top: 1rem; color: #8b949e; font-size: 0.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ag-page">
+    <h1>Agents</h1>
+    <p class="hint">
+        Persistent NPCs. Each Agent has a town and an Aether scene of origin.
+        Phase 1 — bio data lives in one JSON field, capped well under 10 KB
+        per row, so a million-strong population stays in the gigabyte range.
+    </p>
+
+    {% if town_rows %}
+    <table class="ag-towns">
+        <thead>
+            <tr>
+                <th>Town</th>
+                <th class="num">Residents</th>
+                <th class="num">Hex cells</th>
+                <th class="num">Cells with worlds</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in town_rows %}
+            <tr>
+                <td><a href="{% url 'agents:town_detail' row.town.slug %}">{{ row.town.name }}</a>
+                    <span style="color:#6e7681;font-size:0.78rem;">· {{ row.town.slug }}</span></td>
+                <td class="num">{{ row.count }}</td>
+                <td class="num">{{ row.cells }}</td>
+                <td class="num">{{ row.mapped }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No towns yet. Run <code>python manage.py seed_agents_marco</code>.</p>
+    {% endif %}
+
+    <p class="ag-totals">Total Agents in DB: {{ total }}.</p>
+</div>
+{% endblock %}

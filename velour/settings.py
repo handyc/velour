@@ -106,6 +106,7 @@ INSTALLED_APPS = [
     'powerlab',
     'roomplanner',
     'lingua',
+    'agents',
 ]
 
 MIDDLEWARE = [

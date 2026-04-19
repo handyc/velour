@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ agent.display_name }} — Agent{% endblock %}
+
+{% block extra_head %}
+<style>
+    .ag-page  { max-width: 860px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .ag-crumb { color: #6e7681; font-size: 0.8rem; margin-bottom: 0.4rem; }
+    .ag-crumb a { color: #58a6ff; text-decoration: none; }
+
+    .ag-summary {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+        background: #0d1117; border: 1px solid #30363d;
+        border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 1rem;
+    }
+    @media (max-width: 720px) { .ag-summary { grid-template-columns: 1fr; } }
+
+    .ag-summary dt { color: #8b949e; font-size: 0.75rem;
+        text-transform: uppercase; letter-spacing: 0.04em; }
+    .ag-summary dd { margin: 0 0 0.5rem; color: #c9d1d9; font-size: 0.9rem; }
+
+    .ag-section {
+        background: #0d1117; border: 1px solid #30363d;
+        border-radius: 6px; padding: 1rem 1.1rem; margin-bottom: 1rem;
+    }
+    .ag-section h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: #c9d1d9; }
+    .ag-section p { color: #c9d1d9; line-height: 1.5; font-size: 0.92rem; }
+
+    .ag-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .ag-tag {
+        background: #161b22; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.15rem 0.5rem;
+        color: #c9d1d9; font-size: 0.78rem;
+    }
+
+    .ag-fav-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+    }
+    @media (max-width: 720px) { .ag-fav-grid { grid-template-columns: 1fr; } }
+    .ag-fav-grid div { font-size: 0.85rem; color: #c9d1d9; }
+    .ag-fav-grid .k { color: #8b949e; font-size: 0.75rem;
+        text-transform: uppercase; letter-spacing: 0.04em; }
+
+    .ag-byte-bar {
+        margin-top: 1rem; height: 10px;
+        background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+        position: relative; overflow: hidden;
+    }
+    .ag-byte-bar .fill { height: 100%; background: #58a6ff; }
+    .ag-byte-bar .label {
+        position: absolute; top: -1.4rem; right: 0;
+        font-family: ui-monospace, monospace; font-size: 0.75rem;
+        color: #8b949e;
+    }
+
+    table.ag-rels { width: 100%; border-collapse: collapse; }
+    table.ag-rels td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #1e2329;
+        font-size: 0.88rem; }
+    table.ag-rels td a { color: #58a6ff; text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ag-page">
+    <div class="ag-crumb">
+        <a href="{% url 'agents:index' %}">Agents</a> /
+        <a href="{% url 'agents:town_detail' agent.town.slug %}">{{ agent.town.name }}</a> /
+        {{ agent.display_name }}
+    </div>
+
+    <h1>{{ agent.display_name }}</h1>
+    <p style="color:#6e7681;font-size:0.8rem;">{{ agent.slug }}</p>
+
+    <dl class="ag-summary">
+        <div>
+            <dt>Gender</dt><dd>{{ agent.get_gender_display }}</dd>
+            <dt>Birthdate</dt><dd>{{ agent.birthdate|default:"—" }}</dd>
+            <dt>Town</dt><dd>{{ agent.town.name }}</dd>
+        </div>
+        <div>
+            <dt>Origin scene (Aether)</dt><dd>{{ agent.origin_world.title|default:"—" }}</dd>
+            <dt>Current cell</dt>
+            <dd>
+                {% if agent.current_cell %}
+                ({{ agent.current_cell.q }},{{ agent.current_cell.r }})
+                {{ agent.current_cell.label|default:"" }}
+                {% else %}—{% endif %}
+            </dd>
+            <dt>Face seed</dt><dd>{{ agent.face_seed }}</dd>
+        </div>
+    </dl>
+
+    {% with bio=agent.bio_json %}
+    {% if bio.occupation %}
+    <div class="ag-section">
+        <h2>Occupation</h2>
+        <p>{{ bio.occupation }}</p>
+    </div>
+    {% endif %}
+
+    {% if bio.backstory %}
+    <div class="ag-section">
+        <h2>Backstory</h2>
+        <p>{{ bio.backstory }}</p>
+    </div>
+    {% endif %}
+
+    {% if bio.personality %}
+    <div class="ag-section">
+        <h2>Personality</h2>
+        <div class="ag-tags">
+            {% for t in bio.personality %}<span class="ag-tag">{{ t }}</span>{% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if bio.appearance %}
+    <div class="ag-section">
+        <h2>Appearance</h2>
+        <div class="ag-fav-grid">
+            {% if bio.appearance.hair %}<div><div class="k">Hair</div>{{ bio.appearance.hair }}</div>{% endif %}
+            {% if bio.appearance.eye_color %}<div><div class="k">Eyes</div>{{ bio.appearance.eye_color }}</div>{% endif %}
+            {% if bio.appearance.skin_tone %}<div><div class="k">Skin</div>{{ bio.appearance.skin_tone }}</div>{% endif %}
+            {% if bio.appearance.clothing_style %}<div><div class="k">Clothing</div>{{ bio.appearance.clothing_style }}</div>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if bio.favorites %}
+    <div class="ag-section">
+        <h2>Favourites</h2>
+        <div class="ag-fav-grid">
+            {% for k, v in bio.favorites.items %}
+            {% if v %}<div><div class="k">{{ k }}</div>{{ v }}</div>{% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div class="ag-section">
+        <h2>Relationships</h2>
+        {% if outgoing or incoming %}
+        <table class="ag-rels">
+            {% for rel in outgoing %}
+            <tr><td>{{ rel.kind }}</td><td>→</td>
+                <td><a href="{% url 'agents:detail' rel.dst.slug %}">{{ rel.dst.display_name }}</a></td>
+                <td style="color:#6e7681;">{{ rel.notes }}</td></tr>
+            {% endfor %}
+            {% for rel in incoming %}
+            <tr><td>{{ rel.kind }} of</td><td>←</td>
+                <td><a href="{% url 'agents:detail' rel.src.slug %}">{{ rel.src.display_name }}</a></td>
+                <td style="color:#6e7681;">{{ rel.notes }}</td></tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p style="color:#6e7681;font-size:0.85rem;">No relationships yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="ag-section">
+        <h2>Storage</h2>
+        <div class="ag-byte-bar">
+            <div class="fill" style="width: {% widthratio bio_bytes 8000 100 %}%;"></div>
+            <span class="label">{{ bio_bytes }} / 8000 B (bio_json)</span>
+        </div>
+        <p style="color:#6e7681;font-size:0.78rem;margin-top:1.4rem;">
+            Estimated total row: ~{{ estimated_row_bytes }} bytes (under the 10 KB design budget).
+        </p>
+    </div>
+</div>
+{% endblock %}
