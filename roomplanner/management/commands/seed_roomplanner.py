@@ -32,6 +32,9 @@ ROOM_DATA = {
     'name':      'Velour Wet Lab',
     'width_cm':  400,
     'length_cm': 300,
+    # north_direction='right' means real-world north points to the right
+    # side of the screen, so:  top=west, right=north, bottom=east, left=south
+    'north_direction': 'right',
     'notes':     (
         'Primary home lab — aquarium micro-greenhouse, ESP fleet bench, '
         'breadboard station. Fire-safety spacing is the current driver '
@@ -41,13 +44,14 @@ ROOM_DATA = {
 
 FEATURES = [
     # kind, label, x, y, w, d, notes
-    ('door',     'entry',       160, 0,   80, 10, 'swings inward'),
-    ('window',   'south',       50,  290, 180, 10, 'main daylight'),
-    ('outlet',   'bench E',     390, 80,  10, 10, '230V × 4'),
-    ('outlet',   'bench W',     0,   80,  10, 10, '230V × 2'),
-    ('outlet',   'rack',        390, 200, 10, 10, '230V × 4'),
-    ('radiator', 'north',       260, 0,   100, 15, 'hot in winter — keep clear'),
-    ('ethernet', 'rack',        390, 210, 10, 5,  'Cat6 to switch'),
+    # door on east wall (bottom of screen), biased toward north (right)
+    ('door',     'entry',       280, 290, 80,  10, 'east wall, near north corner'),
+    # whole west wall (top of screen) is glass
+    ('window',   'west wall',   0,   0,   400, 10, 'entire wall is window — main daylight'),
+    ('outlet',   'north bench', 390, 80,  10,  10, '230V × 4'),
+    ('outlet',   'south bench', 0,   80,  10,  10, '230V × 2'),
+    ('outlet',   'rack',        390, 200, 10,  10, '230V × 4'),
+    ('ethernet', 'rack',        390, 210, 10,  5,  'Cat6 to switch'),
 ]
 
 PLACEMENTS = [
@@ -55,7 +59,8 @@ PLACEMENTS = [
     ('workbench-160',       'ESP fleet bench',    10,  80,  0),
     ('breadboard-station',  'breadboard',         180, 80,  0),
     ('rack-19in-12u',       'equipment rack',     330, 200, 0),
-    ('aquarium-120l',       'Gary tank',          10,  200, 0),
+    # Gary's tank sits long-axis vertical — rotated 90° so footprint is 35×80.
+    ('aquarium-120l',       'Gary tank',          10,  200, 90),
     ('lightbox-grow',       'micro-greenhouse',   100, 200, 0),
     ('shelf-ikea-kallax-4', 'parts shelf',        10,  20,  0),
     ('office-chair',        'main chair',         150, 170, 0),

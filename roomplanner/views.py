@@ -1,8 +1,12 @@
 import json
+import socket
+import urllib.request
+import urllib.error
 
 from django.contrib.auth.decorators import login_required
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.utils import timezone as djtz
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
@@ -96,6 +100,9 @@ def room_detail(request, slug):
         'heat_watts', 'needs_outlet',
     ))
 
+    # Map the room's north direction onto each SVG edge (top/right/bottom/left).
+    edge_labels = _edge_labels(room.north_direction)
+
     return render(request, 'roomplanner/room_detail.html', {
         'room':         room,
         'features':     feature_items,
@@ -104,7 +111,29 @@ def room_detail(request, slug):
         'constraints':  constraints,
         'feature_kinds':    Feature.KIND_CHOICES,
         'piece_kinds':      FurniturePiece.KIND_CHOICES,
+        'north_choices':    Room.NORTH_CHOICES,
+        'edge_labels':      edge_labels,
     })
+
+
+def _edge_labels(north_direction):
+    """Return {top: 'N', right: 'E', bottom: 'S', left: 'W'} rotated for
+    the room's north_direction choice."""
+    cycle = ['N', 'E', 'S', 'W']
+    shifts = {
+        Room.NORTH_UP:    0,  # N=top, E=right, S=bottom, W=left
+        Room.NORTH_RIGHT: 3,  # N=right, E=bottom, S=left, W=top
+        Room.NORTH_DOWN:  2,
+        Room.NORTH_LEFT:  1,
+    }
+    s = shifts.get(north_direction, 0)
+    # positions in clockwise order: top, right, bottom, left
+    return {
+        'top':    cycle[(0 + s) % 4],
+        'right':  cycle[(1 + s) % 4],
+        'bottom': cycle[(2 + s) % 4],
+        'left':   cycle[(3 + s) % 4],
+    }
 
 
 def catalog(request):
@@ -351,6 +380,101 @@ def api_piece_add(request):
         'height_cm':     piece.height_cm,
         'heat_watts':    piece.heat_watts,
         'needs_outlet':  piece.needs_outlet,
+    })
+
+
+@login_required
+@require_POST
+def api_room_update(request, slug):
+    """Update per-room settings: north_direction, name, notes,
+    latitude, longitude. Dimensions stay admin-only for now."""
+    room = get_object_or_404(Room, slug=slug)
+    data = _json(request)
+
+    if 'north_direction' in data:
+        valid = {k for k, _ in Room.NORTH_CHOICES}
+        nd = data['north_direction']
+        if nd in valid:
+            room.north_direction = nd
+
+    if 'name' in data:
+        room.name = str(data['name'])[:120]
+
+    if 'notes' in data:
+        room.notes = str(data['notes'])[:2000]
+
+    if 'latitude' in data:
+        try:   room.latitude = float(data['latitude'])
+        except (TypeError, ValueError):  pass
+    if 'longitude' in data:
+        try:   room.longitude = float(data['longitude'])
+        except (TypeError, ValueError):  pass
+
+    if 'location_city' in data:
+        room.location_city = str(data['location_city'])[:120]
+
+    room.save()
+    return JsonResponse({
+        'ok':              True,
+        'north_direction': room.north_direction,
+        'edge_labels':     _edge_labels(room.north_direction),
+        'latitude':        room.latitude,
+        'longitude':       room.longitude,
+        'location_city':   room.location_city,
+    })
+
+
+@login_required
+@require_POST
+def api_room_locate(request, slug):
+    """Hit ip-api.com from the server side to geolocate the lab's
+    public IP, and store the result on the room."""
+    room = get_object_or_404(Room, slug=slug)
+
+    url = 'http://ip-api.com/json/?fields=status,message,country,city,lat,lon,query'
+    try:
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'velour-roomplanner/1.0',
+        })
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            body = resp.read().decode('utf-8')
+    except (urllib.error.URLError, socket.timeout, TimeoutError) as exc:
+        return JsonResponse({
+            'ok':    False,
+            'error': f'geolocation request failed: {exc}',
+        }, status=502)
+
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'bad geolocation response'},
+                            status=502)
+
+    if payload.get('status') != 'success':
+        return JsonResponse({
+            'ok':    False,
+            'error': payload.get('message') or 'geolocation unsuccessful',
+        }, status=502)
+
+    room.latitude  = payload.get('lat')
+    room.longitude = payload.get('lon')
+    city   = payload.get('city') or ''
+    country = payload.get('country') or ''
+    room.location_city = (
+        f"{city}, {country}".strip(', ')[:120] if (city or country) else ''
+    )
+    room.location_detected_at = djtz.now()
+    room.save(update_fields=[
+        'latitude', 'longitude', 'location_city', 'location_detected_at',
+    ])
+
+    return JsonResponse({
+        'ok':                  True,
+        'latitude':            room.latitude,
+        'longitude':           room.longitude,
+        'location_city':       room.location_city,
+        'public_ip':           payload.get('query'),
+        'detected_at':         room.location_detected_at.isoformat(),
     })
 
 

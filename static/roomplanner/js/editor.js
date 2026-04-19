@@ -347,6 +347,56 @@
     document.getElementById('rp-new-name').value = '';
   });
 
+  // Orientation: north_direction change → re-label the four compass texts.
+  const northSel = document.getElementById('rp-north');
+  if (northSel) {
+    northSel.addEventListener('change', async () => {
+      const msg = document.getElementById('rp-orient-msg');
+      setMsg(msg, 'saving…');
+      const data = await api(`${apiRoom}/room/update/`, {
+        north_direction: northSel.value,
+      });
+      if (!data.ok) { setMsg(msg, data.error || 'failed', 'err'); return; }
+      const e = data.edge_labels || {};
+      const set = (id, txt) => {
+        const el = document.getElementById(id);
+        if (el && txt) el.textContent = txt;
+      };
+      set('rp-compass-top',    e.top);
+      set('rp-compass-right',  e.right);
+      set('rp-compass-bottom', e.bottom);
+      set('rp-compass-left',   e.left);
+      setMsg(msg, `north → ${data.north_direction}`, 'ok');
+    });
+  }
+
+  // Detect via IP
+  const locateBtn = document.getElementById('rp-locate-btn');
+  if (locateBtn) {
+    locateBtn.addEventListener('click', async () => {
+      const msg  = document.getElementById('rp-locate-msg');
+      const disp = document.getElementById('rp-loc-display');
+      setMsg(msg, 'asking ip-api.com…');
+      locateBtn.disabled = true;
+      try {
+        const data = await api(`${apiRoom}/room/locate/`, {});
+        if (!data.ok) {
+          setMsg(msg, data.error || 'geolocation failed', 'err');
+          return;
+        }
+        const lat = (data.latitude  || 0).toFixed(3);
+        const lon = (data.longitude || 0).toFixed(3);
+        if (disp) {
+          disp.innerHTML = `${data.location_city || '—'} ` +
+            `<small style="color:#8b949e;">(${lat}, ${lon})</small>`;
+        }
+        setMsg(msg, `detected — public IP ${data.public_ip || '?'}`, 'ok');
+      } finally {
+        locateBtn.disabled = false;
+      }
+    });
+  }
+
   // Add feature
   document.getElementById('rp-add-feature').addEventListener('click', async () => {
     const msg = document.getElementById('rp-feat-msg');

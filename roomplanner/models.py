@@ -3,13 +3,39 @@ from django.db import models
 
 class Room(models.Model):
     """A room in the physical lab. Coordinates are in centimetres with
-    (0, 0) at the top-left (SVG convention)."""
+    (0, 0) at the top-left (SVG convention).
+
+    north_direction lets the on-screen layout differ from the usual
+    “north is up” convention — the lab here has the entry on its east
+    wall but the door sits at the bottom of the screen, so north_direction
+    is 'right' and the SVG edge labels get re-mapped accordingly.
+    """
+
+    NORTH_UP    = 'up'
+    NORTH_RIGHT = 'right'
+    NORTH_DOWN  = 'down'
+    NORTH_LEFT  = 'left'
+    NORTH_CHOICES = [
+        (NORTH_UP,    'north is up (top of screen)'),
+        (NORTH_RIGHT, 'north is right'),
+        (NORTH_DOWN,  'north is down (bottom of screen)'),
+        (NORTH_LEFT,  'north is left'),
+    ]
 
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=120)
     width_cm = models.PositiveIntegerField(help_text="X-axis extent in cm.")
     length_cm = models.PositiveIntegerField(help_text="Y-axis extent in cm.")
     notes = models.TextField(blank=True)
+
+    north_direction = models.CharField(
+        max_length=8, choices=NORTH_CHOICES, default=NORTH_UP,
+        help_text="Which edge of the SVG points to real-world north.",
+    )
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    location_city = models.CharField(max_length=120, blank=True)
+    location_detected_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

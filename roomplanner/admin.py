@@ -21,7 +21,9 @@ class ConstraintInline(admin.TabularInline):
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'width_cm', 'length_cm', 'updated_at')
+    list_display = ('name', 'slug', 'width_cm', 'length_cm',
+                    'north_direction', 'location_city', 'updated_at')
+    list_filter = ('north_direction',)
     prepopulated_fields = {'slug': ('name',)}
     inlines = [FeatureInline, PlacementInline, ConstraintInline]
 

@@ -150,6 +150,24 @@
         <!-- 50cm grid -->
         <g id="rp-grid" stroke="#21262d" stroke-width="0.4"></g>
 
+        <!-- compass edge labels (N/S/E/W, rotated by room.north_direction) -->
+        <g id="rp-compass"
+           font-family="ui-monospace, monospace" font-size="10"
+           fill="#8b949e" text-anchor="middle">
+          <text id="rp-compass-top"
+                x="{% widthratio room.width_cm 2 1 %}" y="-3">{{ edge_labels.top }}</text>
+          <text id="rp-compass-bottom"
+                x="{% widthratio room.width_cm 2 1 %}"
+                y="{{ room.length_cm|add:8 }}">{{ edge_labels.bottom }}</text>
+          <text id="rp-compass-left"
+                x="-5" y="{% widthratio room.length_cm 2 1 %}"
+                dominant-baseline="middle">{{ edge_labels.left }}</text>
+          <text id="rp-compass-right"
+                x="{{ room.width_cm|add:5 }}"
+                y="{% widthratio room.length_cm 2 1 %}"
+                dominant-baseline="middle">{{ edge_labels.right }}</text>
+        </g>
+
         <!-- placements (furniture) -->
         <g id="rp-placements">
           {% for p in placements %}
@@ -194,6 +212,39 @@
 
     <!-- SIDEBAR ------------------------------------------------- -->
     <div class="rp-side">
+
+      <div class="rp-panel">
+        <h3>Orientation &amp; location</h3>
+        <label for="rp-north">which screen edge is north?</label>
+        <select id="rp-north">
+          {% for val, disp in north_choices %}
+            <option value="{{ val }}"
+                    {% if val == room.north_direction %}selected{% endif %}>
+              {{ disp }}
+            </option>
+          {% endfor %}
+        </select>
+        <div id="rp-orient-msg" class="rp-msg"></div>
+
+        <label style="margin-top:0.6rem;">detected location</label>
+        <div id="rp-loc-display"
+             style="color:#c9d1d9;font-size:0.85rem;min-height:1.2em;">
+          {% if room.location_city %}
+            {{ room.location_city }}
+            {% if room.latitude %}
+              <small style="color:#8b949e;">
+                ({{ room.latitude|floatformat:3 }},
+                 {{ room.longitude|floatformat:3 }})
+              </small>
+            {% endif %}
+          {% else %}
+            <small style="color:#6e7681;">not detected yet</small>
+          {% endif %}
+        </div>
+        <button id="rp-locate-btn" type="button"
+                class="rp-btn rp-btn-neutral">Detect via IP</button>
+        <div id="rp-locate-msg" class="rp-msg"></div>
+      </div>
 
       <div class="rp-panel">
         <h3>Add piece from catalog</h3>

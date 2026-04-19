@@ -28,6 +28,11 @@ urlpatterns = [
     path('<slug:slug>/api/feature/<int:pk>/delete/',
          views.api_feature_delete, name='api_feature_delete'),
 
+    path('<slug:slug>/api/room/update/',
+         views.api_room_update, name='api_room_update'),
+    path('<slug:slug>/api/room/locate/',
+         views.api_room_locate, name='api_room_locate'),
+
     # room page — keep last so the /api/ paths above don't collide
     path('<slug:slug>/', views.room_detail, name='room_detail'),
 ]
