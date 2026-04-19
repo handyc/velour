@@ -347,6 +347,65 @@
     document.getElementById('rp-new-name').value = '';
   });
 
+  // Score this layout
+  const scoreBtn = document.getElementById('rp-score-btn');
+  const scoreVerdict = document.getElementById('rp-score-verdict');
+  const scoreBreakdown = document.getElementById('rp-score-breakdown');
+  const violationsG = document.getElementById('rp-violations');
+
+  const VERDICT_CLASS = {
+    'clean':         'rp-verdict-clean',
+    'minor issues':  'rp-verdict-minor',
+    'needs work':    'rp-verdict-work',
+    'unsafe':        'rp-verdict-unsafe',
+  };
+
+  function renderViolationOverlays(violations) {
+    const xmlns = 'http://www.w3.org/2000/svg';
+    while (violationsG.firstChild) violationsG.removeChild(violationsG.firstChild);
+    for (const v of violations) {
+      if (!v.zone) continue;
+      const z = v.zone;
+      const r = document.createElementNS(xmlns, 'rect');
+      r.setAttribute('class', 'rp-violation-zone');
+      r.setAttribute('x', z.x); r.setAttribute('y', z.y);
+      r.setAttribute('width', z.w); r.setAttribute('height', z.h);
+      violationsG.appendChild(r);
+    }
+  }
+
+  if (scoreBtn) {
+    scoreBtn.addEventListener('click', async () => {
+      setMsg(document.getElementById('rp-score-msg'), 'scoring…');
+      const res = await fetch(`${apiRoom}/room/score/`, {
+        credentials: 'same-origin',
+      });
+      let data;
+      try { data = await res.json(); }
+      catch (_) { data = { total: -1, verdict: 'error', violations: [] }; }
+      scoreVerdict.textContent = `${data.verdict} (penalty ${data.total})`;
+      scoreVerdict.className = '';
+      const cls = VERDICT_CLASS[data.verdict];
+      if (cls) scoreVerdict.classList.add(cls);
+
+      while (scoreBreakdown.firstChild) scoreBreakdown.removeChild(scoreBreakdown.firstChild);
+      if (!data.violations.length) {
+        const li = document.createElement('li');
+        li.textContent = 'no violations';
+        li.style.color = '#3fb950';
+        scoreBreakdown.appendChild(li);
+      }
+      for (const v of data.violations) {
+        const li = document.createElement('li');
+        li.className = `rp-sev-${v.severity}`;
+        li.textContent = v.message;
+        scoreBreakdown.appendChild(li);
+      }
+      renderViolationOverlays(data.violations);
+      setMsg(document.getElementById('rp-score-msg'), '');
+    });
+  }
+
   // Orientation: north_direction change → re-label the four compass texts.
   const northSel = document.getElementById('rp-north');
   if (northSel) {

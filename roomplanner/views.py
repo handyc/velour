@@ -10,6 +10,7 @@ from django.utils import timezone as djtz
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
+from .fitness import score_room
 from .models import (
     Constraint, Feature, FurniturePiece, Placement, Room,
 )
@@ -476,6 +477,13 @@ def api_room_locate(request, slug):
         'public_ip':           payload.get('query'),
         'detected_at':         room.location_detected_at.isoformat(),
     })
+
+
+def api_room_score(request, slug):
+    """Score the room's current layout against its active constraints.
+    GET so the UI can call it freely on button-press."""
+    room = get_object_or_404(Room, slug=slug)
+    return JsonResponse(score_room(room))
 
 
 @login_required

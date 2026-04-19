@@ -32,6 +32,8 @@ urlpatterns = [
          views.api_room_update, name='api_room_update'),
     path('<slug:slug>/api/room/locate/',
          views.api_room_locate, name='api_room_locate'),
+    path('<slug:slug>/api/room/score/',
+         views.api_room_score, name='api_room_score'),
 
     # room page — keep last so the /api/ paths above don't collide
     path('<slug:slug>/', views.room_detail, name='room_detail'),

@@ -98,6 +98,20 @@
   .rp-msg.err { color: #f85149; }
   .rp-msg.ok  { color: #3fb950; }
 
+  /* violation overlays */
+  .rp-violation-zone  { fill: #f85149; opacity: 0.12;
+                        stroke: #f85149; stroke-width: 1;
+                        stroke-dasharray: 4 3; }
+  .rp-violation-link  { stroke: #f85149; stroke-width: 1.5;
+                        stroke-dasharray: 2 2; opacity: 0.8; }
+  .rp-verdict-clean  { color: #3fb950; }
+  .rp-verdict-minor  { color: #d29922; }
+  .rp-verdict-work   { color: #f0883e; }
+  .rp-verdict-unsafe { color: #f85149; }
+  .rp-sev-3 { color: #f85149; }
+  .rp-sev-2 { color: #f0883e; }
+  .rp-sev-1 { color: #d29922; }
+
   .rp-section-label {
     color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
     letter-spacing: 0.04em; margin: 1rem 0 0.4rem;
@@ -189,6 +203,9 @@
           {% endfor %}
         </g>
 
+        <!-- violation overlays (drawn beneath features so labels stay readable) -->
+        <g id="rp-violations" pointer-events="none"></g>
+
         <!-- features (doors, windows, outlets) — drawn on top -->
         <g id="rp-features">
           {% for f in features %}
@@ -212,6 +229,18 @@
 
     <!-- SIDEBAR ------------------------------------------------- -->
     <div class="rp-side">
+
+      <div class="rp-panel">
+        <h3>Layout score</h3>
+        <button id="rp-score-btn" type="button"
+                class="rp-btn rp-btn-neutral">Score this layout</button>
+        <div id="rp-score-verdict"
+             style="margin-top:0.5rem;font-size:0.9rem;color:#c9d1d9;"></div>
+        <ul id="rp-score-breakdown"
+            style="margin:0.4rem 0 0;padding-left:1.1rem;
+                   font-size:0.82rem;color:#c9d1d9;line-height:1.45;"></ul>
+        <div id="rp-score-msg" class="rp-msg"></div>
+      </div>
 
       <div class="rp-panel">
         <h3>Orientation &amp; location</h3>

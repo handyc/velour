@@ -1,8 +1,12 @@
 import base64
+from decimal import Decimal, InvalidOperation
 
-from django.shortcuts import get_object_or_404, render
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
-from .models import Circuit, Part
+from .models import Circuit, Part, PartPriceSnapshot
 
 
 def _render_diagram(circuit):
@@ -54,8 +58,73 @@ def part_detail(request, slug):
     part = get_object_or_404(Part, slug=slug)
     snapshots = list(part.price_snapshots.all())
     uses = list(part.circuit_uses.select_related('circuit').all())
+
+    # Build a tiny sparkline polyline of unit_price_usd over observed_at,
+    # oldest → newest so the line reads left-to-right.
+    spark = None
+    if len(snapshots) >= 2:
+        chrono = sorted(snapshots, key=lambda s: s.observed_at)
+        prices = [float(s.unit_price_usd) for s in chrono]
+        lo, hi = min(prices), max(prices)
+        span = (hi - lo) or 1.0
+        W, H = 180, 32
+        n = len(prices)
+        pts = []
+        for i, p in enumerate(prices):
+            x = (i / (n - 1)) * (W - 2) + 1
+            y = H - 2 - ((p - lo) / span) * (H - 4)
+            pts.append(f"{x:.1f},{y:.1f}")
+        spark = {
+            'w':     W,
+            'h':     H,
+            'points': ' '.join(pts),
+            'first': prices[0],
+            'last':  prices[-1],
+            'min':   lo,
+            'max':   hi,
+        }
+
     return render(request, 'powerlab/part_detail.html', {
         'part':      part,
         'snapshots': snapshots,
         'uses':      uses,
+        'spark':     spark,
     })
+
+
+@login_required
+@require_POST
+def part_record_price(request, slug):
+    """Record a manual price snapshot from the part_detail form, then
+    recompute the rolling-average price."""
+    part = get_object_or_404(Part, slug=slug)
+    vendor = (request.POST.get('vendor') or '').strip()[:100]
+    src    = (request.POST.get('source_url') or '').strip()[:500]
+
+    try:
+        unit_price = Decimal(request.POST.get('unit_price_usd') or '')
+    except (InvalidOperation, TypeError):
+        messages.error(request, 'unit price must be a number')
+        return redirect('powerlab:part_detail', slug=part.slug)
+
+    if unit_price <= 0:
+        messages.error(request, 'unit price must be positive')
+        return redirect('powerlab:part_detail', slug=part.slug)
+    if not vendor:
+        messages.error(request, 'vendor required')
+        return redirect('powerlab:part_detail', slug=part.slug)
+
+    try:
+        qty_break = int(request.POST.get('qty_break') or '1')
+    except ValueError:
+        qty_break = 1
+    if qty_break < 1:
+        qty_break = 1
+
+    PartPriceSnapshot.objects.create(
+        part=part, vendor=vendor, unit_price_usd=unit_price,
+        qty_break=qty_break, source_url=src,
+    )
+    part.recompute_avg_price()
+    messages.success(request, f'recorded {vendor} @ ${unit_price}')
+    return redirect('powerlab:part_detail', slug=part.slug)

@@ -29,6 +29,49 @@
   .pl-num { text-align: right; color: #c9d1d9;
             font-variant-numeric: tabular-nums; }
   .pl-missing { color: #6e7681; }
+  .pl-price-row {
+    display: flex; align-items: baseline; gap: 1rem;
+    margin: 0.4rem 0 0.8rem;
+    color: #c9d1d9;
+  }
+  .pl-price-row .pl-avg { font-size: 1.4rem; font-weight: 600; }
+  .pl-price-row small { color: #8b949e; }
+  .pl-price-row .pl-trend-up   { color: #f85149; }
+  .pl-price-row .pl-trend-down { color: #3fb950; }
+  .pl-spark {
+    background: #0d1117; border: 1px solid #21262d;
+    border-radius: 4px; padding: 4px 6px;
+    display: inline-block; vertical-align: middle;
+  }
+  .pl-spark polyline { fill: none; stroke: #58a6ff; stroke-width: 1.2; }
+  .pl-form {
+    background: #0d1117; border: 1px solid #21262d;
+    border-radius: 6px; padding: 0.8rem 1rem; margin: 0.5rem 0 1rem;
+    display: grid; gap: 0.5rem;
+    grid-template-columns: 1.3fr 1fr 0.8fr 1.8fr auto;
+    align-items: end;
+  }
+  .pl-form label { display: block; color: #8b949e; font-size: 0.72rem;
+                   text-transform: uppercase; letter-spacing: 0.04em;
+                   margin-bottom: 0.15rem; }
+  .pl-form input {
+    width: 100%; box-sizing: border-box;
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.35rem 0.5rem; font: inherit; font-size: 0.88rem;
+  }
+  .pl-form button {
+    background: #238636; border: 1px solid #2ea043; color: #fff;
+    border-radius: 4px; padding: 0.4rem 0.8rem; font: inherit;
+    font-size: 0.85rem; cursor: pointer;
+  }
+  .pl-form button:hover { background: #2ea043; }
+  .pl-msg-ok  { color: #3fb950; font-size: 0.85rem; }
+  .pl-msg-err { color: #f85149; font-size: 0.85rem; }
+  @media (max-width: 720px) {
+    .pl-form { grid-template-columns: 1fr 1fr; }
+    .pl-form button { grid-column: span 2; }
+  }
 </style>
 {% endblock %}
 
@@ -56,6 +99,62 @@
   {% if part.datasheet_url %}
   <p><a href="{{ part.datasheet_url }}" target="_blank" style="color:#58a6ff;">Datasheet ↗</a></p>
   {% endif %}
+
+  <div class="pl-section-label">pricing</div>
+  {% for m in messages %}
+    <div class="{% if m.tags == 'error' %}pl-msg-err{% else %}pl-msg-ok{% endif %}">{{ m }}</div>
+  {% endfor %}
+  <div class="pl-price-row">
+    {% if part.est_unit_price_usd %}
+      <span class="pl-avg">${{ part.est_unit_price_usd }}</span>
+      <small>rolling avg · {{ snapshots|length }} snapshot{{ snapshots|length|pluralize }}</small>
+      {% if spark %}
+        <svg class="pl-spark" width="{{ spark.w }}" height="{{ spark.h }}"
+             viewBox="0 0 {{ spark.w }} {{ spark.h }}"
+             xmlns="http://www.w3.org/2000/svg"
+             role="img" aria-label="price history">
+          <polyline points="{{ spark.points }}"/>
+        </svg>
+        <small>
+          <span>${{ spark.min|floatformat:4 }}–${{ spark.max|floatformat:4 }}</span>
+          {% if spark.last > spark.first %}
+            <span class="pl-trend-up">▲</span>
+          {% elif spark.last < spark.first %}
+            <span class="pl-trend-down">▼</span>
+          {% else %}
+            <span>—</span>
+          {% endif %}
+        </small>
+      {% endif %}
+    {% else %}
+      <span class="pl-missing">no price data yet — add a snapshot below</span>
+    {% endif %}
+  </div>
+
+  <form class="pl-form" method="post"
+        action="{% url 'powerlab:part_record_price' part.slug %}">
+    {% csrf_token %}
+    <div>
+      <label for="pl-vendor">vendor</label>
+      <input id="pl-vendor" name="vendor" type="text" required
+             placeholder="Mouser / Digi-Key / LCSC / Aliexpress">
+    </div>
+    <div>
+      <label for="pl-price">unit price (USD)</label>
+      <input id="pl-price" name="unit_price_usd" type="number"
+             step="0.0001" min="0.0001" required placeholder="0.1234">
+    </div>
+    <div>
+      <label for="pl-qty">qty break</label>
+      <input id="pl-qty" name="qty_break" type="number" min="1" value="1">
+    </div>
+    <div>
+      <label for="pl-src">source URL</label>
+      <input id="pl-src" name="source_url" type="url"
+             placeholder="https://...">
+    </div>
+    <button type="submit">Record</button>
+  </form>
 
   <div class="pl-section-label">price snapshots</div>
   {% if snapshots %}
