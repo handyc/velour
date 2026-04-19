@@ -12,4 +12,8 @@ urlpatterns = [
          views.part_record_price, name='part_record_price'),
     path('<slug:slug>/', views.detail, name='detail'),
     path('<slug:slug>/compare/', views.compare, name='compare'),
+    path('<slug:slug>/schematic/edit/',
+         views.edit_schematic, name='edit_schematic'),
+    path('<slug:slug>/schematic/save/',
+         views.save_schematic, name='save_schematic'),
 ]

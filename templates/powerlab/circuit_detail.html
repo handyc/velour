@@ -27,6 +27,11 @@
   .pl-diagram pre { margin: 0; color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
                     font-size: 0.82rem; line-height: 1.25; }
   .pl-diagram img { max-width: 100%; height: auto; display: block; }
+  .pl-schematic-svg { width: 100%; height: auto; display: block; }
+  .pl-schematic-edit {
+    color: #58a6ff; text-decoration: none; font-size: 0.82rem;
+    margin-left: 0.5rem; text-transform: none; letter-spacing: 0;
+  }
   .pl-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
   .pl-table th, .pl-table td {
     text-align: left; padding: 0.4rem 0.5rem;
@@ -62,16 +67,24 @@
   <div class="pl-body">{{ circuit.body_md }}</div>
   {% endif %}
 
-  {% if circuit.diagram_source %}
-  <div class="pl-section-label">schematic</div>
+  <div class="pl-section-label">
+    schematic
+    <a class="pl-schematic-edit" href="{% url 'powerlab:edit_schematic' circuit.slug %}">edit →</a>
+  </div>
   <div class="pl-diagram">
-    {% if diagram_b64 %}
+    {% if schematic_svg %}
+      {{ schematic_svg|safe }}
+    {% elif diagram_b64 %}
       <img src="data:image/png;base64,{{ diagram_b64 }}" alt="schematic">
-    {% else %}
+    {% elif circuit.diagram_source %}
       <pre>{{ circuit.diagram_source }}</pre>
+    {% else %}
+      <div style="color:#8b949e; font-size:0.85rem;">
+        No schematic yet — <a href="{% url 'powerlab:edit_schematic' circuit.slug %}"
+        style="color:#58a6ff; text-decoration:none;">open the editor</a> to draw one.
+      </div>
     {% endif %}
   </div>
-  {% endif %}
 
   <div class="pl-section-label">
     bill of materials

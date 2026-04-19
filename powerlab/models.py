@@ -173,6 +173,13 @@ class Circuit(models.Model):
         help_text="Diagram source — rendered via codex.rendering.diagrams.",
     )
 
+    # MVP browser schematic editor: nodes + wires in a single JSON blob.
+    # See powerlab/schematic.py for shape and SVG rendering.
+    schematic_json = models.JSONField(
+        default=dict, blank=True,
+        help_text="Browser-edited schematic — { nodes: [...], wires: [...] }.",
+    )
+
     display_order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

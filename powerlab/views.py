@@ -1,11 +1,14 @@
 import base64
+import json
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from . import schematic as pl_schematic
 from .models import Circuit, Part, PartPriceSnapshot
 
 
@@ -42,10 +45,54 @@ def index(request):
 def detail(request, slug):
     circuit = get_object_or_404(Circuit, slug=slug)
     bom = list(circuit.bom.select_related('part').all())
+    schematic_doc = pl_schematic.normalise(circuit.schematic_json or {})
+    schematic_svg = pl_schematic.render_svg(schematic_doc) if schematic_doc.get('nodes') else ''
     return render(request, 'powerlab/circuit_detail.html', {
-        'circuit':      circuit,
-        'bom':          bom,
-        'diagram_b64':  _render_diagram(circuit),
+        'circuit':       circuit,
+        'bom':           bom,
+        'diagram_b64':   _render_diagram(circuit),
+        'schematic_svg': schematic_svg,
+    })
+
+
+@login_required
+def edit_schematic(request, slug):
+    circuit = get_object_or_404(Circuit, slug=slug)
+    doc = pl_schematic.normalise(circuit.schematic_json or {})
+    # Hand the SVG renderer's symbol data to the browser so client-side
+    # rendering stays pixel-matched with the server-side render.
+    symbols_js = {
+        kind: {
+            'label': sym['label'],
+            'paths': sym['paths'],
+            'pins':  {pid: [px, py] for pid, (px, py) in sym['pins'].items()},
+        }
+        for kind, sym in pl_schematic.SYMBOLS.items()
+    }
+    return render(request, 'powerlab/circuit_schematic_edit.html', {
+        'circuit':    circuit,
+        'doc_json':   json.dumps(doc),
+        'palette':    pl_schematic.palette_for_template(),
+        'symbols_js': json.dumps(symbols_js),
+    })
+
+
+@login_required
+@require_POST
+def save_schematic(request, slug):
+    circuit = get_object_or_404(Circuit, slug=slug)
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except (ValueError, UnicodeDecodeError):
+        return HttpResponseBadRequest('invalid JSON')
+    doc = pl_schematic.normalise(payload)
+    circuit.schematic_json = doc
+    circuit.save(update_fields=['schematic_json', 'updated_at'])
+    return JsonResponse({
+        'ok':       True,
+        'nodes':    len(doc['nodes']),
+        'wires':    len(doc['wires']),
+        'doc':      doc,
     })
 
 

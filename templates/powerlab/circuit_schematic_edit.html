@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Schematic — {{ circuit.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .sch-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem; color: #c9d1d9; }
+  .sch-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+             margin-bottom: 0.6rem; }
+  .sch-bar .sp { flex: 1; }
+  .sch-bar button, .sch-bar a.btn {
+    background: #161b22; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.25rem 0.55rem; font-size: 0.82rem;
+    cursor: pointer; text-decoration: none;
+  }
+  .sch-bar button:hover { border-color: #58a6ff; color: #58a6ff; }
+  .sch-bar button.on { border-color: #3fb950; color: #3fb950; }
+  .sch-status { color: #8b949e; font-size: 0.78rem; }
+  .sch-split { display: grid; grid-template-columns: 160px 1fr; gap: 0.6rem; }
+  .sch-palette {
+    border: 1px solid #21262d; border-radius: 4px; padding: 0.5rem;
+    background: #0d1117;
+  }
+  .sch-palette h4 { margin: 0 0 0.4rem; font-size: 0.78rem;
+                    color: #8b949e; text-transform: uppercase; letter-spacing: 0.04em; }
+  .sch-palette button {
+    display: block; width: 100%; text-align: left;
+    background: #161b22; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.2rem 0.4rem; font-size: 0.82rem;
+    margin-bottom: 0.25rem; cursor: pointer;
+  }
+  .sch-palette button.sel { border-color: #58a6ff; color: #58a6ff; }
+  .sch-canvas-host {
+    border: 1px solid #21262d; border-radius: 4px; background: #0d1117;
+    overflow: hidden; position: relative;
+  }
+  svg.sch-canvas { display: block; width: 100%; height: 560px;
+                   background: #0d1117; cursor: crosshair; }
+  svg.sch-canvas .pl-node { cursor: move; }
+  svg.sch-canvas .pl-node.sel rect.pl-hit { stroke: #58a6ff; stroke-dasharray: 2 2; }
+  svg.sch-canvas rect.pl-hit { fill: transparent; stroke: transparent; }
+  svg.sch-canvas .pl-pin {
+    fill: #3fb950; stroke: #0d1117; stroke-width: 1;
+    cursor: pointer;
+  }
+  svg.sch-canvas .pl-pin.hot { fill: #f0883e; }
+  svg.sch-canvas .pl-wire { stroke: #c9d1d9; stroke-width: 1.5; fill: none; }
+  svg.sch-canvas .pl-symbol { stroke: #c9d1d9; stroke-width: 1.5; fill: none; }
+  svg.sch-canvas text.pl-label { fill: #8b949e; font-size: 11px;
+                                 font-family: ui-monospace, monospace;
+                                 text-anchor: middle; }
+  .sch-props {
+    background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.6rem; margin-top: 0.6rem; font-size: 0.85rem;
+  }
+  .sch-props label { display: block; color: #8b949e; margin: 0.3rem 0 0.15rem;
+                     font-size: 0.75rem; text-transform: uppercase;
+                     letter-spacing: 0.04em; }
+  .sch-props input {
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.25rem 0.4rem; width: 7rem; font-size: 0.85rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sch-wrap">
+  <div style="color:#8b949e; font-size:0.85rem;">
+    <a href="{% url 'powerlab:detail' circuit.slug %}" style="color:#58a6ff;
+       text-decoration:none;">← {{ circuit.title }}</a>
+  </div>
+  <h1 style="margin:0.2rem 0 0.8rem; font-weight:600;">schematic editor</h1>
+
+  <div class="sch-bar">
+    <button id="sch-mode-move" class="on">move</button>
+    <button id="sch-mode-wire">wire</button>
+    <button id="sch-rotate">rotate (R)</button>
+    <button id="sch-delete">delete (Del)</button>
+    <span class="sp"></span>
+    <span class="sch-status" id="sch-status">—</span>
+    <button id="sch-save">save</button>
+  </div>
+
+  <div class="sch-split">
+    <div class="sch-palette">
+      <h4>palette</h4>
+      {% for p in palette %}
+        <button type="button" class="sch-place" data-kind="{{ p.kind }}">{{ p.label }}</button>
+      {% endfor %}
+    </div>
+
+    <div>
+      <div class="sch-canvas-host">
+        <svg id="sch-canvas" class="sch-canvas"
+             xmlns="http://www.w3.org/2000/svg"
+             viewBox="0 0 800 600"
+             preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="sch-props" id="sch-props" style="display:none;">
+        <strong id="sch-props-kind">—</strong>
+        <label>label</label>
+        <input id="sch-props-label" maxlength="24">
+        <label>value</label>
+        <input id="sch-props-value" maxlength="24" placeholder="e.g. 10k">
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ doc_json|json_script:"sch-doc-data" }}
+
+<script>
+(function(){
+  const SAVE_URL  = "{% url 'powerlab:save_schematic' circuit.slug %}";
+  const CSRF      = "{{ csrf_token }}";
+  const canvas    = document.getElementById('sch-canvas');
+  const statusEl  = document.getElementById('sch-status');
+  const propsEl   = document.getElementById('sch-props');
+  const propKind  = document.getElementById('sch-props-kind');
+  const propLabel = document.getElementById('sch-props-label');
+  const propValue = document.getElementById('sch-props-value');
+  const btnMove   = document.getElementById('sch-mode-move');
+  const btnWire   = document.getElementById('sch-mode-wire');
+  const btnRotate = document.getElementById('sch-rotate');
+  const btnDelete = document.getElementById('sch-delete');
+  const btnSave   = document.getElementById('sch-save');
+
+  const SYMBOLS = {{ symbols_js|safe }};
+  const doc = JSON.parse(document.getElementById('sch-doc-data').textContent);
+  if (!doc.nodes) doc.nodes = [];
+  if (!doc.wires) doc.wires = [];
+
+  let mode = 'move';           // 'move' | 'wire' | 'place'
+  let placeKind = null;        // kind when mode === 'place'
+  let wireFrom = null;         // {nodeId, pin} during wire rubber-band
+  let selectedId = null;
+  let drag = null;             // {id, dx, dy}
+  let nextId = (function(){
+    let max = 0;
+    for (const n of doc.nodes) {
+      const m = /^n(\d+)$/.exec(n.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return max + 1;
+  })();
+  let dirty = false;
+
+  function setStatus(msg, tone){
+    statusEl.textContent = msg;
+    statusEl.style.color = tone === 'bad'  ? '#f85149' :
+                           tone === 'good' ? '#3fb950' : '#8b949e';
+  }
+  function markDirty(){ dirty = true; setStatus('unsaved changes'); }
+
+  function setMode(m){
+    mode = m;
+    btnMove.classList.toggle('on', m === 'move');
+    btnWire.classList.toggle('on', m === 'wire');
+    for (const b of document.querySelectorAll('.sch-place'))
+      b.classList.toggle('sel', m === 'place' && b.dataset.kind === placeKind);
+    wireFrom = null;
+    render();
+  }
+
+  btnMove.addEventListener('click', () => setMode('move'));
+  btnWire.addEventListener('click', () => setMode('wire'));
+  for (const b of document.querySelectorAll('.sch-place')){
+    b.addEventListener('click', () => {
+      placeKind = b.dataset.kind;
+      setMode('place');
+      setStatus('click canvas to place ' + b.textContent, '');
+    });
+  }
+
+  btnRotate.addEventListener('click', rotateSelected);
+  btnDelete.addEventListener('click', deleteSelected);
+  btnSave.addEventListener('click', save);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.key === 'r' || e.key === 'R') { rotateSelected(); e.preventDefault(); }
+    if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelected(); e.preventDefault(); }
+    if (e.key === 'Escape') { setMode('move'); selectedId = null; updateProps(); render(); }
+  });
+
+  propLabel.addEventListener('input', () => {
+    const n = findNode(selectedId);
+    if (n) { n.label = propLabel.value.slice(0, 24); markDirty(); render(); }
+  });
+  propValue.addEventListener('input', () => {
+    const n = findNode(selectedId);
+    if (n) { n.value = propValue.value.slice(0, 24); markDirty(); render(); }
+  });
+
+  function findNode(id){ return doc.nodes.find(n => n.id === id); }
+
+  function rotateSelected(){
+    const n = findNode(selectedId);
+    if (!n) return;
+    n.rot = (n.rot + 90) % 360;
+    markDirty(); render();
+  }
+  function deleteSelected(){
+    if (!selectedId) return;
+    doc.nodes = doc.nodes.filter(n => n.id !== selectedId);
+    doc.wires = doc.wires.filter(w => !w.from.startsWith(selectedId + '.')
+                                    && !w.to.startsWith(selectedId + '.'));
+    selectedId = null;
+    updateProps();
+    markDirty(); render();
+  }
+
+  function svgPoint(e){
+    const r = canvas.getBoundingClientRect();
+    const vb = canvas.viewBox.baseVal;
+    const x = (e.clientX - r.left) * vb.width  / r.width;
+    const y = (e.clientY - r.top)  * vb.height / r.height;
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  function rotate(x, y, deg){
+    if (!deg) return [x, y];
+    const a = deg * Math.PI / 180;
+    const c = Math.cos(a), s = Math.sin(a);
+    return [x*c - y*s, x*s + y*c];
+  }
+
+  function pinXY(n, pinId){
+    const sym = SYMBOLS[n.kind]; if (!sym) return null;
+    const p = sym.pins[pinId]; if (!p) return null;
+    const [rx, ry] = rotate(p[0], p[1], n.rot || 0);
+    return { x: n.x + rx, y: n.y + ry };
+  }
+
+  function addNode(kind, x, y){
+    const id = 'n' + (nextId++);
+    doc.nodes.push({
+      id, kind, x, y, rot: 0, label: '', value: '',
+    });
+    selectedId = id;
+    markDirty();
+  }
+
+  canvas.addEventListener('click', (e) => {
+    if (mode === 'place' && placeKind){
+      const p = svgPoint(e);
+      addNode(placeKind, p.x, p.y);
+      updateProps();
+      setMode('move');
+      render();
+      return;
+    }
+    if (e.target === canvas){
+      // background click = deselect + cancel wiring
+      selectedId = null;
+      wireFrom = null;
+      updateProps();
+      render();
+    }
+  });
+
+  // Drag nodes with pointer events on .pl-node groups (see render()).
+  function onNodePointerDown(e, id){
+    if (mode !== 'move') return;
+    const n = findNode(id); if (!n) return;
+    const p = svgPoint(e);
+    drag = { id, dx: p.x - n.x, dy: p.y - n.y };
+    selectedId = id;
+    updateProps();
+    canvas.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    render();
+  }
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const n = findNode(drag.id); if (!n) return;
+    const p = svgPoint(e);
+    // snap to 10 px grid
+    n.x = Math.round((p.x - drag.dx) / 10) * 10;
+    n.y = Math.round((p.y - drag.dy) / 10) * 10;
+    markDirty(); render();
+  });
+  canvas.addEventListener('pointerup', () => { drag = null; });
+
+  function onPinClick(e, nodeId, pinId){
+    if (mode !== 'wire') return;
+    e.stopPropagation();
+    if (!wireFrom){
+      wireFrom = { nodeId, pin: pinId };
+      setStatus('click the other pin to finish the wire', '');
+    } else {
+      if (wireFrom.nodeId !== nodeId){
+        doc.wires.push({
+          from: wireFrom.nodeId + '.' + wireFrom.pin,
+          to:   nodeId + '.' + pinId,
+        });
+        markDirty();
+      }
+      wireFrom = null;
+    }
+    render();
+  }
+
+  function updateProps(){
+    const n = findNode(selectedId);
+    if (!n){ propsEl.style.display = 'none'; return; }
+    propsEl.style.display = '';
+    propKind.textContent = n.kind + ' · ' + n.id;
+    propLabel.value = n.label || '';
+    propValue.value = n.value || '';
+  }
+
+  function renderSymbolPaths(kind){
+    // Fetched once per kind from the palette data attribute.
+    const sym = SYMBOLS[kind]; if (!sym) return '';
+    return sym.paths.map(d => `<path d="${d}" class="pl-symbol"/>`).join('');
+  }
+
+  function esc(s){ return (s || '').replace(/[&<>"]/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',
+  }[c])); }
+
+  function render(){
+    // Grid backdrop + wires + nodes + labels.
+    let out = '';
+    out += `<defs><pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse">`
+         + `<path d="M 20 0 L 0 0 0 20" fill="none" stroke="#1f2937" stroke-width="0.5"/>`
+         + `</pattern></defs>`
+         + `<rect width="100%" height="100%" fill="url(#g)"/>`;
+
+    // Wires (drawn before nodes so junction dots sit on top).
+    for (const w of doc.wires){
+      const [aN, aP] = w.from.split('.');
+      const [bN, bP] = w.to.split('.');
+      const na = findNode(aN), nb = findNode(bN);
+      if (!na || !nb) continue;
+      const a = pinXY(na, aP), b = pinXY(nb, bP);
+      if (!a || !b) continue;
+      out += `<path class="pl-wire" d="M ${a.x} ${a.y} L ${b.x} ${a.y} L ${b.x} ${b.y}"/>`;
+    }
+
+    // Nodes.
+    for (const n of doc.nodes){
+      const sym = SYMBOLS[n.kind]; if (!sym) continue;
+      const sel = (n.id === selectedId) ? ' sel' : '';
+      out += `<g class="pl-node${sel}" data-id="${n.id}"`
+           + ` transform="translate(${n.x},${n.y}) rotate(${n.rot||0})">`;
+      out += renderSymbolPaths(n.kind);
+      // Hit rect for easy pointer capture.
+      out += `<rect class="pl-hit" x="-36" y="-30" width="72" height="60"/>`;
+      // Pins.
+      for (const [pinId, [px, py]] of Object.entries(sym.pins)){
+        const hot = (wireFrom && wireFrom.nodeId === n.id && wireFrom.pin === pinId)
+                    ? ' hot' : '';
+        out += `<circle class="pl-pin${hot}" cx="${px}" cy="${py}" r="3"`
+             + ` data-node="${n.id}" data-pin="${pinId}"/>`;
+      }
+      out += `</g>`;
+      // Un-rotated label.
+      const txt = [n.label, n.value].filter(Boolean).join(' ');
+      if (txt){
+        out += `<text class="pl-label" x="${n.x}" y="${n.y + 28}">${esc(txt)}</text>`;
+      }
+    }
+
+    canvas.innerHTML = out;
+
+    // Event handlers on freshly created elements.
+    for (const g of canvas.querySelectorAll('.pl-node')){
+      const id = g.dataset.id;
+      g.addEventListener('pointerdown', (e) => onNodePointerDown(e, id));
+    }
+    for (const p of canvas.querySelectorAll('.pl-pin')){
+      p.addEventListener('click', (e) => onPinClick(e, p.dataset.node, p.dataset.pin));
+    }
+  }
+
+  function save(){
+    btnSave.disabled = true;
+    setStatus('saving…', '');
+    fetch(SAVE_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({version: 1, nodes: doc.nodes, wires: doc.wires}),
+    }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(res => {
+        btnSave.disabled = false;
+        dirty = false;
+        setStatus(`saved · ${res.nodes} nodes, ${res.wires} wires`, 'good');
+      })
+      .catch(err => {
+        btnSave.disabled = false;
+        setStatus('save failed: ' + err, 'bad');
+      });
+  }
+
+  window.addEventListener('beforeunload', (e) => {
+    if (dirty) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  setMode('move');
+  updateProps();
+  render();
+  setStatus(`loaded · ${doc.nodes.length} nodes, ${doc.wires.length} wires`, '');
+})();
+</script>
+{% endblock %}
