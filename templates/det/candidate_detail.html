@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Det candidate #{{ cand.pk }} — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  h1 { font-size: 1.1rem; margin: 0 0 0.2rem; }
+  h2 { font-size: 0.9rem; margin: 1rem 0 0.4rem; }
+  .subtitle { color: #8b949e; font-size: 0.8rem; margin-bottom: 0.8rem; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 3px;
+         font-size: 0.72rem; font-family: monospace; }
+  .tag.class1 { background: #21262d; color: #8b949e; }
+  .tag.class2 { background: #3a2f0c; color: #e3b341; }
+  .tag.class3 { background: #3f1a1a; color: #f85149; }
+  .tag.class4 { background: #0c2c4d; color: #58a6ff; }
+  .tag.unknown { background: #21262d; color: #6e7681; }
+
+  .grid {
+    display: grid; grid-template-columns: 1.1fr 1fr; gap: 1.2rem;
+  }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+    padding: 0.8rem;
+  }
+
+  canvas#viewport {
+    display: block; background: #000; border-radius: 4px;
+    width: 100%; height: auto; image-rendering: pixelated;
+  }
+  .controls {
+    display: flex; gap: 0.4rem; align-items: center; margin-top: 0.6rem;
+    font-size: 0.78rem;
+  }
+  .controls button {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.6rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .controls button:hover { border-color: #58a6ff; }
+  .controls .tick { color: #8b949e; font-family: monospace;
+                    margin-left: auto; }
+  .slider { flex: 1; }
+
+  dl.measurements {
+    display: grid; grid-template-columns: auto 1fr; gap: 2px 0.8rem;
+    font-size: 0.78rem; margin: 0;
+  }
+  dl.measurements dt { color: #8b949e; font-family: monospace; }
+  dl.measurements dd { color: #c9d1d9; font-family: monospace; margin: 0; }
+
+  .score-breakdown {
+    margin-top: 0.6rem; font-size: 0.74rem; color: #8b949e;
+    font-family: monospace;
+  }
+  .score-breakdown li { list-style: none; }
+  .score-breakdown li b { color: #58a6ff; }
+
+  details.rules-block {
+    margin-top: 0.8rem; font-size: 0.75rem;
+  }
+  details.rules-block summary {
+    cursor: pointer; color: #8b949e; padding: 0.25rem 0;
+  }
+  pre.rules {
+    max-height: 300px; overflow: auto; font-size: 0.7rem;
+    background: #010409; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.5rem; color: #c9d1d9; margin: 0.4rem 0 0;
+  }
+
+  form.promote {
+    display: flex; gap: 0.4rem; align-items: center; margin-top: 0.6rem;
+    font-size: 0.78rem;
+  }
+  form.promote input[type=text] {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.4rem; font-size: 0.78rem;
+    flex: 1;
+  }
+  form.promote .btn, a.btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.3rem 0.65rem; border-radius: 3px; text-decoration: none;
+    font-size: 0.78rem; cursor: pointer;
+  }
+  form.promote .btn:hover, a.btn:hover { background: #2ea043; }
+  .promoted-note { color: #2ea043; font-size: 0.82rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p style="font-size:0.75rem;margin:0 0 0.35rem">
+    <a href="{% url 'det:index' %}" style="color:#8b949e">← Det</a> /
+    <a href="{% url 'det:search_detail' pk=cand.run_id %}"
+       style="color:#8b949e">Search #{{ cand.run_id }}</a>
+  </p>
+  <h1>Candidate #{{ cand.pk }}
+    <span class="tag {{ cand.est_class }}">
+      {{ cand.get_est_class_display }}</span>
+    <span style="color:#58a6ff;font-family:monospace;margin-left:0.5rem">
+      score {{ cand.score }}</span>
+  </h1>
+  <p class="subtitle">
+    {{ cand.n_rules }} 7-tuple rules ·
+    {{ cand.run.n_colors }} colors ·
+    grid {{ cand.run.screen_width }}×{{ cand.run.screen_height }} ·
+    horizon {{ cand.run.horizon }}
+  </p>
+
+  <div class="grid">
+    <div class="panel">
+      <canvas id="viewport"></canvas>
+      <div class="controls">
+        <button id="btn-play">▶ play</button>
+        <button id="btn-step">step</button>
+        <button id="btn-reset">reset</button>
+        <input id="slider" type="range" class="slider" min="0"
+               value="0" step="1">
+        <span class="tick" id="tick-label">t=0</span>
+      </div>
+      <p style="color:#6e7681;font-size:0.7rem;margin-top:0.6rem;
+                line-height:1.4">
+        Preview of the same trajectory Det scored — seeded grid,
+        same ruleset, same hex neighbor order as Automaton. If this
+        looks promising, promote it below to run it at full scale.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2 style="margin-top:0">Measurements</h2>
+      <dl class="measurements">
+        <dt>uniform tail</dt>
+        <dd>{{ cand.analysis.uniform|yesno:"yes,no" }}</dd>
+        <dt>period</dt>
+        <dd>{% if cand.analysis.period %}{{ cand.analysis.period }}
+          (entered t={{ cand.analysis.entered_at }})
+          {% else %}aperiodic within horizon{% endif %}</dd>
+        <dt>ended at tick</dt>
+        <dd>{{ cand.analysis.ended_at_tick }}</dd>
+        <dt>activity tail</dt>
+        <dd>{{ cand.analysis.activity_tail }}</dd>
+        <dt>block entropy</dt>
+        <dd>{{ cand.analysis.block_entropy }}</dd>
+        <dt>density profile</dt>
+        <dd>{{ cand.analysis.density_profile }}</dd>
+        <dt>color diversity</dt>
+        <dd>{{ cand.analysis.color_diversity }} of {{ cand.run.n_colors }}</dd>
+        <dt>grid seed</dt>
+        <dd>{{ cand.analysis.grid_seed }}</dd>
+      </dl>
+
+      <div class="score-breakdown">
+        <b>Score breakdown</b> ({{ cand.score }} total)
+        <ul style="padding-left:1rem;margin:0.2rem 0 0">
+        {% for k, v in cand.analysis.score_breakdown.items %}
+          <li>{{ k }} · <b>+{{ v }}</b></li>
+        {% endfor %}
+        </ul>
+      </div>
+
+      <h2>Promote</h2>
+      {% if cand.promoted_to %}
+      <p class="promoted-note">Already promoted as
+        <a href="/automaton/" style="color:#2ea043">
+          {{ cand.promoted_to.name }}</a>.
+      </p>
+      {% else %}
+      <form class="promote" method="post"
+            action="{% url 'det:promote_candidate' pk=cand.pk %}">
+        {% csrf_token %}
+        <input type="text" name="name"
+               placeholder="ruleset name (optional)">
+        <button type="submit" class="btn">Promote to Automaton</button>
+      </form>
+      <p style="color:#6e7681;font-size:0.7rem;margin-top:0.4rem;
+                line-height:1.4">
+        Creates a seeded automaton.RuleSet + Simulation so the
+        trajectory replays identically there at full interactive scale.
+      </p>
+      {% endif %}
+
+      <details class="rules-block">
+        <summary>Rules JSON ({{ cand.n_rules }} entries) ·
+          <a href="{% url 'det:candidate_json' pk=cand.pk %}"
+             style="color:#58a6ff">raw</a>
+        </summary>
+        <pre class="rules">{{ rules_pretty }}</pre>
+      </details>
+    </div>
+  </div>
+</div>
+
+{{ frames_json|json_script:"frames-data" }}
+{{ palette_json|json_script:"palette-data" }}
+
+<script>
+(function () {
+  const frames = JSON.parse(document.getElementById('frames-data').textContent);
+  const palette = JSON.parse(document.getElementById('palette-data').textContent);
+  const canvas = document.getElementById('viewport');
+  const ctx = canvas.getContext('2d');
+  const slider = document.getElementById('slider');
+  const tickLabel = document.getElementById('tick-label');
+  const btnPlay = document.getElementById('btn-play');
+  const btnStep = document.getElementById('btn-step');
+  const btnReset = document.getElementById('btn-reset');
+
+  const W = frames[0][0].length;
+  const H = frames[0].length;
+  const CELL = 14;       // px per cell edge for the hex render
+  const HEX_H = CELL * 1.732; // height of a flat-topped hex
+  // Axial-hex render: even columns drop by HEX_H/2 for staggered rows,
+  // matching the automaton run page's neighbor convention.
+  canvas.width = W * CELL * 1.5 + CELL;
+  canvas.height = H * HEX_H + HEX_H;
+  slider.max = frames.length - 1;
+
+  function drawHex(cx, cy, r, color) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = Math.PI / 3 * i;
+      const x = cx + r * Math.cos(angle);
+      const y = cy + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function drawFrame(t) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const grid = frames[t];
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        const cx = CELL + c * CELL * 1.5;
+        const cy = HEX_H / 2 + r * HEX_H + ((c % 2 === 0) ? 0 : HEX_H / 2);
+        const v = grid[r][c];
+        drawHex(cx, cy, CELL * 0.9, palette[v] || '#333');
+      }
+    }
+    tickLabel.textContent = 't=' + t;
+  }
+
+  let t = 0;
+  let playing = false;
+  let raf = null;
+
+  function setT(newT) {
+    t = Math.max(0, Math.min(frames.length - 1, newT));
+    slider.value = t;
+    drawFrame(t);
+  }
+
+  function loop() {
+    if (!playing) return;
+    setT(t + 1);
+    if (t >= frames.length - 1) { playing = false; btnPlay.textContent = '▶ play'; return; }
+    raf = setTimeout(() => requestAnimationFrame(loop), 110);
+  }
+
+  btnPlay.addEventListener('click', () => {
+    playing = !playing;
+    btnPlay.textContent = playing ? '⏸ pause' : '▶ play';
+    if (playing) {
+      if (t >= frames.length - 1) t = 0;
+      loop();
+    } else if (raf) { clearTimeout(raf); }
+  });
+  btnStep.addEventListener('click', () => { playing = false;
+    btnPlay.textContent = '▶ play'; setT(t + 1); });
+  btnReset.addEventListener('click', () => { playing = false;
+    btnPlay.textContent = '▶ play'; setT(0); });
+  slider.addEventListener('input', () => { playing = false;
+    btnPlay.textContent = '▶ play'; setT(parseInt(slider.value, 10)); });
+
+  drawFrame(0);
+})();
+</script>
+{% endblock %}

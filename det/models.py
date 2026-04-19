@@ -1,11 +1,130 @@
-"""Det — deterministic engine, counterpart to Oracle / Identity / Evolution.
+"""Det — a search engine for Class-4 (edge-of-chaos) hex CA rulesets.
 
-Scope is deliberately TBD at scaffold time; see memory note
-`project_det_app_backlog`. When the shape of the app firms up, the first
-model probably wants to capture a *rule* (inputs → output) so it can be
-replayed byte-for-byte. Keep it in the spirit of: Identity is poetry,
-Oracle is judgment, Evolution is search — Det is the thing that, given
-the same inputs, always returns the same answer.
+Rule 110, in Wolfram's elementary 1-D family, is the canonical
+example of Class 4: localized structures that propagate and
+interact on a textured background, long transients before any
+cycle, computationally universal. Det's job is to look for rulesets
+on Automaton's hex substrate that exhibit analogous dynamics.
+
+The workflow:
+  1. User kicks off a `SearchRun` with parameters (n_colors, how
+     many candidates to try, grid size for screening, horizon,
+     wildcard fraction).
+  2. `det.search.execute(run)` generates random 7-tuple rulesets,
+     steps each forward with `automaton.detector.step_exact`,
+     measures them, and saves each as a `Candidate` with its score.
+  3. Candidates are ranked. The user picks the most promising and
+     promotes them into `automaton.RuleSet`s, where they can be
+     run and watched at full scale.
 """
 
-from django.db import models  # noqa: F401 — intentional, models arrive later
+from django.db import models
+
+
+class SearchRun(models.Model):
+    """One sweep: generate N random hex rulesets and score each."""
+
+    STATUS_CHOICES = [
+        ('pending',  'Pending'),
+        ('running',  'Running'),
+        ('finished', 'Finished'),
+        ('failed',   'Failed'),
+    ]
+
+    label = models.CharField(max_length=200, blank=True,
+        help_text='Optional human label. Auto-generated from params '
+                  'if left blank.')
+    n_colors = models.PositiveSmallIntegerField(default=4,
+        help_text='Number of cell colors (2-4). n=0 and n=1 are '
+                  'trivially deterministic and not useful here.')
+    n_candidates = models.PositiveIntegerField(default=200,
+        help_text='How many random rulesets to generate and score.')
+    n_rules_per_candidate = models.PositiveIntegerField(default=80,
+        help_text='How many 7-tuple rules in each candidate ruleset.')
+    wildcard_pct = models.PositiveSmallIntegerField(default=25,
+        help_text='Fraction of neighbor positions that are wildcards '
+                  '(-1 / "any"). Higher = coarser rules, more coverage '
+                  'of the 7-tuple space but noisier dynamics.')
+    screen_width = models.PositiveSmallIntegerField(default=20,
+        help_text='Grid width used to screen candidates (kept small '
+                  'so a sweep is interactive).')
+    screen_height = models.PositiveSmallIntegerField(default=20)
+    horizon = models.PositiveSmallIntegerField(default=40,
+        help_text='Max ticks to step each candidate forward before '
+                  'measuring.')
+    seed = models.CharField(max_length=64, blank=True,
+        help_text='RNG seed for reproducibility. Auto-set from '
+                  'timestamp if blank.')
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='pending')
+    error = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.label or f'SearchRun #{self.pk} (n={self.n_colors})'
+
+    @property
+    def duration_seconds(self):
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
+
+
+class Candidate(models.Model):
+    """One scored random ruleset.
+
+    `rules_json` stores the 7-tuple rules in the same shape Automaton
+    uses, so promotion is a straight translation to `automaton.ExactRule`.
+    `analysis` keeps the raw measurements; `score` is the single
+    number the ranking UI sorts on.
+    """
+
+    CLASS_CHOICES = [
+        ('class1', 'Class 1 — uniform'),
+        ('class2', 'Class 2 — periodic'),
+        ('class3', 'Class 3 — chaotic'),
+        ('class4', 'Class 4 — complex / edge of chaos'),
+        ('unknown', 'Unknown'),
+    ]
+
+    run = models.ForeignKey(SearchRun, on_delete=models.CASCADE,
+                            related_name='candidates')
+    rules_json = models.JSONField(default=list,
+        help_text='List of dicts with keys s, n (6-tuple), r — same '
+                  'shape automaton.detector.step_exact consumes.')
+    n_rules = models.PositiveIntegerField(default=0)
+    rules_hash = models.CharField(max_length=16, db_index=True,
+        help_text='Stable short hash of the rules list so duplicates '
+                  'can be deduped within a run.')
+
+    score = models.FloatField(default=0.0,
+        help_text='Class-4-likeness, higher is better. Composed in '
+                  'det.search.score_candidate.')
+    est_class = models.CharField(max_length=16, choices=CLASS_CHOICES,
+                                 default='unknown')
+    analysis = models.JSONField(default=dict,
+        help_text='Raw measurements: uniform, period, activity_rate, '
+                  'block_entropy, density_profile, color_diversity, '
+                  'ended_at_tick.')
+
+    # If a user decides this candidate is worth keeping, we copy it
+    # into Automaton's ruleset/simulation tables and remember the FK
+    # here so the UI can link to the interactive page.
+    promoted_to = models.ForeignKey('automaton.RuleSet',
+        null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='det_candidates')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-score', 'id']
+        indexes = [models.Index(fields=['run', '-score'])]
+
+    def __str__(self):
+        return (f'Candidate #{self.pk} ({self.est_class}, '
+                f'score={self.score:.2f})')

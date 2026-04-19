@@ -4,62 +4,213 @@
 
 {% block extra_head %}
 <style>
-  .det-wrap { max-width: 760px; margin: 2rem auto; padding: 0 1rem;
+  .det-wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
               color: #c9d1d9; }
-  .det-wrap h1 { margin-bottom: 0.25rem; }
-  .det-wrap .lede { color: #8b949e; margin-bottom: 1.5rem;
-                    max-width: 62ch; line-height: 1.5; }
-  .det-wrap .trio {
-    display: grid; gap: 0.75rem;
-    grid-template-columns: repeat(3, 1fr);
-    margin: 1.5rem 0;
+  .det-wrap h1 { margin-bottom: 0.25rem; font-size: 1.4rem; }
+  .det-wrap .lede { color: #8b949e; max-width: 68ch; line-height: 1.55;
+                    margin: 0 0 1.25rem; font-size: 0.9rem; }
+  .det-wrap .lede em { color: #c9d1d9; font-style: normal; }
+  .det-wrap .classes {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem;
+    margin: 0.8rem 0 1.3rem; font-size: 0.78rem;
   }
-  .det-wrap .trio .peer {
-    border: 1px solid #21262d; border-radius: 6px;
-    padding: 0.75rem 0.9rem; background: #0d1117;
+  .det-wrap .classes .cls {
+    border: 1px solid #21262d; background: #0d1117; padding: 0.5rem 0.65rem;
+    border-radius: 4px; border-left-width: 3px;
   }
-  .det-wrap .trio .peer b { color: #c9d1d9; }
-  .det-wrap .trio .peer p { color: #8b949e; font-size: 0.85rem;
-                            margin: 0.25rem 0 0; line-height: 1.4; }
-  .det-wrap .scaffold {
-    border: 1px dashed #30363d; border-radius: 6px;
-    padding: 0.9rem 1rem; color: #8b949e; font-size: 0.85rem;
-    background: #0d1117;
+  .cls.c1 { border-left-color: #6e7681; }
+  .cls.c2 { border-left-color: #d29922; }
+  .cls.c3 { border-left-color: #f85149; }
+  .cls.c4 { border-left-color: #58a6ff; }
+  .cls b { color: #c9d1d9; display: block; margin-bottom: 0.2rem; }
+  .cls span { color: #6e7681; font-size: 0.7rem; line-height: 1.35; }
+
+  .newsearch {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1.25rem;
   }
+  .newsearch h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+  .newsearch form {
+    display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+    font-size: 0.78rem;
+  }
+  .newsearch label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  .newsearch input, .newsearch select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.2rem 0.35rem; font-size: 0.78rem;
+  }
+  .newsearch input[type=number] { width: 4rem; }
+  .newsearch .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .newsearch .btn:hover { background: #2ea043; }
+
+  .runlist { display: flex; flex-direction: column; gap: 2px; }
+  .runrow {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: center;
+  }
+  .runrow.s-finished { border-left-color: #2ea043; }
+  .runrow.s-failed   { border-left-color: #f85149; }
+  .runrow.s-running  { border-left-color: #d29922; }
+  .runrow a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .runrow a:hover { color: #58a6ff; }
+  .runrow .meta { color: #6e7681; font-size: 0.68rem;
+                  font-family: monospace; }
+
+  .top-candidates {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.4rem; margin-top: 0.6rem;
+  }
+  .top-candidates .tc {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.5rem 0.6rem; text-decoration: none; color: #c9d1d9;
+    font-size: 0.75rem; line-height: 1.4;
+  }
+  .top-candidates .tc:hover { border-color: #58a6ff; }
+  .top-candidates .tc .score { font-size: 1rem; color: #58a6ff;
+                               font-family: monospace; }
+  .top-candidates .tc .cls { color: #8b949e; font-size: 0.68rem;
+                             text-transform: uppercase; letter-spacing: 0.06em; }
+  .top-candidates .tc.c1 .cls { color: #6e7681; }
+  .top-candidates .tc.c2 .cls { color: #d29922; }
+  .top-candidates .tc.c3 .cls { color: #f85149; }
+  .top-candidates .tc.c4 .cls { color: #58a6ff; }
+  .top-candidates .tc .analytics { color: #6e7681; font-family: monospace;
+                                   font-size: 0.68rem; }
+  h2 { font-size: 0.92rem; margin: 1.1rem 0 0.35rem; color: #c9d1d9; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="det-wrap">
-  <h1>Det</h1>
+  <h1>Det — boundaries of determinism</h1>
   <p class="lede">
-    Deterministic engine — counterpart to Oracle (judgment), Identity
-    (poetry), and Evolution (search). Given the same inputs, Det always
-    returns the same answer. Scope is intentionally undefined at
-    scaffold time; the shape firms up with the first concrete use case.
+    A deterministic engine has just one job: same inputs, same
+    answer. But on a grid of cells following a uniform local rule,
+    identical inputs can still yield four wildly different worlds.
+    Stephen Wolfram's classification names them: <em>Class 1</em>
+    evolves to a single colour; <em>Class 2</em> settles into small
+    stable or periodic patches; <em>Class 3</em> boils into
+    statistical noise; <em>Class 4</em> — the edge of chaos —
+    produces localized structures that drift, collide, and compute.
+    Rule 110 is the canonical 1-D Class 4 rule; Matthew Cook proved
+    it Turing-complete in 2004.
+  </p>
+  <p class="lede">
+    Det searches for <em>Class 4 analogs on Automaton's hexagonal
+    substrate</em> (cell + 6 neighbors, n ∈ {2, 3, 4} colors). It
+    generates random 7-tuple rulesets, steps each forward, measures
+    activity, block entropy, cycle length, and color diversity, and
+    ranks candidates by how Rule-110-like their dynamics look.
+    Promising survivors can be promoted to Automaton for interactive
+    play.
   </p>
 
-  <div class="trio">
-    <div class="peer">
-      <b>Identity</b>
-      <p>Poetry. Mood, ticks, reflections — attention shaped by state.</p>
-    </div>
-    <div class="peer">
-      <b>Oracle</b>
-      <p>Judgment. Classical ML decision trees trained centrally,
-         shipped as 5 KB blobs.</p>
-    </div>
-    <div class="peer">
-      <b>Evolution</b>
-      <p>Search. Three-level GA on a single Agent class, recursive
-         populations.</p>
-    </div>
+  <div class="classes">
+    <div class="cls c1"><b>Class 1</b><span>uniform — dies to a single
+      color</span></div>
+    <div class="cls c2"><b>Class 2</b><span>periodic — still lifes,
+      oscillators, repeating bands</span></div>
+    <div class="cls c3"><b>Class 3</b><span>chaotic — statistically
+      random, no lasting structure</span></div>
+    <div class="cls c4"><b>Class 4</b><span>complex — gliders,
+      long transients, the interesting club</span></div>
   </div>
 
-  <div class="scaffold">
-    Placeholder page. When Det's first rule type lands — likely an
-    <code>(inputs, output)</code> replayable tuple — replace this with
-    a rule registry and a tester. See <code>project_det_app_backlog</code>.
+  <div class="newsearch">
+    <h2>New search</h2>
+    <form method="post" action="{% url 'det:create_search' %}">
+      {% csrf_token %}
+      <label>colors
+        <select name="n_colors">
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+        </select>
+      </label>
+      <label>candidates
+        <input type="number" name="n_candidates" value="150"
+               min="20" max="600">
+      </label>
+      <label>rules / candidate
+        <input type="number" name="n_rules_per_candidate" value="80"
+               min="20" max="300">
+      </label>
+      <label>wildcards %
+        <input type="number" name="wildcard_pct" value="25"
+               min="0" max="80">
+      </label>
+      <label>W
+        <input type="number" name="screen_width" value="20"
+               min="12" max="40">
+      </label>
+      <label>H
+        <input type="number" name="screen_height" value="20"
+               min="12" max="40">
+      </label>
+      <label>horizon
+        <input type="number" name="horizon" value="40"
+               min="20" max="120">
+      </label>
+      <label>label
+        <input type="text" name="label" placeholder="optional"
+               style="width:9rem">
+      </label>
+      <button type="submit" class="btn">Run search</button>
+    </form>
+    <p style="color:#6e7681;font-size:0.7rem;margin:0.5rem 0 0">
+      Runs synchronously. Default params take ~5-15s. For larger
+      sweeps use <code>manage.py det_search</code>.
+    </p>
+  </div>
+
+  {% if top_candidates %}
+  <h2>Top candidates across all searches</h2>
+  <div class="top-candidates">
+    {% for c in top_candidates %}
+    <a class="tc {{ c.est_class|slice:"0:2" }}{{ c.est_class|slice:"5:6" }}"
+       href="{% url 'det:candidate_detail' pk=c.pk %}">
+      <div><span class="score">{{ c.score }}</span>
+        <span class="cls">{{ c.get_est_class_display }}</span></div>
+      <div class="analytics">
+        act {{ c.analysis.activity_tail|default:"?" }} ·
+        ent {{ c.analysis.block_entropy|default:"?" }} ·
+        {% if c.analysis.period %}p {{ c.analysis.period }}{% else %}aperiodic{% endif %}
+      </div>
+      <div style="color:#8b949e;font-size:0.68rem;margin-top:2px">
+        run #{{ c.run_id }} · {{ c.run.n_colors }}c ·
+        {{ c.n_rules }} rules
+        {% if c.promoted_to %}· <span style="color:#2ea043">promoted</span>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>Searches</h2>
+  <div class="runlist">
+    {% for run in runs %}
+    <div class="runrow s-{{ run.status }}">
+      <a href="{% url 'det:search_detail' pk=run.pk %}">
+        {{ run|default:"SearchRun" }}
+        {% if run.label %}<span style="color:#8b949e">— {{ run.label }}</span>{% endif %}
+      </a>
+      <span class="meta">
+        {{ run.n_colors }}c · {{ run.n_candidates }} cands
+        {% if run.duration_seconds %}· {{ run.duration_seconds|floatformat:1 }}s{% endif %}
+        · {{ run.get_status_display }}
+      </span>
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">No searches yet. Run one above.</p>
+    {% endfor %}
   </div>
 </div>
 {% endblock %}

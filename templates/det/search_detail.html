@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}Det search #{{ run.pk }} — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  h1 { font-size: 1.2rem; margin: 0 0 0.25rem; }
+  .subtitle { color: #8b949e; font-size: 0.82rem; margin-bottom: 0.9rem; }
+  .params {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.55rem 0.8rem; font-family: monospace; font-size: 0.76rem;
+    color: #8b949e; margin-bottom: 1rem;
+  }
+  .classbar {
+    display: flex; gap: 4px; margin-bottom: 0.8rem; font-size: 0.75rem;
+  }
+  .classbar a {
+    background: #161b22; padding: 0.3rem 0.55rem; border-radius: 3px;
+    border: 1px solid #21262d; color: #c9d1d9; text-decoration: none;
+  }
+  .classbar a.active, .classbar a:hover { border-color: #58a6ff; }
+  .classbar a .n { color: #6e7681; font-family: monospace;
+                   margin-left: 0.3rem; }
+
+  table.candidates {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+  }
+  table.candidates th, table.candidates td {
+    border-bottom: 1px solid #21262d; padding: 0.3rem 0.5rem;
+    text-align: left;
+  }
+  table.candidates th {
+    background: #0d1117; color: #8b949e; font-weight: 500;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  table.candidates td.num {
+    font-family: monospace; text-align: right; color: #8b949e;
+  }
+  table.candidates td.score {
+    font-family: monospace; color: #58a6ff; font-weight: 500;
+  }
+  table.candidates tr:hover td { background: #0d1117; }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 3px;
+         font-size: 0.68rem; font-family: monospace; }
+  .tag.class1 { background: #21262d; color: #8b949e; }
+  .tag.class2 { background: #3a2f0c; color: #e3b341; }
+  .tag.class3 { background: #3f1a1a; color: #f85149; }
+  .tag.class4 { background: #0c2c4d; color: #58a6ff; }
+  .tag.unknown { background: #21262d; color: #6e7681; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.2rem 0.55rem; border-radius: 3px; text-decoration: none;
+    font-size: 0.72rem;
+  }
+  .promoted { color: #2ea043; font-size: 0.7rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Search #{{ run.pk }}{% if run.label %} — {{ run.label }}{% endif %}</h1>
+  <p class="subtitle">
+    {{ run.get_status_display }} ·
+    created {{ run.created_at|date:"Y-m-d H:i" }}
+    {% if run.duration_seconds %}· {{ run.duration_seconds|floatformat:1 }}s{% endif %}
+  </p>
+
+  <div class="params">
+    n_colors={{ run.n_colors }} · candidates={{ run.n_candidates }} ·
+    rules/candidate={{ run.n_rules_per_candidate }} ·
+    wildcards={{ run.wildcard_pct }}% ·
+    grid={{ run.screen_width }}×{{ run.screen_height }} ·
+    horizon={{ run.horizon }} · seed="{{ run.seed }}"
+    {% if run.error %}<br><span style="color:#f85149">error: {{ run.error }}</span>{% endif %}
+  </div>
+
+  <div class="classbar">
+    <a href="?" {% if not class_filter %}class="active"{% endif %}>all
+      <span class="n">{{ run.candidates.count }}</span></a>
+    <a href="?class=class4" {% if class_filter == 'class4' %}class="active"{% endif %}>
+      class 4 <span class="n">{{ class_counts.class4 }}</span></a>
+    <a href="?class=class3" {% if class_filter == 'class3' %}class="active"{% endif %}>
+      class 3 <span class="n">{{ class_counts.class3 }}</span></a>
+    <a href="?class=class2" {% if class_filter == 'class2' %}class="active"{% endif %}>
+      class 2 <span class="n">{{ class_counts.class2 }}</span></a>
+    <a href="?class=class1" {% if class_filter == 'class1' %}class="active"{% endif %}>
+      class 1 <span class="n">{{ class_counts.class1 }}</span></a>
+    <a href="?class=unknown" {% if class_filter == 'unknown' %}class="active"{% endif %}>
+      unknown <span class="n">{{ class_counts.unknown }}</span></a>
+  </div>
+
+  <table class="candidates">
+    <thead>
+      <tr>
+        <th>#</th><th>class</th><th>score</th>
+        <th>activity</th><th>entropy</th><th>period</th>
+        <th>colors</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in candidates %}
+      <tr>
+        <td><a href="{% url 'det:candidate_detail' pk=c.pk %}">#{{ c.pk }}</a></td>
+        <td><span class="tag {{ c.est_class }}">{{ c.est_class }}</span></td>
+        <td class="score">{{ c.score }}</td>
+        <td class="num">{{ c.analysis.activity_tail|default:"?" }}</td>
+        <td class="num">{{ c.analysis.block_entropy|default:"?" }}</td>
+        <td class="num">
+          {% if c.analysis.period %}{{ c.analysis.period }}{% else %}—{% endif %}
+        </td>
+        <td class="num">{{ c.analysis.color_diversity }}/{{ run.n_colors }}</td>
+        <td>
+          {% if c.promoted_to %}
+          <span class="promoted">promoted →
+            <a href="/automaton/">{{ c.promoted_to.slug }}</a></span>
+          {% else %}
+          <a class="btn" href="{% url 'det:candidate_detail' pk=c.pk %}">preview</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" style="color:#6e7681;text-align:center;padding:1rem">
+        No candidates match this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
