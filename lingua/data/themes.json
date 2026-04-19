@@ -113,6 +113,298 @@
       "Thank you very much."
     ]
   },
+  "computer_programming": {
+    "name": "Computer Programming",
+    "word": [
+      "code", "program", "script", "function", "variable", "constant",
+      "parameter", "argument", "return", "loop", "array", "list",
+      "dictionary", "object", "class", "method", "string", "integer",
+      "float", "boolean", "null", "true", "false", "compile", "debug",
+      "error", "warning", "bug", "file", "folder", "path", "library",
+      "framework", "module", "package", "server", "client", "database",
+      "query", "cache", "memory", "thread", "process", "network",
+      "request", "response", "input", "output", "algorithm", "interface",
+      "keyboard", "mouse", "screen", "computer", "developer", "user"
+    ],
+    "phrase": [
+      "source code", "open source", "pull request", "merge conflict",
+      "null pointer", "stack overflow", "off by one", "race condition",
+      "memory leak", "unit test", "edge case", "linked list",
+      "hash table", "binary tree", "design pattern", "version control",
+      "code review", "continuous integration", "machine learning",
+      "artificial intelligence"
+    ],
+    "sentence": [
+      "The program crashed with a null pointer exception.",
+      "Please review my pull request.",
+      "I pushed my changes to the main branch.",
+      "The build is failing.",
+      "Add a unit test for this function.",
+      "This code has a memory leak.",
+      "Commit your changes before you merge.",
+      "The server is down again.",
+      "Can you help me debug this?",
+      "I need to refactor this module.",
+      "What does this function return?",
+      "Read the documentation before asking.",
+      "The database is not responding."
+    ]
+  },
+  "llms": {
+    "name": "Large Language Models",
+    "word": [
+      "model", "token", "prompt", "completion", "temperature",
+      "embedding", "vector", "transformer", "attention", "layer",
+      "weight", "parameter", "training", "inference", "fine-tuning",
+      "dataset", "corpus", "tokenizer", "vocabulary", "context",
+      "generation", "probability", "softmax", "gradient", "backpropagation",
+      "checkpoint", "bias", "hallucination", "alignment", "reasoning",
+      "agent", "tool", "memory", "retrieval", "grounding", "safety"
+    ],
+    "phrase": [
+      "large language model", "neural network", "foundation model",
+      "context window", "prompt engineering", "chain of thought",
+      "in-context learning", "reinforcement learning", "human feedback",
+      "instruction tuning", "system prompt", "token limit",
+      "vector database", "semantic search", "few-shot example",
+      "zero-shot task", "mixture of experts", "retrieval augmented generation",
+      "model distillation", "knowledge cutoff"
+    ],
+    "sentence": [
+      "The model generated a plausible but incorrect answer.",
+      "Please increase the temperature for more creative output.",
+      "This prompt needs more context to work well.",
+      "The assistant refused because of its safety policy.",
+      "We fine-tuned the model on a domain-specific dataset.",
+      "The context window is too small for this document.",
+      "Chain-of-thought prompting improved the reasoning score.",
+      "The model is hallucinating sources that do not exist.",
+      "We embedded the documents into a vector database.",
+      "Retrieval augmented generation reduces hallucinations.",
+      "The knowledge cutoff means it cannot know recent events.",
+      "Let the agent call tools when it needs real data."
+    ]
+  },
+  "organic_chemistry": {
+    "name": "Organic Chemistry",
+    "word": [
+      "carbon", "hydrogen", "oxygen", "nitrogen", "sulfur", "phosphorus",
+      "atom", "molecule", "bond", "electron", "proton", "neutron",
+      "element", "compound", "reaction", "catalyst", "solvent", "solution",
+      "acid", "base", "salt", "ester", "ether", "alcohol", "aldehyde",
+      "ketone", "amine", "amide", "alkane", "alkene", "alkyne",
+      "aromatic", "benzene", "methane", "ethane", "propane", "butane",
+      "functional group", "isomer", "chirality", "polymer", "monomer",
+      "enzyme", "protein", "amino acid", "carbohydrate", "lipid",
+      "oxidation", "reduction", "synthesis", "hydrolysis"
+    ],
+    "phrase": [
+      "functional group", "double bond", "triple bond", "covalent bond",
+      "hydrogen bond", "reaction mechanism", "activation energy",
+      "rate constant", "organic solvent", "aqueous solution",
+      "amino acid", "fatty acid", "nucleic acid", "peptide bond",
+      "carbon chain", "ring structure", "electron density",
+      "oxidation state", "polar molecule", "non-polar molecule"
+    ],
+    "sentence": [
+      "The reaction proceeds through a six-membered transition state.",
+      "Ethanol is a common organic solvent.",
+      "This molecule contains a chiral carbon.",
+      "The carbonyl group is highly polarised.",
+      "We ran the reaction under a nitrogen atmosphere.",
+      "Benzene is the simplest aromatic compound.",
+      "The enzyme lowers the activation energy of the reaction.",
+      "Amino acids are linked by peptide bonds.",
+      "Oxidation increases the oxidation state of the carbon.",
+      "The product was purified by column chromatography.",
+      "The alcohol was converted into an ester.",
+      "Proteins fold because of hydrogen bonds."
+    ]
+  },
+  "sports": {
+    "name": "Sports",
+    "word": [
+      "sport", "game", "match", "team", "player", "coach", "referee",
+      "score", "goal", "point", "win", "lose", "draw", "tie", "ball",
+      "bat", "racket", "net", "field", "court", "pitch", "track",
+      "stadium", "arena", "gym", "training", "exercise", "fitness",
+      "muscle", "medal", "champion", "trophy", "tournament", "league",
+      "season", "athlete", "football", "soccer", "basketball", "tennis",
+      "volleyball", "baseball", "hockey", "golf", "boxing", "wrestling",
+      "swimming", "running", "cycling", "skiing", "surfing", "climbing",
+      "yoga", "rugby", "cricket", "Olympic"
+    ],
+    "phrase": [
+      "world cup", "gold medal", "silver medal", "bronze medal",
+      "penalty kick", "red card", "yellow card", "home team", "away team",
+      "personal best", "world record", "Olympic games", "final match",
+      "season ticket", "half time", "extra time", "match point",
+      "fair play", "winning streak", "opening ceremony"
+    ],
+    "sentence": [
+      "Our team won the match three to two.",
+      "Who is your favourite player?",
+      "The referee gave him a red card.",
+      "He broke the world record.",
+      "I go to the gym three times a week.",
+      "They lost in the final.",
+      "She scored the winning goal.",
+      "The stadium was completely full.",
+      "Tennis is played on a court.",
+      "Let's watch the game together.",
+      "He trains every morning before breakfast.",
+      "The Olympic games are held every four years."
+    ]
+  },
+  "intimacy": {
+    "name": "Sex, Love & Relationships",
+    "word": [
+      "love", "kiss", "hug", "embrace", "touch", "feeling", "emotion",
+      "heart", "body", "skin", "boyfriend", "girlfriend", "partner",
+      "spouse", "husband", "wife", "fianc\u00e9", "fianc\u00e9e",
+      "couple", "relationship", "romance", "date", "attraction",
+      "desire", "passion", "intimacy", "flirt", "crush", "affection",
+      "jealousy", "trust", "consent", "condom", "contraception",
+      "pregnancy", "sexuality", "gender", "orientation", "marriage",
+      "wedding", "honeymoon", "divorce", "breakup", "ex"
+    ],
+    "phrase": [
+      "on a date", "in love", "first kiss", "first date", "blind date",
+      "long-term relationship", "open relationship", "romantic partner",
+      "safe sex", "sexual health", "fall in love", "break up",
+      "move in together", "get engaged", "get married", "be single",
+      "dating app", "mutual feelings", "emotional bond", "physical attraction"
+    ],
+    "sentence": [
+      "Will you go on a date with me?",
+      "I have a new girlfriend.",
+      "They are getting married next summer.",
+      "How long have you been together?",
+      "Safe sex is important for everyone.",
+      "Are you single or in a relationship?",
+      "He told her that he loved her.",
+      "She broke up with him last week.",
+      "We met on a dating app.",
+      "I think I am falling in love with you.",
+      "Do you have a partner?",
+      "They moved in together after a year.",
+      "Consent must be freely given."
+    ]
+  },
+  "internal_medicine": {
+    "name": "Internal Medicine",
+    "word": [
+      "patient", "doctor", "nurse", "physician", "specialist", "hospital",
+      "clinic", "ward", "emergency", "diagnosis", "prognosis", "treatment",
+      "therapy", "medication", "prescription", "dose", "symptom", "sign",
+      "disease", "illness", "infection", "inflammation", "fever", "pain",
+      "fatigue", "cough", "nausea", "vomiting", "diarrhea", "constipation",
+      "heart", "lung", "liver", "kidney", "stomach", "intestine",
+      "pancreas", "thyroid", "artery", "vein", "blood", "pressure",
+      "pulse", "respiration", "oxygen", "glucose", "cholesterol",
+      "hypertension", "diabetes", "asthma", "pneumonia", "anemia",
+      "cancer", "tumor", "antibiotic", "vaccine", "allergy", "biopsy",
+      "ultrasound", "x-ray"
+    ],
+    "phrase": [
+      "blood pressure", "heart rate", "body temperature", "medical history",
+      "physical examination", "differential diagnosis", "chronic disease",
+      "acute condition", "side effect", "drug interaction",
+      "informed consent", "primary care", "emergency room",
+      "intensive care", "vital signs", "blood test", "urine sample",
+      "chest pain", "shortness of breath", "family history"
+    ],
+    "sentence": [
+      "The patient has high blood pressure.",
+      "Please take this medication twice a day with food.",
+      "We need to run a few more blood tests.",
+      "Do you have any known allergies?",
+      "His symptoms started three days ago.",
+      "The diagnosis is type two diabetes.",
+      "She was admitted to the hospital overnight.",
+      "Please describe the pain on a scale of one to ten.",
+      "There is no family history of heart disease.",
+      "Stop smoking and exercise more often.",
+      "The x-ray shows a small fracture.",
+      "The infection responded well to antibiotics."
+    ]
+  },
+  "history": {
+    "name": "History",
+    "word": [
+      "history", "historian", "century", "decade", "era", "period",
+      "ancient", "medieval", "modern", "contemporary", "war", "peace",
+      "battle", "soldier", "army", "navy", "empire", "kingdom", "republic",
+      "democracy", "monarchy", "revolution", "independence", "colony",
+      "treaty", "alliance", "king", "queen", "emperor", "president",
+      "prime minister", "general", "invasion", "conquest", "defeat",
+      "victory", "siege", "fortress", "castle", "cathedral", "monastery",
+      "trade", "industry", "agriculture", "slavery", "migration",
+      "civilization", "culture", "religion", "language", "artifact",
+      "document", "chronicle", "archaeology", "museum", "archive"
+    ],
+    "phrase": [
+      "the Middle Ages", "the Renaissance", "the Industrial Revolution",
+      "the French Revolution", "the Roman Empire", "the Byzantine Empire",
+      "the Ottoman Empire", "the Cold War", "World War One",
+      "World War Two", "the Dutch Golden Age", "the Enlightenment",
+      "the Reformation", "the Age of Exploration", "the ancient world",
+      "primary source", "secondary source", "oral history",
+      "cultural heritage", "historical document"
+    ],
+    "sentence": [
+      "The Roman Empire fell in the fifth century.",
+      "The French Revolution began in seventeen eighty-nine.",
+      "The Second World War ended in nineteen forty-five.",
+      "Historians rely on primary sources.",
+      "The Netherlands gained independence from Spain.",
+      "The printing press changed European society.",
+      "Ancient Greece is the birthplace of democracy.",
+      "The Industrial Revolution started in England.",
+      "Leiden University was founded in fifteen seventy-five.",
+      "The Middle Ages lasted about a thousand years.",
+      "The Berlin Wall fell in nineteen eighty-nine.",
+      "Many historical documents were lost in the fire."
+    ]
+  },
+  "farming": {
+    "name": "Farming",
+    "word": [
+      "farm", "farmer", "field", "pasture", "meadow", "barn", "stable",
+      "silo", "greenhouse", "orchard", "vineyard", "garden", "soil",
+      "seed", "seedling", "sprout", "plant", "crop", "harvest", "yield",
+      "grain", "wheat", "barley", "oat", "rye", "corn", "rice",
+      "vegetable", "fruit", "root", "leaf", "stem", "flower", "weed",
+      "fertilizer", "manure", "compost", "pesticide", "irrigation",
+      "plow", "tractor", "combine", "hay", "straw", "fence", "gate",
+      "livestock", "cattle", "cow", "bull", "calf", "sheep", "lamb",
+      "goat", "pig", "chicken", "rooster", "hen", "duck", "horse",
+      "milk", "wool", "egg", "honey", "beekeeper", "rain", "drought",
+      "sun", "frost"
+    ],
+    "phrase": [
+      "organic farming", "family farm", "dairy farm", "arable land",
+      "crop rotation", "harvest season", "growing season", "planting time",
+      "farmers market", "food chain", "greenhouse gas", "climate change",
+      "sustainable agriculture", "free range chickens", "grass fed cattle",
+      "food security", "soil erosion", "agricultural subsidy",
+      "organic fertilizer", "irrigation system"
+    ],
+    "sentence": [
+      "The farmer plants wheat in the autumn.",
+      "We harvest the apples in September.",
+      "The cows are in the pasture.",
+      "It has not rained in three weeks.",
+      "This farm has been in our family for a hundred years.",
+      "Organic vegetables cost more at the market.",
+      "The tractor broke down in the middle of the field.",
+      "Sheep give us wool and milk.",
+      "The chickens lay about twenty eggs a day.",
+      "The harvest this year was very good.",
+      "We need to water the greenhouse before sunset.",
+      "A drought can ruin an entire crop."
+    ]
+  },
   "greetings": {
     "name": "Greetings & Small Talk",
     "phrase": [
