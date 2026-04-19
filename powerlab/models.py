@@ -1,7 +1,14 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db import models
 from django.utils import timezone as djtz
+
+
+# Rolling-window: prefer recent snapshots so a stale 2024 price doesn't
+# drag the average after we've got fresh 2026 data.
+PRICE_WINDOW_DAYS = 90
+PRICE_WINDOW_MAX_SNAPS = 10
 
 
 class Part(models.Model):
@@ -66,11 +73,24 @@ class Part(models.Model):
         return f"{self.name}"
 
     def recompute_avg_price(self):
-        snaps = list(self.price_snapshots.all())
-        if not snaps:
+        """Average the most recent snapshots inside PRICE_WINDOW_DAYS,
+        capped at PRICE_WINDOW_MAX_SNAPS. Falls back to all-time if the
+        window is empty (useful right after a fresh seed with no recent
+        observations)."""
+        cutoff = djtz.now() - timedelta(days=PRICE_WINDOW_DAYS)
+        window = list(
+            self.price_snapshots
+                .filter(observed_at__gte=cutoff)
+                .order_by('-observed_at')[:PRICE_WINDOW_MAX_SNAPS]
+        )
+        if not window:
+            window = list(
+                self.price_snapshots.all()[:PRICE_WINDOW_MAX_SNAPS]
+            )
+        if not window:
             return
-        total = sum((s.unit_price_usd for s in snaps), Decimal('0'))
-        avg = (total / len(snaps)).quantize(Decimal('0.0001'))
+        total = sum((s.unit_price_usd for s in window), Decimal('0'))
+        avg = (total / len(window)).quantize(Decimal('0.0001'))
         self.est_unit_price_usd = avg
         self.price_last_checked_at = djtz.now()
         self.save(update_fields=['est_unit_price_usd',
