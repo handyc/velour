@@ -35,6 +35,32 @@
 </div>
 
 {% if rulesets %}
+{% if rulesets.count > 1 %}
+<h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Merge rulesets</h2>
+<p style="color:#6e7681;font-size:0.7rem;margin:0 0 0.3rem">
+    Union of all unique rules from both parents. A takes priority on collisions.
+</p>
+<form method="post" action="{% url 'automaton:merge_rulesets' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
+    {% csrf_token %}
+    <label style="color:#8b949e;font-size:0.72rem">A
+        <select name="ruleset_a">
+            {% for rs in rulesets %}<option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>{% endfor %}
+        </select>
+    </label>
+    <label style="color:#8b949e;font-size:0.72rem">B
+        <select name="ruleset_b">
+            {% for rs in rulesets %}<option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>{% endfor %}
+        </select>
+    </label>
+    <input type="text" name="name" placeholder="merged name (optional)" style="width:9rem;font-size:0.72rem">
+    <button type="submit" class="btn" style="background:#1f6feb;border-color:#388bfd">Merge</button>
+</form>
+<form method="post" action="{% url 'automaton:merge_random_rulesets' %}" style="display:inline-block;margin-top:0.3rem">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-secondary" style="font-size:0.72rem">Merge two random rulesets</button>
+</form>
+{% endif %}
+
 <h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">New simulation</h2>
 <form method="post" action="{% url 'automaton:create' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
     {% csrf_token %}

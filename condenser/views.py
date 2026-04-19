@@ -336,6 +336,163 @@ def distill_aether_stereokit(request, slug):
         return redirect('condenser:home')
 
 
+def _distill_and_save(request, *, name, source_tier, target_tier, build,
+                      success_fmt='Distilled: {size} bytes.'):
+    """Shared scaffolding — create Distillation row, run `build()`, save,
+    extract annotations, record insight, redirect to detail."""
+    d = Distillation(name=name, source_app='det', source_tier=source_tier,
+                     target_tier=target_tier, status='running')
+    d.save()
+    try:
+        output = build()
+        d.output = output
+        d.output_size_bytes = len(output.encode('utf-8'))
+        d.status = 'completed'
+        d.completed_at = timezone.now()
+        d.annotations = _extract_annotations(output)
+        d.save()
+        _record_insight(d)
+        messages.success(request, success_fmt.format(size=d.output_size_bytes))
+    except Exception as e:
+        d.status = 'error'
+        d.error_detail = str(e)
+        d.save()
+        messages.error(request, f'Distillation failed: {e}')
+    return redirect('condenser:detail', slug=d.slug)
+
+
+@login_required
+@require_POST
+def emulate_attiny(request, slug):
+    """Push an attiny-tier distillation into bodymap's in-browser emulator.
+
+    Creates a fresh AttinyDesign with the distilled C, invokes bodymap's
+    avr-gcc pipeline, and redirects to the emulator view. Only t13a is
+    supported — the emulator is t13a-only; a t85 distillation lands in
+    the editor instead."""
+    from bodymap.attiny_views import _compile_design, _next_i2c_address, _unique_design_slug
+    from bodymap.models import AttinyDesign
+
+    d = get_object_or_404(Distillation, slug=slug)
+    if d.target_tier != 'attiny' or not d.output:
+        messages.error(request, 'Only ATTiny distillations can be emulated.')
+        return redirect('condenser:detail', slug=slug)
+
+    # Infer MCU from the distillation source. The t13a output explicitly
+    # names "ATTiny13a" in its header; the t85 output names "ATTiny85".
+    src = d.output
+    mcu = 'attiny85' if ('ATTiny85' in src or 'attiny85' in src) else 'attiny13a'
+
+    design = AttinyDesign.objects.create(
+        slug=_unique_design_slug(f'{d.slug}-emu'),
+        name=f'{d.name} (emulator)',
+        mcu=mcu,
+        c_source=src,
+        description=f'Auto-created from Condenser distillation "{d.name}".',
+        i2c_address=_next_i2c_address(),
+    )
+    _compile_design(design)
+    design.save()
+
+    if not design.compile_ok:
+        messages.error(request,
+            f'Compile failed — opening the editor so you can see the log. '
+            f'(Snippet: {design.compile_log[-200:]})')
+        return redirect('bodymap:attiny_design', slug=design.slug)
+
+    if mcu != 'attiny13a':
+        messages.warning(request,
+            'The in-browser emulator is t13a-only. Opened this design '
+            'in the editor — flash it to real hardware to run it.')
+        return redirect('bodymap:attiny_design', slug=design.slug)
+
+    return redirect('bodymap:attiny_emulate_slug', slug=design.slug)
+
+
+@login_required
+@require_POST
+def distill_det_attiny13a(request):
+    """Det ancestor → ATTiny13a: Rule 110 in 1KB."""
+    from .distill_det import distill_attiny13a
+    return _distill_and_save(
+        request,
+        name='Det → ATTiny13a (Rule 110 ancestor)',
+        source_tier='django', target_tier='attiny',
+        build=distill_attiny13a,
+        success_fmt='Det → ATTiny13a: {size} bytes of Rule 110.',
+    )
+
+
+@login_required
+@require_POST
+def distill_det_attiny85(request):
+    """Det → ATTiny85: one baked hex ruleset."""
+    from .distill_det import distill_attiny85
+    n_colors = max(2, min(4, int(request.POST.get('n_colors', 2))))
+    n_rules = max(4, min(64, int(request.POST.get('n_rules', 24))))
+    wildcard_pct = max(0, min(80, int(request.POST.get('wildcard_pct', 20))))
+    seed_raw = request.POST.get('seed', '').strip()
+    seed = int(seed_raw) if seed_raw.isdigit() else None
+    return _distill_and_save(
+        request,
+        name=f'Det → ATTiny85 (1 baked ruleset, {n_colors}c×{n_rules}r)',
+        source_tier='django', target_tier='attiny',
+        build=lambda: distill_attiny85(n_colors=n_colors, n_rules=n_rules,
+                                       wildcard_pct=wildcard_pct, seed=seed),
+        success_fmt='Det → ATTiny85: {size} bytes.',
+    )
+
+
+@login_required
+@require_POST
+def distill_det_esp8266(request):
+    """Det → ESP8266: baked candidates + web scoreboard."""
+    from .distill_det import distill_esp8266
+    n_candidates = max(1, min(6, int(request.POST.get('n_candidates', 3))))
+    n_rules = max(20, min(200, int(request.POST.get('n_rules', 80))))
+    n_colors = max(2, min(4, int(request.POST.get('n_colors', 3))))
+    W = max(6, min(24, int(request.POST.get('W', 12))))
+    H = max(4, min(20, int(request.POST.get('H', 8))))
+    horizon = max(10, min(120, int(request.POST.get('horizon', 30))))
+    ssid = request.POST.get('wifi_ssid', 'YOUR_WIFI').strip() or 'YOUR_WIFI'
+    pwd = request.POST.get('wifi_pass', 'YOUR_PASS').strip() or 'YOUR_PASS'
+    return _distill_and_save(
+        request,
+        name=f'Det → ESP8266 ({n_candidates} cand × {n_rules} rules, {W}×{H})',
+        source_tier='django', target_tier='esp',
+        build=lambda: distill_esp8266(n_candidates=n_candidates, n_rules=n_rules,
+                                      n_colors=n_colors, W=W, H=H, horizon=horizon,
+                                      wifi_ssid=ssid, wifi_pass=pwd),
+        success_fmt='Det → ESP8266: {size} bytes.',
+    )
+
+
+@login_required
+@require_POST
+def distill_det_esp32s3(request):
+    """Det → ESP32-S3 SuperMini: on-chip search + web UI."""
+    from .distill_det import distill_esp32s3
+    n_candidates = max(2, min(48, int(request.POST.get('n_candidates', 12))))
+    n_rules = max(20, min(250, int(request.POST.get('n_rules', 100))))
+    n_colors = max(2, min(4, int(request.POST.get('n_colors', 4))))
+    W = max(8, min(32, int(request.POST.get('W', 16))))
+    H = max(6, min(24, int(request.POST.get('H', 12))))
+    horizon = max(10, min(200, int(request.POST.get('horizon', 40))))
+    wildcard_pct = max(0, min(80, int(request.POST.get('wildcard_pct', 25))))
+    ssid = request.POST.get('wifi_ssid', 'YOUR_WIFI').strip() or 'YOUR_WIFI'
+    pwd = request.POST.get('wifi_pass', 'YOUR_PASS').strip() or 'YOUR_PASS'
+    return _distill_and_save(
+        request,
+        name=f'Det → ESP32-S3 ({n_candidates}×{n_rules}, {W}×{H}, on-chip search)',
+        source_tier='django', target_tier='esp',
+        build=lambda: distill_esp32s3(W=W, H=H, horizon=horizon, n_colors=n_colors,
+                                      n_candidates=n_candidates, n_rules=n_rules,
+                                      wildcard_pct=wildcard_pct,
+                                      wifi_ssid=ssid, wifi_pass=pwd),
+        success_fmt='Det → ESP32-S3: {size} bytes.',
+    )
+
+
 @login_required
 def decision_tree_555(request):
     """Information page: decision trees built from 555 timer ICs."""

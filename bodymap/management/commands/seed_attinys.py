@@ -164,6 +164,26 @@ TEMPLATES = [
      '1.2 MHz default, clearing the screen takes a visible 3 seconds '
      'but the sweep animation still runs fine.'),
 
+    ('rule110_st7735s_13a', 'Rule 110 → ST7735S (13a)', 'attiny13a',
+     'Rule 110 space-time diagram, one pixel row per generation, on the 80×160 IPS panel.',
+     'PB0 = MOSI, PB2 = SCK, PB3 = RES, PB4 = DC. Module CS→GND, BLK→VCC.',
+     '160-cell elementary CA with zero-padded edges, seeded with a '
+     'single alive cell at the right edge so the classic leftward '
+     'triangular wedge appears. Each new generation paints one pixel '
+     'row, cycling y=0..79 so the panel always shows the last 80 '
+     'generations. Colour rotates through an 8-step hue ramp so the '
+     'time axis reads as a smooth gradient. Every 320 generations the '
+     'row reseeds. Fits in ~910 bytes flash, 40 B SRAM.'),
+
+    ('rule110_gm009605_13a', 'Rule 110 → GM009605 (13a)', 'attiny13a',
+     'Rule 110 space-time diagram on the 128×64 SSD1306 OLED — mono, 8 pages of 8 generations each.',
+     'PB0 = SDA, PB2 = SCL. PB1 / PB3 / PB4 free.',
+     '32-cell × 4-pixel-per-cell CA drawn page-by-page: eight '
+     'successive generations are accumulated into a 32-byte column '
+     'buffer, then committed as one SSD1306 page write. Pages cycle 0..7 '
+     'so the display shows the last 64 generations. Reseeds every 120 '
+     'generations. Fits in ~890 bytes flash, 40 B SRAM.'),
+
     ('ca_rule_13a', 'Cellular automaton rule (13a)', 'attiny13a',
      'Wolfram-style 3→1 elementary CA cell — pot picks one of 256 rules (Rule 30, 90, 110, …).',
      'PB0 = C_new out, PB1 = L in, PB2 = rule pot (ADC1), PB3 = C in, PB4 = R in.',

@@ -316,3 +316,105 @@ def create_exact_rules(request):
     messages.success(request,
         f'Created ruleset "{rs.name}" with {len(rules)} exact 7-tuple rules.')
     return redirect('automaton:home')
+
+
+def _merge_two(rs_a, rs_b, name=None):
+    """Build a new RuleSet containing every unique rule from both parents.
+
+    Exact rules dedup by 8-tuple (self + 6 neighbors + result); count rules
+    dedup by 5-tuple (self, neighbor_color, min, max, result). Parent A's
+    rules come first, then any B rule whose key is not already seen. Priority
+    is renumbered 0..N-1 to preserve first-match order across the union.
+    """
+    exact_a = list(rs_a.exact_rules.order_by('priority'))
+    exact_b = list(rs_b.exact_rules.order_by('priority'))
+    count_a = list(rs_a.rules.order_by('priority'))
+    count_b = list(rs_b.rules.order_by('priority'))
+
+    if not name:
+        name = f'{rs_a.name} ⊕ {rs_b.name}'
+
+    rs = RuleSet.objects.create(
+        name=name,
+        n_colors=max(rs_a.n_colors, rs_b.n_colors),
+        source='operator',
+        description=(f'Merged union of "{rs_a.name}" and "{rs_b.name}". '
+                     f'Duplicate rules folded; first-match priority preserved '
+                     f'with parent A taking precedence.'),
+        source_metadata={
+            'merged_from': [rs_a.slug, rs_b.slug],
+            'parent_pks': [rs_a.pk, rs_b.pk],
+        },
+    )
+
+    merged_exact = []
+    seen_e = set()
+    for r in exact_a + exact_b:
+        key = (r.self_color, r.n0_color, r.n1_color, r.n2_color,
+               r.n3_color, r.n4_color, r.n5_color, r.result_color)
+        if key in seen_e:
+            continue
+        seen_e.add(key)
+        merged_exact.append(ExactRule(
+            ruleset=rs, priority=len(merged_exact),
+            self_color=r.self_color,
+            n0_color=r.n0_color, n1_color=r.n1_color, n2_color=r.n2_color,
+            n3_color=r.n3_color, n4_color=r.n4_color, n5_color=r.n5_color,
+            result_color=r.result_color,
+        ))
+    ExactRule.objects.bulk_create(merged_exact)
+
+    merged_count = []
+    seen_c = set()
+    for r in count_a + count_b:
+        key = (r.self_color, r.neighbor_color,
+               r.min_count, r.max_count, r.result_color)
+        if key in seen_c:
+            continue
+        seen_c.add(key)
+        merged_count.append(Rule(
+            ruleset=rs, priority=len(merged_count),
+            self_color=r.self_color, neighbor_color=r.neighbor_color,
+            min_count=r.min_count, max_count=r.max_count,
+            result_color=r.result_color, notes=r.notes,
+        ))
+    Rule.objects.bulk_create(merged_count)
+
+    return rs, len(merged_exact), len(merged_count)
+
+
+@login_required
+@require_POST
+def merge_rulesets(request):
+    """Combine two explicit rulesets into a new one keeping unique rules."""
+    a_id = request.POST.get('ruleset_a', '')
+    b_id = request.POST.get('ruleset_b', '')
+    if not a_id or not b_id or a_id == b_id:
+        messages.error(request, 'Pick two different rulesets to merge.')
+        return redirect('automaton:home')
+    rs_a = get_object_or_404(RuleSet, pk=a_id)
+    rs_b = get_object_or_404(RuleSet, pk=b_id)
+    name = request.POST.get('name', '').strip() or None
+    rs, n_exact, n_count = _merge_two(rs_a, rs_b, name=name)
+    messages.success(request,
+        f'Merged "{rs_a.name}" ⊕ "{rs_b.name}" → "{rs.name}" '
+        f'({n_exact} exact + {n_count} count rules).')
+    return redirect('automaton:home')
+
+
+@login_required
+@require_POST
+def merge_random_rulesets(request):
+    """Pick two random rulesets and merge them."""
+    pks = list(RuleSet.objects.values_list('pk', flat=True))
+    if len(pks) < 2:
+        messages.error(request, 'Need at least two rulesets to merge.')
+        return redirect('automaton:home')
+    a_pk, b_pk = random.sample(pks, 2)
+    rs_a = RuleSet.objects.get(pk=a_pk)
+    rs_b = RuleSet.objects.get(pk=b_pk)
+    rs, n_exact, n_count = _merge_two(rs_a, rs_b)
+    messages.success(request,
+        f'Random merge: "{rs_a.name}" ⊕ "{rs_b.name}" → "{rs.name}" '
+        f'({n_exact} exact + {n_count} count rules).')
+    return redirect('automaton:home')

@@ -101,6 +101,61 @@ Each tier strips away what can't survive, preserving only the essential logic.
         </div>
         <a href="{% url 'condenser:decision_tree_555' %}" class="btn btn-secondary" style="margin-top:0.4rem;display:inline-block">Reference guide</a>
     </div>
+    <div class="avail-card" style="border-left:3px solid #58a6ff">
+        <h3>Det → MCU ladder (hex Class-4 search)</h3>
+        <p>Port Det's hex Rule-110 search across four rungs of the
+        capability ladder — from a 1KB ancestor to a fresh on-chip
+        search every boot. Each rung produces a compilable firmware
+        file you can flash.</p>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-bottom:0.4rem">
+            <span class="tier-badge tier-attiny">ATTiny13a</span>
+            <span style="color:#6e7681">·</span>
+            <span class="tier-badge tier-attiny">ATTiny85</span>
+            <span style="color:#6e7681">·</span>
+            <span class="tier-badge tier-esp">ESP8266</span>
+            <span style="color:#6e7681">·</span>
+            <span class="tier-badge tier-esp">ESP32-S3</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:0.35rem;font-size:0.75rem">
+            <form method="post" action="{% url 'condenser:distill_det_attiny13a' %}" style="display:flex;gap:0.4rem;align-items:center">
+                {% csrf_token %}
+                <button type="submit" class="btn" style="min-width:11rem;text-align:left">ATTiny13a: Rule 110 ancestor</button>
+                <span style="color:#6e7681">1-D, 2-colour, the shape of the idea. No params.</span>
+            </form>
+
+            <form method="post" action="{% url 'condenser:distill_det_attiny85' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+                {% csrf_token %}
+                <button type="submit" class="btn" style="min-width:11rem;text-align:left">ATTiny85: one baked ruleset</button>
+                <label style="color:#8b949e">colors <select name="n_colors"><option>2</option><option>3</option><option>4</option></select></label>
+                <label style="color:#8b949e">rules <input type="number" name="n_rules" value="24" min="4" max="64" style="width:3.5rem"></label>
+                <label style="color:#8b949e">wildcards% <input type="number" name="wildcard_pct" value="20" min="0" max="80" style="width:3rem"></label>
+                <label style="color:#8b949e">seed <input type="text" name="seed" placeholder="random" style="width:5rem"></label>
+            </form>
+
+            <form method="post" action="{% url 'condenser:distill_det_esp8266' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+                {% csrf_token %}
+                <button type="submit" class="btn" style="min-width:11rem;text-align:left">ESP8266: baked candidates + web</button>
+                <label style="color:#8b949e">cands <input type="number" name="n_candidates" value="3" min="1" max="6" style="width:3rem"></label>
+                <label style="color:#8b949e">rules <input type="number" name="n_rules" value="80" min="20" max="200" style="width:3.5rem"></label>
+                <label style="color:#8b949e">W×H <input type="number" name="W" value="12" min="6" max="24" style="width:3rem">×<input type="number" name="H" value="8" min="4" max="20" style="width:3rem"></label>
+                <label style="color:#8b949e">ssid <input type="text" name="wifi_ssid" placeholder="YOUR_WIFI" style="width:7rem"></label>
+                <label style="color:#8b949e">pw <input type="text" name="wifi_pass" placeholder="YOUR_PASS" style="width:7rem"></label>
+            </form>
+
+            <form method="post" action="{% url 'condenser:distill_det_esp32s3' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+                {% csrf_token %}
+                <button type="submit" class="btn" style="min-width:11rem;text-align:left;background:#1f6feb;border-color:#388bfd">ESP32-S3 SuperMini: on-chip search</button>
+                <label style="color:#8b949e">cands <input type="number" name="n_candidates" value="12" min="2" max="48" style="width:3rem"></label>
+                <label style="color:#8b949e">rules <input type="number" name="n_rules" value="100" min="20" max="250" style="width:3.5rem"></label>
+                <label style="color:#8b949e">W×H <input type="number" name="W" value="16" min="8" max="32" style="width:3rem">×<input type="number" name="H" value="12" min="6" max="24" style="width:3rem"></label>
+                <label style="color:#8b949e">horizon <input type="number" name="horizon" value="40" min="10" max="200" style="width:3rem"></label>
+                <label style="color:#8b949e">ssid <input type="text" name="wifi_ssid" placeholder="YOUR_WIFI" style="width:7rem"></label>
+                <label style="color:#8b949e">pw <input type="text" name="wifi_pass" placeholder="YOUR_PASS" style="width:7rem"></label>
+            </form>
+        </div>
+    </div>
+
     <div class="avail-card" style="border-left:3px solid #bc8cff">
         <h3>Full chain: Tiles → JS → ESP → ATTiny → 555</h3>
         <p>Run the entire distillation pipeline in one click. Produces all 4 tiers,
