@@ -78,6 +78,37 @@
     }
     .st-status { text-align: center; color: #6e7681; font-size: 0.8rem;
                  margin-top: 0.8rem; min-height: 1rem; }
+
+    /* Speech controls — small unobtrusive button in the card's top-right
+       and a companion auto-speak toggle above the card. */
+    .st-card-wrap .speak-btn {
+        position: absolute; top: 0.5rem; right: 0.5rem; z-index: 2;
+        background: transparent; border: 1px solid #30363d; color: #8b949e;
+        border-radius: 50%; width: 2rem; height: 2rem; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.95rem; padding: 0; line-height: 1;
+    }
+    .st-card-wrap .speak-btn:hover { color: #58a6ff; border-color: #58a6ff; }
+    .st-card-wrap .speak-btn.speaking {
+        color: #58a6ff; border-color: #58a6ff;
+        box-shadow: 0 0 0 2px rgba(88,166,255,0.25);
+    }
+    .st-card-wrap .speak-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
+    .st-card-wrap .speak-btn[hidden] { display: none; }
+
+    .st-speech-bar {
+        display: flex; align-items: center; gap: 0.75rem;
+        color: #8b949e; font-size: 0.78rem; margin-bottom: 0.5rem;
+        justify-content: flex-end;
+    }
+    .st-speech-bar label { cursor: pointer; user-select: none; }
+    .st-speech-bar select {
+        background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+        border-radius: 4px; padding: 0.1rem 0.3rem; font: inherit;
+        font-size: 0.75rem;
+    }
+    .st-speech-bar[hidden] { display: none; }
+    .st-speech-bar .unavailable { color: #6e7681; font-style: italic; }
 </style>
 {% endblock %}
 
@@ -94,8 +125,29 @@
     </div>
 
     {% if card %}
+    <div class="st-speech-bar" id="st-speech-bar" hidden>
+        <label>
+            <input type="checkbox" id="st-autospeak">
+            auto-play on new card
+        </label>
+        <label>voice:
+            <select id="st-voice"></select>
+        </label>
+    </div>
     <div class="st-card-wrap">
-        <div class="st-card level-{{ card.level }}" id="st-card" data-card-id="{{ card.id }}">
+        <button type="button" class="speak-btn" id="st-speak"
+                aria-label="Speak the target-language text"
+                title="Speak (press S)"
+                hidden>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M7 2 3 5H1v6h2l4 3V2zm3.7 3.3 1-1A5 5 0 0 1 10.7 12.7l-1-1A3.5 3.5 0 0 0 10.7 5.3zm2.1-2.1 1-1A8 8 0 0 1 13.8 14.8l-1-1A6.5 6.5 0 0 0 12.8 3.2z"/>
+            </svg>
+        </button>
+        <div class="st-card level-{{ card.level }}" id="st-card"
+             data-card-id="{{ card.id }}"
+             data-lemma="{{ card.lemma|escape }}"
+             data-gloss="{{ card.gloss|escape }}"
+             data-lang="{{ language.code }}">
             <div class="front">{{ card.lemma|default:"—" }}</div>
             {% if card.pronunciation %}
             <div class="pron">{{ card.pronunciation }}</div>
@@ -105,7 +157,7 @@
             <div class="freq">#{{ card.freq_rank }} · box {{ card.leitner_box }}</div>
             {% endif %}
         </div>
-        <div class="hint" id="st-hint">click card to reveal</div>
+        <div class="hint" id="st-hint">click card to reveal — press S to hear it</div>
     </div>
 
     <div class="st-actions">
@@ -132,17 +184,207 @@
     const hint    = document.getElementById('st-hint');
     const status  = document.getElementById('st-status');
     const csrf    = document.querySelector('[name=csrfmiddlewaretoken]');
+    const speakBtn = document.getElementById('st-speak');
+    const speechBar = document.getElementById('st-speech-bar');
+    const voiceSel = document.getElementById('st-voice');
+    const autoBox  = document.getElementById('st-autospeak');
     let revealed = false;
 
     function reveal() {
         if (revealed) return;
         revealed = true;
         cardEl.classList.add('flipped');
-        hint.textContent = 'grade your recall';
+        hint.textContent = 'grade your recall — press S to hear it';
         again.disabled = false;
         good.disabled  = false;
     }
     cardEl.addEventListener('click', reveal);
+
+    // --- Web Speech API wiring -----------------------------------------
+    // Map Velour language codes to BCP-47 prefixes browsers understand.
+    const BCP47 = {
+        'nl': 'nl', 'zh-Hans': 'zh', 'zh': 'zh',
+        'es': 'es', 'fr': 'fr', 'ja': 'ja', 'ko': 'ko',
+        'he': 'he', 'en': 'en',
+        // Classical langs fall back to modern relatives for TTS.
+        'grc': 'el', 'la': 'it', 'san': 'hi',
+    };
+    const rawLang   = (cardEl.dataset.lang || 'en');
+    const baseCode  = BCP47[rawLang] || rawLang.split('-')[0];
+    const lemma     = cardEl.dataset.lemma || '';
+    const gloss     = cardEl.dataset.gloss || '';
+    const lsKey     = 'lingua:speech:' + rawLang;
+    const autoKey   = 'lingua:autospeak:' + rawLang;
+
+    const synth = window.speechSynthesis || null;
+    const SERVER_VOICE_KEY = 'server:espeak';
+    let allVoices = [];
+    let chosenVoice = null;       // Web Speech voice, or null when serverPicked
+    let serverPicked = false;
+    let autoSpoke = false;
+    let serverAudio = null;       // <audio> used for espeak-ng playback
+
+    function populateVoices() {
+        allVoices = synth ? (synth.getVoices() || []) : [];
+        // Exact-prefix matches (e.g. 'zh-CN' for baseCode 'zh') rank first,
+        // then any remaining voices so the dropdown is never empty.
+        const matched = allVoices.filter(
+            v => (v.lang || '').toLowerCase().startsWith(baseCode.toLowerCase()));
+        const others  = allVoices.filter(v => matched.indexOf(v) === -1);
+        const ordered = matched.concat(others);
+
+        const prev = voiceSel.value;
+        voiceSel.innerHTML = '';
+
+        // Server espeak-ng voice is always first: Firefox on Windows
+        // typically sees zero target-language voices, so this is the
+        // only thing that reliably works for Chinese, French, etc.
+        const serverGroup = document.createElement('optgroup');
+        serverGroup.label = 'Velour (offline)';
+        const serverOpt = document.createElement('option');
+        serverOpt.value = SERVER_VOICE_KEY;
+        serverOpt.textContent = 'espeak-ng · ' + rawLang;
+        serverGroup.appendChild(serverOpt);
+        voiceSel.appendChild(serverGroup);
+
+        if (matched.length) {
+            const g = document.createElement('optgroup');
+            g.label = baseCode + ' voices (' + matched.length + ')';
+            matched.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v.name;
+                o.textContent = v.name + ' · ' + v.lang;
+                g.appendChild(o);
+            });
+            voiceSel.appendChild(g);
+        }
+        if (others.length) {
+            const g = document.createElement('optgroup');
+            g.label = matched.length ? 'other voices' : 'other browser voices (wrong language)';
+            others.forEach(v => {
+                const o = document.createElement('option');
+                o.value = v.name;
+                o.textContent = v.name + ' · ' + v.lang;
+                g.appendChild(o);
+            });
+            voiceSel.appendChild(g);
+        }
+
+        // Default pick: remembered > prev selection > first native match
+        // for the target language > server espeak-ng voice.
+        const remembered = localStorage.getItem(lsKey);
+        let pickName;
+        if (remembered === SERVER_VOICE_KEY) {
+            pickName = SERVER_VOICE_KEY;
+        } else if (remembered && ordered.find(v => v.name === remembered)) {
+            pickName = remembered;
+        } else if (prev && (prev === SERVER_VOICE_KEY || ordered.find(v => v.name === prev))) {
+            pickName = prev;
+        } else if (matched.length) {
+            pickName = matched[0].name;
+        } else {
+            pickName = SERVER_VOICE_KEY;
+        }
+        voiceSel.value = pickName;
+        applySelection(pickName);
+
+        autoBox.checked = localStorage.getItem(autoKey) === '1';
+        if (autoBox.checked && !autoSpoke) {
+            autoSpoke = true;
+            // Some browsers ignore speak() before any user gesture; the
+            // silent failure is fine — user can press the button instead.
+            speak(lemma);
+        }
+    }
+
+    function applySelection(value) {
+        if (value === SERVER_VOICE_KEY) {
+            serverPicked = true;
+            chosenVoice = null;
+        } else {
+            serverPicked = false;
+            chosenVoice = allVoices.find(v => v.name === value) || null;
+        }
+    }
+
+    function speakServer(text) {
+        if (!text) return;
+        if (!serverAudio) {
+            serverAudio = new Audio();
+            serverAudio.addEventListener('play',  () => {
+                speakBtn.classList.add('speaking'); status.textContent = '';
+            });
+            serverAudio.addEventListener('ended', () => {
+                speakBtn.classList.remove('speaking');
+            });
+            serverAudio.addEventListener('error', () => {
+                speakBtn.classList.remove('speaking');
+                status.textContent = 'server TTS failed (is espeak-ng installed?)';
+            });
+        }
+        const url = '{% url "lingua:speak" %}?lang=' + encodeURIComponent(rawLang) +
+                    '&text=' + encodeURIComponent(text);
+        serverAudio.src = url;
+        const p = serverAudio.play();
+        if (p && p.catch) p.catch(() => {
+            status.textContent = 'audio blocked — click the speaker once to enable';
+        });
+    }
+
+    function speak(text) {
+        if (!text) return;
+        if (serverPicked) { speakServer(text); return; }
+        if (!synth) {
+            status.textContent = 'speech synthesis not available';
+            return;
+        }
+        try { synth.cancel(); } catch (e) {}
+        const u = new SpeechSynthesisUtterance(text);
+        if (chosenVoice) {
+            u.voice = chosenVoice;
+            u.lang  = chosenVoice.lang;
+        } else {
+            u.lang  = baseCode;
+        }
+        u.rate  = 0.9;
+        u.onstart = () => {
+            speakBtn.classList.add('speaking');
+            status.textContent = '';
+        };
+        u.onend   = () => speakBtn.classList.remove('speaking');
+        u.onerror = (ev) => {
+            speakBtn.classList.remove('speaking');
+            status.textContent = 'speech error: ' + (ev && ev.error ? ev.error : 'unknown');
+        };
+        synth.speak(u);
+    }
+
+    // Server espeak-ng is always available as a voice, so show the bar
+    // even when the browser has no Web Speech support at all.
+    speechBar.hidden = false;
+    speakBtn.hidden  = false;
+    populateVoices();
+    if (synth) {
+        // Chrome loads voices asynchronously, and sometimes more than once.
+        if (synth.addEventListener) {
+            synth.addEventListener('voiceschanged', populateVoices);
+        } else {
+            synth.onvoiceschanged = populateVoices;
+        }
+    }
+    voiceSel.addEventListener('change', () => {
+        applySelection(voiceSel.value);
+        if (voiceSel.value) localStorage.setItem(lsKey, voiceSel.value);
+    });
+    autoBox.addEventListener('change', () => {
+        localStorage.setItem(autoKey, autoBox.checked ? '1' : '0');
+    });
+    speakBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        speak(lemma);
+    });
+    // -------------------------------------------------------------------
+
     document.addEventListener('keydown', function (ev) {
         if (ev.key === ' ' || ev.key === 'Enter') {
             ev.preventDefault();
@@ -152,6 +394,8 @@
             if (revealed) again.click();
         } else if (ev.key === '2' || ev.key === 'k') {
             if (revealed) good.click();
+        } else if (ev.key === 's' || ev.key === 'S') {
+            speak(lemma);
         }
     });
 

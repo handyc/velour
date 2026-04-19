@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
@@ -246,6 +247,60 @@ def grade(request):
         'leitner_box':     card.leitner_box,
         'next_due_in_days': LEITNER_INTERVAL_DAYS[card.leitner_box],
     })
+
+
+# Map Velour language codes to espeak-ng voice names. Classical
+# languages without their own voices borrow a modern relative.
+ESPEAK_VOICE = {
+    'en':      'en-us',
+    'nl':      'nl',
+    'fr':      'fr-fr',
+    'es':      'es',
+    'ja':      'ja',
+    'ko':      'ko',
+    'he':      'he',
+    'zh':      'cmn',
+    'zh-Hans': 'cmn',
+    'zh-Hant': 'cmn',
+    'grc':     'grc',
+    'la':      'la',
+    'san':     'hi',
+    'sa':      'hi',
+}
+
+
+@login_required
+@require_http_methods(['GET'])
+def speak(request):
+    """Server-side TTS via espeak-ng. Exists because Firefox on Windows
+    only exposes a couple of SAPI voices, so the in-browser Web Speech
+    API isn't enough. Returns a WAV stream."""
+    text = (request.GET.get('text') or '').strip()
+    lang = (request.GET.get('lang') or 'en').strip()
+    if not text:
+        return HttpResponseBadRequest('missing text')
+    if len(text) > 500:
+        return HttpResponseBadRequest('text too long')
+
+    voice = ESPEAK_VOICE.get(lang) or ESPEAK_VOICE.get(lang.split('-')[0]) or 'en-us'
+    try:
+        proc = subprocess.run(
+            ['espeak-ng', '-v', voice, '-s', '150', '--stdout', text],
+            capture_output=True, timeout=8, check=False,
+        )
+    except FileNotFoundError:
+        return HttpResponse('espeak-ng not installed', status=503,
+                            content_type='text/plain')
+    except subprocess.TimeoutExpired:
+        return HttpResponse('tts timed out', status=504, content_type='text/plain')
+    if proc.returncode != 0 or not proc.stdout:
+        return HttpResponse('tts failed: ' + proc.stderr.decode('utf-8', 'replace'),
+                            status=500, content_type='text/plain')
+
+    resp = HttpResponse(proc.stdout, content_type='audio/wav')
+    resp['Cache-Control'] = 'private, max-age=3600'
+    resp['Content-Length'] = str(len(proc.stdout))
+    return resp
 
 
 @login_required
