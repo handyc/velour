@@ -326,6 +326,29 @@
       </div>
 
       <div class="rp-panel">
+        <h3>Walk it in Aether</h3>
+        <p style="font-size:0.82rem;color:#8b949e;margin:0 0 0.5rem;line-height:1.4;">
+          Export this room to a 3D Aether scene. Furniture renders as box
+          primitives; walls and the floor slab are auto-generated.
+          Re-running replaces the previous export only.
+        </p>
+        <form method="post"
+              action="{% url 'roomplanner:export_room_to_aether' room.slug %}">
+          {% csrf_token %}
+          <button type="submit" class="rp-btn">Export this room → Aether</button>
+        </form>
+        {% if room.floor and room.floor.building %}
+        <form method="post" style="margin-top:0.4rem;"
+              action="{% url 'roomplanner:export_building_to_aether' room.floor.building.slug %}">
+          {% csrf_token %}
+          <button type="submit" class="rp-btn rp-btn-neutral">
+            Export whole building → Aether
+          </button>
+        </form>
+        {% endif %}
+      </div>
+
+      <div class="rp-panel">
         <h3>Orientation &amp; location</h3>
         <label for="rp-north">which screen edge is north?</label>
         <select id="rp-north">

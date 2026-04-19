@@ -1,0 +1,333 @@
+"""Export a Building (or single Room) to an Aether World.
+
+Conventions:
+    Room Planner is in centimetres, Y forward in plan view (i.e. "up
+    the page" = +Y on the SVG). Aether uses metres, three.js-style
+    axes: +X right, +Y up, -Z forward.
+
+    So the mapping is:
+        rp.x_cm / 100  →  ae.x        (right on the floor)
+        rp.y_cm / 100  →  ae.z        (forward on the floor; we
+                                       negate so +Y on the plan
+                                       reads as "into the scene")
+        rp.height/100  →  ae.y        (up out of the floor)
+
+    A Floor sits at base_y = sum of heights of the floors below it.
+    Rooms on the same floor are laid out in a row with a 2 m gap.
+
+Idempotency: every entity created here gets a name prefix of `rp:`,
+so re-export deletes only its own entities and leaves user-added
+geometry alone.
+"""
+
+from __future__ import annotations
+
+from django.db import transaction
+
+from aether.models import Entity, World
+
+from .models import Building, Floor, Room
+
+
+PREFIX = 'rp:'
+
+# How far apart adjacent rooms sit on the same floor (metres).
+ROOM_GAP_M = 2.0
+
+# Wall thickness in metres.
+WALL_T_M = 0.10
+
+# Default ceiling height when a floor is missing (cm).
+DEFAULT_FLOOR_HEIGHT_CM = 280
+
+
+PIECE_COLORS = {
+    'desk':       '#8B4513',
+    'chair':      '#CD853F',
+    'shelf':      '#6B8E23',
+    'cabinet':    '#708090',
+    'rack':       '#2F4F4F',
+    'aquarium':   '#4682B4',
+    'lightbox':   '#DAA520',
+    'breadboard': '#9370DB',
+    'storage':    '#A9A9A9',
+    'other':      '#808080',
+}
+
+FEATURE_COLORS = {
+    'door':     '#5C4033',
+    'window':   '#87CEEB',
+    'outlet':   '#B22222',
+    'vent':     '#D3D3D3',
+    'radiator': '#C0C0C0',
+    'pillar':   '#696969',
+    'sink':     '#F5F5F5',
+    'ethernet': '#FFD700',
+    'other':    '#808080',
+}
+
+FLOOR_PANEL_COLOR = '#4a4a4a'
+WALL_COLOR = '#cfcfcf'
+
+
+def _world_for_building(building: Building) -> World:
+    slug = f'roomplanner-{building.slug}'
+    world, created = World.objects.get_or_create(
+        slug=slug,
+        defaults={
+            'title':        f'{building.name} (Room Planner)',
+            'description':  f'Auto-generated walkable export of building "{building.name}".',
+            'sky_color':    '#9ab8d6',
+            'ground_color': '#2c2c2c',
+            'fog_far':      400.0,
+            'ambient_light': 0.55,
+            'allow_flight': True,
+            'spawn_x':      0.0,
+            'spawn_y':      1.6,
+            'spawn_z':      0.0,
+        },
+    )
+    if not created:
+        world.description = f'Auto-generated walkable export of building "{building.name}".'
+        world.save(update_fields=['description'])
+    return world
+
+
+def _world_for_room(room: Room) -> World:
+    slug = f'roomplanner-{room.slug}'
+    world, created = World.objects.get_or_create(
+        slug=slug,
+        defaults={
+            'title':        f'{room.name} (Room Planner)',
+            'description':  f'Auto-generated walkable export of room "{room.name}".',
+            'sky_color':    '#9ab8d6',
+            'ground_color': '#2c2c2c',
+            'fog_far':      300.0,
+            'ambient_light': 0.55,
+            'allow_flight': True,
+            'spawn_x':      0.0,
+            'spawn_y':      1.6,
+            'spawn_z':      0.0,
+        },
+    )
+    return world
+
+
+def _clear_existing(world: World):
+    Entity.objects.filter(world=world, name__startswith=PREFIX).delete()
+
+
+def _make_box(world, name, x, y, z, sx, sy, sz, color, sort_order=0):
+    return Entity(
+        world=world,
+        name=PREFIX + name,
+        primitive='box',
+        primitive_color=color,
+        pos_x=x, pos_y=y, pos_z=z,
+        scale_x=sx, scale_y=sy, scale_z=sz,
+        sort_order=sort_order,
+    )
+
+
+def _floor_layout(building: Building):
+    """Yield (floor, base_y_metres). Ground floor at 0; each next
+    floor stacks on the heights below it."""
+    floors = list(Floor.objects.filter(building=building).order_by('level'))
+    base = 0.0
+    for f in floors:
+        yield f, base
+        base += (f.height_cm or DEFAULT_FLOOR_HEIGHT_CM) / 100.0
+
+
+def _room_origin(rooms_on_floor):
+    """Yield (room, origin_x_m) for rooms laid out left-to-right on
+    a floor, separated by ROOM_GAP_M."""
+    cursor = 0.0
+    for r in rooms_on_floor:
+        w_m = r.width_cm / 100.0
+        # Origin is the room's lower-left corner.
+        yield r, cursor
+        cursor += w_m + ROOM_GAP_M
+
+
+def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
+               floor_height_m: float, ents: list):
+    """Append all primitives for one room to `ents`."""
+    w_m = room.width_cm  / 100.0  # X extent
+    d_m = room.length_cm / 100.0  # Z extent (Room Planner Y → Aether Z, negated)
+    cx = origin_x + w_m / 2.0
+    cz = -d_m / 2.0  # rooms grow in -Z direction so +Y on the plan is "forward"
+
+    # Floor slab — 5 cm thick, sitting just at base_y so its top is base_y.
+    ents.append(_make_box(
+        world,
+        f'floor-{room.slug}',
+        cx, base_y - 0.025, cz,
+        w_m, 0.05, d_m,
+        FLOOR_PANEL_COLOR,
+        sort_order=0,
+    ))
+
+    # Four walls — thin boxes hugging the perimeter, full ceiling height.
+    wall_y = base_y + floor_height_m / 2.0
+    # West wall (small X edge)
+    ents.append(_make_box(
+        world, f'wall-W-{room.slug}',
+        origin_x - WALL_T_M / 2.0, wall_y, cz,
+        WALL_T_M, floor_height_m, d_m,
+        WALL_COLOR, sort_order=1,
+    ))
+    # East wall
+    ents.append(_make_box(
+        world, f'wall-E-{room.slug}',
+        origin_x + w_m + WALL_T_M / 2.0, wall_y, cz,
+        WALL_T_M, floor_height_m, d_m,
+        WALL_COLOR, sort_order=1,
+    ))
+    # South wall (the +Y plan edge, which is -Z in scene)
+    ents.append(_make_box(
+        world, f'wall-S-{room.slug}',
+        cx, wall_y, -d_m - WALL_T_M / 2.0,
+        w_m, floor_height_m, WALL_T_M,
+        WALL_COLOR, sort_order=1,
+    ))
+    # North wall (the 0,0 plan edge, which is 0 in scene)
+    ents.append(_make_box(
+        world, f'wall-N-{room.slug}',
+        cx, wall_y, WALL_T_M / 2.0,
+        w_m, floor_height_m, WALL_T_M,
+        WALL_COLOR, sort_order=1,
+    ))
+
+    # Features: small boxes near the floor.
+    for feat in room.features.all():
+        fw = feat.width_cm / 100.0
+        fd = feat.depth_cm / 100.0
+        fh = 0.4 if feat.kind != 'window' else 0.6
+        # Centre in plan coords:
+        plan_cx = feat.x_cm / 100.0 + fw / 2.0
+        plan_cy = feat.y_cm / 100.0 + fd / 2.0
+        ae_x = origin_x + plan_cx
+        ae_z = -plan_cy
+        ae_y = base_y + (fh / 2.0 if feat.kind != 'window'
+                         else floor_height_m / 2.0)
+        color = FEATURE_COLORS.get(feat.kind, FEATURE_COLORS['other'])
+        ents.append(_make_box(
+            world,
+            f'feature-{feat.kind}-{feat.pk}',
+            ae_x, ae_y, ae_z,
+            fw, fh, fd,
+            color, sort_order=10,
+        ))
+
+    # Placements: box per furniture piece, height from FurniturePiece.height_cm
+    # (fall back to a reasonable default by kind).
+    for pl in room.placements.select_related('piece').all():
+        piece = pl.piece
+        # Rotation 90/270 swaps W and D in plan footprint.
+        w_plan = piece.width_cm
+        d_plan = piece.depth_cm
+        if pl.rotation_deg in (90, 270):
+            w_plan, d_plan = d_plan, w_plan
+
+        pw = w_plan / 100.0
+        pd = d_plan / 100.0
+        ph = (piece.height_cm or _default_height_cm(piece.kind)) / 100.0
+
+        plan_cx = pl.x_cm / 100.0 + pw / 2.0
+        plan_cy = pl.y_cm / 100.0 + pd / 2.0
+        ae_x = origin_x + plan_cx
+        ae_z = -plan_cy
+        ae_y = base_y + ph / 2.0
+        color = PIECE_COLORS.get(piece.kind, PIECE_COLORS['other'])
+
+        # Map roomplanner rotation (around floor normal = +Y in Aether)
+        # to rot_y degrees. rotation_deg goes 0/90/180/270 clockwise on the
+        # plan (which looks down -Y in three.js); negate for handedness.
+        ents.append(_make_box(
+            world,
+            f'piece-{pl.pk}',
+            ae_x, ae_y, ae_z,
+            pw, ph, pd,
+            color, sort_order=20,
+        ))
+
+
+def _default_height_cm(kind: str) -> int:
+    """Reasonable fallback heights when the catalog entry didn't set one."""
+    return {
+        'desk':       75,
+        'chair':      90,
+        'shelf':     180,
+        'cabinet':   200,
+        'rack':      150,
+        'aquarium':   60,
+        'lightbox':   30,
+        'breadboard': 10,
+        'storage':    40,
+    }.get(kind, 80)
+
+
+@transaction.atomic
+def export_building(building: Building) -> World:
+    world = _world_for_building(building)
+    _clear_existing(world)
+
+    ents: list = []
+    spawn_set = False
+    for floor, base_y in _floor_layout(building):
+        floor_h_m = (floor.height_cm or DEFAULT_FLOOR_HEIGHT_CM) / 100.0
+        rooms = list(Room.objects.filter(floor=floor).order_by('name'))
+        for room, origin_x in _room_origin(rooms):
+            _emit_room(room, world, base_y, origin_x, floor_h_m, ents)
+            if not spawn_set:
+                # Spawn at the centre of the first room on the lowest
+                # floor, eyeline 1.6 m above the slab.
+                w_m = room.width_cm / 100.0
+                d_m = room.length_cm / 100.0
+                world.spawn_x = origin_x + w_m / 2.0
+                world.spawn_y = base_y + 1.6
+                world.spawn_z = -d_m / 2.0
+                world.save(update_fields=['spawn_x', 'spawn_y', 'spawn_z'])
+                spawn_set = True
+
+    Entity.objects.bulk_create(ents)
+    return world
+
+
+@transaction.atomic
+def export_room(room: Room) -> World:
+    """Single-room shortcut. Floors are not stacked; the room sits at Y=0."""
+    world = _world_for_room(room)
+    _clear_existing(world)
+
+    floor_h_m = ((room.floor.height_cm if room.floor else DEFAULT_FLOOR_HEIGHT_CM)
+                 / 100.0)
+    ents: list = []
+    _emit_room(room, world, base_y=0.0, origin_x=0.0,
+               floor_height_m=floor_h_m, ents=ents)
+
+    w_m = room.width_cm / 100.0
+    d_m = room.length_cm / 100.0
+    world.spawn_x = w_m / 2.0
+    world.spawn_y = 1.6
+    world.spawn_z = -d_m / 2.0
+    world.save(update_fields=['spawn_x', 'spawn_y', 'spawn_z'])
+
+    Entity.objects.bulk_create(ents)
+    return world
+
+
+def export_summary(world: World) -> dict:
+    qs = Entity.objects.filter(world=world, name__startswith=PREFIX)
+    by_prefix = {}
+    for name in qs.values_list('name', flat=True):
+        # rp:floor-..., rp:wall-W-..., rp:feature-door-..., rp:piece-...
+        bare = name[len(PREFIX):]
+        kind = bare.split('-', 1)[0]
+        by_prefix[kind] = by_prefix.get(kind, 0) + 1
+    return {
+        'total':   qs.count(),
+        'by_kind': by_prefix,
+        'world_slug': world.slug,
+    }

@@ -48,6 +48,12 @@ urlpatterns = [
     path('<slug:slug>/api/layout/<int:pk>/delete/',
          views.api_layout_delete, name='api_layout_delete'),
 
+    # Aether export
+    path('<slug:slug>/export-aether/',
+         views.export_room_to_aether, name='export_room_to_aether'),
+    path('building/<slug:slug>/export-aether/',
+         views.export_building_to_aether, name='export_building_to_aether'),
+
     # room page — keep last so the /api/ paths above don't collide
     path('<slug:slug>/', views.room_detail, name='room_detail'),
 ]

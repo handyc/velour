@@ -636,6 +636,30 @@ def api_layout_delete(request, slug, pk):
 
 @login_required
 @require_POST
+def export_room_to_aether(request, slug):
+    """POST → write the room into Aether and redirect to the walkable view."""
+    from django.shortcuts import redirect
+    from .aether_export import export_room
+
+    room = get_object_or_404(Room, slug=slug)
+    world = export_room(room)
+    return redirect(f'/aether/{world.slug}/enter/')
+
+
+@login_required
+@require_POST
+def export_building_to_aether(request, slug):
+    """POST → write the whole building (all floors stacked) and redirect."""
+    from django.shortcuts import redirect
+    from .aether_export import export_building
+
+    building = get_object_or_404(Building, slug=slug)
+    world = export_building(building)
+    return redirect(f'/aether/{world.slug}/enter/')
+
+
+@login_required
+@require_POST
 def api_piece_delete(request, piece_id):
     """Remove a catalog piece. PROTECT FK means this fails if placements
     still exist that use it — caller should delete placements first."""
