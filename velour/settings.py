@@ -107,6 +107,7 @@ INSTALLED_APPS = [
     'roomplanner',
     'lingua',
     'agents',
+    'det',
 ]
 
 MIDDLEWARE = [

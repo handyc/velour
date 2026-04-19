@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Det — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .det-wrap { max-width: 760px; margin: 2rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .det-wrap h1 { margin-bottom: 0.25rem; }
+  .det-wrap .lede { color: #8b949e; margin-bottom: 1.5rem;
+                    max-width: 62ch; line-height: 1.5; }
+  .det-wrap .trio {
+    display: grid; gap: 0.75rem;
+    grid-template-columns: repeat(3, 1fr);
+    margin: 1.5rem 0;
+  }
+  .det-wrap .trio .peer {
+    border: 1px solid #21262d; border-radius: 6px;
+    padding: 0.75rem 0.9rem; background: #0d1117;
+  }
+  .det-wrap .trio .peer b { color: #c9d1d9; }
+  .det-wrap .trio .peer p { color: #8b949e; font-size: 0.85rem;
+                            margin: 0.25rem 0 0; line-height: 1.4; }
+  .det-wrap .scaffold {
+    border: 1px dashed #30363d; border-radius: 6px;
+    padding: 0.9rem 1rem; color: #8b949e; font-size: 0.85rem;
+    background: #0d1117;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="det-wrap">
+  <h1>Det</h1>
+  <p class="lede">
+    Deterministic engine — counterpart to Oracle (judgment), Identity
+    (poetry), and Evolution (search). Given the same inputs, Det always
+    returns the same answer. Scope is intentionally undefined at
+    scaffold time; the shape firms up with the first concrete use case.
+  </p>
+
+  <div class="trio">
+    <div class="peer">
+      <b>Identity</b>
+      <p>Poetry. Mood, ticks, reflections — attention shaped by state.</p>
+    </div>
+    <div class="peer">
+      <b>Oracle</b>
+      <p>Judgment. Classical ML decision trees trained centrally,
+         shipped as 5 KB blobs.</p>
+    </div>
+    <div class="peer">
+      <b>Evolution</b>
+      <p>Search. Three-level GA on a single Agent class, recursive
+         populations.</p>
+    </div>
+  </div>
+
+  <div class="scaffold">
+    Placeholder page. When Det's first rule type lands — likely an
+    <code>(inputs, output)</code> replayable tuple — replace this with
+    a rule registry and a tester. See <code>project_det_app_backlog</code>.
+  </div>
+</div>
+{% endblock %}
