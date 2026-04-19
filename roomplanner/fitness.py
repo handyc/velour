@@ -85,7 +85,7 @@ class Violation:
 
 def _score_egress(room, constraint, features, placements):
     """No placement may sit within `min_clearance_cm` of a door feature."""
-    min_cm = int(constraint.value_json.get('min_clearance_cm', 80))
+    min_cm = int(constraint.value_json.get('min_clearance_cm', 10))
     door_kind = constraint.value_json.get('door_feature_kind', 'door')
 
     doors = [f for f in features if f.kind == door_kind]

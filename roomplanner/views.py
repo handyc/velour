@@ -433,7 +433,7 @@ def api_piece_add(request):
 @require_POST
 def api_room_update(request, slug):
     """Update per-room settings: north_direction, name, notes,
-    latitude, longitude. Dimensions stay admin-only for now."""
+    dimensions, latitude, longitude."""
     room = get_object_or_404(Room, slug=slug)
     data = _json(request)
 
@@ -448,6 +448,17 @@ def api_room_update(request, slug):
 
     if 'notes' in data:
         room.notes = str(data['notes'])[:2000]
+
+    # Dimensions — clamp to a sane range (30 cm to 100 m) so a typo
+    # can't shrink the canvas to 0 or blow up the viewBox.
+    for field in ('width_cm', 'length_cm'):
+        if field in data:
+            try:
+                v = int(data[field])
+            except (TypeError, ValueError):
+                continue
+            if 30 <= v <= 10000:
+                setattr(room, field, v)
 
     if 'latitude' in data:
         try:   room.latitude = float(data['latitude'])
@@ -464,6 +475,8 @@ def api_room_update(request, slug):
         'ok':              True,
         'north_direction': room.north_direction,
         'edge_labels':     _edge_labels(room.north_direction),
+        'width_cm':        room.width_cm,
+        'length_cm':       room.length_cm,
         'latitude':        room.latitude,
         'longitude':       room.longitude,
         'location_city':   room.location_city,

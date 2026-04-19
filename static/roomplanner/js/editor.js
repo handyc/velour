@@ -708,6 +708,53 @@
     });
   }
 
+  // Resize room. Updates the SVG canvas + viewBox + outline rect in place
+  // so the user sees the new footprint immediately without a reload.
+  const sizeBtn = document.getElementById('rp-size-apply');
+  if (sizeBtn) {
+    sizeBtn.addEventListener('click', async () => {
+      const msg  = document.getElementById('rp-size-msg');
+      const wEl  = document.getElementById('rp-width');
+      const lEl  = document.getElementById('rp-length');
+      const w    = parseInt(wEl.value, 10);
+      const l    = parseInt(lEl.value, 10);
+      if (!(w >= 30 && w <= 10000 && l >= 30 && l <= 10000)) {
+        setMsg(msg, 'width and length must be 30–10000 cm', 'err'); return;
+      }
+      setMsg(msg, 'saving…');
+      const data = await api(`${apiRoom}/room/update/`, {
+        width_cm:  w,
+        length_cm: l,
+      });
+      if (!data.ok) { setMsg(msg, data.error || 'failed', 'err'); return; }
+      const canvas = document.getElementById('rp-canvas');
+      if (canvas) {
+        canvas.setAttribute('viewBox', `-10 -10 ${data.width_cm + 20} ${data.length_cm + 20}`);
+        canvas.style.height = `${data.length_cm}px`;
+        canvas.dataset.roomW = data.width_cm;
+        canvas.dataset.roomH = data.length_cm;
+        const outline = canvas.querySelector('rect');
+        if (outline) {
+          outline.setAttribute('width',  data.width_cm);
+          outline.setAttribute('height', data.length_cm);
+        }
+        // Re-centre the compass edge labels to the new midpoints.
+        const midW = data.width_cm / 2;
+        const midL = data.length_cm / 2;
+        const setAttrs = (id, attrs) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+        };
+        setAttrs('rp-compass-top',    {x: midW});
+        setAttrs('rp-compass-bottom', {x: midW, y: data.length_cm + 8});
+        setAttrs('rp-compass-left',   {y: midL});
+        setAttrs('rp-compass-right',  {x: data.width_cm + 5, y: midL});
+      }
+      setMsg(msg, `resized to ${data.width_cm}×${data.length_cm} cm`, 'ok');
+    });
+  }
+
   // Detect via IP
   const locateBtn = document.getElementById('rp-locate-btn');
   if (locateBtn) {

@@ -1,16 +1,29 @@
 """Export a Building (or single Room) to an Aether World.
 
 Conventions:
-    Room Planner is in centimetres, Y forward in plan view (i.e. "up
-    the page" = +Y on the SVG). Aether uses metres, three.js-style
-    axes: +X right, +Y up, -Z forward.
+    Room Planner is in centimetres. Its SVG plan uses standard SVG
+    axes: +X right, +Y *down* the page. Aether uses metres and
+    three.js-style axes: +X right, +Y up, -Z forward (the camera's
+    default view direction).
 
-    So the mapping is:
-        rp.x_cm / 100  →  ae.x        (right on the floor)
-        rp.y_cm / 100  →  ae.z        (forward on the floor; we
-                                       negate so +Y on the plan
-                                       reads as "into the scene")
-        rp.height/100  →  ae.y        (up out of the floor)
+    The mapping:
+        rp.x_cm / 100  →  ae.x              (right on the floor)
+        rp.y_cm / 100  →  (rp.y - length)/100 → ae.z
+                                          (the plan's "top edge",
+                                           rp_y=0, lands at -length
+                                           which is the camera's
+                                           forward; the plan's
+                                           "bottom edge" ends up
+                                           behind the camera)
+        rp.height/100  →  ae.y              (up out of the floor)
+
+    Why this mapping: a reader looking at a plan naturally treats
+    "up the page" as "forward in the room". Spawning the camera in
+    the room's centre with yaw=0 (facing -Z) makes the plan's top
+    edge the wall you walk toward, which preserves left/right from
+    the plan in the walkable view. An earlier `ae.z = -rp.y` mapping
+    flipped the handedness and caused a left/right mirror whenever
+    the user turned 180° to look at the "top of the plan".
 
     A Floor sits at base_y = sum of heights of the floors below it.
     Rooms on the same floor are laid out in a row with a 2 m gap.
@@ -154,9 +167,12 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
                floor_height_m: float, ents: list):
     """Append all primitives for one room to `ents`."""
     w_m = room.width_cm  / 100.0  # X extent
-    d_m = room.length_cm / 100.0  # Z extent (Room Planner Y → Aether Z, negated)
+    d_m = room.length_cm / 100.0  # Z extent
     cx = origin_x + w_m / 2.0
-    cz = -d_m / 2.0  # rooms grow in -Z direction so +Y on the plan is "forward"
+    # Rooms extend from ae_z=-d_m (plan top edge, y=0) to ae_z=0 (plan
+    # bottom edge). Camera spawns at the centre facing -Z, so the plan's
+    # "up the page" direction is what the user walks toward.
+    cz = -d_m / 2.0
 
     # Floor slab — 5 cm thick, sitting just at base_y so its top is base_y.
     ents.append(_make_box(
@@ -170,30 +186,30 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
 
     # Four walls — thin boxes hugging the perimeter, full ceiling height.
     wall_y = base_y + floor_height_m / 2.0
-    # West wall (small X edge)
+    # West wall (small X edge of the plan)
     ents.append(_make_box(
         world, f'wall-W-{room.slug}',
         origin_x - WALL_T_M / 2.0, wall_y, cz,
         WALL_T_M, floor_height_m, d_m,
         WALL_COLOR, sort_order=1,
     ))
-    # East wall
+    # East wall (large X edge of the plan)
     ents.append(_make_box(
         world, f'wall-E-{room.slug}',
         origin_x + w_m + WALL_T_M / 2.0, wall_y, cz,
         WALL_T_M, floor_height_m, d_m,
         WALL_COLOR, sort_order=1,
     ))
-    # South wall (the +Y plan edge, which is -Z in scene)
+    # "N" wall — plan top edge (y=0) → ae_z = -d_m (far side from spawn).
     ents.append(_make_box(
-        world, f'wall-S-{room.slug}',
+        world, f'wall-N-{room.slug}',
         cx, wall_y, -d_m - WALL_T_M / 2.0,
         w_m, floor_height_m, WALL_T_M,
         WALL_COLOR, sort_order=1,
     ))
-    # North wall (the 0,0 plan edge, which is 0 in scene)
+    # "S" wall — plan bottom edge (y=d_m) → ae_z = 0 (behind spawn).
     ents.append(_make_box(
-        world, f'wall-N-{room.slug}',
+        world, f'wall-S-{room.slug}',
         cx, wall_y, WALL_T_M / 2.0,
         w_m, floor_height_m, WALL_T_M,
         WALL_COLOR, sort_order=1,
@@ -208,7 +224,7 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
         plan_cx = feat.x_cm / 100.0 + fw / 2.0
         plan_cy = feat.y_cm / 100.0 + fd / 2.0
         ae_x = origin_x + plan_cx
-        ae_z = -plan_cy
+        ae_z = plan_cy - d_m
         ae_y = base_y + (fh / 2.0 if feat.kind != 'window'
                          else floor_height_m / 2.0)
         color = FEATURE_COLORS.get(feat.kind, FEATURE_COLORS['other'])
@@ -237,7 +253,7 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
         plan_cx = pl.x_cm / 100.0 + pw / 2.0
         plan_cy = pl.y_cm / 100.0 + pd / 2.0
         ae_x = origin_x + plan_cx
-        ae_z = -plan_cy
+        ae_z = plan_cy - d_m
         ae_y = base_y + ph / 2.0
         color = PIECE_COLORS.get(piece.kind, PIECE_COLORS['other'])
 

@@ -349,6 +349,24 @@
       </div>
 
       <div class="rp-panel">
+        <h3>Room size</h3>
+        <div class="rp-row">
+          <div>
+            <label for="rp-width">width cm</label>
+            <input id="rp-width" type="number" min="30" max="10000" step="10"
+                   value="{{ room.width_cm }}">
+          </div>
+          <div>
+            <label for="rp-length">length cm</label>
+            <input id="rp-length" type="number" min="30" max="10000" step="10"
+                   value="{{ room.length_cm }}">
+          </div>
+        </div>
+        <button id="rp-size-apply" type="button" class="rp-btn">Apply size</button>
+        <div id="rp-size-msg" class="rp-msg"></div>
+      </div>
+
+      <div class="rp-panel">
         <h3>Orientation &amp; location</h3>
         <label for="rp-north">which screen edge is north?</label>
         <select id="rp-north">
