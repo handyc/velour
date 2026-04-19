@@ -17,7 +17,9 @@
   const features    = document.getElementById('rp-features');
   const gridG       = document.getElementById('rp-grid');
   const toolbar     = document.getElementById('rp-toolbar');
-  const tbLabel     = document.getElementById('rp-tb-label');
+  // tbLabel gets swapped between <span> and <input> during inline rename,
+  // so it needs `let` not `const`.
+  let   tbLabel     = document.getElementById('rp-tb-label');
   const tbRotate    = document.getElementById('rp-tb-rotate');
   const tbRename    = document.getElementById('rp-tb-rename');
   const tbDelete    = document.getElementById('rp-tb-delete');
@@ -86,18 +88,53 @@
   function select(group) {
     if (selected) selected.classList.remove('selected');
     selected = group || null;
+    disarmDelete();
     if (selected) {
       selected.classList.add('selected');
       tbLabel.textContent = selected.dataset.label ||
         selected.dataset.kind || 'item';
       const isPlacement = selected.dataset.type === 'placement';
       tbRotate.style.display = isPlacement ? '' : 'none';
-      toolbar.classList.add('visible');
+      toolbar.classList.remove('disabled');
+      tbRotate.disabled = false;
+      tbRename.disabled = false;
+      tbDelete.disabled = false;
       // bring to front
       selected.parentNode.appendChild(selected);
     } else {
-      toolbar.classList.remove('visible');
+      tbLabel.textContent = 'no selection';
+      toolbar.classList.add('disabled');
+      tbRotate.disabled = true;
+      tbRename.disabled = true;
+      tbDelete.disabled = true;
     }
+  }
+
+  // -------------------------------------------------- 2-click delete arm
+  // Replaces window.confirm(). First click arms the button (pulse red);
+  // second click within ARM_MS commits. Navigating away / selecting
+  // something else disarms it.
+  const ARM_MS = 4000;
+  let armedTimer = null;
+  function armDelete(onCommit) {
+    if (armedTimer) {          // second click: commit
+      clearTimeout(armedTimer);
+      armedTimer = null;
+      tbDelete.classList.remove('armed');
+      tbDelete.textContent = '✕';
+      onCommit();
+      return;
+    }
+    tbDelete.classList.add('armed');
+    tbDelete.textContent = '✕?';
+    armedTimer = setTimeout(disarmDelete, ARM_MS);
+  }
+  function disarmDelete() {
+    if (!armedTimer) return;
+    clearTimeout(armedTimer);
+    armedTimer = null;
+    tbDelete.classList.remove('armed');
+    tbDelete.textContent = '✕';
   }
 
   // -------------------------------------------------- drag
@@ -177,33 +214,60 @@
     }
   });
 
-  tbRename.addEventListener('click', async () => {
+  // Rename — replace the label span with an inline input (no popup).
+  tbRename.addEventListener('click', () => {
     if (!selected) return;
+    disarmDelete();
+    if (tbLabel.tagName === 'INPUT') return;      // already editing
     const cur = selected.dataset.label || '';
-    const next = window.prompt('New label:', cur);
-    if (next === null) return;
-    const type = selected.dataset.type;
-    const id   = selected.dataset.id;
-    const data = await api(`${apiRoom}/${type}/${id}/update/`, { label: next });
-    if (data.ok) {
-      selected.dataset.label = data.label;
-      const t = selected.querySelector('text.rp-label');
-      if (t) t.textContent = data.label;
-      tbLabel.textContent = data.label;
-    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'rp-tb-rename';
+    input.id = 'rp-tb-label';
+    input.value = cur;
+    tbLabel.parentNode.replaceChild(input, tbLabel);
+    tbLabel = input;
+    input.focus();
+    input.select();
+    const finish = async (commit) => {
+      const next = input.value;
+      const span = document.createElement('span');
+      span.id = 'rp-tb-label';
+      span.className = 'rp-tb-label';
+      span.textContent = commit ? next || cur : cur;
+      input.parentNode.replaceChild(span, input);
+      tbLabel = span;
+      if (!commit || next === cur || !selected) return;
+      const type = selected.dataset.type;
+      const id   = selected.dataset.id;
+      const data = await api(`${apiRoom}/${type}/${id}/update/`, { label: next });
+      if (data.ok) {
+        selected.dataset.label = data.label;
+        const t = selected.querySelector('text.rp-label');
+        if (t) t.textContent = data.label;
+        tbLabel.textContent = data.label;
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')     { e.preventDefault(); finish(true);  }
+      else if (e.key === 'Escape'){ e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
   });
 
-  tbDelete.addEventListener('click', async () => {
+  // Delete — 2-click arm instead of window.confirm().
+  tbDelete.addEventListener('click', () => {
     if (!selected) return;
-    const type = selected.dataset.type;
-    const id   = selected.dataset.id;
-    const label = selected.dataset.label || type;
-    if (!window.confirm(`Remove “${label}”?`)) return;
-    const data = await api(`${apiRoom}/${type}/${id}/delete/`, {});
-    if (data.ok) {
-      selected.remove();
-      select(null);
-    }
+    armDelete(async () => {
+      if (!selected) return;
+      const type = selected.dataset.type;
+      const id   = selected.dataset.id;
+      const data = await api(`${apiRoom}/${type}/${id}/delete/`, {});
+      if (data.ok) {
+        selected.remove();
+        select(null);
+      }
+    });
   });
 
   // -------------------------------------------------- rendering new items
@@ -464,12 +528,9 @@
         parseInt(evoGensInput.value, 10) || 60));
       const pop  = Math.max(4, Math.min(100,
         parseInt(evoPopInput.value, 10) || 30));
-      const confirmed = window.confirm(
-        `Run the genetic search? This will move your furniture to a ` +
-        `lower-penalty layout (${gens} generations × ${pop} population).`
-      );
-      if (!confirmed) return;
-
+      // No popup — clicking the button is consent. The server writes
+      // an auto-snapshot before mutating, so the move is recoverable
+      // from the saved-layouts panel if the user doesn't like it.
       evolveBtn.disabled = true;
       setMsg(msg, `evolving ${gens} × ${pop}…`);
       try {
@@ -479,6 +540,19 @@
         });
         if (!data.ok) {
           setMsg(msg, data.error || 'evolve failed', 'err');
+          return;
+        }
+        if (data.incompatible_with_reality) {
+          // GA couldn't find a non-overlapping arrangement — the best
+          // candidate still has furniture occupying the same space.
+          // Refuse to apply, surface the offending pairs.
+          drawEvoSpark(data.history || []);
+          const pairs = (data.overlap || [])
+            .map(o => `${o.a_label} ↔ ${o.b_label}`)
+            .join(', ');
+          setMsg(msg,
+            `red flag: no non-overlapping layout — ${pairs || 'overlap unavoidable'}`,
+            'err');
           return;
         }
         applyPlacementUpdates(data.placements || []);
@@ -568,12 +642,28 @@
   }
 
   if (layoutDelete) {
+    // 2-click arm — first click asks; second within 4s commits.
+    let layoutArm = null;
+    const origLabel = layoutDelete.textContent;
+    const disarmLayout = () => {
+      if (!layoutArm) return;
+      clearTimeout(layoutArm);
+      layoutArm = null;
+      layoutDelete.textContent = origLabel;
+      layoutDelete.classList.remove('rp-armed');
+    };
     layoutDelete.addEventListener('click', async () => {
       const id = layoutSelect.value;
       if (!id) { setMsg(layoutMsg, 'pick a layout first', 'err'); return; }
+      if (!layoutArm) {
+        layoutArm = setTimeout(disarmLayout, 4000);
+        layoutDelete.textContent = 'click again to confirm';
+        layoutDelete.classList.add('rp-armed');
+        setMsg(layoutMsg, 'click "confirm" within 4s', '');
+        return;
+      }
+      disarmLayout();
       const opt = layoutSelect.selectedOptions[0];
-      const label = opt ? opt.textContent : 'this layout';
-      if (!window.confirm(`Delete ${label}?`)) return;
       setMsg(layoutMsg, 'deleting…');
       const data = await api(`${apiRoom}/layout/${id}/delete/`, {});
       if (!data.ok) { setMsg(layoutMsg, data.error || 'failed', 'err'); return; }
@@ -581,6 +671,8 @@
       layoutSelect.value = '';
       setMsg(layoutMsg, 'deleted', 'ok');
     });
+    // Re-arming should also reset if the user picks a different layout.
+    if (layoutSelect) layoutSelect.addEventListener('change', disarmLayout);
   }
 
   // After an evolve, the server writes an auto-snapshot; reflect it here.

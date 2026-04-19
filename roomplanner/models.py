@@ -1,6 +1,69 @@
 from django.db import models
 
 
+class Building(models.Model):
+    """A physical building that holds one or more floors. Most users
+    will only ever have a couple of these — "Home", maybe "Office" —
+    but making it a first-class model means the stacked-floors view
+    has a container to render into and address/location data has
+    somewhere sensible to live."""
+
+    slug = models.SlugField(unique=True)
+    name = models.CharField(max_length=120)
+    address = models.CharField(max_length=240, blank=True)
+    notes = models.TextField(blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class Floor(models.Model):
+    """A storey within a Building. `level` is an integer so basements
+    can be -1, -2 etc. The unique (building, level) constraint means
+    you can't accidentally create two "floor 2"s."""
+
+    building = models.ForeignKey(
+        Building, on_delete=models.CASCADE, related_name='floors',
+    )
+    level = models.IntegerField(
+        help_text="Storey number: 0 = ground, 1 = first, -1 = basement.",
+    )
+    name = models.CharField(
+        max_length=80, blank=True,
+        help_text="Optional human name, e.g. 'Attic', 'Ground floor'.",
+    )
+    notes = models.TextField(blank=True)
+    # Height matters when the Aether export lands — it stacks floors
+    # vertically in Z. Defaulting to 280 cm matches a typical Dutch
+    # ceiling; users can override per floor.
+    height_cm = models.PositiveIntegerField(default=280)
+
+    class Meta:
+        # Top-down order: highest floor first in a list, so an attic
+        # sits above the ground floor visually.
+        ordering = ['building', '-level']
+        unique_together = [('building', 'level')]
+
+    def __str__(self):
+        return f"{self.building.name} — {self.display_name}"
+
+    @property
+    def display_name(self):
+        if self.name:
+            return self.name
+        if self.level == 0:
+            return "Ground floor"
+        if self.level < 0:
+            return f"Basement {abs(self.level)}"
+        return f"Floor {self.level}"
+
+
 class Room(models.Model):
     """A room in the physical lab. Coordinates are in centimetres with
     (0, 0) at the top-left (SVG convention).
@@ -24,6 +87,12 @@ class Room(models.Model):
 
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=120)
+    floor = models.ForeignKey(
+        Floor, on_delete=models.PROTECT, related_name='rooms',
+        null=True, blank=True,
+        help_text="Which storey this room sits on. Optional for rooms "
+                  "imported before multi-floor support landed.",
+    )
     width_cm = models.PositiveIntegerField(help_text="X-axis extent in cm.")
     length_cm = models.PositiveIntegerField(help_text="Y-axis extent in cm.")
     notes = models.TextField(blank=True)

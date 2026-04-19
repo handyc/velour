@@ -21,7 +21,7 @@ import random
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .fitness import any_overlap, score_placements
+from .fitness import any_overlap, overlapping_pairs, score_placements
 
 
 # ---- duck-typed placement -------------------------------------------
@@ -208,6 +208,15 @@ class EvolveResult:
     population: int
     history: List[dict]
     best: Candidate
+    # Red flag: the GA *tries* to drive overlap to zero, but a tiny room
+    # plus too much furniture can leave every candidate overlapping. If
+    # that happens, best.overlap is non-empty and apply_result() refuses
+    # to write — the layout is "incompatible with reality".
+    overlap: List[dict] = None
+
+    @property
+    def incompatible_with_reality(self) -> bool:
+        return bool(self.overlap)
 
     def as_changes(self) -> List[dict]:
         """Placement updates the caller can feed straight into Placement.save."""
@@ -297,12 +306,20 @@ def evolve(
         population=population,
         history=history,
         best=best_cand,
+        overlap=overlapping_pairs(best_cand),
     )
 
 
 def apply_result(room, result: EvolveResult) -> Dict[int, dict]:
     """Persist the best candidate back to the DB. Returns a map of
-    placement_id → {x, y, rot, w, h, label} for the caller to echo."""
+    placement_id → {x, y, rot, w, h, label} for the caller to echo.
+
+    Refuses to write if the best candidate still has overlapping
+    furniture — furniture can't physically occupy the same space, so
+    persisting such an arrangement would be dishonest. Callers should
+    check `result.incompatible_with_reality` first."""
+    if result.incompatible_with_reality:
+        return {}
     from .models import Placement
     touched: Dict[int, dict] = {}
     by_id = {p.id: p for p in result.best}

@@ -16,7 +16,8 @@ from .layouts import (
     list_layouts, load_layout, save_auto_snapshot, save_layout,
 )
 from .models import (
-    Constraint, Feature, FurniturePiece, Layout, Placement, Room,
+    Building, Constraint, Feature, Floor, FurniturePiece, Layout,
+    Placement, Room,
 )
 
 
@@ -58,11 +59,50 @@ def _feature_color(feature):
 
 
 def index(request):
-    rooms = list(Room.objects.all())
+    # Buildings → Floors → Rooms. Rooms without a floor (shouldn't
+    # happen post-0005 migration, but defensive) fall into a "loose"
+    # bucket at the bottom.
+    buildings = list(
+        Building.objects
+        .prefetch_related('floors__rooms__placements',
+                          'floors__rooms__constraints')
+    )
+    building_groups = []
+    for b in buildings:
+        floors = []
+        for f in b.floors.all():
+            floors.append({
+                'floor': f,
+                'rooms': list(f.rooms.all()),
+            })
+        building_groups.append({'building': b, 'floors': floors})
+
+    loose_rooms = list(Room.objects.filter(floor__isnull=True))
     pieces_count = FurniturePiece.objects.count()
+    total_rooms = Room.objects.count()
+
     return render(request, 'roomplanner/index.html', {
-        'rooms':        rooms,
-        'pieces_count': pieces_count,
+        'building_groups': building_groups,
+        'loose_rooms':     loose_rooms,
+        'total_rooms':     total_rooms,
+        'pieces_count':    pieces_count,
+    })
+
+
+def building_detail(request, slug):
+    """Stacked-floors view of one building. Each floor lists its rooms
+    and shows a miniature footprint sketch for quick eyeballing."""
+    building = get_object_or_404(Building, slug=slug)
+    floors = []
+    for f in building.floors.all():
+        rooms = list(f.rooms.all())
+        floors.append({
+            'floor': f,
+            'rooms': rooms,
+        })
+    return render(request, 'roomplanner/building_detail.html', {
+        'building': building,
+        'floors':   floors,
     })
 
 
@@ -533,6 +573,10 @@ def api_room_evolve(request, slug):
         'history':        hist,
         'placements':     list(touched.values()),
         'score':          score_room(room),
+        # Red flag — no non-overlapping layout was found, so we did not
+        # persist anything. The editor should show a banner, not update.
+        'incompatible_with_reality': result.incompatible_with_reality,
+        'overlap':                   result.overlap or [],
     })
 
 

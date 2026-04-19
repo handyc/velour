@@ -9,17 +9,44 @@
   .rp-bar { color: #8b949e; font-size: 0.85rem; margin-bottom: 1rem;
             display: flex; gap: 1.5rem; }
   .rp-bar a { color: #58a6ff; text-decoration: none; }
+  .rp-bldg {
+    border: 1px solid #21262d; border-radius: 6px;
+    margin-bottom: 1rem; overflow: hidden;
+  }
+  .rp-bldg-hd {
+    background: #161b22; padding: 0.6rem 0.9rem;
+    display: flex; align-items: baseline; gap: 0.75rem;
+    border-bottom: 1px solid #21262d;
+  }
+  .rp-bldg-hd a { color: #c9d1d9; text-decoration: none; font-weight: 600; }
+  .rp-bldg-hd .rp-addr { color: #8b949e; font-size: 0.82rem; }
+  .rp-floor {
+    border-top: 1px solid #21262d; padding: 0.5rem 0.9rem;
+  }
+  .rp-floor:first-of-type { border-top: none; }
+  .rp-floor-hd {
+    color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 0.3rem;
+    display: flex; gap: 0.5rem; align-items: baseline;
+  }
+  .rp-floor-level {
+    display: inline-block; min-width: 1.6rem; padding: 0.05rem 0.35rem;
+    border: 1px solid #30363d; border-radius: 3px;
+    text-align: center; color: #c9d1d9; font-variant-numeric: tabular-nums;
+  }
   .rp-table { width: 100%; border-collapse: collapse; }
   .rp-table th, .rp-table td {
-    text-align: left; padding: 0.45rem 0.5rem;
+    text-align: left; padding: 0.35rem 0.5rem;
     border-bottom: 1px solid #21262d;
-    font-size: 0.92rem;
+    font-size: 0.9rem;
   }
-  .rp-table th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+  .rp-table tr:last-child td { border-bottom: none; }
+  .rp-table th { color: #8b949e; font-weight: 500; font-size: 0.76rem;
                  text-transform: uppercase; letter-spacing: 0.04em; }
   .rp-table a { color: #58a6ff; text-decoration: none; }
   .rp-num { text-align: right; color: #c9d1d9; font-variant-numeric: tabular-nums; }
-  .rp-empty { color: #8b949e; padding: 1rem 0; font-style: italic; }
+  .rp-empty { color: #8b949e; padding: 0.6rem 0.9rem; font-style: italic;
+              font-size: 0.88rem; }
 </style>
 {% endblock %}
 
@@ -29,41 +56,89 @@
   <p class="rp-lede">
     Lay out the physical lab — a top-down 2D view of each room, with
     furniture + fixed features (doors, outlets, windows) and a list of
-    organizing constraints. Phase 2 plugs the Evolution Engine in to
-    search for arrangements that satisfy all constraints.
+    organizing constraints. Rooms are grouped by building and floor.
   </p>
 
   <div class="rp-bar">
-    <span>{{ rooms|length }} room{{ rooms|length|pluralize }}</span>
+    <span>{{ total_rooms }} room{{ total_rooms|pluralize }}</span>
     <span>·</span>
     <a href="{% url 'roomplanner:catalog' %}">{{ pieces_count }} furniture pieces</a>
   </div>
 
-  <table class="rp-table">
-    <thead>
-      <tr>
-        <th>room</th>
-        <th class="rp-num">width</th>
-        <th class="rp-num">length</th>
-        <th class="rp-num">pieces</th>
-        <th class="rp-num">constraints</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in rooms %}
-      <tr>
-        <td><a href="{% url 'roomplanner:room_detail' r.slug %}">{{ r.name }}</a></td>
-        <td class="rp-num">{{ r.width_cm }} cm</td>
-        <td class="rp-num">{{ r.length_cm }} cm</td>
-        <td class="rp-num">{{ r.placements.count }}</td>
-        <td class="rp-num">{{ r.constraints.count }}</td>
-      </tr>
-      {% empty %}
-      <tr><td colspan="5" class="rp-empty">
-        no rooms yet — run <code>seed_roomplanner</code>
-      </td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {% for group in building_groups %}
+  <div class="rp-bldg">
+    <div class="rp-bldg-hd">
+      <a href="{% url 'roomplanner:building_detail' group.building.slug %}">
+        {{ group.building.name }}
+      </a>
+      {% if group.building.address %}
+      <span class="rp-addr">{{ group.building.address }}</span>
+      {% endif %}
+    </div>
+
+    {% for entry in group.floors %}
+    <div class="rp-floor">
+      <div class="rp-floor-hd">
+        <span class="rp-floor-level">{{ entry.floor.level }}</span>
+        <span>{{ entry.floor.display_name }}</span>
+      </div>
+      {% if entry.rooms %}
+      <table class="rp-table">
+        <thead>
+          <tr>
+            <th>room</th>
+            <th class="rp-num">width</th>
+            <th class="rp-num">length</th>
+            <th class="rp-num">pieces</th>
+            <th class="rp-num">constraints</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in entry.rooms %}
+          <tr>
+            <td><a href="{% url 'roomplanner:room_detail' r.slug %}">{{ r.name }}</a></td>
+            <td class="rp-num">{{ r.width_cm }} cm</td>
+            <td class="rp-num">{{ r.length_cm }} cm</td>
+            <td class="rp-num">{{ r.placements.count }}</td>
+            <td class="rp-num">{{ r.constraints.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="rp-empty">no rooms on this floor yet</div>
+      {% endif %}
+    </div>
+    {% empty %}
+    <div class="rp-empty">no floors yet — add one in admin</div>
+    {% endfor %}
+  </div>
+  {% empty %}
+  <p class="rp-empty">
+    no buildings yet — run <code>seed_roomplanner</code> or add one in admin
+  </p>
+  {% endfor %}
+
+  {% if loose_rooms %}
+  <div class="rp-bldg">
+    <div class="rp-bldg-hd">
+      <span style="color:#d29922;">unassigned rooms</span>
+      <span class="rp-addr">no floor set — edit in admin to place them</span>
+    </div>
+    <div class="rp-floor">
+      <table class="rp-table">
+        <tbody>
+          {% for r in loose_rooms %}
+          <tr>
+            <td><a href="{% url 'roomplanner:room_detail' r.slug %}">{{ r.name }}</a></td>
+            <td class="rp-num">{{ r.width_cm }} cm</td>
+            <td class="rp-num">{{ r.length_cm }} cm</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

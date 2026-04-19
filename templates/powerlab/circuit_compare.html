@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}{{ circuit.title }} — vendor comparison{% endblock %}
+
+{% block extra_head %}
+<style>
+  .pl-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem; }
+  .pl-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .pl-back a { color: #58a6ff; text-decoration: none; }
+  .pl-title { font-weight: 600; margin: 0.2rem 0 0.3rem; }
+  .pl-tagline { color: #8b949e; margin-bottom: 1.25rem; max-width: 70ch; }
+  .pl-section-label {
+    color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; margin: 1.25rem 0 0.4rem;
+  }
+  .pl-cmp { width: 100%; border-collapse: collapse;
+            font-variant-numeric: tabular-nums; }
+  .pl-cmp th, .pl-cmp td {
+    text-align: right; padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid #21262d; font-size: 0.9rem;
+  }
+  .pl-cmp th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+               text-transform: uppercase; letter-spacing: 0.04em; }
+  .pl-cmp th.pl-l, .pl-cmp td.pl-l { text-align: left; }
+  .pl-cmp tr:hover td { background: #161b22; }
+  .pl-cmp a { color: #58a6ff; text-decoration: none; }
+  .pl-des { color: #f0883e; width: 3rem; }
+  .pl-part { color: #c9d1d9; }
+  .pl-qty { color: #8b949e; width: 3rem; }
+  .pl-missing { color: #484f58; }
+  .pl-min { color: #56d364; font-weight: 600; }
+  .pl-unit { color: #8b949e; font-size: 0.78rem; margin-left: 0.2rem; }
+  .pl-totals td {
+    border-top: 1px solid #30363d; border-bottom: none;
+    padding-top: 0.6rem; color: #c9d1d9; font-weight: 500;
+  }
+  .pl-totals td.pl-partial { color: #d29922; }
+  .pl-totals .pl-missing-note { color: #8b949e; font-weight: normal;
+                                 font-size: 0.78rem; }
+  .pl-note {
+    color: #8b949e; font-size: 0.82rem; max-width: 70ch;
+    margin: 1rem 0; line-height: 1.5;
+  }
+  .pl-cheapest-row td { color: #56d364; font-weight: 500; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pl-wrap">
+  <div class="pl-back">
+    <a href="{% url 'powerlab:detail' circuit.slug %}">← {{ circuit.title }}</a>
+  </div>
+  <h1 class="pl-title">{{ circuit.title }} — vendor comparison</h1>
+  <p class="pl-tagline">
+    Rolling-window unit prices ({{ bom_count }} BOM line{{ bom_count|pluralize }}),
+    last {{ '90' }} days. Cheapest per row in green.
+  </p>
+
+  {% if rows %}
+  <table class="pl-cmp">
+    <thead>
+      <tr>
+        <th class="pl-l">ref</th>
+        <th class="pl-l">part</th>
+        <th>qty</th>
+        {% for v in vendors %}<th>{{ v }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="pl-l pl-des">{{ row.line.designator }}</td>
+        <td class="pl-l pl-part">
+          <a href="{% url 'powerlab:part_detail' row.line.part.slug %}">{{ row.line.part.name }}</a>
+        </td>
+        <td class="pl-qty">{{ row.line.qty }}</td>
+        {% for cell in row.cells %}
+        <td {% if cell.is_min %}class="pl-min"{% elif cell.unit is None %}class="pl-missing"{% endif %}>
+          {% if cell.unit is not None %}
+            ${{ cell.line }}<span class="pl-unit">@${{ cell.unit }}</span>
+          {% else %}—{% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+
+      <tr class="pl-totals">
+        <td class="pl-l" colspan="2">vendor total</td>
+        <td></td>
+        {% for v in vendor_columns %}
+        <td class="{% if v.partial %}pl-partial{% endif %}">
+          ${{ v.total }}
+          {% if v.partial %}<span class="pl-missing-note">({{ v.missing }} missing)</span>{% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+
+      <tr class="pl-cheapest-row">
+        <td class="pl-l" colspan="2">cheapest-per-line total</td>
+        <td></td>
+        <td colspan="{{ vendors|length }}" style="text-align:right;">
+          ${{ cheapest_total }}
+          {% if cheapest_missing %}
+            <span class="pl-missing-note">({{ cheapest_missing }} line{{ cheapest_missing|pluralize }} unpriced anywhere)</span>
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="pl-note">No BOM lines on this circuit yet.</p>
+  {% endif %}
+
+  <p class="pl-note">
+    A vendor column with "(n missing)" means that vendor has no price
+    snapshot for n of the BOM parts — its total is just the parts it
+    covers, so compare totals with that caveat in mind. Run
+    <code>venv/bin/python manage.py powerlab_refresh_prices</code> to
+    fill gaps from Mouser &amp; Conrad; AliExpress is manual-paste only
+    (use the form on a part's detail page).
+  </p>
+</div>
+{% endblock %}

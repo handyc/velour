@@ -57,6 +57,18 @@ class Command(BaseCommand):
             f"(improvement {result.improvement})"
         )
 
+        if result.incompatible_with_reality:
+            self.stdout.write(self.style.ERROR(
+                f"red flag: best candidate still overlaps "
+                f"({len(result.overlap)} collision(s)) — NOT saved"
+            ))
+            for pair in result.overlap:
+                self.stdout.write(self.style.ERROR(
+                    f"  {pair['a_label']} ↔ {pair['b_label']} "
+                    f"({pair['area_cm2']} cm² shared)"
+                ))
+            return
+
         if not opts['apply']:
             self.stdout.write(self.style.WARNING(
                 "--apply not set — best candidate NOT saved"

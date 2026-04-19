@@ -309,3 +309,29 @@ def any_overlap(placements) -> bool:
             if dx > 0 and dy > 0:
                 return True
     return False
+
+
+def overlapping_pairs(placements):
+    """Every pair of placements whose AABBs overlap.
+
+    Returns a list of dicts with enough info for the UI to red-flag the
+    arrangement: the two placement ids/labels and the overlap area.
+    Physical reality doesn't permit furniture to occupy the same cubic
+    centimetre, so any non-empty list means the arrangement is
+    "incompatible with reality" and the evolve engine should refuse to
+    apply it."""
+    rects = [(_rect_from_placement(p), p) for p in placements]
+    out = []
+    for i, (a, pa) in enumerate(rects):
+        for b, pb in rects[i + 1:]:
+            dx = min(a.x2, b.x2) - max(a.x, b.x)
+            dy = min(a.y2, b.y2) - max(a.y, b.y)
+            if dx > 0 and dy > 0:
+                out.append({
+                    'a_id':      getattr(pa, 'id', None),
+                    'b_id':      getattr(pb, 'id', None),
+                    'a_label':   pa.label or pa.piece.name,
+                    'b_label':   pb.label or pb.piece.name,
+                    'area_cm2':  int(dx * dy),
+                })
+    return out

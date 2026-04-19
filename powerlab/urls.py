@@ -11,4 +11,5 @@ urlpatterns = [
     path('parts/<slug:slug>/price/',
          views.part_record_price, name='part_record_price'),
     path('<slug:slug>/', views.detail, name='detail'),
+    path('<slug:slug>/compare/', views.compare, name='compare'),
 ]

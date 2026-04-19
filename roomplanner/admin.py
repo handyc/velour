@@ -1,6 +1,30 @@
 from django.contrib import admin
 
-from .models import Constraint, Feature, FurniturePiece, Layout, Placement, Room
+from .models import (
+    Building, Constraint, Feature, Floor, FurniturePiece, Layout,
+    Placement, Room,
+)
+
+
+class FloorInline(admin.TabularInline):
+    model = Floor
+    extra = 0
+    fields = ('level', 'name', 'height_cm', 'notes')
+
+
+@admin.register(Building)
+class BuildingAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'address', 'created_at')
+    prepopulated_fields = {'slug': ('name',)}
+    inlines = [FloorInline]
+
+
+@admin.register(Floor)
+class FloorAdmin(admin.ModelAdmin):
+    list_display = ('building', 'level', 'name', 'height_cm')
+    list_filter = ('building',)
+    ordering = ('building', '-level')
+    search_fields = ('name', 'building__name')
 
 
 class FeatureInline(admin.TabularInline):
@@ -21,10 +45,11 @@ class ConstraintInline(admin.TabularInline):
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'width_cm', 'length_cm',
+    list_display = ('name', 'slug', 'floor', 'width_cm', 'length_cm',
                     'north_direction', 'location_city', 'updated_at')
-    list_filter = ('north_direction',)
+    list_filter = ('floor__building', 'floor', 'north_direction')
     prepopulated_fields = {'slug': ('name',)}
+    autocomplete_fields = ('floor',)
     inlines = [FeatureInline, PlacementInline, ConstraintInline]
 
 

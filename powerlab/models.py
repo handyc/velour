@@ -96,6 +96,26 @@ class Part(models.Model):
         self.save(update_fields=['est_unit_price_usd',
                                  'price_last_checked_at'])
 
+    def avg_price_by_vendor(self):
+        """Rolling-window unit price per vendor. Same window/cap as the
+        blended average, applied per-vendor bucket. Returns a dict of
+        {vendor: Decimal}; vendors with zero snapshots are omitted."""
+        cutoff = djtz.now() - timedelta(days=PRICE_WINDOW_DAYS)
+        buckets = {}
+        for snap in self.price_snapshots.all():
+            buckets.setdefault(snap.vendor, []).append(snap)
+        out = {}
+        for vendor, snaps in buckets.items():
+            snaps.sort(key=lambda s: s.observed_at, reverse=True)
+            window = [s for s in snaps if s.observed_at >= cutoff][:PRICE_WINDOW_MAX_SNAPS]
+            if not window:
+                window = snaps[:PRICE_WINDOW_MAX_SNAPS]
+            if not window:
+                continue
+            total = sum((s.unit_price_usd for s in window), Decimal('0'))
+            out[vendor] = (total / len(window)).quantize(Decimal('0.0001'))
+        return out
+
 
 class PartPriceSnapshot(models.Model):
     """One observed price for a Part from some vendor."""

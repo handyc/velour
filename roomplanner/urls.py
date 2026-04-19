@@ -7,6 +7,8 @@ app_name = 'roomplanner'
 urlpatterns = [
     path('', views.index, name='index'),
     path('catalog/', views.catalog, name='catalog'),
+    path('building/<slug:slug>/',
+         views.building_detail, name='building_detail'),
 
     # catalog API (not room-scoped)
     path('api/piece/add/',  views.api_piece_add,  name='api_piece_add'),

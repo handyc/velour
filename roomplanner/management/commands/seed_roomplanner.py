@@ -6,8 +6,28 @@ Idempotent — upserts by slug.
 from django.core.management.base import BaseCommand
 
 from roomplanner.models import (
-    Constraint, Feature, FurniturePiece, Placement, Room,
+    Building, Constraint, Feature, Floor, FurniturePiece, Placement, Room,
 )
+
+
+BUILDING_DATA = {
+    'slug':    'home',
+    'name':    'Home',
+    'address': '',
+    'notes':   (
+        '3-storey house. The wet lab sits on the top floor; ground and '
+        'first are living space. Edit in admin to rename or add rooms.'
+    ),
+}
+
+FLOORS = [
+    # (level, name, height_cm)
+    (0, 'Ground floor', 260),
+    (1, 'First floor',  260),
+    (2, 'Top floor',    240),  # attic-ish, lower ceiling
+]
+
+LAB_FLOOR_LEVEL = 2  # wet lab sits on the top floor
 
 
 CATALOG = [
@@ -102,13 +122,32 @@ class Command(BaseCommand):
             action = 'created' if created else 'updated'
             self.stdout.write(f"  [{action}] piece {slug}")
 
-        # Room
+        # Building + floors
+        building, b_created = Building.objects.update_or_create(
+            slug=BUILDING_DATA['slug'],
+            defaults={k: v for k, v in BUILDING_DATA.items() if k != 'slug'},
+        )
+        self.stdout.write(
+            f"  [{'created' if b_created else 'updated'}] building {building.slug}"
+        )
+        for level, name, height in FLOORS:
+            Floor.objects.update_or_create(
+                building=building, level=level,
+                defaults={'name': name, 'height_cm': height},
+            )
+        self.stdout.write(f"  [wrote] {len(FLOORS)} floors on {building.slug}")
+
+        lab_floor = Floor.objects.get(building=building, level=LAB_FLOOR_LEVEL)
+
+        # Room — pinned to the lab floor
+        room_defaults = {k: v for k, v in ROOM_DATA.items() if k != 'slug'}
+        room_defaults['floor'] = lab_floor
         room, created = Room.objects.update_or_create(
             slug=ROOM_DATA['slug'],
-            defaults={k: v for k, v in ROOM_DATA.items() if k != 'slug'},
+            defaults=room_defaults,
         )
         action = 'created' if created else 'updated'
-        self.stdout.write(f"  [{action}] room {room.slug}")
+        self.stdout.write(f"  [{action}] room {room.slug} on {lab_floor.display_name}")
 
         # Wipe + rewrite features / placements / constraints (idempotent).
         room.features.all().delete()

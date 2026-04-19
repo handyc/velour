@@ -49,6 +49,86 @@ def detail(request, slug):
     })
 
 
+def compare(request, slug):
+    """Per-vendor BOM comparison: rows = BOM lines, columns = vendors.
+
+    Relevant when purchasing is restricted to one supplier (Conrad for
+    university orders) and we need to know the delta vs. Mouser /
+    AliExpress at a glance."""
+    from powerlab import sources as psources
+
+    circuit = get_object_or_404(Circuit, slug=slug)
+    bom = list(circuit.bom.select_related('part').all())
+
+    # Collect the union of vendors seen on any BOM part, plus every
+    # registered source — so columns stay stable even if a part has no
+    # snapshot from (say) Conrad yet.
+    seen = set()
+    per_line_prices = []   # list of {vendor: Decimal unit_price}
+    for line in bom:
+        prices = line.part.avg_price_by_vendor()
+        per_line_prices.append(prices)
+        seen.update(prices.keys())
+    for s in psources.SOURCES:
+        seen.add(s['vendor_label'])
+
+    # Preferred column order: registered sources first in registration
+    # order, then anything else alphabetically. Keeps Mouser/Conrad/
+    # AliExpress on the left, rando manual vendor names on the right.
+    registered = [s['vendor_label'] for s in psources.SOURCES]
+    trailing = sorted(v for v in seen if v not in registered)
+    vendors = [v for v in registered if v in seen] + trailing
+
+    rows = []
+    vendor_totals = {v: Decimal('0') for v in vendors}
+    vendor_missing = {v: 0 for v in vendors}
+    cheapest_total = Decimal('0')
+    cheapest_missing = 0
+
+    for line, prices in zip(bom, per_line_prices):
+        cells = []
+        available = [(v, prices[v]) for v in vendors if v in prices]
+        cheapest = min((p for _, p in available), default=None)
+        for v in vendors:
+            unit = prices.get(v)
+            if unit is None:
+                cells.append({'unit': None, 'line': None, 'is_min': False})
+                vendor_missing[v] += 1
+                continue
+            line_total = (unit * line.qty).quantize(Decimal('0.01'))
+            vendor_totals[v] += line_total
+            cells.append({
+                'unit':   unit,
+                'line':   line_total,
+                'is_min': (cheapest is not None and unit == cheapest),
+            })
+        if cheapest is not None:
+            cheapest_total += (cheapest * line.qty).quantize(Decimal('0.01'))
+        else:
+            cheapest_missing += 1
+        rows.append({'line': line, 'cells': cells})
+
+    vendor_columns = [
+        {
+            'name':    v,
+            'total':   vendor_totals[v].quantize(Decimal('0.01')),
+            'missing': vendor_missing[v],
+            'partial': vendor_missing[v] > 0,
+        }
+        for v in vendors
+    ]
+
+    return render(request, 'powerlab/circuit_compare.html', {
+        'circuit':          circuit,
+        'vendors':          vendors,
+        'vendor_columns':   vendor_columns,
+        'rows':             rows,
+        'cheapest_total':   cheapest_total.quantize(Decimal('0.01')),
+        'cheapest_missing': cheapest_missing,
+        'bom_count':        len(bom),
+    })
+
+
 def parts(request):
     all_parts = list(Part.objects.all())
     return render(request, 'powerlab/parts.html', {'parts': all_parts})

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}{{ building.name }} — Room Planner{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rp-wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem; }
+  .rp-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .rp-back a { color: #58a6ff; text-decoration: none; }
+  .rp-title { font-weight: 600; margin: 0.2rem 0 0.3rem; }
+  .rp-meta { color: #8b949e; font-size: 0.88rem; margin-bottom: 1.25rem; }
+  .rp-notes { color: #c9d1d9; max-width: 70ch; margin-bottom: 1.5rem;
+              line-height: 1.5; white-space: pre-wrap; }
+  .rp-stack {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  .rp-floor {
+    border: 1px solid #30363d; border-radius: 4px; padding: 0.7rem 1rem;
+    background: #0d1117;
+  }
+  .rp-floor-hd {
+    display: flex; align-items: baseline; gap: 0.75rem;
+    color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 0.4rem;
+  }
+  .rp-floor-level {
+    display: inline-block; min-width: 1.6rem; padding: 0.05rem 0.35rem;
+    border: 1px solid #30363d; border-radius: 3px; background: #161b22;
+    text-align: center; color: #c9d1d9; font-variant-numeric: tabular-nums;
+  }
+  .rp-floor-name { color: #c9d1d9; text-transform: none; letter-spacing: 0;
+                   font-size: 0.9rem; font-weight: 500; }
+  .rp-floor-height { color: #8b949e; font-size: 0.75rem; margin-left: auto; }
+  .rp-rooms { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .rp-room-card {
+    border: 1px solid #21262d; border-radius: 3px; padding: 0.4rem 0.7rem;
+    background: #161b22; font-size: 0.88rem;
+  }
+  .rp-room-card a { color: #c9d1d9; text-decoration: none; }
+  .rp-room-card a:hover { color: #58a6ff; }
+  .rp-room-dim { color: #8b949e; font-size: 0.78rem;
+                 font-variant-numeric: tabular-nums; margin-left: 0.5rem; }
+  .rp-empty { color: #8b949e; font-style: italic; font-size: 0.88rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp-wrap">
+  <div class="rp-back">
+    <a href="{% url 'roomplanner:index' %}">← Room Planner</a>
+  </div>
+  <h1 class="rp-title">{{ building.name }}</h1>
+  {% if building.address %}
+  <div class="rp-meta">{{ building.address }}</div>
+  {% endif %}
+  {% if building.notes %}
+  <div class="rp-notes">{{ building.notes }}</div>
+  {% endif %}
+
+  <div class="rp-stack">
+    {% for entry in floors %}
+    <div class="rp-floor">
+      <div class="rp-floor-hd">
+        <span class="rp-floor-level">{{ entry.floor.level }}</span>
+        <span class="rp-floor-name">{{ entry.floor.display_name }}</span>
+        <span class="rp-floor-height">ceiling {{ entry.floor.height_cm }} cm</span>
+      </div>
+      {% if entry.rooms %}
+      <div class="rp-rooms">
+        {% for r in entry.rooms %}
+        <div class="rp-room-card">
+          <a href="{% url 'roomplanner:room_detail' r.slug %}">{{ r.name }}</a>
+          <span class="rp-room-dim">{{ r.width_cm }}×{{ r.length_cm }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="rp-empty">no rooms on this floor</div>
+      {% endif %}
+    </div>
+    {% empty %}
+    <div class="rp-empty">no floors — add one in admin</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

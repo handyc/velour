@@ -73,7 +73,14 @@
   </div>
   {% endif %}
 
-  <div class="pl-section-label">bill of materials</div>
+  <div class="pl-section-label">
+    bill of materials
+    <a href="{% url 'powerlab:compare' circuit.slug %}"
+       style="color:#58a6ff; text-decoration:none; text-transform:none;
+              letter-spacing:0; font-size:0.82rem; margin-left:0.5rem;">
+      compare vendors →
+    </a>
+  </div>
   <table class="pl-table">
     <thead>
       <tr>
