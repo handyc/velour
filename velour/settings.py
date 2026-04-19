@@ -105,6 +105,7 @@ INSTALLED_APPS = [
     'bodymap',
     'powerlab',
     'roomplanner',
+    'lingua',
 ]
 
 MIDDLEWARE = [
@@ -131,6 +132,7 @@ TEMPLATES = [
                 'django.contrib.messages.context_processors.messages',
                 'chronos.context_processors.topbar_clock',
                 'identity.context_processors.topbar_pulse',
+                'lingua.context_processors.lingua',
             ],
         },
     },

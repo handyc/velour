@@ -51,6 +51,7 @@ urlpatterns = [
     path('bodymap/', include('bodymap.urls')),
     path('powerlab/', include('powerlab.urls')),
     path('roomplanner/', include('roomplanner.urls')),
+    path('lingua/', include('lingua.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

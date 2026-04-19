@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Lingua — preferences{% endblock %}
+
+{% block extra_head %}
+<style>
+    .lg-page { max-width: 860px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .lg-page h1 { margin-bottom: 0.25rem; }
+    .lg-page .hint { color: #8b949e; font-size: 0.85rem; margin-bottom: 1.25rem; }
+
+    .lg-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+        margin-bottom: 1.5rem;
+    }
+    @media (max-width: 720px) { .lg-grid { grid-template-columns: 1fr; } }
+
+    .lg-panel {
+        background: #0d1117; border: 1px solid #30363d;
+        border-radius: 6px; padding: 1rem 1.1rem;
+    }
+    .lg-panel h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: #c9d1d9; }
+
+    .lg-priority-list { list-style: none; padding: 0; margin: 0; }
+    .lg-priority-list li {
+        display: flex; gap: 0.5rem; align-items: center;
+        padding: 0.25rem 0; border-bottom: 1px dashed #1e2329;
+    }
+    .lg-priority-list li:last-child { border-bottom: none; }
+    .lg-priority-list .slot {
+        width: 1.5rem; color: #6e7681; font-family: ui-monospace, monospace;
+        font-size: 0.8rem;
+    }
+    .lg-priority-list select {
+        flex: 1; background: #161b22; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; padding: 0.2rem 0.4rem;
+    }
+    .lg-priority-list .endonym {
+        color: #6e7681; font-size: 0.75rem; min-width: 5rem; text-align: right;
+    }
+
+    .lg-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; }
+    .lg-row label { color: #c9d1d9; font-size: 0.88rem; }
+    .lg-row select, .lg-row input[type=text] {
+        background: #161b22; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; padding: 0.2rem 0.4rem;
+    }
+
+    .lg-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .lg-actions button {
+        background: #238636; color: #fff; border: none;
+        border-radius: 4px; padding: 0.4rem 0.9rem; cursor: pointer;
+        font: inherit;
+    }
+    .lg-actions button:hover { background: #2ea043; }
+
+    .lg-stats { color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; }
+
+    .lg-try {
+        background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+        padding: 1rem 1.1rem; margin-top: 1rem;
+    }
+    .lg-try textarea {
+        width: 100%; min-height: 4rem; box-sizing: border-box;
+        background: #161b22; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px; padding: 0.4rem;
+        font: inherit;
+    }
+    .lg-try .result {
+        margin-top: 0.5rem; padding: 0.5rem 0.7rem;
+        background: #161b22; border-left: 3px solid #58a6ff;
+        color: #c9d1d9; font-size: 0.9rem; min-height: 1.5rem;
+        white-space: pre-wrap;
+    }
+    .lg-try .meta { color: #6e7681; font-size: 0.72rem; margin-top: 0.25rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="lg-page">
+    <h1>Lingua</h1>
+    <p class="hint">
+        Pick up to six target languages in order of priority. The first is your
+        primary — it's what hover-translate will show by default.
+        {% if not languages %}<br><strong style="color:#d29922;">No languages seeded yet.</strong>
+        Run <code>python manage.py seed_lingua</code>.{% endif %}
+    </p>
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="lg-grid">
+            <div class="lg-panel">
+                <h2>Priority languages</h2>
+                <ol class="lg-priority-list">
+                    {% for slot in slots %}
+                    <li>
+                        <span class="slot">{{ slot.num }}.</span>
+                        <select name="priority">
+                            <option value="">— none —</option>
+                            {% for lang in languages %}
+                            <option value="{{ lang.code }}"
+                                {% if slot.current == lang.code %}selected{% endif %}>
+                                {{ lang.name }}{% if lang.low_resource %} · low-resource{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </li>
+                    {% endfor %}
+                </ol>
+            </div>
+
+            <div class="lg-panel">
+                <h2>Hover tooltip</h2>
+                <div class="lg-row">
+                    <label>
+                        <input type="checkbox" name="auto_translate"
+                            {% if pref.auto_translate %}checked{% endif %}>
+                        Enable project-wide hover-translate
+                    </label>
+                </div>
+                <div class="lg-row">
+                    <label>Modifier:
+                        <select name="hover_modifier">
+                            <option value="alt"   {% if pref.hover_modifier == "alt" %}selected{% endif %}>Alt (hold)</option>
+                            <option value="ctrl"  {% if pref.hover_modifier == "ctrl" %}selected{% endif %}>Ctrl (hold)</option>
+                            <option value="shift" {% if pref.hover_modifier == "shift" %}selected{% endif %}>Shift (hold)</option>
+                            <option value="none"  {% if pref.hover_modifier == "none" %}selected{% endif %}>None (always on hover)</option>
+                        </select>
+                    </label>
+                </div>
+                <p class="lg-stats">
+                    Cache: {{ cache_stats.rows }} row{{ cache_stats.rows|pluralize }}
+                    across {{ cache_stats.by_lang|length }} target language{{ cache_stats.by_lang|length|pluralize }}.
+                </p>
+            </div>
+        </div>
+
+        <div class="lg-actions">
+            <button type="submit">Save preferences</button>
+        </div>
+    </form>
+
+    <div class="lg-try">
+        <h2 style="margin-top:0;font-size:0.95rem;">Try it</h2>
+        <textarea id="lg-try-text"
+            placeholder="Type some English and press Translate…">Gary is feeding the fish.</textarea>
+        <div class="lg-actions">
+            <button type="button" id="lg-try-go">Translate</button>
+            <span class="lg-stats" id="lg-try-status"></span>
+        </div>
+        <div class="result" id="lg-try-result"></div>
+        <div class="meta" id="lg-try-meta"></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const btn  = document.getElementById('lg-try-go');
+    const txt  = document.getElementById('lg-try-text');
+    const out  = document.getElementById('lg-try-result');
+    const meta = document.getElementById('lg-try-meta');
+    const stat = document.getElementById('lg-try-status');
+    if (!btn) return;
+    btn.addEventListener('click', async function () {
+        stat.textContent = 'translating…';
+        out.textContent = '';
+        meta.textContent = '';
+        try {
+            const resp = await fetch('{% url "lingua:translate" %}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: txt.value }),
+            });
+            const data = await resp.json();
+            stat.textContent = '';
+            if (data.error) {
+                out.textContent = '(error: ' + data.error + ')';
+            } else {
+                out.textContent = data.translation;
+                meta.textContent = (data.cached ? 'cached · ' : 'fresh · ') + 'backend=' + data.backend;
+            }
+        } catch (e) {
+            stat.textContent = '';
+            out.textContent = '(network error)';
+        }
+    });
+})();
+</script>
+{% endblock %}

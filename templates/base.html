@@ -100,6 +100,7 @@
                 <a href="{% url 'bodymap:list' %}">Bodymap</a>
                 <a href="{% url 'powerlab:index' %}">Power Lab</a>
                 <a href="{% url 'roomplanner:index' %}">Room Planner</a>
+                <a href="{% url 'lingua:home' %}">Lingua</a>
                 <a href="{% url 'experiments:list' %}">Experiments</a>
                 <a href="{% url 'chronos:home' %}">Chronos</a>
                 <a href="{% url 'databases:list' %}">Databases</a>
@@ -155,6 +156,11 @@
     </main>
 
     <script src="{% static_v 'js/chronos.js' %}"></script>
+    {% if lingua_cfg %}
+    {{ lingua_cfg|json_script:"lingua-cfg-data" }}
+    <script>window.LINGUA_CFG = JSON.parse(document.getElementById('lingua-cfg-data').textContent);</script>
+    <script src="{% static_v 'lingua/lingua.js' %}"></script>
+    {% endif %}
     {% block extra_js %}{% endblock %}
 </body>
 </html>
