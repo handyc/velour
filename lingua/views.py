@@ -7,9 +7,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import threading
+import wave
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
@@ -268,13 +273,66 @@ ESPEAK_VOICE = {
     'sa':      'hi',
 }
 
+# Piper is the quality upgrade path. A language is piper-eligible only
+# when a .onnx model sits next to this package; otherwise we fall back
+# to espeak-ng. Models are big (~60 MB each) so they live outside git.
+PIPER_VOICE = {
+    'fr':      'fr_FR-siwis-medium',
+    'zh':      'zh_CN-huayan-medium',
+    'zh-Hans': 'zh_CN-huayan-medium',
+    'zh-Hant': 'zh_CN-huayan-medium',
+}
+
+_piper_dir = Path(settings.BASE_DIR) / 'lingua' / 'data' / 'piper_voices'
+_piper_cache: dict = {}
+_piper_lock = threading.Lock()
+
+
+def _piper_wav(text: str, lang: str):
+    """Return WAV bytes synthesized by piper, or None if not available
+    for this lang. Voice instances are cached per process — the first
+    request pays ~1 s of onnxruntime warm-up, the rest are fast."""
+    key = PIPER_VOICE.get(lang) or PIPER_VOICE.get(lang.split('-')[0])
+    if not key:
+        return None
+    model_path = _piper_dir / (key + '.onnx')
+    config_path = _piper_dir / (key + '.onnx.json')
+    if not model_path.exists() or not config_path.exists():
+        return None
+    try:
+        from piper import PiperVoice  # lazy: tolerate missing dep
+    except ImportError:
+        return None
+    with _piper_lock:
+        voice = _piper_cache.get(key)
+        if voice is None:
+            voice = PiperVoice.load(str(model_path), config_path=str(config_path))
+            _piper_cache[key] = voice
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as wf:
+            voice.synthesize_wav(text, wf)
+        return buf.getvalue()
+
+
+def _espeak_wav(text: str, lang: str):
+    """Return WAV bytes from espeak-ng, or raise the exception to caller."""
+    voice = ESPEAK_VOICE.get(lang) or ESPEAK_VOICE.get(lang.split('-')[0]) or 'en-us'
+    proc = subprocess.run(
+        ['espeak-ng', '-v', voice, '-s', '150', '--stdout', text],
+        capture_output=True, timeout=8, check=False,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise RuntimeError(proc.stderr.decode('utf-8', 'replace') or 'espeak failed')
+    return proc.stdout
+
 
 @login_required
 @require_http_methods(['GET'])
 def speak(request):
-    """Server-side TTS via espeak-ng. Exists because Firefox on Windows
-    only exposes a couple of SAPI voices, so the in-browser Web Speech
-    API isn't enough. Returns a WAV stream."""
+    """Server-side TTS. Prefers piper when a model is available for the
+    language; otherwise falls back to espeak-ng. Exists because Firefox
+    on Windows exposes almost no Web Speech voices, making in-browser
+    TTS unreliable for foreign-language drilling."""
     text = (request.GET.get('text') or '').strip()
     lang = (request.GET.get('lang') or 'en').strip()
     if not text:
@@ -282,24 +340,25 @@ def speak(request):
     if len(text) > 500:
         return HttpResponseBadRequest('text too long')
 
-    voice = ESPEAK_VOICE.get(lang) or ESPEAK_VOICE.get(lang.split('-')[0]) or 'en-us'
+    backend = 'piper'
     try:
-        proc = subprocess.run(
-            ['espeak-ng', '-v', voice, '-s', '150', '--stdout', text],
-            capture_output=True, timeout=8, check=False,
-        )
+        wav = _piper_wav(text, lang)
+        if wav is None:
+            backend = 'espeak-ng'
+            wav = _espeak_wav(text, lang)
     except FileNotFoundError:
         return HttpResponse('espeak-ng not installed', status=503,
                             content_type='text/plain')
     except subprocess.TimeoutExpired:
         return HttpResponse('tts timed out', status=504, content_type='text/plain')
-    if proc.returncode != 0 or not proc.stdout:
-        return HttpResponse('tts failed: ' + proc.stderr.decode('utf-8', 'replace'),
-                            status=500, content_type='text/plain')
+    except Exception as exc:
+        return HttpResponse('tts failed: ' + str(exc), status=500,
+                            content_type='text/plain')
 
-    resp = HttpResponse(proc.stdout, content_type='audio/wav')
+    resp = HttpResponse(wav, content_type='audio/wav')
     resp['Cache-Control'] = 'private, max-age=3600'
-    resp['Content-Length'] = str(len(proc.stdout))
+    resp['Content-Length'] = str(len(wav))
+    resp['X-Lingua-TTS'] = backend
     return resp
 
 

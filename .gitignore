@@ -51,6 +51,10 @@ Master_Control_Notes.pdf
 # --- Skyfield ephemeris (auto-downloaded on first use, ~17MB) -------------
 chronos/data/*.bsp
 
+# --- Piper TTS voice models (each ~60MB, installed per-machine) ----------
+lingua/data/piper_voices/*.onnx
+lingua/data/piper_voices/*.onnx.json
+
 # --- Backups, caches, scratch ---------------------------------------------
 backups/
 .cache/

@@ -95,6 +95,11 @@
     }
     .st-card-wrap .speak-btn[disabled] { opacity: 0.3; cursor: not-allowed; }
     .st-card-wrap .speak-btn[hidden] { display: none; }
+    /* Gloss speaker mirrors the target-language one but sits on the
+       top-left so both buttons are reachable once the card is flipped. */
+    .st-card-wrap .speak-gloss-btn {
+        top: 0.5rem; left: 0.5rem; right: auto;
+    }
 
     .st-speech-bar {
         display: flex; align-items: center; gap: 0.75rem;
@@ -130,6 +135,10 @@
             <input type="checkbox" id="st-autospeak">
             auto-play on new card
         </label>
+        <label>
+            <input type="checkbox" id="st-autoflip">
+            auto-play on flip
+        </label>
         <label>voice:
             <select id="st-voice"></select>
         </label>
@@ -143,11 +152,20 @@
                 <path d="M7 2 3 5H1v6h2l4 3V2zm3.7 3.3 1-1A5 5 0 0 1 10.7 12.7l-1-1A3.5 3.5 0 0 0 10.7 5.3zm2.1-2.1 1-1A8 8 0 0 1 13.8 14.8l-1-1A6.5 6.5 0 0 0 12.8 3.2z"/>
             </svg>
         </button>
+        <button type="button" class="speak-btn speak-gloss-btn" id="st-speak-gloss"
+                aria-label="Speak the gloss in the source language"
+                title="Speak the meaning (press G)"
+                hidden>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M7 2 3 5H1v6h2l4 3V2zm3.7 3.3 1-1A5 5 0 0 1 10.7 12.7l-1-1A3.5 3.5 0 0 0 10.7 5.3zm2.1-2.1 1-1A8 8 0 0 1 13.8 14.8l-1-1A6.5 6.5 0 0 0 12.8 3.2z"/>
+            </svg>
+        </button>
         <div class="st-card level-{{ card.level }}" id="st-card"
              data-card-id="{{ card.id }}"
              data-lemma="{{ card.lemma|escape }}"
              data-gloss="{{ card.gloss|escape }}"
-             data-lang="{{ language.code }}">
+             data-lang="{{ language.code }}"
+             data-gloss-lang="{{ card.source_lang|default:'en' }}">
             <div class="front">{{ card.lemma|default:"—" }}</div>
             {% if card.pronunciation %}
             <div class="pron">{{ card.pronunciation }}</div>
@@ -185,20 +203,12 @@
     const status  = document.getElementById('st-status');
     const csrf    = document.querySelector('[name=csrfmiddlewaretoken]');
     const speakBtn = document.getElementById('st-speak');
+    const speakGlossBtn = document.getElementById('st-speak-gloss');
     const speechBar = document.getElementById('st-speech-bar');
     const voiceSel = document.getElementById('st-voice');
     const autoBox  = document.getElementById('st-autospeak');
+    const flipBox  = document.getElementById('st-autoflip');
     let revealed = false;
-
-    function reveal() {
-        if (revealed) return;
-        revealed = true;
-        cardEl.classList.add('flipped');
-        hint.textContent = 'grade your recall — press S to hear it';
-        again.disabled = false;
-        good.disabled  = false;
-    }
-    cardEl.addEventListener('click', reveal);
 
     // --- Web Speech API wiring -----------------------------------------
     // Map Velour language codes to BCP-47 prefixes browsers understand.
@@ -210,11 +220,25 @@
         'grc': 'el', 'la': 'it', 'san': 'hi',
     };
     const rawLang   = (cardEl.dataset.lang || 'en');
+    const glossLang = (cardEl.dataset.glossLang || 'en');
     const baseCode  = BCP47[rawLang] || rawLang.split('-')[0];
     const lemma     = cardEl.dataset.lemma || '';
     const gloss     = cardEl.dataset.gloss || '';
     const lsKey     = 'lingua:speech:' + rawLang;
     const autoKey   = 'lingua:autospeak:' + rawLang;
+    const flipKey   = 'lingua:autoflip:' + rawLang;
+
+    function reveal() {
+        if (revealed) return;
+        revealed = true;
+        cardEl.classList.add('flipped');
+        hint.textContent = 'grade your recall — S: hear it · G: hear meaning';
+        again.disabled = false;
+        good.disabled  = false;
+        if (gloss) speakGlossBtn.hidden = false;
+        if (flipBox && flipBox.checked) speak(lemma);
+    }
+    cardEl.addEventListener('click', reveal);
 
     const synth = window.speechSynthesis || null;
     const SERVER_VOICE_KEY = 'server:espeak';
@@ -331,6 +355,34 @@
         });
     }
 
+    // Gloss always goes through the server endpoint: the dropdown
+    // voice targets the lemma language, and we don't ask the user to
+    // pick a second voice for their L1.
+    let glossAudio = null;
+    function speakGloss() {
+        if (!gloss) return;
+        if (!glossAudio) {
+            glossAudio = new Audio();
+            glossAudio.addEventListener('play', () => {
+                speakGlossBtn.classList.add('speaking'); status.textContent = '';
+            });
+            glossAudio.addEventListener('ended', () => {
+                speakGlossBtn.classList.remove('speaking');
+            });
+            glossAudio.addEventListener('error', () => {
+                speakGlossBtn.classList.remove('speaking');
+                status.textContent = 'gloss TTS failed';
+            });
+        }
+        glossAudio.src = '{% url "lingua:speak" %}?lang=' +
+                         encodeURIComponent(glossLang) +
+                         '&text=' + encodeURIComponent(gloss);
+        const p = glossAudio.play();
+        if (p && p.catch) p.catch(() => {
+            status.textContent = 'audio blocked — click a speaker once to enable';
+        });
+    }
+
     function speak(text) {
         if (!text) return;
         if (serverPicked) { speakServer(text); return; }
@@ -379,9 +431,17 @@
     autoBox.addEventListener('change', () => {
         localStorage.setItem(autoKey, autoBox.checked ? '1' : '0');
     });
+    flipBox.checked = localStorage.getItem(flipKey) === '1';
+    flipBox.addEventListener('change', () => {
+        localStorage.setItem(flipKey, flipBox.checked ? '1' : '0');
+    });
     speakBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
         speak(lemma);
+    });
+    speakGlossBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        speakGloss();
     });
     // -------------------------------------------------------------------
 
@@ -396,6 +456,8 @@
             if (revealed) good.click();
         } else if (ev.key === 's' || ev.key === 'S') {
             speak(lemma);
+        } else if (ev.key === 'g' || ev.key === 'G') {
+            if (revealed) speakGloss();
         }
     });
 
