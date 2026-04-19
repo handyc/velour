@@ -68,15 +68,29 @@
       Export building to Aether (walkable scene)
     </button>
   </form>
-  <form method="post" style="margin: 0 0 1.25rem;"
+  <form method="post" style="margin: 0 0 1.25rem;display:flex;
+                               flex-wrap:wrap;gap:0.5rem;align-items:center;"
         action="{% url 'roomplanner:export_building_to_lego_aether' building.slug %}">
     {% csrf_token %}
+    <label style="font-size:0.8rem;color:#8b949e;display:flex;
+                  flex-direction:column;gap:2px;">
+      cm per stud
+      <input type="number" name="cm_per_stud" value="40"
+             min="2" max="200" step="1" list="rp-lego-ratios"
+             style="width:5rem;background:#0d1117;color:#c9d1d9;
+                    border:1px solid #30363d;border-radius:3px;
+                    padding:0.25rem 0.4rem;font-size:0.9rem;">
+    </label>
     <button type="submit"
             style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;
                    border-radius:6px;padding:0.4rem 0.9rem;cursor:pointer;
                    font:inherit;">
       Export building to Lego Aether (studded bricks)
     </button>
+    <datalist id="rp-lego-ratios">
+      <option value="10"><option value="20"><option value="40">
+      <option value="80"><option value="160">
+    </datalist>
   </form>
 
   <div class="rp-stack">

@@ -5,9 +5,11 @@ Reuses the same brick-payload format the Legolith/Aether
 `[w, d, plates, color, x_studs, y_studs, z_plates, has_studs]` — so
 once we emit the list, the shared renderer does all the three.js work.
 
-Scale:
-    1 stud  = 40 cm   (so a 4 m × 3 m room lands as a 10 × 8 baseplate)
-    1 plate = 16 cm   (1/3 of a standard brick, matching LDraw ratios)
+Scale is caller-configurable via `cm_per_stud`:
+    default 40 cm → 1 stud  (a 4 m × 3 m room → 10 × 8 baseplate)
+    smaller ratios give denser, more detailed builds (20 cm = 20×15);
+    larger ratios give chunkier landmarks-only builds (80 cm = 5×4).
+Plate height is always stud_cm × 0.4 (the LDraw ratio).
 
 Idempotent: the derived Aether slug is deterministic and
 `export_*_to_lego()` wipes the existing world before rebuilding it.
@@ -22,8 +24,9 @@ from aether.models import Entity, EntityScript, Script, World
 from .models import Building, Floor, Room
 
 
-STUD_CM = 40.0
-PLATE_CM = STUD_CM * 0.4          # 16 cm per plate
+DEFAULT_STUD_CM = 40.0
+MIN_STUD_CM = 2.0                 # tighter and brick counts explode
+MAX_STUD_CM = 200.0                # looser and rooms collapse to single bricks
 DEFAULT_CEILING_CM = 280
 ROOM_GAP_STUDS = 4                # empty gutter between rooms on the same floor
 
@@ -56,12 +59,24 @@ FEATURE_COLORS = {
 }
 
 
-def _cm_to_studs(cm):
-    return max(1, round(cm / STUD_CM))
+def _clamp_stud_cm(cm_per_stud):
+    """Normalize and bound the caller-supplied ratio. Out-of-range
+    values get clamped rather than rejected so a stale URL never 500s."""
+    try:
+        v = float(cm_per_stud)
+    except (TypeError, ValueError):
+        v = DEFAULT_STUD_CM
+    if v <= 0:
+        v = DEFAULT_STUD_CM
+    return max(MIN_STUD_CM, min(MAX_STUD_CM, v))
 
 
-def _cm_to_plates(cm):
-    return max(1, round(cm / PLATE_CM))
+def _cm_to_studs(cm, stud_cm):
+    return max(1, round(cm / stud_cm))
+
+
+def _cm_to_plates(cm, stud_cm):
+    return max(1, round(cm / (stud_cm * 0.4)))
 
 
 def _default_height_cm(kind):
@@ -88,18 +103,18 @@ def _ensure_script():
     return s
 
 
-def _emit_room_bricks(room, origin_x, origin_y, base_plates, bricks):
+def _emit_room_bricks(room, origin_x, origin_y, base_plates, bricks, stud_cm):
     """Append bricks for one room to `bricks`.
 
     origin_x, origin_y are in studs (room's SW corner on the world plate).
     base_plates is the z-offset in plates (0 for ground floor; higher for
-    stacked storeys in a building export).
+    stacked storeys in a building export). stud_cm is the export ratio.
     """
-    w_s = _cm_to_studs(room.width_cm)
-    d_s = _cm_to_studs(room.length_cm)
+    w_s = _cm_to_studs(room.width_cm, stud_cm)
+    d_s = _cm_to_studs(room.length_cm, stud_cm)
 
     floor_h_cm = (room.floor.height_cm if room.floor else DEFAULT_CEILING_CM)
-    h_plates = _cm_to_plates(floor_h_cm)
+    h_plates = _cm_to_plates(floor_h_cm, stud_cm)
 
     # Baseplate — 1 plate thick, studded.
     bricks.append([
@@ -135,10 +150,10 @@ def _emit_room_bricks(room, origin_x, origin_y, base_plates, bricks):
     # Features: small coloured brick at the plan position. Doors/windows sit
     # taller so they read from the outside without cutting through the walls.
     for feat in room.features.all():
-        fw = _cm_to_studs(feat.width_cm)
-        fd = _cm_to_studs(feat.depth_cm)
-        fx = origin_x + _cm_to_studs(feat.x_cm or 0) - (1 if feat.x_cm else 0)
-        fy = origin_y + _cm_to_studs(feat.y_cm or 0) - (1 if feat.y_cm else 0)
+        fw = _cm_to_studs(feat.width_cm, stud_cm)
+        fd = _cm_to_studs(feat.depth_cm, stud_cm)
+        fx = origin_x + _cm_to_studs(feat.x_cm or 0, stud_cm) - (1 if feat.x_cm else 0)
+        fy = origin_y + _cm_to_studs(feat.y_cm or 0, stud_cm) - (1 if feat.y_cm else 0)
         fx = _clamp(fx, origin_x, origin_x + max(0, w_s - fw))
         fy = _clamp(fy, origin_y, origin_y + max(0, d_s - fd))
         fh_plates = 6 if feat.kind in ('door', 'window') else 3
@@ -156,13 +171,13 @@ def _emit_room_bricks(room, origin_x, origin_y, base_plates, bricks):
         d_plan = piece.depth_cm
         if pl.rotation_deg in (90, 270):
             w_plan, d_plan = d_plan, w_plan
-        pw = _cm_to_studs(w_plan)
-        pd = _cm_to_studs(d_plan)
+        pw = _cm_to_studs(w_plan, stud_cm)
+        pd = _cm_to_studs(d_plan, stud_cm)
         ph_cm = piece.height_cm or _default_height_cm(piece.kind)
-        ph_plates = _cm_to_plates(ph_cm)
+        ph_plates = _cm_to_plates(ph_cm, stud_cm)
 
-        px = origin_x + _cm_to_studs(pl.x_cm or 0) - (1 if pl.x_cm else 0)
-        py = origin_y + _cm_to_studs(pl.y_cm or 0) - (1 if pl.y_cm else 0)
+        px = origin_x + _cm_to_studs(pl.x_cm or 0, stud_cm) - (1 if pl.x_cm else 0)
+        py = origin_y + _cm_to_studs(pl.y_cm or 0, stud_cm) - (1 if pl.y_cm else 0)
         px = _clamp(px, origin_x, origin_x + max(0, w_s - pw))
         py = _clamp(py, origin_y, origin_y + max(0, d_s - pd))
 
@@ -218,19 +233,21 @@ def _attach_bricks(world, script, bricks, center_studs):
 
 
 @transaction.atomic
-def export_room_to_lego(room: Room) -> World:
+def export_room_to_lego(room: Room, cm_per_stud: float = DEFAULT_STUD_CM) -> World:
     script = _ensure_script()
-    w_s = _cm_to_studs(room.width_cm)
-    d_s = _cm_to_studs(room.length_cm)
+    stud_cm = _clamp_stud_cm(cm_per_stud)
+    w_s = _cm_to_studs(room.width_cm, stud_cm)
+    d_s = _cm_to_studs(room.length_cm, stud_cm)
 
     bricks: list = []
     _emit_room_bricks(room, origin_x=0, origin_y=0,
-                      base_plates=0, bricks=bricks)
+                      base_plates=0, bricks=bricks, stud_cm=stud_cm)
 
     slug = f'lego-rp-{room.slug}'
     title = f'Lego {room.name} (Room Planner)'
     desc = (f'Studded-brick export of "{room.name}" — {len(bricks)} bricks on a '
-            f'{w_s}×{d_s}-stud baseplate. Re-export replaces this world only.')
+            f'{w_s}×{d_s}-stud baseplate at {stud_cm:g} cm/stud. '
+            f'Re-export replaces this world only.')
     world = _make_world(slug, title, desc, w_s, d_s)
 
     # Spawn inside the room, aligned with how the legoworld script
@@ -246,8 +263,10 @@ def export_room_to_lego(room: Room) -> World:
 
 
 @transaction.atomic
-def export_building_to_lego(building: Building) -> World:
+def export_building_to_lego(building: Building,
+                            cm_per_stud: float = DEFAULT_STUD_CM) -> World:
     script = _ensure_script()
+    stud_cm = _clamp_stud_cm(cm_per_stud)
 
     bricks: list = []
     total_max_w = 1
@@ -257,17 +276,17 @@ def export_building_to_lego(building: Building) -> World:
     floors = list(Floor.objects.filter(building=building).order_by('level'))
     for floor in floors:
         floor_h_cm = floor.height_cm or DEFAULT_CEILING_CM
-        floor_plates = _cm_to_plates(floor_h_cm) + 1   # walls + baseplate
+        floor_plates = _cm_to_plates(floor_h_cm, stud_cm) + 1   # walls + baseplate
 
         rooms = list(Room.objects.filter(floor=floor).order_by('name'))
         x_cursor = 0
         floor_d = 1
         for room in rooms:
-            w_s = _cm_to_studs(room.width_cm)
-            d_s = _cm_to_studs(room.length_cm)
+            w_s = _cm_to_studs(room.width_cm, stud_cm)
+            d_s = _cm_to_studs(room.length_cm, stud_cm)
             _emit_room_bricks(
                 room, origin_x=x_cursor, origin_y=0,
-                base_plates=z_cursor_plates, bricks=bricks,
+                base_plates=z_cursor_plates, bricks=bricks, stud_cm=stud_cm,
             )
             x_cursor += w_s + ROOM_GAP_STUDS
             floor_d = max(floor_d, d_s)
@@ -279,7 +298,8 @@ def export_building_to_lego(building: Building) -> World:
     slug = f'lego-rp-{building.slug}'
     title = f'Lego {building.name} (Room Planner)'
     desc = (f'Studded-brick export of {building.name} — {len(bricks)} bricks '
-            f'across {len(floors)} floor(s), stacked vertically.')
+            f'across {len(floors)} floor(s) at {stud_cm:g} cm/stud, '
+            f'stacked vertically.')
     world = _make_world(slug, title, desc, total_max_w, total_max_d)
 
     center = max(total_max_w, total_max_d) / 2.0

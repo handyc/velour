@@ -674,24 +674,32 @@ def export_building_to_aether(request, slug):
 @login_required
 @require_POST
 def export_room_to_lego_aether(request, slug):
-    """POST → render the room as studded Lego bricks in Aether."""
+    """POST → render the room as studded Lego bricks in Aether.
+
+    Accepts an optional `cm_per_stud` form field (default 40); values
+    outside lego_export's clamp range are quietly normalized rather
+    than rejected so the user never hits a 400 from a typo."""
     from django.shortcuts import redirect
-    from .lego_export import export_room_to_lego
+    from .lego_export import DEFAULT_STUD_CM, export_room_to_lego
 
     room = get_object_or_404(Room, slug=slug)
-    world = export_room_to_lego(room)
+    cm_per_stud = request.POST.get('cm_per_stud', DEFAULT_STUD_CM)
+    world = export_room_to_lego(room, cm_per_stud=cm_per_stud)
     return redirect(f'/aether/{world.slug}/enter/')
 
 
 @login_required
 @require_POST
 def export_building_to_lego_aether(request, slug):
-    """POST → render the building (all floors stacked) as studded Lego bricks."""
+    """POST → render the building (all floors stacked) as studded Lego bricks.
+
+    Accepts an optional `cm_per_stud` form field (default 40)."""
     from django.shortcuts import redirect
-    from .lego_export import export_building_to_lego
+    from .lego_export import DEFAULT_STUD_CM, export_building_to_lego
 
     building = get_object_or_404(Building, slug=slug)
-    world = export_building_to_lego(building)
+    cm_per_stud = request.POST.get('cm_per_stud', DEFAULT_STUD_CM)
+    world = export_building_to_lego(building, cm_per_stud=cm_per_stud)
     return redirect(f'/aether/{world.slug}/enter/')
 
 

@@ -347,24 +347,50 @@
         </form>
         {% endif %}
         <p style="font-size:0.82rem;color:#8b949e;margin:0.75rem 0 0.4rem;line-height:1.4;">
-          Or render the same scene as studded Lego bricks — 1 stud = 40 cm.
+          Or render the same scene as studded Lego bricks. Pick the
+          scale — smaller cm/stud gives denser builds, larger gives
+          chunkier landmarks-only ones.
         </p>
         <form method="post"
-              action="{% url 'roomplanner:export_room_to_lego_aether' room.slug %}">
+              action="{% url 'roomplanner:export_room_to_lego_aether' room.slug %}"
+              style="display:flex;flex-wrap:wrap;gap:0.4rem;align-items:center;">
           {% csrf_token %}
+          <label style="font-size:0.75rem;color:#8b949e;display:flex;
+                        flex-direction:column;gap:2px;">
+            cm per stud
+            <input type="number" name="cm_per_stud" value="40"
+                   min="2" max="200" step="1" list="rp-lego-ratios"
+                   style="width:5rem;background:#0d1117;color:#c9d1d9;
+                          border:1px solid #30363d;border-radius:3px;
+                          padding:0.2rem 0.35rem;font-size:0.85rem;">
+          </label>
           <button type="submit" class="rp-btn rp-btn-neutral">
             Export this room → Lego Aether
           </button>
         </form>
         {% if room.floor and room.floor.building %}
-        <form method="post" style="margin-top:0.4rem;"
+        <form method="post" style="margin-top:0.4rem;display:flex;
+                                   flex-wrap:wrap;gap:0.4rem;align-items:center;"
               action="{% url 'roomplanner:export_building_to_lego_aether' room.floor.building.slug %}">
           {% csrf_token %}
+          <label style="font-size:0.75rem;color:#8b949e;display:flex;
+                        flex-direction:column;gap:2px;">
+            cm per stud
+            <input type="number" name="cm_per_stud" value="40"
+                   min="2" max="200" step="1" list="rp-lego-ratios"
+                   style="width:5rem;background:#0d1117;color:#c9d1d9;
+                          border:1px solid #30363d;border-radius:3px;
+                          padding:0.2rem 0.35rem;font-size:0.85rem;">
+          </label>
           <button type="submit" class="rp-btn rp-btn-neutral">
             Export whole building → Lego Aether
           </button>
         </form>
         {% endif %}
+        <datalist id="rp-lego-ratios">
+          <option value="10"><option value="20"><option value="40">
+          <option value="80"><option value="160">
+        </datalist>
       </div>
 
       <div class="rp-panel">
