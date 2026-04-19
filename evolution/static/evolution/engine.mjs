@@ -463,6 +463,8 @@ export class EvolutionEngine {
             ? params.mutation_rate : 0.25;
         this.tournamentK = (typeof params.tournament_k === 'number')
             ? params.tournament_k : 3;
+        this.crossoverRate = (typeof params.crossover_rate === 'number')
+            ? params.crossover_rate : 0;
         this.script = params.script || '';
         this.seedString = params.seed_string || '';
 
@@ -540,10 +542,37 @@ export class EvolutionEngine {
             elite_name: elite.name,
         });
         // breed next generation
+        const handler = GENE_TYPES[this.geneType] || GENE_TYPES.lsystem;
+        const canCross = this.level === 0
+                         && typeof handler.crossover === 'function'
+                         && this.crossoverRate > 0
+                         && this.populationSize >= 3;
         const next = [elite];           // elitist carry-forward
         while (next.length < this.populationSize) {
-            const parent = this._tournament();
-            next.push(parent.clone().mutate(this.rng, this.mutationRate));
+            if (canCross && rnd(this.rng) < this.crossoverRate) {
+                const p1 = this._tournament();
+                let p2 = this._tournament();
+                // Bias toward distinct parents so crossover does real work
+                if (p2 === p1 && this.population.length > 1) {
+                    for (let tries = 0; tries < 3 && p2 === p1; tries++) {
+                        p2 = this._tournament();
+                    }
+                }
+                const childGene = handler.crossover(p1.gene, p2.gene, this.rng);
+                const child = new Agent({
+                    level: this.level,
+                    gene: childGene,
+                    gene_type: this.geneType,
+                    seed_string: this.seedString,
+                    script: this.script,
+                    parent: p1,
+                });
+                child.mutate(this.rng, this.mutationRate);
+                next.push(child);
+            } else {
+                const parent = this._tournament();
+                next.push(parent.clone().mutate(this.rng, this.mutationRate));
+            }
         }
         this.population = next;
         return { gen: this.generation, best: elite.score, mean };

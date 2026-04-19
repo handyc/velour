@@ -157,12 +157,16 @@ def promote_candidate_to_evolution(request, pk):
         pop = max(4, min(48, int(request.POST.get('population_size') or 16)))
         gens = max(10, min(400, int(request.POST.get('generations') or 80)))
         mut = float(request.POST.get('mutation_rate') or 0.15)
+        xover = float(request.POST.get('crossover_rate') or 0.5)
     except (TypeError, ValueError):
         return HttpResponseBadRequest('bad numeric parameter')
     mut = max(0.01, min(0.6, mut))
+    xover = max(0.0, min(0.95, xover))
     try:
         run, agent = promote_to_evolution(cand, population_size=pop,
-                                          generations=gens, mutation_rate=mut)
+                                          generations=gens,
+                                          mutation_rate=mut,
+                                          crossover_rate=xover)
     except Exception as exc:
         messages.error(request, f'Promote to Evolution failed: {exc}')
         return redirect('det:candidate_detail', pk=cand.pk)

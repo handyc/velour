@@ -334,6 +334,33 @@ export const hexcaHandler = {
         }
         return next;
     },
+    crossover(geneA, geneB, rng) {
+        // Single-point-by-fraction: child = A[0..fA] ++ B[fB..]. Using
+        // a shared fraction across parents preserves length (roughly)
+        // even when parents differ in rule count. Dedup on key so a
+        // rule that exists in both parents doesn't take two slots.
+        const ra = (geneA && geneA.rules) || [];
+        const rb = (geneB && geneB.rules) || [];
+        if (ra.length === 0) return { rules: rb.map(cloneRule) };
+        if (rb.length === 0) return { rules: ra.map(cloneRule) };
+        const f = 0.3 + rng() * 0.4; // 0.30..0.70
+        const splitA = Math.max(1, Math.floor(ra.length * f));
+        const splitB = Math.min(rb.length - 1,
+                                Math.max(0, Math.floor(rb.length * f)));
+        const child = [];
+        const seen = new Set();
+        for (let i = 0; i < splitA; i++) pushUnique(child, seen, ra[i]);
+        for (let i = splitB; i < rb.length; i++) pushUnique(child, seen, rb[i]);
+        // Guard: crossover that drops below 4 rules is rarely
+        // interesting on the hex substrate — pad from the richer parent
+        // so the child has something to step with.
+        const richer = (ra.length >= rb.length) ? ra : rb;
+        let idx = 0;
+        while (child.length < 4 && idx < richer.length) {
+            pushUnique(child, seen, richer[idx++]);
+        }
+        return { rules: child };
+    },
     async work(agent, ctx) {
         const target = (ctx && ctx.hexca_target) || {};
         const W = clampInt(target.screen_width || 18, 4, 40);
@@ -360,4 +387,19 @@ export const hexcaHandler = {
 function clampInt(v, lo, hi) {
     const n = v | 0;
     return n < lo ? lo : (n > hi ? hi : n);
+}
+
+function cloneRule(r) {
+    return { s: r.s, n: r.n.slice(), r: r.r };
+}
+
+function ruleKey(r) {
+    return `${r.s}|${r.n[0]},${r.n[1]},${r.n[2]},${r.n[3]},${r.n[4]},${r.n[5]}|${r.r}`;
+}
+
+function pushUnique(list, seen, rule) {
+    const k = ruleKey(rule);
+    if (seen.has(k)) return;
+    seen.add(k);
+    list.push(cloneRule(rule));
 }

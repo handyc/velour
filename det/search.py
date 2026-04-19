@@ -259,7 +259,7 @@ def execute(run, progress_cb=None):
 
 
 def promote_to_evolution(candidate, population_size=16, generations=80,
-                         mutation_rate=0.15):
+                         mutation_rate=0.15, crossover_rate=0.5):
     """Hand `candidate` to the Evolution Engine as the founding parent
     of a new L0 run with gene_type='hexca'. The browser engine will
     breed mutated children of the candidate's ruleset and score each
@@ -312,6 +312,7 @@ def promote_to_evolution(candidate, population_size=16, generations=80,
             'det_search_run_id': candidate.run_id,
         },
         'mutation_rate': mutation_rate,
+        'crossover_rate': crossover_rate,
         'tournament_k': 3,
     }
     run_base = f'det-cand-{candidate.pk}-evo'
