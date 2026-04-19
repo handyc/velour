@@ -10,6 +10,7 @@ from django.utils import timezone as djtz
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
+from .evolution import apply_result, evolve
 from .fitness import score_room
 from .models import (
     Constraint, Feature, FurniturePiece, Placement, Room,
@@ -484,6 +485,48 @@ def api_room_score(request, slug):
     GET so the UI can call it freely on button-press."""
     room = get_object_or_404(Room, slug=slug)
     return JsonResponse(score_room(room))
+
+
+@login_required
+@require_POST
+def api_room_evolve(request, slug):
+    """Run a small GA search and persist the best candidate. Returns
+    the changes list + fresh score so the editor can patch placements
+    in place."""
+    room = get_object_or_404(Room, slug=slug)
+    data = _json(request)
+
+    generations = _as_int(data.get('generations', 30),
+                          default=30, min_=1, max_=1000)
+    population  = _as_int(data.get('population', 20),
+                          default=20, min_=4, max_=200)
+    seed = data.get('seed')
+    if seed is not None:
+        try:    seed = int(seed)
+        except (TypeError, ValueError):  seed = None
+
+    result = evolve(room, generations=generations,
+                    population=population, seed=seed)
+    touched = apply_result(room, result)
+
+    # History is small (one entry per generation); trimming down to at
+    # most 60 points keeps the sparkline readable.
+    hist = result.history
+    if len(hist) > 60:
+        step = max(1, len(hist) // 60)
+        hist = [hist[i] for i in range(0, len(hist), step)]
+
+    return JsonResponse({
+        'ok':             True,
+        'initial_score':  result.initial_score,
+        'best_score':     result.best_score,
+        'improvement':    result.improvement,
+        'generations':    result.generations,
+        'population':     result.population,
+        'history':        hist,
+        'placements':     list(touched.values()),
+        'score':          score_room(room),
+    })
 
 
 @login_required

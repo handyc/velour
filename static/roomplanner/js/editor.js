@@ -374,6 +374,29 @@
     }
   }
 
+  function renderScore(data, prefix) {
+    scoreVerdict.textContent = `${data.verdict} (penalty ${data.total})` +
+      (prefix ? ` — ${prefix}` : '');
+    scoreVerdict.className = '';
+    const cls = VERDICT_CLASS[data.verdict];
+    if (cls) scoreVerdict.classList.add(cls);
+
+    while (scoreBreakdown.firstChild) scoreBreakdown.removeChild(scoreBreakdown.firstChild);
+    if (!data.violations.length) {
+      const li = document.createElement('li');
+      li.textContent = 'no violations';
+      li.style.color = '#3fb950';
+      scoreBreakdown.appendChild(li);
+    }
+    for (const v of data.violations) {
+      const li = document.createElement('li');
+      li.className = `rp-sev-${v.severity}`;
+      li.textContent = v.message;
+      scoreBreakdown.appendChild(li);
+    }
+    renderViolationOverlays(data.violations);
+  }
+
   if (scoreBtn) {
     scoreBtn.addEventListener('click', async () => {
       setMsg(document.getElementById('rp-score-msg'), 'scoring…');
@@ -383,26 +406,92 @@
       let data;
       try { data = await res.json(); }
       catch (_) { data = { total: -1, verdict: 'error', violations: [] }; }
-      scoreVerdict.textContent = `${data.verdict} (penalty ${data.total})`;
-      scoreVerdict.className = '';
-      const cls = VERDICT_CLASS[data.verdict];
-      if (cls) scoreVerdict.classList.add(cls);
-
-      while (scoreBreakdown.firstChild) scoreBreakdown.removeChild(scoreBreakdown.firstChild);
-      if (!data.violations.length) {
-        const li = document.createElement('li');
-        li.textContent = 'no violations';
-        li.style.color = '#3fb950';
-        scoreBreakdown.appendChild(li);
-      }
-      for (const v of data.violations) {
-        const li = document.createElement('li');
-        li.className = `rp-sev-${v.severity}`;
-        li.textContent = v.message;
-        scoreBreakdown.appendChild(li);
-      }
-      renderViolationOverlays(data.violations);
+      renderScore(data);
       setMsg(document.getElementById('rp-score-msg'), '');
+    });
+  }
+
+  // Evolve button — runs a short GA, applies the best layout, updates
+  // the placements in place.
+  const evolveBtn = document.getElementById('rp-evolve-btn');
+  const evoGensInput = document.getElementById('rp-evo-gens');
+  const evoPopInput  = document.getElementById('rp-evo-pop');
+  const evoSpark     = document.getElementById('rp-evo-spark');
+  const evoSparkLine = document.getElementById('rp-evo-spark-line');
+
+  function drawEvoSpark(history) {
+    if (!history || !history.length) {
+      evoSpark.style.display = 'none';
+      return;
+    }
+    const bests = history.map(h => h.best);
+    const lo = Math.min(...bests), hi = Math.max(...bests);
+    const span = (hi - lo) || 1;
+    const W = 180, H = 28, n = bests.length;
+    const pts = bests.map((b, i) => {
+      const x = n === 1 ? W / 2 : (i / (n - 1)) * (W - 2) + 1;
+      const y = H - 2 - ((b - lo) / span) * (H - 4);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    evoSparkLine.setAttribute('points', pts.join(' '));
+    evoSpark.style.display = 'block';
+  }
+
+  function applyPlacementUpdates(updates) {
+    for (const u of updates) {
+      const g = placements.querySelector(
+        `.rp-placement[data-id="${u.id}"]`,
+      );
+      if (!g) continue;
+      g.dataset.x = u.x;
+      g.dataset.y = u.y;
+      g.dataset.w = u.w;
+      g.dataset.h = u.h;
+      g.dataset.rot = u.rot;
+      g.setAttribute('transform', `translate(${u.x} ${u.y})`);
+      const rect = g.querySelector('rect');
+      if (rect) {
+        rect.setAttribute('width',  u.w);
+        rect.setAttribute('height', u.h);
+      }
+    }
+  }
+
+  if (evolveBtn) {
+    evolveBtn.addEventListener('click', async () => {
+      const msg = document.getElementById('rp-score-msg');
+      const gens = Math.max(10, Math.min(500,
+        parseInt(evoGensInput.value, 10) || 60));
+      const pop  = Math.max(4, Math.min(100,
+        parseInt(evoPopInput.value, 10) || 30));
+      const confirmed = window.confirm(
+        `Run the genetic search? This will move your furniture to a ` +
+        `lower-penalty layout (${gens} generations × ${pop} population).`
+      );
+      if (!confirmed) return;
+
+      evolveBtn.disabled = true;
+      setMsg(msg, `evolving ${gens} × ${pop}…`);
+      try {
+        const data = await api(`${apiRoom}/room/evolve/`, {
+          generations: gens,
+          population:  pop,
+        });
+        if (!data.ok) {
+          setMsg(msg, data.error || 'evolve failed', 'err');
+          return;
+        }
+        applyPlacementUpdates(data.placements || []);
+        drawEvoSpark(data.history || []);
+        renderScore(data.score,
+          `was ${data.initial_score} → now ${data.best_score} ` +
+          `(${data.improvement > 0 ? '−' : ''}${Math.abs(data.improvement)})`);
+        setMsg(msg,
+          `${data.generations} gens × ${data.population} pop complete`,
+          'ok');
+      } finally {
+        evolveBtn.disabled = false;
+      }
     });
   }
 

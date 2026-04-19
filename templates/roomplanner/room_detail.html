@@ -232,10 +232,36 @@
 
       <div class="rp-panel">
         <h3>Layout score</h3>
-        <button id="rp-score-btn" type="button"
-                class="rp-btn rp-btn-neutral">Score this layout</button>
+        <div style="display:flex; gap:0.4rem;">
+          <button id="rp-score-btn" type="button"
+                  class="rp-btn rp-btn-neutral"
+                  style="margin-top:0; flex:1;">Score</button>
+          <button id="rp-evolve-btn" type="button"
+                  class="rp-btn"
+                  style="margin-top:0; flex:1;"
+                  title="Run a genetic search for a better arrangement. Will move your furniture.">Evolve</button>
+        </div>
+        <div class="rp-row" style="margin-top:0.5rem;">
+          <div>
+            <label for="rp-evo-gens">generations</label>
+            <input id="rp-evo-gens" type="number" min="10" max="500" value="60">
+          </div>
+          <div>
+            <label for="rp-evo-pop">population</label>
+            <input id="rp-evo-pop" type="number" min="4" max="100" value="30">
+          </div>
+        </div>
         <div id="rp-score-verdict"
              style="margin-top:0.5rem;font-size:0.9rem;color:#c9d1d9;"></div>
+        <svg id="rp-evo-spark" width="100%" height="28"
+             viewBox="0 0 180 28" preserveAspectRatio="none"
+             style="display:none; margin-top:0.35rem;
+                    background:#0d1117; border:1px solid #21262d;
+                    border-radius:4px;">
+          <polyline id="rp-evo-spark-line"
+                    fill="none" stroke="#58a6ff"
+                    stroke-width="1.2" vector-effect="non-scaling-stroke"/>
+        </svg>
         <ul id="rp-score-breakdown"
             style="margin:0.4rem 0 0;padding-left:1.1rem;
                    font-size:0.82rem;color:#c9d1d9;line-height:1.45;"></ul>

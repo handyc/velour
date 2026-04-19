@@ -250,11 +250,10 @@ SCORERS = {
 # ---- top-level -------------------------------------------------------
 
 
-def score_room(room) -> dict:
-    features   = list(room.features.all())
-    placements = list(room.placements.select_related('piece').all())
-    constraints = list(room.constraints.filter(active=True))
-
+def score_placements(room, features, placements, constraints) -> dict:
+    """Score an arbitrary set of placements (real or duck-typed) against
+    the given features + constraints. The GA calls this directly on
+    in-memory candidates without touching the DB."""
     all_violations: List[Violation] = []
     per_constraint = []
 
@@ -286,3 +285,27 @@ def score_room(room) -> dict:
         'violations':   [v.to_dict() for v in all_violations],
         'per_constraint': per_constraint,
     }
+
+
+def score_room(room) -> dict:
+    return score_placements(
+        room,
+        features=list(room.features.all()),
+        placements=list(room.placements.select_related('piece').all()),
+        constraints=list(room.constraints.filter(active=True)),
+    )
+
+
+# ---- helpers the GA needs too ---------------------------------------
+
+def any_overlap(placements) -> bool:
+    """True if any two placement AABBs overlap (positive-area intersection).
+    Touching edges don't count. Used by the GA to reject impossible layouts."""
+    rects = [(_rect_from_placement(p), p) for p in placements]
+    for i, (a, _) in enumerate(rects):
+        for b, _ in rects[i + 1:]:
+            dx = min(a.x2, b.x2) - max(a.x, b.x)
+            dy = min(a.y2, b.y2) - max(a.y, b.y)
+            if dx > 0 and dy > 0:
+                return True
+    return False
