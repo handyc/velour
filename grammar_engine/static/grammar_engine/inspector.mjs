@@ -33,6 +33,12 @@ export class Inspector {
         this.statsTimer = null;
         this._chainedOnLog = null;
 
+        // Continuous-evolution state (Subwords tab). Persists across
+        // pane re-renders so the checkbox stays consistent.
+        this.evolveTimer = null;
+        this.evolveContinuous = false;
+        this.evolveIntervalSec = 10;
+
         this._panes = {
             grammar:   this.root.querySelector('#gi-pane-grammar'),
             particles: this.root.querySelector('#gi-pane-particles'),
@@ -96,10 +102,12 @@ export class Inspector {
         this.root.classList.add('open');
         this.render(this.activeTab);
         if (this.activeTab === 'stats') this._startStatsTimer();
+        if (this.evolveContinuous) this._startEvolveTimer();
     }
     close() {
         this.root.classList.remove('open');
         this._stopStatsTimer();
+        this._stopEvolveTimer();
     }
     _startStatsTimer() {
         this._stopStatsTimer();
@@ -107,6 +115,21 @@ export class Inspector {
     }
     _stopStatsTimer() {
         if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
+    }
+    _startEvolveTimer() {
+        this._stopEvolveTimer();
+        const ms = Math.max(1, this.evolveIntervalSec) * 1000;
+        this.evolveTimer = setInterval(() => {
+            if (!this.engine) return;
+            this.engine.evolve();
+            if (this.activeTab === 'subwords' &&
+                this.root.classList.contains('open')) {
+                this._renderSubwords();
+            }
+        }, ms);
+    }
+    _stopEvolveTimer() {
+        if (this.evolveTimer) { clearInterval(this.evolveTimer); this.evolveTimer = null; }
     }
 
     render(tab) {
@@ -331,6 +354,16 @@ export class Inspector {
                 <input type="text" class="gi-sub-new" placeholder="new pattern (e.g. nVl)" />
                 <button class="gi-btn primary gi-sub-add">Add</button>
                 <button class="gi-btn gi-sub-evolve">Run evolve cycle now</button>
+                <label class="gi-sub-cont-lbl" style="display:inline-flex;gap:0.3rem;
+                        align-items:center;color:#8b95a0;font-size:0.78rem;
+                        margin-left:0.4rem;">
+                    <input type="checkbox" class="gi-sub-cont">
+                    continuous · every
+                    <input type="number" class="gi-sub-cont-sec" min="1" max="3600"
+                           style="width:4rem;padding:0.15rem 0.3rem;">
+                    s
+                    <span class="gi-sub-cont-status" style="color:#6e7681;"></span>
+                </label>
                 <span class="gi-count"></span>
             </div>
             <table class="gi-table">
@@ -410,6 +443,34 @@ export class Inspector {
             engine.evolve();
             this._renderSubwords();
         };
+
+        const contBox = pane.querySelector('.gi-sub-cont');
+        const contSec = pane.querySelector('.gi-sub-cont-sec');
+        const contStatus = pane.querySelector('.gi-sub-cont-status');
+        contBox.checked = this.evolveContinuous;
+        contSec.value = this.evolveIntervalSec;
+        const refreshStatus = () => {
+            contStatus.textContent = this.evolveContinuous
+                ? '· running'
+                : '';
+        };
+        refreshStatus();
+        contBox.addEventListener('change', () => {
+            this.evolveContinuous = contBox.checked;
+            if (this.evolveContinuous) this._startEvolveTimer();
+            else this._stopEvolveTimer();
+            refreshStatus();
+        });
+        contSec.addEventListener('change', () => {
+            const v = parseInt(contSec.value, 10);
+            if (!Number.isFinite(v) || v < 1) {
+                contSec.value = this.evolveIntervalSec;
+                return;
+            }
+            this.evolveIntervalSec = Math.min(3600, v);
+            contSec.value = this.evolveIntervalSec;
+            if (this.evolveContinuous) this._startEvolveTimer();
+        });
     }
 
     // ── Words tab ──────────────────────────────────────────────
