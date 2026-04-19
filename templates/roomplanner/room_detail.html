@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ room.name }} — Room Planner{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rp-page { max-width: 1240px; margin: 1rem auto; padding: 0 1rem; }
+  .rp-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.4rem; }
+  .rp-back a { color: #58a6ff; text-decoration: none; }
+  .rp-title { margin: 0.2rem 0 0.2rem; font-weight: 600; }
+  .rp-meta  { color: #8b949e; font-size: 0.88rem; margin-bottom: 0.5rem; }
+  .rp-notes { color: #c9d1d9; max-width: 62ch; margin: 0.4rem 0 1rem; }
+
+  .rp-layout {
+    display: grid; gap: 1.25rem;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    align-items: start;
+  }
+  @media (max-width: 880px) { .rp-layout { grid-template-columns: 1fr; } }
+
+  .rp-canvas-wrap {
+    background: #0d1117; border: 1px solid #21262d;
+    border-radius: 6px; padding: 0.75rem;
+    position: relative;
+  }
+  .rp-canvas-wrap svg {
+    display: block; background: #161b22;
+    max-width: 100%; height: auto;
+    user-select: none; touch-action: none;
+  }
+  .rp-toolbar {
+    position: absolute; right: 0.75rem; top: 0.75rem;
+    display: flex; gap: 0.3rem;
+    background: rgba(22,27,34,0.92);
+    border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.3rem 0.45rem;
+    font-size: 0.8rem; color: #c9d1d9;
+    opacity: 0; pointer-events: none; transition: opacity 0.15s;
+  }
+  .rp-toolbar.visible { opacity: 1; pointer-events: auto; }
+  .rp-toolbar button {
+    background: #21262d; border: 1px solid #30363d; border-radius: 4px;
+    color: #c9d1d9; padding: 0.2rem 0.55rem; cursor: pointer;
+    font: inherit; font-size: 0.78rem;
+  }
+  .rp-toolbar button:hover { background: #30363d; }
+  .rp-toolbar .rp-tb-danger { color: #f85149; border-color: #6e1f1f; }
+  .rp-toolbar .rp-tb-danger:hover { background: #6e1f1f; color: #fff; }
+  .rp-toolbar .rp-tb-label { color: #8b949e; margin-right: 0.25rem; }
+
+  /* selected + hover */
+  .rp-placement rect, .rp-feature rect { cursor: grab; }
+  .rp-placement.dragging rect, .rp-feature.dragging rect { cursor: grabbing; }
+  .rp-placement.selected rect, .rp-feature.selected rect {
+    stroke: #f0883e !important; stroke-width: 3 !important;
+  }
+
+  /* sidebar */
+  .rp-side { display: flex; flex-direction: column; gap: 1rem; }
+  .rp-panel {
+    background: #0d1117; border: 1px solid #21262d;
+    border-radius: 6px; padding: 0.75rem 0.9rem;
+  }
+  .rp-panel h3 {
+    margin: 0 0 0.5rem; font-size: 0.82rem;
+    color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+  .rp-panel label {
+    display: block; color: #8b949e; font-size: 0.78rem;
+    margin: 0.45rem 0 0.15rem;
+  }
+  .rp-panel input, .rp-panel select, .rp-panel textarea {
+    width: 100%; box-sizing: border-box;
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.3rem 0.45rem; font: inherit; font-size: 0.88rem;
+  }
+  .rp-row { display: grid; gap: 0.4rem;
+            grid-template-columns: 1fr 1fr; }
+  .rp-inline-check { display: flex; align-items: center; gap: 0.4rem;
+                     margin-top: 0.5rem; color: #c9d1d9; font-size: 0.85rem; }
+  .rp-inline-check input { width: auto; }
+  .rp-btn {
+    background: #238636; border: 1px solid #2ea043; color: #fff;
+    border-radius: 4px; padding: 0.35rem 0.7rem;
+    cursor: pointer; font: inherit; font-size: 0.85rem;
+    margin-top: 0.6rem; width: 100%;
+  }
+  .rp-btn:hover { background: #2ea043; }
+  .rp-btn.rp-btn-neutral {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+  }
+  .rp-btn.rp-btn-neutral:hover { background: #30363d; }
+  .rp-msg { color: #8b949e; font-size: 0.78rem; margin-top: 0.4rem;
+            min-height: 1em; }
+  .rp-msg.err { color: #f85149; }
+  .rp-msg.ok  { color: #3fb950; }
+
+  .rp-section-label {
+    color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; margin: 1rem 0 0.4rem;
+  }
+  .rp-list { color: #c9d1d9; padding-left: 1.25rem;
+             font-size: 0.9rem; line-height: 1.55; }
+  .rp-list small { color: #8b949e; }
+  .rp-kind { color: #f0883e; font-variant: small-caps; font-size: 0.82rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp-page">
+  <div class="rp-back"><a href="{% url 'roomplanner:index' %}">← Room Planner</a></div>
+  <h1 class="rp-title">{{ room.name }}</h1>
+  <div class="rp-meta">
+    {{ room.width_cm }} cm × {{ room.length_cm }} cm
+    · {{ placements|length }} piece{{ placements|length|pluralize }}
+    · {{ features|length }} feature{{ features|length|pluralize }}
+  </div>
+  {% if room.notes %}<p class="rp-notes">{{ room.notes }}</p>{% endif %}
+
+  {% csrf_token %}
+
+  <div class="rp-layout">
+    <!-- CANVAS ------------------------------------------------- -->
+    <div class="rp-canvas-wrap">
+      <div id="rp-toolbar" class="rp-toolbar">
+        <span id="rp-tb-label" class="rp-tb-label">—</span>
+        <button id="rp-tb-rotate" type="button" title="Rotate 90°">⟳</button>
+        <button id="rp-tb-rename" type="button" title="Rename">✎</button>
+        <button id="rp-tb-delete" type="button" class="rp-tb-danger"
+                title="Remove">✕</button>
+      </div>
+
+      <svg id="rp-canvas"
+           data-room-slug="{{ room.slug }}"
+           data-room-w="{{ room.width_cm }}"
+           data-room-h="{{ room.length_cm }}"
+           viewBox="-10 -10 {{ room.width_cm|add:20 }} {{ room.length_cm|add:20 }}"
+           width="100%"
+           style="height: {{ room.length_cm }}px; max-height: 75vh;"
+           preserveAspectRatio="xMidYMid meet"
+           xmlns="http://www.w3.org/2000/svg">
+
+        <!-- room outline -->
+        <rect x="0" y="0" width="{{ room.width_cm }}" height="{{ room.length_cm }}"
+              fill="#161b22" stroke="#30363d" stroke-width="2"/>
+
+        <!-- 50cm grid -->
+        <g id="rp-grid" stroke="#21262d" stroke-width="0.4"></g>
+
+        <!-- placements (furniture) -->
+        <g id="rp-placements">
+          {% for p in placements %}
+          <g class="rp-placement"
+             data-id="{{ p.id }}" data-type="placement"
+             data-piece-id="{{ p.piece_id }}"
+             data-x="{{ p.x }}" data-y="{{ p.y }}"
+             data-w="{{ p.w }}" data-h="{{ p.h }}"
+             data-rot="{{ p.rot }}"
+             data-label="{{ p.label }}"
+             transform="translate({{ p.x }} {{ p.y }})">
+            <rect x="0" y="0" width="{{ p.w }}" height="{{ p.h }}"
+                  fill="{{ p.fill }}" stroke="#c9d1d9" stroke-width="1"
+                  opacity="0.85" rx="2"/>
+            <text class="rp-label" x="4" y="14" fill="#c9d1d9"
+                  font-size="11" font-family="ui-monospace, monospace"
+                  pointer-events="none">{{ p.label }}</text>
+          </g>
+          {% endfor %}
+        </g>
+
+        <!-- features (doors, windows, outlets) — drawn on top -->
+        <g id="rp-features">
+          {% for f in features %}
+          <g class="rp-feature"
+             data-id="{{ f.id }}" data-type="feature"
+             data-kind="{{ f.kind }}"
+             data-x="{{ f.x }}" data-y="{{ f.y }}"
+             data-w="{{ f.w }}" data-h="{{ f.h }}"
+             data-label="{{ f.label }}"
+             transform="translate({{ f.x }} {{ f.y }})">
+            <rect x="0" y="0" width="{{ f.w }}" height="{{ f.h }}"
+                  fill="{{ f.fill }}" opacity="0.9"/>
+            <text class="rp-label" x="0" y="-3" fill="{{ f.fill }}"
+                  font-size="9" font-family="ui-monospace, monospace"
+                  pointer-events="none">{{ f.label }}</text>
+          </g>
+          {% endfor %}
+        </g>
+      </svg>
+    </div>
+
+    <!-- SIDEBAR ------------------------------------------------- -->
+    <div class="rp-side">
+
+      <div class="rp-panel">
+        <h3>Add piece from catalog</h3>
+        <label for="rp-catalog-select">piece</label>
+        <select id="rp-catalog-select">
+          {% for piece in catalog %}
+            <option value="{{ piece.id }}"
+                    data-w="{{ piece.width_cm }}" data-h="{{ piece.depth_cm }}"
+                    data-kind="{{ piece.kind }}">
+              {{ piece.name }} — {{ piece.width_cm }}×{{ piece.depth_cm }}cm
+            </option>
+          {% endfor %}
+        </select>
+        <label for="rp-place-label">label (optional)</label>
+        <input id="rp-place-label" type="text" placeholder="e.g. ‘south bench’">
+        <button id="rp-add-placement" type="button" class="rp-btn">Place in room</button>
+        <div id="rp-place-msg" class="rp-msg"></div>
+      </div>
+
+      <div class="rp-panel">
+        <h3>Add custom piece (trash find)</h3>
+        <label for="rp-new-name">name</label>
+        <input id="rp-new-name" type="text" placeholder="e.g. second-hand bookshelf">
+        <label for="rp-new-kind">kind</label>
+        <select id="rp-new-kind">
+          {% for val, disp in piece_kinds %}
+            <option value="{{ val }}">{{ disp }}</option>
+          {% endfor %}
+        </select>
+        <div class="rp-row">
+          <div>
+            <label for="rp-new-w">width cm</label>
+            <input id="rp-new-w" type="number" value="60" min="1">
+          </div>
+          <div>
+            <label for="rp-new-d">depth cm</label>
+            <input id="rp-new-d" type="number" value="40" min="1">
+          </div>
+        </div>
+        <div class="rp-row">
+          <div>
+            <label for="rp-new-h">height cm</label>
+            <input id="rp-new-h" type="number" value="0" min="0">
+          </div>
+          <div>
+            <label for="rp-new-heat">heat W</label>
+            <input id="rp-new-heat" type="number" value="0" min="0">
+          </div>
+        </div>
+        <label class="rp-inline-check">
+          <input id="rp-new-outlet" type="checkbox"> needs power outlet
+        </label>
+        <button id="rp-add-piece" type="button" class="rp-btn">Add to catalog + place</button>
+        <div id="rp-piece-msg" class="rp-msg"></div>
+      </div>
+
+      <div class="rp-panel">
+        <h3>Add fixed feature</h3>
+        <label for="rp-feat-kind">kind</label>
+        <select id="rp-feat-kind">
+          {% for val, disp in feature_kinds %}
+            <option value="{{ val }}">{{ disp }}</option>
+          {% endfor %}
+        </select>
+        <label for="rp-feat-label">label</label>
+        <input id="rp-feat-label" type="text" placeholder="e.g. ‘east wall’">
+        <div class="rp-row">
+          <div>
+            <label for="rp-feat-w">width cm</label>
+            <input id="rp-feat-w" type="number" value="80" min="1">
+          </div>
+          <div>
+            <label for="rp-feat-d">depth cm</label>
+            <input id="rp-feat-d" type="number" value="10" min="1">
+          </div>
+        </div>
+        <button id="rp-add-feature" type="button" class="rp-btn rp-btn-neutral">Add feature</button>
+        <div id="rp-feat-msg" class="rp-msg"></div>
+      </div>
+
+      <div class="rp-panel" style="font-size:0.8rem;color:#8b949e;">
+        <h3>Tips</h3>
+        <ul style="padding-left:1.1rem;margin:0;line-height:1.45;">
+          <li>Click an item to select it, then use the toolbar to rotate, rename, or remove.</li>
+          <li>Drag anywhere inside a piece to move it.</li>
+          <li>New placements drop at the room's centre; drag them where you want.</li>
+          <li>Catalog changes stick — your custom pieces show up next time.</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="rp-section-label">constraints ({{ constraints|length }})</div>
+  <ul class="rp-list">
+    {% for c in constraints %}
+      <li><span class="rp-kind">{{ c.get_kind_display }}</span> — {{ c.description }}</li>
+    {% empty %}
+      <li style="color:#6e7681;">no constraints on this room</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<script src="{% static 'roomplanner/js/editor.js' %}"></script>
+{% endblock %}

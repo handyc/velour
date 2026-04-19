@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}{{ circuit.title }} — Power Lab{% endblock %}
+
+{% block extra_head %}
+<style>
+  .pl-wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+  .pl-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .pl-back a { color: #58a6ff; text-decoration: none; }
+  .pl-title { font-weight: 600; margin: 0.2rem 0 0.3rem; }
+  .pl-tagline { color: #8b949e; margin-bottom: 1.25rem; max-width: 70ch; }
+  .pl-status {
+    display: inline-block; padding: 0.08rem 0.45rem;
+    border: 1px solid #30363d; border-radius: 3px;
+    color: #8b949e; font-size: 0.72rem; margin-left: 0.5rem;
+  }
+  .pl-body { color: #c9d1d9; max-width: 70ch; line-height: 1.55;
+             white-space: pre-wrap; margin-bottom: 1.5rem; }
+  .pl-section-label {
+    color: #8b949e; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; margin: 1.25rem 0 0.4rem;
+  }
+  .pl-diagram {
+    background: #0d1117; border: 1px solid #21262d; padding: 1rem;
+    border-radius: 6px; overflow-x: auto;
+  }
+  .pl-diagram pre { margin: 0; color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                    font-size: 0.82rem; line-height: 1.25; }
+  .pl-diagram img { max-width: 100%; height: auto; display: block; }
+  .pl-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  .pl-table th, .pl-table td {
+    text-align: left; padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #21262d;
+    font-size: 0.9rem;
+  }
+  .pl-table th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+                 text-transform: uppercase; letter-spacing: 0.04em; }
+  .pl-table a { color: #58a6ff; text-decoration: none; }
+  .pl-des { color: #f0883e; font-variant-numeric: tabular-nums; width: 3rem; }
+  .pl-qty { text-align: right; color: #c9d1d9; width: 3rem;
+            font-variant-numeric: tabular-nums; }
+  .pl-cost { text-align: right; color: #c9d1d9; width: 5rem;
+             font-variant-numeric: tabular-nums; }
+  .pl-notes { color: #8b949e; font-size: 0.82rem; }
+  .pl-totals td { border-bottom: none; padding-top: 0.6rem;
+                  color: #c9d1d9; font-weight: 500; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pl-wrap">
+  <div class="pl-back">
+    <a href="{% url 'powerlab:index' %}">← Power Lab</a>
+  </div>
+  <h1 class="pl-title">
+    {{ circuit.title }}
+    <span class="pl-status">{{ circuit.get_status_display }}</span>
+  </h1>
+  {% if circuit.tagline %}<p class="pl-tagline">{{ circuit.tagline }}</p>{% endif %}
+
+  {% if circuit.body_md %}
+  <div class="pl-body">{{ circuit.body_md }}</div>
+  {% endif %}
+
+  {% if circuit.diagram_source %}
+  <div class="pl-section-label">schematic</div>
+  <div class="pl-diagram">
+    {% if diagram_b64 %}
+      <img src="data:image/png;base64,{{ diagram_b64 }}" alt="schematic">
+    {% else %}
+      <pre>{{ circuit.diagram_source }}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="pl-section-label">bill of materials</div>
+  <table class="pl-table">
+    <thead>
+      <tr>
+        <th>ref</th>
+        <th>part</th>
+        <th class="pl-qty">qty</th>
+        <th class="pl-cost">unit</th>
+        <th class="pl-cost">line</th>
+        <th>notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in bom %}
+      <tr>
+        <td class="pl-des">{{ line.designator }}</td>
+        <td><a href="{% url 'powerlab:part_detail' line.part.slug %}">{{ line.part.name }}</a></td>
+        <td class="pl-qty">{{ line.qty }}</td>
+        <td class="pl-cost">
+          {% if line.part.est_unit_price_usd %}${{ line.part.est_unit_price_usd }}{% else %}—{% endif %}
+        </td>
+        <td class="pl-cost">
+          {% if line.line_total_usd %}${{ line.line_total_usd }}{% else %}—{% endif %}
+        </td>
+        <td class="pl-notes">{{ line.notes }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="pl-totals">
+        <td colspan="4" style="text-align:right;">estimated total:</td>
+        <td class="pl-cost">${{ circuit.bom_total_usd }}</td>
+        <td class="pl-notes">{% if circuit.bom_has_unpriced %}(some parts unpriced){% endif %}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}

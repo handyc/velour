@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Parts Inventory — Power Lab{% endblock %}
+
+{% block extra_head %}
+<style>
+  .pl-wrap { max-width: 1040px; margin: 1.5rem auto; padding: 0 1rem; }
+  .pl-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .pl-back a { color: #58a6ff; text-decoration: none; }
+  .pl-table { width: 100%; border-collapse: collapse; }
+  .pl-table th, .pl-table td {
+    text-align: left; padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #21262d;
+    font-size: 0.9rem;
+  }
+  .pl-table th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+                 text-transform: uppercase; letter-spacing: 0.04em; }
+  .pl-table a { color: #58a6ff; text-decoration: none; }
+  .pl-cat { color: #8b949e; font-size: 0.78rem;
+            font-variant: small-caps; }
+  .pl-num { text-align: right; color: #c9d1d9;
+            font-variant-numeric: tabular-nums; }
+  .pl-missing { color: #6e7681; }
+  .pl-empty { color: #8b949e; padding: 1rem 0; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pl-wrap">
+  <div class="pl-back">
+    <a href="{% url 'powerlab:index' %}">← Power Lab</a>
+  </div>
+  <h1>Parts Inventory</h1>
+  <p style="color:#8b949e; max-width:60ch;">
+    Every component that appears in any Power Lab circuit is tracked
+    here. Prices are rolling averages across observed vendor snapshots.
+  </p>
+
+  <table class="pl-table">
+    <thead>
+      <tr>
+        <th>category</th>
+        <th>name</th>
+        <th>MPN</th>
+        <th class="pl-num">est. unit price</th>
+        <th>last checked</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in parts %}
+      <tr>
+        <td class="pl-cat">{{ p.get_category_display }}</td>
+        <td><a href="{% url 'powerlab:part_detail' p.slug %}">{{ p.name }}</a></td>
+        <td style="color:#8b949e;">{{ p.mpn|default:"—" }}</td>
+        <td class="pl-num">
+          {% if p.est_unit_price_usd %}${{ p.est_unit_price_usd }}{% else %}<span class="pl-missing">—</span>{% endif %}
+        </td>
+        <td style="color:#8b949e;">
+          {% if p.price_last_checked_at %}{{ p.price_last_checked_at|date:"Y-m-d" }}{% else %}<span class="pl-missing">never</span>{% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="pl-empty">no parts yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

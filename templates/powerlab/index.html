@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Power Lab — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .pl-wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+  .pl-wrap h1 { font-weight: 600; margin-bottom: 0.25rem; }
+  .pl-lede { color: #8b949e; margin-bottom: 1.5rem; max-width: 60ch; }
+  .pl-bar { color: #8b949e; font-size: 0.85rem; margin-bottom: 1rem;
+            display: flex; gap: 1.5rem; }
+  .pl-bar a { color: #58a6ff; text-decoration: none; }
+  .pl-bar a:hover { text-decoration: underline; }
+  .pl-table { width: 100%; border-collapse: collapse; }
+  .pl-table th, .pl-table td {
+    text-align: left; padding: 0.45rem 0.5rem;
+    border-bottom: 1px solid #21262d;
+    font-size: 0.92rem;
+  }
+  .pl-table th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+                 text-transform: uppercase; letter-spacing: 0.04em; }
+  .pl-table a { color: #58a6ff; text-decoration: none; }
+  .pl-table a:hover { text-decoration: underline; }
+  .pl-idx { color: #6e7681; width: 1.5rem; }
+  .pl-tagline { color: #8b949e; font-size: 0.82rem; margin-top: 0.15rem; }
+  .pl-num { text-align: right; color: #c9d1d9; font-variant-numeric: tabular-nums; }
+  .pl-status {
+    display: inline-block; padding: 0.08rem 0.45rem;
+    border: 1px solid #30363d; border-radius: 3px;
+    color: #8b949e; font-size: 0.72rem;
+  }
+  .pl-empty { color: #8b949e; padding: 1rem 0; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pl-wrap">
+  <h1>Power Lab</h1>
+  <p class="pl-lede">
+    Experimental power-supply designs for tiny always-on devices —
+    ATtiny, ESP8266, ESP32-S3 SuperMini. Each circuit carries a
+    description, a schematic, and a bill of materials that populates a
+    shared parts inventory.
+  </p>
+
+  <div class="pl-bar">
+    <span>{{ circuits|length }} circuit{{ circuits|length|pluralize }}</span>
+    <span>·</span>
+    <a href="{% url 'powerlab:parts' %}">{{ parts_count }} parts in inventory</a>
+    {% if priced_count %}<span>· {{ priced_count }} priced</span>{% endif %}
+  </div>
+
+  <table class="pl-table">
+    <thead>
+      <tr>
+        <th></th>
+        <th>circuit</th>
+        <th>status</th>
+        <th class="pl-num">BOM</th>
+        <th class="pl-num">est. cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in circuits %}
+      <tr>
+        <td class="pl-idx">{{ forloop.counter }}</td>
+        <td>
+          <a href="{% url 'powerlab:detail' c.slug %}">{{ c.title }}</a>
+          {% if c.tagline %}<div class="pl-tagline">{{ c.tagline }}</div>{% endif %}
+        </td>
+        <td><span class="pl-status">{{ c.get_status_display }}</span></td>
+        <td class="pl-num">{{ c.bom.count }}</td>
+        <td class="pl-num">
+          ${{ c.bom_total_usd }}{% if c.bom_has_unpriced %} <span style="color:#6e7681">+?</span>{% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="pl-empty">
+        no circuits yet — run <code>seed_powerlab</code>
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

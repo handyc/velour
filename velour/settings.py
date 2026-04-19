@@ -103,6 +103,8 @@ INSTALLED_APPS = [
     'displacer',
     'casting',
     'bodymap',
+    'powerlab',
+    'roomplanner',
 ]
 
 MIDDLEWARE = [

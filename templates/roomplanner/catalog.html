@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Furniture Catalog — Room Planner{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rp-wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+  .rp-back { color: #8b949e; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .rp-back a { color: #58a6ff; text-decoration: none; }
+  .rp-table { width: 100%; border-collapse: collapse; }
+  .rp-table th, .rp-table td {
+    text-align: left; padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #21262d;
+    font-size: 0.9rem;
+  }
+  .rp-table th { color: #8b949e; font-weight: 500; font-size: 0.78rem;
+                 text-transform: uppercase; letter-spacing: 0.04em; }
+  .rp-kind { color: #8b949e; font-size: 0.82rem; font-variant: small-caps; }
+  .rp-num { text-align: right; color: #c9d1d9;
+            font-variant-numeric: tabular-nums; }
+  .rp-empty { color: #8b949e; padding: 1rem 0; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rp-wrap">
+  <div class="rp-back">
+    <a href="{% url 'roomplanner:index' %}">← Room Planner</a>
+  </div>
+  <h1>Furniture Catalog</h1>
+  <p style="color:#8b949e; max-width:60ch;">
+    Reusable pieces that can be placed in any room. Dimensions are
+    top-down footprints in centimetres.
+  </p>
+
+  <table class="rp-table">
+    <thead>
+      <tr>
+        <th>kind</th>
+        <th>name</th>
+        <th class="rp-num">W × D (cm)</th>
+        <th class="rp-num">H (cm)</th>
+        <th class="rp-num">heat (W)</th>
+        <th>outlet?</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pieces %}
+      <tr>
+        <td class="rp-kind">{{ p.get_kind_display }}</td>
+        <td>{{ p.name }}</td>
+        <td class="rp-num">{{ p.width_cm }} × {{ p.depth_cm }}</td>
+        <td class="rp-num">{{ p.height_cm }}</td>
+        <td class="rp-num">{{ p.heat_watts }}</td>
+        <td>{% if p.needs_outlet %}yes{% else %}<span style="color:#6e7681;">—</span>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="rp-empty">no pieces yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
