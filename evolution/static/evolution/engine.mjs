@@ -410,6 +410,7 @@ export class Agent {
             rng: ctx.rng,
             gene_type: ctx.gene_type || 'lsystem',
             lut_target: ctx.lut_target || null,
+            hexca_target: ctx.hexca_target || null,
         });
         inner.init();
         await inner.runUntilDone();
@@ -444,13 +445,14 @@ export class EvolutionEngine {
         population_size = 24, generations_target = 200,
         target_score = 0.95,
         params = {}, seedAgent = null, rng = null,
-        gene_type = 'lsystem', lut_target = null,
+        gene_type = 'lsystem', lut_target = null, hexca_target = null,
     } = {}) {
         this.run = run;
         this.level = level;
         this.goal = goal || '';
         this.geneType = gene_type;
         this.lutTarget = lut_target;
+        this.hexcaTarget = hexca_target;
         this.populationSize = Math.max(2, population_size | 0);
         this.generationsTarget = Math.max(1, generations_target | 0);
         this.targetScore = target_score;
@@ -487,7 +489,7 @@ export class EvolutionEngine {
     }
 
     _makeFounder(i) {
-        const ctx = { lut_target: this.lutTarget };
+        const ctx = { lut_target: this.lutTarget, hexca_target: this.hexcaTarget };
         let gene;
         if (this.seedAgent && i === 0) {
             gene = deepClone(this.seedAgent.gene);
@@ -517,6 +519,7 @@ export class EvolutionEngine {
             goal: this.goal, rng: this.rng,
             gene_type: this.geneType,
             lut_target: this.lutTarget,
+            hexca_target: this.hexcaTarget,
         };
         for (const a of this.population) {
             await a.work(ctx);

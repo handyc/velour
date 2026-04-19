@@ -258,6 +258,188 @@ def execute(run, progress_cb=None):
         run.save()
 
 
+def promote_to_evolution(candidate, population_size=16, generations=80,
+                         mutation_rate=0.15):
+    """Hand `candidate` to the Evolution Engine as the founding parent
+    of a new L0 run with gene_type='hexca'. The browser engine will
+    breed mutated children of the candidate's ruleset and score each
+    against the same screening substrate Det uses.
+
+    Returns (EvolutionRun, seed_Agent). Caller redirects to the run.
+
+    Reusing the candidate's original grid_seed means children are
+    scored on the same initial condition the Det screener used, so
+    scores are directly comparable. The mutate operator in
+    hexca_gene.mjs perturbs rule results / neighbors / self-colors in
+    place and occasionally adds or drops a rule.
+    """
+    from evolution.models import Agent as EvoAgent, EvolutionRun
+
+    run_cfg = candidate.run
+    grid_seed = candidate.analysis.get('grid_seed') or f'det-cand-{candidate.pk}'
+
+    gene = {
+        'rules': candidate.rules_json,
+        'n_colors': run_cfg.n_colors,
+        'source': 'det',
+        'source_candidate_id': candidate.pk,
+    }
+    agent_base = f'det-cand-{candidate.pk}'
+    agent_name = _unique_name(EvoAgent, agent_base)
+    seed_agent = EvoAgent.objects.create(
+        name=agent_name,
+        level=0,
+        gene=gene,
+        seed_string='',
+        script='',
+        score=0.0,
+        notes=(f'Seeded from Det Candidate #{candidate.pk} '
+               f'(score {candidate.score:.2f}, '
+               f'{candidate.get_est_class_display()}).'),
+    )
+
+    params = {
+        'gene_type': 'hexca',
+        'hexca_target': {
+            'n_colors': run_cfg.n_colors,
+            'screen_width': run_cfg.screen_width,
+            'screen_height': run_cfg.screen_height,
+            'horizon': run_cfg.horizon,
+            'wildcard_pct': run_cfg.wildcard_pct,
+            'n_rules_per_candidate': run_cfg.n_rules_per_candidate,
+            'grid_seed': grid_seed,
+            'det_candidate_id': candidate.pk,
+            'det_search_run_id': candidate.run_id,
+        },
+        'mutation_rate': mutation_rate,
+        'tournament_k': 3,
+    }
+    run_base = f'det-cand-{candidate.pk}-evo'
+    run_name = _unique_name(EvolutionRun, run_base)
+    run = EvolutionRun.objects.create(
+        name=run_name,
+        level=0,
+        goal_string='',
+        population_size=population_size,
+        generations_target=generations,
+        target_score=1.0 - 1e-9,
+        seed_agent=seed_agent,
+        params=params,
+        notes=(f'Bred from Det Candidate #{candidate.pk} '
+               f'(Det score {candidate.score:.2f}). '
+               f'Export best back with `det/import/`.'),
+    )
+    return run, seed_agent
+
+
+def _unique_name(model, base, max_tries=200):
+    """Tack on -2, -3, ... until we find a free name. Used for Agent
+    and EvolutionRun, both of which have unique name constraints."""
+    name = base
+    n = 2
+    while model.objects.filter(name=name).exists() and n <= max_tries:
+        name = f'{base}-{n}'
+        n += 1
+    return name
+
+
+def import_agent_as_candidate(agent, run=None):
+    """Pull an evolution.Agent with a hex-CA gene back into Det as a
+    Candidate row. If `run` is None, a fresh SearchRun of size 1 is
+    created to hold it; otherwise we append to that run (useful for
+    clustering several imports alongside a source Det sweep).
+
+    Raises ValueError if the agent's gene doesn't look like a hex-CA
+    gene (no 'rules' key), if any rule is malformed, or if the gene
+    omits n_colors and we can't infer it safely.
+    """
+    from .models import Candidate, SearchRun
+
+    gene = agent.gene or {}
+    rules = gene.get('rules')
+    if not isinstance(rules, list) or not rules:
+        raise ValueError(
+            f'Agent "{agent.name}" has no hex-CA rules in its gene.'
+        )
+    # Validate shape — each rule is {s, n: [6], r}, ints in range
+    cleaned = []
+    for er in rules:
+        if not isinstance(er, dict):
+            raise ValueError(f'Malformed rule (not a dict): {er!r}')
+        if 's' not in er or 'n' not in er or 'r' not in er:
+            raise ValueError(f'Rule missing s/n/r keys: {er!r}')
+        if not isinstance(er['n'], list) or len(er['n']) != 6:
+            raise ValueError(f'Rule needs 6 neighbors: {er!r}')
+        cleaned.append({
+            's': int(er['s']),
+            'n': [int(x) for x in er['n']],
+            'r': int(er['r']),
+        })
+
+    n_colors = gene.get('n_colors')
+    if n_colors is None:
+        # Infer from largest color index in the gene, clamp to [2, 4].
+        max_col = 1
+        for er in cleaned:
+            max_col = max(max_col, er['s'], er['r'])
+            for x in er['n']:
+                max_col = max(max_col, x)
+        n_colors = max(2, min(4, max_col + 1))
+    n_colors = int(n_colors)
+    if n_colors < 2 or n_colors > 4:
+        raise ValueError(f'n_colors must be 2..4, got {n_colors}')
+
+    # Figure out the screening substrate. Prefer the run this agent
+    # emerged from; fall back to any run it seeded (round-trip case
+    # where we imported the founder itself); fall back to Det defaults.
+    target = {}
+    source = agent.source_run or agent.runs_seeded.first()
+    if source:
+        target = (source.params or {}).get('hexca_target', {}) or {}
+    W = int(target.get('screen_width') or 20)
+    H = int(target.get('screen_height') or 20)
+    horizon = int(target.get('horizon') or 40)
+    grid_seed = target.get('grid_seed') or f'import-agent-{agent.pk}'
+
+    if run is None:
+        run = SearchRun.objects.create(
+            label=f'import from evolution #{agent.pk}',
+            n_colors=n_colors,
+            n_candidates=1,
+            n_rules_per_candidate=len(cleaned),
+            wildcard_pct=int(target.get('wildcard_pct') or 25),
+            screen_width=W,
+            screen_height=H,
+            horizon=horizon,
+            seed=grid_seed,
+            status='finished',
+        )
+        run.started_at = timezone.now()
+        run.finished_at = timezone.now()
+        run.save()
+
+    analysis, _final, _prev = _step_and_measure(
+        cleaned, W, H, n_colors, horizon, grid_seed,
+    )
+    score, breakdown = _score(analysis, n_colors)
+    analysis['score_breakdown'] = breakdown
+    analysis['grid_seed'] = grid_seed
+    analysis['imported_from_agent_id'] = agent.pk
+    analysis['imported_from_agent_slug'] = agent.slug
+    est = _classify(analysis, score, n_colors)
+
+    cand = Candidate.objects.create(
+        run=run,
+        rules_json=cleaned,
+        n_rules=len(cleaned),
+        rules_hash=_rules_hash(cleaned),
+        score=score,
+        est_class=est,
+        analysis=analysis,
+    )
+    return cand, run
+
+
 def promote(candidate, name=None):
     """Copy a Candidate into automaton.RuleSet + automaton.ExactRule so
     the operator can run it interactively from the Automaton app.

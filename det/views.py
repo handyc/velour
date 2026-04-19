@@ -2,13 +2,14 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from .models import Candidate, SearchRun
-from .search import execute, promote
+from .search import execute, import_agent_as_candidate, promote, promote_to_evolution
 
 
 @login_required
@@ -142,3 +143,78 @@ def candidate_json(request, pk):
         'analysis': cand.analysis,
         'rules': cand.rules_json,
     })
+
+
+@login_required
+@require_POST
+def promote_candidate_to_evolution(request, pk):
+    """Hand a Candidate to the Evolution Engine as an L0 founder with a
+    hex-CA gene. Creates an Agent + EvolutionRun wired with
+    gene_type='hexca' and a hexca_target matching this Candidate's
+    screening substrate, then redirects to the run page."""
+    cand = get_object_or_404(Candidate.objects.select_related('run'), pk=pk)
+    try:
+        pop = max(4, min(48, int(request.POST.get('population_size') or 16)))
+        gens = max(10, min(400, int(request.POST.get('generations') or 80)))
+        mut = float(request.POST.get('mutation_rate') or 0.15)
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest('bad numeric parameter')
+    mut = max(0.01, min(0.6, mut))
+    try:
+        run, agent = promote_to_evolution(cand, population_size=pop,
+                                          generations=gens, mutation_rate=mut)
+    except Exception as exc:
+        messages.error(request, f'Promote to Evolution failed: {exc}')
+        return redirect('det:candidate_detail', pk=cand.pk)
+    messages.success(
+        request,
+        f'Created Evolution run "{run.name}" seeded with hex-CA agent '
+        f'"{agent.name}". Open it, press start, watch the children breed.'
+    )
+    return redirect('evolution:run_detail', slug=run.slug)
+
+
+@login_required
+@require_POST
+def import_agent_from_evolution(request):
+    """Pull an evolved Agent back into Det as a Candidate row. The Agent
+    must carry a hex-CA gene ({rules: [...], n_colors, ...}) —
+    typically one produced by a run Det itself started.
+
+    Creates a fresh SearchRun-style row (size 1) if no `run_id` is
+    supplied; otherwise appends the Candidate to an existing run so the
+    operator can compare the imported score alongside the original.
+    """
+    from evolution.models import Agent as EvoAgent
+
+    agent_ref = (request.POST.get('agent') or '').strip()
+    if not agent_ref:
+        return HttpResponseBadRequest('agent required (pk or slug)')
+    agent = None
+    if agent_ref.isdigit():
+        agent = EvoAgent.objects.filter(pk=int(agent_ref)).first()
+    if not agent:
+        agent = EvoAgent.objects.filter(slug=agent_ref).first()
+    if not agent:
+        messages.error(request, f'No Evolution Agent matching "{agent_ref}".')
+        return redirect('det:index')
+
+    run_ref = (request.POST.get('run') or '').strip()
+    run = None
+    if run_ref:
+        if run_ref.isdigit():
+            run = SearchRun.objects.filter(pk=int(run_ref)).first()
+
+    try:
+        with transaction.atomic():
+            cand, sr = import_agent_as_candidate(agent, run=run)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('det:index')
+
+    messages.success(
+        request,
+        f'Imported Agent "{agent.name}" → Candidate #{cand.pk} '
+        f'(score {cand.score:.2f}, {cand.get_est_class_display()}).'
+    )
+    return redirect('det:candidate_detail', pk=cand.pk)

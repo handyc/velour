@@ -13,6 +13,11 @@ urlpatterns = [
          name='candidate_detail'),
     path('candidate/<int:pk>/promote/', views.promote_candidate,
          name='promote_candidate'),
+    path('candidate/<int:pk>/promote-to-evolution/',
+         views.promote_candidate_to_evolution,
+         name='promote_to_evolution'),
     path('candidate/<int:pk>/json/', views.candidate_json,
          name='candidate_json'),
+    path('import-from-evolution/', views.import_agent_from_evolution,
+         name='import_from_evolution'),
 ]

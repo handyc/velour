@@ -267,9 +267,18 @@ def agent_list(request):
 @login_required
 def agent_detail(request, slug):
     agent = get_object_or_404(Agent, slug=slug)
+    gene = agent.gene or {}
+    is_hexca = (
+        isinstance(gene, dict)
+        and isinstance(gene.get('rules'), list)
+        and bool(gene['rules'])
+        and all(isinstance(r, dict) and 'n' in r and 's' in r and 'r' in r
+                for r in gene['rules'])
+    )
     return render(request, 'evolution/agent_detail.html', {
         'agent': agent,
-        'gene_json': json.dumps(agent.gene or {}, indent=2),
+        'gene_json': json.dumps(gene, indent=2),
+        'is_hexca': is_hexca,
     })
 
 

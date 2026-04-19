@@ -85,7 +85,7 @@
     <div class="ev-section">
         <h2>Actions</h2>
         <div class="ev-actions">
-            {% if agent.level == 0 %}
+            {% if agent.level == 0 and not is_hexca %}
             <form method="post"
                   action="{% url 'evolution:agent_export_lsystem' slug=agent.slug %}"
                   onsubmit="return confirm('Export {{ agent.name|escapejs }} to L-System library?');">
@@ -97,6 +97,14 @@
                   onsubmit="return confirm('Export {{ agent.name|escapejs }} to Grammar Engine as a new language?');">
                 {% csrf_token %}
                 <button type="submit" class="ev-btn primary">→ Export to Grammar Engine</button>
+            </form>
+            {% endif %}
+            {% if is_hexca %}
+            <form method="post" action="{% url 'det:import_from_evolution' %}"
+                  onsubmit="return confirm('Import {{ agent.name|escapejs }} back to Det as a Candidate?');">
+                {% csrf_token %}
+                <input type="hidden" name="agent" value="{{ agent.id }}">
+                <button type="submit" class="ev-btn primary">→ Import to Det</button>
             </form>
             {% endif %}
             <a href="{% url 'evolution:list' %}#seed={{ agent.id }}" class="ev-btn">Seed new run</a>

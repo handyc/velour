@@ -54,12 +54,23 @@
 </div>
 
 <script type="module">
-    import { EvolutionEngine } from "{% static 'evolution/engine.mjs' %}";
+    import { EvolutionEngine, GENE_TYPES } from "{% static 'evolution/engine.mjs' %}";
     import { EvolutionUI } from "{% static 'evolution/ui.mjs' %}";
 
     const RUN = {{ run_json|safe }};
     const csrfToken = document.cookie
         .split('; ').find(r => r.startsWith('csrftoken='))?.split('=')[1] || '';
+
+    const params = RUN.params || {};
+    const geneType = params.gene_type || 'lsystem';
+
+    // Gene-type handlers that live outside engine.mjs register themselves
+    // here before the engine spins up. Add new types as ES modules in
+    // their owner app's static dir and load + attach below.
+    if (geneType === 'hexca' && !GENE_TYPES.hexca) {
+        const mod = await import("{% static 'det/hexca_gene.mjs' %}");
+        GENE_TYPES.hexca = mod.hexcaHandler;
+    }
 
     const engine = new EvolutionEngine({
         run: RUN,
@@ -68,8 +79,11 @@
         population_size: RUN.population_size,
         generations_target: RUN.generations_target,
         target_score: RUN.target_score,
-        params: RUN.params || {},
+        params,
         seedAgent: RUN.seed_agent || null,
+        gene_type: geneType,
+        lut_target: params.lut_target || null,
+        hexca_target: params.hexca_target || null,
     });
     engine.init();
 
