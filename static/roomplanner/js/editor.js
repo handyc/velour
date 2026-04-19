@@ -495,6 +495,104 @@
     });
   }
 
+  // Saved layouts — save/load/delete named snapshots of the Placement
+  // positions. Auto-snapshots taken before evolve/load live here too.
+  const layoutSelect = document.getElementById('rp-layout-select');
+  const layoutMsg    = document.getElementById('rp-layout-msg');
+  const layoutName   = document.getElementById('rp-layout-name');
+  const layoutSave   = document.getElementById('rp-layout-save');
+  const layoutLoad   = document.getElementById('rp-layout-load');
+  const layoutDelete = document.getElementById('rp-layout-delete');
+
+  function layoutLabel(l) {
+    const prefix = l.is_auto ? '·auto· ' : '';
+    const score = (l.score_total === null || l.score_total === undefined)
+      ? '' : ` — penalty ${l.score_total}`;
+    return `${prefix}${l.name}${score}`;
+  }
+
+  function addLayoutOption(l) {
+    const opt = document.createElement('option');
+    opt.value = l.id;
+    opt.textContent = layoutLabel(l);
+    if (l.is_auto) opt.dataset.auto = '1';
+    // Saved layouts are ordered newest-first server-side; keep that
+    // here by inserting just after the '(current)' option.
+    layoutSelect.insertBefore(opt, layoutSelect.children[1] || null);
+    return opt;
+  }
+
+  async function refreshLayoutList() {
+    const res = await fetch(`${apiRoom}/layout/`, { credentials: 'same-origin' });
+    let data;
+    try { data = await res.json(); } catch (_) { return; }
+    if (!data.ok) return;
+    // Rebuild options preserving the leading '(current — unsaved)' entry.
+    while (layoutSelect.children.length > 1) layoutSelect.removeChild(layoutSelect.lastChild);
+    for (const l of data.layouts) {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = layoutLabel(l);
+      if (l.is_auto) opt.dataset.auto = '1';
+      layoutSelect.appendChild(opt);
+    }
+  }
+
+  if (layoutSave) {
+    layoutSave.addEventListener('click', async () => {
+      const name = (layoutName.value || '').trim();
+      if (!name) { setMsg(layoutMsg, 'name required', 'err'); return; }
+      setMsg(layoutMsg, 'saving…');
+      const data = await api(`${apiRoom}/layout/save/`, { name: name });
+      if (!data.ok) { setMsg(layoutMsg, data.error || 'failed', 'err'); return; }
+      addLayoutOption(data);
+      layoutSelect.value = data.id;
+      layoutName.value = '';
+      setMsg(layoutMsg, `saved “${data.name}”`, 'ok');
+    });
+  }
+
+  if (layoutLoad) {
+    layoutLoad.addEventListener('click', async () => {
+      const id = layoutSelect.value;
+      if (!id) { setMsg(layoutMsg, 'pick a layout first', 'err'); return; }
+      setMsg(layoutMsg, 'loading…');
+      const data = await api(`${apiRoom}/layout/${id}/load/`, {});
+      if (!data.ok) { setMsg(layoutMsg, data.error || 'failed', 'err'); return; }
+      applyPlacementUpdates(data.placements || []);
+      if (data.score) renderScore(data.score, `loaded “${data.loaded}”`);
+      setMsg(layoutMsg, `loaded “${data.loaded}”`, 'ok');
+      // A fresh auto-snapshot was saved before the load; refresh the list.
+      refreshLayoutList();
+    });
+  }
+
+  if (layoutDelete) {
+    layoutDelete.addEventListener('click', async () => {
+      const id = layoutSelect.value;
+      if (!id) { setMsg(layoutMsg, 'pick a layout first', 'err'); return; }
+      const opt = layoutSelect.selectedOptions[0];
+      const label = opt ? opt.textContent : 'this layout';
+      if (!window.confirm(`Delete ${label}?`)) return;
+      setMsg(layoutMsg, 'deleting…');
+      const data = await api(`${apiRoom}/layout/${id}/delete/`, {});
+      if (!data.ok) { setMsg(layoutMsg, data.error || 'failed', 'err'); return; }
+      if (opt) opt.remove();
+      layoutSelect.value = '';
+      setMsg(layoutMsg, 'deleted', 'ok');
+    });
+  }
+
+  // After an evolve, the server writes an auto-snapshot; reflect it here.
+  if (evolveBtn) {
+    const originalEvolve = evolveBtn.onclick;
+    evolveBtn.addEventListener('click', () => {
+      // Let the main evolve handler finish (it runs first on the click
+      // event). Poll the layout list once after a short delay.
+      setTimeout(refreshLayoutList, 300);
+    });
+  }
+
   // Orientation: north_direction change → re-label the four compass texts.
   const northSel = document.getElementById('rp-north');
   if (northSel) {

@@ -37,6 +37,15 @@ urlpatterns = [
     path('<slug:slug>/api/room/evolve/',
          views.api_room_evolve, name='api_room_evolve'),
 
+    path('<slug:slug>/api/layout/',
+         views.api_layout_list, name='api_layout_list'),
+    path('<slug:slug>/api/layout/save/',
+         views.api_layout_save, name='api_layout_save'),
+    path('<slug:slug>/api/layout/<int:pk>/load/',
+         views.api_layout_load, name='api_layout_load'),
+    path('<slug:slug>/api/layout/<int:pk>/delete/',
+         views.api_layout_delete, name='api_layout_delete'),
+
     # room page — keep last so the /api/ paths above don't collide
     path('<slug:slug>/', views.room_detail, name='room_detail'),
 ]

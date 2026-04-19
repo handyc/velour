@@ -269,6 +269,33 @@
       </div>
 
       <div class="rp-panel">
+        <h3>Saved layouts</h3>
+        <label for="rp-layout-select">layout</label>
+        <select id="rp-layout-select">
+          <option value="">(current — unsaved)</option>
+          {% for l in layouts %}
+            <option value="{{ l.id }}" data-auto="{% if l.is_auto %}1{% endif %}">
+              {% if l.is_auto %}·auto· {% endif %}{{ l.name }}
+              {% if l.score_total is not None %} — penalty {{ l.score_total }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+        <div class="rp-row" style="margin-top:0.5rem;">
+          <button id="rp-layout-load" type="button"
+                  class="rp-btn rp-btn-neutral"
+                  style="margin-top:0;">Load</button>
+          <button id="rp-layout-delete" type="button"
+                  class="rp-btn rp-btn-neutral"
+                  style="margin-top:0;">Delete</button>
+        </div>
+        <label for="rp-layout-name" style="margin-top:0.6rem;">save current as</label>
+        <input id="rp-layout-name" type="text"
+               placeholder="e.g. ‘after deep-clean’">
+        <button id="rp-layout-save" type="button" class="rp-btn">Save</button>
+        <div id="rp-layout-msg" class="rp-msg"></div>
+      </div>
+
+      <div class="rp-panel">
         <h3>Orientation &amp; location</h3>
         <label for="rp-north">which screen edge is north?</label>
         <select id="rp-north">

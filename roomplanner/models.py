@@ -149,6 +149,36 @@ class Placement(models.Model):
         return (self.piece.width_cm, self.piece.depth_cm)
 
 
+class Layout(models.Model):
+    """A named snapshot of a Room's Placement positions. Lets the user
+    keep a "before" and A/B-compare arrangements, and lets the GA save
+    the pre-evolve state automatically so an evolve can be undone."""
+
+    room = models.ForeignKey(
+        Room, on_delete=models.CASCADE, related_name='layouts',
+    )
+    name = models.CharField(max_length=120)
+    snapshot = models.JSONField(
+        default=list,
+        help_text=(
+            'List of {placement_id, x_cm, y_cm, rotation_deg} recorded '
+            'at save time.'
+        ),
+    )
+    is_auto = models.BooleanField(
+        default=False,
+        help_text='True for auto-snapshots taken before destructive ops.',
+    )
+    score_total = models.IntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.room.slug})"
+
+
 class Constraint(models.Model):
     """A fire-safety / organization / ergonomic rule that layouts
     should satisfy. Phase 1 stores them descriptively; Phase 2 plugs

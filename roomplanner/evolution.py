@@ -126,10 +126,32 @@ def _mut_relocate(cand: Candidate, rng: random.Random, room) -> None:
     p.y_cm = rng.randint(0, max(0, room.length_cm - h))
 
 
+def _mut_snap_wall(cand: Candidate, rng: random.Random, room) -> None:
+    """Push one placement against its nearest wall. Real furniture tends
+    to live along walls; this mutation accelerates layouts toward that
+    attractor instead of the GA floating things in the middle."""
+    p = rng.choice(cand)
+    w, h = p.footprint_cm
+    dx_left    = p.x_cm
+    dx_right   = room.width_cm - (p.x_cm + w)
+    dy_top     = p.y_cm
+    dy_bottom  = room.length_cm - (p.y_cm + h)
+    nearest = min(dx_left, dx_right, dy_top, dy_bottom)
+    if nearest == dx_left:
+        p.x_cm = 0
+    elif nearest == dx_right:
+        p.x_cm = max(0, room.width_cm - w)
+    elif nearest == dy_top:
+        p.y_cm = 0
+    else:
+        p.y_cm = max(0, room.length_cm - h)
+
+
 _MUTATION_TABLE = [
-    (0.55, _mut_jitter),
-    (0.20, _mut_rotate90),
-    (0.15, _mut_swap),
+    (0.40, _mut_jitter),
+    (0.18, _mut_rotate90),
+    (0.18, _mut_snap_wall),
+    (0.14, _mut_swap),
     (0.10, _mut_relocate),
 ]
 

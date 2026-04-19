@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Constraint, Feature, FurniturePiece, Placement, Room
+from .models import Constraint, Feature, FurniturePiece, Layout, Placement, Room
 
 
 class FeatureInline(admin.TabularInline):
@@ -51,3 +51,10 @@ class ConstraintAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Feature)
+
+
+@admin.register(Layout)
+class LayoutAdmin(admin.ModelAdmin):
+    list_display = ('room', 'name', 'is_auto', 'score_total', 'created_at')
+    list_filter = ('room', 'is_auto')
+    search_fields = ('name',)

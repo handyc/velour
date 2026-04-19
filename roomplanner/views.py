@@ -12,8 +12,11 @@ from django.views.decorators.http import require_POST
 
 from .evolution import apply_result, evolve
 from .fitness import score_room
+from .layouts import (
+    list_layouts, load_layout, save_auto_snapshot, save_layout,
+)
 from .models import (
-    Constraint, Feature, FurniturePiece, Placement, Room,
+    Constraint, Feature, FurniturePiece, Layout, Placement, Room,
 )
 
 
@@ -115,6 +118,7 @@ def room_detail(request, slug):
         'piece_kinds':      FurniturePiece.KIND_CHOICES,
         'north_choices':    Room.NORTH_CHOICES,
         'edge_labels':      edge_labels,
+        'layouts':          list_layouts(room),
     })
 
 
@@ -505,6 +509,9 @@ def api_room_evolve(request, slug):
         try:    seed = int(seed)
         except (TypeError, ValueError):  seed = None
 
+    # Auto-snapshot the pre-evolve state so this is recoverable.
+    save_auto_snapshot(room)
+
     result = evolve(room, generations=generations,
                     population=population, seed=seed)
     touched = apply_result(room, result)
@@ -527,6 +534,60 @@ def api_room_evolve(request, slug):
         'placements':     list(touched.values()),
         'score':          score_room(room),
     })
+
+
+def api_layout_list(request, slug):
+    room = get_object_or_404(Room, slug=slug)
+    return JsonResponse({
+        'ok':      True,
+        'layouts': list_layouts(room),
+    })
+
+
+@login_required
+@require_POST
+def api_layout_save(request, slug):
+    room = get_object_or_404(Room, slug=slug)
+    data = _json(request)
+    name = str(data.get('name', '')).strip()[:120]
+    if not name:
+        return JsonResponse({'ok': False, 'error': 'name required'},
+                            status=400)
+    layout = save_layout(room, name, auto=False)
+    return JsonResponse({
+        'ok':          True,
+        'id':          layout.id,
+        'name':        layout.name,
+        'is_auto':     layout.is_auto,
+        'score_total': layout.score_total,
+        'created_at':  layout.created_at.isoformat(),
+        'size':        len(layout.snapshot or []),
+    })
+
+
+@login_required
+@require_POST
+def api_layout_load(request, slug, pk):
+    room = get_object_or_404(Room, slug=slug)
+    layout = get_object_or_404(Layout, pk=pk, room=room)
+    # Auto-snapshot the current state before overwriting it.
+    save_auto_snapshot(room, label_prefix=f'before load {layout.name[:40]}')
+    touched = load_layout(layout)
+    return JsonResponse({
+        'ok':          True,
+        'loaded':      layout.name,
+        'placements':  touched,
+        'score':       score_room(room),
+    })
+
+
+@login_required
+@require_POST
+def api_layout_delete(request, slug, pk):
+    room = get_object_or_404(Room, slug=slug)
+    layout = get_object_or_404(Layout, pk=pk, room=room)
+    layout.delete()
+    return JsonResponse({'ok': True, 'id': pk})
 
 
 @login_required
