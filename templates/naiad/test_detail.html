@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Test run #{{ run.pk }} — Naiad{% endblock %}
+
+{% block extra_head %}
+<style>
+  .nd-wrap { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .nd-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .crumbs { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.6rem; }
+  .crumbs a { color: #58a6ff; text-decoration: none; }
+
+  .verdict {
+    display: inline-block; padding: 0.2rem 0.6rem;
+    border-radius: 4px; font-size: 0.78rem; font-weight: 600;
+    letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .verdict.passed { background: #1f3a24; color: #2ea043; border: 1px solid #2ea043; }
+  .verdict.failed { background: #3a1f24; color: #f85149; border: 1px solid #f85149; }
+  .verdict.no-target { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+
+  .meta-line { color: #8b949e; font-size: 0.8rem; margin: 0.5rem 0 1rem; }
+  .meta-line b { color: #c9d1d9; }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.75rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+
+  table.funnel {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+  }
+  table.funnel th, table.funnel td {
+    text-align: right; padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #21262d; font-family: monospace;
+  }
+  table.funnel th { color: #6e7681; font-weight: normal;
+                    font-size: 0.68rem; text-transform: uppercase;
+                    letter-spacing: 0.05em; }
+  table.funnel th:first-child, table.funnel td:first-child {
+    text-align: left; font-family: inherit;
+  }
+  table.funnel td.target { color: #d29922; }
+  table.funnel td.below { color: #2ea043; }
+  table.funnel td.above { color: #f85149; }
+  table.funnel td.unit { color: #6e7681; font-size: 0.68rem;
+                         font-family: inherit; }
+
+  .bar {
+    height: 6px; background: #21262d; border-radius: 3px;
+    overflow: hidden; min-width: 80px; display: inline-block;
+    vertical-align: middle; margin-right: 4px;
+  }
+  .bar > span {
+    display: block; height: 100%;
+    background: linear-gradient(90deg, #58a6ff 0%, #2ea043 100%);
+  }
+
+  .failures {
+    color: #f85149; font-size: 0.8rem; font-family: monospace;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nd-wrap">
+  <div class="crumbs">
+    <a href="{% url 'naiad:index' %}">Naiad</a> ›
+    <a href="{% url 'naiad:system_detail' slug=run.system.slug %}">{{ run.system.name }}</a> ›
+    Test #{{ run.pk }}
+  </div>
+  <h1>{{ run.system.name }}
+    {% if run.passed %}
+      <span class="verdict passed">passed</span>
+    {% elif run.passed is False %}
+      <span class="verdict failed">failed</span>
+    {% else %}
+      <span class="verdict no-target">no target</span>
+    {% endif %}
+  </h1>
+  <p class="meta-line">
+    <b>{{ run.source.name }}</b>
+    {% if run.target %}→ <b>{{ run.target.name }}</b>{% endif %}
+    · {{ run.created_at|date:"Y-m-d H:i" }}
+    · {{ run.trace|length }} stage{{ run.trace|length|pluralize }} traced
+  </p>
+
+  {% if run.failures %}
+  <div class="panel">
+    <h2>Failures</h2>
+    <p class="failures">
+      {% for k in run.failures %}{{ k }}{% if not forloop.last %}, {% endif %}{% endfor %}
+    </p>
+    <p style="color:#6e7681;font-size:0.7rem;margin:0.4rem 0 0">
+      These contaminants exited the chain above the target spec.
+    </p>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Funnel — concentration through the chain</h2>
+    <table class="funnel">
+      <thead>
+        <tr>
+          <th>contaminant</th>
+          {% for entry in run.trace %}
+            <th>{{ entry.label|truncatechars:14 }}</th>
+          {% endfor %}
+          <th>target</th>
+          <th>unit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in funnel %}
+        <tr>
+          <td>{{ f.label }}</td>
+          {% for label, val in f.values %}
+            <td>
+              {% if val is None %}—
+              {% else %}{{ val|floatformat:"-3" }}{% endif %}
+            </td>
+          {% endfor %}
+          <td class="target">
+            {% if f.target is not None %}{{ f.target|floatformat:"-3" }}{% else %}—{% endif %}
+          </td>
+          <td class="unit">{{ f.unit }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p style="color:#6e7681;font-size:0.7rem;margin:0.5rem 0 0">
+      Each column is a stage's output. The first column is the source water
+      pre-treatment; the last is the final output.
+    </p>
+  </div>
+</div>
+{% endblock %}

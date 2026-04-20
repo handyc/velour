@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}{{ system.name }} — Naiad{% endblock %}
+
+{% block extra_head %}
+<style>
+  .nd-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .nd-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .crumbs { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.6rem; }
+  .crumbs a { color: #58a6ff; text-decoration: none; }
+
+  .meta-line { color: #8b949e; font-size: 0.78rem; margin: 0 0 1rem; }
+  .meta-line b { color: #c9d1d9; }
+  .desc { color: #8b949e; font-size: 0.85rem; max-width: 70ch;
+          line-height: 1.5; margin: 0 0 1rem; }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.75rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+
+  .chain { display: flex; flex-direction: column; gap: 0.3rem; }
+  .stage {
+    background: #161b22; border-left: 3px solid #58a6ff;
+    border-radius: 0 4px 4px 0; padding: 0.4rem 0.6rem;
+    display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.8rem;
+  }
+  .stage .pos { color: #6e7681; font-family: monospace; width: 1.6rem; }
+  .stage .label { flex: 1; color: #c9d1d9; }
+  .stage .kind { color: #6e7681; font-size: 0.68rem;
+                 text-transform: uppercase; letter-spacing: 0.06em; }
+  .stage .removes {
+    color: #58a6ff; font-family: monospace; font-size: 0.66rem;
+    white-space: nowrap;
+  }
+  .stage form { display: inline; }
+  .stage .del {
+    background: #21262d; color: #8b949e; border: none;
+    border-radius: 3px; padding: 0.2rem 0.45rem; font-size: 0.7rem;
+    cursor: pointer;
+  }
+  .stage .del:hover { background: #f85149; color: white; }
+
+  form.inline label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  form.inline {
+    display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: end;
+  }
+  form.inline select, form.inline input {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.4rem; font-size: 0.78rem;
+  }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .btn.warn { background: #d29922; border-color: #d29922; }
+  .btn:hover { filter: brightness(1.1); }
+
+  .runlist { display: flex; flex-direction: column; gap: 2px; }
+  .runrow {
+    background: #161b22; border-left: 2px solid #6e7681;
+    padding: 0.32rem 0.55rem; font-size: 0.76rem;
+    display: flex; gap: 0.5rem; align-items: baseline;
+  }
+  .runrow.passed { border-left-color: #2ea043; }
+  .runrow.failed { border-left-color: #f85149; }
+  .runrow a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .runrow a:hover { color: #58a6ff; }
+  .runrow .meta { color: #6e7681; font-family: monospace; font-size: 0.68rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nd-wrap">
+  <div class="crumbs">
+    <a href="{% url 'naiad:index' %}">Naiad</a> ›
+    {{ system.name }}
+  </div>
+  <h1>{{ system.name }}</h1>
+  <p class="meta-line">
+    <b>{{ system.source.name }}</b>
+    {% if system.target %}→ <b>{{ system.target.name }}</b>{% else %}
+      <span style="color:#6e7681">(no target spec)</span>
+    {% endif %}
+    · {{ stages|length }} stage{{ stages|length|pluralize }}
+  </p>
+  {% if system.description %}<p class="desc">{{ system.description }}</p>{% endif %}
+
+  <div class="panel">
+    <h2>Treatment chain</h2>
+    {% if stages %}
+    <div class="chain">
+      {% for s in stages %}
+      <div class="stage">
+        <span class="pos">{{ s.position }}</span>
+        <span class="label">{{ s.label|default:s.stage_type.name }}</span>
+        <span class="kind">{{ s.stage_type.get_kind_display }}</span>
+        <span class="removes">
+          {% for k, v in s.stage_type.removal.items %}{{ k }} {{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
+        <form method="post" action="{% url 'naiad:remove_stage' slug=system.slug stage_id=s.pk %}">
+          {% csrf_token %}
+          <button class="del" type="submit"
+                  onclick="return confirm('Remove this stage?')">×</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p style="color:#6e7681;font-size:0.78rem">
+      Empty chain. Add a first stage below.
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Add stage</h2>
+    <form class="inline" method="post"
+          action="{% url 'naiad:add_stage' slug=system.slug %}">
+      {% csrf_token %}
+      <label>stage type
+        <select name="stage_type" required>
+          {% for st in stage_types %}
+            <option value="{{ st.pk }}">{{ st.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>local label (optional)
+        <input type="text" name="label" placeholder="">
+      </label>
+      <button class="btn" type="submit">Append stage</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Run a test</h2>
+    <form class="inline" method="post"
+          action="{% url 'naiad:run_test' slug=system.slug %}">
+      {% csrf_token %}
+      <label>source override (optional)
+        <select name="source">
+          <option value="">— use system default ({{ system.source.name }}) —</option>
+          {% for p in sources %}
+            <option value="{{ p.pk }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>target override (optional)
+        <select name="target">
+          <option value="">— use system default
+            {% if system.target %}({{ system.target.name }}){% else %}(none){% endif %} —
+          </option>
+          {% for p in targets %}
+            <option value="{{ p.pk }}">{{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn warn" type="submit">Simulate</button>
+    </form>
+    <p style="color:#6e7681;font-size:0.7rem;margin:0.5rem 0 0">
+      Runs the chain in position order, attenuating each contaminant by
+      every stage's removal fraction. Output is compared against the
+      target spec for pass/fail.
+    </p>
+  </div>
+
+  {% if test_runs %}
+  <div class="panel">
+    <h2>Test runs</h2>
+    <div class="runlist">
+      {% for r in test_runs %}
+      <div class="runrow {% if r.passed %}passed{% elif r.passed is False %}failed{% endif %}">
+        <a href="{% url 'naiad:test_detail' pk=r.pk %}">
+          {{ r.source.name }}
+          {% if r.target %}→ {{ r.target.name }}{% endif %}
+        </a>
+        <span class="meta">
+          {% if r.passed %}passed
+          {% elif r.passed is False %}{{ r.failures|length }} failed
+          {% else %}no-target{% endif %}
+          · {{ r.created_at|date:"Y-m-d H:i" }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

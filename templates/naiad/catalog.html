@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Catalog — Naiad{% endblock %}
+
+{% block extra_head %}
+<style>
+  .nd-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .nd-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .crumbs { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.6rem; }
+  .crumbs a { color: #58a6ff; text-decoration: none; }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.75rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+
+  table.cat {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+  }
+  table.cat th, table.cat td {
+    text-align: left; padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #21262d; vertical-align: top;
+  }
+  table.cat th { color: #6e7681; font-weight: normal;
+                 font-size: 0.68rem; text-transform: uppercase;
+                 letter-spacing: 0.05em; }
+  table.cat td.num { text-align: right; font-family: monospace;
+                     color: #8b949e; }
+  table.cat .desc { color: #8b949e; font-size: 0.74rem; line-height: 1.45; }
+  table.cat .removes {
+    color: #58a6ff; font-family: monospace; font-size: 0.68rem;
+  }
+
+  .contam-table { width: auto; }
+  .contam-table th { padding-right: 1.5rem; }
+  .contam-table td { padding-right: 1.5rem; }
+  .contam-table td.unit { color: #6e7681; font-family: monospace; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nd-wrap">
+  <div class="crumbs">
+    <a href="{% url 'naiad:index' %}">Naiad</a> › Catalog
+  </div>
+  <h1>Catalog</h1>
+
+  <div class="panel">
+    <h2>Contaminants ({{ contaminants|length }})</h2>
+    <table class="cat contam-table">
+      <thead>
+        <tr><th>key</th><th>label</th><th>unit</th></tr>
+      </thead>
+      <tbody>
+        {% for key, label, unit in contaminants %}
+        <tr>
+          <td style="font-family:monospace">{{ key }}</td>
+          <td>{{ label }}</td>
+          <td class="unit">{{ unit }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Stage types ({{ stage_types|length }})</h2>
+    <table class="cat">
+      <thead>
+        <tr>
+          <th>name</th><th>kind</th><th>flow lpm</th><th>watts</th>
+          <th>maint days</th><th>removes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for st in stage_types %}
+        <tr>
+          <td>
+            <div>{{ st.name }}</div>
+            {% if st.description %}
+              <div class="desc">{{ st.description }}</div>
+            {% endif %}
+          </td>
+          <td>{{ st.get_kind_display }}</td>
+          <td class="num">{{ st.flow_lpm|floatformat:"-2" }}</td>
+          <td class="num">{{ st.energy_watts|floatformat:"-1" }}</td>
+          <td class="num">{{ st.maintenance_days }}</td>
+          <td class="removes">
+            {% for k, v in st.removal.items %}{{ k }} {{ v }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>Profiles ({{ profiles|length }})</h2>
+    <table class="cat">
+      <thead>
+        <tr><th>scope</th><th>name</th><th>values</th></tr>
+      </thead>
+      <tbody>
+        {% for p in profiles %}
+        <tr>
+          <td>{{ p.get_scope_display }}</td>
+          <td>
+            <div>{{ p.name }}</div>
+            {% if p.notes %}<div class="desc">{{ p.notes }}</div>{% endif %}
+          </td>
+          <td class="removes">
+            {% for k, v in p.values.items %}{{ k }} {{ v }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

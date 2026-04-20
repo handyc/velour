@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}Naiad — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .naiad-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+                color: #c9d1d9; }
+  .naiad-wrap h1 { margin-bottom: 0.25rem; font-size: 1.4rem; }
+  .naiad-wrap .lede { color: #8b949e; max-width: 70ch; line-height: 1.55;
+                      margin: 0 0 1.25rem; font-size: 0.9rem; }
+  .naiad-wrap .lede em { color: #c9d1d9; font-style: normal; }
+
+  .panels { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; }
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.92rem; margin: 0 0 0.5rem; color: #c9d1d9; }
+  .panel .hint { color: #6e7681; font-size: 0.7rem; margin: 0.4rem 0 0; }
+
+  .sys-list { display: flex; flex-direction: column; gap: 2px; }
+  .sys-row {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.4rem 0.6rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: baseline;
+  }
+  .sys-row a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .sys-row a:hover { color: #58a6ff; }
+  .sys-row .meta { color: #6e7681; font-size: 0.68rem;
+                   font-family: monospace; }
+
+  form.inline label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px; margin-bottom: 0.4rem;
+  }
+  form.inline input, form.inline select, form.inline textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.4rem; font-size: 0.78rem;
+    font-family: inherit;
+  }
+  form.inline textarea { min-height: 3rem; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .btn:hover { background: #2ea043; }
+
+  .runlist { display: flex; flex-direction: column; gap: 2px; }
+  .runrow {
+    background: #161b22; border-left: 2px solid #6e7681;
+    padding: 0.32rem 0.55rem; font-size: 0.76rem;
+    display: flex; gap: 0.5rem; align-items: baseline;
+  }
+  .runrow.passed { border-left-color: #2ea043; }
+  .runrow.failed { border-left-color: #f85149; }
+  .runrow a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .runrow a:hover { color: #58a6ff; }
+  .runrow .meta { color: #6e7681; font-size: 0.68rem;
+                  font-family: monospace; }
+
+  .stage-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr));
+    gap: 0.4rem; margin-top: 0.4rem;
+  }
+  .stage-card {
+    background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.4rem 0.55rem; font-size: 0.74rem; line-height: 1.45;
+  }
+  .stage-card b { display: block; color: #c9d1d9; }
+  .stage-card .kind { color: #6e7681; font-size: 0.65rem;
+                      text-transform: uppercase; letter-spacing: 0.06em; }
+  .stage-card .removes { color: #58a6ff; font-family: monospace;
+                         font-size: 0.68rem; margin-top: 2px; }
+
+  .profile-row {
+    display: flex; gap: 0.4rem; padding: 0.3rem 0;
+    border-bottom: 1px dashed #21262d; font-size: 0.76rem;
+  }
+  .profile-row:last-child { border-bottom: none; }
+  .profile-row .scope {
+    width: 4.5rem; color: #6e7681; font-family: monospace; font-size: 0.66rem;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .profile-row .name { flex: 1; color: #c9d1d9; }
+  .profile-row .keys { color: #6e7681; font-family: monospace;
+                       font-size: 0.66rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="naiad-wrap">
+  <h1>Naiad — water purification design lab</h1>
+  <p class="lede">
+    A <em>system</em> here is an ordered chain of treatment <em>stages</em> —
+    sediment cartridge, activated carbon, UV lamp, reverse-osmosis membrane,
+    slow sand bed. Pick a <em>source water profile</em> (rural well,
+    creek, greywater, EU tap), push it through the chain, and Naiad
+    multiplies each contaminant's remaining concentration by every
+    stage's removal fraction in sequence. Compare the output against a
+    target spec (EU drinking water, irrigation-grade, aquarium-safe) to
+    see where the design holds and where it leaks.
+  </p>
+  <p class="lede">
+    Phase 1 is intentionally a steady-state model — ideal attenuators in
+    series, no kinetics or membrane fouling. Good enough to size a chain;
+    the schema is open so later phases can add real physics without
+    moving the data.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panels">
+    <div>
+      <div class="panel">
+        <h2>Systems</h2>
+        <div class="sys-list">
+          {% for s in systems %}
+          <div class="sys-row">
+            <a href="{% url 'naiad:system_detail' slug=s.slug %}">
+              {{ s.name }}
+            </a>
+            <span class="meta">
+              {{ s.source.name }}
+              {% if s.target %}→ {{ s.target.name }}{% endif %}
+            </span>
+          </div>
+          {% empty %}
+          <p class="hint">No systems yet. Create one on the right.</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% if recent_runs %}
+      <div class="panel">
+        <h2>Recent test runs</h2>
+        <div class="runlist">
+          {% for r in recent_runs %}
+          <div class="runrow {% if r.passed %}passed{% elif r.passed is False %}failed{% endif %}">
+            <a href="{% url 'naiad:test_detail' pk=r.pk %}">
+              {{ r.system.name }}
+              <span style="color:#6e7681">·
+                {{ r.source.name }}{% if r.target %} → {{ r.target.name }}{% endif %}
+              </span>
+            </a>
+            <span class="meta">
+              {% if r.passed %}passed
+              {% elif r.passed is False %}{{ r.failures|length }} failed
+              {% else %}no-target{% endif %}
+              · {{ r.created_at|date:"Y-m-d H:i" }}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>New system</h2>
+        <form class="inline" method="post"
+              action="{% url 'naiad:create_system' %}">
+          {% csrf_token %}
+          <label>name
+            <input type="text" name="name" required
+                   placeholder="e.g. Cabin well to drinking">
+          </label>
+          <label>slug
+            <input type="text" name="slug" required pattern="[a-z0-9-]+"
+                   placeholder="cabin-well-drinking">
+          </label>
+          <label>source water
+            <select name="source" required>
+              <option value="">— pick a source profile —</option>
+              {% for p in profiles %}
+                {% if p.scope == 'source' %}
+                  <option value="{{ p.pk }}">{{ p.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </label>
+          <label>target spec (optional)
+            <select name="target">
+              <option value="">— none —</option>
+              {% for p in profiles %}
+                {% if p.scope == 'target' %}
+                  <option value="{{ p.pk }}">{{ p.name }}</option>
+                {% endif %}
+              {% endfor %}
+            </select>
+          </label>
+          <label>description
+            <textarea name="description"
+                      placeholder="Notes about the use case…"></textarea>
+          </label>
+          <button class="btn" type="submit">Create system</button>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Profiles</h2>
+        {% for p in profiles %}
+        <div class="profile-row">
+          <span class="scope">{{ p.scope }}</span>
+          <span class="name">{{ p.name }}</span>
+          <span class="keys">{{ p.values|length }} keys</span>
+        </div>
+        {% endfor %}
+        <p class="hint">Catalog: <a href="{% url 'naiad:catalog' %}"
+           style="color:#58a6ff">stage types &amp; profiles</a></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Stage-type catalog ({{ stage_types|length }})</h2>
+    <div class="stage-grid">
+      {% for st in stage_types %}
+      <div class="stage-card">
+        <b>{{ st.name }}</b>
+        <span class="kind">{{ st.get_kind_display }}</span>
+        <div class="removes">
+          {% for k, v in st.removal.items %}{{ k }} {{ v }}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -108,6 +108,7 @@ INSTALLED_APPS = [
     'lingua',
     'agents',
     'det',
+    'naiad',
 ]
 
 MIDDLEWARE = [
