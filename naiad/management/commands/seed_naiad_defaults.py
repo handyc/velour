@@ -128,6 +128,9 @@ STAGE_TYPES = [
                     'ammonia / nitrification / struvite stages can act. '
                     'Consumes urea; generates ammonia.',
         removal={'urea': 0.98},
+        # CO(NH2)2 (MW 60, 2 N) → 2 NH4+-N (14 g/mol N each).
+        # Per 1 mg urea removed, 2 × 14 / 60 = 0.467 mg NH4-N produced.
+        converts={'urea': {'ammonia': 0.467}},
         flow_lpm=1.5, energy_watts=2.0,
         cost_eur=15.0, maintenance_days=180,
     ),
@@ -158,11 +161,13 @@ STAGE_TYPES = [
         name='Nitrification bioreactor (MBBR)',
         kind='biological',
         description='Moving-bed biofilm oxidises residual NH₄⁺ to NO₃⁻ '
-                    'at neutral pH. Pairs well with RO downstream since '
-                    'RO rejects nitrate cleanly. (Phase-1 sim only '
-                    'models consumption — nitrate rise is implicit and '
-                    'handled by the downstream RO stage.)',
+                    'at neutral pH. Pairs well with RO or ion-exchange '
+                    'downstream since those reject the produced nitrate '
+                    'cleanly — without that polish a nitrifier just '
+                    'trades one regulated solute for another.',
         removal={'ammonia': 0.92},
+        # N conservation: 1 mg NH4-N oxidises to 1 mg NO3-N.
+        converts={'ammonia': {'nitrate': 1.0}},
         flow_lpm=1.5, energy_watts=12.0,
         cost_eur=30.0, maintenance_days=365,
     ),
@@ -179,6 +184,68 @@ STAGE_TYPES = [
         flow_lpm=0.5, energy_watts=120.0,
         cost_eur=180.0, maintenance_days=365,
     ),
+
+    # --- Low-budget / passive polish stages ---------------------------
+    # Real-world appropriate-technology options: passive storage,
+    # natural sorbents, constructed wetlands, sunlight. Near-zero power
+    # and maintenance, meaningful but gentle removal per pass.
+    dict(
+        slug='urine-storage-tank',
+        name='Long-term urine storage tank',
+        kind='biological',
+        description='Sealed tank holding urine 1-6 months at ambient. '
+                    'Urease-rich biofilm converts urea to ammonium '
+                    'carbonate; resulting high-pH stream inactivates '
+                    'most pathogens. Eawag Vuna\'s pre-treatment — no '
+                    'moving parts, no power.',
+        removal={'urea': 0.97, 'bacteria': 0.99, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.99},
+        converts={'urea': {'ammonia': 0.467}},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=50.0, maintenance_days=365,
+    ),
+    dict(
+        slug='zeolite-ammonium',
+        name='Zeolite (clinoptilolite) ammonium filter',
+        kind='ion_exchange',
+        description='Natural clinoptilolite selectively sorbs NH₄⁺. '
+                    'Regenerable with brine; no power; cheap by the '
+                    'kilo. Also grabs a fraction of K⁺. Common in '
+                    'off-grid and emergency water-treatment kits.',
+        removal={'ammonia': 0.80, 'potassium': 0.35},
+        flow_lpm=4.0, energy_watts=0.0,
+        cost_eur=15.0, maintenance_days=180,
+    ),
+    dict(
+        slug='constructed-wetland',
+        name='Constructed wetland (subsurface-flow)',
+        kind='biological',
+        description='Reed / gravel bed with long residence time. Plants '
+                    'and rhizosphere microbiota take up nitrate, '
+                    'phosphate, residual ammonia; anaerobic zones '
+                    'denitrify; sunlight in the upper zones degrades '
+                    'pharma and hormones. Passive polish, slow flow.',
+        removal={'nitrate': 0.70, 'ammonia': 0.50, 'phosphate': 0.60,
+                 'bacteria': 0.99, 'protozoa': 0.95, 'pharma': 0.40,
+                 'hormones': 0.30, 'voc': 0.60, 'turbidity': 0.80},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=180,
+    ),
+    dict(
+        slug='solar-disinfection',
+        name='Solar disinfection (SODIS)',
+        kind='uv',
+        description='Sunlight-in-a-bottle: UV-A plus thermal '
+                    'inactivation over 6 h. Endorsed by WHO for '
+                    'household drinking water; costs only the bottle. '
+                    'Batch process, clear water only — pair with a '
+                    'sediment stage upstream.',
+        removal={'bacteria': 0.999, 'viruses': 3.0 / 6.0,
+                 'protozoa': 0.80},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=1.0, maintenance_days=0,
+    ),
+
     dict(
         slug='vapor-distillation',
         name='Vapour-compression distillation',
@@ -441,11 +508,11 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_system, stage_type=st, position=i)
 
-        # Evolved counterpart — naiad_evolve seed=42, pop=80, gens=250,
-        # --cost-cap 1200 --watt-cap 700. Same cost as the reference
-        # (~€545) but passes eu-drinking-urine-reuse and cuts power
-        # 430 W → 250 W by dropping vapour-compression + stripping in
-        # favour of repeated RO + nitrification.
+        # Evolved counterparts — both from naiad_evolve seed=42 but with
+        # different cost/watt caps, giving two snapshots of the design
+        # landscape: a balanced passing chain (v2) and a minimum-budget
+        # passing chain (v3) showing how far the low-budget passive
+        # stages can take you when they're in the catalog.
         urine_v2, urine_v2_created = System.objects.update_or_create(
             slug='urine-to-drinking-v2', defaults=dict(
                 name='Urine → Drinking (GA-tuned v2)',
@@ -474,7 +541,43 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v2, stage_type=st, position=i)
 
+        # v3 — minimum-budget variant using the new passive stages
+        # (zeolite ammonium, constructed wetland). naiad_evolve seed=42,
+        # pop=120, gens=400, --cost-cap 800 --watt-cap 400. ~€455 /
+        # 134 W: 4× RO + 2× zeolite + 2× wetland + urea hydrolysis +
+        # nitrification; no electrochem, no distillation.
+        urine_v3, urine_v3_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v3', defaults=dict(
+                name='Urine → Drinking (minimum-budget v3)',
+                description='GA-evolved minimum-budget passing chain. '
+                            'Leans on passive stages (zeolite, constructed '
+                            'wetland) in place of electrochemical oxidation '
+                            'and vapour distillation. ~€455 / 134 W — a '
+                            'proof-of-concept that urine-to-potable is '
+                            'reachable without the industrial power draw '
+                            'of the reference catalog.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v3_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'zeolite-ammonium',
+                'reverse-osmosis',
+                'reverse-osmosis',
+                'constructed-wetland',
+                'urea-hydrolysis',
+                'zeolite-ammonium',
+                'reverse-osmosis',
+                'nitrification-bioreactor',
+                'constructed-wetland',
+                'reverse-osmosis',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v3, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
-            f'"{urine_system.name}", "{urine_v2.name}".'))
+            f'"{urine_system.name}", "{urine_v2.name}", '
+            f'"{urine_v3.name}".'))

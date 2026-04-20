@@ -212,6 +212,7 @@ def evolve(request, slug):
             'name': st.name,
             'kind': st.kind,
             'removal': st.removal or {},
+            'converts': st.converts or {},
             'cost_eur': st.cost_eur,
             'energy_watts': st.energy_watts,
             'maintenance_days': st.maintenance_days,

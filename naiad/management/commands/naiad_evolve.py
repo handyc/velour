@@ -62,12 +62,20 @@ def simulate(stages: list[str], ctx: Ctx) -> dict:
         st = ctx.types.get(slug)
         if st is None:
             continue
+        removal = st.removal or {}
+        converts = st.converts or {}
+        produced: dict[str, float] = {}
         for key, value in list(current.items()):
-            frac = float((st.removal or {}).get(key, 0.0) or 0.0)
+            frac = float(removal.get(key, 0.0) or 0.0)
             if frac <= 0:
                 continue
             frac = min(max(frac, 0.0), 1.0)
-            current[key] = value * (1.0 - frac)
+            removed = value * frac
+            current[key] = value - removed
+            for dst, yield_factor in (converts.get(key) or {}).items():
+                produced[dst] = produced.get(dst, 0.0) + removed * float(yield_factor)
+        for dst, amount in produced.items():
+            current[dst] = current.get(dst, 0.0) + amount
     return current
 
 

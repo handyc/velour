@@ -93,6 +93,14 @@ class StageType(models.Model):
     # e.g. {"bacteria": 0.9999, "turbidity": 0.95}
     removal = models.JSONField(default=dict, blank=True)
 
+    # Conversion of removed mass into downstream contaminants, keyed
+    # by input contaminant. `{"urea": {"ammonia": 0.467}}` means: per
+    # unit of urea this stage removes, add 0.467 units to ammonia.
+    # Used by stages that transform rather than destroy — urea
+    # hydrolysis (urea → NH₄⁺-N), nitrification (NH₄⁺-N → NO₃⁻-N).
+    # Empty/missing = pure removal, no transformation.
+    converts = models.JSONField(default=dict, blank=True)
+
     flow_lpm = models.FloatField(
         default=0.0,
         help_text='Nominal flow rate in litres per minute.')

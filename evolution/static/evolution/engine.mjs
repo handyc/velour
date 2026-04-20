@@ -385,11 +385,22 @@ export function naiadSimulate(stages, ctx) {
         const st = typesBySlug[slug];
         if (!st) continue;
         const removal = st.removal || {};
+        const converts = st.converts || {};
+        const produced = {};
         for (const key of Object.keys(current)) {
             const raw = Number(removal[key] || 0);
             if (!(raw > 0)) continue;
             const f = Math.min(1, Math.max(0, raw));
-            current[key] = current[key] * (1 - f);
+            const removed = current[key] * f;
+            current[key] = current[key] - removed;
+            const outputs = converts[key] || {};
+            for (const dst of Object.keys(outputs)) {
+                const y = Number(outputs[dst] || 0);
+                produced[dst] = (produced[dst] || 0) + removed * y;
+            }
+        }
+        for (const dst of Object.keys(produced)) {
+            current[dst] = (Number(current[dst]) || 0) + produced[dst];
         }
         trace.push({ label: st.name, slug, values: Object.assign({}, current) });
     }

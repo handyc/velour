@@ -39,12 +39,19 @@ def simulate(system: System, source: WaterProfile,
 
     for stg in stages:
         removal = stg.stage_type.removal or {}
+        converts = stg.stage_type.converts or {}
+        produced: dict[str, float] = {}
         for key, value in list(current.items()):
             frac = float(removal.get(key, 0.0) or 0.0)
             if frac <= 0:
                 continue
             frac = min(max(frac, 0.0), 1.0)
-            current[key] = value * (1.0 - frac)
+            removed = value * frac
+            current[key] = value - removed
+            for dst, yield_factor in (converts.get(key) or {}).items():
+                produced[dst] = produced.get(dst, 0.0) + removed * float(yield_factor)
+        for dst, amount in produced.items():
+            current[dst] = current.get(dst, 0.0) + amount
         trace.append({
             'position': stg.position,
             'stage':    stg.stage_type.slug,
