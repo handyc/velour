@@ -41,8 +41,23 @@ class Command(BaseCommand):
             help='Screening horizon in ticks (default: 60).')
         parser.add_argument('--seed', default='',
             help='RNG seed string (default: timestamp).')
+        parser.add_argument('--workers', type=int, default=1,
+            help='Parallel worker processes for candidate scoring. '
+                 '1 = in-process. 0 = auto-detect (os.cpu_count). '
+                 'Candidates are independent and CPU-bound so scaling '
+                 'is close to linear up to cpu_count.')
+        parser.add_argument('--time-limit', type=int, default=None,
+            dest='time_limit',
+            help='Wall-clock cap in seconds. Once exceeded, no new '
+                 'candidates are submitted and the run finalises with '
+                 'whatever has been scored. Pair with SBATCH --time '
+                 'on Slurm so the finaliser fits in the job\'s budget.')
 
     def handle(self, *args, **opts):
+        import os
+        workers = opts['workers']
+        if workers == 0:
+            workers = max(1, os.cpu_count() or 1)
         run = SearchRun.objects.create(
             label=opts['label'],
             n_colors=opts['n_colors'],
@@ -56,12 +71,15 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.NOTICE(
             f'SearchRun #{run.pk} started ({run.n_candidates} candidates, '
-            f'{run.n_colors} colors)…'))
+            f'{run.n_colors} colors, workers={workers}'
+            + (f', time_limit={opts["time_limit"]}s' if opts['time_limit'] else '')
+            + ')…'))
 
         def progress(done, total):
             self.stdout.write(f'  {done}/{total}')
 
-        execute(run, progress_cb=progress)
+        execute(run, progress_cb=progress, n_workers=workers,
+                time_limit_seconds=opts['time_limit'])
 
         top = (run.candidates.order_by('-score', 'id')[:10])
         self.stdout.write(self.style.SUCCESS(

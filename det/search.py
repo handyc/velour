@@ -26,6 +26,8 @@ alongside the score; the operator gets the final say.
 import hashlib
 import json
 import random
+import time
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
 from django.utils import timezone
 
@@ -193,11 +195,71 @@ def _classify(analysis, score, n_colors):
     return 'unknown'
 
 
-def execute(run, progress_cb=None):
-    """Run a SearchRun to completion. Blocks until done. Safe to call
-    from a management command or synchronously from a view when
-    n_candidates is kept modest (default 200 × 40 ticks × 20×20 grid
-    runs in a few seconds of pure Python)."""
+def _score_one(cand_idx: int, run_seed: str, n_colors: int,
+               n_rules: int, wildcard_pct: int,
+               W: int, H: int, horizon: int) -> dict:
+    """Pure-Python worker: deterministically generate and score the
+    ruleset at index cand_idx. Picklable for ProcessPoolExecutor.
+    Rules are seeded by `{run_seed}-rules-{cand_idx}` (not sequential
+    from a shared RNG) so that candidates can be evaluated in any
+    order and the output stays reproducible."""
+    rules_rng = random.Random(f'{run_seed}-rules-{cand_idx}')
+    rules = _generate_rules(n_rules, n_colors, wildcard_pct, rules_rng)
+    grid_seed = f'{run_seed}-cand-{cand_idx}'
+    analysis, _final, _prev = _step_and_measure(
+        rules, W, H, n_colors, horizon, grid_seed,
+    )
+    score, breakdown = _score(analysis, n_colors)
+    analysis['score_breakdown'] = breakdown
+    analysis['grid_seed'] = grid_seed
+    est = _classify(analysis, score, n_colors)
+    return {
+        'cand_idx':   cand_idx,
+        'rules':      rules,
+        'rules_hash': _rules_hash(rules),
+        'score':      score,
+        'est_class':  est,
+        'analysis':   analysis,
+    }
+
+
+def _candidate_from_result(run, result):
+    """Build an unsaved Candidate row from a worker dict."""
+    from .models import Candidate
+    return Candidate(
+        run=run,
+        rules_json=result['rules'],
+        n_rules=len(result['rules']),
+        rules_hash=result['rules_hash'],
+        score=result['score'],
+        est_class=result['est_class'],
+        analysis=result['analysis'],
+    )
+
+
+def execute(run, progress_cb=None, n_workers=1, time_limit_seconds=None,
+            flush_every=500):
+    """Run a SearchRun to completion. Blocks until done.
+
+    n_workers=1 runs in-process (no IPC overhead, good for small sweeps).
+    n_workers>1 distributes candidate scoring across ProcessPoolExecutor
+    workers — each candidate is independent and the worker is pure
+    Python (step_exact + the measurement pipeline) so parallel scaling
+    is close to linear up to cpu_count. A sliding window of
+    `n_workers * 4` futures keeps the pool busy without piling up the
+    whole candidate budget in memory.
+
+    time_limit_seconds, when set, caps wall-clock time — once exceeded,
+    no new candidates are submitted and in-flight futures are allowed
+    to finish. Useful for Slurm submissions that have a hard walltime
+    (the caller should set this a little below the SBATCH --time ceiling
+    so the process has room to bulk_create the final batch and mark the
+    run finished).
+
+    flush_every writes completed Candidates to the DB periodically so
+    that long runs are visible in the UI mid-sweep and so we don't hold
+    thousands of rows in memory.
+    """
     from .models import Candidate
 
     if not run.seed:
@@ -207,49 +269,85 @@ def execute(run, progress_cb=None):
     run.error = ''
     run.save()
 
+    started_wall = time.time()
+    seen_hashes: set[str] = set()
+    pending: list = []
+    total_saved = 0
+    total_scored = 0
+
+    def time_up() -> bool:
+        return (time_limit_seconds is not None
+                and (time.time() - started_wall) > time_limit_seconds)
+
+    def flush():
+        nonlocal total_saved, pending
+        if pending:
+            Candidate.objects.bulk_create(pending, batch_size=200)
+            total_saved += len(pending)
+            pending = []
+
+    def consume(result):
+        nonlocal total_scored
+        total_scored += 1
+        rh = result['rules_hash']
+        if rh in seen_hashes:
+            return
+        seen_hashes.add(rh)
+        pending.append(_candidate_from_result(run, result))
+        if len(pending) >= flush_every:
+            flush()
+        if progress_cb and total_scored % 25 == 0:
+            progress_cb(total_scored, run.n_candidates)
+
     try:
-        rng = random.Random(run.seed)
-        seen_hashes = set()
-        bulk = []
+        target = run.n_candidates
+        if n_workers <= 1:
+            for i in range(target):
+                if time_up():
+                    break
+                consume(_score_one(
+                    i, run.seed, run.n_colors,
+                    run.n_rules_per_candidate, run.wildcard_pct,
+                    run.screen_width, run.screen_height, run.horizon,
+                ))
+        else:
+            window = max(1, n_workers * 4)
+            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                futures: dict = {}
+                next_idx = 0
 
-        for i in range(run.n_candidates):
-            rules = _generate_rules(
-                n_rules=run.n_rules_per_candidate,
-                n_colors=run.n_colors,
-                wildcard_pct=run.wildcard_pct,
-                rng=rng,
-            )
-            rh = _rules_hash(rules)
-            if rh in seen_hashes:
-                continue
-            seen_hashes.add(rh)
+                def submit_next():
+                    nonlocal next_idx
+                    fut = pool.submit(
+                        _score_one,
+                        next_idx, run.seed, run.n_colors,
+                        run.n_rules_per_candidate, run.wildcard_pct,
+                        run.screen_width, run.screen_height, run.horizon,
+                    )
+                    futures[fut] = next_idx
+                    next_idx += 1
 
-            grid_seed = f'{run.seed}-cand-{i}'
-            analysis, _final, _prev = _step_and_measure(
-                rules, run.screen_width, run.screen_height,
-                run.n_colors, run.horizon, grid_seed,
-            )
-            score, breakdown = _score(analysis, run.n_colors)
-            analysis['score_breakdown'] = breakdown
-            analysis['grid_seed'] = grid_seed
-            est = _classify(analysis, score, run.n_colors)
+                while next_idx < target and len(futures) < window and not time_up():
+                    submit_next()
 
-            bulk.append(Candidate(
-                run=run,
-                rules_json=rules,
-                n_rules=len(rules),
-                rules_hash=rh,
-                score=score,
-                est_class=est,
-                analysis=analysis,
-            ))
+                while futures:
+                    done, _ = wait(set(futures.keys()), timeout=1.0,
+                                   return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        del futures[fut]
+                        try:
+                            consume(fut.result())
+                        except Exception:
+                            raise
+                        while (next_idx < target
+                               and len(futures) < window
+                               and not time_up()):
+                            submit_next()
 
-            if progress_cb and i % 10 == 0:
-                progress_cb(i + 1, run.n_candidates)
-
-        Candidate.objects.bulk_create(bulk, batch_size=200)
+        flush()
         run.status = 'finished'
     except Exception as exc:
+        flush()
         run.status = 'failed'
         run.error = str(exc)
         raise
