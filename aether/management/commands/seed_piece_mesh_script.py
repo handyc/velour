@@ -68,14 +68,19 @@ shape.closePath();
 const geom = new THREE.ExtrudeGeometry(shape, {
     depth: hCm / 100, bevelEnabled: false, curveSegments: 12,
 });
-// ExtrudeGeometry builds on the XY plane, extruding into +Z. Rotate
-// it so the footprint lies on XZ (ground plane) and the height runs
-// up +Y — the same orientation a plain BoxGeometry would have.
+// ExtrudeGeometry builds in the XY plane and extrudes along +Z.
+// Rotate so the footprint lies on XZ (ground plane) and the
+// extrusion direction becomes +Y — same orientation a plain
+// BoxGeometry would have.
 geom.rotateX(-Math.PI / 2);
-// After the rotation, z=0 sits at the ground (before extrusion) and
-// z=-depth sits at the top. Translate so the centre sits at y=0 — the
-// entity's pos_y will lift it off the floor like the box path does.
-geom.translate(0, hCm / 200, 0);
+// Centre the mesh on its own origin via the bounding box. This is
+// robust to either three.js extrude direction (prior comment assumed
+// the wrong one and left the mesh floating half its height above
+// the floor). Entity pos_y = base_y + height/2 then puts the bottom
+// on the floor — matching the plain box path.
+geom.computeBoundingBox();
+const bb = geom.boundingBox;
+geom.translate(0, -(bb.min.y + bb.max.y) / 2, 0);
 
 const mat = new THREE.MeshStandardMaterial({
     color: color, roughness: 0.6, metalness: 0.0,

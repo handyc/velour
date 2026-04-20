@@ -219,15 +219,25 @@ def compute_mood(snapshot):
     pair has a probability. If the roll fails, Identity stays in its
     current mood — emotional inertia.
 
+    Rules whose aspect has an active AspectSuppression are skipped
+    here — so a concern the operator has told the system to stop
+    worrying about also stops colouring the mood. The aspect still
+    shows up in `evaluate_all_aspects`, just can't *win* the mood
+    choice.
+
     Returns (mood, intensity, label, first_match_aspects).
 
     Prefers DB-backed Rule rows; falls back to the module-level RULES
     list only if the Rule table is empty (fresh install edge case)."""
+    from .models import AspectSuppression
     prev = _previous_mood()
+    suppressed = AspectSuppression.active_aspects()
 
     db_rules = _db_rules()
     if db_rules:
         for rule in db_rules:
+            if rule.aspect in suppressed:
+                continue
             try:
                 if _eval_condition(rule.condition, snapshot):
                     return _apply_transition(
@@ -241,6 +251,8 @@ def compute_mood(snapshot):
     # Fallback: pre-Session-3 hardcoded lambdas
     for rule in RULES:
         predicate, mood, intensity, label, aspects = rule
+        if aspects and aspects[0] in suppressed:
+            continue
         try:
             if predicate(snapshot):
                 return _apply_transition(

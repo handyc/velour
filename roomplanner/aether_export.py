@@ -225,10 +225,10 @@ def _emit_polygon_shell(room, world, base_y, origin_x, floor_height_m,
     miny, maxy = min(ys), max(ys)
     cx_plan = (minx + maxx) / 2.0
     cy_plan = (miny + maxy) / 2.0
-    # The script places extruded mesh centred at y=0 in its local
-    # frame, so pos_y = base_y + floor_thickness/2 puts the top at
-    # base_y + floor_thickness and the bottom at base_y — matching
-    # the rect path which sits the slab top at base_y.
+    # piece-mesh-render centres the mesh on its own origin, so
+    # pos_y = base_y - thickness/2 puts the slab TOP at base_y —
+    # matching the rect path (which also sits the slab top at base_y
+    # via pos_y = base_y - 0.025 on a 5 cm box).
     FLOOR_THICKNESS_CM = 5.0
     ae_cx = origin_x + cx_plan / 100.0
     ae_cz = cy_plan / 100.0 - d_m
@@ -237,7 +237,7 @@ def _emit_polygon_shell(room, world, base_y, origin_x, floor_height_m,
         name=PREFIX + f'floor-{room.slug}',
         primitive='box', primitive_color=FLOOR_PANEL_COLOR,
         pos_x=ae_cx,
-        pos_y=base_y,
+        pos_y=base_y - (FLOOR_THICKNESS_CM / 100.0) / 2.0,
         pos_z=ae_cz,
         scale_x=1.0, scale_y=1.0, scale_z=1.0,
         behavior='scripted',
@@ -381,13 +381,17 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
         if is_extrusion:
             # The polygon lives in un-rotated local cm coords; rot_y
             # handles orientation, so we don't swap polygon vertices.
+            # The piece-mesh-render script centres the mesh on its own
+            # origin, so pos_y = base_y + height/2 puts the bottom on
+            # the floor — same anchor convention as the plain box path.
             h_cm = geom.get('height_cm') or ph_cm
             scripted.append((
                 Entity(
                     world=world,
                     name=PREFIX + f'piece-{pl.pk}',
                     primitive='box', primitive_color=color,
-                    pos_x=ae_x, pos_y=base_y, pos_z=ae_z,
+                    pos_x=ae_x, pos_y=base_y + (h_cm / 100.0) / 2.0,
+                    pos_z=ae_z,
                     scale_x=1.0, scale_y=1.0, scale_z=1.0,
                     rot_y=-(pl.rotation_deg or 0),
                     behavior='scripted',
