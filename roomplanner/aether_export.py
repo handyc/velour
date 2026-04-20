@@ -37,9 +37,12 @@ from __future__ import annotations
 
 from django.db import transaction
 
-from aether.models import Entity, World
+from aether.models import Entity, EntityScript, Script, World
 
 from .models import Building, Floor, Room
+
+
+PIECE_MESH_SCRIPT_SLUG = 'piece-mesh-render'
 
 
 PREFIX = 'rp:'
@@ -164,8 +167,17 @@ def _room_origin(rooms_on_floor):
 
 
 def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
-               floor_height_m: float, ents: list):
-    """Append all primitives for one room to `ents`."""
+               floor_height_m: float, ents: list,
+               scripted: list, piece_script):
+    """Append all primitives for one room to `ents`.
+
+    Pieces without real geometry become plain box entities in `ents`.
+    Pieces whose `geometry` is `{type: 'extrusion', ...}` become
+    scripted entities in `scripted` — (Entity, props) tuples that the
+    caller saves one-by-one so each row's PK is available for the
+    matching EntityScript attachment. If `piece_script` is None
+    (script not seeded), every piece falls back to a box.
+    """
     w_m = room.width_cm  / 100.0  # X extent
     d_m = room.length_cm / 100.0  # Z extent
     cx = origin_x + w_m / 2.0
@@ -240,6 +252,11 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
     # (fall back to a reasonable default by kind).
     for pl in room.placements.select_related('piece').all():
         piece = pl.piece
+        geom = piece.geometry or {}
+        is_extrusion = (piece_script is not None
+                        and geom.get('type') == 'extrusion'
+                        and geom.get('polygon'))
+
         # Rotation 90/270 swaps W and D in plan footprint.
         w_plan = piece.width_cm
         d_plan = piece.depth_cm
@@ -248,7 +265,8 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
 
         pw = w_plan / 100.0
         pd = d_plan / 100.0
-        ph = (piece.height_cm or _default_height_cm(piece.kind)) / 100.0
+        ph_cm = piece.height_cm or _default_height_cm(piece.kind)
+        ph = ph_cm / 100.0
 
         plan_cx = pl.x_cm / 100.0 + pw / 2.0
         plan_cy = pl.y_cm / 100.0 + pd / 2.0
@@ -260,13 +278,35 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
         # Map roomplanner rotation (around floor normal = +Y in Aether)
         # to rot_y degrees. rotation_deg goes 0/90/180/270 clockwise on the
         # plan (which looks down -Y in three.js); negate for handedness.
-        ents.append(_make_box(
-            world,
-            f'piece-{pl.pk}',
-            ae_x, ae_y, ae_z,
-            pw, ph, pd,
-            color, sort_order=20,
-        ))
+        if is_extrusion:
+            # The polygon lives in un-rotated local cm coords; rot_y
+            # handles orientation, so we don't swap polygon vertices.
+            h_cm = geom.get('height_cm') or ph_cm
+            scripted.append((
+                Entity(
+                    world=world,
+                    name=PREFIX + f'piece-{pl.pk}',
+                    primitive='box', primitive_color=color,
+                    pos_x=ae_x, pos_y=base_y, pos_z=ae_z,
+                    scale_x=1.0, scale_y=1.0, scale_z=1.0,
+                    rot_y=-(pl.rotation_deg or 0),
+                    behavior='scripted',
+                    sort_order=20,
+                ),
+                {
+                    'polygon': list(geom['polygon']),
+                    'heightCm': h_cm,
+                    'color': color,
+                },
+            ))
+        else:
+            ents.append(_make_box(
+                world,
+                f'piece-{pl.pk}',
+                ae_x, ae_y, ae_z,
+                pw, ph, pd,
+                color, sort_order=20,
+            ))
 
 
 def _default_height_cm(kind: str) -> int:
@@ -284,18 +324,34 @@ def _default_height_cm(kind: str) -> int:
     }.get(kind, 80)
 
 
+def _attach_scripts(scripted, piece_script):
+    """Save scripted entities one-by-one (each needs a PK) and attach
+    a piece-mesh-render EntityScript to each."""
+    attachments = []
+    for ent, props in scripted:
+        ent.save()
+        attachments.append(EntityScript(
+            entity=ent, script=piece_script, props=props,
+        ))
+    EntityScript.objects.bulk_create(attachments)
+
+
 @transaction.atomic
 def export_building(building: Building) -> World:
     world = _world_for_building(building)
     _clear_existing(world)
+    piece_script = Script.objects.filter(
+        slug=PIECE_MESH_SCRIPT_SLUG).first()
 
     ents: list = []
+    scripted: list = []
     spawn_set = False
     for floor, base_y in _floor_layout(building):
         floor_h_m = (floor.height_cm or DEFAULT_FLOOR_HEIGHT_CM) / 100.0
         rooms = list(Room.objects.filter(floor=floor).order_by('name'))
         for room, origin_x in _room_origin(rooms):
-            _emit_room(room, world, base_y, origin_x, floor_h_m, ents)
+            _emit_room(room, world, base_y, origin_x, floor_h_m,
+                       ents, scripted, piece_script)
             if not spawn_set:
                 # Spawn at the centre of the first room on the lowest
                 # floor, eyeline 1.6 m above the slab.
@@ -308,6 +364,7 @@ def export_building(building: Building) -> World:
                 spawn_set = True
 
     Entity.objects.bulk_create(ents)
+    _attach_scripts(scripted, piece_script)
     return world
 
 
@@ -316,12 +373,16 @@ def export_room(room: Room) -> World:
     """Single-room shortcut. Floors are not stacked; the room sits at Y=0."""
     world = _world_for_room(room)
     _clear_existing(world)
+    piece_script = Script.objects.filter(
+        slug=PIECE_MESH_SCRIPT_SLUG).first()
 
     floor_h_m = ((room.floor.height_cm if room.floor else DEFAULT_FLOOR_HEIGHT_CM)
                  / 100.0)
     ents: list = []
+    scripted: list = []
     _emit_room(room, world, base_y=0.0, origin_x=0.0,
-               floor_height_m=floor_h_m, ents=ents)
+               floor_height_m=floor_h_m, ents=ents,
+               scripted=scripted, piece_script=piece_script)
 
     w_m = room.width_cm / 100.0
     d_m = room.length_cm / 100.0
@@ -331,6 +392,7 @@ def export_room(room: Room) -> World:
     world.save(update_fields=['spawn_x', 'spawn_y', 'spawn_z'])
 
     Entity.objects.bulk_create(ents)
+    _attach_scripts(scripted, piece_script)
     return world
 
 

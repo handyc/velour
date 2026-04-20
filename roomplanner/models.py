@@ -180,6 +180,24 @@ class FurniturePiece(models.Model):
     needs_outlet = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
 
+    # Optional real geometry. Empty dict = render as a plain box (the
+    # existing behaviour); the planner's bounding-box width/depth/height
+    # still drive placement and fitness calcs either way.
+    #
+    # Supported today:
+    #   {"type": "extrusion",
+    #    "polygon": [[x_cm, y_cm], ...],    # closed 2D footprint,
+    #                                       # coords in cm with (0,0) at
+    #                                       # the piece's SW corner
+    #    "height_cm": 75}                   # extrusion depth (vertical)
+    #
+    # The piece-mesh-render Aether script reads this straight from the
+    # EntityScript props; non-rectangular rooms will reuse the same
+    # polygon shape under Room.polygon_cm when that lands.
+    geometry = models.JSONField(default=dict, blank=True,
+        help_text='Optional real-geometry payload. Empty = plain box. '
+                  'See FurniturePiece docstring for the accepted shapes.')
+
     class Meta:
         ordering = ['kind', 'name']
 
