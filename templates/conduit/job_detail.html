@@ -117,6 +117,30 @@
   </div>
   {% endif %}
 
+  {% if job.payload.naiad and job.status == 'done' %}
+  <div class="panel" style="border-left:2px solid #58a6ff">
+    <h2>Naiad follow-up</h2>
+    <p class="hint">
+      This job was dispatched from
+      <a href="{% url 'naiad:system_detail' slug=job.payload.naiad.parent_slug %}">/naiad/{{ job.payload.naiad.parent_slug }}/</a>.
+      Import the winning chain as a new Naiad System, inheriting the
+      parent's source + target profiles.
+    </p>
+    <form method="post"
+          action="{% url 'naiad:import_evolve_job' job_slug=job.slug %}"
+          style="display:flex;gap:0.4rem;align-items:end;flex-wrap:wrap">
+      {% csrf_token %}
+      <label style="color:#8b949e;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">
+        slug
+        <input type="text" name="save_as" pattern="[a-z0-9-]+"
+               placeholder="{% if job.payload.naiad.save_as %}{{ job.payload.naiad.save_as }}{% else %}{{ job.payload.naiad.parent_slug }}-from-job-{{ job.pk }}{% endif %}"
+               style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.25rem 0.4rem;font-size:0.78rem;width:18rem">
+      </label>
+      <button class="btn" type="submit">Import winner into Naiad</button>
+    </form>
+  </div>
+  {% endif %}
+
   {% if job.stdout %}
   <div class="panel">
     <h2>stdout</h2>

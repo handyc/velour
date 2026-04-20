@@ -19,6 +19,7 @@ Why a shared helper:
 
 from __future__ import annotations
 
+import re
 import shlex
 from typing import Any
 
@@ -61,6 +62,14 @@ def dispatch_via_conduit(system, target_slug: str, opts: dict) -> Any:
                 f'{timezone.now():%Y%m%d-%H%M%S}')
     job_name = f'Naiad evolve: {system.slug}'
 
+    # Stashed alongside the executor payload so the Naiad import
+    # view can reconstruct the winner's parentage (source + target)
+    # even when the GA ran on a remote checkout with no shared DB.
+    naiad_meta = {
+        'parent_slug': system.slug,
+        'save_as':     opts.get('save') or None,
+    }
+
     if target.kind in SHELL_KINDS:
         cwd = str(settings.BASE_DIR)
         python_bin = f'{cwd}/venv/bin/python'
@@ -69,7 +78,8 @@ def dispatch_via_conduit(system, target_slug: str, opts: dict) -> Any:
         timeout = max(3600, int(opts.get('gens', 0)) * 10)
         job = Job.objects.create(
             slug=job_slug, name=job_name, kind='shell',
-            payload={'command': command, 'cwd': cwd, 'timeout': timeout},
+            payload={'command': command, 'cwd': cwd, 'timeout': timeout,
+                     'naiad': naiad_meta},
             requester=opts.get('requester'),
             requested_target=target,
         )
@@ -77,7 +87,7 @@ def dispatch_via_conduit(system, target_slug: str, opts: dict) -> Any:
         script = _render_sbatch(system, target, passthrough, opts)
         job = Job.objects.create(
             slug=job_slug, name=job_name, kind='slurm_script',
-            payload={'script': script},
+            payload={'script': script, 'naiad': naiad_meta},
             requester=opts.get('requester'),
             requested_target=target,
         )
@@ -113,6 +123,80 @@ def _passthrough_args(system_slug: str, opts: dict) -> str:
     if opts.get('save'):
         parts += ['--save', shlex.quote(str(opts['save']))]
     return ' '.join(parts)
+
+
+# ── Result parser ────────────────────────────────────────────────
+ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+STAGE_LINE_RE = re.compile(r'^\s*(\d+)\.\s+([a-z0-9-]+)\s*$')
+KV_RE = re.compile(r'^\s*(score|passes|length|cost|power|fails)\s*:\s*(.+?)\s*$')
+
+
+def parse_evolve_stdout(text: str) -> dict | None:
+    """Parse the ── Best chain found ── block out of naiad_evolve
+    stdout. Returns None if the block is absent (run failed, or the
+    output isn't from naiad_evolve). Shape:
+
+        {'score': 0.5282, 'passed': True, 'length': 12,
+         'cost': 535.0, 'watts': 332.0,
+         'stages': ['sediment-5um', 'reverse-osmosis', ...]}
+
+    Robust to ANSI color codes (manage.py's style.SUCCESS emits them
+    when stdout is a TTY) and to extra/missing lines — we only keep
+    the fields we recognise."""
+    if not text:
+        return None
+    clean = ANSI_RE.sub('', text)
+    lines = clean.splitlines()
+
+    # Find the best-chain header.
+    try:
+        start = next(i for i, l in enumerate(lines)
+                     if 'Best chain found' in l)
+    except StopIteration:
+        return None
+
+    out: dict[str, Any] = {'stages': []}
+    in_stages = False
+    for line in lines[start + 1:]:
+        stripped = line.rstrip()
+        if not stripped:
+            if in_stages:
+                break
+            continue
+        m = STAGE_LINE_RE.match(stripped)
+        if m:
+            in_stages = True
+            out['stages'].append(m.group(2))
+            continue
+        if in_stages:
+            # Left the stages block (e.g. "output vs target:" header).
+            break
+        m = KV_RE.match(stripped)
+        if not m:
+            if stripped.startswith('stages'):
+                in_stages = True
+            continue
+        key, raw = m.group(1), m.group(2).strip()
+        if key == 'score':
+            try:    out['score']   = float(raw)
+            except ValueError: pass
+        elif key == 'passes':
+            out['passed'] = raw.strip().lower() in ('true', '1', 'yes')
+        elif key == 'length':
+            try:    out['length']  = int(raw)
+            except ValueError: pass
+        elif key == 'cost':
+            try:    out['cost']    = float(raw.lstrip('€').strip())
+            except ValueError: pass
+        elif key == 'power':
+            try:    out['watts']   = float(raw.rstrip('W').strip())
+            except ValueError: pass
+        elif key == 'fails':
+            out['fails'] = [s.strip() for s in raw.split(',') if s.strip()]
+
+    if not out['stages']:
+        return None
+    return out
 
 
 def _render_sbatch(system, target, passthrough: str, opts: dict) -> str:

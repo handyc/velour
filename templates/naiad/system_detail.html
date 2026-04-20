@@ -187,6 +187,26 @@
     </p>
   </div>
 
+  {% if conduit_jobs %}
+  <div class="panel">
+    <h2>Conduit dispatches</h2>
+    <div class="runlist">
+      {% for j in conduit_jobs %}
+      <div class="runrow {% if j.status == 'done' %}passed{% elif j.status == 'failed' %}failed{% endif %}">
+        <a href="{% url 'conduit:job_detail' slug=j.slug %}">
+          {{ j.slug }}
+        </a>
+        <span class="meta">
+          {{ j.get_status_display }}
+          {% if j.target %}· {{ j.target.name }}{% endif %}
+          · {{ j.created_at|date:"Y-m-d H:i" }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if test_runs %}
   <div class="panel">
     <h2>Test runs</h2>

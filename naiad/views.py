@@ -8,7 +8,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from .evolve_dispatch import DispatchError, dispatch_via_conduit
+from .evolve_dispatch import (
+    DispatchError, dispatch_via_conduit, parse_evolve_stdout,
+)
 from .models import (
     CONTAMINANTS, CONTAMINANT_LABELS, CONTAMINANT_UNITS,
     Stage, StageType, System, TestRun, WaterProfile,
@@ -67,6 +69,22 @@ def system_detail(request, slug):
                  .order_by('-created_at')[:10])
     sources = WaterProfile.objects.filter(scope='source')
     targets = WaterProfile.objects.filter(scope='target')
+
+    # Recent Conduit jobs that targeted this system as their parent,
+    # so the user can jump to status / import a completed winner
+    # without detouring through /conduit/. Imported lazily so Naiad
+    # doesn't hard-fail if Conduit is uninstalled.
+    conduit_jobs: list = []
+    try:
+        from conduit.models import Job
+        conduit_jobs = list(
+            Job.objects.filter(
+                payload__naiad__parent_slug=system.slug,
+            ).order_by('-created_at')[:10]
+        )
+    except Exception:
+        conduit_jobs = []
+
     return render(request, 'naiad/system_detail.html', {
         'system':       system,
         'stages':       stages,
@@ -75,6 +93,7 @@ def system_detail(request, slug):
         'sources':      sources,
         'targets':      targets,
         'contaminants': CONTAMINANTS,
+        'conduit_jobs': conduit_jobs,
     })
 
 
@@ -288,6 +307,87 @@ def evolve_via_conduit(request, slug):
         request,
         f'Dispatched {job.name} to {job.target.name}.')
     return redirect('conduit:job_detail', slug=job.slug)
+
+
+@login_required
+@require_POST
+def import_evolve_job(request, job_slug):
+    """Parse the 'Best chain found' block out of a completed Conduit
+    Job's stdout and materialise a new Naiad System from it. Needed
+    when the GA ran on a remote checkout (ALICE) whose SQLite doesn't
+    round-trip to this one — the user copies stdout into the
+    handoff-complete form, then comes here to turn it into a real
+    System. Also works for local runs where the user skipped --save
+    and decides later they want to keep the winner."""
+    from conduit.models import Job
+
+    job = get_object_or_404(Job, slug=job_slug)
+    meta = (job.payload or {}).get('naiad') or {}
+    parent_slug = meta.get('parent_slug')
+    if not parent_slug:
+        messages.error(request,
+            f'Job {job.slug} is not a Naiad dispatch — no parent to '
+            f'inherit source/target from.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    try:
+        parent = System.objects.select_related(
+            'source', 'target').get(slug=parent_slug)
+    except System.DoesNotExist:
+        messages.error(request,
+            f'Parent System {parent_slug!r} has gone missing locally.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    winner = parse_evolve_stdout(job.stdout or '')
+    if not winner or not winner.get('stages'):
+        messages.error(request,
+            f'Could not find a winning chain in the job stdout. '
+            f'Is the run complete and the output pasted in?')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    # Save-as slug: prefer any user-supplied slug on the form, else
+    # the one the dispatch stashed in payload, else derive from the
+    # parent + Job id.
+    form_slug = slugify((request.POST.get('save_as') or '').strip())
+    save_as = (form_slug or slugify(meta.get('save_as') or '')
+               or f'{parent.slug}-from-job-{job.pk}')
+    if System.objects.filter(slug=save_as).exists():
+        messages.error(request,
+            f'System slug {save_as!r} already exists. Pick another.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    stage_slugs = winner['stages']
+    types_by_slug = {
+        st.slug: st for st in StageType.objects.filter(slug__in=stage_slugs)
+    }
+    missing = [s for s in stage_slugs if s not in types_by_slug]
+    if missing:
+        messages.error(request,
+            f'unknown stage types in winner: {", ".join(sorted(set(missing)))}')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    score_str = f'{winner.get("score", 0):.4f}'
+    pass_str  = 'passing' if winner.get('passed') else 'failing'
+    with transaction.atomic():
+        new_system = System.objects.create(
+            slug=save_as,
+            name=f'{parent.name} (from job {job.pk})',
+            source=parent.source, target=parent.target,
+            description=(
+                f'Imported from Conduit job {job.slug}, score={score_str} '
+                f'({pass_str}). Parent: {parent.slug}.'),
+        )
+        for i, slug_ in enumerate(stage_slugs):
+            Stage.objects.create(
+                system=new_system,
+                stage_type=types_by_slug[slug_],
+                position=i,
+            )
+
+    messages.success(request,
+        f'Imported as /naiad/{new_system.slug}/ ({len(stage_slugs)} stages, '
+        f'{pass_str}).')
+    return redirect('naiad:system_detail', slug=new_system.slug)
 
 
 @login_required
