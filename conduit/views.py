@@ -256,4 +256,12 @@ def handoff_complete(request, pk):
     handoff.job.save(update_fields=[
         'status', 'stdout', 'stderr', 'finished_at'])
     messages.success(request, f'Handoff acknowledged as {outcome}')
+
+    # If the dispatching app wired a follow-up (e.g. Naiad sets
+    # payload['naiad']), stay on the handoff page so the follow-up
+    # panel renders there and the user can act on the result without
+    # navigating away. Plain shell/script handoffs keep the old
+    # redirect to the Job detail.
+    if outcome == 'done' and (handoff.job.payload or {}).get('naiad'):
+        return redirect('conduit:handoff_detail', pk=handoff.pk)
     return redirect('conduit:job_detail', slug=handoff.job.slug)

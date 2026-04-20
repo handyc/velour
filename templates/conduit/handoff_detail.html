@@ -103,6 +103,15 @@
         class="panel">
     {% csrf_token %}
     <h2>Record outcome</h2>
+    {% if handoff.job.payload.naiad %}
+    <p class="hint" style="margin:0 0 0.6rem">
+      Naiad dispatch from
+      <a href="{% url 'naiad:system_detail' slug=handoff.job.payload.naiad.parent_slug %}">/naiad/{{ handoff.job.payload.naiad.parent_slug }}/</a>
+      — paste the full run stdout (the whole "── Best chain found ──"
+      block) so the winner can be imported back here without
+      another round-trip.
+    </p>
+    {% endif %}
     <label>Outcome
       <select name="outcome">
         <option value="done">done</option>
@@ -120,6 +129,32 @@
     </label>
     <button class="btn" type="submit">Mark complete</button>
   </form>
+  {% endif %}
+
+  {% if handoff.job.payload.naiad and handoff.job.status == 'done' %}
+  <div class="panel" style="border-left:2px solid #58a6ff">
+    <h2>Naiad follow-up</h2>
+    <p class="hint">
+      Import the winning chain from
+      <a href="{% url 'naiad:system_detail' slug=handoff.job.payload.naiad.parent_slug %}">/naiad/{{ handoff.job.payload.naiad.parent_slug }}/</a>
+      as a new System, inheriting its source + target profiles. If
+      the parse finds nothing, double-check that the whole run
+      stdout (including the "── Best chain found ──" block) was
+      pasted above.
+    </p>
+    <form method="post"
+          action="{% url 'naiad:import_evolve_job' job_slug=handoff.job.slug %}"
+          style="display:flex;gap:0.4rem;align-items:end;flex-wrap:wrap">
+      {% csrf_token %}
+      <label style="margin:0">
+        slug
+        <input type="text" name="save_as" pattern="[a-z0-9-]+"
+               placeholder="{% if handoff.job.payload.naiad.save_as %}{{ handoff.job.payload.naiad.save_as }}{% else %}{{ handoff.job.payload.naiad.parent_slug }}-from-job-{{ handoff.job.pk }}{% endif %}"
+               style="width:18rem">
+      </label>
+      <button class="btn" type="submit">Import winner into Naiad</button>
+    </form>
+  </div>
   {% endif %}
 
   {% if handoff.notes %}
