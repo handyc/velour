@@ -148,6 +148,14 @@ def room_detail(request, slug):
     # Map the room's north direction onto each SVG edge (top/right/bottom/left).
     edge_labels = _edge_labels(room.north_direction)
 
+    # Non-rectangular rooms: SVG polygon points string. Empty string
+    # when the room is a plain rectangle.
+    polygon_points = ''
+    if room.polygon_cm:
+        polygon_points = ' '.join(
+            f'{float(v[0]):g},{float(v[1]):g}' for v in room.polygon_cm
+        )
+
     return render(request, 'roomplanner/room_detail.html', {
         'room':         room,
         'features':     feature_items,
@@ -159,6 +167,7 @@ def room_detail(request, slug):
         'north_choices':    Room.NORTH_CHOICES,
         'edge_labels':      edge_labels,
         'layouts':          list_layouts(room),
+        'polygon_points':   polygon_points,
     })
 
 

@@ -189,7 +189,12 @@
 
         <!-- room outline -->
         <rect x="0" y="0" width="{{ room.width_cm }}" height="{{ room.length_cm }}"
-              fill="#161b22" stroke="#30363d" stroke-width="2"/>
+              fill="#161b22" stroke="#30363d" stroke-width="2"
+              {% if polygon_points %}stroke-dasharray="8 6" opacity="0.35"{% endif %}/>
+        {% if polygon_points %}
+        <polygon points="{{ polygon_points }}"
+                 fill="#1b222c" stroke="#58a6ff" stroke-width="2.5"/>
+        {% endif %}
 
         <!-- 50cm grid -->
         <g id="rp-grid" stroke="#21262d" stroke-width="0.4"></g>

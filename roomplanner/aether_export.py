@@ -166,6 +166,135 @@ def _room_origin(rooms_on_floor):
         cursor += w_m + ROOM_GAP_M
 
 
+def _emit_rect_shell(room, world, base_y, origin_x, w_m, d_m, cx, cz,
+                     floor_height_m, ents):
+    """Original axis-aligned floor + 4 walls path."""
+    # Floor slab — 5 cm thick, sitting just at base_y so its top is base_y.
+    ents.append(_make_box(
+        world, f'floor-{room.slug}',
+        cx, base_y - 0.025, cz, w_m, 0.05, d_m,
+        FLOOR_PANEL_COLOR, sort_order=0,
+    ))
+
+    wall_y = base_y + floor_height_m / 2.0
+    ents.append(_make_box(
+        world, f'wall-W-{room.slug}',
+        origin_x - WALL_T_M / 2.0, wall_y, cz,
+        WALL_T_M, floor_height_m, d_m,
+        WALL_COLOR, sort_order=1,
+    ))
+    ents.append(_make_box(
+        world, f'wall-E-{room.slug}',
+        origin_x + w_m + WALL_T_M / 2.0, wall_y, cz,
+        WALL_T_M, floor_height_m, d_m,
+        WALL_COLOR, sort_order=1,
+    ))
+    ents.append(_make_box(
+        world, f'wall-N-{room.slug}',
+        cx, wall_y, -d_m - WALL_T_M / 2.0,
+        w_m, floor_height_m, WALL_T_M,
+        WALL_COLOR, sort_order=1,
+    ))
+    ents.append(_make_box(
+        world, f'wall-S-{room.slug}',
+        cx, wall_y, WALL_T_M / 2.0,
+        w_m, floor_height_m, WALL_T_M,
+        WALL_COLOR, sort_order=1,
+    ))
+
+
+def _emit_polygon_shell(room, world, base_y, origin_x, floor_height_m,
+                        polygon, ents, scripted, piece_script):
+    """Polygon-shaped room: one extruded floor + one thin box per edge.
+
+    `polygon` is a list of [x_cm, y_cm] in plan coords (SVG: +Y down,
+    (0,0) at the room's NW bounding-box corner). We map plan_x → ae_x
+    via `origin_x + px/100` and plan_y → ae_z via `py/100 - d_m`, so
+    the plan's top edge sits at the far wall and the bottom edge lands
+    behind spawn — same convention as the rectangular path.
+    """
+    import math
+    d_m = room.length_cm / 100.0
+
+    # ---- Floor: reuse piece-mesh-render with a 5 cm extrusion. The
+    # script centres the polygon on its bounding box, so we position
+    # the anchor entity at the bbox centre (in aether coords).
+    xs = [float(v[0]) for v in polygon]
+    ys = [float(v[1]) for v in polygon]
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+    cx_plan = (minx + maxx) / 2.0
+    cy_plan = (miny + maxy) / 2.0
+    # The script places extruded mesh centred at y=0 in its local
+    # frame, so pos_y = base_y + floor_thickness/2 puts the top at
+    # base_y + floor_thickness and the bottom at base_y — matching
+    # the rect path which sits the slab top at base_y.
+    FLOOR_THICKNESS_CM = 5.0
+    ae_cx = origin_x + cx_plan / 100.0
+    ae_cz = cy_plan / 100.0 - d_m
+    floor_ent = Entity(
+        world=world,
+        name=PREFIX + f'floor-{room.slug}',
+        primitive='box', primitive_color=FLOOR_PANEL_COLOR,
+        pos_x=ae_cx,
+        pos_y=base_y,
+        pos_z=ae_cz,
+        scale_x=1.0, scale_y=1.0, scale_z=1.0,
+        behavior='scripted',
+        sort_order=0,
+    )
+    # The script expects polygon coords in an XZ-like plane (it treats
+    # the input as [x, y] in the Shape plane, then rotateX(-π/2) turns
+    # that Y into aether -Z). To land plan_y at aether_z = py/100 - d_m,
+    # pass the plan polygon verbatim — the script's bbox-centring + the
+    # rotate flip produces the right layout once the entity is anchored
+    # at (ae_cx, base_y, ae_cz).
+    scripted.append((
+        floor_ent,
+        {
+            'polygon': [[float(v[0]), float(v[1])] for v in polygon],
+            'heightCm': FLOOR_THICKNESS_CM,
+            'color': FLOOR_PANEL_COLOR,
+        },
+    ))
+
+    # ---- Walls: one box per polygon edge.
+    wall_y = base_y + floor_height_m / 2.0
+    n = len(polygon)
+    for i in range(n):
+        px1, py1 = float(polygon[i][0]), float(polygon[i][1])
+        px2, py2 = float(polygon[(i + 1) % n][0]), float(polygon[(i + 1) % n][1])
+        # Endpoints in aether coords.
+        ax1 = origin_x + px1 / 100.0
+        az1 = py1 / 100.0 - d_m
+        ax2 = origin_x + px2 / 100.0
+        az2 = py2 / 100.0 - d_m
+        dx = ax2 - ax1
+        dz = az2 - az1
+        length_m = math.hypot(dx, dz)
+        if length_m < 1e-6:
+            continue
+        mx = (ax1 + ax2) / 2.0
+        mz = (az1 + az2) / 2.0
+        # Box scale_x aligned with +X by default. We want it to point
+        # along the edge direction (dx, dz); in three.js rot_y rotates
+        # from +X toward -Z, so rot_y = atan2(-dz, dx).
+        rot_y_rad = math.atan2(-dz, dx)
+        rot_y_deg = math.degrees(rot_y_rad)
+        # Extend length slightly so adjacent walls overlap at corners.
+        ents.append(Entity(
+            world=world,
+            name=PREFIX + f'wall-{i}-{room.slug}',
+            primitive='box', primitive_color=WALL_COLOR,
+            pos_x=mx, pos_y=wall_y, pos_z=mz,
+            scale_x=length_m + WALL_T_M,
+            scale_y=floor_height_m,
+            scale_z=WALL_T_M,
+            rot_y=rot_y_deg,
+            sort_order=1,
+        ))
+
+
 def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
                floor_height_m: float, ents: list,
                scripted: list, piece_script):
@@ -177,55 +306,26 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
     caller saves one-by-one so each row's PK is available for the
     matching EntityScript attachment. If `piece_script` is None
     (script not seeded), every piece falls back to a box.
+
+    When `room.polygon_cm` is set the floor becomes an extruded polygon
+    and walls become one thin box per polygon edge; otherwise the four
+    axis-aligned walls + rectangular floor path is used.
     """
-    w_m = room.width_cm  / 100.0  # X extent
-    d_m = room.length_cm / 100.0  # Z extent
+    w_m = room.width_cm  / 100.0  # X extent (plan bounding box)
+    d_m = room.length_cm / 100.0  # Z extent (plan bounding box)
     cx = origin_x + w_m / 2.0
     # Rooms extend from ae_z=-d_m (plan top edge, y=0) to ae_z=0 (plan
     # bottom edge). Camera spawns at the centre facing -Z, so the plan's
     # "up the page" direction is what the user walks toward.
     cz = -d_m / 2.0
 
-    # Floor slab — 5 cm thick, sitting just at base_y so its top is base_y.
-    ents.append(_make_box(
-        world,
-        f'floor-{room.slug}',
-        cx, base_y - 0.025, cz,
-        w_m, 0.05, d_m,
-        FLOOR_PANEL_COLOR,
-        sort_order=0,
-    ))
-
-    # Four walls — thin boxes hugging the perimeter, full ceiling height.
-    wall_y = base_y + floor_height_m / 2.0
-    # West wall (small X edge of the plan)
-    ents.append(_make_box(
-        world, f'wall-W-{room.slug}',
-        origin_x - WALL_T_M / 2.0, wall_y, cz,
-        WALL_T_M, floor_height_m, d_m,
-        WALL_COLOR, sort_order=1,
-    ))
-    # East wall (large X edge of the plan)
-    ents.append(_make_box(
-        world, f'wall-E-{room.slug}',
-        origin_x + w_m + WALL_T_M / 2.0, wall_y, cz,
-        WALL_T_M, floor_height_m, d_m,
-        WALL_COLOR, sort_order=1,
-    ))
-    # "N" wall — plan top edge (y=0) → ae_z = -d_m (far side from spawn).
-    ents.append(_make_box(
-        world, f'wall-N-{room.slug}',
-        cx, wall_y, -d_m - WALL_T_M / 2.0,
-        w_m, floor_height_m, WALL_T_M,
-        WALL_COLOR, sort_order=1,
-    ))
-    # "S" wall — plan bottom edge (y=d_m) → ae_z = 0 (behind spawn).
-    ents.append(_make_box(
-        world, f'wall-S-{room.slug}',
-        cx, wall_y, WALL_T_M / 2.0,
-        w_m, floor_height_m, WALL_T_M,
-        WALL_COLOR, sort_order=1,
-    ))
+    polygon = list(room.polygon_cm or [])
+    if len(polygon) >= 3 and piece_script is not None:
+        _emit_polygon_shell(room, world, base_y, origin_x, floor_height_m,
+                            polygon, ents, scripted, piece_script)
+    else:
+        _emit_rect_shell(room, world, base_y, origin_x, w_m, d_m, cx, cz,
+                         floor_height_m, ents)
 
     # Features: small boxes near the floor.
     for feat in room.features.all():

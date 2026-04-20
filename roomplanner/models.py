@@ -101,6 +101,19 @@ class Room(models.Model):
         max_length=8, choices=NORTH_CHOICES, default=NORTH_UP,
         help_text="Which edge of the SVG points to real-world north.",
     )
+    # Optional non-rectangular footprint. Empty list = treat the room
+    # as the full width_cm × length_cm axis-aligned rectangle (current
+    # behaviour). Otherwise a closed polygon in plan coords (cm, SVG
+    # convention with (0,0) at the top-left corner, +Y down the page),
+    # used by the Aether export to emit real wall segments + a shaped
+    # floor. width_cm/length_cm should be the bounding box so the
+    # editor/SVG still frame the room correctly.
+    polygon_cm = models.JSONField(
+        default=list, blank=True,
+        help_text='Optional closed polygon of [x_cm, y_cm] vertices. '
+                  'Empty = rectangular. Coords in SVG convention, '
+                  '(0,0) top-left, bounded by width_cm × length_cm.',
+    )
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     location_city = models.CharField(max_length=120, blank=True)
