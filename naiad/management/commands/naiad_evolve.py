@@ -184,6 +184,17 @@ class Command(BaseCommand):
         parser.add_argument('--seed', type=int, default=None)
         parser.add_argument('--every', type=int, default=10,
                             help='Print stats every N generations.')
+        parser.add_argument('--cost-cap', type=float, default=None,
+                            dest='cost_cap',
+                            help='Cost penalty saturation ceiling, EUR. '
+                                 'Chains below this are scored on cost '
+                                 'gradient; above, penalty is 1.0.')
+        parser.add_argument('--watt-cap', type=float, default=None,
+                            dest='watt_cap',
+                            help='Power penalty saturation ceiling, watts.')
+        parser.add_argument('--length-cap', type=float, default=None,
+                            dest='length_cap',
+                            help='Length penalty saturation ceiling, stages.')
         parser.add_argument('--save', default=None,
                             help='If set, save the winner as a new System '
                                  'with this slug.')
@@ -218,6 +229,12 @@ class Command(BaseCommand):
             types  = types,
             slugs  = sorted(types.keys()),
         )
+        if opts.get('cost_cap') is not None:
+            ctx.cost_cap = float(opts['cost_cap'])
+        if opts.get('watt_cap') is not None:
+            ctx.watt_cap = float(opts['watt_cap'])
+        if opts.get('length_cap') is not None:
+            ctx.length_cap = float(opts['length_cap'])
 
         rng = random.Random(opts['seed'])
         pop = [random_gene(rng, ctx) for _ in range(opts['pop'])]
