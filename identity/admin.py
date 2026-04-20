@@ -1,12 +1,12 @@
 from django.contrib import admin
 
 from .models import (
-    ClaudeHook, Concern, ContinuityMarker, CronRun, DwellingState,
-    Identity, IdentityAssertion, IdentityToggles, InternalDialogue,
-    Intervention, IntrospectiveLayer, LLMExchange, LLMProvider,
-    LoopTraversal, Meditation, MentalHealthDiagnosis, Mood, Reflection,
-    ReflectionLoopState, Rule, SessionReflection, StrangeLoop,
-    TemplateContribution, ThoughtExperiment, Tick,
+    AspectSuppression, ClaudeHook, Concern, ContinuityMarker, CronRun,
+    DwellingState, Identity, IdentityAssertion, IdentityToggles,
+    InternalDialogue, Intervention, IntrospectiveLayer, LLMExchange,
+    LLMProvider, LoopTraversal, Meditation, MentalHealthDiagnosis, Mood,
+    Reflection, ReflectionLoopState, Rule, SessionReflection,
+    StrangeLoop, TemplateContribution, ThoughtExperiment, Tick,
 )
 
 
@@ -55,10 +55,18 @@ class TickAdmin(admin.ModelAdmin):
 @admin.register(Concern)
 class ConcernAdmin(admin.ModelAdmin):
     list_display = ('aspect', 'name', 'severity', 'reconfirm_count',
-                    'opened_at', 'closed_at')
-    list_filter = ('aspect', 'closed_at')
+                    'opened_at', 'closed_at', 'closed_reason')
+    list_filter = ('aspect', 'closed_at', 'closed_reason')
     readonly_fields = ('opened_at', 'last_seen_at', 'origin_tick')
     search_fields = ('aspect', 'name', 'description')
+
+
+@admin.register(AspectSuppression)
+class AspectSuppressionAdmin(admin.ModelAdmin):
+    list_display = ('aspect', 'reason', 'created_at', 'until_at', 'is_active')
+    list_filter = ('reason',)
+    search_fields = ('aspect', 'note')
+    readonly_fields = ('created_at',)
 
 
 @admin.register(Meditation)

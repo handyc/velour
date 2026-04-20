@@ -328,11 +328,17 @@ def maintain_concerns(current_aspect_hits, origin_tick):
     """
     from django.utils import timezone
     from datetime import timedelta
-    from .models import Concern
+    from .models import AspectSuppression, Concern
 
     opened = []
     reconfirmed = []
     closed = []
+
+    # Operator-set suppressions short-circuit concern tracking before
+    # the open/bump decision. The rule still fired — the aspect is on
+    # the Tick — but we decline to turn that observation into a
+    # remembered worry.
+    suppressed_aspects = AspectSuppression.active_aspects()
 
     # Only aspects flagged as concerning matter for concern tracking.
     # In DB mode the flag is Rule.opens_concern; in fallback mode the
@@ -351,6 +357,28 @@ def maintain_concerns(current_aspect_hits, origin_tick):
 
     # Open or bump.
     for aspect, (label, intensity) in currently_concerning.items():
+        if aspect in suppressed_aspects:
+            # Don't open, don't bump, don't reconfirm. If there's a
+            # legacy open concern from before the suppression was set,
+            # close it now with the operator-chosen reason so the
+            # history reads cleanly.
+            existing = Concern.objects.filter(
+                aspect=aspect, closed_at=None).first()
+            if existing:
+                reason = AspectSuppression.reason_for(aspect) or 'accepted'
+                existing.close(reason=reason,
+                               note='Closed by AspectSuppression.')
+                closed.append(existing)
+                from .models import _write_continuity_marker
+                _write_continuity_marker(
+                    'shed',
+                    f'Concern closed (suppressed): '
+                    f'{existing.name or existing.aspect}',
+                    source_model='identity.Concern',
+                    source_pk=existing.pk,
+                )
+            continue
+
         existing = Concern.objects.filter(aspect=aspect, closed_at=None).first()
         if existing:
             # Bump last_seen_at (auto_now handles this on save) and

@@ -275,6 +275,25 @@ class Concern(models.Model):
                   'concern closes automatically when last_seen_at gets '
                   'stale relative to the tick interval.')
     closed_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # When a concern closes we now record *how* it ended — auto-sweep
+    # sets 'stale', the rule system can set 'resolved', and an operator
+    # using identity_acknowledge sets 'accepted' or 'deferred'. This
+    # matters because the mood and the closed concern history need to
+    # speak differently about a concern that went away on its own
+    # (success) vs. one the operator told the system to stop worrying
+    # about (acceptance, not success).
+    CLOSED_REASON_CHOICES = [
+        ('stale',     'Stale — observation stopped triggering'),
+        ('resolved',  'Resolved — underlying condition cleared'),
+        ('accepted',  'Accepted — operator marked as intentional'),
+        ('deferred',  'Deferred — operator will handle later'),
+    ]
+    closed_reason = models.CharField(
+        max_length=16, blank=True, choices=CLOSED_REASON_CHOICES,
+        help_text='How the concern ended. Blank while open.')
+    closed_note = models.TextField(blank=True,
+        help_text='Optional operator note recorded at close time, '
+                  'especially for accepted/deferred reasons.')
 
     origin_tick = models.ForeignKey(Tick, on_delete=models.SET_NULL,
         null=True, blank=True, related_name='opened_concerns',
@@ -306,14 +325,109 @@ class Concern(models.Model):
         from django.utils import timezone
         return int((timezone.now() - self.opened_at).total_seconds())
 
-    def close(self, reason='stale'):
+    def close(self, reason='stale', note=''):
         """Mark this concern as resolved. Idempotent — closing an
-        already-closed concern is a no-op."""
+        already-closed concern is a no-op. `reason` must be one of the
+        CLOSED_REASON_CHOICES keys."""
         if self.closed_at:
             return
         from django.utils import timezone
         self.closed_at = timezone.now()
-        self.save(update_fields=['closed_at'])
+        self.closed_reason = reason
+        if note:
+            self.closed_note = note
+        self.save(update_fields=['closed_at', 'closed_reason', 'closed_note'])
+
+
+class AspectSuppression(models.Model):
+    """Operator-set gate that stops a rule aspect from opening a new
+    Concern — and closes any currently-open one — while the gate is
+    active.
+
+    This is the "direct to subconscious" channel. Normally Identity's
+    attention engine is deterministic: the rules tick, observations
+    match, concerns open and stay open as long as the observation
+    keeps matching. That's the right default — a system that forgets
+    on its own would feel unstable. But sometimes the observation is
+    *correct* and the concern is *not warranted*: the ESP fleet being
+    half-silent, for instance, is deliberate during a lab rework. The
+    rule keeps firing, the concern keeps reconfirming, and every
+    session-start greeting opens with the same stale worry.
+
+    A suppression row doesn't lie to the rule engine. The rule still
+    evaluates, the aspect still shows up on the Tick, the sensor data
+    is unchanged. What's suppressed is the concern-tracking layer —
+    the "this is worth remembering between ticks" decision. Once
+    `until_at` passes the suppression is gone and concerns open as
+    usual on the next matching tick.
+
+    Reasons map 1:1 to Concern.CLOSED_REASON_CHOICES' operator-facing
+    entries — `accepted` (intentional, not a problem) and `deferred`
+    (I know, I'll deal with it later). The suppression's reason is
+    also copied onto the close_reason of any concern it closes so the
+    history reads cleanly.
+    """
+
+    REASON_CHOICES = [
+        ('accepted', 'Accepted — intentional, not a problem'),
+        ('deferred', 'Deferred — acknowledged, will handle later'),
+    ]
+
+    aspect = models.CharField(max_length=64, db_index=True,
+        help_text='The rule aspect tag to suppress, e.g. '
+                  '"fleet_partial_silence".')
+    reason = models.CharField(max_length=16, choices=REASON_CHOICES,
+                              default='accepted')
+    note = models.TextField(blank=True,
+        help_text='Optional free-form explanation shown alongside the '
+                  'suppression — helps future-you remember why this was '
+                  'set, especially for accepted-forever entries.')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # NULL = no expiry (accepted-forever). Otherwise the suppression
+    # is ignored once timezone.now() >= until_at.
+    until_at = models.DateTimeField(null=True, blank=True, db_index=True,
+        help_text='When this suppression expires. NULL = no expiry.')
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['aspect', 'until_at']),
+        ]
+
+    def __str__(self):
+        expiry = 'forever' if self.until_at is None else f'until {self.until_at:%Y-%m-%d}'
+        return f'{self.aspect} [{self.reason}, {expiry}]'
+
+    @property
+    def is_active(self):
+        if self.until_at is None:
+            return True
+        from django.utils import timezone
+        return timezone.now() < self.until_at
+
+    @classmethod
+    def active_aspects(cls):
+        """Return the set of aspect tags that currently have at least
+        one live suppression. Cheap to call on every tick."""
+        from django.utils import timezone
+        now = timezone.now()
+        qs = cls.objects.filter(
+            models.Q(until_at__isnull=True) | models.Q(until_at__gt=now)
+        ).values_list('aspect', flat=True)
+        return set(qs)
+
+    @classmethod
+    def reason_for(cls, aspect):
+        """Return the most recent live suppression reason for `aspect`,
+        or None if the aspect is not currently suppressed."""
+        from django.utils import timezone
+        now = timezone.now()
+        row = (cls.objects
+               .filter(aspect=aspect)
+               .filter(models.Q(until_at__isnull=True)
+                       | models.Q(until_at__gt=now))
+               .order_by('-created_at').first())
+        return row.reason if row else None
 
 
 class Rule(models.Model):
