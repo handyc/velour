@@ -106,8 +106,7 @@
         </span>
         <form method="post" action="{% url 'naiad:remove_stage' slug=system.slug stage_id=s.pk %}">
           {% csrf_token %}
-          <button class="del" type="submit"
-                  onclick="return confirm('Remove this stage?')">×</button>
+          <button class="del" type="submit">×</button>
         </form>
       </div>
       {% endfor %}
