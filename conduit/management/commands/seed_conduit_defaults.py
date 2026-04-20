@@ -23,10 +23,14 @@ DEFAULTS = [
         host='login1.alice.universiteitleiden.nl',
         priority=5,
         config={
-            'ssh_user':   'username',
-            'partition':  'cpu-short',
-            'remote_dir': '~/jobs',
-            'account':    '',
+            'ssh_user':          'username',
+            'partition':         'cpu-short',
+            'remote_dir':        '~/jobs',
+            'remote_velour_dir': '~/velour-dev',
+            'time_limit':        '01:00:00',
+            'cpus_per_task':     1,
+            'mem':               '2G',
+            'account':           '',
         },
         notes='ALICE prohibits automated sbatch; human operator '
               'submits via handoff queue.',
