@@ -8,8 +8,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from .models import Candidate, SearchRun
+from .models import Candidate, SearchRun, Tournament
 from .search import execute, import_agent_as_candidate, promote, promote_to_evolution
+from .tournament import add_candidate as add_tournament_candidate
+from .tournament import execute as execute_tournament
 
 
 @login_required
@@ -309,3 +311,148 @@ def import_search_job(request, job_slug):
         f'Imported {run.candidates.count()} candidates from '
         f'{job.slug} ({n_class4} class-4) into SearchRun #{run.pk}.')
     return redirect('det:search_detail', pk=run.pk)
+
+
+@login_required
+def tournament_list(request):
+    tourneys = Tournament.objects.all()[:50]
+    open_tourneys = Tournament.objects.filter(status='pending')\
+        .order_by('-created_at')[:20]
+    return render(request, 'det/tournament_list.html', {
+        'tournaments':       tourneys,
+        'open_tournaments':  open_tourneys,
+    })
+
+
+@login_required
+@require_POST
+def tournament_create(request):
+    try:
+        n_colors = int(request.POST.get('n_colors', 3))
+        n_seeds = int(request.POST.get('n_seeds', 5))
+        W = int(request.POST.get('screen_width', 18))
+        H = int(request.POST.get('screen_height', 16))
+        horizon = int(request.POST.get('horizon', 60))
+    except ValueError:
+        return HttpResponseBadRequest('Bad integer parameter.')
+    if not (2 <= n_colors <= 4):
+        return HttpResponseBadRequest('n_colors must be 2, 3, or 4.')
+    if not (2 <= n_seeds <= 20):
+        return HttpResponseBadRequest('n_seeds must be 2..20.')
+
+    t = Tournament.objects.create(
+        label=(request.POST.get('label') or '').strip(),
+        n_colors=n_colors, n_seeds=n_seeds,
+        screen_width=W, screen_height=H, horizon=horizon,
+    )
+    messages.success(request,
+        f'Created Tournament #{t.pk}. Add candidates, then run.')
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+@login_required
+def tournament_detail(request, pk):
+    t = get_object_or_404(Tournament, pk=pk)
+    entries = list(
+        t.entries.select_related('candidate', 'candidate__run',
+                                 'candidate__promoted_to')
+        .order_by('rank', '-aggregate_score', 'id')
+    )
+    for e in entries:
+        e.delta = (round(e.aggregate_score - e.candidate.score, 2)
+                   if e.aggregate_score else None)
+    seeds_preview = [f'{t.master_seed or "(pending)"}-round-{i}'
+                     for i in range(t.n_seeds)]
+    addable_runs = (SearchRun.objects.filter(n_colors=t.n_colors,
+                                             status='finished')
+                    .order_by('-created_at')[:30])
+    return render(request, 'det/tournament_detail.html', {
+        'tournament':    t,
+        'entries':       entries,
+        'seeds_preview': seeds_preview,
+        'addable_runs':  addable_runs,
+    })
+
+
+@login_required
+@require_POST
+def tournament_add(request, pk):
+    """Add one or more candidates to a tournament.
+
+    Accepts (in priority order):
+      - `top_of_run`: SearchRun pk → add that run's top-scoring candidate.
+      - `candidate`:  single Candidate pk.
+      - `candidates`: comma-separated Candidate pks.
+    """
+    t = get_object_or_404(Tournament, pk=pk)
+    if t.status != 'pending':
+        messages.error(request,
+            'Tournament has already been run — create a new one to add '
+            'more candidates.')
+        return redirect('det:tournament_detail', pk=t.pk)
+
+    cand_ids: list[int] = []
+    run_ref = (request.POST.get('top_of_run') or '').strip()
+    if run_ref.isdigit():
+        run = SearchRun.objects.filter(pk=int(run_ref)).first()
+        if run:
+            top = run.candidates.order_by('-score', 'id').first()
+            if top:
+                cand_ids.append(top.pk)
+
+    single = (request.POST.get('candidate') or '').strip()
+    if single.isdigit():
+        cand_ids.append(int(single))
+
+    many = (request.POST.get('candidates') or '').strip()
+    if many:
+        for chunk in many.replace(',', ' ').split():
+            if chunk.isdigit():
+                cand_ids.append(int(chunk))
+
+    if not cand_ids:
+        messages.error(request, 'No candidate specified.')
+        return redirect('det:tournament_detail', pk=t.pk)
+
+    added = 0
+    skipped = []
+    for cid in cand_ids:
+        c = Candidate.objects.filter(pk=cid).first()
+        if c is None:
+            skipped.append(f'#{cid} (not found)')
+            continue
+        try:
+            add_tournament_candidate(t, c)
+            added += 1
+        except ValueError as exc:
+            skipped.append(f'#{cid} ({exc})')
+
+    if added:
+        messages.success(request, f'Added {added} candidate(s).')
+    if skipped:
+        messages.error(request, 'Skipped: ' + '; '.join(skipped))
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+@login_required
+@require_POST
+def tournament_run(request, pk):
+    t = get_object_or_404(Tournament, pk=pk)
+    if t.status not in ('pending', 'failed'):
+        messages.error(request,
+            f'Tournament is {t.get_status_display()} — can only run '
+            f'pending or failed tournaments.')
+        return redirect('det:tournament_detail', pk=t.pk)
+    n_entries = t.entries.count()
+    if n_entries == 0:
+        messages.error(request, 'Add at least one candidate first.')
+        return redirect('det:tournament_detail', pk=t.pk)
+    try:
+        execute_tournament(t)
+    except Exception as exc:
+        messages.error(request, f'Tournament run failed: {exc}')
+        return redirect('det:tournament_detail', pk=t.pk)
+    messages.success(request,
+        f'Scored {n_entries} entries across {t.n_seeds} seeds '
+        f'in {t.duration_seconds:.1f}s.')
+    return redirect('det:tournament_detail', pk=t.pk)

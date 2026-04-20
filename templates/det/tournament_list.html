@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Det tournaments — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .tl-wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .tl-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .tl-wrap p.lede { color: #8b949e; max-width: 68ch; line-height: 1.55;
+                    margin: 0 0 1rem; font-size: 0.88rem; }
+  .tl-wrap .crumb { font-size: 0.78rem; color: #6e7681; margin-bottom: 0.4rem; }
+  .tl-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .tl-wrap .crumb a:hover { color: #58a6ff; }
+
+  .newcreate {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1.25rem;
+  }
+  .newcreate h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+  .newcreate form {
+    display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+    font-size: 0.78rem;
+  }
+  .newcreate label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  .newcreate input, .newcreate select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.2rem 0.35rem; font-size: 0.78rem;
+  }
+  .newcreate input[type=number] { width: 4rem; }
+  .newcreate .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .tlist { display: flex; flex-direction: column; gap: 2px; }
+  .trow {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: center;
+  }
+  .trow.s-finished { border-left-color: #2ea043; }
+  .trow.s-failed   { border-left-color: #f85149; }
+  .trow.s-pending  { border-left-color: #6e7681; }
+  .trow.s-running  { border-left-color: #d29922; }
+  .trow a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .trow a:hover { color: #58a6ff; }
+  .trow .meta { color: #6e7681; font-size: 0.68rem; font-family: monospace; }
+  h2 { font-size: 0.92rem; margin: 1.1rem 0 0.35rem; color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tl-wrap">
+  <p class="crumb"><a href="{% url 'det:index' %}">← Det</a></p>
+  <h1>Tournaments</h1>
+  <p class="lede">
+    Re-score a roster of Candidates against <em>N shared initial
+    grids</em> and aggregate. A ruleset that wins across seeds is
+    robustly Class-4-like; one that only won its native SearchRun was
+    lucky with its starting condition. n_colors, grid dimensions, and
+    horizon are fixed per-tournament so the aggregate scores are
+    directly comparable.
+  </p>
+
+  <div class="newcreate">
+    <h2>New tournament</h2>
+    <form method="post" action="{% url 'det:tournament_create' %}">
+      {% csrf_token %}
+      <label>colors
+        <select name="n_colors">
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+      <label>seeds
+        <input type="number" name="n_seeds" value="5" min="2" max="20">
+      </label>
+      <label>W
+        <input type="number" name="screen_width" value="18" min="12" max="40">
+      </label>
+      <label>H
+        <input type="number" name="screen_height" value="16" min="12" max="40">
+      </label>
+      <label>horizon
+        <input type="number" name="horizon" value="60" min="20" max="120">
+      </label>
+      <label>label
+        <input type="text" name="label" placeholder="optional"
+               style="width:11rem">
+      </label>
+      <button type="submit" class="btn">Create</button>
+    </form>
+  </div>
+
+  <h2>All tournaments</h2>
+  <div class="tlist">
+    {% for t in tournaments %}
+    <div class="trow s-{{ t.status }}">
+      <a href="{% url 'det:tournament_detail' pk=t.pk %}">
+        Tournament #{{ t.pk }}
+        {% if t.label %}<span style="color:#8b949e">— {{ t.label }}</span>{% endif %}
+      </a>
+      <span class="meta">
+        {{ t.n_colors }}c · {{ t.n_seeds }} seeds · {{ t.entries.count }} entries
+        {% if t.duration_seconds %}· {{ t.duration_seconds|floatformat:1 }}s{% endif %}
+        · {{ t.get_status_display }}
+      </span>
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">No tournaments yet. Create one above.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -194,6 +194,14 @@
   </div>
   {% endif %}
 
+  <p style="font-size:0.78rem;margin-top:1.1rem">
+    <a href="{% url 'det:tournament_list' %}"
+       style="color:#58a6ff;text-decoration:none">
+      → Tournaments</a>
+    <span style="color:#6e7681">— re-score rosters of candidates
+    against shared initial grids</span>
+  </p>
+
   <h2>Searches</h2>
   <div class="runlist">
     {% for run in runs %}

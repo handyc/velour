@@ -22,4 +22,14 @@ urlpatterns = [
          name='import_from_evolution'),
     path('import-search-job/<slug:job_slug>/', views.import_search_job,
          name='import_search_job'),
+
+    path('tournaments/', views.tournament_list, name='tournament_list'),
+    path('tournaments/new/', views.tournament_create,
+         name='tournament_create'),
+    path('tournaments/<int:pk>/', views.tournament_detail,
+         name='tournament_detail'),
+    path('tournaments/<int:pk>/add/', views.tournament_add,
+         name='tournament_add'),
+    path('tournaments/<int:pk>/run/', views.tournament_run,
+         name='tournament_run'),
 ]

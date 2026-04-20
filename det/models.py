@@ -134,3 +134,84 @@ class Candidate(models.Model):
     def __str__(self):
         return (f'Candidate #{self.pk} ({self.est_class}, '
                 f'score={self.score:.2f})')
+
+
+class Tournament(models.Model):
+    """A shared-seed head-to-head between Det Candidates.
+
+    Each Candidate in a SearchRun is scored against *one* random grid.
+    A high score can be seed-luck. A Tournament re-scores a roster of
+    Candidates against N shared initial grids and aggregates — a
+    ruleset that wins across seeds is robustly Class-4-like, not an
+    accident. Only Candidates that share the tournament's n_colors
+    can compete; grid dimensions and horizon are fixed per-tournament
+    so the scores are directly comparable.
+    """
+
+    STATUS_CHOICES = [
+        ('pending',  'Pending'),
+        ('running',  'Running'),
+        ('finished', 'Finished'),
+        ('failed',   'Failed'),
+    ]
+
+    label = models.CharField(max_length=200, blank=True)
+    n_colors = models.PositiveSmallIntegerField(default=3)
+    n_seeds = models.PositiveSmallIntegerField(default=5,
+        help_text='How many shared initial grids each entry is '
+                  'scored against.')
+    screen_width = models.PositiveSmallIntegerField(default=18)
+    screen_height = models.PositiveSmallIntegerField(default=16)
+    horizon = models.PositiveSmallIntegerField(default=60)
+    master_seed = models.CharField(max_length=64, blank=True,
+        help_text='Derives the per-round seeds. Auto-set from '
+                  'timestamp if blank.')
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='pending')
+    error = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.label or f'Tournament #{self.pk}'
+
+    @property
+    def duration_seconds(self):
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
+
+
+class TournamentEntry(models.Model):
+    """One Candidate's performance across all of a Tournament's seeds."""
+
+    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE,
+                                   related_name='entries')
+    candidate = models.ForeignKey(Candidate, on_delete=models.CASCADE,
+                                  related_name='tournament_entries')
+
+    aggregate_score = models.FloatField(default=0.0,
+        help_text='Mean of per_seed scores. Ranking sort key.')
+    per_seed = models.JSONField(default=list,
+        help_text='List of {seed, score, est_class, analysis} dicts — '
+                  'one per shared grid.')
+    rank = models.PositiveIntegerField(null=True, blank=True,
+        help_text='1-based, set after execute. Null until run finishes '
+                  'or if disqualified.')
+    disqualified = models.BooleanField(default=False)
+    note = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['rank', '-aggregate_score', 'id']
+        unique_together = [('tournament', 'candidate')]
+        indexes = [models.Index(fields=['tournament', '-aggregate_score'])]
+
+    def __str__(self):
+        return (f'TournamentEntry(cand {self.candidate_id}, '
+                f'agg={self.aggregate_score:.2f})')

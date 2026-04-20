@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Tournament #{{ tournament.pk }} — Det{% endblock %}
+
+{% block extra_head %}
+<style>
+  .td-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .td-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .td-wrap .crumb { font-size: 0.78rem; color: #6e7681; margin-bottom: 0.4rem; }
+  .td-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .td-wrap .crumb a:hover { color: #58a6ff; }
+  .td-wrap .meta {
+    color: #8b949e; font-size: 0.78rem; font-family: monospace;
+    margin: 0 0 1rem;
+  }
+  .td-wrap .meta .s-finished { color: #2ea043; }
+  .td-wrap .meta .s-failed   { color: #f85149; }
+  .td-wrap .meta .s-pending  { color: #8b949e; }
+  .td-wrap .meta .s-running  { color: #d29922; }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+  .panel form {
+    display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+    font-size: 0.78rem;
+  }
+  .panel label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  .panel input, .panel select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.2rem 0.35rem; font-size: 0.78rem;
+  }
+  .panel .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .panel .btn.neutral { background: #21262d; border-color: #30363d;
+                        color: #c9d1d9; }
+
+  table.board { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  table.board th, table.board td {
+    padding: 0.3rem 0.5rem; text-align: left;
+    border-bottom: 1px solid #21262d;
+  }
+  table.board th { color: #8b949e; font-weight: normal;
+                   font-size: 0.7rem; text-transform: uppercase;
+                   letter-spacing: 0.05em; }
+  table.board td.num { text-align: right; font-family: monospace; }
+  table.board tr.dq td { color: #6e7681; }
+  table.board tr td.rank { font-family: monospace; color: #58a6ff;
+                           font-weight: bold; }
+  table.board .cls-class4 { color: #58a6ff; }
+  table.board .cls-class3 { color: #f85149; }
+  table.board .cls-class2 { color: #d29922; }
+  table.board .cls-class1 { color: #6e7681; }
+
+  .heat {
+    display: inline-grid; gap: 1px; vertical-align: middle;
+    grid-auto-flow: column;
+  }
+  .heat span {
+    width: 14px; height: 14px; border-radius: 2px;
+    background: #21262d; display: inline-block;
+  }
+  /* Color ramp: low score → dark; high → blue. Grey for uniform. */
+  .heat span.s0 { background: #21262d; }
+  .heat span.s1 { background: #153047; }
+  .heat span.s2 { background: #1f5188; }
+  .heat span.s3 { background: #2f81c8; }
+  .heat span.s4 { background: #58a6ff; }
+  .heat span.dead { background: #3a1415; }
+
+  a.cand-link { color: #c9d1d9; text-decoration: none; }
+  a.cand-link:hover { color: #58a6ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="td-wrap">
+  <p class="crumb">
+    <a href="{% url 'det:index' %}">← Det</a> ·
+    <a href="{% url 'det:tournament_list' %}">Tournaments</a>
+  </p>
+  <h1>Tournament #{{ tournament.pk }}
+    {% if tournament.label %}<span style="color:#8b949e">— {{ tournament.label }}</span>{% endif %}
+  </h1>
+  <p class="meta">
+    <span class="s-{{ tournament.status }}">{{ tournament.get_status_display }}</span>
+    · {{ tournament.n_colors }}c
+    · {{ tournament.n_seeds }} seeds
+    · {{ tournament.screen_width }}x{{ tournament.screen_height }}
+    · horizon {{ tournament.horizon }}
+    {% if tournament.master_seed %}· master_seed {{ tournament.master_seed }}{% endif %}
+    {% if tournament.duration_seconds %}· {{ tournament.duration_seconds|floatformat:1 }}s{% endif %}
+  </p>
+  {% if tournament.error %}
+    <p style="color:#f85149;font-family:monospace;font-size:0.78rem">
+      error: {{ tournament.error }}
+    </p>
+  {% endif %}
+
+  {% if tournament.status == 'pending' %}
+  <div class="panel">
+    <h2>Add candidates</h2>
+    <form method="post" action="{% url 'det:tournament_add' pk=tournament.pk %}"
+          style="margin-bottom:0.4rem">
+      {% csrf_token %}
+      <label>top of run
+        <select name="top_of_run">
+          <option value="">—</option>
+          {% for run in addable_runs %}
+            <option value="{{ run.pk }}">
+              #{{ run.pk }} · {{ run.n_candidates }} cands
+              {% if run.label %}· {{ run.label }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn">Add top-of-run</button>
+    </form>
+    <form method="post" action="{% url 'det:tournament_add' pk=tournament.pk %}">
+      {% csrf_token %}
+      <label>candidate ids (space or comma)
+        <input type="text" name="candidates" style="width:26rem"
+               placeholder="e.g. 124 198 330">
+      </label>
+      <button type="submit" class="btn">Add by ID</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <form method="post" action="{% url 'det:tournament_run' pk=tournament.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="btn"
+              {% if not entries %}disabled{% endif %}>
+        Run tournament ({{ entries|length }} entries)
+      </button>
+      <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem">
+        Runs synchronously — plan ~{{ tournament.n_seeds }}s per entry.
+      </span>
+    </form>
+  </div>
+  {% endif %}
+
+  <h2 style="margin-top:1.2rem">Leaderboard</h2>
+  <table class="board">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>candidate</th>
+        <th class="num">aggregate</th>
+        <th class="num">native</th>
+        <th class="num">Δ</th>
+        <th>native class</th>
+        <th>per-seed</th>
+        <th>note</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr class="{% if e.disqualified %}dq{% endif %}">
+        <td class="rank">
+          {% if e.disqualified %}DQ
+          {% elif e.rank %}#{{ e.rank }}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <a class="cand-link"
+             href="{% url 'det:candidate_detail' pk=e.candidate.pk %}">
+            cand #{{ e.candidate.pk }} · run #{{ e.candidate.run_id }}
+          </a>
+        </td>
+        <td class="num">
+          {% if e.aggregate_score %}{{ e.aggregate_score|floatformat:3 }}{% else %}—{% endif %}
+        </td>
+        <td class="num">{{ e.candidate.score|floatformat:2 }}</td>
+        <td class="num">
+          {% if e.delta is not None %}
+            {% if e.delta >= 0 %}+{% endif %}{{ e.delta|floatformat:2 }}
+          {% else %}—{% endif %}
+        </td>
+        <td class="cls-{{ e.candidate.est_class }}">
+          {{ e.candidate.get_est_class_display }}
+        </td>
+        <td>
+          {% if e.per_seed %}
+          <span class="heat">
+            {% for r in e.per_seed %}
+              {% if r.analysis.uniform %}
+                <span class="dead" title="seed {{ forloop.counter0 }}: went uniform"></span>
+              {% else %}
+                <span class="s{% if r.score < 1 %}0{% elif r.score < 2.5 %}1{% elif r.score < 3.5 %}2{% elif r.score < 4.5 %}3{% else %}4{% endif %}"
+                      title="seed {{ forloop.counter0 }}: {{ r.score|floatformat:2 }} ({{ r.est_class }})"></span>
+              {% endif %}
+            {% endfor %}
+          </span>
+          {% else %}
+            <span style="color:#6e7681">—</span>
+          {% endif %}
+        </td>
+        <td style="color:#8b949e;font-size:0.72rem">{{ e.note }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" style="color:#6e7681;font-size:0.78rem">
+        No entries yet.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
