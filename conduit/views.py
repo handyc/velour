@@ -170,6 +170,29 @@ def job_cancel(request, slug):
 
 
 @login_required
+@require_POST
+def job_check_results(request, slug):
+    """Re-stat the job's results_subdir under VELOUR_RESULTS_DIR and
+    snapshot the manifest if it has gone non-empty. Idempotent — safe
+    to click repeatedly while an sbatch step is still rclone'ing."""
+    job = get_object_or_404(Job, slug=slug)
+    if not job.results_subdir:
+        messages.error(request, 'Job declared no bulk output.')
+        return redirect('conduit:job_detail', slug=job.slug)
+    manifest = job.check_results()
+    if job.results_ready_at:
+        messages.success(
+            request,
+            f'{len(manifest)} file(s) landed in {job.results_subdir}.')
+    else:
+        messages.info(
+            request,
+            f'No files yet under {job.results_subdir} '
+            f'(looking in {settings.VELOUR_RESULTS_DIR}).')
+    return redirect('conduit:job_detail', slug=job.slug)
+
+
+@login_required
 def handoff_list(request):
     handoffs = JobHandoff.objects.select_related('job').order_by(
         'status', '-job__created_at')

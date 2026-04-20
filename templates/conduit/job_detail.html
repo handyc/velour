@@ -107,6 +107,30 @@
     <pre class="blk">{{ job.payload }}</pre>
   </div>
 
+  {% if job.results_subdir %}
+  <div class="panel" style="border-left:2px solid #2ea043">
+    <h2>Bulk results</h2>
+    <div style="font-size:0.78rem;color:#8b949e;margin-bottom:0.4rem">
+      Expected under <code>VELOUR_RESULTS_DIR/{{ job.results_subdir }}/</code>
+      (rclone-over-SFTP tail in the sbatch script).
+      {% if job.results_ready_at %}
+        Landed {{ job.results_ready_at|date:"Y-m-d H:i:s" }}.
+      {% else %}
+        Not yet seen.
+      {% endif %}
+    </div>
+    <form method="post" action="{% url 'conduit:job_check_results' slug=job.slug %}"
+          style="display:inline">
+      {% csrf_token %}
+      <button class="btn" type="submit">Check results</button>
+    </form>
+    {% if job.results_manifest %}
+    <pre class="blk" style="margin-top:0.5rem;max-height:16rem;overflow:auto">{% for f in job.results_manifest %}{{ f.name }}  {{ f.size }} B
+{% endfor %}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if handoff %}
   <div class="panel" style="border-left:2px solid #d29922">
     <h2>Handoff ({{ handoff.get_status_display }})</h2>
@@ -114,6 +138,28 @@
       This job needs an operator. See
       <a href="{% url 'conduit:handoff_detail' pk=handoff.pk %}">handoff details</a>.
     </p>
+  </div>
+  {% endif %}
+
+  {% if job.payload.det and job.status == 'done' %}
+  <div class="panel" style="border-left:2px solid #58a6ff">
+    <h2>Det follow-up</h2>
+    <p class="hint">
+      Read results.json from the per-job results directory and create
+      a new SearchRun + Candidate rows in the local Det app.
+      {% if job.payload.det.export_class %}
+        Filter: est_class = <code>{{ job.payload.det.export_class }}</code>.
+      {% endif %}
+      {% if job.payload.det.export_top %}
+        Top {{ job.payload.det.export_top }} by score.
+      {% endif %}
+    </p>
+    <form method="post"
+          action="{% url 'det:import_search_job' job_slug=job.slug %}"
+          style="display:inline">
+      {% csrf_token %}
+      <button class="btn" type="submit">Import candidates into Det</button>
+    </form>
   </div>
   {% endif %}
 

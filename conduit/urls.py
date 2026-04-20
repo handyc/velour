@@ -13,6 +13,7 @@ urlpatterns = [
     path('jobs/new/',                      views.job_create,      name='job_create'),
     path('jobs/<slug:slug>/',              views.job_detail,      name='job_detail'),
     path('jobs/<slug:slug>/cancel/',       views.job_cancel,      name='job_cancel'),
+    path('jobs/<slug:slug>/check-results/', views.job_check_results, name='job_check_results'),
     path('handoffs/',                      views.handoff_list,    name='handoff_list'),
     path('handoffs/<int:pk>/',             views.handoff_detail,  name='handoff_detail'),
     path('handoffs/<int:pk>/submit/',      views.handoff_submit,  name='handoff_submit'),

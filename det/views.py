@@ -222,3 +222,90 @@ def import_agent_from_evolution(request):
         f'(score {cand.score:.2f}, {cand.get_est_class_display()}).'
     )
     return redirect('det:candidate_detail', pk=cand.pk)
+
+
+@login_required
+@require_POST
+def import_search_job(request, job_slug):
+    """Import results.json from a completed Conduit Job into a new
+    SearchRun + Candidate rows. Reads from Job.results_path, which is
+    VELOUR_RESULTS_DIR/<job.results_subdir>/ — the same directory the
+    remote sbatch rclone'd its output into.
+
+    Idempotent per job_slug in the sense that each click creates a new
+    SearchRun; the Candidate rows mirror the remote ones but carry
+    fresh primary keys. The remote-side grid seed is preserved in
+    `analysis`, so the Automaton preview matches what ran on the
+    cluster."""
+    from conduit.models import Job
+
+    job = get_object_or_404(Job, slug=job_slug)
+    det_meta = (job.payload or {}).get('det') or {}
+    if not det_meta:
+        messages.error(request, 'Job was not dispatched by Det.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    path = job.results_path
+    if path is None:
+        messages.error(request, 'Job has no results_subdir set.')
+        return redirect('conduit:job_detail', slug=job.slug)
+    results_file = path / (det_meta.get('results_file') or 'results.json')
+    if not results_file.exists():
+        messages.error(request,
+            f'No results.json under {path}. Click "Check results" '
+            f'after the remote rclone step has finished.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    try:
+        payload = json.loads(results_file.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        messages.error(request, f'Could not parse {results_file}: {exc}')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    params = payload.get('run') or det_meta.get('params') or {}
+    cands = payload.get('candidates') or []
+    if not cands:
+        messages.error(request,
+            f'{results_file} has no candidates — remote run may have '
+            f'failed before scoring anything.')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    label = (params.get('label') or '').strip() \
+        or f'Conduit {job.slug}'
+    try:
+        with transaction.atomic():
+            run = SearchRun.objects.create(
+                label=label,
+                n_colors=int(params.get('n_colors') or 3),
+                n_candidates=int(params.get('n_candidates')
+                                 or len(cands)),
+                n_rules_per_candidate=int(
+                    params.get('n_rules_per_candidate') or 0),
+                wildcard_pct=int(params.get('wildcard_pct') or 0),
+                screen_width=int(params.get('screen_width') or 18),
+                screen_height=int(params.get('screen_height') or 16),
+                horizon=int(params.get('horizon') or 60),
+                seed=str(params.get('seed') or ''),
+                status='finished',
+            )
+            Candidate.objects.bulk_create([
+                Candidate(
+                    run=run,
+                    rules_json=c.get('rules') or [],
+                    n_rules=int(c.get('n_rules') or len(c.get('rules') or [])),
+                    rules_hash=str(c.get('rules_hash') or '')[:16],
+                    score=float(c.get('score') or 0.0),
+                    est_class=str(c.get('est_class') or 'unknown'),
+                    analysis=c.get('analysis') or {},
+                )
+                for c in cands
+            ], batch_size=200)
+    except Exception as exc:
+        messages.error(request, f'Import failed: {exc}')
+        return redirect('conduit:job_detail', slug=job.slug)
+
+    n_class4 = run.candidates.filter(est_class='class4').count()
+    messages.success(request,
+        f'Imported {run.candidates.count()} candidates from '
+        f'{job.slug} ({n_class4} class-4) into SearchRun #{run.pk}.')
+    return redirect('det:search_detail', pk=run.pk)

@@ -12,9 +12,19 @@ The defaults (3 colors, 35 % wildcards, 100 rules, 18×16, horizon 60)
 were picked empirically — they land roughly 5 % of candidates in
 class4 on a 200-candidate sweep. Earlier defaults (4c, 25 %, 40 horizon)
 almost always produced pure class2 noise.
+
+Cluster dispatch: `--via-conduit TARGET_SLUG` packages this sweep as
+a Conduit Job (shell or Slurm, depending on the target kind) and
+returns immediately. The remote process writes results.json into
+VELOUR_RESULTS_DIR/<job_slug>/; the Det import view reads that file
+to reconstruct the SearchRun + Candidates locally.
 """
 
-from django.core.management.base import BaseCommand
+import json
+import time
+from pathlib import Path
+
+from django.core.management.base import BaseCommand, CommandError
 
 from det.models import SearchRun
 from det.search import execute
@@ -52,9 +62,35 @@ class Command(BaseCommand):
                  'candidates are submitted and the run finalises with '
                  'whatever has been scored. Pair with SBATCH --time '
                  'on Slurm so the finaliser fits in the job\'s budget.')
+        parser.add_argument('--export-json', default='',
+            dest='export_json',
+            help='After the run, write a JSON snapshot of the top '
+                 'candidates to this path (used by Conduit dispatch to '
+                 'carry results back across the SSH boundary).')
+        parser.add_argument('--export-top', type=int, default=500,
+            dest='export_top',
+            help='How many candidates to include in --export-json '
+                 '(sorted by score descending). 0 = all. Default 500 '
+                 'keeps the JSON around ~1 MB for typical rulesets.')
+        parser.add_argument('--export-class', default='',
+            dest='export_class',
+            help='If set (e.g. "class4"), only candidates with this '
+                 'est_class are included in --export-json.')
+        parser.add_argument('--via-conduit', default='',
+            dest='via_conduit',
+            help='JobTarget slug. Instead of running locally, package '
+                 'this sweep as a Conduit Job and return immediately. '
+                 'For shell targets the command runs inline; for Slurm '
+                 'targets an sbatch script is rendered with an rclone '
+                 'tail that ships results back to the Velour host.')
 
     def handle(self, *args, **opts):
         import os
+
+        if opts['via_conduit']:
+            self._dispatch_via_conduit(opts)
+            return
+
         workers = opts['workers']
         if workers == 0:
             workers = max(1, os.cpu_count() or 1)
@@ -95,3 +131,97 @@ class Command(BaseCommand):
                 f'ent={c.analysis.get("block_entropy", 0):.2f}  '
                 f'period={c.analysis.get("period")}'
             )
+
+        if opts['export_json']:
+            self._export_json(run, opts)
+
+    def _export_json(self, run, opts):
+        qs = run.candidates.all()
+        if opts['export_class']:
+            qs = qs.filter(est_class=opts['export_class'])
+        qs = qs.order_by('-score', 'id')
+        if opts['export_top'] and opts['export_top'] > 0:
+            qs = qs[:opts['export_top']]
+        payload = {
+            'run': {
+                'label':                 run.label,
+                'n_colors':              run.n_colors,
+                'n_candidates':          run.n_candidates,
+                'n_rules_per_candidate': run.n_rules_per_candidate,
+                'wildcard_pct':          run.wildcard_pct,
+                'screen_width':          run.screen_width,
+                'screen_height':         run.screen_height,
+                'horizon':               run.horizon,
+                'seed':                  run.seed,
+                'status':                run.status,
+                'duration_seconds':      run.duration_seconds,
+            },
+            'filter': {
+                'est_class': opts['export_class'] or None,
+                'top':       opts['export_top'],
+            },
+            'candidates': [
+                {
+                    'rules_hash': c.rules_hash,
+                    'score':      c.score,
+                    'est_class':  c.est_class,
+                    'n_rules':    c.n_rules,
+                    'rules':      c.rules_json,
+                    'analysis':   c.analysis,
+                }
+                for c in qs
+            ],
+        }
+        path = Path(opts['export_json'])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, separators=(',', ':')))
+        self.stdout.write(self.style.SUCCESS(
+            f'Wrote {len(payload["candidates"])} candidates to {path}'))
+
+    def _dispatch_via_conduit(self, opts):
+        """Package as a Conduit Job and block on its status. Local
+        shell executors run in a daemon thread that would otherwise
+        die when this CLI process exits — polling keeps the foreground
+        alive until the job reaches a terminal state."""
+        from det.dispatch import DispatchError, dispatch_via_conduit
+        try:
+            job = dispatch_via_conduit(opts, opts['via_conduit'])
+        except DispatchError as exc:
+            raise CommandError(str(exc))
+        self.stdout.write(self.style.SUCCESS(
+            f'dispatched Conduit job {job.slug}'))
+        self.stdout.write(
+            f'  target: {job.target.name} '
+            f'({job.target.get_kind_display()})')
+        self.stdout.write(f'  watch : /conduit/jobs/{job.slug}/')
+        if job.results_subdir:
+            self.stdout.write(
+                f'  expect: VELOUR_RESULTS_DIR/{job.results_subdir}/')
+
+        terminal = {'done', 'failed', 'cancelled', 'handoff'}
+        last_status = None
+        while job.status not in terminal:
+            time.sleep(1.0)
+            job.refresh_from_db()
+            if job.status != last_status:
+                self.stdout.write(
+                    f'  status: {job.get_status_display()}')
+                last_status = job.status
+
+        self.stdout.write(f'  final : {job.get_status_display()}')
+        if job.status == 'handoff':
+            self.stdout.write(
+                '  next  : open /conduit/handoffs/ to submit on '
+                'the cluster, then import results from '
+                f'/conduit/jobs/{job.slug}/ once done.')
+            return
+        if job.status == 'done':
+            self.stdout.write(
+                '  next  : import into Det from '
+                f'/conduit/jobs/{job.slug}/.')
+        if job.stdout:
+            self.stdout.write('── job stdout ──')
+            self.stdout.write(job.stdout[-4000:])
+        if job.stderr:
+            self.stdout.write('── job stderr ──')
+            self.stdout.write(job.stderr[-2000:])

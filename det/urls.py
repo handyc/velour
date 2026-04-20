@@ -20,4 +20,6 @@ urlpatterns = [
          name='candidate_json'),
     path('import-from-evolution/', views.import_agent_from_evolution,
          name='import_from_evolution'),
+    path('import-search-job/<slug:job_slug>/', views.import_search_job,
+         name='import_search_job'),
 ]

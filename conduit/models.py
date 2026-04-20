@@ -122,6 +122,28 @@ class Job(models.Model):
         help_text='Executor-specific extra return data (HTTP body, '
                   'sensor reading, etc.).')
     exit_code = models.IntegerField(null=True, blank=True)
+
+    # Bulk-results pickup path. For jobs that write more than stdout
+    # will hold (GB-range Slurm outputs, etc.), the executor templates
+    # the rclone tail at the end of the sbatch script so results land
+    # at VELOUR_RESULTS_DIR/<results_subdir>/ on the Velour host. The
+    # handoff-complete / app importer side reads from there. Relative
+    # to settings.VELOUR_RESULTS_DIR; empty = job has no bulk output.
+    results_subdir = models.CharField(
+        max_length=200, blank=True,
+        help_text='Subdirectory under VELOUR_RESULTS_DIR where bulk '
+                  'results land (via rclone-over-SFTP from the compute '
+                  'node). Empty = stdout-only job.')
+    results_manifest = models.JSONField(
+        default=list, blank=True,
+        help_text='Snapshot of files seen under results_subdir the '
+                  'first time check_results found them non-empty — '
+                  'list of {name, size, mtime}. Survives cleanup of '
+                  'the directory itself for audit purposes.')
+    results_ready_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='When results_subdir first went non-empty.')
+
     created_at = models.DateTimeField(auto_now_add=True)
     dispatched_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
@@ -137,6 +159,41 @@ class Job(models.Model):
         if not self.dispatched_at or not self.finished_at:
             return None
         return (self.finished_at - self.dispatched_at).total_seconds()
+
+    @property
+    def results_path(self):
+        """Absolute Path to the results subdirectory, or None if the
+        job declared no bulk output. Does not check existence."""
+        if not self.results_subdir:
+            return None
+        from django.conf import settings
+        from pathlib import Path
+        return Path(settings.VELOUR_RESULTS_DIR) / self.results_subdir
+
+    def check_results(self):
+        """Stat self.results_path; if non-empty and results_ready_at
+        isn't set, snapshot the manifest. Returns the current manifest
+        (either the persisted one or a fresh listing). Idempotent."""
+        from django.utils import timezone as tz
+        path = self.results_path
+        if path is None or not path.exists():
+            return self.results_manifest
+        entries = []
+        for p in sorted(path.rglob('*')):
+            if not p.is_file():
+                continue
+            stat = p.stat()
+            entries.append({
+                'name':  str(p.relative_to(path)),
+                'size':  stat.st_size,
+                'mtime': stat.st_mtime,
+            })
+        if entries and not self.results_ready_at:
+            self.results_ready_at = tz.now()
+            self.results_manifest = entries
+            self.save(update_fields=['results_ready_at',
+                                     'results_manifest'])
+        return entries or self.results_manifest
 
 
 class JobHandoff(models.Model):
