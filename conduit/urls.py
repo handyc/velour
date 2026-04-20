@@ -17,4 +17,6 @@ urlpatterns = [
     path('handoffs/<int:pk>/',             views.handoff_detail,  name='handoff_detail'),
     path('handoffs/<int:pk>/submit/',      views.handoff_submit,  name='handoff_submit'),
     path('handoffs/<int:pk>/complete/',    views.handoff_complete, name='handoff_complete'),
+    path('notebooks/',                     views.notebook_list,     name='notebook_list'),
+    path('notebooks/<slug:slug>.ipynb',    views.notebook_download, name='notebook_download'),
 ]

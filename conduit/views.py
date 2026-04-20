@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseBadRequest
+from django.http import FileResponse, Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.text import slugify
@@ -22,6 +24,24 @@ from django.views.decorators.http import require_POST
 from .executors import dispatch
 from .models import Job, JobHandoff, JobTarget
 from .routing import RoutingError
+
+
+NOTEBOOKS_DIR = Path(__file__).resolve().parent / 'notebooks'
+
+NOTEBOOKS = [
+    {
+        'slug':        'loghi-htr',
+        'filename':    'loghi_htr.ipynb',
+        'title':       'Transkribus clone — Loghi HTR',
+        'summary':     'Upload scanned pages, run KNAW-HuC Loghi HTR '
+                       'through an ipywidgets GUI, download PAGE-XML. '
+                       'Designed to run on ALICE Open OnDemand; falls '
+                       'back to mock output when no container runtime '
+                       'is available.',
+        'venue':       'ALICE Open OnDemand (Jupyter)',
+        'engine':      'knaw-huc/loghi via apptainer',
+    },
+]
 
 
 @login_required
@@ -185,6 +205,37 @@ def handoff_submit(request, pk):
     handoff.job.save(update_fields=['status'])
     messages.success(request, f'Handoff submitted as {external_id}')
     return redirect('conduit:handoff_detail', pk=pk)
+
+
+@login_required
+def notebook_list(request):
+    items = []
+    for nb in NOTEBOOKS:
+        path = NOTEBOOKS_DIR / nb['filename']
+        items.append({
+            **nb,
+            'exists': path.exists(),
+            'size_kb': (path.stat().st_size // 1024) if path.exists() else 0,
+        })
+    return render(request, 'conduit/notebook_list.html', {
+        'notebooks': items,
+    })
+
+
+@login_required
+def notebook_download(request, slug):
+    nb = next((n for n in NOTEBOOKS if n['slug'] == slug), None)
+    if nb is None:
+        raise Http404(f'unknown notebook {slug!r}')
+    path = NOTEBOOKS_DIR / nb['filename']
+    if not path.exists():
+        raise Http404(f'notebook file missing: {nb["filename"]}')
+    return FileResponse(
+        open(path, 'rb'),
+        content_type='application/x-ipynb+json',
+        as_attachment=True,
+        filename=nb['filename'],
+    )
 
 
 @login_required

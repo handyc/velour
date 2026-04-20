@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Conduit notebooks — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 900px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.3rem; margin: 0 0 0.3rem; }
+  .wrap p.lede { color: #8b949e; font-size: 0.9rem; line-height: 1.55;
+                 max-width: 72ch; margin: 0 0 1rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .nb-card {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.9rem 1rem; margin-bottom: 0.8rem;
+  }
+  .nb-card h2 { font-size: 0.95rem; margin: 0 0 0.3rem; }
+  .nb-card .meta {
+    color: #6e7681; font-size: 0.7rem; font-family: monospace;
+    margin-bottom: 0.5rem;
+  }
+  .nb-card .summary { color: #c9d1d9; font-size: 0.85rem;
+                      line-height: 1.5; margin-bottom: 0.6rem; }
+  .nb-card .tags { display: flex; gap: 0.5rem; flex-wrap: wrap;
+                   margin-bottom: 0.6rem; }
+  .nb-card .tag {
+    background: #161b22; border: 1px solid #21262d; border-radius: 3px;
+    padding: 0.15rem 0.45rem; color: #8b949e; font-size: 0.7rem;
+  }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.4rem 0.8rem; border-radius: 4px; text-decoration: none;
+    font-size: 0.82rem; display: inline-block;
+  }
+  .btn.missing { background: #6e7681; border-color: #6e7681;
+                 pointer-events: none; opacity: 0.6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Notebook templates</h1>
+  <p class="lede">
+    Pre-built Jupyter notebooks intended to run on Open OnDemand hosts
+    (ALICE in particular). A notebook here is effectively a kiosk-style
+    GUI for a workflow — ipywidgets buttons and dropdowns on top, the
+    underlying Slurm / container calls tucked into collapsed cells. A
+    future Conduit target of kind <code>slurm_ondemand</code> will
+    auto-open these on the cluster; for now, download the <code>.ipynb</code>
+    and upload it into your ALICE OnDemand Jupyter session.
+  </p>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> / notebooks
+  </p>
+
+  {% for nb in notebooks %}
+  <div class="nb-card">
+    <h2>{{ nb.title }}</h2>
+    <div class="meta">
+      {{ nb.filename }}
+      {% if nb.exists %}· {{ nb.size_kb }} KB{% else %}· <span style="color:#f85149">file missing</span>{% endif %}
+    </div>
+    <p class="summary">{{ nb.summary }}</p>
+    <div class="tags">
+      <span class="tag">venue: {{ nb.venue }}</span>
+      <span class="tag">engine: {{ nb.engine }}</span>
+    </div>
+    {% if nb.exists %}
+      <a class="btn"
+         href="{% url 'conduit:notebook_download' slug=nb.slug %}">
+        Download .ipynb
+      </a>
+    {% else %}
+      <a class="btn missing">unavailable</a>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
