@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}{% if program %}Edit {{ program.name }}{% else %}New oneliner{% endif %}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 780px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.2rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .panel { background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+           padding: 0.9rem 1rem; margin-bottom: 1rem; }
+  label { display: block; color: #8b949e; font-size: 0.72rem;
+          margin: 0.6rem 0 0.2rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  input, textarea { background: #0d1117; color: #c9d1d9;
+                    border: 1px solid #30363d; border-radius: 3px;
+                    padding: 0.35rem 0.5rem; font-size: 0.85rem;
+                    font-family: inherit; width: 100%; box-sizing: border-box; }
+  textarea.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                  min-height: 10rem; line-height: 1.4; color: #d2a8ff; }
+  .btn { background: #238636; border: 1px solid #2ea043; color: white;
+         padding: 0.4rem 0.9rem; border-radius: 4px; cursor: pointer;
+         font-size: 0.82rem; font-family: inherit; }
+  .btn.neutral { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+  .ruler {
+    color: #484f58; font-family: ui-monospace, monospace; font-size: 0.72rem;
+    margin-top: 0.3rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>{% if program %}Edit "{{ program.name }}"{% else %}New oneliner{% endif %}</h1>
+  <p class="hint">
+    Every line must fit in {{ max_line }} columns after trailing whitespace is
+    stripped. Trailing blank lines are allowed but ignored for the count.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" class="panel">
+    {% csrf_token %}
+    <label for="id_name">Name</label>
+    <input id="id_name" name="name" required
+           value="{{ values.name }}">
+
+    <label for="id_slug">Slug</label>
+    <input id="id_slug" name="slug"
+           value="{{ values.slug }}"
+           placeholder="auto-slugified from name if blank">
+
+    <label for="id_purpose">Purpose</label>
+    <textarea id="id_purpose" name="purpose" rows="2"
+              placeholder="What it does and the trick that makes it fit.">{{ values.purpose }}</textarea>
+
+    <label for="id_code">Code</label>
+    <textarea id="id_code" name="code" class="mono" required
+              spellcheck="false"
+              placeholder="main(){puts(&quot;hello, world&quot;);}">{{ values.code }}</textarea>
+    <div class="ruler">
+      {% comment %}80-char ruler: a tick every 10, numbers at 10/20/…/80.{% endcomment %}
+      |........10........20........30........40........50........60........70........80
+    </div>
+
+    <label for="id_compile_flags">Compile flags</label>
+    <input id="id_compile_flags" name="compile_flags"
+           value="{{ values.compile_flags }}"
+           placeholder="-w">
+
+    <label for="id_stdin_fixture">Canonical stdin (optional)</label>
+    <textarea id="id_stdin_fixture" name="stdin_fixture" class="mono" rows="2">{{ values.stdin_fixture }}</textarea>
+
+    <div style="margin-top:0.9rem">
+      <button class="btn" type="submit">
+        {% if program %}Save changes{% else %}Create oneliner{% endif %}
+      </button>
+      {% if program %}
+      <a class="btn neutral" href="{% url 'oneliner:detail' slug=program.slug %}">Cancel</a>
+      {% else %}
+      <a class="btn neutral" href="{% url 'oneliner:index' %}">Cancel</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

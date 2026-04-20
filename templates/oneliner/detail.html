@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}{{ program.name }} — Oneliner{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.2rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+
+  .panel { background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+           padding: 0.9rem 1rem; margin-bottom: 1rem; }
+  .panel h2 { font-size: 0.88rem; margin: 0 0 0.5rem; color: #c9d1d9; }
+
+  .meta-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+               gap: 0.4rem 1rem; font-size: 0.78rem; }
+  .meta-grid .lbl { color: #6e7681; font-size: 0.66rem;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+
+  pre.code {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86rem;
+    line-height: 1.45;
+    color: #d2a8ff;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    padding: 0.6rem 0;
+    overflow-x: auto;
+  }
+  pre.code .row { display: grid; grid-template-columns: 3.5rem 1fr 3rem;
+                  padding: 0 0.6rem; }
+  pre.code .n  { color: #484f58; text-align: right; padding-right: 0.7rem; user-select: none; }
+  pre.code .c  { white-space: pre; }
+  pre.code .w  { color: #484f58; text-align: right; padding-left: 0.7rem; font-variant-numeric: tabular-nums; }
+  pre.code .over .w { color: #f85149; }
+  pre.code .over .c { border-left: 2px solid #f85149; margin-left: -2px; }
+
+  pre.blk { background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+            padding: 0.6rem; font-size: 0.78rem; color: #c9d1d9;
+            white-space: pre-wrap; word-break: break-word; margin: 0.3rem 0 0;
+            overflow-x: auto; }
+
+  form.inline { display: inline; }
+  .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+         padding: 0.35rem 0.8rem; border-radius: 4px; cursor: pointer;
+         font-size: 0.8rem; text-decoration: none; display: inline-block;
+         font-family: inherit; }
+  .btn.primary { background: #238636; border-color: #2ea043; color: white; }
+  .btn.danger  { background: #6f1d1d; border-color: #8b2c2c; color: #ffd7d5; }
+  textarea, input { background: #0d1117; color: #c9d1d9;
+                    border: 1px solid #30363d; border-radius: 3px;
+                    padding: 0.3rem 0.45rem; font-size: 0.82rem;
+                    font-family: inherit; width: 100%; box-sizing: border-box; }
+  textarea.mono { font-family: ui-monospace, monospace; min-height: 3rem; }
+
+  .st { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .st-ok      { color: #2ea043; }
+  .st-warn    { color: #d29922; }
+  .st-error   { color: #f85149; }
+  .st-unknown { color: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>{{ program.name }}</h1>
+  <p class="hint">
+    <a href="{% url 'oneliner:index' %}">Oneliner</a> / {{ program.slug }} ·
+    <a href="{% url 'oneliner:edit' slug=program.slug %}">edit</a>
+    {% if program.purpose %}<br>{{ program.purpose }}{% endif %}
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #30363d">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <div class="meta-grid">
+      <div><div class="lbl">longest line</div><div>{{ program.char_count }} / {{ max_line }} ch</div></div>
+      <div><div class="lbl">total chars</div><div>{{ program.total_chars }}</div></div>
+      <div><div class="lbl">lines</div><div>{{ program.n_lines }}</div></div>
+      <div><div class="lbl">compile status</div>
+        <div><span class="st st-{{ program.last_status }}">{{ program.get_last_status_display }}</span></div></div>
+      <div><div class="lbl">binary size</div>
+        <div>{% if program.last_binary_size %}{{ program.last_binary_size }} B{% else %}—{% endif %}</div></div>
+      <div><div class="lbl">last exit</div>
+        <div>{% if program.last_run_exit is not None %}{{ program.last_run_exit }}{% else %}—{% endif %}</div></div>
+      <div><div class="lbl">compile flags</div><div><code>{{ program.compile_flags|default:"—" }}</code></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Code</h2>
+    <pre class="code">{% for line in program.lines %}<div class="row{% if line|length > max_line %} over{% endif %}"><span class="n">{{ forloop.counter }}</span><span class="c">{{ line }}</span><span class="w">{{ line|length }}</span></div>{% endfor %}</pre>
+  </div>
+
+  <div class="panel">
+    <h2>Compile</h2>
+    <form method="post" action="{% url 'oneliner:compile' slug=program.slug %}" class="inline">
+      {% csrf_token %}
+      <button class="btn primary" type="submit">Compile with cc {{ program.compile_flags }}</button>
+    </form>
+    {% if program.last_compile_output %}
+    <pre class="blk" style="color:#ffa198">{{ program.last_compile_output }}</pre>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Run</h2>
+    <form method="post" action="{% url 'oneliner:run' slug=program.slug %}">
+      {% csrf_token %}
+      <label style="display:block;color:#8b949e;font-size:0.72rem;margin-bottom:0.3rem">
+        stdin (defaults to the stored fixture if blank)
+      </label>
+      <textarea name="stdin" class="mono" rows="2">{{ program.stdin_fixture }}</textarea>
+      <div style="margin-top:0.4rem">
+        <button class="btn primary" type="submit">Compile + run (3s timeout)</button>
+      </div>
+    </form>
+    {% if program.last_run_stdout or program.last_run_exit is not None %}
+    <pre class="blk">{{ program.last_run_stdout }}</pre>
+    {% endif %}
+  </div>
+
+  <div class="panel" style="border-left:2px solid #6f1d1d">
+    <form method="post" action="{% url 'oneliner:delete' slug=program.slug %}" class="inline">
+      {% csrf_token %}
+      <button class="btn danger" type="submit">Delete this oneliner</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

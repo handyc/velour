@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Oneliner — tiny C{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.3rem; margin: 0 0 0.2rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .sort-bar { font-size: 0.75rem; color: #8b949e; margin-bottom: 0.6rem; }
+  .sort-bar a { color: #58a6ff; text-decoration: none; margin-right: 0.8rem; }
+  .sort-bar a.on { color: #c9d1d9; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #21262d;
+           vertical-align: top; }
+  th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+       text-transform: uppercase; letter-spacing: 0.05em; }
+  td.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: #d2a8ff; white-space: pre; }
+  td.num { font-family: ui-monospace, monospace; color: #8b949e;
+           text-align: right; font-variant-numeric: tabular-nums; }
+  a.name { color: #58a6ff; text-decoration: none; font-weight: 500; }
+  a.name:hover { text-decoration: underline; }
+  .st { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .st-ok      { color: #2ea043; }
+  .st-warn    { color: #d29922; }
+  .st-error   { color: #f85149; }
+  .st-unknown { color: #6e7681; }
+  .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+         padding: 0.35rem 0.7rem; border-radius: 4px;
+         font-size: 0.78rem; text-decoration: none; display: inline-block; }
+  .note { color: #6e7681; font-size: 0.75rem; }
+  .ceil { color: #d29922; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Oneliner</h1>
+  <p class="hint">
+    C programs that fit in <span class="ceil">{{ max_line }} columns</span>
+    per line. Museum of K&amp;R tricks: implicit int, comma operator side
+    effects, <code>main(c){…}</code> as a free counter.
+    &middot;
+    <a href="{% url 'oneliner:create' %}">New oneliner</a>
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <p class="note" style="border-left:2px solid #30363d;padding:0.3rem 0.6rem">{{ m }}</p>
+    {% endfor %}
+  {% endif %}
+
+  <div class="sort-bar">
+    sort:
+    <a href="?sort=name"  class="{% if sort == 'name' %}on{% endif %}">name</a>
+    <a href="?sort=chars" class="{% if sort == 'chars' %}on{% endif %}">longest line</a>
+    <a href="?sort=size"  class="{% if sort == 'size' %}on{% endif %}">binary size</a>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>name</th>
+        <th>code (first line)</th>
+        <th class="num">ch</th>
+        <th class="num">lines</th>
+        <th class="num">binary</th>
+        <th>status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in programs %}
+      <tr>
+        <td><a class="name" href="{% url 'oneliner:detail' slug=p.slug %}">{{ p.name }}</a></td>
+        <td class="code">{{ p.lines.0|default:"" }}</td>
+        <td class="num">{{ p.char_count }}</td>
+        <td class="num">{{ p.n_lines }}</td>
+        <td class="num">{% if p.last_binary_size %}{{ p.last_binary_size }} B{% else %}—{% endif %}</td>
+        <td><span class="st st-{{ p.last_status }}">{{ p.get_last_status_display }}</span></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="note">
+        No programs yet.
+        <a href="{% url 'oneliner:create' %}">Create one</a>,
+        or run <code>manage.py seed_oneliner_defaults</code> for the classics.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
