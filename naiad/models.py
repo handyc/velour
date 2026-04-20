@@ -43,6 +43,18 @@ CONTAMINANTS = [
     ('arsenic',        'Arsenic',                           'µg/L'),
     ('voc',            'Volatile organic compounds',        'µg/L'),
     ('pfas',           'PFAS (total)',                      'ng/L'),
+    # Urine-treatment contaminants. Concentrations in fresh human urine
+    # range from ~10 g/L (urea) down to ng/L (hormone residues). Keys
+    # below track what matters for urine-to-drinkable designs; sources
+    # where they don't apply simply omit the key.
+    ('urea',           'Urea',                              'mg/L'),
+    ('ammonia',        'Ammonia / ammonium (as N)',         'mg/L'),
+    ('creatinine',     'Creatinine',                        'mg/L'),
+    ('phosphate',      'Phosphate (as P)',                  'mg/L'),
+    ('potassium',      'Potassium',                         'mg/L'),
+    ('sodium',         'Sodium',                            'mg/L'),
+    ('hormones',       'Hormone residues (e.g. estrogens)', 'ng/L'),
+    ('pharma',         'Pharmaceutical residues',           'ng/L'),
 ]
 CONTAMINANT_KEYS = [c[0] for c in CONTAMINANTS]
 CONTAMINANT_LABELS = {k: label for (k, label, _unit) in CONTAMINANTS}

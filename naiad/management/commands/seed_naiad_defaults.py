@@ -63,7 +63,11 @@ STAGE_TYPES = [
                     'and nitrate but wastes ~3× water as brine.',
         removal={'tds': 0.97, 'lead': 0.98, 'nitrate': 0.92,
                  'fluoride': 0.95, 'arsenic': 0.97, 'pfas': 0.95,
-                 'iron': 0.98, 'bacteria': 0.999},
+                 'iron': 0.98, 'bacteria': 0.999,
+                 'sodium': 0.95, 'potassium': 0.95,
+                 'creatinine': 0.95, 'phosphate': 0.95,
+                 'urea': 0.40, 'ammonia': 0.60,
+                 'pharma': 0.85, 'hormones': 0.85},
         flow_lpm=0.5, energy_watts=30.0,
         cost_eur=85.0, maintenance_days=730,
     ),
@@ -109,6 +113,89 @@ STAGE_TYPES = [
         removal={'bacteria': 0.9999, 'viruses': 4.0 / 6.0},
         flow_lpm=10.0, energy_watts=8.0,
         cost_eur=3.0, maintenance_days=30,
+    ),
+
+    # --- Urine-treatment stage types ----------------------------------
+    # Removal fractions are order-of-magnitude figures pulled from the
+    # Eawag Vuna project, NASA UPA-style vapour-compression papers, and
+    # decentralised-sanitation reviews. Real pilot data will refine these.
+    dict(
+        slug='urea-hydrolysis', name='Urea hydrolysis (enzymatic)',
+        kind='biological',
+        description='Biofilm reactor where urease-rich biomass converts '
+                    'urea to ammonium carbonate. Not a removal stage on '
+                    'its own — it stabilises the stream so downstream '
+                    'ammonia / nitrification / struvite stages can act. '
+                    'Consumes urea; generates ammonia.',
+        removal={'urea': 0.98},
+        flow_lpm=1.5, energy_watts=2.0,
+        cost_eur=15.0, maintenance_days=180,
+    ),
+    dict(
+        slug='struvite-precipitation', name='Struvite precipitation (MAP)',
+        kind='chemical',
+        description='Dose Mg²⁺ (e.g. MgO) at pH ~9 to precipitate '
+                    'magnesium-ammonium-phosphate crystals. Recovers ~90% '
+                    'of phosphorus and a chunk of the ammonium as solid '
+                    'fertiliser; little effect on urea.',
+        removal={'phosphate': 0.90, 'ammonia': 0.35},
+        flow_lpm=1.0, energy_watts=3.0,
+        cost_eur=8.0, maintenance_days=60,
+    ),
+    dict(
+        slug='ammonia-stripping', name='Ammonia stripping tower',
+        kind='chemical',
+        description='Raise pH to 10-11, counter-current air or steam to '
+                    'volatilise NH₃. Classical industrial move; captures '
+                    'NH₃ in an acid trap for fertiliser. Effective on '
+                    'ammonia but dumps alkali that must be re-balanced.',
+        removal={'ammonia': 0.95},
+        flow_lpm=2.0, energy_watts=40.0,
+        cost_eur=25.0, maintenance_days=180,
+    ),
+    dict(
+        slug='nitrification-bioreactor',
+        name='Nitrification bioreactor (MBBR)',
+        kind='biological',
+        description='Moving-bed biofilm oxidises residual NH₄⁺ to NO₃⁻ '
+                    'at neutral pH. Pairs well with RO downstream since '
+                    'RO rejects nitrate cleanly. (Phase-1 sim only '
+                    'models consumption — nitrate rise is implicit and '
+                    'handled by the downstream RO stage.)',
+        removal={'ammonia': 0.92},
+        flow_lpm=1.5, energy_watts=12.0,
+        cost_eur=30.0, maintenance_days=365,
+    ),
+    dict(
+        slug='electrochem-oxidation',
+        name='Electrochemical oxidation (BDD anode)',
+        kind='chemical',
+        description='Boron-doped diamond electrodes generate hydroxyl '
+                    'radicals that mineralise urea, organics, hormones, '
+                    'and pharmaceuticals — pricey on electrodes and '
+                    'power but removes classes RO leaves behind.',
+        removal={'urea': 0.90, 'pharma': 0.95, 'hormones': 0.95,
+                 'creatinine': 0.90, 'voc': 0.80, 'bacteria': 0.999},
+        flow_lpm=0.5, energy_watts=120.0,
+        cost_eur=180.0, maintenance_days=365,
+    ),
+    dict(
+        slug='vapor-distillation',
+        name='Vapour-compression distillation',
+        kind='physical',
+        description='NASA-UPA-style: evaporate water from brine under '
+                    'reduced pressure, recompress vapour to condense. '
+                    'Separates water from essentially everything non-'
+                    'volatile — salts, creatinine, pharma residues — '
+                    'at the cost of high energy use.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.99, 'phosphate': 0.99,
+                 'pharma': 0.95, 'hormones': 0.95, 'urea': 0.80,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'bacteria': 0.9999, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.9999},
+        flow_lpm=0.2, energy_watts=200.0,
+        cost_eur=220.0, maintenance_days=730,
     ),
 ]
 
@@ -159,6 +246,54 @@ SOURCE_PROFILES = [
             'voc': 20.0,
         },
     ),
+    dict(
+        slug='human-urine-fresh', name='Human urine (fresh)',
+        scope='source',
+        notes='Freshly voided adult urine, no storage. Urea still '
+              'intact, ammonia low, bacteria near-sterile at the '
+              'meatus. Values are population averages — individual '
+              'urine varies with hydration, diet, health, and drugs.',
+        values={
+            'turbidity':   20.0,        # NTU — colloidal
+            'tds':       25000.0,       # mg/L — yes, that salty
+            'urea':      20000.0,       # mg/L — the big one
+            'ammonia':      50.0,       # mg/L as N — low in fresh urine
+            'creatinine':  1500.0,      # mg/L
+            'phosphate':    800.0,      # mg/L as P
+            'potassium':   2000.0,      # mg/L
+            'sodium':      3500.0,      # mg/L
+            'chlorine':       0.0,
+            'nitrate':        5.0,      # mg/L
+            'bacteria':      10.0,      # CFU/100mL — near-sterile
+            'voc':           50.0,      # µg/L
+            'pharma':     10000.0,      # ng/L — highly variable
+            'hormones':    2000.0,      # ng/L — estrogens, etc.
+        },
+    ),
+    dict(
+        slug='human-urine-stored', name='Human urine (stored / hydrolysed)',
+        scope='source',
+        notes='Urine stored >1 week at ambient temperature: urea has '
+              'largely hydrolysed to ammonium carbonate, pH has risen '
+              'to ~9, most pathogens are inactivated by alkalinity. '
+              'This is what Eawag-style source-separating toilets '
+              'actually feed to a treatment train.',
+        values={
+            'turbidity':   25.0,
+            'tds':       28000.0,
+            'urea':         200.0,      # mostly hydrolysed away
+            'ammonia':     9000.0,      # mg/L as N — massive
+            'creatinine':  1500.0,
+            'phosphate':    800.0,
+            'potassium':   2000.0,
+            'sodium':      3500.0,
+            'nitrate':        3.0,
+            'bacteria':       1.0,      # inactivated by high pH
+            'voc':           40.0,
+            'pharma':     10000.0,
+            'hormones':    2000.0,
+        },
+    ),
 ]
 
 
@@ -193,6 +328,38 @@ TARGET_PROFILES = [
               'loop.',
         values={
             'turbidity': 10.0, 'bacteria': 1000.0,
+        },
+    ),
+    dict(
+        slug='eu-drinking-urine-reuse',
+        name='EU drinking water (urine-reuse bounds)',
+        scope='target',
+        notes='Same spirit as eu-drinking but with explicit caps on '
+              'urine-derived solutes (urea, ammonia, creatinine, '
+              'sodium, potassium, phosphate, hormones, pharma). WHO '
+              'and Dutch potable-reuse guidance were the anchor. Use '
+              'this as the pass/fail spec for urine-to-drinking '
+              'systems instead of eu-drinking — which silently ignores '
+              'these keys.',
+        values={
+            'turbidity':  1.0,
+            'tds':     1500.0,
+            'bacteria':   0.0,
+            'viruses':    0.0,
+            'protozoa':   0.0,
+            'lead':       5.0,
+            'nitrate':   11.3,
+            'fluoride':   1.5,
+            'arsenic':   10.0,
+            'pfas':     100.0,
+            'urea':       2.0,          # mg/L — conservative ceiling
+            'ammonia':    0.5,          # mg/L as N — WHO taste limit
+            'creatinine': 1.0,          # mg/L
+            'phosphate': 10.0,          # mg/L as P
+            'potassium': 12.0,          # mg/L — WHO provisional
+            'sodium':   200.0,          # mg/L — EU DWD taste param
+            'hormones':   1.0,          # ng/L — EU watchlist band
+            'pharma':    10.0,          # ng/L — WHO insignificant level
         },
     ),
 ]
@@ -239,7 +406,42 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=system, stage_type=st, position=i)
 
+        # Reference urine-to-drinking chain. Not guaranteed to pass on
+        # day one — the point is to have something concrete to tune
+        # against. Based loosely on Vuna (Eawag) + vapour-compression
+        # distillation + AOP polish. Run a TestRun from the UI to see
+        # where it leaks.
+        urine_src = WaterProfile.objects.get(slug='human-urine-stored')
+        urine_tgt = WaterProfile.objects.get(slug='eu-drinking-urine-reuse')
+        urine_system, urine_created = System.objects.update_or_create(
+            slug='urine-to-drinking', defaults=dict(
+                name='Urine → Drinking (reference chain)',
+                description='Source-separated urine, stored until urea '
+                            'hydrolyses, then: sediment → struvite → '
+                            'ammonia stripping → nitrification → GAC → '
+                            'vapour distillation → electrochemical '
+                            'polish → UV. A starting point — refine '
+                            'the order and swap stages based on lab '
+                            'results.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'sediment-5um',
+                'struvite-precipitation',
+                'ammonia-stripping',
+                'nitrification-bioreactor',
+                'granular-carbon',
+                'vapor-distillation',
+                'electrochem-oxidation',
+                'uv-sterilizer',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_system, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
-            f'{"Created" if created else "Found"} sample system '
-            f'"{system.name}".'))
+            f'Sample systems: "{system.name}", '
+            f'"{urine_system.name}".'))
