@@ -109,6 +109,7 @@ INSTALLED_APPS = [
     'agents',
     'det',
     'naiad',
+    'conduit',
 ]
 
 MIDDLEWARE = [

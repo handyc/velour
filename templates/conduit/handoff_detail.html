@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Handoff — {{ handoff.job.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.3rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.9rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+  pre.blk {
+    background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.6rem; font-size: 0.76rem; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-word;
+    color: #c9d1d9; margin: 0.3rem 0 0;
+  }
+  label {
+    display: flex; flex-direction: column; gap: 3px;
+    color: #8b949e; font-size: 0.72rem; margin-bottom: 0.6rem;
+  }
+  input, textarea, select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.45rem; font-size: 0.82rem;
+    font-family: inherit;
+  }
+  textarea { min-height: 3rem; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .btn.neutral { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+  .st-pending { color: #d29922; } .st-submitted { color: #58a6ff; }
+  .st-acknowledged { color: #2ea043; } .st-cancelled { color: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Handoff: {{ handoff.job.name }}</h1>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> /
+    <a href="{% url 'conduit:handoff_list' %}">handoffs</a> / {{ handoff.pk }} ·
+    <a href="{% url 'conduit:job_detail' slug=handoff.job.slug %}">back to job</a>
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <div>
+      Status: <span class="st-{{ handoff.status }}">
+        {{ handoff.get_status_display }}
+      </span>
+      {% if handoff.external_id %}
+        · external id <code>{{ handoff.external_id }}</code>
+      {% endif %}
+    </div>
+    {% if handoff.submitted_by %}
+    <div style="color:#6e7681;font-size:0.74rem;margin-top:0.3rem">
+      Submitted by {{ handoff.submitted_by.username }}
+      at {{ handoff.submitted_at|date:"Y-m-d H:i:s" }}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Instructions</h2>
+    <pre class="blk">{{ handoff.submit_instructions }}</pre>
+  </div>
+
+  <div class="panel">
+    <h2>Script</h2>
+    <pre class="blk">{{ handoff.script_text }}</pre>
+  </div>
+
+  {% if handoff.status == 'pending' %}
+  <form method="post" action="{% url 'conduit:handoff_submit' pk=handoff.pk %}"
+        class="panel">
+    {% csrf_token %}
+    <h2>Record submission</h2>
+    <label>External job ID (e.g. Slurm job number)
+      <input type="text" name="external_id" required>
+    </label>
+    <label>Notes
+      <textarea name="notes"></textarea>
+    </label>
+    <button class="btn" type="submit">Mark submitted</button>
+  </form>
+  {% endif %}
+
+  {% if handoff.status == 'submitted' %}
+  <form method="post" action="{% url 'conduit:handoff_complete' pk=handoff.pk %}"
+        class="panel">
+    {% csrf_token %}
+    <h2>Record outcome</h2>
+    <label>Outcome
+      <select name="outcome">
+        <option value="done">done</option>
+        <option value="failed">failed</option>
+      </select>
+    </label>
+    <label>stdout (paste from the cluster, optional)
+      <textarea name="stdout" style="font-family:monospace"></textarea>
+    </label>
+    <label>stderr (optional)
+      <textarea name="stderr" style="font-family:monospace"></textarea>
+    </label>
+    <label>Notes
+      <textarea name="notes"></textarea>
+    </label>
+    <button class="btn" type="submit">Mark complete</button>
+  </form>
+  {% endif %}
+
+  {% if handoff.notes %}
+  <div class="panel">
+    <h2>Notes</h2>
+    <pre class="blk">{{ handoff.notes }}</pre>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

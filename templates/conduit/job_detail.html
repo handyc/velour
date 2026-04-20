@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.name }} — Conduit{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.3rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.9rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+  .meta-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr));
+    gap: 0.4rem 1rem; font-size: 0.78rem;
+  }
+  .meta-grid .lbl {
+    color: #6e7681; font-size: 0.67rem; text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .st-done { color: #2ea043; } .st-failed { color: #f85149; }
+  .st-running { color: #58a6ff; } .st-handoff { color: #d29922; }
+  .st-cancelled { color: #6e7681; }
+  pre.blk {
+    background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.6rem; font-size: 0.75rem; overflow-x: auto;
+    white-space: pre-wrap; word-break: break-word;
+    color: #c9d1d9; margin: 0.3rem 0 0;
+  }
+  .btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem; text-decoration: none; display: inline-block;
+  }
+  .btn.danger { background: #6f1d1d; border-color: #8b2c2c; color: #ffd7d5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>{{ job.name }}</h1>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> /
+    <a href="{% url 'conduit:job_list' %}">jobs</a> / {{ job.slug }}
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <div class="meta-grid">
+      <div>
+        <div class="lbl">status</div>
+        <div class="st-{{ job.status }}">{{ job.get_status_display }}</div>
+      </div>
+      <div>
+        <div class="lbl">kind</div>
+        <div>{{ job.get_kind_display }}</div>
+      </div>
+      <div>
+        <div class="lbl">target</div>
+        <div>{{ job.target|default:"—" }}</div>
+      </div>
+      <div>
+        <div class="lbl">requester</div>
+        <div>{{ job.requester.username|default:"—" }}</div>
+      </div>
+      <div>
+        <div class="lbl">exit code</div>
+        <div>{{ job.exit_code|default_if_none:"—" }}</div>
+      </div>
+      <div>
+        <div class="lbl">duration</div>
+        <div>{% if job.duration_seconds %}{{ job.duration_seconds|floatformat:2 }}s{% else %}—{% endif %}</div>
+      </div>
+      <div>
+        <div class="lbl">created</div>
+        <div style="font-family:monospace">{{ job.created_at|date:"Y-m-d H:i:s" }}</div>
+      </div>
+      <div>
+        <div class="lbl">dispatched</div>
+        <div style="font-family:monospace">{{ job.dispatched_at|date:"Y-m-d H:i:s"|default:"—" }}</div>
+      </div>
+      <div>
+        <div class="lbl">finished</div>
+        <div style="font-family:monospace">{{ job.finished_at|date:"Y-m-d H:i:s"|default:"—" }}</div>
+      </div>
+    </div>
+    {% if job.status == 'pending' or job.status == 'routing' or job.status == 'dispatched' or job.status == 'handoff' %}
+      <form method="post" action="{% url 'conduit:job_cancel' slug=job.slug %}"
+            style="margin-top:0.6rem">
+        {% csrf_token %}
+        <button class="btn danger" type="submit">Cancel</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Payload</h2>
+    <pre class="blk">{{ job.payload }}</pre>
+  </div>
+
+  {% if handoff %}
+  <div class="panel" style="border-left:2px solid #d29922">
+    <h2>Handoff ({{ handoff.get_status_display }})</h2>
+    <p class="hint">
+      This job needs an operator. See
+      <a href="{% url 'conduit:handoff_detail' pk=handoff.pk %}">handoff details</a>.
+    </p>
+  </div>
+  {% endif %}
+
+  {% if job.stdout %}
+  <div class="panel">
+    <h2>stdout</h2>
+    <pre class="blk">{{ job.stdout }}</pre>
+  </div>
+  {% endif %}
+
+  {% if job.stderr %}
+  <div class="panel">
+    <h2>stderr</h2>
+    <pre class="blk" style="color:#ffa198">{{ job.stderr }}</pre>
+  </div>
+  {% endif %}
+
+  {% if job.result %}
+  <div class="panel">
+    <h2>result</h2>
+    <pre class="blk">{{ job.result }}</pre>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

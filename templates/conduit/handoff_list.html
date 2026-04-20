@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Conduit handoffs — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.3rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  table.ho {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+  }
+  table.ho th, table.ho td {
+    padding: 0.4rem 0.6rem; border-bottom: 1px solid #21262d;
+    text-align: left;
+  }
+  table.ho th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+                text-transform: uppercase; letter-spacing: 0.05em; }
+  table.ho a { color: #c9d1d9; text-decoration: none; }
+  table.ho a:hover { color: #58a6ff; }
+  .st-pending { color: #d29922; } .st-submitted { color: #58a6ff; }
+  .st-acknowledged { color: #2ea043; } .st-cancelled { color: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Handoffs</h1>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> / handoffs ·
+    jobs waiting for a human to submit them externally
+  </p>
+  <table class="ho">
+    <thead>
+      <tr>
+        <th>job</th><th>status</th><th>external id</th>
+        <th>submitted by</th><th>when</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for h in handoffs %}
+      <tr>
+        <td><a href="{% url 'conduit:handoff_detail' pk=h.pk %}">{{ h.job.name }}</a></td>
+        <td class="st-{{ h.status }}">{{ h.get_status_display }}</td>
+        <td style="font-family:monospace">{{ h.external_id|default:"—" }}</td>
+        <td>{{ h.submitted_by.username|default:"—" }}</td>
+        <td style="font-family:monospace;color:#6e7681">
+          {{ h.submitted_at|date:"Y-m-d H:i"|default:"—" }}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" style="color:#6e7681;text-align:center">
+        No handoffs yet.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

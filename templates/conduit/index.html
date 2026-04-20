@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Conduit — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .cdt-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .cdt-wrap h1 { margin-bottom: 0.25rem; font-size: 1.4rem; }
+  .cdt-wrap .lede { color: #8b949e; max-width: 72ch; line-height: 1.55;
+                    margin: 0 0 1.25rem; font-size: 0.9rem; }
+  .cdt-wrap .lede em { color: #c9d1d9; font-style: normal; }
+  .panels { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; }
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.8rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.92rem; margin: 0 0 0.5rem; color: #c9d1d9; }
+  .panel .hint { color: #6e7681; font-size: 0.7rem; margin: 0.4rem 0 0; }
+  .panel .hint a { color: #58a6ff; text-decoration: none; }
+
+  .row-list { display: flex; flex-direction: column; gap: 2px; }
+  .row {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    padding: 0.4rem 0.6rem; font-size: 0.78rem;
+    display: flex; gap: 0.6rem; align-items: baseline;
+  }
+  .row a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .row a:hover { color: #58a6ff; }
+  .row .meta { color: #6e7681; font-size: 0.68rem; font-family: monospace; }
+  .row.done    { border-left-color: #2ea043; }
+  .row.failed  { border-left-color: #f85149; }
+  .row.handoff { border-left-color: #d29922; }
+  .row.cancelled { border-left-color: #6e7681; }
+
+  .tgt-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr));
+    gap: 0.4rem;
+  }
+  .tgt-card {
+    background: #161b22; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.4rem 0.55rem; font-size: 0.74rem; line-height: 1.45;
+  }
+  .tgt-card b { color: #c9d1d9; }
+  .tgt-card .kind {
+    color: #6e7681; font-size: 0.65rem; text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .tgt-card.off { opacity: 0.45; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem; text-decoration: none; display: inline-block;
+  }
+  .btn:hover { background: #2ea043; }
+  .btn.neutral { background: #21262d; border-color: #30363d; }
+  .btn.neutral:hover { background: #30363d; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cdt-wrap">
+  <h1>Conduit — pipelines &amp; routing</h1>
+  <p class="lede">
+    Conduit is Velour's <em>dispatcher</em>. A <em>Job</em> describes
+    a unit of work (shell command, Slurm sbatch script, HTTP request,
+    agent task, sensor read, firmware flash). A <em>JobTarget</em> is
+    a registered backend (this host, a VPS, the ALICE HPC cluster, a
+    Pi, an ESP, an ATtiny, a code agent, a generic HTTP endpoint).
+    Submit a job; Conduit routes it to the most appropriate target
+    and executes it — or, for ALICE-bound work, hands you a ready-to-
+    copy sbatch script and waits while you submit it manually.
+  </p>
+  <p class="lede">
+    Phase 1 ships two real executors: local shell and Slurm manual-
+    submit. Other target kinds are stubs until the hardware/agents
+    are wired.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panels">
+    <div>
+      <div class="panel">
+        <h2>Recent jobs
+          <a class="btn" style="float:right"
+             href="{% url 'conduit:job_create' %}">new job</a>
+        </h2>
+        <div class="row-list">
+          {% for j in recent_jobs %}
+          <div class="row {{ j.status }}">
+            <a href="{% url 'conduit:job_detail' slug=j.slug %}">
+              {{ j.name }}
+              <span style="color:#6e7681"> · {{ j.kind }}</span>
+            </a>
+            <span class="meta">
+              {{ j.get_status_display }}
+              {% if j.target %} · {{ j.target.slug }}{% endif %}
+              · {{ j.created_at|date:"Y-m-d H:i" }}
+            </span>
+          </div>
+          {% empty %}
+          <p class="hint">No jobs yet. Submit one with
+            <a href="{% url 'conduit:job_create' %}">new job</a>.</p>
+          {% endfor %}
+        </div>
+        <p class="hint">
+          <a href="{% url 'conduit:job_list' %}">all jobs</a>
+        </p>
+      </div>
+
+      {% if open_handoffs %}
+      <div class="panel">
+        <h2>Open handoffs (awaiting operator)</h2>
+        <div class="row-list">
+          {% for h in open_handoffs %}
+          <div class="row handoff">
+            <a href="{% url 'conduit:handoff_detail' pk=h.pk %}">
+              {{ h.job.name }}
+            </a>
+            <span class="meta">
+              {{ h.get_status_display }}
+              {% if h.external_id %} · id {{ h.external_id }}{% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        <p class="hint">
+          <a href="{% url 'conduit:handoff_list' %}">all handoffs</a>
+        </p>
+      </div>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Targets
+          <a class="btn neutral" style="float:right"
+             href="{% url 'conduit:target_create' %}">new target</a>
+        </h2>
+        <div class="tgt-grid">
+          {% for t in targets %}
+          <div class="tgt-card {% if not t.enabled %}off{% endif %}">
+            <b>{{ t.name }}</b>
+            <div class="kind">{{ t.get_kind_display }}</div>
+            {% if t.host %}
+            <div style="color:#6e7681;font-family:monospace;font-size:0.68rem">
+              {{ t.host }}
+            </div>
+            {% endif %}
+          </div>
+          {% empty %}
+          <p class="hint">
+            No targets yet. Run <code>manage.py seed_conduit_defaults</code>
+            or create one.
+          </p>
+          {% endfor %}
+        </div>
+        <p class="hint">
+          <a href="{% url 'conduit:target_list' %}">all targets</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

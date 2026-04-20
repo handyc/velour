@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}New target — Conduit{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 680px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.3rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 1rem; margin-bottom: 1rem;
+  }
+  label {
+    display: flex; flex-direction: column; gap: 3px;
+    color: #8b949e; font-size: 0.72rem; margin-bottom: 0.6rem;
+  }
+  input, select, textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.45rem; font-size: 0.82rem;
+    font-family: inherit;
+  }
+  textarea { min-height: 4rem; font-family: monospace; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>New target</h1>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> /
+    <a href="{% url 'conduit:target_list' %}">targets</a> / new
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #f85149">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" class="panel">
+    {% csrf_token %}
+    <label>slug
+      <input type="text" name="slug" required pattern="[a-z0-9-]+"
+             placeholder="alice-manual">
+    </label>
+    <label>name
+      <input type="text" name="name" required
+             placeholder="ALICE (Leiden HPC, manual submit)">
+    </label>
+    <label>kind
+      <select name="kind" required>
+        {% for k, label in kinds %}
+          <option value="{{ k }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>host
+      <input type="text" name="host"
+             placeholder="login1.alice.universiteitleiden.nl">
+    </label>
+    <label>config (JSON)
+      <textarea name="config"
+                placeholder='{"ssh_user": "me", "partition": "cpu-short"}'></textarea>
+    </label>
+    <label>priority
+      <input type="number" name="priority" value="0">
+    </label>
+    <label>notes
+      <textarea name="notes"></textarea>
+    </label>
+    <button class="btn" type="submit">Create target</button>
+  </form>
+</div>
+{% endblock %}

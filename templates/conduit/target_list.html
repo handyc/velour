@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Conduit targets — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.3rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.75rem; margin: 0 0 1rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  table.tgt {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+  }
+  table.tgt th, table.tgt td {
+    padding: 0.4rem 0.6rem; border-bottom: 1px solid #21262d;
+    text-align: left; vertical-align: top;
+  }
+  table.tgt th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+                 text-transform: uppercase; letter-spacing: 0.05em; }
+  table.tgt tr.off { opacity: 0.45; }
+  code { color: #58a6ff; }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.7rem; border-radius: 4px; text-decoration: none;
+    font-size: 0.78rem; display: inline-block; float: right;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Targets
+    <a class="btn" href="{% url 'conduit:target_create' %}">new target</a>
+  </h1>
+  <p class="hint">
+    <a href="{% url 'conduit:index' %}">Conduit</a> / targets
+  </p>
+  <table class="tgt">
+    <thead>
+      <tr>
+        <th>name</th><th>slug</th><th>kind</th><th>host</th>
+        <th>priority</th><th>enabled</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in targets %}
+      <tr class="{% if not t.enabled %}off{% endif %}">
+        <td>{{ t.name }}</td>
+        <td><code>{{ t.slug }}</code></td>
+        <td>{{ t.get_kind_display }}</td>
+        <td style="font-family:monospace;color:#8b949e">{{ t.host|default:"—" }}</td>
+        <td>{{ t.priority }}</td>
+        <td>{% if t.enabled %}yes{% else %}no{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" style="color:#6e7681;text-align:center">
+        No targets yet. Run <code>manage.py seed_conduit_defaults</code>.
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
