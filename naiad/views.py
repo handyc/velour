@@ -1,8 +1,11 @@
+import json
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from .models import (
@@ -164,6 +167,106 @@ def test_detail(request, pk):
     return render(request, 'naiad/test_detail.html', {
         'run':     run,
         'funnel':  funnel,
+    })
+
+
+@login_required
+def evolve(request, slug):
+    """Open the evolve page for a system. Embeds the StageType
+    catalog + source + target as JSON so the browser-side Evolution
+    Engine (gene_type='naiad') can score candidate chains without a
+    round-trip."""
+    system = get_object_or_404(
+        System.objects.select_related('source', 'target'), slug=slug)
+    if not system.target:
+        messages.error(
+            request,
+            'Evolve needs a target profile on the system — '
+            'set one before evolving.')
+        return redirect('naiad:system_detail', slug=system.slug)
+
+    stage_types = list(StageType.objects.all())
+    stage_types_json = [
+        {
+            'slug': st.slug,
+            'name': st.name,
+            'kind': st.kind,
+            'removal': st.removal or {},
+            'cost_eur': st.cost_eur,
+            'energy_watts': st.energy_watts,
+            'maintenance_days': st.maintenance_days,
+            'flow_lpm': st.flow_lpm,
+        }
+        for st in stage_types
+    ]
+    payload = {
+        'system_slug':  system.slug,
+        'system_name':  system.name,
+        'source_slug':  system.source.slug,
+        'source_name':  system.source.name,
+        'source_values': system.source.values or {},
+        'target_slug':  system.target.slug,
+        'target_name':  system.target.name,
+        'target_values': system.target.values or {},
+        'stage_types':  stage_types_json,
+        'contaminants': [
+            {'key': k, 'label': label, 'unit': unit}
+            for (k, label, unit) in CONTAMINANTS
+        ],
+    }
+    return render(request, 'naiad/evolve.html', {
+        'system':  system,
+        'payload_json': json.dumps(payload),
+    })
+
+
+@login_required
+@require_POST
+def evolve_save(request, slug):
+    """Save an evolved chain as a new Naiad System, cloning the
+    parent's source + target. Body is JSON: {name, slug?, stages}."""
+    parent = get_object_or_404(
+        System.objects.select_related('source', 'target'), slug=slug)
+    try:
+        body = json.loads(request.body.decode('utf-8') or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'invalid json'}, status=400)
+
+    name = (body.get('name') or '').strip()
+    new_slug = (body.get('slug') or '').strip() or slugify(name)
+    stages = body.get('stages') or []
+    if not name or not new_slug or not stages:
+        return JsonResponse(
+            {'error': 'name, slug, and at least one stage are required.'},
+            status=400)
+    if System.objects.filter(slug=new_slug).exists():
+        return JsonResponse(
+            {'error': f'slug "{new_slug}" is already taken.'}, status=400)
+
+    types_by_slug = {
+        st.slug: st for st in StageType.objects.filter(slug__in=stages)
+    }
+    missing = [s for s in stages if s not in types_by_slug]
+    if missing:
+        return JsonResponse(
+            {'error': f'unknown stage types: {", ".join(missing)}'},
+            status=400)
+
+    with transaction.atomic():
+        new_system = System.objects.create(
+            slug=new_slug, name=name,
+            source=parent.source, target=parent.target,
+            description=f'Evolved from {parent.name} ({parent.slug}). '
+                        f'Score: {body.get("score", "?")}.',
+        )
+        for i, s in enumerate(stages):
+            Stage.objects.create(
+                system=new_system, stage_type=types_by_slug[s], position=i)
+    return JsonResponse({
+        'ok':  True,
+        'url': f'/naiad/{new_system.slug}/',
+        'slug': new_system.slug,
+        'name': new_system.name,
     })
 
 

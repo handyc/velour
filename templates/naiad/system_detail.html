@@ -138,6 +138,24 @@
   </div>
 
   <div class="panel">
+    <h2>Evolve</h2>
+    {% if system.target %}
+    <p style="margin:0 0 0.5rem;color:#8b949e;font-size:0.78rem">
+      Breed chains against {{ system.source.name }} → {{ system.target.name }}.
+      Winners are scored for passing the target AND being cheap / compact /
+      low-energy / low-maintenance.
+    </p>
+    <a class="btn" style="display:inline-block;text-decoration:none"
+       href="{% url 'naiad:evolve' slug=system.slug %}">Open evolution lab →</a>
+    {% else %}
+    <p style="color:#6e7681;font-size:0.78rem;margin:0">
+      Set a target profile on this system first — evolution needs a goal
+      to aim at.
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="panel">
     <h2>Run a test</h2>
     <form class="inline" method="post"
           action="{% url 'naiad:run_test' slug=system.slug %}">

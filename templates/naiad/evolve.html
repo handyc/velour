@@ -1,0 +1,467 @@
+{% extends "base.html" %}
+
+{% block title %}Evolve — {{ system.name }} — Naiad{% endblock %}
+
+{% block extra_head %}
+<style>
+  .ev-wrap { max-width: 1200px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .ev-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .crumbs { color: #6e7681; font-size: 0.75rem; margin-bottom: 0.6rem; }
+  .crumbs a { color: #58a6ff; text-decoration: none; }
+  .meta-line { color: #8b949e; font-size: 0.8rem; margin: 0 0 1rem; }
+  .meta-line b { color: #c9d1d9; }
+
+  .cols { display: grid; grid-template-columns: 1.5fr 1fr; gap: 1rem;
+          align-items: start; }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.75rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; }
+
+  .ctrls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
+  .ctrls label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  .ctrls input {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.4rem; font-size: 0.78rem;
+    width: 5rem;
+  }
+  .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.8rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .btn.warn { background: #d29922; border-color: #d29922; }
+  .btn.stop { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn:not(:disabled):hover { filter: brightness(1.1); }
+
+  #score-chart {
+    width: 100%; height: 180px; background: #0d1117;
+    border: 1px solid #21262d; border-radius: 4px;
+  }
+
+  .chain { display: flex; flex-direction: column; gap: 3px; }
+  .chain .row {
+    background: #161b22; border-left: 3px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.3rem 0.5rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: baseline;
+  }
+  .chain .pos { color: #6e7681; font-family: monospace; width: 1.5rem; }
+  .chain .name { flex: 1; color: #c9d1d9; }
+  .chain .kind { color: #6e7681; font-size: 0.66rem;
+                 text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(100px,1fr));
+    gap: 0.3rem; margin-top: 0.4rem;
+  }
+  .stat {
+    background: #161b22; border: 1px solid #21262d; border-radius: 3px;
+    padding: 0.35rem 0.5rem; font-size: 0.72rem;
+  }
+  .stat b { display: block; color: #c9d1d9; font-size: 0.95rem;
+            font-family: monospace; line-height: 1.2; }
+  .stat span { color: #6e7681; font-size: 0.65rem;
+               text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat.pass b { color: #2ea043; }
+  .stat.fail b { color: #f85149; }
+
+  .contam-table {
+    width: 100%; border-collapse: collapse; font-size: 0.74rem;
+  }
+  .contam-table th, .contam-table td {
+    text-align: right; padding: 0.25rem 0.4rem;
+    border-bottom: 1px solid #21262d; font-family: monospace;
+  }
+  .contam-table th { color: #6e7681; font-weight: normal;
+                     font-size: 0.66rem; text-transform: uppercase;
+                     letter-spacing: 0.05em; }
+  .contam-table th:first-child, .contam-table td:first-child {
+    text-align: left; font-family: inherit;
+  }
+  .contam-table td.ok    { color: #2ea043; }
+  .contam-table td.bad   { color: #f85149; }
+  .contam-table td.muted { color: #6e7681; }
+
+  #save-form { display: flex; gap: 0.4rem; align-items: end; flex-wrap: wrap;
+               margin-top: 0.5rem; }
+  #save-form input {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.5rem; font-size: 0.8rem;
+  }
+  #save-msg { color: #8b949e; font-size: 0.75rem; margin-top: 0.4rem; }
+  #save-msg.ok  { color: #2ea043; }
+  #save-msg.err { color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ev-wrap">
+  <div class="crumbs">
+    <a href="{% url 'naiad:index' %}">Naiad</a> ›
+    <a href="{% url 'naiad:system_detail' slug=system.slug %}">{{ system.name }}</a> ›
+    Evolve
+  </div>
+  <h1>Evolve — {{ system.name }}</h1>
+  <p class="meta-line">
+    Breeding chains against:
+    <b>{{ system.source.name }}</b> →
+    <b>{{ system.target.name }}</b>.
+    Score ∈ [0, 1]: &lt; 0.5 = failing target, ≥ 0.5 = passing + penalised
+    by cost, wattage, stage count, maintenance load.
+  </p>
+
+  <div class="panel">
+    <div class="ctrls">
+      <label>population<input id="cfg-pop"   type="number" value="40" min="8"  max="200"></label>
+      <label>generations<input id="cfg-gens" type="number" value="200" min="10" max="2000"></label>
+      <label>mutation<input id="cfg-mut"     type="number" value="0.30" min="0.01" max="1" step="0.01"></label>
+      <label>crossover<input id="cfg-cross"  type="number" value="0.4" min="0" max="1" step="0.05"></label>
+      <label>target score<input id="cfg-target" type="number" value="0.95" min="0.5" max="1" step="0.01"></label>
+      <label>seed<input id="cfg-seed" type="number" placeholder="—" style="width:6rem"></label>
+      <button id="btn-start" class="btn">Start</button>
+      <button id="btn-pause" class="btn stop" disabled>Pause</button>
+      <button id="btn-reset" class="btn stop">Reset</button>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="panel">
+        <h2>Best chain <span id="best-name" style="color:#6e7681;font-size:0.75rem"></span></h2>
+        <div id="chain-view" class="chain"></div>
+        <div class="stat-grid">
+          <div class="stat" id="stat-gen"><span>generation</span><b>0</b></div>
+          <div class="stat" id="stat-score"><span>score</span><b>—</b></div>
+          <div class="stat" id="stat-pass"><span>target</span><b>—</b></div>
+          <div class="stat" id="stat-cost"><span>cost €</span><b>—</b></div>
+          <div class="stat" id="stat-watts"><span>watts</span><b>—</b></div>
+          <div class="stat" id="stat-len"><span>stages</span><b>—</b></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Funnel (best chain)</h2>
+        <div style="overflow-x: auto">
+          <table class="contam-table" id="funnel-table">
+            <thead><tr><th>contaminant</th><th>source</th><th>output</th><th>target</th><th>unit</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Score over generations</h2>
+        <canvas id="score-chart"></canvas>
+      </div>
+
+      <div class="panel">
+        <h2>Save best as new Naiad system</h2>
+        <form id="save-form">
+          <label style="color:#8b949e;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">
+            name<input type="text" id="save-name" required
+                       placeholder="e.g. Evolved well chain #1">
+          </label>
+          <label style="color:#8b949e;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">
+            slug<input type="text" id="save-slug" required pattern="[a-z0-9-]+"
+                       placeholder="evolved-well-1">
+          </label>
+          <button class="btn" type="submit" id="save-btn" disabled>Save</button>
+        </form>
+        <div id="save-msg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="naiad-payload" type="application/json">{{ payload_json|safe }}</script>
+
+<script type="module">
+  import { EvolutionEngine, makeRng } from "{% load static %}{% static 'evolution/engine.mjs' %}";
+
+  const data = JSON.parse(document.getElementById('naiad-payload').textContent);
+  const stageBySlug = {};
+  const stageSlugs = [];
+  for (const st of data.stage_types) {
+      stageBySlug[st.slug] = st;
+      stageSlugs.push(st.slug);
+  }
+  const contamLabels = {};
+  const contamUnits  = {};
+  for (const c of data.contaminants) {
+      contamLabels[c.key] = c.label;
+      contamUnits[c.key]  = c.unit;
+  }
+
+  const naiadTarget = {
+      stage_slugs:          stageSlugs,
+      stage_types_by_slug:  stageBySlug,
+      source_values:        data.source_values,
+      target_values:        data.target_values,
+      weights: {},  // engine defaults
+  };
+
+  let engine = null;
+  let loopId = null;
+  let bestEverGene = null;
+
+  const $ = (id) => document.getElementById(id);
+
+  function fmt(n, d = 3) {
+      if (n == null || !isFinite(n)) return '—';
+      const abs = Math.abs(n);
+      if (abs !== 0 && abs < 0.001) return n.toExponential(2);
+      return Number(n.toFixed(d)).toString();
+  }
+
+  function renderChain(stages) {
+      const target = $('chain-view');
+      target.innerHTML = '';
+      if (!stages || !stages.length) {
+          target.innerHTML = '<div class="row"><span class="name" style="color:#6e7681">— empty chain —</span></div>';
+          return;
+      }
+      stages.forEach((slug, i) => {
+          const st = stageBySlug[slug];
+          if (!st) return;
+          const row = document.createElement('div');
+          row.className = 'row';
+          row.innerHTML =
+              '<span class="pos">' + i + '</span>' +
+              '<span class="name">' + st.name + '</span>' +
+              '<span class="kind">' + st.kind + '</span>';
+          target.appendChild(row);
+      });
+  }
+
+  function renderStats(agent) {
+      $('stat-gen').querySelector('b').textContent = engine.generation;
+      $('stat-score').querySelector('b').textContent = fmt(agent.score, 3);
+      const passed = agent.naiad_result && agent.naiad_result.passed;
+      const passedEl = $('stat-pass');
+      passedEl.className = 'stat ' + (passed ? 'pass' : 'fail');
+      passedEl.querySelector('b').textContent = passed ? 'PASS' : 'fail';
+      const r = agent.naiad_result || {};
+      $('stat-cost').querySelector('b').textContent  = fmt(r.totalCost, 1);
+      $('stat-watts').querySelector('b').textContent = fmt(r.totalWatts, 1);
+      $('stat-len').querySelector('b').textContent   = (agent.gene.stages || []).length;
+  }
+
+  function renderFunnel(agent) {
+      const body = $('funnel-table').querySelector('tbody');
+      body.innerHTML = '';
+      const r = agent.naiad_result;
+      if (!r) return;
+      const source = data.source_values;
+      const target = data.target_values;
+      const output = r.output;
+      for (const key of Object.keys(source)) {
+          const tr = document.createElement('tr');
+          const lim = target[key];
+          let cls = 'muted';
+          if (lim != null && output[key] != null) {
+              cls = output[key] <= lim ? 'ok' : 'bad';
+          } else if (lim == null) {
+              cls = 'muted';
+          }
+          tr.innerHTML =
+              '<td>' + (contamLabels[key] || key) + '</td>' +
+              '<td>' + fmt(source[key]) + '</td>' +
+              '<td class="' + cls + '">' + fmt(output[key]) + '</td>' +
+              '<td>' + (lim != null ? fmt(lim) : '—') + '</td>' +
+              '<td class="muted">' + (contamUnits[key] || '') + '</td>';
+          body.appendChild(tr);
+      }
+  }
+
+  function drawChart() {
+      if (!engine) return;
+      const c = $('score-chart');
+      const dpr = window.devicePixelRatio || 1;
+      const w = c.clientWidth, h = c.clientHeight;
+      c.width = w * dpr; c.height = h * dpr;
+      const ctx = c.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = '#21262d'; ctx.beginPath();
+      for (const y of [0.25, 0.5, 0.75]) {
+          ctx.moveTo(0, h * (1 - y)); ctx.lineTo(w, h * (1 - y));
+      }
+      ctx.stroke();
+      // Pass threshold line at 0.5.
+      ctx.strokeStyle = '#30363d'; ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, h * 0.5); ctx.lineTo(w, h * 0.5); ctx.stroke();
+      ctx.setLineDash([]);
+
+      const hist = engine.history;
+      if (!hist.length) return;
+      const n = hist.length;
+      const xscale = n > 1 ? w / (n - 1) : w;
+      // mean
+      ctx.strokeStyle = '#8b949e'; ctx.lineWidth = 1; ctx.beginPath();
+      hist.forEach((p, i) => {
+          const x = i * xscale, y = h * (1 - Math.max(0, Math.min(1, p.mean)));
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      // best
+      ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.beginPath();
+      hist.forEach((p, i) => {
+          const x = i * xscale, y = h * (1 - Math.max(0, Math.min(1, p.best)));
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+  }
+
+  function defaultSaveNameSlug() {
+      const base = (data.system_slug || 'evolved');
+      let n = 1;
+      while (true) {
+          const s = base + '-evolved-' + n;
+          // We don't know which slugs exist; the server rejects dupes.
+          return { name: data.system_name + ' (evolved ' + n + ')', slug: s };
+      }
+  }
+
+  function updateSaveButton() {
+      const best = engine && engine.best;
+      $('save-btn').disabled = !best || !((best.gene.stages || []).length);
+      if (best && !$('save-name').value) {
+          const sug = defaultSaveNameSlug();
+          $('save-name').value = sug.name;
+          $('save-slug').value = sug.slug;
+      }
+  }
+
+  function onGeneration(eng) {
+      const best = eng.best;
+      if (best) {
+          bestEverGene = best.gene;
+          $('best-name').textContent = '(' + best.name + ')';
+          renderChain(best.gene.stages || []);
+          renderStats(best);
+          renderFunnel(best);
+      }
+      drawChart();
+      updateSaveButton();
+  }
+
+  function startEngine() {
+      const pop = parseInt($('cfg-pop').value, 10)   || 40;
+      const gens = parseInt($('cfg-gens').value, 10) || 200;
+      const mut  = parseFloat($('cfg-mut').value)    || 0.3;
+      const cross = parseFloat($('cfg-cross').value) || 0.4;
+      const tgt  = parseFloat($('cfg-target').value) || 0.95;
+      const seedRaw = $('cfg-seed').value;
+      const seed = seedRaw ? (parseInt(seedRaw, 10) >>> 0) : null;
+
+      engine = new EvolutionEngine({
+          level: 0,
+          gene_type: 'naiad',
+          naiad_target: naiadTarget,
+          population_size: pop,
+          generations_target: gens,
+          target_score: tgt,
+          rng: seed != null ? makeRng(seed) : null,
+          params: { mutation_rate: mut, crossover_rate: cross, tournament_k: 3 },
+      });
+      engine.onGeneration = onGeneration;
+      engine.init();
+      loopId = requestAnimationFrame(tickLoop);
+      $('btn-start').disabled = true;
+      $('btn-pause').disabled = false;
+  }
+
+  async function tickLoop() {
+      if (!engine || engine.status === 'paused') return;
+      if (engine.isDone()) {
+          $('btn-pause').disabled = true;
+          $('btn-start').disabled = false;
+          return;
+      }
+      // Do several ticks per animation frame to keep things snappy.
+      const batch = 3;
+      for (let i = 0; i < batch && !engine.isDone(); i++) {
+          await engine.tick();
+      }
+      loopId = requestAnimationFrame(tickLoop);
+  }
+
+  $('btn-start').addEventListener('click', () => {
+      if (!engine || engine.isDone()) {
+          startEngine();
+      } else {
+          engine.status = 'running';
+          loopId = requestAnimationFrame(tickLoop);
+          $('btn-start').disabled = true;
+          $('btn-pause').disabled = false;
+      }
+  });
+  $('btn-pause').addEventListener('click', () => {
+      if (engine) engine.status = 'paused';
+      $('btn-start').disabled = false;
+      $('btn-pause').disabled = true;
+  });
+  $('btn-reset').addEventListener('click', () => {
+      if (loopId) cancelAnimationFrame(loopId);
+      engine = null; bestEverGene = null;
+      $('chain-view').innerHTML = '';
+      $('funnel-table').querySelector('tbody').innerHTML = '';
+      $('best-name').textContent = '';
+      ['stat-gen','stat-score','stat-pass','stat-cost','stat-watts','stat-len']
+          .forEach(id => $(id).querySelector('b').textContent = '—');
+      const ctx = $('score-chart').getContext('2d');
+      ctx.clearRect(0, 0, $('score-chart').width, $('score-chart').height);
+      $('btn-start').disabled = false;
+      $('btn-pause').disabled = true;
+      $('save-btn').disabled = true;
+  });
+
+  const CSRF = '{{ csrf_token }}';
+  $('save-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!engine || !engine.best) return;
+      const gene = engine.best.gene;
+      const payload = {
+          name:   $('save-name').value.trim(),
+          slug:   $('save-slug').value.trim(),
+          stages: (gene.stages || []),
+          score:  engine.best.score,
+      };
+      $('save-msg').textContent = 'Saving…';
+      $('save-msg').className = '';
+      try {
+          const r = await fetch('{% url "naiad:evolve_save" slug=system.slug %}', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+              body:    JSON.stringify(payload),
+          });
+          const body = await r.json();
+          if (r.ok && body.ok) {
+              $('save-msg').textContent = 'Saved — opening ' + body.name + '…';
+              $('save-msg').className = 'ok';
+              setTimeout(() => { window.location.href = body.url; }, 400);
+          } else {
+              $('save-msg').textContent = body.error || 'save failed';
+              $('save-msg').className = 'err';
+          }
+      } catch (err) {
+          $('save-msg').textContent = 'network error: ' + err.message;
+          $('save-msg').className = 'err';
+      }
+  });
+
+  // Initial empty render.
+  renderChain([]);
+  window.addEventListener('resize', drawChart);
+</script>
+{% endblock %}

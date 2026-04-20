@@ -311,6 +311,173 @@ async function lutWork(agent, ctx) {
     return s;
 }
 
+// ── Naiad gene handler (water purification chain) ───────────────────
+// A Naiad agent's gene is an ordered list of StageType slugs. `work`
+// runs Naiad's steady-state simulation in JS (output_c = input_c *
+// product(1 - removal[c])) against a source/target profile pair, then
+// returns a score in [0, 1] shaped so "passes target spec AND is
+// cheap/small/low-energy" is optimized:
+//   failing  : 0..0.5  geometric mean of (target/output) across failing
+//              contaminants (closer to target → higher)
+//   passing  : 0.5..1  less cost, fewer stages, less wattage, lower
+//              maintenance load → closer to 1.0
+// The catalog (stage types + source + target + weights) lives on
+// ctx.naiad_target and is threaded through by the engine.
+function naiadRandom(rng, ctx) {
+    const t = (ctx && ctx.naiad_target) || null;
+    const slugs = (t && t.stage_slugs) || [];
+    if (!slugs.length) return { stages: [] };
+    const len = 2 + ri(rng, 5);   // 2..6 stages at birth
+    const stages = [];
+    for (let i = 0; i < len; i++) stages.push(pick(rng, slugs));
+    return { stages };
+}
+
+function naiadMutate(gene, rng, rate, ctx) {
+    const t = (ctx && ctx.naiad_target) || null;
+    const slugs = (t && t.stage_slugs) || [];
+    const next = { stages: (gene.stages || []).slice() };
+    if (!slugs.length) return next;
+    const MIN = 1, MAX = 12;
+    // Each stage has `rate` chance of being substituted for another.
+    for (let i = 0; i < next.stages.length; i++) {
+        if (rnd(rng) < rate) next.stages[i] = pick(rng, slugs);
+    }
+    // Structural edits at lower probability.
+    if (rnd(rng) < rate * 0.6 && next.stages.length < MAX) {
+        // insert
+        const pos = ri(rng, next.stages.length + 1);
+        next.stages.splice(pos, 0, pick(rng, slugs));
+    }
+    if (rnd(rng) < rate * 0.5 && next.stages.length > MIN) {
+        // delete
+        const pos = ri(rng, next.stages.length);
+        next.stages.splice(pos, 1);
+    }
+    if (rnd(rng) < rate * 0.4 && next.stages.length >= 2) {
+        // swap two adjacent (cheap reorder)
+        const pos = ri(rng, next.stages.length - 1);
+        [next.stages[pos], next.stages[pos + 1]] =
+            [next.stages[pos + 1], next.stages[pos]];
+    }
+    return next;
+}
+
+function naiadCrossover(a, b, rng) {
+    const A = (a && a.stages) || [];
+    const B = (b && b.stages) || [];
+    if (!A.length) return { stages: B.slice() };
+    if (!B.length) return { stages: A.slice() };
+    // One-point crossover on each parent's own length; keeps both
+    // contributions but lets length drift naturally.
+    const pa = 1 + ri(rng, Math.max(1, A.length - 1));
+    const pb = 1 + ri(rng, Math.max(1, B.length - 1));
+    return { stages: A.slice(0, pa).concat(B.slice(pb)) };
+}
+
+export function naiadSimulate(stages, ctx) {
+    const t = (ctx && ctx.naiad_target) || null;
+    const typesBySlug = (t && t.stage_types_by_slug) || {};
+    const source = (t && t.source_values) || {};
+    const current = Object.assign({}, source);
+    const trace = [{ label: 'source', values: Object.assign({}, current) }];
+    for (const slug of (stages || [])) {
+        const st = typesBySlug[slug];
+        if (!st) continue;
+        const removal = st.removal || {};
+        for (const key of Object.keys(current)) {
+            const raw = Number(removal[key] || 0);
+            if (!(raw > 0)) continue;
+            const f = Math.min(1, Math.max(0, raw));
+            current[key] = current[key] * (1 - f);
+        }
+        trace.push({ label: st.name, slug, values: Object.assign({}, current) });
+    }
+    return { output: current, trace };
+}
+
+async function naiadWork(agent, ctx) {
+    const t = (ctx && ctx.naiad_target) || null;
+    if (!t) { agent.output = 'no naiad_target'; return 0; }
+    const gene = agent.gene || { stages: [] };
+    const { output, trace } = naiadSimulate(gene.stages || [], ctx);
+
+    const target = t.target_values || {};
+    const typesBySlug = t.stage_types_by_slug || {};
+
+    // pass/fail against each target contaminant present in output.
+    // Targets literally set to 0 are interpreted as "below detection" —
+    // compared against `detection_eps` (default 1e-6) — otherwise the GA
+    // landscape has an unreachable cliff and scores can't exceed 0.5.
+    const detectionEps = t.detection_eps || 1e-6;
+    let allPass = true;
+    let ratioProduct = 1, ratioCount = 0;
+    const failures = [];
+    for (const key of Object.keys(target)) {
+        let lim = Number(target[key]);
+        if (!isFinite(lim)) continue;
+        if (!(key in output)) continue;   // source didn't measure it
+        if (lim <= 0) lim = detectionEps;
+        const out = Number(output[key]);
+        if (!(out > lim)) continue;
+        allPass = false;
+        failures.push(key);
+        // distance score: 1.0 means at the limit, <1 means above it
+        const ratio = lim / Math.max(out, lim * 1e-12);
+        ratioProduct *= Math.max(1e-6, Math.min(1, ratio));
+        ratioCount++;
+    }
+
+    // length / cost / energy / maintenance penalties
+    let totalCost = 0, totalWatts = 0, maintLoad = 0;
+    for (const slug of (gene.stages || [])) {
+        const st = typesBySlug[slug];
+        if (!st) continue;
+        totalCost  += Number(st.cost_eur     || 0);
+        totalWatts += Number(st.energy_watts || 0);
+        const days = Math.max(1, Number(st.maintenance_days || 365));
+        maintLoad += 1 / days;
+    }
+    const W = t.weights || {};
+    const costCap    = W.cost_cap_eur    || 300;
+    const wattCap    = W.watt_cap        || 200;
+    const lengthCap  = W.length_cap      || 12;
+    const maintCap   = W.maint_cap       || 0.1;
+    const wCost   = (W.w_cost   ?? 0.40);
+    const wWatt   = (W.w_watt   ?? 0.25);
+    const wLength = (W.w_length ?? 0.20);
+    const wMaint  = (W.w_maint  ?? 0.15);
+
+    const costPen   = Math.min(1, totalCost     / costCap);
+    const wattPen   = Math.min(1, totalWatts    / wattCap);
+    const lenPen    = Math.min(1, (gene.stages || []).length / lengthCap);
+    const maintPen  = Math.min(1, maintLoad     / maintCap);
+    const penalty   = wCost * costPen + wWatt * wattPen
+                    + wLength * lenPen + wMaint * maintPen;
+
+    let score;
+    if (allPass) {
+        score = 0.5 + 0.5 * (1 - penalty);
+    } else {
+        const geo = ratioCount > 0
+                    ? Math.pow(ratioProduct, 1 / ratioCount) : 0;
+        // cap failing scores at 0.5 so any passing chain always beats any
+        // failing one; still reward proximity to target.
+        score = 0.5 * geo;
+    }
+
+    agent.output = JSON.stringify({
+        stages: (gene.stages || []),
+        passed: allPass,
+        failures,
+        totalCost, totalWatts,
+        length: (gene.stages || []).length,
+    });
+    agent.naiad_result = { output, trace, passed: allPass, failures,
+                           totalCost, totalWatts };
+    return Math.max(0, Math.min(1, score));
+}
+
 // ── Gene-type registry ──────────────────────────────────────────────
 // The L-system path above is the default. New types just register here.
 // Each handler provides random/mutate/work; the engine dispatches on
@@ -332,6 +499,12 @@ export const GENE_TYPES = {
         random: (rng, ctx) => lutRandom(rng, (ctx && ctx.lut_target && ctx.lut_target.n) || 2),
         mutate: lutMutate,
         work: lutWork,
+    },
+    naiad: {
+        random: naiadRandom,
+        mutate: naiadMutate,
+        work: naiadWork,
+        crossover: naiadCrossover,
     },
 };
 
@@ -366,10 +539,10 @@ export class Agent {
         return child;
     }
 
-    mutate(rng, rate) {
+    mutate(rng, rate, ctx = null) {
         if (this.level === 0) {
             const handler = GENE_TYPES[this.gene_type] || GENE_TYPES.lsystem;
-            this.gene = handler.mutate(this.gene, rng, rate);
+            this.gene = handler.mutate(this.gene, rng, rate, ctx);
         } else {
             this.gene = mutateMeta(this.gene, rng, rate);
         }
@@ -411,6 +584,7 @@ export class Agent {
             gene_type: ctx.gene_type || 'lsystem',
             lut_target: ctx.lut_target || null,
             hexca_target: ctx.hexca_target || null,
+            naiad_target: ctx.naiad_target || null,
         });
         inner.init();
         await inner.runUntilDone();
@@ -446,6 +620,7 @@ export class EvolutionEngine {
         target_score = 0.95,
         params = {}, seedAgent = null, rng = null,
         gene_type = 'lsystem', lut_target = null, hexca_target = null,
+        naiad_target = null,
     } = {}) {
         this.run = run;
         this.level = level;
@@ -453,6 +628,7 @@ export class EvolutionEngine {
         this.geneType = gene_type;
         this.lutTarget = lut_target;
         this.hexcaTarget = hexca_target;
+        this.naiadTarget = naiad_target;
         this.populationSize = Math.max(2, population_size | 0);
         this.generationsTarget = Math.max(1, generations_target | 0);
         this.targetScore = target_score;
@@ -491,7 +667,8 @@ export class EvolutionEngine {
     }
 
     _makeFounder(i) {
-        const ctx = { lut_target: this.lutTarget, hexca_target: this.hexcaTarget };
+        const ctx = { lut_target: this.lutTarget, hexca_target: this.hexcaTarget,
+                      naiad_target: this.naiadTarget };
         let gene;
         if (this.seedAgent && i === 0) {
             gene = deepClone(this.seedAgent.gene);
@@ -511,7 +688,7 @@ export class EvolutionEngine {
             script: this.script,
         });
         // immediate diversity: mutate non-elite founders
-        if (i > 0) a.mutate(this.rng, this.mutationRate);
+        if (i > 0) a.mutate(this.rng, this.mutationRate, ctx);
         return a;
     }
 
@@ -522,6 +699,7 @@ export class EvolutionEngine {
             gene_type: this.geneType,
             lut_target: this.lutTarget,
             hexca_target: this.hexcaTarget,
+            naiad_target: this.naiadTarget,
         };
         for (const a of this.population) {
             await a.work(ctx);
@@ -567,11 +745,11 @@ export class EvolutionEngine {
                     script: this.script,
                     parent: p1,
                 });
-                child.mutate(this.rng, this.mutationRate);
+                child.mutate(this.rng, this.mutationRate, ctx);
                 next.push(child);
             } else {
                 const parent = this._tournament();
-                next.push(parent.clone().mutate(this.rng, this.mutationRate));
+                next.push(parent.clone().mutate(this.rng, this.mutationRate, ctx));
             }
         }
         this.population = next;

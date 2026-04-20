@@ -56,6 +56,12 @@ def simulate(system: System, source: WaterProfile,
 
     passed = None
     failures: list[str] = []
+    # Targets literally set to 0 are interpreted as "below detection" —
+    # compared against DETECTION_EPS — otherwise no finite chain can ever
+    # drive a contaminant to mathematical zero, so every system trivially
+    # "fails" on bacteria=0 / protozoa=0 / etc. 1e-6 is well below the
+    # reporting resolution of any commodity water test kit.
+    DETECTION_EPS = 1e-6
     if target is not None and target.values:
         passed = True
         for key, limit in target.values.items():
@@ -66,6 +72,8 @@ def simulate(system: System, source: WaterProfile,
             if key not in output:
                 # Source didn't measure it; we can't prove pass nor fail.
                 continue
+            if lim <= 0:
+                lim = DETECTION_EPS
             if output[key] > lim:
                 passed = False
                 failures.append(key)
