@@ -27,16 +27,14 @@ from __future__ import annotations
 
 import math
 import random
-import shlex
 import time
 from dataclasses import dataclass, field
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.utils import timezone
 from django.utils.text import slugify
 
+from naiad.evolve_dispatch import DispatchError, dispatch_via_conduit
 from naiad.models import Stage, StageType, System
 
 
@@ -168,63 +166,6 @@ def tournament(pop, fitness, rng, k=3):
         if fitness[i] > fitness[best]:
             best = i
     return pop[best]
-
-
-def _passthrough_args(system_slug: str, opts: dict) -> str:
-    """Rebuild the CLI argv for a re-invocation that will actually run
-    the GA (so NOT including --via-conduit — the remote process runs
-    inline). shlex.quote protects values so the string can be embedded
-    safely in a shell command or sbatch script."""
-    parts = [shlex.quote(system_slug),
-             '--pop', str(int(opts['pop'])),
-             '--gens', str(int(opts['gens'])),
-             '--rate', repr(float(opts['rate'])),
-             '--crossover', repr(float(opts['crossover'])),
-             '--elite', str(int(opts['elite'])),
-             '--every', str(int(opts['every']))]
-    if opts.get('seed') is not None:
-        parts += ['--seed', str(int(opts['seed']))]
-    if opts.get('save'):
-        parts += ['--save', shlex.quote(str(opts['save']))]
-    return ' '.join(parts)
-
-
-def _render_sbatch(system: System, target, passthrough: str,
-                   opts: dict) -> str:
-    """Render an sbatch script that runs naiad_evolve inside a velour
-    checkout on the cluster. Config keys on the target (with sensible
-    ALICE defaults): remote_velour_dir, partition, time_limit, account,
-    cpus_per_task, mem."""
-    cfg = target.config or {}
-    remote_dir    = cfg.get('remote_velour_dir', '~/velour-dev')
-    partition     = cfg.get('partition', 'cpu-short')
-    time_limit    = cfg.get('time_limit', '01:00:00')
-    account       = cfg.get('account', '')
-    cpus_per_task = int(cfg.get('cpus_per_task', 1))
-    mem           = cfg.get('mem', '2G')
-    short_slug    = slugify(system.slug)[:40] or 'naiad'
-
-    header = [
-        '#!/bin/bash',
-        f'#SBATCH --job-name=naiad-{short_slug}',
-        f'#SBATCH --partition={partition}',
-        f'#SBATCH --time={time_limit}',
-        f'#SBATCH --cpus-per-task={cpus_per_task}',
-        f'#SBATCH --mem={mem}',
-        '#SBATCH --output=naiad-%j.out',
-        '#SBATCH --error=naiad-%j.err',
-    ]
-    if account:
-        header.append(f'#SBATCH --account={account}')
-
-    body = [
-        '',
-        'set -euo pipefail',
-        f'cd {remote_dir}',
-        f'venv/bin/python manage.py naiad_evolve {passthrough}',
-        '',
-    ]
-    return '\n'.join(header + body)
 
 
 class Command(BaseCommand):
@@ -361,70 +302,22 @@ class Command(BaseCommand):
     # ── Conduit dispatch ──────────────────────────────────────────
     def _dispatch_via_conduit(self, system: System, target_slug: str,
                               opts: dict) -> None:
-        """Package this run as a Conduit Job and dispatch it."""
-        # Imported lazily so naiad doesn't force a conduit import for
-        # the inline GA path.
-        from conduit.executors import dispatch
-        from conduit.models import Job, JobTarget
-        from conduit.routing import RoutingError
-
+        """Package this run as a Conduit Job, dispatch, and block
+        until terminal — the _local_shell executor runs in a daemon
+        thread that would otherwise die at CLI exit (fine under
+        gunicorn, broken here)."""
         try:
-            target = JobTarget.objects.get(slug=target_slug)
-        except JobTarget.DoesNotExist:
-            raise CommandError(
-                f'No Conduit JobTarget with slug {target_slug!r}. '
-                f'Run `manage.py seed_conduit_defaults` or create one '
-                f'at /conduit/targets/new/.')
-        if not target.enabled:
-            raise CommandError(
-                f'JobTarget {target_slug!r} is disabled.')
+            job = dispatch_via_conduit(system, target_slug, opts)
+        except DispatchError as exc:
+            raise CommandError(str(exc))
 
-        passthrough = _passthrough_args(system.slug, opts)
-        job_slug = (f'naiad-evolve-{slugify(system.slug)}-'
-                    f'{timezone.now():%Y%m%d-%H%M%S}')
-        job_name = f'Naiad evolve: {system.slug}'
-
-        if target.kind in ('local', 'vps'):
-            cwd = str(settings.BASE_DIR)
-            python_bin = f'{cwd}/venv/bin/python'
-            command = (f'{shlex.quote(python_bin)} manage.py naiad_evolve '
-                       f'{passthrough}')
-            timeout = max(3600, int(opts['gens']) * 10)
-            job = Job.objects.create(
-                slug=job_slug, name=job_name, kind='shell',
-                payload={'command': command, 'cwd': cwd,
-                         'timeout': timeout},
-                requested_target=target,
-            )
-        elif target.kind in ('slurm', 'slurm_manual'):
-            script = _render_sbatch(system, target, passthrough, opts)
-            job = Job.objects.create(
-                slug=job_slug, name=job_name, kind='slurm_script',
-                payload={'script': script},
-                requested_target=target,
-            )
-        else:
-            raise CommandError(
-                f'JobTarget kind {target.kind!r} is not supported for '
-                f'naiad_evolve (need local, vps, slurm, or slurm_manual).')
-
-        try:
-            dispatch(job)
-        except RoutingError as exc:
-            raise CommandError(f'routing failed: {exc}')
-
-        job.refresh_from_db()
         self.stdout.write(self.style.SUCCESS(
             f'dispatched Conduit job {job.slug}'))
         self.stdout.write(
-            f'  target: {target.name} ({target.get_kind_display()})')
+            f'  target: {job.target.name} '
+            f'({job.target.get_kind_display()})')
         self.stdout.write(f'  watch : /conduit/jobs/{job.slug}/')
 
-        # For local/vps shell jobs, the executor uses a daemon thread
-        # that would die when this CLI process exits — so block here
-        # until the Job reaches a terminal state, then print the
-        # captured output. Handoff kinds return immediately; nothing
-        # to wait on until the human submits.
         terminal = {'done', 'failed', 'cancelled', 'handoff'}
         if job.status not in terminal:
             last_status = None

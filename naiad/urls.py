@@ -16,5 +16,7 @@ urlpatterns = [
     path('<slug:slug>/test/',      views.run_test,     name='run_test'),
     path('<slug:slug>/evolve/',    views.evolve,       name='evolve'),
     path('<slug:slug>/evolve/save/', views.evolve_save, name='evolve_save'),
+    path('<slug:slug>/evolve/via-conduit/',
+         views.evolve_via_conduit, name='evolve_via_conduit'),
     path('test/<int:pk>/',         views.test_detail,  name='test_detail'),
 ]

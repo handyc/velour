@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
+from .evolve_dispatch import DispatchError, dispatch_via_conduit
 from .models import (
     CONTAMINANTS, CONTAMINANT_LABELS, CONTAMINANT_UNITS,
     Stage, StageType, System, TestRun, WaterProfile,
@@ -214,10 +215,79 @@ def evolve(request, slug):
             for (k, label, unit) in CONTAMINANTS
         ],
     }
+    # Conduit targets eligible for naiad_evolve dispatch. Imported
+    # lazily so naiad doesn't hard-depend on conduit being installed.
+    try:
+        from conduit.models import JobTarget
+        conduit_targets = list(JobTarget.objects.filter(
+            enabled=True,
+            kind__in=('local', 'vps', 'slurm', 'slurm_manual'),
+        ).order_by('kind', '-priority', 'name'))
+    except Exception:
+        conduit_targets = []
+
     return render(request, 'naiad/evolve.html', {
         'system':  system,
         'payload_json': json.dumps(payload),
+        'conduit_targets': conduit_targets,
     })
+
+
+@login_required
+@require_POST
+def evolve_via_conduit(request, slug):
+    """Dispatch a server-side GA for this system through Conduit on
+    the chosen JobTarget. Redirects to the Conduit job detail page so
+    the user can watch status / read stdout."""
+    system = get_object_or_404(
+        System.objects.select_related('source', 'target'), slug=slug)
+    if not system.target:
+        messages.error(request, 'Evolve needs a target profile first.')
+        return redirect('naiad:system_detail', slug=system.slug)
+
+    def _int(name, default, lo, hi):
+        try:
+            v = int(request.POST.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _float(name, default, lo, hi):
+        try:
+            v = float(request.POST.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    target_slug = (request.POST.get('target_slug') or '').strip()
+    if not target_slug:
+        messages.error(request, 'Pick a Conduit target.')
+        return redirect('naiad:evolve', slug=system.slug)
+
+    seed_raw = (request.POST.get('seed') or '').strip()
+    save_raw = (request.POST.get('save') or '').strip()
+    opts = {
+        'pop':       _int('pop', 60, 4, 400),
+        'gens':      _int('gens', 120, 1, 10_000),
+        'rate':      _float('rate', 0.25, 0.0, 1.0),
+        'crossover': _float('crossover', 0.7, 0.0, 1.0),
+        'elite':     _int('elite', 2, 0, 20),
+        'every':     _int('every', 10, 1, 1_000),
+        'seed':      int(seed_raw) if seed_raw else None,
+        'save':      slugify(save_raw) if save_raw else None,
+        'requester': request.user if request.user.is_authenticated else None,
+    }
+
+    try:
+        job = dispatch_via_conduit(system, target_slug, opts)
+    except DispatchError as exc:
+        messages.error(request, f'dispatch failed: {exc}')
+        return redirect('naiad:evolve', slug=system.slug)
+
+    messages.success(
+        request,
+        f'Dispatched {job.name} to {job.target.name}.')
+    return redirect('conduit:job_detail', slug=job.slug)
 
 
 @login_required

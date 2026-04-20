@@ -131,6 +131,44 @@
     </div>
   </div>
 
+  {% if conduit_targets %}
+  <div class="panel">
+    <h2>Dispatch server-side run via Conduit</h2>
+    <p style="color:#6e7681; font-size:0.72rem; margin:0 0 0.4rem">
+      Runs the same GA headlessly through <a href="{% url 'conduit:index' %}"
+      style="color:#58a6ff; text-decoration:none">Conduit</a>.
+      Local targets stream stdout into the Job. Slurm targets render
+      an sbatch script + handoff row. <code>save-as</code> creates a
+      new Naiad System from the winner (only round-trips for local
+      runs).
+    </p>
+    <form method="post"
+          action="{% url 'naiad:evolve_via_conduit' slug=system.slug %}"
+          class="ctrls">
+      {% csrf_token %}
+      <label>target
+        <select name="target_slug"
+                style="background:#0d1117; color:#c9d1d9;
+                       border:1px solid #30363d; border-radius:3px;
+                       padding:0.25rem 0.4rem; font-size:0.78rem;
+                       min-width:10rem">
+          {% for t in conduit_targets %}
+          <option value="{{ t.slug }}">{{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>pop<input name="pop"   type="number" value="60"  min="4"  max="400"></label>
+      <label>gens<input name="gens" type="number" value="200" min="1"  max="10000"></label>
+      <label>rate<input name="rate" type="number" value="0.25" min="0" max="1" step="0.01"></label>
+      <label>seed<input name="seed" type="number" placeholder="—" style="width:6rem"></label>
+      <label>save as<input name="save" type="text"
+                           placeholder="evolved-slug"
+                           style="width:11rem"></label>
+      <button class="btn" type="submit">Dispatch</button>
+    </form>
+  </div>
+  {% endif %}
+
   <div class="cols">
     <div>
       <div class="panel">
