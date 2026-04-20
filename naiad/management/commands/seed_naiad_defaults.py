@@ -441,7 +441,40 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_system, stage_type=st, position=i)
 
+        # Evolved counterpart — naiad_evolve seed=42, pop=80, gens=250,
+        # --cost-cap 1200 --watt-cap 700. Same cost as the reference
+        # (~€545) but passes eu-drinking-urine-reuse and cuts power
+        # 430 W → 250 W by dropping vapour-compression + stripping in
+        # favour of repeated RO + nitrification.
+        urine_v2, urine_v2_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v2', defaults=dict(
+                name='Urine → Drinking (GA-tuned v2)',
+                description='GA-evolved passing chain (seed 42, urine-scale '
+                            'caps €1200 / 700 W). No vapour-compression, no '
+                            'ammonia stripping — three RO passes plus three '
+                            'nitrification stages do the same job at roughly '
+                            'half the power draw.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v2_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'sediment-1um',
+                'nitrification-bioreactor',
+                'urea-hydrolysis',
+                'reverse-osmosis',
+                'nitrification-bioreactor',
+                'nitrification-bioreactor',
+                'slow-sand',
+                'reverse-osmosis',
+                'reverse-osmosis',
+                'electrochem-oxidation',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v2, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
-            f'"{urine_system.name}".'))
+            f'"{urine_system.name}", "{urine_v2.name}".'))
