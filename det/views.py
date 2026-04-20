@@ -31,13 +31,13 @@ def create_search(request):
     (default ~5-15s). For heavier sweeps the operator should use the
     `det_search` management command instead."""
     try:
-        n_colors = int(request.POST.get('n_colors', 4))
-        n_candidates = int(request.POST.get('n_candidates', 150))
-        n_rules = int(request.POST.get('n_rules_per_candidate', 80))
-        wildcard_pct = int(request.POST.get('wildcard_pct', 25))
-        horizon = int(request.POST.get('horizon', 40))
-        W = int(request.POST.get('screen_width', 20))
-        H = int(request.POST.get('screen_height', 20))
+        n_colors = int(request.POST.get('n_colors', 3))
+        n_candidates = int(request.POST.get('n_candidates', 200))
+        n_rules = int(request.POST.get('n_rules_per_candidate', 100))
+        wildcard_pct = int(request.POST.get('wildcard_pct', 35))
+        horizon = int(request.POST.get('horizon', 60))
+        W = int(request.POST.get('screen_width', 18))
+        H = int(request.POST.get('screen_height', 16))
     except ValueError:
         return HttpResponseBadRequest('Bad integer parameter.')
 

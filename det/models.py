@@ -34,24 +34,30 @@ class SearchRun(models.Model):
     label = models.CharField(max_length=200, blank=True,
         help_text='Optional human label. Auto-generated from params '
                   'if left blank.')
-    n_colors = models.PositiveSmallIntegerField(default=4,
+    n_colors = models.PositiveSmallIntegerField(default=3,
         help_text='Number of cell colors (2-4). n=0 and n=1 are '
-                  'trivially deterministic and not useful here.')
+                  'trivially deterministic and not useful here. 3 is '
+                  'the empirical sweet spot — 4 needs many more rules '
+                  'to cover the 7-tuple space and most candidates '
+                  'freeze as class2.')
     n_candidates = models.PositiveIntegerField(default=200,
         help_text='How many random rulesets to generate and score.')
-    n_rules_per_candidate = models.PositiveIntegerField(default=80,
-        help_text='How many 7-tuple rules in each candidate ruleset.')
-    wildcard_pct = models.PositiveSmallIntegerField(default=25,
+    n_rules_per_candidate = models.PositiveIntegerField(default=100,
+        help_text='How many 7-tuple rules in each candidate ruleset. '
+                  'Denser rule tables produce richer dynamics.')
+    wildcard_pct = models.PositiveSmallIntegerField(default=35,
         help_text='Fraction of neighbor positions that are wildcards '
                   '(-1 / "any"). Higher = coarser rules, more coverage '
-                  'of the 7-tuple space but noisier dynamics.')
-    screen_width = models.PositiveSmallIntegerField(default=20,
+                  'of the 7-tuple space but noisier dynamics. ~35 is '
+                  'where class4 density peaks in practice.')
+    screen_width = models.PositiveSmallIntegerField(default=18,
         help_text='Grid width used to screen candidates (kept small '
                   'so a sweep is interactive).')
-    screen_height = models.PositiveSmallIntegerField(default=20)
-    horizon = models.PositiveSmallIntegerField(default=40,
+    screen_height = models.PositiveSmallIntegerField(default=16)
+    horizon = models.PositiveSmallIntegerField(default=60,
         help_text='Max ticks to step each candidate forward before '
-                  'measuring.')
+                  'measuring. Needs to be long enough that early '
+                  'transients settle — 40 wasn\u2019t.')
     seed = models.CharField(max_length=64, blank=True,
         help_text='RNG seed for reproducibility. Auto-set from '
                   'timestamp if blank.')
