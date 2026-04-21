@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     'oneliner',
     'konso',
     'isolation',
+    'radiant',
 ]
 
 MIDDLEWARE = [

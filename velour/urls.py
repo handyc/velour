@@ -59,6 +59,7 @@ urlpatterns = [
     path('oneliner/', include('oneliner.urls')),
     path('konso/', include('konso.urls')),
     path('isolation/', include('isolation.urls')),
+    path('radiant/', include('radiant.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

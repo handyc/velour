@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}Radiant — server psychohistory{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 1200px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .rad-wrap .tagline { color: #8b949e; font-size: 0.8rem; margin: 0 0 0.7rem;
+                       max-width: 78ch; line-height: 1.5; }
+  .rad-wrap h2 { font-size: 0.95rem; margin: 1.3rem 0 0.4rem;
+                 color: #c9d1d9; }
+  .rad-wrap h2 .lite { color: #6e7681; font-weight: normal;
+                       font-size: 0.72rem; margin-left: 0.5rem; }
+
+  .rad-wrap table { border-collapse: collapse; font-size: 0.76rem;
+                    font-family: ui-monospace, Menlo, monospace;
+                    width: 100%; margin: 0.2rem 0 0.6rem; }
+  .rad-wrap th, .rad-wrap td { padding: 0.25rem 0.5rem;
+                               border-bottom: 1px solid #21262d;
+                               text-align: left; }
+  .rad-wrap th { color: #8b949e; font-weight: normal;
+                 background: #0d1117; text-transform: uppercase;
+                 font-size: 0.68rem; letter-spacing: 0.04em; }
+  .rad-wrap td.num { text-align: right;
+                     font-variant-numeric: tabular-nums; }
+  .rad-wrap td.regime { font-size: 0.68rem; text-transform: uppercase;
+                        letter-spacing: 0.05em; color: #6e7681; }
+  .rad-wrap tr.regime-linear td.regime      { color: #2ea043; }
+  .rad-wrap tr.regime-logistic td.regime    { color: #d29922; }
+  .rad-wrap tr.regime-speculative td.regime { color: #f85149; }
+  .rad-wrap tr.horizon-now { background: #161b22; }
+
+  .rad-wrap .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.6rem 0.8rem; margin: 0.4rem 0 0.8rem;
+  }
+  .rad-wrap .panel.purchase {
+    border-color: #2ea043; background: #0f1a11;
+  }
+  .rad-wrap .panel.caveat {
+    border-color: #6e2626; background: #1a1010;
+  }
+
+  .rad-wrap .box-grid { display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                        gap: 0.6rem; margin-top: 0.4rem; }
+  .rad-wrap .box {
+    background: #161b22; border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.5rem 0.7rem; font-size: 0.8rem;
+  }
+  .rad-wrap .box h4 { margin: 0 0 0.3rem; font-size: 0.85rem;
+                      color: #58a6ff; }
+  .rad-wrap .box dl { display: grid; grid-template-columns: auto 1fr;
+                      gap: 0.15rem 0.6rem; margin: 0; font-size: 0.76rem; }
+  .rad-wrap .box dt { color: #8b949e; }
+  .rad-wrap .box dd { margin: 0; font-family: ui-monospace, Menlo, monospace;
+                      font-variant-numeric: tabular-nums; }
+  .rad-wrap .box .note { color: #8b949e; font-size: 0.72rem;
+                         margin-top: 0.4rem; line-height: 1.4; }
+
+  .rad-wrap .scroll { overflow-x: auto; }
+  .rad-wrap details { margin: 0.4rem 0; }
+  .rad-wrap details summary { cursor: pointer; font-size: 0.78rem;
+                              color: #58a6ff; }
+  .rad-wrap .speculate-note {
+    color: #8b949e; font-size: 0.72rem; font-style: italic;
+    padding: 0.15rem 0.5rem;
+  }
+  .rad-wrap a.toggle {
+    color: #58a6ff; font-size: 0.72rem; text-decoration: none;
+    margin-left: 0.4rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<h1>Radiant</h1>
+<p class="tagline">
+  A Prime Radiant for LUCDH: projects the server fleet across twelve
+  horizons, from the next year to ten millennia. Linear extrapolation
+  is actionable for a decade; logistic saturation stretches to a
+  century; beyond that the output is deliberately ceremonial —
+  hardware, institutions, and the discipline itself drift faster than
+  any model can follow.
+</p>
+
+<h2>Current fleet <span class="lite">· {{ servers.count }} servers</span></h2>
+<div class="scroll">
+<table>
+  <thead>
+    <tr>
+      <th>Server</th><th>Role</th><th>Status</th>
+      <th class="num">RAM GB</th><th class="num">Storage GB</th>
+      <th class="num">Cores</th><th class="num">Used GB</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for s in servers %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td>{{ s.get_role_display }}</td>
+      <td>{{ s.get_status_display }}</td>
+      <td class="num">{{ s.ram_gb }}</td>
+      <td class="num">{{ s.storage_gb }}</td>
+      <td class="num">{{ s.cpu_cores }}</td>
+      <td class="num">{{ s.storage_used_gb|floatformat:0 }}</td>
+      <td>{{ s.notes|truncatechars:60 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Workload classes <span class="lite">· {{ classes|length }} classes</span></h2>
+<div class="scroll">
+<table>
+  <thead>
+    <tr>
+      <th>Class</th>
+      <th class="num">Current</th>
+      <th class="num">RAM MB</th>
+      <th class="num">Storage MB</th>
+      <th class="num">Peak users</th>
+      <th class="num">New / yr</th>
+      <th class="num">Saturation K</th>
+      <th>Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for c in classes %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td class="num">{{ c.current_count }}</td>
+      <td class="num">{{ c.typical_ram_mb }}</td>
+      <td class="num">{{ c.typical_storage_mb }}</td>
+      <td class="num">{{ c.peak_concurrency }}</td>
+      <td class="num">{{ c.new_per_year|floatformat:1 }}</td>
+      <td class="num">{{ c.saturation_count }}</td>
+      <td>{{ c.notes|truncatechars:70 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>May 2026 purchase recommendation
+  <span class="lite">
+    · sized for ~2× the 5-year peak
+    {% if split_wp %}
+      · <a class="toggle" href="?split=0">show unified alternative</a>
+    {% else %}
+      · <a class="toggle" href="?split=1">show split alternative</a>
+    {% endif %}
+  </span>
+</h2>
+<div class="panel purchase">
+  <div class="box-grid">
+    {% for box in recommendation.boxes %}
+      <div class="box">
+        <h4>{{ box.label }}</h4>
+        <dl>
+          <dt>RAM</dt><dd>{{ box.ram_gb }} GB</dd>
+          <dt>Storage</dt><dd>{{ box.storage_gb }} GB</dd>
+          <dt>CPU cores</dt><dd>{{ box.cpu_cores }}</dd>
+        </dl>
+        <div class="note">{{ box.notes }}</div>
+      </div>
+    {% endfor %}
+  </div>
+  <div class="note" style="margin-top:0.5rem;color:#8b949e;font-size:0.72rem;">
+    Basis: 5-year peak of
+    {{ recommendation.basis_ram_peak_gb|floatformat:1 }} GB RAM and
+    {{ recommendation.basis_storage_gb|floatformat:0 }} GB storage.
+    Headroom of 2× keeps replacement on a 5-7 year cadence.
+    {% if recommendation.split %}
+      Splitting the WordPress classroom load isolates the 40-student
+      concurrency spikes from the 24/7 Django production workload.
+    {% else %}
+      A single box is simpler to operate but couples classroom spikes
+      to production — one noisy classroom can slow a live site.
+    {% endif %}
+  </div>
+</div>
+
+<h2>Twelve-horizon forecast
+  <span class="lite">· linear → logistic → speculative</span></h2>
+<div class="scroll">
+<table>
+  <thead>
+    <tr>
+      <th>Horizon</th>
+      <th>Regime</th>
+      <th class="num">Projects</th>
+      <th class="num">RAM idle GB</th>
+      <th class="num">RAM peak GB</th>
+      <th class="num">Storage GB</th>
+      <th class="num">Cores</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in forecast_rows %}
+    <tr class="regime-{{ row.regime }} {% if row.years == 0 %}horizon-now{% endif %}">
+      <td>
+        {% if row.years == 0 %}now{% else %}+{{ row.years }}y{% endif %}
+      </td>
+      <td class="regime">{{ row.regime }}</td>
+      <td class="num">{{ row.total_projects|floatformat:0 }}</td>
+      <td class="num">{{ row.total_ram_idle_gb|floatformat:1 }}</td>
+      <td class="num">{{ row.total_ram_peak_gb|floatformat:1 }}</td>
+      <td class="num">{{ row.total_storage_gb|floatformat:0 }}</td>
+      <td class="num">{{ row.total_cpu_cores }}</td>
+    </tr>
+    {% if row.narrative %}
+      <tr><td colspan="7" class="speculate-note">↳ {{ row.narrative }}</td></tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<details>
+  <summary>Per-class breakdown at each horizon</summary>
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Horizon</th><th>Class</th>
+        <th class="num">Projects</th>
+        <th class="num">RAM idle</th>
+        <th class="num">RAM peak</th>
+        <th class="num">Storage GB</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in forecast_rows %}
+      {% for cls in row.per_class %}
+        <tr class="regime-{{ row.regime }}">
+          <td>{% if row.years == 0 %}now{% else %}+{{ row.years }}y{% endif %}</td>
+          <td>{{ cls.class_name }}</td>
+          <td class="num">{{ cls.projects|floatformat:0 }}</td>
+          <td class="num">{{ cls.ram_idle_gb|floatformat:2 }}</td>
+          <td class="num">{{ cls.ram_peak_gb|floatformat:2 }}</td>
+          <td class="num">{{ cls.storage_gb|floatformat:0 }}</td>
+        </tr>
+      {% endfor %}
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+
+<div class="panel caveat">
+  <div style="font-size:0.78rem;color:#c9d1d9;">
+    <strong style="color:#f85149;">Seldon disclaimer.</strong>
+    Psychohistory works on masses, not individuals. These projections are
+    trustworthy only at horizons where the underlying assumptions remain
+    roughly stable. Numbers past ~100 years are ceremonial — Leiden
+    University was founded in 1575 (itself 451 years old in 2026); the
+    500- to 10,000-year horizons exist to remind the operator that
+    hardware, storage media, programming languages, the discipline of
+    digital humanities, and the institution itself are all moving
+    targets over those spans.
+  </div>
+</div>
+
+</div>
+{% endblock %}
