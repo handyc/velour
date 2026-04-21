@@ -1,17 +1,20 @@
-"""Oneliner — C programs short enough to fit in a tweet.
+"""Oneliner — programs short enough to fit in a tweet.
 
 The whole point of the app is the 80-character ceiling: every row in
 `Oneliner.code` must be ≤ 80 chars after trailing whitespace is
 stripped. That's the Fortran punch-card / 80-column terminal limit,
-and it forces K&R tricks (implicit int return, comma operator for
-side effects, `main(c){…}` as a free counter) that are fun to look
-at but actively discouraged in modern C. This app is a museum for
+and it forces tricks (K&R implicit int, comma operator for side
+effects, `main(c){…}` as a free counter in C; parameter expansion,
+brace expansion, one-letter flags in bash) that are fun to look at
+but actively discouraged in modern code. This app is a museum for
 them.
 
-`compile()` shells out to `cc` (whatever `/usr/bin/cc` resolves to)
-with the row's own `compile_flags` and captures stderr + the stripped
-binary size. `run()` executes the compiled artifact with a stdin
-string and a 3-second timeout and captures stdout.
+Two languages are supported. `language='c'` shells out to `cc`
+(whatever `/usr/bin/cc` resolves to) with the row's `compile_flags`
+and captures stderr + the stripped binary size; `run()` executes the
+compiled artifact. `language='bash'` is interpreted: `compile()`
+reduces to `bash -n` (syntax check only, no binary), and `run()`
+execs `bash -c <code>` directly.
 
 Security note: compile+run execute as the Velour web-process uid,
 same as `conduit.executors._local_shell`. This is not a sandbox.
@@ -35,7 +38,7 @@ MAX_LINE = 80
 
 
 class Oneliner(models.Model):
-    """One tiny C program."""
+    """One tiny program."""
 
     STATUS_CHOICES = [
         ('unknown', 'Not yet compiled'),
@@ -44,8 +47,17 @@ class Oneliner(models.Model):
         ('error',   'Compile failed'),
     ]
 
+    LANGUAGE_CHOICES = [
+        ('c',    'C'),
+        ('bash', 'Bash'),
+    ]
+
     slug = models.SlugField(unique=True, max_length=80)
     name = models.CharField(max_length=160)
+    language = models.CharField(
+        max_length=4, choices=LANGUAGE_CHOICES, default='c',
+        help_text='"c" compiles with cc and runs the binary; '
+                  '"bash" interprets directly via `bash -c`.')
     purpose = models.TextField(
         blank=True,
         help_text='One-sentence description of what the program does '
@@ -55,10 +67,11 @@ class Oneliner(models.Model):
                   '≤ 80 characters. Trailing blank lines are allowed '
                   'but ignored for the count.')
     compile_flags = models.CharField(
-        max_length=200, default='-w',
-        help_text='Extra cc flags. `-w` suppresses warnings (most of '
-                  'these programs are deliberately K&R-style and '
-                  'compile with a dozen warnings under -Wall).')
+        max_length=200, default='-w', blank=True,
+        help_text='For C: extra cc flags. `-w` suppresses warnings '
+                  '(K&R-style classics trigger many -Wall warnings). '
+                  'For bash: extra flags passed before `-c` '
+                  '(e.g. `-u` for undefined-variable checking).')
     stdin_fixture = models.TextField(
         blank=True,
         help_text='Optional canonical stdin to feed to run(). '
@@ -118,13 +131,17 @@ class Oneliner(models.Model):
                 f'Every line must be ≤ {MAX_LINE} chars. {msg}.'})
 
     def compile(self, keep_binary: bool = False) -> dict:
-        """Shell out to cc, capture stderr + stripped binary size.
-        Updates last_* fields and saves. Returns a dict for immediate
-        UI consumption: {status, output, binary_size, binary_path}.
+        """Shell out to cc (C) or bash -n (bash), capture stderr +
+        stripped binary size. Updates last_* fields and saves. Returns
+        a dict for immediate UI consumption: {status, output,
+        binary_size, binary_path}.
 
         keep_binary=True leaves the compiled artifact on disk so a
         subsequent run() doesn't have to recompile. The caller is
-        responsible for cleaning up via `_cleanup_binary`."""
+        responsible for cleaning up via `_cleanup_binary`. Ignored
+        for bash (no binary is produced)."""
+        if self.language == 'bash':
+            return self._compile_bash()
         cc = shutil.which('cc') or shutil.which('gcc')
         if not cc:
             result = {'status': 'error',
@@ -174,10 +191,43 @@ class Oneliner(models.Model):
             result['binary_path'] = None
         return result
 
+    def _compile_bash(self) -> dict:
+        """Bash's "compile" step is `bash -n` — parse-only syntax
+        check. No binary is produced; binary_size stays None."""
+        bash = shutil.which('bash')
+        if not bash:
+            result = {'status': 'error',
+                      'output': 'No bash on PATH.',
+                      'binary_size': None, 'binary_path': None}
+            self._record_compile(result)
+            return result
+        try:
+            proc = subprocess.run(
+                [bash, '-n', '-c', self.code],
+                capture_output=True, text=True, timeout=3)
+        except subprocess.TimeoutExpired:
+            result = {'status': 'error',
+                      'output': 'bash -n timed out after 3s.',
+                      'binary_size': None, 'binary_path': None}
+            self._record_compile(result)
+            return result
+        output = (proc.stderr or '').strip()
+        if proc.returncode != 0:
+            result = {'status': 'error',
+                      'output': output or 'bash reported a syntax error.',
+                      'binary_size': None, 'binary_path': None}
+        else:
+            result = {'status': 'ok', 'output': output,
+                      'binary_size': None, 'binary_path': None}
+        self._record_compile(result)
+        return result
+
     def run(self, stdin: str | None = None, timeout: float = 3.0) -> dict:
         """Compile if needed, then execute with `stdin`. Captures the
         first 8KB of stdout + exit code. Updates last_run_* and
         saves."""
+        if self.language == 'bash':
+            return self._run_bash(stdin=stdin, timeout=timeout)
         compiled = self.compile(keep_binary=True)
         if compiled['status'] == 'error' or not compiled['binary_path']:
             result = {'exit': None,
@@ -205,6 +255,38 @@ class Oneliner(models.Model):
         finally:
             shutil.rmtree(binp.parent, ignore_errors=True)
 
+        self._record_run(result)
+        return result
+
+    def _run_bash(self, stdin: str | None, timeout: float) -> dict:
+        """Execute the code through `bash -c` with stdin. Runs a
+        syntax check first so a bad script is reported as a compile
+        error, not an exit-code soup."""
+        check = self._compile_bash()
+        if check['status'] == 'error':
+            result = {'exit': None,
+                      'stdout': '(syntax check failed; see compile output)',
+                      'truncated': False}
+            self._record_run(result)
+            return result
+        bash = shutil.which('bash')
+        flags = (self.compile_flags or '').split()
+        cmd = [bash, *flags, '-c', self.code]
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=(stdin if stdin is not None else self.stdin_fixture),
+                capture_output=True, text=True, timeout=timeout)
+            stdout = proc.stdout or ''
+            truncated = len(stdout) > 8192
+            if truncated:
+                stdout = stdout[:8192] + '\n...[truncated]'
+            result = {'exit': proc.returncode,
+                      'stdout': stdout, 'truncated': truncated}
+        except subprocess.TimeoutExpired:
+            result = {'exit': None,
+                      'stdout': f'(timed out after {timeout}s)',
+                      'truncated': False}
         self._record_run(result)
         return result
 

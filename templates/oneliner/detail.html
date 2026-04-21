@@ -82,6 +82,7 @@
 
   <div class="panel">
     <div class="meta-grid">
+      <div><div class="lbl">language</div><div>{{ program.get_language_display }}</div></div>
       <div><div class="lbl">longest line</div><div>{{ program.char_count }} / {{ max_line }} ch</div></div>
       <div><div class="lbl">total chars</div><div>{{ program.total_chars }}</div></div>
       <div><div class="lbl">lines</div><div>{{ program.n_lines }}</div></div>
@@ -91,7 +92,7 @@
         <div>{% if program.last_binary_size %}{{ program.last_binary_size }} B{% else %}—{% endif %}</div></div>
       <div><div class="lbl">last exit</div>
         <div>{% if program.last_run_exit is not None %}{{ program.last_run_exit }}{% else %}—{% endif %}</div></div>
-      <div><div class="lbl">compile flags</div><div><code>{{ program.compile_flags|default:"—" }}</code></div></div>
+      <div><div class="lbl">{% if program.language == 'bash' %}bash{% else %}compile{% endif %} flags</div><div><code>{{ program.compile_flags|default:"—" }}</code></div></div>
     </div>
   </div>
 
@@ -101,10 +102,16 @@
   </div>
 
   <div class="panel">
-    <h2>Compile</h2>
+    <h2>{% if program.language == 'bash' %}Syntax check{% else %}Compile{% endif %}</h2>
     <form method="post" action="{% url 'oneliner:compile' slug=program.slug %}" class="inline">
       {% csrf_token %}
-      <button class="btn primary" type="submit">Compile with cc {{ program.compile_flags }}</button>
+      <button class="btn primary" type="submit">
+        {% if program.language == 'bash' %}
+          Check with bash -n
+        {% else %}
+          Compile with cc {{ program.compile_flags }}
+        {% endif %}
+      </button>
     </form>
     {% if program.last_compile_output %}
     <pre class="blk" style="color:#ffa198">{{ program.last_compile_output }}</pre>
@@ -120,7 +127,13 @@
       </label>
       <textarea name="stdin" class="mono" rows="2">{{ program.stdin_fixture }}</textarea>
       <div style="margin-top:0.4rem">
-        <button class="btn primary" type="submit">Compile + run (3s timeout)</button>
+        <button class="btn primary" type="submit">
+          {% if program.language == 'bash' %}
+            Run via bash -c (3s timeout)
+          {% else %}
+            Compile + run (3s timeout)
+          {% endif %}
+        </button>
       </div>
     </form>
     {% if program.last_run_stdout or program.last_run_exit is not None %}

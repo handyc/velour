@@ -55,6 +55,15 @@
            value="{{ values.slug }}"
            placeholder="auto-slugified from name if blank">
 
+    <label for="id_language">Language</label>
+    <select id="id_language" name="language"
+            style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                   border-radius:3px;padding:0.35rem 0.5rem;font-size:0.85rem;
+                   font-family:inherit;">
+      <option value="c" {% if values.language == 'c' %}selected{% endif %}>C (cc)</option>
+      <option value="bash" {% if values.language == 'bash' %}selected{% endif %}>Bash (bash -c)</option>
+    </select>
+
     <label for="id_purpose">Purpose</label>
     <textarea id="id_purpose" name="purpose" rows="2"
               placeholder="What it does and the trick that makes it fit.">{{ values.purpose }}</textarea>

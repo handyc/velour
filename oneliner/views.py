@@ -11,7 +11,10 @@ from .models import MAX_LINE, Oneliner
 @login_required
 def index(request):
     sort = request.GET.get('sort', 'name')
+    lang = request.GET.get('lang', '')
     qs = Oneliner.objects.all()
+    if lang in {'c', 'bash'}:
+        qs = qs.filter(language=lang)
     programs = list(qs)
     if sort == 'size':
         programs.sort(key=lambda o: (o.last_binary_size or 10**9, o.name))
@@ -22,6 +25,7 @@ def index(request):
     return render(request, 'oneliner/index.html', {
         'programs': programs,
         'sort':     sort,
+        'lang':     lang,
         'max_line': MAX_LINE,
     })
 
@@ -61,25 +65,33 @@ def edit(request, slug):
 def _values_from(program):
     if program is None:
         return {'name': '', 'slug': '', 'code': '',
-                'purpose': '', 'compile_flags': '-w', 'stdin_fixture': ''}
+                'purpose': '', 'language': 'c',
+                'compile_flags': '-w', 'stdin_fixture': ''}
     return {
         'name':          program.name,
         'slug':          program.slug,
         'code':          program.code,
         'purpose':       program.purpose,
+        'language':      program.language,
         'compile_flags': program.compile_flags,
         'stdin_fixture': program.stdin_fixture,
     }
 
 
 def _save_from_post(request, program):
+    language = (request.POST.get('language') or 'c').strip()
+    if language not in {'c', 'bash'}:
+        language = 'c'
+    default_flags = '-w' if language == 'c' else ''
     values = {
         'name':          (request.POST.get('name') or '').strip(),
         'slug':          slugify((request.POST.get('slug')
                                  or request.POST.get('name') or '').strip()),
         'code':          request.POST.get('code') or '',
         'purpose':       (request.POST.get('purpose') or '').strip(),
-        'compile_flags': (request.POST.get('compile_flags') or '-w').strip(),
+        'language':      language,
+        'compile_flags': (request.POST.get('compile_flags')
+                          or default_flags).strip(),
         'stdin_fixture': request.POST.get('stdin_fixture') or '',
     }
 
@@ -125,6 +137,8 @@ def compile_view(request, slug):
     elif result['status'] == 'warn':
         messages.info(request,
             f'Compiled with warnings — binary is {result["binary_size"]} B.')
+    elif program.language == 'bash':
+        messages.success(request, 'Syntax clean — bash -n parsed the script.')
     else:
         messages.success(request,
             f'Compiled clean — binary is {result["binary_size"]} B.')

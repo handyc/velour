@@ -28,6 +28,8 @@
   .st-warn    { color: #d29922; }
   .st-error   { color: #f85149; }
   .st-unknown { color: #6e7681; }
+  .st-c       { color: #d2a8ff; }
+  .st-bash    { color: #79c0ff; }
   .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
          padding: 0.35rem 0.7rem; border-radius: 4px;
          font-size: 0.78rem; text-decoration: none; display: inline-block; }
@@ -40,9 +42,10 @@
 <div class="wrap">
   <h1>Oneliner</h1>
   <p class="hint">
-    C programs that fit in <span class="ceil">{{ max_line }} columns</span>
-    per line. Museum of K&amp;R tricks: implicit int, comma operator side
-    effects, <code>main(c){…}</code> as a free counter.
+    Programs that fit in <span class="ceil">{{ max_line }} columns</span>
+    per line. C (K&amp;R implicit int, comma operator, <code>main(c){…}</code>
+    as a free counter) and bash (parameter expansion, brace expansion, pipe
+    golf). A museum for the tricks that make each one fit.
     &middot;
     <a href="{% url 'oneliner:create' %}">New oneliner</a>
   </p>
@@ -54,16 +57,27 @@
   {% endif %}
 
   <div class="sort-bar">
-    sort:
-    <a href="?sort=name"  class="{% if sort == 'name' %}on{% endif %}">name</a>
-    <a href="?sort=chars" class="{% if sort == 'chars' %}on{% endif %}">longest line</a>
-    <a href="?sort=size"  class="{% if sort == 'size' %}on{% endif %}">binary size</a>
+    language:
+    <a href="?{% if sort != 'name' %}sort={{ sort }}{% endif %}"
+       class="{% if not lang %}on{% endif %}">all</a>
+    <a href="?lang=c{% if sort != 'name' %}&sort={{ sort }}{% endif %}"
+       class="{% if lang == 'c' %}on{% endif %}">C</a>
+    <a href="?lang=bash{% if sort != 'name' %}&sort={{ sort }}{% endif %}"
+       class="{% if lang == 'bash' %}on{% endif %}">bash</a>
+    &nbsp; | &nbsp; sort:
+    <a href="?{% if lang %}lang={{ lang }}{% endif %}"
+       class="{% if sort == 'name' %}on{% endif %}">name</a>
+    <a href="?sort=chars{% if lang %}&lang={{ lang }}{% endif %}"
+       class="{% if sort == 'chars' %}on{% endif %}">longest line</a>
+    <a href="?sort=size{% if lang %}&lang={{ lang }}{% endif %}"
+       class="{% if sort == 'size' %}on{% endif %}">binary size</a>
   </div>
 
   <table>
     <thead>
       <tr>
         <th>name</th>
+        <th>lang</th>
         <th>code (first line)</th>
         <th class="num">ch</th>
         <th class="num">lines</th>
@@ -75,6 +89,7 @@
       {% for p in programs %}
       <tr>
         <td><a class="name" href="{% url 'oneliner:detail' slug=p.slug %}">{{ p.name }}</a></td>
+        <td><span class="st st-{{ p.language }}">{{ p.get_language_display }}</span></td>
         <td class="code">{{ p.lines.0|default:"" }}</td>
         <td class="num">{{ p.char_count }}</td>
         <td class="num">{{ p.n_lines }}</td>
@@ -82,10 +97,11 @@
         <td><span class="st st-{{ p.last_status }}">{{ p.get_last_status_display }}</span></td>
       </tr>
       {% empty %}
-      <tr><td colspan="6" class="note">
+      <tr><td colspan="7" class="note">
         No programs yet.
         <a href="{% url 'oneliner:create' %}">Create one</a>,
-        or run <code>manage.py seed_oneliner_defaults</code> for the classics.
+        or run <code>manage.py seed_oneliner_defaults</code> / <code>seed_bash_oneliners</code>
+        for the classics.
       </td></tr>
       {% endfor %}
     </tbody>
