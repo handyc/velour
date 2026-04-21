@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 from .models import Candidate, SearchRun, Tournament
 from .search import execute, import_agent_as_candidate, promote, promote_to_evolution
 from .tournament import add_candidate as add_tournament_candidate
+from .tournament import add_winners_of as add_winners_from_tournaments
 from .tournament import autofill_random as autofill_tournament
 from .tournament import execute as execute_tournament
 
@@ -319,9 +320,12 @@ def tournament_list(request):
     tourneys = Tournament.objects.all()[:50]
     open_tourneys = Tournament.objects.filter(status='pending')\
         .order_by('-created_at')[:20]
+    finished = (Tournament.objects.filter(status='finished')
+                .order_by('-created_at')[:30])
     return render(request, 'det/tournament_list.html', {
         'tournaments':       tourneys,
         'open_tournaments':  open_tourneys,
+        'finished_tournaments': finished,
     })
 
 
@@ -367,11 +371,18 @@ def tournament_detail(request, pk):
     addable_runs = (SearchRun.objects.filter(n_colors=t.n_colors,
                                              status='finished')
                     .order_by('-created_at')[:30])
+    source_tournaments = []
+    if t.source_tournaments:
+        source_tournaments = list(
+            Tournament.objects.filter(pk__in=t.source_tournaments)
+            .order_by('pk')
+        )
     return render(request, 'det/tournament_detail.html', {
         'tournament':    t,
         'entries':       entries,
         'seeds_preview': seeds_preview,
         'addable_runs':  addable_runs,
+        'source_tournaments': source_tournaments,
     })
 
 
@@ -535,6 +546,100 @@ def tournament_auto(request):
             note__startswith='auto → automaton').count()
         summary += (f' Auto-promoted {n_prom} class-4 winner(s) to '
                     f'Automaton + Evolution.')
+    messages.success(request, summary)
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+@login_required
+@require_POST
+def tournament_meta(request):
+    """Tournament-of-tournaments: pool the top-K winners of several
+    finished tournaments into one meta-tournament, then (optionally)
+    run it. All source tournaments must share the same n_colors as the
+    meta so the scorer is apples-to-apples; substrate (W/H/horizon) is
+    inherited from the first source, or overridden via form.
+
+    The point: a candidate that won its native SearchRun could be lucky
+    with its seed. A candidate that tops a tournament could be lucky
+    with its round seeds. Facing top-K winners from N tournaments on a
+    *fresh* master_seed strips the next layer of luck.
+    """
+    ids_raw = request.POST.getlist('sources')
+    source_ids = [int(x) for x in ids_raw if x.isdigit()]
+    if len(source_ids) < 2:
+        messages.error(request,
+            'Pick at least two source tournaments.')
+        return redirect('det:tournament_list')
+
+    sources = list(Tournament.objects.filter(
+        pk__in=source_ids, status='finished').order_by('pk'))
+    if len(sources) < 2:
+        messages.error(request,
+            'Need at least two *finished* source tournaments.')
+        return redirect('det:tournament_list')
+
+    n_colors_set = {t.n_colors for t in sources}
+    if len(n_colors_set) > 1:
+        messages.error(request,
+            f'Sources have mismatched n_colors: {sorted(n_colors_set)}. '
+            f'A meta-tournament has one substrate.')
+        return redirect('det:tournament_list')
+    n_colors = sources[0].n_colors
+
+    try:
+        top_k = max(1, min(20, int(request.POST.get('top_k') or 3)))
+        n_seeds = int(request.POST.get('n_seeds') or 5)
+        W = int(request.POST.get('screen_width') or sources[0].screen_width)
+        H = int(request.POST.get('screen_height')
+                or sources[0].screen_height)
+        horizon = int(request.POST.get('horizon') or sources[0].horizon)
+        auto_promote = max(0, min(10,
+            int(request.POST.get('auto_promote_top') or 0)))
+    except ValueError:
+        return HttpResponseBadRequest('Bad integer parameter.')
+    if not (2 <= n_seeds <= 20):
+        return HttpResponseBadRequest('n_seeds must be 2..20.')
+
+    default_label = (f'meta-{len(sources)}T top-{top_k} × {n_seeds}s '
+                     f'({n_colors}c)')
+    t = Tournament.objects.create(
+        label=(request.POST.get('label') or '').strip() or default_label,
+        n_colors=n_colors, n_seeds=n_seeds,
+        screen_width=W, screen_height=H, horizon=horizon,
+        auto_promote_top=auto_promote,
+        source_tournaments=[s.pk for s in sources],
+    )
+    added, sub, dup = add_winners_from_tournaments(t, sources, top_k=top_k)
+    if added == 0:
+        t.delete()
+        messages.error(request,
+            f'No eligible winners in sources #{source_ids} '
+            f'(top-{top_k} each). Check the source tournaments have '
+            f'finished and produced ranked entries.')
+        return redirect('det:tournament_list')
+
+    run_now = (request.POST.get('run_now') or 'on') == 'on'
+    if not run_now:
+        messages.success(request,
+            f'Meta-tournament #{t.pk}: {added} unique winner(s) pooled '
+            f'from {len(sources)} source(s) (dup={dup}, '
+            f'sub-mismatch={sub}). Press Run on the detail page.')
+        return redirect('det:tournament_detail', pk=t.pk)
+
+    try:
+        execute_tournament(t)
+    except Exception as exc:
+        messages.error(request,
+            f'Meta-tournament #{t.pk}: pooled {added}, run failed: {exc}')
+        return redirect('det:tournament_detail', pk=t.pk)
+
+    summary = (f'Meta-tournament #{t.pk}: {added} unique winners '
+               f'from {len(sources)} source(s) scored across {n_seeds} '
+               f'fresh seeds in {t.duration_seconds:.1f}s.')
+    if auto_promote:
+        n_prom = t.entries.filter(
+            note__startswith='auto → automaton').count()
+        summary += (f' Auto-promoted {n_prom} class-4 winner(s).')
     messages.success(request, summary)
     return redirect('det:tournament_detail', pk=t.pk)
 

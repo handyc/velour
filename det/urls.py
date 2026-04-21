@@ -28,6 +28,8 @@ urlpatterns = [
          name='tournament_create'),
     path('tournaments/auto/', views.tournament_auto,
          name='tournament_auto'),
+    path('tournaments/meta/', views.tournament_meta,
+         name='tournament_meta'),
     path('tournaments/<int:pk>/', views.tournament_detail,
          name='tournament_detail'),
     path('tournaments/<int:pk>/add/', views.tournament_add,

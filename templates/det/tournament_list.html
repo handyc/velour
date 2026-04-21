@@ -116,6 +116,62 @@
     </p>
   </div>
 
+  {% if finished_tournaments %}
+  <div class="newcreate">
+    <h2>Meta-tournament — pool top-K winners from several tournaments</h2>
+    <form method="post" action="{% url 'det:tournament_meta' %}">
+      {% csrf_token %}
+      <label style="flex: 1 1 100%; max-width: 44rem">sources (multi-select — same n_colors only)
+        <select name="sources" multiple size="6"
+                style="width:100%;height:7.5rem;font-family:monospace;font-size:0.72rem">
+          {% for t in finished_tournaments %}
+            <option value="{{ t.pk }}">
+              #{{ t.pk }} · {{ t.n_colors }}c · {{ t.n_seeds }}s · {{ t.entries.count }}e
+              {% if t.label %}· {{ t.label }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>top K each
+        <input type="number" name="top_k" value="3" min="1" max="20">
+      </label>
+      <label>seeds (fresh)
+        <input type="number" name="n_seeds" value="5" min="2" max="20">
+      </label>
+      <label>W
+        <input type="number" name="screen_width" placeholder="inherit"
+               min="12" max="40" style="width:5rem">
+      </label>
+      <label>H
+        <input type="number" name="screen_height" placeholder="inherit"
+               min="12" max="40" style="width:5rem">
+      </label>
+      <label>horizon
+        <input type="number" name="horizon" placeholder="inherit"
+               min="20" max="120" style="width:5rem">
+      </label>
+      <label>auto-promote top
+        <input type="number" name="auto_promote_top" value="1" min="0" max="10"
+               title="Auto-promote class-4 winners to Automaton + Evolution. 0 = off.">
+      </label>
+      <label>label
+        <input type="text" name="label" placeholder="auto if blank"
+               style="width:11rem">
+      </label>
+      <label style="flex-direction:row;align-items:center;gap:0.3rem">
+        <input type="checkbox" name="run_now" checked>
+        run now
+      </label>
+      <button type="submit" class="btn">Run meta-tournament</button>
+    </form>
+    <p style="color:#6e7681;font-size:0.7rem;margin:0.5rem 0 0">
+      Cmd/Ctrl-click to pick several sources. Strips a second layer of
+      seed-luck: top-K from each source face a fresh master_seed
+      together. W/H/horizon inherit from the first source if blank.
+    </p>
+  </div>
+  {% endif %}
+
   <div class="newcreate">
     <h2>Empty tournament — hand-picked entries</h2>
     <form method="post" action="{% url 'det:tournament_create' %}">

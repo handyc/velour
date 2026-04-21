@@ -106,6 +106,16 @@
     </p>
   {% endif %}
 
+  {% if source_tournaments %}
+  <p style="color:#8b949e;font-size:0.78rem;margin:0 0 1rem">
+    meta — pooled from
+    {% for s in source_tournaments %}
+      <a href="{% url 'det:tournament_detail' pk=s.pk %}"
+         style="color:#58a6ff;text-decoration:none;font-family:monospace">#{{ s.pk }}</a>{% if not forloop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+
   {% if tournament.status == 'pending' %}
   <div class="panel">
     <h2>Add candidates</h2>

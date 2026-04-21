@@ -171,6 +171,11 @@ class Tournament(models.Model):
                   'entries (whose native class is 4 and whose aggregate '
                   'stayed in the class-4 band) to Automaton + Evolution. '
                   '0 = no auto-promotion.')
+    source_tournaments = models.JSONField(default=list, blank=True,
+        help_text='For meta-tournaments (tournament-of-tournaments): '
+                  'list of parent Tournament IDs whose top-K winners '
+                  'were pooled to build this roster. Empty list for '
+                  'regular tournaments.')
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES,
                               default='pending')

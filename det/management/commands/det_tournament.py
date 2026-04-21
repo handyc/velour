@@ -16,7 +16,8 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from det.models import Candidate, SearchRun, Tournament
-from det.tournament import add_candidate, autofill_random, execute
+from det.tournament import (add_candidate, add_winners_of,
+                            autofill_random, execute)
 
 
 class Command(BaseCommand):
@@ -42,6 +43,16 @@ class Command(BaseCommand):
         parser.add_argument('--random', type=int, default=0, metavar='N',
             help='Autofill N random compatible candidates from the pool '
                  '(matching n_colors, score ≥ --min-score).')
+        parser.add_argument('--from-tournaments', nargs='+', type=int,
+            default=[], metavar='T_ID',
+            help='Meta mode: pool the top-K winners of these finished '
+                 'tournaments into the new one. All sources must share '
+                 'n_colors; --n-colors is inferred from the first '
+                 'source and the flag value is ignored.')
+        parser.add_argument('--top-k-each', type=int, default=3,
+            metavar='K',
+            help='How many top-ranked winners to pull from each '
+                 '--from-tournaments source (default 3).')
         parser.add_argument('--min-score', type=float, default=2.0,
             help='Native-score floor for --random (default 2.0). '
                  'Bump to 3.5 to restrict to the class-4 band.')
@@ -63,7 +74,23 @@ class Command(BaseCommand):
             self._print_board(opts['show'])
             return
 
-        n_colors = opts['n_colors']
+        meta_source_ids = opts.get('from_tournaments') or []
+        meta_sources = []
+        if meta_source_ids:
+            meta_sources = list(Tournament.objects.filter(
+                pk__in=meta_source_ids, status='finished').order_by('pk'))
+            if len(meta_sources) < 2:
+                raise CommandError(
+                    '--from-tournaments needs ≥2 *finished* source IDs; '
+                    f'got {len(meta_sources)} from {meta_source_ids}.')
+            n_colors_set = {t.n_colors for t in meta_sources}
+            if len(n_colors_set) > 1:
+                raise CommandError(
+                    f'source tournaments have mismatched n_colors: '
+                    f'{sorted(n_colors_set)}.')
+            n_colors = meta_sources[0].n_colors
+        else:
+            n_colors = opts['n_colors']
         if not (2 <= n_colors <= 4):
             raise CommandError('n_colors must be 2, 3, or 4.')
 
@@ -76,9 +103,19 @@ class Command(BaseCommand):
             screen_height=opts['height'],
             horizon=opts['horizon'],
             auto_promote_top=auto_promote,
+            source_tournaments=[s.pk for s in meta_sources],
         )
 
         added = 0
+        if meta_sources:
+            top_k = max(1, int(opts['top_k_each']))
+            n, sub, dup = add_winners_of(tourney, meta_sources, top_k=top_k)
+            added += n
+            self.stdout.write(
+                f'  + {n} winner(s) pooled from {len(meta_sources)} source '
+                f'tournament(s) (top-{top_k} each; dup={dup}, '
+                f'sub-mismatch={sub})')
+
         for run_id in opts['top_of_each']:
             run = SearchRun.objects.filter(pk=run_id).first()
             if not run:

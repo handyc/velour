@@ -165,6 +165,52 @@ def _auto_promote_winners(tournament):
         promoted += 1
 
 
+def add_winners_of(tournament, source_tournaments, top_k=3):
+    """Pool the top-K ranked candidates from each source tournament
+    into `tournament`. Returns (added, skipped_substrate, skipped_dup).
+
+    "Top" means rank 1..K and not disqualified. Candidates that appear
+    in more than one source are added once (dedup by candidate pk).
+    Source tournaments with mismatched n_colors are silently skipped
+    at the candidate level — each Candidate's substrate still has to
+    match the meta-tournament's, which add_candidate enforces.
+
+    Caller is responsible for recording source IDs on
+    `tournament.source_tournaments`; this helper just fills the roster.
+    """
+    from .models import TournamentEntry
+
+    source_ids = [t.pk for t in source_tournaments]
+    if not source_ids:
+        return 0, 0, 0
+
+    winner_entries = (
+        TournamentEntry.objects
+        .filter(tournament_id__in=source_ids,
+                disqualified=False,
+                rank__isnull=False,
+                rank__lte=top_k)
+        .select_related('candidate', 'candidate__run')
+        .order_by('rank', 'id')
+    )
+    seen = set()
+    added = 0
+    skip_sub = 0
+    skip_dup = 0
+    for we in winner_entries:
+        cand = we.candidate
+        if cand.pk in seen:
+            skip_dup += 1
+            continue
+        seen.add(cand.pk)
+        try:
+            add_candidate(tournament, cand)
+            added += 1
+        except ValueError:
+            skip_sub += 1
+    return added, skip_sub, skip_dup
+
+
 def autofill_random(tournament, n, min_score=2.0, rng_seed=None):
     """Add up to `n` random Candidates to `tournament` from the pool of
     compatible candidates. Returns (added, pool_size).
