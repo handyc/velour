@@ -12,6 +12,8 @@ when the grid dimensions, horizon, and n_colors match. Tournaments lock
 those three to keep comparisons honest.
 """
 
+import random
+
 from django.utils import timezone
 
 from automaton.detector import step_exact
@@ -89,6 +91,44 @@ def add_candidate(tournament, candidate):
         tournament=tournament, candidate=candidate,
     )
     return entry
+
+
+def autofill_random(tournament, n, min_score=2.0, rng_seed=None):
+    """Add up to `n` random Candidates to `tournament` from the pool of
+    compatible candidates. Returns (added, pool_size).
+
+    Compatible = matches tournament.n_colors and scored at least
+    `min_score` natively. The default (2.0) filters out the obvious
+    class-1/class-2 floor (see det.search._score) while keeping the
+    pool wide; bump to 3.5 to restrict to the class-4 band.
+
+    Already-entered candidates are excluded so autofill can be stacked
+    on a manually-primed tournament. `rng_seed` (a string) makes the
+    selection reproducible; leave None to draw fresh each call.
+    """
+    from .models import Candidate
+
+    pool_ids = list(
+        Candidate.objects
+        .filter(run__n_colors=tournament.n_colors,
+                score__gte=float(min_score))
+        .exclude(tournament_entries__tournament=tournament)
+        .values_list('pk', flat=True)
+    )
+    rng = random.Random(rng_seed) if rng_seed is not None else random.Random()
+    rng.shuffle(pool_ids)
+    picked = pool_ids[:n]
+    if not picked:
+        return 0, 0
+    added = 0
+    for c in (Candidate.objects.filter(pk__in=picked)
+              .select_related('run')):
+        try:
+            add_candidate(tournament, c)
+            added += 1
+        except ValueError:
+            continue
+    return added, len(pool_ids)
 
 
 def execute(tournament, progress_cb=None):

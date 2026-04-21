@@ -16,7 +16,7 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from det.models import Candidate, SearchRun, Tournament
-from det.tournament import add_candidate, execute
+from det.tournament import add_candidate, autofill_random, execute
 
 
 class Command(BaseCommand):
@@ -39,6 +39,14 @@ class Command(BaseCommand):
         parser.add_argument('--candidates', nargs='*', type=int, default=[],
             metavar='CAND_ID',
             help='Explicit candidate IDs to add.')
+        parser.add_argument('--random', type=int, default=0, metavar='N',
+            help='Autofill N random compatible candidates from the pool '
+                 '(matching n_colors, score ≥ --min-score).')
+        parser.add_argument('--min-score', type=float, default=2.0,
+            help='Native-score floor for --random (default 2.0). '
+                 'Bump to 3.5 to restrict to the class-4 band.')
+        parser.add_argument('--rng-seed', default=None,
+            help='Seed for reproducible random selection.')
         parser.add_argument('--no-run', action='store_true',
             help='Create and populate without scoring — useful for '
                  'staging a tournament then kicking it off from the UI.')
@@ -92,6 +100,18 @@ class Command(BaseCommand):
                 self.stderr.write(f'  - skipped candidate #{cid}: not found')
                 continue
             added += self._try_add(tourney, c)
+
+        if opts['random']:
+            n_auto, pool = autofill_random(
+                tourney, n=opts['random'],
+                min_score=opts['min_score'],
+                rng_seed=opts['rng_seed'],
+            )
+            added += n_auto
+            self.stdout.write(
+                f'  + {n_auto} random candidate(s) from pool of {pool} '
+                f'(n_colors={opts["n_colors"]}, '
+                f'min_score={opts["min_score"]})')
 
         if added == 0:
             tourney.delete()

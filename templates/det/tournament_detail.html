@@ -125,13 +125,28 @@
       </label>
       <button type="submit" class="btn">Add top-of-run</button>
     </form>
-    <form method="post" action="{% url 'det:tournament_add' pk=tournament.pk %}">
+    <form method="post" action="{% url 'det:tournament_add' pk=tournament.pk %}"
+          style="margin-bottom:0.4rem">
       {% csrf_token %}
       <label>candidate ids (space or comma)
         <input type="text" name="candidates" style="width:26rem"
                placeholder="e.g. 124 198 330">
       </label>
       <button type="submit" class="btn">Add by ID</button>
+    </form>
+    <form method="post" action="{% url 'det:tournament_autofill' pk=tournament.pk %}">
+      {% csrf_token %}
+      <label>autofill random N
+        <input type="number" name="n" value="50" min="2" max="300">
+      </label>
+      <label>min native
+        <input type="number" step="0.1" name="min_score" value="2.0"
+               min="0" max="10" style="width:4.5rem">
+      </label>
+      <button type="submit" class="btn neutral">Autofill</button>
+      <span style="color:#6e7681;font-size:0.7rem;margin-left:0.4rem">
+        draws from compatible candidates not already entered
+      </span>
     </form>
   </div>
 

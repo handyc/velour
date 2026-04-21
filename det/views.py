@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 from .models import Candidate, SearchRun, Tournament
 from .search import execute, import_agent_as_candidate, promote, promote_to_evolution
 from .tournament import add_candidate as add_tournament_candidate
+from .tournament import autofill_random as autofill_tournament
 from .tournament import execute as execute_tournament
 
 
@@ -431,6 +432,98 @@ def tournament_add(request, pk):
         messages.success(request, f'Added {added} candidate(s).')
     if skipped:
         messages.error(request, 'Skipped: ' + '; '.join(skipped))
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+def _autofill_params(request, defaults):
+    """Read n/min_score/rng_seed from POST with safe coercion."""
+    try:
+        n = int(request.POST.get('n') or defaults.get('n', 50))
+        min_score = float(request.POST.get('min_score')
+                          or defaults.get('min_score', 2.0))
+    except ValueError:
+        return None
+    n = max(1, min(300, n))
+    min_score = max(0.0, min(10.0, min_score))
+    rng_seed = (request.POST.get('rng_seed') or '').strip() or None
+    return {'n': n, 'min_score': min_score, 'rng_seed': rng_seed}
+
+
+@login_required
+@require_POST
+def tournament_autofill(request, pk):
+    """Autofill a pending tournament with up to N random compatible
+    candidates drawn from the Candidate pool."""
+    t = get_object_or_404(Tournament, pk=pk)
+    if t.status != 'pending':
+        messages.error(request,
+            'Autofill only works on pending tournaments.')
+        return redirect('det:tournament_detail', pk=t.pk)
+    params = _autofill_params(request, {})
+    if params is None:
+        return HttpResponseBadRequest('bad autofill parameter')
+    added, pool = autofill_tournament(
+        t, n=params['n'], min_score=params['min_score'],
+        rng_seed=params['rng_seed'])
+    if added == 0:
+        messages.error(request,
+            f'No compatible candidates: pool was {pool} (n_colors='
+            f'{t.n_colors}, min_score {params["min_score"]}).')
+    else:
+        messages.success(request,
+            f'Added {added} random candidate(s) from a pool of {pool}.')
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+@login_required
+@require_POST
+def tournament_auto(request):
+    """One-click: create a new tournament, autofill N random candidates,
+    run it. Redirects to the finished detail page on success."""
+    try:
+        n_colors = int(request.POST.get('n_colors', 3))
+        n_seeds = int(request.POST.get('n_seeds', 5))
+        W = int(request.POST.get('screen_width', 18))
+        H = int(request.POST.get('screen_height', 16))
+        horizon = int(request.POST.get('horizon', 60))
+    except ValueError:
+        return HttpResponseBadRequest('Bad integer parameter.')
+    if not (2 <= n_colors <= 4):
+        return HttpResponseBadRequest('n_colors must be 2, 3, or 4.')
+    if not (2 <= n_seeds <= 20):
+        return HttpResponseBadRequest('n_seeds must be 2..20.')
+
+    fill = _autofill_params(request, {'n': 50, 'min_score': 2.0})
+    if fill is None:
+        return HttpResponseBadRequest('bad autofill parameter')
+
+    t = Tournament.objects.create(
+        label=(request.POST.get('label') or '').strip()
+              or f'auto-{fill["n"]} × {n_seeds}s ({n_colors}c)',
+        n_colors=n_colors, n_seeds=n_seeds,
+        screen_width=W, screen_height=H, horizon=horizon,
+    )
+    added, pool = autofill_tournament(
+        t, n=fill['n'], min_score=fill['min_score'],
+        rng_seed=fill['rng_seed'])
+    if added == 0:
+        t.delete()
+        messages.error(request,
+            f'No compatible candidates: pool was {pool} (n_colors='
+            f'{n_colors}, min_score {fill["min_score"]}). '
+            f'Run a SearchRun first, then try again.')
+        return redirect('det:tournament_list')
+    try:
+        execute_tournament(t)
+    except Exception as exc:
+        messages.error(request,
+            f'Tournament #{t.pk}: autofilled {added} of {pool}, '
+            f'then run failed: {exc}')
+        return redirect('det:tournament_detail', pk=t.pk)
+    messages.success(request,
+        f'Auto-tournament #{t.pk}: {added} random candidates '
+        f'(from pool of {pool}) scored across {n_seeds} seeds '
+        f'in {t.duration_seconds:.1f}s.')
     return redirect('det:tournament_detail', pk=t.pk)
 
 
