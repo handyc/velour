@@ -202,8 +202,19 @@
     against shared initial grids</span>
   </p>
 
-  <h2>Searches</h2>
-  <div class="runlist">
+  <h2>Searches
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">
+      {% if query %}{{ shown_runs }} match{{ shown_runs|pluralize:",es" }} · {{ total_runs }} total{% else %}{{ shown_runs }} of {{ total_runs }}{% endif %}
+    </span>
+  </h2>
+  <form method="get" style="margin:0 0 0.4rem 0;display:flex;gap:0.4rem;align-items:center;font-size:0.78rem">
+    <input type="text" name="q" value="{{ query }}"
+           placeholder="filter by label…"
+           style="flex:1;max-width:20rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.2rem 0.35rem;font-size:0.78rem">
+    <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;padding:0.2rem 0.6rem">Filter</button>
+    {% if query %}<a href="{% url 'det:index' %}" style="color:#8b949e;font-size:0.72rem">clear</a>{% endif %}
+  </form>
+  <div class="runlist" style="max-height:20rem;overflow-y:auto">
     {% for run in runs %}
     <div class="runrow s-{{ run.status }}">
       <a href="{% url 'det:search_detail' pk=run.pk %}">

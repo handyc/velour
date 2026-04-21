@@ -13,11 +13,20 @@ from .models import ExactRule, Rule, RuleSet, Simulation
 
 @login_required
 def home(request):
-    simulations = Simulation.objects.select_related('ruleset').all()[:20]
+    q = (request.GET.get('q') or '').strip()
+    sims = Simulation.objects.select_related('ruleset')
     rulesets = RuleSet.objects.all()
+    if q:
+        sims = sims.filter(name__icontains=q)
+        rulesets = rulesets.filter(name__icontains=q)
+    total_sims = Simulation.objects.count()
+    simulations = list(sims[:200])
     return render(request, 'automaton/home.html', {
-        'simulations': simulations,
-        'rulesets': rulesets,
+        'simulations':  simulations,
+        'rulesets':     rulesets,
+        'query':        q,
+        'shown_sims':   len(simulations),
+        'total_sims':   total_sims,
     })
 
 

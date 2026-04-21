@@ -18,13 +18,21 @@ from .tournament import execute as execute_tournament
 
 @login_required
 def index(request):
-    runs = SearchRun.objects.all()[:50]
+    q = (request.GET.get('q') or '').strip()
+    runs_qs = SearchRun.objects.all()
+    if q:
+        runs_qs = runs_qs.filter(label__icontains=q)
+    total_runs = SearchRun.objects.count()
+    runs = list(runs_qs[:200])
     top_candidates = (Candidate.objects
                       .select_related('run', 'promoted_to')
                       .order_by('-score', '-id')[:12])
     return render(request, 'det/index.html', {
-        'runs': runs,
+        'runs':           runs,
         'top_candidates': top_candidates,
+        'query':          q,
+        'shown_runs':     len(runs),
+        'total_runs':     total_runs,
     })
 
 
@@ -317,15 +325,23 @@ def import_search_job(request, job_slug):
 
 @login_required
 def tournament_list(request):
-    tourneys = Tournament.objects.all()[:50]
+    q = (request.GET.get('q') or '').strip()
+    tqs = Tournament.objects.all()
+    if q:
+        tqs = tqs.filter(label__icontains=q)
+    total_tourneys = Tournament.objects.count()
+    tourneys = list(tqs[:200])
     open_tourneys = Tournament.objects.filter(status='pending')\
         .order_by('-created_at')[:20]
     finished = (Tournament.objects.filter(status='finished')
-                .order_by('-created_at')[:30])
+                .order_by('-created_at')[:60])
     return render(request, 'det/tournament_list.html', {
-        'tournaments':       tourneys,
-        'open_tournaments':  open_tourneys,
+        'tournaments':          tourneys,
+        'open_tournaments':     open_tourneys,
         'finished_tournaments': finished,
+        'query':                q,
+        'shown_tourneys':       len(tourneys),
+        'total_tourneys':       total_tourneys,
     })
 
 

@@ -203,8 +203,19 @@
     </form>
   </div>
 
-  <h2>All tournaments</h2>
-  <div class="tlist">
+  <h2>All tournaments
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">
+      {% if query %}{{ shown_tourneys }} match{{ shown_tourneys|pluralize:",es" }} · {{ total_tourneys }} total{% else %}{{ shown_tourneys }} of {{ total_tourneys }}{% endif %}
+    </span>
+  </h2>
+  <form method="get" style="margin:0 0 0.4rem 0;display:flex;gap:0.4rem;align-items:center;font-size:0.78rem">
+    <input type="text" name="q" value="{{ query }}"
+           placeholder="filter by label…"
+           style="flex:1;max-width:20rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.2rem 0.35rem;font-size:0.78rem">
+    <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;padding:0.2rem 0.6rem">Filter</button>
+    {% if query %}<a href="{% url 'det:tournament_list' %}" style="color:#8b949e;font-size:0.72rem">clear</a>{% endif %}
+  </form>
+  <div class="tlist" style="max-height:22rem;overflow-y:auto">
     {% for t in tournaments %}
     <div class="trow s-{{ t.status }}">
       <a href="{% url 'det:tournament_detail' pk=t.pk %}">
