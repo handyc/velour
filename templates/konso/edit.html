@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}{% if mode == 'edit' %}Edit {{ sentence.konso }}{% else %}New Konso tree{% endif %} — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap .crumb { font-size: 0.78rem; color: #6e7681;
+                    margin-bottom: 0.4rem; }
+  .kn-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .kn-wrap h1 { margin: 0 0 0.6rem; font-size: 1.2rem; }
+  .kn-form {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 0.7rem; font-size: 0.78rem;
+  }
+  .kn-form label { color: #8b949e; font-size: 0.72rem;
+                   display: flex; flex-direction: column; gap: 2px; }
+  .kn-form label.wide { grid-column: 1 / span 2; }
+  .kn-form input, .kn-form select, .kn-form textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.45rem; font-size: 0.82rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .kn-form textarea { min-height: 3.6rem; resize: vertical; }
+  .kn-form .row { grid-column: 1 / span 2; display: flex;
+                  gap: 0.4rem; align-items: center; }
+  .kn-form .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.75rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .kn-form .btn.secondary {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+  }
+  .preview-box {
+    margin-top: 0.8rem; min-height: 60px;
+    overflow-x: auto;
+  }
+  .hint { color: #6e7681; font-size: 0.7rem; }
+  .hint code { color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <p class="crumb">
+    <a href="{% url 'konso:index' %}">← Konso</a>
+    {% if mode == 'edit' %} ·
+    <a href="{% url 'konso:detail' slug=sentence.slug %}">{{ sentence.slug }}</a>
+    {% endif %}
+  </p>
+  <h1>{% if mode == 'edit' %}Edit tree{% else %}New Konso tree{% endif %}</h1>
+
+  <form method="post" class="kn-form"
+        action="{% if mode == 'edit' %}{% url 'konso:edit' slug=sentence.slug %}{% else %}{% url 'konso:create' %}{% endif %}">
+    {% csrf_token %}
+    <label class="wide">Konso
+      <input type="text" name="konso" value="{{ data.konso }}"
+             required placeholder="nama tika gupe">
+    </label>
+    <label class="wide">Gloss (interlinear, optional)
+      <input type="text" name="gloss" value="{{ data.gloss }}"
+             placeholder="man house build-PST">
+    </label>
+    <label class="wide">Translation
+      <input type="text" name="translation" value="{{ data.translation }}"
+             required placeholder="'A man built a house'">
+    </label>
+    <label class="wide">Tree (labelled bracket)
+      <textarea id="tree-input" name="tree_bracket" required>{{ data.tree_bracket }}</textarea>
+    </label>
+    <label>Source
+      <select name="source">
+        {% for val, lbl in source_choices %}
+        <option value="{{ val }}" {% if val == data.source %}selected{% endif %}>{{ lbl }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Citation (optional)
+      <input type="text" name="citation" value="{{ data.citation }}"
+             placeholder="Ongaye 2013, p. 197">
+    </label>
+    <label class="wide">Notes (optional)
+      <textarea name="notes">{{ data.notes }}</textarea>
+    </label>
+    <div class="row">
+      <button type="submit" class="btn">
+        {% if mode == 'edit' %}Save changes{% else %}Create tree{% endif %}
+      </button>
+      <button type="button" class="btn secondary" id="preview-btn">Preview tree</button>
+      <span class="hint">
+        Every <code>[LABEL ...]</code> becomes a non-terminal;
+        bare tokens are Konso terminals.
+      </span>
+    </div>
+  </form>
+
+  <div class="preview-box" id="preview-box"></div>
+</div>
+
+<script>
+(function () {
+    const btn  = document.getElementById('preview-btn');
+    const input = document.getElementById('tree-input');
+    const box  = document.getElementById('preview-box');
+    const tokenEl = document.querySelector(
+        '[name=csrfmiddlewaretoken]');
+    if (!btn || !input || !box || !tokenEl) return;
+    btn.addEventListener('click', async () => {
+        const fd = new FormData();
+        fd.append('tree_bracket', input.value);
+        fd.append('csrfmiddlewaretoken', tokenEl.value);
+        box.innerHTML = '<p style="color:#8b949e;font-size:0.78rem">'
+            + 'Rendering…</p>';
+        try {
+            const r = await fetch('{% url "konso:preview" %}',
+                { method: 'POST', body: fd });
+            box.innerHTML = await r.text();
+        } catch (e) {
+            box.innerHTML = '<p style="color:#f85149;font-size:0.78rem">'
+                + 'Request failed: ' + e + '</p>';
+        }
+    });
+})();
+</script>
+{% endblock %}

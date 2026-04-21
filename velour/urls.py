@@ -57,6 +57,7 @@ urlpatterns = [
     path('naiad/', include('naiad.urls')),
     path('conduit/', include('conduit.urls')),
     path('oneliner/', include('oneliner.urls')),
+    path('konso/', include('konso.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

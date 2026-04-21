@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Konso — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .kn-wrap p.lede { color: #8b949e; max-width: 72ch; line-height: 1.5;
+                    margin: 0 0 0.9rem; font-size: 0.82rem; }
+  .kn-wrap p.lede em { color: #c9d1d9; font-style: normal; }
+
+  .kn-new {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.65rem 0.85rem; margin-bottom: 0.85rem;
+    font-size: 0.78rem;
+  }
+  .kn-new summary {
+    cursor: pointer; color: #c9d1d9; font-weight: 500;
+    list-style: none; display: flex; align-items: center; gap: 0.4rem;
+  }
+  .kn-new summary::before {
+    content: '▸'; color: #6e7681; font-size: 0.8rem;
+    transition: transform 0.15s;
+  }
+  .kn-new[open] summary::before { transform: rotate(90deg); }
+  .kn-new form { margin-top: 0.6rem; display: grid;
+                 grid-template-columns: 1fr 1fr; gap: 0.4rem 0.6rem; }
+  .kn-new label { color: #8b949e; font-size: 0.72rem;
+                  display: flex; flex-direction: column; gap: 2px; }
+  .kn-new label.wide { grid-column: 1 / span 2; }
+  .kn-new input, .kn-new select, .kn-new textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.4rem; font-size: 0.78rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .kn-new textarea { min-height: 3.4rem; resize: vertical; }
+  .kn-new .row { grid-column: 1 / span 2; display: flex;
+                 gap: 0.4rem; align-items: center; }
+  .kn-new .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+
+  .kn-list { display: flex; flex-direction: column; gap: 2px; }
+  .kn-row {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: center;
+  }
+  .kn-row.s-literature   { border-left-color: #2ea043; }
+  .kn-row.s-illustrative { border-left-color: #d29922; }
+  .kn-row.s-operator     { border-left-color: #58a6ff; }
+  .kn-row a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .kn-row a:hover { color: #58a6ff; }
+  .kn-row .konso { font-weight: 500; }
+  .kn-row .gloss { color: #8b949e; font-size: 0.72rem; }
+  .kn-row .src { color: #6e7681; font-size: 0.68rem;
+                 font-family: monospace; }
+  h2 { font-size: 0.92rem; margin: 0.9rem 0 0.35rem; color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <h1>Konso — syntactic trees</h1>
+  <p class="lede">
+    Konso (autonym <em>Af Xonso</em>) is a <em>Lowland East Cushitic</em>
+    language of southwest Ethiopia with ~250,000 speakers. Word order
+    is SOV, phrases are postpositional, relative clauses follow their
+    head noun, and case is marked by clitics rather than suffixes.
+    Trees here are written in Chomsky-style labelled-bracket notation
+    (<code>[S [NP nama] [VP [NP tika] [V gupe]]]</code>) and rendered
+    as inline SVG.
+  </p>
+
+  <details class="kn-new">
+    <summary>New tree — write a sentence</summary>
+    <form method="post" action="{% url 'konso:create' %}">
+      {% csrf_token %}
+      <label class="wide">Konso
+        <input type="text" name="konso"
+               placeholder="e.g. nama tika gupe">
+      </label>
+      <label class="wide">Gloss (interlinear, optional)
+        <input type="text" name="gloss"
+               placeholder="man house build-PST">
+      </label>
+      <label class="wide">Translation
+        <input type="text" name="translation"
+               placeholder="'A man built a house'">
+      </label>
+      <label class="wide">Tree (labelled bracket)
+        <textarea name="tree_bracket"
+                  placeholder="[S [NP nama] [VP [NP tika] [V gupe]]]"></textarea>
+      </label>
+      <label>Source
+        <select name="source">
+          {% for val, lbl in source_choices %}
+          <option value="{{ val }}"
+            {% if val == 'illustrative' %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Citation (optional)
+        <input type="text" name="citation"
+               placeholder="Ongaye 2013, p. 197">
+      </label>
+      <label class="wide">Notes (optional)
+        <textarea name="notes"
+                  placeholder="SOV; focus marker; case clitic — anything to flag"></textarea>
+      </label>
+      <div class="row">
+        <button type="submit" class="btn">Save tree</button>
+        <span style="color:#6e7681;font-size:0.7rem">
+          Every <code>[LABEL ...]</code> becomes a non-terminal;
+          bare tokens are Konso terminals.
+        </span>
+      </div>
+    </form>
+  </details>
+
+  <h2>Sentences
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">
+      {% if query %}{{ shown }} match{{ shown|pluralize:",es" }} · {{ total }} total{% else %}{{ shown }} of {{ total }}{% endif %}
+    </span>
+  </h2>
+  <form method="get" style="margin:0 0 0.4rem 0;display:flex;gap:0.4rem;align-items:center;font-size:0.78rem">
+    <input type="text" name="q" value="{{ query }}"
+           placeholder="filter by Konso / translation / slug…"
+           style="flex:1;max-width:22rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.2rem 0.4rem;font-size:0.78rem">
+    <button type="submit" class="btn" style="font-size:0.72rem;padding:0.2rem 0.6rem;background:#21262d;border-color:#30363d">Filter</button>
+    {% if query %}<a href="{% url 'konso:index' %}" style="color:#8b949e;font-size:0.72rem">clear</a>{% endif %}
+  </form>
+
+  <div class="kn-list" style="max-height:22rem;overflow-y:auto">
+    {% for s in sentences %}
+    <div class="kn-row s-{{ s.source }}">
+      <a href="{% url 'konso:detail' slug=s.slug %}">
+        <span class="konso">{{ s.konso }}</span>
+        <span class="gloss">— {{ s.translation }}</span>
+      </a>
+      <span class="src">
+        {{ s.get_source_display|slice:":3" }}
+        {% if s.citation %}· {{ s.citation }}{% endif %}
+      </span>
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">
+      {% if query %}No sentences match "{{ query }}".{% else %}No sentences yet. Open the "New tree" panel above, or run <code>manage.py seed_konso</code>.{% endif %}
+    </p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

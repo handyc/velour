@@ -120,6 +120,7 @@ INSTALLED_APPS = [
     'naiad',
     'conduit',
     'oneliner',
+    'konso',
 ]
 
 MIDDLEWARE = [

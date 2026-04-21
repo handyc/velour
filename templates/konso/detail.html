@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sentence.konso }} — Konso{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap .crumb { font-size: 0.78rem; color: #6e7681;
+                    margin-bottom: 0.4rem; }
+  .kn-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .kn-wrap .crumb a:hover { color: #58a6ff; }
+  .kn-wrap h1 { margin: 0 0 0.15rem; font-size: 1.3rem;
+                font-family: ui-monospace, Menlo, monospace; }
+  .kn-wrap .trans { color: #8b949e; font-size: 0.92rem;
+                    margin-bottom: 0.25rem; font-style: italic; }
+  .kn-wrap .gloss { color: #d2a8ff; font-size: 0.82rem;
+                    font-family: ui-monospace, Menlo, monospace;
+                    margin-bottom: 0.85rem; }
+  .kn-wrap .meta { color: #6e7681; font-size: 0.72rem;
+                   margin-bottom: 0.85rem; }
+  .kn-wrap .meta code { color: #8b949e; }
+  .kn-wrap .svg-box { overflow-x: auto; margin-bottom: 0.85rem; }
+  .kn-wrap .notes {
+    background: #0d1117; border: 1px solid #21262d;
+    border-left: 2px solid #d29922; border-radius: 0 3px 3px 0;
+    padding: 0.4rem 0.6rem; font-size: 0.78rem; color: #c9d1d9;
+    margin-bottom: 0.85rem;
+  }
+  .kn-wrap .bracket {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.4rem 0.6rem; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.78rem; color: #8b949e; white-space: pre-wrap;
+    word-break: break-all; margin-bottom: 0.85rem;
+  }
+  .kn-wrap .actions { display: flex; gap: 0.4rem; margin-bottom: 0.85rem; }
+  .kn-wrap .actions .btn {
+    font-size: 0.78rem; padding: 0.3rem 0.7rem; border-radius: 4px;
+    cursor: pointer; background: #21262d; border: 1px solid #30363d;
+    color: #c9d1d9; text-decoration: none;
+  }
+  .kn-wrap .actions .btn.danger {
+    border-color: #6e2626; color: #f85149;
+  }
+  .kn-wrap .err {
+    color: #f85149; font-size: 0.82rem;
+    background: #21262d; border-left: 2px solid #f85149;
+    padding: 0.4rem 0.6rem; margin-bottom: 0.85rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <p class="crumb">
+    <a href="{% url 'konso:index' %}">← Konso</a>
+  </p>
+  <h1>{{ sentence.konso }}</h1>
+  <div class="trans">'{{ sentence.translation }}'</div>
+  {% if sentence.gloss %}
+  <div class="gloss">{{ sentence.gloss }}</div>
+  {% endif %}
+  <div class="meta">
+    <code>{{ sentence.slug }}</code> ·
+    {{ sentence.get_source_display }}
+    {% if sentence.citation %}· {{ sentence.citation }}{% endif %}
+  </div>
+
+  {% if parse_error %}
+  <div class="err">Tree parse error: {{ parse_error }}</div>
+  {% else %}
+  <div class="svg-box">{{ svg|safe }}</div>
+  {% endif %}
+
+  <div class="bracket">{{ sentence.tree_bracket }}</div>
+
+  {% if sentence.notes %}
+  <div class="notes">{{ sentence.notes|linebreaksbr }}</div>
+  {% endif %}
+
+  <div class="actions">
+    <a class="btn" href="{% url 'konso:edit' slug=sentence.slug %}">Edit</a>
+    <form method="post" action="{% url 'konso:delete' slug=sentence.slug %}"
+          style="display:inline" data-konso-delete>
+      {% csrf_token %}
+      <button type="submit" class="btn danger">Delete</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
