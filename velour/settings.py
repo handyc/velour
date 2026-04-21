@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     'conduit',
     'oneliner',
     'konso',
+    'isolation',
 ]
 
 MIDDLEWARE = [

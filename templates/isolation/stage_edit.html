@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}{% if stage %}Edit stage{% else %}Add stage{% endif %} — {{ pipeline.name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .iso-form { max-width: 800px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; font-size: 0.82rem; }
+  .iso-form .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .iso-form .crumb a { color: #58a6ff; text-decoration: none; }
+  .iso-form h1 { margin: 0 0 0.6rem; font-size: 1.2rem; }
+  .iso-form form { display: grid; gap: 0.5rem; }
+  .iso-form .row2 { display: grid; grid-template-columns: 1fr 5rem; gap: 0.5rem; }
+  .iso-form label { display: flex; flex-direction: column; gap: 3px;
+                    color: #8b949e; font-size: 0.72rem; }
+  .iso-form input, .iso-form textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.5rem; font-size: 0.82rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .iso-form textarea { min-height: 4.5rem; resize: vertical; }
+  .iso-form .buttons { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
+  .iso-form .btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.9rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .iso-form .btn-secondary {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+    text-decoration: none; display: inline-block;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="iso-form">
+  <div class="crumb">
+    <a href="{% url 'isolation:index' %}">Isolation</a> ›
+    <a href="{% url 'isolation:detail' slug=pipeline.slug %}">{{ pipeline.name }}</a> ›
+    {% if stage %}Edit stage #{{ stage.order }}{% else %}Add stage{% endif %}
+  </div>
+  <h1>{% if stage %}Edit stage{% else %}Add stage{% endif %}</h1>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="row2">
+      <label>App label <span style="color:#6e7681">(Django app, e.g. "det")</span>
+        <input type="text" name="app_label" required
+               value="{{ stage.app_label|default:'' }}">
+      </label>
+      <label>Order
+        <input type="number" name="order" min="1"
+               value="{{ stage.order|default:'' }}">
+      </label>
+    </div>
+    <label>Entrypoint <span style="color:#6e7681">(class, function, or mgmt command)</span>
+      <input type="text" name="entrypoint" required
+             placeholder="det.search.run_search  or  det_search"
+             value="{{ stage.entrypoint|default:'' }}">
+    </label>
+    <label>Produces <span style="color:#6e7681">(what this stage outputs)</span>
+      <input type="text" name="produces"
+             placeholder="SearchRun + Candidate rows"
+             value="{{ stage.produces|default:'' }}">
+    </label>
+    <label>Fields used <span style="color:#6e7681">(one per line — these are what to keep when isolating)</span>
+      <textarea name="fields_used">{{ stage.fields_used|default:'' }}</textarea>
+    </label>
+    <label>Notes <span style="color:#6e7681">(branching, side effects)</span>
+      <textarea name="notes">{{ stage.notes|default:'' }}</textarea>
+    </label>
+    <div class="buttons">
+      <button type="submit" class="btn">Save</button>
+      <a class="btn btn-secondary"
+         href="{% url 'isolation:detail' slug=pipeline.slug %}"
+         style="padding:0.35rem 0.9rem">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

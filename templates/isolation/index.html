@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Isolation — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .iso-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .iso-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .iso-wrap p.lede { color: #8b949e; max-width: 76ch; line-height: 1.5;
+                     margin: 0 0 0.9rem; font-size: 0.82rem; }
+  .iso-wrap p.lede em { color: #c9d1d9; font-style: normal; }
+
+  .iso-bar { display: flex; gap: 0.5rem; align-items: center;
+             margin-bottom: 0.6rem; font-size: 0.78rem; }
+  .iso-bar input[type=text] {
+    flex: 1; max-width: 22rem; background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.2rem 0.4rem; font-size: 0.78rem;
+  }
+  .iso-bar .btn, .iso-bar a.btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.2rem 0.6rem; border-radius: 3px; cursor: pointer;
+    text-decoration: none; font-size: 0.72rem;
+  }
+  .iso-bar .btn-secondary {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+  }
+
+  table.iso-list { width: 100%; border-collapse: collapse;
+                   font-size: 0.78rem; }
+  table.iso-list th, table.iso-list td {
+    padding: 0.4rem 0.55rem; border-bottom: 1px solid #1a2230;
+    text-align: left; vertical-align: middle;
+  }
+  table.iso-list th {
+    color: #8b949e; text-transform: uppercase;
+    font-size: 0.66rem; letter-spacing: 0.06em;
+    border-bottom: 1px solid #30363d;
+  }
+  table.iso-list td.name a { color: #58a6ff; text-decoration: none; }
+  table.iso-list td.name a:hover { text-decoration: underline; }
+  table.iso-list td.apps { color: #8b949e; font-size: 0.72rem;
+                            font-family: ui-monospace, monospace; }
+
+  .pf-strip { display: flex; gap: 2px; align-items: center; }
+  .pf-cell {
+    width: 14px; height: 14px; border-radius: 2px;
+    background: #21262d; border: 1px solid #30363d;
+    display: inline-block;
+  }
+  .pf-legend {
+    color: #6e7681; font-size: 0.68rem;
+    margin-top: 0.4rem; display: flex; gap: 0.7rem; flex-wrap: wrap;
+  }
+  .pf-legend span.dot {
+    display: inline-block; width: 9px; height: 9px;
+    border-radius: 2px; vertical-align: middle; margin-right: 3px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="iso-wrap">
+  <h1>Isolation</h1>
+  <p class="lede">
+    A <em>pipeline</em> is a workflow that crosses several Velour apps
+    (e.g. <em>Det</em> brute-forces hex CA rulesets → <em>Evolution</em>
+    breeds them → <em>Automaton</em> renders them). Isolation captures
+    such a pipeline as one tightly-scoped artifact set: trim the unused
+    fields, fold the classes, then re-implement the MVP across a
+    progression of resource regimes — from a one-line shell command
+    down to an ATtiny13a, up through ESP firmware to a Pi.
+  </p>
+
+  <form class="iso-bar" method="get">
+    <input type="text" name="q" value="{{ q }}"
+           placeholder="filter by name / app / description…"
+           autocomplete="off">
+    <button type="submit" class="btn btn-secondary">Filter</button>
+    {% if q %}<a href="{% url 'isolation:index' %}"
+                 style="color:#8b949e;font-size:0.72rem">clear</a>{% endif %}
+    <span style="flex:1"></span>
+    <a href="{% url 'isolation:create' %}" class="btn">+ New pipeline</a>
+  </form>
+
+  {% if rows %}
+  <table class="iso-list">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Apps</th>
+        <th>Stages</th>
+        <th>Targets</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="name">
+          <a href="{{ row.pipeline.get_absolute_url }}">{{ row.pipeline.name }}</a>
+        </td>
+        <td class="apps">{{ row.pipeline.apps_used }}</td>
+        <td>{{ row.pipeline.stages.count }}</td>
+        <td>
+          <span class="pf-strip" title="cli·c·t13·t85·8266·esp32·pi4">
+            {% for t in row.targets %}
+              <span class="pf-cell"
+                    title="{% if t %}{{ t.get_target_display }} — {{ t.get_status_display }}{% else %}—{% endif %}"
+                    {% if t %}style="background:{{ t.status_color }}"{% endif %}></span>
+            {% endfor %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pf-legend">
+    <span><span class="dot" style="background:#484f58"></span>not started</span>
+    <span><span class="dot" style="background:#d29922"></span>attempted</span>
+    <span><span class="dot" style="background:#58a6ff"></span>working</span>
+    <span><span class="dot" style="background:#3fb950"></span>shipped</span>
+    <span><span class="dot" style="background:#6e7681"></span>infeasible</span>
+    <span style="margin-left:auto">cells: cli · C · t13 · t85 · 8266 · esp32 · pi4</span>
+  </div>
+  {% else %}
+  <p style="color:#6e7681;font-size:0.78rem">
+    {% if q %}No pipelines match "{{ q }}".{% else %}No pipelines yet. Run <code>manage.py seed_isolation</code> for the hex-CA pipeline, or click "+ New pipeline".{% endif %}
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

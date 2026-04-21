@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pipeline.name }} — Isolation{% endblock %}
+
+{% block extra_head %}
+<style>
+  .iso-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .iso-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.4rem; }
+  .iso-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .iso-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .iso-wrap p.desc { color: #c9d1d9; max-width: 78ch; line-height: 1.5;
+                     margin: 0 0 0.6rem; font-size: 0.82rem; }
+  .iso-wrap p.apps { color: #8b949e; font-size: 0.74rem;
+                     font-family: ui-monospace, monospace;
+                     margin: 0 0 0.9rem; }
+
+  .iso-actions { display: flex; gap: 0.4rem; margin-bottom: 0.9rem;
+                  font-size: 0.72rem; }
+  .iso-actions a, .iso-actions button {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.2rem 0.55rem; border-radius: 3px; text-decoration: none;
+    cursor: pointer; font-size: 0.72rem;
+  }
+  .iso-actions a.add { background: #238636; border-color: #2ea043; color: white; }
+  .iso-actions form { display: inline; }
+  .iso-actions .danger { color: #f85149; border-color: #6e2626; }
+
+  h2 { font-size: 0.95rem; margin: 1.1rem 0 0.4rem; color: #c9d1d9; }
+  h2 .lite { color: #6e7681; font-weight: normal; font-size: 0.72rem;
+             font-family: ui-monospace, monospace; }
+
+  table.stages, table.targets {
+    width: 100%; border-collapse: collapse; font-size: 0.78rem;
+    background: #0d1117; border: 1px solid #1a2230; border-radius: 4px;
+  }
+  table.stages th, table.stages td,
+  table.targets th, table.targets td {
+    padding: 0.4rem 0.55rem; border-bottom: 1px solid #1a2230;
+    text-align: left; vertical-align: top;
+  }
+  table.stages th, table.targets th {
+    color: #8b949e; text-transform: uppercase;
+    font-size: 0.66rem; letter-spacing: 0.06em;
+    border-bottom: 1px solid #30363d;
+  }
+  table.stages td.idx { color: #6e7681; font-family: ui-monospace, monospace;
+                         width: 2rem; }
+  table.stages td.app { color: #58a6ff;
+                         font-family: ui-monospace, monospace; width: 7rem; }
+  table.stages td.entry {
+    color: #d2a8ff; font-family: ui-monospace, monospace;
+  }
+  table.stages td.produces { color: #c9d1d9; }
+  table.stages td.fields {
+    color: #8b949e; font-family: ui-monospace, monospace;
+    font-size: 0.72rem; white-space: pre-wrap;
+  }
+  table.stages td.act { width: 5rem; text-align: right; }
+  table.stages td.act a { color: #58a6ff; font-size: 0.7rem; text-decoration: none;
+                           margin-left: 0.4rem; }
+  table.stages td.notes {
+    color: #8b949e; font-size: 0.72rem; font-style: italic;
+  }
+
+  .target-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 6px; margin-top: 0.4rem;
+  }
+  .target-card {
+    background: #0d1117; border: 1px solid #1a2230; border-radius: 4px;
+    padding: 0.45rem 0.5rem; font-size: 0.72rem; cursor: pointer;
+    text-decoration: none; color: #c9d1d9; display: block;
+    border-left-width: 3px;
+  }
+  .target-card:hover { background: #161b22; border-color: #30363d; }
+  .target-card .label {
+    color: #c9d1d9; font-size: 0.7rem; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .target-card .status {
+    color: #8b949e; font-size: 0.65rem; margin-top: 2px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .target-card .size {
+    color: #6e7681; font-size: 0.65rem;
+    font-family: ui-monospace, monospace;
+  }
+
+  details.notes-block {
+    background: #0d1117; border: 1px solid #1a2230; border-radius: 4px;
+    padding: 0.5rem 0.7rem; font-size: 0.78rem; margin-top: 0.6rem;
+  }
+  details.notes-block summary { cursor: pointer; color: #8b949e; }
+  details.notes-block pre {
+    color: #c9d1d9; white-space: pre-wrap; margin-top: 0.4rem;
+    font-family: ui-monospace, monospace; font-size: 0.74rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="iso-wrap">
+  <div class="crumb">
+    <a href="{% url 'isolation:index' %}">Isolation</a> ›
+    {{ pipeline.name }}
+  </div>
+  <h1>{{ pipeline.name }}</h1>
+  {% if pipeline.description %}
+    <p class="desc">{{ pipeline.description|linebreaksbr }}</p>
+  {% endif %}
+  {% if pipeline.apps_used %}
+    <p class="apps">apps: {{ pipeline.apps_used }}</p>
+  {% endif %}
+
+  <div class="iso-actions">
+    <a href="{% url 'isolation:edit' slug=pipeline.slug %}">Edit pipeline</a>
+    <a class="add" href="{% url 'isolation:stage_create' slug=pipeline.slug %}">+ Add stage</a>
+    <form method="post" action="{% url 'isolation:delete' slug=pipeline.slug %}"
+          style="margin-left:auto">
+      {% csrf_token %}
+      <span data-guard style="display:inline">
+        <button type="button" class="danger"
+                onclick="this.style.display='none';this.nextElementSibling.style.display='inline'">
+          Delete pipeline
+        </button>
+        <button type="submit" class="danger"
+                style="display:none;background:#6e2626;border-color:#8e2929;color:#fff">
+          Really delete?
+        </button>
+      </span>
+    </form>
+  </div>
+
+  <h2>Stages
+    <span class="lite">— ordered; branching noted in stage notes</span>
+  </h2>
+  {% if stages %}
+  <table class="stages">
+    <thead>
+      <tr>
+        <th>#</th><th>App</th><th>Entrypoint</th>
+        <th>Produces</th><th>Fields used</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in stages %}
+      <tr>
+        <td class="idx">{{ s.order }}</td>
+        <td class="app">{{ s.app_label }}</td>
+        <td class="entry">{{ s.entrypoint }}</td>
+        <td class="produces">{{ s.produces }}</td>
+        <td class="fields">{{ s.fields_used }}</td>
+        <td class="act">
+          <a href="{% url 'isolation:stage_edit' slug=pipeline.slug pk=s.pk %}">edit</a>
+          <form method="post"
+                action="{% url 'isolation:stage_delete' slug=pipeline.slug pk=s.pk %}"
+                style="display:inline">
+            {% csrf_token %}
+            <span data-guard style="display:inline">
+              <button type="button" class="danger"
+                      style="background:transparent;border:none;color:#f85149;cursor:pointer;font-size:0.7rem;padding:0;margin-left:0.4rem"
+                      onclick="this.style.display='none';this.nextElementSibling.style.display='inline'">
+                ✕
+              </button>
+              <button type="submit"
+                      style="display:none;background:#6e2626;border:1px solid #8e2929;color:#fff;padding:0 0.3rem;font-size:0.65rem;border-radius:2px;cursor:pointer">
+                really
+              </button>
+            </span>
+          </form>
+        </td>
+      </tr>
+      {% if s.notes %}
+      <tr>
+        <td></td>
+        <td colspan="5" class="notes">↳ {{ s.notes }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#6e7681;font-size:0.78rem">
+    No stages yet. Click "+ Add stage" to define the first one.
+  </p>
+  {% endif %}
+
+  <h2>Platform targets
+    <span class="lite">— click any cell to edit artifact + status</span>
+  </h2>
+  <div class="target-grid">
+    {% for key, label, t in targets %}
+      <a class="target-card"
+         href="{% url 'isolation:target_edit' slug=pipeline.slug pk=t.pk %}"
+         style="border-left-color: {{ t.status_color }}">
+        <div class="label">{{ label }}</div>
+        <div class="status">{{ t.get_status_display }}</div>
+        {% if t.size_bytes is not None %}
+          <div class="size">{{ t.display_size }}</div>
+        {% elif t.artifact_path %}
+          <div class="size">→ {{ t.artifact_path }}</div>
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+
+  {% if pipeline.notes %}
+  <details class="notes-block">
+    <summary>Refactoring notes</summary>
+    <pre>{{ pipeline.notes }}</pre>
+  </details>
+  {% endif %}
+</div>
+{% endblock %}
