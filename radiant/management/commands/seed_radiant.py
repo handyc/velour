@@ -15,32 +15,34 @@ SERVERS = [
         'name': 'LUCDH main',
         'role': 'main',
         'status': 'active',
-        'ram_gb': 32,
+        'ram_gb': 8,
         'storage_gb': 200,
         'cpu_cores': 4,
         'storage_used_gb': 150,
-        'notes': 'Hosts ~40 Django projects and ~30 WordPress class sites. '
-                 'Currently serves the whole humanities-DH fleet on 4 cores.',
+        'notes': 'Hosts ~40 Django projects and ~30 WordPress class sites '
+                 'on 8 GB RAM / 4 cores. Realistic peak already exceeds '
+                 'available RAM — fleet survives because classes rarely '
+                 'collide and most projects sit idle at baseline.',
     },
     {
         'name': 'OpenAtlas sandbox',
         'role': 'experimental',
         'status': 'active',
-        'ram_gb': 8,
+        'ram_gb': 2,
         'storage_gb': 100,
         'cpu_cores': 2,
         'notes': 'Isolated because OpenAtlas had installation issues that '
-                 'would have entangled other projects.',
+                 'would have entangled other projects. 2 GB RAM.',
     },
     {
         'name': 'SignBank sandbox',
         'role': 'experimental',
         'status': 'active',
-        'ram_gb': 8,
+        'ram_gb': 2,
         'storage_gb': 100,
         'cpu_cores': 2,
         'notes': 'Isolated for safe code testing of the SignBank refactor '
-                 '(open-source sign-language project).',
+                 '(open-source sign-language project). 2 GB RAM.',
     },
 ]
 
@@ -52,28 +54,31 @@ CLASSES = [
         'name': 'Production Django',
         'description': 'Completed humanities projects running 24/7 with '
                        'minimal maintenance.',
-        'typical_ram_mb': 100,
+        'typical_ram_mb': 70,
         'typical_storage_mb': 500,
         'peak_concurrency': 5,
         'active_fraction': 0.20,
         'new_per_year': 4.5,
         'saturation_count': 250,
         'notes': 'Anchor class. Low-traffic humanities sites rarely '
-                 'peak together; only ~20% are active at any moment.',
+                 'peak together; only ~20% are active at any moment. '
+                 'Idle Django + gunicorn worker sits at ~70 MB.',
     },
     {
         'name': 'WordPress classroom',
         'description': 'WordPress sites used by live classes, constantly '
                        'updated, up to 40 students on a single site when '
                        'a class is in session.',
-        'typical_ram_mb': 250,
+        'typical_ram_mb': 60,
         'typical_storage_mb': 800,
         'peak_concurrency': 40,
         'active_fraction': 0.15,
         'new_per_year': 2.0,
         'saturation_count': 80,
         'notes': 'Spiky per-site, but classes are staggered; only ~15% '
-                 'of sites are in session concurrently at peak.',
+                 'of sites are in session concurrently at peak. Idle '
+                 'PHP-FPM pool sits at ~60 MB — workers die between '
+                 'requests, so dormant sites cost almost nothing.',
     },
     {
         'name': 'Experimental isolated',
@@ -91,7 +96,7 @@ CLASSES = [
         'name': 'Development',
         'description': 'Projects in active development with changing '
                        'requirements.',
-        'typical_ram_mb': 150,
+        'typical_ram_mb': 80,
         'typical_storage_mb': 400,
         'peak_concurrency': 2,
         'active_fraction': 0.3,
@@ -104,7 +109,7 @@ CLASSES = [
         'name': 'Admin / pipeline',
         'description': 'Machines providing full admin access for pipeline '
                        'testing across the fleet.',
-        'typical_ram_mb': 500,
+        'typical_ram_mb': 300,
         'typical_storage_mb': 5000,
         'peak_concurrency': 1,
         'active_fraction': 1.0,
