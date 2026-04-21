@@ -113,7 +113,7 @@
 
 <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
     {% if tileset.tile_type == 'hex' and tileset.palette|length >= 2 %}
-    <form method="post" action="{% url 'tiles:generate_complete_hex' tileset.slug %}" style="display:inline;" onsubmit="return confirm('This replaces all existing tiles with a complete 64-tile set. Continue?');">
+    <form method="post" action="{% url 'tiles:generate_complete_hex' tileset.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn">Generate Complete Set (64 tiles)</button>
     </form>
@@ -125,7 +125,7 @@
         <button type="submit" class="btn">Render Artwork</button>
     </form>
     {% endif %}
-    <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;" onsubmit="return confirm('Delete {{ tileset.name }}?');">
+    <form method="post" action="{% url 'tiles:delete' tileset.slug %}" style="display: inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>

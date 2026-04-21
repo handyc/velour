@@ -57,7 +57,7 @@
         <div class="actions">
             <a href="{% url 'mail:detail' a.pk %}" class="btn">Details</a>
             <a href="{% url 'mail:edit' a.pk %}" class="btn btn-secondary">Edit</a>
-            <form method="post" action="{% url 'mail:delete' a.pk %}" onsubmit="return confirm('Remove {{ a.name }}?');">
+            <form method="post" action="{% url 'mail:delete' a.pk %}">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary">Delete</button>
             </form>

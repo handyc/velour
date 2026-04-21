@@ -35,7 +35,7 @@
     <a href="{% url 'codex:volume_pdf' volume.slug %}" target="_blank" class="btn">Build PDF</a>
     <a href="{% url 'codex:volume_pdf' volume.slug %}?print=1" target="_blank" class="btn btn-secondary" title="A4 + 3mm bleed + crop marks, RGB colour">Print-ready PDF</a>
     <a href="{% url 'codex:volume_list' %}" class="btn btn-secondary">Back</a>
-    <form method="post" action="{% url 'codex:volume_delete' volume.slug %}" onsubmit="return confirm('Delete this volume? The underlying manuals are kept.');" style="margin-left:auto;">
+    <form method="post" action="{% url 'codex:volume_delete' volume.slug %}" style="margin-left:auto;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
     </form>
@@ -52,7 +52,7 @@
             <div class="meta">{{ e.manual.section_count }} section{{ e.manual.section_count|pluralize }} · {{ e.manual.get_format_display }}</div>
         </div>
         <div class="meta">v{{ e.manual.version|default:"—" }}</div>
-        <form method="post" action="{% url 'codex:volume_remove_manual' volume.slug e.pk %}" onsubmit="return confirm('Remove from volume?');">
+        <form method="post" action="{% url 'codex:volume_remove_manual' volume.slug e.pk %}">
             {% csrf_token %}
             <button type="submit" class="remove">Remove</button>
         </form>

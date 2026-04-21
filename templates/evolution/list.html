@@ -210,8 +210,7 @@
 
     <form class="ev-newbar" method="post"
           action="{% url 'evolution:language_tournament' %}"
-          style="grid-template-columns: auto auto auto auto auto auto 1fr;"
-          onsubmit="return confirm('This will delete the lowest-scoring Language(s) from Grammar Engine. Continue?');">
+          style="grid-template-columns: auto auto auto auto auto auto 1fr;">
         {% csrf_token %}
         <label title="Pull N random Languages from Grammar Engine, score them against a neutral random goal, delete the lowest K.">Tournament</label>
         <label style="font-weight:normal">competitors</label>
@@ -235,8 +234,7 @@
 
     <form class="ev-newbar" method="post"
           action="{% url 'evolution:language_championship' %}"
-          style="grid-template-columns: auto auto auto auto auto auto auto 1fr;"
-          onsubmit="return confirm('Championship deletes non-advancers across many tournaments — potentially most of the Grammar Engine library. Floor will hold the line. Continue?');">
+          style="grid-template-columns: auto auto auto auto auto auto auto 1fr;">
         {% csrf_token %}
         <label title="Bracketed tournament-of-tournaments. Each level's winners advance to the next level's matches.">Championship</label>
         <label style="font-weight:normal">levels</label>
@@ -258,10 +256,19 @@
         <input type="number" name="floor" value="4" min="2" max="50"
                style="width:4em"
                title="Total-deletion budget across the whole championship — Grammar Engine library never drops below this.">
-        <button type="submit" class="ev-btn danger"
-                title="Championship: shuffle, bracket into groups of `per_group`, run tournament in each, top `winners_per_group` advance. Repeat for `levels` levels. Each match's winners absorb the evolved grammar as a trophy variant — multi-level survivors collect stacks.">
-            run championship
-        </button>
+        <span data-guard style="display:inline">
+            <button type="button"
+                    onclick="this.style.display='none';this.nextElementSibling.style.display='inline'"
+                    class="ev-btn danger"
+                    title="Championship: shuffle, bracket into groups of `per_group`, run tournament in each, top `winners_per_group` advance. Repeat for `levels` levels. Each match's winners absorb the evolved grammar as a trophy variant — multi-level survivors collect stacks.">
+                run championship
+            </button>
+            <button type="submit"
+                    style="display:none;background:#6e2626;border-color:#8e2929;color:#fff"
+                    class="ev-btn danger">
+                Really? Deletes non-advancers across library
+            </button>
+        </span>
     </form>
 
     <form class="ev-newbar" method="get"
@@ -304,7 +311,6 @@
             <td style="text-align:right;">
                 <form method="post"
                       action="{% url 'evolution:run_delete' slug=run.slug %}"
-                      onsubmit="return confirm('Delete {{ run.name|escapejs }}?');"
                       style="display:inline;">
                     {% csrf_token %}
                     <button type="submit" class="ev-btn danger">✕</button>

@@ -29,15 +29,21 @@
         <div class="app-actions" style="display: flex; align-items: center;">
             <a href="{% url 'app_factory:detail' app.pk %}" class="btn btn-secondary">Details</a>
             <form method="post" action="{% url 'app_factory:delete' app.pk %}"
-                  style="display:inline; margin-left: 0.5rem;"
-                  onsubmit="return confirm('Delete app {{ app.name }} and all its files? This cannot be undone.');">
+                  style="display:inline; margin-left: 0.5rem;">
                 {% csrf_token %}
-                <button type="submit" class="btn-icon btn-icon-danger" title="Delete {{ app.name }}">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                        <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H5.5l1-1h3l1 1H13a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-                    </svg>
-                </button>
+                <span data-guard style="display:inline">
+                    <button type="button"
+                            onclick="this.style.display='none';this.nextElementSibling.style.display='inline'"
+                            class="btn-icon btn-icon-danger" title="Delete {{ app.name }}">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H5.5l1-1h3l1 1H13a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                        </svg>
+                    </button>
+                    <button type="submit"
+                            style="display:none;background:#6e2626;border-color:#8e2929;color:#fff;font-size:0.75rem;padding:0.15rem 0.4rem;"
+                            class="btn-icon btn-icon-danger" title="Really delete {{ app.name }} and all its files">Really?</button>
+                </span>
             </form>
         </div>
     </div>

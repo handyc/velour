@@ -71,7 +71,7 @@
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Mark unread</button>
     </form>
-    <form method="post" action="{% url 'mail:inbound_delete' msg.pk %}" style="display:inline;" onsubmit="return confirm('Delete this message from velour? (Does not touch the remote mailbox.)');">
+    <form method="post" action="{% url 'mail:inbound_delete' msg.pk %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>

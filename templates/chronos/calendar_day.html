@@ -40,7 +40,7 @@
         {% if ev.notes %}<div class="notes">{{ ev.notes }}</div>{% endif %}
         <div class="actions">
             <a href="{% url 'chronos:event_edit' ev.slug %}" class="btn btn-secondary" style="font-size:0.78rem;">Edit</a>
-            <form method="post" action="{% url 'chronos:event_delete' ev.slug %}" style="display:inline;" onsubmit="return confirm('Delete event {{ ev.title|escapejs }}?');">
+            <form method="post" action="{% url 'chronos:event_delete' ev.slug %}" style="display:inline;">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Delete</button>
             </form>

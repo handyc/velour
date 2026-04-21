@@ -71,7 +71,7 @@
 
     <div style="display:flex; gap:0.5rem; margin-top:1rem;">
         <a href="{% url 'attic:edit' item.slug %}" class="btn">Edit</a>
-        <form method="post" action="{% url 'attic:delete' item.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ item.title|escapejs }}? This removes the file from disk.');">
+        <form method="post" action="{% url 'attic:delete' item.slug %}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary">Delete</button>
         </form>

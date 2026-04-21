@@ -81,7 +81,7 @@
         <div class="offset">UTC{{ w.utc_offset }}</div>
         <div class="actions">
             <a href="{% url 'chronos:watched_edit' w.pk %}" class="btn btn-secondary">Edit</a>
-            <form method="post" action="{% url 'chronos:watched_delete' w.pk %}" style="display:inline;" onsubmit="return confirm('Remove {{ w.label|escapejs }}?');">
+            <form method="post" action="{% url 'chronos:watched_delete' w.pk %}" style="display:inline;">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary">Delete</button>
             </form>

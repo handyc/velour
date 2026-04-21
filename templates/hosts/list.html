@@ -95,7 +95,7 @@
             </form>
             <a href="{% url 'hosts:detail' host.pk %}" class="btn btn-secondary">Details</a>
             <a href="{% url 'hosts:edit' host.pk %}" class="btn btn-secondary">Edit</a>
-            <form method="post" action="{% url 'hosts:delete' host.pk %}" onsubmit="return confirm('Remove {{ host.name }}?');">
+            <form method="post" action="{% url 'hosts:delete' host.pk %}">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary">Delete</button>
             </form>

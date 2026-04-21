@@ -31,8 +31,7 @@
 <div style="margin-top:1rem;display:flex;gap:0.5rem;">
     <form method="post" action="{% url 'legolith:delete' world.slug %}" style="display:inline;">
         {% csrf_token %}
-        <button type="submit" class="btn btn-secondary"
-                onclick="return confirm('Delete this world?');">Delete</button>
+        <button type="submit" class="btn btn-secondary">Delete</button>
     </form>
     <a href="{% url 'legolith:generate' %}" class="btn btn-secondary">Roll another</a>
 </div>

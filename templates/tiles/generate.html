@@ -255,7 +255,8 @@
     });
 
     document.getElementById('btn-save-tileset').addEventListener('click', function() {
-        if (!lastGrid) { alert('Generate a tiling first.'); return; }
+        var status = document.getElementById('gen-status');
+        if (!lastGrid) { status.textContent = 'Generate a tiling first.'; status.style.color = '#f85149'; return; }
         var bs = parseInt(document.getElementById('block-size').value) || 4;
         bs = Math.max(2, Math.min(16, bs));
 
@@ -271,7 +272,7 @@
 
         var blocksW = Math.floor(lastW / bs);
         var blocksH = Math.floor(lastH / bs);
-        if (blocksW < 1 || blocksH < 1) { alert('Grid too small for block size ' + bs); return; }
+        if (blocksW < 1 || blocksH < 1) { status.textContent = 'Grid too small for block size ' + bs; status.style.color = '#f85149'; return; }
 
         var tiles = [];
         var seen = {};
@@ -312,7 +313,7 @@
             }
         }
 
-        if (!tiles.length) { alert('No valid blocks found.'); return; }
+        if (!tiles.length) { status.textContent = 'No valid blocks found.'; status.style.color = '#f85149'; return; }
         document.getElementById('grid-json-field').value = JSON.stringify(tiles);
         document.getElementById('grid-w-field').value = blocksW;
         document.getElementById('grid-h-field').value = blocksH;

@@ -51,7 +51,7 @@
     <span class="coords">{{ p.lat|floatformat:4 }}, {{ p.lon|floatformat:4 }} · z{{ p.zoom }}</span>
     <span class="actions">
         <a href="{% url 'cartography:place_edit' p.slug %}" class="btn btn-secondary" style="font-size:0.72rem;">Edit</a>
-        <form method="post" action="{% url 'cartography:place_delete' p.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ p.name|escapejs }}?');">
+        <form method="post" action="{% url 'cartography:place_delete' p.slug %}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;">Delete</button>
         </form>

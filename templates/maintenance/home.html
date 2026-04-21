@@ -93,13 +93,18 @@
             </div>
             <div class="backup-actions">
                 <a href="{% url 'maintenance:backup_download' backup.pk %}" class="btn btn-secondary">Download</a>
-                <form method="post" action="{% url 'maintenance:backup_restore' backup.pk %}" style="display:inline;"
-                      onsubmit="return confirm('Restore {{ backup.filename }} to /home/{{ backup.username }}/? This will overwrite existing files.');">
+                <form method="post" action="{% url 'maintenance:backup_restore' backup.pk %}" style="display:inline;">
                     {% csrf_token %}
-                    <button type="submit" class="btn btn-primary">Restore</button>
+                    <span data-guard style="display:inline">
+                        <button type="button"
+                                onclick="this.style.display='none';this.nextElementSibling.style.display='inline'"
+                                class="btn btn-primary">Restore</button>
+                        <button type="submit"
+                                style="display:none;background:#6e2626;border-color:#8e2929;color:#fff"
+                                class="btn btn-primary">Really? Will overwrite /home/{{ backup.username }}/</button>
+                    </span>
                 </form>
-                <form method="post" action="{% url 'maintenance:backup_delete' backup.pk %}" style="display:inline;"
-                      onsubmit="return confirm('Delete {{ backup.filename }}?');">
+                <form method="post" action="{% url 'maintenance:backup_delete' backup.pk %}" style="display:inline;">
                     {% csrf_token %}
                     <button type="submit" class="btn btn-danger" style="font-size:0.65rem; padding:0.12rem 0.4rem;">Del</button>
                 </form>

@@ -42,7 +42,7 @@
 
 <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
     <a href="{% url 'hpc:edit' cluster.slug %}" class="btn">Edit</a>
-    <form method="post" action="{% url 'hpc:delete' cluster.slug %}" style="display:inline;" onsubmit="return confirm('Remove {{ cluster.nickname }}?');">
+    <form method="post" action="{% url 'hpc:delete' cluster.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>

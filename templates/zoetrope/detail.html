@@ -108,7 +108,7 @@
             </form>
         {% endif %}
         <a href="{% url 'zoetrope:list' %}" class="btn btn-secondary">Back</a>
-        <form method="post" action="{% url 'zoetrope:delete' reel.slug %}" style="margin-left:auto;" onsubmit="return confirm('Delete this reel?');">
+        <form method="post" action="{% url 'zoetrope:delete' reel.slug %}" style="margin-left:auto;">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
         </form>

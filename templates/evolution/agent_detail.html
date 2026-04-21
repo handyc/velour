@@ -87,21 +87,18 @@
         <div class="ev-actions">
             {% if agent.level == 0 and not is_hexca %}
             <form method="post"
-                  action="{% url 'evolution:agent_export_lsystem' slug=agent.slug %}"
-                  onsubmit="return confirm('Export {{ agent.name|escapejs }} to L-System library?');">
+                  action="{% url 'evolution:agent_export_lsystem' slug=agent.slug %}">
                 {% csrf_token %}
                 <button type="submit" class="ev-btn primary">→ Export to L-System</button>
             </form>
             <form method="post"
-                  action="{% url 'evolution:agent_export_grammar' slug=agent.slug %}"
-                  onsubmit="return confirm('Export {{ agent.name|escapejs }} to Grammar Engine as a new language?');">
+                  action="{% url 'evolution:agent_export_grammar' slug=agent.slug %}">
                 {% csrf_token %}
                 <button type="submit" class="ev-btn primary">→ Export to Grammar Engine</button>
             </form>
             {% endif %}
             {% if is_hexca %}
-            <form method="post" action="{% url 'det:import_from_evolution' %}"
-                  onsubmit="return confirm('Import {{ agent.name|escapejs }} back to Det as a Candidate?');">
+            <form method="post" action="{% url 'det:import_from_evolution' %}">
                 {% csrf_token %}
                 <input type="hidden" name="agent" value="{{ agent.id }}">
                 <button type="submit" class="ev-btn primary">→ Import to Det</button>
@@ -111,7 +108,6 @@
             <a href="{% url 'evolution:agent_json' slug=agent.slug %}" class="ev-btn">JSON</a>
             <form method="post"
                   action="{% url 'evolution:agent_delete' slug=agent.slug %}"
-                  onsubmit="return confirm('Delete {{ agent.name|escapejs }}?');"
                   style="margin-left:auto;">
                 {% csrf_token %}
                 <button type="submit" class="ev-btn danger">✕ Delete</button>

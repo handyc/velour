@@ -58,7 +58,7 @@
 
 <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
     <a href="{% url 'experiments:edit' experiment.slug %}" class="btn">Edit</a>
-    <form method="post" action="{% url 'experiments:delete' experiment.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ experiment.name }}? Attached nodes become unassigned.');">
+    <form method="post" action="{% url 'experiments:delete' experiment.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>

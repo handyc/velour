@@ -57,7 +57,7 @@
                 <a href="{% url 'nodes:hardware_edit' p.pk %}" style="font-size: 0.8125rem;">edit</a>
                 {% if p.nodes.count == 0 %}
                 &nbsp;
-                <form method="post" action="{% url 'nodes:hardware_delete' p.pk %}" style="display:inline;" onsubmit="return confirm('Delete {{ p.name }}?');">
+                <form method="post" action="{% url 'nodes:hardware_delete' p.pk %}" style="display:inline;">
                     {% csrf_token %}
                     <button type="submit" style="background:none;border:none;color:#8b949e;cursor:pointer;font:inherit;font-size:0.8125rem;padding:0;">delete</button>
                 </form>

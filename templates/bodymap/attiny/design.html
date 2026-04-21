@@ -186,8 +186,7 @@
                 <p style="color: #8b949e; font-size: 0.8rem; margin: 0 0 0.6rem;">
                     Removes this design and its built hex. Templates are untouched.
                 </p>
-                <form method="post" action="{% url 'bodymap:attiny_design_delete' design.slug %}"
-                      onsubmit="return confirm('Delete design {{ design.name|escapejs }}?');">
+                <form method="post" action="{% url 'bodymap:attiny_design_delete' design.slug %}">
                     {% csrf_token %}
                     <button class="de-btn danger" type="submit">Delete design</button>
                 </form>

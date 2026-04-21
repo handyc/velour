@@ -102,8 +102,7 @@
             {% if not is_new %}
             <span style="flex:1"></span>
             <button type="submit" formaction="{% url 'legolith:library_delete' slug=model.slug %}"
-                    formmethod="post" class="btn ghost" style="color:#e3534d;border-color:#da3633;"
-                    onclick="return confirm('Delete {{ model.name|escapejs }}?')">Delete</button>
+                    formmethod="post" class="btn ghost" style="color:#e3534d;border-color:#da3633;">Delete</button>
             {% endif %}
         </div>
     </div>

@@ -123,7 +123,6 @@
             <td style="text-align:right;">
                 <form method="post"
                       action="{% url 'grammar_engine:delete' slug=lang.slug %}"
-                      onsubmit="return confirm('Delete {{ lang.name|escapejs }}?');"
                       style="display:inline;">
                     {% csrf_token %}
                     <button type="submit" class="ge-btn danger">✕</button>

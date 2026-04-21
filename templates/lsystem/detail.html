@@ -20,7 +20,7 @@
         {% csrf_token %}
         <button type="submit" style="background:#238636;color:#fff;border:1px solid #2ea043;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Export to Aether</button>
     </form>
-    <form method="post" action="{% url 'lsystem:species_delete' species.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ species.name }}?');">
+    <form method="post" action="{% url 'lsystem:species_delete' species.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" style="background:transparent;color:#f85149;border:1px solid #f85149;padding:0.35rem 0.8rem;border-radius:4px;font-size:0.82rem;cursor:pointer;">Delete</button>
     </form>

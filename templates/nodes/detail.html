@@ -91,9 +91,16 @@
 <h2 style="margin-top: 1.5rem;">API token</h2>
 <p style="color:#8b949e; font-size: 0.875rem;">Send this value in <code>Authorization: Bearer &lt;token&gt;</code> from the device when posting telemetry. Anyone with this string can impersonate the node — treat it like a password.</p>
 <div class="token-box">{{ node.api_token }}</div>
-<form method="post" action="{% url 'nodes:rotate_token' node.slug %}" style="margin-top: 0.5rem;" onsubmit="return confirm('Rotating the token will break the device until you reflash it with the new value. Continue?');">
+<form method="post" action="{% url 'nodes:rotate_token' node.slug %}" style="margin-top: 0.5rem;">
     {% csrf_token %}
-    <button type="submit" class="btn btn-secondary" style="font-size: 0.8125rem;">Rotate token</button>
+    <span data-guard style="display:inline">
+        <button type="button"
+                onclick="this.style.display='none';this.nextElementSibling.style.display='inline'"
+                class="btn btn-secondary" style="font-size: 0.8125rem;">Rotate token</button>
+        <button type="submit"
+                style="display:none;background:#6e2626;border-color:#8e2929;color:#fff;font-size:0.8125rem;"
+                class="btn btn-secondary">Really? Will break device until reflashed</button>
+    </span>
 </form>
 
 <h2 style="margin-top: 1.5rem;">Live</h2>
@@ -317,7 +324,7 @@
 
 <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
     <a href="{% url 'nodes:edit' node.slug %}" class="btn">Edit</a>
-    <form method="post" action="{% url 'nodes:delete' node.slug %}" style="display:inline;" onsubmit="return confirm('Remove {{ node.nickname }} from the fleet? This does not affect the physical device.');">
+    <form method="post" action="{% url 'nodes:delete' node.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete</button>
     </form>

@@ -108,7 +108,7 @@
     {% if db.is_sqlite and db.file_exists %}
     <a href="{% url 'databases:download' db.slug %}" class="btn">Download .sqlite3</a>
     {% endif %}
-    <form method="post" action="{% url 'databases:delete' db.slug %}" style="display:inline;" onsubmit="return confirm('Delete {{ db.nickname|escapejs }}?{% if db.is_sqlite %}\n\nCheck the box to also delete the .sqlite3 file.{% endif %}');">
+    <form method="post" action="{% url 'databases:delete' db.slug %}" style="display:inline;">
         {% csrf_token %}
         {% if db.is_sqlite and db.file_exists %}
         <label style="font-size:0.78rem;color:#8b949e;margin-right:0.3rem;">

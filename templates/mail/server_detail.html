@@ -53,7 +53,7 @@
 
     <div style="margin-top: 1.5rem; display: flex; gap: 0.5rem;">
         <a href="{% url 'mail:server_inbox' %}" class="btn btn-secondary">&larr; Back to inbox</a>
-        <form method="post" action="{% url 'mail:server_delete' msg.pk %}" style="display:inline;" onsubmit="return confirm('Delete this message?');">
+        <form method="post" action="{% url 'mail:server_delete' msg.pk %}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary">Delete</button>
         </form>

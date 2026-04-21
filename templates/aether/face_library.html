@@ -60,8 +60,7 @@
      {% csrf_token %}
      <button type="submit" class="fav" title="toggle favorite">{% if f.favorite %}★{% else %}☆{% endif %}</button>
     </form>
-    <form method="post" action="{% url 'aether:face_delete' f.slug %}"
-          onsubmit="return confirm('Delete {{ f.name|escapejs }}?');">
+    <form method="post" action="{% url 'aether:face_delete' f.slug %}">
      {% csrf_token %}
      <button type="submit" class="danger" title="delete">✕</button>
     </form>

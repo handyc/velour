@@ -63,7 +63,7 @@
                 </form>
                 &nbsp;
                 {% endif %}
-                <form method="post" action="{% url 'nodes:firmware_delete' fw.pk %}" style="display:inline;" onsubmit="return confirm('Delete {{ fw.name }} {{ fw.version }}? The .bin file will be removed from disk.');">
+                <form method="post" action="{% url 'nodes:firmware_delete' fw.pk %}" style="display:inline;">
                     {% csrf_token %}
                     <button type="submit" style="background:none;border:none;color:#8b949e;cursor:pointer;font:inherit;font-size:0.8125rem;padding:0;">delete</button>
                 </form>

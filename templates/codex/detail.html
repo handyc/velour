@@ -32,7 +32,7 @@
     <a href="{% url 'codex:manual_pdf' manual.slug %}?print=1" target="_blank" class="btn btn-secondary" title="A4 + 3mm bleed + crop marks, RGB colour (CMYK separation is your print shop's job)">Print-ready PDF</a>
     <a href="{% url 'codex:manual_edit' manual.slug %}" class="btn btn-secondary">Edit Manual</a>
     <a href="{% url 'codex:section_add' manual.slug %}" class="btn btn-secondary">New Section</a>
-    <form method="post" action="{% url 'codex:manual_delete' manual.slug %}" style="display:inline;" onsubmit="return confirm('Delete manual {{ manual.title|escapejs }}?');">
+    <form method="post" action="{% url 'codex:manual_delete' manual.slug %}" style="display:inline;">
         {% csrf_token %}
         <button type="submit" class="btn btn-secondary">Delete Manual</button>
     </form>
@@ -47,7 +47,7 @@
     <span class="preview">{{ s.body|truncatechars:80 }}</span>
     <span class="actions">
         <a href="{% url 'codex:section_edit' manual.slug s.slug %}" class="btn btn-secondary" style="font-size:0.78rem;">Edit</a>
-        <form method="post" action="{% url 'codex:section_delete' manual.slug s.slug %}" style="display:inline;" onsubmit="return confirm('Delete section {{ s.title|escapejs }}?');">
+        <form method="post" action="{% url 'codex:section_delete' manual.slug s.slug %}" style="display:inline;">
             {% csrf_token %}
             <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;">Delete</button>
         </form>

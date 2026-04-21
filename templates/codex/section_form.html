@@ -72,7 +72,7 @@
         {% if f.caption %}<div style="font-size:0.72rem; color:#8b949e; font-style:italic; margin-top:0.4rem;">{{ f.caption|truncatechars:120 }}</div>{% endif %}
         <div style="display:flex; gap:0.3rem; margin-top:0.5rem;">
             <a href="{% url 'codex:figure_edit' manual.slug section.slug f.slug %}" class="btn btn-secondary" style="font-size:0.72rem;">Edit</a>
-            <form method="post" action="{% url 'codex:figure_delete' manual.slug section.slug f.slug %}" style="display:inline;" onsubmit="return confirm('Delete figure {{ f.slug|escapejs }}?');">
+            <form method="post" action="{% url 'codex:figure_delete' manual.slug section.slug f.slug %}" style="display:inline;">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;">Delete</button>
             </form>
