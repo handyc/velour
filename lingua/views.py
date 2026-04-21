@@ -389,3 +389,46 @@ def bootstrap(request):
         'priority':       pref.priority_codes,
         'hover_modifier': pref.hover_modifier,
     })
+
+
+from collections import defaultdict
+from . import concepts as concepts_module
+
+
+@login_required
+def concepts(request):
+    """Browse the toy universal-concept vocabulary at 3 nested tiers."""
+    tier_name = (request.GET.get('tier') or 'full').lower()
+    if tier_name == '10':
+        rows = concepts_module.TIER_10
+    elif tier_name == '100':
+        rows = concepts_module.TIER_100
+    else:
+        tier_name = 'full'
+        rows = concepts_module.TIER_FULL
+
+    by_pos = defaultdict(list)
+    for c, pos, gloss in rows:
+        by_pos[pos].append({'concept': c, 'gloss': gloss})
+    pos_labels = [
+        ('pro',  'Pronouns & deixis'),
+        ('n',    'Things (noun-like)'),
+        ('v',    'Events (verb-like)'),
+        ('adj',  'Qualities (adjective-like)'),
+        ('gram', 'Grammatical & logical'),
+    ]
+    sections = [
+        {'label': label, 'entries': by_pos[p]}
+        for p, label in pos_labels if by_pos.get(p)
+    ]
+
+    return render(request, 'lingua/concepts.html', {
+        'tier_name': tier_name,
+        'rows':      rows,
+        'sections':  sections,
+        'counts': {
+            'ten':  len(concepts_module.TIER_10),
+            'hun':  len(concepts_module.TIER_100),
+            'full': len(concepts_module.TIER_FULL),
+        },
+    })

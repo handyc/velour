@@ -15,4 +15,5 @@ urlpatterns = [
          views.study, name='study_theme'),
     path('flashcards/grade/',        views.grade,           name='grade'),
     path('speak/',                   views.speak,           name='speak'),
+    path('concepts/',                views.concepts,        name='concepts'),
 ]

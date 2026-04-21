@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Lingua — concept vocabulary{% endblock %}
+
+{% block extra_head %}
+<style>
+    .cv-page { max-width: 960px; margin: 0 auto; padding: 1rem 1.5rem; }
+    .cv-page h1 { margin-bottom: 0.25rem; }
+    .cv-page .hint { color: #8b949e; font-size: 0.85rem; margin-bottom: 1rem; }
+
+    .cv-tabs { display: flex; gap: 0.4rem; margin: 0.75rem 0 1.5rem; flex-wrap: wrap; }
+    .cv-tabs a {
+        padding: 0.35rem 0.8rem; border-radius: 4px;
+        background: #161b22; border: 1px solid #30363d;
+        color: #c9d1d9; font-size: 0.85rem; text-decoration: none;
+    }
+    .cv-tabs a.active {
+        background: #1f6feb; border-color: #1f6feb; color: white;
+    }
+    .cv-tabs a .count { color: #6e7681; font-size: 0.75rem; margin-left: 0.35rem; }
+    .cv-tabs a.active .count { color: #c9d1d9; }
+
+    .cv-section { margin-bottom: 1.75rem; }
+    .cv-section h2 {
+        font-size: 0.9rem; color: #8b949e; font-weight: 500;
+        border-bottom: 1px solid #30363d; padding-bottom: 0.35rem;
+        margin: 0 0 0.75rem;
+    }
+    .cv-section h2 .section-count {
+        float: right; color: #6e7681; font-size: 0.8rem;
+    }
+
+    .cv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.25rem 1rem;
+    }
+    .cv-row {
+        display: flex; gap: 0.6rem; align-items: baseline;
+        padding: 0.2rem 0; border-bottom: 1px dashed #1e2329;
+        font-size: 0.85rem;
+    }
+    .cv-row .concept {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #79c0ff; font-weight: 600;
+        min-width: 8rem; flex: 0 0 auto;
+    }
+    .cv-row .gloss { color: #8b949e; flex: 1 1 auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cv-page">
+    <h1>Concept Vocabulary</h1>
+    <p class="hint">
+        A toy inventory of universal semantic concepts — not words in any
+        particular language. Each concept is an idea, not a lexical item,
+        so it's neither declined nor conjugated. Three nested tiers:
+        the minimum ten, a Swadesh-scale core, and the full ~700-concept
+        dictionary.
+    </p>
+
+    <div class="cv-tabs">
+        <a href="?tier=10"   class="{% if tier_name == '10' %}active{% endif %}">
+            Tier 10 <span class="count">{{ counts.ten }}</span>
+        </a>
+        <a href="?tier=100"  class="{% if tier_name == '100' %}active{% endif %}">
+            Tier 100 <span class="count">{{ counts.hun }}</span>
+        </a>
+        <a href="?tier=full" class="{% if tier_name == 'full' %}active{% endif %}">
+            Full <span class="count">{{ counts.full }}</span>
+        </a>
+    </div>
+
+    {% for s in sections %}
+    <div class="cv-section">
+        <h2>
+            {{ s.label }}
+            <span class="section-count">{{ s.entries|length }}</span>
+        </h2>
+        <div class="cv-grid">
+            {% for e in s.entries %}
+            <div class="cv-row">
+                <span class="concept">{{ e.concept }}</span>
+                <span class="gloss">{{ e.gloss }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <p style="margin-top: 2rem;">
+        <a href="{% url 'lingua:home' %}" class="btn btn-secondary">← Back to Lingua</a>
+    </p>
+</div>
+{% endblock %}

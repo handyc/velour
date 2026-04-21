@@ -82,7 +82,8 @@
     <p class="hint">
         Pick up to six target languages in order of priority. The first is your
         primary — it's what hover-translate will show by default.
-        <a href="{% url 'lingua:flashcards' %}" style="float:right;color:#58a6ff;">Flashcards →</a></p><p class="hint">
+        <a href="{% url 'lingua:flashcards' %}" style="float:right;color:#58a6ff;">Flashcards →</a>
+        <a href="{% url 'lingua:concepts' %}" style="float:right;color:#58a6ff;margin-right:1rem;">Concepts →</a></p><p class="hint">
         {% if not languages %}<br><strong style="color:#d29922;">No languages seeded yet.</strong>
         Run <code>python manage.py seed_lingua</code>.{% endif %}
     </p>
