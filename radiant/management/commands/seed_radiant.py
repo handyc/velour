@@ -6,7 +6,7 @@ Idempotent: re-running updates rows instead of duplicating them.
 from django.core.management.base import BaseCommand
 
 from radiant.models import (Server, WorkloadClass, HostedProject,
-                            GrowthAssumption)
+                            GrowthAssumption, Candidate, Scenario)
 
 
 # Current state as reported by the LUCDH operator, 2026-04-21.
@@ -17,9 +17,10 @@ SERVERS = [
         'status': 'active',
         'ram_gb': 32,
         'storage_gb': 200,
-        'cpu_cores': 8,
+        'cpu_cores': 4,
         'storage_used_gb': 150,
-        'notes': 'Hosts ~40 Django projects and ~30 WordPress class sites.',
+        'notes': 'Hosts ~40 Django projects and ~30 WordPress class sites. '
+                 'Currently serves the whole humanities-DH fleet on 4 cores.',
     },
     {
         'name': 'OpenAtlas sandbox',
@@ -54,22 +55,25 @@ CLASSES = [
         'typical_ram_mb': 100,
         'typical_storage_mb': 500,
         'peak_concurrency': 5,
+        'active_fraction': 0.20,
         'new_per_year': 4.5,
         'saturation_count': 250,
-        'notes': 'Anchor class. New requests arrive at ~4-5/year; '
-                 'saturation reflects Leiden humanities department size.',
+        'notes': 'Anchor class. Low-traffic humanities sites rarely '
+                 'peak together; only ~20% are active at any moment.',
     },
     {
         'name': 'WordPress classroom',
         'description': 'WordPress sites used by live classes, constantly '
-                       'updated, peak 40 concurrent students per site.',
+                       'updated, up to 40 students on a single site when '
+                       'a class is in session.',
         'typical_ram_mb': 250,
         'typical_storage_mb': 800,
         'peak_concurrency': 40,
+        'active_fraction': 0.15,
         'new_per_year': 2.0,
         'saturation_count': 80,
-        'notes': 'Different load profile from Django — spiky during '
-                 'class hours, near-idle otherwise.',
+        'notes': 'Spiky per-site, but classes are staggered; only ~15% '
+                 'of sites are in session concurrently at peak.',
     },
     {
         'name': 'Experimental isolated',
@@ -78,6 +82,7 @@ CLASSES = [
         'typical_ram_mb': 300,
         'typical_storage_mb': 2000,
         'peak_concurrency': 2,
+        'active_fraction': 0.5,
         'new_per_year': 0.5,
         'saturation_count': 10,
         'notes': 'Low count, high per-project footprint.',
@@ -89,6 +94,7 @@ CLASSES = [
         'typical_ram_mb': 150,
         'typical_storage_mb': 400,
         'peak_concurrency': 2,
+        'active_fraction': 0.3,
         'new_per_year': 3.0,
         'saturation_count': 30,
         'notes': 'Churn-heavy: many rise, some promote to Production, '
@@ -101,9 +107,107 @@ CLASSES = [
         'typical_ram_mb': 500,
         'typical_storage_mb': 5000,
         'peak_concurrency': 1,
+        'active_fraction': 1.0,
         'new_per_year': 0.2,
         'saturation_count': 5,
         'notes': 'One or two boxes is usually enough forever.',
+    },
+]
+
+
+# Candidate hardware options under consideration for May 2026 purchase.
+# Prices are rough retail figures the operator can refine.
+CANDIDATES = [
+    {
+        'name': 'Mini prod box (64 GB / 1 TB / 6-core)',
+        'purpose': 'django',
+        'ram_gb': 64,
+        'storage_gb': 1000,
+        'cpu_cores': 6,
+        'approximate_cost_eur': 2000,
+        'notes': 'Budget mini-tower with ECC RAM; enough for current '
+                 'Django load plus ~5 years of growth.',
+    },
+    {
+        'name': 'Mini WP box (32 GB / 500 GB / 6-core)',
+        'purpose': 'wordpress',
+        'ram_gb': 32,
+        'storage_gb': 500,
+        'cpu_cores': 6,
+        'approximate_cost_eur': 1500,
+        'notes': 'Dedicated to classroom WordPress; smaller RAM because '
+                 'only a handful of classes hit peak at once.',
+    },
+    {
+        'name': 'Unified modest (96 GB / 2 TB / 8-core)',
+        'purpose': 'unified',
+        'ram_gb': 96,
+        'storage_gb': 2000,
+        'cpu_cores': 8,
+        'approximate_cost_eur': 3500,
+        'notes': 'Single replacement box — simpler ops, still on a '
+                 '~5-year replacement cadence.',
+    },
+    {
+        'name': 'Unified comfortable (128 GB / 4 TB / 12-core)',
+        'purpose': 'unified',
+        'ram_gb': 128,
+        'storage_gb': 4000,
+        'cpu_cores': 12,
+        'approximate_cost_eur': 5500,
+        'notes': 'More headroom; should carry the fleet for ~7-10 years '
+                 'without a second purchase.',
+    },
+    {
+        'name': 'Shoestring refurb (16 GB / 500 GB / 4-core)',
+        'purpose': 'unified',
+        'ram_gb': 16,
+        'storage_gb': 500,
+        'cpu_cores': 4,
+        'approximate_cost_eur': 600,
+        'notes': 'Used / refurb option. Matches current capacity on a '
+                 'bigger disk — survives ~2 years before a squeeze.',
+    },
+    {
+        'name': 'Pi-class experimental (8 GB / 500 GB / 4-core)',
+        'purpose': 'experimental',
+        'ram_gb': 8,
+        'storage_gb': 500,
+        'cpu_cores': 4,
+        'approximate_cost_eur': 300,
+        'notes': 'Tiny SBC-style box for the next OpenAtlas-style '
+                 'isolation need. Cheap + disposable.',
+    },
+]
+
+
+SCENARIOS = [
+    {
+        'name': 'Tight budget — refurb and hold',
+        'description': 'Shoestring refurb as the main replacement; no '
+                       'WP split. Buys ~2 years before squeeze.',
+        'candidate_slugs': ['shoestring-refurb-16-gb-500-gb-4-core'],
+    },
+    {
+        'name': 'Mid — unified modest',
+        'description': 'One 96 GB / 2 TB box. Simpler ops, 5-year '
+                       'headroom, single point of failure.',
+        'candidate_slugs': ['unified-modest-96-gb-2-tb-8-core'],
+    },
+    {
+        'name': 'Split prod vs WP',
+        'description': 'Django/prod on mini prod box; WP classroom on '
+                       'dedicated mini WP box. Isolates class spikes.',
+        'candidate_slugs': [
+            'mini-prod-box-64-gb-1-tb-6-core',
+            'mini-wp-box-32-gb-500-gb-6-core',
+        ],
+    },
+    {
+        'name': 'Comfortable — future-proof single',
+        'description': '128 GB / 4 TB unified box for ~7-10 year cadence. '
+                       'Higher up-front cost; fewer purchases over time.',
+        'candidate_slugs': ['unified-comfortable-128-gb-4-tb-12-core'],
     },
 ]
 
@@ -163,6 +267,24 @@ class Command(BaseCommand):
                     'value': value, 'unit': unit, 'description': description,
                 })
             self.stdout.write(f'assume: {key} = {value} {unit}')
+
+        cand_by_slug = {}
+        for row in CANDIDATES:
+            obj, _ = Candidate.objects.update_or_create(
+                name=row['name'], defaults=row)
+            cand_by_slug[obj.slug] = obj
+            self.stdout.write(f'cand:   {obj.name}')
+
+        for row in SCENARIOS:
+            slugs = row.pop('candidate_slugs')
+            scenario, _ = Scenario.objects.update_or_create(
+                name=row['name'], defaults={
+                    'description': row['description'],
+                })
+            scenario.candidates.set([cand_by_slug[s] for s in slugs
+                                     if s in cand_by_slug])
+            self.stdout.write(f'scen:   {scenario.name} '
+                              f'({scenario.candidates.count()} candidate(s))')
 
         self.stdout.write(self.style.SUCCESS('Radiant seeded.'))
 

@@ -88,6 +88,14 @@
   any model can follow.
 </p>
 
+<div style="font-size:0.78rem;margin:0.1rem 0 0.9rem">
+  <a href="{% url 'radiant:scenarios' %}"
+     style="color:#58a6ff;text-decoration:none">Scenarios →</a>
+  <span style="color:#6e7681;margin:0 0.5rem">·</span>
+  <a href="{% url 'radiant:snapshots' %}"
+     style="color:#58a6ff;text-decoration:none">Snapshots ({{ snapshot_count }}) →</a>
+</div>
+
 <h2>Current fleet <span class="lite">· {{ servers.count }} servers</span></h2>
 <div class="scroll">
 <table>
@@ -126,6 +134,7 @@
       <th class="num">RAM MB</th>
       <th class="num">Storage MB</th>
       <th class="num">Peak users</th>
+      <th class="num">Active frac</th>
       <th class="num">New / yr</th>
       <th class="num">Saturation K</th>
       <th>Notes</th>
@@ -139,6 +148,7 @@
       <td class="num">{{ c.typical_ram_mb }}</td>
       <td class="num">{{ c.typical_storage_mb }}</td>
       <td class="num">{{ c.peak_concurrency }}</td>
+      <td class="num">{{ c.active_fraction|floatformat:2 }}</td>
       <td class="num">{{ c.new_per_year|floatformat:1 }}</td>
       <td class="num">{{ c.saturation_count }}</td>
       <td>{{ c.notes|truncatechars:70 }}</td>

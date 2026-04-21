@@ -106,7 +106,13 @@ class WorkloadClass(models.Model):
     typical_storage_mb = models.PositiveIntegerField(default=500,
         help_text='Storage footprint of a typical project, in MB.')
     peak_concurrency = models.PositiveIntegerField(default=1,
-        help_text='Peak concurrent users per project under load.')
+        help_text='Peak concurrent users per project when that project '
+                  'is actually in session.')
+    active_fraction = models.FloatField(default=0.3,
+        help_text='Fraction of projects in this class that are at peak '
+                  'simultaneously. WordPress classroom is typically 0.1-'
+                  '0.2 (only a few classes in session at once); quiet '
+                  'Django production is ~0.2-0.4.')
     new_per_year = models.FloatField(default=0,
         help_text='Rate of new projects per year in this class.')
     saturation_count = models.PositiveIntegerField(default=0,
@@ -202,3 +208,133 @@ class GrowthAssumption(models.Model):
             return float(row.value)
         except (TypeError, ValueError):
             return default
+
+
+class Candidate(models.Model):
+    """A piece of hardware under consideration for purchase.
+
+    Think of these as rows in a quote sheet: a name, the spec sheet,
+    an approximate price, and a purpose tag so scenarios know which
+    workload the box would carry.
+    """
+
+    PURPOSE_CHOICES = [
+        ('unified',     'Unified — everything'),
+        ('django',      'Django production'),
+        ('wordpress',   'WordPress classroom'),
+        ('experimental','Experimental / isolated'),
+        ('development', 'Development'),
+        ('admin',       'Admin / pipeline'),
+    ]
+
+    name = models.CharField(max_length=140, unique=True)
+    slug = models.SlugField(max_length=160, unique=True, blank=True)
+    purpose = models.CharField(max_length=20, choices=PURPOSE_CHOICES,
+                               default='unified')
+    ram_gb = models.PositiveIntegerField(default=32)
+    storage_gb = models.PositiveIntegerField(default=500)
+    cpu_cores = models.PositiveIntegerField(default=8)
+    approximate_cost_eur = models.PositiveIntegerField(default=0,
+        help_text='Rough purchase cost in euros. 0 = unknown.')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['purpose', 'ram_gb']
+
+    def __str__(self):
+        return f'{self.name} ({self.ram_gb} GB / {self.storage_gb} GB)'
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:140] or 'candidate'
+            candidate = base
+            n = 2
+            while Candidate.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+
+class Scenario(models.Model):
+    """A named bundle of Candidates — a hypothetical purchase.
+
+    The scenario is evaluated against the forecast to report how many
+    years of headroom it buys before RAM, storage, or cores run out.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    description = models.TextField(blank=True)
+    candidates = models.ManyToManyField(Candidate, related_name='scenarios',
+                                        blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:200] or 'scenario'
+            candidate = base
+            n = 2
+            while Scenario.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+    @property
+    def total_ram_gb(self):
+        return sum(c.ram_gb for c in self.candidates.all())
+
+    @property
+    def total_storage_gb(self):
+        return sum(c.storage_gb for c in self.candidates.all())
+
+    @property
+    def total_cpu_cores(self):
+        return sum(c.cpu_cores for c in self.candidates.all())
+
+    @property
+    def total_cost_eur(self):
+        return sum(c.approximate_cost_eur for c in self.candidates.all())
+
+
+class Snapshot(models.Model):
+    """A frozen copy of the forecast + recommendation at a moment in time.
+
+    The whole output is stored as JSON so the operator can re-visit
+    what Radiant predicted on a given date even after the assumptions
+    have drifted. The Seldon move: record your predictions so you can
+    check them later.
+    """
+
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    notes = models.TextField(blank=True)
+    payload = models.JSONField(default=dict, blank=True,
+        help_text='forecast_rows + recommendation + classes + servers '
+                  'captured at snapshot time.')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.created_at:%Y-%m-%d})'
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:200] or 'snapshot'
+            candidate = base
+            n = 2
+            while Snapshot.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)

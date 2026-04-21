@@ -63,15 +63,30 @@ def project_count(wc, years):
 def ram_gb_for_class(wc, count, peak_factor=1.0):
     """Aggregate RAM for `count` projects in class wc, in GB.
 
-    peak_factor lifts the baseline to account for concurrent users on
-    classroom WordPress. Idle RAM uses typical_ram_mb; peak multiplies
-    by peak_concurrency when peak_factor > 1.
+    Peak RAM models realistic concurrency: only `active_fraction` of
+    projects are under load at any moment, not all of them. A WP fleet
+    of 30 sites at 0.15 active_fraction means ~4.5 sites are in session
+    at peak, each carrying its full user-concurrency tax; the other ~25
+    are idle on their baseline RAM.
+
+    peak_factor=1.0 → all-idle baseline.
+    peak_factor=1.5 → model "realistic peak" using active_fraction.
     """
-    if peak_factor > 1 and wc.peak_concurrency > 1:
-        per_project_mb = wc.typical_ram_mb * (1 + (wc.peak_concurrency - 1) * 0.25)
-    else:
-        per_project_mb = wc.typical_ram_mb
-    return (count * per_project_mb) / 1024.0
+    idle_mb_per = wc.typical_ram_mb
+    if peak_factor <= 1.0 or wc.peak_concurrency <= 1:
+        return (count * idle_mb_per) / 1024.0
+
+    active_fraction = max(0.0, min(1.0, wc.active_fraction or 0.3))
+    # When "in session", each active project's RAM grows with its
+    # concurrent user count. Assume ~25 MB of resident memory per
+    # simultaneous user on top of the base footprint.
+    per_user_mb = 25
+    active_mb_per = idle_mb_per + (wc.peak_concurrency - 1) * per_user_mb
+
+    n_active = count * active_fraction
+    n_idle = count - n_active
+    total_mb = n_active * active_mb_per + n_idle * idle_mb_per
+    return total_mb / 1024.0
 
 
 def storage_gb_for_class(wc, count, years):
@@ -88,8 +103,11 @@ def storage_gb_for_class(wc, count, years):
 
 
 def cpu_cores_needed(ram_gb_total, peak_factor):
-    """Rough heuristic: 1 core per 4 GB of working RAM, lifted by peak."""
-    base = max(2, math.ceil(ram_gb_total / 4))
+    """Humanities web is I/O-bound; ~1 core per 12 GB of working RAM,
+    with a floor of 4. The current LUCDH box runs 40 Django + 30 WP on
+    4 cores, so this sizing matches reality for the baseline load.
+    """
+    base = max(4, math.ceil(ram_gb_total / 12))
     if peak_factor > 1:
         base = math.ceil(base * peak_factor)
     return base
@@ -137,15 +155,16 @@ def forecast_table(workload_classes):
 def purchase_recommendation(rows, split_wordpress=True):
     """Convert the 1-year and 5-year rows into a concrete May 2026 spec.
 
-    Sizes for roughly 2x the 5-year peak — we want to replace in ~5-7
-    years, not every year. Optionally splits WordPress onto its own box.
+    Sizes for ~1.5x the 5-year peak — enough headroom for a ~4-5 year
+    replacement cadence without overbuilding on a tight budget.
+    Optionally splits WordPress onto its own box.
     """
     row_1y = next(r for r in rows if r['years'] == 1)
     row_5y = next(r for r in rows if r['years'] == 5)
 
-    target_ram = row_5y['total_ram_peak_gb'] * 2
-    target_storage = row_5y['total_storage_gb'] * 2.5
-    target_cores = max(8, cpu_cores_needed(target_ram, 1.0))
+    target_ram = row_5y['total_ram_peak_gb'] * 1.5
+    target_storage = row_5y['total_storage_gb'] * 2.0
+    target_cores = max(4, cpu_cores_needed(target_ram, 1.0))
 
     def _snap_ram(gb):
         for tier in [16, 32, 64, 128, 256, 512, 1024]:
@@ -198,18 +217,19 @@ def purchase_recommendation(rows, split_wordpress=True):
     boxes = [
         {
             'label':     'Production + Django box',
-            'ram_gb':    _snap_ram(rest_ram * 2),
-            'storage_gb':_snap_storage(rest_storage * 2.5),
-            'cpu_cores': _snap_cores(cpu_cores_needed(rest_ram * 2, 1.0)),
+            'ram_gb':    _snap_ram(rest_ram * 1.5),
+            'storage_gb':_snap_storage(rest_storage * 2.0),
+            'cpu_cores': _snap_cores(cpu_cores_needed(rest_ram * 1.5, 1.0)),
             'notes':     'Handles Django 24/7, dev, experimental, admin.',
         },
         {
             'label':     'WordPress classroom box',
-            'ram_gb':    _snap_ram(wp_ram * 2),
-            'storage_gb':_snap_storage(wp_storage * 2),
-            'cpu_cores': _snap_cores(cpu_cores_needed(wp_ram * 2, 1.3)),
-            'notes':     'Isolates classroom spikes (40 concurrent '
-                         'students/site) from production workloads.',
+            'ram_gb':    _snap_ram(wp_ram * 1.5),
+            'storage_gb':_snap_storage(wp_storage * 1.5),
+            'cpu_cores': _snap_cores(cpu_cores_needed(wp_ram * 1.5, 1.2)),
+            'notes':     'Isolates classroom spikes from production '
+                         'workloads. Cores lifted modestly since a few '
+                         'classes can hit peak simultaneously.',
         },
     ]
     return {
@@ -220,4 +240,44 @@ def purchase_recommendation(rows, split_wordpress=True):
         'basis_storage_gb':  row_5y['total_storage_gb'],
         'year_1':            row_1y,
         'year_5':            row_5y,
+    }
+
+
+def evaluate_scenario(scenario, rows):
+    """How many years does this scenario's capacity last?
+
+    Returns a dict describing when RAM, storage, and cores would first
+    be exceeded by the forecast. "Never" means the scenario survives
+    past the longest horizon (10,000 years — i.e. the speculative tail
+    where the forecast has saturated).
+    """
+    total_ram = sum(c.ram_gb for c in scenario.candidates.all())
+    total_storage = sum(c.storage_gb for c in scenario.candidates.all())
+    total_cores = sum(c.cpu_cores for c in scenario.candidates.all())
+
+    def _first_breach(rows, key, capacity):
+        for r in rows:
+            if r[key] > capacity:
+                return r['years']
+        return None  # never
+
+    ram_exhausted = _first_breach(rows, 'total_ram_peak_gb', total_ram)
+    storage_exhausted = _first_breach(rows, 'total_storage_gb', total_storage)
+    cores_exhausted = _first_breach(rows, 'total_cpu_cores', total_cores)
+
+    # The scenario's effective lifetime is the earliest breach.
+    breaches = [b for b in [ram_exhausted, storage_exhausted, cores_exhausted]
+                if b is not None]
+    lifetime_years = min(breaches) if breaches else None
+
+    return {
+        'total_ram_gb':      total_ram,
+        'total_storage_gb':  total_storage,
+        'total_cpu_cores':   total_cores,
+        'total_cost_eur':    sum(c.approximate_cost_eur
+                                 for c in scenario.candidates.all()),
+        'ram_exhausted_at':     ram_exhausted,
+        'storage_exhausted_at': storage_exhausted,
+        'cores_exhausted_at':   cores_exhausted,
+        'lifetime_years':       lifetime_years,
     }

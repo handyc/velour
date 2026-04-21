@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from .models import Server, WorkloadClass, HostedProject, GrowthAssumption
+from .models import (Server, WorkloadClass, HostedProject, GrowthAssumption,
+                     Candidate, Scenario, Snapshot)
 
 
 @admin.register(Server)
@@ -13,8 +14,9 @@ class ServerAdmin(admin.ModelAdmin):
 
 @admin.register(WorkloadClass)
 class WorkloadClassAdmin(admin.ModelAdmin):
-    list_display = ('name', 'typical_ram_mb', 'new_per_year',
-                    'saturation_count', 'current_count')
+    list_display = ('name', 'typical_ram_mb', 'peak_concurrency',
+                    'active_fraction', 'new_per_year', 'saturation_count',
+                    'current_count')
     search_fields = ('name', 'description')
 
 
@@ -29,3 +31,26 @@ class HostedProjectAdmin(admin.ModelAdmin):
 class GrowthAssumptionAdmin(admin.ModelAdmin):
     list_display = ('key', 'value', 'unit')
     search_fields = ('key', 'description')
+
+
+@admin.register(Candidate)
+class CandidateAdmin(admin.ModelAdmin):
+    list_display = ('name', 'purpose', 'ram_gb', 'storage_gb', 'cpu_cores',
+                    'approximate_cost_eur')
+    list_filter = ('purpose',)
+    search_fields = ('name', 'notes')
+
+
+@admin.register(Scenario)
+class ScenarioAdmin(admin.ModelAdmin):
+    list_display = ('name', 'total_ram_gb', 'total_storage_gb',
+                    'total_cpu_cores', 'total_cost_eur')
+    filter_horizontal = ('candidates',)
+    search_fields = ('name', 'description')
+
+
+@admin.register(Snapshot)
+class SnapshotAdmin(admin.ModelAdmin):
+    list_display = ('name', 'created_at')
+    search_fields = ('name', 'notes')
+    readonly_fields = ('payload', 'created_at')

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Scenarios — Radiant{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.3rem; font-size: 1.2rem; }
+  .rad-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .rad-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .rad-wrap .tagline { color: #8b949e; font-size: 0.8rem; max-width: 72ch;
+                       line-height: 1.5; margin: 0 0 0.8rem; }
+
+  .scen { background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+          padding: 0.65rem 0.85rem; margin: 0.5rem 0; }
+  .scen h2 { margin: 0 0 0.2rem; font-size: 0.95rem; color: #c9d1d9; }
+  .scen .desc { color: #8b949e; font-size: 0.78rem;
+                margin: 0.1rem 0 0.5rem; line-height: 1.5; }
+  .scen dl { display: grid; grid-template-columns: auto 1fr auto 1fr;
+             gap: 0.15rem 0.6rem; font-size: 0.76rem; margin: 0; }
+  .scen dt { color: #8b949e; }
+  .scen dd { margin: 0; font-family: ui-monospace, Menlo, monospace;
+             font-variant-numeric: tabular-nums; }
+  .scen .cands { font-size: 0.74rem; color: #8b949e; margin-top: 0.45rem; }
+  .scen .cands code { color: #c9d1d9; background: #161b22;
+                      padding: 1px 5px; border-radius: 2px;
+                      font-size: 0.72rem; }
+  .scen .lifetime { font-size: 0.78rem; padding: 0.3rem 0.5rem;
+                    border-radius: 3px; margin: 0.4rem 0 0.1rem;
+                    font-family: ui-monospace, Menlo, monospace;
+                    font-variant-numeric: tabular-nums; }
+  .scen .lifetime.good  { background: #0f1a11; color: #2ea043; }
+  .scen .lifetime.ok    { background: #1a1810; color: #d29922; }
+  .scen .lifetime.short { background: #1a1010; color: #f85149; }
+  .scen .rank { color: #6e7681; font-size: 0.72rem;
+                text-transform: uppercase; letter-spacing: 0.04em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<div class="crumb">
+  <a href="{% url 'radiant:index' %}">Radiant</a> · scenarios
+</div>
+<h1>Purchase scenarios</h1>
+<p class="tagline">
+  Each scenario is a hypothetical purchase — one or more candidate
+  boxes. Radiant walks the 12-horizon forecast against each scenario's
+  capacity and reports when RAM, storage, or cores would first be
+  exceeded. "Never" means the scenario survives the entire horizon
+  chain (useful for comfort boxes; be cautious — the forecast saturates
+  in the logistic regime, not in reality).
+</p>
+
+{% for entry in evaluated %}
+  <div class="scen">
+    <div class="rank">
+      {% if entry.eval.lifetime_years == None %}
+        unlimited headroom
+      {% else %}
+        runs out after +{{ entry.eval.lifetime_years }} yr
+      {% endif %}
+    </div>
+    <h2>{{ entry.scenario.name }}</h2>
+    <p class="desc">{{ entry.scenario.description }}</p>
+
+    <dl>
+      <dt>RAM</dt><dd>{{ entry.eval.total_ram_gb }} GB</dd>
+      <dt>Storage</dt><dd>{{ entry.eval.total_storage_gb }} GB</dd>
+      <dt>Cores</dt><dd>{{ entry.eval.total_cpu_cores }}</dd>
+      <dt>Cost</dt><dd>€ {{ entry.eval.total_cost_eur }}</dd>
+    </dl>
+
+    <div class="lifetime
+      {% if entry.eval.lifetime_years == None or entry.eval.lifetime_years >= 10 %}good
+      {% elif entry.eval.lifetime_years >= 3 %}ok
+      {% else %}short{% endif %}">
+      {% if entry.eval.ram_exhausted_at != None %}
+        RAM runs out at +{{ entry.eval.ram_exhausted_at }} yr ·
+      {% else %}
+        RAM never exhausted ·
+      {% endif %}
+      {% if entry.eval.storage_exhausted_at != None %}
+        storage at +{{ entry.eval.storage_exhausted_at }} yr ·
+      {% else %}
+        storage never ·
+      {% endif %}
+      {% if entry.eval.cores_exhausted_at != None %}
+        cores at +{{ entry.eval.cores_exhausted_at }} yr
+      {% else %}
+        cores never
+      {% endif %}
+    </div>
+
+    <div class="cands">
+      {% for c in entry.scenario.candidates.all %}
+        <code>{{ c.name }}</code>
+        — €{{ c.approximate_cost_eur }}
+        {% if not forloop.last %}<br>{% endif %}
+      {% endfor %}
+    </div>
+  </div>
+{% empty %}
+  <p style="color:#8b949e;font-size:0.78rem;">
+    No scenarios yet. Add some via
+    <a href="/admin/radiant/scenario/" style="color:#58a6ff">admin</a>.
+  </p>
+{% endfor %}
+
+</div>
+{% endblock %}

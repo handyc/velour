@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Snapshots — Radiant{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 900px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.3rem; font-size: 1.2rem; }
+  .rad-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .rad-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .rad-wrap .tagline { color: #8b949e; font-size: 0.8rem; max-width: 72ch;
+                       line-height: 1.5; margin: 0 0 0.8rem; }
+
+  .rad-wrap form { background: #0d1117; border: 1px solid #30363d;
+                   padding: 0.5rem 0.8rem; border-radius: 3px;
+                   display: grid; gap: 0.35rem; margin: 0.5rem 0 1rem; }
+  .rad-wrap form label { color: #8b949e; font-size: 0.72rem;
+                         display: flex; flex-direction: column; gap: 2px; }
+  .rad-wrap form input, .rad-wrap form textarea {
+    background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.5rem; border-radius: 3px; font-size: 0.82rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .rad-wrap form textarea { min-height: 3rem; resize: vertical; }
+  .rad-wrap form .btn { background: #238636; border: 1px solid #2ea043;
+                        color: white; padding: 0.3rem 0.9rem;
+                        border-radius: 3px; font-size: 0.78rem;
+                        cursor: pointer; justify-self: start; }
+
+  .rad-wrap ul.snaps { list-style: none; padding: 0; margin: 0.4rem 0; }
+  .rad-wrap ul.snaps li {
+    border-bottom: 1px solid #21262d; padding: 0.35rem 0;
+    font-size: 0.8rem; display: grid;
+    grid-template-columns: 1fr auto; gap: 0.6rem;
+  }
+  .rad-wrap ul.snaps li a { color: #58a6ff; text-decoration: none; }
+  .rad-wrap ul.snaps li .when { color: #6e7681; font-size: 0.72rem;
+                                font-family: ui-monospace, Menlo, monospace; }
+  .rad-wrap ul.snaps li .meta { color: #8b949e; font-size: 0.72rem;
+                                margin-top: 2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<div class="crumb">
+  <a href="{% url 'radiant:index' %}">Radiant</a> · snapshots
+</div>
+<h1>Snapshots</h1>
+<p class="tagline">
+  Freeze the current forecast + recommendation as a Snapshot. Useful
+  for checking, years later, what Radiant said on a given date —
+  Seldon's move. Assumptions will drift; this is how you audit drift.
+</p>
+
+<form method="post" action="{% url 'radiant:take_snapshot' %}">
+  {% csrf_token %}
+  <label>Name
+    <input type="text" name="name" required
+           placeholder="e.g. pre-May-2026 purchase decision">
+  </label>
+  <label>Notes (optional)
+    <textarea name="notes" placeholder="Context for future-you."></textarea>
+  </label>
+  <button type="submit" class="btn">Take snapshot</button>
+</form>
+
+<h2 style="font-size:0.9rem;color:#c9d1d9;margin:1rem 0 0.3rem">
+  Saved snapshots <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">· {{ snapshots|length }}</span>
+</h2>
+<ul class="snaps">
+  {% for s in snapshots %}
+    <li>
+      <div>
+        <a href="{% url 'radiant:snapshot_detail' s.slug %}">{{ s.name }}</a>
+        {% if s.notes %}<div class="meta">{{ s.notes|truncatechars:100 }}</div>{% endif %}
+      </div>
+      <div class="when">{{ s.created_at|date:"Y-m-d H:i" }}</div>
+    </li>
+  {% empty %}
+    <li style="color:#8b949e;border:none;">No snapshots yet.</li>
+  {% endfor %}
+</ul>
+
+</div>
+{% endblock %}

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}{{ snapshot.name }} — Radiant snapshot{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.2rem; font-size: 1.2rem; }
+  .rad-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .rad-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .rad-wrap .stamp { color: #8b949e; font-size: 0.74rem;
+                     font-family: ui-monospace, Menlo, monospace;
+                     margin-bottom: 0.8rem; }
+  .rad-wrap h2 { font-size: 0.95rem; margin: 1rem 0 0.3rem; color: #c9d1d9; }
+
+  .rad-wrap table { border-collapse: collapse; font-size: 0.76rem;
+                    font-family: ui-monospace, Menlo, monospace;
+                    width: 100%; margin: 0.2rem 0 0.6rem; }
+  .rad-wrap th, .rad-wrap td { padding: 0.22rem 0.5rem;
+                               border-bottom: 1px solid #21262d;
+                               text-align: left; }
+  .rad-wrap th { color: #8b949e; font-weight: normal;
+                 background: #0d1117; text-transform: uppercase;
+                 font-size: 0.66rem; letter-spacing: 0.04em; }
+  .rad-wrap td.num { text-align: right;
+                     font-variant-numeric: tabular-nums; }
+
+  .rad-wrap .rec-panel {
+    background: #0f1a11; border: 1px solid #2ea043; border-radius: 3px;
+    padding: 0.5rem 0.75rem; margin: 0.3rem 0 0.6rem;
+  }
+  .rad-wrap .rec-panel h3 { margin: 0 0 0.3rem;
+                            font-size: 0.82rem; color: #58a6ff; }
+  .rad-wrap .rec-panel dl { display: grid;
+                            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                            gap: 0.3rem; font-size: 0.76rem; margin: 0; }
+  .rad-wrap .rec-panel dt { color: #8b949e; font-size: 0.68rem; }
+  .rad-wrap .rec-panel dd { margin: 0;
+                            font-family: ui-monospace, Menlo, monospace; }
+
+  .rad-wrap details summary { cursor: pointer; color: #58a6ff;
+                              font-size: 0.78rem; margin: 0.4rem 0; }
+  .rad-wrap pre { font-size: 0.7rem; color: #8b949e;
+                  background: #0d1117; padding: 0.5rem;
+                  overflow-x: auto; border-radius: 3px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<div class="crumb">
+  <a href="{% url 'radiant:index' %}">Radiant</a> ·
+  <a href="{% url 'radiant:snapshots' %}">snapshots</a> · {{ snapshot.name }}
+</div>
+<h1>{{ snapshot.name }}</h1>
+<div class="stamp">taken {{ snapshot.created_at|date:"Y-m-d H:i" }}</div>
+{% if snapshot.notes %}
+  <p style="color:#c9d1d9;font-size:0.82rem;max-width:72ch;">
+    {{ snapshot.notes|linebreaksbr }}
+  </p>
+{% endif %}
+
+<h2>Purchase recommendation at time of snapshot</h2>
+{% if rec_split %}
+  <div class="rec-panel">
+    <h3>Split scenario</h3>
+    {% for box in rec_split.boxes %}
+      <dl>
+        <dt>{{ box.label }}</dt>
+        <dd>{{ box.ram_gb }} GB RAM · {{ box.storage_gb }} GB · {{ box.cpu_cores }} cores</dd>
+      </dl>
+    {% endfor %}
+  </div>
+{% endif %}
+{% if rec_unified %}
+  <div class="rec-panel">
+    <h3>Unified scenario</h3>
+    {% for box in rec_unified.boxes %}
+      <dl>
+        <dt>{{ box.label }}</dt>
+        <dd>{{ box.ram_gb }} GB RAM · {{ box.storage_gb }} GB · {{ box.cpu_cores }} cores</dd>
+      </dl>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<h2>Forecast at time of snapshot</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Horizon</th><th>Regime</th>
+      <th class="num">Projects</th>
+      <th class="num">RAM idle GB</th>
+      <th class="num">RAM peak GB</th>
+      <th class="num">Storage GB</th>
+      <th class="num">Cores</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{% if row.years == 0 %}now{% else %}+{{ row.years }}y{% endif %}</td>
+        <td>{{ row.regime }}</td>
+        <td class="num">{{ row.total_projects|floatformat:0 }}</td>
+        <td class="num">{{ row.total_ram_idle_gb|floatformat:1 }}</td>
+        <td class="num">{{ row.total_ram_peak_gb|floatformat:1 }}</td>
+        <td class="num">{{ row.total_storage_gb|floatformat:0 }}</td>
+        <td class="num">{{ row.total_cpu_cores }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<details>
+  <summary>Assumptions at snapshot time</summary>
+  <h2 style="font-size:0.8rem">Workload classes</h2>
+  <table>
+    <thead>
+      <tr><th>Class</th><th class="num">Current</th>
+          <th class="num">RAM MB</th><th class="num">Peak</th>
+          <th class="num">Active frac</th>
+          <th class="num">New/yr</th><th class="num">K</th></tr>
+    </thead>
+    <tbody>
+      {% for c in payload_classes %}
+        <tr>
+          <td>{{ c.name }}</td>
+          <td class="num">{{ c.current_count }}</td>
+          <td class="num">{{ c.typical_ram_mb }}</td>
+          <td class="num">{{ c.peak_concurrency }}</td>
+          <td class="num">{{ c.active_fraction|default_if_none:"—" }}</td>
+          <td class="num">{{ c.new_per_year }}</td>
+          <td class="num">{{ c.saturation_count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2 style="font-size:0.8rem">Servers</h2>
+  <table>
+    <thead>
+      <tr><th>Server</th><th>Role</th>
+          <th class="num">RAM GB</th><th class="num">Storage GB</th>
+          <th class="num">Cores</th><th class="num">Used GB</th></tr>
+    </thead>
+    <tbody>
+      {% for s in payload_servers %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td>{{ s.role }}</td>
+          <td class="num">{{ s.ram_gb }}</td>
+          <td class="num">{{ s.storage_gb }}</td>
+          <td class="num">{{ s.cpu_cores }}</td>
+          <td class="num">{{ s.storage_used_gb }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+
+</div>
+{% endblock %}

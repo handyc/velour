@@ -1,23 +1,15 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
-from .forecast import forecast_table, purchase_recommendation
-from .models import HORIZON_YEARS, Server, WorkloadClass, HostedProject
+from .forecast import forecast_table, purchase_recommendation, evaluate_scenario
+from .models import (HORIZON_YEARS, Server, WorkloadClass, HostedProject,
+                     Scenario, Snapshot)
 
 
-@login_required
-def home(request):
-    """The Prime Radiant itself — fleet + forecast table + purchase rec."""
-    servers = Server.objects.all()
-    classes = list(WorkloadClass.objects.all())
-    projects = HostedProject.objects.select_related('server', 'workload_class')
-
-    split_wp = request.GET.get('split', '1') != '0'
-
-    rows = forecast_table(classes)
-    rec = purchase_recommendation(rows, split_wordpress=split_wp)
-
-    speculative_notes = {
+def _speculative_notes():
+    return {
         200:   'Beyond hardware replacement cycles; 50+ generations of '
                'storage media change. Numbers are curve extrapolation only.',
         500:   'Past the operational lifetime of most universities in '
@@ -31,8 +23,25 @@ def home(request):
         10000: 'Beyond any reasonable claim. Retained only because Seldon '
                'set his equations at this scale. Output is ceremonial.',
     }
+
+
+def _current_forecast():
+    classes = list(WorkloadClass.objects.all())
+    rows = forecast_table(classes)
+    notes = _speculative_notes()
     for row in rows:
-        row['narrative'] = speculative_notes.get(row['years'], '')
+        row['narrative'] = notes.get(row['years'], '')
+    return rows, classes
+
+
+@login_required
+def home(request):
+    """Prime Radiant itself — fleet + forecast + purchase rec."""
+    split_wp = request.GET.get('split', '1') != '0'
+    rows, classes = _current_forecast()
+    rec = purchase_recommendation(rows, split_wordpress=split_wp)
+    servers = Server.objects.all()
+    projects = HostedProject.objects.select_related('server', 'workload_class')
 
     return render(request, 'radiant/home.html', {
         'servers':        servers,
@@ -42,4 +51,97 @@ def home(request):
         'recommendation': rec,
         'split_wp':       split_wp,
         'horizons':       HORIZON_YEARS,
+        'scenario_count': Scenario.objects.count(),
+        'snapshot_count': Snapshot.objects.count(),
+    })
+
+
+@login_required
+def scenarios(request):
+    """Ranked list of scenarios with headroom evaluation."""
+    rows, _ = _current_forecast()
+    scenarios = list(Scenario.objects.prefetch_related('candidates'))
+
+    evaluated = []
+    for s in scenarios:
+        ev = evaluate_scenario(s, rows)
+        evaluated.append({'scenario': s, 'eval': ev})
+
+    def _sort_key(entry):
+        # Sort by lifetime_years descending; None (never exhausted) comes first.
+        life = entry['eval']['lifetime_years']
+        return (0 if life is None else 1, -(life or 0))
+
+    evaluated.sort(key=_sort_key)
+
+    return render(request, 'radiant/scenarios.html', {
+        'evaluated': evaluated,
+        'forecast_rows': rows,
+    })
+
+
+@login_required
+def snapshots(request):
+    """Chronological list of saved forecast snapshots."""
+    return render(request, 'radiant/snapshots.html', {
+        'snapshots': Snapshot.objects.all(),
+    })
+
+
+@login_required
+@require_POST
+def take_snapshot(request):
+    """Freeze the current forecast + recommendation as a Snapshot."""
+    name = (request.POST.get('name') or '').strip()
+    notes = (request.POST.get('notes') or '').strip()
+    if not name:
+        messages.error(request, 'Snapshot needs a name.')
+        return redirect('radiant:snapshots')
+
+    rows, classes = _current_forecast()
+    rec_split = purchase_recommendation(rows, split_wordpress=True)
+    rec_unified = purchase_recommendation(rows, split_wordpress=False)
+
+    payload = {
+        'forecast_rows':        rows,
+        'recommendation_split': rec_split,
+        'recommendation_unified': rec_unified,
+        'classes': [{
+            'name': c.name,
+            'current_count': c.current_count,
+            'typical_ram_mb': c.typical_ram_mb,
+            'typical_storage_mb': c.typical_storage_mb,
+            'peak_concurrency': c.peak_concurrency,
+            'new_per_year': c.new_per_year,
+            'saturation_count': c.saturation_count,
+        } for c in classes],
+        'servers': [{
+            'name': s.name,
+            'role': s.role,
+            'ram_gb': s.ram_gb,
+            'storage_gb': s.storage_gb,
+            'cpu_cores': s.cpu_cores,
+            'storage_used_gb': s.storage_used_gb,
+        } for s in Server.objects.all()],
+    }
+    snap = Snapshot.objects.create(name=name, notes=notes, payload=payload)
+    messages.success(request, f'Snapshot "{snap.name}" saved.')
+    return redirect('radiant:snapshot_detail', slug=snap.slug)
+
+
+@login_required
+def snapshot_detail(request, slug):
+    snap = get_object_or_404(Snapshot, slug=slug)
+    # Re-attach narrative to stored rows for display consistency.
+    notes = _speculative_notes()
+    rows = snap.payload.get('forecast_rows', [])
+    for row in rows:
+        row['narrative'] = notes.get(row.get('years'), '')
+    return render(request, 'radiant/snapshot_detail.html', {
+        'snapshot': snap,
+        'rows': rows,
+        'rec_split': snap.payload.get('recommendation_split'),
+        'rec_unified': snap.payload.get('recommendation_unified'),
+        'payload_classes': snap.payload.get('classes', []),
+        'payload_servers': snap.payload.get('servers', []),
     })
