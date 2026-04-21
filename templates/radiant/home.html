@@ -188,11 +188,15 @@
     {{ recommendation.basis_storage_gb|floatformat:0 }} GB storage.
     Headroom of 2× keeps replacement on a 5-7 year cadence.
     {% if recommendation.split %}
-      Splitting the WordPress classroom load isolates the 40-student
-      concurrency spikes from the 24/7 Django production workload.
+      Three-box split isolates three different failure modes:
+      WordPress classroom spikes (40 students), wildly-experimental
+      projects that may crash or eat resources (OpenAtlas, SignBank
+      refactor), and the stable 24/7 Django fleet. Current layout
+      already follows this pattern with two 2 GB sandboxes.
     {% else %}
       A single box is simpler to operate but couples classroom spikes
-      to production — one noisy classroom can slow a live site.
+      and experimental crashes to production — one runaway process
+      or noisy classroom can slow every live site.
     {% endif %}
   </div>
 </div>

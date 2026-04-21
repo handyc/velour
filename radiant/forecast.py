@@ -201,35 +201,58 @@ def purchase_recommendation(rows, split_wordpress=True):
             'year_5': row_5y,
         }
 
-    # Split the 5-year totals into "wp-heavy" and "rest" by class slug.
-    wp_ram = 0.0
-    wp_storage = 0.0
-    rest_ram = 0.0
-    rest_storage = 0.0
+    # Split the 5-year totals into three isolation domains by class slug:
+    # WordPress classroom (spiky), Experimental (crashy), everything else
+    # (stable production).
+    wp_ram = wp_storage = 0.0
+    exp_ram = exp_storage = 0.0
+    rest_ram = rest_storage = 0.0
     for cls in row_5y['per_class']:
-        if 'wordpress' in cls['class_slug']:
+        slug = cls['class_slug']
+        if 'wordpress' in slug:
             wp_ram += cls['ram_peak_gb']
             wp_storage += cls['storage_gb']
+        elif 'experimental' in slug or 'isolated' in slug:
+            exp_ram += cls['ram_peak_gb']
+            exp_storage += cls['storage_gb']
         else:
             rest_ram += cls['ram_peak_gb']
             rest_storage += cls['storage_gb']
 
+    # Experimental box floor: a usable SBC-class machine, even when the
+    # forecast-peak contribution is tiny. Crashy projects still need a
+    # real Linux + admin + swap file.
+    exp_ram_sized = max(16, exp_ram * 1.5)
+    exp_storage_sized = max(250, exp_storage * 1.5)
+
     boxes = [
         {
-            'label':     'Production + Django box',
+            'label':     'Production Django box',
             'ram_gb':    _snap_ram(rest_ram * 1.5),
             'storage_gb':_snap_storage(rest_storage * 2.0),
             'cpu_cores': _snap_cores(cpu_cores_needed(rest_ram * 1.5, 1.0)),
-            'notes':     'Handles Django 24/7, dev, experimental, admin.',
+            'notes':     'Handles Django 24/7, dev, admin/pipeline. '
+                         'Stable workload — sized for forecast growth '
+                         'plus 1.5x headroom.',
         },
         {
             'label':     'WordPress classroom box',
             'ram_gb':    _snap_ram(wp_ram * 1.5),
             'storage_gb':_snap_storage(wp_storage * 1.5),
             'cpu_cores': _snap_cores(cpu_cores_needed(wp_ram * 1.5, 1.2)),
-            'notes':     'Isolates classroom spikes from production '
-                         'workloads. Cores lifted modestly since a few '
-                         'classes can hit peak simultaneously.',
+            'notes':     'Isolates 40-student classroom spikes from '
+                         '24/7 production. Cores lifted modestly since '
+                         'a few classes can hit peak simultaneously.',
+        },
+        {
+            'label':     'Experimental isolated box',
+            'ram_gb':    _snap_ram(exp_ram_sized),
+            'storage_gb':_snap_storage(exp_storage_sized),
+            'cpu_cores': _snap_cores(cpu_cores_needed(exp_ram_sized, 1.0)),
+            'notes':     'For wildly-experimental projects like OpenAtlas '
+                         'and SignBank refactor — install failures or '
+                         'runaway processes here cannot take down '
+                         'production or classroom. SBC-class is fine.',
         },
     ]
     return {

@@ -209,6 +209,18 @@ SCENARIOS = [
         ],
     },
     {
+        'name': 'Three-box split (prod + WP + experimental)',
+        'description': 'Matches current LUCDH topology: production Django, '
+                       'classroom WordPress, wildly-experimental isolated. '
+                       'Replaces the two 2 GB sandboxes with one shared '
+                       'Pi-class box. Three independent failure domains.',
+        'candidate_slugs': [
+            'mini-prod-box-64-gb-1-tb-6-core',
+            'mini-wp-box-32-gb-500-gb-6-core',
+            'pi-class-experimental-8-gb-500-gb-4-core',
+        ],
+    },
+    {
         'name': 'Comfortable — future-proof single',
         'description': '128 GB / 4 TB unified box for ~7-10 year cadence. '
                        'Higher up-front cost; fewer purchases over time.',
