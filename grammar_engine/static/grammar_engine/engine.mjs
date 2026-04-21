@@ -107,9 +107,12 @@ const DEFAULTS = {
     SUBWORD_CAP: 1000,
     SUBWORD_SEED: 300,
     WORD_COUNT: 10000,
+    WORD_MIN: 200,
+    WORD_CAP: 20000,
     PARTICLE_SEED: 140,
     PARTICLE_CAP: 400,
     PARTICLE_MIN: 90,
+    GRAMMAR_VARIANT_CAP: 8,
     UTTERANCE_LOG_CAP: 400,
 };
 
@@ -255,6 +258,10 @@ export class GrammarEngine {
         this.SUBWORDS = [];
         this.WORDS = [];
         this.SPEECH_GRAMMARS = {};
+        // "kind/variant" → useCount; populated by expandGrammarMeta,
+        // consumed by evolveGrammars. Kept off the variant itself so
+        // the Grammar tab's JSON view stays clean.
+        this.variantUseCounts = {};
 
         this.utteranceLog = [];
         this.utteranceLogCap = this.limits.UTTERANCE_LOG_CAP;
@@ -627,6 +634,8 @@ export class GrammarEngine {
         const variantNames = Object.keys(g.variants);
         const variantName = variantNames[Math.floor(Math.random() * variantNames.length)];
         const variant = g.variants[variantName];
+        const vkey = chosenKind + '/' + variantName;
+        this.variantUseCounts[vkey] = (this.variantUseCounts[vkey] || 0) + 1;
         const rules = {};
         for (const [key, val] of Object.entries(variant)) {
             rules[key] = Array.isArray(val)
@@ -1159,9 +1168,81 @@ export class GrammarEngine {
         return arr;
     }
 
-    evolve() {
-        const { PARTICLE_CAP, PARTICLE_MIN, SUBWORD_CAP } = this.limits;
+    mutateWord(subIds) {
+        const arr = subIds.slice();
+        const op = Math.random();
+        if (!this.SUBWORDS.length) return arr;
+        if (op < 0.3 && arr.length > 1) {
+            arr.splice(Math.floor(Math.random() * arr.length), 1);
+        } else if (op < 0.55 && arr.length < 8) {
+            const i = Math.floor(Math.random() * (arr.length + 1));
+            const pick = this._pickPopularSubword();
+            if (pick) arr.splice(i, 0, pick.id);
+        } else if (op < 0.8 && arr.length) {
+            const i = Math.floor(Math.random() * arr.length);
+            const pick = this._pickPopularSubword();
+            if (pick) arr[i] = pick.id;
+        } else if (arr.length) {
+            const i = Math.floor(Math.random() * arr.length);
+            arr.splice(i + 1, 0, arr[i]);
+        }
+        return arr;
+    }
 
+    // Mutate an L-system rule RHS. `ruleKeys` is the set of other rule
+    // names the RHS may reference (e.g. S → "WW" uses the W rule).
+    _mutateRuleRHS(val, ruleKeys) {
+        if (Array.isArray(val)) {
+            const r = Math.random();
+            if (r < 0.25 && val.length > 1) {
+                const out = val.slice();
+                out.splice(Math.floor(Math.random() * out.length), 1);
+                return out;
+            }
+            if (r < 0.65 && val.length) {
+                const i = Math.floor(Math.random() * val.length);
+                const out = val.slice();
+                out[i] = this._mutateSymbolString(String(out[i]), ruleKeys);
+                return out;
+            }
+            const seed = val[Math.floor(Math.random() * val.length)];
+            return val.concat([this._mutateSymbolString(String(seed), ruleKeys)]);
+        }
+        return this._mutateSymbolString(String(val), ruleKeys);
+    }
+
+    _mutateSymbolString(str, ruleKeys) {
+        const pool = (SYMS + (ruleKeys || []).join('')).split('');
+        if (!pool.length) return str;
+        const pick = () => pool[Math.floor(Math.random() * pool.length)];
+        const chars = str.split('');
+        const op = Math.random();
+        if (op < 0.3 && chars.length > 1) {
+            chars.splice(Math.floor(Math.random() * chars.length), 1);
+        } else if (op < 0.55 && chars.length < 12) {
+            const i = Math.floor(Math.random() * (chars.length + 1));
+            chars.splice(i, 0, pick());
+        } else if (op < 0.85 && chars.length) {
+            chars[Math.floor(Math.random() * chars.length)] = pick();
+        } else if (chars.length > 1) {
+            const i = Math.floor(Math.random() * (chars.length - 1));
+            const tmp = chars[i]; chars[i] = chars[i + 1]; chars[i + 1] = tmp;
+        }
+        return chars.join('');
+    }
+
+    mutateGrammarVariant(variant, ruleKeys) {
+        const keys = Object.keys(variant);
+        if (!keys.length) return JSON.parse(JSON.stringify(variant));
+        const pickKey = keys[Math.floor(Math.random() * keys.length)];
+        const out = JSON.parse(JSON.stringify(variant));
+        out[pickKey] = this._mutateRuleRHS(
+            out[pickKey], ruleKeys || keys);
+        return out;
+    }
+
+    evolveParticles() {
+        const { PARTICLE_CAP, PARTICLE_MIN } = this.limits;
         const sortedP = [...this.PARTICLES].sort((a, b) => b.useCount - a.useCount);
         const topPN = Math.max(2, Math.floor(this.PARTICLES.length * 0.03));
         for (let i = 0; i < topPN; i++) {
@@ -1202,7 +1283,10 @@ export class GrammarEngine {
                     .map(i => (this.PARTICLES[i] || {type:'?'}).type).join('');
             }
         }
+    }
 
+    evolveSubwords() {
+        const { SUBWORD_CAP } = this.limits;
         const sorted = [...this.SUBWORDS].sort((a, b) => b.useCount - a.useCount);
         const topN = Math.max(2, Math.floor(this.SUBWORDS.length * 0.02));
         for (let i = 0; i < topN; i++) {
@@ -1231,6 +1315,80 @@ export class GrammarEngine {
             this.SUBWORDS.length = 0;
             this.SUBWORDS.push(...keep);
         }
+    }
+
+    evolveWords() {
+        const WORD_CAP = this.limits.WORD_CAP;
+        if (this.SUBWORDS.length === 0) return;
+        const sorted = [...this.WORDS].sort((a, b) => b.useCount - a.useCount);
+        const topN = Math.max(2, Math.floor(this.WORDS.length * 0.02));
+        for (let i = 0; i < topN; i++) {
+            if (this.WORDS.length >= WORD_CAP) break;
+            const parent = sorted[i];
+            if (!parent) break;
+            const childSubIds = this.mutateWord(parent.subIds);
+            if (!childSubIds.length) continue;
+            this.WORDS.push({
+                id: this.WORDS.length,
+                subIds: childSubIds,
+                useCount: 0,
+                born: Date.now(),
+            });
+        }
+        const ageT = Date.now() - 120000;
+        const fresh = this.WORDS.filter(w => !(w.useCount === 0 && w.born < ageT));
+        const stale = this.WORDS.filter(w =>   w.useCount === 0 && w.born < ageT);
+        const needed = Math.max(0, this.limits.WORD_MIN - fresh.length);
+        const keep = fresh.concat(stale.slice(0, needed));
+        if (keep.length !== this.WORDS.length) {
+            keep.forEach((w, i) => { w.id = i; });
+            this.WORDS.length = 0;
+            this.WORDS.push(...keep);
+        }
+    }
+
+    // Spawn a mutated child variant under each existing grammar, seeded
+    // from its most-used variant (top 2 if ≥2 variants). New variants
+    // get names like v3_mut1. Caps per-grammar variant count so this
+    // can't grow unbounded.
+    evolveGrammars() {
+        const CAP = this.limits.GRAMMAR_VARIANT_CAP;
+        for (const [kind, g] of Object.entries(this.SPEECH_GRAMMARS)) {
+            const variantNames = Object.keys(g.variants);
+            if (!variantNames.length) continue;
+            const scored = variantNames.map(n => ({
+                name: n,
+                use: this.variantUseCounts[kind + '/' + n] || 0,
+            })).sort((a, b) => b.use - a.use);
+            const parents = scored.slice(0, 2);
+            for (const p of parents) {
+                if (Object.keys(g.variants).length >= CAP) break;
+                const child = this.mutateGrammarVariant(
+                    g.variants[p.name], variantNames);
+                let n = 1, newName;
+                do { newName = p.name + '_mut' + n++; }
+                while (g.variants[newName]);
+                g.variants[newName] = child;
+            }
+            // Prune the least-used variant(s) if over cap; never drop below 1.
+            const keys = Object.keys(g.variants);
+            while (keys.length > CAP && keys.length > 1) {
+                const worst = keys.map(n => ({
+                    name: n,
+                    use: this.variantUseCounts[kind + '/' + n] || 0,
+                })).sort((a, b) => a.use - b.use)[0];
+                delete g.variants[worst.name];
+                delete this.variantUseCounts[kind + '/' + worst.name];
+                keys.splice(keys.indexOf(worst.name), 1);
+            }
+        }
+    }
+
+    evolve() {
+        this.evolveParticles();
+        this.evolveSubwords();
+        this.evolveWords();
+        this.evolveGrammars();
     }
 
     invent() {

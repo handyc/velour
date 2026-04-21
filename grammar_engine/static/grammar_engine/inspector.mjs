@@ -33,11 +33,18 @@ export class Inspector {
         this.statsTimer = null;
         this._chainedOnLog = null;
 
-        // Continuous-evolution state (Subwords tab). Persists across
-        // pane re-renders so the checkbox stays consistent.
-        this.evolveTimer = null;
-        this.evolveContinuous = false;
-        this.evolveIntervalSec = 10;
+        // Per-tab continuous-evolve state. Persists across pane
+        // re-renders so the checkboxes stay consistent.
+        this.evolveState = {
+            particles: { continuous: false, intervalSec: 10, timer: null,
+                         method: 'evolveParticles', render: '_renderParticles' },
+            subwords:  { continuous: false, intervalSec: 10, timer: null,
+                         method: 'evolveSubwords',  render: '_renderSubwords' },
+            words:     { continuous: false, intervalSec: 10, timer: null,
+                         method: 'evolveWords',     render: '_renderWords' },
+            grammar:   { continuous: false, intervalSec: 30, timer: null,
+                         method: 'evolveGrammars',  render: '_renderGrammar' },
+        };
 
         this._panes = {
             grammar:   this.root.querySelector('#gi-pane-grammar'),
@@ -102,12 +109,14 @@ export class Inspector {
         this.root.classList.add('open');
         this.render(this.activeTab);
         if (this.activeTab === 'stats') this._startStatsTimer();
-        if (this.evolveContinuous) this._startEvolveTimer();
+        for (const tab of Object.keys(this.evolveState)) {
+            if (this.evolveState[tab].continuous) this._startEvolveTimer(tab);
+        }
     }
     close() {
         this.root.classList.remove('open');
         this._stopStatsTimer();
-        this._stopEvolveTimer();
+        for (const tab of Object.keys(this.evolveState)) this._stopEvolveTimer(tab);
     }
     _startStatsTimer() {
         this._stopStatsTimer();
@@ -116,20 +125,71 @@ export class Inspector {
     _stopStatsTimer() {
         if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
     }
-    _startEvolveTimer() {
-        this._stopEvolveTimer();
-        const ms = Math.max(1, this.evolveIntervalSec) * 1000;
-        this.evolveTimer = setInterval(() => {
+    _startEvolveTimer(tab) {
+        const st = this.evolveState[tab];
+        if (!st) return;
+        this._stopEvolveTimer(tab);
+        const ms = Math.max(1, st.intervalSec) * 1000;
+        st.timer = setInterval(() => {
             if (!this.engine) return;
-            this.engine.evolve();
-            if (this.activeTab === 'subwords' &&
-                this.root.classList.contains('open')) {
-                this._renderSubwords();
+            this.engine[st.method]();
+            if (this.activeTab === tab && this.root.classList.contains('open')) {
+                this[st.render]();
             }
         }, ms);
     }
-    _stopEvolveTimer() {
-        if (this.evolveTimer) { clearInterval(this.evolveTimer); this.evolveTimer = null; }
+    _stopEvolveTimer(tab) {
+        const st = this.evolveState[tab];
+        if (st && st.timer) { clearInterval(st.timer); st.timer = null; }
+    }
+
+    // Render the "Run evolve cycle now · continuous · every N s" strip
+    // that every evolvable tab shares. Call with the tab key and the
+    // toolbar element the controls should be appended to.
+    _wireEvolveControls(tab, toolbar) {
+        const st = this.evolveState[tab];
+        if (!st) return;
+        const wrap = document.createElement('span');
+        wrap.style.cssText = 'display:inline-flex;gap:0.4rem;align-items:center;';
+        wrap.innerHTML = `
+            <button class="gi-btn gi-ev-run">Run evolve cycle now</button>
+            <label style="display:inline-flex;gap:0.3rem;align-items:center;
+                    color:#8b95a0;font-size:0.78rem;">
+                <input type="checkbox" class="gi-ev-cont">
+                continuous · every
+                <input type="number" class="gi-ev-sec" min="1" max="3600"
+                       style="width:4rem;padding:0.15rem 0.3rem;">
+                s
+                <span class="gi-ev-status" style="color:#6e7681;"></span>
+            </label>
+        `;
+        toolbar.appendChild(wrap);
+        const btn = wrap.querySelector('.gi-ev-run');
+        const cb = wrap.querySelector('.gi-ev-cont');
+        const sec = wrap.querySelector('.gi-ev-sec');
+        const status = wrap.querySelector('.gi-ev-status');
+        cb.checked = st.continuous;
+        sec.value = st.intervalSec;
+        const refresh = () => { status.textContent = st.continuous ? '· running' : ''; };
+        refresh();
+        btn.onclick = () => {
+            if (!this.engine) return;
+            this.engine[st.method]();
+            this[st.render]();
+        };
+        cb.addEventListener('change', () => {
+            st.continuous = cb.checked;
+            if (st.continuous) this._startEvolveTimer(tab);
+            else this._stopEvolveTimer(tab);
+            refresh();
+        });
+        sec.addEventListener('change', () => {
+            const v = parseInt(sec.value, 10);
+            if (!Number.isFinite(v) || v < 1) { sec.value = st.intervalSec; return; }
+            st.intervalSec = Math.min(3600, v);
+            sec.value = st.intervalSec;
+            if (st.continuous) this._startEvolveTimer(tab);
+        });
     }
 
     render(tab) {
@@ -159,8 +219,15 @@ export class Inspector {
         header.innerHTML = 'Rules are applied for <b>iterations</b> passes over '
             + 'the <b>axiom</b>. A value that is a <b>string</b> expands to that '
             + 'string; a value that is an <b>array</b> picks one entry at '
-            + 'expansion time. Edit the JSON and click <b>Apply</b>.';
+            + 'expansion time. Edit the JSON and click <b>Apply</b>. '
+            + 'Evolve cycle spawns a mutated child variant under each grammar, '
+            + 'seeded from its most-used variant(s).';
         pane.appendChild(header);
+        const evBar = document.createElement('div');
+        evBar.className = 'gi-toolbar gi-ev-bar';
+        evBar.style.marginBottom = '0.8rem';
+        pane.appendChild(evBar);
+        this._wireEvolveControls('grammar', evBar);
 
         const LSystem = this.LSystem;
         const pick = (xs) => xs[Math.floor(Math.random() * xs.length)];
@@ -265,6 +332,7 @@ export class Inspector {
                 <button class="gi-btn primary gi-pp-add">Add particle</button>
                 <span class="gi-count"></span>
             </div>
+            <div class="gi-toolbar gi-ev-bar"></div>
             <table class="gi-table">
                 <thead><tr>
                     <th>ID</th><th>Type</th><th>Dur (ms)</th>
@@ -338,6 +406,7 @@ export class Inspector {
             engine.addParticle(t);
             this._renderParticles();
         };
+        this._wireEvolveControls('particles', pane.querySelector('.gi-ev-bar'));
     }
 
     // ── Subwords tab ───────────────────────────────────────────
@@ -353,19 +422,9 @@ export class Inspector {
             <div class="gi-toolbar">
                 <input type="text" class="gi-sub-new" placeholder="new pattern (e.g. nVl)" />
                 <button class="gi-btn primary gi-sub-add">Add</button>
-                <button class="gi-btn gi-sub-evolve">Run evolve cycle now</button>
-                <label class="gi-sub-cont-lbl" style="display:inline-flex;gap:0.3rem;
-                        align-items:center;color:#8b95a0;font-size:0.78rem;
-                        margin-left:0.4rem;">
-                    <input type="checkbox" class="gi-sub-cont">
-                    continuous · every
-                    <input type="number" class="gi-sub-cont-sec" min="1" max="3600"
-                           style="width:4rem;padding:0.15rem 0.3rem;">
-                    s
-                    <span class="gi-sub-cont-status" style="color:#6e7681;"></span>
-                </label>
                 <span class="gi-count"></span>
             </div>
+            <div class="gi-toolbar gi-ev-bar"></div>
             <table class="gi-table">
                 <thead><tr>
                     <th>ID</th><th>Pattern</th><th>Particles</th><th>Used</th>
@@ -439,38 +498,7 @@ export class Inspector {
             inp.value = '';
             this._renderSubwords();
         };
-        pane.querySelector('.gi-sub-evolve').onclick = () => {
-            engine.evolve();
-            this._renderSubwords();
-        };
-
-        const contBox = pane.querySelector('.gi-sub-cont');
-        const contSec = pane.querySelector('.gi-sub-cont-sec');
-        const contStatus = pane.querySelector('.gi-sub-cont-status');
-        contBox.checked = this.evolveContinuous;
-        contSec.value = this.evolveIntervalSec;
-        const refreshStatus = () => {
-            contStatus.textContent = this.evolveContinuous
-                ? '· running'
-                : '';
-        };
-        refreshStatus();
-        contBox.addEventListener('change', () => {
-            this.evolveContinuous = contBox.checked;
-            if (this.evolveContinuous) this._startEvolveTimer();
-            else this._stopEvolveTimer();
-            refreshStatus();
-        });
-        contSec.addEventListener('change', () => {
-            const v = parseInt(contSec.value, 10);
-            if (!Number.isFinite(v) || v < 1) {
-                contSec.value = this.evolveIntervalSec;
-                return;
-            }
-            this.evolveIntervalSec = Math.min(3600, v);
-            contSec.value = this.evolveIntervalSec;
-            if (this.evolveContinuous) this._startEvolveTimer();
-        });
+        this._wireEvolveControls('subwords', pane.querySelector('.gi-ev-bar'));
     }
 
     // ── Words tab ──────────────────────────────────────────────
@@ -487,6 +515,7 @@ export class Inspector {
                 <button class="gi-btn gi-word-new">+ new random word</button>
                 <span class="gi-count"></span>
             </div>
+            <div class="gi-toolbar gi-ev-bar"></div>
             <table class="gi-table">
                 <thead><tr>
                     <th>ID</th><th>Subword chain</th><th>Symbols</th><th>Used</th><th></th>
@@ -563,6 +592,7 @@ export class Inspector {
             engine.addRandomWord();
             renderRows();
         };
+        this._wireEvolveControls('words', pane.querySelector('.gi-ev-bar'));
         renderRows();
     }
 

@@ -322,6 +322,170 @@ class Scenario(models.Model):
         return self.total_upfront_eur + self.total_monthly_eur * 60
 
 
+class EvoPopulation(models.Model):
+    """A genetic-algorithm population of hypothetical purchase bundles.
+
+    Each *individual* is a bundle of Candidate IDs (a multiset — duplicates
+    allowed, e.g. two Dedicated Pro 64GB). Fitness combines 5-year lifetime
+    from :func:`forecast.evaluate_scenario` with TCO, failure-domain
+    isolation, and simplicity. The population is persisted so the browser
+    or a cron can step generations asynchronously.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    population_size = models.PositiveSmallIntegerField(default=32)
+    min_boxes = models.PositiveSmallIntegerField(default=1)
+    max_boxes = models.PositiveSmallIntegerField(default=5)
+    mutation_rate = models.FloatField(default=0.3)
+    elitism = models.PositiveSmallIntegerField(default=2)
+
+    # Fitness weights — each knob normalised so 1.0 == "one unit of this
+    # matters as much as one lifetime-year".
+    weight_lifetime    = models.FloatField(default=1.0)
+    weight_tco         = models.FloatField(default=0.5)
+    weight_isolation   = models.FloatField(default=2.0)
+    weight_simplicity  = models.FloatField(default=0.3)
+    weight_headroom    = models.FloatField(default=1.0)
+
+    generation = models.PositiveIntegerField(default=0)
+    best_fitness = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-modified_at']
+        verbose_name = 'evolved population'
+        verbose_name_plural = 'evolved populations'
+
+    def __str__(self):
+        return f'{self.name} (gen {self.generation})'
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:200] or 'population'
+            candidate = base
+            n = 2
+            while EvoPopulation.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+
+class EvoIndividual(models.Model):
+    """One genome in a population. genome_ids is a list of Candidate.pk values."""
+
+    population = models.ForeignKey(EvoPopulation, on_delete=models.CASCADE,
+                                   related_name='individuals')
+    generation = models.PositiveIntegerField(default=0)
+    genome_ids = models.JSONField(default=list,
+        help_text='List of Candidate.pk values — the bundle this genome encodes.')
+    fitness = models.FloatField(default=0.0)
+    breakdown = models.JSONField(default=dict, blank=True,
+        help_text='Fitness components: lifetime_years, tco_eur, '
+                  'isolation_bonus, simplicity_bonus, headroom_bonus, plus '
+                  'totals so the detail page doesn\'t need to re-evaluate.')
+    parent_a = models.ForeignKey('self', null=True, blank=True,
+                                 on_delete=models.SET_NULL,
+                                 related_name='offspring_a')
+    parent_b = models.ForeignKey('self', null=True, blank=True,
+                                 on_delete=models.SET_NULL,
+                                 related_name='offspring_b')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-fitness', 'id']
+
+    def __str__(self):
+        return f'Ind#{self.pk} gen{self.generation} fit={self.fitness:.2f}'
+
+
+class EvoTournament(models.Model):
+    """A head-to-head evolution of N populations from varied seeds.
+
+    Running a tournament spins up `rounds` fresh populations, evolves
+    each `generations` steps, and records the winner. Compare single-run
+    luck against the best of a bracket.
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    notes = models.TextField(blank=True)
+    rounds = models.PositiveSmallIntegerField(default=8)
+    generations = models.PositiveIntegerField(default=30)
+    population_size = models.PositiveSmallIntegerField(default=24)
+    mutation_rate = models.FloatField(default=0.3)
+    weights_json = models.JSONField(default=dict, blank=True,
+        help_text='Snapshot of the weight vector used for scoring.')
+    leaderboard = models.JSONField(default=list, blank=True,
+        help_text='[{round, fitness, genome_ids, summary}, ...] sorted '
+                  'by fitness desc. Top row is the tournament champion.')
+    champion_genome_ids = models.JSONField(default=list, blank=True)
+    champion_fitness = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} (champ {self.champion_fitness:.2f})'
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:200] or 'tournament'
+            candidate = base
+            n = 2
+            while EvoTournament.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+
+class EvoMetaTournament(models.Model):
+    """A tournament of tournaments.
+
+    Runs `rounds` tournaments — each with a perturbed weight vector —
+    and promotes the best *champion* as the meta-champion. The point is
+    to test how stable a winning bundle is across reasonable variation in
+    what you care about (more budget vs. more headroom vs. more isolation).
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+    slug = models.SlugField(max_length=220, unique=True, blank=True)
+    notes = models.TextField(blank=True)
+    rounds = models.PositiveSmallIntegerField(default=4)
+    tournament_rounds = models.PositiveSmallIntegerField(default=6)
+    generations = models.PositiveIntegerField(default=25)
+    population_size = models.PositiveSmallIntegerField(default=20)
+    weight_jitter = models.FloatField(default=0.35,
+        help_text='+/- fraction by which each weight is perturbed per round.')
+    leaderboard = models.JSONField(default=list, blank=True)
+    champion_genome_ids = models.JSONField(default=list, blank=True)
+    champion_fitness = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} (meta-champ {self.champion_fitness:.2f})'
+
+    def save(self, *args, **kwargs):
+        if not self.slug and self.name:
+            base = slugify(self.name)[:200] or 'meta-tournament'
+            candidate = base
+            n = 2
+            while EvoMetaTournament.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{n}'
+                n += 1
+            self.slug = candidate
+        super().save(*args, **kwargs)
+
+
 class Snapshot(models.Model):
     """A frozen copy of the forecast + recommendation at a moment in time.
 

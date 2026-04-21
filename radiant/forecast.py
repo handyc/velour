@@ -113,6 +113,13 @@ def cpu_cores_needed(ram_gb_total, peak_factor):
     return base
 
 
+def _current_forecast_rows():
+    """Convenience: fetch WorkloadClasses + forecast_table in one call,
+    without narrative strings. Shared by evolution.py."""
+    from .models import WorkloadClass
+    return forecast_table(list(WorkloadClass.objects.all()))
+
+
 def forecast_table(workload_classes):
     """Return one dict per horizon with per-class and aggregate figures."""
     rows = []
