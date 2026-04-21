@@ -200,7 +200,7 @@ SEEDS = [
          'notes': 'Classical / liturgical language of the Ethiopian '
                   'Orthodox church. VSO in unmarked main clauses.'},
         [{
-            'slug': 'gez-hanaṣa-bəʾəsi-beta',
+            'slug': 'gez-hanasa-beesi-beta',
             'konso': 'ሐነጸ ብእሲ ቤተ',
             'gloss': 'build.PST.3SG.M  man  house.ACC',
             'translation': 'A man built a house.',
@@ -725,7 +725,7 @@ SEEDS = [
                   'serial verb constructions productive; no overt '
                   'tense morphology (TAM via particles).'},
         [{
-            'slug': 'yor-okunrin-kọ-ile',
+            'slug': 'yor-okunrin-ko-ile',
             'konso': 'ọkùnrin náà kọ́ ilé',
             'gloss': 'man  DEF  build  house',
             'translation': 'The man built a house.',
@@ -749,7 +749,7 @@ SEEDS = [
          'notes': 'SVO; two-tone + downstep; productive serial-verb '
                   'constructions; vowel harmony (ATR).'},
         [{
-            'slug': 'ibo-nwoke-wuru-ụlọ',
+            'slug': 'ibo-nwoke-wuru-ulo',
             'konso': 'nwoke wuru ụlọ',
             'gloss': 'man  build.PST  house',
             'translation': 'A man built a house.',
@@ -800,7 +800,7 @@ SEEDS = [
          'notes': 'SVO; tonal; serial verbs; productive ideophones; '
                   'nasality and labial-velars /kp gb/.'},
         [{
-            'slug': 'ewe-ŋutsu-la-tu-aƒe',
+            'slug': 'ewe-nutsu-la-tu-afe',
             'konso': 'ŋutsu la tu aƒe',
             'gloss': 'man  DEF  build  house',
             'translation': 'The man built a house.',
@@ -851,7 +851,7 @@ SEEDS = [
                   '— sentence form depends on what is in focus '
                   '(subject, verb, complement).'},
         [{
-            'slug': 'wol-goor-bi-tabax-na-kër',
+            'slug': 'wol-goor-bi-tabax-na-ker',
             'konso': 'góor gi tabax na kër',
             'gloss': 'man  DEF  build  PERF  house',
             'translation': 'The man built a house.',
@@ -901,7 +901,7 @@ SEEDS = [
          'notes': 'S-Aux-O-V — unusual for West Africa; tonal; '
                   'N\'Ko script popular alongside Latin.'},
         [{
-            'slug': 'bam-cɛ-ye-so-jɔ',
+            'slug': 'bam-ce-ye-so-jo',
             'konso': 'cɛ ye so jɔ',
             'gloss': 'man  PFV  house  build',
             'translation': 'The man built a house.',
@@ -925,7 +925,7 @@ SEEDS = [
          'notes': 'Close relative of Bambara; same S-Aux-O-V order '
                   'with perfective / imperfective auxiliary.'},
         [{
-            'slug': 'mnk-kewo-ye-buŋo-loo',
+            'slug': 'mnk-kewo-ye-bungo-loo',
             'konso': 'kewo ye buŋo loo',
             'gloss': 'man.DEF  PFV  house.DEF  build',
             'translation': 'The man built the house.',
@@ -951,7 +951,7 @@ SEEDS = [
                   'creaky) are phonemic; rich verbal morphology via '
                   'ablaut ("root and pattern" in a Nilotic language).'},
         [{
-            'slug': 'din-mony-acï-dhɛ̈ɛ̈ny-looi',
+            'slug': 'din-mony-aci-dhenny-looi',
             'konso': 'mony acï dhɛ̈ɛ̈ny looi',
             'gloss': 'man  PFV  house  build',
             'translation': 'A man has built a house.',
@@ -973,7 +973,7 @@ SEEDS = [
          'speakers': 2000000, 'word_order': 'svo',
          'notes': 'SVO; three-way vowel length; modal tonal contrasts.'},
         [{
-            'slug': 'nus-wut-ci-duëël-lath',
+            'slug': 'nus-wut-ci-dueel-lath',
             'konso': 'wut cɛ duëël lath',
             'gloss': 'man  PFV  house  build',
             'translation': 'The man built a house.',

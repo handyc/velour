@@ -491,7 +491,7 @@ SEEDS = [
          'notes': 'Own branch of Indo-European; SOV; seven cases; '
                   'own script designed by Mesrop Mashtots in 405 CE.'},
         [{
-            'slug': 'hye-mardə-tun-kaṙuc̣ec',
+            'slug': 'hye-marde-tun-karutsets',
             'konso': 'մարդը|marde տուն|tun կառուցեց|karutsets',
             'gloss': 'man.DEF  house  build.PFV.AOR.3SG',
             'translation': 'The man built a house.',
