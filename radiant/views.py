@@ -3,10 +3,11 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from .evolution import run_evolution, seed_population, step_generation
 from .forecast import (forecast_table, purchase_recommendation,
                        evaluate_scenario, render_forecast_svg)
-from .models import (HORIZON_YEARS, Server, WorkloadClass, HostedProject,
-                     Scenario, Snapshot)
+from .models import (HORIZON_YEARS, Candidate, EvoPopulation, Server,
+                     WorkloadClass, HostedProject, Scenario, Snapshot)
 
 
 def _speculative_notes():
@@ -129,6 +130,143 @@ def take_snapshot(request):
     snap = Snapshot.objects.create(name=name, notes=notes, payload=payload)
     messages.success(request, f'Snapshot "{snap.name}" saved.')
     return redirect('radiant:snapshot_detail', slug=snap.slug)
+
+
+@login_required
+def evolve_index(request):
+    """List of evolved populations + form to create a new one."""
+    populations = EvoPopulation.objects.all()
+    return render(request, 'radiant/evolve_index.html', {
+        'populations':     populations,
+        'candidate_count': Candidate.objects.count(),
+    })
+
+
+@login_required
+@require_POST
+def evolve_create(request):
+    name = (request.POST.get('name') or '').strip()
+    if not name:
+        messages.error(request, 'Name is required.')
+        return redirect('radiant:evolve_index')
+    if EvoPopulation.objects.filter(name=name).exists():
+        messages.error(request, f'Population "{name}" already exists.')
+        return redirect('radiant:evolve_index')
+    if Candidate.objects.count() == 0:
+        messages.error(request,
+            'No Candidates in library — seed radiant first.')
+        return redirect('radiant:evolve_index')
+
+    def _int(key, default, lo, hi):
+        try:
+            v = int(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _float(key, default, lo, hi):
+        try:
+            v = float(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    pop = EvoPopulation.objects.create(
+        name=name,
+        population_size=_int('population_size', 32, 4, 256),
+        min_boxes=_int('min_boxes', 1, 1, 10),
+        max_boxes=_int('max_boxes', 5, 1, 12),
+        mutation_rate=_float('mutation_rate', 0.3, 0.0, 1.0),
+        elitism=_int('elitism', 2, 0, 10),
+        weight_lifetime=_float('weight_lifetime', 1.0, 0.0, 10.0),
+        weight_tco=_float('weight_tco', 0.5, 0.0, 10.0),
+        weight_isolation=_float('weight_isolation', 2.0, 0.0, 10.0),
+        weight_simplicity=_float('weight_simplicity', 0.3, 0.0, 10.0),
+        weight_headroom=_float('weight_headroom', 1.0, 0.0, 10.0),
+    )
+    seed_population(pop)
+    messages.success(request,
+        f'Created "{pop.name}" — generation 0 seeded with '
+        f'{pop.population_size} random bundles.')
+    return redirect('radiant:evolve_detail', slug=pop.slug)
+
+
+@login_required
+def evolve_detail(request, slug):
+    pop = get_object_or_404(EvoPopulation, slug=slug)
+    top_n = 10
+    leaders = list(pop.individuals.order_by('-fitness', 'id')[:top_n])
+    cmap = {c.pk: c for c in Candidate.objects.all()}
+
+    board = []
+    for ind in leaders:
+        names = [cmap[cid].name if cid in cmap else f'#{cid}'
+                 for cid in ind.genome_ids]
+        from collections import Counter
+        counts = Counter(names)
+        summary = ', '.join(f'{n}×{k}' if n > 1 else k
+                            for k, n in counts.items())
+        board.append({'ind': ind, 'summary': summary})
+
+    return render(request, 'radiant/evolve_detail.html', {
+        'pop':        pop,
+        'leaders':    board,
+        'pop_count':  pop.individuals.count(),
+    })
+
+
+@login_required
+@require_POST
+def evolve_step(request, slug):
+    pop = get_object_or_404(EvoPopulation, slug=slug)
+    result = step_generation(pop)
+    if result.get('ok'):
+        messages.success(request,
+            f'Stepped to generation {result["generation"]} — '
+            f'best fitness {result["best_fitness"]:.3f}.')
+    else:
+        messages.error(request, result.get('error', 'step failed'))
+    return redirect('radiant:evolve_detail', slug=pop.slug)
+
+
+@login_required
+@require_POST
+def evolve_run(request, slug):
+    pop = get_object_or_404(EvoPopulation, slug=slug)
+    try:
+        gens = int(request.POST.get('gens', 10))
+    except (TypeError, ValueError):
+        gens = 10
+    gens = max(1, min(500, gens))
+    result = run_evolution(pop, generations=gens)
+    if result.get('ok'):
+        messages.success(request,
+            f'Ran {gens} generations — now at gen '
+            f'{result["final_generation"]}, best fitness '
+            f'{result["best_fitness"]:.3f}.')
+    else:
+        messages.error(request, result.get('error', 'run failed'))
+    return redirect('radiant:evolve_detail', slug=pop.slug)
+
+
+@login_required
+@require_POST
+def evolve_reseed(request, slug):
+    pop = get_object_or_404(EvoPopulation, slug=slug)
+    seed_population(pop)
+    messages.success(request,
+        f'Reseeded "{pop.name}" — back to generation 0.')
+    return redirect('radiant:evolve_detail', slug=pop.slug)
+
+
+@login_required
+@require_POST
+def evolve_delete(request, slug):
+    pop = get_object_or_404(EvoPopulation, slug=slug)
+    name = pop.name
+    pop.delete()
+    messages.success(request, f'Deleted "{name}".')
+    return redirect('radiant:evolve_index')
 
 
 @login_required
