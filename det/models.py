@@ -166,6 +166,11 @@ class Tournament(models.Model):
     master_seed = models.CharField(max_length=64, blank=True,
         help_text='Derives the per-round seeds. Auto-set from '
                   'timestamp if blank.')
+    auto_promote_top = models.PositiveSmallIntegerField(default=0,
+        help_text='After run, auto-promote up to this many top-ranked '
+                  'entries (whose native class is 4 and whose aggregate '
+                  'stayed in the class-4 band) to Automaton + Evolution. '
+                  '0 = no auto-promotion.')
 
     status = models.CharField(max_length=16, choices=STATUS_CHOICES,
                               default='pending')

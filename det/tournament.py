@@ -93,6 +93,78 @@ def add_candidate(tournament, candidate):
     return entry
 
 
+CLASS4_AGG_FLOOR = 3.5  # Matches det.search._classify — aggregate must
+                        # stay in the class-4 band to survive auto-promote.
+
+
+def _auto_promote_winners(tournament):
+    """Promote up to tournament.auto_promote_top top-ranked entries that
+    look robustly Class-4. An entry qualifies if:
+
+      - it finished (rank is set, not disqualified),
+      - its candidate's *native* est_class is 'class4' (the screening
+        scorer thought so on the one random grid it saw),
+      - its tournament aggregate stayed at or above the class-4 floor
+        (a lucky native class-4 that collapses across shared seeds is
+        *not* robust — we skip it),
+      - the candidate isn't already promoted to Automaton (idempotent).
+
+    For each qualifier we create (a) an Automaton RuleSet + Simulation
+    via search.promote and (b) an Evolution Engine L0 founder via
+    search.promote_to_evolution. The Evolution run is staged idle; the
+    operator opens /evolution/<slug>/ and presses start.
+
+    Failures on one entry don't abort the loop — we record the reason
+    on entry.note and move on. This runs inside execute() so everything
+    is inside the same try/finally that marks the tournament failed
+    if something truly explodes.
+    """
+    from .search import promote, promote_to_evolution
+
+    ranked = list(
+        tournament.entries.select_related('candidate', 'candidate__run',
+                                          'candidate__promoted_to')
+        .filter(disqualified=False, rank__isnull=False)
+        .order_by('rank')
+    )
+    promoted = 0
+    target = tournament.auto_promote_top
+    for entry in ranked:
+        if promoted >= target:
+            break
+        cand = entry.candidate
+        if cand.est_class != 'class4':
+            continue
+        if entry.aggregate_score < CLASS4_AGG_FLOOR:
+            continue
+        if cand.promoted_to is not None:
+            continue
+
+        rank_label = f'#{entry.rank}'
+        tourney_label = tournament.label or f'T#{tournament.pk}'
+        rs_name = (f'{tourney_label} {rank_label} '
+                   f'(agg {entry.aggregate_score:.2f}, '
+                   f'{tournament.n_colors}c)')
+        try:
+            rs = promote(cand, name=rs_name)
+        except Exception as exc:
+            entry.note = f'auto-promote → automaton failed: {exc}'
+            entry.save(update_fields=['note'])
+            continue
+        try:
+            er, _agent = promote_to_evolution(cand)
+        except Exception as exc:
+            entry.note = (f'auto → automaton "{rs.slug}"; '
+                          f'evolution failed: {exc}')
+            entry.save(update_fields=['note'])
+            promoted += 1
+            continue
+        entry.note = (f'auto → automaton "{rs.slug}" · '
+                      f'evolution "{er.slug}"')
+        entry.save(update_fields=['note'])
+        promoted += 1
+
+
 def autofill_random(tournament, n, min_score=2.0, rng_seed=None):
     """Add up to `n` random Candidates to `tournament` from the pool of
     compatible candidates. Returns (added, pool_size).
@@ -181,6 +253,9 @@ def execute(tournament, progress_cb=None):
         for i, e in enumerate(alive, start=1):
             e.rank = i
             e.save(update_fields=['rank'])
+
+        if tournament.auto_promote_top:
+            _auto_promote_winners(tournament)
 
         tournament.status = 'finished'
     except Exception as exc:

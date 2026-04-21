@@ -96,6 +96,10 @@
       <label>horizon
         <input type="number" name="horizon" value="60" min="20" max="120">
       </label>
+      <label>auto-promote top
+        <input type="number" name="auto_promote_top" value="1" min="0" max="10"
+               title="After run, auto-promote this many top class-4 winners to Automaton + Evolution. 0 = off.">
+      </label>
       <label>label
         <input type="text" name="label" placeholder="auto if blank"
                style="width:11rem">
@@ -106,7 +110,9 @@
       Pulls N random candidates whose native score ≥ min_native and
       whose SearchRun used the same n_colors, then runs them against
       N shared initial grids. Synchronous — plan ~0.7s per entry per
-      seed (50 × 5 = ~3 minutes at defaults).
+      seed (50 × 5 = ~3 minutes at defaults). Top-ranked winners whose
+      aggregate stays in the class-4 band (≥3.5) are auto-promoted to
+      Automaton + Evolution staged-idle.
     </p>
   </div>
 

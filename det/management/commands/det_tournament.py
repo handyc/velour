@@ -47,6 +47,11 @@ class Command(BaseCommand):
                  'Bump to 3.5 to restrict to the class-4 band.')
         parser.add_argument('--rng-seed', default=None,
             help='Seed for reproducible random selection.')
+        parser.add_argument('--auto-promote', type=int, default=0,
+            metavar='N',
+            help='After running, auto-promote up to N top class-4 '
+                 'winners (aggregate ≥ 3.5) to Automaton + Evolution. '
+                 '0 = off (default).')
         parser.add_argument('--no-run', action='store_true',
             help='Create and populate without scoring — useful for '
                  'staging a tournament then kicking it off from the UI.')
@@ -62,6 +67,7 @@ class Command(BaseCommand):
         if not (2 <= n_colors <= 4):
             raise CommandError('n_colors must be 2, 3, or 4.')
 
+        auto_promote = max(0, min(10, int(opts.get('auto_promote') or 0)))
         tourney = Tournament.objects.create(
             label=opts['label'],
             n_colors=n_colors,
@@ -69,6 +75,7 @@ class Command(BaseCommand):
             screen_width=opts['width'],
             screen_height=opts['height'],
             horizon=opts['horizon'],
+            auto_promote_top=auto_promote,
         )
 
         added = 0

@@ -497,11 +497,18 @@ def tournament_auto(request):
     if fill is None:
         return HttpResponseBadRequest('bad autofill parameter')
 
+    try:
+        auto_promote_top = int(request.POST.get('auto_promote_top') or 0)
+    except ValueError:
+        return HttpResponseBadRequest('bad auto_promote_top parameter')
+    auto_promote_top = max(0, min(10, auto_promote_top))
+
     t = Tournament.objects.create(
         label=(request.POST.get('label') or '').strip()
               or f'auto-{fill["n"]} × {n_seeds}s ({n_colors}c)',
         n_colors=n_colors, n_seeds=n_seeds,
         screen_width=W, screen_height=H, horizon=horizon,
+        auto_promote_top=auto_promote_top,
     )
     added, pool = autofill_tournament(
         t, n=fill['n'], min_score=fill['min_score'],
@@ -520,10 +527,15 @@ def tournament_auto(request):
             f'Tournament #{t.pk}: autofilled {added} of {pool}, '
             f'then run failed: {exc}')
         return redirect('det:tournament_detail', pk=t.pk)
-    messages.success(request,
-        f'Auto-tournament #{t.pk}: {added} random candidates '
-        f'(from pool of {pool}) scored across {n_seeds} seeds '
-        f'in {t.duration_seconds:.1f}s.')
+    summary = (f'Auto-tournament #{t.pk}: {added} random candidates '
+               f'(from pool of {pool}) scored across {n_seeds} seeds '
+               f'in {t.duration_seconds:.1f}s.')
+    if auto_promote_top:
+        n_prom = t.entries.filter(
+            note__startswith='auto → automaton').count()
+        summary += (f' Auto-promoted {n_prom} class-4 winner(s) to '
+                    f'Automaton + Evolution.')
+    messages.success(request, summary)
     return redirect('det:tournament_detail', pk=t.pk)
 
 
