@@ -11,6 +11,8 @@ class Backup(models.Model):
         'auth.User', on_delete=models.SET_NULL, null=True,
     )
     notes = models.CharField(max_length=300, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archived_path = models.CharField(max_length=500, blank=True)
 
     class Meta:
         ordering = ['-created_at']

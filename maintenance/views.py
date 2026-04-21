@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tarfile
 from datetime import datetime
@@ -8,12 +9,14 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .models import Backup
 
 
 BACKUP_DIR = os.path.join(str(settings.BASE_DIR), 'backups')
+ARCHIVIST_DROP = '/home/archivist/incoming'
 
 
 def _get_home_users():
@@ -129,6 +132,65 @@ def backup_restore(request, pk):
     except Exception as e:
         messages.error(request, f'Restore failed: {e}')
 
+    return redirect('maintenance:home')
+
+
+@login_required
+@require_POST
+def backup_archive(request, pk):
+    """Move a backup tarball to the Archivist drop directory.
+
+    Archivist (a separate Unix user) owns /home/archivist/incoming/ as a
+    1777 sticky drop box. Its own scripts will rclone the file to SURF
+    Research Drive, so this view just hands the .tar over and records
+    the handoff."""
+    backup = get_object_or_404(Backup, pk=pk)
+
+    if backup.archived_at:
+        messages.info(request, f'{backup.filename} is already archived.')
+        return redirect('maintenance:home')
+
+    if not os.path.isfile(backup.filepath):
+        messages.error(request, f'Backup file not found: {backup.filepath}')
+        return redirect('maintenance:home')
+
+    if not os.path.isdir(ARCHIVIST_DROP):
+        messages.error(
+            request,
+            f'Archivist drop directory not found: {ARCHIVIST_DROP}. '
+            f'Create the archivist user and the incoming dir first.'
+        )
+        return redirect('maintenance:home')
+
+    if not os.access(ARCHIVIST_DROP, os.W_OK):
+        messages.error(
+            request,
+            f'No write permission to {ARCHIVIST_DROP}. '
+            f'Set it to mode 1777 (drop-box).'
+        )
+        return redirect('maintenance:home')
+
+    dest = os.path.join(ARCHIVIST_DROP, backup.filename)
+    base, ext = os.path.splitext(backup.filename)
+    n = 1
+    while os.path.exists(dest):
+        dest = os.path.join(ARCHIVIST_DROP, f'{base}_{n}{ext}')
+        n += 1
+
+    try:
+        shutil.move(backup.filepath, dest)
+    except Exception as e:
+        messages.error(request, f'Move failed: {e}')
+        return redirect('maintenance:home')
+
+    backup.archived_at = timezone.now()
+    backup.archived_path = dest
+    backup.filepath = dest
+    backup.save()
+    messages.success(
+        request,
+        f'Sent {backup.filename} to Archivist ({dest}).'
+    )
     return redirect('maintenance:home')
 
 
