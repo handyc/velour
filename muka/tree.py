@@ -10,6 +10,12 @@ bracketed node or a bare token (= terminal / leaf). Tokens may
 contain apostrophes (for Konso glottal stop) and hyphens (for
 morpheme segmentation). Whitespace between tokens is irrelevant.
 
+A terminal token may carry an optional romanization / transliteration
+after a `|` separator — e.g. `你|nǐ`, `食べる|taberu`, `한국|hanguk`.
+The renderer draws the romanization as a smaller second line beneath
+the main surface form; this keeps ideographic trees readable for
+non-readers without forcing a separate data field.
+
 Layout is a textbook tidy-tree: post-order pass assigns each node an
 x-position equal to the midpoint of its children's x-range; leaves
 are placed at integer x-slots in reading order. Depth is the y-axis.
@@ -40,10 +46,19 @@ class Node:
     children: List['Node'] = field(default_factory=list)
     x: float = 0.0
     depth: int = 0
+    romanization: str = ''
 
     @property
     def is_leaf(self) -> bool:
         return not self.children
+
+
+def _split_leaf_token(tok: str) -> tuple:
+    """Split a leaf token on the first `|` into (surface, romanization)."""
+    if '|' in tok:
+        surface, _, rom = tok.partition('|')
+        return surface, rom
+    return tok, ''
 
 
 _TOKEN = re.compile(r"\[|\]|[^\s\[\]]+")
@@ -77,7 +92,8 @@ def parse_bracket(s: str) -> Node:
             if tok == '[':
                 children.append(parse_node())
             else:
-                children.append(Node(label=tok))
+                surface, rom = _split_leaf_token(tok)
+                children.append(Node(label=surface, romanization=rom))
                 pos[0] += 1
         if pos[0] >= len(tokens):
             raise ParseError(f"Unterminated bracket at {label!r}.")
@@ -122,9 +138,14 @@ def render_svg(root: Node,
     nodes: List[Node] = []
     _walk(root, nodes)
     max_depth = max(n.depth for n in nodes)
+    has_rom = any(n.is_leaf and n.romanization for n in nodes)
 
     width = max(n_leaves, 1) * col_w + 2 * pad
-    height = (max_depth + 1) * row_h + 2 * pad
+    # Add an extra half-row under the leaves when any leaf carries a
+    # romanization, so the reading fits without colliding with the
+    # SVG floor.
+    rom_pad = 18 if has_rom else 0
+    height = (max_depth + 1) * row_h + 2 * pad + rom_pad
 
     def px(node: Node) -> float:
         return pad + (node.x + 0.5) * col_w
@@ -155,6 +176,12 @@ def render_svg(root: Node,
                 f'<text x="{px(n):.1f}" y="{py(n):.1f}" '
                 f'text-anchor="middle" fill="#c9d1d9" '
                 f'font-size="15" font-weight="500">{label}</text>')
+            if n.romanization:
+                parts.append(
+                    f'<text x="{px(n):.1f}" y="{py(n) + 16:.1f}" '
+                    f'text-anchor="middle" fill="#8b949e" '
+                    f'font-size="10" font-style="italic">'
+                    f'{escape(n.romanization)}</text>')
         else:
             parts.append(
                 f'<text x="{px(n):.1f}" y="{py(n):.1f}" '
@@ -168,6 +195,8 @@ def render_bracket(node: Node) -> str:
     """Re-serialize a Node back to `[S [NP ...]]` form — useful for
     echoing a normalized version of user input."""
     if node.is_leaf:
+        if node.romanization:
+            return f'{node.label}|{node.romanization}'
         return node.label
     inner = ' '.join(render_bracket(c) for c in node.children)
     return f'[{node.label} {inner}]'

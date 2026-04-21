@@ -101,8 +101,8 @@ PRIORITY_SENTENCES = {
             'konso': '他是老师',
             'gloss': '3SG  be  teacher',
             'translation': 'He is a teacher.',
-            'tree_bracket': ('[S [NP [Pron 他]] '
-                             '[VP [V 是] [NP [N 老师]]]]'),
+            'tree_bracket': ('[S [NP [Pron 他|tā]] '
+                             '[VP [V 是|shì] [NP [N 老师|lǎo shī]]]]'),
             'notes': 'Copular 是 shì links two nominals. No article or '
                      'number marking — bare *lǎoshī* covers both '
                      '"a teacher" and "teachers".',
@@ -114,11 +114,11 @@ PRIORITY_SENTENCES = {
             'konso': '我把书放在桌子上',
             'gloss': '1SG  BA  book  put  at  table  on',
             'translation': 'I put the book on the table.',
-            'tree_bracket': ('[S [NP [Pron 我]] '
-                             '[VP [BA 把] [NP [N 书]] '
-                             '[V 放] '
-                             '[PP [P 在] '
-                             '[NP [N 桌子] [Loc 上]]]]]'),
+            'tree_bracket': ('[S [NP [Pron 我|wǒ]] '
+                             '[VP [BA 把|bǎ] [NP [N 书|shū]] '
+                             '[V 放|fàng] '
+                             '[PP [P 在|zài] '
+                             '[NP [N 桌子|zhuō zi] [Loc 上|shàng]]]]]'),
             'notes': 'The 把 bǎ construction fronts the (definite, '
                      'affected) object in front of the verb — a '
                      'dedicated "disposal" pattern unavailable in most '
@@ -131,8 +131,8 @@ PRIORITY_SENTENCES = {
             'konso': '你去哪里?',
             'gloss': '2SG  go  where',
             'translation': 'Where are you going?',
-            'tree_bracket': ('[S [NP [Pron 你]] '
-                             '[VP [V 去] [NP [Wh 哪里]]]]'),
+            'tree_bracket': ('[S [NP [Pron 你|nǐ]] '
+                             '[VP [V 去|qù] [NP [Wh 哪里|nǎ lǐ]]]]'),
             'notes': 'Wh-in-situ: 哪里 nǎlǐ "where" stays in its '
                      'argument position. No movement, no auxiliary '
                      'inversion — the question particle intonation does '
@@ -146,9 +146,9 @@ PRIORITY_SENTENCES = {
             'konso': '那本书我读过',
             'gloss': 'that  CL  book  1SG  read  EXP',
             'translation': "That book, I've read.",
-            'tree_bracket': ('[S [Topic [NP [Dem 那] [Cl 本] [N 书]]] '
-                             '[NP [Pron 我]] '
-                             '[VP [V 读] [Asp 过]]]'),
+            'tree_bracket': ('[S [Topic [NP [Dem 那|nà] [Cl 本|běn] [N 书|shū]]] '
+                             '[NP [Pron 我|wǒ]] '
+                             '[VP [V 读|dú] [Asp 过|guò]]]'),
             'notes': 'Topic-comment — the fronted object is a topic '
                      'slot, not a moved argument. Experiential 过 guo '
                      'marks "at least once in the past".',

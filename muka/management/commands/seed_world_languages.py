@@ -434,9 +434,9 @@ SEEDS = [
             'konso': '男人造咗間屋',
             'gloss': 'man  build  PFV  CL  house',
             'translation': 'The man built a house.',
-            'tree_bracket': ('[S [NP [N 男人]] '
-                             '[VP [V 造] [Asp 咗] '
-                             '[NP [Cl 間] [N 屋]]]]'),
+            'tree_bracket': ('[S [NP [N 男人|naam4 jan4]] '
+                             '[VP [V 造|zou6] [Asp 咗|zo2] '
+                             '[NP [Cl 間|gaan1] [N 屋|uk1]]]]'),
             'notes': 'Perfective 咗 zo2 (Mandarin 了 le). Classifier '
                      '間 gaan1 is obligatory before 屋 uk1 "house". '
                      'Glottolog labels this entry "Yue Chinese".',
@@ -495,8 +495,9 @@ SEEDS = [
             'konso': '男は家を建てた',
             'gloss': 'man  TOP  house  ACC  build.PST',
             'translation': 'The man built a house.',
-            'tree_bracket': ('[S [NP [N 男] [Top は]] '
-                             '[VP [NP [N 家] [Case を]] [V 建てた]]]'),
+            'tree_bracket': ('[S [NP [N 男|otoko] [Top は|wa]] '
+                             '[VP [NP [N 家|ie] [Case を|o]] '
+                             '[V 建てた|tateta]]]'),
             'notes': 'は marks topic, を marks object, verb final. '
                      '建てた = past of 建てる "to build (a building)".',
             'source': 'illustrative',
