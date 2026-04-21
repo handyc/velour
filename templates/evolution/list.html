@@ -108,7 +108,12 @@
         <a href="{% url 'zoetrope:tournaments' %}">Reel tournaments →</a>
     </div>
 
-    <form class="ev-newbar" method="post" action="{% url 'evolution:new' %}">
+    <details style="margin-bottom:1.5rem;">
+        <summary style="cursor:pointer;color:#ffb84d;font-size:0.8rem;letter-spacing:0.05em;text-transform:uppercase;padding:0.5rem 0.8rem;border:1px solid #50401a;border-radius:4px;background:#0f1620;">
+            + Create new run
+        </summary>
+    <form class="ev-newbar" method="post" action="{% url 'evolution:new' %}"
+          style="margin-top:0.6rem;">
         {% csrf_token %}
 
         <label>Name</label>
@@ -168,9 +173,15 @@
             <button type="submit" class="ev-btn primary">+ Create run</button>
         </div>
     </form>
+    </details>
+
+    <details style="margin-bottom:1.5rem;">
+        <summary style="cursor:pointer;color:#8b949e;font-size:0.75rem;letter-spacing:0.05em;text-transform:uppercase;padding:0.4rem 0;border-bottom:1px solid #1a2230;">
+            ▸ Speciate · Populate · Tournament · Championship
+        </summary>
 
     <form class="ev-newbar" method="post" action="{% url 'evolution:speciate' %}"
-          style="grid-template-columns: auto auto auto auto auto 1fr;">
+          style="grid-template-columns: auto auto auto auto auto 1fr;margin-top:0.8rem;">
         {% csrf_token %}
         <label title="One random-goal-from-Language evolution per round.">Speciate</label>
         <label style="font-weight:normal">rounds</label>
@@ -270,6 +281,7 @@
             </button>
         </span>
     </form>
+    </details>
 
     <form class="ev-newbar" method="get"
           style="grid-template-columns: auto 1fr auto auto;">
