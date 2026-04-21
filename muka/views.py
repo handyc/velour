@@ -180,7 +180,7 @@ def create(request):
                 'data': data, 'mode': 'create',
                 'source_choices': SOURCE_CHOICES,
             })
-        return redirect('konso:detail', slug=s.slug)
+        return redirect('muka:detail', slug=s.slug)
     return render(request, 'muka/edit.html', {
         'data': {
             'konso': '', 'gloss': '', 'translation': '',
@@ -209,7 +209,7 @@ def edit(request, slug):
                 'data': data, 'mode': 'edit', 'sentence': s,
                 'source_choices': SOURCE_CHOICES,
             })
-        return redirect('konso:detail', slug=s.slug)
+        return redirect('muka:detail', slug=s.slug)
     return render(request, 'muka/edit.html', {
         'data': {
             'konso':        s.konso,
@@ -230,7 +230,7 @@ def edit(request, slug):
 def delete(request, slug):
     s = get_object_or_404(Sentence, slug=slug)
     s.delete()
-    return redirect('konso:index')
+    return redirect('muka:index')
 
 
 def _make_flashcard(user, sentence, lingua_lang):
@@ -272,13 +272,13 @@ def add_sentence_to_deck(request, slug):
     if not s.language:
         messages.error(request,
             'This sentence has no language attached — cannot build a flashcard.')
-        return redirect('konso:detail', slug=slug)
+        return redirect('muka:detail', slug=slug)
     lingua_lang = lingua_language_for(s.language, create=True)
     if not lingua_lang:
         messages.error(request,
             f'{s.language.english_name} has no ISO 639-3 code; cannot link '
             'to Lingua.')
-        return redirect('konso:detail', slug=slug)
+        return redirect('muka:detail', slug=slug)
     _, created = _make_flashcard(request.user, s, lingua_lang)
     if created:
         messages.success(request,
@@ -286,7 +286,7 @@ def add_sentence_to_deck(request, slug):
     else:
         messages.info(request,
             f'Already in your {lingua_lang.name} deck.')
-    return redirect('konso:detail', slug=slug)
+    return redirect('muka:detail', slug=slug)
 
 
 @login_required
@@ -297,12 +297,12 @@ def add_language_to_deck(request, slug):
     if not sentences:
         messages.warning(request,
             f'No sentences attached to {lang.english_name} yet.')
-        return redirect('konso:language_detail', slug=slug)
+        return redirect('muka:language_detail', slug=slug)
     lingua_lang = lingua_language_for(lang, create=True)
     if not lingua_lang:
         messages.error(request,
             f'{lang.english_name} has no ISO 639-3 code; cannot link to Lingua.')
-        return redirect('konso:language_detail', slug=slug)
+        return redirect('muka:language_detail', slug=slug)
     made, existed = 0, 0
     for s in sentences:
         _, created = _make_flashcard(request.user, s, lingua_lang)
@@ -317,7 +317,7 @@ def add_language_to_deck(request, slug):
     else:
         messages.info(request,
             f'All {existed} sentence(s) already in your {lingua_lang.name} deck.')
-    return redirect('konso:language_detail', slug=slug)
+    return redirect('muka:language_detail', slug=slug)
 
 
 def _language_from_glottolog(row):
@@ -378,15 +378,15 @@ def add_random_language(request):
     if not row:
         messages.warning(request,
             'No new Glottolog languages left to add — we have them all.')
-        return redirect('konso:index')
+        return redirect('muka:index')
     lang, created = _language_from_glottolog(row)
     if lang is None:
         messages.error(request, 'Could not create language from Glottolog row.')
-        return redirect('konso:index')
+        return redirect('muka:index')
     if created:
         messages.success(request,
             f'Added {lang.english_name} ({lang.glottocode}) from Glottolog.')
-    return redirect('konso:language_detail', slug=lang.slug)
+    return redirect('muka:language_detail', slug=lang.slug)
 
 
 @login_required
@@ -416,18 +416,18 @@ def add_by_glottocode(request, glottocode):
     if not row:
         messages.error(request,
             f'No Glottolog entry for glottocode "{glottocode}".')
-        return redirect('konso:index')
+        return redirect('muka:index')
     lang, created = _language_from_glottolog(row)
     if lang is None:
         messages.error(request, 'Could not create language from Glottolog row.')
-        return redirect('konso:index')
+        return redirect('muka:index')
     if created:
         messages.success(request,
             f'Added {lang.english_name} ({lang.glottocode}) from Glottolog.')
     else:
         messages.info(request,
             f'{lang.english_name} is already in the library.')
-    return redirect('konso:language_detail', slug=lang.slug)
+    return redirect('muka:language_detail', slug=lang.slug)
 
 
 @login_required
