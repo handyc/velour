@@ -120,7 +120,7 @@ INSTALLED_APPS = [
     'naiad',
     'conduit',
     'oneliner',
-    'konso',
+    'muka',
     'isolation',
     'radiant',
 ]

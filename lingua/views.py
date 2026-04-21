@@ -170,6 +170,20 @@ def flashcards(request):
                                            d['theme_label'].lower(),
                                            level_order.get(d['level'], 9)))
 
+    # Cross-link to Muka: show a "→ syntactic trees in Muka" link on
+    # each block when a matching Muka language row exists.
+    from muka.lingua_bridge import konso_slug_for_lingua_code
+    from muka.models import Sentence
+    for block in languages:
+        slug = konso_slug_for_lingua_code(block['code'])
+        if slug:
+            block['konso_slug']  = slug
+            block['konso_count'] = Sentence.objects.filter(
+                language__slug=slug).count()
+        else:
+            block['konso_slug']  = ''
+            block['konso_count'] = 0
+
     return render(request, 'lingua/flashcards.html', {'languages': languages})
 
 

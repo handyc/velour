@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{% if mode == 'edit' %}Edit {{ sentence.konso }}{% else %}New Konso tree{% endif %} — Velour{% endblock %}
+{% block title %}{% if mode == 'edit' %}Edit {{ sentence.konso }}{% else %}New tree{% endif %} — Muka{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -47,17 +47,17 @@
 {% block content %}
 <div class="kn-wrap">
   <p class="crumb">
-    <a href="{% url 'konso:index' %}">← Konso</a>
+    <a href="{% url 'muka:index' %}">← Muka</a>
     {% if mode == 'edit' %} ·
-    <a href="{% url 'konso:detail' slug=sentence.slug %}">{{ sentence.slug }}</a>
+    <a href="{% url 'muka:detail' slug=sentence.slug %}">{{ sentence.slug }}</a>
     {% endif %}
   </p>
-  <h1>{% if mode == 'edit' %}Edit tree{% else %}New Konso tree{% endif %}</h1>
+  <h1>{% if mode == 'edit' %}Edit tree{% else %}New tree{% endif %}</h1>
 
   <form method="post" class="kn-form"
-        action="{% if mode == 'edit' %}{% url 'konso:edit' slug=sentence.slug %}{% else %}{% url 'konso:create' %}{% endif %}">
+        action="{% if mode == 'edit' %}{% url 'muka:edit' slug=sentence.slug %}{% else %}{% url 'muka:create' %}{% endif %}">
     {% csrf_token %}
-    <label class="wide">Konso
+    <label class="wide">Text
       <input type="text" name="konso" value="{{ data.konso }}"
              required placeholder="nama tika gupe">
     </label>
@@ -93,7 +93,7 @@
       <button type="button" class="btn secondary" id="preview-btn">Preview tree</button>
       <span class="hint">
         Every <code>[LABEL ...]</code> becomes a non-terminal;
-        bare tokens are Konso terminals.
+        bare tokens are terminals.
       </span>
     </div>
   </form>
@@ -116,7 +116,7 @@
         box.innerHTML = '<p style="color:#8b949e;font-size:0.78rem">'
             + 'Rendering…</p>';
         try {
-            const r = await fetch('{% url "konso:preview" %}',
+            const r = await fetch('{% url "muka:preview" %}',
                 { method: 'POST', body: fd });
             box.innerHTML = await r.text();
         } catch (e) {

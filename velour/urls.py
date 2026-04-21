@@ -57,7 +57,7 @@ urlpatterns = [
     path('naiad/', include('naiad.urls')),
     path('conduit/', include('conduit.urls')),
     path('oneliner/', include('oneliner.urls')),
-    path('konso/', include('konso.urls')),
+    path('muka/', include('muka.urls')),
     path('isolation/', include('isolation.urls')),
     path('radiant/', include('radiant.urls')),
 

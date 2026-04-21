@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ sentence.konso }} — Konso{% endblock %}
+{% block title %}{{ sentence.konso }} — Muka{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -33,7 +33,8 @@
     font-size: 0.78rem; color: #8b949e; white-space: pre-wrap;
     word-break: break-all; margin-bottom: 0.85rem;
   }
-  .kn-wrap .actions { display: flex; gap: 0.4rem; margin-bottom: 0.85rem; }
+  .kn-wrap .actions { display: flex; gap: 0.4rem; margin-bottom: 0.85rem;
+                      flex-wrap: wrap; align-items: center; }
   .kn-wrap .actions .btn {
     font-size: 0.78rem; padding: 0.3rem 0.7rem; border-radius: 4px;
     cursor: pointer; background: #21262d; border: 1px solid #30363d;
@@ -42,6 +43,14 @@
   .kn-wrap .actions .btn.danger {
     border-color: #6e2626; color: #f85149;
   }
+  .kn-wrap .actions .btn.flash {
+    border-color: #5a4b19; color: #d29922;
+  }
+  .kn-wrap .actions .indeck {
+    font-size: 0.72rem; color: #6e7681;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .kn-wrap .actions .indeck a { color: #d2a8ff; text-decoration: none; }
   .kn-wrap .err {
     color: #f85149; font-size: 0.82rem;
     background: #21262d; border-left: 2px solid #f85149;
@@ -53,7 +62,10 @@
 {% block content %}
 <div class="kn-wrap">
   <p class="crumb">
-    <a href="{% url 'konso:index' %}">← Konso</a>
+    <a href="{% url 'muka:index' %}">← All languages</a>
+    {% if sentence.language %}
+    · <a href="{% url 'muka:language_detail' slug=sentence.language.slug %}">{{ sentence.language.english_name }}</a>
+    {% endif %}
   </p>
   <h1>{{ sentence.konso }}</h1>
   <div class="trans">'{{ sentence.translation }}'</div>
@@ -64,6 +76,7 @@
     <code>{{ sentence.slug }}</code> ·
     {{ sentence.get_source_display }}
     {% if sentence.citation %}· {{ sentence.citation }}{% endif %}
+    {% if sentence.language %}· <a href="{% url 'muka:language_detail' slug=sentence.language.slug %}" style="color:#d2a8ff;text-decoration:none;">{{ sentence.language.english_name }}</a>{% endif %}
   </div>
 
   {% if parse_error %}
@@ -79,9 +92,27 @@
   {% endif %}
 
   <div class="actions">
-    <a class="btn" href="{% url 'konso:edit' slug=sentence.slug %}">Edit</a>
-    <form method="post" action="{% url 'konso:delete' slug=sentence.slug %}"
-          style="display:inline" data-konso-delete>
+    <a class="btn" href="{% url 'muka:edit' slug=sentence.slug %}">Edit</a>
+    {% if sentence.language %}
+    <form method="post"
+          action="{% url 'muka:add_sentence_to_deck' slug=sentence.slug %}"
+          style="display:inline">
+      {% csrf_token %}
+      <button type="submit" class="btn flash">
+        {% if in_deck %}↻ Refresh in flashcards{% else %}+ Add to flashcards{% endif %}
+      </button>
+    </form>
+    {% if in_deck and lingua_lang %}
+    <span class="indeck">
+      in
+      <a href="{% url 'lingua:study_theme' lingua_lang.code 'muka' 'sentence' %}">
+        {{ lingua_lang.name }} · Muka deck
+      </a>
+    </span>
+    {% endif %}
+    {% endif %}
+    <form method="post" action="{% url 'muka:delete' slug=sentence.slug %}"
+          style="display:inline" data-muka-delete>
       {% csrf_token %}
       <button type="submit" class="btn danger">Delete</button>
     </form>

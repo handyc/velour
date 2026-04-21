@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lang.english_name }} — Muka{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap .crumb { font-size: 0.78rem; color: #6e7681;
+                    margin-bottom: 0.4rem; }
+  .kn-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .kn-wrap .crumb a:hover { color: #58a6ff; }
+  .kn-wrap h1 { margin: 0 0 0.1rem; font-size: 1.3rem; }
+  .kn-wrap h1 .auto { color: #8b949e; font-style: italic;
+                      font-weight: normal; font-size: 0.95rem;
+                      margin-left: 0.3rem; }
+  .typ { display: grid; grid-template-columns: max-content 1fr;
+         gap: 0.1rem 0.85rem; font-size: 0.78rem; color: #c9d1d9;
+         margin: 0.5rem 0 0.9rem; }
+  .typ dt { color: #6e7681; font-family: monospace; font-size: 0.72rem; }
+  .typ dd { margin: 0; }
+  .notes { background: #0d1117; border: 1px solid #21262d;
+           border-left: 2px solid #d2a8ff; border-radius: 0 3px 3px 0;
+           padding: 0.5rem 0.7rem; font-size: 0.78rem; color: #c9d1d9;
+           margin: 0.2rem 0 0.9rem; line-height: 1.5; }
+
+  .kn-list { display: flex; flex-direction: column; gap: 2px; }
+  .kn-row {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: center;
+  }
+  .kn-row.s-literature   { border-left-color: #2ea043; }
+  .kn-row.s-illustrative { border-left-color: #d29922; }
+  .kn-row.s-operator     { border-left-color: #58a6ff; }
+  .kn-row a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .kn-row a:hover { color: #58a6ff; }
+  .kn-row .konso { font-weight: 500; }
+  .kn-row .gloss { color: #8b949e; font-size: 0.72rem; }
+  .kn-row .src { color: #6e7681; font-size: 0.68rem;
+                 font-family: monospace; }
+
+  .kn-deck-bar {
+    display: flex; gap: 0.4rem; margin: 0.2rem 0 0.85rem;
+    align-items: center; flex-wrap: wrap; font-size: 0.78rem;
+    color: #8b949e;
+  }
+  .kn-deck-bar .btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.55rem; border-radius: 4px; text-decoration: none;
+    font-size: 0.78rem; cursor: pointer;
+  }
+  .kn-deck-bar .btn.flash { border-color: #5a4b19; color: #d29922; }
+  .kn-deck-bar .btn.study { border-color: #1f5a3a; color: #7ee787; }
+  .kn-deck-bar .note { color: #6e7681; font-size: 0.72rem;
+                       font-family: ui-monospace, Menlo, monospace; }
+  .msgs { margin: 0 0 0.6rem; font-size: 0.78rem; }
+  .msgs .m { padding: 0.3rem 0.55rem; border-radius: 3px;
+             margin-bottom: 2px; }
+  .msgs .m.success { background: #0f2918; color: #7ee787;
+                     border-left: 2px solid #2ea043; }
+  .msgs .m.info    { background: #0f1e2b; color: #79c0ff;
+                     border-left: 2px solid #58a6ff; }
+  .msgs .m.warning { background: #2b220f; color: #d29922;
+                     border-left: 2px solid #d29922; }
+  .msgs .m.error   { background: #2b0f0f; color: #f85149;
+                     border-left: 2px solid #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <p class="crumb">
+    <a href="{% url 'muka:index' %}">← All languages</a>
+  </p>
+  <h1>{{ lang.english_name }}
+    <span class="auto">{{ lang.name }}</span>
+  </h1>
+  <dl class="typ">
+    <dt>family</dt>  <dd>{{ lang.get_family_display }}
+      {% if lang.subgroup %}· <span style="color:#8b949e">{{ lang.subgroup }}</span>{% endif %}</dd>
+    <dt>order</dt>   <dd>{{ lang.get_word_order_display }}</dd>
+    {% if lang.region %}<dt>region</dt>  <dd>{{ lang.region }}</dd>{% endif %}
+    {% if lang.iso639_3 %}<dt>ISO&nbsp;639-3</dt> <dd><code>{{ lang.iso639_3 }}</code></dd>{% endif %}
+    {% if lang.speakers %}<dt>speakers</dt><dd>~{{ lang.speakers }}</dd>{% endif %}
+  </dl>
+  {% if lang.notes %}
+  <div class="notes">{{ lang.notes|linebreaksbr }}</div>
+  {% endif %}
+
+  {% if messages %}
+  <div class="msgs">
+    {% for m in messages %}
+    <div class="m {{ m.tags }}">{{ m }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if sentences %}
+  <div class="kn-deck-bar">
+    <form method="post"
+          action="{% url 'muka:add_language_to_deck' slug=lang.slug %}"
+          style="display:inline">
+      {% csrf_token %}
+      <button type="submit" class="btn flash">
+        + Add {{ sentences|length }} sentence{{ sentences|length|pluralize }}
+        to Lingua flashcards
+      </button>
+    </form>
+    {% if lingua_lang and deck_count %}
+    <a class="btn study"
+       href="{% url 'lingua:study_theme' lingua_lang.code 'muka' 'sentence' %}">
+      Study {{ deck_count }} card{{ deck_count|pluralize }} →
+    </a>
+    <span class="note">
+      Lingua: {{ lingua_lang.code }}
+    </span>
+    {% elif lingua_lang %}
+    <span class="note">
+      Lingua code: {{ lingua_lang.code }} — no Muka cards yet.
+    </span>
+    {% elif not lang.iso639_3 %}
+    <span class="note">
+      (No ISO 639-3 code — add one in admin to link to Lingua.)
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="kn-list">
+    {% for s in sentences %}
+    <div class="kn-row s-{{ s.source }}">
+      <a href="{% url 'muka:detail' slug=s.slug %}">
+        <span class="konso">{{ s.konso }}</span>
+        <span class="gloss">— {{ s.translation }}</span>
+      </a>
+      <span class="src">
+        {{ s.get_source_display|slice:":3" }}
+        {% if s.citation %}· {{ s.citation }}{% endif %}
+      </span>
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">
+      No sentences yet for {{ lang.english_name }}.
+      <a href="{% url 'muka:create' %}" style="color:#8b949e">Add one.</a>
+    </p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

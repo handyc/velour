@@ -22,8 +22,8 @@ Reset + reseed: venv/bin/python manage.py seed_konso --reset
 from django.core.management.base import BaseCommand
 from django.utils.text import slugify
 
-from konso.models import Sentence
-from konso.tree import parse_bracket
+from muka.models import Sentence
+from muka.tree import parse_bracket
 
 
 SEEDS = [

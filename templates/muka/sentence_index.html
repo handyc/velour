@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}All sentences — Muka{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap .crumb { font-size: 0.78rem; color: #6e7681;
+                    margin-bottom: 0.4rem; }
+  .kn-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .kn-wrap .crumb a:hover { color: #58a6ff; }
+  .kn-wrap h1 { margin: 0 0 0.3rem; font-size: 1.15rem; }
+
+  .kn-list { display: flex; flex-direction: column; gap: 2px;
+             max-height: 36rem; overflow-y: auto; }
+  .kn-row {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.6rem; align-items: center;
+  }
+  .kn-row.s-literature   { border-left-color: #2ea043; }
+  .kn-row.s-illustrative { border-left-color: #d29922; }
+  .kn-row.s-operator     { border-left-color: #58a6ff; }
+  .kn-row a.primary { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .kn-row a.primary:hover { color: #58a6ff; }
+  .kn-row .konso { font-weight: 500; }
+  .kn-row .gloss { color: #8b949e; font-size: 0.72rem; }
+  .kn-row .lang { color: #8b949e; font-size: 0.68rem; }
+  .kn-row .lang a { color: #d2a8ff; text-decoration: none; }
+  .kn-row .src { color: #6e7681; font-size: 0.68rem;
+                 font-family: monospace; }
+  input.srch, select.langsel {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.2rem 0.4rem; font-size: 0.78rem;
+  }
+  .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+         padding: 0.2rem 0.55rem; border-radius: 4px; font-size: 0.78rem;
+         cursor: pointer; text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <p class="crumb">
+    <a href="{% url 'muka:index' %}">← All languages</a>
+  </p>
+  <h1>All sentences
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">
+      {% if query or lang_slug %}{{ shown }} match{{ shown|pluralize:",es" }} · {{ total }} total{% else %}{{ shown }} of {{ total }}{% endif %}
+    </span>
+  </h1>
+
+  <form method="get" style="margin:0 0 0.5rem 0;display:flex;
+        gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
+    <input class="srch" type="text" name="q" value="{{ query }}"
+           placeholder="text / translation / slug…"
+           style="flex:1;max-width:22rem">
+    <select class="langsel" name="lang">
+      <option value="">any language</option>
+      {% for l in languages %}
+      <option value="{{ l.slug }}" {% if l.slug == lang_slug %}selected{% endif %}>
+        {{ l.english_name }}
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn">Filter</button>
+    {% if query or lang_slug %}<a href="{% url 'muka:sentence_index' %}" style="color:#8b949e">clear</a>{% endif %}
+  </form>
+
+  <div class="kn-list">
+    {% for s in sentences %}
+    <div class="kn-row s-{{ s.source }}">
+      <a class="primary" href="{% url 'muka:detail' slug=s.slug %}">
+        <span class="konso">{{ s.konso }}</span>
+        <span class="gloss">— {{ s.translation }}</span>
+      </a>
+      <span class="lang">
+        {% if s.language %}<a href="{% url 'muka:language_detail' slug=s.language.slug %}">{{ s.language.english_name }}</a>{% else %}—{% endif %}
+      </span>
+      <span class="src">{{ s.get_source_display|slice:":3" }}</span>
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">
+      No sentences match.
+    </p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

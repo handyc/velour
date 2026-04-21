@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block title %}Muka — syntactic trees · Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .kn-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .kn-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .kn-wrap p.lede { color: #8b949e; max-width: 74ch; line-height: 1.5;
+                    margin: 0 0 0.9rem; font-size: 0.82rem; }
+  .kn-wrap p.lede em { color: #c9d1d9; font-style: normal; }
+
+  .kn-bar { display: flex; gap: 0.5rem; margin-bottom: 0.85rem;
+            font-size: 0.78rem; align-items: center;
+            color: #8b949e; flex-wrap: wrap; }
+  .kn-bar .btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.55rem; border-radius: 4px; text-decoration: none;
+    font-size: 0.78rem;
+  }
+  .kn-bar .btn.primary { background: #1f3a1f; border-color: #2ea043; }
+  .kn-bar .btn:hover { background: #30363d; }
+  .kn-bar .tally { color: #6e7681; font-family: monospace;
+                   font-size: 0.72rem; }
+
+  h2.fam { font-size: 0.88rem; color: #d2a8ff; margin: 1rem 0 0.35rem;
+           letter-spacing: 0.02em; }
+  .kn-lgrid {
+    display: grid; grid-template-columns: repeat(auto-fill,
+                                                  minmax(16rem, 1fr));
+    gap: 3px;
+  }
+  .kn-lrow {
+    background: #161b22; border-left: 2px solid #58a6ff;
+    border-radius: 0 3px 3px 0; padding: 0.35rem 0.55rem;
+    font-size: 0.78rem; display: flex; gap: 0.5rem;
+    align-items: baseline;
+  }
+  .kn-lrow.wo-sov { border-left-color: #d29922; }
+  .kn-lrow.wo-svo { border-left-color: #58a6ff; }
+  .kn-lrow.wo-vso { border-left-color: #f778ba; }
+  .kn-lrow.wo-vos { border-left-color: #a371f7; }
+  .kn-lrow.wo-mixed,
+  .kn-lrow.wo-free,
+  .kn-lrow.wo-unknown { border-left-color: #6e7681; }
+  .kn-lrow a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .kn-lrow a:hover { color: #58a6ff; }
+  .kn-lrow .auto { color: #8b949e; font-size: 0.72rem; }
+  .kn-lrow .n { color: #6e7681; font-size: 0.7rem;
+                font-family: monospace; }
+  .kn-lrow .wo { color: #6e7681; font-size: 0.65rem;
+                 font-family: monospace; letter-spacing: 0.04em; }
+
+  .kn-gsearch { position: relative; }
+  .kn-gsearch input.srch {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.22rem 0.45rem; font-size: 0.78rem;
+    width: 18rem; max-width: 60vw;
+  }
+  .kn-gres {
+    position: absolute; top: 1.7rem; left: 0; z-index: 20;
+    width: 26rem; max-width: 90vw; max-height: 22rem; overflow-y: auto;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+    box-shadow: 0 4px 14px #000a; padding: 2px;
+  }
+  .kn-gres .hit {
+    display: flex; gap: 0.5rem; align-items: baseline;
+    padding: 0.3rem 0.5rem; border-radius: 3px;
+    font-size: 0.78rem; cursor: pointer;
+  }
+  .kn-gres .hit:hover { background: #161b22; }
+  .kn-gres .hit .nm { flex: 1; color: #c9d1d9; }
+  .kn-gres .hit .g  { color: #6e7681; font-family: monospace;
+                      font-size: 0.7rem; }
+  .kn-gres .hit .fm { color: #d2a8ff; font-size: 0.7rem; }
+  .kn-gres .hit.already { opacity: 0.55; cursor: default; }
+  .kn-gres .hit.already .nm::after { content: ' · already'; color: #6e7681; }
+  .kn-gres .empty { color: #6e7681; padding: 0.3rem 0.5rem;
+                    font-size: 0.78rem; }
+
+  .msgs { margin: 0 0 0.6rem; font-size: 0.78rem; }
+  .msgs .m { padding: 0.3rem 0.55rem; border-radius: 3px;
+             margin-bottom: 2px; }
+  .msgs .m.success { background: #0f2918; color: #7ee787;
+                     border-left: 2px solid #2ea043; }
+  .msgs .m.info    { background: #0f1e2b; color: #79c0ff;
+                     border-left: 2px solid #58a6ff; }
+  .msgs .m.warning { background: #2b220f; color: #d29922;
+                     border-left: 2px solid #d29922; }
+  .msgs .m.error   { background: #2b0f0f; color: #f85149;
+                     border-left: 2px solid #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kn-wrap">
+  <h1>Muka — syntactic trees</h1>
+  <p class="lede">
+    <em>Muka</em> is the Oromoid word for "tree". The app started as a
+    <em>Konso</em> showcase (Lowland East Cushitic, ~250k speakers, SW
+    Ethiopia, canonical SOV in the typology literature) and has since
+    expanded to African languages broadly — Afroasiatic (Semitic,
+    Cushitic, Chadic, Berber, Omotic), Niger-Congo (Bantu, Kwa, Mande,
+    Atlantic, Volta-Niger), Nilo-Saharan, Khoe-Kwadi/Khoisan, isolate
+    (Hadza), Malagasy, Afrikaans, pidgins/creoles — plus a growing set
+    of world classics (Sanskrit, Latin, Ancient Greek, Hittite,
+    Mandarin, Japanese, and more). Trees are Chomsky-style labelled
+    brackets; most entries are illustrative and a reader with the
+    grammar in hand should upgrade them with a page citation.
+  </p>
+
+  {% if messages %}
+  <div class="msgs">
+    {% for m in messages %}
+    <div class="m {{ m.tags }}">{{ m }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="kn-bar">
+    <a class="btn primary" href="{% url 'muka:create' %}">+ New tree</a>
+    <form method="post" action="{% url 'muka:add_random' %}"
+          style="display:inline">
+      {% csrf_token %}
+      <button type="submit" class="btn">+ Add random language</button>
+    </form>
+    <span class="kn-gsearch">
+      <input type="text" class="srch" id="kn-gq"
+             placeholder="Glottolog search: glottocode or name…"
+             autocomplete="off">
+      <div class="kn-gres" id="kn-gres" style="display:none"></div>
+    </span>
+    <a class="btn" href="{% url 'muka:sentence_index' %}">Browse all sentences</a>
+    <span class="tally">
+      {{ total_langs }} languages · {{ total_sent }} sentences
+      {% if orphan_count %}· {{ orphan_count }} unlinked{% endif %}
+    </span>
+  </div>
+
+  {% for fam_slug, fam_label, langs in family_groups %}
+  <h2 class="fam">{{ fam_label }}
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem;
+                 font-family:monospace;">
+      · {{ langs|length }}
+    </span>
+  </h2>
+  <div class="kn-lgrid">
+    {% for lang in langs %}
+    <div class="kn-lrow wo-{{ lang.word_order }}">
+      <a href="{% url 'muka:language_detail' slug=lang.slug %}">
+        {{ lang.english_name }}
+        <span class="auto">({{ lang.name }})</span>
+      </a>
+      <span class="wo">{{ lang.get_word_order_display }}</span>
+      <span class="n">{{ lang.n_sent }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% empty %}
+  <p style="color:#6e7681;font-size:0.78rem">
+    No languages yet. Run <code>manage.py seed_konso</code> then
+    <code>manage.py seed_african_languages</code>.
+  </p>
+  {% endfor %}
+</div>
+
+<script>
+(function () {
+  const q = document.getElementById('kn-gq');
+  const box = document.getElementById('kn-gres');
+  if (!q || !box) return;
+  const csrf = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+  let timer = null;
+
+  function render(results) {
+    if (!results.length) {
+      box.innerHTML = '<div class="empty">No Glottolog matches.</div>';
+      box.style.display = 'block';
+      return;
+    }
+    box.innerHTML = '';
+    results.forEach(r => {
+      const row = document.createElement(r.already ? 'div' : 'form');
+      row.className = 'hit' + (r.already ? ' already' : '');
+      if (!r.already) {
+        row.method = 'post';
+        row.action = '{% url "muka:add_by_glottocode" glottocode="GLOTTO" %}'
+                     .replace('GLOTTO', r.glottocode);
+        row.innerHTML = `<input type="hidden" name="csrfmiddlewaretoken" value="${csrf}">`;
+      }
+      const label = document.createElement(r.already ? 'span' : 'button');
+      if (!r.already) {
+        label.type = 'submit';
+        label.style.cssText = 'background:none;border:none;padding:0;'
+          + 'text-align:left;display:flex;flex:1;gap:0.5rem;cursor:pointer;'
+          + 'color:inherit;font:inherit;';
+      } else {
+        label.style.cssText = 'display:flex;flex:1;gap:0.5rem;';
+      }
+      label.innerHTML =
+        `<span class="nm">${r.name}</span>`
+        + `<span class="fm">${r.family || '—'}</span>`
+        + `<span class="g">${r.glottocode}${r.iso ? ' · ' + r.iso : ''}</span>`;
+      row.appendChild(label);
+      box.appendChild(row);
+    });
+    box.style.display = 'block';
+  }
+
+  q.addEventListener('input', () => {
+    clearTimeout(timer);
+    const v = q.value.trim();
+    if (!v) { box.style.display = 'none'; return; }
+    timer = setTimeout(() => {
+      fetch('{% url "muka:search_glottolog" %}?q=' + encodeURIComponent(v))
+        .then(r => r.json())
+        .then(d => render(d.results || []))
+        .catch(() => { box.style.display = 'none'; });
+    }, 150);
+  });
+  q.addEventListener('focus', () => {
+    if (q.value.trim()) q.dispatchEvent(new Event('input'));
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.kn-gsearch')) box.style.display = 'none';
+  });
+})();
+</script>
+{% endblock %}

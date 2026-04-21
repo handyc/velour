@@ -117,6 +117,15 @@
                 <span class="due">{{ block.due }}</span> due ·
                 {{ block.total }} total
             </span>
+            {% if block.konso_slug %}
+            <a class="konso-link"
+               href="{% url 'muka:language_detail' slug=block.konso_slug %}"
+               style="font-size:0.72rem;color:#d2a8ff;text-decoration:none;
+                      margin-left:auto;padding:0.15rem 0.45rem;
+                      border:1px solid #30363d;border-radius:3px;">
+              → {{ block.konso_count }} syntactic tree{{ block.konso_count|pluralize }} in Muka
+            </a>
+            {% endif %}
         </div>
         <div class="fc-lang-body">
             {% for d in block.decks %}
