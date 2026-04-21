@@ -243,6 +243,106 @@ def purchase_recommendation(rows, split_wordpress=True):
     }
 
 
+def render_forecast_svg(rows, width=920, height=220):
+    """Tufte-style sparkline of RAM-peak across the 12 horizons.
+
+    X-axis is log10(years+1) so the linear regime has room to breathe and
+    the speculative tail doesn't swallow the chart. Points are coloured by
+    regime (green/amber/red). Intended as an at-a-glance companion to the
+    numbers table — not a precision chart.
+    """
+    pad_l, pad_r, pad_t, pad_b = 52, 24, 14, 34
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    if not rows:
+        return ''
+
+    xs = [math.log10(r['years'] + 1) for r in rows]
+    ys_ram = [r['total_ram_peak_gb'] for r in rows]
+    ys_idle = [r['total_ram_idle_gb'] for r in rows]
+
+    x_min, x_max = min(xs), max(xs) or 1.0
+    x_span = (x_max - x_min) or 1.0
+    y_max = max(max(ys_ram), 1.0) * 1.15
+
+    def X(v): return pad_l + (v - x_min) / x_span * plot_w
+    def Y(v): return pad_t + plot_h - v / y_max * plot_h
+
+    regime_fill = {'linear': '#2ea043', 'logistic': '#d29922',
+                   'speculative': '#f85149'}
+
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" '
+        f'xmlns="http://www.w3.org/2000/svg" '
+        f'style="width:100%;height:auto;'
+        f'font-family:ui-monospace,Menlo,monospace;font-size:10px;'
+        f'color:#8b949e;">'
+    ]
+
+    # y-axis gridlines + labels (every ~25% of y_max, snapped to 10s)
+    step = max(10, round(y_max / 4 / 10) * 10)
+    ticks = []
+    t = 0
+    while t <= y_max:
+        ticks.append(t)
+        t += step
+    for tv in ticks:
+        yp = Y(tv)
+        parts.append(f'<line x1="{pad_l}" x2="{width - pad_r}" '
+                     f'y1="{yp:.1f}" y2="{yp:.1f}" '
+                     f'stroke="#21262d" stroke-width="0.5" />')
+        parts.append(f'<text x="{pad_l - 6}" y="{yp + 3:.1f}" '
+                     f'text-anchor="end" fill="#6e7681">{tv}</text>')
+
+    parts.append(f'<text x="8" y="{pad_t + 10}" fill="#8b949e" '
+                 f'transform="rotate(-90 8 {pad_t + 10})" '
+                 f'text-anchor="end">GB RAM</text>')
+
+    # idle line (faint), then peak line (blue)
+    def path_for(ys):
+        return 'M ' + ' L '.join(
+            f'{X(x):.1f},{Y(y):.1f}' for x, y in zip(xs, ys))
+
+    parts.append(f'<path d="{path_for(ys_idle)}" fill="none" '
+                 f'stroke="#30363d" stroke-width="1" '
+                 f'stroke-dasharray="2,3" />')
+    parts.append(f'<path d="{path_for(ys_ram)}" fill="none" '
+                 f'stroke="#58a6ff" stroke-width="1.5" />')
+
+    # points coloured by regime
+    for row, x, y in zip(rows, xs, ys_ram):
+        color = regime_fill.get(row['regime'], '#8b949e')
+        parts.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" '
+                     f'r="2.8" fill="{color}" />')
+
+    # x-axis labels at each horizon
+    for row, x in zip(rows, xs):
+        label = 'now' if row['years'] == 0 else (
+            f'{row["years"]//1000}ky' if row['years'] >= 1000 else
+            f'+{row["years"]}y')
+        parts.append(f'<text x="{X(x):.1f}" y="{height - 18}" '
+                     f'text-anchor="middle" fill="#6e7681">{label}</text>')
+
+    # legend
+    legend_y = height - 4
+    legend_items = [
+        ('#2ea043', 'linear'), ('#d29922', 'logistic'),
+        ('#f85149', 'speculative'), ('#58a6ff', 'peak'),
+        ('#30363d', 'idle'),
+    ]
+    lx = pad_l
+    for color, name in legend_items:
+        parts.append(f'<circle cx="{lx}" cy="{legend_y - 3}" r="2.5" '
+                     f'fill="{color}" />')
+        parts.append(f'<text x="{lx + 6}" y="{legend_y}" '
+                     f'fill="#8b949e">{name}</text>')
+        lx += 72
+
+    parts.append('</svg>')
+    return ''.join(parts)
+
+
 def evaluate_scenario(scenario, rows):
     """How many years does this scenario's capacity last?
 
@@ -270,14 +370,21 @@ def evaluate_scenario(scenario, rows):
                 if b is not None]
     lifetime_years = min(breaches) if breaches else None
 
+    total_cost = sum(c.approximate_cost_eur for c in scenario.candidates.all())
+    # Cost of ownership per year of service. "Never" breaches are capped at
+    # 10 years for this calc — beyond a decade nobody trusts the forecast,
+    # and box replacement cycles rule anyway.
+    effective_life = min(10, lifetime_years) if lifetime_years is not None else 10
+    cost_per_year = (total_cost / effective_life) if effective_life > 0 else None
+
     return {
         'total_ram_gb':      total_ram,
         'total_storage_gb':  total_storage,
         'total_cpu_cores':   total_cores,
-        'total_cost_eur':    sum(c.approximate_cost_eur
-                                 for c in scenario.candidates.all()),
+        'total_cost_eur':    total_cost,
         'ram_exhausted_at':     ram_exhausted,
         'storage_exhausted_at': storage_exhausted,
         'cores_exhausted_at':   cores_exhausted,
         'lifetime_years':       lifetime_years,
+        'cost_per_year_eur':    cost_per_year,
     }

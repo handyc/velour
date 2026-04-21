@@ -70,7 +70,13 @@
       <dt>RAM</dt><dd>{{ entry.eval.total_ram_gb }} GB</dd>
       <dt>Storage</dt><dd>{{ entry.eval.total_storage_gb }} GB</dd>
       <dt>Cores</dt><dd>{{ entry.eval.total_cpu_cores }}</dd>
-      <dt>Cost</dt><dd>€ {{ entry.eval.total_cost_eur }}</dd>
+      <dt>Cost</dt><dd>€ {{ entry.eval.total_cost_eur }}
+        {% if entry.eval.cost_per_year_eur %}
+          <span style="color:#8b949e;font-size:0.72rem;">
+            · ~€{{ entry.eval.cost_per_year_eur|floatformat:0 }}/yr
+          </span>
+        {% endif %}
+      </dd>
     </dl>
 
     <div class="lifetime

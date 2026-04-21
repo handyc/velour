@@ -3,7 +3,8 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .forecast import forecast_table, purchase_recommendation, evaluate_scenario
+from .forecast import (forecast_table, purchase_recommendation,
+                       evaluate_scenario, render_forecast_svg)
 from .models import (HORIZON_YEARS, Server, WorkloadClass, HostedProject,
                      Scenario, Snapshot)
 
@@ -48,6 +49,7 @@ def home(request):
         'classes':        classes,
         'projects':       projects,
         'forecast_rows':  rows,
+        'forecast_svg':   render_forecast_svg(rows),
         'recommendation': rec,
         'split_wp':       split_wp,
         'horizons':       HORIZON_YEARS,
