@@ -28,6 +28,25 @@
     <span class="stat" id="pop-count"></span>
 </div>
 
+<form class="palette-bar" method="post" action="{% url 'automaton:update_palette' sim.slug %}"
+      id="palette-form"
+      style="display:flex;gap:0.4rem;align-items:center;margin:0.3rem 0;flex-wrap:wrap;
+             padding:0.25rem 0.4rem;background:#0d1117;border:1px solid #21262d;border-radius:3px">
+    {% csrf_token %}
+    <span style="font-size:0.7rem;color:#8b949e;letter-spacing:0.04em">PALETTE</span>
+    <span id="palette-pickers" style="display:inline-flex;gap:2px"></span>
+    <button type="button" class="btn btn-secondary"
+            onclick="randomPalette()"
+            style="font-size:0.72rem">🎲 Random</button>
+    <button type="button" class="btn btn-secondary"
+            onclick="resetPalette()"
+            style="font-size:0.72rem">Reset</button>
+    <input type="hidden" name="palette" id="palette-json-field">
+    <button type="submit" class="btn"
+            onclick="document.getElementById('palette-json-field').value=JSON.stringify(PALETTE)"
+            style="font-size:0.72rem;background:#238636;border-color:#2ea043">Save</button>
+</form>
+
 <canvas id="grid"></canvas>
 
 <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
@@ -239,11 +258,59 @@
         timer = setTimeout(runLoop, delay);
     }
 
+    // Snapshot of the palette as it arrived from the server, used by the
+    // Reset button to revert in-browser edits without a page reload.
+    var INITIAL_PALETTE = PALETTE.slice();
+
+    function renderPalettePickers() {
+        var holder = document.getElementById('palette-pickers');
+        if (!holder) return;
+        holder.innerHTML = '';
+        for (var i = 0; i < PALETTE.length; i++) {
+            (function(idx) {
+                var input = document.createElement('input');
+                input.type = 'color';
+                input.value = PALETTE[idx];
+                input.title = 'color ' + idx;
+                input.style.cssText =
+                    'width:26px;height:22px;border:1px solid #30363d;' +
+                    'background:transparent;cursor:pointer;padding:0;' +
+                    'vertical-align:middle';
+                input.addEventListener('input', function() {
+                    PALETTE[idx] = input.value;
+                    draw();
+                });
+                holder.appendChild(input);
+            })(i);
+        }
+    }
+
+    function randomPalette() {
+        for (var i = 0; i < PALETTE.length; i++) {
+            var v = Math.floor(Math.random() * 0x1000000)
+                        .toString(16).padStart(6, '0');
+            PALETTE[i] = '#' + v;
+        }
+        renderPalettePickers();
+        draw();
+    }
+
+    function resetPalette() {
+        for (var i = 0; i < PALETTE.length; i++) {
+            PALETTE[i] = INITIAL_PALETTE[i];
+        }
+        renderPalettePickers();
+        draw();
+    }
+
     // Expose to onclick
     window.togglePlay = togglePlay;
     window.step = step;
     window.randomize = randomize;
+    window.randomPalette = randomPalette;
+    window.resetPalette = resetPalette;
 
+    renderPalettePickers();
     draw();
 })();
 </script>

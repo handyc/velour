@@ -193,6 +193,46 @@ def rename_simulation(request, slug):
     return redirect('automaton:run', slug=sim.slug)
 
 
+_HEX_COLOR_LEN = 7    # "#rrggbb"
+
+
+@login_required
+@require_POST
+def update_palette(request, slug):
+    """Persist a new cell-colour palette for this simulation.
+
+    Expects a single `palette` POST field carrying a JSON-encoded list of
+    "#rrggbb" strings. The list length must match the simulation's
+    existing palette length — changing n_colors is a ruleset-level
+    concern that this endpoint deliberately doesn't touch.
+    """
+    sim = get_object_or_404(Simulation, slug=slug)
+    raw = (request.POST.get('palette') or '').strip()
+    if not raw:
+        messages.error(request, 'Palette payload missing.')
+        return redirect('automaton:run', slug=sim.slug)
+    try:
+        palette = json.loads(raw)
+    except json.JSONDecodeError:
+        messages.error(request, 'Invalid palette JSON.')
+        return redirect('automaton:run', slug=sim.slug)
+    if not (isinstance(palette, list) and palette and all(
+        isinstance(c, str) and len(c) == _HEX_COLOR_LEN and c.startswith('#')
+        for c in palette
+    )):
+        messages.error(request, 'Palette must be a list of #rrggbb strings.')
+        return redirect('automaton:run', slug=sim.slug)
+    if sim.palette and len(palette) != len(sim.palette):
+        messages.error(request,
+            f'Palette length mismatch (expected {len(sim.palette)}, '
+            f'got {len(palette)}).')
+        return redirect('automaton:run', slug=sim.slug)
+    sim.palette = palette
+    sim.save(update_fields=['palette'])
+    messages.success(request, 'Palette saved.')
+    return redirect('automaton:run', slug=sim.slug)
+
+
 @login_required
 @require_POST
 def create_life_rules(request):

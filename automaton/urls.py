@@ -14,4 +14,5 @@ urlpatterns = [
     path('<slug:slug>/data.json',  views.simulation_data_json, name='data_json'),
     path('<slug:slug>/export.json', views.export_simulation_json, name='export_json'),
     path('<slug:slug>/rename/',    views.rename_simulation, name='rename'),
+    path('<slug:slug>/palette/',   views.update_palette,    name='update_palette'),
 ]
