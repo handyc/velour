@@ -17,6 +17,7 @@ from django.utils import timezone as djtz
 from django.views.decorators.http import require_POST
 
 from .models import CalendarEvent, ClockPrefs, Task, WatchedTimezone
+from .planets import mars_snapshot, venus_snapshot
 
 
 def _all_tz_names():
@@ -64,6 +65,8 @@ def home(request):
         'prefs': prefs,
         'home_clock': home_clock,
         'watched': watched,
+        'mars_clock': mars_snapshot(),
+        'venus_clock': venus_snapshot(),
     })
 
 
