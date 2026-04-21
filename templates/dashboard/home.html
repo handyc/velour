@@ -10,136 +10,145 @@
     .dash-header span { color: #8b949e; font-size: 0.85rem; margin-left: 0.5rem; }
 
     /* ── Office Suite bar ─────────────────────────────────── */
-    .suite-label {
+    .suite-label, .tools-label {
         font-size: 0.7rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: #8b949e;
-        margin: 0.75rem 0 0.35rem 0.1rem;
+        margin: 0.6rem 0 0.3rem 0.1rem;
     }
     .suite-grid {
         display: grid;
         grid-template-columns: 1fr;
-        gap: 0.6rem;
-        margin-bottom: 1rem;
+        gap: 0.45rem;
+        margin-bottom: 0.7rem;
     }
-    @media (min-width: 600px) {
-        .suite-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (min-width: 900px) {
-        .suite-grid { grid-template-columns: repeat(4, 1fr); }
-    }
+    @media (min-width: 600px) { .suite-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (min-width: 900px) { .suite-grid { grid-template-columns: repeat(5, 1fr); } }
     .suite-card {
         background: #161b22;
         border: 1px solid #30363d;
         border-radius: 6px;
-        padding: 0.9rem 1rem 0.8rem 1rem;
+        padding: 0.5rem 0.7rem;
         display: flex;
         align-items: center;
-        gap: 0.8rem;
+        gap: 0.55rem;
         border-left: 3px solid transparent;
         transition: border-color 0.15s;
     }
     .suite-card:hover { border-color: currentColor; }
-    .suite-card--mail    { border-left-color: #58a6ff; color: #58a6ff; }
-    .suite-card--cal     { border-left-color: #56d364; color: #56d364; }
-    .suite-card--docs    { border-left-color: #d2a8ff; color: #d2a8ff; }
-    .suite-card--files   { border-left-color: #e3b341; color: #e3b341; }
+    .suite-card--mail  { border-left-color: #58a6ff; color: #58a6ff; }
+    .suite-card--cal   { border-left-color: #56d364; color: #56d364; }
+    .suite-card--docs  { border-left-color: #d2a8ff; color: #d2a8ff; }
+    .suite-card--files { border-left-color: #e3b341; color: #e3b341; }
     .suite-icon {
-        font-size: 1.5rem;
+        font-size: 1.1rem;
         line-height: 1;
         flex: 0 0 auto;
-        width: 2rem;
+        width: 1.3rem;
         text-align: center;
     }
     .suite-body { flex: 1; min-width: 0; }
     .suite-body h3 {
-        font-size: 0.95rem;
-        margin: 0 0 0.15rem 0;
+        font-size: 0.85rem;
+        margin: 0;
         color: #c9d1d9;
     }
     .suite-body p {
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: #8b949e;
         margin: 0;
         line-height: 1.3;
     }
     .suite-card a {
-        display: block;
-        text-decoration: none;
-        color: inherit;
+        display: flex; align-items: center; gap: 0.55rem; width: 100%;
+        text-decoration: none; color: inherit;
     }
-    .suite-card a:hover { text-decoration: none; }
 
-    /* ── System & Tools grid ──────────────────────────────── */
-    .tools-label {
+    /* ── Category groups (details/summary) ─────────────────── */
+    .cat-group {
+        background: transparent;
+        margin: 0 0 0.35rem 0;
+    }
+    .cat-group summary {
+        list-style: none;
+        cursor: pointer;
         font-size: 0.7rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: #8b949e;
-        margin: 0 0 0.35rem 0.1rem;
-    }
-    .dashboard-grid {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 0.5rem;
-    }
-    @media (min-width: 600px) {
-        .dashboard-grid { grid-template-columns: repeat(2, 1fr); gap: 0.55rem; }
-    }
-    @media (min-width: 900px) {
-        .dashboard-grid { grid-template-columns: repeat(4, 1fr); gap: 0.6rem; }
-    }
-    @media (min-width: 1200px) {
-        .dashboard-grid { grid-template-columns: repeat(5, 1fr); }
-    }
-    .dashboard-grid .card {
-        padding: 0.7rem 0.9rem;
+        margin: 0.1rem 0 0.3rem 0.1rem;
         display: flex;
-        flex-direction: column;
-        justify-content: space-between;
+        align-items: center;
+        gap: 0.35rem;
+        user-select: none;
     }
-    .dashboard-grid .card h3 {
-        font-size: 0.9rem;
+    .cat-group summary::-webkit-details-marker { display: none; }
+    .cat-group summary::before {
+        content: '▸';
+        color: #6e7681;
+        font-size: 0.7rem;
+        transition: transform 0.12s;
+        display: inline-block;
+    }
+    .cat-group[open] summary::before { transform: rotate(90deg); }
+    .cat-group summary .cat-count {
+        color: #6e7681;
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 0.65rem;
+        margin-left: 0.2rem;
+    }
+    .cat-group summary:hover { color: #c9d1d9; }
+
+    /* ── Compact tool-card grid ────────────────────────────── */
+    .tools-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.3rem;
         margin-bottom: 0.25rem;
     }
-    .dashboard-grid .card p {
+    .tools-grid .card {
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        padding: 0.4rem 0.55rem;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        line-height: 1.3;
+        text-decoration: none;
+        color: inherit;
+        min-width: 0;
+        transition: border-color 0.12s, background 0.12s;
+    }
+    .tools-grid .card:hover {
+        background: #1b222b;
+        border-color: #30363d;
+    }
+    .tools-grid .card h3 {
         font-size: 0.78rem;
-        line-height: 1.35;
-        margin-bottom: 0.2rem;
+        margin: 0;
+        color: #c9d1d9;
         flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
-    .dashboard-grid .card a {
-        font-size: 0.78rem;
-        margin-top: 0.2rem;
+    .tools-grid .card .open-arrow {
+        color: #58a6ff;
+        font-size: 0.72rem;
+        opacity: 0.55;
+        flex: 0 0 auto;
     }
+    .tools-grid .card:hover .open-arrow { opacity: 1; }
 
-    /* Phone: compact strips */
+    /* Phone: nothing much changes since cards are already strip-shaped. */
     @media (max-width: 599px) {
-        .suite-card {
-            padding: 0.6rem 0.85rem;
-        }
+        .container { padding: 0.5rem 1rem; }
         .suite-body p { display: none; }
-        .dashboard-grid .card {
-            flex-direction: row;
-            align-items: center;
-            padding: 0.55rem 0.85rem;
-            gap: 0.75rem;
-        }
-        .dashboard-grid .card h3 {
-            flex: 1 1 auto;
-            margin: 0;
-            font-size: 0.9rem;
-        }
-        .dashboard-grid .card p {
-            display: none;
-        }
-        .dashboard-grid .card a {
-            flex: 0 0 auto;
-            margin: 0;
-            font-size: 0.78rem;
-            white-space: nowrap;
-        }
+        .tools-grid { grid-template-columns: repeat(2, 1fr); }
     }
 </style>
 {% endblock %}
@@ -150,276 +159,131 @@
     <span>Welcome back, {{ user.username }}</span>
 </div>
 
+{# Office Suite — compact strip row, always visible #}
 <div class="suite-label">Office Suite</div>
 <div class="suite-grid">
     <div class="suite-card suite-card--mail">
-        <a href="{% url 'mail:inbound_list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+        <a href="{% url 'mail:inbound_list' %}">
             <div class="suite-icon">&#9993;</div>
-            <div class="suite-body">
-                <h3>Mail</h3>
-                <p>Inbound messages and mail accounts</p>
-            </div>
+            <div class="suite-body"><h3>Mail</h3><p>Inbound + accounts</p></div>
         </a>
     </div>
     <div class="suite-card suite-card--cal">
-        <a href="{% url 'chronos:home' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+        <a href="{% url 'chronos:home' %}">
             <div class="suite-icon">&#128339;</div>
-            <div class="suite-body">
-                <h3>Calendar</h3>
-                <p>Clocks, timezones, and calendar</p>
-            </div>
+            <div class="suite-body"><h3>Calendar</h3><p>Clocks &amp; events</p></div>
         </a>
     </div>
     <div class="suite-card suite-card--cal">
-        <a href="{% url 'chronos:briefing' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+        <a href="{% url 'chronos:briefing' %}">
             <div class="suite-icon">&#128203;</div>
-            <div class="suite-body">
-                <h3>Briefing</h3>
-                <p>Today: mood, calendar, open tasks</p>
-            </div>
+            <div class="suite-body"><h3>Briefing</h3><p>Today: mood + tasks</p></div>
         </a>
     </div>
     <div class="suite-card suite-card--docs">
-        <a href="{% url 'codex:list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+        <a href="{% url 'codex:list' %}">
             <div class="suite-icon">&#128214;</div>
-            <div class="suite-body">
-                <h3>Documents</h3>
-                <p>Manuals rendered into Tufte-style PDFs</p>
-            </div>
+            <div class="suite-body"><h3>Documents</h3><p>Codex manuals</p></div>
         </a>
     </div>
     <div class="suite-card suite-card--files">
-        <a href="{% url 'attic:list' %}" style="display:flex;align-items:center;gap:0.8rem;width:100%">
+        <a href="{% url 'attic:list' %}">
             <div class="suite-icon">&#128193;</div>
-            <div class="suite-body">
-                <h3>Files</h3>
-                <p>Images, audio, video, documents</p>
-            </div>
+            <div class="suite-body"><h3>Files</h3><p>Media library</p></div>
         </a>
     </div>
 </div>
 
-<div class="tools-label">System &amp; Tools</div>
-<div class="dashboard-grid">
-    <div class="card">
-        <h3>Web Terminal</h3>
-        <p>Interactive shell session on the host system.</p>
-        <a href="{% url 'terminal:terminal' %}">Open Terminal</a>
+{# System & Ops — default open (most-used utilities) #}
+<details class="cat-group" open>
+    <summary>System &amp; Ops <span class="cat-count">· 13</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'terminal:terminal' %}" title="Interactive shell session on the host"><h3>Terminal</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'sysinfo:home' %}" title="{{ system_info.hostname }} · Load {{ system_info.load }}"><h3>System Info</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'graphs:home' %}" title="Live and historical system usage graphs"><h3>Graphs</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'logs:home' %}" title="View and analyze system logs"><h3>Logs</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'services:home' %}" title="Nginx, Supervisor, Gunicorn"><h3>Services</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'databases:list' %}" title="SQLite, MySQL, PostgreSQL — browse + query"><h3>Databases</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'security:home' %}" title="Audit SSH, firewall, ports, users, updates"><h3>Security</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'maintenance:home' %}" title="Backup and restore /home directories"><h3>Maintenance</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'winctl:home' %}" title="Control Windows from WSL"><h3>Windows</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'hosts:list' %}" title="Remote Velour instances + health polling"><h3>Hosts</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'hpc:list' %}" title="High-performance computing clusters"><h3>HPC</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'app_factory:list' %}" title="Create + deploy Django apps"><h3>App Factory</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'conduit:index' %}" title="Job routing — local/VPS/HPC/Pi/ESP/ATtiny/code-agents"><h3>Conduit</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>App Factory</h3>
-        <p>Create, deploy, and manage Django applications.</p>
-        <a href="{% url 'app_factory:list' %}">Manage Apps</a>
+</details>
+
+{# Identity & Thought — default open, only 2 items #}
+<details class="cat-group" open>
+    <summary>Identity &amp; Thought <span class="cat-count">· 2</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'identity:home' %}" title="Self-awareness, personality, strange loops"><h3>Identity</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'oracle:home' %}" title="Classical-ML decision trees — poor-man's AI judgment"><h3>Oracle</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>System Info</h3>
-        <p>{{ system_info.hostname }} &middot; Load: {{ system_info.load }}</p>
-        <a href="{% url 'sysinfo:home' %}">Full Details</a>
+</details>
+
+{# Fleet & Hardware — collapsed by default #}
+<details class="cat-group">
+    <summary>Fleet &amp; Hardware <span class="cat-count">· 5</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'nodes:list' %}" title="ESP8266 / ESP32 microcontroller fleet"><h3>Nodes</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'experiments:list' %}" title="Lightweight experiment tracker"><h3>Experiments</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'bodymap:list' %}" title="Wearable biometric mesh — ESP32-S3 per body segment"><h3>Bodymap</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'powerlab:index' %}" title="Solar → supercap charge pumps for tiny always-on devices"><h3>Power Lab</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'roomplanner:index' %}" title="Lab-room layout + fire-safety/cable-run constraints"><h3>Room Planner</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>Security</h3>
-        <p>Audit SSH, firewall, ports, users, and updates.</p>
-        <a href="{% url 'security:home' %}">Security Tools</a>
+</details>
+
+{# Worlds & Creatures — collapsed by default #}
+<details class="cat-group">
+    <summary>Worlds &amp; Creatures <span class="cat-count">· 9</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'aether:world_list' %}" title="Immersive 3D worlds in the browser"><h3>Aether</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'agents:index' %}" title="Persistent NPCs on axial-hex towns"><h3>Agents</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'bridge:home' %}" title="Spacefleet workspace — warp to procedural worlds"><h3>Bridge</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'lsystem:species_list' %}" title="Procedural plants + architecture with 3D preview"><h3>L-System</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'legolith:list' %}" title="Studded-brick worlds + math worksheets"><h3>Legolith</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'grammar_engine:list' %}" title="Deterministic speech synthesis shared across apps"><h3>Grammar Engine</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'evolution:list' %}" title="Populations of L-system agents bred toward a goal"><h3>Evolution</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'screen_gubi:index' %}" title="80×25 text screen becomes an L-System tree world"><h3>Screen Gubi</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'agricola:game' %}" title="Agar.io clone — eat cells to grow"><h3>Agricola</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>Logs</h3>
-        <p>View and analyze system logs with filtering.</p>
-        <a href="{% url 'logs:home' %}">View Logs</a>
+</details>
+
+{# Research & Search — collapsed by default #}
+<details class="cat-group">
+    <summary>Research &amp; Search <span class="cat-count">· 7</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'casting:index' %}" title="Byte-level experiments with .c download + JS port"><h3>Casting</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'reckoner:index' %}" title="True cost of compute — picojoules to exajoules"><h3>Reckoner</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'lingua:home' %}" title="Offline Argos MT + flashcards + TTS stack"><h3>Lingua</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'konso:index' %}" title="Syntactic trees for Konso (Lowland East Cushitic)"><h3>Konso</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'datalift:job_list' %}" title="MySQL → Django models + SQLite, anonymization"><h3>Datalift</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>Services</h3>
-        <p>Nginx sites, Supervisor programs, Gunicorn.</p>
-        <a href="{% url 'services:home' %}">View Services</a>
+</details>
+
+{# Lab & Design — collapsed by default #}
+<details class="cat-group">
+    <summary>Lab &amp; Design <span class="cat-count">· 7</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'tiles:list' %}" title="Wang tile sets as substrate for ideas"><h3>Tiles</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'condenser:home' %}" title="Distill apps through constrained tiers"><h3>Condenser</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'oneliner:index' %}" title="Museum for sub-80-col C programs — compiles + runs"><h3>Oneliner</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'zoetrope:list' %}" title="Spin Attic images into short mp4 films"><h3>Zoetrope</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'displacer:home' %}" title="Oral-history site scaffold — themes, articles, pages"><h3>Displacer</h3><span class="open-arrow">›</span></a>
+        <a class="card" href="{% url 'cartography:home' %}" title="Multi-scale cartography — Earth, Mars, Moon, sky"><h3>Maps</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>Databases</h3>
-        <p>SQLite, MySQL, and PostgreSQL. Browse, query, download.</p>
-        <a href="{% url 'databases:list' %}">Open Databases</a>
+</details>
+
+{# Other #}
+<details class="cat-group">
+    <summary>Other <span class="cat-count">· 1</span></summary>
+    <div class="tools-grid">
+        <a class="card" href="{% url 'landingpage:home' %}" title="Newspaper-style chronicle"><h3>Landing Page</h3><span class="open-arrow">›</span></a>
     </div>
-    <div class="card">
-        <h3>Graphs</h3>
-        <p>Live and historical system usage graphs.</p>
-        <a href="{% url 'graphs:home' %}">View Graphs</a>
-    </div>
-    <div class="card">
-        <h3>Identity</h3>
-        <p>Self-awareness, personality, and strange loops.</p>
-        <a href="{% url 'identity:home' %}">View Identity</a>
-    </div>
-    <div class="card">
-        <h3>Oracle</h3>
-        <p>Classical-ML decision trees — poor-man's AI judgment.</p>
-        <a href="{% url 'oracle:home' %}">Ask Oracle</a>
-    </div>
-    <div class="card">
-        <h3>Maintenance</h3>
-        <p>Backup and restore /home directories.</p>
-        <a href="{% url 'maintenance:home' %}">Maintenance</a>
-    </div>
-    <div class="card">
-        <h3>Windows</h3>
-        <p>Control Windows from WSL.</p>
-        <a href="{% url 'winctl:home' %}">Windows Control</a>
-    </div>
-    <div class="card">
-        <h3>Nodes</h3>
-        <p>ESP8266 / ESP32 microcontroller fleet.</p>
-        <a href="{% url 'nodes:list' %}">View Nodes</a>
-    </div>
-    <div class="card">
-        <h3>Experiments</h3>
-        <p>Lightweight experiment tracker.</p>
-        <a href="{% url 'experiments:list' %}">View Experiments</a>
-    </div>
-    <div class="card">
-        <h3>Tiles</h3>
-        <p>Wang tile sets as substrate for ideas.</p>
-        <a href="{% url 'tiles:list' %}">Open Tiles</a>
-    </div>
-    <div class="card">
-        <h3>Condenser</h3>
-        <p>Distill apps through constrained tiers.</p>
-        <a href="{% url 'condenser:home' %}">Open Condenser</a>
-    </div>
-    <div class="card">
-        <h3>Automaton</h3>
-        <p>Hex cellular automata — 4-color Game of Life.</p>
-        <a href="{% url 'automaton:home' %}">Open Automaton</a>
-    </div>
-    <div class="card">
-        <h3>Det</h3>
-        <p>Search for Class-4 (edge-of-chaos) hex CA rulesets — Rule 110 analogs. Tournaments and meta-tournaments strip seed-luck.</p>
-        <a href="{% url 'det:index' %}">Open Det</a>
-    </div>
-    <div class="card">
-        <h3>Aether</h3>
-        <p>Immersive 3D worlds in the browser.</p>
-        <a href="{% url 'aether:world_list' %}">Enter Aether</a>
-    </div>
-    <div class="card">
-        <h3>Agents</h3>
-        <p>Persistent NPCs living on axial-hex towns — bios, relations, and routines that outlive a single Aether visit.</p>
-        <a href="{% url 'agents:index' %}">Open Agents</a>
-    </div>
-    <div class="card">
-        <h3>L-System</h3>
-        <p>Procedural plants and architecture with 3D preview.</p>
-        <a href="{% url 'lsystem:species_list' %}">Open L-System</a>
-    </div>
-    <div class="card">
-        <h3>Legolith</h3>
-        <p>Studded-brick worlds grown from an L-System grammar. Math worksheets too.</p>
-        <a href="{% url 'legolith:list' %}">Open Legolith</a>
-    </div>
-    <div class="card">
-        <h3>Bridge</h3>
-        <p>Spacefleet commander's workspace — warp to procedural worlds, catalogue an atlas.</p>
-        <a href="{% url 'bridge:home' %}">Take the Bridge</a>
-    </div>
-    <div class="card">
-        <h3>Grammar Engine</h3>
-        <p>Deterministic speech synthesis — particles, subwords, words, L-system grammars. Shared by Bridge, Aether, and planets.</p>
-        <a href="{% url 'grammar_engine:list' %}">Open Grammar Engine</a>
-    </div>
-    <div class="card">
-        <h3>Evolution Engine</h3>
-        <p>Populations of L-system agents bred toward an L-system goal. Three recursive levels — workers, meta, meta-meta. Saved agents export to the L-System library.</p>
-        <a href="{% url 'evolution:list' %}">Open Evolution Engine</a>
-    </div>
-    <div class="card">
-        <h3>Reckoner</h3>
-        <p>True cost of compute — picojoules to exajoules, matched to real-world signposts.</p>
-        <a href="{% url 'reckoner:index' %}">Open Reckoner</a>
-    </div>
-    <div class="card">
-        <h3>Displacer</h3>
-        <p>Oral-history site scaffold — themes, articles, and pages with a Zotonic-style look. Private; ingest a local mirror to populate.</p>
-        <a href="{% url 'displacer:home' %}">Open Displacer</a>
-    </div>
-    <div class="card">
-        <h3>Casting</h3>
-        <p>Model-search library — byte-level experiments with a .c download and a live JS port. A pun on fashion casting and C casts.</p>
-        <a href="{% url 'casting:index' %}">Open Casting</a>
-    </div>
-    <div class="card">
-        <h3>Bodymap</h3>
-        <p>Wearable biometric mesh — ESP32-S3 nodes on each body segment, clustering themselves into a topology via pairwise motion coherence.</p>
-        <a href="{% url 'bodymap:list' %}">Open Bodymap</a>
-    </div>
-    <div class="card">
-        <h3>Power Lab</h3>
-        <p>Experimental power-supply designs for tiny always-on devices — solar → supercap charge pumps, ATtiny/ESP harvesters. Grows a shared parts inventory.</p>
-        <a href="{% url 'powerlab:index' %}">Open Power Lab</a>
-    </div>
-    <div class="card">
-        <h3>Room Planner</h3>
-        <p>Lab-room layout — furniture placement, fire-safety + cable-run constraints. Phase 2 hooks the Evolution Engine for layout search.</p>
-        <a href="{% url 'roomplanner:index' %}">Open Room Planner</a>
-    </div>
-    <div class="card">
-        <h3>Naiad</h3>
-        <p>Water-purification design lab — chain sediment / carbon / RO / UV / biological stages, push a source profile through, compare output to a target spec.</p>
-        <a href="{% url 'naiad:index' %}">Open Naiad</a>
-    </div>
-    <div class="card">
-        <h3>Conduit</h3>
-        <p>Pipelines &amp; routing — dispatch jobs to local shell, VPS, HPC (ALICE manual-submit), Pi, ESP, ATtiny, or code agents. Handoff queue for manual-submit work.</p>
-        <a href="{% url 'conduit:index' %}">Open Conduit</a>
-    </div>
-    <div class="card">
-        <h3>Oneliner</h3>
-        <p>A museum for sub-80-col C programs. Implicit int, comma-operator rotates, <code>main(c){…}</code> as a free counter. Compiles + runs each, shows binary size.</p>
-        <a href="{% url 'oneliner:index' %}">Open Oneliner</a>
-    </div>
-    <div class="card">
-        <h3>Zoetrope</h3>
-        <p>Spin Attic images into short mp4 films — pick a tag, pick a tempo.</p>
-        <a href="{% url 'zoetrope:list' %}">Open Zoetrope</a>
-    </div>
-    <div class="card">
-        <h3>Screen Gubi</h3>
-        <p>An 80×25 text screen becomes an L-System tree world. Type; watch the forest change.</p>
-        <a href="{% url 'screen_gubi:index' %}">Open Gubi</a>
-    </div>
-    <div class="card">
-        <h3>Datalift</h3>
-        <p>MySQL &rarr; Django models + SQLite, and data anonymization.</p>
-        <a href="{% url 'datalift:job_list' %}">Open Datalift</a>
-    </div>
-    <div class="card">
-        <h3>Lingua</h3>
-        <p>Project-wide translations — offline Argos MT, themed + leveled flashcards, multi-engine TTS (web-speech → espeak-ng → piper).</p>
-        <a href="{% url 'lingua:home' %}">Open Lingua</a>
-    </div>
-    <div class="card">
-        <h3>Konso</h3>
-        <p>Syntactic trees for Konso (Lowland East Cushitic, SW Ethiopia). SOV word order, postpositions, case clitics — renders labelled-bracket notation to SVG.</p>
-        <a href="{% url 'konso:index' %}">Open Konso</a>
-    </div>
-    <div class="card">
-        <h3>Agricola</h3>
-        <p>Agar.io clone — eat cells to grow.</p>
-        <a href="{% url 'agricola:game' %}">Play Now</a>
-    </div>
-    <div class="card">
-        <h3>Maps</h3>
-        <p>Multi-scale cartography — Earth, Mars, Moon, sky.</p>
-        <a href="{% url 'cartography:home' %}">Open Maps</a>
-    </div>
-    <div class="card">
-        <h3>HPC</h3>
-        <p>High-performance computing clusters.</p>
-        <a href="{% url 'hpc:list' %}">Open HPC</a>
-    </div>
-    <div class="card">
-        <h3>Landing Page</h3>
-        <p>Newspaper-style chronicle.</p>
-        <a href="{% url 'landingpage:home' %}">View News</a>
-    </div>
-    <div class="card">
-        <h3>Hosts</h3>
-        <p>Remote Velour instances and health polling.</p>
-        <a href="{% url 'hosts:list' %}">View Hosts</a>
-    </div>
-</div>
+</details>
 {% endblock %}
