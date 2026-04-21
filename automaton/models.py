@@ -17,6 +17,9 @@ from django.db import models
 from django.utils.text import slugify
 
 
+DEFAULT_PALETTE = ['#0d1117', '#58a6ff', '#f85149', '#2ea043']
+
+
 class RuleSet(models.Model):
     """A collection of cellular automaton rules for hex grids."""
 
@@ -34,6 +37,10 @@ class RuleSet(models.Model):
     source = models.CharField(max_length=16, choices=SOURCE_CHOICES,
                               default='operator')
     source_metadata = models.JSONField(default=dict, blank=True)
+    palette = models.JSONField(default=list, blank=True,
+        help_text='Canonical cell-colour palette. Empty = use the built-in '
+                  'default. New simulations inherit this; palette edits on '
+                  'any simulation sync back here; merges inherit from parent A.')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

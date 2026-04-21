@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from .models import ExactRule, Rule, RuleSet, Simulation
+from .models import DEFAULT_PALETTE, ExactRule, Rule, RuleSet, Simulation
 
 
 @login_required
@@ -41,16 +41,17 @@ def create_simulation(request):
 
     ruleset = get_object_or_404(RuleSet, pk=ruleset_id)
 
-    # Default palette: 4 colors
-    palette = ['#0d1117', '#58a6ff', '#f85149', '#2ea043']
+    # Prefer the ruleset's canonical palette if set; otherwise the built-in
+    # default, optionally overlaid by a picked tileset.
+    palette = list(ruleset.palette) if ruleset.palette else list(DEFAULT_PALETTE)
 
-    # Try to get palette from a tileset
     tileset = None
     tileset_id = request.POST.get('tileset', '')
     if tileset_id:
         from tiles.models import TileSet
         tileset = TileSet.objects.filter(pk=tileset_id).first()
-        if tileset and tileset.palette:
+        if tileset and tileset.palette and not ruleset.palette:
+            # Tileset only gets to seed when the ruleset hasn't claimed a palette.
             palette = (tileset.palette + palette)[:4]
 
     # Random initial grid
@@ -229,7 +230,11 @@ def update_palette(request, slug):
         return redirect('automaton:run', slug=sim.slug)
     sim.palette = palette
     sim.save(update_fields=['palette'])
-    messages.success(request, 'Palette saved.')
+    # Sync to the ruleset so future simulations + merges inherit these colours.
+    # This is why palette edits feel "stickier" than grid state.
+    sim.ruleset.palette = palette
+    sim.ruleset.save(update_fields=['palette'])
+    messages.success(request, 'Palette saved (ruleset updated too).')
     return redirect('automaton:run', slug=sim.slug)
 
 
@@ -383,6 +388,10 @@ def _merge_two(rs_a, rs_b, name=None):
     if not name:
         name = f'{rs_a.name} ⊕ {rs_b.name}'
 
+    # Palette dominance: parent A wins, falling back to B, then the built-in
+    # default. Matches the first-match rule precedence already in place.
+    inherited_palette = list(rs_a.palette or rs_b.palette or DEFAULT_PALETTE)
+
     rs = RuleSet.objects.create(
         name=name,
         n_colors=max(rs_a.n_colors, rs_b.n_colors),
@@ -394,6 +403,7 @@ def _merge_two(rs_a, rs_b, name=None):
             'merged_from': [rs_a.slug, rs_b.slug],
             'parent_pks': [rs_a.pk, rs_b.pk],
         },
+        palette=inherited_palette,
     )
 
     merged_exact = []
