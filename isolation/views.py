@@ -26,6 +26,9 @@ def _pipeline_form(request, pipeline=None):
     p.name = (request.POST.get('name') or '').strip() or p.name
     p.description = (request.POST.get('description') or '').strip()
     p.apps_used = (request.POST.get('apps_used') or '').strip()
+    origin = (request.POST.get('origin_target') or '').strip()
+    if origin in TARGET_ORDER:
+        p.origin_target = origin
     p.notes = (request.POST.get('notes') or '').strip()
     return p
 
@@ -71,12 +74,28 @@ def detail(request, slug):
     p.ensure_all_targets()
     stages = p.stages.all()
     targets_by_key = {t.target: t for t in p.targets.all()}
-    ordered_targets = [(k, label, targets_by_key[k])
-                       for (k, label) in TARGET_CHOICES]
+
+    distill, origin, expand = [], None, []
+    for (k, label) in TARGET_CHOICES:
+        cell = {
+            'key':       k,
+            'label':     label,
+            'target':    targets_by_key[k],
+            'direction': p.direction_for(k),
+        }
+        if cell['direction'] == 'origin':
+            origin = cell
+        elif cell['direction'] == 'distill':
+            distill.append(cell)
+        else:
+            expand.append(cell)
+
     return render(request, 'isolation/detail.html', {
         'pipeline': p,
         'stages': stages,
-        'targets': ordered_targets,
+        'distill': distill,    # smaller than origin (left-to-right: smallest→origin)
+        'origin':  origin,
+        'expand':  expand,     # larger than origin (left-to-right: origin→largest)
     })
 
 
@@ -94,6 +113,7 @@ def create(request):
         return redirect('isolation:detail', slug=p.slug)
     return render(request, 'isolation/edit.html', {
         'pipeline': None,
+        'target_choices': TARGET_CHOICES,
     })
 
 
@@ -111,6 +131,7 @@ def edit(request, slug):
             return redirect('isolation:detail', slug=p.slug)
     return render(request, 'isolation/edit.html', {
         'pipeline': p,
+        'target_choices': TARGET_CHOICES,
     })
 
 
@@ -192,4 +213,6 @@ def target_edit(request, slug, pk):
         'pipeline': p,
         'target': t,
         'status_choices': STATUS_CHOICES,
+        'direction': p.direction_for(t.target),
+        'origin_label': dict(TARGET_CHOICES).get(p.origin_target, p.origin_target),
     })

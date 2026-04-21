@@ -57,6 +57,20 @@
     {% if target.display_size %} · {{ target.display_size }}{% endif %}
     · last updated {{ target.updated_at|date:"Y-m-d H:i" }}
   </div>
+  <div class="currently" style="margin-top:-0.4rem">
+    {% if direction == 'origin' %}
+      <span style="color:#f0b429">◆</span> this target <b>is the origin</b>
+      of the pipeline
+    {% elif direction == 'distill' %}
+      <span style="color:#d2a8ff">←</span> <b>distillation</b> from
+      origin <span style="color:#c9d1d9">{{ origin_label }}</span> — aim
+      for a smaller/more-constrained re-implementation
+    {% else %}
+      <span style="color:#79c0ff">→</span> <b>expansion</b> from
+      origin <span style="color:#c9d1d9">{{ origin_label }}</span> — aim
+      for a larger/more-capable re-implementation
+    {% endif %}
+  </div>
 
   <form method="post">
     {% csrf_token %}

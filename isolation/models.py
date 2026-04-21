@@ -31,7 +31,14 @@ class Pipeline(models.Model):
     each invoke a class/function from one Velour app. Isolation's job
     is to capture which fields/classes/methods are *actually used* by
     the pipeline so they can be re-implemented standalone, then ported
-    to a range of platforms with progressively tighter resource caps.
+    along a platform axis.
+
+    The pipeline has an ``origin_target`` — the platform where it
+    currently lives. Everything to the *left* of origin on the platform
+    axis (smaller / more constrained) is a **distillation**; everything
+    to the *right* (larger / more capable) is an **expansion**. Both
+    directions coexist; a single pipeline can have artifacts on either
+    side of origin without conflict.
     """
     slug = models.SlugField(unique=True, max_length=80)
     name = models.CharField(max_length=160)
@@ -39,6 +46,11 @@ class Pipeline(models.Model):
         help_text='What the pipeline does, end-to-end.')
     apps_used = models.CharField(max_length=240, blank=True,
         help_text='Comma-separated Django app labels involved.')
+    origin_target = models.CharField(max_length=20, choices=TARGET_CHOICES,
+                                     default='pi4',
+        help_text='The platform this pipeline natively lives on. '
+                  'Targets smaller than origin are distillations; '
+                  'larger are expansions.')
     notes = models.TextField(blank=True,
         help_text='Refactoring notes — fields trimmed, classes merged, '
                   'unused features removed.')
@@ -60,6 +72,22 @@ class Pipeline(models.Model):
         for key in TARGET_ORDER:
             if key not in existing:
                 IsolationTarget.objects.create(pipeline=self, target=key)
+
+    def origin_index(self):
+        try:
+            return TARGET_ORDER.index(self.origin_target)
+        except ValueError:
+            return len(TARGET_ORDER) - 1
+
+    def direction_for(self, target_key):
+        """Return 'origin', 'distill', or 'expand' for a given target key."""
+        if target_key == self.origin_target:
+            return 'origin'
+        try:
+            i, o = TARGET_ORDER.index(target_key), self.origin_index()
+        except ValueError:
+            return 'origin'
+        return 'distill' if i < o else 'expand'
 
 
 class Stage(models.Model):

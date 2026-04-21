@@ -87,6 +87,33 @@
     font-family: ui-monospace, monospace;
   }
 
+  .direction-row {
+    display: flex; gap: 0.8rem; align-items: stretch;
+    margin-top: 0.5rem; flex-wrap: wrap;
+  }
+  .dir-block { flex: 1 1 auto; min-width: 160px; }
+  .dir-block.origin { flex: 0 0 auto; }
+  .dir-block.distill .dir-caption { text-align: right; color: #d2a8ff; }
+  .dir-block.expand  .dir-caption { text-align: left;  color: #79c0ff; }
+  .dir-caption {
+    font-size: 0.68rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 0.3rem;
+  }
+  .dir-caption .lite {
+    font-weight: normal; text-transform: none; letter-spacing: 0;
+    color: #6e7681; margin-left: 0.35rem;
+  }
+  .dir-caption.origin-cap { color: #f0b429; text-align: center; }
+  .dir-grid { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .target-card.origin {
+    background: #1a1405; border: 1px solid #583f00;
+    border-left-width: 3px;
+    min-width: 130px;
+  }
+  .target-card.distill { border-color: #30363d; }
+  .target-card.expand  { border-color: #30363d; }
+
   details.notes-block {
     background: #0d1117; border: 1px solid #1a2230; border-radius: 4px;
     padding: 0.5rem 0.7rem; font-size: 0.78rem; margin-top: 0.6rem;
@@ -187,22 +214,76 @@
   {% endif %}
 
   <h2>Platform targets
-    <span class="lite">— click any cell to edit artifact + status</span>
+    <span class="lite">
+      — origin: <b>{{ pipeline.get_origin_target_display }}</b>
+      · ← distill · expand →
+    </span>
   </h2>
-  <div class="target-grid">
-    {% for key, label, t in targets %}
-      <a class="target-card"
-         href="{% url 'isolation:target_edit' slug=pipeline.slug pk=t.pk %}"
-         style="border-left-color: {{ t.status_color }}">
-        <div class="label">{{ label }}</div>
-        <div class="status">{{ t.get_status_display }}</div>
-        {% if t.size_bytes is not None %}
-          <div class="size">{{ t.display_size }}</div>
-        {% elif t.artifact_path %}
-          <div class="size">→ {{ t.artifact_path }}</div>
-        {% endif %}
-      </a>
-    {% endfor %}
+  <div class="direction-row">
+    {% if distill %}
+      <div class="dir-block distill">
+        <div class="dir-caption">
+          ← Distilled
+          <span class="lite">smaller / more constrained than origin</span>
+        </div>
+        <div class="target-grid dir-grid">
+          {% for c in distill %}
+            <a class="target-card distill"
+               href="{% url 'isolation:target_edit' slug=pipeline.slug pk=c.target.pk %}"
+               style="border-left-color: {{ c.target.status_color }}">
+              <div class="label">{{ c.label }}</div>
+              <div class="status">{{ c.target.get_status_display }}</div>
+              {% if c.target.size_bytes is not None %}
+                <div class="size">{{ c.target.display_size }}</div>
+              {% elif c.target.artifact_path %}
+                <div class="size">→ {{ c.target.artifact_path }}</div>
+              {% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if origin %}
+      <div class="dir-block origin">
+        <div class="dir-caption origin-cap">◆ Origin</div>
+        <a class="target-card origin"
+           href="{% url 'isolation:target_edit' slug=pipeline.slug pk=origin.target.pk %}"
+           style="border-left-color: {{ origin.target.status_color }}">
+          <div class="label">{{ origin.label }}</div>
+          <div class="status">{{ origin.target.get_status_display }}</div>
+          {% if origin.target.size_bytes is not None %}
+            <div class="size">{{ origin.target.display_size }}</div>
+          {% elif origin.target.artifact_path %}
+            <div class="size">→ {{ origin.target.artifact_path }}</div>
+          {% endif %}
+        </a>
+      </div>
+    {% endif %}
+
+    {% if expand %}
+      <div class="dir-block expand">
+        <div class="dir-caption">
+          Expanded →
+          <span class="lite">larger / more capable than origin</span>
+        </div>
+        <div class="target-grid dir-grid">
+          {% for c in expand %}
+            <a class="target-card expand"
+               href="{% url 'isolation:target_edit' slug=pipeline.slug pk=c.target.pk %}"
+               style="border-left-color: {{ c.target.status_color }}">
+              <div class="label">{{ c.label }}</div>
+              <div class="status">{{ c.target.get_status_display }}</div>
+              {% if c.target.size_bytes is not None %}
+                <div class="size">{{ c.target.display_size }}</div>
+              {% elif c.target.artifact_path %}
+                <div class="size">→ {{ c.target.artifact_path }}</div>
+              {% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
   </div>
 
   {% if pipeline.notes %}

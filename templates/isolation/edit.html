@@ -50,6 +50,19 @@
              placeholder="det, evolution, automaton"
              value="{{ pipeline.apps_used|default:'' }}">
     </label>
+    <label>Origin platform
+      <span style="color:#6e7681">(smaller targets = distill · larger = expand)</span>
+      <select name="origin_target"
+              style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.3rem 0.5rem;font-size:0.82rem">
+        {% for key, label in target_choices %}
+          <option value="{{ key }}"
+            {% if pipeline.origin_target == key %}selected
+            {% elif not pipeline and key == 'pi4' %}selected{% endif %}>
+            {{ label }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
     <label>Description <span style="color:#6e7681">(end-to-end, what the pipeline does)</span>
       <textarea name="description">{{ pipeline.description|default:'' }}</textarea>
     </label>
