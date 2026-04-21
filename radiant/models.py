@@ -24,7 +24,7 @@ from django.db import models
 from django.utils.text import slugify
 
 
-HORIZON_YEARS = [0, 1, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000]
+HORIZON_YEARS = [0, 1, 2, 3, 4, 5, 10, 20, 50, 100, 200, 500, 1000, 5000, 10000]
 
 # Regime labels keyed to horizon depth. Linear math is reliable for a
 # decade at most; logistic saturation buys another century; beyond that,
@@ -235,9 +235,17 @@ class Candidate(models.Model):
     storage_gb = models.PositiveIntegerField(default=500)
     cpu_cores = models.PositiveIntegerField(default=8)
     approximate_cost_eur = models.PositiveIntegerField(default=0,
-        help_text='Rough purchase cost in euros. 0 = unknown.')
+        help_text='One-time upfront cost in euros (purchase or setup). '
+                  '0 = none / rental.')
+    monthly_cost_eur = models.PositiveIntegerField(default=0,
+        help_text='Monthly rental cost in euros for hosted options. '
+                  '0 = owned hardware.')
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def five_year_tco_eur(self):
+        return self.approximate_cost_eur + self.monthly_cost_eur * 60
 
     class Meta:
         ordering = ['purpose', 'ram_gb']
@@ -301,8 +309,17 @@ class Scenario(models.Model):
         return sum(c.cpu_cores for c in self.candidates.all())
 
     @property
-    def total_cost_eur(self):
+    def total_upfront_eur(self):
         return sum(c.approximate_cost_eur for c in self.candidates.all())
+
+    @property
+    def total_monthly_eur(self):
+        return sum(c.monthly_cost_eur for c in self.candidates.all())
+
+    @property
+    def total_cost_eur(self):
+        """5-year TCO: upfront + 60 months of rental."""
+        return self.total_upfront_eur + self.total_monthly_eur * 60
 
 
 class Snapshot(models.Model):

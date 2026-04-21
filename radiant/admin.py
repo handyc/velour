@@ -36,7 +36,8 @@ class GrowthAssumptionAdmin(admin.ModelAdmin):
 @admin.register(Candidate)
 class CandidateAdmin(admin.ModelAdmin):
     list_display = ('name', 'purpose', 'ram_gb', 'storage_gb', 'cpu_cores',
-                    'approximate_cost_eur')
+                    'approximate_cost_eur', 'monthly_cost_eur',
+                    'five_year_tco_eur')
     list_filter = ('purpose',)
     search_fields = ('name', 'notes')
 

@@ -393,18 +393,26 @@ def evaluate_scenario(scenario, rows):
                 if b is not None]
     lifetime_years = min(breaches) if breaches else None
 
-    total_cost = sum(c.approximate_cost_eur for c in scenario.candidates.all())
-    # Cost of ownership per year of service. "Never" breaches are capped at
-    # 10 years for this calc — beyond a decade nobody trusts the forecast,
-    # and box replacement cycles rule anyway.
-    effective_life = min(10, lifetime_years) if lifetime_years is not None else 10
-    cost_per_year = (total_cost / effective_life) if effective_life > 0 else None
+    total_upfront = sum(c.approximate_cost_eur for c in scenario.candidates.all())
+    total_monthly = sum(c.monthly_cost_eur for c in scenario.candidates.all())
+    total_5yr_tco = total_upfront + total_monthly * 60
+    # "Never" breaches are capped at 5 years for cost-per-year math —
+    # beyond that the forecast's own assumptions drift faster than any
+    # budget justification can stand on.
+    effective_life = min(5, lifetime_years) if lifetime_years is not None else 5
+    if effective_life > 0:
+        cost_per_year = (total_upfront / effective_life
+                         + total_monthly * 12)
+    else:
+        cost_per_year = None
 
     return {
         'total_ram_gb':      total_ram,
         'total_storage_gb':  total_storage,
         'total_cpu_cores':   total_cores,
-        'total_cost_eur':    total_cost,
+        'total_upfront_eur': total_upfront,
+        'total_monthly_eur': total_monthly,
+        'total_cost_eur':    total_5yr_tco,
         'ram_exhausted_at':     ram_exhausted,
         'storage_exhausted_at': storage_exhausted,
         'cores_exhausted_at':   cores_exhausted,
