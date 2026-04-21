@@ -436,6 +436,36 @@ def tournament_add(request, pk):
 
 @login_required
 @require_POST
+def tournament_promote(request, pk, entry_pk):
+    """One-click promote a TournamentEntry's candidate to an
+    Automaton RuleSet+Simulation. Naming reflects the tournament
+    context — the winner's ruleset title records rank + aggregate,
+    which is the meaningful score, not the seed-sensitive native."""
+    from .models import TournamentEntry
+
+    t = get_object_or_404(Tournament, pk=pk)
+    entry = get_object_or_404(
+        TournamentEntry.objects.select_related('candidate'),
+        pk=entry_pk, tournament=t,
+    )
+    if t.status != 'finished':
+        messages.error(request,
+            'Tournament must be finished before promoting winners.')
+        return redirect('det:tournament_detail', pk=t.pk)
+    rank_label = f'#{entry.rank}' if entry.rank else 'DQ'
+    tourney_label = t.label or f'T#{t.pk}'
+    name = (f'{tourney_label} {rank_label} '
+            f'(agg {entry.aggregate_score:.2f}, '
+            f'{t.n_colors}c)')
+    rs = promote(entry.candidate, name=name)
+    messages.success(request,
+        f'Promoted to Automaton ruleset "{rs.name}". '
+        f'Run it from /automaton/{rs.slug}/.')
+    return redirect('det:tournament_detail', pk=t.pk)
+
+
+@login_required
+@require_POST
 def tournament_run(request, pk):
     t = get_object_or_404(Tournament, pk=pk)
     if t.status not in ('pending', 'failed'):

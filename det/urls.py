@@ -32,4 +32,6 @@ urlpatterns = [
          name='tournament_add'),
     path('tournaments/<int:pk>/run/', views.tournament_run,
          name='tournament_run'),
+    path('tournaments/<int:pk>/entries/<int:entry_pk>/promote/',
+         views.tournament_promote, name='tournament_promote'),
 ]

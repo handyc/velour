@@ -160,6 +160,7 @@
         <th class="num">Δ</th>
         <th>native class</th>
         <th>per-seed</th>
+        <th>promote</th>
         <th>note</th>
       </tr>
     </thead>
@@ -205,10 +206,31 @@
             <span style="color:#6e7681">—</span>
           {% endif %}
         </td>
+        <td>
+          {% if e.candidate.promoted_to %}
+            <a href="{% url 'automaton:run' slug=e.candidate.promoted_to.simulations.first.slug %}"
+               style="color:#2ea043;text-decoration:none;font-size:0.72rem"
+               title="Already promoted to {{ e.candidate.promoted_to.name }}">
+              → automaton
+            </a>
+          {% elif tournament.status == 'finished' and not e.disqualified %}
+            <form method="post"
+                  action="{% url 'det:tournament_promote' pk=tournament.pk entry_pk=e.pk %}"
+                  style="display:inline">
+              {% csrf_token %}
+              <button type="submit" class="btn neutral"
+                      style="padding:0.1rem 0.45rem;font-size:0.7rem">
+                promote
+              </button>
+            </form>
+          {% else %}
+            <span style="color:#6e7681">—</span>
+          {% endif %}
+        </td>
         <td style="color:#8b949e;font-size:0.72rem">{{ e.note }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="8" style="color:#6e7681;font-size:0.78rem">
+      <tr><td colspan="9" style="color:#6e7681;font-size:0.78rem">
         No entries yet.
       </td></tr>
       {% endfor %}
