@@ -43,7 +43,6 @@
             style="font-size:0.72rem">Reset</button>
     <input type="hidden" name="palette" id="palette-json-field">
     <button type="submit" class="btn"
-            onclick="document.getElementById('palette-json-field').value=JSON.stringify(PALETTE)"
             style="font-size:0.72rem;background:#238636;border-color:#2ea043">Save</button>
 </form>
 
@@ -309,6 +308,14 @@
     window.randomize = randomize;
     window.randomPalette = randomPalette;
     window.resetPalette = resetPalette;
+
+    var paletteForm = document.getElementById('palette-form');
+    if (paletteForm) {
+        paletteForm.addEventListener('submit', function() {
+            document.getElementById('palette-json-field').value =
+                JSON.stringify(PALETTE);
+        });
+    }
 
     renderPalettePickers();
     draw();
