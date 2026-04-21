@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block title %}{{ lesson.title }} — Camlfornia{% endblock %}
+
+{% block extra_head %}
+<style>
+  .caml-wrap { max-width: 1200px; margin: 1.25rem auto; padding: 0 1rem;
+               color: #c9d1d9; }
+  .caml-wrap .crumb { font-size: 0.78rem; color: #6e7681;
+                      margin-bottom: 0.4rem; }
+  .caml-wrap .crumb a { color: #8b949e; text-decoration: none; }
+  .caml-wrap .crumb a:hover { color: #58a6ff; }
+  .caml-wrap h1 { margin: 0 0 0.2rem; font-size: 1.2rem; }
+  .caml-wrap h1 .n { color: #6e7681; font-family: ui-monospace, Menlo, monospace;
+                     font-size: 0.75rem; margin-right: 0.5rem; }
+  .caml-wrap h1 .pass { color: #7ee787; font-size: 0.75rem;
+                        margin-left: 0.4rem; }
+
+  .caml-layout {
+    display: grid; grid-template-columns: 1fr 1.25fr;
+    gap: 0.8rem; margin-top: 0.4rem;
+  }
+  @media (max-width: 860px) { .caml-layout { grid-template-columns: 1fr; } }
+
+  .caml-prompt {
+    background: #0d1117; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.7rem 0.9rem; font-size: 0.82rem; line-height: 1.5;
+  }
+  .caml-prompt h2, .caml-prompt h3 { margin: 0.6rem 0 0.2rem;
+                                     font-size: 0.9rem; color: #d2a8ff; }
+  .caml-prompt p { margin: 0.2rem 0 0.6rem; }
+  .caml-prompt code {
+    background: #161b22; color: #f5b078; padding: 0.05rem 0.3rem;
+    border-radius: 3px; font-size: 0.78rem;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .caml-prompt pre.cm-block {
+    background: #0b0f14; border-left: 2px solid #30363d;
+    padding: 0.5rem 0.7rem; overflow-x: auto; font-size: 0.78rem;
+    border-radius: 0 3px 3px 0;
+  }
+
+  .caml-editor-col { display: flex; flex-direction: column; gap: 0.45rem; }
+  .caml-editor {
+    background: #0b0f14; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 4px; padding: 0.5rem 0.6rem; font-size: 0.82rem;
+    font-family: ui-monospace, Menlo, monospace; min-height: 14rem;
+    width: 100%; box-sizing: border-box; resize: vertical;
+    line-height: 1.45; tab-size: 2;
+  }
+  .caml-bar { display: flex; gap: 0.4rem; align-items: center;
+              font-size: 0.78rem; }
+  .caml-bar .btn {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.3rem 0.7rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem;
+  }
+  .caml-bar .btn.run { background: #1f3a1f; border-color: #2ea043;
+                       color: #7ee787; }
+  .caml-bar .btn.run:hover { background: #27532a; }
+  .caml-bar .btn.reset { color: #d29922; border-color: #5a4b19; }
+  .caml-bar .btn.sol { color: #79c0ff; }
+  .caml-bar .spacer { flex: 1; }
+  .caml-bar .hint { color: #6e7681; font-family: ui-monospace, Menlo,
+                    monospace; font-size: 0.7rem; }
+
+  .caml-output {
+    background: #0b0f14; border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.5rem 0.7rem; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.78rem; white-space: pre-wrap; min-height: 4rem;
+    max-height: 20rem; overflow-y: auto; color: #c9d1d9;
+  }
+  .caml-output .label {
+    color: #6e7681; font-size: 0.68rem; letter-spacing: 0.04em;
+    text-transform: uppercase; margin-bottom: 0.15rem;
+  }
+  .caml-output .stderr { color: #f85149; }
+  .caml-output .verdict { margin-top: 0.45rem; font-weight: 500; }
+  .caml-output .verdict.pass { color: #7ee787; }
+  .caml-output .verdict.fail { color: #f85149; }
+  .caml-output .verdict.skip { color: #d29922; }
+
+  .caml-sol {
+    display: none;
+    margin-top: 0.55rem; background: #0b0f14;
+    border: 1px solid #30363d; border-left: 2px solid #58a6ff;
+    border-radius: 4px; padding: 0.5rem 0.7rem;
+    font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem;
+    white-space: pre-wrap; color: #c9d1d9;
+  }
+  .caml-sol.open { display: block; }
+
+  .caml-nav {
+    display: flex; gap: 0.4rem; margin-top: 0.9rem; align-items: center;
+    font-size: 0.78rem;
+  }
+  .caml-nav a {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.6rem; border-radius: 4px; text-decoration: none;
+    font-size: 0.78rem;
+  }
+  .caml-nav a:hover { color: #58a6ff; }
+  .caml-nav .grow { flex: 1; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="caml-wrap">
+  <p class="crumb">
+    <a href="{% url 'camlfornia:index' %}">← Camlfornia</a>
+  </p>
+  <h1>
+    <span class="n">{{ lesson.order }}.</span>{{ lesson.title }}
+    {% if passed_once %}<span class="pass">✓ passed</span>{% endif %}
+  </h1>
+
+  {% if not ocaml_installed %}
+  <p style="background:#2b220f;color:#d29922;border-left:2px solid #d29922;
+           padding:0.35rem 0.55rem;border-radius:0 3px 3px 0;
+           font-size:0.78rem;">
+    ⚠ <code>ocaml</code> is not installed on the server — Run will return an
+    install hint. Install with <code>sudo apt install ocaml</code>.
+  </p>
+  {% endif %}
+
+  <div class="caml-layout">
+    <div class="caml-prompt">
+      {{ prompt_html|safe }}
+      {% if lesson.expected_output %}
+      <h3>Expected output</h3>
+      <pre class="cm-block"><code>{{ lesson.expected_output }}</code></pre>
+      {% endif %}
+    </div>
+
+    <div class="caml-editor-col">
+      <textarea id="caml-editor" class="caml-editor" spellcheck="false">{{ initial_code }}</textarea>
+      <div class="caml-bar">
+        <button type="button" class="btn run" id="caml-run">▶ Run</button>
+        <button type="button" class="btn reset" id="caml-reset">Reset</button>
+        {% if lesson.solution_code %}
+        <button type="button" class="btn sol" id="caml-sol-toggle">Show solution</button>
+        {% endif %}
+        <span class="spacer"></span>
+        <span class="hint">Ctrl+Enter to run</span>
+      </div>
+      <div class="caml-output" id="caml-output">
+        <div class="label">output</div>
+        <span style="color:#6e7681">Press Run to execute.</span>
+      </div>
+      {% if lesson.solution_code %}
+      <pre class="caml-sol" id="caml-sol">{{ lesson.solution_code }}</pre>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="caml-nav">
+    {% if prev_lesson %}
+    <a href="{% url 'camlfornia:lesson' slug=prev_lesson.slug %}">
+      ← {{ prev_lesson.title }}
+    </a>
+    {% endif %}
+    <span class="grow"></span>
+    {% if next_lesson %}
+    <a href="{% url 'camlfornia:lesson' slug=next_lesson.slug %}">
+      {{ next_lesson.title }} →
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  const editor = document.getElementById('caml-editor');
+  const runBtn = document.getElementById('caml-run');
+  const resetBtn = document.getElementById('caml-reset');
+  const out = document.getElementById('caml-output');
+  const solBtn = document.getElementById('caml-sol-toggle');
+  const solBox = document.getElementById('caml-sol');
+  const STARTER = "{{ lesson.starter_code|escapejs }}";
+  const RUN_URL = '{% url "camlfornia:run" slug=lesson.slug %}';
+  const CSRF = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+
+  if (solBtn && solBox) {
+    solBtn.addEventListener('click', () => {
+      solBox.classList.toggle('open');
+      solBtn.textContent = solBox.classList.contains('open')
+        ? 'Hide solution' : 'Show solution';
+    });
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      if (typeof STARTER === 'string') editor.value = STARTER;
+    });
+  }
+
+  function esc(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+  }
+
+  async function run() {
+    out.innerHTML = '<div class="label">running…</div>';
+    try {
+      const r = await fetch(RUN_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': CSRF,
+        },
+        body: JSON.stringify({ code: editor.value }),
+      });
+      const data = await r.json();
+      renderResult(data);
+    } catch (e) {
+      out.innerHTML = '<div class="label">error</div>'
+        + '<span class="stderr">' + esc(String(e)) + '</span>';
+    }
+  }
+
+  function renderResult(d) {
+    let html = '';
+    if (d.stdout) {
+      html += '<div class="label">stdout</div>' + esc(d.stdout);
+    }
+    if (d.stderr) {
+      html += '<div class="label" style="margin-top:0.3rem">stderr</div>'
+            + '<span class="stderr">' + esc(d.stderr) + '</span>';
+    }
+    if (!d.stdout && !d.stderr) {
+      html += '<div class="label">output</div>'
+            + '<span style="color:#6e7681">(no output)</span>';
+    }
+    if (!d.installed) {
+      html += '<div class="verdict skip">⚠ OCaml runtime missing on server.</div>';
+    } else if (d.timed_out) {
+      html += '<div class="verdict fail">✗ timed out</div>';
+    } else if (d.passed) {
+      html += '<div class="verdict pass">✓ passed</div>';
+    } else if (d.expected_output) {
+      html += '<div class="verdict fail">✗ output does not match expected.</div>';
+    } else if (d.exit_code === 0) {
+      html += '<div class="verdict pass">✓ ran without errors</div>';
+    } else {
+      html += '<div class="verdict fail">✗ exit code '
+           + d.exit_code + '</div>';
+    }
+    out.innerHTML = html;
+    if (d.passed) {
+      const pill = document.querySelector('h1 .pass');
+      if (!pill) {
+        const h1 = document.querySelector('.caml-wrap h1');
+        const span = document.createElement('span');
+        span.className = 'pass';
+        span.textContent = ' ✓ passed';
+        h1.appendChild(span);
+      }
+    }
+  }
+
+  runBtn.addEventListener('click', run);
+  editor.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      run();
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const s = editor.selectionStart, t = editor.selectionEnd;
+      editor.value = editor.value.slice(0, s) + '  '
+                   + editor.value.slice(t);
+      editor.selectionStart = editor.selectionEnd = s + 2;
+    }
+  });
+})();
+</script>
+{# Hidden CSRF for fetch #}
+<form style="display:none">{% csrf_token %}</form>
+{% endblock %}

@@ -60,6 +60,7 @@ urlpatterns = [
     path('muka/', include('muka.urls')),
     path('isolation/', include('isolation.urls')),
     path('radiant/', include('radiant.urls')),
+    path('camlfornia/', include('camlfornia.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

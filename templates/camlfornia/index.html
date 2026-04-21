@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Camlfornia — OCaml lessons{% endblock %}
+
+{% block extra_head %}
+<style>
+  .caml-wrap { max-width: 1000px; margin: 1.25rem auto; padding: 0 1rem;
+               color: #c9d1d9; }
+  .caml-wrap h1 { margin: 0 0 0.15rem; font-size: 1.3rem; }
+  .caml-wrap h1 .tag { color: #e6823a; font-family: ui-monospace, Menlo, monospace;
+                       font-size: 0.72rem; margin-left: 0.4rem;
+                       letter-spacing: 0.04em; vertical-align: middle; }
+  .caml-wrap p.lede { color: #8b949e; max-width: 74ch; line-height: 1.5;
+                      margin: 0 0 0.9rem; font-size: 0.82rem; }
+  .caml-wrap p.lede em { color: #c9d1d9; font-style: normal; }
+
+  .caml-status {
+    font-size: 0.72rem; font-family: ui-monospace, Menlo, monospace;
+    padding: 0.3rem 0.55rem; border-radius: 3px; margin-bottom: 0.85rem;
+    display: inline-block;
+  }
+  .caml-status.ok   { background: #0f2918; color: #7ee787;
+                      border-left: 2px solid #2ea043; }
+  .caml-status.miss { background: #2b220f; color: #d29922;
+                      border-left: 2px solid #d29922; }
+
+  .caml-list { display: flex; flex-direction: column; gap: 2px; }
+  .caml-row {
+    background: #161b22; border-left: 2px solid #e6823a;
+    border-radius: 0 3px 3px 0; padding: 0.4rem 0.6rem;
+    font-size: 0.82rem; display: flex; gap: 0.6rem; align-items: baseline;
+  }
+  .caml-row .n { color: #6e7681; font-family: ui-monospace, Menlo, monospace;
+                 font-size: 0.72rem; min-width: 2.2rem; text-align: right; }
+  .caml-row a { color: #c9d1d9; text-decoration: none; flex: 1; }
+  .caml-row a:hover { color: #58a6ff; }
+  .caml-row .diff {
+    color: #8b949e; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.7rem; padding: 0.05rem 0.35rem;
+    border: 1px solid #30363d; border-radius: 3px;
+  }
+  .caml-row .pass { color: #7ee787; font-size: 0.7rem;
+                    font-family: ui-monospace, Menlo, monospace; }
+  .caml-row.done { border-left-color: #2ea043; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="caml-wrap">
+  <h1>Camlfornia <span class="tag">OCaml · in the browser</span></h1>
+  <p class="lede">
+    A small, hands-on <em>OCaml</em> curriculum. Each lesson pairs a short
+    explanation with an editable program you run against a live toplevel.
+    Start at the top and work down — later lessons assume the earlier ones.
+  </p>
+
+  {% if ocaml_installed %}
+  <div class="caml-status ok">✓ ocaml runtime detected on server</div>
+  {% else %}
+  <div class="caml-status miss">
+    ⚠ ocaml runtime not found — install with
+    <code>sudo apt install ocaml</code>, then reload this page.
+  </div>
+  {% endif %}
+
+  <div class="caml-list">
+    {% for l in lessons %}
+    <div class="caml-row{% if l.is_passed %} done{% endif %}">
+      <span class="n">{{ l.order }}</span>
+      <a href="{% url 'camlfornia:lesson' slug=l.slug %}">{{ l.title }}</a>
+      <span class="diff">{{ l.get_difficulty_display }}</span>
+      {% if l.is_passed %}<span class="pass">✓</span>{% endif %}
+    </div>
+    {% empty %}
+    <p style="color:#6e7681;font-size:0.78rem">
+      No lessons yet. Run
+      <code>manage.py seed_camlfornia</code>.
+    </p>
+    {% endfor %}
+  </div>
+
+  {% if lessons %}
+  <p style="color:#6e7681;font-size:0.72rem;margin-top:0.85rem;
+            font-family:ui-monospace,Menlo,monospace">
+    {{ passed_count }} / {{ lessons|length }} complete
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     'muka',
     'isolation',
     'radiant',
+    'camlfornia',
 ]
 
 MIDDLEWARE = [
