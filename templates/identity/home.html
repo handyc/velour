@@ -235,7 +235,14 @@
             Stillness
         </button>
     </form>
-    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick, or a quiet moment that sets down what's being held.</span>
+    <form method="post" action="{% url 'identity:dream_now' %}" style="display:inline; margin-left:0.35rem;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary" style="font-size:0.78rem;"
+                title="Splice random Attic images, hold a patient/clinician exchange about them, grow two fresh tilesets, splice those, then render a 10-second Dream Movie in Zoetrope.">
+            Dream
+        </button>
+    </form>
+    <span style="color:#6e7681;font-size:0.72rem;margin-left:0.5rem;">Manual attention tick, a quiet moment, or a Dream sequence that threads five apps.</span>
 </div>
 
 <div class="dash-toolbar">

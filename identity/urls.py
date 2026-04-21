@@ -11,6 +11,7 @@ urlpatterns = [
     path('mood-data/', views.mood_data, name='mood_data'),
     path('state.json', views.state_json, name='state_json'),
     path('tick/', views.tick_now, name='tick_now'),
+    path('dream/', views.dream_now, name='dream_now'),
     path('ticks/', views.tick_log, name='tick_log'),
     path('concerns/', views.concerns_list, name='concerns_list'),
     path('concerns/<int:pk>/close/', views.concern_close, name='concern_close'),

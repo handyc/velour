@@ -1074,6 +1074,40 @@ def tick_now(request):
     return redirect('identity:home')
 
 
+@login_required
+@require_POST
+def dream_now(request):
+    """Run the full Dream sequence: splice Attic → therapy dialogue →
+    two fresh tilesets → splice their artworks → 10-second Dream Movie
+    in Zoetrope. One user gesture, five apps."""
+    from .dreaming import run_dream_sequence
+
+    result = run_dream_sequence(user=request.user)
+    reel = result.get('reel')
+    splice = result.get('image_splice')
+    tilesets = result.get('tilesets') or []
+    errors = result.get('errors') or []
+
+    parts = []
+    if splice:
+        parts.append(f'spliced {splice.title}')
+    if tilesets:
+        parts.append(
+            f'grew {len(tilesets)} tileset{"s" if len(tilesets) != 1 else ""}'
+        )
+    if reel and reel.status == 'ready':
+        parts.append(f'rendered /zoetrope/{reel.slug}/ ({reel.title})')
+    elif reel:
+        parts.append(f'reel {reel.title} ({reel.status})')
+
+    if parts:
+        messages.success(request, 'Dreamt: ' + '; '.join(parts) + '.')
+    if errors:
+        messages.warning(request, 'Dream hiccups: ' + '; '.join(errors))
+
+    return redirect('identity:home')
+
+
 # =====================================================================
 # Hofstadter views — absorbed from the standalone hofstadter app.
 # Prefixed with hof_ to avoid name collisions.
