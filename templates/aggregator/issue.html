@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+
+{% block title %}{{ issue.title }} — Aggregator{% endblock %}
+
+{% block extra_head %}
+<style>
+  /* Newspaper-style layout. Off-white page, serif body, black ink. */
+  .paper {
+    max-width: 980px; margin: 1.2rem auto 3rem;
+    padding: 2rem 2.4rem 2.8rem;
+    background: #f7f3ea;
+    color: #1c1a17;
+    border: 1px solid #30363d;
+    font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+    font-size: 1.02rem; line-height: 1.55;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+  }
+  .paper .masthead {
+    border-bottom: 3px double #1c1a17;
+    padding-bottom: 0.8rem; margin-bottom: 1.3rem;
+    text-align: center;
+  }
+  .paper .masthead h1 {
+    font-family: 'Didot', 'Bodoni 72', 'Times New Roman', serif;
+    font-weight: 700; font-size: 2.6rem; letter-spacing: 0.02em;
+    margin: 0;
+  }
+  .paper .masthead .subtitle {
+    margin-top: 0.3rem; font-style: italic; color: #3a342b;
+    font-size: 0.95rem;
+  }
+  .paper .masthead .dateline {
+    margin-top: 0.4rem;
+    font-size: 0.78rem; letter-spacing: 0.16em;
+    text-transform: uppercase; color: #3a342b;
+    display: flex; justify-content: space-between;
+    border-top: 1px solid #3a342b; border-bottom: 1px solid #3a342b;
+    padding: 0.35rem 0.3rem; margin-top: 0.6rem;
+  }
+
+  .paper .columns {
+    column-count: 2; column-gap: 1.7rem; column-rule: 1px solid #c2b8a3;
+  }
+  @media (max-width: 720px) { .paper .columns { column-count: 1; } }
+
+  .paper article {
+    break-inside: avoid; page-break-inside: avoid;
+    margin: 0 0 1.2rem;
+    border-bottom: 1px solid #c2b8a3;
+    padding-bottom: 0.8rem;
+  }
+  .paper article:last-child { border-bottom: 0; }
+  .paper article h3 {
+    margin: 0 0 0.15rem; font-size: 1.15rem;
+    font-family: 'Times New Roman', Times, serif;
+    font-weight: 700; line-height: 1.25;
+  }
+  .paper article h3 a {
+    color: #1c1a17; text-decoration: none;
+  }
+  .paper article h3 a:hover { text-decoration: underline; }
+  .paper article .byline {
+    font-size: 0.72rem; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #594e3d;
+    margin-bottom: 0.35rem;
+  }
+  .paper article .summary {
+    font-size: 0.92rem; line-height: 1.5;
+    color: #2a261f; margin: 0;
+  }
+  .paper article .summary p { margin: 0 0 0.45rem; }
+  /* Defuse aggressive feed HTML */
+  .paper article .summary img,
+  .paper article .summary iframe { display: none; }
+
+  /* Feature: the first story, full-width lead */
+  .paper .lead {
+    column-span: all;
+    border-bottom: 2px solid #1c1a17; padding-bottom: 1rem;
+    margin-bottom: 1.2rem;
+  }
+  .paper .lead h3 { font-size: 1.7rem; margin-bottom: 0.3rem; }
+  .paper .lead .summary { font-size: 1rem; }
+
+  .paper .empty {
+    text-align: center; color: #594e3d;
+    font-style: italic; padding: 2rem 0;
+  }
+
+  .paper footer {
+    margin-top: 1.4rem; padding-top: 0.6rem;
+    border-top: 1px solid #3a342b;
+    font-size: 0.72rem; color: #594e3d;
+    display: flex; justify-content: space-between;
+    letter-spacing: 0.06em;
+  }
+
+  .paper-actions {
+    max-width: 980px; margin: 0 auto 0.5rem;
+    display: flex; gap: 0.5rem; justify-content: flex-end;
+    font-size: 0.8rem;
+  }
+  .paper-actions a, .paper-actions button {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.7rem; border-radius: 3px;
+    text-decoration: none; cursor: pointer; font-size: 0.78rem;
+  }
+  .paper-actions .danger { background: #5a1d1d; border-color: #8b2c2c; }
+
+  @media print {
+    body { background: white !important; }
+    .paper-actions, nav, header, footer.site { display: none !important; }
+    .paper { box-shadow: none; border: 0; margin: 0; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="paper-actions">
+  <a href="{% url 'aggregator:index' %}">← Aggregator</a>
+  <a href="{% url 'aggregator:issues' %}">All issues</a>
+  <a href="#" onclick="window.print();return false;">Print</a>
+  <form method="post" action="{% url 'aggregator:issue_delete' slug=issue.slug %}"
+        style="margin:0">
+    {% csrf_token %}
+    <button type="submit" class="danger">Delete</button>
+  </form>
+</div>
+
+<div class="paper">
+  <div class="masthead">
+    <h1>{{ issue.title }}</h1>
+    {% if issue.subtitle %}
+      <div class="subtitle">{{ issue.subtitle }}</div>
+    {% endif %}
+    <div class="dateline">
+      <span>{{ issue.created_at|date:"l d F Y" }}</span>
+      <span>Velour Press · Leiden</span>
+      <span>{{ issue.created_at|date:"H:i" }}</span>
+    </div>
+  </div>
+
+  {% if items %}
+    {% with lead=items.0 %}
+    <article class="lead">
+      <h3><a href="{{ lead.article.url }}" target="_blank"
+             rel="noopener">{{ lead.article.title }}</a></h3>
+      <div class="byline">
+        {{ lead.article.feed.name }}{% if lead.article.author %}
+          · {{ lead.article.author }}{% endif %}
+        {% if lead.article.published_at %}
+          · {{ lead.article.published_at|date:"D d M · H:i" }}
+        {% endif %}
+      </div>
+      {% if lead.article.summary %}
+      <div class="summary">{{ lead.article.summary|safe|truncatewords_html:80 }}</div>
+      {% endif %}
+    </article>
+    {% endwith %}
+
+    <div class="columns">
+    {% for item in items %}
+      {% if not forloop.first %}
+      <article>
+        <h3><a href="{{ item.article.url }}" target="_blank"
+               rel="noopener">{{ item.article.title }}</a></h3>
+        <div class="byline">
+          {{ item.article.feed.name }}{% if item.article.published_at %}
+            · {{ item.article.published_at|date:"D d M · H:i" }}
+          {% endif %}
+        </div>
+        {% if item.article.summary %}
+        <div class="summary">{{ item.article.summary|safe|truncatewords_html:45 }}</div>
+        {% endif %}
+      </article>
+      {% endif %}
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">
+      No stories to print — the window was empty.
+      <div style="margin-top:0.6rem">
+        <a href="{% url 'aggregator:index' %}"
+           style="color:#1c1a17">← back to Aggregator</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <footer>
+    <span>Issue {{ issue.slug }}</span>
+    <span>{{ issue.article_count }} stories · last {{ issue.window_hours }} h</span>
+    <span>Composed {{ issue.created_at|date:"Y-m-d H:i" }}</span>
+  </footer>
+</div>
+{% endblock %}

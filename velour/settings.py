@@ -124,6 +124,7 @@ INSTALLED_APPS = [
     'isolation',
     'radiant',
     'camlfornia',
+    'aggregator',
 ]
 
 MIDDLEWARE = [

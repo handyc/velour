@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}Aggregator — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .agg-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; font-size: 0.85rem; }
+  .agg-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .agg-wrap p.lede { color: #8b949e; max-width: 76ch; line-height: 1.5;
+                     margin: 0 0 1rem; font-size: 0.82rem; }
+
+  .agg-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 1.25rem; }
+  @media (max-width: 820px) { .agg-grid { grid-template-columns: 1fr; } }
+
+  .agg-card { background: #0d1117; border: 1px solid #21262d;
+              border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+  .agg-card h2 { margin: 0 0 0.4rem; font-size: 0.82rem;
+                 color: #8b949e; letter-spacing: 0.06em;
+                 text-transform: uppercase; font-weight: 600; }
+
+  .agg-btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.9rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.8rem; text-decoration: none; display: inline-block;
+  }
+  .agg-btn.secondary {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+  }
+  .agg-btn.danger { background: #5a1d1d; border-color: #8b2c2c; }
+
+  .agg-form { display: grid; gap: 0.4rem; }
+  .agg-form .row { display: grid; grid-template-columns: 1fr 2fr 1fr auto;
+                   gap: 0.4rem; align-items: end; }
+  .agg-form input, .agg-form select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.5rem; font-size: 0.82rem;
+  }
+  .agg-form label { font-size: 0.72rem; color: #8b949e; display: flex;
+                    flex-direction: column; gap: 2px; }
+
+  .feed-tbl { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .feed-tbl th, .feed-tbl td { text-align: left; padding: 0.3rem 0.4rem;
+                                border-bottom: 1px solid #21262d; }
+  .feed-tbl th { color: #8b949e; font-weight: 500;
+                 text-transform: uppercase; font-size: 0.68rem;
+                 letter-spacing: 0.04em; }
+  .feed-tbl .state-on  { color: #2ea043; }
+  .feed-tbl .state-off { color: #6e7681; }
+  .feed-tbl .err { color: #f85149; }
+  .feed-tbl .actions form { display: inline; }
+  .feed-tbl .actions button { background: transparent; border: 0;
+                              color: #8b949e; cursor: pointer;
+                              font-size: 0.78rem; padding: 0 0.3rem; }
+  .feed-tbl .actions button:hover { color: #c9d1d9; }
+  .feed-tbl .actions button.x:hover { color: #f85149; }
+
+  .recent-list { list-style: none; padding: 0; margin: 0; }
+  .recent-list li { padding: 0.35rem 0; border-bottom: 1px solid #161b22; }
+  .recent-list a { color: #c9d1d9; text-decoration: none; }
+  .recent-list a:hover { color: #58a6ff; }
+  .recent-list .src { color: #6e7681; font-size: 0.72rem;
+                      margin-right: 0.4rem; }
+  .recent-list .when { color: #6e7681; font-size: 0.72rem; float: right; }
+
+  .issue-list { list-style: none; padding: 0; margin: 0; }
+  .issue-list li { padding: 0.35rem 0; border-bottom: 1px solid #161b22; }
+  .issue-list a { color: #79c0ff; text-decoration: none; }
+  .issue-list .meta { color: #6e7681; font-size: 0.72rem; }
+
+  .compose-row { display: grid; grid-template-columns: 2fr 6rem auto auto;
+                 gap: 0.4rem; align-items: end; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="agg-wrap">
+  <h1>Aggregator</h1>
+  <p class="lede">
+    A custom newspaper, composed on request. Subscribe to RSS or Atom
+    feeds below, pull the latest articles, then compose an <em>issue</em>
+    — a snapshot of what's fresh, organized and dated.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+    <div style="padding:0.4rem 0.7rem;border:1px solid #30363d;border-radius:4px;
+                background:#0d1117;margin-bottom:0.6rem;font-size:0.78rem;">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="agg-card">
+    <h2>Compose a newspaper</h2>
+    <form method="post" action="{% url 'aggregator:compose' %}"
+          class="compose-row">
+      {% csrf_token %}
+      <label>Title (optional)
+        <input type="text" name="title"
+               placeholder="Today's Velour Herald">
+      </label>
+      <label>Window (h)
+        <input type="number" name="window_hours" min="1" max="168" value="24">
+      </label>
+      <label style="justify-self:end">
+        <input type="checkbox" name="fetch" value="1" checked>
+        <span style="color:#c9d1d9">Fetch first</span>
+      </label>
+      <button type="submit" class="agg-btn">Compose →</button>
+    </form>
+    <p style="color:#6e7681;font-size:0.72rem;margin:0.4rem 0 0;">
+      "Fetch first" pulls every active feed before composing (slow on first run,
+      &lt;1 s once warm). Without it, composes from already-stored articles.
+    </p>
+  </div>
+
+  <div class="agg-grid">
+    <div>
+      <div class="agg-card">
+        <h2 style="display:flex;justify-content:space-between;align-items:center;">
+          Feeds
+          <form method="post" action="{% url 'aggregator:fetch_now' %}"
+                style="margin:0">
+            {% csrf_token %}
+            <button type="submit" class="agg-btn secondary"
+                    style="padding:0.2rem 0.6rem;font-size:0.72rem;">Fetch all now</button>
+          </form>
+        </h2>
+        <table class="feed-tbl">
+          <tr>
+            <th>Name</th><th>Topics</th><th>Last fetched</th>
+            <th>#</th><th></th>
+          </tr>
+          {% for f in feeds %}
+          <tr>
+            <td>
+              <span class="{% if f.active %}state-on{% else %}state-off{% endif %}">●</span>
+              <a href="{{ f.url }}" target="_blank"
+                 style="color:#c9d1d9;text-decoration:none">{{ f.name }}</a>
+              {% if f.last_error %}
+                <div class="err" style="font-size:0.68rem">{{ f.last_error|truncatechars:80 }}</div>
+              {% endif %}
+            </td>
+            <td style="color:#8b949e">{{ f.topics|default:"—" }}</td>
+            <td style="color:#6e7681">
+              {% if f.last_fetched %}{{ f.last_fetched|date:"Y-m-d H:i" }}
+              {% else %}never{% endif %}
+            </td>
+            <td style="color:#6e7681">{{ f.fetch_count }}</td>
+            <td class="actions">
+              <form method="post" action="{% url 'aggregator:feed_toggle' f.pk %}">
+                {% csrf_token %}
+                <button type="submit" title="toggle active">
+                  {% if f.active %}⏸{% else %}▶{% endif %}
+                </button>
+              </form>
+              <form method="post" action="{% url 'aggregator:feed_delete' f.pk %}">
+                {% csrf_token %}
+                <button type="submit" class="x" title="delete">×</button>
+              </form>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="5" style="color:#6e7681;padding:0.7rem 0">
+            No feeds yet — add one below, or run <code>manage.py
+            seed_aggregator_feeds</code>.
+          </td></tr>
+          {% endfor %}
+        </table>
+      </div>
+
+      <div class="agg-card">
+        <h2>Add a feed</h2>
+        <form method="post" action="{% url 'aggregator:feed_add' %}"
+              class="agg-form">
+          {% csrf_token %}
+          <div class="row">
+            <label>Name
+              <input type="text" name="name" required placeholder="BBC World">
+            </label>
+            <label>Feed URL (RSS / Atom)
+              <input type="url" name="url" required
+                     placeholder="https://example.com/rss.xml">
+            </label>
+            <label>Topics
+              <input type="text" name="topics" placeholder="tech, news">
+            </label>
+            <button type="submit" class="agg-btn">Add</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="agg-card">
+        <h2>Your issues</h2>
+        <ul class="issue-list">
+          {% for i in issues %}
+          <li>
+            <a href="{% url 'aggregator:issue' slug=i.slug %}">{{ i.title }}</a>
+            <div class="meta">
+              {{ i.created_at|date:"Y-m-d H:i" }} · {{ i.article_count }} stories
+            </div>
+          </li>
+          {% empty %}
+          <li style="color:#6e7681">None yet — compose one above.</li>
+          {% endfor %}
+        </ul>
+        {% if issues %}
+        <p style="margin:0.6rem 0 0">
+          <a href="{% url 'aggregator:issues' %}" class="agg-btn secondary"
+             style="padding:0.2rem 0.6rem;font-size:0.72rem">All issues →</a>
+        </p>
+        {% endif %}
+      </div>
+
+      <div class="agg-card">
+        <h2>Recent articles (all feeds)</h2>
+        <ul class="recent-list">
+          {% for a in recent %}
+          <li>
+            <span class="src">{{ a.feed.name }}</span>
+            <a href="{{ a.url }}" target="_blank">{{ a.title|truncatechars:90 }}</a>
+            <span class="when">
+              {% if a.published_at %}{{ a.published_at|date:"m-d H:i" }}
+              {% else %}{{ a.fetched_at|date:"m-d H:i" }}{% endif %}
+            </span>
+          </li>
+          {% empty %}
+          <li style="color:#6e7681">Nothing fetched yet.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

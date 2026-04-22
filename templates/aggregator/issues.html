@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}All issues — Aggregator{% endblock %}
+
+{% block extra_head %}
+<style>
+  .agg-wrap { max-width: 820px; margin: 1.2rem auto; padding: 0 1rem;
+              color: #c9d1d9; font-size: 0.85rem; }
+  .agg-wrap h1 { margin: 0 0 0.4rem; font-size: 1.2rem; }
+  .agg-wrap .crumb { color: #6e7681; font-size: 0.72rem;
+                     margin-bottom: 0.8rem; }
+  .agg-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+
+  .issue-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0.6rem; border-bottom: 1px solid #21262d;
+  }
+  .issue-row:first-child { border-top: 1px solid #21262d; }
+  .issue-row a.t { color: #c9d1d9; text-decoration: none;
+                   font-weight: 500; }
+  .issue-row a.t:hover { color: #58a6ff; }
+  .issue-row .meta { color: #6e7681; font-size: 0.72rem; }
+
+  .issue-row form { margin: 0; }
+  .issue-row button {
+    background: transparent; border: 0; color: #6e7681; cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .issue-row button:hover { color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="agg-wrap">
+  <div class="crumb">
+    <a href="{% url 'aggregator:index' %}">Aggregator</a> › All issues
+  </div>
+  <h1>All issues</h1>
+
+  {% for i in issues %}
+  <div class="issue-row">
+    <div>
+      <a class="t" href="{% url 'aggregator:issue' slug=i.slug %}">{{ i.title }}</a>
+      <div class="meta">
+        {{ i.created_at|date:"Y-m-d H:i" }} · {{ i.article_count }} stories
+        · window {{ i.window_hours }} h
+      </div>
+    </div>
+    <form method="post" action="{% url 'aggregator:issue_delete' slug=i.slug %}">
+      {% csrf_token %}
+      <button type="submit" title="delete">×</button>
+    </form>
+  </div>
+  {% empty %}
+  <p style="color:#6e7681">No issues yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}
