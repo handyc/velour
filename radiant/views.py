@@ -3,11 +3,13 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .evolution import run_evolution, seed_population, step_generation
+from .evolution import (run_evolution, seed_population, step_generation,
+                        run_tournament, run_meta_tournament)
 from .forecast import (forecast_table, purchase_recommendation,
                        evaluate_scenario, render_forecast_svg)
-from .models import (HORIZON_YEARS, Candidate, EvoPopulation, Server,
-                     WorkloadClass, HostedProject, Scenario, Snapshot)
+from .models import (HORIZON_YEARS, Candidate, EvoPopulation, EvoTournament,
+                     EvoMetaTournament, Server, WorkloadClass, HostedProject,
+                     Scenario, Snapshot)
 
 
 def _speculative_notes():
@@ -267,6 +269,206 @@ def evolve_delete(request, slug):
     pop.delete()
     messages.success(request, f'Deleted "{name}".')
     return redirect('radiant:evolve_index')
+
+
+def _candidate_display_map():
+    return {c.pk: c.name for c in Candidate.objects.all()}
+
+
+def _decorate_board(board, cmap):
+    """Attach readable bundle summaries to every row, so templates don't
+    need to build Counters themselves."""
+    out = []
+    from collections import Counter
+    for row in board or []:
+        ids = row.get('genome_ids') or []
+        names = [cmap.get(cid, f'#{cid}') for cid in ids]
+        counts = Counter(names)
+        summary = ', '.join(f'{n}×{k}' if n > 1 else k
+                            for k, n in counts.items())
+        out.append({**row, 'summary': summary})
+    return out
+
+
+@login_required
+def tournament_index(request):
+    tournaments = EvoTournament.objects.all()
+    return render(request, 'radiant/tournament_index.html', {
+        'tournaments':     tournaments,
+        'candidate_count': Candidate.objects.count(),
+    })
+
+
+@login_required
+@require_POST
+def tournament_create(request):
+    name = (request.POST.get('name') or '').strip()
+    if not name:
+        messages.error(request, 'Name is required.')
+        return redirect('radiant:tournament_index')
+    if EvoTournament.objects.filter(name=name).exists():
+        messages.error(request, f'Tournament "{name}" already exists.')
+        return redirect('radiant:tournament_index')
+    if Candidate.objects.count() == 0:
+        messages.error(request, 'No Candidates in library — seed radiant first.')
+        return redirect('radiant:tournament_index')
+
+    def _int(key, default, lo, hi):
+        try:
+            v = int(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _float(key, default, lo, hi):
+        try:
+            v = float(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    t = EvoTournament.objects.create(
+        name=name,
+        rounds=_int('rounds', 8, 2, 64),
+        generations=_int('generations', 30, 1, 500),
+        population_size=_int('population_size', 24, 4, 128),
+        mutation_rate=_float('mutation_rate', 0.3, 0.0, 1.0),
+    )
+    messages.success(request, f'Created tournament "{t.name}" — hit Run to evolve.')
+    return redirect('radiant:tournament_detail', slug=t.slug)
+
+
+@login_required
+def tournament_detail(request, slug):
+    t = get_object_or_404(EvoTournament, slug=slug)
+    cmap = _candidate_display_map()
+    board = _decorate_board(t.leaderboard or [], cmap)
+    from collections import Counter
+    champ_names = [cmap.get(cid, f'#{cid}') for cid in (t.champion_genome_ids or [])]
+    champ_summary = ', '.join(
+        f'{n}×{k}' if n > 1 else k
+        for k, n in Counter(champ_names).items()
+    )
+    return render(request, 'radiant/tournament_detail.html', {
+        't':             t,
+        'board':         board,
+        'champ_summary': champ_summary,
+    })
+
+
+@login_required
+@require_POST
+def tournament_run(request, slug):
+    t = get_object_or_404(EvoTournament, slug=slug)
+    result = run_tournament(t)
+    if result.get('ok'):
+        messages.success(request,
+            f'Ran {t.rounds} rounds — champion fitness '
+            f'{t.champion_fitness:.3f}.')
+    else:
+        messages.error(request, result.get('error', 'run failed'))
+    return redirect('radiant:tournament_detail', slug=t.slug)
+
+
+@login_required
+@require_POST
+def tournament_delete(request, slug):
+    t = get_object_or_404(EvoTournament, slug=slug)
+    name = t.name
+    t.delete()
+    messages.success(request, f'Deleted tournament "{name}".')
+    return redirect('radiant:tournament_index')
+
+
+@login_required
+def meta_index(request):
+    metas = EvoMetaTournament.objects.all()
+    return render(request, 'radiant/meta_index.html', {
+        'metas':           metas,
+        'candidate_count': Candidate.objects.count(),
+    })
+
+
+@login_required
+@require_POST
+def meta_create(request):
+    name = (request.POST.get('name') or '').strip()
+    if not name:
+        messages.error(request, 'Name is required.')
+        return redirect('radiant:meta_index')
+    if EvoMetaTournament.objects.filter(name=name).exists():
+        messages.error(request, f'Meta "{name}" already exists.')
+        return redirect('radiant:meta_index')
+    if Candidate.objects.count() == 0:
+        messages.error(request, 'No Candidates in library — seed radiant first.')
+        return redirect('radiant:meta_index')
+
+    def _int(key, default, lo, hi):
+        try:
+            v = int(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _float(key, default, lo, hi):
+        try:
+            v = float(request.POST.get(key, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    m = EvoMetaTournament.objects.create(
+        name=name,
+        rounds=_int('rounds', 4, 2, 32),
+        tournament_rounds=_int('tournament_rounds', 6, 2, 32),
+        generations=_int('generations', 25, 1, 300),
+        population_size=_int('population_size', 20, 4, 96),
+        weight_jitter=_float('weight_jitter', 0.35, 0.0, 1.0),
+    )
+    messages.success(request, f'Created meta-tournament "{m.name}".')
+    return redirect('radiant:meta_detail', slug=m.slug)
+
+
+@login_required
+def meta_detail(request, slug):
+    m = get_object_or_404(EvoMetaTournament, slug=slug)
+    cmap = _candidate_display_map()
+    board = _decorate_board(m.leaderboard or [], cmap)
+    from collections import Counter
+    champ_names = [cmap.get(cid, f'#{cid}') for cid in (m.champion_genome_ids or [])]
+    champ_summary = ', '.join(
+        f'{n}×{k}' if n > 1 else k
+        for k, n in Counter(champ_names).items()
+    )
+    return render(request, 'radiant/meta_detail.html', {
+        'm':             m,
+        'board':         board,
+        'champ_summary': champ_summary,
+    })
+
+
+@login_required
+@require_POST
+def meta_run(request, slug):
+    m = get_object_or_404(EvoMetaTournament, slug=slug)
+    result = run_meta_tournament(m)
+    if result.get('ok'):
+        messages.success(request,
+            f'Ran {m.rounds} inner tournaments — meta-champion '
+            f'{m.champion_fitness:.3f}.')
+    else:
+        messages.error(request, result.get('error', 'run failed'))
+    return redirect('radiant:meta_detail', slug=m.slug)
+
+
+@login_required
+@require_POST
+def meta_delete(request, slug):
+    m = get_object_or_404(EvoMetaTournament, slug=slug)
+    name = m.name
+    m.delete()
+    messages.success(request, f'Deleted meta "{name}".')
+    return redirect('radiant:meta_index')
 
 
 @login_required

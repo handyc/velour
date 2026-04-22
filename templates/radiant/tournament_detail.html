@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t.name }} — Tournament — Radiant{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.3rem; font-size: 1.2rem; }
+  .rad-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .rad-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+
+  .panel { background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+           padding: 0.75rem 0.9rem; margin: 0.5rem 0 0.9rem; }
+  .panel h2 { font-size: 0.88rem; margin: 0 0 0.55rem; color: #c9d1d9; }
+
+  .meta-grid { display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+               gap: 0.4rem 1rem; font-size: 0.78rem; }
+  .meta-grid .lbl { color: #6e7681; font-size: 0.66rem;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.78rem;
+          font-family: ui-monospace, Menlo, monospace; margin: 0.2rem 0 0.4rem; }
+  th, td { padding: 0.3rem 0.55rem; border-bottom: 1px solid #21262d;
+           text-align: left; vertical-align: top; }
+  th { color: #8b949e; font-weight: normal; background: #0d1117;
+       text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.summary { color: #c9d1d9; white-space: normal; word-break: break-word; }
+  tr.best { background: #0f1a11; }
+
+  form.inline { display: inline; }
+  .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+         padding: 0.35rem 0.8rem; border-radius: 3px; cursor: pointer;
+         font-size: 0.8rem; text-decoration: none; display: inline-block;
+         font-family: inherit; }
+  .btn.primary { background: #238636; border-color: #2ea043; color: white; }
+  .btn.danger  { background: #6f1d1d; border-color: #8b2c2c; color: #ffd7d5; }
+
+  .msg-block { padding: 0.35rem 0.6rem; border-left: 2px solid #30363d;
+               font-size: 0.78rem; margin: 0.2rem 0 0.5rem; }
+  .msg-block.error   { border-color: #8b2c2c; color: #ffa198; }
+  .msg-block.success { border-color: #2ea043; color: #2ea043; }
+  .msg-block.info    { border-color: #d29922; color: #d29922; }
+
+  .champ { color: #f0cc5b; font-weight: 600; }
+  .note  { color: #6e7681; font-size: 0.8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<div class="crumb">
+  <a href="{% url 'radiant:index' %}">Radiant</a> ·
+  <a href="{% url 'radiant:evolve_index' %}">evolve</a> ·
+  <a href="{% url 'radiant:tournament_index' %}">tournaments</a> ·
+  {{ t.slug }}
+</div>
+<h1>{{ t.name }}</h1>
+
+{% if messages %}
+  {% for m in messages %}
+    <div class="msg-block {{ m.tags }}">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="panel">
+  <div class="meta-grid">
+    <div><div class="lbl">rounds</div><div>{{ t.rounds }}</div></div>
+    <div><div class="lbl">gens / round</div><div>{{ t.generations }}</div></div>
+    <div><div class="lbl">population</div><div>{{ t.population_size }}</div></div>
+    <div><div class="lbl">mutation</div><div>{{ t.mutation_rate }}</div></div>
+    <div><div class="lbl">created</div><div>{{ t.created_at|date:"Y-m-d H:i" }}</div></div>
+  </div>
+  {% if t.weights_json %}
+    <div style="margin-top:0.55rem;font-size:0.74rem;color:#8b949e">
+      weights:
+      {% for k, v in t.weights_json.items %}
+        {{ k }}={{ v|floatformat:2 }}{% if not forloop.last %} · {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Run</h2>
+  <form method="post" action="{% url 'radiant:tournament_run' slug=t.slug %}"
+        class="inline">
+    {% csrf_token %}
+    <button class="btn primary" type="submit">
+      {% if t.leaderboard %}Re-run{% else %}Run tournament{% endif %}
+    </button>
+  </form>
+  <span class="note" style="margin-left:0.6rem">
+    Runs {{ t.rounds }} independent populations × {{ t.generations }} gens
+    each. Synchronous — may take a few seconds.
+  </span>
+</div>
+
+{% if board %}
+<div class="panel">
+  <h2>Champion</h2>
+  <div class="meta-grid">
+    <div><div class="lbl">fitness</div>
+         <div class="champ">{{ t.champion_fitness|floatformat:3 }}</div></div>
+    <div style="grid-column:span 3"><div class="lbl">bundle</div>
+         <div>{{ champ_summary }}</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Leaderboard · {{ board|length }} rounds</h2>
+  <table>
+    <thead>
+      <tr>
+        <th class="num">#</th>
+        <th class="num">round</th>
+        <th class="num">fitness</th>
+        <th class="num">life</th>
+        <th class="num">tco</th>
+        <th class="num">n</th>
+        <th>bundle</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in board %}
+      <tr{% if forloop.first %} class="best"{% endif %}>
+        <td class="num">{{ forloop.counter }}</td>
+        <td class="num">{{ row.round }}</td>
+        <td class="num">{{ row.fitness|floatformat:3 }}</td>
+        <td class="num">
+          {% with life=row.breakdown.lifetime_years %}
+            {% if life == 9999 %}&infin;{% else %}{{ life }}y{% endif %}
+          {% endwith %}
+        </td>
+        <td class="num">€{{ row.breakdown.tco_eur|floatformat:0 }}</td>
+        <td class="num">{{ row.breakdown.n_boxes|default:"—" }}</td>
+        <td class="summary">{{ row.summary }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel">
+  <p class="note">Not run yet — hit Run above.</p>
+</div>
+{% endif %}
+
+<div class="panel" style="border-left:2px solid #6f1d1d">
+  <form method="post"
+        action="{% url 'radiant:tournament_delete' slug=t.slug %}"
+        class="inline">
+    {% csrf_token %}
+    <button class="btn danger" type="submit">Delete tournament</button>
+  </form>
+</div>
+
+</div>
+{% endblock %}

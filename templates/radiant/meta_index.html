@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Meta-tournaments — Radiant{% endblock %}
+
+{% block extra_head %}
+<style>
+  .rad-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .rad-wrap h1 { margin: 0 0 0.3rem; font-size: 1.2rem; }
+  .rad-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.5rem; }
+  .rad-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .rad-wrap .tagline { color: #8b949e; font-size: 0.8rem; max-width: 78ch;
+                       line-height: 1.5; margin: 0 0 1rem; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.78rem;
+          font-family: ui-monospace, Menlo, monospace; margin: 0.2rem 0 1rem; }
+  th, td { padding: 0.3rem 0.55rem; border-bottom: 1px solid #21262d;
+           text-align: left; }
+  th { color: #8b949e; font-weight: normal; background: #0d1117;
+       text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a.name { color: #58a6ff; text-decoration: none; font-weight: 500; }
+  a.name:hover { text-decoration: underline; }
+
+  .panel { background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+           padding: 0.75rem 0.9rem; margin: 0.6rem 0 1rem; }
+  .panel h2 { font-size: 0.88rem; margin: 0 0 0.5rem; color: #c9d1d9; }
+  .panel .msg { color: #d29922; font-size: 0.8rem; }
+
+  .form-grid { display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+               gap: 0.45rem 0.9rem; margin: 0.4rem 0 0.7rem; }
+  .form-grid label { font-size: 0.7rem; color: #8b949e;
+                     text-transform: uppercase; letter-spacing: 0.04em;
+                     display: block; margin-bottom: 0.15rem; }
+  .form-grid input { background: #0d1117; color: #c9d1d9;
+                     border: 1px solid #30363d; border-radius: 3px;
+                     padding: 0.28rem 0.4rem; font-size: 0.82rem;
+                     font-family: inherit; width: 100%; box-sizing: border-box; }
+  .form-grid input.mono { font-family: ui-monospace, Menlo, monospace; }
+
+  .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+         padding: 0.35rem 0.8rem; border-radius: 3px; cursor: pointer;
+         font-size: 0.8rem; text-decoration: none; display: inline-block;
+         font-family: inherit; }
+  .btn.primary { background: #238636; border-color: #2ea043; color: white; }
+
+  .note { color: #6e7681; font-size: 0.76rem; }
+  .msg-block { padding: 0.35rem 0.6rem; border-left: 2px solid #30363d;
+               font-size: 0.78rem; margin: 0.2rem 0 0.5rem; }
+  .msg-block.error   { border-color: #8b2c2c; color: #ffa198; }
+  .msg-block.success { border-color: #2ea043; color: #2ea043; }
+  .msg-block.info    { border-color: #d29922; color: #d29922; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="rad-wrap">
+
+<div class="crumb">
+  <a href="{% url 'radiant:index' %}">Radiant</a> ·
+  <a href="{% url 'radiant:evolve_index' %}">evolve</a> · meta
+</div>
+<h1>Meta-tournaments</h1>
+<p class="tagline">
+  A meta-tournament runs several
+  <a href="{% url 'radiant:tournament_index' %}">tournaments</a>, each with
+  the fitness weights jittered by ± a configurable fraction, and promotes the
+  best champion across those runs as the meta-champion. The point is to
+  test how stable a winning bundle is across reasonable variation in what
+  we actually care about — TCO vs. headroom vs. isolation.
+</p>
+
+{% if messages %}
+  {% for m in messages %}
+    <div class="msg-block {{ m.tags }}">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+{% if candidate_count == 0 %}
+  <div class="panel">
+    <p class="msg">No Candidates in the library yet — run
+    <code>manage.py seed_radiant</code> before creating a meta-tournament.</p>
+  </div>
+{% endif %}
+
+<div class="panel">
+  <h2>Existing meta-tournaments</h2>
+  {% if metas %}
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th class="num">rounds</th>
+          <th class="num">inner</th>
+          <th class="num">gens</th>
+          <th class="num">pop</th>
+          <th class="num">jitter</th>
+          <th class="num">champion fit</th>
+          <th>created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in metas %}
+        <tr>
+          <td><a class="name" href="{% url 'radiant:meta_detail' slug=m.slug %}">{{ m.name }}</a></td>
+          <td class="num">{{ m.rounds }}</td>
+          <td class="num">{{ m.tournament_rounds }}</td>
+          <td class="num">{{ m.generations }}</td>
+          <td class="num">{{ m.population_size }}</td>
+          <td class="num">{{ m.weight_jitter }}</td>
+          <td class="num">
+            {% if m.leaderboard %}{{ m.champion_fitness|floatformat:3 }}
+            {% else %}<span class="note">not yet run</span>{% endif %}
+          </td>
+          <td>{{ m.created_at|date:"D j M H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="note">No meta-tournaments yet — create one below.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>New meta-tournament</h2>
+  <form method="post" action="{% url 'radiant:meta_create' %}">
+    {% csrf_token %}
+    <div class="form-grid">
+      <div>
+        <label for="name">name</label>
+        <input type="text" id="name" name="name" required
+               placeholder="spring-meta">
+      </div>
+      <div>
+        <label for="rounds">rounds (outer)</label>
+        <input type="number" id="rounds" name="rounds" class="mono"
+               value="4" min="2" max="32">
+      </div>
+      <div>
+        <label for="tournament_rounds">rounds per inner tournament</label>
+        <input type="number" id="tournament_rounds"
+               name="tournament_rounds" class="mono"
+               value="6" min="2" max="32">
+      </div>
+      <div>
+        <label for="generations">gens / inner round</label>
+        <input type="number" id="generations" name="generations" class="mono"
+               value="25" min="1" max="300">
+      </div>
+      <div>
+        <label for="population_size">population size</label>
+        <input type="number" id="population_size" name="population_size"
+               class="mono" value="20" min="4" max="96">
+      </div>
+      <div>
+        <label for="weight_jitter">weight jitter (± fraction)</label>
+        <input type="number" id="weight_jitter" name="weight_jitter"
+               class="mono" value="0.35" step="0.05" min="0" max="1">
+      </div>
+    </div>
+    <button class="btn primary" type="submit"
+            {% if candidate_count == 0 %}disabled{% endif %}>
+      Create meta-tournament
+    </button>
+  </form>
+</div>
+
+</div>
+{% endblock %}

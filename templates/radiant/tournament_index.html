@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Evolve — Radiant{% endblock %}
+{% block title %}Tournaments — Radiant{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -38,8 +38,6 @@
                      padding: 0.28rem 0.4rem; font-size: 0.82rem;
                      font-family: inherit; width: 100%; box-sizing: border-box; }
   .form-grid input.mono { font-family: ui-monospace, Menlo, monospace; }
-  .subhead { font-size: 0.72rem; color: #6e7681; text-transform: uppercase;
-             letter-spacing: 0.04em; margin: 0.4rem 0 0.3rem; }
 
   .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
          padding: 0.35rem 0.8rem; border-radius: 3px; cursor: pointer;
@@ -60,19 +58,17 @@
 <div class="rad-wrap">
 
 <div class="crumb">
-  <a href="{% url 'radiant:index' %}">Radiant</a> · evolve
+  <a href="{% url 'radiant:index' %}">Radiant</a> ·
+  <a href="{% url 'radiant:evolve_index' %}">evolve</a> · tournaments
 </div>
-<h1>Evolved populations</h1>
+<h1>Tournaments</h1>
 <p class="tagline">
-  Genetic search over multisets of Candidate boxes. Each bundle is
-  scored against the live 12-horizon forecast — lifetime-years, 5-year
-  TCO, isolation across production / wordpress / experimental, box
-  count, and RAM headroom all weighted. The engine is the same one
-  exposed as <code>manage.py radiant_evolve</code>.
-  Also available: <a href="{% url 'radiant:tournament_index' %}">tournaments</a>
-  (re-run a bracket from fresh seeds) and
-  <a href="{% url 'radiant:meta_index' %}">meta-tournaments</a>
-  (jittered-weight robustness test).
+  A tournament spins up <em>N</em> fresh populations from independent seeds,
+  evolves each for the same number of generations, and ranks their winners.
+  The top row is the tournament champion — the bundle that survives best
+  across seed luck. Compare with
+  <a href="{% url 'radiant:meta_index' %}">meta-tournaments</a>,
+  which also vary the fitness weights.
 </p>
 
 {% if messages %}
@@ -84,120 +80,81 @@
 {% if candidate_count == 0 %}
   <div class="panel">
     <p class="msg">No Candidates in the library yet — run
-    <code>manage.py seed_radiant</code> (or load the LUCDH fixture)
-    before evolving anything.</p>
+    <code>manage.py seed_radiant</code> before creating a tournament.</p>
   </div>
 {% endif %}
 
 <div class="panel">
-  <h2>Existing populations</h2>
-  {% if populations %}
+  <h2>Existing tournaments</h2>
+  {% if tournaments %}
     <table>
       <thead>
         <tr>
           <th>Name</th>
-          <th class="num">generation</th>
-          <th class="num">best fitness</th>
-          <th class="num">size</th>
-          <th class="num">boxes</th>
+          <th class="num">rounds</th>
+          <th class="num">gens</th>
+          <th class="num">pop</th>
           <th class="num">mut</th>
-          <th>modified</th>
+          <th class="num">champion fit</th>
+          <th>created</th>
         </tr>
       </thead>
       <tbody>
-        {% for p in populations %}
+        {% for t in tournaments %}
         <tr>
-          <td><a class="name" href="{% url 'radiant:evolve_detail' slug=p.slug %}">{{ p.name }}</a></td>
-          <td class="num">{{ p.generation }}</td>
-          <td class="num">{{ p.best_fitness|floatformat:3 }}</td>
-          <td class="num">{{ p.population_size }}</td>
-          <td class="num">{{ p.min_boxes }}&ndash;{{ p.max_boxes }}</td>
-          <td class="num">{{ p.mutation_rate }}</td>
-          <td>{{ p.modified_at|date:"D j M H:i" }}</td>
+          <td><a class="name" href="{% url 'radiant:tournament_detail' slug=t.slug %}">{{ t.name }}</a></td>
+          <td class="num">{{ t.rounds }}</td>
+          <td class="num">{{ t.generations }}</td>
+          <td class="num">{{ t.population_size }}</td>
+          <td class="num">{{ t.mutation_rate }}</td>
+          <td class="num">
+            {% if t.leaderboard %}{{ t.champion_fitness|floatformat:3 }}
+            {% else %}<span class="note">not yet run</span>{% endif %}
+          </td>
+          <td>{{ t.created_at|date:"D j M H:i" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="note">No populations yet — create one below.</p>
+    <p class="note">No tournaments yet — create one below.</p>
   {% endif %}
 </div>
 
 <div class="panel">
-  <h2>New population</h2>
-  <form method="post" action="{% url 'radiant:evolve_create' %}">
+  <h2>New tournament</h2>
+  <form method="post" action="{% url 'radiant:tournament_create' %}">
     {% csrf_token %}
-
-    <div class="subhead">Identity</div>
     <div class="form-grid">
       <div>
         <label for="name">name</label>
         <input type="text" id="name" name="name" required
-               placeholder="mixed-isolated">
+               placeholder="spring-bracket">
       </div>
-    </div>
-
-    <div class="subhead">GA knobs</div>
-    <div class="form-grid">
+      <div>
+        <label for="rounds">rounds</label>
+        <input type="number" id="rounds" name="rounds" class="mono"
+               value="8" min="2" max="64">
+      </div>
+      <div>
+        <label for="generations">generations / round</label>
+        <input type="number" id="generations" name="generations" class="mono"
+               value="30" min="1" max="500">
+      </div>
       <div>
         <label for="population_size">population size</label>
         <input type="number" id="population_size" name="population_size"
-               class="mono" value="32" min="4" max="256">
-      </div>
-      <div>
-        <label for="min_boxes">min boxes</label>
-        <input type="number" id="min_boxes" name="min_boxes"
-               class="mono" value="1" min="1" max="10">
-      </div>
-      <div>
-        <label for="max_boxes">max boxes</label>
-        <input type="number" id="max_boxes" name="max_boxes"
-               class="mono" value="5" min="1" max="12">
+               class="mono" value="24" min="4" max="128">
       </div>
       <div>
         <label for="mutation_rate">mutation rate</label>
         <input type="number" id="mutation_rate" name="mutation_rate"
                class="mono" value="0.3" step="0.05" min="0" max="1">
       </div>
-      <div>
-        <label for="elitism">elitism</label>
-        <input type="number" id="elitism" name="elitism"
-               class="mono" value="2" min="0" max="10">
-      </div>
     </div>
-
-    <div class="subhead">Fitness weights</div>
-    <div class="form-grid">
-      <div>
-        <label for="weight_lifetime">lifetime</label>
-        <input type="number" id="weight_lifetime" name="weight_lifetime"
-               class="mono" value="1.0" step="0.1" min="0" max="10">
-      </div>
-      <div>
-        <label for="weight_tco">TCO penalty</label>
-        <input type="number" id="weight_tco" name="weight_tco"
-               class="mono" value="0.5" step="0.1" min="0" max="10">
-      </div>
-      <div>
-        <label for="weight_isolation">isolation</label>
-        <input type="number" id="weight_isolation" name="weight_isolation"
-               class="mono" value="2.0" step="0.1" min="0" max="10">
-      </div>
-      <div>
-        <label for="weight_simplicity">simplicity</label>
-        <input type="number" id="weight_simplicity" name="weight_simplicity"
-               class="mono" value="0.3" step="0.1" min="0" max="10">
-      </div>
-      <div>
-        <label for="weight_headroom">headroom</label>
-        <input type="number" id="weight_headroom" name="weight_headroom"
-               class="mono" value="1.0" step="0.1" min="0" max="10">
-      </div>
-    </div>
-
     <button class="btn primary" type="submit"
             {% if candidate_count == 0 %}disabled{% endif %}>
-      Create + seed generation 0
+      Create tournament
     </button>
   </form>
 </div>

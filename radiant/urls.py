@@ -17,4 +17,16 @@ urlpatterns = [
     path('evolve/<slug:slug>/run/',   views.evolve_run,      name='evolve_run'),
     path('evolve/<slug:slug>/reseed/', views.evolve_reseed,  name='evolve_reseed'),
     path('evolve/<slug:slug>/delete/', views.evolve_delete,  name='evolve_delete'),
+
+    path('tournaments/',              views.tournament_index,  name='tournament_index'),
+    path('tournaments/new/',          views.tournament_create, name='tournament_create'),
+    path('tournaments/<slug:slug>/',  views.tournament_detail, name='tournament_detail'),
+    path('tournaments/<slug:slug>/run/', views.tournament_run, name='tournament_run'),
+    path('tournaments/<slug:slug>/delete/', views.tournament_delete, name='tournament_delete'),
+
+    path('meta/',                     views.meta_index,  name='meta_index'),
+    path('meta/new/',                 views.meta_create, name='meta_create'),
+    path('meta/<slug:slug>/',         views.meta_detail, name='meta_detail'),
+    path('meta/<slug:slug>/run/',     views.meta_run,    name='meta_run'),
+    path('meta/<slug:slug>/delete/',  views.meta_delete, name='meta_delete'),
 ]
