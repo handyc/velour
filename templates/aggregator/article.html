@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.title }} — Aggregator{% endblock %}
+
+{% block extra_head %}
+<style>
+  .art-wrap { max-width: 780px; margin: 1.2rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .art-wrap .crumb { color: #6e7681; font-size: 0.72rem;
+                     margin-bottom: 0.8rem; }
+  .art-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+
+  .art-header h1 {
+    font-size: 1.6rem; margin: 0 0 0.3rem;
+    line-height: 1.25; font-family: 'Palatino Linotype', Georgia, serif;
+  }
+  .art-header .byline {
+    color: #8b949e; font-size: 0.8rem; margin-bottom: 0.6rem;
+    display: flex; gap: 0.6rem; flex-wrap: wrap;
+  }
+  .art-header .byline a { color: #79c0ff; text-decoration: none; }
+  .art-header .byline .dot { color: #30363d; }
+
+  .art-body {
+    margin-top: 1rem; padding-top: 1rem;
+    border-top: 1px solid #30363d;
+    font-size: 0.95rem; line-height: 1.6; color: #d4d4d4;
+  }
+  .art-body p { margin: 0 0 0.75rem; }
+  .art-body img { max-width: 100%; height: auto; border-radius: 4px;
+                  opacity: 0.9; }
+  .art-body a { color: #79c0ff; }
+  .art-body iframe { max-width: 100%; }
+
+  .art-actions { margin: 1.2rem 0 0; display: flex; gap: 0.5rem;
+                 flex-wrap: wrap; }
+  .art-btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.35rem 0.9rem; border-radius: 3px; text-decoration: none;
+    font-size: 0.85rem;
+  }
+  .art-btn.secondary {
+    background: #21262d; border-color: #30363d; color: #c9d1d9;
+  }
+
+  .no-summary {
+    color: #6e7681; font-style: italic; padding: 1rem 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="art-wrap">
+  <div class="crumb">
+    <a href="{% url 'aggregator:index' %}">Aggregator</a> ›
+    <a href="{% url 'aggregator:articles' %}">Articles</a> ›
+    <a href="{% url 'aggregator:articles' %}?feed={{ article.feed.pk }}">{{ article.feed.name }}</a>
+  </div>
+
+  <div class="art-header">
+    <h1>{{ article.title }}</h1>
+    <div class="byline">
+      <a href="{% url 'aggregator:articles' %}?feed={{ article.feed.pk }}">{{ article.feed.name }}</a>
+      {% if article.author %}<span class="dot">·</span>{{ article.author }}{% endif %}
+      {% if article.published_at %}
+        <span class="dot">·</span>published {{ article.published_at|date:"D d M Y · H:i" }}
+      {% endif %}
+      <span class="dot">·</span>fetched {{ article.fetched_at|date:"Y-m-d H:i" }}
+    </div>
+  </div>
+
+  <div class="art-body">
+    {% if article.summary %}
+      {{ article.summary|safe }}
+    {% else %}
+      <div class="no-summary">
+        No stored summary for this article — only the title and link were in
+        the feed. Click "Read at source" to see the full page.
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="art-actions">
+    <a class="art-btn" href="{{ article.url }}" target="_blank" rel="noopener">
+      Read at source ↗
+    </a>
+    <a class="art-btn secondary"
+       href="{% url 'aggregator:articles' %}?feed={{ article.feed.pk }}">
+      ← More from {{ article.feed.name }}
+    </a>
+  </div>
+</div>
+{% endblock %}

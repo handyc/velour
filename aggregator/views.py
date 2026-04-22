@@ -1,6 +1,6 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseBadRequest
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -121,3 +121,36 @@ def issue_delete(request, slug):
     issue.delete()
     messages.success(request, 'Issue deleted.')
     return redirect('aggregator:issues')
+
+
+@login_required
+def articles(request):
+    """All scraped articles, paginated. Optional ?feed=<pk> and ?q=<text>."""
+    qs = (Article.objects.select_related('feed')
+          .order_by('-published_at', '-fetched_at'))
+    feed_pk = request.GET.get('feed') or ''
+    q = (request.GET.get('q') or '').strip()
+    feed = None
+    if feed_pk:
+        try:
+            feed = Feed.objects.get(pk=int(feed_pk))
+            qs = qs.filter(feed=feed)
+        except (ValueError, Feed.DoesNotExist):
+            feed = None
+    if q:
+        qs = qs.filter(title__icontains=q) | qs.filter(summary__icontains=q)
+        qs = qs.distinct()
+    page = Paginator(qs, 50).get_page(request.GET.get('page'))
+    return render(request, 'aggregator/articles.html', {
+        'page':      page,
+        'feed':      feed,
+        'feeds':     Feed.objects.order_by('name'),
+        'q':         q,
+        'total':     qs.count(),
+    })
+
+
+@login_required
+def article(request, pk):
+    art = get_object_or_404(Article.objects.select_related('feed'), pk=pk)
+    return render(request, 'aggregator/article.html', {'article': art})

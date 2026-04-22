@@ -134,8 +134,10 @@
           <tr>
             <td>
               <span class="{% if f.active %}state-on{% else %}state-off{% endif %}">●</span>
-              <a href="{{ f.url }}" target="_blank"
+              <a href="{% url 'aggregator:articles' %}?feed={{ f.pk }}"
                  style="color:#c9d1d9;text-decoration:none">{{ f.name }}</a>
+              <a href="{{ f.url }}" target="_blank" title="open feed URL"
+                 style="color:#6e7681;text-decoration:none;font-size:0.68rem;margin-left:0.3rem">↗</a>
               {% if f.last_error %}
                 <div class="err" style="font-size:0.68rem">{{ f.last_error|truncatechars:80 }}</div>
               {% endif %}
@@ -214,12 +216,16 @@
       </div>
 
       <div class="agg-card">
-        <h2>Recent articles (all feeds)</h2>
+        <h2 style="display:flex;justify-content:space-between;align-items:center">
+          Recent articles (all feeds)
+          <a href="{% url 'aggregator:articles' %}" class="agg-btn secondary"
+             style="padding:0.2rem 0.6rem;font-size:0.72rem">Browse all →</a>
+        </h2>
         <ul class="recent-list">
           {% for a in recent %}
           <li>
             <span class="src">{{ a.feed.name }}</span>
-            <a href="{{ a.url }}" target="_blank">{{ a.title|truncatechars:90 }}</a>
+            <a href="{% url 'aggregator:article' pk=a.pk %}">{{ a.title|truncatechars:90 }}</a>
             <span class="when">
               {% if a.published_at %}{{ a.published_at|date:"m-d H:i" }}
               {% else %}{{ a.fetched_at|date:"m-d H:i" }}{% endif %}

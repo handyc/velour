@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Articles — Aggregator{% endblock %}
+
+{% block extra_head %}
+<style>
+  .agg-wrap { max-width: 1080px; margin: 1.2rem auto; padding: 0 1rem;
+              color: #c9d1d9; font-size: 0.85rem; }
+  .agg-wrap .crumb { color: #6e7681; font-size: 0.72rem;
+                     margin-bottom: 0.8rem; }
+  .agg-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+  .agg-wrap h1 { margin: 0 0 0.2rem; font-size: 1.2rem; }
+  .agg-wrap .subt { color: #8b949e; font-size: 0.78rem; margin-bottom: 0.6rem; }
+
+  .agg-filter {
+    display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center;
+    margin: 0.7rem 0 1rem; font-size: 0.78rem;
+  }
+  .agg-filter select, .agg-filter input[type=text] {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.25rem 0.5rem; font-size: 0.78rem;
+    font-family: inherit;
+  }
+  .agg-filter input[type=text] { min-width: 14rem; }
+  .agg-filter button {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.7rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .agg-filter a.clear { color: #6e7681; text-decoration: none;
+                        font-size: 0.72rem; }
+
+  .art-list { list-style: none; padding: 0; margin: 0; }
+  .art-list li {
+    padding: 0.5rem 0.3rem;
+    border-bottom: 1px solid #21262d;
+    display: grid; grid-template-columns: 10rem 1fr 7rem; gap: 0.6rem;
+    align-items: baseline;
+  }
+  .art-list li:hover { background: #0d1117; }
+  .art-list .src { color: #79c0ff; font-size: 0.72rem;
+                   text-decoration: none; }
+  .art-list .src:hover { text-decoration: underline; }
+  .art-list .title a { color: #c9d1d9; text-decoration: none;
+                       font-weight: 500; }
+  .art-list .title a:hover { color: #58a6ff; }
+  .art-list .title .blurb {
+    color: #6e7681; font-size: 0.72rem; margin-top: 0.15rem;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .art-list .when { color: #6e7681; font-size: 0.72rem; text-align: right; }
+
+  .pager { margin: 1rem 0; display: flex; justify-content: space-between;
+           align-items: center; color: #6e7681; font-size: 0.78rem; }
+  .pager a {
+    color: #c9d1d9; text-decoration: none;
+    background: #21262d; border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.2rem 0.6rem; margin: 0 0.2rem;
+  }
+  .pager a:hover { color: #58a6ff; }
+  .pager .curr { color: #c9d1d9; font-weight: 600; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="agg-wrap">
+  <div class="crumb">
+    <a href="{% url 'aggregator:index' %}">Aggregator</a> › Articles
+  </div>
+  <h1>
+    {% if feed %}Articles from {{ feed.name }}{% else %}All articles{% endif %}
+  </h1>
+  <div class="subt">
+    {{ total }} stored · showing page {{ page.number }} of {{ page.paginator.num_pages }}
+  </div>
+
+  <form method="get" class="agg-filter">
+    <label style="color:#8b949e">Feed:
+      <select name="feed" onchange="this.form.submit()">
+        <option value="">— all feeds —</option>
+        {% for f in feeds %}
+        <option value="{{ f.pk }}" {% if feed and feed.pk == f.pk %}selected{% endif %}>
+          {{ f.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="color:#8b949e">Search:
+      <input type="text" name="q" value="{{ q }}" placeholder="title or summary…">
+    </label>
+    <button type="submit">Filter</button>
+    {% if feed or q %}
+    <a class="clear" href="{% url 'aggregator:articles' %}">clear</a>
+    {% endif %}
+  </form>
+
+  <ul class="art-list">
+    {% for a in page.object_list %}
+    <li>
+      <a class="src"
+         href="{% url 'aggregator:articles' %}?feed={{ a.feed.pk }}">{{ a.feed.name }}</a>
+      <div class="title">
+        <a href="{% url 'aggregator:article' pk=a.pk %}">{{ a.title }}</a>
+        {% if a.summary %}
+        <div class="blurb">{{ a.summary|striptags|truncatechars:160 }}</div>
+        {% endif %}
+      </div>
+      <div class="when">
+        {% if a.published_at %}{{ a.published_at|date:"Y-m-d H:i" }}
+        {% else %}{{ a.fetched_at|date:"Y-m-d H:i" }} (fetched){% endif %}
+      </div>
+    </li>
+    {% empty %}
+    <li style="color:#6e7681;grid-template-columns:1fr">
+      No articles match. Try clearing the filter or running
+      <code>manage.py aggregator_fetch</code>.
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div class="pager">
+    <div>
+      {% if page.has_previous %}
+        <a href="?page=1{% if feed %}&feed={{ feed.pk }}{% endif %}{% if q %}&q={{ q }}{% endif %}">«</a>
+        <a href="?page={{ page.previous_page_number }}{% if feed %}&feed={{ feed.pk }}{% endif %}{% if q %}&q={{ q }}{% endif %}">‹</a>
+      {% endif %}
+      <span class="curr">{{ page.number }}</span>
+      {% if page.has_next %}
+        <a href="?page={{ page.next_page_number }}{% if feed %}&feed={{ feed.pk }}{% endif %}{% if q %}&q={{ q }}{% endif %}">›</a>
+        <a href="?page={{ page.paginator.num_pages }}{% if feed %}&feed={{ feed.pk }}{% endif %}{% if q %}&q={{ q }}{% endif %}">»</a>
+      {% endif %}
+    </div>
+    <div>page {{ page.number }} / {{ page.paginator.num_pages }}</div>
+  </div>
+</div>
+{% endblock %}
