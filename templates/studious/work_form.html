@@ -1,0 +1,138 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{% if work %}Edit{% else %}Ingest{% endif %} work — Studious{% endblock %}
+
+{% block studious %}
+<h1>{% if work %}Edit work{% else %}Ingest a work{% endif %}</h1>
+{% if scholar and not work %}
+<p class="lede">Ingesting under <strong>{{ scholar.name }}</strong>.</p>
+{% endif %}
+
+<div class="st-card">
+  <form method="post" enctype="multipart/form-data" class="st-form">
+    {% csrf_token %}
+
+    {% if not work %}
+    <label>Scholar
+      <select name="scholar" required>
+        {% for s in scholars %}
+          <option value="{{ s.slug }}"
+            {% if scholar and s.slug == scholar.slug %}selected{% endif %}>
+            {{ s.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+    {% endif %}
+
+    <div class="row3">
+      <label>Title
+        <input name="title" required maxlength="400"
+               value="{{ work.title|default:'' }}"
+               placeholder="e.g. Frontiers of Justice">
+      </label>
+      <label>Year
+        <input name="year" type="number" min="0" max="3000"
+               value="{{ work.year|default:'' }}" placeholder="2006">
+      </label>
+      <label>Kind
+        <select name="kind">
+          {% for val, lbl in work_kinds %}
+          <option value="{{ val }}"
+            {% if work and work.kind == val %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="row2">
+      <label>DOI (optional)
+        <input name="doi" maxlength="160" value="{{ work.doi|default:'' }}"
+               placeholder="10.1093/…">
+      </label>
+      <label>URL (optional)
+        <input name="url" type="url" maxlength="500"
+               value="{{ work.url|default:'' }}"
+               placeholder="https://…">
+      </label>
+    </div>
+
+    {% if not work %}
+    <fieldset style="border:1px solid #30363d;border-radius:4px;
+                     padding:0.5rem 0.8rem;color:#c9d1d9;font-size:0.78rem">
+      <legend style="color:#8b949e;padding:0 0.3rem;font-size:0.72rem;
+                     text-transform:uppercase;letter-spacing:0.04em">
+        Ingest source
+      </legend>
+      <label style="flex-direction:row;align-items:center;gap:0.4rem">
+        <input type="radio" name="ingest" value="url" id="ing-url">
+        <span>Scrape the URL above (trafilatura reader-mode)</span>
+      </label>
+      <label style="flex-direction:row;align-items:center;gap:0.4rem">
+        <input type="radio" name="ingest" value="pdf" id="ing-pdf">
+        <span>Upload a PDF file</span>
+      </label>
+      <label style="flex-direction:row;align-items:center;gap:0.4rem">
+        <input type="radio" name="ingest" value="paste" id="ing-paste" checked>
+        <span>Paste raw text below</span>
+      </label>
+      <label style="margin-top:0.4rem">
+        PDF file
+        <input type="file" name="source_file" accept="application/pdf">
+      </label>
+    </fieldset>
+    {% endif %}
+
+    <label>Abstract
+      <textarea name="abstract" rows="3"
+                placeholder="Optional — short summary.">{{ work.abstract|default:'' }}</textarea>
+    </label>
+
+    <label>Full text
+      <textarea name="full_text" rows="{% if work %}14{% else %}10{% endif %}"
+                placeholder="Paste the body here, or leave blank if ingesting via URL/PDF.">{{ work.full_text|default:'' }}</textarea>
+    </label>
+
+    <label>Domains (Ctrl-click for multi-select)
+      <select name="domains" multiple size="5">
+        {% for d in domains %}
+        <option value="{{ d.slug }}"
+          {% if work %}{% for wd in work.domains.all %}{% if wd.slug == d.slug %}selected{% endif %}{% endfor %}{% endif %}>
+          {{ d.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Notes
+      <textarea name="notes" rows="3">{{ work.notes|default:'' }}</textarea>
+    </label>
+
+    <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
+      <button type="submit" class="st-btn">
+        {% if work %}Save{% else %}Ingest{% endif %}
+      </button>
+      {% if work %}
+      <a href="{% url 'studious:work_detail' slug=work.slug %}"
+         class="st-btn secondary">Cancel</a>
+      {% else %}
+      <a href="{% url 'studious:index' %}" class="st-btn secondary">Cancel</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if work %}
+<div class="st-card">
+  <h2>Delete</h2>
+  <p style="color:#8b949e;font-size:0.78rem;margin:0 0 0.5rem">
+    Deletes the work and its {{ work.claims.count }} claim(s).
+    Argument references become orphaned.
+  </p>
+  <form method="post" action="{% url 'studious:work_delete' slug=work.slug %}">
+    {% csrf_token %}
+    <button type="submit" class="st-btn danger">Delete “{{ work.title|truncatechars:40 }}”</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,121 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{% if argument %}Edit{% else %}New{% endif %} argument — Studious{% endblock %}
+
+{% block studious %}
+<h1>{% if argument %}Edit argument{% else %}New argument{% endif %}</h1>
+
+<div class="st-card">
+  <form method="post" class="st-form">
+    {% csrf_token %}
+    <div class="row3">
+      <label>Title
+        <input name="title" required maxlength="200"
+               value="{{ argument.title|default:'' }}"
+               placeholder="e.g. The capabilities approach and dignity">
+      </label>
+      <label>Kind
+        <select name="kind">
+          {% for val, lbl in argument_kinds %}
+          <option value="{{ val }}"
+            {% if argument and argument.kind == val %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Domain (optional)
+        <select name="domain">
+          <option value="">—</option>
+          {% for d in domains %}
+          <option value="{{ d.slug }}"
+            {% if argument and argument.domain and argument.domain.slug == d.slug %}selected{% endif %}>{{ d.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    {% if not argument %}
+    <fieldset style="border:1px solid #30363d;border-radius:4px;
+                     padding:0.5rem 0.8rem;color:#c9d1d9;font-size:0.78rem">
+      <legend style="color:#8b949e;padding:0 0.3rem;font-size:0.72rem;
+                     text-transform:uppercase;letter-spacing:0.04em">
+        Pick claims (ordered by selection — Ctrl-click for multi-select)
+      </legend>
+      <form method="get" style="display:flex;gap:0.4rem;margin-bottom:0.5rem">
+        <select name="scholar" onchange="this.form.submit()"
+                style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                       border-radius:3px;padding:0.2rem 0.4rem;font-size:0.78rem">
+          <option value="">— all scholars —</option>
+          {% for s in scholars %}
+          <option value="{{ s.slug }}"
+            {% if s.slug == scholar_slug %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <select name="claims" multiple size="14" style="width:100%">
+        {% for c in claims %}
+        <option value="{{ c.pk }}">
+          [{{ c.work.scholar.name }} · {{ c.work.title|truncatechars:40 }}]
+          {{ c.text|truncatechars:140 }}
+        </option>
+        {% endfor %}
+      </select>
+      <p class="meta" style="margin:0.3rem 0 0">
+        Shift-click picks a range; Ctrl-click toggles individual lines.
+        First-selected becomes premise #1.
+      </p>
+    </fieldset>
+    {% endif %}
+
+    {% if argument %}
+    <label>Premises
+      <textarea name="premises_text" rows="8">{{ argument.premises_text }}</textarea>
+    </label>
+    <label>Tension (shared-vocabulary hint — edit to name real tensions)
+      <textarea name="tension_text" rows="6">{{ argument.tension_text }}</textarea>
+    </label>
+    <label>Synthesis (your argument — Studious never writes this)
+      <textarea name="synthesis_text" rows="12">{{ argument.synthesis_text }}</textarea>
+    </label>
+    {% endif %}
+
+    <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
+      <button type="submit" class="st-btn">
+        {% if argument %}Save{% else %}Scaffold argument{% endif %}
+      </button>
+      {% if argument %}
+      <a href="{% url 'studious:argument_detail' slug=argument.slug %}"
+         class="st-btn secondary">Cancel</a>
+      {% else %}
+      <a href="{% url 'studious:argument_list' %}"
+         class="st-btn secondary">Cancel</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if argument and items %}
+<div class="st-card">
+  <h2>Pinned claims</h2>
+  <ol style="padding-left:1.2rem;margin:0">
+    {% for it in items %}
+    <li style="margin:0.3rem 0">
+      <span class="st-chip kind">{{ it.get_role_display }}</span>
+      <strong>{{ it.claim.work.scholar.name }}</strong>,
+      <a href="{% url 'studious:work_detail' slug=it.claim.work.slug %}"
+         style="color:#58a6ff">{{ it.claim.work.title|truncatechars:50 }}</a>
+      {% if it.claim.work.year %}({{ it.claim.work.year }}){% endif %}:
+      <div class="st-excerpt" style="margin-left:0.5rem">{{ it.claim.text|truncatechars:280 }}</div>
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+
+<div class="st-card">
+  <h2>Delete</h2>
+  <form method="post" action="{% url 'studious:argument_delete' slug=argument.slug %}">
+    {% csrf_token %}
+    <button type="submit" class="st-btn danger">Delete argument</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

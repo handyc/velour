@@ -1,0 +1,53 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{% if claim %}Edit{% else %}New{% endif %} claim — Studious{% endblock %}
+
+{% block studious %}
+<h1>{% if claim %}Edit claim{% else %}New claim{% endif %}</h1>
+<p class="lede">
+  Under <a href="{% url 'studious:work_detail' slug=work.slug %}"
+           style="color:#58a6ff">{{ work.title|truncatechars:80 }}</a>
+  — <span class="meta">{{ work.scholar.name }}</span>
+</p>
+
+<div class="st-card">
+  <form method="post" class="st-form">
+    {% csrf_token %}
+    <label>Claim text
+      <textarea name="text" rows="5" required>{{ claim.text|default:'' }}</textarea>
+    </label>
+    <div class="row2">
+      <label>Kind
+        <select name="kind">
+          {% for val, lbl in claim_kinds %}
+          <option value="{{ val }}"
+            {% if claim and claim.kind == val %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Page / section
+        <input name="page_ref" maxlength="40"
+               value="{{ claim.page_ref|default:'' }}" placeholder='e.g. "p. 42" or "§3.1"'>
+      </label>
+    </div>
+    <label>Notes
+      <textarea name="notes" rows="3">{{ claim.notes|default:'' }}</textarea>
+    </label>
+    <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
+      <button type="submit" class="st-btn">Save</button>
+      <a href="{% url 'studious:work_detail' slug=work.slug %}"
+         class="st-btn secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% if claim %}
+<div class="st-card">
+  <h2>Delete</h2>
+  <form method="post" action="{% url 'studious:claim_delete' pk=claim.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="st-btn danger">Delete claim</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

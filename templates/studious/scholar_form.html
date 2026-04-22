@@ -1,0 +1,63 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{% if scholar %}Edit{% else %}New{% endif %} scholar — Studious{% endblock %}
+
+{% block studious %}
+<h1>{% if scholar %}Edit scholar{% else %}New scholar{% endif %}</h1>
+
+<div class="st-card">
+  <form method="post" class="st-form">
+    {% csrf_token %}
+    <label>Name
+      <input name="name" required value="{{ scholar.name|default:'' }}"
+             placeholder="e.g. Martha Nussbaum">
+    </label>
+    <div class="row2">
+      <label>Affiliation
+        <input name="affiliation" value="{{ scholar.affiliation|default:'' }}"
+               placeholder="e.g. University of Chicago">
+      </label>
+      <label>Active years
+        <input name="active_years" value="{{ scholar.active_years|default:'' }}"
+               placeholder='e.g. "1960–" or "1632–1704"'>
+      </label>
+    </div>
+    <label>Homepage URL
+      <input type="url" name="homepage_url"
+             value="{{ scholar.homepage_url|default:'' }}"
+             placeholder="https://…">
+    </label>
+    <label>Bio
+      <textarea name="bio" rows="3">{{ scholar.bio|default:'' }}</textarea>
+    </label>
+    <label>Notes (why you're interested — feeds the argument workshop)
+      <textarea name="notes" rows="3">{{ scholar.notes|default:'' }}</textarea>
+    </label>
+    <div style="display:flex;gap:0.5rem;margin-top:0.3rem">
+      <button type="submit" class="st-btn">Save</button>
+      {% if scholar %}
+      <a href="{% url 'studious:scholar_detail' slug=scholar.slug %}"
+         class="st-btn secondary">Cancel</a>
+      {% else %}
+      <a href="{% url 'studious:scholar_list' %}"
+         class="st-btn secondary">Cancel</a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+
+{% if scholar %}
+<div class="st-card">
+  <h2>Delete</h2>
+  <p style="color:#8b949e;font-size:0.78rem;margin:0 0 0.5rem">
+    Deleting this scholar removes their {{ scholar.works.count }} work(s)
+    and every associated claim.
+  </p>
+  <form method="post"
+        action="{% url 'studious:scholar_delete' slug=scholar.slug %}">
+    {% csrf_token %}
+    <button type="submit" class="st-btn danger">Delete {{ scholar.name }}</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

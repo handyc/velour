@@ -1,0 +1,67 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{{ scholar.name }} — Studious{% endblock %}
+
+{% block studious %}
+<h1>{{ scholar.name }}</h1>
+<p class="lede">
+  {% if scholar.affiliation %}{{ scholar.affiliation }}{% endif %}
+  {% if scholar.active_years %} · {{ scholar.active_years }}{% endif %}
+  {% if scholar.homepage_url %}
+    · <a href="{{ scholar.homepage_url }}" target="_blank"
+         style="color:#58a6ff">homepage ↗</a>
+  {% endif %}
+</p>
+
+<div class="st-grid">
+  <div>
+    {% if scholar.bio %}
+    <div class="st-card">
+      <h2>Bio</h2>
+      <div class="st-excerpt">{{ scholar.bio|linebreaksbr }}</div>
+    </div>
+    {% endif %}
+
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        Works
+        <a href="{% url 'studious:work_add' %}?scholar={{ scholar.slug }}"
+           class="st-btn small">+ Ingest work</a>
+      </h2>
+      <table class="st-tbl">
+        <tr><th>Title</th><th>Year</th><th>Kind</th>
+            <th>Tokens</th><th>Claims</th></tr>
+        {% for w in works %}
+        <tr>
+          <td><a href="{% url 'studious:work_detail' slug=w.slug %}">{{ w.title|truncatechars:70 }}</a></td>
+          <td class="meta">{{ w.year|default:"—" }}</td>
+          <td class="meta">{{ w.get_kind_display }}</td>
+          <td class="meta">{{ w.token_count|default:"—" }}</td>
+          <td class="meta">{{ w.claims.count }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" style="color:#6e7681;padding:0.8rem 0">
+          No works yet — ingest one.
+        </td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  <div>
+    {% if scholar.notes %}
+    <div class="st-card">
+      <h2>Notes</h2>
+      <div class="st-excerpt">{{ scholar.notes|linebreaksbr }}</div>
+    </div>
+    {% endif %}
+
+    <div class="st-card">
+      <p>
+        <a href="{% url 'studious:scholar_edit' slug=scholar.slug %}"
+           class="st-btn secondary small">Edit scholar</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

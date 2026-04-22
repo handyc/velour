@@ -1,0 +1,127 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}Studious — Velour{% endblock %}
+
+{% block studious %}
+<h1>Studious</h1>
+<p class="lede">
+  A scholar's workbench. Ingest work by the thinkers you care about —
+  URL, PDF, or raw paste — extract candidate claims, and braid claims
+  across scholars into arguments you write yourself. Analysis is
+  deterministic: TF-IDF for distinguishing terms, heuristic sentence
+  picking for claim candidates, template-scaffolded premise + tension
+  blocks. The synthesis is always yours.
+</p>
+
+<div class="st-grid">
+  <div>
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center;">
+        Scholars
+        <a href="{% url 'studious:scholar_add' %}" class="st-btn small">+ Add scholar</a>
+      </h2>
+      <table class="st-tbl">
+        <tr><th>Name</th><th>Affiliation</th><th>Works</th><th>Active</th></tr>
+        {% for s in scholars %}
+        <tr>
+          <td><a href="{% url 'studious:scholar_detail' slug=s.slug %}">{{ s.name }}</a></td>
+          <td class="meta">{{ s.affiliation|default:"—" }}</td>
+          <td class="meta">{{ s.works.count }}</td>
+          <td class="meta">{{ s.active_years|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" style="color:#6e7681;padding:0.8rem 0">
+          No scholars yet — <a href="{% url 'studious:scholar_add' %}"
+          style="color:#58a6ff">add one</a> to get started.
+        </td></tr>
+        {% endfor %}
+      </table>
+    </div>
+
+    <div class="st-card">
+      <h2>Recent works</h2>
+      <table class="st-tbl">
+        <tr><th>Title</th><th>Scholar</th><th>Year</th><th>Kind</th></tr>
+        {% for w in works_recent %}
+        <tr>
+          <td><a href="{% url 'studious:work_detail' slug=w.slug %}">{{ w.title|truncatechars:70 }}</a></td>
+          <td class="meta">{{ w.scholar.name }}</td>
+          <td class="meta">{{ w.year|default:"—" }}</td>
+          <td class="meta">{{ w.get_kind_display }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4" style="color:#6e7681;padding:0.8rem 0">
+          No works ingested yet.
+        </td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+
+  <div>
+    <div class="st-card">
+      <h2>Your arguments</h2>
+      {% if arguments %}
+      <ul style="list-style:none;padding:0;margin:0">
+        {% for a in arguments %}
+        <li style="padding:0.3rem 0;border-bottom:1px solid #161b22">
+          <a href="{% url 'studious:argument_detail' slug=a.slug %}"
+             style="color:#79c0ff;text-decoration:none">{{ a.title }}</a>
+          <div class="meta" style="color:#6e7681;font-size:0.72rem">
+            {{ a.get_kind_display }} · {{ a.items.count }} claims ·
+            {{ a.modified_at|date:"Y-m-d" }}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      <p style="margin:0.6rem 0 0">
+        <a href="{% url 'studious:argument_new' %}" class="st-btn small">+ New argument</a>
+        <a href="{% url 'studious:argument_list' %}"
+           class="st-btn secondary small">All →</a>
+      </p>
+      {% else %}
+      <p style="color:#6e7681">
+        None yet. Extract claims from at least two works, then
+        <a href="{% url 'studious:argument_new' %}" style="color:#58a6ff">scaffold an argument</a>.
+      </p>
+      {% endif %}
+    </div>
+
+    <div class="st-card">
+      <h2>Stats</h2>
+      <table class="st-tbl">
+        <tr><td>Scholars</td><td class="meta">{{ scholar_count }}</td></tr>
+        <tr><td>Works</td><td class="meta">{{ work_count }}</td></tr>
+        <tr><td>Claims</td><td class="meta">{{ claim_count }}</td></tr>
+      </table>
+    </div>
+
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        Domains
+      </h2>
+      {% if domains %}
+      <div>
+        {% for d in domains %}
+          <span class="st-chip">{{ d.name }}</span>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p style="color:#6e7681">
+        None yet. Domains are broad field labels (e.g. "philosophy of mind")
+        that works can be tagged with.
+      </p>
+      {% endif %}
+      <form method="post" action="{% url 'studious:domain_add' %}"
+            style="display:flex;gap:0.4rem;margin-top:0.6rem">
+        {% csrf_token %}
+        <input name="name" placeholder="new domain name"
+               style="flex:1;background:#0d1117;color:#c9d1d9;
+                      border:1px solid #30363d;border-radius:3px;
+                      padding:0.3rem 0.5rem;font-size:0.78rem">
+        <button type="submit" class="st-btn small secondary">Add</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

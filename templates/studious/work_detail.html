@@ -1,0 +1,149 @@
+{% extends "studious/_base.html" %}
+
+{% block title %}{{ work.title }} — Studious{% endblock %}
+
+{% block studious %}
+<h1>{{ work.title }}</h1>
+<p class="lede">
+  <a href="{% url 'studious:scholar_detail' slug=work.scholar.slug %}"
+     style="color:#58a6ff">{{ work.scholar.name }}</a>
+  {% if work.year %} · {{ work.year }}{% endif %}
+  · {{ work.get_kind_display }}
+  {% if work.doi %} · <span class="meta">DOI: {{ work.doi }}</span>{% endif %}
+  {% if work.url %}
+    · <a href="{{ work.url }}" target="_blank" style="color:#58a6ff">source ↗</a>
+  {% endif %}
+</p>
+
+<div class="st-grid">
+  <div>
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        Claims ({{ claims.count }})
+        <span>
+          <form method="post"
+                action="{% url 'studious:work_extract_claims' slug=work.slug %}"
+                style="display:inline">
+            {% csrf_token %}
+            <button type="submit" class="st-btn small"
+                    title="Heuristic sentence extraction.">Extract claims</button>
+          </form>
+          <a href="{% url 'studious:claim_add' slug=work.slug %}"
+             class="st-btn small secondary">+ Hand-written</a>
+        </span>
+      </h2>
+      {% if claims %}
+      <table class="st-tbl">
+        <tr><th></th><th>Claim</th><th>Kind</th>
+            <th>Score</th><th></th></tr>
+        {% for c in claims %}
+        <tr>
+          <td class="meta">{{ c.order }}</td>
+          <td>
+            <div class="st-excerpt">{{ c.text }}</div>
+            {% if c.page_ref %}<span class="meta">{{ c.page_ref }}</span>{% endif %}
+            {% if c.auto_extracted %}<span class="st-chip auto">auto</span>{% endif %}
+          </td>
+          <td><span class="st-chip kind">{{ c.get_kind_display }}</span></td>
+          <td class="meta">{% if c.score %}{{ c.score|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="actions">
+            <a href="{% url 'studious:claim_edit' pk=c.pk %}" title="edit">✎</a>
+            <form method="post"
+                  action="{% url 'studious:claim_delete' pk=c.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="x" title="delete">×</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p style="color:#6e7681">
+        No claims yet. Use <em>Extract claims</em> to let Studious
+        propose candidates, or add one by hand.
+      </p>
+      {% endif %}
+    </div>
+
+    {% if work.abstract %}
+    <div class="st-card">
+      <h2>Abstract</h2>
+      <div class="st-excerpt">{{ work.abstract|linebreaksbr }}</div>
+    </div>
+    {% endif %}
+
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        Full text
+        <span class="meta">
+          {{ work.token_count }} tokens
+          {% if work.full_text %}
+          · {{ work.full_text|length }} chars
+          {% endif %}
+        </span>
+      </h2>
+      {% if work.full_text %}
+      <details>
+        <summary style="cursor:pointer;color:#8b949e;font-size:0.78rem">Show text</summary>
+        <div class="st-text" style="max-height:520px;overflow-y:auto;
+                                    margin-top:0.5rem;padding:0.5rem;
+                                    background:#010409;border:1px solid #21262d;
+                                    border-radius:4px">{{ work.full_text }}</div>
+      </details>
+      {% else %}
+      <p style="color:#6e7681">
+        No body text. <a href="{% url 'studious:work_edit' slug=work.slug %}"
+        style="color:#58a6ff">Edit</a> to paste one in.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="st-card">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">
+        Top distinguishing terms
+        <form method="post"
+              action="{% url 'studious:work_analyze' slug=work.slug %}"
+              style="display:inline">
+          {% csrf_token %}
+          <button type="submit" class="st-btn small secondary"
+                  title="Re-score vs current corpus">Rescore</button>
+        </form>
+      </h2>
+      {% if top_terms %}
+      <p class="meta" style="margin:0 0 0.5rem">
+        TF-IDF against {{ work.analysis_json.corpus_size|default:"0" }} other work(s).
+      </p>
+      <ul class="st-terms" style="padding:0;margin:0;list-style:none">
+        {% for t in top_terms %}
+          <li>{{ t.0 }}<span class="w">·{{ t.1 }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p style="color:#6e7681">
+        Not scored yet — click <em>Rescore</em>, or ingest the text first.
+      </p>
+      {% endif %}
+    </div>
+
+    {% if work.domains.exists %}
+    <div class="st-card">
+      <h2>Domains</h2>
+      <div>
+        {% for d in work.domains.all %}
+          <span class="st-chip">{{ d.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="st-card">
+      <p style="margin:0">
+        <a href="{% url 'studious:work_edit' slug=work.slug %}"
+           class="st-btn secondary small">Edit work</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}
