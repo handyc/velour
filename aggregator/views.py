@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import Article, Feed, Newspaper
+from .models import FEED_KIND_CHOICES, Article, Feed, Newspaper
 
 
 @login_required
@@ -34,6 +34,47 @@ def feed_add(request):
         return redirect('aggregator:index')
     Feed.objects.create(name=name[:120], url=url[:500], topics=topics[:240])
     messages.success(request, f'Added feed "{name}".')
+    return redirect('aggregator:index')
+
+
+@login_required
+def feed_edit(request, pk):
+    f = get_object_or_404(Feed, pk=pk)
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        url = (request.POST.get('url') or '').strip()
+        if not name or not url:
+            messages.error(request, 'Name and URL are both required.')
+        else:
+            f.name = name[:120]
+            f.url = url[:500]
+            f.topics = (request.POST.get('topics') or '').strip()[:240]
+            kind = (request.POST.get('kind') or 'rss').strip()
+            if kind in dict(FEED_KIND_CHOICES):
+                f.kind = kind
+            f.active = request.POST.get('active') == '1'
+            f.save()
+            messages.success(request, f'Saved feed "{f.name}".')
+            return redirect('aggregator:index')
+    return render(request, 'aggregator/feed_edit.html', {
+        'feed':  f,
+        'kinds': FEED_KIND_CHOICES,
+        'article_count': f.articles.count(),
+    })
+
+
+@login_required
+@require_POST
+def feed_fetch(request, pk):
+    """Fetch just this one feed — useful after editing the URL or when
+    only one source is stale and you don't want to pound every feed."""
+    f = get_object_or_404(Feed, pk=pk)
+    new, upd, err = f.fetch_once()
+    if err:
+        messages.warning(request, f'{f.name}: {err}')
+    else:
+        messages.success(request,
+            f'{f.name}: {new} new / {upd} updated.')
     return redirect('aggregator:index')
 
 

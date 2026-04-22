@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ feed.name }} — Aggregator — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .fe-wrap { max-width: 720px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; font-size: 0.85rem; }
+  .fe-wrap h1 { margin: 0 0 0.2rem; font-size: 1.2rem; }
+  .fe-wrap .crumb { color: #6e7681; font-size: 0.72rem; margin-bottom: 0.8rem; }
+  .fe-wrap .crumb a { color: #58a6ff; text-decoration: none; }
+
+  .fe-card { background: #0d1117; border: 1px solid #21262d;
+             border-radius: 6px; padding: 0.9rem 1.1rem; margin-bottom: 1rem; }
+  .fe-card h2 { margin: 0 0 0.4rem; font-size: 0.82rem;
+                color: #8b949e; letter-spacing: 0.06em;
+                text-transform: uppercase; font-weight: 600; }
+
+  .fe-form { display: grid; gap: 0.6rem; }
+  .fe-form label { font-size: 0.72rem; color: #8b949e;
+                   display: flex; flex-direction: column; gap: 2px; }
+  .fe-form input, .fe-form select {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.35rem 0.55rem; font-size: 0.85rem;
+    font-family: inherit;
+  }
+  .fe-form .row2 { display: grid; grid-template-columns: 1fr 1fr;
+                   gap: 0.6rem; }
+  .fe-form .check { flex-direction: row; align-items: center; gap: 0.5rem;
+                    color: #c9d1d9; font-size: 0.82rem; }
+
+  .fe-btn {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.4rem 1rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.82rem; text-decoration: none; display: inline-block;
+    font-family: inherit;
+  }
+  .fe-btn.secondary { background: #21262d; border-color: #30363d;
+                      color: #c9d1d9; }
+  .fe-btn.danger { background: #5a1d1d; border-color: #8b2c2c; }
+
+  .fe-meta { color: #6e7681; font-size: 0.76rem; line-height: 1.6; }
+  .fe-meta .err { color: #f85149; }
+  .fe-actions { display: flex; gap: 0.5rem; align-items: center;
+                margin-top: 0.4rem; }
+
+  .msg-block { padding: 0.4rem 0.7rem; border-left: 2px solid #30363d;
+               font-size: 0.78rem; margin-bottom: 0.6rem; background: #0d1117; }
+  .msg-block.error   { border-color: #8b2c2c; color: #ffa198; }
+  .msg-block.success { border-color: #2ea043; color: #2ea043; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fe-wrap">
+
+<div class="crumb">
+  <a href="{% url 'aggregator:index' %}">Aggregator</a> ·
+  edit feed
+</div>
+<h1>{{ feed.name }}</h1>
+
+{% if messages %}
+  {% for m in messages %}
+  <div class="msg-block {{ m.tags }}">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="fe-card">
+  <h2>Details</h2>
+  <form method="post" class="fe-form">
+    {% csrf_token %}
+    <label>Name
+      <input type="text" name="name" required value="{{ feed.name }}">
+    </label>
+    <label>Feed URL
+      <input type="url" name="url" required value="{{ feed.url }}">
+    </label>
+    <div class="row2">
+      <label>Topics (comma-separated)
+        <input type="text" name="topics" value="{{ feed.topics }}"
+               placeholder="tech, world">
+      </label>
+      <label>Kind
+        <select name="kind">
+          {% for val, label in kinds %}
+          <option value="{{ val }}"
+                  {% if val == feed.kind %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <label class="check">
+      <input type="checkbox" name="active" value="1"
+             {% if feed.active %}checked{% endif %}>
+      Active (included in Fetch all + Compose)
+    </label>
+    <div class="fe-actions">
+      <button type="submit" class="fe-btn">Save</button>
+      <a href="{% url 'aggregator:index' %}" class="fe-btn secondary">Cancel</a>
+      <span style="flex:1"></span>
+      <form method="post" action="{% url 'aggregator:feed_fetch' feed.pk %}"
+            style="display:inline">
+        {% csrf_token %}
+        <button type="submit" class="fe-btn secondary">Fetch now</button>
+      </form>
+    </div>
+  </form>
+</div>
+
+<div class="fe-card">
+  <h2>Status</h2>
+  <div class="fe-meta">
+    <div><strong style="color:#c9d1d9">Articles stored:</strong>
+      <a href="{% url 'aggregator:articles' %}?feed={{ feed.pk }}"
+         style="color:#58a6ff;text-decoration:none">{{ article_count }}</a></div>
+    <div><strong style="color:#c9d1d9">Fetched:</strong>
+      {{ feed.fetch_count }} times,
+      {% if feed.last_fetched %}last at
+        {{ feed.last_fetched|date:"Y-m-d H:i" }}
+      {% else %}never fetched{% endif %}
+    </div>
+    <div><strong style="color:#c9d1d9">Created:</strong>
+      {{ feed.created_at|date:"Y-m-d H:i" }}</div>
+    {% if feed.last_error %}
+    <div><strong style="color:#c9d1d9">Last error:</strong>
+      <span class="err">{{ feed.last_error }}</span></div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="fe-card" style="border-left: 2px solid #6f1d1d">
+  <h2>Delete feed</h2>
+  <p class="fe-meta" style="margin:0 0 0.5rem">
+    Removes the feed <em>and all {{ article_count }} stored article{{ article_count|pluralize }}</em>.
+    Newspaper issues that already quoted them stay intact but the links go dead.
+  </p>
+  <form method="post" action="{% url 'aggregator:feed_delete' feed.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="fe-btn danger">Delete feed</button>
+  </form>
+</div>
+
+</div>
+{% endblock %}

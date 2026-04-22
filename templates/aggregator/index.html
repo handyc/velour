@@ -155,6 +155,13 @@
             </td>
             <td style="color:#6e7681">{{ f.fetch_count }}</td>
             <td class="actions">
+              <form method="post" action="{% url 'aggregator:feed_fetch' f.pk %}">
+                {% csrf_token %}
+                <button type="submit" title="fetch this feed now">↻</button>
+              </form>
+              <a href="{% url 'aggregator:feed_edit' f.pk %}"
+                 title="edit feed"
+                 style="color:#8b949e;text-decoration:none;padding:0 0.3rem;">✎</a>
               <form method="post" action="{% url 'aggregator:feed_toggle' f.pk %}">
                 {% csrf_token %}
                 <button type="submit" title="toggle active">
