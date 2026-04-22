@@ -52,11 +52,12 @@
 <div class="cv-page">
     <h1>Concept Vocabulary</h1>
     <p class="hint">
-        A toy inventory of universal semantic concepts — not words in any
-        particular language. Each concept is an idea, not a lexical item,
-        so it's neither declined nor conjugated. Three nested tiers:
-        the minimum ten, a Swadesh-scale core, and the full ~700-concept
-        dictionary.
+        A toy inventory of semantic concepts — not words in any particular
+        language. Each concept is an idea, not a lexical item, so it's
+        neither declined nor conjugated. Four nested tiers: the minimum
+        ten, a Swadesh-scale core, the full ~700-concept dictionary, and
+        a broad 10K-ish lexicon extending it with named taxa and cultural
+        specifics.
     </p>
 
     <div class="cv-tabs">
@@ -68,6 +69,9 @@
         </a>
         <a href="?tier=full" class="{% if tier_name == 'full' %}active{% endif %}">
             Full <span class="count">{{ counts.full }}</span>
+        </a>
+        <a href="?tier=10k"  class="{% if tier_name == '10k' %}active{% endif %}">
+            10K <span class="count">{{ counts.tenk }}</span>
         </a>
     </div>
 

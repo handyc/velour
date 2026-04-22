@@ -403,6 +403,8 @@ def concepts(request):
         rows = concepts_module.TIER_10
     elif tier_name == '100':
         rows = concepts_module.TIER_100
+    elif tier_name == '10k':
+        rows = concepts_module.TIER_10K
     else:
         tier_name = 'full'
         rows = concepts_module.TIER_FULL
@@ -430,5 +432,6 @@ def concepts(request):
             'ten':  len(concepts_module.TIER_10),
             'hun':  len(concepts_module.TIER_100),
             'full': len(concepts_module.TIER_FULL),
+            'tenk': len(concepts_module.TIER_10K),
         },
     })

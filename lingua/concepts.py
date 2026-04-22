@@ -900,6 +900,13 @@ TIER_FULL_ADDITIONS = [
 TIER_100 = TIER_10 + TIER_100_ADDITIONS
 TIER_FULL = TIER_100 + TIER_FULL_ADDITIONS
 
+# TIER_10K extends TIER_FULL with procedurally-expanded domain
+# vocabulary (species, tools, dishes, etc.). Lives in a sibling
+# module to keep this file navigable. Batches land incrementally.
+from .concepts_10k import TIER_10K_ADDITIONS  # noqa: E402
+
+TIER_10K = TIER_FULL + TIER_10K_ADDITIONS
+
 
 def as_dict(tier):
     """Turn one of the tier lists into {concept: (pos, gloss)}."""
@@ -912,6 +919,7 @@ def concepts(tier):
 
 
 if __name__ == '__main__':
-    print(f'TIER_10:   {len(TIER_10):4d} concepts')
-    print(f'TIER_100:  {len(TIER_100):4d} concepts')
-    print(f'TIER_FULL: {len(TIER_FULL):4d} concepts')
+    print(f'TIER_10:   {len(TIER_10):5d} concepts')
+    print(f'TIER_100:  {len(TIER_100):5d} concepts')
+    print(f'TIER_FULL: {len(TIER_FULL):5d} concepts')
+    print(f'TIER_10K:  {len(TIER_10K):5d} concepts')
