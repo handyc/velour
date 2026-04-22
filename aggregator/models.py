@@ -111,6 +111,12 @@ class Article(models.Model):
     url          = models.URLField(max_length=500)
     author       = models.CharField(max_length=160, blank=True)
     summary      = models.TextField(blank=True)
+    body_html    = models.TextField(blank=True,
+        help_text='Reader-mode HTML extracted from the article URL.')
+    body_text    = models.TextField(blank=True,
+        help_text='Plain-text form of the body — searchable.')
+    body_fetched_at = models.DateTimeField(null=True, blank=True)
+    body_error   = models.CharField(max_length=240, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     fetched_at   = models.DateTimeField(auto_now_add=True)
 
@@ -121,6 +127,43 @@ class Article(models.Model):
 
     def __str__(self):
         return self.title
+
+    def has_body(self):
+        return bool(self.body_html.strip())
+
+    def fetch_content(self):
+        """Download the URL and extract reader-mode body. Returns bool."""
+        import trafilatura
+        try:
+            downloaded = trafilatura.fetch_url(self.url)
+            if not downloaded:
+                self.body_error = 'download returned empty'
+                self.body_fetched_at = timezone.now()
+                self.save(update_fields=['body_error', 'body_fetched_at'])
+                return False
+            body_html = trafilatura.extract(
+                downloaded, output_format='html',
+                include_comments=False, include_tables=True,
+                include_images=True, include_links=True,
+                favor_recall=True,
+            ) or ''
+            body_text = trafilatura.extract(
+                downloaded, output_format='txt',
+                include_comments=False,
+            ) or ''
+        except Exception as exc:
+            self.body_error = f'extract failed: {exc}'[:240]
+            self.body_fetched_at = timezone.now()
+            self.save(update_fields=['body_error', 'body_fetched_at'])
+            return False
+
+        self.body_html = body_html
+        self.body_text = body_text
+        self.body_error = '' if body_html.strip() else 'no readable content'
+        self.body_fetched_at = timezone.now()
+        self.save(update_fields=['body_html', 'body_text',
+                                 'body_error', 'body_fetched_at'])
+        return bool(body_html.strip())
 
 
 class Newspaper(models.Model):

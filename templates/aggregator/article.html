@@ -46,6 +46,19 @@
   .no-summary {
     color: #6e7681; font-style: italic; padding: 1rem 0;
   }
+
+  .body-meta {
+    color: #6e7681; font-size: 0.7rem; margin: 0.8rem 0 0.2rem;
+    display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+  }
+  .body-meta form { display: inline; margin: 0; }
+  .body-meta button {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.15rem 0.5rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.7rem;
+  }
+  .body-meta .err { color: #f85149; }
+  .body-meta .ok { color: #2ea043; }
 </style>
 {% endblock %}
 
@@ -70,7 +83,9 @@
   </div>
 
   <div class="art-body">
-    {% if article.summary %}
+    {% if article.body_html %}
+      {{ article.body_html|safe }}
+    {% elif article.summary %}
       {{ article.summary|safe }}
     {% else %}
       <div class="no-summary">
@@ -78,6 +93,25 @@
         the feed. Click "Read at source" to see the full page.
       </div>
     {% endif %}
+  </div>
+
+  <div class="body-meta">
+    {% if article.body_fetched_at %}
+      {% if article.body_html %}
+        <span class="ok">● Full body extracted</span>
+      {% else %}
+        <span class="err">● Body extraction returned no readable content</span>
+      {% endif %}
+      <span>· {{ article.body_fetched_at|date:"Y-m-d H:i" }}</span>
+    {% elif article.body_error %}
+      <span class="err">● Body fetch failed: {{ article.body_error }}</span>
+    {% else %}
+      <span>Body not yet fetched.</span>
+    {% endif %}
+    <form method="post" action="{% url 'aggregator:article_refetch' pk=article.pk %}">
+      {% csrf_token %}
+      <button type="submit">Re-extract body</button>
+    </form>
   </div>
 
   <div class="art-actions">

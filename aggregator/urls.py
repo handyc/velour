@@ -16,4 +16,5 @@ urlpatterns = [
     path('issue/<slug:slug>/delete/', views.issue_delete, name='issue_delete'),
     path('articles/',         views.articles,      name='articles'),
     path('article/<int:pk>/', views.article,       name='article'),
+    path('article/<int:pk>/refetch/', views.article_refetch, name='article_refetch'),
 ]

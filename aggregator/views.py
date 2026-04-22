@@ -138,7 +138,9 @@ def articles(request):
         except (ValueError, Feed.DoesNotExist):
             feed = None
     if q:
-        qs = qs.filter(title__icontains=q) | qs.filter(summary__icontains=q)
+        qs = (qs.filter(title__icontains=q)
+              | qs.filter(summary__icontains=q)
+              | qs.filter(body_text__icontains=q))
         qs = qs.distinct()
     page = Paginator(qs, 50).get_page(request.GET.get('page'))
     return render(request, 'aggregator/articles.html', {
@@ -153,4 +155,19 @@ def articles(request):
 @login_required
 def article(request, pk):
     art = get_object_or_404(Article.objects.select_related('feed'), pk=pk)
+    if not art.body_fetched_at and not art.body_error:
+        art.fetch_content()
     return render(request, 'aggregator/article.html', {'article': art})
+
+
+@login_required
+@require_POST
+def article_refetch(request, pk):
+    """Force re-extraction of the article body."""
+    art = get_object_or_404(Article, pk=pk)
+    ok = art.fetch_content()
+    if ok:
+        messages.success(request, 'Re-extracted article body.')
+    else:
+        messages.warning(request, f'Re-fetch failed: {art.body_error or "unknown"}')
+    return redirect('aggregator:article', pk=pk)
