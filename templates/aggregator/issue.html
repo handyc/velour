@@ -15,6 +15,7 @@
     font-size: 1.02rem; line-height: 1.55;
     box-shadow: 0 10px 30px rgba(0,0,0,0.45);
   }
+  .paper.full { max-width: 760px; font-size: 1.05rem; }
   .paper .masthead {
     border-bottom: 3px double #1c1a17;
     padding-bottom: 0.8rem; margin-bottom: 1.3rem;
@@ -73,6 +74,13 @@
   .paper article .summary img,
   .paper article .summary iframe { display: none; }
 
+  .paper article .read-on {
+    display: inline-block; margin-top: 0.35rem;
+    font-size: 0.72rem; letter-spacing: 0.06em;
+    text-transform: uppercase; color: #594e3d;
+    text-decoration: none; border-bottom: 1px dotted #594e3d;
+  }
+
   /* Feature: the first story, full-width lead */
   .paper .lead {
     column-span: all;
@@ -81,6 +89,45 @@
   }
   .paper .lead h3 { font-size: 1.7rem; margin-bottom: 0.3rem; }
   .paper .lead .summary { font-size: 1rem; }
+
+  /* Full Edition — each article as a single-column long read */
+  .paper.full .feature {
+    border-bottom: 1px solid #c2b8a3; padding-bottom: 1.5rem;
+    margin-bottom: 1.8rem;
+  }
+  .paper.full .feature:last-child { border-bottom: 0; }
+  .paper.full .feature h3 {
+    font-size: 1.55rem; margin: 0 0 0.25rem;
+    line-height: 1.2;
+  }
+  .paper.full .feature .byline { font-size: 0.75rem; }
+  .paper.full .feature .body {
+    margin-top: 0.7rem; font-size: 1rem;
+    line-height: 1.65;
+  }
+  .paper.full .feature .body p { margin: 0 0 0.7rem; }
+  .paper.full .feature .body h1,
+  .paper.full .feature .body h2,
+  .paper.full .feature .body h3 {
+    font-size: 1.1rem; margin: 1rem 0 0.35rem;
+  }
+  .paper.full .feature .body img,
+  .paper.full .feature .body iframe { display: none; }
+  .paper.full .feature .body pre,
+  .paper.full .feature .body code {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.88rem; background: #ede6d5; padding: 0 0.2em;
+    border-radius: 2px;
+  }
+  .paper.full .feature .body blockquote {
+    margin: 0.5rem 0 0.7rem; padding-left: 0.8rem;
+    border-left: 3px solid #c2b8a3; color: #3a342b;
+    font-style: italic;
+  }
+  .paper.full .feature .missing {
+    font-size: 0.85rem; color: #594e3d; font-style: italic;
+    margin-top: 0.5rem;
+  }
 
   .paper .empty {
     text-align: center; color: #594e3d;
@@ -98,19 +145,24 @@
   .paper-actions {
     max-width: 980px; margin: 0 auto 0.5rem;
     display: flex; gap: 0.5rem; justify-content: flex-end;
-    font-size: 0.8rem;
+    font-size: 0.8rem; align-items: center; flex-wrap: wrap;
   }
   .paper-actions a, .paper-actions button {
     background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
     padding: 0.25rem 0.7rem; border-radius: 3px;
     text-decoration: none; cursor: pointer; font-size: 0.78rem;
   }
+  .paper-actions .mode-active {
+    background: #2c3443; border-color: #58a6ff; color: #79c0ff;
+  }
   .paper-actions .danger { background: #5a1d1d; border-color: #8b2c2c; }
+  .paper-actions form { margin: 0; }
 
   @media print {
     body { background: white !important; }
     .paper-actions, nav, header, footer.site { display: none !important; }
-    .paper { box-shadow: none; border: 0; margin: 0; }
+    .paper { box-shadow: none; border: 0; margin: 0; max-width: none; }
+    .paper.full .feature .body { font-size: 0.95rem; }
   }
 </style>
 {% endblock %}
@@ -119,15 +171,27 @@
 <div class="paper-actions">
   <a href="{% url 'aggregator:index' %}">← Aggregator</a>
   <a href="{% url 'aggregator:issues' %}">All issues</a>
+  {% if full %}
+    <a href="{% url 'aggregator:issue' slug=issue.slug %}">Broadsheet</a>
+    <span class="mode-active">Full edition</span>
+  {% else %}
+    <span class="mode-active">Broadsheet</span>
+    <a href="{% url 'aggregator:issue' slug=issue.slug %}?full=1">Full edition</a>
+  {% endif %}
+  <form method="post" action="{% url 'aggregator:issue_scrape' slug=issue.slug %}">
+    {% csrf_token %}
+    <button type="submit" title="Fetch reader-mode bodies for every article missing one">
+      Scrape bodies
+    </button>
+  </form>
   <a href="#" onclick="window.print();return false;">Print</a>
-  <form method="post" action="{% url 'aggregator:issue_delete' slug=issue.slug %}"
-        style="margin:0">
+  <form method="post" action="{% url 'aggregator:issue_delete' slug=issue.slug %}">
     {% csrf_token %}
     <button type="submit" class="danger">Delete</button>
   </form>
 </div>
 
-<div class="paper">
+<div class="paper{% if full %} full{% endif %}">
   <div class="masthead">
     <h1>{{ issue.title }}</h1>
     {% if issue.subtitle %}
@@ -140,7 +204,49 @@
     </div>
   </div>
 
-  {% if items %}
+  {% if not items %}
+    <div class="empty">
+      No stories to print — the window was empty.
+      <div style="margin-top:0.6rem">
+        <a href="{% url 'aggregator:index' %}"
+           style="color:#1c1a17">← back to Aggregator</a>
+      </div>
+    </div>
+  {% elif full %}
+    {# Full edition: every article in full, single column. #}
+    {% for item in items %}
+    <article class="feature">
+      <h3><a href="{{ item.article.url }}" target="_blank"
+             rel="noopener">{{ item.article.title }}</a></h3>
+      <div class="byline">
+        {{ item.article.feed.name }}{% if item.article.author %}
+          · {{ item.article.author }}{% endif %}
+        {% if item.article.published_at %}
+          · {{ item.article.published_at|date:"D d M Y · H:i" }}
+        {% endif %}
+      </div>
+      <div class="body">
+        {% if item.article.body_html %}
+          {{ item.article.body_html|safe }}
+        {% elif item.article.summary %}
+          {{ item.article.summary|safe }}
+          <div class="missing">
+            Body not yet scraped — use "Scrape bodies" above, or open the
+            source link.
+          </div>
+        {% else %}
+          <div class="missing">
+            No body available{% if item.article.body_error %}
+              — {{ item.article.body_error }}{% endif %}.
+            <a href="{{ item.article.url }}" target="_blank"
+               rel="noopener" style="color:#1c1a17">Open source ↗</a>
+          </div>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  {% else %}
+    {# Broadsheet: lead story, then two-column deck of teasers. #}
     {% with lead=items.0 %}
     <article class="lead">
       <h3><a href="{{ lead.article.url }}" target="_blank"
@@ -152,9 +258,13 @@
           · {{ lead.article.published_at|date:"D d M · H:i" }}
         {% endif %}
       </div>
-      {% if lead.article.summary %}
-      <div class="summary">{{ lead.article.summary|safe|truncatewords_html:80 }}</div>
+      {% if lead.article.body_text %}
+        <div class="summary">{{ lead.article.body_text|truncatewords:110|linebreaksbr }}</div>
+      {% elif lead.article.summary %}
+        <div class="summary">{{ lead.article.summary|safe|truncatewords_html:100 }}</div>
       {% endif %}
+      <a class="read-on"
+         href="{% url 'aggregator:article' pk=lead.article.pk %}">Read on Velour →</a>
     </article>
     {% endwith %}
 
@@ -169,20 +279,14 @@
             · {{ item.article.published_at|date:"D d M · H:i" }}
           {% endif %}
         </div>
-        {% if item.article.summary %}
-        <div class="summary">{{ item.article.summary|safe|truncatewords_html:45 }}</div>
+        {% if item.article.body_text %}
+          <div class="summary">{{ item.article.body_text|truncatewords:60|linebreaksbr }}</div>
+        {% elif item.article.summary %}
+          <div class="summary">{{ item.article.summary|safe|truncatewords_html:55 }}</div>
         {% endif %}
       </article>
       {% endif %}
     {% endfor %}
-    </div>
-  {% else %}
-    <div class="empty">
-      No stories to print — the window was empty.
-      <div style="margin-top:0.6rem">
-        <a href="{% url 'aggregator:index' %}"
-           style="color:#1c1a17">← back to Aggregator</a>
-      </div>
     </div>
   {% endif %}
 

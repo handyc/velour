@@ -13,6 +13,7 @@ urlpatterns = [
     path('compose/',          views.compose,       name='compose'),
     path('issues/',           views.issues,        name='issues'),
     path('issue/<slug:slug>/',        views.issue,        name='issue'),
+    path('issue/<slug:slug>/scrape/', views.issue_scrape, name='issue_scrape'),
     path('issue/<slug:slug>/delete/', views.issue_delete, name='issue_delete'),
     path('articles/',         views.articles,      name='articles'),
     path('article/<int:pk>/', views.article,       name='article'),

@@ -189,8 +189,14 @@ class Newspaper(models.Model):
 
     @classmethod
     def compose(cls, user, window_hours=24, max_per_feed=4, max_total=60,
-                title=None):
-        """Snapshot the latest articles into a new Newspaper. Returns the issue."""
+                title=None, scrape_bodies=False, scrape_limit=40):
+        """Snapshot the latest articles into a new Newspaper. Returns the issue.
+
+        If ``scrape_bodies`` is true, up to ``scrape_limit`` of the chosen
+        articles that don't already have a scraped body will be fetched
+        with trafilatura before the issue is saved — so the printed
+        newspaper renders actual article prose instead of RSS blurbs.
+        """
         now = timezone.now()
         cutoff = now - timezone.timedelta(hours=window_hours)
         chosen = []
@@ -213,6 +219,16 @@ class Newspaper(models.Model):
             if len(chosen) >= max_total:
                 break
 
+        scraped = 0
+        if scrape_bodies and chosen:
+            for art in chosen:
+                if scraped >= scrape_limit:
+                    break
+                if art.body_fetched_at or art.body_error:
+                    continue
+                art.fetch_content()
+                scraped += 1
+
         base_slug = slugify(f'issue-{now:%Y%m%d-%H%M}')
         slug = base_slug
         salt = 1
@@ -220,12 +236,16 @@ class Newspaper(models.Model):
             salt += 1
             slug = f'{base_slug}-{salt}'
 
+        subtitle = (f"{len(chosen)} stories · last {window_hours} h "
+                    f"· {len(per_feed_counts)} sources")
+        if scraped:
+            subtitle += f' · scraped {scraped}'
+
         issue = cls.objects.create(
             user=user,
             slug=slug,
             title=title or f"Velour Herald · {now:%a %d %b %Y %H:%M}",
-            subtitle=f"{len(chosen)} stories · last {window_hours} h "
-                     f"· {len(per_feed_counts)} sources",
+            subtitle=subtitle,
             window_hours=window_hours,
             article_count=len(chosen),
         )

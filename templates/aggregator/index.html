@@ -68,7 +68,8 @@
   .issue-list a { color: #79c0ff; text-decoration: none; }
   .issue-list .meta { color: #6e7681; font-size: 0.72rem; }
 
-  .compose-row { display: grid; grid-template-columns: 2fr 6rem auto auto;
+  .compose-row { display: grid;
+                 grid-template-columns: 2fr 5rem auto auto auto;
                  gap: 0.4rem; align-items: end; }
 </style>
 {% endblock %}
@@ -105,11 +106,16 @@
         <input type="checkbox" name="fetch" value="1" checked>
         <span style="color:#c9d1d9">Fetch first</span>
       </label>
+      <label style="justify-self:end">
+        <input type="checkbox" name="scrape" value="1">
+        <span style="color:#c9d1d9">Scrape bodies</span>
+      </label>
       <button type="submit" class="agg-btn">Compose →</button>
     </form>
     <p style="color:#6e7681;font-size:0.72rem;margin:0.4rem 0 0;">
       "Fetch first" pulls every active feed before composing (slow on first run,
-      &lt;1 s once warm). Without it, composes from already-stored articles.
+      &lt;1 s once warm). "Scrape bodies" also downloads the articles and
+      extracts reader-mode prose — slower, but yields a real newspaper.
     </p>
   </div>
 

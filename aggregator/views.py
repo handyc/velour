@@ -80,7 +80,8 @@ def fetch_now(request):
 @login_required
 @require_POST
 def compose(request):
-    """Snapshot a fresh newspaper. If ?fetch=1, pulls feeds first."""
+    """Snapshot a fresh newspaper. If ?fetch=1, pulls feeds first.
+    If ?scrape=1, also pulls reader-mode bodies for chosen articles."""
     if request.POST.get('fetch') == '1':
         for f in Feed.objects.filter(active=True):
             f.fetch_once()
@@ -89,8 +90,9 @@ def compose(request):
     except (TypeError, ValueError):
         window = 24
     title = (request.POST.get('title') or '').strip() or None
+    scrape = request.POST.get('scrape') == '1'
     issue = Newspaper.compose(user=request.user, window_hours=window,
-                              title=title)
+                              title=title, scrape_bodies=scrape)
     if issue.article_count == 0:
         messages.warning(request,
             "No articles in window — try fetching first or widening the window.")
@@ -102,10 +104,39 @@ def issue(request, slug):
     issue = get_object_or_404(Newspaper, slug=slug, user=request.user)
     items = (issue.items.select_related('article', 'article__feed')
                         .order_by('order'))
+    full = request.GET.get('full') == '1'
     return render(request, 'aggregator/issue.html', {
         'issue': issue,
         'items': items,
+        'full':  full,
     })
+
+
+@login_required
+@require_POST
+def issue_scrape(request, slug):
+    """Fetch reader-mode bodies for every article in this issue that
+    doesn't already have one. Caps at 60 to bound request time."""
+    issue = get_object_or_404(Newspaper, slug=slug, user=request.user)
+    items = (issue.items.select_related('article')
+                        .order_by('order')[:60])
+    scraped = 0
+    failed = 0
+    for it in items:
+        art = it.article
+        if art.body_fetched_at and not art.body_error:
+            continue
+        ok = art.fetch_content()
+        if ok:
+            scraped += 1
+        else:
+            failed += 1
+    if scraped or failed:
+        messages.success(request,
+            f'Scraped {scraped} bodies ({failed} failed).')
+    else:
+        messages.info(request, 'All bodies already scraped.')
+    return redirect('aggregator:issue', slug=issue.slug)
 
 
 @login_required
