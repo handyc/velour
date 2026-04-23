@@ -37,7 +37,13 @@
  *      append the winner's genome, chmod +x.
  *
  * Build:
- *   ./build.sh                # → ~18.5 KB hunter binary
+ *   ./build.sh                # → strip + append 4100-byte seed tail
+ *   cc hunter.c -o hunter     # also works — hunter bootstraps a
+ *                             # random palette + identity genome on
+ *                             # first run, writes winners with a
+ *                             # real tail so they're self-replicating
+ *                             # from then on. build.sh just makes
+ *                             # the first binary smaller (-Os -s).
  *
  * ────────────────────────────────────────────────────────────────── */
 
@@ -56,7 +62,13 @@
 #define NSIT       16384
 #define GBYTES     4096          /* K^7 * 2 bits / 8 */
 #define PAL_BYTES  4             /* one ANSI-256 index per cell state */
-#define TAIL_BYTES (PAL_BYTES + GBYTES)  /* total seed payload */
+/* 4-byte magic at the head of the tail so `cc hunter.c -o hunter`
+ * (no tail appended) is distinguishable from a real seeded binary.
+ * Without this, the last 4100 bytes of a plain-compiled ELF would
+ * masquerade as a tail and we'd step a grid using random .rodata. */
+#define MAGIC_BYTES 4
+#define TAIL_MAGIC "HXC4"        /* hex-CA class-4 marker */
+#define TAIL_BYTES (MAGIC_BYTES + PAL_BYTES + GBYTES)  /* 4104 bytes */
 #define GRID_W     14
 #define GRID_H     14
 #define HORIZON    25
@@ -69,11 +81,13 @@ typedef unsigned char u8;
 
 /* Seed tail layout appended to every hunter binary:
  *
- *   [ PAL_BYTES palette  ][  GBYTES packed genome  ]
+ *   [ MAGIC "HXC4" ][ PAL_BYTES palette ][ GBYTES packed genome ]
  *
- * The palette travels with the genome — inherited across copies,
- * crossed from one parent per child, mutated rarely. Ruleset and
- * aesthetic evolve together. */
+ * Total 4104 bytes. The magic lets us tell a real seeded binary from
+ * a plain `cc hunter.c -o hunter` where the last 4104 bytes are just
+ * .rodata or .eh_frame_hdr junk. The palette travels with the genome
+ * — inherited across copies, crossed from one parent per child,
+ * mutated rarely. Ruleset and aesthetic evolve together. */
 
 /* ── Packed-genome helpers ───────────────────────────────────────── */
 
@@ -195,6 +209,30 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
 
 /* ── Terminal rendering (ANSI 256-colour hex) ────────────────────── */
 
+/* Pick 4 distinct ANSI-256 indices in-place. Mostly saturated cube
+ * (16..231), occasional greys (232..255). Matches the palette-seed
+ * logic in build.sh, used when bootstrapping a missing tail. */
+static void invent_palette(u8 *pal) {
+    for (int i = 0; i < K; ) {
+        int c = ((rand() % 10) < 9)
+              ? (16 + rand() % 216)
+              : (232 + rand() % 24);
+        int ok = 1;
+        for (int j = 0; j < i; j++) if (pal[j] == c) { ok = 0; break; }
+        if (ok) pal[i++] = (u8)c;
+    }
+}
+
+/* Fill a 4096-byte buffer with the identity packed genome (every
+ * situation → self-colour). Matches build.sh's default seed and
+ * gives the GA a flat zero-activity floor to climb from. */
+static void identity_genome(u8 *g) {
+    memset(g + 0 * 1024, 0x00, 1024);
+    memset(g + 1 * 1024, 0x55, 1024);
+    memset(g + 2 * 1024, 0xAA, 1024);
+    memset(g + 3 * 1024, 0xFF, 1024);
+}
+
 static void render_grid(const u8 *grid, const u8 *pal) {
     printf("\x1b[H\x1b[J");  /* cursor home + clear screen */
     for (int y = 0; y < GRID_H; y++) {
@@ -249,7 +287,9 @@ static long file_size(const char *path) {
     return stat(path, &st) == 0 ? st.st_size : -1;
 }
 
-/* Read our own tail, splitting into palette + genome. */
+/* Read our own tail, verifying the magic + splitting into palette +
+ * genome. Returns -1 if the file is too small or the magic doesn't
+ * match — the caller then knows to bootstrap a fresh seed. */
 static int read_self_seed(const char *self_path, u8 *pal, u8 *genome) {
     long sz = file_size(self_path);
     if (sz < TAIL_BYTES) return -1;
@@ -258,20 +298,27 @@ static int read_self_seed(const char *self_path, u8 *pal, u8 *genome) {
     if (fseek(fp, sz - TAIL_BYTES, SEEK_SET) != 0) {
         fclose(fp); return -1;
     }
-    int ok = (fread(pal,    1, PAL_BYTES, fp) == PAL_BYTES)
-          && (fread(genome, 1, GBYTES,    fp) == GBYTES);
+    char magic[MAGIC_BYTES];
+    int ok = (fread(magic,  1, MAGIC_BYTES, fp) == MAGIC_BYTES)
+          && (memcmp(magic, TAIL_MAGIC, MAGIC_BYTES) == 0)
+          && (fread(pal,    1, PAL_BYTES,   fp) == PAL_BYTES)
+          && (fread(genome, 1, GBYTES,      fp) == GBYTES);
     fclose(fp);
     return ok ? 0 : -1;
 }
 
 /* Write a child: [engine bytes of self] ++ [child palette] ++
  * [child genome]. Always a full TAIL_BYTES tail; everything before
- * is the unchanged engine. */
+ * is the unchanged engine. If `self_has_tail` is 0 (we bootstrapped
+ * a missing tail at startup), the whole self file is engine bytes
+ * and we just append a tail to the copy. */
 static int write_child(const char *self_path, const char *dst_path,
-                       const u8 *pal, const u8 *genome) {
+                       const u8 *pal, const u8 *genome,
+                       int self_has_tail) {
     long sz = file_size(self_path);
-    if (sz < TAIL_BYTES) return -1;
-    long engine_size = sz - TAIL_BYTES;
+    if (sz < 0) return -1;
+    long engine_size = self_has_tail ? (sz - TAIL_BYTES) : sz;
+    if (engine_size < 0) return -1;
     FILE *in = fopen(self_path, "rb");
     if (!in) return -1;
     FILE *out = fopen(dst_path, "wb");
@@ -285,8 +332,9 @@ static int write_child(const char *self_path, const char *dst_path,
         fwrite(buf, 1, got, out);
         left -= got;
     }
-    fwrite(pal,    1, PAL_BYTES, out);
-    fwrite(genome, 1, GBYTES,    out);
+    fwrite(TAIL_MAGIC, 1, MAGIC_BYTES, out);
+    fwrite(pal,        1, PAL_BYTES,   out);
+    fwrite(genome,     1, GBYTES,      out);
     fclose(in); fclose(out);
     chmod(dst_path, 0755);
     return 0;
@@ -319,22 +367,29 @@ static void usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
-    /* Read our own tail to get the seed palette + genome — both modes
-     * need this. The palette is inherited from the binary itself, not
-     * re-rolled per run, so a given hunter always shows up in the same
-     * colours (until its children drift). */
+    /* Read our own tail to get the seed palette + genome. If there's
+     * no tail (plain `cc hunter.c -o hunter` with no build.sh step),
+     * bootstrap one on the fly: random palette + identity genome,
+     * matching build.sh's default seed. Remember we bootstrapped so
+     * write_child knows to treat the whole self file as engine bytes. */
     u8 seed_pal[PAL_BYTES];
     u8 seed[GBYTES];
+    int self_has_tail = 1;
     if (read_self_seed(argv[0], seed_pal, seed) != 0) {
-        fprintf(stderr, "error: can't read seed from '%s' "
-                "(did you append %d bytes of palette+genome to the engine?)\n",
-                argv[0], TAIL_BYTES);
-        return 2;
+        srand((unsigned)time(NULL));
+        invent_palette(seed_pal);
+        identity_genome(seed);
+        self_has_tail = 0;
+        fprintf(stderr,
+                "note: no tail on '%s' — bootstrapped random palette "
+                "+ identity genome (pal=[%d %d %d %d])\n",
+                argv[0], seed_pal[0], seed_pal[1], seed_pal[2], seed_pal[3]);
     }
 
     /* Display mode: no args → render + step for 10 ticks then exit.
      * RNG seeded from time() so the grid is different every run; the
-     * palette is fixed (it comes from the seed tail). */
+     * palette is fixed (it comes from the seed tail, or from the
+     * bootstrap above on a tail-less binary). */
     if (argc == 1) {
         srand((unsigned)time(NULL));
         display_seed(seed, seed_pal, (uint32_t)time(NULL), 10);
@@ -465,7 +520,7 @@ int main(int argc, char **argv) {
             if (stat(path, &probe) != 0) break;  /* free slot */
             next_slot++;
         }
-        int rc = write_child(argv[0], path, pals[w], pool[w]);
+        int rc = write_child(argv[0], path, pals[w], pool[w], self_has_tail);
         if (rc != 0) {
             fprintf(stderr, "  couldn't write %s\n", path);
         }

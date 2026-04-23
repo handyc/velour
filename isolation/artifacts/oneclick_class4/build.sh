@@ -1,10 +1,14 @@
 #!/bin/sh
-# Build the hunter binary: engine bytes + 4-byte palette + 4096-byte genome.
-# Tail is 4100 bytes; total ~14-16 KB after -Os -s.
+# Build the hunter binary: engine + 4-byte magic + 4-byte palette +
+# 4096-byte genome. Tail is 4104 bytes; total ~14-16 KB after -Os -s.
+#
+# `cc hunter.c -o hunter` also works — hunter detects a missing tail
+# via the magic and bootstraps one on first run. build.sh just makes
+# the first binary smaller (strip + --gc-sections).
 #
 # Usage:
 #   ./build.sh              # fresh random palette + identity genome
-#   ./build.sh winner_1     # reuse an existing winner's full tail (pal+genome)
+#   ./build.sh winner_1     # reuse an existing winner's full tail
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -16,12 +20,12 @@ cc -Os -s -Wall \
    "$HERE/hunter.c" -o "$HERE/hunter_engine"
 
 if [ $# -ge 1 ] && [ -f "$1" ]; then
-    # Slice off the tail 4100 bytes of an existing hunter binary:
-    # [4-byte palette][4096-byte genome]. Both inherited wholesale.
+    # Slice off the tail 4104 bytes of an existing hunter binary:
+    # [magic][palette][genome]. All inherited wholesale.
     echo "reusing seed from: $1"
-    tail -c 4100 "$1" > "$HERE/seed.bin"
+    tail -c 4104 "$1" > "$HERE/seed.bin"
 else
-    # Default seed: random palette + IDENTITY genome.
+    # Default seed: magic + random palette + IDENTITY genome.
     #
     # Palette: 4 distinct ANSI-256 indices, mostly from the saturated
     # 6×6×6 cube (16..231), occasional greys (232..255). Matches
@@ -46,6 +50,7 @@ while len(pal) < 4:
     c = random.randint(16, 231) if random.random() < 0.9 \
         else random.randint(232, 255)
     if c not in pal: pal.append(c)
+sys.stdout.buffer.write(b'HXC4')          # magic (must match TAIL_MAGIC)
 sys.stdout.buffer.write(bytes(pal))
 sys.stdout.buffer.write(b'\x00' * 1024 + b'\x55' * 1024
                         + b'\xaa' * 1024 + b'\xff' * 1024)
