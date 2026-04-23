@@ -48,8 +48,8 @@
 #define GRID_W     14
 #define GRID_H     14
 #define HORIZON    25
-#define POP        16
-#define GENS       8
+#define POP        30
+#define GENS       40
 #define TSEEDS     3
 #define WINNERS    3
 
@@ -112,6 +112,11 @@ static void seed_grid(u8 *grid, uint32_t seed) {
 
 /* ── Class-4 fitness ──────────────────────────────────────────────── */
 
+/* Global last-activity-tail, populated by fitness() so main() can
+ * report how the population is distributing across the edge-of-chaos
+ * band. Not thread-safe; this program is single-threaded. */
+static double last_activity_tail = 0.0;
+
 static double fitness(const u8 *genome, uint32_t grid_seed) {
     u8 a[GRID_W * GRID_H], b[GRID_W * GRID_H];
     seed_grid(a, grid_seed);
@@ -140,8 +145,13 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
     double avg = 0;
     for (int i = HORIZON - tail_n; i < HORIZON; i++) avg += act[i];
     avg /= tail_n;
+    last_activity_tail = avg;
 
-    /* Partial credit, same shape as det.search._score. */
+    /* Partial credit, but with a SMOOTH activity gradient so the GA
+     * has something to climb toward from either side of the band.
+     * Previous version used a hard activity ∈ [0.03, 0.30] cutoff
+     * which left genomes with avg=0.005 (dominantly identity) flat
+     * at score ~3.5 with no pull toward the class-4 peak at 0.12. */
     double score = 0;
     if (!uniform) score += 1.0;
     /* "Aperiodic" proxy: activity never fell to zero in the tail. */
@@ -149,9 +159,15 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
     for (int i = HORIZON - tail_n; i < HORIZON; i++)
         if (act[i] > 0.001) { aperiodic = 1; break; }
     if (aperiodic) score += 1.5;
-    /* Activity band: edge of chaos. */
-    if (avg >= 0.03 && avg <= 0.30)
-        score += 2.0 * (1.0 - my_fabs(avg - 0.12) / 0.18);
+    /* Activity — tent function peaking at 0.12, linearly falling to
+     * zero at activity=0 on one side and activity=0.75 on the other.
+     * No hard cutoff: even near-dead genomes get a tiny non-zero
+     * contribution that pulls them toward the edge-of-chaos peak. */
+    double activity_reward;
+    if (avg <= 0.12) activity_reward = avg / 0.12;            /* 0 → 1 */
+    else             activity_reward = (0.75 - avg) / 0.63;   /* 1 → 0 at 0.75 */
+    if (activity_reward < 0) activity_reward = 0;
+    score += 2.0 * activity_reward;
     /* Colour diversity. */
     if (diversity >= 2) score += 0.25 * (diversity < K ? diversity : K);
     return score;
@@ -230,11 +246,19 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    /* 2. Initial population: seed + POP-1 mutants */
+    /* 2. Initial population: seed + POP-1 heavily-mutated copies.
+     *
+     * Rate 0.05 ≈ 820 situation-flips per child. From the identity
+     * seed that's enough to inject non-trivial activity into an
+     * otherwise-dead substrate — the GA's job is then to prune back
+     * toward the class-4 band. From a random-chaos seed the same
+     * 820 flips don't change character (still chaos); that's why
+     * build.sh now defaults to the identity seed.
+     */
     u8 pool[POP][GBYTES];
     double fit[POP];
     memcpy(pool[0], seed, GBYTES);
-    for (int i = 1; i < POP; i++) mutate(pool[i], seed, 0.02);
+    for (int i = 1; i < POP; i++) mutate(pool[i], seed, 0.05);
 
     /* 3. GA */
     for (int gen = 0; gen < GENS; gen++) {
@@ -253,11 +277,15 @@ int main(int argc, char **argv) {
             fit[j + 1] = fv;
             memcpy(pool[j + 1], tmp, GBYTES);
         }
-        fprintf(stderr, "gen %2d: best=%.2f mean=",
-                gen + 1, fit[0]);
         double sum = 0;
         for (int i = 0; i < POP; i++) sum += fit[i];
-        fprintf(stderr, "%.2f\n", sum / POP);
+        /* Measure activity-tail of the best agent so the log shows
+         * whether we're still stuck at chaos (≈0.75), still at
+         * identity (≈0.0), or edging into the class-4 band (~0.1). */
+        fitness(pool[0], rseed);
+        fprintf(stderr,
+                "gen %2d: best=%.2f mean=%.2f best_activity=%.3f\n",
+                gen + 1, fit[0], sum / POP, last_activity_tail);
 
         /* Breed bottom half from top half. */
         for (int i = POP / 2; i < POP; i++) {
