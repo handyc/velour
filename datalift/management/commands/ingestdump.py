@@ -2,7 +2,7 @@
 
     python manage.py ingestdump path/to/full_dump.sql \\
         --app myapp [--map table_map.json] [--truncate] \\
-        [--chunk 500] [--dry-run]
+        [--chunk 500] [--dry-run] [--no-fk-sweep]
 
 This runs on the machine that holds the original data. Nothing it
 reads or writes needs to leave the local environment.
@@ -21,14 +21,48 @@ Table-to-model resolution:
   ``<app>.FooBar`` (i.e. Django's default ``<app>_<modellower>``
   table name, reversed — we strip the ``<app>_`` prefix if present
   and PascalCase what's left).
-* Pass ``--map table_map.json`` with ``{"src_table": "app.Model",
-  …}`` to override.
+* Pass ``--map table_map.json`` with entries in one of two forms:
+
+      {
+        "users":    "myapp.User",
+        "studies": {
+          "model":         "myapp.Study",
+          "drop_columns":  ["internal_flag"],
+          "value_maps":    {"study_type": {"Linguistics": "linguistics"}},
+          "synthesize":    {"username": "email"},
+          "dedupe_by":     "username"
+        }
+      }
+
 * Tables without a mapping are skipped with a warning.
 
 Column resolution: the INSERT's own column list is preferred. If the
 INSERT has no columns, the command reads them from the CREATE TABLE
 block in the same dump. Unknown columns on the model are dropped with
 a warning.
+
+The rich per-table spec supports five legacy-data knobs that come up
+on almost every port of a custom framework to Django:
+
+* ``drop_columns``: legacy columns to NOT send to the model (e.g.
+  Laravel ``remember_token`` when your Django model doesn't have one).
+* ``value_maps``: per-column enum translation, e.g. legacy
+  ``"Male"/"Female"`` to your model's choice keys ``"M"/"F"``. Use
+  the sentinel ``"__default__"`` to catch unknown values.
+* ``synthesize``: compute a Django field's value from another legacy
+  column on the same row, e.g. ``{"username": "email"}``. Falls back
+  to ``<fieldname>_<id>`` when the source column is null/empty.
+* ``dedupe_by``: after all row transforms but before bulk_create,
+  collapse rows that collide on this field — classic fix for legacy
+  tables where two rows share an email but Django needs a unique
+  username. The row with the highest legacy ``id`` wins.
+* ``model``: the usual "app.Model" target; only required in the rich
+  form (the string form IS the model).
+
+After every table is loaded, the ingest runs a SQLite
+``PRAGMA foreign_key_check`` sweep and drops child rows whose parent
+is missing — catches orphan appointments/junction rows from hard
+deletes in the legacy system. Disable with ``--no-fk-sweep``.
 """
 
 from __future__ import annotations
@@ -38,7 +72,7 @@ import re
 
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
 
 from datalift.dump_parser import iter_create_tables, iter_inserts
 
@@ -52,7 +86,6 @@ _COL_DEF_RE = re.compile(
 
 def _extract_column_order(ddl: str) -> list[str]:
     """Pull the column names out of a CREATE TABLE DDL block, in order."""
-    # Strip outer CREATE TABLE … ( … ) ENGINE=… ;
     body = ddl[ddl.index('(') + 1 : ddl.rindex(')')]
     cols: list[str] = []
     depth = 0
@@ -95,16 +128,87 @@ def _extract_column_order(ddl: str) -> list[str]:
 
 
 def _default_model_name(app_label: str, table: str) -> str:
-    """Guess a model name from a MySQL table name.
-
-    Strips the conventional ``<app>_`` prefix (Django's default table
-    naming), then PascalCases the remainder.
-    """
     stem = table
     prefix = app_label + '_'
     if stem.startswith(prefix):
         stem = stem[len(prefix):]
     return ''.join(part.capitalize() for part in stem.split('_') if part)
+
+
+def _apply_value_map(value, vmap):
+    """Translate a cell value through a per-column value_maps dict.
+
+    Recognises the sentinel ``"__default__"`` as the fallback for
+    unknown values. ``None`` passes through unchanged.
+    """
+    if value is None:
+        return None
+    if value in vmap:
+        return vmap[value]
+    if "__default__" in vmap:
+        return vmap["__default__"]
+    return value
+
+
+def _dedupe_rows(objs, key_field, report):
+    """Collapse rows that share a value on ``key_field``. Keeps the row
+    with the highest ``id`` (most recent in legacy systems that use
+    autoincrement). Returns (kept_objs, n_dropped).
+    """
+    by_key = {}
+    dropped = []
+    for obj in objs:
+        k = getattr(obj, key_field, None)
+        if k is None:
+            by_key[id(obj)] = obj  # unique by python id; will keep all
+            continue
+        prev = by_key.get(k)
+        if prev is None:
+            by_key[k] = obj
+            continue
+        win, los = ((obj, prev)
+                    if (getattr(obj, 'id', 0) or 0) > (getattr(prev, 'id', 0) or 0)
+                    else (prev, obj))
+        by_key[k] = win
+        dropped.append((getattr(los, 'id', None), k, getattr(win, 'id', None)))
+    if dropped:
+        report(f"  deduped {len(dropped)} row(s) on {key_field}:")
+        for loser_id, k, winner_id in dropped[:20]:
+            report(f"    legacy id {loser_id} ({k!r}) → superseded by id {winner_id}")
+        if len(dropped) > 20:
+            report(f"    … and {len(dropped) - 20} more")
+    return list(by_key.values()), len(dropped)
+
+
+def _fk_orphan_sweep(report):
+    """Drop child rows whose FK parent is missing (SQLite only).
+
+    Loops until `PRAGMA foreign_key_check` reports nothing — deleting
+    a child can't create a new orphan since we never touch parents,
+    but the loop is cheap insurance. Returns {table: count_dropped}.
+    """
+    dropped = {}
+    with connection.cursor() as c:
+        for _ in range(5):
+            c.execute("PRAGMA foreign_key_check")
+            violations = c.fetchall()
+            if not violations:
+                break
+            by_tbl = {}
+            for row in violations:
+                tbl, rowid = row[0], row[1]
+                by_tbl.setdefault(tbl, set()).add(rowid)
+            for tbl, rowids in by_tbl.items():
+                ids = sorted(rowids)
+                ph = ",".join(["%s"] * len(ids))
+                c.execute(
+                    f'DELETE FROM "{tbl}" WHERE rowid IN ({ph})', ids
+                )
+                dropped[tbl] = dropped.get(tbl, 0) + len(ids)
+    for tbl, n in dropped.items():
+        report(f"  dropped {n} orphan row(s) from {tbl} "
+               "(missing parent in legacy data)")
+    return dropped
 
 
 class Command(BaseCommand):
@@ -118,7 +222,8 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             '--map', default=None,
-            help='JSON file mapping source-table-name → "app.Model".',
+            help='JSON file mapping source-table-name → "app.Model" '
+                 'or a rich spec dict (see module docstring).',
         )
         parser.add_argument(
             '--truncate', action='store_true',
@@ -131,6 +236,11 @@ class Command(BaseCommand):
         parser.add_argument(
             '--dry-run', action='store_true',
             help='Parse and resolve; do not write to the database.',
+        )
+        parser.add_argument(
+            '--no-fk-sweep', action='store_true',
+            help='Skip the post-load PRAGMA foreign_key_check pass that '
+                 'drops child rows whose FK parent is missing.',
         )
 
     def handle(self, *args, **opts):
@@ -147,35 +257,52 @@ class Command(BaseCommand):
         except LookupError:
             raise CommandError(f'unknown app: {app_label}')
 
-        # Table → (columns, model) resolution.
         table_columns: dict[str, list[str]] = {}
         for name, ddl in iter_create_tables(text):
             table_columns[name] = _extract_column_order(ddl)
 
-        table_map: dict[str, str] = {}
+        raw_map: dict = {}
         if opts['map']:
             try:
                 with open(opts['map'], 'r', encoding='utf-8') as fh:
-                    table_map = json.load(fh)
+                    raw_map = json.load(fh)
             except OSError as e:
                 raise CommandError(f'cannot read map {opts["map"]}: {e}')
 
-        def resolve_model(table: str):
-            dotted = table_map.get(table)
-            if dotted:
-                app, model = dotted.split('.', 1)
+        def resolve_spec(table: str):
+            """Return (model, spec) or (None, None) for this table.
+
+            Spec is a normalized dict with keys drop_columns,
+            value_maps, synthesize, dedupe_by. The table map may give
+            either a plain "app.Model" string or a full dict.
+            """
+            entry = raw_map.get(table)
+            spec = {
+                "drop_columns": [],
+                "value_maps": {},
+                "synthesize": {},
+                "dedupe_by": None,
+            }
+            if isinstance(entry, dict):
+                dotted = entry.get("model") or f"{app_label}.{_default_model_name(app_label, table)}"
+                spec["drop_columns"] = list(entry.get("drop_columns", []))
+                spec["value_maps"] = dict(entry.get("value_maps", {}))
+                spec["synthesize"] = dict(entry.get("synthesize", {}))
+                spec["dedupe_by"] = entry.get("dedupe_by")
+            elif isinstance(entry, str):
+                dotted = entry
             else:
-                app = app_label
-                model = _default_model_name(app_label, table)
+                dotted = f"{app_label}.{_default_model_name(app_label, table)}"
             try:
-                return apps.get_model(app, model)
-            except LookupError:
-                return None
+                app, model = dotted.split('.', 1)
+                return apps.get_model(app, model), spec
+            except (LookupError, ValueError):
+                return None, None
 
         if opts['truncate'] and not opts['dry_run']:
             seen_models = set()
             for table, _, _ in iter_inserts(text):
-                model = resolve_model(table)
+                model, _ = resolve_spec(table)
                 if model and model not in seen_models:
                     model.objects.all().delete()
                     seen_models.add(model)
@@ -185,57 +312,85 @@ class Command(BaseCommand):
         total_out = 0
         skipped_tables: list[str] = []
 
-        for table, cols, rows in iter_inserts(text):
-            total_in += len(rows)
-            model = resolve_model(table)
-            if model is None:
-                skipped_tables.append(table)
-                continue
-            column_names = cols or table_columns.get(table)
-            if not column_names:
-                self.stderr.write(
-                    f'  ! {table}: no column list; skipping {len(rows)} row(s)')
-                continue
-            if len(column_names) != len(rows[0]):
-                self.stderr.write(
-                    f'  ! {table}: column count mismatch '
-                    f'({len(column_names)} cols, {len(rows[0])} values); skipping'
-                )
-                continue
+        # We accumulate all writes in one transaction so the FK-orphan
+        # sweep at the end sees a consistent graph.
+        with transaction.atomic():
+            for table, cols, rows in iter_inserts(text):
+                total_in += len(rows)
+                model, spec = resolve_spec(table)
+                if model is None:
+                    skipped_tables.append(table)
+                    continue
+                column_names = cols or table_columns.get(table)
+                if not column_names:
+                    self.stderr.write(
+                        f'  ! {table}: no column list; skipping '
+                        f'{len(rows)} row(s)')
+                    continue
+                if len(column_names) != len(rows[0]):
+                    self.stderr.write(
+                        f'  ! {table}: column count mismatch '
+                        f'({len(column_names)} cols, {len(rows[0])} values); '
+                        'skipping')
+                    continue
 
-            field_names = {f.column for f in model._meta.get_fields()
-                           if hasattr(f, 'column')}
-            field_names |= {f.name for f in model._meta.get_fields()
-                            if hasattr(f, 'name')}
+                field_names = {f.column for f in model._meta.get_fields()
+                               if hasattr(f, 'column')}
+                field_names |= {f.name for f in model._meta.get_fields()
+                                if hasattr(f, 'name')}
 
-            unknown = [c for c in column_names if c not in field_names]
-            if unknown:
-                self.stderr.write(
-                    f'  - {table}: dropping {len(unknown)} unknown column(s): '
-                    f'{unknown}'
-                )
+                drop_set = set(spec["drop_columns"])
+                unknown = [c for c in column_names
+                           if c not in field_names and c not in drop_set]
+                if unknown:
+                    self.stderr.write(
+                        f'  - {table}: dropping {len(unknown)} unknown column(s): '
+                        f'{unknown}'
+                    )
 
-            objs = []
-            for row in rows:
-                kwargs = {}
-                for col, val in zip(column_names, row):
-                    if col in field_names:
+                vmaps = spec["value_maps"]
+                synth = spec["synthesize"]
+
+                objs = []
+                for row in rows:
+                    row_dict = dict(zip(column_names, row))
+                    kwargs = {}
+                    for col, val in row_dict.items():
+                        if col in drop_set:
+                            continue
+                        if col not in field_names:
+                            continue
+                        if col in vmaps:
+                            val = _apply_value_map(val, vmaps[col])
                         kwargs[col] = val
-                objs.append(model(**kwargs))
+                    for dest, src in synth.items():
+                        kwargs[dest] = (row_dict.get(src)
+                                        or f"{dest}_{row_dict.get('id')}")
+                    objs.append(model(**kwargs))
 
-            if opts['dry_run']:
+                if spec["dedupe_by"]:
+                    objs, _ = _dedupe_rows(
+                        objs, spec["dedupe_by"], self.stdout.write
+                    )
+
+                if opts['dry_run']:
+                    self.stdout.write(
+                        f'  [dry] {table} → {model.__name__}: '
+                        f'{len(objs)} row(s) would be loaded')
+                    total_out += len(objs)
+                    continue
+
+                model.objects.bulk_create(objs, batch_size=opts['chunk'])
                 self.stdout.write(
-                    f'  [dry] {table} → {model.__name__}: '
-                    f'{len(objs)} row(s) would be loaded')
+                    f'  ✓ {table} → {model.__name__}: {len(objs)} row(s)')
                 total_out += len(objs)
-                continue
 
-            chunk = opts['chunk']
-            with transaction.atomic():
-                model.objects.bulk_create(objs, batch_size=chunk)
-            self.stdout.write(
-                f'  ✓ {table} → {model.__name__}: {len(objs)} row(s)')
-            total_out += len(objs)
+            # Sweep orphans inside the same atomic block so a violation
+            # leaves the DB unchanged.
+            if (not opts['dry_run']
+                    and not opts['no_fk_sweep']
+                    and connection.vendor == 'sqlite'):
+                _fk_orphan_sweep(self.stdout.write)
 
         if skipped_tables:
             self.stderr.write(
