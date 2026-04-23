@@ -236,3 +236,96 @@ def anonymize_upload(request):
                     pass
 
     return render(request, 'datalift/anonymize_upload.html')
+
+
+@login_required
+def port_upload(request):
+    """Upload a mysqldump; get back a zip of models.py + admin.py +
+    table_map.json + a README of next steps.
+
+    Everything runs locally in the Django process; nothing leaves the
+    machine. The zip is assembled in-memory.
+    """
+    if request.method == 'POST' and request.FILES.get('dump_file'):
+        import io
+        import json
+        import zipfile
+        from .model_generator import generate_all
+
+        uploaded = request.FILES['dump_file']
+        app_label = (request.POST.get('app_label') or '').strip() or 'app'
+        source_db = (request.POST.get('source_database') or '').strip()
+
+        try:
+            text = uploaded.read().decode('utf-8', errors='replace')
+        except Exception as e:
+            messages.error(request, f'cannot read dump: {e}')
+            return render(request, 'datalift/port_upload.html')
+
+        try:
+            models_src, admin_src, tmap = generate_all(
+                text, app_label=app_label, source_database=source_db,
+            )
+        except Exception as e:
+            messages.error(request, f'port failed while parsing the dump: {e}')
+            return render(request, 'datalift/port_upload.html')
+
+        n_tables = len(tmap.get('tables') or {})
+        readme = (
+            f"# Datalift port — {app_label}\n\n"
+            f"Generated from `{uploaded.name}`.\n"
+            f"{n_tables} model(s) inferred.\n\n"
+            f"## Files in this zip\n\n"
+            f"- `{app_label}/models.py` — one class per legacy table with\n"
+            f"  inferred field types, FK resolution, Laravel soft-delete\n"
+            f"  hints, TextChoices for ENUMs, sensible Meta, `__str__`.\n"
+            f"- `{app_label}/admin.py` — one `ModelAdmin` per model with\n"
+            f"  list_display / search_fields / list_filter /\n"
+            f"  date_hierarchy / raw_id_fields inferred.\n"
+            f"- `{app_label}/ingest/table_map.json` — starter map for\n"
+            f"  `manage.py ingestdump`: value_maps for ENUMs, drop_columns\n"
+            f"  for Laravel cruft, synthesize for users-without-username,\n"
+            f"  rewrite_laravel_passwords when a password column is found.\n\n"
+            f"## Install into your Django project\n\n"
+            f"```\n"
+            f"python manage.py startapp {app_label}   # if not yet created\n"
+            f"# extract the zip contents over the generated app skeleton:\n"
+            f"unzip datalift_port.zip -d .\n"
+            f"# then\n"
+            f"python manage.py makemigrations {app_label}\n"
+            f"python manage.py migrate\n"
+            f"python manage.py ingestdump <your-dump.sql> --app {app_label} "
+            f"--map {app_label}/ingest/table_map.json --truncate\n"
+            f"python manage.py createsuperuser\n"
+            f"python manage.py runserver\n"
+            f"```\n\n"
+            f"## Review checklist\n\n"
+            f"- Field types where the inference had to guess (ENUM keys\n"
+            f"  especially — the map's value_maps are identity-mapped by\n"
+            f"  default; change values when your Django choices use\n"
+            f"  different slugs).\n"
+            f"- Pluralisation — models.py handles common irregulars but\n"
+            f"  check verbose_name_plural on anything unusual.\n"
+            f"- Junction tables are flagged for M2M promotion in their\n"
+            f"  docstring. Promote by moving the relation to the parent\n"
+            f"  as `ManyToManyField(..., through=<JunctionModel>)`.\n"
+        )
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f'{app_label}/models.py', models_src)
+            zf.writestr(f'{app_label}/admin.py', admin_src)
+            zf.writestr(
+                f'{app_label}/ingest/table_map.json',
+                json.dumps(tmap, indent=2, ensure_ascii=False) + '\n',
+            )
+            zf.writestr('README.md', readme)
+
+        buf.seek(0)
+        resp = HttpResponse(buf.getvalue(), content_type='application/zip')
+        resp['Content-Disposition'] = (
+            f'attachment; filename="datalift_port_{app_label}.zip"'
+        )
+        return resp
+
+    return render(request, 'datalift/port_upload.html')

@@ -8,6 +8,7 @@ urlpatterns = [
     path('', views.job_list, name='job_list'),
     path('add/', views.job_add, name='job_add'),
     path('anonymize/', views.anonymize_upload, name='anonymize_upload'),
+    path('port/',      views.port_upload,      name='port_upload'),
     path('<slug:slug>/', views.job_detail, name='job_detail'),
     path('<slug:slug>/run/', views.job_run, name='job_run'),
     path('<slug:slug>/delete/', views.job_delete, name='job_delete'),

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Port a Legacy App — Datalift{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;">
+    <a href="{% url 'datalift:job_list' %}" style="color:#8b949e;text-decoration:none;font-size:0.85rem;">&larr; Jobs</a>
+    <h2 style="margin:0;">Port a Legacy App</h2>
+</div>
+
+<p style="color:#8b949e;margin-top:0;max-width:64ch;line-height:1.55;">
+    Drop a mysqldump here. Datalift generates a Django
+    <code>models.py</code>, <code>admin.py</code>, and a starter
+    <code>ingest/table_map.json</code> — the same output as
+    <code>manage.py port</code>, returned as a zip you unpack into
+    your project.
+</p>
+
+<p style="color:#6e7681;font-size:0.82rem;max-width:64ch;line-height:1.55;">
+    Everything runs locally in this Django process. The dump is read,
+    parsed, and discarded — no copies are persisted, nothing is sent
+    anywhere. Only the assembled zip is streamed back to the browser.
+</p>
+
+{% if messages %}
+    <div style="margin:0.8rem 0;">
+        {% for m in messages %}
+            <div style="background:#3b1212;border-left:2px solid #f85149;color:#ffdcd7;padding:0.5rem 0.8rem;margin-bottom:2px;font-size:0.85rem;border-radius:2px;">
+                {{ m }}
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" style="margin-top:1rem;max-width:36rem;">
+    {% csrf_token %}
+
+    <label style="color:#8b949e;font-size:0.85rem;display:block;margin-bottom:1rem;">
+        mysqldump file (.sql)<br>
+        <input type="file" name="dump_file" accept=".sql" required
+               style="margin-top:0.3rem;color:#c9d1d9;font-size:0.85rem;">
+    </label>
+
+    <label style="color:#8b949e;font-size:0.85rem;display:block;margin-bottom:1rem;">
+        Target app label<br>
+        <input type="text" name="app_label" required placeholder="myapp"
+               style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.32rem 0.55rem;border-radius:3px;font-size:0.85rem;width:18rem;margin-top:0.3rem;">
+        <span style="color:#6e7681;font-size:0.75rem;display:block;margin-top:0.2rem;">
+            Django app label that will hold the generated code. Used
+            as "app.Model" in the ingest map.
+        </span>
+    </label>
+
+    <label style="color:#8b949e;font-size:0.85rem;display:block;margin-bottom:1rem;">
+        Source database name <span style="color:#6e7681;">(optional)</span><br>
+        <input type="text" name="source_database" placeholder="luclla1q_example"
+               style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.32rem 0.55rem;border-radius:3px;font-size:0.85rem;width:18rem;margin-top:0.3rem;">
+        <span style="color:#6e7681;font-size:0.75rem;display:block;margin-top:0.2rem;">
+            Recorded in the map's <code>_meta</code> for later reference.
+        </span>
+    </label>
+
+    <button type="submit" style="background:#8957e5;color:#fff;border:1px solid #a371f7;padding:0.5rem 1.5rem;border-radius:4px;font-size:0.88rem;cursor:pointer;font-weight:600;">
+        Port &amp; Download Zip
+    </button>
+</form>
+
+<details style="margin-top:2rem;color:#8b949e;font-size:0.82rem;max-width:64ch;">
+    <summary style="cursor:pointer;">What the zip contains</summary>
+    <ul style="line-height:1.6;margin-top:0.4rem;">
+        <li><code>&lt;app&gt;/models.py</code> — one class per legacy
+            table with inferred field types (EmailField / URLField /
+            SlugField / TextChoices for ENUMs / FK resolution /
+            Laravel conventions).</li>
+        <li><code>&lt;app&gt;/admin.py</code> — one <code>ModelAdmin</code>
+            per model with inferred <code>list_display</code>,
+            <code>search_fields</code>, <code>list_filter</code>,
+            <code>date_hierarchy</code>, <code>raw_id_fields</code>.</li>
+        <li><code>&lt;app&gt;/ingest/table_map.json</code> — starter
+            map for <code>manage.py ingestdump</code> — value_maps
+            for ENUMs, drop_columns for Laravel cruft, synthesize
+            rules for users without usernames, Laravel bcrypt rewrite
+            when a password column is found.</li>
+        <li><code>README.md</code> — the step-by-step to migrate and
+            ingest.</li>
+    </ul>
+</details>
+{% endblock %}

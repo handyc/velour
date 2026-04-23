@@ -713,23 +713,219 @@ def generate_table_map(tables: List[Table], app_label: str,
 
         # synthesize username from email for users-like tables
         col_names = {c.name for c in t.columns}
+        is_user_table = any(k in t.name.lower()
+                            for k in ('user', 'account'))
         if ('username' not in col_names and 'email' in col_names
-                and any(k in t.name.lower() for k in ('user', 'account'))):
+                and is_user_table):
             spec['synthesize'] = {'username': 'email'}
             spec['dedupe_by'] = 'username'
+
+        # Laravel $2y$ bcrypt → Django bcrypt$$2b$ at load time
+        if is_user_table and 'password' in col_names:
+            spec['rewrite_laravel_passwords'] = 'password'
 
         out['tables'][t.name] = spec
 
     return out
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Admin-file generation
+# ═════════════════════════════════════════════════════════════════════
+
+# Column-name heuristics for what an admin would want to surface.
+_SEARCH_NAMES = {'name', 'title', 'label', 'slug', 'email', 'username',
+                 'code', 'headline', 'subject'}
+_LIST_FILTER_PATTERNS = ('status', 'active', 'approved', 'published',
+                         'state', 'role', 'kind', 'type', 'level')
+
+
+def _guess_list_display(t: Table) -> List[str]:
+    """Pick up to 6 columns worth showing in the admin list view."""
+    picks: List[str] = []
+    col_names = [c.name for c in t.columns]
+
+    # 'id' always if present (or django handles the PK link anyway)
+    if 'id' in col_names:
+        picks.append('id')
+
+    # Prioritised identifier columns
+    for candidate in ('name', 'title', 'slug', 'email', 'username',
+                      'code', 'label'):
+        if candidate in col_names and candidate not in picks:
+            picks.append(candidate)
+        if len(picks) >= 4:
+            break
+
+    # Append useful metadata columns
+    for candidate in ('status', 'active', 'approved', 'role', 'kind',
+                      'type', 'level', 'created_at', 'updated_at',
+                      'published_at'):
+        if candidate in col_names and candidate not in picks:
+            picks.append(candidate)
+        if len(picks) >= 6:
+            break
+
+    # Include first FK (as a useful join column) if we still have room
+    fk_cols = {fk.columns[0] for fk in t.foreign_keys if len(fk.columns) == 1}
+    for col in col_names:
+        if col in fk_cols and col not in picks and len(picks) < 6:
+            # FK fields are named without _id on the Django side
+            py_name = column_to_field_name(col)
+            if py_name.endswith('_id'):
+                py_name = py_name[:-3]
+            picks.append(py_name)
+
+    return picks
+
+
+def _guess_search_fields(t: Table) -> List[str]:
+    """Text-ish columns an operator is likely to search on."""
+    col_names = {c.name: c for c in t.columns}
+    picks = []
+    for c in t.columns:
+        low = c.name.lower()
+        if low in _SEARCH_NAMES or low.endswith('_name') or low.endswith('_title'):
+            # Only include if column is textual
+            raw = c.raw_type
+            if raw.startswith(('varchar', 'char')) or raw in (
+                    'text', 'tinytext', 'mediumtext', 'longtext'):
+                picks.append(column_to_field_name(c.name))
+    return picks[:4]
+
+
+def _guess_list_filter(t: Table) -> List[str]:
+    """Columns whose admin filter-panel would be useful — booleans,
+    choices, low-cardinality FKs, date columns."""
+    picks = []
+    fk_cols = {fk.columns[0] for fk in t.foreign_keys if len(fk.columns) == 1}
+    for c in t.columns:
+        low = c.name.lower()
+        raw = c.raw_type
+        if raw.startswith('tinyint(1)') or raw in ('boolean', 'bool'):
+            picks.append(column_to_field_name(c.name))
+        elif raw.startswith('enum('):
+            picks.append(column_to_field_name(c.name))
+        elif any(pat in low for pat in _LIST_FILTER_PATTERNS):
+            picks.append(column_to_field_name(c.name))
+        elif c.name in fk_cols and c.name != 'user_id':
+            # FKs can be useful filters — strip _id for the Django field
+            py_name = column_to_field_name(c.name)
+            if py_name.endswith('_id'):
+                py_name = py_name[:-3]
+            picks.append(py_name)
+    # Dedupe preserving order
+    seen = set()
+    out = []
+    for p in picks:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out[:5]
+
+
+def _guess_date_hierarchy(t: Table) -> Optional[str]:
+    """If there's a prominent date column, Django's admin gets a nicer
+    top-bar navigation from it."""
+    for candidate in ('created_at', 'published_at', 'date', 'dob',
+                      'application_date'):
+        if any(c.name == candidate for c in t.columns):
+            return candidate
+    return None
+
+
+def _guess_raw_id_fields(t: Table) -> List[str]:
+    """FKs that could explode a <select> widget — use raw id input
+    instead. Heuristic: FK to a table named users or babies or anything
+    likely to have many rows."""
+    HIGH_CARDINALITY = {'users', 'babies', 'posts', 'orders',
+                        'products', 'items', 'events'}
+    picks = []
+    for fk in t.foreign_keys:
+        if len(fk.columns) != 1:
+            continue
+        if fk.ref_table in HIGH_CARDINALITY:
+            py_name = column_to_field_name(fk.columns[0])
+            if py_name.endswith('_id'):
+                py_name = py_name[:-3]
+            picks.append(py_name)
+    return picks
+
+
+def generate_admin_py(tables: List[Table], app_label: str,
+                     source: str = '') -> str:
+    """Emit a full admin.py as a string — one ModelAdmin per non-
+    skipped table with inferred list_display, search_fields,
+    list_filter, date_hierarchy, raw_id_fields."""
+    model_names = [table_to_model_name(t.name, app_label) for t in tables
+                   if t.name not in {'migrations', 'password_resets',
+                                     'personal_access_tokens', 'failed_jobs'}]
+    if not model_names:
+        return ('# Auto-generated by datalift genmodels.\n'
+                '# No models to register.\n')
+
+    out: List[str] = [
+        '"""Auto-generated by datalift genmodels.',
+        '',
+        f'Source: {source or "mysqldump"}',
+        '',
+        'One ModelAdmin per generated model. Inferred defaults for',
+        'list_display / search_fields / list_filter / date_hierarchy /',
+        'raw_id_fields — tune as needed.',
+        '"""',
+        '',
+        'from django.contrib import admin',
+        '',
+        'from .models import (',
+    ]
+    for n in sorted(model_names):
+        out.append(f'    {n},')
+    out.append(')')
+    out.append('')
+    out.append('')
+
+    for t in tables:
+        if t.name in {'migrations', 'password_resets',
+                      'personal_access_tokens', 'failed_jobs'}:
+            continue
+        model = table_to_model_name(t.name, app_label)
+        list_display = _guess_list_display(t)
+        search_fields = _guess_search_fields(t)
+        list_filter = _guess_list_filter(t)
+        date_h = _guess_date_hierarchy(t)
+        raw_id = _guess_raw_id_fields(t)
+
+        out.append(f'@admin.register({model})')
+        out.append(f'class {model}Admin(admin.ModelAdmin):')
+        if list_display:
+            out.append(f'    list_display = {tuple(list_display)!r}')
+        if search_fields:
+            out.append(f'    search_fields = {tuple(search_fields)!r}')
+        if list_filter:
+            out.append(f'    list_filter = {tuple(list_filter)!r}')
+        if date_h:
+            out.append(f'    date_hierarchy = {date_h!r}')
+        if raw_id:
+            out.append(f'    raw_id_fields = {tuple(raw_id)!r}')
+        if not (list_display or search_fields or list_filter
+                or date_h or raw_id):
+            out.append('    pass')
+        out.append('')
+
+    return '\n'.join(out).rstrip() + '\n'
+
+
 # Convenience wrapper
 def generate_all(dump_text: str, app_label: str,
-                 source_database: str = '') -> tuple[str, dict]:
-    """One-shot: parse dump, return (models_py_source, table_map_dict)."""
+                 source_database: str = ''
+                 ) -> tuple[str, str, dict]:
+    """One-shot: parse dump, return
+    (models_py_source, admin_py_source, table_map_dict)."""
     tables = parse_dump(dump_text)
     models_src = generate_models_py(tables, app_label=app_label,
                                     source=source_database or 'dump')
+    admin_src = generate_admin_py(tables, app_label=app_label,
+                                  source=source_database or 'dump')
     tmap = generate_table_map(tables, app_label=app_label,
                               source_database=source_database)
-    return models_src, tmap
+    return models_src, admin_src, tmap

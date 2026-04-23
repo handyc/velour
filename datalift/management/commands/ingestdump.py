@@ -56,6 +56,9 @@ on almost every port of a custom framework to Django:
   collapse rows that collide on this field — classic fix for legacy
   tables where two rows share an email but Django needs a unique
   username. The row with the highest legacy ``id`` wins.
+* ``rewrite_laravel_passwords``: the name of a column that holds
+  Laravel bcrypt (``$2y$``) hashes. At load time they're rewritten to
+  Django's ``bcrypt$$2b$`` prefix so existing passwords keep working.
 * ``model``: the usual "app.Model" target; only required in the rich
   form (the string form IS the model).
 
@@ -282,6 +285,7 @@ class Command(BaseCommand):
                 "value_maps": {},
                 "synthesize": {},
                 "dedupe_by": None,
+                "rewrite_laravel_passwords": None,
             }
             if isinstance(entry, dict):
                 dotted = entry.get("model") or f"{app_label}.{_default_model_name(app_label, table)}"
@@ -289,6 +293,8 @@ class Command(BaseCommand):
                 spec["value_maps"] = dict(entry.get("value_maps", {}))
                 spec["synthesize"] = dict(entry.get("synthesize", {}))
                 spec["dedupe_by"] = entry.get("dedupe_by")
+                spec["rewrite_laravel_passwords"] = entry.get(
+                    "rewrite_laravel_passwords")
             elif isinstance(entry, str):
                 dotted = entry
             else:
@@ -350,6 +356,8 @@ class Command(BaseCommand):
 
                 vmaps = spec["value_maps"]
                 synth = spec["synthesize"]
+                pw_col = spec.get("rewrite_laravel_passwords")
+                n_pw_rewritten = 0
 
                 objs = []
                 for row in rows:
@@ -362,11 +370,21 @@ class Command(BaseCommand):
                             continue
                         if col in vmaps:
                             val = _apply_value_map(val, vmaps[col])
+                        if (col == pw_col and isinstance(val, str)
+                                and val.startswith('$2y$')):
+                            val = 'bcrypt$' + val.replace(
+                                '$2y$', '$2b$', 1)
+                            n_pw_rewritten += 1
                         kwargs[col] = val
                     for dest, src in synth.items():
                         kwargs[dest] = (row_dict.get(src)
                                         or f"{dest}_{row_dict.get('id')}")
                     objs.append(model(**kwargs))
+
+                if n_pw_rewritten:
+                    self.stdout.write(
+                        f'  rewrote {n_pw_rewritten} Laravel $2y$ password '
+                        f'hash(es) → Django bcrypt$$2b$ format')
 
                 if spec["dedupe_by"]:
                     objs, _ = _dedupe_rows(
