@@ -61,6 +61,38 @@ def _hex_neighbors_valid(grid, r, c, W, H):
             if 0 <= nr < H and 0 <= nc < W]
 
 
+def step_packed(grid, W, H, packed):
+    """Advance the grid one tick using a ``PackedRuleset``.
+
+    Equivalent result to ``step_exact`` when the packed ruleset was
+    materialised from the same explicit rule list (see
+    ``PackedRuleset.from_explicit``), but O(1) per cell with a single
+    memory fetch — no hash, no wildcard walk. The packed blob fits
+    entirely in L1 cache on any modern CPU.
+
+    ``packed`` is an ``automaton.packed.PackedRuleset`` instance.
+    """
+    next_grid = [[0] * W for _ in range(H)]
+    K = packed.n_colors
+    # Precompute the K^i weights inline — marginal speedup on a hot loop.
+    w0, w1, w2, w3, w4, w5 = (K**6, K**5, K**4, K**3, K**2, K**1)
+    bits = packed.bits_per_cell
+    mask = (1 << bits) - 1
+    data = packed.data
+    for r in range(H):
+        for c in range(W):
+            self_c = grid[r][c]
+            nbs = _hex_neighbors_padded(grid, r, c, W, H)
+            idx = (self_c * w0
+                   + nbs[0] * w1 + nbs[1] * w2 + nbs[2] * w3
+                   + nbs[3] * w4 + nbs[4] * w5 + nbs[5])
+            bit_offset = idx * bits
+            byte_i = bit_offset >> 3
+            bit_i = bit_offset & 7
+            next_grid[r][c] = (data[byte_i] >> bit_i) & mask
+    return next_grid
+
+
 def step_exact(grid, W, H, exact_rules):
     """Apply exact-match rules. `exact_rules` is a list of dicts with
     keys s (self color), n (6-tuple neighbor colors), r (result color);

@@ -72,10 +72,17 @@ def _rules_hash(rules):
     return hashlib.sha1(payload).hexdigest()[:16]
 
 
-def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed):
+def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
+                      packed=None):
     """Run a ruleset forward up to `horizon` ticks from a seeded
     random grid. Stops early if we detect a short cycle. Returns
-    (analysis_dict, final_grid, prev_grid)."""
+    (analysis_dict, final_grid, prev_grid).
+
+    When ``packed`` is a ``PackedRuleset`` instance, the per-tick
+    simulator is ``step_packed`` — one memory fetch per cell per
+    tick, no wildcard walk. Falls back to ``step_exact`` otherwise.
+    """
+    from automaton.detector import step_packed
     grid = engine.seeded_random_grid(W, H, n_colors, grid_seed)
     history = [grid]
     prev = grid
@@ -83,7 +90,10 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed):
     period = None
     entered_at = None
     for t in range(1, horizon + 1):
-        nxt = step_exact(grid, W, H, rules)
+        if packed is not None:
+            nxt = step_packed(grid, W, H, packed)
+        else:
+            nxt = step_exact(grid, W, H, rules)
         activity_samples.append(engine.activity_rate(grid, nxt))
         history.append(nxt)
         prev = grid
