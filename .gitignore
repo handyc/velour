@@ -84,3 +84,7 @@ memory/
 /byte_model_parity
 /byte_model_sampled
 /byte_model_*.ckpt
+
+# --- Isolation oneclick-hex-class4 compiled hunter (keep .c + .py source) -
+/isolation/artifacts/oneclick_class4/hunter
+/isolation/artifacts/oneclick_class4/winner_*

@@ -2,15 +2,18 @@
  *
  * Layout:
  *
- *   [ ELF: engine bytes (~10 KB of -O2 code) ][ 4096-byte seed genome ]
+ *   [ ELF: engine bytes (~10 KB of -Os code) ][ 4-byte palette ][ 4096-byte genome ]
  *
- * Total size: ~14 KB when -O2 + strip. Target: under 16 KB.
+ * Total size: ~14 KB when -Os + strip. Target: under 16 KB.
  *
- * The seed genome is ALWAYS the last 4096 bytes of the binary itself.
- * There is no linked-in constant for the seed — we read ``argv[0]``
- * and slice off its tail. This lets us build the engine once and then
- * ship many hunters (one per genome) as ``cat engine_bytes genome.bin
- * > hunter_N``, no recompile needed.
+ * The seed tail is ALWAYS the last 4100 bytes of the binary itself:
+ * 4 bytes of palette (one ANSI-256 index per cell state) followed by
+ * a 4096-byte packed genome. There is no linked-in constant for the
+ * seed — we read ``argv[0]`` and slice off its tail. This lets us
+ * build the engine once and then ship many hunters (one per seed)
+ * as ``cat engine_bytes seed.bin > hunter_N``, no recompile needed.
+ * Palette and genome travel together through crossover and mutation
+ * so each lineage keeps its own look.
  *
  * Two modes:
  *
@@ -52,6 +55,8 @@
 #define K          4
 #define NSIT       16384
 #define GBYTES     4096          /* K^7 * 2 bits / 8 */
+#define PAL_BYTES  4             /* one ANSI-256 index per cell state */
+#define TAIL_BYTES (PAL_BYTES + GBYTES)  /* total seed payload */
 #define GRID_W     14
 #define GRID_H     14
 #define HORIZON    25
@@ -61,6 +66,14 @@
 #define WINNERS    3
 
 typedef unsigned char u8;
+
+/* Seed tail layout appended to every hunter binary:
+ *
+ *   [ PAL_BYTES palette  ][  GBYTES packed genome  ]
+ *
+ * The palette travels with the genome — inherited across copies,
+ * crossed from one parent per child, mutated rarely. Ruleset and
+ * aesthetic evolve together. */
 
 /* ── Packed-genome helpers ───────────────────────────────────────── */
 
@@ -182,36 +195,12 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
 
 /* ── Terminal rendering (ANSI 256-colour hex) ────────────────────── */
 
-/* Palette for the four cell states. Populated at start of display
- * mode by choose_palette() — each run picks a fresh combination. */
-static int ANSI_COLOURS[K];
-
-/* Pick 4 distinct 256-colour ANSI codes, mostly from the 216-colour
- * cube (16..231) which is the saturated/bright range, with occasional
- * greys (232..255) for contrast. Re-rolls on dup so every cell state
- * gets a visibly distinct colour. */
-static void choose_palette(void) {
-    for (int i = 0; i < K; ) {
-        int c;
-        /* 90% cube, 10% greyscale for variety. */
-        if ((rand() % 10) < 9) c = 16 + rand() % 216;
-        else                   c = 232 + rand() % 24;
-        /* Reject if too close to an already-picked colour in 6×6×6
-         * cube space — avoids near-indistinguishable palettes. */
-        int ok = 1;
-        for (int j = 0; j < i; j++) {
-            if (ANSI_COLOURS[j] == c) { ok = 0; break; }
-        }
-        if (ok) ANSI_COLOURS[i++] = c;
-    }
-}
-
-static void render_grid(const u8 *grid) {
+static void render_grid(const u8 *grid, const u8 *pal) {
     printf("\x1b[H\x1b[J");  /* cursor home + clear screen */
     for (int y = 0; y < GRID_H; y++) {
         if (y & 1) putchar(' ');            /* offset odd rows for hex */
         for (int x = 0; x < GRID_W; x++) {
-            printf("\x1b[48;5;%dm  ", ANSI_COLOURS[grid[y * GRID_W + x]]);
+            printf("\x1b[48;5;%dm  ", pal[grid[y * GRID_W + x]]);
         }
         printf("\x1b[0m\n");
     }
@@ -219,22 +208,21 @@ static void render_grid(const u8 *grid) {
 }
 
 /* Display mode: seed a random grid, render + step for `ticks` frames.
- * Sleeps a few hundred ms between frames so the eye can follow it. */
-static void display_seed(const u8 *seed, uint32_t grid_seed, int ticks) {
-    choose_palette();
+ * The palette comes from the seed tail — it's part of the inherited
+ * genome, not re-rolled every run. */
+static void display_seed(const u8 *genome, const u8 *pal,
+                         uint32_t grid_seed, int ticks) {
     u8 a[GRID_W * GRID_H], b[GRID_W * GRID_H];
     seed_grid(a, grid_seed);
     for (int t = 0; t <= ticks; t++) {
-        render_grid(a);
+        render_grid(a, pal);
         printf("tick %d / %d  palette=[%d %d %d %d]\n",
-               t, ticks,
-               ANSI_COLOURS[0], ANSI_COLOURS[1],
-               ANSI_COLOURS[2], ANSI_COLOURS[3]);
+               t, ticks, pal[0], pal[1], pal[2], pal[3]);
         fflush(stdout);
         if (t == ticks) break;
-        step_grid(seed, a, b);
+        step_grid(genome, a, b);
         memcpy(a, b, sizeof a);
-        usleep(150000);  /* ~6.7 fps */
+        usleep(150000);
     }
 }
 
@@ -261,22 +249,29 @@ static long file_size(const char *path) {
     return stat(path, &st) == 0 ? st.st_size : -1;
 }
 
-static int read_self_seed(const char *self_path, u8 *out) {
+/* Read our own tail, splitting into palette + genome. */
+static int read_self_seed(const char *self_path, u8 *pal, u8 *genome) {
     long sz = file_size(self_path);
-    if (sz < GBYTES) return -1;
+    if (sz < TAIL_BYTES) return -1;
     FILE *fp = fopen(self_path, "rb");
     if (!fp) return -1;
-    if (fseek(fp, sz - GBYTES, SEEK_SET) != 0) { fclose(fp); return -1; }
-    int ok = fread(out, 1, GBYTES, fp) == GBYTES;
+    if (fseek(fp, sz - TAIL_BYTES, SEEK_SET) != 0) {
+        fclose(fp); return -1;
+    }
+    int ok = (fread(pal,    1, PAL_BYTES, fp) == PAL_BYTES)
+          && (fread(genome, 1, GBYTES,    fp) == GBYTES);
     fclose(fp);
     return ok ? 0 : -1;
 }
 
+/* Write a child: [engine bytes of self] ++ [child palette] ++
+ * [child genome]. Always a full TAIL_BYTES tail; everything before
+ * is the unchanged engine. */
 static int write_child(const char *self_path, const char *dst_path,
-                       const u8 *genome) {
+                       const u8 *pal, const u8 *genome) {
     long sz = file_size(self_path);
-    if (sz < GBYTES) return -1;
-    long engine_size = sz - GBYTES;
+    if (sz < TAIL_BYTES) return -1;
+    long engine_size = sz - TAIL_BYTES;
     FILE *in = fopen(self_path, "rb");
     if (!in) return -1;
     FILE *out = fopen(dst_path, "wb");
@@ -290,10 +285,28 @@ static int write_child(const char *self_path, const char *dst_path,
         fwrite(buf, 1, got, out);
         left -= got;
     }
-    fwrite(genome, 1, GBYTES, out);
+    fwrite(pal,    1, PAL_BYTES, out);
+    fwrite(genome, 1, GBYTES,    out);
     fclose(in); fclose(out);
     chmod(dst_path, 0755);
     return 0;
+}
+
+/* Palette inheritance. One parent's palette is inherited wholesale
+ * by each child (crossing palettes slot-by-slot tends to blur them
+ * into muddy 4-tuples; inheriting whole keeps aesthetics crisp).
+ * Occasionally reroll a single slot to introduce palette drift. */
+static void palette_inherit(u8 *dst, const u8 *a, const u8 *b) {
+    const u8 *src = (rand() & 1) ? a : b;
+    memcpy(dst, src, PAL_BYTES);
+    /* ~8% per-generation chance of mutating one palette slot. */
+    if ((rand() % 100) < 8) {
+        int slot = rand() % K;
+        int c = ((rand() % 10) < 9)
+              ? (16 + rand() % 216)
+              : (232 + rand() % 24);
+        dst[slot] = (u8)c;
+    }
 }
 
 /* ── main ─────────────────────────────────────────────────────────── */
@@ -306,20 +319,25 @@ static void usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
-    /* Read our own tail to get the seed genome — both modes need this. */
+    /* Read our own tail to get the seed palette + genome — both modes
+     * need this. The palette is inherited from the binary itself, not
+     * re-rolled per run, so a given hunter always shows up in the same
+     * colours (until its children drift). */
+    u8 seed_pal[PAL_BYTES];
     u8 seed[GBYTES];
-    if (read_self_seed(argv[0], seed) != 0) {
+    if (read_self_seed(argv[0], seed_pal, seed) != 0) {
         fprintf(stderr, "error: can't read seed from '%s' "
-                "(did you append 4096 bytes of genome to the engine?)\n",
-                argv[0]);
+                "(did you append %d bytes of palette+genome to the engine?)\n",
+                argv[0], TAIL_BYTES);
         return 2;
     }
 
     /* Display mode: no args → render + step for 10 ticks then exit.
-     * Seed the RNG with time() so each run picks a fresh palette. */
+     * RNG seeded from time() so the grid is different every run; the
+     * palette is fixed (it comes from the seed tail). */
     if (argc == 1) {
         srand((unsigned)time(NULL));
-        display_seed(seed, (uint32_t)time(NULL), 10);
+        display_seed(seed, seed_pal, (uint32_t)time(NULL), 10);
         return 0;
     }
 
@@ -338,50 +356,66 @@ int main(int argc, char **argv) {
     }
     srand(rseed);
 
-    /* Population + fitness arrays, sized at runtime. calloc() is
-     * contiguous so pool[i] + GBYTES is the next genome. */
-    u8 (*pool)[GBYTES] = calloc(pop, GBYTES);
+    /* Population + fitness + palette arrays, sized at runtime.
+     * calloc() is contiguous so pool[i] + GBYTES is the next genome,
+     * and pals[i] + PAL_BYTES is the next palette. */
+    u8 (*pool)[GBYTES]    = calloc(pop, GBYTES);
+    u8 (*pals)[PAL_BYTES] = calloc(pop, PAL_BYTES);
     double *fit = calloc(pop, sizeof(double));
-    if (!pool || !fit) {
+    if (!pool || !pals || !fit) {
         fprintf(stderr, "error: out of memory for pop=%d\n", pop);
         return 3;
     }
 
-    /* Initial population: seed + mutants at 5% per-situation flip. */
+    /* Initial population: seed + mutants at 5% per-situation flip.
+     * All agents start with the seed palette; drift comes from
+     * palette_inherit during breeding. */
     memcpy(pool[0], seed, GBYTES);
-    for (int i = 1; i < pop; i++) mutate(pool[i], seed, 0.05);
+    memcpy(pals[0], seed_pal, PAL_BYTES);
+    for (int i = 1; i < pop; i++) {
+        mutate(pool[i], seed, 0.05);
+        memcpy(pals[i], seed_pal, PAL_BYTES);
+    }
 
     /* GA loop */
     for (int gen = 0; gen < gens; gen++) {
         for (int i = 0; i < pop; i++) fit[i] = fitness(pool[i], rseed);
 
-        /* Insertion sort by fitness descending. */
+        /* Insertion sort by fitness descending — palette follows
+         * its genome through the sort. */
         for (int i = 1; i < pop; i++) {
             double fv = fit[i];
-            u8 tmp[GBYTES]; memcpy(tmp, pool[i], GBYTES);
+            u8 tmp[GBYTES];     memcpy(tmp,     pool[i], GBYTES);
+            u8 tmp_pal[PAL_BYTES]; memcpy(tmp_pal, pals[i], PAL_BYTES);
             int j = i - 1;
             while (j >= 0 && fit[j] < fv) {
                 fit[j + 1] = fit[j];
                 memcpy(pool[j + 1], pool[j], GBYTES);
+                memcpy(pals[j + 1], pals[j], PAL_BYTES);
                 j--;
             }
             fit[j + 1] = fv;
-            memcpy(pool[j + 1], tmp, GBYTES);
+            memcpy(pool[j + 1], tmp,     GBYTES);
+            memcpy(pals[j + 1], tmp_pal, PAL_BYTES);
         }
         double sum = 0;
         for (int i = 0; i < pop; i++) sum += fit[i];
         fitness(pool[0], rseed);
         fprintf(stderr,
-                "gen %2d: best=%.2f mean=%.2f best_activity=%.3f\n",
-                gen + 1, fit[0], sum / pop, last_activity_tail);
+                "gen %2d: best=%.2f mean=%.2f best_activity=%.3f "
+                "best_pal=[%d %d %d %d]\n",
+                gen + 1, fit[0], sum / pop, last_activity_tail,
+                pals[0][0], pals[0][1], pals[0][2], pals[0][3]);
 
-        /* Breed bottom half from top half. */
+        /* Breed bottom half from top half — palette inherits from
+         * one of the two parents (with occasional slot drift). */
         for (int i = pop / 2; i < pop; i++) {
+            int pa = rand() % (pop / 2);
+            int pb = rand() % (pop / 2);
             u8 tmp[GBYTES];
-            cross(tmp,
-                  pool[rand() % (pop / 2)],
-                  pool[rand() % (pop / 2)]);
+            cross(tmp, pool[pa], pool[pb]);
             mutate(pool[i], tmp, 0.005);
+            palette_inherit(pals[i], pals[pa], pals[pb]);
         }
     }
 
@@ -389,15 +423,18 @@ int main(int argc, char **argv) {
     for (int i = 0; i < pop; i++) fit[i] = fitness(pool[i], rseed);
     for (int i = 1; i < pop; i++) {
         double fv = fit[i];
-        u8 tmp[GBYTES]; memcpy(tmp, pool[i], GBYTES);
+        u8 tmp[GBYTES];        memcpy(tmp,     pool[i], GBYTES);
+        u8 tmp_pal[PAL_BYTES]; memcpy(tmp_pal, pals[i], PAL_BYTES);
         int j = i - 1;
         while (j >= 0 && fit[j] < fv) {
             fit[j + 1] = fit[j];
             memcpy(pool[j + 1], pool[j], GBYTES);
+            memcpy(pals[j + 1], pals[j], PAL_BYTES);
             j--;
         }
         fit[j + 1] = fv;
-        memcpy(pool[j + 1], tmp, GBYTES);
+        memcpy(pool[j + 1], tmp,     GBYTES);
+        memcpy(pals[j + 1], tmp_pal, PAL_BYTES);
     }
 
     /* 4. Tournament: top WINNERS × TSEEDS different seeds */
@@ -428,11 +465,13 @@ int main(int argc, char **argv) {
             if (stat(path, &probe) != 0) break;  /* free slot */
             next_slot++;
         }
-        int rc = write_child(argv[0], path, pool[w]);
+        int rc = write_child(argv[0], path, pals[w], pool[w]);
         if (rc != 0) {
             fprintf(stderr, "  couldn't write %s\n", path);
         }
-        printf("#%d  ga=%.2f  avg=%.2f  per=[", w + 1, fit[w], avg);
+        printf("#%d  ga=%.2f  avg=%.2f  pal=[%d %d %d %d]  per=[",
+               w + 1, fit[w], avg,
+               pals[w][0], pals[w][1], pals[w][2], pals[w][3]);
         for (int s = 0; s < TSEEDS; s++)
             printf("%s%.2f", s ? " " : "", per[s]);
         printf("]  →  ./%s\n", path);
@@ -440,6 +479,7 @@ int main(int argc, char **argv) {
     }
 
     free(pool);
+    free(pals);
     free(fit);
     return 0;
 }
