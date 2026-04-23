@@ -63,8 +63,23 @@ def oneclick_hunt(request):
         final_winners=_int('winners', 3, 1, 10),
     )
 
-    promoted = [{'pk': pk, 'url': f'/automaton/ruleset/{pk}/'}
-                for pk in result.promoted_ruleset_ids]
+    # Each promoted RuleSet got a companion Simulation (see
+    # det.pipeline._promote_to_automaton). Automaton's landing page is
+    # /automaton/<slug>/ per simulation, not per ruleset, so resolve.
+    from automaton.models import Simulation
+    sims_by_ruleset = {
+        s.ruleset_id: s for s in Simulation.objects
+        .filter(ruleset_id__in=result.promoted_ruleset_ids)
+        .order_by('-pk')
+    }
+    promoted = []
+    for pk in result.promoted_ruleset_ids:
+        sim = sims_by_ruleset.get(pk)
+        promoted.append({
+            'pk':   pk,
+            'url':  reverse('automaton:run', args=[sim.slug]) if sim else None,
+            'name': sim.name if sim else f'RuleSet #{pk}',
+        })
     return render(request, 'det/oneclick_result.html', {
         'result': result,
         'promoted': promoted,
