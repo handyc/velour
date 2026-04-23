@@ -42,6 +42,26 @@ _CREATE_RE = re.compile(
 )
 
 
+def _strip_table_prefix_placeholders(name: str) -> str:
+    """Normalise a captured table name by stripping source-embedded
+    placeholders that frameworks substitute at install time:
+
+    * ``/*_*/table`` — MediaWiki table-prefix macro.
+    * ``$wpdb->table``, ``${wpdb}->table`` — WordPress PHP variable.
+    * ``{PREFIX}_table`` — generic curly-brace placeholder.
+
+    Returns the bare table name, or ``''`` if nothing survives (caller
+    should skip the statement in that case).
+    """
+    # SQL comment blocks /* ... */
+    name = re.sub(r'/\*[^*]*\*/', '', name)
+    # PHP object-property placeholder: $wpdb-> / ${wpdb}-> / $wpdb->$foo->
+    name = re.sub(r'\$\{?[A-Za-z_][\w.]*\}?->', '', name)
+    # Generic curly-brace prefix ({PREFIX}_, {prefix}_)
+    name = re.sub(r'\{[A-Za-z_][\w.]*\}_?', '', name)
+    return name.strip()
+
+
 def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
     """Yield ``(table_name, full_ddl_block)`` for every CREATE TABLE.
 
@@ -55,12 +75,7 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
         m = _CREATE_RE.search(text, i)
         if not m:
             break
-        name = m.group('name')
-        # Strip embedded /* ... */ comment blocks from the table
-        # name. MediaWiki uses `/*_*/tablename` as a table-prefix
-        # placeholder that's substituted at install time; we treat
-        # an unsubstituted placeholder as empty prefix.
-        name = re.sub(r'/\*[^*]*\*/', '', name).strip()
+        name = _strip_table_prefix_placeholders(m.group('name'))
         if not name:
             # Degenerate: couldn't recover a usable name. Skip.
             i = m.end()
@@ -184,10 +199,7 @@ def iter_inserts(text: str) -> Iterator[tuple[str, list[str] | None, list[tuple]
         m = _INSERT_HEAD_RE.search(text, i)
         if not m:
             break
-        table = m.group('name')
-        # Strip embedded /* ... */ blocks (MediaWiki-style table
-        # prefix placeholder) from the table name; see iter_create_tables.
-        table = re.sub(r'/\*[^*]*\*/', '', table).strip()
+        table = _strip_table_prefix_placeholders(m.group('name'))
         if not table:
             i = m.end()
             continue

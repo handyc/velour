@@ -68,7 +68,10 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Iterable
 
-from datalift.dump_parser import iter_create_tables, strip_auto_increment
+from datalift.dump_parser import (
+    iter_create_tables, strip_auto_increment,
+    _strip_table_prefix_placeholders,
+)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -203,9 +206,9 @@ def parse_create_table(ddl: str) -> Table:
                   ddl, re.IGNORECASE)
     if not m:
         raise ValueError('no CREATE TABLE header')
-    # Strip embedded /* ... */ from the name — MediaWiki's `/*_*/table`
-    # table-prefix placeholder should become just `table`.
-    name = re.sub(r'/\*[^*]*\*/', '', m.group(1)).strip()
+    # Strip any framework table-prefix placeholder — MediaWiki's
+    # `/*_*/table`, WordPress's `$wpdb->table`, generic `{PREFIX}_`.
+    name = _strip_table_prefix_placeholders(m.group(1))
     if not name:
         raise ValueError('table name missing after prefix placeholder strip')
     body = ddl[ddl.index('(', m.end() - 1) + 1: ddl.rindex(')')]
@@ -287,9 +290,19 @@ def parse_create_table(ddl: str) -> Table:
 
 
 def parse_dump(text: str) -> List[Table]:
-    """Parse every CREATE TABLE in a dump into Table objects."""
-    return [parse_create_table(strip_auto_increment(ddl))
-            for _, ddl in iter_create_tables(text)]
+    """Parse every CREATE TABLE in a dump into Table objects.
+
+    If the same table name appears twice (WordPress defines ``users``
+    twice — once for single-site, once for multisite with extra
+    spam/deleted columns), the later definition wins. This matches
+    the "last write" semantics of running both CREATE TABLE IF NOT
+    EXISTS blocks against an empty DB.
+    """
+    parsed: Dict[str, Table] = {}
+    for _, ddl in iter_create_tables(text):
+        t = parse_create_table(strip_auto_increment(ddl))
+        parsed[t.name] = t
+    return list(parsed.values())
 
 
 # ═════════════════════════════════════════════════════════════════════
