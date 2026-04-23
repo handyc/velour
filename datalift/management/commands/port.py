@@ -48,6 +48,9 @@ class Command(BaseCommand):
         parser.add_argument('--app', required=True,
             help='Django app label that receives the port. The app must '
                  'already exist (manage.py startapp <app>).')
+        parser.add_argument('--app-dir', default=None,
+            help='Target app filesystem directory. Required when --app '
+                 'is not installed in the running Django project.')
         parser.add_argument('--php-dir', default=None,
             help='Optional legacy PHP source tree. Scanned for secrets/PII '
                  'before generation; non-empty findings block the pipeline '
@@ -106,12 +109,16 @@ class Command(BaseCommand):
         app_label = opts['app']
         try:
             app_config = apps.get_app_config(app_label)
+            app_dir = Path(app_config.path)
         except LookupError:
-            raise CommandError(
-                f'unknown app: {app_label}. Create it first: '
-                f'manage.py startapp {app_label}'
-            )
-        app_dir = Path(app_config.path)
+            if opts.get('app_dir'):
+                app_dir = Path(opts['app_dir']).resolve()
+            else:
+                raise CommandError(
+                    f'app `{app_label}` is not installed in this project. '
+                    f'Either register it or pass --app-dir /path/to/<app>/ '
+                    f'so outputs go to the right place.'
+                )
 
         # ── Step 1: PHP scan gate ───────────────────────────────
         if opts['php_dir']:

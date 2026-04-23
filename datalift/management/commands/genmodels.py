@@ -43,6 +43,10 @@ class Command(BaseCommand):
         parser.add_argument('input', help='Path to the mysqldump .sql file.')
         parser.add_argument('--app', required=True,
             help='Django app label that will receive the models.')
+        parser.add_argument('--app-dir', default=None,
+            help='Target app filesystem directory. Required when --app '
+                 'is not installed in the running Django project; '
+                 'optional (and auto-inferred) when it is.')
         parser.add_argument('--out', default=None,
             help='Where to write models.py. Default: <app-dir>/models.py. '
                  'Use "-" for stdout.')
@@ -64,26 +68,43 @@ class Command(BaseCommand):
         text = path.read_text(encoding='utf-8', errors='replace')
 
         app_label = opts['app']
+        # If the app is installed in the current Django project, auto-
+        # infer the output paths from its filesystem location. If it's
+        # not installed (the dump-and-go case — running from Datalift,
+        # writing into an unrelated project), the user must supply
+        # --out / --admin-out / --map-out (or --app-dir) explicitly.
+        app_dir = None
         try:
             app_config = apps.get_app_config(app_label)
+            app_dir = Path(app_config.path)
         except LookupError:
-            raise CommandError(
-                f'unknown app: {app_label}. Create the app skeleton '
-                f'(manage.py startapp {app_label}) before running genmodels.'
-            )
+            if opts.get('app_dir'):
+                app_dir = Path(opts['app_dir']).resolve()
+            elif not (opts['out'] or opts['admin_out'] or opts['map_out']):
+                raise CommandError(
+                    f'app `{app_label}` is not installed in this project. '
+                    f'Either register it first (manage.py startapp '
+                    f'{app_label}) or pass --app-dir /path/to/<app>/ so '
+                    f'outputs go to the right place. You can also pass '
+                    f'--out/--admin-out/--map-out individually.'
+                )
 
-        app_dir = Path(app_config.path)
-        models_path = opts['out']
-        if models_path is None:
-            models_path = app_dir / 'models.py'
-        elif models_path == '-':
+        def _default(path_component: str) -> Path | None:
+            if app_dir is None:
+                return None
+            return app_dir / path_component
+
+        models_path_opt = opts['out']
+        if models_path_opt is None:
+            models_path = _default('models.py')
+        elif models_path_opt == '-':
             models_path = None
         else:
-            models_path = Path(models_path)
+            models_path = Path(models_path_opt)
 
         admin_path_opt = opts['admin_out']
         if admin_path_opt is None:
-            admin_path = app_dir / 'admin.py'
+            admin_path = _default('admin.py')
         elif admin_path_opt == '':
             admin_path = None
         else:
@@ -91,11 +112,19 @@ class Command(BaseCommand):
 
         map_path_opt = opts['map_out']
         if map_path_opt is None:
-            map_path = app_dir / 'ingest' / 'table_map.json'
+            map_path = _default('ingest') / 'table_map.json' if app_dir else None
         elif map_path_opt == '':
             map_path = None
         else:
             map_path = Path(map_path_opt)
+
+        if models_path is None and not any(
+                [opts['out'] == '-',  # explicit stdout
+                 opts['admin_out'], opts['map_out']]):
+            raise CommandError(
+                'no output path resolved — supply --out (or --app-dir '
+                'to infer all three).'
+            )
 
         models_src, admin_src, tmap = generate_all(
             text, app_label=app_label,
