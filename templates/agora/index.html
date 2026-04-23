@@ -1,0 +1,110 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>Agora</h1>
+<p class="lede">
+  A meta-university — Agora contains modelled universities, each with
+  its own departments, programs, and catalogs. The actual coursework
+  (assignments, readings, simulations) lives in other Velour apps
+  (Studious, Muka, Oneliner, Lingua…) and is wired into sections
+  through resource links.
+</p>
+
+<div class="ag-grid">
+  {% for u in universities %}
+    <a href="{% url 'agora:university_detail' slug=u.slug %}" class="ag-card"
+       style="text-decoration:none;">
+      <h3 style="color:#d2a8ff;">{{ u.name }}</h3>
+      {% if u.tagline %}<div style="color:#c9d1d9;font-size:0.8rem;">{{ u.tagline }}</div>{% endif %}
+      <div class="meta">{{ u.n_depts }} department{{ u.n_depts|pluralize }}{% if u.city %} · {{ u.city }}{% endif %}</div>
+    </a>
+  {% empty %}
+    <div class="ag-card meta">
+      No universities modelled yet. Run <code>seed_agora_leiden</code>
+      and/or <code>seed_agora_velour</code>.
+    </div>
+  {% endfor %}
+</div>
+
+<div class="ag-grid" style="margin-top:0.5rem;">
+  <div class="ag-card">
+    <h3>Current term</h3>
+    {% if current_term %}
+      <div><strong>{{ current_term.name }}</strong></div>
+      <div class="meta">{{ current_term.start_date }} → {{ current_term.end_date }}</div>
+      <div class="meta">{{ current_sections|length }} section(s) running</div>
+    {% else %}
+      <div class="meta">No term is currently active.</div>
+      <div class="meta"><a href="{% url 'agora:term_list' %}">See all terms →</a></div>
+    {% endif %}
+  </div>
+
+  <div class="ag-card">
+    <h3>Catalog totals</h3>
+    <div class="meta">{{ n_universities }} universit{{ n_universities|pluralize:"y,ies" }} · {{ n_departments }} department{{ n_departments|pluralize }}</div>
+    <div class="meta">{{ n_courses }} course{{ n_courses|pluralize }} · {{ n_terms }} term{{ n_terms|pluralize }}</div>
+    <div class="meta" style="margin-top:0.3rem;">
+      <a href="{% url 'agora:university_list' %}">Universities →</a> ·
+      <a href="{% url 'agora:department_list' %}">Departments →</a> ·
+      <a href="{% url 'agora:course_list' %}">Courses →</a>
+    </div>
+  </div>
+</div>
+
+{% if current_sections %}
+<h2>This term's sections</h2>
+<table class="ag-tbl">
+  <thead>
+    <tr><th>Code</th><th>Title</th><th>Instructor</th><th>Meets</th><th>Roster</th></tr>
+  </thead>
+  <tbody>
+    {% for s in current_sections %}
+      <tr>
+        <td><a href="{% url 'agora:section_detail' pk=s.pk %}">{{ s.course.code }}-{{ s.section_number }}</a></td>
+        <td>{{ s.course.title }}</td>
+        <td class="meta">{{ s.instructor.get_full_name|default:s.instructor.username }}</td>
+        <td class="meta">{{ s.meeting_pattern|default:"—" }}</td>
+        <td class="meta">{{ s.enrolled_count }}/{{ s.capacity }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if my_taught %}
+<h2>Sections I teach</h2>
+<table class="ag-tbl">
+  <thead><tr><th>Code</th><th>Title</th><th>Term</th><th>Roster</th></tr></thead>
+  <tbody>
+    {% for s in my_taught %}
+      <tr>
+        <td><a href="{% url 'agora:section_detail' pk=s.pk %}">{{ s.course.code }}-{{ s.section_number }}</a></td>
+        <td>{{ s.course.title }}</td>
+        <td class="meta">{{ s.term.name }}</td>
+        <td class="meta">{{ s.enrolled_count }}/{{ s.capacity }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if my_enrolled %}
+<h2>Sections I'm enrolled in</h2>
+<table class="ag-tbl">
+  <thead><tr><th>Code</th><th>Title</th><th>Term</th><th>Status</th><th>Grade</th></tr></thead>
+  <tbody>
+    {% for e in my_enrolled %}
+      <tr>
+        <td><a href="{% url 'agora:section_detail' pk=e.section.pk %}">{{ e.section.course.code }}-{{ e.section.section_number }}</a></td>
+        <td>{{ e.section.course.title }}</td>
+        <td class="meta">{{ e.section.term.name }}</td>
+        <td class="meta">{{ e.get_status_display }}</td>
+        <td class="meta">{{ e.grade|default:"—" }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

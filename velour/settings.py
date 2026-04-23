@@ -126,6 +126,7 @@ INSTALLED_APPS = [
     'camlfornia',
     'aggregator',
     'studious',
+    'agora',
 ]
 
 MIDDLEWARE = [

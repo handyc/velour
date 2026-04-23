@@ -1,0 +1,53 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Courses — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>Courses{% if selected_u %} · {{ selected_u.name }}{% endif %}</h1>
+
+{% if universities %}
+  <p class="meta" style="margin-bottom:0.6rem;">
+    Filter by university:
+    <a href="{% url 'agora:course_list' %}{% if q %}?q={{ q }}{% endif %}"
+       style="{% if not selected_u %}color:#7ee787;{% endif %}">All</a>
+    {% for u in universities %}
+      · <a href="?u={{ u.slug }}{% if q %}&q={{ q }}{% endif %}"
+           style="{% if selected_u == u %}color:#7ee787;{% endif %}">{{ u.code }}</a>
+    {% endfor %}
+  </p>
+{% endif %}
+
+<form method="get" style="margin-bottom:0.6rem;">
+  <input type="text" name="q" value="{{ q }}" placeholder="Search code or title…"
+         style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+                padding:0.22rem 0.5rem;border-radius:3px;font-size:0.8rem;
+                width:18rem;">
+  {% if selected_u %}<input type="hidden" name="u" value="{{ selected_u.slug }}">{% endif %}
+</form>
+
+<table class="ag-tbl">
+  <thead>
+    <tr><th>University</th><th>Code</th><th>Title</th><th>Department</th><th>Credits</th><th>Sections</th></tr>
+  </thead>
+  <tbody>
+    {% for c in courses %}
+      <tr>
+        <td class="meta">
+          {% if c.department.university %}
+            <a href="{% url 'agora:university_detail' slug=c.department.university.slug %}">{{ c.department.university.code }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td><a href="{% url 'agora:course_detail' slug=c.slug %}">{{ c.code }}</a></td>
+        <td>{{ c.title }}</td>
+        <td class="meta">{{ c.department.code }}</td>
+        <td class="meta">{{ c.credits }}</td>
+        <td class="meta">{{ c.n_sections }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="6" class="meta">
+        {% if q %}No matches for "{{ q }}".{% else %}No courses yet.{% endif %}
+      </td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

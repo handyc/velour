@@ -1,0 +1,26 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Terms — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>Terms</h1>
+
+<table class="ag-tbl">
+  <thead>
+    <tr><th>Name</th><th>Start</th><th>End</th><th>Sections</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for t in terms %}
+      <tr>
+        <td>{{ t.name }}</td>
+        <td class="meta">{{ t.start_date|date:"d M Y" }}</td>
+        <td class="meta">{{ t.end_date|date:"d M Y" }}</td>
+        <td class="meta">{{ t.n_sections }}</td>
+        <td>{% if t.is_current %}<span class="ag-pill current">current</span>{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="meta">No terms yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

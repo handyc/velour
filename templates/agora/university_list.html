@@ -1,0 +1,34 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Universities — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>Universities</h1>
+<p class="lede">
+  Agora is a meta-university: it holds many modelled universities.
+  Each has its own departments, programs, and catalogs.
+</p>
+
+<div class="ag-grid">
+  {% for u in universities %}
+    <a href="{% url 'agora:university_detail' slug=u.slug %}" class="ag-card"
+       style="text-decoration:none;">
+      <h3 style="color:#d2a8ff;">{{ u.name }}</h3>
+      {% if u.tagline %}<div style="color:#c9d1d9;font-size:0.8rem;">{{ u.tagline }}</div>{% endif %}
+      <div class="meta">
+        {% if u.city %}{{ u.city }}{% if u.country %}, {{ u.country }}{% endif %}{% endif %}
+        {% if u.founded %} · founded {{ u.founded }}{% endif %}
+      </div>
+      <div class="meta" style="margin-top:0.35rem;">
+        {{ u.n_depts }} department{{ u.n_depts|pluralize }} · {{ u.n_courses }} course{{ u.n_courses|pluralize }}
+      </div>
+    </a>
+  {% empty %}
+    <div class="ag-card meta">
+      No universities modelled yet. Run
+      <code>manage.py seed_agora_leiden</code> or
+      <code>manage.py seed_agora_velour</code> to populate.
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

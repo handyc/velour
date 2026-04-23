@@ -1,0 +1,50 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Grades — {{ section.course.code }}-{{ section.section_number }} — Agora{% endblock %}
+
+{% block agora %}
+<h1>Grades — {{ section.course.code }}-{{ section.section_number }}</h1>
+<p class="meta">
+  {{ section.course.title }} · {{ section.term.name }} ·
+  <a href="{% url 'agora:section_detail' pk=section.pk %}">← back to section</a>
+</p>
+
+<form method="post">
+  {% csrf_token %}
+  <table class="ag-tbl">
+    <thead>
+      <tr><th>Student</th><th>Username</th><th>Status</th><th>Grade</th></tr>
+    </thead>
+    <tbody>
+      {% for e, grade_field, status_field in form.rows %}
+        <tr>
+          <td>{{ e.student.get_full_name|default:"—" }}</td>
+          <td class="meta">{{ e.student.username }}</td>
+          <td>{{ status_field }}</td>
+          <td>{{ grade_field }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4" class="meta">No students enrolled.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:0.8rem;">
+    <button type="submit"
+            style="background:#1f3a1f;border:1px solid #2ea043;color:#7ee787;
+                   padding:0.35rem 0.85rem;border-radius:3px;font-size:0.82rem;
+                   cursor:pointer;">
+      Save grades
+    </button>
+    <a href="{% url 'agora:section_detail' pk=section.pk %}"
+       style="margin-left:0.5rem;color:#8b949e;">Cancel</a>
+  </div>
+</form>
+
+<style>
+  form input[type=text], form select {
+    background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+    padding:0.15rem 0.35rem; border-radius:3px; font-size:0.8rem;
+  }
+</style>
+{% endblock %}

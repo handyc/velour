@@ -1,0 +1,43 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}{{ dept.code }} — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>{{ dept.code }} — {{ dept.name }}</h1>
+{% if dept.description %}<p class="lede">{{ dept.description }}</p>{% endif %}
+
+<h2>Programs</h2>
+{% if programs %}
+  <table class="ag-tbl">
+    <thead><tr><th>Level</th><th>Name</th></tr></thead>
+    <tbody>
+      {% for p in programs %}
+        <tr>
+          <td class="meta">{{ p.get_level_display }}</td>
+          <td>{{ p.name }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">No programs yet.</p>
+{% endif %}
+
+<h2>Courses</h2>
+{% if courses %}
+  <table class="ag-tbl">
+    <thead><tr><th>Code</th><th>Title</th><th>Credits</th></tr></thead>
+    <tbody>
+      {% for c in courses %}
+        <tr>
+          <td><a href="{% url 'agora:course_detail' slug=c.slug %}">{{ c.code }}</a></td>
+          <td>{{ c.title }}</td>
+          <td class="meta">{{ c.credits }} ECTS</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">No courses yet.</p>
+{% endif %}
+{% endblock %}

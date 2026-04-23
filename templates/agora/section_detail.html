@@ -1,0 +1,165 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}{{ section.course.code }}-{{ section.section_number }} — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>{{ section.course.code }}-{{ section.section_number }} — {{ section.course.title }}</h1>
+<p class="meta">
+  <a href="{% url 'agora:course_detail' slug=section.course.slug %}">{{ section.course.code }}</a>
+  ·
+  <a href="{% url 'agora:department_detail' slug=section.course.department.slug %}">{{ section.course.department.code }}</a>
+  · {{ section.term.name }}{% if section.term.is_current %} <span class="ag-pill current">current</span>{% endif %}
+</p>
+
+{% if messages %}
+  <div style="margin:0.4rem 0 0.8rem;">
+    {% for m in messages %}
+      <div style="padding:0.3rem 0.6rem;border-radius:3px;font-size:0.78rem;
+                  background:#0f2918;color:#7ee787;border-left:2px solid #2ea043;
+                  margin-bottom:2px;">{{ m }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="ag-grid">
+  <div class="ag-card">
+    <h3>Meeting</h3>
+    <div>{{ section.meeting_pattern|default:"—" }}</div>
+    <div class="meta">Room: {{ section.room|default:"—" }}</div>
+  </div>
+  <div class="ag-card">
+    <h3>Instructor</h3>
+    <div>{{ section.instructor.get_full_name|default:section.instructor.username }}</div>
+    <div class="meta">{{ section.instructor.email|default:"—" }}</div>
+  </div>
+  <div class="ag-card">
+    <h3>Roster</h3>
+    <div>{{ section.enrolled_count }}/{{ section.capacity }} enrolled</div>
+
+    {% if not is_instructor %}
+      <div style="margin-top:0.5rem;">
+        {% if my_enrollment and my_enrollment.status == 'enrolled' %}
+          <form method="post" action="{% url 'agora:section_withdraw' pk=section.pk %}"
+                style="display:inline;">
+            {% csrf_token %}
+            <button type="submit"
+                    style="background:#3b1212;border:1px solid #f85149;color:#ffdcd7;
+                           padding:0.2rem 0.5rem;border-radius:3px;font-size:0.74rem;
+                           cursor:pointer;">
+              Withdraw
+            </button>
+          </form>
+          <span class="meta">· You're enrolled</span>
+        {% elif my_enrollment %}
+          <form method="post" action="{% url 'agora:section_enroll' pk=section.pk %}"
+                style="display:inline;">
+            {% csrf_token %}
+            <button type="submit"
+                    style="background:#1f3a1f;border:1px solid #2ea043;color:#7ee787;
+                           padding:0.2rem 0.5rem;border-radius:3px;font-size:0.74rem;
+                           cursor:pointer;">
+              Re-enroll
+            </button>
+          </form>
+          <span class="meta">· Status: {{ my_enrollment.get_status_display }}</span>
+        {% else %}
+          {% if section.enrolled_count < section.capacity %}
+            <form method="post" action="{% url 'agora:section_enroll' pk=section.pk %}"
+                  style="display:inline;">
+              {% csrf_token %}
+              <button type="submit"
+                      style="background:#1f3a1f;border:1px solid #2ea043;color:#7ee787;
+                             padding:0.2rem 0.5rem;border-radius:3px;font-size:0.74rem;
+                             cursor:pointer;">
+                Enroll
+              </button>
+            </form>
+          {% else %}
+            <span class="meta">Full</span>
+          {% endif %}
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<h2 style="display:flex;justify-content:space-between;align-items:center;">
+  <span>Enrolled students</span>
+  {% if is_instructor %}
+    <a href="{% url 'agora:grades_edit' pk=section.pk %}"
+       style="font-size:0.78rem;background:#161b22;border:1px solid #30363d;
+              padding:0.22rem 0.55rem;border-radius:3px;">
+      Edit grades →
+    </a>
+  {% endif %}
+</h2>
+{% if roster %}
+  <table class="ag-tbl">
+    <thead><tr><th>Name</th><th>Username</th><th>Status</th><th>Grade</th><th>Enrolled</th></tr></thead>
+    <tbody>
+      {% for e in roster %}
+        <tr>
+          <td>{{ e.student.get_full_name|default:"—" }}</td>
+          <td class="meta">{{ e.student.username }}</td>
+          <td class="meta">{{ e.get_status_display }}</td>
+          <td class="meta">{{ e.grade|default:"—" }}</td>
+          <td class="meta">{{ e.enrolled_at|date:"d M Y" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">No students enrolled yet.</p>
+{% endif %}
+
+<h2 style="display:flex;justify-content:space-between;align-items:center;">
+  <span>Resources</span>
+  {% if is_instructor %}
+    <a href="{% url 'agora:resource_add' pk=section.pk %}"
+       style="font-size:0.78rem;background:#161b22;border:1px solid #30363d;
+              padding:0.22rem 0.55rem;border-radius:3px;">
+      + Add resource
+    </a>
+  {% endif %}
+</h2>
+{% if resources %}
+  <table class="ag-tbl">
+    <thead><tr><th>Kind</th><th>Title</th><th>Target</th><th>Notes</th>{% if is_instructor %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+      {% for r in resources %}
+        <tr>
+          <td class="meta">{{ r.get_kind_display }}</td>
+          <td>{{ r.title }}</td>
+          <td class="meta">
+            {% if r.target %}{{ r.target }}
+            {% elif r.external_url %}<a href="{{ r.external_url }}">{{ r.external_url|truncatechars:40 }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td class="meta">{{ r.notes|default:"—" }}</td>
+          {% if is_instructor %}
+            <td>
+              <form method="post"
+                    action="{% url 'agora:resource_delete' pk=section.pk rpk=r.pk %}"
+                    style="display:inline;">
+                {% csrf_token %}
+                <button type="submit" title="Remove resource"
+                        style="background:none;border:none;color:#6e7681;
+                               cursor:pointer;font-size:0.78rem;">
+                  ✕
+                </button>
+              </form>
+            </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">
+    No resources linked yet.
+    {% if is_instructor %}
+      <a href="{% url 'agora:resource_add' pk=section.pk %}">Attach one →</a>
+    {% endif %}
+  </p>
+{% endif %}
+{% endblock %}

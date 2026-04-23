@@ -1,0 +1,39 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}{{ u.name }} — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>{{ u.name }}</h1>
+<p class="meta">
+  {% if u.city %}{{ u.city }}{% if u.country %}, {{ u.country }}{% endif %}{% endif %}
+  {% if u.founded %} · founded {{ u.founded }}{% endif %}
+  {% if u.website %} · <a href="{{ u.website }}">{{ u.website }}</a>{% endif %}
+</p>
+{% if u.tagline %}<p style="font-style:italic;color:#8b949e;">{{ u.tagline }}</p>{% endif %}
+{% if u.description %}<p class="lede">{{ u.description }}</p>{% endif %}
+
+<h2>Departments</h2>
+{% if departments %}
+  <table class="ag-tbl">
+    <thead><tr><th>Code</th><th>Name</th><th>Programs</th><th>Courses</th></tr></thead>
+    <tbody>
+      {% for d in departments %}
+        <tr>
+          <td><a href="{% url 'agora:department_detail' slug=d.slug %}">{{ d.code }}</a></td>
+          <td>{{ d.name }}</td>
+          <td class="meta">{{ d.n_programs }}</td>
+          <td class="meta">{{ d.n_courses }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">No departments yet.</p>
+{% endif %}
+
+<p class="meta" style="margin-top:0.8rem;">
+  See all of {{ u.name }}'s offerings:
+  <a href="{% url 'agora:course_list' %}?u={{ u.slug }}">courses →</a> ·
+  <a href="{% url 'agora:department_list' %}?u={{ u.slug }}">departments →</a>
+</p>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Add resource — {{ section.course.code }}-{{ section.section_number }} — Agora{% endblock %}
+
+{% block agora %}
+<h1>Add resource</h1>
+<p class="meta">
+  <a href="{% url 'agora:section_detail' pk=section.pk %}">← back to {{ section.course.code }}-{{ section.section_number }}</a>
+</p>
+
+<form method="post" style="max-width:38rem;">
+  {% csrf_token %}
+  {% if form.non_field_errors %}
+    <div style="background:#3b1212;border-left:2px solid #f85149;padding:0.4rem 0.6rem;color:#ffdcd7;margin-bottom:0.6rem;font-size:0.82rem;">
+      {{ form.non_field_errors|join:"<br>" }}
+    </div>
+  {% endif %}
+
+  {% for field in form %}
+    <div style="margin-bottom:0.75rem;">
+      <label for="{{ field.id_for_label }}"
+             style="display:block;color:#8b949e;font-size:0.78rem;margin-bottom:0.2rem;">
+        {{ field.label }}{% if field.field.required %} *{% endif %}
+      </label>
+      {{ field }}
+      {% if field.help_text %}
+        <div style="color:#6e7681;font-size:0.72rem;margin-top:0.2rem;">{{ field.help_text }}</div>
+      {% endif %}
+      {% if field.errors %}
+        <div style="color:#f85149;font-size:0.75rem;margin-top:0.2rem;">{{ field.errors|join:", " }}</div>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+  <button type="submit"
+          style="background:#1f3a1f;border:1px solid #2ea043;color:#7ee787;
+                 padding:0.35rem 0.85rem;border-radius:3px;font-size:0.82rem;
+                 cursor:pointer;">
+    Add resource
+  </button>
+  <a href="{% url 'agora:section_detail' pk=section.pk %}"
+     style="margin-left:0.5rem;color:#8b949e;">Cancel</a>
+</form>
+
+<style>
+  form input[type=text], form input[type=url], form input[type=number],
+  form select, form textarea {
+    background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+    padding:0.32rem 0.5rem; border-radius:3px; font-size:0.82rem;
+    width: 100%; max-width: 32rem;
+  }
+  form textarea { font-family: inherit; }
+</style>
+{% endblock %}

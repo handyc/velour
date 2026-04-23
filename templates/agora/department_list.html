@@ -1,0 +1,42 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}Departments — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>Departments{% if selected_u %} · {{ selected_u.name }}{% endif %}</h1>
+
+{% if universities %}
+  <p class="meta" style="margin-bottom:0.6rem;">
+    Filter by university:
+    <a href="{% url 'agora:department_list' %}"
+       style="{% if not selected_u %}color:#7ee787;{% endif %}">All</a>
+    {% for u in universities %}
+      · <a href="?u={{ u.slug }}"
+           style="{% if selected_u == u %}color:#7ee787;{% endif %}">{{ u.code }}</a>
+    {% endfor %}
+  </p>
+{% endif %}
+
+<table class="ag-tbl">
+  <thead>
+    <tr><th>University</th><th>Code</th><th>Name</th><th>Courses</th><th>Programs</th></tr>
+  </thead>
+  <tbody>
+    {% for d in departments %}
+      <tr>
+        <td class="meta">
+          {% if d.university %}
+            <a href="{% url 'agora:university_detail' slug=d.university.slug %}">{{ d.university.code }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td><a href="{% url 'agora:department_detail' slug=d.slug %}">{{ d.code }}</a></td>
+        <td>{{ d.name }}</td>
+        <td class="meta">{{ d.n_courses }}</td>
+        <td class="meta">{{ d.n_programs }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="meta">No departments match the filter.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

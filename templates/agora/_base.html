@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block extra_head %}
+<style>
+  .ag-wrap { max-width: 1100px; margin: 1.25rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .ag-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; color: #c9d1d9; }
+  .ag-wrap h2 { font-size: 0.95rem; color: #d2a8ff; margin: 1.3rem 0 0.5rem;
+                letter-spacing: 0.02em; }
+  .ag-wrap p.lede { color: #8b949e; max-width: 74ch; line-height: 1.5;
+                    margin: 0 0 1rem; font-size: 0.84rem; }
+  .ag-wrap a { color: #58a6ff; text-decoration: none; }
+  .ag-wrap a:hover { color: #79c0ff; text-decoration: underline; }
+
+  .ag-bar { display: flex; gap: 0.4rem; margin-bottom: 0.85rem;
+            font-size: 0.78rem; color: #6e7681; flex-wrap: wrap; }
+  .ag-bar a { background: #161b22; border: 1px solid #30363d;
+              padding: 0.22rem 0.55rem; border-radius: 3px; }
+  .ag-bar a.active { background: #1f3a1f; border-color: #2ea043;
+                     color: #d2a8ff; }
+
+  .ag-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: 0.75rem; margin: 0.6rem 0;
+  }
+  .ag-card {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.75rem 0.85rem; font-size: 0.82rem; line-height: 1.5;
+  }
+  .ag-card h3 { margin: 0 0 0.4rem; font-size: 0.88rem; color: #c9d1d9; }
+  .ag-card .meta { color: #6e7681; font-size: 0.72rem;
+                   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .ag-tbl { width: 100%; border-collapse: collapse; margin-top: 0.3rem;
+            font-size: 0.82rem; }
+  .ag-tbl th, .ag-tbl td { padding: 0.32rem 0.55rem;
+                           border-bottom: 1px solid #21262d;
+                           text-align: left; vertical-align: top; }
+  .ag-tbl th { color: #8b949e; font-weight: normal; font-size: 0.75rem; }
+  .ag-tbl .meta { color: #6e7681; font-size: 0.75rem; }
+
+  .ag-pill { display: inline-block; font-size: 0.7rem;
+             padding: 0.05rem 0.4rem; border-radius: 2px;
+             background: #21262d; color: #8b949e; margin-right: 0.3rem;
+             font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .ag-pill.current { background: #1f3a1f; color: #7ee787; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ag-wrap">
+  <div class="ag-bar">
+    <a href="{% url 'agora:index' %}"             {% if view_name == 'index' %}class="active"{% endif %}>Dashboard</a>
+    <a href="{% url 'agora:university_list' %}"   {% if view_name == 'universities' %}class="active"{% endif %}>Universities</a>
+    <a href="{% url 'agora:department_list' %}"   {% if view_name == 'departments' %}class="active"{% endif %}>Departments</a>
+    <a href="{% url 'agora:course_list' %}"       {% if view_name == 'courses' %}class="active"{% endif %}>Courses</a>
+    <a href="{% url 'agora:term_list' %}"         {% if view_name == 'terms' %}class="active"{% endif %}>Terms</a>
+  </div>
+  {% block agora %}{% endblock %}
+</div>
+{% endblock %}

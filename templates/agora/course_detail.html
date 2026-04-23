@@ -1,0 +1,35 @@
+{% extends "agora/_base.html" %}
+
+{% block title %}{{ course.code }} — Agora — Velour{% endblock %}
+
+{% block agora %}
+<h1>{{ course.code }} — {{ course.title }}</h1>
+<p class="meta">
+  <a href="{% url 'agora:department_detail' slug=course.department.slug %}">{{ course.department.code }} — {{ course.department.name }}</a>
+  · {{ course.credits }} ECTS
+</p>
+{% if course.description %}<p class="lede">{{ course.description }}</p>{% endif %}
+
+<h2>Sections</h2>
+{% if sections %}
+  <table class="ag-tbl">
+    <thead>
+      <tr><th>#</th><th>Term</th><th>Instructor</th><th>Meets</th><th>Room</th><th>Roster</th></tr>
+    </thead>
+    <tbody>
+      {% for s in sections %}
+        <tr>
+          <td><a href="{% url 'agora:section_detail' pk=s.pk %}">{{ s.section_number }}</a></td>
+          <td class="meta">{{ s.term.name }}{% if s.term.is_current %} <span class="ag-pill current">current</span>{% endif %}</td>
+          <td class="meta">{{ s.instructor.get_full_name|default:s.instructor.username }}</td>
+          <td class="meta">{{ s.meeting_pattern|default:"—" }}</td>
+          <td class="meta">{{ s.room|default:"—" }}</td>
+          <td class="meta">{{ s.enrolled_count }}/{{ s.capacity }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="meta">This course hasn't been scheduled in any term yet.</p>
+{% endif %}
+{% endblock %}

@@ -63,6 +63,7 @@ urlpatterns = [
     path('camlfornia/', include('camlfornia.urls')),
     path('aggregator/', include('aggregator.urls')),
     path('studious/', include('studious.urls')),
+    path('agora/',    include('agora.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),
