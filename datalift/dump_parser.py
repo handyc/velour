@@ -114,13 +114,61 @@ _ESCAPES = {
 }
 
 
+def _strip_non_data_blocks(text: str) -> str:
+    """Remove CREATE TRIGGER / CREATE VIEW / CREATE PROCEDURE /
+    CREATE FUNCTION bodies before INSERT parsing.
+
+    mysqldump wraps these in ``DELIMITER ;;`` blocks with ``BEGIN`` /
+    ``END`` bodies that contain SQL statements — including
+    ``INSERT INTO`` fragments that are trigger code, not data. The
+    data parser would then try to evaluate trigger-scope references
+    like ``new.film_id`` as literals and crash.
+
+    Strategy: delete any ``DELIMITER ;;`` … ``DELIMITER ;`` block in
+    its entirety, plus any bare ``CREATE VIEW`` / ``CREATE TRIGGER``
+    / ``CREATE PROCEDURE`` / ``CREATE FUNCTION`` statement. Data
+    INSERTs are never wrapped in DELIMITER blocks, so this is safe.
+    """
+    # 1. DELIMITER ;; … DELIMITER ; — mysqldump's wrapping
+    text = re.sub(
+        r'DELIMITER\s+;;\s.*?DELIMITER\s+;\s*',
+        '\n',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # 2. Standalone CREATE VIEW / TRIGGER / PROCEDURE / FUNCTION (no
+    #    DELIMITER wrap — terminates on semicolon at column 0).
+    text = re.sub(
+        r'CREATE\s+(?:ALGORITHM\s*=\s*\w+\s+)?'
+        r'(?:DEFINER\s*=\s*[^\s]+\s+)?'
+        r'(?:SQL\s+SECURITY\s+\w+\s+)?'
+        r'(?:VIEW|TRIGGER|PROCEDURE|FUNCTION)\b[^;]*?;',
+        '\n',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    # 3. Inline MySQL version-gated value wrappers inside INSERTs —
+    #    Sakila wraps BLOB columns as /*!50705 0x... */. We keep the
+    #    inner payload so the value parser sees it as a plain hex
+    #    literal. Only strip the /*!nnnnn  prefix and matching */.
+    text = re.sub(r'/\*!\d+\s', '', text)
+    text = text.replace('*/', '')
+    return text
+
+
 def iter_inserts(text: str) -> Iterator[tuple[str, list[str] | None, list[tuple]]]:
     """Yield ``(table_name, columns_or_None, rows)`` per INSERT statement.
 
     ``rows`` is a list of tuples of scalar Python values. If the INSERT
     had no explicit column list, ``columns_or_None`` is ``None`` and the
     caller should consult the CREATE TABLE for column order.
+
+    Non-data blocks (CREATE VIEW / TRIGGER / PROCEDURE / FUNCTION, and
+    anything inside a ``DELIMITER ;;`` wrap) are stripped up front so
+    stray ``INSERT INTO`` fragments inside trigger bodies don't get
+    parsed as data.
     """
+    text = _strip_non_data_blocks(text)
     i = 0
     n = len(text)
     while i < n:
@@ -179,6 +227,29 @@ def _parse_tuple(s: str, i: int) -> tuple[tuple, int]:
 
 def _parse_value(s: str, i: int):
     n = len(s)
+    # MySQL version-gated value: /*!50705 <value> */  (BLOBs in Sakila
+    # are wrapped this way). Peel the comment and parse what's inside.
+    if s[i:i+2] == '/*' and i + 2 < n and s[i+2] == '!':
+        end = s.find('*/', i + 3)
+        if end > 0:
+            inner = s[i+3:end].lstrip()
+            # Skip past the version-digit prefix (e.g. "50705 ")
+            k = 0
+            while k < len(inner) and inner[k].isdigit():
+                k += 1
+            inner_val_start = i + 3 + (len(s[i+3:end]) - len(inner.lstrip())) + k
+            # Simpler approach: parse the value from the start of the
+            # significant content inside the comment.
+            inner_start = i + 3
+            while inner_start < end and s[inner_start] in ' \t':
+                inner_start += 1
+            while inner_start < end and s[inner_start].isdigit():
+                inner_start += 1
+            while inner_start < end and s[inner_start] in ' \t':
+                inner_start += 1
+            # Recurse on the cleaned substring
+            val, _ = _parse_value(s, inner_start)
+            return val, end + 2
     # NULL
     if s[i:i+4].upper() == 'NULL':
         return None, i + 4

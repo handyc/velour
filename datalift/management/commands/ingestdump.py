@@ -81,8 +81,12 @@ from datalift.dump_parser import iter_create_tables, iter_inserts
 
 
 _COL_DEF_RE = re.compile(
-    r"^\s*[`\"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`\"]?\s+(?!KEY|UNIQUE|PRIMARY|"
-    r"FOREIGN|CONSTRAINT|INDEX|FULLTEXT|SPATIAL|CHECK)",
+    # Reject the line if it *starts* with a constraint/index keyword —
+    # otherwise ``CONSTRAINT fk_foo FOREIGN KEY …`` would get parsed
+    # as a column named "CONSTRAINT".
+    r"^\s*(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b)"
+    r"[`\"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`\"]?\s+"
+    r"(?!KEY|UNIQUE|PRIMARY|FOREIGN|CONSTRAINT|INDEX|FULLTEXT|SPATIAL|CHECK)",
     re.IGNORECASE,
 )
 
@@ -90,6 +94,13 @@ _COL_DEF_RE = re.compile(
 def _extract_column_order(ddl: str) -> list[str]:
     """Pull the column names out of a CREATE TABLE DDL block, in order."""
     body = ddl[ddl.index('(') + 1 : ddl.rindex(')')]
+    # Unwrap version-gated comments so the column definitions inside
+    # are parsed as regular lines (see model_generator for the matching
+    # rationale). Strip SQL line comments too.
+    body = re.sub(r'--[^\n]*', '', body)
+    body = re.sub(r'/\*!\d+\s+', '', body)
+    body = re.sub(r'\*/', '', body)
+    body = re.sub(r'/\*[^*]*\*/', '', body)
     cols: list[str] = []
     depth = 0
     buf: list[str] = []

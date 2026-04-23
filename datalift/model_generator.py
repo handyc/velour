@@ -109,15 +109,18 @@ class Table:
 # ═════════════════════════════════════════════════════════════════════
 
 _COL_LINE_RE = re.compile(
-    r'^\s*[`"](?P<name>[^`"]+)[`"]\s+(?P<rest>.+?)\s*$'
+    r'^\s*(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b)'
+    r'[`"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`"]?\s+(?P<rest>.+?)\s*$',
+    re.IGNORECASE,
 )
 _CONSTRAINT_RE = re.compile(
-    r'^\s*(?:CONSTRAINT\s+[`"][^`"]+[`"]\s+)?'
+    r'^\s*(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
     r'(?P<kind>PRIMARY\s+KEY|UNIQUE\s+KEY|FOREIGN\s+KEY|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b',
     re.IGNORECASE,
 )
 _FK_RE = re.compile(
     r'FOREIGN\s+KEY\s*\(([^)]+)\)\s*REFERENCES\s+[`"]?(?P<ref>[^\s`"(]+)[`"]?\s*\(([^)]+)\)'
+    r'(?:\s+ON\s+(?:UPDATE|DELETE)\s+(?:RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION|SET\s+DEFAULT))*'
     r'(?:\s+ON\s+DELETE\s+(?P<ondel>RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION|SET\s+DEFAULT))?',
     re.IGNORECASE,
 )
@@ -163,8 +166,13 @@ def _split_body_lines(body: str) -> List[str]:
 
 
 def _strip_colnames(s: str) -> List[str]:
-    """Turn ```col1`, `col2`, `col3`` into ['col1', 'col2', 'col3']."""
-    return [m for m in re.findall(r'[`"]([^`"]+)[`"]', s)]
+    """Turn ```col1`, `col2`, `col3`` — or the unquoted equivalent —
+    into ['col1', 'col2', 'col3']. Handles Laravel (backticked) and
+    canonical SQL (unquoted) dumps alike."""
+    # Match either `quoted` or bare identifier
+    return re.findall(r'[`"]([^`"]+)[`"]|([A-Za-z_][A-Za-z0-9_]*)', s) \
+        and [a or b for a, b in re.findall(
+            r'[`"]([^`"]+)[`"]|([A-Za-z_][A-Za-z0-9_]*)', s) if a or b]
 
 
 def parse_create_table(ddl: str) -> Table:
@@ -175,6 +183,16 @@ def parse_create_table(ddl: str) -> Table:
         raise ValueError('no CREATE TABLE header')
     name = m.group(1)
     body = ddl[ddl.index('(', m.end() - 1) + 1: ddl.rindex(')')]
+    # Strip SQL line comments, then unwrap version-gated comments —
+    # /*!50705 ... */ wrap real column definitions (e.g. Sakila's
+    # GEOMETRY column for MySQL 5.7.5+). UNWRAP rather than strip so
+    # the inner DDL is treated as a regular column, otherwise
+    # schema↔data column counts drift.
+    body = re.sub(r'--[^\n]*', '', body)
+    body = re.sub(r'/\*!\d+\s+', '', body)
+    body = re.sub(r'\*/', '', body)
+    # Strip plain /* ... */ blocks that aren't version-gated.
+    body = re.sub(r'/\*[^*]*\*/', '', body)
     t = Table(name=name)
 
     for line in _split_body_lines(body):
@@ -385,18 +403,17 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
     if col.is_auto_inc:
         return 'models.BigAutoField(primary_key=True)'
 
-    # ForeignKey — takes precedence over raw-type heuristics
+    # ForeignKey — takes precedence over raw-type heuristics.
+    # We default to related_name="+" (disables the reverse accessor)
+    # to avoid conflicts when a table has multiple FKs to the same
+    # target, or when a column name collides with a reverse accessor
+    # elsewhere. The operator can promote to a real reverse name in
+    # review.
     if fk_target:
-        on_delete = {
-            'CASCADE':     'models.CASCADE',
-            'SET_NULL':    'models.SET_NULL',
-            'RESTRICT':    'models.PROTECT',
-            'NO_ACTION':   'models.PROTECT',
-            'SET_DEFAULT': 'models.SET_DEFAULT',
-        }.get('CASCADE', 'models.CASCADE')  # default; overridden below
+        on_delete = 'models.CASCADE'  # overwritten by generate_models_py
         nb = _render_null_blank(col)
         return (f'models.ForeignKey("{fk_target}", '
-                f'on_delete={on_delete}{nb})')
+                f'on_delete={on_delete}, related_name="+"{nb})')
 
     null_blank = _render_null_blank(col)
 
@@ -621,7 +638,7 @@ def generate_models_py(tables: List[Table], app_label: str,
                     'SET_DEFAULT': 'models.SET_DEFAULT',
                 }.get(fk.on_delete, 'models.CASCADE')
                 field_code = re.sub(
-                    r'on_delete=[^,)]+',
+                    r'on_delete=models\.[A-Z_]+',
                     f'on_delete={on_delete}',
                     field_code,
                 )
@@ -632,9 +649,16 @@ def generate_models_py(tables: List[Table], app_label: str,
 
         # 3. Meta
         col_names = {c.name for c in t.columns}
-        ordering = ['id']
+        # Pick the real PK name for ordering — legacy tables often
+        # don't call it `id`. Without this, Django's system check
+        # rejects any ordering that names a non-existent field.
+        pk_col = next(
+            (c.name for c in t.columns if c.is_auto_inc),
+            (t.primary_key[0] if t.primary_key else 'id'),
+        )
+        ordering = [pk_col]
         if 'created_at' in col_names:
-            ordering = ["-created_at"]
+            ordering = ['-created_at']
         elif 'name' in col_names:
             ordering = ['name']
 
