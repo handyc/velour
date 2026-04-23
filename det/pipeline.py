@@ -329,18 +329,23 @@ def _promote_to_automaton(winners: List[dict], *, n_colors: int,
     """Save each winner's packed ruleset as a full automaton.RuleSet +
     ExactRule set + a seeded Simulation so the operator can run it
     from /automaton/."""
-    from automaton.models import ExactRule, RuleSet, Simulation
+    from automaton.models import DEFAULT_PALETTE, ExactRule, RuleSet, Simulation
 
+    from datetime import datetime
+    stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     created: List[int] = []
     for i, w in enumerate(winners):
         agent: PackedRuleset = w['agent']
-        name = (f'Det oneclick #{i + 1}: tournament='
-                f'{w["tournament_score_avg"]:.2f} '
-                f'(seed-of-pop {seed_score:.2f})')
+        # RuleSet.name is unique=True; include the timestamp so repeated
+        # pipeline runs with similar scores don't collide.
+        name = (f'Det oneclick {stamp} #{i + 1}: '
+                f'tournament={w["tournament_score_avg"]:.2f} '
+                f'(seed {seed_score:.2f})')
         rs = RuleSet.objects.create(
             name=name,
             n_colors=n_colors,
             source='seed',
+            palette=list(DEFAULT_PALETTE),
             description=(
                 'Promoted from det.pipeline.run_oneclick_pipeline. '
                 f'Seed ruleset was the best of the initial random batch '
@@ -376,9 +381,10 @@ def _promote_to_automaton(winners: List[dict], *, n_colors: int,
         initial_grid = engine.seeded_random_grid(W, H, n_colors, ga_grid_seed)
         Simulation.objects.create(
             ruleset=rs,
-            name=f'Oneclick #{i + 1} preview',
+            name=f'Oneclick {stamp} #{i + 1} preview',
             width=W, height=H,
             grid_state=initial_grid,
+            palette=list(DEFAULT_PALETTE),
             notes=(
                 f'Initial grid reused from the GA substrate '
                 f'({W}×{H}, seed "{ga_grid_seed}").'
