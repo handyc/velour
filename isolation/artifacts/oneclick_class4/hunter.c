@@ -314,6 +314,14 @@ int main(int argc, char **argv) {
 
     /* 4. Tournament: top WINNERS × TSEEDS different seeds */
     printf("=== top %d winners ===\n", WINNERS);
+
+    /* Pick output names by scanning for the next free winner_N slot.
+     * This matters when either (a) the running binary is itself named
+     * winner_N (a descendant re-invoked in its own parent dir), or
+     * (b) a previous run left winner_1..winner_K in place. We never
+     * clobber an existing file or the running executable. */
+    int next_slot = 1;
+
     for (int w = 0; w < WINNERS; w++) {
         double sum = 0;
         double per[TSEEDS];
@@ -323,9 +331,15 @@ int main(int argc, char **argv) {
         }
         double avg = sum / TSEEDS;
 
-        /* 5. Write the winner as a runnable child binary. */
+        /* 5. Write the winner as a runnable child binary, at the next
+         * slot that doesn't already exist on disk. */
         char path[64];
-        snprintf(path, sizeof path, "winner_%d", w + 1);
+        for (;;) {
+            snprintf(path, sizeof path, "winner_%d", next_slot);
+            struct stat probe;
+            if (stat(path, &probe) != 0) break;  /* free slot */
+            next_slot++;
+        }
         int rc = write_child(argv[0], path, pool[w]);
         if (rc != 0) {
             fprintf(stderr, "  couldn't write %s\n", path);
@@ -334,6 +348,7 @@ int main(int argc, char **argv) {
         for (int s = 0; s < TSEEDS; s++)
             printf("%s%.2f", s ? " " : "", per[s]);
         printf("]  →  ./%s\n", path);
+        next_slot++;  /* don't pick the same slot for the next winner */
     }
 
     return 0;
