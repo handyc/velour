@@ -43,6 +43,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/stat.h>
 
 /* Hand-inlined fabs — avoids pulling in libm (saves ~8 KB on glibc). */
@@ -181,10 +182,29 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
 
 /* ── Terminal rendering (ANSI 256-colour hex) ────────────────────── */
 
-/* 256-colour palette for the four cell states. Matches the existing
- * isolation/artifacts/hex_ca_class4/c_compact.c so the aesthetic
- * carries between the two artifacts. */
-static const int ANSI_COLOURS[K] = { 232, 22, 94, 208 };
+/* Palette for the four cell states. Populated at start of display
+ * mode by choose_palette() — each run picks a fresh combination. */
+static int ANSI_COLOURS[K];
+
+/* Pick 4 distinct 256-colour ANSI codes, mostly from the 216-colour
+ * cube (16..231) which is the saturated/bright range, with occasional
+ * greys (232..255) for contrast. Re-rolls on dup so every cell state
+ * gets a visibly distinct colour. */
+static void choose_palette(void) {
+    for (int i = 0; i < K; ) {
+        int c;
+        /* 90% cube, 10% greyscale for variety. */
+        if ((rand() % 10) < 9) c = 16 + rand() % 216;
+        else                   c = 232 + rand() % 24;
+        /* Reject if too close to an already-picked colour in 6×6×6
+         * cube space — avoids near-indistinguishable palettes. */
+        int ok = 1;
+        for (int j = 0; j < i; j++) {
+            if (ANSI_COLOURS[j] == c) { ok = 0; break; }
+        }
+        if (ok) ANSI_COLOURS[i++] = c;
+    }
+}
 
 static void render_grid(const u8 *grid) {
     printf("\x1b[H\x1b[J");  /* cursor home + clear screen */
@@ -201,11 +221,15 @@ static void render_grid(const u8 *grid) {
 /* Display mode: seed a random grid, render + step for `ticks` frames.
  * Sleeps a few hundred ms between frames so the eye can follow it. */
 static void display_seed(const u8 *seed, uint32_t grid_seed, int ticks) {
+    choose_palette();
     u8 a[GRID_W * GRID_H], b[GRID_W * GRID_H];
     seed_grid(a, grid_seed);
     for (int t = 0; t <= ticks; t++) {
         render_grid(a);
-        printf("tick %d / %d\n", t, ticks);
+        printf("tick %d / %d  palette=[%d %d %d %d]\n",
+               t, ticks,
+               ANSI_COLOURS[0], ANSI_COLOURS[1],
+               ANSI_COLOURS[2], ANSI_COLOURS[3]);
         fflush(stdout);
         if (t == ticks) break;
         step_grid(seed, a, b);
@@ -291,10 +315,11 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    /* Display mode: no args → render + step for 10 ticks then exit. */
+    /* Display mode: no args → render + step for 10 ticks then exit.
+     * Seed the RNG with time() so each run picks a fresh palette. */
     if (argc == 1) {
-        srand(42);
-        display_seed(seed, 42, 10);
+        srand((unsigned)time(NULL));
+        display_seed(seed, (uint32_t)time(NULL), 10);
         return 0;
     }
 
