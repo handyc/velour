@@ -12,23 +12,29 @@
  * ship many hunters (one per genome) as ``cat engine_bytes genome.bin
  * > hunter_N``, no recompile needed.
  *
- * Pipeline:
+ * Two modes:
+ *
+ *   ./hunter                      # display mode: animate the seed
+ *                                 # genome on a random grid for
+ *                                 # 10 ticks and exit. No GA.
+ *   ./hunter POP GENS [SEED]      # GA mode: evolve POP agents over
+ *                                 # GENS generations; write winners.
+ *
+ * Display-mode pipeline (no args):
  *   1. Read own tail → 4096-byte seed.
- *   2. Mutate seed ``POP-1`` times to form initial population.
- *   3. Run ``GENS`` generations of tournament-2 GA on a small hex grid.
- *   4. Score top K on multiple seed grids; pick top ``WINNERS``.
+ *   2. Seed a random grid.
+ *   3. ANSI 256-colour render + step the grid for 10 ticks.
+ *
+ * GA-mode pipeline (with args):
+ *   1. Read own tail → 4096-byte seed.
+ *   2. Mutate seed POP-1 times to form initial population.
+ *   3. Run GENS generations of tournament-2 GA on a small hex grid.
+ *   4. Score top K on multiple seed grids; pick top WINNERS.
  *   5. For each winner: copy our own engine bytes to a new file,
- *      append the winner's genome, chmod +x. Each output is another
- *      self-contained hunter you can run to refine further.
+ *      append the winner's genome, chmod +x.
  *
  * Build:
- *   cc -O2 -s hunter.c -o hunter_engine
- *   dd if=/dev/urandom bs=1 count=4096 >> hunter_engine
- *   mv hunter_engine hunter && chmod +x hunter
- *
- * Run:
- *   ./hunter          # → writes winner_1, winner_2, winner_3 + summary
- *   ./winner_1        # refines further from that genome
+ *   ./build.sh                # → ~18.5 KB hunter binary
  *
  * ────────────────────────────────────────────────────────────────── */
 
@@ -173,6 +179,41 @@ static double fitness(const u8 *genome, uint32_t grid_seed) {
     return score;
 }
 
+/* ── Terminal rendering (ANSI 256-colour hex) ────────────────────── */
+
+/* 256-colour palette for the four cell states. Matches the existing
+ * isolation/artifacts/hex_ca_class4/c_compact.c so the aesthetic
+ * carries between the two artifacts. */
+static const int ANSI_COLOURS[K] = { 232, 22, 94, 208 };
+
+static void render_grid(const u8 *grid) {
+    printf("\x1b[H\x1b[J");  /* cursor home + clear screen */
+    for (int y = 0; y < GRID_H; y++) {
+        if (y & 1) putchar(' ');            /* offset odd rows for hex */
+        for (int x = 0; x < GRID_W; x++) {
+            printf("\x1b[48;5;%dm  ", ANSI_COLOURS[grid[y * GRID_W + x]]);
+        }
+        printf("\x1b[0m\n");
+    }
+    fflush(stdout);
+}
+
+/* Display mode: seed a random grid, render + step for `ticks` frames.
+ * Sleeps a few hundred ms between frames so the eye can follow it. */
+static void display_seed(const u8 *seed, uint32_t grid_seed, int ticks) {
+    u8 a[GRID_W * GRID_H], b[GRID_W * GRID_H];
+    seed_grid(a, grid_seed);
+    for (int t = 0; t <= ticks; t++) {
+        render_grid(a);
+        printf("tick %d / %d\n", t, ticks);
+        fflush(stdout);
+        if (t == ticks) break;
+        step_grid(seed, a, b);
+        memcpy(a, b, sizeof a);
+        usleep(150000);  /* ~6.7 fps */
+    }
+}
+
 /* ── GA ops ───────────────────────────────────────────────────────── */
 
 static void mutate(u8 *dst, const u8 *src, double rate) {
@@ -233,11 +274,15 @@ static int write_child(const char *self_path, const char *dst_path,
 
 /* ── main ─────────────────────────────────────────────────────────── */
 
-int main(int argc, char **argv) {
-    unsigned rseed = (argc > 1) ? (unsigned)atoi(argv[1]) : 42;
-    srand(rseed);
+static void usage(const char *prog) {
+    fprintf(stderr,
+        "usage: %s                    # display: animate seed for 10 ticks\n"
+        "       %s POP GENS [SEED]    # GA: evolve POP agents for GENS gens\n",
+        prog, prog);
+}
 
-    /* 1. Read our own tail to get the seed genome. */
+int main(int argc, char **argv) {
+    /* Read our own tail to get the seed genome — both modes need this. */
     u8 seed[GBYTES];
     if (read_self_seed(argv[0], seed) != 0) {
         fprintf(stderr, "error: can't read seed from '%s' "
@@ -246,26 +291,47 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    /* 2. Initial population: seed + POP-1 heavily-mutated copies.
-     *
-     * Rate 0.05 ≈ 820 situation-flips per child. From the identity
-     * seed that's enough to inject non-trivial activity into an
-     * otherwise-dead substrate — the GA's job is then to prune back
-     * toward the class-4 band. From a random-chaos seed the same
-     * 820 flips don't change character (still chaos); that's why
-     * build.sh now defaults to the identity seed.
-     */
-    u8 pool[POP][GBYTES];
-    double fit[POP];
+    /* Display mode: no args → render + step for 10 ticks then exit. */
+    if (argc == 1) {
+        srand(42);
+        display_seed(seed, 42, 10);
+        return 0;
+    }
+
+    /* GA mode: needs at least POP GENS. */
+    if (argc < 3) {
+        usage(argv[0]);
+        return 1;
+    }
+    int pop  = atoi(argv[1]);
+    int gens = atoi(argv[2]);
+    unsigned rseed = (argc >= 4) ? (unsigned)atoi(argv[3]) : 42;
+    if (pop < 2 || gens < 1) {
+        fprintf(stderr, "error: POP must be ≥2 and GENS ≥1.\n");
+        usage(argv[0]);
+        return 1;
+    }
+    srand(rseed);
+
+    /* Population + fitness arrays, sized at runtime. calloc() is
+     * contiguous so pool[i] + GBYTES is the next genome. */
+    u8 (*pool)[GBYTES] = calloc(pop, GBYTES);
+    double *fit = calloc(pop, sizeof(double));
+    if (!pool || !fit) {
+        fprintf(stderr, "error: out of memory for pop=%d\n", pop);
+        return 3;
+    }
+
+    /* Initial population: seed + mutants at 5% per-situation flip. */
     memcpy(pool[0], seed, GBYTES);
-    for (int i = 1; i < POP; i++) mutate(pool[i], seed, 0.05);
+    for (int i = 1; i < pop; i++) mutate(pool[i], seed, 0.05);
 
-    /* 3. GA */
-    for (int gen = 0; gen < GENS; gen++) {
-        for (int i = 0; i < POP; i++) fit[i] = fitness(pool[i], rseed);
+    /* GA loop */
+    for (int gen = 0; gen < gens; gen++) {
+        for (int i = 0; i < pop; i++) fit[i] = fitness(pool[i], rseed);
 
-        /* Insertion sort (POP is small, keeps code tight). */
-        for (int i = 1; i < POP; i++) {
+        /* Insertion sort by fitness descending. */
+        for (int i = 1; i < pop; i++) {
             double fv = fit[i];
             u8 tmp[GBYTES]; memcpy(tmp, pool[i], GBYTES);
             int j = i - 1;
@@ -278,28 +344,25 @@ int main(int argc, char **argv) {
             memcpy(pool[j + 1], tmp, GBYTES);
         }
         double sum = 0;
-        for (int i = 0; i < POP; i++) sum += fit[i];
-        /* Measure activity-tail of the best agent so the log shows
-         * whether we're still stuck at chaos (≈0.75), still at
-         * identity (≈0.0), or edging into the class-4 band (~0.1). */
+        for (int i = 0; i < pop; i++) sum += fit[i];
         fitness(pool[0], rseed);
         fprintf(stderr,
                 "gen %2d: best=%.2f mean=%.2f best_activity=%.3f\n",
-                gen + 1, fit[0], sum / POP, last_activity_tail);
+                gen + 1, fit[0], sum / pop, last_activity_tail);
 
         /* Breed bottom half from top half. */
-        for (int i = POP / 2; i < POP; i++) {
+        for (int i = pop / 2; i < pop; i++) {
             u8 tmp[GBYTES];
             cross(tmp,
-                  pool[rand() % (POP / 2)],
-                  pool[rand() % (POP / 2)]);
+                  pool[rand() % (pop / 2)],
+                  pool[rand() % (pop / 2)]);
             mutate(pool[i], tmp, 0.005);
         }
     }
 
-    /* Re-score one more time on the final population. */
-    for (int i = 0; i < POP; i++) fit[i] = fitness(pool[i], rseed);
-    for (int i = 1; i < POP; i++) {
+    /* Re-score the final population. */
+    for (int i = 0; i < pop; i++) fit[i] = fitness(pool[i], rseed);
+    for (int i = 1; i < pop; i++) {
         double fv = fit[i];
         u8 tmp[GBYTES]; memcpy(tmp, pool[i], GBYTES);
         int j = i - 1;
@@ -351,5 +414,7 @@ int main(int argc, char **argv) {
         next_slot++;  /* don't pick the same slot for the next winner */
     }
 
+    free(pool);
+    free(fit);
     return 0;
 }
