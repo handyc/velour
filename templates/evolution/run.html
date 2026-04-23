@@ -71,6 +71,10 @@
         const mod = await import("{% static 'det/hexca_gene.mjs' %}");
         GENE_TYPES.hexca = mod.hexcaHandler;
     }
+    if (geneType === 'packed_hexca' && !GENE_TYPES.packed_hexca) {
+        const mod = await import("{% static 'det/packed_gene.mjs' %}");
+        GENE_TYPES.packed_hexca = mod.packedHexcaHandler;
+    }
 
     const engine = new EvolutionEngine({
         run: RUN,
