@@ -124,8 +124,46 @@
       long transients, the interesting club</span></div>
   </div>
 
+  <div class="newsearch" style="border-color:#2ea043;">
+    <h2 style="color:#7ee787;">🎯 One-click Class-4 hunt</h2>
+    <p class="lede" style="margin-bottom:0.6rem;">
+      Random packed 16,384-rule seed → mutate to a population → GA for
+      N generations → tournament across K seed grids → promote top
+      winners to <a href="/automaton/" style="color:#58a6ff">Automaton</a>.
+      All <em>in one click</em>; all packed-ruleset, all Python-side.
+    </p>
+    <form method="post" action="{% url 'det:oneclick_hunt' %}">
+      {% csrf_token %}
+      <label>population
+        <input type="number" name="population" value="25"
+               min="10" max="80">
+      </label>
+      <label>generations
+        <input type="number" name="generations" value="12"
+               min="4" max="40">
+      </label>
+      <label>grid size
+        <input type="number" name="grid" value="18" min="10" max="32">
+      </label>
+      <label>horizon
+        <input type="number" name="horizon" value="30" min="12" max="80">
+      </label>
+      <label>tournament seeds
+        <input type="number" name="tournament_seeds" value="5"
+               min="1" max="12">
+      </label>
+      <label>winners → Automaton
+        <input type="number" name="winners" value="3" min="1" max="10">
+      </label>
+      <button class="btn" type="submit"
+              style="background:#1f3a1f;border-color:#2ea043;color:#7ee787;">
+        Hunt Class-4 →
+      </button>
+    </form>
+  </div>
+
   <div class="newsearch">
-    <h2>New search</h2>
+    <h2>New search (random candidate sweep)</h2>
     <form method="post" action="{% url 'det:create_search' %}">
       {% csrf_token %}
       <label>colors

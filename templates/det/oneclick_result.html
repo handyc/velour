@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Class-4 hunt — Det — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .oc-wrap { max-width: 1000px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; font-size: 0.9rem; }
+  .oc-wrap h1 { font-size: 1.35rem; margin: 0 0 0.4rem; }
+  .oc-wrap h2 { font-size: 0.95rem; color: #d2a8ff; margin-top: 1.3rem; }
+  .oc-wrap a { color: #58a6ff; text-decoration: none; }
+  .oc-wrap a:hover { text-decoration: underline; }
+  .oc-card { background: #0d1117; border: 1px solid #30363d;
+             border-radius: 4px; padding: 0.8rem 1rem; margin-bottom: 0.8rem; }
+  .oc-card h3 { margin: 0 0 0.4rem; font-size: 0.88rem; color: #c9d1d9; }
+  .oc-card .meta { color: #8b949e; font-size: 0.78rem;
+                   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .oc-tbl { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .oc-tbl th, .oc-tbl td { padding: 0.35rem 0.6rem;
+                           border-bottom: 1px solid #21262d; text-align: left; }
+  .oc-tbl th { color: #8b949e; font-weight: normal; font-size: 0.76rem; }
+  .oc-tbl .num { text-align: right;
+                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .oc-pill { display: inline-block; padding: 0.12rem 0.45rem;
+             background: #1f3a1f; color: #7ee787; border-radius: 3px;
+             font-size: 0.75rem; font-weight: 500; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="oc-wrap">
+  <p><a href="{% url 'det:index' %}">&larr; back to Det</a></p>
+  <h1>🎯 Class-4 hunt — complete</h1>
+  <p style="color:#8b949e;">
+    Packed seed → GA → tournament → <a href="/automaton/">promoted to Automaton</a>.
+  </p>
+
+  <h2>Stages</h2>
+  <table class="oc-tbl">
+    <thead><tr><th>Stage</th><th>Detail</th><th class="num">Elapsed</th></tr></thead>
+    <tbody>
+    {% for s in result.stages %}
+      <tr>
+        <td><b>{{ s.name }}</b></td>
+        <td class="meta">{{ s.detail }}</td>
+        <td class="num">{{ s.elapsed_s|floatformat:2 }}s</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Seed + GA</h2>
+  <div class="oc-card">
+    <div class="meta">
+      seed score: <b style="color:#c9d1d9;">{{ result.seed_score|floatformat:2 }}</b>
+      &nbsp;|&nbsp;
+      final GA best: <b style="color:#c9d1d9;">{{ result.final_generation_best|floatformat:2 }}</b>
+      &nbsp;|&nbsp;
+      final GA mean: <b style="color:#c9d1d9;">{{ result.final_generation_mean|floatformat:2 }}</b>
+    </div>
+    <div class="meta" style="margin-top:0.3rem;">
+      seed genome fingerprint: <code>{{ result.seed_hex }}</code>
+    </div>
+  </div>
+
+  <h2>Tournament ranking</h2>
+  <table class="oc-tbl">
+    <thead>
+      <tr>
+        <th>#</th><th class="num">GA score</th>
+        <th class="num">Tournament avg</th>
+        <th>Per-seed detail</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for entry in result.tournament_ranking %}
+      <tr>
+        <td>{{ forloop.counter }}</td>
+        <td class="num">{{ entry.ga_score|floatformat:2 }}</td>
+        <td class="num"><b>{{ entry.tournament_score_avg|floatformat:2 }}</b></td>
+        <td class="meta">
+          {% for ps in entry.per_seed %}
+            {{ ps.seed|slice:"-8:" }}:<b>{{ ps.score|floatformat:2 }}</b>{% if not forloop.last %} · {% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Promoted rulesets</h2>
+  {% if promoted %}
+    <div class="oc-card">
+      {% for p in promoted %}
+        <div style="margin-bottom:0.3rem;">
+          <span class="oc-pill">RuleSet #{{ p.pk }}</span>
+          <a href="{{ p.url }}">view in Automaton →</a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="meta">None promoted — check the pipeline config.</p>
+  {% endif %}
+
+  <form method="post" action="{% url 'det:oneclick_hunt' %}" style="margin-top:1.5rem;">
+    {% csrf_token %}
+    <button type="submit" style="background:#1f3a1f;border:1px solid #2ea043;
+                                 color:#7ee787;padding:0.5rem 1rem;
+                                 border-radius:4px;cursor:pointer;font-size:0.9rem;">
+      Hunt again →
+    </button>
+  </form>
+</div>
+{% endblock %}

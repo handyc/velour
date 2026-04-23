@@ -38,6 +38,41 @@ def index(request):
 
 @login_required
 @require_POST
+def oneclick_hunt(request):
+    """Full Class-4 hunt pipeline: random packed seed → GA → tournament
+    → promote top winners to Automaton. Synchronous, runs in a single
+    request (typical sweep is 3-20s depending on params).
+    """
+    from .pipeline import run_oneclick_pipeline
+
+    def _int(name, default, lo=1, hi=200):
+        try:
+            v = int(request.POST.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    result = run_oneclick_pipeline(
+        seed_candidates=_int('seed_candidates', 15, 1, 50),
+        population_size=_int('population', 25, 4, 100),
+        generations=_int('generations', 12, 1, 50),
+        grid_W=_int('grid', 18, 8, 40),
+        grid_H=_int('grid', 18, 8, 40),
+        horizon=_int('horizon', 30, 8, 120),
+        tournament_seeds=_int('tournament_seeds', 5, 1, 20),
+        final_winners=_int('winners', 3, 1, 10),
+    )
+
+    promoted = [{'pk': pk, 'url': f'/automaton/ruleset/{pk}/'}
+                for pk in result.promoted_ruleset_ids]
+    return render(request, 'det/oneclick_result.html', {
+        'result': result,
+        'promoted': promoted,
+    })
+
+
+@login_required
+@require_POST
 def create_search(request):
     """Kick off a new SearchRun. Runs synchronously for modest params
     (default ~5-15s). For heavier sweeps the operator should use the

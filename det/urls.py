@@ -7,6 +7,7 @@ app_name = 'det'
 
 urlpatterns = [
     path('', views.index, name='index'),
+    path('oneclick/', views.oneclick_hunt, name='oneclick_hunt'),
     path('search/new/', views.create_search, name='create_search'),
     path('search/<int:pk>/', views.search_detail, name='search_detail'),
     path('candidate/<int:pk>/', views.candidate_detail,
