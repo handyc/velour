@@ -228,7 +228,8 @@
   {% for row in forecast_rows %}
     <tr class="regime-{{ row.regime }} {% if row.years == 0 %}horizon-now{% endif %}">
       <td>
-        {% if row.years == 0 %}now{% else %}+{{ row.years }}y{% endif %}
+        {% if row.years == 0 %}now ({{ row.forecast_year }})
+        {% else %}+{{ row.years }}y ({{ row.forecast_year }}){% endif %}
       </td>
       <td class="regime">{{ row.regime }}</td>
       <td class="num">{{ row.total_projects|floatformat:0 }}</td>
@@ -262,7 +263,8 @@
     {% for row in forecast_rows %}
       {% for cls in row.per_class %}
         <tr class="regime-{{ row.regime }}">
-          <td>{% if row.years == 0 %}now{% else %}+{{ row.years }}y{% endif %}</td>
+          <td>{% if row.years == 0 %}now ({{ row.forecast_year }})
+              {% else %}+{{ row.years }}y ({{ row.forecast_year }}){% endif %}</td>
           <td>{{ cls.class_name }}</td>
           <td class="num">{{ cls.projects|floatformat:0 }}</td>
           <td class="num">{{ cls.ram_idle_gb|floatformat:2 }}</td>

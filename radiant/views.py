@@ -47,12 +47,22 @@ def home(request):
     servers = Server.objects.all()
     projects = HostedProject.objects.select_related('server', 'workload_class')
 
+    # Overlay the last N snapshots on the chart, each faded by age.
+    # Takes snapshot.created_at.year as the basis for that snapshot's
+    # relative offsets, so a "+5y" row saved in 2024 lands at 2029 and
+    # an overlapping "+5y" row saved in 2026 lands at 2031.
+    historical = []
+    for snap in Snapshot.objects.order_by('-created_at')[:8]:
+        hrows = (snap.payload or {}).get('forecast_rows') or []
+        if hrows:
+            historical.append((snap.created_at.year, hrows))
+
     return render(request, 'radiant/home.html', {
         'servers':        servers,
         'classes':        classes,
         'projects':       projects,
         'forecast_rows':  rows,
-        'forecast_svg':   render_forecast_svg(rows),
+        'forecast_svg':   render_forecast_svg(rows, historical=historical),
         'recommendation': rec,
         'split_wp':       split_wp,
         'horizons':       HORIZON_YEARS,

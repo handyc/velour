@@ -20,6 +20,7 @@ class workloads.
 """
 
 import math
+from datetime import date
 
 from .models import HORIZON_YEARS, regime_for, GrowthAssumption
 
@@ -120,8 +121,16 @@ def _current_forecast_rows():
     return forecast_table(list(WorkloadClass.objects.all()))
 
 
-def forecast_table(workload_classes):
-    """Return one dict per horizon with per-class and aggregate figures."""
+def forecast_table(workload_classes, base_year=None):
+    """Return one dict per horizon with per-class and aggregate figures.
+
+    Each row carries both ``years`` (offset from ``base_year``) and
+    ``forecast_year`` (absolute calendar year), so callers that plot
+    multiple past forecasts on one chart can align them by absolute
+    time instead of offset time.
+    """
+    if base_year is None:
+        base_year = date.today().year
     rows = []
     for years in HORIZON_YEARS:
         per_class = []
@@ -148,6 +157,7 @@ def forecast_table(workload_classes):
             total_storage += storage
         rows.append({
             'years':             years,
+            'forecast_year':     base_year + years,
             'regime':            regime_for(years),
             'per_class':         per_class,
             'total_projects':    total_projects,
@@ -273,30 +283,62 @@ def purchase_recommendation(rows, split_wordpress=True):
     }
 
 
-def render_forecast_svg(rows, width=920, height=220):
-    """Tufte-style sparkline of RAM-peak across the 12 horizons.
+def _fade_opacity(years_old, max_age=8.0):
+    """How saturated to render a past prediction. Today → 1.0; max_age
+    years ago or older → 0.15. Linear decay between."""
+    if years_old <= 0:
+        return 1.0
+    frac = min(1.0, years_old / max_age)
+    return max(0.15, 1.0 - 0.85 * frac)
 
-    X-axis is log10(years+1) so the linear regime has room to breathe and
-    the speculative tail doesn't swallow the chart. Points are coloured by
-    regime (green/amber/red). Intended as an at-a-glance companion to the
-    numbers table — not a precision chart.
+
+def render_forecast_svg(rows, width=920, height=240, historical=None,
+                        base_year=None):
+    """Tufte-style chart of RAM-peak across the 12 horizons.
+
+    X-axis is log10(absolute year − base_year + 1) so the near-term has
+    room to breathe and the speculative tail doesn't swallow the chart.
+    Points are coloured by regime (green/amber/red).
+
+    If ``historical`` is a list of ``(snapshot_year, rows)`` tuples, each
+    is drawn as a faded line behind the current prediction — its own
+    absolute years on the shared axis, its opacity decaying with age
+    so old predictions visibly retreat as they recede in time.
     """
-    pad_l, pad_r, pad_t, pad_b = 52, 24, 14, 34
+    pad_l, pad_r, pad_t, pad_b = 52, 24, 14, 46
     plot_w = width - pad_l - pad_r
     plot_h = height - pad_t - pad_b
 
     if not rows:
         return ''
 
-    xs = [math.log10(r['years'] + 1) for r in rows]
+    if base_year is None:
+        base_year = date.today().year
+    historical = historical or []
+
+    # The shared x-axis spans from base_year to whatever the furthest
+    # prediction across current + historical lands at.
+    def _years_span(rs):
+        return [r.get('forecast_year',
+                      r['years'] + base_year) - base_year for r in rs]
+
+    max_horizon_years = max(_years_span(rows) or [1])
+    for _, hrows in historical:
+        max_horizon_years = max(max_horizon_years,
+                                max(_years_span(hrows) or [1]))
+
+    def X(absolute_year):
+        offset = max(0, absolute_year - base_year)
+        return pad_l + (math.log10(offset + 1) /
+                        math.log10(max_horizon_years + 1)) * plot_w
+
     ys_ram = [r['total_ram_peak_gb'] for r in rows]
     ys_idle = [r['total_ram_idle_gb'] for r in rows]
-
-    x_min, x_max = min(xs), max(xs) or 1.0
-    x_span = (x_max - x_min) or 1.0
     y_max = max(max(ys_ram), 1.0) * 1.15
+    for _, hrows in historical:
+        y_max = max(y_max,
+                    max(r['total_ram_peak_gb'] for r in hrows) * 1.15)
 
-    def X(v): return pad_l + (v - x_min) / x_span * plot_w
     def Y(v): return pad_t + plot_h - v / y_max * plot_h
 
     regime_fill = {'linear': '#2ea043', 'logistic': '#d29922',
@@ -310,7 +352,7 @@ def render_forecast_svg(rows, width=920, height=220):
         f'color:#8b949e;">'
     ]
 
-    # y-axis gridlines + labels (every ~25% of y_max, snapped to 10s)
+    # y-axis gridlines + labels
     step = max(10, round(y_max / 4 / 10) * 10)
     ticks = []
     t = 0
@@ -329,10 +371,35 @@ def render_forecast_svg(rows, width=920, height=220):
                  f'transform="rotate(-90 8 {pad_t + 10})" '
                  f'text-anchor="end">GB RAM</text>')
 
-    # idle line (faint), then peak line (blue)
+    # --- Historical lines first, so current prediction draws over them.
+    current_year = date.today().year
+    for snapshot_year, hrows in historical:
+        age_years = max(0, current_year - snapshot_year)
+        opacity = _fade_opacity(age_years)
+        hxs = [r.get('forecast_year', r['years'] + snapshot_year)
+               for r in hrows]
+        hys = [r['total_ram_peak_gb'] for r in hrows]
+        path = 'M ' + ' L '.join(
+            f'{X(x):.1f},{Y(y):.1f}' for x, y in zip(hxs, hys))
+        parts.append(f'<path d="{path}" fill="none" '
+                     f'stroke="#58a6ff" stroke-width="1" '
+                     f'stroke-dasharray="3,2" '
+                     f'opacity="{opacity:.2f}" />')
+        # Label at the snapshot's start point
+        if hxs and hys:
+            parts.append(
+                f'<text x="{X(hxs[0]):.1f}" y="{Y(hys[0]) - 4:.1f}" '
+                f'text-anchor="start" fill="#58a6ff" '
+                f'opacity="{opacity:.2f}" font-size="9">'
+                f"pred·{snapshot_year}</text>"
+            )
+
+    # --- Current prediction (full saturation).
     def path_for(ys):
+        xs_abs = [r.get('forecast_year', r['years'] + base_year)
+                  for r in rows]
         return 'M ' + ' L '.join(
-            f'{X(x):.1f},{Y(y):.1f}' for x, y in zip(xs, ys))
+            f'{X(x):.1f},{Y(y):.1f}' for x, y in zip(xs_abs, ys))
 
     parts.append(f'<path d="{path_for(ys_idle)}" fill="none" '
                  f'stroke="#30363d" stroke-width="1" '
@@ -340,19 +407,26 @@ def render_forecast_svg(rows, width=920, height=220):
     parts.append(f'<path d="{path_for(ys_ram)}" fill="none" '
                  f'stroke="#58a6ff" stroke-width="1.5" />')
 
-    # points coloured by regime
-    for row, x, y in zip(rows, xs, ys_ram):
+    for row, y in zip(rows, ys_ram):
+        x_abs = row.get('forecast_year', row['years'] + base_year)
         color = regime_fill.get(row['regime'], '#8b949e')
-        parts.append(f'<circle cx="{X(x):.1f}" cy="{Y(y):.1f}" '
+        parts.append(f'<circle cx="{X(x_abs):.1f}" cy="{Y(y):.1f}" '
                      f'r="2.8" fill="{color}" />')
 
-    # x-axis labels at each horizon
-    for row, x in zip(rows, xs):
-        label = 'now' if row['years'] == 0 else (
-            f'{row["years"]//1000}ky' if row['years'] >= 1000 else
+    # x-axis labels — absolute years, with relative offset below
+    for row in rows:
+        x_abs = row.get('forecast_year', row['years'] + base_year)
+        relative = 'now' if row['years'] == 0 else (
+            f'+{row["years"]//1000}ky' if row['years'] >= 1000 else
             f'+{row["years"]}y')
-        parts.append(f'<text x="{X(x):.1f}" y="{height - 18}" '
-                     f'text-anchor="middle" fill="#6e7681">{label}</text>')
+        parts.append(
+            f'<text x="{X(x_abs):.1f}" y="{height - 26}" '
+            f'text-anchor="middle" fill="#c9d1d9">{x_abs}</text>'
+        )
+        parts.append(
+            f'<text x="{X(x_abs):.1f}" y="{height - 16}" '
+            f'text-anchor="middle" fill="#6e7681">{relative}</text>'
+        )
 
     # legend
     legend_y = height - 4
@@ -361,6 +435,8 @@ def render_forecast_svg(rows, width=920, height=220):
         ('#f85149', 'speculative'), ('#58a6ff', 'peak'),
         ('#30363d', 'idle'),
     ]
+    if historical:
+        legend_items.append(('#58a6ff', 'past (faded)'))
     lx = pad_l
     for color, name in legend_items:
         parts.append(f'<circle cx="{lx}" cy="{legend_y - 3}" r="2.5" '
