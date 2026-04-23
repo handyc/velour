@@ -113,6 +113,28 @@ _COL_LINE_RE = re.compile(
     r'[`"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`"]?\s+(?P<rest>.+?)\s*$',
     re.IGNORECASE,
 )
+
+
+def _normalize_type(raw: str) -> str:
+    """Lowercase the type keyword + unsigned/zerofill modifiers, but
+    preserve the parenthesised argument list as-written. ENUM('M','F')
+    has case-significant values that must round-trip through the
+    TextChoices class and back into ingestion unchanged. For numeric
+    args (VARCHAR(255), DECIMAL(10,2)) it's a no-op."""
+    m = re.match(
+        r'^([A-Za-z]+)(\s*\([^)]*\))?(\s+unsigned)?(\s+zerofill)?$',
+        raw, re.IGNORECASE,
+    )
+    if not m:
+        return raw.lower()
+    kw = m.group(1).lower()
+    # Strip whitespace between keyword and "(" so downstream regexes
+    # like r'enum\((.+)\)' match whether the source wrote ENUM(...)
+    # or ENUM (...) with an intervening space.
+    paren = (m.group(2) or '').lstrip()
+    rest = ((m.group(3) or '') + (m.group(4) or '')).lower()
+    return kw + paren + rest
+
 _CONSTRAINT_RE = re.compile(
     r'^\s*(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
     r'(?P<kind>PRIMARY\s+KEY|UNIQUE\s+KEY|FOREIGN\s+KEY|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b',
@@ -181,7 +203,11 @@ def parse_create_table(ddl: str) -> Table:
                   ddl, re.IGNORECASE)
     if not m:
         raise ValueError('no CREATE TABLE header')
-    name = m.group(1)
+    # Strip embedded /* ... */ from the name — MediaWiki's `/*_*/table`
+    # table-prefix placeholder should become just `table`.
+    name = re.sub(r'/\*[^*]*\*/', '', m.group(1)).strip()
+    if not name:
+        raise ValueError('table name missing after prefix placeholder strip')
     body = ddl[ddl.index('(', m.end() - 1) + 1: ddl.rindex(')')]
     # Strip SQL line comments, then unwrap version-gated comments —
     # /*!50705 ... */ wrap real column definitions (e.g. Sakila's
@@ -244,7 +270,7 @@ def parse_create_table(ddl: str) -> Table:
             default = def_m.group(1)
 
         t.columns.append(Column(
-            name=col_name, raw_type=raw_type.lower(),
+            name=col_name, raw_type=_normalize_type(raw_type),
             not_null=not_null, default=default,
             is_auto_inc=auto_inc, on_update_current_ts=on_update,
         ))
@@ -659,6 +685,18 @@ def generate_models_py(tables: List[Table], app_label: str,
         fk_by_col = {fk.columns[0]: fk for fk in t.foreign_keys
                      if len(fk.columns) == 1}
 
+        # Natural single-column PK (not auto-increment, not an FK) —
+        # we'll add `primary_key=True` so Django doesn't silently tack
+        # on its own `id` column. Composite PKs stay as
+        # UniqueConstraint below; FK-as-PK also stays as constraint,
+        # since Django won't let a ForeignKey be the sole PK.
+        natural_pk_col = None
+        if (len(t.primary_key) == 1
+                and not any(c.is_auto_inc and c.name == t.primary_key[0]
+                            for c in t.columns)
+                and t.primary_key[0] not in fk_by_col):
+            natural_pk_col = t.primary_key[0]
+
         for col in t.columns:
             # Skip PK if it's the default auto-id (Django emits one)
             if col.is_auto_inc and col.name == 'id':
@@ -695,6 +733,17 @@ def generate_models_py(tables: List[Table], app_label: str,
                 )
             else:
                 py_name = column_to_field_name(col.name)
+
+            # Promote this column to the natural PK if appropriate.
+            # Inject `primary_key=True` inside the field's paren list.
+            if col.name == natural_pk_col and '(' in field_code:
+                paren_open = field_code.index('(')
+                paren_close = field_code.rindex(')')
+                inner = field_code[paren_open + 1:paren_close].strip()
+                sep = ', ' if inner else ''
+                field_code = (field_code[:paren_open + 1]
+                              + 'primary_key=True' + sep + inner
+                              + field_code[paren_close:])
 
             out.append(f'    {py_name} = {field_code}')
 
@@ -789,9 +838,16 @@ def generate_table_map(tables: List[Table], app_label: str,
         },
         'tables': {},
     }
-    skip_tables = {'migrations', 'password_resets',
-                   'personal_access_tokens', 'failed_jobs'}
-    out['skip_tables'] = sorted(skip_tables)
+    # Default skips are Laravel housekeeping tables. We only bake
+    # them into the emitted map when they actually appear in the
+    # dump — otherwise they're just confusing noise in non-Laravel
+    # maps (e.g. an employees or MediaWiki dump).
+    laravel_skip = {'migrations', 'password_resets',
+                    'personal_access_tokens', 'failed_jobs'}
+    table_names = {t.name for t in tables}
+    skip_tables = laravel_skip & table_names
+    if skip_tables:
+        out['skip_tables'] = sorted(skip_tables)
 
     for t in tables:
         if t.name in skip_tables:

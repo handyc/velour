@@ -283,6 +283,15 @@ class Command(BaseCommand):
             except OSError as e:
                 raise CommandError(f'cannot read map {opts["map"]}: {e}')
 
+        # Maps come in two shapes. Both are supported for backwards-
+        # compatibility with the pre-genmodels hand-written form:
+        #   flat:     {"tablename": "app.Model", "other": {...}, ...}
+        #   nested:   {"_meta": ..., "tables": {"tablename": ...},
+        #              "skip_tables": [...]}
+        table_entries = raw_map.get('tables') if isinstance(
+            raw_map.get('tables'), dict) else raw_map
+        skip_tables = set(raw_map.get('skip_tables') or [])
+
         def resolve_spec(table: str):
             """Return (model, spec) or (None, None) for this table.
 
@@ -290,7 +299,9 @@ class Command(BaseCommand):
             value_maps, synthesize, dedupe_by. The table map may give
             either a plain "app.Model" string or a full dict.
             """
-            entry = raw_map.get(table)
+            if table in skip_tables:
+                return None, None
+            entry = table_entries.get(table)
             spec = {
                 "drop_columns": [],
                 "value_maps": {},
@@ -356,6 +367,18 @@ class Command(BaseCommand):
                 field_names |= {f.name for f in model._meta.get_fields()
                                 if hasattr(f, 'name')}
 
+                # Map FK Python-name and column-name → attname. When
+                # the legacy dump has a column `emp_no` that we've
+                # promoted to a ForeignKey(Employee), the constructor
+                # won't accept `model(emp_no=10001)` (needs an instance);
+                # we have to route to the raw-PK attribute `emp_no_id`.
+                fk_attname = {}
+                for f in model._meta.get_fields():
+                    if getattr(f, 'many_to_one', False):
+                        fk_attname[f.name] = f.attname
+                        if hasattr(f, 'column'):
+                            fk_attname[f.column] = f.attname
+
                 drop_set = set(spec["drop_columns"])
                 unknown = [c for c in column_names
                            if c not in field_names and c not in drop_set]
@@ -386,7 +409,10 @@ class Command(BaseCommand):
                             val = 'bcrypt$' + val.replace(
                                 '$2y$', '$2b$', 1)
                             n_pw_rewritten += 1
-                        kwargs[col] = val
+                        # FK fields: route to the attname (e.g. emp_no
+                        # → emp_no_id) so the constructor accepts a
+                        # raw PK without having to fetch the target.
+                        kwargs[fk_attname.get(col, col)] = val
                     for dest, src in synth.items():
                         kwargs[dest] = (row_dict.get(src)
                                         or f"{dest}_{row_dict.get('id')}")

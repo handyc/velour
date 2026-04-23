@@ -56,6 +56,15 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
         if not m:
             break
         name = m.group('name')
+        # Strip embedded /* ... */ comment blocks from the table
+        # name. MediaWiki uses `/*_*/tablename` as a table-prefix
+        # placeholder that's substituted at install time; we treat
+        # an unsubstituted placeholder as empty prefix.
+        name = re.sub(r'/\*[^*]*\*/', '', name).strip()
+        if not name:
+            # Degenerate: couldn't recover a usable name. Skip.
+            i = m.end()
+            continue
         start = m.start()
         # Walk forward tracking paren depth + quoted strings until we
         # see the semicolon at depth 0.
@@ -176,6 +185,12 @@ def iter_inserts(text: str) -> Iterator[tuple[str, list[str] | None, list[tuple]
         if not m:
             break
         table = m.group('name')
+        # Strip embedded /* ... */ blocks (MediaWiki-style table
+        # prefix placeholder) from the table name; see iter_create_tables.
+        table = re.sub(r'/\*[^*]*\*/', '', table).strip()
+        if not table:
+            i = m.end()
+            continue
         cols_raw = m.group('cols')
         columns = None
         if cols_raw is not None:
