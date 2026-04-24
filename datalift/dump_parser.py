@@ -48,6 +48,7 @@ def _strip_table_prefix_placeholders(name: str) -> str:
 
     * ``/*_*/table`` — MediaWiki table-prefix macro.
     * ``$wpdb->table``, ``${wpdb}->table`` — WordPress PHP variable.
+    * ``#__table`` — Joomla installer prefix.
     * ``{PREFIX}_table`` — generic curly-brace placeholder.
 
     Returns the bare table name, or ``''`` if nothing survives (caller
@@ -57,6 +58,8 @@ def _strip_table_prefix_placeholders(name: str) -> str:
     name = re.sub(r'/\*[^*]*\*/', '', name)
     # PHP object-property placeholder: $wpdb-> / ${wpdb}-> / $wpdb->$foo->
     name = re.sub(r'\$\{?[A-Za-z_][\w.]*\}?->', '', name)
+    # Joomla installer prefix: #__tablename → tablename
+    name = re.sub(r'^#__', '', name)
     # Generic curly-brace prefix ({PREFIX}_, {prefix}_)
     name = re.sub(r'\{[A-Za-z_][\w.]*\}_?', '', name)
     return name.strip()
@@ -327,12 +330,68 @@ def _parse_value(s: str, i: int):
             return int(token), j
         except ValueError:
             return token, j
-    # Bareword (e.g. CURRENT_TIMESTAMP) — rare in mysqldump data rows,
-    # but handle gracefully as a string.
+    # Bareword / SQL-function call in INSERT VALUES.
+    #
+    # mysqldump's own output rarely embeds function calls in data
+    # rows, but hand-authored installer SQL (Joomla, some custom
+    # migrations) does. We consume a bareword and any immediately
+    # following parenthesised argument list (`CURRENT_TIMESTAMP()`,
+    # `DATE_FORMAT(...)`, etc.) to keep the tuple parser happy, then:
+    #
+    #   - For time-like functions, return a tz-aware "now" so
+    #     DateTimeField happily accepts it.
+    #   - For a bareword without parens, pass through as a string —
+    #     this is the historical behaviour for `CURRENT_TIMESTAMP`
+    #     without `()` and for things like NULL-adjacent tokens.
+    #   - For any other function call, return None. Django's field
+    #     default fills in from there; if the column is NOT NULL
+    #     without a default, the user sees a clear IntegrityError
+    #     instead of a mysterious string-coercion failure.
     bw_re = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')
     m = bw_re.match(s, i)
     if m:
-        return m.group(0), m.end()
+        j = m.end()
+        token_name = m.group(0)
+        is_function = j < n and s[j] == '('
+        if is_function:
+            depth = 1
+            j += 1
+            # Balance parens, respecting quoted strings.
+            in_s = False
+            quote_ch = ''
+            while j < n and depth > 0:
+                ch = s[j]
+                if in_s:
+                    if ch == '\\' and j + 1 < n:
+                        j += 2
+                        continue
+                    if ch == quote_ch:
+                        in_s = False
+                    j += 1
+                    continue
+                if ch in ("'", '"'):
+                    in_s = True
+                    quote_ch = ch
+                    j += 1
+                    continue
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                j += 1
+        up = token_name.upper()
+        TIMEY = {'CURRENT_TIMESTAMP', 'NOW', 'CURDATE', 'CURTIME',
+                 'UTC_TIMESTAMP', 'LOCALTIME', 'LOCALTIMESTAMP',
+                 'SYSDATE'}
+        if up in TIMEY:
+            from datetime import datetime, timezone
+            return datetime.now(timezone.utc), j
+        if is_function:
+            # Unknown SQL function — treat as "let the DB / Django
+            # fill in a default". NULL is the least-bad fallback.
+            return None, j
+        # Plain bareword: keep it as a string for back-compat.
+        return token_name, j
     raise ValueError(f'cannot parse value at offset {i}: {s[i:i+20]!r}')
 
 

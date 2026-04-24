@@ -416,17 +416,43 @@ def _render_null_blank(col: Column) -> str:
     return '' if col.not_null else ', null=True, blank=True'
 
 
-def _render_default(col: Column, python_literal: bool = True) -> str:
+def _render_default(col: Column, kind: str = 'generic') -> str:
+    """Render a Django ``, default=<value>`` fragment if the MySQL
+    column has an explicit DEFAULT. ``kind`` picks a sensible python
+    literal for the field type (``'numeric'``, ``'string'``,
+    ``'generic'``). Returns empty string if no applicable default."""
     if col.default is None or col.default.upper() == 'NULL':
         return ''
     raw = col.default
-    if raw.startswith("'") and raw.endswith("'"):
-        return f", default={raw}"
     if raw.upper() in ('CURRENT_TIMESTAMP', 'CURRENT_TIMESTAMP()'):
-        return ''  # Handled via auto_now / auto_now_add elsewhere
-    if python_literal:
-        return f", default={raw}"
-    return ''
+        return ''  # handled via auto_now / auto_now_add elsewhere
+    if raw.startswith("'") and raw.endswith("'"):
+        inner = raw[1:-1].replace("'", "\\'")
+        if kind == 'numeric':
+            # Legacy schemas sometimes quote numeric defaults: '0'
+            try:
+                return f", default={int(inner)}"
+            except ValueError:
+                try:
+                    return f", default={float(inner)}"
+                except ValueError:
+                    return ''
+        return f", default='{inner}'"
+    # Unquoted literal (numeric or keyword)
+    if kind == 'string':
+        return ''  # don't invent a default for a char field from a bareword
+    try:
+        int(raw); return f", default={raw}"
+    except ValueError:
+        try:
+            float(raw); return f", default={raw}"
+        except ValueError:
+            return ''
+
+
+def _nbd(col: Column, kind: str = 'generic') -> str:
+    """null_blank + default combined — the common pattern."""
+    return _render_null_blank(col) + _render_default(col, kind)
 
 
 def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
@@ -488,43 +514,45 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
         return f'models.BooleanField({", ".join(bits)})'
 
     # Tinyint / smallint / int / bigint
+    nbd_num = _nbd(col, 'numeric')
     if re.match(r'tinyint', raw):
-        return f'models.PositiveSmallIntegerField({null_blank.lstrip(", ")})'
+        return f'models.PositiveSmallIntegerField({nbd_num.lstrip(", ")})'
     if 'smallint' in raw:
-        return f'models.SmallIntegerField({null_blank.lstrip(", ")})'
+        return f'models.SmallIntegerField({nbd_num.lstrip(", ")})'
     if 'bigint' in raw:
         if 'unsigned' in raw:
-            return f'models.PositiveBigIntegerField({null_blank.lstrip(", ")})'
-        return f'models.BigIntegerField({null_blank.lstrip(", ")})'
+            return f'models.PositiveBigIntegerField({nbd_num.lstrip(", ")})'
+        return f'models.BigIntegerField({nbd_num.lstrip(", ")})'
     if re.match(r'(mediumint|int)\b', raw):
         if 'unsigned' in raw:
-            return f'models.PositiveIntegerField({null_blank.lstrip(", ")})'
-        return f'models.IntegerField({null_blank.lstrip(", ")})'
+            return f'models.PositiveIntegerField({nbd_num.lstrip(", ")})'
+        return f'models.IntegerField({nbd_num.lstrip(", ")})'
 
     # Decimal / float / double
     m = re.match(r'decimal\((\d+),(\d+)\)', raw)
     if m:
         return (f'models.DecimalField(max_digits={m.group(1)}, '
-                f'decimal_places={m.group(2)}{null_blank})')
+                f'decimal_places={m.group(2)}{nbd_num})')
     if 'double' in raw or 'float' in raw:
-        return f'models.FloatField({null_blank.lstrip(", ")})'
+        return f'models.FloatField({nbd_num.lstrip(", ")})'
 
     # Char / varchar — the most inference-heavy branch
+    nbd_str = _nbd(col, 'string')
     char_len = _char_length(raw)
     if char_len is not None:
         if _is_email_column(col.name):
-            return f'models.EmailField(max_length={char_len}{null_blank})'
+            return f'models.EmailField(max_length={char_len}{nbd_str})'
         if _is_url_column(col.name):
-            return f'models.URLField(max_length={char_len}{null_blank})'
+            return f'models.URLField(max_length={char_len}{nbd_str})'
         if _is_slug_column(col.name):
-            return f'models.SlugField(max_length={char_len}{null_blank})'
+            return f'models.SlugField(max_length={char_len}{nbd_str})'
         if _is_ip_column(col.name):
             return f'models.GenericIPAddressField({null_blank.lstrip(", ")})'
-        return f'models.CharField(max_length={char_len}{null_blank})'
+        return f'models.CharField(max_length={char_len}{nbd_str})'
 
     # Text family
     if raw in ('text', 'tinytext', 'mediumtext', 'longtext'):
-        return f'models.TextField({null_blank.lstrip(", ")})'
+        return f'models.TextField({nbd_str.lstrip(", ")})'
 
     # Dates and times
     if raw == 'date':
@@ -534,7 +562,7 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
     if 'datetime' in raw or 'timestamp' in raw:
         return f'models.DateTimeField({null_blank.lstrip(", ")})'
     if raw == 'year':
-        return f'models.PositiveSmallIntegerField({null_blank.lstrip(", ")})'
+        return f'models.PositiveSmallIntegerField({nbd_num.lstrip(", ")})'
 
     # ENUM — handled at the model level (via TextChoices). Caller sets
     # this up when it detects an enum; this function only returns the
@@ -757,6 +785,27 @@ def generate_models_py(tables: List[Table], app_label: str,
                 field_code = (field_code[:paren_open + 1]
                               + 'primary_key=True' + sep + inner
                               + field_code[paren_close:])
+
+            # Django reserves the Python name `id` for primary keys.
+            # When a legacy composite-PK table has an `id` column
+            # that's just one part of the composite (Joomla's
+            # `associations` table is the motivating case), we must
+            # promote `id` to primary_key=True here — the composite
+            # UniqueConstraint still enforces the full tuple; Django
+            # just needs to know which single column acts as PK.
+            if (col.name == 'id'
+                    and col.name in t.primary_key
+                    and len(t.primary_key) > 1
+                    and 'primary_key=True' not in field_code
+                    and not (col.is_auto_inc and col.name == 'id')):
+                if '(' in field_code:
+                    paren_open = field_code.index('(')
+                    paren_close = field_code.rindex(')')
+                    inner = field_code[paren_open + 1:paren_close].strip()
+                    sep = ', ' if inner else ''
+                    field_code = (field_code[:paren_open + 1]
+                                  + 'primary_key=True' + sep + inner
+                                  + field_code[paren_close:])
 
             out.append(f'    {py_name} = {field_code}')
 
