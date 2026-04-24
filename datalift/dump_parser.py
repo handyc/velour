@@ -120,11 +120,19 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
                     in_s = False
                 j += 1
                 continue
-            # Line comment: -- ...\n or # ...\n
+            # Line comment: -- ...\n or # ...\n. Also Oracle's
+            # `rem ...` / `REM ...` form (SQL*Plus) — recognised only
+            # at the start of a line after optional whitespace so a
+            # column named `remark` isn't mistaken for a comment.
             if (ch == '-' and j + 1 < n and text[j+1] == '-') or ch == '#':
                 nl = text.find('\n', j)
                 j = n if nl < 0 else nl + 1
                 continue
+            if ch in 'rR' and (j == 0 or text[j-1] in '\n\r'):
+                if text[j:j+4].lower() in ('rem ', 'rem\t'):
+                    nl = text.find('\n', j)
+                    j = n if nl < 0 else nl + 1
+                    continue
             # Block comment: /* ... */
             if ch == '/' and j + 1 < n and text[j+1] == '*':
                 close = text.find('*/', j + 2)
@@ -221,6 +229,13 @@ def _strip_non_data_blocks(text: str) -> str:
     #    preserve the newline so statement boundaries stay intact.
     text = re.sub(r'(^|\n)([ \t]*)--[^\n]*', r'\1\2', text)
     text = re.sub(r'(^|\n)([ \t]*)#[^\n]*', r'\1\2', text)
+    # 5. Oracle SQL*Plus directives: `rem …`, `Prompt …`, `SET …`
+    #    at line start. These aren't SQL and don't contribute to
+    #    CREATE/INSERT parsing. Case-insensitive, leading-whitespace
+    #    tolerant, the whole line collapses to a newline.
+    text = re.sub(r'(?im)^[ \t]*rem[ \t][^\n]*', '', text)
+    text = re.sub(r'(?im)^[ \t]*prompt[ \t][^\n]*', '', text)
+    text = re.sub(r'(?im)^[ \t]*set[ \t]+\w+[^\n]*', '', text)
     return text
 
 
@@ -433,6 +448,16 @@ def _parse_value(s: str, i: int):
         if up in TIMEY:
             from datetime import datetime, timezone
             return datetime.now(timezone.utc), j
+        # Oracle's TO_DATE('17-06-2013', 'dd-MM-yyyy') — the first
+        # string arg is the actual date value, the second is the
+        # format. We pull the first quoted arg and hand it back; the
+        # ingester's _coerce_date_string handles the assortment of
+        # legacy date formats (DD-MM-YYYY included).
+        if up in ('TO_DATE', 'TO_TIMESTAMP') and is_function:
+            body = s[m.end():j]   # '(...)' including the parens
+            qm = re.match(r"\s*\(\s*'([^']*)'", body)
+            if qm:
+                return qm.group(1), j
         if is_function:
             # Unknown SQL function — treat as "let the DB / Django
             # fill in a default". NULL is the least-bad fallback.

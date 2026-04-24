@@ -137,9 +137,13 @@ def _normalize_type(raw: str) -> str:
     preserve the parenthesised argument list as-written. ENUM('M','F')
     has case-significant values that must round-trip through the
     TextChoices class and back into ingestion unchanged. For numeric
-    args (VARCHAR(255), DECIMAL(10,2)) it's a no-op."""
+    args (VARCHAR(255), DECIMAL(10,2)) it's a no-op.
+
+    The keyword character class allows trailing digits so Oracle's
+    `VARCHAR2(60)` and `NUMBER(10,2)` keep their digits — without
+    that `VARCHAR2(60)` would lose its `2` and parse as `VARCHAR`."""
     m = re.match(
-        r'^([A-Za-z]+)(\s*\([^)]*\))?(\s+unsigned)?(\s+zerofill)?$',
+        r'^([A-Za-z][A-Za-z0-9]*)(\s*\([^)]*\))?(\s+unsigned)?(\s+zerofill)?$',
         raw, re.IGNORECASE,
     )
     if not m:
@@ -246,6 +250,12 @@ def parse_create_table(ddl: str) -> Table:
     t = Table(name=name)
 
     for line in _split_body_lines(body):
+        # Oracle HR style column defs span multiple physical lines:
+        #    region_id   NUMBER
+        #        CONSTRAINT region_id_nn NOT NULL
+        # Collapse intra-definition whitespace so the single-line
+        # regex covers these shapes too.
+        line = re.sub(r'\s+', ' ', line).strip()
         if _CONSTRAINT_RE.match(line):
             # Structural constraint, not a column
             fkm = _FK_RE.search(line)
@@ -276,8 +286,11 @@ def parse_create_table(ddl: str) -> Table:
         rest = col_m.group('rest')
 
         # Extract raw_type — everything up to the first keyword after it.
+        # Keyword can have trailing digits so Oracle's VARCHAR2 /
+        # NUMBER2 / INT8 etc. aren't stripped.
         type_m = re.match(
-            r'(?P<t>[A-Za-z]+(?:\s*\([^)]*\))?(?:\s+unsigned)?(?:\s+zerofill)?)',
+            r'(?P<t>[A-Za-z][A-Za-z0-9]*(?:\s*\([^)]*\))?'
+            r'(?:\s+unsigned)?(?:\s+zerofill)?)',
             rest, re.IGNORECASE,
         )
         raw_type = type_m.group('t').strip() if type_m else rest.split()[0]
@@ -339,12 +352,14 @@ def parse_dump(text: str) -> List[Table]:
     return list(parsed.values())
 
 
-# Common ALTER TABLE prelude — handles both mysqldump (single-line,
-# no `ONLY`) and pg_dump (multi-line, with `ONLY`, schema-qualified
-# names) variants.
+# Common ALTER TABLE prelude — handles three variants:
+#   ALTER TABLE t ADD CONSTRAINT name PK/FK/UNIQUE …         (pg_dump / mysqldump)
+#   ALTER TABLE t ADD PK/FK/UNIQUE name …                     (MySQL-permissive)
+#   ALTER TABLE t ADD ( CONSTRAINT name PK/FK/UNIQUE … )      (Oracle)
+# Also accepts pg_dump's optional `ONLY` + schema-qualified name.
 _ALTER_TABLE_PRELUDE = (
     r'ALTER\s+TABLE\s+(?:ONLY\s+)?[`"]?(?P<tbl>[^\s`"()]+)[`"]?\s+'
-    r'ADD\s+(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
+    r'ADD\s+\(?\s*(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
 )
 
 # Matches a post-hoc FK constraint declared via ALTER TABLE, e.g.
@@ -636,7 +651,14 @@ INTEGER_TYPE_MAP = {
     'bigserial': ('BigIntegerField', 'BigIntegerField'),
 }
 
-DECIMAL_TYPE_KEYWORDS = frozenset({'decimal', 'numeric', 'dec', 'fixed'})
+# NUMBER is Oracle's catch-all exact-numeric type — behaves like
+# DECIMAL when it carries a (p, s) precision and like an integer
+# when it has (p) alone or no args. Treating it as DECIMAL-family
+# means NUMBER(4) maps to DecimalField(max_digits=4, decimal_places=0)
+# which is semantically correct even if a dedicated IntegerField
+# would be slightly more ergonomic.
+DECIMAL_TYPE_KEYWORDS = frozenset({'decimal', 'numeric', 'dec', 'fixed',
+                                     'number'})
 
 FLOAT_TYPE_KEYWORDS = frozenset({'float', 'double', 'real', 'float4', 'float8'})
 
@@ -672,17 +694,27 @@ def _char_length(raw_type: str) -> Optional[int]:
     """Extract the ``(N)`` length from char-family types."""
     if _type_keyword(raw_type) not in CHAR_TYPE_KEYWORDS:
         return None
-    m = re.match(r'[a-z]+\((\d+)\)', raw_type)
+    # Keyword can have trailing digits (Oracle's VARCHAR2 etc.).
+    m = re.match(r'[a-z][a-z0-9]*\((\d+)\)', raw_type)
     return int(m.group(1)) if m else None
 
 
 def _decimal_precision(raw_type: str) -> Optional[tuple]:
-    """Extract ``(M, D)`` from DECIMAL/NUMERIC. Returns None if not a
-    decimal keyword or no parens."""
+    """Extract ``(M, D)`` from DECIMAL/NUMERIC/NUMBER. Returns None
+    if not a decimal keyword or if the type has no parens. Oracle's
+    `NUMBER(4)` (no decimal places) is treated as ``(4, 0)`` — one
+    argument means precision only, scale defaults to zero."""
     if _type_keyword(raw_type) not in DECIMAL_TYPE_KEYWORDS:
         return None
-    m = re.match(r'[a-z]+\((\d+),\s*(\d+)\)', raw_type)
-    return (int(m.group(1)), int(m.group(2))) if m else None
+    # (M, D)
+    m = re.match(r'[a-z][a-z0-9]*\((\d+)\s*,\s*(\d+)\)', raw_type)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    # (M) — Oracle NUMBER(4) shape.
+    m = re.match(r'[a-z][a-z0-9]*\((\d+)\)', raw_type)
+    if m:
+        return (int(m.group(1)), 0)
+    return None
 
 
 def _is_email_column(name: str) -> bool:

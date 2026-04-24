@@ -226,7 +226,13 @@ def _coerce_date_string(val):
     for fmt in _DATE_FORMATS:
         try:
             dt = datetime.strptime(val, fmt)
-            return dt.isoformat(sep=' ')
+            # If the format didn't carry a time component, return
+            # a plain YYYY-MM-DD string so DateField accepts it
+            # (DateField's to_python rejects the trailing '00:00:00'
+            # that isoformat(sep=' ') would produce).
+            if '%H' in fmt or '%M' in fmt or '%S' in fmt:
+                return dt.isoformat(sep=' ')
+            return dt.date().isoformat()
         except ValueError:
             continue
     return val
