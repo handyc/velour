@@ -343,12 +343,26 @@ def pluralize(name: str) -> str:
     return low + 's'
 
 
-def table_to_model_name(table: str, app_label: str = '') -> str:
-    """``lab_user`` → ``User`` when app_label is ``lab``, otherwise
-    ``LabUser``. Also singularizes and handles irregular plurals."""
+def table_to_model_name(table: str, app_label: str = '',
+                        all_tables: Optional[Iterable[str]] = None) -> str:
+    """Convert a legacy SQL table name to a PascalCase Django model name.
+
+    Strips ``app_label + '_'`` from the start when ALL tables share
+    that prefix — e.g. Babybase had `lab_user`, `lab_baby`, etc. in
+    the `lab` app, so the prefix is Django-idiom overhead that should
+    collapse to `User`, `Baby`. When only some tables happen to match
+    (PrestaShop's `shop_group` in a `shop` app, where most tables
+    don't have a `shop_` prefix), stripping is harmful — the
+    `shop_group` table is a distinct `Group`-vs-`ShopGroup` entity,
+    and collapsing it creates model-name collisions. So the prefix
+    strip is only applied when it's unambiguous.
+    """
     stem = table
-    if app_label and stem.startswith(app_label + '_'):
-        stem = stem[len(app_label) + 1:]
+    if app_label and all_tables is not None:
+        prefix = app_label + '_'
+        table_list = list(all_tables)
+        if table_list and all(t.startswith(prefix) for t in table_list):
+            stem = stem[len(prefix):]
     parts = re.split(r'[_\-\s]+', stem)
     parts = [singularize(p) for p in parts if p]
     return ''.join(p.capitalize() for p in parts) or 'Model'
@@ -663,8 +677,9 @@ def _find_junction_m2ms(tables: List[Table]) -> Dict[str, List[tuple]]:
 def generate_models_py(tables: List[Table], app_label: str,
                        source: str = '') -> str:
     """Emit a full models.py as a string."""
+    _all_table_names = [t.name for t in tables]
     # Map legacy table name → Django model name (for FK targets)
-    model_name_for = {t.name: table_to_model_name(t.name, app_label)
+    model_name_for = {t.name: table_to_model_name(t.name, app_label, _all_table_names)
                       for t in tables}
     m2ms = _find_junction_m2ms(tables)
 
@@ -776,11 +791,16 @@ def generate_models_py(tables: List[Table], app_label: str,
                 py_name = column_to_field_name(col.name)
 
             # Promote this column to the natural PK if appropriate.
-            # Inject `primary_key=True` inside the field's paren list.
+            # Inject `primary_key=True` and strip any null=True /
+            # blank=True (PKs are implicitly NOT NULL in MySQL even
+            # when the CREATE TABLE forgets to say so).
             if col.name == natural_pk_col and '(' in field_code:
                 paren_open = field_code.index('(')
                 paren_close = field_code.rindex(')')
                 inner = field_code[paren_open + 1:paren_close].strip()
+                inner = re.sub(r',?\s*null=True', '', inner)
+                inner = re.sub(r',?\s*blank=True', '', inner)
+                inner = inner.lstrip(', ').strip()
                 sep = ', ' if inner else ''
                 field_code = (field_code[:paren_open + 1]
                               + 'primary_key=True' + sep + inner
@@ -802,6 +822,9 @@ def generate_models_py(tables: List[Table], app_label: str,
                     paren_open = field_code.index('(')
                     paren_close = field_code.rindex(')')
                     inner = field_code[paren_open + 1:paren_close].strip()
+                    inner = re.sub(r',?\s*null=True', '', inner)
+                    inner = re.sub(r',?\s*blank=True', '', inner)
+                    inner = inner.lstrip(', ').strip()
                     sep = ', ' if inner else ''
                     field_code = (field_code[:paren_open + 1]
                                   + 'primary_key=True' + sep + inner
@@ -911,11 +934,12 @@ def generate_table_map(tables: List[Table], app_label: str,
     if skip_tables:
         out['skip_tables'] = sorted(skip_tables)
 
+    _all_table_names = [t.name for t in tables]
     for t in tables:
         if t.name in skip_tables:
             continue
 
-        model_name = table_to_model_name(t.name, app_label)
+        model_name = table_to_model_name(t.name, app_label, _all_table_names)
         spec: Dict = {
             'model': f'{app_label}.{model_name}',
         }
@@ -1083,7 +1107,8 @@ def generate_admin_py(tables: List[Table], app_label: str,
     """Emit a full admin.py as a string — one ModelAdmin per non-
     skipped table with inferred list_display, search_fields,
     list_filter, date_hierarchy, raw_id_fields."""
-    model_names = [table_to_model_name(t.name, app_label) for t in tables
+    _all_table_names = [t.name for t in tables]
+    model_names = [table_to_model_name(t.name, app_label, _all_table_names) for t in tables
                    if t.name not in {'migrations', 'password_resets',
                                      'personal_access_tokens', 'failed_jobs'}]
     if not model_names:
@@ -1114,7 +1139,7 @@ def generate_admin_py(tables: List[Table], app_label: str,
         if t.name in {'migrations', 'password_resets',
                       'personal_access_tokens', 'failed_jobs'}:
             continue
-        model = table_to_model_name(t.name, app_label)
+        model = table_to_model_name(t.name, app_label, _all_table_names)
         list_display = _guess_list_display(t)
         search_fields = _guess_search_fields(t)
         list_filter = _guess_list_filter(t)

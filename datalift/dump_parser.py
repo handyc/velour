@@ -49,6 +49,9 @@ def _strip_table_prefix_placeholders(name: str) -> str:
     * ``/*_*/table`` — MediaWiki table-prefix macro.
     * ``$wpdb->table``, ``${wpdb}->table`` — WordPress PHP variable.
     * ``#__table`` — Joomla installer prefix.
+    * ``PREFIX_table`` / ``DB_PREFIX_table`` — PrestaShop / osCommerce
+      literal-uppercase prefix, substituted at install time with e.g.
+      ``ps_`` / ``osc_``.
     * ``{PREFIX}_table`` — generic curly-brace placeholder.
 
     Returns the bare table name, or ``''`` if nothing survives (caller
@@ -60,6 +63,10 @@ def _strip_table_prefix_placeholders(name: str) -> str:
     name = re.sub(r'\$\{?[A-Za-z_][\w.]*\}?->', '', name)
     # Joomla installer prefix: #__tablename → tablename
     name = re.sub(r'^#__', '', name)
+    # PrestaShop / osCommerce literal uppercase prefix.
+    # Require the trailing underscore to avoid chewing real table
+    # names that merely happen to start with an uppercase run.
+    name = re.sub(r'^(?:DB_PREFIX|PREFIX)_', '', name)
     # Generic curly-brace prefix ({PREFIX}_, {prefix}_)
     name = re.sub(r'\{[A-Za-z_][\w.]*\}_?', '', name)
     return name.strip()
