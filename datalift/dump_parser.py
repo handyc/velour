@@ -148,7 +148,10 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
 # ── INSERT parsing ─────────────────────────────────────────────────
 
 _INSERT_HEAD_RE = re.compile(
-    r"INSERT\s+INTO\s+[`\"]?(?P<name>[^\s`\"]+)[`\"]?"
+    # Exclude `(` from the name class so `INSERT INTO tbl(col1,col2)`
+    # (no space before the paren, common in hand-authored dumps)
+    # doesn't swallow the column list into the table name.
+    r"INSERT\s+INTO\s+[`\"]?(?P<name>[^\s`\"(]+)[`\"]?"
     r"\s*(?:\((?P<cols>[^)]*)\))?\s*VALUES\s*",
     re.IGNORECASE,
 )

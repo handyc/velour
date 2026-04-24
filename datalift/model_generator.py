@@ -397,6 +397,13 @@ def _apply_alter_table_fks(text: str, tables: Dict[str, Table]) -> None:
     """
     from datalift.dump_parser import _strip_table_prefix_placeholders
 
+    # Strip SQL line comments so ALTER TABLE statements inside
+    # `-- Removed, not unique. ALTER TABLE …` annotations aren't
+    # mistaken for live declarations (Dolibarr has several
+    # historical-FK comments with this shape).
+    text = re.sub(r'(?m)^\s*--[^\n]*', '', text)
+    text = re.sub(r'(?m)^\s*#[^\n]*', '', text)
+
     for m in _ALTER_FK_RE.finditer(text):
         tbl_name = _strip_table_prefix_placeholders(m.group('tbl'))
         ref_table = _strip_table_prefix_placeholders(m.group('ref'))

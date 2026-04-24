@@ -407,6 +407,10 @@ class Command(BaseCommand):
         total_in = 0
         total_out = 0
         skipped_tables: list[str] = []
+        # PK-dedup state, scoped to the whole run so multiple INSERT
+        # INTO statements for the same model can't mutually collide.
+        seen_pks_by_model: dict = {}
+        dropped_by_table: dict = {}
 
         # We accumulate all writes in one transaction so the FK-orphan
         # sweep at the end sees a consistent graph.
@@ -456,6 +460,10 @@ class Command(BaseCommand):
                 # parser returns as a str; we need bytes for Django.
                 date_fields = set()
                 binary_fields = set()
+                # Numeric fields — coerce `''` (quoted empty string
+                # in source SQL) to None so we don't pass '' into an
+                # IntegerField/DecimalField and trip the type check.
+                numeric_fields = set()
                 # Fields that have a non-NULL default — if the parsed
                 # value is None (e.g. Dolibarr's `__ENTITY__`
                 # placeholder), we drop the kwarg so Django applies
@@ -471,6 +479,17 @@ class Command(BaseCommand):
                         binary_fields.add(f.name)
                         if hasattr(f, 'attname'):
                             binary_fields.add(f.attname)
+                    elif cls in (
+                        'IntegerField', 'BigIntegerField',
+                        'SmallIntegerField', 'PositiveIntegerField',
+                        'PositiveSmallIntegerField',
+                        'PositiveBigIntegerField', 'DecimalField',
+                        'FloatField', 'AutoField', 'BigAutoField',
+                        'SmallAutoField',
+                    ):
+                        numeric_fields.add(f.name)
+                        if hasattr(f, 'attname'):
+                            numeric_fields.add(f.attname)
                     # Track NOT-NULL fields with a default. The Django
                     # sentinel for "no default set" is
                     # django.db.models.NOT_PROVIDED — checked by name
@@ -568,6 +587,12 @@ class Command(BaseCommand):
                             val = _coerce_date_string(val)
                         elif target_field in binary_fields:
                             val = _coerce_binary_value(val)
+                        elif target_field in numeric_fields:
+                            # Empty string in a numeric column is
+                            # legacy-DB shorthand for "no value" —
+                            # Django raises a type error otherwise.
+                            if val == '':
+                                val = None
                         # None into a NOT NULL field with a default
                         # → drop the kwarg so Django applies its
                         # model-level default (Dolibarr's __ENTITY__
@@ -589,6 +614,35 @@ class Command(BaseCommand):
                     objs, _ = _dedupe_rows(
                         objs, spec["dedupe_by"], self.stdout.write
                     )
+
+                # Auto-dedup by PK. Multi-tenant dumps like
+                # Dolibarr's multicompany seed data have the same
+                # rowid appearing under different entity values;
+                # once the installer's __ENTITY__ placeholder
+                # collapses to a default, we get genuine PK
+                # collisions. This dedup tracks seen PKs PER MODEL
+                # across all INSERT statements (not per-batch), so
+                # a second INSERT INTO accounting_account that
+                # reuses rowid 1 is silently dropped rather than
+                # hitting a UNIQUE constraint at bulk_create time.
+                pk_attr = model._meta.pk.attname
+                seen_pks = seen_pks_by_model.setdefault(model, set())
+                if pk_attr:
+                    deduped = []
+                    for obj in objs:
+                        pk = getattr(obj, pk_attr, None)
+                        if pk is None:
+                            deduped.append(obj)
+                            continue
+                        if pk in seen_pks:
+                            continue
+                        seen_pks.add(pk)
+                        deduped.append(obj)
+                    dropped = len(objs) - len(deduped)
+                    if dropped:
+                        dropped_by_table[table] = dropped_by_table.get(
+                            table, 0) + dropped
+                    objs = deduped
 
                 if opts['dry_run']:
                     self.stdout.write(
@@ -612,6 +666,12 @@ class Command(BaseCommand):
         if skipped_tables:
             self.stderr.write(
                 f'Skipped tables with no model: {sorted(set(skipped_tables))}')
+        if dropped_by_table:
+            total_dropped = sum(dropped_by_table.values())
+            self.stdout.write(
+                f'  dropped {total_dropped} row(s) total due to duplicate '
+                f'PK across multiple INSERT statements '
+                f'({len(dropped_by_table)} table(s) affected)')
         self.stdout.write(
             self.style.SUCCESS(
                 f'\n{total_out}/{total_in} rows ingested '
