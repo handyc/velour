@@ -101,7 +101,11 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
             continue
         start = m.start()
         # Walk forward tracking paren depth + quoted strings until we
-        # see the semicolon at depth 0.
+        # see the semicolon at depth 0. SQL comments (`-- …`, `# …`,
+        # `/* … */`) must be skipped cleanly — otherwise an apostrophe
+        # in a French-language comment like `-- d'un element` flips
+        # our string-state on and we swallow everything up to the
+        # next apostrophe, typically losing dozens of tables.
         j = m.end() - 1  # position at the opening '('
         depth = 0
         in_s = False  # inside '...' or "..."
@@ -115,6 +119,16 @@ def iter_create_tables(text: str) -> Iterator[tuple[str, str]]:
                 if ch == quote_ch:
                     in_s = False
                 j += 1
+                continue
+            # Line comment: -- ...\n or # ...\n
+            if (ch == '-' and j + 1 < n and text[j+1] == '-') or ch == '#':
+                nl = text.find('\n', j)
+                j = n if nl < 0 else nl + 1
+                continue
+            # Block comment: /* ... */
+            if ch == '/' and j + 1 < n and text[j+1] == '*':
+                close = text.find('*/', j + 2)
+                j = n if close < 0 else close + 2
                 continue
             if ch in ("'", '"'):
                 in_s = True
@@ -196,6 +210,13 @@ def _strip_non_data_blocks(text: str) -> str:
     #    literal. Only strip the /*!nnnnn  prefix and matching */.
     text = re.sub(r'/\*!\d+\s', '', text)
     text = text.replace('*/', '')
+    # 4. SQL line comments: `-- …\n` and `# …\n`. Without this,
+    #    Dolibarr's install SQL has shell-script snippets in
+    #    comment lines with `echo "INSERT INTO …"` literals that
+    #    our INSERT regex would otherwise match as real data.
+    #    Preserve the newline so statement boundaries stay intact.
+    text = re.sub(r'(^|\n)--[^\n]*', r'\1', text)
+    text = re.sub(r'(^|\n)#[^\n]*', r'\1', text)
     return text
 
 
@@ -418,6 +439,14 @@ def _parse_value(s: str, i: int):
         # doesn't reject the string "true".
         if up in ('TRUE', 'FALSE'):
             return (up == 'TRUE'), j
+        # Installer-substituted placeholders: tokens like `__ENTITY__`
+        # or `__DEPLOY_FOO__` appear in Dolibarr's seed SQL where
+        # the installer swaps them for runtime values. We don't know
+        # the replacement, so we return None — callers can map the
+        # column to a default via value_maps if they need a specific
+        # substitution. Recognised shape: `__UPPERCASE_WORDS__`.
+        if re.fullmatch(r'__[A-Z][A-Z0-9_]*__', token_name):
+            return None, j
         # Plain bareword: keep it as a string for back-compat.
         return token_name, j
     raise ValueError(f'cannot parse value at offset {i}: {s[i:i+20]!r}')

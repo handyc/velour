@@ -280,6 +280,14 @@ def parse_create_table(ddl: str) -> Table:
         auto_inc = bool(re.search(r'\bAUTO_INCREMENT\b', tail, re.IGNORECASE))
         on_update = bool(re.search(
             r'\bON\s+UPDATE\s+CURRENT_TIMESTAMP\b', tail, re.IGNORECASE))
+        # Column-level PRIMARY KEY (Dolibarr: `id smallint PRIMARY KEY`,
+        # Chinook: `AlbumId INT NOT NULL … CONSTRAINT PK_Album
+        # PRIMARY KEY (AlbumId)`). Only treat as inline when the
+        # keyword follows the column's own tail — table-level
+        # `PRIMARY KEY (…)` constraints are handled elsewhere.
+        if re.search(r'\bPRIMARY\s+KEY\b', tail, re.IGNORECASE):
+            if col_name not in t.primary_key:
+                t.primary_key.append(col_name)
 
         default = None
         def_m = re.search(r"\bDEFAULT\s+('(?:[^']|'')*'|\S+)", tail, re.IGNORECASE)
@@ -346,15 +354,23 @@ _ALTER_FK_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches a post-hoc PRIMARY KEY declared via ALTER TABLE (pg_dump).
+# Matches a post-hoc PRIMARY KEY declared via ALTER TABLE. Handles
+# three shapes:
+#   ALTER TABLE t ADD CONSTRAINT cn PRIMARY KEY (cols)     (pg_dump)
+#   ALTER TABLE t ADD PRIMARY KEY (cols)                   (plain)
+#   ALTER TABLE t ADD PRIMARY KEY cn (cols)                (MySQL-permissive
+#                                                           — Dolibarr style)
 _ALTER_PK_RE = re.compile(
-    _ALTER_TABLE_PRELUDE + r'PRIMARY\s+KEY\s*\(([^)]+)\)',
+    _ALTER_TABLE_PRELUDE
+    + r'PRIMARY\s+KEY\s*(?:[`"]?[A-Za-z_][\w]*[`"]?\s*)?\(([^)]+)\)',
     re.IGNORECASE,
 )
 
-# Matches a post-hoc UNIQUE constraint declared via ALTER TABLE.
+# Matches a post-hoc UNIQUE constraint — same three shapes.
 _ALTER_UNIQUE_RE = re.compile(
-    _ALTER_TABLE_PRELUDE + r'UNIQUE\s*\(([^)]+)\)',
+    _ALTER_TABLE_PRELUDE
+    + r'UNIQUE(?:\s+(?:KEY|INDEX))?'
+    + r'\s*(?:[`"]?[A-Za-z_][\w]*[`"]?\s*)?\(([^)]+)\)',
     re.IGNORECASE,
 )
 
@@ -471,26 +487,59 @@ def pluralize(name: str) -> str:
     return low + 's'
 
 
+def _common_table_prefix(tables: Iterable[str]) -> str:
+    """Longest ``xxx_`` prefix shared by every table name. Returns
+    ``''`` if there's no shared prefix. Used by table_to_model_name
+    to strip Dolibarr-style `llx_`, WordPress-style `wp_`, Laravel
+    `lab_` etc. automatically — whenever the dump is uniformly
+    prefixed, the Python class names drop the overhead."""
+    tl = list(tables)
+    if not tl:
+        return ''
+    shortest = min(tl, key=len)
+    # Longest common prefix across the set…
+    prefix = ''
+    for i, ch in enumerate(shortest):
+        if all(t[i] == ch for t in tl):
+            prefix = shortest[:i + 1]
+        else:
+            break
+    # …truncated at the last `_` so we don't chew partial words.
+    last_under = prefix.rfind('_')
+    return prefix[:last_under + 1] if last_under >= 0 else ''
+
+
 def table_to_model_name(table: str, app_label: str = '',
                         all_tables: Optional[Iterable[str]] = None) -> str:
     """Convert a legacy SQL table name to a PascalCase Django model name.
 
-    Strips ``app_label + '_'`` from the start when ALL tables share
-    that prefix — e.g. Babybase had `lab_user`, `lab_baby`, etc. in
-    the `lab` app, so the prefix is Django-idiom overhead that should
-    collapse to `User`, `Baby`. When only some tables happen to match
-    (PrestaShop's `shop_group` in a `shop` app, where most tables
-    don't have a `shop_` prefix), stripping is harmful — the
-    `shop_group` table is a distinct `Group`-vs-`ShopGroup` entity,
-    and collapsing it creates model-name collisions. So the prefix
-    strip is only applied when it's unambiguous.
+    Strips a shared prefix from the start when every table in the
+    dump begins with it. Two cases:
+
+    * ``app_label + '_'`` — Babybase's `lab_user`, `lab_baby` under
+      `--app lab`.
+    * Framework-conventional literal prefix — Dolibarr's `llx_`,
+      WordPress's default `wp_`. Detected automatically via
+      `_common_table_prefix` so we don't need a hand-written list.
+
+    Mixed-prefix dumps (PrestaShop under `--app shop` where only
+    `shop_*` tables begin with `shop_`) get no strip — the
+    `shop_group` table stays `ShopGroup`, avoiding model-name
+    collisions with a distinct `group` table.
     """
     stem = table
-    if app_label and all_tables is not None:
-        prefix = app_label + '_'
+    if all_tables is not None:
         table_list = list(all_tables)
-        if table_list and all(t.startswith(prefix) for t in table_list):
-            stem = stem[len(prefix):]
+        # Try app_label first (explicit operator intent)…
+        if app_label:
+            prefix = app_label + '_'
+            if table_list and all(t.startswith(prefix) for t in table_list):
+                stem = stem[len(prefix):]
+        # …then fall back to an auto-detected shared prefix.
+        if stem == table:
+            shared = _common_table_prefix(table_list)
+            if shared and len(shared) >= 2:  # avoid single-char prefixes
+                stem = stem[len(shared):]
     parts = re.split(r'[_\-\s]+', stem)
     parts = [singularize(p) for p in parts if p]
 
@@ -904,6 +953,28 @@ def generate_models_py(tables: List[Table], app_label: str,
                       for t in tables}
     m2ms = _find_junction_m2ms(tables)
 
+    # Pre-pass: if any FK targets a non-PK column, that column must
+    # be declared unique on the referenced table. Django rejects
+    # `to_field='x'` without `unique=True` on x (fields.E311).
+    # Dolibarr's schema has several such FKs to `code` VARCHARs that
+    # aren't formally unique in the CREATE TABLE; flag them here.
+    by_name = {t.name: t for t in tables}
+    for t in tables:
+        for fk in t.foreign_keys:
+            ref = by_name.get(fk.ref_table)
+            if (ref is None or not fk.ref_columns
+                    or len(fk.ref_columns) != 1):
+                continue
+            ref_col = fk.ref_columns[0]
+            if ref_col in ref.primary_key:
+                continue
+            if [ref_col] in ref.uniques:
+                continue
+            ref.uniques.append([ref_col])
+            for c in ref.columns:
+                if c.name == ref_col:
+                    c.is_unique = True
+
     out: List[str] = [
         '"""Auto-generated by datalift genmodels.',
         '',
@@ -1008,8 +1079,52 @@ def generate_models_py(tables: List[Table], app_label: str,
                     f'on_delete={on_delete}',
                     field_code,
                 )
+                # Non-PK target: when the FK references a column
+                # other than the target's PK, emit `to_field='col'`
+                # so Django matches the legacy data. Dolibarr's
+                # `fk_pcg_version → llx_accounting_system(pcg_version)`
+                # is the motivating case — stores strings like
+                # `'PCG15-PYME-AD'` pointed at a non-PK VARCHAR.
+                ref_tbl_obj = next((tt for tt in tables
+                                    if tt.name == fk.ref_table), None)
+                if (fk.ref_columns and ref_tbl_obj
+                        and ref_tbl_obj.primary_key
+                        and fk.ref_columns != ref_tbl_obj.primary_key):
+                    to_field = fk.ref_columns[0]
+                    field_code = re.sub(
+                        r'(on_delete=models\.[A-Z_]+)',
+                        rf"\1, to_field='{to_field}'",
+                        field_code,
+                    )
             else:
                 py_name = column_to_field_name(col.name)
+
+            # Inject `unique=True` when the column has a single-col
+            # UNIQUE constraint. (Multi-col uniques land as Meta
+            # UniqueConstraints further down.) For FK columns the
+            # positional target string comes first — we insert
+            # after it to avoid SyntaxError. For non-FK fields we
+            # insert at the head of the kwargs.
+            if (col.is_unique and col.name != natural_pk_col
+                    and 'primary_key=True' not in field_code
+                    and 'unique=True' not in field_code
+                    and '(' in field_code):
+                if fk:
+                    # ForeignKey("Target", … )  → add after "Target",
+                    field_code = re.sub(
+                        r'(models\.ForeignKey\("[^"]+"),\s*',
+                        r'\1, unique=True, ',
+                        field_code,
+                        count=1,
+                    )
+                else:
+                    paren_open = field_code.index('(')
+                    paren_close = field_code.rindex(')')
+                    inner = field_code[paren_open + 1:paren_close].strip()
+                    sep = ', ' if inner else ''
+                    field_code = (field_code[:paren_open + 1]
+                                  + 'unique=True' + sep + inner
+                                  + field_code[paren_close:])
 
             # Promote this column to the natural PK if appropriate.
             # Inject `primary_key=True` and strip any null=True /

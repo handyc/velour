@@ -456,6 +456,11 @@ class Command(BaseCommand):
                 # parser returns as a str; we need bytes for Django.
                 date_fields = set()
                 binary_fields = set()
+                # Fields that have a non-NULL default — if the parsed
+                # value is None (e.g. Dolibarr's `__ENTITY__`
+                # placeholder), we drop the kwarg so Django applies
+                # the model default instead of inserting SQL NULL.
+                default_fields = set()
                 for f in model._meta.get_fields():
                     cls = f.__class__.__name__
                     if cls in ('DateField', 'DateTimeField'):
@@ -466,6 +471,27 @@ class Command(BaseCommand):
                         binary_fields.add(f.name)
                         if hasattr(f, 'attname'):
                             binary_fields.add(f.attname)
+                    # Track NOT-NULL fields with a default. The Django
+                    # sentinel for "no default set" is
+                    # django.db.models.NOT_PROVIDED — checked by name
+                    # to avoid an extra import.
+                    has_default = (hasattr(f, 'default')
+                                   and f.default is not None
+                                   and f.default.__class__.__name__
+                                       != 'DjangoNotProvided'
+                                   and f.default.__class__.__module__
+                                       != 'django.db.models.fields')
+                    # Simpler heuristic that works across Django
+                    # versions: NOT_PROVIDED is a singleton at
+                    # models.NOT_PROVIDED; anything else means a
+                    # real default exists.
+                    from django.db.models.fields import NOT_PROVIDED
+                    has_default = (hasattr(f, 'default')
+                                   and f.default is not NOT_PROVIDED)
+                    if has_default and hasattr(f, 'null') and not f.null:
+                        default_fields.add(f.name)
+                        if hasattr(f, 'attname'):
+                            default_fields.add(f.attname)
 
                 drop_set = set(spec["drop_columns"])
 
@@ -542,6 +568,12 @@ class Command(BaseCommand):
                             val = _coerce_date_string(val)
                         elif target_field in binary_fields:
                             val = _coerce_binary_value(val)
+                        # None into a NOT NULL field with a default
+                        # → drop the kwarg so Django applies its
+                        # model-level default (Dolibarr's __ENTITY__
+                        # placeholder comes through as None).
+                        if val is None and target_field in default_fields:
+                            continue
                         kwargs[target_field] = val
                     for dest, src in synth.items():
                         kwargs[dest] = (row_dict.get(src)
