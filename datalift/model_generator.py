@@ -456,11 +456,87 @@ LARAVEL_DROP_COLUMNS = {'remember_token'}
 LARAVEL_TIMESTAMP_COLUMNS = {'created_at', 'updated_at', 'deleted_at'}
 
 
+# ═════════════════════════════════════════════════════════════════════
+# Type registry — which SQL type keywords map to which Django fields.
+#
+# When a new SQL dialect shows up with `CITEXT`, `VARCHAR2`, or some
+# vendor-specific synonym, the fix is a one-line addition to the
+# relevant set here, not a new branch in infer_field. The `raw_type`
+# passed to infer_field is always already-normalised (lowercase
+# keyword + preserved paren args — see _normalize_type), so the
+# lookups are plain set membership.
+#
+# Order notes:
+# * tinyint(1) has to be handled as Boolean BEFORE tinyint falls
+#   through to PositiveSmallIntegerField — the raw_type prefix
+#   check in infer_field still lives there.
+# * Integer map values are (signed_django_field, unsigned_django_field)
+#   tuples; when the raw contains " unsigned", we pick the second.
+# ═════════════════════════════════════════════════════════════════════
+
+BOOLEAN_TYPE_KEYWORDS = frozenset({'boolean', 'bool'})
+
+INTEGER_TYPE_MAP = {
+    'tinyint':   ('PositiveSmallIntegerField', 'PositiveSmallIntegerField'),
+    'smallint':  ('SmallIntegerField', 'PositiveSmallIntegerField'),
+    'mediumint': ('IntegerField', 'PositiveIntegerField'),
+    'int':       ('IntegerField', 'PositiveIntegerField'),
+    'integer':   ('IntegerField', 'PositiveIntegerField'),
+    'bigint':    ('BigIntegerField', 'PositiveBigIntegerField'),
+    'int2':      ('SmallIntegerField', 'PositiveSmallIntegerField'),
+    'int4':      ('IntegerField', 'PositiveIntegerField'),
+    'int8':      ('BigIntegerField', 'PositiveBigIntegerField'),
+    'serial':    ('IntegerField', 'IntegerField'),
+    'bigserial': ('BigIntegerField', 'BigIntegerField'),
+}
+
+DECIMAL_TYPE_KEYWORDS = frozenset({'decimal', 'numeric', 'dec', 'fixed'})
+
+FLOAT_TYPE_KEYWORDS = frozenset({'float', 'double', 'real', 'float4', 'float8'})
+
+CHAR_TYPE_KEYWORDS = frozenset({'char', 'varchar', 'nchar', 'nvarchar',
+                                  'character', 'bpchar', 'varchar2'})
+
+TEXT_TYPE_KEYWORDS = frozenset({'text', 'tinytext', 'mediumtext',
+                                  'longtext', 'ntext', 'clob', 'citext'})
+
+DATE_TYPE_KEYWORDS = frozenset({'date'})
+TIME_TYPE_KEYWORDS = frozenset({'time', 'timetz'})
+DATETIME_TYPE_KEYWORDS = frozenset({'datetime', 'timestamp',
+                                     'datetime2', 'smalldatetime',
+                                     'timestamptz'})
+
+BLOB_TYPE_KEYWORDS = frozenset({'blob', 'tinyblob', 'mediumblob', 'longblob',
+                                 'binary', 'varbinary', 'bytea', 'image',
+                                 'raw'})
+
+JSON_TYPE_KEYWORDS = frozenset({'json', 'jsonb'})
+
+UUID_TYPE_KEYWORDS = frozenset({'uuid', 'uniqueidentifier'})
+
+
+def _type_keyword(raw_type: str) -> str:
+    """Return just the type keyword (``'nvarchar'``, ``'decimal'``,
+    ``'int'``), stripping any ``(args)`` or ``unsigned`` modifiers."""
+    m = re.match(r'([a-z][a-z0-9_]*)', raw_type)
+    return m.group(1) if m else ''
+
+
 def _char_length(raw_type: str) -> Optional[int]:
-    # Accept NVARCHAR / NCHAR (SQL-Server-origin MySQL ports) as
-    # equivalent to VARCHAR / CHAR.
-    m = re.match(r'(?:nvarchar|nchar|varchar|char)\((\d+)\)', raw_type)
+    """Extract the ``(N)`` length from char-family types."""
+    if _type_keyword(raw_type) not in CHAR_TYPE_KEYWORDS:
+        return None
+    m = re.match(r'[a-z]+\((\d+)\)', raw_type)
     return int(m.group(1)) if m else None
+
+
+def _decimal_precision(raw_type: str) -> Optional[tuple]:
+    """Extract ``(M, D)`` from DECIMAL/NUMERIC. Returns None if not a
+    decimal keyword or no parens."""
+    if _type_keyword(raw_type) not in DECIMAL_TYPE_KEYWORDS:
+        return None
+    m = re.match(r'[a-z]+\((\d+),\s*(\d+)\)', raw_type)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def _is_email_column(name: str) -> bool:
@@ -572,8 +648,15 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
             return ('models.DateTimeField(null=True, blank=True, '
                     'help_text="Laravel soft-delete column.")')
 
-    # Boolean
-    if raw.startswith('tinyint(1)') or raw in ('boolean', 'bool'):
+    kw = _type_keyword(raw)
+    unsigned = 'unsigned' in raw
+    nbd_num = _nbd(col, 'numeric')
+    nbd_str = _nbd(col, 'string')
+
+    # Boolean — tinyint(1) is MySQL's canonical bool shape, distinct
+    # from tinyint(N) which is a small int. The prefix check keeps
+    # it routed to BooleanField before the integer map kicks in.
+    if raw.startswith('tinyint(1)') or kw in BOOLEAN_TYPE_KEYWORDS:
         bits = []
         if col.default is not None:
             raw_default = col.default.strip("'")
@@ -587,35 +670,22 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
             bits.extend(['null=True', 'blank=True'])
         return f'models.BooleanField({", ".join(bits)})'
 
-    # Tinyint / smallint / int / bigint
-    nbd_num = _nbd(col, 'numeric')
-    if re.match(r'tinyint', raw):
-        return f'models.PositiveSmallIntegerField({nbd_num.lstrip(", ")})'
-    if 'smallint' in raw:
-        return f'models.SmallIntegerField({nbd_num.lstrip(", ")})'
-    if 'bigint' in raw:
-        if 'unsigned' in raw:
-            return f'models.PositiveBigIntegerField({nbd_num.lstrip(", ")})'
-        return f'models.BigIntegerField({nbd_num.lstrip(", ")})'
-    if re.match(r'(mediumint|int)\b', raw):
-        if 'unsigned' in raw:
-            return f'models.PositiveIntegerField({nbd_num.lstrip(", ")})'
-        return f'models.IntegerField({nbd_num.lstrip(", ")})'
+    # Integer family — single lookup in INTEGER_TYPE_MAP.
+    if kw in INTEGER_TYPE_MAP:
+        signed_field, unsigned_field = INTEGER_TYPE_MAP[kw]
+        field = unsigned_field if unsigned else signed_field
+        return f'models.{field}({nbd_num.lstrip(", ")})'
 
-    # Decimal / numeric / float / double. NUMERIC(M,D) is SQL-
-    # standard-equivalent to DECIMAL(M,D) and appears in Chinook-
-    # style MySQL ports from SQL Server.
-    m = re.match(r'(?:decimal|numeric)\((\d+),(\d+)\)', raw)
-    if m:
-        return (f'models.DecimalField(max_digits={m.group(1)}, '
-                f'decimal_places={m.group(2)}{nbd_num})')
-    if 'double' in raw or 'float' in raw:
+    # Decimal / numeric — shares (M,D) precision extraction.
+    dp = _decimal_precision(raw)
+    if dp is not None:
+        return (f'models.DecimalField(max_digits={dp[0]}, '
+                f'decimal_places={dp[1]}{nbd_num})')
+    if kw in FLOAT_TYPE_KEYWORDS:
         return f'models.FloatField({nbd_num.lstrip(", ")})'
 
-    # Char / varchar — the most inference-heavy branch. NVARCHAR /
-    # NCHAR are SQL-Server-origin variants that MySQL accepts;
-    # treat them exactly like their non-N counterparts.
-    nbd_str = _nbd(col, 'string')
+    # Char / varchar — length-based, with column-name heuristics for
+    # specialised Django fields (EmailField, URLField, SlugField).
     char_len = _char_length(raw)
     if char_len is not None:
         if _is_email_column(col.name):
@@ -629,51 +699,55 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
         return f'models.CharField(max_length={char_len}{nbd_str})'
 
     # Text family
-    if raw in ('text', 'tinytext', 'mediumtext', 'longtext'):
+    if kw in TEXT_TYPE_KEYWORDS:
         return f'models.TextField({nbd_str.lstrip(", ")})'
 
     # Dates and times
-    if raw == 'date':
+    if kw in DATE_TYPE_KEYWORDS:
         return f'models.DateField({null_blank.lstrip(", ")})'
-    if raw == 'time':
+    if kw in TIME_TYPE_KEYWORDS:
         return f'models.TimeField({null_blank.lstrip(", ")})'
-    if 'datetime' in raw or 'timestamp' in raw:
+    if kw in DATETIME_TYPE_KEYWORDS:
         return f'models.DateTimeField({null_blank.lstrip(", ")})'
-    if raw == 'year':
+    if kw == 'year':
         return f'models.PositiveSmallIntegerField({nbd_num.lstrip(", ")})'
 
     # ENUM — handled at the model level (via TextChoices). Caller sets
     # this up when it detects an enum; this function only returns the
     # CharField reference.
-    m = re.match(r'enum\((.+)\)', raw)
-    if m:
-        vals = re.findall(r"'((?:[^']|'')*)'", m.group(1))
-        max_len = max((len(v) for v in vals), default=20)
-        # Emit reference; model generator inserts a Choices class.
-        choices_cls = f'{column_to_field_name(col.name).title()}Choices'
-        return (f'models.CharField(max_length={max_len}, '
-                f'choices={choices_cls}.choices{null_blank})')
+    if kw == 'enum':
+        m = re.match(r'enum\((.+)\)', raw)
+        if m:
+            vals = re.findall(r"'((?:[^']|'')*)'", m.group(1))
+            max_len = max((len(v) for v in vals), default=20)
+            choices_cls = f'{column_to_field_name(col.name).title()}Choices'
+            return (f'models.CharField(max_length={max_len}, '
+                    f'choices={choices_cls}.choices{null_blank})')
 
     # SET — MySQL's comma-separated multi-enum. Django has no native
     # equivalent, but storing as a CharField with the full possible
     # length (all values + separators) keeps the legacy data intact.
     # The operator will typically post-process into a list or M2M.
-    m = re.match(r'set\((.+)\)', raw)
-    if m:
-        vals = re.findall(r"'((?:[^']|'')*)'", m.group(1))
-        # Worst case: all values joined by ","
-        max_len = sum(len(v) for v in vals) + max(0, len(vals) - 1) or 255
-        allowed = ', '.join(vals)
-        return (f'models.CharField(max_length={max_len}{null_blank}, '
-                f'help_text="MySQL SET — stored as comma-separated '
-                f'string. Allowed values: {allowed}.")')
+    if kw == 'set':
+        m = re.match(r'set\((.+)\)', raw)
+        if m:
+            vals = re.findall(r"'((?:[^']|'')*)'", m.group(1))
+            max_len = sum(len(v) for v in vals) + max(0, len(vals) - 1) or 255
+            allowed = ', '.join(vals)
+            return (f'models.CharField(max_length={max_len}{null_blank}, '
+                    f'help_text="MySQL SET — stored as comma-separated '
+                    f'string. Allowed values: {allowed}.")')
 
     # JSON
-    if raw == 'json':
+    if kw in JSON_TYPE_KEYWORDS:
         return f'models.JSONField(default=dict{null_blank})'
 
+    # UUID — Django's native UUIDField.
+    if kw in UUID_TYPE_KEYWORDS:
+        return f'models.UUIDField({null_blank.lstrip(", ")})'
+
     # Blob / binary
-    if 'blob' in raw or 'binary' in raw:
+    if kw in BLOB_TYPE_KEYWORDS:
         return f'models.BinaryField({null_blank.lstrip(", ")})'
 
     return f'models.TextField({null_blank.lstrip(", ")})  # unmapped: {raw}'
