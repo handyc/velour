@@ -81,12 +81,22 @@ from datalift.dump_parser import iter_create_tables, iter_inserts
 
 
 _COL_DEF_RE = re.compile(
-    # Reject the line if it *starts* with a constraint/index keyword —
-    # otherwise ``CONSTRAINT fk_foo FOREIGN KEY …`` would get parsed
-    # as a column named "CONSTRAINT".
-    r"^\s*(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b)"
-    r"[`\"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`\"]?\s+"
-    r"(?!KEY|UNIQUE|PRIMARY|FOREIGN|CONSTRAINT|INDEX|FULLTEXT|SPATIAL|CHECK)",
+    # Reject lines that START a constraint/index declaration. The
+    # keyword match requires an accompanying KEY/INDEX/paren so we
+    # don't mistake a column named ``fulltext`` / ``spatial`` /
+    # ``check`` (Pagila has ``fulltext tsvector``) for a constraint.
+    r"^\s*(?!"
+      r"CONSTRAINT\s+|"
+      r"PRIMARY\s+KEY\b|"
+      r"FOREIGN\s+KEY\b|"
+      r"UNIQUE\s+(?:KEY\b|\()|"
+      r"KEY\s+|"
+      r"INDEX\s*(?:\S|\()|"
+      r"FULLTEXT\s+(?:KEY|INDEX)\b|"
+      r"SPATIAL\s+(?:KEY|INDEX)\b|"
+      r"CHECK\s*\("
+    r")"
+    r"[`\"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`\"]?\s+",
     re.IGNORECASE,
 )
 
@@ -176,6 +186,30 @@ _DATE_FORMATS = (
     '%d.%m.%Y',
     '%Y%m%d',
 )
+
+
+def _coerce_binary_value(val):
+    """Turn a string-shaped bytea value into actual bytes.
+
+    * ``'\\x89504e47…'`` → ``b'\\x89\\x50\\x4e\\x47…'`` (pg_dump
+      emits bytea values in this hex-escape form inside quoted
+      strings; the backslash is preserved by the string parser).
+    * ``'plain text'`` → UTF-8 bytes (some schemas still stuff text
+      into a BLOB column).
+    * ``bytes`` → passed through.
+    * ``None`` → passed through.
+    """
+    if val is None or isinstance(val, (bytes, bytearray, memoryview)):
+        return val
+    if isinstance(val, str):
+        if val.startswith('\\x'):
+            hex_part = val[2:]
+            try:
+                return bytes.fromhex(hex_part)
+            except ValueError:
+                pass
+        return val.encode('utf-8', 'replace')
+    return val
 
 
 def _coerce_date_string(val):
@@ -417,13 +451,21 @@ class Command(BaseCommand):
                 # coerce unusual string formats (Chinook stores
                 # `YYYY/M/D`, some dumps use `DD-MM-YYYY`) before
                 # Django's field.to_python() trips over them.
+                # Similarly for BinaryField — pg_dump emits bytea
+                # values as `'\x<hex>'` text literals, which our
+                # parser returns as a str; we need bytes for Django.
                 date_fields = set()
+                binary_fields = set()
                 for f in model._meta.get_fields():
                     cls = f.__class__.__name__
                     if cls in ('DateField', 'DateTimeField'):
                         date_fields.add(f.name)
                         if hasattr(f, 'attname'):
                             date_fields.add(f.attname)
+                    elif cls == 'BinaryField':
+                        binary_fields.add(f.name)
+                        if hasattr(f, 'attname'):
+                            binary_fields.add(f.attname)
 
                 drop_set = set(spec["drop_columns"])
 
@@ -498,6 +540,8 @@ class Command(BaseCommand):
                         target_field = fk_attname.get(col, col)
                         if target_field in date_fields:
                             val = _coerce_date_string(val)
+                        elif target_field in binary_fields:
+                            val = _coerce_binary_value(val)
                         kwargs[target_field] = val
                     for dest, src in synth.items():
                         kwargs[dest] = (row_dict.get(src)

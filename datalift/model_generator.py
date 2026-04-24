@@ -112,7 +112,21 @@ class Table:
 # ═════════════════════════════════════════════════════════════════════
 
 _COL_LINE_RE = re.compile(
-    r'^\s*(?!(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b)'
+    # Reject constraint lines (same shape as ingestdump._COL_DEF_RE).
+    # Each keyword requires a trailing KEY/INDEX/paren so a column
+    # named ``fulltext`` / ``spatial`` / ``check`` still parses as
+    # a column.
+    r'^\s*(?!'
+      r'CONSTRAINT\s+|'
+      r'PRIMARY\s+KEY\b|'
+      r'FOREIGN\s+KEY\b|'
+      r'UNIQUE\s+(?:KEY\b|\()|'
+      r'KEY\s+|'
+      r'INDEX\s*(?:\S|\()|'
+      r'FULLTEXT\s+(?:KEY|INDEX)\b|'
+      r'SPATIAL\s+(?:KEY|INDEX)\b|'
+      r'CHECK\s*\('
+    r')'
     r'[`"]?(?P<name>[A-Za-z_][A-Za-z0-9_]*)[`"]?\s+(?P<rest>.+?)\s*$',
     re.IGNORECASE,
 )
@@ -310,13 +324,20 @@ def parse_dump(text: str) -> List[Table]:
     return list(parsed.values())
 
 
+# Common ALTER TABLE prelude — handles both mysqldump (single-line,
+# no `ONLY`) and pg_dump (multi-line, with `ONLY`, schema-qualified
+# names) variants.
+_ALTER_TABLE_PRELUDE = (
+    r'ALTER\s+TABLE\s+(?:ONLY\s+)?[`"]?(?P<tbl>[^\s`"()]+)[`"]?\s+'
+    r'ADD\s+(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
+)
+
 # Matches a post-hoc FK constraint declared via ALTER TABLE, e.g.
 #   ALTER TABLE `Invoice` ADD CONSTRAINT `FK_InvoiceCustomerId`
 #   FOREIGN KEY (`CustomerId`) REFERENCES `Customer` (`CustomerId`)
 #   ON DELETE NO ACTION ON UPDATE NO ACTION;
 _ALTER_FK_RE = re.compile(
-    r'ALTER\s+TABLE\s+[`"]?(?P<tbl>[^\s`"()]+)[`"]?\s+'
-    r'ADD\s+(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
+    _ALTER_TABLE_PRELUDE +
     r'FOREIGN\s+KEY\s*\(([^)]+)\)\s+'
     r'REFERENCES\s+[`"]?(?P<ref>[^\s`"()]+)[`"]?\s*\(([^)]+)\)'
     r'(?:\s+ON\s+(?:UPDATE|DELETE)\s+'
@@ -325,11 +346,41 @@ _ALTER_FK_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches a post-hoc PRIMARY KEY declared via ALTER TABLE (pg_dump).
+_ALTER_PK_RE = re.compile(
+    _ALTER_TABLE_PRELUDE + r'PRIMARY\s+KEY\s*\(([^)]+)\)',
+    re.IGNORECASE,
+)
+
+# Matches a post-hoc UNIQUE constraint declared via ALTER TABLE.
+_ALTER_UNIQUE_RE = re.compile(
+    _ALTER_TABLE_PRELUDE + r'UNIQUE\s*\(([^)]+)\)',
+    re.IGNORECASE,
+)
+
+# A column default of `nextval('…_seq'::regclass)` is pg_dump's way
+# of saying "this is a SERIAL / BIGSERIAL auto-increment".
+_NEXTVAL_RE = re.compile(
+    r"nextval\s*\(\s*'[^']+'(?:::regclass)?\s*\)",
+    re.IGNORECASE,
+)
+
 
 def _apply_alter_table_fks(text: str, tables: Dict[str, Table]) -> None:
-    """Populate `foreign_keys` on each Table from post-hoc
-    `ALTER TABLE ... ADD FOREIGN KEY` declarations in `text`."""
+    """Populate table-level structure from post-hoc ALTER TABLE
+    declarations. Covers three shapes emitted by pg_dump (and many
+    hand-authored MySQL schemas):
+
+    * ``ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY (…) REFERENCES …``
+    * ``ALTER TABLE … ADD CONSTRAINT … PRIMARY KEY (…)``
+    * ``ALTER TABLE … ADD CONSTRAINT … UNIQUE (…)``
+
+    Also recognises ``DEFAULT nextval(…)`` on a column as equivalent
+    to ``AUTO_INCREMENT``: when ALTER TABLE later declares that
+    column as the PK, we upgrade it to a BigAutoField.
+    """
     from datalift.dump_parser import _strip_table_prefix_placeholders
+
     for m in _ALTER_FK_RE.finditer(text):
         tbl_name = _strip_table_prefix_placeholders(m.group('tbl'))
         ref_table = _strip_table_prefix_placeholders(m.group('ref'))
@@ -345,6 +396,38 @@ def _apply_alter_table_fks(text: str, tables: Dict[str, Table]) -> None:
             columns=cols, ref_table=ref_table,
             ref_columns=ref_cols, on_delete=ondel,
         ))
+
+    for m in _ALTER_PK_RE.finditer(text):
+        tbl_name = _strip_table_prefix_placeholders(m.group('tbl'))
+        target = tables.get(tbl_name)
+        if target is None or target.primary_key:
+            continue  # don't overwrite an inline PK
+        pk_cols = _strip_colnames(m.group(2))
+        target.primary_key = pk_cols
+        # Update per-column flags so the emit phase sees them as PK
+        for c in target.columns:
+            if c.name in pk_cols:
+                c.is_primary = True
+                # Promote nextval()-defaulted PK columns to AUTO_INCREMENT
+                # semantics: when pg_dump says `customer_id integer
+                # DEFAULT nextval('customer_customer_id_seq'::regclass)`
+                # and later declares it PK, the canonical Django form
+                # is a BigAutoField(primary_key=True).
+                if c.default and _NEXTVAL_RE.search(c.default):
+                    c.is_auto_inc = True
+
+    for m in _ALTER_UNIQUE_RE.finditer(text):
+        tbl_name = _strip_table_prefix_placeholders(m.group('tbl'))
+        target = tables.get(tbl_name)
+        if target is None:
+            continue
+        u_cols = _strip_colnames(m.group(2))
+        if u_cols not in target.uniques:
+            target.uniques.append(u_cols)
+        if len(u_cols) == 1:
+            for c in target.columns:
+                if c.name == u_cols[0]:
+                    c.is_unique = True
 
 
 # ═════════════════════════════════════════════════════════════════════

@@ -53,6 +53,9 @@ def _strip_table_prefix_placeholders(name: str) -> str:
       literal-uppercase prefix, substituted at install time with e.g.
       ``ps_`` / ``osc_``.
     * ``{PREFIX}_table`` — generic curly-brace placeholder.
+    * ``public.table`` / ``dbo.table`` / ``mydb.table`` — database /
+      schema qualifier (pg_dump default, SQL Server dbo schema,
+      mysqldump with explicit database). The final identifier wins.
 
     Returns the bare table name, or ``''`` if nothing survives (caller
     should skip the statement in that case).
@@ -69,6 +72,12 @@ def _strip_table_prefix_placeholders(name: str) -> str:
     name = re.sub(r'^(?:DB_PREFIX|PREFIX)_', '', name)
     # Generic curly-brace prefix ({PREFIX}_, {prefix}_)
     name = re.sub(r'\{[A-Za-z_][\w.]*\}_?', '', name)
+    # Database/schema qualifier: keep only the last dotted segment.
+    # Also strips double-quoted wrapping that pg_dump sometimes emits
+    # around individual segments (e.g. `"public"."my_table"`).
+    if '.' in name:
+        name = name.rsplit('.', 1)[-1]
+    name = name.strip('"\'` \t')
     return name.strip()
 
 
@@ -403,6 +412,12 @@ def _parse_value(s: str, i: int):
             # Unknown SQL function — treat as "let the DB / Django
             # fill in a default". NULL is the least-bad fallback.
             return None, j
+        # Booleans are spelled as barewords in Postgres INSERTs:
+        #     INSERT INTO … VALUES (…, true, false, …)
+        # Return actual Python booleans so Django's BooleanField
+        # doesn't reject the string "true".
+        if up in ('TRUE', 'FALSE'):
+            return (up == 'TRUE'), j
         # Plain bareword: keep it as a string for back-compat.
         return token_name, j
     raise ValueError(f'cannot parse value at offset {i}: {s[i:i+20]!r}')
