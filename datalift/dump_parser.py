@@ -217,9 +217,10 @@ def _strip_non_data_blocks(text: str) -> str:
     #    Dolibarr's install SQL has shell-script snippets in
     #    comment lines with `echo "INSERT INTO …"` literals that
     #    our INSERT regex would otherwise match as real data.
-    #    Preserve the newline so statement boundaries stay intact.
-    text = re.sub(r'(^|\n)--[^\n]*', r'\1', text)
-    text = re.sub(r'(^|\n)#[^\n]*', r'\1', text)
+    #    Accept leading whitespace so indented comments count too;
+    #    preserve the newline so statement boundaries stay intact.
+    text = re.sub(r'(^|\n)([ \t]*)--[^\n]*', r'\1\2', text)
+    text = re.sub(r'(^|\n)([ \t]*)#[^\n]*', r'\1\2', text)
     return text
 
 

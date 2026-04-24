@@ -153,8 +153,15 @@ def _normalize_type(raw: str) -> str:
     return kw + paren + rest
 
 _CONSTRAINT_RE = re.compile(
+    # Match a constraint-declaration line. FULLTEXT / SPATIAL need an
+    # accompanying KEY/INDEX keyword so Pagila's
+    # `fulltext tsvector NOT NULL` column doesn't get misclassified
+    # as a FULLTEXT constraint. UNIQUE needs a KEY or a `(` so
+    # `unique_code VARCHAR(32)` style columns don't collide either.
     r'^\s*(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
-    r'(?P<kind>PRIMARY\s+KEY|UNIQUE\s+KEY|FOREIGN\s+KEY|KEY|INDEX|FULLTEXT|SPATIAL|CHECK)\b',
+    r'(?P<kind>PRIMARY\s+KEY|UNIQUE\s+(?:KEY|\()|FOREIGN\s+KEY'
+    r'|KEY\s|INDEX\s|FULLTEXT\s+(?:KEY|INDEX)'
+    r'|SPATIAL\s+(?:KEY|INDEX)|CHECK\s*\()',
     re.IGNORECASE,
 )
 _FK_RE = re.compile(
