@@ -1419,10 +1419,16 @@ def _guess_list_filter(t: Table) -> List[str]:
 
 def _guess_date_hierarchy(t: Table) -> Optional[str]:
     """If there's a prominent date column, Django's admin gets a nicer
-    top-bar navigation from it."""
+    top-bar navigation from it. Only returns a column whose raw_type
+    is actually date/time-shaped — legacy schemas often name a column
+    `date` or `created_at` but store a Unix-timestamp int (MyBB does
+    this throughout), which Django's admin rejects (E128)."""
+    date_typed = {c.name for c in t.columns
+                  if any(kw in c.raw_type for kw in
+                         ('date', 'time', 'timestamp'))}
     for candidate in ('created_at', 'published_at', 'date', 'dob',
                       'application_date'):
-        if any(c.name == candidate for c in t.columns):
+        if candidate in date_typed:
             return candidate
     return None
 
