@@ -1,3 +1,4 @@
+from django.apps import apps
 from django.db import models
 from django.utils.text import slugify
 
@@ -28,11 +29,15 @@ class LiftJob(models.Model):
     source_password = models.CharField(max_length=500, blank=True)
     source_database = models.CharField(max_length=200)
 
-    # Or use an existing Database app connection
-    source_db_ref = models.ForeignKey(
-        'databases.Database', on_delete=models.SET_NULL,
-        null=True, blank=True, related_name='lift_jobs',
-        help_text='Use connection from Databases app instead of manual entry',
+    # Optional reference to a databases.Database record (PK only).
+    # Stored as a plain integer so datalift has no hard dependency on
+    # the velour databases app — the resolved_source_db property
+    # lazily fetches the Database instance iff the app is installed.
+    source_db_ref = models.PositiveIntegerField(
+        null=True, blank=True,
+        help_text='PK of a `databases.Database` row to pull '
+                  'host/port/user/password/database from. Ignored '
+                  'silently if the databases app is not installed.',
     )
 
     # Output
@@ -54,6 +59,19 @@ class LiftJob(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def resolved_source_db(self):
+        """Lazily resolve ``source_db_ref`` (an int PK) to a
+        ``databases.Database`` instance. Returns None if unset or if
+        the databases app is not installed in this project."""
+        if not self.source_db_ref:
+            return None
+        try:
+            Model = apps.get_model('databases', 'Database')
+        except LookupError:
+            return None
+        return Model.objects.filter(pk=self.source_db_ref).first()
+
     def save(self, *args, **kwargs):
         if not self.slug:
             base = slugify(self.name)
@@ -62,11 +80,15 @@ class LiftJob(models.Model):
                 slug = f'{base}-{n}'
                 n += 1
             self.slug = slug
-        # If source_db_ref set, pull connection details from it
-        if self.source_db_ref:
-            self.source_host = self.source_db_ref.host
-            self.source_port = self.source_db_ref.port
-            self.source_user = self.source_db_ref.username
-            self.source_password = self.source_db_ref.password
-            self.source_database = self.source_db_ref.database_name
+        # If source_db_ref set, pull connection details from the
+        # referenced Database row (when the databases app is
+        # available — otherwise leave the manually-entered values
+        # alone).
+        db = self.resolved_source_db
+        if db is not None:
+            self.source_host = db.host
+            self.source_port = db.port
+            self.source_user = db.username
+            self.source_password = db.password
+            self.source_database = db.database_name
         super().save(*args, **kwargs)

@@ -33,10 +33,12 @@ def job_add(request):
 
         db_ref_id = request.POST.get('source_db_ref')
         if db_ref_id:
+            # Just store the PK — resolution happens lazily via
+            # LiftJob.resolved_source_db. No import of the databases
+            # app here means datalift stays usable standalone.
             try:
-                from databases.models import Database
-                job.source_db_ref = Database.objects.get(pk=db_ref_id)
-            except Exception:
+                job.source_db_ref = int(db_ref_id)
+            except (TypeError, ValueError):
                 pass
         else:
             job.source_host = request.POST.get('source_host', 'localhost')
