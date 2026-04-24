@@ -164,6 +164,40 @@ def _apply_value_map(value, vmap):
     return value
 
 
+# Date formats we try in order when a legacy dump emits something
+# Django's Date/DateTimeField to_python won't parse on its own.
+# Chinook uses YYYY/M/D; some European exports use DD-MM-YYYY etc.
+_DATE_FORMATS = (
+    '%Y/%m/%d',
+    '%Y/%m/%d %H:%M:%S',
+    '%d-%m-%Y',
+    '%d-%m-%Y %H:%M:%S',
+    '%d/%m/%Y',
+    '%d.%m.%Y',
+    '%Y%m%d',
+)
+
+
+def _coerce_date_string(val):
+    """Best-effort normalise a date string into Django's preferred
+    ``YYYY-MM-DD[ HH:MM:SS]`` form. Non-string values pass through
+    untouched. Unparseable strings also pass through so Django still
+    raises a clear ValidationError with the original value."""
+    if not isinstance(val, str):
+        return val
+    from datetime import datetime
+    # Already ISO-like?
+    if re.match(r'^\d{4}-\d{2}-\d{2}', val):
+        return val
+    for fmt in _DATE_FORMATS:
+        try:
+            dt = datetime.strptime(val, fmt)
+            return dt.isoformat(sep=' ')
+        except ValueError:
+            continue
+    return val
+
+
 def _dedupe_rows(objs, key_field, report):
     """Collapse rows that share a value on ``key_field``. Keeps the row
     with the highest ``id`` (most recent in legacy systems that use
@@ -379,9 +413,53 @@ class Command(BaseCommand):
                         if hasattr(f, 'column'):
                             fk_attname[f.column] = f.attname
 
+                # Fields expecting a date/datetime — for these we'll
+                # coerce unusual string formats (Chinook stores
+                # `YYYY/M/D`, some dumps use `DD-MM-YYYY`) before
+                # Django's field.to_python() trips over them.
+                date_fields = set()
+                for f in model._meta.get_fields():
+                    cls = f.__class__.__name__
+                    if cls in ('DateField', 'DateTimeField'):
+                        date_fields.add(f.name)
+                        if hasattr(f, 'attname'):
+                            date_fields.add(f.attname)
+
                 drop_set = set(spec["drop_columns"])
+
+                # Case-normalised alias map: Chinook's INSERT lists
+                # columns as PascalCase (`GenreId`, `Name`) while our
+                # generated Django fields are snake_case (`genre_id`,
+                # `name`). Any INSERT column that doesn't match a field
+                # directly gets snake_cased + lower-cased; if that hits
+                # a field name, we alias through.
+                def _snakeify(s: str) -> str:
+                    # Lightweight CamelCase → snake_case that mirrors
+                    # model_generator.column_to_field_name. Doesn't
+                    # import it to keep the command self-contained.
+                    s1 = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', s)
+                    s2 = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', s1)
+                    return s2.lower()
+                col_alias = {}
+                for c in column_names:
+                    if c in field_names or c in drop_set:
+                        continue
+                    sn = _snakeify(c)
+                    if sn in field_names or sn in fk_attname:
+                        col_alias[c] = sn
+                        continue
+                    # FK field: strip trailing _id
+                    if sn.endswith('_id') and sn[:-3] in fk_attname:
+                        col_alias[c] = sn[:-3]
+                        continue
+                    # Lowercase exact match (e.g. ALL CAPS column)
+                    if c.lower() in field_names:
+                        col_alias[c] = c.lower()
+
                 unknown = [c for c in column_names
-                           if c not in field_names and c not in drop_set]
+                           if c not in field_names
+                           and c not in drop_set
+                           and c not in col_alias]
                 if unknown:
                     self.stderr.write(
                         f'  - {table}: dropping {len(unknown)} unknown column(s): '
@@ -400,6 +478,11 @@ class Command(BaseCommand):
                     for col, val in row_dict.items():
                         if col in drop_set:
                             continue
+                        # Translate case-mismatched INSERT columns
+                        # into their Django field name (e.g. Chinook's
+                        # `GenreId` → `genre_id`).
+                        if col in col_alias:
+                            col = col_alias[col]
                         if col not in field_names:
                             continue
                         if col in vmaps:
@@ -412,7 +495,10 @@ class Command(BaseCommand):
                         # FK fields: route to the attname (e.g. emp_no
                         # → emp_no_id) so the constructor accepts a
                         # raw PK without having to fetch the target.
-                        kwargs[fk_attname.get(col, col)] = val
+                        target_field = fk_attname.get(col, col)
+                        if target_field in date_fields:
+                            val = _coerce_date_string(val)
+                        kwargs[target_field] = val
                     for dest, src in synth.items():
                         kwargs[dest] = (row_dict.get(src)
                                         or f"{dest}_{row_dict.get('id')}")

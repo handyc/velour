@@ -295,6 +295,12 @@ def _parse_value(s: str, i: int):
         i = _skip_ws(s, i + 7)
         v, j = _parse_string(s, i)
         return v.encode('latin-1', 'replace'), j
+    # SQL-Server-style Unicode string literal prefix: N'...'. MySQL
+    # accepts this for utf8 literals; we've already normalised the
+    # source to Python `str`, so just skip the N and parse as a
+    # regular quoted string.
+    if (s[i] in 'Nn' and i + 1 < n and s[i+1] == "'"):
+        return _parse_string(s, i + 1)
     # hex literal 0xDEADBEEF  → bytes
     if s[i] == '0' and i + 1 < n and s[i+1] in ('x', 'X'):
         j = i + 2

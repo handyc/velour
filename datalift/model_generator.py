@@ -302,7 +302,49 @@ def parse_dump(text: str) -> List[Table]:
     for _, ddl in iter_create_tables(text):
         t = parse_create_table(strip_auto_increment(ddl))
         parsed[t.name] = t
+    # Post-pass: attach any ALTER TABLE ADD FOREIGN KEY declarations
+    # to their owning table. SQL-Server-origin MySQL ports (Chinook,
+    # many hand-authored schemas) declare FKs separately from the
+    # CREATE TABLE, so the inline-FK parser misses them.
+    _apply_alter_table_fks(text, parsed)
     return list(parsed.values())
+
+
+# Matches a post-hoc FK constraint declared via ALTER TABLE, e.g.
+#   ALTER TABLE `Invoice` ADD CONSTRAINT `FK_InvoiceCustomerId`
+#   FOREIGN KEY (`CustomerId`) REFERENCES `Customer` (`CustomerId`)
+#   ON DELETE NO ACTION ON UPDATE NO ACTION;
+_ALTER_FK_RE = re.compile(
+    r'ALTER\s+TABLE\s+[`"]?(?P<tbl>[^\s`"()]+)[`"]?\s+'
+    r'ADD\s+(?:CONSTRAINT\s+[`"]?[^\s`"]+[`"]?\s+)?'
+    r'FOREIGN\s+KEY\s*\(([^)]+)\)\s+'
+    r'REFERENCES\s+[`"]?(?P<ref>[^\s`"()]+)[`"]?\s*\(([^)]+)\)'
+    r'(?:\s+ON\s+(?:UPDATE|DELETE)\s+'
+    r'(?:RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION|SET\s+DEFAULT))*'
+    r'(?:\s+ON\s+DELETE\s+(?P<ondel>RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION|SET\s+DEFAULT))?',
+    re.IGNORECASE,
+)
+
+
+def _apply_alter_table_fks(text: str, tables: Dict[str, Table]) -> None:
+    """Populate `foreign_keys` on each Table from post-hoc
+    `ALTER TABLE ... ADD FOREIGN KEY` declarations in `text`."""
+    from datalift.dump_parser import _strip_table_prefix_placeholders
+    for m in _ALTER_FK_RE.finditer(text):
+        tbl_name = _strip_table_prefix_placeholders(m.group('tbl'))
+        ref_table = _strip_table_prefix_placeholders(m.group('ref'))
+        target = tables.get(tbl_name)
+        if target is None:
+            continue
+        cols = _strip_colnames(m.group(2))
+        ref_cols = _strip_colnames(m.group(4))
+        ondel = (m.group('ondel') or 'CASCADE').upper().replace(' ', '_')
+        if ondel == 'NO_ACTION':
+            ondel = 'CASCADE'  # NO ACTION ≈ CASCADE for most app code
+        target.foreign_keys.append(ForeignKey(
+            columns=cols, ref_table=ref_table,
+            ref_columns=ref_cols, on_delete=ondel,
+        ))
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -318,18 +360,21 @@ _IRREGULAR_PLURALS = {
 
 
 def singularize(name: str) -> str:
-    """Best-effort singularize for making a model name from a table."""
+    """Best-effort singularize for making a model name from a table.
+    Preserves the original case of the preserved prefix — Chinook's
+    `InvoiceLine` stays mixed-case so table_to_model_name doesn't
+    collapse it to `Invoiceline`."""
     low = name.lower()
     for sing, plur in _IRREGULAR_PLURALS.items():
         if low == plur:
             return sing
     if low.endswith('ies') and len(low) > 3:
-        return low[:-3] + 'y'
+        return name[:-3] + ('Y' if name[-3].isupper() else 'y')
     if low.endswith('ses') or low.endswith('xes') or low.endswith('zes'):
-        return low[:-2]
+        return name[:-2]
     if low.endswith('s') and not low.endswith('ss'):
-        return low[:-1]
-    return low
+        return name[:-1]
+    return name
 
 
 def pluralize(name: str) -> str:
@@ -365,7 +410,20 @@ def table_to_model_name(table: str, app_label: str = '',
             stem = stem[len(prefix):]
     parts = re.split(r'[_\-\s]+', stem)
     parts = [singularize(p) for p in parts if p]
-    return ''.join(p.capitalize() for p in parts) or 'Model'
+
+    def _capitalize_part(p: str) -> str:
+        # Preserve existing PascalCase or camelCase tokens — Chinook's
+        # `InvoiceLine` would become `Invoiceline` under plain
+        # `.capitalize()`. If the token already has internal uppercase
+        # letters (i.e. it's mixed case), leave the case as-is apart
+        # from upper-casing the first character.
+        if not p:
+            return p
+        if any(c.isupper() for c in p[1:]):
+            return p[0].upper() + p[1:]
+        return p.capitalize()
+
+    return ''.join(_capitalize_part(p) for p in parts) or 'Model'
 
 
 def column_to_field_name(col_name: str) -> str:
@@ -399,7 +457,9 @@ LARAVEL_TIMESTAMP_COLUMNS = {'created_at', 'updated_at', 'deleted_at'}
 
 
 def _char_length(raw_type: str) -> Optional[int]:
-    m = re.match(r'(?:varchar|char)\((\d+)\)', raw_type)
+    # Accept NVARCHAR / NCHAR (SQL-Server-origin MySQL ports) as
+    # equivalent to VARCHAR / CHAR.
+    m = re.match(r'(?:nvarchar|nchar|varchar|char)\((\d+)\)', raw_type)
     return int(m.group(1)) if m else None
 
 
@@ -542,15 +602,19 @@ def infer_field(col: Column, *, fk_target: Optional[str] = None) -> str:
             return f'models.PositiveIntegerField({nbd_num.lstrip(", ")})'
         return f'models.IntegerField({nbd_num.lstrip(", ")})'
 
-    # Decimal / float / double
-    m = re.match(r'decimal\((\d+),(\d+)\)', raw)
+    # Decimal / numeric / float / double. NUMERIC(M,D) is SQL-
+    # standard-equivalent to DECIMAL(M,D) and appears in Chinook-
+    # style MySQL ports from SQL Server.
+    m = re.match(r'(?:decimal|numeric)\((\d+),(\d+)\)', raw)
     if m:
         return (f'models.DecimalField(max_digits={m.group(1)}, '
                 f'decimal_places={m.group(2)}{nbd_num})')
     if 'double' in raw or 'float' in raw:
         return f'models.FloatField({nbd_num.lstrip(", ")})'
 
-    # Char / varchar — the most inference-heavy branch
+    # Char / varchar — the most inference-heavy branch. NVARCHAR /
+    # NCHAR are SQL-Server-origin variants that MySQL accepts;
+    # treat them exactly like their non-N counterparts.
     nbd_str = _nbd(col, 'string')
     char_len = _char_length(raw)
     if char_len is not None:
