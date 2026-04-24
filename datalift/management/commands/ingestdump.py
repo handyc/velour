@@ -262,6 +262,37 @@ def _dedupe_rows(objs, key_field, report):
     return list(by_key.values()), len(dropped)
 
 
+def _bulk_load(model, objs, chunk, *, continue_on_error=False):
+    """Insert ``objs`` into ``model``, returning ``(inserted, row_errors)``.
+
+    The fast path is a single ``bulk_create`` of the whole batch.
+    When ``continue_on_error`` is set and the batch throws, we fall
+    back to per-row ``save()`` — each row that still fails gets
+    appended to ``row_errors`` as ``(1-based-index, short-message)``.
+    When the flag is unset, any exception propagates (preserving the
+    pre-existing rollback-on-error contract).
+    """
+    if not objs:
+        return 0, []
+    try:
+        model.objects.bulk_create(objs, batch_size=chunk)
+        return len(objs), []
+    except Exception as e:
+        if not continue_on_error:
+            raise
+    # Fallback: individual inserts so we can isolate failing rows.
+    inserted = 0
+    errors = []
+    for idx, obj in enumerate(objs, 1):
+        try:
+            obj.save(force_insert=True)
+            inserted += 1
+        except Exception as row_e:
+            msg = str(row_e).strip().splitlines()[0][:160]
+            errors.append((idx, msg))
+    return inserted, errors
+
+
 def _fk_orphan_sweep(report):
     """Drop child rows whose FK parent is missing (SQLite only).
 
@@ -323,6 +354,18 @@ class Command(BaseCommand):
             '--no-fk-sweep', action='store_true',
             help='Skip the post-load PRAGMA foreign_key_check pass that '
                  'drops child rows whose FK parent is missing.',
+        )
+        parser.add_argument(
+            '--continue-on-error', action='store_true',
+            help='Keep going when a row fails to insert instead of '
+                 'rolling the whole dump back. Falls out of the '
+                 'atomic transaction and commits tables that worked.',
+        )
+        parser.add_argument(
+            '--max-errors', type=int, default=20,
+            help='With --continue-on-error, stop reporting after this '
+                 'many failed rows (ingest still continues; this just '
+                 'keeps the log readable). Default 20.',
         )
 
     def handle(self, *args, **opts):
@@ -411,10 +454,20 @@ class Command(BaseCommand):
         # INTO statements for the same model can't mutually collide.
         seen_pks_by_model: dict = {}
         dropped_by_table: dict = {}
+        # When --continue-on-error is set, a per-table count of rows
+        # that failed individual insert so we can surface a summary.
+        error_rows_by_table: dict = {}
 
-        # We accumulate all writes in one transaction so the FK-orphan
-        # sweep at the end sees a consistent graph.
-        with transaction.atomic():
+        # Atomicity: by default the whole ingest runs in one
+        # transaction so a mid-dump failure leaves an untouched DB.
+        # --continue-on-error drops this — each table commits on
+        # its own so partial progress survives. Contextlib's
+        # nullcontext gives us a uniform `with` body either way.
+        import contextlib
+        wrapper = (contextlib.nullcontext()
+                   if opts['continue_on_error']
+                   else transaction.atomic())
+        with wrapper:
             for table, cols, rows in iter_inserts(text):
                 total_in += len(rows)
                 model, spec = resolve_spec(table)
@@ -651,10 +704,29 @@ class Command(BaseCommand):
                     total_out += len(objs)
                     continue
 
-                model.objects.bulk_create(objs, batch_size=opts['chunk'])
-                self.stdout.write(
-                    f'  ✓ {table} → {model.__name__}: {len(objs)} row(s)')
-                total_out += len(objs)
+                inserted, row_errors = _bulk_load(
+                    model, objs, opts['chunk'],
+                    continue_on_error=opts['continue_on_error'],
+                )
+                if row_errors:
+                    shown = row_errors[:opts['max_errors']]
+                    for idx, err in shown:
+                        self.stderr.write(
+                            f'  ✗ {table} row {idx}: {err}')
+                    more = len(row_errors) - len(shown)
+                    if more:
+                        self.stderr.write(
+                            f'  ✗ … and {more} more in {table} '
+                            '(use --max-errors to show more)')
+                    error_rows_by_table[table] = (
+                        error_rows_by_table.get(table, 0) + len(row_errors))
+                if inserted:
+                    self.stdout.write(
+                        f'  ✓ {table} → {model.__name__}: '
+                        f'{inserted} row(s)'
+                        + (f' ({len(row_errors)} failed)'
+                           if row_errors else ''))
+                total_out += inserted
 
             # Sweep orphans inside the same atomic block so a violation
             # leaves the DB unchanged.
@@ -672,6 +744,15 @@ class Command(BaseCommand):
                 f'  dropped {total_dropped} row(s) total due to duplicate '
                 f'PK across multiple INSERT statements '
                 f'({len(dropped_by_table)} table(s) affected)')
+        if error_rows_by_table:
+            total_errs = sum(error_rows_by_table.values())
+            tables_w_errors = sorted(error_rows_by_table.items(),
+                                      key=lambda p: -p[1])
+            self.stderr.write(
+                f'  ✗ {total_errs} row(s) failed insert across '
+                f'{len(error_rows_by_table)} table(s). Worst offenders:')
+            for tbl, n in tables_w_errors[:5]:
+                self.stderr.write(f'      {n:6d}  {tbl}')
         self.stdout.write(
             self.style.SUCCESS(
                 f'\n{total_out}/{total_in} rows ingested '
