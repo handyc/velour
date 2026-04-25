@@ -339,11 +339,10 @@ def _rewrite_code(chunk: str) -> str:
     s = s.replace('this->', 'self.')
     s = s.replace('->', '.')
 
-    # `array(...)` → `[...]`
-    s = re.sub(r'\barray\s*\(', '[', s)
-
-    # `=>` → `:`
-    s = s.replace('=>', ':')
+    # `array(...)` → `[...]` and `=>` → `:` are both handled in a
+    # separate balanced-paren pass before this one
+    # (see _rewrite_array_literals). Doing them inline here would
+    # leave a stray `)` somewhere downstream and break every file.
 
     # PHP-strict equality
     s = s.replace('===', '==')
@@ -369,8 +368,62 @@ def _rewrite_code(chunk: str) -> str:
     s = re.sub(r'(\w+)\s+instanceof\s+(\w+)',
                 r'isinstance(\1, \2)', s)
 
-    # `new Foo(...)` → `Foo(...)`
-    s = re.sub(r'\bnew\s+(\w+)', r'\1', s)
+    # `new Foo(...)` and `new \Foo\Bar(...)` → `Foo(...)` / `Foo.Bar(...)`
+    s = re.sub(r'\bnew\s+\\?(\w+(?:\\\w+)*)',
+                lambda m: m.group(1).replace('\\', '.'), s)
+
+    # PHP namespace separator `\` in identifiers becomes `.` in
+    # Python (after the leading `\` from absolute references is
+    # stripped). Run last so we don't interfere with string-escape
+    # processing earlier passes might rely on.
+    s = re.sub(r'\\(?=[A-Z]\w)', '.', s)
+    # Strip a stray leading `.` that would have been an absolute
+    # `\Foo` reference at expression start.
+    s = re.sub(r'(?<![A-Za-z0-9_.])\.(?=[A-Z]\w)', '', s)
+
+    # PHP `=&` (assign-by-reference) → `=` — Python doesn't have a
+    # by-reference assignment operator; semantics differ but the
+    # syntax has to compile.
+    s = re.sub(r'=\s*&\s*', '= ', s)
+
+    # PHP `@function()` (error suppression) → strip the `@`. Python
+    # doesn't have a per-expression error-suppression operator.
+    s = re.sub(r'@(?=[a-zA-Z_])', '', s)
+
+    # PHP `++` / `--` post/pre-increment → `+= 1` / `-= 1`. Only
+    # rewrites the postfix form `var++` (the prefix `++var` is rare
+    # in idiomatic PHP). Wrap in re.sub guard so we don't touch
+    # `++` inside Python's own `+=` / `-=`.
+    s = re.sub(r'(\b\w+(?:\.\w+|\[[^\]]+\])*)\+\+(?!=)', r'\1 += 1', s)
+    s = re.sub(r'(\b\w+(?:\.\w+|\[[^\]]+\])*)--(?!=)', r'\1 -= 1', s)
+
+    # Python reserved-word collisions. PHP allows `$class`, `$global`,
+    # `$continue`, etc. as variable names — Python doesn't. Rename
+    # by appending an underscore. (Only matches BARE identifiers
+    # already stripped of the `$` prefix earlier in this routine.)
+    py_reserved = ('class', 'global', 'continue', 'pass', 'def',
+                    'lambda', 'from', 'import', 'as', 'with',
+                    'yield', 'nonlocal', 'finally')
+    for kw in py_reserved:
+        s = re.sub(rf'\b{kw}\b(?=\s*[=,)])', f'{kw}_', s)
+        # As a function/method parameter name — `def foo(continue=None)`
+        s = re.sub(rf'(?<=[(,]\s){kw}\b', f'{kw}_', s)
+
+    # PHP type casts `(int) expr` are handled in a dedicated
+    # string-aware pass (`_rewrite_casts`) BEFORE this routine runs;
+    # doing them here would break across string-split boundaries.
+
+    # PHP ternary `cond ? a : b` → Python `a if cond else b`.
+    # Conservative match: identifiers/parens on each side, no
+    # nested ternaries (handled left-to-right in subsequent passes).
+    def _ternary(m: re.Match[str]) -> str:
+        return f'({m.group(2).strip()} if {m.group(1).strip()} '\
+               f'else {m.group(3).strip()})'
+    # Limit scope: match a chunk that doesn't span dict literals.
+    s = re.sub(
+        r'\(([^()?:]+?)\)\s*\?\s*([^?:]+?)\s*:\s*([^?:;,)]+)',
+        _ternary, s,
+    )
 
     # `??` and `.=`
     s = re.sub(r'\s*\?\?\s*', ' or ', s)
@@ -403,6 +456,14 @@ def _rewrite_string_concat(expr: str) -> str:
         if i + 1 < len(segments) and segments[i + 1][1]:
             new_chunk = re.sub(r'(\s*)\.(\s*)$', r'\1+\2', new_chunk)
         # Code-internal: require whitespace on at least one side.
+        # BUT: don't rewrite `).methodName(` or `].methodName(`
+        # patterns — those are method-chain calls (often multi-line),
+        # not concat. The negative lookahead `(?!\w+\s*\()` keeps
+        # them as attribute/method access.
+        new_chunk = re.sub(
+            r"([\)\]])(\s+\.\s*|\s*\.\s+)(\w+)(?=\s*[\(\.])",
+            r"\1.\3", new_chunk,
+        )
         new_chunk = re.sub(
             r"([\w\)\]])(\s+\.\s*|\s*\.\s+)(?=[\w'\"])",
             r"\1 + ", new_chunk,
@@ -411,22 +472,224 @@ def _rewrite_string_concat(expr: str) -> str:
     return ''.join(out)
 
 
+def _rewrite_array_literals(s: str) -> str:
+    """Rewrite PHP `array(...)` and `array(k => v)` to Python `[...]`
+    or `{k: v}`. Walks the source with paren-depth tracking so the
+    matching closing `)` is rewritten to `]` (or `}` for assoc
+    arrays) — naive opening-only rewrites leave dangling parens and
+    break every downstream file.
+
+    Mixed-form arrays like Yii validation rules
+    (`['attr', 'validator', 'param' => $val]`) get the LIST shape
+    rather than the DICT shape, since Python dicts can't hold
+    positional entries. The `=>` in the keyed entries stays raw —
+    invalid Python, but a clear porter signal."""
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    in_str: str | None = None
+    # bracket_stack entries: [kind, opener_idx, has_arrow, has_positional,
+    #                         entry_started, last_arrow_pos]
+    bracket_stack: list[list] = []
+
+    def _at_top_comma() -> None:
+        """A `,` at the bracket's depth: if no `=>` was seen in the
+        current entry, this entry is positional."""
+        if bracket_stack:
+            entry = bracket_stack[-1]
+            if not entry[5]:  # no arrow in this entry
+                entry[3] = True  # has_positional
+            entry[5] = False  # reset for next entry
+
+    def _at_arrow() -> None:
+        if bracket_stack:
+            bracket_stack[-1][2] = True
+            bracket_stack[-1][5] = True
+
+    while i < n:
+        ch = s[i]
+        if in_str:
+            out.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out.append(s[i + 1]); i += 2; continue
+            if ch == in_str:
+                in_str = None
+            i += 1; continue
+        if ch in ('"', "'"):
+            in_str = ch; out.append(ch); i += 1; continue
+        # `array(` opener
+        if ch == 'a' and s[i:i + 5] == 'array' \
+                and (i == 0 or not (s[i - 1].isalnum() or s[i - 1] == '_')):
+            j = i + 5
+            while j < n and s[j] in ' \t':
+                j += 1
+            if j < n and s[j] == '(':
+                out.append('[')
+                bracket_stack.append(['[', len(out) - 1, False, False, False, False])
+                i = j + 1
+                continue
+        if ch == '(':
+            bracket_stack.append(['(', -1, False, False, False, False])
+            out.append(ch); i += 1; continue
+        if ch == '[':
+            out.append(ch)
+            bracket_stack.append(['[php', len(out) - 1, False, False, False, False])
+            i += 1; continue
+        if ch == '=' and i + 1 < n and s[i + 1] == '>' \
+                and bracket_stack and bracket_stack[-1][0] in ('[', '[php'):
+            _at_arrow()
+            out.append(':'); i += 2; continue
+        if ch == ',' and bracket_stack and bracket_stack[-1][0] in ('[', '[php'):
+            _at_top_comma()
+            out.append(','); i += 1; continue
+        if ch == ')':
+            if bracket_stack and bracket_stack[-1][0] == '[':
+                _, opener_idx, has_arrow, has_pos, _, _ = bracket_stack.pop()
+                # Pure dict only when ALL entries are key→value.
+                if has_arrow and not has_pos:
+                    out[opener_idx] = '{'
+                    out.append('}')
+                else:
+                    out.append(']')
+            else:
+                if bracket_stack:
+                    bracket_stack.pop()
+                out.append(')')
+            i += 1; continue
+        if ch == ']':
+            if bracket_stack and bracket_stack[-1][0] == '[php':
+                _, opener_idx, has_arrow, has_pos, _, _ = bracket_stack.pop()
+                if has_arrow and not has_pos:
+                    out[opener_idx] = '{'
+                    out.append('}')
+                else:
+                    out.append(']')
+            else:
+                if bracket_stack:
+                    bracket_stack.pop()
+                out.append(']')
+            i += 1; continue
+        out.append(ch); i += 1
+    return ''.join(out)
+
+
+_CAST_TYPES = {
+    'int': 'int', 'integer': 'int', 'long': 'int',
+    'float': 'float', 'double': 'float', 'real': 'float',
+    'string': 'str', 'bool': 'bool', 'boolean': 'bool',
+    'array': 'list', 'object': 'dict',
+}
+
+
+def _rewrite_casts(s: str) -> str:
+    """Rewrite PHP type casts `(int) $x['k']` into Python constructor
+    calls `int(x['k'])`, walking with bracket awareness so the cast
+    argument's full extent (including array indices and method
+    chains) is captured before the closing `)` is appended."""
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    in_str: str | None = None
+    while i < n:
+        ch = s[i]
+        if in_str:
+            out.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out.append(s[i + 1]); i += 2; continue
+            if ch == in_str:
+                in_str = None
+            i += 1; continue
+        if ch in ('"', "'"):
+            in_str = ch; out.append(ch); i += 1; continue
+        # Detect `(type)` — only at expression boundaries (start of
+        # source, after operator/whitespace/`(`/`,`).
+        if ch == '(':
+            m = re.match(
+                r'\(\s*(int|integer|long|float|double|real|string|'
+                r'bool|boolean|array|object)\s*\)', s[i:],
+            )
+            if m and (i == 0 or s[i - 1] in ' \t\n,(=!<>?+*-/'):
+                kind = _CAST_TYPES[m.group(1).lower()]
+                # Consume optional whitespace after `)`
+                j = i + m.end()
+                while j < n and s[j] in ' \t':
+                    j += 1
+                # Capture the cast argument: an identifier optionally
+                # followed by `[...]`/`.x`/`->x`/`(...)` chains.
+                arg_start = j
+                # Collect: word, `(...)`, `[...]`, `.word`, `->word`
+                while j < n:
+                    if s[j] == '$' or s[j].isalnum() or s[j] == '_':
+                        j += 1
+                    elif s[j] == '[':
+                        cp = _balanced_bracket(s, j)
+                        if cp is None:
+                            break
+                        j = cp + 1
+                    elif s[j] == '(':
+                        cp = _balanced_paren(s, j)
+                        if cp is None:
+                            break
+                        j = cp + 1
+                    elif s[j:j + 2] == '->':
+                        j += 2
+                    elif s[j] == '.' and j + 1 < n and \
+                            (s[j + 1].isalnum() or s[j + 1] == '_'):
+                        j += 1
+                    else:
+                        break
+                arg = s[arg_start:j]
+                if arg.strip():
+                    out.append(f'{kind}({arg})')
+                    i = j
+                    continue
+        out.append(ch); i += 1
+    return ''.join(out)
+
+
+def _balanced_bracket(s: str, open_idx: int) -> int | None:
+    """Find matching `]` for `[` at open_idx (string-aware)."""
+    depth = 0
+    in_str: str | None = None
+    i = open_idx
+    while i < len(s):
+        ch = s[i]
+        if in_str:
+            if ch == '\\' and i + 1 < len(s):
+                i += 2; continue
+            if ch == in_str:
+                in_str = None
+            i += 1; continue
+        if ch in ('"', "'"):
+            in_str = ch; i += 1; continue
+        if ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
 def _translate_expr(expr: str) -> str:
     """Translate a single PHP expression into best-effort Python.
 
     Most rewriting is routed through `_apply_to_code` so that string
     literals are preserved verbatim — this is what stops `'1.0'`
     from becoming `'1 + 0'` (the concat rule) or `'!'` from becoming
-    `'not '` (the logical-not rule). The string-concat operator gets
-    a separate string-aware pass because it spans the boundary
-    between code and adjacent string literals."""
+    `'not '` (the logical-not rule). Three rewrites span code/string
+    boundaries and use dedicated string-aware passes:
+    - `_rewrite_array_literals` (needs paren-depth tracking),
+    - `_rewrite_casts` (cast argument may include array indices with
+       string keys: `(string) $foo['k']` → `str(foo['k'])`),
+    - `_rewrite_string_concat` (operator joins code to strings)."""
     if not expr or not expr.strip():
         return expr
-    s = _apply_to_code(expr, _rewrite_code)
+    s = _rewrite_array_literals(expr)
+    s = _rewrite_casts(s)
+    s = _apply_to_code(s, _rewrite_code)
     s = _rewrite_string_concat(s)
-    # Function-call translation runs across string boundaries
-    # (call args may be string literals) but only matches function
-    # names by `_FUNCALL_RE`, which won't match inside quotes.
     s = _translate_function_calls(s)
     return s
 
@@ -619,7 +882,11 @@ def _render_if(src: str, match: re.Match[str], indent: int
     body_span = _balanced_block(src, body_open)
     if body_span is None:
         return pad + '# PORTER: unbalanced if body', close_paren + 1
-    out.append(f'{pad}if {_translate_expr(cond)}:')
+    # Collapse multi-line conditions to single line so the trailing
+    # `:` doesn't end up on its own line (Python rejects bare `:`).
+    cond_one = ' '.join(line.strip() for line in cond.splitlines()
+                        if line.strip())
+    out.append(f'{pad}if {_translate_expr(cond_one)}:')
     inner = _translate_block(src[body_span[0]:body_span[1]], indent + 1)
     out.append(inner if inner.strip() else f'{pad}    pass')
     i = body_span[1] + 1
@@ -648,7 +915,9 @@ def _render_if(src: str, match: re.Match[str], indent: int
             bs = _balanced_block(src, bo)
             if bs is None:
                 break
-            out.append(f'{pad}elif {_translate_expr(cond)}:')
+            cond_one = ' '.join(line.strip() for line in cond.splitlines()
+                                if line.strip())
+            out.append(f'{pad}elif {_translate_expr(cond_one)}:')
             inner = _translate_block(src[bs[0]:bs[1]], indent + 1)
             out.append(inner if inner.strip() else f'{pad}    pass')
             i = bs[1] + 1
@@ -746,7 +1015,10 @@ def _render_while(src: str, match: re.Match[str], indent: int
     close_paren = _balanced_paren(src, open_paren)
     if close_paren is None:
         return pad + '# PORTER: malformed while', match.end()
-    cond = _translate_expr(src[open_paren + 1:close_paren])
+    cond_raw = src[open_paren + 1:close_paren]
+    cond_one = ' '.join(line.strip() for line in cond_raw.splitlines()
+                        if line.strip())
+    cond = _translate_expr(cond_one)
     body_open = src.find('{', close_paren)
     body_span = _balanced_block(src, body_open) if body_open >= 0 else None
     if body_span is None:
@@ -900,10 +1172,14 @@ def _translate_simple_statement(stmt: str) -> str:
         return f'# PORTER: use {rest} — translate to a Python import'
     if re.match(r'^require(_once)?\b|^include(_once)?\b', s):
         return f'# PORTER: {s} — translate to import'
-    # Assignment with `[]` push: `$arr[] = $x` → `arr.append(x)`
-    m = re.match(r'^\$?(\w+)\s*\[\s*\]\s*=\s*(.+)$', s)
+    # Assignment with `[]` push: `$arr[] = $x` → `arr.append(x)`,
+    # also `$obj->arr[] = $x` and `self.arr[] = $x` (after earlier
+    # rewrites turned `$this->` into `self.`).
+    m = re.match(r'^(\$?[\w$]+(?:->[\w$]+|\.[\w]+)*)\s*\[\s*\]\s*=\s*(.+)$',
+                  s)
     if m:
-        return f'{m.group(1)}.append({_translate_expr(m.group(2))})'
+        target = _translate_expr(m.group(1))
+        return f'{target}.append({_translate_expr(m.group(2))})'
     # Chained array assignment: `$arr['key'] = expr`
     m = re.match(r'^\$?(\w+)\s*\[\s*(.+?)\s*\]\s*=\s*(.+)$', s)
     if m and not m.group(2).startswith('['):
@@ -911,6 +1187,12 @@ def _translate_simple_statement(stmt: str) -> str:
         key = _translate_expr(m.group(2))
         val = _translate_expr(m.group(3))
         return f'{var}[{key}] = {val}'
+    # PHP `list($a, $b) = expr` → Python tuple unpack `a, b = expr`.
+    m = re.match(r'^list\s*\(\s*(?P<vars>[^)]+)\)\s*=\s*(?P<rhs>.+)$', s)
+    if m:
+        names = ', '.join(_strip_dollars_outside_strings(v).strip()
+                          for v in m.group('vars').split(','))
+        return f'{names} = {_translate_expr(m.group("rhs"))}'
     # Compound assignment (`.=` already handled in _translate_expr)
     return _translate_expr(s)
 
