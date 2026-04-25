@@ -171,6 +171,30 @@ def seed_liftwp_short():
         license='CC BY-SA 4.0',
         copyright_year='2026',
         copyright_holder='Velour Project',
+        bibliography=r"""
+@book{tufte2001,
+    author    = {Tufte, Edward R.},
+    year      = {2001},
+    title     = {The Visual Display of Quantitative Information},
+    edition   = {2nd},
+    publisher = {Graphics Press},
+    address   = {Cheshire, Connecticut}
+}
+
+@misc{wordpress_handbook,
+    author = {{WordPress.org}},
+    year   = {2024},
+    title  = {Theme Developer Handbook: Template Hierarchy},
+    note   = {https://developer.wordpress.org/themes/basics/template-hierarchy/}
+}
+
+@misc{underscores,
+    author = {{Automattic}},
+    year   = {2013},
+    title  = {Underscores ({\_s}): A Starter Theme for WordPress},
+    note   = {https://underscores.me/}
+}
+""",
     )
 
     upsert_section(m, 'why-liftwp', 0,
@@ -292,7 +316,8 @@ For a typical WP theme, `liftwp` writes four kinds of artifact.
 ### Translated templates
 
 Each PHP template in the theme becomes a Django template at the
-matching path under `templates/<app>/`. Standard names like
+matching path under `templates/<app>/`. The recognised filenames
+follow the WordPress template hierarchy [@wordpress_handbook]:
 `index.php`, `single.php`, `page.php` map to `index.html`,
 `single.html`, `page.html` directly. Partials in `template-parts/`,
 `parts/`, `partials/`, or `templates/` subdirectories preserve their
@@ -675,14 +700,14 @@ isn't. It does not pretend to be smart.
                    'The tested-themes proof', """
 The translator was iterated against every official WordPress default
 theme released in the thirteen years from Twenty Twelve through
-Twenty Twenty-One, plus the Underscores starter template. Every
-theme lifts with zero unhandled fragments. 232 translated templates
-total.
+Twenty Twenty-One, plus the Underscores starter template
+[@underscores]. Every theme lifts with zero unhandled fragments. 232
+translated templates total.
 
-Templates per theme as a bar sparkline, in chronological order
-(Twenty Twelve to Twenty Twenty-One, then Underscores):
-[[spark:20,25,25,15,18,26,19,18,32,14 | bar]] — range 14 to 32,
-median around 19.
+Templates per theme as a bar sparkline [@tufte2001], in
+chronological order (Twenty Twelve to Twenty Twenty-One, then
+Underscores): [[spark:20,25,25,15,18,26,19,18,32,14 | bar]] — range
+14 to 32, median around 19.
 
 | Theme               | Templates | Unhandled |
 |---|---:|---:|
@@ -759,14 +784,57 @@ def seed_datalift_overview():
         license='CC BY-SA 4.0',
         copyright_year='2026',
         copyright_holder='Velour Project',
+        bibliography=r"""
+@article{codd1970,
+    author  = {Codd, E. F.},
+    year    = {1970},
+    title   = {A Relational Model of Data for Large Shared Data Banks},
+    journal = {Communications of the ACM},
+    volume  = {13},
+    number  = {6},
+    pages   = {377-387}
+}
+
+@book{tufte2001,
+    author    = {Tufte, Edward R.},
+    year      = {2001},
+    title     = {The Visual Display of Quantitative Information},
+    edition   = {2nd},
+    publisher = {Graphics Press},
+    address   = {Cheshire, Connecticut}
+}
+
+@book{tufte2006,
+    author    = {Tufte, Edward R.},
+    year      = {2006},
+    title     = {Beautiful Evidence},
+    publisher = {Graphics Press},
+    address   = {Cheshire, Connecticut}
+}
+
+@misc{playwright,
+    author = {{Microsoft Corporation}},
+    year   = {2020},
+    title  = {Playwright: cross-browser end-to-end testing for modern web apps},
+    note   = {https://playwright.dev}
+}
+
+@misc{kroki,
+    author = {Demaret, Yuzutech},
+    year   = {2019},
+    title  = {Kroki: creates diagrams from textual descriptions},
+    note   = {https://kroki.io}
+}
+""",
     )
 
     upsert_section(m, 'what-it-is', 0,
                    'What Datalift is', """
 A Velour app at `/datalift/`. Eight management commands. About 7000
 lines of Python with 258 regression tests covering ten WordPress
-themes, eleven mysqldump dialects, and every fix that ever surfaced
-during a real corpus port.
+themes, eleven mysqldump dialects (each tracing back through nearly
+six decades of relational tradition [@codd1970]), and every fix that
+ever surfaced during a real corpus port.
 
 The promise is narrow: take a `mysqldump` (or PostgreSQL `pg_dump
 --inserts`) plus optionally the legacy site's filesystem tree, and
@@ -849,8 +917,10 @@ manage.py shotdiff before.png after.png --out diff.png
 ```
 
 Steps 1-4 are the data half. Steps 5-7 are the presentation half.
-Step 8 is the verification half. Each step is independent and
-idempotent — re-running step 7 doesn't disturb step 4, and so on.
+Step 8 is the verification half (`browsershot` is backed by
+Playwright [@playwright]; `shotdiff` is backed by Pillow). Each step
+is independent and idempotent — re-running step 7 doesn't disturb
+step 4, and so on.
 """)
 
     upsert_figure(pipeline, 'pipeline', 'mermaid', """flowchart LR
@@ -1311,6 +1381,26 @@ def seed_ingestdump_guide():
         license='CC BY-SA 4.0',
         copyright_year='2026',
         copyright_holder='Velour Project',
+        bibliography=r"""
+@book{tufte2001,
+    author    = {Tufte, Edward R.},
+    year      = {2001},
+    title     = {The Visual Display of Quantitative Information},
+    edition   = {2nd},
+    publisher = {Graphics Press},
+    address   = {Cheshire, Connecticut}
+}
+
+@article{codd1970,
+    author  = {Codd, E. F.},
+    year    = {1970},
+    title   = {A Relational Model of Data for Large Shared Data Banks},
+    journal = {Communications of the ACM},
+    volume  = {13},
+    number  = {6},
+    pages   = {377-387}
+}
+""",
     )
 
     upsert_section(m, 'invocation', 0, 'Invocation', """
@@ -1511,9 +1601,9 @@ levers:
 
 Reference timings (single-thread, SQLite):
 
-Wall time across corpora (seconds, log-shaped scale shown as bars):
-[[spark:0.3,0.6,7,8,72,153 | bar]] — Chinook, Sakila, WordPress,
-MediaWiki, Dolibarr, employees in order.
+Wall time across corpora (seconds, log-shaped scale shown as bars
+[@tufte2001]): [[spark:0.3,0.6,7,8,72,153 | bar]] — Chinook,
+Sakila, WordPress, MediaWiki, Dolibarr, employees in order.
 
 | Dump                  | Tables | Rows  | Wall time |
 |---|---:|---:|---:|
