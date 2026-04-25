@@ -241,7 +241,100 @@ _STMT_RULES: list[tuple[re.Pattern[str], str]] = [
      '{{ archive_title|default:"" }}'),
     (re.compile(r'^single_tag_title\s*\(\s*\)\s*;?\s*$'),
      '{{ archive_title|default:"" }}'),
+
+    # Brace-style control flow (Twenty Sixteen mixes brace + alt). ───
+    # The split_statements pass has separated `if (...) {` from `}`
+    # from the body, so each shows up as its own statement.
+    (re.compile(r'^if\s*\(.*\)\s*\{$'),
+     '{% if False %}{# brace-if condition not translated #}'),
+    (re.compile(r'^elseif\s*\(.*\)\s*\{$'),
+     '{% elif False %}{# brace-elseif condition not translated #}'),
+    (re.compile(r'^else\s*\{$'),
+     '{% else %}'),
+    (re.compile(r'^\}\s*else\s*\{$'),
+     '{% else %}'),
+    (re.compile(r'^\}\s*elseif\s*\(.*\)\s*\{$'),
+     '{% elif False %}{# brace-elseif condition not translated #}'),
+    (re.compile(r'^\}$'),
+     '{% endif %}'),
+    (re.compile(r'^foreach\s*\(.*\)\s*\{$'),
+     '{% for _item in _items %}{# brace-foreach not fully translated #}'),
+    (re.compile(r'^while\s*\(.*\)\s*\{$'),
+     '{% for _item in _items %}{# brace-while not fully translated #}'),
+    (re.compile(r'^return\s*\??$'),
+     '{# return — early-exit dropped in template translation #}'),
+
 ]
+
+
+# Some rules need access to captured groups; handle them in a small
+# parallel table. Each entry: (pattern, callable(match) -> str).
+_STMT_RULES_DYNAMIC: list[tuple[re.Pattern[str], 'callable']] = [
+    (re.compile(r"^get_sidebar\s*\(\s*['\"](?P<n>[\w-]+)['\"]\s*\)\s*;?\s*$"),
+     lambda m: f"{{% include 'wp/sidebar-{m.group('n')}.html' %}}"),
+    (re.compile(r"^get_template_part\s*\(\s*['\"](?P<base>[^'\"]+)['\"]\s*(?:,\s*['\"](?P<suf>[^'\"]+)['\"])?\s*\)\s*;?\s*$"),
+     lambda m: ("{% include 'wp/" + m.group('base')
+                + ('-' + m.group('suf') if m.group('suf') else '')
+                + ".html' %}")),
+    # Generalised alt-syntax control flow: any condition the lifter
+    # can't evaluate becomes a False branch with the original
+    # condition preserved as a comment for the porter.
+    (re.compile(r'^if\s*\((?P<cond>.+)\)\s*:\s*$'),
+     lambda m: '{% if False %}{# alt-if condition: ' +
+               _safe_comment(m.group('cond').strip()) + ' #}'),
+    (re.compile(r'^elseif\s*\((?P<cond>.+)\)\s*:\s*$'),
+     lambda m: '{% elif False %}{# alt-elseif condition: ' +
+               _safe_comment(m.group('cond').strip()) + ' #}'),
+    # echo $var → {{ var }} — variable likely not in template context, but
+    # this is the best we can do without a custom view.
+    (re.compile(r'^echo\s+\$(?P<name>\w+)\s*;?\s*$'),
+     lambda m: '{{ ' + m.group('name') + ' }}'),
+    # echo "literal string"
+    (re.compile(r"^echo\s+(['\"])(?P<text>.*?)(?<!\\)\1\s*;?\s*$"),
+     lambda m: m.group('text')),
+    # echo $var ? 'A' : 'B' → {% if var %}A{% else %}B{% endif %}
+    (re.compile(
+        r"^echo\s+\$(?P<name>\w+)\s*\?\s*"
+        r"(['\"])(?P<a>.*?)(?<!\\)\2\s*:\s*(['\"])(?P<b>.*?)(?<!\\)\4\s*;?\s*$"),
+     lambda m: ('{% if ' + m.group('name') + ' %}'
+                + m.group('a')
+                + ('{% else %}' + m.group('b') if m.group('b') else '')
+                + '{% endif %}')),
+    # echo <ANY-EXPR> ? 'A' : 'B' — a generalised ternary that handles
+    # property access, function calls, and comparisons. We can't
+    # evaluate the LHS, so emit BOTH strings as a comment + the truthy
+    # one (whichever is more likely to be the "default" — the second).
+    (re.compile(
+        r"^echo\s+(?P<lhs>[^?]+?)\?\s*"
+        r"(['\"])(?P<a>.*?)(?<!\\)\2\s*:\s*(['\"])(?P<b>.*?)(?<!\\)\4\s*;?\s*$"),
+     lambda m: ('{# ternary: ' + _safe_comment(m.group('lhs').strip())
+                + " ? '" + m.group('a') + "' : '" + m.group('b') + "' #}"
+                + m.group('a'))),
+    # Alt-syntax while with arbitrary condition.
+    (re.compile(r'^while\s*\((?P<cond>.+)\)\s*:\s*$'),
+     lambda m: '{% for _item in _items %}{# alt-while condition: '
+               + _safe_comment(m.group('cond').strip()) + ' #}'),
+    # PHP increment / decrement — no Django equivalent, drop with a note.
+    (re.compile(r'^(?:\+\+|--)\$\w+\s*$'),
+     lambda m: ''),
+    (re.compile(r'^\$\w+(?:\+\+|--)\s*$'),
+     lambda m: ''),
+    # Concat-assign onto a PHP var — silent skip
+    (re.compile(r'^\$\w+(?:->\w+)?\s*\.=\s*.+$'),
+     lambda m: ''),
+    # Bare object method call — silent skip
+    (re.compile(r'^\$\w+(?:->\w+)+\s*\([^)]*\)\s*$'),
+     lambda m: ''),
+    # $var = ... assignments — silent skip with a porter-facing comment.
+    (re.compile(r'^\$(?P<name>\w+)\s*=\s*(?P<rhs>.+)$'),
+     lambda m: '{# php: $' + m.group('name') + ' = '
+               + _safe_comment(m.group('rhs').strip()[:80]) + ' #}'),
+]
+
+
+def _safe_comment(s: str) -> str:
+    """Escape `#}` so it can't terminate the surrounding Django comment."""
+    return s.replace('#}', '#}}')
 
 # Statements we drop silently (pre-Loop setup that doesn't translate
 # but doesn't need flagging either).
@@ -251,13 +344,19 @@ _DROP_RULES = [
 ]
 
 
-def _translate_php_block(php: str, skipped: list[str]) -> str:
+def _translate_php_block(php: str, skipped: list[str],
+                          theme_prefix: str = '',
+                          theme_funcs: set[str] | None = None) -> str:
     """Translate the body of one <?php ... ?> block."""
+    if theme_funcs is None:
+        theme_funcs = set()
     php = _strip_php_comments(php)
     statements = _split_statements(php)
     out_parts: list[str] = []
-    for stmt in statements:
-        s = stmt.strip()
+    for raw_stmt in statements:
+        # Collapse runs of whitespace inside the statement so multi-line
+        # WP calls match single-line regexes.
+        s = ' '.join(raw_stmt.split())
         if not s:
             continue
         replaced = False
@@ -272,19 +371,410 @@ def _translate_php_block(php: str, skipped: list[str]) -> str:
                 out_parts.append(repl)
                 replaced = True
                 break
-        if not replaced:
-            skipped.append(s)
-            out_parts.append('{# WP-LIFT? ' + s.replace('#}', '#}}') + ' #}')
+        if replaced:
+            continue
+        for pat, fn in _STMT_RULES_DYNAMIC:
+            m = pat.match(s)
+            if m:
+                out_parts.append(fn(m))
+                replaced = True
+                break
+        if replaced:
+            continue
+        # Function-name dispatch — handles tags with arbitrary arg lists
+        # by ignoring the parenthesised payload.
+        translated = _translate_call(s, skipped, theme_prefix, theme_funcs)
+        if translated is not None:
+            out_parts.append(translated)
+            continue
+        skipped.append(s)
+        out_parts.append('{# WP-LIFT? ' + s.replace('#}', '#}}') + ' #}')
     return ''.join(out_parts)
+
+
+# ── Function-name dispatch (tolerates any arg payload) ─────────────
+
+_CALL_HEAD = re.compile(r'^(?:echo\s+)?(\w+)\s*\(')
+
+# Tag functions where the arg list is formatting hints we ignore;
+# the basic Django output is sufficient.
+_FUNC_RULES = {
+    'the_archive_title':         '{{ archive_title|default:"Archive" }}',
+    'the_archive_description':   '{{ archive_description|default:"" }}',
+    'single_cat_title':          '{{ archive_title|default:"" }}',
+    'single_tag_title':          '{{ archive_title|default:"" }}',
+    'the_title':                 '{{ post.post_title }}',
+    'the_content':               '{{ post.post_content|safe }}',
+    'the_excerpt':               '{{ post.post_excerpt }}',
+    'the_ID':                    '{{ post.id }}',
+    'the_permalink':             '{{ post.permalink }}',
+    'the_date':                  '{{ post.post_date|date:"F j, Y" }}',
+    'the_time':                  '{{ post.post_date|date:"g:i a" }}',
+    'the_author':                '{{ post.author_obj.display_name|default:"Anonymous" }}',
+    'the_category':              '{{ post.categories_html|safe }}',
+    'the_tags':                  '{{ post.tags_html|safe }}',
+    'the_post_thumbnail':        '{# the_post_thumbnail — manual port if you use featured images #}',
+    'post_class':                'class="post"',
+    'body_class':                'class="wp"',
+    'language_attributes':       'lang="en"',
+    'wp_head':                   '{% block extra_head %}{% endblock %}',
+    'wp_footer':                 '{% block extra_foot %}{% endblock %}',
+    'wp_link_pages':             '{# wp_link_pages — multi-page posts not lifted #}',
+    'the_posts_pagination':      "{% include 'wp/pagination.html' %}",
+    'the_comments_navigation':   "{% include 'wp/pagination.html' %}",
+    'next_posts_link':           '{% if posts.has_next %}<a class="next" href="?page={{ posts.next_page_number }}">Older posts &rarr;</a>{% endif %}',
+    'previous_posts_link':       '{% if posts.has_previous %}<a class="prev" href="?page={{ posts.previous_page_number }}">&larr; Newer posts</a>{% endif %}',
+    'posts_nav_link':            "{% include 'wp/pagination.html' %}",
+    'paginate_links':            "{% include 'wp/pagination.html' %}",
+    'wp_list_comments':          "{% for c in post.comments_list %}{% include 'wp/comment.html' %}{% endfor %}",
+    'comments_number':           '{{ post.comments_list|length }}',
+    'comment_author':            '{{ c.comment_author }}',
+    'comment_text':              '{{ c.comment_content|safe }}',
+    'comment_date':              '{{ c.comment_date|date:"F j, Y" }}',
+    'comment_time':              '{{ c.comment_date|date:"g:i a" }}',
+    'comment_form':              '{# comment_form() — submission not in Phase 2 #}',
+    'edit_comment_link':         '',
+    'wp_nav_menu':               '{# wp_nav_menu — register nav menu support manually #}',
+    'do_action':                 '',
+    'wp_register':               '',
+    'wp_loginout':               '',
+    'wp_meta':                   '',
+    'get_calendar':              '{# get_calendar() — not implemented #}',
+    # Boolean predicates — return false unless explicitly handled.
+    'has_nav_menu':              'false',
+    'is_singular':               'false',
+    'is_archive':                'false',
+    'is_page':                   'false',
+    'is_home':                   'false',
+    'is_front_page':             'false',
+    'is_search':                 'false',
+    'is_paged':                  'false',
+    'is_active_sidebar':         'false',
+    'is_customize_preview':      'false',
+    'is_admin':                  'false',
+    'pings_open':                'false',
+    'post_password_required':    'false',
+    'function_exists':           'false',
+    'is_user_logged_in':         'false',
+    'current_user_can':          'false',
+    'comments_open':             'false',
+    'get_header_image':          'false',
+    'has_post_thumbnail':        'false',
+    # Sidebar / widget plumbing — silent skip
+    'dynamic_sidebar':           '{# dynamic_sidebar — register widget areas manually #}',
+    # Hooks / filters — silent skip
+    'apply_filters':             '{# apply_filters — hook ignored #}',
+    'wp_body_open':              '',
+    # Theme-utility tags
+    'wp_title':                  '{{ blog_name }}',
+    'single_post_title':         '{{ post.post_title|default:blog_name }}',
+    'get_search_query':          '{{ search_query }}',
+    'get_comments_number':       '{{ post.comments_list|length }}',
+    'the_post_navigation':       "{# the_post_navigation — manual port #}",
+    'the_posts_navigation':      "{% include 'wp/pagination.html' %}",
+    'the_header_image_tag':      '{# the_header_image_tag — manual port #}',
+    'get_avatar':                '{# get_avatar — manual port #}',
+    'get_the_author':            '{{ post.author_obj.display_name|default:"Anonymous" }}',
+    'get_the_author_meta':       '{{ post.author_obj.user_email }}',
+    'the_author_meta':           '{{ post.author_obj.user_email }}',
+    'get_post_format':           "''",
+    'get_post_type':             "''",
+    'get_post_type_object':      "''",
+    'get_queried_object':        "''",
+    'get_queried_object_id':     "''",
+    'edit_post_link':            '',
+    'edit_comment_link':         '',
+    'the_privacy_policy_link':   '',
+    'post_type_supports':        'false',
+    'number_format_i18n':        '{{ value }}',
+    # Boolean-ish info that returns content when echoed
+    'home_url':                  "{% url 'wp_index' %}",
+    'site_url':                  "{% url 'wp_index' %}",
+    'get_stylesheet_uri':        "{% static 'wp/style.css' %}",
+    'get_template_directory_uri':"{% static 'wp' %}",
+    'get_bloginfo':              '',  # handled by bloginfo regex; rare echo form
+    # Widgets / list helpers — manual port
+    'the_widget':                '{# the_widget — manual port #}',
+    'wp_list_categories':        '{# wp_list_categories — manual port #}',
+    'wp_list_pages':             '{# wp_list_pages — manual port #}',
+    'wp_list_authors':           '{# wp_list_authors — manual port #}',
+    'wp_list_bookmarks':         '{# wp_list_bookmarks — manual port #}',
+    'get_archives':              '{# get_archives — manual port #}',
+    'wp_get_archives':           '{# wp_get_archives — manual port #}',
+    'the_custom_logo':           '{# the_custom_logo — manual port #}',
+    'has_custom_logo':           'false',
+    'get_custom_logo':           '',
+    'get_search_form':           "{% include 'wp/searchform.html' %}",
+    # Pagination cousins
+    'the_comments_pagination':   "{% include 'wp/pagination.html' %}",
+    'previous_comments_link':    '{% if post.comments_list %}<a class="prev" href="?cpage={{ comment_page|add:-1 }}">&larr; Older comments</a>{% endif %}',
+    'next_comments_link':        '{% if post.comments_list %}<a class="next" href="?cpage={{ comment_page|add:1 }}">Newer comments &rarr;</a>{% endif %}',
+    'comments_popup_link':       '{# comments_popup_link — manual port #}',
+    # Get-the-X family
+    'get_the_post_thumbnail':    '',
+    'get_the_date':              '{{ post.post_date|date:"F j, Y" }}',
+    'get_the_time':              '{{ post.post_date|date:"g:i a" }}',
+    'get_the_title':             '{{ post.post_title }}',
+    'get_the_excerpt':           '{{ post.post_excerpt }}',
+    'get_the_author_link':       '{{ post.author_obj.display_name|default:"Anonymous" }}',
+    'get_the_category_list':     '{{ post.categories_html|safe }}',
+    'get_the_tag_list':          '{{ post.tags_html|safe }}',
+    'get_the_terms':             '',
+    'get_the_ID':                '{{ post.id }}',
+    'get_the_permalink':         "{{ post.permalink }}",
+    'get_permalink':             "{{ post.permalink }}",
+    'get_the_content':           '{{ post.post_content|safe }}',
+    'get_post_format':           "''",
+    'get_post_format_string':    '',
+    'get_post_gallery':          '',
+    'category_description':      '{{ archive_description|default:"" }}',
+    'tag_description':           '{{ archive_description|default:"" }}',
+    'term_description':          '{{ archive_description|default:"" }}',
+    'wp_date':                   '{{ now|date:"F j, Y" }}',
+    'date_i18n':                 '{{ now|date:"F j, Y" }}',
+    'wp_reset_postdata':         '',
+    'wp_reset_query':            '',
+    'rewind_posts':              '',
+    'is_page_template':          'false',
+    'is_sticky':                 'false',
+    'is_attachment':             'false',
+    'is_tax':                    'false',
+    'is_tag':                    'false',
+    'is_category':               'false',
+    'is_404':                    'false',
+    'is_rtl':                    'false',
+    'is_main_query':             'true',
+    'has_excerpt':               'false',
+    'is_multi_author':           'false',
+    'comments_link':             "{{ post.permalink }}#comments",
+    'get_comments_link':         "{{ post.permalink }}#comments",
+    'get_avatar_url':            "''",
+    'wp_get_attachment_image':   '',
+    'wp_get_attachment_url':     "''",
+    'wp_get_attachment_link':    '',
+    'the_custom_header_markup':  '{# the_custom_header_markup — manual port #}',
+    'header_image':              "''",
+    'wp_body_open':              '',
+    'get_template_directory':    "''",
+    'get_stylesheet_directory':  "''",
+    'get_theme_mod':             "''",
+    'get_option':                "''",
+    'set_query_var':             '',
+    'wp_nonce_field':            '',
+    'wp_create_nonce':           "''",
+    'admin_url':                 "''",
+    # Comments + post-nav variants with arg lists
+    'comments_template':         "{% include 'wp/comments.html' %}",
+    'previous_post_link':        '{# previous_post_link — manual port #}',
+    'next_post_link':            '{# next_post_link — manual port #}',
+    'the_post_thumbnail_url':    "''",
+}
+
+# String-returning translation functions: drop wrapper, keep first arg
+_I18N_FUNCS = {
+    # echo-translate family
+    '_e', '_ex', 'esc_attr_e', 'esc_html_e', 'esc_attr_x', 'esc_html_x',
+    # return-translate family
+    '__', '_x', '_n', '_nx',
+    'esc_html__', 'esc_attr__', 'esc_url__',
+    'esc_html_x', 'esc_attr_x',
+    'translate', 'translate_with_gettext_context',
+    # escape family
+    'esc_html', 'esc_attr', 'esc_url', 'esc_url_raw', 'esc_textarea',
+    'esc_js', 'esc_xml',
+    # sanitize family
+    'wp_kses_post', 'wp_kses_data', 'wp_kses',
+    'sanitize_text_field', 'sanitize_html_class', 'sanitize_title',
+    # type coercion
+    'absint', 'intval', 'strval', 'floatval',
+    # other passthroughs
+    'antispambot',
+}
+
+_FIRST_STRING = re.compile(r"\s*(['\"])(.*?)(?<!\\)\1")
+
+
+def _translate_call(stmt: str, skipped: list[str],
+                     theme_prefix: str = '',
+                     theme_funcs: set[str] | None = None) -> str | None:
+    if theme_funcs is None:
+        theme_funcs = set()
+    m = _CALL_HEAD.match(stmt)
+    if not m:
+        return None
+    name = m.group(1)
+
+    if name in _I18N_FUNCS:
+        body = stmt[m.end():].rstrip(';)').rstrip()
+        sm = _FIRST_STRING.match(body)
+        if sm:
+            return _html_escape_literal(sm.group(2))
+        return _translate_call(body.strip(), skipped, theme_prefix, theme_funcs) or ''
+
+    if name == 'printf':
+        return _translate_printf(stmt[m.end():], skipped, theme_prefix, theme_funcs)
+
+    if name == 'get_template_part':
+        return _translate_get_template_part(stmt[m.end():])
+
+    if name in _FUNC_RULES:
+        return _FUNC_RULES[name]
+
+    # Theme-defined function (scanned from theme's inc/ + functions.php).
+    # Authoritative — beats the prefix heuristic.
+    if name in theme_funcs:
+        return '{# theme function ' + name + '() — port manually #}'
+
+    # Prefix heuristic fallback (theme dir name). Catches functions in
+    # themes whose inc/ wasn't scannable for whatever reason.
+    if theme_prefix and name.startswith(theme_prefix + '_'):
+        return '{# theme function ' + name + '() — port manually #}'
+
+    return None
+
+
+def _translate_printf(args: str, skipped: list[str],
+                       theme_prefix: str,
+                       theme_funcs: set[str] | None = None) -> str | None:
+    if theme_funcs is None:
+        theme_funcs = set()
+    """``printf("Search Results for: %s", get_search_query())`` →
+    ``Search Results for: {{ search_query }}``.
+    Best-effort: only handles printf with a literal-or-i18n format string
+    and one or more simple %s/%d substitutions filled by translatable calls.
+    """
+    body = args.strip()
+    # Strip outer trailing `);`
+    body = body.rstrip(';').rstrip()
+    if body.endswith(')'):
+        body = body[:-1]
+    # Split top-level commas — same depth/string awareness as _split_statements.
+    parts = _split_top_level_commas(body)
+    if not parts:
+        return None
+    fmt_raw = parts[0].strip()
+    # Resolve the format string: literal, or wrapped in __('...', 'domain') / _x(...)
+    fmt = _extract_literal_or_i18n_string(fmt_raw)
+    if fmt is None:
+        return None
+    rest = parts[1:]
+    # Translate each %s/%d placeholder to its corresponding arg.
+    placeholder = re.compile(r'%(?:\d+\$)?[sdif]')
+    out: list[str] = []
+    last = 0
+    arg_index = 0
+    for m in placeholder.finditer(fmt):
+        out.append(fmt[last:m.start()])
+        if arg_index < len(rest):
+            arg = rest[arg_index].strip()
+            # String literal — emit verbatim
+            sm = _FIRST_STRING.match(arg)
+            if sm and sm.end() == len(arg):
+                out.append(sm.group(2))
+            else:
+                translated = _translate_call(arg, skipped, theme_prefix, theme_funcs)
+                out.append(translated if translated is not None else '{# ' + arg + ' #}')
+        arg_index += 1
+        last = m.end()
+    out.append(fmt[last:])
+    return ''.join(out)
+
+
+def _split_top_level_commas(body: str) -> list[str]:
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    in_str: str | None = None
+    i = 0
+    while i < len(body):
+        ch = body[i]
+        if in_str:
+            buf.append(ch)
+            if ch == '\\' and i + 1 < len(body):
+                buf.append(body[i + 1])
+                i += 2
+                continue
+            if ch == in_str:
+                in_str = None
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == '(':
+            depth += 1
+            buf.append(ch)
+        elif ch == ')':
+            depth -= 1
+            buf.append(ch)
+        elif ch == ',' and depth == 0:
+            parts.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if buf:
+        parts.append(''.join(buf))
+    return parts
+
+
+def _extract_literal_or_i18n_string(expr: str) -> str | None:
+    """Pull a string out of nested i18n/escape wrappers.
+
+    ``'foo'`` → ``foo``
+    ``__('foo', 'domain')`` → ``foo``
+    ``esc_html(_nx('singular', 'plural', $n, 'ctx', 'domain'))`` → ``singular``
+    """
+    expr = expr.strip()
+    while True:
+        sm = _FIRST_STRING.match(expr)
+        if sm:
+            return sm.group(2)
+        m = _CALL_HEAD.match(expr)
+        if not m or m.group(1) not in _I18N_FUNCS:
+            return None
+        expr = expr[m.end():].lstrip()
+
+
+def _html_escape_literal(s: str) -> str:
+    """Escape an i18n literal that's about to land in HTML."""
+    # The literal might already contain HTML entities (&ldquo; etc.) — pass
+    # those through. Just mark it safe-ish.
+    return s
+
+
+_GET_TEMPLATE_PART = re.compile(
+    r"\s*(['\"])(?P<base>[^'\"]+)\1\s*(?:,\s*(['\"])(?P<suffix>[^'\"]+)\3)?",
+)
+
+
+def _translate_get_template_part(args: str) -> str:
+    """``get_template_part('template-parts/content', 'single')`` →
+    ``{% include 'wp/template-parts/content-single.html' %}``.
+    A non-literal suffix degrades to the no-suffix include.
+    """
+    m = _GET_TEMPLATE_PART.match(args)
+    if not m:
+        return None  # type: ignore[return-value]
+    base = m.group('base')
+    suffix = m.group('suffix')
+    if suffix:
+        path = f'wp/{base}-{suffix}.html'
+    else:
+        path = f'wp/{base}.html'
+    return "{% include '" + path + "' %}"
 
 
 def _split_statements(php: str) -> list[str]:
     """Split PHP source into top-level statements.
 
-    Statements end at ``;`` or at colons that follow control-flow
-    keywords (``if (...) :``, ``while (...) :``, ``else :``). We
-    track paren depth so that ``;`` inside ``for (;;)`` doesn't fool
-    us, and string state so that ``;`` inside ``"abc;"`` doesn't.
+    Splits at ``;``, at ``:`` after control-flow keywords (alt syntax:
+    ``if (...) :`` ... ``endif;``), and at top-level ``{`` / ``}``
+    so that brace-style ``if (...) { ... }`` blocks are translatable
+    statement-by-statement. Tracks paren depth and string state so
+    that ``;`` inside ``"abc;"`` or ``for (;;)`` doesn't split.
     """
     out: list[str] = []
     buf: list[str] = []
@@ -321,6 +811,25 @@ def _split_statements(php: str) -> list[str]:
             buf.append(ch)
             out.append(''.join(buf))
             buf = []
+        elif ch == '{' and depth == 0:
+            buf.append(ch)
+            out.append(''.join(buf))
+            buf = []
+        elif ch == '}' and depth == 0:
+            # Lookahead: keep `}` glued to a following `else`/`elseif` so
+            # the brace-style if/elif/else chain stays in one statement
+            # ("} else {" / "} elseif (...) {").
+            rest = php[i + 1:]
+            stripped = rest.lstrip()
+            if stripped.startswith(('else ', 'else{', 'else\n', 'else\t',
+                                     'elseif ', 'elseif(', 'elseif\n',
+                                     'elseif\t')):
+                buf.append(ch)
+            else:
+                if buf and ''.join(buf).strip():
+                    out.append(''.join(buf))
+                out.append('}')
+                buf = []
         else:
             buf.append(ch)
         i += 1
@@ -339,11 +848,15 @@ def _looks_like_alt_control(buf: list[str]) -> bool:
 
 # ── Top-level: translate one .php file into one .html ──────────────
 
-def translate_template(php_source: str) -> tuple[str, list[str]]:
+def translate_template(php_source: str,
+                       theme_prefix: str = '',
+                       theme_funcs: set[str] | None = None) -> tuple[str, list[str]]:
     """Translate one PHP theme file → (django html, skipped statements)."""
     skipped: list[str] = []
     out: list[str] = []
     pos = 0
+    if theme_funcs is None:
+        theme_funcs = set()
     while True:
         m_open = _PHP_OPEN.search(php_source, pos)
         if not m_open:
@@ -354,15 +867,15 @@ def translate_template(php_source: str) -> tuple[str, list[str]]:
         is_short_echo = php_source[m_open.start():m_open.end()] == '<?='
         m_close = _PHP_CLOSE.search(php_source, m_open.end())
         if not m_close:
-            # Unterminated PHP block — leave as a marker, stop.
-            tail = php_source[m_open.start():]
-            skipped.append(tail.strip()[:120])
-            out.append('{# WP-LIFT? unterminated PHP block #}')
+            block = php_source[m_open.end():]
+            if is_short_echo:
+                block = 'echo ' + block.strip().rstrip(';') + ';'
+            out.append(_translate_php_block(block, skipped, theme_prefix, theme_funcs))
             break
         block = php_source[m_open.end():m_close.start()]
         if is_short_echo:
             block = 'echo ' + block.strip().rstrip(';') + ';'
-        out.append(_translate_php_block(block, skipped))
+        out.append(_translate_php_block(block, skipped, theme_prefix, theme_funcs))
         pos = m_close.end()
     body = ''.join(out)
     # Any template that uses {% static %} needs the static loader.
@@ -378,12 +891,116 @@ _STATIC_ASSET_EXTS = {
     '.ico', '.woff', '.woff2', '.ttf', '.otf', '.eot',
 }
 
+# Subdirectories whose .php files are PHP CODE, not templates.
+_CODE_DIR_PARTS = {'inc', 'includes', 'lib', 'vendor', 'src', 'classes'}
 
-def parse_theme(theme_dir: Path) -> LiftResult:
-    """Walk a WordPress theme directory and translate every standard file."""
+# Subdirectories whose .php files are explicitly templates/partials.
+_PARTIAL_DIR_PARTS = {'template-parts', 'parts', 'partials', 'templates'}
+
+# WP template-hierarchy filename patterns at the theme root.
+_TEMPLATE_HIERARCHY_PATTERNS = [
+    re.compile(r'^single-[\w-]+\.php$'),
+    re.compile(r'^archive-[\w-]+\.php$'),
+    re.compile(r'^category-[\w-]+\.php$'),
+    re.compile(r'^tag-[\w-]+\.php$'),
+    re.compile(r'^page-[\w-]+\.php$'),
+    re.compile(r'^taxonomy-[\w-]+\.php$'),
+    re.compile(r'^author-[\w-]+\.php$'),
+    re.compile(r'^date-[\w-]+\.php$'),
+    re.compile(r'^header-[\w-]+\.php$'),
+    re.compile(r'^footer-[\w-]+\.php$'),
+    re.compile(r'^sidebar-[\w-]+\.php$'),
+    re.compile(r'^content-[\w-]+\.php$'),
+]
+
+
+def _is_template_file(rel: Path) -> bool:
+    """True if rel looks like a WP template/partial, not PHP code."""
+    name = rel.name
+    if name in _THEME_FILE_TARGETS:
+        return True
+    parents = set(rel.parts[:-1])
+    if parents & _CODE_DIR_PARTS:
+        return False
+    if parents & _PARTIAL_DIR_PARTS:
+        return True
+    if name == 'functions.php' or name.endswith(('.functions.php',
+                                                  '-functions.php')):
+        return False
+    if name.startswith('class-'):
+        return False
+    if rel.parent != Path('.'):
+        # Some other subdir we don't recognize → treat as code (safer).
+        return False
+    return any(p.match(name) for p in _TEMPLATE_HIERARCHY_PATTERNS)
+
+
+def _partial_target_name(rel: Path) -> str:
+    """``template-parts/content-single.php`` → ``template-parts/content-single.html``"""
+    return str(rel.with_suffix('.html'))
+
+
+_THEME_PREFIX_RE = re.compile(r'[^a-z0-9]+')
+_PHP_FUNC_DEF = re.compile(r'function\s+(\w+)\s*\(')
+
+
+def _derive_theme_prefix(theme_dir: Path) -> str:
+    """Auto-derive a theme prefix from the directory name.
+
+    ``twentysixteen`` → ``twentysixteen``; ``my-cool-theme`` → ``my_cool_theme``.
+    Used to silently skip ``themename_*`` function calls that we know are
+    theme-internal helpers (defined in inc/ or functions.php).
+    """
+    return _THEME_PREFIX_RE.sub('_', theme_dir.name.lower()).strip('_')
+
+
+def _scan_theme_functions(theme_dir: Path) -> set[str]:
+    """Collect function names defined in the theme's PHP code paths.
+
+    Far more precise than prefix-matching: a theme like Twenty Twenty-One
+    lives in dir ``twentytwentyone`` but defines ``twenty_twenty_one_*``
+    functions, which prefix-match would miss. Reading the actual
+    ``inc/`` / ``functions.php`` PHP gives the truth.
+    """
+    names: set[str] = set()
+    candidates: list[Path] = []
+    for d in ('inc', 'includes', 'lib', 'src', 'classes'):
+        sub = theme_dir / d
+        if sub.is_dir():
+            candidates.extend(sub.rglob('*.php'))
+    fn = theme_dir / 'functions.php'
+    if fn.is_file():
+        candidates.append(fn)
+    for path in candidates:
+        try:
+            txt = path.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
+        names.update(_PHP_FUNC_DEF.findall(txt))
+    return names
+
+
+def parse_theme(theme_dir: Path,
+                theme_prefix: str | None = None,
+                theme_funcs: set[str] | None = None) -> LiftResult:
+    """Walk a WordPress theme directory and translate every PHP file
+    that looks like a template (skipping recognized PHP-code files).
+
+    ``theme_prefix`` defaults to a sanitised version of the directory
+    name; any function call ``<prefix>_<name>(...)`` is quietly marked
+    as theme-internal.
+
+    ``theme_funcs`` defaults to function names actually defined in the
+    theme's ``inc/`` / ``functions.php`` — far more precise than the
+    prefix heuristic. Both sets are checked.
+    """
     result = LiftResult()
     if not theme_dir.is_dir():
         return result
+    if theme_prefix is None:
+        theme_prefix = _derive_theme_prefix(theme_dir)
+    if theme_funcs is None:
+        theme_funcs = _scan_theme_functions(theme_dir)
     for path in sorted(theme_dir.rglob('*')):
         if not path.is_file():
             continue
@@ -393,19 +1010,27 @@ def parse_theme(theme_dir: Path) -> LiftResult:
         if ext in _STATIC_ASSET_EXTS:
             result.static_assets.append(rel)
             continue
+        if ext not in {'.php', '.phtml'}:
+            continue
+        if not _is_template_file(rel):
+            result.unhandled_files.append(rel)
+            continue
         if name in _THEME_FILE_TARGETS:
             target_name, view_name = _THEME_FILE_TARGETS[name]
-            php = path.read_text(encoding='utf-8', errors='replace')
-            body, skipped = translate_template(php)
-            result.records.append(TemplateRecord(
-                source=rel,
-                target_name=target_name,
-                view_name=view_name,
-                body=body,
-                skipped=skipped,
-            ))
-        elif ext in {'.php', '.phtml'}:
-            result.unhandled_files.append(rel)
+        else:
+            target_name = _partial_target_name(rel)
+            view_name = None
+        php = path.read_text(encoding='utf-8', errors='replace')
+        body, skipped = translate_template(
+            php, theme_prefix=theme_prefix, theme_funcs=theme_funcs,
+        )
+        result.records.append(TemplateRecord(
+            source=rel,
+            target_name=target_name,
+            view_name=view_name,
+            body=body,
+            skipped=skipped,
+        ))
     return result
 
 
@@ -788,6 +1413,7 @@ def apply(result: LiftResult, project_root: Path, app_label: str,
     for rec in result.records:
         target = templates_dir / rec.target_name
         if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(rec.body, encoding='utf-8')
         log.append(f'template  {rec.source} → {target.relative_to(project_root)}')
 

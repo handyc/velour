@@ -49,6 +49,7 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
 | `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
+| `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
 
 ## `genmodels` — what it infers
@@ -279,22 +280,66 @@ urlpatterns = [
 ]
 ```
 
-## `browsershot` — visual verification of lifted sites
+## `browsershot` + `shotdiff` — visual verification of lifted sites
 
-Headless-browser PNG screenshot of any URL, useful for visually
-diffing the original site against the datalifted port:
+Headless-browser PNG screenshot of any URL, then a Pillow-driven
+overlay diff so you can see at a glance where the lifted site
+differs from the original:
 
 ```bash
 python manage.py browsershot https://legacy-site.example/post/42 \
     --out /tmp/before.png
 python manage.py browsershot http://127.0.0.1:7778/post/42/ \
     --out /tmp/after.png
-# compare the two PNGs by eye, or pipe through ImageMagick `compare`
+python manage.py shotdiff /tmp/before.png /tmp/after.png \
+    --out /tmp/diff.png
 ```
 
-Backed by Playwright + Chromium (already in the venv). Returns a
-full-page PNG by default; `--viewport-only` truncates to the
-first 1280×800. See `:mod:datalift.browsershot` for the Python API.
+`shotdiff` reports the percentage of pixels above the per-channel
+threshold (default 16) and writes an overlay PNG: `after` is shown
+desaturated with diff regions painted bright red.
+
+`browsershot` is backed by Playwright + Chromium (already in the
+venv); `shotdiff` is backed by Pillow. See `:mod:datalift.browsershot`
+for the Python API.
+
+## Coverage proof: 10 default WP themes, 0 unhandled fragments
+
+`liftwp` was iterated against the 10 official WordPress default
+themes spanning 13 years (Twenty Twelve through Twenty Twenty-One)
+plus the Underscores starter template. Every theme lifts to a
+fully-translated set of Django templates with **0 unhandled PHP
+fragments** — 232 templates total. The 24-test
+`Phase3RealWorldTranslationTests` suite pins each pattern surfaced
+during that iteration so it can't regress:
+
+* Brace-style `if (foo) { ... } elseif (bar) { ... } else { ... }`
+  (no `:`/`endif;`)
+* `} elseif (X) {` keeps the chain in one statement (lookahead in
+  the splitter)
+* Generalised alt-syntax `if (...) :` / `elseif (...) :` that
+  defaults to `{% if False %}` with the original condition preserved
+  as a comment
+* `while ($x->have_posts()) :` and other alt-while with arbitrary
+  conditions
+* Ternary: `echo $var ? 'A' : 'B'` (specific) and
+  `echo <any-expr> ? 'A' : 'B'` (general — emits comment + truthy)
+* `++$i` / `--$i` and `$x .= 'foo'` — silent skip
+* `$var = ...` — porter-facing comment
+* `echo $var` → `{{ var }}`, `echo "literal"` → `literal`
+* `get_template_part('a/b', 'c')` → `{% include 'wp/a/b-c.html' %}`
+* `get_sidebar('content-bottom')` → `{% include 'wp/sidebar-content-bottom.html' %}`
+* `printf(__('text %s'), expr)` — best-effort substitution
+* Nested i18n `esc_html(_nx(...))` — recursive string extraction
+* `<?php` at end-of-file with no `?>` close tag (WP convention)
+* `template-parts/*.php` translated as partials at
+  `templates/<app>/template-parts/*.html`
+* `inc/`, `includes/`, `lib/` etc. recognised as PHP-code dirs and
+  flagged unhandled
+* Theme-internal functions: `parse_theme()` scans `inc/` +
+  `functions.php` for `function name()` definitions and treats any
+  call to one as a quiet `{# theme function #}` marker rather than
+  worklist noise. Falls back to a directory-name prefix heuristic.
 
 ## Running the tests
 
@@ -302,7 +347,7 @@ first 1280×800. See `:mod:datalift.browsershot` for the Python API.
 venv/bin/python manage.py test datalift.tests
 ```
 
-232 tests, ~30 ms. Every corpus-level bug we've fixed has a
+258 tests, ~30 ms. Every corpus-level bug we've fixed has a
 named regression here.
 
 ## Known limits

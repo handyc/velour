@@ -130,11 +130,13 @@ class TranslateTemplateTests(SimpleTestCase):
         self.assertIn('{{ post.post_title }}', out)
         self.assertEqual(skipped, [])
 
-    def test_unterminated_php_block(self):
-        php = '<h1>oops<?php the_title()'
+    def test_php_at_eof_translates_without_closing_tag(self):
+        """WP themes conventionally drop the trailing ?> so the file ends
+        with PHP code. We translate that tail as a normal PHP block."""
+        php = '<h1>hi</h1><?php the_title();'
         out, skipped = translate_template(php)
-        self.assertIn('{# WP-LIFT?', out)
-        self.assertEqual(len(skipped), 1)
+        self.assertIn('{{ post.post_title }}', out)
+        self.assertEqual(skipped, [])
 
     def test_static_loader_auto_prepended(self):
         php = '<link rel="stylesheet" href="<?php echo get_stylesheet_uri(); ?>">'
@@ -346,6 +348,198 @@ class DefaultPartialsTests(SimpleTestCase):
         # The {% url ... as ... %} form does NOT raise NoReverseMatch.
         self.assertIn("{% url 'wp_search' as wp_search_url %}", body)
         self.assertIn("wp_search_url|default:'/'", body)
+
+
+class Phase3RealWorldTranslationTests(SimpleTestCase):
+    """Patterns surfaced by lifting 10 official WP themes in one session.
+    Each test pins a specific surfaced pattern so it can't regress."""
+
+    def test_brace_style_if_else_chain(self):
+        php = '<?php if ( foo() ) { echo "a"; } else { echo "b"; } ?>'
+        out, _ = translate_template(php)
+        self.assertIn('{% if False %}', out)
+        self.assertIn('{% else %}', out)
+        self.assertIn('{% endif %}', out)
+
+    def test_brace_style_endif_then_elseif_stays_one_statement(self):
+        """Splitting `} elseif (X) {` into two would break the if/elif chain."""
+        php = '<?php if ( a() ) { echo "1"; } elseif ( b() ) { echo "2"; } ?>'
+        out, _ = translate_template(php)
+        self.assertEqual(out.count('{% if False %}'), 1)
+        self.assertEqual(out.count('{% elif False %}'), 1)
+        self.assertEqual(out.count('{% endif %}'), 1)
+
+    def test_alt_if_with_complex_condition(self):
+        php = "<?php if ( has_nav_menu( 'primary' ) || has_nav_menu( 'social' ) ) : ?>shown<?php endif; ?>"
+        out, _ = translate_template(php)
+        self.assertIn('{% if False %}', out)
+        self.assertIn('alt-if condition', out)
+
+    def test_alt_while_with_object_method(self):
+        php = '<?php while ( $recent_posts->have_posts() ) : ?>x<?php endwhile; ?>'
+        out, _ = translate_template(php)
+        self.assertIn('{% for _item in _items %}', out)
+        self.assertIn('{% endfor %}', out)
+
+    def test_ternary_string_literal(self):
+        php = """<?php echo $is_front ? 'aria-current="page"' : ''; ?>"""
+        out, _ = translate_template(php)
+        self.assertIn('{% if is_front %}', out)
+        self.assertIn('aria-current="page"', out)
+        self.assertIn('{% endif %}', out)
+
+    def test_general_ternary_with_function_lhs(self):
+        """``echo get_option('show_avatars') ? 'show-avatars' : ''``"""
+        php = """<?php echo get_option( 'show_avatars' ) ? 'show-avatars' : ''; ?>"""
+        out, _ = translate_template(php)
+        self.assertIn('show-avatars', out)
+        self.assertIn('ternary:', out)
+
+    def test_general_ternary_with_property_access(self):
+        php = """<?php echo $discussion->responses > 0 ? 'A' : 'B'; ?>"""
+        out, _ = translate_template(php)
+        self.assertIn('ternary:', out)
+        self.assertTrue('A' in out or 'B' in out)
+
+    def test_increment_drops_silently(self):
+        php = '<?php ++$i; ?>'
+        out, skipped = translate_template(php)
+        self.assertEqual(skipped, [])
+
+    def test_concat_assign_drops_silently(self):
+        php = "<?php $wrapper_classes .= ' has-logo'; ?>"
+        out, skipped = translate_template(php)
+        self.assertEqual(skipped, [])
+
+    def test_var_assignment_emits_porter_comment(self):
+        php = "<?php $site_name = get_bloginfo('name'); ?>"
+        out, skipped = translate_template(php)
+        self.assertIn('php:', out)
+        self.assertEqual(skipped, [])
+
+    def test_echo_var(self):
+        php = '<?php echo $site_name; ?>'
+        out, _ = translate_template(php)
+        self.assertIn('{{ site_name }}', out)
+
+    def test_get_template_part_literal_suffix(self):
+        php = "<?php get_template_part('template-parts/content', 'single'); ?>"
+        out, _ = translate_template(php)
+        self.assertIn("{% include 'wp/template-parts/content-single.html' %}", out)
+
+    def test_get_template_part_no_suffix(self):
+        php = "<?php get_template_part('template-parts/content'); ?>"
+        out, _ = translate_template(php)
+        self.assertIn("{% include 'wp/template-parts/content.html' %}", out)
+
+    def test_get_sidebar_with_arg(self):
+        php = "<?php get_sidebar('content-bottom'); ?>"
+        out, _ = translate_template(php)
+        self.assertIn("{% include 'wp/sidebar-content-bottom.html' %}", out)
+
+    def test_printf_with_string_literal(self):
+        php = "<?php printf( __( 'Proudly powered by %s', 'd' ), 'WordPress' ); ?>"
+        out, _ = translate_template(php)
+        self.assertIn('Proudly powered by WordPress', out)
+
+    def test_printf_with_translatable_arg(self):
+        php = "<?php printf( __( 'Search Results for: %s', 'd' ), get_search_query() ); ?>"
+        out, _ = translate_template(php)
+        self.assertIn('Search Results for:', out)
+        self.assertIn('{{ search_query }}', out)
+
+    def test_nested_i18n_extraction(self):
+        """``esc_html(_nx('A','B',$n,'ctx','d'))`` → format extracts to 'A'."""
+        php = ("<?php printf( esc_html( _nx( "
+               "'%1$s thought', '%1$s thoughts', $n, 'ctx', 'd' ) ), $n ); ?>")
+        out, skipped = translate_template(php)
+        self.assertIn('thought', out)
+        # The printf should not be in skipped if the format extracted.
+        self.assertEqual(len([s for s in skipped if 'printf' in s]), 0)
+
+    def test_php_at_eof_no_close_tag(self):
+        """``<?php\nget_footer();`` without a trailing ?> still translates."""
+        php = '<h1>x</h1><?php get_footer();'
+        out, skipped = translate_template(php)
+        self.assertIn("{% include 'wp/footer.html' %}", out)
+        self.assertEqual(skipped, [])
+
+    def test_template_parts_translated_as_partials(self):
+        from datalift.wp_lifter import parse_theme
+        tmp = Path(tempfile.mkdtemp())
+        theme = tmp / 'theme'
+        (theme / 'template-parts').mkdir(parents=True)
+        (theme / 'index.php').write_text(
+            "<?php get_template_part('template-parts/content', 'single'); ?>"
+        )
+        (theme / 'template-parts' / 'content-single.php').write_text(
+            '<?php the_title(); ?>'
+        )
+        result = parse_theme(theme)
+        names = sorted(r.target_name for r in result.records)
+        self.assertIn('template-parts/content-single.html', names)
+
+    def test_inc_dir_files_are_unhandled(self):
+        from datalift.wp_lifter import parse_theme
+        tmp = Path(tempfile.mkdtemp())
+        theme = tmp / 'theme'
+        (theme / 'inc').mkdir(parents=True)
+        (theme / 'index.php').write_text('<?php the_title(); ?>')
+        (theme / 'functions.php').write_text('<?php // theme code ?>')
+        (theme / 'inc' / 'template-tags.php').write_text(
+            '<?php function my_tag() {} ?>'
+        )
+        result = parse_theme(theme)
+        flagged = sorted(p.name for p in result.unhandled_files)
+        self.assertIn('functions.php', flagged)
+        self.assertIn('template-tags.php', flagged)
+
+    def test_theme_funcs_auto_detected_from_inc(self):
+        """A function defined in inc/ is treated as theme-internal."""
+        from datalift.wp_lifter import parse_theme
+        tmp = Path(tempfile.mkdtemp())
+        theme = tmp / 'mytheme'
+        (theme / 'inc').mkdir(parents=True)
+        (theme / 'index.php').write_text(
+            '<?php twenty_twenty_one_post_thumbnail(); ?>'
+        )
+        (theme / 'inc' / 'template-tags.php').write_text(
+            '<?php function twenty_twenty_one_post_thumbnail() {} ?>'
+        )
+        result = parse_theme(theme)
+        index = next(r for r in result.records if r.source.name == 'index.php')
+        self.assertEqual(index.skipped, [])
+        self.assertIn('theme function twenty_twenty_one_post_thumbnail', index.body)
+
+    def test_theme_funcs_via_functions_php(self):
+        """Functions in functions.php are also detected."""
+        from datalift.wp_lifter import parse_theme
+        tmp = Path(tempfile.mkdtemp())
+        theme = tmp / 'mytheme'
+        theme.mkdir()
+        (theme / 'index.php').write_text('<?php mytheme_helper(); ?>')
+        (theme / 'functions.php').write_text(
+            '<?php function mytheme_helper() {} ?>'
+        )
+        result = parse_theme(theme)
+        index = next(r for r in result.records if r.source.name == 'index.php')
+        self.assertEqual(index.skipped, [])
+
+    def test_known_wp_predicates_return_false(self):
+        for fn in ['has_nav_menu', 'is_active_sidebar', 'current_user_can',
+                   'is_paged', 'comments_open', 'is_singular', 'is_home']:
+            php = f'<?php {fn}(); ?>'
+            out, skipped = translate_template(php)
+            self.assertEqual(skipped, [], f'{fn} produced skipped: {skipped}')
+            self.assertIn('false', out, f'{fn} did not produce false: {out!r}')
+
+    def test_i18n_with_esc_wrappers(self):
+        for fn in ['esc_html__', 'esc_attr__', 'esc_html_e', 'esc_attr_e']:
+            php = "<?php echo " + fn + "( 'Hello', 'd' ); ?>" if fn.endswith('_e') is False \
+                  else "<?php " + fn + "( 'Hello', 'd' ); ?>"
+            out, skipped = translate_template(php)
+            self.assertEqual(skipped, [], f'{fn} produced skipped: {skipped}')
+            self.assertIn('Hello', out, f'{fn} did not produce Hello: {out!r}')
 
     def test_no_default_partials_when_unreferenced(self):
         tmp = Path(tempfile.mkdtemp())
