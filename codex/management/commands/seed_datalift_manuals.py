@@ -4462,7 +4462,60 @@ ecosystem looks like under a microscope), quiet in the application
 code that LimeSurvey actually maintains.
 """)
 
-    upsert_section(m, 'verdict', 6, 'The verdict', """
+    upsert_section(m, 'compile-test', 6,
+                   'The truth-test: does the output actually compile?', """
+The end-to-end run reported 1,134 PHP files translated by
+`liftphpcode` with porter markers on only 0.156 / file. That
+metric measures *coverage* — how often the lifter found a pattern
+to apply — not *correctness*. The next question, asked in the
+same session: how many of those 1,134 Python files actually pass
+`python -m py_compile`?
+
+The first measurement was sobering. Of 1,134 files, **274
+compiled (24.1%)**. Three quarters of the lifter's output was
+syntactically broken Python.
+
+Six iterative fix-rounds, each driven by counting the most
+common error pattern across the failing files, brought the
+compile rate to 51.1%:
+
+| Round | Fix                                                                    | Pass rate | Δ      |
+|---|---|---:|---:|
+| 0 | (initial)                                                                  | 24.1%   | —      |
+| 1 | `array(...)` — rewrite matching `)` → `]` via balanced-paren walk          | 30.1%   | +6.0pp |
+| 2 | Fix `opener_idx = -1` bug in short-array `[...]` rewriter                  | 41.2%   | +11.1pp |
+| 3 | PHP namespace `\\Foo\\Bar` → `Foo.Bar`; `=&` → `=`; `new \\Class` → `Class` | (combined with 4) | — |
+| 4 | PHP type casts `(string) $x['k']` → `str(x['k'])` (string-aware pass)      | 47.9%   | +6.7pp |
+| 5 | Mixed positional/keyed arrays stay as list (Yii validation rules); ternary; multi-line `if (`; `++/--`; Python-keyword variable rename; PHP `@` error suppression; `list()` destructure; method-chain protected from concat rule | 49.8%   | +1.9pp |
+| 6 | `else\\n  {` (whitespace before brace); walrus operator for `if x = expr`  | 51.1%   | +1.3pp |
+
+Climb sparkline: `▁▂▂▅▆▇█`.
+
+Each fix was a real PHP idiom the catch-all hadn't anticipated.
+Each was surfaced cheaply by running the output through the
+Python compiler and tallying error categories. The pattern is the
+same playbook that worked for finding the `liftwig if(cond)` bug:
+**use real targets to surface real edges**.
+
+The remaining 50% need patterns the regex pipeline genuinely
+can't handle robustly without a PHP AST parser:
+
+- PHP-8 nullsafe `?->` (rewrites to `(x and x.y)` but the
+  semantics differ around method calls).
+- Named arguments (`foo(name: 'x')`) which collide with the
+  array `=>` → `:` rewrite.
+- Closures-in-expression position (`$f = function() { ... };`).
+- Multi-line single-quoted strings containing literal newlines.
+- Complex chained API patterns where method names happen to
+  collide with PHP reserved words.
+
+These are real porter overhead. The 51.1% number bounds Datalift's
+*bottom-of-stack* contribution: the pipeline produces this much
+ready-to-import Python without human intervention. Anything
+above that is what the porter adds.
+""")
+
+    upsert_section(m, 'verdict', 7, 'The verdict', """
 Datalift was pointed at an **unseen, enterprise-scale, Yii 1.x +
 Twig + MariaDB project of 20,234 files** and processed it end-to-end
 without modification to the LimeSurvey source.
