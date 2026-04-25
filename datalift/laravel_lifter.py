@@ -208,6 +208,184 @@ def _strip_php_comments(php: str) -> str:
     return php
 
 
+def _extract_group_prefixes(php: str) -> list[tuple[int, int, str, str]]:
+    """Find every ``Route::group([..., 'prefix' => 'X', ...], function () { ... });``
+    or ``Route::prefix('X')->...->group(function () { ... });`` and
+    return a list of (start, end, prefix, name_prefix) tuples covering
+    the byte range of each group's *body* (the closure inside).
+
+    Nested groups are returned in source order; a route's effective
+    prefix is the concatenation of every group whose range contains
+    that route.
+    """
+    out: list[tuple[int, int, str, str]] = []
+    n = len(php)
+    i = 0
+    # Match openers: `Route::group(` or `Route::prefix(` (with optional
+    # chained builders). For each, we extract any 'prefix' or 'name'
+    # configuration and then locate the matching closure body span.
+    opener_re = re.compile(
+        r"Route::(?:group|prefix|middleware|name|namespace|domain)\s*\("
+    )
+    while i < n:
+        m = opener_re.search(php, i)
+        if not m:
+            break
+        start = m.start()
+        # Walk the chain of `Route::X(...)->Y(...)->...->group(function ...)`
+        # collecting prefix/name modifiers and finding the closure.
+        prefix_parts: list[str] = []
+        name_prefix_parts: list[str] = []
+        cursor = m.start()
+        # Loop over chained calls — each is `Route::method(...)` or
+        # `->method(...)` — and capture prefix / name args. Stop when
+        # we hit the call whose first arg is `function (`.
+        chain_re = re.compile(
+            r"(?:Route::|->)(?P<m>\w+)\("
+        )
+        chain_m = chain_re.match(php, cursor)
+        if not chain_m:
+            i = m.end()
+            continue
+        # Walk chain until we find the closure.
+        while chain_m:
+            method = chain_m.group('m')
+            args_start = chain_m.end()
+            # Find matching `)` for this call (balanced parens).
+            depth = 1
+            in_str: str | None = None
+            j = args_start
+            while j < n and depth > 0:
+                ch = php[j]
+                if in_str:
+                    if ch == '\\' and j + 1 < n:
+                        j += 2
+                        continue
+                    if ch == in_str:
+                        in_str = None
+                    j += 1
+                    continue
+                if ch in ('"', "'"):
+                    in_str = ch
+                elif ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                j += 1
+            if depth != 0:
+                break  # Unbalanced; bail out.
+            args = php[args_start:j - 1]
+
+            # Capture method-specific config.
+            if method == 'group':
+                # Args may be: `[...config...], function () { ... }`
+                # or just `function () { ... }`.
+                # Find the closure body braces.
+                # Look for `function` keyword in args.
+                fn_m = re.search(r'function\s*\([^)]*\)\s*(?:use\s*\([^)]*\)\s*)?\{', args)
+                if not fn_m:
+                    break
+                # The brace at fn_m.end() - 1 is the body opener,
+                # but we have `args` as a substring; convert positions
+                # back to the original `php`.
+                fn_brace_in_php = args_start + fn_m.end() - 1
+                body_start = fn_brace_in_php + 1
+                # Find matching `}`.
+                d = 1
+                in_s: str | None = None
+                k = body_start
+                while k < n and d > 0:
+                    ch = php[k]
+                    if in_s:
+                        if ch == '\\' and k + 1 < n:
+                            k += 2
+                            continue
+                        if ch == in_s:
+                            in_s = None
+                        k += 1
+                        continue
+                    if ch in ('"', "'"):
+                        in_s = ch
+                    elif ch == '{':
+                        d += 1
+                    elif ch == '}':
+                        d -= 1
+                    k += 1
+                # Also check for `'prefix' => 'X'` in this group's
+                # config (the array part before the closure).
+                config_part = args[:fn_m.start()]
+                p_m = re.search(
+                    r"['\"]prefix['\"]\s*=>\s*['\"]([^'\"]*)['\"]",
+                    config_part,
+                )
+                if p_m:
+                    prefix_parts.append(p_m.group(1))
+                n_m = re.search(
+                    r"['\"]as['\"]\s*=>\s*['\"]([^'\"]*)['\"]",
+                    config_part,
+                )
+                if n_m:
+                    name_prefix_parts.append(n_m.group(1))
+                # Record the group's body span with combined prefix/name.
+                full_prefix = '/'.join(p.strip('/') for p in prefix_parts if p)
+                if full_prefix:
+                    full_prefix = '/' + full_prefix
+                full_name = ''.join(name_prefix_parts)
+                out.append((body_start, k - 1, full_prefix, full_name))
+                # Advance just past the opener (NOT past the body) so the
+                # next iteration can find any nested Route::group / prefix
+                # inside this body.
+                i = m.end()
+                break
+            elif method == 'prefix':
+                p_m = re.match(
+                    r"\s*['\"]([^'\"]*)['\"]",
+                    args,
+                )
+                if p_m:
+                    prefix_parts.append(p_m.group(1))
+            elif method == 'name':
+                n_m = re.match(
+                    r"\s*['\"]([^'\"]*)['\"]",
+                    args,
+                )
+                if n_m:
+                    name_prefix_parts.append(n_m.group(1))
+            # Move past the closing `)` and look for the next `->`.
+            cursor = j
+            # Skip whitespace, then look for `->`.
+            while cursor < n and php[cursor] in ' \t\n':
+                cursor += 1
+            if php[cursor:cursor + 2] != '->':
+                break
+            chain_m = chain_re.match(php, cursor)
+            if not chain_m:
+                break
+        else:
+            # While loop exited without break — no group found.
+            i = m.end()
+            continue
+
+        i = max(i + 1, m.end())
+    return out
+
+
+def _prefix_for(spans: list[tuple[int, int, str, str]],
+                 pos: int) -> tuple[str, str]:
+    """Return (combined_prefix, combined_name_prefix) for a route at
+    position `pos`, by concatenating every span that contains it
+    (innermost last)."""
+    p_parts: list[str] = []
+    n_parts: list[str] = []
+    for start, end, prefix, name in spans:
+        if start <= pos <= end:
+            if prefix:
+                p_parts.append(prefix.strip('/'))
+            if name:
+                n_parts.append(name)
+    return ('/'.join(p for p in p_parts if p), ''.join(n_parts))
+
+
 def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
     """Parse a Laravel routes file. Returns (routes, unhandled-fragments)."""
     php = _strip_php_comments(php)
@@ -217,19 +395,45 @@ def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
     # Track lines we've consumed so we can flag the rest.
     seen_spans: list[tuple[int, int]] = []
 
+    # Find every Route::group / Route::prefix(...)->group container
+    # and record (body_start, body_end, prefix, name_prefix) for each.
+    # Routes inside a group inherit its prefix.
+    group_spans = _extract_group_prefixes(php)
+
+    def _apply_prefix(path: str, pos: int) -> str:
+        prefix, _ = _prefix_for(group_spans, pos)
+        if not prefix:
+            return path
+        path_clean = path.lstrip('/')
+        return '/' + prefix + ('/' + path_clean if path_clean else '')
+
+    def _apply_name_prefix(name: str | None, pos: int) -> str | None:
+        _, name_prefix = _prefix_for(group_spans, pos)
+        if not name:
+            return name
+        if not name_prefix:
+            return name
+        # Don't double-prefix.
+        if name.startswith(name_prefix):
+            return name
+        return name_prefix + name
+
     # 1. Resource and apiResource (each expands to multiple routes).
     for m in _ROUTE_RESOURCE.finditer(php):
         seen_spans.append((m.start(), m.end()))
         kind = m.group('kind')
         name = m.group('name')
         ctrl = m.group('ctrl')
-        # Look at the trailing modifiers (e.g. `->only(['index', 'show'])`)
-        # in the same statement; we don't translate them yet, just
-        # record the full set.
+        prefix, _ = _prefix_for(group_spans, m.start())
+        full_name = (prefix.replace('/', '.') + '.' + name).strip('.') if prefix else name
         if kind == 'resource':
-            routes.extend(_resource_routes(name, ctrl))
+            sub = _resource_routes(name, ctrl)
         else:
-            routes.extend(_api_resource_routes(name, ctrl))
+            sub = _api_resource_routes(name, ctrl)
+        for r in sub:
+            r.path = _apply_prefix(r.path, m.start())
+            r.name = full_name + r.name[len(name):]  # rename prefix
+        routes.extend(sub)
 
     # 2. Route::view (no controller) — emit a TemplateView-like marker.
     for m in _ROUTE_VIEW.finditer(php):
@@ -237,16 +441,14 @@ def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
         path = m.group('path')
         view_name = m.group('view').replace('.', '/') + '.html'
         routes.append(RouteRecord(
-            method='get', path=path, controller='', action='_view_only',
+            method='get', path=_apply_prefix(path, m.start()),
+            controller='', action='_view_only',
             name=None, raw=f'Route::view({path!r}, {view_name!r})',
         ))
 
     # 3. Bracket form: Route::method('path', [Ctrl::class, 'action'])
     for m in _ROUTE_BRACKET.finditer(php):
         seen_spans.append((m.start(), m.end()))
-        # Look ahead for chained ->name() / ->middleware() up to the
-        # next semicolon at brace depth 0. Cheap heuristic: scan to
-        # the next semicolon.
         end_idx = php.find(';', m.end())
         chain = php[m.end():end_idx if end_idx > 0 else m.end()]
         name_m = _NAME_RE.search(chain)
@@ -260,10 +462,11 @@ def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
             ]
         routes.append(RouteRecord(
             method=m.group('method').lower(),
-            path=m.group('path'),
+            path=_apply_prefix(m.group('path'), m.start()),
             controller=m.group('ctrl'),
             action=m.group('action'),
-            name=name_m.group(2) if name_m else None,
+            name=_apply_name_prefix(name_m.group(2) if name_m else None,
+                                     m.start()),
             middleware=middleware,
             raw=php[m.start():end_idx if end_idx > 0 else m.end()],
         ))
@@ -285,10 +488,11 @@ def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
             ]
         routes.append(RouteRecord(
             method=m.group('method').lower(),
-            path=m.group('path'),
+            path=_apply_prefix(m.group('path'), m.start()),
             controller=m.group('ctrl'),
             action='__invoke',
-            name=name_m.group(2) if name_m else None,
+            name=_apply_name_prefix(name_m.group(2) if name_m else None,
+                                     m.start()),
             middleware=middleware,
             raw=php[m.start():end_idx if end_idx > 0 else m.end()],
         ))
@@ -325,10 +529,11 @@ def parse_routes(php: str) -> tuple[list[RouteRecord], list[str]]:
             ]
         routes.append(RouteRecord(
             method=m.group('method').lower(),
-            path=m.group('path'),
+            path=_apply_prefix(m.group('path'), m.start()),
             controller=m.group('ctrl'),
             action=m.group('action'),
-            name=name_m.group(2) if name_m else None,
+            name=_apply_name_prefix(name_m.group(2) if name_m else None,
+                                     m.start()),
             middleware=middleware,
             raw=php[m.start():end_idx if end_idx > 0 else m.end()],
         ))
@@ -410,43 +615,130 @@ def _short_controller_name(name: str) -> str:
     return name.replace('\\\\', '\\').rstrip('\\').rsplit('\\', 1)[-1]
 
 
-def render_urls(routes: list[RouteRecord], app_label: str = 'app') -> str:
-    """Render a Django ``urls.py`` from a list of routes."""
-    seen_views: set[str] = set()
-    paths: list[str] = []
-    needs_views_import = False
+def _safe_dispatcher_name(django_path: str) -> str:
+    """Turn a Django URL pattern into a Python identifier suitable for
+    a dispatcher function name. ``view/<int:host_id>/`` →
+    ``_dispatch_view_int_host_id``."""
+    s = re.sub(r'[^A-Za-z0-9]+', '_', django_path).strip('_')
+    return f'_dispatch_{s}' if s else '_dispatch_root'
 
+
+def render_urls(routes: list[RouteRecord], app_label: str = 'app') -> str:
+    """Render a Django ``urls.py`` from a list of routes.
+
+    Critical: when multiple HTTP methods share a URL path (the
+    conventional REST resource layout), Django's first-match URL
+    resolver routes all of them to the first handler, so only the
+    GET handler ever fires. We work around this by grouping routes
+    by path and emitting a small dispatcher view for any path with
+    more than one method. The dispatcher inspects ``request.method``
+    and delegates to the right handler.
+    """
+    # Group routes by their final Django path string, preserving
+    # original order for the first-seen-name + first-seen-middleware.
+    paths_by_url: dict[str, list[RouteRecord]] = {}
+    order: list[str] = []
     for r in routes:
         if not r.controller:
-            # Route::view or closure — emit a TemplateView marker
-            paths.append(
-                f"    # path({laravel_path_to_django(r.path)!r}, "
+            # Route::view / closure — emit a TemplateView marker line
+            # and don't fold into the dispatch table.
+            url = laravel_path_to_django(r.path)
+            paths_by_url.setdefault(url, []).append(r)
+            if url not in order:
+                order.append(url)
+            continue
+        url = laravel_path_to_django(r.path)
+        if url not in paths_by_url:
+            paths_by_url[url] = []
+            order.append(url)
+        paths_by_url[url].append(r)
+
+    needs_views_import = False
+    needs_http_imports = False
+    dispatchers: list[str] = []   # Python source for each dispatcher fn
+    url_lines: list[str] = []
+
+    for url in order:
+        rs = paths_by_url[url]
+        # Closure / Route::view-only paths
+        controllered = [r for r in rs if r.controller]
+        if not controllered:
+            url_lines.append(
+                f"    # path({url!r}, "
                 f"TemplateView.as_view(template_name='...')),"
             )
             continue
-        ctrl_short = _short_controller_name(r.controller)
-        view_name = f'{ctrl_short}_{r.action}'
-        seen_views.add(view_name)
-        django_path = laravel_path_to_django(r.path)
-        line = (
-            f"    path({django_path!r}, views.{view_name}"
-            + (f", name={r.name!r}" if r.name else '')
-            + "),  # "
-            + r.method.upper()
-        )
-        if r.middleware:
-            line += f' [middleware: {", ".join(r.middleware)}]'
-        paths.append(line)
-        needs_views_import = True
 
-    out = ['"""Auto-generated by datalift liftlaravel."""',
-           'from django.urls import path',
-           '']
+        if len(controllered) == 1:
+            r = controllered[0]
+            ctrl_short = _short_controller_name(r.controller)
+            view_name = f'{ctrl_short}_{r.action}'
+            line = (
+                f"    path({url!r}, views.{view_name}"
+                + (f", name={r.name!r}" if r.name else '')
+                + "),  # " + r.method.upper()
+            )
+            if r.middleware:
+                line += f' [middleware: {", ".join(r.middleware)}]'
+            url_lines.append(line)
+            needs_views_import = True
+            continue
+
+        # Multi-method case — emit a dispatcher.
+        needs_views_import = True
+        needs_http_imports = True
+        disp_name = _safe_dispatcher_name(url)
+        # Dispatcher source.
+        method_table = ', '.join(
+            f"{r.method.upper()!r}: views.{_short_controller_name(r.controller)}_{r.action}"
+            for r in controllered
+        )
+        # Pick the first-seen route name (Django path name; we choose the GET if available).
+        chosen_name = None
+        for r in controllered:
+            if r.name and (chosen_name is None or r.method == 'get'):
+                chosen_name = r.name
+        dispatchers.append(
+            f"def {disp_name}(request, *args, **kwargs):\n"
+            f"    \"\"\"HTTP-method dispatcher for {url!r}.\"\"\"\n"
+            f"    _handlers = {{{method_table}}}\n"
+            f"    handler = _handlers.get(request.method)\n"
+            f"    if handler is None:\n"
+            f"        return HttpResponseNotAllowed(_handlers.keys())\n"
+            f"    return handler(request, *args, **kwargs)\n"
+        )
+        line = (
+            f"    path({url!r}, {disp_name}"
+            + (f", name={chosen_name!r}" if chosen_name else '')
+            + "),  # methods: "
+            + ', '.join(sorted({r.method.upper() for r in controllered}))
+        )
+        url_lines.append(line)
+
+    out = [
+        '"""Auto-generated by datalift liftlaravel.',
+        '',
+        'Routes that share a URL pattern with different HTTP methods',
+        'are dispatched through a small per-path handler that switches',
+        'on request.method. This is required because Django\'s URL',
+        'resolver matches first-seen-only — without dispatching, only',
+        'the GET handler of a REST resource would ever fire.',
+        '"""',
+        'from django.urls import path',
+    ]
+    if needs_http_imports:
+        out.append('from django.http import HttpResponseNotAllowed')
+    out.append('')
     if needs_views_import:
         out.append('from . import views')
         out.append('')
+
+    out.extend(dispatchers)
+    if dispatchers:
+        out.append('')
+
     out.append('urlpatterns = [')
-    out.extend(paths)
+    out.extend(url_lines)
     out.append(']')
     return '\n'.join(out) + '\n'
 

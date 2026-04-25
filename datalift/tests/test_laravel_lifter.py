@@ -115,6 +115,55 @@ class RouteParsingTests(SimpleTestCase):
         self.assertEqual(len(skipped), 1)
 
 
+class GroupPrefixTests(SimpleTestCase):
+    """Route::group prefixes propagate to inner routes — without this,
+    every nested route looked like it lived at the root, breaking
+    real Laravel apps that nest by prefix."""
+
+    def test_group_array_prefix(self):
+        php = """Route::group(['prefix' => 'api'], function () {
+            Route::get('/users', [UserController::class, 'index']);
+        });"""
+        routes, _ = parse_routes(php)
+        self.assertEqual(len(routes), 1)
+        self.assertEqual(routes[0].path, '/api/users')
+
+    def test_chained_prefix_then_group(self):
+        php = """Route::prefix('admin')->group(function () {
+            Route::get('/users', [UserController::class, 'index']);
+        });"""
+        routes, _ = parse_routes(php)
+        self.assertEqual(routes[0].path, '/admin/users')
+
+    def test_nested_groups_concatenate(self):
+        php = """Route::prefix('admin')->group(function () {
+            Route::prefix('settings')->group(function () {
+                Route::get('/general', [SettingsController::class, 'show']);
+            });
+        });"""
+        routes, _ = parse_routes(php)
+        self.assertEqual(routes[0].path, '/admin/settings/general')
+
+    def test_group_name_prefix_concatenates(self):
+        php = """Route::group(['prefix' => 'admin', 'as' => 'admin.'], function () {
+            Route::get('/users', [UserController::class, 'index'])
+                ->name('users.index');
+        });"""
+        routes, _ = parse_routes(php)
+        self.assertEqual(routes[0].path, '/admin/users')
+        self.assertEqual(routes[0].name, 'admin.users.index')
+
+    def test_resource_inside_group(self):
+        php = """Route::prefix('api')->group(function () {
+            Route::resource('items', ItemController::class);
+        });"""
+        routes, _ = parse_routes(php)
+        self.assertEqual(len(routes), 7)
+        for r in routes:
+            self.assertTrue(r.path.startswith('/api/items'),
+                            f'expected api prefix, got {r.path}')
+
+
 class UrlsRenderingTests(SimpleTestCase):
 
     def test_renders_urlpatterns(self):
@@ -128,6 +177,53 @@ class UrlsRenderingTests(SimpleTestCase):
         self.assertIn('urlpatterns = [', text)
         self.assertIn("path('users/', views.UserController_index", text)
         self.assertIn("name='users.index'", text)
+
+    def test_no_dispatcher_for_single_method(self):
+        from datalift.laravel_lifter import RouteRecord
+        routes = [
+            RouteRecord(method='get', path='/users',
+                        controller='UserController', action='index'),
+        ]
+        text = render_urls(routes, 'app')
+        self.assertNotIn('_dispatch_', text)
+        self.assertNotIn('HttpResponseNotAllowed', text)
+
+    def test_multi_method_path_emits_dispatcher(self):
+        """The CRITICAL case: same path, different HTTP methods.
+        Django's first-match resolver would route every method to
+        the GET handler. We emit a per-path dispatcher to fix this."""
+        from datalift.laravel_lifter import RouteRecord
+        routes = [
+            RouteRecord(method='get',    path='/items/{id}',
+                        controller='ItemController', action='show',
+                        name='items.show'),
+            RouteRecord(method='put',    path='/items/{id}',
+                        controller='ItemController', action='update'),
+            RouteRecord(method='delete', path='/items/{id}',
+                        controller='ItemController', action='destroy'),
+        ]
+        text = render_urls(routes, 'app')
+        # Dispatcher function emitted
+        self.assertIn('def _dispatch_', text)
+        self.assertIn('HttpResponseNotAllowed', text)
+        # All three method handlers referenced inside the dispatcher
+        self.assertIn('ItemController_show', text)
+        self.assertIn('ItemController_update', text)
+        self.assertIn('ItemController_destroy', text)
+        # Only one path entry for that URL — pointing at the dispatcher
+        self.assertEqual(text.count("path('items/<int:id>/'"), 1)
+        # GET name is preferred for the path() entry
+        self.assertIn("name='items.show'", text)
+
+    def test_resource_routes_use_dispatcher(self):
+        """Route::resource expansion produces 7 routes that fold into
+        2 paths with multi-method dispatchers."""
+        from datalift.laravel_lifter import _resource_routes
+        routes = _resource_routes('items', 'ItemController')
+        text = render_urls(routes, 'app')
+        # 'items/' has GET (index) + POST (store)
+        # 'items/<int:id>/' has GET (show) + PUT (update) + DELETE (destroy)
+        self.assertEqual(text.count('def _dispatch_'), 2)
 
 
 class BodyTranslationTests(SimpleTestCase):
