@@ -873,6 +873,7 @@ predictable enough to re-run.
 | `liftlaravel` | **Translate Laravel routes + controllers — first PHP business-logic lifter.** |
 | `liftmigrations` | Parse Laravel migrations into Django models (no SQL dump required). |
 | `liftsymfony` | Translate Symfony controllers + routes (attribute / annotation / YAML). |
+| `liftdoctrine` | Translate Doctrine `#[ORM\\Entity]` classes into Django models. |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -2798,11 +2799,10 @@ lifter was iterated against. It exercises:
 """)
 
     upsert_section(m, 'limitations', 4, 'Known limitations', """
-- **Doctrine entities** are out of scope here. Run `genmodels`
-  against the SQL dump (or `liftmigrations` against Laravel's
-  Blueprint files in mixed projects). A future `liftdoctrine`
-  could parse `#[ORM\\Entity]` and `#[ORM\\Column(...)]` attributes
-  on entity classes; not built yet.
+- **Doctrine entities** are handled by the sibling `liftdoctrine`
+  command. Pair this lifter with `liftdoctrine` (or invoke
+  `liftall --symfony-dir ...` which runs both back-to-back) to get
+  routes + views + models from one Symfony source tree.
 - **Form objects** (`$form = $this->createForm(UserType::class)`,
   `$form->handleRequest($request)`) emit a porter marker. Django
   uses django.forms with a different shape; the porter rewires.
@@ -2812,6 +2812,176 @@ lifter was iterated against. It exercises:
   attributes.
 - **Voter classes / security expressions** — not parsed. The
   porter wires Django's permission system manually.
+""")
+
+
+def seed_liftdoctrine_guide():
+    m = upsert_manual(
+        'liftdoctrine-guide',
+        title='liftdoctrine',
+        subtitle='Translate Doctrine entity classes into Django models',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftdoctrine reads a Symfony / Doctrine project\'s entity '
+            'classes (`src/Entity/**/*.php`) and emits Django models. '
+            'Recognises modern PHP 8 attributes (`#[ORM\\Entity]`, '
+            '`#[ORM\\Column(...)]`, `#[ORM\\ManyToOne(...)]`) and '
+            'falls back on legacy docblock annotations. Where a '
+            'column attribute omits the `type:` argument, the lifter '
+            'infers the Doctrine type from the PHP type hint — '
+            '`\\DateTimeImmutable` becomes `DateTimeField`, `int` '
+            'becomes `IntegerField`, and so on. Validated against '
+            'the official Symfony Demo: 4 entities, 21 columns, '
+            'every type resolved.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftdoctrine /path/to/symfony/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Reads `<app>/src/Entity/**/*.php` (also tries `Entities/` and
+`Domain/`) and emits `<app>/models_doctrine.py`. Each
+`#[ORM\\Entity]` class becomes one Django model. Lives alongside
+`models.py`, `models_migrations.py`, and `models_symfony.py` so
+the user can diff and merge by hand.
+""")
+
+    upsert_section(m, 'columns', 1, 'Column type mapping', """
+Doctrine column types map to Django fields like this. The lifter
+accepts the literal string form (`type: 'string'`) and the modern
+class-constant form (`type: Types::STRING`).
+
+| Doctrine type            | Django field                           |
+|---|---|
+| `integer`, `smallint`    | `IntegerField`, `SmallIntegerField`    |
+| `bigint`                 | `BigIntegerField` (or `BigAutoField` with `Id+GeneratedValue`) |
+| `string`                 | `CharField(max_length=length or 255)`  |
+| `text`                   | `TextField()`                          |
+| `boolean`                | `BooleanField()`                       |
+| `float`                  | `FloatField()`                         |
+| `decimal`                | `DecimalField(max_digits=p, decimal_places=s)` |
+| `date`, `date_immutable` | `DateField()`                          |
+| `datetime`, `datetime_immutable`, `datetimetz` | `DateTimeField()`    |
+| `time`, `time_immutable` | `TimeField()`                          |
+| `json`, `array`, `simple_array` | `JSONField()`                   |
+| `guid`, `uuid`           | `UUIDField()`                          |
+| `binary`, `blob`         | `BinaryField()`                        |
+| `ascii_string`           | `CharField(max_length=length or 255)`  |
+
+Modifiers (named arguments on `#[ORM\\Column(...)]`):
+
+| Doctrine                       | Django kwarg                |
+|---|---|
+| `length: 200`                  | `max_length=200`            |
+| `nullable: true`               | `null=True, blank=True`     |
+| `unique: true`                 | `unique=True`               |
+| `precision: 10, scale: 2`      | `max_digits=10, decimal_places=2` |
+| `options: { default: 0 }`      | `default=0`                 |
+
+Identifier handling — `#[ORM\\Id]` plus `#[ORM\\GeneratedValue]`
+turns the column into an `AutoField(primary_key=True)` (or
+`BigAutoField` when paired with a `bigint` column).
+""")
+
+    upsert_section(m, 'inference', 2,
+                   'Type inference from PHP type hints', """
+Modern Symfony often omits the `type:` argument entirely:
+
+```php
+#[ORM\\Column]
+private \\DateTimeImmutable $publishedAt;
+```
+
+Doctrine infers the column type from the PHP property type hint.
+liftdoctrine mirrors that:
+
+| PHP type hint            | Inferred Doctrine type     | Django field      |
+|---|---|---|
+| `string`                 | `string`                   | `CharField`       |
+| `int`                    | `integer`                  | `IntegerField`    |
+| `bool`                   | `boolean`                  | `BooleanField`    |
+| `float`                  | `float`                    | `FloatField`      |
+| `array`                  | `json`                     | `JSONField`       |
+| `\\DateTime`             | `datetime`                 | `DateTimeField`   |
+| `\\DateTimeImmutable`    | `datetime_immutable`       | `DateTimeField`   |
+| `\\DateTimeInterface`    | `datetime`                 | `DateTimeField`   |
+
+Nullable hints (`?bool $featured`) are honoured both ways: the
+`?` prefix is stripped before lookup, and a `nullable: true`
+column attribute still adds `null=True, blank=True`.
+""")
+
+    upsert_section(m, 'relationships', 3,
+                   'Relationship attributes', """
+| Doctrine attribute                                 | Django output                                                |
+|---|---|
+| `#[ORM\\ManyToOne(targetEntity: User::class)]`      | `ForeignKey(to='User', on_delete=models.DO_NOTHING)`         |
+| ↳ `#[ORM\\JoinColumn(nullable: true)]`              | adds `null=True, blank=True`                                  |
+| ↳ `#[ORM\\JoinColumn(onDelete: 'CASCADE')]`         | sets `on_delete=models.CASCADE`                               |
+| ↳ `#[ORM\\JoinColumn(onDelete: 'SET NULL')]`        | sets `on_delete=models.SET_NULL`                              |
+| ↳ `#[ORM\\JoinColumn(onDelete: 'RESTRICT')]`        | sets `on_delete=models.PROTECT`                               |
+| `#[ORM\\OneToOne(targetEntity: Profile::class)]`    | `OneToOneField(to='Profile', on_delete=models.DO_NOTHING)`   |
+| `#[ORM\\ManyToMany(targetEntity: Tag::class)]`      | `ManyToManyField(to='Tag')`                                  |
+| `#[ORM\\OneToMany(targetEntity: Comment::class)]`   | _omitted_ — Django expresses the inverse via `related_name`  |
+
+Targets are resolved by stripping the `::class` suffix and any
+namespace prefix. `App\\Entity\\User::class` becomes the bare
+string `'User'`. The porter is expected to add full app-qualified
+references where needed.
+""")
+
+    upsert_section(m, 'corpus', 4,
+                   'Tested against the Symfony Demo', """
+The official Symfony Demo (`symfony/demo`) ships four entities
+that exercise the full surface this lifter covers:
+
+| Entity   | Columns | Notes                                         |
+|---|---:|---|
+| `Comment` | 5      | FK back to `Post` and `User`; bare `#[ORM\\Column]` on `published_at` |
+| `Post`    | 8      | M2M to `Tag`; bare `#[ORM\\Column]` on `published_at` resolves to `DateTimeField` via PHP-hint inference |
+| `Tag`     | 2      | minimal entity, name `unique=True`            |
+| `User`    | 6      | `roles` typed `array` → `JSONField`           |
+
+| Metric                          | Result |
+|---|---:|
+| Entities parsed                 | 4      |
+| Columns translated              | 21     |
+| Relationships resolved          | 4 FK + 1 M2M (OneToMany inverse omitted) |
+| Bare `#[ORM\\Column]` inferred   | 2      |
+| `Types::*` constants resolved   | 19     |
+| Unhandled fragments             | 0      |
+""")
+
+    upsert_section(m, 'limitations', 5, 'Known limitations', """
+- **Embeddables** (`#[ORM\\Embedded(class: Money::class)]`) are
+  not yet expanded into their constituent columns. A `Money`
+  embeddable with `amount` + `currency` columns becomes one
+  field that the porter has to flatten by hand.
+- **Discriminator columns / single-table inheritance**
+  (`#[ORM\\InheritanceType('SINGLE_TABLE')]`,
+  `#[ORM\\DiscriminatorColumn(...)]`) emit a parent class without
+  the discriminator field. Django's preferred shape is
+  multi-table inheritance, which is a structural decision the
+  porter makes.
+- **Lifecycle callbacks** (`#[ORM\\HasLifecycleCallbacks]`,
+  `#[ORM\\PrePersist]`) — Django uses signals for the same role;
+  not auto-translated.
+- **Custom Doctrine types** (registered via
+  `Types::add()`) fall through to `CharField(max_length=255)`. The
+  porter substitutes the appropriate Django field once the
+  semantics are known.
 """)
 
 
@@ -3289,6 +3459,7 @@ def seed_datalift_volume():
             'liftlaravel-guide',
             'liftmigrations-guide',
             'liftsymfony-guide',
+            'liftdoctrine-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3730,6 +3901,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftsymfony Guide     → /codex/liftsymfony-guide/'
         ))
+        seed_liftdoctrine_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftdoctrine Guide    → /codex/liftdoctrine-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3751,5 +3926,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (19 manuals + 1 volume).'
+            '\nDatalift manuals seeded (20 manuals + 1 volume).'
         ))

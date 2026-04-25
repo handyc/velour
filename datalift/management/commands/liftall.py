@@ -20,7 +20,10 @@ Pipeline (each step skipped if the input it needs isn't present):
     5.  liftsite    — HTML/JS/CSS routing (if --legacy-dir)
     6.  liftwp / liftsmarty / liftwig / liftblade / liftvolt
                     — theme lift (if --theme-dir + --theme-type)
-    7.  liftlaravel — routes + controllers (if --laravel-dir)
+    7a. liftmigrations — Laravel Blueprints → models (if --migrations-dir)
+    7b. liftlaravel — routes + controllers (if --laravel-dir)
+    8.  liftsymfony — controllers + routes (if --symfony-dir)
+    9.  liftdoctrine — `#[ORM\\Entity]` → models (if --symfony-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -283,6 +286,23 @@ class Command(BaseCommand):
         else:
             summary.append('8. liftsymfony: SKIPPED (no --symfony-dir)')
 
+        # ── 9. Doctrine entities → models ─────────────────────────
+        # Any Symfony app with src/Entity/ also feeds liftdoctrine —
+        # the two emit non-overlapping outputs (urls/views vs models).
+        if symfony_dir:
+            self._step(9, f'liftdoctrine ({symfony_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftdoctrine', str(symfony_dir), **kwargs)
+                summary.append(f'9. liftdoctrine: ok ({symfony_dir})')
+            except Exception as e:
+                summary.append(f'9. liftdoctrine: FAILED ({e})')
+                raise
+        else:
+            summary.append('9. liftdoctrine: SKIPPED (no --symfony-dir)')
+
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('═══ liftall summary ═══'))
@@ -297,5 +317,5 @@ class Command(BaseCommand):
     def _step(self, n: int, label: str) -> None:
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f'━━━ Step {n}/6 — {label} ━━━'
+            f'━━━ Step {n}/9 — {label} ━━━'
         ))
