@@ -870,6 +870,7 @@ predictable enough to re-run.
 | `liftwig`     | Translate a Twig `.twig` template tree (Drupal 8+, Symfony, Slim).|
 | `liftblade`   | Translate a Laravel Blade `.blade.php` view tree.                |
 | `liftvolt`    | Translate a Phalcon Volt `.volt` template tree.                  |
+| `liftlaravel` | **Translate Laravel routes + controllers — first PHP business-logic lifter.** |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -2459,6 +2460,214 @@ wrapper around liftwig:
 """)
 
 
+def seed_liftlaravel_guide():
+    m = upsert_manual(
+        'liftlaravel-guide',
+        title='liftlaravel',
+        subtitle='The first PHP business-logic lifter',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftlaravel translates a Laravel application\'s routes '
+            'and controllers into Django urls.py + views.py. The '
+            'first lifter in the family that ports PHP business '
+            'logic (not just templates or schema). Validated against '
+            'Pterodactyl Panel: 235 routes, 79 controllers, 323 '
+            'methods, 0 unhandled route fragments. Eloquent query '
+            'builder, $this->method calls, and other context-sensitive '
+            'patterns are flagged with porter comments — those are '
+            'real porter work, not translator gaps.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftlaravel /path/to/laravel/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+The source directory is the Laravel application root — the one
+that has both `routes/` and `app/Http/Controllers/`. liftlaravel
+reads:
+
+- `routes/web.php`, `routes/api.php`, and any other `routes/*.php`
+  → emits `<app>/urls_laravel.py`.
+- `app/Http/Controllers/**/*.php` → emits `<app>/views_laravel.py`.
+
+Wire these into your project's URLconf with
+`path('', include('myapp.urls_laravel'))`.
+""")
+
+    upsert_section(m, 'routes', 1, 'Route translation', """
+The route translator recognises every conventional Laravel route
+shape:
+
+| Laravel                                                        | Django                                                |
+|---|---|
+| `Route::get('/path', [Ctrl::class, 'action'])`                  | `path('path/', views.Ctrl_action, name=...)`          |
+| `Route::post('/path', [Ctrl::class, 'action'])`                 | (POST — annotated as comment)                         |
+| `Route::get('/path', 'Ctrl@action')`                            | (older syntax — same translation)                     |
+| `Route::get('/path', Ctrl::class)`                              | invokable controller — wires `Ctrl___invoke`          |
+| `Route::resource('items', ItemController::class)`               | expands to seven REST routes                          |
+| `Route::apiResource('items', ItemController::class)`            | expands to five REST routes (no create/edit forms)    |
+| `Route::view('/about', 'pages.about')`                          | TemplateView marker                                   |
+| `Route::group(...)` / `Route::prefix(...)->group(...)`          | container — inner routes still match                  |
+| `->name('users.index')`                                         | `name='users.index'` kwarg                            |
+| `->middleware('auth')`                                          | annotated as comment                                  |
+| `Route::fallback([Ctrl::class, 'method'])`                       | catch-all GET route                                   |
+
+URL parameter handling:
+
+| Laravel                | Django                              |
+|---|---|
+| `/users/{id}`          | `users/<int:id>/`                   |
+| `/posts/{slug}`        | `posts/<slug:slug>/`                |
+| `/items/{name}`        | `items/<str:name>/`                 |
+| `/users/{user:id}`     | `users/<int:user_id>/`              |
+| `/posts/{post:slug}`   | `posts/<slug:post_slug>/`           |
+
+The `{Model:column}` form is Laravel's implicit route-model
+binding shorthand; the translator combines model + column into a
+single Django kwarg name.
+
+Namespaced controllers (`Admin\\BaseController`, `Client\\Servers\\WebsocketController`)
+are stripped to their short class name in the generated view
+references — Django imports use the bare name.
+""")
+
+    upsert_section(m, 'bodies', 2,
+                   'Controller method body translation', """
+The translator handles the conventional Eloquent / Laravel
+patterns deterministically:
+
+| Laravel PHP                                          | Django Python                                                       |
+|---|---|
+| `$users = User::all();`                              | `users = User.objects.all()`                                         |
+| `$user = User::find($id);`                           | `user = User.objects.filter(id=id).first()`                          |
+| `$user = User::findOrFail($id);`                     | `user = get_object_or_404(User, id=id)`                              |
+| `$post = Post::create([...]);`                       | `post = Post.objects.create(**...)`                                  |
+| `User::count();`                                     | `User.objects.count()`                                               |
+| `$user->save();` / `->delete();`                     | `user.save()` / `user.delete()`                                      |
+| `$user->update([...]);`                              | `User.objects.filter(pk=user.pk).update(**...)`                      |
+| `return view('foo.bar', $data);`                     | `return render(request, 'foo/bar.html', data)`                       |
+| `return redirect()->route('x');`                     | `return redirect('x')`                                               |
+| `return redirect('/path');`                          | `return redirect('/path')`                                           |
+| `return redirect()->back();`                         | `return redirect(request.META.get("HTTP_REFERER", "/"))`             |
+| `return response()->json($data);`                    | `return JsonResponse(data)`                                          |
+| `Auth::user()` / `auth()->user()`                    | `request.user`                                                       |
+| `Auth::check()`                                      | `request.user.is_authenticated`                                      |
+| `request()->input('k')` / `request('k')`             | `request.POST.get('k', request.GET.get('k'))`                        |
+| `request()->all()`                                   | `dict(request.POST.items()) \\| dict(request.GET.items())`            |
+| `array('a' => 1, 'b' => 2)` / `['a' => 1]`           | `'a': 1, 'b': 2` (with brackets staying)                              |
+| `=>` / `->` / `$var` / `null/true/false`             | `:` / `.` / `var` / `None/True/False`                                |
+| `'a' . 'b'` (string concat)                          | `'a' + 'b'`                                                          |
+
+Patterns that need porter work emit a `# LARAVEL-LIFT:` comment:
+
+- **`$this->method()` / `$this->property`** — controller-internal
+  state. Port to a Django service object or method on a CBV.
+- **`Model::where(...)->get()` / `->orderBy(...)` / `->paginate(...)`** —
+  Eloquent query builder. Port to Django ORM `.objects.filter()` /
+  `.order_by()` / `Paginator`.
+- **`DB::` / `Mail::` / `Cache::` / `Session::` facades** —
+  port to Django's equivalent (`django.db.connection`,
+  `django.core.mail`, `django.core.cache`, `request.session`).
+
+These markers are the porter's TODO list. They are NOT translator
+errors — they're a deliberate boundary between deterministic
+translation and code that needs human or AI judgement.
+""")
+
+    upsert_section(m, 'corpus', 3,
+                   'Tested against Pterodactyl Panel', """
+Pterodactyl Panel (game-server admin, 79 controllers, ~7,500 lines
+of PHP business logic) was the corpus that drove this translator's
+design.
+
+| Metric                              | Result    |
+|---|---:|
+| Controllers parsed                  | 79        |
+| Controller methods translated       | 323       |
+| Route fragments parsed              | 235       |
+| Unhandled route fragments           | 0         |
+| Controller-method porter markers    | 273       |
+
+The 273 porter markers break down as:
+
+| Marker                                     | Count |
+|---|---:|
+| `$this->` (controller-internal call)        | 233   |
+| `.where()` (Eloquent builder)               |  26   |
+| `.paginate()` (Eloquent pagination)         |  13   |
+| `Model::where()` (static Eloquent builder)  |   1   |
+
+Iteration sparkline (unhandled route fragments per round):
+[[spark:268,17,0 | bar]] — 268 → 17 → 0. Three rounds:
+namespaced controllers, invokable controllers + Route::fallback.
+
+The translator was honest about Pterodactyl from the first run —
+the very first lift parsed 79 controllers and 323 methods cleanly.
+The route-fragment count fell from 268 to 0 by adding two regex
+forms (namespaced and invokable controllers). The
+`$this->` markers are not a translator gap; they're a
+fundamental difference between Laravel's class-based
+controllers and Django's function-based views, and the porter
+chooses how to bridge them.
+""")
+
+    upsert_section(m, 'limitations', 4, 'Known limitations', """
+- **Eloquent query builder chains.** `User::where('age', '>', 18)
+  ->whereNull('deleted_at')->orderBy('name')->paginate(20)` is
+  too context-sensitive for a regex pipeline (the operator
+  argument decides the lookup name; `whereNull` maps differently
+  from `where`). The translator flags these and the porter
+  rewrites to Django ORM. Future work: a richer Eloquent-aware
+  pass that handles the dozen most-common chains.
+- **`$this->service->method()`** chains. The `$this` reference is
+  flagged because Django views are functions, not methods on a
+  controller class. The porter chooses: convert to a class-based
+  view, or pull state into module-level dependencies.
+- **Laravel Form Requests.** `function store(StoreUserRequest $req)` —
+  the `$req` is a typed validator class. The translator drops the
+  `Request $request` arg and the porter wires Django form
+  validation (or DRF serialisers).
+- **Service container injection** (`__construct(Repository $repo)`).
+  Constructors are translated as views with extra args, which is
+  almost certainly wrong; the porter restructures to module-level
+  imports or class-based-view attributes.
+- **Closures inside route definitions** (`Route::get('/', function () { ... })`).
+  Not parsed — flagged as unhandled fragments.
+""")
+
+    upsert_section(m, 'shape', 5,
+                   'Shape and scale', """
+- ~700 LOC of pure Python in `datalift/laravel_lifter.py`.
+- 39 regression tests, ~10 ms.
+- Walker → route parser → controller parser → renderer →
+  worklist. Same shape as the template lifters.
+- No LLM, no network, runtime in milliseconds.
+
+The same architecture extends to the next PHP framework: a
+separate command per framework so each one's conventions can
+be encoded as deterministic rules. **Symfony** (annotation /
+attribute routes, Doctrine ORM, `Twig` templates already covered),
+**CakePHP** (convention-over-configuration), **CodeIgniter** (older,
+flatter), **Yii** are all tractable in the same shape.
+
+The 273 porter markers in the Pterodactyl run are the unconquered
+sub-domain — *Eloquent query builder chains and class-based
+internal state*. Both are tractable, just not in this iteration.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -2806,6 +3015,7 @@ def seed_datalift_volume():
             'liftwig-guide',
             'liftblade-guide',
             'liftvolt-guide',
+            'liftlaravel-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3235,6 +3445,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftvolt Guide        → /codex/liftvolt-guide/'
         ))
+        seed_liftlaravel_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftlaravel Guide     → /codex/liftlaravel-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3256,5 +3470,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (16 manuals + 1 volume).'
+            '\nDatalift manuals seeded (17 manuals + 1 volume).'
         ))

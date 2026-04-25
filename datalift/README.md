@@ -52,7 +52,8 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftwig` | Translate a Twig template directory (`.twig`) into Django templates (Drupal/Symfony/Slim) |
 | `liftblade` | Translate a Laravel Blade view directory (`.blade.php`) into Django templates |
 | `liftvolt` | Translate a Phalcon Volt template directory (`.volt`) into Django templates |
-| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, and the right theme lifter in one command |
+| `liftlaravel` | **Translate Laravel routes and controllers into Django urls.py + views.py.** First PHP business-logic lifter. |
+| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, the right theme lifter, and liftlaravel in one command |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |

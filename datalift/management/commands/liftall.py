@@ -13,12 +13,14 @@
 
 Pipeline (each step skipped if the input it needs isn't present):
 
-    1.  port       — scan PHP (if --legacy-dir), genmodels from --dump
-    2.  migrate    — `makemigrations <app> && migrate` (if --migrate)
-    3.  ingestdump — load rows (if --ingest, requires migrated tables)
-    4.  liftphp    — full PHP scan + worklist (if --legacy-dir)
-    5.  liftsite   — HTML/JS/CSS routing (if --legacy-dir)
-    6.  liftwp / liftsmarty / liftwig — theme lift (if --theme-dir)
+    1.  port        — scan PHP (if --legacy-dir), genmodels from --dump
+    2.  migrate     — `makemigrations <app> && migrate` (if --migrate)
+    3.  ingestdump  — load rows (if --ingest, requires migrated tables)
+    4.  liftphp     — full PHP scan + worklist (if --legacy-dir)
+    5.  liftsite    — HTML/JS/CSS routing (if --legacy-dir)
+    6.  liftwp / liftsmarty / liftwig / liftblade / liftvolt
+                    — theme lift (if --theme-dir + --theme-type)
+    7.  liftlaravel — routes + controllers (if --laravel-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -58,6 +60,11 @@ class Command(BaseCommand):
         parser.add_argument('--theme-dir', default=None,
                             help='Path to the legacy theme directory '
                                  '(requires --theme-type).')
+        parser.add_argument('--laravel-dir', default=None,
+                            help='Path to a Laravel application root '
+                                 '(routes/ + app/Http/Controllers/). '
+                                 'Triggers liftlaravel — emits urls_laravel.py '
+                                 'and views_laravel.py.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -98,10 +105,14 @@ class Command(BaseCommand):
 
         legacy_dir = Path(opts['legacy_dir']).resolve() if opts['legacy_dir'] else None
         theme_dir = Path(opts['theme_dir']).resolve() if opts['theme_dir'] else None
+        laravel_dir = (Path(opts['laravel_dir']).resolve()
+                       if opts['laravel_dir'] else None)
         if legacy_dir and not legacy_dir.is_dir():
             raise CommandError(f'--legacy-dir is not a directory: {legacy_dir}')
         if theme_dir and not theme_dir.is_dir():
             raise CommandError(f'--theme-dir is not a directory: {theme_dir}')
+        if laravel_dir and not laravel_dir.is_dir():
+            raise CommandError(f'--laravel-dir is not a directory: {laravel_dir}')
 
         summary: list[str] = []
         dry = opts['dry_run']
@@ -203,6 +214,21 @@ class Command(BaseCommand):
                 raise
         else:
             summary.append('6. theme: SKIPPED (no --theme-dir)')
+
+        # ── 7. Laravel routes + controllers ───────────────────────
+        if laravel_dir:
+            self._step(7, f'liftlaravel ({laravel_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftlaravel', str(laravel_dir), **kwargs)
+                summary.append(f'7. liftlaravel: ok ({laravel_dir})')
+            except Exception as e:
+                summary.append(f'7. liftlaravel: FAILED ({e})')
+                raise
+        else:
+            summary.append('7. liftlaravel: SKIPPED (no --laravel-dir)')
 
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
