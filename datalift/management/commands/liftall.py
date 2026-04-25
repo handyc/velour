@@ -71,6 +71,11 @@ class Command(BaseCommand):
                                  'emits models_migrations.py from Schema::create '
                                  'blueprints. Useful when the source has '
                                  'no SQL dump.')
+        parser.add_argument('--symfony-dir', default=None,
+                            help='Path to a Symfony application root '
+                                 '(src/Controller/ + config/routes/). '
+                                 'Triggers liftsymfony — emits urls_symfony.py '
+                                 'and views_symfony.py.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -256,6 +261,27 @@ class Command(BaseCommand):
                 raise
         else:
             summary.append('7. liftlaravel: SKIPPED (no --laravel-dir)')
+
+        # ── 8. Symfony controllers + routes ───────────────────────
+        symfony_dir = (Path(opts['symfony_dir']).resolve()
+                       if opts['symfony_dir'] else None)
+        if symfony_dir:
+            if not symfony_dir.is_dir():
+                raise CommandError(
+                    f'--symfony-dir is not a directory: {symfony_dir}'
+                )
+            self._step(8, f'liftsymfony ({symfony_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftsymfony', str(symfony_dir), **kwargs)
+                summary.append(f'8. liftsymfony: ok ({symfony_dir})')
+            except Exception as e:
+                summary.append(f'8. liftsymfony: FAILED ({e})')
+                raise
+        else:
+            summary.append('8. liftsymfony: SKIPPED (no --symfony-dir)')
 
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')

@@ -872,6 +872,7 @@ predictable enough to re-run.
 | `liftvolt`    | Translate a Phalcon Volt `.volt` template tree.                  |
 | `liftlaravel` | **Translate Laravel routes + controllers — first PHP business-logic lifter.** |
 | `liftmigrations` | Parse Laravel migrations into Django models (no SQL dump required). |
+| `liftsymfony` | Translate Symfony controllers + routes (attribute / annotation / YAML). |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -2675,6 +2676,145 @@ internal state*. Both are tractable, just not in this iteration.
 """)
 
 
+def seed_liftsymfony_guide():
+    m = upsert_manual(
+        'liftsymfony-guide',
+        title='liftsymfony',
+        subtitle='Translate Symfony controllers + routes into Django',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftsymfony reads a Symfony application\'s controllers '
+            'and route files and emits Django urls.py + views.py. '
+            'Recognises PHP 8 attribute routes (#[Route(...)]), '
+            'docblock annotations (@Route(...)), and YAML route '
+            'files (config/routes/*.yaml). Validated against the '
+            'official Symfony Demo: 4 controllers, 12 methods, 19 '
+            'attribute routes, all paths and namespaces resolved '
+            'cleanly.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftsymfony /path/to/symfony/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Reads:
+
+- `<symfony>/src/Controller/**/*.php` — emits `<app>/views_symfony.py`.
+- `<symfony>/config/routes/*.yaml` (or `config/routes/`,
+  `config/routing/`, `config/`) — adds to the URL surface.
+- PHP attribute routes (`#[Route(...)]`) and docblock annotation
+  routes (`@Route(...)`) on each controller method, AND class-level
+  `#[Route(...)]` prefixes that propagate to inner methods.
+""")
+
+    upsert_section(m, 'translation', 1, 'Route translation', """
+| Symfony source                                            | Django output                              |
+|---|---|
+| `#[Route('/users')]` on a method                          | `path('users/', ...)`                      |
+| `#[Route('/users', methods: ['GET', 'POST'])]`            | dispatcher splitting on `request.method`   |
+| `#[Route('/users', name: 'app_user_index')]`              | `name='app_user_index'`                    |
+| `#[Route(path: '/users')]` (named arg form)               | same as positional                         |
+| `@Route("/users", methods={"GET"})` (docblock)            | same as attribute form                     |
+| `#[Route('/admin/blog')]` on the **class**                | prepended to every method route             |
+| YAML: `path: /users` / `controller: X::method`            | `path('users/', views.X_method, name=...)` |
+
+URL parameter handling (Symfony has more variants than Laravel):
+
+| Symfony                          | Django                              |
+|---|---|
+| `/users/{id}`                    | `users/<int:id>/`                   |
+| `/posts/{slug}`                  | `posts/<slug:slug>/`                |
+| `/users/{id<\\d+>}`              | `users/<int:id>/`                   |
+| `/posts/{slug<[a-z-]+>}`         | `posts/<slug:slug>/`                |
+| `/users/{id:user}` (param converter) | `users/<int:id>/`               |
+| `/posts/{slug:post}`             | `posts/<slug:slug>/`                |
+
+Symfony's param-converter shorthand (`{id:user}`) means "the
+{id} param resolves to a User entity". Django doesn't have
+auto-resolution; the kwarg becomes a plain int and the porter
+fetches the entity in the view.
+""")
+
+    upsert_section(m, 'controllers', 2,
+                   'Controller body translation', """
+| Symfony PHP                                            | Django Python                                                |
+|---|---|
+| `return $this->render('user/index.html.twig', $data)`  | `return render(request, 'user/index.html', data)`            |
+| `return $this->redirectToRoute('app_user_index')`      | `return redirect('app_user_index')`                          |
+| `return $this->redirect($url)`                         | `return redirect(url)`                                       |
+| `return $this->json($data)`                            | `return JsonResponse(data)`                                  |
+| `return new Response($body)`                           | `return HttpResponse(body)`                                  |
+| `$this->getUser()`                                     | `request.user`                                               |
+| `$this->isGranted('ROLE_X')`                           | `request.user.has_perm('ROLE_X')` (porter checks perm name)  |
+| `$request->query->get('k')`                            | `request.GET.get('k')`                                       |
+| `$request->request->get('k')`                          | `request.POST.get('k')`                                      |
+| `$repo->findAll()`                                     | `repo.objects.all()`                                         |
+| `$repo->findOneBy(['x' => $y])`                        | `repo.objects.filter(**{'x': y}).first()`                    |
+| `$repo->find($id)`                                     | `repo.objects.filter(id=id).first()`                         |
+| `$em->persist($x); $em->flush()`                       | `x.save()`                                                   |
+
+Same-named-class disambiguation: Symfony commonly has e.g.
+`App\\Controller\\BlogController` and `App\\Controller\\Admin\\BlogController`.
+The lifter prepends the namespace's last segment to disambiguate
+in views.py:
+
+  `App\\Controller\\BlogController::index()`        → `BlogController_index`
+  `App\\Controller\\Admin\\BlogController::index()` → `Admin_BlogController_index`
+""")
+
+    upsert_section(m, 'corpus', 3,
+                   'Tested against the Symfony Demo', """
+The official Symfony Demo (`symfony/demo`) was the corpus this
+lifter was iterated against. It exercises:
+
+- Class-level `#[Route('/admin/post')]` prefixes on Admin controllers.
+- Per-method routes with both bare paths and entity converters.
+- Multiple methods at the same path with different HTTP methods
+  (covered by the per-path dispatcher).
+- Two controllers with the same short name in different namespaces
+  (`Admin\\BlogController` vs `BlogController`) — disambiguated
+  by namespace prefix.
+
+| Metric                          | Result |
+|---|---:|
+| Controllers parsed              | 4      |
+| Methods translated              | 12     |
+| Attribute / annotation routes   | 19     |
+| YAML routes                     | 0 (Demo uses pure attribute routing) |
+| Unique URL paths                | 12     |
+| Method dispatchers              | 4      |
+""")
+
+    upsert_section(m, 'limitations', 4, 'Known limitations', """
+- **Doctrine entities** are out of scope here. Run `genmodels`
+  against the SQL dump (or `liftmigrations` against Laravel's
+  Blueprint files in mixed projects). A future `liftdoctrine`
+  could parse `#[ORM\\Entity]` and `#[ORM\\Column(...)]` attributes
+  on entity classes; not built yet.
+- **Form objects** (`$form = $this->createForm(UserType::class)`,
+  `$form->handleRequest($request)`) emit a porter marker. Django
+  uses django.forms with a different shape; the porter rewires.
+- **Service-locator injection** in constructors — emits the args
+  as Django view-function args, which is wrong but visible. The
+  porter restructures into module-level imports or class-based-view
+  attributes.
+- **Voter classes / security expressions** — not parsed. The
+  porter wires Django's permission system manually.
+""")
+
+
 def seed_liftmigrations_guide():
     m = upsert_manual(
         'liftmigrations-guide',
@@ -3148,6 +3288,7 @@ def seed_datalift_volume():
             'liftvolt-guide',
             'liftlaravel-guide',
             'liftmigrations-guide',
+            'liftsymfony-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3585,6 +3726,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftmigrations Guide  → /codex/liftmigrations-guide/'
         ))
+        seed_liftsymfony_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftsymfony Guide     → /codex/liftsymfony-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3606,5 +3751,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (18 manuals + 1 volume).'
+            '\nDatalift manuals seeded (19 manuals + 1 volume).'
         ))
