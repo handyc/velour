@@ -73,6 +73,16 @@ class ControlFlowTests(SimpleTestCase):
         self.assertIn('{% block content %}', out)
         self.assertIn('{% endblock %}', out)
 
+    def test_if_with_function_call_parens(self):
+        # LimeSurvey-style `{% if(condition) %}` — no space between
+        # `if` and `(`. Found by the LimeSurvey end-to-end road test.
+        out, skipped = translate_template(
+            '{% if(aSurveyInfo.options.brandlogo == "on") %}x{% endif %}'
+        )
+        self.assertIn('{% if', out)
+        self.assertIn('aSurveyInfo.options.brandlogo == "on"', out)
+        self.assertEqual(skipped, [])
+
 
 class IncludeExtendsTests(SimpleTestCase):
 

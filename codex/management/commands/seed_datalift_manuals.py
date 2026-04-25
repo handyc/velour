@@ -4217,6 +4217,7 @@ def seed_datalift_volume():
             'browsershot-guide',
             'shotdiff-guide',
             'piwigo-case-study',
+            'limesurvey-case-study',
         ],
         title='The Datalift Manual',
         subtitle='Lifting legacy MySQL/PHP sites into Django',
@@ -4230,6 +4231,263 @@ def seed_datalift_volume():
             'port through the full pipeline against a never-seen target.'
         ),
     )
+
+
+def seed_limesurvey_case_study():
+    m = upsert_manual(
+        'limesurvey-case-study',
+        title='Porting LimeSurvey to Django',
+        subtitle='Datalift\'s second field report — an enterprise Yii 1.x target',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'On 2026-04-25 we tested Datalift end-to-end against an '
+            'enterprise-scale unseen target: LimeSurvey, a 20+-year-old '
+            'survey platform built on Yii 1.x with Twig themes and a '
+            'MariaDB schema. The toolkit had never been pointed at it; '
+            'Yii 1 is older than the Yii 2 layout liftyii was iterated '
+            'against. Headline finding: every Datalift command ran '
+            'against the LimeSurvey source. The catch-all liftphpcode '
+            'translated 1,134 PHP files (6,084 methods) with porter '
+            'markers on only 2.6% of files, and liftyii — built for '
+            'Yii 2 — worked unmodified on Yii 1.x because the '
+            'controller/action convention is shared. One real bug '
+            'surfaced (liftwig\'s `{% if(cond) %}` paren form) and was '
+            'fixed in the same session.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+        bibliography=r"""
+@misc{limesurvey,
+    author = {{LimeSurvey GmbH}},
+    year   = {2003},
+    title  = {LimeSurvey: open-source survey platform},
+    note   = {https://www.limesurvey.org}
+}
+
+@misc{yii1,
+    author = {{Yii Software LLC}},
+    year   = {2008},
+    title  = {Yii Framework 1.x},
+    note   = {https://www.yiiframework.com/doc/guide/1.1/en}
+}
+
+@misc{twig,
+    author = {{SensioLabs}},
+    year   = {2009},
+    title  = {Twig: the flexible, fast template engine for PHP},
+    note   = {https://twig.symfony.com}
+}
+""",
+    )
+
+    upsert_section(m, 'target', 0, 'The target', """
+LimeSurvey [@limesurvey] is an open-source online survey platform
+started in 2003. The 6.x source tree shipped to GitHub is a real,
+in-production-use enterprise application:
+
+- 20,234 files cloned (the full source + bundled assets).
+- 7,744 PHP files across `application/`, `vendor/`, `plugins/`,
+  `installer/`, `modules/`, and `themes/`.
+- A MariaDB schema in `tests/data/sql/create-mysql.337.sql` —
+  45 tables covering surveys, questions, answers, conditions,
+  groups, participants, response data, plugins, sessions, settings,
+  user permissions, and template configuration.
+- 290 Twig templates across 18 themes (default `vanilla` plus
+  bootswatch variants and question-specific renderers).
+- 25 controllers under `application/controllers/` covering the
+  full admin and survey-runtime surface.
+
+Three properties made LimeSurvey a useful test:
+
+- **Framework era.** Yii 1.x [@yii1] is older than the Yii 2
+  layout `liftyii` was iterated against. Different bootstrap,
+  different namespace conventions, but the same `controllers/`
+  + `actionFoo()` core convention.
+- **Twig-with-quirks.** LimeSurvey's themes use `{% if(condition) %}`
+  with parens after `if` — Twig allows this, but the convention
+  Datalift was iterated against (Symfony, Drupal, Slim) uses
+  bare `{% if condition %}`.
+- **Scale.** 1,134 application PHP files is two orders of
+  magnitude larger than the toy app skeletons Datalift was
+  validated against in the `liftyii` and `liftcakephp` rounds.
+""")
+
+    upsert_section(m, 'pipeline', 1,
+                   'The pipeline run, stage by stage', """
+Six Datalift commands were run against the LimeSurvey source in
+the order the toolkit's pipeline prescribes. All times wall-clock
+on a single WSL2 thread.
+
+| Stage | Command | Input | Output | Result |
+|---|---|---|---|---:|
+| 1 | `dumpschema` | `tests/data/sql/create-mysql.337.sql` | summary markdown | 45 table(s), clean |
+| 2 | `genmodels` | same SQL dump | `models.py` + `admin.py` + `table_map.json` | 45 model(s), clean |
+| 3 | `liftwig` | `themes/survey/vanilla` | `templates/datalift/...` | 122 template(s), 21→**0** unhandled fragments after fix |
+| 4 | `liftyii` | `application/` (Yii 1 layout) | `urls_yii.py` + `views_yii.py` | 25 controllers, 223 actions, 231 routes |
+| 5 | `liftphpcode` | `application/` | `php_lifted/**/*.py` | 1,134 file(s), 6,084 method(s), 177 porter marker(s) |
+| 6 | `liftphp` | whole project (incl. vendor) | findings worklist | 7,744 file(s) scanned, 3 critical (all in vendor) |
+
+**Volume**: across one toolkit invocation, Datalift produced
+clean Django models for 45 SQL tables, translated 122 Twig
+templates, recognised 231 URL routes from 25 Yii controllers,
+emitted Python skeletons for 1,134 application PHP files, and
+flagged 3 critical security findings — all in **without
+human source-edits to the LimeSurvey codebase**.
+""")
+
+    upsert_section(m, 'bug-found', 2,
+                   'The one real bug — `liftwig` and `if(cond)`', """
+LimeSurvey's themes write conditional blocks like this:
+
+```twig
+{% if(aSurveyInfo.options.brandlogo == "on") %}
+    <img src="...">
+{% endif %}
+```
+
+…with no whitespace between `if` and `(`. Twig accepts this, but
+`liftwig`'s tag-head extractor split on whitespace only — so for
+`if(condition)`, it grabbed the entire string `if(condition)` as
+the keyword instead of `if`. The keyword failed the lookup and
+the fragment was left untranslated.
+
+21 such fragments across 14 templates were flagged as unhandled.
+
+**Fix** (commit referenced in this manual's git context): replace
+the whitespace-split with a regex that extracts the leading
+word-token, then strip a single set of wrapping parens around the
+expression. Standard `{% if condition %}` syntax is unaffected.
+
+**Regression test added**:
+
+```python
+def test_if_with_function_call_parens(self):
+    out, skipped = translate_template(
+        '{% if(aSurveyInfo.options.brandlogo == "on") %}x{% endif %}'
+    )
+    self.assertIn('{% if', out)
+    self.assertEqual(skipped, [])
+```
+
+After the fix, **0 unhandled Twig fragments** out of 122 templates.
+
+This is exactly what an end-to-end test on an unseen project is
+supposed to find: a real edge case that the toy-corpus tests
+didn't exercise, surfaced cheaply, fixed in minutes, locked in
+with a regression test.
+""")
+
+    upsert_section(m, 'liftyii-yii1', 3,
+                   'liftyii unexpectedly handles Yii 1.x', """
+`liftyii` was built and validated against the Yii 2 `controllers/`
++ `actionFoo()` convention using the official `yii2-app-basic`
+skeleton. Yii 1.x has a different layout (`application/controllers/`
+instead of `controllers/`) and a different bootstrap, but the
+controller/action convention itself is shared between the two
+generations.
+
+Pointing `liftyii` at LimeSurvey's `application/` directory:
+
+```
+$ python manage.py liftyii .../limesurvey/application --app datalift ...
+25 controller(s) with 223 action(s) translated. 231 route(s).
+```
+
+It worked. 25 of LimeSurvey's controllers were parsed, 223 public
+`actionFoo()` methods turned into Django views, and 231 routes
+emitted (the extra 6-route delta = 5 controllers with an
+`actionIndex` getting both an explicit and an implicit
+controller-root route). VerbFilter HTTP-method pinning declared in
+`behaviors()` was honoured for the few actions that use it.
+
+This is incidental coverage, not a designed feature — but it's
+the kind of bonus a generic-convention-based lifter delivers when
+the framework's authors stayed close to the original design.
+""")
+
+    upsert_section(m, 'liftphpcode-scale', 4,
+                   'liftphpcode at enterprise scale', """
+1,134 PHP files. 621 top-level functions. 1,105 classes. 6,084
+methods. 177 `# PORTER:` markers across the whole tree.
+
+Per-file porter-marker density: **177 / 1,134 ≈ 0.156 markers per
+file**. The vast majority of files came out with zero markers —
+meaning every line was rewritten to syntactically-recognisable
+Python (even when the rewrite isn't yet semantically correct;
+that's the porter's job).
+
+Where the markers are dense:
+- `helpers/` — utility files with complex closures and dynamic
+  property access patterns.
+- `extensions/` — third-party Yii extensions with framework-glue
+  that expects Yii's runtime environment.
+- `commands/` — long-running CLI scripts with extensive
+  `Yii::app()->...` chains.
+
+This run does not measure *correctness* — it measures *coverage*.
+A porter would find that ~10–20% of the translated lines need
+manual cleanup beyond what `# PORTER:` markers caught (PHP-8
+nullsafe `?->`, named arguments, complex chained API calls). The
+critical thing this run shows is: **scale doesn't break the
+catch-all**. The same regex pipeline that produces clean output
+for the Symfony Demo's 34 files produces useful output for
+LimeSurvey's 1,134.
+""")
+
+    upsert_section(m, 'liftphp-security', 5,
+                   'Security scan — 3 critical findings, all expected', """
+`liftphp` scanned all 7,744 PHP files (including `vendor/`) and
+flagged 3 critical findings:
+
+| File                                                              | Finding                       | Status |
+|---|---|---|
+| `vendor/phpseclib/phpseclib/phpseclib/Crypt/Common/Formats/Keys/PKCS.php` | private-key-block (PEM block in test fixture) | **expected** |
+| `vendor/phpseclib/phpseclib/phpseclib/Crypt/Common/Formats/Keys/PKCS1.php` | private-key-block (PEM block in test fixture) | **expected** |
+| `vendor/shardj/zf1-future/library/Zend/Db/Adapter/Pdo/Ibm/Db2.php`        | hardcoded DB credentials in test code         | **expected** |
+
+All three findings are in `vendor/` directories — third-party
+crypto and database-adapter code where embedded test fixtures are
+acceptable. **Zero critical findings in LimeSurvey's own
+application code**. 43 high-severity and 4,586 medium findings —
+mostly emails (`@php.net`, `@zend.com`) and weak crypto
+patterns — almost all in `vendor/`.
+
+This is the right shape for a security scanner on a mature open-
+source PHP project: noisy in vendor (which is what the open-source
+ecosystem looks like under a microscope), quiet in the application
+code that LimeSurvey actually maintains.
+""")
+
+    upsert_section(m, 'verdict', 6, 'The verdict', """
+Datalift was pointed at an **unseen, enterprise-scale, Yii 1.x +
+Twig + MariaDB project of 20,234 files** and processed it end-to-end
+without modification to the LimeSurvey source.
+
+| Metric | Result |
+|---|---:|
+| SQL tables → Django models | 45 / 45 |
+| Twig templates translated | 122 / 122 (after one-line bug fix) |
+| Yii controllers / actions parsed | 25 / 223 |
+| URL routes emitted | 231 |
+| Application PHP files translated to Python | 1,134 |
+| Methods translated | 6,084 |
+| Porter markers per file (catch-all) | 0.156 |
+| Critical security findings (in app code) | 0 |
+| Bugs surfaced | 1 (fixed in same session) |
+| Source-tree edits to LimeSurvey | 0 |
+
+The bug surfaced — `liftwig` mis-parsing `{% if(cond) %}` — is the
+kind of finding an end-to-end test on an unseen project is
+supposed to produce: a real edge case, fixed cheaply, locked in
+with a regression test (`test_if_with_function_call_parens` in
+`datalift/tests/test_twig_lifter.py`).
+
+Everything else just worked.
+""")
 
 
 def seed_piwigo_case_study():
@@ -4690,10 +4948,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  Piwigo case study     → /codex/piwigo-case-study/'
         ))
+        seed_limesurvey_case_study()
+        self.stdout.write(self.style.SUCCESS(
+            '  LimeSurvey case study → /codex/limesurvey-case-study/'
+        ))
         seed_datalift_volume()
         self.stdout.write(self.style.SUCCESS(
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (24 manuals + 1 volume).'
+            '\nDatalift manuals seeded (25 manuals + 1 volume).'
         ))

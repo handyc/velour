@@ -106,8 +106,35 @@ def _translate_block_body(body: str, skipped: list[str]) -> str:
     s = body.strip()
     if not s:
         return ''
-    head = s.split(None, 1)[0]
-    rest = s[len(head):].strip()
+    # Extract the leading keyword. LimeSurvey-style templates like
+    # `{% if(condition) %}` have no whitespace between `if` and `(`,
+    # so plain whitespace-split misclassifies them. Match the leading
+    # word-token, treating any non-word follow-up as `rest`.
+    head_m = re.match(r'(\w+)', s)
+    if not head_m:
+        head = s.split(None, 1)[0]
+        rest = s[len(head):].strip()
+    else:
+        head = head_m.group(1)
+        rest = s[head_m.end():].strip()
+        # Strip a single set of wrapping parens around `rest` when the
+        # call style was `{% if(cond) %}` — Twig allows this and Django
+        # accepts the same expression without them.
+        if rest.startswith('(') and rest.endswith(')'):
+            inner = rest[1:-1].strip()
+            # Only strip if the parens are balanced from one to the other.
+            depth = 0
+            ok = True
+            for j, ch in enumerate(inner):
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth < 0:
+                        ok = False
+                        break
+            if ok and depth == 0:
+                rest = inner
 
     # Direct passthroughs — Django has these tags with the same names.
     if head in ('if', 'elseif', 'else', 'endif',
