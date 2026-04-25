@@ -716,7 +716,24 @@ def _translate_eloquent_chains(text: str) -> str:
 # Each rule: (pattern, replacement). Replacement may use named groups.
 
 _BODY_RULES: list[tuple[re.Pattern[str], object]] = [
-    # `view('foo.bar', $data)` → `render(request, 'foo/bar.html', data)`
+    # `$this->view->make('foo.bar', $data)` — Pterodactyl-style view
+    # rendering through an injected View service. Translates to the
+    # same `render()` call as the global `view()` helper.
+    (re.compile(
+        r"\$this->view->make\(\s*(['\"])(?P<view>[^'\"]+)\1"
+        r"(?:\s*,\s*(?P<data>[^)]+))?\)"
+    ),
+     lambda m: ("render(request, '"
+                + m.group('view').replace('.', '/') + ".html'"
+                + (', ' + _translate_php_expr(m.group('data')) if m.group('data') else '')
+                + ")")),
+
+    # Same pattern but with `with()` chaining the data:
+    # `$this->view->make('foo.bar')->with('users', $users)` — too
+    # contextual; flag it for the porter.
+    # (Handled by the `$this->` smell rule below.)
+
+    # `view('foo.bar', $data)` — the global Laravel helper.
     (re.compile(
         r"view\(\s*(['\"])(?P<view>[^'\"]+)\1"
         r"(?:\s*,\s*(?P<data>[^)]+))?\)"

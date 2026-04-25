@@ -157,6 +157,13 @@ class BodyTranslationTests(SimpleTestCase):
         out, _ = translate_method_body(php)
         self.assertIn("redirect('users.index')", out)
 
+    def test_this_view_make(self):
+        """Pterodactyl-style $this->view->make() — translates same
+        as the global view() helper."""
+        php = "return $this->view->make('admin.api.index', ['keys' => $keys]);"
+        out, _ = translate_method_body(php)
+        self.assertIn("render(request, 'admin/api/index.html'", out)
+
     def test_redirect_path(self):
         php = "return redirect('/login');"
         out, _ = translate_method_body(php)
