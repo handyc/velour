@@ -415,12 +415,14 @@ def _rewrite_code(chunk: str) -> str:
                    'finally', 'raise', 'except', 'try', 'else')
     for kw in method_kws:
         s = re.sub(rf'\.{kw}(?=\s*[(\[])', f'.{kw}_', s)
-    # As a variable being assigned or used as parameter name:
-    # `class = None`, `def foo(continue=None)`.
+    # As a variable being assigned, used as parameter name, or
+    # subscripted: `class = None`, `def foo(continue=None)`,
+    # `with['key']`. Renames any standalone occurrence of a
+    # Python keyword that's followed by `=`, `,`, `)`, or `[`.
     for kw in ('class', 'global', 'continue', 'pass', 'def',
                 'lambda', 'from', 'import', 'as', 'with',
                 'yield', 'nonlocal', 'finally'):
-        s = re.sub(rf'\b{kw}\b(?=\s*[=,)])', f'{kw}_', s)
+        s = re.sub(rf'\b{kw}\b(?=\s*[=,)\[])', f'{kw}_', s)
         s = re.sub(rf'(?<=[(,]\s){kw}\b', f'{kw}_', s)
 
     # PHP type casts `(int) expr` are handled in a dedicated
@@ -432,9 +434,20 @@ def _rewrite_code(chunk: str) -> str:
     # version that handles nested parens like
     #   `($x->y() == 'show') ? 'a' : 'b'`
 
-    # `??` and `.=`
+    # `??` (null-coalesce) and `?:` (Elvis: `$x ?: $default` →
+    # `$x or $default`). Both compile to Python `or`.
     s = re.sub(r'\s*\?\?\s*', ' or ', s)
+    s = re.sub(r'\s*\?\s*:\s*', ' or ', s)
     s = s.replace('.=', '+=')
+
+    # PHP `static $var` (function-scoped static) — strip `static`;
+    # Python doesn't have function-scoped statics. Porter rewires
+    # via class attribute or default-mutable-arg trick.
+    s = re.sub(r'\bstatic\s+(?=\w)', '', s)
+
+    # PHP callable syntax `[&$this, 'method']` (passing a method
+    # reference) — strip the `&`. Python uses bound methods directly.
+    s = re.sub(r'\[\s*&\s*', '[', s)
     return s
 
 
@@ -921,6 +934,53 @@ def _balanced_bracket(s: str, open_idx: int) -> int | None:
                 return i
         i += 1
     return None
+
+
+def _rewrite_multiline_strings(s: str) -> str:
+    """PHP single- and double-quoted strings can contain literal
+    newlines (`$sql = 'SELECT *\nFROM users';`). Python single-line
+    quotes can't. Convert any string literal that spans a newline
+    into a triple-quoted form so it survives compilation.
+
+    Also strips raw `\\u` and `\\x` escape sequences inside
+    single-quoted strings — PHP doesn't interpret them, but Python
+    would try and fail on truncated forms (`'C:\\users\\foo'`).
+    """
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if ch in ("'", '"'):
+            # Find the matching closing quote (string-aware, escape-aware).
+            j = i + 1
+            while j < n:
+                if s[j] == '\\' and j + 1 < n:
+                    j += 2
+                    continue
+                if s[j] == ch:
+                    break
+                j += 1
+            if j >= n:
+                out.append(s[i:])
+                break
+            literal = s[i:j + 1]
+            # Multi-line? Convert to triple-quoted.
+            if '\n' in literal:
+                inner = literal[1:-1]
+                # Python triple-quoted form. Escape any `'''` inside.
+                inner = inner.replace("'''", r"\'\'\'")
+                out.append("'''" + inner + "'''")
+            elif ch == "'" and ('\\u' in literal or '\\x' in literal):
+                # Use a raw single-line string so Python doesn't
+                # try to interpret PHP-meaningless escapes.
+                out.append('r' + literal)
+            else:
+                out.append(literal)
+            i = j + 1
+            continue
+        out.append(ch); i += 1
+    return ''.join(out)
 
 
 def _translate_expr(expr: str) -> str:
@@ -1510,6 +1570,15 @@ def _translate_simple_statement(stmt: str) -> str:
     return _translate_expr(s)
 
 
+_PY_KEYWORDS_AS_PARAM = frozenset((
+    'class', 'global', 'continue', 'pass', 'def', 'lambda',
+    'from', 'import', 'as', 'with', 'yield', 'nonlocal',
+    'finally', 'raise', 'return', 'try', 'except', 'else',
+    'if', 'elif', 'while', 'for', 'in', 'is', 'and', 'or',
+    'not', 'None', 'True', 'False',
+))
+
+
 def _translate_php_param_list(args_src: str) -> str:
     if not args_src.strip():
         return ''
@@ -1523,6 +1592,9 @@ def _translate_php_param_list(args_src: str) -> str:
         if not m:
             continue
         name = m.group('name')
+        # Python reserved word as parameter? Suffix with `_`.
+        if name in _PY_KEYWORDS_AS_PARAM:
+            name = name + '_'
         if m.group('def'):
             out.append(f'{name}={_translate_expr(m.group("def").strip())}')
         else:
@@ -1568,6 +1640,11 @@ _CONST_RE = re.compile(
 def parse_file(php: str, source: Path | None = None) -> PhpFile:
     """Parse one PHP file into PhpFile records."""
     src = strip_php_comments(php)
+    # Pre-pass: convert multi-line single/double-quoted strings into
+    # triple-quoted form (Python single-line quotes can't span lines)
+    # and prefix `r` to single-quoted strings carrying `\u`/`\x`
+    # escape sequences (PHP doesn't interpret them; Python would).
+    src = _rewrite_multiline_strings(src)
     rec = PhpFile(source=source or Path('file.php'))
     nm = _NAMESPACE_RE.search(src)
     if nm:
