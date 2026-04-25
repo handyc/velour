@@ -868,6 +868,8 @@ predictable enough to re-run.
 | `liftwp`      | Translate a WordPress PHP theme into Django templates+views+urls.|
 | `liftsmarty`  | Translate a Smarty `.tpl` theme (Piwigo, older PrestaShop).      |
 | `liftwig`     | Translate a Twig `.twig` template tree (Drupal 8+, Symfony, Slim).|
+| `liftblade`   | Translate a Laravel Blade `.blade.php` view tree.                |
+| `liftvolt`    | Translate a Phalcon Volt `.volt` template tree.                  |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -2310,6 +2312,153 @@ additions.
 """)
 
 
+def seed_liftblade_guide():
+    m = upsert_manual(
+        'liftblade-guide',
+        title='liftblade',
+        subtitle='A deterministic Laravel-Blade-to-Django translator',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftblade translates a tree of Laravel Blade `.blade.php` '
+            'view files into Django templates. Blade uses `@directive` '
+            'syntax and `{{ $var }}` echoes; the translator handles '
+            'the standard control-flow / inheritance / auth / form '
+            'helpers and is honest about the long tail. Validated '
+            'end-to-end against Pterodactyl Panel\'s 51 admin views: '
+            'zero unhandled fragments.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftblade /path/to/resources/views \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Files matching `*.blade.php` are translated; their `.blade.php`
+suffix is stripped and `.html` is appended. Subdirectories are
+preserved so Laravel's dotted view names (`@include('layouts.app')`)
+remap to filesystem paths (`templates/<app>/layouts/app.html`).
+""")
+
+    upsert_section(m, 'translation', 1, 'Translation table', """
+| Blade                                | Django                                  |
+|---|---|
+| `{{ $var }}`                         | `{{ var }}`                             |
+| `{{ $obj->prop }}`                   | `{{ obj.prop }}`                        |
+| `{!! $html !!}`                      | `{{ html\\|safe }}`                      |
+| `{{-- comment --}}`                  | `{# comment #}`                         |
+| `@{{ literal }}`                     | `{% verbatim %}{{ literal }}{% endverbatim %}` |
+| `@if($x)/@elseif/@else/@endif`       | `{% if x %}/{% elif %}/{% else %}/{% endif %}` |
+| `@unless($x)/@endunless`             | `{% if not x %}/{% endif %}`            |
+| `@isset($x)/@endisset`               | `{% if x %}/{% endif %}`                |
+| `@empty($x)/@endempty`               | `{% if not x %}/{% endif %}`            |
+| `@foreach($items as $item)`          | `{% for item in items %}`               |
+| `@foreach($items as $key => $val)`   | `{% for key, val in items.items %}`     |
+| `@extends('layouts.app')`            | `{% extends 'layouts/app.html' %}`      |
+| `@include('partials.nav')`           | `{% include 'partials/nav.html' %}`     |
+| `@yield('content')`                  | `{% block content %}{% endblock %}`     |
+| `@yield('title', 'Default')`         | `{% block title %}Default{% endblock %}`|
+| `@section('c')...@endsection`        | `{% block c %}...{% endblock %}`        |
+| `@section('title', 'Hi')`            | `{% block title %}Hi{% endblock %}`     |
+| `@auth/@endauth`                     | `{% if user.is_authenticated %}/{% endif %}` |
+| `@guest/@endguest`                   | `{% if not user.is_authenticated %}/{% endif %}` |
+| `@csrf`                              | `{% csrf_token %}`                      |
+| `@lang('msg')`                       | `msg` (literal — no catalog at template-time) |
+| `@parent`                            | `{{ block.super }}`                     |
+
+Plugin directives (`@livewire`, `@vite`, etc.) are not in the
+core allowlist and pass through **verbatim** — Django renders
+them as literal text and the porter sees exactly where to wire
+the equivalent. CSS `@import` / `@media` / `@font-face` and
+JS docblock `@var` survive intact for the same reason.
+""")
+
+    upsert_section(m, 'limitations', 2, 'Known limitations', """
+- **Method calls in expressions.** `{{ $user->getName() }}` becomes
+  `{{ user.getName() }}` — Django will fail to resolve the call;
+  the porter wires either a method on the model or a context var.
+- **`@php ... @endphp` blocks** — Django has no inline-PHP
+  equivalent. Emitted as a porter marker.
+- **`@for($i = 0; $i < N; $i++)`** — C-style loops. Porter rewrites
+  to `{% for %}` over a range.
+- **Components (`@component / @endcomponent`)** — porter wires via
+  custom Django template tags or `{% include with %}`.
+- **`@case / @break`** in a switch — Django has no switch tag.
+""")
+
+    upsert_section(m, 'corpora', 3,
+                   'Tested against Pterodactyl Panel', """
+Pterodactyl Panel (game-server admin, Laravel 9-era, ~50 admin
+views) was the corpus that drove the directive-allowlist design.
+Initial run flagged 43 fragments; after recognising `@lang` and
+adding the allowlist (so CSS `@import` / `@media` inside
+`<style>` blocks and Blade `@foreach` with whitespace between
+the name and parens both worked), it lifted clean.
+
+| Theme              | Templates | Unhandled |
+|---|---:|---:|
+| Pterodactyl Panel  | 51        | 0         |
+
+Iteration sparkline: [[spark:43,0 | bar]]
+""")
+
+
+def seed_liftvolt_guide():
+    m = upsert_manual(
+        'liftvolt-guide',
+        title='liftvolt',
+        subtitle='A deterministic Phalcon Volt translator',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftvolt translates Phalcon Volt `.volt` templates into '
+            'Django. Volt is largely Twig-shaped, so the translator '
+            'is a thin wrapper around liftwig: a pre-pass swaps '
+            '`.volt` extensions in include/extends paths, then the '
+            'Twig translator does the rest.'
+        ),
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftvolt /path/to/views \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Files ending in `.volt` are translated to `.html`. The translator
+delegates to liftwig once `.volt` paths are remapped, so the full
+Twig translation table applies (see the liftwig manual).
+""")
+
+    upsert_section(m, 'differences', 1,
+                   'How Volt differs from Twig', """
+The differences are small enough that liftvolt is a 100-line
+wrapper around liftwig:
+
+- **File extension.** `.volt` → `.html` (not `.html.volt`).
+- **`{% extends 'X.volt' %}`** swaps to `'X.html'` (the same way
+  liftwig swaps `.html.twig` → `.html`).
+- **No other syntactic differences** that affect translation.
+  Volt has Phalcon-specific helpers (`url('/path')`, `static_url`)
+  but those pass through as Twig function calls — the porter
+  wires custom Django template tags or context variables.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -2655,6 +2804,8 @@ def seed_datalift_volume():
             'liftwp-guide',
             'liftsmarty-guide',
             'liftwig-guide',
+            'liftblade-guide',
+            'liftvolt-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3076,6 +3227,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftwig Guide         → /codex/liftwig-guide/'
         ))
+        seed_liftblade_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftblade Guide       → /codex/liftblade-guide/'
+        ))
+        seed_liftvolt_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftvolt Guide        → /codex/liftvolt-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3097,5 +3256,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (14 manuals + 1 volume).'
+            '\nDatalift manuals seeded (16 manuals + 1 volume).'
         ))

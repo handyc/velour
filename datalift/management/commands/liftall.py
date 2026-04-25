@@ -38,6 +38,8 @@ THEME_TYPE_TO_COMMAND = {
     'wp':      'liftwp',
     'smarty':  'liftsmarty',
     'twig':    'liftwig',
+    'blade':   'liftblade',
+    'volt':    'liftvolt',
 }
 
 
@@ -60,7 +62,8 @@ class Command(BaseCommand):
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
             help='Theme template language: wp (WordPress PHP themes), '
-                 'smarty (.tpl), or twig (.twig).',
+                 'smarty (.tpl), twig (.twig), blade (.blade.php), or '
+                 'volt (.volt).',
         )
         parser.add_argument('--migrate', action='store_true',
                             help='Run makemigrations + migrate after genmodels.')
