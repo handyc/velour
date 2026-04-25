@@ -48,6 +48,7 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftphp` | Scan a legacy PHP tree for secrets / PII before sharing it |
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
 | `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
+| `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
 
 ## `genmodels` — what it infers
@@ -210,6 +211,10 @@ What it translates deterministically:
   → Django `{% include 'wp/X.html' %}`
 * `the_title()` / `the_content()` / `the_excerpt()` / `the_permalink()` /
   `the_date()` / `the_author()` / `the_ID()` / `the_category()` / `the_tags()`
+* Comment loop: `have_comments()`, `wp_list_comments()`, `comments_number()`,
+  `comment_author()`, `comment_text()`, `comment_date()` (read-only)
+* Pagination: `next_posts_link()`, `previous_posts_link()`, `the_posts_pagination()`
+* Archive titles: `the_archive_title()`, `single_cat_title()`, `single_tag_title()`
 * `bloginfo('name'|'description'|'charset'|'url'|'stylesheet_url')`
 * `wp_head()` / `wp_footer()` → empty Django blocks
 * `language_attributes()` / `body_class()` / `post_class()`
@@ -218,15 +223,35 @@ What it translates deterministically:
 * Short-echo `<?= expr ?>`
 * Standard theme files: `index.php`, `single.php`, `page.php`,
   `archive.php`, `404.php`, `search.php`, plus partials
-  (`header.php`, `footer.php`, `sidebar.php`, etc.)
+  (`header.php`, `footer.php`, `sidebar.php`, `comments.php`, etc.)
 
-What it explicitly does NOT translate (Phase 1 — flagged in the
-worklist instead):
+URL surface generated:
+
+* `/` — paginated post list (`?page=N`)
+* `/post/<id>/` — single post (with comments)
+* `/page/<id>/` — single page
+* `/category/<slug>/` — paginated category archive
+* `/tag/<slug>/` — paginated tag archive
+* `/<year>/` and `/<year>/<month>/` — date archives
+* `/search/?s=<q>` — search by title OR content
+
+Default partial templates are auto-emitted (and only auto-emitted)
+when a translated theme references them but didn't ship its own
+copy: `comments.html`, `comment.html`, `pagination.html`,
+`searchform.html`, `sidebar.html`. Auto-emission is fixed-point —
+e.g. the default `sidebar.html` includes `searchform.html`, so
+both land. Defaults degrade gracefully — `searchform.html` uses
+`{% url ... as %}` so the form falls back to `action="/"` if no
+`wp_search` route exists.
+
+What it explicitly does NOT translate (flagged in the worklist
+instead):
 
 * Custom post types, shortcodes
 * Plugin hooks (`add_action`, `add_filter`)
 * Theme options pages, widgets, admin screens
-* Comment submission (display only)
+* Comment submission (display only — `comment_form()` returns a
+  no-op marker)
 * AJAX endpoints, REST API routes
 * `functions.php` / `*.functions.php` / non-standard PHP files
 
@@ -254,13 +279,30 @@ urlpatterns = [
 ]
 ```
 
+## `browsershot` — visual verification of lifted sites
+
+Headless-browser PNG screenshot of any URL, useful for visually
+diffing the original site against the datalifted port:
+
+```bash
+python manage.py browsershot https://legacy-site.example/post/42 \
+    --out /tmp/before.png
+python manage.py browsershot http://127.0.0.1:7778/post/42/ \
+    --out /tmp/after.png
+# compare the two PNGs by eye, or pipe through ImageMagick `compare`
+```
+
+Backed by Playwright + Chromium (already in the venv). Returns a
+full-page PNG by default; `--viewport-only` truncates to the
+first 1280×800. See `:mod:datalift.browsershot` for the Python API.
+
 ## Running the tests
 
 ```bash
 venv/bin/python manage.py test datalift.tests
 ```
 
-206 tests, ~30 ms. Every corpus-level bug we've fixed has a
+232 tests, ~30 ms. Every corpus-level bug we've fixed has a
 named regression here.
 
 ## Known limits
