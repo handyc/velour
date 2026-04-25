@@ -65,6 +65,12 @@ class Command(BaseCommand):
                                  '(routes/ + app/Http/Controllers/). '
                                  'Triggers liftlaravel — emits urls_laravel.py '
                                  'and views_laravel.py.')
+        parser.add_argument('--migrations-dir', default=None,
+                            help='Path to a Laravel database/migrations/ '
+                                 'directory. Triggers liftmigrations — '
+                                 'emits models_migrations.py from Schema::create '
+                                 'blueprints. Useful when the source has '
+                                 'no SQL dump.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -215,7 +221,28 @@ class Command(BaseCommand):
         else:
             summary.append('6. theme: SKIPPED (no --theme-dir)')
 
-        # ── 7. Laravel routes + controllers ───────────────────────
+        # ── 7a. Laravel migrations → models ───────────────────────
+        migrations_dir = (Path(opts['migrations_dir']).resolve()
+                          if opts['migrations_dir'] else None)
+        if migrations_dir:
+            if not migrations_dir.is_dir():
+                raise CommandError(
+                    f'--migrations-dir is not a directory: {migrations_dir}'
+                )
+            self._step(7, f'liftmigrations ({migrations_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftmigrations', str(migrations_dir), **kwargs)
+                summary.append(f'7. liftmigrations: ok ({migrations_dir})')
+            except Exception as e:
+                summary.append(f'7. liftmigrations: FAILED ({e})')
+                raise
+        else:
+            summary.append('7. liftmigrations: SKIPPED (no --migrations-dir)')
+
+        # ── 7b. Laravel routes + controllers ──────────────────────
         if laravel_dir:
             self._step(7, f'liftlaravel ({laravel_dir.name})')
             try:

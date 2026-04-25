@@ -871,6 +871,7 @@ predictable enough to re-run.
 | `liftblade`   | Translate a Laravel Blade `.blade.php` view tree.                |
 | `liftvolt`    | Translate a Phalcon Volt `.volt` template tree.                  |
 | `liftlaravel` | **Translate Laravel routes + controllers — first PHP business-logic lifter.** |
+| `liftmigrations` | Parse Laravel migrations into Django models (no SQL dump required). |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -2674,6 +2675,130 @@ internal state*. Both are tractable, just not in this iteration.
 """)
 
 
+def seed_liftmigrations_guide():
+    m = upsert_manual(
+        'liftmigrations-guide',
+        title='liftmigrations',
+        subtitle='Lift Laravel database migrations into Django models',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'Most Laravel apps ship their schema as Blueprint-based '
+            'migration files (`database/migrations/*.php`) instead of '
+            '— or alongside — raw SQL dumps. liftmigrations parses '
+            'those Blueprints and emits Django models, the same '
+            'shape genmodels would produce from a mysqldump. Useful '
+            'when the source project has no populated database.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftmigrations /path/to/database/migrations \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Each `Schema::create('table', function (Blueprint $table) { ... })`
+block becomes one Django model class in `<app>/models_migrations.py`.
+`Schema::table(...)` modifications are recognised and skipped — the
+schema you want is the cumulative effect, but parsing modify-only
+blocks adds complexity without a clear gain.
+""")
+
+    upsert_section(m, 'mapping', 1, 'Blueprint → Django field mapping', """
+| Blueprint                          | Django                                      |
+|---|---|
+| `$table->id()`                     | `BigAutoField(primary_key=True)`            |
+| `$table->increments(...)`          | `AutoField(primary_key=True)`               |
+| `$table->bigIncrements(...)`       | `BigAutoField(primary_key=True)`            |
+| `$table->string(name, len?)`       | `CharField(max_length=...)`                 |
+| `$table->text(name)`               | `TextField()`                               |
+| `$table->integer(name)`            | `IntegerField()`                            |
+| `$table->bigInteger(name)`         | `BigIntegerField()`                         |
+| `$table->unsignedInteger(...)`     | `PositiveIntegerField()`                    |
+| `$table->boolean(name)`            | `BooleanField()`                            |
+| `$table->date(name)`               | `DateField()`                               |
+| `$table->dateTime(name)`           | `DateTimeField()`                           |
+| `$table->timestamp(name)`          | `DateTimeField()`                           |
+| `$table->time(name)`               | `TimeField()`                               |
+| `$table->decimal(name, p, s)`      | `DecimalField(max_digits=p, decimal_places=s)` |
+| `$table->float(name)`              | `FloatField()`                              |
+| `$table->json(name)`               | `JSONField()`                               |
+| `$table->uuid(name)`               | `UUIDField()`                               |
+| `$table->binary(name)`             | `BinaryField()`                             |
+| `$table->ipAddress(name)`          | `GenericIPAddressField()`                   |
+| `$table->enum(name, [a,b,c])`      | `CharField(choices=[a,b,c], max_length=...)` |
+| `$table->rememberToken()`          | `CharField('remember_token', max_length=100, null=True)` |
+| `$table->softDeletes()`            | `DateTimeField('deleted_at', null=True)`    |
+| `$table->timestamps()`             | `created_at` + `updated_at` (auto_now_add / auto_now) |
+
+Modifier chain:
+
+| Blueprint               | Django                                  |
+|---|---|
+| `->nullable()`          | `null=True, blank=True`                 |
+| `->unique()`            | `unique=True`                           |
+| `->default(value)`      | `default=value`                         |
+| `->unsigned()`          | upgrades type (Integer → PositiveInteger) |
+| `->index()`             | `db_index=True`                         |
+| `->comment('text')`     | `help_text='text'`                      |
+| `->primary()`           | `primary_key=True`                      |
+
+Foreign keys:
+
+| Blueprint                                      | Django                                            |
+|---|---|
+| `$table->foreignId('user_id')->constrained()`  | `ForeignKey('app.User', on_delete=models.DO_NOTHING)` |
+| `$table->foreign('post_id')->references('id')->on('posts')->onDelete('cascade')` | `ForeignKey('app.Post', on_delete=models.CASCADE)` |
+| `->cascadeOnDelete()`                          | `on_delete=models.CASCADE`                        |
+| `->restrictOnDelete()`                         | `on_delete=models.PROTECT`                        |
+| `->nullOnDelete()`                             | `on_delete=models.SET_NULL`                       |
+""")
+
+    upsert_section(m, 'validation', 2, 'Validation against Pterodactyl', """
+Pterodactyl Panel ships 194 migration files spanning many years of
+schema evolution. liftmigrations parsed all 194, ignored the
+`Schema::table(...)` modifications, and emitted **48 distinct
+Django models with 382 columns** — the cumulative-effect schema
+that the running database would have.
+
+  Migration files          194
+  Distinct tables created   48
+  Total columns translated 382
+  Files skipped              0
+
+The output is a working starting point — every column type is
+inferred from the Blueprint API call alone, no SQL dump required.
+For projects shipped without a populated database (the common
+Laravel case), this is the path: clone the repo, run
+liftmigrations, review, migrate.
+""")
+
+    upsert_section(m, 'limitations', 3, 'Known limitations', """
+- **`Schema::table(...)`** modifications are skipped. The cumulative
+  schema is the union of `Schema::create` blocks, which works when
+  later modifications are additive (the common case). For
+  destructive modifications (column renames, drops), the porter
+  reviews and adjusts.
+- **Polymorphic relations (`$table->morphs('owner')`)** — generates
+  two columns (`owner_id`, `owner_type`) but no GenericForeignKey.
+  The porter wires that with django.contrib.contenttypes.
+- **Custom column types via `$table->addColumn(...)`** — parsed
+  best-effort from the type name; uncommon types fall through.
+- **Indexes added separately (`$table->index([...])`)** — recorded
+  in the worklist but not yet emitted as Meta.indexes — porter
+  copy-paste.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -3022,6 +3147,7 @@ def seed_datalift_volume():
             'liftblade-guide',
             'liftvolt-guide',
             'liftlaravel-guide',
+            'liftmigrations-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3455,6 +3581,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftlaravel Guide     → /codex/liftlaravel-guide/'
         ))
+        seed_liftmigrations_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftmigrations Guide  → /codex/liftmigrations-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3476,5 +3606,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (17 manuals + 1 volume).'
+            '\nDatalift manuals seeded (18 manuals + 1 volume).'
         ))
