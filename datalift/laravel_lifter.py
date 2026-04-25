@@ -453,10 +453,269 @@ def render_urls(routes: list[RouteRecord], app_label: str = 'app') -> str:
 
 # ── Controller body translation ───────────────────────────────────
 
+# ── Eloquent query builder translation ───────────────────────────
+#
+# Eloquent chains like
+#   User::where('age', '>', 18)->whereNull('deleted_at')->orderBy('name')->get()
+# translate to
+#   User.objects.filter(age__gt=18, deleted_at__isnull=True).order_by('name')
+#
+# Step 1: translate ``Model::method(...)`` openers to
+# ``Model.objects.method(...)`` shape.
+# Step 2: translate chained ``->method(...)`` calls one at a time.
+# Step 3: drop terminal ``->get()`` / ``->all()`` (Django querysets are
+# lazy; the chain itself is the queryset).
+
+_ELOQUENT_OP_TO_DJANGO = {
+    '=':  '',
+    '<>': '_NEG_',
+    '!=': '_NEG_',
+    '>':  '__gt',
+    '>=': '__gte',
+    '<':  '__lt',
+    '<=': '__lte',
+    'like':     '__icontains',
+    'not like': '_NEG_icontains',
+}
+
+
+def _eloquent_where_to_filter(args: str) -> str:
+    """Translate the args of a ``where(...)`` call to Django filter kwargs.
+
+    ``where('age', '>', 18)``       → ``age__gt=18``
+    ``where('name', 'Jane')``       → ``name='Jane'``
+    ``where('deleted_at', '!=', null)`` → ``.exclude(deleted_at=null)``
+        (handled by the caller; we return a sentinel.)
+    """
+    # Split on top-level commas.
+    parts = _split_top_level_commas(args)
+    if len(parts) == 2:
+        col = parts[0].strip().strip("'\"")
+        val = _translate_php_expr(parts[1].strip())
+        return f'{col}={val}'
+    if len(parts) == 3:
+        col = parts[0].strip().strip("'\"")
+        op = parts[1].strip().strip("'\"").lower()
+        val = _translate_php_expr(parts[2].strip())
+        suffix = _ELOQUENT_OP_TO_DJANGO.get(op)
+        if suffix is None:
+            return f'{col}={val}  # eloquent op {op!r}'
+        if suffix.startswith('_NEG_'):
+            # Caller should turn this into .exclude(...) instead.
+            inner = suffix[len('_NEG_'):]
+            tail = inner if inner else ''
+            return f'__EXCLUDE__:{col}{tail}={val}'
+        return f'{col}{suffix}={val}'
+    return f'  # eloquent where(...) with {len(parts)} args — port manually'
+
+
+def _split_top_level_commas(s: str) -> list[str]:
+    out: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    in_str: str | None = None
+    for ch in s:
+        if in_str:
+            buf.append(ch)
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+            buf.append(ch)
+            continue
+        if ch in '([{':
+            depth += 1
+            buf.append(ch)
+        elif ch in ')]}':
+            depth -= 1
+            buf.append(ch)
+        elif ch == ',' and depth == 0:
+            out.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        out.append(''.join(buf))
+    return out
+
+
+# Match a chained Eloquent call: ->method(args). Handles balanced
+# parens with simple recursion (good enough for one level of nesting).
+_CHAIN_CALL_RE = re.compile(
+    r"->(?P<m>\w+)\((?P<a>(?:[^()]|\([^()]*\))*)\)"
+)
+
+# Static opener: Model::method(args), where Model starts capital.
+_STATIC_CALL_RE = re.compile(
+    r"\b(?P<model>[A-Z]\w*)::(?P<m>\w+)\((?P<a>(?:[^()]|\([^()]*\))*)\)"
+)
+
+
+def _translate_chain_call(method: str, args: str) -> str:
+    """Translate one ``->method(args)`` chain step. Returns the
+    Django ORM equivalent (without the leading dot)."""
+    a = args.strip()
+    if method == 'where':
+        kw = _eloquent_where_to_filter(a)
+        if kw.startswith('__EXCLUDE__:'):
+            return f"exclude({kw[len('__EXCLUDE__:'):]})"
+        return f'filter({kw})'
+    if method == 'whereNull':
+        col = a.strip().strip("'\"")
+        return f'filter({col}__isnull=True)'
+    if method == 'whereNotNull':
+        col = a.strip().strip("'\"")
+        return f'filter({col}__isnull=False)'
+    if method == 'whereIn':
+        parts = _split_top_level_commas(a)
+        if len(parts) == 2:
+            col = parts[0].strip().strip("'\"")
+            return f'filter({col}__in={_translate_php_expr(parts[1].strip())})'
+    if method == 'whereNotIn':
+        parts = _split_top_level_commas(a)
+        if len(parts) == 2:
+            col = parts[0].strip().strip("'\"")
+            return f'exclude({col}__in={_translate_php_expr(parts[1].strip())})'
+    if method == 'whereBetween':
+        parts = _split_top_level_commas(a)
+        if len(parts) == 2:
+            col = parts[0].strip().strip("'\"")
+            return (f'filter({col}__range='
+                    f'{_translate_php_expr(parts[1].strip())})')
+    if method == 'orderBy':
+        parts = _split_top_level_commas(a)
+        col = parts[0].strip().strip("'\"")
+        if len(parts) >= 2 and parts[1].strip().strip("'\"").lower() == 'desc':
+            return f"order_by('-{col}')"
+        return f"order_by('{col}')"
+    if method == 'orderByDesc':
+        col = a.strip().strip("'\"")
+        return f"order_by('-{col}')"
+    if method == 'latest':
+        col = a.strip().strip("'\"") if a.strip() else 'created_at'
+        return f"order_by('-{col}')"
+    if method == 'oldest':
+        col = a.strip().strip("'\"") if a.strip() else 'created_at'
+        return f"order_by('{col}')"
+    if method == 'limit' or method == 'take':
+        # `.limit(10)` / `.take(10)` — Django uses slicing, but we
+        # can't mix that into a chain mid-stream. Emit a marker.
+        return f'[:{ _translate_php_expr(a) }]'
+    if method == 'first':
+        return 'first()'
+    if method == 'count':
+        return 'count()'
+    if method == 'exists':
+        return 'exists()'
+    if method == 'pluck':
+        parts = _split_top_level_commas(a)
+        col = parts[0].strip().strip("'\"")
+        return f"values_list('{col}', flat=True)"
+    if method == 'select':
+        cols = [p.strip().strip("'\"") for p in _split_top_level_commas(a)]
+        return f"values({', '.join(repr(c) for c in cols)})"
+    if method == 'distinct':
+        return 'distinct()'
+    if method in ('get', 'all', 'cursor'):
+        # Django querysets are lazy; the terminal -> drops.
+        return ''
+    if method == 'find':
+        return f'filter(id={_translate_php_expr(a)}).first()'
+    if method == 'findOrFail':
+        return f'filter(id={_translate_php_expr(a)}).first()  # findOrFail — port to get_object_or_404'
+    if method == 'paginate':
+        return 'all()  # paginate — wrap in Paginator at the view level'
+    if method == 'with':
+        parts = [p.strip().strip("'\"") for p in _split_top_level_commas(a)]
+        return f'select_related({", ".join(repr(p) for p in parts)})'
+    return f'{method}({_translate_php_expr(a)})  # eloquent — port manually'
+
+
+# Names that look like models but are actually Laravel facades / global
+# helpers — the chain translator must not touch their static calls,
+# they're handled by _BODY_RULES instead.
+_FACADE_NAMES = {
+    'Auth', 'DB', 'Mail', 'Cache', 'Session', 'Storage', 'Queue',
+    'Redis', 'Log', 'Config', 'Lang', 'Hash', 'Crypt', 'Cookie',
+    'Event', 'File', 'Gate', 'Notification', 'Password', 'Schema',
+    'Validator', 'View', 'Response', 'Request', 'Route', 'URL',
+    'Artisan', 'Bus', 'Broadcast',
+}
+
+
+def _translate_eloquent_chains(text: str) -> str:
+    """Walk the source, find each ``Model::method(...)->method(...)..->terminal()``
+    chain, and rewrite to a Django ORM expression.
+
+    The chain is recognised lazily — start at any ``Model::`` opener,
+    consume as many `->method(...)` segments as follow with no
+    intervening whitespace beyond what fits in the regex. Skips
+    Laravel facades (Auth, DB, Mail, etc.) so their static calls
+    flow through to _BODY_RULES.
+    """
+    out: list[str] = []
+    pos = 0
+    while pos < len(text):
+        m = _STATIC_CALL_RE.search(text, pos)
+        if not m:
+            out.append(text[pos:])
+            break
+        out.append(text[pos:m.start()])
+        model = m.group('model')
+        method = m.group('m')
+        args = m.group('a')
+        end = m.end()
+
+        # Skip facades — those have dedicated rules in _BODY_RULES.
+        if model in _FACADE_NAMES:
+            out.append(text[m.start():m.end()])
+            pos = end
+            continue
+
+        # Skip if the static method is one we already have a rule for
+        # in _BODY_RULES (e.g. all(), find, findOrFail, create, count).
+        # We let _BODY_RULES handle those.
+        if method in {'all', 'find', 'findOrFail', 'create',
+                       'count', 'first'}:
+            out.append(text[m.start():m.end()])
+            pos = end
+            continue
+
+        # Begin a chain
+        chain_parts: list[str] = []
+        opener = _translate_chain_call(method, args)
+        if opener:
+            chain_parts.append(opener)
+
+        # Consume `->method(args)` segments while present.
+        while True:
+            cm = _CHAIN_CALL_RE.match(text, end)
+            if not cm:
+                break
+            cm_method = cm.group('m')
+            cm_args = cm.group('a')
+            tr = _translate_chain_call(cm_method, cm_args)
+            if tr:
+                chain_parts.append(tr)
+            end = cm.end()
+
+        body = '.'.join(chain_parts)
+        if body:
+            out.append(f'{model}.objects.{body}')
+        else:
+            out.append(f'{model}.objects.all()')
+        pos = end
+
+    return ''.join(out)
+
+
+# ── Generic body rule pass ────────────────────────────────────────
+#
 # Order matters in this rule list — earlier rules win.
 # Each rule: (pattern, replacement). Replacement may use named groups.
 
-_BODY_RULES: list[tuple[re.Pattern[str], str | object]] = [
+_BODY_RULES: list[tuple[re.Pattern[str], object]] = [
     # `view('foo.bar', $data)` → `render(request, 'foo/bar.html', data)`
     (re.compile(
         r"view\(\s*(['\"])(?P<view>[^'\"]+)\1"
@@ -587,7 +846,14 @@ def translate_method_body(php_body: str) -> tuple[str, list[str]]:
     skipped: list[str] = []
     body = _strip_php_comments(php_body)
 
-    # Apply rules over the whole body.
+    # Step 1: Collapse Eloquent query-builder chains BEFORE the
+    # generic rule pass, so a chain like
+    #   `User::where('a', $b)->orderBy('c')->get()`
+    # becomes `User.objects.filter(a=b).order_by('c')` in one shot
+    # rather than getting partially shredded by individual rules.
+    body = _translate_eloquent_chains(body)
+
+    # Step 2: Apply the generic rule pass.
     out = body
     for pat, repl in _BODY_RULES:
         out = pat.sub(repl, out) if callable(repl) else pat.sub(repl, out)

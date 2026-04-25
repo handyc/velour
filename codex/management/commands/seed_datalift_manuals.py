@@ -2598,39 +2598,45 @@ design.
 | Controller methods translated       | 323       |
 | Route fragments parsed              | 235       |
 | Unhandled route fragments           | 0         |
-| Controller-method porter markers    | 273       |
+| Controller-method porter markers    | 264       |
 
-The 273 porter markers break down as:
+The 264 porter markers break down as:
 
 | Marker                                     | Count |
 |---|---:|
 | `$this->` (controller-internal call)        | 233   |
-| `.where()` (Eloquent builder)               |  26   |
+| `.where()` (Eloquent builder, complex form) |  18   |
 | `.paginate()` (Eloquent pagination)         |  13   |
-| `Model::where()` (static Eloquent builder)  |   1   |
 
 Iteration sparkline (unhandled route fragments per round):
 [[spark:268,17,0 | bar]] — 268 → 17 → 0. Three rounds:
 namespaced controllers, invokable controllers + Route::fallback.
 
-The translator was honest about Pterodactyl from the first run —
-the very first lift parsed 79 controllers and 323 methods cleanly.
-The route-fragment count fell from 268 to 0 by adding two regex
-forms (namespaced and invokable controllers). The
-`$this->` markers are not a translator gap; they're a
-fundamental difference between Laravel's class-based
-controllers and Django's function-based views, and the porter
-chooses how to bridge them.
+Iteration sparkline (Eloquent porter markers per round):
+[[spark:40,27 | bar]] — 40 → 27. The Eloquent chain translator
+reduces the simple `where`/`orderBy`/`pluck`/`select`/`with`
+patterns to Django ORM directly; complex chains and pagination
+remain porter work.
+
+The remaining `$this->` markers are not a translator gap; they're a
+fundamental difference between Laravel's class-based controllers
+and Django's function-based views. Closing them would mean either
+(a) emitting Django class-based views, which is a much bigger
+shape change, or (b) translating each `$this->service` reference
+into a module-level dependency, which loses the structure.
+Either is a porter judgement call.
 """)
 
     upsert_section(m, 'limitations', 4, 'Known limitations', """
-- **Eloquent query builder chains.** `User::where('age', '>', 18)
-  ->whereNull('deleted_at')->orderBy('name')->paginate(20)` is
-  too context-sensitive for a regex pipeline (the operator
-  argument decides the lookup name; `whereNull` maps differently
-  from `where`). The translator flags these and the porter
-  rewrites to Django ORM. Future work: a richer Eloquent-aware
-  pass that handles the dozen most-common chains.
+- **Eloquent query builder chains** are translated for the common
+  patterns: `where`, `where(col, op, val)` (with `=`, `!=`, `<>`,
+  `<`, `<=`, `>`, `>=`, `like`, `not like`), `whereNull`,
+  `whereNotNull`, `whereIn`, `whereNotIn`, `whereBetween`,
+  `orderBy`, `orderByDesc`, `latest`, `oldest`, `pluck`, `select`,
+  `distinct`, `with`, `find`, `findOrFail`, `limit`/`take`, and the
+  terminal `get`/`all`/`cursor`/`first`/`count`/`exists`. The few
+  patterns we don't translate (`whereHas` with sub-queries,
+  `paginate(N)`, raw SQL fragments) emit a porter marker.
 - **`$this->service->method()`** chains. The `$this` reference is
   flagged because Django views are functions, not methods on a
   controller class. The porter chooses: convert to a class-based

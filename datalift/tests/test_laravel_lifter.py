@@ -209,10 +209,121 @@ class BodyTranslationTests(SimpleTestCase):
         self.assertTrue(any('DB::' in s for s in skipped))
         self.assertIn('LARAVEL-LIFT', out)
 
-    def test_eloquent_where_flagged(self):
+    def test_eloquent_where_translated_not_flagged(self):
+        """As of the chain-translator round, simple where() chains are
+        translated rather than flagged."""
         php = "$users = User::where('active', true)->get();"
         out, skipped = translate_method_body(php)
-        self.assertTrue(any('where' in s.lower() for s in skipped))
+        self.assertIn("User.objects.filter(active=True)", out)
+        self.assertEqual(skipped, [])
+
+
+class EloquentChainTests(SimpleTestCase):
+    """Eloquent query-builder chain translation. The biggest source of
+    porter markers in the first Pterodactyl run was untranslated chains;
+    these tests pin every chain shape we now translate cleanly."""
+
+    def test_simple_where_two_args(self):
+        php = "User::where('email', $email)->first();"
+        out, _ = translate_method_body(php)
+        self.assertIn("User.objects.filter(email=email).first()", out)
+
+    def test_where_with_op(self):
+        php = "User::where('age', '>', 18)->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("User.objects.filter(age__gt=18)", out)
+
+    def test_where_lt_op(self):
+        php = "User::where('age', '<', 65)->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("age__lt=65", out)
+
+    def test_where_gte_lte(self):
+        php = "User::where('a', '>=', 1)->where('b', '<=', 10)->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("a__gte=1", out)
+        self.assertIn("b__lte=10", out)
+
+    def test_where_neq_becomes_exclude(self):
+        php = "User::where('status', '!=', 'banned')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("exclude(status='banned')", out)
+
+    def test_where_like_to_icontains(self):
+        php = "User::where('name', 'like', $q)->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("name__icontains=q", out)
+
+    def test_where_null(self):
+        php = "User::whereNull('deleted_at')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("deleted_at__isnull=True", out)
+
+    def test_where_not_null(self):
+        php = "User::whereNotNull('verified_at')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("verified_at__isnull=False", out)
+
+    def test_where_in(self):
+        php = "User::whereIn('id', [1, 2, 3])->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("id__in=", out)
+
+    def test_order_by(self):
+        php = "User::orderBy('name')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("order_by('name')", out)
+
+    def test_order_by_desc(self):
+        php = "User::orderBy('created_at', 'desc')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("order_by('-created_at')", out)
+
+    def test_latest(self):
+        php = "User::latest()->first();"
+        out, _ = translate_method_body(php)
+        self.assertIn("order_by('-created_at')", out)
+        self.assertIn(".first()", out)
+
+    def test_oldest_with_column(self):
+        php = "User::oldest('updated_at')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("order_by('updated_at')", out)
+
+    def test_pluck(self):
+        php = "User::pluck('email')->all();"
+        out, _ = translate_method_body(php)
+        self.assertIn("values_list('email', flat=True)", out)
+
+    def test_select(self):
+        php = "User::select('id', 'name')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("values('id', 'name')", out)
+
+    def test_distinct(self):
+        php = "User::distinct()->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn(".distinct()", out)
+
+    def test_with_eager_load(self):
+        php = "User::with('posts', 'comments')->get();"
+        out, _ = translate_method_body(php)
+        self.assertIn("select_related('posts', 'comments')", out)
+
+    def test_full_chain(self):
+        php = ("$users = User::where('active', true)"
+               "->whereNull('deleted_at')"
+               "->orderBy('name')"
+               "->limit(10)"
+               "->get();")
+        out, _ = translate_method_body(php)
+        # We translate active=True, deleted_at__isnull=True, order_by('name'),
+        # then [:10] terminal.
+        self.assertIn("User.objects", out)
+        self.assertIn("filter(active=True)", out)
+        self.assertIn("deleted_at__isnull=True", out)
+        self.assertIn("order_by('name')", out)
+        self.assertIn("[:10]", out)
 
 
 class ControllerParsingTests(SimpleTestCase):
