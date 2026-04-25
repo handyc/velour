@@ -48,6 +48,7 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftphp` | Scan a legacy PHP tree for secrets / PII before sharing it |
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
 | `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
+| `liftsmarty` | Translate a Smarty theme directory (`.tpl`) into Django templates |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
