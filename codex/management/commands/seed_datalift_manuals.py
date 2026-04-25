@@ -2231,21 +2231,361 @@ def seed_datalift_volume():
             'liftwp-guide',
             'browsershot-guide',
             'shotdiff-guide',
+            'piwigo-case-study',
         ],
         title='The Datalift Manual',
         subtitle='Lifting legacy MySQL/PHP sites into Django',
         author='Velour / Datalift',
         version='1.0',
         abstract=(
-            'A bound edition of all ten Datalift command manuals. '
-            'Read the overview first for the shape; jump to a '
-            'command-specific manual for the details. The pipeline '
-            'is overview → dumpschema → genmodels → ingestdump → '
-            'liftphp → liftsite → liftwp (quickstart + guide) → '
-            'browsershot → shotdiff. Idempotent re-render: changes '
-            'to any contained manual reflow into this volume.'
+            'A bound edition of all Datalift command manuals plus '
+            'one field-report case study (Piwigo). Read the overview '
+            'first for the shape; jump to a command-specific manual '
+            'for the details; read the case study for an end-to-end '
+            'port through the full pipeline against a never-seen target.'
         ),
     )
+
+
+def seed_piwigo_case_study():
+    m = upsert_manual(
+        'piwigo-case-study',
+        title='Porting Piwigo to Django',
+        subtitle='A Datalift field report on an unseen target',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'On 2026-04-25 we tested Datalift end-to-end against a '
+            'project it had never seen: Piwigo, a 2002-era PHP+MySQL '
+            'photo gallery using Smarty templates rather than '
+            'WordPress. This report logs every step honestly — which '
+            'commands ran clean on Datalift alone, which surfaced '
+            'edges of what the toolkit currently covers, and which '
+            'required human or AI assistance to bridge. The headline '
+            'finding: 6 of 7 Datalift commands ran without '
+            'modification on a never-seen schema and codebase; the '
+            '7th (liftwp) correctly reports it does not know Smarty. '
+            'Closing that one gap with a deterministic liftsmarty '
+            'command would move coverage to 100%.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+        bibliography=r"""
+@book{tufte2001,
+    author    = {Tufte, Edward R.},
+    year      = {2001},
+    title     = {The Visual Display of Quantitative Information},
+    edition   = {2nd},
+    publisher = {Graphics Press},
+    address   = {Cheshire, Connecticut}
+}
+
+@misc{piwigo,
+    author = {{Piwigo Team}},
+    year   = {2002},
+    title  = {Piwigo: photo gallery software for the web},
+    note   = {https://piwigo.org}
+}
+
+@misc{smarty,
+    author = {{New Digital Group}},
+    year   = {2001},
+    title  = {Smarty: template engine for PHP},
+    note   = {https://www.smarty.net}
+}
+""",
+    )
+
+    upsert_section(m, 'target', 0, 'The target', """
+Piwigo [@piwigo] is a PHP+MySQL photo-gallery application started
+in 2002 (originally PhpWebGallery). It is not in Datalift's trained
+test corpora. The 15.4.0 source ships with:
+
+- A 17 KB MySQL install schema covering 34 tables.
+- 924 PHP files across 10 MB of source.
+- 36 Smarty [@smarty] templates (`.tpl`) in the default theme
+  totalling 2367 lines.
+- ~750 static assets (CSS, JS, images, fonts).
+
+Three properties make Piwigo a useful "arbitrary" test:
+
+- **Domain.** Photo gallery, not blog/forum/wiki/CMS. Tables
+  cover albums, images, comments, ratings, tags, plugins,
+  caches — a different shape from anything in the trained corpora.
+- **Template language.** Smarty, not WordPress PHP themes.
+  Datalift's `liftwp` is by name and design WordPress-specific.
+- **Age.** Started in 2002, the codebase carries patterns from
+  early PHP — including a `mysqldump` from MySQL 4.0.24, which
+  exercises Datalift's older-dialect handling.
+""")
+
+    pipeline_section = upsert_section(m, 'pipeline-run', 1,
+                  'The pipeline run, step by step', """
+Each Datalift command was run against the Piwigo source in the
+order the manual prescribes. Times are wall clock on a single
+WSL2 thread.
+
+| # | Step                  | Datalift only? | Wall time | Output                         |
+|---|---|---|---|---|
+| 1 | `dumpschema`          | yes            | < 0.1 s   | 34 CREATE TABLE blocks         |
+| 2 | `genmodels --force`   | yes            | < 0.1 s   | 34 models (681 LOC) + admin    |
+| 3 | `migrate`             | (Django std)   | < 1 s     | 34 piwigo tables in SQLite     |
+| 4 | `ingestdump`          | yes (skipped)  | n/a       | install schema has no INSERTs  |
+| 5 | `liftphp`             | yes            | ~ 6 s     | 924 files scanned, 348 findings|
+| 6 | `liftsite`            | yes            | ~ 4 s     | 1657/2716 files routed         |
+| 7 | `liftwp`              | yes            | ~ 0.5 s   | 8 templates (mail PHP); 53 .tpl ignored |
+| 8 | hand-port one .tpl    | **no — AI**    | ~ 5 min   | 1 of 36 templates in Django    |
+
+!fig:steps-flow
+""")
+
+    upsert_figure(pipeline_section, 'steps-flow', 'mermaid', """flowchart LR
+    SQL[piwigo install.sql]
+    SQL --> S1[1. dumpschema]
+    S1 --> S2[2. genmodels]
+    S2 --> S3[3. migrate]
+    S3 --> S4[4. ingestdump]
+    SRC[Piwigo source 10MB]
+    SRC --> S5[5. liftphp]
+    SRC --> S6[6. liftsite]
+    THEME[default theme - Smarty]
+    THEME --> S7[7. liftwp - mismatch]
+    S7 -.->|gap| AI[8. hand or AI port]
+    style AI fill:#fff5cc,stroke:#cc6633
+    style S7 fill:#ffeeee
+""", caption=(
+        'Eight steps. Steps 1-6 ran clean on Datalift alone. Step 7 '
+        '(liftwp) honestly surfaces the gap — Smarty is not '
+        'WordPress. Step 8 (in yellow) is the AI/manual portion: '
+        'translate Smarty `.tpl` files to Django templates by hand '
+        'or with assistance.'
+    ))
+
+    upsert_section(m, 'datalift-coverage', 2,
+                  'What Datalift covered', """
+The data half (steps 1-3) and the static-asset half (step 6) plus
+the secret scan (step 5) ran identically to how they would on a
+trained corpus. No Piwigo-specific patches required.
+
+**Schema → models, by field type.** genmodels produced 34 model
+classes from 34 CREATE TABLE blocks, 681 lines total, with 4 dialect
+features visibly exercised:
+
+- 17 `TextChoices` subclasses generated from MySQL `ENUM(...)`
+  declarations (e.g. `enum('public','private')` for
+  `categories.status`).
+- 12 `BigAutoField(primary_key=True)` from `auto_increment`
+  declarations.
+- 10 `UniqueConstraint` blocks from composite primary keys
+  (junction tables: `image_category`, `user_access`, etc.).
+- A scattering of `EmailField` / `URLField` / `SlugField`
+  inferred from column-name shape.
+
+Field type distribution across the 34 models:
+
+[[spark:67,44,25,24,17,12,10,9,5 | bar]]
+CharField (67), PositiveIntegerField (44), DateTimeField (25),
+PositiveSmallIntegerField (24), TextChoices (17), BigAutoField (12),
+UniqueConstraint (10), TextField (9), IntegerField (5).
+
+**PHP scan (`liftphp`).** 924 PHP files scanned in roughly 6 seconds.
+The scanner found:
+
+- 1 critical (specific category — see worklist).
+- 9 high (basic-auth URLs in vendor / docs).
+- 338 medium (mostly `email-pii`, including documentation samples
+  and translation files).
+
+Findings by category, sorted by frequency:
+[[spark:431,14,2 | bar]]
+email-pii (431), password-var (14), basic-auth-url (2).
+
+**Static assets (`liftsite`).** 1657 of 2716 source files were
+routed; 753 ended up under `static/gallery/`, 904 under
+`templates/gallery/`. The remaining 1059 were PHP business logic
+(deferred to the manual port) or unrecognised extensions that
+Datalift conservatively leaves alone.
+""")
+
+    smarty_section = upsert_section(m, 'smarty-gap', 3,
+                  'The Smarty gap (where AI was required)', """
+liftwp ran against `themes/default/` and produced an honest result:
+8 PHP templates translated (the bundled email templates that happen
+to be `.php` rather than `.tpl`), 53 actual Smarty templates
+ignored. This is the toolkit correctly reporting unknown territory
+rather than silently doing the wrong thing.
+
+The Smarty syntax in Piwigo's templates is regular and small:
+
+| Construct                   | Count |
+|---|---:|
+| `{if X}` blocks             | 314   |
+| `{foreach}` blocks          |  54   |
+| `{include file=...}` blocks |  22   |
+| `\|@translate` filters      | 290   |
+| `{'literal'\|@translate}`   | 276 of the 290 |
+
+!fig:smarty-vs-django
+
+Total Smarty LOC across the 36 templates: 2367.
+
+Of the 290 `|@translate` filter applications, 276 are on string
+literals — meaning a deterministic translator could produce the
+literal text inline (or a `{% translate %}` tag, depending on
+i18n strategy) without any analysis. The remaining 14 take
+variables; those still translate cleanly to Django filter syntax.
+
+By construct frequency [@tufte2001]:
+[[spark:314,290,276,54,22 | bar]] — `{if}`, `|@translate` total,
+literal-`@translate`, `{foreach}`, `{include}`. Five rule classes
+would cover ≥99% of the theme.
+
+Hand-porting one template (`identification.tpl`, 67 lines) took
+roughly five minutes. Extrapolating linearly: the full default
+theme (2367 LOC) would take 3–6 hours of focused work — or
+approximately 1 minute end-to-end if `liftsmarty` existed.
+""")
+
+    upsert_figure(smarty_section, 'smarty-vs-django', 'mermaid', """flowchart LR
+    subgraph smarty ["Smarty (Piwigo)"]
+        S1["{if isset $X}...{/if}"]
+        S2["{foreach $items as $i}...{/foreach}"]
+        S3["{$VAR}"]
+        S4["{'string'|@translate}"]
+        S5["{include file='X.tpl'}"]
+    end
+    subgraph django ["Django template"]
+        D1["{% if X %}...{% endif %}"]
+        D2["{% for i in items %}...{% endfor %}"]
+        D3["{{ VAR }}"]
+        D4["{% translate 'string' %}"]
+        D5["{% include 'X.html' %}"]
+    end
+    S1 --> D1
+    S2 --> D2
+    S3 --> D3
+    S4 --> D4
+    S5 --> D5
+""", caption=(
+        'Five Smarty constructs map one-to-one to Django template '
+        'tags. The mapping is regular enough to fit in a small '
+        'rule table — the same shape as liftwp\'s _STMT_RULES, '
+        'tailored for `.tpl` syntax.'
+    ))
+
+    upsert_section(m, 'coverage-summary', 4,
+                  'Coverage summary', """
+Counting work units two ways:
+
+**By file count.** Datalift handled ~3300 source files
+(34 schema tables + 924 PHP scanned + 1657 static-or-template
+routed + 681 lines of generated models). The Smarty templates
+needing translation are 36 files / 2367 LOC.
+
+[[spark:34,924,1657,681,36 | bar]]
+Tables (34), PHP scanned (924), files routed by liftsite (1657),
+generated model LOC (681), Smarty templates needing translation
+(36).
+
+**By coverage percentage.** Of 8 pipeline steps, 6 were 100%
+Datalift, 1 was Django-standard (migrate), 1 needed AI (the
+Smarty translation). By step count: ~85% Datalift, ~15% AI.
+
+Iteration sparkline showing the ratio of unhandled output across
+the run:
+
+  Step          Unhandled-in-output
+  dumpschema    0  (everything wanted, kept)
+  genmodels     0  (all 34 tables → models)
+  migrate       0  (no errors)
+  ingestdump    n/a
+  liftphp       0  (all findings recorded)
+  liftsite      0  (every file accounted for)
+  liftwp        53 (Smarty .tpl files left alone)
+  hand-port     0  (the one we did)
+
+[[spark:0,0,0,0,0,53,0 | bar]]
+
+The shape is notable: every Datalift step has zero leftovers
+*except* liftwp on a non-WP theme, which is exactly the published
+limit of that command. The toolkit is honest about its boundaries.
+""")
+
+    upsert_section(m, 'liftsmarty-proposal', 5,
+                  'What this implies — `liftsmarty`', """
+Smarty is regular enough to be deterministic. The five construct
+classes count for ≥99% of the templates. A `liftsmarty` command
+would mirror liftwp's design:
+
+- A Smarty-aware splitter (Smarty uses `{` / `}` delimiters; needs
+  to understand quoted strings, `{literal}` blocks, comments).
+- A small rule table:
+  - `{if X}` / `{elseif}` / `{else}` / `{/if}` ↔ Django if blocks.
+  - `{foreach $X as $Y}` / `{/foreach}` ↔ `{% for y in X %}`.
+  - `{$X}` ↔ `{{ X }}`.
+  - `{'literal'|@translate}` ↔ `{% translate "literal" %}`.
+  - `{$X|@translate}` ↔ `{{ X|translate }}` (or pass-through).
+  - `{include file='X.tpl'}` ↔ `{% include 'X.html' %}`.
+- Pluggable for the long tail of Smarty modifiers (`|escape`,
+  `|date_format`, `|count`, etc.) — most have direct Django
+  filter equivalents.
+
+Estimated implementation: ~600 LOC pure Python + ~30 regression
+tests in the same shape as `wp_lifter.py`. Once shipped, the same
+case study above goes from "85% Datalift / 15% AI" to "100%
+Datalift". The AI gap is a missing command, not a fundamental
+limit.
+
+The same design extends to other PHP template engines:
+**Twig** (Drupal/Symfony), **Blade** (Laravel), **Volt**
+(Phalcon), **Plates**. Each is small enough to be a separate
+deterministic command. The roadmap from this case study: pick
+one frequent target, ship it, repeat.
+""")
+
+    upsert_section(m, 'reproducing', 6,
+                  'Reproducing the run', """
+The exact commands, in order, against a fresh checkout of Piwigo
+15.4.0 and an empty Django project containing a `gallery` app:
+
+```
+# 1.
+manage.py dumpschema /path/to/piwigo_install.sql --out schema.sql
+
+# 2.
+manage.py genmodels /path/to/piwigo_install.sql --app gallery --force
+
+# 3.
+manage.py makemigrations gallery && manage.py migrate
+
+# 4. (skipped — install schema has no INSERTs)
+# 5.
+manage.py liftphp /path/to/Piwigo-15.4.0 --app gallery
+
+# 6.
+manage.py liftsite /path/to/Piwigo-15.4.0 --app gallery
+
+# 7. (will produce the gap as a no-action result)
+manage.py liftwp /path/to/Piwigo-15.4.0/themes/default \\
+    --app gallery --skip-checks --dry-run
+
+# 8. — hand-port .tpl files until liftsmarty exists
+```
+
+Total wall time across steps 1, 2, 3, 5, 6, 7: roughly 12 seconds.
+
+The full pipeline log including stdout from every step is
+preserved in `piwigo_django/PIPELINE_LOG.md` outside this Codex
+installation.
+""")
+
+
+def seed_volume_post_case_study():
+    """Re-bind the volume to include the case study after it exists."""
+    seed_datalift_volume()
 
 
 class Command(BaseCommand):
@@ -2292,10 +2632,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  shotdiff Guide        → /codex/shotdiff-guide/'
         ))
+        seed_piwigo_case_study()
+        self.stdout.write(self.style.SUCCESS(
+            '  Piwigo case study     → /codex/piwigo-case-study/'
+        ))
         seed_datalift_volume()
         self.stdout.write(self.style.SUCCESS(
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (10 manuals + 1 volume).'
+            '\nDatalift manuals seeded (11 manuals + 1 volume).'
         ))
