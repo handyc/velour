@@ -38,6 +38,24 @@ def upsert_section(manual, slug, sort_order, title, body, sidenotes=''):
     return s
 
 
+def upsert_figure(section, slug, kind, source, caption='',
+                  caption_position='margin', sort_order=0):
+    """Create or update a Figure on `section`. Save() re-renders via
+    Kroki whenever the source changes (sha256-keyed)."""
+    from codex.models import Figure
+    f, _ = Figure.objects.get_or_create(
+        section=section, slug=slug,
+        defaults={'kind': kind, 'source': source},
+    )
+    f.kind = kind
+    f.source = source
+    f.caption = caption
+    f.caption_position = caption_position
+    f.sort_order = sort_order
+    f.save()
+    return f
+
+
 def seed_liftwp_quickstart():
     m = upsert_manual(
         'liftwp-quickstart',
@@ -247,9 +265,11 @@ cp -r /themes/mytheme/{css,js,fonts,style.css,screenshot.png} \\
 index. Click a title to load the single view.
 """)
 
-    upsert_section(m, 'output-structure', 3,
+    output_section = upsert_section(m, 'output-structure', 3,
                    'What liftwp produces', """
 For a typical WP theme, `liftwp` writes four kinds of artifact.
+
+!fig:translation-pipeline
 
 ### Translated templates
 
@@ -323,6 +343,32 @@ Auto-emission is fixed-point: the default `sidebar.html` includes
 `{% url 'wp_search' as wp_search_url %}` so it never raises
 `NoReverseMatch` if the search route isn't wired.
 """)
+
+    upsert_figure(output_section, 'translation-pipeline', 'mermaid', """flowchart LR
+    PHP[theme/index.php]
+    PHP --> SCAN[scan PHP-tag boundaries]
+    SCAN --> SPLIT[split into statements]
+    SPLIT --> RULES{match rule?}
+    RULES -->|static regex| OUT_S[Django snippet]
+    RULES -->|dynamic regex| OUT_D[capture-driven snippet]
+    RULES -->|function name| OUT_F[function dispatch]
+    RULES -->|theme-specific| OUT_T[theme-function marker]
+    RULES -->|unknown| OUT_W[WP-LIFT marker + worklist]
+    OUT_S --> ASSEMBLE[assemble body]
+    OUT_D --> ASSEMBLE
+    OUT_F --> ASSEMBLE
+    OUT_T --> ASSEMBLE
+    OUT_W --> ASSEMBLE
+    ASSEMBLE --> POST[prepend load-static if needed]
+    POST --> HTML[templates/wp/index.html]
+""", caption=(
+        "How one PHP theme file is translated. The splitter is depth-aware "
+        "(parens, strings, braces). Rules are tried in order: static "
+        "regex/string pairs, then dynamic regex/callable pairs, then a "
+        "function-name lookup table, then the theme-specific prefix and "
+        "function-set check. Anything that falls through becomes a "
+        "{# WP-LIFT? ... #} marker AND a worklist entry."
+    ))
 
     upsert_section(m, 'translation-table', 4,
                    'What translates deterministically', """
@@ -615,6 +661,11 @@ Twenty Twenty-One, plus the Underscores starter template. Every
 theme lifts with zero unhandled fragments. 232 translated templates
 total.
 
+Templates per theme as a bar sparkline, in chronological order
+(Twenty Twelve to Twenty Twenty-One, then Underscores):
+[[spark:20,25,25,15,18,26,19,18,32,14 | bar]] — range 14 to 32,
+median around 19.
+
 | Theme               | Templates | Unhandled |
 |---|---:|---:|
 | Twenty Twelve       | 20 | 0 |
@@ -736,8 +787,15 @@ Each command has its own manual in this set. Read this one for the
 shape; jump to the command-specific manual for the details.
 """)
 
-    upsert_section(m, 'pipeline', 2,
+    pipeline = upsert_section(m, 'pipeline', 2,
                    'A typical port, end to end', """
+The eight Datalift commands compose into three flows: a data
+pipeline (dumpschema, genmodels, ingestdump), a presentation
+pipeline (liftphp, liftsite, liftwp), and a verification loop
+(browsershot, shotdiff).
+
+!fig:pipeline
+
 A complete port of a legacy WordPress install through Datalift looks
 like this:
 
@@ -776,6 +834,38 @@ Steps 1-4 are the data half. Steps 5-7 are the presentation half.
 Step 8 is the verification half. Each step is independent and
 idempotent — re-running step 7 doesn't disturb step 4, and so on.
 """)
+
+    upsert_figure(pipeline, 'pipeline', 'mermaid', """flowchart LR
+    subgraph data ["data half"]
+        D[dump.sql]
+        D --> GM[genmodels]
+        GM --> M[models.py]
+        D --> ID[ingestdump]
+        M --> ID
+        ID --> DB[(SQLite)]
+        D --> DS[dumpschema]
+        DS --> SS[schema.sql]
+    end
+    subgraph pres ["presentation half"]
+        SITE[legacy site/]
+        SITE --> LP[liftphp]
+        LP --> RED[redacted/]
+        SITE --> LS[liftsite]
+        LS --> ST[static/]
+        SITE --> LW[liftwp]
+        LW --> TM[templates+views+urls]
+    end
+    subgraph verify ["verification"]
+        BS[browsershot] --> PNG[before/after.png]
+        PNG --> SD[shotdiff]
+        SD --> DIFF[diff.png]
+    end
+""", caption=(
+        'The eight Datalift commands grouped into three pipelines. '
+        'Each command is independent; the arrows show typical flow '
+        'but every output is also a standalone artifact you can '
+        'inspect, share, or hand to a porter.'
+    ))
 
     upsert_section(m, 'corpora', 3,
                    'What it has been tested against', """
@@ -1356,6 +1446,10 @@ levers:
   index pre-build, no second pass.
 
 Reference timings (single-thread, SQLite):
+
+Wall time across corpora (seconds, log-shaped scale shown as bars):
+[[spark:0.3,0.6,7,8,72,153 | bar]] — Chinook, Sakila, WordPress,
+MediaWiki, Dolibarr, employees in order.
 
 | Dump                  | Tables | Rows  | Wall time |
 |---|---:|---:|---:|
