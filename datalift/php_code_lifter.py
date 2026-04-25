@@ -428,16 +428,9 @@ def _rewrite_code(chunk: str) -> str:
     # doing them here would break across string-split boundaries.
 
     # PHP ternary `cond ? a : b` → Python `a if cond else b`.
-    # Conservative match: identifiers/parens on each side, no
-    # nested ternaries (handled left-to-right in subsequent passes).
-    def _ternary(m: re.Match[str]) -> str:
-        return f'({m.group(2).strip()} if {m.group(1).strip()} '\
-               f'else {m.group(3).strip()})'
-    # Limit scope: match a chunk that doesn't span dict literals.
-    s = re.sub(
-        r'\(([^()?:]+?)\)\s*\?\s*([^?:]+?)\s*:\s*([^?:;,)]+)',
-        _ternary, s,
-    )
+    # See _rewrite_ternary (called separately) for the paren-aware
+    # version that handles nested parens like
+    #   `($x->y() == 'show') ? 'a' : 'b'`
 
     # `??` and `.=`
     s = re.sub(r'\s*\?\?\s*', ' or ', s)
@@ -696,6 +689,215 @@ def _rewrite_casts(s: str) -> str:
     return ''.join(out)
 
 
+def _rewrite_ternary(s: str) -> str:
+    """Rewrite PHP ternary `cond ? a : b` to Python `(a if cond else b)`.
+
+    Walks string-aware so `?` and `:` inside string literals are
+    preserved. Uses paren/bracket-depth tracking so nested parens
+    in the condition don't break the match. Iterates so chains of
+    ternaries get rewritten left-to-right (PHP ternary is
+    left-associative even though `?:` chains in PHP are usually
+    a deprecated form)."""
+    safety = 50
+    while safety > 0:
+        safety -= 1
+        # Find a `?` that isn't inside a string and isn't part of `?->`
+        # (PHP nullsafe) or `??` (null coalesce) — both already handled.
+        i = 0
+        n = len(s)
+        in_str: str | None = None
+        depth = 0
+        sq_depth = 0
+        cb_depth = 0
+        q_idx = -1
+        while i < n:
+            ch = s[i]
+            if in_str:
+                if ch == '\\' and i + 1 < n:
+                    i += 2; continue
+                if ch == in_str:
+                    in_str = None
+                i += 1; continue
+            if ch in ('"', "'"):
+                in_str = ch; i += 1; continue
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            elif ch == '[':
+                sq_depth += 1
+            elif ch == ']':
+                sq_depth -= 1
+            elif ch == '{':
+                cb_depth += 1
+            elif ch == '}':
+                cb_depth -= 1
+            elif ch == '?' and depth == 0 and sq_depth == 0 and cb_depth == 0:
+                # Skip `??` (null coalesce) and `?->` (nullsafe).
+                if i + 1 < n and s[i + 1] in ('?', '-', '.'):
+                    i += 2; continue
+                q_idx = i
+                break
+            i += 1
+        if q_idx < 0:
+            break
+        # Find the matching `:` at the same depth.
+        i = q_idx + 1
+        in_str = None
+        depth = 0
+        sq_depth = 0
+        cb_depth = 0
+        col_idx = -1
+        while i < n:
+            ch = s[i]
+            if in_str:
+                if ch == '\\' and i + 1 < n:
+                    i += 2; continue
+                if ch == in_str:
+                    in_str = None
+                i += 1; continue
+            if ch in ('"', "'"):
+                in_str = ch; i += 1; continue
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+                if depth < 0:
+                    break
+            elif ch == '[':
+                sq_depth += 1
+            elif ch == ']':
+                sq_depth -= 1
+                if sq_depth < 0:
+                    break
+            elif ch == '{':
+                cb_depth += 1
+            elif ch == '}':
+                cb_depth -= 1
+                if cb_depth < 0:
+                    break
+            elif ch == ':' and depth == 0 and sq_depth == 0 \
+                    and cb_depth == 0:
+                col_idx = i
+                break
+            elif ch == ';' and depth == 0:
+                break
+            i += 1
+        if col_idx < 0:
+            # No matching `:` — give up on this ternary.
+            return s
+        # Find the end of the else expression.
+        i = col_idx + 1
+        in_str = None
+        depth = 0
+        sq_depth = 0
+        cb_depth = 0
+        end_idx = n
+        while i < n:
+            ch = s[i]
+            if in_str:
+                if ch == '\\' and i + 1 < n:
+                    i += 2; continue
+                if ch == in_str:
+                    in_str = None
+                i += 1; continue
+            if ch in ('"', "'"):
+                in_str = ch; i += 1; continue
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                if depth == 0:
+                    end_idx = i
+                    break
+                depth -= 1
+            elif ch == '[':
+                sq_depth += 1
+            elif ch == ']':
+                if sq_depth == 0:
+                    end_idx = i
+                    break
+                sq_depth -= 1
+            elif ch == '{':
+                cb_depth += 1
+            elif ch == '}':
+                if cb_depth == 0:
+                    end_idx = i
+                    break
+                cb_depth -= 1
+            elif ch in (',', ';') and depth == 0 and sq_depth == 0 \
+                    and cb_depth == 0:
+                end_idx = i
+                break
+            i += 1
+        # Find the start of the condition by walking back from `?`.
+        j = q_idx - 1
+        while j >= 0 and s[j].isspace():
+            j -= 1
+        cond_end = j + 1
+        # The condition extends back until a separator at depth 0.
+        in_str = None
+        depth = 0
+        sq_depth = 0
+        cb_depth = 0
+        cond_start = 0
+        while j >= 0:
+            ch = s[j]
+            # Detect strings backwards (rough heuristic).
+            if ch in ('"', "'") and (j == 0 or s[j - 1] != '\\'):
+                # Find matching open quote
+                k = j - 1
+                while k >= 0 and s[k] != ch:
+                    k -= 1
+                if k < 0:
+                    break
+                j = k - 1
+                continue
+            if ch == ')':
+                depth += 1
+            elif ch == '(':
+                if depth == 0:
+                    cond_start = j + 1
+                    break
+                depth -= 1
+            elif ch == ']':
+                sq_depth += 1
+            elif ch == '[':
+                if sq_depth == 0:
+                    cond_start = j + 1
+                    break
+                sq_depth -= 1
+            elif ch in (',', ';', '=') and depth == 0 and sq_depth == 0 \
+                    and cb_depth == 0:
+                # `=` could be part of `==`/`!=`/`<=`/`>=`. Check.
+                if ch == '=':
+                    if (j > 0 and s[j - 1] in '=!<>') or \
+                       (j + 1 < n and s[j + 1] == '='):
+                        j -= 1; continue
+                cond_start = j + 1
+                break
+            j -= 1
+        cond = s[cond_start:cond_end].strip()
+        then = s[q_idx + 1:col_idx].strip()
+        else_ = s[col_idx + 1:end_idx].strip()
+        # Strip outer parens on cond if present (will get readded).
+        if cond.startswith('(') and cond.endswith(')'):
+            depth = 0
+            ok = True
+            for k, ch in enumerate(cond[:-1]):
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth == 0:
+                        ok = False
+                        break
+            if ok:
+                cond = cond[1:-1].strip()
+        new = f'({then} if {cond} else {else_})'
+        s = s[:cond_start] + new + s[end_idx:]
+    return s
+
+
 def _balanced_bracket(s: str, open_idx: int) -> int | None:
     """Find matching `]` for `[` at open_idx (string-aware)."""
     depth = 0
@@ -739,6 +941,7 @@ def _translate_expr(expr: str) -> str:
     s = _rewrite_casts(s)
     s = _apply_to_code(s, _rewrite_code)
     s = _rewrite_string_concat(s)
+    s = _rewrite_ternary(s)
     s = _translate_function_calls(s)
     return s
 
@@ -853,6 +1056,21 @@ def _translate_block(php_body: str, indent: int = 0) -> str:
 
         # Closing brace handled by caller — defensive.
         if src[i] == '}':
+            i += 1; continue
+
+        # PHP allows bare `{ ... }` blocks as no-op grouping (commonly
+        # used to scope a few statements visually). Treat the brace as
+        # a transparent block: recurse into its body at the SAME indent
+        # level so the contents flow naturally into the surrounding
+        # block.
+        if src[i] == '{':
+            span = _balanced_block(src, i)
+            if span is not None:
+                inner = _translate_block(src[span[0]:span[1]], indent)
+                if inner.strip():
+                    lines.append(inner)
+                i = span[1] + 1
+                continue
             i += 1; continue
 
         # Try block-form constructs first.
@@ -1041,6 +1259,9 @@ def _render_foreach(src: str, match: re.Match[str], indent: int
                 _find_statement_end(src, match.end()) + 1)
     arr = _translate_expr(am.group('arr').strip())
     binds = am.group('binds').strip()
+    # PHP `foreach ($arr as &$v)` (by-reference iteration) — strip
+    # the `&`; Python iterates by value.
+    binds = binds.replace('&', '')
     # k => v ?
     if '=>' in binds:
         k, v = [b.strip() for b in binds.split('=>', 1)]
