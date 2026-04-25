@@ -877,6 +877,7 @@ predictable enough to re-run.
 | `liftcodeigniter` | Translate CodeIgniter 3 + 4 routes and controllers into Django. |
 | `liftcakephp` | Translate CakePHP 4 / 5 routes (incl. `scope`/`prefix`/`resources`/`fallbacks`) and controllers into Django. |
 | `liftyii`     | Translate Yii 2 controllers (incl. VerbFilter HTTP-method pinning) and `urlManager.rules` into Django. |
+| `liftphpcode` | **The catch-all.** Translate arbitrary PHP source (any framework, no framework, custom code) into Python. Best-effort with `# PORTER:` markers. |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -3625,6 +3626,238 @@ that pins `logout` to POST.
 """)
 
 
+def seed_liftphpcode_guide():
+    m = upsert_manual(
+        'liftphpcode-guide',
+        title='liftphpcode',
+        subtitle='Translate arbitrary PHP source into Python',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftphpcode is the catch-all that complements every '
+            'framework-specific lifter. Where liftlaravel / liftsymfony '
+            '/ liftcakephp / liftyii / liftcodeigniter understand the '
+            '*idioms* of their respective frameworks, this module '
+            'understands PHP itself: assignments, control flow, classes, '
+            'functions, expressions, the standard library, and the '
+            'punctuation differences (`->` vs `.`, `::` vs `.`, `=>` '
+            'vs `:`, `.` for concat vs `+`, `$var` vs `var`). The '
+            'output is "Python-shaped" PHP — ready for the porter to '
+            'clean up rather than ready for production.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftphpcode /path/to/php/source \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Walks every `.php` file under the source tree (skipping
+`vendor/`, `node_modules/`, `tests/`) and emits a
+`<app>/php_lifted/<mirrored-path>.py` file for each. The output
+mirrors the original directory layout so the porter can pair files
+1:1.
+
+The `<app>/liftphpcode_worklist.md` summary lists every translated
+file with its function / class / method / porter-marker counts so
+the porter can prioritise the densest review work first.
+""")
+
+    upsert_section(m, 'expression-rewrites', 1,
+                   'Expression-level rewrites', """
+| PHP expression                             | Python output                            |
+|---|---|
+| `$x`                                       | `x`                                      |
+| `null` / `true` / `false`                  | `None` / `True` / `False`                |
+| `'a' . 'b'` (string concat with whitespace)| `'a' + 'b'`                              |
+| `$x . $y`                                  | `x + y`                                  |
+| `$user->name`                              | `user.name`                              |
+| `Foo::bar()`                               | `Foo.bar()`                              |
+| `Foo::class`                               | `Foo`                                    |
+| `self::foo()` / `static::foo()` / `parent::foo()` | `self.foo()` / `cls.foo()` / `super().foo()` |
+| `===` / `!==`                              | `==` / `!=`                              |
+| `&&` / `\\|\\|` / `!`                      | `and` / `or` / `not`                     |
+| `=>`                                       | `:`                                       |
+| `array(1, 2)` / `[1, 2]`                   | `[1, 2]` (PHP short-form arrays kept)    |
+| `isset($x)`                                | `(x is not None)`                        |
+| `empty($x)`                                | `(not x)`                                 |
+| `instanceof`                               | `isinstance(...)`                        |
+| `new Foo()`                                | `Foo()`                                  |
+| `$x ?? 'default'`                          | `x or 'default'`                         |
+| `.=`                                        | `+=`                                      |
+
+Critical guarantee: every rewrite is **string-aware**. A `.` inside
+`'1.0'` is NOT translated to `+`; a `!` inside `'!'` is NOT
+translated to `not `; a `$x` inside `"hello $x"` is NOT stripped.
+The string-aware walker (`datalift._php.strip_php_comments` and
+the local `_split_strings` / `_apply_to_code` helpers) routes all
+rewrites around quoted regions.
+
+Concat disambiguation: after `->` is rewritten to `.`, both
+attribute access (`user.name`) and string-concat (`a . b`) use the
+same character. The lifter requires whitespace around `.` for the
+concat rewrite, so `user.name` (no spaces) stays attribute access
+and `a . b` (with spaces) becomes `a + b`.
+""")
+
+    upsert_section(m, 'control-flow', 2, 'Control-flow translation', """
+| PHP                                                      | Python                                              |
+|---|---|
+| `if (cond) { ... } elseif (c2) { ... } else { ... }`     | `if cond:` / `elif c2:` / `else:`                  |
+| `foreach ($arr as $v) { ... }`                           | `for v in arr:`                                    |
+| `foreach ($arr as $k => $v) { ... }`                     | `for k, v in arr.items():`                         |
+| `for ($i = 0; $i < N; $i++) { ... }`                     | `for i in range(0, N):`                            |
+| `while (cond) { ... }`                                   | `while cond:`                                      |
+| `switch ($x) { case 1: ... break; default: ... }`        | `match x:` / `case 1:` / `case _:`                 |
+| `try { ... } catch (Exception $e) { ... } finally { ... }` | `try:` / `except Exception as e:` / `finally:`   |
+| `try { ... } catch (\\Foo\\Bar $e) { ... }`              | `except Foo.Bar as e:`                             |
+| `try { ... } catch (Foo\\|Bar $e) { ... }`               | `except (Foo, Bar) as e:`                          |
+| `function helper($a, $b = 1) { ... }`                    | `def helper(a, b=1): ...` (local fn)              |
+
+For-loops outside the classic `for ($i = 0; $i < N; $i++)` shape
+emit a porter marker — Python doesn't have C-style three-clause
+loops, and the rewrite has to know what shape the porter wants.
+
+Switch statements use Python 3.10+ `match` syntax. `break;`
+inside a case is silently dropped (Python `match` doesn't fall
+through). Nested switch-in-switch is supported.
+""")
+
+    upsert_section(m, 'stdlib-map', 3, 'PHP standard-library mapping', """
+liftphpcode ships a translation table covering ~150 common PHP
+functions. The table maps the most-used 80% of stdlib calls to
+their Python equivalents, with arity-aware substitution. Examples:
+
+| PHP                                       | Python                                       |
+|---|---|
+| `strlen($s)` / `count($a)` / `sizeof($a)` | `len(s)` / `len(a)`                          |
+| `strtolower($s)` / `strtoupper($s)`       | `s.lower()` / `s.upper()`                    |
+| `trim($s)` / `ltrim($s)` / `rtrim($s)`    | `s.strip()` / `s.lstrip()` / `s.rstrip()`    |
+| `str_replace($a, $b, $s)`                 | `s.replace(a, b)`                            |
+| `str_contains($h, $n)`                    | `(n in h)`                                   |
+| `str_starts_with($s, $p)` / `str_ends_with(..)` | `s.startswith(p)` / `s.endswith(p)`     |
+| `explode(',', $s)` / `implode(',', $a)`   | `s.split(',')` / `','.join(a)`               |
+| `sprintf($fmt, $a, $b)`                   | `(fmt % (a, b))`                             |
+| `htmlspecialchars($s)`                    | `html.escape(s)`                             |
+| `urlencode($s)` / `urldecode($s)`         | `urllib.parse.quote/unquote(s)`              |
+| `json_encode($x)` / `json_decode($s)`     | `json.dumps(x)` / `json.loads(s)`            |
+| `md5($s)` / `sha1($s)` / `base64_encode/decode` | `hashlib.*` / `base64.*` Python equiv  |
+| `array_keys($a)` / `array_values($a)`     | `list(a.keys())` / `list(a.values())`        |
+| `array_map($fn, $a)` / `array_filter($a, $fn)` | `list(map(fn, a))` / `list(filter(fn, a))` |
+| `in_array($v, $a)` / `array_key_exists($k, $a)` | `(v in a)` / `(k in a)`                |
+| `array_merge($a, $b)`                     | `{**a, **b}` (assoc) / `(a + b)` (numeric)   |
+| `array_unique($a)`                        | `list(dict.fromkeys(a))`                     |
+| `range(1, 10)` / `min($a)` / `max($a)`    | `list(range(1, 10))` / `min(a)` / `max(a)`   |
+| `is_array/string/int/...($x)`             | `isinstance(x, list/str/int/...)`            |
+| `gettype($x)`                             | `type(x).__name__`                           |
+| `echo` / `print_r` / `var_dump`           | `print(...)`                                 |
+| `die($msg)` / `exit($msg)`                | `sys.exit(msg)`                              |
+| `file_get_contents` / `file_put_contents` | `open(...).read()` / `open(...).write(...)`  |
+| `time()` / `date($fmt)`                   | `int(time.time())` / `datetime.now().strftime(fmt)` |
+| `preg_match` / `preg_replace` / `preg_split` | `re.search` / `re.sub` / `re.split`       |
+
+Functions outside this table pass through untranslated — the porter
+sees them and rewrites against the appropriate Python library
+(usually Django itself, or stdlib, or a Pythonic third-party pkg).
+""")
+
+    upsert_section(m, 'class-translation', 4,
+                   'Classes, inheritance, properties', """
+PHP class definitions translate to Python class definitions with
+the same shape — names, parents (translated `\\` → `.` for
+namespaces), interfaces, properties, methods, constants:
+
+```php
+namespace App;
+class Greeter extends \\App\\Bar implements Baz, Qux {
+    public string $name = 'World';
+    const VERSION = '1.0';
+    public function greet(): string {
+        return 'Hello ' . $this->name;
+    }
+}
+```
+
+becomes:
+
+```python
+class Greeter(App.Bar, Baz, Qux):
+    VERSION = '1.0'
+    name = 'World'  # string
+    def greet(self):  # returns: string
+        return 'Hello ' + self.name
+```
+
+Notes:
+- Visibility (`public`/`protected`/`private`) is dropped — Python
+  uses the underscore convention; the porter renames if needed.
+- Type hints on properties + return types are preserved as
+  end-of-line comments.
+- `static` methods drop the implicit `self` parameter.
+- `abstract class` emits a comment marker reminding the porter to
+  decorate methods with `@abstractmethod`.
+- `const FOO = 'bar'` becomes a class-level attribute.
+""")
+
+    upsert_section(m, 'corpus', 5,
+                   'Tested against the Symfony Demo source', """
+Run on `symfony/demo/src/` (the official Symfony Demo, used as a
+generic-PHP corpus rather than as a Symfony-aware target):
+
+| Metric                          | Result |
+|---|---:|
+| Files translated                | 34     |
+| Top-level functions             | 0      |
+| Classes parsed                  | 34     |
+| Methods translated              | 153    |
+| `# PORTER:` markers             | 0 (every line translated to syntactically-recognisable Python) |
+| Files skipped (vendor/tests/empty) | _(varies per run)_ |
+
+Quality of output: namespace + `use` statements preserved as
+top-of-file comments for porter context; class hierarchy
+preserved; method signatures translated with `self` injected;
+PHP-8 attributes (`#[...]`) preserved as-is; control flow
+rewritten to Python; common stdlib calls translated; complex
+expressions (Doctrine query-builder chains, Twig context arrays,
+form-builder patterns) pass through as Python-shaped PHP for the
+porter to refine.
+""")
+
+    upsert_section(m, 'limitations', 6, 'Known limitations', """
+- **Output is Python-shaped, not Python-correct.** Many lines
+  produce code that won't `python -m py_compile` cleanly — they
+  use PHP-8 nullsafe `?->`, named arguments (`foo(name: 'x')`),
+  variadic spread (`...$args`), match expressions, attributes,
+  associative-array literals (which need `{}` not `[]`), or
+  complex chained API calls. These all pass through as
+  Python-shaped tokens for the porter to clean up.
+- **No PHP-AST parsing.** liftphpcode is a regex-and-pattern
+  rewriter, not a parser. Pathological PHP (heredocs containing
+  PHP-like patterns, complex string interpolation, `eval`) confuses
+  it. Use the framework-specific lifters where possible — they
+  understand structure better.
+- **Closures** in expression position (`$f = function () { ... };`)
+  emit `# PORTER:` markers; Python lambdas can't hold full
+  function bodies.
+- **Dynamic property/method access** (`$obj->{$name}`,
+  `$class::$method()`) is left untranslated.
+- **Generators** (`yield`) pass through — Python's `yield` syntax
+  is similar but the rewrite hasn't been verified end-to-end.
+- **`vendor/`, `node_modules/`, `tests/` are skipped by default.**
+  These are usually third-party code or fixture data the porter
+  doesn't want re-emitted in the Django app.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -3979,6 +4212,7 @@ def seed_datalift_volume():
             'liftcodeigniter-guide',
             'liftcakephp-guide',
             'liftyii-guide',
+            'liftphpcode-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -4436,6 +4670,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftyii Guide         → /codex/liftyii-guide/'
         ))
+        seed_liftphpcode_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftphpcode Guide     → /codex/liftphpcode-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -4457,5 +4695,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (23 manuals + 1 volume).'
+            '\nDatalift manuals seeded (24 manuals + 1 volume).'
         ))

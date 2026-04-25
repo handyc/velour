@@ -27,6 +27,7 @@ Pipeline (each step skipped if the input it needs isn't present):
     10. liftcodeigniter — CI3/CI4 routes + controllers (if --codeigniter-dir)
     11. liftcakephp — CakePHP routes + controllers (if --cakephp-dir)
     12. liftyii — Yii 2 controllers + URL rules (if --yii-dir)
+    13. liftphpcode — catch-all PHP → Python translator (if --phpcode-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -97,6 +98,11 @@ class Command(BaseCommand):
                                  '(controllers/ + config/web.php). '
                                  'Triggers liftyii — emits urls_yii.py and '
                                  'views_yii.py.')
+        parser.add_argument('--phpcode-dir', default=None,
+                            help='Path to a PHP source tree for the catch-all '
+                                 'PHP → Python translator (liftphpcode). '
+                                 'Mirrors the directory structure under '
+                                 '<app>/php_lifted/.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -384,6 +390,27 @@ class Command(BaseCommand):
         else:
             summary.append('12. liftyii: SKIPPED (no --yii-dir)')
 
+        # ── 13. liftphpcode — the catch-all PHP → Python ───────────
+        phpcode_dir = (Path(opts['phpcode_dir']).resolve()
+                       if opts['phpcode_dir'] else None)
+        if phpcode_dir:
+            if not phpcode_dir.is_dir():
+                raise CommandError(
+                    f'--phpcode-dir is not a directory: {phpcode_dir}'
+                )
+            self._step(13, f'liftphpcode ({phpcode_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftphpcode', str(phpcode_dir), **kwargs)
+                summary.append(f'13. liftphpcode: ok ({phpcode_dir})')
+            except Exception as e:
+                summary.append(f'13. liftphpcode: FAILED ({e})')
+                raise
+        else:
+            summary.append('13. liftphpcode: SKIPPED (no --phpcode-dir)')
+
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('═══ liftall summary ═══'))
@@ -398,5 +425,5 @@ class Command(BaseCommand):
     def _step(self, n: int, label: str) -> None:
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f'━━━ Step {n}/12 — {label} ━━━'
+            f'━━━ Step {n}/13 — {label} ━━━'
         ))
