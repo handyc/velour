@@ -47,6 +47,7 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `dumpschema` | Extract just the schema portion of a mysqldump for easier review |
 | `liftphp` | Scan a legacy PHP tree for secrets / PII before sharing it |
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
+| `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
 
 ## `genmodels` — what it infers
@@ -188,13 +189,78 @@ Typical edits:
   prefix to Django's `bcrypt$$2b$` format
 * `skip_tables` — bypass entire tables
 
+## `liftwp` — WordPress theme → Django templates
+
+After `genmodels` + `ingestdump` give you the WP data, `liftwp`
+translates a WordPress theme directory into Django templates,
+views, and url patterns so the public-facing site can render.
+
+```bash
+python manage.py liftwp /path/to/wp-content/themes/mytheme \
+    --app wp \
+    [--out /path/to/django/project] \
+    [--worklist liftwp_worklist.md] \
+    [--dry-run]
+```
+
+What it translates deterministically:
+
+* The classic Loop (`if (have_posts()) : while (have_posts()) : the_post()`)
+* `get_header()` / `get_footer()` / `get_sidebar()` / `comments_template()`
+  → Django `{% include 'wp/X.html' %}`
+* `the_title()` / `the_content()` / `the_excerpt()` / `the_permalink()` /
+  `the_date()` / `the_author()` / `the_ID()` / `the_category()` / `the_tags()`
+* `bloginfo('name'|'description'|'charset'|'url'|'stylesheet_url')`
+* `wp_head()` / `wp_footer()` → empty Django blocks
+* `language_attributes()` / `body_class()` / `post_class()`
+* `echo home_url()` / `echo site_url()` / `echo get_stylesheet_uri()`
+* PHP comments (`//`, `#`, `/* */`)
+* Short-echo `<?= expr ?>`
+* Standard theme files: `index.php`, `single.php`, `page.php`,
+  `archive.php`, `404.php`, `search.php`, plus partials
+  (`header.php`, `footer.php`, `sidebar.php`, etc.)
+
+What it explicitly does NOT translate (Phase 1 — flagged in the
+worklist instead):
+
+* Custom post types, shortcodes
+* Plugin hooks (`add_action`, `add_filter`)
+* Theme options pages, widgets, admin screens
+* Comment submission (display only)
+* AJAX endpoints, REST API routes
+* `functions.php` / `*.functions.php` / non-standard PHP files
+
+Everything in the second list — and any unrecognised PHP fragment
+inside a translated template — is preserved as a
+`{# WP-LIFT? <original> #}` Django comment AND collected in
+`liftwp_worklist.md`, so a human or Claude can walk through them
+without re-crawling the source.
+
+Output:
+
+* `templates/<app>/index.html`, `single.html`, `page.html`, etc.
+* `<app>/views_wp.py` — view functions that read from the
+  datalifted WP models
+* `<app>/urls_wp.py` — `path('post/<int:post_id>/', ...)` etc.
+* `liftwp_worklist.md` at the project root
+
+Wire the URLs into your project with:
+
+```python
+# myproject/urls.py
+urlpatterns = [
+    ...,
+    path('', include('wp.urls_wp')),
+]
+```
+
 ## Running the tests
 
 ```bash
 venv/bin/python manage.py test datalift.tests
 ```
 
-118 tests, ~20 ms. Every corpus-level bug we've fixed has a
+206 tests, ~30 ms. Every corpus-level bug we've fixed has a
 named regression here.
 
 ## Known limits
