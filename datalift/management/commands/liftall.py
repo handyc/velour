@@ -26,6 +26,7 @@ Pipeline (each step skipped if the input it needs isn't present):
     9.  liftdoctrine — `#[ORM\\Entity]` → models (if --symfony-dir)
     10. liftcodeigniter — CI3/CI4 routes + controllers (if --codeigniter-dir)
     11. liftcakephp — CakePHP routes + controllers (if --cakephp-dir)
+    12. liftyii — Yii 2 controllers + URL rules (if --yii-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -91,6 +92,11 @@ class Command(BaseCommand):
                                  '(config/routes.php + src/Controller/). '
                                  'Triggers liftcakephp — emits '
                                  'urls_cakephp.py and views_cakephp.py.')
+        parser.add_argument('--yii-dir', default=None,
+                            help='Path to a Yii 2 application root '
+                                 '(controllers/ + config/web.php). '
+                                 'Triggers liftyii — emits urls_yii.py and '
+                                 'views_yii.py.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -357,6 +363,27 @@ class Command(BaseCommand):
         else:
             summary.append('11. liftcakephp: SKIPPED (no --cakephp-dir)')
 
+        # ── 12. Yii 2 controllers + URL rules ─────────────────────
+        yii_dir = (Path(opts['yii_dir']).resolve()
+                   if opts['yii_dir'] else None)
+        if yii_dir:
+            if not yii_dir.is_dir():
+                raise CommandError(
+                    f'--yii-dir is not a directory: {yii_dir}'
+                )
+            self._step(12, f'liftyii ({yii_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftyii', str(yii_dir), **kwargs)
+                summary.append(f'12. liftyii: ok ({yii_dir})')
+            except Exception as e:
+                summary.append(f'12. liftyii: FAILED ({e})')
+                raise
+        else:
+            summary.append('12. liftyii: SKIPPED (no --yii-dir)')
+
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('═══ liftall summary ═══'))
@@ -371,5 +398,5 @@ class Command(BaseCommand):
     def _step(self, n: int, label: str) -> None:
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f'━━━ Step {n}/11 — {label} ━━━'
+            f'━━━ Step {n}/12 — {label} ━━━'
         ))

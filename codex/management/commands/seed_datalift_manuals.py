@@ -876,6 +876,7 @@ predictable enough to re-run.
 | `liftdoctrine` | Translate Doctrine `#[ORM\\Entity]` classes into Django models. |
 | `liftcodeigniter` | Translate CodeIgniter 3 + 4 routes and controllers into Django. |
 | `liftcakephp` | Translate CakePHP 4 / 5 routes (incl. `scope`/`prefix`/`resources`/`fallbacks`) and controllers into Django. |
+| `liftyii`     | Translate Yii 2 controllers (incl. VerbFilter HTTP-method pinning) and `urlManager.rules` into Django. |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -3451,6 +3452,179 @@ cakephp/app`) is the smallest realistic test corpus: bare
 """)
 
 
+def seed_liftyii_guide():
+    m = upsert_manual(
+        'liftyii-guide',
+        title='liftyii',
+        subtitle='Translate Yii 2 controllers + URL rules into Django',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftyii reads a Yii 2 application\'s '
+            '`controllers/**/*Controller.php` files and (optionally) '
+            'the `urlManager.rules` table from `config/web.php`, and '
+            'emits Django urls.py + views.py. Every public '
+            '`actionFoo()` method becomes a route at '
+            '`/<controller-id>/<action-id>/<args>`. `behaviors()` '
+            'VerbFilter declarations are honoured so that, e.g., '
+            '`logout` is POST-only. Validated against the official '
+            '`yii2-app-basic` skeleton: 1 controller, 5 actions, 6 '
+            'routes including the implicit `site/` → `actionIndex`.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftyii /path/to/yii2/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Reads `<app>/controllers/**/*Controller.php` (recursively, so
+`controllers/admin/UserController.php` is picked up too) and
+`<app>/config/web.php` for any `urlManager.rules` table. Emits
+`<app>/urls_yii.py` + `<app>/views_yii.py`.
+""")
+
+    upsert_section(m, 'routes', 1, 'Default route generation', """
+Yii 2 does not require route declarations: every controller/action
+pair is automatically dispatched at
+`/<controller-id>/<action-id>/<args>/`, where:
+
+- **controller-id** is the class name minus `Controller`,
+  lowercased and dashed: `SiteController` → `site`,
+  `MyAdminController` → `my-admin`.
+- **action-id** is the method name minus `action`, lowercased and
+  dashed: `actionLogin` → `login`, `actionLogOut` → `log-out`.
+- **args** are the action method's parameters, emitted as
+  `<str:name>` segments by default.
+
+Plus: any controller with an `actionIndex` also gets a route at
+`/<controller-id>/` (without the trailing `index/`), mirroring
+Yii's default. So `SiteController::actionIndex` produces both
+`site/index/` and `site/`.
+
+| Yii action                                       | Django path                          |
+|---|---|
+| `SiteController::actionIndex()`                   | `site/index/` and `site/`            |
+| `SiteController::actionLogin()`                   | `site/login/`                        |
+| `PostController::actionView($id)`                 | `post/view/<str:id>/`                |
+| `MyAdminController::actionEditUser($id, $tab)`    | `my-admin/edit-user/<str:id>/<str:tab>/` |
+
+VerbFilter pinning — when `behaviors()` returns:
+
+```php
+'verbs' => [
+    'class' => VerbFilter::class,
+    'actions' => [
+        'logout' => ['post'],
+        'delete' => ['post', 'delete'],
+    ],
+],
+```
+
+…the lifter emits the matching routes pinned to those HTTP methods,
+with a per-path dispatcher when more than one verb maps to one path.
+Otherwise the route accepts any HTTP method.
+""")
+
+    upsert_section(m, 'urlmanager', 2,
+                   'Custom urlManager.rules', """
+If `config/web.php` declares a `urlManager.rules` table:
+
+```php
+'urlManager' => [
+    'enablePrettyUrl' => true,
+    'rules' => [
+        'posts/<id:\\d+>' => 'post/view',
+        'posts'           => 'post/index',
+    ],
+],
+```
+
+…the lifter pulls each rule into the worklist and emits a comment
+in `urls_yii.py` listing the patterns. Translating Yii's pattern
+syntax (`<id:\\d+>`) to Django's converter syntax is left for the
+porter — most apps have only a handful of explicit rules and the
+default routing covers the rest.
+""")
+
+    upsert_section(m, 'controllers', 3,
+                   'Controller body translation', """
+| Yii source                                                   | Django output                                              |
+|---|---|
+| `return $this->render('view')`                                | `return render(request, 'view.html')`                      |
+| `return $this->render('view', ['post' => $post])`             | `return render(request, 'view.html', { ... })`             |
+| `return $this->renderPartial('frag')` / `renderAjax(...)`     | `return render(request, 'frag.html')`                      |
+| `return $this->goHome()`                                      | `return redirect('/')` (no `return return`)                |
+| `return $this->goBack()`                                      | `return redirect(request.session.get('return_url', '/'))`  |
+| `return $this->refresh()`                                     | `return redirect(request.path)`                            |
+| `return $this->redirect('/login')` / `redirect(['site/index'])` | `return redirect('/login')` / `redirect('site/index')`   |
+| `Yii::$app->user->isGuest`                                    | `(not request.user.is_authenticated)`                      |
+| `Yii::$app->user->identity`                                   | `request.user`                                             |
+| `Yii::$app->session->get('k')`                                | `request.session.get('k')`                                 |
+| `Yii::$app->session->set('k', $v)`                            | `request.session['k'] = v`                                 |
+| `Yii::$app->session->setFlash('success', $msg)`               | porter marker → `messages.success(request, msg)`           |
+| `Yii::$app->request->post('x')`                               | `request.POST.get('x')`                                    |
+| `Yii::$app->request->isAjax`                                  | `request.headers.get('x-requested-with') == 'XMLHttpRequest'` |
+| `Post::findOne($id)`                                          | porter marker → `Post.objects.filter(pk=id).first()`       |
+| `Post::find()->all()`                                         | porter marker → `list(Post.objects.all())`                 |
+| `$post->save()` / `$post->delete()`                           | `post.save()` / `post.delete()` (Django ORM is the same)   |
+
+Lifecycle methods (`behaviors`, `actions`, `beforeAction`,
+`afterAction`) and any non-`actionFoo` public method are ignored —
+they're not URL-routed.
+
+`return ` is consumed-and-re-emitted in redirect rules so we never
+produce `return return redirect(...)`.
+""")
+
+    upsert_section(m, 'corpus', 4,
+                   'Tested against yii2-app-basic', """
+The official `yiisoft/yii2-app-basic` skeleton ships one controller
+(`SiteController`) with five actions covering homepage / about /
+contact / login / logout. Its `behaviors()` declares a VerbFilter
+that pins `logout` to POST.
+
+| Metric                          | Result |
+|---|---:|
+| Controllers parsed              | 1      |
+| Actions translated              | 5      |
+| Routes emitted                  | 6 (5 actions + implicit `site/` → index) |
+| VerbFilter pins applied         | 1 (`logout` → POST)                       |
+| Custom URL rules                | 0 (skeleton ships an empty `rules` array) |
+""")
+
+    upsert_section(m, 'limitations', 5, 'Known limitations', """
+- **Modules** (Yii's HMVC structure: `modules/<mod>/controllers/`)
+  are not yet recursed into. They live alongside the top-level
+  `controllers/`; future support would add `<module>/` as a path
+  prefix and the module name as a controller-class qualifier.
+- **GridView / DataProvider** patterns produce porter markers for
+  the underlying ActiveRecord query but the GridView itself is a
+  view-layer abstraction Django expresses differently (custom
+  template tag or DataTables). The porter rewires.
+- **AccessControl filter** (in `behaviors()`) — recognised
+  structurally but not auto-translated. Django uses
+  `@login_required` / `@permission_required` decorators; the
+  porter chooses the right decorator per action.
+- **Yii's `Yii::$app->controller->renderContent()`** and
+  partial-content composition patterns aren't recognised. Most
+  apps use plain `render()` which is covered.
+- **Custom URL rules** from `urlManager.rules` are noted in the
+  worklist but their pattern syntax (`<id:\\d+>`) is not
+  translated to Django converter syntax. The porter handles it
+  case-by-case.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -3804,6 +3978,7 @@ def seed_datalift_volume():
             'liftdoctrine-guide',
             'liftcodeigniter-guide',
             'liftcakephp-guide',
+            'liftyii-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -4257,6 +4432,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftcakephp Guide     → /codex/liftcakephp-guide/'
         ))
+        seed_liftyii_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftyii Guide         → /codex/liftyii-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -4278,5 +4457,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (22 manuals + 1 volume).'
+            '\nDatalift manuals seeded (23 manuals + 1 volume).'
         ))

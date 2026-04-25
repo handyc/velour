@@ -58,7 +58,8 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftdoctrine` | Translate Doctrine entity classes (`#[ORM\Entity]`, `#[ORM\Column]`, `#[ORM\ManyToOne]`) into Django models. PHP-type-hint inference covers bare `#[ORM\Column]` attributes. |
 | `liftcodeigniter` | Translate a CodeIgniter app (CI3 `application/` or CI4 `app/`/`src/`) — routes (incl. `group()`/`resource()`) + controllers — into Django urls.py + views.py. |
 | `liftcakephp` | Translate a CakePHP 4/5 app (`config/routes.php` + `src/Controller/`) — routes (incl. `scope`/`prefix`/`resources`/`fallbacks`) + controllers — into Django urls.py + views.py. |
-| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, theme lifter, liftlaravel, liftmigrations, liftsymfony, liftdoctrine, liftcodeigniter, and liftcakephp in one command |
+| `liftyii` | Translate a Yii 2 app (`controllers/` + optional `config/web.php` `urlManager.rules`) — every public `actionFoo()` becomes a Django route at `/<controller-id>/<action-id>/`, with VerbFilter HTTP-method pinning honoured. |
+| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, theme lifter, liftlaravel, liftmigrations, liftsymfony, liftdoctrine, liftcodeigniter, liftcakephp, and liftyii in one command |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
