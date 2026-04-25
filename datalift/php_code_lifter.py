@@ -409,12 +409,17 @@ def _rewrite_code(chunk: str) -> str:
                     'yield', 'nonlocal', 'finally', 'raise',
                     'is', 'in', 'and', 'or', 'not', 'None',
                     'True', 'False', 'except', 'try', 'else')
-    # As a method/attribute (`obj.import(...)`)
+    # As a method, attribute, or chain segment (`obj.import(...)`,
+    # `cls.class`, `obj.with[...]`). Anything after a `.` that's a
+    # Python reserved word and is followed by `(`, `[`, ` `, `\n`,
+    # `=`, `,`, `)`, `:`, `]`, or end-of-string — gets `_` suffixed.
     method_kws = ('import', 'class', 'global', 'continue', 'pass',
                    'def', 'lambda', 'from', 'as', 'with', 'yield',
-                   'finally', 'raise', 'except', 'try', 'else')
+                   'finally', 'raise', 'except', 'try', 'else',
+                   'if', 'elif', 'while', 'for', 'in', 'is', 'and',
+                   'or', 'not', 'return')
     for kw in method_kws:
-        s = re.sub(rf'\.{kw}(?=\s*[(\[])', f'.{kw}_', s)
+        s = re.sub(rf'\.{kw}(?=[\s(\[=,):\]]|$)', f'.{kw}_', s)
     # As a variable being assigned, used as parameter name, or
     # subscripted: `class = None`, `def foo(continue=None)`,
     # `with['key']`. Renames any standalone occurrence of a
@@ -434,6 +439,11 @@ def _rewrite_code(chunk: str) -> str:
     # version that handles nested parens like
     #   `($x->y() == 'show') ? 'a' : 'b'`
 
+    # PHP `??=` (null-coalesce assign, PHP 7.4) — rewrite first so the
+    # plain `??` rule below doesn't shred it. `$x ??= $y` semantically:
+    # if $x is null, set it to $y. Closest Python: `x = x or y`.
+    s = re.sub(r'(\w+(?:\.\w+|\[[^\]]*\])*)\s*\?\?=\s*',
+                r'\1 = \1 or ', s)
     # `??` (null-coalesce) and `?:` (Elvis: `$x ?: $default` →
     # `$x or $default`). Both compile to Python `or`.
     s = re.sub(r'\s*\?\?\s*', ' or ', s)
