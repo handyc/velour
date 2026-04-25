@@ -874,6 +874,7 @@ predictable enough to re-run.
 | `liftmigrations` | Parse Laravel migrations into Django models (no SQL dump required). |
 | `liftsymfony` | Translate Symfony controllers + routes (attribute / annotation / YAML). |
 | `liftdoctrine` | Translate Doctrine `#[ORM\\Entity]` classes into Django models. |
+| `liftcodeigniter` | Translate CodeIgniter 3 + 4 routes and controllers into Django. |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -3109,6 +3110,191 @@ liftmigrations, review, migrate.
 """)
 
 
+def seed_liftcodeigniter_guide():
+    m = upsert_manual(
+        'liftcodeigniter-guide',
+        title='liftcodeigniter',
+        subtitle='Translate CodeIgniter 3 + CodeIgniter 4 apps into Django',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftcodeigniter reads a CodeIgniter application and emits '
+            'Django urls.py + views.py. Recognises both layouts: CI3 '
+            '(`application/config/routes.php` + `application/controllers/`) '
+            'and CI4 (`app/Config/Routes.php` or `src/Config/Routes.php` + '
+            '`app/Controllers/` or `src/Controllers/`). CI4 route '
+            'groups, `resource` shortcuts, and namespace prefixes are '
+            'all expanded. Validated against the Myth/Auth library: '
+            '11 routes through one grouped namespace, 11 controller '
+            'methods translated.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftcodeigniter /path/to/codeigniter/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Reads:
+
+- **CI3**: `application/config/routes.php`,
+  `application/controllers/**/*.php`.
+- **CI4**: `app/Config/Routes.php` (or `src/Config/Routes.php`),
+  `app/Controllers/**/*.php` (or `src/Controllers/**/*.php`).
+
+Emits `<app>/urls_codeigniter.py` and `<app>/views_codeigniter.py`.
+The two layouts are auto-detected; pointing at a project root that
+has both is fine — both sets are merged into the same output files.
+""")
+
+    upsert_section(m, 'routes-ci3', 1, 'Route translation — CI3', """
+CI3 has one routing form: an associative array literal with a URL
+pattern key and a `controller/method[/$1...]` value.
+
+| CI3 source                                   | Django output                              |
+|---|---|
+| `$route['users/(:num)'] = 'users/show/$1'`   | `path('users/<int:arg1>/', views.Users_show)` |
+| `$route['catalog/(:any)'] = 'cat/show/$1'`   | `path('catalog/<str:arg1>/', views.Cat_show)` |
+| `$route['posts/(:segment)'] = 'p/get/$1'`    | `path('posts/<slug:arg1>/', views.P_get)` |
+| `$route['default_controller'] = 'welcome'`   | _(noted in worklist; routed by Django's URL system)_ |
+
+The CI3 controller-name fragment is lowercase by convention but the
+PHP class is PascalCase, so `users/show` becomes `Users_show`.
+""")
+
+    upsert_section(m, 'routes-ci4', 2, 'Route translation — CI4', """
+CI4 routes are method calls on a `RouteCollection`. liftcodeigniter
+covers verb routes, the `match([...])` form, the `resource`
+shortcut, and `group()` blocks (with prefix and `namespace` option).
+
+| CI4 source                                            | Django output                                                |
+|---|---|
+| `$routes->get('/', 'Home::index')`                    | `path('', views.Home_index)`                                  |
+| `$routes->get('users/(:num)', 'U::show/$1')`          | `path('users/<int:arg1>/', views.U_show)`                     |
+| `$routes->post('login', 'A::attempt')`                | `path('login/', views.A_attempt)` (POST-only via dispatcher)  |
+| `$routes->add('/foo', 'F::any')`                      | `path('foo/', views.F_any)` (any HTTP method)                 |
+| `$routes->match(['get','post'], '/x', 'X::y')`        | one path + dispatcher with two HTTP-method branches            |
+| `$routes->get('login', 'A::login', ['as' => 'login'])`| `path('login/', views.A_login, name='login')`                 |
+| `$routes->resource('photos')`                         | 7 conventional REST routes (`GET /`, `POST /`, `GET /:id`, …) |
+| `$routes->group('admin', fn($r) => $r->get('/', 'A::i'))` | `path('admin/', views.A_i)`                              |
+| `$routes->group('', ['namespace' => 'App\\X\\Controllers'], fn(...))` | controller class is `App_X_AuthController` etc.   |
+
+Group `namespace` is parsed with the same convention used by
+liftsymfony / liftdoctrine: the trailing `Controllers` segment is
+stripped and the rest is joined with underscores into a class
+prefix (`Myth\\Auth\\Controllers` → `Myth_Auth`).
+
+Closures (`$routes->get('foo', static fn() => '...')`) and
+non-string handlers are skipped — they have no Django equivalent
+without porter intervention.
+""")
+
+    upsert_section(m, 'urls', 3, 'CI URL placeholders → Django', """
+| CI placeholder       | Django converter        | Example                  |
+|---|---|---|
+| `(:num)`             | `<int:argN>`            | `users/(:num)` → `users/<int:arg1>/` |
+| `(:any)`             | `<str:argN>`            | `cat/(:any)` → `cat/<str:arg1>/`     |
+| `(:segment)`         | `<slug:argN>`           | `posts/(:segment)` → `posts/<slug:arg1>/` |
+| `(:hash)`            | `<str:argN>`            | (treated as opaque str)              |
+| `(:alpha)`           | `<str:argN>`            |                                       |
+| `(:alphanum)`        | `<str:argN>`            |                                       |
+| Raw regex `\\d+`     | `<int:argN>`            | best-effort                           |
+
+Multiple placeholders in one URL number sequentially: `arg1`, `arg2`,
+… The Django view function signature gets these as positional args
+after `request`.
+""")
+
+    upsert_section(m, 'controllers', 4,
+                   'Controller body translation', """
+| CI source                                              | Django output                                                |
+|---|---|
+| `$this->load->view('foo', $data)`                      | `render(request, 'foo.html', data)`                          |
+| `view('foo', $data)` (CI4)                             | `render(request, 'foo.html', data)`                          |
+| `$this->input->post('x')`                              | `request.POST.get('x')`                                      |
+| `$this->input->get('x')`                               | `request.GET.get('x')`                                       |
+| `$this->request->getPost('x')` (CI4)                   | `request.POST.get('x')`                                      |
+| `$this->request->getVar('x')` (CI4)                    | `(request.POST.get('x') or request.GET.get('x'))`            |
+| `$this->session->userdata('x')`                        | `request.session.get('x')`                                   |
+| `session()->get('x')` (CI4)                            | `request.session.get('x')`                                   |
+| `redirect('foo')`                                      | `return redirect('/foo/')`                                   |
+| `redirect()->to('foo')` (CI4)                          | `return redirect('/foo/')`                                   |
+| `redirect()->route('login')` (CI4)                     | `return redirect('login')` (named URL)                       |
+| `redirect()->back()` (CI4)                             | `return redirect(request.META.get('HTTP_REFERER', '/'))`     |
+| `return $this->response->setJSON($x)` (CI4)            | `return JsonResponse(x);`                                    |
+| `$this->load->library('email')`                        | porter marker — replace with Django service                  |
+| `$this->load->model('User_model')`                     | porter marker — Django auto-imports models                   |
+
+Methods prefixed with `_` (CI3 convention for "private to URL
+routing") are skipped. CI4 lifecycle hooks (`initController`,
+`initialize`) are also skipped.
+
+The `return ` keyword is consumed-and-re-emitted in redirect rules,
+so `return redirect('foo');` does not become `return return
+redirect(...)`.
+""")
+
+    upsert_section(m, 'corpus', 5,
+                   'Tested against the Myth/Auth library', """
+[Myth/Auth](https://github.com/lonnieezell/myth-auth) is a CI4
+authentication library. Its `src/Config/Routes.php` exercises:
+
+- A `$routes->group('', ['namespace' => 'Myth\\Auth\\Controllers'], ...)`
+  block — namespace prefix should propagate to all 11 inner routes.
+- `$routes->get(...)` and `$routes->post(...)` against the same
+  path with `'as' => 'login'`-style aliases.
+- A controller (`AuthController.php`, 526 lines) with 11 public
+  methods covering login / logout / register / activate / forgot /
+  reset / attempt-* flows.
+
+| Metric                          | Result |
+|---|---:|
+| Verb routes parsed              | 11     |
+| Named routes (`'as' => ...`)    | 6      |
+| Controllers parsed              | 1      |
+| Methods translated              | 11     |
+| Namespace prefix propagation    | ✓ (`Myth_Auth_AuthController`) |
+
+Also tested against the bare `app/` skeleton in the CodeIgniter 4
+framework itself (`Home::index` only, 1 route + 1 method) to
+verify the minimal happy path.
+""")
+
+    upsert_section(m, 'limitations', 6, 'Known limitations', """
+- **Auto-routing** — CI3 and CI4 both support automatic
+  `/<controller>/<method>/<args>` routing without an explicit
+  routes entry. liftcodeigniter currently expects routes to be
+  declared. The `setAutoRoute(true)` flag is recognised but not
+  acted on; the porter wires Django's URL system to mirror the
+  effect.
+- **Dynamic route paths** (`$routes->get($config->loginPath, ...)`)
+  produce a route entry with an empty path. Myth/Auth uses this
+  pattern for its reserved-routes table; the porter substitutes the
+  real strings.
+- **Closure handlers** are skipped; only `'Controller::method'`
+  string handlers are translated.
+- **Filters** (`['filter' => 'auth']` on routes) are noted but not
+  translated — Django uses middleware / decorators for the same
+  job; the porter decides which Django mechanism fits.
+- **CI4 `Model` classes** (extending `CodeIgniter\\Model`) are not
+  yet translated to Django models. Most CI3+CI4 apps use
+  `$this->db->...` query-builder calls inline; those emit porter
+  markers pointing at the Django ORM equivalent.
+- **HMVC modules** (`Modules\\<module>\\Controllers\\X`) are
+  recognised structurally but emit `Modules_<module>_X` qualified
+  names; the porter typically restructures into Django apps.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -3460,6 +3646,7 @@ def seed_datalift_volume():
             'liftmigrations-guide',
             'liftsymfony-guide',
             'liftdoctrine-guide',
+            'liftcodeigniter-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -3905,6 +4092,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftdoctrine Guide    → /codex/liftdoctrine-guide/'
         ))
+        seed_liftcodeigniter_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftcodeigniter Guide → /codex/liftcodeigniter-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -3926,5 +4117,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (20 manuals + 1 volume).'
+            '\nDatalift manuals seeded (21 manuals + 1 volume).'
         ))

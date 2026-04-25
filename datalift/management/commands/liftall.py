@@ -24,6 +24,7 @@ Pipeline (each step skipped if the input it needs isn't present):
     7b. liftlaravel — routes + controllers (if --laravel-dir)
     8.  liftsymfony — controllers + routes (if --symfony-dir)
     9.  liftdoctrine — `#[ORM\\Entity]` → models (if --symfony-dir)
+    10. liftcodeigniter — CI3/CI4 routes + controllers (if --codeigniter-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -79,6 +80,11 @@ class Command(BaseCommand):
                                  '(src/Controller/ + config/routes/). '
                                  'Triggers liftsymfony — emits urls_symfony.py '
                                  'and views_symfony.py.')
+        parser.add_argument('--codeigniter-dir', default=None,
+                            help='Path to a CodeIgniter application root '
+                                 '(CI3 application/ or CI4 app/ src/). '
+                                 'Triggers liftcodeigniter — emits '
+                                 'urls_codeigniter.py and views_codeigniter.py.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -303,6 +309,27 @@ class Command(BaseCommand):
         else:
             summary.append('9. liftdoctrine: SKIPPED (no --symfony-dir)')
 
+        # ── 10. CodeIgniter routes + controllers ──────────────────
+        codeigniter_dir = (Path(opts['codeigniter_dir']).resolve()
+                           if opts['codeigniter_dir'] else None)
+        if codeigniter_dir:
+            if not codeigniter_dir.is_dir():
+                raise CommandError(
+                    f'--codeigniter-dir is not a directory: {codeigniter_dir}'
+                )
+            self._step(10, f'liftcodeigniter ({codeigniter_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftcodeigniter', str(codeigniter_dir), **kwargs)
+                summary.append(f'10. liftcodeigniter: ok ({codeigniter_dir})')
+            except Exception as e:
+                summary.append(f'10. liftcodeigniter: FAILED ({e})')
+                raise
+        else:
+            summary.append('10. liftcodeigniter: SKIPPED (no --codeigniter-dir)')
+
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('═══ liftall summary ═══'))
@@ -317,5 +344,5 @@ class Command(BaseCommand):
     def _step(self, n: int, label: str) -> None:
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f'━━━ Step {n}/9 — {label} ━━━'
+            f'━━━ Step {n}/10 — {label} ━━━'
         ))

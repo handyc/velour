@@ -56,7 +56,8 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftmigrations` | Parse Laravel `database/migrations/*.php` (Schema::create blueprints) into Django models — for projects with no SQL dump. |
 | `liftsymfony` | Translate a Symfony application — controllers (PHP attributes / docblock annotations) + YAML route files — into Django urls.py + views.py. |
 | `liftdoctrine` | Translate Doctrine entity classes (`#[ORM\Entity]`, `#[ORM\Column]`, `#[ORM\ManyToOne]`) into Django models. PHP-type-hint inference covers bare `#[ORM\Column]` attributes. |
-| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, theme lifter, liftlaravel, liftmigrations, liftsymfony, and liftdoctrine in one command |
+| `liftcodeigniter` | Translate a CodeIgniter app (CI3 `application/` or CI4 `app/`/`src/`) — routes (incl. `group()`/`resource()`) + controllers — into Django urls.py + views.py. |
+| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, theme lifter, liftlaravel, liftmigrations, liftsymfony, liftdoctrine, and liftcodeigniter in one command |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
