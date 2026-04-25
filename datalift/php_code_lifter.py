@@ -755,6 +755,34 @@ def _translate_function_calls(s: str) -> str:
 
 # ── Statement-level translation ───────────────────────────────────
 
+_WALRUS_RE = re.compile(
+    r'^(\s*\(?\s*)(\w+)\s*=\s*(?!=)([^=].*?)(\s*\)?\s*)$'
+)
+
+
+def _maybe_walrus(cond: str) -> str:
+    """Convert `if x = expr` patterns into Python walrus form
+    `if (x := expr)`. PHP assigns-in-conditions are common; the
+    walrus operator (3.8+) is the cleanest Python equivalent.
+
+    Handles three shapes seen in real code:
+      `var = expr`                  → `(var := expr)`
+      `(var = expr) != False`       → `((var := expr)) != False`
+      `not var = expr`              → `not (var := expr)`
+    """
+    # Bare `var = expr` at top of cond — no other operators around.
+    m = re.match(r'^\s*(?:not\s+)?(\w+)\s*=\s*(?!=)(.+)$', cond.strip())
+    if m and '==' not in cond and '!=' not in cond and '<=' not in cond \
+            and '>=' not in cond and ':=' not in cond:
+        prefix = 'not ' if cond.strip().startswith('not ') else ''
+        return f'{prefix}({m.group(1)} := {m.group(2).strip()})'
+    # `(var = expr) <op> rhs` form
+    m = re.match(r'^\(\s*(\w+)\s*=\s*(?!=)([^()]+?)\)\s*(.*)$', cond.strip())
+    if m and ':=' not in cond:
+        return f'({m.group(1)} := {m.group(2).strip()}) {m.group(3)}'
+    return cond
+
+
 def _translate_block(php_body: str, indent: int = 0) -> str:
     """Translate a PHP statement block into Python. `indent` is the
     Python indentation level (4-space units)."""
@@ -886,7 +914,11 @@ def _render_if(src: str, match: re.Match[str], indent: int
     # `:` doesn't end up on its own line (Python rejects bare `:`).
     cond_one = ' '.join(line.strip() for line in cond.splitlines()
                         if line.strip())
-    out.append(f'{pad}if {_translate_expr(cond_one)}:')
+    cond_translated = _translate_expr(cond_one)
+    # PHP `if ($x = expr)` (assignment-in-condition) → walrus
+    # operator. Recognise the post-translation pattern.
+    cond_translated = _maybe_walrus(cond_translated)
+    out.append(f'{pad}if {cond_translated}:')
     inner = _translate_block(src[body_span[0]:body_span[1]], indent + 1)
     out.append(inner if inner.strip() else f'{pad}    pass')
     i = body_span[1] + 1
@@ -917,15 +949,22 @@ def _render_if(src: str, match: re.Match[str], indent: int
                 break
             cond_one = ' '.join(line.strip() for line in cond.splitlines()
                                 if line.strip())
-            out.append(f'{pad}elif {_translate_expr(cond_one)}:')
+            cond_t = _maybe_walrus(_translate_expr(cond_one))
+            out.append(f'{pad}elif {cond_t}:')
             inner = _translate_block(src[bs[0]:bs[1]], indent + 1)
             out.append(inner if inner.strip() else f'{pad}    pass')
             i = bs[1] + 1
             continue
         if src.startswith('else', j):
-            bo = src.find('{', j + 4)
-            if bo < 0 or bo - (j + 4) > 5:  # else without immediate {
+            # Skip whitespace after `else` to find the `{`. The
+            # earlier `elseif`/`else if` checks above guarantee we
+            # don't accidentally consume an else-if here.
+            k = j + 4
+            while k < len(src) and src[k] in ' \t\r\n':
+                k += 1
+            if k >= len(src) or src[k] != '{':
                 break
+            bo = k
             bs = _balanced_block(src, bo)
             if bs is None:
                 break
@@ -1018,7 +1057,7 @@ def _render_while(src: str, match: re.Match[str], indent: int
     cond_raw = src[open_paren + 1:close_paren]
     cond_one = ' '.join(line.strip() for line in cond_raw.splitlines()
                         if line.strip())
-    cond = _translate_expr(cond_one)
+    cond = _maybe_walrus(_translate_expr(cond_one))
     body_open = src.find('{', close_paren)
     body_span = _balanced_block(src, body_open) if body_open >= 0 else None
     if body_span is None:
