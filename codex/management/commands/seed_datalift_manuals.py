@@ -56,6 +56,24 @@ def upsert_figure(section, slug, kind, source, caption='',
     return f
 
 
+def upsert_volume(slug, manual_slugs, **fields):
+    """Create or update a Volume bundling the named Manuals in order."""
+    from codex.models import Volume, Manual, VolumeManual
+    v, _ = Volume.objects.get_or_create(slug=slug, defaults=fields)
+    for k, v_val in fields.items():
+        setattr(v, k, v_val)
+    v.save()
+    # Idempotent: clear existing entries, re-pin in order.
+    VolumeManual.objects.filter(volume=v).delete()
+    for i, ms in enumerate(manual_slugs):
+        try:
+            m = Manual.objects.get(slug=ms)
+        except Manual.DoesNotExist:
+            continue
+        VolumeManual.objects.create(volume=v, manual=m, sort_order=i)
+    return v
+
+
 def seed_liftwp_quickstart():
     m = upsert_manual(
         'liftwp-quickstart',
@@ -1066,8 +1084,11 @@ The command exits 0 on success and prints a per-table summary:
 (views, system tables) are noted separately.
 """)
 
-    upsert_section(m, 'dialect-handling', 2, 'Dialect handling', """
+    dialect_section = upsert_section(m, 'dialect-handling', 2, 'Dialect handling', """
 Legacy SQL dumps differ wildly in detail. genmodels recognises:
+
+!fig:dialect-flow
+
 
 ### Table-name placeholders
 
@@ -1111,6 +1132,26 @@ handles Dolibarr's `llx_`, vBulletin's `vb_`, legacy WordPress's
 - URL-shaped column names (`*_url`, `link`) → `URLField`.
 - Slug-shaped column names (`slug`, `*_slug`) → `SlugField`.
 """)
+
+    upsert_figure(dialect_section, 'dialect-flow', 'mermaid', """flowchart TD
+    IN[CREATE TABLE statement]
+    IN --> KNOWN{known CMS prefix?}
+    KNOWN -->|MediaWiki, WordPress, Joomla, etc.| STRIP1[strip placeholder]
+    KNOWN -->|no| COMMON{all tables share xxx_?}
+    COMMON -->|yes| STRIP2[strip common prefix]
+    COMMON -->|no| ASIS[use name as-is]
+    STRIP1 --> NAME[clean table name]
+    STRIP2 --> NAME
+    ASIS --> NAME
+    NAME --> PASCAL[PascalCase to model]
+""", caption=(
+        'Three-stage prefix recognition. Known CMS placeholders '
+        '(MediaWiki /*_*/, WordPress $wpdb->, Joomla #__, etc.) are '
+        'stripped first. Failing that, common-prefix autodetection '
+        'kicks in: if every table starts with the same xxx_, the '
+        'stem is removed (handles Dolibarr llx_, vBulletin vb_, '
+        'legacy WordPress wp_).'
+    ))
 
     upsert_section(m, 'structural-patterns', 3,
                    'Structural patterns', """
@@ -1296,9 +1337,12 @@ idempotent. Drop it for incremental loads. `--dry-run` parses the
 dump and resolves every value but writes nothing.
 """)
 
-    upsert_section(m, 'value-parsing', 1, 'Value parsing', """
+    parse_section = upsert_section(m, 'value-parsing', 1, 'Value parsing', """
 The INSERT row parser handles the union of MySQL, PostgreSQL,
 SQL-Server, and Oracle `INSERT ... VALUES` shapes. It recognises:
+
+!fig:parse-pipeline
+
 
 - **Quoted strings** with `\\\\`, `\\'`, `\\"` escapes.
 - **Numeric literals** including negatives and scientific notation.
@@ -1319,6 +1363,26 @@ SQL-Server, and Oracle `INSERT ... VALUES` shapes. It recognises:
 - **Installer placeholders** like `__ENTITY__` (Dolibarr's tenant
   marker) → None.
 """)
+
+    upsert_figure(parse_section, 'parse-pipeline', 'mermaid', """flowchart LR
+    DUMP[dump.sql]
+    DUMP --> SKIP[skip comments and DDL]
+    SKIP --> INSERT[find INSERT statements]
+    INSERT --> COLS[resolve column list]
+    COLS --> ROWS[walk rows]
+    ROWS --> PARSE[parse each value]
+    PARSE --> COERCE[per-field coercions]
+    COERCE --> DEDUP[cross-batch PK dedup]
+    DEDUP --> BULK[bulk_create chunked]
+    BULK --> DB[(SQLite)]
+""", caption=(
+        'The ingest pipeline. Comments and DDL are filtered; INSERT '
+        'statements are matched and their column lists resolved (from '
+        'the INSERT itself or, if absent, from the matching CREATE '
+        'TABLE). Each value is parsed against the dialect rules, '
+        'coerced to fit the target Django field, deduplicated against '
+        'cross-batch keys, then handed to bulk_create in chunks.'
+    ))
 
     upsert_section(m, 'comment-handling', 2, 'Comment handling', """
 SQL dumps include comments in three styles: `-- ...` (line),
@@ -1504,12 +1568,14 @@ def seed_liftphp_guide():
         copyright_holder='Velour Project',
     )
 
-    upsert_section(m, 'why', 0, 'Why liftphp exists', """
+    why_section = upsert_section(m, 'why', 0, 'Why liftphp exists', """
 The privacy premise of `liftsite` is that files shown to an
 assistant must not carry row data or secrets. HTML/JS/CSS are
 relatively low-risk because they're structural. PHP is high-risk
 because it mixes structure with inline DB calls, credentials, API
 keys, and occasionally fixture data.
+
+!fig:scan-pipeline
 
 liftphp reads PHP and emits structured findings — never the raw
 secret. The findings drive three workflows:
@@ -1526,6 +1592,22 @@ secret. The findings drive three workflows:
 
 No LLM. No subprocess. No network. Pure regex + rules.
 """)
+
+    upsert_figure(why_section, 'scan-pipeline', 'mermaid', """flowchart LR
+    SRC[legacy site/]
+    SRC --> WALK[walk *.php files]
+    WALK --> SCAN[run 8-rule scanner]
+    SCAN --> FIND[Finding records]
+    FIND --> WL[worklist annotation]
+    FIND -.->|--redact| RED[redacted parallel tree]
+    FIND -.->|--strict| EXIT[exit 2 if any finding]
+""", caption=(
+        'liftphp produces three artifacts from one scan: a worklist '
+        'annotation always; a redacted parallel tree when --redact '
+        'is set; a nonzero exit when --strict is set. The Finding '
+        'records carry category, severity, line, and a *masked* '
+        'snippet — the raw secret never leaves the scanner.'
+    ))
 
     upsert_section(m, 'invocation', 1, 'Invocation', """
 ```
@@ -1685,8 +1767,11 @@ python manage.py liftsite /path/to/old/site \\
 `--dry-run` writes only the worklist; no files are placed.
 """)
 
-    upsert_section(m, 'classification', 1, 'How files are classified', """
+    classify_section = upsert_section(m, 'classification', 1, 'How files are classified', """
 Each file in the source tree is bucketed by extension:
+
+!fig:bucket-routing
+
 
 | Bucket  | Extensions                                                   | Routed to                       |
 |---|---|---|
@@ -1703,6 +1788,22 @@ routing to avoid double-bucketing: `js/`, `scripts/`,
 collapse to CSS; `images/`, `img/`, `assets/`, `fonts/`, `media/`
 collapse to assets.
 """)
+
+    upsert_figure(classify_section, 'bucket-routing', 'mermaid', """flowchart TD
+    FILE[file in source tree]
+    FILE --> EXT{extension?}
+    EXT -->|html htm tpl| HTML[templates/app/]
+    EXT -->|js mjs| JS[static/app/js/]
+    EXT -->|css| CSS[static/app/css/]
+    EXT -->|png jpg gif svg etc.| AS[static/app/images-or-fonts-etc/]
+    EXT -->|php phtml inc| PHP[deferred: liftphp / liftwp]
+    EXT -->|anything else| OTHER[inventoried, no placement]
+""", caption=(
+        'Six routing buckets, six target locations under the Django '
+        'app. PHP files are deliberately not auto-placed — they need '
+        'liftphp (for secret scanning) or liftwp (for translation) '
+        'before they can land safely.'
+    ))
 
     upsert_section(m, 'rewriting', 2, 'HTML rewriting', """
 liftsite performs conservative rewrites on HTML files:
@@ -2025,6 +2126,38 @@ match — what's left is anti-alias noise.
 """)
 
 
+def seed_datalift_volume():
+    """Bind the ten Datalift manuals into one PDF book."""
+    upsert_volume(
+        'the-datalift-manual',
+        manual_slugs=[
+            'datalift',
+            'dumpschema-quickstart',
+            'genmodels-guide',
+            'ingestdump-guide',
+            'liftphp-guide',
+            'liftsite-guide',
+            'liftwp-quickstart',
+            'liftwp-guide',
+            'browsershot-guide',
+            'shotdiff-guide',
+        ],
+        title='The Datalift Manual',
+        subtitle='Lifting legacy MySQL/PHP sites into Django',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'A bound edition of all ten Datalift command manuals. '
+            'Read the overview first for the shape; jump to a '
+            'command-specific manual for the details. The pipeline '
+            'is overview → dumpschema → genmodels → ingestdump → '
+            'liftphp → liftsite → liftwp (quickstart + guide) → '
+            'browsershot → shotdiff. Idempotent re-render: changes '
+            'to any contained manual reflow into this volume.'
+        ),
+    )
+
+
 class Command(BaseCommand):
     help = 'Seed Codex manuals for the Datalift toolset.'
 
@@ -2069,6 +2202,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  shotdiff Guide        → /codex/shotdiff-guide/'
         ))
+        seed_datalift_volume()
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (10 manuals).'
+            '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
+        ))
+        self.stdout.write(self.style.SUCCESS(
+            '\nDatalift manuals seeded (10 manuals + 1 volume).'
         ))
