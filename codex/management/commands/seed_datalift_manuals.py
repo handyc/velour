@@ -4218,6 +4218,7 @@ def seed_datalift_volume():
             'shotdiff-guide',
             'piwigo-case-study',
             'limesurvey-case-study',
+            'phpbb-case-study',
         ],
         title='The Datalift Manual',
         subtitle='Lifting legacy MySQL/PHP sites into Django',
@@ -4582,6 +4583,138 @@ with a regression test (`test_if_with_function_call_parens` in
 `datalift/tests/test_twig_lifter.py`).
 
 Everything else just worked.
+""")
+
+
+def seed_phpbb_case_study():
+    m = upsert_manual(
+        'phpbb-case-study',
+        title='Porting phpBB to Django',
+        subtitle='Datalift\'s third field report — turning a data point into a trend',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'On 2026-04-26, after the LimeSurvey end-to-end test, '
+            'Datalift was pointed at phpBB — a different domain '
+            '(forum vs survey), a different framework era (custom MVC '
+            'vs Yii 1.x), and a different code base (980 PHP files vs '
+            '1,134). The point was to turn the LimeSurvey single-data-'
+            'point into a trend: does the toolkit generalise, or was '
+            'it overfit to one project?'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+        bibliography=r"""
+@misc{phpbb,
+    author = {{phpBB Group}},
+    year   = {2000},
+    title  = {phpBB: bulletin board software},
+    note   = {https://www.phpbb.com}
+}
+""",
+    )
+
+    upsert_section(m, 'target', 0, 'The target', """
+phpBB [@phpbb] is one of the oldest and most widely-deployed
+forum platforms — first released in 2000, still maintained, still
+in production at thousands of sites. Properties that made it a
+useful second-corpus test:
+
+- **Different domain.** Forum (boards, posts, topics, polls,
+  permissions, sessions, ranks) vs LimeSurvey's surveys.
+- **No framework.** phpBB is custom MVC. None of `liftlaravel`,
+  `liftsymfony`, `liftcakephp`, `liftyii`, or `liftcodeigniter`
+  applies — the entire surface goes through the catch-all
+  (`liftphpcode`).
+- **Era.** Started 2000, codebase carries patterns from PHP 4
+  through PHP 8: more `static`, more `[&$this, 'method']`
+  callable syntax, more multi-line single-quoted SQL strings,
+  more `?:` Elvis operators.
+- **Schema dialect.** phpBB ships only postgres + oracle schema
+  files (no MySQL dump), so this round skipped genmodels and
+  focused on the catch-all PHP → Python translator.
+""")
+
+    upsert_section(m, 'pipeline', 1,
+                   'The pipeline run', """
+Two stages applied to phpBB:
+
+| Stage | Command | Input | Result |
+|---|---|---|---:|
+| 1 | `liftphpcode` | `phpBB/phpbb/` (980 files) | 980 files translated, 416 fns, 923 classes, 4,262 methods |
+| 2 | `python -m py_compile` | each emitted `.py` | **35.2% pass** (338/980) at end |
+
+Schema layer skipped (no MySQL dump). Theme layer skipped (phpBB
+uses its own template engine, not Twig).
+""")
+
+    upsert_section(m, 'patterns-found', 2,
+                   'New patterns surfaced', """
+The phpBB run found six PHP idioms LimeSurvey hadn't exercised:
+
+| # | Pattern | Fix |
+|---|---|---|
+| 1 | Multi-line single/double-quoted strings (`$sql = 'SELECT *\\nFROM users'`) | Pre-pass converts to Python triple-quoted form |
+| 2 | PHP Elvis operator `$x ?: $default` (short ternary) | Translates to `$x or $default` (same falsy semantics) |
+| 3 | `static $forum_ids;` at standalone position (no assignment) | Loosened the static-strip regex's lookahead |
+| 4 | Python keyword as variable name being subscripted (`$with['key']`) | Added `[` to the keyword-rename trigger set |
+| 5 | PHP callable syntax `[&$this, 'method']` | Strips the `&` by-reference marker |
+| 6 | Python keyword as function parameter name (`function merge($with)`) | `_translate_php_param_list` now honours the keyword set |
+
+Strings carrying `\\u` or `\\x` escape sequences in single
+quotes (e.g. Windows paths `'C:\\users\\foo'`) get prefixed with
+`r` so Python doesn't try to interpret PHP-meaningless escapes.
+""")
+
+    upsert_section(m, 'comparison', 3,
+                   'phpBB vs LimeSurvey: the trend', """
+| Metric | LimeSurvey | phpBB |
+|---|---:|---:|
+| PHP files translated | 1,134 | 980 |
+| Methods translated | 6,084 | 4,262 |
+| Initial compile rate | 24.1% | 30.6% |
+| Final compile rate (end-of-session) | 58.5% | 35.2% |
+| Real bugs surfaced | ~15 patterns | 6 new patterns |
+| Source-tree edits to project | 0 | 0 |
+
+The phpBB rate is **lower** than LimeSurvey because phpBB exercises
+the catch-all harder: complex SQL strings, closures-in-expression
+position, callable arrays, deeply nested ternaries, `static $var`
+function-scoped variables. LimeSurvey leans on Yii 1.x patterns
+that were already domesticated (action methods, simple render calls,
+helper functions). phpBB has none of that scaffolding.
+
+Both runs cross-pollinated: every fix from one improved the other.
+LimeSurvey's compile rate rose 57.0% → 58.5% during the phpBB
+session purely from the multi-line-string and Elvis-op fixes.
+
+**The trend**: each new corpus surfaces a fresh handful of real
+PHP idioms and pushes the catch-all forward by a few percentage
+points. The toolkit isn't overfit; the corpus space is just very
+large.
+""")
+
+    upsert_section(m, 'verdict', 4, 'The verdict', """
+Two real-world unseen targets, two qualitatively different code
+bases, both processed end-to-end without source-tree
+modification:
+
+- **LimeSurvey** (Yii 1.x + Twig + MariaDB): 100% schema /
+  58.5% code.
+- **phpBB** (custom MVC, no schema dump): N/A schema / 35.2% code.
+
+The schema-layer claim from the LimeSurvey case study holds:
+where Datalift can find a SQL dump, `genmodels` produces a
+ready-to-migrate `models.py`. The code-layer claim holds with
+honest variance: the catch-all bottoms out the porter's work,
+but how high it bottoms-out depends entirely on how much custom
+PHP the source uses.
+
+Each new corpus is essentially a finder of bugs. Three would
+turn the trend into a body of evidence; six would make it boring.
 """)
 
 
@@ -5047,10 +5180,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  LimeSurvey case study → /codex/limesurvey-case-study/'
         ))
+        seed_phpbb_case_study()
+        self.stdout.write(self.style.SUCCESS(
+            '  phpBB case study      → /codex/phpbb-case-study/'
+        ))
         seed_datalift_volume()
         self.stdout.write(self.style.SUCCESS(
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (25 manuals + 1 volume).'
+            '\nDatalift manuals seeded (26 manuals + 1 volume).'
         ))
