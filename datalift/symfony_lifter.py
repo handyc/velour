@@ -71,10 +71,10 @@ class SymfonyLiftResult:
 
 def _strip_php_comments_keep_docblocks(src: str) -> str:
     """Strip `//` and `#` line comments. Keeps `/* */` block comments
-    because Symfony annotation routes live in docblocks."""
-    src = re.sub(r'(?m)//.*?$', '', src)
-    src = re.sub(r'(?m)#(?!\[).*?$', '', src)  # `#` but not `#[` (attrs)
-    return src
+    because Symfony annotation routes live in docblocks. Delegates
+    to the shared string-aware walker."""
+    from datalift._php import strip_php_comments
+    return strip_php_comments(src, keep_docblocks=True)
 
 
 def _extract_brace_block(src: str, start: int) -> tuple[str, int]:

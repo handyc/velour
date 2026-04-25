@@ -875,6 +875,7 @@ predictable enough to re-run.
 | `liftsymfony` | Translate Symfony controllers + routes (attribute / annotation / YAML). |
 | `liftdoctrine` | Translate Doctrine `#[ORM\\Entity]` classes into Django models. |
 | `liftcodeigniter` | Translate CodeIgniter 3 + 4 routes and controllers into Django. |
+| `liftcakephp` | Translate CakePHP 4 / 5 routes (incl. `scope`/`prefix`/`resources`/`fallbacks`) and controllers into Django. |
 | `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
@@ -3295,6 +3296,161 @@ verify the minimal happy path.
 """)
 
 
+def seed_liftcakephp_guide():
+    m = upsert_manual(
+        'liftcakephp-guide',
+        title='liftcakephp',
+        subtitle='Translate CakePHP 4 / 5 routes + controllers into Django',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftcakephp reads a CakePHP application\'s '
+            '`config/routes.php` and `src/Controller/**/*.php` (with '
+            'prefix subdirs like `src/Controller/Admin/...`) and '
+            'emits Django urls.py + views.py. Recognises the closure '
+            'form (`return function (RouteBuilder $routes) {}`) plus '
+            '`scope()`, `prefix()`, `connect()` (string and array '
+            'forms), `resources()`, and `fallbacks()`.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftcakephp /path/to/cakephp/app \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Reads `<app>/config/routes.php` and walks `<app>/src/Controller/`,
+including prefixed subdirectories (`src/Controller/Admin/...`).
+Emits `<app>/urls_cakephp.py` and `<app>/views_cakephp.py`.
+
+`AppController` and `ErrorController` are recognised as base
+classes and skipped — they have no URL surface.
+""")
+
+    upsert_section(m, 'routes', 1, 'Route translation', """
+| CakePHP source                                                     | Django output                                                |
+|---|---|
+| `$builder->connect('/pages/*', 'Pages::display')`                  | `path('pages/<path:tail>/', views.PagesController_display)`  |
+| `$builder->connect('/articles', ['controller' => 'A', 'action' => 'i'])` | `path('articles/', views.AController_i)`              |
+| `$builder->connect('/articles/{id}', [...])`                       | `path('articles/<int:id>/', ...)` (id inferred numeric)      |
+| `$builder->connect('/u/{slug}', [...], ['slug' => '[a-z]+'])`      | `path('u/<slug:slug>/', ...)` (regex hint → slug)            |
+| `$builder->resources('Articles')`                                  | 7 conventional REST routes (`GET /`, `POST /`, `GET /:id`, …) |
+| `$routes->scope('/api', fn($b) => $b->connect('/x', 'X::y'))`      | path prefixed with `api/`                                    |
+| `$routes->prefix('Admin', fn($b) => $b->connect('/x', [...]))`     | controller class becomes `Admin_XController`                 |
+| `$builder->fallbacks()`                                            | porter marker — explicit Django paths required               |
+
+Path conventions:
+
+- `{name}` → `<str:name>` (default).
+- `{id}` → `<int:id>` (Cake convention: `id` is numeric).
+- Regex hint `'\\d+'` → `<int:name>`.
+- `*` (greedy trailing) → `<path:tail>`.
+
+Controller naming: `'Articles'` becomes `ArticlesController` in
+the emitted Django view function (`ArticlesController_index` etc.),
+matching CakePHP's class-name convention. With `prefix()` the
+class is qualified: `Admin_ArticlesController`.
+""")
+
+    upsert_section(m, 'controllers', 2,
+                   'Controller body translation', """
+| CakePHP source                                            | Django output                                                |
+|---|---|
+| `return $this->render('Pages/home')`                       | `return render(request, 'Pages/home.html')`                  |
+| `return $this->redirect('/')`                              | `return redirect('/')` (no `return return`)                  |
+| `return $this->redirect(['controller' => 'X', 'action' => 'y'])` | `return redirect('X_y')` (named URL)                  |
+| `$this->request->getData('email')`                         | `request.POST.get('email')`                                  |
+| `$this->request->getQuery('q')`                            | `request.GET.get('q')`                                       |
+| `$this->request->getParam('id')`                           | `kwargs.get('id')`                                           |
+| `$this->getRequest()->getSession()->read('k')`             | `request.session.get('k')`                                   |
+| `$this->Articles->find('all')`                             | porter marker → `Articles.objects.all()`                     |
+| `$this->Articles->get($id)`                                | porter marker → `Articles.objects.get(pk=id)`                |
+| `$this->Articles->save($article)`                          | porter marker → `article.save()`                             |
+| `$this->set(compact('articles'))`                          | porter marker — pass to `render()` context dict              |
+| `throw new NotFoundException()`                            | `raise Http404`                                              |
+| `throw new ForbiddenException()`                           | `raise PermissionDenied`                                     |
+| `$this->Flash->success('Saved')`                           | porter marker → `messages.success(request, 'Saved')`         |
+
+Lifecycle hooks (`initialize`, `beforeFilter`, `beforeRender`,
+`afterFilter`, `beforeRedirect`) and `_`-prefixed methods are
+skipped — they're not URL-routed.
+
+Like every other lifter in the toolkit, the `return ` keyword is
+consumed-and-re-emitted in redirect rules, so
+`return $this->redirect('/');` does not become `return return
+redirect('/')`.
+""")
+
+    upsert_section(m, 'comment-stripper', 3,
+                   'A note on string-aware comment stripping', """
+CakePHP's default routes file contains the URL pattern `'/pages/*'`,
+where the `/*` inside the string literal would fool a naive regex
+comment stripper into treating it as the start of a block comment
+— silently swallowing every route until the next `*/`.
+
+This whole toolkit was retrofitted with a string-aware PHP comment
+stripper (`datalift._php.strip_php_comments`) the moment this bug
+showed up. Every lifter — Laravel, Symfony, Doctrine, CodeIgniter,
+WordPress, plus this one — now delegates to that shared walker, so
+URL patterns containing `/*`, `//`, or `#` characters survive the
+stripping pass.
+""")
+
+    upsert_section(m, 'corpus', 4,
+                   'Tested against the CakePHP application skeleton', """
+The official `cakephp/app` skeleton (`composer create-project
+cakephp/app`) is the smallest realistic test corpus: bare
+`routes.php` + `PagesController.php`. It exercises:
+
+- The `return function (RouteBuilder $routes): void {}` outer
+  closure form.
+- A `scope('/', ...)` block.
+- `connect('/', [...])` (array form, with positional `home` arg).
+- `connect('/pages/*', 'Pages::display')` (string-target form +
+  greedy `*`).
+- `fallbacks()` — flagged in the worklist; the porter must
+  expand `/<controller>/<action>/*` into explicit Django paths.
+
+| Metric                          | Result |
+|---|---:|
+| Routes parsed                   | 2      |
+| Controllers parsed              | 1      |
+| Actions translated              | 1      |
+| Fallbacks flagged               | ✓      |
+| Base classes filtered           | `AppController`, `ErrorController` |
+""")
+
+    upsert_section(m, 'limitations', 5, 'Known limitations', """
+- **Auto-routing** via `$builder->fallbacks()` is **not**
+  expanded into explicit Django paths. It's flagged in the worklist
+  with a porter marker; the porter adds explicit routes for any
+  controller that needs the fallback behaviour.
+- **Table classes** (`src/Model/Table/*Table.php`) are not yet
+  translated to Django models. CakePHP's `belongsTo`/`hasMany`
+  associations live in `initialize()`; a future `liftcaketables`
+  could parse those into Django FK / related_name pairs.
+- **Entity classes** (`src/Model/Entity/*.php`) usually only
+  declare `$_accessible` arrays — not enough to drive a Django
+  model on their own. Skipped; the porter pairs the table-class
+  associations with the SQL dump (handled by `genmodels`).
+- **Behaviors / Components** (`SoftDelete`, `Tree`, `Auth`) — not
+  translated. Django uses `models.Manager` / decorators / signals
+  for the same jobs; the porter chooses the appropriate Django
+  mechanism.
+- **Cake CLI shells** (`src/Console/`) — out of scope.
+- **DataView / Crud plugin** patterns — not recognised.
+""")
+
+
 def seed_liftall_guide():
     m = upsert_manual(
         'liftall-guide',
@@ -3647,6 +3803,7 @@ def seed_datalift_volume():
             'liftsymfony-guide',
             'liftdoctrine-guide',
             'liftcodeigniter-guide',
+            'liftcakephp-guide',
             'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
@@ -4096,6 +4253,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftcodeigniter Guide → /codex/liftcodeigniter-guide/'
         ))
+        seed_liftcakephp_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftcakephp Guide     → /codex/liftcakephp-guide/'
+        ))
         seed_liftall_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftall Guide         → /codex/liftall-guide/'
@@ -4117,5 +4278,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (21 manuals + 1 volume).'
+            '\nDatalift manuals seeded (22 manuals + 1 volume).'
         ))

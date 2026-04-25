@@ -88,14 +88,11 @@ _PHP_CLOSE = re.compile(r'\?>')
 
 # Inside PHP, strip block + line comments. We are not building a real
 # PHP parser; we're stripping enough to make the patterns below match.
-_PHP_COMMENT_BLOCK = re.compile(r'/\*.*?\*/', re.DOTALL)
-_PHP_COMMENT_LINE = re.compile(r'(?m)(?:^|\s)(?://|\#).*$')
-
 
 def _strip_php_comments(php: str) -> str:
-    php = _PHP_COMMENT_BLOCK.sub('', php)
-    php = _PHP_COMMENT_LINE.sub('', php)
-    return php
+    """String-aware PHP comment stripper. Delegates to shared helper."""
+    from datalift._php import strip_php_comments
+    return strip_php_comments(php)
 
 
 # ── Template tag → Django translation table ───────────────────────

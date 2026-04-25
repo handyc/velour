@@ -456,9 +456,9 @@ def parse_blueprint(body: str) -> list[ColumnRecord]:
     """Parse a Schema::create body and return its columns."""
     columns: list[ColumnRecord] = []
 
-    # Strip comments first.
-    body = re.sub(r'/\*.*?\*/', '', body, flags=re.DOTALL)
-    body = re.sub(r'(?m)//.*?$', '', body)
+    # Strip comments first (string-aware so embedded `/*` survives).
+    from datalift._php import strip_php_comments
+    body = strip_php_comments(body)
 
     # Handle `$table->timestamps()` — expands to created_at + updated_at.
     if re.search(r"\$table->timestamps\s*\(\s*\)", body):

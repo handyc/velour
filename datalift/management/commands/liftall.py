@@ -25,6 +25,7 @@ Pipeline (each step skipped if the input it needs isn't present):
     8.  liftsymfony — controllers + routes (if --symfony-dir)
     9.  liftdoctrine — `#[ORM\\Entity]` → models (if --symfony-dir)
     10. liftcodeigniter — CI3/CI4 routes + controllers (if --codeigniter-dir)
+    11. liftcakephp — CakePHP routes + controllers (if --cakephp-dir)
 
 Each underlying command writes its own worklist; this orchestrator
 prints a unified summary at the end. Pure Datalift, no LLM, no
@@ -85,6 +86,11 @@ class Command(BaseCommand):
                                  '(CI3 application/ or CI4 app/ src/). '
                                  'Triggers liftcodeigniter — emits '
                                  'urls_codeigniter.py and views_codeigniter.py.')
+        parser.add_argument('--cakephp-dir', default=None,
+                            help='Path to a CakePHP application root '
+                                 '(config/routes.php + src/Controller/). '
+                                 'Triggers liftcakephp — emits '
+                                 'urls_cakephp.py and views_cakephp.py.')
         parser.add_argument(
             '--theme-type', choices=list(THEME_TYPE_TO_COMMAND.keys()),
             default=None,
@@ -330,6 +336,27 @@ class Command(BaseCommand):
         else:
             summary.append('10. liftcodeigniter: SKIPPED (no --codeigniter-dir)')
 
+        # ── 11. CakePHP routes + controllers ──────────────────────
+        cakephp_dir = (Path(opts['cakephp_dir']).resolve()
+                       if opts['cakephp_dir'] else None)
+        if cakephp_dir:
+            if not cakephp_dir.is_dir():
+                raise CommandError(
+                    f'--cakephp-dir is not a directory: {cakephp_dir}'
+                )
+            self._step(11, f'liftcakephp ({cakephp_dir.name})')
+            try:
+                kwargs = {'app': app_label, 'verbosity': 0}
+                if dry:
+                    kwargs['dry_run'] = True
+                call_command('liftcakephp', str(cakephp_dir), **kwargs)
+                summary.append(f'11. liftcakephp: ok ({cakephp_dir})')
+            except Exception as e:
+                summary.append(f'11. liftcakephp: FAILED ({e})')
+                raise
+        else:
+            summary.append('11. liftcakephp: SKIPPED (no --cakephp-dir)')
+
         # ── Final summary ─────────────────────────────────────────
         self.stdout.write('')
         self.stdout.write(self.style.SUCCESS('═══ liftall summary ═══'))
@@ -344,5 +371,5 @@ class Command(BaseCommand):
     def _step(self, n: int, label: str) -> None:
         self.stdout.write('')
         self.stdout.write(self.style.MIGRATE_HEADING(
-            f'━━━ Step {n}/10 — {label} ━━━'
+            f'━━━ Step {n}/11 — {label} ━━━'
         ))

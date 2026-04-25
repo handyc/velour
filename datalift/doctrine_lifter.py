@@ -64,9 +64,9 @@ class DoctrineLiftResult:
 # ── PHP source utilities ──────────────────────────────────────────
 
 def _strip_php_comments(src: str) -> str:
-    src = re.sub(r'(?m)//.*?$', '', src)
-    src = re.sub(r'(?m)#(?!\[).*?$', '', src)  # `#` but not `#[`
-    return src
+    """String-aware PHP comment stripper. Delegates to shared helper."""
+    from datalift._php import strip_php_comments
+    return strip_php_comments(src)
 
 
 def _camel_to_snake(name: str) -> str:

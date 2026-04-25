@@ -201,11 +201,14 @@ def _api_resource_routes(prefix: str, controller: str) -> list[RouteRecord]:
 
 
 def _strip_php_comments(php: str) -> str:
-    """Remove `// ...`, `# ...`, and `/* ... */` comments from PHP."""
-    php = re.sub(r'/\*.*?\*/', '', php, flags=re.DOTALL)
-    php = re.sub(r'(?m)//.*?$', '', php)
-    php = re.sub(r'(?m)#.*?$', '', php)
-    return php
+    """Remove `// ...`, `# ...`, and `/* ... */` comments from PHP.
+
+    Delegates to the shared string-aware walker — naive regex-based
+    stripping corrupts strings containing `/*` (e.g. URL patterns
+    like `'/files/*'`).
+    """
+    from datalift._php import strip_php_comments
+    return strip_php_comments(php)
 
 
 def _extract_group_prefixes(php: str) -> list[tuple[int, int, str, str]]:

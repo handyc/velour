@@ -71,10 +71,9 @@ class CILiftResult:
 # ── Shared PHP utilities ──────────────────────────────────────────
 
 def _strip_php_comments(src: str) -> str:
-    src = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)
-    src = re.sub(r'(?m)//.*?$', '', src)
-    src = re.sub(r'(?m)#(?!\[).*?$', '', src)
-    return src
+    """String-aware PHP comment stripper. Delegates to shared helper."""
+    from datalift._php import strip_php_comments
+    return strip_php_comments(src)
 
 
 _CAMEL_BOUNDARY = re.compile(r'(?<!^)(?=[A-Z])')
