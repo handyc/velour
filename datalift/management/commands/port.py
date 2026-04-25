@@ -36,7 +36,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from datalift.model_generator import generate_all
 from datalift.php_scanner import scan as php_scan
-from datalift.site_lifter import walk_site
+from datalift.site_lifter import classify, walk_site
 
 
 class Command(BaseCommand):
@@ -67,19 +67,18 @@ class Command(BaseCommand):
 
     def _scan_php(self, php_dir: Path) -> list:
         """Run the scanner on every PHP file in the tree; return
-        (path, findings) list."""
+        (relative_path, findings) list."""
         out = []
-        for rel, kind in walk_site(php_dir):
-            if kind != 'php':
+        for path in walk_site(php_dir):
+            if classify(path) != 'php':
                 continue
             try:
-                text = (php_dir / rel).read_text(
-                    encoding='utf-8', errors='replace')
+                text = path.read_text(encoding='utf-8', errors='replace')
             except OSError:
                 continue
             findings = php_scan(text)
             if findings:
-                out.append((rel, findings))
+                out.append((path.relative_to(php_dir), findings))
         return out
 
     def _print_scan_summary(self, scan_results):

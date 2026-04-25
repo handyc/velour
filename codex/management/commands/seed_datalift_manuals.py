@@ -857,7 +857,7 @@ predictable enough to re-run.
     ))
 
     upsert_section(m, 'commands', 1,
-                   'The eight commands', """
+                   'The commands', """
 | Command       | What it does                                                    |
 |---|---|
 | `dumpschema`  | Slice the schema out of a mysqldump for a Claude-safe review.   |
@@ -865,12 +865,18 @@ predictable enough to re-run.
 | `ingestdump`  | Parse INSERT blocks → load rows into the generated models.      |
 | `liftsite`    | Move HTML/JS/CSS/static assets into Django's `templates/static/`.|
 | `liftphp`     | Scan PHP for secrets/PII; optionally write redacted copies.     |
-| `liftwp`      | Translate a WordPress theme into Django templates+views+urls.   |
+| `liftwp`      | Translate a WordPress PHP theme into Django templates+views+urls.|
+| `liftsmarty`  | Translate a Smarty `.tpl` theme (Piwigo, older PrestaShop).      |
+| `liftwig`     | Translate a Twig `.twig` template tree (Drupal 8+, Symfony, Slim).|
+| `liftall`     | End-to-end orchestrator — runs every step above in one command.  |
 | `browsershot` | Take a real-browser PNG screenshot of any URL.                  |
 | `shotdiff`    | Diff two PNGs and emit an overlay highlighting the changes.     |
+| `port`        | Two-step focus version of liftall: scan + genmodels only.       |
 
 Each command has its own manual in this set. Read this one for the
-shape; jump to the command-specific manual for the details.
+shape; jump to the command-specific manual for the details. For
+the happy path, `liftall` is the single command that ties them
+all together.
 """)
 
     pipeline = upsert_section(m, 'pipeline', 2,
@@ -2152,6 +2158,242 @@ same Datalift family; the shared scaffolding is in this and
 """)
 
 
+def seed_liftwig_guide():
+    m = upsert_manual(
+        'liftwig-guide',
+        title='liftwig',
+        subtitle='A deterministic Twig-to-Django template translator',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftwig translates a tree of Twig `.twig` files into Django '
+            'templates. Twig (Symfony, Drupal 8+, Slim, Craft CMS) is '
+            'the closest of the major PHP template languages to '
+            'Django\'s syntax — most of the translation is path-remap '
+            'and filter-argument syntax. Validated end-to-end against '
+            'four official Drupal 11 themes (Olivero, Claro, '
+            'starterkit_theme, stable9): 451 templates total, zero '
+            'unhandled fragments.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftwig /path/to/templates \\
+    --app myapp \\
+    [--out /path/to/project] \\
+    [--worklist worklist.md] \\
+    [--dry-run]
+```
+
+Output: every `.twig` file under the source directory becomes a
+Django template at the matching path under `templates/<app>/`.
+The `.twig` extension is dropped; if the remaining suffix is one
+of `.html` / `.txt` / `.xml` / `.json`, it stays. Otherwise
+`.html` is appended.
+""")
+
+    upsert_section(m, 'translation-table', 1, 'Translation table', """
+Twig and Django share most of their syntax — the translator's job
+is mostly the small set of corner cases.
+
+### Direct passthroughs (Django already does these)
+
+| Twig                                | Django (same)                  |
+|---|---|
+| `{{ x }}`                           | `{{ x }}`                      |
+| `{{ x.prop }}`                      | `{{ x.prop }}`                 |
+| `{{ x\\|filter }}`                   | `{{ x\\|filter }}`              |
+| `{% if X %}` / `{% else %}` / `{% endif %}` | same                   |
+| `{% for x in xs %}` / `{% endfor %}` | same                          |
+| `{% block name %}` / `{% endblock %}` | same                         |
+| `{# comment #}`                     | same                           |
+| `{% verbatim %}` / `{% endverbatim %}` | same                        |
+
+### Translations that matter
+
+| Twig                                | Django                              |
+|---|---|
+| `{% extends 'X.html.twig' %}`       | `{% extends 'X.html' %}`            |
+| `{% include 'X.html.twig' %}`       | `{% include 'X.html' %}`            |
+| `{% elseif x %}`                    | `{% elif x %}`                      |
+| `{{ x\\|date('Y-m-d') }}`            | `{{ x\\|date:'Y-m-d' }}`             |
+| `{{ x\\|filter('a','b') }}`          | `{{ x\\|filter:'a' }}` (first arg)   |
+| `{{ x ?? 'fallback' }}`             | `{{ x\\|default:'fallback' }}`       |
+| `{{ active ? 'on' : 'off' }}`       | `{% if active %}on{% else %}off{% endif %}` |
+
+### Twig-only constructs (porter-facing markers)
+
+| Twig                            | What we emit                           |
+|---|---|
+| `{% set x = 1 %}`               | `{# twig set x = 1 — wire in view #}`  |
+| `{% set x %}body{% endset %}`   | open + close porter comments           |
+| `{% macro f(a,b) %}...{% endmacro %}` | porter comment                  |
+| `{% import "x.html.twig" as foo %}`   | porter comment                  |
+| `{% embed 'x.html.twig' %}...{% endembed %}` | translates to `{% include %}` + porter note for block overrides |
+| `{% trans %}...{% plural %}...{% endtrans %}` | Django `{% blocktranslate %} {% plural %} {% endblocktranslate %}` |
+| `{% apply filter %}...{% endapply %}` | porter comment                   |
+| `{% cache %}...{% endcache %}`        | porter comment                   |
+
+Twig functions (`path('route_name')`, `asset('css/x.css')`,
+`url('foo')`, `form_widget(form)`) are left intact in the
+translated body — Django will fail to resolve them on render and
+the porter sees the exact location to wire either a custom
+template tag or a context variable.
+""")
+
+    upsert_section(m, 'corpora', 2,
+                   'Tested corpora (Drupal core themes)', """
+liftwig was iterated against the four core themes shipped with
+Drupal 11.3.8 — Olivero (the current default front-end theme),
+Claro (the current admin theme), starterkit_theme (the new theme
+generator base), and stable9 (the legacy compatibility layer).
+
+| Theme              | Twig templates | Unhandled |
+|---|---:|---:|
+| Olivero            | 72  | 0 |
+| Claro              | 119 | 0 |
+| starterkit_theme   | 85  | 0 |
+| stable9            | 175 | 0 |
+| **Total**          | **451** | **0** |
+
+[[spark:72,119,85,175 | bar]] — Olivero, Claro, starterkit_theme,
+stable9.
+
+The two refinements made during this iteration: handling
+`{% endset %}` (block-form `{% set %}` vs the more common
+statement form), and recognising the Twig i18n trio
+`{% trans %}/{% plural %}/{% endtrans %}` as Django's
+`{% blocktranslate %}` / `{% plural %}` / `{% endblocktranslate %}`.
+
+Iteration sparkline (across the four-theme run, total unhandled
+fragments after each change):
+[[spark:1,3,0,0 | bar]] — initial 1, after first round
+realised stable9 had 3 trans-block fragments, after handling
+{% endset %} 0, after handling {% trans %} 0.
+""")
+
+    upsert_section(m, 'limitations', 3, 'Known limitations', """
+- **Twig functions** like `path()`, `asset()`, `url()`,
+  `form_widget()`, `dump()` are passed through verbatim. Django
+  raises a clear error at render time; the porter wires the right
+  template tag or context value.
+- **`{% set %}` block form** with complex bodies — porter must
+  refactor into a view or `{% with %}` block.
+- **Macros** — Django's closest analog is `{% include with %}` or
+  a custom template tag; liftwig flags the macro for hand port.
+- **Twig multi-arg filters** (e.g. `|replace({'a':'b'})`) — the
+  first positional arg is translated; dict args become a porter
+  marker. Django's filter system takes one positional arg.
+- **`{% sandbox %}`, `{% cache %}`, `{% apply %}`** — Django has
+  no native equivalents.
+""")
+
+    upsert_section(m, 'shape', 4,
+                   'Shape and scale', """
+- ~400 LOC of pure Python in `datalift/twig_lifter.py`.
+- 24 regression tests, ~6 ms.
+- Mirrors `wp_lifter.py` and `smarty_lifter.py` design: walker +
+  rule-table dispatcher + worklist.
+- Same operating envelope: pure Python, no LLM, no network.
+
+Three template-engine lifters now ship in the Datalift family —
+`liftwp` (WordPress PHP themes), `liftsmarty` (Smarty `.tpl`),
+`liftwig` (Twig `.twig`). The same shape extends to **Blade**
+(Laravel) and **Volt** (Phalcon) as the next two natural
+additions.
+""")
+
+
+def seed_liftall_guide():
+    m = upsert_manual(
+        'liftall-guide',
+        title='liftall',
+        subtitle='End-to-end Datalift orchestrator',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftall chains every Datalift step — port (scan + '
+            'genmodels), makemigrations + migrate, ingestdump, '
+            'liftphp, liftsite, and the right theme lifter — in a '
+            'single command, with a unified summary. The happy path '
+            'goes from a mysqldump and a legacy source tree to a '
+            'browsable Django project in one keystroke.'
+        ),
+    )
+
+    upsert_section(m, 'invocation', 0, 'Invocation', """
+```
+python manage.py liftall \\
+    --dump path/to/dump.sql \\
+    --app myapp \\
+    [--legacy-dir path/to/legacy/source/] \\
+    [--theme-dir path/to/theme/] \\
+    [--theme-type wp|smarty|twig] \\
+    [--migrate] \\
+    [--ingest] \\
+    [--source-database name] \\
+    [--force] [--dry-run]
+```
+
+Each flag enables one step. Without `--legacy-dir`, the PHP scan
+and asset routing are skipped. Without `--theme-dir`, no theme
+translation happens. `--ingest` requires `--migrate` (the rows
+need somewhere to land).
+""")
+
+    upsert_section(m, 'pipeline', 1, 'The chain', """
+| Step | Command            | Triggered by                     |
+|---|---|---|
+| 1    | `port`             | always (scan if `--legacy-dir`)  |
+| 2    | `migrate`          | `--migrate`                      |
+| 3    | `ingestdump`       | `--ingest` (needs `--migrate`)   |
+| 4    | `liftphp`          | `--legacy-dir`                   |
+| 5    | `liftsite`         | `--legacy-dir`                   |
+| 6    | `liftwp` / `liftsmarty` / `liftwig` | `--theme-dir` + `--theme-type` |
+
+The orchestrator stops on the first failing step and prints a
+unified summary showing which steps succeeded, were skipped, or
+failed. Each underlying command writes its own worklist; liftall
+just wires them together.
+""")
+
+    upsert_section(m, 'piwigo-recipe', 2,
+                   'Recipe: porting Piwigo end-to-end', """
+The Piwigo case study run reduces to one command:
+
+```
+manage.py liftall \\
+    --dump   piwigo_install.sql \\
+    --app    gallery \\
+    --legacy-dir /path/to/Piwigo-15.4.0 \\
+    --theme-dir  /path/to/Piwigo-15.4.0/themes/default \\
+    --theme-type smarty \\
+    --migrate --force
+```
+
+This runs in this order:
+
+1. `port` scans `/legacy/` for secrets, then runs `genmodels`
+   on the dump.
+2. `makemigrations gallery && migrate`.
+3. (`ingestdump` skipped because we passed no `--ingest`.)
+4. `liftphp` scans the full PHP tree.
+5. `liftsite` routes static assets.
+6. `liftsmarty` translates `themes/default/*.tpl` to
+   `templates/gallery/template/*.html`.
+
+Output: 34 models migrated, 924 PHP files scanned, 1657 assets
+routed, 53 Smarty templates translated, all in roughly 12 seconds.
+""")
+
+
 def seed_browsershot_guide():
     m = upsert_manual(
         'browsershot-guide',
@@ -2412,6 +2654,8 @@ def seed_datalift_volume():
             'liftwp-quickstart',
             'liftwp-guide',
             'liftsmarty-guide',
+            'liftwig-guide',
+            'liftall-guide',
             'browsershot-guide',
             'shotdiff-guide',
             'piwigo-case-study',
@@ -2828,6 +3072,14 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftsmarty Guide      → /codex/liftsmarty-guide/'
         ))
+        seed_liftwig_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftwig Guide         → /codex/liftwig-guide/'
+        ))
+        seed_liftall_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftall Guide         → /codex/liftall-guide/'
+        ))
         seed_browsershot_guide()
         self.stdout.write(self.style.SUCCESS(
             '  browsershot Guide     → /codex/browsershot-guide/'
@@ -2845,5 +3097,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (12 manuals + 1 volume).'
+            '\nDatalift manuals seeded (14 manuals + 1 volume).'
         ))

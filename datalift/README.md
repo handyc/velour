@@ -49,6 +49,8 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
 | `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
 | `liftsmarty` | Translate a Smarty theme directory (`.tpl`) into Django templates |
+| `liftwig` | Translate a Twig template directory (`.twig`) into Django templates (Drupal/Symfony/Slim) |
+| `liftall` | End-to-end orchestrator — chains scan, genmodels, migrate, ingest, liftphp, liftsite, and the right theme lifter in one command |
 | `browsershot` | Take a real-browser PNG screenshot of any URL — for visually verifying lifted sites match the original |
 | `shotdiff` | Diff two PNG screenshots and emit an overlay highlighting the changes |
 | `port` | Run `liftphp` (optional) + `genmodels` + print remaining manual steps |
