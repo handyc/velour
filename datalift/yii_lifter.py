@@ -133,14 +133,21 @@ def _split_args(s: str) -> list[str]:
 # ── Body translation ──────────────────────────────────────────────
 
 _BODY_RULES: list[tuple[re.Pattern[str], str]] = [
-    # render — `$this->render('view')` (positional + with array)
-    (re.compile(r"\$this->render\(\s*'([^']+)'\s*\)"),
+    # render — `$this->render('view')` and `$this->render('view', $ctx)`.
+    # For the second form we ONLY rewrite the prefix; the
+    # `$ctx` argument (often an array literal) goes through the
+    # catch-all (php_code_lifter._translate_block) which handles
+    # nested brackets correctly. A naive `[^\]]*` capture here
+    # corrupts nested `params['key']` indexes inside the array.
+    # `(?:return\s+)?` consumes any caller-supplied `return` so we
+    # never produce `return return render(...)`.
+    (re.compile(r"(?:return\s+)?\$this->render\(\s*'([^']+)'\s*\)"),
      r"return render(request, '\1.html')"),
-    (re.compile(r"\$this->render\(\s*'([^']+)'\s*,\s*\[(?P<arr>[^\]]*)\]\s*\)"),
-     r"return render(request, '\1.html', { \g<arr> })"),
-    (re.compile(r"\$this->renderPartial\(\s*'([^']+)'\s*\)"),
+    (re.compile(r"(?:return\s+)?\$this->render\(\s*'([^']+)'\s*,\s*"),
+     r"return render(request, '\1.html', "),
+    (re.compile(r"(?:return\s+)?\$this->renderPartial\(\s*'([^']+)'\s*\)"),
      r"return render(request, '\1.html')"),
-    (re.compile(r"\$this->renderAjax\(\s*'([^']+)'\s*\)"),
+    (re.compile(r"(?:return\s+)?\$this->renderAjax\(\s*'([^']+)'\s*\)"),
      r"return render(request, '\1.html')"),
 
     # Navigation helpers
@@ -206,19 +213,27 @@ _BODY_RULES: list[tuple[re.Pattern[str], str]] = [
 
 
 def _translate_body(php_body: str) -> str:
+    """Translate a Yii action body into Python.
+
+    Two-stage:
+      1. Yii-specific rewrites (`Yii::$app->...`, `$this->render`,
+         `goHome` etc.) — done first so the rich framework idioms
+         get the right semantic translation.
+      2. Generic PHP → Python pass via `php_code_lifter._translate_block`
+         — handles control flow (if/while/foreach), array literals,
+         type casts, ternary, `++`/`--`, namespace `\\`, Python-keyword
+         renames, walrus for assignment-in-condition, etc.
+
+    Without stage 2 the output had `$this->`, `array(...)`, `::`,
+    PHP `if (...)` with braces, and many other untranslated idioms
+    that turned the file into invalid Python."""
     body = php_body
     for pat, repl in _BODY_RULES:
         body = pat.sub(repl, body)
-    out: list[str] = []
-    for raw in body.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
-            out.append('')
-            continue
-        if line.endswith(';'):
-            line = line[:-1]
-        out.append(line)
-    return '\n'.join(out).strip('\n')
+    # Stage 2: hand off to the catch-all translator for everything
+    # the framework-specific rules didn't catch.
+    from datalift.php_code_lifter import _translate_block
+    return _translate_block(body, indent=0)
 
 
 # ── Controller parsing ────────────────────────────────────────────

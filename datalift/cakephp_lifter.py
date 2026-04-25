@@ -237,19 +237,17 @@ _BODY_RULES: list[tuple[re.Pattern[str], str]] = [
 
 
 def _translate_body(php_body: str) -> str:
+    """Two-stage: CakePHP-specific rules first (`$this->render`,
+    `$this->redirect`, `$this->Articles->find`...), then delegate to
+    `php_code_lifter._translate_block` for control flow + array
+    literals + casts + everything else generic. Without stage 2 the
+    output had untranslated `$this->`, `array(...)`, `::`, PHP
+    `if (...)` braces, etc. — Python-shaped but not Python-correct."""
     body = php_body
     for pat, repl in _BODY_RULES:
         body = pat.sub(repl, body)
-    out: list[str] = []
-    for raw in body.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
-            out.append('')
-            continue
-        if line.endswith(';'):
-            line = line[:-1]
-        out.append(line)
-    return '\n'.join(out).strip('\n')
+    from datalift.php_code_lifter import _translate_block
+    return _translate_block(body, indent=0)
 
 
 # ── Controller parsing ────────────────────────────────────────────

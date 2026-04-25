@@ -235,21 +235,17 @@ _BODY_RULES: list[tuple[re.Pattern[str], str]] = [
 
 
 def _translate_body(php_body: str) -> str:
-    """Translate one method body's PHP into best-effort Django Python."""
+    """Two-stage: CodeIgniter-specific rules first (`$this->load->view`,
+    `$this->input->post`, `redirect()`...), then delegate to
+    `php_code_lifter._translate_block` for the generic PHP → Python
+    pass that handles control flow + array literals + casts + the
+    rest. Without stage 2 the output had untranslated PHP idioms
+    that didn't compile."""
     body = php_body
     for pat, repl in _BODY_RULES:
         body = pat.sub(repl, body)
-    # Trailing semicolons → blank
-    out_lines: list[str] = []
-    for raw in body.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
-            out_lines.append('')
-            continue
-        if line.endswith(';'):
-            line = line[:-1]
-        out_lines.append(line)
-    return '\n'.join(out_lines).strip('\n')
+    from datalift.php_code_lifter import _translate_block
+    return _translate_block(body, indent=0)
 
 
 # ── Controller parsing ────────────────────────────────────────────

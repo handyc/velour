@@ -373,13 +373,16 @@ def _rewrite_code(chunk: str) -> str:
                 lambda m: m.group(1).replace('\\', '.'), s)
 
     # PHP namespace separator `\` in identifiers becomes `.` in
-    # Python (after the leading `\` from absolute references is
-    # stripped). Run last so we don't interfere with string-escape
-    # processing earlier passes might rely on.
-    s = re.sub(r'\\(?=[A-Z]\w)', '.', s)
+    # Python. PHP namespaces may use either case (`\Foo\Bar` or
+    # `\my\helpers\Foo`) so accept both. Skip line-continuation
+    # `\\\n` (literal backslash followed by newline) which Python
+    # wants preserved.
+    s = re.sub(r'\\(?=[A-Za-z]\w)', '.', s)
     # Strip a stray leading `.` that would have been an absolute
-    # `\Foo` reference at expression start.
-    s = re.sub(r'(?<![A-Za-z0-9_.])\.(?=[A-Z]\w)', '', s)
+    # `\Foo` reference at expression start. Must NOT match the `.`
+    # between a `)` or `]` and a chained method (`obj.m().next`),
+    # which is normal Python attribute access.
+    s = re.sub(r'(?<![A-Za-z0-9_.\)\]])\.(?=[A-Za-z]\w)', '', s)
 
     # PHP `=&` (assign-by-reference) → `=` — Python doesn't have a
     # by-reference assignment operator; semantics differ but the
@@ -398,15 +401,26 @@ def _rewrite_code(chunk: str) -> str:
     s = re.sub(r'(\b\w+(?:\.\w+|\[[^\]]+\])*)--(?!=)', r'\1 -= 1', s)
 
     # Python reserved-word collisions. PHP allows `$class`, `$global`,
-    # `$continue`, etc. as variable names — Python doesn't. Rename
-    # by appending an underscore. (Only matches BARE identifiers
-    # already stripped of the `$` prefix earlier in this routine.)
+    # `$continue`, etc. as variable names AND as method names
+    # (`Yii::import(...)`). Python forbids both. Rename by appending
+    # an underscore.
     py_reserved = ('class', 'global', 'continue', 'pass', 'def',
                     'lambda', 'from', 'import', 'as', 'with',
-                    'yield', 'nonlocal', 'finally')
-    for kw in py_reserved:
+                    'yield', 'nonlocal', 'finally', 'raise',
+                    'is', 'in', 'and', 'or', 'not', 'None',
+                    'True', 'False', 'except', 'try', 'else')
+    # As a method/attribute (`obj.import(...)`)
+    method_kws = ('import', 'class', 'global', 'continue', 'pass',
+                   'def', 'lambda', 'from', 'as', 'with', 'yield',
+                   'finally', 'raise', 'except', 'try', 'else')
+    for kw in method_kws:
+        s = re.sub(rf'\.{kw}(?=\s*[(\[])', f'.{kw}_', s)
+    # As a variable being assigned or used as parameter name:
+    # `class = None`, `def foo(continue=None)`.
+    for kw in ('class', 'global', 'continue', 'pass', 'def',
+                'lambda', 'from', 'import', 'as', 'with',
+                'yield', 'nonlocal', 'finally'):
         s = re.sub(rf'\b{kw}\b(?=\s*[=,)])', f'{kw}_', s)
-        # As a function/method parameter name — `def foo(continue=None)`
         s = re.sub(rf'(?<=[(,]\s){kw}\b', f'{kw}_', s)
 
     # PHP type casts `(int) expr` are handled in a dedicated
@@ -474,37 +488,66 @@ def _rewrite_string_concat(expr: str) -> str:
 
 def _rewrite_array_literals(s: str) -> str:
     """Rewrite PHP `array(...)` and `array(k => v)` to Python `[...]`
-    or `{k: v}`. Walks the source with paren-depth tracking so the
-    matching closing `)` is rewritten to `]` (or `}` for assoc
-    arrays) — naive opening-only rewrites leave dangling parens and
-    break every downstream file.
+    or `{k: v}`. Walks with paren-depth tracking so the matching
+    closing `)` is rewritten to `]` (or `}` for assoc arrays) —
+    naive opening-only rewrites leave dangling parens and break
+    every downstream file.
 
-    Mixed-form arrays like Yii validation rules
-    (`['attr', 'validator', 'param' => $val]`) get the LIST shape
-    rather than the DICT shape, since Python dicts can't hold
-    positional entries. The `=>` in the keyed entries stays raw —
-    invalid Python, but a clear porter signal."""
+    Three shapes get different treatments:
+    - Pure positional `[1, 2, 3]` → list `[1, 2, 3]`.
+    - Pure key→value `['a' => 1, 'b' => 2]` → dict `{'a': 1, 'b': 2}`.
+    - Mixed (Yii validation rules: `['attr', 'val', 'p' => $x]`) →
+      list with each `=>` rewritten to `,` so `'p' => $x` becomes
+      two list entries `'p', $x`. Semantically lossy but
+      syntactically valid Python; the porter restructures.
+
+    `=>` positions are tracked but not translated until close, so
+    we can decide between `:` (dict), `,` (mixed list), or untouched
+    (no arrows seen)."""
     out: list[str] = []
     i = 0
     n = len(s)
     in_str: str | None = None
-    # bracket_stack entries: [kind, opener_idx, has_arrow, has_positional,
-    #                         entry_started, last_arrow_pos]
+    # bracket_stack entries:
+    #   [kind, opener_idx, has_arrow, has_positional,
+    #    saw_entry_content, entry_has_arrow, arrow_positions]
     bracket_stack: list[list] = []
 
-    def _at_top_comma() -> None:
-        """A `,` at the bracket's depth: if no `=>` was seen in the
-        current entry, this entry is positional."""
+    def _on_comma() -> None:
         if bracket_stack:
             entry = bracket_stack[-1]
-            if not entry[5]:  # no arrow in this entry
-                entry[3] = True  # has_positional
-            entry[5] = False  # reset for next entry
+            if entry[4] and not entry[5]:
+                entry[3] = True   # has_positional
+            entry[4] = False
+            entry[5] = False
 
-    def _at_arrow() -> None:
+    def _on_arrow() -> None:
         if bracket_stack:
             bracket_stack[-1][2] = True
             bracket_stack[-1][5] = True
+            bracket_stack[-1][4] = True
+            bracket_stack[-1][6].append(len(out))  # remember position
+
+    def _close_array(opener_idx: int, has_arrow: bool, has_pos: bool,
+                      entry_started: bool, entry_has_arrow: bool,
+                      arrow_positions: list[int]) -> str:
+        """Decide opener/closer + how to translate `=>` positions."""
+        # Trailing entry was positional?
+        if entry_started and not entry_has_arrow:
+            has_pos = True
+        if has_arrow and not has_pos:
+            out[opener_idx] = '{'
+            for p in arrow_positions:
+                out[p] = ':'
+            return '}'
+        if has_arrow and has_pos:
+            # Mixed: list with `,` instead of `=>`. Each `'k' => v`
+            # becomes two adjacent list entries `'k', v`.
+            for p in arrow_positions:
+                out[p] = ','
+            return ']'
+        # Pure positional or empty
+        return ']'
 
     while i < n:
         ch = s[i]
@@ -516,7 +559,11 @@ def _rewrite_array_literals(s: str) -> str:
                 in_str = None
             i += 1; continue
         if ch in ('"', "'"):
-            in_str = ch; out.append(ch); i += 1; continue
+            in_str = ch
+            # Strings count as entry content for mixed-vs-dict detection.
+            if bracket_stack and bracket_stack[-1][0] in ('[', '[php'):
+                bracket_stack[-1][4] = True
+            out.append(ch); i += 1; continue
         # `array(` opener
         if ch == 'a' and s[i:i + 5] == 'array' \
                 and (i == 0 or not (s[i - 1].isalnum() or s[i - 1] == '_')):
@@ -525,32 +572,34 @@ def _rewrite_array_literals(s: str) -> str:
                 j += 1
             if j < n and s[j] == '(':
                 out.append('[')
-                bracket_stack.append(['[', len(out) - 1, False, False, False, False])
+                bracket_stack.append(['[', len(out) - 1, False, False, False, False, []])
                 i = j + 1
                 continue
         if ch == '(':
-            bracket_stack.append(['(', -1, False, False, False, False])
+            bracket_stack.append(['(', -1, False, False, False, False, []])
             out.append(ch); i += 1; continue
         if ch == '[':
             out.append(ch)
-            bracket_stack.append(['[php', len(out) - 1, False, False, False, False])
+            bracket_stack.append(['[php', len(out) - 1, False, False, False, False, []])
             i += 1; continue
         if ch == '=' and i + 1 < n and s[i + 1] == '>' \
                 and bracket_stack and bracket_stack[-1][0] in ('[', '[php'):
-            _at_arrow()
-            out.append(':'); i += 2; continue
+            # Defer the actual symbol — we'll patch it at close time
+            # so we can choose between `:` (dict) and `,` (mixed list).
+            out.append('=>')  # two-char placeholder rewritten on close
+            _on_arrow()
+            # arrow_positions stored as len(out)-1, point to the
+            # 2-char `=>` we just appended (recorded as ONE element).
+            # Adjust the position to the LAST appended index:
+            bracket_stack[-1][6][-1] = len(out) - 1
+            i += 2; continue
         if ch == ',' and bracket_stack and bracket_stack[-1][0] in ('[', '[php'):
-            _at_top_comma()
+            _on_comma()
             out.append(','); i += 1; continue
         if ch == ')':
             if bracket_stack and bracket_stack[-1][0] == '[':
-                _, opener_idx, has_arrow, has_pos, _, _ = bracket_stack.pop()
-                # Pure dict only when ALL entries are key→value.
-                if has_arrow and not has_pos:
-                    out[opener_idx] = '{'
-                    out.append('}')
-                else:
-                    out.append(']')
+                _, opener_idx, ha, hp, es, eha, aps = bracket_stack.pop()
+                out.append(_close_array(opener_idx, ha, hp, es, eha, aps))
             else:
                 if bracket_stack:
                     bracket_stack.pop()
@@ -558,17 +607,17 @@ def _rewrite_array_literals(s: str) -> str:
             i += 1; continue
         if ch == ']':
             if bracket_stack and bracket_stack[-1][0] == '[php':
-                _, opener_idx, has_arrow, has_pos, _, _ = bracket_stack.pop()
-                if has_arrow and not has_pos:
-                    out[opener_idx] = '{'
-                    out.append('}')
-                else:
-                    out.append(']')
+                _, opener_idx, ha, hp, es, eha, aps = bracket_stack.pop()
+                out.append(_close_array(opener_idx, ha, hp, es, eha, aps))
             else:
                 if bracket_stack:
                     bracket_stack.pop()
                 out.append(']')
             i += 1; continue
+        # Mark entry-content for the topmost array bracket.
+        if bracket_stack and bracket_stack[-1][0] in ('[', '[php') \
+                and not ch.isspace():
+            bracket_stack[-1][4] = True
         out.append(ch); i += 1
     return ''.join(out)
 
@@ -1211,11 +1260,15 @@ def _translate_simple_statement(stmt: str) -> str:
         return f'# PORTER: use {rest} — translate to a Python import'
     if re.match(r'^require(_once)?\b|^include(_once)?\b', s):
         return f'# PORTER: {s} — translate to import'
-    # Assignment with `[]` push: `$arr[] = $x` → `arr.append(x)`,
-    # also `$obj->arr[] = $x` and `self.arr[] = $x` (after earlier
-    # rewrites turned `$this->` into `self.`).
-    m = re.match(r'^(\$?[\w$]+(?:->[\w$]+|\.[\w]+)*)\s*\[\s*\]\s*=\s*(.+)$',
-                  s)
+    # Assignment with `[]` push: `$arr[] = $x` → `arr.append(x)`.
+    # Also handles `$obj->arr[] = $x`, `self.arr[] = $x`,
+    # `$arr['key'][] = $x` (nested-index push), and multi-line
+    # values (`re.DOTALL`) — array pushes commonly include
+    # multi-line array literals on the RHS.
+    m = re.match(
+        r'^(\$?[\w$]+(?:->[\w$]+|\.[\w]+|\[[^\]]+\])*)\s*\[\s*\]\s*=\s*(.+)$',
+        s, re.DOTALL,
+    )
     if m:
         target = _translate_expr(m.group(1))
         return f'{target}.append({_translate_expr(m.group(2))})'
