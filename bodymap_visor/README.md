@@ -96,13 +96,33 @@ spec).
 
 - ✅ `kms.c` / `kms.h` — DRM/KMS + GBM + EGL + GLES3 bring-up
   (Phase 1, scaffolding shipped 2026-04-18)
-- ✅ `main.c` — solid-colour scanout at ~60 Hz (Phase 1)
-- ⏳ `net.c` — libcurl fetch of the manifest URL
-- ⏳ `world.c` — parse manifest, build entity table
-- ⏳ `gltf.c` — cgltf load of referenced .glb assets
-- ⏳ `stereo.c` — split viewport into left/right eye cameras
-  (the `stereo` block in the manifest is the source of truth)
-- ⏳ `pose.c` — UDS consumer of bodymap ESP mesh pose updates
+- ✅ `main.c` — main loop with stereo viewport split and
+  per-eye matrix dispatch (Phase 2)
+- ✅ `net.c` / `net.h` — libcurl fetch of the manifest URL
+- ✅ `world.c` / `world.h` — cJSON parse → struct world_manifest
+  with entities, portals, stereo block
+- ✅ `stereo.c` / `stereo.h` — per-eye projection + view matrix
+  (YXZ Euler, IPD-offset eye position, column-major output) +
+  viewport rect computation
+- ✅ `pose.c` / `pose.h` — Unix-domain SOCK_DGRAM consumer of
+  bodymap ESP mesh head poses, drains to latest sample on each
+  frame
+- ⏳ `gltf.c` — cgltf load of referenced .glb assets and a
+  vertex-shader / fragment-shader entity renderer
+
+What main does today: opens DRM, fetches one manifest at startup,
+parses it, opens the pose UDS at `/run/aether-visor/pose.sock`,
+and per frame drains the latest pose, computes both eye matrices
+via stereo.c, and stamps each viewport with a slightly-shifted
+shade of the manifest sky colour so an operator can verify the
+left/right viewport split before glTF entity rendering lands.
+
+Build deps (Debian / Raspberry Pi OS):
+
+```
+sudo apt install -y libdrm-dev libgbm-dev libegl1-mesa-dev \
+    libgles2-mesa-dev libcurl4-openssl-dev libcjson-dev pkg-config
+```
 
 The HUD path (`bodymap_hud/`) is the active head-mounted target.
-The visor is the higher-end VR build, optional and slower-burning.
+The visor is the higher-end VR build.
