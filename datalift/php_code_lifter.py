@@ -751,6 +751,10 @@ def _rewrite_named_args(s: str) -> str:
     in_str: str | None = None
     paren_depth = 0
     bracket_depth = 0  # `[` and `{`
+    # Per-paren-depth count of unmatched `?` tokens. If > 0, the
+    # next `:` at this depth is the ternary-else separator, NOT a
+    # named-arg.
+    ternary_depth: list[int] = [0]
     while i < n:
         ch = s[i]
         if in_str:
@@ -764,15 +768,21 @@ def _rewrite_named_args(s: str) -> str:
             in_str = ch; out.append(ch); i += 1; continue
         if ch == '(':
             paren_depth += 1
+            ternary_depth.append(0)
             out.append(ch); i += 1; continue
         if ch == ')':
             paren_depth = max(0, paren_depth - 1)
+            if len(ternary_depth) > 1:
+                ternary_depth.pop()
             out.append(ch); i += 1; continue
         if ch in ('[', '{'):
             bracket_depth += 1
             out.append(ch); i += 1; continue
         if ch in (']', '}'):
             bracket_depth = max(0, bracket_depth - 1)
+            out.append(ch); i += 1; continue
+        if ch == '?' and not (i + 1 < n and s[i + 1] in ('?', '-', '.', '>')):
+            ternary_depth[-1] += 1
             out.append(ch); i += 1; continue
         # Look for `<word> : <expr>` at func-call depth.
         if ch.isalpha() or ch == '_':
@@ -796,14 +806,25 @@ def _rewrite_named_args(s: str) -> str:
                        'continue', 'global', 'nonlocal'}
             if k < n and s[k] == ':' and (k + 1 >= n or s[k + 1] != ':') \
                     and paren_depth > 0 and bracket_depth == 0 \
-                    and ident not in _PY_KW:
-                # Look ahead: must be a kwarg (followed by an expr,
-                # not a dict-style key:val with surrounding `{`).
-                # Replace `:` with `=`.
+                    and ident not in _PY_KW \
+                    and ternary_depth[-1] == 0:
+                # The `:` here is a kwarg separator, not a ternary's
+                # else (ternary_depth[-1] would be > 0 if a `?`
+                # was seen earlier in this paren level).
                 out.append(ident)
                 # Preserve any whitespace before the `:`, then `=`.
                 out.append(s[j:k])
                 out.append('=')
+                i = k + 1
+                continue
+            # If we're at a `:` and ternary_depth[-1] > 0, this `:`
+            # consumes the matching `?` for the ternary's else.
+            if k < n and s[k] == ':' and ternary_depth[-1] > 0 \
+                    and (k + 1 >= n or s[k + 1] != ':'):
+                ternary_depth[-1] -= 1
+                out.append(ident)
+                out.append(s[j:k])
+                out.append(':')
                 i = k + 1
                 continue
             out.append(ident); i = j; continue
