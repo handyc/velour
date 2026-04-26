@@ -2434,6 +2434,162 @@ VOL2_CHAPTERS = [
 ]
 
 
+VOL2_BODIES = {
+    'ch2-terminal': """The terminal app is one of the few places in Velour where there is no escape from JavaScript. The browser-side `xterm.js` widget is the only mature in-page terminal renderer; the server-side bridge needs to be a long-lived WebSocket because pseudo-terminals are byte streams not request/response pairs. This chapter walks the full shape — two ASGI consumers, the WebSocket frame format, the PTY orchestration, the security boundary.
+
+## The two consumers
+
+There are two distinct WebSocket endpoints, each with its own `AsyncJsonWebsocketConsumer` subclass:
+
+**`ShellConsumer`** opens a local PTY (`pty.openpty()`), forks a child process running the operator's login shell, and bridges the master fd to the WebSocket in both directions. Every keystroke from the browser writes to the master fd; every byte the shell produces gets framed as a JSON `{"k":"out","b":"..."}` message and sent to the browser. Window resize events become `TIOCSWINSZ` ioctls on the master fd so vim and tmux render at the right size.
+
+**`SshConsumer`** opens an asyncssh connection to a registered remote host, requests a pseudo-terminal on the far side, and bridges the asyncssh channel's read/write streams to the WebSocket the same way. The host is identified by slug; the slug → connection details mapping lives in the `hosts` app. Auth is via an SSH key the velour user owns.
+
+Both consumers share the framing protocol and the resize handling. They differ only in how they get the byte stream they bridge.
+
+## The frame format
+
+WebSocket frames are JSON objects with a one-letter `k` (kind) field and kind-specific payload:
+
+```jsonc
+{"k": "in",  "b": "ls\\n"}              // browser → server, keystrokes
+{"k": "out", "b": "file1\\nfile2\\n"}    // server → browser, output
+{"k": "rsz", "rows": 24, "cols": 80}    // browser → server, resize
+{"k": "exit", "code": 0}                // server → browser, child exited
+```
+
+The `b` payloads are raw byte sequences carried as UTF-8 — including ANSI escape sequences for colour, cursor motion, line clears. `xterm.js` interprets them on the browser side. Velour's bridge does no interpretation: bytes in, bytes out.
+
+The choice to wrap in JSON rather than send raw binary is operational: every frame is human-readable in browser dev-tools, which makes terminal-bug triage tractable.
+
+## The PTY lifecycle
+
+When the WebSocket opens, the consumer calls `pty.openpty()` to allocate a master/slave pair, then `os.fork()`. The child closes the master fd, makes the slave its controlling terminal (`os.setsid()` + `TIOCSCTTY`), redirects fds 0/1/2 to the slave, and `execvp`'s into the operator's shell. The parent (the consumer) keeps the master fd, registers it with the asyncio loop for read events, and starts pumping.
+
+When the child exits, the master fd reads zero bytes; the consumer sends a final `{"k":"exit","code":N}` and closes the WebSocket. When the WebSocket closes (browser tab closed, network blip), the consumer SIGHUPs the child process group so dangling shells don't accumulate.
+
+## Security
+
+Both consumers are gated by `@login_required` at the URL level — anonymous browsers cannot establish either WebSocket. The shell consumer additionally requires the operator's Django user to be in the `terminal_shell` group (configurable; the seed grants it to superusers only). The SSH consumer requires the target host to be in the operator's allowlist, which is per-user and managed in the `hosts` app's admin.
+
+There is no shell escape protection beyond Django's auth: an authorized operator gets the same access they would get if they SSH'd to the box directly. The threat model is "an operator who would otherwise have shell access wants browser access too", not "an untrusted user wants to break out of a sandbox". Sandboxing inside a PTY is a hard problem and Velour does not attempt it.
+
+## Channels routing
+
+The two consumers are wired into the project's ASGI router (`velour/asgi.py`):
+
+```python
+from channels.routing import URLRouter
+from channels.auth import AuthMiddlewareStack
+
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": AuthMiddlewareStack(URLRouter([
+        path("ws/terminal/shell/",  ShellConsumer.as_asgi()),
+        path("ws/terminal/ssh/<slug:host>/", SshConsumer.as_asgi()),
+    ])),
+})
+```
+
+`AuthMiddlewareStack` populates `self.scope['user']` so `@login_required` semantics work the way HTTP views expect.
+
+## What follows
+
+Chapter 3 covers the static-asset pipeline that ships `xterm.js` to the browser. Chapter 4 covers the chronos topbar that renders above the terminal pane. Chapter 8 covers the extension pattern for adding new WebSocket consumers — the terminal app's pattern is the template the rest of the codebase follows when something genuinely needs a long-lived connection.""",
+
+    'ch8-extension-points': """Velour grows mostly by addition rather than modification. New apps slot into `INSTALLED_APPS`. New dashboard cards append to `CARDS`. New context processors register in `TEMPLATES['OPTIONS']`. New template tag libraries land under `<app>/templatetags/`. None of these require touching the core. This chapter is the reference for the four most-used extension points: dashboard cards, context processors, template tag libraries, and management commands.
+
+## Adding a dashboard card
+
+`dashboard/cards.py` carries a single list:
+
+```python
+CARDS = [
+    Card('Web Terminal',  'terminal:home',     icon='terminal'),
+    Card('App Factory',   'app_factory:home',  icon='factory'),
+    # ...
+]
+```
+
+A new card is one new line. Convention:
+
+- The label is title-case, two words max.
+- The URL is a named route from the new app's `urls.py`.
+- The icon is one of the keys in `static/dashboard/icons.svg` (a hand-drawn SVG sprite). New icons get added to that sprite via Inkscape; the PR adds both the icon and the card in one commit.
+- The card position in the list IS the grid position. Re-ordering the list re-orders the dashboard. The convention is to group related concerns.
+- Cards SHOULD have a corresponding top-menu link in `templates/_topmenu.html` so the feature is discoverable from anywhere, not only from the dashboard. The convention is enforced by a quick test in `dashboard/tests.py` that diffs the two lists.
+
+## Adding a context processor
+
+A context processor is a function that runs on every request and adds keys to the template context. The chronos topbar lives this way (Vol 3 Ch 1 — the `_world_clocks_for(now)` per-minute cache pattern is the reference).
+
+To add one:
+
+1. Write the function in `<app>/context_processors.py`. It takes `request`, returns a dict.
+2. Add it to `TEMPLATES['OPTIONS']['context_processors']` in `velour/settings.py`.
+3. The keys you return become available in every template via `{{ your_key }}`.
+
+The convention is that context processors must be **fast** (cached, ideally; per-minute is cheap, per-second is acceptable, per-request is suspect) and **defensive** (a context processor that raises kills every page render). Wrap your work in try/except and return `{}` on error.
+
+## Adding a template tag library
+
+Template tags live in `<app>/templatetags/<app>_tags.py`. The Django convention; nothing custom. Use them for rendering helpers that wouldn't fit cleanly as a context processor or a filter.
+
+```python
+# chronos/templatetags/chronos_tags.py
+from django import template
+register = template.Library()
+
+@register.simple_tag
+def world_chip(timezone_str):
+    \"\"\"Render one world-time chip from a tz string.\"\"\"
+    from chronos.world_clocks import format_chip
+    return format_chip(timezone_str)
+```
+
+In a template:
+
+```django
+{% load chronos_tags %}
+<span class="chip">{% world_chip "Europe/Amsterdam" %}</span>
+```
+
+The convention: each app owns one tag library, named `<app>_tags.py`. Cross-app tags are an anti-pattern; if a tag is useful across apps, the function lives in a shared utility module and each app's tag library re-exports it.
+
+## Adding a management command
+
+Drop a file at `<app>/management/commands/<command_name>.py` with a `Command(BaseCommand)` subclass. Django auto-discovers it; `python manage.py <command_name>` runs it.
+
+Velour conventions for management commands:
+
+- Idempotent by default. Running twice should produce the same end state. Seed commands especially must be idempotent — they're re-run every deploy.
+- One-line `help`. The string Django prints in `manage.py --help` is the only documentation many operators read.
+- Use `self.stdout.write(self.style.SUCCESS(...))` for important state changes; raw `self.stdout.write` for diagnostic noise. Operators piping output to log files appreciate the distinction.
+- Long-running commands should accept `--dry-run` and print what they *would* do without doing it.
+
+## Adding to identity_cron
+
+Velour has exactly one crontab entry: `* * * * * .../manage.py identity_cron`. The dispatcher inside `identity/cron.py` decides what to run. To add a new periodic job:
+
+1. Define a function in `identity/cron.py` that does the work and returns a one-line summary string.
+2. Add it to the `pipelines` list near the bottom of `dispatch()`.
+3. Add an interval to `DEFAULT_INTERVALS` (seconds).
+4. Add the kind to the `'all'` set so `--force=all` includes it.
+
+The dispatcher writes a `CronRun` row for every fire — success or error — so the audit trail is automatic.
+
+## What you cannot extend without modifying core
+
+A short list of things that genuinely require touching files in `velour/`:
+
+- Adding a new top-level URL pattern (you edit `velour/urls.py`).
+- Adding a new app to `INSTALLED_APPS` (you edit `velour/settings.py`).
+- Adding a new middleware (you edit `velour/settings.py`).
+
+The convention is to keep these edits small and trivially reviewable: one-line additions in alphabetical order. Any change that requires more than a one-line edit to a file under `velour/` is a sign the extension point is missing and should be designed before the feature ships."""
+}
+
+
 def seed_volume_2():
     m = upsert_manual(
         'velour-developer-guide-vol-2',
@@ -2571,26 +2727,26 @@ Chapters 2 through 7 cover specific Web-layer apps. Chapter 8 documents the exte
 
     sort = 210
     for slug, title, summary in VOL2_CHAPTERS[1:7]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL2_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-When written, this chapter will follow the format established in Chapter 1: a one-paragraph framing, then the architectural choices spelled out as numbered observations, then the code patterns, then the cross-references to the other apps that depend on or extend this one. Approx. 25–40 pages.""",
-            sidenotes='Stub. To be expanded in a subsequent revision.')
+When written, this chapter will follow the format established in Chapter 1: a one-paragraph framing, then the architectural choices spelled out as numbered observations, then the code patterns, then the cross-references to the other apps that depend on or extend this one. Approx. 25–40 pages.""")
+        sn = '' if slug in VOL2_BODIES else 'Stub. To be expanded in a subsequent revision.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-3', 800, 'Part III — Extension',
         """One chapter — Chapter 8 — documenting the extension points the rest of the codebase reuses.""")
 
     slug, title, summary = VOL2_CHAPTERS[7]
-    upsert_section(m, slug, 810, title,
-        f"""*This chapter is a stub. Outline:*
+    body = VOL2_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-When written, this chapter will document each extension point with: a code example showing the minimal addition, the convention any addition must follow, a list of existing extensions in the codebase that follow the convention, and a regression risk for each. Approx. 30–40 pages.""",
-        sidenotes='Stub. To be expanded in a subsequent revision.')
+When written, this chapter will document each extension point with: a code example showing the minimal addition, the convention any addition must follow, a list of existing extensions in the codebase that follow the convention, and a regression risk for each. Approx. 30–40 pages.""")
+    sn = '' if slug in VOL2_BODIES else 'Stub. To be expanded in a subsequent revision.'
+    upsert_section(m, slug, 810, title, body, sidenotes=sn)
 
     upsert_section(m, 'where-this-volume-sits', 950,
         'Where this volume sits in the set',
@@ -2665,6 +2821,149 @@ VOL3_CHAPTERS = [
      'channel. The conventions that keep new additions from '
      'breaking the morning briefing.'),
 ]
+
+
+VOL3_BODIES = {
+    'ch2-holiday-traditions': """Chronos pulls holidays from eleven calendar systems. Each system is a thin adapter: a function that, given a date range, returns a list of `CalendarEvent` rows tagged with the tradition slug. The eleven adapters live in `chronos/holidays/<tradition>.py` and share a common interface but no common code — each calendar system has its own conventions, edge cases, and historical drift.
+
+This chapter walks the eleven adapters in turn. The order is alphabetical except for Civic, which leads because it's the only one that's universal.
+
+## The adapter contract
+
+Every adapter exports one function:
+
+```python
+def events_in_range(start_utc, end_utc) -> list[CalendarEvent]:
+    \"\"\"Return one CalendarEvent per holiday or observance whose
+    when_utc falls within [start_utc, end_utc). The CalendarEvent
+    objects are NOT saved here — the caller saves them in a
+    transaction so partial-failure leaves no half-imported state.\"\"\"
+```
+
+Adapters are pure: no DB writes, no network calls. They derive holiday dates from a local table of rules, the JPL ephemeris (for tropical-year-anchored events), and the calendar's own conversion functions (Hebrew, Hijri, Bikram Sambat, etc.).
+
+The chronos `seed_holidays` management command runs all eleven adapters over the next 25 years and bulk-inserts the results. Re-running is idempotent — `update_or_create` keyed on `(tradition, label, when_utc)` ensures no duplicates.
+
+## Civic
+
+The civic calendar is operator-configured: the operator picks a country (or a list of countries) and the adapter loads the matching list from the Python `holidays` package. Default is the operator's country code from chronos settings. New Year's Day, country-specific national days, MLK Day in the US, Koningsdag in the Netherlands, etc.
+
+This is the only adapter that depends on a third-party package. The dependency is intentional — `holidays` is well-maintained and covers 50+ countries with edge cases for moveable feasts and substitution rules. Re-implementing would be a small library-of-libraries.
+
+## Christianity
+
+The Christian liturgical calendar is the largest single adapter. It computes Easter via the Anonymous Gregorian algorithm, then derives Lent, Holy Week, Pentecost, and Trinity Sunday by offset. Fixed feasts (Christmas, Epiphany, All Saints) come from a hardcoded table. Western and Eastern Easter are both computed; the operator picks which to render via a chronos setting.
+
+The adapter is the largest because the calendar carries the most distinctions: liturgical colours, vigil-vs-day, fast-vs-feast, ferial-vs-festal. Each event's `metadata` dict carries those fields so the calendar UI can render them differently.
+
+## Judaism
+
+Hebrew calendar dates come from the `pyluach` package. The adapter walks each Hebrew year overlapping the requested range, emits the major moadim (Rosh Hashanah, Yom Kippur, Sukkot, Hanukkah, Tu B'Shvat, Purim, Pesach, Lag B'Omer, Shavuot, Tisha B'Av), and tags each event with its Hebrew date in the metadata. The adapter handles both the Diaspora two-day yom-tov pattern and the Israel single-day pattern via a chronos setting.
+
+## Islam
+
+The Hijri calendar is lunar; Hijri dates drift through the Gregorian year by ~11 days each year. The adapter uses `hijri_converter` to map Hijri month-1-day-1 (Ras as-Sanah), Mawlid an-Nabi, Ramadan, Eid al-Fitr, Eid al-Adha, and the Hajj. Because the start of Ramadan and Eid depends on lunar observation in some traditions, the adapter emits both the calculated date and a ±1 day metadata range; the calendar UI shows the calculated date with a note that the actual observance may shift by a day.
+
+## Hinduism
+
+The Hindu adapter is the most opinionated. It uses a fixed list of major pan-Indian festivals (Diwali, Holi, Janmashtami, Navaratri, Ganesh Chaturthi, Raksha Bandhan, Makar Sankranti, Maha Shivaratri) computed via the `drik-panchanga` Python port for the operator's chosen city (default: New Delhi). Regional festivals (Pongal, Onam, Bihu, Durga Puja) are not included by default; the operator enables them per region.
+
+## Buddhism
+
+Vesak (the Buddha's birthday/enlightenment/death) is the major event in most Theravada traditions; it falls on the full moon of the Vaisakha month. The adapter computes it via the lunar ephemeris. Bodhi Day (Mahayana, December 8) and Ulambana (Mahayana ghost festival, around mid-July full moon) are also emitted. Theravada vs Mahayana is a chronos setting.
+
+## Bahá'í
+
+The Bahá'í calendar has 19 months of 19 days plus 4-5 intercalary days. Naw-Ruz (March 21), the nine Holy Days, and Ayyam-i-Há come from a fixed-date table; the adapter just emits them with the right Gregorian year.
+
+## Sikh
+
+Gurpurab anniversaries (Guru Nanak's birth, Guru Gobind Singh's birth, the martyrdom of Guru Arjan, Vaisakhi) are computed from the Nanakshahi calendar via a small lookup table. Vaisakhi (April 13/14) is the major shared holiday with Hindu Punjab — it carries metadata tagging it as observed in both traditions so the calendar UI can avoid duplicate rendering.
+
+## Zoroastrian
+
+Nowruz (March 21), Mehregan (October 2), and Sadeh (January 30) are emitted from a fixed-date table. The Zoroastrian calendar has multiple variants (Fasli, Shahanshahi, Kadmi); chronos uses Fasli by default to align with the Iranian civil calendar's Nowruz.
+
+## Secular UN observances
+
+International Women's Day, Earth Day, World Refugee Day, etc. — all from a fixed table. The metadata distinguishes UN-declared observances from informal ones (Pi Day) and from country-specific commemorations that nevertheless have international visibility (Bastille Day).
+
+## Lab-personal
+
+The eleventh "tradition" is the operator's own calendar: birthdays, anniversaries, lab-relevant dates (the day Gary was provisioned, the day the LoRa stack came up). These are not derived; they are entered through the chronos UI and stored as `CalendarEvent` rows with `tradition='personal'`.
+
+The personal-tradition is intentionally last in the list because it's the only one that the operator edits live; the other ten are seeded once and refreshed only when chronos itself is upgraded.
+
+## What follows
+
+Chapter 3 covers the astronomical layer (skyfield, Meeus, the JPL ephemeris). Many holidays (Easter, Vesak, Ramadan) reference astronomical events; the chronos architecture computes the astro events first and the holiday adapters consume them. Chapter 4 covers the deep-time UI design that makes 25 years of these events browsable on a single screen.""",
+
+    'ch5-databases': """The databases app is Velour's window into "things that are SQL but aren't Velour's own SQLite." Most lab control panels accumulate side databases over time — an old MySQL the previous person left running, a Postgres the latest experiment writes to, a sqlite file someone else's tool produced. The databases app is a registry of those, plus a read-only browser, plus an opt-in SQL shell.
+
+It is deliberately not a database management tool. Schema migrations, backups, and write paths are out of scope. The app exists to let an operator answer "what is this database, what's in it, and what does the third row look like?" without leaving the dashboard.
+
+## The model
+
+```python
+class Database(models.Model):
+    slug      = models.SlugField(unique=True)
+    name      = models.CharField(max_length=120)
+    backend   = models.CharField(max_length=16,
+        choices=[('mysql','MySQL'),('postgres','PostgreSQL'),
+                 ('sqlite','SQLite'),('oracle','Oracle')])
+    host      = models.CharField(max_length=200, blank=True)
+    port      = models.PositiveIntegerField(null=True, blank=True)
+    db_name   = models.CharField(max_length=120)
+    user      = models.CharField(max_length=120, blank=True)
+    password_file = models.CharField(max_length=200, blank=True,
+        help_text='chmod 600 file under BASE_DIR; secret-file '
+                  'protocol applies (Vol 1 Ch 3)')
+    notes     = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+```
+
+The password lives in a file, never in the row. This is the secret-file protocol enforced from the beginning — the model literally has nowhere to put a password value.
+
+## Phase 1 — registry
+
+Phase 1 is the model + an admin form + a list view at `/databases/`. The list shows backend, host, name, last-tested timestamp, and a small status pill. The status comes from a per-row "test connection" button that opens a connection (with a 5-second timeout), runs `SELECT 1`, and updates a `last_tested_at` field on the row. No introspection beyond connection-works-or-not.
+
+Phase 1 is what most operators use most of the time: "do I have credentials for the legacy MySQL?" — yes/no, here's the host, here's the password file, go SSH if you want to do anything.
+
+## Phase 2 — table browser
+
+Phase 2 adds `/databases/<slug>/` showing a list of tables (schema introspection via `SHOW TABLES` / `pg_class` / `sqlite_master` / `ALL_TABLES`). Click a table → `/databases/<slug>/<table>/` showing column names, types, primary key, foreign keys, row count, and the first 50 rows. All read-only. All cached per-table for 30 seconds because schema introspection on a large database can be expensive.
+
+The connection-cache discipline is important. Phase 2 opens one connection per (database, request) and reuses it across all queries the request issues. It does NOT pool connections across requests because most legacy databases have small `max_connections` and a connection leak in Velour shouldn't compete with the legacy app's own pool.
+
+## Phase 3 — SQL shell
+
+Phase 3 is the opt-in `/databases/<slug>/sql/` SQL shell. Operator types a query, hits run, sees the result rendered as a table. Two safety gates:
+
+1. **Read-only role enforcement.** The connection is opened with a `read_only` user (a separate row on `Database` carrying a different `password_file`). The application makes no attempt to parse the query; it relies on the database's own role permissions to refuse `INSERT`/`UPDATE`/`DELETE`/`DROP`. Every database backend Velour supports has read-only roles; the SQL shell is unavailable on databases where the operator hasn't configured one.
+
+2. **Query timeout.** Every query runs with a hardcoded 30-second statement timeout (set via `SET STATEMENT_TIMEOUT`, `SET LOCAL statement_timeout`, etc — backend-specific). A query that would lock the legacy app's tables for an hour gets killed at 30 seconds.
+
+The shell is gated behind a per-database "SQL shell enabled" flag that defaults to off. Turning it on requires the operator to acknowledge the read-only-role-must-exist convention.
+
+## What the app does NOT do
+
+- Migrations. Use the legacy app's own migration tool.
+- Schema design. Use a real schema design tool (DBeaver, etc).
+- Backups. Use the database's own dump tool — `mysqldump`, `pg_dump`, etc — driven from a cron job (Vol 5 Ch 6).
+- Write queries. Even a "harmless" write query gets refused by the read-only role.
+- Connection pooling. One connection per request. Operators who need pooled access write a different tool.
+
+## Cross-references
+
+- Vol 1 Ch 3 — the secret-file protocol, which `password_file` follows.
+- Vol 5 Ch 6 — how backup tooling reads `Database` rows to know what to dump.
+- The Datalift app (separate from databases) is the *write* path: it ingests a `mysqldump` into Django models. See the Datalift Manual volume in the Codex library.
+
+## What follows
+
+Chapter 6 covers the graphs app, which renders time-series data from any of the registered databases (Phase 4 — not yet shipped). Chapter 7 covers nodes and the SensorReading time-series the graphs draw. Chapter 8 covers experiments, which group readings across nodes."""
+}
 
 
 def seed_volume_3():
@@ -2767,13 +3066,13 @@ Chapter 2 covers each of the eleven holiday traditions in turn. Chapter 3 is the
 
     sort = 210
     for slug, title, summary in VOL3_CHAPTERS[1:4]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL3_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-When written, this chapter will follow the format established in Chapter 1: framing, architectural choices, code patterns, cross-references. Approx. 30–50 pages.""",
-            sidenotes='Stub. To be expanded in a subsequent revision.')
+When written, this chapter will follow the format established in Chapter 1: framing, architectural choices, code patterns, cross-references. Approx. 30–50 pages.""")
+        sn = '' if slug in VOL3_BODIES else 'Stub. To be expanded in a subsequent revision.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-3', 500, 'Part III — Data',
@@ -2781,13 +3080,13 @@ When written, this chapter will follow the format established in Chapter 1: fram
 
     sort = 510
     for slug, title, summary in VOL3_CHAPTERS[4:8]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL3_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-When written, approx. 25–40 pages.""",
-            sidenotes='Stub.')
+When written, approx. 25–40 pages.""")
+        sn = '' if slug in VOL3_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-4', 900, 'Part IV — Extension',
@@ -2867,6 +3166,319 @@ VOL4_CHAPTERS = [
      '(see Vol 1 Ch 14 and the codex_app_reports command), and '
      'the planned editor-side integration.'),
 ]
+
+
+VOL4_BODIES = {
+    'ch2-markdown-subset': """Codex understands a deliberately small subset of Markdown plus a handful of Velour-specific extensions. The subset is small because every block type the renderer accepts is one more thing the Tufte-style PDF pipeline has to lay out correctly. The extensions are Velour-specific because the things Tufte cared about — sidenotes, sparklines, slope graphs — are not in CommonMark.
+
+This chapter is the reference. Every block type Codex will render appears here with its syntax, its rendered shape, and its constraints.
+
+## Block-level constructs
+
+### Headings
+
+ATX-style only:
+
+```markdown
+# Manual title (only one per Section, used as the running header)
+## Section title
+### Subsection title
+```
+
+Codex does NOT render `#### h4` or deeper — the typographic stack tops out at h3. A document needing h4 should be split into two Sections.
+
+### Paragraphs
+
+Plain prose. Wrap at any column; the renderer reflows. Hard line breaks via the two-trailing-spaces convention are recognised but rare — paragraphs are the default block.
+
+### Lists
+
+Both ordered and unordered, single level (no nested lists in the renderer):
+
+```markdown
+- a bullet
+- another bullet
+
+1. an ordered item
+2. another
+```
+
+Nested lists render as flat text with prefix indicators; this is intentional. Tufte's books use nested lists almost never. If a structure genuinely needs nesting, use a definition list (below).
+
+### Definition lists
+
+```markdown
+Term
+:   The definition. Can run multiple lines, indented by four spaces
+    to continue.
+```
+
+Renders as a hanging indent, term in bold, definition body in body face.
+
+### Code blocks
+
+Fenced only, with optional language:
+
+```markdown
+```python
+def foo():
+    return 42
+```
+```
+
+Fenced inline `code` works the same way. The renderer applies a monospace face but does NOT syntax-highlight — Tufte's books don't and the colourful syntax-highlighted code blocks Sphinx produces clash with the typographic palette.
+
+### Tables
+
+The pipe-table syntax:
+
+```markdown
+| col 1 | col 2 |
+|-------|-------|
+| a     | b     |
+```
+
+Renders in the **Tufte minimal-rule** style by default: a single horizontal rule above the header, one below the header, one at the bottom of the table. No vertical rules, no zebra-striping, no row borders. Right-align by appending `:` to the right side of the separator: `|------:|`.
+
+To opt into a bordered table (rare; reserved for tables where cells are visually heterogeneous), wrap the table in a `:::table-bordered ... :::` fence.
+
+### Block quotes
+
+Standard `>` prefix. Renders as a slight left indent in italic body face. Multi-paragraph blockquotes: prefix every paragraph with `>`, and use `>` on its own line as a separator.
+
+### Callouts
+
+```markdown
+:::tip
+A short callout. Renders as a sidenote-styled box in the margin.
+:::
+
+:::warning
+The same shape but a different colour.
+:::
+```
+
+Three callout types: `tip`, `warning`, `note`. Each renders as a margin sidebar, not as an inline interruption to the main text column.
+
+## Inline constructs
+
+### Emphasis
+
+`*italic*` and `**bold**`. The combination `***both***` renders as bold-italic.
+
+### Links
+
+`[label](url)` for external; `[label](#section-slug)` for in-volume cross-references; `[label](manual:slug#section)` for cross-manual references. The cross-manual form resolves at render time and renders as a styled span with a small arrow superscript indicating the link target.
+
+### Sidenotes
+
+The Velour-specific extension that's the most-used. Two syntaxes:
+
+```markdown
+A sentence in body text.[^a brief sidenote]
+
+Same sentence with a numbered sidenote.[^1]
+
+[^1]: The full sidenote text appears here, anywhere in the section.
+```
+
+The renderer anchors each sidenote to the line that triggered it, in the right margin, with a small superscript marker. If two sidenotes would collide vertically, the second is bumped down and a connector line is drawn from the marker to the bumped sidenote.
+
+## Velour-specific fences
+
+### Charts
+
+```markdown
+:::chart kind=line
+title: Test counts per round
+x: 1 / 2 / 3 / 4 / 5
+y: 22 / 30 / 47 / 51 / 56
+:::
+```
+
+Seven chart kinds: `bar`, `line`, `bullet`, `scatter`, `histogram`, `column`, `sparkstrip`. The chart library is pure-fpdf2 vector drawing — no matplotlib, no PIL.
+
+### Sparklines
+
+Inline:
+
+```markdown
+Test counts: ::sparkline 22,30,47,51,56:: → grew steadily.
+```
+
+Four sparkline variants: `sparkline` (line), `sparkarea` (area), `sparkdot` (dot strip), `sparkwl` (win-loss).
+
+### Diagrams
+
+```markdown
+:::diagram kind=mermaid
+graph LR
+    A --> B
+    B --> C
+:::
+```
+
+21 diagram kinds via Kroki: `mermaid`, `plantuml`, `graphviz`, `bpmn`, `c4plantuml`, `excalidraw`, `nomnoml`, `pikchr`, `seqdiag`, `wireviz`, etc. The renderer caches Kroki responses by sha256 of the source so re-renders are cache hits.
+
+### Slope graphs
+
+Two-column comparison:
+
+```markdown
+:::slopegraph
+title: Round-trip latency improvement
+left: before
+right: after
+- API a    : 230 → 95
+- API b    : 410 → 380
+- API c    : 95  → 88
+:::
+```
+
+Renders as Tufte's slope-graph layout: two vertical scales, one line per row connecting the left and right values.
+
+### Small multiples
+
+```markdown
+:::multiples cols=4
+- Q1 : ::sparkline 1,2,3,4,5::
+- Q2 : ::sparkline 5,3,2,4,3::
+- Q3 : ::sparkline 2,2,3,3,4::
+- Q4 : ::sparkline 4,5,5,5,6::
+:::
+```
+
+A grid of small inline charts, one per row, intended for at-a-glance comparison.
+
+## What the renderer rejects
+
+- HTML inside Markdown. The renderer does not pass through arbitrary HTML; the typographic pipeline can't lay out unknown markup. If you need HTML, you don't need Codex.
+- Images. Diagrams render via Kroki; charts render via the chart library; ad-hoc images are out of scope. Vol 4 Ch 9 covers the planned weasyprint backend that would change this.
+- Math. LaTeX equations are out of scope. Math-heavy chapters use plain prose with inline `code` for symbols, or render the equation as a `kroki/typst` diagram.
+- Footnotes (the `[^N]` *bottom-of-page* convention). Codex turns those into sidenotes regardless of intent. Bottom-of-page footnotes don't fit the typographic plan.
+
+## What follows
+
+Chapter 3 is the renderer internals — how each of these block types becomes pixels in a PDF. Chapter 4 is the chart library. Chapter 5 is the diagram round-trip. Chapter 7 is the writing style guide that says when to use each block type.""",
+
+    'ch6-introspection': """The introspection layer (`codex/introspection.py`) is the reason every Velour app has a "reference" appendix in this guide without anyone hand-writing those tables. The layer walks Django's own app registry, asks each app what it exports, and emits markdown tables ready for the renderer.
+
+This chapter is the contract: what introspection extracts, how to invoke it from a manual seeder, and how to add a new introspection function for a kind of metadata Velour starts caring about later.
+
+## What it extracts today
+
+Six functions, each returning markdown:
+
+```python
+from codex.introspection import (
+    models_for_app,        # list every model + its fields
+    urls_for_app,          # list every named URL pattern
+    commands_for_app,      # list every management command
+    settings_for_app,      # list app-specific settings
+    signals_for_app,       # list every connected signal handler
+    cron_pipelines,        # list identity_cron pipelines + intervals
+)
+```
+
+Each takes an app label and returns a markdown table:
+
+```python
+>>> from codex.introspection import models_for_app
+>>> print(models_for_app('chronos'))
+| Model | Fields |
+|-------|--------|
+| `CalendarEvent` | when_utc, label, tradition, kind, metadata |
+| `WorldClock`    | city, timezone, sort_order, visible |
+| `Task`          | title, notes, source_app, source_url, due_at, priority, status |
+```
+
+The output is plain markdown, ready to be the body of a `Section`.
+
+## Calling from a seeder
+
+The convention: every per-app chapter has an introspection-generated reference appendix as its last section. The seeder for that chapter looks like:
+
+```python
+def seed_chronos_chapter(m):
+    upsert_section(m, 'chronos-narrative', 100,
+                   'Chapter 19 — Chronos',
+                   _hand_written_chronos_narrative())
+    upsert_section(m, 'chronos-models', 110,
+                   'Reference: chronos models',
+                   models_for_app('chronos'),
+                   sidenotes='Auto-generated from django.apps; '
+                             're-run seed_devguide to refresh.')
+    upsert_section(m, 'chronos-urls', 120,
+                   'Reference: chronos URLs',
+                   urls_for_app('chronos'))
+    upsert_section(m, 'chronos-commands', 130,
+                   'Reference: chronos management commands',
+                   commands_for_app('chronos'))
+```
+
+Every chapter that documents an app follows this pattern. The narrative changes; the appendices auto-update.
+
+## How `models_for_app` works
+
+```python
+def models_for_app(app_label: str) -> str:
+    cfg = django_apps.get_app_config(app_label)
+    rows = []
+    for model in cfg.get_models():
+        fields = ', '.join(
+            f'`{f.name}`' for f in model._meta.fields
+            if not f.auto_created
+        )
+        rows.append(f'| `{model.__name__}` | {fields} |')
+    return ('| Model | Fields |\\n|-------|--------|\\n'
+            + '\\n'.join(rows))
+```
+
+That's it. Twelve lines. The output is markdown the renderer already knows how to lay out.
+
+The same shape — walk Django's introspection API, format as a markdown table — covers all six functions. `urls_for_app` walks `URLResolver.reverse_dict`. `commands_for_app` walks `management.find_commands(app_path)`. `settings_for_app` filters `django.conf.settings.__dict__` for keys that match the app prefix.
+
+## Adding a new introspection function
+
+When Velour starts shipping something new that lives in many apps, the pattern is:
+
+1. Pick what to extract (e.g., "every `codex_report()` hook").
+2. Walk the app registry, collecting the metadata.
+3. Format as a markdown table.
+4. Add a one-paragraph docstring naming where the data comes from.
+
+Example: an introspection function that lists every `codex_report()` hook (the per-app reports from Vol 1's commit `8419a0d`):
+
+```python
+def codex_reports_for_apps() -> str:
+    rows = []
+    for cfg in django_apps.get_app_configs():
+        try:
+            mod = importlib.import_module(f'{cfg.name}.codex_report')
+        except ModuleNotFoundError:
+            continue
+        if hasattr(mod, 'report'):
+            rows.append(f'| `{cfg.label}` | yes |')
+    return ('| App | codex_report() |\\n|-----|----------------|\\n'
+            + '\\n'.join(rows))
+```
+
+The docstring tells the next person what to expect. The output is ready for the renderer.
+
+## What introspection deliberately doesn't do
+
+- It doesn't render docstrings. Sphinx-style autodoc was deliberately not adopted; docstrings tend to be tactical comments aimed at the next maintainer of the function, not coherent documentation aimed at a chapter reader. The introspection layer extracts shape (what fields, what URLs, what commands) and leaves narrative to the hand-written sections.
+- It doesn't extract from inside function bodies. No AST walking, no call-graph inference. The complexity isn't worth the brittleness.
+- It doesn't generate cross-references. A model field that's a foreign key gets listed by name; the link to the target model is the writer's job.
+
+## Re-running on every deploy
+
+`manage.py seed_devguide` is run on every deploy. The auto-generated appendices refresh; the hand-written narratives are unchanged because their bodies are seeded with the exact same string. This is why chapter slugs and sort orders are stable: the seed is idempotent on the structure, additive on the content.
+
+## What follows
+
+Chapter 7 covers the writing style guide — when to use each block type the markdown subset offers, when to use a slope graph vs a line chart, how to structure a chapter so it reads well in print and searches well in PDF. Chapter 8 covers extending Codex itself: adding new block types, new chart kinds, new figure kinds. Chapter 9 covers the deferred work."""
+}
 
 
 def seed_volume_4():
@@ -2949,13 +3561,13 @@ Chapter 2 is the reference for every block type. Chapter 3 walks the renderer. C
 
     sort = 210
     for slug, title, summary in VOL4_CHAPTERS[1:3]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL4_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 50–80 pages.""",
-            sidenotes='Stub.')
+Approx. 50–80 pages.""")
+        sn = '' if slug in VOL4_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-3', 400, 'Part III — Visualisation',
@@ -2963,13 +3575,13 @@ Approx. 50–80 pages.""",
 
     sort = 410
     for slug, title, summary in VOL4_CHAPTERS[3:5]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL4_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 40–60 pages.""",
-            sidenotes='Stub.')
+Approx. 40–60 pages.""")
+        sn = '' if slug in VOL4_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-4', 600, 'Part IV — Generation',
@@ -2977,13 +3589,13 @@ Approx. 40–60 pages.""",
 
     sort = 610
     for slug, title, summary in VOL4_CHAPTERS[5:7]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL4_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 30–50 pages.""",
-            sidenotes='Stub.')
+Approx. 30–50 pages.""")
+        sn = '' if slug in VOL4_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-5', 800, 'Part V — Extension and future',
@@ -3075,6 +3687,313 @@ VOL5_CHAPTERS = [
 ]
 
 
+VOL5_BODIES = {
+    'ch2-hotswap': """The hot-swap workflow replaces a running Velour install on a remote host without taking it offline. The premise: gunicorn is supervised; supervisor will restart it cleanly given a new code tree; nginx in front of gunicorn buffers the second-or-two restart so most clients see no error. The whole choreography is driven by `manage.py generate_deploy --hotswap`.
+
+This chapter walks the workflow end-to-end: what the command produces, what each script does, the failure modes, and the rollback procedure.
+
+## What `--hotswap` produces
+
+```
+$ venv/bin/python manage.py generate_deploy --user swibliq \\
+    --host velour.example.com --hotswap
+deploy/hotswap-2026-04-26T19-44-12/
+├── hotswap.sh        # the orchestration script (run on the target)
+├── pre-checks.sh     # invoked first; aborts if anything looks off
+├── post-checks.sh    # invoked last; smoke-tests the new install
+└── tarball.tar.gz    # the new code tree, gitignored, generated fresh
+```
+
+The tarball is built from the current git working tree. Untracked files are not included; uncommitted changes ARE included (the assumption is the operator wants to deploy what they have, not what's pushed). The tarball contains the project tree minus `venv/`, `db.sqlite3`, the `secret_key.txt` family, and the `backups/` directory — anything live on the target stays.
+
+## The hotswap.sh sequence
+
+The script runs as the project user on the target host. It does, in order:
+
+1. **Pre-flight check.** Run `pre-checks.sh`. If supervisor reports gunicorn isn't running, or disk usage is over 95%, or there's an open lock file from a previous deploy, abort here.
+
+2. **Snapshot the current install.** `mv velour-dev velour-dev.<timestamp>`. This is the rollback target — kept for 7 days, then garbage-collected by the daily backup pipeline.
+
+3. **Unpack the new tarball.** `tar -xzf tarball.tar.gz -C velour-dev`. The new tree lands; the old `venv/`, `db.sqlite3`, secrets, and backups are NOT in the tarball, so they remain in the timestamped snapshot directory and need to be moved across.
+
+4. **Move the live state across.** `mv velour-dev.<timestamp>/{venv,db.sqlite3,secret_key.txt,health_token.txt,mail_relay_token.txt,backups} velour-dev/`. The new tree now has the old live state attached.
+
+5. **Refresh the venv.** `venv/bin/pip install -q -r requirements.txt`. Skipped if `requirements.txt` is unchanged from the snapshot (sha256 compared); usually skipped.
+
+6. **Run migrations.** `venv/bin/python manage.py migrate --noinput`. New migrations apply forward. There is no built-in support for backward-compatible migrations — that discipline is the migration author's, see Vol 5 Ch 8.
+
+7. **Run collectstatic.** `venv/bin/python manage.py collectstatic --noinput`. New static files land under `staticfiles/` where nginx serves them.
+
+8. **Reload supervisor.** `supervisorctl restart velour:*`. The colon-star reloads every program in the `velour` group — gunicorn, the channels worker, the per-app cron consumer if running. Supervisor's restart is graceful; gunicorn's `--graceful-timeout 30` setting in `gunicorn.conf.py` lets in-flight requests finish before workers are recycled.
+
+9. **Post-flight check.** Run `post-checks.sh`. Hits `https://velour.example.com/health/` (the health-token-gated endpoint), expects a 200 with the build hash matching the new tree's HEAD. If the check fails, the script ROLLS BACK automatically — see below.
+
+10. **Cleanup.** Schedule the timestamped snapshot for deletion in 7 days via `at`. The snapshot is the rollback artifact; once 7 days pass without the operator noticing a problem, the assumption is the new install is good and the snapshot is reclaimed.
+
+## Failure modes
+
+Things that go wrong in approximate order of frequency:
+
+- **Migration fails at step 6.** The new code is unpacked but the database is in an in-between state. The script aborts before restarting supervisor, so the OLD code (which the snapshot dir still contains, but supervisor is still pointed at the new tree) is not restarted. Operator decision required: roll back manually (`mv velour-dev velour-dev.failed && mv velour-dev.<timestamp> velour-dev && supervisorctl restart velour:*`) or fix forward (debug the migration on the target).
+
+- **collectstatic clobbers a file an operator hand-edited.** Conventionally, hand-edits to files under `staticfiles/` don't survive a deploy. Operators who modify static files should put the source under a per-app `static/<app>/` directory and let collectstatic pick them up.
+
+- **Post-flight 502.** gunicorn is up but failing every request — usually a missing settings field or an import error from the new code. The script auto-rolls-back: `mv velour-dev velour-dev.failed-<timestamp> && mv velour-dev.<timestamp> velour-dev && supervisorctl restart velour:*`. The failed tree is kept for inspection. Total downtime: roughly 30 seconds.
+
+- **Disk fills during step 5.** The old venv plus the new venv plus the tarball plus the snapshot can briefly use 3-4 GB. The pre-flight check refuses to start if free space is under 5 GB; if it crossed that threshold during the deploy, supervisor stays on the old tree and the operator gets a stack trace.
+
+## Rollback procedure (manual)
+
+When the auto-rollback at step 9 misses something — usually because the failure mode is "the site renders but is broken in some non-200 way" — manual rollback is two commands:
+
+```bash
+mv velour-dev velour-dev.failed-$(date +%s)
+mv velour-dev.<timestamp> velour-dev
+supervisorctl restart velour:*
+```
+
+The `<timestamp>` is the directory name from step 2. The supervisor restart is the third command and the only one that takes user-visible time (~5 seconds for graceful gunicorn cycling).
+
+## Cross-references
+
+- Vol 1 Ch 14 — the original `generate_deploy` command (without `--hotswap`).
+- Vol 5 Ch 1 — the fresh-install path that produces the initial deploy.
+- Vol 5 Ch 6 — the backup pipeline, which provides the snapshot recovery if even the rollback fails.
+
+## What follows
+
+Chapter 3 covers monitoring across multiple Velour installs (cross-fleet polling). Chapters 4-8 cover the rest of the operations surface — mail relay, security audit, backups, token rotation, performance.""",
+
+    'ch9-writing-an-app': """Adding a Velour app is a fifty-minute exercise the first time. After that, twenty. This chapter walks an example end-to-end: the app `weather` that records local weather observations, has a model, a view, a URL, a dashboard card, and a Codex section. Every step shows the code; the convention being demonstrated is that **a new app touches only files inside the new app plus three one-line edits to the project's `settings.py` and `urls.py`**.
+
+## Step 1 — scaffold
+
+```bash
+$ venv/bin/python manage.py startapp weather
+```
+
+Creates `weather/` with the standard Django skeleton: `models.py`, `views.py`, `admin.py`, `apps.py`, `migrations/`, `tests.py`. Velour adds a `templates/weather/` directory under the project's templates root (NOT under the app directory — see Vol 1 Ch 5 on the template convention).
+
+```bash
+$ mkdir -p templates/weather
+$ touch weather/urls.py
+```
+
+## Step 2 — the model
+
+`weather/models.py`:
+
+```python
+from django.db import models
+
+
+class Observation(models.Model):
+    when_utc      = models.DateTimeField(db_index=True)
+    temp_c        = models.FloatField()
+    humidity_pct  = models.PositiveSmallIntegerField()
+    wind_kmh      = models.FloatField()
+    pressure_hpa  = models.FloatField(null=True, blank=True)
+    notes         = models.CharField(max_length=200, blank=True)
+    source        = models.CharField(max_length=64,
+        help_text='Where this reading came from — "manual", '
+                  '"sensor:gary", "kmni-api"')
+    created_at    = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-when_utc']
+        indexes = [
+            models.Index(fields=['-when_utc']),
+            models.Index(fields=['source', '-when_utc']),
+        ]
+
+    def __str__(self):
+        return f'{self.when_utc:%Y-%m-%d %H:%M} {self.temp_c}°C'
+```
+
+Conventions on display:
+
+- `created_at` is auto-now-add for audit. The semantically meaningful timestamp is `when_utc` (when the reading was *taken*).
+- Indexes on the fields that get filtered or ordered. Django creates an index on `db_index=True` fields; the `class Meta` indexes are for compound or descending sorts.
+- A `source` field with documented values is more useful than a `source_app` FK in the long run — sources outlive their apps.
+
+## Step 3 — register the app
+
+`velour/settings.py`:
+
+```python
+INSTALLED_APPS = [
+    # ...
+    'weather',
+]
+```
+
+One line. Alphabetically ordered (the convention in `velour/settings.py` is order-by-conceptual-grouping, not strict alphabetical, but a new addition near related apps is fine).
+
+```bash
+$ venv/bin/python manage.py makemigrations weather
+$ venv/bin/python manage.py migrate weather
+```
+
+## Step 4 — the view
+
+`weather/views.py`:
+
+```python
+from django.contrib.auth.decorators import login_required
+from django.shortcuts import render
+
+from .models import Observation
+
+
+@login_required
+def index(request):
+    obs = Observation.objects.all()[:50]
+    return render(request, 'weather/index.html', {
+        'observations': obs,
+        'count': Observation.objects.count(),
+    })
+```
+
+`@login_required` is the default for Velour views; the few that aren't login-gated are the API endpoints called by the ESP fleet. The Vol 5 Ch 5 security chapter covers the threat model.
+
+## Step 5 — the template
+
+`templates/weather/index.html`:
+
+```django
+{% extends "base.html" %}
+{% block title %}Weather · Velour{% endblock %}
+
+{% block content %}
+<h1>Weather observations</h1>
+<p>{{ count }} reading{{ count|pluralize }}.</p>
+
+<table class="data">
+  <thead>
+    <tr><th>when</th><th>°C</th><th>%</th><th>km/h</th><th>source</th></tr>
+  </thead>
+  <tbody>
+    {% for o in observations %}
+    <tr>
+      <td>{{ o.when_utc|date:"Y-m-d H:i" }}</td>
+      <td>{{ o.temp_c }}</td>
+      <td>{{ o.humidity_pct }}</td>
+      <td>{{ o.wind_kmh }}</td>
+      <td><code>{{ o.source }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+```
+
+The `class="data"` styling comes from `static/site.css`; every Velour data-table uses it. No custom CSS for new apps.
+
+## Step 6 — the URL
+
+`weather/urls.py`:
+
+```python
+from django.urls import path
+from . import views
+
+app_name = 'weather'
+
+urlpatterns = [
+    path('', views.index, name='index'),
+]
+```
+
+`velour/urls.py`:
+
+```python
+urlpatterns = [
+    # ...
+    path('weather/', include('weather.urls')),
+]
+```
+
+One line in `velour/urls.py` — same convention as `INSTALLED_APPS`.
+
+## Step 7 — the dashboard card
+
+`dashboard/cards.py`:
+
+```python
+CARDS = [
+    # ...
+    Card('Weather', 'weather:index', icon='cloud'),
+]
+```
+
+If `cloud` isn't already in `static/dashboard/icons.svg`, draw it (or copy from a SVG icon set with a compatible licence) and add it to the sprite. One commit, both files.
+
+## Step 8 — the Codex section
+
+`weather` becomes one-line-mentioned in `velour-complete-reference` automatically because `models_for_app('weather')` (Vol 4 Ch 6) is invoked when seeding that manual. The next time `seed_manuals` runs, an auto-generated reference appendix appears.
+
+For a hand-written narrative, add it via `seed_velour_self_chapters.py` (or write a per-app seed command). See `seed_devguide.py`'s structure for the convention.
+
+## Step 9 — periodic tasks (optional)
+
+If `weather` should fire something on a schedule — say, fetch a forecast from an API every hour — add a function in `identity/cron.py`:
+
+```python
+def _do_weather_fetch():
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('weather_fetch', stdout=buf)
+    return buf.getvalue().strip()
+```
+
+Wire it into `pipelines` and `DEFAULT_INTERVALS` (Vol 2 Ch 8). The single crontab entry already exists; you don't add a new one.
+
+## Step 10 — tests
+
+`weather/tests.py`:
+
+```python
+from django.test import TestCase
+from django.utils import timezone
+from django.contrib.auth.models import User
+
+from .models import Observation
+
+
+class ObservationModelTests(TestCase):
+    def test_str(self):
+        o = Observation.objects.create(
+            when_utc=timezone.now(), temp_c=18.5,
+            humidity_pct=65, wind_kmh=12, source='manual')
+        self.assertIn('18.5', str(o))
+
+
+class IndexViewTests(TestCase):
+    def test_login_required(self):
+        resp = self.client.get('/weather/')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_renders_for_logged_in_user(self):
+        u = User.objects.create_user('alice', password='pw')
+        self.client.force_login(u)
+        resp = self.client.get('/weather/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Weather observations')
+```
+
+Run with `manage.py test weather`.
+
+## Total work
+
+10 files touched, 3 of them in shared project directories (one line each), the rest under the new app. Total time at moderate pace: 50 minutes. After the second or third app, you stop following this list and just write — the conventions are small enough to internalize.
+
+## What follows
+
+Chapter 10 is the recipes catalogue: 30 patterns for things people commonly want to do (add an LLM augmentation hook, expose a JSON API for the ESP fleet, schedule a backup, push a custom Codex report). Chapter 11 is the long-term roadmap synthesised from the memory backlog."""
+}
+
+
 def seed_volume_5():
     m = upsert_manual(
         'velour-developer-guide-vol-5',
@@ -3154,13 +4073,13 @@ Chapter 2 covers the hot-swap workflow — replacing a running install without d
 
     sort = 210
     for slug, title, summary in VOL5_CHAPTERS[1:8]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL5_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 25–40 pages.""",
-            sidenotes='Stub.')
+Approx. 25–40 pages.""")
+        sn = '' if slug in VOL5_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
     upsert_section(m, 'part-3', 800, 'Part III — Extension',
@@ -3168,13 +4087,13 @@ Approx. 25–40 pages.""",
 
     sort = 810
     for slug, title, summary in VOL5_CHAPTERS[8:11]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL5_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 30–50 pages.""",
-            sidenotes='Stub.')
+Approx. 30–50 pages.""")
+        sn = '' if slug in VOL5_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
 
