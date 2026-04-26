@@ -566,23 +566,46 @@ class _Visitor:
 
     def _maybe_walrus(self, cond: str) -> str:
         """Convert `var = expr` (PHP assignment-in-condition) into
-        Python walrus form `(var := expr)`. Three shapes handled:
-        bare `var = expr`, `(var = expr) <op> rhs`, and a leading
-        `not var = expr`. Subscript LHS (`arr['k'] = v`) is rewritten
-        to a temporary: `(__tmp := v) is not None and arr['k'] := v`
-        — but Python doesn't allow walrus on a subscript, so we just
-        evaluate the RHS into a temp and use the assignment as a
-        side effect. For now: if the LHS is subscripted, fall back
-        to comparing the RHS against truth and emit a porter marker
-        in a comment."""
+        Python walrus form `(var := expr)`.
+
+        Shapes handled:
+          - bare `var = expr`
+          - `(var = expr)` (parenthesized)
+          - `not var = expr`
+          - `(var = expr) <op> rhs`  (assignment-then-compare;
+                                       common in `while ((row = f()) != False)`)
+          - `var.attr = expr` and `var->attr = expr` (translates LHS,
+            keeps walrus binding to the bare name)
+
+        Subscript LHS (`$arr['k'] = $v`) can't bind via walrus
+        in Python; emits a porter marker."""
         s = cond.strip()
-        if ':=' in s or '==' in s.replace('===', '') \
-                or '!=' in s.replace('!==', ''):
+        if ':=' in s:
             return cond
+        # Already comparison-only — no assignment to lift.
+        # Be careful: `==` and `!=` ARE permitted here — we're only
+        # blocking when the assignment is BURIED behind a comparison
+        # so we don't double-process.
+        # `(var = expr) <op> rhs` — common in `while ((x = f()) != val)`.
+        # Detect a parenthesized assignment followed by a comparison.
+        m_compare = re.match(
+            r'^\(\s*(\w+(?:\.\w+|\[[^\]]+\])*)\s*=\s*(?!=)([^=].*?)\)\s*'
+            r'(==|!=|<=|>=|<|>|is\s+not|is)\s*(.+)$', s)
+        if m_compare:
+            lhs = m_compare.group(1)
+            rhs = m_compare.group(2).strip()
+            op = m_compare.group(3)
+            cmp_rhs = m_compare.group(4)
+            # Walrus only binds to a bare identifier; if the LHS has
+            # an attribute or subscript, fall back to evaluating
+            # without binding.
+            if '.' in lhs or '[' in lhs:
+                return f'({rhs}) {op} {cmp_rhs}  # PORTER: was `{lhs} = {rhs}`'
+            return f'({lhs} := {rhs}) {op} {cmp_rhs}'
+
         # Subscript LHS form: `arr['k'] = expr` — Python's walrus
-        # can't bind to a subscript. Best effort: turn the assignment
-        # into `( arr['k'] := expr )` won't compile, so we drop the
-        # binding and just evaluate the RHS as the condition.
+        # can't bind to a subscript. Drop the binding and just
+        # evaluate the RHS as the condition.
         m_sub = re.match(
             r'^\(?\s*(?:not\s+)?([\w.]+\[[^\]]+\](?:\[[^\]]+\])*)\s*='
             r'\s*(?!=)(.+?)\)?$', s)
@@ -592,6 +615,12 @@ class _Visitor:
             return (f'{prefix}({m_sub.group(2).strip()})'
                     f'  # PORTER: PHP `{m_sub.group(1)} = ...` '
                     f'in cond — bind manually')
+
+        # If the cond ALREADY contains a comparison, don't try to
+        # walrus — the comparison is the boolean expression.
+        if '==' in s.replace('===', '') or '!=' in s.replace('!==', ''):
+            return cond
+
         # `var = expr` (with optional outer parens stripped). Use
         # paren-balanced matching for the RHS so we don't mid-cut a
         # function call like `readdir(sFolder)`.
@@ -861,7 +890,14 @@ class _Visitor:
         return _safe_name(self.text(node).replace('\\', '.').lstrip('.'))
 
     def expr_integer(self, node) -> str:
-        return self.text(node)
+        # PHP octal `0777` is invalid in Python 3 — must be `0o777`.
+        # PHP hex `0xff` and binary `0b101` are fine in both. Decimal
+        # `0` alone is fine.
+        text = self.text(node)
+        if (len(text) > 1 and text.startswith('0')
+                and text[1].isdigit()):
+            return '0o' + text[1:]
+        return text
 
     def expr_float(self, node) -> str:
         return self.text(node)
@@ -963,6 +999,13 @@ class _Visitor:
     def expr_assignment_expression(self, node) -> str:
         left = node.child_by_field_name('left')
         right = node.child_by_field_name('right')
+        # PHP `$x = &$expr` (assign-by-reference) — strip the `&`;
+        # Python uses bound names / mutable container semantics.
+        if right is not None and right.type == 'by_ref':
+            for c in right.children:
+                if c.type != '&':
+                    right = c
+                    break
         # PHP `$arr[] = $x` (array push) → `arr.append(x)`.
         if left is not None and left.type == 'subscript_expression':
             non_brackets = [c for c in left.children
