@@ -335,10 +335,13 @@ class _Visitor:
                             pdefault = self.visit_expr(pc)
                     if pname:
                         pname = _safe_name(pname)
-                        if pdefault is not None:
+                        # Variadic params get the Python `*` prefix.
+                        prefix = '*' if p.type == 'variadic_parameter' \
+                                 else ''
+                        if pdefault is not None and not prefix:
                             params.append(f'{pname}={pdefault}')
                         else:
-                            params.append(pname)
+                            params.append(f'{prefix}{pname}')
         body_node = node.child_by_field_name('body')
         body_py = self.visit(body_node, indent + 1) if body_node else ''
         if not body_py.strip():
@@ -949,35 +952,52 @@ class _Visitor:
     def expr_assignment_expression(self, node) -> str:
         left = node.child_by_field_name('left')
         right = node.child_by_field_name('right')
-        # PHP `$arr[] = $x` (array push) → `arr.append(x)`. Detect
-        # an empty-index subscript on the LHS.
+        # PHP `$arr[] = $x` (array push) → `arr.append(x)`.
         if left is not None and left.type == 'subscript_expression':
-            has_index = any(c.type not in ('[', ']') and
-                             c is not left.child(0) for c in left.children)
-            # Above is fragile; simpler check: 3 children means `arr [ ]`
-            # (no index), 4 children means `arr [ idx ]`.
             non_brackets = [c for c in left.children
                             if c.type not in ('[', ']')]
             if len(non_brackets) == 1:
-                # No index — it's an array-push.
                 target_node = non_brackets[0]
                 target = self.visit_expr(target_node)
                 value = self.visit_expr(right) if right else ''
                 return f'{target}.append({value})'
+        # PHP destructuring: `[$a, $b] = $bits` or `list($a, $b) = $bits`.
+        # Both produce a `list_literal` LHS in tree-sitter. → Python
+        # tuple unpack `a, b = bits`.
+        if left is not None and left.type == 'list_literal':
+            names = []
+            for c in left.children:
+                if c.type == 'variable_name':
+                    names.append(_safe_name(self.text(c).lstrip('$')))
+            if names:
+                value = self.visit_expr(right) if right else ''
+                return f'{", ".join(names)} = {value}'
         l = self.visit_expr(left) if left else ''
         r = self.visit_expr(right) if right else ''
         return f'{l} = {r}'
+
+    def expr_variadic_unpacking(self, node) -> str:
+        # PHP `...$args` in function calls → Python `*args`
+        for c in node.children:
+            if c.type != '...':
+                return f'*{self.visit_expr(c)}'
+        return '*()'
 
     def expr_augmented_assignment_expression(self, node) -> str:
         left = node.child_by_field_name('left')
         right = node.child_by_field_name('right')
         op_node = node.child_by_field_name('operator')
         op = self.text(op_node) if op_node else '='
+        l = self.visit_expr(left) if left else ''
+        r = self.visit_expr(right) if right else ''
         # PHP `.=` (string concat assign) → Python `+=`
         if op == '.=':
             op = '+='
-        l = self.visit_expr(left) if left else ''
-        r = self.visit_expr(right) if right else ''
+        # PHP 7.4 null-coalescing assign `??=`. Closest Python:
+        # `x = x or y` (loses the `is None` distinction; porter
+        # tightens where it matters).
+        if op == '??=':
+            return f'{l} = {l} or {r}'
         return f'{l} {op} {r}'
 
     def expr_conditional_expression(self, node) -> str:
