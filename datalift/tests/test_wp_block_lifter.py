@@ -155,6 +155,105 @@ class DynamicBlockTests(SimpleTestCase):
         self.assertIn('c.comment_content', out)
 
 
+class DynamicWidgetBlockTests(SimpleTestCase):
+    """Dynamic blocks that need a Django context variable to work —
+    latest-posts, latest-comments, archives, tag-cloud, calendar,
+    embeds, etc."""
+
+    def test_embed_youtube_with_url(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:embed {"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"'
+            ',"providerNameSlug":"youtube"} /-->')
+        self.assertIn('youtube.com/embed/dQw4w9WgXcQ', out)
+        self.assertIn('<iframe', out)
+
+    def test_embed_legacy_core_embed(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:core-embed/youtube -->'
+            '<figure><div>https://youtu.be/dQw4w9WgXcQ</div></figure>'
+            '<!-- /wp:core-embed/youtube -->')
+        self.assertIn('youtube.com/embed/dQw4w9WgXcQ', out)
+
+    def test_embed_vimeo(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:embed {"url":"https://vimeo.com/123456",'
+            '"providerNameSlug":"vimeo"} /-->')
+        self.assertIn('player.vimeo.com/video/123456', out)
+
+    def test_embed_unknown_provider_falls_back_to_link(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:embed {"url":"https://example.com/foo"} /-->')
+        self.assertIn('href="https://example.com/foo"', out)
+
+    def test_latest_posts(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:latest-posts {"postsToShow":3} /-->')
+        self.assertIn('latest_posts', out)
+        self.assertIn('slice:":3"', out)
+
+    def test_latest_comments(self):
+        out, _, _ = lift_block_template('<!-- wp:latest-comments /-->')
+        self.assertIn('latest_comments', out)
+        self.assertIn('comment_author', out)
+
+    def test_archives(self):
+        out, _, _ = lift_block_template('<!-- wp:archives /-->')
+        self.assertIn('archive_months', out)
+        self.assertIn('m.month_name', out)
+
+    def test_tag_cloud(self):
+        out, _, _ = lift_block_template('<!-- wp:tag-cloud /-->')
+        self.assertIn('tag_cloud', out)
+        self.assertIn('/tag/', out)
+
+    def test_calendar(self):
+        out, _, _ = lift_block_template('<!-- wp:calendar /-->')
+        self.assertIn('calendar_html', out)
+
+    def test_avatar(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:avatar {"size":64} /-->')
+        self.assertIn('avatar_url', out)
+        self.assertIn('width="64"', out)
+
+    def test_loginout(self):
+        out, _, _ = lift_block_template('<!-- wp:loginout /-->')
+        self.assertIn('is_authenticated', out)
+        self.assertIn('Log in', out)
+
+    def test_read_more(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:read-more {"content":"Continue reading"} /-->')
+        self.assertIn('Continue reading', out)
+        self.assertIn('post.get_absolute_url', out)
+
+    def test_query_no_results(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:query-no-results --><p>None.</p><!-- /wp:query-no-results -->')
+        self.assertIn('{% if not posts', out)
+        self.assertIn('None.', out)
+
+    def test_comments_title(self):
+        out, _, _ = lift_block_template('<!-- wp:comments-title /-->')
+        self.assertIn('comments|length', out)
+
+    def test_comment_template(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:comment-template -->'
+            '<p>x</p>'
+            '<!-- /wp:comment-template -->')
+        self.assertIn('{% for c in comments %}', out)
+        self.assertIn('<p>x</p>', out)
+
+    def test_comment_author_name(self):
+        out, _, _ = lift_block_template('<!-- wp:comment-author-name /-->')
+        self.assertIn('c.comment_author', out)
+
+    def test_comment_reply_link(self):
+        out, _, _ = lift_block_template('<!-- wp:comment-reply-link /-->')
+        self.assertIn('reply-{{ c.comment_id }}', out)
+
+
 class QueryLoopTests(SimpleTestCase):
 
     def test_query_with_post_template(self):

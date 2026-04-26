@@ -227,6 +227,198 @@ def _t_post_featured_image(attrs, inner_html, lifter):
     return f'<figure class="wp-block-post-featured-image">{img}</figure>'
 
 
+def _t_embed(attrs, inner_html, lifter):
+    """A wp:embed block. WP detects the URL provider and emits an
+    iframe; we do the same for the common providers, fall back to
+    a plain link otherwise. Block name `embed` (newer) and
+    `core-embed/<provider>` (legacy) both flow here via aliases."""
+    url = (attrs.get('url', '') or '').strip()
+    provider = (attrs.get('providerNameSlug', '') or '').lower()
+    # Sniff inner_html for the URL if attrs don't carry it (legacy
+    # core-embed serialised the URL between the comments).
+    if not url and inner_html:
+        m = re.search(r'https?://[^\s<>"\']+', inner_html)
+        if m:
+            url = m.group(0)
+    if not provider:
+        for tag in ('youtube', 'youtu.be', 'vimeo', 'twitter', 'x.com',
+                     'instagram', 'facebook', 'tiktok', 'soundcloud',
+                     'spotify', 'wordpress.tv'):
+            if tag in url.lower():
+                provider = tag.replace('youtu.be', 'youtube').replace(
+                    'x.com', 'twitter').replace('.', '_')
+                break
+    embed_url = url
+    if 'youtube' in (provider or url.lower()):
+        m = re.search(r'(?:v=|youtu\.be/|/embed/)([\w-]+)', url)
+        if m:
+            embed_url = f'https://www.youtube.com/embed/{m.group(1)}'
+    elif 'vimeo' in (provider or url.lower()):
+        m = re.search(r'vimeo\.com/(\d+)', url)
+        if m:
+            embed_url = f'https://player.vimeo.com/video/{m.group(1)}'
+    if embed_url and embed_url != url:
+        body = (f'<iframe class="wp-block-embed__iframe" '
+                f'src="{embed_url}" width="560" height="315" '
+                f'frameborder="0" allowfullscreen></iframe>')
+    elif url:
+        body = (f'<a href="{url}" class="wp-block-embed__link" '
+                f'rel="noopener">{url}</a>')
+    else:
+        body = inner_html
+    return (f'<figure class="wp-block-embed is-provider-{provider}">'
+            f'{body}</figure>')
+
+
+def _t_latest_posts(attrs, inner_html, lifter):
+    """The "latest posts" widget. Reads {{ latest_posts }} from
+    context (a list of objects with .title, .get_absolute_url,
+    .published_at) — view supplies it."""
+    n = attrs.get('postsToShow', 5)
+    return (
+        f'<ul class="wp-block-latest-posts" data-count="{n}">\n'
+        f'  {{% for p in latest_posts|default_if_none:""|slice:":{n}" %}}\n'
+        '    <li><a href="{{ p.get_absolute_url }}">'
+        '{{ p.title|safe }}</a> '
+        '<time>{{ p.published_at|date:"F j, Y" }}</time></li>\n'
+        '  {% empty %}\n'
+        '    <li><em>No recent posts.</em></li>\n'
+        '  {% endfor %}\n'
+        '</ul>'
+    )
+
+
+def _t_latest_comments(attrs, inner_html, lifter):
+    n = attrs.get('commentsToShow', 5)
+    return (
+        f'<ul class="wp-block-latest-comments" data-count="{n}">\n'
+        f'  {{% for c in latest_comments|default_if_none:""'
+        f'|slice:":{n}" %}}\n'
+        '    <li><span class="wp-block-latest-comments__author">'
+        '{{ c.comment_author|default:"Anonymous" }}</span> on '
+        '<a href="/post/{{ c.comment_post_id }}/">'
+        '{{ c.post_title|default:"a post" }}</a></li>\n'
+        '  {% empty %}\n'
+        '    <li><em>No comments yet.</em></li>\n'
+        '  {% endfor %}\n'
+        '</ul>'
+    )
+
+
+def _t_archives(attrs, inner_html, lifter):
+    """Monthly archive list — reads {{ archive_months }} (list of
+    objects with .year, .month_name, .count, .url)."""
+    return (
+        '<ul class="wp-block-archives">\n'
+        '  {% for m in archive_months|default_if_none:"" %}\n'
+        '    <li><a href="{{ m.url }}">'
+        '{{ m.month_name }} {{ m.year }}</a> '
+        '({{ m.count }})</li>\n'
+        '  {% endfor %}\n'
+        '</ul>'
+    )
+
+
+def _t_tag_cloud(attrs, inner_html, lifter):
+    return (
+        '<div class="wp-block-tag-cloud">\n'
+        '  {% for t in tag_cloud|default_if_none:"" %}\n'
+        '    <a href="/tag/{{ t.slug }}/" '
+        'style="font-size:{{ t.font_size|default:"1rem" }}">'
+        '{{ t.name }}</a>\n'
+        '  {% endfor %}\n'
+        '</div>'
+    )
+
+
+def _t_calendar(attrs, inner_html, lifter):
+    """Month-grid of post-bearing days. Reads {{ calendar_html }}
+    pre-rendered from the view (rendering a calendar in pure
+    template syntax is impractical)."""
+    return ('<div class="wp-block-calendar">'
+            '{{ calendar_html|default:""|safe }}'
+            '</div>')
+
+
+def _t_avatar(attrs, inner_html, lifter):
+    size = attrs.get('size', 96)
+    return (f'<img class="wp-block-avatar" width="{size}" height="{size}" '
+            f'src="{{{{ avatar_url|default:"" }}}}" '
+            f'alt="{{{{ avatar_alt|default:"" }}}}">')
+
+
+def _t_loginout(attrs, inner_html, lifter):
+    return ('<span class="wp-block-loginout">'
+            '{% if request.user.is_authenticated %}'
+            '<a href="/accounts/logout/">Log out</a>'
+            '{% else %}'
+            '<a href="/accounts/login/">Log in</a>'
+            '{% endif %}'
+            '</span>')
+
+
+def _t_read_more(attrs, inner_html, lifter):
+    label = attrs.get('content', 'Read more')
+    return (f'<a class="wp-block-read-more" '
+            f'href="{{{{ post.get_absolute_url }}}}">{label}</a>')
+
+
+def _t_query_no_results(attrs, inner_html, lifter):
+    return ('{% if not posts or posts|length == 0 %}'
+            f'{inner_html or "<p>No posts found.</p>"}'
+            '{% endif %}')
+
+
+def _t_post_author_biography(attrs, inner_html, lifter):
+    return ('<div class="wp-block-post-author-biography">'
+            '{{ post.author.biography|default:""|safe }}'
+            '</div>')
+
+
+def _t_comments_title(attrs, inner_html, lifter):
+    return ('<h3 class="wp-block-comments-title">'
+            'Comments ({{ comments|length }})'
+            '</h3>')
+
+
+def _t_comment_template(attrs, inner_html, lifter):
+    return (f'<ol class="wp-block-comment-template">\n'
+            f'  {{% for c in comments %}}\n'
+            f'    <li>{inner_html or ""}</li>\n'
+            f'  {{% endfor %}}\n'
+            f'</ol>')
+
+
+def _t_comment_author_name(attrs, inner_html, lifter):
+    return ('<span class="wp-block-comment-author-name">'
+            '{{ c.comment_author|default:"Anonymous" }}'
+            '</span>')
+
+
+def _t_comment_content(attrs, inner_html, lifter):
+    return ('<div class="wp-block-comment-content">'
+            '{{ c.comment_content|linebreaks }}'
+            '</div>')
+
+
+def _t_comment_date(attrs, inner_html, lifter):
+    return ('<time class="wp-block-comment-date">'
+            '{{ c.comment_date|date:"F j, Y" }}'
+            '</time>')
+
+
+def _t_comment_reply_link(attrs, inner_html, lifter):
+    return ('<a class="wp-block-comment-reply-link" '
+            'href="#reply-{{ c.comment_id }}">Reply</a>')
+
+
+def _t_comment_edit_link(attrs, inner_html, lifter):
+    return ('{% if request.user.is_staff %}'
+            '<a class="wp-block-comment-edit-link" '
+            'href="/admin/wp/comment/{{ c.comment_id }}/change/">'
+            'Edit</a>{% endif %}')
+
+
 def _t_search(attrs, inner_html, lifter):
     """The WP search input. Emits a GET form posting back to the
     current URL with `?s=<term>` (the WP convention)."""
@@ -523,6 +715,38 @@ _TRANSLATORS = {
     'post-navigation-link':       _t_post_navigation_link,
     'search':                     _t_search,
     'pattern':                    _t_pattern,
+    'embed':                      _t_embed,
+    'core-embed/youtube':         _t_embed,
+    'core-embed/vimeo':           _t_embed,
+    'core-embed/twitter':         _t_embed,
+    'core-embed/instagram':       _t_embed,
+    'core-embed/facebook':        _t_embed,
+    'core-embed/tiktok':          _t_embed,
+    'core-embed/wordpress-tv':    _t_embed,
+    'core-embed/spotify':         _t_embed,
+    'core-embed/soundcloud':      _t_embed,
+    'latest-posts':               _t_latest_posts,
+    'latest-comments':            _t_latest_comments,
+    'archives':                   _t_archives,
+    'tag-cloud':                  _t_tag_cloud,
+    'calendar':                   _t_calendar,
+    'avatar':                     _t_avatar,
+    'loginout':                   _t_loginout,
+    'read-more':                  _t_read_more,
+    'query-no-results':           _t_query_no_results,
+    'post-author-biography':      _t_post_author_biography,
+    'comments':                   _t_default('comments'),
+    'comments-title':             _t_comments_title,
+    'comment-template':           _t_comment_template,
+    'comment-author-name':        _t_comment_author_name,
+    'comment-content':            _t_comment_content,
+    'comment-date':               _t_comment_date,
+    'comment-reply-link':         _t_comment_reply_link,
+    'comment-edit-link':          _t_comment_edit_link,
+    'comments-pagination':        _t_default('comments-pagination'),
+    'comments-pagination-previous': _t_query_pagination_previous,
+    'comments-pagination-numbers':  _t_query_pagination_numbers,
+    'comments-pagination-next':   _t_query_pagination_next,
     'image':                      _t_image,
     'paragraph':                  _t_paragraph,
     'heading':                    _t_heading,

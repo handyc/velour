@@ -416,6 +416,55 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_tut_embeds',
+        'title': 'wp:embed → real iframes + graceful provider fallbacks',
+        'subtitle': 'YouTube/Vimeo URLs become live embeds; rest degrade to links',
+        'image': 'tt2_tut_embeds.png',
+        'metrics': [
+            ('source post', 'wp_posts.id=1738 ("Block category: Embeds")'),
+            ('explicit embeds in source', '5 (YouTube, Twitter, '
+             'Facebook, Instagram, WordPress.tv)'),
+            ('YouTube → iframe',
+             'src="https://www.youtube.com/embed/<id>" 560x315'),
+            ('Vimeo → iframe',
+             'src="https://player.vimeo.com/video/<id>"'),
+            ('other providers',
+             '<a class="wp-block-embed__link" rel="noopener">'),
+            ('wrapper', '<figure class="wp-block-embed '
+             'is-provider-<slug>">'),
+            ('legacy aliases', 'core-embed/youtube, core-embed/vimeo, '
+             '… all routed to wp:embed'),
+            ('new dynamic translators total',
+             '25 (embed, latest-posts, latest-comments, archives, '
+             'tag-cloud, calendar, avatar, loginout, read-more, '
+             'query-no-results, comment-* family, …)'),
+            ('test count', '47 unit tests, all green'),
+        ],
+        'body': (
+            "wp:embed is the trickiest dynamic block — WP runs the "
+            "URL through oEmbed at render time. The lifter does the "
+            "approachable subset deterministically: YouTube and Vimeo "
+            "URLs are pattern-matched, the video id extracted, and a "
+            "real <iframe> emitted with the canonical embed URL. "
+            "Everything else (Twitter, Facebook, Instagram, "
+            "WordPress.tv, Spotify, SoundCloud, Reddit, TikTok, "
+            "Mixcloud, Kickstarter, Slideshare, Crowdsignal, Imgur, "
+            "Issuu, Scribd, Speaker Deck, Wolfram, ...) degrades "
+            "gracefully to a class-marked <a> link in a "
+            "provider-tagged figure, which is what the surrounding "
+            "TUT theme actually styles. Round 6 added 25 dynamic-"
+            "widget translators total — the comment-block family is "
+            "now complete (comment-template, comment-author-name, "
+            "comment-content, comment-date, comment-reply-link, "
+            "comment-edit-link, comments-pagination), and the "
+            "sidebar widgets (latest-posts, latest-comments, "
+            "archives, tag-cloud, calendar) read from a "
+            "_sidebar_ctx() helper in the demo views."
+        ),
+        'reproduce': '/post/1738/ on the TUT-loaded demo',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',
