@@ -2374,8 +2374,857 @@ But the foundation is here. If Volume 1 is all you ever read of this guide, you 
 """
 
 
+# =====================================================================
+# Volume 2 — The Web Layer
+# =====================================================================
+
+VOL2_CHAPTERS = [
+    ('ch1-dashboard',
+     'Chapter 1 — The dashboard and base.html',
+     'The 4×4 grid of cards on /dashboard/, the chronos topbar '
+     'context processor, the body-class convention, the Tufte-'
+     'influenced palette in static/site.css, and the no-JavaScript-'
+     'first principle. Includes the dashboard\'s rendering pipeline '
+     'from card definition to grid placement, and the rules for when '
+     'a feature gets a card vs a top-menu link only.'),
+    ('ch2-terminal',
+     'Chapter 2 — Web Terminal (Channels + ASGI + xterm.js)',
+     'Two ASGI consumers: PTY-backed shell terminal and ssh-tunnelled '
+     'foreign-host terminal. The xterm.js client wiring, the WebSocket '
+     'frame format, terminal-history persistence, and security '
+     'hardening (allowed-hosts allowlist, auth gate, no shell escapes '
+     'without an interactive PTY).'),
+    ('ch3-template-conventions',
+     'Chapter 3 — Template conventions and the static asset pipeline',
+     'How templates/<app>/ inherits from base.html. The static_v cache-'
+     'busting suffix. ET Book bundling for Codex. Per-app vs project-'
+     'level static dirs. The convention that templates carry zero '
+     'inline JavaScript except for the dropdown plug.'),
+    ('ch4-chronos-topbar',
+     'Chapter 4 — Chronos in the topbar (context processor anatomy)',
+     'How the chronos clock and 32 world-time chips render on every '
+     'page via a single context processor. The processor\'s caching '
+     'discipline. The CSS min() trick for viewport-fit math. The '
+     'thirty-two-clock layout problem and how it\'s solved without '
+     'JavaScript.'),
+    ('ch5-mail-uis',
+     'Chapter 5 — The Mail app (mailbox + mailroom + relay)',
+     'Three UIs: per-account inbox, the relay-inbox triage queue, the '
+     'admin mailroom. SMTP server bring-up. Domain-aware delivery via '
+     'DynamicMailboxBackend. The mail relay protocol and its token-'
+     'gated forward path.'),
+    ('ch6-logs-services-security',
+     'Chapter 6 — Operational tools (Logs / Services / Security / Sysinfo / Graphs)',
+     'Five small apps that share the "view-only operational surface" '
+     'pattern. Sysinfo\'s read-only proc parsing. Services and the '
+     'systemctl bridge. Security\'s audit-table model. Graphs as '
+     'time-series renderer for sensor and reading data.'),
+    ('ch7-codex-ui',
+     'Chapter 7 — Codex itself, from the user side',
+     'The /codex/ UI: manual list, volume binding, section navigation, '
+     'PDF download. The reading view\'s left-rail typography. The '
+     'sidenote anchor convention. Hot-rebuild on section save.'),
+    ('ch8-extension-points',
+     'Chapter 8 — Extension points: dashboard cards, context '
+     'processors, template tags',
+     'How to add a new dashboard card without forking dashboard/views. '
+     'How to write a context processor that shows on every page. How '
+     'to register a new template tag library. The convention that '
+     'extension points are documented before they are used.'),
+]
+
+
+def seed_volume_2():
+    m = upsert_manual(
+        'velour-developer-guide-vol-2',
+        title='Velour Developer Guide, Volume 2',
+        subtitle='The Web Layer',
+        format='complete',
+        author='Velour',
+        version='0.1 (work in progress)',
+        abstract=(
+            'Volume 2 of the five-volume Velour Developer Guide. '
+            'Covers the user-facing Web layer in depth: the '
+            'dashboard, the Web Terminal, the chronos topbar, '
+            'the mail UIs, the operational view-only apps, and '
+            'the extension points the rest of the codebase '
+            'reuses. The companion volumes are Vol 1 (Foundations '
+            'and Philosophy), Vol 3 (Time and Data), Vol 4 (Codex '
+            'and Documentation), Vol 5 (Operations and Extension).'
+            '\n\n'
+            'Status: outline + first chapter substantive; remaining '
+            'chapters are stubs awaiting expansion. The chapter '
+            'structure is stable.'
+        ),
+    )
+
+    upsert_section(m, 'foreword', 10, 'Foreword',
+        """Volume 2 walks the parts of Velour an operator actually clicks on.
+
+Volume 1 explained the meta-app idea — the Django project that contains apps that generate Django projects. This volume zooms in on what a logged-in operator sees at `/`. Most of Velour's surface is plain server-rendered HTML, no SPA, no client-side routing, no compile step. The unusual choices are in the topbar (a context processor that renders thirty-two world clocks on every page without JavaScript) and the terminal app (Channels + ASGI for two distinct WebSocket transports), and these are covered in their own chapters.
+
+Read Volume 1 first. Volume 2 assumes the meta-app idiom and the secret-file protocol.
+
+## How to read this volume
+
+Each chapter is one app or one cross-cutting concern. The chapter on the dashboard is also the chapter that establishes the look-and-feel rules every other UI follows. Read it first.
+
+The chapters on small operational apps (Logs / Services / Security / Sysinfo / Graphs) are bundled into one chapter — they share a pattern (view-only, no writes from the UI) and the differences between them are smaller than the similarities.
+
+The extension-points chapter at the end is the one to consult when adding a new card or a new context processor. It documents the conventions the rest of Velour follows so a new addition fits cleanly.
+
+## Status
+
+This volume currently contains:
+
+- A complete first chapter (the dashboard).
+- Outlined stubs for chapters 2 through 8.
+
+The chapter list is stable. Stubs include enough description to know what each chapter will cover when written.""",
+        sidenotes='Volume 2 was scoped at ~400pp in the original 5-volume plan.')
+
+    upsert_section(m, 'ch1-dashboard', 110,
+        'Chapter 1 — The dashboard and base.html',
+        """The dashboard at `/dashboard/` is the entry point most operators see first. It is a 4×4 grid of cards on a desktop browser, collapsing to single-column horizontal strips on a phone. Each card is a feature area; click any card to open it.
+
+This chapter explains how the grid is constructed, what the cards are, where the chronos topbar comes from, why there is no JavaScript on the page, and the conventions that follow from these choices.
+
+## The grid
+
+The grid is plain CSS:
+
+```css
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.6rem;
+  max-width: 1100px;
+  margin: 1rem auto;
+}
+@media (max-width: 700px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+No grid library. No layout JavaScript. The breakpoint at 700px is the only adaptation.
+
+The grid order matters. Cards that group conceptually live next to each other:
+
+| Row | Cards |
+|---:|---|
+| 1 | Web Terminal · App Factory · System Info · Security |
+| 2 | Logs · Services · Databases · Graphs |
+| 3 | Identity · Maintenance · Windows · Agricola |
+| 4 | Codex · — · — · — |
+
+Three cells in row 4 are reserved for whatever comes next. Velour grows by occupying one of those cells; when all sixteen are full, the next addition either replaces one (rare) or moves the grid to a 5×4 (also rare).
+
+## Cards as data
+
+The cards are not HTML. They are a Python list in `dashboard/cards.py`:
+
+```python
+CARDS = [
+    Card('Web Terminal',  'terminal:home',   icon='terminal'),
+    Card('App Factory',   'app_factory:home', icon='factory'),
+    Card('System Info',   'sysinfo:home',    icon='cpu'),
+    # ...
+]
+```
+
+Adding a card is editing the list. Removing a card is deleting from the list. Reordering is moving items. The template renders the grid by walking `CARDS` and emitting one `<a class="dashboard-card">` per item.
+
+The data-not-template approach has two payoffs: tests can assert the card list shape directly, and the same list is reused by the top menu without duplicating markup.
+
+## The base template
+
+Every page in Velour extends `base.html`. The base contains:
+
+- the `<head>` block (title, the static-CSS link, the static_v cache-busting suffix);
+- the topbar (the chronos context processor renders here — Chapter 4);
+- the body-class plug (each page sets `body_class` so per-page CSS can target);
+- a `{% block content %}` for the page body;
+- a footer with the build-time hash and a link to the Codex Quickstart.
+
+There is no JavaScript in `base.html` except a five-line dropdown polyfill loaded inline. The base is small enough to read in one screen.
+
+## The no-JavaScript-first principle
+
+Velour pages use plain HTML forms and full-page submits unless an interaction *requires* client-side behaviour. The exceptions, in order of how reluctantly they were introduced:
+
+1. The Web Terminal (xterm.js + Channels — no other path works).
+2. The Codex live-rebuild on section save (a 50-line fetch).
+3. The Identity ticking-mood pulse in the topbar (a 12-line setInterval).
+4. The dropdown polyfill in `base.html` (five lines, vanilla, inline).
+
+Everything else is server-rendered HTML. This is the rule Volume 2 enforces and the rest of this volume documents.
+
+## What follows
+
+Chapters 2 through 7 cover specific Web-layer apps. Chapter 8 documents the extension points: how to add a new dashboard card, a new context processor, a new template tag library — each in roughly the form a real PR would take.""",
+        sidenotes='The dashboard once had thirteen cards; the original plan was twenty. The smaller number turned out to be a feature.')
+
+    upsert_section(m, 'part-2', 200, 'Part II — App-by-app',
+        """Six chapters covering the specific Web-layer apps: Web Terminal, template conventions, the chronos topbar, the Mail family, the operational tools cluster, and the user-side of Codex.""")
+
+    sort = 210
+    for slug, title, summary in VOL2_CHAPTERS[1:7]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+When written, this chapter will follow the format established in Chapter 1: a one-paragraph framing, then the architectural choices spelled out as numbered observations, then the code patterns, then the cross-references to the other apps that depend on or extend this one. Approx. 25–40 pages.""",
+            sidenotes='Stub. To be expanded in a subsequent revision.')
+        sort += 10
+
+    upsert_section(m, 'part-3', 800, 'Part III — Extension',
+        """One chapter — Chapter 8 — documenting the extension points the rest of the codebase reuses.""")
+
+    slug, title, summary = VOL2_CHAPTERS[7]
+    upsert_section(m, slug, 810, title,
+        f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+When written, this chapter will document each extension point with: a code example showing the minimal addition, the convention any addition must follow, a list of existing extensions in the codebase that follow the convention, and a regression risk for each. Approx. 30–40 pages.""",
+        sidenotes='Stub. To be expanded in a subsequent revision.')
+
+    upsert_section(m, 'where-this-volume-sits', 950,
+        'Where this volume sits in the set',
+        """Volume 1 explained *what* Velour is. Volume 2 explains *what an operator sees*. Volume 3 covers the time-and-data subsystems that fill many of these views with content. Volume 4 covers Codex itself in depth. Volume 5 covers operations.
+
+A reader interested in extending Velour should read Volume 1 cover-to-cover, then read Chapters 1 and 8 of Volume 2 (the dashboard and the extension points), then dive into the volume covering the area they want to extend.""")
+
+
+# =====================================================================
+# Volume 3 — Time and Data
+# =====================================================================
+
+VOL3_CHAPTERS = [
+    ('ch1-chronos-deep',
+     'Chapter 1 — Chronos in depth',
+     'Everything in Volume 1\'s chronos chapter, expanded. The hour/'
+     'minute/second model. The 32 world-time chips. The deep-time '
+     'browse modes (day → month → year → century → millennium → '
+     '100Ky). The CSS min() trick for variable-precision intervals. '
+     'The chronos "tasks" model and the morning briefing.'),
+    ('ch2-holiday-traditions',
+     'Chapter 2 — Eleven holiday traditions',
+     'The eleven calendar systems chronos pulls holidays from: '
+     'Gregorian civic, Christian liturgical, Jewish, Islamic, Hindu, '
+     'Buddhist, Bahá\'í, Sikh, Zoroastrian, secular UN observances, '
+     'and the lab-personal calendar. Each is one calendar adapter '
+     'with documented ranges and edge cases.'),
+    ('ch3-astronomy',
+     'Chapter 3 — Skyfield, Meeus, and the JPL ephemeris',
+     'How chronos computes solstices, equinoxes, eclipses, and '
+     'planetary conjunctions via the skyfield library and the '
+     'JPL DE421 ephemeris file. The Meeus formulas in fallback '
+     'positions. Aspect detection thresholds. Multi-decade '
+     'precomputed ranges for performance.'),
+    ('ch4-deep-time',
+     'Chapter 4 — Deep-time UI design',
+     'The day/month/year/decade/century/millennium/100Ky '
+     'browsing chain. The shared CSS variable for time-step '
+     'precision. The visual bridge between scales. How holidays '
+     'and astronomical events render at each scale without '
+     'visual collapse.'),
+    ('ch5-databases',
+     'Chapter 5 — The Databases app',
+     'Phase 1 (the registry of known databases), Phase 2 (the '
+     'table browser with column types and row counts), Phase 3 '
+     '(the SQL shell with role gating). The connection-cache '
+     'discipline. Per-database read-only roles for safety.'),
+    ('ch6-graphs',
+     'Chapter 6 — Graphs and time-series',
+     'How the graphs app renders SensorReading and any other '
+     'time-keyed model into the same chart family Codex uses. '
+     'Backed by the same matplotlib-free chart code so PDFs '
+     'and live pages share visual conventions.'),
+    ('ch7-nodes',
+     'Chapter 7 — Nodes (the ESP fleet)',
+     'The Node and HardwareProfile models. The OTA firmware-'
+     'check protocol. The auto-discovery handshake. The '
+     'fleet status page. The carrying-case planner. '
+     'Cross-references to bodymap_firmware and bodymap_hud.'),
+    ('ch8-experiments',
+     'Chapter 8 — Experiments and SensorReading',
+     'How a long-running experiment is modelled as one '
+     'Experiment + many Node + many SensorReading rows. The '
+     'data-model trade-offs (tall table vs wide). The Phase 2 '
+     'expansion plan: experiment graphs, comparative dashboards, '
+     'cross-experiment statistics.'),
+    ('ch9-extension-time',
+     'Chapter 9 — Extension points: holidays, astro events, '
+     'data models',
+     'How to add a new holiday source. How to add a new '
+     'astronomical computation. How to add a new sensor '
+     'channel. The conventions that keep new additions from '
+     'breaking the morning briefing.'),
+]
+
+
+def seed_volume_3():
+    m = upsert_manual(
+        'velour-developer-guide-vol-3',
+        title='Velour Developer Guide, Volume 3',
+        subtitle='Time and Data',
+        format='complete',
+        author='Velour',
+        version='0.1 (work in progress)',
+        abstract=(
+            'Volume 3 of the five-volume Velour Developer Guide. '
+            'Covers chronos in depth (the eleven holiday '
+            'traditions, the JPL ephemeris, the deep-time '
+            'browsing chain), the databases app, the graphs '
+            'app, and the data side of nodes + experiments + '
+            'sensor readings. The companion volumes are Vol 1 '
+            '(Foundations), Vol 2 (Web Layer), Vol 4 (Codex), '
+            'Vol 5 (Operations).'
+            '\n\n'
+            'Status: outline + first chapter substantive; '
+            'remaining chapters are stubs awaiting expansion.'
+        ),
+    )
+
+    upsert_section(m, 'foreword', 10, 'Foreword',
+        """Volume 3 covers the parts of Velour that know about *when* and *what*. The chronos app handles when — wall time, calendar time, deep time, the eleven traditions of holidays the lab marks, and the JPL ephemeris of solar-system motion. The databases / graphs / nodes / experiments family handles what — registries, tables, time-series, sensor readings, and the long-running experimental contexts that connect them.
+
+These are small apps individually. Together they make Velour a system that knows the date in eight cultural calendars, the next planetary conjunction, the live load on the workstation, and the temperature in the aquarium.
+
+Read Volumes 1 and 2 first. Volume 3 assumes the meta-app idiom and the dashboard layout. Chapter 1 (chronos in depth) is the prerequisite for the rest of the volume.""",
+        sidenotes='Volume 3 was scoped at ~400pp in the original 5-volume plan.')
+
+    upsert_section(m, 'ch1-chronos-deep', 110,
+        'Chapter 1 — Chronos in depth',
+        """The chronos app is the largest single subsystem in Velour. It handles every time-related concern: wall clocks, world time chips for thirty-two cities, calendar grids for eleven cultural traditions, astronomical events from the JPL ephemeris, deep-time browsing from one day all the way out to one hundred thousand years, the morning briefing, the task-and-event model, and the topbar context processor every other page consumes.
+
+Volume 1 introduced chronos at the level of "there is a clock in the topbar." This chapter explains how the clock is computed, why it never spins the laptop fan, how the world chips arrange themselves without JavaScript, how the holiday traditions are layered without colliding, and how the deep-time browse modes share a single coordinate system from minutes to millennia.
+
+## The model
+
+The chronos data model is intentionally small. Three tables carry most of the weight:
+
+```python
+class CalendarEvent(models.Model):
+    when_utc   = models.DateTimeField(db_index=True)
+    label      = models.CharField(max_length=200)
+    tradition  = models.CharField(max_length=32)
+    kind       = models.CharField(max_length=32)
+    metadata   = models.JSONField(default=dict)
+
+class WorldClock(models.Model):
+    city       = models.CharField(max_length=80)
+    timezone   = models.CharField(max_length=64)
+    sort_order = models.PositiveSmallIntegerField()
+    visible    = models.BooleanField(default=True)
+
+class Task(models.Model):
+    title      = models.CharField(max_length=200)
+    notes      = models.TextField(blank=True)
+    source_app = models.CharField(max_length=64)
+    source_url = models.CharField(max_length=400)
+    due_at     = models.DateTimeField(null=True, blank=True)
+    priority   = models.CharField(max_length=8)
+    status     = models.CharField(max_length=16)
+```
+
+Holidays, eclipses, conjunctions, equinoxes, and lab-personal events all share the `CalendarEvent` shape. The `tradition` field discriminates them at query time. This denormalization is intentional — it lets the calendar grid render every kind of event with one query.
+
+## The 100Ky chain
+
+The deep-time browse modes form a chain: day → week → month → year → decade → century → millennium → 10Ky → 100Ky. Each mode is a single Django view that accepts a centre date and a span. The same `CalendarEvent` query returns events within the span, with the renderer choosing how to display them based on density.
+
+At 100Ky scale, the calendar shows the last interglacial, the Holocene, the predicted next glacial cycle, and the major asteroid impact dates as far back as Chicxulub. The same CalendarEvent rows that store next Tuesday's lab meeting also store the K-Pg boundary. The kind field distinguishes them.
+
+## The topbar context processor
+
+The chronos topbar lives in `chronos/context_processors.py`:
+
+```python
+def chronos_topbar(request):
+    \"\"\"Inject clock + world-chips + next-event into every page.\"\"\"
+    now = timezone.now()
+    return {
+        'chronos_now':        now,
+        'chronos_chips':      _world_clocks_for(now),
+        'chronos_next_event': _next_calendar_event(now),
+    }
+```
+
+`_world_clocks_for(now)` is cached per-minute (per-second would be cheap but unnecessary; the chips show HH:MM not HH:MM:SS). `_next_calendar_event(now)` is cached per-five-minutes — the cache invalidates when CalendarEvent is saved.
+
+## What follows
+
+Chapter 2 covers each of the eleven holiday traditions in turn. Chapter 3 is the astronomical layer (skyfield + JPL ephemeris). Chapter 4 covers the deep-time UI in design detail. Chapters 5–8 are the data-side apps. Chapter 9 documents the extension points.""",
+        sidenotes='The "chronos doesn\'t spin the fan" claim is load-bearing: the topbar fires on every page render, so any per-second computation would be visible in `top` immediately.')
+
+    upsert_section(m, 'part-2', 200, 'Part II — Time',
+        """Three chapters fleshing out chronos: the eleven holiday traditions, the astronomical layer, and the deep-time UI.""")
+
+    sort = 210
+    for slug, title, summary in VOL3_CHAPTERS[1:4]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+When written, this chapter will follow the format established in Chapter 1: framing, architectural choices, code patterns, cross-references. Approx. 30–50 pages.""",
+            sidenotes='Stub. To be expanded in a subsequent revision.')
+        sort += 10
+
+    upsert_section(m, 'part-3', 500, 'Part III — Data',
+        """Four chapters covering the data-side apps: databases, graphs, nodes, and experiments.""")
+
+    sort = 510
+    for slug, title, summary in VOL3_CHAPTERS[4:8]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+When written, approx. 25–40 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+    upsert_section(m, 'part-4', 900, 'Part IV — Extension',
+        """One chapter documenting how to add new holiday sources, astronomical computations, and data models.""")
+
+    slug, title, summary = VOL3_CHAPTERS[8]
+    upsert_section(m, slug, 910, title,
+        f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 25 pages.""",
+        sidenotes='Stub.')
+
+
+# =====================================================================
+# Volume 4 — Codex and Documentation
+# =====================================================================
+
+VOL4_CHAPTERS = [
+    ('ch1-philosophy',
+     'Chapter 1 — Codex philosophy and the Tufte influence',
+     'Why Velour ships its own documentation system instead of '
+     'reusing Sphinx or MkDocs. The Tufte design principles applied '
+     '(high data-ink ratio, minimal chrome, sidenotes over footnotes, '
+     'small multiples). The decision to render PDFs from markdown '
+     'rather than HTML to PDF.'),
+    ('ch2-markdown-subset',
+     'Chapter 2 — The Codex markdown subset',
+     'Reference for every block type Codex understands. Headings, '
+     'paragraphs, lists, code blocks, tables (Tufte minimal-rule and '
+     'bordered), definition lists, callouts, slope graphs, small '
+     'multiples, sparklines, sidenotes, and the :::chart fence.'),
+    ('ch3-renderer',
+     'Chapter 3 — The renderer (codex/rendering/tufte.py)',
+     'A walkthrough of the rendering pipeline: markdown parse, AST '
+     'walk, fpdf2 page composition, sidenote anchor placement with '
+     'collision avoidance, page-break logic, table layout. Per-block '
+     'rendering classes and how to add a new one.'),
+    ('ch4-sparklines-charts',
+     'Chapter 4 — Sparklines and the chart library',
+     'Pure-fpdf2 vector drawing of sparklines (line, area, dot, '
+     'winloss). The seven chart kinds (bar, line, bullet, scatter, '
+     'histogram, column, sparkstrip). Colour palette discipline '
+     '(Dark2, colourblind-safe). The :::chart fence syntax.'),
+    ('ch5-diagrams-kroki',
+     'Chapter 5 — Diagrams via Kroki',
+     'The 21 figure kinds Codex knows about. The Kroki round-trip '
+     'and the local cache. Mermaid, PlantUML, Graphviz, BPMN, etc. '
+     'How to add a new diagram kind. The fall-back render when '
+     'Kroki is unreachable.'),
+    ('ch6-introspection',
+     'Chapter 6 — codex/introspection.py and per-app reference',
+     'How Codex generates reference appendices by walking '
+     'django.apps.apps.get_app_configs(). Model field tables, URL '
+     'route tables, management command listings, settings entries. '
+     'The pattern that lets every app contribute a reference '
+     'appendix without duplicating boilerplate.'),
+    ('ch7-tutorials',
+     'Chapter 7 — Writing tutorials: best practices per block',
+     'A style guide. When to use a callout vs a sidenote. When to '
+     'use a slope graph vs a line chart. How to structure a chapter '
+     'so it survives the introspection pipeline. The "show then '
+     'tell" pattern that makes chapters readable in print and '
+     'searchable in PDF.'),
+    ('ch8-extension-points',
+     'Chapter 8 — Extension points: block types, figure kinds, '
+     'chart types',
+     'How to add a new block type (with a worked example). How to '
+     'add a new figure kind. How to add a new chart type with the '
+     'same fpdf2 vector pattern as the sparkline family.'),
+    ('ch9-future',
+     'Chapter 9 — Future: weasyprint, ET Book Italic Display, more',
+     'The deferred work: a weasyprint backend for HTML-to-PDF, '
+     'the ET Book Italic Display family for callouts, additional '
+     'chart libraries, the periodic-report aggregation pattern '
+     '(see Vol 1 Ch 14 and the codex_app_reports command), and '
+     'the planned editor-side integration.'),
+]
+
+
+def seed_volume_4():
+    m = upsert_manual(
+        'velour-developer-guide-vol-4',
+        title='Velour Developer Guide, Volume 4',
+        subtitle='Codex and Documentation',
+        format='complete',
+        author='Velour',
+        version='0.1 (work in progress)',
+        abstract=(
+            'Volume 4 of the five-volume Velour Developer Guide. '
+            'Covers Codex itself: the markdown subset, the '
+            'renderer, sparklines, charts, diagrams via Kroki, '
+            'the introspection layer, the tutorial style guide, '
+            'and the planned extensions. Companion volumes: Vol 1 '
+            '(Foundations), Vol 2 (Web Layer), Vol 3 (Time and '
+            'Data), Vol 5 (Operations).'
+            '\n\n'
+            'Status: outline + first chapter substantive; '
+            'remaining chapters are stubs awaiting expansion.'
+        ),
+    )
+
+    upsert_section(m, 'foreword', 10, 'Foreword',
+        """Codex is the system you are reading right now. Volume 4 documents it as a system: the philosophy, the markdown subset, the renderer pipeline, the chart library, the diagram round-trip, the per-app introspection, the writing conventions, and the extension points.
+
+This is the most self-referential volume in the set. The conventions documented in this volume were used to write this volume. Reading it carefully gives a sense of what's possible inside the same machinery; writing more of it requires becoming fluent in those same conventions.
+
+Read Volume 1 first. Volume 4 references its concepts (the meta-app idea, the secret-file protocol) when relevant. The other companion volumes (2, 3, 5) are independent of this one — Codex is orthogonal to the rest of the codebase.
+
+## How to read this volume
+
+Chapter 1 is the philosophy. Chapter 2 is the reference for the markdown subset and is the chapter you'll re-read most often. Chapters 3, 4, and 5 are the renderer internals. Chapter 6 is the introspection layer that auto-generates reference appendices. Chapter 7 is the style guide. Chapters 8 and 9 are about extending Codex.
+
+If you only want to *write* documentation, read Chapters 2 and 7. If you want to *extend* Codex, read all of it.""",
+        sidenotes='Volume 4 was scoped at ~500pp — the largest in the set, because Codex contains many small-but-substantial subsystems.')
+
+    upsert_section(m, 'ch1-philosophy', 110,
+        'Chapter 1 — Codex philosophy and the Tufte influence',
+        """Codex exists because no off-the-shelf documentation system fits Velour.
+
+Sphinx is the obvious default — it's the standard for Python projects, it's well-maintained, it has a large ecosystem of themes and extensions. Velour does not use it. The reasons are specific.
+
+## What Sphinx is good at
+
+Sphinx is good at: indexing a large code-base by docstring, producing consistent cross-referenced HTML, producing cross-referenced PDF via LaTeX, supporting an ecosystem of plugins for diagrams and equations, and shipping with reasonable defaults that look the same as every other Python project's documentation.
+
+The first three of these are real strengths. The last is, in Velour's case, a problem.
+
+## What Velour wants instead
+
+Velour's documentation is a *teaching* artifact, not a reference dump. The Quickstart is meant to be read by a new contributor in five minutes; the Working Tour is meant to be read in an evening; the Complete Reference is meant to be browsed; the Developer Guide volumes are meant to be read like a book series. Each of these has different design needs. Sphinx renders all four into the same shape.
+
+Velour's PDFs need to look like Tufte's books. Specifically:
+
+- The text column is narrow. Sidenotes go in the right margin, anchored to the line that triggered them, never in footers.
+- Charts and tables are inline with prose, not separated into figure environments. Captions, when used at all, are short and italicised.
+- Tables follow the minimal-rule convention: single horizontal lines above and below the header, no vertical rules, no zebra-striping, no borders. The bordered variant is reserved for tables where the cells are visually heterogeneous.
+- Line spacing is generous. The body font is ET Book — a free derivative of the typeface Tufte commissioned for his own books.
+- The colour palette is Dark2 (a colourblind-safe ColorBrewer set), used sparingly. Most pages are black ink on cream paper.
+
+These choices compose. Each individually is small; together they make a reading experience distinct from any of the off-the-shelf documentation tools.
+
+## Why render PDFs from Markdown directly
+
+Sphinx renders to LaTeX, and LaTeX renders to PDF. This is the standard pipeline. Codex skips both steps. It uses fpdf2 to compose pages directly from a parsed Markdown AST.
+
+The reason is control. LaTeX's typesetting is excellent in the canonical case but every Tufte-style customization (margin sidenotes, the narrow text column, the minimal-rule table style) requires either a non-trivial LaTeX package or hand-written `\\write18`-style hacks. Codex's renderer is ~3000 lines of Python that handles every block type Velour cares about exactly the way it should look.
+
+The cost: writers can't drop into raw LaTeX for one-off equations or unusual layouts. The benefit: every page in every Codex manual looks the same, and every block type the renderer supports is documented in Chapter 2 of this volume.
+
+## What follows
+
+Chapter 2 is the reference for every block type. Chapter 3 walks the renderer. Chapter 4 covers sparklines and charts. Chapter 5 covers diagrams via Kroki. Chapter 6 covers the introspection layer. Chapter 7 is the style guide. Chapters 8 and 9 are about extension and the future.""",
+        sidenotes='Tufte\'s four books — *Visual Display*, *Envisioning*, *Visual Explanations*, *Beautiful Evidence* — are the design canon Codex is trying to honour. They are also the books most likely to look hand-set even on a computer screen.')
+
+    upsert_section(m, 'part-2', 200, 'Part II — Reference',
+        """Two chapters covering everything you need to write documentation that Codex can render: the markdown subset (Chapter 2) and the renderer's internal pipeline (Chapter 3).""")
+
+    sort = 210
+    for slug, title, summary in VOL4_CHAPTERS[1:3]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 50–80 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+    upsert_section(m, 'part-3', 400, 'Part III — Visualisation',
+        """Two chapters covering the visualisation half of Codex: the chart library (Chapter 4) and diagrams via Kroki (Chapter 5).""")
+
+    sort = 410
+    for slug, title, summary in VOL4_CHAPTERS[3:5]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 40–60 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+    upsert_section(m, 'part-4', 600, 'Part IV — Generation',
+        """Two chapters: the introspection layer that generates reference appendices (Chapter 6) and the writing style guide (Chapter 7).""")
+
+    sort = 610
+    for slug, title, summary in VOL4_CHAPTERS[5:7]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 30–50 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+    upsert_section(m, 'part-5', 800, 'Part V — Extension and future',
+        """Two chapters on extending Codex (Chapter 8) and the deferred work (Chapter 9).""")
+
+    sort = 810
+    for slug, title, summary in VOL4_CHAPTERS[7:9]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 25–40 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+
+# =====================================================================
+# Volume 5 — Operations and Extension
+# =====================================================================
+
+VOL5_CHAPTERS = [
+    ('ch1-production',
+     'Chapter 1 — Production deployment in detail',
+     'Bringing up Velour on a fresh server end-to-end: provisioning, '
+     'user creation, Python install, supervisor + nginx + gunicorn '
+     'wiring, secret files, first-run migrations, the smoke-test '
+     'check-list. Per-section diagrams of the network flow.'),
+    ('ch2-hotswap',
+     'Chapter 2 — The hot-swap workflow',
+     'How `manage.py generate_deploy --hotswap` produces a deploy '
+     'tarball that can replace a running install without downtime. '
+     'The supervisor reload sequence. Rollback procedure. The '
+     'failure modes and their recoveries.'),
+    ('ch3-monitoring',
+     'Chapter 3 — Monitoring with hosts + cross-fleet polling',
+     'The hosts app: registry of remote Velour instances, periodic '
+     'health-check polling, the cross-fleet status page. The '
+     'monitoring cadence trade-offs. Alert thresholds and the '
+     'codex_app_reports daily snapshot.'),
+    ('ch4-mail-relay',
+     'Chapter 4 — Mail relay and external integration',
+     'The mail relay protocol in operations terms. Token rotation. '
+     'DNS records (SPF, DKIM, DMARC). Bounce handling. Migration '
+     'paths from a legacy mail server.'),
+    ('ch5-security-audit',
+     'Chapter 5 — Security audit philosophy',
+     'What security/ checks for and what it deliberately does not. '
+     'The audit-table model. Daily vs ad-hoc audits. Threat model: '
+     'what Velour assumes about its operator, its network, its '
+     'host. The gap between the audit and a real penetration test.'),
+    ('ch6-backups',
+     'Chapter 6 — Maintenance and backup strategy',
+     'The backups app: per-class auto-prune windows (daily=7, '
+     'weekly=4, monthly=12), the secret-file inclusion list, '
+     'restore procedures, off-host replication patterns. Cron '
+     'integration via identity_cron.'),
+    ('ch7-tokens',
+     'Chapter 7 — The token rotation flow',
+     'Health token, mail relay token, provisioning token, LLM '
+     'API keys. The chmod 600 secret-file convention. Rotation '
+     'procedure for each token. The risk of bypassing the '
+     'convention.'),
+    ('ch8-performance',
+     'Chapter 8 — Performance: when to scale, what to measure',
+     'Velour\'s performance profile in practice. Where the bottle-'
+     'necks live (chronos cache miss, Codex render, three.js '
+     'scene serialization). Profiling tools. When to introduce '
+     'Postgres / Redis / a CDN. When not to.'),
+    ('ch9-writing-an-app',
+     'Chapter 9 — Writing your own Velour app from scratch',
+     'A worked example: take an idea, scaffold an app, wire it '
+     'into INSTALLED_APPS, add a model, add a view, add a URL, '
+     'add a dashboard card, write a Codex section. End-to-end '
+     'in roughly 50 minutes.'),
+    ('ch10-recipes',
+     'Chapter 10 — Recipes: 30 practical examples',
+     'Thirty practical patterns for common tasks: scheduling a '
+     'cron via identity_cron, adding an LLM augmentation hook, '
+     'producing a periodic Codex report, extending Aether with a '
+     'new entity script, generating a deploy artifact for a child '
+     'project, etc. Each recipe is a 1-2 page worked example.'),
+    ('ch11-roadmap',
+     'Chapter 11 — Roadmap: the items currently in MEMORY.md backlog',
+     'A snapshot of the long-term roadmap synthesised from the '
+     'memory backlog: which items are deferred indefinitely, which '
+     'are next-up, which depend on others, and the rough order of '
+     'priority. Updated each time the guide is re-seeded.'),
+]
+
+
+def seed_volume_5():
+    m = upsert_manual(
+        'velour-developer-guide-vol-5',
+        title='Velour Developer Guide, Volume 5',
+        subtitle='Operations and Extension',
+        format='complete',
+        author='Velour',
+        version='0.1 (work in progress)',
+        abstract=(
+            'Volume 5 of the five-volume Velour Developer Guide. '
+            'Covers production operations (deploy, hot-swap, '
+            'monitoring, mail relay, security audit, backups, '
+            'token rotation, performance) and extension (writing '
+            'your own app, recipes, the long-term roadmap). '
+            'Companion volumes: Vol 1 (Foundations), Vol 2 (Web '
+            'Layer), Vol 3 (Time and Data), Vol 4 (Codex).'
+            '\n\n'
+            'Status: outline + first chapter substantive; '
+            'remaining chapters are stubs awaiting expansion.'
+        ),
+    )
+
+    upsert_section(m, 'foreword', 10, 'Foreword',
+        """Volume 5 is for the operator. The previous four volumes covered what Velour *is* (Vol 1), what it shows you (Vol 2), what it knows about (Vol 3), and how it documents itself (Vol 4). This volume is about how to *run* it.
+
+The first eight chapters cover production operations: deployment, hot-swap, monitoring, mail relay, security audit, backups, token rotation, and performance. The last three cover extension: writing your own Velour app, a catalogue of recipes for common tasks, and the current long-term roadmap synthesised from the memory backlog.
+
+Read this volume after Volume 1 — the meta-app idiom and the secret-file protocol are prerequisites for everything in here. The other volumes (2, 3, 4) are useful but not required.
+
+## How to read this volume
+
+Chapters 1 and 2 (deployment and hot-swap) are best read together; they describe two paths through the same generate_deploy machinery. Chapters 3 through 8 are independent; read whichever applies to the operational concern in front of you.
+
+Chapters 9 and 10 are the extension chapters and are the ones to read when *adding* something to Velour. Chapter 11 is the roadmap and is the one to consult to know what's coming next.""",
+        sidenotes='Volume 5 was scoped at ~400pp.')
+
+    upsert_section(m, 'ch1-production', 110,
+        'Chapter 1 — Production deployment in detail',
+        """Volume 1's deploy chapter explained the *idea* of `generate_deploy` — that it's a Django management command which renders templates for nginx, supervisor, gunicorn, and a setup script, parameterised by a target user and a target host. This chapter is the operations side: how to actually use those generated artifacts to bring Velour up on a fresh server, and what to check when the bring-up fails.
+
+## The fresh-host check-list
+
+The shortest path from a bare Linux host to a running Velour, in order:
+
+1. **Provision the user.** `useradd -m -s /bin/bash velour`. The user owns the project tree and runs gunicorn. Do not run gunicorn as root.
+2. **Install Python.** Whatever Python version Velour was last tested against (currently 3.12); a venv inside the project tree avoids touching system Python.
+3. **Install the runtime supervisor.** Either system-wide supervisord (Debian: `apt install supervisor`) or the user-mode WSL pattern documented in `deploy/supervisord-wsl.ini`.
+4. **Install nginx** and the systemd unit it ships with. Disable the default vhost.
+5. **Clone the repo** as the velour user, into `/var/www/webapps/velour/velour-dev`.
+6. **Make the venv:** `cd /var/www/webapps/velour/velour-dev && python3.12 -m venv venv`.
+7. **Install the deps:** `venv/bin/pip install -r requirements.txt`.
+8. **Generate the deploy artifacts:** `venv/bin/python manage.py generate_deploy --user velour --host velour.example.com`. This writes nginx.conf, supervisor.conf, gunicorn.conf.py, setup.sh, and adminsetup.sh into `deploy/`.
+9. **Run setup.sh** as root. It creates the secret-file directory, writes initial chmod-600 secrets, sets up nginx and supervisor symlinks, and reloads both.
+10. **Run adminsetup.sh** as the velour user. It runs migrations, creates a superuser, and seeds the default Codex manuals.
+11. **Smoke-test:** `curl -I https://velour.example.com/dashboard/`. Expect a 302 to the login page.
+
+If every step succeeds, total wall time is roughly fifteen minutes for an experienced operator on familiar infrastructure.
+
+## What goes wrong
+
+The failure modes, in approximate order of frequency:
+
+- **nginx returns 502** — gunicorn isn't reachable on the unix socket. Check supervisor status; check the socket path matches what nginx is configured to proxy to.
+- **The static files don't load** — `collectstatic` wasn't run, or `STATIC_ROOT` is misconfigured, or the nginx alias doesn't match. The Velour convention is `STATIC_ROOT = BASE_DIR / 'staticfiles'` and the nginx alias points at exactly that.
+- **The first request hangs** — sqlite write contention from the first migration not having finished, or a missing secret file the app tries to read at import time.
+- **The next-day cron doesn't fire** — the operator forgot to install the one-line crontab entry. There is exactly one entry: `* * * * * /path/to/venv/bin/python /path/to/manage.py identity_cron`. The dispatcher decides what to run.
+
+Each of these has a recovery procedure documented in the per-section paragraphs that follow this chapter's stub.
+
+## What follows
+
+Chapter 2 covers the hot-swap workflow — replacing a running install without downtime. Chapter 3 covers monitoring. Chapters 4 through 8 cover specific operational concerns. Chapter 9 covers writing a new Velour app. Chapter 10 is the recipes catalogue. Chapter 11 is the roadmap.""",
+        sidenotes='The fifteen-minute fresh-host bring-up assumes the operator has done it before. First time, budget an afternoon and expect to learn at least one thing about the infrastructure that wasn\'t in any documentation.')
+
+    upsert_section(m, 'part-2', 200, 'Part II — Operations',
+        """Seven chapters covering specific operational concerns: hot-swap, monitoring, mail relay, security audit, backups, token rotation, and performance.""")
+
+    sort = 210
+    for slug, title, summary in VOL5_CHAPTERS[1:8]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 25–40 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+    upsert_section(m, 'part-3', 800, 'Part III — Extension',
+        """Three chapters on extending Velour: writing your own app (Chapter 9), a recipes catalogue (Chapter 10), and the current roadmap (Chapter 11).""")
+
+    sort = 810
+    for slug, title, summary in VOL5_CHAPTERS[8:11]:
+        upsert_section(m, slug, sort, title,
+            f"""*This chapter is a stub. Outline:*
+
+{summary}
+
+Approx. 30–50 pages.""",
+            sidenotes='Stub.')
+        sort += 10
+
+
+# =====================================================================
+# Volume binding — "The Velour Developer Guide"
+# =====================================================================
+
+def seed_developer_guide_volume():
+    """Bind all five volumes into one Codex Volume so a reader sees
+    them as a coherent set rather than five orphan slugs in the
+    manual list."""
+    from codex.models import Volume, Manual, VolumeManual
+
+    v, _ = Volume.objects.get_or_create(
+        slug='the-velour-developer-guide',
+        defaults={
+            'title':    'The Velour Developer Guide',
+            'subtitle': 'A five-volume reference for the meta-app',
+            'author':   'Velour',
+            'abstract': (
+                'Five volumes: Foundations and Philosophy (Vol 1), '
+                'The Web Layer (Vol 2), Time and Data (Vol 3), '
+                'Codex and Documentation (Vol 4), Operations and '
+                'Extension (Vol 5). Modelled on the Unix V '
+                'Programmer\'s Manual: dense, opinionated, '
+                'cross-referenced. Volume 1 is substantive; '
+                'Volumes 2-5 are working drafts with first '
+                'chapters written and remaining chapters '
+                'outlined.'),
+        },
+    )
+    v.title = 'The Velour Developer Guide'
+    v.subtitle = 'A five-volume reference for the meta-app'
+    v.save()
+
+    VolumeManual.objects.filter(volume=v).delete()
+    for i in range(1, 6):
+        slug = f'velour-developer-guide-vol-{i}'
+        m = Manual.objects.filter(slug=slug).first()
+        if m:
+            VolumeManual.objects.create(volume=v, manual=m, sort_order=i)
+    return v
+
+
 SEEDERS = {
     1: seed_volume_1,
+    2: seed_volume_2,
+    3: seed_volume_3,
+    4: seed_volume_4,
+    5: seed_volume_5,
 }
 
 
@@ -2405,3 +3254,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f'  ✓ {slug} ({m.sections.count()} sections)'
             ))
+        vol = seed_developer_guide_volume()
+        self.stdout.write(self.style.SUCCESS(
+            f'  ✓ volume "{vol.title}" → '
+            f'/codex/volumes/{vol.slug}/'
+        ))
