@@ -189,6 +189,9 @@ class _Visitor:
             '"""Auto-translated from PHP source by datalift php_ast_lifter."""',
             'from __future__ import annotations',
             'import sys, os, math, json, re, hashlib, base64, urllib.parse, html, time, datetime, functools',
+            '# PHP-semantics shims: php_isset, php_empty, php_eq, php_count,',
+            '# PhpArray, ob_start/ob_get_clean, the superglobals (_GET/_POST/...).',
+            'from datalift.php_runtime import *  # noqa: F401, F403',
             '',
         ]
         for child in node.children:
@@ -389,6 +392,89 @@ class _Visitor:
     def visit_continue_statement(self, node, indent: int) -> str:
         return '    ' * indent + 'continue'
 
+    def visit_unset_statement(self, node, indent: int) -> str:
+        # `unset($x, $y)` — Python's nearest analogue is `del x; del y`.
+        targets = []
+        for c in node.children:
+            if c.type not in ('unset', '(', ')', ',', ';'):
+                targets.append(self.visit_expr(c))
+        if not targets:
+            return ''
+        pad = '    ' * indent
+        return '\n'.join(f'{pad}{t} = None  # PHP unset()' for t in targets)
+
+    def visit_exit_statement(self, node, indent: int) -> str:
+        # `exit;`, `exit(1);`, `die("msg");`
+        for c in node.children:
+            if c.type == 'parenthesized_expression':
+                # extract inner
+                for cc in c.children:
+                    if cc.type not in ('(', ')'):
+                        return '    ' * indent + f'sys.exit({self.visit_expr(cc)})'
+                return '    ' * indent + 'sys.exit()'
+        return '    ' * indent + 'sys.exit()'
+
+    def visit_empty_statement(self, node, indent: int) -> str:
+        # Bare `;` — no-op in Python (we just emit nothing).
+        return ''
+
+    def visit_global_declaration(self, node, indent: int) -> str:
+        # `global $foo, $bar;` → `global foo, bar`
+        names = []
+        for c in node.children:
+            if c.type == 'variable_name':
+                names.append(_safe_name(self.text(c).lstrip('$')))
+        if not names:
+            return ''
+        return '    ' * indent + f'global {", ".join(names)}'
+
+    def visit_function_static_declaration(self, node, indent: int) -> str:
+        # `static $foo = 0;` inside a function — Python has no
+        # function-scoped statics. Emit a porter marker plus a
+        # nonlocal-style hint so the file still compiles.
+        for c in node.children:
+            if c.type == 'static_variable_declaration':
+                name = ''
+                default = 'None'
+                got_eq = False
+                for cc in c.children:
+                    if cc.type == 'variable_name':
+                        name = self.text(cc).lstrip('$')
+                    elif cc.type == '=':
+                        got_eq = True
+                    elif got_eq:
+                        default = self.visit_expr(cc)
+                if name:
+                    pad = '    ' * indent
+                    return (f'{pad}{_safe_name(name)} = {default}'
+                            f'  # PORTER: PHP static — promote to '
+                            f'class attr or default-arg trick')
+        return ''
+
+    def visit_text_interpolation(self, node, indent: int) -> str:
+        # Inline HTML/text between `?>...<?php`. Emit a porter marker
+        # with the original snippet so the porter sees it.
+        snippet = self.text(node).strip()[:80].replace('\n', ' ')
+        if not snippet:
+            return ''
+        return '    ' * indent + f'# PORTER: inline HTML/text: {snippet!r}'
+
+    def visit_use_declaration(self, node, indent: int) -> str:
+        # `use TraitName;` inside a class. Python uses multiple
+        # inheritance instead of traits. Porter marker.
+        return '    ' * indent + f'# PORTER: trait use — {self.text(node)}'
+
+    def visit_named_label_statement(self, node, indent: int) -> str:
+        return '    ' * indent + f'# PORTER: PHP label — {self.text(node)}'
+
+    def visit_goto_statement(self, node, indent: int) -> str:
+        return '    ' * indent + f'# PORTER: PHP goto — {self.text(node)}'
+
+    def visit_declare_statement(self, node, indent: int) -> str:
+        # `declare(strict_types=1);` — Python is always strict-typed
+        # in the way PHP means here; no-op.
+        return ''
+
     def visit_if_statement(self, node, indent: int) -> str:
         cond_node = node.child_by_field_name('condition')
         body_node = node.child_by_field_name('body')
@@ -396,6 +482,10 @@ class _Visitor:
         # Strip outer parens (PHP `if ($x)` always has them).
         if cond.startswith('(') and cond.endswith(')'):
             cond = cond[1:-1].strip()
+        # PHP allows assignment-in-condition (`if ($x = expr())`).
+        # Convert to Python's walrus operator `:=` so the file
+        # compiles AND captures the binding.
+        cond = self._maybe_walrus(cond)
         body_py = self.visit(body_node, indent + 1) if body_node else \
                    '    ' * (indent + 1) + 'pass'
         pad = '    ' * indent
@@ -410,6 +500,7 @@ class _Visitor:
                     econd = econd[1:-1].strip()
                 ebody = self.visit(eb, indent + 1) if eb else \
                          '    ' * (indent + 1) + 'pass'
+                econd = self._maybe_walrus(econd)
                 out += f'\n{pad}elif {econd}:\n{ebody}'
             elif c.type == 'else_clause':
                 eb = c.child_by_field_name('body')
@@ -430,9 +521,24 @@ class _Visitor:
         cond = self.visit_expr(cond_node) if cond_node else 'True'
         if cond.startswith('(') and cond.endswith(')'):
             cond = cond[1:-1].strip()
+        cond = self._maybe_walrus(cond)
         body_py = self.visit(body_node, indent + 1) if body_node else \
                    '    ' * (indent + 1) + 'pass'
         return f'{"    " * indent}while {cond}:\n{body_py}'
+
+    def _maybe_walrus(self, cond: str) -> str:
+        """Convert `var = expr` (PHP assignment-in-condition) into
+        Python walrus form `(var := expr)`. Recognises three shapes:
+        bare `var = expr`, `(var = expr) <op> rhs`, and a leading
+        `not var = expr`."""
+        s = cond.strip()
+        if ':=' in s or '==' in s.replace('===', '') or '!=' in s.replace('!==', ''):
+            return cond
+        m = re.match(r'^\(?\s*(?:not\s+)?(\w+)\s*=\s*(?!=)(.+?)\)?$', s)
+        if m and '=' not in m.group(2):
+            prefix = 'not ' if s.lstrip('(').strip().startswith('not ') else ''
+            return f'{prefix}({m.group(1)} := {m.group(2).strip()})'
+        return cond
 
     def visit_do_statement(self, node, indent: int) -> str:
         # PHP `do { } while (cond);` → `while True: ... if not cond: break`
@@ -669,16 +775,55 @@ class _Visitor:
         return 'None'
 
     def expr_string(self, node) -> str:
-        # tree-sitter-php splits a string into `'`/`"` + content + `'`/`"`.
-        return self.text(node)
+        return self._render_string(node)
 
     def expr_encapsed_string(self, node) -> str:
-        # Double-quoted PHP string with `$var` interpolation. For now,
-        # emit it as-is (Python won't interpolate but compiles).
-        return self.text(node)
+        # Double-quoted PHP string with `$var` interpolation. Convert
+        # to a Python f-string by walking the children: literal pieces
+        # stay raw, `variable_name` children become `{var}`. Falls
+        # back to raw text if the structure is unfamiliar.
+        try:
+            parts = []
+            has_interpolation = False
+            for c in node.children:
+                if c.type in ('"', "'"):
+                    continue
+                if c.type == 'variable_name':
+                    parts.append('{' + _safe_name(self.text(c).lstrip('$')) + '}')
+                    has_interpolation = True
+                elif c.type == 'string_value':
+                    parts.append(self.text(c))
+                else:
+                    return self._render_string(node)
+            body = ''.join(parts)
+            return ('f"' + body.replace('"', '\\"') + '"'
+                    if has_interpolation else
+                    '"' + body.replace('"', '\\"') + '"')
+        except Exception:
+            return self._render_string(node)
 
     def expr_string_literal(self, node) -> str:
-        return self.text(node)
+        return self._render_string(node)
+
+    def _render_string(self, node) -> str:
+        """Emit a Python string literal that mirrors a PHP string.
+
+        PHP single- and double-quoted strings can contain literal
+        newlines; Python single-line quotes can't. Multi-line strings
+        get triple-quoted form. Strings carrying `\\u`/`\\x` escape
+        sequences in single quotes get a leading `r` prefix (PHP
+        doesn't interpret those; Python would and crash on truncated
+        forms)."""
+        text = self.text(node)
+        if '\n' in text and len(text) >= 2:
+            quote = text[0]
+            if quote in ('"', "'"):
+                inner = text[1:-1] if text.endswith(quote) else text[1:]
+                inner = inner.replace("'''", r"\'\'\'")
+                return "'''" + inner + "'''"
+        if text.startswith("'") and ('\\u' in text or '\\x' in text):
+            return 'r' + text
+        return text
 
     def expr_binary_expression(self, node) -> str:
         left = node.child_by_field_name('left')
@@ -795,39 +940,65 @@ class _Visitor:
         a = self._render_arguments(args)
         return f'({o}.{n}({a}) if {o} is not None else None)'
 
+    def _scoped_parts(self, node):
+        """Pull out the scope, name, and arguments from any
+        scoped-access node. tree-sitter-php often doesn't tag these
+        children with field names, so we iterate by position."""
+        scope_node = None
+        name_node = None
+        args_node = None
+        for c in node.children:
+            if c.type == '::':
+                continue
+            if c.type == 'arguments':
+                args_node = c
+            elif scope_node is None:
+                scope_node = c
+            elif name_node is None:
+                name_node = c
+        return scope_node, name_node, args_node
+
     def expr_scoped_call_expression(self, node) -> str:
         # `Foo::bar(...)` → `Foo.bar(...)`
-        scope = node.child_by_field_name('scope')
-        name = node.child_by_field_name('name')
-        args = node.child_by_field_name('arguments')
-        s = self.text(scope).replace('\\', '.').lstrip('.') if scope else ''
-        # Translate self::/static::/parent:: to Python conventions.
-        if s == 'self':
-            s = 'self'
-        elif s == 'static':
+        scope_node, name_node, args_node = self._scoped_parts(node)
+        s = self.text(scope_node).replace('\\', '.').lstrip('.') \
+            if scope_node else ''
+        if s == 'static':
             s = 'cls'
-        elif s == 'parent':
-            return f'super().{_safe_name(self.text(name).lstrip("$"))}({self._render_arguments(args)})'
-        n = _safe_name(self.text(name).lstrip('$')) if name else ''
-        a = self._render_arguments(args)
+        if s == 'parent':
+            return (f'super().{_safe_name(self.text(name_node).lstrip("$"))}('
+                    f'{self._render_arguments(args_node)})')
+        n = _safe_name(self.text(name_node).lstrip('$')) if name_node else ''
+        a = self._render_arguments(args_node)
         return f'{s}.{n}({a})'
 
     def expr_scoped_property_access_expression(self, node) -> str:
         # `Foo::$bar` → `Foo.bar`
-        scope = node.child_by_field_name('scope')
-        name = node.child_by_field_name('name')
-        s = self.text(scope).replace('\\', '.').lstrip('.') if scope else ''
-        n = _safe_name(self.text(name).lstrip('$')) if name else ''
+        scope_node, name_node, _ = self._scoped_parts(node)
+        s = self.text(scope_node).replace('\\', '.').lstrip('.') \
+            if scope_node else ''
+        n = _safe_name(self.text(name_node).lstrip('$')) if name_node else ''
         return f'{s}.{n}'
 
     def expr_class_constant_access_expression(self, node) -> str:
-        # `Foo::CONST` or `Foo::class` → `Foo.CONST` / `Foo`
-        scope = node.child_by_field_name('scope')
-        name = node.child_by_field_name('name')
-        s = self.text(scope).replace('\\', '.').lstrip('.') if scope else ''
-        if name is not None and self.text(name) == 'class':
-            return s
-        n = self.text(name) if name else ''
+        # `Foo::CONST` / `Foo::class` / `self::CONST` / `static::class`.
+        # Children are positional in tree-sitter-php: [scope, ::, name].
+        scope_node = None
+        name_node = None
+        for c in node.children:
+            if c.type == '::':
+                continue
+            if scope_node is None:
+                scope_node = c
+            else:
+                name_node = c
+        s = self.text(scope_node).replace('\\', '.').lstrip('.') \
+            if scope_node else ''
+        if s == 'static':
+            s = 'cls'
+        if name_node is not None and self.text(name_node) == 'class':
+            return s if s != 'self' else self.text(scope_node)
+        n = self.text(name_node) if name_node else ''
         return f'{s}.{n}'
 
     def expr_function_call_expression(self, node) -> str:
