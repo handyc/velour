@@ -761,6 +761,453 @@ views like any other Django project.
 """)
 
 
+def seed_liftwpblock_guide():
+    m = upsert_manual(
+        'liftwpblock-guide',
+        title='liftwpblock',
+        subtitle='WordPress block (FSE) themes → Django templates',
+        format='short',
+        author='Velour / Datalift',
+        version='1.0',
+        abstract=(
+            'liftwpblock is the block-theme cousin of liftwp. Where '
+            'liftwp handles classic PHP themes (header.php, '
+            'index.php, the_loop), liftwpblock handles Full Site '
+            'Editing (FSE) themes — directories of templates/*.html '
+            '+ parts/*.html + theme.json with no PHP at all, just '
+            'wp:* block-comment markup. It walks that markup, '
+            'translates ~50 block types into Django, synthesises a '
+            'theme-aware base.html from theme.json, and produces a '
+            'browsable site. This guide states what it covers, '
+            'what it deliberately doesn\'t, and where the hard '
+            'edges are.'
+        ),
+        edition='First edition',
+        license='CC BY-SA 4.0',
+        copyright_year='2026',
+        copyright_holder='Velour Project',
+        bibliography=r"""
+@misc{wp_block_handbook,
+    author = {{WordPress.org}},
+    year   = {2024},
+    title  = {Block Editor Handbook: Block Themes},
+    note   = {https://developer.wordpress.org/themes/block-themes/}
+}
+
+@misc{wp_theme_unit_test,
+    author = {{WPTRT}},
+    year   = {2024},
+    title  = {Theme Unit Test (theme-unit-test-data.xml)},
+    note   = {https://github.com/WPTRT/theme-unit-test}
+}
+
+@misc{tt2,
+    author = {{WordPress.org}},
+    year   = {2022},
+    title  = {Twenty Twenty-Two — the first default block theme},
+    note   = {https://wordpress.org/themes/twentytwentytwo/}
+}
+""",
+    )
+
+    upsert_section(m, 'why-liftwpblock', 0,
+                   'Why liftwpblock exists', """
+WordPress 5.9 introduced *block themes* (Full Site Editing). The
+shape changed completely: no more `header.php` / `footer.php` /
+`single.php` written in PHP. A block theme is a directory of
+`templates/*.html` + `parts/*.html` files containing only HTML +
+`<!-- wp:foo {"…"} -->` markup, plus a `theme.json` that
+declares the design tokens (colors, fonts, spacing, layout
+widths) the markup references.
+
+`liftwp` was built for the old shape. It does not understand
+block-comment markup, and the lifted templates are mostly empty
+because there is no PHP for it to translate. `liftwpblock` is
+the new entry point for the new shape:
+
+- Walks the block markup with a brace-balanced parser (regex
+  alone can't handle the nested JSON in attrs like
+  `wp:query {"query":{"perPage":10}}`).
+- Translates ~50 block types — static layout (gallery, cover,
+  code, audio, video, …), dynamic widgets (latest-posts,
+  archives, calendar, …), comment-block family
+  (comment-template + author-name + content + reply-link),
+  embed-block (real iframes for YouTube/Vimeo, graceful
+  degradation for everything else), the query-loop family
+  (query → post-template → query-pagination-{previous,next,
+  numbers}), and the site-identity blocks (site-logo,
+  site-title, navigation, page-list, …).
+- Synthesises a `base.html` driven entirely by CSS custom
+  properties matching WP's `--wp--preset--*` /
+  `--wp--custom--*` naming, with values pulled from
+  `theme.json`.
+- Lifts the chrome (`templates/index.html` etc.) and the
+  parts (`parts/header.html`, `parts/footer.html`, …) into the
+  same `templates/<app>/` tree, with `{% extends %}` /
+  `{% include %}` wired to the synthesised base.
+
+The output is a Django app you can run immediately if your data
+is already in the conventional WP-shaped models (Post, User,
+Comment, Term, TermTaxonomy, TermRelationship, Option,
+Postmeta) — exactly the shape `genmodels` produces from a
+`wp_*` mysqldump.
+""", sidenotes=(
+        'The acid test is the official WordPress Theme Unit Test '
+        'corpus (theme-unit-test-data.xml — 168 posts, 177 terms, '
+        '33 comments, every block type, every post format). All '
+        'eight rounds of refinement landed against that corpus.'
+    ))
+
+    upsert_section(m, 'pipeline', 1,
+                   'Where liftwpblock fits in the pipeline', """
+The full Datalift port of a block-theme WordPress site is the
+same five commands as a classic-theme WP site, with `liftwp`
+swapped for `liftwpblock`:
+
+```
+mysqldump        --> dumpschema     ==> schema.sql
+                 --> genmodels      ==> wp/models.py + admin.py
+                 --> makemigrations / migrate
+                 --> ingestdump     ==> wp_* rows in SQLite
+theme directory  --> liftwpblock    ==> templates + base.html
+```
+
+Each step is independent and idempotent. You can re-run
+`liftwpblock` after editing the theme without touching your
+data, and you can re-run `ingestdump` after editing the schema
+without touching your templates.
+
+If your source isn't a mysqldump (e.g., you only have a WXR
+export), the data half is a quick custom importer that walks
+the XML and populates the same models — the full TUT acid test
+goes through exactly that path.
+""")
+
+    upsert_section(m, 'quickstart', 2,
+                   'Quickstart', """
+Assume your Django app is `wp` (the conventional choice from
+genmodels) and the theme lives at `/themes/twentytwentytwo`.
+
+```
+python manage.py liftwpblock /themes/twentytwentytwo \\
+    --app wp --out templates/wp
+```
+
+Output:
+
+- `templates/wp/index.html`, `single.html`, `page.html`,
+  `archive.html`, `404.html`, `search.html`, plus all
+  `parts/*.html` from the theme.
+- `templates/wp/base.html` — synthesised from `theme.json`,
+  pulls in `--wp--preset--color--*` and
+  `--wp--preset--font-family-*` as CSS custom properties so
+  the lifted templates render in the original theme's
+  palette and typography.
+- `liftwpblock_worklist.md` — a per-template log of any blocks
+  the lifter didn't recognise.
+
+Then in your views, supply the conventional context vars: the
+templates expect `posts` (Paginator-shaped), `post`, `site`
+(with `name` / `description` / `url`), `archive_title`,
+`comments`, plus the sidebar widgets `latest_posts`,
+`latest_comments`, `archive_months`, `tag_cloud`. The
+adapter pattern in the case-study notes below shows how to
+build these from genmodels-shaped models in ~150 LOC.
+""")
+
+    upsert_section(m, 'block-coverage', 3,
+                   'Block coverage', """
+The lifter recognises ~50 block types organised into six
+families. Each family has a short note on what the translator
+does.
+
+**Site-identity blocks.** `site-logo` reads `site.logo_url`,
+`site-title` renders `<a href="/"><h1>{{ site.name }}</h1></a>`,
+`site-tagline` renders `{{ site.description }}`. `navigation`
++ `page-list` walk pages from the navigation context. Static
+nav links pass through.
+
+**Query loop family.** `wp:query { "query": { "perPage": N,
+"postType": "post" } }` becomes a `<main class="wp-block-
+query">` with the inner content wrapped in
+`{% for post in posts %}`. `post-template` is the loop body.
+`query-pagination`, `query-pagination-previous`,
+`query-pagination-next`, `query-pagination-numbers` use
+Django's Paginator API (`posts.has_previous`,
+`posts.has_next`, `posts.number`, `posts.paginator.num_pages`)
+via a thin `_PageProxy` shim. `query-no-results` becomes the
+empty-state branch. `query-title` becomes the archive heading
+read from `archive_title`.
+
+**Post blocks.** `post-title`, `post-content`, `post-excerpt`,
+`post-date`, `post-featured-image`, `post-author`,
+`post-author-name`, `post-author-biography`, `post-terms`
+(both category and tag taxonomies), `post-navigation-link`
+(prev/next single-post nav), `read-more`. `post-title`
+applies `|safe` to match WP's `the_title()`, since WP allows
+HTML in titles.
+
+**Comment block family.** `post-comments` recurses into the
+inner content. `comment-template` becomes
+`{% for c in comments %}`. `comment-author-name`,
+`comment-content`, `comment-date`, `comment-reply-link`,
+`comment-edit-link`, `comments-title`, `comments-pagination`
+(+ -previous, -numbers, -next) all bind to `c.*` fields.
+`avatar` falls back to a Gravatar URL.
+
+**Static / layout blocks.** `gallery`, `cover`, `code`,
+`preformatted`, `verse`, `pullquote`, `quote`, `audio`,
+`video`, `file`, `media-text`, `columns` + `column`, `group`,
+`buttons` + `button`, `table`, `list` + `list-item`,
+`social-links` + `social-link`, `details`, `footnotes`,
+`paragraph`, `heading`, `image`, `separator`, `spacer`. WP
+stores these as already-rendered HTML inside the comment, so
+the translator drops the comment markers and preserves the
+inner HTML. `wp:more` and `wp:nextpage` render to invisible
+markers (the lifted templates render the full post in one
+view).
+
+**Dynamic widgets.** `latest-posts`, `latest-comments`,
+`archives`, `tag-cloud`, `calendar`, `search`, `loginout`.
+Each binds to a Django context var (`latest_posts`,
+`latest_comments`, `archive_months`, `tag_cloud`) provided by
+a small `_sidebar_ctx()` helper in your views.
+
+**Embeds.** `wp:embed` and the legacy `core-embed/<provider>`
+aliases route through one translator. YouTube and Vimeo URLs
+are pattern-matched and emitted as real
+`<iframe src="https://www.youtube.com/embed/<id>"
+width="560" height="315" frameborder="0" allowfullscreen>`.
+Other providers (Twitter, Facebook, Instagram,
+WordPress.tv, Spotify, SoundCloud, Reddit, TikTok,
+Mixcloud, Kickstarter, Slideshare, Crowdsignal, Imgur,
+Issuu, Scribd, Speaker Deck, Wolfram, …) degrade
+gracefully to a `<a class="wp-block-embed__link"
+rel="noopener">` link inside a `<figure
+class="wp-block-embed is-provider-<slug>">`, which is what
+the surrounding theme actually styles.
+
+**Classic shortcodes.** Pre-Gutenberg post bodies use
+`[caption ...]<img/>caption[/caption]` and
+`[gallery ids="..."]`. After block translation completes,
+`expand_classic_shortcodes()` rewrites both forms into real
+`<figure>` markup. `[gallery]` without ids degrades to a
+placeholder.
+""")
+
+    upsert_section(m, 'theme-json', 4,
+                   'theme.json → CSS custom properties', """
+The synthesised `base.html` is a thin shell whose only job is
+to expose `theme.json`'s design tokens as CSS custom
+properties matching WP's own naming, so the inner block
+markup styles correctly.
+
+For each entry in `theme.json` `settings.color.palette[]` →
+`--wp--preset--color--<slug>: <value>;`. For each entry in
+`settings.typography.fontFamilies[]` →
+`--wp--preset--font-family--<slug>: <value>;`. Layout sizes
+from `settings.layout.contentSize` and `wideSize` →
+`--wp--style--global--content-size` and
+`--wp--style--global--wide-size`. Custom tokens under
+`settings.custom.*` flatten to `--wp--custom--<dotted-path>`.
+
+The result: the lifted templates inherit the original theme's
+look without copying any of its CSS. If you want to override
+individual tokens (different palette, larger content width)
+you edit the synthesised `base.html` directly, or add a
+sibling stylesheet that overrides the variables.
+""")
+
+    upsert_section(m, 'what-it-does-not', 5,
+                   'What liftwpblock deliberately does not do',
+                   """
+Translation has a finite scope. The following things are
+explicitly not in it:
+
+**Plugin shortcodes and plugin blocks.** WooCommerce
+(`[woocommerce_cart]`, `wp:woocommerce/*`), Contact Form 7,
+Gravity Forms, bbPress, BuddyPress, Elementor, Advanced Custom
+Fields, Yoast SEO blocks, SEOPress — none of these are
+translated. Each plugin defines its own block namespace and
+its own runtime; covering them is plugin-by-plugin work that
+belongs in dedicated `liftwc`, `liftcf7`, … commands rather
+than the core lifter.
+
+**Live oEmbed lookups.** WP queries `oembed.com` at render
+time to resolve arbitrary URLs to embed HTML. The lifter
+short-circuits the common case (YouTube, Vimeo) by URL
+pattern and degrades the rest to a marked link. Adding a
+real oEmbed cache table is a downstream concern.
+
+**Block patterns marketplace.** WP themes can reference
+named patterns from wordpress.org's pattern directory
+(`wp:pattern {"slug":"my-pattern"}`). The lifter emits a
+porter slot — your view supplies content for the named slot
+via context variable. There is no automatic download from the
+pattern directory.
+
+**Editor-only state.** Block settings that control the
+*editor* experience (locks, reusable-block links, color
+swatches in the inserter) are dropped — they have no
+public-facing render.
+
+**JavaScript-driven behavior.** Slideshows, lightboxes,
+animations, carousels, tabs — anything that needs the
+front-end JS WP ships with `@wordpress/interactivity` —
+renders the static fallback only. If you need the
+interactivity, write it in your own JS layer.
+
+**Custom post types beyond post / page / attachment.** The
+lifter assumes the standard three. If your site uses CPTs
+(`book`, `event`, `recipe`, …), the templates that target
+those CPTs lift cleanly but the views you write need to
+handle the routing.
+
+**Multilingual (WPML / Polylang).** The lifter is
+language-agnostic at the markup level, but there is no
+translation-layer integration. Single-language sites only.
+
+**Form handling.** `wp:search` lifts to a working Django GET
+form. Other forms (comment submission, contact, login) lift
+to the static markup but the view-side handlers are yours
+to write — there is no automatic POST endpoint synthesis.
+""", sidenotes=(
+        'A reasonable rule of thumb: if a block ships with WordPress '
+        'core or with the active block theme, liftwpblock probably '
+        'handles it. If it ships with a third-party plugin, it '
+        'probably does not.'
+    ))
+
+    upsert_section(m, 'tut-acid-test', 6,
+                   'The TUT acid test', """
+liftwpblock was hardened in eight refinement rounds against
+the official WordPress Theme Unit Test corpus
+(`theme-unit-test-data.xml`): 168 posts, 177 terms, 33
+comments, every block type, every classic post format, the
+markup-test post that explicitly verifies HTML in titles,
+the password-protected post, the oEmbed-block post, the
+heaviest design / media / layout / formatting category
+posts.
+
+Each round followed the same loop:
+
+1. Pick a TUT post (or class of posts) the templates didn't
+   render perfectly.
+2. Identify the block / shortcode / view-side fix needed.
+3. Add the translator (or expander).
+4. Add a unit test pinning the new behaviour.
+5. Curl the live page, verify zero `<!-- wp:` leakage.
+6. Screenshot the lifted page in a headless Chromium.
+7. Add a Datalift gallery entry referencing the screenshot.
+8. Commit + push.
+
+The cumulative shape of the eight rounds:
+
+```chart
+::: chart kind=column
+title: Translators registered after each round
+x: round 1 / 2 / 3 / 4 / 5 / 6 / 7 / 8
+y: 9 / 14 / 18 / 22 / 27 / 52 / 75 / 75
+:::
+```
+
+(Round 7 doubled the count by registering the static-block
+long tail explicitly so the unknown-block porter count drops
+to zero. Round 8 did not add new wp:* translators — it added
+the classic-shortcode expander, which lives outside the
+translator table.)
+
+By round 8 the eight heaviest TUT stress posts (Block: Cover,
+Block: Gallery, Block category: Common / Formatting / Layout
+Elements / Design / Text / Media) lift **241 wp:* blocks
+total with zero porter markers and zero `<!-- wp:` leakage**.
+The unit-test count progressed 22 → 30 → 47 → 51 → 56, all
+green.
+
+What graduation means here: against the corpus the lifter
+was hardened on, the residual porter count is zero. That is
+*not* a claim of zero porter count against the wider WP
+ecosystem — see the previous section for the deliberate
+exclusions.
+""")
+
+    upsert_section(m, 'verifying-with-shotdiff', 7,
+                   'Verifying the lift visually', """
+The same browsershot + shotdiff pair that liftwp uses works
+here. Run the original WP install and the lifted Django side
+on adjacent ports, then for each lifted URL:
+
+```
+manage.py browsershot http://wp.local/post/1730/ \\
+    --out original.png
+manage.py browsershot http://django.local/post/1730/ \\
+    --out lifted.png
+manage.py shotdiff original.png lifted.png \\
+    --out diff.png
+```
+
+The diff highlights pixel-level deltas. For a faithful theme
+lift the residual diff is the original theme's runtime
+JavaScript (slideshows, lightboxes) — every static layout
+and color difference should be zero or near-zero.
+
+For the TUT corpus specifically, the demo gallery in the
+Datalift app at `/datalift/gallery/` pre-renders the
+screenshot side of the comparison: Block: Cover, Block:
+Gallery, the WP 6.1 category-block stress posts, the
+post-format posts with `[caption]` shortcodes, the oEmbed
+post (post 1738 — five distinct embeds in a single body),
+the password-protected post (post 1168), the
+HTML-in-title markup test (post 1173), the archive / search
+/ 404 surface, plus the basic index / single / page
+templates. Each entry includes the source post id so you
+can re-run the comparison locally.
+""")
+
+    upsert_section(m, 'reproducing', 8,
+                   'Reproducing the TUT acid test', """
+The exact path, in order, to reproduce the TUT acid test
+locally:
+
+```
+# 1. Clone the test data.
+curl -O https://raw.githubusercontent.com/WPTRT/theme-unit-test/\\
+master/themeunittestdata.wordpress.xml
+
+# 2. Spin up an empty Django project, add a `wp` app, set up
+#    the conventional WP-shaped models (use genmodels against
+#    a wp_* schema dump if you have one, or write them by
+#    hand).
+
+# 3. Walk the WXR XML directly into wp.* models. The TUT
+#    acid-test driver in datalift-tests/ is a small
+#    management command (~250 LOC, xml.etree only — no
+#    WordPress install needed):
+manage.py import_wxr themeunittestdata.wordpress.xml --wipe
+
+# 4. Lift Twenty Twenty-Two (or any block theme).
+manage.py liftwpblock /themes/twentytwentytwo \\
+    --app wp --out templates/wp
+
+# 5. Add the conventional adapter view layer (~150 LOC) that
+#    bridges the wp.* models to the names the lifted
+#    templates expect (post.title, site.name, comments,
+#    posts.has_previous, …) — see the gallery entry
+#    "TT2 + lifted WP data" for the exact shape.
+
+# 6. runserver and curl your way through the URL surface:
+#    /, /post/<int>/, /category/<slug>/, /tag/<slug>/,
+#    /author/<login>/, /year/<int>/, /search/?s=<q>,
+#    /post/1168/ (password gate, password "enter").
+```
+
+Wall time end-to-end against a fresh checkout: roughly two
+minutes including the WXR ingest. Output: 11 lifted
+templates, ~50 wp:* translators exercised, 168 importable
+posts, 0 unhandled blocks across the eight stress posts.
+""")
+
+
 def seed_datalift_overview():
     m = upsert_manual(
         'datalift',
@@ -5314,6 +5761,10 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             '  liftwp Guide          → /codex/liftwp-guide/'
         ))
+        seed_liftwpblock_guide()
+        self.stdout.write(self.style.SUCCESS(
+            '  liftwpblock Guide     → /codex/liftwpblock-guide/'
+        ))
         seed_liftsmarty_guide()
         self.stdout.write(self.style.SUCCESS(
             '  liftsmarty Guide      → /codex/liftsmarty-guide/'
@@ -5395,5 +5846,5 @@ class Command(BaseCommand):
             '  The Datalift Manual   → /codex/volumes/the-datalift-manual/'
         ))
         self.stdout.write(self.style.SUCCESS(
-            '\nDatalift manuals seeded (27 manuals + 1 volume).'
+            '\nDatalift manuals seeded (28 manuals + 1 volume).'
         ))
