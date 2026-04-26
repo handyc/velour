@@ -186,7 +186,9 @@ def _t_template_part(attrs, inner_html, lifter):
 def _t_post_title(attrs, inner_html, lifter):
     level = attrs.get('level', 2)
     is_link = attrs.get('isLink', False)
-    inner = '{{ post.title|default:"" }}'
+    # WP's the_title() lets editor-supplied HTML through (italics,
+    # superscript, etc.), so render |safe to match WP behaviour.
+    inner = '{{ post.title|default:""|safe }}'
     if is_link:
         inner = f'<a href="{{{{ post.get_absolute_url }}}}">{inner}</a>'
     return f'<h{level} class="wp-block-post-title">{inner}</h{level}>'
@@ -226,10 +228,34 @@ def _t_post_featured_image(attrs, inner_html, lifter):
 
 
 def _t_post_comments(attrs, inner_html, lifter):
+    """Emit a working default comment list. Reads `comments` from
+    the view context — a queryset/iterable of objects with the WP
+    schema (comment_author, comment_content, comment_date, etc.).
+    The porter can swap this for a Django comments-app render."""
     lifter._porter('post-comments')
-    return ('<div class="wp-block-post-comments">'
-            '{# PORTER: WP comment list — wire to your Django comments app #}'
-            '</div>')
+    return (
+        '<div class="wp-block-post-comments">\n'
+        '  {% if comments %}\n'
+        '  <h3 class="wp-block-comments-title">'
+        'Comments ({{ comments|length }})</h3>\n'
+        '  <ol class="wp-block-comment-template">\n'
+        '    {% for c in comments %}\n'
+        '    <li class="wp-block-comment">\n'
+        '      <div class="wp-block-comment-author-name">'
+        '{{ c.comment_author|default:"Anonymous" }}</div>\n'
+        '      <time class="wp-block-comment-date">'
+        '{{ c.comment_date|date:"F j, Y" }}</time>\n'
+        '      <div class="wp-block-comment-content">'
+        '{{ c.comment_content|linebreaks }}</div>\n'
+        '    </li>\n'
+        '    {% endfor %}\n'
+        '  </ol>\n'
+        '  {% else %}\n'
+        '  <p class="wp-block-comments-empty">No comments yet.</p>\n'
+        '  {% endif %}\n'
+        '  {# PORTER: replace with your comments app render #}\n'
+        '</div>'
+    )
 
 
 def _t_site_logo(attrs, inner_html, lifter):

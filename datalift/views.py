@@ -246,6 +246,110 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_tut_acid_test',
+        'title': 'TT2 vs the WordPress Theme Unit Test corpus',
+        'subtitle': 'the official WP theme certification dataset, in Django',
+        'image': 'tt2_tut_index.png',
+        'metrics': [
+            ('source', 'theme-unit-test-data.xml (WordPress.org reference)'),
+            ('imported', '168 posts, 21 pages, 37 attachments, 33 comments'),
+            ('terms', '177 (68 categories + 110 tags)'),
+            ('paginated index', '6 pages × 10 posts'),
+            ('edge cases survived', 'HTML in titles, special chars, '
+             'Greek Unicode, deeply-nested comments, embedded blocks'),
+            ('porter markers cleared', '1 (post-comments now has a '
+             'working default loop)'),
+        ],
+        'body': (
+            "The full pipeline against real-world WordPress content. "
+            "The official Theme Unit Test data (the WXR every WP "
+            "theme on .org is certified against) is parsed and "
+            "INSERTed into the lifted wp.* models. The Twenty "
+            "Twenty-Two block theme renders 168 posts, "
+            "21 pages, 37 attachments through the lifted Django "
+            "templates. Survived: HTML in titles ('<em>With</em>' "
+            "renders italic), special characters in titles "
+            "(`!@#$%^&*` etc.), Greek Unicode in comment authors, "
+            "20-comment threads, embedded block markup inside "
+            "post_content (lifted at render time, not just "
+            "passed through), real WP attachment URLs from "
+            "wpthemetestdata.files.wordpress.com pulled via "
+            "_thumbnail_id postmeta. Two iteration fixes shipped "
+            "with this run: post-title now |safe (matches WP "
+            "the_title), post-comments now emits a working default "
+            "loop instead of just a porter marker."
+        ),
+        'reproduce': 'manage.py import_wxr <path>.xml --wipe',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_tut_block_post',
+        'title': 'TT2 rendering Gutenberg block content',
+        'subtitle': 'wp:* markup inside post_content lifted at render time',
+        'image': 'tt2_tut_blocks.png',
+        'metrics': [
+            ('source post', 'wp_posts.id=163 ("WP 6.1 Font size scale")'),
+            ('content shape', '8 wp:heading + wp:paragraph blocks'),
+            ('rendered', 'plain HTML, zero <!-- wp: --> leakage'),
+        ],
+        'body': (
+            "Blocks-inside-post_content path. WP's Gutenberg editor "
+            "stores post bodies as HTML interleaved with block "
+            "comments (<!-- wp:heading {\"fontSize\":\"medium\"} -->). "
+            "The view's _PostCtx.content runs the same lift_block_template "
+            "the templates do, so block markup inside post bodies "
+            "is also stripped/translated at render time. The result "
+            "is clean HTML — no stale block-comment annotations "
+            "leak through to the browser."
+        ),
+        'reproduce': '/post/163/ on the TUT-loaded demo',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_tut_page',
+        'title': 'TT2 page.html with TUT content',
+        'subtitle': 'About The Tests page, lifted from page.html template',
+        'image': 'tt2_tut_page.png',
+        'metrics': [
+            ('source', 'wp_posts WHERE id=2 AND post_type=page'),
+            ('template', 'tt2/page.html (auto-routed by post_type)'),
+            ('comments empty-state', '"No comments yet." default'),
+        ],
+        'body': (
+            "A WP page (post_type=page) routed automatically to the "
+            "lifted page.html template instead of single.html. "
+            "Renders the official WP theme test 'About' page with "
+            "ordered list of resource links, properly formatted "
+            "block content, and the empty-state of the comments "
+            "block."
+        ),
+        'reproduce': '/post/2/ on the TUT-loaded demo',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_tut_html_title',
+        'title': 'HTML in WP post titles, rendered correctly',
+        'subtitle': '<em>With</em> in italics, <sup>up</sup> as superscript',
+        'image': 'tt2_tut_html_title.png',
+        'metrics': [
+            ('source', 'wp_posts.post_title contains literal HTML tags'),
+            ('test instruction',
+             'TUT post explicitly says "verify italics + superscript"'),
+            ('lifter behaviour',
+             '|safe on post.title, matching WP the_title()'),
+        ],
+        'body': (
+            "Caught during the TUT acid test: the lifter was "
+            "auto-escaping HTML in titles, but WP's the_title() "
+            "passes editor-supplied HTML through. One-line fix to "
+            "the post-title translator (|safe filter), and the "
+            "official 'Markup: Title <em>With</em> <b>Mark<sup>up"
+            "</sup></b>' test post now renders correctly."
+        ),
+        'reproduce': '/post/1173/ on the TUT-loaded demo',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',
