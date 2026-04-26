@@ -143,6 +143,79 @@ GALLERY_ENTRIES = [
         'codex': 'phpbb-case-study',
     },
     {
+        'slug': 'symfony_demo',
+        'title': 'Symfony Demo: 4 controllers → urls.py + views.py',
+        'subtitle': 'liftsymfony — attribute routes, class-level prefixes, namespace-disambiguated controllers',
+        'image': 'symfony_demo.png',
+        'metrics': [
+            ('controllers parsed', '4'),
+            ('methods translated', '12'),
+            ('attribute routes', '19'),
+            ('YAML routes', '0 (Demo uses pure attribute routing)'),
+            ('compile rate', 'urls.py + views.py both clean'),
+        ],
+        'body': (
+            "The official Symfony Demo (symfony/demo) — the corpus "
+            "liftsymfony was iterated against. Class-level "
+            "#[Route('/admin/post')] prefixes propagate to every "
+            "method route. Two controllers with the same short "
+            "name in different namespaces (Admin\\BlogController vs "
+            "BlogController) get disambiguated by namespace prefix. "
+            "Doctrine relations handled by liftdoctrine alongside."
+        ),
+        'reproduce': '/tmp/sfdemo_lift/datalift/views_symfony.py',
+        'codex': 'liftsymfony-guide',
+    },
+    {
+        'slug': 'cakephp_skeleton',
+        'title': 'CakePHP skeleton: PagesController::display',
+        'subtitle': 'liftcakephp — RouteBuilder closure, scope+fallbacks, controller actions',
+        'image': 'cakephp_skeleton.png',
+        'metrics': [
+            ('controllers parsed', '1'),
+            ('actions translated', '1 (display)'),
+            ('routes', '2 (/, /pages/*)'),
+            ('fallbacks() flagged', '✓ porter marker'),
+            ('compile rate', 'urls.py + views.py both clean'),
+        ],
+        'body': (
+            "CakePHP's official `cakephp/app` skeleton — the "
+            "smallest possible CakePHP installation. Tests every "
+            "router shape liftcakephp covers: scope('/'), "
+            "connect() with both string-target and array-target "
+            "forms, the greedy * pattern, fallbacks(). The "
+            "$builder->fallbacks() call gets a porter marker (it "
+            "expands to /<controller>/<action>/* dispatch which "
+            "Datalift doesn't auto-translate)."
+        ),
+        'reproduce': '/tmp/cake_lift/datalift/views_cakephp.py',
+        'codex': 'liftcakephp-guide',
+    },
+    {
+        'slug': 'yii_basic',
+        'title': 'Yii 2 basic-app: SiteController, 5 actions',
+        'subtitle': 'liftyii — actionFoo() → /<controller-id>/<action-id>/, VerbFilter pinning',
+        'image': 'yii_basic.png',
+        'metrics': [
+            ('controllers parsed', '1'),
+            ('actions translated', '5 (Index, Login, Logout, Contact, About)'),
+            ('routes', '6 (5 actions + implicit site/ → actionIndex)'),
+            ('VerbFilter pin applied', "1 (logout → POST-only)"),
+            ('compile rate', 'urls.py + views.py both clean'),
+        ],
+        'body': (
+            "The official yii2-app-basic skeleton. Every public "
+            "actionFoo() method becomes a Django route at "
+            "/<controller-id>/<action-id>/. Yii also auto-routes "
+            "/<controller-id>/ to actionIndex — the lifter "
+            "honours that with an extra implicit route. The "
+            "behaviors() VerbFilter declaration pins logout to "
+            "POST-only via a per-path dispatcher."
+        ),
+        'reproduce': '/tmp/yii_lift/datalift/views_yii.py',
+        'codex': 'liftyii-guide',
+    },
+    {
         'slug': 'piwigo_endtoend',
         'title': 'Piwigo: the original road test',
         'subtitle': '2002-era PHP photo gallery + Smarty templates',
