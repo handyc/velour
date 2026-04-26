@@ -955,7 +955,12 @@ class _Visitor:
                 inner = text[1:-1] if text.endswith(quote) else text[1:]
                 inner = inner.replace("'''", r"\'\'\'")
                 return "'''" + inner + "'''"
-        if text.startswith("'") and ('\\u' in text or '\\x' in text):
+        # PHP double-quoted strings interpret some escapes (`\n`,
+        # `\t`, etc.) but NOT `\u` or `\x` the way Python does.
+        # Python single AND double quotes both interpret `\u`/`\x`,
+        # so prefixing with `r` keeps the source verbatim.
+        if (text.startswith("'") or text.startswith('"')) \
+                and ('\\u' in text or '\\x' in text):
             return 'r' + text
         return text
 

@@ -823,10 +823,13 @@ def _rewrite_ternary(s: str) -> str:
                 cb_depth += 1
             elif ch == '}':
                 cb_depth -= 1
-            elif ch == '?' and depth == 0 and sq_depth == 0 and cb_depth == 0:
+            elif ch == '?':
                 # Skip `??` (null coalesce) and `?->` (nullsafe).
                 if i + 1 < n and s[i + 1] in ('?', '-', '.'):
                     i += 2; continue
+                # Allow ternaries nested inside calls/arrays/dicts —
+                # was previously requiring depth==0 across all three
+                # bracket kinds, which missed many real ternaries.
                 q_idx = i
                 break
             i += 1
