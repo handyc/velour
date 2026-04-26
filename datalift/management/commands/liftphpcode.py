@@ -60,7 +60,8 @@ class Command(BaseCommand):
         worklist_path.write_text(render_worklist(result, app_label, source),
                                  encoding='utf-8')
         self.stdout.write(f'worklist → {worklist_path}')
-        log = apply(result, project_root, app_label, dry_run=opts['dry_run'])
+        log = apply(result, project_root, app_label,
+                    dry_run=opts['dry_run'], source_root=source)
         for line in log:
             self.stdout.write('  ' + line)
         total_funcs = sum(len(f.functions) for f in result.files)

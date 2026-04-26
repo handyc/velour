@@ -1939,20 +1939,50 @@ def render_worklist(result: PhpCodeLiftResult, app_label: str,
 
 
 def apply(result: PhpCodeLiftResult, project_root: Path,
-          app_label: str, dry_run: bool = False) -> list[str]:
+          app_label: str, dry_run: bool = False,
+          source_root: Path | None = None) -> list[str]:
+    """Emit one Python file per parsed PHP file.
+
+    Strategy: try the AST lifter (`php_ast_lifter`, tree-sitter-php
+    backed) first. If it produces output and the result compiles
+    cleanly via `compile()`, use it. Otherwise fall back to the
+    regex-based `render_python` (which always produces something,
+    even when imperfect)."""
+    from datalift import php_ast_lifter
     log: list[str] = []
     if not result.files:
         return log
     out_root = project_root / app_label / 'php_lifted'
     if not dry_run:
         out_root.mkdir(parents=True, exist_ok=True)
+    ast_count = 0
+    regex_count = 0
     for f in result.files:
-        # Mirror the source path under php_lifted/, swapping .php→.py.
         target_rel = f.source.with_suffix('.py')
         target = out_root / target_rel
+        # Try AST first.
+        py: str | None = None
+        if php_ast_lifter.AVAILABLE and source_root is not None:
+            full_php = source_root / f.source
+            try:
+                ast_result = php_ast_lifter.parse_file(full_php)
+                if ast_result is not None and ast_result.python.strip():
+                    # Verify the output compiles before committing.
+                    try:
+                        compile(ast_result.python, str(target_rel), 'exec')
+                        py = ast_result.python
+                        ast_count += 1
+                    except SyntaxError:
+                        py = None  # fall through to regex
+            except Exception:
+                py = None
+        if py is None:
+            py = render_python(f)
+            regex_count += 1
         if not dry_run:
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(render_python(f), encoding='utf-8')
+            target.write_text(py, encoding='utf-8')
     log.append(f'php_lifted/ → {out_root.relative_to(project_root)} '
-               f'({len(result.files)} file(s))')
+               f'({len(result.files)} file(s); '
+               f'{ast_count} via AST, {regex_count} via regex fallback)')
     return log
