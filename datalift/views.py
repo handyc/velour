@@ -510,6 +510,49 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_tut_classic_shortcodes',
+        'title': 'Classic [caption] + [gallery] shortcodes expanded',
+        'subtitle': 'Pre-Gutenberg post bodies render too — no leaked text',
+        'image': 'tt2_tut_caption_shortcode.png',
+        'metrics': [
+            ('TUT post-format posts surveyed',
+             '13 (post-format-image, gallery, audio, video, '
+             'aside, link, status, quote, chat, …)'),
+            ('shortcodes surveyed across corpus',
+             '[gallery] ×12, [caption] ×12, [audio] ×1'),
+            ('expanders added',
+             '_expand_caption (attr + inline forms), _expand_gallery'),
+            ('caption attr form output',
+             '<figure class="wp-block-image align…" style="width:Npx">'
+             '…<figcaption class="wp-element-caption">…</figcaption>'
+             '</figure>'),
+            ('gallery with ids output',
+             'columns-N + per-id <a href="#attachment-N">'),
+            ('view-side fix',
+             '_PostCtx.content always runs the lifter (was gated on '
+             '"<!-- wp:" presence — classic posts skipped it)'),
+            ('test count', '56 unit tests, all green'),
+        ],
+        'body': (
+            "Pre-Gutenberg posts (the entire post-format/markup "
+            "test corpus in TUT) use raw shortcodes like "
+            "[caption id=… align=… width=…]<img/>caption text"
+            "[/caption] and [gallery ids=\"1,2,3\"]. Until this "
+            "round those leaked through to the browser as "
+            "literal bracketed text. The lifter now expands both "
+            "shortcode forms ([caption]'s older caption=… attr "
+            "form AND the newer inline-text-after-img form) into "
+            "real <figure>+<figcaption> markup, and [gallery] into "
+            "a wp-block-gallery wrapper with per-id placeholder "
+            "anchors. The view also stopped gating the lift on "
+            "wp:* comment presence, so classic posts hit the "
+            "expander too. The corpus' 25 shortcode invocations "
+            "now render."
+        ),
+        'reproduce': '/post/568/, /post/555/ on the TUT-loaded demo',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',

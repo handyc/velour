@@ -309,6 +309,53 @@ class StaticBlockLongTailTests(SimpleTestCase):
         self.assertIn('wp-block-nextpage', out)
 
 
+class ClassicShortcodeTests(SimpleTestCase):
+    """The TUT post-format corpus uses classic shortcodes
+    [caption ...] and [gallery ...] in raw post bodies (not wrapped
+    in wp:shortcode comments). The lifter expands them to
+    real HTML so they don't leak as text to the browser."""
+
+    def test_caption_attr_form(self):
+        # Older form: caption text supplied as an attribute.
+        src = ('[caption id="attachment_612" align="aligncenter" '
+               'width="640" caption="Burns like a spinifex log."]'
+               '<a href="x.jpg"><img src="x.jpg" /></a>'
+               '[/caption]')
+        out, _, _ = lift_block_template(src)
+        self.assertIn('<figure class="wp-block-image aligncenter"', out)
+        self.assertIn('style="width:640px"', out)
+        self.assertIn('Burns like a spinifex log.', out)
+        self.assertIn('<figcaption', out)
+        self.assertNotIn('[caption', out)
+
+    def test_caption_inline_form(self):
+        # Newer form: caption text supplied after the <img>.
+        src = ('[caption id="x" align="alignnone" width="300"]'
+               '<img src="x.jpg" /> Caption sits after the image.'
+               '[/caption]')
+        out, _, _ = lift_block_template(src)
+        self.assertIn('Caption sits after the image.', out)
+        self.assertIn('<figcaption', out)
+
+    def test_gallery_with_ids(self):
+        out, _, _ = lift_block_template('[gallery ids="1,2,3" columns="2"]')
+        self.assertIn('wp-block-gallery', out)
+        self.assertIn('columns-2', out)
+        self.assertIn('attachment-1', out)
+        self.assertIn('attachment-3', out)
+        self.assertNotIn('[gallery', out)
+
+    def test_gallery_bare(self):
+        out, _, _ = lift_block_template('[gallery]')
+        self.assertIn('wp-block-gallery', out)
+        self.assertNotIn('[gallery', out)
+
+    def test_shortcode_expansion_idempotent_on_clean_html(self):
+        src = '<p>Plain old paragraph.</p>'
+        out, _, _ = lift_block_template(src)
+        self.assertEqual(out, src)
+
+
 class QueryLoopTests(SimpleTestCase):
 
     def test_query_with_post_template(self):

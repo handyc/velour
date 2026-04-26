@@ -861,6 +861,93 @@ class _BlockLifter:
         return translator(attrs, inner, self)
 
 
+# ── Classic shortcode expansion ───────────────────────────────────
+#
+# Classic-format WP posts (the post-format / TUT corpus) use raw
+# shortcodes that aren't wrapped in <!-- wp:shortcode --> blocks.
+# The most-used ones in TUT are [caption] and [gallery]. Expand
+# them to plain HTML so they render instead of leaking as text.
+
+_SHORTCODE_ATTR_RE = re.compile(
+    r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|(\S+))')
+
+
+def _parse_shortcode_attrs(attr_str: str) -> dict:
+    out = {}
+    for m in _SHORTCODE_ATTR_RE.finditer(attr_str or ''):
+        out[m.group(1)] = m.group(2) or m.group(3) or m.group(4) or ''
+    return out
+
+
+_CAPTION_RE = re.compile(
+    r'\[caption([^\]]*)\](.*?)\[/caption\]',
+    re.DOTALL | re.IGNORECASE)
+
+
+def _expand_caption(m) -> str:
+    attrs = _parse_shortcode_attrs(m.group(1))
+    inner = (m.group(2) or '').strip()
+    # Caption text comes either from caption= attr or from text
+    # following the trailing </a> or <img/>.
+    caption_text = attrs.get('caption', '')
+    if not caption_text:
+        # Strip the leading <a>...</a> or <img .../> and what
+        # remains (if any) is the caption text.
+        m2 = re.match(r'(\s*(?:<a[^>]*>)?<img[^>]*/?>(?:</a>)?)\s*(.*)',
+                      inner, re.DOTALL | re.IGNORECASE)
+        if m2:
+            head, tail = m2.group(1), m2.group(2).strip()
+            if tail:
+                caption_text = tail
+                inner = head
+    cls_parts = ['wp-block-image']
+    align = attrs.get('align', '')
+    if align:
+        cls_parts.append(align)
+    width = attrs.get('width', '')
+    style = f' style="width:{width}px"' if width.isdigit() else ''
+    figcap = (f'<figcaption class="wp-element-caption">'
+              f'{caption_text}</figcaption>') if caption_text else ''
+    return (f'<figure class="{" ".join(cls_parts)}"{style}>'
+            f'{inner}{figcap}</figure>')
+
+
+_GALLERY_RE = re.compile(
+    r'\[gallery([^\]]*)\]', re.IGNORECASE)
+
+
+def _expand_gallery(m) -> str:
+    attrs = _parse_shortcode_attrs(m.group(1))
+    ids = attrs.get('ids', '')
+    columns = attrs.get('columns', '3')
+    if ids:
+        # Render anchors per id — best-effort static placeholder
+        # since we have no DB at template-lift time. Templates can
+        # later override via a real {% gallery %} tag.
+        items = ''.join(
+            f'<figure class="wp-block-image gallery-item">'
+            f'<a href="#attachment-{i.strip()}">'
+            f'attachment {i.strip()}</a></figure>'
+            for i in ids.split(',') if i.strip())
+        body = items
+    else:
+        body = (
+            '<p class="wp-block-gallery__placeholder">'
+            '<em>gallery placeholder</em></p>')
+    return (f'<figure class="wp-block-gallery '
+            f'has-nested-images columns-{columns}">{body}</figure>')
+
+
+def expand_classic_shortcodes(html: str) -> str:
+    """Expand the [caption] and [gallery] shortcodes commonly seen
+    in classic-format WP post bodies. Idempotent on shortcode-free
+    input. Other shortcodes (audio/video/playlist/embed/...) are
+    left as-is for downstream handling."""
+    html = _CAPTION_RE.sub(_expand_caption, html)
+    html = _GALLERY_RE.sub(_expand_gallery, html)
+    return html
+
+
 def lift_block_template(html: str, app_label: str = '') \
         -> tuple[str, list[str], int]:
     """Translate one block-template file's HTML to a Django template.
@@ -870,6 +957,7 @@ def lift_block_template(html: str, app_label: str = '') \
     parts resolve under `<app>/parts/...`."""
     l = _BlockLifter(app_label=app_label)
     out = l.lift(html)
+    out = expand_classic_shortcodes(out)
     return out, l.blocks_seen, l.porter_count
 
 
