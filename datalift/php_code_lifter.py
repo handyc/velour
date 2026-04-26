@@ -1027,6 +1027,15 @@ def _balanced_bracket(s: str, open_idx: int) -> int | None:
     return None
 
 
+def _pick_triple_quote(body: str) -> str:
+    # Pick `'''` or `\"""` based on which one doesn't appear at the
+    # end of `body` (which would form 4 consecutive quotes and break
+    # the closing). Prefer `'''` unless `body` ends with `'`.
+    if body.endswith("'") or "'''" in body:
+        return '"""'
+    return "'''"
+
+
 def _rewrite_multiline_strings(s: str) -> str:
     """PHP single- and double-quoted strings can contain literal
     newlines (`$sql = 'SELECT *\nFROM users';`). Python single-line
@@ -1056,12 +1065,15 @@ def _rewrite_multiline_strings(s: str) -> str:
                 out.append(s[i:])
                 break
             literal = s[i:j + 1]
-            # Multi-line? Convert to triple-quoted.
+            # Multi-line? Convert to triple-quoted. Pick a quote
+            # style that doesn't collide with the body (avoid the
+            # `body ends with ' + closing '''` → 4-quote-run trap).
             if '\n' in literal:
                 inner = literal[1:-1]
-                # Python triple-quoted form. Escape any `'''` inside.
-                inner = inner.replace("'''", r"\'\'\'")
-                out.append("'''" + inner + "'''")
+                tq = _pick_triple_quote(inner)
+                # Escape any matching triple-quote sequence inside.
+                inner = inner.replace(tq, '\\' + tq[0] + '\\' + tq[0] + '\\' + tq[0])
+                out.append(tq + inner + tq)
             elif ch == "'" and ('\\u' in literal or '\\x' in literal):
                 # Use a raw single-line string so Python doesn't
                 # try to interpret PHP-meaningless escapes.
