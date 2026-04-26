@@ -594,6 +594,61 @@ def llm_chat_send(request):
 
 @login_required
 @require_POST
+def rumination_augment(request):
+    """Operator-initiated LLM commentary on a single rumination
+    pairing. Receives `artifact_a` and `artifact_b` text in POST,
+    fires one cost-capped LLM call, returns JSON with the coda
+    (or an empty string + error message). Per-click only, never
+    auto. Toggle is off by default; an unset provider also
+    silently skips."""
+    from decimal import Decimal
+    from .models import (LLMExchange, llm_cost_cap_check)
+    from .llm_client import (compose_rumination_coda,
+                              RUMINATION_AUGMENT_SYSTEM_PROMPT)
+    toggles = IdentityToggles.get_self()
+    if not toggles.llm_augment_rumination_enabled:
+        return JsonResponse({'coda': '', 'error': 'disabled in toggles'})
+    provider = toggles.llm_augment_provider
+    if provider is None:
+        return JsonResponse({'coda': '', 'error': 'no provider configured'})
+
+    a = (request.POST.get('artifact_a') or '').strip()[:1500]
+    b = (request.POST.get('artifact_b') or '').strip()[:1500]
+    if not a or not b:
+        return JsonResponse({'coda': '', 'error': 'both artifacts required'})
+
+    rate_in = provider.cost_per_million_input_tokens_usd / Decimal('1000000')
+    rate_out = provider.cost_per_million_output_tokens_usd / Decimal('1000000')
+    prompt_chars = (len(RUMINATION_AUGMENT_SYSTEM_PROMPT)
+                    + len(a) + len(b) + 200)
+    estimate = Decimal(prompt_chars) * rate_in + Decimal('100') * rate_out
+    allowed, reason = llm_cost_cap_check(estimate)
+    if not allowed:
+        LLMExchange.objects.create(
+            provider=provider, prompt='[rumination augmentation]',
+            system_prompt=RUMINATION_AUGMENT_SYSTEM_PROMPT,
+            response='', tokens_in=0, tokens_out=0,
+            latency_ms=0, cost_usd=Decimal('0'),
+            error=f'refused — {reason}')
+        return JsonResponse({'coda': '', 'error': f'cap: {reason}'})
+
+    text, tin, tout, err, latency, cost = compose_rumination_coda(
+        provider, a, b)
+    LLMExchange.objects.create(
+        provider=provider,
+        prompt='[rumination augmentation]\n\nA:\n' + a[:300]
+               + '\n\nB:\n' + b[:300],
+        system_prompt=RUMINATION_AUGMENT_SYSTEM_PROMPT,
+        response=text or '',
+        tokens_in=tin, tokens_out=tout,
+        latency_ms=latency, cost_usd=cost,
+        error=err or '',
+    )
+    return JsonResponse({'coda': text or '', 'error': err or ''})
+
+
+@login_required
+@require_POST
 def llm_exchange_ingest(request, pk):
     """Promote an LLMExchange to an IdentityAssertion. The LLM
     becomes a foreign observer whose commentary is preserved in

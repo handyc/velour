@@ -178,6 +178,63 @@ class MirrorPhaseFourTests(TestCase):
             'meditation body')
         self.assertEqual(result, '')
 
+    def test_reflection_augmentation_skipped_when_toggle_off(self):
+        from identity.reflection import _augment_reflection
+        from identity.models import IdentityToggles
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_reflections_enabled = False
+        toggles.save()
+        self.assertEqual(_augment_reflection(toggles, 'body'), '')
+
+    def test_reflection_augmentation_skipped_when_provider_unset(self):
+        from identity.reflection import _augment_reflection
+        from identity.models import IdentityToggles
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_reflections_enabled = True
+        toggles.llm_augment_provider = None
+        toggles.save()
+        self.assertEqual(_augment_reflection(toggles, 'body'), '')
+
+    def test_reflection_hourly_period_never_augmented(self):
+        # The reflect() function gates augmentation to
+        # daily/weekly/monthly. Hourly should pass through with no
+        # augmentation regardless of toggle state.
+        from decimal import Decimal
+        from identity.reflection import reflect
+        from identity.models import (IdentityToggles, LLMProvider,
+                                      LLMExchange, Tick)
+        provider = LLMProvider.objects.create(
+            name='test', slug='test', base_url='http://x/', model='m',
+            cost_per_million_input_tokens_usd=Decimal('1'),
+            cost_per_million_output_tokens_usd=Decimal('1'),
+        )
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_reflections_enabled = True
+        toggles.llm_augment_provider = provider
+        toggles.llm_daily_cost_cap_usd = Decimal('10.00')
+        toggles.save()
+        # Run hourly; if augmentation fired, an LLMExchange row
+        # would be created.
+        reflect(period='hourly', push_to_codex=False)
+        self.assertEqual(
+            LLMExchange.objects.filter(provider=provider).count(), 0)
+
+    def test_rumination_augment_endpoint_skips_when_disabled(self):
+        from identity.models import IdentityToggles
+        from django.contrib.auth.models import User
+        u = User.objects.create_user('alice', password='pw')
+        self.client.force_login(u)
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_rumination_enabled = False
+        toggles.save()
+        resp = self.client.post(
+            reverse('identity:rumination_augment'),
+            {'artifact_a': 'X', 'artifact_b': 'Y'})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['coda'], '')
+        self.assertIn('disabled', data['error'])
+
     def test_l4_augmentation_logs_refusal_when_cap_exceeded(self):
         from decimal import Decimal
         from identity.meditation import _augment_l4_body

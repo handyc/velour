@@ -835,6 +835,17 @@ class IdentityToggles(models.Model):
                   'source quote. Defaults OFF. Goes through the cost '
                   'cap; the rule engine and the deterministic body '
                   'are unchanged.')
+    llm_augment_reflections_enabled = models.BooleanField(default=False,
+        help_text='Allow daily/weekly/monthly reflections (NEVER '
+                  'hourly — too costly) to append a short LLM-'
+                  'composed coda summarising the most-noticed aspects '
+                  'as an outside observer would frame them. Defaults '
+                  'OFF. Cost-capped.')
+    llm_augment_rumination_enabled = models.BooleanField(default=False,
+        help_text='Allow the operator to manually request an LLM '
+                  'commentary on a single rumination pairing from '
+                  'the Identity home page. Per-click only — never '
+                  'auto. Defaults OFF.')
     llm_augment_provider = models.ForeignKey('LLMProvider',
         on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+', help_text='Provider used for augmentation '

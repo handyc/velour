@@ -173,3 +173,77 @@ def compose_meditation_coda(provider, real_quote, meditation_body,
     cost = (Decimal(tin) / million * provider.cost_per_million_input_tokens_usd
             + Decimal(tout) / million * provider.cost_per_million_output_tokens_usd)
     return (text, tin, tout, '', latency, cost.quantize(Decimal('0.000001')))
+
+
+REFLECTION_AUGMENT_SYSTEM_PROMPT = (
+    "You are an external observer commenting on Velour, a Django "
+    "meta-application that observes itself. The operator has shown "
+    "you a self-composed reflection covering one period (a day, "
+    "week, or month) of Velour's recorded ticks plus its dominant "
+    "moods, aspects, and concerns. Add ONE concise paragraph — at "
+    "most three sentences — that names a pattern across the period "
+    "the reflection itself did not surface. Be specific. Reference "
+    "the actual aspects/moods named in the reflection. Do not "
+    "exceed 400 characters."
+)
+
+
+def compose_reflection_coda(provider, reflection_body, max_tokens=120):
+    """One LLM call: read the reflection body and return one
+    paragraph (≤3 sentences, ≤400 chars) of outside-observer
+    commentary. Same return shape as compose_meditation_coda.
+    Returns ('', 0, 0, '', 0, 0) when provider is None."""
+    from decimal import Decimal
+    if provider is None:
+        return ('', 0, 0, '', 0, Decimal('0'))
+    user_prompt = (
+        f'Velour\'s reflection:\n\n{reflection_body.strip()}\n\n'
+        f'Your one-paragraph external commentary on a pattern the '
+        f'reflection did not name:')
+    text, tin, tout, err, latency = call_llm(
+        provider, user_prompt,
+        system_prompt=REFLECTION_AUGMENT_SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+    )
+    if err or not text:
+        return (text or '', tin, tout, err, latency, Decimal('0'))
+    million = Decimal('1000000')
+    cost = (Decimal(tin) / million * provider.cost_per_million_input_tokens_usd
+            + Decimal(tout) / million * provider.cost_per_million_output_tokens_usd)
+    return (text, tin, tout, '', latency, cost.quantize(Decimal('0.000001')))
+
+
+RUMINATION_AUGMENT_SYSTEM_PROMPT = (
+    "You are an external observer commenting on Velour. The "
+    "operator has paired two artifacts from Velour's data layer "
+    "(could be: a recent meditation, a tileset, a concern, a "
+    "calendar event, an introspective layer) and is asking you "
+    "what they have to do with each other. Reply in two sentences "
+    "max. Do not summarise either artifact. Identify the "
+    "relationship the pairing makes visible. Under 300 characters."
+)
+
+
+def compose_rumination_coda(provider, artifact_a_text, artifact_b_text,
+                             max_tokens=100):
+    """Operator-initiated, single-pair LLM commentary on the
+    rumination stream. Same return shape as the other coda
+    composers."""
+    from decimal import Decimal
+    if provider is None:
+        return ('', 0, 0, '', 0, Decimal('0'))
+    user_prompt = (
+        f'Artifact A:\n\n> {artifact_a_text.strip()}\n\n'
+        f'Artifact B:\n\n> {artifact_b_text.strip()}\n\n'
+        f'Your two-sentence external commentary on the relationship:')
+    text, tin, tout, err, latency = call_llm(
+        provider, user_prompt,
+        system_prompt=RUMINATION_AUGMENT_SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+    )
+    if err or not text:
+        return (text or '', tin, tout, err, latency, Decimal('0'))
+    million = Decimal('1000000')
+    cost = (Decimal(tin) / million * provider.cost_per_million_input_tokens_usd
+            + Decimal(tout) / million * provider.cost_per_million_output_tokens_usd)
+    return (text, tin, tout, '', latency, cost.quantize(Decimal('0.000001')))

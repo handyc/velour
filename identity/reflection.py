@@ -441,6 +441,16 @@ def reflect(period='weekly', push_to_codex=True):
     body = compose_body(period, start, end, ticks, concerns, snapshot, metrics)
     title = _period_title(period, start)
 
+    # Optional LLM augmentation. Scoped to daily/weekly/monthly only
+    # so the hourly cadence (24/day → expensive) is never augmented.
+    # Toggle is OFF by default; cost-cap enforces against runaway
+    # spend; refusals log as visible LLMExchange rows.
+    if (period in ('daily', 'weekly', 'monthly')
+            and toggles.llm_augment_reflections_enabled):
+        coda = _augment_reflection(toggles, body)
+        if coda:
+            body = body + '\n\n*An external observer added:*\n\n> ' + coda
+
     row, created = Reflection.objects.update_or_create(
         period=period,
         period_start=start,
@@ -507,3 +517,44 @@ def _push_to_codex(reflection):
 
     reflection.codex_section_slug = section_slug
     reflection.save(update_fields=['codex_section_slug'])
+
+
+def _augment_reflection(toggles, body) -> str:
+    """If augmentation is enabled and a provider is configured,
+    ask the LLM for a 1-paragraph external commentary on the
+    reflection body. Returns the coda text or '' on skip /
+    refusal / error. Logs the exchange either way (refusals
+    carry error='refused — ...')."""
+    from decimal import Decimal
+    from .models import (LLMExchange, llm_cost_cap_check)
+    from .llm_client import (compose_reflection_coda,
+                              REFLECTION_AUGMENT_SYSTEM_PROMPT)
+    provider = toggles.llm_augment_provider
+    if provider is None:
+        return ''
+    rate_in = provider.cost_per_million_input_tokens_usd / Decimal('1000000')
+    rate_out = provider.cost_per_million_output_tokens_usd / Decimal('1000000')
+    prompt_chars = (len(REFLECTION_AUGMENT_SYSTEM_PROMPT)
+                    + len(body) + 200)
+    estimate = Decimal(prompt_chars) * rate_in + Decimal('120') * rate_out
+    allowed, reason = llm_cost_cap_check(estimate)
+    if not allowed:
+        LLMExchange.objects.create(
+            provider=provider, prompt='[reflection augmentation]',
+            system_prompt=REFLECTION_AUGMENT_SYSTEM_PROMPT,
+            response='', tokens_in=0, tokens_out=0,
+            latency_ms=0, cost_usd=Decimal('0'),
+            error=f'refused — {reason}')
+        return ''
+    text, tin, tout, err, latency, cost = compose_reflection_coda(
+        provider, body)
+    LLMExchange.objects.create(
+        provider=provider,
+        prompt='[reflection augmentation]\n\n' + body[:500],
+        system_prompt=REFLECTION_AUGMENT_SYSTEM_PROMPT,
+        response=text or '',
+        tokens_in=tin, tokens_out=tout,
+        latency_ms=latency, cost_usd=cost,
+        error=err or '',
+    )
+    return text or ''
