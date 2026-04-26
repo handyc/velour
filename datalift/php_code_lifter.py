@@ -1707,6 +1707,12 @@ def _translate_simple_statement(stmt: str) -> str:
     s = stmt.strip()
     if not s:
         return ''
+    # Collapse multi-line statements to a single line so Python's
+    # implicit-continuation rules don't reject `x =\n    expr`.
+    # PHP semicolon-terminated; Python prefers single-line.
+    if '\n' in s:
+        s = ' '.join(line.strip() for line in s.splitlines()
+                     if line.strip())
     # Standalone keywords
     if re.match(r'^(break|continue)\b', s):
         return re.match(r'^(break|continue)', s).group(0)
