@@ -6,6 +6,9 @@ app_name = 'datalift'
 
 urlpatterns = [
     path('', views.job_list, name='job_list'),
+    path('gallery/', views.gallery, name='gallery'),
+    path('gallery/<str:slug>.png', views.gallery_image,
+         name='gallery_image'),
     path('add/', views.job_add, name='job_add'),
     path('anonymize/', views.anonymize_upload, name='anonymize_upload'),
     path('port/',      views.port_upload,      name='port_upload'),

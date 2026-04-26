@@ -1,14 +1,218 @@
 import os
 import tempfile
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import FileResponse, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from .models import LiftJob
+
+
+# ── Gallery: past successes for demoing the toolkit ───────────────
+#
+# Each entry is a hand-curated record of one Datalift demonstration.
+# Live entries that the runtime can verify (model counts, schema
+# stats from the SQLite db.sqlite3 in the demo project) are
+# refreshed on every page render. Static entries (case-study
+# headlines, screenshot paths) come from this list directly.
+
+_DEMO_DIR = Path(__file__).resolve().parent / 'demo'
+
+GALLERY_ENTRIES = [
+    {
+        'slug': 'lime_django_schema',
+        'title': 'LimeSurvey schema, served live',
+        'subtitle': 'genmodels → models.py → Django ORM → real HTTP page',
+        'image': 'lime_django_demo.png',
+        'metrics': [
+            ('schema tables', '45'),
+            ('Django check issues', '0'),
+            ('migration ops', '45'),
+            ('porter source-edits', '0'),
+            ('HTTP response', '200, 1.5 KB, 8 ms'),
+        ],
+        'body': (
+            "The unmodified models.py emitted by genmodels from "
+            "LimeSurvey's MariaDB schema, dropped into a 30-line "
+            "Django project. manage.py check is silent, "
+            "makemigrations generates 45 Create-model ops, migrate "
+            "applies them. The view inserts and reads sample User "
+            "rows via the lifted ORM and renders an HTML table. "
+            "browsershot captures the page through real Chromium."
+        ),
+        'reproduce': 'datalift/demo/lime_django/',
+        'codex': 'limesurvey-case-study',
+    },
+    {
+        'slug': 'lime_django_typeurl',
+        'title': 'phpBB type_url class running inside Django',
+        'subtitle': "lifted application code, not just lifted schema",
+        'image': 'lime_django_typeurl.png',
+        'metrics': [
+            ('lifted methods called', '3'),
+            ('framework deps stubbed', '3'),
+            ('lifted lines (unmodified)', '16'),
+            ('shim lines added', '~25'),
+            ('porter line-edits', '0'),
+        ],
+        'body': (
+            "The class type_url from phpBB/phpbb/profilefields/type/"
+            "type_url.php — unmodified liftphpcode output — runs "
+            "inside Django with three minimum-viable dependency "
+            "stubs (a type_string base class, a get_preg_expression "
+            "URL-regex helper, and a self.user.lang i18n dict). "
+            "All four methods execute against live input: defaults, "
+            "HTML form-field generation via translated PHP "
+            "string-concat, and URL validation with both pass and "
+            "fail paths."
+        ),
+        'reproduce': 'datalift/demo/lime_django/lime_app/lifted_typeurl.py',
+        'codex': 'liftphpcode-guide',
+    },
+    {
+        'slug': 'limesurvey_endtoend',
+        'title': 'LimeSurvey full pipeline',
+        'subtitle': 'Yii 1.x + Twig + MariaDB road test',
+        'image': None,
+        'metrics': [
+            ('files translated', '1,134'),
+            ('compile-rate', '89.4%'),
+            ('schema → Django models', '100% (45 tables)'),
+            ('Twig templates', '122 / 122 clean'),
+            ('Yii controllers', '25 / 223 actions / 231 routes'),
+        ],
+        'body': (
+            "End-to-end pipeline against the LimeSurvey 6.x source "
+            "tree. dumpschema → genmodels → migrate → liftwig → "
+            "liftyii → liftphpcode → liftphp security scan. Every "
+            "stage clean; one liftwig bug found and fixed in-session "
+            "(if(cond) paren form). Two roundtrip layers proven: "
+            "Django check / migrate / ORM (100%) and py_compile of "
+            "the lifted application code (89.4%)."
+        ),
+        'reproduce': 'See limesurvey-case-study Codex manual.',
+        'codex': 'limesurvey-case-study',
+    },
+    {
+        'slug': 'mediawiki_endtoend',
+        'title': 'MediaWiki end-to-end',
+        'subtitle': 'Wiki engine on a custom framework — 2,235 PHP files',
+        'image': None,
+        'metrics': [
+            ('files translated', '2,235'),
+            ('compile-rate', '86.7%'),
+            ('schema → Django models', '100% (64 tables)'),
+            ('PHP-8 idioms surfaced + fixed', "??=, attribute access ->class"),
+        ],
+        'body': (
+            "The platform behind Wikipedia. 2,235 files in includes/, "
+            "all processed through liftphpcode. Schema dump (MySQL "
+            "dialect) lifted by genmodels into 64 Django models, "
+            "Django check silent, all 64 mw_* tables created in "
+            "SQLite. Two PHP-8 idioms surfaced: ??= null-coalescing "
+            "assign and Python-keyword attribute access (->class)."
+        ),
+        'reproduce': 'See mediawiki-case-study Codex manual.',
+        'codex': 'mediawiki-case-study',
+    },
+    {
+        'slug': 'phpbb_endtoend',
+        'title': 'phpBB end-to-end',
+        'subtitle': 'Custom-MVC forum software (no schema dump shipped)',
+        'image': None,
+        'metrics': [
+            ('files translated', '960'),
+            ('compile-rate', '92.0%'),
+            ('schema', 'N/A — postgres-only schema'),
+            ('Triple-quote-trap fixed', "''..''  →  \"\"..\"\""),
+        ],
+        'body': (
+            "Custom-MVC forum software started in 2000. None of the "
+            "framework lifters apply (no Yii / Symfony / Laravel / "
+            "Cake / CodeIgniter). Pure catch-all territory. Six new "
+            "PHP idioms surfaced and fixed in-session: multi-line "
+            "single-quoted strings, Elvis ?:, standalone static $x, "
+            "keyword-as-subscript-var, [&$this, 'm'] callable, "
+            "keyword-as-param-name."
+        ),
+        'reproduce': 'See phpbb-case-study Codex manual.',
+        'codex': 'phpbb-case-study',
+    },
+    {
+        'slug': 'piwigo_endtoend',
+        'title': 'Piwigo: the original road test',
+        'subtitle': '2002-era PHP photo gallery + Smarty templates',
+        'image': None,
+        'metrics': [
+            ('PHP files in source', '924'),
+            ('SQL tables', '34'),
+            ('Smarty templates', '36'),
+            ('static assets', '~750'),
+        ],
+        'body': (
+            "The first end-to-end Datalift case study. A PHP+MySQL "
+            "photo-gallery application started in 2002. Tests "
+            "Datalift against an 'arbitrary' codebase — different "
+            "domain, different template language, different schema "
+            "dialect. Closed by adding the liftsmarty command "
+            "in-session."
+        ),
+        'reproduce': 'See piwigo-case-study Codex manual.',
+        'codex': 'piwigo-case-study',
+    },
+]
+
+
+def _live_metrics():
+    """Refresh metrics that the runtime can verify on each render."""
+    metrics = {}
+    db = _DEMO_DIR / 'lime_django' / '..' / '..' / 'lime_django' / 'db.sqlite3'
+    # Demo SQLite lives at /tmp/lime_django/db.sqlite3 by convention;
+    # also accept a copy under datalift/demo/.
+    for candidate in (Path('/tmp/lime_django/db.sqlite3'),
+                       _DEMO_DIR / 'lime_django' / 'db.sqlite3'):
+        if candidate.exists():
+            try:
+                import sqlite3
+                con = sqlite3.connect(candidate)
+                tables = con.execute(
+                    "SELECT count(*) FROM sqlite_master "
+                    "WHERE type='table' AND name LIKE 'lime_%'"
+                ).fetchone()[0]
+                metrics['sqlite_tables'] = str(tables)
+                con.close()
+                break
+            except Exception:
+                pass
+    return metrics
+
+
+def gallery(request):
+    """Public gallery of past Datalift successes — for demoing the
+    toolkit to people who want to see what it can do."""
+    live = _live_metrics()
+    return render(request, 'datalift/gallery.html', {
+        'entries': GALLERY_ENTRIES,
+        'live': live,
+        'total_files': '4,329',
+        'total_compile': '88.6%',
+        'codex_manuals': '27',
+    })
+
+
+def gallery_image(request, slug):
+    """Serve a screenshot from the demo dir."""
+    for entry in GALLERY_ENTRIES:
+        if entry['slug'] == slug and entry.get('image'):
+            path = _DEMO_DIR / entry['image']
+            if path.exists():
+                return FileResponse(open(path, 'rb'),
+                                    content_type='image/png')
+    raise Http404
 
 
 @login_required

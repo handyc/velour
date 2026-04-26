@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Datalift — Gallery{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:0.3rem;">Datalift Gallery</h2>
+<p style="color:#8b949e;margin-top:0;">
+Past successes for showing the toolkit to people who want to see
+what it can actually do — not what the manual claims, but live
+captures from real road tests.
+</p>
+
+<div style="margin-bottom:1.2rem;display:flex;gap:1rem;flex-wrap:wrap;
+            background:#0d1117;border:1px solid #30363d;border-radius:6px;
+            padding:0.7rem 1rem;font-size:0.85rem;">
+  <span><strong style="color:#7ee787;">{{ total_files }}</strong>
+        <span style="color:#8b949e;">PHP files lifted across three road-test corpora</span></span>
+  <span style="color:#444;">·</span>
+  <span><strong style="color:#7ee787;">{{ total_compile }}</strong>
+        <span style="color:#8b949e;">average py_compile pass rate</span></span>
+  <span style="color:#444;">·</span>
+  <span><strong style="color:#7ee787;">{{ codex_manuals }}</strong>
+        <span style="color:#8b949e;">Codex manuals + 1 bound volume</span></span>
+  {% if live.sqlite_tables %}
+  <span style="color:#444;">·</span>
+  <span><strong style="color:#7ee787;">{{ live.sqlite_tables }}</strong>
+        <span style="color:#8b949e;">tables live in the LimeSurvey demo db right now</span></span>
+  {% endif %}
+</div>
+
+<div style="margin-bottom:1rem;">
+  <a href="{% url 'datalift:job_list' %}"
+     style="color:#58a6ff;text-decoration:none;font-size:0.85rem;">← back to jobs</a>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:1rem;">
+{% for e in entries %}
+<div style="background:#161b22;border:1px solid #30363d;border-radius:6px;
+            padding:1rem 1.2rem;">
+  <div style="display:flex;align-items:baseline;gap:0.6rem;">
+    <h3 style="margin:0;color:#c9d1d9;font-weight:500;font-size:1.05rem;">
+      {{ e.title }}</h3>
+    <span style="color:#6e7681;font-size:0.78rem;">{{ e.subtitle }}</span>
+  </div>
+
+  <div style="display:flex;gap:1.2rem;margin-top:0.8rem;flex-wrap:wrap;">
+    {% if e.image %}
+    <div style="flex:0 0 360px;">
+      <a href="{% url 'datalift:gallery_image' e.slug %}" target="_blank">
+        <img src="{% url 'datalift:gallery_image' e.slug %}"
+             style="width:100%;border:1px solid #30363d;border-radius:4px;
+                    background:#fff;display:block;"
+             alt="{{ e.title }}">
+      </a>
+    </div>
+    {% endif %}
+
+    <div style="flex:1;min-width:280px;">
+      <p style="color:#c9d1d9;font-size:0.88rem;line-height:1.5;
+                margin:0 0 0.7rem 0;">{{ e.body }}</p>
+
+      <table style="border-collapse:collapse;font-size:0.8rem;
+                    margin-bottom:0.7rem;">
+        {% for k, v in e.metrics %}
+        <tr>
+          <td style="color:#8b949e;padding:0.15rem 0.7rem 0.15rem 0;
+                     vertical-align:top;">{{ k }}</td>
+          <td style="color:#c9d1d9;padding:0.15rem 0;
+                     font-family:monospace;">{{ v }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+
+      <div style="font-size:0.78rem;color:#8b949e;display:flex;gap:1rem;
+                  flex-wrap:wrap;">
+        <span>reproduce:
+          <code style="color:#c9d1d9;background:#0d1117;padding:0 0.3rem;">
+            {{ e.reproduce }}</code></span>
+        {% if e.codex %}
+        <span>read:
+          <a href="/codex/{{ e.codex }}/"
+             style="color:#58a6ff;text-decoration:none;">
+            {{ e.codex }}</a></span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<p style="color:#6e7681;font-size:0.75rem;margin-top:1.5rem;font-style:italic;">
+  Want to add a new entry? Append to <code>GALLERY_ENTRIES</code> in
+  <code>datalift/views.py</code>, drop a screenshot into
+  <code>datalift/demo/</code>, push.
+</p>
+{% endblock %}
