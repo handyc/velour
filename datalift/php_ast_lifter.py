@@ -439,9 +439,13 @@ class _Visitor:
         return '    ' * indent + 'raise'
 
     def visit_break_statement(self, node, indent: int) -> str:
+        if indent == 0:
+            return f'# PORTER: PHP top-level break (no enclosing loop)'
         return '    ' * indent + 'break'
 
     def visit_continue_statement(self, node, indent: int) -> str:
+        if indent == 0:
+            return f'# PORTER: PHP top-level continue (no enclosing loop)'
         return '    ' * indent + 'continue'
 
     def visit_unset_statement(self, node, indent: int) -> str:
@@ -578,6 +582,23 @@ class _Visitor:
                    '    ' * (indent + 1) + 'pass'
         return f'{"    " * indent}while {cond}:\n{body_py}'
 
+    def _walrus_buried(self, cond: str) -> str:
+        """Find `(var = expr)` patterns ANYWHERE in a condition
+        and rewrite to walrus form `(var := expr)`. Used for compound
+        conditions like `if ((not isset(x)) and ((x = f())))` where
+        the assignment is buried under boolean operators."""
+        result = cond
+        for _ in range(8):  # cap iterations
+            new = re.sub(
+                r'\(\s*(\w+)\s*=\s*(?!=)([^=()][^()]*)\)',
+                lambda m: f'({m.group(1)} := {m.group(2).strip()})',
+                result,
+            )
+            if new == result:
+                break
+            result = new
+        return result
+
     def _maybe_walrus(self, cond: str) -> str:
         """Convert `var = expr` (PHP assignment-in-condition) into
         Python walrus form `(var := expr)`.
@@ -619,21 +640,22 @@ class _Visitor:
 
         # Subscript LHS form: `arr['k'] = expr` — Python's walrus
         # can't bind to a subscript. Drop the binding and just
-        # evaluate the RHS as the condition.
+        # evaluate the RHS as the condition. The porter-marker
+        # comment goes at end-of-line (Python allows trailing
+        # comments after `:` in if/while contexts).
         m_sub = re.match(
             r'^\(?\s*(?:not\s+)?([\w.]+\[[^\]]+\](?:\[[^\]]+\])*)\s*='
             r'\s*(?!=)(.+?)\)?$', s)
         if m_sub:
             prefix = 'not ' if s.lstrip('(').strip().startswith('not ') \
                      else ''
-            return (f'{prefix}({m_sub.group(2).strip()})'
-                    f'  # PORTER: PHP `{m_sub.group(1)} = ...` '
-                    f'in cond — bind manually')
+            return f'{prefix}({m_sub.group(2).strip()})'
 
-        # If the cond ALREADY contains a comparison, don't try to
-        # walrus — the comparison is the boolean expression.
+        # If the cond ALREADY contains a comparison, try the
+        # buried-walrus path (compound boolean with embedded
+        # assignments) before giving up.
         if '==' in s.replace('===', '') or '!=' in s.replace('!==', ''):
-            return cond
+            return self._walrus_buried(cond)
 
         # `var = expr` (with optional outer parens stripped). Use
         # paren-balanced matching for the RHS so we don't mid-cut a
@@ -657,7 +679,8 @@ class _Visitor:
         if m and '=' not in m.group(2):
             prefix = 'not ' if stripped.startswith('not ') else ''
             return f'{prefix}({m.group(1)} := {m.group(2).strip()})'
-        return cond
+        # Compound conds with buried `(var = expr)` — last-chance.
+        return self._walrus_buried(cond)
 
     def visit_do_statement(self, node, indent: int) -> str:
         # PHP `do { } while (cond);` → `while True: ... if not cond: break`
@@ -674,7 +697,10 @@ class _Visitor:
 
     def visit_for_statement(self, node, indent: int) -> str:
         # Recognise `for ($i = N; $i < M; $i++)` and `<=` variant
-        # → `for i in range(...)`.
+        # → `for i in range(...)`. Cond/update raw text matches the
+        # PHP shape; the start and stop expressions go through
+        # `visit_expr` so any `$var` / `->` / namespace separators
+        # are translated.
         init = node.child_by_field_name('initialize')
         cond = node.child_by_field_name('condition')
         upd = node.child_by_field_name('update')
@@ -690,22 +716,31 @@ class _Visitor:
         if m_init and m_cond and m_upd \
                 and m_init.group(1) == m_cond.group(1) == m_upd.group(1):
             var = _safe_name(m_init.group(1))
-            start = m_init.group(2)
+            # Translate the START expression (might be `count($x)` etc.)
+            start = self._translate_inline(m_init.group(2))
             op = m_cond.group(2)
-            stop = m_cond.group(3)
-            # `<= N` → `range(start, N + 1)` to match PHP's inclusive
-            # upper bound; `<` stays as-is.
+            stop = self._translate_inline(m_cond.group(3))
             if op == '<=':
                 stop = f'({stop}) + 1'
             elif op == '>':
-                # Reverse iteration; needs a stride. Best effort: emit
-                # range with negative step.
                 return (f'{"    " * indent}for {var} in '
                         f'range({start}, {stop}, -1):\n{body_py}')
             return (f'{"    " * indent}for {var} in '
                     f'range({start}, {stop}):\n{body_py}')
         pad = '    ' * indent
         return f'{pad}# PORTER: for-loop — rewrite as Python iteration\n{body_py}'
+
+    def _translate_inline(self, text: str) -> str:
+        """Translate a fragment of PHP expression text — used for
+        for-loop init/cond/update where we have raw text not a node.
+        Strips `$`, rewrites `->` to `.`, strips namespace `\\`."""
+        s = text.strip()
+        s = s.replace('?->', '.')
+        s = s.replace('->', '.')
+        s = re.sub(r'\$(\w+)', r'\1', s)
+        s = re.sub(r'(?<!\w)\\(?=[A-Za-z]\w)', '', s)
+        s = re.sub(r'\\(?=[A-Za-z]\w)', '.', s)
+        return s
 
     def visit_foreach_statement(self, node, indent: int) -> str:
         # tree-sitter-php structures: `foreach (COLL as VAR_OR_PAIR_OR_BYREF) BODY`
