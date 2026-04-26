@@ -55,6 +55,7 @@ DEFAULT_INTERVALS = {
     'rebuild_document': 604_800,     # 1 w
     'morning_briefing': 86_400,      # 1 d (gated to fire near 06:00 local)
     'app_status_report': 86_400,     # 1 d — aggregate codex_report() hooks
+    'backup_run':        86_400,     # 1 d — daily backup, weekly/monthly piggyback
 }
 
 
@@ -87,7 +88,7 @@ def dispatch(force=None):
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
             'meditate_deep', 'rebuild_document', 'tile_reflect',
-            'morning_briefing', 'app_status_report',
+            'morning_briefing', 'app_status_report', 'backup_run',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -123,6 +124,7 @@ def dispatch(force=None):
         ('tile_reflect',     _do_tile_reflect),
         ('morning_briefing', _do_morning_briefing),
         ('app_status_report', _do_app_status_report),
+        ('backup_run',       _do_backup_run),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -236,6 +238,26 @@ def _do_deep_meditation_ladder():
     except Exception:
         pass
     return f'Composed deep ladder {",".join(composed)} ({voice})'
+
+
+def _do_backup_run():
+    """Daily backup. Weekly piggybacks on Monday; monthly on the
+    first of the month. Each retention class has its own auto-prune
+    window so the disk doesn't grow without bound."""
+    from django.core.management import call_command
+    import io
+    today = timezone.now()
+    classes = ['daily']
+    if today.weekday() == 0:    # Monday
+        classes.append('weekly')
+    if today.day == 1:
+        classes.append('monthly')
+    summaries = []
+    for retention in classes:
+        buf = io.StringIO()
+        call_command('make_backup', retention=retention, stdout=buf)
+        summaries.append(f'{retention}: {buf.getvalue().strip()}')
+    return ' | '.join(summaries)
 
 
 def _do_app_status_report():

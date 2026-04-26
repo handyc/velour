@@ -56,7 +56,10 @@ lingua/data/piper_voices/*.onnx
 lingua/data/piper_voices/*.onnx.json
 
 # --- Backups, caches, scratch ---------------------------------------------
-backups/
+# Ignore actual snapshots, NOT the Django app code.
+backups/snapshots/
+backups/*.tar
+backups/*.tar.gz
 .cache/
 .coverage
 .tox/

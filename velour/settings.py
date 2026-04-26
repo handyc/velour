@@ -127,6 +127,7 @@ INSTALLED_APPS = [
     'aggregator',
     'studious',
     'agora',
+    'backups',
 ]
 
 MIDDLEWARE = [

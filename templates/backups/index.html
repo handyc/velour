@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Backups · Velour{% endblock %}
+
+{% block content %}
+<h1>Backups</h1>
+
+<p>Snapshots of Velour's load-bearing state — the SQLite database
+plus secret files. Each row is one tarball produced by
+<code>manage.py make_backup</code>. Daily snapshots keep the last
+7; weekly the last 4; monthly the last 12; manual snapshots are
+never auto-pruned.</p>
+
+<table class="data">
+  <thead>
+    <tr>
+      <th>retention</th>
+      <th>count</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r, n in counts.items %}
+    <tr><td>{{ r }}</td><td>{{ n }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Recent snapshots</h2>
+
+{% if snapshots %}
+<table class="data">
+  <thead>
+    <tr>
+      <th>when</th>
+      <th>retention</th>
+      <th>size</th>
+      <th>sha256 (first 12)</th>
+      <th>path</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in snapshots %}
+    <tr>
+      <td>{{ s.created_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ s.retention }}</td>
+      <td>{{ s.size_mb }} MB</td>
+      <td><code>{{ s.sha256|slice:":12" }}</code></td>
+      <td><code>{{ s.path }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p><em>No snapshots yet.</em> Run <code>python manage.py make_backup</code>
+to produce one.</p>
+{% endif %}
+{% endblock %}
