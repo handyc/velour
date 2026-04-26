@@ -4530,6 +4530,58 @@ ready-to-import Python without human intervention. Anything
 above that is what the porter adds.
 """)
 
+    upsert_section(m, 'served-end-to-end', 8,
+                   'End-to-end: lifted models served as a real HTTP page', """
+The compile-rate and Django-round-trip sections established
+that the schema layer is functional. The next experiment closed
+the loop: take the lifted `models.py`, build a minimal Django
+project around it, write one view that uses the lifted ORM,
+boot the dev server on a real port, and capture the rendered
+output via Velour's `browsershot` command (real Chromium).
+
+Setup at `datalift/demo/lime_django/`:
+
+- `lime_django/settings.py` — 8 lines (SECRET_KEY, SQLite,
+  INSTALLED_APPS = `['django.contrib.contenttypes',
+  'django.contrib.auth', 'lime_app']`, DEFAULT_AUTO_FIELD).
+- `lime_django/urls.py` — 3 lines (one route → `index` view).
+- `lime_app/models.py` — **the unmodified `models.py` that
+  `genmodels` produced**. 1,400 lines, 45 model classes.
+- `lime_app/views.py` — one `index()` view that:
+   - calls `User.objects.create(...)` to seed sample rows
+   - calls `User.objects.all()[:10]`, `.count()`, `.count()`,
+     `.count()` for the summary line
+   - renders an HTML page with a real ORM-backed table
+
+Result captured via `manage.py runserver 0.0.0.0:7778`:
+
+| Stage | Result |
+|---|---|
+| `manage.py runserver` boot                                            | clean — no errors, no migrations needed (already applied) |
+| `curl http://127.0.0.1:7778/`                                         | **HTTP 200, 1562 bytes, 8ms response time** |
+| Page renders                                                          | clean HTML, table of 5 users from the lifted ORM, summary box |
+| `manage.py browsershot http://127.0.0.1:7778/ --out lime_django_demo.png` | clean Chromium render — 800×600, 67,918 bytes |
+
+The screenshot lives at `datalift/demo/lime_django_demo.png`
+in this repo. The HTTP body lives at
+`datalift/demo/lime_django_demo.html`. The 30 lines of Django
+glue + the view live at `datalift/demo/lime_django/`.
+
+**This is the proof of "the toolkit actually runs."** Not just
+"the lifted code compiles" — the lifted models register as Django
+models, accept real ORM operations, return real database rows,
+and the rendered page comes through a real HTTP request to a
+real Chromium instance.
+
+The application-code layer (89.4% of LimeSurvey's
+`application/` PHP files compile to valid Python via
+`liftphpcode`) needs more porter work for the same demo: each
+controller depends on Yii's framework machinery
+(request/response/session/template) which has to be either
+ported over or shimmed by the `php_runtime` module. That work
+is in scope for a real porter project, not a one-session demo.
+""")
+
     upsert_section(m, 'django-roundtrip', 7,
                    'Does the lifted output actually run? The Django round-trip', """
 The compile-rate test answered "is the output valid Python?" but

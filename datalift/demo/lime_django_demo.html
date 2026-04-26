@@ -1,0 +1,27 @@
+
+<!doctype html><html><head><title>LimeSurvey lifted demo</title>
+<style>
+body{font-family:sans-serif;max-width:780px;margin:2em auto;color:#222}
+h1{font-weight:400;border-bottom:1px solid #888;padding-bottom:0.3em}
+table{border-collapse:collapse;width:100%;margin-top:1em}
+td,th{border:1px solid #888;padding:0.4em 0.7em;text-align:left}
+.summary{background:#eef;padding:0.7em 1em;border-left:3px solid #449}
+</style></head><body>
+<h1>LimeSurvey, lifted</h1>
+<div class="summary">
+This page is served by Django through <code>lime_app.models</code> —
+the unmodified <code>models.py</code> that <code>genmodels</code> produced
+from the LimeSurvey MariaDB schema. No source-edits to the lifted code.
+<br><br>
+<strong>5</strong> users · <strong>0</strong> surveys ·
+<strong>1</strong> answers in the SQLite database right now.
+</div>
+<h2>First 10 users (lifted ORM round-trip)</h2>
+<table>
+<thead><tr><th>uid</th><th>users_name</th><th>email</th><th>full_name</th></tr></thead>
+<tbody><tr><td>1</td><td>alice</td><td>alice@example.com</td><td>Alice Test</td></tr><tr><td>2</td><td>bob</td><td>bob@example.com</td><td>Bob Demo</td></tr><tr><td>3</td><td>carol</td><td>carol@example.com</td><td>Carol Demo</td></tr><tr><td>4</td><td>dave</td><td>dave@example.com</td><td>Dave Demo</td></tr><tr><td>5</td><td>eve</td><td>eve@example.com</td><td>Eve Demo</td></tr></tbody>
+</table>
+<p><em>Refresh to see <code>seed_if_empty()</code> add more rows on
+each request — every column was inferred by Datalift from the
+SQL CREATE TABLE statement.</em></p>
+</body></html>
