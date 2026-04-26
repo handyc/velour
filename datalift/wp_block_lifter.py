@@ -51,6 +51,7 @@ class WpBlockTheme:
     templates: list[WpBlockTemplate] = field(default_factory=list)
     parts: list[WpBlockTemplate] = field(default_factory=list)
     skipped_files: list[Path] = field(default_factory=list)
+    patterns: dict[str, str] = field(default_factory=dict)
 
 
 # ── Block-comment parser ──────────────────────────────────────────
@@ -444,13 +445,31 @@ def _t_search(attrs, inner_html, lifter):
 
 def _t_pattern(attrs, inner_html, lifter):
     """A WP block pattern (reusable named markup, e.g.
-    'twentytwentytwo/hidden-404'). The pattern markup lives in the
-    theme's patterns/*.php files, which we don't read. Emit a
-    porter-marker that surfaces the slug so a porter knows what to
-    fill in."""
+    'twentytwentytwo/hidden-404'). If the lifter was handed a
+    `patterns` map by the theme walker, splice in the matching
+    pattern's markup (and recursively lift it). Otherwise fall
+    back to a porter slot whose context var lets the porter
+    supply markup at view time."""
     slug = attrs.get('slug', 'unknown')
-    lifter._porter(f'pattern {slug}')
     safe_slug = slug.replace('/', '_').replace('-', '_')
+    pattern_html = lifter.patterns.get(slug) if lifter.patterns else None
+    if pattern_html is not None:
+        # Recursively lift the pattern's markup with the same
+        # lifter — its block translators run as if the markup
+        # were inline. Guard against pattern→pattern→pattern
+        # cycles via _expanding set.
+        if slug in lifter._expanding:
+            lifter._porter(f'pattern cycle on {slug}')
+            return f'<!-- pattern cycle: {slug} -->'
+        lifter._expanding.add(slug)
+        try:
+            lifted = lifter.lift(pattern_html)
+        finally:
+            lifter._expanding.discard(slug)
+        return (f'<div class="wp-block-pattern" '
+                f'data-slug="{slug}">{lifted}</div>')
+    # No pattern available — emit a porter slot.
+    lifter._porter(f'pattern {slug}')
     return (f'<div class="wp-block-pattern" data-slug="{slug}">\n'
             f'  {{# PORTER: WP pattern {slug!r} — supply the markup, '
             f'or set context var pattern_{safe_slug} #}}\n'
@@ -809,10 +828,13 @@ class _BlockLifter:
     """Walks the block-comment markup of one template file and
     emits a Django-template equivalent."""
 
-    def __init__(self, app_label: str = '') -> None:
+    def __init__(self, app_label: str = '',
+                 patterns: dict[str, str] | None = None) -> None:
         self.blocks_seen: list[str] = []
         self.porter_count = 0
         self.app_label = app_label
+        self.patterns = patterns or {}
+        self._expanding: set[str] = set()
 
     def _porter(self, msg: str) -> None:
         self.porter_count += 1
@@ -948,17 +970,65 @@ def expand_classic_shortcodes(html: str) -> str:
     return html
 
 
-def lift_block_template(html: str, app_label: str = '') \
+def lift_block_template(html: str, app_label: str = '',
+                         patterns: dict[str, str] | None = None) \
         -> tuple[str, list[str], int]:
     """Translate one block-template file's HTML to a Django template.
     Returns (django_html, blocks_seen, porter_marker_count).
 
     `app_label` (optional) prefixes any `{% include %}` paths so
-    parts resolve under `<app>/parts/...`."""
-    l = _BlockLifter(app_label=app_label)
+    parts resolve under `<app>/parts/...`.
+
+    `patterns` (optional) is a slug → block-markup map; when a
+    `wp:pattern` block references a slug present in this map, its
+    markup is spliced in instead of leaving a porter slot."""
+    l = _BlockLifter(app_label=app_label, patterns=patterns)
     out = l.lift(html)
     out = expand_classic_shortcodes(out)
     return out, l.blocks_seen, l.porter_count
+
+
+# ── Pattern walker (theme patterns/*.php) ─────────────────────────
+
+_PATTERN_HEADER_SLUG_RE = re.compile(
+    r'^\s*\*\s*Slug:\s*(\S+)\s*$', re.MULTILINE)
+
+
+def parse_theme_patterns(theme_dir: Path) -> dict[str, str]:
+    """Walk `<theme>/patterns/*.php` and return slug → block-markup.
+
+    Each file is a small PHP wrapper around block markup:
+
+        <?php
+        /**
+         * Title: …
+         * Slug: twentytwentyfour/posts-3-col
+         * Categories: query
+         */
+        ?>
+        <!-- wp:query … --> … <!-- /wp:query -->
+
+    The PHP header is parsed for the Slug: line; the body after
+    the `?>` is the block markup. Files without a Slug: line are
+    skipped silently (they aren't valid WP patterns)."""
+    out: dict[str, str] = {}
+    p_dir = theme_dir / 'patterns'
+    if not p_dir.is_dir():
+        return out
+    for php in sorted(p_dir.glob('*.php')):
+        try:
+            text = php.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            continue
+        m = _PATTERN_HEADER_SLUG_RE.search(text)
+        if not m:
+            continue
+        slug = m.group(1)
+        # The body lives after the closing ?> of the header.
+        idx = text.find('?>')
+        body = text[idx + 2:].strip() if idx >= 0 else text
+        out[slug] = body
+    return out
 
 
 # ── Theme walker ──────────────────────────────────────────────────
@@ -979,6 +1049,10 @@ def parse_block_theme(theme_dir: Path,
                             theme_json=parse_theme_json(theme_dir))
     if not theme_dir.is_dir():
         return result
+    # Patterns (PHP-wrapped block markup) — read once, reused by
+    # every template/part that references them.
+    patterns = parse_theme_patterns(theme_dir)
+    result.patterns = patterns
     # Templates
     tpl_dir = theme_dir / 'templates'
     if tpl_dir.is_dir():
@@ -989,7 +1063,7 @@ def parse_block_theme(theme_dir: Path,
                 result.skipped_files.append(tpl.relative_to(theme_dir))
                 continue
             django_html, blocks, porter_n = lift_block_template(
-                src, app_label=app_label)
+                src, app_label=app_label, patterns=patterns)
             result.templates.append(WpBlockTemplate(
                 source=tpl.relative_to(theme_dir),
                 name=tpl.stem,
@@ -1008,7 +1082,7 @@ def parse_block_theme(theme_dir: Path,
                 result.skipped_files.append(part.relative_to(theme_dir))
                 continue
             django_html, blocks, porter_n = lift_block_template(
-                src, app_label=app_label)
+                src, app_label=app_label, patterns=patterns)
             result.parts.append(WpBlockTemplate(
                 source=part.relative_to(theme_dir),
                 name=part.stem,

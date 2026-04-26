@@ -553,6 +553,57 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt4_real_world_test',
+        'title': 'Real-world test: Twenty Twenty-Four → pattern resolution',
+        'subtitle': 'A different theme entirely surfaces a real bug',
+        'image': 'tt4_real_world_index.png',
+        'metrics': [
+            ('theme tested',
+             'Twenty Twenty-Four (downloaded from wordpress.org)'),
+            ('files lifted',
+             '11 templates + 4 parts + 27 patterns'),
+            ('blocks before pattern resolution',
+             '111 (templates emit ~empty index — patterns held the markup)'),
+            ('blocks after pattern resolution',
+             '373 (3.4x — patterns now spliced inline + recursively lifted)'),
+            ('lifter additions',
+             'parse_theme_patterns() walks patterns/*.php; '
+             '_t_pattern splices when slug matches; cycle-safe'),
+            ('view-side fix',
+             '_PostCtx.excerpt now lifts + strips tags before slicing '
+             '(was leaking raw <!-- wp: --> comments into listing pages)'),
+            ('test count', '63 unit tests, all green (+7 new)'),
+        ],
+        'body': (
+            "(b) of \"a then b\" — graduate, then take the toolkit "
+            "to a theme it has never seen. Twenty Twenty-Four was "
+            "the test. Initial probe: every template + part lifted "
+            "with zero unknown-block porters, zero comment leakage. "
+            "But when swapped in for TT2 and curled, the home page "
+            "rendered as an empty header. Why: TT4's index.html is "
+            "literally three lines — header part, group containing "
+            "two wp:pattern references, footer part. The actual "
+            "post-grid lives in patterns/posts-3-col.php. Without "
+            "pattern resolution the lifter emitted porter slots "
+            "where the post grid should be. Round 9 added "
+            "parse_theme_patterns() to walk patterns/*.php, parse "
+            "the PHP comment header for the Slug: line, and feed "
+            "the resulting slug→markup map into the lifter. "
+            "Pattern resolution recursively re-lifts (so a pattern "
+            "containing a pattern works) with cycle-detection. "
+            "TT4's index post-grid then renders correctly. A "
+            "second bug surfaced once index pages started populating "
+            "— _PostCtx.excerpt was slicing raw post bodies, "
+            "leaking <!-- wp: --> comments into the listing. Fixed "
+            "to lift + strip first."
+        ),
+        'reproduce': (
+            'manage.py liftwpblock /path/to/twentytwentyfour '
+            '--app tt2 --out templates/tt2'
+        ),
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',

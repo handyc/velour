@@ -987,6 +987,15 @@ rel="noopener">` link inside a `<figure
 class="wp-block-embed is-provider-<slug>">`, which is what
 the surrounding theme actually styles.
 
+**Patterns.** `wp:pattern {"slug":"<theme>/<name>"}` looks up
+the named pattern in the theme's `patterns/*.php` directory
+(parsed at lift time). When found, the pattern's markup is
+spliced inline and recursively lifted — so a pattern that
+references another pattern works, and Twenty Twenty-Four's
+`index.html` (which is essentially three lines that compose
+two patterns) renders as a real post grid. Cycle detection
+breaks pathological pattern→pattern→pattern loops.
+
 **Classic shortcodes.** Pre-Gutenberg post bodies use
 `[caption ...]<img/>caption[/caption]` and
 `[gallery ids="..."]`. After block translation completes,
@@ -1041,10 +1050,15 @@ real oEmbed cache table is a downstream concern.
 
 **Block patterns marketplace.** WP themes can reference
 named patterns from wordpress.org's pattern directory
-(`wp:pattern {"slug":"my-pattern"}`). The lifter emits a
-porter slot — your view supplies content for the named slot
-via context variable. There is no automatic download from the
-pattern directory.
+(`wp:pattern {"slug":"foo/my-pattern"}`). The lifter walks
+the *theme's own* `patterns/*.php` directory at parse time,
+parses the PHP comment header for `Slug:`, and splices the
+matching pattern's markup inline (recursively re-lifted, with
+cycle detection). For pattern slugs whose definitions live in
+the wordpress.org pattern directory rather than the theme,
+the porter-slot fallback still applies — supply the markup
+yourself via context variable. There is no automatic
+download from the pattern directory.
 
 **Editor-only state.** Block settings that control the
 *editor* experience (locks, reusable-block links, color

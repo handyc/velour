@@ -356,6 +356,106 @@ class ClassicShortcodeTests(SimpleTestCase):
         self.assertEqual(out, src)
 
 
+class PatternResolutionTests(SimpleTestCase):
+    """Real-world block themes (Twenty Twenty-Four, …) compose
+    their templates almost entirely out of wp:pattern references
+    that point into the theme's patterns/*.php files. Without
+    pattern resolution, the lifted index.html is empty and the
+    demo home page renders as just the header. With it, the
+    pattern's markup is spliced inline and recursively lifted."""
+
+    def test_pattern_with_no_map_falls_back_to_porter_slot(self):
+        out, _, porters = lift_block_template(
+            '<!-- wp:pattern {"slug":"foo/bar"} /-->')
+        self.assertIn('PORTER', out)
+        self.assertIn('pattern_foo_bar', out)
+        self.assertGreaterEqual(porters, 1)
+
+    def test_pattern_with_map_splices_markup_inline(self):
+        patterns = {
+            'mytheme/hello': (
+                '<!-- wp:paragraph -->'
+                '<p>Hello from a resolved pattern.</p>'
+                '<!-- /wp:paragraph -->'),
+        }
+        out, _, porters = lift_block_template(
+            '<!-- wp:pattern {"slug":"mytheme/hello"} /-->',
+            patterns=patterns)
+        self.assertIn('Hello from a resolved pattern.', out)
+        self.assertNotIn('PORTER', out)
+        self.assertNotIn('<!-- wp:', out)
+        # The recursively-lifted pattern should not bump the
+        # porter count just by being resolved.
+        self.assertEqual(porters, 0)
+
+    def test_pattern_resolution_is_recursive(self):
+        # Pattern A references pattern B; B contains real markup.
+        patterns = {
+            'mytheme/a': '<!-- wp:pattern {"slug":"mytheme/b"} /-->',
+            'mytheme/b': '<!-- wp:heading --><h2>B</h2><!-- /wp:heading -->',
+        }
+        out, _, _ = lift_block_template(
+            '<!-- wp:pattern {"slug":"mytheme/a"} /-->',
+            patterns=patterns)
+        self.assertIn('<h2>B</h2>', out)
+        self.assertNotIn('<!-- wp:', out)
+
+    def test_pattern_resolution_breaks_cycles(self):
+        # A → B → A — should not infinite-loop.
+        patterns = {
+            'mytheme/a': '<!-- wp:pattern {"slug":"mytheme/b"} /-->',
+            'mytheme/b': '<!-- wp:pattern {"slug":"mytheme/a"} /-->',
+        }
+        out, _, porters = lift_block_template(
+            '<!-- wp:pattern {"slug":"mytheme/a"} /-->',
+            patterns=patterns)
+        self.assertIn('pattern cycle', out)
+        self.assertGreaterEqual(porters, 1)
+
+
+class PatternWalkerTests(SimpleTestCase):
+    """parse_theme_patterns walks <theme>/patterns/*.php and
+    returns a slug → block-markup map."""
+
+    def test_parse_theme_patterns_extracts_slug_and_body(self):
+        import tempfile
+        from pathlib import Path
+        from datalift.wp_block_lifter import parse_theme_patterns
+        with tempfile.TemporaryDirectory() as td:
+            theme = Path(td)
+            (theme / 'patterns').mkdir()
+            (theme / 'patterns' / 'p1.php').write_text(
+                '<?php\n'
+                '/**\n'
+                ' * Title: My pattern\n'
+                ' * Slug: mytheme/p1\n'
+                ' * Categories: query\n'
+                ' */\n'
+                '?>\n'
+                '<!-- wp:paragraph --><p>Body.</p><!-- /wp:paragraph -->\n')
+            patterns = parse_theme_patterns(theme)
+            self.assertIn('mytheme/p1', patterns)
+            self.assertIn('<p>Body.</p>', patterns['mytheme/p1'])
+
+    def test_parse_theme_patterns_skips_files_without_slug_header(self):
+        import tempfile
+        from pathlib import Path
+        from datalift.wp_block_lifter import parse_theme_patterns
+        with tempfile.TemporaryDirectory() as td:
+            theme = Path(td)
+            (theme / 'patterns').mkdir()
+            (theme / 'patterns' / 'noslug.php').write_text(
+                '<?php /** Title: noslug */ ?>\n<p>x</p>')
+            self.assertEqual(parse_theme_patterns(theme), {})
+
+    def test_parse_theme_patterns_returns_empty_when_no_dir(self):
+        import tempfile
+        from pathlib import Path
+        from datalift.wp_block_lifter import parse_theme_patterns
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(parse_theme_patterns(Path(td)), {})
+
+
 class QueryLoopTests(SimpleTestCase):
 
     def test_query_with_post_template(self):
