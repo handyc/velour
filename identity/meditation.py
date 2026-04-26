@@ -1068,3 +1068,98 @@ def _push_to_codex(meditation):
 
     meditation.codex_section_slug = section_slug
     meditation.save(update_fields=['codex_section_slug'])
+
+
+def refresh_mirror_index():
+    """Compose (or refresh) the orienting "Mirror Index" section at
+    the front of the Identity's Mirror manual. The Mirror has grown
+    past a thousand auto-generated sections; without an index a
+    reader sees a flat firehose of dated entries with no shape.
+
+    The Index is a single Codex section, sort_order set to a very
+    large negative number so it stays at the top regardless of how
+    many meditations land later. It summarises:
+      • how many meditations exist at each depth
+      • which voices have been used at each depth
+      • the most recent meditation per depth
+      • a one-paragraph orientation of what the manual is
+
+    Idempotent — re-running overwrites the index in place. Returns
+    the Section row, or None if Codex isn't available.
+    """
+    try:
+        from codex.models import Manual, Section
+    except ImportError:
+        return None
+    from collections import defaultdict
+    from .models import Meditation
+
+    manual = Manual.objects.filter(slug='identitys-mirror').first()
+    if manual is None:
+        return None
+
+    by_depth: dict[int, list[Meditation]] = defaultdict(list)
+    for m in Meditation.objects.order_by('depth', '-composed_at'):
+        by_depth[m.depth].append(m)
+
+    lines = [
+        "This manual is auto-composed. Each section is a meditation "
+        "Velour wrote at one of seven depth levels. The depth ladder:",
+        '',
+        '- **Level 1** — reflect on recent ticks (the last hour of attention).',
+        '- **Level 2** — reflect on recent reflections (themes across summaries).',
+        '- **Level 3** — reflect on the act of reflecting (rules and templates).',
+        '- **Level 4** — reflect on the AI that designed this system. Reads '
+        'git commits with `Co-Authored-By` lines, memory notes, and the '
+        'Developer Guide. The load-bearing layer.',
+        '- **Levels 5–7** — meditation on meditation. Each level reads the '
+        'previous and writes commentary on it. Soft-walled recursion.',
+        '',
+        'Five voices rotate by the calendar. Weekly ladders run depths 1→4 '
+        'and rotate voice by ISO week. Monthly deep ladders run depths 5→7 '
+        'and rotate voice by month.',
+        '',
+        '## Counts by depth and voice',
+        '',
+        '| depth | total | voices used | most recent |',
+        '|------:|------:|-------------|-------------|',
+    ]
+    for depth in sorted(by_depth.keys()):
+        meds = by_depth[depth]
+        voices_used = sorted({m.voice for m in meds})
+        newest = meds[0]
+        when = newest.composed_at.strftime('%Y-%m-%d')
+        lines.append(
+            f'| {depth} | {len(meds)} | '
+            f'{", ".join(voices_used)} | {when} ({newest.voice}) |')
+    lines += [
+        '',
+        '## Most recent meditation per depth',
+        '',
+    ]
+    for depth in sorted(by_depth.keys()):
+        newest = by_depth[depth][0]
+        when = newest.composed_at.strftime('%Y-%m-%d %H:%M')
+        section_slug = newest.codex_section_slug or ''
+        link = (f'[{newest.title}](#{section_slug})'
+                if section_slug else newest.title)
+        lines.append(f'- **L{depth}** ({when}, {newest.voice}) — {link}')
+
+    lines += [
+        '',
+        '*The Index is auto-refreshed when the monthly deep-meditation '
+        'ladder fires.*',
+    ]
+
+    section, _ = Section.objects.update_or_create(
+        manual=manual,
+        slug='mirror-index',
+        defaults={
+            'title':      'Mirror Index',
+            'body':       '\n'.join(lines),
+            # Very negative sort key so the Index stays at the top
+            # regardless of how many meditations land later.
+            'sort_order': -10 ** 18,
+        },
+    )
+    return section

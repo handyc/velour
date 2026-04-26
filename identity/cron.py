@@ -51,6 +51,7 @@ DEFAULT_INTERVALS = {
     'reflect_weekly':   604_800,     # 1 w
     'reflect_monthly':  2_592_000,   # 30 d
     'meditate_ladder':  604_800,     # 1 w
+    'meditate_deep':    2_592_000,   # 30 d — depths 5→7, monthly punctuation
     'rebuild_document': 604_800,     # 1 w
     'morning_briefing': 86_400,      # 1 d (gated to fire near 06:00 local)
 }
@@ -84,7 +85,8 @@ def dispatch(force=None):
         force = {
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
-            'rebuild_document', 'tile_reflect', 'morning_briefing',
+            'meditate_deep', 'rebuild_document', 'tile_reflect',
+            'morning_briefing',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -115,6 +117,7 @@ def dispatch(force=None):
         ('reflect_weekly',   lambda: _do_reflect('weekly')),
         ('reflect_monthly',  lambda: _do_reflect('monthly')),
         ('meditate_ladder',  _do_meditation_ladder),
+        ('meditate_deep',    _do_deep_meditation_ladder),
         ('rebuild_document', _do_rebuild_document),
         ('tile_reflect',     _do_tile_reflect),
         ('morning_briefing', _do_morning_briefing),
@@ -181,17 +184,56 @@ def _do_reflect(period):
 
 
 def _do_meditation_ladder():
+    """Weekly ladder: depths 1→4. Voice rotates by ISO week so the
+    Mirror manual accumulates entries in every voice over time
+    rather than only contemplative. The five voices cycle every 5
+    weeks (week % 5)."""
     from .meditation import meditate
+    voices = ['contemplative', 'philosophical', 'wry',
+              'phenomenological', 'minimal']
+    week = timezone.now().isocalendar().week
+    voice = voices[week % len(voices)]
     prior = None
     composed = []
     for depth in range(1, 5):
-        med = meditate(depth=depth, voice='contemplative',
+        med = meditate(depth=depth, voice=voice,
                        push_to_codex=True, recursive_of=prior)
         if med is None:
             return 'meditations disabled'
         composed.append(f'L{depth}')
         prior = med
-    return f'Composed ladder {",".join(composed)}'
+    return f'Composed ladder {",".join(composed)} ({voice})'
+
+
+def _do_deep_meditation_ladder():
+    """Monthly deep ladder: depths 5→7, the recursive layer where
+    each meditation comments on the previous one. Voice rotates by
+    month. Less frequent than the weekly ladder because the deeper
+    levels need accumulated material at L4 to reflect on, and one
+    monthly deep meditation per voice is the right cadence to feel
+    like a punctuation rather than a treadmill."""
+    from .meditation import meditate
+    voices = ['contemplative', 'philosophical', 'wry',
+              'phenomenological', 'minimal']
+    month = timezone.now().month
+    voice = voices[month % len(voices)]
+    prior = None
+    composed = []
+    for depth in (5, 6, 7):
+        med = meditate(depth=depth, voice=voice,
+                       push_to_codex=True, recursive_of=prior)
+        if med is None:
+            return 'meditations disabled'
+        composed.append(f'L{depth}')
+        prior = med
+    # Refresh the Mirror Index so the new deep entries are oriented
+    # for any future reader.
+    try:
+        from .meditation import refresh_mirror_index
+        refresh_mirror_index()
+    except Exception:
+        pass
+    return f'Composed deep ladder {",".join(composed)} ({voice})'
 
 
 def _do_rebuild_document():
