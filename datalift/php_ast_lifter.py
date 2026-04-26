@@ -375,9 +375,33 @@ class _Visitor:
         return '    ' * indent + f'print({", ".join(args)})'
 
     def visit_return_statement(self, node, indent: int) -> str:
+        # PHP config files commonly use top-level `<?php return [...];`
+        # to declare a module-level value (Symfony / Yii / Laravel
+        # config style). Python doesn't allow top-level `return`, so
+        # at indent 0 emit it as `_module_value = expr` instead.
+        # Also: PHP allows `return $x = $expr;` (assign then return);
+        # Python doesn't, so split into two statements.
         for c in node.children:
-            if c.type not in ('return', ';'):
-                return '    ' * indent + 'return ' + self.visit_expr(c)
+            if c.type in ('return', ';'):
+                continue
+            pad = '    ' * indent
+            if c.type == 'assignment_expression':
+                # `return X = expr` → `X = expr; return X`
+                left = c.child_by_field_name('left')
+                right = c.child_by_field_name('right')
+                lhs = self.visit_expr(left) if left else ''
+                rhs = self.visit_expr(right) if right else ''
+                if indent == 0:
+                    return (f'# PORTER: PHP top-level `return X = expr`\n'
+                            f'{lhs} = {rhs}\n'
+                            f'_module_value = {lhs}')
+                return f'{pad}{lhs} = {rhs}\n{pad}return {lhs}'
+            expr = self.visit_expr(c)
+            if indent == 0:
+                return (f'# PORTER: PHP top-level `return` — '
+                        f'config-file pattern; consume via _module_value\n'
+                        f'_module_value = {expr}')
+            return pad + 'return ' + expr
         return '    ' * indent + 'return'
 
     def visit_throw_statement(self, node, indent: int) -> str:
@@ -528,15 +552,53 @@ class _Visitor:
 
     def _maybe_walrus(self, cond: str) -> str:
         """Convert `var = expr` (PHP assignment-in-condition) into
-        Python walrus form `(var := expr)`. Recognises three shapes:
+        Python walrus form `(var := expr)`. Three shapes handled:
         bare `var = expr`, `(var = expr) <op> rhs`, and a leading
-        `not var = expr`."""
+        `not var = expr`. Subscript LHS (`arr['k'] = v`) is rewritten
+        to a temporary: `(__tmp := v) is not None and arr['k'] := v`
+        — but Python doesn't allow walrus on a subscript, so we just
+        evaluate the RHS into a temp and use the assignment as a
+        side effect. For now: if the LHS is subscripted, fall back
+        to comparing the RHS against truth and emit a porter marker
+        in a comment."""
         s = cond.strip()
-        if ':=' in s or '==' in s.replace('===', '') or '!=' in s.replace('!==', ''):
+        if ':=' in s or '==' in s.replace('===', '') \
+                or '!=' in s.replace('!==', ''):
             return cond
-        m = re.match(r'^\(?\s*(?:not\s+)?(\w+)\s*=\s*(?!=)(.+?)\)?$', s)
+        # Subscript LHS form: `arr['k'] = expr` — Python's walrus
+        # can't bind to a subscript. Best effort: turn the assignment
+        # into `( arr['k'] := expr )` won't compile, so we drop the
+        # binding and just evaluate the RHS as the condition.
+        m_sub = re.match(
+            r'^\(?\s*(?:not\s+)?([\w.]+\[[^\]]+\](?:\[[^\]]+\])*)\s*='
+            r'\s*(?!=)(.+?)\)?$', s)
+        if m_sub:
+            prefix = 'not ' if s.lstrip('(').strip().startswith('not ') \
+                     else ''
+            return (f'{prefix}({m_sub.group(2).strip()})'
+                    f'  # PORTER: PHP `{m_sub.group(1)} = ...` '
+                    f'in cond — bind manually')
+        # `var = expr` (with optional outer parens stripped). Use
+        # paren-balanced matching for the RHS so we don't mid-cut a
+        # function call like `readdir(sFolder)`.
+        stripped = s
+        if stripped.startswith('(') and stripped.endswith(')'):
+            inner = stripped[1:-1].strip()
+            depth = 0
+            ok = True
+            for j, ch in enumerate(inner):
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth < 0:
+                        ok = False
+                        break
+            if ok and depth == 0:
+                stripped = inner
+        m = re.match(r'^(?:not\s+)?(\w+)\s*=\s*(?!=)(.+)$', stripped)
         if m and '=' not in m.group(2):
-            prefix = 'not ' if s.lstrip('(').strip().startswith('not ') else ''
+            prefix = 'not ' if stripped.startswith('not ') else ''
             return f'{prefix}({m.group(1)} := {m.group(2).strip()})'
         return cond
 
@@ -554,79 +616,101 @@ class _Visitor:
                 f'{pad}    if not ({cond}): break')
 
     def visit_for_statement(self, node, indent: int) -> str:
-        # Try to recognise `for ($i = N; $i < M; $i++)` → `for i in range(...)`.
-        kids = list(node.children)
-        # Field names: initialize, condition, update, body
+        # Recognise `for ($i = N; $i < M; $i++)` and `<=` variant
+        # → `for i in range(...)`.
         init = node.child_by_field_name('initialize')
         cond = node.child_by_field_name('condition')
         upd = node.child_by_field_name('update')
         body = node.child_by_field_name('body')
         m_init = re.match(r'^\$(\w+)\s*=\s*(\S+)$',
                            self.text(init).strip() if init else '')
-        m_cond = re.match(r'^\$(\w+)\s*<\s*(.+)$',
+        m_cond = re.match(r'^\$(\w+)\s*(<=?|>)\s*(.+)$',
                            self.text(cond).strip() if cond else '')
-        m_upd = re.match(r'^\$(\w+)\+\+$',
+        m_upd = re.match(r'^\$(\w+)(\+\+|--)$',
                           self.text(upd).strip() if upd else '')
         body_py = self.visit(body, indent + 1) if body else \
                    '    ' * (indent + 1) + 'pass'
         if m_init and m_cond and m_upd \
                 and m_init.group(1) == m_cond.group(1) == m_upd.group(1):
             var = _safe_name(m_init.group(1))
-            return (f'{"    " * indent}for {var} in range({m_init.group(2)}, '
-                    f'{m_cond.group(2)}):\n{body_py}')
-        # Fallback: emit a porter marker plus the body.
+            start = m_init.group(2)
+            op = m_cond.group(2)
+            stop = m_cond.group(3)
+            # `<= N` → `range(start, N + 1)` to match PHP's inclusive
+            # upper bound; `<` stays as-is.
+            if op == '<=':
+                stop = f'({stop}) + 1'
+            elif op == '>':
+                # Reverse iteration; needs a stride. Best effort: emit
+                # range with negative step.
+                return (f'{"    " * indent}for {var} in '
+                        f'range({start}, {stop}, -1):\n{body_py}')
+            return (f'{"    " * indent}for {var} in '
+                    f'range({start}, {stop}):\n{body_py}')
         pad = '    ' * indent
         return f'{pad}# PORTER: for-loop — rewrite as Python iteration\n{body_py}'
 
     def visit_foreach_statement(self, node, indent: int) -> str:
-        # children include the collection expr, `as`, key/value bindings, body
-        body = node.child_by_field_name('body')
-        # Walk children to find the collection and bindings.
+        # tree-sitter-php structures: `foreach (COLL as VAR_OR_PAIR_OR_BYREF) BODY`
+        # Pre-`as`: the collection expression. Post-`as`: one of
+        #   - variable_name                              → for v in coll
+        #   - pair { variable_name => variable_name }    → for k, v in coll.items()
+        #   - by_ref { & variable_name }                 → for v in coll  (strip &)
+        #   - by_ref inside pair                         → same with stripping
+        #   - list_literal($a, $b, ...)                  → for (a, b) in coll
+        body = None
+        for c in node.children:
+            if c.type == 'compound_statement':
+                body = c
         coll = None
-        key = None
-        value = None
+        binding = None
         seen_as = False
         for c in node.children:
             if c.type == 'as':
                 seen_as = True
                 continue
-            if c.type in ('foreach', '(', ')'):
+            if c.type in ('foreach', '(', ')', 'compound_statement'):
                 continue
-            if c.type == body.type:
-                continue
-            if not seen_as:
-                # First pre-`as` expression is the collection
-                if coll is None and c.type not in ('comment',):
-                    coll = c
-            else:
-                # Post-`as` children: variable_name [, =>, variable_name]
-                if c.type == 'variable_name':
-                    if key is None:
-                        key = c
-                    else:
-                        value = c
-                elif c.type == 'pair':
-                    # `$k => $v` — represented as a `pair` node sometimes
-                    for pc in c.children:
-                        if pc.type == 'variable_name':
-                            if key is None:
-                                key = pc
-                            else:
-                                value = pc
-        if coll is None:
+            if not seen_as and coll is None:
+                coll = c
+            elif seen_as and binding is None:
+                binding = c
+        if coll is None or binding is None:
             return self.unknown(node, indent)
         coll_py = self.visit_expr(coll)
         body_py = self.visit(body, indent + 1) if body else \
                    '    ' * (indent + 1) + 'pass'
         pad = '    ' * indent
-        if key is not None and value is not None:
-            kn = _safe_name(self.text(key).lstrip('$'))
-            vn = _safe_name(self.text(value).lstrip('$'))
-            return f'{pad}for {kn}, {vn} in {coll_py}.items():\n{body_py}'
-        if key is not None:
-            vn = _safe_name(self.text(key).lstrip('$'))
-            return f'{pad}for {vn} in {coll_py}:\n{body_py}'
-        return self.unknown(node, indent)
+
+        def name_from(n):
+            """Strip `$`/`&` and return a safe Python identifier."""
+            if n.type == 'by_ref':
+                for cc in n.children:
+                    if cc.type == 'variable_name':
+                        return _safe_name(self.text(cc).lstrip('$'))
+            return _safe_name(self.text(n).lstrip('$'))
+
+        if binding.type == 'pair':
+            key_node = None
+            val_node = None
+            for cc in binding.children:
+                if cc.type in ('variable_name', 'by_ref'):
+                    if key_node is None:
+                        key_node = cc
+                    else:
+                        val_node = cc
+            if key_node and val_node:
+                return (f'{pad}for {name_from(key_node)}, '
+                        f'{name_from(val_node)} in {coll_py}.items():\n{body_py}')
+        if binding.type == 'list_literal':
+            names = []
+            for cc in binding.children:
+                if cc.type == 'variable_name':
+                    names.append(_safe_name(self.text(cc).lstrip('$')))
+            if names:
+                return (f'{pad}for {", ".join(names)} in {coll_py}:\n{body_py}')
+        # Single-name binding (variable_name or by_ref)
+        return f'{pad}for {name_from(binding)} in {coll_py}:\n{body_py}'
 
     def visit_switch_statement(self, node, indent: int) -> str:
         cond_node = node.child_by_field_name('condition')
@@ -830,10 +914,22 @@ class _Visitor:
         right = node.child_by_field_name('right')
         op_node = node.child_by_field_name('operator')
         op = self.text(op_node) if op_node else ''
+        # tree-sitter sometimes doesn't tag the `instanceof` operator
+        # via the `operator` field — search the children manually.
+        if not op:
+            for c in node.children:
+                if c is not left and c is not right and c.type != 'comment':
+                    op = self.text(c)
+                    break
         l = self.visit_expr(left) if left else ''
         r = self.visit_expr(right) if right else ''
+        # PHP `instanceof` → Python `isinstance(x, Cls)`.
+        if op == 'instanceof':
+            # Right-hand side is the class name; strip any leading `\`.
+            return f'isinstance({l}, {r.lstrip(".")})'
         op_map = {'.': '+', '===': '==', '!==': '!=', '&&': 'and',
-                   '||': 'or', '??': 'or'}
+                   '||': 'or', '??': 'or', 'xor': '^',
+                   'and': 'and', 'or': 'or'}
         py_op = op_map.get(op, op)
         return f'({l} {py_op} {r})'
 
@@ -1162,14 +1258,55 @@ class _Visitor:
                 return f'__import__("copy").copy({self.visit_expr(c)})'
         return 'None'
 
+    def expr_error_suppression_expression(self, node) -> str:
+        # PHP `@expr` (error suppression). Python has no equivalent;
+        # just strip the `@` and emit the inner expression.
+        for c in node.children:
+            if c.type != '@':
+                return self.visit_expr(c)
+        return ''
+
+    def expr_reference_modifier(self, node) -> str:
+        # Pass-by-reference markers `&$x` — Python doesn't have them.
+        # Emit just the inner expression; semantics shift but compiles.
+        return ''
+
+    def expr_by_ref(self, node) -> str:
+        # `&$variable` in a function arg. Strip the `&`.
+        for c in node.children:
+            if c.type != '&':
+                return self.visit_expr(c)
+        return ''
+
+    def expr_static_modifier(self, node) -> str:
+        return ''
+
+    def expr_visibility_modifier(self, node) -> str:
+        return ''
+
     def expr_anonymous_function(self, node) -> str:
         # PHP closures `function ($a, $b) use ($c) { ... }`. Python
         # `lambda` is single-expression; PHP closures hold full
-        # bodies. Emit a porter marker with the original.
+        # bodies. Hoist the body to a generated module-level fn
+        # in the future; for now emit a name-only stub that
+        # compiles. The porter wires the real body.
         self.porter_count += 1
-        return (f'(lambda *args, **kwargs: '
-                f'__import__("warnings").warn("PORTER: PHP closure"))'
-                f'  # PORTER closure: {self.text(node)[:80]}')
+        # Extract param names so the stub has the right arity.
+        params: list[str] = []
+        for c in node.children:
+            if c.type == 'formal_parameters':
+                for p in c.children:
+                    if p.type == 'simple_parameter':
+                        for pc in p.children:
+                            if pc.type == 'variable_name':
+                                params.append(_safe_name(
+                                    self.text(pc).lstrip('$')))
+        param_list = ', '.join(params) if params else '*args'
+        # Single-line lambda that returns None, syntactically valid.
+        return f'(lambda {param_list}: None)'
+
+    def expr_anonymous_function_creation_expression(self, node) -> str:
+        return self.expr_anonymous_function(node)
 
     def expr_arrow_function(self, node) -> str:
         # PHP 7.4 `fn ($x) => $x * 2` — single-expression closure,
