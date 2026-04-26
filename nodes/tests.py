@@ -183,3 +183,57 @@ class ApiRegisterDisabledTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(resp.status_code, 503)
+
+
+from dataclasses import dataclass
+
+from .carrying_case import pack_fleet
+
+
+@dataclass
+class _Item:
+    label: str
+    w: int
+    d: int
+    h: int
+
+
+class CarryingCasePackerTests(TestCase):
+    """The cardboard-insert packer takes a list of (label, w, d, h)
+    items and a case interior size in mm, and lays out 2D pockets
+    using a tallest-first shelf-pack."""
+
+    def test_single_item_fits(self):
+        result = pack_fleet([_Item('a', 30, 50, 15)],
+                            case_w_mm=100, case_d_mm=100, case_h_mm=20)
+        self.assertEqual(len(result.pockets), 1)
+        self.assertEqual(result.pockets[0].label, 'a')
+        self.assertEqual(result.overflow, [])
+
+    def test_overflow_when_too_many_items(self):
+        items = [_Item(f'i{i}', 60, 60, 15) for i in range(20)]
+        result = pack_fleet(items, case_w_mm=100, case_d_mm=100,
+                             case_h_mm=20)
+        self.assertEqual(len(result.pockets), 1)
+        self.assertEqual(len(result.overflow), 19)
+        self.assertFalse(result.fits)
+
+    def test_height_overflow_skipped(self):
+        # Items taller than case_h_mm are dropped to overflow even
+        # if their footprint fits.
+        items = [_Item('tall', 20, 20, 100)]
+        result = pack_fleet(items, case_w_mm=100, case_d_mm=100,
+                             case_h_mm=10)
+        self.assertEqual(len(result.pockets), 0)
+        self.assertEqual(result.overflow, ['tall'])
+
+    def test_row_wrap(self):
+        # 4 items 30 wide each, case 80 wide, margin 5:
+        # cursor 5 → 40 → 75 (third needs 75+30+5=110 > 80, wraps).
+        # Two per row → two rows.
+        items = [_Item(f'i{i}', 30, 30, 10) for i in range(4)]
+        result = pack_fleet(items, case_w_mm=80, case_d_mm=200,
+                             case_h_mm=20, margin_mm=5)
+        self.assertEqual(len(result.pockets), 4)
+        ys = sorted({p.y_mm for p in result.pockets})
+        self.assertEqual(len(ys), 2)

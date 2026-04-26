@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Carrying case · Fleet · Velour{% endblock %}
+
+{% block content %}
+<style>
+ .case-page { max-width: 1100px; margin: 0 auto; }
+ .case-form { display:flex; gap:.6rem; align-items:flex-end;
+              margin-bottom:1rem; flex-wrap:wrap; }
+ .case-form label { display:flex; flex-direction:column; font-size:.8rem;
+                    color:#8b949e; gap:.2rem; }
+ .case-form input { background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+                    padding:.3rem .5rem; border-radius:3px; width:6rem; }
+ .case-form button { background:#238636; color:white; border:none; padding:.4rem .9rem;
+                     border-radius:3px; cursor:pointer; }
+ .case-svg { background: #f7eecf; border:1px solid #d4a85a; }
+ .pocket { fill:#fff; stroke:#666; stroke-width:0.5; }
+ .pocket-text { font: 6px sans-serif; fill:#333; text-anchor:middle; }
+ .stats { display:flex; gap:2rem; font-size:.85rem; color:#8b949e;
+          margin: 1rem 0; flex-wrap:wrap; }
+ .stats b { color:#c9d1d9; }
+ .overflow { background:#5a1d1d; color:#ffb4b4; padding:.5rem .8rem;
+             border-radius:4px; margin: 1rem 0; }
+</style>
+
+<div class="case-page">
+ <h1>Fleet carrying case</h1>
+ <p style="color:#8b949e">Designs a folded-cardboard insert that
+   fits the ESP fleet inside carry-on luggage. Each pocket sized
+   from the matching <code>HardwareProfile.{width,depth,height}_mm</code>.
+   Algorithm: shelf-pack with rows, tallest-first. Cut the
+   pockets along the SVG outlines.</p>
+
+ <form class="case-form" method="get">
+  <label>case width (mm)<input type="number" name="w" value="{{ case_w }}"></label>
+  <label>case depth (mm)<input type="number" name="d" value="{{ case_d }}"></label>
+  <label>case height (mm)<input type="number" name="h" value="{{ case_h }}"></label>
+  <button type="submit">re-pack</button>
+ </form>
+
+ <div class="stats">
+  <span>Pockets placed: <b>{{ result.pockets|length }}</b></span>
+  <span>Used area: <b>{{ result.used_w_mm }} × {{ result.used_d_mm }} mm</b>
+        of <b>{{ case_w }} × {{ case_d }} mm</b></span>
+  <span>Tallest pocket: <b>up to {{ case_h }} mm</b></span>
+ </div>
+
+ {% if result.overflow %}
+ <div class="overflow">
+  Did not fit ({{ result.overflow|length }}):
+  {% for n in result.overflow %}{{ n }}{% if not forloop.last %}, {% endif %}{% endfor %}.
+  Increase case dimensions or split into two cases.
+ </div>
+ {% endif %}
+
+ <svg class="case-svg" width="100%"
+      viewBox="-10 -10 {{ case_w|add:20 }} {{ case_d|add:20 }}"
+      preserveAspectRatio="xMidYMid meet">
+   <rect x="0" y="0" width="{{ case_w }}" height="{{ case_d }}"
+         fill="#f7eecf" stroke="#222" stroke-width="1.5"/>
+   {% for p in result.pockets %}
+     <rect class="pocket"
+           x="{{ p.x_mm }}" y="{{ p.y_mm }}"
+           width="{{ p.w_mm }}" height="{{ p.d_mm }}"/>
+     <text class="pocket-text"
+           x="{{ p.x_mm|add:p.w_mm|floatformat:0 }}"
+           y="{{ p.y_mm|add:p.d_mm|floatformat:0 }}"
+           transform="translate(-{{ p.w_mm }} -{{ p.d_mm }}) translate({{ p.w_mm }} {{ p.d_mm }})">
+       {{ p.label }}
+     </text>
+   {% endfor %}
+ </svg>
+
+ <p style="font-size:.8rem; color:#8b949e">
+   Print the SVG at 1:1 scale on letter or A4, glue onto a sheet of
+   2 mm cardboard, and cut along the inner pocket outlines.
+ </p>
+
+ <p style="margin-top:2rem"><a href="{% url 'nodes:list' %}">← back to fleet</a></p>
+</div>
+{% endblock %}

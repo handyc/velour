@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from experiments.models import Experiment
 
+from .carrying_case import fleet_items, pack_fleet
 from .models import Firmware, HardwareProfile, Node, SensorReading
 
 
@@ -911,3 +912,24 @@ def api_identity_json(request, slug):
             'mood_intensity': 0.5,
             'name':           'Velour',
         })
+
+
+@login_required
+def carrying_case(request):
+    """Carrying-case insert designer. Pick the case interior dims;
+    pack the fleet's hardware profiles into 2D pockets; render a
+    print-ready SVG layout."""
+    try:
+        case_w = int(request.GET.get('w', 280))
+        case_d = int(request.GET.get('d', 195))
+        case_h = int(request.GET.get('h', 60))
+    except ValueError:
+        case_w, case_d, case_h = 280, 195, 60
+    nodes = Node.objects.select_related('hardware_profile').order_by('nickname')
+    items = fleet_items(nodes)
+    result = pack_fleet(items, case_w, case_d, case_h)
+    return render(request, 'nodes/carrying_case.html', {
+        'case_w': case_w, 'case_d': case_d, 'case_h': case_h,
+        'result': result,
+        'nodes': nodes,
+    })

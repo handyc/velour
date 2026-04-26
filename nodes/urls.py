@@ -8,6 +8,7 @@ app_name = 'nodes'
 urlpatterns = [
     path('',                         views.node_list,       name='list'),
     path('add/',                     views.node_add,        name='add'),
+    path('carrying-case/',           views.carrying_case,   name='carrying_case'),
     path('hardware/',                views.hardware_list,   name='hardware_list'),
     path('hardware/add/',            views.hardware_add,    name='hardware_add'),
     path('hardware/<int:pk>/edit/',  views.hardware_edit,   name='hardware_edit'),

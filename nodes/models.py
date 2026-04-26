@@ -59,6 +59,13 @@ class HardwareProfile(models.Model):
     adc_bits = models.PositiveIntegerField(null=True, blank=True, help_text='ADC resolution in bits.')
     gpio_count = models.PositiveIntegerField(null=True, blank=True, help_text='Usable GPIO count.')
     notes = models.TextField(blank=True)
+    # Physical dimensions (millimetres). Used by the carrying-case
+    # planner to lay out cardboard insert pockets per board family.
+    # Defaults are sized for a standard ESP32 DevKit-V1 footprint;
+    # narrower or taller variants override per row.
+    width_mm = models.PositiveSmallIntegerField(default=28)
+    depth_mm = models.PositiveSmallIntegerField(default=55)
+    height_mm = models.PositiveSmallIntegerField(default=15)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
