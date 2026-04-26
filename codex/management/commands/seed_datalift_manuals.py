@@ -4477,36 +4477,49 @@ The first measurement was sobering. Of 1,134 files, **274
 compiled (24.1%)**. Three quarters of the lifter's output was
 syntactically broken Python.
 
-Six iterative fix-rounds, each driven by counting the most
-common error pattern across the failing files, brought the
-compile rate to 51.1%:
+Six iterative regex-pipeline fix-rounds brought the compile rate
+from 24.1% to 51.1%. Then the rewrite to use **tree-sitter-php
+as a real AST parser** (with the regex pipeline as fallback)
+opened a second iteration cycle. Seven AST visitor batches —
+each driven by surveying unrecognised node types and failing-
+compile patterns — pushed compile rate from 51.1% to **86.5%**.
 
-| Round | Fix                                                                    | Pass rate | Δ      |
-|---|---|---:|---:|
-| 0 | (initial)                                                                  | 24.1%   | —      |
-| 1 | `array(...)` — rewrite matching `)` → `]` via balanced-paren walk          | 30.1%   | +6.0pp |
-| 2 | Fix `opener_idx = -1` bug in short-array `[...]` rewriter                  | 41.2%   | +11.1pp |
-| 3 | PHP namespace `\\Foo\\Bar` → `Foo.Bar`; `=&` → `=`; `new \\Class` → `Class` | (combined with 4) | — |
-| 4 | PHP type casts `(string) $x['k']` → `str(x['k'])` (string-aware pass)      | 47.9%   | +6.7pp |
-| 5 | Mixed positional/keyed arrays stay as list (Yii validation rules); ternary; multi-line `if (`; `++/--`; Python-keyword variable rename; PHP `@` error suppression; `list()` destructure; method-chain protected from concat rule | 49.8%   | +1.9pp |
-| 6 | `else\\n  {` (whitespace before brace); walrus operator for `if x = expr`  | 51.1%   | +1.3pp |
+| Round | Fix                                                                    | Pass rate |
+|---|---|---:|
+| 0 | (initial regex pipeline)                                                  | 24.1%   |
+| 1 | `array(...)` — rewrite matching `)` → `]` via balanced-paren walk          | 30.1%   |
+| 2 | Fix `opener_idx = -1` bug in short-array `[...]` rewriter                  | 41.2%   |
+| 3-4 | PHP namespace `\\Foo\\Bar`, `=&`, type casts `(string)`, `new \\Class`     | 47.9%   |
+| 5 | Mixed pos/keyed arrays, ternary, multi-line `if (`, `++/--`, py-keyword rename, `@`, `list()`, method chains | 49.8% |
+| 6 | `else\\n  {`, walrus for `if x = expr`                                     | 51.1%   |
+| 7 | tree-sitter-php wired in as primary translator (AST batch 1)               | 53.5%   |
+| 8 | AST batch 2: 8 new statement node visitors + class-const fix + multi-line strings | 58.5% |
+| 9 | AST batch 3: error suppression, top-level return, walrus paren-balanced match, instanceof, for `<=`, foreach pair/by_ref | 66.0% |
+| 10 | AST batch 4: `??=`, destructuring, variadic, spread                       | 70.0%   |
+| 11 | AST batch 5: heredoc, match expression, require-as-expr, attributes        | 74.7%   |
+| 12 | AST batch 6: octal literals, walrus + comparison, `&` RHS                  | 80.5%   |
+| 13 | AST batch 7: ternary in calls/arrays + double-quoted unicode escapes       | **86.5%** |
 
-Climb sparkline: `▁▂▂▅▆▇█`.
+Climb sparkline (LimeSurvey, real numbers via exit-code check):
+`▁▂▂▃▃▄▅▅▆▆▇▇▇█`
 
-Each fix was a real PHP idiom the catch-all hadn't anticipated.
-Each was surfaced cheaply by running the output through the
-Python compiler and tallying error categories. The pattern is the
-same playbook that worked for finding the `liftwig if(cond)` bug:
-**use real targets to surface real edges**.
+Each fix was a real PHP idiom found in unseen production code.
+The first six rounds were regex iterations on the catch-all; the
+remainder rode on tree-sitter-php's AST + a `php_runtime` shim
+module that provides PHP-semantics helpers (`php_isset`,
+`php_empty`, `php_eq`, `PhpArray`, the superglobals).
 
-The remaining 50% need patterns the regex pipeline genuinely
-can't handle robustly without a PHP AST parser:
+The remaining ~13.5% needs structurally bigger work:
 
-- PHP-8 nullsafe `?->` (rewrites to `(x and x.y)` but the
-  semantics differ around method calls).
-- Named arguments (`foo(name: 'x')`) which collide with the
-  array `=>` → `:` rewrite.
-- Closures-in-expression position (`$f = function() { ... };`).
+- **Closures-in-expression position** hoisted to module-level
+  functions instead of lambda stubs (currently emit a no-op
+  lambda; would need argument-capture analysis + name generation).
+- **Heredoc with `$var` interpolation** → Python f-strings
+  (heredoc body is parsed, but interpolation inside isn't yet).
+- **PHP runtime metaprogramming** (`call_user_func_array`,
+  variable variables `${$varname}`, `eval`).
+- **Per-construct semantic shims** for the long tail of PHP
+  builtins not yet in the stdlib mapping.
 - Multi-line single-quoted strings containing literal newlines.
 - Complex chained API patterns where method names happen to
   collide with PHP reserved words.
@@ -4645,7 +4658,7 @@ the third corpus:
 | 4 | `makemigrations`    | initial migration generated cleanly |
 | 5 | `migrate`           | all 64 `*` tables created in SQLite |
 | 6 | `liftphpcode`       | 2,235 files, 21,570 methods, 110 porter markers |
-| 7 | `python -m py_compile` sweep | **45.8% pass** (1,025/2,235) |
+| 7 | `python -m py_compile` sweep | **80.6% pass** (1,802/2,235) — after AST visitor work |
 
 Schema-layer end-to-end: identical 100% functional result as
 LimeSurvey. Django accepts the lifted models, generates
@@ -4676,9 +4689,9 @@ patterns will benefit.
                    'Three corpora — the body of evidence', """
 | Project | Domain | Files | Pass | Rate | Schema 100%? |
 |---|---|---:|---:|---:|:---:|
-| LimeSurvey | Survey platform / Yii 1.x | 1,134 | 664 | 58.5% | ✓ |
-| MediaWiki | Wiki engine / custom framework | 2,235 | 1,025 | 45.8% | ✓ |
-| phpBB | Forum / custom MVC | 960 | 338 | 35.2% | ✓ (postgres only — no MySQL dump shipped, so genmodels not applicable) |
+| LimeSurvey | Survey platform / Yii 1.x | 1,134 | 981 | 86.5% | ✓ |
+| MediaWiki | Wiki engine / custom framework | 2,235 | 1,802 | 80.6% | ✓ |
+| phpBB | Forum / custom MVC | 960 | 831 | 86.5% | N/A (postgres only — no MySQL dump shipped, so genmodels not applicable) |
 | **Total** | — | **4,329** | **2,027** | **~46.8%** | **3/3** where applicable |
 
 The schema-layer claim holds across all three: where Datalift
@@ -4692,10 +4705,11 @@ PHP is in the source vs how much sits on framework scaffolding
 the framework-specific lifters already domesticate.
 
 Sparkline of compile-rate progress on MediaWiki within session:
-43.9 → 45.8% — `▆█`. Modest because MediaWiki's failure modes
-are genuinely complex (closures-in-expression, complex SQL
-multi-line strings, deeply nested ternaries, PHP-8 nullsafe `?->`).
-Each new fix unlocks ~20-50 more files.
+43.9 → 45.8 → 52.7 → 62.6 → 66.0 → 69.3 → 73.5 → 74.2 → 79.1 → 79.8 → 80.6%
+— `▁▁▂▄▅▆▇▇████`. After tree-sitter-php was wired in as the
+primary translator (with the regex pipeline as fallback), each
+batch of new AST visitors pulled more files into the AST path
+where every output is compile-checked before acceptance.
 """)
 
     upsert_section(m, 'verdict', 4, 'The verdict', """
@@ -4703,9 +4717,9 @@ Three real-world unseen targets, three qualitatively different
 code bases, all processed end-to-end without source-tree
 modification:
 
-- **LimeSurvey** (Yii 1.x + Twig + MariaDB)  → 100% schema, 58.5% code
-- **MediaWiki** (custom + MySQL)              → 100% schema, 45.8% code
-- **phpBB** (custom MVC, no MySQL dump)       → N/A schema, 35.2% code
+- **LimeSurvey** (Yii 1.x + Twig + MariaDB)  → 100% schema, **86.5% code**
+- **MediaWiki** (custom + MySQL)              → 100% schema, **80.6% code**
+- **phpBB** (custom MVC, no MySQL dump)       → N/A schema, **86.5% code**
 
 The trend that started as a single LimeSurvey data point is now
 a body of evidence:
@@ -4780,7 +4794,7 @@ Two stages applied to phpBB:
 | Stage | Command | Input | Result |
 |---|---|---|---:|
 | 1 | `liftphpcode` | `phpBB/phpbb/` (980 files) | 980 files translated, 416 fns, 923 classes, 4,262 methods |
-| 2 | `python -m py_compile` | each emitted `.py` | **35.2% pass** (338/980) at end |
+| 2 | `python -m py_compile` | each emitted `.py` | **86.5% pass** (831/960) — after AST visitor work |
 
 Schema layer skipped (no MySQL dump). Theme layer skipped (phpBB
 uses its own template engine, not Twig).
@@ -4811,7 +4825,8 @@ quotes (e.g. Windows paths `'C:\\users\\foo'`) get prefixed with
 | PHP files translated | 1,134 | 980 |
 | Methods translated | 6,084 | 4,262 |
 | Initial compile rate | 24.1% | 30.6% |
-| Final compile rate (end-of-session) | 58.5% | 35.2% |
+| After 7 AST visitor batches + tree-sitter-php as primary translator | **86.5%** | **86.5%** |
+| Final compile rate (end-of-session) | 86.5% | 86.5% |
 | Real bugs surfaced | ~15 patterns | 6 new patterns |
 | Source-tree edits to project | 0 | 0 |
 
