@@ -1288,22 +1288,65 @@ def _maybe_walrus(cond: str) -> str:
     `if (x := expr)`. PHP assigns-in-conditions are common; the
     walrus operator (3.8+) is the cleanest Python equivalent.
 
-    Handles three shapes seen in real code:
+    Handles five shapes seen in real code:
       `var = expr`                  → `(var := expr)`
       `(var = expr) != False`       → `((var := expr)) != False`
       `not var = expr`              → `not (var := expr)`
+      `False != (var = expr)`       → `False != (var := expr)`
+      `<expr> <op> (var = expr) [<op> ...]` (buried, any position)
     """
+    if ':=' in cond:
+        return cond
     # Bare `var = expr` at top of cond — no other operators around.
     m = re.match(r'^\s*(?:not\s+)?(\w+)\s*=\s*(?!=)(.+)$', cond.strip())
     if m and '==' not in cond and '!=' not in cond and '<=' not in cond \
-            and '>=' not in cond and ':=' not in cond:
+            and '>=' not in cond:
         prefix = 'not ' if cond.strip().startswith('not ') else ''
         return f'{prefix}({m.group(1)} := {m.group(2).strip()})'
     # `(var = expr) <op> rhs` form
     m = re.match(r'^\(\s*(\w+)\s*=\s*(?!=)([^()]+?)\)\s*(.*)$', cond.strip())
-    if m and ':=' not in cond:
+    if m:
         return f'({m.group(1)} := {m.group(2).strip()}) {m.group(3)}'
-    return cond
+    # Buried walrus with balanced-paren support: any `(var = expr)`
+    # at any depth in the cond, where `expr` may itself contain
+    # nested parens (`self.cache.get('_' + key)`). Walks the string
+    # tracking depth so we capture the matching `)` for the RHS.
+    return _buried_walrus(cond)
+
+
+def _buried_walrus(cond: str) -> str:
+    out: list[str] = []
+    i = 0
+    n = len(cond)
+    while i < n:
+        if cond[i] == '(':
+            # Look for `(\w+\s*=\s*` at this position
+            m = re.match(r'\(\s*(\w+)\s*=\s*(?!=)', cond[i:])
+            if m:
+                # Find the matching `)` for this paren
+                depth = 1
+                j = i + 1
+                while j < n and depth > 0:
+                    if cond[j] == '(':
+                        depth += 1
+                    elif cond[j] == ')':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                if depth == 0:
+                    # j is the closing `)` index
+                    rhs = cond[i + m.end():j].strip()
+                    # Make sure RHS doesn't contain `=` at depth 0
+                    # (would be ambiguous with multi-assign)
+                    if '=' not in re.sub(r'\([^()]*\)', '', rhs) \
+                            and rhs:
+                        out.append(f'({m.group(1)} := {rhs})')
+                        i = j + 1
+                        continue
+        out.append(cond[i])
+        i += 1
+    return ''.join(out)
 
 
 def _translate_block(php_body: str, indent: int = 0) -> str:
