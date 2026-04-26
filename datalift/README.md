@@ -47,7 +47,8 @@ python manage.py ingestdump path/to/dump.sql --app myapp \
 | `dumpschema` | Extract just the schema portion of a mysqldump for easier review |
 | `liftphp` | Scan a legacy PHP tree for secrets / PII before sharing it |
 | `liftsite` | Convert legacy HTML/JS/CSS into a Django `templates/` + `static/` layout |
-| `liftwp` | Translate a WordPress theme into Django templates + views + urls (public-facing only) |
+| `liftwp` | Translate a *classic* WordPress theme (PHP files) into Django templates + views + urls |
+| `liftwpblock` | Translate a *block* WordPress theme (`templates/*.html` + `theme.json`) — Twenty Twenty-Two and friends — into Django templates + a `theme.json`-driven `base.html` |
 | `liftsmarty` | Translate a Smarty theme directory (`.tpl`) into Django templates |
 | `liftwig` | Translate a Twig template directory (`.twig`) into Django templates (Drupal/Symfony/Slim) |
 | `liftblade` | Translate a Laravel Blade view directory (`.blade.php`) into Django templates |
@@ -315,6 +316,72 @@ desaturated with diff regions painted bright red.
 `browsershot` is backed by Playwright + Chromium (already in the
 venv); `shotdiff` is backed by Pillow. See `:mod:datalift.browsershot`
 for the Python API.
+
+## `liftwpblock` — WordPress *block* theme → Django templates
+
+WordPress 5.9 (2022) introduced full-site editing and block themes
+— Twenty Twenty-Two, Twenty Twenty-Three, etc. These don't ship
+PHP templates: instead `templates/*.html` and `parts/*.html` carry
+serialized block markup (`<!-- wp:query -->`, `<!-- wp:post-title /-->`)
+and `theme.json` carries colors, fonts, sizes, spacing tokens.
+
+```bash
+python manage.py liftwpblock /path/to/wp-content/themes/twentytwentytwo \
+    --app tt2_app \
+    [--out /path/to/django/project] \
+    [--worklist liftwpblock_worklist.md] \
+    [--dry-run]
+```
+
+What it translates deterministically:
+
+* `wp:query` → `{% for post in posts %}` (paginated post loop)
+* `wp:post-template` → the loop body
+* `wp:post-title`, `wp:post-content`, `wp:post-excerpt`, `wp:post-date`,
+  `wp:post-featured-image`, `wp:post-author`, `wp:post-comments`,
+  `wp:post-terms` — all bind to a Django `post` instance
+* `wp:template-part {"slug":"header"}` → `{% include "<app>/parts/header.html" %}`
+  (with optional `tagName` honoured: `<header>{% include … %}</header>`)
+* `wp:site-logo` / `wp:site-title` / `wp:site-tagline` → `site.logo`,
+  `site.name`, `site.tagline` (porter wires the context)
+* `wp:query-pagination`, `wp:query-pagination-previous`, `-next`,
+  `-numbers` → Django paginator (`posts.has_previous`, `posts.number`,
+  `posts.paginator.num_pages`, etc.)
+* `wp:separator`, `wp:spacer` (with `height` attr), `wp:image`,
+  `wp:paragraph`, `wp:heading` (`level` attr honoured)
+* `wp:group`, `wp:columns`, `wp:column`, `wp:cover`, `wp:gallery`
+  and the rest of the static-layout long tail — pass through their
+  literal HTML, drop the comment markers
+* `wp:html` (custom HTML) — raw passthrough
+* Nested JSON in block attrs (`{"query":{"perPage":10,"postType":"post"}}`)
+  is parsed correctly via balanced-brace scanning
+
+`theme.json` becomes a synthesised `base.html` (`{% extends "<app>/base.html" %}`)
+with every palette colour, font family, font size, and `custom.*`
+spacing token written as a CSS variable using WordPress's own
+`--wp--preset--*` and `--wp--custom--*` naming. The lifted
+templates render with the original theme's look out of the box;
+the porter is meant to edit `base.html` to taste.
+
+What it explicitly flags as porter work (`{# PORTER: ... #}`):
+
+* `wp:navigation` / `wp:page-list` — wire to your nav source
+* `wp:post-comments` / `wp:post-comments-form` — wire to your
+  comments app
+* `wp:shortcode` — translate to a Django template tag
+* Unknown blocks — strip the comment, keep the inner HTML, count
+  in the worklist
+
+Output:
+
+* `templates/<app>/base.html` — synthesised once, never overwritten
+  on re-runs (so porter edits survive)
+* `templates/<app>/<template>.html` for each `templates/*.html`
+* `templates/<app>/parts/<part>.html` for each `parts/*.html`
+* `<app>/wp_theme.json` — the original `theme.json` for further
+  porter wiring (e.g. into a context processor)
+* `liftwpblock_worklist.md` — block frequencies, porter markers,
+  per-template breakdown
 
 ## Coverage proof: 10 default WP themes, 0 unhandled fragments
 

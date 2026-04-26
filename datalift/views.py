@@ -216,6 +216,58 @@ GALLERY_ENTRIES = [
         'codex': 'liftyii-guide',
     },
     {
+        'slug': 'tt2_block_theme',
+        'title': 'Twenty Twenty-Two → Django, fully styled',
+        'subtitle': "WordPress's flagship FSE block theme, lifted intact",
+        'image': 'tt2_block_theme.png',
+        'metrics': [
+            ('templates lifted', '11 (index, page, single, archive, …)'),
+            ('parts lifted', '4 (header × 3 + footer)'),
+            ('blocks translated', '153'),
+            ('porter markers', '56 (nav menu + comments + page-list)'),
+            ('theme.json tokens', '40+ CSS variables (colors, fonts, spacing)'),
+            ('HTTP response', '200, 6.1 KB, runs against fake-post stub'),
+        ],
+        'body': (
+            "Twenty Twenty-Two — WordPress's flagship full-site-editing "
+            "block theme — fed straight into liftwpblock. Every "
+            "<!-- wp:* --> comment block is translated to its Django "
+            "equivalent: wp:query becomes {% for post in posts %}, "
+            "wp:template-part becomes {% include %}, post-title / "
+            "post-date / post-featured-image / post-excerpt all bind "
+            "to a Django Post instance. theme.json colors, font "
+            "families, font sizes and spacing tokens are written into "
+            "a synthesised base.html as --wp--preset--* CSS variables, "
+            "so the lifted templates render with the original theme's "
+            "look out of the box. Run against a 3-post fake context, "
+            "rendered live, screenshotted through Chromium."
+        ),
+        'reproduce': 'manage.py liftwpblock /path/to/tt2 --app tt2_app',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_single_page',
+        'title': 'TT2 single-page template',
+        'subtitle': 'wp:post-content + wp:separator + wp:post-comments',
+        'image': 'tt2_page_template.png',
+        'metrics': [
+            ('source', 'tt2/templates/page.html (26 lines)'),
+            ('output', 'tt2_app/page.html (24 lines, extends base)'),
+            ('porter markers', '1 (post-comments → wire to comments app)'),
+            ('HTTP response', '200, 4.4 KB'),
+        ],
+        'body': (
+            "Same theme, the single-page template (`page.html`). "
+            "Renders post.title in <h1> (level=1 from block attrs), "
+            "post.featured_image, the wp:separator, post.content "
+            "marked |safe so authored HTML survives, and a porter "
+            "marker where the WP comments block needs to be wired "
+            "to whatever Django comments app the porter prefers."
+        ),
+        'reproduce': 'datalift/tests/test_wp_block_lifter.py',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'piwigo_endtoend',
         'title': 'Piwigo: the original road test',
         'subtitle': '2002-era PHP photo gallery + Smarty templates',
