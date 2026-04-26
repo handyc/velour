@@ -54,6 +54,7 @@ DEFAULT_INTERVALS = {
     'meditate_deep':    2_592_000,   # 30 d — depths 5→7, monthly punctuation
     'rebuild_document': 604_800,     # 1 w
     'morning_briefing': 86_400,      # 1 d (gated to fire near 06:00 local)
+    'app_status_report': 86_400,     # 1 d — aggregate codex_report() hooks
 }
 
 
@@ -86,7 +87,7 @@ def dispatch(force=None):
             'tick', 'reflect_hourly', 'reflect_daily',
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
             'meditate_deep', 'rebuild_document', 'tile_reflect',
-            'morning_briefing',
+            'morning_briefing', 'app_status_report',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -121,6 +122,7 @@ def dispatch(force=None):
         ('rebuild_document', _do_rebuild_document),
         ('tile_reflect',     _do_tile_reflect),
         ('morning_briefing', _do_morning_briefing),
+        ('app_status_report', _do_app_status_report),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -234,6 +236,16 @@ def _do_deep_meditation_ladder():
     except Exception:
         pass
     return f'Composed deep ladder {",".join(composed)} ({voice})'
+
+
+def _do_app_status_report():
+    """Daily — aggregate every app's codex_report() hook into one
+    Codex manual at /codex/app-status-{YYYY-MM-DD}/."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('codex_app_reports', stdout=buf)
+    return buf.getvalue().strip() or 'app status report composed'
 
 
 def _do_rebuild_document():
