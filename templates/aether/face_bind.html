@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Bind face — {{ face.name }}{% endblock %}
+
+{% block content %}
+<style>
+ .bind-wrap { max-width: 900px; margin: 0 auto; }
+ .bind-hdr { display:flex; gap:1rem; align-items:baseline; margin-bottom:1rem; }
+ .bind-hdr h2 { margin: 0; }
+ .bind-hdr .sub { color:#8b949e; font-size:.82rem; }
+ .ent-list { display: grid; grid-template-columns: 1fr 1fr; gap:.4rem; }
+ .ent { background:#0d1117; border:1px solid #30363d; border-radius:4px;
+        padding:.4rem .6rem; display:flex; gap:.4rem; align-items:center;
+        font-size:.82rem; }
+ .ent.npc { border-color: #58a6ff; }
+ .ent .label { flex: 1; color:#c9d1d9; }
+ .ent .label .world { color:#8b949e; font-size:.7rem; display:block; }
+ .ent .has-face { color:#f0c040; font-size:.7rem; }
+ .ent button { background:#238636; color:white; border:none; padding:.3rem .6rem;
+               border-radius:3px; cursor:pointer; font-size:.75rem; }
+ .ent button:hover { background:#2ea043; }
+</style>
+
+<div class="bind-wrap">
+  <div class="bind-hdr">
+    <h2>Bind face: {{ face.name }}</h2>
+    <span class="sub">Pick the avatar this face should appear on.
+      NPCs (with wander scripts attached) are listed first.</span>
+  </div>
+
+  <p><a href="{% url 'aether:face_library' %}">← back to face library</a></p>
+
+  <form method="post" action="">
+    {% csrf_token %}
+    <div class="ent-list">
+      {% for e in entities %}
+        <div class="ent {% if e.pk in npc_ids %}npc{% endif %}">
+          <div class="label">
+            {{ e.name|default:"(unnamed)" }}
+            <span class="world">world: {{ e.world.name }}
+              {% if e.face_id %}· already has a face{% endif %}</span>
+          </div>
+          <button type="submit" name="entity_id" value="{{ e.pk }}">bind</button>
+        </div>
+      {% empty %}
+        <p>No entities found.</p>
+      {% endfor %}
+    </div>
+  </form>
+</div>
+{% endblock %}

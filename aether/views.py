@@ -1736,3 +1736,54 @@ def face_favorite(request, slug):
     face.favorite = not face.favorite
     face.save()
     return redirect('aether:face_library')
+
+
+@login_required
+def face_bind(request, slug):
+    """Pick an Entity to display this SavedFace on. The pool is
+    every Entity across worlds; recommended candidates (humanoid
+    primitives + NPCs) are listed first so users don't have to
+    scan a long list to find a face-bearing entity. POST applies
+    the binding."""
+    face = get_object_or_404(SavedFace, slug=slug)
+    if request.method == 'POST':
+        entity_id = request.POST.get('entity_id', '').strip()
+        try:
+            entity = Entity.objects.get(pk=entity_id)
+        except (Entity.DoesNotExist, ValueError):
+            return redirect('aether:face_bind', slug=face.slug)
+        entity.face = face
+        entity.save(update_fields=['face'])
+        return redirect('aether:face_library')
+
+    # Sort recommended-first: NPC scripts attached, then humanoid
+    # primitives, then everything else.
+    npc_entity_ids = set(EntityScript.objects
+        .filter(script__slug__in=['wander', 'wander-routine'])
+        .values_list('entity_id', flat=True))
+    entities = list(Entity.objects.select_related('world')
+                    .order_by('world__slug', 'name', 'pk'))
+    def _rank(e):
+        if e.pk in npc_entity_ids:
+            return 0
+        if (e.primitive or '').lower() in ('humanoid', 'avatar'):
+            return 1
+        return 2
+    entities.sort(key=_rank)
+
+    return render(request, 'aether/face_bind.html', {
+        'face': face,
+        'entities': entities[:200],
+        'npc_ids': npc_entity_ids,
+    })
+
+
+@login_required
+@require_POST
+def face_unbind(request, entity_pk):
+    """Detach the SavedFace currently on this entity (if any).
+    Returns to the entity's world."""
+    entity = get_object_or_404(Entity, pk=entity_pk)
+    entity.face = None
+    entity.save(update_fields=['face'])
+    return redirect('aether:face_library')

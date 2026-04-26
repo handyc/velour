@@ -60,6 +60,9 @@
      {% csrf_token %}
      <button type="submit" class="fav" title="toggle favorite">{% if f.favorite %}★{% else %}☆{% endif %}</button>
     </form>
+    <a class="actbtn" href="{% url 'aether:face_bind' f.slug %}"
+       style="flex:1;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:2px 6px;font-size:.7rem;border-radius:3px;cursor:pointer;text-align:center;text-decoration:none;line-height:1.5;"
+       title="bind to an avatar">🪞</a>
     <form method="post" action="{% url 'aether:face_delete' f.slug %}">
      {% csrf_token %}
      <button type="submit" class="danger" title="delete">✕</button>
