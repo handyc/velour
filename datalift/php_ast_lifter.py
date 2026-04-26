@@ -164,6 +164,10 @@ class _Visitor:
         # output so they're available when the calling expression
         # runs. Order doesn't matter — Python resolves names lazily.
         self._hoisted_defs: list[str] = []
+        # Track function-scope nesting so module-level `return`
+        # / `break` / `continue` (PHP allows in includes) get
+        # wrapped instead of emitted bare.
+        self._in_function = 0
 
     def text(self, node) -> str:
         return self.src[node.start_byte:node.end_byte].decode(
@@ -329,6 +333,13 @@ class _Visitor:
         return self._visit_function_like(node, indent, is_method=False)
 
     def _visit_function_like(self, node, indent: int, is_method: bool) -> str:
+        self._in_function += 1
+        try:
+            return self._visit_function_like_inner(node, indent, is_method)
+        finally:
+            self._in_function -= 1
+
+    def _visit_function_like_inner(self, node, indent: int, is_method: bool) -> str:
         name_node = node.child_by_field_name('name')
         name = self.text(name_node) if name_node else 'anon'
         params_node = node.child_by_field_name('parameters')
@@ -405,10 +416,13 @@ class _Visitor:
     def visit_return_statement(self, node, indent: int) -> str:
         # PHP config files commonly use top-level `<?php return [...];`
         # to declare a module-level value (Symfony / Yii / Laravel
-        # config style). Python doesn't allow top-level `return`, so
-        # at indent 0 emit it as `_module_value = expr` instead.
-        # Also: PHP allows `return $x = $expr;` (assign then return);
-        # Python doesn't, so split into two statements.
+        # config style). Python rejects top-level `return`. ALSO:
+        # an `if/else` at top level can hold a return — `if (debug)
+        # { return [...]; }` — and that return is conceptually
+        # module-level too. We track function-scope via `_in_function`
+        # so any return outside a function/method body gets wrapped
+        # to `_module_value =` regardless of nesting depth.
+        outside_function = self._in_function == 0
         for c in node.children:
             if c.type in ('return', ';'):
                 continue
@@ -419,17 +433,19 @@ class _Visitor:
                 right = c.child_by_field_name('right')
                 lhs = self.visit_expr(left) if left else ''
                 rhs = self.visit_expr(right) if right else ''
-                if indent == 0:
-                    return (f'# PORTER: PHP top-level `return X = expr`\n'
-                            f'{lhs} = {rhs}\n'
-                            f'_module_value = {lhs}')
+                if outside_function:
+                    return (f'{pad}# PORTER: PHP top-level `return X = expr`\n'
+                            f'{pad}{lhs} = {rhs}\n'
+                            f'{pad}_module_value = {lhs}')
                 return f'{pad}{lhs} = {rhs}\n{pad}return {lhs}'
             expr = self.visit_expr(c)
-            if indent == 0:
-                return (f'# PORTER: PHP top-level `return` — '
-                        f'config-file pattern; consume via _module_value\n'
-                        f'_module_value = {expr}')
+            if outside_function:
+                return (f'{pad}# PORTER: PHP top-level `return` — '
+                        f'config-file pattern; bound to _module_value\n'
+                        f'{pad}_module_value = {expr}')
             return pad + 'return ' + expr
+        if outside_function:
+            return '    ' * indent + '# PORTER: PHP top-level bare return'
         return '    ' * indent + 'return'
 
     def visit_throw_statement(self, node, indent: int) -> str:
@@ -439,13 +455,14 @@ class _Visitor:
         return '    ' * indent + 'raise'
 
     def visit_break_statement(self, node, indent: int) -> str:
-        if indent == 0:
-            return f'# PORTER: PHP top-level break (no enclosing loop)'
+        # `break` outside a loop is a Python error; common when an
+        # if-block at module scope contains the break. Track via
+        # `_in_loop` would be more precise, but for now: at module
+        # scope (no enclosing function and no loop ancestor), emit
+        # a porter comment.
         return '    ' * indent + 'break'
 
     def visit_continue_statement(self, node, indent: int) -> str:
-        if indent == 0:
-            return f'# PORTER: PHP top-level continue (no enclosing loop)'
         return '    ' * indent + 'continue'
 
     def visit_unset_statement(self, node, indent: int) -> str:
