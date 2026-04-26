@@ -403,6 +403,15 @@ def _rewrite_code(chunk: str) -> str:
                 lambda m: f'(({m.group(1)} > {m.group(2)}) - '
                           f'({m.group(1)} < {m.group(2)}))', s)
 
+    # PHP 7.4 arrow function `fn ($x) => expr` → Python lambda.
+    # Single-expression by definition (no body braces) so maps
+    # cleanly. Allow optional whitespace around the parens.
+    s = re.sub(
+        r'\bfn\s*\(([^)]*)\)\s*=>\s*',
+        lambda m: f'lambda {", ".join(p.strip().lstrip("$") for p in m.group(1).split(",") if p.strip())}: ',
+        s,
+    )
+
     # PHP `@function()` (error suppression) → strip the `@`. Python
     # doesn't have a per-expression error-suppression operator.
     s = re.sub(r'@(?=[a-zA-Z_])', '', s)
@@ -733,7 +742,9 @@ def _rewrite_named_args(s: str) -> str:
     every `:` inside a paren would corrupt dict literals. We track
     bracket nesting: convert `name: value` to `name=value` only
     when inside function-call parens AND NOT inside any nested
-    dict/list literal."""
+    dict/list literal AND when the name isn't a Python reserved
+    word (which can't be a parameter name anyway, and is more
+    likely a ternary `... ? None : x`)."""
     out: list[str] = []
     i = 0
     n = len(s)
@@ -774,8 +785,18 @@ def _rewrite_named_args(s: str) -> str:
             k = j
             while k < n and s[k] in ' \t':
                 k += 1
+            # Don't rewrite when the "name" is a Python reserved
+            # word — those can't be kwarg names, and `None : x` is
+            # almost always a ternary's else-branch separator.
+            _PY_KW = {'None', 'True', 'False', 'and', 'or', 'not',
+                       'is', 'in', 'if', 'else', 'elif', 'for',
+                       'while', 'return', 'yield', 'def', 'class',
+                       'lambda', 'try', 'except', 'finally', 'raise',
+                       'import', 'from', 'as', 'with', 'pass', 'break',
+                       'continue', 'global', 'nonlocal'}
             if k < n and s[k] == ':' and (k + 1 >= n or s[k + 1] != ':') \
-                    and paren_depth > 0 and bracket_depth == 0:
+                    and paren_depth > 0 and bracket_depth == 0 \
+                    and ident not in _PY_KW:
                 # Look ahead: must be a kwarg (followed by an expr,
                 # not a dict-style key:val with surrounding `{`).
                 # Replace `:` with `=`.
