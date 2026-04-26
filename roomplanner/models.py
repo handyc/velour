@@ -198,15 +198,25 @@ class FurniturePiece(models.Model):
     # still drive placement and fitness calcs either way.
     #
     # Supported today:
+    #
     #   {"type": "extrusion",
     #    "polygon": [[x_cm, y_cm], ...],    # closed 2D footprint,
     #                                       # coords in cm with (0,0) at
     #                                       # the piece's SW corner
     #    "height_cm": 75}                   # extrusion depth (vertical)
     #
-    # The piece-mesh-render Aether script reads this straight from the
-    # EntityScript props; non-rectangular rooms will reuse the same
-    # polygon shape under Room.polygon_cm when that lands.
+    #   {"type": "wireframe",
+    #    "vertices": [[x_cm, y_cm, z_cm], ...],
+    #                                       # 3D points, (0,0,0) at the
+    #                                       # piece's SW-bottom corner;
+    #                                       # y is up
+    #    "edges": [[i, j], ...],            # pairs of vertex indices
+    #    "color": "#aaaaaa",                # optional, defaults to
+    #                                       # piece kind colour
+    #    "line_width": 2}                   # optional, default 2
+    #
+    # The piece-mesh-render and piece-wireframe-render Aether scripts
+    # read these straight from the EntityScript props.
     geometry = models.JSONField(default=dict, blank=True,
         help_text='Optional real-geometry payload. Empty = plain box. '
                   'See FurniturePiece docstring for the accepted shapes.')

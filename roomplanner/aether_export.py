@@ -43,6 +43,7 @@ from .models import Building, Floor, Room
 
 
 PIECE_MESH_SCRIPT_SLUG = 'piece-mesh-render'
+PIECE_WIREFRAME_SCRIPT_SLUG = 'piece-wireframe-render'
 
 
 PREFIX = 'rp:'
@@ -350,12 +351,22 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
 
     # Placements: box per furniture piece, height from FurniturePiece.height_cm
     # (fall back to a reasonable default by kind).
+    # Wireframe script (optional, separate from the extrusion mesh
+    # script). Looked up here so _emit_room only needs the mesh script
+    # passed in; this is module-local and cheap.
+    wireframe_script = Script.objects.filter(
+        slug=PIECE_WIREFRAME_SCRIPT_SLUG).first()
+
     for pl in room.placements.select_related('piece').all():
         piece = pl.piece
         geom = piece.geometry or {}
         is_extrusion = (piece_script is not None
                         and geom.get('type') == 'extrusion'
                         and geom.get('polygon'))
+        is_wireframe = (wireframe_script is not None
+                        and geom.get('type') == 'wireframe'
+                        and geom.get('vertices')
+                        and geom.get('edges'))
 
         # Rotation 90/270 swaps W and D in plan footprint.
         w_plan = piece.width_cm
@@ -402,6 +413,31 @@ def _emit_room(room: Room, world: World, base_y: float, origin_x: float,
                     'heightCm': h_cm,
                     'color': color,
                 },
+                piece_script,
+            ))
+        elif is_wireframe:
+            # Vertices in cm with (0,0,0) at SW-bottom corner; the
+            # wireframe script centres the bounding-box and the
+            # entity's pos_y = base_y + ph/2 puts the bottom on the
+            # floor.
+            scripted.append((
+                Entity(
+                    world=world,
+                    name=PREFIX + f'piece-{pl.pk}',
+                    primitive='box', primitive_color=color,
+                    pos_x=ae_x, pos_y=ae_y, pos_z=ae_z,
+                    scale_x=1.0, scale_y=1.0, scale_z=1.0,
+                    rot_y=-(pl.rotation_deg or 0),
+                    behavior='scripted',
+                    sort_order=20,
+                ),
+                {
+                    'vertices': list(geom['vertices']),
+                    'edges':    list(geom['edges']),
+                    'color':    geom.get('color') or color,
+                    'lineWidth': geom.get('line_width', 2),
+                },
+                wireframe_script,
             ))
         else:
             ents.append(_make_box(
@@ -430,12 +466,23 @@ def _default_height_cm(kind: str) -> int:
 
 def _attach_scripts(scripted, piece_script):
     """Save scripted entities one-by-one (each needs a PK) and attach
-    a piece-mesh-render EntityScript to each."""
+    the right Aether script to each. Tuples can be either the legacy
+    2-tuple `(Entity, props)` (uses `piece_script`) or the new
+    3-tuple `(Entity, props, script)` so wireframe and mesh entities
+    can coexist in one export."""
     attachments = []
-    for ent, props in scripted:
+    for item in scripted:
+        if len(item) == 3:
+            ent, props, script = item
+        else:
+            ent, props = item
+            script = piece_script
+        if script is None:
+            ent.save()
+            continue
         ent.save()
         attachments.append(EntityScript(
-            entity=ent, script=piece_script, props=props,
+            entity=ent, script=script, props=props,
         ))
     EntityScript.objects.bulk_create(attachments)
 
