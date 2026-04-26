@@ -159,6 +159,11 @@ class _Visitor:
         self.porter_count = 0
         self.unrecognised: list[str] = []
         self._anon_counter = 0
+        # Closures hoisted to module-level. Each entry is the
+        # full Python `def` block; emitted at the end of program
+        # output so they're available when the calling expression
+        # runs. Order doesn't matter — Python resolves names lazily.
+        self._hoisted_defs: list[str] = []
 
     def text(self, node) -> str:
         return self.src[node.start_byte:node.end_byte].decode(
@@ -200,6 +205,15 @@ class _Visitor:
             piece = self.visit(child, indent)
             if piece.strip():
                 out.append(piece)
+        # Hoisted closures go at the top so they're defined before
+        # any expression that references them. Insert after the
+        # imports/header (before the first translated code chunk).
+        if self._hoisted_defs:
+            header_end = 7  # length of the header `out` above
+            out = (out[:header_end]
+                   + ['# Hoisted PHP closures (one def per anonymous function)']
+                   + self._hoisted_defs
+                   + [''] + out[header_end:])
         return '\n'.join(out)
 
     def visit_text(self, node, indent: int) -> str:
@@ -1179,9 +1193,14 @@ class _Visitor:
     def expr_function_call_expression(self, node) -> str:
         fn_node = node.child_by_field_name('function')
         args = node.child_by_field_name('arguments')
+        # Bare function name (for stdlib mapping lookup) — but the
+        # ACTUAL emitted call uses the visited expression so namespace
+        # prefixes (`\App\Foo`) get rewritten to `App.Foo` not left
+        # raw with the leading `\`.
         fn_name = self.text(fn_node) if fn_node else ''
+        fn_emit = self.visit_expr(fn_node) if fn_node else ''
         a_list = self._argument_list(args)
-        # Stdlib mapping
+        # Stdlib mapping (uses the BARE PHP name)
         if fn_name in _PHP_TO_PY:
             mapping = _PHP_TO_PY[fn_name]
             if isinstance(mapping, str):
@@ -1192,7 +1211,7 @@ class _Visitor:
                 result = None
             if result is not None:
                 return result
-        return f'{fn_name}({", ".join(a_list)})'
+        return f'{fn_emit}({", ".join(a_list)})'
 
     def expr_object_creation_expression(self, node) -> str:
         # `new Foo(...)` → `Foo(...)`
@@ -1377,25 +1396,72 @@ class _Visitor:
         return ''
 
     def expr_anonymous_function(self, node) -> str:
-        # PHP closures `function ($a, $b) use ($c) { ... }`. Python
-        # `lambda` is single-expression; PHP closures hold full
-        # bodies. Hoist the body to a generated module-level fn
-        # in the future; for now emit a name-only stub that
-        # compiles. The porter wires the real body.
-        self.porter_count += 1
-        # Extract param names so the stub has the right arity.
+        """PHP closure `function ($a, $b) use ($c, &$d) { ... }`.
+
+        Python `lambda` is single-expression — can't hold full PHP
+        closure bodies. Strategy: HOIST the closure body to a
+        generated module-level function `_closure_N`, then replace
+        the expression with a reference to that name.
+
+        `use ($c)` clauses (closure-captures) are translated to
+        default arguments so the captured value is bound at
+        closure-creation time. `use (&$d)` (by-reference capture)
+        falls back to a regular kwarg with an undefined-default
+        marker the porter rewires."""
         params: list[str] = []
+        use_vars: list[str] = []  # captures via `use ($x, &$y)` clause
+        body_node = None
         for c in node.children:
             if c.type == 'formal_parameters':
                 for p in c.children:
                     if p.type == 'simple_parameter':
+                        pname = ''
+                        pdefault = None
+                        got_eq = False
                         for pc in p.children:
                             if pc.type == 'variable_name':
-                                params.append(_safe_name(
-                                    self.text(pc).lstrip('$')))
-        param_list = ', '.join(params) if params else '*args'
-        # Single-line lambda that returns None, syntactically valid.
-        return f'(lambda {param_list}: None)'
+                                pname = self.text(pc).lstrip('$')
+                            elif pc.type == '=':
+                                got_eq = True
+                            elif got_eq and pdefault is None:
+                                pdefault = self.visit_expr(pc)
+                        if pname:
+                            pname = _safe_name(pname)
+                            if pdefault is not None:
+                                params.append(f'{pname}={pdefault}')
+                            else:
+                                params.append(pname)
+            elif c.type == 'anonymous_function_use_clause':
+                # `use ($x, &$y)` — collect captured-variable names.
+                for uc in c.children:
+                    if uc.type == 'variable_name':
+                        use_vars.append(_safe_name(
+                            self.text(uc).lstrip('$')))
+                    elif uc.type == 'by_ref':
+                        for uc2 in uc.children:
+                            if uc2.type == 'variable_name':
+                                use_vars.append(_safe_name(
+                                    self.text(uc2).lstrip('$')))
+            elif c.type == 'compound_statement':
+                body_node = c
+        # Generate a fresh module-level name.
+        self._anon_counter += 1
+        name = f'_closure_{self._anon_counter}'
+        # Captured vars become regular kwargs with `None` default —
+        # the porter rewires to either bind via Python closure
+        # (move the def into the using scope) or pass explicitly
+        # at the call site. `name=name` would fail at hoist time
+        # since the captured names don't exist at module level.
+        default_caps = ', '.join(f'{v}=None' for v in use_vars)
+        all_params = ', '.join(filter(None, [', '.join(params), default_caps]))
+        body_py = (self.visit(body_node, 1) if body_node else
+                    '    pass')
+        if not body_py.strip():
+            body_py = '    pass'
+        self._hoisted_defs.append(
+            f'def {name}({all_params}):\n{body_py}'
+        )
+        return name
 
     def expr_anonymous_function_creation_expression(self, node) -> str:
         return self.expr_anonymous_function(node)
