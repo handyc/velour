@@ -335,7 +335,12 @@ def _rewrite_code(chunk: str) -> str:
     s = re.sub(r'(\w+)::class\b', r'\1', s)
     s = re.sub(r'(\w+)::(\w+)', r'\1.\2', s)
 
-    # `$this->` → `self.`, plus generic `->` → `.`
+    # `$this->` → `self.`, generic `->` → `.`. Strip PHP-8 nullsafe
+    # `?->` to plain `.` first — Python has no nullsafe operator,
+    # so semantics shift (NoneType.attr will raise) but syntax
+    # compiles. The porter rewrites to `(obj.attr if obj else None)`
+    # where it actually matters.
+    s = s.replace('?->', '.')
     s = s.replace('this->', 'self.')
     s = s.replace('->', '.')
 
@@ -373,16 +378,15 @@ def _rewrite_code(chunk: str) -> str:
                 lambda m: m.group(1).replace('\\', '.'), s)
 
     # PHP namespace separator `\` in identifiers becomes `.` in
-    # Python. PHP namespaces may use either case (`\Foo\Bar` or
-    # `\my\helpers\Foo`) so accept both. Skip line-continuation
-    # `\\\n` (literal backslash followed by newline) which Python
-    # wants preserved.
+    # Python. Two-step:
+    # (1) `\Foo` at expression-start (absolute-namespace reference) —
+    #     drop the leading `\` so we don't get a stray `.`. The
+    #     lookbehind `(?<!\w)` stops us from rewriting an escape
+    #     `\n` inside an identifier, but allows a `\` that starts
+    #     a token after whitespace, comma, paren, etc.
+    # (2) `\` between two identifier segments — replace with `.`.
+    s = re.sub(r'(?<!\w)\\(?=[A-Za-z]\w)', '', s)
     s = re.sub(r'\\(?=[A-Za-z]\w)', '.', s)
-    # Strip a stray leading `.` that would have been an absolute
-    # `\Foo` reference at expression start. Must NOT match the `.`
-    # between a `)` or `]` and a chained method (`obj.m().next`),
-    # which is normal Python attribute access.
-    s = re.sub(r'(?<![A-Za-z0-9_.\)\]])\.(?=[A-Za-z]\w)', '', s)
 
     # PHP `=&` (assign-by-reference) → `=` — Python doesn't have a
     # by-reference assignment operator; semantics differ but the
@@ -712,6 +716,70 @@ def _rewrite_casts(s: str) -> str:
     return ''.join(out)
 
 
+def _rewrite_named_args(s: str) -> str:
+    """PHP 8 named arguments: `func(name: value)` → `func(name=value)`.
+
+    Python uses `=` for keyword arguments. The naive rewrite of
+    every `:` inside a paren would corrupt dict literals. We track
+    bracket nesting: convert `name: value` to `name=value` only
+    when inside function-call parens AND NOT inside any nested
+    dict/list literal."""
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    in_str: str | None = None
+    paren_depth = 0
+    bracket_depth = 0  # `[` and `{`
+    while i < n:
+        ch = s[i]
+        if in_str:
+            out.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out.append(s[i + 1]); i += 2; continue
+            if ch == in_str:
+                in_str = None
+            i += 1; continue
+        if ch in ('"', "'"):
+            in_str = ch; out.append(ch); i += 1; continue
+        if ch == '(':
+            paren_depth += 1
+            out.append(ch); i += 1; continue
+        if ch == ')':
+            paren_depth = max(0, paren_depth - 1)
+            out.append(ch); i += 1; continue
+        if ch in ('[', '{'):
+            bracket_depth += 1
+            out.append(ch); i += 1; continue
+        if ch in (']', '}'):
+            bracket_depth = max(0, bracket_depth - 1)
+            out.append(ch); i += 1; continue
+        # Look for `<word> : <expr>` at func-call depth.
+        if ch.isalpha() or ch == '_':
+            # Read identifier
+            j = i
+            while j < n and (s[j].isalnum() or s[j] == '_'):
+                j += 1
+            ident = s[i:j]
+            # Skip whitespace
+            k = j
+            while k < n and s[k] in ' \t':
+                k += 1
+            if k < n and s[k] == ':' and (k + 1 >= n or s[k + 1] != ':') \
+                    and paren_depth > 0 and bracket_depth == 0:
+                # Look ahead: must be a kwarg (followed by an expr,
+                # not a dict-style key:val with surrounding `{`).
+                # Replace `:` with `=`.
+                out.append(ident)
+                # Preserve any whitespace before the `:`, then `=`.
+                out.append(s[j:k])
+                out.append('=')
+                i = k + 1
+                continue
+            out.append(ident); i = j; continue
+        out.append(ch); i += 1
+    return ''.join(out)
+
+
 def _rewrite_ternary(s: str) -> str:
     """Rewrite PHP ternary `cond ? a : b` to Python `(a if cond else b)`.
 
@@ -1011,6 +1079,7 @@ def _translate_expr(expr: str) -> str:
     s = _rewrite_casts(s)
     s = _apply_to_code(s, _rewrite_code)
     s = _rewrite_string_concat(s)
+    s = _rewrite_named_args(s)
     s = _rewrite_ternary(s)
     s = _translate_function_calls(s)
     return s

@@ -1165,35 +1165,35 @@ def translate_method_body(php_body: str) -> tuple[str, list[str]]:
     # rather than getting partially shredded by individual rules.
     body = _translate_eloquent_chains(body)
 
-    # Step 2: Apply the generic rule pass.
+    # Step 2: Apply the Laravel-specific rule pass (facades,
+    # `view(...)`, `redirect(...)`, `request()->`, etc.).
     out = body
     for pat, repl in _BODY_RULES:
         out = pat.sub(repl, out) if callable(repl) else pat.sub(repl, out)
 
-    # Statement-level cleanup: convert `;` line endings to nothing
-    # (Python statements end with newlines).
-    lines = []
-    for raw in out.split('\n'):
-        stripped = raw.rstrip().rstrip(';')
-        if stripped.strip():
-            lines.append(stripped)
-    out = '\n'.join(lines)
-
-    # Translate `return view(...)` patterns where the rule already
-    # rewrote the call but not the surrounding `return`.
-    out = re.sub(r'\breturn\s+', 'return ', out)
+    # Step 3: hand the result to the catch-all
+    # (`php_code_lifter._translate_block`) so control flow, array
+    # literals, type casts, ternary, namespace `\\`, Python keyword
+    # renames, walrus operator, etc. all get translated too. Without
+    # this step the output had untranslated `array(...)`,
+    # `if (...) { ... }`, `$var->prop`, and dozens of other PHP
+    # idioms that didn't compile. The catch-all is the result of
+    # the LimeSurvey / MediaWiki / phpBB road tests.
+    from datalift.php_code_lifter import _translate_block
+    out = _translate_block(out, indent=0)
 
     # Detect leftover PHP-only constructs and flag them. After the
     # `->` → `.` rule, smells use `.` for chained access, not `->`.
+    # NOTE: catch-all has already rewritten `Foo::bar` to `Foo.bar`,
+    # so the facade detectors look for the post-translation form.
     php_smell_rules = [
-        (r'\b\w+::where\(',  'Model::where (Eloquent — port to .objects.filter())'),
-        (r'\.where\(',       '.where (Eloquent — port to .objects.filter())'),
+        (r'\b\w+\.where\(',  'Model.where (Eloquent — port to .objects.filter())'),
         (r'\.orderBy\(',     '.orderBy (Eloquent — translate to .order_by())'),
         (r'\.paginate\(',    '.paginate (Eloquent — Django uses Paginator)'),
-        (r'\bDB::',          'DB:: facade — port to Django ORM by hand'),
-        (r'\bMail::',        'Mail:: facade — port to django.core.mail'),
-        (r'\bCache::',       'Cache:: facade — port to django.core.cache'),
-        (r'\bSession::',     'Session:: facade — port to request.session'),
+        (r'\bDB\.',          'DB:: facade — port to Django ORM by hand'),
+        (r'\bMail\.',        'Mail:: facade — port to django.core.mail'),
+        (r'\bCache\.',       'Cache:: facade — port to django.core.cache'),
+        (r'\bSession\.',     'Session:: facade — port to request.session'),
         (r'this\.',          'this. (controller-internal call — port via self.)'),
     ]
     for pat, label in php_smell_rules:

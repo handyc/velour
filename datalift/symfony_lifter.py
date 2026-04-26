@@ -374,11 +374,17 @@ _SYMFONY_BODY_RULES: list[tuple[re.Pattern[str], object]] = [
                 + (', ' + _translate_php_expr(m.group('data')) if m.group('data') else '')
                 + ")")),
 
-    # `$this->redirectToRoute('name')` etc.
-    (re.compile(r"\$this->redirectToRoute\(\s*(['\"])([^'\"]+)\1[^)]*\)"),
+    # `$this->redirectToRoute('name')` — only matches the
+    # zero-extra-arg form. Multi-arg forms (e.g. with `['id' =>
+    # $post]` and an HTTP status code) used to be matched by a
+    # `[^)]*` pattern that stopped at the FIRST `)` inside the args,
+    # corrupting nested method calls like `$post->getId()`. They now
+    # fall through to the catch-all (`php_code_lifter._translate_block`)
+    # which handles them with proper paren tracking.
+    (re.compile(r"\$this->redirectToRoute\(\s*(['\"])([^'\"]+)\1\s*\)"),
      lambda m: f"redirect({m.group(1)}{m.group(2)}{m.group(1)})"),
-    (re.compile(r"\$this->redirect\(\s*(?P<url>[^)]+)\)"),
-     lambda m: f"redirect({_translate_php_expr(m.group('url'))})"),
+    (re.compile(r"\$this->redirect\(\s*(['\"])([^'\"]+)\1\s*\)"),
+     lambda m: f"redirect({m.group(1)}{m.group(2)}{m.group(1)})"),
 
     # `$this->json(...)` / new JsonResponse(...)
     (re.compile(r"\$this->json\(\s*(?P<arg>[^)]+)\)"),
@@ -409,31 +415,53 @@ _SYMFONY_BODY_RULES: list[tuple[re.Pattern[str], object]] = [
     # Doctrine repository: `$repo->findAll()` / `findOneBy(...)` / `find($id)`
     (re.compile(r"\$(?P<v>\w+)->findAll\(\)"),
      lambda m: f"{m.group('v')}.objects.all()"),
-    (re.compile(r"\$(?P<v>\w+)->findOneBy\(\s*(?P<a>[^)]+)\)"),
+    # findBy / findOneBy — single-criteria form only. Multi-arg
+    # forms (with $orderBy, $limit, $offset) used to be matched by
+    # `[^)]+` which silently included the extra args, producing
+    # `.filter(**{a:b}, {c:d})` (positional after kw unpacking).
+    # Multi-arg forms now fall through to the catch-all which
+    # produces syntactically-valid `.findBy({a:b}, {c:d})` for the
+    # porter to refactor.
+    (re.compile(r"\$(?P<v>\w+)->findOneBy\(\s*(?P<a>\[[^\[\]]*\])\s*\)"),
      lambda m: f"{m.group('v')}.objects.filter(**{_translate_php_expr(m.group('a'))}).first()"),
-    (re.compile(r"\$(?P<v>\w+)->findBy\(\s*(?P<a>[^)]+)\)"),
+    (re.compile(r"\$(?P<v>\w+)->findBy\(\s*(?P<a>\[[^\[\]]*\])\s*\)"),
      lambda m: f"{m.group('v')}.objects.filter(**{_translate_php_expr(m.group('a'))})"),
-    (re.compile(r"\$(?P<v>\w+)->find\(\s*(?P<id>[^)]+)\)"),
+    (re.compile(r"\$(?P<v>\w+)->find\(\s*(?P<id>[^)(]+)\)"),
      lambda m: f"{m.group('v')}.objects.filter(id={_translate_php_expr(m.group('id'))}).first()"),
 
-    # `$entityManager->persist($x); $entityManager->flush()`
+    # `$entityManager->persist($x); $entityManager->flush()` — keep
+    # the trailing `;` on the emitted Python so the catch-all's
+    # statement-boundary parser still finds a separator. Without
+    # the `;`, `_find_statement_end` would gobble the next real
+    # statement into the same chunk and break indentation.
     (re.compile(r"\$(?P<em>\w+)->persist\(\s*\$(?P<x>\w+)\s*\)\s*;?"),
-     lambda m: f"{m.group('x')}.save()  # symfony persist+flush"),
+     lambda m: f"{m.group('x')}.save();"),
     (re.compile(r"\$(?P<em>\w+)->flush\(\)\s*;?"),
-     ''),  # flush is a no-op after .save()
+     ';'),  # keep `;` so statement boundaries survive; `;` alone is
+            # a no-op after the catch-all's blank-line cleanup
 
-    # `=>` / `->` / `$var` / null/true/false / `.` concat
-    (re.compile(r"=>"), ':'),
-    (re.compile(r"->"), '.'),
-    (re.compile(r"\bnull\b"), 'None'),
-    (re.compile(r"\btrue\b"), 'True'),
-    (re.compile(r"\bfalse\b"), 'False'),
-    (re.compile(r"\s+\.\s+"), ' + '),
-    (re.compile(r"\$(?P<v>\w+)"), lambda m: m.group('v')),
+    # The generic PHP-syntax rewrites (`=>` → `:`, `->` → `.`,
+    # `null/true/false`, string concat, `$var` strip) used to live
+    # here. They're now all handled by the catch-all
+    # (`php_code_lifter._translate_block`) — and crucially the
+    # catch-all's `=>` rewrite is bracket-aware, so `['k' => v]`
+    # becomes `{'k': v}` (dict) instead of `['k' : v]` (list with a
+    # stray `:`, invalid Python). Local versions stripped.
 ]
 
 
 def _translate_php_expr(expr: str) -> str:
+    """Translate a single PHP expression to Python.
+
+    Used inline by `_SYMFONY_BODY_RULES` callbacks (e.g. for the
+    array argument to `findBy(...)`). Delegates to
+    `php_code_lifter._translate_expr` which handles `array(...)`/
+    `[...]` literal-vs-dict detection (so `['k' => $v]` becomes
+    `{'k': v}` and not `['k' : v]`)."""
+    from datalift.php_code_lifter import _translate_expr
+    return _translate_expr(expr.strip())
+    # (Original Symfony-only rule pass kept below as dead code for
+    # reference, but the catch-all subsumes it cleanly.)
     s = expr.strip()
     for pat, repl in _SYMFONY_BODY_RULES:
         s = pat.sub(repl, s) if callable(repl) else pat.sub(repl, s)
@@ -441,18 +469,27 @@ def _translate_php_expr(expr: str) -> str:
 
 
 def translate_method_body(php_body: str) -> tuple[str, list[str]]:
-    """Translate a Symfony controller method body."""
+    """Translate a Symfony controller method body.
+
+    Two-stage:
+      1. Symfony-specific rules (`$this->render`, `$this->redirectToRoute`,
+         `$repo->find`, etc.) — handle the rich framework idioms first.
+      2. Generic PHP → Python pass via
+         `php_code_lifter._translate_block` — handles control flow,
+         array literals, type casts, ternary, namespace `\\`, Python
+         keyword renames, walrus, and the dozens of other patterns
+         the catch-all has accumulated through the LimeSurvey /
+         MediaWiki / phpBB road tests."""
     skipped: list[str] = []
     body = _strip_php_comments_keep_docblocks(php_body)
     out = body
     for pat, repl in _SYMFONY_BODY_RULES:
         out = pat.sub(repl, out) if callable(repl) else pat.sub(repl, out)
 
-    lines = []
-    for raw in out.split('\n'):
-        s = raw.rstrip().rstrip(';')
-        if s.strip(): lines.append(s)
-    out = '\n'.join(lines)
+    # The previous per-line `;` strip + blank-line filter is now
+    # redundant — _translate_block handles statement parsing.
+    from datalift.php_code_lifter import _translate_block
+    out = _translate_block(out, indent=0)
 
     # Detect remaining smells.
     smell_rules = [
