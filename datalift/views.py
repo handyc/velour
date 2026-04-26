@@ -246,8 +246,66 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_real_wp_data',
+        'title': 'TT2 + lifted WP data — the loop closes',
+        'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',
+        'image': 'tt2_real_data_index.png',
+        'metrics': [
+            ('WP tables ingested', '12 (wp_posts, wp_options, wp_users, …)'),
+            ('published posts', '4 (real WP rows)'),
+            ('templates lifted', '11 (TT2)'),
+            ('adapter classes', '3 (_PostCtx, _SiteCtx, _AuthorCtx)'),
+            ('post.title source', 'wp_posts.post_title'),
+            ('site.name source', 'wp_options where option_name=blogname'),
+            ('HTTP response', '200, 6.6 KB, 4 posts via {% for %}'),
+        ],
+        'body': (
+            "The full pipeline. A WordPress mysqldump is fed through "
+            "datalift's data path (genmodels → ingestdump) to produce "
+            "the wp Django app with Post, User, Option, etc. models "
+            "populated from real WP rows. The Twenty Twenty-Two block "
+            "theme is lifted by liftwpblock into Django templates. "
+            "Three small adapter classes bridge the WP schema "
+            "(post_title / post_content / post_date / "
+            "wp_options.blogname) to the names the lifted templates "
+            "expect (post.title / post.content / post.published_at / "
+            "site.name). The result is a Django site rendering real "
+            "WordPress data through a real WordPress theme — no PHP "
+            "runtime, no manual template editing, two halves wired "
+            "with a 130-line views.py."
+        ),
+        'reproduce': 'datalift-tests/wp_django/tt2/views.py',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_real_wp_single',
+        'title': 'TT2 single post — real WP body content',
+        'subtitle': 'wp_posts.post_content rendered through page.html',
+        'image': 'tt2_real_data_single.png',
+        'metrics': [
+            ('source', 'wp_posts WHERE id=1'),
+            ('template', 'tt2/single.html (lifted from TT2)'),
+            ('title source', 'post.post_title'),
+            ('body source', 'post.post_content (rendered |safe)'),
+            ('author source', 'wp_users.display_name via post_author FK'),
+            ('date source', 'post.post_date (Django |date filter)'),
+        ],
+        'body': (
+            "The single-post view: same theme, same DB row that "
+            "ingestdump put in wp_posts. The lifted template asks for "
+            "post.title, post.content|safe, post.published_at, "
+            "post.author.display_name. The adapter walks the WP "
+            "schema and serves them. Body HTML survives intact "
+            "(<code>... the_content() ...</code>), the date passes "
+            "through Django's |date:\"F j, Y\" filter, the author "
+            "name comes from the real wp_users row."
+        ),
+        'reproduce': 'manage.py runserver 7778 → /post/1/',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_single_page',
-        'title': 'TT2 single-page template',
+        'title': 'TT2 single-page template (fake-data smoke test)',
         'subtitle': 'wp:post-content + wp:separator + wp:post-comments',
         'image': 'tt2_page_template.png',
         'metrics': [
