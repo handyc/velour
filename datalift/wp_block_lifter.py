@@ -227,6 +227,79 @@ def _t_post_featured_image(attrs, inner_html, lifter):
     return f'<figure class="wp-block-post-featured-image">{img}</figure>'
 
 
+def _t_search(attrs, inner_html, lifter):
+    """The WP search input. Emits a GET form posting back to the
+    current URL with `?s=<term>` (the WP convention)."""
+    label = attrs.get('label', 'Search')
+    show_label = attrs.get('showLabel', True)
+    placeholder = attrs.get('placeholder', '')
+    button_text = attrs.get('buttonText', 'Search')
+    label_html = (f'<label class="wp-block-search__label" '
+                  f'for="wp-search">{label}</label>'
+                  if show_label else '')
+    return (
+        '<form class="wp-block-search" method="get" role="search" '
+        'action="/search/">'
+        f'{label_html}'
+        f'<input type="search" id="wp-search" name="s" '
+        f'placeholder="{placeholder or label}" '
+        f'value="{{{{ search_query|default:"" }}}}">'
+        f'<button type="submit" '
+        f'class="wp-block-search__button">{button_text}</button>'
+        '</form>'
+    )
+
+
+def _t_pattern(attrs, inner_html, lifter):
+    """A WP block pattern (reusable named markup, e.g.
+    'twentytwentytwo/hidden-404'). The pattern markup lives in the
+    theme's patterns/*.php files, which we don't read. Emit a
+    porter-marker that surfaces the slug so a porter knows what to
+    fill in."""
+    slug = attrs.get('slug', 'unknown')
+    lifter._porter(f'pattern {slug}')
+    safe_slug = slug.replace('/', '_').replace('-', '_')
+    return (f'<div class="wp-block-pattern" data-slug="{slug}">\n'
+            f'  {{# PORTER: WP pattern {slug!r} — supply the markup, '
+            f'or set context var pattern_{safe_slug} #}}\n'
+            f'  {{{{ pattern_{safe_slug}|default:""|safe }}}}\n'
+            f'</div>')
+
+
+def _t_query_title(attrs, inner_html, lifter):
+    """The archive title block — `Category: Foo`, `Tag: Bar`,
+    `Year: 2023`, `Search results for: foo`, etc. Reads
+    {{ archive_title }} from the view context."""
+    kind = attrs.get('type', 'archive')
+    return (f'<h1 class="wp-block-query-title" data-type="{kind}">'
+            '{{ archive_title|default:"Archive" }}'
+            '</h1>')
+
+
+def _t_term_description(attrs, inner_html, lifter):
+    """The term description block — renders {{ term_description }}
+    from the view context (the wp_term_taxonomy.description column)."""
+    return ('<div class="wp-block-term-description">'
+            '{{ term_description|default:""|safe }}'
+            '</div>')
+
+
+def _t_post_navigation_link(attrs, inner_html, lifter):
+    """Previous / next single-post navigation. Reads {{ prev_post }}
+    or {{ next_post }} from the view context (objects with .title
+    and .get_absolute_url)."""
+    direction = attrs.get('type', 'next')
+    var = 'prev_post' if direction == 'previous' else 'next_post'
+    label_default = '← Previous' if direction == 'previous' else 'Next →'
+    return (f'<nav class="wp-block-post-navigation-link">'
+            f'{{% if {var} %}}'
+            f'<a href="{{{{ {var}.get_absolute_url }}}}">'
+            f'{label_default}: {{{{ {var}.title|safe }}}}'
+            f'</a>'
+            f'{{% endif %}}'
+            f'</nav>')
+
+
 def _t_post_comments(attrs, inner_html, lifter):
     """Emit a working default comment list. Reads `comments` from
     the view context — a queryset/iterable of objects with the WP
@@ -445,6 +518,11 @@ _TRANSLATORS = {
     'query-pagination-previous':  _t_query_pagination_previous,
     'query-pagination-next':      _t_query_pagination_next,
     'query-pagination-numbers':   _t_query_pagination_numbers,
+    'query-title':                _t_query_title,
+    'term-description':           _t_term_description,
+    'post-navigation-link':       _t_post_navigation_link,
+    'search':                     _t_search,
+    'pattern':                    _t_pattern,
     'image':                      _t_image,
     'paragraph':                  _t_paragraph,
     'heading':                    _t_heading,
@@ -715,6 +793,33 @@ def render_base_html(theme_json: dict | None, app_label: str) -> str:
         '.wp-block-query-pagination { '
         'display: flex; gap: 1rem; justify-content: space-between; '
         'padding: 2rem 0; }\n'
+        '.wp-block-query-title { '
+        'font-family: var(--wp--preset--font-family--source-serif-pro, '
+        'serif); font-weight: 300; '
+        'font-size: clamp(2rem, 4vw, 2.75rem); margin: 2rem 0; }\n'
+        '.wp-block-search { display: flex; gap: 0.5rem; '
+        'margin: 1rem 0 2rem; }\n'
+        '.wp-block-search input[type=search] { flex: 1; '
+        'padding: 0.5rem 0.75rem; '
+        'border: 1px solid currentColor; '
+        'background: var(--wp--preset--color--background, #fff); '
+        'color: inherit; font-size: 1rem; }\n'
+        '.wp-block-search__button { '
+        'padding: 0.5rem 1rem; '
+        'background: var(--wp--preset--color--primary, #1a4548); '
+        'color: var(--wp--preset--color--background, #fff); '
+        'border: 0; cursor: pointer; }\n'
+        '.wp-block-comments-title { '
+        'font-family: var(--wp--preset--font-family--source-serif-pro, '
+        'serif); font-weight: 400; margin-top: 3rem; }\n'
+        '.wp-block-comment { padding: 1rem 0; '
+        'border-bottom: 1px solid currentColor; }\n'
+        '.wp-block-comment-author-name { font-weight: 600; }\n'
+        '.wp-block-comment-date { color: '
+        'var(--wp--preset--color--primary, #1a4548); '
+        'font-size: 0.9rem; }\n'
+        '.wp-block-post-navigation-link { padding: 1rem 0; '
+        'font-size: 0.95rem; }\n'
         '</style>\n'
         '{% block extra_head %}{% endblock %}\n'
         '</head>\n'

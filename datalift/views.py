@@ -327,6 +327,72 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_tut_archives',
+        'title': 'TT2 archives + search + 404 — full URL surface',
+        'subtitle': 'category / tag / author / year / search / 404',
+        'image': 'tt2_tut_category.png',
+        'metrics': [
+            ('routes wired', '6 (index, single, category, tag, '
+             'author, year, search) + 404 handler'),
+            ('archive title source',
+             'wp:query-title block → {{ archive_title }}'),
+            ('archive.html template',
+             'lifted from TT2, drives all 4 archive variants'),
+            ('search input', 'wp:search → working Django GET form'),
+            ('search query source', 'Q(post_title) | Q(post_content)'),
+            ('404 fallback', 'wp:pattern porter slot, default supplied'),
+            ('new lifter translators', '5 (query-title, search, '
+             'pattern, term-description, post-navigation-link)'),
+        ],
+        'body': (
+            "Wired the rest of the URL surface a real WP site "
+            "exposes. /category/<slug>/, /tag/<slug>/, "
+            "/author/<login>/, /year/<int>/ all share the lifted "
+            "archive.html template — just paginate a different "
+            "queryset. /search/?s=<q> uses the lifted search.html. "
+            "Five new lifter translators went in to support these: "
+            "wp:query-title (archive heading), wp:search "
+            "(working search form), wp:pattern (porter slot for "
+            "named WP block patterns the theme references), "
+            "wp:term-description, wp:post-navigation-link "
+            "(prev/next single-post nav). The lifted 404.html embeds "
+            "TT2's `twentytwentytwo/hidden-404` pattern — the porter "
+            "supplies its content via context var "
+            "`pattern_twentytwentytwo_hidden_404`."
+        ),
+        'reproduce': '/category/block/, /search/?s=Markup, /nonexistent/',
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'tt2_tut_password',
+        'title': 'Password-protected post — full WP gate',
+        'subtitle': 'session-cookie unlock, GET/POST flow',
+        'image': 'tt2_tut_password.png',
+        'metrics': [
+            ('source post', 'wp_posts.id=1168 ("Template: Password '
+             'Protected"), pw=enter'),
+            ('locked state',
+             '_PostCtx.content returns prompt + form'),
+            ('POST → cookie', 'session[wp_postpass_<id>] = True'),
+            ('unlocked state', 'real post_content + comments'),
+            ('Django test',
+             'wrong=locked, right=unlocked, GET=still unlocked'),
+        ],
+        'body': (
+            "WP password-protected posts surface a prompt + form "
+            "until the right password is POSTed; once POSTed, a "
+            "session cookie keeps the post unlocked. Wired into "
+            "_PostCtx.content as a conditional render — locked posts "
+            "return the password form, unlocked posts return the "
+            "real (lifted) content. POST handler sets the session "
+            "cookie. Verified via Django's test client: wrong "
+            "password stays locked, right password unlocks, "
+            "subsequent GET stays unlocked."
+        ),
+        'reproduce': '/post/1168/ on the TUT-loaded demo, password "enter"',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_tut_html_title',
         'title': 'HTML in WP post titles, rendered correctly',
         'subtitle': '<em>With</em> in italics, <sup>up</sup> as superscript',

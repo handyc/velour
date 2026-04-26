@@ -105,6 +105,55 @@ class DynamicBlockTests(SimpleTestCase):
         out, _, _ = lift_block_template('<!-- wp:post-author /-->')
         self.assertIn('post.author', out)
 
+    def test_query_title_archive(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:query-title {"type":"archive"} /-->')
+        self.assertIn('archive_title', out)
+        self.assertIn('data-type="archive"', out)
+
+    def test_query_title_search_default(self):
+        out, _, _ = lift_block_template('<!-- wp:query-title /-->')
+        self.assertIn('archive_title', out)
+
+    def test_term_description(self):
+        out, _, _ = lift_block_template('<!-- wp:term-description /-->')
+        self.assertIn('term_description', out)
+        self.assertIn('|safe', out)
+
+    def test_search_block(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:search {"label":"Find","buttonText":"Go"} /-->')
+        self.assertIn('action="/search/"', out)
+        self.assertIn('name="s"', out)
+        self.assertIn('search_query', out)
+        self.assertIn('Go', out)
+
+    def test_pattern_block(self):
+        out, _, p = lift_block_template(
+            '<!-- wp:pattern {"slug":"twentytwentytwo/hidden-404"} /-->')
+        self.assertIn('twentytwentytwo/hidden-404', out)
+        self.assertIn('pattern_twentytwentytwo_hidden_404', out)
+        self.assertEqual(p, 1)  # one porter marker
+
+    def test_post_navigation_previous(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:post-navigation-link {"type":"previous"} /-->')
+        self.assertIn('prev_post', out)
+        self.assertIn('← Previous', out)
+
+    def test_post_navigation_next(self):
+        out, _, _ = lift_block_template(
+            '<!-- wp:post-navigation-link {"type":"next"} /-->')
+        self.assertIn('next_post', out)
+        self.assertIn('Next →', out)
+
+    def test_post_comments_default_loop(self):
+        out, _, _ = lift_block_template('<!-- wp:post-comments /-->')
+        self.assertIn('{% for c in comments %}', out)
+        self.assertIn('c.comment_author', out)
+        self.assertIn('c.comment_date', out)
+        self.assertIn('c.comment_content', out)
+
 
 class QueryLoopTests(SimpleTestCase):
 
