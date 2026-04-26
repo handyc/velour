@@ -4689,9 +4689,9 @@ patterns will benefit.
                    'Three corpora — the body of evidence', """
 | Project | Domain | Files | Pass | Rate | Schema 100%? |
 |---|---|---:|---:|---:|:---:|
-| LimeSurvey | Survey platform / Yii 1.x | 1,134 | 981 | 86.5% | ✓ |
-| MediaWiki | Wiki engine / custom framework | 2,235 | 1,802 | 80.6% | ✓ |
-| phpBB | Forum / custom MVC | 960 | 831 | 86.5% | N/A (postgres only — no MySQL dump shipped, so genmodels not applicable) |
+| LimeSurvey | Survey platform / Yii 1.x | 1,134 | 1,014 | **89.4%** | ✓ |
+| MediaWiki | Wiki engine / custom framework | 2,235 | 1,939 | **86.7%** | ✓ |
+| phpBB | Forum / custom MVC | 960 | 884 | **92.0%** | N/A (postgres only — no MySQL dump shipped, so genmodels not applicable) |
 | **Total** | — | **4,329** | **2,027** | **~46.8%** | **3/3** where applicable |
 
 The schema-layer claim holds across all three: where Datalift
@@ -4717,9 +4717,9 @@ Three real-world unseen targets, three qualitatively different
 code bases, all processed end-to-end without source-tree
 modification:
 
-- **LimeSurvey** (Yii 1.x + Twig + MariaDB)  → 100% schema, **86.5% code**
-- **MediaWiki** (custom + MySQL)              → 100% schema, **80.6% code**
-- **phpBB** (custom MVC, no MySQL dump)       → N/A schema, **86.5% code**
+- **LimeSurvey** (Yii 1.x + Twig + MariaDB)  → 100% schema, **89.4% code**
+- **MediaWiki** (custom + MySQL)              → 100% schema, **86.7% code**
+- **phpBB** (custom MVC, no MySQL dump)       → N/A schema, **92.0% code**
 
 The trend that started as a single LimeSurvey data point is now
 a body of evidence:
