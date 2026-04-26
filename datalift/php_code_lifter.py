@@ -66,6 +66,9 @@ class PhpFile:
     classes: list[PhpClass] = field(default_factory=list)
     top_level_python: str = ''
     porter_markers: int = 0
+    # Closures hoisted out of expression position by the pre-pass.
+    # Each entry is a Python `def _closure_N(...)` block.
+    _hoisted_stubs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -392,6 +395,13 @@ def _rewrite_code(chunk: str) -> str:
     # by-reference assignment operator; semantics differ but the
     # syntax has to compile.
     s = re.sub(r'=\s*&\s*', '= ', s)
+
+    # PHP `<=>` (spaceship) — returns -1/0/1 like a comparator.
+    # Closest Python: `(a > b) - (a < b)`. Rewrite the operator
+    # in place; the surrounding expression carries through.
+    s = re.sub(r'(\S+)\s*<=>\s*(\S+)',
+                lambda m: f'(({m.group(1)} > {m.group(2)}) - '
+                          f'({m.group(1)} < {m.group(2)}))', s)
 
     # PHP `@function()` (error suppression) → strip the `@`. Python
     # doesn't have a per-expression error-suppression operator.
@@ -1064,6 +1074,92 @@ def _rewrite_multiline_strings(s: str) -> str:
     return ''.join(out)
 
 
+_CLOSURE_HEAD_RE = re.compile(
+    r'(?:static\s+)?\bfunction\s*\((?P<params>[^)]*)\)\s*'
+    r'(?:use\s*\((?P<use>[^)]*)\)\s*)?'
+    r'(?::\s*\??[\w\\|]+\s*)?'
+    r'\{'
+)
+
+
+def _hoist_closures(src: str) -> tuple[str, list[str]]:
+    """Find PHP closures in expression position
+    (`function ($a) [use ($b)] { ... }`) and replace each with a
+    generated `_closure_N` name. Returns (rewritten_src, stub_defs).
+
+    The closure body is captured as raw PHP and emitted as a
+    Python `def _closure_N(args, captured=None): # PORTER: PHP body`
+    stub. Porter wires the real body. This keeps the SURROUNDING
+    statement parseable — without hoisting, `array_map(function (...)
+    { ... }, $list)` breaks the catch-all because nested braces
+    confuse statement-end detection."""
+    out_parts: list[str] = []
+    stubs: list[str] = []
+    counter = 0
+    i = 0
+    n = len(src)
+    in_str: str | None = None
+    while i < n:
+        ch = src[i]
+        if in_str:
+            out_parts.append(ch)
+            if ch == '\\' and i + 1 < n:
+                out_parts.append(src[i + 1]); i += 2; continue
+            if ch == in_str:
+                in_str = None
+            i += 1; continue
+        if ch in ('"', "'"):
+            in_str = ch; out_parts.append(ch); i += 1; continue
+        m = _CLOSURE_HEAD_RE.match(src, i)
+        if m:
+            # Make sure this isn't a function DECLARATION (`function
+            # foo(...)`) — those are detected by absence of a name
+            # before the `(`. The regex already guarantees no name.
+            # Also require we're in expression position: previous
+            # non-whitespace char should be `(`, `[`, `,`, `=`, `>`,
+            # `?`, `:`, or start-of-statement.
+            prev = i - 1
+            while prev >= 0 and src[prev] in ' \t\r\n':
+                prev -= 1
+            prev_ch = src[prev] if prev >= 0 else ';'
+            if prev_ch in '([,=:?>;{}':
+                # Find the matching `}` for the body.
+                brace = src.find('{', m.start())
+                span = _balanced_block(src, brace)
+                if span is not None:
+                    counter += 1
+                    name = f'_closure_{counter}'
+                    # Build a stub def. Param names from PHP, captures
+                    # become kwargs with None default.
+                    params = []
+                    for p in (m.group('params') or '').split(','):
+                        pm = re.search(r'\$(\w+)', p)
+                        if pm:
+                            params.append(pm.group(1))
+                    use_caps = []
+                    for u in (m.group('use') or '').split(','):
+                        um = re.search(r'\$(\w+)', u)
+                        if um:
+                            use_caps.append(um.group(1))
+                    arg_str = ', '.join(
+                        params + [f'{c}=None' for c in use_caps]
+                    )
+                    body_php = src[span[0]:span[1]].strip()
+                    body_snippet = body_php.replace('\n', ' ')[:100]
+                    stub = (f'def {name}({arg_str}):\n'
+                            f'    """Hoisted PHP closure.\n\n'
+                            f'    PORTER: original PHP body:\n'
+                            f'    {body_snippet}\n'
+                            f'    """\n'
+                            f'    pass  # PORTER')
+                    stubs.append(stub)
+                    out_parts.append(name)
+                    i = span[1] + 1
+                    continue
+        out_parts.append(ch); i += 1
+    return ''.join(out_parts), stubs
+
+
 def _translate_expr(expr: str) -> str:
     """Translate a single PHP expression into best-effort Python.
 
@@ -1727,7 +1823,14 @@ def parse_file(php: str, source: Path | None = None) -> PhpFile:
     # and prefix `r` to single-quoted strings carrying `\u`/`\x`
     # escape sequences (PHP doesn't interpret them; Python would).
     src = _rewrite_multiline_strings(src)
+    # Pre-pass: hoist PHP closures `function (...) [use (...)] { ... }`
+    # in expression position to module-level stub names. Each one is
+    # a real function-scoped construct that the regex pipeline can't
+    # translate inline; replacing them with a name reference plus a
+    # collected stub list keeps the surrounding statement parseable.
+    src, hoisted_stubs = _hoist_closures(src)
     rec = PhpFile(source=source or Path('file.php'))
+    rec._hoisted_stubs = hoisted_stubs  # consumed by render_python
     nm = _NAMESPACE_RE.search(src)
     if nm:
         rec.namespace = nm.group(1)
@@ -1865,6 +1968,15 @@ def render_python(file_rec: PhpFile) -> str:
     out.append('import sys, os, math, json, base64, hashlib, time, datetime, '
                're, random, urllib.parse, html, functools')
     out.append('')
+
+    # Hoisted closures live at module scope so they're available
+    # when the calling code references them (Python resolves names
+    # lazily so order doesn't matter).
+    if getattr(file_rec, '_hoisted_stubs', None):
+        out.append('# Hoisted PHP closures (one stub per anonymous function).')
+        for stub in file_rec._hoisted_stubs:
+            out.append(stub)
+            out.append('')
 
     for fn in file_rec.functions:
         args = ', '.join(a for a in fn.args if a)
