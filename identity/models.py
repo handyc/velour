@@ -829,6 +829,18 @@ class IdentityToggles(models.Model):
                   'would push this month\'s spend past this number '
                   'are refused before hitting the network. '
                   'Default $10.')
+    llm_augment_meditations_enabled = models.BooleanField(default=False,
+        help_text='Allow level-4 meditations to append a short LLM-'
+                  'composed coda commenting on the meditation\'s real '
+                  'source quote. Defaults OFF. Goes through the cost '
+                  'cap; the rule engine and the deterministic body '
+                  'are unchanged.')
+    llm_augment_provider = models.ForeignKey('LLMProvider',
+        on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', help_text='Provider used for augmentation '
+                  'calls (meditation codas etc.). When null, '
+                  'augmentation is silently skipped even when the '
+                  'toggle is on.')
 
     # Tile generation frequency — 9-position slider:
     #   0 = never, 1 = 1/year, 2 = 1/month, 3 = 1/week,

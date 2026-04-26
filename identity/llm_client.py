@@ -125,3 +125,51 @@ def call_llm(provider, prompt, system_prompt=None, max_tokens=400,
     tokens_out = int(usage.get('completion_tokens', 0) or 0)
 
     return (content.strip(), tokens_in, tokens_out, '', latency)
+
+
+AUGMENT_SYSTEM_PROMPT = (
+    "You are an external observer commenting briefly on Velour, a "
+    "Django meta-application that observes itself. The operator has "
+    "shown you a quoted passage from Velour's own self-record (a git "
+    "commit, a memory note, or a developer-guide section) plus a "
+    "short prose meditation Velour composed about it. Add ONE "
+    "additional sentence — at most two — that names something about "
+    "the relationship between the quote and the meditation that the "
+    "meditation itself did not say. Be specific. Do not summarise. "
+    "Do not soften. Do not exceed 200 characters."
+)
+
+
+def compose_meditation_coda(provider, real_quote, meditation_body,
+                             max_tokens=80):
+    """One LLM call: read the (real source quote, deterministic
+    meditation body) pair and return a 1-2 sentence external
+    commentary. Returns (text, tokens_in, tokens_out, error,
+    latency_ms, cost_usd) — same shape as `call_llm` plus the
+    computed cost for the cost-cap ledger.
+
+    Caller is responsible for the cost-cap pre-check and the
+    LLMExchange logging. Returns ('', 0, 0, '', 0, 0) when provider
+    is None — which is the silent-skip the meditation composer
+    relies on.
+    """
+    from decimal import Decimal
+    if provider is None:
+        return ('', 0, 0, '', 0, Decimal('0'))
+    user_prompt = (
+        f'The source passage:\n\n> {real_quote.strip()}\n\n'
+        f'Velour\'s meditation about it:\n\n{meditation_body.strip()}\n\n'
+        f'Your one-to-two-sentence external commentary:')
+    text, tin, tout, err, latency = call_llm(
+        provider, user_prompt,
+        system_prompt=AUGMENT_SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+    )
+    if err or not text:
+        return (text or '', tin, tout, err, latency, Decimal('0'))
+    # Compute cost via the same formula LLMExchange.compute_cost
+    # uses, but inline so we don't have to construct a row to ask.
+    million = Decimal('1000000')
+    cost = (Decimal(tin) / million * provider.cost_per_million_input_tokens_usd
+            + Decimal(tout) / million * provider.cost_per_million_output_tokens_usd)
+    return (text, tin, tout, '', latency, cost.quantize(Decimal('0.000001')))

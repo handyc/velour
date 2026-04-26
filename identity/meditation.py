@@ -892,6 +892,15 @@ def meditate(depth=1, voice='contemplative', push_to_codex=True,
     if originating_tileset_slug:
         source_refs['originating_tileset_slug'] = originating_tileset_slug
 
+    # Optional LLM augmentation, depth-4 only. Toggle is OFF by
+    # default; an unset provider also silently skips. The cost-cap
+    # gate refuses calls that would push past the budget; the
+    # refusal is logged as an LLMExchange row for the operator.
+    if depth == 4 and toggles.llm_augment_meditations_enabled:
+        coda = _augment_l4_body(toggles, sources, body)
+        if coda:
+            body = body + '\n\n*An external observer added:*\n\n> ' + coda
+
     med = Meditation.objects.create(
         depth=depth,
         voice=voice,
@@ -1023,6 +1032,64 @@ def stillness(close_dwelling=True, push_to_codex=True):
     )
 
     return med
+
+
+def _augment_l4_body(toggles, sources, body) -> str:
+    """If augmentation is enabled and the cost-cap allows it, ask
+    the configured LLM provider for a 1-2 sentence external
+    commentary on the meditation. Returns the coda text or '' on
+    skip / refusal / error. The exchange is logged either way so
+    the operator can audit; refusals carry error='refused — ...'
+    so suppressed calls are visible."""
+    from decimal import Decimal
+    from .models import (LLMExchange, LLMProvider,
+                          llm_cost_cap_check)
+    from .llm_client import compose_meditation_coda, AUGMENT_SYSTEM_PROMPT
+    provider = toggles.llm_augment_provider
+    if provider is None:
+        return ''
+    # Pick the highest-substance commit from the sources gathered
+    # for this L4 — the coda comments on the relationship between
+    # source and meditation, so any of the top commits works.
+    commits = sources.get('commits', [])
+    if not commits:
+        return ''
+    top = commits[0]
+    quote = top.get('subject', '')
+    if top.get('body'):
+        body_lines = [
+            ln for ln in top['body'].splitlines()
+            if ln.strip() and not ln.strip().startswith('Co-Authored-By')
+        ][:3]
+        if body_lines:
+            quote = quote + '\n' + '\n'.join(body_lines)
+    # Estimate cost from the prompt size and a generous output
+    # budget (80 tokens — short codas only).
+    rate_in = provider.cost_per_million_input_tokens_usd / Decimal('1000000')
+    rate_out = provider.cost_per_million_output_tokens_usd / Decimal('1000000')
+    prompt_chars = len(AUGMENT_SYSTEM_PROMPT) + len(quote) + len(body) + 200
+    estimate = Decimal(prompt_chars) * rate_in + Decimal('80') * rate_out
+    allowed, reason = llm_cost_cap_check(estimate)
+    if not allowed:
+        LLMExchange.objects.create(
+            provider=provider, prompt='[L4 augmentation]',
+            system_prompt=AUGMENT_SYSTEM_PROMPT,
+            response='', tokens_in=0, tokens_out=0,
+            latency_ms=0, cost_usd=Decimal('0'),
+            error=f'refused — {reason}')
+        return ''
+    text, tin, tout, err, latency, cost = compose_meditation_coda(
+        provider, quote, body)
+    LLMExchange.objects.create(
+        provider=provider,
+        prompt='[L4 augmentation]\n\n' + quote[:500],
+        system_prompt=AUGMENT_SYSTEM_PROMPT,
+        response=text or '',
+        tokens_in=tin, tokens_out=tout,
+        latency_ms=latency, cost_usd=cost,
+        error=err or '',
+    )
+    return text or ''
 
 
 def _push_to_codex(meditation):

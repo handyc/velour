@@ -153,6 +153,58 @@ class MirrorPhaseFourTests(TestCase):
         # 1M input × $2 + 500k output × $6 = $2 + $3 = $5.00
         self.assertEqual(e.compute_cost(), Decimal('5.000000'))
 
+    def test_l4_augmentation_skipped_when_toggle_off(self):
+        from identity.meditation import _augment_l4_body
+        from identity.models import IdentityToggles
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_meditations_enabled = False
+        toggles.save()
+        result = _augment_l4_body(
+            toggles,
+            {'commits': [{'subject': 'x', 'body': '', 'ai_coauthor': False}]},
+            'meditation body')
+        self.assertEqual(result, '')
+
+    def test_l4_augmentation_skipped_when_provider_unset(self):
+        from identity.meditation import _augment_l4_body
+        from identity.models import IdentityToggles
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_meditations_enabled = True
+        toggles.llm_augment_provider = None
+        toggles.save()
+        result = _augment_l4_body(
+            toggles,
+            {'commits': [{'subject': 'x', 'body': '', 'ai_coauthor': False}]},
+            'meditation body')
+        self.assertEqual(result, '')
+
+    def test_l4_augmentation_logs_refusal_when_cap_exceeded(self):
+        from decimal import Decimal
+        from identity.meditation import _augment_l4_body
+        from identity.models import (IdentityToggles, LLMProvider,
+                                      LLMExchange)
+        provider = LLMProvider.objects.create(
+            name='test', slug='test',
+            base_url='http://localhost/', model='m',
+            cost_per_million_input_tokens_usd=Decimal('100'),
+            cost_per_million_output_tokens_usd=Decimal('100'),
+        )
+        toggles = IdentityToggles.get_self()
+        toggles.llm_augment_meditations_enabled = True
+        toggles.llm_augment_provider = provider
+        toggles.llm_daily_cost_cap_usd = Decimal('0.0001')
+        toggles.save()
+        result = _augment_l4_body(
+            toggles,
+            {'commits': [{'subject': 'x' * 200, 'body': '',
+                          'ai_coauthor': False}]},
+            'meditation body')
+        self.assertEqual(result, '')
+        # Refusal logged with the cap-exceeded reason.
+        ex = LLMExchange.objects.filter(provider=provider).first()
+        self.assertIsNotNone(ex)
+        self.assertIn('refused', ex.error)
+
     def test_mirror_index_idempotent(self):
         from codex.models import Manual, Section
         from identity.meditation import refresh_mirror_index
