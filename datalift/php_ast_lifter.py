@@ -218,6 +218,17 @@ class _Visitor:
     def visit_namespace_use_declaration(self, node, indent: int) -> str:
         return f'# {self.text(node)}'
 
+    def visit_attribute_list(self, node, indent: int) -> str:
+        # PHP 8 attributes `#[Foo, Bar(arg)]` — emit as comments;
+        # Python decorators don't have a 1:1 mapping.
+        return '    ' * indent + f'# Attr: {self.text(node)}'
+
+    def visit_attribute_group(self, node, indent: int) -> str:
+        return '    ' * indent + f'# Attr: {self.text(node)}'
+
+    def visit_attribute(self, node, indent: int) -> str:
+        return ''
+
     # ── Class / function declarations ─────────────────────────────
 
     def visit_class_declaration(self, node, indent: int) -> str:
@@ -1255,10 +1266,23 @@ class _Visitor:
         return 'print()'
 
     def expr_include_expression(self, node) -> str:
-        return f'# PORTER: {self.text(node)} — translate to Python import'
+        # PHP `include $path;` returns 1 on success; emit a None
+        # placeholder that compiles. Original source goes in a
+        # trailing comment so the porter sees what to wire.
+        snippet = self.text(node).replace('\n', ' ')[:80]
+        self.porter_count += 1
+        return f'None  # PORTER: {snippet} — translate to import'
 
     def expr_require_expression(self, node) -> str:
-        return f'# PORTER: {self.text(node)} — translate to Python import'
+        snippet = self.text(node).replace('\n', ' ')[:80]
+        self.porter_count += 1
+        return f'None  # PORTER: {snippet} — translate to import'
+
+    def expr_include_once_expression(self, node) -> str:
+        return self.expr_include_expression(node)
+
+    def expr_require_once_expression(self, node) -> str:
+        return self.expr_require_expression(node)
 
     def expr_throw_expression(self, node) -> str:
         for c in node.children:
@@ -1327,6 +1351,78 @@ class _Visitor:
 
     def expr_anonymous_function_creation_expression(self, node) -> str:
         return self.expr_anonymous_function(node)
+
+    def expr_heredoc(self, node) -> str:
+        # PHP `<<<TAG ... TAG` heredoc (with `$var` interpolation).
+        # Convert to a triple-quoted Python string. Interpolation is
+        # left as raw `$var` text; porter wires.
+        body = ''
+        for c in node.children:
+            if c.type == 'heredoc_body':
+                body = self.text(c)
+        body = body.lstrip('\n').replace('"""', r'\"\"\"')
+        return '"""' + body + '"""'
+
+    def expr_nowdoc(self, node) -> str:
+        body = ''
+        for c in node.children:
+            if c.type == 'nowdoc_body':
+                body = self.text(c)
+        body = body.lstrip('\n').replace("'''", r"\'\'\'")
+        return "'''" + body + "'''"
+
+    def expr_match_expression(self, node) -> str:
+        # PHP 8 match. Subject + match_block of match_conditional /
+        # match_default. Translates to a Python `match ... case` —
+        # but `match` is a statement, not an expression. So emit it
+        # as a chained ternary: `(v if subj == k else (v2 if subj == k2 else default))`.
+        subject = ''
+        block = None
+        for c in node.children:
+            if c.type == 'parenthesized_expression':
+                subject = self.visit_expr(c)
+                if subject.startswith('(') and subject.endswith(')'):
+                    subject = subject[1:-1].strip()
+            elif c.type == 'match_block':
+                block = c
+        if block is None:
+            return self._fallback_expr(node)
+        arms: list[tuple[list[str], str]] = []
+        default_arm: str | None = None
+        for c in block.children:
+            if c.type == 'match_conditional_expression':
+                # Children: keys (comma-separated), `=>`, value
+                keys = []
+                value = ''
+                seen_arrow = False
+                for cc in c.children:
+                    if cc.type == '=>':
+                        seen_arrow = True
+                        continue
+                    if cc.type in (',', '{', '}'):
+                        continue
+                    if not seen_arrow:
+                        if cc.type == 'match_condition_list':
+                            for kc in cc.children:
+                                if kc.type != ',':
+                                    keys.append(self.visit_expr(kc))
+                        else:
+                            keys.append(self.visit_expr(cc))
+                    else:
+                        value = self.visit_expr(cc)
+                arms.append((keys, value))
+            elif c.type == 'match_default_expression':
+                for cc in c.children:
+                    if cc.type not in ('default', '=>', ',', '{', '}'):
+                        default_arm = self.visit_expr(cc)
+        # Build chained ternary from the arms.
+        if default_arm is None:
+            default_arm = 'None  # PORTER: PHP match without default'
+        out = default_arm
+        for keys, value in reversed(arms):
+            cond = ' or '.join(f'{subject} == {k}' for k in keys)
+            out = f'({value} if {cond} else {out})'
+        return out
 
     def expr_arrow_function(self, node) -> str:
         # PHP 7.4 `fn ($x) => $x * 2` — single-expression closure,
