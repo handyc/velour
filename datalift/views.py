@@ -604,6 +604,93 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt5_real_world_test',
+        'title': 'Real-world test #2: Twenty Twenty-Five — clean lift',
+        'subtitle': 'No new bugs surfaced; pattern resolution carries it',
+        'image': 'tt5_real_world_index.png',
+        'metrics': [
+            ('theme tested',
+             'Twenty Twenty-Five (downloaded from wordpress.org)'),
+            ('files lifted',
+             '8 templates + 7 parts + 98 patterns'),
+            ('blocks (after pattern resolution)', '258'),
+            ('distinct block types used', '46'),
+            ('unknown-block porters', '0'),
+            ('intentional context-needed porters',
+             '10 (navigation, post-comments — view-side wiring)'),
+            ('comment-block leakage', '0'),
+            ('new lifter changes required', '0 (pattern fix from '
+             'TT4 round carried it)'),
+        ],
+        'body': (
+            "Twenty Twenty-Five is the most recent default WP block "
+            "theme — 98 patterns (4x more than TT4), 7 distinct "
+            "header parts, full block-comment thread support, "
+            "post navigation, custom post-comments-form. The lift "
+            "produced 258 blocks across 46 distinct types with "
+            "zero unknown blocks and zero comment leakage. The "
+            "pattern-resolution fix shipped during the TT4 round "
+            "carried directly: TT5's home pattern composition is "
+            "exactly the same shape (templates compose patterns "
+            "compose more patterns). Browser-rendered screenshot "
+            "shows TT5 home with featured images, headings at all "
+            "sizes, paragraphs, dates, and the byline area — "
+            "all from real TUT data, all rendered through the "
+            "lifted TT5 templates. No regressions, no new gaps "
+            "found. Round 9's pattern walker scaled."
+        ),
+        'reproduce': (
+            'manage.py liftwpblock /path/to/twentytwentyfive '
+            '--app tt2 --out templates/tt2'
+        ),
+        'codex': 'liftwpblock-guide',
+    },
+    {
+        'slug': 'frost_real_world_test',
+        'title': 'Real-world test #3: Frost (third-party theme)',
+        'subtitle': 'Excerpt template-syntax leak surfaced + fixed',
+        'image': 'frost_real_world_index.png',
+        'metrics': [
+            ('theme tested',
+             'Frost — popular third-party block theme '
+             '(downloaded from wordpress.org/themes)'),
+            ('files lifted',
+             '9 templates + 2 parts + 50 patterns'),
+            ('blocks (after pattern resolution)', '170'),
+            ('distinct block types used', '39'),
+            ('unknown-block porters', '0'),
+            ('comment-block leakage', '0'),
+            ('view-side bug surfaced', 'excerpt rendered Django '
+             'template syntax ({# … #}, {% … %}, {{ … }}) as '
+             'literal text in listing pages'),
+            ('fix', '_PostCtx.excerpt now strips Django template '
+             'syntax in addition to HTML tags before slicing'),
+        ],
+        'body': (
+            "Third real-world theme tested. Frost's home is a "
+            "tighter design than TT4/TT5 — clean post listing with "
+            "title + date + byline + excerpt, no featured-image "
+            "thumbnail. The lift itself was clean (0 unknown "
+            "blocks across 50 patterns / 170 blocks), but the "
+            "rendered listing surfaced a real bug: post excerpts "
+            "displayed literal `{# PORTER: … #}` and "
+            "`{% for m in archive_months %}` text where "
+            "navigation / archives / latest-comments blocks "
+            "appeared in post bodies. Root cause: _PostCtx.excerpt "
+            "called the lifter (so block markers were translated "
+            "to Django template tags) and stripped HTML tags "
+            "(so wrapper divs disappeared) — but didn't strip "
+            "the Django template tags themselves, so they leaked "
+            "as text. Fixed: strip {# #}, {% %}, {{ }} before "
+            "stripping HTML. Listing now reads as natural prose."
+        ),
+        'reproduce': (
+            'manage.py liftwpblock /path/to/frost '
+            '--app tt2 --out templates/tt2'
+        ),
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',
