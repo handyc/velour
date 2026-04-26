@@ -4662,6 +4662,7 @@ def seed_datalift_volume():
             'liftsite-guide',
             'liftwp-quickstart',
             'liftwp-guide',
+            'liftwpblock-guide',
             'liftsmarty-guide',
             'liftwig-guide',
             'liftblade-guide',

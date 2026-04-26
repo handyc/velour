@@ -1021,6 +1021,39 @@ SEEDERS = {
 }
 
 
+def seed_velour_volume():
+    """Bind the three Velour-self manuals into one volume so a reader
+    sees them as a coherent triplet (3pp → 16pp → 891pp) rather than
+    three orphan slugs in the manual list."""
+    from codex.models import Volume, Manual, VolumeManual
+
+    v, _ = Volume.objects.get_or_create(slug='the-velour-manual', defaults={
+        'title':        'The Velour Manual',
+        'subtitle':     'Quickstart → Working Tour → Complete Reference',
+        'author':       'Velour',
+        'abstract':     ('Three manuals describing Velour itself, '
+                         'ordered shortest to longest. Read the '
+                         'Quickstart in five minutes; the Working '
+                         'Tour in an evening; the Complete '
+                         'Reference whenever you need a specific '
+                         'subsystem.'),
+    })
+    v.title = 'The Velour Manual'
+    v.subtitle = 'Quickstart → Working Tour → Complete Reference'
+    v.save()
+
+    VolumeManual.objects.filter(volume=v).delete()
+    for i, slug in enumerate([
+        'velour-quickstart',
+        'velour-working-tour',
+        'velour-complete-reference',
+    ]):
+        m = Manual.objects.filter(slug=slug).first()
+        if m:
+            VolumeManual.objects.create(volume=v, manual=m, sort_order=i)
+    return v
+
+
 class Command(BaseCommand):
     help = 'Seed preliminary Velour manuals (idempotent).'
 
@@ -1047,6 +1080,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f'  ✓ {s} ({m.sections.count()} sections)'
             ))
+        v = seed_velour_volume()
+        self.stdout.write(self.style.SUCCESS(
+            f'  ✓ volume "{v.title}" → /codex/volumes/{v.slug}/'
+        ))
         self.stdout.write(self.style.SUCCESS(
             f'Done. {Manual.objects.count()} manuals total.'
         ))
