@@ -818,6 +818,17 @@ class IdentityToggles(models.Model):
                   'Defaults OFF because LLM queries hit external '
                   'APIs and cost money. Turn on only after adding '
                   'at least one LLMProvider with a valid API key.')
+    llm_daily_cost_cap_usd = models.DecimalField(
+        max_digits=8, decimal_places=4, default=1,
+        help_text='Hard daily cap on LLM spend in USD. Calls that '
+                  'would push today\'s spend past this number are '
+                  'refused before hitting the network. Default $1.')
+    llm_monthly_cost_cap_usd = models.DecimalField(
+        max_digits=8, decimal_places=4, default=10,
+        help_text='Hard monthly cap on LLM spend in USD. Calls that '
+                  'would push this month\'s spend past this number '
+                  'are refused before hitting the network. '
+                  'Default $10.')
 
     # Tile generation frequency — 9-position slider:
     #   0 = never, 1 = 1/year, 2 = 1/month, 3 = 1/week,
@@ -1375,6 +1386,16 @@ class LLMProvider(models.Model):
                   'lives as a chmod-600 plain-text file, e.g. '
                   '"llm_openai.key". Leave blank for local models '
                   'that need no auth.')
+    cost_per_million_input_tokens_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, default=0,
+        help_text='Provider-published price per million input tokens '
+                  'in USD. Used to compute LLMExchange.cost_usd and '
+                  'enforce IdentityToggles cost caps. Leave 0 for '
+                  'free local models.')
+    cost_per_million_output_tokens_usd = models.DecimalField(
+        max_digits=10, decimal_places=4, default=0,
+        help_text='Provider-published price per million output tokens '
+                  'in USD. Used to compute LLMExchange.cost_usd.')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1409,6 +1430,12 @@ class LLMExchange(models.Model):
 
     tokens_in = models.PositiveIntegerField(default=0)
     tokens_out = models.PositiveIntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=6,
+        default=0,
+        help_text='Computed at save time from token counts and the '
+                  'provider rate snapshot. Frozen on the row so '
+                  'historical cost is auditable even if provider '
+                  'rates change later.')
     latency_ms = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True,
         help_text='Error message if the API call failed.')
@@ -1430,6 +1457,72 @@ class LLMExchange(models.Model):
     def __str__(self):
         ok = 'ERR' if self.error else 'OK'
         return f'[{ok}] {self.created_at:%Y-%m-%d %H:%M} ({self.tokens_out} tokens out)'
+
+    def compute_cost(self) -> 'Decimal':
+        """USD cost of this exchange given the provider's snapshot
+        of per-million-token rates. Safe to call when provider is
+        None (returns 0). The result should be assigned to
+        self.cost_usd before save() — this method does not save."""
+        from decimal import Decimal
+        if self.provider is None:
+            return Decimal('0')
+        million = Decimal('1000000')
+        in_cost = (Decimal(self.tokens_in) / million
+                   * self.provider.cost_per_million_input_tokens_usd)
+        out_cost = (Decimal(self.tokens_out) / million
+                    * self.provider.cost_per_million_output_tokens_usd)
+        return (in_cost + out_cost).quantize(Decimal('0.000001'))
+
+
+def llm_spend_today() -> 'Decimal':
+    """Sum of cost_usd across LLMExchange rows from today (local
+    date). Used by the cost-cap gate. Stored as Decimal."""
+    from decimal import Decimal
+    from django.db.models import Sum
+    from django.utils import timezone
+    today = timezone.localdate()
+    total = (LLMExchange.objects.filter(created_at__date=today)
+             .aggregate(s=Sum('cost_usd'))['s'])
+    return total or Decimal('0')
+
+
+def llm_spend_this_month() -> 'Decimal':
+    from decimal import Decimal
+    from django.db.models import Sum
+    from django.utils import timezone
+    today = timezone.localdate()
+    total = (LLMExchange.objects.filter(
+        created_at__year=today.year,
+        created_at__month=today.month,
+    ).aggregate(s=Sum('cost_usd'))['s'])
+    return total or Decimal('0')
+
+
+def llm_cost_cap_check(estimated_cost_usd) -> tuple[bool, str]:
+    """Pre-call gate. Returns (allowed, reason). When `allowed` is
+    False, the caller should refuse the call and log an LLMExchange
+    with error=reason so the operator can see what was suppressed.
+
+    `estimated_cost_usd` is the *predicted* cost of the upcoming
+    call (Decimal). The gate compares (today's spend + estimate)
+    and (this month's spend + estimate) against the toggles' caps.
+    """
+    from decimal import Decimal
+    toggles = IdentityToggles.get_self()
+    est = Decimal(estimated_cost_usd)
+    today = llm_spend_today()
+    if today + est > toggles.llm_daily_cost_cap_usd:
+        return (False,
+                f'daily cap exceeded: would push spend to '
+                f'${today + est:.4f} (cap '
+                f'${toggles.llm_daily_cost_cap_usd:.4f})')
+    month = llm_spend_this_month()
+    if month + est > toggles.llm_monthly_cost_cap_usd:
+        return (False,
+                f'monthly cap exceeded: would push spend to '
+                f'${month + est:.4f} (cap '
+                f'${toggles.llm_monthly_cost_cap_usd:.4f})')
+    return (True, '')
 
 
 # =====================================================================

@@ -554,11 +554,30 @@ def llm_chat_send(request):
         messages.error(request, 'Pick an active LLM provider.')
         return redirect('identity:llm_chat')
 
+    # Pre-call cost cap. Estimate cost from a generous output budget
+    # (1k tokens) so a runaway response can't blow past the cap.
+    from decimal import Decimal
+    from .models import llm_cost_cap_check
+    rate_in = provider.cost_per_million_input_tokens_usd / Decimal('1000000')
+    rate_out = provider.cost_per_million_output_tokens_usd / Decimal('1000000')
+    estimate = Decimal(len(prompt)) * rate_in + Decimal('1000') * rate_out
+    allowed, reason = llm_cost_cap_check(estimate)
+    if not allowed:
+        # Log the refusal as an exchange so the operator can audit.
+        LLMExchange.objects.create(
+            provider=provider, prompt=prompt,
+            system_prompt=DEFAULT_SYSTEM_PROMPT,
+            response='', tokens_in=0, tokens_out=0,
+            latency_ms=0, cost_usd=Decimal('0'),
+            error=f'refused — {reason}')
+        messages.error(request, f'Cost cap reached: {reason}')
+        return redirect('identity:llm_chat')
+
     response, tin, tout, error, latency = call_llm(
         provider, prompt, system_prompt=DEFAULT_SYSTEM_PROMPT,
     )
 
-    LLMExchange.objects.create(
+    exchange = LLMExchange(
         provider=provider,
         prompt=prompt,
         system_prompt=DEFAULT_SYSTEM_PROMPT,
@@ -568,6 +587,8 @@ def llm_chat_send(request):
         latency_ms=latency,
         error=error or '',
     )
+    exchange.cost_usd = exchange.compute_cost()
+    exchange.save()
     return redirect('identity:llm_chat')
 
 

@@ -102,6 +102,57 @@ class MirrorPhaseFourTests(TestCase):
         Manual.objects.filter(slug='identitys-mirror').delete()
         self.assertIsNone(refresh_mirror_index())
 
+    def test_llm_cost_cap_blocks_when_exceeded(self):
+        from decimal import Decimal
+        from identity.models import (LLMProvider, LLMExchange,
+                                      IdentityToggles, llm_cost_cap_check)
+        toggles = IdentityToggles.get_self()
+        toggles.llm_daily_cost_cap_usd = Decimal('0.01')
+        toggles.save()
+        provider = LLMProvider.objects.create(
+            name='test', slug='test',
+            base_url='http://localhost/',
+            model='m',
+            cost_per_million_input_tokens_usd=Decimal('1'),
+            cost_per_million_output_tokens_usd=Decimal('1'),
+        )
+        # Burn the budget with one expensive exchange.
+        e = LLMExchange.objects.create(
+            provider=provider, prompt='x',
+            tokens_in=20_000, tokens_out=0)
+        e.cost_usd = e.compute_cost()
+        e.save()
+        # Next call's estimated cost should now be refused.
+        allowed, reason = llm_cost_cap_check(Decimal('0.005'))
+        self.assertFalse(allowed)
+        self.assertIn('daily cap exceeded', reason)
+
+    def test_llm_cost_cap_allows_when_under_budget(self):
+        from decimal import Decimal
+        from identity.models import (LLMProvider, IdentityToggles,
+                                      llm_cost_cap_check)
+        toggles = IdentityToggles.get_self()
+        toggles.llm_daily_cost_cap_usd = Decimal('1.0')
+        toggles.llm_monthly_cost_cap_usd = Decimal('10.0')
+        toggles.save()
+        allowed, reason = llm_cost_cap_check(Decimal('0.01'))
+        self.assertTrue(allowed)
+        self.assertEqual(reason, '')
+
+    def test_llm_exchange_compute_cost(self):
+        from decimal import Decimal
+        from identity.models import LLMProvider, LLMExchange
+        provider = LLMProvider.objects.create(
+            name='test', slug='test', base_url='http://x/', model='m',
+            cost_per_million_input_tokens_usd=Decimal('2'),
+            cost_per_million_output_tokens_usd=Decimal('6'),
+        )
+        e = LLMExchange.objects.create(
+            provider=provider, prompt='x',
+            tokens_in=1_000_000, tokens_out=500_000)
+        # 1M input × $2 + 500k output × $6 = $2 + $3 = $5.00
+        self.assertEqual(e.compute_cost(), Decimal('5.000000'))
+
     def test_mirror_index_idempotent(self):
         from codex.models import Manual, Section
         from identity.meditation import refresh_mirror_index
