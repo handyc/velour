@@ -465,6 +465,51 @@ GALLERY_ENTRIES = [
         'codex': 'liftwpblock-guide',
     },
     {
+        'slug': 'tt2_tut_static_long_tail',
+        'title': 'Static block long-tail — gallery, cover, code, audio…',
+        'subtitle': '241 blocks across 8 stress posts, zero porter markers',
+        'image': 'tt2_tut_gallery.png',
+        'metrics': [
+            ('TUT stress posts surveyed',
+             '8 (Block: Cover/Gallery, Block category: '
+             'Common/Formatting/Layout/Text/Media/Design)'),
+            ('blocks lifted across them', '241 wp:* invocations'),
+            ('porter markers emitted', '0'),
+            ('comment leakage in HTTP output', '0'),
+            ('new explicit registrations',
+             '23 (gallery, cover, code, preformatted, verse, '
+             'pullquote, quote, audio, video, file, media-text, '
+             'columns, column, group, buttons, button, table, list, '
+             'list-item, social-links, social-link, details, '
+             'footnotes)'),
+            ('special-cased markers',
+             'wp:more, wp:nextpage (single-render-friendly)'),
+            ('lifter regression fixed',
+             '_t_image no longer double-wraps <figure>'),
+            ('test count', '51 unit tests, all green'),
+        ],
+        'body': (
+            "WP's editor stores most static layout/content blocks as "
+            "<!-- wp:foo --> wrapping already-rendered HTML. The "
+            "lifter's job is just to drop the comment markers and "
+            "preserve the inner HTML — the long tail of design "
+            "blocks (galleries, covers, code, pullquotes, audio, "
+            "video, file downloads, media-text, columns, groups, "
+            "buttons, tables, lists, social links, details, "
+            "footnotes) all behave the same way. Round 7 explicitly "
+            "registered 23 of these so the unknown-block porter "
+            "count goes to zero across the eight heaviest TUT "
+            "stress posts. Two special-case markers, wp:more and "
+            "wp:nextpage, render to invisible spans because the "
+            "lifted templates render the whole post in a single "
+            "view. One latent bug found and fixed: _t_image was "
+            "wrapping the WP-supplied <figure> in another <figure>, "
+            "producing nested figures."
+        ),
+        'reproduce': '/post/{1730,1745,1752,1732,1734,21,24,8}/',
+        'codex': 'liftwpblock-guide',
+    },
+    {
         'slug': 'tt2_real_wp_data',
         'title': 'TT2 + lifted WP data — the loop closes',
         'subtitle': 'mysqldump → genmodels → ingestdump → liftwpblock → live',

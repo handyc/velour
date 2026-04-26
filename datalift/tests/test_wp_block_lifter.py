@@ -254,6 +254,61 @@ class DynamicWidgetBlockTests(SimpleTestCase):
         self.assertIn('reply-{{ c.comment_id }}', out)
 
 
+class StaticBlockLongTailTests(SimpleTestCase):
+    """The TUT corpus exercises gallery / cover / code / pullquote /
+    audio / video / file / list / table / columns / group / button /
+    media-text / social-links / quote / verse / preformatted, all of
+    which WP stores as already-rendered HTML inside the block
+    comment. The lifter just needs to drop the comment markers,
+    preserve inner HTML, and not bump the porter count."""
+
+    BLOCKS = [
+        'gallery', 'cover', 'code', 'preformatted', 'verse',
+        'pullquote', 'quote', 'audio', 'video', 'file', 'media-text',
+        'columns', 'column', 'group', 'buttons', 'button', 'table',
+        'list', 'list-item', 'social-links', 'social-link', 'details',
+        'footnotes',
+    ]
+
+    def test_each_static_block_passes_inner_html_unchanged(self):
+        for name in self.BLOCKS:
+            with self.subTest(block=name):
+                src = (f'<!-- wp:{name} {{"id":42}} -->'
+                       f'<div class="wp-block-{name}">PAYLOAD</div>'
+                       f'<!-- /wp:{name} -->')
+                out, blocks, porters = lift_block_template(src)
+                self.assertIn('PAYLOAD', out)
+                self.assertNotIn('<!-- wp:', out)
+                self.assertNotIn('<!-- /wp:', out)
+                self.assertEqual(porters, 0,
+                    f'wp:{name} should not bump porter count')
+                self.assertIn(name, blocks)
+
+    def test_image_block_does_not_double_wrap(self):
+        # Regression: _t_image used to wrap inner_html in another
+        # <figure class="wp-block-image">, producing nested figures.
+        src = (
+            '<!-- wp:image {"id":616} -->'
+            '<figure class="wp-block-image size-full">'
+            '<img src="x.jpg" class="wp-image-616"/></figure>'
+            '<!-- /wp:image -->'
+        )
+        out, _, _ = lift_block_template(src)
+        # Exactly one opening <figure ...> in output.
+        self.assertEqual(out.count('<figure'), 1)
+
+    def test_more_block_emits_marker_not_porter(self):
+        out, _, porters = lift_block_template('<!-- wp:more /-->')
+        self.assertEqual(porters, 0)
+        self.assertIn('wp-block-more', out)
+        self.assertNotIn('<!-- wp:', out)
+
+    def test_nextpage_block_emits_marker_not_porter(self):
+        out, _, porters = lift_block_template('<!-- wp:nextpage /-->')
+        self.assertEqual(porters, 0)
+        self.assertIn('wp-block-nextpage', out)
+
+
 class QueryLoopTests(SimpleTestCase):
 
     def test_query_with_post_template(self):

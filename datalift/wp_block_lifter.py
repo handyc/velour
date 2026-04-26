@@ -633,8 +633,10 @@ def _t_post_terms(attrs, inner_html, lifter):
 
 
 def _t_image(attrs, inner_html, lifter):
-    # Static image block — just keep inner HTML, which is the <img>.
-    return f'<figure class="wp-block-image">{inner_html}</figure>'
+    # WP stores wp:image as comment + an already-formed
+    # <figure class="wp-block-image…"><img …/></figure>. Just keep
+    # the inner HTML — wrapping again would nest two <figure>s.
+    return inner_html
 
 
 def _t_paragraph(attrs, inner_html, lifter):
@@ -672,6 +674,21 @@ def _t_shortcode(attrs, inner_html, lifter):
     lifter._porter('shortcode')
     return (f'{{# PORTER: WP shortcode {inner_html.strip()!r} — '
             f'translate to Django template tag #}}')
+
+
+def _t_more(attrs, inner_html, lifter):
+    # The <!--more--> separator. In single-post view we render
+    # everything, so leave only an invisible anchor classic themes
+    # can target. Theme CSS expects `<span id="more-…">` or similar;
+    # emit a class-marked anchor with no text.
+    return '<span class="wp-block-more"></span>'
+
+
+def _t_nextpage(attrs, inner_html, lifter):
+    # Page-break marker. WP paginates the_content() on this; the
+    # lifted templates render the whole post in one go, so the
+    # marker becomes invisible.
+    return '<span class="wp-block-nextpage" aria-hidden="true"></span>'
 
 
 def _t_default(name):
@@ -754,6 +771,35 @@ _TRANSLATORS = {
     'spacer':                     _t_spacer,
     'html':                       _t_html,
     'shortcode':                  _t_shortcode,
+    # Static layout / content blocks. Their inner HTML is already
+    # final (WP's editor stores rendered markup), so the only job
+    # is to drop the comment markers — exactly what _t_default does.
+    # Listing them here suppresses the "unknown block" porter count.
+    'gallery':                    _t_default('gallery'),
+    'cover':                      _t_default('cover'),
+    'code':                       _t_default('code'),
+    'preformatted':               _t_default('preformatted'),
+    'verse':                      _t_default('verse'),
+    'pullquote':                  _t_default('pullquote'),
+    'quote':                      _t_default('quote'),
+    'audio':                      _t_default('audio'),
+    'video':                      _t_default('video'),
+    'file':                       _t_default('file'),
+    'media-text':                 _t_default('media-text'),
+    'columns':                    _t_default('columns'),
+    'column':                     _t_default('column'),
+    'group':                      _t_default('group'),
+    'buttons':                    _t_default('buttons'),
+    'button':                     _t_default('button'),
+    'table':                      _t_default('table'),
+    'list':                       _t_default('list'),
+    'list-item':                  _t_default('list-item'),
+    'social-links':               _t_default('social-links'),
+    'social-link':                _t_default('social-link'),
+    'details':                    _t_default('details'),
+    'footnotes':                  _t_default('footnotes'),
+    'more':                       _t_more,
+    'nextpage':                   _t_nextpage,
 }
 
 
