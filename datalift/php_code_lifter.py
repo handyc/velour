@@ -403,6 +403,10 @@ def _rewrite_code(chunk: str) -> str:
                 lambda m: f'(({m.group(1)} > {m.group(2)}) - '
                           f'({m.group(1)} < {m.group(2)}))', s)
 
+    # PHP variadic spread `...$args` (in calls and signatures) →
+    # Python `*args`. Also handles `...expr` for argument unpacking.
+    s = re.sub(r'\.{3}\s*\$?(\w+)', r'*\1', s)
+
     # PHP 7.4 arrow function `fn ($x) => expr` → Python lambda.
     # Single-expression by definition (no body braces) so maps
     # cleanly. Allow optional whitespace around the parens.
