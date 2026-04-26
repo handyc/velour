@@ -520,6 +520,33 @@ def world_visor_json(request, slug):
     ).select_related('script'):
         entity_behaviors.setdefault(es.entity_id, []).append(es.script.slug)
 
+    # Stereo render hints. The visor (C/EGL) splits the framebuffer
+    # left/right and renders one eye to each half; the server tells
+    # it the operator's IPD and the panel's intrinsic FOV so the
+    # geometry math lives in one place. These are query-overridable
+    # so the operator can A/B test from the URL bar without
+    # editing the world.
+    def _qf(name, default):
+        try:
+            return float(request.GET.get(name, default))
+        except (TypeError, ValueError):
+            return default
+    stereo = {
+        'enabled':       request.GET.get('stereo', '0') == '1',
+        # Interpupillary distance in metres. Adult average ~63 mm.
+        'ipd_m':         _qf('ipd', 0.063),
+        # Per-eye horizontal FOV in degrees. The visor panel is
+        # commonly 60–110°; default 90 gives natural-looking depth.
+        'fov_deg':       _qf('fov', 90.0),
+        # Panel pixel dimensions per eye (the C side splits a
+        # single framebuffer in half).
+        'eye_width_px':  int(_qf('w', 1920)),
+        'eye_height_px': int(_qf('h', 1080)),
+        # Near/far clip planes in metres.
+        'clip_near_m':   _qf('near', 0.05),
+        'clip_far_m':    _qf('far', 200.0),
+    }
+
     manifest = {
         'world': {
             'slug': world.slug,
@@ -536,6 +563,7 @@ def world_visor_json(request, slug):
             'hdri': _abs(request, world.hdri_asset) if world.hdri_asset else '',
         },
         'spawn': [world.spawn_x, world.spawn_y, world.spawn_z],
+        'stereo': stereo,
         'entities': [
             {
                 'id': e.pk,
