@@ -62,6 +62,12 @@ STAGE_DIMENSIONS = {
     'berkey-gravity':          (300, 300, 550),
     # 3D-printed ceramic
     'tpms-ceramic-microfilter':(100, 100, 150),
+    # Soda-can scale micro-stages (each <66 mm × <66 mm × <168 mm,
+    # i.e. fits inside a 500 mL aluminum can)
+    'micro-hollow-fiber':       (25,  25, 130),
+    'micro-mixed-bed-ix':       (40,  40, 100),
+    'micro-gac-cartridge':      (30,  30, 100),
+    'forward-osmosis-pouch':    (50,  35, 160),
 }
 
 
@@ -578,6 +584,81 @@ STAGE_TYPES = [
         flow_lpm=0.06, energy_watts=800.0,
         cost_eur=200.0, maintenance_days=365,
     ),
+    # --- Soda-can-scale micro stages ---------------------------------
+    # Each fits inside a standard 500 mL aluminium can (~66 mm Ø ×
+    # 168 mm). Useful as a thought-experiment for "what's the smallest
+    # urine-to-something-drinkable system?" The honest answer for
+    # EU-potable: none of these alone, and 500 mL of total assembly
+    # volume is below the physical floor for that target.
+    dict(
+        slug='micro-hollow-fiber',
+        name='Micro hollow-fiber filter (LifeStraw-class)',
+        kind='membrane',
+        description='25 mm × 130 mm 0.1 µm hollow-fiber cartridge. '
+                    'Removes bacteria, protozoa, and ~half of viruses '
+                    'by size exclusion. Backflushable, multi-thousand-'
+                    'litre lifetime. Does nothing for dissolved '
+                    'solutes — salts, urea, ammonia, hormones all pass '
+                    'straight through.',
+        removal={'bacteria': 0.99999, 'protozoa': 0.99999,
+                 'viruses': 0.50, 'turbidity': 0.95},
+        flow_lpm=0.4, energy_watts=0.0,
+        cost_eur=15.0, maintenance_days=365,
+    ),
+    dict(
+        slug='micro-mixed-bed-ix',
+        name='Micro mixed-bed ion-exchange column',
+        kind='ion_exchange',
+        description='40 mm × 100 mm column packed with mixed-bed '
+                    'cation/anion resin. Captures NH₄⁺, Na⁺, K⁺, '
+                    'and some nitrate; saturates fast (~50 bed '
+                    'volumes for ammonium). Single-use at this size '
+                    '— pop the cartridge, regenerate with brine + '
+                    'caustic, reload.',
+        removal={'ammonia': 0.95, 'sodium': 0.60, 'potassium': 0.60,
+                 'nitrate': 0.50, 'lead': 0.80},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=14,
+    ),
+    dict(
+        slug='micro-gac-cartridge',
+        name='Micro activated-carbon cartridge',
+        kind='adsorption',
+        description='30 mm × 100 mm coconut-shell GAC cartridge. '
+                    'Catches organics — VOC, hormones, pharma, '
+                    'chlorine. Limited capacity at this size; good '
+                    'for a few litres before breakthrough. No effect '
+                    'on dissolved inorganics or urea.',
+        removal={'voc': 0.85, 'chlorine': 0.95,
+                 'pharma': 0.70, 'hormones': 0.65, 'pfas': 0.30},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=12.0, maintenance_days=30,
+    ),
+    dict(
+        slug='forward-osmosis-pouch',
+        name='Forward-osmosis pouch (sugar draw)',
+        kind='membrane',
+        description='LifeStraw-HydroPack-class semi-permeable pouch '
+                    'with a concentrated sugar draw solution inside. '
+                    'Water moves osmotically across the TFC membrane '
+                    'into the draw, leaving most solutes behind. The '
+                    'output is dilute sugar water, drinkable in '
+                    'emergencies but not pure water — and not EU-'
+                    'compliant. Single-use; the pouch fills then '
+                    'becomes the rehydration drink. Urea passes more '
+                    'than salts (small, uncharged), so a kidney-load '
+                    'flag is appropriate downstream.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.95, 'phosphate': 0.99,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'urea': 0.40, 'ammonia': 0.60,
+                 'pharma': 0.90, 'hormones': 0.85,
+                 'bacteria': 0.9999999, 'viruses': 0.99999,
+                 'protozoa': 0.9999999, 'turbidity': 0.99},
+        flow_lpm=0.05, energy_watts=0.0,
+        cost_eur=30.0, maintenance_days=1,
+    ),
+
     dict(
         slug='tpms-ceramic-microfilter',
         name='3D-printed ceramic TPMS microfilter',
@@ -745,6 +826,32 @@ TARGET_PROFILES = [
               'loop.',
         values={
             'turbidity': 10.0, 'bacteria': 1000.0,
+        },
+    ),
+    dict(
+        slug='field-emergency-drinkable',
+        name='Field-emergency drinkable (not EU-potable)',
+        scope='target',
+        notes='Relaxed survival-mode target — single-dose, "this won\'t '
+              'kill you in 24 hours," not a long-term ration. '
+              'Pathogens still strict (sterile water); dissolved '
+              'solute limits 100-1000× looser than EU. Use this as '
+              'the pass/fail spec for soda-can-scale systems where '
+              'the EU urine-reuse target is physically unreachable.',
+        values={
+            'turbidity':   5.0,
+            'tds':      3000.0,
+            'bacteria':    0.0,
+            'viruses':     0.0,
+            'protozoa':    0.0,
+            'urea':      200.0,         # kidney burden, but single-dose tolerable
+            'ammonia':   200.0,         # tastes terrible, not acutely toxic
+            'creatinine': 100.0,
+            'phosphate': 100.0,
+            'sodium':   1000.0,
+            'potassium': 500.0,
+            'hormones':  500.0,
+            'pharma':   5000.0,
         },
     ),
     dict(
@@ -1079,10 +1186,45 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v7, stage_type=st, position=i)
 
+        # v8 — soda-can-scale chain. Forward-osmosis pouch with sugar
+        # draw + a mixed-bed ion-exchange micro-column = 440 mL total
+        # (fits inside a 500 mL aluminium can with margin). Output
+        # passes the field-emergency target (drinkable in a survival
+        # context, not long-term ration); does NOT meet EU spec —
+        # urea, hormones, and ammonia all sit well above EU limits.
+        # The honest physical floor for can-scale urine treatment.
+        urine_v8_target = WaterProfile.objects.get(
+            slug='field-emergency-drinkable')
+        urine_v8, urine_v8_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v8-soda-can', defaults=dict(
+                name='Urine → Drinkable (v8 soda-can emergency)',
+                description='Smallest possible urine-to-drinkable '
+                            'assembly: a forward-osmosis pouch (sugar '
+                            'draw, water moves osmotically into a '
+                            'concentrated solution) followed by a '
+                            'mixed-bed ion-exchange cartridge. 440 mL '
+                            'total, fits inside a 500 mL aluminium '
+                            'can. Output is dilute sugar water with '
+                            'residual urea, ammonia, and hormones at '
+                            '100× the EU drinking limit but inside '
+                            'the field-emergency window. NOT EU-'
+                            'potable; survival-mode only.',
+                source=urine_src, target=urine_v8_target,
+            ))
+        if urine_v8_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'forward-osmosis-pouch',
+                'micro-mixed-bed-ix',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v8, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
             f'"{urine_system.name}", "{urine_v2.name}", '
             f'"{urine_v3.name}", "{urine_v4.name}", '
             f'"{urine_v5.name}", "{urine_v6.name}", '
-            f'"{urine_v7.name}".'))
+            f'"{urine_v7.name}", "{urine_v8.name}".'))

@@ -327,7 +327,7 @@ class Command(BaseCommand):
             f'Caps   : cost €{ctx.cost_cap:.0f}  '
             f'watts {ctx.watt_cap:.0f}  '
             f'length {ctx.length_cap:.0f}  '
-            f'volume {ctx.volume_cap:.0f} L{preset_tag}')
+            f'volume {ctx.volume_cap:g} L{preset_tag}')
         self.stdout.write('')
 
         for gen in range(opts['gens']):
