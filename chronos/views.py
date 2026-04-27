@@ -914,6 +914,85 @@ def _parse_neo_notes(notes):
     return out
 
 
+@login_required
+def sky_object(request, slug):
+    """Per-object detail: facts + next-14-days passes + ground track."""
+    obj = get_object_or_404(TrackedObject, slug=slug)
+    prefs = ClockPrefs.load()
+    djtz.activate(_home_tz())
+
+    ctx = {
+        'obj':     obj,
+        'prefs':   prefs,
+        'tle':     None,
+        'altaz':   None,
+        'passes':  [],
+        'track':   [],
+    }
+
+    if obj.kind == TrackedObject.KIND_SATELLITE:
+        from .astro_sources.satellites import (
+            altaz_now, compute_passes, ground_track,
+        )
+        tle = obj.elements_json or {}
+        ctx['tle'] = tle if tle.get('line1') else None
+        if ctx['tle']:
+            aa = altaz_now(tle, prefs.home_lat, prefs.home_lon,
+                           prefs.home_elev_m)
+            if aa:
+                alt, az, dist = aa
+                ctx['altaz'] = {'alt_deg': alt, 'az_deg': az,
+                                'distance_km': dist}
+            ctx['passes'] = compute_passes(
+                tle, prefs.home_lat, prefs.home_lon, prefs.home_elev_m,
+                days=14, visible_only=False,
+            )
+            ctx['track'] = ground_track(tle, minutes=180, step_seconds=30)
+            ctx['track_svg_paths'] = _ground_track_svg(ctx['track'])
+            if ctx['track']:
+                lat0, lon0, _ = ctx['track'][0]
+                ctx['track_now_xy'] = (
+                    (lon0 + 180) * 2.0,
+                    (90 - lat0) * 2.0,
+                )
+            ctx['observer_xy'] = (
+                (prefs.home_lon + 180) * 2.0,
+                (90 - prefs.home_lat) * 2.0,
+            )
+
+    return render(request, 'chronos/sky_object.html', ctx)
+
+
+def _ground_track_svg(track):
+    """Convert a ground track into a list of SVG-ready polyline strings.
+
+    The track wraps at the international date line (lon -180/+180).
+    We split the polyline whenever consecutive points jump > 180° in
+    longitude, so the rendered path doesn't zigzag across the map.
+
+    SVG canvas: 720x360 (2 px per degree). Lon -180→+180 maps to
+    x 0→720; lat +90→-90 maps to y 0→360 (north on top).
+    """
+    if not track:
+        return []
+    paths = []
+    cur = []
+    prev_lon = None
+    for lat, lon, _t in track:
+        x = (lon + 180) * 2.0
+        y = (90 - lat) * 2.0
+        if prev_lon is not None and abs(lon - prev_lon) > 180:
+            if len(cur) >= 2:
+                paths.append(' '.join(f'{px:.1f},{py:.1f}'
+                                      for px, py in cur))
+            cur = []
+        cur.append((x, y))
+        prev_lon = lon
+    if len(cur) >= 2:
+        paths.append(' '.join(f'{px:.1f},{py:.1f}' for px, py in cur))
+    return paths
+
+
 def sky_json(request):
     """JSON snapshot for the sky table's auto-refresh."""
     prefs = ClockPrefs.load()

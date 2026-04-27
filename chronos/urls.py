@@ -42,6 +42,7 @@ urlpatterns = [
     # Sky tracking (Phase 2f)
     path('sky/',                   views.sky,          name='sky'),
     path('sky.json',               views.sky_json,     name='sky_json'),
+    path('sky/<slug:slug>/',       views.sky_object,   name='sky_object'),
 
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),

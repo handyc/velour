@@ -184,6 +184,32 @@ def compute_passes(tle, lat, lon, elev_m=0.0,
     return passes
 
 
+def ground_track(tle, minutes=180, step_seconds=30):
+    """Sub-satellite path for the upcoming `minutes` of orbit.
+
+    Returns a list of (lat_deg, lon_deg, when_utc) tuples sampled at
+    the requested step. Useful for drawing the ground track on a
+    world map. Default span is ~2 orbits for a typical LEO satellite.
+    """
+    ts, _eph = _loader_get()
+    if ts is None:
+        return []
+    sat = _make_satellite(tle, ts)
+    t0 = ts.now()
+    t0_dt = t0.utc_datetime()
+    n_steps = int(minutes * 60 / step_seconds) + 1
+
+    out = []
+    for i in range(n_steps):
+        when = t0_dt + dt.timedelta(seconds=i * step_seconds)
+        t = ts.utc(when)
+        sub = sat.at(t).subpoint()
+        out.append((float(sub.latitude.degrees),
+                    float(sub.longitude.degrees),
+                    when))
+    return out
+
+
 def get(year):
     """Match the ASTRO_SOURCES protocol — but satellites don't seed
     yearly events. Return empty so seed_astronomy doesn't pull anything.

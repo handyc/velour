@@ -159,8 +159,117 @@ class Command(BaseCommand):
             )
             n_created += 1
 
+        n_concerns_opened, n_concerns_closed = _sync_neo_concerns(rows)
+
         self.stdout.write(self.style.SUCCESS(
             f'Done. Threshold {threshold_label} · {opts["days"]} days · '
             f'{deleted} stale events removed · '
-            f'{n_created} close approaches emitted.'
+            f'{n_created} close approaches emitted · '
+            f'{n_concerns_opened} concerns opened, '
+            f'{n_concerns_closed} closed.'
         ))
+
+
+def _neo_aspect(designation):
+    """Sanitise a NEO designation into a 64-char-safe Concern aspect tag.
+    '2026 HW' → 'neo_close__2026_HW'."""
+    import re
+    safe = re.sub(r'[^A-Za-z0-9]+', '_', designation.strip())
+    return f'neo_close__{safe}'[:64]
+
+
+def _is_notable_neo(row):
+    """Threshold for opening an Identity Concern.
+
+    Two criteria, either is enough:
+      * Distance < 1 LD — close enough to be worth flagging on its
+        own regardless of size (asteroids inside Earth's Hill sphere
+        are rare and historically photogenic).
+      * H < 22 AND distance < 5 LD — the IAU "potentially hazardous
+        size" threshold (≈140 m) coupled with a close pass.
+
+    Returns (notable: bool, severity: float, why: str).
+    """
+    ld = row.get('dist_ld')
+    h = row.get('h')
+    if ld is None:
+        return False, 0.0, ''
+
+    if ld < 1.0:
+        sev = min(1.0, 0.6 + (1.0 - ld) * 0.4)
+        why = f'Closer than the Moon ({ld:.2f} LD).'
+        return True, sev, why
+
+    if h is not None and h < 22.0 and ld < 5.0:
+        sev = max(0.3, min(0.7, 0.7 - (ld - 1.0) * 0.1))
+        why = (f'Potentially-hazardous size class (H={h:.1f}, '
+               f'≈{row.get("diameter_km_est", 0)*1000:.0f} m) '
+               f'within {ld:.1f} LD.')
+        return True, sev, why
+
+    return False, 0.0, ''
+
+
+def _sync_neo_concerns(rows):
+    """Open Concerns for notable NEOs in the fresh feed; close
+    Concerns for NEOs that have already passed.
+
+    Idempotent: re-running with the same feed doesn't re-open or
+    close anything that's already in the right state.
+    """
+    try:
+        from identity.models import Concern
+    except Exception:
+        return (0, 0)  # identity app missing — no-op
+
+    opened = 0
+    seen_aspects = set()
+
+    for row in rows:
+        notable, severity, why = _is_notable_neo(row)
+        if not notable:
+            continue
+        des = row['designation']
+        aspect = _neo_aspect(des)
+        seen_aspects.add(aspect)
+        existing = Concern.objects.filter(
+            aspect=aspect, closed_at__isnull=True,
+        ).first()
+        name = f'NEO close approach: {des} · {row["dist_ld"]:.2f} LD'
+        diameter_km = row.get('diameter_km_est') or 0
+        if diameter_km < 0.05:
+            size_str = f'~{diameter_km * 1000:.0f} m'
+        else:
+            size_str = f'~{diameter_km:.2f} km'
+        description = (
+            f'{why}\n\n'
+            f'Approach: {row["when_utc"]:%Y-%m-%d %H:%M} UT\n'
+            f'Distance: {row["dist_au"]:.6f} AU '
+            f'= {row["dist_ld"]:.2f} lunar distances\n'
+            f'Velocity: {row.get("v_rel_km_s", 0):.2f} km/s\n'
+            f'Magnitude H: {row.get("h", "?")}, est. diameter {size_str}'
+        )
+        if existing:
+            existing.severity = severity
+            existing.description = description
+            existing.save(update_fields=['severity', 'description'])
+        else:
+            Concern.objects.create(
+                aspect=aspect, name=name,
+                description=description, severity=severity,
+            )
+            opened += 1
+
+    closed = 0
+    stale_qs = Concern.objects.filter(
+        aspect__startswith='neo_close__', closed_at__isnull=True,
+    ).exclude(aspect__in=seen_aspects)
+    for c in stale_qs:
+        c.close(
+            reason='resolved',
+            note='NEO close approach has passed or fell outside the '
+                 'refresh threshold.',
+        )
+        closed += 1
+
+    return (opened, closed)

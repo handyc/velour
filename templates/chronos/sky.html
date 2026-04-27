@@ -65,7 +65,7 @@
     {% for r in rows %}
     <tr class="{% if r.above_horizon %}above{% else %}below{% endif %}" data-slug="{{ r.slug }}">
       <td class="name">
-        {{ r.name }}
+        <a href="{% url 'chronos:sky_object' r.slug %}" style="color:inherit;text-decoration:none;border-bottom:1px dotted #6e7681;">{{ r.name }}</a>
         <span class="sky-kind">{{ r.kind_label }}</span>
         {% if r.elements_age_h and r.elements_age_h > 168 %}
           <span class="sky-stale" title="TLE older than 7 days">stale</span>

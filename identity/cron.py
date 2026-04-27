@@ -56,6 +56,8 @@ DEFAULT_INTERVALS = {
     'morning_briefing': 86_400,      # 1 d (gated to fire near 06:00 local)
     'app_status_report': 86_400,     # 1 d — aggregate codex_report() hooks
     'backup_run':        86_400,     # 1 d — daily backup, weekly/monthly piggyback
+    'sky_satellites':    86_400,     # 1 d — refresh TLEs + visible-pass calendar
+    'sky_neos':          86_400,     # 1 d — refresh JPL CNEOS close approaches
 }
 
 
@@ -89,6 +91,7 @@ def dispatch(force=None):
             'reflect_weekly', 'reflect_monthly', 'meditate_ladder',
             'meditate_deep', 'rebuild_document', 'tile_reflect',
             'morning_briefing', 'app_status_report', 'backup_run',
+            'sky_satellites', 'sky_neos',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -125,6 +128,8 @@ def dispatch(force=None):
         ('morning_briefing', _do_morning_briefing),
         ('app_status_report', _do_app_status_report),
         ('backup_run',       _do_backup_run),
+        ('sky_satellites',   _do_sky_satellites),
+        ('sky_neos',         _do_sky_neos),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -268,6 +273,29 @@ def _do_app_status_report():
     buf = io.StringIO()
     call_command('codex_app_reports', stdout=buf)
     return buf.getvalue().strip() or 'app status report composed'
+
+
+def _do_sky_satellites():
+    """Daily — re-fetch TLEs for watched satellites and re-emit
+    visible passes into the calendar. Network failures degrade
+    gracefully (refresh_satellites falls back to cached TLEs)."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('refresh_satellites', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'satellites refreshed'
+
+
+def _do_sky_neos():
+    """Daily — mirror upcoming NEO close approaches from JPL CNEOS
+    into the calendar. Same idempotent re-emit pattern as satellites."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('refresh_neos', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'NEOs refreshed'
 
 
 def _do_rebuild_document():

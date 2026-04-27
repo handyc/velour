@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}{{ obj.name }} — Sky - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.obj-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.obj-head h1 { margin:0; font-size:1.4rem; }
+.obj-head .meta { color:#8b949e; font-size:0.88rem; }
+.obj-head .kind {
+  display:inline-block; padding:0.05rem 0.4rem; border-radius:3px;
+  background:#21262d; color:#8b949e; font-size:0.7rem;
+  text-transform:uppercase; letter-spacing:0.05em;
+}
+
+.fact-grid {
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+  gap:0.6rem; margin-top:0.8rem;
+  font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.fact-grid .fact {
+  background:#0d1117; border:1px solid #21262d; border-radius:4px;
+  padding:0.4rem 0.6rem;
+}
+.fact-grid .fact .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.05em; display:block; margin-bottom:0.15rem;
+}
+.fact-grid .fact .val { color:#c9d1d9; font-size:1.05rem; }
+.fact-grid .fact.above .val { color:#3fb950; }
+
+.section { margin-top:1.6rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; }
+.section h2 { font-size:0.95rem; margin:0 0 0.5rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.05em; }
+
+.passes-table { width:100%; border-collapse:collapse; font-size:0.9rem;
+  font-family:ui-monospace, monospace; }
+.passes-table th { text-align:left; color:#8b949e; font-weight:500;
+  font-size:0.78rem; text-transform:uppercase; letter-spacing:0.05em;
+  border-bottom:1px solid #30363d; padding:0.3rem 0.5rem; }
+.passes-table td { padding:0.3rem 0.5rem; border-bottom:1px solid #161b22; }
+.passes-table tr.visible td { color:#c9d1d9; }
+.passes-table tr.visible td.alt { color:#3fb950; font-weight:600; }
+.passes-table tr.invisible td { color:#6e7681; }
+
+.gt-svg-wrap { background:#0d1117; border:1px solid #21262d;
+  border-radius:4px; padding:0.4rem; }
+.gt-svg { width:100%; height:auto; display:block; }
+.gt-grat { stroke:#21262d; stroke-width:0.5; fill:none; }
+.gt-axis { stroke:#30363d; stroke-width:1; fill:none; }
+.gt-track { stroke:#bc8cff; stroke-width:2; fill:none;
+  stroke-linecap:round; stroke-linejoin:round; }
+.gt-now { fill:#f85149; }
+.gt-observer { fill:#58a6ff; stroke:#0d1117; stroke-width:1.5; }
+.gt-label { fill:#6e7681; font-size:9px;
+  font-family:ui-monospace, monospace; }
+
+.tle-block {
+  background:#0d1117; border:1px solid #21262d; border-radius:4px;
+  padding:0.5rem 0.7rem; font-family:ui-monospace, monospace;
+  font-size:0.8rem; color:#8b949e; white-space:pre; overflow-x:auto;
+}
+
+.notes { color:#8b949e; font-size:0.9rem; margin-top:0.8rem;
+  white-space:pre-wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="obj-head">
+  <h1>{{ obj.name }}</h1>
+  <span class="kind">{{ obj.get_kind_display }}</span>
+  {% if obj.designation %}<span class="meta">CATNR {{ obj.designation }}</span>{% endif %}
+  {% if obj.magnitude is not None %}<span class="meta">mag {{ obj.magnitude|floatformat:1 }}</span>{% endif %}
+  {% if obj.elements_age_hours %}<span class="meta">TLE age {{ obj.elements_age_hours|floatformat:1 }} h</span>{% endif %}
+</div>
+
+{% if obj.notes %}<p class="notes">{{ obj.notes }}</p>{% endif %}
+
+{% if altaz %}
+<div class="fact-grid">
+  <div class="fact {% if altaz.alt_deg > 0 %}above{% endif %}">
+    <span class="lbl">Altitude</span>
+    <span class="val">{{ altaz.alt_deg|floatformat:1 }}°</span>
+  </div>
+  <div class="fact">
+    <span class="lbl">Azimuth</span>
+    <span class="val">{{ altaz.az_deg|floatformat:0 }}°</span>
+  </div>
+  <div class="fact">
+    <span class="lbl">Distance</span>
+    <span class="val">{{ altaz.distance_km|floatformat:0 }} km</span>
+  </div>
+  <div class="fact">
+    <span class="lbl">From</span>
+    <span class="val">{{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E</span>
+  </div>
+</div>
+{% endif %}
+
+{% if passes %}
+<div class="section">
+  <h2>Passes · next 14 days · {{ passes|length }} total</h2>
+  <table class="passes-table">
+    <thead>
+      <tr>
+        <th>Rise (local)</th>
+        <th>Max alt</th>
+        <th>Azimuth</th>
+        <th>Duration</th>
+        <th>Visible</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in passes %}
+      <tr class="{% if p.visible %}visible{% else %}invisible{% endif %}">
+        <td>{{ p.rise|date:'D d M H:i:s' }}</td>
+        <td class="alt">{{ p.max_alt_deg|floatformat:0 }}°</td>
+        <td>{{ p.culminate_az_deg|floatformat:0 }}°</td>
+        <td>{{ p.duration_s|floatformat:0 }} s</td>
+        <td>
+          {% if p.visible %}yes
+          {% elif not p.sat_sunlit %}in shadow
+          {% else %}daylight{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if track_svg_paths %}
+<div class="section">
+  <h2>Ground track · next 3 hours</h2>
+  <div class="gt-svg-wrap">
+    <svg class="gt-svg" viewBox="0 0 720 360" preserveAspectRatio="xMidYMid meet"
+         xmlns="http://www.w3.org/2000/svg">
+      <!-- Background -->
+      <rect x="0" y="0" width="720" height="360" fill="#0d1117"/>
+
+      <!-- Graticule every 30° lat / 30° lon -->
+      <g class="gt-grat">
+        <line x1="60"  y1="0" x2="60"  y2="360"/>
+        <line x1="120" y1="0" x2="120" y2="360"/>
+        <line x1="180" y1="0" x2="180" y2="360"/>
+        <line x1="240" y1="0" x2="240" y2="360"/>
+        <line x1="300" y1="0" x2="300" y2="360"/>
+        <line x1="420" y1="0" x2="420" y2="360"/>
+        <line x1="480" y1="0" x2="480" y2="360"/>
+        <line x1="540" y1="0" x2="540" y2="360"/>
+        <line x1="600" y1="0" x2="600" y2="360"/>
+        <line x1="660" y1="0" x2="660" y2="360"/>
+        <line x1="0" y1="60"  x2="720" y2="60"/>
+        <line x1="0" y1="120" x2="720" y2="120"/>
+        <line x1="0" y1="240" x2="720" y2="240"/>
+        <line x1="0" y1="300" x2="720" y2="300"/>
+      </g>
+
+      <!-- Axes: equator + prime meridian -->
+      <g class="gt-axis">
+        <line x1="0" y1="180" x2="720" y2="180"/>
+        <line x1="360" y1="0" x2="360" y2="360"/>
+      </g>
+
+      <!-- Labels -->
+      <text class="gt-label" x="4"   y="12">90°N</text>
+      <text class="gt-label" x="4"   y="178">0°</text>
+      <text class="gt-label" x="4"   y="356">90°S</text>
+      <text class="gt-label" x="364" y="12">0°</text>
+      <text class="gt-label" x="540" y="12">90°E</text>
+      <text class="gt-label" x="180" y="12">90°W</text>
+
+      <!-- Ground track polylines -->
+      {% for path in track_svg_paths %}
+      <polyline class="gt-track" points="{{ path }}"/>
+      {% endfor %}
+
+      <!-- Start marker (current sub-satellite point) -->
+      {% if track_now_xy %}
+      <circle class="gt-now"
+              cx="{{ track_now_xy.0|floatformat:1 }}"
+              cy="{{ track_now_xy.1|floatformat:1 }}" r="5"/>
+      {% endif %}
+
+      <!-- Observer marker -->
+      <circle class="gt-observer"
+              cx="{{ observer_xy.0|floatformat:1 }}"
+              cy="{{ observer_xy.1|floatformat:1 }}" r="4"/>
+    </svg>
+  </div>
+  <small style="color:#6e7681; display:block; margin-top:0.4rem;">
+    Equirectangular projection, 30° graticule. Track is the next ~3 hours
+    of the satellite's sub-orbital path. Observer marked in blue.
+  </small>
+</div>
+{% endif %}
+
+{% if tle %}
+<div class="section">
+  <h2>TLE</h2>
+  <div class="tle-block">{{ tle.line1 }}
+{{ tle.line2 }}</div>
+  {% if obj.source_url %}
+  <small style="color:#6e7681;"><a href="{{ obj.source_url }}" target="_blank" rel="noopener">Source: CelesTrak</a></small>
+  {% endif %}
+</div>
+{% endif %}
+
+<div style="margin-top:1.5rem;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">← All sky objects</a>
+</div>
+{% endblock %}
