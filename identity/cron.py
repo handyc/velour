@@ -60,6 +60,7 @@ DEFAULT_INTERVALS = {
     'sky_neos':          86_400,     # 1 d — refresh JPL CNEOS close approaches
     'space_weather':     21_600,     # 6 h — Kp / wind / X-ray / aurora from SWPC
     'local_environment': 21_600,     # 6 h — air quality + UV + pollen for observer
+    'weather':           21_600,     # 6 h — temp / clouds / precip forecast
 }
 
 
@@ -94,7 +95,7 @@ def dispatch(force=None):
             'meditate_deep', 'rebuild_document', 'tile_reflect',
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
-            'local_environment',
+            'local_environment', 'weather',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -135,6 +136,7 @@ def dispatch(force=None):
         ('sky_neos',         _do_sky_neos),
         ('space_weather',    _do_space_weather),
         ('local_environment', _do_local_environment),
+        ('weather',          _do_weather),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -325,6 +327,19 @@ def _do_local_environment():
     call_command('refresh_local_environment', stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'local environment refreshed'
+
+
+def _do_weather():
+    """Every 6 h — pull weather forecast (temp / cloud / precip / wind)
+    for the observer location from Open-Meteo's free /v1/forecast.
+    Hourly + daily metrics into chronos.Measurement. Drives the
+    /chronos/weather/ page and the dome's cloud-cover HUD line."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('refresh_weather', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'weather refreshed'
 
 
 def _do_rebuild_document():

@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Weather — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.wx-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.wx-head h1 { margin:0; }
+.wx-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.wx-now {
+  display:grid;
+  grid-template-columns: max-content 1fr;
+  gap:1rem 1.5rem;
+  align-items:center;
+  margin-top: 1rem;
+  background:#0d1117; border:1px solid #21262d; border-radius:8px;
+  padding:1rem 1.25rem;
+}
+.wx-now .emoji { font-size:3.5rem; line-height:1; }
+.wx-now .summary { display:flex; flex-direction:column; gap:0.25rem; }
+.wx-now .temp { font-family: ui-monospace, monospace; font-size:2rem;
+  color:#c9d1d9; line-height:1; }
+.wx-now .label { color:#c9d1d9; font-size:1rem; }
+.wx-now .extra { color:#8b949e; font-size:0.85rem;
+  font-family:ui-monospace,monospace; }
+
+.wx-grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+.wx-card {
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:0.7rem 0.9rem;
+  display:flex; flex-direction:column; gap:0.35rem;
+  font-family: ui-monospace, monospace;
+}
+.wx-card .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.06em;
+}
+.wx-card .val {
+  color:#c9d1d9; font-size:1.5rem; font-weight:500; line-height:1.1;
+}
+.wx-card .sub { color:#8b949e; font-size:0.78rem; }
+.wx-card svg.spark { width:100%; height:36px; display:block; margin-top:0.2rem; }
+.wx-card svg.spark.temp polyline   { fill:none; stroke:#f59e0b; stroke-width:1.2; }
+.wx-card svg.spark.cloud polyline  { fill:none; stroke:#8b949e; stroke-width:1.2; }
+.wx-card svg.spark.precip polyline { fill:none; stroke:#58a6ff; stroke-width:1.2; }
+.wx-card svg.spark.wind polyline   { fill:none; stroke:#3fb950; stroke-width:1.2; }
+
+.wx-strip-section { margin-top:1.4rem; padding-top:0.7rem;
+  border-top:1px solid #21262d; }
+.wx-strip-section h2 { font-size:0.85rem; margin:0 0 0.4rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.06em; }
+
+.wx-strip {
+  display:flex; gap:0.3rem; overflow-x:auto;
+  padding-bottom:0.5rem;
+}
+.wx-strip-cell {
+  flex:0 0 auto; width:64px; text-align:center;
+  background:#0d1117; border:1px solid #21262d; border-radius:4px;
+  padding:0.3rem 0;
+  font-family:ui-monospace,monospace; font-size:0.75rem;
+}
+.wx-strip-cell .hh { color:#8b949e; }
+.wx-strip-cell .em { font-size:1.5rem; line-height:1.1; padding:0.1rem 0; }
+.wx-strip-cell .t  { color:#c9d1d9; font-weight:500; }
+.wx-strip-cell .cl { color:#6e7681; font-size:0.66rem; margin-top:0.1rem; }
+.wx-strip-cell .pp { color:#58a6ff; font-size:0.66rem; }
+
+.wx-daily { width:100%; border-collapse:collapse; margin-top:0.5rem;
+  font-family:ui-monospace,monospace; font-size:0.85rem; }
+.wx-daily th { text-align:left; color:#8b949e; font-weight:500;
+  font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em;
+  border-bottom:1px solid #30363d; padding:0.3rem 0.5rem; }
+.wx-daily td { padding:0.4rem 0.5rem; border-bottom:1px solid #161b22;
+  color:#c9d1d9; }
+.wx-daily td.em { font-size:1.3rem; }
+.wx-daily td.summary { color:#8b949e; }
+.wx-daily td.temps {
+  background: linear-gradient(to right,
+    rgba(58,166,255,0.08), rgba(245,158,11,0.18));
+  border-radius:3px;
+  font-feature-settings: "tnum";
+}
+
+.wx-extra { margin-top:1.2rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; color:#8b949e; font-size:0.85rem;
+  line-height:1.5; }
+.wx-extra code { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wx-head">
+  <h1>Weather</h1>
+  <span class="meta">Open-Meteo · {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E</span>
+</div>
+
+<div class="wx-now">
+  <div class="emoji">{{ code_emoji }}</div>
+  <div class="summary">
+    <div class="temp">{% if temp_now %}{{ temp_now.value|floatformat:1 }}°C{% else %}—{% endif %}</div>
+    <div class="label">{{ code_label }}</div>
+    <div class="extra">
+      {% if cloud_now %}{{ cloud_now.value|floatformat:0 }}% cloud{% endif %}
+      {% if wind_now %} · {{ wind_now.value|floatformat:0 }} km/h wind{% endif %}
+      {% if humidity_now %} · {{ humidity_now.value|floatformat:0 }}% RH{% endif %}
+      {% if visibility_now %} · vis {{ visibility_now.value|floatformat:0 }} m{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="wx-grid">
+  <div class="wx-card">
+    <span class="lbl">Temperature · ±24 h</span>
+    <span class="val">{% if temp_now %}{{ temp_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">°C</small>{% else %}—{% endif %}</span>
+    <span class="sub">{% if temp_now %}{{ temp_now.at|date:'D H:i' }}{% endif %}</span>
+    {% if temp_24h_svg %}
+    <svg class="spark temp" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ temp_24h_svg }}"/>
+    </svg>{% endif %}
+  </div>
+
+  <div class="wx-card">
+    <span class="lbl">Cloud cover · 24 h</span>
+    <span class="val">{% if cloud_now %}{{ cloud_now.value|floatformat:0 }}%{% else %}—{% endif %}</span>
+    <span class="sub">forecast next 24 h</span>
+    {% if cloud_24h_svg %}
+    <svg class="spark cloud" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ cloud_24h_svg }}"/>
+    </svg>{% endif %}
+  </div>
+
+  <div class="wx-card">
+    <span class="lbl">Precipitation prob. · 24 h</span>
+    <span class="val">{% if precip_now %}{{ precip_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">mm/h</small>{% else %}—{% endif %}</span>
+    <span class="sub">forecast next 24 h</span>
+    {% if precip_24h_svg %}
+    <svg class="spark precip" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ precip_24h_svg }}"/>
+    </svg>{% endif %}
+  </div>
+
+  <div class="wx-card">
+    <span class="lbl">Wind · ±24 h</span>
+    <span class="val">{% if wind_now %}{{ wind_now.value|floatformat:0 }} <small style="font-size:0.55em;color:#6e7681;">km/h</small>{% else %}—{% endif %}</span>
+    <span class="sub">{% if wind_now %}{{ wind_now.at|date:'D H:i' }}{% endif %}</span>
+    {% if wind_24h_svg %}
+    <svg class="spark wind" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ wind_24h_svg }}"/>
+    </svg>{% endif %}
+  </div>
+</div>
+
+{% if hourly_strip %}
+<div class="wx-strip-section">
+  <h2>Next 24 hours</h2>
+  <div class="wx-strip">
+    {% for h in hourly_strip %}
+    <div class="wx-strip-cell" title="{{ h.label }}">
+      <div class="hh">{{ h.at_local|date:'H:i' }}</div>
+      <div class="em">{{ h.emoji }}</div>
+      <div class="t">{{ h.temp|floatformat:0 }}°</div>
+      {% if h.cloud is not None %}<div class="cl">{{ h.cloud|floatformat:0 }}% cl</div>{% endif %}
+      {% if h.precip_pct %}<div class="pp">{{ h.precip_pct|floatformat:0 }}% rain</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if daily_rows %}
+<div class="wx-strip-section">
+  <h2>7-day outlook</h2>
+  <table class="wx-daily">
+    <thead>
+      <tr>
+        <th>Day</th><th></th><th>Conditions</th>
+        <th>Low / High</th><th>Rain</th><th>UV</th><th>Sun</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for d in daily_rows %}
+      <tr>
+        <td>{{ d.date|date:'D d M' }}</td>
+        <td class="em">{{ d.emoji }}</td>
+        <td class="summary">{{ d.label }}</td>
+        <td class="temps">
+          {% if d.low %}{{ d.low.value|floatformat:0 }}°{% endif %}
+          /
+          {% if d.high %}{{ d.high.value|floatformat:0 }}°{% endif %}
+        </td>
+        <td>{% if d.precip_mm %}{{ d.precip_mm.value|floatformat:1 }} mm{% else %}—{% endif %}</td>
+        <td>{% if d.uv_max %}{{ d.uv_max.value|floatformat:0 }}{% else %}—{% endif %}</td>
+        <td class="summary">
+          {% if d.sunrise_local and d.sunset_local %}
+            {{ d.sunrise_local|slice:"11:16" }}–{{ d.sunset_local|slice:"11:16" }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="wx-extra">
+  Data from Open-Meteo's <code>/v1/forecast</code> endpoint, refreshed every
+  6 h by <code>identity_cron</code>. WMO weather codes mapped to standard
+  descriptions and Unicode emoji. Same <code>chronos.Measurement</code>
+  table that hosts the air-quality and space-weather metrics — source tag
+  <code>open-meteo-weather</code>.
+</div>
+
+<div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:local' %}" class="btn btn-secondary">Local Air</a>
+  <a href="{% url 'chronos:space_weather' %}" class="btn btn-secondary">Space Weather</a>
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

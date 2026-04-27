@@ -820,6 +820,8 @@ def _briefing_context(tz):
     upcoming = [t for t in open_tasks if t not in overdue
                 and t not in due_today]
 
+    environs = _briefing_environs()
+
     return {
         'now':         now,
         'today':       today,
@@ -829,6 +831,74 @@ def _briefing_context(tz):
         'due_today':   due_today,
         'upcoming':    upcoming,
         'open_count':  Task.objects.filter(status=Task.STATUS_OPEN).count(),
+        'environs':    environs,
+    }
+
+
+def _briefing_environs():
+    """Compose the morning briefing's environs strip — current weather,
+    today's UV peak, current air quality band, and any open
+    threshold-Concerns from the env_threshold__ family. Cheap reads
+    from chronos.Measurement; degrades gracefully when there's no data
+    yet (fresh install or sources offline).
+
+    `at__lte=now` everywhere — Open-Meteo ships forecast data along
+    with observations, so the latest row is in the future unless we
+    constrain.
+    """
+    from .astro_sources.weather import wmo_label
+    from .astro_sources.local_environment import (
+        european_aqi_band, uv_band,
+    )
+
+    now = djtz.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+
+    def _latest(source, metric):
+        return Measurement.objects.filter(
+            source=source, metric=metric, at__lte=now,
+        ).order_by('-at').first()
+
+    def _today(source, metric):
+        # Daily metrics are stamped at local midnight in UTC; for
+        # uv_index_max we want today's specifically (not yesterday's).
+        return Measurement.objects.filter(
+            source=source, metric=metric,
+            at__gte=today_start - timedelta(hours=24),
+            at__lt=today_end,
+        ).order_by('-at').first()
+
+    code = _latest('open-meteo-weather', 'weather_code')
+    weather_label, weather_emoji = wmo_label(code.value if code else None)
+    temp = _latest('open-meteo-weather', 'temperature_2m')
+    cloud = _latest('open-meteo-weather', 'cloud_cover')
+    uv_today_max = _today('open-meteo-weather', 'uv_index_max')
+
+    aqi = _latest('open-meteo', 'european_aqi')
+    o3 = _latest('open-meteo', 'ozone')
+
+    # Open threshold concerns from Phase 7 (env_threshold__*).
+    try:
+        from identity.models import Concern
+        env_concerns = list(Concern.objects.filter(
+            aspect__startswith='env_threshold__', closed_at__isnull=True,
+        )[:5])
+    except Exception:
+        env_concerns = []
+
+    return {
+        'available':      bool(code or aqi),
+        'weather_label':  weather_label,
+        'weather_emoji':  weather_emoji,
+        'temp_c':         temp.value if temp else None,
+        'cloud_pct':      cloud.value if cloud else None,
+        'uv_today_max':   uv_today_max.value if uv_today_max else None,
+        'uv_today_band':  uv_band(uv_today_max.value if uv_today_max else None),
+        'aqi':            aqi.value if aqi else None,
+        'aqi_band':       european_aqi_band(aqi.value if aqi else None),
+        'ozone':          o3.value if o3 else None,
+        'env_concerns':   env_concerns,
     }
 
 
@@ -1111,6 +1181,138 @@ def local_environment(request):
 
 
 @login_required
+def weather(request):
+    """Weather forecast dashboard — current + 24-h hourly + 7-day daily."""
+    from .astro_sources.weather import wmo_label
+
+    prefs = ClockPrefs.load()
+    home_tz = _home_tz()
+    djtz.activate(home_tz)
+    now = djtz.now()
+    SOURCE = 'open-meteo-weather'
+
+    def _latest(metric):
+        return Measurement.objects.filter(
+            source=SOURCE, metric=metric, at__lte=now,
+        ).order_by('-at').first()
+
+    def _hourly(metric, hours_ahead=24):
+        return list(Measurement.objects.filter(
+            source=SOURCE, metric=metric,
+            at__gte=now, at__lte=now + timedelta(hours=hours_ahead),
+        ).order_by('at'))
+
+    def _past(metric, hours):
+        return list(Measurement.objects.filter(
+            source=SOURCE, metric=metric,
+            at__gte=now - timedelta(hours=hours), at__lte=now,
+        ).order_by('at'))
+
+    # 7-day daily forecast: pull each daily metric and align by date.
+    daily = {}
+    daily_qs = Measurement.objects.filter(
+        source=SOURCE, metric__in=[m for m, _ in _DAILY_METRICS_LIST],
+        at__gte=now - timedelta(days=1),
+        at__lte=now + timedelta(days=8),
+    ).order_by('at')
+    for m in daily_qs:
+        # Use the date_local in extra when available (weather_code_daily
+        # carries it), else derive from at + tz offset.
+        if m.extra and m.extra.get('date_local'):
+            date_key = date.fromisoformat(m.extra['date_local'])
+        else:
+            date_key = m.at.astimezone(home_tz).date()
+        daily.setdefault(date_key, {})[m.metric] = m
+
+    daily_rows = []
+    for date_key in sorted(daily.keys()):
+        if date_key < now.astimezone(home_tz).date():
+            continue
+        row = daily[date_key]
+        wc = row.get('weather_code_daily')
+        wmo = wmo_label(wc.value) if wc else ('—', '')
+        sunrise_local = sunset_local = None
+        if wc and wc.extra:
+            sunrise_local = wc.extra.get('sunrise_local')
+            sunset_local  = wc.extra.get('sunset_local')
+        daily_rows.append({
+            'date': date_key,
+            'high': row.get('temperature_2m_max'),
+            'low':  row.get('temperature_2m_min'),
+            'precip_mm': row.get('precipitation_sum'),
+            'sunshine_s': row.get('sunshine_duration'),
+            'uv_max': row.get('uv_index_max'),
+            'label': wmo[0],
+            'emoji': wmo[1],
+            'sunrise_local': sunrise_local,
+            'sunset_local':  sunset_local,
+        })
+
+    # Hourly forecast strip: build a pre-cooked list of (hour, temp, cloud, code, emoji, precip_pct)
+    hourly_strip = []
+    temps = _hourly('temperature_2m', 24)
+    clouds_by_at = {m.at: m.value for m in _hourly('cloud_cover', 24)}
+    codes_by_at = {m.at: m.value for m in _hourly('weather_code', 24)}
+    pp_by_at = {m.at: m.value for m in _hourly('precipitation_probability', 24)}
+    for m in temps:
+        wmo = wmo_label(codes_by_at.get(m.at))
+        hourly_strip.append({
+            'at_local':    m.at.astimezone(home_tz),
+            'temp':        m.value,
+            'cloud':       clouds_by_at.get(m.at),
+            'precip_pct':  pp_by_at.get(m.at),
+            'label':       wmo[0],
+            'emoji':       wmo[1],
+        })
+
+    temp_now = _latest('temperature_2m')
+    cloud_now = _latest('cloud_cover')
+    code_now = _latest('weather_code')
+    wind_now = _latest('wind_speed_10m')
+    precip_now = _latest('precipitation')
+    humidity_now = _latest('relative_humidity_2m')
+    visibility_now = _latest('visibility')
+    code_label, code_emoji = wmo_label(code_now.value if code_now else None)
+
+    return render(request, 'chronos/weather.html', {
+        'prefs':         prefs,
+        'temp_now':      temp_now,
+        'cloud_now':     cloud_now,
+        'code_now':      code_now,
+        'code_label':    code_label,
+        'code_emoji':    code_emoji,
+        'wind_now':      wind_now,
+        'precip_now':    precip_now,
+        'humidity_now':  humidity_now,
+        'visibility_now': visibility_now,
+        'temp_24h_svg':  _sparkline_polyline(_past('temperature_2m', 24)
+                                             + _hourly('temperature_2m', 24),
+                                             w=200, h=40),
+        'cloud_24h_svg': _sparkline_polyline(_hourly('cloud_cover', 24),
+                                             lo=0, hi=100, w=200, h=40),
+        'precip_24h_svg':_sparkline_polyline(_hourly('precipitation_probability', 24),
+                                             lo=0, hi=100, w=200, h=40),
+        'wind_24h_svg':  _sparkline_polyline(_past('wind_speed_10m', 12)
+                                             + _hourly('wind_speed_10m', 24),
+                                             lo=0, w=200, h=40),
+        'hourly_strip':  hourly_strip,
+        'daily_rows':    daily_rows,
+    })
+
+
+# Local copy of weather.py's DAILY_METRICS list to avoid an import cycle
+# when this view is composed before astro_sources is fully imported.
+_DAILY_METRICS_LIST = [
+    ('temperature_2m_max',     '°C'),
+    ('temperature_2m_min',     '°C'),
+    ('sunshine_duration',      's'),
+    ('precipitation_sum',      'mm'),
+    ('uv_index_max',           ''),
+    ('weather_code_daily',     ''),
+]
+
+
+@login_required
 def sky_object(request, slug):
     """Per-object detail: facts + next-14-days passes + ground track."""
     obj = get_object_or_404(TrackedObject, slug=slug)
@@ -1227,7 +1429,42 @@ def sky_json(request):
             prefs.home_lat, prefs.home_lon, prefs.home_elev_m,
         )
         payload['aurora'] = _aurora_for_dome(prefs)
+        payload['weather'] = _weather_for_dome()
     return JsonResponse(payload)
+
+
+def _weather_for_dome():
+    """Latest hourly snapshot for the dome HUD: temp, cloud cover,
+    weather code (with emoji), wind. Returns None if no recent data.
+
+    `at__lte=now` is critical — Open-Meteo returns forecast data
+    alongside observations, so an unbounded latest() would jump
+    forward to whatever the last forecast hour is.
+    """
+    from .astro_sources.weather import wmo_label
+    SOURCE = 'open-meteo-weather'
+    now = djtz.now()
+
+    def _latest(metric):
+        return Measurement.objects.filter(
+            source=SOURCE, metric=metric, at__lte=now,
+        ).order_by('-at').first()
+
+    code = _latest('weather_code')
+    if not code:
+        return None
+    label, emoji = wmo_label(code.value)
+    temp = _latest('temperature_2m')
+    cloud = _latest('cloud_cover')
+    wind = _latest('wind_speed_10m')
+    return {
+        'observed_at':   code.at.isoformat(),
+        'weather_label': label,
+        'weather_emoji': emoji,
+        'temp_c':        temp.value if temp else None,
+        'cloud_pct':     cloud.value if cloud else None,
+        'wind_km_h':     wind.value if wind else None,
+    }
 
 
 def _aurora_for_dome(prefs):

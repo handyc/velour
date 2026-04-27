@@ -45,6 +45,30 @@
     .due-today-tag { color: #d29922; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 0.5em; }
 
     .brief-actions { margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+    .env-row {
+        display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .env-row .now-temp { font-size: 1.6rem; color: #c9d1d9; }
+    .env-row .now-emoji { font-size: 2rem; line-height: 1; }
+    .env-row .env-cell { display: flex; flex-direction: column; gap: 0.05rem; }
+    .env-row .env-cell .lbl {
+        color: #6e7681; font-size: 0.65rem;
+        text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .env-row .env-cell .val { color: #c9d1d9; font-size: 1rem; }
+    .env-aqi.very-good       .val { color: #50f0e6; }
+    .env-aqi.good            .val { color: #50ccaa; }
+    .env-aqi.moderate        .val { color: #f0e641; }
+    .env-aqi.poor            .val { color: #ff5050; }
+    .env-aqi.very-poor       .val { color: #960032; }
+    .env-aqi.extremely-poor  .val { color: #7d2181; }
+    .env-uv.high      .val,
+    .env-uv.very-high .val { color: #d29922; }
+    .env-uv.extreme   .val { color: #f85149; }
+    .env-warnings { margin-top: 0.4rem; }
+    .env-warnings li { color: #f85149; font-size: 0.8rem; }
 </style>
 {% endblock %}
 
@@ -94,6 +118,44 @@
         <div class="empty">Nothing on the calendar today.</div>
         {% endif %}
     </div>
+
+    {% if environs.available %}
+    <div class="brief-section" style="grid-column: 1 / -1;">
+        <h2>Environs</h2>
+        <div class="env-row">
+            <div class="now-emoji">{{ environs.weather_emoji }}</div>
+            <div class="env-cell">
+                <span class="lbl">{{ environs.weather_label }}</span>
+                <span class="val">{% if environs.temp_c is not None %}{{ environs.temp_c|floatformat:0 }} °C{% endif %}{% if environs.cloud_pct is not None %} · {{ environs.cloud_pct|floatformat:0 }}% cloud{% endif %}</span>
+            </div>
+            {% if environs.aqi is not None %}
+            <div class="env-cell env-aqi {{ environs.aqi_band|slugify }}">
+                <span class="lbl">European AQI</span>
+                <span class="val">{{ environs.aqi|floatformat:0 }} · {{ environs.aqi_band }}</span>
+            </div>
+            {% endif %}
+            {% if environs.uv_today_max is not None %}
+            <div class="env-cell env-uv {{ environs.uv_today_band|slugify }}">
+                <span class="lbl">UV peak today</span>
+                <span class="val">{{ environs.uv_today_max|floatformat:1 }} · {{ environs.uv_today_band }}</span>
+            </div>
+            {% endif %}
+            {% if environs.ozone is not None %}
+            <div class="env-cell">
+                <span class="lbl">O₃ now</span>
+                <span class="val">{{ environs.ozone|floatformat:0 }} µg/m³</span>
+            </div>
+            {% endif %}
+        </div>
+        {% if environs.env_concerns %}
+        <ul class="env-warnings">
+            {% for c in environs.env_concerns %}
+            <li>⚠ {{ c.name }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+    {% endif %}
 
     <div class="brief-section" style="grid-column: 1 / -1;">
         <h2>Tasks ({{ open_count }} open)</h2>

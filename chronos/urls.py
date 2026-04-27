@@ -54,6 +54,9 @@ urlpatterns = [
     # Local environment (Phase 7) — air quality + UV + pollen.
     path('local/',                 views.local_environment, name='local'),
 
+    # Weather (Phase 8) — temp / clouds / precipitation forecast.
+    path('weather/',               views.weather,         name='weather'),
+
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),
     path('tasks/',                 views.task_list,    name='task_list'),
