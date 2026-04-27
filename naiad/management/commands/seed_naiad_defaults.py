@@ -74,6 +74,13 @@ STAGE_DIMENSIONS = {
     'anammox-cartridge':        (60,  40,  80),
     'forward-osmosis-spiral':   (40,  30, 100),
     'micro-electrochem-polish': (60,  60,  40),
+    # Permaculture / regenerative tier — plants and animals turning
+    # contaminants into harvestable biomass.
+    'comfrey-pot':              (300, 300, 500),
+    'vermifilter':              (300, 300, 300),
+    'duckweed-tray':            (500, 300, 100),
+    'aquaponic-bed':            (600, 400, 400),
+    'brine-shrimp-tank':        (300, 300, 400),
 }
 
 
@@ -781,6 +788,106 @@ STAGE_TYPES = [
         cost_eur=20.0, maintenance_days=60,
     ),
 
+    # --- Permaculture / regenerative tier ---------------------------
+    # Live plants and animals turning contaminants into harvestable
+    # biomass. Per-pass removal is modest because contact time is
+    # short relative to plant uptake kinetics — the strength of these
+    # stages is the BYPRODUCT stream (food, fertilizer, fish, worms).
+    # Sized for a "garden corner" of a lab; assumes recirculating
+    # flow over days, not single-pass minutes.
+    dict(
+        slug='comfrey-pot',
+        name='Comfrey pot (potted phytoremediation)',
+        kind='biological',
+        description='Symphytum officinale in a 30×30×50 cm pot, fed '
+                    'on a slow trickle of pre-hydrolysed urine. '
+                    'Comfrey is a famous "dynamic accumulator" — '
+                    'taproot mines NPK and trace minerals; rhizosphere '
+                    'microbes degrade some pharma + hormones. Harvest '
+                    'leaves weekly for compost tea or chop-and-drop '
+                    'mulch. Per-pass removal modest (kinetics-limited '
+                    'on a single pass) but biomass output is real: '
+                    '~50 g N + 80 g K + 15 g P captured per kg of '
+                    'leaf harvested.',
+        removal={'nitrate': 0.20, 'ammonia': 0.15, 'phosphate': 0.30,
+                 'potassium': 0.20, 'hormones': 0.20,
+                 'bacteria': 0.80, 'turbidity': 0.85},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=15.0, maintenance_days=14,
+    ),
+    dict(
+        slug='vermifilter',
+        name='Vermifilter (earthworm bed)',
+        kind='biological',
+        description='30×30×30 cm bin packed with coir + Eisenia '
+                    'fetida (red wigglers). Water trickles through '
+                    'the bed; worms ingest organic load + '
+                    'microorganisms; vermicasts coat the substrate '
+                    'and continue degrading hormones, pharma, and '
+                    'pathogens. Harvest castings monthly — premium '
+                    'fertilizer (N-P-K + humic acids); excess worms '
+                    'feed chickens, fish, or amphibians. Real '
+                    'wastewater technology (vermifiltration in '
+                    'India, Kenya, Brazil pilots).',
+        removal={'voc': 0.50, 'bacteria': 0.95, 'protozoa': 0.90,
+                 'turbidity': 0.90, 'hormones': 0.30, 'pharma': 0.20},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=30,
+    ),
+    dict(
+        slug='duckweed-tray',
+        name='Duckweed tray (Lemna minor)',
+        kind='biological',
+        description='Shallow 50×30×10 cm tray covered in a floating '
+                    'mat of Lemna minor — the world\'s fastest-'
+                    'growing flowering plant, doubles biomass every '
+                    '24-48 h on N-rich water. Skim the mat weekly: '
+                    'high-protein animal feed (chickens, fish, '
+                    'rabbits, biogas substrate). Surface coverage '
+                    'also blocks sunlight → suppresses algae and '
+                    'mosquito larvae.',
+        removal={'nitrate': 0.40, 'ammonia': 0.30, 'phosphate': 0.40,
+                 'potassium': 0.20},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=10.0, maintenance_days=7,
+    ),
+    dict(
+        slug='aquaponic-bed',
+        name='Aquaponic bed (tilapia + leafy greens)',
+        kind='biological',
+        description='60×40×40 cm tank with tilapia or carp + a media '
+                    'bed of leafy greens (lettuce, kale, basil) '
+                    'grown hydroponically on the fish-tank water. '
+                    'Fish convert dissolved organics and trickled-in '
+                    'pre-hydrolysed urine into more fish; nitrifying '
+                    'biofilm in the gravel converts NH₄⁺ → NO₃⁻ for '
+                    'the plants. Small recirculation pump (5 W) '
+                    'keeps the loop oxygenated. Outputs: edible '
+                    'fish (~kg/month), edible greens (daily), '
+                    'spent gravel as garden mulch.',
+        removal={'nitrate': 0.50, 'ammonia': 0.40, 'phosphate': 0.40,
+                 'potassium': 0.30,
+                 'bacteria': 0.95, 'turbidity': 0.90},
+        flow_lpm=0.5, energy_watts=5.0,
+        cost_eur=60.0, maintenance_days=14,
+    ),
+    dict(
+        slug='brine-shrimp-tank',
+        name='Brine shrimp tank (FO reject sidestream)',
+        kind='biological',
+        description='30×30×40 cm tank for Artemia salina, fed on the '
+                    'concentrated reject brine from a downstream FO '
+                    'or RO stage (the brine is high-TDS — perfect '
+                    'for shrimp). Not a treatment stage on the main '
+                    'flow; this is a SIDESTREAM that turns the '
+                    'system\'s waste concentrate into harvestable '
+                    'live protein for fish food, aquarium feed, or '
+                    'amphibian husbandry. ~20 g of dried brine '
+                    'shrimp per litre of brine treated.',
+        removal={'tds': 0.05, 'phosphate': 0.10, 'pharma': 0.10},
+        flow_lpm=0.05, energy_watts=2.0,
+        cost_eur=25.0, maintenance_days=14,
+    ),
     dict(
         slug='tpms-ceramic-microfilter',
         name='3D-printed ceramic TPMS microfilter',
@@ -1634,6 +1741,51 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v15, stage_type=st, position=i)
 
+        # v16 — the "garden corner" ecosystem. Urine → fish + greens
+        # + worm castings + duckweed feed + comfrey mulch + clean
+        # irrigation water. Output water is irrigation/aquaponic-
+        # grade (NOT EU-potable: ammonia residual ~600 mg/L; for
+        # drinking-grade output, follow with v14's polish train).
+        # The point isn't compactness — it's that the urine pipeline
+        # becomes a productive permaculture system rather than a
+        # waste-destruction one.
+        irrig_target = WaterProfile.objects.get(slug='irrigation')
+        urine_v16, urine_v16_created = System.objects.update_or_create(
+            slug='urine-to-garden-v16-ecosystem', defaults=dict(
+                name='Urine → Garden Ecosystem (v16 productive cycle)',
+                description='Urine becomes biomass. Two urease '
+                            'cartridges → vermifilter (red wigglers, '
+                            'monthly castings harvest) → aquaponic '
+                            'bed (tilapia + leafy greens) → duckweed '
+                            'tray (skimmed weekly for animal feed) → '
+                            'comfrey pot (leaf harvest for compost '
+                            'tea) → ceramic pot filter (final '
+                            'pathogen polish). Output: '
+                            'irrigation-grade water + ~kg/month '
+                            'fish, daily greens, weekly comfrey '
+                            'mulch + duckweed, monthly vermicompost. '
+                            '~210 L assembly volume — closer to a '
+                            'garden corner than a kitchen counter, '
+                            'but every gram of nitrogen leaves as '
+                            'something edible or useful instead of '
+                            'as brine.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v16_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'aquaponic-bed',
+                'duckweed-tray',
+                'comfrey-pot',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v16, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1644,4 +1796,4 @@ class Command(BaseCommand):
             f'"{urine_v9.name}", "{urine_v10.name}", '
             f'"{urine_v11.name}", "{urine_v12.name}", '
             f'"{urine_v13.name}", "{urine_v14.name}", '
-            f'"{urine_v15.name}".'))
+            f'"{urine_v15.name}", "{urine_v16.name}".'))
