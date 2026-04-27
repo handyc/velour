@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}Coast — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.cs-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.cs-head h1 { margin:0; }
+.cs-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.cs-grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.cs-card {
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:0.7rem 0.9rem;
+  display:flex; flex-direction:column; gap:0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.cs-card .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.06em;
+}
+.cs-card .val {
+  color:#c9d1d9; font-size:1.7rem; font-weight:500; line-height:1.1;
+}
+.cs-card .sub { color:#8b949e; font-size:0.78rem; }
+.cs-card svg.spark { width:100%; height:36px; display:block; margin-top:0.2rem; }
+.cs-card svg.spark.tide  polyline { fill:none; stroke:#58a6ff; stroke-width:1.2; }
+.cs-card svg.spark.waves polyline { fill:none; stroke:#3fb950; stroke-width:1.2; }
+.cs-card svg.spark.sst   polyline { fill:none; stroke:#f59e0b; stroke-width:1.2; }
+
+.cs-section { margin-top:1.4rem; padding-top:0.7rem;
+  border-top:1px solid #21262d; }
+.cs-section h2 {
+  font-size:0.85rem; margin:0 0 0.4rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.06em;
+}
+
+.cs-tides { width:100%; border-collapse:collapse; font-family:ui-monospace,monospace;
+  font-size:0.9rem; }
+.cs-tides th { text-align:left; color:#8b949e; font-weight:500;
+  font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em;
+  border-bottom:1px solid #30363d; padding:0.3rem 0.5rem; }
+.cs-tides td { padding:0.4rem 0.5rem; border-bottom:1px solid #161b22;
+  color:#c9d1d9; }
+.cs-tides td.kind-high { color:#3fb950; font-weight:500; }
+.cs-tides td.kind-low  { color:#58a6ff; }
+
+.cs-extra { margin-top:1.2rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; color:#8b949e; font-size:0.85rem;
+  line-height:1.5; }
+.cs-extra code { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cs-head">
+  <h1>Coast</h1>
+  <span class="meta">
+    {{ prefs.coast_label }} · {{ prefs.coast_lat|floatformat:2 }}°N {{ prefs.coast_lon|floatformat:2 }}°E
+  </span>
+</div>
+
+<div class="cs-grid">
+  <div class="cs-card">
+    <span class="lbl">Sea level (MSL)</span>
+    <span class="val">
+      {% if tide_now %}
+        {% if tide_now.value >= 0 %}+{% endif %}{{ tide_now.value|floatformat:2 }} <small style="font-size:0.55em;color:#6e7681;">m</small>
+      {% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if tide_now %}{{ tide_now.at|date:'D H:i' }} · relative to mean sea level{% else %}no data yet{% endif %}
+    </span>
+    {% if tide_24h_svg %}
+    <svg class="spark tide" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ tide_24h_svg }}"/>
+    </svg>
+    <span class="sub">last 12 h + next 24 h</span>
+    {% endif %}
+  </div>
+
+  <div class="cs-card">
+    <span class="lbl">Wave height</span>
+    <span class="val">
+      {% if waves_now %}{{ waves_now.value|floatformat:2 }} <small style="font-size:0.55em;color:#6e7681;">m</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if wave_dir_compass %}from {{ wave_dir_compass }}{% endif %}
+    </span>
+    {% if waves_5d_svg %}
+    <svg class="spark waves" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ waves_5d_svg }}"/>
+    </svg>
+    <span class="sub">forecast next 5 d</span>
+    {% endif %}
+  </div>
+
+  <div class="cs-card">
+    <span class="lbl">Sea surface temp</span>
+    <span class="val">
+      {% if sst_now %}{{ sst_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">°C</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if sst_now %}{{ sst_now.at|date:'D H:i' }}{% endif %}
+    </span>
+    {% if sst_24h_svg %}
+    <svg class="spark sst" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ sst_24h_svg }}"/>
+    </svg>
+    {% endif %}
+  </div>
+
+  <div class="cs-card">
+    <span class="lbl">Surface current</span>
+    <span class="val">
+      {% if cur_v_now %}{{ cur_v_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">km/h</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if cur_d_compass %}flowing {{ cur_d_compass }}{% endif %}
+    </span>
+  </div>
+</div>
+
+{% if extremes %}
+<div class="cs-section">
+  <h2>Tide extremes — next 5 days</h2>
+  <table class="cs-tides">
+    <thead>
+      <tr><th>When (local)</th><th>Kind</th><th>Height (m, MSL)</th></tr>
+    </thead>
+    <tbody>
+      {% for ex in extremes %}
+      <tr>
+        <td>{{ ex.at|date:'D d M H:i' }}</td>
+        <td class="kind-{{ ex.kind }}">
+          {% if ex.kind == 'high' %}▲ HIGH tide{% else %}▼ low tide{% endif %}
+        </td>
+        <td>
+          {% if ex.value >= 0 %}+{% endif %}{{ ex.value|floatformat:2 }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="cs-extra">
+  Data from Open-Meteo's <code>marine-api</code> for {{ prefs.coast_label }},
+  refreshed every 6 h by <code>identity_cron</code> via
+  <code>refresh_marine</code>. Tide extremes are derived from the
+  <code>sea_level_height_msl</code> hourly series by detecting local
+  maxima (high tide) and minima (low tide). Same
+  <code>chronos.Measurement</code> table that hosts air-quality,
+  weather, and space-weather metrics — source tag <code>open-meteo-marine</code>.
+</div>
+
+<div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:weather' %}" class="btn btn-secondary">Weather</a>
+  <a href="{% url 'chronos:local' %}" class="btn btn-secondary">Local Air</a>
+  <a href="{% url 'chronos:space_weather' %}" class="btn btn-secondary">Space Weather</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

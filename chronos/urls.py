@@ -61,6 +61,9 @@ urlpatterns = [
     # Weather (Phase 8) — temp / clouds / precipitation forecast.
     path('weather/',               views.weather,         name='weather'),
 
+    # Coast / marine (Phase 15) — tide / waves / water temp / currents.
+    path('coast/',                 views.coast,           name='coast'),
+
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),
     path('tasks/',                 views.task_list,    name='task_list'),

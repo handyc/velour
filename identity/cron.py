@@ -63,6 +63,7 @@ DEFAULT_INTERVALS = {
     'weather':           21_600,     # 6 h — temp / clouds / precip forecast
     'pass_digest':       604_800,    # 7 d — weekly Codex sky-digest manual
     'sat_transits':      604_800,    # 7 d — sun/moon transit predictions
+    'marine':            21_600,     # 6 h — tide / waves / water temp / currents
 }
 
 
@@ -98,7 +99,7 @@ def dispatch(force=None):
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
             'local_environment', 'weather', 'pass_digest',
-            'sat_transits',
+            'sat_transits', 'marine',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -142,6 +143,7 @@ def dispatch(force=None):
         ('weather',          _do_weather),
         ('pass_digest',      _do_pass_digest),
         ('sat_transits',     _do_sat_transits),
+        ('marine',           _do_marine),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -369,6 +371,18 @@ def _do_sat_transits():
     call_command('compute_sat_transits', stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'sat transits computed'
+
+
+def _do_marine():
+    """Every 6 h — pull marine forecast (tide / waves / water temp /
+    currents) for the configured coastal point from Open-Meteo. Drives
+    the /chronos/coast/ dashboard."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('refresh_marine', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'marine refreshed'
 
 
 def _do_rebuild_document():

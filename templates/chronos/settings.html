@@ -61,6 +61,28 @@
         </div>
     </fieldset>
 
+    <fieldset style="border:1px solid #30363d; border-radius:4px; padding:0.6rem 0.9rem; margin-bottom:1rem;">
+        <legend style="color:#8b949e; padding:0 0.4rem; font-size:0.85rem;">Coast (nearest sensible coastal point)</legend>
+        <small style="color:#6e7681; display:block; margin-bottom:0.6rem;">
+            Used by <a href="{% url 'chronos:coast' %}">/chronos/coast/</a> for tides, waves, and water temperature.
+            Default = Katwijk aan Zee, 10 km west of Leiden.
+        </small>
+        <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <div>
+                <label for="coast_lat">Latitude (°N)</label><br>
+                <input type="number" step="any" id="coast_lat" name="coast_lat" value="{{ prefs.coast_lat }}" min="-90" max="90" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+            <div>
+                <label for="coast_lon">Longitude (°E)</label><br>
+                <input type="number" step="any" id="coast_lon" name="coast_lon" value="{{ prefs.coast_lon }}" min="-180" max="180" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+            <div>
+                <label for="coast_label">Label</label><br>
+                <input type="text" id="coast_label" name="coast_label" value="{{ prefs.coast_label }}" maxlength="80" style="width:200px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+        </div>
+    </fieldset>
+
     <div style="display:flex; gap:0.5rem;">
         <button type="submit" class="btn">Save</button>
         <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Cancel</a>

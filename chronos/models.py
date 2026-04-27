@@ -61,6 +61,20 @@ class ClockPrefs(models.Model):
         help_text='Observer elevation in metres above sea level. Affects '
                   'horizon for satellite passes; safe to leave at 0.',
     )
+    coast_lat = models.FloatField(
+        default=52.20,
+        help_text='Latitude of the nearest coastal point (degrees, +N). '
+                  'Used for the /chronos/coast/ marine dashboard. Default '
+                  '= Katwijk aan Zee (10 km west of Leiden).',
+    )
+    coast_lon = models.FloatField(
+        default=4.40,
+        help_text='Longitude of the nearest coastal point (degrees, +E).',
+    )
+    coast_label = models.CharField(
+        max_length=80, default='Katwijk aan Zee',
+        help_text='Human label for the coastal point on the dashboard.',
+    )
 
     class Meta:
         verbose_name = 'Clock preferences'

@@ -90,7 +90,9 @@ def settings_view(request):
                 prefs.auto_sync_seconds = 600
             for fld, lo, hi in [('home_lat', -90, 90),
                                 ('home_lon', -180, 180),
-                                ('home_elev_m', -500, 9000)]:
+                                ('home_elev_m', -500, 9000),
+                                ('coast_lat', -90, 90),
+                                ('coast_lon', -180, 180)]:
                 raw = request.POST.get(fld)
                 if raw not in (None, ''):
                     try:
@@ -99,6 +101,9 @@ def settings_view(request):
                             setattr(prefs, fld, v)
                     except ValueError:
                         pass
+            coast_label = request.POST.get('coast_label', '').strip()
+            if coast_label:
+                prefs.coast_label = coast_label[:80]
             prefs.save()
             messages.success(request, 'Clock preferences saved.')
             return redirect('chronos:home')
@@ -1928,6 +1933,75 @@ def sky_transits(request):
 
     return render(request, 'chronos/sky_transits.html', {
         'rows': rows,
+    })
+
+
+@login_required
+def coast(request):
+    """Marine dashboard — tide level, waves, water temp, currents,
+    next-N-days tide extremes (high/low) for the configured coastal
+    point. Reads from chronos.Measurement source='open-meteo-marine'.
+    """
+    from .astro_sources.marine import detect_tide_extremes
+
+    prefs = ClockPrefs.load()
+    home_tz = _home_tz()
+    djtz.activate(home_tz)
+    now = djtz.now()
+    SOURCE = 'open-meteo-marine'
+
+    def _latest(metric):
+        return Measurement.objects.filter(
+            source=SOURCE, metric=metric, at__lte=now,
+        ).order_by('-at').first()
+
+    def _series(metric, hours_back, hours_ahead):
+        return list(Measurement.objects.filter(
+            source=SOURCE, metric=metric,
+            at__gte=now - timedelta(hours=hours_back),
+            at__lte=now + timedelta(hours=hours_ahead),
+        ).order_by('at'))
+
+    # Tide extremes — scan the next 5 days
+    tide_series = list(Measurement.objects.filter(
+        source=SOURCE, metric='sea_level_height_msl',
+        at__gte=now, at__lte=now + timedelta(days=5),
+    ).order_by('at'))
+    tide_pairs = [(m.at, m.value) for m in tide_series]
+    extremes = detect_tide_extremes(tide_pairs)
+
+    # Compass label for current direction
+    def _compass(deg):
+        if deg is None:
+            return ''
+        dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+        return dirs[round(deg / 45) % 8]
+
+    tide_now = _latest('sea_level_height_msl')
+    waves_now = _latest('wave_height')
+    sst_now = _latest('sea_surface_temperature')
+    cur_v_now = _latest('ocean_current_velocity')
+    cur_d_now = _latest('ocean_current_direction')
+    wave_dir_now = _latest('wave_direction')
+
+    return render(request, 'chronos/coast.html', {
+        'prefs':         prefs,
+        'tide_now':      tide_now,
+        'waves_now':     waves_now,
+        'sst_now':       sst_now,
+        'cur_v_now':     cur_v_now,
+        'cur_d_now':     cur_d_now,
+        'cur_d_compass': _compass(cur_d_now.value if cur_d_now else None),
+        'wave_dir_compass': _compass(wave_dir_now.value if wave_dir_now else None),
+        'tide_24h_svg':  _sparkline_polyline(_series('sea_level_height_msl', 12, 24),
+                                              w=200, h=40),
+        'tide_5d_svg':   _sparkline_polyline(_series('sea_level_height_msl', 0, 24*5),
+                                              w=200, h=40),
+        'waves_5d_svg':  _sparkline_polyline(_series('wave_height', 0, 24*5),
+                                              lo=0, w=200, h=40),
+        'sst_24h_svg':   _sparkline_polyline(_series('sea_surface_temperature', 12, 24),
+                                              w=200, h=40),
+        'extremes':      extremes[:20],
     })
 
 
