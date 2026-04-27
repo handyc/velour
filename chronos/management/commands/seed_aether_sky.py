@@ -211,6 +211,28 @@ function altAzToVec3(altDeg, azDeg, R) {
     );
 }
 
+// Inverse: alt/az → RA/Dec given observer latitude and current LST.
+// Used to "freeze" the celestial coordinates of sun/moon/planets so
+// the time scrubber can re-project them onto the sky for a different
+// effective time. Sat positions are NOT round-tripped this way —
+// their TLE-driven motion is too fast for stored RA/Dec to be valid
+// across a ±24 h scrub window.
+function altAzToRaDec(altDeg, azDeg, latRad, lstDeg) {
+    const alt = altDeg * Math.PI / 180;
+    const az  = azDeg * Math.PI / 180;
+    const sinAlt = Math.sin(alt), cosAlt = Math.cos(alt);
+    const sinAz  = Math.sin(az),  cosAz  = Math.cos(az);
+    const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
+    const sinDec = sinAlt * sinLat + cosAlt * cosLat * cosAz;
+    const dec = Math.asin(Math.max(-1, Math.min(1, sinDec)));
+    const cosDec = Math.cos(dec);
+    const sinHa = -sinAz * cosAlt / cosDec;
+    const cosHa = (sinAlt - sinDec * sinLat) / (cosDec * cosLat);
+    const haDeg = Math.atan2(sinHa, cosHa) * 180 / Math.PI;
+    const ra = ((lstDeg - haDeg) % 360 + 360) % 360;
+    return {ra: ra, dec: dec * 180 / Math.PI};
+}
+
 // Build a billboarded text sprite via CanvasTexture. Used for the
 // cardinal letters and every named celestial body so the visitor
 // can tell a colored dot from another colored dot.
@@ -395,7 +417,7 @@ function buildTimeScrubber() {
         '               border:1px solid #3a4a60;padding:3px 9px;' +
         '               border-radius:4px;cursor:pointer;">' +
         'Now</button>' +
-        '<small style="color:#6e8090;">stars / Milky Way only</small>';
+        '<small style="color:#6e8090;">stars · planets · sun · moon</small>';
     document.body.appendChild(wrap);
 
     const input = document.getElementById('chronos-sky-scrubber-input');
@@ -417,7 +439,10 @@ function buildTimeScrubber() {
         ctx.state.timeOffsetHours = h;
         readout.textContent = fmtOffset(h);
         // Force an instant re-position so the slider feels responsive.
+        // updateStarPositions covers stars + constellations + Milky Way;
+        // repositionLiveBodies covers sun + moon + planets + atmosphere.
         updateStarPositions();
+        repositionLiveBodies();
     }
     input.addEventListener('input', () => apply(parseFloat(input.value)));
     reset.addEventListener('click', () => {
@@ -634,6 +659,62 @@ function updateStarPositions() {
     updateMilkyWayPositions();
 }
 
+// Re-project sun, moon, and planets from their stored RA/Dec onto
+// the sky for the scrubber's effective time. Drives the sun-light
+// position + intensity + atmosphere from the *scrubbed* sun altitude
+// so dragging the slider past sunset darkens the sky and brings out
+// the stars even when wall-clock time is mid-afternoon.
+//
+// Satellites are not in this loop — their positions move too fast
+// (~5 minutes per ISS pass) for stored RA/Dec to be meaningful.
+// They keep using direct alt/az from the latest server fetch.
+function repositionLiveBodies() {
+    const obs = ctx.state.lastObserver;
+    if (!obs) return;
+    const latRad = obs.lat * Math.PI / 180;
+    const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
+    const offsetMs = (ctx.state.timeOffsetHours || 0) * 3.6e6;
+    const effectiveTime = new Date(Date.now() + offsetMs);
+    const lstRad = computeLST(effectiveTime, obs.lon) * Math.PI / 180;
+    const R = ctx.state.R;
+
+    function project(mesh, horizonAlt) {
+        if (!mesh || mesh.userData.ra == null) return null;
+        const decRad = mesh.userData.dec * Math.PI / 180;
+        const sinDec = Math.sin(decRad), cosDec = Math.cos(decRad);
+        const haRad = lstRad - mesh.userData.ra * Math.PI / 180;
+        const sinHa = Math.sin(haRad), cosHa = Math.cos(haRad);
+        const sinAlt = sinDec * sinLat + cosDec * cosLat * cosHa;
+        const altR = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+        const cosAlt = Math.cos(altR);
+        const sinAz = -cosDec * sinHa / cosAlt;
+        const cosAz = (sinDec - sinAlt * sinLat) / (cosAlt * cosLat);
+        const azR = Math.atan2(sinAz, cosAz);
+        mesh.position.set(
+             R * cosAlt * Math.sin(azR),
+             R * sinAlt,
+            -R * cosAlt * Math.cos(azR)
+        );
+        const altDeg = altR * 180 / Math.PI;
+        mesh.visible = altDeg > horizonAlt;
+        return altDeg;
+    }
+
+    const sun = ctx.state.sun;
+    const sunAlt = project(sun, -3);
+    if (sunAlt != null) {
+        ctx.state.sunLight.position.copy(sun.position);
+        const t = Math.max(0, Math.min(1, (sunAlt + 6) / 12));
+        ctx.state.sunLight.intensity = 0.9 * t + 0.05;
+        ctx.state.lastSunAlt = sunAlt;
+        updateAtmosphere(sunAlt);
+    }
+    project(ctx.state.moon, -3);
+    for (const mesh of ctx.state.planets.values()) {
+        project(mesh, -2);
+    }
+}
+
 // Atmospheric sky and stellar opacity, both keyed off sun altitude.
 // Two interpolation segments meeting at sun_alt = -6° (civil twilight),
 // where SKY_DUSK peaks. Above +6°, full SKY_DAY; below -12°, full
@@ -684,28 +765,29 @@ function applyData(data) {
     if (data.observer) ctx.state.lastObserver = data.observer;
     updateNeoBillboard(data.neos);
 
-    // Sun + sun-light.
+    const obs = ctx.state.lastObserver;
+    const latRad = obs ? obs.lat * Math.PI / 180 : null;
+    const lstNowDeg = obs ? computeLST(new Date(), obs.lon) : null;
+
+    // Sun — store RA/Dec for scrubbed re-projection. Actual position
+    // and sun-light + atmosphere update happens in repositionLiveBodies.
     const ss = data.solar_system || {};
-    if (ss.sun && Number.isFinite(ss.sun.alt_deg)) {
-        const v = altAzToVec3(ss.sun.alt_deg, ss.sun.az_deg, R);
-        ctx.state.sun.position.copy(v);
-        ctx.state.sun.visible = ss.sun.alt_deg > -3;
-        ctx.state.sunLight.position.copy(v);
-        // Civil twilight rolls intensity smoothly: 0 below -6°, 0.9 at +6°.
-        const t = Math.max(0, Math.min(1, (ss.sun.alt_deg + 6) / 12));
-        ctx.state.sunLight.intensity = 0.9 * t + 0.05;
-        ctx.state.lastSunAlt = ss.sun.alt_deg;
-        updateAtmosphere(ss.sun.alt_deg);
+    if (ss.sun && Number.isFinite(ss.sun.alt_deg) && latRad != null) {
+        const rd = altAzToRaDec(
+            ss.sun.alt_deg, ss.sun.az_deg, latRad, lstNowDeg);
+        ctx.state.sun.userData.ra = rd.ra;
+        ctx.state.sun.userData.dec = rd.dec;
     }
 
-    // Moon.
-    if (ss.moon && Number.isFinite(ss.moon.alt_deg)) {
-        const v = altAzToVec3(ss.moon.alt_deg, ss.moon.az_deg, R);
-        ctx.state.moon.position.copy(v);
-        ctx.state.moon.visible = ss.moon.alt_deg > -3;
+    // Moon — store RA/Dec.
+    if (ss.moon && Number.isFinite(ss.moon.alt_deg) && latRad != null) {
+        const rd = altAzToRaDec(
+            ss.moon.alt_deg, ss.moon.az_deg, latRad, lstNowDeg);
+        ctx.state.moon.userData.ra = rd.ra;
+        ctx.state.moon.userData.dec = rd.dec;
     }
 
-    // Planets — build on first sight, reposition thereafter.
+    // Planets — build on first sight, store RA/Dec for re-projection.
     const planets = ss.planets || [];
     const seenPlanets = new Set();
     for (const p of planets) {
@@ -720,6 +802,7 @@ function applyData(data) {
                 new THREE.MeshBasicMaterial({color: color})
             );
             mesh.userData.planetSlug = p.slug;
+            mesh.userData.radius = radius;
             ctx.scene.add(mesh);
             ctx.state.planets.set(p.slug, mesh);
             const labelColor = '#' + color.toString(16).padStart(6, '0');
@@ -729,11 +812,11 @@ function applyData(data) {
             label.position.set(0, radius * 2 + 1.5, 0);
             mesh.add(label);
         }
-        if (Number.isFinite(p.alt_deg)) {
-            mesh.position.copy(altAzToVec3(p.alt_deg, p.az_deg, R));
-            mesh.visible = p.alt_deg > -2;
-        } else {
-            mesh.visible = false;
+        if (Number.isFinite(p.alt_deg) && latRad != null) {
+            const rd = altAzToRaDec(
+                p.alt_deg, p.az_deg, latRad, lstNowDeg);
+            mesh.userData.ra = rd.ra;
+            mesh.userData.dec = rd.dec;
         }
     }
     for (const [slug, mesh] of ctx.state.planets.entries()) {
@@ -742,6 +825,10 @@ function applyData(data) {
             ctx.state.planets.delete(slug);
         }
     }
+
+    // Sun/moon/planets now re-projected through stored RA/Dec, so the
+    // time scrubber moves them along with the stars + Milky Way.
+    repositionLiveBodies();
 
     // Satellites.
     const rows = (data.rows || []).filter(r => r.kind === 'satellite');
