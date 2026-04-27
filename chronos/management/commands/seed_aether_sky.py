@@ -132,10 +132,26 @@ if (!ctx.state.init) {
     ctx.state.SKY_NIGHT = new THREE.Color(0x040714);  // deep blue-black
     ctx.state.lastSunAlt = null;
 
+    // Constellation lines (Phase 3). Built after the star catalog
+    // resolves so each line endpoint can be a real (RA, Dec) lookup
+    // by Hipparcos number into the star catalog. They share the
+    // 30 s star-update cadence and the sky-darkness opacity ramp.
+    ctx.state.constellationLines = null;
+    ctx.state.constellationData = null;
+    ctx.state.starByHip = null;
+
     fetch('/static/chronos/bright_stars.json')
         .then(r => r.ok ? r.json() : null)
-        .then(data => { if (data && data.stars) buildStarPoints(data.stars); })
-        .catch(err => console.warn('star catalog fetch failed:', err));
+        .then(data => {
+            if (!data || !data.stars) return;
+            buildStarPoints(data.stars);
+            return fetch('/static/chronos/constellation_lines.json');
+        })
+        .then(r => r && r.ok ? r.json() : null)
+        .then(data => {
+            if (data && data.constellations) buildConstellations(data);
+        })
+        .catch(err => console.warn('catalog fetch failed:', err));
 }
 
 // Helpers (re-declared each frame; cheap, all closures over state/entity).
@@ -165,6 +181,7 @@ function buildStarPoints(catalog) {
     const positions = new Float32Array(n * 3);
     const colors = new Float32Array(n * 3);
     const sizes = new Float32Array(n);
+    const byHip = new Map();
     for (let i = 0; i < n; i++) {
         const s = catalog[i];
         // mag → display size; brightest few pop, faintest still visible at 1px.
@@ -173,7 +190,9 @@ function buildStarPoints(catalog) {
         colors[i*3+0] = c[0]; colors[i*3+1] = c[1]; colors[i*3+2] = c[2];
         // Park off-screen until updateStarPositions fills them in.
         positions[i*3+0] = 0; positions[i*3+1] = -1e4; positions[i*3+2] = 0;
+        if (s.hip != null) byHip.set(s.hip, i);
     }
+    ctx.state.starByHip = byHip;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geom.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
@@ -188,6 +207,77 @@ function buildStarPoints(catalog) {
     ctx.state.starPoints = points;
     ctx.state.starCatalog = catalog;
     updateStarPositions();
+}
+
+// Build a THREE.LineSegments from the constellations payload. Each
+// vertex is filled with the *current* alt/az of its referenced star,
+// computed once at build time by reading the star Points geometry
+// (which buildStarPoints populated by calling updateStarPositions).
+// Subsequent re-positions piggyback on updateStarPositions; we don't
+// recompute alt/az here, just copy from the star buffer.
+function buildConstellations(payload) {
+    const byHip = ctx.state.starByHip;
+    if (!byHip) return;
+    const segments = [];
+    for (const c of payload.constellations || []) {
+        for (const [hipA, hipB] of (c.lines || [])) {
+            const ia = byHip.get(hipA);
+            const ib = byHip.get(hipB);
+            if (ia != null && ib != null) {
+                segments.push([ia, ib]);
+            }
+        }
+    }
+    if (!segments.length) return;
+    const positions = new Float32Array(segments.length * 6);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color: 0x5a7090, transparent: true, opacity: 0.0,
+        // Lines render slightly translucent and blue-grey so they
+        // suggest the figure without competing with the stars.
+    });
+    const lines = new THREE.LineSegments(geom, mat);
+    lines.frustumCulled = false;
+    ctx.scene.add(lines);
+    ctx.state.constellationLines = lines;
+    ctx.state.constellationSegments = segments;
+    refreshConstellations();
+    console.log('chronos-sky: constellations loaded:',
+                payload.constellations.length, 'figures,',
+                segments.length, 'segments');
+}
+
+// Re-fill the LineSegments position buffer from the current star
+// positions. Called from updateStarPositions so lines move in lock-
+// step with their endpoint stars.
+function refreshConstellations() {
+    const lines = ctx.state.constellationLines;
+    const segments = ctx.state.constellationSegments;
+    const stars = ctx.state.starPoints;
+    if (!lines || !segments || !stars) return;
+    const starPos = stars.geometry.attributes.position.array;
+    const linePos = lines.geometry.attributes.position.array;
+    for (let i = 0; i < segments.length; i++) {
+        const [ia, ib] = segments[i];
+        // Each star occupies 3 floats in starPos; each segment 6 in linePos.
+        const sa = ia * 3, sb = ib * 3;
+        const off = i * 6;
+        // Hide the whole segment if either endpoint is below horizon
+        // (parked at y = -1e4 by updateStarPositions).
+        if (starPos[sa+1] < -1000 || starPos[sb+1] < -1000) {
+            // Collapse both ends to the same off-screen point.
+            for (let j = 0; j < 6; j++) linePos[off+j] = -1e4;
+            continue;
+        }
+        linePos[off+0] = starPos[sa+0];
+        linePos[off+1] = starPos[sa+1];
+        linePos[off+2] = starPos[sa+2];
+        linePos[off+3] = starPos[sb+0];
+        linePos[off+4] = starPos[sb+1];
+        linePos[off+5] = starPos[sb+2];
+    }
+    lines.geometry.attributes.position.needsUpdate = true;
 }
 
 // Greenwich Mean Sidereal Time (degrees), then add longitude for LST.
@@ -235,6 +325,7 @@ function updateStarPositions() {
         positions[i*3+2] = -R * cosAlt * Math.cos(azR);
     }
     ctx.state.starPoints.geometry.attributes.position.needsUpdate = true;
+    refreshConstellations();
 }
 
 // Atmospheric sky and stellar opacity, both keyed off sun altitude.
@@ -263,6 +354,13 @@ function updateAtmosphere(sunAltDeg) {
         const op = Math.max(0, Math.min(1, (-sunAltDeg - 2) / 6));
         ctx.state.starPoints.material.opacity = op;
         ctx.state.starPoints.visible = op > 0.02;
+        if (ctx.state.constellationLines) {
+            // Lines render at ~60% of star opacity so they recede when
+            // looked at directly but support the stars at a glance.
+            const lineOp = op * 0.55;
+            ctx.state.constellationLines.material.opacity = lineOp;
+            ctx.state.constellationLines.visible = lineOp > 0.02;
+        }
     }
 }
 
