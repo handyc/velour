@@ -752,8 +752,11 @@ STAGE_TYPES = [
                     'biomass to establish — then steady-state N₂ '
                     'venting indefinitely. Needs a partial-nitrite '
                     'partner stream upstream (handled by a small '
-                    'aerated side-stream, baked into cost).',
-        removal={'ammonia': 0.85},
+                    'aerated side-stream, baked into cost). The biofilm '
+                    'also hosts heterotrophic denitrifiers that consume '
+                    'incoming nitrate → N₂ — useful chained downstream '
+                    'of an MABR (which speciates ammonia to nitrate).',
+        removal={'ammonia': 0.85, 'nitrate': 0.80},
         flow_lpm=0.1, energy_watts=0.0,
         cost_eur=50.0, maintenance_days=180,
     ),
@@ -1587,6 +1590,50 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v14, stage_type=st, position=i)
 
+        # v15 — anammox-hybrid alternative to v14. Two MABRs do the
+        # bulk NH4 → NO3 conversion (fast, compact), then a single
+        # anammox cartridge with a co-cultured denitrifying biofilm
+        # vents the nitrogen as N₂ gas — leaving the system instead
+        # of being concentrated in the FO reject brine. Two FO passes
+        # finish the job. 8 stages, 1026 mL — slightly over 1 L, the
+        # cost of the anammox path. €352, 0 W. The differentiator vs
+        # v14 isn't volume but waste-stream chemistry: v15's brine is
+        # essentially nitrogen-free, useful for closed-loop systems
+        # or where the brine gets reused (struvite, fertilizer).
+        urine_v15, urine_v15_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v15-anammox-hybrid', defaults=dict(
+                name='Urine → Drinking (v15 anammox N₂-vent hybrid)',
+                description='Zero-power EU-potable with nitrogen '
+                            'leaving as N₂ gas instead of '
+                            'concentrating in the FO reject brine. '
+                            'Two urease cartridges, two MABRs (NH₄⁺ '
+                            '→ NO₃⁻), one anammox cartridge with '
+                            'denitrifying co-population (NH₄⁺ + NO₃⁻ '
+                            '→ N₂ gas), three FO cartridges, one '
+                            'GAC. 1026 mL, 9 stages, €352, 0 W. '
+                            'Costs +72 mL vs v14, gains a clean '
+                            'reject-brine stream. Slow biofilm '
+                            'startup (3-6 weeks for MABR + 6-8 for '
+                            'anammox to mature in series).',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v15_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'mabr-cartridge',
+                'mabr-cartridge',
+                'anammox-cartridge',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'micro-gac-cartridge',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v15, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1596,4 +1643,5 @@ class Command(BaseCommand):
             f'"{urine_v7.name}", "{urine_v8.name}", '
             f'"{urine_v9.name}", "{urine_v10.name}", '
             f'"{urine_v11.name}", "{urine_v12.name}", '
-            f'"{urine_v13.name}", "{urine_v14.name}".'))
+            f'"{urine_v13.name}", "{urine_v14.name}", '
+            f'"{urine_v15.name}".'))
