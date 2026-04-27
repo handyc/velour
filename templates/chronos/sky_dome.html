@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+
+{% block title %}Sky Dome — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.dome-wrap {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 200px);
+  min-height: 480px;
+  background: #05070d;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dome-wrap canvas { display: block; width: 100%; height: 100%; }
+
+.dome-hud {
+  position: absolute; top: 0.6rem; left: 0.6rem;
+  color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; line-height: 1.4;
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid #21262d; border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  pointer-events: none;
+  max-width: 280px;
+}
+.dome-hud .observer { color: #58a6ff; }
+.dome-hud .computed { color: #6e7681; font-size: 0.7rem; }
+
+.dome-neos {
+  position: absolute; top: 0.6rem; right: 0.6rem;
+  color: #c9d1d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; line-height: 1.4;
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid #21262d; border-radius: 4px;
+  padding: 0.4rem 0.6rem;
+  max-width: 320px;
+}
+.dome-neos h3 {
+  margin: 0 0 0.3rem; font-size: 0.68rem; color: #f59e0b;
+  text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+}
+.dome-neos ul { list-style: none; padding: 0; margin: 0; }
+.dome-neos li {
+  padding: 0.18rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  display: flex; gap: 0.4rem; align-items: baseline;
+  font-size: 0.74rem;
+}
+.dome-neos li:last-child { border-bottom: 0; }
+.dome-neos .des { color: #c9d1d9; flex: 1 0 auto; }
+.dome-neos .ld { color: #f59e0b; min-width: 4em; text-align: right; }
+.dome-neos .countdown { color: #8b949e; min-width: 6.5em; text-align: right; }
+
+.dome-controls {
+  position: absolute; bottom: 0.6rem; left: 0.6rem;
+  color: #6e7681; font-family: ui-monospace, monospace; font-size: 0.7rem;
+  background: rgba(13, 17, 23, 0.6);
+  border-radius: 3px; padding: 0.25rem 0.5rem;
+}
+
+.dome-sat-label {
+  position: absolute;
+  color: #c9d1d9; font-family: ui-monospace, monospace;
+  font-size: 0.7rem; line-height: 1;
+  pointer-events: none;
+  text-shadow: 0 0 3px #000, 0 0 6px #000;
+  white-space: nowrap;
+  transform: translate(8px, -50%);
+}
+.dome-sat-label.below { color: #6e7681; opacity: 0.5; }
+.dome-sat-label.iss { color: #f85149; }
+.dome-sat-label.tiangong { color: #f59e0b; }
+.dome-sat-label.hst { color: #c9d1d9; }
+
+.dome-cardinal {
+  position: absolute;
+  color: #6e7681; font-family: ui-monospace, monospace; font-size: 0.85rem;
+  font-weight: 600; letter-spacing: 0.05em;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  text-shadow: 0 0 4px #05070d, 0 0 8px #05070d;
+}
+.dome-cardinal.primary { color: #c9d1d9; font-size: 1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div style="display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap;">
+  <h1 style="margin:0;">Sky Dome</h1>
+  <span style="color:#8b949e;">
+    Live hemisphere from {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E
+  </span>
+</div>
+
+<div class="dome-wrap" id="dome">
+  <div class="dome-hud" id="dome-hud">
+    <div><span class="observer">●</span> observer · {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E</div>
+    <div id="dome-status">loading…</div>
+    <div class="computed" id="dome-computed"></div>
+  </div>
+  <div class="dome-neos" id="dome-neos" style="display:none;">
+    <h3>Upcoming NEO close approaches</h3>
+    <ul id="dome-neos-list"></ul>
+  </div>
+  <div class="dome-controls">drag = rotate · scroll = zoom · double-click = reset</div>
+</div>
+
+<div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky table</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos</a>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const wrap = document.getElementById('dome');
+const status = document.getElementById('dome-status');
+const computed = document.getElementById('dome-computed');
+const neoBox = document.getElementById('dome-neos');
+const neoList = document.getElementById('dome-neos-list');
+
+// --- Scene setup ---------------------------------------------------------
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x05070d, 1.6, 4.0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+const resize = () => {
+  const r = wrap.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+};
+wrap.appendChild(renderer.domElement);
+
+const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 100);
+camera.position.set(0, 0.4, 1.6);
+camera.lookAt(0, 0.5, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.minDistance = 0.4;
+controls.maxDistance = 3.5;
+controls.minPolarAngle = 0;
+controls.maxPolarAngle = Math.PI / 2 - 0.04;  // can't dip below horizon
+controls.enablePan = false;
+controls.rotateSpeed = 0.5;
+renderer.domElement.addEventListener('dblclick', () => {
+  camera.position.set(0, 0.4, 1.6);
+  controls.target.set(0, 0.0, 0);
+  controls.update();
+});
+
+resize();
+window.addEventListener('resize', resize);
+
+// --- Hemisphere wireframe ------------------------------------------------
+const RADIUS = 1.0;
+
+const altRings = new THREE.Group();
+[30, 60].forEach((altDeg) => {
+  const r = Math.cos(altDeg * Math.PI / 180) * RADIUS;
+  const y = Math.sin(altDeg * Math.PI / 180) * RADIUS;
+  const ring = new THREE.RingGeometry(r * 0.999, r, 96);
+  ring.rotateX(-Math.PI / 2);
+  const lineGeom = new THREE.BufferGeometry();
+  const verts = [];
+  const segments = 96;
+  for (let i = 0; i <= segments; i++) {
+    const t = (i / segments) * Math.PI * 2;
+    verts.push(r * Math.sin(t), y, -r * Math.cos(t));
+  }
+  lineGeom.setAttribute('position',
+    new THREE.Float32BufferAttribute(verts, 3));
+  altRings.add(new THREE.LineLoop(lineGeom,
+    new THREE.LineBasicMaterial({ color: 0x21262d })));
+});
+scene.add(altRings);
+
+const azLines = new THREE.Group();
+for (let az = 0; az < 360; az += 30) {
+  const verts = [];
+  const azRad = az * Math.PI / 180;
+  for (let alt = 0; alt <= 90; alt += 5) {
+    const altRad = alt * Math.PI / 180;
+    verts.push(
+      RADIUS * Math.cos(altRad) * Math.sin(azRad),
+      RADIUS * Math.sin(altRad),
+     -RADIUS * Math.cos(altRad) * Math.cos(azRad),
+    );
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  const isCardinal = (az % 90 === 0);
+  azLines.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+    color: isCardinal ? 0x30363d : 0x161b22,
+  })));
+}
+scene.add(azLines);
+
+// Horizon ring (slightly brighter)
+{
+  const verts = [];
+  for (let i = 0; i <= 360; i++) {
+    const t = i * Math.PI / 180;
+    verts.push(RADIUS * Math.sin(t), 0, -RADIUS * Math.cos(t));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  scene.add(new THREE.LineLoop(g, new THREE.LineBasicMaterial({
+    color: 0x484f58,
+  })));
+}
+
+// Ground disk (very subtle)
+{
+  const g = new THREE.CircleGeometry(RADIUS * 0.997, 64);
+  g.rotateX(-Math.PI / 2);
+  const m = new THREE.MeshBasicMaterial({
+    color: 0x0a0d12, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+  });
+  scene.add(new THREE.Mesh(g, m));
+}
+
+// Zenith marker (small +)
+{
+  const verts = [
+    -0.02, RADIUS, 0,  0.02, RADIUS, 0,
+    0, RADIUS, -0.02,  0, RADIUS, 0.02,
+  ];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  scene.add(new THREE.LineSegments(g,
+    new THREE.LineBasicMaterial({ color: 0x6e7681 })));
+}
+
+// --- Cardinal direction labels (HTML overlay, projected to canvas) -------
+const cardinals = [
+  { az:   0, lbl: 'N', primary: true },
+  { az:  45, lbl: 'NE' },
+  { az:  90, lbl: 'E', primary: true },
+  { az: 135, lbl: 'SE' },
+  { az: 180, lbl: 'S', primary: true },
+  { az: 225, lbl: 'SW' },
+  { az: 270, lbl: 'W', primary: true },
+  { az: 315, lbl: 'NW' },
+];
+
+cardinals.forEach((c) => {
+  const el = document.createElement('div');
+  el.className = 'dome-cardinal' + (c.primary ? ' primary' : '');
+  el.textContent = c.lbl;
+  wrap.appendChild(el);
+  const az = c.az * Math.PI / 180;
+  c.worldPos = new THREE.Vector3(
+    RADIUS * Math.sin(az), 0.02, -RADIUS * Math.cos(az),
+  );
+  c.el = el;
+});
+
+// --- Satellite layer -----------------------------------------------------
+const satGroup = new THREE.Group();
+scene.add(satGroup);
+
+const sats = new Map();  // slug -> { dot, label, trail, color }
+
+const SAT_COLORS = {
+  iss:      0xf85149,
+  tiangong: 0xf59e0b,
+  hst:      0xc9d1d9,
+};
+
+function altAzToVec(altDeg, azDeg, r = RADIUS) {
+  const alt = altDeg * Math.PI / 180;
+  const az = azDeg * Math.PI / 180;
+  return new THREE.Vector3(
+    r * Math.cos(alt) * Math.sin(az),
+    r * Math.sin(alt),
+   -r * Math.cos(alt) * Math.cos(az),
+  );
+}
+
+function ensureSat(row) {
+  let s = sats.get(row.slug);
+  if (s) return s;
+
+  const color = SAT_COLORS[row.slug] || 0x58a6ff;
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.012, 12, 8),
+    new THREE.MeshBasicMaterial({ color }),
+  );
+  satGroup.add(dot);
+
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.024, 12, 8),
+    new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.25,
+    }),
+  );
+  satGroup.add(halo);
+
+  const trailGeom = new THREE.BufferGeometry();
+  trailGeom.setAttribute('position',
+    new THREE.Float32BufferAttribute(new Float32Array(0), 3));
+  trailGeom.setAttribute('color',
+    new THREE.Float32BufferAttribute(new Float32Array(0), 3));
+  const trail = new THREE.Line(trailGeom, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true,
+  }));
+  satGroup.add(trail);
+
+  const label = document.createElement('div');
+  label.className = 'dome-sat-label ' + row.slug;
+  label.textContent = row.name;
+  wrap.appendChild(label);
+
+  s = { dot, halo, trail, label, color };
+  sats.set(row.slug, s);
+  return s;
+}
+
+function updateSat(row) {
+  const s = ensureSat(row);
+  if (row.alt_deg == null || row.az_deg == null) {
+    s.dot.visible = false;
+    s.halo.visible = false;
+    s.label.style.display = 'none';
+    s.trail.visible = false;
+    return;
+  }
+  const above = row.above_horizon;
+  const radial = above ? RADIUS : RADIUS * 0.92;  // shrink below-horizon
+  const pos = altAzToVec(Math.max(row.alt_deg, -8), row.az_deg, radial);
+  s.dot.position.copy(pos);
+  s.halo.position.copy(pos);
+  s.dot.visible = true;
+  s.halo.visible = above;
+  s.label.style.display = '';
+  s.label.classList.toggle('below', !above);
+  s.label.textContent = row.name + (above
+    ? ` ${row.alt_deg.toFixed(0)}°`
+    : ` (${row.alt_deg.toFixed(0)}°)`);
+
+  // Trail samples: row.track is [[t_offset_s, alt, az], ...]
+  if (row.track && row.track.length) {
+    const verts = [];
+    const colors = [];
+    const c = new THREE.Color(s.color);
+    for (const [tOff, alt, az] of row.track) {
+      if (alt < -2) continue;  // skip far-below-horizon for tidy trails
+      const v = altAzToVec(alt, az);
+      verts.push(v.x, v.y, v.z);
+      // Past = dim, future = full color, with linear fade
+      const isFuture = tOff >= 0;
+      const fade = isFuture
+        ? Math.max(0.4, 1 - tOff / 900)        // 0..15min ahead → 1.0..0.4
+        : Math.max(0.05, 1 + tOff / 600);      // -10min..0 → 0.05..1.0
+      colors.push(c.r * fade, c.g * fade, c.b * fade);
+    }
+    s.trail.visible = true;
+    s.trail.geometry.setAttribute('position',
+      new THREE.Float32BufferAttribute(verts, 3));
+    s.trail.geometry.setAttribute('color',
+      new THREE.Float32BufferAttribute(colors, 3));
+    s.trail.geometry.attributes.position.needsUpdate = true;
+    s.trail.geometry.attributes.color.needsUpdate = true;
+  } else {
+    s.trail.visible = false;
+  }
+}
+
+// --- HTML overlay positioning --------------------------------------------
+const tmpV = new THREE.Vector3();
+function projectTo2D(worldPos) {
+  tmpV.copy(worldPos);
+  tmpV.project(camera);
+  const r = wrap.getBoundingClientRect();
+  return {
+    x: (tmpV.x * 0.5 + 0.5) * r.width,
+    y: (1 - (tmpV.y * 0.5 + 0.5)) * r.height,
+    inFront: tmpV.z < 1,
+  };
+}
+
+function updateOverlays() {
+  cardinals.forEach((c) => {
+    const p = projectTo2D(c.worldPos);
+    if (p.inFront) {
+      c.el.style.display = '';
+      c.el.style.left = p.x + 'px';
+      c.el.style.top = p.y + 'px';
+    } else {
+      c.el.style.display = 'none';
+    }
+  });
+  for (const s of sats.values()) {
+    if (s.label.style.display === 'none') continue;
+    const p = projectTo2D(s.dot.position);
+    if (p.inFront) {
+      s.label.style.left = p.x + 'px';
+      s.label.style.top = p.y + 'px';
+    } else {
+      s.label.style.display = 'none';
+    }
+  }
+}
+
+// --- NEO HUD -------------------------------------------------------------
+let neoData = [];
+
+function fmtCountdown(targetIso) {
+  const target = Date.parse(targetIso);
+  if (!Number.isFinite(target)) return '';
+  const ms = target - Date.now();
+  if (ms <= 0) return 'now';
+  const totalMin = Math.floor(ms / 60000);
+  const days = Math.floor(totalMin / (60 * 24));
+  const hours = Math.floor((totalMin % (60 * 24)) / 60);
+  const mins = totalMin % 60;
+  if (days > 0) return `in ${days}d ${hours}h`;
+  if (hours > 0) return `in ${hours}h ${mins}m`;
+  return `in ${mins}m`;
+}
+
+function renderNeoHUD() {
+  if (!neoData.length) {
+    neoBox.style.display = 'none';
+    return;
+  }
+  neoBox.style.display = '';
+  neoList.innerHTML = neoData.map((n) => `
+    <li>
+      <span class="des">${n.designation || '?'}</span>
+      <span class="ld">${n.dist_ld != null ? n.dist_ld.toFixed(2) + ' LD' : '—'}</span>
+      <span class="countdown">${fmtCountdown(n.when_iso)}</span>
+    </li>
+  `).join('');
+}
+
+setInterval(renderNeoHUD, 5000);  // tick countdowns
+
+// --- Data fetch ----------------------------------------------------------
+async function refresh() {
+  try {
+    const r = await fetch('{% url "chronos:sky_json" %}?track=1',
+                          { credentials: 'same-origin' });
+    if (!r.ok) {
+      status.textContent = 'fetch failed (' + r.status + ')';
+      return;
+    }
+    const data = await r.json();
+    const above = data.rows.filter((row) => row.above_horizon).length;
+    status.textContent = above + ' above horizon · '
+                       + data.rows.length + ' total tracked';
+    if (data.computed_at) {
+      const d = new Date(data.computed_at);
+      computed.textContent = 'computed ' + d.toLocaleTimeString();
+    }
+    data.rows.forEach(updateSat);
+    neoData = data.neos || [];
+    renderNeoHUD();
+  } catch (e) {
+    status.textContent = 'error: ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 8000);
+
+// --- Render loop ---------------------------------------------------------
+function tick() {
+  controls.update();
+  updateOverlays();
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
+{% endblock %}

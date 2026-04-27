@@ -184,6 +184,34 @@ def compute_passes(tle, lat, lon, elev_m=0.0,
     return passes
 
 
+def altaz_track(tle, lat, lon, elev_m=0.0,
+                minutes_back=10, minutes_ahead=10, step_seconds=30):
+    """Sequence of (t_offset_s, alt_deg, az_deg) samples around now.
+
+    Used by the sky dome to draw a fading past-trail and a brighter
+    future-arc for each visible satellite, all in one round trip.
+    Negative offsets are past; positive are future. Altitudes can be
+    negative (below horizon) — the renderer can clip them.
+    """
+    ts, _eph = _loader_get()
+    if ts is None:
+        return []
+    sat = _make_satellite(tle, ts)
+    observer = _make_observer(lat, lon, elev_m)
+    t0_dt = ts.now().utc_datetime()
+    n_back = int(minutes_back * 60 / step_seconds)
+    n_ahead = int(minutes_ahead * 60 / step_seconds)
+    samples = []
+    for i in range(-n_back, n_ahead + 1):
+        when = t0_dt + dt.timedelta(seconds=i * step_seconds)
+        t = ts.utc(when)
+        alt, az, _d = (sat - observer).at(t).altaz()
+        samples.append((i * step_seconds,
+                        float(alt.degrees),
+                        float(az.degrees)))
+    return samples
+
+
 def ground_track(tle, minutes=180, step_seconds=30):
     """Sub-satellite path for the upcoming `minutes` of orbit.
 

@@ -915,6 +915,20 @@ def _parse_neo_notes(notes):
 
 
 @login_required
+def sky_dome(request):
+    """3D hemisphere view from the observer location.
+
+    Pulls from /chronos/sky.json?track=1 every few seconds — server
+    does the SGP4 work, the client just paints. Self-contained scene,
+    not an Aether World.
+    """
+    prefs = ClockPrefs.load()
+    return render(request, 'chronos/sky_dome.html', {
+        'prefs': prefs,
+    })
+
+
+@login_required
 def sky_object(request, slug):
     """Per-object detail: facts + next-14-days passes + ground track."""
     obj = get_object_or_404(TrackedObject, slug=slug)
@@ -994,17 +1008,62 @@ def _ground_track_svg(track):
 
 
 def sky_json(request):
-    """JSON snapshot for the sky table's auto-refresh."""
+    """JSON snapshot for the sky table's auto-refresh.
+
+    `track=1` adds per-sat ±10-minute alt/az samples (used by the
+    sky dome to draw fading past-trails and bright future-arcs). The
+    table view doesn't ask for it because it'd triple the payload.
+    """
     prefs = ClockPrefs.load()
+    rows = _sky_snapshot(prefs)
+    if request.GET.get('track') == '1':
+        from .astro_sources.satellites import altaz_track
+        for row in rows:
+            obj = TrackedObject.objects.filter(slug=row['slug']).first()
+            if obj and obj.kind == TrackedObject.KIND_SATELLITE:
+                tle = obj.elements_json or {}
+                if tle.get('line1'):
+                    row['track'] = altaz_track(
+                        tle, prefs.home_lat, prefs.home_lon,
+                        prefs.home_elev_m,
+                        minutes_back=10, minutes_ahead=15,
+                        step_seconds=30,
+                    )
     return JsonResponse({
-        'rows': _sky_snapshot(prefs),
-        'observer': {
+        'rows':        rows,
+        'neos':        _neos_for_dome(),
+        'observer':    {
             'lat': prefs.home_lat,
             'lon': prefs.home_lon,
             'elev_m': prefs.home_elev_m,
         },
         'computed_at': djtz.now().isoformat(),
     })
+
+
+def _neos_for_dome(limit=5):
+    """Return the next N upcoming NEO close approaches as a flat list
+    for the dome's HUD overlay. Each row is the structured fields the
+    template / JS already use, plus an ISO timestamp for client-side
+    countdowns.
+    """
+    horizon = djtz.now() + timedelta(days=60)
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='neos',
+        start__gte=djtz.now(), start__lte=horizon,
+    ).order_by('start')[:limit]
+    out = []
+    for ev in qs:
+        meta = _parse_neo_notes(ev.notes)
+        out.append({
+            'designation': meta.get('designation', ''),
+            'when_iso':    ev.start.isoformat(),
+            'dist_ld':     meta.get('dist_ld'),
+            'v_km_s':      meta.get('v_km_s'),
+            'h':           meta.get('h'),
+            'size_label':  meta.get('size_label', ''),
+        })
+    return out
 
 
 def _sky_snapshot(prefs):
