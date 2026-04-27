@@ -657,7 +657,7 @@ STAGE_TYPES = [
         removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
                  'creatinine': 0.98, 'phosphate': 0.99,
                  'lead': 0.99, 'arsenic': 0.99,
-                 'urea': 0.40, 'ammonia': 0.60,
+                 'urea': 0.40, 'ammonia': 0.60, 'nitrate': 0.92,
                  'pharma': 0.95, 'hormones': 0.92,
                  'bacteria': 0.9999999, 'viruses': 0.99999,
                  'protozoa': 0.9999999, 'turbidity': 0.99},
@@ -680,7 +680,7 @@ STAGE_TYPES = [
         removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
                  'creatinine': 0.98, 'phosphate': 0.99,
                  'lead': 0.99, 'arsenic': 0.99,
-                 'urea': 0.40, 'ammonia': 0.60,
+                 'urea': 0.40, 'ammonia': 0.60, 'nitrate': 0.92,
                  'pharma': 0.95, 'hormones': 0.92,
                  'bacteria': 0.9999999, 'viruses': 0.99999,
                  'protozoa': 0.9999999, 'turbidity': 0.99},
@@ -1543,6 +1543,50 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v13, stage_type=st, position=i)
 
+        # v14 — sub-1L EU-potable with ZERO electricity. Trades the
+        # battery-powered electrolyzers for passive membrane-aerated
+        # biofilm reactors (MABR) — these convert NH₄⁺ → NO₃⁻
+        # biologically. Three MABR passes drop ammonia to <1 mg/L;
+        # the FO TFC membrane then rejects both residual ammonia and
+        # the produced nitrate (~92 % per pass). Three FO passes
+        # finish the dissolved-solute knockdown; one micro-GAC for
+        # the hormone tail. 9 stages, 954 mL, €352, 0 W. Caveat:
+        # 1-2 weeks for the biofilm to mature on first deployment.
+        urine_v14, urine_v14_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v14-zero-power-litre', defaults=dict(
+                name='Urine → Drinking (v14 zero-power 1 L)',
+                description='Zero-electricity EU-potable urine system. '
+                            'Two urease cartridges, three MABR '
+                            'cartridges (passive nitrification: O₂ '
+                            'diffuses through hollow-fiber membranes, '
+                            'biofilm oxidises NH₄⁺ to NO₃⁻), three '
+                            'spiral-wound FO cartridges (reject '
+                            'residual ammonia + the produced '
+                            'nitrate), one micro-GAC for hormone '
+                            'polish. 954 mL — fits in a 1 L bottle. '
+                            '9 stages, €352, 0 W. Slow startup (1-2 '
+                            'weeks for the MABR biofilm to mature) '
+                            'then steady-state forever after. The '
+                            'off-grid counterpart to v13.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v14_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'mabr-cartridge',
+                'mabr-cartridge',
+                'mabr-cartridge',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'micro-gac-cartridge',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v14, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1552,4 +1596,4 @@ class Command(BaseCommand):
             f'"{urine_v7.name}", "{urine_v8.name}", '
             f'"{urine_v9.name}", "{urine_v10.name}", '
             f'"{urine_v11.name}", "{urine_v12.name}", '
-            f'"{urine_v13.name}".'))
+            f'"{urine_v13.name}", "{urine_v14.name}".'))
