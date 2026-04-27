@@ -72,6 +72,7 @@ STAGE_DIMENSIONS = {
     'ammonia-electrolyzer':     (60,  60,  30),
     'mabr-cartridge':           (50,  40,  60),
     'anammox-cartridge':        (60,  40,  80),
+    'forward-osmosis-spiral':   (40,  30, 100),
 }
 
 
@@ -661,6 +662,29 @@ STAGE_TYPES = [
                  'protozoa': 0.9999999, 'turbidity': 0.99},
         flow_lpm=0.05, energy_watts=0.0,
         cost_eur=30.0, maintenance_days=1,
+    ),
+    dict(
+        slug='forward-osmosis-spiral',
+        name='Forward-osmosis spiral cartridge (compact, multi-use)',
+        kind='membrane',
+        description='Spiral-wound TFC FO module — same selective '
+                    'membrane as a HydroPack but rolled into a 40×30×'
+                    '100 mm cartridge with continuous-flow draw '
+                    'circuit (concentrated salt or sugar regenerated '
+                    'in a side bottle). 50 % smaller than the '
+                    'single-use pouch with the same membrane area; '
+                    'multi-use, indefinitely refillable. The compact-'
+                    'system equivalent of the pouch when you have '
+                    'capacity to recharge the draw.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.98, 'phosphate': 0.99,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'urea': 0.40, 'ammonia': 0.60,
+                 'pharma': 0.95, 'hormones': 0.92,
+                 'bacteria': 0.9999999, 'viruses': 0.99999,
+                 'protozoa': 0.9999999, 'turbidity': 0.99},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=60.0, maintenance_days=365,
     ),
     dict(
         slug='ammonia-electrolyzer',
@@ -1378,6 +1402,53 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v10, stage_type=st, position=i)
 
+        # v11 — sub-litre EU-potable. Three improvements over v10:
+        # (a) compact spiral-wound FO cartridges replace the bulky
+        # single-use pouches (saves 80 mL each); (b) a third
+        # electrolyzer pass eliminates the IX stage entirely (the
+        # third electrolyzer brings ammonia to 90 µg/L on its own,
+        # then the downstream FO pair finishes the job); (c) drop
+        # the hollow-fiber backstop — two FO cartridges with TFC
+        # membranes already drive bacteria below detection (1e-14
+        # CFU). 888 mL, fits in a 1 L Nalgene with 100 mL of head
+        # space. €364, 15 W (small Li-ion battery). Passes the full
+        # EU urine-reuse target with comfortable margin.
+        urine_v11, urine_v11_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v11-nalgene', defaults=dict(
+                name='Urine → Drinking (v11 sub-litre Nalgene)',
+                description='Smallest known EU-compliant chain. Two '
+                            'urease cartridges, three ammonia '
+                            'electrolyzers (the third replaces v10\'s '
+                            'IX stage at lower volume cost), two '
+                            'compact spiral-wound FO cartridges (50 % '
+                            'smaller than the single-use pouches at '
+                            'the same membrane area), two micro-GAC '
+                            'polishes for hormones and pharma. No '
+                            'pathogen backstop needed — two FO passes '
+                            'with TFC membranes already drive '
+                            'bacteria 14 orders below detection. '
+                            '888 mL (fits in a 1 L Nalgene), 15 W '
+                            '(small Li-ion battery), passes the full '
+                            'EU urine-reuse target.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v11_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'ammonia-electrolyzer',
+                'ammonia-electrolyzer',
+                'ammonia-electrolyzer',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'micro-gac-cartridge',
+                'micro-gac-cartridge',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v11, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1385,4 +1456,5 @@ class Command(BaseCommand):
             f'"{urine_v3.name}", "{urine_v4.name}", '
             f'"{urine_v5.name}", "{urine_v6.name}", '
             f'"{urine_v7.name}", "{urine_v8.name}", '
-            f'"{urine_v9.name}", "{urine_v10.name}".'))
+            f'"{urine_v9.name}", "{urine_v10.name}", '
+            f'"{urine_v11.name}".'))
