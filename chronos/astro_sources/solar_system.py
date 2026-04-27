@@ -121,6 +121,7 @@ def current_state(lat, lon, elev_m=0.0):
     }
 
     # Planets
+    sun_xyz = obs.at(t).observe(sun).position.au  # earth→sun, BCRS au
     planets = []
     for slug, name, eph_key, default_mag in NAKED_EYE:
         if slug in ('sun', 'moon'):
@@ -129,9 +130,10 @@ def current_state(lat, lon, elev_m=0.0):
             body = _safe_eph_lookup(eph, eph_key)
         except KeyError:
             continue
-        app = obs.at(t).observe(body).apparent()
+        astrom = obs.at(t).observe(body)
+        app = astrom.apparent()
         alt, az, dist = app.altaz()
-        planets.append({
+        row = {
             'slug':          slug,
             'name':          name,
             'alt_deg':       float(alt.degrees),
@@ -139,7 +141,26 @@ def current_state(lat, lon, elev_m=0.0):
             'distance_au':   float(dist.au),
             'magnitude':     default_mag,  # static estimate — fine for sizing
             'above_horizon': float(alt.degrees) > 0.0,
-        })
+        }
+        # Phase angle (Sun-Planet-Earth, measured at the planet) for the
+        # inner planets. Mercury/Venus swing through full crescent–gibbous
+        # cycles; Mars stays gibbous (≥84%) but the slight defect is still
+        # visible. Outer planets stay essentially full from Earth, so we
+        # skip them.
+        if slug in ('mercury', 'venus', 'mars'):
+            p_xyz = astrom.position.au  # earth→planet
+            ps = [sun_xyz[i] - p_xyz[i] for i in range(3)]   # planet→sun
+            pe = [-p_xyz[i] for i in range(3)]               # planet→earth
+            ps_mag = math.sqrt(sum(x * x for x in ps))
+            pe_mag = math.sqrt(sum(x * x for x in pe))
+            if ps_mag > 0 and pe_mag > 0:
+                cos_phase = sum(ps[i] * pe[i] for i in range(3)) \
+                    / (ps_mag * pe_mag)
+                cos_phase = max(-1.0, min(1.0, cos_phase))
+                phase_angle = math.degrees(math.acos(cos_phase))
+                row['phase_angle_deg'] = phase_angle
+                row['illuminated_frac'] = (1.0 + cos_phase) / 2.0
+        planets.append(row)
     out['planets'] = planets
 
     return out

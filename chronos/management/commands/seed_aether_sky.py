@@ -180,6 +180,7 @@ if (!ctx.state.init) {
     // shifting them correctly needs server-side recomputation.
     ctx.state.timeOffsetHours = 0;
     buildTimeScrubber();
+    buildCompass();
 
     fetch('/static/chronos/bright_stars.json')
         .then(r => r.ok ? r.json() : null)
@@ -269,6 +270,72 @@ function makeTextSprite(text, opts) {
     return sprite;
 }
 
+// Render Mercury/Venus/Mars phase into a square canvas. Bright limb
+// is fixed on the +x side of the canvas; the sprite is rotated each
+// frame so that direction aligns with the screen-space line from
+// planet to sun. Phase angle α with illum = (1 + cos α) / 2; the
+// terminator on the projected disk is a half-ellipse with semi-axes
+// (R, R·|cos α|). For illum ≥ 0.5 (gibbous) the terminator curves
+// into the dark hemisphere on the left; for illum < 0.5 (crescent)
+// it curves into the bright hemisphere on the right.
+function drawPlanetPhase(canvas, color, illum) {
+    const R = canvas.width / 2;
+    const c2d = canvas.getContext('2d');
+    c2d.clearRect(0, 0, canvas.width, canvas.height);
+    const cr = (color >> 16) & 0xff;
+    const cg = (color >> 8) & 0xff;
+    const cb = color & 0xff;
+    const dark = 'rgb(' + Math.round(cr * 0.12) + ','
+                       + Math.round(cg * 0.13) + ','
+                       + Math.round(cb * 0.18) + ')';
+    const bright = 'rgb(' + cr + ',' + cg + ',' + cb + ')';
+    const cx = R, cy = R;
+    const a = Math.abs(2 * illum - 1) * R;
+    c2d.fillStyle = dark;
+    c2d.beginPath();
+    c2d.arc(cx, cy, R, 0, Math.PI * 2);
+    c2d.fill();
+    c2d.fillStyle = bright;
+    c2d.beginPath();
+    // Right limb: top → right → bottom.
+    c2d.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2, false);
+    if (illum >= 0.5) {
+        // Gibbous — terminator curves left, fill the larger right portion.
+        c2d.ellipse(cx, cy, a, R, 0, Math.PI / 2, 3 * Math.PI / 2, false);
+    } else {
+        // Crescent — terminator curves right, only the thin sliver near limb is lit.
+        c2d.ellipse(cx, cy, a, R, 0, Math.PI / 2, -Math.PI / 2, true);
+    }
+    c2d.closePath();
+    c2d.fill();
+}
+
+function makePhaseSprite(color, radius, illum) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    drawPlanetPhase(canvas, color, illum);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true,
+        depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const d = radius * 2.1;  // slight upsize so phase reads from a distance
+    sprite.scale.set(d, d, 1);
+    sprite.userData.phaseCanvas = canvas;
+    sprite.renderOrder = 5;
+    return sprite;
+}
+
+function repaintPhaseSprite(sprite, color, illum) {
+    const canvas = sprite.userData.phaseCanvas;
+    if (!canvas) return;
+    drawPlanetPhase(canvas, color, illum);
+    if (sprite.material.map) sprite.material.map.needsUpdate = true;
+}
+
 // Approximate star color from Johnson B-V. Hot blue-white at -0.3, cool red
 // at +1.6. Linear-segment palette — adequate at a few pixels per star.
 function bvToColor(bv) {
@@ -323,14 +390,29 @@ function buildConstellations(payload) {
     const byHip = ctx.state.starByHip;
     if (!byHip) return;
     const segments = [];
+    const labels = [];  // [{sprite, starIndices: [...]}]
     for (const c of payload.constellations || []) {
+        const localStarIndices = new Set();
+        let segmentsHere = 0;
         for (const [hipA, hipB] of (c.lines || [])) {
             const ia = byHip.get(hipA);
             const ib = byHip.get(hipB);
             if (ia != null && ib != null) {
                 segments.push([ia, ib]);
+                localStarIndices.add(ia);
+                localStarIndices.add(ib);
+                segmentsHere++;
             }
         }
+        if (!segmentsHere) continue;
+        const sprite = makeTextSprite(c.name, {
+            color: '#9ab8d8', heightM: 1.3, fontPx: 38,
+        });
+        sprite.position.set(0, -1e4, 0);  // park; refresh places it
+        sprite.material.opacity = 0;
+        sprite.renderOrder = 9;  // behind stars (10) but above lines
+        ctx.scene.add(sprite);
+        labels.push({sprite: sprite, starIndices: [...localStarIndices]});
     }
     if (!segments.length) return;
     const positions = new Float32Array(segments.length * 6);
@@ -346,10 +428,50 @@ function buildConstellations(payload) {
     ctx.scene.add(lines);
     ctx.state.constellationLines = lines;
     ctx.state.constellationSegments = segments;
+    ctx.state.constellationLabels = labels;
     refreshConstellations();
     console.log('chronos-sky: constellations loaded:',
                 payload.constellations.length, 'figures,',
-                segments.length, 'segments');
+                segments.length, 'segments,',
+                labels.length, 'labels');
+}
+
+// Reposition each constellation's name sprite at the centroid of its
+// member stars. Star positions are already in updateStarPositions's
+// buffer, so we just average — cheap. Labels below the horizon are
+// hidden by parking them off-screen.
+function refreshConstellationLabels() {
+    const labels = ctx.state.constellationLabels;
+    const stars = ctx.state.starPoints;
+    if (!labels || !stars) return;
+    const starPos = stars.geometry.attributes.position.array;
+    const R = ctx.state.R;
+    for (const lab of labels) {
+        let sx = 0, sy = 0, sz = 0, n = 0;
+        for (const idx of lab.starIndices) {
+            const off = idx * 3;
+            // Skip endpoints below horizon (parked at y = -1e4).
+            if (starPos[off + 1] < -1000) continue;
+            sx += starPos[off + 0];
+            sy += starPos[off + 1];
+            sz += starPos[off + 2];
+            n++;
+        }
+        // If fewer than half the stars are above the horizon, skip the
+        // label — the figure is too cropped to read.
+        if (n * 2 < lab.starIndices.length) {
+            lab.sprite.position.set(0, -1e4, 0);
+            continue;
+        }
+        sx /= n; sy /= n; sz /= n;
+        // Renormalise to the celestial sphere so the label sits at the
+        // same depth as its stars (avoids parallax against the dome).
+        const m = Math.sqrt(sx * sx + sy * sy + sz * sz);
+        if (m > 1e-3) {
+            const k = R / m;
+            lab.sprite.position.set(sx * k, sy * k, sz * k);
+        }
+    }
 }
 
 // Re-fill the LineSegments position buffer from the current star
@@ -382,6 +504,7 @@ function refreshConstellations() {
         linePos[off+5] = starPos[sb+2];
     }
     lines.geometry.attributes.position.needsUpdate = true;
+    refreshConstellationLabels();
 }
 
 // Time scrubber (Phase 7). DOM overlay — slider + readout + reset.
@@ -449,6 +572,87 @@ function buildTimeScrubber() {
         input.value = '0';
         apply(0);
     });
+}
+
+// Compass HUD (Phase 8). Top-right rose that rotates against the
+// camera's yaw so its "N" tick always indicates true north on
+// screen. Polaris's altitude (= observer latitude) is shown below
+// the rose so the visitor knows where to look up to find the pole
+// star itself. Idempotent injection — re-entering the world reuses
+// the existing element.
+function buildCompass() {
+    if (document.getElementById('chronos-sky-compass')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'chronos-sky-compass';
+    wrap.style.cssText = [
+        'position:fixed', 'top:14px', 'right:14px',
+        'width:96px',
+        'background:rgba(8,12,22,0.78)',
+        'border:1px solid #3a4a60', 'border-radius:8px',
+        'padding:6px 6px 4px', 'z-index:1000',
+        'pointer-events:none',
+        'font-family:"Helvetica Neue",Arial,sans-serif',
+        'color:#dceaff', 'text-align:center',
+    ].join(';') + ';';
+    wrap.innerHTML =
+        '<svg viewBox="-50 -50 100 100" width="84" height="84" ' +
+        '     style="display:block;margin:0 auto;overflow:visible;">' +
+        '  <circle r="44" fill="rgba(8,12,22,0.55)" ' +
+        '          stroke="#3a4a60" stroke-width="1"/>' +
+        '  <g id="chronos-sky-compass-rose">' +
+        '    <line x1="0" y1="-44" x2="0" y2="-30" ' +
+        '          stroke="#ff6060" stroke-width="2.5"/>' +
+        '    <text y="-18" text-anchor="middle" ' +
+        '          font-size="13" fill="#ff6060" font-weight="bold">N</text>' +
+        '    <text x="22" y="4" text-anchor="middle" ' +
+        '          font-size="10" fill="#9ab" font-weight="bold">E</text>' +
+        '    <text y="26" text-anchor="middle" ' +
+        '          font-size="10" fill="#9ab" font-weight="bold">S</text>' +
+        '    <text x="-22" y="4" text-anchor="middle" ' +
+        '          font-size="10" fill="#9ab" font-weight="bold">W</text>' +
+        '  </g>' +
+        '  <polygon points="0,-5 -4,5 4,5" fill="#dceaff"/>' +
+        '</svg>' +
+        '<div id="chronos-sky-compass-readout" ' +
+        '     style="font-size:10px;color:#8fb6e6;margin-top:2px;' +
+        '            font-family:ui-monospace,monospace;letter-spacing:0.3px;">' +
+        '  ↑ Polaris</div>';
+    document.body.appendChild(wrap);
+}
+
+function updateCompass() {
+    const rose = document.getElementById('chronos-sky-compass-rose');
+    if (!rose || !ctx.camera) return;
+    const fwd = new THREE.Vector3();
+    ctx.camera.getWorldDirection(fwd);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) return;
+    fwd.normalize();
+    // Bearing: clockwise angle from -Z (north). At fwd=(0,0,-1) → 0;
+    // fwd=(1,0,0) (east) → π/2. SVG rotate is clockwise positive, but
+    // we want the N tick to drift left when looking east, so apply
+    // the negative bearing.
+    const bearing = Math.atan2(fwd.x, -fwd.z);
+    rose.setAttribute('transform',
+        'rotate(' + (-bearing * 180 / Math.PI).toFixed(1) + ')');
+    // Refresh the readout when observer changes — Polaris altitude
+    // equals the observer's latitude (north hemisphere) or "below
+    // horizon" when at southern lat.
+    const obs = ctx.state.lastObserver;
+    if (obs && ctx.state.compassObsKey !== obs.lat) {
+        ctx.state.compassObsKey = obs.lat;
+        const out = document.getElementById('chronos-sky-compass-readout');
+        if (out) {
+            const polarisAlt = obs.lat;
+            if (polarisAlt > 0.5) {
+                out.textContent = '↑ Polaris ' + polarisAlt.toFixed(0) + '°';
+            } else if (polarisAlt < -0.5) {
+                out.textContent = 'Polaris hidden';
+            } else {
+                out.textContent = 'Polaris on horizon';
+            }
+        }
+    }
 }
 
 // NEO billboard (Phase 6). Multi-line text panel showing the next
@@ -713,6 +917,23 @@ function repositionLiveBodies() {
     for (const mesh of ctx.state.planets.values()) {
         project(mesh, -2);
     }
+    // Rotate phase sprites so their bright limb points at the sun's
+    // screen-space position. Project both into NDC (y up); atan2 of
+    // the delta gives the angle to apply to material.rotation. Three.js
+    // sprite rotation is mathematical-positive (CCW in NDC), which
+    // matches atan2(dy, dx) when dy is NDC-y.
+    if (ctx.state.sun && ctx.state.sun.visible) {
+        const sunNDC = ctx.state.sun.position.clone().project(ctx.camera);
+        for (const mesh of ctx.state.planets.values()) {
+            if (!mesh.userData.phaseCanvas || !mesh.visible) continue;
+            const pNDC = mesh.position.clone().project(ctx.camera);
+            const dx = sunNDC.x - pNDC.x;
+            const dy = sunNDC.y - pNDC.y;
+            if (dx * dx + dy * dy > 1e-8) {
+                mesh.material.rotation = Math.atan2(dy, dx);
+            }
+        }
+    }
 }
 
 // Atmospheric sky and stellar opacity, both keyed off sun altitude.
@@ -747,6 +968,17 @@ function updateAtmosphere(sunAltDeg) {
             const lineOp = op * 0.55;
             ctx.state.constellationLines.material.opacity = lineOp;
             ctx.state.constellationLines.visible = lineOp > 0.02;
+        }
+        if (ctx.state.constellationLabels) {
+            // Labels fade in slightly later than lines, so the stars
+            // settle in first; once the sky is dark, labels read
+            // brighter than the lines themselves.
+            const labelOp = Math.max(0, Math.min(0.85, op * 0.85));
+            for (const lab of ctx.state.constellationLabels) {
+                lab.sprite.material.opacity = labelOp;
+                lab.sprite.visible = labelOp > 0.02
+                                  && lab.sprite.position.y > -1000;
+            }
         }
     }
     if (ctx.state.milkyWayPoints) {
@@ -794,13 +1026,20 @@ function applyData(data) {
         if (!p.slug) continue;
         seenPlanets.add(p.slug);
         let mesh = ctx.state.planets.get(p.slug);
+        const color = ctx.state.PLANET_COLORS[p.slug] || 0xffffff;
+        const radius = ctx.state.GIANT_PLANETS.has(p.slug) ? 2.5 : 1.5;
         if (!mesh) {
-            const color = ctx.state.PLANET_COLORS[p.slug] || 0xffffff;
-            const radius = ctx.state.GIANT_PLANETS.has(p.slug) ? 2.5 : 1.5;
-            mesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius, 16, 16),
-                new THREE.MeshBasicMaterial({color: color})
-            );
+            if (Number.isFinite(p.illuminated_frac)) {
+                // Inner planet — billboard with the right phase shape.
+                mesh = makePhaseSprite(color, radius, p.illuminated_frac);
+                mesh.userData.phaseFrac = p.illuminated_frac;
+                mesh.userData.color = color;
+            } else {
+                mesh = new THREE.Mesh(
+                    new THREE.SphereGeometry(radius, 16, 16),
+                    new THREE.MeshBasicMaterial({color: color})
+                );
+            }
             mesh.userData.planetSlug = p.slug;
             mesh.userData.radius = radius;
             ctx.scene.add(mesh);
@@ -811,6 +1050,17 @@ function applyData(data) {
             });
             label.position.set(0, radius * 2 + 1.5, 0);
             mesh.add(label);
+        }
+        // Repaint the phase canvas if the lit fraction has shifted
+        // perceptibly (~1% in either direction). For Venus that's a
+        // few hours of orbital motion; once a fetch is plenty.
+        if (mesh.userData.phaseCanvas
+            && Number.isFinite(p.illuminated_frac)) {
+            const prev = mesh.userData.phaseFrac;
+            if (prev == null || Math.abs(prev - p.illuminated_frac) > 0.01) {
+                repaintPhaseSprite(mesh, color, p.illuminated_frac);
+                mesh.userData.phaseFrac = p.illuminated_frac;
+            }
         }
         if (Number.isFinite(p.alt_deg) && latRad != null) {
             const rd = altAzToRaDec(
@@ -894,6 +1144,9 @@ if (ctx.state.starPoints && ctx.state.lastStarUpdate >= ctx.state.STAR_UPDATE_S)
     ctx.state.lastStarUpdate = 0;
     updateStarPositions();
 }
+
+// Compass HUD — every frame; cheap DOM transform.
+updateCompass();
 """
 
 
