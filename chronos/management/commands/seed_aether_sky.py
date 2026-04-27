@@ -46,20 +46,34 @@ if (!ctx.state.init) {
     ctx.state.lastObserver = null;
     ctx.state.computedAt = '';
 
+    // The anchor entity has scale 0.001 (a hack to keep its primitive
+    // mesh imperceptible while still being included by the scene
+    // serializer, which filters visible=False rows). All celestial
+    // bodies and cardinal posts are therefore added to ctx.scene
+    // directly — adding them as children of ctx.entity would inherit
+    // the 0.001 scale and shrink the sun to 8 mm at 20 cm distance.
+
     // Sun — bright self-lit sphere; its position drives a directional
     // light so the moon picks up the correct phase from Lambertian
     // shading, no shader gymnastics required.
     const sun = new THREE.Mesh(
         new THREE.SphereGeometry(8, 24, 24),
-        new THREE.MeshBasicMaterial({color: 0xffd966})
+        new THREE.MeshBasicMaterial({color: 0xffd966, fog: false})
     );
     sun.visible = false;
-    ctx.entity.add(sun);
+    ctx.scene.add(sun);
     ctx.state.sun = sun;
 
+    // DirectionalLight needs its target in the scene graph for the
+    // light direction to be honoured. A bare Object3D at the world
+    // origin (where the player spawns) is fine.
     const sunLight = new THREE.DirectionalLight(0xffffff, 0.0);
     sunLight.position.set(0, 100, 0);
-    ctx.entity.add(sunLight);
+    const sunTarget = new THREE.Object3D();
+    sunTarget.position.set(0, 0, 0);
+    ctx.scene.add(sunLight);
+    ctx.scene.add(sunTarget);
+    sunLight.target = sunTarget;
     ctx.state.sunLight = sunLight;
 
     // Moon — Lambert sphere; phase emerges from the sun light.
@@ -68,7 +82,7 @@ if (!ctx.state.init) {
         new THREE.MeshLambertMaterial({color: 0xcccccc})
     );
     moon.visible = false;
-    ctx.entity.add(moon);
+    ctx.scene.add(moon);
     ctx.state.moon = moon;
 
     // Pools, keyed by chronos slug.
@@ -98,8 +112,9 @@ if (!ctx.state.init) {
         );
         const az = c.az * Math.PI / 180;
         post.position.set(15 * Math.sin(az), 1.25, -15 * Math.cos(az));
-        ctx.entity.add(post);
+        ctx.scene.add(post);
     }
+    console.log('chronos-sky: anchor initialised, awaiting first fetch');
 
     // Bright-star points (Phase 2). Geometry is empty until the static
     // catalog fetch resolves; per-second LST math repositions them.
@@ -169,7 +184,7 @@ function buildStarPoints(catalog) {
     });
     const points = new THREE.Points(geom, mat);
     points.frustumCulled = false;
-    ctx.entity.add(points);
+    ctx.scene.add(points);
     ctx.state.starPoints = points;
     ctx.state.starCatalog = catalog;
     updateStarPositions();
@@ -263,7 +278,6 @@ function applyData(data) {
         ctx.state.sun.position.copy(v);
         ctx.state.sun.visible = ss.sun.alt_deg > -3;
         ctx.state.sunLight.position.copy(v);
-        ctx.state.sunLight.target = ctx.entity;
         // Civil twilight rolls intensity smoothly: 0 below -6°, 0.9 at +6°.
         const t = Math.max(0, Math.min(1, (ss.sun.alt_deg + 6) / 12));
         ctx.state.sunLight.intensity = 0.9 * t + 0.05;
@@ -293,7 +307,7 @@ function applyData(data) {
                 new THREE.MeshBasicMaterial({color: color})
             );
             mesh.userData.planetSlug = p.slug;
-            ctx.entity.add(mesh);
+            ctx.scene.add(mesh);
             ctx.state.planets.set(p.slug, mesh);
         }
         if (Number.isFinite(p.alt_deg)) {
@@ -305,7 +319,7 @@ function applyData(data) {
     }
     for (const [slug, mesh] of ctx.state.planets.entries()) {
         if (!seenPlanets.has(slug)) {
-            ctx.entity.remove(mesh);
+            ctx.scene.remove(mesh);
             ctx.state.planets.delete(slug);
         }
     }
@@ -323,7 +337,7 @@ function applyData(data) {
                 new THREE.MeshBasicMaterial({color: 0xffffff})
             );
             mesh.userData.satSlug = s.slug;
-            ctx.entity.add(mesh);
+            ctx.scene.add(mesh);
             ctx.state.satellites.set(s.slug, mesh);
         }
         if (Number.isFinite(s.alt_deg)) {
@@ -339,7 +353,7 @@ function applyData(data) {
     }
     for (const [slug, mesh] of ctx.state.satellites.entries()) {
         if (!seenSats.has(slug)) {
-            ctx.entity.remove(mesh);
+            ctx.scene.remove(mesh);
             ctx.state.satellites.delete(slug);
         }
     }
