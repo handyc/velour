@@ -257,12 +257,290 @@ STAGE_TYPES = [
                     'at the cost of high energy use.',
         removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
                  'creatinine': 0.99, 'phosphate': 0.99,
-                 'pharma': 0.95, 'hormones': 0.95, 'urea': 0.80,
+                 'pharma': 0.95, 'hormones': 0.95,
+                 'urea': 0.80, 'ammonia': 0.90,
                  'lead': 0.99, 'arsenic': 0.99,
+                 'turbidity': 0.99,
                  'bacteria': 0.9999, 'viruses': 5.0 / 6.0,
                  'protozoa': 0.9999},
         flow_lpm=0.2, energy_watts=200.0,
         cost_eur=220.0, maintenance_days=730,
+    ),
+
+    # --- Kitchen-grade / MacGyver tier --------------------------------
+    # Soda bottles, coffee filters, vinegar, wood ash, BBQ briquettes,
+    # household bleach, a black-painted basin under clear plastic. WHO
+    # / Peace Corps / disaster-prep canon. Real removal numbers, but
+    # throughputs are batch-tiny and many stages are setup-helpers
+    # rather than removal stages on their own. Pair acidification with
+    # a thermal step for the urea/ammonia trick.
+    dict(
+        slug='bucket-settling',
+        name='Settling bucket (24 h)',
+        kind='physical',
+        description='Five-gallon bucket with a lid. Let urine sit for '
+                    '24 h, then decant the supernatant. Drops coarse '
+                    'solids and a chunk of bacteria with the sediment '
+                    'cake. The simplest pre-stage there is.',
+        removal={'turbidity': 0.50, 'bacteria': 0.20, 'protozoa': 0.30},
+        flow_lpm=0.05, energy_watts=0.0,
+        cost_eur=5.0, maintenance_days=30,
+    ),
+    dict(
+        slug='cloth-coffee-filter',
+        name='Cloth + coffee-filter drip',
+        kind='physical',
+        description='Bandana-grade prefilter: bandana over a funnel '
+                    'with a paper coffee filter inside. Catches '
+                    'colloids and big organic flakes before they '
+                    'foul a downstream charcoal column.',
+        removal={'turbidity': 0.70, 'protozoa': 0.30,
+                 'bacteria': 0.10},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=1.0, maintenance_days=7,
+    ),
+    dict(
+        slug='vinegar-acidify',
+        name='Vinegar acidification (pH ~4)',
+        kind='chemical',
+        description='Dose white vinegar (acetic acid) until pH drops '
+                    'to ~4. Free ammonia disappears into non-volatile '
+                    'ammonium acetate; the salt then drops out in any '
+                    'downstream physical or thermal stage. Modelled '
+                    'as 95 % ammonia removal because that is what '
+                    'reaches a downstream still — not gone, but '
+                    'durably bound.',
+        removal={'ammonia': 0.95},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=3.0, maintenance_days=14,
+    ),
+    dict(
+        slug='wood-ash-lye',
+        name='Wood-ash potash dose (pH ~10)',
+        kind='chemical',
+        description='Wood-ash leachate (potash) raises pH well into '
+                    'the alkaline band, tipping the NH₄⁺/NH₃ '
+                    'equilibrium toward gaseous NH₃. Pair with an '
+                    'open settle vessel or counter-current air strip '
+                    'to actually offgas it. Free if you have a fire.',
+        removal={'ammonia': 0.30, 'bacteria': 0.50},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=0.0, maintenance_days=14,
+    ),
+    dict(
+        slug='alum-coagulation',
+        name='Alum coagulant + settle',
+        kind='chemical',
+        description='Potassium aluminum sulfate (pickling alum) '
+                    'coagulates colloids into pin-flocs that settle '
+                    'in 30 minutes. Garden-store bag, lasts '
+                    'effectively forever per bag.',
+        removal={'turbidity': 0.85, 'bacteria': 0.50,
+                 'pharma': 0.30, 'hormones': 0.20},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=5.0, maintenance_days=30,
+    ),
+    dict(
+        slug='bleach-dose',
+        name='Household bleach (NaOCl)',
+        kind='chemical',
+        description='Four drops of unscented 8.25 % bleach per gallon '
+                    'and a 30-minute hold. Drives chlorine residual '
+                    'high enough to kill bacteria and most viruses. '
+                    'Crypto and other resistant protozoa survive — '
+                    'pair upstream with settling or filtration.',
+        removal={'bacteria': 0.9999, 'viruses': 4.0 / 6.0,
+                 'protozoa': 0.50},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=2.0, maintenance_days=90,
+    ),
+    dict(
+        slug='briquette-charcoal',
+        name='BBQ-briquette charcoal column',
+        kind='adsorption',
+        description='Crushed lump charcoal (rinse first to drop the '
+                    'starch binder) packed into a soda bottle. Real '
+                    'adsorption capacity but well below activated '
+                    'carbon — fine for taste/odor and a fraction of '
+                    'organics. The "ten dollar carbon stage."',
+        removal={'voc': 0.50, 'chlorine': 0.60,
+                 'pharma': 0.40, 'hormones': 0.30,
+                 'ammonia': 0.10},
+        flow_lpm=0.4, energy_watts=0.0,
+        cost_eur=3.0, maintenance_days=14,
+    ),
+    dict(
+        slug='diy-gac-bottle',
+        name='DIY granular activated carbon (PET bottle)',
+        kind='adsorption',
+        description='Aquarium-grade GAC (~€5/lb) in an inverted PET '
+                    'soda bottle, with a coffee filter as a holder. '
+                    'A real activated-carbon stage at field-kit '
+                    'price, slower than a pro carbon block but '
+                    'meaningful contact time at gravity flow.',
+        removal={'voc': 0.85, 'chlorine': 0.95, 'pfas': 0.30,
+                 'pharma': 0.80, 'hormones': 0.75,
+                 'ammonia': 0.20, 'urea': 0.20},
+        flow_lpm=0.4, energy_watts=0.0,
+        cost_eur=8.0, maintenance_days=60,
+    ),
+    dict(
+        slug='solar-still',
+        name='Solar still (single-effect)',
+        kind='physical',
+        description='Black-painted basin in a sloped clear-plastic '
+                    'tent; vapor condenses on the underside of the '
+                    'film and runs to a collection bottle. The '
+                    'workhorse of cheap urine-to-water — leaves urea, '
+                    'salts, hormones, pharma, and metals in the '
+                    'dregs. Pair upstream with vinegar acidification '
+                    'or you carry NH₃ into the distillate. ~1 L/m²/'
+                    'day temperate; quoted flow assumes ~5 m² array. '
+                    'Removal numbers below assume an acidified feed; '
+                    'without vinegar upstream, urea and ammonia '
+                    'carry-over is much higher.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.99, 'phosphate': 0.99,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'turbidity': 0.99,
+                 'urea': 0.70, 'ammonia': 0.80,
+                 'pharma': 0.95, 'hormones': 0.95,
+                 'bacteria': 0.999, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.999},
+        flow_lpm=0.005, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=60,
+    ),
+    dict(
+        slug='boiling-pot',
+        name='Boil + condense (kettle/pot)',
+        kind='physical',
+        description='Bring water to a rolling boil for ≥1 minute. '
+                    'Wood- or propane-fired in field use, so '
+                    'electrical draw is zero — but the fuel-handling '
+                    'cadence shows up as high maintenance. Disinfects '
+                    'thoroughly; does nothing to dissolved solutes '
+                    'unless you also condense the vapor (next stage).',
+        removal={'bacteria': 0.9999, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.999},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=30.0, maintenance_days=7,
+    ),
+    dict(
+        slug='stovetop-still',
+        name='Stovetop still (kettle + condenser tube)',
+        kind='physical',
+        description='Pressure-cooker or kettle with a copper-coil '
+                    'condenser running through a cold-water bucket. '
+                    '"Moonshine still" geometry, food-grade build. '
+                    'Gives you full distillation throughput at the '
+                    'cost of running an electric stove (or a wood '
+                    'fire with maintenance going up instead). '
+                    'Like the solar still, removal numbers assume an '
+                    'acidified feed.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.99, 'phosphate': 0.99,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'turbidity': 0.99,
+                 'urea': 0.85, 'ammonia': 0.85,
+                 'pharma': 0.95, 'hormones': 0.95,
+                 'bacteria': 0.9999, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.9999},
+        flow_lpm=0.4, energy_watts=1500.0,
+        cost_eur=60.0, maintenance_days=180,
+    ),
+
+    # --- Field / camping tier ----------------------------------------
+    # Where backpacker filters, ceramic candles, NaDCC tablets, and
+    # gravity multi-element filters live. Real engineering, off-the-
+    # shelf at a sporting-goods store; €20-300.
+    dict(
+        slug='ceramic-pot-filter',
+        name='Ceramic pot filter (Potters-for-Peace)',
+        kind='physical',
+        description='Clay-and-sawdust ceramic candle, optionally '
+                    'silver-impregnated. Pore size ~0.2 µm — bacteria '
+                    'and protozoa stay on the outer surface; viruses '
+                    'are partially captured by absorption. Slow '
+                    'gravity flow, near-zero maintenance.',
+        removal={'bacteria': 0.9999, 'protozoa': 0.9999,
+                 'viruses': 0.85, 'turbidity': 0.95},
+        flow_lpm=0.05, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=365,
+    ),
+    dict(
+        slug='hollow-fiber-filter',
+        name='Hollow-fiber backpacker filter',
+        kind='membrane',
+        description='Sawyer / Lifestraw-class 0.1 µm hollow-fiber '
+                    'membrane. Bacteria and protozoa stop dead; '
+                    'viruses partially leak through. Backflush keeps '
+                    'it alive for 100k+ litres.',
+        removal={'bacteria': 0.99999, 'protozoa': 0.99999,
+                 'viruses': 0.50, 'turbidity': 0.95},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=30.0, maintenance_days=365,
+    ),
+    dict(
+        slug='nadcc-tablets',
+        name='NaDCC chlorine tablets (Aquatabs)',
+        kind='chemical',
+        description='Sodium dichloroisocyanurate tablets — slower-'
+                    'release chlorine than bleach with a more '
+                    'predictable residual. WHO-recommended for '
+                    'household disinfection. Crypto still survives.',
+        removal={'bacteria': 0.99999, 'viruses': 0.9999,
+                 'protozoa': 0.50},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=10.0, maintenance_days=180,
+    ),
+    dict(
+        slug='diy-uv-cfl',
+        name='DIY germicidal UV reactor (CFL)',
+        kind='uv',
+        description='25 W germicidal CFL bulb in a foil-lined PVC '
+                    'tube with a quartz sleeve. Less polished than a '
+                    'real UV-C sterilizer (uneven dose, shorter lamp '
+                    'life), but real 254 nm UV nonetheless.',
+        removal={'bacteria': 0.99, 'viruses': 0.60,
+                 'protozoa': 0.95},
+        flow_lpm=0.3, energy_watts=25.0,
+        cost_eur=30.0, maintenance_days=365,
+    ),
+    dict(
+        slug='countertop-distiller',
+        name='Countertop electric distiller',
+        kind='physical',
+        description='Megahome-class consumer distiller — 1 gal per '
+                    '4-5 hours, kills everything biological, leaves '
+                    'all dissolved solutes in the boiling chamber. '
+                    'Same urea/ammonia carry-over caveat as any '
+                    'thermal stage.',
+        removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
+                 'creatinine': 0.99, 'phosphate': 0.99,
+                 'lead': 0.99, 'arsenic': 0.99,
+                 'turbidity': 0.99,
+                 'urea': 0.60, 'ammonia': 0.40,
+                 'pharma': 0.97, 'hormones': 0.97,
+                 'bacteria': 0.9999, 'viruses': 5.0 / 6.0,
+                 'protozoa': 0.9999},
+        flow_lpm=0.06, energy_watts=800.0,
+        cost_eur=200.0, maintenance_days=365,
+    ),
+    dict(
+        slug='berkey-gravity',
+        name='Berkey-style gravity multi-element filter',
+        kind='adsorption',
+        description='Stacked stainless dispensers with black '
+                    'carbon-block candles (and optional fluoride '
+                    'PF-2 elements). High flow for gravity, broad '
+                    'removal across organics, metals, and pathogens '
+                    '— but does nothing to salts or urea.',
+        removal={'bacteria': 0.999999, 'viruses': 0.99,
+                 'protozoa': 0.99999, 'lead': 0.95,
+                 'voc': 0.95, 'chlorine': 0.99, 'fluoride': 0.95,
+                 'pharma': 0.80, 'hormones': 0.70},
+        flow_lpm=0.3, energy_watts=0.0,
+        cost_eur=250.0, maintenance_days=730,
     ),
 ]
 
@@ -576,8 +854,116 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v3, stage_type=st, position=i)
 
+        # v4 — kitchen MacGyver (all-passive, soda-bottle tier).
+        # Validated by simulator: passes the urine-reuse target on
+        # stored urine. Total ~€121 / 0 W. The trick the GA found
+        # is re-acidifying with vinegar between distillation passes,
+        # so each successive still strips ammonia from a feed that's
+        # been re-locked as ammonium acetate.
+        urine_v4, urine_v4_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v4-kitchen', defaults=dict(
+                name='Urine → Drinking (v4 kitchen MacGyver)',
+                description='Soda-bottle tier — all-passive, zero '
+                            'electricity. A 5-gal bucket, a paper '
+                            'coffee filter, white vinegar, four '
+                            'solar stills, a DIY granular-carbon '
+                            'column in a PET bottle, and a few '
+                            'drops of household bleach. The trick: '
+                            're-dose vinegar between distillation '
+                            'passes so each still gets a fresh '
+                            'acidified feed. ~€121 total, no power, '
+                            '~1 L/day per m² of solar still area.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v4_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'bucket-settling',
+                'vinegar-acidify',
+                'solar-still',
+                'solar-still',
+                'vinegar-acidify',
+                'solar-still',
+                'solar-still',
+                'diy-gac-bottle',
+                'bleach-dose',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v4, stage_type=st, position=i)
+
+        # v5 — field / camping kit. Uses stovetop distillation for
+        # higher throughput than solar at the cost of stove fuel,
+        # plus urea-hydrolysis to knock out urea biologically before
+        # the thermal step. ~€187 / 3 kW peak (one element on at a
+        # time in practice; Naiad sums simultaneously-flowing stages).
+        urine_v5, urine_v5_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v5-field', defaults=dict(
+                name='Urine → Drinking (v5 field / camping)',
+                description='Field-kit tier — stovetop kettle-and-'
+                            'condenser still, alum coagulant, urea '
+                            'hydrolysis biofilm, vinegar, zeolite '
+                            'polish, two DIY GAC bottles, NaDCC '
+                            'tabs. Faster throughput than v4 at '
+                            'the cost of an electric stove (or a '
+                            'wood fire, which the model treats as '
+                            'high-maintenance instead of high-watt).',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v5_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'alum-coagulation',
+                'urea-hydrolysis',
+                'vinegar-acidify',
+                'stovetop-still',
+                'vinegar-acidify',
+                'stovetop-still',
+                'zeolite-ammonium',
+                'diy-gac-bottle',
+                'diy-gac-bottle',
+                'nadcc-tablets',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v5, stage_type=st, position=i)
+
+        # v6 — consumer mid-tier. Vapour-compression + electrochem +
+        # zeolite + GAC + UV. Heavy on commercial gear; ~€743 /
+        # 579 W. The reference chain (urine-to-drinking) and v2 cover
+        # the higher-cost "industrial" end.
+        urine_v6, urine_v6_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v6-consumer', defaults=dict(
+                name='Urine → Drinking (v6 consumer mid-tier)',
+                description='Off-the-shelf consumer gear — twin '
+                            'vapour-compression distillers, BDD '
+                            'electrochemical polish, zeolite '
+                            'ammonium trap, granular-activated '
+                            'carbon, whole-house UV. The "buy this '
+                            'on Amazon" tier; ~€743 / 579 W.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v6_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'urea-hydrolysis',
+                'urea-hydrolysis',
+                'vinegar-acidify',
+                'vapor-distillation',
+                'vinegar-acidify',
+                'vapor-distillation',
+                'electrochem-oxidation',
+                'zeolite-ammonium',
+                'granular-carbon',
+                'uv-sterilizer',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v6, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
             f'"{urine_system.name}", "{urine_v2.name}", '
-            f'"{urine_v3.name}".'))
+            f'"{urine_v3.name}", "{urine_v4.name}", '
+            f'"{urine_v5.name}", "{urine_v6.name}".'))
