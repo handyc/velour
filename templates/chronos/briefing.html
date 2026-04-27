@@ -236,7 +236,7 @@
                 {% if card.manual.subtitle %}<span class="r-sub">{{ card.manual.subtitle }}</span>{% endif %}
                 <span class="r-blurb">{{ card.blurb }}</span>
                 <span class="r-actions">
-                    Read · <a href="{% url 'codex:manual_pdf' card.manual.slug %}"
+                    Read · <a href="{% url 'chronos:cached_sky_pdf' card.manual.slug %}"
                               onclick="event.stopPropagation();">PDF</a>
                 </span>
             </a>

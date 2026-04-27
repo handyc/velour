@@ -360,12 +360,15 @@ def _do_weather():
 
 def _do_pass_digest():
     """Weekly — re-render the Codex Manual that ranks the next 7 days
-    of viewable satellite passes. Idempotent per ISO week."""
+    of viewable satellite passes, then refresh its cached PDF on disk
+    so the briefing's reading pin and the digest page serve a static
+    file instead of re-rendering. Idempotent per ISO week."""
     from django.core.management import call_command
     import io
     buf = io.StringIO()
     call_command('compose_pass_digest', quiet=True)
-    return 'sky digest manual re-rendered'
+    call_command('publish_sky_pdfs', stdout=buf)
+    return 'sky digest manual re-rendered + PDF published'
 
 
 def _do_sat_transits():
@@ -395,25 +398,28 @@ def _do_marine():
 
 
 def _do_sky_almanac():
-    """Monthly — recompose the yearly Sky Almanac Codex Manual.
-    Idempotent per calendar year; re-running rewrites every section
-    in place from the latest CalendarEvent state."""
+    """Monthly — recompose the yearly Sky Almanac Codex Manual, then
+    refresh its cached PDF on disk so the briefing's reading pin and
+    other surfaces serve a static file instead of re-rendering on
+    every click. Idempotent per calendar year."""
     from django.core.management import call_command
     import io
     buf = io.StringIO()
     call_command('compose_sky_almanac', quiet=True, stdout=buf)
-    return 'sky almanac re-rendered'
+    call_command('publish_sky_pdfs', stdout=buf)
+    return 'sky almanac re-rendered + PDF published'
 
 
 def _do_sky_retrospective():
     """Monthly — recompose the year-to-date Sky Retrospective Codex
-    Manual. Counterpart to the Sky Almanac (forward-looking).
-    Idempotent per calendar year."""
+    Manual + cache its PDF. Counterpart to the Sky Almanac
+    (forward-looking). Idempotent per calendar year."""
     from django.core.management import call_command
     import io
     buf = io.StringIO()
     call_command('compose_sky_retrospective', quiet=True, stdout=buf)
-    return 'sky retrospective re-rendered'
+    call_command('publish_sky_pdfs', stdout=buf)
+    return 'sky retrospective re-rendered + PDF published'
 
 
 def _do_rebuild_document():

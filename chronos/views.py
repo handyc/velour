@@ -1691,6 +1691,34 @@ def sky_digest(request):
 
 
 @login_required
+def cached_sky_pdf(request, slug):
+    """Serve a sky-* manual's PDF from MEDIA_ROOT/sky-pdfs/ instead of
+    re-rendering on every request.
+
+    Slugs are allowlisted by prefix (sky-digest-* / sky-almanac-* /
+    sky-retrospective-*) inside `sky_pdf_path` — anything else returns
+    404, so this view can't serve arbitrary media files. If the cached
+    PDF is missing (publish_sky_pdfs hasn't run yet), we fall back to
+    a 302 redirect to the live `codex:manual_pdf` view so the link
+    still works on a fresh install.
+    """
+    from django.http import FileResponse, HttpResponseRedirect
+    from django.urls import reverse
+    from .management.commands.publish_sky_pdfs import sky_pdf_path
+
+    path = sky_pdf_path(slug)
+    if path is None:
+        raise Http404('Not a sky manual')
+    if not path.exists():
+        return HttpResponseRedirect(
+            reverse('codex:manual_pdf', kwargs={'slug': slug})
+        )
+    response = FileResponse(open(path, 'rb'), content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{slug}.pdf"'
+    response['Cache-Control'] = 'public, max-age=900'
+    return response
+
+
 def sky_subscribe(request):
     """Landing page explaining how to subscribe to the ICS feed.
     Shows the canonical URL and per-platform instructions.
