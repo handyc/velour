@@ -73,6 +73,7 @@ STAGE_DIMENSIONS = {
     'mabr-cartridge':           (50,  40,  60),
     'anammox-cartridge':        (60,  40,  80),
     'forward-osmosis-spiral':   (40,  30, 100),
+    'micro-electrochem-polish': (60,  60,  40),
 }
 
 
@@ -685,6 +686,24 @@ STAGE_TYPES = [
                  'protozoa': 0.9999999, 'turbidity': 0.99},
         flow_lpm=0.1, energy_watts=0.0,
         cost_eur=60.0, maintenance_days=365,
+    ),
+    dict(
+        slug='micro-electrochem-polish',
+        name='Compact BDD electrochemical polish',
+        kind='chemical',
+        description='60×60×40 mm boron-doped-diamond electrode cell. '
+                    'Generates hydroxyl radicals at the anode that '
+                    'mineralise organics — pharma, hormones, '
+                    'creatinine, residual urea. Same chemistry as '
+                    'the bench-scale electrochem-oxidation stage at '
+                    '1/150th the volume, lower per-pass removal '
+                    'because contact time drops with the housing. '
+                    '8 W; expensive electrodes (€140).',
+        removal={'pharma': 0.95, 'hormones': 0.95, 'creatinine': 0.92,
+                 'urea': 0.85, 'ammonia': 0.50,
+                 'voc': 0.85, 'bacteria': 0.999},
+        flow_lpm=0.15, energy_watts=8.0,
+        cost_eur=140.0, maintenance_days=365,
     ),
     dict(
         slug='ammonia-electrolyzer',
@@ -1449,6 +1468,81 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v11, stage_type=st, position=i)
 
+        # v12 — under three-quarter litre. The compact BDD electro-
+        # chemical polish does the work of v11's two GACs in a
+        # single stage (mineralises hormones, pharma, creatinine,
+        # residual urea via hydroxyl radicals); BDD also removes
+        # ~50 % of ammonia per pass, so v11's third electrolyzer is
+        # no longer needed. Net 7 stages, 744 mL — fits in a 750 mL
+        # wine bottle. €420, 18 W. Passes the full EU urine-reuse
+        # target.
+        urine_v12, urine_v12_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v12-wine-bottle', defaults=dict(
+                name='Urine → Drinking (v12 wine-bottle compact)',
+                description='Two urease cartridges, two ammonia '
+                            'electrolyzers, one BDD electrochemical '
+                            'polish (handles pharma + hormones + '
+                            'creatinine + residual ammonia via '
+                            'hydroxyl-radical mineralisation), two '
+                            'spiral-wound FO cartridges. 744 mL, '
+                            'fits in a 750 mL wine bottle. 7 stages, '
+                            '€420, 18 W. The BDD anode replaces both '
+                            'GAC polishes and one electrolyzer at '
+                            'lower total volume.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v12_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'ammonia-electrolyzer',
+                'ammonia-electrolyzer',
+                'micro-electrochem-polish',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v12, stage_type=st, position=i)
+
+        # v13 — under 700 mL. Drop one urea-hydrolysis cartridge and
+        # let the BDD electrochem mop up the residual urea (10 mg/L
+        # after one urea-hyd, then × 0.15 in electrochem, then × 0.36
+        # through the FO pair = 0.54 mg/L, comfortably under EU 2).
+        # 6 stages, 672 mL — fits in a 24 oz tall can or a small
+        # thermos. €380, 18 W. Smallest known urine-to-EU-potable
+        # configuration in the catalog.
+        urine_v13, urine_v13_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v13-minimal', defaults=dict(
+                name='Urine → Drinking (v13 minimal EU-compliant)',
+                description='Smallest EU-potable urine system in the '
+                            'catalog. Single urease cartridge, two '
+                            'ammonia electrolyzers, one BDD electro-'
+                            'chemical polish, two compact spiral FO '
+                            'cartridges. 672 mL, 6 stages, €380, '
+                            '18 W. Fits inside a 24 oz tall can. '
+                            'The BDD anode is doing four jobs at '
+                            'once: residual-urea mineralisation, '
+                            'pharma + hormones + creatinine '
+                            'oxidation, and ~50 % of remaining '
+                            'ammonia.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v13_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'ammonia-electrolyzer',
+                'ammonia-electrolyzer',
+                'micro-electrochem-polish',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v13, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1457,4 +1551,5 @@ class Command(BaseCommand):
             f'"{urine_v5.name}", "{urine_v6.name}", '
             f'"{urine_v7.name}", "{urine_v8.name}", '
             f'"{urine_v9.name}", "{urine_v10.name}", '
-            f'"{urine_v11.name}".'))
+            f'"{urine_v11.name}", "{urine_v12.name}", '
+            f'"{urine_v13.name}".'))
