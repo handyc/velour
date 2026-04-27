@@ -68,6 +68,7 @@ STAGE_DIMENSIONS = {
     'micro-mixed-bed-ix':       (40,  40, 100),
     'micro-gac-cartridge':      (30,  30, 100),
     'forward-osmosis-pouch':    (50,  35, 160),
+    'micro-urea-hydrolysis':    (30,  30,  80),
 }
 
 
@@ -616,7 +617,7 @@ STAGE_TYPES = [
                     '— pop the cartridge, regenerate with brine + '
                     'caustic, reload.',
         removal={'ammonia': 0.95, 'sodium': 0.60, 'potassium': 0.60,
-                 'nitrate': 0.50, 'lead': 0.80},
+                 'nitrate': 0.50, 'lead': 0.80, 'creatinine': 0.40},
         flow_lpm=0.3, energy_watts=0.0,
         cost_eur=25.0, maintenance_days=14,
     ),
@@ -649,7 +650,7 @@ STAGE_TYPES = [
                     'than salts (small, uncharged), so a kidney-load '
                     'flag is appropriate downstream.',
         removal={'tds': 0.99, 'sodium': 0.99, 'potassium': 0.99,
-                 'creatinine': 0.95, 'phosphate': 0.99,
+                 'creatinine': 0.98, 'phosphate': 0.99,
                  'lead': 0.99, 'arsenic': 0.99,
                  'urea': 0.40, 'ammonia': 0.60,
                  'pharma': 0.90, 'hormones': 0.85,
@@ -657,6 +658,26 @@ STAGE_TYPES = [
                  'protozoa': 0.9999999, 'turbidity': 0.99},
         flow_lpm=0.05, energy_watts=0.0,
         cost_eur=30.0, maintenance_days=1,
+    ),
+    dict(
+        slug='micro-urea-hydrolysis',
+        name='Micro urease biofilm cartridge',
+        kind='biological',
+        description='30 mm × 80 mm column packed with urease-immobilised '
+                    'beads — same chemistry as the bench-scale Vuna '
+                    'biofilm reactor, miniaturised for inline use. '
+                    'Hydrolyses urea to ammonium carbonate; the '
+                    'liberated NH₄⁺ then needs a downstream IX trap '
+                    'or thermal pass to remove. Real research uses '
+                    'urease-bead cartridges in clinical blood-urea '
+                    'sensors; the same scale works for trickle '
+                    'urine flow.',
+        removal={'urea': 0.95},
+        # 1 mg urea → 14×2/60 = 0.467 mg NH4-N (same as the bench
+        # urea-hydrolysis reactor — N is conserved, just speciated).
+        converts={'urea': {'ammonia': 0.467}},
+        flow_lpm=0.2, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=60,
     ),
 
     dict(
@@ -1221,10 +1242,48 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v8, stage_type=st, position=i)
 
+        # v9 — tall-can scale (~700 mL envelope). Adds a urease
+        # biofilm cartridge upstream of the FO pouch (knocks urea
+        # before it gets to the membrane) plus a GAC polish + a
+        # hollow-fiber pathogen redundancy stage. ~683 mL total —
+        # fits in a 24 oz (710 mL) tall can. Closer to "habitual-use
+        # drinkable" than v8: still NOT EU-potable (urea, ammonia,
+        # hormones remain above EU caps) but order-of-magnitude
+        # better than v8 on most residuals.
+        urine_v9, urine_v9_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v9-tall-can', defaults=dict(
+                name='Urine → Drinkable (v9 tall-can enhanced)',
+                description='Urease cartridge → forward-osmosis pouch '
+                            '→ mixed-bed IX → activated-carbon polish '
+                            '→ hollow-fiber pathogen backstop. ~683 mL '
+                            'total, fits in a 24 oz tall can. '
+                            'Significantly cleaner than v8 — urea '
+                            'pre-hydrolysed before the membrane, '
+                            'pharma/hormones knocked back by GAC, '
+                            'pathogens get a second-line membrane '
+                            'after FO. Still not EU-potable on urea '
+                            'and ammonia residuals; closer to '
+                            '"habitual-use drinkable" than emergency.',
+                source=urine_src, target=urine_v8_target,
+            ))
+        if urine_v9_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'forward-osmosis-pouch',
+                'micro-mixed-bed-ix',
+                'micro-gac-cartridge',
+                'micro-hollow-fiber',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v9, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
             f'"{urine_system.name}", "{urine_v2.name}", '
             f'"{urine_v3.name}", "{urine_v4.name}", '
             f'"{urine_v5.name}", "{urine_v6.name}", '
-            f'"{urine_v7.name}", "{urine_v8.name}".'))
+            f'"{urine_v7.name}", "{urine_v8.name}", '
+            f'"{urine_v9.name}".'))
