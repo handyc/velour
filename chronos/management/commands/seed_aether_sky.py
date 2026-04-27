@@ -174,6 +174,13 @@ if (!ctx.state.init) {
         ctx.state.neoBillboard = sprite;
     }
 
+    // Time-scrubbing (Phase 7). DOM overlay slider that shifts LST
+    // for stars / constellations / Milky Way only; live celestial
+    // bodies (sun, moon, planets, sats) stay at server "now" because
+    // shifting them correctly needs server-side recomputation.
+    ctx.state.timeOffsetHours = 0;
+    buildTimeScrubber();
+
     fetch('/static/chronos/bright_stars.json')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -355,6 +362,70 @@ function refreshConstellations() {
     lines.geometry.attributes.position.needsUpdate = true;
 }
 
+// Time scrubber (Phase 7). DOM overlay — slider + readout + reset.
+// Idempotent: re-running won't double-inject because we check for
+// the existing element by id. Pointer-events on the wrapper so the
+// scene's pointer-lock controls don't swallow slider drags.
+function buildTimeScrubber() {
+    if (document.getElementById('chronos-sky-scrubber')) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'chronos-sky-scrubber';
+    wrap.style.cssText = [
+        'position:fixed', 'bottom:14px', 'left:50%',
+        'transform:translateX(-50%)',
+        'background:rgba(8,12,22,0.86)', 'color:#dceaff',
+        'padding:8px 14px',
+        'border:1px solid #3a4a60', 'border-radius:6px',
+        'z-index:1000', 'pointer-events:auto',
+        'font-family:"Helvetica Neue",Arial,sans-serif',
+        'font-size:12px', 'display:flex', 'align-items:center',
+        'gap:10px',
+    ].join(';') + ';';
+    wrap.innerHTML =
+        '<label style="white-space:nowrap;color:#8fb6e6;">Time</label>' +
+        '<input id="chronos-sky-scrubber-input" type="range" ' +
+        '       min="-24" max="24" step="0.25" value="0" ' +
+        '       style="width:240px;">' +
+        '<span id="chronos-sky-scrubber-readout" ' +
+        '      style="min-width:120px;text-align:right;' +
+        '             font-family:ui-monospace,monospace;color:#dceaff;">' +
+        'now</span>' +
+        '<button id="chronos-sky-scrubber-reset" type="button" ' +
+        '        style="background:#21262d;color:#dceaff;' +
+        '               border:1px solid #3a4a60;padding:3px 9px;' +
+        '               border-radius:4px;cursor:pointer;">' +
+        'Now</button>' +
+        '<small style="color:#6e8090;">stars / Milky Way only</small>';
+    document.body.appendChild(wrap);
+
+    const input = document.getElementById('chronos-sky-scrubber-input');
+    const readout = document.getElementById('chronos-sky-scrubber-readout');
+    const reset = document.getElementById('chronos-sky-scrubber-reset');
+
+    function fmtOffset(h) {
+        if (Math.abs(h) < 0.005) return 'now';
+        const sign = h >= 0 ? '+' : '−';
+        const abs = Math.abs(h);
+        const hh = Math.floor(abs);
+        const mm = Math.round((abs - hh) * 60);
+        const t = new Date(Date.now() + h * 3600 * 1000);
+        const hhmm = (hh.toString().padStart(2, '0') + 'h' +
+                      mm.toString().padStart(2, '0'));
+        return sign + hhmm + ' · ' + t.toUTCString().slice(17, 22) + 'Z';
+    }
+    function apply(h) {
+        ctx.state.timeOffsetHours = h;
+        readout.textContent = fmtOffset(h);
+        // Force an instant re-position so the slider feels responsive.
+        updateStarPositions();
+    }
+    input.addEventListener('input', () => apply(parseFloat(input.value)));
+    reset.addEventListener('click', () => {
+        input.value = '0';
+        apply(0);
+    });
+}
+
 // NEO billboard (Phase 6). Multi-line text panel showing the next
 // few asteroid close approaches from /chronos/sky.json's `neos`
 // field. Repainted on each successful fetch.
@@ -482,7 +553,9 @@ function updateMilkyWayPositions() {
     const obs = ctx.state.lastObserver;
     const latRad = obs.lat * Math.PI / 180;
     const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
-    const lstRad = computeLST(new Date(), obs.lon) * Math.PI / 180;
+    const offsetMs = (ctx.state.timeOffsetHours || 0) * 3.6e6;
+    const effectiveTime = new Date(Date.now() + offsetMs);
+    const lstRad = computeLST(effectiveTime, obs.lon) * Math.PI / 180;
     const R = ctx.state.R;
     const positions = cloud.geometry.attributes.position.array;
     const n = coords.length / 2;
@@ -528,7 +601,9 @@ function updateStarPositions() {
     const obs = ctx.state.lastObserver;
     const latRad = obs.lat * Math.PI / 180;
     const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
-    const lstRad = computeLST(new Date(), obs.lon) * Math.PI / 180;
+    const offsetMs = (ctx.state.timeOffsetHours || 0) * 3.6e6;
+    const effectiveTime = new Date(Date.now() + offsetMs);
+    const lstRad = computeLST(effectiveTime, obs.lon) * Math.PI / 180;
     const R = ctx.state.R;
     const positions = ctx.state.starPoints.geometry.attributes.position.array;
     const cat = ctx.state.starCatalog;
