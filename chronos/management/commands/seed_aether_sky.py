@@ -160,6 +160,20 @@ if (!ctx.state.init) {
     ctx.state.milkyWayPoints = null;
     ctx.state.milkyWayCoords = null;
 
+    // NEO close-approach billboard (Phase 6). A multi-line text
+    // sprite parked east-northeast of the spawn point, repainted
+    // each time /chronos/sky.json fetches with the next 3 NEOs.
+    {
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            transparent: true, depthWrite: false, fog: false,
+        }));
+        sprite.position.set(8, 2.8, -12);  // visible from default heading
+        sprite.scale.set(0.001, 0.001, 1); // start tiny; first paint resizes
+        sprite.renderOrder = 11;
+        ctx.scene.add(sprite);
+        ctx.state.neoBillboard = sprite;
+    }
+
     fetch('/static/chronos/bright_stars.json')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -341,6 +355,82 @@ function refreshConstellations() {
     lines.geometry.attributes.position.needsUpdate = true;
 }
 
+// NEO billboard (Phase 6). Multi-line text panel showing the next
+// few asteroid close approaches from /chronos/sky.json's `neos`
+// field. Repainted on each successful fetch.
+function renderTextLinesToCanvas(lines, opts) {
+    opts = opts || {};
+    const fontPx = opts.fontPx || 26;
+    const lineH = Math.round(fontPx * 1.45);
+    const padX = 24, padY = 18;
+    const canvas = document.createElement('canvas');
+    const c2d = canvas.getContext('2d');
+    const baseFont = '"Helvetica Neue", Arial, sans-serif';
+    c2d.font = '600 ' + fontPx + 'px ' + baseFont;
+    let maxW = 0;
+    for (const line of lines) {
+        const w = c2d.measureText(line.text || line).width;
+        if (w > maxW) maxW = w;
+    }
+    canvas.width  = Math.ceil(maxW) + padX * 2;
+    canvas.height = Math.ceil(lineH * lines.length) + padY * 2;
+    // re-bind font after resize (canvas state resets)
+    c2d.font = '600 ' + fontPx + 'px ' + baseFont;
+    c2d.fillStyle = 'rgba(8, 12, 22, 0.86)';
+    c2d.fillRect(0, 0, canvas.width, canvas.height);
+    c2d.strokeStyle = '#3a4a60';
+    c2d.lineWidth = 3;
+    c2d.strokeRect(1.5, 1.5, canvas.width - 3, canvas.height - 3);
+    c2d.textBaseline = 'top';
+    let y = padY;
+    for (const line of lines) {
+        const text = line.text || line;
+        c2d.fillStyle = line.color || '#dceaff';
+        c2d.fillText(text, padX, y);
+        y += lineH;
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+}
+
+function updateNeoBillboard(neos) {
+    const sprite = ctx.state.neoBillboard;
+    if (!sprite) return;
+    const lines = [
+        {text: 'Near-Earth approaches (next out)', color: '#ffd966'},
+        {text: '', color: '#dceaff'},
+    ];
+    if (!neos || neos.length === 0) {
+        lines.push({text: '  none in window', color: '#8b9eb6'});
+    } else {
+        for (const n of neos.slice(0, 3)) {
+            const d = new Date(n.when_iso);
+            const dateStr = d.toUTCString().slice(5, 16);  // "27 Apr 2026"
+            const ldStr = (typeof n.dist_ld === 'number')
+                ? n.dist_ld.toFixed(1) + ' LD' : '';
+            const vStr = (typeof n.v_km_s === 'number')
+                ? n.v_km_s.toFixed(1) + ' km/s' : '';
+            const sizeStr = n.size_label || '';
+            lines.push({text: '  ' + dateStr + '   ' + n.designation,
+                        color: '#dceaff'});
+            const detail = ['     ' + ldStr, sizeStr, vStr]
+                .filter(s => s).join('  ·  ');
+            lines.push({text: detail, color: '#8fb6e6'});
+            lines.push({text: '', color: '#dceaff'});
+        }
+    }
+    const tex = renderTextLinesToCanvas(lines, {fontPx: 26});
+    if (sprite.material.map) sprite.material.map.dispose();
+    sprite.material.map = tex;
+    sprite.material.needsUpdate = true;
+    // Match world scale to the canvas aspect — keep height fixed at
+    // ~3.2 m so the panel stays a consistent visual size.
+    const heightM = 3.2;
+    const aspect = tex.image.width / tex.image.height;
+    sprite.scale.set(heightM * aspect, heightM, 1);
+}
+
 // Milky Way (Phase 5). Scatter cloud along the galactic plane with
 // brightness baked in by build_milky_way.py. Each point is one (ra,
 // dec, brightness) triple; we use the same RA/Dec→alt/az math as
@@ -517,6 +607,7 @@ function applyData(data) {
     const R = ctx.state.R;
     ctx.state.computedAt = data.computed_at || '';
     if (data.observer) ctx.state.lastObserver = data.observer;
+    updateNeoBillboard(data.neos);
 
     // Sun + sun-light.
     const ss = data.solar_system || {};
