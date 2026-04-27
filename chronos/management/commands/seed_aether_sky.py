@@ -35,8 +35,9 @@ SCRIPT_SLUG = 'chronos-sky-updater'
 # and capture ctx.state/ctx.entity by closure — they're rebuilt every
 # frame, which is cheap (tens of ns).
 SCRIPT_CODE = r"""
-// Lazy init on the first frame. Builds sun + sun-light + moon, plus
-// empty pools for planets and satellites that fill in once data arrives.
+// Lazy init on the first frame. Builds sun + sun-light + moon, the
+// empty entity pools for planets and satellites, the cardinal posts,
+// and kicks off the static fetch of the bright-stars catalog.
 if (!ctx.state.init) {
     ctx.state.init = true;
     ctx.state.lastFetch = 5;     // fetch immediately on first frame
@@ -99,6 +100,27 @@ if (!ctx.state.init) {
         post.position.set(15 * Math.sin(az), 1.25, -15 * Math.cos(az));
         ctx.entity.add(post);
     }
+
+    // Bright-star points (Phase 2). Geometry is empty until the static
+    // catalog fetch resolves; per-second LST math repositions them.
+    ctx.state.starPoints = null;
+    ctx.state.starCatalog = null;
+    ctx.state.lastStarUpdate = 0;
+    ctx.state.STAR_UPDATE_S = 30;   // Earth rotates 7.5°/30 s — sub-perceptual
+
+    // Atmospheric sky (Phase 2). Three-stop palette interpolated by
+    // sun altitude. SKY_DAY for daylight, SKY_DUSK for civil twilight,
+    // SKY_NIGHT for astronomical night. The starting scene.background
+    // (#08111f, set by the World) reads as deep night.
+    ctx.state.SKY_DAY   = new THREE.Color(0x6da7d6);  // slate sky-blue
+    ctx.state.SKY_DUSK  = new THREE.Color(0xff8a4f);  // sodium-orange
+    ctx.state.SKY_NIGHT = new THREE.Color(0x040714);  // deep blue-black
+    ctx.state.lastSunAlt = null;
+
+    fetch('/static/chronos/bright_stars.json')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data && data.stars) buildStarPoints(data.stars); })
+        .catch(err => console.warn('star catalog fetch failed:', err));
 }
 
 // Helpers (re-declared each frame; cheap, all closures over state/entity).
@@ -110,6 +132,123 @@ function altAzToVec3(altDeg, azDeg, R) {
          R * Math.sin(alt),
         -R * Math.cos(alt) * Math.cos(az)
     );
+}
+
+// Approximate star color from Johnson B-V. Hot blue-white at -0.3, cool red
+// at +1.6. Linear-segment palette — adequate at a few pixels per star.
+function bvToColor(bv) {
+    if (bv == null || !Number.isFinite(bv)) bv = 0.6;
+    if (bv < 0)        return [0.72, 0.85, 1.00];   // O/B
+    if (bv < 0.4)      return [0.95, 0.97, 1.00];   // A
+    if (bv < 0.8)      return [1.00, 1.00, 0.92];   // F/G
+    if (bv < 1.4)      return [1.00, 0.85, 0.65];   // K
+    return                    [1.00, 0.65, 0.45];   // M
+}
+
+function buildStarPoints(catalog) {
+    const n = catalog.length;
+    const positions = new Float32Array(n * 3);
+    const colors = new Float32Array(n * 3);
+    const sizes = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const s = catalog[i];
+        // mag → display size; brightest few pop, faintest still visible at 1px.
+        sizes[i] = Math.max(1.0, Math.min(7.5, 5.5 - s.mag));
+        const c = bvToColor(s.bv);
+        colors[i*3+0] = c[0]; colors[i*3+1] = c[1]; colors[i*3+2] = c[2];
+        // Park off-screen until updateStarPositions fills them in.
+        positions[i*3+0] = 0; positions[i*3+1] = -1e4; positions[i*3+2] = 0;
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+    geom.setAttribute('size',     new THREE.BufferAttribute(sizes,     1));
+    const mat = new THREE.PointsMaterial({
+        vertexColors: true, sizeAttenuation: false, size: 2.5,
+        transparent: true, opacity: 0.0,
+    });
+    const points = new THREE.Points(geom, mat);
+    points.frustumCulled = false;
+    ctx.entity.add(points);
+    ctx.state.starPoints = points;
+    ctx.state.starCatalog = catalog;
+    updateStarPositions();
+}
+
+// Greenwich Mean Sidereal Time (degrees), then add longitude for LST.
+// IAU 1982 polynomial; accurate to a few seconds for our purposes.
+function computeLST(date, lonDeg) {
+    const ms = date.getTime();
+    const jd = ms / 86400000 + 2440587.5;
+    const t = (jd - 2451545.0) / 36525;
+    let gmst = 280.46061837
+             + 360.98564736629 * (jd - 2451545.0)
+             + 0.000387933 * t * t
+             - t * t * t / 38710000;
+    return ((gmst + lonDeg) % 360 + 360) % 360;
+}
+
+function updateStarPositions() {
+    if (!ctx.state.starPoints || !ctx.state.lastObserver) return;
+    const obs = ctx.state.lastObserver;
+    const latRad = obs.lat * Math.PI / 180;
+    const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
+    const lstRad = computeLST(new Date(), obs.lon) * Math.PI / 180;
+    const R = ctx.state.R;
+    const positions = ctx.state.starPoints.geometry.attributes.position.array;
+    const cat = ctx.state.starCatalog;
+    for (let i = 0; i < cat.length; i++) {
+        const s = cat[i];
+        const decRad = s.dec * Math.PI / 180;
+        const sinDec = Math.sin(decRad), cosDec = Math.cos(decRad);
+        const haRad = lstRad - s.ra * Math.PI / 180;
+        const sinHa = Math.sin(haRad), cosHa = Math.cos(haRad);
+        const sinAlt = sinDec * sinLat + cosDec * cosLat * cosHa;
+        if (sinAlt < -0.05) {
+            // Below horizon — park out of view; size attribute keeps a
+            // valid range so the GPU never reads a NaN.
+            positions[i*3+1] = -1e4;
+            continue;
+        }
+        const altR = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+        const cosAlt = Math.cos(altR);
+        const sinAz = -cosDec * sinHa / cosAlt;
+        const cosAz = (sinDec - sinAlt * sinLat) / (cosAlt * cosLat);
+        const azR = Math.atan2(sinAz, cosAz);
+        positions[i*3+0] =  R * cosAlt * Math.sin(azR);
+        positions[i*3+1] =  R * sinAlt;
+        positions[i*3+2] = -R * cosAlt * Math.cos(azR);
+    }
+    ctx.state.starPoints.geometry.attributes.position.needsUpdate = true;
+}
+
+// Atmospheric sky and stellar opacity, both keyed off sun altitude.
+// Two interpolation segments meeting at sun_alt = -6° (civil twilight),
+// where SKY_DUSK peaks. Above +6°, full SKY_DAY; below -12°, full
+// SKY_NIGHT. The fog color tracks so the horizon doesn't disagree
+// with the sky.
+function updateAtmosphere(sunAltDeg) {
+    if (sunAltDeg == null || !Number.isFinite(sunAltDeg)) return;
+    const dayMix = Math.max(0, Math.min(1, (sunAltDeg + 6) / 12));
+    const twiMix = sunAltDeg >= -12
+        ? Math.max(0, 1 - Math.abs(sunAltDeg + 6) / 12)
+        : 0;
+    const c = new THREE.Color()
+        .copy(ctx.state.SKY_NIGHT)
+        .lerp(ctx.state.SKY_DUSK, twiMix)
+        .lerp(ctx.state.SKY_DAY,  dayMix);
+    if (ctx.scene.background && ctx.scene.background.copy) {
+        ctx.scene.background.copy(c);
+    }
+    if (ctx.scene.fog && ctx.scene.fog.color) {
+        ctx.scene.fog.color.copy(c);
+    }
+    if (ctx.state.starPoints) {
+        // Stars opaque at sun_alt < -8°, fully invisible at sun_alt > -2°.
+        const op = Math.max(0, Math.min(1, (-sunAltDeg - 2) / 6));
+        ctx.state.starPoints.material.opacity = op;
+        ctx.state.starPoints.visible = op > 0.02;
+    }
 }
 
 function applyData(data) {
@@ -128,6 +267,8 @@ function applyData(data) {
         // Civil twilight rolls intensity smoothly: 0 below -6°, 0.9 at +6°.
         const t = Math.max(0, Math.min(1, (ss.sun.alt_deg + 6) / 12));
         ctx.state.sunLight.intensity = 0.9 * t + 0.05;
+        ctx.state.lastSunAlt = ss.sun.alt_deg;
+        updateAtmosphere(ss.sun.alt_deg);
     }
 
     // Moon.
@@ -215,6 +356,14 @@ if (ctx.state.lastFetch >= 5 && !ctx.state.fetching) {
         .then(data => { if (data) applyData(data); })
         .catch(err => console.warn('chronos-sky fetch failed:', err))
         .finally(() => { ctx.state.fetching = false; });
+}
+
+// Reposition stars on a 30 s cadence (Earth rotates 7.5° per 30 s — well
+// below the perceptual jitter threshold for points at radius 200 m).
+ctx.state.lastStarUpdate += ctx.deltaTime;
+if (ctx.state.starPoints && ctx.state.lastStarUpdate >= ctx.state.STAR_UPDATE_S) {
+    ctx.state.lastStarUpdate = 0;
+    updateStarPositions();
 }
 """
 
