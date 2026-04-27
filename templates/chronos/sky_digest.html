@@ -150,9 +150,14 @@
   the <a href="{% url 'codex:list' %}">Codex</a>.
   <br><br>
   Looking 12 months out instead of 7 days? See the
-  <a href="{% url 'codex:manual_detail' slug='sky-almanac-2026' %}">Sky Almanac · 2026</a>
-  — yearly editorial digest of eclipses, conjunctions, meteor peaks,
-  NEO close approaches, and predicted satellite transits.
+  {% now "Y" as Y %}
+  <a href="{% url 'codex:manual_detail' slug='sky-almanac-'|add:Y %}">Sky Almanac · {{ Y }}</a>
+  (forward) and the
+  <a href="{% url 'codex:manual_detail' slug='sky-retrospective-'|add:Y %}">Sky Retrospective · {{ Y }}</a>
+  (backward) — yearly Codex Manuals refreshed monthly.
+  PDF downloads:
+  <a href="{% url 'codex:manual_pdf' slug='sky-almanac-'|add:Y %}">almanac.pdf</a> ·
+  <a href="{% url 'codex:manual_pdf' slug='sky-retrospective-'|add:Y %}">retrospective.pdf</a>.
 </div>
 
 <div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">

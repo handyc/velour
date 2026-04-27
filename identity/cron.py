@@ -65,6 +65,7 @@ DEFAULT_INTERVALS = {
     'sat_transits':      604_800,    # 7 d — sun/moon transit predictions
     'marine':            21_600,     # 6 h — tide / waves / water temp / currents
     'sky_almanac':       2_592_000,  # 30 d — yearly Sky Almanac Codex Manual
+    'sky_retrospective': 2_592_000,  # 30 d — year-to-date Sky Retrospective
 }
 
 
@@ -101,6 +102,7 @@ def dispatch(force=None):
             'sky_satellites', 'sky_neos', 'space_weather',
             'local_environment', 'weather', 'pass_digest',
             'sat_transits', 'marine', 'sky_almanac',
+            'sky_retrospective',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -146,6 +148,7 @@ def dispatch(force=None):
         ('sat_transits',     _do_sat_transits),
         ('marine',           _do_marine),
         ('sky_almanac',      _do_sky_almanac),
+        ('sky_retrospective', _do_sky_retrospective),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -396,6 +399,17 @@ def _do_sky_almanac():
     buf = io.StringIO()
     call_command('compose_sky_almanac', quiet=True, stdout=buf)
     return 'sky almanac re-rendered'
+
+
+def _do_sky_retrospective():
+    """Monthly — recompose the year-to-date Sky Retrospective Codex
+    Manual. Counterpart to the Sky Almanac (forward-looking).
+    Idempotent per calendar year."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('compose_sky_retrospective', quiet=True, stdout=buf)
+    return 'sky retrospective re-rendered'
 
 
 def _do_rebuild_document():
