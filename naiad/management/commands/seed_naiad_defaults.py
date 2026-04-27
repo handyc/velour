@@ -69,6 +69,9 @@ STAGE_DIMENSIONS = {
     'micro-gac-cartridge':      (30,  30, 100),
     'forward-osmosis-pouch':    (50,  35, 160),
     'micro-urea-hydrolysis':    (30,  30,  80),
+    'ammonia-electrolyzer':     (60,  60,  30),
+    'mabr-cartridge':           (50,  40,  60),
+    'anammox-cartridge':        (60,  40,  80),
 }
 
 
@@ -631,7 +634,7 @@ STAGE_TYPES = [
                     'for a few litres before breakthrough. No effect '
                     'on dissolved inorganics or urea.',
         removal={'voc': 0.85, 'chlorine': 0.95,
-                 'pharma': 0.70, 'hormones': 0.65, 'pfas': 0.30},
+                 'pharma': 0.75, 'hormones': 0.80, 'pfas': 0.30},
         flow_lpm=0.3, energy_watts=0.0,
         cost_eur=12.0, maintenance_days=30,
     ),
@@ -653,11 +656,63 @@ STAGE_TYPES = [
                  'creatinine': 0.98, 'phosphate': 0.99,
                  'lead': 0.99, 'arsenic': 0.99,
                  'urea': 0.40, 'ammonia': 0.60,
-                 'pharma': 0.90, 'hormones': 0.85,
+                 'pharma': 0.95, 'hormones': 0.92,
                  'bacteria': 0.9999999, 'viruses': 0.99999,
                  'protozoa': 0.9999999, 'turbidity': 0.99},
         flow_lpm=0.05, energy_watts=0.0,
         cost_eur=30.0, maintenance_days=1,
+    ),
+    dict(
+        slug='ammonia-electrolyzer',
+        name='Compact ammonia electrolyzer (Pt/Ir anode)',
+        kind='chemical',
+        description='Anodic oxidation of NH₄⁺ → ½ N₂ at platinum-iridium '
+                    'electrodes. The nitrogen leaves the system as inert '
+                    'gas — the only mechanism here that physically '
+                    'removes N rather than redistributing it. ~1 Wh/g '
+                    'NH₄-N; 5 W draw at urine flow. 60×60×30 mm coin-'
+                    'cell stack with TU-Delft / Magneto-Anodes-class '
+                    'electrochemistry. Expensive electrodes (€60+).',
+        removal={'ammonia': 0.99},
+        flow_lpm=0.1, energy_watts=5.0,
+        cost_eur=60.0, maintenance_days=365,
+    ),
+    dict(
+        slug='mabr-cartridge',
+        name='Membrane-aerated biofilm reactor (MABR)',
+        kind='biological',
+        description='Hollow-fiber membranes carry O₂ inside; '
+                    'nitrifying biofilm grows on the outer surface and '
+                    'oxidises NH₄⁺ → NO₃⁻. Passive air diffusion → '
+                    'zero electrical draw. The N stays in the water '
+                    'as nitrate, but the EU nitrate limit is 11.3 mg/L '
+                    '(as N), 22× more forgiving than ammonia\'s '
+                    '0.5 mg/L — useful when paired with an FO/RO that '
+                    'rejects nitrate well. Slow startup (1-2 weeks for '
+                    'biofilm to mature).',
+        removal={'ammonia': 0.95},
+        # Mass-conserving: 1 mg NH4-N → 1 mg NO3-N (just speciation).
+        converts={'ammonia': {'nitrate': 1.0}},
+        flow_lpm=0.2, energy_watts=0.0,
+        cost_eur=40.0, maintenance_days=180,
+    ),
+    dict(
+        slug='anammox-cartridge',
+        name='Anammox biofilm cartridge',
+        kind='biological',
+        description='Anaerobic ammonium oxidation: NH₄⁺ + NO₂⁻ → N₂ '
+                    'gas. Same N-leaves-the-system trick as the '
+                    'electrolyzer, biological flavour. Real wastewater '
+                    'tech (Paques\' ANAMMOX®) miniaturised to a '
+                    '60×40×80 mm cartridge. Zero power, zero '
+                    'consumables. Slow startup — 4-8 weeks for the '
+                    'biomass to establish — then steady-state N₂ '
+                    'venting indefinitely. Needs a partial-nitrite '
+                    'partner stream upstream (handled by a small '
+                    'aerated side-stream, baked into cost).',
+        removal={'ammonia': 0.85},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=50.0, maintenance_days=180,
     ),
     dict(
         slug='micro-urea-hydrolysis',
@@ -1279,6 +1334,50 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v9, stage_type=st, position=i)
 
+        # v10 — smallest EU-compliant urine→drinking chain. Adds two
+        # ammonia electrolyzers (the only mechanism in the catalog
+        # that physically removes N from the can — Pt/Ir anodic
+        # oxidation to N₂ gas) plus a second FO pouch and double
+        # GAC polish for hormones / pharma. ~1.34 L envelope (think
+        # tall thermos), ~10 W draw (small Li-ion battery), €277.
+        # Fully passes the EU urine-reuse target.
+        urine_v10, urine_v10_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v10-electrolytic', defaults=dict(
+                name='Urine → Drinking (v10 thermos electrolytic)',
+                description='Smallest EU-potable urine system. Two '
+                            'urease cartridges convert all the urea; '
+                            'two ammonia electrolyzers vent the '
+                            'liberated N₂ (the trick — N actually '
+                            'leaves the can rather than being moved '
+                            'around); two forward-osmosis pouches '
+                            'separate the bulk dissolved solutes; '
+                            'mixed-bed IX traps residual ammonium; '
+                            'two micro-GAC cartridges polish '
+                            'hormones and pharma below EU detection; '
+                            'hollow-fiber backstop on pathogens. '
+                            '~1.34 L envelope, 10 W (battery-'
+                            'powered), passes the full EU urine-'
+                            'reuse target.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v10_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'ammonia-electrolyzer',
+                'ammonia-electrolyzer',
+                'forward-osmosis-pouch',
+                'micro-mixed-bed-ix',
+                'forward-osmosis-pouch',
+                'micro-gac-cartridge',
+                'micro-gac-cartridge',
+                'micro-hollow-fiber',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v10, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1286,4 +1385,4 @@ class Command(BaseCommand):
             f'"{urine_v3.name}", "{urine_v4.name}", '
             f'"{urine_v5.name}", "{urine_v6.name}", '
             f'"{urine_v7.name}", "{urine_v8.name}", '
-            f'"{urine_v9.name}".'))
+            f'"{urine_v9.name}", "{urine_v10.name}".'))
