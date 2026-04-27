@@ -273,6 +273,145 @@ cardinals.forEach((c) => {
   c.el = el;
 });
 
+// --- Solar-system layer --------------------------------------------------
+const ssGroup = new THREE.Group();
+scene.add(ssGroup);
+
+// Sun: yellow disk + soft corona; sized larger than sats for emphasis.
+const sunDot = new THREE.Mesh(
+  new THREE.SphereGeometry(0.04, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffd75c }),
+);
+sunDot.visible = false;
+ssGroup.add(sunDot);
+
+const sunCorona = new THREE.Mesh(
+  new THREE.SphereGeometry(0.08, 24, 16),
+  new THREE.MeshBasicMaterial({
+    color: 0xffd75c, transparent: true, opacity: 0.18,
+  }),
+);
+sunCorona.visible = false;
+ssGroup.add(sunCorona);
+
+// Moon: phong-shaded sphere; a directional light at the Sun's
+// position automatically gives the right terminator + phase.
+const moonGroup = new THREE.Group();
+const moonMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(0.03, 32, 24),
+  new THREE.MeshPhongMaterial({
+    color: 0xe8e8d0, shininess: 4, specular: 0x222222,
+  }),
+);
+moonGroup.add(moonMesh);
+
+// A faint dark fill so the unlit half isn't pitch black against the
+// dome (helps when the moon is a thin crescent against day-twilight).
+const moonNightSide = new THREE.Mesh(
+  new THREE.SphereGeometry(0.0298, 32, 24),
+  new THREE.MeshBasicMaterial({ color: 0x1a1a1a }),
+);
+moonGroup.add(moonNightSide);
+
+const moonLight = new THREE.DirectionalLight(0xfff4d0, 1.4);
+moonGroup.add(moonLight);
+moonGroup.add(new THREE.AmbientLight(0x1a1a20, 0.35));
+moonGroup.visible = false;
+ssGroup.add(moonGroup);
+
+// Naked-eye planets — small colored dots with labels.
+const PLANET_COLORS = {
+  mercury: 0xe8d8a8,
+  venus:   0xffffff,
+  mars:    0xd97757,
+  jupiter: 0xdabf95,
+  saturn:  0xe8c878,
+};
+const planetEntries = ['mercury','venus','mars','jupiter','saturn'].map((slug) => {
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.015, 12, 8),
+    new THREE.MeshBasicMaterial({ color: PLANET_COLORS[slug] }),
+  );
+  dot.visible = false;
+  ssGroup.add(dot);
+  const label = document.createElement('div');
+  label.className = 'dome-sat-label';
+  label.style.color = '#' + PLANET_COLORS[slug].toString(16).padStart(6, '0');
+  label.textContent = slug[0].toUpperCase() + slug.slice(1);
+  label.style.display = 'none';
+  wrap.appendChild(label);
+  return { slug, dot, label };
+});
+
+// Twilight tints — applied to the dome background when sun changes band.
+const TWILIGHT_TINTS = {
+  day:           0x1a3a5e,  // pale blue daytime sky
+  civil:         0x3d2a4f,  // sunset orange/violet mix
+  nautical:      0x14193a,  // deep blue
+  astronomical:  0x080d20,  // very dark blue
+  night:         0x05070d,  // black, current
+};
+
+function applyTwilight(band) {
+  const tint = TWILIGHT_TINTS[band] || TWILIGHT_TINTS.night;
+  scene.background = new THREE.Color(tint);
+  scene.fog.color = new THREE.Color(tint);
+  // Also dim the wireframe contrast against bright daytime tint
+  const wireOpacity = (band === 'day' || band === 'civil') ? 0.5 : 1.0;
+  altRings.children.forEach(c => { c.material.opacity = wireOpacity; c.material.transparent = wireOpacity < 1; });
+  azLines.children.forEach(c => { c.material.opacity = wireOpacity; c.material.transparent = wireOpacity < 1; });
+}
+applyTwilight('night');
+
+function updateSolarSystem(ss) {
+  if (!ss) return;
+  // Sun
+  if (ss.sun) {
+    const above = ss.sun.alt_deg > -1;
+    const r = above ? RADIUS : RADIUS * 0.92;
+    const p = altAzToVec(Math.max(ss.sun.alt_deg, -8), ss.sun.az_deg, r);
+    sunDot.position.copy(p);
+    sunCorona.position.copy(p);
+    sunDot.visible = true;
+    sunCorona.visible = above;
+    applyTwilight(ss.sun.twilight);
+  }
+  // Moon — position the entire group, set the directional light to point
+  // from the Moon towards the Sun so the lit hemisphere faces the Sun.
+  if (ss.moon) {
+    const above = ss.moon.alt_deg > -1;
+    const r = above ? RADIUS : RADIUS * 0.92;
+    const mp = altAzToVec(Math.max(ss.moon.alt_deg, -8), ss.moon.az_deg, r);
+    moonGroup.position.copy(mp);
+    moonGroup.visible = true;
+    if (ss.sun) {
+      const sp = altAzToVec(ss.sun.alt_deg, ss.sun.az_deg, RADIUS);
+      // Light direction: from Moon position towards Sun position
+      const dir = sp.clone().sub(mp).normalize();
+      moonLight.position.copy(dir.multiplyScalar(2));
+      moonLight.target.position.set(0, 0, 0);
+      moonLight.target.updateMatrixWorld();
+    }
+  }
+  // Planets
+  ss.planets && ss.planets.forEach((p) => {
+    const entry = planetEntries.find((e) => e.slug === p.slug);
+    if (!entry) return;
+    if (p.alt_deg == null) {
+      entry.dot.visible = false;
+      entry.label.style.display = 'none';
+      return;
+    }
+    const above = p.above_horizon;
+    const r = above ? RADIUS : RADIUS * 0.92;
+    const pos = altAzToVec(Math.max(p.alt_deg, -8), p.az_deg, r);
+    entry.dot.position.copy(pos);
+    entry.dot.visible = true;
+    entry.label.style.display = above ? '' : 'none';
+    entry._worldPos = pos;
+  });
+}
+
 // --- Satellite layer -----------------------------------------------------
 const satGroup = new THREE.Group();
 scene.add(satGroup);
@@ -418,6 +557,58 @@ function updateOverlays() {
       s.label.style.display = 'none';
     }
   }
+  planetEntries.forEach((e) => {
+    if (e.label.style.display === 'none') return;
+    const p = projectTo2D(e.dot.position);
+    if (p.inFront) {
+      e.label.style.left = p.x + 'px';
+      e.label.style.top = p.y + 'px';
+    } else {
+      e.label.style.display = 'none';
+    }
+  });
+}
+
+// --- Solar HUD ---------------------------------------------------------
+const solarHud = document.createElement('div');
+solarHud.style.cssText = 'position:absolute;bottom:0.6rem;right:0.6rem;'
+  + 'color:#c9d1d9;font-family:ui-monospace,monospace;font-size:0.74rem;'
+  + 'background:rgba(13,17,23,0.7);border:1px solid #21262d;border-radius:4px;'
+  + 'padding:0.4rem 0.6rem;line-height:1.4;';
+solarHud.style.display = 'none';
+wrap.appendChild(solarHud);
+
+function updateSolarHUD(ss) {
+  const lines = [];
+  if (ss.sun) {
+    const altSign = ss.sun.alt_deg >= 0 ? '+' : '';
+    const bandPretty = {
+      day: 'day', civil: 'civil twilight', nautical: 'nautical twilight',
+      astronomical: 'astronomical twilight', night: 'night',
+    }[ss.sun.twilight] || ss.sun.twilight;
+    lines.push(
+      `<span style="color:#ffd75c">☉</span> ` +
+      `${altSign}${ss.sun.alt_deg.toFixed(1)}° · ${bandPretty}`
+    );
+  }
+  if (ss.moon) {
+    const above = ss.moon.alt_deg > 0;
+    const dim = above ? '#e8e8d0' : '#6e7681';
+    const altSign = ss.moon.alt_deg >= 0 ? '+' : '';
+    const lit = (ss.moon.illuminated_frac * 100).toFixed(0);
+    lines.push(
+      `<span style="color:${dim}">☽</span> ` +
+      `${altSign}${ss.moon.alt_deg.toFixed(1)}° · ${ss.moon.phase_name} · ${lit}% lit`
+    );
+  }
+  if (ss.planets) {
+    const visible = ss.planets.filter((p) => p.above_horizon).length;
+    if (visible) {
+      lines.push(`<span style="color:#888">●</span> ${visible} planet${visible===1?'':'s'} above horizon`);
+    }
+  }
+  solarHud.innerHTML = lines.join('<br>');
+  solarHud.style.display = lines.length ? '' : 'none';
 }
 
 // --- NEO HUD -------------------------------------------------------------
@@ -472,6 +663,10 @@ async function refresh() {
       computed.textContent = 'computed ' + d.toLocaleTimeString();
     }
     data.rows.forEach(updateSat);
+    if (data.solar_system) {
+      updateSolarSystem(data.solar_system);
+      updateSolarHUD(data.solar_system);
+    }
     neoData = data.neos || [];
     renderNeoHUD();
   } catch (e) {

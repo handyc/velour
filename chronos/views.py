@@ -1029,7 +1029,7 @@ def sky_json(request):
                         minutes_back=10, minutes_ahead=15,
                         step_seconds=30,
                     )
-    return JsonResponse({
+    payload = {
         'rows':        rows,
         'neos':        _neos_for_dome(),
         'observer':    {
@@ -1038,7 +1038,13 @@ def sky_json(request):
             'elev_m': prefs.home_elev_m,
         },
         'computed_at': djtz.now().isoformat(),
-    })
+    }
+    if request.GET.get('track') == '1':
+        from .astro_sources.solar_system import current_state
+        payload['solar_system'] = current_state(
+            prefs.home_lat, prefs.home_lon, prefs.home_elev_m,
+        )
+    return JsonResponse(payload)
 
 
 def _neos_for_dome(limit=5):
