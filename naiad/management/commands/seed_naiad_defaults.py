@@ -1786,6 +1786,58 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v16, stage_type=st, position=i)
 
+        # v17 — v16's productive ecosystem with v14's EU-polish tail
+        # bolted on. The biology takes the bulk of the urine's
+        # nitrogen / phosphorus / potassium and turns it into fish,
+        # greens, worm castings, comfrey, and duckweed. Whatever the
+        # plants and animals couldn't reach (residual ammonia, the
+        # last of the hormones / pharma, dissolved salts) gets
+        # finished off by 3× MABR + 3× FO-spiral + 1× GAC. Output is
+        # full EU-potable drinking water AND the ecosystem
+        # byproducts on the same pipeline. ~200 L assembly volume,
+        # 13 stages, €457, 5 W (the aquaponic pump). The "have it
+        # both ways" tier.
+        urine_v17, urine_v17_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v17-garden-plus-polish', defaults=dict(
+                name='Urine → Drinking + Garden (v17 ecosystem + polish)',
+                description='Full-circle system: v16\'s permaculture '
+                            'front-end (vermifilter → aquaponics → '
+                            'duckweed → comfrey → ceramic candle) '
+                            'pulls most of the nitrogen / phosphate / '
+                            'potassium out as harvestable biomass; '
+                            'three MABR cartridges plus three '
+                            'spiral-wound FO cartridges plus a GAC '
+                            'polish on the back end finish off '
+                            'whatever the biology left behind. '
+                            'Output: EU-potable drinking water AND '
+                            'fish, greens, vermicompost, duckweed, '
+                            'comfrey leaves on the same pipeline. '
+                            '~200 L (a garden corner), €457, 5 W. '
+                            'Slow startup (weeks for biofilm + fish '
+                            'maturation) then steady-state forever.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v17_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'aquaponic-bed',
+                'duckweed-tray',
+                'comfrey-pot',
+                'mabr-cartridge',
+                'mabr-cartridge',
+                'mabr-cartridge',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'forward-osmosis-spiral',
+                'micro-gac-cartridge',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v17, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1796,4 +1848,5 @@ class Command(BaseCommand):
             f'"{urine_v9.name}", "{urine_v10.name}", '
             f'"{urine_v11.name}", "{urine_v12.name}", '
             f'"{urine_v13.name}", "{urine_v14.name}", '
-            f'"{urine_v15.name}", "{urine_v16.name}".'))
+            f'"{urine_v15.name}", "{urine_v16.name}", '
+            f'"{urine_v17.name}".'))
