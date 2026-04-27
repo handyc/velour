@@ -17,7 +17,8 @@ from django.utils import timezone as djtz
 from django.views.decorators.http import require_POST
 
 from .models import (
-    CalendarEvent, ClockPrefs, Task, TrackedObject, WatchedTimezone,
+    CalendarEvent, ClockPrefs, Measurement, Task, TrackedObject,
+    WatchedTimezone,
 )
 from .planets import mars_snapshots, venus_snapshot
 
@@ -930,6 +931,100 @@ def sky(request):
 
 
 @login_required
+def space_weather(request):
+    """Solar + geomagnetic activity dashboard, fed by NOAA SWPC.
+
+    Reads the Measurement time-series this app already populates via
+    refresh_space_weather. Renders headline cards (current value +
+    Kp colour band) and per-metric SVG sparklines.
+    """
+    prefs = ClockPrefs.load()
+    djtz.activate(_home_tz())
+
+    def _series(metric, hours):
+        cutoff = djtz.now() - timedelta(hours=hours)
+        return list(
+            Measurement.objects.filter(
+                source='noaa-swpc', metric=metric, at__gte=cutoff,
+            ).order_by('at')
+        )
+
+    def _latest(metric):
+        return Measurement.objects.filter(
+            source='noaa-swpc', metric=metric,
+        ).order_by('-at').first()
+
+    from .astro_sources.space_weather import xray_class, aurora_visible_at
+
+    latest_xray = _latest('xray_flux')
+    latest_kp = _latest('kp_index')
+    latest_wind = _latest('wind_speed')
+    latest_sunspot = _latest('sunspot_number')
+    latest_aurora = _latest('aurora_max_pct')
+
+    aurora_oval_summary = (latest_aurora.extra
+                           if latest_aurora and latest_aurora.extra else {})
+    aurora_visible = aurora_visible_at(prefs.home_lat, aurora_oval_summary)
+
+    return render(request, 'chronos/space_weather.html', {
+        'prefs': prefs,
+        'kp_now':       latest_kp,
+        'wind_now':     latest_wind,
+        'xray_now':     latest_xray,
+        'xray_class':   xray_class(latest_xray.value) if latest_xray else '',
+        'sunspot_now':  latest_sunspot,
+        'aurora_now':   latest_aurora,
+        'aurora_visible_from_observer': aurora_visible,
+        'kp_24h':       _series('kp_index', 24),
+        'kp_7d':        _series('kp_index', 24 * 7),
+        'wind_24h':     _series('wind_speed', 24),
+        'wind_density_24h': _series('wind_density', 24),
+        'xray_6h':      _series('xray_flux', 6),
+        'sunspot_24mo': _series('sunspot_number', 24 * 30 * 24),
+        'aurora_30d_min_lat': _series('aurora_north_min_lat', 24 * 30),
+        # Pre-cooked SVG polylines so the template doesn't do math.
+        'kp_24h_svg':       _sparkline_polyline(_series('kp_index', 24),
+                                                lo=0, hi=9, w=200, h=40),
+        'wind_24h_svg':     _sparkline_polyline(_series('wind_speed', 24),
+                                                w=200, h=40),
+        'xray_6h_svg':      _sparkline_polyline(_series('xray_flux', 6),
+                                                log=True, w=200, h=40),
+        'sunspot_24mo_svg': _sparkline_polyline(_series('sunspot_number', 24 * 30 * 24),
+                                                lo=0, w=200, h=40),
+    })
+
+
+def _sparkline_polyline(samples, lo=None, hi=None, log=False, w=200, h=40, pad=2):
+    """Reduce a Measurement list to an SVG polyline `points` string.
+
+    Auto-fits y-range from data if lo/hi not given. With log=True the
+    y-axis is log10 of value (clamped at 1e-12 to avoid -inf for X-ray).
+    Returns '' if there are fewer than two samples.
+    """
+    if len(samples) < 2:
+        return ''
+    import math
+    raw_y = [s.value for s in samples]
+    if log:
+        ys = [math.log10(max(v, 1e-12)) for v in raw_y]
+    else:
+        ys = list(raw_y)
+    y_lo = min(ys) if lo is None else (math.log10(max(lo, 1e-12)) if log else lo)
+    y_hi = max(ys) if hi is None else (math.log10(max(hi, 1e-12)) if log else hi)
+    if y_hi - y_lo < 1e-9:
+        y_hi = y_lo + 1
+    plot_h = h - 2 * pad
+    plot_w = w - 2 * pad
+    n = len(ys)
+    pts = []
+    for i, y in enumerate(ys):
+        x = pad + plot_w * (i / (n - 1))
+        py = pad + plot_h * (1 - (y - y_lo) / (y_hi - y_lo))
+        pts.append(f'{x:.1f},{py:.1f}')
+    return ' '.join(pts)
+
+
+@login_required
 def sky_object(request, slug):
     """Per-object detail: facts + next-14-days passes + ground track."""
     obj = get_object_or_404(TrackedObject, slug=slug)
@@ -1045,7 +1140,32 @@ def sky_json(request):
         payload['solar_system'] = current_state(
             prefs.home_lat, prefs.home_lon, prefs.home_elev_m,
         )
+        payload['aurora'] = _aurora_for_dome(prefs)
     return JsonResponse(payload)
+
+
+def _aurora_for_dome(prefs):
+    """Latest Ovation oval summary, tagged with whether it reaches
+    down to the observer's latitude. Returns None if no recent data.
+    """
+    from .astro_sources.space_weather import aurora_visible_at
+    latest = Measurement.objects.filter(
+        source='noaa-swpc', metric='aurora_max_pct',
+    ).order_by('-at').first()
+    if not latest:
+        return None
+    summary = latest.extra or {}
+    north_lats = [v for v in (summary.get('north_boundary_by_lon') or {}).values()
+                  if v is not None]
+    south_lats = [v for v in (summary.get('south_boundary_by_lon') or {}).values()
+                  if v is not None]
+    return {
+        'observation_time': latest.at.isoformat(),
+        'max_intensity_pct': float(latest.value),
+        'equatorward_lat_north': min(north_lats) if north_lats else None,
+        'equatorward_lat_south': max(south_lats) if south_lats else None,
+        'visible_from_observer': aurora_visible_at(prefs.home_lat, summary),
+    }
 
 
 def _neos_for_dome(limit=5):

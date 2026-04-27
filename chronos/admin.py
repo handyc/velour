@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (
-    CalendarEvent, ClockPrefs, Task, TrackedObject, WatchedTimezone,
+    CalendarEvent, ClockPrefs, Measurement, Task, TrackedObject,
+    WatchedTimezone,
 )
 
 
@@ -42,3 +43,12 @@ class TrackedObjectAdmin(admin.ModelAdmin):
     search_fields = ('name', 'slug', 'designation')
     list_editable = ('is_watched',)
     readonly_fields = ('elements_fetched_at', 'created_at')
+
+
+@admin.register(Measurement)
+class MeasurementAdmin(admin.ModelAdmin):
+    list_display = ('source', 'metric', 'value', 'unit', 'at', 'received_at')
+    list_filter = ('source', 'metric')
+    search_fields = ('source', 'metric')
+    date_hierarchy = 'at'
+    readonly_fields = ('received_at',)

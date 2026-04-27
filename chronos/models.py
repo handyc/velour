@@ -378,3 +378,51 @@ class TrackedObject(models.Model):
             return None
         from django.utils import timezone as djtz
         return (djtz.now() - self.elements_fetched_at).total_seconds() / 3600.0
+
+
+# --- Time-series measurements (Phase 6+) ---------------------------------
+
+
+class Measurement(models.Model):
+    """Generic time-series sample — one row per (source, metric, at).
+
+    Used by space-weather (NOAA SWPC) and (Phase 7) local-environment
+    (Luchtmeetnet, pollen, etc). Deliberately one wide table rather
+    than per-metric models so charts and pruning are uniform.
+
+    Reasonable conventions:
+        source:  'noaa-swpc', 'luchtmeetnet', 'rivm-pollen'
+        metric:  'kp_index', 'sunspot_number', 'wind_speed_km_s',
+                 'xray_flux', 'pm25_ug_m3', 'no2_ug_m3', 'o3_ug_m3'
+        unit:    short human label e.g. 'km/s', 'µg/m³', '' if unitless
+        extra:   freeform JSON for context not worth a column
+                 (e.g. station_count for Kp, satellite ID for GOES).
+
+    `at` is the natural timestamp of the observation as published by
+    the source (already UTC, already aware). `received_at` is when
+    Velour pulled it — used for deduplication.
+    """
+
+    source = models.CharField(max_length=40, db_index=True)
+    metric = models.CharField(max_length=40, db_index=True)
+    value = models.FloatField()
+    unit = models.CharField(max_length=24, blank=True)
+    at = models.DateTimeField(db_index=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+    extra = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-at']
+        indexes = [
+            models.Index(fields=['source', 'metric', 'at']),
+            models.Index(fields=['metric', '-at']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['source', 'metric', 'at'],
+                name='measurement_unique_source_metric_at',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.source}:{self.metric} = {self.value} @ {self.at:%Y-%m-%d %H:%M}'

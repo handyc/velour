@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Space Weather — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.sw-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.sw-head h1 { margin:0; }
+.sw-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.sw-grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.sw-card {
+  background:#0d1117;
+  border:1px solid #21262d;
+  border-radius:6px;
+  padding:0.7rem 0.9rem;
+  display:flex; flex-direction:column; gap:0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sw-card .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.06em;
+}
+.sw-card .val {
+  color:#c9d1d9; font-size:1.7rem; font-weight:500; line-height:1.1;
+}
+.sw-card .sub { color:#8b949e; font-size:0.78rem; }
+.sw-card svg { display:block; margin-top:0.2rem; }
+.sw-card svg polyline { fill:none; stroke:#58a6ff; stroke-width:1.2; }
+
+/* Kp colour bands — a NOAA standard.
+   0-3: green (quiet); 4: yellow; 5+: orange→red (storm) */
+.sw-card.kp-q  .val { color:#3fb950; }
+.sw-card.kp-u  .val { color:#d29922; }
+.sw-card.kp-m  .val { color:#db6d28; }
+.sw-card.kp-h  .val { color:#f85149; }
+
+.sw-card.xr-A  .val { color:#6e7681; }
+.sw-card.xr-B  .val { color:#3fb950; }
+.sw-card.xr-C  .val { color:#58a6ff; }
+.sw-card.xr-M  .val { color:#d29922; }
+.sw-card.xr-X  .val { color:#f85149; }
+
+.sw-card.aurora-yes .val { color:#bc8cff; }
+
+.sw-card svg.spark { width:100%; height:40px; }
+.sw-card svg.spark.spark-kp polyline   { stroke:#3fb950; }
+.sw-card svg.spark.spark-wind polyline { stroke:#58a6ff; }
+.sw-card svg.spark.spark-xray polyline { stroke:#d29922; }
+.sw-card svg.spark.spark-ssn polyline  { stroke:#bc8cff; }
+
+.sw-extra { margin-top:1.2rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; color:#8b949e; font-size:0.85rem;
+  line-height:1.5; }
+.sw-extra code { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sw-head">
+  <h1>Space Weather</h1>
+  <span class="meta">
+    NOAA SWPC · observer {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E
+  </span>
+</div>
+
+<div class="sw-grid">
+  {% with kp_val=kp_now.value|default:0 %}
+  <div class="sw-card {% if kp_val < 4 %}kp-q{% elif kp_val < 5 %}kp-u{% elif kp_val < 7 %}kp-m{% else %}kp-h{% endif %}">
+    <span class="lbl">Kp index · last 3 h</span>
+    <span class="val">{% if kp_now %}{{ kp_now.value|floatformat:1 }}{% else %}—{% endif %}</span>
+    <span class="sub">
+      {% if kp_now %}
+      observed {{ kp_now.at|date:'D H:i' }} ·
+      {% if kp_val < 4 %}quiet
+      {% elif kp_val < 5 %}unsettled
+      {% elif kp_val < 7 %}minor storm
+      {% else %}major storm{% endif %}
+      {% else %}no data yet{% endif %}
+    </span>
+    {% if kp_24h_svg %}
+    <svg class="spark spark-kp" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ kp_24h_svg }}"/>
+    </svg>
+    <span class="sub">last 24 h</span>
+    {% endif %}
+  </div>
+  {% endwith %}
+
+  <div class="sw-card xr-{{ xray_class|slice:':1' }}">
+    <span class="lbl">X-ray flux · GOES primary</span>
+    <span class="val">{{ xray_class|default:'—' }}</span>
+    <span class="sub">
+      {% if xray_now %}
+      {{ xray_now.value|stringformat:".2e" }} W/m² ·
+      {{ xray_now.at|date:'H:i' }} UT
+      {% else %}no data yet{% endif %}
+    </span>
+    {% if xray_6h_svg %}
+    <svg class="spark spark-xray" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ xray_6h_svg }}"/>
+    </svg>
+    <span class="sub">last 6 h (log scale)</span>
+    {% endif %}
+  </div>
+
+  <div class="sw-card">
+    <span class="lbl">Solar wind speed</span>
+    <span class="val">
+      {% if wind_now %}{{ wind_now.value|floatformat:0 }} <small style="font-size:0.6em;color:#6e7681;">km/s</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if wind_now %}DSCOVR · {{ wind_now.at|date:'D H:i' }}{% else %}no data yet{% endif %}
+    </span>
+    {% if wind_24h_svg %}
+    <svg class="spark spark-wind" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ wind_24h_svg }}"/>
+    </svg>
+    <span class="sub">last 24 h</span>
+    {% endif %}
+  </div>
+
+  <div class="sw-card">
+    <span class="lbl">Sunspot number · monthly</span>
+    <span class="val">
+      {% if sunspot_now %}{{ sunspot_now.value|floatformat:0 }}{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if sunspot_now %}SILSO via SWPC · {{ sunspot_now.at|date:'M Y' }}{% else %}no data yet{% endif %}
+    </span>
+    {% if sunspot_24mo_svg %}
+    <svg class="spark spark-ssn" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ sunspot_24mo_svg }}"/>
+    </svg>
+    <span class="sub">last 24 months</span>
+    {% endif %}
+  </div>
+
+  <div class="sw-card {% if aurora_visible_from_observer %}aurora-yes{% endif %}">
+    <span class="lbl">Aurora · Ovation oval</span>
+    <span class="val">
+      {% if aurora_now %}{{ aurora_now.value|floatformat:0 }}%{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if aurora_visible_from_observer %}
+      <strong style="color:#bc8cff;">visible from {{ prefs.home_lat|floatformat:1 }}°N tonight</strong>
+      {% elif aurora_now %}
+      max intensity globally · oval too far north
+      {% else %}no data yet{% endif %}
+    </span>
+    <span class="sub">peak Kp needed at this latitude: ~{{ prefs.home_lat|floatformat:0 }}° N → Kp 6+</span>
+  </div>
+</div>
+
+<div class="sw-extra">
+  All values come from <code>services.swpc.noaa.gov</code>, refreshed every 6 h
+  by <code>identity_cron</code> via <code>refresh_space_weather</code>. The
+  underlying <code>chronos.Measurement</code> table is a generic time-series
+  store — Phase 7 (local air quality / pollen / ozone) will live in the same
+  table.
+</div>
+
+<div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

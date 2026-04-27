@@ -352,6 +352,42 @@ const TWILIGHT_TINTS = {
   night:         0x05070d,  // black, current
 };
 
+// Aurora horizon ring — drawn faintly on the poleward horizon when
+// the Ovation oval reaches down to the observer's latitude. We
+// build a half-ring of the appropriate hemisphere and just toggle
+// visibility based on the latest aurora data.
+const auroraRing = (() => {
+  const verts = [];
+  const colors = [];
+  const baseColor = new THREE.Color(0xbc8cff);
+  // Half-ring from az 270 → 90 across N (covers NW → N → NE)
+  for (let i = 0; i <= 60; i++) {
+    const az = 270 + (180 * i / 60);  // 270 to 450 (=90)
+    const azNorm = ((az % 360) + 360) % 360;
+    const altDeg = 8 + 12 * Math.sin(Math.PI * i / 60);  // peaks ~20° at due N
+    const alt = altDeg * Math.PI / 180;
+    const azR = azNorm * Math.PI / 180;
+    verts.push(
+      RADIUS * Math.cos(alt) * Math.sin(azR),
+      RADIUS * Math.sin(alt),
+      -RADIUS * Math.cos(alt) * Math.cos(azR),
+    );
+    // Brighter at peak, faded at edges.
+    const fade = Math.sin(Math.PI * i / 60);
+    colors.push(baseColor.r * fade, baseColor.g * fade, baseColor.b * fade);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const m = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.75, linewidth: 2,
+  });
+  const line = new THREE.Line(g, m);
+  line.visible = false;
+  scene.add(line);
+  return line;
+})();
+
 function applyTwilight(band) {
   const tint = TWILIGHT_TINTS[band] || TWILIGHT_TINTS.night;
   scene.background = new THREE.Color(tint);
@@ -578,7 +614,7 @@ solarHud.style.cssText = 'position:absolute;bottom:0.6rem;right:0.6rem;'
 solarHud.style.display = 'none';
 wrap.appendChild(solarHud);
 
-function updateSolarHUD(ss) {
+function updateSolarHUD(ss, aurora) {
   const lines = [];
   if (ss.sun) {
     const altSign = ss.sun.alt_deg >= 0 ? '+' : '';
@@ -606,6 +642,14 @@ function updateSolarHUD(ss) {
     if (visible) {
       lines.push(`<span style="color:#888">●</span> ${visible} planet${visible===1?'':'s'} above horizon`);
     }
+  }
+  if (aurora && aurora.equatorward_lat_north != null) {
+    const lat = aurora.equatorward_lat_north.toFixed(0);
+    const dim = aurora.visible_from_observer ? '#bc8cff' : '#6e7681';
+    const tag = aurora.visible_from_observer
+      ? `aurora possible from here (oval to ${lat}° N)`
+      : `aurora confined to ${lat}° N+`;
+    lines.push(`<span style="color:${dim}">⚡</span> ${tag}`);
   }
   solarHud.innerHTML = lines.join('<br>');
   solarHud.style.display = lines.length ? '' : 'none';
@@ -665,8 +709,9 @@ async function refresh() {
     data.rows.forEach(updateSat);
     if (data.solar_system) {
       updateSolarSystem(data.solar_system);
-      updateSolarHUD(data.solar_system);
+      updateSolarHUD(data.solar_system, data.aurora);
     }
+    auroraRing.visible = !!(data.aurora && data.aurora.visible_from_observer);
     neoData = data.neos || [];
     renderNeoHUD();
   } catch (e) {

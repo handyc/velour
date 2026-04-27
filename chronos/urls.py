@@ -48,6 +48,9 @@ urlpatterns = [
     path('sky.json',               views.sky_json,     name='sky_json'),
     path('sky/<slug:slug>/',       views.sky_object,   name='sky_object'),
 
+    # Space weather (Phase 6) — solar + geomagnetic activity dashboard.
+    path('space-weather/',         views.space_weather, name='space_weather'),
+
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),
     path('tasks/',                 views.task_list,    name='task_list'),
