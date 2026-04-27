@@ -1627,21 +1627,35 @@ def sky_subscribe(request):
 
 
 def sky_feed_ics(request):
-    """iCalendar feed of curated sky alerts: viewable satellite passes
-    (top 7 days) + all upcoming sun/moon transits + appulses (90 days).
+    """iCalendar feed of curated sky alerts.
+
+    Default contents:
+        - Top viewable satellite passes (next 7 days, Phase 10 ranking)
+        - All sun/moon transits + appulses (next 90 days)
+        - NEO close approaches under threshold (next 90 days)
+        - Notable astronomical events (next 365 days): eclipses,
+          equinoxes, solstices, planetary conjunctions, meteor peaks.
+
+    Filterable via query string:
+        ?include=passes,transits,neos,astro    (default: all)
+        ?exclude=neos                          (subtract from default)
 
     Returned as text/calendar so Apple/Google/Outlook can subscribe.
-    Each VEVENT carries two VALARMs: -30M for prep, -5M for "now".
-
-    Public read by design (calendar apps can't pass session cookies),
-    so we deliberately don't include sensitive context. The observer
-    lat/lon is exposed in LOCATION — Velour-typical install is local
-    to one user, so this is acceptable. Wrap in a token if hosting
-    publicly.
+    Public read by design — calendar apps can't pass session cookies.
     """
     import re as _re
     prefs = ClockPrefs.load()
     now = djtz.now()
+
+    all_categories = {'passes', 'transits', 'neos', 'astro'}
+    inc_param = request.GET.get('include', '').strip()
+    exc_param = request.GET.get('exclude', '').strip()
+    include = (
+        {x.strip() for x in inc_param.split(',') if x.strip()}
+        if inc_param else set(all_categories)
+    )
+    exclude = {x.strip() for x in exc_param.split(',') if x.strip()}
+    active = (include & all_categories) - exclude
 
     cal_lines = [
         'BEGIN:VCALENDAR',
@@ -1659,7 +1673,7 @@ def sky_feed_ics(request):
     location = f'{prefs.home_lat:.4f},{prefs.home_lon:.4f}'
 
     # 1. Top viewable passes next 7 days
-    pass_rows = top_viewable_passes(now, days=7, limit=20)
+    pass_rows = top_viewable_passes(now, days=7, limit=20) if 'passes' in active else []
     for r in pass_rows:
         ev = r['event']
         uid = f'pass-{ev.pk}@velour.chronos'
@@ -1685,7 +1699,7 @@ def sky_feed_ics(request):
     transit_qs = CalendarEvent.objects.filter(
         source='feed', tradition__slug='sat-transits',
         start__gte=now, start__lte=now + timedelta(days=90),
-    ).order_by('start')
+    ).order_by('start') if 'transits' in active else []
     for ev in transit_qs:
         tags = ev.tags or ''
         kind = 'transit' if 'kind:transit' in tags else 'appulse'
@@ -1724,6 +1738,81 @@ def sky_feed_ics(request):
             location=location,
             alarms=[(60, 'Transit in 1 hour'), (5, 'Transit in 5 min')],
         )
+
+    # 3. NEO close approaches next 90 days (Phase 2 data)
+    if 'neos' in active:
+        neo_qs = CalendarEvent.objects.filter(
+            source='feed', tradition__slug='neos',
+            start__gte=now, start__lte=now + timedelta(days=90),
+        ).order_by('start')
+        for ev in neo_qs:
+            meta = _parse_neo_notes(ev.notes)
+            uid = f'neo-{ev.pk}@velour.chronos'
+            des = meta.get('designation', ev.title.split(' · ')[0])
+            ld = meta.get('dist_ld')
+            v = meta.get('v_km_s')
+            size = meta.get('size_label', '')
+            summary = f'☄ NEO {des}'
+            if ld is not None:
+                summary += f' · {ld:.2f} LD'
+            desc_parts = [
+                f'Near-Earth object close approach.',
+                f'Designation: {des}',
+            ]
+            if ld is not None:
+                desc_parts.append(f'Closest approach: {ld:.2f} lunar distances.')
+            if v is not None:
+                desc_parts.append(f'Relative velocity: {v:.1f} km/s.')
+            if size:
+                desc_parts.append(f'Estimated size: {size}.')
+            desc_parts.append('Source: JPL CNEOS.')
+            cal_lines += _vevent(
+                uid=uid,
+                summary=summary,
+                description=' '.join(desc_parts),
+                dtstart=ev.start,
+                dtend=ev.end or ev.start + timedelta(minutes=30),
+                location=location,
+                alarms=[(1440, 'NEO approach in 24 h'),
+                        (60, 'NEO approach in 1 h')],
+            )
+
+    # 4. Notable astronomical events next 365 days
+    if 'astro' in active:
+        # Skip moon phases — too noisy for a calendar (one every 7 days,
+        # 4 phases per month). Eclipses, conjunctions, equinoxes,
+        # solstices, and meteor peaks are signal.
+        astro_qs = CalendarEvent.objects.filter(
+            source='astro',
+            start__gte=now, start__lte=now + timedelta(days=365),
+        ).exclude(
+            title__icontains='moon',
+        ).order_by('start')
+        for ev in astro_qs:
+            uid = f'astro-{ev.pk}@velour.chronos'
+            tradition_name = ev.tradition.name if ev.tradition else 'Astronomy'
+            t = ev.title.lower()
+            if 'eclipse' in t:
+                emoji = '🌑' if 'lunar' in t else '☀️'
+            elif 'meteor' in t:
+                emoji = '☄'
+            elif 'conjunction' in t:
+                emoji = '🪐'
+            elif 'equinox' in t or 'solstice' in t:
+                emoji = '🌍'
+            else:
+                emoji = '✦'
+            summary = f'{emoji} {ev.title}'
+            desc = (f'Astronomical event: {ev.title}. '
+                    f'Source: {tradition_name} (chronos.astro_sources, '
+                    f'JPL DE421 ephemeris).')
+            cal_lines += _vevent(
+                uid=uid, summary=summary, description=desc,
+                dtstart=ev.start,
+                dtend=ev.end or ev.start + timedelta(hours=1),
+                location=location,
+                alarms=[(1440, 'Astronomical event in 24 h')],
+            )
 
     cal_lines.append('END:VCALENDAR')
 

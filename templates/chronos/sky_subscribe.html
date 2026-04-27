@@ -69,13 +69,41 @@
 <div class="sub-included">
   Currently in the feed:
   <ul style="margin:0.4rem 0; padding-left:1.5rem;">
-    <li><strong>Top viewable satellite passes</strong> over the next 7 days
-        (Phase 10 ranking — high altitude × duration × clear sky).</li>
-    <li><strong>Sun and Moon transits + appulses</strong> over the next 90
-        days (every on-disk silhouette plus close near-misses within 1°).</li>
+    <li>☄ <strong>Top viewable satellite passes</strong> next 7 days
+        (Phase 10 ranking — high altitude × duration × clear sky).
+        Alarms at -30 min, -5 min.</li>
+    <li>🎯 <strong>Sun and Moon transits + appulses</strong> next 90 days
+        (every on-disk silhouette plus near-misses within 1°).
+        Alarms at -1 h, -5 min.</li>
+    <li>☄ <strong>NEO close approaches</strong> next 90 days (asteroids
+        passing within 10 lunar distances, from JPL CNEOS).
+        Alarms at -24 h, -1 h.</li>
+    <li>🌍 <strong>Astronomical events</strong> next 365 days — eclipses,
+        equinoxes, solstices, planetary conjunctions, and major meteor
+        shower peaks. Alarm at -24 h.</li>
   </ul>
-  Each event has two alarms — 30 min and 5 min before for passes,
-  1 h and 5 min before for transits.
+  <small style="color:#6e7681;">
+    Moon phases are excluded from the feed (too noisy — one event every
+    7 days, four per month). They're still in the chronos calendar.
+  </small>
+</div>
+
+<div class="sub-section">
+  <h2>Filter the feed</h2>
+  <p>By default the feed includes every category above. To narrow it,
+  append a query string:</p>
+  <ul style="margin:0.4rem 0; padding-left:1.5rem; color:#8b949e; line-height:1.7;">
+    <li><code>?include=passes,transits</code> — only the categories you
+        list. Comma-separated. Allowed: <code>passes</code>,
+        <code>transits</code>, <code>neos</code>, <code>astro</code>.</li>
+    <li><code>?exclude=neos</code> — everything except the categories
+        you list. Useful as "default minus astronomy" if you only want
+        the satellite-related stuff.</li>
+  </ul>
+  <p>
+    Example — passes only, no transits or NEOs:<br>
+    <code>{{ feed_url }}?include=passes</code>
+  </p>
 </div>
 
 <div class="sub-section">
