@@ -71,6 +71,104 @@ def _measurement_extremes(year_start, year_end, source, metric,
     ).order_by(order)[:limit])
 
 
+def _measurement_buckets(year_start, year_end, source, metric, agg='max'):
+    """Pull measurements in [year_start, year_end) and bucket by ISO
+    week, aggregating each week with `agg` ('max', 'min', 'mean').
+
+    Returns a list of floats — one per non-empty week, in chronological
+    order. Empty weeks are dropped rather than zero-filled, so sparklines
+    show real data only. Useful for sparkstrip rows on the retrospective:
+    we don't have 52 weeks of every signal, especially early in the year.
+    """
+    from chronos.models import Measurement
+    qs = (Measurement.objects
+          .filter(source=source, metric=metric,
+                  at__gte=year_start, at__lt=year_end)
+          .order_by('at')
+          .values_list('at', 'value'))
+    buckets = {}
+    for at, value in qs:
+        key = at.isocalendar()[:2]
+        buckets.setdefault(key, []).append(value)
+    if not buckets:
+        return []
+    rows = sorted(buckets.items())
+    if agg == 'max':
+        return [max(v) for _, v in rows]
+    if agg == 'min':
+        return [min(v) for _, v in rows]
+    return [sum(v) / len(v) for _, v in rows]
+
+
+def _format_spark_values(values, places=1):
+    """Render a list of floats into the comma-separated form expected
+    by `:::chart` and `[[spark:...]]` blocks. Trims trailing zeros for
+    a cleaner manual."""
+    out = []
+    for v in values:
+        if v == int(v):
+            out.append(f'{int(v)}')
+        else:
+            out.append(f'{v:.{places}f}')
+    return ','.join(out)
+
+
+def _year_in_numbers_section(year_start, year_end):
+    """Single sparkstrip block with the year's headline signals,
+    weekly-bucketed. Sparkstrip auto-normalizes per row so signals
+    with very different units stack legibly."""
+    rows = []
+    series_specs = [
+        ('Kp index (max)',          'noaa-swpc',          'kp_index',         'max', 1),
+        ('Sunspot number',          'noaa-swpc',          'sunspot_number',   'max', 0),
+        ('Solar wind (km/s, peak)', 'noaa-swpc',          'wind_speed',       'max', 0),
+        ('European AQI (peak)',     'open-meteo',         'european_aqi',     'max', 0),
+        ('Ozone (µg/m³, peak)',     'open-meteo',         'ozone',            'max', 0),
+        ('UV index (peak)',         'open-meteo-weather', 'uv_index_max',     'max', 1),
+        ('Temperature (°C, mean)',  'open-meteo-weather', 'temperature_2m',   'mean', 1),
+        ('Cloud cover (%, mean)',   'open-meteo-weather', 'cloud_cover',      'mean', 0),
+        ('Wave height (m, peak)',   'open-meteo-marine',  'wave_height',      'max', 2),
+        ('Sea level (m, peak)',     'open-meteo-marine',  'sea_level_height_msl', 'max', 2),
+    ]
+    for label, source, metric, agg, places in series_specs:
+        values = _measurement_buckets(year_start, year_end,
+                                      source, metric, agg=agg)
+        if len(values) < 2:
+            continue
+        rows.append(f'{label}: {_format_spark_values(values, places)}')
+    if not rows:
+        return ('_Not enough Measurement history yet to chart weekly '
+                'aggregates. The retrospective\'s "Year in numbers" '
+                'section will fill in as the pipelines accumulate._')
+    body = [
+        'Year-to-date weekly aggregates of every continuously-monitored '
+        'signal that has more than one week of data on file. Each strip '
+        'is normalized to its own range, so the *shape* (when did things '
+        'spike? when did they trend?) is what reads — absolute scale '
+        'lives in the sections below.',
+        '',
+        ':::chart sparkstrip',
+        'title: Year in numbers · weekly aggregates',
+        *rows,
+        ':::',
+    ]
+    return '\n'.join(body)
+
+
+def _inline_spark(values, places=1, mode='end', label='weekly'):
+    """Compose a markdown line with a `[[spark:...]]` inline sparkline,
+    suitable for placing on its own paragraph below an h3 heading.
+    The renderer parses inline runs in paragraph blocks but not in
+    headings, so we keep the spark out of the heading itself.
+
+    Returns empty string if there's not enough data to draw a useful
+    line — caller should still emit a blank separator if it wants."""
+    if len(values) < 2:
+        return ''
+    return (f'[[spark:{_format_spark_values(values, places)} | {mode}]] '
+            f'*— {label} ({len(values)} weeks on file)*')
+
+
 def _flatten_past_events(events, tz):
     """Render a chronological table of past events."""
     if not events:
@@ -90,11 +188,17 @@ def _sw_section(year_start, year_end, tz):
                  '(Kp index, X-ray flux, sunspots, aurora oval):')
     lines.append('')
 
+    kp_buckets = _measurement_buckets(year_start, year_end, 'noaa-swpc',
+                                      'kp_index', 'max')
     kp_max = _measurement_extremes(year_start, year_end, 'noaa-swpc',
                                    'kp_index', 'max', 3)
     if kp_max:
         lines.append('### Strongest geomagnetic activity (Kp index)')
         lines.append('')
+        spark = _inline_spark(kp_buckets, places=1, label='weekly Kp peak')
+        if spark:
+            lines.append(spark)
+            lines.append('')
         for m in kp_max:
             lines.append(f'- **Kp {m.value:.1f}** at '
                          f'{m.at.astimezone(tz):%a %d %b %Y · %H:%M local}')
@@ -111,12 +215,19 @@ def _sw_section(year_start, year_end, tz):
                          f'{m.at.astimezone(tz):%a %d %b · %H:%M local}')
         lines.append('')
 
+    sn_buckets = _measurement_buckets(year_start, year_end, 'noaa-swpc',
+                                      'sunspot_number', 'max')
     sn = _measurement_extremes(year_start, year_end, 'noaa-swpc',
                                'sunspot_number', 'max', 1)
     if sn:
         m = sn[0]
-        lines.append(f'### Peak sunspot number')
+        lines.append('### Peak sunspot number')
         lines.append('')
+        spark = _inline_spark(sn_buckets, places=0,
+                              label='monthly sunspot number')
+        if spark:
+            lines.append(spark)
+            lines.append('')
         lines.append(
             f'**{m.value:.0f}** in {m.at.astimezone(tz):%B %Y}.')
         lines.append('')
@@ -139,9 +250,16 @@ def _weather_section(year_start, year_end, tz):
                                 'temperature_2m_max', 'max', 3)
     cold = _measurement_extremes(year_start, year_end, 'open-meteo-weather',
                                  'temperature_2m_min', 'min', 3)
+    temp_mean_buckets = _measurement_buckets(
+        year_start, year_end, 'open-meteo-weather', 'temperature_2m', 'mean')
     if hot:
         parts.append('### Hottest days')
         parts.append('')
+        spark = _inline_spark(temp_mean_buckets, places=1,
+                              label='weekly mean temperature')
+        if spark:
+            parts.append(spark)
+            parts.append('')
         for m in hot:
             parts.append(f'- **{m.value:.1f} °C** on '
                          f'{m.at.astimezone(tz):%A %d %B}')
@@ -155,31 +273,49 @@ def _weather_section(year_start, year_end, tz):
         parts.append('')
 
     # UV peak, AQI peak (worst air-quality day)
+    uv_buckets = _measurement_buckets(year_start, year_end,
+                                      'open-meteo-weather',
+                                      'uv_index_max', 'max')
     uv = _measurement_extremes(year_start, year_end, 'open-meteo-weather',
                                'uv_index_max', 'max', 1)
     if uv:
         m = uv[0]
+        spark = _inline_spark(uv_buckets, places=1,
+                              label='daily UV peak')
+        spark_inline = (' ' + spark) if spark else ''
         parts.append(f'**Peak UV index**: {m.value:.1f} on '
-                     f'{m.at.astimezone(tz):%A %d %B}.')
+                     f'{m.at.astimezone(tz):%A %d %B}.{spark_inline}')
         parts.append('')
 
+    aqi_buckets = _measurement_buckets(year_start, year_end, 'open-meteo',
+                                       'european_aqi', 'max')
     aqi = _measurement_extremes(year_start, year_end, 'open-meteo',
                                 'european_aqi', 'max', 3)
     if aqi:
         parts.append('### Worst air-quality readings (European AQI)')
         parts.append('')
+        spark = _inline_spark(aqi_buckets, places=0,
+                              label='weekly EAQI peak')
+        if spark:
+            parts.append(spark)
+            parts.append('')
         from chronos.astro_sources.local_environment import european_aqi_band
         for m in aqi:
             parts.append(f'- **EAQI {m.value:.0f}** ({european_aqi_band(m.value)}) at '
                          f'{m.at.astimezone(tz):%A %d %B · %H:%M}')
         parts.append('')
 
+    ozone_buckets = _measurement_buckets(year_start, year_end, 'open-meteo',
+                                         'ozone', 'max')
     o3 = _measurement_extremes(year_start, year_end, 'open-meteo',
                                'ozone', 'max', 1)
     if o3:
         m = o3[0]
+        spark = _inline_spark(ozone_buckets, places=0,
+                              label='weekly ozone peak')
+        spark_inline = (' ' + spark) if spark else ''
         parts.append(f'**Peak ozone**: {m.value:.0f} µg/m³ at '
-                     f'{m.at.astimezone(tz):%A %d %B · %H:%M}.')
+                     f'{m.at.astimezone(tz):%A %d %B · %H:%M}.{spark_inline}')
         if m.value > 180:
             parts.append('Above the EU 1-hour info threshold (180 µg/m³).')
 
@@ -330,6 +466,11 @@ class Command(BaseCommand):
                                      transits, kp_max,
                                      year_start, year_end),
             sort_order=10,
+        )
+        Section.objects.create(
+            manual=manual, title='Year in numbers',
+            body=_year_in_numbers_section(year_start, year_end),
+            sort_order=15,
         )
         Section.objects.create(
             manual=manual, title='Eclipses',
