@@ -69,6 +69,28 @@
     .env-uv.extreme   .val { color: #f85149; }
     .env-warnings { margin-top: 0.4rem; }
     .env-warnings li { color: #f85149; font-size: 0.8rem; }
+
+    .reading-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .reading-card {
+        flex: 1 1 18rem; min-width: 14rem;
+        background: #0d1117; border: 1px solid #21262d; border-radius: 5px;
+        padding: 0.55rem 0.75rem; color: #c9d1d9; text-decoration: none;
+        display: flex; flex-direction: column; gap: 0.2rem;
+    }
+    .reading-card:hover { border-color: #30363d; background: #161b22; }
+    .reading-card.recommended {
+        border-color: #58a6ff; box-shadow: inset 3px 0 0 #58a6ff;
+    }
+    .reading-card .rec-flag {
+        font-size: 0.65rem; color: #58a6ff;
+        text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .reading-card .r-title { font-size: 1rem; font-weight: 500; }
+    .reading-card .r-sub { color: #8b949e; font-size: 0.75rem; }
+    .reading-card .r-blurb { color: #8b949e; font-size: 0.78rem; line-height: 1.35; }
+    .reading-card .r-actions { font-size: 0.75rem; margin-top: 0.15rem; }
+    .reading-card .r-actions a { color: #58a6ff; text-decoration: none; }
+    .reading-card .r-actions a:hover { text-decoration: underline; }
 </style>
 {% endblock %}
 
@@ -199,6 +221,27 @@
             {% endfor %}
         </ul>
         {% endif %}
+    </div>
+    {% endif %}
+
+    {% if reading %}
+    <div class="brief-section" style="grid-column: 1 / -1;">
+        <h2>Reading</h2>
+        <div class="reading-row">
+            {% for card in reading %}
+            <a class="reading-card{% if card.recommended %} recommended{% endif %}"
+               href="{% url 'codex:manual_detail' card.manual.slug %}">
+                {% if card.recommended %}<span class="rec-flag">★ recommended today</span>{% endif %}
+                <span class="r-title">{{ card.manual.title }}</span>
+                {% if card.manual.subtitle %}<span class="r-sub">{{ card.manual.subtitle }}</span>{% endif %}
+                <span class="r-blurb">{{ card.blurb }}</span>
+                <span class="r-actions">
+                    Read · <a href="{% url 'codex:manual_pdf' card.manual.slug %}"
+                              onclick="event.stopPropagation();">PDF</a>
+                </span>
+            </a>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 

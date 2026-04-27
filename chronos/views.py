@@ -1169,12 +1169,86 @@ def _briefing_environs():
     }
 
 
+def _briefing_recommended_reading(now, tz):
+    """Pick "today's recommended read" from the three sky Codex Manuals
+    (weekly digest, yearly almanac, year-to-date retrospective) and
+    return a short list of cards for the briefing.
+
+    Cadence:
+      - Sunday → yearly almanac (look ahead at the year)
+      - Last day of month → retrospective (look back at the year so far)
+      - Otherwise → weekly digest (operational, what's up this week)
+
+    The unrecommended manuals are still listed (smaller), so the user
+    can switch reads without leaving the briefing. If the digest for
+    this ISO week hasn't been composed yet, we fall back to the most
+    recent digest manual; ditto for almanac/retrospective by year.
+    """
+    try:
+        from codex.models import Manual
+    except Exception:
+        return None
+
+    local = now.astimezone(tz)
+    iso_year, iso_week, _ = local.isocalendar()
+
+    # Last day of month: tomorrow's month differs from today's.
+    tomorrow = local + timedelta(days=1)
+    is_last_day_of_month = tomorrow.month != local.month
+
+    if local.weekday() == 6:  # Sunday
+        recommended_kind = 'almanac'
+    elif is_last_day_of_month:
+        recommended_kind = 'retrospective'
+    else:
+        recommended_kind = 'digest'
+
+    def _pick(slug, prefix):
+        m = Manual.objects.filter(slug=slug).first()
+        if m:
+            return m
+        return (Manual.objects.filter(slug__startswith=prefix)
+                .order_by('-updated_at').first())
+
+    digest = _pick(f'sky-digest-{iso_year}-w{iso_week:02d}', 'sky-digest-')
+    almanac = _pick(f'sky-almanac-{local.year}', 'sky-almanac-')
+    retro = _pick(f'sky-retrospective-{local.year}', 'sky-retrospective-')
+
+    cards = []
+    for kind, manual, blurb in (
+        ('digest', digest,
+         'Top viewable satellite passes for this week, scored on '
+         'altitude, duration, and cloud forecast.'),
+        ('almanac', almanac,
+         'Forward look at the year — eclipses, equinoxes, conjunctions, '
+         'meteors, NEO close approaches, satellite transits.'),
+        ('retrospective', retro,
+         'Year so far — past sky events, plus extremes from the '
+         'space-weather, AQI, and weather time-series.'),
+    ):
+        if not manual:
+            continue
+        cards.append({
+            'kind':        kind,
+            'recommended': (kind == recommended_kind),
+            'manual':      manual,
+            'blurb':       blurb,
+        })
+
+    if not cards:
+        return None
+    cards.sort(key=lambda c: (not c['recommended'], c['kind']))
+    return cards
+
+
 @login_required
 def briefing(request):
     """Today's briefing: mood + concerns + calendar + tasks on one page."""
     tz = _home_tz()
     djtz.activate(tz)
-    return render(request, 'chronos/briefing.html', _briefing_context(tz))
+    ctx = _briefing_context(tz)
+    ctx['reading'] = _briefing_recommended_reading(ctx['now'], tz)
+    return render(request, 'chronos/briefing.html', ctx)
 
 
 # --- Sky tracking (Phase 2f) ---------------------------------------------
