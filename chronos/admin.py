@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from .models import CalendarEvent, ClockPrefs, Task, WatchedTimezone
+from .models import (
+    CalendarEvent, ClockPrefs, Task, TrackedObject, WatchedTimezone,
+)
 
 
 @admin.register(ClockPrefs)
@@ -30,3 +32,13 @@ class TaskAdmin(admin.ModelAdmin):
     list_filter = ('status', 'priority', 'source_app')
     search_fields = ('title', 'notes', 'source_app')
     date_hierarchy = 'created_at'
+
+
+@admin.register(TrackedObject)
+class TrackedObjectAdmin(admin.ModelAdmin):
+    list_display = ('name', 'kind', 'designation', 'is_watched',
+                    'magnitude', 'elements_fetched_at')
+    list_filter = ('kind', 'is_watched')
+    search_fields = ('name', 'slug', 'designation')
+    list_editable = ('is_watched',)
+    readonly_fields = ('elements_fetched_at', 'created_at')

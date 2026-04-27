@@ -16,7 +16,9 @@ from django.urls import reverse
 from django.utils import timezone as djtz
 from django.views.decorators.http import require_POST
 
-from .models import CalendarEvent, ClockPrefs, Task, WatchedTimezone
+from .models import (
+    CalendarEvent, ClockPrefs, Task, TrackedObject, WatchedTimezone,
+)
 from .planets import mars_snapshots, venus_snapshot
 
 
@@ -85,6 +87,17 @@ def settings_view(request):
                 prefs.auto_sync_seconds = max(0, int(request.POST.get('auto_sync_seconds', '600')))
             except ValueError:
                 prefs.auto_sync_seconds = 600
+            for fld, lo, hi in [('home_lat', -90, 90),
+                                ('home_lon', -180, 180),
+                                ('home_elev_m', -500, 9000)]:
+                raw = request.POST.get(fld)
+                if raw not in (None, ''):
+                    try:
+                        v = float(raw)
+                        if lo <= v <= hi:
+                            setattr(prefs, fld, v)
+                    except ValueError:
+                        pass
             prefs.save()
             messages.success(request, 'Clock preferences saved.')
             return redirect('chronos:home')
@@ -822,4 +835,137 @@ def _briefing_context(tz):
 def briefing(request):
     """Today's briefing: mood + concerns + calendar + tasks on one page."""
     tz = _home_tz()
+    djtz.activate(tz)
     return render(request, 'chronos/briefing.html', _briefing_context(tz))
+
+
+# --- Sky tracking (Phase 2f) ---------------------------------------------
+
+
+@login_required
+def sky(request):
+    """Live alt/az table for tracked objects from the home location.
+
+    Server renders the initial snapshot; client polls /chronos/sky.json
+    to refresh without a full page reload.
+    """
+    prefs = ClockPrefs.load()
+    rows = _sky_snapshot(prefs)
+    djtz.activate(_home_tz())
+    return render(request, 'chronos/sky.html', {
+        'prefs': prefs,
+        'rows':  rows,
+        'tracked_count': TrackedObject.objects.filter(is_watched=True).count(),
+        'neo_approaches': _upcoming_neo_approaches(60),
+    })
+
+
+def _upcoming_neo_approaches(days_ahead):
+    """Pull future NEO close-approach CalendarEvents for the sky page.
+
+    Re-parses the structured fields out of the event's notes (which
+    refresh_neos writes in a stable format) so the template can render
+    proper columns. Returns at most 50 rows.
+    """
+    horizon = djtz.now() + timedelta(days=days_ahead)
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='neos',
+        start__gte=djtz.now(), start__lte=horizon,
+    ).order_by('start')[:50]
+
+    rows = []
+    for ev in qs:
+        meta = _parse_neo_notes(ev.notes)
+        rows.append({
+            'event':       ev,
+            'when':        ev.start,
+            'designation': meta.get('designation', ev.title.split(' · ')[0]),
+            'dist_ld':     meta.get('dist_ld'),
+            'v_km_s':      meta.get('v_km_s'),
+            'h':           meta.get('h'),
+            'size_label':  meta.get('size_label', ''),
+            't_uncertain': meta.get('t_uncertain', ''),
+        })
+    return rows
+
+
+_NEO_NOTE_PATTERNS = {
+    'designation': re.compile(r'Designation:\s*(\S+(?:\s\S+)?)'),
+    'dist_ld':     re.compile(r'=\s*([\d.]+)\s*lunar distances'),
+    'v_km_s':      re.compile(r'velocity:\s*([\d.]+)\s*km/s'),
+    'h':           re.compile(r'magnitude\s*H\s*=\s*([\d.]+)'),
+    'size_label':  re.compile(r'estimated diameter\s*(\S+\s*\S+)\s*\)'),
+    't_uncertain': re.compile(r'Time uncertainty\s*\(1σ\):\s*(\S+(?:\s\S+)?)'),
+}
+
+
+def _parse_neo_notes(notes):
+    out = {}
+    for key, pat in _NEO_NOTE_PATTERNS.items():
+        m = pat.search(notes or '')
+        if m:
+            v = m.group(1).strip()
+            if key in ('dist_ld', 'v_km_s', 'h'):
+                try:
+                    v = float(v)
+                except ValueError:
+                    continue
+            out[key] = v
+    return out
+
+
+def sky_json(request):
+    """JSON snapshot for the sky table's auto-refresh."""
+    prefs = ClockPrefs.load()
+    return JsonResponse({
+        'rows': _sky_snapshot(prefs),
+        'observer': {
+            'lat': prefs.home_lat,
+            'lon': prefs.home_lon,
+            'elev_m': prefs.home_elev_m,
+        },
+        'computed_at': djtz.now().isoformat(),
+    })
+
+
+def _sky_snapshot(prefs):
+    """Compute current alt/az/distance for every watched TrackedObject.
+
+    Returns a list of plain dicts ordered by altitude descending —
+    above-horizon objects first, then below-horizon.
+    """
+    from .astro_sources.satellites import altaz_now
+
+    out = []
+    for obj in TrackedObject.objects.filter(is_watched=True):
+        row = {
+            'slug':        obj.slug,
+            'name':        obj.name,
+            'kind':        obj.kind,
+            'kind_label':  obj.get_kind_display(),
+            'designation': obj.designation,
+            'magnitude':   obj.magnitude,
+            'alt_deg':     None,
+            'az_deg':      None,
+            'distance_km': None,
+            'above_horizon': False,
+            'elements_age_h': obj.elements_age_hours,
+        }
+        if obj.kind == TrackedObject.KIND_SATELLITE:
+            tle = obj.elements_json or {}
+            if tle.get('line1') and tle.get('line2'):
+                aa = altaz_now(tle, prefs.home_lat, prefs.home_lon,
+                               prefs.home_elev_m)
+                if aa:
+                    alt, az, dist = aa
+                    row['alt_deg'] = alt
+                    row['az_deg'] = az
+                    row['distance_km'] = dist
+                    row['above_horizon'] = alt > 0
+        out.append(row)
+
+    out.sort(key=lambda r: (
+        0 if r['above_horizon'] else 1,
+        -(r['alt_deg'] if r['alt_deg'] is not None else -999),
+    ))
+    return out

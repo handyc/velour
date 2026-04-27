@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Sky — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.sky-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.sky-head h1 { margin:0; }
+.sky-head .meta { color:#8b949e; font-size:0.9rem; }
+.sky-head .computed { color:#6e7681; font-size:0.8rem; font-family:ui-monospace,monospace; }
+
+.sky-table { width:100%; border-collapse:collapse; margin-top:0.75rem; font-size:0.92rem; }
+.sky-table th { text-align:left; color:#8b949e; font-weight:500;
+  font-size:0.78rem; text-transform:uppercase; letter-spacing:0.05em;
+  border-bottom:1px solid #30363d; padding:0.4rem 0.6rem; }
+.sky-table td { padding:0.45rem 0.6rem; border-bottom:1px solid #21262d;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.sky-table td.name { font-family:inherit; }
+.sky-table tr.above td { color:#c9d1d9; }
+.sky-table tr.above td.alt { color:#3fb950; font-weight:600; }
+.sky-table tr.below td { color:#6e7681; }
+.sky-table td.az-compass { color:#8b949e; font-size:0.8rem; }
+.sky-kind { display:inline-block; padding:0.05rem 0.4rem; border-radius:3px;
+  background:#21262d; color:#8b949e; font-size:0.7rem;
+  text-transform:uppercase; letter-spacing:0.05em; margin-left:0.4em; }
+.sky-stale { color:#d29922; font-size:0.75rem; margin-left:0.4em; }
+
+.sky-empty { color:#6e7681; font-style:italic; padding:1.5rem 0; }
+.sky-actions { margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap; }
+
+.passes-section { margin-top:2rem; padding-top:1rem; border-top:1px solid #21262d; }
+.passes-section h2 { font-size:0.95rem; margin:0 0 0.5rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.05em; }
+.passes-list { list-style:none; padding:0; margin:0; }
+.passes-list li { padding:0.35rem 0; border-bottom:1px solid #161b22;
+  font-family:ui-monospace,monospace; font-size:0.87rem; }
+.passes-list .pass-when { color:#c9d1d9; }
+.passes-list .pass-sat { color:#bc8cff; }
+.passes-list .pass-meta { color:#6e7681; font-size:0.78rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sky-head">
+  <h1>Sky</h1>
+  <span class="meta">
+    {{ tracked_count }} watched ·
+    observer {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E
+  </span>
+  <span class="computed" id="sky-computed-at"></span>
+</div>
+
+<table class="sky-table" id="sky-table">
+  <thead>
+    <tr>
+      <th>Object</th>
+      <th>Altitude</th>
+      <th>Azimuth</th>
+      <th>Distance</th>
+      <th>Mag</th>
+      <th>TLE age</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr class="{% if r.above_horizon %}above{% else %}below{% endif %}" data-slug="{{ r.slug }}">
+      <td class="name">
+        {{ r.name }}
+        <span class="sky-kind">{{ r.kind_label }}</span>
+        {% if r.elements_age_h and r.elements_age_h > 168 %}
+          <span class="sky-stale" title="TLE older than 7 days">stale</span>
+        {% endif %}
+      </td>
+      <td class="alt">{% if r.alt_deg is not None %}{{ r.alt_deg|floatformat:1 }}°{% else %}—{% endif %}</td>
+      <td class="az">{% if r.az_deg is not None %}{{ r.az_deg|floatformat:0 }}°<span class="az-compass" data-az="{{ r.az_deg }}"></span>{% else %}—{% endif %}</td>
+      <td class="dist">{% if r.distance_km %}{{ r.distance_km|floatformat:0 }} km{% else %}—{% endif %}</td>
+      <td class="mag">{% if r.magnitude is not None %}{{ r.magnitude|floatformat:1 }}{% else %}—{% endif %}</td>
+      <td class="age">{% if r.elements_age_h is not None %}{{ r.elements_age_h|floatformat:1 }} h{% else %}—{% endif %}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="6" class="sky-empty">
+      No tracked objects yet. Run <code>manage.py refresh_satellites --seed</code>
+      to populate ISS, Hubble, and Tiangong.
+    </td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if neo_approaches %}
+<div class="passes-section">
+  <h2>Upcoming close approaches · {{ neo_approaches|length }} NEO{{ neo_approaches|length|pluralize }}, next 60 days</h2>
+  <table class="sky-table">
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Designation</th>
+        <th>Distance</th>
+        <th>Velocity</th>
+        <th>H</th>
+        <th>Est. size</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in neo_approaches %}
+      <tr class="above" title="{{ r.event.notes }}">
+        <td>{{ r.when|date:'D d M H:i' }}</td>
+        <td class="name">{{ r.designation }}</td>
+        <td>{% if r.dist_ld %}{{ r.dist_ld|floatformat:2 }} LD{% else %}—{% endif %}</td>
+        <td>{% if r.v_km_s %}{{ r.v_km_s|floatformat:1 }} km/s{% else %}—{% endif %}</td>
+        <td>{% if r.h %}{{ r.h|floatformat:1 }}{% else %}—{% endif %}</td>
+        <td class="az-compass">{{ r.size_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <small style="color:#6e7681; display:block; margin-top:0.4rem;">
+    Distances in lunar distances (1 LD ≈ 384 400 km). Sizes estimated from
+    H assuming 0.14 albedo — real diameters can vary 2–3× without direct
+    measurement. Mirror is from JPL CNEOS; refresh with
+    <code>manage.py refresh_neos</code>.
+  </small>
+</div>
+{% endif %}
+
+<div class="sky-actions">
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Back to Chronos</a>
+  <a href="{% url 'chronos:settings' %}" class="btn btn-secondary">Set observer location</a>
+  <a href="{% url 'chronos:calendar' %}" class="btn btn-secondary">Upcoming passes (calendar)</a>
+</div>
+
+<script>
+(function () {
+  const compassFor = (az) => {
+    const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return ' ' + dirs[Math.round(az / 45) % 8];
+  };
+  document.querySelectorAll('.az-compass').forEach((el) => {
+    const az = parseFloat(el.dataset.az);
+    if (!Number.isNaN(az)) el.textContent = compassFor(az);
+  });
+
+  const fmtTime = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  };
+
+  const computedAt = document.getElementById('sky-computed-at');
+  const tbody = document.querySelector('#sky-table tbody');
+
+  const refresh = async () => {
+    try {
+      const r = await fetch('{% url "chronos:sky_json" %}', {credentials:'same-origin'});
+      if (!r.ok) return;
+      const data = await r.json();
+      computedAt.textContent = 'computed ' + fmtTime(data.computed_at);
+      const rowsBySlug = new Map();
+      tbody.querySelectorAll('tr[data-slug]').forEach((tr) => {
+        rowsBySlug.set(tr.dataset.slug, tr);
+      });
+      data.rows.forEach((row) => {
+        const tr = rowsBySlug.get(row.slug);
+        if (!tr) return;
+        tr.classList.toggle('above', row.above_horizon);
+        tr.classList.toggle('below', !row.above_horizon);
+        const cells = tr.querySelectorAll('td');
+        cells[1].textContent = row.alt_deg != null ? row.alt_deg.toFixed(1) + '°' : '—';
+        if (row.az_deg != null) {
+          const az = row.az_deg.toFixed(0) + '°';
+          cells[2].innerHTML = az + '<span class="az-compass">' + compassFor(row.az_deg) + '</span>';
+        } else {
+          cells[2].textContent = '—';
+        }
+        cells[3].textContent = row.distance_km ? Math.round(row.distance_km) + ' km' : '—';
+      });
+    } catch (e) { /* swallow */ }
+  };
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+{% endblock %}

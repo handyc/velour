@@ -47,6 +47,20 @@ class ClockPrefs(models.Model):
         default=True,
         help_text='If True, the topbar clock ticks at 1Hz showing seconds.',
     )
+    home_lat = models.FloatField(
+        default=52.16,
+        help_text='Observer latitude in degrees, +N. Used by sky views '
+                  '(satellite passes, asteroid alt/az). Default = Leiden.',
+    )
+    home_lon = models.FloatField(
+        default=4.49,
+        help_text='Observer longitude in degrees, +E. Used by sky views.',
+    )
+    home_elev_m = models.FloatField(
+        default=0.0,
+        help_text='Observer elevation in metres above sea level. Affects '
+                  'horizon for satellite passes; safe to leave at 0.',
+    )
 
     class Meta:
         verbose_name = 'Clock preferences'
@@ -292,3 +306,75 @@ class Task(models.Model):
     @property
     def is_open(self):
         return self.status == self.STATUS_OPEN
+
+
+# --- Sky tracking (Phase 2f) ---------------------------------------------
+
+
+class TrackedObject(models.Model):
+    """A thing in the sky we're following — satellite, asteroid, comet.
+
+    Unlike CalendarEvent (point-in-time, pre-seedable for decades),
+    tracked objects need fresh orbital elements (TLEs decay in ~2 weeks
+    for satellites; new NEOs are discovered constantly). The refresh_*
+    commands keep `elements_json` current and emit predicted passes /
+    close-approaches as CalendarEvents tagged source='feed'.
+
+    Position-at-time computation lives in chronos.astro_sources.
+    """
+
+    KIND_SATELLITE = 'satellite'
+    KIND_ASTEROID = 'asteroid'
+    KIND_COMET = 'comet'
+    KIND_DEBRIS = 'debris'
+    KIND_CHOICES = [
+        (KIND_SATELLITE, 'Artificial satellite'),
+        (KIND_ASTEROID, 'Asteroid'),
+        (KIND_COMET, 'Comet'),
+        (KIND_DEBRIS, 'Debris'),
+    ]
+
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, db_index=True)
+    name = models.CharField(max_length=120)
+    slug = models.SlugField(max_length=140, unique=True)
+    designation = models.CharField(
+        max_length=80, blank=True,
+        help_text='Catalog ID — NORAD CATNR for satellites '
+                  '(e.g. "25544"), provisional designation for '
+                  'asteroids (e.g. "2024 XY12").',
+    )
+    elements_json = models.JSONField(
+        default=dict, blank=True,
+        help_text='TLE lines for satellites: {"line1": "...", "line2": "..."}. '
+                  'Keplerian elements for asteroids/comets.',
+    )
+    elements_fetched_at = models.DateTimeField(null=True, blank=True)
+    source_url = models.URLField(max_length=400, blank=True)
+    notes = models.TextField(blank=True)
+    is_watched = models.BooleanField(
+        default=True,
+        help_text='If True, refresh_* commands keep this object current and '
+                  'emit predicted passes / close-approaches into the calendar.',
+    )
+    magnitude = models.FloatField(
+        null=True, blank=True,
+        help_text='Rough visual magnitude. Lower = brighter. ISS ~ -3, '
+                  'Hubble ~ +2, faint NEOs > +20.',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['kind', 'name']
+        indexes = [
+            models.Index(fields=['kind', 'is_watched']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_kind_display()}: {self.name}'
+
+    @property
+    def elements_age_hours(self):
+        if not self.elements_fetched_at:
+            return None
+        from django.utils import timezone as djtz
+        return (djtz.now() - self.elements_fetched_at).total_seconds() / 3600.0

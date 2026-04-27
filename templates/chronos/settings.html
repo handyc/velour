@@ -39,6 +39,28 @@
         <small style="color:#6e7681;">How often the in-page JS clock checks back with the server. 600 = every 10 min. 0 = never (manual only).</small>
     </div>
 
+    <fieldset style="border:1px solid #30363d; border-radius:4px; padding:0.6rem 0.9rem; margin-bottom:1rem;">
+        <legend style="color:#8b949e; padding:0 0.4rem; font-size:0.85rem;">Observer location</legend>
+        <small style="color:#6e7681; display:block; margin-bottom:0.6rem;">
+            Used by <a href="{% url 'chronos:sky' %}">/chronos/sky/</a> for satellite passes and (later) asteroid alt/az.
+            Leave defaults if you don't care.
+        </small>
+        <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <div>
+                <label for="home_lat">Latitude (°N)</label><br>
+                <input type="number" step="any" id="home_lat" name="home_lat" value="{{ prefs.home_lat }}" min="-90" max="90" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+            <div>
+                <label for="home_lon">Longitude (°E)</label><br>
+                <input type="number" step="any" id="home_lon" name="home_lon" value="{{ prefs.home_lon }}" min="-180" max="180" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+            <div>
+                <label for="home_elev_m">Elevation (m)</label><br>
+                <input type="number" step="any" id="home_elev_m" name="home_elev_m" value="{{ prefs.home_elev_m }}" style="width:120px;padding:0.4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;">
+            </div>
+        </div>
+    </fieldset>
+
     <div style="display:flex; gap:0.5rem;">
         <button type="submit" class="btn">Save</button>
         <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Cancel</a>

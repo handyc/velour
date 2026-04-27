@@ -39,6 +39,10 @@ urlpatterns = [
 
     path('resync/', views.resync_calendar, name='resync'),
 
+    # Sky tracking (Phase 2f)
+    path('sky/',                   views.sky,          name='sky'),
+    path('sky.json',               views.sky_json,     name='sky_json'),
+
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),
     path('tasks/',                 views.task_list,    name='task_list'),
