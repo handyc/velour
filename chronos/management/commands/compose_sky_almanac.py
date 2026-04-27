@@ -146,10 +146,10 @@ def _neo_table(events, tz):
     for ev in events:
         local = ev.start.astimezone(tz)
         notes = ev.notes or ''
-        m_des = re.search(r'Designation:\s*(\S+(?:\s\S+)?)', notes)
+        m_des = re.search(r'Designation:[ \t]*([^\n]+)', notes)
         m_ld = re.search(r'=\s*([\d.]+)\s*lunar', notes)
         m_v = re.search(r'velocity:\s*([\d.]+)\s*km', notes)
-        m_size = re.search(r'estimated diameter\s*(\S+\s*\S+)', notes)
+        m_size = re.search(r'estimated diameter\s+([^)]+?)\s*\)', notes)
         des = m_des.group(1).strip() if m_des else ev.title.split(' ·')[0]
         ld = f'{float(m_ld.group(1)):.2f}' if m_ld else '—'
         v = f'{float(m_v.group(1)):.1f} km/s' if m_v else '—'

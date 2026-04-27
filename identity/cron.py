@@ -308,11 +308,15 @@ def _do_sky_satellites():
 
 def _do_sky_neos():
     """Daily — mirror upcoming NEO close approaches from JPL CNEOS
-    into the calendar. Same idempotent re-emit pattern as satellites."""
+    into the calendar. Same idempotent re-emit pattern as satellites.
+
+    Window is 365 days so the yearly Sky Almanac (Phase 16) sees the
+    full forward year of close approaches rather than just the next
+    two months. Idempotent re-run wipes future NEO events first."""
     from django.core.management import call_command
     import io
     buf = io.StringIO()
-    call_command('refresh_neos', stdout=buf)
+    call_command('refresh_neos', days=365, stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'NEOs refreshed'
 
