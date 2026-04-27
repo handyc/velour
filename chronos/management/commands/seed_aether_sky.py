@@ -153,6 +153,13 @@ if (!ctx.state.init) {
     ctx.state.constellationData = null;
     ctx.state.starByHip = null;
 
+    // Milky Way (Phase 5) — scatter cloud. Same RA/Dec→alt/az math
+    // as stars; rendered behind constellation lines and slightly
+    // dimmer overall, with a softer fade-in (still visible into
+    // nautical twilight where stars are still washed out).
+    ctx.state.milkyWayPoints = null;
+    ctx.state.milkyWayCoords = null;
+
     fetch('/static/chronos/bright_stars.json')
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -163,6 +170,11 @@ if (!ctx.state.init) {
         .then(r => r && r.ok ? r.json() : null)
         .then(data => {
             if (data && data.constellations) buildConstellations(data);
+            return fetch('/static/chronos/milky_way.json');
+        })
+        .then(r => r && r.ok ? r.json() : null)
+        .then(data => {
+            if (data && data.points) buildMilkyWay(data.points);
         })
         .catch(err => console.warn('catalog fetch failed:', err));
 }
@@ -329,6 +341,85 @@ function refreshConstellations() {
     lines.geometry.attributes.position.needsUpdate = true;
 }
 
+// Milky Way (Phase 5). Scatter cloud along the galactic plane with
+// brightness baked in by build_milky_way.py. Each point is one (ra,
+// dec, brightness) triple; we use the same RA/Dec→alt/az math as
+// stars and update on the same 30 s cadence.
+function buildMilkyWay(points) {
+    const n = points.length;
+    const positions = new Float32Array(n * 3);
+    const colors = new Float32Array(n * 3);
+    const sizes = new Float32Array(n);
+    // Pack the (ra, dec) pairs into a flat Float32Array for cache-
+    // friendly iteration in updateMilkyWayPositions. Brightness goes
+    // into the per-vertex color so we don't have to modulate at draw.
+    const coords = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+        const p = points[i];
+        coords[i*2+0] = p.ra;
+        coords[i*2+1] = p.dec;
+        const b = Math.max(0.05, Math.min(1.0, p.b ?? 0.5));
+        // Slight blue cast — the band reads as cooler than typical
+        // foreground stars on a real night sky.
+        colors[i*3+0] = b * 0.85;
+        colors[i*3+1] = b * 0.90;
+        colors[i*3+2] = b * 1.00;
+        sizes[i] = 1.5 + b * 1.2;
+        positions[i*3+1] = -1e4;  // park
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+    geom.setAttribute('size',     new THREE.BufferAttribute(sizes,     1));
+    const mat = new THREE.PointsMaterial({
+        vertexColors: true, sizeAttenuation: false, size: 1.8,
+        transparent: true, opacity: 0.0,
+    });
+    const cloud = new THREE.Points(geom, mat);
+    cloud.frustumCulled = false;
+    cloud.renderOrder = -1;  // behind stars + constellation lines
+    ctx.scene.add(cloud);
+    ctx.state.milkyWayPoints = cloud;
+    ctx.state.milkyWayCoords = coords;
+    updateMilkyWayPositions();
+    console.log('chronos-sky: Milky Way loaded:', n, 'scatter points');
+}
+
+function updateMilkyWayPositions() {
+    const cloud = ctx.state.milkyWayPoints;
+    const coords = ctx.state.milkyWayCoords;
+    if (!cloud || !coords || !ctx.state.lastObserver) return;
+    const obs = ctx.state.lastObserver;
+    const latRad = obs.lat * Math.PI / 180;
+    const sinLat = Math.sin(latRad), cosLat = Math.cos(latRad);
+    const lstRad = computeLST(new Date(), obs.lon) * Math.PI / 180;
+    const R = ctx.state.R;
+    const positions = cloud.geometry.attributes.position.array;
+    const n = coords.length / 2;
+    for (let i = 0; i < n; i++) {
+        const ra = coords[i*2+0];
+        const dec = coords[i*2+1];
+        const decRad = dec * Math.PI / 180;
+        const sinDec = Math.sin(decRad), cosDec = Math.cos(decRad);
+        const haRad = lstRad - ra * Math.PI / 180;
+        const sinHa = Math.sin(haRad), cosHa = Math.cos(haRad);
+        const sinAlt = sinDec * sinLat + cosDec * cosLat * cosHa;
+        if (sinAlt < -0.05) {
+            positions[i*3+1] = -1e4;
+            continue;
+        }
+        const altR = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+        const cosAlt = Math.cos(altR);
+        const sinAz = -cosDec * sinHa / cosAlt;
+        const cosAz = (sinDec - sinAlt * sinLat) / (cosAlt * cosLat);
+        const azR = Math.atan2(sinAz, cosAz);
+        positions[i*3+0] =  R * cosAlt * Math.sin(azR);
+        positions[i*3+1] =  R * sinAlt;
+        positions[i*3+2] = -R * cosAlt * Math.cos(azR);
+    }
+    cloud.geometry.attributes.position.needsUpdate = true;
+}
+
 // Greenwich Mean Sidereal Time (degrees), then add longitude for LST.
 // IAU 1982 polynomial; accurate to a few seconds for our purposes.
 function computeLST(date, lonDeg) {
@@ -375,6 +466,7 @@ function updateStarPositions() {
     }
     ctx.state.starPoints.geometry.attributes.position.needsUpdate = true;
     refreshConstellations();
+    updateMilkyWayPositions();
 }
 
 // Atmospheric sky and stellar opacity, both keyed off sun altitude.
@@ -410,6 +502,14 @@ function updateAtmosphere(sunAltDeg) {
             ctx.state.constellationLines.material.opacity = lineOp;
             ctx.state.constellationLines.visible = lineOp > 0.02;
         }
+    }
+    if (ctx.state.milkyWayPoints) {
+        // Milky Way fades in slightly before bright stars do — the band
+        // is bigger and dimmer per dot so it needs a darker sky to read.
+        // Fully visible by sun_alt = -10°; gone by sun_alt = -3°.
+        const mwOp = Math.max(0, Math.min(0.85, (-sunAltDeg - 3) / 7));
+        ctx.state.milkyWayPoints.material.opacity = mwOp;
+        ctx.state.milkyWayPoints.visible = mwOp > 0.02;
     }
 }
 
