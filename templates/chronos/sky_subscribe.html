@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Subscribe to Sky Alerts — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.sub-head h1 { margin: 0; }
+.sub-head .meta { color:#8b949e; font-size:0.92rem; }
+
+.feed-url-box {
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:0.7rem 0.9rem; margin-top:0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  display:flex; flex-direction:column; gap:0.4rem;
+}
+.feed-url-box .scheme-row { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+.feed-url-box .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.06em; min-width:6em;
+}
+.feed-url-box code {
+  color:#c9d1d9; background:#161b22;
+  padding:0.2rem 0.4rem; border-radius:3px;
+  font-size:0.85rem; flex:1;
+}
+
+.sub-section { margin-top:1.4rem; }
+.sub-section h2 {
+  font-size:0.95rem; margin:0 0 0.5rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.06em;
+  font-weight:500;
+}
+.sub-section ol { margin:0.4rem 0; padding-left:1.5rem; line-height:1.7; }
+.sub-section li code { background:#161b22; padding:0.05rem 0.3rem;
+  border-radius:3px; font-size:0.85rem; }
+.sub-section p { color:#8b949e; line-height:1.5; }
+
+.sub-included {
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:0.7rem 0.9rem; margin-top:0.6rem;
+  font-size:0.9rem; line-height:1.7;
+}
+.sub-included strong { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sub-head">
+  <h1>Subscribe to Sky Alerts</h1>
+  <p class="meta">
+    A live iCalendar feed you can subscribe to from any calendar app.
+    Refreshes every hour as the underlying forecasts and TLEs change,
+    so the alerts stay accurate.
+  </p>
+</div>
+
+<div class="feed-url-box">
+  <div class="scheme-row">
+    <span class="lbl">Standard</span>
+    <code>{{ feed_url }}</code>
+  </div>
+  <div class="scheme-row">
+    <span class="lbl">webcal://</span>
+    <code>{{ webcal_url }}</code>
+  </div>
+</div>
+
+<div class="sub-included">
+  Currently in the feed:
+  <ul style="margin:0.4rem 0; padding-left:1.5rem;">
+    <li><strong>Top viewable satellite passes</strong> over the next 7 days
+        (Phase 10 ranking — high altitude × duration × clear sky).</li>
+    <li><strong>Sun and Moon transits + appulses</strong> over the next 90
+        days (every on-disk silhouette plus close near-misses within 1°).</li>
+  </ul>
+  Each event has two alarms — 30 min and 5 min before for passes,
+  1 h and 5 min before for transits.
+</div>
+
+<div class="sub-section">
+  <h2>Apple Calendar (Mac, iPhone, iPad)</h2>
+  <ol>
+    <li>Tap the <strong>webcal://</strong> URL above on the device — it
+        will offer to subscribe directly.</li>
+    <li>On Mac: <code>File → New Calendar Subscription…</code> and paste
+        the standard URL. Set "Auto-refresh" to <code>Every hour</code>.</li>
+  </ol>
+</div>
+
+<div class="sub-section">
+  <h2>Google Calendar</h2>
+  <ol>
+    <li>Open <a href="https://calendar.google.com/" target="_blank" rel="noopener">calendar.google.com</a>.</li>
+    <li>Click <strong>+</strong> next to "Other calendars" → "From URL".</li>
+    <li>Paste the <strong>standard</strong> URL above. Click "Add calendar".</li>
+  </ol>
+  <p>Google syncs subscribed calendars roughly every 8-24 hours, so a
+  same-day update may not appear until the next sync.</p>
+</div>
+
+<div class="sub-section">
+  <h2>Outlook / Office 365</h2>
+  <ol>
+    <li>Open Outlook on the web → <code>Calendar → Add calendar →
+        Subscribe from web</code>.</li>
+    <li>Paste the <strong>standard</strong> URL.</li>
+  </ol>
+</div>
+
+<div class="sub-section">
+  <h2>Privacy note</h2>
+  <p>
+    The feed embeds your observer location ({{ feed_url|cut:"http://"|cut:"https://"|truncatechars:0 }}observer's lat/lon)
+    in <code>LOCATION</code> fields and is publicly readable on any host
+    that can reach this server. Don't expose the URL on a public-internet
+    Velour install without a token if your location is sensitive.
+  </p>
+</div>
+
+<div style="margin-top:1.4rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:sky_digest' %}" class="btn btn-secondary">Week digest</a>
+  <a href="{% url 'chronos:sky_transits' %}" class="btn btn-secondary">Transits</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

@@ -1058,6 +1058,8 @@ def top_viewable_passes(now, days=7, limit=20):
         max_alt = int(m_alt.group(1)) if m_alt else 0
         m_dur = _re.search(r'Duration\s+(\d+)\s*s', ev.notes or '')
         duration_s = int(m_dur.group(1)) if m_dur else 0
+        m_slug = _re.search(r'sat:([\w-]+)', ev.tags or '')
+        sat_slug = m_slug.group(1) if m_slug else ''
         score = max_alt * duration_s * (100 - wx['cloud_pct']) / 100
         out.append({
             'event':       ev,
@@ -1065,6 +1067,7 @@ def top_viewable_passes(now, days=7, limit=20):
             'score':       score,
             'max_alt':     max_alt,
             'duration_s':  duration_s,
+            'sat_slug':    sat_slug,
         })
     out.sort(key=lambda r: -r['score'])
     return out[:limit]
@@ -1606,6 +1609,190 @@ def sky_digest(request):
         'nights': nights,
         'days':   7,
     })
+
+
+@login_required
+def sky_subscribe(request):
+    """Landing page explaining how to subscribe to the ICS feed.
+    Shows the canonical URL and per-platform instructions.
+    """
+    feed_url = request.build_absolute_uri(reverse('chronos:sky_feed_ics'))
+    return render(request, 'chronos/sky_subscribe.html', {
+        'feed_url':         feed_url,
+        # Webcal: same URL with the scheme replaced. Some calendar
+        # apps (Apple Calendar) prefer this scheme to auto-subscribe.
+        'webcal_url':       feed_url.replace('http://', 'webcal://')
+                                    .replace('https://', 'webcal://'),
+    })
+
+
+def sky_feed_ics(request):
+    """iCalendar feed of curated sky alerts: viewable satellite passes
+    (top 7 days) + all upcoming sun/moon transits + appulses (90 days).
+
+    Returned as text/calendar so Apple/Google/Outlook can subscribe.
+    Each VEVENT carries two VALARMs: -30M for prep, -5M for "now".
+
+    Public read by design (calendar apps can't pass session cookies),
+    so we deliberately don't include sensitive context. The observer
+    lat/lon is exposed in LOCATION — Velour-typical install is local
+    to one user, so this is acceptable. Wrap in a token if hosting
+    publicly.
+    """
+    import re as _re
+    prefs = ClockPrefs.load()
+    now = djtz.now()
+
+    cal_lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Velour//Chronos Sky Alerts//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        f'X-WR-CALNAME:Velour Sky Alerts',
+        f'X-WR-CALDESC:Viewable satellite passes + sun/moon transits '
+        f'for {prefs.home_lat:.2f}°N {prefs.home_lon:.2f}°E',
+        'X-WR-TIMEZONE:UTC',
+        'X-PUBLISHED-TTL:PT1H',
+    ]
+
+    location = f'{prefs.home_lat:.4f},{prefs.home_lon:.4f}'
+
+    # 1. Top viewable passes next 7 days
+    pass_rows = top_viewable_passes(now, days=7, limit=20)
+    for r in pass_rows:
+        ev = r['event']
+        uid = f'pass-{ev.pk}@velour.chronos'
+        title = ev.title.split(' · ')[0]
+        summary = f'☄ {title} · max {r["max_alt"]}° · {r["weather"]["label"]}'
+        desc = (
+            f'Satellite pass · max altitude {r["max_alt"]}° · '
+            f'duration {r["duration_s"]} s · '
+            f'forecast {r["weather"]["label"]} '
+            f'({r["weather"]["cloud_pct"]:.0f}% cloud cover).'
+        )
+        cal_lines += _vevent(
+            uid=uid, summary=summary, description=desc,
+            dtstart=ev.start, dtend=ev.end or ev.start + timedelta(seconds=60),
+            location=location,
+            url=request.build_absolute_uri(
+                reverse('chronos:sky_object', args=[r.get('sat_slug', '')])
+            ) if r.get('sat_slug') else None,
+            alarms=[(30, 'Pass in 30 minutes'), (5, 'Pass in 5 minutes')],
+        )
+
+    # 2. All upcoming transits + appulses next 90 days
+    transit_qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='sat-transits',
+        start__gte=now, start__lte=now + timedelta(days=90),
+    ).order_by('start')
+    for ev in transit_qs:
+        tags = ev.tags or ''
+        kind = 'transit' if 'kind:transit' in tags else 'appulse'
+        body = ('sun' if 'body:sun' in tags
+                else 'moon' if 'body:moon' in tags else '')
+        emoji = '☀️' if body == 'sun' else '🌙'
+        m_sep = _re.search(r"sep\s+([\d.]+)'", ev.title)
+        m_dur = _re.search(r"·\s+([\d.]+)\s*s\s*$", ev.title)
+        m_balt = _re.search(r'altitude at peak:\s*([\d.\-]+)', ev.notes or '')
+        sep = float(m_sep.group(1)) if m_sep else None
+        dur = float(m_dur.group(1)) if m_dur else None
+        balt = float(m_balt.group(1)) if m_balt else None
+        cond = transit_conditions(ev, body=body, kind=kind,
+                                  body_alt_deg=balt, sep_arcmin=sep,
+                                  duration_s=dur)
+        uid = f'transit-{ev.pk}@velour.chronos'
+        prefix = '🎯' if kind == 'transit' else '○'
+        summary = f'{prefix} {emoji} {ev.title}'
+        desc_parts = [
+            f'Predicted {kind} of satellite across the {body.title()}.',
+            f'Minimum separation: {sep:.1f} arcminutes.',
+        ]
+        if balt is not None:
+            desc_parts.append(f'{body.title()} altitude at peak: {balt:.0f}°.')
+        if dur is not None:
+            desc_parts.append(f'Duration: {dur:.1f} seconds.')
+        desc_parts.append(f'Photo rating: {cond["photo_rating"]} ({cond["rating_score"]}/100).')
+        for note in cond['safety_notes']:
+            desc_parts.append(f'WARNING: {note}')
+        desc = ' '.join(desc_parts)
+        # Transits often last < 1s; pad end so calendar UIs render a block.
+        end_at = ev.end if ev.end else ev.start + timedelta(minutes=2)
+        cal_lines += _vevent(
+            uid=uid, summary=summary, description=desc,
+            dtstart=ev.start, dtend=end_at,
+            location=location,
+            alarms=[(60, 'Transit in 1 hour'), (5, 'Transit in 5 min')],
+        )
+
+    cal_lines.append('END:VCALENDAR')
+
+    body = '\r\n'.join(cal_lines) + '\r\n'
+    from django.http import HttpResponse
+    resp = HttpResponse(body, content_type='text/calendar; charset=utf-8')
+    resp['Content-Disposition'] = 'inline; filename="velour-sky.ics"'
+    return resp
+
+
+def _ics_dt(dt_obj):
+    """Render a datetime as an ICS UTC timestamp (YYYYMMDDTHHMMSSZ)."""
+    if dt_obj.tzinfo is None:
+        from datetime import timezone as _tz
+        dt_obj = dt_obj.replace(tzinfo=_tz.utc)
+    from datetime import timezone as _tz
+    return dt_obj.astimezone(_tz.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+def _ics_escape(text):
+    """ICS line-content escaping per RFC 5545: \\, ;, , and newline."""
+    return (str(text)
+            .replace('\\', '\\\\')
+            .replace(';', '\\;')
+            .replace(',', '\\,')
+            .replace('\n', '\\n'))
+
+
+def _ics_fold(line):
+    """Fold lines to ≤75 octets per RFC 5545. Continuation lines start
+    with a single space."""
+    if len(line) <= 75:
+        return [line]
+    out = [line[:75]]
+    rest = line[75:]
+    while rest:
+        out.append(' ' + rest[:74])
+        rest = rest[74:]
+    return out
+
+
+def _vevent(*, uid, summary, description, dtstart, dtend,
+            location='', url=None, alarms=()):
+    """Build a VEVENT block as a list of folded ICS lines."""
+    now_stamp = _ics_dt(djtz.now())
+    parts = ['BEGIN:VEVENT',
+             f'UID:{uid}',
+             f'DTSTAMP:{now_stamp}',
+             f'DTSTART:{_ics_dt(dtstart)}',
+             f'DTEND:{_ics_dt(dtend)}',
+             f'SUMMARY:{_ics_escape(summary)}',
+             f'DESCRIPTION:{_ics_escape(description)}']
+    if location:
+        parts.append(f'LOCATION:{_ics_escape(location)}')
+    if url:
+        parts.append(f'URL:{url}')
+    for minutes_before, label in alarms:
+        parts += [
+            'BEGIN:VALARM',
+            'ACTION:DISPLAY',
+            f'DESCRIPTION:{_ics_escape(label)}',
+            f'TRIGGER:-PT{minutes_before}M',
+            'END:VALARM',
+        ]
+    parts.append('END:VEVENT')
+    folded = []
+    for line in parts:
+        folded += _ics_fold(line)
+    return folded
 
 
 @login_required
