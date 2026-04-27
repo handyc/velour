@@ -527,6 +527,26 @@ STAGE_TYPES = [
         cost_eur=200.0, maintenance_days=365,
     ),
     dict(
+        slug='tpms-ceramic-microfilter',
+        name='3D-printed ceramic TPMS microfilter',
+        kind='physical',
+        description='Stereolithography-printed ceramic with a triply '
+                    'periodic minimal surface (gyroid / Schwarz-P / '
+                    'Schwarz-D) geometry, then kiln-fired. The '
+                    'hierarchical pores give 3-5× the surface-area-to-'
+                    'volume of a Potters-for-Peace candle at '
+                    'comparable removal, with tunable pore size from '
+                    '5 µm down to ~0.2 µm. Indefinite life if '
+                    'periodically baked to burn off biofilm. Research-'
+                    'emerging (ETH Zurich / MIT / Lithoz / Tethon3D); '
+                    'achievable price assumes maker-space access to a '
+                    'ceramic SLA printer + resin per cartridge.',
+        removal={'bacteria': 0.99999, 'viruses': 0.95,
+                 'protozoa': 0.99999, 'turbidity': 0.99},
+        flow_lpm=0.5, energy_watts=0.0,
+        cost_eur=40.0, maintenance_days=730,
+    ),
+    dict(
         slug='berkey-gravity',
         name='Berkey-style gravity multi-element filter',
         kind='adsorption',
@@ -961,9 +981,50 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v6, stage_type=st, position=i)
 
+        # v7 — fully passive, no chemicals, no electricity. Trades
+        # vinegar's acidification trick for more zeolite + more solar
+        # stills; trades bleach + UV for the 3D-printed ceramic TPMS
+        # microfilter as a final pathogen polish. The honest cost of
+        # going chemical-free is ~€198 (vs v4's €121 with vinegar +
+        # bleach) — chemicals were doing real work; pulling them out
+        # demands more passes through the still.
+        urine_v7, urine_v7_created = System.objects.update_or_create(
+            slug='urine-to-drinking-v7-zero-input', defaults=dict(
+                name='Urine → Drinking (v7 zero-input passive)',
+                description='No additives, no electricity. Three '
+                            'beds of clinoptilolite zeolite trap '
+                            'ammonium; four solar still passes '
+                            'remove residual urea, salts, pharma, '
+                            'and hormones; a DIY GAC bottle picks '
+                            'up tail-end organics; a 3D-printed '
+                            'ceramic TPMS microfilter is the final '
+                            'pathogen polish. Roughly €198 of '
+                            'rocks, plastic, and ceramic; 0 W; 0 '
+                            'consumables.',
+                source=urine_src, target=urine_tgt,
+            ))
+        if urine_v7_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'bucket-settling',
+                'zeolite-ammonium',
+                'zeolite-ammonium',
+                'zeolite-ammonium',
+                'solar-still',
+                'solar-still',
+                'solar-still',
+                'solar-still',
+                'diy-gac-bottle',
+                'tpms-ceramic-microfilter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v7, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
             f'"{urine_system.name}", "{urine_v2.name}", '
             f'"{urine_v3.name}", "{urine_v4.name}", '
-            f'"{urine_v5.name}", "{urine_v6.name}".'))
+            f'"{urine_v5.name}", "{urine_v6.name}", '
+            f'"{urine_v7.name}".'))
