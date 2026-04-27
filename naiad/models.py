@@ -115,11 +115,24 @@ class StageType(models.Model):
         help_text='Typical replacement or cleaning interval in days. '
                   '0 = maintenance-free in Phase 1 terms.')
 
+    # Physical bounding box for shelf-pack into a 1 m³ cube. Order-of-
+    # magnitude — a 5 gal bucket settles at 300×300×300; a folded
+    # solar still array at 500×500×300; etc. Used by the GA's volume
+    # penalty and by the per-system physical-layout view.
+    width_mm  = models.PositiveIntegerField(default=200)
+    depth_mm  = models.PositiveIntegerField(default=200)
+    height_mm = models.PositiveIntegerField(default=200)
+
     class Meta:
         ordering = ['kind', 'name']
 
     def __str__(self):
         return self.name
+
+    @property
+    def volume_litres(self) -> float:
+        """Bounding-box volume in litres — 1 mm³ = 1 µL = 1e-6 L."""
+        return (self.width_mm * self.depth_mm * self.height_mm) / 1e6
 
 
 class WaterProfile(models.Model):

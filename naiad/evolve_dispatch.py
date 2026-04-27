@@ -128,6 +128,8 @@ def _passthrough_args(system_slug: str, opts: dict) -> str:
         parts += ['--watt-cap', repr(float(opts['watt_cap']))]
     if opts.get('length_cap') is not None:
         parts += ['--length-cap', repr(float(opts['length_cap']))]
+    if opts.get('volume_cap') is not None:
+        parts += ['--volume-cap', repr(float(opts['volume_cap']))]
     if opts.get('save'):
         parts += ['--save', shlex.quote(str(opts['save']))]
     return ' '.join(parts)

@@ -88,6 +88,19 @@ def system_detail(request, slug):
     except Exception:
         conduit_jobs = []
 
+    # Physical layout — pack stage bounding boxes into a 1 m³ cube
+    # for the "best smallest filter" scoreboard.
+    from .physical import (
+        chain_volume_litres, fits_in_cube, pack_chain, CUBE_LITRES,
+    )
+    chain_stage_types = [s.stage_type for s in stages]
+    physical = {
+        'volume_l':      chain_volume_litres(chain_stage_types),
+        'cube_l':        CUBE_LITRES,
+        'fits_in_cube':  fits_in_cube(chain_stage_types),
+        'pack':          pack_chain(chain_stage_types),
+    }
+
     return render(request, 'naiad/system_detail.html', {
         'system':       system,
         'stages':       stages,
@@ -97,6 +110,7 @@ def system_detail(request, slug):
         'targets':      targets,
         'contaminants': CONTAMINANTS,
         'conduit_jobs': conduit_jobs,
+        'physical':     physical,
     })
 
 

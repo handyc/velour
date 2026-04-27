@@ -73,6 +73,32 @@
   .runrow a { color: #c9d1d9; text-decoration: none; flex: 1; }
   .runrow a:hover { color: #58a6ff; }
   .runrow .meta { color: #6e7681; font-family: monospace; font-size: 0.68rem; }
+
+  /* Physical-layout panel */
+  .phys-grid { display: grid; grid-template-columns: 1fr 360px;
+               gap: 1rem; align-items: start; }
+  .phys-grid > div { min-width: 0; }
+  .phys-meter {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+    padding: 0.4rem 0.6rem; font-size: 0.78rem;
+  }
+  .phys-meter .row { display: flex; justify-content: space-between;
+                     gap: 0.5rem; margin: 0.2rem 0; }
+  .phys-meter .row b { color: #c9d1d9; font-family: monospace; }
+  .phys-meter .row span { color: #6e7681; }
+  .phys-bar { height: 8px; background: #161b22; border-radius: 4px;
+              overflow: hidden; margin-top: 0.3rem; }
+  .phys-bar div { height: 100%; background: linear-gradient(90deg,
+                  #2ea043 0%, #d29922 70%, #f85149 100%); }
+  .phys-svg-wrap { position: relative; aspect-ratio: 1 / 1;
+                   border: 1px solid #30363d; border-radius: 4px;
+                   background: #161b22; }
+  .phys-svg-wrap svg { display: block; width: 100%; height: 100%; }
+  .phys-pocket-text { font: 9px ui-monospace, monospace; fill: #0d1117;
+                      pointer-events: none; }
+  .phys-overflow { color: #f85149; font-size: 0.74rem; margin-top: 0.4rem; }
+  .phys-legend { font-size: 0.7rem; color: #6e7681;
+                 margin-top: 0.3rem; }
 </style>
 {% endblock %}
 
@@ -117,6 +143,70 @@
     </p>
     {% endif %}
   </div>
+
+  {% if stages %}
+  <div class="panel">
+    <h2>Physical layout · 1 m³ cube</h2>
+    <div class="phys-grid">
+      <div class="phys-svg-wrap">
+        <svg viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg">
+          <!-- 1 m × 1 m floor outline + 100 mm gridlines -->
+          <rect x="0" y="0" width="1000" height="1000"
+                fill="none" stroke="#30363d" stroke-width="3"/>
+          {% for g in "0123456789" %}
+          <line x1="{% widthratio forloop.counter0 10 1000 %}" y1="0"
+                x2="{% widthratio forloop.counter0 10 1000 %}" y2="1000"
+                stroke="#21262d" stroke-width="1"/>
+          <line x1="0" y1="{% widthratio forloop.counter0 10 1000 %}"
+                x2="1000" y2="{% widthratio forloop.counter0 10 1000 %}"
+                stroke="#21262d" stroke-width="1"/>
+          {% endfor %}
+          {% for p in physical.pack.pockets %}
+          <rect x="{{ p.x_mm }}" y="{{ p.y_mm }}"
+                width="{{ p.w_mm }}" height="{{ p.d_mm }}"
+                fill="#58a6ff" fill-opacity="0.55"
+                stroke="#58a6ff" stroke-width="1.5"/>
+          <text class="phys-pocket-text"
+                x="{{ p.x_mm|add:6 }}" y="{{ p.y_mm|add:14 }}">
+            {{ forloop.counter0 }}
+          </text>
+          {% endfor %}
+        </svg>
+      </div>
+      <div>
+        <div class="phys-meter">
+          <div class="row"><span>volume</span>
+            <b>{{ physical.volume_l|floatformat:0 }} L</b></div>
+          <div class="row"><span>cube</span>
+            <b>{{ physical.cube_l|floatformat:0 }} L</b></div>
+          <div class="row"><span>fill</span>
+            <b>{% widthratio physical.volume_l physical.cube_l 100 %} %</b></div>
+          <div class="phys-bar">
+            <div style="width:{% widthratio physical.volume_l physical.cube_l 100 %}%;
+                        max-width:100%"></div>
+          </div>
+          <div class="row" style="margin-top:0.4rem">
+            <span>fits in 1 m³</span>
+            <b style="color:{% if physical.fits_in_cube %}#2ea043{% else %}#f85149{% endif %}">
+              {% if physical.fits_in_cube %}yes{% else %}NO{% endif %}
+            </b>
+          </div>
+          {% if physical.pack.overflow %}
+          <p class="phys-overflow">
+            {{ physical.pack.overflow|length }} stage{{ physical.pack.overflow|length|pluralize }}
+            need a second tier (the floor view shows the bottom layer only).
+          </p>
+          {% endif %}
+        </div>
+        <p class="phys-legend">
+          Top-down floor plan, 100 mm grid. Stages numbered in chain
+          order; bounding-box volumes summed for the GA's volume
+          penalty (best smallest filter wins).
+        </p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="panel">
     <h2>Add stage</h2>

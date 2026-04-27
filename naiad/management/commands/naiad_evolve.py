@@ -47,21 +47,25 @@ PRESETS = {
         'cost_cap':   150.0,   # soda-bottle tier — vinegar, solar still, GAC
         'watt_cap':    10.0,
         'length_cap':  12.0,
+        'volume_cap': 600.0,   # half a 1 m³ cube
     },
     'field': {
         'cost_cap':   300.0,   # camping kit — stovetop still, ceramic, NaDCC
         'watt_cap':   200.0,
         'length_cap':  12.0,
+        'volume_cap': 500.0,
     },
     'consumer': {
         'cost_cap':   900.0,   # commercial gear — countertop distillers, RO, UV
         'watt_cap':  1500.0,
         'length_cap':  14.0,
+        'volume_cap': 800.0,
     },
     'industrial': {
         'cost_cap':  2500.0,   # vapour-compression + electrochem + ammonia tower
         'watt_cap':  2500.0,
         'length_cap':  18.0,
+        'volume_cap': 1500.0,  # allowed bigger than 1 m³
     },
 }
 
@@ -73,14 +77,16 @@ class Ctx:
     types:  dict   # slug -> StageType
     slugs:  list
     # Weights match the JS defaults.
-    cost_cap:   float = 300.0
-    watt_cap:   float = 200.0
-    length_cap: float = 12.0
-    maint_cap:  float = 0.1
-    w_cost:     float = 0.40
-    w_watt:     float = 0.25
-    w_length:   float = 0.20
-    w_maint:    float = 0.15
+    cost_cap:    float = 300.0
+    watt_cap:    float = 200.0
+    length_cap:  float = 12.0
+    maint_cap:   float = 0.1
+    volume_cap:  float = 1000.0   # litres, default = 1 m³ cube
+    w_cost:      float = 0.30
+    w_watt:      float = 0.20
+    w_length:    float = 0.15
+    w_maint:     float = 0.10
+    w_volume:    float = 0.25
     detection_eps: float = 1e-6
 
 
@@ -131,7 +137,7 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         ratio_product *= max(1e-6, min(1.0, ratio))
         ratio_count += 1
 
-    total_cost = total_watts = maint_load = 0.0
+    total_cost = total_watts = maint_load = total_volume = 0.0
     for slug in stages:
         st = ctx.types.get(slug)
         if st is None:
@@ -140,13 +146,21 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         total_watts += float(st.energy_watts or 0)
         days = max(1.0, float(st.maintenance_days or 365))
         maint_load += 1.0 / days
+        # Bounding-box volume in litres; sum is a lower bound on
+        # how much room a built-up assembly needs.
+        w = float(st.width_mm  or 0)
+        d = float(st.depth_mm  or 0)
+        h = float(st.height_mm or 0)
+        total_volume += (w * d * h) / 1e6
 
-    cost_pen  = min(1.0, total_cost  / ctx.cost_cap)
-    watt_pen  = min(1.0, total_watts / ctx.watt_cap)
-    len_pen   = min(1.0, len(stages) / ctx.length_cap)
-    maint_pen = min(1.0, maint_load  / ctx.maint_cap)
-    penalty = (ctx.w_cost   * cost_pen  + ctx.w_watt   * watt_pen +
-               ctx.w_length * len_pen   + ctx.w_maint  * maint_pen)
+    cost_pen  = min(1.0, total_cost   / ctx.cost_cap)
+    watt_pen  = min(1.0, total_watts  / ctx.watt_cap)
+    len_pen   = min(1.0, len(stages)  / ctx.length_cap)
+    maint_pen = min(1.0, maint_load   / ctx.maint_cap)
+    vol_pen   = min(1.0, total_volume / ctx.volume_cap)
+    penalty = (ctx.w_cost   * cost_pen   + ctx.w_watt   * watt_pen +
+               ctx.w_length * len_pen    + ctx.w_maint  * maint_pen +
+               ctx.w_volume * vol_pen)
 
     if all_pass:
         s = 0.5 + 0.5 * (1 - penalty)
@@ -157,6 +171,7 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
     stats = {
         'cost': total_cost, 'watts': total_watts,
         'length': len(stages), 'maint_load': maint_load,
+        'volume': total_volume,
         'output': output,
     }
     return max(0.0, min(1.0, s)), all_pass, failures, stats
@@ -241,6 +256,11 @@ class Command(BaseCommand):
         parser.add_argument('--length-cap', type=float, default=None,
                             dest='length_cap',
                             help='Length penalty saturation ceiling, stages.')
+        parser.add_argument('--volume-cap', type=float, default=None,
+                            dest='volume_cap',
+                            help='Volume penalty saturation ceiling, '
+                                 'litres. 1000 = a 1 m³ cube. Best-'
+                                 'smallest-filter chains score better.')
         parser.add_argument('--save', default=None,
                             help='If set, save the winner as a new System '
                                  'with this slug.')
@@ -286,6 +306,8 @@ class Command(BaseCommand):
             ctx.watt_cap = float(opts['watt_cap'])
         if opts.get('length_cap') is not None:
             ctx.length_cap = float(opts['length_cap'])
+        if opts.get('volume_cap') is not None:
+            ctx.volume_cap = float(opts['volume_cap'])
 
         rng = random.Random(opts['seed'])
         pop = [random_gene(rng, ctx) for _ in range(opts['pop'])]
@@ -304,7 +326,8 @@ class Command(BaseCommand):
         self.stdout.write(
             f'Caps   : cost €{ctx.cost_cap:.0f}  '
             f'watts {ctx.watt_cap:.0f}  '
-            f'length {ctx.length_cap:.0f}{preset_tag}')
+            f'length {ctx.length_cap:.0f}  '
+            f'volume {ctx.volume_cap:.0f} L{preset_tag}')
         self.stdout.write('')
 
         for gen in range(opts['gens']):
@@ -353,6 +376,7 @@ class Command(BaseCommand):
         self.stdout.write(f'length  : {stats["length"]}')
         self.stdout.write(f'cost    : €{stats["cost"]:.0f}')
         self.stdout.write(f'power   : {stats["watts"]:.0f} W')
+        self.stdout.write(f'volume  : {stats["volume"]:.1f} L')
         self.stdout.write('stages  :')
         for i, slug in enumerate(best_gene):
             self.stdout.write(f'  {i:2d}. {slug}')

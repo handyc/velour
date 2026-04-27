@@ -13,6 +13,58 @@ from django.core.management.base import BaseCommand
 from naiad.models import StageType, System, WaterProfile
 
 
+# Physical bounding boxes per stage slug (width × depth × height in
+# mm). A bucket settles at 300³, a 2 L PET soda bottle at 100×100×200,
+# a small solar still at 500×500×300, an industrial RO/distiller at
+# 300-400 mm a side. These drive the GA's volume penalty and the
+# per-system 1 m³ shelf-pack visualisation.
+STAGE_DIMENSIONS = {
+    # Existing kitchen / hardware-store filters
+    'sediment-5um':            (100, 100, 250),
+    'sediment-1um':            (100, 100, 250),
+    'carbon-block':            (100, 100, 350),
+    'granular-carbon':         (200, 200, 350),
+    'reverse-osmosis':         (300, 200, 400),
+    'uv-sterilizer':           (300,  80, 400),
+    'slow-sand':               (500, 500, 400),
+    'ion-exchange-softener':   (250, 250, 500),
+    'chlorination':            (200, 200, 200),
+    # Urine-treatment industrial
+    'urea-hydrolysis':         (300, 300, 350),
+    'struvite-precipitation':  (300, 300, 300),
+    'ammonia-stripping':       (300, 300, 900),
+    'nitrification-bioreactor':(400, 400, 350),
+    'electrochem-oxidation':   (300, 300, 250),
+    # Low-budget passive
+    'urine-storage-tank':      (600, 600, 500),
+    'zeolite-ammonium':        (200, 200, 300),
+    'constructed-wetland':     (800, 500, 500),
+    'solar-disinfection':      (200, 100, 100),
+    'vapor-distillation':      (400, 400, 400),
+    # Kitchen / MacGyver tier
+    'bucket-settling':         (300, 300, 300),
+    'cloth-coffee-filter':     (150, 150, 200),
+    'vinegar-acidify':         (200, 200, 250),
+    'wood-ash-lye':            (200, 200, 250),
+    'alum-coagulation':        (200, 200, 250),
+    'bleach-dose':             (100, 100, 200),
+    'briquette-charcoal':      (100, 100, 200),
+    'diy-gac-bottle':          (100, 100, 250),
+    'solar-still':             (500, 500, 300),
+    'boiling-pot':             (250, 250, 250),
+    'stovetop-still':          (400, 400, 400),
+    # Field / camping tier
+    'ceramic-pot-filter':      (250, 250, 350),
+    'hollow-fiber-filter':     (100,  50, 150),
+    'nadcc-tablets':           (50,   50, 100),
+    'diy-uv-cfl':              (200, 100, 250),
+    'countertop-distiller':    (300, 300, 400),
+    'berkey-gravity':          (300, 300, 550),
+    # 3D-printed ceramic
+    'tpms-ceramic-microfilter':(100, 100, 150),
+}
+
+
 STAGE_TYPES = [
     dict(
         slug='sediment-5um', name='5 µm sediment filter',
@@ -736,6 +788,12 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         st_n = 0
         for spec in STAGE_TYPES:
+            spec = dict(spec)
+            dims = STAGE_DIMENSIONS.get(spec['slug'])
+            if dims:
+                spec.setdefault('width_mm',  dims[0])
+                spec.setdefault('depth_mm',  dims[1])
+                spec.setdefault('height_mm', dims[2])
             obj, created = StageType.objects.update_or_create(
                 slug=spec['slug'], defaults=spec)
             st_n += 1
