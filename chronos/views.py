@@ -1025,6 +1025,92 @@ def _sparkline_polyline(samples, lo=None, hi=None, log=False, w=200, h=40, pad=2
 
 
 @login_required
+def local_environment(request):
+    """Air quality + UV + pollen dashboard, fed by Open-Meteo.
+
+    Same time-series substrate as space_weather (chronos.Measurement),
+    same card-and-sparkline layout pattern.
+    """
+    from .astro_sources.local_environment import (
+        european_aqi_band, uv_band, pollen_band,
+    )
+
+    prefs = ClockPrefs.load()
+    djtz.activate(_home_tz())
+    now = djtz.now()
+
+    def _series(metric, hours):
+        cutoff = now - timedelta(hours=hours)
+        return list(
+            Measurement.objects.filter(
+                source='open-meteo', metric=metric,
+                at__gte=cutoff, at__lte=now,
+            ).order_by('at')
+        )
+
+    def _latest(metric):
+        return Measurement.objects.filter(
+            source='open-meteo', metric=metric, at__lte=now,
+        ).order_by('-at').first()
+
+    def _next_24h(metric):
+        return list(
+            Measurement.objects.filter(
+                source='open-meteo', metric=metric,
+                at__gte=now, at__lte=now + timedelta(hours=24),
+            ).order_by('at')
+        )
+
+    pollen_metrics = ['alder_pollen', 'birch_pollen', 'grass_pollen',
+                      'mugwort_pollen', 'olive_pollen', 'ragweed_pollen']
+    pollens = []
+    for m in pollen_metrics:
+        latest = _latest(m)
+        if not latest:
+            continue
+        pollens.append({
+            'metric':     m,
+            'name':       m.replace('_pollen', '').title(),
+            'value':      latest.value,
+            'band':       pollen_band(latest.value),
+            'unit':       latest.unit,
+            'at':         latest.at,
+            'spark':      _sparkline_polyline(_series(m, 24 * 7),
+                                              lo=0, w=200, h=40),
+        })
+    # Sort: highest first so allergens you'd actually feel rise to the top
+    pollens.sort(key=lambda p: -p['value'])
+
+    aqi_now = _latest('european_aqi')
+    return render(request, 'chronos/local_environment.html', {
+        'prefs': prefs,
+        'aqi_now':         aqi_now,
+        'aqi_band':        european_aqi_band(aqi_now.value if aqi_now else None),
+        'pm25_now':        _latest('pm2_5'),
+        'pm10_now':        _latest('pm10'),
+        'no2_now':         _latest('nitrogen_dioxide'),
+        'o3_now':          _latest('ozone'),
+        'uv_now':          _latest('uv_index'),
+        'uv_band':         uv_band(getattr(_latest('uv_index'), 'value', None)),
+        'pollens':         pollens,
+        'aqi_24h_svg':     _sparkline_polyline(_series('european_aqi', 24),
+                                               lo=0, w=200, h=40),
+        'aqi_7d_svg':      _sparkline_polyline(_series('european_aqi', 24 * 7),
+                                               lo=0, w=200, h=40),
+        'pm25_24h_svg':    _sparkline_polyline(_series('pm2_5', 24),
+                                               lo=0, w=200, h=40),
+        'pm10_24h_svg':    _sparkline_polyline(_series('pm10', 24),
+                                               lo=0, w=200, h=40),
+        'no2_24h_svg':     _sparkline_polyline(_series('nitrogen_dioxide', 24),
+                                               lo=0, w=200, h=40),
+        'o3_24h_svg':      _sparkline_polyline(_series('ozone', 24),
+                                               lo=0, w=200, h=40),
+        'uv_next24_svg':   _sparkline_polyline(_next_24h('uv_index'),
+                                               lo=0, hi=11, w=200, h=40),
+    })
+
+
+@login_required
 def sky_object(request, slug):
     """Per-object detail: facts + next-14-days passes + ground track."""
     obj = get_object_or_404(TrackedObject, slug=slug)

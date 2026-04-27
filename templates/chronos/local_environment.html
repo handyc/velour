@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}Local Environment — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.le-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.le-head h1 { margin:0; }
+.le-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.le-grid {
+  display:grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+.le-card {
+  background:#0d1117;
+  border:1px solid #21262d;
+  border-radius:6px;
+  padding:0.7rem 0.9rem;
+  display:flex; flex-direction:column; gap:0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.le-card .lbl {
+  color:#6e7681; font-size:0.7rem; text-transform:uppercase;
+  letter-spacing:0.06em;
+}
+.le-card .val {
+  color:#c9d1d9; font-size:1.7rem; font-weight:500; line-height:1.1;
+}
+.le-card .sub { color:#8b949e; font-size:0.78rem; }
+.le-card svg.spark { width:100%; height:40px; display:block; margin-top:0.2rem; }
+.le-card svg.spark polyline { fill:none; stroke-width:1.2; }
+
+/* European AQI six-band colours
+   (https://airindex.eea.europa.eu/Map/AQI/Viewer/) */
+.le-card.aqi-very-good       .val { color:#50f0e6; }
+.le-card.aqi-good            .val { color:#50ccaa; }
+.le-card.aqi-moderate        .val { color:#f0e641; }
+.le-card.aqi-poor            .val { color:#ff5050; }
+.le-card.aqi-very-poor       .val { color:#960032; }
+.le-card.aqi-extremely-poor  .val { color:#7d2181; }
+
+.le-card .spark.aqi polyline   { stroke:#50ccaa; }
+.le-card .spark.pm polyline    { stroke:#58a6ff; }
+.le-card .spark.no2 polyline   { stroke:#d29922; }
+.le-card .spark.o3 polyline    { stroke:#bc8cff; }
+.le-card .spark.uv polyline    { stroke:#f59e0b; }
+.le-card .spark.pollen polyline { stroke:#3fb950; }
+
+/* O3 breach colouring */
+.le-card.o3-breach .val { color:#f85149; }
+/* UV bands */
+.le-card.uv-low       .val { color:#3fb950; }
+.le-card.uv-moderate  .val { color:#f0e641; }
+.le-card.uv-high      .val { color:#d29922; }
+.le-card.uv-very-high .val { color:#f85149; }
+.le-card.uv-extreme   .val { color:#bc8cff; }
+
+.pollen-list {
+  margin-top: 0.5rem; font-family: ui-monospace, monospace; font-size:0.85rem;
+  display: grid; grid-template-columns: max-content 1fr max-content;
+  column-gap: 0.6rem; row-gap: 0.2rem;
+}
+.pollen-list .name { color:#c9d1d9; }
+.pollen-list .level { color:#8b949e; font-size:0.78rem; align-self:end; }
+.pollen-list .level.high { color:#d29922; }
+.pollen-list .level.very-high { color:#f85149; }
+.pollen-list .grains { color:#6e7681; font-size:0.78rem; align-self:end; text-align:right; }
+.pollen-list .grains.dominant { color:#3fb950; }
+
+.le-extra { margin-top:1.2rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; color:#8b949e; font-size:0.85rem;
+  line-height:1.5; }
+.le-extra code { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="le-head">
+  <h1>Local Environment</h1>
+  <span class="meta">
+    Open-Meteo · {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E
+  </span>
+</div>
+
+<div class="le-grid">
+  <div class="le-card aqi-{{ aqi_band|slugify }}">
+    <span class="lbl">European AQI</span>
+    <span class="val">
+      {% if aqi_now %}{{ aqi_now.value|floatformat:0 }}{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if aqi_now %}{{ aqi_band }} · {{ aqi_now.at|date:'D H:i' }}{% else %}no data yet{% endif %}
+    </span>
+    {% if aqi_24h_svg %}
+    <svg class="spark aqi" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ aqi_24h_svg }}"/>
+    </svg>
+    <span class="sub">last 24 h</span>
+    {% endif %}
+  </div>
+
+  <div class="le-card">
+    <span class="lbl">PM2.5 · fine particulate</span>
+    <span class="val">
+      {% if pm25_now %}{{ pm25_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">µg/m³</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      WHO 24-h guideline 15 · EU annual limit 25
+    </span>
+    {% if pm25_24h_svg %}
+    <svg class="spark pm" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ pm25_24h_svg }}"/>
+    </svg>
+    {% endif %}
+  </div>
+
+  <div class="le-card">
+    <span class="lbl">PM10 · coarse particulate</span>
+    <span class="val">
+      {% if pm10_now %}{{ pm10_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">µg/m³</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      WHO 24-h guideline 45 · EU 24-h limit 50
+    </span>
+    {% if pm10_24h_svg %}
+    <svg class="spark pm" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ pm10_24h_svg }}"/>
+    </svg>
+    {% endif %}
+  </div>
+
+  <div class="le-card">
+    <span class="lbl">NO₂ · nitrogen dioxide</span>
+    <span class="val">
+      {% if no2_now %}{{ no2_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">µg/m³</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      EU 1-h limit 200 · annual limit 40
+    </span>
+    {% if no2_24h_svg %}
+    <svg class="spark no2" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ no2_24h_svg }}"/>
+    </svg>
+    {% endif %}
+  </div>
+
+  <div class="le-card {% if o3_now and o3_now.value > 180 %}o3-breach{% endif %}">
+    <span class="lbl">O₃ · ozone</span>
+    <span class="val">
+      {% if o3_now %}{{ o3_now.value|floatformat:1 }} <small style="font-size:0.55em;color:#6e7681;">µg/m³</small>{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      EU info threshold 180 · alert 240
+    </span>
+    {% if o3_24h_svg %}
+    <svg class="spark o3" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ o3_24h_svg }}"/>
+    </svg>
+    {% endif %}
+  </div>
+
+  <div class="le-card uv-{{ uv_band|slugify }}">
+    <span class="lbl">UV index</span>
+    <span class="val">
+      {% if uv_now %}{{ uv_now.value|floatformat:1 }}{% else %}—{% endif %}
+    </span>
+    <span class="sub">
+      {% if uv_now %}{{ uv_band }} · {{ uv_now.at|date:'D H:i' }}{% else %}no data yet{% endif %}
+    </span>
+    {% if uv_next24_svg %}
+    <svg class="spark uv" viewBox="0 0 200 40" preserveAspectRatio="none">
+      <polyline points="{{ uv_next24_svg }}"/>
+    </svg>
+    <span class="sub">next 24 h forecast</span>
+    {% endif %}
+  </div>
+
+  {% if pollens %}
+  <div class="le-card" style="grid-column: span 2;">
+    <span class="lbl">Pollen · 6 species</span>
+    <div class="pollen-list">
+      {% for p in pollens %}
+      <span class="name">{{ p.name }}</span>
+      <span class="level {{ p.band|slugify }}">{{ p.band }}</span>
+      <span class="grains {% if forloop.first and p.value > 0 %}dominant{% endif %}">
+        {{ p.value|floatformat:1 }} {{ p.unit }}
+      </span>
+      {% endfor %}
+    </div>
+    <span class="sub" style="margin-top:0.5rem;">low &lt; 10 · moderate 10–50 · high 50–200 · very high &gt; 200 grains/m³</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="le-extra">
+  Data from Open-Meteo's <code>air-quality</code> API, refreshed every 6 h
+  by <code>identity_cron</code> via <code>refresh_local_environment</code>.
+  Same <code>chronos.Measurement</code> table that hosts space-weather metrics —
+  source tag <code>open-meteo</code>. Threshold-breach Identity Concerns
+  open and close automatically based on the latest reading.
+</div>
+
+<div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:space_weather' %}" class="btn btn-secondary">Space Weather</a>
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

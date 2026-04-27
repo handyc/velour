@@ -51,6 +51,9 @@ urlpatterns = [
     # Space weather (Phase 6) — solar + geomagnetic activity dashboard.
     path('space-weather/',         views.space_weather, name='space_weather'),
 
+    # Local environment (Phase 7) — air quality + UV + pollen.
+    path('local/',                 views.local_environment, name='local'),
+
     # Tasks + briefing (Phase 2e)
     path('briefing/',              views.briefing,     name='briefing'),
     path('tasks/',                 views.task_list,    name='task_list'),

@@ -59,6 +59,7 @@ DEFAULT_INTERVALS = {
     'sky_satellites':    86_400,     # 1 d — refresh TLEs + visible-pass calendar
     'sky_neos':          86_400,     # 1 d — refresh JPL CNEOS close approaches
     'space_weather':     21_600,     # 6 h — Kp / wind / X-ray / aurora from SWPC
+    'local_environment': 21_600,     # 6 h — air quality + UV + pollen for observer
 }
 
 
@@ -93,6 +94,7 @@ def dispatch(force=None):
             'meditate_deep', 'rebuild_document', 'tile_reflect',
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
+            'local_environment',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -132,6 +134,7 @@ def dispatch(force=None):
         ('sky_satellites',   _do_sky_satellites),
         ('sky_neos',         _do_sky_neos),
         ('space_weather',    _do_space_weather),
+        ('local_environment', _do_local_environment),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -310,6 +313,18 @@ def _do_space_weather():
     call_command('refresh_space_weather', stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'space weather refreshed'
+
+
+def _do_local_environment():
+    """Every 6 h — pull air quality + UV + pollen for the observer
+    location from Open-Meteo. Opens/closes Identity Concerns when
+    pollutant thresholds are crossed (O₃, PM2.5, NO₂, UV, pollen)."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('refresh_local_environment', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'local environment refreshed'
 
 
 def _do_rebuild_document():
