@@ -38,7 +38,10 @@ def index(request):
 @require_POST
 def create_system(request):
     name = (request.POST.get('name') or '').strip()
-    slug = (request.POST.get('slug') or '').strip()
+    # slugify so "3w system weird" → "3w-system-weird"; the URL pattern
+    # only matches [-a-zA-Z0-9_]+ and a redirect with raw spaces would
+    # NoReverseMatch on the way back.
+    slug = slugify(request.POST.get('slug') or '')
     source_id = request.POST.get('source')
     if not name or not slug or not source_id:
         return HttpResponseBadRequest('name, slug, source are required.')
