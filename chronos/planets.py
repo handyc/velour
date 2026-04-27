@@ -59,6 +59,49 @@ MARS_LANDMARKS = [
         # Sol 0 = landing day local at Jezero (2021-02-18 UTC, MSD_local ~52304.7)
         'landing_msd_local': 52304,
     },
+    {
+        'key': 'insight',
+        'label': 'Mars · Elysium Planitia',
+        'tz_name': 'InSight LMST',
+        'longitude_east': 135.623,
+        'longitude_label': 'λ 136°E',
+        'sol_mode': 'mission',
+        # Sol 0 = landing day local at Elysium Planitia
+        # (2018-11-26 19:52:59 UTC, MSD_local ~51511.6).
+        # InSight's heat-flow / seismic mission ended 2022-12-21
+        # but the LMST clock keeps ticking — the mission sol count
+        # is a permanent timeline, not a status indicator.
+        'landing_msd_local': 51511,
+    },
+    {
+        'key': 'ingenuity',
+        'label': 'Mars · Wright Brothers Field',
+        'tz_name': 'Ingenuity Flight Sol',
+        # Co-located with Perseverance at Jezero; the named "Wright
+        # Brothers Field" is the takeoff site of Flight 1.
+        'longitude_east': 77.4500,
+        'longitude_label': 'λ 77°E',
+        'sol_mode': 'mission',
+        # Sol 0 = first powered flight on another planet
+        # (2021-04-19 12:33 UTC, MSD_local ~52362.7). Ingenuity's
+        # mission-sol count is conventionally the "Flight Sol"
+        # numbering — independent of Perseverance's landing-sol clock
+        # so the two run side-by-side at the same longitude.
+        'landing_msd_local': 52362,
+    },
+    {
+        'key': 'zhurong',
+        'label': 'Mars · Utopia Planitia',
+        'tz_name': 'Zhurong LMST',
+        'longitude_east': 109.925,
+        'longitude_label': 'λ 110°E',
+        'sol_mode': 'mission',
+        # Sol 0 = landing day local at Utopia Planitia
+        # (2021-05-14 23:18 UTC, MSD_local ~52387.6). Zhurong went
+        # into planned hibernation in May 2022 and didn't wake; like
+        # InSight, the LMST clock continues regardless.
+        'landing_msd_local': 52387,
+    },
 ]
 
 
