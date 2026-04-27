@@ -63,6 +63,9 @@ if (!ctx.state.init) {
     sun.visible = false;
     ctx.scene.add(sun);
     ctx.state.sun = sun;
+    const sunLabel = makeTextSprite('Sun', {color: '#ffd966', heightM: 4});
+    sunLabel.position.set(0, 14, 0);  // local — sits above the disc
+    sun.add(sunLabel);
 
     // DirectionalLight needs its target in the scene graph for the
     // light direction to be honoured. A bare Object3D at the world
@@ -84,6 +87,9 @@ if (!ctx.state.init) {
     moon.visible = false;
     ctx.scene.add(moon);
     ctx.state.moon = moon;
+    const moonLabel = makeTextSprite('Moon', {color: '#e6e6e6', heightM: 3.5});
+    moonLabel.position.set(0, 8, 0);
+    moon.add(moonLabel);
 
     // Pools, keyed by chronos slug.
     ctx.state.planets = new Map();
@@ -113,6 +119,13 @@ if (!ctx.state.init) {
         const az = c.az * Math.PI / 180;
         post.position.set(15 * Math.sin(az), 1.25, -15 * Math.cos(az));
         ctx.scene.add(post);
+        const letterColor = '#' + c.color.toString(16).padStart(6, '0');
+        const letter = makeTextSprite(c.dir, {
+            color: letterColor, heightM: 1.0, fontPx: 80,
+        });
+        letter.position.copy(post.position);
+        letter.position.y += 1.6;  // float above the post head
+        ctx.scene.add(letter);
     }
     console.log('chronos-sky: anchor initialised, awaiting first fetch');
 
@@ -163,6 +176,42 @@ function altAzToVec3(altDeg, azDeg, R) {
          R * Math.sin(alt),
         -R * Math.cos(alt) * Math.cos(az)
     );
+}
+
+// Build a billboarded text sprite via CanvasTexture. Used for the
+// cardinal letters and every named celestial body so the visitor
+// can tell a colored dot from another colored dot.
+function makeTextSprite(text, opts) {
+    opts = opts || {};
+    const fontPx = opts.fontPx || 56;
+    const color = opts.color || '#ffffff';
+    const stroke = opts.stroke || 'rgba(0,0,0,0.85)';
+    const pad = 10;
+    const canvas = document.createElement('canvas');
+    const c2d = canvas.getContext('2d');
+    c2d.font = 'bold ' + fontPx + 'px sans-serif';
+    const w = Math.ceil(c2d.measureText(text).width) + pad * 2;
+    const h = fontPx + pad * 2;
+    canvas.width = w; canvas.height = h;
+    // Re-set after resize (canvas resets state on width/height assignment).
+    c2d.font = 'bold ' + fontPx + 'px sans-serif';
+    c2d.textBaseline = 'middle';
+    c2d.lineWidth = 5;
+    c2d.strokeStyle = stroke;
+    c2d.strokeText(text, pad, h / 2);
+    c2d.fillStyle = color;
+    c2d.fillText(text, pad, h / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true,
+        depthWrite: false, fog: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const heightM = opts.heightM || 1.6;
+    sprite.scale.set(heightM * w / h, heightM, 1);
+    sprite.renderOrder = 10;
+    return sprite;
 }
 
 // Approximate star color from Johnson B-V. Hot blue-white at -0.3, cool red
@@ -407,6 +456,12 @@ function applyData(data) {
             mesh.userData.planetSlug = p.slug;
             ctx.scene.add(mesh);
             ctx.state.planets.set(p.slug, mesh);
+            const labelColor = '#' + color.toString(16).padStart(6, '0');
+            const label = makeTextSprite(p.name || p.slug, {
+                color: labelColor, heightM: 2.4,
+            });
+            label.position.set(0, radius * 2 + 1.5, 0);
+            mesh.add(label);
         }
         if (Number.isFinite(p.alt_deg)) {
             mesh.position.copy(altAzToVec3(p.alt_deg, p.az_deg, R));
@@ -437,6 +492,15 @@ function applyData(data) {
             mesh.userData.satSlug = s.slug;
             ctx.scene.add(mesh);
             ctx.state.satellites.set(s.slug, mesh);
+            // Only label brighter sats — fainter ones spam labels at
+            // every blink. Threshold matches typical naked-eye limit.
+            if (Number.isFinite(s.magnitude) && s.magnitude < 4.0) {
+                const label = makeTextSprite(s.name || s.slug, {
+                    color: '#cccccc', heightM: 1.6, fontPx: 48,
+                });
+                label.position.set(0, 1.4, 0);
+                mesh.add(label);
+            }
         }
         if (Number.isFinite(s.alt_deg)) {
             mesh.position.copy(altAzToVec3(s.alt_deg, s.az_deg, R));
