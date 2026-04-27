@@ -46,8 +46,24 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
             (data.places || []).forEach(function (p) {
-                L.marker([p.lat, p.lon]).addTo(map)
-                    .bindPopup('<b>' + p.name + '</b><br>' + (p.notes || ''));
+                // Colored CircleMarker when Place.color is set, else
+                // the default Leaflet pin (so user-saved bookmarks
+                // without a color still look familiar).
+                var marker;
+                if (p.color) {
+                    marker = L.circleMarker([p.lat, p.lon], {
+                        radius: 7, color: '#000', weight: 1.5,
+                        fillColor: p.color, fillOpacity: 0.9,
+                    });
+                } else {
+                    marker = L.marker([p.lat, p.lon]);
+                }
+                var popup = '<b>' + p.name + '</b>';
+                if (p.notes) popup += '<br><span style="font-size:0.78rem;">' +
+                                       p.notes + '</span>';
+                popup += '<br><span style="color:#888;font-size:0.7rem;">' +
+                         p.lat.toFixed(3) + '°, ' + p.lon.toFixed(3) + '°</span>';
+                marker.addTo(map).bindPopup(popup);
             });
         });
 
