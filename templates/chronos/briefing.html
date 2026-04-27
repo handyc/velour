@@ -111,11 +111,27 @@
                 {% if not ev.all_day %}<span class="meta">{{ ev.start|date:'H:i' }}</span> {% endif %}
                 {{ ev.title }}
                 {% if ev.all_day %}<span class="meta">all day</span>{% endif %}
+                {% if ev.pass_weather %}
+                  <span class="meta">·
+                    {% if ev.pass_weather.viewable %}
+                      <span style="color:#3fb950;">{{ ev.pass_weather.label }}</span>
+                    {% else %}
+                      <span style="color:#6e7681;">{{ ev.pass_weather.label }}</span>
+                    {% endif %}
+                  </span>
+                {% endif %}
             </li>
             {% endfor %}
         </ul>
         {% else %}
         <div class="empty">Nothing on the calendar today.</div>
+        {% endif %}
+
+        {% if next_visible_pass %}
+        <div style="margin-top:0.7rem; padding-top:0.5rem; border-top:1px solid #161b22; font-size:0.85rem; color:#3fb950;">
+            ☄ Next clear-sky pass: <strong>{{ next_visible_pass.event.title }}</strong>
+            <br><span class="meta" style="color:#8b949e;">{{ next_visible_pass.event.start|date:'D H:i' }} · {{ next_visible_pass.weather.label }}</span>
+        </div>
         {% endif %}
     </div>
 

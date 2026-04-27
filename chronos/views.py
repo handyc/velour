@@ -812,6 +812,16 @@ def _briefing_context(tz):
         pass
 
     events = _events_on_day(today, tz)
+    # Annotate satellite-pass events (source='feed', tags contain
+    # 'satellite') with the cloud-cover forecast for the pass window.
+    for ev in events:
+        if ev.source == 'feed' and 'satellite' in (ev.tags or '') and ev.end:
+            ev.pass_weather = pass_weather(ev.start, ev.end)
+        else:
+            ev.pass_weather = None
+
+    next_visible_pass = _next_clear_sky_pass(now)
+
     open_tasks = list(Task.objects.filter(status=Task.STATUS_OPEN)[:10])
     overdue = [t for t in open_tasks
                if t.due_at and t.due_at.astimezone(tz).date() < today]
@@ -832,7 +842,32 @@ def _briefing_context(tz):
         'upcoming':    upcoming,
         'open_count':  Task.objects.filter(status=Task.STATUS_OPEN).count(),
         'environs':    environs,
+        'next_visible_pass': next_visible_pass,
     }
+
+
+def _next_clear_sky_pass(now):
+    """Find the next satellite-pass CalendarEvent in the next 48 h
+    where the cloud-cover forecast averages < 60% over the pass.
+
+    48 h is the window that catches "tonight + tomorrow night + the
+    morning after"; widen if a future feature needs further-out
+    look-aheads (forecast quality drops past ~5 days anyway).
+
+    Returns dict {event, weather} or None.
+    """
+    horizon = now + timedelta(hours=48)
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='satellites',
+        start__gte=now, start__lte=horizon,
+    ).order_by('start')
+    for ev in qs:
+        if not ev.end:
+            continue
+        wx = pass_weather(ev.start, ev.end)
+        if wx and wx.get('viewable'):
+            return {'event': ev, 'weather': wx}
+    return None
 
 
 def _briefing_environs():
@@ -1341,10 +1376,13 @@ def sky_object(request, slug):
                 alt, az, dist = aa
                 ctx['altaz'] = {'alt_deg': alt, 'az_deg': az,
                                 'distance_km': dist}
-            ctx['passes'] = compute_passes(
+            passes = compute_passes(
                 tle, prefs.home_lat, prefs.home_lon, prefs.home_elev_m,
                 days=14, visible_only=False,
             )
+            for p in passes:
+                p['weather'] = pass_weather(p['rise'], p['set'])
+            ctx['passes'] = passes
             ctx['track'] = ground_track(tle, minutes=180, step_seconds=30)
             ctx['track_svg_paths'] = _ground_track_svg(ctx['track'])
             if ctx['track']:
@@ -1430,7 +1468,67 @@ def sky_json(request):
         )
         payload['aurora'] = _aurora_for_dome(prefs)
         payload['weather'] = _weather_for_dome()
+        nxt = _next_clear_sky_pass(djtz.now())
+        if nxt:
+            payload['next_pass'] = {
+                'title':       nxt['event'].title,
+                'start_iso':   nxt['event'].start.isoformat(),
+                'cloud_pct':   nxt['weather']['cloud_pct'],
+                'label':       nxt['weather']['label'],
+            }
     return JsonResponse(payload)
+
+
+def pass_weather(start_utc, end_utc):
+    """Aggregate the weather forecast over a satellite pass window.
+
+    Pulls hourly cloud_cover and precipitation_probability Measurements
+    that fall within (or near) the pass window and averages them.
+    Returns None when there's no forecast covering this time (e.g.
+    pass is more than 7 days out, or refresh_weather hasn't run yet).
+
+    Result:
+        {'cloud_pct': float,
+         'precip_pct': float | None,
+         'label': 'clear' | 'partly cloudy' | 'mostly cloudy' | 'overcast'
+                   (+ ' · rain likely' when precip_pct > 50),
+         'viewable': bool — True iff cloud_pct < 60 and rain unlikely}
+    """
+    SOURCE = 'open-meteo-weather'
+    pad = timedelta(minutes=30)
+    cloud_qs = Measurement.objects.filter(
+        source=SOURCE, metric='cloud_cover',
+        at__gte=start_utc - pad, at__lte=end_utc + pad,
+    )
+    cloud_values = [m.value for m in cloud_qs]
+    if not cloud_values:
+        return None
+    cloud_pct = sum(cloud_values) / len(cloud_values)
+
+    pp_qs = Measurement.objects.filter(
+        source=SOURCE, metric='precipitation_probability',
+        at__gte=start_utc - pad, at__lte=end_utc + pad,
+    )
+    pp_values = [m.value for m in pp_qs]
+    precip_pct = sum(pp_values) / len(pp_values) if pp_values else None
+
+    if cloud_pct < 30:
+        label = 'clear'
+    elif cloud_pct < 60:
+        label = 'partly cloudy'
+    elif cloud_pct < 90:
+        label = 'mostly cloudy'
+    else:
+        label = 'overcast'
+    rain_likely = bool(precip_pct and precip_pct > 50)
+    if rain_likely:
+        label += ' · rain likely'
+    return {
+        'cloud_pct':  cloud_pct,
+        'precip_pct': precip_pct,
+        'label':      label,
+        'viewable':   cloud_pct < 60 and not rain_likely,
+    }
 
 
 def _weather_for_dome():

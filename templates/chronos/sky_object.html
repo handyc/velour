@@ -43,6 +43,10 @@
 .passes-table tr.visible td { color:#c9d1d9; }
 .passes-table tr.visible td.alt { color:#3fb950; font-weight:600; }
 .passes-table tr.invisible td { color:#6e7681; }
+.passes-table td.viewing-good   { color:#3fb950; }
+.passes-table td.viewing-meh    { color:#d29922; }
+.passes-table td.viewing-poor   { color:#6e7681; }
+.passes-table td.viewing-rain   { color:#58a6ff; }
 
 .gt-svg-wrap { background:#0d1117; border:1px solid #21262d;
   border-radius:4px; padding:0.4rem; }
@@ -110,6 +114,7 @@
         <th>Azimuth</th>
         <th>Duration</th>
         <th>Visible</th>
+        <th>Viewing forecast</th>
       </tr>
     </thead>
     <tbody>
@@ -123,6 +128,17 @@
           {% if p.visible %}yes
           {% elif not p.sat_sunlit %}in shadow
           {% else %}daylight{% endif %}
+        </td>
+        <td class="
+          {% if p.weather %}
+            {% if p.weather.precip_pct and p.weather.precip_pct > 50 %}viewing-rain
+            {% elif p.weather.cloud_pct < 30 %}viewing-good
+            {% elif p.weather.cloud_pct < 60 %}viewing-meh
+            {% else %}viewing-poor{% endif %}
+          {% endif %}">
+          {% if p.weather %}
+            {{ p.weather.label }} · {{ p.weather.cloud_pct|floatformat:0 }}% cloud
+          {% else %}—{% endif %}
         </td>
       </tr>
       {% endfor %}

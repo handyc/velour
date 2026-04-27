@@ -614,7 +614,7 @@ solarHud.style.cssText = 'position:absolute;bottom:0.6rem;right:0.6rem;'
 solarHud.style.display = 'none';
 wrap.appendChild(solarHud);
 
-function updateSolarHUD(ss, aurora, weather) {
+function updateSolarHUD(ss, aurora, weather, nextPass) {
   const lines = [];
   if (weather) {
     const parts = [];
@@ -623,6 +623,12 @@ function updateSolarHUD(ss, aurora, weather) {
     if (weather.wind_km_h != null) parts.push(weather.wind_km_h.toFixed(0) + ' km/h wind');
     const tail = parts.join(' · ');
     lines.push(`<span style="font-size:1rem">${weather.weather_emoji}</span> ${weather.weather_label} · ${tail}`);
+  }
+  if (nextPass) {
+    const t = new Date(nextPass.start_iso);
+    const when = t.toLocaleDateString([], {weekday:'short'}) + ' '
+               + t.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    lines.push(`<span style="color:#3fb950">☄</span> next clear pass: <strong>${nextPass.title}</strong> @ ${when}`);
   }
   if (ss.sun) {
     const altSign = ss.sun.alt_deg >= 0 ? '+' : '';
@@ -717,7 +723,7 @@ async function refresh() {
     data.rows.forEach(updateSat);
     if (data.solar_system) {
       updateSolarSystem(data.solar_system);
-      updateSolarHUD(data.solar_system, data.aurora, data.weather);
+      updateSolarHUD(data.solar_system, data.aurora, data.weather, data.next_pass);
     }
     auroraRing.visible = !!(data.aurora && data.aurora.visible_from_observer);
     neoData = data.neos || [];
