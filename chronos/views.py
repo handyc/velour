@@ -843,11 +843,11 @@ def briefing(request):
 
 
 @login_required
-def sky(request):
-    """Live alt/az table for tracked objects from the home location.
+def sky_table(request):
+    """Tabular sky view — alt/az + upcoming NEO close approaches.
 
-    Server renders the initial snapshot; client polls /chronos/sky.json
-    to refresh without a full page reload.
+    Drill-down from the dome at /chronos/sky/table/. Server renders
+    the initial snapshot; client polls /chronos/sky.json every 5 s.
     """
     prefs = ClockPrefs.load()
     rows = _sky_snapshot(prefs)
@@ -915,12 +915,13 @@ def _parse_neo_notes(notes):
 
 
 @login_required
-def sky_dome(request):
-    """3D hemisphere view from the observer location.
+def sky(request):
+    """Sky home — 3D hemisphere view from the observer location.
 
-    Pulls from /chronos/sky.json?track=1 every few seconds — server
-    does the SGP4 work, the client just paints. Self-contained scene,
-    not an Aether World.
+    The dome is the primary sky view; the structured table lives at
+    /chronos/sky/table/. Pulls from /chronos/sky.json?track=1 every
+    few seconds — server does the SGP4 work, the client just paints.
+    Self-contained scene, not an Aether World.
     """
     prefs = ClockPrefs.load()
     return render(request, 'chronos/sky_dome.html', {

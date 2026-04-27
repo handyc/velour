@@ -39,10 +39,13 @@ urlpatterns = [
 
     path('resync/', views.resync_calendar, name='resync'),
 
-    # Sky tracking (Phase 2f)
+    # Sky tracking (Phase 2f).
+    # /chronos/sky/ = dome (default visual view).
+    # /chronos/sky/table/ = structured drill-down (must come before the
+    # generic <slug> route or Django would route 'table' as a slug).
     path('sky/',                   views.sky,          name='sky'),
+    path('sky/table/',             views.sky_table,    name='sky_table'),
     path('sky.json',               views.sky_json,     name='sky_json'),
-    path('sky/dome/',              views.sky_dome,     name='sky_dome'),
     path('sky/<slug:slug>/',       views.sky_object,   name='sky_object'),
 
     # Tasks + briefing (Phase 2e)
