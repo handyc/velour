@@ -64,6 +64,7 @@ DEFAULT_INTERVALS = {
     'pass_digest':       604_800,    # 7 d — weekly Codex sky-digest manual
     'sat_transits':      604_800,    # 7 d — sun/moon transit predictions
     'marine':            21_600,     # 6 h — tide / waves / water temp / currents
+    'sky_almanac':       2_592_000,  # 30 d — yearly Sky Almanac Codex Manual
 }
 
 
@@ -99,7 +100,7 @@ def dispatch(force=None):
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
             'local_environment', 'weather', 'pass_digest',
-            'sat_transits', 'marine',
+            'sat_transits', 'marine', 'sky_almanac',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -144,6 +145,7 @@ def dispatch(force=None):
         ('pass_digest',      _do_pass_digest),
         ('sat_transits',     _do_sat_transits),
         ('marine',           _do_marine),
+        ('sky_almanac',      _do_sky_almanac),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -383,6 +385,17 @@ def _do_marine():
     call_command('refresh_marine', stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'marine refreshed'
+
+
+def _do_sky_almanac():
+    """Monthly — recompose the yearly Sky Almanac Codex Manual.
+    Idempotent per calendar year; re-running rewrites every section
+    in place from the latest CalendarEvent state."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('compose_sky_almanac', quiet=True, stdout=buf)
+    return 'sky almanac re-rendered'
 
 
 def _do_rebuild_document():
