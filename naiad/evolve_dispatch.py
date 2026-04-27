@@ -120,6 +120,14 @@ def _passthrough_args(system_slug: str, opts: dict) -> str:
              '--every',     str(int(opts['every']))]
     if opts.get('seed') is not None:
         parts += ['--seed', str(int(opts['seed']))]
+    if opts.get('preset'):
+        parts += ['--preset', shlex.quote(str(opts['preset']))]
+    if opts.get('cost_cap') is not None:
+        parts += ['--cost-cap', repr(float(opts['cost_cap']))]
+    if opts.get('watt_cap') is not None:
+        parts += ['--watt-cap', repr(float(opts['watt_cap']))]
+    if opts.get('length_cap') is not None:
+        parts += ['--length-cap', repr(float(opts['length_cap']))]
     if opts.get('save'):
         parts += ['--save', shlex.quote(str(opts['save']))]
     return ' '.join(parts)

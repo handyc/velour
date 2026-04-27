@@ -38,6 +38,34 @@ from naiad.evolve_dispatch import DispatchError, dispatch_via_conduit
 from naiad.models import Stage, StageType, System
 
 
+# Budget bands matched to the v4/v5/v6/v2-v3 reference systems.
+# `--preset <name>` pre-fills cost/watt/length caps; any explicit
+# --cost-cap / --watt-cap / --length-cap on the same command line
+# wins.
+PRESETS = {
+    'kitchen': {
+        'cost_cap':   150.0,   # soda-bottle tier — vinegar, solar still, GAC
+        'watt_cap':    10.0,
+        'length_cap':  12.0,
+    },
+    'field': {
+        'cost_cap':   300.0,   # camping kit — stovetop still, ceramic, NaDCC
+        'watt_cap':   200.0,
+        'length_cap':  12.0,
+    },
+    'consumer': {
+        'cost_cap':   900.0,   # commercial gear — countertop distillers, RO, UV
+        'watt_cap':  1500.0,
+        'length_cap':  14.0,
+    },
+    'industrial': {
+        'cost_cap':  2500.0,   # vapour-compression + electrochem + ammonia tower
+        'watt_cap':  2500.0,
+        'length_cap':  18.0,
+    },
+}
+
+
 @dataclass
 class Ctx:
     source: dict
@@ -192,6 +220,16 @@ class Command(BaseCommand):
         parser.add_argument('--seed', type=int, default=None)
         parser.add_argument('--every', type=int, default=10,
                             help='Print stats every N generations.')
+        parser.add_argument('--preset', choices=sorted(PRESETS.keys()),
+                            default=None,
+                            help='Set cost/watt/length caps in one go: '
+                                 'kitchen (€150, 10 W) — soda-bottle tier; '
+                                 'field (€300, 200 W) — camping kit; '
+                                 'consumer (€900, 1500 W) — commercial gear; '
+                                 'industrial (€2500, 2500 W) — '
+                                 'vapour-compression + electrochem. '
+                                 'Explicit --cost-cap / --watt-cap / '
+                                 '--length-cap override the preset.')
         parser.add_argument('--cost-cap', type=float, default=None,
                             dest='cost_cap',
                             help='Cost penalty saturation ceiling, EUR. '
@@ -237,6 +275,11 @@ class Command(BaseCommand):
             types  = types,
             slugs  = sorted(types.keys()),
         )
+        # Apply preset first, then let any explicit cap override it.
+        preset_name = opts.get('preset')
+        if preset_name:
+            for k, v in PRESETS[preset_name].items():
+                setattr(ctx, k, v)
         if opts.get('cost_cap') is not None:
             ctx.cost_cap = float(opts['cost_cap'])
         if opts.get('watt_cap') is not None:
@@ -257,6 +300,11 @@ class Command(BaseCommand):
             f'seed={opts["seed"]})')
         self.stdout.write(f'Source : {system.source.slug}')
         self.stdout.write(f'Target : {system.target.slug}')
+        preset_tag = f' [preset {preset_name}]' if preset_name else ''
+        self.stdout.write(
+            f'Caps   : cost €{ctx.cost_cap:.0f}  '
+            f'watts {ctx.watt_cap:.0f}  '
+            f'length {ctx.length_cap:.0f}{preset_tag}')
         self.stdout.write('')
 
         for gen in range(opts['gens']):
