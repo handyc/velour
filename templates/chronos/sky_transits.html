@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Sun + Moon Transits — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.tx-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.tx-head h1 { margin:0; }
+.tx-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.tx-empty {
+  margin-top: 1.5rem;
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:1rem 1.25rem; color:#8b949e; font-size:0.95rem;
+}
+
+.tx-card {
+  background:#0d1117;
+  border:1px solid #21262d;
+  border-radius:8px;
+  padding:1rem 1.2rem;
+  margin-top:1rem;
+  display:grid;
+  grid-template-columns: max-content 1fr max-content;
+  gap:1rem 1.5rem;
+  align-items:center;
+}
+.tx-card.transit { border-color: #ff7b72; box-shadow: inset 4px 0 0 #ff7b72; }
+.tx-card.appulse { border-color: #30363d; }
+
+.tx-emoji { font-size:3.5rem; line-height:1; text-align:center; }
+
+.tx-body .when {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color:#c9d1d9; font-size:1.1rem;
+}
+.tx-body .who {
+  color:#c9d1d9; font-size:1.05rem; font-weight:500;
+}
+.tx-body .what {
+  color:#8b949e; font-size:0.85rem; font-family:ui-monospace,monospace;
+  margin-top:0.4rem; line-height:1.6;
+}
+.tx-body .what .lbl { color:#6e7681; font-size:0.7rem;
+  text-transform:uppercase; letter-spacing:0.06em; }
+.tx-body .reasons {
+  margin-top:0.4rem; color:#8b949e; font-size:0.78rem;
+  line-height:1.5;
+}
+.tx-body .reasons li { margin-left:0.6rem; list-style:disc; }
+.tx-body .safety {
+  margin-top:0.4rem;
+  background: rgba(248, 81, 73, 0.08);
+  border-left: 3px solid #f85149;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem; color: #c9d1d9; line-height: 1.45;
+}
+
+.tx-rating {
+  text-align:center; min-width:120px;
+}
+.tx-rating .label {
+  font-size:1rem; font-weight:600; padding:0.25rem 0.6rem;
+  border-radius:4px; display:inline-block;
+}
+.tx-rating .label.excellent { background:#1a4d2e; color:#3fb950; }
+.tx-rating .label.good      { background:#1f3a47; color:#58a6ff; }
+.tx-rating .label.marginal  { background:#3d2e0a; color:#d29922; }
+.tx-rating .label.poor      { background:#3a1f1f; color:#f85149; }
+.tx-rating .label.pending   { background:#1f2330; color:#8b949e; }
+.tx-rating .score {
+  display:block; margin-top:0.25rem;
+  color:#6e7681; font-family:ui-monospace,monospace; font-size:0.78rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tx-head">
+  <h1>Sun + Moon Transits</h1>
+  <span class="meta">All upcoming transits + appulses across watched satellites</span>
+</div>
+
+{% if not rows %}
+<div class="tx-empty">
+  No transits or appulses currently predicted. Run
+  <code>manage.py compute_sat_transits --days 180</code> to widen the
+  search window. Genuine transits are rare — a few per satellite per
+  year per observer location.
+</div>
+{% else %}
+{% for r in rows %}
+<div class="tx-card {{ r.kind }}">
+  <div class="tx-emoji">
+    {% if r.body == 'sun' %}☀️{% elif r.body == 'moon' %}🌙{% endif %}
+  </div>
+  <div class="tx-body">
+    <div class="when">{{ r.event.start|date:'l d M Y · H:i:s' }} <span class="meta" style="color:#6e7681; font-size:0.78rem;">local</span></div>
+    <div class="who">{{ r.event.title|cut:" · sep" }}</div>
+    <div class="what">
+      <span class="lbl">{{ r.kind }}</span>
+      · sep <strong>{{ r.sep_arcmin|floatformat:1 }}'</strong>
+      {% if r.duration_s %}· duration <strong>{{ r.duration_s|floatformat:1 }} s</strong>{% endif %}
+      {% if r.body_alt_deg is not None %}· {{ r.body|capfirst }} alt <strong>{{ r.body_alt_deg|floatformat:0 }}°</strong>{% endif %}
+      {% if r.cond.cloud_pct is not None %}
+        · forecast <strong>{{ r.cond.cloud_label }}</strong> ({{ r.cond.cloud_pct|floatformat:0 }}% cloud)
+      {% elif r.cond.forecast_status == 'pending' %}
+        · forecast <em>not yet covered (5-day horizon)</em>
+      {% endif %}
+      {% if r.body == 'moon' and r.cond.moon_phase_name %}
+        · Moon <strong>{{ r.cond.moon_phase_name }}</strong> ({{ r.cond.moon_illuminated|floatformat:0 }}{% widthratio r.cond.moon_illuminated 1 100 %}% lit)
+      {% endif %}
+    </div>
+    {% if r.cond.rating_reasons %}
+    <ul class="reasons">
+      {% for reason in r.cond.rating_reasons %}<li>{{ reason }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% for note in r.cond.safety_notes %}
+    <div class="safety">⚠ {{ note }}</div>
+    {% endfor %}
+  </div>
+  <div class="tx-rating">
+    <span class="label {{ r.cond.photo_rating }}">{{ r.cond.photo_rating }}</span>
+    <span class="score">{{ r.cond.rating_score }}/100</span>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<div style="margin-top:1.4rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:sky_table' %}" class="btn btn-secondary">Sky table</a>
+  <a href="{% url 'chronos:sky_digest' %}" class="btn btn-secondary">Week digest</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

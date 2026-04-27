@@ -135,6 +135,35 @@
         {% endif %}
     </div>
 
+    {% if upcoming_transits %}
+    <div class="brief-section" style="grid-column: 1 / -1;">
+        <h2>Sun / Moon transits — next 14 days</h2>
+        <ul class="event-list">
+            {% for t in upcoming_transits %}
+            <li>
+                {% if t.body == 'sun' %}☀️{% elif t.body == 'moon' %}🌙{% endif %}
+                <span class="meta">{{ t.event.start|date:'D d M H:i' }}</span>
+                {{ t.event.title|cut:" · sep" }}
+                {% if t.kind == 'transit' %}
+                  · <span style="color:#ff7b72;"><strong>transit</strong></span>
+                {% endif %}
+                · <span style="color:
+                    {% if t.cond.photo_rating == 'excellent' %}#3fb950
+                    {% elif t.cond.photo_rating == 'good' %}#58a6ff
+                    {% elif t.cond.photo_rating == 'marginal' %}#d29922
+                    {% elif t.cond.photo_rating == 'poor' %}#f85149
+                    {% else %}#6e7681{% endif %};">
+                  photo {{ t.cond.photo_rating }}
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+        <div style="margin-top:0.4rem; font-size:0.78rem; color:#6e7681;">
+            <a href="{% url 'chronos:sky_transits' %}" style="color:#58a6ff;">All transits →</a>
+        </div>
+    </div>
+    {% endif %}
+
     {% if environs.available %}
     <div class="brief-section" style="grid-column: 1 / -1;">
         <h2>Environs</h2>

@@ -831,6 +831,7 @@ def _briefing_context(tz):
                 and t not in due_today]
 
     environs = _briefing_environs()
+    upcoming_transits = _briefing_upcoming_transits(now)
 
     return {
         'now':         now,
@@ -843,6 +844,182 @@ def _briefing_context(tz):
         'open_count':  Task.objects.filter(status=Task.STATUS_OPEN).count(),
         'environs':    environs,
         'next_visible_pass': next_visible_pass,
+        'upcoming_transits': upcoming_transits,
+    }
+
+
+def _briefing_upcoming_transits(now, days=14):
+    """Pull next-N-days transits + appulses into a small list for the
+    briefing's "Sun/Moon transits ahead" pin. Includes pre-cooked
+    photo rating from transit_conditions().
+    """
+    import re as _re
+    horizon = now + timedelta(days=days)
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='sat-transits',
+        start__gte=now, start__lte=horizon,
+    ).order_by('start')[:5]
+    out = []
+    for ev in qs:
+        tags = ev.tags or ''
+        kind = 'transit' if 'kind:transit' in tags else 'appulse'
+        body = ('sun' if 'body:sun' in tags
+                else 'moon' if 'body:moon' in tags else '')
+        m_sep = _re.search(r"sep\s+([\d.]+)'", ev.title)
+        m_dur = _re.search(r"·\s+([\d.]+)\s*s\s*$", ev.title)
+        m_balt = _re.search(r'altitude at peak:\s*([\d.\-]+)°', ev.notes or '')
+        sep = float(m_sep.group(1)) if m_sep else None
+        dur = float(m_dur.group(1)) if m_dur else None
+        balt = float(m_balt.group(1)) if m_balt else None
+        cond = transit_conditions(ev, body=body, kind=kind,
+                                  body_alt_deg=balt,
+                                  sep_arcmin=sep, duration_s=dur)
+        out.append({
+            'event': ev, 'kind': kind, 'body': body,
+            'sep_arcmin': sep, 'duration_s': dur, 'cond': cond,
+        })
+    return out
+
+
+def transit_conditions(event, body, kind, body_alt_deg, sep_arcmin,
+                       duration_s):
+    """Compose a "go/no-go" view for a satellite transit/appulse.
+
+    Inputs are the parsed fields the per-sat detail page already
+    extracts. Returns a dict the template can render directly:
+
+        {'cloud_pct':       float | None,
+         'cloud_label':     'clear' | 'partly cloudy' | ... | None,
+         'forecast_status': 'covered' | 'pending' | 'past',
+         'moon_phase_name': str | None  (lunar transits only),
+         'moon_illuminated': float | None  (0..1),
+         'body_alt_deg':    float | None,
+         'sep_arcmin':      float | None,
+         'duration_s':      float | None,
+         'photo_rating':    'excellent' | 'good' | 'marginal' | 'poor',
+         'rating_score':    0..100,
+         'rating_reasons':  list of strings,
+         'safety_notes':    list of strings  (solar filter, etc.)}
+
+    Photo rating heuristics (informal):
+      * altitude > 30° + clear + central transit  → excellent
+      * any of: cloud > 60%, alt < 10°, sep > body radius (appulse) → poor
+      * forecast not yet covering the transit  → 'pending' (rating still
+        gives a no-weather best-case)
+    """
+    from .astro_sources.weather import wmo_label  # noqa: F401 — implicit
+
+    now = djtz.now()
+    horizon_forecast = now + timedelta(days=5, hours=12)
+    cloud_pct = None
+    cloud_label = None
+    forecast_status = 'past' if event.start < now else 'pending'
+
+    if event.start >= now and event.start <= horizon_forecast:
+        wx = pass_weather(event.start, event.end or event.start + timedelta(seconds=60))
+        if wx:
+            cloud_pct = wx['cloud_pct']
+            cloud_label = wx['label']
+            forecast_status = 'covered'
+
+    moon_phase_name = None
+    moon_illuminated = None
+    if body == 'moon':
+        # Read the latest solar_system snapshot — Moon's illuminated_frac
+        # is roughly stable over a couple of days, so we use the most
+        # recent computed value rather than re-running skyfield. For
+        # transits more than a few days out this is approximate.
+        try:
+            from .astro_sources.solar_system import current_state
+            from .models import ClockPrefs
+            prefs = ClockPrefs.load()
+            ss = current_state(prefs.home_lat, prefs.home_lon, prefs.home_elev_m)
+            if ss and ss.get('moon'):
+                # Better: estimate moon phase at the transit time.
+                # For events within ~7 days, the current phase is a
+                # reasonable proxy (moon illumination changes ~3.4%/day).
+                days_off = (event.start - now).total_seconds() / 86400
+                # Synodic month is 29.5 days; phase angle advances
+                # 360°/29.5 = 12.2°/day. Skip detailed computation here
+                # and just report current.
+                moon_phase_name = ss['moon']['phase_name']
+                moon_illuminated = ss['moon']['illuminated_frac']
+        except Exception:
+            pass
+
+    rating_score = 50
+    rating_reasons = []
+
+    if kind == 'transit':
+        # Centrality bonus
+        body_radius_arcmin = (0.266 if body == 'sun' else 0.259) * 60
+        if sep_arcmin is not None:
+            centrality = max(0.0, 1.0 - sep_arcmin / body_radius_arcmin)
+            rating_score += int(centrality * 25)
+            if centrality > 0.7:
+                rating_reasons.append('near-central transit')
+        if duration_s is not None and duration_s > 1.0:
+            rating_score += 5
+            rating_reasons.append(f'duration {duration_s:.1f} s')
+    else:
+        rating_score -= 25
+        rating_reasons.append('appulse — close miss, not a silhouette')
+
+    if body_alt_deg is not None:
+        if body_alt_deg > 30:
+            rating_score += 15
+            rating_reasons.append(f'body high in sky ({body_alt_deg:.0f}°)')
+        elif body_alt_deg < 10:
+            rating_score -= 25
+            rating_reasons.append(f'body very low ({body_alt_deg:.0f}°)')
+
+    if cloud_pct is not None:
+        if cloud_pct < 30:
+            rating_score += 15
+            rating_reasons.append(f'forecast clear ({cloud_pct:.0f}% cloud)')
+        elif cloud_pct < 60:
+            rating_reasons.append(f'forecast partly cloudy ({cloud_pct:.0f}%)')
+        else:
+            rating_score -= 30
+            rating_reasons.append(f'forecast cloudy ({cloud_pct:.0f}%)')
+
+    rating_score = max(0, min(100, rating_score))
+    if forecast_status == 'pending':
+        rating_label = 'pending'
+    elif rating_score >= 80:
+        rating_label = 'excellent'
+    elif rating_score >= 60:
+        rating_label = 'good'
+    elif rating_score >= 40:
+        rating_label = 'marginal'
+    else:
+        rating_label = 'poor'
+
+    safety_notes = []
+    if body == 'sun' and kind == 'transit':
+        safety_notes.append(
+            'NEVER look directly at the Sun — use a solar filter '
+            '(rated optical density 5+) on lens AND viewfinder.'
+        )
+    if duration_s is not None and duration_s < 1.0 and kind == 'transit':
+        safety_notes.append(
+            f'Sub-second event ({duration_s:.1f} s) — use burst mode '
+            'or video at high frame rate to catch the silhouette.'
+        )
+
+    return {
+        'cloud_pct':        cloud_pct,
+        'cloud_label':      cloud_label,
+        'forecast_status':  forecast_status,
+        'moon_phase_name':  moon_phase_name,
+        'moon_illuminated': moon_illuminated,
+        'body_alt_deg':     body_alt_deg,
+        'sep_arcmin':       sep_arcmin,
+        'duration_s':       duration_s,
+        'photo_rating':     rating_label,
+        'rating_score':     rating_score,
+        'rating_reasons':   rating_reasons,
+        'safety_notes':     safety_notes,
     }
 
 
@@ -1432,6 +1609,53 @@ def sky_digest(request):
 
 
 @login_required
+def sky_transits(request):
+    """Consolidated overview of upcoming transits across every watched
+    satellite, with photo conditions per event.
+    """
+    import re as _re
+    djtz.activate(_home_tz())
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='sat-transits',
+        start__gte=djtz.now(),
+    ).order_by('start')
+
+    rows = []
+    for ev in qs:
+        tags = ev.tags or ''
+        kind = 'transit' if 'kind:transit' in tags else 'appulse'
+        body = ('sun' if 'body:sun' in tags
+                else 'moon' if 'body:moon' in tags else '')
+        m_sep = _re.search(r"sep\s+([\d.]+)'", ev.title)
+        m_dur = _re.search(r"·\s+([\d.]+)\s*s\s*$", ev.title)
+        m_balt = _re.search(r'(?:Sun|Moon) altitude at peak:\s*([\d.\-]+)°',
+                            ev.notes or '')
+        sep = float(m_sep.group(1)) if m_sep else None
+        dur = float(m_dur.group(1)) if m_dur else None
+        balt = float(m_balt.group(1)) if m_balt else None
+        # Pull sat slug from tags
+        m_slug = _re.search(r'sat-transit:([\w-]+)', tags)
+        sat_slug = m_slug.group(1) if m_slug else ''
+        rows.append({
+            'event':       ev,
+            'kind':        kind,
+            'body':        body,
+            'sat_slug':    sat_slug,
+            'sep_arcmin':  sep,
+            'duration_s':  dur,
+            'body_alt_deg': balt,
+            'cond':        transit_conditions(
+                ev, body=body, kind=kind,
+                body_alt_deg=balt, sep_arcmin=sep, duration_s=dur,
+            ),
+        })
+
+    return render(request, 'chronos/sky_transits.html', {
+        'rows': rows,
+    })
+
+
+@login_required
 def sky_object(request, slug):
     """Per-object detail: facts + next-14-days passes + ground track."""
     obj = get_object_or_404(TrackedObject, slug=slug)
@@ -1488,14 +1712,21 @@ def sky_object(request, slug):
                 m_dur = _re.search(r"·\s+([\d.]+)\s*s\s*$", t.title)
                 m_balt = _re.search(r'(?:Sun|Moon) altitude at peak:\s*([\d.\-]+)°',
                                     t.notes or '')
-                transits_rich.append({
+                row = {
                     'event':       t,
                     'kind':        kind,
                     'body':        body,
                     'sep_arcmin':  float(m_sep.group(1)) if m_sep else None,
                     'duration_s':  float(m_dur.group(1)) if m_dur else None,
                     'body_alt_deg': float(m_balt.group(1)) if m_balt else None,
-                })
+                }
+                row['cond'] = transit_conditions(
+                    t, body=body, kind=kind,
+                    body_alt_deg=row['body_alt_deg'],
+                    sep_arcmin=row['sep_arcmin'],
+                    duration_s=row['duration_s'],
+                )
+                transits_rich.append(row)
             ctx['transits'] = transits_rich
             if ctx['track']:
                 lat0, lon0, _ = ctx['track'][0]

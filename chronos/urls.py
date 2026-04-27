@@ -46,6 +46,7 @@ urlpatterns = [
     path('sky/',                   views.sky,          name='sky'),
     path('sky/table/',             views.sky_table,    name='sky_table'),
     path('sky/digest/',            views.sky_digest,   name='sky_digest'),
+    path('sky/transits/',          views.sky_transits, name='sky_transits'),
     path('sky.json',               views.sky_json,     name='sky_json'),
     path('sky/<slug:slug>/',       views.sky_object,   name='sky_object'),
 

@@ -159,6 +159,7 @@
         <th>Min sep</th>
         <th>Body alt</th>
         <th>Duration</th>
+        <th>Photo rating</th>
       </tr>
     </thead>
     <tbody>
@@ -184,6 +185,13 @@
         </td>
         <td>
           {% if t.duration_s %}{{ t.duration_s|floatformat:1 }} s{% else %}—{% endif %}
+        </td>
+        <td title="{{ t.cond.rating_reasons|join:' · ' }}">
+          {% if t.cond.photo_rating == 'excellent' %}<span style="color:#3fb950;">★ excellent</span>
+          {% elif t.cond.photo_rating == 'good' %}<span style="color:#58a6ff;">good</span>
+          {% elif t.cond.photo_rating == 'marginal' %}<span style="color:#d29922;">marginal</span>
+          {% elif t.cond.photo_rating == 'poor' %}<span style="color:#f85149;">poor</span>
+          {% else %}<span style="color:#6e7681;">pending</span>{% endif %}
         </td>
       </tr>
       {% endfor %}
