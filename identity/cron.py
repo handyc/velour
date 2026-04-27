@@ -61,6 +61,7 @@ DEFAULT_INTERVALS = {
     'space_weather':     21_600,     # 6 h — Kp / wind / X-ray / aurora from SWPC
     'local_environment': 21_600,     # 6 h — air quality + UV + pollen for observer
     'weather':           21_600,     # 6 h — temp / clouds / precip forecast
+    'pass_digest':       604_800,    # 7 d — weekly Codex sky-digest manual
 }
 
 
@@ -95,7 +96,7 @@ def dispatch(force=None):
             'meditate_deep', 'rebuild_document', 'tile_reflect',
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
-            'local_environment', 'weather',
+            'local_environment', 'weather', 'pass_digest',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -137,6 +138,7 @@ def dispatch(force=None):
         ('space_weather',    _do_space_weather),
         ('local_environment', _do_local_environment),
         ('weather',          _do_weather),
+        ('pass_digest',      _do_pass_digest),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -340,6 +342,16 @@ def _do_weather():
     call_command('refresh_weather', stdout=buf)
     out = buf.getvalue().strip()
     return out.splitlines()[-1] if out else 'weather refreshed'
+
+
+def _do_pass_digest():
+    """Weekly — re-render the Codex Manual that ranks the next 7 days
+    of viewable satellite passes. Idempotent per ISO week."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('compose_pass_digest', quiet=True)
+    return 'sky digest manual re-rendered'
 
 
 def _do_rebuild_document():

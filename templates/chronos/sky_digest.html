@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Sky Digest — Chronos - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+.sd-head { display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap; }
+.sd-head h1 { margin:0; }
+.sd-head .meta { color:#8b949e; font-size:0.9rem; }
+
+.sd-empty {
+  margin-top: 1.5rem;
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:1rem 1.25rem; color:#8b949e; font-size:0.95rem;
+}
+
+.sd-night { margin-top:1.4rem; }
+.sd-night h2 {
+  font-size:0.95rem; margin:0 0 0.5rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.06em;
+  font-weight:500;
+}
+
+.sd-pass {
+  background:#0d1117; border:1px solid #21262d; border-radius:6px;
+  padding:0.7rem 1rem; margin-bottom:0.5rem;
+  display:grid;
+  grid-template-columns: max-content 1fr max-content;
+  align-items:center;
+  gap:1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sd-pass .when {
+  font-size:1.4rem; color:#c9d1d9;
+}
+.sd-pass .when .meta {
+  display:block; color:#6e7681; font-size:0.7rem;
+  text-transform:uppercase; letter-spacing:0.06em;
+}
+.sd-pass .body { font-size:0.92rem; }
+.sd-pass .body .title { color:#c9d1d9; font-weight:500; }
+.sd-pass .body .stats { color:#8b949e; margin-top:0.2rem; font-size:0.85rem; }
+.sd-pass .body .stats .clear { color:#3fb950; }
+.sd-pass .body .stats .partly { color:#d29922; }
+.sd-pass .badge {
+  font-size:0.95rem; color:#3fb950;
+  font-weight:500;
+}
+.sd-pass.top {
+  border-color:#3fb950;
+  box-shadow: inset 4px 0 0 #3fb950;
+}
+
+.sd-rank {
+  margin-top:1.6rem; padding-top:0.8rem; border-top:1px solid #21262d;
+}
+.sd-rank h2 {
+  font-size:0.95rem; margin:0 0 0.5rem;
+  color:#8b949e; text-transform:uppercase; letter-spacing:0.06em;
+  font-weight:500;
+}
+.sd-rank-table {
+  width:100%; border-collapse:collapse; font-family:ui-monospace,monospace;
+  font-size:0.85rem;
+}
+.sd-rank-table th { text-align:left; color:#8b949e; font-weight:500;
+  font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em;
+  border-bottom:1px solid #30363d; padding:0.3rem 0.5rem; }
+.sd-rank-table td { padding:0.4rem 0.5rem; border-bottom:1px solid #161b22;
+  color:#c9d1d9; }
+.sd-rank-table tr.top td { color:#3fb950; font-weight:500; }
+
+.sd-extra { margin-top:1.4rem; padding-top:0.8rem;
+  border-top:1px solid #21262d; color:#8b949e; font-size:0.85rem;
+  line-height:1.5; }
+.sd-extra code { color:#c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sd-head">
+  <h1>Sky Digest</h1>
+  <span class="meta">
+    Top viewable satellite passes · next {{ days }} days · from
+    {{ prefs.home_lat|floatformat:2 }}°N {{ prefs.home_lon|floatformat:2 }}°E
+  </span>
+</div>
+
+{% if not nights %}
+<div class="sd-empty">
+  No clear-sky passes forecast in the next {{ days }} days. Either
+  every visible pass falls under heavy cloud cover, the satellites'
+  ground tracks miss this latitude, or <code>refresh_satellites</code> /
+  <code>refresh_weather</code> haven't run recently.
+</div>
+{% else %}
+{% for n in nights %}
+<div class="sd-night">
+  <h2>{{ n.date|date:'l d M Y' }} → into {{ n.date|date:'l'|add:" night" }}</h2>
+  {% for p in n.passes %}
+  <div class="sd-pass {% if forloop.counter == 1 and forloop.parentloop.counter == 1 %}top{% endif %}">
+    <div class="when">
+      {{ p.when_local|date:'H:i' }}
+      <span class="meta">local</span>
+    </div>
+    <div class="body">
+      <div class="title">{{ p.event.title }}</div>
+      <div class="stats">
+        <span class="clear">{{ p.weather.label }}</span>
+        · {{ p.duration_s }} s
+        · max alt {{ p.max_alt }}°
+      </div>
+    </div>
+    <div class="badge">★ {{ p.score|floatformat:0 }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endfor %}
+
+<div class="sd-rank">
+  <h2>Ranked top {{ rows|length }}</h2>
+  <table class="sd-rank-table">
+    <thead>
+      <tr>
+        <th>#</th><th>When (local)</th><th>Object</th>
+        <th>Max alt</th><th>Dur</th><th>Cloud</th><th>Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr {% if forloop.counter == 1 %}class="top"{% endif %}>
+        <td>{{ forloop.counter }}</td>
+        <td>{{ r.event.start|date:'D d M H:i' }}</td>
+        <td>{{ r.event.title|cut:' · '|truncatechars:30 }}</td>
+        <td>{{ r.max_alt }}°</td>
+        <td>{{ r.duration_s }} s</td>
+        <td>{{ r.weather.cloud_pct|floatformat:0 }}%</td>
+        <td>{{ r.score|floatformat:0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="sd-extra">
+  Score = max altitude × duration × clear-sky fraction. The same ranking
+  is composed into a Codex Manual <em>weekly</em> by <code>identity_cron</code>'s
+  <code>pass_digest</code> pipeline. View the latest published edition at
+  the <a href="{% url 'codex:list' %}">Codex</a>.
+</div>
+
+<div style="margin-top:1.2rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+  <a href="{% url 'chronos:sky' %}" class="btn btn-secondary">Sky dome</a>
+  <a href="{% url 'chronos:sky_table' %}" class="btn btn-secondary">Sky table</a>
+  <a href="{% url 'chronos:weather' %}" class="btn btn-secondary">Weather</a>
+  <a href="{% url 'chronos:home' %}" class="btn btn-secondary">Chronos home</a>
+</div>
+{% endblock %}

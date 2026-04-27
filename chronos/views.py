@@ -846,6 +846,53 @@ def _briefing_context(tz):
     }
 
 
+def top_viewable_passes(now, days=7, limit=20):
+    """Rank the next `days` days of satellite-pass CalendarEvents
+    by viewing quality.
+
+    Score = max_alt_deg × duration_s × (100 - cloud_pct) / 100, so a
+    higher arc + longer duration + clearer sky scores higher. Returns
+    list of dicts:
+
+        [{'event': <CalendarEvent>, 'weather': {...}, 'score': float,
+          'max_alt': int, 'duration_s': int, 'when_local': datetime},
+         ...]
+
+    Only viewable (cloud<60%, no rain) passes are scored. Pass
+    duration and max altitude are extracted from the existing event
+    title/notes which refresh_satellites already wrote in a stable
+    format ("ISS (ZARYA) pass · max 84°", notes contain "Duration N s").
+    """
+    import re as _re
+    horizon = now + timedelta(days=days)
+    qs = CalendarEvent.objects.filter(
+        source='feed', tradition__slug='satellites',
+        start__gte=now, start__lte=horizon,
+    ).order_by('start')
+
+    out = []
+    for ev in qs:
+        if not ev.end:
+            continue
+        wx = pass_weather(ev.start, ev.end)
+        if not wx or not wx['viewable']:
+            continue
+        m_alt = _re.search(r'max\s+(\d+)°', ev.title)
+        max_alt = int(m_alt.group(1)) if m_alt else 0
+        m_dur = _re.search(r'Duration\s+(\d+)\s*s', ev.notes or '')
+        duration_s = int(m_dur.group(1)) if m_dur else 0
+        score = max_alt * duration_s * (100 - wx['cloud_pct']) / 100
+        out.append({
+            'event':       ev,
+            'weather':     wx,
+            'score':       score,
+            'max_alt':     max_alt,
+            'duration_s':  duration_s,
+        })
+    out.sort(key=lambda r: -r['score'])
+    return out[:limit]
+
+
 def _next_clear_sky_pass(now):
     """Find the next satellite-pass CalendarEvent in the next 48 h
     where the cloud-cover forecast averages < 60% over the pass.
@@ -1345,6 +1392,43 @@ _DAILY_METRICS_LIST = [
     ('uv_index_max',           ''),
     ('weather_code_daily',     ''),
 ]
+
+
+@login_required
+def sky_digest(request):
+    """The next 7 days of viewable satellite passes, ranked.
+
+    The same ranking that compose_pass_digest writes to a Codex
+    Manual weekly. This view is the live reading.
+    """
+    prefs = ClockPrefs.load()
+    home_tz = _home_tz()
+    djtz.activate(home_tz)
+    now = djtz.now()
+    rows = top_viewable_passes(now, days=7)
+    # Group by local date so the page reads as a multi-night plan.
+    from collections import defaultdict
+    by_night = defaultdict(list)
+    for r in rows:
+        local = r['event'].start.astimezone(home_tz)
+        # "Pre-dawn" passes belong to the previous evening conceptually;
+        # group anything before noon under the previous date.
+        night_key = local.date() if local.hour >= 12 else (local - timedelta(days=1)).date()
+        by_night[night_key].append({**r, 'when_local': local})
+    nights = []
+    for date_key in sorted(by_night.keys()):
+        nights.append({
+            'date': date_key,
+            'passes': sorted(by_night[date_key],
+                             key=lambda p: p['when_local']),
+        })
+    return render(request, 'chronos/sky_digest.html', {
+        'prefs':  prefs,
+        'now':    now,
+        'rows':   rows,
+        'nights': nights,
+        'days':   7,
+    })
 
 
 @login_required

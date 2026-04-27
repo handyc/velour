@@ -45,6 +45,7 @@ urlpatterns = [
     # generic <slug> route or Django would route 'table' as a slug).
     path('sky/',                   views.sky,          name='sky'),
     path('sky/table/',             views.sky_table,    name='sky_table'),
+    path('sky/digest/',            views.sky_digest,   name='sky_digest'),
     path('sky.json',               views.sky_json,     name='sky_json'),
     path('sky/<slug:slug>/',       views.sky_object,   name='sky_object'),
 
