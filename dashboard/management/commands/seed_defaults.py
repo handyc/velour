@@ -36,60 +36,71 @@ class Command(BaseCommand):
 
         # (tz_name, label, sort_order, color)
         # Color is optional — empty string means default grey.
-        # Sort order follows UTC offset (negative = west, positive = east).
-        # Same-timezone cities sort alphabetically by label.
+        # Sort order follows current UTC offset (DST applied) ascending,
+        # so the list reads west→east, earliest→latest local time.
+        # Same-offset cities are listed alphabetically. Step is 10 to
+        # leave room for hand-inserted clocks between cities.
+        # update_or_create (not get_or_create) so re-running this seed
+        # also corrects sort_order/color on existing rows — important
+        # when this list shifts over time (DST quirks, new cities).
         cities = [
-            ('Pacific/Midway',        'Midway',        -1100, ''),
-            ('Pacific/Honolulu',      'Honolulu',      -1000, ''),
-            ('Pacific/Marquesas',     'Marquesas',      -950, ''),
-            ('America/Anchorage',     'Anchorage',      -900, ''),
-            ('America/Los_Angeles',   'Los Angeles',    -800, ''),
-            ('America/Denver',        'Denver',         -700, ''),
-            ('America/Chicago',       'Chicago',        -600, ''),
-            ('America/New_York',      'New York',       -500, ''),
-            ('America/New_York',      'Tampa',          -500, '#f4a460'),
-            ('America/Caracas',       'Caracas',        -400, ''),
-            ('America/St_Johns',      "St. John's",     -350, ''),
-            ('America/Sao_Paulo',     'São Paulo',      -300, '#2ea043'),
-            ('Atlantic/South_Georgia','S. Georgia',     -200, ''),
-            ('Atlantic/Azores',       'Azores',         -100, ''),
-            ('Etc/UTC',               'UTC',              -1, ''),
-            ('Europe/London',         'London',            0, '#cb4b16'),
-            ('Europe/Amsterdam',      'Enschede',        100, '#8b4513'),
-            ('Europe/Amsterdam',      'Leiden',           100, '#228b22'),
-            ('Europe/Berlin',         'Ochtrup',         100, '#9b59b6'),
-            ('Europe/Athens',         'Athens',           200, ''),
-            ('Europe/Moscow',         'Moscow',           300, '#58a6ff'),
-            ('Asia/Tehran',           'Tehran',           350, ''),
-            ('Asia/Dubai',            'Dubai',            400, ''),
-            ('Asia/Kabul',            'Kabul',            450, ''),
-            ('Asia/Karachi',          'Karachi',          500, ''),
-            ('Asia/Kolkata',          'Mumbai',           550, ''),
-            ('Asia/Kathmandu',        'Kathmandu',        575, ''),
-            ('Asia/Dhaka',            'Dhaka',            600, ''),
-            ('Asia/Yangon',           'Yangon',           650, ''),
-            ('Asia/Bangkok',          'Bangkok',          700, ''),
-            ('Asia/Shanghai',         'Guangzhou',        800, '#800000'),
-            ('Asia/Shanghai',         'Shanghai',         800, ''),
-            ('Australia/Eucla',       'Eucla',            875, ''),
-            ('Asia/Tokyo',            'Tokyo',            900, ''),
-            ('Australia/Darwin',      'Darwin',           950, ''),
-            ('Australia/Sydney',      'Sydney',          1000, ''),
-            ('Australia/Lord_Howe',   'Lord Howe',       1050, ''),
-            ('Pacific/Noumea',        'Nouméa',          1100, ''),
-            ('Pacific/Auckland',      'Auckland',        1200, ''),
-            ('Pacific/Chatham',       'Chatham Is.',     1275, ''),
-            ('Pacific/Tongatapu',     'Tonga',           1300, ''),
-            ('Pacific/Kiritimati',    'Kiritimati',      1400, ''),
+            ('Pacific/Midway',        'Midway',          0, ''),
+            ('Pacific/Honolulu',      'Honolulu',       10, ''),
+            ('Pacific/Marquesas',     'Marquesas',      20, ''),
+            ('America/Anchorage',     'Anchorage',      30, ''),
+            ('America/Los_Angeles',   'Los Angeles',    40, ''),
+            ('America/Denver',        'Denver',         50, ''),
+            ('America/Chicago',       'Chicago',        60, ''),
+            ('America/New_York',      'New York',       70, ''),
+            ('America/New_York',      'Tampa',          80, '#f4a460'),
+            ('America/Caracas',       'Caracas',        90, ''),
+            ('America/Sao_Paulo',     'São Paulo',     100, '#2ea043'),
+            ('America/St_Johns',      "St. John's",    110, ''),
+            ('Atlantic/South_Georgia','S. Georgia',    120, ''),
+            ('Atlantic/Azores',       'Azores',        130, ''),
+            ('Etc/UTC',               'UTC',           140, ''),
+            ('Europe/London',         'London',        150, '#cb4b16'),
+            ('Europe/Amsterdam',      'Enschede',      160, '#8b4513'),
+            ('Europe/Amsterdam',      'Leiden',        170, '#228b22'),
+            ('Europe/Berlin',         'Ochtrup',       180, '#9b59b6'),
+            ('Europe/Athens',         'Athens',        190, ''),
+            ('Europe/Moscow',         'Moscow',        200, '#58a6ff'),
+            ('Asia/Tehran',           'Tehran',        210, ''),
+            ('Asia/Dubai',            'Dubai',         220, ''),
+            ('Asia/Kabul',            'Kabul',         230, ''),
+            ('Asia/Karachi',          'Karachi',       240, ''),
+            ('Asia/Kolkata',          'Mumbai',        250, ''),
+            ('Asia/Kathmandu',        'Kathmandu',     260, ''),
+            ('Asia/Dhaka',            'Dhaka',         270, ''),
+            ('Asia/Yangon',           'Yangon',        280, ''),
+            ('Asia/Bangkok',          'Bangkok',       290, ''),
+            ('Asia/Shanghai',         'Guangzhou',     300, '#800000'),
+            ('Asia/Shanghai',         'Shanghai',      310, ''),
+            ('Australia/Eucla',       'Eucla',         320, ''),
+            ('Asia/Tokyo',            'Tokyo',         330, ''),
+            ('Australia/Darwin',      'Darwin',        340, ''),
+            ('Australia/Sydney',      'Sydney',        350, ''),
+            ('Australia/Lord_Howe',   'Lord Howe',     360, ''),
+            ('Pacific/Noumea',        'Nouméa',        370, ''),
+            ('Pacific/Auckland',      'Auckland',      380, ''),
+            ('Pacific/Chatham',       'Chatham Is.',   390, ''),
+            ('Pacific/Tongatapu',     'Tonga',         400, ''),
+            ('Pacific/Kiritimati',    'Kiritimati',    410, ''),
         ]
         created = 0
+        updated = 0
         for tz, label, sort, color in cities:
-            _, c = WatchedTimezone.objects.get_or_create(
+            _, c = WatchedTimezone.objects.update_or_create(
                 tz_name=tz, label=label,
                 defaults={'sort_order': sort, 'color': color})
             if c:
                 created += 1
-        self.stdout.write(f'  Chronos: {created} new clocks, {len(cities)} total')
+            else:
+                updated += 1
+        self.stdout.write(
+            f'  Chronos: {created} new clocks, '
+            f'{updated} updated, {len(cities)} total'
+        )
 
     def _seed_fleet(self):
         from nodes.models import Node, HardwareProfile
