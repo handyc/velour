@@ -19,6 +19,16 @@ VENUS_SIDEREAL_DAY = 243.0226
 VENUS_ORBITAL_YEAR = 224.70069
 VENUS_SOLAR_DAY = 1.0 / (1.0 / VENUS_ORBITAL_YEAR + 1.0 / VENUS_SIDEREAL_DAY)
 
+# Tick rates: how fast a *local* second advances per real (SI) second.
+#   Earth: 1.0 (definition).
+#   Mars: 86400 / (88775.244 SI sec per sol) ≈ 0.97324  → MTC ticks ~3% slower.
+#   Venus: 86400 / (~10_087_193 SI sec per Venus solar day) ≈ 0.00857
+#          → VST ticks ~117× slower than Earth.
+# Used by the home page's JS so each clock advances at the right rate
+# from a single page-load snapshot, without per-second server polling.
+MARS_TICK_RATE = 1.0 / MARS_SOL_IN_EARTH_DAYS
+VENUS_TICK_RATE = 1.0 / VENUS_SOLAR_DAY
+
 
 MARS_LANDMARKS = [
     {
@@ -66,7 +76,11 @@ def _mars_msd(now_utc):
 
 
 def _lmst_snapshot(msd, landmark, now_utc):
-    """Compute LMST at landmark's longitude and build a snapshot dict."""
+    """Compute LMST at landmark's longitude and build a snapshot dict.
+
+    Includes tick parameters so JS can advance the displayed clock
+    between page loads at the correct (slower-than-Earth) rate.
+    """
     lon_offset = landmark['longitude_east'] / 360.0
     msd_local = msd + lon_offset
     local_sol_floor = int(msd_local) if msd_local >= 0 else int(msd_local) - 1
@@ -76,10 +90,14 @@ def _lmst_snapshot(msd, landmark, now_utc):
     m = int((total_seconds % 3600) // 60)
     s = int(total_seconds % 60)
     if landmark['sol_mode'] == 'mission':
-        sol = local_sol_floor - landmark['landing_msd_local']
-        sol_str = f'Sol {sol}' if sol >= 0 else f'Pre-landing ({sol})'
+        sol_offset = landmark['landing_msd_local']
+        sol = local_sol_floor - sol_offset
+        sol_prefix = 'Sol '
+        sol_str = f'{sol_prefix}{sol}' if sol >= 0 else f'Pre-landing ({sol})'
     else:
-        sol_str = f'MSD {local_sol_floor}'
+        sol_offset = 0
+        sol_prefix = 'MSD '
+        sol_str = f'{sol_prefix}{local_sol_floor}'
     return {
         'key': landmark['key'],
         'label': landmark['label'],
@@ -88,6 +106,13 @@ def _lmst_snapshot(msd, landmark, now_utc):
         'time_str': f'{h:02d}:{m:02d}:{s:02d}',
         'utc_offset': landmark['longitude_label'],
         'epoch_ms': int(now_utc.timestamp() * 1000),
+        # JS-tick parameters
+        'kind': 'planet',
+        'tick_rate': MARS_TICK_RATE,
+        'sol_at_epoch': local_sol_floor,
+        'second_at_epoch': total_seconds,
+        'sol_prefix': sol_prefix,
+        'sol_offset': sol_offset,
     }
 
 
@@ -124,4 +149,12 @@ def venus_snapshot(now_utc=None):
         'time_str': f'{h:02d}:{m:02d}:{s:02d}',
         'utc_offset': 'λ 0° · retrograde',
         'epoch_ms': int(now_utc.timestamp() * 1000),
+        # JS-tick parameters — Venus seconds are ~117× slower than Earth's,
+        # so this clock will visibly tick once every ~1.95 minutes of real time.
+        'kind': 'planet',
+        'tick_rate': VENUS_TICK_RATE,
+        'sol_at_epoch': sol,
+        'second_at_epoch': total_seconds,
+        'sol_prefix': 'Sol ',
+        'sol_offset': 0,
     }

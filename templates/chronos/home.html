@@ -69,26 +69,40 @@
 <h2 style="margin-top: 1.25rem; margin-bottom: 0.25rem;">Other Worlds</h2>
 <div class="clock-grid">
     {% for m in mars_clocks %}
-    <div class="card clock-card mars">
+    <div class="card clock-card mars"
+         data-clock-kind="planet"
+         data-clock-epoch-ms="{{ m.epoch_ms }}"
+         data-clock-tick-rate="{{ m.tick_rate }}"
+         data-clock-sol-at-epoch="{{ m.sol_at_epoch }}"
+         data-clock-second-at-epoch="{{ m.second_at_epoch }}"
+         data-clock-sol-prefix="{{ m.sol_prefix }}"
+         data-clock-sol-offset="{{ m.sol_offset }}">
         <div class="label-block">
             <div class="label">{{ m.label }}</div>
             <div class="tz">{{ m.tz_name }}</div>
         </div>
         <div class="date-time-block">
-            <span class="date">{{ m.date_str }}</span>
-            <span class="time">{{ m.time_str }}</span>
+            <span class="date js-clock-date">{{ m.date_str }}</span>
+            <span class="time js-clock-time">{{ m.time_str }}</span>
         </div>
         <div class="offset">{{ m.utc_offset }}</div>
     </div>
     {% endfor %}
-    <div class="card clock-card venus">
+    <div class="card clock-card venus"
+         data-clock-kind="planet"
+         data-clock-epoch-ms="{{ venus_clock.epoch_ms }}"
+         data-clock-tick-rate="{{ venus_clock.tick_rate }}"
+         data-clock-sol-at-epoch="{{ venus_clock.sol_at_epoch }}"
+         data-clock-second-at-epoch="{{ venus_clock.second_at_epoch }}"
+         data-clock-sol-prefix="{{ venus_clock.sol_prefix }}"
+         data-clock-sol-offset="{{ venus_clock.sol_offset }}">
         <div class="label-block">
             <div class="label">{{ venus_clock.label }}</div>
             <div class="tz">{{ venus_clock.tz_name }}</div>
         </div>
         <div class="date-time-block">
-            <span class="date">{{ venus_clock.date_str }}</span>
-            <span class="time">{{ venus_clock.time_str }}</span>
+            <span class="date js-clock-date">{{ venus_clock.date_str }}</span>
+            <span class="time js-clock-time">{{ venus_clock.time_str }}</span>
         </div>
         <div class="offset">{{ venus_clock.utc_offset }}</div>
     </div>

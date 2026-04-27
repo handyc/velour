@@ -89,6 +89,50 @@
         setInterval(paint, topbarShowSeconds ? 1000 : 15000);
     });
 
+    // --- planetary clock cards (Mars MTC, rover LMST, Venus VST) ----
+    // These don't tick at 1 Earth-second per tick. A Mars second is
+    // ~1.027 Earth seconds (rate ~0.973); a Venus second is ~117 Earth
+    // seconds (rate ~0.00857). We snapshot once at page load and let JS
+    // advance from there at the right rate — exact arithmetic, no drift.
+    const planetCards = document.querySelectorAll(
+        '.clock-card[data-clock-kind="planet"]'
+    );
+    planetCards.forEach(function (card) {
+        const epochMs = parseInt(card.dataset.clockEpochMs || '0', 10);
+        const tickRate = parseFloat(card.dataset.clockTickRate || '1');
+        const solAtEpoch = parseInt(card.dataset.clockSolAtEpoch || '0', 10);
+        const secAtEpoch = parseFloat(card.dataset.clockSecondAtEpoch || '0');
+        const solPrefix = card.dataset.clockSolPrefix || 'Sol ';
+        const solOffset = parseInt(card.dataset.clockSolOffset || '0', 10);
+        const dateEl = card.querySelector('.js-clock-date');
+        const timeEl = card.querySelector('.js-clock-time');
+
+        function paint() {
+            const elapsedReal = (Date.now() - epochMs) / 1000;
+            const localElapsed = elapsedReal * tickRate;
+            const totalSec = secAtEpoch + localElapsed;
+            const solsAdvanced = Math.floor(totalSec / 86400);
+            const inSol = totalSec - solsAdvanced * 86400;
+            const sol = solAtEpoch + solsAdvanced - solOffset;
+            const h = Math.floor(inSol / 3600);
+            const m = Math.floor((inSol % 3600) / 60);
+            const s = Math.floor(inSol % 60);
+            if (dateEl) {
+                dateEl.textContent = sol >= 0
+                    ? `${solPrefix}${sol}`
+                    : `Pre-landing (${sol})`;
+            }
+            if (timeEl) {
+                timeEl.textContent =
+                    String(h).padStart(2, '0') + ':' +
+                    String(m).padStart(2, '0') + ':' +
+                    String(s).padStart(2, '0');
+            }
+        }
+        paint();
+        setInterval(paint, 1000);
+    });
+
     // --- periodic re-sync against the server ------------------------
     function resyncTopbar() {
         if (!topbar) return;
