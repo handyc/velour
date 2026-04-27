@@ -1469,6 +1469,34 @@ def sky_object(request, slug):
             ctx['passes'] = passes
             ctx['track'] = ground_track(tle, minutes=180, step_seconds=30)
             ctx['track_svg_paths'] = _ground_track_svg(ctx['track'])
+            # Pull persisted transits + appulses for this sat (emitted
+            # weekly by compute_sat_transits) and pre-cook the columns
+            # so the template stays clean.
+            import re as _re
+            transit_qs = CalendarEvent.objects.filter(
+                source='feed', tradition__slug='sat-transits',
+                tags__contains=f'sat-transit:{obj.slug}',
+                start__gte=djtz.now(),
+            ).order_by('start')[:20]
+            transits_rich = []
+            for t in transit_qs:
+                tags = t.tags or ''
+                kind = 'transit' if 'kind:transit' in tags else 'appulse'
+                body = ('sun' if 'body:sun' in tags
+                        else 'moon' if 'body:moon' in tags else '')
+                m_sep = _re.search(r"sep\s+([\d.]+)'", t.title)
+                m_dur = _re.search(r"·\s+([\d.]+)\s*s\s*$", t.title)
+                m_balt = _re.search(r'(?:Sun|Moon) altitude at peak:\s*([\d.\-]+)°',
+                                    t.notes or '')
+                transits_rich.append({
+                    'event':       t,
+                    'kind':        kind,
+                    'body':        body,
+                    'sep_arcmin':  float(m_sep.group(1)) if m_sep else None,
+                    'duration_s':  float(m_dur.group(1)) if m_dur else None,
+                    'body_alt_deg': float(m_balt.group(1)) if m_balt else None,
+                })
+            ctx['transits'] = transits_rich
             if ctx['track']:
                 lat0, lon0, _ = ctx['track'][0]
                 ctx['track_now_xy'] = (

@@ -62,6 +62,7 @@ DEFAULT_INTERVALS = {
     'local_environment': 21_600,     # 6 h — air quality + UV + pollen for observer
     'weather':           21_600,     # 6 h — temp / clouds / precip forecast
     'pass_digest':       604_800,    # 7 d — weekly Codex sky-digest manual
+    'sat_transits':      604_800,    # 7 d — sun/moon transit predictions
 }
 
 
@@ -97,6 +98,7 @@ def dispatch(force=None):
             'morning_briefing', 'app_status_report', 'backup_run',
             'sky_satellites', 'sky_neos', 'space_weather',
             'local_environment', 'weather', 'pass_digest',
+            'sat_transits',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -139,6 +141,7 @@ def dispatch(force=None):
         ('local_environment', _do_local_environment),
         ('weather',          _do_weather),
         ('pass_digest',      _do_pass_digest),
+        ('sat_transits',     _do_sat_transits),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -352,6 +355,20 @@ def _do_pass_digest():
     buf = io.StringIO()
     call_command('compose_pass_digest', quiet=True)
     return 'sky digest manual re-rendered'
+
+
+def _do_sat_transits():
+    """Weekly — predict next 90 days of solar/lunar transits and
+    appulses for each watched satellite. Emits CalendarEvents under
+    the 'Sat Transits' tradition + opens an Identity Concern per
+    on-disk transit. Heavy by chronos standards (~3 s per sat) but
+    weekly cadence keeps load minimal."""
+    from django.core.management import call_command
+    import io
+    buf = io.StringIO()
+    call_command('compute_sat_transits', stdout=buf)
+    out = buf.getvalue().strip()
+    return out.splitlines()[-1] if out else 'sat transits computed'
 
 
 def _do_rebuild_document():

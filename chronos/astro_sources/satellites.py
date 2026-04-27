@@ -238,6 +238,140 @@ def ground_track(tle, minutes=180, step_seconds=30):
     return out
 
 
+def find_transits(tle, lat, lon, elev_m=0.0, days=30,
+                  appulse_max_deg=1.0, coarse_step_s=60,
+                  fine_step_s=0.5):
+    """Predict times when a satellite passes in front of (or very near)
+    the Sun or Moon as seen from the observer.
+
+    Algorithm:
+      1. Coarse-scan the next `days` days at `coarse_step_s` resolution
+         and compute the angular separation (sat ↔ body) at each step.
+      2. Identify local minima where separation < `appulse_max_deg`.
+      3. Around each local minimum, refine at `fine_step_s` resolution
+         (typically 0.5-1 s) over a ±2-minute window to find the exact
+         peak time and minimum separation.
+      4. Classify each refined event:
+            - 'transit'  : minimum < body angular radius (sat silhouette
+                           crosses the disk)
+            - 'appulse'  : minimum < appulse_max_deg but > body radius
+                           (close approach, pretty in a wide-field shot)
+      5. Filter out events when the body is below the observer's
+         horizon (you can't see the sun if it's set).
+
+    Returns a list of dicts:
+
+        [{'body':'sun'|'moon',
+          'kind':'transit'|'appulse',
+          'peak_at':       datetime UTC of closest approach,
+          'min_sep_deg':   float,
+          'body_alt_deg':  float (alt of body at peak),
+          'body_az_deg':   float,
+          'sat_alt_deg':   float,
+          'duration_s':    float (transit only — entry to exit),
+         }, ...]
+
+    Body angular radii used:
+        Sun  ≈ 0.266° (varies ±1.7% with Earth's orbit)
+        Moon ≈ 0.259° (varies ±5% with lunar distance)
+    """
+    import numpy as np
+    ts, eph = _loader_get()
+    if ts is None or eph is None:
+        return []
+    sat = _make_satellite(tle, ts)
+    observer = _make_observer(lat, lon, elev_m)
+
+    n = int(days * 86400 / coarse_step_s)
+    t0_dt = dt.datetime.now(dt.timezone.utc)
+    times_dt = [t0_dt + dt.timedelta(seconds=i * coarse_step_s) for i in range(n)]
+    times = ts.from_datetimes(times_dt)
+
+    sat_alt, sat_az, _ = (sat - observer).at(times).altaz()
+    sun_pos = (eph['earth'] + observer).at(times).observe(eph['sun']).apparent()
+    sun_alt, sun_az, _ = sun_pos.altaz()
+    moon_pos = (eph['earth'] + observer).at(times).observe(eph['moon']).apparent()
+    moon_alt, moon_az, _ = moon_pos.altaz()
+
+    results = []
+    for body_name, b_alt, b_az in [
+        ('sun',  sun_alt.degrees,  sun_az.degrees),
+        ('moon', moon_alt.degrees, moon_az.degrees),
+    ]:
+        sep = _ang_sep_deg(sat_alt.degrees, sat_az.degrees, b_alt, b_az)
+        # Coarse local minima below the appulse threshold.
+        candidates = []
+        for i in range(1, n - 1):
+            if sep[i] < appulse_max_deg and sep[i] <= sep[i-1] and sep[i] <= sep[i+1]:
+                candidates.append(i)
+
+        for idx in candidates:
+            window = 120  # seconds either side
+            t_min_dt = times_dt[idx] - dt.timedelta(seconds=window)
+            t_max_dt = times_dt[idx] + dt.timedelta(seconds=window)
+            n_fine = int((2 * window) / fine_step_s) + 1
+            fine_dts = [t_min_dt + dt.timedelta(seconds=k * fine_step_s)
+                        for k in range(n_fine)]
+            fine_t = ts.from_datetimes(fine_dts)
+            sat_a, sat_z, _ = (sat - observer).at(fine_t).altaz()
+            body = eph['sun'] if body_name == 'sun' else eph['moon']
+            body_p = (eph['earth'] + observer).at(fine_t).observe(body).apparent()
+            body_a, body_z, _ = body_p.altaz()
+            seps_fine = _ang_sep_deg(sat_a.degrees, sat_z.degrees,
+                                     body_a.degrees, body_z.degrees)
+
+            min_i = int(seps_fine.argmin())
+            min_sep = float(seps_fine[min_i])
+            peak_at = fine_dts[min_i]
+            body_alt_at_peak = float(body_a.degrees[min_i])
+            body_az_at_peak = float(body_z.degrees[min_i])
+            sat_alt_at_peak = float(sat_a.degrees[min_i])
+
+            if body_alt_at_peak <= 0:
+                continue  # body below horizon — invisible
+
+            body_radius = 0.266 if body_name == 'sun' else 0.259
+            kind = 'transit' if min_sep < body_radius else 'appulse'
+
+            duration_s = 0.0
+            if kind == 'transit':
+                # Walk outward from peak until separation exceeds body
+                # radius — that's entry/exit.
+                left = min_i
+                while left > 0 and seps_fine[left] < body_radius:
+                    left -= 1
+                right = min_i
+                while right < n_fine - 1 and seps_fine[right] < body_radius:
+                    right += 1
+                duration_s = (right - left) * fine_step_s
+
+            results.append({
+                'body':         body_name,
+                'kind':         kind,
+                'peak_at':      peak_at,
+                'min_sep_deg':  min_sep,
+                'body_alt_deg': body_alt_at_peak,
+                'body_az_deg':  body_az_at_peak,
+                'sat_alt_deg':  sat_alt_at_peak,
+                'duration_s':   duration_s,
+            })
+
+    results.sort(key=lambda r: r['peak_at'])
+    return results
+
+
+def _ang_sep_deg(alt1, az1, alt2, az2):
+    """Angular separation (great-circle) between two alt/az points
+    on the celestial hemisphere, in degrees. Inputs are numpy arrays
+    or scalars."""
+    import numpy as np
+    a1 = np.radians(alt1); z1 = np.radians(az1)
+    a2 = np.radians(alt2); z2 = np.radians(az2)
+    cos_d = (np.sin(a1) * np.sin(a2)
+             + np.cos(a1) * np.cos(a2) * np.cos(z1 - z2))
+    return np.degrees(np.arccos(np.clip(cos_d, -1, 1)))
+
+
 def get(year):
     """Match the ASTRO_SOURCES protocol — but satellites don't seed
     yearly events. Return empty so seed_astronomy doesn't pull anything.
