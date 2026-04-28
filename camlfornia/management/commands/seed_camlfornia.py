@@ -6,6 +6,7 @@ Order is the canonical learning order; difficulty is mostly cosmetic.
 
 from django.core.management.base import BaseCommand
 
+from camlfornia.curriculum import EXTRA_LESSONS
 from camlfornia.models import Lesson
 
 
@@ -340,7 +341,7 @@ class Command(BaseCommand):
             self.stdout.write(f'Deleted {n} existing lessons.')
 
         created = updated = 0
-        for spec in LESSONS:
+        for spec in LESSONS + EXTRA_LESSONS:
             obj, was_created = Lesson.objects.update_or_create(
                 slug=spec['slug'],
                 defaults={k: v for k, v in spec.items() if k != 'slug'},
