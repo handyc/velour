@@ -339,47 +339,61 @@
     const langButtons = langBar
         ? Array.from(langBar.querySelectorAll('.quill-lang-btn')) : [];
 
+    // Track which contenteditable body last had focus and what
+    // selection range it had — so a clicked language button can
+    // insert into it without focus being stolen by the button itself.
+    let lastFocusedBody = null;
+    let savedRange = null;
+
+    function rememberRange() {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const r = sel.getRangeAt(0);
+        if (lastFocusedBody && lastFocusedBody.contains(r.startContainer)) {
+            savedRange = r.cloneRange();
+        }
+    }
+
     function setActiveLang(btn) {
         langButtons.forEach(b => b.classList.toggle('active', b === btn));
-        if (!btn) { activeLang = null; return; }
+        if (!btn) {
+            activeLang = null;
+            flashStatus('cleared (next typing → section default)');
+            return;
+        }
         activeLang = {
             slug: btn.dataset.slug,
             bcp47: btn.dataset.bcp47,
             direction: btn.dataset.direction,
             fontstack: btn.dataset.fontstack,
+            name: btn.querySelector('.quill-lang-name').textContent.trim(),
         };
     }
 
-    langButtons.forEach((btn) => {
-        btn.addEventListener('click', () => setActiveLang(btn));
-    });
-
-    // Cmd/Ctrl+1..9 select the first nine languages. Cmd/Ctrl+0
-    // clears the active language (next typing flows in the section's
-    // primary language).
-    document.addEventListener('keydown', (e) => {
-        if (!(e.metaKey || e.ctrlKey)) return;
-        if (e.key >= '1' && e.key <= '9') {
-            const idx = parseInt(e.key, 10) - 1;
-            if (idx < langButtons.length) {
-                e.preventDefault();
-                setActiveLang(langButtons[idx]);
-            }
-        } else if (e.key === '0') {
-            e.preventDefault();
-            setActiveLang(null);
-        }
-    });
-
-    /* ─── Insert language span at cursor ────────────────────── */
-    // When a language is active, the next typed character goes into
-    // a `<span lang="..." dir="..." style="font-family: ...">` so the
-    // browser switches font + direction inline. We do this by inserting
-    // an empty span on focus + keystroke, placing the cursor inside.
     function insertLangSpan() {
-        if (!activeLang) return;
+        if (!activeLang) return false;
+        if (!lastFocusedBody) {
+            flashStatus('click into a section first', 'error');
+            return false;
+        }
+        // Restore focus + selection to the last-edited body.
+        lastFocusedBody.focus();
         const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
+        const inBody = sel && sel.rangeCount > 0
+            && lastFocusedBody.contains(sel.getRangeAt(0).startContainer);
+        if (!inBody) {
+            if (savedRange && lastFocusedBody.contains(savedRange.startContainer)) {
+                sel.removeAllRanges();
+                sel.addRange(savedRange);
+            } else {
+                // Fall back to end-of-body.
+                const r = document.createRange();
+                r.selectNodeContents(lastFocusedBody);
+                r.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(r);
+            }
+        }
         const range = sel.getRangeAt(0);
         const span = document.createElement('span');
         span.setAttribute('lang', activeLang.bcp47);
@@ -387,42 +401,75 @@
         if (activeLang.fontstack) {
             span.style.fontFamily = activeLang.fontstack;
         }
-        // Zero-width space so the span has a position to type into.
+        // Zero-width space gives the span a position to type into;
+        // without it, browsers collapse empty spans and the cursor
+        // lands outside.
         span.appendChild(document.createTextNode('​'));
+        range.deleteContents();
         range.insertNode(span);
-        const newRange = document.createRange();
-        newRange.selectNodeContents(span);
-        newRange.collapse(false);
+        const inside = document.createRange();
+        inside.selectNodeContents(span);
+        inside.collapse(false);
         sel.removeAllRanges();
-        sel.addRange(newRange);
+        sel.addRange(inside);
+        flashStatus('typing in ' + activeLang.name, 'saved');
+        return true;
     }
 
-    document.querySelectorAll('.quill-section-body').forEach((body) => {
-        body.addEventListener('keydown', (e) => {
-            // Only insert on the first printable keystroke after a
-            // language switch — we set a sentinel and consume it.
-            if (activeLang && body._pendingLang === undefined) return;
-        });
-        body.addEventListener('beforeinput', (e) => {
-            if (activeLang && e.inputType === 'insertText') {
-                // Check if cursor is already inside a span with the
-                // right lang — if so, don't double-wrap.
-                const sel = window.getSelection();
-                if (sel.rangeCount === 0) return;
-                let node = sel.getRangeAt(0).startContainer;
-                while (node && node !== body) {
-                    if (node.nodeType === 1 && node.tagName === 'SPAN'
-                        && node.getAttribute('lang') === activeLang.bcp47) {
-                        return; // already inside the right span
-                    }
-                    node = node.parentNode;
-                }
-                e.preventDefault();
-                insertLangSpan();
-                // Now actually insert the typed character.
-                document.execCommand('insertText', false, e.data || '');
+    /* ─── Status flashing — visible feedback on every action ── */
+    let statusTimer = null;
+    function flashStatus(text, cls) {
+        status.textContent = text;
+        status.className = 'quill-status' + (cls ? ' ' + cls : '');
+        clearTimeout(statusTimer);
+        statusTimer = setTimeout(() => {
+            // Don't clobber a saved-state message.
+            if (status.textContent === text) {
+                status.textContent = activeLang
+                    ? '⌜' + activeLang.name + '⌝ ready'
+                    : 'idle';
+                status.className = 'quill-status';
             }
+        }, 2000);
+    }
+
+    /* ─── Language button mousedown: don't steal focus ───────── */
+    langButtons.forEach((btn) => {
+        // mousedown.preventDefault is the standard pattern for toolbar
+        // buttons that act on a contenteditable. It keeps the cursor
+        // and selection in the body.
+        btn.addEventListener('mousedown', (e) => e.preventDefault());
+        btn.addEventListener('click', () => {
+            setActiveLang(btn);
+            insertLangSpan();
         });
+    });
+
+    /* ─── Track which body has focus + cache its range ───────── */
+    document.querySelectorAll('.quill-section-body').forEach((body) => {
+        body.addEventListener('focus', () => { lastFocusedBody = body; });
+        // Cache the selection range continuously while the body is
+        // focused, so a button click can restore it after a blur.
+        body.addEventListener('keyup',     rememberRange);
+        body.addEventListener('mouseup',   rememberRange);
+        body.addEventListener('input',     rememberRange);
+        body.addEventListener('blur',      rememberRange);
+    });
+
+    /* ─── Cmd/Ctrl+1..9 hotkeys ─────────────────────────────── */
+    document.addEventListener('keydown', (e) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        if (e.key >= '1' && e.key <= '9') {
+            const idx = parseInt(e.key, 10) - 1;
+            if (idx < langButtons.length) {
+                e.preventDefault();
+                setActiveLang(langButtons[idx]);
+                insertLangSpan();
+            }
+        } else if (e.key === '0') {
+            e.preventDefault();
+            setActiveLang(null);
+        }
     });
 
     /* ─── Autosave on blur (and after a typing pause) ───────── */
