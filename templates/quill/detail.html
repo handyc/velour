@@ -684,8 +684,19 @@
     }
 
     document.addEventListener('keydown', (e) => {
-        // Compose gateway. Don't fire on Ctrl+Shift+; or other modifiers
-        // beyond Ctrl/Meta + ;.
+        // Primary compose gateway: a bare backslash inside a contenteditable.
+        // No modifier, single keystroke, LaTeX-familiar. Type `\\` (backslash
+        // twice) to insert a literal backslash — the second `\` is not in
+        // the diacritic map, so prefix-state aborts and inserts both.
+        if (e.key === '\\' && !e.ctrlKey && !e.metaKey && !e.altKey
+            && composeState === null && inEditable()) {
+            e.preventDefault();
+            enterComposeMode();
+            return;
+        }
+
+        // Backup gateway: Ctrl+; / Cmd+; — kept for users who already
+        // have it in muscle memory.
         if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === ';') {
             e.preventDefault();
             enterComposeMode();
@@ -700,6 +711,14 @@
             }
             // Ignore pure modifier keystrokes (Shift, etc.)
             if (e.key.length !== 1) return;
+            // Special case: typing `\` while in prefix state means
+            // "I wanted a literal backslash" — insert it and abort.
+            if (e.key === '\\') {
+                e.preventDefault();
+                abortCompose();
+                insertText('\\');
+                return;
+            }
             // Allow only known prefixes; otherwise cancel + let through.
             if (Object.prototype.hasOwnProperty.call(COMPOSE_MAP, e.key)) {
                 e.preventDefault();
