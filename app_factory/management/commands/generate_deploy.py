@@ -22,6 +22,7 @@ DEPLOY_ARTIFACTS = [
     ('deploy/setup.sh',         'setup.sh',                True),
     ('deploy/adminsetup.sh',    'adminsetup.sh',           True),
     ('deploy/hotswap.sh',       'hotswap.sh',              True),
+    ('deploy/install-macos.sh', 'install-macos.sh',        True),
 ]
 
 

@@ -145,6 +145,7 @@ sudo rsync -a --delete \
     --exclude='db.sqlite3-*' \
     --exclude='secret_key.txt' \
     --exclude='health_token.txt' \
+    --exclude='mail_relay_token.txt' \
     --exclude='.env' \
     --exclude='.env.*' \
     --exclude='.git/' \
