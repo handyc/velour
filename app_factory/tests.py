@@ -153,6 +153,59 @@ class CloneFilterTests(SimpleTestCase):
         # unincluded dropped
         self.assertNotIn("'naiad'", out)
 
+    def test_context_processor_returns_frozenset_of_slugs(self):
+        from app_factory.context_processors import (
+            installed_app_slugs, _compute_slugs,
+        )
+        slugs = _compute_slugs()
+        # Should be project apps, not django.contrib.*
+        for entry in slugs:
+            self.assertFalse(entry.startswith('django.'))
+        # Should contain known slugs.
+        for must_have in ('dashboard', 'identity', 'codex', 'app_factory'):
+            self.assertIn(must_have, slugs)
+        # Context processor returns the right key shape.
+        ctx = installed_app_slugs(None)
+        self.assertIn('installed_app_slugs', ctx)
+        # Frozen so templates can't mutate it accidentally.
+        self.assertIsInstance(ctx['installed_app_slugs'], frozenset)
+
+    def _assert_url_calls_guarded(self, text, label):
+        """Helper: every ``{% url 'app:...' %}`` in the given text must be
+        preceded (within 400 chars) by an if-guard naming the same slug.
+        ``admin`` / ``login`` / ``logout`` are Django built-ins and don't
+        need a guard."""
+        import re
+        BUILTIN = {'admin', 'login', 'logout'}
+        for m in re.finditer(r"\{%\s*url\s*'([a-z_][a-z_0-9]*):", text):
+            slug = m.group(1)
+            if slug in BUILTIN:
+                continue
+            window = text[max(0, m.start() - 400):m.start()]
+            self.assertIn(
+                f"'{slug}' in installed_app_slugs", window,
+                f"{label}: {{% url '{slug}:...' %}} is not guarded by "
+                f"{{% if '{slug}' in installed_app_slugs %}}. A stripped "
+                f"clone will 500 on this link.",
+            )
+
+    def test_base_html_nav_links_are_guarded(self):
+        from django.conf import settings
+        path = settings.BASE_DIR / 'templates' / 'base.html'
+        text = path.read_text()
+        nav_start = text.find("class=\"nav-links\"")
+        nav_end = text.find("</nav>", nav_start)
+        self._assert_url_calls_guarded(text[nav_start:nav_end], 'base.html nav')
+
+    def test_dashboard_home_cards_are_guarded(self):
+        from django.conf import settings
+        path = settings.BASE_DIR / 'templates' / 'dashboard' / 'home.html'
+        text = path.read_text()
+        # Scan only the {% block content %} section, which is where the
+        # cards live. Style/JS blocks have no url calls.
+        content_start = text.find("{% block content %}")
+        self._assert_url_calls_guarded(text[content_start:], 'dashboard/home.html')
+
     def test_filter_url_includes_drops_unincluded(self):
         from app_factory.clone_filter import filter_url_includes
         src = (

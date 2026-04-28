@@ -159,6 +159,7 @@ TEMPLATES = [
                 'chronos.context_processors.topbar_clock',
                 'identity.context_processors.topbar_pulse',
                 'lingua.context_processors.lingua',
+                'app_factory.context_processors.installed_app_slugs',
             ],
         },
     },

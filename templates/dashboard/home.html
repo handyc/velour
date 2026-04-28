@@ -162,55 +162,65 @@
 {# Office Suite — compact strip row, always visible #}
 <div class="suite-label">Office Suite</div>
 <div class="suite-grid">
+    {% if 'mail' in installed_app_slugs %}
     <div class="suite-card suite-card--mail">
         <a href="{% url 'mail:inbound_list' %}">
             <div class="suite-icon">&#9993;</div>
             <div class="suite-body"><h3>Mail</h3><p>Inbound + accounts</p></div>
         </a>
     </div>
+    {% endif %}
+    {% if 'chronos' in installed_app_slugs %}
     <div class="suite-card suite-card--cal">
         <a href="{% url 'chronos:home' %}">
             <div class="suite-icon">&#128339;</div>
             <div class="suite-body"><h3>Calendar</h3><p>Clocks &amp; events</p></div>
         </a>
     </div>
+    {% endif %}
+    {% if 'chronos' in installed_app_slugs %}
     <div class="suite-card suite-card--cal">
         <a href="{% url 'chronos:briefing' %}">
             <div class="suite-icon">&#128203;</div>
             <div class="suite-body"><h3>Briefing</h3><p>Today: mood + tasks</p></div>
         </a>
     </div>
+    {% endif %}
+    {% if 'codex' in installed_app_slugs %}
     <div class="suite-card suite-card--docs">
         <a href="{% url 'codex:list' %}">
             <div class="suite-icon">&#128214;</div>
             <div class="suite-body"><h3>Documents</h3><p>Codex manuals</p></div>
         </a>
     </div>
+    {% endif %}
+    {% if 'attic' in installed_app_slugs %}
     <div class="suite-card suite-card--files">
         <a href="{% url 'attic:list' %}">
             <div class="suite-icon">&#128193;</div>
             <div class="suite-body"><h3>Files</h3><p>Media library</p></div>
         </a>
     </div>
+    {% endif %}
 </div>
 
 {# System & Ops — default open (most-used utilities) #}
 <details class="cat-group" open>
     <summary>System &amp; Ops <span class="cat-count">· 13</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'terminal:terminal' %}" title="Interactive shell session on the host"><h3>Terminal</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'sysinfo:home' %}" title="{{ system_info.hostname }} · Load {{ system_info.load }}"><h3>System Info</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'graphs:home' %}" title="Live and historical system usage graphs"><h3>Graphs</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'logs:home' %}" title="View and analyze system logs"><h3>Logs</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'services:home' %}" title="Nginx, Supervisor, Gunicorn"><h3>Services</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'databases:list' %}" title="SQLite, MySQL, PostgreSQL — browse + query"><h3>Databases</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'security:home' %}" title="Audit SSH, firewall, ports, users, updates"><h3>Security</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'maintenance:home' %}" title="Backup and restore /home directories"><h3>Maintenance</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'winctl:home' %}" title="Control Windows from WSL"><h3>Windows</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'hosts:list' %}" title="Remote Velour instances + health polling"><h3>Hosts</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'hpc:list' %}" title="High-performance computing clusters"><h3>HPC</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'app_factory:list' %}" title="Create + deploy Django apps"><h3>App Factory</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'conduit:index' %}" title="Job routing — local/VPS/HPC/Pi/ESP/ATtiny/code-agents"><h3>Conduit</h3><span class="open-arrow">›</span></a>
+        {% if 'terminal' in installed_app_slugs %}<a class="card" href="{% url 'terminal:terminal' %}" title="Interactive shell session on the host"><h3>Terminal</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'sysinfo' in installed_app_slugs %}<a class="card" href="{% url 'sysinfo:home' %}" title="{{ system_info.hostname }} · Load {{ system_info.load }}"><h3>System Info</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'graphs' in installed_app_slugs %}<a class="card" href="{% url 'graphs:home' %}" title="Live and historical system usage graphs"><h3>Graphs</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'logs' in installed_app_slugs %}<a class="card" href="{% url 'logs:home' %}" title="View and analyze system logs"><h3>Logs</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'services' in installed_app_slugs %}<a class="card" href="{% url 'services:home' %}" title="Nginx, Supervisor, Gunicorn"><h3>Services</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'databases' in installed_app_slugs %}<a class="card" href="{% url 'databases:list' %}" title="SQLite, MySQL, PostgreSQL — browse + query"><h3>Databases</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'security' in installed_app_slugs %}<a class="card" href="{% url 'security:home' %}" title="Audit SSH, firewall, ports, users, updates"><h3>Security</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'maintenance' in installed_app_slugs %}<a class="card" href="{% url 'maintenance:home' %}" title="Backup and restore /home directories"><h3>Maintenance</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'winctl' in installed_app_slugs %}<a class="card" href="{% url 'winctl:home' %}" title="Control Windows from WSL"><h3>Windows</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'hosts' in installed_app_slugs %}<a class="card" href="{% url 'hosts:list' %}" title="Remote Velour instances + health polling"><h3>Hosts</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'hpc' in installed_app_slugs %}<a class="card" href="{% url 'hpc:list' %}" title="High-performance computing clusters"><h3>HPC</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'app_factory' in installed_app_slugs %}<a class="card" href="{% url 'app_factory:list' %}" title="Create + deploy Django apps"><h3>App Factory</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'conduit' in installed_app_slugs %}<a class="card" href="{% url 'conduit:index' %}" title="Job routing — local/VPS/HPC/Pi/ESP/ATtiny/code-agents"><h3>Conduit</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -218,8 +228,8 @@
 <details class="cat-group" open>
     <summary>Identity &amp; Thought <span class="cat-count">· 2</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'identity:home' %}" title="Self-awareness, personality, strange loops"><h3>Identity</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'oracle:home' %}" title="Classical-ML decision trees — poor-man's AI judgment"><h3>Oracle</h3><span class="open-arrow">›</span></a>
+        {% if 'identity' in installed_app_slugs %}<a class="card" href="{% url 'identity:home' %}" title="Self-awareness, personality, strange loops"><h3>Identity</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'oracle' in installed_app_slugs %}<a class="card" href="{% url 'oracle:home' %}" title="Classical-ML decision trees — poor-man's AI judgment"><h3>Oracle</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -227,11 +237,11 @@
 <details class="cat-group">
     <summary>Fleet &amp; Hardware <span class="cat-count">· 5</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'nodes:list' %}" title="ESP8266 / ESP32 microcontroller fleet"><h3>Nodes</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'experiments:list' %}" title="Lightweight experiment tracker"><h3>Experiments</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'bodymap:list' %}" title="Wearable biometric mesh — ESP32-S3 per body segment"><h3>Bodymap</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'powerlab:index' %}" title="Solar → supercap charge pumps for tiny always-on devices"><h3>Power Lab</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'roomplanner:index' %}" title="Lab-room layout + fire-safety/cable-run constraints"><h3>Room Planner</h3><span class="open-arrow">›</span></a>
+        {% if 'nodes' in installed_app_slugs %}<a class="card" href="{% url 'nodes:list' %}" title="ESP8266 / ESP32 microcontroller fleet"><h3>Nodes</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'experiments' in installed_app_slugs %}<a class="card" href="{% url 'experiments:list' %}" title="Lightweight experiment tracker"><h3>Experiments</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'bodymap' in installed_app_slugs %}<a class="card" href="{% url 'bodymap:list' %}" title="Wearable biometric mesh — ESP32-S3 per body segment"><h3>Bodymap</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'powerlab' in installed_app_slugs %}<a class="card" href="{% url 'powerlab:index' %}" title="Solar → supercap charge pumps for tiny always-on devices"><h3>Power Lab</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'roomplanner' in installed_app_slugs %}<a class="card" href="{% url 'roomplanner:index' %}" title="Lab-room layout + fire-safety/cable-run constraints"><h3>Room Planner</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -239,15 +249,15 @@
 <details class="cat-group">
     <summary>Worlds &amp; Creatures <span class="cat-count">· 9</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'aether:world_list' %}" title="Immersive 3D worlds in the browser"><h3>Aether</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'agents:index' %}" title="Persistent NPCs on axial-hex towns"><h3>Agents</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'bridge:home' %}" title="Spacefleet workspace — warp to procedural worlds"><h3>Bridge</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'lsystem:species_list' %}" title="Procedural plants + architecture with 3D preview"><h3>L-System</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'legolith:list' %}" title="Studded-brick worlds + math worksheets"><h3>Legolith</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'grammar_engine:list' %}" title="Deterministic speech synthesis shared across apps"><h3>Grammar Engine</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'evolution:list' %}" title="Populations of L-system agents bred toward a goal"><h3>Evolution</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'screen_gubi:index' %}" title="80×25 text screen becomes an L-System tree world"><h3>Screen Gubi</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'agricola:game' %}" title="Agar.io clone — eat cells to grow"><h3>Agricola</h3><span class="open-arrow">›</span></a>
+        {% if 'aether' in installed_app_slugs %}<a class="card" href="{% url 'aether:world_list' %}" title="Immersive 3D worlds in the browser"><h3>Aether</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'agents' in installed_app_slugs %}<a class="card" href="{% url 'agents:index' %}" title="Persistent NPCs on axial-hex towns"><h3>Agents</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'bridge' in installed_app_slugs %}<a class="card" href="{% url 'bridge:home' %}" title="Spacefleet workspace — warp to procedural worlds"><h3>Bridge</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'lsystem' in installed_app_slugs %}<a class="card" href="{% url 'lsystem:species_list' %}" title="Procedural plants + architecture with 3D preview"><h3>L-System</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'legolith' in installed_app_slugs %}<a class="card" href="{% url 'legolith:list' %}" title="Studded-brick worlds + math worksheets"><h3>Legolith</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'grammar_engine' in installed_app_slugs %}<a class="card" href="{% url 'grammar_engine:list' %}" title="Deterministic speech synthesis shared across apps"><h3>Grammar Engine</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'evolution' in installed_app_slugs %}<a class="card" href="{% url 'evolution:list' %}" title="Populations of L-system agents bred toward a goal"><h3>Evolution</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'screen_gubi' in installed_app_slugs %}<a class="card" href="{% url 'screen_gubi:index' %}" title="80×25 text screen becomes an L-System tree world"><h3>Screen Gubi</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'agricola' in installed_app_slugs %}<a class="card" href="{% url 'agricola:game' %}" title="Agar.io clone — eat cells to grow"><h3>Agricola</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -255,18 +265,18 @@
 <details class="cat-group">
     <summary>Research &amp; Search <span class="cat-count">· 11</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'casting:index' %}" title="Byte-level experiments with .c download + JS port"><h3>Casting</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'reckoner:index' %}" title="True cost of compute — picojoules to exajoules"><h3>Reckoner</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'radiant:index' %}" title="Psychohistorical forecast of the LUCDH server fleet — 12 horizons"><h3>Radiant</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'lingua:home' %}" title="Offline Argos MT + flashcards + TTS stack"><h3>Lingua</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'muka:index' %}" title="Syntactic trees — Oromoid for 'tree'. Covers Konso and many more languages."><h3>Muka</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'camlfornia:index' %}" title="Learn OCaml in the browser — lessons + editor + runner"><h3>Camlfornia</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'aggregator:index' %}" title="Custom newspaper from RSS/Atom feeds — composed on request"><h3>Aggregator</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'studious:index' %}" title="Scholar library + argument workshop — ingest works, extract claims, braid cross-scholar arguments"><h3>Studious</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'agora:index' %}" title="University master framework — departments, courses, terms, sections, enrollments; calls out to other apps for coursework"><h3>Agora</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'datalift:job_list' %}" title="MySQL → Django models + SQLite, anonymization"><h3>Datalift</h3><span class="open-arrow">›</span></a>
+        {% if 'det' in installed_app_slugs %}<a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'automaton' in installed_app_slugs %}<a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'casting' in installed_app_slugs %}<a class="card" href="{% url 'casting:index' %}" title="Byte-level experiments with .c download + JS port"><h3>Casting</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'reckoner' in installed_app_slugs %}<a class="card" href="{% url 'reckoner:index' %}" title="True cost of compute — picojoules to exajoules"><h3>Reckoner</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'radiant' in installed_app_slugs %}<a class="card" href="{% url 'radiant:index' %}" title="Psychohistorical forecast of the LUCDH server fleet — 12 horizons"><h3>Radiant</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'lingua' in installed_app_slugs %}<a class="card" href="{% url 'lingua:home' %}" title="Offline Argos MT + flashcards + TTS stack"><h3>Lingua</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'muka' in installed_app_slugs %}<a class="card" href="{% url 'muka:index' %}" title="Syntactic trees — Oromoid for 'tree'. Covers Konso and many more languages."><h3>Muka</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'camlfornia' in installed_app_slugs %}<a class="card" href="{% url 'camlfornia:index' %}" title="Learn OCaml in the browser — lessons + editor + runner"><h3>Camlfornia</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'aggregator' in installed_app_slugs %}<a class="card" href="{% url 'aggregator:index' %}" title="Custom newspaper from RSS/Atom feeds — composed on request"><h3>Aggregator</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'studious' in installed_app_slugs %}<a class="card" href="{% url 'studious:index' %}" title="Scholar library + argument workshop — ingest works, extract claims, braid cross-scholar arguments"><h3>Studious</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'agora' in installed_app_slugs %}<a class="card" href="{% url 'agora:index' %}" title="University master framework — departments, courses, terms, sections, enrollments; calls out to other apps for coursework"><h3>Agora</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'datalift' in installed_app_slugs %}<a class="card" href="{% url 'datalift:job_list' %}" title="MySQL → Django models + SQLite, anonymization"><h3>Datalift</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -274,14 +284,14 @@
 <details class="cat-group">
     <summary>Lab &amp; Design <span class="cat-count">· 8</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'tiles:list' %}" title="Wang tile sets as substrate for ideas"><h3>Tiles</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'condenser:home' %}" title="Distill apps through constrained tiers"><h3>Condenser</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'isolation:index' %}" title="Re-package cross-app pipelines as MVPs for tiny targets"><h3>Isolation</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'oneliner:index' %}" title="Museum for sub-80-col C programs — compiles + runs"><h3>Oneliner</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'zoetrope:list' %}" title="Spin Attic images into short mp4 films"><h3>Zoetrope</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'displacer:home' %}" title="Oral-history site scaffold — themes, articles, pages"><h3>Displacer</h3><span class="open-arrow">›</span></a>
-        <a class="card" href="{% url 'cartography:home' %}" title="Multi-scale cartography — Earth, Mars, Moon, sky"><h3>Maps</h3><span class="open-arrow">›</span></a>
+        {% if 'naiad' in installed_app_slugs %}<a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'tiles' in installed_app_slugs %}<a class="card" href="{% url 'tiles:list' %}" title="Wang tile sets as substrate for ideas"><h3>Tiles</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'condenser' in installed_app_slugs %}<a class="card" href="{% url 'condenser:home' %}" title="Distill apps through constrained tiers"><h3>Condenser</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'isolation' in installed_app_slugs %}<a class="card" href="{% url 'isolation:index' %}" title="Re-package cross-app pipelines as MVPs for tiny targets"><h3>Isolation</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'oneliner' in installed_app_slugs %}<a class="card" href="{% url 'oneliner:index' %}" title="Museum for sub-80-col C programs — compiles + runs"><h3>Oneliner</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'zoetrope' in installed_app_slugs %}<a class="card" href="{% url 'zoetrope:list' %}" title="Spin Attic images into short mp4 films"><h3>Zoetrope</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'displacer' in installed_app_slugs %}<a class="card" href="{% url 'displacer:home' %}" title="Oral-history site scaffold — themes, articles, pages"><h3>Displacer</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'cartography' in installed_app_slugs %}<a class="card" href="{% url 'cartography:home' %}" title="Multi-scale cartography — Earth, Mars, Moon, sky"><h3>Maps</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 
@@ -289,7 +299,7 @@
 <details class="cat-group">
     <summary>Other <span class="cat-count">· 1</span></summary>
     <div class="tools-grid">
-        <a class="card" href="{% url 'landingpage:home' %}" title="Newspaper-style chronicle"><h3>Landing Page</h3><span class="open-arrow">›</span></a>
+        {% if 'landingpage' in installed_app_slugs %}<a class="card" href="{% url 'landingpage:home' %}" title="Newspaper-style chronicle"><h3>Landing Page</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 {% endblock %}
