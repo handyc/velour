@@ -350,68 +350,81 @@
         padding:1.2rem 1.5rem;
         font-size:0.85rem;color:#c9d1d9;
         font-family: ui-monospace, "SF Mono", monospace;">
-        <h3 style="margin:0 0 0.4rem 0;font-family:inherit;">Compose key cheat sheet</h3>
+        <h3 style="margin:0 0 0.4rem 0;font-family:inherit;">
+            Compose key cheat sheet — macOS US Extended replica
+        </h3>
         <p style="margin:0 0 0.4rem 0;color:#c9d1d9;font-family:inherit;">
-            <strong>Fast path (recommended):</strong> hold
-            <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">Alt</code>
-            and tap a diacritic mark, release Alt, then tap the base letter — two
-            keystrokes per diacritic.
+            Quill's dead-key map mirrors macOS <em>US Extended</em> / <em>ABC Extended</em>
+            exactly. <strong>Fast path:</strong> hold
+            <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">Alt</code>,
+            tap a prefix letter, release, then tap the base letter.
         </p>
         <p style="margin:0 0 0.4rem 0;color:#8b949e;font-family:inherit;">
-            Examples: <code>Alt+. s → ṣ</code> · <code>Alt+= a → ā</code> ·
-            <code>Alt+' s → ś</code> · <code>Alt+, c → ç</code> · <code>Alt+v s → š</code>.
-            Marks that need Shift (~ ^ : * ( ") need Alt+Shift, e.g.
-            <code>Alt+Shift+~ n → ñ</code>.
+            Examples: <code>Alt+a a → ā</code> · <code>Alt+x s → ṣ</code> ·
+            <code>Alt+e s → ś</code> · <code>Alt+n n → ñ</code> ·
+            <code>Alt+v s → š</code> · <code>Alt+u u → ü</code>.
         </p>
         <p style="margin:0 0 0.8rem 0;color:#8b949e;font-family:inherit;">
-            <strong>Slow path (no Alt needed):</strong> type
+            <strong>Slow path:</strong> type
             <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">\</code>
-            (a single backslash) then a diacritic mark then a base letter, e.g.
-            <code>\.s → ṣ</code>. Type <code>\\</code> to insert a literal backslash.
-            <code>Ctrl+;</code> / <code>Cmd+;</code> also opens compose mode.
+            then prefix then base, e.g. <code>\a a → ā</code>, <code>\x s → ṣ</code>.
+            Type <code>\\</code> to insert a literal backslash.
             <code>Esc</code> cancels; <code>Tab</code> inserts a tab character.
         </p>
-        <table style="border-collapse:collapse;width:100%;font-family:inherit;">
+        <table style="border-collapse:collapse;width:100%;font-family:inherit;font-size:0.8rem;">
             <thead>
                 <tr style="text-align:left;color:#6e7681;font-size:0.7rem;
                            text-transform:uppercase;letter-spacing:0.05em;">
-                    <th style="padding:0.3rem 0.6rem 0.3rem 0;width:5rem;">Mark</th>
-                    <th style="padding:0.3rem 0.6rem;width:7rem;">Diacritic</th>
+                    <th style="padding:0.3rem 0.6rem 0.3rem 0;width:5.4rem;">Prefix</th>
+                    <th style="padding:0.3rem 0.6rem;width:8rem;">Diacritic</th>
                     <th style="padding:0.3rem 0;">Examples</th>
                 </tr>
             </thead>
             <tbody>
-                <tr><td><code>.</code></td><td>underdot</td>
-                    <td>.s → ṣ · .t → ṭ · .n → ṇ · .m → ṃ · .h → ḥ · .r → ṛ · .l → ḷ · .d → ḍ</td></tr>
-                <tr><td><code>=</code></td><td>macron</td>
-                    <td>=a → ā · =i → ī · =u → ū · =e → ē · =o → ō</td></tr>
-                <tr><td><code>'</code></td><td>acute</td>
-                    <td>'a → á · 's → ś · 'n → ń · 'c → ć · 'z → ź</td></tr>
-                <tr><td><code>`</code></td><td>grave</td>
-                    <td>`a → à · `e → è · `i → ì · `o → ò · `u → ù</td></tr>
-                <tr><td><code>~</code></td><td>tilde</td>
-                    <td>~n → ñ · ~a → ã · ~o → õ</td></tr>
-                <tr><td><code>^</code></td><td>circumflex</td>
-                    <td>^a → â · ^e → ê · ^i → î · ^o → ô · ^u → û · ^s → ŝ</td></tr>
-                <tr><td><code>:</code></td><td>diaeresis</td>
-                    <td>:a → ä · :o → ö · :u → ü · :e → ë · :i → ï</td></tr>
-                <tr><td><code>,</code></td><td>cedilla</td>
-                    <td>,c → ç · ,s → ş</td></tr>
-                <tr><td><code>v</code></td><td>caron / háček</td>
-                    <td>vs → š · vc → č · vz → ž · vn → ň · vr → ř</td></tr>
-                <tr><td><code>(</code></td><td>breve</td>
-                    <td>(a → ă · (e → ĕ · (g → ğ</td></tr>
-                <tr><td><code>*</code></td><td>ring</td>
-                    <td>*a → å · *u → ů</td></tr>
-                <tr><td><code>/</code></td><td>stroke</td>
-                    <td>/o → ø · /l → ł · /d → đ · /h → ħ</td></tr>
-                <tr><td><code>m</code></td><td>overdot</td>
-                    <td>mm → ṁ · mn → ṅ · ms → ṡ · mg → ġ</td></tr>
+                <tr><td><code>Alt+a</code></td><td>macron</td>
+                    <td>aa → ā · ae → ē · ai → ī · ao → ō · ay → ȳ · al → ḹ · ar → ṝ</td></tr>
+                <tr><td><code>Alt+e</code></td><td>acute</td>
+                    <td>ea → á · es → ś · en → ń · ec → ć · ez → ź · er → ŕ · em → ḿ</td></tr>
+                <tr><td><code>Alt+`</code></td><td>grave</td>
+                    <td>`a → à · `e → è · `i → ì · `o → ò · `u → ù · `n → ǹ</td></tr>
+                <tr><td><code>Alt+6</code></td><td>circumflex</td>
+                    <td>6a → â · 6e → ê · 6i → î · 6o → ô · 6u → û · 6s → ŝ · 6h → ĥ</td></tr>
+                <tr><td><code>Alt+n</code></td><td>tilde</td>
+                    <td>nn → ñ · na → ã · no → õ · nu → ũ · ne → ẽ · ny → ỹ</td></tr>
+                <tr><td><code>Alt+u</code></td><td>diaeresis (umlaut)</td>
+                    <td>ua → ä · ue → ë · ui → ï · uo → ö · uu → ü · uy → ÿ</td></tr>
+                <tr><td><code>Alt+w</code></td><td>dot above</td>
+                    <td>wm → ṁ · wn → ṅ · ws → ṡ · wg → ġ · wz → ż · we → ė · wc → ċ</td></tr>
+                <tr><td><code>Alt+x</code></td><td>dot below (underdot)</td>
+                    <td>xs → ṣ · xt → ṭ · xn → ṇ · xm → ṃ · xh → ḥ · xr → ṛ · xl → ḷ · xd → ḍ</td></tr>
+                <tr><td><code>Alt+h</code></td><td>macron below</td>
+                    <td>hb → ḇ · hd → ḏ · hk → ḵ · hl → ḻ · hn → ṉ · hr → ṟ · ht → ṯ · hz → ẕ</td></tr>
+                <tr><td><code>Alt+v</code></td><td>caron (háček)</td>
+                    <td>vs → š · vc → č · vz → ž · vn → ň · vr → ř · vd → ď · vt → ť · ve → ě · vh → ȟ</td></tr>
+                <tr><td><code>Alt+b</code></td><td>breve</td>
+                    <td>ba → ă · be → ĕ · bg → ğ · bo → ŏ · bu → ŭ · bi → ĭ · bh → ḫ</td></tr>
+                <tr><td><code>Alt+c</code></td><td>cedilla</td>
+                    <td>cc → ç · cs → ş · ct → ţ · cn → ņ · cl → ļ · ck → ķ · cr → ŗ</td></tr>
+                <tr><td><code>Alt+l</code></td><td>stroke</td>
+                    <td>lo → ø · ll → ł · ld → đ · lh → ħ · lt → ŧ · li → ɨ · lu → ʉ · lz → ƶ</td></tr>
+                <tr><td><code>Alt+k</code></td><td>ring above</td>
+                    <td>ka → å · ku → ů · ky → ẙ · kw → ẘ</td></tr>
+                <tr><td><code>Alt+m</code></td><td>ogonek</td>
+                    <td>ma → ą · me → ę · mi → į · mo → ǫ · mu → ų</td></tr>
+                <tr><td><code>Alt+z</code></td><td>hook above</td>
+                    <td>za → ả · ze → ẻ · zi → ỉ · zo → ỏ · zu → ủ · zy → ỷ</td></tr>
+                <tr><td><code>Alt+i</code></td><td>horn (Vietnamese)</td>
+                    <td>io → ơ · iu → ư</td></tr>
+                <tr><td><code>Alt+p</code></td><td>comma below</td>
+                    <td>ps → ș · pt → ț</td></tr>
+                <tr><td><code>Alt+j</code></td><td>double acute</td>
+                    <td>jo → ő · ju → ű</td></tr>
             </tbody>
         </table>
         <p style="margin:0.8rem 0 0 0;color:#6e7681;font-size:0.78rem;font-family:inherit;">
-            Capitals work too (Ctrl+; . S → Ṣ, Ctrl+; = A → Ā). Unrecognised combinations
-            insert the literal characters.
+            Capitals work too (<code>Alt+a A → Ā</code>, <code>Alt+x S → Ṣ</code>).
+            Unrecognised combinations insert the literal prefix + base letter so no
+            keystrokes are silently lost.
         </p>
     </div>
 
@@ -578,70 +591,157 @@
     // keystrokes are consumed: a diacritic mark, then a base letter.
     // Esc aborts at any point.
 
+    // macOS "ABC Extended" / "US Extended" dead-key mappings, replicated.
+    // Prefix keys are indexed by the *macOS Option+key* — so Option+A is
+    // macron (key 'a'), Option+X is underdot (key 'x'), Option+E is
+    // acute (key 'e'), etc. We expose two gateways into the same table:
+    // the `\` (backslash) slow path types `\a a → ā`, and the Alt fast
+    // path types `Alt+a then a → ā`, mirroring the Mac chord exactly.
+    //
+    // Where Unicode lacks a precomposed character, the value uses a
+    // base + combining-mark sequence so the result still renders.
     const COMPOSE_MAP = {
-        '.': {  // underdot below — Indic and Semitic transliteration
-            s: 'ṣ', t: 'ṭ', n: 'ṇ', m: 'ṃ', h: 'ḥ', r: 'ṛ', l: 'ḷ',
-            d: 'ḍ', b: 'ḅ', k: 'ḳ', z: 'ẓ',
-            S: 'Ṣ', T: 'Ṭ', N: 'Ṇ', M: 'Ṃ', H: 'Ḥ', R: 'Ṛ', L: 'Ḷ',
-            D: 'Ḍ', B: 'Ḅ', K: 'Ḳ', Z: 'Ẓ',
+        // ─── Option+A — Macron (line above) ──────────────────────
+        'a': {
+            a: 'ā', A: 'Ā', e: 'ē', E: 'Ē',
+            g: 'ḡ', G: 'Ḡ', i: 'ī', I: 'Ī',
+            l: 'ḹ', L: 'Ḹ',  // L+macron uses the precombined dotbelow+macron char
+            o: 'ō', O: 'Ō', r: 'ṝ', R: 'Ṝ',  // same for R (vocalic R lengthened)
+            s: 's̄', S: 'S̄',
+            v: 'v̄', V: 'V̄',
+            y: 'ȳ', Y: 'Ȳ',
+            z: 'z̄', Z: 'Z̄',
         },
-        '=': {  // macron — Pali, IAST, Latin scholarship
-            a: 'ā', e: 'ē', i: 'ī', o: 'ō', u: 'ū', y: 'ȳ',
-            A: 'Ā', E: 'Ē', I: 'Ī', O: 'Ō', U: 'Ū', Y: 'Ȳ',
+        // ─── Option+E — Acute ────────────────────────────────────
+        'e': {
+            a: 'á', A: 'Á', c: 'ć', C: 'Ć', e: 'é', E: 'É',
+            g: 'ǵ', G: 'Ǵ', i: 'í', I: 'Í', m: 'ḿ', M: 'Ḿ',
+            n: 'ń', N: 'Ń', o: 'ó', O: 'Ó', p: 'ṕ', P: 'Ṕ',
+            r: 'ŕ', R: 'Ŕ', s: 'ś', S: 'Ś', w: 'ẃ', W: 'Ẃ',
+            y: 'ý', Y: 'Ý', z: 'ź', Z: 'Ź',
         },
-        "'": {  // acute
-            a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', y: 'ý',
-            c: 'ć', n: 'ń', s: 'ś', z: 'ź', l: 'ĺ', r: 'ŕ',
-            A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú', Y: 'Ý',
-            C: 'Ć', N: 'Ń', S: 'Ś', Z: 'Ź',
+        // ─── Option+` — Grave ────────────────────────────────────
+        '`': {
+            a: 'à', A: 'À', e: 'è', E: 'È', i: 'ì', I: 'Ì',
+            n: 'ǹ', N: 'Ǹ', o: 'ò', O: 'Ò', u: 'ù', U: 'Ù',
+            v: 'v̀', V: 'V̀',
+            w: 'ẁ', W: 'Ẁ', y: 'ỳ', Y: 'Ỳ',
         },
-        '`': {  // grave
-            a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù',
-            A: 'À', E: 'È', I: 'Ì', O: 'Ò', U: 'Ù',
+        // ─── Option+6 — Circumflex ──────────────────────────────
+        '6': {
+            a: 'â', A: 'Â', c: 'ĉ', C: 'Ĉ', e: 'ê', E: 'Ê',
+            g: 'ĝ', G: 'Ĝ', h: 'ĥ', H: 'Ĥ', i: 'î', I: 'Î',
+            j: 'ĵ', J: 'Ĵ', m: 'm̂', M: 'M̂',
+            n: 'n̂', N: 'N̂', o: 'ô', O: 'Ô',
+            s: 'ŝ', S: 'Ŝ', u: 'û', U: 'Û',
+            w: 'ŵ', W: 'Ŵ', y: 'ŷ', Y: 'Ŷ', z: 'ẑ', Z: 'Ẑ',
         },
-        '~': {  // tilde
-            a: 'ã', n: 'ñ', o: 'õ', u: 'ũ',
-            A: 'Ã', N: 'Ñ', O: 'Õ', U: 'Ũ',
+        // ─── Option+N — Tilde ───────────────────────────────────
+        'n': {
+            a: 'ã', A: 'Ã', e: 'ẽ', E: 'Ẽ', i: 'ĩ', I: 'Ĩ',
+            n: 'ñ', N: 'Ñ', o: 'õ', O: 'Õ', u: 'ũ', U: 'Ũ',
+            v: 'ṽ', V: 'Ṽ', y: 'ỹ', Y: 'Ỹ',
         },
-        '^': {  // circumflex
-            a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', y: 'ŷ',
-            s: 'ŝ', c: 'ĉ', g: 'ĝ', h: 'ĥ', j: 'ĵ',
-            A: 'Â', E: 'Ê', I: 'Î', O: 'Ô', U: 'Û',
-            S: 'Ŝ', C: 'Ĉ', G: 'Ĝ', H: 'Ĥ', J: 'Ĵ',
+        // ─── Option+U — Diaeresis (umlaut) ─────────────────────
+        'u': {
+            a: 'ä', A: 'Ä', e: 'ë', E: 'Ë', h: 'ḧ', H: 'Ḧ',
+            i: 'ï', I: 'Ï', o: 'ö', O: 'Ö',
+            t: 'ẗ',  // U+1E97 — only lowercase precomposed exists
+            u: 'ü', U: 'Ü', w: 'ẅ', W: 'Ẅ', x: 'ẍ', X: 'Ẍ',
+            y: 'ÿ', Y: 'Ÿ',
         },
-        ':': {  // diaeresis / umlaut
-            a: 'ä', e: 'ë', i: 'ï', o: 'ö', u: 'ü', y: 'ÿ',
-            A: 'Ä', E: 'Ë', I: 'Ï', O: 'Ö', U: 'Ü',
+        // ─── Option+W — Dot Above ──────────────────────────────
+        'w': {
+            a: 'ȧ', A: 'Ȧ', b: 'ḃ', B: 'Ḃ', c: 'ċ', C: 'Ċ',
+            d: 'ḋ', D: 'Ḋ', e: 'ė', E: 'Ė', f: 'ḟ', F: 'Ḟ',
+            g: 'ġ', G: 'Ġ', h: 'ḣ', H: 'Ḣ',
+            i: 'ı', I: 'İ',  // dotless i / I-with-dot — Apple's choice for this dead key
+            m: 'ṁ', M: 'Ṁ', n: 'ṅ', N: 'Ṅ', o: 'ȯ', O: 'Ȯ',
+            p: 'ṗ', P: 'Ṗ', r: 'ṙ', R: 'Ṙ', s: 'ṡ', S: 'Ṡ',
+            t: 'ṫ', T: 'Ṫ', w: 'ẇ', W: 'Ẇ', x: 'ẋ', X: 'Ẋ',
+            y: 'ẏ', Y: 'Ẏ', z: 'ż', Z: 'Ż',
         },
-        ',': {  // cedilla
-            c: 'ç', s: 'ş', t: 'ţ',
-            C: 'Ç', S: 'Ş', T: 'Ţ',
+        // ─── Option+X — Dot Below (underdot) ───────────────────
+        'x': {
+            a: 'ạ', A: 'Ạ', b: 'ḅ', B: 'Ḅ', d: 'ḍ', D: 'Ḍ',
+            e: 'ẹ', E: 'Ẹ', h: 'ḥ', H: 'Ḥ', i: 'ị', I: 'Ị',
+            k: 'ḳ', K: 'Ḳ', l: 'ḷ', L: 'Ḷ', m: 'ṃ', M: 'Ṃ',
+            n: 'ṇ', N: 'Ṇ', o: 'ọ', O: 'Ọ', r: 'ṛ', R: 'Ṛ',
+            s: 'ṣ', S: 'Ṣ', t: 'ṭ', T: 'Ṭ', u: 'ụ', U: 'Ụ',
+            v: 'ṿ', V: 'Ṿ', w: 'ẉ', W: 'Ẉ',
+            y: 'ỵ', Y: 'Ỵ', z: 'ẓ', Z: 'Ẓ',
         },
-        '*': {  // ring above
-            a: 'å', u: 'ů',
-            A: 'Å', U: 'Ů',
+        // ─── Option+H — Macron Below (line below) ──────────────
+        'h': {
+            b: 'ḇ', B: 'Ḇ', d: 'ḏ', D: 'Ḏ',
+            h: 'ẖ', H: 'H̱',
+            k: 'ḵ', K: 'Ḵ', l: 'ḻ', L: 'Ḻ',
+            n: 'ṉ', N: 'Ṉ', r: 'ṟ', R: 'Ṟ',
+            t: 'ṯ', T: 'Ṯ', z: 'ẕ', Z: 'Ẕ',
         },
-        '/': {  // stroke / slash
-            o: 'ø', l: 'ł', d: 'đ', h: 'ħ', t: 'ŧ',
-            O: 'Ø', L: 'Ł', D: 'Đ', H: 'Ħ', T: 'Ŧ',
+        // ─── Option+V — Caron (háček) ──────────────────────────
+        'v': {
+            a: 'ǎ', A: 'Ǎ', c: 'č', C: 'Č', d: 'ď', D: 'Ď',
+            e: 'ě', E: 'Ě', g: 'ǧ', G: 'Ǧ', h: 'ȟ', H: 'Ȟ',
+            i: 'ǐ', I: 'Ǐ',
+            j: 'ǰ', J: 'J̌',  // only lowercase J+caron is precomposed
+            k: 'ǩ', K: 'Ǩ', l: 'ľ', L: 'Ľ', n: 'ň', N: 'Ň',
+            o: 'ǒ', O: 'Ǒ', r: 'ř', R: 'Ř', s: 'š', S: 'Š',
+            t: 'ť', T: 'Ť', u: 'ǔ', U: 'Ǔ',
+            v: 'v̌', V: 'V̌',
+            x: 'x̌', X: 'X̌',
+            z: 'ž', Z: 'Ž',
         },
-        'v': {  // caron / háček (also wedge)
-            s: 'š', c: 'č', z: 'ž', n: 'ň', r: 'ř', d: 'ď', t: 'ť',
-            l: 'ľ', e: 'ě', g: 'ǧ',
-            S: 'Š', C: 'Č', Z: 'Ž', N: 'Ň', R: 'Ř', E: 'Ě',
+        // ─── Option+B — Breve ──────────────────────────────────
+        'b': {
+            a: 'ă', A: 'Ă', e: 'ĕ', E: 'Ĕ', g: 'ğ', G: 'Ğ',
+            h: 'ḫ', H: 'Ḫ', i: 'ĭ', I: 'Ĭ',
+            o: 'ŏ', O: 'Ŏ', u: 'ŭ', U: 'Ŭ',
         },
-        '(': {  // breve
-            a: 'ă', e: 'ĕ', i: 'ĭ', o: 'ŏ', u: 'ŭ', g: 'ğ',
-            A: 'Ă', E: 'Ĕ', I: 'Ĭ', O: 'Ŏ', U: 'Ŭ', G: 'Ğ',
+        // ─── Option+C — Cedilla ────────────────────────────────
+        'c': {
+            c: 'ç', C: 'Ç', d: 'ḑ', D: 'Ḑ', e: 'ȩ', E: 'Ȩ',
+            g: 'ģ', G: 'Ģ', h: 'ḩ', H: 'Ḩ', k: 'ķ', K: 'Ķ',
+            l: 'ļ', L: 'Ļ', n: 'ņ', N: 'Ņ', r: 'ŗ', R: 'Ŗ',
+            s: 'ş', S: 'Ş', t: 'ţ', T: 'Ţ',
+            z: 'z̧', Z: 'Z̧',
         },
-        'm': {  // overdot — Indic anusvara/guttural-nasal in IAST
-            m: 'ṁ', n: 'ṅ', s: 'ṡ', g: 'ġ', z: 'ż', e: 'ė', i: 'ı',
-            M: 'Ṁ', N: 'Ṅ', S: 'Ṡ', G: 'Ġ', Z: 'Ż', E: 'Ė', I: 'İ',
+        // ─── Option+L — Stroke ─────────────────────────────────
+        'l': {
+            b: 'ƀ', B: 'Ƀ', d: 'đ', D: 'Đ', g: 'ǥ', G: 'Ǥ',
+            h: 'ħ', H: 'Ħ', i: 'ɨ', I: 'Ɨ', l: 'ł', L: 'Ł',
+            o: 'ø', O: 'Ø', t: 'ŧ', T: 'Ŧ', u: 'ʉ', U: 'Ʉ',
+            z: 'ƶ', Z: 'Ƶ',
         },
-        '"': {  // double acute / Indic palatal sibilant alternative
-            a: 'ä', o: 'ö', u: 'ü',  // diaeresis fallback
-            s: 'ś',  // common for IAST palatal sibilant
-            S: 'Ś',
+        // ─── Option+K — Ring Above ─────────────────────────────
+        'k': {
+            a: 'å', A: 'Å',
+            e: 'e̊', E: 'E̊',
+            o: 'o̊', O: 'O̊',
+            u: 'ů', U: 'Ů',
+            w: 'ẘ', y: 'ẙ',
+        },
+        // ─── Option+M — Ogonek ─────────────────────────────────
+        'm': {
+            a: 'ą', A: 'Ą', e: 'ę', E: 'Ę', i: 'į', I: 'Į',
+            o: 'ǫ', O: 'Ǫ', u: 'ų', U: 'Ų',
+        },
+        // ─── Option+Z — Hook Above ─────────────────────────────
+        'z': {
+            a: 'ả', A: 'Ả', e: 'ẻ', E: 'Ẻ', i: 'ỉ', I: 'Ỉ',
+            o: 'ỏ', O: 'Ỏ', u: 'ủ', U: 'Ủ', y: 'ỷ', Y: 'Ỷ',
+        },
+        // ─── Option+I — Horn (Vietnamese) ──────────────────────
+        'i': {
+            o: 'ơ', O: 'Ơ', u: 'ư', U: 'Ư',
+        },
+        // ─── Option+P — Comma Below ────────────────────────────
+        'p': {
+            s: 'ș', S: 'Ș', t: 'ț', T: 'Ț',
+        },
+        // ─── Option+J — Double Acute (Hungarian) ───────────────
+        'j': {
+            o: 'ő', O: 'Ő', u: 'ű', U: 'Ű',
         },
     };
 
