@@ -29,8 +29,13 @@ READ_CHUNK = 4096
 
 class TerminalConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        # Mirror the is_superuser gate on the HTTP view. A PTY here
+        # is full RCE as the project user — staff alone is not
+        # enough, since we want non-superuser staff to admin specific
+        # apps without inheriting shell access.
         user = self.scope.get('user')
-        if not user or not user.is_authenticated:
+        if (not user or not user.is_authenticated
+                or not user.is_active or not user.is_superuser):
             await self.close(code=4401)
             return
 
