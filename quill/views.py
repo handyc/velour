@@ -112,6 +112,21 @@ def detail(request, slug):
         .select_related('language')
         .order_by('order', 'pk')
     )
+    # The document's primary_language must always be selectable in the
+    # toolbar — that's the "switch back to plain English/Dutch/etc."
+    # affordance. If it's not already in DocumentLanguage (e.g. the
+    # user removed it, or the doc predates Phase 1.5), synthesise an
+    # in-memory DocumentLanguage and pin it to the front. Not saved;
+    # configuring the language palette persists the canonical set.
+    if doc.primary_language_id:
+        already_in = any(
+            dl.language_id == doc.primary_language_id for dl in enabled_langs
+        )
+        if not already_in:
+            synthetic = DocumentLanguage(
+                document=doc, language=doc.primary_language, order=-1,
+            )
+            enabled_langs.insert(0, synthetic)
     return render(request, 'quill/detail.html', {
         'document': doc,
         'sections': doc.sections.all().select_related('style', 'primary_language'),
@@ -285,6 +300,21 @@ def document_languages(request, slug):
             if new_primary:
                 doc.primary_language = new_primary
                 doc.save(update_fields=['primary_language'])
+                # Ensure the primary is always present in the toolbar
+                # palette — clicking it is the "switch back to default"
+                # affordance, and a missing primary leaves users
+                # without a way to do that.
+                if not DocumentLanguage.objects.filter(
+                        document=doc, language=new_primary).exists():
+                    next_order = (
+                        DocumentLanguage.objects.filter(document=doc)
+                        .order_by('-order').values_list('order', flat=True)
+                        .first()
+                    )
+                    next_order = (next_order or 0) + 1
+                    DocumentLanguage.objects.create(
+                        document=doc, language=new_primary, order=0,
+                    )
 
         messages.success(request, 'Languages updated.')
         return redirect('quill:document_languages', slug=doc.slug)

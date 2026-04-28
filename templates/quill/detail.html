@@ -84,6 +84,16 @@
         border-color: #58a6ff;
         color: #fff;
     }
+    .quill-lang-btn.cursor-here {
+        outline: 2px solid #56d364;
+        outline-offset: 1px;
+    }
+    .quill-lang-btn.is-primary::after {
+        content: "•";
+        color: #e3b341;
+        margin-left: 0.25rem;
+        font-weight: 700;
+    }
     .quill-lang-btn .quill-lang-native {
         opacity: 0.85;
         font-size: 0.78rem;
@@ -246,12 +256,12 @@
         <span class="quill-lang-label">Language</span>
         {% for dl in enabled_langs %}
         <button type="button"
-                class="quill-lang-btn {% if dl.language.direction == 'rtl' %}quill-lang-rtl{% endif %}"
+                class="quill-lang-btn{% if dl.language.direction == 'rtl' %} quill-lang-rtl{% endif %}{% if document.primary_language_id == dl.language_id %} is-primary{% endif %}"
                 data-slug="{{ dl.language.slug }}"
                 data-bcp47="{{ dl.language.bcp47 }}"
                 data-direction="{{ dl.language.direction }}"
                 data-fontstack="{{ dl.language.font_stack }}"
-                title="{{ dl.language.name }} — {{ dl.language.script_name }} · {{ dl.language.direction|upper }}">
+                title="{{ dl.language.name }} — {{ dl.language.script_name }} · {{ dl.language.direction|upper }}{% if document.primary_language_id == dl.language_id %} · primary{% endif %}">
             <span class="quill-lang-name">{{ dl.language.name }}</span>
             {% if dl.language.native_name %}
             <span class="quill-lang-native"
