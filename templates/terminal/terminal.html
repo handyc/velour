@@ -1,117 +1,124 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Terminal - Velour{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/xterm/xterm.css' %}">
+<style>
+  .terminal-container {
+    display: flex; flex-direction: column;
+    height: calc(100vh - 4.5rem);
+    margin: 0.5rem; border: 1px solid #30363d; border-radius: 4px;
+    background: #0d1117; overflow: hidden;
+  }
+  .terminal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.4rem 0.8rem; background: #161b22;
+    border-bottom: 1px solid #30363d;
+    color: #c9d1d9; font-size: 0.85rem;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .terminal-status { color: #8b949e; }
+  .terminal-status.connected { color: #3fb950; }
+  .terminal-status.disconnected { color: #f85149; }
+  .terminal-host { flex: 1; padding: 0.25rem 0.4rem; }
+  .terminal-host .xterm { height: 100%; }
+  .terminal-host .xterm-viewport { background: transparent !important; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="terminal-container">
-    <div class="terminal-header">
-        <span>Web Terminal</span>
-        <span>
-            <label style="color: #8b949e; font-size: 0.85rem;">
-                <input type="checkbox" id="sudo-toggle" {% if not user.is_superuser %}disabled{% endif %}>
-                sudo mode {% if not user.is_superuser %}(superuser only){% endif %}
-            </label>
-        </span>
-    </div>
-    <div class="terminal-output" id="terminal-output">
-        <span class="output-stdout">Velour Terminal ready.\nType commands below.\n\n</span>
-    </div>
-    <div class="terminal-input-line">
-        <span class="terminal-prompt" id="terminal-prompt">$</span>
-        <input type="text" class="terminal-input" id="terminal-input" autofocus
-               placeholder="Enter command..." autocomplete="off" spellcheck="false">
-    </div>
+  <div class="terminal-header">
+    <span>Web Terminal · {{ user.username }}</span>
+    <span class="terminal-status" id="terminal-status">connecting…</span>
+  </div>
+  <div class="terminal-host" id="terminal-host"></div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/xterm/xterm.min.js' %}"></script>
+<script src="{% static 'js/xterm/addon-fit.min.js' %}"></script>
+<script src="{% static 'js/xterm/addon-web-links.min.js' %}"></script>
 <script>
 (function() {
-    const output = document.getElementById('terminal-output');
-    const input = document.getElementById('terminal-input');
-    const sudoToggle = document.getElementById('sudo-toggle');
-    const prompt = document.getElementById('terminal-prompt');
-    const history = [];
-    let historyIndex = -1;
-    let cwd = null;
+  const host = document.getElementById('terminal-host');
+  const statusEl = document.getElementById('terminal-status');
 
-    function appendOutput(text, cls) {
-        const span = document.createElement('span');
-        span.className = cls;
-        span.textContent = text;
-        output.appendChild(span);
-        output.scrollTop = output.scrollHeight;
+  const term = new Terminal({
+    cursorBlink: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: 13,
+    theme: {
+      background: '#0d1117', foreground: '#c9d1d9',
+      cursor: '#c9d1d9', selectionBackground: '#264f78',
+      black:   '#484f58', red:     '#ff7b72', green:   '#7ee787',
+      yellow:  '#d29922', blue:    '#79c0ff', magenta: '#d2a8ff',
+      cyan:    '#a5d6ff', white:   '#c9d1d9',
+    },
+    scrollback: 5000,
+  });
+
+  const fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.loadAddon(new WebLinksAddon.WebLinksAddon());
+  term.open(host);
+  fitAddon.fit();
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = 'terminal-status ' + (cls || '');
+  }
+
+  const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = wsScheme + '://' + location.host + '/ws/terminal/';
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = function() {
+    setStatus('connected', 'connected');
+    sendResize();
+  };
+
+  ws.onmessage = function(ev) {
+    term.write(ev.data);
+  };
+
+  ws.onclose = function(ev) {
+    setStatus('disconnected (' + ev.code + ')', 'disconnected');
+    term.write('\r\n\x1b[2m[connection closed]\x1b[0m\r\n');
+  };
+
+  ws.onerror = function() {
+    setStatus('error', 'disconnected');
+  };
+
+  term.onData(function(data) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'input', data: data}));
     }
+  });
 
-    async function executeCommand(command) {
-        appendOutput((sudoToggle.checked ? '# ' : '$ ') + command + '\n', 'output-cmd');
+  function sendResize() {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'resize',
+      cols: term.cols,
+      rows: term.rows,
+    }));
+  }
 
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-            || '{{ csrf_token }}';
+  let resizeDebounce = null;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(function() {
+      fitAddon.fit();
+      sendResize();
+    }, 100);
+  });
 
-        try {
-            const response = await fetch('{% url "terminal:execute" %}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken,
-                },
-                body: JSON.stringify({
-                    command: command,
-                    sudo: sudoToggle.checked,
-                    cwd: cwd,
-                }),
-            });
-
-            const data = await response.json();
-
-            if (data.stdout) appendOutput(data.stdout, 'output-stdout');
-            if (data.stderr) appendOutput(data.stderr, 'output-stderr');
-            if (data.error)  appendOutput(data.error + '\n', 'output-stderr');
-        } catch (err) {
-            appendOutput('Network error: ' + err.message + '\n', 'output-stderr');
-        }
-    }
-
-    input.addEventListener('keydown', async function(e) {
-        if (e.key === 'Enter') {
-            const command = input.value.trim();
-            input.value = '';
-            if (!command) return;
-
-            history.unshift(command);
-            historyIndex = -1;
-
-            // Handle cd locally
-            if (command.startsWith('cd ')) {
-                const dir = command.slice(3).trim();
-                cwd = dir.startsWith('/') ? dir : ((cwd || '') + '/' + dir);
-                appendOutput('$ ' + command + '\n', 'output-cmd');
-                return;
-            }
-
-            await executeCommand(command);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            if (historyIndex < history.length - 1) {
-                historyIndex++;
-                input.value = history[historyIndex];
-            }
-        } else if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            if (historyIndex > 0) {
-                historyIndex--;
-                input.value = history[historyIndex];
-            } else {
-                historyIndex = -1;
-                input.value = '';
-            }
-        }
-    });
-
-    sudoToggle.addEventListener('change', function() {
-        prompt.textContent = sudoToggle.checked ? '#' : '$';
-    });
+  term.focus();
 })();
 </script>
 {% endblock %}

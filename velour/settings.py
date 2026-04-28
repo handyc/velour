@@ -65,6 +65,10 @@ ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '*,localhost,127.0.0.1,lu
 # Application definition
 
 INSTALLED_APPS = [
+    # `daphne` must precede `django.contrib.staticfiles` so its
+    # ASGI-aware runserver overrides Django's WSGI one. Required for
+    # the web terminal's WebSocket consumer to handshake correctly.
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',

@@ -4,6 +4,7 @@ cffi==2.0.0
 channels==4.3.2
 cnlunar==0.2.4
 cryptography==46.0.7
+daphne==4.2.1
 defusedxml==0.7.1
 Django==6.0.4
 fonttools==4.62.1
