@@ -87,6 +87,11 @@ memory/
 # static/casting/sources/ and are tracked normally.
 /outputs/casting/
 
+# --- Runtime state written by smart_runserver -----------------------------
+# Overwritten every server start with whichever port from PREFERRED_PORTS
+# was actually free. Nothing in the codebase reads it as configuration.
+velour_port.txt
+
 # --- Isolation oneclick-hex-class4 compiled hunter (keep .c + .py source) -
 /isolation/artifacts/oneclick_class4/hunter
 /isolation/artifacts/oneclick_class4/winner_*
