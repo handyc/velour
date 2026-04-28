@@ -90,6 +90,10 @@ STAGE_DIMENSIONS = {
     'bsf-larvae-bin':           (400, 300, 200),  # insect protein
     'nettle-patch':             (400, 400, 600),  # cool-temperate accumulator
     'mediterranean-herb-bed':   (500, 400, 300),  # dry-tolerant
+    # Apartment-wall scale (compact ecosystem)
+    'micro-vermifilter':        (200, 200, 200),
+    'microgreens-tray':         (400, 200, 100),
+    'mini-algae-tube':          (200, 100, 800),
 }
 
 
@@ -1036,6 +1040,56 @@ STAGE_TYPES = [
                  'bacteria': 0.75, 'turbidity': 0.80},
         flow_lpm=0.1, energy_watts=0.0,
         cost_eur=20.0, maintenance_days=30,
+    ),
+    dict(
+        slug='micro-vermifilter',
+        name='Under-sink micro vermifilter',
+        kind='biological',
+        description='8 L bin packed with Eisenia fetida — same '
+                    'biology as the full-size vermifilter, scaled '
+                    'down to fit under a kitchen sink. Smaller worm '
+                    'population means smaller monthly castings '
+                    'harvest (~50 g of vermicompost) but the per-'
+                    'pass biology is identical. Top up bedding '
+                    'every 6-8 weeks.',
+        removal={'voc': 0.50, 'bacteria': 0.95, 'protozoa': 0.90,
+                 'turbidity': 0.90, 'hormones': 0.30, 'pharma': 0.20},
+        flow_lpm=0.15, energy_watts=0.0,
+        cost_eur=10.0, maintenance_days=45,
+    ),
+    dict(
+        slug='microgreens-tray',
+        name='Microgreens hydroponic tray',
+        kind='biological',
+        description='Shallow 40×20×10 cm tray for fast-growing '
+                    'microgreens — radish, pea shoots, sunflower '
+                    'sprouts, mustard, basil. 7-14 day harvest '
+                    'cycle; 200-300 g of greens per cycle per tray. '
+                    'Stackable for vertical wall mounting. Lower '
+                    'N uptake than full-size aquaponic but the '
+                    'culinary value per gram is high.',
+        removal={'nitrate': 0.30, 'ammonia': 0.25, 'phosphate': 0.30,
+                 'potassium': 0.20, 'bacteria': 0.85, 'turbidity': 0.85},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=5.0, maintenance_days=14,
+    ),
+    dict(
+        slug='mini-algae-tube',
+        name='Wall-mounted mini algae tube',
+        kind='biological',
+        description='Slim 20×10×80 cm clear-acrylic vertical tube '
+                    'cultivating spirulina or chlorella. Wall-mount '
+                    'orientation maximises light collection while '
+                    'minimising floor footprint. Half the throughput '
+                    'of the full photobioreactor (~6 g protein per '
+                    'L treated) but designed to share a sunny '
+                    'kitchen window with herbs. Weekly harvest by '
+                    'filter-decant.',
+        removal={'nitrate': 0.50, 'ammonia': 0.40, 'phosphate': 0.40,
+                 'potassium': 0.20, 'bacteria': 0.85,
+                 'turbidity': 0.40},
+        flow_lpm=0.08, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=14,
     ),
     dict(
         slug='tpms-ceramic-microfilter',
@@ -2178,6 +2232,46 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v22, stage_type=st, position=i)
 
+        # v23 — apartment-wall scale ecosystem (~70 L). Compact
+        # variants of the bigger stages: under-sink worm bin,
+        # wall-mounted algae tube, stackable microgreens tray,
+        # small duckweed tray, ceramic candle. Designed for an
+        # urban kitchen — the algae tube on a sunny wall, the
+        # microgreens stacked on a cabinet, the worm bin under the
+        # sink. Output: irrigation-grade water + spirulina powder
+        # weekly + microgreens cycles + small worm compost.
+        urine_v23, urine_v23_created = System.objects.update_or_create(
+            slug='urine-to-garden-v23-apartment', defaults=dict(
+                name='Urine → Garden (v23 apartment-wall compact)',
+                description='Vertical / urban ecosystem — fits in a '
+                            'kitchen corner. Two micro-urease '
+                            'cartridges → under-sink micro-'
+                            'vermifilter → wall-mounted mini-algae '
+                            'tube (spirulina) → stacked microgreens '
+                            'tray → small duckweed tray → ceramic '
+                            'candle. Outputs: spirulina powder '
+                            '(~6 g/L of treated urine), microgreens '
+                            '(7-14 day cycles), small monthly worm '
+                            'castings, duckweed for aquarium feed. '
+                            '~64 L assembly volume — about the size '
+                            'of a wine fridge. €92, 0 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v23_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'micro-vermifilter',
+                'mini-algae-tube',
+                'microgreens-tray',
+                'duckweed-tray',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v23, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -2191,4 +2285,5 @@ class Command(BaseCommand):
             f'"{urine_v15.name}", "{urine_v16.name}", '
             f'"{urine_v17.name}", "{urine_v18.name}", '
             f'"{urine_v19.name}", "{urine_v20.name}", '
-            f'"{urine_v21.name}", "{urine_v22.name}".'))
+            f'"{urine_v21.name}", "{urine_v22.name}", '
+            f'"{urine_v23.name}".'))
