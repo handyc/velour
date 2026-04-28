@@ -79,7 +79,9 @@
             {% endif %}
         </a>
         {% endif %}
+        {% if 'chronos' in installed_app_slugs %}
         {% include "chronos/_topbar_clock.html" %}
+        {% endif %}
     </div>
     <nav class="navbar">
         <div class="nav-brand">

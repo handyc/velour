@@ -205,6 +205,7 @@
 </div>
 
 {# System & Ops — default open (most-used utilities) #}
+{% if 'app_factory' in installed_app_slugs or 'conduit' in installed_app_slugs or 'databases' in installed_app_slugs or 'graphs' in installed_app_slugs or 'hosts' in installed_app_slugs or 'hpc' in installed_app_slugs or 'logs' in installed_app_slugs or 'maintenance' in installed_app_slugs or 'security' in installed_app_slugs or 'services' in installed_app_slugs or 'sysinfo' in installed_app_slugs or 'terminal' in installed_app_slugs or 'winctl' in installed_app_slugs %}
 <details class="cat-group" open>
     <summary>System &amp; Ops <span class="cat-count">· 13</span></summary>
     <div class="tools-grid">
@@ -223,8 +224,10 @@
         {% if 'conduit' in installed_app_slugs %}<a class="card" href="{% url 'conduit:index' %}" title="Job routing — local/VPS/HPC/Pi/ESP/ATtiny/code-agents"><h3>Conduit</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Identity & Thought — default open, only 2 items #}
+{% if 'identity' in installed_app_slugs or 'oracle' in installed_app_slugs %}
 <details class="cat-group" open>
     <summary>Identity &amp; Thought <span class="cat-count">· 2</span></summary>
     <div class="tools-grid">
@@ -232,8 +235,10 @@
         {% if 'oracle' in installed_app_slugs %}<a class="card" href="{% url 'oracle:home' %}" title="Classical-ML decision trees — poor-man's AI judgment"><h3>Oracle</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Fleet & Hardware — collapsed by default #}
+{% if 'bodymap' in installed_app_slugs or 'experiments' in installed_app_slugs or 'nodes' in installed_app_slugs or 'powerlab' in installed_app_slugs or 'roomplanner' in installed_app_slugs %}
 <details class="cat-group">
     <summary>Fleet &amp; Hardware <span class="cat-count">· 5</span></summary>
     <div class="tools-grid">
@@ -244,8 +249,10 @@
         {% if 'roomplanner' in installed_app_slugs %}<a class="card" href="{% url 'roomplanner:index' %}" title="Lab-room layout + fire-safety/cable-run constraints"><h3>Room Planner</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Worlds & Creatures — collapsed by default #}
+{% if 'aether' in installed_app_slugs or 'agents' in installed_app_slugs or 'agricola' in installed_app_slugs or 'bridge' in installed_app_slugs or 'evolution' in installed_app_slugs or 'grammar_engine' in installed_app_slugs or 'legolith' in installed_app_slugs or 'lsystem' in installed_app_slugs or 'screen_gubi' in installed_app_slugs %}
 <details class="cat-group">
     <summary>Worlds &amp; Creatures <span class="cat-count">· 9</span></summary>
     <div class="tools-grid">
@@ -260,8 +267,10 @@
         {% if 'agricola' in installed_app_slugs %}<a class="card" href="{% url 'agricola:game' %}" title="Agar.io clone — eat cells to grow"><h3>Agricola</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Research & Search — collapsed by default #}
+{% if 'aggregator' in installed_app_slugs or 'agora' in installed_app_slugs or 'automaton' in installed_app_slugs or 'camlfornia' in installed_app_slugs or 'casting' in installed_app_slugs or 'datalift' in installed_app_slugs or 'det' in installed_app_slugs or 'lingua' in installed_app_slugs or 'muka' in installed_app_slugs or 'radiant' in installed_app_slugs or 'reckoner' in installed_app_slugs or 'studious' in installed_app_slugs %}
 <details class="cat-group">
     <summary>Research &amp; Search <span class="cat-count">· 11</span></summary>
     <div class="tools-grid">
@@ -279,8 +288,10 @@
         {% if 'datalift' in installed_app_slugs %}<a class="card" href="{% url 'datalift:job_list' %}" title="MySQL → Django models + SQLite, anonymization"><h3>Datalift</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Lab & Design — collapsed by default #}
+{% if 'cartography' in installed_app_slugs or 'condenser' in installed_app_slugs or 'displacer' in installed_app_slugs or 'isolation' in installed_app_slugs or 'naiad' in installed_app_slugs or 'oneliner' in installed_app_slugs or 'tiles' in installed_app_slugs or 'zoetrope' in installed_app_slugs %}
 <details class="cat-group">
     <summary>Lab &amp; Design <span class="cat-count">· 8</span></summary>
     <div class="tools-grid">
@@ -294,12 +305,15 @@
         {% if 'cartography' in installed_app_slugs %}<a class="card" href="{% url 'cartography:home' %}" title="Multi-scale cartography — Earth, Mars, Moon, sky"><h3>Maps</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 
 {# Other #}
+{% if 'landingpage' in installed_app_slugs %}
 <details class="cat-group">
     <summary>Other <span class="cat-count">· 1</span></summary>
     <div class="tools-grid">
         {% if 'landingpage' in installed_app_slugs %}<a class="card" href="{% url 'landingpage:home' %}" title="Newspaper-style chronicle"><h3>Landing Page</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
+{% endif %}
 {% endblock %}

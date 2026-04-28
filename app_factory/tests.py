@@ -123,6 +123,26 @@ class AppRegistryTests(SimpleTestCase):
         # The registry, not the form, is the source of truth.
         self.assertEqual(compute_closure(['totally_made_up_app']), set())
 
+    def test_registry_matches_runtime_imports(self):
+        """Lock in zero drift between OPTIONAL_APPS depends_on and the
+        actual cross-app imports in views/models/urls. A failing test
+        means an app added a new inter-app import without updating its
+        registry entry — a stripped clone would crash at first use.
+
+        Run ``manage.py audit_app_deps`` for the operator-facing
+        report and exact missing/stale entries.
+        """
+        from app_factory.dep_audit import audit_optional_app_deps
+        result = audit_optional_app_deps()
+        self.assertEqual(
+            result['missing'], {},
+            'Cross-app imports detected without matching depends_on '
+            'declarations:\n' + '\n'.join(
+                f'  {app}: needs {sorted(deps)}'
+                for app, deps in sorted(result['missing'].items())
+            )
+        )
+
     def test_included_apps_always_contains_core(self):
         result = included_apps([])  # empty selection
         for core_slug in CORE_APPS:
