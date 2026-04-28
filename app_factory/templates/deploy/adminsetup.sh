@@ -146,6 +146,10 @@ sudo rsync -a --delete \
     --exclude='secret_key.txt' \
     --exclude='health_token.txt' \
     --exclude='mail_relay_token.txt' \
+    --exclude='provisioning_secret.txt' \
+    --exclude='*.token' \
+    --exclude='llm_*.key' \
+    --exclude='*_api_key.txt' \
     --exclude='.env' \
     --exclude='.env.*' \
     --exclude='.git/' \
