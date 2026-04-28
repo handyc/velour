@@ -19,6 +19,59 @@ from .management.commands.generate_deploy import render_deploy_artifacts
 from .models import GeneratedApp
 
 
+# Files and directories at BASE_DIR that must NEVER end up in a clone.
+# Mirrors .gitignore — anything excluded from the public repo should
+# also be excluded from a clone tree, since the clone is a fresh install
+# with its own secrets, its own DB, and its own per-machine state.
+#
+# THE SECRET FILES ARE THE LOAD-BEARING ENTRIES. A clone that inherits
+# the originating install's secret_key.txt or token files means
+# compromise of one → compromise of both.
+CLONE_SKIP_TOPLEVEL = {
+    # Secret-file protocol — never copy
+    'secret_key.txt',
+    'health_token.txt',
+    'mail_relay_token.txt',
+    'provisioning_secret.txt',
+    # Source-level git state — clone gets its own .git via `git init`
+    '.git',
+    # Build / runtime
+    'venv',
+    'staticfiles',
+    'db.sqlite3',
+    'db.sqlite3-journal',
+    '__pycache__',
+    # Per-machine runtime state
+    'velour_port.txt',
+    # Generated outputs (per /outputs/<app>/ convention)
+    'outputs',
+    'media',
+    # Claude harness machine-local state
+    '.claude',
+    'memory',
+    # Editor / OS
+    '.vscode',
+    '.idea',
+    '.DS_Store',
+}
+
+# Recursive glob patterns to skip inside subdirectories.
+CLONE_SKIP_PATTERNS = (
+    '__pycache__', '*.pyc', '*.pyo',
+    # Any file ending in .token treated as a secret
+    '*.token',
+    # Per-provider LLM API keys + generic API key files
+    'llm_*.key', '*_api_key.txt',
+    # PlatformIO per-device secrets
+    'secrets.ini',
+    # Editor / OS
+    '*.swp', '*.swo', '*~', '.DS_Store',
+    # Large auto-downloaded data; clone re-downloads on first use
+    '*.bsp',                  # skyfield ephemeris (~17MB each)
+    '*.onnx', '*.onnx.json',  # piper TTS voice models (~60MB each)
+)
+
+
 def _find_open_port(start=8001, end=9000):
     """Find an available port in the given range."""
     # Also avoid ports already claimed by other deployed apps
@@ -85,14 +138,15 @@ def app_create(request):
         if app_type == 'clone':
             base = str(settings.BASE_DIR)
             for item in os.listdir(base):
-                if item in ('venv', 'staticfiles', 'db.sqlite3', '__pycache__'):
+                if item in CLONE_SKIP_TOPLEVEL:
                     continue
                 src = os.path.join(base, item)
                 dst = os.path.join(output_dir, item)
                 if os.path.isdir(src):
-                    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
-                        '__pycache__', '*.pyc', 'venv', 'staticfiles',
-                    ))
+                    shutil.copytree(
+                        src, dst,
+                        ignore=shutil.ignore_patterns(*CLONE_SKIP_PATTERNS),
+                    )
                 else:
                     shutil.copy2(src, dst)
 
