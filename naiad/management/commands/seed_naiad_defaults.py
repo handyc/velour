@@ -97,6 +97,34 @@ STAGE_DIMENSIONS = {
 }
 
 
+# Harvestable biomass output, dry grams per litre of urine treated.
+# Pulled from typical aquaponics / vermiculture / spirulina pilot
+# data — aquaponic beds at 20-30 g/L (combined fish + greens), algae
+# at 10-15 g/L (single-cell protein), worms / mushrooms / herbs at
+# 1-5 g/L. Stages without harvestable output sit at 0 (default) and
+# get the same value via the seed loop's setdefault.
+STAGE_BIOMASS = {
+    'aquaponic-bed':            25.0,
+    'banana-ring':              15.0,
+    'algae-photobioreactor':    12.0,
+    'bsf-larvae-bin':           10.0,
+    'papaya-tree':               8.0,
+    'mini-algae-tube':           6.0,
+    'vermifilter':               5.0,
+    'oyster-mushroom-bed':       5.0,
+    'salicornia-bed':            4.0,
+    'duckweed-tray':             3.0,
+    'microgreens-tray':          3.0,
+    'comfrey-pot':               2.0,
+    'nettle-patch':              2.0,
+    'micro-vermifilter':         1.0,
+    'mediterranean-herb-bed':    1.0,
+    'brine-shrimp-tank':         1.0,
+    'constructed-wetland':       1.0,   # reeds/duckweed slow trickle
+    'urine-storage-tank':        0.5,   # struvite by hand
+}
+
+
 STAGE_TYPES = [
     dict(
         slug='sediment-5um', name='5 µm sediment filter',
@@ -1333,6 +1361,9 @@ class Command(BaseCommand):
                 spec.setdefault('width_mm',  dims[0])
                 spec.setdefault('depth_mm',  dims[1])
                 spec.setdefault('height_mm', dims[2])
+            biomass = STAGE_BIOMASS.get(spec['slug'])
+            if biomass is not None:
+                spec.setdefault('biomass_g_per_l', biomass)
             obj, created = StageType.objects.update_or_create(
                 slug=spec['slug'], defaults=spec)
             st_n += 1

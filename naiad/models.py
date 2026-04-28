@@ -123,6 +123,13 @@ class StageType(models.Model):
     depth_mm  = models.PositiveIntegerField(default=200)
     height_mm = models.PositiveIntegerField(default=200)
 
+    # Harvestable biomass output, grams per litre of urine treated.
+    # Aquaponic + algae stages are the heaviest producers (~10-25
+    # g/L); pure-filtration stages are 0. Drives the GA's biomass-
+    # output bonus so ecosystem chains that turn waste into food
+    # score better than equal-removal stages that just trash it.
+    biomass_g_per_l = models.FloatField(default=0.0)
+
     class Meta:
         ordering = ['kind', 'name']
 

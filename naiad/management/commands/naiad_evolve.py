@@ -77,17 +77,19 @@ class Ctx:
     types:  dict   # slug -> StageType
     slugs:  list
     # Weights match the JS defaults.
-    cost_cap:    float = 300.0
-    watt_cap:    float = 200.0
-    length_cap:  float = 12.0
-    maint_cap:   float = 0.1
-    volume_cap:  float = 1000.0   # litres, default = 1 m³ cube
-    w_cost:      float = 0.30
-    w_watt:      float = 0.20
-    w_length:    float = 0.15
-    w_maint:     float = 0.10
-    w_volume:    float = 0.25
-    detection_eps: float = 1e-6
+    cost_cap:       float = 300.0
+    watt_cap:       float = 200.0
+    length_cap:     float = 12.0
+    maint_cap:      float = 0.1
+    volume_cap:     float = 1000.0   # litres, default = 1 m³ cube
+    biomass_target: float = 50.0     # g/L of harvestable output
+    w_cost:         float = 0.25
+    w_watt:         float = 0.20
+    w_length:       float = 0.15
+    w_maint:        float = 0.10
+    w_volume:       float = 0.20
+    w_biomass:      float = 0.10
+    detection_eps:  float = 1e-6
 
 
 def simulate(stages: list[str], ctx: Ctx) -> dict:
@@ -138,6 +140,7 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         ratio_count += 1
 
     total_cost = total_watts = maint_load = total_volume = 0.0
+    total_biomass = 0.0
     for slug in stages:
         st = ctx.types.get(slug)
         if st is None:
@@ -152,15 +155,21 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         d = float(st.depth_mm  or 0)
         h = float(st.height_mm or 0)
         total_volume += (w * d * h) / 1e6
+        total_biomass += float(getattr(st, 'biomass_g_per_l', 0.0) or 0.0)
 
-    cost_pen  = min(1.0, total_cost   / ctx.cost_cap)
-    watt_pen  = min(1.0, total_watts  / ctx.watt_cap)
-    len_pen   = min(1.0, len(stages)  / ctx.length_cap)
-    maint_pen = min(1.0, maint_load   / ctx.maint_cap)
-    vol_pen   = min(1.0, total_volume / ctx.volume_cap)
-    penalty = (ctx.w_cost   * cost_pen   + ctx.w_watt   * watt_pen +
-               ctx.w_length * len_pen    + ctx.w_maint  * maint_pen +
-               ctx.w_volume * vol_pen)
+    cost_pen     = min(1.0, total_cost   / ctx.cost_cap)
+    watt_pen     = min(1.0, total_watts  / ctx.watt_cap)
+    len_pen      = min(1.0, len(stages)  / ctx.length_cap)
+    maint_pen    = min(1.0, maint_load   / ctx.maint_cap)
+    vol_pen      = min(1.0, total_volume / ctx.volume_cap)
+    # Biomass penalty: 1 when chain produces nothing, 0 when it hits
+    # the target. Reward saturates at biomass_target — past that, no
+    # additional credit (the GA can't game it by stuffing aquaponic
+    # beds into otherwise pointless chains).
+    biomass_pen  = max(0.0, 1.0 - total_biomass / max(ctx.biomass_target, 1e-9))
+    penalty = (ctx.w_cost    * cost_pen   + ctx.w_watt    * watt_pen +
+               ctx.w_length  * len_pen    + ctx.w_maint   * maint_pen +
+               ctx.w_volume  * vol_pen    + ctx.w_biomass * biomass_pen)
 
     if all_pass:
         s = 0.5 + 0.5 * (1 - penalty)
@@ -172,6 +181,7 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         'cost': total_cost, 'watts': total_watts,
         'length': len(stages), 'maint_load': maint_load,
         'volume': total_volume,
+        'biomass': total_biomass,
         'output': output,
     }
     return max(0.0, min(1.0, s)), all_pass, failures, stats
@@ -261,6 +271,15 @@ class Command(BaseCommand):
                             help='Volume penalty saturation ceiling, '
                                  'litres. 1000 = a 1 m³ cube. Best-'
                                  'smallest-filter chains score better.')
+
+        parser.add_argument('--biomass-target', type=float, default=None,
+                            dest='biomass_target',
+                            help='Harvestable biomass output target '
+                                 '(g per L of urine treated). Chains '
+                                 'reaching this value get the full '
+                                 'biomass bonus. Default 50 g/L. Set '
+                                 'higher to push the GA harder toward '
+                                 'ecosystem chains.')
         parser.add_argument('--save', default=None,
                             help='If set, save the winner as a new System '
                                  'with this slug.')
@@ -308,6 +327,8 @@ class Command(BaseCommand):
             ctx.length_cap = float(opts['length_cap'])
         if opts.get('volume_cap') is not None:
             ctx.volume_cap = float(opts['volume_cap'])
+        if opts.get('biomass_target') is not None:
+            ctx.biomass_target = float(opts['biomass_target'])
 
         rng = random.Random(opts['seed'])
         pop = [random_gene(rng, ctx) for _ in range(opts['pop'])]
@@ -327,7 +348,8 @@ class Command(BaseCommand):
             f'Caps   : cost €{ctx.cost_cap:.0f}  '
             f'watts {ctx.watt_cap:.0f}  '
             f'length {ctx.length_cap:.0f}  '
-            f'volume {ctx.volume_cap:g} L{preset_tag}')
+            f'volume {ctx.volume_cap:g} L  '
+            f'biomass {ctx.biomass_target:g} g/L{preset_tag}')
         self.stdout.write('')
 
         for gen in range(opts['gens']):
@@ -377,6 +399,7 @@ class Command(BaseCommand):
         self.stdout.write(f'cost    : €{stats["cost"]:.0f}')
         self.stdout.write(f'power   : {stats["watts"]:.0f} W')
         self.stdout.write(f'volume  : {stats["volume"]:.1f} L')
+        self.stdout.write(f'biomass : {stats["biomass"]:.1f} g/L')
         self.stdout.write('stages  :')
         for i, slug in enumerate(best_gene):
             self.stdout.write(f'  {i:2d}. {slug}')

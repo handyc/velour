@@ -130,6 +130,8 @@ def _passthrough_args(system_slug: str, opts: dict) -> str:
         parts += ['--length-cap', repr(float(opts['length_cap']))]
     if opts.get('volume_cap') is not None:
         parts += ['--volume-cap', repr(float(opts['volume_cap']))]
+    if opts.get('biomass_target') is not None:
+        parts += ['--biomass-target', repr(float(opts['biomass_target']))]
     if opts.get('save'):
         parts += ['--save', shlex.quote(str(opts['save']))]
     return ' '.join(parts)
