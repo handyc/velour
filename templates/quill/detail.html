@@ -261,9 +261,9 @@
     <div class="quill-lang-bar" id="quill-lang-bar">
         <span class="quill-lang-label">Language</span>
         <button type="button" id="quill-compose-btn" class="quill-lang-btn"
-                title="Compose mode (Ctrl+; / Cmd+;) — type a diacritic mark, then a base letter">
+                title="Compose mode — Alt+mark+letter (fast), or \ + mark + letter, or click">
             <span class="quill-lang-name">◌ Compose</span>
-            <span class="quill-lang-key">⌘;</span>
+            <span class="quill-lang-key">Alt</span>
         </button>
         {% for dl in enabled_langs %}
         <button type="button"
@@ -351,11 +351,25 @@
         font-size:0.85rem;color:#c9d1d9;
         font-family: ui-monospace, "SF Mono", monospace;">
         <h3 style="margin:0 0 0.4rem 0;font-family:inherit;">Compose key cheat sheet</h3>
+        <p style="margin:0 0 0.4rem 0;color:#c9d1d9;font-family:inherit;">
+            <strong>Fast path (recommended):</strong> hold
+            <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">Alt</code>
+            and tap a diacritic mark, release Alt, then tap the base letter — two
+            keystrokes per diacritic.
+        </p>
+        <p style="margin:0 0 0.4rem 0;color:#8b949e;font-family:inherit;">
+            Examples: <code>Alt+. s → ṣ</code> · <code>Alt+= a → ā</code> ·
+            <code>Alt+' s → ś</code> · <code>Alt+, c → ç</code> · <code>Alt+v s → š</code>.
+            Marks that need Shift (~ ^ : * ( ") need Alt+Shift, e.g.
+            <code>Alt+Shift+~ n → ñ</code>.
+        </p>
         <p style="margin:0 0 0.8rem 0;color:#8b949e;font-family:inherit;">
-            Press <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">Ctrl+;</code>
-            (or <code>Cmd+;</code>) — or click the <strong>◌ Compose</strong> button — then a
-            <em>diacritic mark</em>, then a <em>base letter</em>. Press <code>Esc</code> to
-            cancel; press <code>Tab</code> in any text to insert a real tab character.
+            <strong>Slow path (no Alt needed):</strong> type
+            <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">\</code>
+            (a single backslash) then a diacritic mark then a base letter, e.g.
+            <code>\.s → ṣ</code>. Type <code>\\</code> to insert a literal backslash.
+            <code>Ctrl+;</code> / <code>Cmd+;</code> also opens compose mode.
+            <code>Esc</code> cancels; <code>Tab</code> inserts a tab character.
         </p>
         <table style="border-collapse:collapse;width:100%;font-family:inherit;">
             <thead>
@@ -684,10 +698,9 @@
     }
 
     document.addEventListener('keydown', (e) => {
-        // Primary compose gateway: a bare backslash inside a contenteditable.
+        // Primary compose gateway: bare backslash inside a contenteditable.
         // No modifier, single keystroke, LaTeX-familiar. Type `\\` (backslash
-        // twice) to insert a literal backslash — the second `\` is not in
-        // the diacritic map, so prefix-state aborts and inserts both.
+        // twice) to insert a literal backslash.
         if (e.key === '\\' && !e.ctrlKey && !e.metaKey && !e.altKey
             && composeState === null && inEditable()) {
             e.preventDefault();
@@ -695,8 +708,26 @@
             return;
         }
 
-        // Backup gateway: Ctrl+; / Cmd+; — kept for users who already
-        // have it in muscle memory.
+        // Fast path: Alt + a diacritic-mark key drops straight into 'base'
+        // state with that mark already chosen. So Alt+. then s → ṣ in two
+        // keystrokes. Alt is much less reserved than Ctrl in browsers, and
+        // on Mac preventDefault here suppresses the native OS diacritic.
+        if (e.altKey && !e.ctrlKey && !e.metaKey
+            && composeState === null && inEditable()
+            && e.key.length === 1
+            && Object.prototype.hasOwnProperty.call(COMPOSE_MAP, e.key)) {
+            e.preventDefault();
+            if (!lastFocusedBody) {
+                flashStatus('click into a section first', 'error');
+                return;
+            }
+            composePrefix = e.key;
+            composeState = 'base';
+            flashStatus('compose: ' + e.key + ' + ?  (Alt fast-path)', 'compose');
+            return;
+        }
+
+        // Backup gateway: Ctrl+; / Cmd+; — kept for muscle memory.
         if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === ';') {
             e.preventDefault();
             enterComposeMode();
