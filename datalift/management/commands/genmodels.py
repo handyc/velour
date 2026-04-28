@@ -6,7 +6,7 @@ from a mysqldump. One-shot replacement for hand-writing models after
         --app myapp \\
         [--out myapp/models.py] \\
         [--map-out myapp/ingest/table_map.json] \\
-        [--source-database luclla1q_babybase]
+        [--source-database legacy_app_db]
 
 The output is never authoritative — Datalift makes best-effort
 inferences (EmailField / SlugField / URLField / TextChoices for

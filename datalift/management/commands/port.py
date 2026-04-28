@@ -2,7 +2,7 @@
 
     python manage.py port path/to/dump.sql --app myapp \\
         [--php-dir path/to/legacy/src/] \\
-        [--source-database luclla1q_babybase] \\
+        [--source-database legacy_app_db] \\
         [--force]
 
 Chains the Datalift pipeline:
