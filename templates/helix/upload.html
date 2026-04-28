@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Helix · Upload{% endblock %}
+
+{% block content %}
+<h1>Upload sequence</h1>
+<p style="color:#8b949e;margin-top:-0.4rem;">
+    FASTA (.fa, .fasta, .fna) or GenBank (.gb, .gbk, .genbank). Either pick
+    a file or paste the sequence text below — the parser sniffs the format
+    from the first non-blank line.
+</p>
+
+<form method="post" enctype="multipart/form-data" style="max-width:720px;margin-top:1rem;">
+    {% csrf_token %}
+
+    <div class="form-group">
+        <label for="id_file">File</label>
+        {{ form.file }}
+    </div>
+
+    <div style="text-align:center;color:#6e7681;font-size:0.85rem;margin:0.5rem 0;">— or —</div>
+
+    <div class="form-group">
+        <label for="id_pasted">Pasted text</label>
+        {{ form.pasted }}
+    </div>
+
+    <div class="form-group">
+        <label for="id_title_override">Title override
+            <span style="color:#8b949e;font-size:0.8rem;">(optional — only applied to the first record)</span>
+        </label>
+        {{ form.title_override }}
+    </div>
+
+    {% if form.errors %}
+    <div style="color:#f85149;font-size:0.85rem;margin-bottom:0.8rem;">
+        {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+    </div>
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">Import</button>
+    <a href="{% url 'helix:list' %}" class="btn btn-secondary" style="margin-left:0.5rem;">Cancel</a>
+</form>
+
+<details style="margin-top:2rem;">
+    <summary style="cursor:pointer;color:#8b949e;font-size:0.85rem;">
+        Try with a sample (paste this and submit)
+    </summary>
+    <pre style="background:#161b22;border:1px solid #30363d;padding:0.7rem;font-size:0.78rem;overflow-x:auto;">
+&gt;sp|P12345|EXAMPLE_HUMAN A toy example sequence
+ATGGCAACCGCAGAATCAACTGTGAACTACAACGCAGTGGAGTACGGCAACGAACGCATC
+GTGAACGGCGGCAACAACGGCAACGGCGGCAACGGCAACGGCAACAACGGCAACTAA
+    </pre>
+</details>
+{% endblock %}

@@ -1,0 +1,87 @@
+/* Helix sequence viewer styles. */
+
+.helix-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding: 0.5rem 0.7rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #c9d1d9;
+    margin-top: 0.6rem;
+}
+.helix-meta strong {
+    color: #8b949e;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    margin-right: 0.3rem;
+}
+
+#helix-viewer-mount svg {
+    width: 100%;
+    height: auto;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    display: block;
+}
+
+.helix-feature {
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.helix-feature:hover { opacity: 0.85; }
+.helix-feature.selected { stroke: #c9d1d9; stroke-width: 1.2; }
+
+.helix-axis text { fill: #8b949e; font-size: 9px; font-family: ui-monospace, monospace; }
+.helix-axis line { stroke: #30363d; }
+.helix-track-label { fill: #8b949e; font-size: 10px; font-family: ui-monospace, monospace; }
+
+.helix-feature-detail {
+    margin-top: 0.6rem;
+    padding: 0.7rem 0.9rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    min-height: 2.4rem;
+    color: #8b949e;
+    font-family: ui-monospace, monospace;
+}
+.helix-feature-detail h4 {
+    margin: 0 0 0.4rem 0;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.95rem;
+}
+.helix-feature-detail .qual-row {
+    display: flex; gap: 0.6rem; padding: 0.1rem 0;
+}
+.helix-feature-detail .qual-key {
+    color: #8b949e; min-width: 8rem; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;
+}
+.helix-feature-detail .qual-val { color: #c9d1d9; word-break: break-word; }
+
+#helix-sequence-mount {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 0.5rem 0.6rem;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: #c9d1d9;
+    margin-top: 0.6rem;
+}
+#helix-sequence-mount .seq-row { display: flex; gap: 0.7rem; white-space: pre; }
+#helix-sequence-mount .seq-pos { color: #6e7681; min-width: 5rem; text-align: right; }
+#helix-sequence-mount .b-A { color: #7ee787; }   /* green */
+#helix-sequence-mount .b-T { color: #ff7b72; }   /* red */
+#helix-sequence-mount .b-G { color: #d29922; }   /* yellow */
+#helix-sequence-mount .b-C { color: #79c0ff; }   /* blue */
+#helix-sequence-mount .b-U { color: #ff7b72; }   /* same as T */
+#helix-sequence-mount .b-N { color: #6e7681; }   /* gray */

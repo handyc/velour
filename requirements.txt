@@ -1,5 +1,6 @@
 asgiref==3.11.1
 bcrypt==5.0.0
+biopython==1.87
 cffi==2.0.0
 channels==4.3.2
 cnlunar==0.2.4

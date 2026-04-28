@@ -132,6 +132,7 @@ INSTALLED_APPS = [
     'studious',
     'agora',
     'backups',
+    'helix',
 ]
 
 MIDDLEWARE = [

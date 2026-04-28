@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Helix · {{ record.title|truncatechars:60 }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'helix/viewer.css' %}">
+{% endblock %}
+
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
+    <h1 style="margin-bottom:0.2rem;">
+        <a href="{% url 'helix:list' %}" style="color:#8b949e;text-decoration:none;font-weight:normal;font-size:0.7em;">← Helix</a>
+        &nbsp;{{ record.title|truncatechars:80 }}
+    </h1>
+    <div>
+        <a href="{% url 'helix:download_fasta' record.pk %}" class="btn btn-secondary">Download FASTA</a>
+        <form method="post" action="{% url 'helix:delete' record.pk %}" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
+        </form>
+    </div>
+</div>
+
+{# Header strip — accession, organism, length, GC, source #}
+<div class="helix-meta">
+    {% if record.accession %}<span><strong>Accession</strong> {{ record.accession }}</span>{% endif %}
+    {% if record.organism %}<span><strong>Organism</strong> <em>{{ record.organism }}</em></span>{% endif %}
+    <span><strong>Length</strong> {{ record.length_bp }} {{ record.sequence_type|lower }}</span>
+    {% if record.gc_content %}
+        <span><strong>GC</strong> {{ record.gc_content|floatformat:3 }}</span>
+    {% endif %}
+    <span><strong>Format</strong> {{ record.get_source_format_display }}</span>
+    <span><strong>Type</strong> {{ record.sequence_type }}</span>
+</div>
+
+{% if record.description and record.description != record.title %}
+<p style="color:#8b949e;font-style:italic;font-size:0.9rem;margin-top:0.5rem;">
+    {{ record.description }}
+</p>
+{% endif %}
+
+{# Annotation track viewer (SVG) #}
+{% if features %}
+<h3 style="margin-top:1.5rem;">Annotation tracks
+    <span style="color:#8b949e;font-weight:normal;font-size:0.85rem;">
+        — {{ features|length }} features
+        {% for ft, n in feature_type_counts.items %}
+            · {{ n }} <code style="color:#79c0ff;">{{ ft }}</code>
+        {% endfor %}
+    </span>
+</h3>
+
+<div id="helix-viewer-mount"
+     data-length="{{ record.length_bp }}"
+     data-features='[
+         {% for f in features %}
+             {"start":{{ f.start }},"end":{{ f.end }},"strand":{{ f.strand }},"type":"{{ f.feature_type|escapejs }}","name":"{{ f.display_name|escapejs }}","qualifiers":{{ f.qualifiers|safe|default:"{}" }}}{% if not forloop.last %},{% endif %}
+         {% endfor %}
+     ]'>
+</div>
+
+<div id="helix-feature-detail" class="helix-feature-detail">
+    Click a feature on the track viewer to see its qualifiers.
+</div>
+
+{% else %}
+<div style="margin-top:1.2rem;padding:0.8rem;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#8b949e;font-size:0.85rem;">
+    No annotation features — this is a plain {{ record.get_source_format_display }} sequence.
+    Upload a GenBank file to see annotation tracks.
+</div>
+{% endif %}
+
+{# Base-by-base sequence view #}
+<h3 style="margin-top:1.5rem;">Sequence</h3>
+<div id="helix-sequence-mount" data-sequence="{{ record.sequence }}"></div>
+
+<script src="{% static 'helix/viewer.js' %}"></script>
+{% endblock %}
