@@ -1280,12 +1280,26 @@ TARGET_PROFILES = [
         },
     ),
     dict(
-        slug='irrigation', name='Irrigation-grade',
+        slug='irrigation', name='Irrigation-grade (permaculture)',
         scope='target',
-        notes='Forgiving target — used for the greywater-to-garden '
-              'loop.',
+        notes='Permaculture-friendly irrigation water, looser than '
+              'FAO industrial-irrigation guidelines but tight enough '
+              'that plants and soil microbes thrive. Free ammonia '
+              'over ~50 mg/L scorches leaves; sodium over ~1000 mg/L '
+              'salts soil out; high phosphate runoff causes algal '
+              'blooms. Bacteria + turbidity stay relaxed (irrigation '
+              'isn\'t drinking). Used as the pass/fail spec for '
+              'urine-to-garden ecosystem chains.',
         values={
-            'turbidity': 10.0, 'bacteria': 1000.0,
+            'turbidity':  10.0,
+            'bacteria': 1000.0,
+            'tds':      5000.0,
+            'sodium':   1000.0,
+            'nitrate':   100.0,    # plant-friendly; high N is fine
+            'ammonia':    50.0,    # phytotoxic above this
+            'phosphate':  50.0,    # P-runoff control
+            'pharma':   1000.0,    # 100× EU drinking limit
+            'hormones':  100.0,    # 100× EU drinking limit
         },
     ),
     dict(
