@@ -1,10 +1,17 @@
 """Quill tests — model invariants + view smoke."""
 
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
-from quill.models import Document, Section, Style
+from quill.models import (
+    Document,
+    DocumentLanguage,
+    Language,
+    Section,
+    Style,
+)
 
 
 class DocumentModelTests(TestCase):
@@ -63,8 +70,8 @@ class ViewSmokeTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         doc = Document.objects.get(title='Essay')
         self.assertEqual(doc.owner, self.user)
-        # Seeded with Body + Heading 1, plus an Introduction section.
-        self.assertEqual(doc.styles.count(), 2)
+        # Seeded with Body + Heading 1 + Quote, plus an Introduction section.
+        self.assertEqual(doc.styles.count(), 3)
         self.assertEqual(doc.sections.count(), 1)
 
     def test_detail_renders_after_create(self):
@@ -80,11 +87,12 @@ class ViewSmokeTests(TestCase):
         Section.objects.create(document=doc, title='first', order=0)
         resp = self.client.post(
             reverse('quill:section_add', args=[doc.slug]),
-            {'title': 'second', 'body': '<p>two</p>', 'level': 1, 'style': ''},
+            {'title': 'second', 'body': '<p>two</p>', 'level': 1,
+             'style': '', 'primary_language': '',
+             'paragraph_direction': 'ltr'},
         )
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(doc.sections.count(), 2)
-        # Newest section has order > existing.
         latest = doc.sections.order_by('-order').first()
         self.assertEqual(latest.title, 'second')
 
@@ -93,7 +101,9 @@ class ViewSmokeTests(TestCase):
         sec = Section.objects.create(document=doc, title='before', body='<p>x</p>')
         resp = self.client.post(
             reverse('quill:section_edit', args=[doc.slug, sec.pk]),
-            {'title': 'after', 'body': '<p>y</p>', 'level': 1, 'style': ''},
+            {'title': 'after', 'body': '<p>y</p>', 'level': 1,
+             'style': '', 'primary_language': '',
+             'paragraph_direction': 'ltr'},
         )
         self.assertEqual(resp.status_code, 302)
         sec.refresh_from_db()
@@ -114,3 +124,110 @@ class ViewSmokeTests(TestCase):
         resp = self.client.post(reverse('quill:delete', args=[doc.slug]))
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(Document.objects.filter(pk=doc.pk).exists())
+
+
+class LanguageSeedTests(TestCase):
+    def test_seed_command_populates_registry(self):
+        call_command('seed_quill_languages')
+        # Spot-check: must have the user's research languages.
+        for slug in ['en', 'nl', 'sa', 'bo', 'zh-hans', 'he', 'ar', 'syr']:
+            self.assertTrue(
+                Language.objects.filter(slug=slug).exists(),
+                f'expected {slug!r} in seed',
+            )
+        # All Hebrew/Aramaic/Arabic/Syriac/Persian rows are RTL.
+        for slug in ['he', 'arc', 'syr', 'ar', 'fa']:
+            lang = Language.objects.get(slug=slug)
+            self.assertEqual(lang.direction, 'rtl', f'{slug} should be RTL')
+
+    def test_seed_idempotent(self):
+        call_command('seed_quill_languages')
+        before = Language.objects.count()
+        call_command('seed_quill_languages')
+        self.assertEqual(Language.objects.count(), before)
+
+
+class MultilingualDocumentTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('alice', password='pw')
+        self.client.force_login(self.user)
+        call_command('seed_quill_languages')
+
+    def test_new_document_seeds_default_languages(self):
+        resp = self.client.post(reverse('quill:new'), {'title': 'Multi'})
+        self.assertEqual(resp.status_code, 302)
+        doc = Document.objects.get(title='Multi')
+        # Default starter languages from views.DEFAULT_DOCUMENT_LANGUAGES.
+        self.assertGreaterEqual(doc.languages.count(), 3)
+        slugs = set(doc.languages.values_list('slug', flat=True))
+        self.assertIn('en', slugs)
+        self.assertIn('sa', slugs)  # Sanskrit is in the default set
+        # Primary should be set.
+        self.assertIsNotNone(doc.primary_language)
+        self.assertEqual(doc.primary_language.slug, 'en')
+
+    def test_section_inherits_doc_primary_language_on_create(self):
+        # Manually set up a doc with Tibetan primary AND enabled, so
+        # the SectionForm's primary_language picker accepts it.
+        bo = Language.objects.get(slug='bo')
+        doc = Document.objects.create(
+            title='bod-test', owner=self.user, primary_language=bo,
+        )
+        DocumentLanguage.objects.create(document=doc, language=bo, order=0)
+        resp = self.client.post(
+            reverse('quill:section_add', args=[doc.slug]),
+            {'title': 'བོད', 'body': '', 'level': 1,
+             'style': '', 'primary_language': '',
+             'paragraph_direction': 'ltr'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        sec = doc.sections.get(title='བོད')
+        self.assertEqual(sec.primary_language.slug, 'bo')
+
+    def test_api_section_save_persists_body_and_dir(self):
+        doc = Document.objects.create(title='save-test', owner=self.user)
+        sec = Section.objects.create(document=doc, body='', title='')
+        resp = self.client.post(
+            reverse('quill:api_section_save', args=[doc.slug, sec.pk]),
+            data='{"title": "Hello", "body": "<p>שלום</p>", "paragraph_direction": "rtl"}',
+            content_type='application/json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body['ok'])
+        sec.refresh_from_db()
+        self.assertEqual(sec.title, 'Hello')
+        self.assertEqual(sec.body, '<p>שלום</p>')
+        self.assertEqual(sec.paragraph_direction, 'rtl')
+
+    def test_languages_config_view_renders(self):
+        doc = Document.objects.create(title='config-test', owner=self.user)
+        resp = self.client.get(reverse('quill:document_languages', args=[doc.slug]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Languages')
+
+    def test_languages_config_adds_language(self):
+        doc = Document.objects.create(title='add-lang', owner=self.user)
+        # Initially no enabled languages.
+        self.assertEqual(doc.languages.count(), 0)
+        resp = self.client.post(
+            reverse('quill:document_languages', args=[doc.slug]),
+            {'add_language': 'sa', 'primary_language': 'sa'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        self.assertEqual(doc.languages.count(), 1)
+        self.assertEqual(doc.primary_language.slug, 'sa')
+
+    def test_languages_config_removes_via_blank_order(self):
+        doc = Document.objects.create(title='rm-lang', owner=self.user)
+        sa = Language.objects.get(slug='sa')
+        DocumentLanguage.objects.create(document=doc, language=sa, order=0)
+        self.assertEqual(doc.languages.count(), 1)
+        resp = self.client.post(
+            reverse('quill:document_languages', args=[doc.slug]),
+            {f'lang_{sa.id}_order': ''},
+        )
+        self.assertEqual(resp.status_code, 302)
+        doc.refresh_from_db()
+        self.assertEqual(doc.languages.count(), 0)

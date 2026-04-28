@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Languages · {{ document.title }} · Quill{% endblock %}
+
+{% block content %}
+<style>
+    .quill-langs h1 { margin-bottom: 0.3rem; }
+    .quill-langs p.quill-meta {
+        color:#8b949e;font-size:0.85rem;margin:0 0 1rem 0;
+    }
+    .quill-langs table {
+        border-collapse: collapse; width: 100%; max-width: 760px;
+    }
+    .quill-langs th, .quill-langs td {
+        text-align: left; padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid #21262d;
+    }
+    .quill-langs thead th {
+        color: #8b949e; font-weight: normal;
+        font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+        border-bottom: 1px solid #30363d;
+    }
+    .quill-langs .quill-native {
+        font-size: 1rem;
+    }
+    .quill-langs .quill-script {
+        color: #8b949e; font-size: 0.78rem;
+    }
+    .quill-langs .quill-dir-rtl {
+        background: #2a1a1a; color: #f8b88a; padding: 0.05em 0.4em;
+        border-radius: 3px; font-size: 0.7rem;
+    }
+    .quill-langs .quill-dir-ltr {
+        color: #6e7681; font-size: 0.7rem;
+    }
+    .quill-langs .quill-sample {
+        color: #8b949e; font-size: 0.85rem; max-width: 280px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .quill-langs input.quill-order {
+        width: 3rem; background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 3px;
+        padding: 0.15rem 0.3rem; font-family: ui-monospace, monospace;
+    }
+    .quill-langs .quill-block {
+        margin: 1.6rem 0;
+    }
+    .quill-langs select {
+        background: #0d1117; color: #c9d1d9;
+        border: 1px solid #30363d; border-radius: 4px;
+        padding: 0.3rem 0.5rem; font-size: 0.95rem;
+    }
+</style>
+
+<div class="quill-langs">
+
+<h1>Languages — {{ document.title }}</h1>
+<p class="quill-meta">
+    Pick which languages appear on this document's toolbar, and their
+    order (lowest first; first nine get hotkeys ⌘1–⌘9). Clear the order
+    field to remove a language. Languages are global across Velour;
+    add new ones via the Django admin.
+    <a href="{% url 'quill:detail' document.slug %}" style="color:#79c0ff;">← Back to document</a>
+</p>
+
+<form method="post">
+{% csrf_token %}
+
+<div class="quill-block">
+    <h3 style="font-size:0.95rem;color:#c9d1d9;margin-bottom:0.4rem;">
+        Primary language
+    </h3>
+    <p style="color:#6e7681;font-size:0.78rem;margin:0 0 0.4rem 0;">
+        Drives the page's overall direction and base font stack. Each
+        new section starts in this language by default.
+    </p>
+    <select name="primary_language">
+        <option value="">— none —</option>
+        {% for lang in all_languages %}
+        <option value="{{ lang.slug }}" {% if document.primary_language_id == lang.id %}selected{% endif %}>
+            {{ lang.name }} ({{ lang.bcp47 }}, {{ lang.direction|upper }})
+        </option>
+        {% endfor %}
+    </select>
+</div>
+
+<div class="quill-block">
+    <h3 style="font-size:0.95rem;color:#c9d1d9;margin-bottom:0.4rem;">
+        Enabled in toolbar
+    </h3>
+
+    {% if enabled %}
+    <table>
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Name</th>
+                <th>Native</th>
+                <th>Script · Dir</th>
+                <th>Sample</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for dl in enabled %}
+        <tr>
+            <td>
+                <input type="number" class="quill-order" min="0" max="999"
+                       name="lang_{{ dl.language_id }}_order"
+                       value="{{ dl.order }}">
+            </td>
+            <td>{{ dl.language.name }}</td>
+            <td class="quill-native"
+                style="font-family: {{ dl.language.font_stack|default:'inherit' }};">
+                {{ dl.language.native_name|default:"—" }}
+            </td>
+            <td>
+                <span class="quill-script">{{ dl.language.script_name }}</span>
+                · {% if dl.language.direction == 'rtl' %}
+                  <span class="quill-dir-rtl">RTL</span>
+                  {% else %}
+                  <span class="quill-dir-ltr">LTR</span>
+                  {% endif %}
+            </td>
+            <td class="quill-sample"
+                style="font-family: {{ dl.language.font_stack|default:'inherit' }};
+                       direction: {{ dl.language.direction }};">
+                {{ dl.language.sample_text }}
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#6e7681;font-size:0.85rem;">
+        No languages enabled yet. Add one below.
+    </p>
+    {% endif %}
+</div>
+
+<div class="quill-block">
+    <h3 style="font-size:0.95rem;color:#c9d1d9;margin-bottom:0.4rem;">
+        Add a language
+    </h3>
+    <select name="add_language">
+        <option value="">— pick one —</option>
+        {% for lang in available %}
+        <option value="{{ lang.slug }}">
+            {{ lang.name }} {% if lang.native_name %}· {{ lang.native_name }}{% endif %}
+            — {{ lang.script_name }} · {{ lang.direction|upper }}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+
+<button type="submit" class="btn btn-primary">Save changes</button>
+</form>
+
+</div>
+{% endblock %}

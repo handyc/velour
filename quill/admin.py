@@ -1,6 +1,28 @@
 from django.contrib import admin
 
-from .models import CrossReference, Document, Footnote, Section, Style
+from .models import (
+    CrossReference,
+    Document,
+    DocumentLanguage,
+    Footnote,
+    Language,
+    Section,
+    Style,
+)
+
+
+@admin.register(Language)
+class LanguageAdmin(admin.ModelAdmin):
+    list_display = ('name', 'native_name', 'bcp47', 'direction',
+                    'script_name', 'slug')
+    list_filter = ('direction', 'script_name')
+    search_fields = ('name', 'native_name', 'slug', 'bcp47', 'script_name')
+
+
+@admin.register(DocumentLanguage)
+class DocumentLanguageAdmin(admin.ModelAdmin):
+    list_display = ('document', 'language', 'order')
+    list_filter = ('language',)
 
 
 class StyleInline(admin.TabularInline):

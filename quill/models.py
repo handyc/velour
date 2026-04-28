@@ -34,6 +34,66 @@ STYLE_KIND_CHOICES = [
     ('list',      'List'),
 ]
 
+DIRECTION_CHOICES = [
+    ('ltr',  'LTR (left-to-right)'),
+    ('rtl',  'RTL (right-to-left)'),
+    ('auto', 'Auto (browser detects from first strong char)'),
+]
+
+
+class Language(models.Model):
+    """A research language with script, direction, and font hints.
+
+    Mellel-style multilingual support: each Language carries a BCP-47
+    code, a writing direction, and a CSS font stack tuned for its
+    script. Documents pick the languages they care about (via
+    DocumentLanguage), and the editor surfaces a toolbar of those for
+    quick switching while typing.
+
+    The ``font_stack`` strings are CSS-ready font-family lists. We
+    don't ship the fonts; users see the best fallback their system
+    has installed (Noto Sans is the safest cross-platform default for
+    most non-Latin scripts).
+    """
+
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(
+        max_length=80,
+        help_text='English name — "Sanskrit", "Tibetan", "Hebrew".',
+    )
+    native_name = models.CharField(
+        max_length=80, blank=True,
+        help_text='Endonym in its own script — "संस्कृतम्", "བོད་སྐད་", "עברית".',
+    )
+    bcp47 = models.CharField(
+        max_length=20,
+        help_text='BCP-47 tag — "en", "nl", "sa", "bo", "zh-Hans", "he", "ar".',
+    )
+    direction = models.CharField(
+        max_length=4, choices=[('ltr', 'LTR'), ('rtl', 'RTL')], default='ltr',
+    )
+    script_name = models.CharField(
+        max_length=40, blank=True,
+        help_text='Script family — "Latin", "Devanagari", "Tibetan", '
+                  '"Han", "Hebrew", "Arabic", "Syriac", "Greek".',
+    )
+    font_stack = models.CharField(
+        max_length=400, blank=True,
+        help_text='CSS font-family list. Longer stacks fall back gracefully '
+                  'across systems where users may have different fonts.',
+    )
+    sample_text = models.CharField(
+        max_length=200, blank=True,
+        help_text='A short sample for the language picker — usually a '
+                  'pangram or characteristic phrase.',
+    )
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
 
 class Document(models.Model):
     title = models.CharField(max_length=300)
@@ -41,6 +101,17 @@ class Document(models.Model):
     owner = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='quill_documents',
+    )
+    primary_language = models.ForeignKey(
+        Language, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='primary_documents',
+        help_text='Default language for new sections. Drives the page\'s '
+                  'overall direction and base font stack.',
+    )
+    languages = models.ManyToManyField(
+        Language, through='DocumentLanguage', related_name='documents',
+        blank=True,
+        help_text='Languages enabled in this document\'s toolbar.',
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -137,11 +208,24 @@ class Section(models.Model):
         Style, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='sections',
     )
+    primary_language = models.ForeignKey(
+        Language, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='primary_sections',
+        help_text='The section\'s default language — drives its block '
+                  'direction and base font stack. Inline spans can switch '
+                  'to other languages.',
+    )
+    paragraph_direction = models.CharField(
+        max_length=4, choices=DIRECTION_CHOICES, default='ltr',
+        help_text='Block writing direction. RTL languages set this to '
+                  '"rtl" by default; "auto" lets the browser decide from '
+                  'first strong character.',
+    )
     body = models.TextField(
         blank=True,
-        help_text='HTML body. ProseMirror-ready: structure carried in '
-                  'tags + class names, no inline styling beyond what a '
-                  'Style covers.',
+        help_text='HTML body. Inline language switches are encoded as '
+                  '<span lang="..." dir="...">...</span> — web standard, '
+                  'survives ProseMirror migration.',
     )
 
     class Meta:
@@ -191,3 +275,28 @@ class CrossReference(models.Model):
 
     def __str__(self):
         return f'§{self.source_id} → §{self.target_id}'
+
+
+class DocumentLanguage(models.Model):
+    """Through model for Document.languages — preserves toolbar order.
+
+    A document subscribes to a subset of the global Language registry.
+    The toolbar shows them in the user-chosen order, with hotkeys
+    Cmd/Ctrl+1..9 mapped to the first nine entries.
+    """
+
+    document = models.ForeignKey(Document, on_delete=models.CASCADE)
+    language = models.ForeignKey(Language, on_delete=models.CASCADE)
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['document', 'language'],
+                name='quill_doc_lang_unique',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.document_id}:{self.language.slug}@{self.order}'
