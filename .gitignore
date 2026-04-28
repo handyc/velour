@@ -80,13 +80,12 @@ Thumbs.db
 memory/
 /oracle/models_dir/*.tree.json
 
-# --- Casting compiled byte_model artifacts (keep .c source, drop binaries) -
-/byte_model
-/byte_model_layered
-/byte_model_moe
-/byte_model_parity
-/byte_model_sampled
-/byte_model_*.ckpt
+# --- Per-app outputs (binaries, ckpts, scratch experiments) ---------------
+# Add new /outputs/<app>/ entries below per subdir (NOT a blanket /outputs/*)
+# so that some output kinds can still be promoted to the public repo case
+# by case. The canonical .c sources for the Casting app live under
+# static/casting/sources/ and are tracked normally.
+/outputs/casting/
 
 # --- Isolation oneclick-hex-class4 compiled hunter (keep .c + .py source) -
 /isolation/artifacts/oneclick_class4/hunter
