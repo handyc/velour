@@ -46,6 +46,12 @@
     .quill-status.saving { color: #e3b341; }
     .quill-status.saved  { color: #56d364; }
     .quill-status.error  { color: #f85149; }
+    .quill-status.compose {
+        color: #d2a8ff;
+        background: #2a1f3a;
+        padding: 0.05em 0.5em;
+        border-radius: 3px;
+    }
 
     /* ── Language palette (Mellel-style) ───────────────────────── */
     .quill-lang-bar {
@@ -254,6 +260,11 @@
     {% if enabled_langs %}
     <div class="quill-lang-bar" id="quill-lang-bar">
         <span class="quill-lang-label">Language</span>
+        <button type="button" id="quill-compose-btn" class="quill-lang-btn"
+                title="Compose mode (Ctrl+; / Cmd+;) — type a diacritic mark, then a base letter">
+            <span class="quill-lang-name">◌ Compose</span>
+            <span class="quill-lang-key">⌘;</span>
+        </button>
         {% for dl in enabled_langs %}
         <button type="button"
                 class="quill-lang-btn{% if dl.language.direction == 'rtl' %} quill-lang-rtl{% endif %}{% if document.primary_language_id == dl.language_id %} is-primary{% endif %}"
@@ -325,6 +336,69 @@
 
     <div class="quill-add-section">
         <a href="{% url 'quill:section_add' document.slug %}">＋ Add section</a>
+        <span style="color:#3a3a3a;margin:0 0.4rem;">·</span>
+        <a href="#" id="quill-compose-help"
+           title="Show compose-key cheat sheet (?)"
+           style="color:#6e7681;">◌ compose help (?)</a>
+    </div>
+
+    {# Compose-key cheat sheet (hidden until toggled) #}
+    <div id="quill-compose-sheet" style="
+        display:none;
+        max-width:720px;margin:1rem auto 0 auto;
+        background:#161b22;border:1px solid #30363d;border-radius:6px;
+        padding:1.2rem 1.5rem;
+        font-size:0.85rem;color:#c9d1d9;
+        font-family: ui-monospace, "SF Mono", monospace;">
+        <h3 style="margin:0 0 0.4rem 0;font-family:inherit;">Compose key cheat sheet</h3>
+        <p style="margin:0 0 0.8rem 0;color:#8b949e;font-family:inherit;">
+            Press <code style="background:#0d1117;padding:0.05em 0.4em;border-radius:3px;">Ctrl+;</code>
+            (or <code>Cmd+;</code>) — or click the <strong>◌ Compose</strong> button — then a
+            <em>diacritic mark</em>, then a <em>base letter</em>. Press <code>Esc</code> to
+            cancel; press <code>Tab</code> in any text to insert a real tab character.
+        </p>
+        <table style="border-collapse:collapse;width:100%;font-family:inherit;">
+            <thead>
+                <tr style="text-align:left;color:#6e7681;font-size:0.7rem;
+                           text-transform:uppercase;letter-spacing:0.05em;">
+                    <th style="padding:0.3rem 0.6rem 0.3rem 0;width:5rem;">Mark</th>
+                    <th style="padding:0.3rem 0.6rem;width:7rem;">Diacritic</th>
+                    <th style="padding:0.3rem 0;">Examples</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td><code>.</code></td><td>underdot</td>
+                    <td>.s → ṣ · .t → ṭ · .n → ṇ · .m → ṃ · .h → ḥ · .r → ṛ · .l → ḷ · .d → ḍ</td></tr>
+                <tr><td><code>=</code></td><td>macron</td>
+                    <td>=a → ā · =i → ī · =u → ū · =e → ē · =o → ō</td></tr>
+                <tr><td><code>'</code></td><td>acute</td>
+                    <td>'a → á · 's → ś · 'n → ń · 'c → ć · 'z → ź</td></tr>
+                <tr><td><code>`</code></td><td>grave</td>
+                    <td>`a → à · `e → è · `i → ì · `o → ò · `u → ù</td></tr>
+                <tr><td><code>~</code></td><td>tilde</td>
+                    <td>~n → ñ · ~a → ã · ~o → õ</td></tr>
+                <tr><td><code>^</code></td><td>circumflex</td>
+                    <td>^a → â · ^e → ê · ^i → î · ^o → ô · ^u → û · ^s → ŝ</td></tr>
+                <tr><td><code>:</code></td><td>diaeresis</td>
+                    <td>:a → ä · :o → ö · :u → ü · :e → ë · :i → ï</td></tr>
+                <tr><td><code>,</code></td><td>cedilla</td>
+                    <td>,c → ç · ,s → ş</td></tr>
+                <tr><td><code>v</code></td><td>caron / háček</td>
+                    <td>vs → š · vc → č · vz → ž · vn → ň · vr → ř</td></tr>
+                <tr><td><code>(</code></td><td>breve</td>
+                    <td>(a → ă · (e → ĕ · (g → ğ</td></tr>
+                <tr><td><code>*</code></td><td>ring</td>
+                    <td>*a → å · *u → ů</td></tr>
+                <tr><td><code>/</code></td><td>stroke</td>
+                    <td>/o → ø · /l → ł · /d → đ · /h → ħ</td></tr>
+                <tr><td><code>m</code></td><td>overdot</td>
+                    <td>mm → ṁ · mn → ṅ · ms → ṡ · mg → ġ</td></tr>
+            </tbody>
+        </table>
+        <p style="margin:0.8rem 0 0 0;color:#6e7681;font-size:0.78rem;font-family:inherit;">
+            Capitals work too (Ctrl+; . S → Ṣ, Ctrl+; = A → Ā). Unrecognised combinations
+            insert the literal characters.
+        </p>
     </div>
 
     {# CSRF token for the autosave fetch #}
@@ -482,6 +556,227 @@
         }
     });
 
+    /* ─── Compose-key dead-key system ────────────────────────── */
+    // Conflict avoidance: we don't capture Ctrl+X / Ctrl+A / Ctrl+S /
+    // Ctrl+Z / Ctrl+C / Ctrl+V / Ctrl+T / Ctrl+W / Ctrl+R / Ctrl+L,
+    // since the browser/OS owns those. Instead, Ctrl+; (or Cmd+;) is
+    // a single "Compose" gateway. After the gateway, the next two
+    // keystrokes are consumed: a diacritic mark, then a base letter.
+    // Esc aborts at any point.
+
+    const COMPOSE_MAP = {
+        '.': {  // underdot below — Indic and Semitic transliteration
+            s: 'ṣ', t: 'ṭ', n: 'ṇ', m: 'ṃ', h: 'ḥ', r: 'ṛ', l: 'ḷ',
+            d: 'ḍ', b: 'ḅ', k: 'ḳ', z: 'ẓ',
+            S: 'Ṣ', T: 'Ṭ', N: 'Ṇ', M: 'Ṃ', H: 'Ḥ', R: 'Ṛ', L: 'Ḷ',
+            D: 'Ḍ', B: 'Ḅ', K: 'Ḳ', Z: 'Ẓ',
+        },
+        '=': {  // macron — Pali, IAST, Latin scholarship
+            a: 'ā', e: 'ē', i: 'ī', o: 'ō', u: 'ū', y: 'ȳ',
+            A: 'Ā', E: 'Ē', I: 'Ī', O: 'Ō', U: 'Ū', Y: 'Ȳ',
+        },
+        "'": {  // acute
+            a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', y: 'ý',
+            c: 'ć', n: 'ń', s: 'ś', z: 'ź', l: 'ĺ', r: 'ŕ',
+            A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú', Y: 'Ý',
+            C: 'Ć', N: 'Ń', S: 'Ś', Z: 'Ź',
+        },
+        '`': {  // grave
+            a: 'à', e: 'è', i: 'ì', o: 'ò', u: 'ù',
+            A: 'À', E: 'È', I: 'Ì', O: 'Ò', U: 'Ù',
+        },
+        '~': {  // tilde
+            a: 'ã', n: 'ñ', o: 'õ', u: 'ũ',
+            A: 'Ã', N: 'Ñ', O: 'Õ', U: 'Ũ',
+        },
+        '^': {  // circumflex
+            a: 'â', e: 'ê', i: 'î', o: 'ô', u: 'û', y: 'ŷ',
+            s: 'ŝ', c: 'ĉ', g: 'ĝ', h: 'ĥ', j: 'ĵ',
+            A: 'Â', E: 'Ê', I: 'Î', O: 'Ô', U: 'Û',
+            S: 'Ŝ', C: 'Ĉ', G: 'Ĝ', H: 'Ĥ', J: 'Ĵ',
+        },
+        ':': {  // diaeresis / umlaut
+            a: 'ä', e: 'ë', i: 'ï', o: 'ö', u: 'ü', y: 'ÿ',
+            A: 'Ä', E: 'Ë', I: 'Ï', O: 'Ö', U: 'Ü',
+        },
+        ',': {  // cedilla
+            c: 'ç', s: 'ş', t: 'ţ',
+            C: 'Ç', S: 'Ş', T: 'Ţ',
+        },
+        '*': {  // ring above
+            a: 'å', u: 'ů',
+            A: 'Å', U: 'Ů',
+        },
+        '/': {  // stroke / slash
+            o: 'ø', l: 'ł', d: 'đ', h: 'ħ', t: 'ŧ',
+            O: 'Ø', L: 'Ł', D: 'Đ', H: 'Ħ', T: 'Ŧ',
+        },
+        'v': {  // caron / háček (also wedge)
+            s: 'š', c: 'č', z: 'ž', n: 'ň', r: 'ř', d: 'ď', t: 'ť',
+            l: 'ľ', e: 'ě', g: 'ǧ',
+            S: 'Š', C: 'Č', Z: 'Ž', N: 'Ň', R: 'Ř', E: 'Ě',
+        },
+        '(': {  // breve
+            a: 'ă', e: 'ĕ', i: 'ĭ', o: 'ŏ', u: 'ŭ', g: 'ğ',
+            A: 'Ă', E: 'Ĕ', I: 'Ĭ', O: 'Ŏ', U: 'Ŭ', G: 'Ğ',
+        },
+        'm': {  // overdot — Indic anusvara/guttural-nasal in IAST
+            m: 'ṁ', n: 'ṅ', s: 'ṡ', g: 'ġ', z: 'ż', e: 'ė', i: 'ı',
+            M: 'Ṁ', N: 'Ṅ', S: 'Ṡ', G: 'Ġ', Z: 'Ż', E: 'Ė', I: 'İ',
+        },
+        '"': {  // double acute / Indic palatal sibilant alternative
+            a: 'ä', o: 'ö', u: 'ü',  // diaeresis fallback
+            s: 'ś',  // common for IAST palatal sibilant
+            S: 'Ś',
+        },
+    };
+
+    let composeState = null;     // null | 'prefix' | 'base'
+    let composePrefix = null;
+
+    function inEditable() {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return false;
+        let n = sel.getRangeAt(0).startContainer;
+        while (n) {
+            if (n.nodeType === 1 && n.getAttribute
+                && n.getAttribute('contenteditable') === 'true') return true;
+            n = n.parentNode;
+        }
+        return false;
+    }
+
+    function insertText(text) {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const tn = document.createTextNode(text);
+        range.insertNode(tn);
+        const after = document.createRange();
+        after.setStartAfter(tn);
+        after.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(after);
+        // Schedule autosave on the section that owns the cursor.
+        let n = tn;
+        while (n && !(n.classList && n.classList.contains('quill-section-block'))) {
+            n = n.parentNode;
+        }
+        if (n && n._scheduleAutosave) n._scheduleAutosave();
+    }
+
+    function enterComposeMode() {
+        if (!inEditable() && !lastFocusedBody) {
+            flashStatus('click into a section first', 'error');
+            return;
+        }
+        if (lastFocusedBody && !inEditable()) lastFocusedBody.focus();
+        composeState = 'prefix';
+        composePrefix = null;
+        flashStatus('compose: ◌ + ?', 'compose');
+    }
+
+    function abortCompose(msg) {
+        composeState = null;
+        composePrefix = null;
+        flashStatus(msg || 'compose cancelled');
+    }
+
+    document.addEventListener('keydown', (e) => {
+        // Compose gateway. Don't fire on Ctrl+Shift+; or other modifiers
+        // beyond Ctrl/Meta + ;.
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key === ';') {
+            e.preventDefault();
+            enterComposeMode();
+            return;
+        }
+
+        if (composeState === 'prefix') {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                abortCompose();
+                return;
+            }
+            // Ignore pure modifier keystrokes (Shift, etc.)
+            if (e.key.length !== 1) return;
+            // Allow only known prefixes; otherwise cancel + let through.
+            if (Object.prototype.hasOwnProperty.call(COMPOSE_MAP, e.key)) {
+                e.preventDefault();
+                composePrefix = e.key;
+                composeState = 'base';
+                flashStatus('compose: ' + e.key + ' + ?', 'compose');
+            } else {
+                abortCompose('compose: unknown mark "' + e.key + '"');
+            }
+            return;
+        }
+
+        if (composeState === 'base') {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                abortCompose();
+                return;
+            }
+            if (e.key.length !== 1) return;
+            const map = COMPOSE_MAP[composePrefix] || {};
+            const composed = map[e.key];
+            const usedPrefix = composePrefix;
+            composeState = null;
+            composePrefix = null;
+            e.preventDefault();
+            if (composed) {
+                insertText(composed);
+                flashStatus('inserted ' + composed + '  (' + usedPrefix + e.key + ')',
+                            'saved');
+            } else {
+                // Unknown combo — insert prefix + char literally so the
+                // user doesn't lose their keystrokes.
+                insertText(usedPrefix + e.key);
+                flashStatus('compose: no match — inserted "' + usedPrefix + e.key + '"');
+            }
+            return;
+        }
+    });
+
+    /* ─── Compose toolbar button ─────────────────────────────── */
+    const composeBtn = document.getElementById('quill-compose-btn');
+    if (composeBtn) {
+        composeBtn.addEventListener('mousedown', (e) => e.preventDefault());
+        composeBtn.addEventListener('click', () => enterComposeMode());
+    }
+
+    /* ─── Tab capture inside contenteditable ─────────────────── */
+    document.querySelectorAll('.quill-section-body, .quill-section-title-edit')
+        .forEach((el) => {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    insertText(e.shiftKey ? '' : '\t');
+                    // Note: Shift+Tab is harder to support correctly
+                    // (it should outdent), so we just no-op for now.
+                }
+            });
+        });
+
+    /* ─── Compose-help cheat sheet toggle ────────────────────── */
+    const helpLink = document.getElementById('quill-compose-help');
+    const helpSheet = document.getElementById('quill-compose-sheet');
+    if (helpLink && helpSheet) {
+        helpLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            helpSheet.style.display =
+                helpSheet.style.display === 'none' ? 'block' : 'none';
+        });
+        // ? key (when not in editable) toggles the sheet too
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '?' && !inEditable() && !e.ctrlKey && !e.metaKey) {
+                helpSheet.style.display =
+                    helpSheet.style.display === 'none' ? 'block' : 'none';
+            }
+        });
+    }
+
     /* ─── Autosave on blur (and after a typing pause) ───────── */
     const PAUSE_MS = 900;
     function saveSection(block) {
@@ -526,6 +821,10 @@
             clearTimeout(pendingTimer);
             pendingTimer = setTimeout(() => saveSection(block), PAUSE_MS);
         }
+        // Expose the scheduler so JS-driven inserts (compose, Tab,
+        // language span) can trigger autosave too — `input` events
+        // don't fire for Range-based insertion.
+        block._scheduleAutosave = schedule;
         editables.forEach((el) => {
             el.addEventListener('input', schedule);
             el.addEventListener('blur', () => {
