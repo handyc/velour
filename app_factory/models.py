@@ -38,6 +38,38 @@ class GeneratedApp(models.Model):
         help_text='PID of the local dev server process',
     )
 
+    # --- customization baked into deploy artifacts + clone Identity --------
+    # These are captured at create time and flow into:
+    #   1. The deploy templates (nginx server_name, maintenance fallback).
+    #   2. For clones: a clone_init.json at the cloned tree root, picked up
+    #      by `manage.py apply_clone_init` so the new install's Identity
+    #      singleton starts with the operator-chosen values rather than
+    #      the originating instance's.
+    server_name = models.CharField(
+        max_length=253, blank=True,
+        help_text='nginx server_name. Blank = derive as '
+                  '<deploy_user>.<hostname-from-Identity>.',
+    )
+    hostname = models.CharField(
+        max_length=253, blank=True,
+        help_text='Base domain baked into the new clone\'s Identity row. '
+                  'Blank = inherit from the originating install.',
+    )
+    admin_email = models.EmailField(
+        blank=True,
+        help_text='Default recipient for system mail in the new clone.',
+    )
+    maintenance_root = models.CharField(
+        max_length=255, blank=True,
+        help_text='Host directory nginx serves when the upstream socket '
+                  'is down. Blank = /var/www/maintenance.',
+    )
+    instance_label = models.CharField(
+        max_length=100, blank=True,
+        help_text='What the new clone calls itself in its own UI. '
+                  'Blank = the app name.',
+    )
+
     class Meta:
         ordering = ['-created_at']
 

@@ -262,6 +262,77 @@ class MirrorPhaseFourTests(TestCase):
         self.assertIsNotNone(ex)
         self.assertIn('refused', ex.error)
 
+    def test_apply_clone_init_updates_identity_and_renames_file(self):
+        import json, os, tempfile
+        from unittest.mock import patch
+        from io import StringIO
+        from django.conf import settings
+        from django.core.management import call_command
+        from identity.models import Identity
+
+        with tempfile.TemporaryDirectory() as tmp:
+            init_path = os.path.join(tmp, 'clone_init.json')
+            with open(init_path, 'w') as f:
+                json.dump({
+                    'instance_label': 'Velour at the Lab',
+                    'hostname':       'lab.example.com',
+                    'admin_email':    'lab-ops@example.com',
+                }, f)
+
+            # Patch BASE_DIR so the command looks in our tmp dir.
+            with patch.object(settings, 'BASE_DIR', tmp):
+                call_command('apply_clone_init', stdout=StringIO())
+
+            ident = Identity.get_self()
+            self.assertEqual(ident.name, 'Velour at the Lab')
+            self.assertEqual(ident.hostname, 'lab.example.com')
+            self.assertEqual(ident.admin_email, 'lab-ops@example.com')
+
+            # File renamed → idempotent
+            self.assertFalse(os.path.exists(init_path))
+            self.assertTrue(os.path.exists(init_path + '.applied'))
+
+    def test_apply_clone_init_skips_blank_fields(self):
+        import json, os, tempfile
+        from unittest.mock import patch
+        from io import StringIO
+        from django.conf import settings
+        from django.core.management import call_command
+        from identity.models import Identity
+
+        ident = Identity.get_self()
+        ident.name = 'Original Name'
+        ident.hostname = 'original.example.com'
+        ident.save()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            init_path = os.path.join(tmp, 'clone_init.json')
+            with open(init_path, 'w') as f:
+                # All blank — should not overwrite anything.
+                json.dump({
+                    'instance_label': '',
+                    'hostname':       '',
+                    'admin_email':    '',
+                }, f)
+            with patch.object(settings, 'BASE_DIR', tmp):
+                call_command('apply_clone_init', stdout=StringIO())
+
+        ident.refresh_from_db()
+        self.assertEqual(ident.name, 'Original Name')
+        self.assertEqual(ident.hostname, 'original.example.com')
+
+    def test_apply_clone_init_no_op_when_file_missing(self):
+        import tempfile
+        from unittest.mock import patch
+        from io import StringIO
+        from django.conf import settings
+        from django.core.management import call_command
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(settings, 'BASE_DIR', tmp):
+                # Should not raise — just print "nothing to do".
+                call_command('apply_clone_init', stdout=StringIO())
+
     def test_mirror_index_idempotent(self):
         from codex.models import Manual, Section
         from identity.meditation import refresh_mirror_index

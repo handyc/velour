@@ -92,6 +92,13 @@ memory/
 # was actually free. Nothing in the codebase reads it as configuration.
 velour_port.txt
 
+# --- App Factory clone-time customization ---------------------------------
+# Written by /apps/create/ at the root of a fresh clone tree, consumed by
+# `manage.py apply_clone_init` on first boot. Both the live and the
+# .applied form should stay local to each install, never tracked.
+clone_init.json
+clone_init.json.applied
+
 # --- Isolation oneclick-hex-class4 compiled hunter (keep .c + .py source) -
 /isolation/artifacts/oneclick_class4/hunter
 /isolation/artifacts/oneclick_class4/winner_*

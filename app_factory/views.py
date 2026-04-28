@@ -119,6 +119,37 @@ def app_list(request):
     return render(request, 'app_factory/list.html', {'apps': apps})
 
 
+def _identity_defaults():
+    """Read the originating install's Identity values to pre-fill the
+    create-app form. Falls back to safe placeholders if Identity isn't
+    available (e.g. fresh checkout, pre-migrate)."""
+    try:
+        from identity.models import Identity
+        i = Identity.get_self()
+        return {
+            'hostname': (i.hostname or 'example.com').strip(),
+            'admin_email': (i.admin_email or '').strip(),
+        }
+    except Exception:
+        return {'hostname': 'example.com', 'admin_email': ''}
+
+
+def _write_clone_init(target_dir, instance_label, hostname, admin_email):
+    """Drop a clone_init.json at the cloned tree's root. The new install
+    consumes this on first boot via `manage.py apply_clone_init` so its
+    Identity singleton starts with operator-chosen values rather than
+    inheriting the originating instance's name/hostname/email."""
+    import json
+    payload = {
+        'instance_label': instance_label,
+        'hostname': hostname,
+        'admin_email': admin_email,
+    }
+    out = os.path.join(target_dir, 'clone_init.json')
+    with open(out, 'w') as f:
+        json.dump(payload, f, indent=2)
+
+
 @login_required
 def app_create(request):
     if request.method == 'POST':
@@ -126,10 +157,17 @@ def app_create(request):
         description = request.POST.get('description', '').strip()
         app_type = request.POST.get('app_type', 'blank')
         deploy_user = request.POST.get('deploy_user', '').strip()
+        server_name = request.POST.get('server_name', '').strip()
+        hostname = request.POST.get('hostname', '').strip()
+        admin_email = request.POST.get('admin_email', '').strip()
+        maintenance_root = request.POST.get('maintenance_root', '').strip()
+        instance_label = request.POST.get('instance_label', '').strip()
 
         if not name:
             messages.error(request, 'App name is required.')
-            return render(request, 'app_factory/create.html')
+            return render(request, 'app_factory/create.html', {
+                'defaults': _identity_defaults(),
+            })
 
         dir_name = _make_dir_name(name)
         output_dir = os.path.join(settings.APP_OUTPUT_DIR, dir_name)
@@ -149,6 +187,15 @@ def app_create(request):
                     )
                 else:
                     shutil.copy2(src, dst)
+
+            # Bake the operator's choices into the new tree. apply_clone_init
+            # picks this up on first boot.
+            _write_clone_init(
+                output_dir,
+                instance_label=instance_label or name,
+                hostname=hostname,
+                admin_email=admin_email,
+            )
 
             subprocess.run(
                 ['python3', '-m', 'venv', os.path.join(output_dir, 'venv')],
@@ -181,6 +228,11 @@ def app_create(request):
             app_type=app_type,
             created_by=request.user,
             deploy_user=deploy_user or name.lower().replace(' ', ''),
+            server_name=server_name,
+            hostname=hostname,
+            admin_email=admin_email,
+            maintenance_root=maintenance_root,
+            instance_label=instance_label,
         )
 
         _generate_deploy_artifacts(app)
@@ -188,7 +240,9 @@ def app_create(request):
         messages.success(request, f'App "{name}" created at {output_dir}')
         return redirect('app_factory:list')
 
-    return render(request, 'app_factory/create.html')
+    return render(request, 'app_factory/create.html', {
+        'defaults': _identity_defaults(),
+    })
 
 
 def _generate_deploy_artifacts(app):
@@ -222,6 +276,8 @@ def _generate_deploy_artifacts(app):
         project_name=project_name,
         deploy_user=deploy_user,
         app_label=app.name,
+        server_name=app.server_name or None,
+        maintenance_root=app.maintenance_root or None,
     )
 
 
