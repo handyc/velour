@@ -37,10 +37,12 @@
         transition: border-color 0.15s;
     }
     .suite-card:hover { border-color: currentColor; }
-    .suite-card--mail  { border-left-color: #58a6ff; color: #58a6ff; }
-    .suite-card--cal   { border-left-color: #56d364; color: #56d364; }
-    .suite-card--docs  { border-left-color: #d2a8ff; color: #d2a8ff; }
-    .suite-card--files { border-left-color: #e3b341; color: #e3b341; }
+    .suite-card--mail   { border-left-color: #58a6ff; color: #58a6ff; }
+    .suite-card--cal    { border-left-color: #56d364; color: #56d364; }
+    .suite-card--docs   { border-left-color: #d2a8ff; color: #d2a8ff; }
+    .suite-card--files  { border-left-color: #e3b341; color: #e3b341; }
+    .suite-card--write  { border-left-color: #ff9580; color: #ff9580; }
+    .suite-card--sheet  { border-left-color: #7ee787; color: #7ee787; }
     .suite-icon {
         font-size: 1.1rem;
         line-height: 1;
@@ -191,6 +193,22 @@
         <a href="{% url 'codex:list' %}">
             <div class="suite-icon">&#128214;</div>
             <div class="suite-body"><h3>Documents</h3><p>Codex manuals</p></div>
+        </a>
+    </div>
+    {% endif %}
+    {% if 'quill' in installed_app_slugs %}
+    <div class="suite-card suite-card--write">
+        <a href="{% url 'quill:list' %}">
+            <div class="suite-icon">&#9998;</div>
+            <div class="suite-body"><h3>Quill</h3><p>Word processor</p></div>
+        </a>
+    </div>
+    {% endif %}
+    {% if 'ledger' in installed_app_slugs %}
+    <div class="suite-card suite-card--sheet">
+        <a href="{% url 'ledger:list' %}">
+            <div class="suite-icon">&#128202;</div>
+            <div class="suite-body"><h3>Ledger</h3><p>Spreadsheet</p></div>
         </a>
     </div>
     {% endif %}

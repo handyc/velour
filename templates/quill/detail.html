@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}{{ document.title }} · Quill{% endblock %}
+
+{% block content %}
+<style>
+    .quill-doc-header {
+        display:flex;align-items:baseline;gap:1rem;
+        margin-bottom:0.4rem;
+    }
+    .quill-meta {
+        color:#8b949e;font-size:0.8rem;
+    }
+    .quill-section {
+        border-left:2px solid #30363d;
+        padding:0.6rem 0 0.6rem 1rem;
+        margin:1.2rem 0;
+    }
+    .quill-section h2 {
+        margin:0 0 0.4rem 0;
+        font-size:1.05rem;
+        color:#c9d1d9;
+    }
+    .quill-section .quill-section-actions {
+        font-size:0.75rem;color:#8b949e;
+    }
+    .quill-section .quill-section-actions a {
+        color:#79c0ff;text-decoration:none;
+    }
+    .quill-section .quill-body-rendered {
+        margin-top:0.5rem;color:#c9d1d9;
+        font-family: Charter, Georgia, "Times New Roman", serif;
+        line-height:1.55;
+    }
+    .quill-section .quill-empty {
+        color:#6e7681;font-style:italic;
+    }
+    .quill-style-pill {
+        display:inline-block;
+        font-size:0.7rem;color:#8b949e;
+        border:1px solid #30363d;border-radius:10px;
+        padding:0 0.45rem;margin-left:0.4rem;
+        font-family: ui-monospace, monospace;
+    }
+    .quill-toolbar {
+        display:flex;gap:0.5rem;flex-wrap:wrap;
+        margin:1rem 0;
+    }
+    .quill-styles-list {
+        margin:1.4rem 0;color:#8b949e;font-size:0.85rem;
+    }
+    .quill-styles-list code {
+        color:#c9d1d9;background:#161b22;padding:0 0.3rem;border-radius:3px;
+    }
+</style>
+
+<div class="quill-doc-header">
+    <h1 style="margin:0;">{{ document.title }}</h1>
+    <span class="quill-meta">
+        {{ document.section_count }} section{{ document.section_count|pluralize }}
+        · {{ document.word_count }} word{{ document.word_count|pluralize }}
+        · updated {{ document.updated_at|date:"Y-m-d H:i" }}
+    </span>
+</div>
+
+<div class="quill-toolbar">
+    <a href="{% url 'quill:section_add' document.slug %}" class="btn btn-primary">Add section</a>
+    <a href="{% url 'quill:style_add' document.slug %}" class="btn">Add style</a>
+    <a href="{% url 'quill:list' %}" style="color:#8b949e;align-self:center;">← All documents</a>
+    <form method="post" action="{% url 'quill:delete' document.slug %}" style="margin-left:auto;">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="color:#f85149;border-color:#5a1a1a;">Delete document</button>
+    </form>
+</div>
+
+{% if sections %}
+    {% for sec in sections %}
+        <div class="quill-section" style="margin-left:{{ sec.level|add:"-1"|stringformat:"d" }}rem;">
+            <h2>
+                {{ sec.title|default:"(untitled)" }}
+                {% if sec.style %}<span class="quill-style-pill">{{ sec.style.name }}</span>{% endif %}
+            </h2>
+            <div class="quill-section-actions">
+                <a href="{% url 'quill:section_edit' document.slug sec.pk %}">edit</a>
+                ·
+                <form method="post" action="{% url 'quill:section_delete' document.slug sec.pk %}"
+                      style="display:inline;">
+                    {% csrf_token %}
+                    <button type="submit"
+                            style="background:none;border:0;color:#f85149;cursor:pointer;padding:0;font-size:0.75rem;">
+                        delete
+                    </button>
+                </form>
+            </div>
+            <div class="quill-body-rendered" {% if sec.style %}style="{{ sec.style.as_inline_css }}"{% endif %}>
+                {% if sec.body %}{{ sec.body|safe }}{% else %}<span class="quill-empty">(empty)</span>{% endif %}
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div style="margin-top:2rem;padding:1.5rem;border:1px dashed #30363d;border-radius:6px;color:#8b949e;text-align:center;">
+        No sections yet.
+        <a href="{% url 'quill:section_add' document.slug %}" style="color:#79c0ff;">Add the first one</a>.
+    </div>
+{% endif %}
+
+{% if styles %}
+<div class="quill-styles-list">
+    <strong>Styles:</strong>
+    {% for s in styles %}<code>{{ s.name }}</code>{% if not forloop.last %} · {% endif %}{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

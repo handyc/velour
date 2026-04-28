@@ -133,6 +133,8 @@ INSTALLED_APPS = [
     'agora',
     'backups',
     'helix',
+    'quill',
+    'ledger',
 ]
 
 MIDDLEWARE = [

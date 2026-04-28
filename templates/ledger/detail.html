@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}{{ workbook.title }} · Ledger{% endblock %}
+
+{% block content %}
+<style>
+    .ledger-toolbar {
+        display:flex;align-items:baseline;gap:0.7rem;margin:0 0 0.6rem 0;
+    }
+    .ledger-meta { color:#8b949e;font-size:0.8rem; }
+    .ledger-grid {
+        border-collapse:collapse;
+        font-family: ui-monospace, "SF Mono", monospace;
+        font-size:0.85rem;
+        margin-top:0.6rem;
+    }
+    .ledger-grid th, .ledger-grid td {
+        border:1px solid #30363d;
+        padding:0;
+        min-width:80px;
+        height:24px;
+        background:#0d1117;
+    }
+    .ledger-grid th {
+        background:#161b22;
+        color:#8b949e;
+        font-weight:normal;
+        text-align:center;
+        font-size:0.75rem;
+        padding:0 0.3rem;
+    }
+    .ledger-grid th.row-header {
+        min-width:40px;
+        position:sticky;left:0;
+    }
+    .ledger-grid input.ledger-cell {
+        width:100%;
+        height:24px;
+        border:0;
+        background:transparent;
+        color:#c9d1d9;
+        padding:0 0.3rem;
+        font: inherit;
+        outline:0;
+    }
+    .ledger-grid input.ledger-cell:focus {
+        background:#161b22;
+        outline:1px solid #58a6ff;
+    }
+    .ledger-grid td.formula-cell input {
+        color:#79c0ff;
+    }
+    .ledger-grid td.error-cell input {
+        color:#f85149;
+    }
+    .ledger-formula-bar {
+        margin:0.6rem 0;
+        font-family: ui-monospace, monospace;
+        font-size:0.85rem;
+        color:#8b949e;
+    }
+    .ledger-formula-bar code {
+        background:#161b22;color:#c9d1d9;
+        padding:0.1rem 0.4rem;border-radius:3px;
+    }
+</style>
+
+<div class="ledger-toolbar">
+    <h1 style="margin:0;">{{ workbook.title }}</h1>
+    <span class="ledger-meta">
+        {{ workbook.cell_count }} cells
+        · language <code>{{ workbook.formula_language.slug|default:"excel" }}</code>
+        · updated {{ workbook.updated_at|date:"Y-m-d H:i" }}
+    </span>
+    <a href="{% url 'ledger:list' %}" style="color:#8b949e;margin-left:auto;">← All workbooks</a>
+    <form method="post" action="{% url 'ledger:delete' workbook.slug %}" style="margin:0;">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="color:#f85149;border-color:#5a1a1a;">Delete</button>
+    </form>
+</div>
+
+<div class="ledger-formula-bar" id="ledger-formula-bar">
+    Selected: <span id="ledger-selected-a1">—</span> ·
+    raw: <code id="ledger-selected-raw"></code>
+</div>
+
+<div style="overflow-x:auto;">
+    <table class="ledger-grid">
+        <thead>
+            <tr>
+                <th class="row-header"></th>
+                {% for letter in col_letters %}<th>{{ letter }}</th>{% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <th class="row-header">{{ row.r|add:"1" }}</th>
+                {% for cell in row.cells %}
+                <td class="{% if cell.is_formula %}formula-cell{% endif %}"
+                    data-a1="{{ cell.a1 }}"
+                    data-row="{{ cell.row }}" data-col="{{ cell.col }}"
+                    data-raw="{{ cell.value }}">
+                    <input class="ledger-cell"
+                           value="{% if cell.is_formula %}{{ cell.computed }}{% else %}{{ cell.value }}{% endif %}"
+                           data-display-mode="{% if cell.is_formula %}computed{% else %}raw{% endif %}">
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<p style="color:#6e7681;font-size:0.78rem;margin-top:1rem;">
+    Phase 1 — single-cell recompute. Type a value or
+    <code>=SUM(A1:A3)</code> and press Enter. Dependent-cell propagation
+    is Phase 2.
+</p>
+
+<script>
+(function() {
+    const setCellUrl = "{% url 'ledger:api_set_cell' workbook.slug sheet.pk %}";
+    const csrf = document.querySelector('input[name=csrfmiddlewaretoken]').value;
+    const sel = {
+        a1: document.getElementById('ledger-selected-a1'),
+        raw: document.getElementById('ledger-selected-raw'),
+    };
+
+    function showSelection(td, input) {
+        sel.a1.textContent = td.dataset.a1;
+        sel.raw.textContent = td.dataset.raw || '';
+    }
+
+    document.querySelectorAll('.ledger-cell').forEach(input => {
+        const td = input.parentElement;
+        input.addEventListener('focus', () => {
+            // When focused, show the *raw* value so the user edits the
+            // formula source, not its computed result.
+            input.value = td.dataset.raw || input.value;
+            input.dataset.displayMode = 'raw';
+            showSelection(td, input);
+        });
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        });
+
+        function commit() {
+            const newVal = input.value;
+            if (newVal === td.dataset.raw) {
+                // Nothing changed — restore display.
+                if (input.dataset.displayMode === 'raw' && td.classList.contains('formula-cell')) {
+                    // Re-show computed if it's a formula cell.
+                    input.value = td.querySelector(':scope').dataset.computed || newVal;
+                }
+                return;
+            }
+            fetch(setCellUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+                body: JSON.stringify({
+                    row: parseInt(td.dataset.row, 10),
+                    col: parseInt(td.dataset.col, 10),
+                    value: newVal,
+                }),
+            }).then(r => r.json()).then(d => {
+                td.dataset.raw = d.value;
+                td.dataset.computed = d.computed;
+                if (d.value && d.value.startsWith('=')) {
+                    td.classList.add('formula-cell');
+                    input.value = d.error ? ('#ERR ' + d.error) : d.computed;
+                    td.classList.toggle('error-cell', !!d.error);
+                } else {
+                    td.classList.remove('formula-cell', 'error-cell');
+                    input.value = d.value;
+                }
+                showSelection(td, input);
+            }).catch(err => {
+                console.error('cell update failed', err);
+            });
+        }
+    });
+})();
+</script>
+
+{# Hidden form purely so the JS can grab a CSRF token. #}
+<form style="display:none;">{% csrf_token %}</form>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Ledger · New workbook{% endblock %}
+
+{% block content %}
+<h1>New workbook</h1>
+
+<form method="post" style="max-width:520px;margin-top:1rem;">
+    {% csrf_token %}
+    <div style="margin-bottom:1rem;">
+        <label for="id_title" style="display:block;color:#8b949e;font-size:0.85rem;margin-bottom:0.3rem;">Title</label>
+        {{ form.title }}
+    </div>
+    {% if form.errors %}<div style="color:#f85149;">{{ form.errors }}</div>{% endif %}
+    <button type="submit" class="btn btn-primary">Create</button>
+    <a href="{% url 'ledger:list' %}" style="margin-left:0.6rem;color:#8b949e;">Cancel</a>
+</form>
+
+<style>
+    #id_title {
+        width:100%;
+        padding:0.5rem 0.6rem;
+        background:#0d1117;
+        border:1px solid #30363d;
+        border-radius:6px;
+        color:#c9d1d9;
+        font-size:1rem;
+    }
+</style>
+{% endblock %}

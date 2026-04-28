@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Add style · {{ document.title }}{% endblock %}
+
+{% block content %}
+<style>
+    .quill-style-edit form {
+        display:flex;flex-direction:column;gap:0.9rem;max-width:560px;
+    }
+    .quill-style-edit label {
+        display:block;color:#8b949e;font-size:0.8rem;margin-bottom:0.2rem;
+        text-transform:uppercase;letter-spacing:0.05em;
+    }
+    .quill-style-edit input[type=text],
+    .quill-style-edit select,
+    .quill-style-edit textarea {
+        width:100%;
+        padding:0.5rem 0.6rem;
+        background:#0d1117;
+        border:1px solid #30363d;
+        border-radius:6px;
+        color:#c9d1d9;
+        font-size:0.95rem;
+    }
+    .quill-style-edit .quill-help {
+        color:#6e7681;font-size:0.78rem;
+    }
+</style>
+
+<div class="quill-style-edit">
+    <h1 style="margin-bottom:0.4rem;">Add style</h1>
+    <p style="color:#8b949e;font-size:0.85rem;margin-top:0;">
+        in <a href="{% url 'quill:detail' document.slug %}" style="color:#79c0ff;">{{ document.title }}</a>
+    </p>
+
+    <form method="post">
+        {% csrf_token %}
+        <div><label>Name</label>{{ form.name }}</div>
+        <div><label>Kind</label>{{ form.kind }}</div>
+        <div>
+            <label>CSS rules (JSON)</label>
+            {{ form.css_rules }}
+            <div class="quill-help">
+                Keys use <code>snake_case</code> (e.g. <code>font_family</code>, <code>line_height</code>).
+                Translated to CSS at render time.
+            </div>
+        </div>
+        {% if form.errors %}<div style="color:#f85149;">{{ form.errors }}</div>{% endif %}
+        <div>
+            <button type="submit" class="btn btn-primary">Add style</button>
+            <a href="{% url 'quill:detail' document.slug %}"
+               style="color:#8b949e;margin-left:0.6rem;">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
