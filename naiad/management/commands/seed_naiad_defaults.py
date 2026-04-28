@@ -81,6 +81,15 @@ STAGE_DIMENSIONS = {
     'duckweed-tray':            (500, 300, 100),
     'aquaponic-bed':            (600, 400, 400),
     'brine-shrimp-tank':        (300, 300, 400),
+    # Ecosystem-style stages
+    'oyster-mushroom-bed':      (400, 300, 400),  # mycoremediation
+    'banana-ring':              (600, 600, 800),  # tropical canopy
+    'papaya-tree':              (500, 500, 800),  # tropical fruit
+    'salicornia-bed':           (600, 400, 200),  # halophyte
+    'algae-photobioreactor':    (400, 100, 800),  # vertical tube
+    'bsf-larvae-bin':           (400, 300, 200),  # insect protein
+    'nettle-patch':             (400, 400, 600),  # cool-temperate accumulator
+    'mediterranean-herb-bed':   (500, 400, 300),  # dry-tolerant
 }
 
 
@@ -887,6 +896,146 @@ STAGE_TYPES = [
         removal={'tds': 0.05, 'phosphate': 0.10, 'pharma': 0.10},
         flow_lpm=0.05, energy_watts=2.0,
         cost_eur=25.0, maintenance_days=14,
+    ),
+    dict(
+        slug='oyster-mushroom-bed',
+        name='Oyster mushroom mycoremediation bed',
+        kind='biological',
+        description='Pleurotus ostreatus on a 40×30×40 cm bed of '
+                    'urine-soaked straw + cardboard. Mycelium '
+                    'enzymatically degrades hormones, pharma, '
+                    'aromatic organics — real research at the BlueTech '
+                    'and Stamets labs. Fruiting flushes every 14 days '
+                    'produce edible mushrooms (~200 g/flush). After '
+                    '4-5 flushes, spent substrate goes to vermifilter '
+                    'or directly to the garden as fungal mulch.',
+        removal={'voc': 0.70, 'pharma': 0.40, 'hormones': 0.50,
+                 'bacteria': 0.85, 'turbidity': 0.70,
+                 'ammonia': 0.20, 'nitrate': 0.20},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=14,
+    ),
+    dict(
+        slug='banana-ring',
+        name='Banana ring (tropical canopy crop)',
+        kind='biological',
+        description='Classic permaculture banana circle — a 60×60×80 cm '
+                    'pit lined with mulch and ringed with 3-4 banana '
+                    'plants (Musa spp.). Bananas are heavy K demanders '
+                    'and tolerate high-N greywater inputs; tropical '
+                    'wastewater treatment in Hawaii, Cuba, Sri Lanka. '
+                    'Yields ~5-15 kg fruit per plant per year + '
+                    'leaves for compost / wraps / animal fodder.',
+        removal={'nitrate': 0.30, 'ammonia': 0.25, 'phosphate': 0.40,
+                 'potassium': 0.50, 'bacteria': 0.80, 'turbidity': 0.85},
+        flow_lpm=0.2, energy_watts=0.0,
+        cost_eur=40.0, maintenance_days=60,
+    ),
+    dict(
+        slug='papaya-tree',
+        name='Papaya tree (fast tropical fruit)',
+        kind='biological',
+        description='Carica papaya in a 50×50×80 cm half-barrel. '
+                    'Reaches productive size in 6-9 months from seed; '
+                    'fruits within a year. Nitrogen-hungry, heat-'
+                    'loving. Pairs naturally with the banana ring in '
+                    'tropical climates. Yields ~30-50 fruits per '
+                    'tree per year.',
+        removal={'nitrate': 0.30, 'ammonia': 0.25, 'phosphate': 0.30,
+                 'potassium': 0.20, 'bacteria': 0.75, 'turbidity': 0.80},
+        flow_lpm=0.15, energy_watts=0.0,
+        cost_eur=25.0, maintenance_days=60,
+    ),
+    dict(
+        slug='salicornia-bed',
+        name='Salicornia bed (sea asparagus on FO brine)',
+        kind='biological',
+        description='Salicornia europaea (samphire / sea asparagus) — '
+                    'a salt-loving halophyte that thrives on the '
+                    'reject brine from a downstream FO/RO stage. '
+                    'Edible succulent stems harvested weekly for '
+                    'salads and pickling; pioneer-stage tolerates '
+                    'salinity up to seawater. Real saline-aquaculture '
+                    'integration in coastal pilots (Eritrea, Mexico, '
+                    'India).',
+        removal={'tds': 0.40, 'sodium': 0.50, 'potassium': 0.30,
+                 'nitrate': 0.40, 'ammonia': 0.30, 'phosphate': 0.30,
+                 'bacteria': 0.70},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=14,
+    ),
+    dict(
+        slug='algae-photobioreactor',
+        name='Algae photobioreactor (Spirulina / Chlorella)',
+        kind='biological',
+        description='Vertical 40×10×80 cm clear-acrylic tube '
+                    'cultivating Arthrospira platensis (spirulina) '
+                    'or Chlorella vulgaris on hydrolysed urine. '
+                    'High-protein single-cell biomass — spirulina is '
+                    '60-70 % protein by dry weight. Harvest by '
+                    'filter-decant weekly; dried powder is human-'
+                    'edible (or feeds fish, chickens). NASA / Eden '
+                    'Project research.',
+        removal={'nitrate': 0.70, 'ammonia': 0.60, 'phosphate': 0.60,
+                 'potassium': 0.30, 'bacteria': 0.90,
+                 'turbidity': 0.50},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=60.0, maintenance_days=14,
+    ),
+    dict(
+        slug='bsf-larvae-bin',
+        name='Black soldier fly larvae bin',
+        kind='biological',
+        description='Hermetia illucens larvae in a 40×30×20 cm '
+                    'cascade bin, fed on protein-rich byproducts '
+                    'from the chain (vermifilter overflow, spent '
+                    'algae, mushroom substrate). Larvae self-harvest '
+                    'by crawling out the angled drain when ready to '
+                    'pupate; 40-45 % protein, 30 % fat — premium '
+                    'feed for fish, chickens, reptiles. Real '
+                    'circular-economy tech (Kenya, Indonesia, EU '
+                    'pilots).',
+        removal={'voc': 0.70, 'hormones': 0.40, 'pharma': 0.30,
+                 'turbidity': 0.85, 'bacteria': 0.95,
+                 'ammonia': 0.20},
+        flow_lpm=0.2, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=14,
+    ),
+    dict(
+        slug='nettle-patch',
+        name='Stinging nettle patch (Urtica dioica)',
+        kind='biological',
+        description='Cool-temperate counterpart to comfrey — a '
+                    'patch of Urtica dioica in a 40×40×60 cm bed. '
+                    'Even more aggressive N + Fe accumulator than '
+                    'comfrey; cut-and-come-again 4-6 times per '
+                    'season for soup, tea, fermented liquid '
+                    'fertilizer, or chicken fodder (cooked). '
+                    'Self-spreads via rhizomes; tolerates partial '
+                    'shade.',
+        removal={'nitrate': 0.25, 'ammonia': 0.20, 'phosphate': 0.30,
+                 'potassium': 0.25, 'iron': 0.60,
+                 'bacteria': 0.80, 'turbidity': 0.80},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=10.0, maintenance_days=21,
+    ),
+    dict(
+        slug='mediterranean-herb-bed',
+        name='Mediterranean herb bed (rosemary / thyme / lavender)',
+        kind='biological',
+        description='Drought-tolerant aromatic herb bed in a 50×40×30 '
+                    'cm raised planter — Rosmarinus officinalis, '
+                    'Thymus vulgaris, Lavandula angustifolia, Salvia '
+                    'officinalis. Lower N uptake than nettle or '
+                    'comfrey but the byproducts are essential oils '
+                    '(steam-distill the cuttings) and culinary herbs. '
+                    'Pollinator-supporting. Survives on diluted urine '
+                    'inputs that would burn leafier plants.',
+        removal={'nitrate': 0.15, 'ammonia': 0.10, 'phosphate': 0.20,
+                 'potassium': 0.15, 'hormones': 0.15,
+                 'bacteria': 0.75, 'turbidity': 0.80},
+        flow_lpm=0.1, energy_watts=0.0,
+        cost_eur=20.0, maintenance_days=30,
     ),
     dict(
         slug='tpms-ceramic-microfilter',
@@ -1838,6 +1987,197 @@ class Command(BaseCommand):
                 Stage.objects.create(
                     system=urine_v17, stage_type=st, position=i)
 
+        # v18 — mycoremediation ecosystem. Mushrooms are the
+        # decomposers; oyster mycelium does the heavy work on
+        # hormones, pharma, and aromatic organics that plants don't
+        # touch. Pair with nettle (cool-temperate N accumulator) and
+        # vermifilter to close the cycle. Produces mushrooms +
+        # nettle (soup, tea, fertilizer) + vermicompost; output
+        # water is irrigation-grade.
+        urine_v18, urine_v18_created = System.objects.update_or_create(
+            slug='urine-to-garden-v18-fungal', defaults=dict(
+                name='Urine → Garden (v18 fungal mycoremediation)',
+                description='Mushroom-led ecosystem. Two urease '
+                            'cartridges → vermifilter → oyster-'
+                            'mushroom bed (mycelium degrades '
+                            'hormones, pharma, aromatics) → nettle '
+                            'patch (cool-temperate N accumulator) '
+                            '→ duckweed → ceramic candle. Outputs: '
+                            'mushrooms (~200 g/flush, 4-5 flushes), '
+                            'nettle cuttings (soup, tea, liquid '
+                            'fertilizer), worm castings, duckweed. '
+                            'For temperate climates that can\'t '
+                            'support tropical fruit. 6 stages, '
+                            '~80 L, €92, 0 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v18_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'oyster-mushroom-bed',
+                'nettle-patch',
+                'duckweed-tray',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v18, stage_type=st, position=i)
+
+        # v19 — tropical fruit forest. Banana ring + papaya tree
+        # carry the bulk N/P/K demand; comfrey + duckweed polish.
+        # Highest biomass yield of any ecosystem in the catalog —
+        # bananas are ~5-15 kg/plant/year, papaya ~30-50 fruits.
+        # Suited to greenhouse, conservatory, or actual tropical
+        # climate. Output water is irrigation-grade.
+        urine_v19, urine_v19_created = System.objects.update_or_create(
+            slug='urine-to-garden-v19-tropical', defaults=dict(
+                name='Urine → Garden (v19 tropical fruit forest)',
+                description='Banana ring + papaya canopy on the '
+                            'bulk N/P/K stream. Two urease '
+                            'cartridges → vermifilter → banana '
+                            'ring (heavy K demander, ~5-15 kg fruit '
+                            'per plant per year) → papaya tree '
+                            '(N-hungry, ~30-50 fruits per year) → '
+                            'comfrey pot → duckweed → ceramic '
+                            'candle. Greenhouse / conservatory / '
+                            'actual-tropics. ~610 L (a real corner '
+                            'of a sunroom), 8 stages, €175, 0 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v19_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'banana-ring',
+                'papaya-tree',
+                'comfrey-pot',
+                'duckweed-tray',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v19, stage_type=st, position=i)
+
+        # v20 — saline / coastal ecosystem. Built around the FO
+        # reject brine: salicornia (sea asparagus) + brine shrimp
+        # turn high-TDS waste into edible succulents and live
+        # aquaculture feed. The freshwater main flow gets the
+        # standard biology (vermifilter + duckweed); pair with v14
+        # downstream if drinking-water output is needed.
+        urine_v20, urine_v20_created = System.objects.update_or_create(
+            slug='urine-to-garden-v20-coastal', defaults=dict(
+                name='Urine → Garden (v20 coastal halophyte)',
+                description='Salt-tolerant ecosystem. Two urease '
+                            'cartridges → vermifilter → forward-'
+                            'osmosis pouch (the FO reject brine '
+                            'feeds the next two stages — salicornia '
+                            'bed (edible sea asparagus) and brine-'
+                            'shrimp tank (live aquarium feed)). '
+                            'Main freshwater stream: duckweed → '
+                            'ceramic candle. Suited to arid/coastal '
+                            'use where salinity is plentiful and '
+                            'salt-tolerant crops have a market. '
+                            '7 stages, ~115 L, €164, 2 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v20_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'forward-osmosis-pouch',
+                'salicornia-bed',
+                'brine-shrimp-tank',
+                'duckweed-tray',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v20, stage_type=st, position=i)
+
+        # v21 — protein factory. Algae + black soldier fly larvae
+        # convert the urine stream into single-cell protein
+        # (spirulina, ~60-70 % protein) and insect protein (BSF
+        # larvae, ~40-45 % protein, harvested as live or dried fish/
+        # chicken feed). Vermifilter recycles the algae harvest
+        # residue. The most calorie-dense ecosystem option —
+        # designed for off-grid food security rather than fresh
+        # produce.
+        urine_v21, urine_v21_created = System.objects.update_or_create(
+            slug='urine-to-garden-v21-protein', defaults=dict(
+                name='Urine → Garden (v21 algae + insect protein)',
+                description='High-protein output ecosystem. Two '
+                            'urease cartridges → algae photo-'
+                            'bioreactor (Spirulina ~60-70 % protein) '
+                            '→ vermifilter (processes algae harvest '
+                            'residue) → BSF larvae bin (~40-45 % '
+                            'protein, fish/chicken feed) → duckweed '
+                            'tray → comfrey pot → ceramic candle. '
+                            'Vertically-oriented stages keep the '
+                            'footprint small. 8 stages, ~155 L, '
+                            '€212, 0 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v21_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'algae-photobioreactor',
+                'vermifilter',
+                'bsf-larvae-bin',
+                'duckweed-tray',
+                'comfrey-pot',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v21, stage_type=st, position=i)
+
+        # v22 — Mediterranean dry-tolerant ecosystem. Lower water-
+        # uptake plants (rosemary, thyme, lavender, comfrey) for
+        # arid or warm-temperate regions where intensive irrigation
+        # isn't practical. Output: aromatic herbs, essential oils,
+        # honey-supporting flowers, and irrigation-grade water.
+        urine_v22, urine_v22_created = System.objects.update_or_create(
+            slug='urine-to-garden-v22-mediterranean', defaults=dict(
+                name='Urine → Garden (v22 Mediterranean herb)',
+                description='Aromatic, dry-climate ecosystem. Two '
+                            'urease cartridges → vermifilter → '
+                            'mediterranean herb bed (rosemary, '
+                            'thyme, lavender, sage — pollinator-'
+                            'supporting, low water demand) → '
+                            'comfrey pot (the leafy outlier, '
+                            'tolerates higher N) → duckweed (a '
+                            'small shaded tray) → ceramic candle. '
+                            'Outputs: culinary herbs daily, '
+                            'essential oils (steam-distill the '
+                            'cuttings), bee fodder. Warmer / drier '
+                            'counterpart to v18. 7 stages, ~115 L, '
+                            '€102, 0 W.',
+                source=urine_src, target=irrig_target,
+            ))
+        if urine_v22_created:
+            from naiad.models import Stage
+            for i, stype_slug in enumerate([
+                'micro-urea-hydrolysis',
+                'micro-urea-hydrolysis',
+                'vermifilter',
+                'mediterranean-herb-bed',
+                'comfrey-pot',
+                'duckweed-tray',
+                'ceramic-pot-filter',
+            ]):
+                st = StageType.objects.get(slug=stype_slug)
+                Stage.objects.create(
+                    system=urine_v22, stage_type=st, position=i)
+
         self.stdout.write(self.style.SUCCESS(
             f'Naiad seed done: {st_n} stage types, {wp_n} profiles. '
             f'Sample systems: "{system.name}", '
@@ -1849,4 +2189,6 @@ class Command(BaseCommand):
             f'"{urine_v11.name}", "{urine_v12.name}", '
             f'"{urine_v13.name}", "{urine_v14.name}", '
             f'"{urine_v15.name}", "{urine_v16.name}", '
-            f'"{urine_v17.name}".'))
+            f'"{urine_v17.name}", "{urine_v18.name}", '
+            f'"{urine_v19.name}", "{urine_v20.name}", '
+            f'"{urine_v21.name}", "{urine_v22.name}".'))
