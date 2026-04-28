@@ -38,34 +38,95 @@ from naiad.evolve_dispatch import DispatchError, dispatch_via_conduit
 from naiad.models import Stage, StageType, System
 
 
-# Budget bands matched to the v4/v5/v6/v2-v3 reference systems.
-# `--preset <name>` pre-fills cost/watt/length caps; any explicit
-# --cost-cap / --watt-cap / --length-cap on the same command line
-# wins.
+# Budget bands matched to the seeded reference systems.
+# `--preset <name>` pre-fills cost/watt/length/volume caps + biomass
+# target. Any explicit --cost-cap / --watt-cap / --length-cap /
+# --volume-cap / --biomass-target on the same command line wins.
+#
+# Drinking-water tiers: zero biomass target — these chains are
+# pure filtration and shouldn't be penalised for not producing food.
+# Ecosystem tiers: real biomass targets so the GA actually values
+# food output as a positive part of the fitness function.
 PRESETS = {
+    # --- Drinking-water tiers --------------------------------------
     'kitchen': {
-        'cost_cap':   150.0,   # soda-bottle tier — vinegar, solar still, GAC
-        'watt_cap':    10.0,
-        'length_cap':  12.0,
-        'volume_cap': 600.0,   # half a 1 m³ cube
+        'cost_cap':       150.0,   # soda-bottle — vinegar, solar still, GAC
+        'watt_cap':        10.0,
+        'length_cap':      12.0,
+        'volume_cap':     600.0,
+        'biomass_target': 1e-9,    # don't penalize 0-biomass chains
     },
     'field': {
-        'cost_cap':   300.0,   # camping kit — stovetop still, ceramic, NaDCC
-        'watt_cap':   200.0,
-        'length_cap':  12.0,
-        'volume_cap': 500.0,
+        'cost_cap':       300.0,   # camping kit — stovetop still, ceramic, NaDCC
+        'watt_cap':       200.0,
+        'length_cap':      12.0,
+        'volume_cap':     500.0,
+        'biomass_target': 1e-9,
     },
     'consumer': {
-        'cost_cap':   900.0,   # commercial gear — countertop distillers, RO, UV
-        'watt_cap':  1500.0,
-        'length_cap':  14.0,
-        'volume_cap': 800.0,
+        'cost_cap':       900.0,   # commercial — countertop distillers, RO, UV
+        'watt_cap':      1500.0,
+        'length_cap':      14.0,
+        'volume_cap':     800.0,
+        'biomass_target': 1e-9,
     },
     'industrial': {
-        'cost_cap':  2500.0,   # vapour-compression + electrochem + ammonia tower
-        'watt_cap':  2500.0,
-        'length_cap':  18.0,
-        'volume_cap': 1500.0,  # allowed bigger than 1 m³
+        'cost_cap':      2500.0,   # vapour-compression + electrochem + tower
+        'watt_cap':      2500.0,
+        'length_cap':      18.0,
+        'volume_cap':    1500.0,
+        'biomass_target': 1e-9,
+    },
+
+    # --- Ecosystem tiers (urine → biomass + irrigation water) ------
+    'apartment': {
+        'cost_cap':       150.0,   # v23-shaped — wall + counter scale
+        'watt_cap':         5.0,
+        'length_cap':      10.0,
+        'volume_cap':     100.0,
+        'biomass_target':  15.0,
+    },
+    'fungal': {
+        'cost_cap':       175.0,   # v18-shaped — mushrooms + nettle (temperate)
+        'watt_cap':         5.0,
+        'length_cap':      12.0,
+        'volume_cap':     250.0,
+        'biomass_target':  20.0,
+    },
+    'mediterranean': {
+        'cost_cap':       175.0,   # v22-shaped — herbs + oils (arid)
+        'watt_cap':         5.0,
+        'length_cap':      12.0,
+        'volume_cap':     200.0,
+        'biomass_target':  15.0,
+    },
+    'coastal': {
+        'cost_cap':       250.0,   # v20-shaped — halophytes + brine shrimp
+        'watt_cap':        10.0,
+        'length_cap':      12.0,
+        'volume_cap':     250.0,
+        'biomass_target':  15.0,
+    },
+    'protein': {
+        'cost_cap':       300.0,   # v21-shaped — algae + BSF larvae
+        'watt_cap':         5.0,
+        'length_cap':      12.0,
+        'volume_cap':     200.0,
+        'biomass_target':  35.0,
+    },
+    'garden': {
+        'cost_cap':       300.0,   # v16-shaped — generalist greenhouse
+        'watt_cap':        15.0,
+        'length_cap':      12.0,
+        'volume_cap':     300.0,
+        'biomass_target':  35.0,
+    },
+    'tropical': {
+        'cost_cap':       300.0,   # v19-shaped — banana + papaya
+        'watt_cap':         5.0,
+        'length_cap':      12.0,
+        'volume_cap':     700.0,
+        'biomass_target':  35.0,
     },
 }
 
@@ -247,14 +308,23 @@ class Command(BaseCommand):
                             help='Print stats every N generations.')
         parser.add_argument('--preset', choices=sorted(PRESETS.keys()),
                             default=None,
-                            help='Set cost/watt/length caps in one go: '
-                                 'kitchen (€150, 10 W) — soda-bottle tier; '
-                                 'field (€300, 200 W) — camping kit; '
-                                 'consumer (€900, 1500 W) — commercial gear; '
-                                 'industrial (€2500, 2500 W) — '
-                                 'vapour-compression + electrochem. '
-                                 'Explicit --cost-cap / --watt-cap / '
-                                 '--length-cap override the preset.')
+                            help='Set cost / watt / length / volume / '
+                                 'biomass caps in one go. Drinking-'
+                                 'water tiers: kitchen, field, '
+                                 'consumer, industrial (zero biomass '
+                                 'target — pure filtration). '
+                                 'Ecosystem tiers (real biomass '
+                                 'target so the GA values food '
+                                 'output): apartment (urban wall, '
+                                 '15 g/L), fungal (mushrooms + '
+                                 'nettle, 20 g/L), mediterranean '
+                                 '(herbs + oils, 15 g/L), coastal '
+                                 '(halophyte + brine shrimp, 15 g/L), '
+                                 'protein (algae + BSF larvae, '
+                                 '35 g/L), garden (generalist, '
+                                 '35 g/L), tropical (banana + papaya, '
+                                 '35 g/L). Explicit caps override '
+                                 'the preset.')
         parser.add_argument('--cost-cap', type=float, default=None,
                             dest='cost_cap',
                             help='Cost penalty saturation ceiling, EUR. '
