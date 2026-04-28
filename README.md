@@ -42,7 +42,8 @@ gray. The renderer uses pure CSS strips so the layout reflows from a
   personality.
 
 - **[Lou](https://github.com/louzt) who has helped with countless hours
-  of research and input
+  of research, input and code contribution. Without him, the project
+  would still suck.
 
 Both of them are co-conspirators on
 [ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC), a modern
