@@ -88,6 +88,22 @@ def _internal_id_links(soup: BeautifulSoup, current_url: str) -> list[int]:
     return out
 
 
+def apply_curated_article_order(curated_zids: list[int]) -> int:
+    """Reset every Article's display_order to the default (1000), then
+    assign display_order=1..N to the zotonic ids in ``curated_zids``.
+
+    Returns the number of articles that actually received a curated
+    rank (curated_zids may include zids that aren't in our DB yet).
+    """
+    Article.objects.exclude(display_order=1000).update(display_order=1000)
+    applied = 0
+    for i, zid in enumerate(curated_zids, start=1):
+        applied += Article.objects.filter(zotonic_id=zid).update(
+            display_order=i,
+        )
+    return applied
+
+
 def _story_index_order(soup: BeautifulSoup, current_url: str) -> list[int]:
     """On the stories index (id/344) the curated order lives in the
     list of <a class="link"> entries inside #verhalen / .list. Capture
@@ -773,15 +789,7 @@ class Command(BaseCommand):
         # ones in the source index get display_order = 1..N and the
         # rest fall back to recency by zotonic_id.
         if curated_story_order and not dry_run:
-            Article.objects.exclude(display_order=1000).update(
-                display_order=1000,
-            )
-            applied = 0
-            for i, zid in enumerate(curated_story_order, start=1):
-                updated = Article.objects.filter(zotonic_id=zid).update(
-                    display_order=i,
-                )
-                applied += updated
+            applied = apply_curated_article_order(curated_story_order)
             log(f'Applied curated display_order to {applied} '
                 f'of {len(curated_story_order)} articles.')
 
