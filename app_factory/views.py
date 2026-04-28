@@ -15,6 +15,10 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
+from .app_registry import (
+    OPTIONAL_APPS, OPTIONAL_BY_SLUG, all_known_slugs, included_apps,
+)
+from .clone_filter import filter_installed_apps, filter_url_includes
 from .management.commands.generate_deploy import render_deploy_artifacts
 from .models import GeneratedApp
 
@@ -134,6 +138,40 @@ def _identity_defaults():
         return {'hostname': 'example.com', 'admin_email': ''}
 
 
+def _filter_clone_settings_and_urls(output_dir, included_slugs):
+    """Rewrite the cloned tree's velour/settings.py and velour/urls.py
+    to keep only the included-slug entries. Leaves everything else
+    untouched."""
+    settings_path = os.path.join(output_dir, 'velour', 'settings.py')
+    if os.path.isfile(settings_path):
+        with open(settings_path) as f:
+            txt = f.read()
+        with open(settings_path, 'w') as f:
+            f.write(filter_installed_apps(txt, included_slugs))
+
+    urls_path = os.path.join(output_dir, 'velour', 'urls.py')
+    if os.path.isfile(urls_path):
+        with open(urls_path) as f:
+            txt = f.read()
+        with open(urls_path, 'w') as f:
+            f.write(filter_url_includes(txt, included_slugs))
+
+
+def _strip_unused_template_dirs(output_dir, included_slugs):
+    """Drop templates/<slug>/ for any known app not in the included set.
+    Templates of unknown subdirs (base.html lives directly under
+    templates/) are left alone."""
+    templates_dir = os.path.join(output_dir, 'templates')
+    if not os.path.isdir(templates_dir):
+        return
+    for sub in os.listdir(templates_dir):
+        sub_path = os.path.join(templates_dir, sub)
+        if not os.path.isdir(sub_path):
+            continue
+        if sub in all_known_slugs() and sub not in included_slugs:
+            shutil.rmtree(sub_path, ignore_errors=True)
+
+
 def _write_clone_init(target_dir, instance_label, hostname, admin_email):
     """Drop a clone_init.json at the cloned tree's root. The new install
     consumes this on first boot via `manage.py apply_clone_init` so its
@@ -162,6 +200,11 @@ def app_create(request):
         admin_email = request.POST.get('admin_email', '').strip()
         maintenance_root = request.POST.get('maintenance_root', '').strip()
         instance_label = request.POST.get('instance_label', '').strip()
+        # Checkbox grid for OPTIONAL_APPS. Empty selection = full clone.
+        selected_optional = [
+            s for s in request.POST.getlist('selected_apps')
+            if s in OPTIONAL_BY_SLUG
+        ]
 
         if not name:
             messages.error(request, 'App name is required.')
@@ -174,9 +217,23 @@ def app_create(request):
         os.makedirs(output_dir, exist_ok=True)
 
         if app_type == 'clone':
+            # Compute the included-apps set. Empty selection = full clone.
+            if selected_optional:
+                included_slugs = included_apps(selected_optional)
+            else:
+                included_slugs = all_known_slugs()
+
             base = str(settings.BASE_DIR)
             for item in os.listdir(base):
                 if item in CLONE_SKIP_TOPLEVEL:
+                    continue
+                # Strip top-level dirs that name an app we're not including.
+                # Only checks against the known-app universe so we don't
+                # accidentally drop unrelated dirs like `static`, `templates`,
+                # `deploy`, etc. that happen to live at root.
+                if (item in all_known_slugs()
+                        and item not in included_slugs
+                        and os.path.isdir(os.path.join(base, item))):
                     continue
                 src = os.path.join(base, item)
                 dst = os.path.join(output_dir, item)
@@ -187,6 +244,15 @@ def app_create(request):
                     )
                 else:
                     shutil.copy2(src, dst)
+
+            # If the operator trimmed the app list, rewrite the cloned
+            # settings.py and urls.py to match.
+            if selected_optional:
+                _filter_clone_settings_and_urls(output_dir, included_slugs)
+                # Also strip per-app templates/<slug>/ subdirs for apps
+                # we didn't include — they'd never resolve and just
+                # bloat the tree.
+                _strip_unused_template_dirs(output_dir, included_slugs)
 
             # Bake the operator's choices into the new tree. apply_clone_init
             # picks this up on first boot.
@@ -233,6 +299,7 @@ def app_create(request):
             admin_email=admin_email,
             maintenance_root=maintenance_root,
             instance_label=instance_label,
+            selected_apps=','.join(sorted(selected_optional)),
         )
 
         _generate_deploy_artifacts(app)
@@ -242,6 +309,7 @@ def app_create(request):
 
     return render(request, 'app_factory/create.html', {
         'defaults': _identity_defaults(),
+        'optional_apps': OPTIONAL_APPS,
     })
 
 

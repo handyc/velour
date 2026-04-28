@@ -69,6 +69,13 @@ class GeneratedApp(models.Model):
         help_text='What the new clone calls itself in its own UI. '
                   'Blank = the app name.',
     )
+    # Comma-separated list of OPTIONAL_APPS slugs the operator selected.
+    # Empty = all OPTIONAL apps included (full Velour clone). The clone
+    # closure (resolved deps) is recomputed at clone time, not stored.
+    selected_apps = models.TextField(
+        blank=True,
+        help_text='Comma-separated optional-app slugs. Empty = full clone.',
+    )
 
     class Meta:
         ordering = ['-created_at']

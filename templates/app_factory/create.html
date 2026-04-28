@@ -71,6 +71,33 @@
             <input type="text" id="maintenance_root" name="maintenance_root" placeholder="/var/www/maintenance">
         </div>
 
+        <h3>Apps to include <span style="color:#8b949e;font-weight:normal;font-size:0.85rem;">(clone only — leave all unchecked for a full clone)</span></h3>
+        <p style="color:#8b949e;font-size:0.85rem;margin-top:-0.4rem;">
+            Core operating substrate (Identity, Codex, dashboard, mail, etc.)
+            is always included. Below are the optional / feature apps. Selecting
+            one auto-includes its declared dependencies.
+        </p>
+        <div id="optional-apps-grid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.4rem 1rem;margin-bottom:1rem;">
+        {% for app in optional_apps %}
+            <label style="font-size:0.85rem;display:flex;gap:0.4rem;align-items:flex-start;">
+                <input type="checkbox" name="selected_apps" value="{{ app.slug }}" style="margin-top:0.15rem;">
+                <span>
+                    <strong>{{ app.name }}</strong>
+                    {% if app.depends_on %}
+                        <span style="color:#8b949e;font-size:0.75rem;">→ needs {{ app.depends_on|join:", " }}</span>
+                    {% endif %}
+                    <br>
+                    <span style="color:#8b949e;">{{ app.description }}</span>
+                </span>
+            </label>
+        {% endfor %}
+        </div>
+        <p style="color:#8b949e;font-size:0.8rem;margin-top:-0.4rem;">
+            <button type="button" onclick="document.querySelectorAll('#optional-apps-grid input[type=checkbox]').forEach(c=>c.checked=true);return false;" style="background:none;border:none;color:#79c0ff;cursor:pointer;padding:0;">select all</button>
+            ·
+            <button type="button" onclick="document.querySelectorAll('#optional-apps-grid input[type=checkbox]').forEach(c=>c.checked=false);return false;" style="background:none;border:none;color:#79c0ff;cursor:pointer;padding:0;">select none</button>
+        </p>
+
         <button type="submit" class="btn btn-primary">Create App</button>
         <a href="{% url 'app_factory:list' %}" class="btn btn-secondary" style="margin-left: 0.5rem;">Cancel</a>
     </form>
