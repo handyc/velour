@@ -160,16 +160,18 @@ def _lmst_snapshot(msd, landmark, now_utc):
 
 
 def mars_snapshots(now_utc=None):
-    """Return a list of Mars clocks: MTC + active rover LMST clocks."""
+    """Return Mars clocks (MTC + rover LMST), sorted by current sol time-of-day."""
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
     msd = _mars_msd(now_utc)
-    return [_lmst_snapshot(msd, lm, now_utc) for lm in MARS_LANDMARKS]
+    snaps = [_lmst_snapshot(msd, lm, now_utc) for lm in MARS_LANDMARKS]
+    snaps.sort(key=lambda s: s['second_at_epoch'])
+    return snaps
 
 
 def mars_snapshot(now_utc=None):
     """Backwards-compatible single-clock accessor (MTC only)."""
-    return mars_snapshots(now_utc)[0]
+    return next(s for s in mars_snapshots(now_utc) if s['key'] == 'mtc')
 
 
 def venus_snapshot(now_utc=None):
