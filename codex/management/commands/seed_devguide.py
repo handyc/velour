@@ -3477,7 +3477,108 @@ The docstring tells the next person what to expect. The output is ready for the 
 
 ## What follows
 
-Chapter 7 covers the writing style guide — when to use each block type the markdown subset offers, when to use a slope graph vs a line chart, how to structure a chapter so it reads well in print and searches well in PDF. Chapter 8 covers extending Codex itself: adding new block types, new chart kinds, new figure kinds. Chapter 9 covers the deferred work."""
+Chapter 7 covers the writing style guide — when to use each block type the markdown subset offers, when to use a slope graph vs a line chart, how to structure a chapter so it reads well in print and searches well in PDF. Chapter 8 covers extending Codex itself: adding new block types, new chart kinds, new figure kinds. Chapter 9 covers the deferred work.""",
+
+    'ch8-extension-points': r"""Codex's renderer is a stack of small, independent dispatch tables. Three of them are explicitly designed to be extended without touching the rest of the code: the block-type dispatch in `codex/rendering/markdown.py`, the chart-type registry in `codex/rendering/charts.py`, and the figure-kind dispatch in `codex/rendering/diagrams.py`. This chapter walks each one and shows what a clean extension looks like.
+
+The shape of every extension point is the same: a `kind` string in the source markdown maps to a draw function via a Python dict. To add a new kind, write the draw function and put one entry in the dict. Nothing else changes.
+
+## Block types (markdown.py)
+
+The block parser is a single function, `parse(body)`, that walks the markdown line by line and dispatches on the first non-empty character. Each branch consumes some lines and emits a `(kind, payload)` tuple. The current branches:
+
+- `h1`, `h2`, `h3` — headings (`# `, `## `, `### `)
+- `code` — fenced code blocks (` ``` `)
+- `chart` — `:::chart TYPE … :::` (handled before callout because it shares the `:::` prefix)
+- `callout` — `:::note`, `:::warning`, etc.
+- `slope` — `!slope` slope graph
+- `def` — `:::def … :::` definition list
+- `figs` — `!figs:` small multiples
+- `fig` — `!fig:` single figure
+- `table` — `!table:bordered` directive or plain `|`-table
+- `ul` — `- ` bullet list
+- `quote` — `> ` blockquote
+- `paragraph` — fallback
+
+To add a new block kind:
+
+1. Pick a unique opening token. Existing prefixes are `#`, `:::`, `!`, `|`, `-`, `>`, and ` ``` `. New blocks usually pick a new `!verb` or `:::verb` prefix.
+2. Write a `_parse_<kind>(lines, start)` helper that returns `(block, next_index)`. The block is a `(kind, payload)` tuple; the payload shape is whatever the renderer needs.
+3. Add a branch in `parse()` *before* any branch whose token is a prefix of yours (e.g. `:::chart` is matched before plain `:::callout`).
+4. Add a corresponding render branch in `tufte.py`'s `_render_block` switch — that's the half that actually puts ink on the page.
+
+The block parser has no per-block configuration object and no plugin loading. New kinds are added by editing `markdown.py` and `tufte.py` together.
+
+## Chart types (charts.py)
+
+Charts are everything inside a `:::chart TYPE … :::` block. The available types live in one dict at the bottom of `charts.py`:
+
+```python
+CHART_TYPES = {
+    'bar':        draw_bar_chart,
+    'line':       draw_line_chart,
+    'bullet':     draw_bullet_graph,
+    'scatter':    draw_scatter,
+    'histogram':  draw_histogram,
+    'sparkstrip': draw_sparkstrip,
+    'column':     draw_column_chart,
+}
+```
+
+`draw_chart(pdf, chart_type, spec, x, y, width)` does a single `CHART_TYPES.get(chart_type)` lookup. A missing type returns 0 height and prints nothing — the renderer never raises on an unknown type, so a typo in the source markdown produces a blank space rather than a broken PDF.
+
+To add a new chart type:
+
+1. Write `draw_<type>(pdf, spec, x, y, width=CHART_W)`. Return the height consumed in millimetres so the page-flow code can advance correctly.
+2. Add one line to `CHART_TYPES`.
+3. The `:::chart <type> … :::` block parser already accepts arbitrary type strings — no change needed in `markdown.py` for new chart types.
+
+The `spec` dict comes straight from the parsed `:::chart` block. Existing renderers read `data`, `actual`, `target`, `ranges`, `bins`, `highlight`, `labels`, `series`, and `label` from it; pick the same keys when they apply, invent new ones where they don't.
+
+The Dark2 colourblind-safe palette lives near the top of `charts.py` and is shared across all chart types — new charts should pull from it rather than introducing a fresh palette.
+
+## Sparkline variants (sparklines.py)
+
+Sparklines are a smaller surface than charts: they're inline glyphs, not block-level elements. The variants live as flags in the `options` set on the spec, not as a registry:
+
+- bare line — default
+- `bar` — vertical bars instead of a connected line
+- `winloss` — green-up/red-down binary bars
+- `end`, `min`, `max` — coloured endpoint dots
+- `area` — filled area under the curve
+- `dot` — single-point markers
+
+To add a new sparkline variant, add an `elif 'newvariant' in options:` branch inside `draw_sparkline`. The dispatch is by string membership; there's no registry. New variants tend to be small enough — a dozen lines — that the inline branch is the right shape.
+
+## Figure kinds (diagrams.py)
+
+Figures cover diagrams that aren't charts: Mermaid flowcharts, sequence diagrams, structurizr boxes, hand-drawn SVG. The dispatch lives in `render_diagram_to_png(source, kind='mermaid', timeout=15)`. The default kind is `mermaid`, sent to the Kroki HTTP service. The `svg` kind is rendered locally without Kroki — useful for figures that should not depend on a network round-trip.
+
+To add a new figure kind:
+
+1. Add an `if kind == 'newkind':` branch in `render_diagram_to_png`. If the new kind is one of Kroki's many supported diagram types, the branch is one line — Kroki does the work.
+2. If the new kind is rendered locally, write a `_render_<kind>_locally(source)` helper alongside `_render_svg_locally`. Return PNG bytes.
+3. The `!fig:` markdown block already accepts a `kind=` argument that flows through to `render_diagram_to_png`. No change needed in `markdown.py`.
+
+Kroki supports about 30 diagram syntaxes — PlantUML, Graphviz, BPMN, Vega, BlockDiag, etc. Adding any of them to Velour is one branch in the dispatch.
+
+## What does *not* extend cleanly yet
+
+Three things in the renderer are not yet refactored to a registry:
+
+- **Inline syntax.** `parse_inline` (footnotes, citations, links, bold, italic) is a flat if/elif chain. New inline kinds need a new branch and a corresponding emitter in the text layer of `tufte.py`.
+- **Callout categories.** `_parse_callout` accepts arbitrary verbs but only a few have styled rendering (`note`, `warning`, `quote`). A new callout kind is rendered as a generic note unless `tufte.py`'s callout switch is also extended.
+- **Per-app reference auto-generation.** `codex/introspection.py` walks a hardcoded list of model-attribute kinds. Adding a new auto-generated reference shape (e.g. "list every management command") still requires a code change to introspection itself. A registry is on the roadmap.
+
+These are the three places where future work will most readably make extension cheaper.
+
+## Cross-references
+
+Chapter 2 of this volume covered the markdown subset from the *writer's* perspective: which blocks exist and what they look like in source. This chapter covers the same blocks from the *renderer's* perspective: how new ones are added.
+
+Chapter 4 covers the sparkline and chart libraries themselves — what each existing chart type is for and when to reach for it. Chapter 5 covers Kroki diagrams in detail. Chapter 6 covers the introspection layer, which is the "extend the auto-generated reference" half of writing a new Velour app's documentation.
+
+Volume 2 Chapter 8 covers the parallel question for the web layer: how to add a new dashboard card or template tag. The two chapters are deliberately the same length and shape — Codex is documentation infrastructure, the dashboard is web infrastructure, and both extend by registry.""",
 }
 
 
@@ -3603,13 +3704,13 @@ Approx. 30–50 pages.""")
 
     sort = 810
     for slug, title, summary in VOL4_CHAPTERS[7:9]:
-        upsert_section(m, slug, sort, title,
-            f"""*This chapter is a stub. Outline:*
+        body = VOL4_BODIES.get(slug, f"""*This chapter is a stub. Outline:*
 
 {summary}
 
-Approx. 25–40 pages.""",
-            sidenotes='Stub.')
+Approx. 25–40 pages.""")
+        sn = '' if slug in VOL4_BODIES else 'Stub.'
+        upsert_section(m, slug, sort, title, body, sidenotes=sn)
         sort += 10
 
 
@@ -3990,7 +4091,372 @@ Run with `manage.py test weather`.
 
 ## What follows
 
-Chapter 10 is the recipes catalogue: 30 patterns for things people commonly want to do (add an LLM augmentation hook, expose a JSON API for the ESP fleet, schedule a backup, push a custom Codex report). Chapter 11 is the long-term roadmap synthesised from the memory backlog."""
+Chapter 10 is the recipes catalogue: 30 patterns for things people commonly want to do (add an LLM augmentation hook, expose a JSON API for the ESP fleet, schedule a backup, push a custom Codex report). Chapter 11 is the long-term roadmap synthesised from the memory backlog.""",
+
+    'ch4-mail-relay': r"""Velour ships its own mail subsystem rather than depending on Django's `EMAIL_BACKEND` setting alone. The reason is mundane: most installations want to relay mail through more than one provider (a transactional SMTP service for system notices, a personal account for development, a local SMTP listener for offline testing), and the operator wants to switch among them at runtime — not by editing settings.py and restarting.
+
+This chapter walks the four pieces that together make Velour both a mail client and a mail server: the `MailAccount` model, the in-process `send_mail` helper, the HTTP relay endpoint for non-Django consumers, and the IMAP polling loop with its inbound handler dispatch.
+
+## MailAccount: the credential record
+
+`mail.MailAccount` is the central object. One row holds everything needed to send and receive through one mailbox:
+
+- SMTP fields: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_use_tls`, `smtp_use_ssl`
+- IMAP fields: `imap_host`, `imap_port`, `imap_username`, `imap_password`, `imap_use_ssl`
+- Identity: `from_email`, `from_name`
+- Routing: `name` (unique label like `"snel-relay"` or `"gmail-dev"`), `enabled`, `is_default`
+- Test status: `last_tested_at`, `last_test_status`, `last_test_error`
+
+Credentials are stored in plaintext in the SQLite DB. This is the same security model as `secret_key.txt` and `health_token.txt` — a Velour install assumes the host is trusted. Encrypting credentials at rest is a cross-cutting change that should happen to all secret storage at once, not just to the mail app.
+
+Exactly one account is `is_default=True` at any time. The model's `save()` enforces this atomically: marking an account as default unmarks any prior default in the same transaction. This invariant matters because Django's password-reset flow and any caller of `send_mail()` without an explicit `mailbox=` argument both consume the default.
+
+## send_mail: in-process delivery
+
+`mail.sending.send_mail` is the public API for any Django app that wants to send mail:
+
+```python
+from mail.sending import send_mail
+
+# Defaults: uses the is_default account, sends to Identity.admin_email
+send_mail('Disk filling up', '/var is at 92%.')
+
+# Explicit recipient
+send_mail('Welcome', 'Hi.', to='alice@example.com')
+
+# Route through a specific account by name
+send_mail('Invoice', 'See attached.', to='customer@x.com',
+          mailbox='billing')
+
+# HTML alternative
+send_mail('Alert', 'plain text', html='<b>HTML</b>',
+          to='ops@x.com')
+```
+
+Three resolution steps run inside the helper:
+
+1. **Account.** If `mailbox=` was given, look up that named account; raise `NoMailboxConfigured` if missing or disabled. Otherwise use the default; raise `NoMailboxConfigured` if no default is set.
+2. **Recipients.** If `to=` is None, look up `Identity.get_self().admin_email` as a fallback; raise `ValueError` if that's also empty.
+3. **Connection.** Build a fresh `EmailMultiAlternatives` connection scoped to *this* account's SMTP credentials. The connection is not pooled — Velour mail volume is low enough that one TCP connection per message is fine, and per-account isolation matters more than throughput.
+
+The helper is intentionally stdlib-only beyond Django itself. No `requests`, no provider-specific SDKs. Adding Postmark or SendGrid via their REST APIs would mean a new code path here; the SMTP path covers every provider that speaks SMTP, which is essentially all of them.
+
+## DynamicMailboxBackend: wiring the Django global
+
+`settings.EMAIL_BACKEND = 'mail.backends.DynamicMailboxBackend'` makes Django's built-in mail facilities — `django.contrib.auth` password reset, the `mail_admins` helper, anything else that calls `django.core.mail.send_mail` rather than ours — go through the same `MailAccount.get_default()` resolution. The backend reads the default account at connection-construction time. Switching the default in the admin is enough; nothing needs to be reloaded.
+
+If no default is set, the backend falls through to a no-op that logs a warning. A Velour install with no MailAccount configured does not crash on boot or on password-reset attempts; it just fails to deliver, audibly.
+
+## /mail/accounts/relay/: HTTP relay for external apps
+
+The relay endpoint exists so non-Django consumers — legacy PHP scripts, shell scripts, cron jobs running outside Velour, ESP devices that can do HTTP but not SMTP TLS handshakes — can route mail through the same `MailAccount` table without re-implementing SMTP.
+
+The protocol is one POST:
+
+```bash
+curl -X POST https://your-velour/mail/accounts/relay/ \
+  -H "Authorization: Bearer $(cat ~/.config/velour-mail-token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": "Backup complete",
+    "body":    "All databases dumped successfully.",
+    "to":      "ops@example.com",
+    "mailbox": "snel-relay"
+  }'
+```
+
+The view, `mail.views.relay_send`, does five things:
+
+1. **Token check.** Reads `mail_relay_token.txt` from `BASE_DIR`. If the file is missing, the endpoint 404s — relay is opt-in. If the file exists but the request's `Authorization: Bearer` value does not match (constant-time `hmac.compare_digest`), 401.
+2. **Payload parse.** JSON body with required fields `subject`, `body`, `to`; optional `mailbox`, `html`, `reply_to`.
+3. **Delegate to `send_mail`.** Same path as in-process callers — no special case in the relay.
+4. **Map exceptions to status codes.** `NoMailboxConfigured` → 503, `smtplib.SMTPException` or `OSError` → 502, anything else → 500. The error body always includes the exception type name; never includes the credential.
+5. **Return JSON.** `{"ok": true, "delivered": 1, "mailbox": "snel-relay"}`.
+
+The endpoint is `csrf_exempt` because the bearer token is the auth. It is also `require_POST` — GET on this URL is meaningless.
+
+## Inbound: polling, parsing, dispatch
+
+`mail.polling.poll_account(account)` runs IMAP IDLE-style fetch against one MailAccount and writes new messages to `InboundMessage`. The `(mailbox, uid)` unique constraint makes polls idempotent — re-running poll on a mailbox that already has 200 messages fetches none of them again.
+
+`InboundMessage` stores the raw RFC 822 source verbatim. Parsed fields (subject, from, to, date, body) are pulled out for display, but if the parser misses a header or a future release adds attachment handling, the raw source is enough to re-process old messages without re-fetching from IMAP.
+
+Two flags live alongside each message:
+
+- `read` — human-in-the-loop view flag, like any webmail
+- `handled` — machine-in-the-loop processing flag, used by the `mail.handler.VelourSMTPHandler` registry pattern
+
+These are independent. A submission email might be `handled=True, read=False` (the parser already extracted its attachment, but no human has opened it) or `handled=False, read=True` (an operator opened it and wants to defer machine processing).
+
+## Local SMTP server
+
+`mail.handler.VelourSMTPHandler` (registered in `deploy/supervisor-wsl.conf` and equivalent prod configs) listens on a local SMTP port for messages addressed to `velour-local`. Inbound mail goes through the same `InboundMessage` table as IMAP-fetched mail and the same handler dispatch. This is how Velour-internal apps that want to send mail via SMTP without going through `send_mail` can still land in the inbox — useful for legacy code being migrated.
+
+## What this chapter does not cover
+
+Inbound handler implementations — the actual logic that decides "this is a submission", "this is a bounce", "this is a system notice" — are application-specific. Volume 2 Chapter 5 covers the mail UI; this chapter covers the relay infrastructure that surfaces in production deployments.
+
+Token rotation for `mail_relay_token.txt` is covered in Chapter 7 of this volume alongside the other secret-file rotations. The same mechanic applies — write a new token, fan it out to consumers, then replace the file.
+
+Performance: SMTP is the slow path. Sending 100 messages through one account takes around 10–20 seconds because each message opens its own TLS connection. If you find yourself sending bulk mail through Velour, the right answer is usually a third-party transactional service with its own queue (Postmark, SES) and a thin `send_mail` wrapper that POSTs to their API. That wrapper does not yet exist.""",
+
+    'ch10-recipes': r"""This chapter is the cookbook. Each recipe is a short, runnable example for a real situation an operator runs into — not a theoretical exercise. They are grouped roughly by surface area: deployment, mail, identity, fleet, codex, data, observability.
+
+The intent is for an operator to skim the headings, recognise their situation, and copy a working snippet. The style is deliberately terse: command on top, one paragraph of explanation underneath, occasional warnings.
+
+## Deployment & operations
+
+### 1. Spin up a fresh Velour from scratch
+
+```bash
+git clone https://github.com/handyc/velour.git velour-dev
+cd velour-dev
+python -m venv venv && venv/bin/pip install -r requirements.txt
+venv/bin/python manage.py migrate
+venv/bin/python manage.py createsuperuser
+venv/bin/python manage.py seed_defaults
+venv/bin/python manage.py runserver 0.0.0.0:7777
+```
+
+Bind to `0.0.0.0`, not bare `7777`. The bare form binds to `127.0.0.1` only and silently RSTs ESP-board registrations from the LAN.
+
+### 2. Generate a deploy bundle for production
+
+```bash
+venv/bin/python manage.py generate_deploy --user swibliq --host snel.com
+```
+
+Writes a self-contained `deploy/` tarball with systemd units, gunicorn config, and an idempotent install script. The convention is one user per app: socket, dir, static, and venv all live under `/var/www/webapps/<user>/`.
+
+### 3. Hot-swap a live deploy without dropping connections
+
+```bash
+ssh swibliq@snel.com 'cd app && git pull && venv/bin/python manage.py migrate && systemctl --user reload velour'
+```
+
+`reload`, not `restart`. Gunicorn's USR2 handler forks new workers, drains the old ones, and the LB never sees a 502.
+
+### 4. Rotate the secret key
+
+Edit `secret_key.txt` (chmod 600), then restart workers. Existing sessions invalidate; password-reset tokens issued before the rotation stop working. Schedule rotations during maintenance windows.
+
+### 5. Take a manual backup
+
+```bash
+venv/bin/python manage.py make_backup --class manual --note 'pre-migration'
+```
+
+Writes a snapshot to the configured backups dir and inserts a `Snapshot` row. Auto-prune does not touch `class=manual` snapshots — they live until you delete them.
+
+## Mail
+
+### 6. Add a new SMTP relay
+
+Open `/mail/accounts/`, click *Add account*, fill in SMTP host/port/user/password, mark `enabled`. To make it the new global default, also tick `is_default` — the model unmarks the previous default automatically.
+
+### 7. Send mail from any Django app
+
+```python
+from mail.sending import send_mail
+send_mail('Disk full', '/var is at 92%.')  # uses default account, sends to Identity.admin_email
+```
+
+Defaults are forgiving: missing `to` falls back to `Identity.admin_email`, missing `mailbox` falls back to the `is_default` MailAccount.
+
+### 8. Relay mail from a non-Django script
+
+```bash
+curl -X POST https://your-velour/mail/accounts/relay/ \
+  -H "Authorization: Bearer $(cat ~/.velour-mail-token)" \
+  -H "Content-Type: application/json" \
+  -d '{"subject":"hi","body":"text","to":"a@b.com","mailbox":"snel-relay"}'
+```
+
+Token comes from `mail_relay_token.txt` on the Velour host. If the file is missing, the endpoint 404s — opt-in by design.
+
+## Identity
+
+### 9. Read Velour's current mood
+
+```python
+from identity.models import Identity
+self = Identity.get_self()
+print(self.mood, self.mood_intensity, self.mood_because)
+```
+
+Mood is a 2D circumplex (valence × arousal). The named mood is the closest of 16 cells.
+
+### 10. Trigger a single tick manually
+
+```bash
+venv/bin/python manage.py identity_tick
+```
+
+Idempotent — running twice in the same minute does the same work as once. The cron job runs this every minute in production.
+
+### 11. Acknowledge a recurring concern so it stops nagging
+
+```bash
+venv/bin/python manage.py identity_acknowledge fleet_partial_silence
+```
+
+Adds an `AspectSuppression` row. The aspect stops generating concerns until the suppression is deleted. Useful when you know an alert is going to keep firing for a known reason.
+
+### 12. Run a deeper meditation on demand
+
+```bash
+venv/bin/python manage.py meditate_deep --depth 5
+```
+
+Composes a meditation chain at the requested ladder depth. Higher depths take longer and produce richer Mirror entries. Depth 7 is the deepest currently supported.
+
+## Fleet (ESP nodes)
+
+### 13. Provision a fresh ESP board
+
+```bash
+venv/bin/pio run -d nodes/firmware/<board> --target upload --upload-port /dev/ttyACM0
+```
+
+User attaches USB via `usbipd` Windows-side and reports the bus ID; the board appears as `/dev/ttyACM0` inside WSL. The Gary-family boards use `'-DX="value"'` quoting for build flags with spaces.
+
+### 14. Deliver an OTA update to a registered node
+
+Open `/nodes/<slug>/ota/`, pick a firmware artifact, click *Schedule*. The next time the node calls home (default: every 30s), it pulls and flashes.
+
+### 15. Discover where a freshly-flashed node landed on the LAN
+
+```bash
+curl http://<host>:7777/api/nodes/discover
+```
+
+Returns the most recent `(mac, ip, last_seen)` rows. The Velour client library's `VelourClient::discover()` is built on this.
+
+### 16. Suppress fleet-silence concerns when boards are intentionally off
+
+```bash
+venv/bin/python manage.py identity_acknowledge fleet_partial_silence
+```
+
+Same recipe as #11; called out separately because this is the most common acknowledgement when you're reworking the lab and powering boards down.
+
+## Codex
+
+### 17. Seed the default manuals
+
+```bash
+venv/bin/python manage.py seed_defaults
+```
+
+Idempotent. Re-runs are safe and pick up any new manuals added to seed scripts since last run.
+
+### 18. Render a manual to PDF
+
+```bash
+venv/bin/python manage.py render_manual <slug>
+```
+
+Uses `codex/rendering/tufte.py`. The PDF lands next to the manual record. Volumes are rendered with `render_volume`.
+
+### 19. Add a chart to a manual section
+
+```
+:::chart bar
+data: 12, 18, 9, 27, 14
+labels: A, B, C, D, E
+:::
+```
+
+Seven chart types ship: `bar`, `line`, `bullet`, `scatter`, `histogram`, `sparkstrip`, `column`. All draw from the Dark2 colourblind-safe palette.
+
+### 20. Inline sparkline in prose
+
+```
+The week's load: `spark:12,18,9,27,14,21,16` peaked Wednesday.
+```
+
+Add `:bar`, `:winloss`, `:end`, `:min`, `:max`, `:area`, or `:dot` after the values for variants.
+
+### 21. Embed a Mermaid diagram
+
+```
+!fig: my-diagram
+
+mermaid
+graph LR
+  A --> B --> C
+```
+
+Renders via Kroki. The first deploy needs network reachability to a Kroki instance; thereafter the rendered PNG is cached.
+
+## Data
+
+### 22. Lift a legacy MySQL site into Velour
+
+```bash
+venv/bin/python manage.py liftsite mydump.sql --target-app legacy_archive
+```
+
+`datalift` parses the dump, generates Django models, runs migrations, ingests the rows, and anonymises configurable PII columns. Standalone — does not depend on `databases`.
+
+### 23. Lift a WordPress export into block-rendered templates
+
+```bash
+venv/bin/python manage.py liftwpblock --export wp.xml --theme twentytwentytwo
+```
+
+Parses `<!-- wp:* -->` markup and `theme.json`, emits Django templates that render in the original theme's colours.
+
+### 24. Run an ad-hoc query against a registered DB
+
+Open `/databases/<id>/sql/`, type SQL, hit *Run*. Read-only by default; toggle the *Allow write* switch only when you mean it.
+
+## Observability & introspection
+
+### 25. Watch the morning briefing
+
+`/chronos/briefing/` — mood, concerns, today's events, environs, sky, tasks, reading queue. The same content is pushed daily to a Codex manual via `identity_cron` between 06:00 and 08:00 local.
+
+### 26. Tail Velour's structured logs
+
+```bash
+tail -f logs/velour.log | grep -v 'GET /api/nodes/heartbeat'
+```
+
+The heartbeat endpoint is chatty; filter it out for human reading.
+
+### 27. Query the Identity Mirror by date
+
+```python
+from codex.models import Manual
+m = Manual.objects.get(slug='velours-mirror')
+for s in m.sections.filter(sort_order__gte=20260420).order_by('sort_order'):
+    print(s.title)
+```
+
+The Mirror's `sort_order` is `YYYYMMDDHHMM`-style integer time, so range queries over time are simple integer comparisons.
+
+### 28. Subscribe to the sky calendar feed
+
+`/chronos/sky/feed.ics` — passes, transits, NEOs, eclipses, conjunctions. Filterable via `?include=passes,transits` or `?exclude=neos`. Subscribe, don't download — the feed updates as the sky calendar does.
+
+## Generation & GA
+
+### 29. Run a Naiad evolutionary search
+
+```bash
+venv/bin/python manage.py naiad_evolve <goal-system> --preset apartment --pop 250 --gens 1500 --seed 42 --every 250
+```
+
+`--preset` picks a fitness landscape (`apartment`, `garden`, `coastal`, `protein`, `kitchen`, `field`, `consumer`, `industrial`). The GA prints the best chain every `--every` generations and the final best on completion.
+
+### 30. Speciate a Casting experiment into a Language
+
+Open `/casting/byte_model_evolution/`, set a goal expression, click *Speciate*. The engine runs a per-Language-seeded GA, the winner is absorbed back as a tournament trophy. The same engine drives `/evolution/`'s Language tournament button.
+
+## Pointers for the rest
+
+The recipes above cover the most common operator situations. For everything else: Volume 2 covers per-app web-layer recipes, Volume 3 covers data and time, Volume 4 covers writing your own Codex content, Volume 5 Chapter 9 covers writing your own Velour app from scratch (the deepest single recipe in the book).""",
 }
 
 
