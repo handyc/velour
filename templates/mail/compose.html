@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Compose - Mail - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .compose-form { max-width: 720px; }
+    .compose-form label { display: block; margin-bottom: 0.85rem; }
+    .compose-form label > span {
+        display: block;
+        font-size: 0.78rem;
+        color: #8b949e;
+        margin-bottom: 0.25rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .compose-form input[type="text"],
+    .compose-form input[type="email"],
+    .compose-form select,
+    .compose-form textarea {
+        width: 100%;
+        background: #0d1117;
+        color: #c9d1d9;
+        border: 1px solid #30363d;
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.9rem;
+        box-sizing: border-box;
+        font-family: inherit;
+    }
+    .compose-form textarea {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        min-height: 240px;
+        resize: vertical;
+    }
+    .compose-form .row { display: flex; gap: 0.75rem; }
+    .compose-form .row > label { flex: 1; }
+    .compose-form .checkbox-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 1rem; font-size: 0.85rem; color: #c9d1d9; }
+    .compose-form .buttons { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    .hint { font-size: 0.75rem; color: #6e7681; margin-top: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Compose</h1>
+
+{% if messages %}
+<div style="margin-bottom: 1rem;">
+    {% for m in messages %}
+    <div style="padding: 0.4rem 0.7rem; border-radius: 4px; margin-bottom: 0.3rem;
+                background: {% if m.tags == 'error' %}#3a1518{% else %}#0f2a17{% endif %};
+                border: 1px solid {% if m.tags == 'error' %}#5a2429{% else %}#1f4f2c{% endif %};
+                color: {% if m.tags == 'error' %}#f85149{% else %}#3fb950{% endif %};
+                font-size: 0.88rem; font-family: ui-monospace, monospace;">{{ m }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if not accounts %}
+<p style="color: #d29922; margin-bottom: 1.5rem;">
+    No enabled mail accounts configured.
+    <a href="{% url 'mail:add' %}" style="color: #58a6ff;">Add one</a> first.
+</p>
+{% endif %}
+
+<form method="post" class="compose-form">
+    {% csrf_token %}
+
+    <label>
+        <span>To</span>
+        <input type="email" name="to" value="{{ initial.to }}" required autofocus>
+    </label>
+
+    <div class="row">
+        <label>
+            <span>Subject</span>
+            <input type="text" name="subject" value="{{ initial.subject }}" required>
+        </label>
+        <label style="flex: 0 0 14rem;">
+            <span>From mailbox</span>
+            <select name="mailbox">
+                <option value="">(default)</option>
+                {% for a in accounts %}
+                <option value="{{ a.name }}" {% if initial.mailbox == a.name %}selected{% endif %}>
+                    {{ a.name }}{% if a.is_default %} · default{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+
+    <label>
+        <span>Reply-To <em style="color: #6e7681; text-transform: none; letter-spacing: 0;">(optional)</em></span>
+        <input type="email" name="reply_to" value="{{ initial.reply_to }}">
+    </label>
+
+    <label>
+        <span>Body</span>
+        <textarea name="body" required>{{ initial.body }}</textarea>
+        <div class="hint">Plain text by default. Tick the checkbox below to send the body as HTML instead.</div>
+    </label>
+
+    <div class="checkbox-row">
+        <input type="checkbox" name="as_html" id="as_html" {% if initial.as_html %}checked{% endif %}>
+        <label for="as_html" style="margin: 0;">Send body as HTML</label>
+    </div>
+
+    <div class="buttons">
+        <button type="submit" class="btn" {% if not accounts %}disabled{% endif %}>Send</button>
+        <a href="{% url 'mail:home' %}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

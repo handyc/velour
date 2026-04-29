@@ -6,6 +6,10 @@ from . import views
 app_name = 'mail'
 
 urlpatterns = [
+    # --- mail home + compose ------------------------------------------
+    path('',         views.mail_home,    name='home'),
+    path('compose/', views.mail_compose, name='compose'),
+
     # --- accounts (from mailboxes) ------------------------------------
     path('accounts/',                    views.mailbox_list,   name='list'),
     path('accounts/add/',                views.mailbox_add,    name='add'),

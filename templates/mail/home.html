@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Mail - Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+    .mail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 1rem;
+        margin: 1rem 0 1.5rem;
+    }
+    .mail-card {
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 6px;
+        padding: 0.85rem 1rem;
+    }
+    .mail-card h2 {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #8b949e;
+        margin: 0 0 0.5rem;
+        font-weight: 500;
+    }
+    .mail-stat { display: flex; align-items: baseline; gap: 0.4rem; margin-bottom: 0.3rem; }
+    .mail-stat .num { color: #c9d1d9; font-size: 1.5rem; font-weight: 500; }
+    .mail-stat .lbl { color: #6e7681; font-size: 0.78rem; }
+    .mail-meta { color: #6e7681; font-size: 0.78rem; margin-top: 0.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mail-actions { margin-top: 0.7rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .mail-actions a {
+        font-size: 0.78rem;
+        padding: 4px 10px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        color: #c9d1d9;
+        text-decoration: none;
+    }
+    .mail-actions a:hover { border-color: #58a6ff; color: #58a6ff; }
+    .mail-actions a.primary { background: #1f4f2c; border-color: #2ea043; color: #3fb950; }
+    .mail-actions a.primary:hover { background: #2a6b3d; }
+    .acct-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: baseline;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem;
+        padding: 0.2rem 0;
+    }
+    .acct-row .nm { color: #c9d1d9; min-width: 7rem; }
+    .acct-row .host { color: #6e7681; }
+    .acct-row .badge {
+        font-size: 0.62rem;
+        padding: 1px 6px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: #161b22;
+        border: 1px solid #30363d;
+        color: #8b949e;
+    }
+    .acct-row .badge.default { color: #58a6ff; border-color: #1f3a5e; }
+    .acct-row .badge.disabled { color: #6e7681; }
+    .acct-row .badge.ok { color: #3fb950; border-color: #1f4f2c; }
+    .acct-row .badge.error { color: #f85149; border-color: #5a2429; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Mail</h1>
+
+{% if messages %}
+<div style="margin-bottom: 1rem;">
+    {% for m in messages %}
+    <div style="padding: 0.4rem 0.7rem; border-radius: 4px; margin-bottom: 0.3rem;
+                background: {% if m.tags == 'error' %}#3a1518{% else %}#0f2a17{% endif %};
+                border: 1px solid {% if m.tags == 'error' %}#5a2429{% else %}#1f4f2c{% endif %};
+                color: {% if m.tags == 'error' %}#f85149{% else %}#3fb950{% endif %};
+                font-size: 0.88rem; font-family: ui-monospace, monospace;">{{ m }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="mail-grid">
+    <div class="mail-card">
+        <h2>Accounts</h2>
+        <div class="mail-stat"><span class="num">{{ accounts_enabled }}</span><span class="lbl">enabled / {{ accounts_total }} total</span></div>
+        <div class="mail-meta">
+            {% if default_account %}
+                default: <span style="color: #58a6ff;">{{ default_account.name }}</span>
+                · {{ default_account.smtp_host }}:{{ default_account.smtp_port }}
+            {% else %}
+                <span style="color: #d29922;">no default account set</span>
+            {% endif %}
+        </div>
+        <div class="mail-actions">
+            <a href="{% url 'mail:list' %}">Manage</a>
+            <a href="{% url 'mail:add' %}">Add Account</a>
+            <a href="{% url 'mail:compose' %}" class="primary">Compose</a>
+        </div>
+    </div>
+
+    <div class="mail-card">
+        <h2>Inbound (IMAP)</h2>
+        <div class="mail-stat"><span class="num">{{ inbound_unread }}</span><span class="lbl">unread / {{ inbound_total }} total</span></div>
+        {% if inbound_unhandled %}
+        <div class="mail-meta">{{ inbound_unhandled }} unhandled</div>
+        {% endif %}
+        {% if last_inbound %}
+        <div class="mail-meta">last fetch: {{ last_inbound.fetched_at|date:"Y-m-d H:i" }}</div>
+        {% endif %}
+        <div class="mail-actions">
+            <a href="{% url 'mail:inbound_list' %}">Open inbox</a>
+            {% if inbound_unread %}<a href="{% url 'mail:inbound_list' %}?unread=1">Unread</a>{% endif %}
+        </div>
+    </div>
+
+    <div class="mail-card">
+        <h2>Local SMTP server</h2>
+        <div class="mail-stat"><span class="num">{{ local_unread }}</span><span class="lbl">unread / {{ local_total }} delivered</span></div>
+        <div class="mail-meta">
+            {{ smtp_cfg.host }}:{{ smtp_cfg.port }}
+            {% if smtp_cfg.is_enabled %}<span style="color: #3fb950;">· enabled</span>{% else %}<span style="color: #f85149;">· disabled</span>{% endif %}
+        </div>
+        {% if last_local %}
+        <div class="mail-meta">last delivery: {{ last_local.received_at|date:"Y-m-d H:i" }}</div>
+        {% endif %}
+        <div class="mail-actions">
+            <a href="{% url 'mail:server_inbox' %}">Open</a>
+        </div>
+    </div>
+</div>
+
+{% if accounts %}
+<h2 style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; margin: 1.4rem 0 0.5rem; border-bottom: 1px solid #21262d; padding-bottom: 0.3rem;">Configured accounts</h2>
+{% for a in accounts %}
+<div class="acct-row">
+    <span class="nm">{{ a.name }}</span>
+    <span class="host">{{ a.smtp_host }}:{{ a.smtp_port }}</span>
+    {% if a.is_default %}<span class="badge default">default</span>{% endif %}
+    {% if not a.enabled %}<span class="badge disabled">disabled</span>{% endif %}
+    {% if a.last_test_status == 'ok' %}<span class="badge ok">test ok</span>
+    {% elif a.last_test_status == 'error' %}<span class="badge error">test failed</span>{% endif %}
+    <a href="{% url 'mail:detail' a.pk %}" style="color: #58a6ff; font-size: 0.78rem; margin-left: auto;">details →</a>
+</div>
+{% endfor %}
+{% endif %}
+
+<div style="margin-top: 1.5rem;">
+    <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

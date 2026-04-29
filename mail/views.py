@@ -18,6 +18,92 @@ import hmac
 
 
 # =====================================================================
+# Mail home + Compose
+# =====================================================================
+
+@login_required
+def mail_home(request):
+    accounts = MailAccount.objects.all()
+    accounts_enabled = accounts.filter(enabled=True).count()
+    default = accounts.filter(is_default=True, enabled=True).first()
+
+    inbound_total     = InboundMessage.objects.count()
+    inbound_unread    = InboundMessage.objects.filter(read=False).count()
+    inbound_unhandled = InboundMessage.objects.filter(handled=False).count()
+    last_inbound      = InboundMessage.objects.order_by('-fetched_at').first()
+
+    local_total  = LocalDelivery.objects.count()
+    local_unread = LocalDelivery.objects.filter(read=False).count()
+    last_local   = LocalDelivery.objects.order_by('-received_at').first()
+
+    return render(request, 'mail/home.html', {
+        'accounts':          accounts,
+        'accounts_total':    accounts.count(),
+        'accounts_enabled':  accounts_enabled,
+        'default_account':   default,
+        'inbound_total':     inbound_total,
+        'inbound_unread':    inbound_unread,
+        'inbound_unhandled': inbound_unhandled,
+        'last_inbound':      last_inbound,
+        'local_total':       local_total,
+        'local_unread':      local_unread,
+        'last_local':        last_local,
+        'smtp_cfg':          SMTPServerConfig.get_self(),
+    })
+
+
+@login_required
+def mail_compose(request):
+    """One-off send through any enabled MailAccount. Uses send_mail()
+    so it benefits from the same routing + fallback the relay endpoint
+    and Django's password-reset path go through."""
+    accounts = MailAccount.objects.filter(enabled=True).order_by('-is_default', 'name')
+    initial = {
+        'to':       request.GET.get('to', ''),
+        'subject':  request.GET.get('subject', ''),
+        'body':     request.GET.get('body', ''),
+        'mailbox':  request.GET.get('mailbox', ''),
+        'reply_to': request.GET.get('reply_to', ''),
+        'as_html':  False,
+    }
+    if request.method == 'POST':
+        to       = request.POST.get('to', '').strip()
+        subject  = request.POST.get('subject', '').strip()
+        body     = request.POST.get('body', '')
+        mailbox  = request.POST.get('mailbox', '').strip() or None
+        as_html  = bool(request.POST.get('as_html'))
+        reply_to = request.POST.get('reply_to', '').strip() or None
+        initial = {'to': to, 'subject': subject, 'body': body,
+                   'mailbox': mailbox or '', 'reply_to': reply_to or '',
+                   'as_html': as_html}
+        if not to or not subject or not body:
+            messages.error(request, 'To, Subject, and Body are all required.')
+        elif not accounts.exists():
+            messages.error(request, 'No enabled mail accounts configured. Add one first.')
+        else:
+            try:
+                sent = send_mail(
+                    subject=subject,
+                    body=body if not as_html else '',
+                    html=body if as_html else None,
+                    to=to, mailbox=mailbox, reply_to=reply_to,
+                )
+                if sent:
+                    messages.success(request,
+                        f'Sent to {to} via "{mailbox or "default"}".')
+                    return redirect('mail:home')
+                messages.error(request, 'Mailer returned 0 — message not delivered.')
+            except (smtplib.SMTPException, NoMailboxConfigured, OSError) as e:
+                messages.error(request, f'{type(e).__name__}: {e}')
+            except Exception as e:
+                messages.error(request, f'unexpected: {type(e).__name__}: {e}')
+    return render(request, 'mail/compose.html', {
+        'accounts': accounts,
+        'initial':  initial,
+    })
+
+
+# =====================================================================
 # Accounts (from mailboxes)
 # =====================================================================
 

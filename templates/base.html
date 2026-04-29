@@ -101,7 +101,7 @@
                 {% if 'services' in installed_app_slugs %}<a href="{% url 'services:home' %}">Services</a>{% endif %}
                 {% if 'logs' in installed_app_slugs %}<a href="{% url 'logs:home' %}">Logs</a>{% endif %}
                 {% if 'hosts' in installed_app_slugs %}<a href="{% url 'hosts:list' %}">Hosts</a>{% endif %}
-                {% if 'mail' in installed_app_slugs %}<a href="{% url 'mail:inbound_list' %}">Mail</a>{% endif %}
+                {% if 'mail' in installed_app_slugs %}<a href="{% url 'mail:home' %}">Mail</a>{% endif %}
                 {% if 'nodes' in installed_app_slugs %}<a href="{% url 'nodes:list' %}">Fleet</a>{% endif %}
                 {% if 'bodymap' in installed_app_slugs %}<a href="{% url 'bodymap:list' %}">Bodymap</a>{% endif %}
                 {% if 'powerlab' in installed_app_slugs %}<a href="{% url 'powerlab:index' %}">Power Lab</a>{% endif %}
