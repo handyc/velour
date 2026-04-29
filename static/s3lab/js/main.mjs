@@ -216,10 +216,13 @@ function levelFor(b, cellValue) {
 }
 
 function applyOutputBindings(grid) {
-    for (const b of state.bindings) {
+    for (let i = 0; i < state.bindings.length; i++) {
+        const b = state.bindings[i];
         const v = grid[b.cell_y * GRID_W + b.cell_x];
         const level = levelFor(b, v);
         recordHistory(b.gpio_pin, level);
+        const led = document.getElementById(`led-out-${i}`);
+        if (led) led.className = `bled ${level ? 'high' : 'low'}`;
     }
 }
 
@@ -674,6 +677,7 @@ function renderBindingLists() {
           <span class="bcell">cell (${b.cell_x},${b.cell_y})</span>
           <span class="barrow">→</span>
           <span class="bpin">GPIO ${b.gpio_pin}</span>
+          <span class="bled low" id="led-out-${i}"></span>
           <span class="bmask">mask 0x${b.state_mask.toString(16).toUpperCase()}</span>
           <button data-i="${i}" data-kind="out" class="brm">×</button>
         `;
