@@ -3,6 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
 from .models import Distillation
@@ -246,8 +247,15 @@ def distillation_view(request, slug):
 
 
 @login_required
+@xframe_options_sameorigin
 def distillation_raw(request, slug):
-    """Serve the raw distilled output as HTML (for preview in iframe)."""
+    """Serve the raw distilled output as HTML (for preview in iframe).
+
+    Default `XFrameOptionsMiddleware` sends `X-Frame-Options: DENY`,
+    which blocks the iframe in detail.html even on same-origin
+    pages. The decorator overrides DENY → SAMEORIGIN so the embed
+    works without weakening the global default for other views.
+    """
     d = get_object_or_404(Distillation, slug=slug)
     return HttpResponse(d.output, content_type='text/html; charset=utf-8')
 
