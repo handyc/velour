@@ -44,16 +44,45 @@ const state = {
 const ACT_FLOOR_RUN     = 0.02;
 const STATIC_DWELL_LIMIT = 30;    // ~9 s at 300 ms tick
 
-// Default bindings — match the C sketch's default /gpio_map.txt.
+// Default bindings: edges of the grid as outputs, interior as inputs.
+// The mental model is "inputs re-seed the centre, outputs read the
+// long-term effect at the edges". Inputs sit on a 2×2 grid four cells
+// in from each corner; outputs sample every other row of each vertical
+// edge (7 cells per edge × 2 edges = 14 outputs).
+//
+// state_mask = 0x8 ⇒ output HIGH when cell == state 3, so each edge
+// pin fires only when a state-3 wave actually reaches it. Inputs use
+// low=0 / high=3 so a click on HIGH injects a strong stimulus the
+// outputs can detect propagating outward.
+//
+// The pin numbers below 22 match what's broken out on a SuperMini;
+// pin 33+ are conceptually fine in the lab (the engine doesn't care)
+// but won't all wire to a real device — when you flash, edit
+// /gpio_map.txt down to whatever fits your hardware.
 state.bindings = [
-    { cell_x: 3, cell_y: 5, gpio_pin: 1, state_mask: 0x8 },
-    { cell_x: 4, cell_y: 5, gpio_pin: 2, state_mask: 0x8 },
-    { cell_x: 5, cell_y: 5, gpio_pin: 3, state_mask: 0x8 },
-    { cell_x: 6, cell_y: 5, gpio_pin: 8, state_mask: 0x8 },
+    // Left edge (x=0), even rows
+    { cell_x: 0, cell_y:  0, gpio_pin:  1, state_mask: 0x8 },
+    { cell_x: 0, cell_y:  2, gpio_pin:  2, state_mask: 0x8 },
+    { cell_x: 0, cell_y:  4, gpio_pin:  3, state_mask: 0x8 },
+    { cell_x: 0, cell_y:  6, gpio_pin:  8, state_mask: 0x8 },
+    { cell_x: 0, cell_y:  8, gpio_pin:  9, state_mask: 0x8 },
+    { cell_x: 0, cell_y: 10, gpio_pin: 10, state_mask: 0x8 },
+    { cell_x: 0, cell_y: 12, gpio_pin: 13, state_mask: 0x8 },
+    // Right edge (x=13), even rows
+    { cell_x: 13, cell_y:  0, gpio_pin: 14, state_mask: 0x8 },
+    { cell_x: 13, cell_y:  2, gpio_pin: 21, state_mask: 0x8 },
+    { cell_x: 13, cell_y:  4, gpio_pin: 33, state_mask: 0x8 },
+    { cell_x: 13, cell_y:  6, gpio_pin: 34, state_mask: 0x8 },
+    { cell_x: 13, cell_y:  8, gpio_pin: 35, state_mask: 0x8 },
+    { cell_x: 13, cell_y: 10, gpio_pin: 36, state_mask: 0x8 },
+    { cell_x: 13, cell_y: 12, gpio_pin: 37, state_mask: 0x8 },
 ];
 state.inputs = [
-    { gpio_pin: 9,  cell_x: 0,  cell_y: 0,  low_state: 0, high_state: 3, level: 1 },
-    { gpio_pin: 10, cell_x: 13, cell_y: 13, low_state: 0, high_state: 3, level: 1 },
+    // 2×2 grid in the interior, evenly placed away from the edges
+    { gpio_pin: 38, cell_x:  3, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 39, cell_x: 10, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 40, cell_x:  3, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 41, cell_x: 10, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
 ];
 
 state.cur = state.gridA;
@@ -198,6 +227,20 @@ function recordHistory(pin, level) {
 
 // ── Waveform render ─────────────────────────────────────────────────
 
+function resizeWaveformCanvas() {
+    const allPins = new Set([
+        ...state.bindings.map(b => b.gpio_pin),
+        ...state.inputs.map(b => b.gpio_pin),
+    ]);
+    const rowH    = 22;
+    const minH    = 80;
+    const targetH = Math.max(minH, allPins.size * rowH);
+    if (wfCanvas.height !== targetH) {
+        wfCanvas.height = targetH;
+        wfCanvas.style.height = `${targetH}px`;
+    }
+}
+
 function drawWaveform() {
     const W = wfCanvas.width;
     const H = wfCanvas.height;
@@ -211,11 +254,11 @@ function drawWaveform() {
 
     if (allPins.length === 0) return;
 
-    const rowH = Math.min(28, (H / allPins.length) | 0);
-    const labelW = 50;
+    const rowH = Math.max(14, (H / allPins.length) | 0);
+    const labelW = 56;
     const plotW = W - labelW - 10;
 
-    wfCtx.font = '11px ui-monospace, Menlo, monospace';
+    wfCtx.font = '10px ui-monospace, Menlo, monospace';
     wfCtx.textBaseline = 'middle';
 
     for (let i = 0; i < allPins.length; i++) {
@@ -229,12 +272,12 @@ function drawWaveform() {
 
         // Trace
         wfCtx.strokeStyle = isInput ? '#58a6ff' : '#3fb950';
-        wfCtx.lineWidth = 1.5;
+        wfCtx.lineWidth = 1.4;
         wfCtx.beginPath();
         const h = state.history[pin] || [];
         const dx = plotW / state.historyN;
-        const yHi = y0 + 4;
-        const yLo = y0 + rowH - 6;
+        const yHi = y0 + 3;
+        const yLo = y0 + rowH - 4;
         for (let k = 0; k < h.length; k++) {
             const x = labelW + k * dx;
             const y = h[k] ? yHi : yLo;
@@ -540,6 +583,7 @@ function updateGenomeInfo() {
 // ── Binding editor ──────────────────────────────────────────────────
 
 function renderBindingLists() {
+    resizeWaveformCanvas();
     outputList.innerHTML = '';
     for (let i = 0; i < state.bindings.length; i++) {
         const b = state.bindings[i];
