@@ -3,8 +3,8 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from .models import RemoteHost
-from .polling import poll
+from .models import HostPoll, RemoteHost
+from .polling import poll, record_poll
 
 
 @login_required
@@ -66,10 +66,48 @@ def host_delete(request, pk):
     return redirect('hosts:list')
 
 
+SPARK_BARS = '▁▂▃▄▅▆▇█'
+
+
+def _spark(values, width=24):
+    """Render a sequence of floats (0..max) as a Unicode sparkline.
+    Empty cells render as ` `. Width is the target character count;
+    longer inputs are sub-sampled to fit."""
+    clean = [v for v in values if v is not None]
+    if not clean:
+        return ''
+    if len(values) > width:
+        step = len(values) / width
+        values = [values[int(i * step)] for i in range(width)]
+    lo = min(clean)
+    hi = max(clean)
+    span = (hi - lo) or 1.0
+    out = []
+    for v in values:
+        if v is None:
+            out.append(' ')
+            continue
+        idx = int(((v - lo) / span) * (len(SPARK_BARS) - 1))
+        out.append(SPARK_BARS[max(0, min(idx, len(SPARK_BARS) - 1))])
+    return ''.join(out)
+
+
 @login_required
 def host_detail(request, pk):
     host = get_object_or_404(RemoteHost, pk=pk)
-    return render(request, 'hosts/detail.html', {'host': host})
+    polls = list(host.polls.all()[:60])  # most recent first
+    spark = polls[::-1]  # chronological for spark rendering
+    sparklines = {
+        'cpu':  _spark([p.cpu_load for p in spark]),
+        'mem':  _spark([p.mem_pct  for p in spark]),
+        'disk': _spark([p.disk_pct for p in spark]),
+    }
+    return render(request, 'hosts/detail.html', {
+        'host':       host,
+        'polls':      polls[:10],
+        'poll_count': host.polls.count(),
+        'sparklines': sparklines,
+    })
 
 
 @login_required
@@ -78,6 +116,7 @@ def host_refresh(request, pk):
     host = get_object_or_404(RemoteHost, pk=pk)
     poll(host)
     host.save()
+    record_poll(host)
     if host.last_error:
         messages.error(request, f'{host.name}: {host.last_error}')
     else:
@@ -96,6 +135,7 @@ def host_refresh_all(request):
     for host in hosts:
         poll(host)
         host.save()
+        record_poll(host)
         results[host.last_status] = results.get(host.last_status, 0) + 1
     parts = [f'{v} {k}' for k, v in results.items() if v]
     messages.success(request, 'Refreshed all hosts — ' + ', '.join(parts) + '.')

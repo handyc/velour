@@ -56,3 +56,28 @@ class RemoteHost(models.Model):
         if isinstance(self.last_snapshot, dict):
             return self.last_snapshot.get('status_reasons', []) or []
         return []
+
+
+class HostPoll(models.Model):
+    """One row per poll — the history that the live last_* fields on
+    RemoteHost overwrite. Denormalised cpu/mem/disk columns so charts
+    don't have to dig into the JSON snapshot. Auto-pruned to the
+    most recent N polls per host (see polling._record_poll)."""
+
+    host = models.ForeignKey(
+        RemoteHost, on_delete=models.CASCADE, related_name='polls',
+    )
+    at       = models.DateTimeField(auto_now_add=True, db_index=True)
+    status   = models.CharField(max_length=16)
+    cpu_load = models.FloatField(null=True, blank=True)
+    mem_pct  = models.FloatField(null=True, blank=True)
+    disk_pct = models.FloatField(null=True, blank=True)
+    error    = models.TextField(blank=True)
+    snapshot = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-at']
+        indexes = [models.Index(fields=['host', '-at'])]
+
+    def __str__(self):
+        return f'{self.host.name} @ {self.at:%Y-%m-%d %H:%M} ({self.status})'

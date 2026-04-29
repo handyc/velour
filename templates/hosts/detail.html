@@ -4,6 +4,57 @@
 
 {% block extra_head %}
 <style>
+    .meta { color: #8b949e; font-size: 0.875rem; }
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 0.75rem;
+        margin: 1rem 0;
+    }
+    .summary-cell {
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        padding: 0.6rem 0.85rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .summary-cell .lbl {
+        color: #6e7681;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    .summary-cell .val { color: #c9d1d9; font-size: 1.05rem; margin-top: 0.15rem; }
+    .summary-cell .spark {
+        color: #58a6ff;
+        font-size: 0.95rem;
+        letter-spacing: 0.05em;
+        margin-top: 0.2rem;
+    }
+    .polls-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem;
+        margin-top: 0.5rem;
+    }
+    .polls-table th, .polls-table td {
+        text-align: left;
+        padding: 0.25rem 0.6rem;
+        border-bottom: 1px solid #161b22;
+    }
+    .polls-table th {
+        color: #8b949e;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 500;
+        border-bottom: 1px solid #21262d;
+    }
+    .st-green        { color: #2ea043; }
+    .st-yellow       { color: #d29922; }
+    .st-red          { color: #f85149; }
+    .st-unreachable  { color: #8b949e; }
     .snapshot-pre {
         background: #0d1117;
         border: 1px solid #30363d;
@@ -12,23 +63,23 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 0.8125rem;
         color: #c9d1d9;
-        max-height: 70vh;
+        max-height: 60vh;
         overflow: auto;
     }
-    .meta { color: #8b949e; font-size: 0.875rem; }
+    h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; margin: 1.4rem 0 0.5rem; border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>{{ host.name }}</h1>
 <p class="meta">
-    <code>{{ host.url }}</code> &middot;
-    endpoint: <code>{{ host.health_url }}</code>
+    <code>{{ host.url }}</code> · endpoint: <code>{{ host.health_url }}</code>
 </p>
 
 <div class="meta" style="margin-bottom: 1rem;">
-    Status: <strong style="color:#c9d1d9;">{{ host.last_status|default:"(never polled)" }}</strong>
-    {% if host.last_polled_at %} &middot; last poll {{ host.last_polled_at|date:"Y-m-d H:i:s" }}{% endif %}
+    Status: <strong class="st-{{ host.last_status|default:'unreachable' }}">{{ host.last_status|default:"(never polled)" }}</strong>
+    {% if host.last_polled_at %} · last poll {{ host.last_polled_at|date:"Y-m-d H:i:s" }}{% endif %}
+    · {{ poll_count }} poll{{ poll_count|pluralize }} on record
 </div>
 
 {% if host.last_error %}
@@ -47,7 +98,78 @@
     <a href="{% url 'hosts:list' %}" class="btn btn-secondary">Back to Hosts</a>
 </div>
 
-<h2 style="margin-top: 1.5rem;">Snapshot</h2>
+{% if host.last_snapshot %}
+<h2>Summary</h2>
+{% with snap=host.last_snapshot %}
+<div class="summary-grid">
+    {% if snap.cpu.load_average %}
+    <div class="summary-cell">
+        <div class="lbl">CPU load (1/5/15)</div>
+        <div class="val">{{ snap.cpu.load_average.0 }} / {{ snap.cpu.load_average.1|default:"—" }} / {{ snap.cpu.load_average.2|default:"—" }}</div>
+        <div class="spark">{{ sparklines.cpu }}</div>
+    </div>
+    {% endif %}
+    {% if snap.memory.percent_used is not None %}
+    <div class="summary-cell">
+        <div class="lbl">Memory</div>
+        <div class="val">{{ snap.memory.percent_used }}%{% if snap.memory.total_mb %} of {{ snap.memory.total_mb }} MB{% endif %}</div>
+        <div class="spark">{{ sparklines.mem }}</div>
+    </div>
+    {% endif %}
+    {% if snap.disk.percent_used is not None %}
+    <div class="summary-cell">
+        <div class="lbl">Disk</div>
+        <div class="val">{{ snap.disk.percent_used }}%{% if snap.disk.total_gb %} of {{ snap.disk.total_gb }} GB{% endif %}</div>
+        <div class="spark">{{ sparklines.disk }}</div>
+    </div>
+    {% endif %}
+    {% if snap.supervisor.counts.total is not None %}
+    <div class="summary-cell">
+        <div class="lbl">Supervisor</div>
+        <div class="val">{{ snap.supervisor.counts.running|default:0 }} / {{ snap.supervisor.counts.total }} running</div>
+    </div>
+    {% endif %}
+    {% if snap.uptime_days is not None %}
+    <div class="summary-cell">
+        <div class="lbl">Uptime</div>
+        <div class="val">{{ snap.uptime_days }} d</div>
+    </div>
+    {% endif %}
+    {% if snap.hostname %}
+    <div class="summary-cell">
+        <div class="lbl">uname</div>
+        <div class="val" style="font-size: 0.85rem;">{{ snap.hostname }}</div>
+    </div>
+    {% endif %}
+</div>
+{% endwith %}
+{% endif %}
+
+{% if polls %}
+<h2>Recent polls</h2>
+<table class="polls-table">
+    <tr>
+        <th>When</th>
+        <th>Status</th>
+        <th>CPU</th>
+        <th>Mem %</th>
+        <th>Disk %</th>
+        <th>Note</th>
+    </tr>
+    {% for p in polls %}
+    <tr>
+        <td>{{ p.at|date:"Y-m-d H:i:s" }}</td>
+        <td class="st-{{ p.status }}">{{ p.status }}</td>
+        <td>{{ p.cpu_load|default:"—" }}</td>
+        <td>{{ p.mem_pct|default:"—" }}</td>
+        <td>{{ p.disk_pct|default:"—" }}</td>
+        <td style="color: #8b949e;">{{ p.error|truncatechars:60 }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<h2>Snapshot (raw)</h2>
 {% if host.last_snapshot %}
 <pre class="snapshot-pre">{{ host.last_snapshot|pprint }}</pre>
 {% else %}

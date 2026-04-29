@@ -66,6 +66,7 @@ DEFAULT_INTERVALS = {
     'marine':            21_600,     # 6 h — tide / waves / water temp / currents
     'sky_almanac':       2_592_000,  # 30 d — yearly Sky Almanac Codex Manual
     'sky_retrospective': 2_592_000,  # 30 d — year-to-date Sky Retrospective
+    'host_poll':         300,        # 5 min — poll registered RemoteHosts
 }
 
 
@@ -102,7 +103,7 @@ def dispatch(force=None):
             'sky_satellites', 'sky_neos', 'space_weather',
             'local_environment', 'weather', 'pass_digest',
             'sat_transits', 'marine', 'sky_almanac',
-            'sky_retrospective',
+            'sky_retrospective', 'host_poll',
         }
 
     # Pull the operator-set tile_reflect interval from the toggles
@@ -149,6 +150,7 @@ def dispatch(force=None):
         ('marine',           _do_marine),
         ('sky_almanac',      _do_sky_almanac),
         ('sky_retrospective', _do_sky_retrospective),
+        ('host_poll',        _do_host_poll),
     ]
     for kind, fn in pipelines:
         if _overdue(kind):
@@ -420,6 +422,17 @@ def _do_sky_retrospective():
     call_command('compose_sky_retrospective', quiet=True, stdout=buf)
     call_command('publish_sky_pdfs', stdout=buf)
     return 'sky retrospective re-rendered + PDF published'
+
+
+def _do_host_poll():
+    """5-min — poll every enabled RemoteHost, accumulate history. No
+    Concerns are raised here yet; Hosts list view is the surface."""
+    from hosts.polling import poll_all_enabled
+    counts = poll_all_enabled()
+    if not counts:
+        return 'no enabled hosts to poll'
+    parts = [f'{v} {k}' for k, v in sorted(counts.items()) if v]
+    return ' / '.join(parts)
 
 
 def _do_rebuild_document():

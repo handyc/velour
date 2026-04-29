@@ -14,6 +14,7 @@ from django.utils import timezone
 
 
 POLL_TIMEOUT_SECONDS = 8
+HISTORY_KEEP_PER_HOST = 500
 
 
 def poll(host):
@@ -62,3 +63,42 @@ def poll(host):
     host.last_snapshot = data
     host.last_status = data.get('status') or 'green'
     return host
+
+
+def record_poll(host):
+    """Persist the current host.last_* fields as a HostPoll history row,
+    then prune the per-host history to HISTORY_KEEP_PER_HOST. Call this
+    after a `poll(host)` if you want history accumulated."""
+    from .models import HostPoll
+    snap = host.last_snapshot if isinstance(host.last_snapshot, dict) else None
+    cpu_la = ((snap or {}).get('cpu') or {}).get('load_average') or []
+    HostPoll.objects.create(
+        host=host,
+        status=host.last_status or 'unreachable',
+        cpu_load=cpu_la[0] if cpu_la else None,
+        mem_pct=((snap or {}).get('memory') or {}).get('percent_used'),
+        disk_pct=((snap or {}).get('disk') or {}).get('percent_used'),
+        error=host.last_error or '',
+        snapshot=snap,
+    )
+    # Auto-prune: keep only the most recent N rows per host.
+    keep_ids = list(
+        HostPoll.objects
+        .filter(host=host)
+        .order_by('-at')
+        .values_list('id', flat=True)[:HISTORY_KEEP_PER_HOST]
+    )
+    HostPoll.objects.filter(host=host).exclude(id__in=keep_ids).delete()
+
+
+def poll_all_enabled():
+    """Cron entrypoint — poll every enabled host, save last_*, record
+    history. Returns a Counter-style dict of status → count."""
+    from .models import RemoteHost
+    counts = {}
+    for host in RemoteHost.objects.filter(enabled=True):
+        poll(host)
+        host.save()
+        record_poll(host)
+        counts[host.last_status] = counts.get(host.last_status, 0) + 1
+    return counts
