@@ -49,11 +49,113 @@
         align-items: center;
         gap: 0.75rem;
     }
+    .sup-meta {
+        color: #6e7681;
+        font-size: 0.78rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-top: 0.15rem;
+    }
+    .sup-meta .label {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 3px;
+        padding: 1px 6px;
+        color: #c9d1d9;
+        margin-right: 0.4rem;
+    }
+    .ports-table, .systemd-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+    }
+    .ports-table th, .ports-table td,
+    .systemd-table th, .systemd-table td {
+        text-align: left;
+        padding: 0.25rem 0.6rem;
+        border-bottom: 1px solid #161b22;
+    }
+    .ports-table th, .systemd-table th {
+        color: #8b949e;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        font-weight: 500;
+        border-bottom: 1px solid #21262d;
+    }
+    .ports-table td.cmdline, .systemd-table td.desc {
+        color: #8b949e;
+        font-size: 0.78rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 0;
+    }
+    td.col-port { color: #58a6ff; font-weight: 500; }
+    .sd-active   { color: #3fb950; }
+    .sd-failed   { color: #f85149; }
+    .sd-exited   { color: #8b949e; }
+    .sd-running  { color: #3fb950; }
+    .empty-note { color: #6e7681; font-style: italic; font-size: 0.9rem; }
 </style>
 {% endblock %}
 
 {% block content %}
 <h1>Services</h1>
+
+<!-- systemd Section -->
+{% if systemd_available %}
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">systemd</h2>
+        <div class="section-status">
+            <span style="color: #8b949e; font-size: 0.85rem;">{{ systemd_units|length }} active{% if systemd_inactive %} · +{{ systemd_inactive }} loaded inactive{% endif %}</span>
+        </div>
+    </div>
+
+    {% if systemd_units %}
+    <table class="systemd-table">
+        <tr><th>Service</th><th>Status</th><th>Sub</th><th>Description</th></tr>
+        {% for u in systemd_units %}
+        <tr>
+            <td><strong style="color: #c9d1d9;">{{ u.name }}</strong></td>
+            <td class="sd-{{ u.active }}">{{ u.active }}</td>
+            <td class="sd-{{ u.sub }}">{{ u.sub }}</td>
+            <td class="desc" title="{{ u.description }}">{{ u.description }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty-note">No active systemd services on this host.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Listening Ports Section -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">Listening Ports (TCP)</h2>
+        <div class="section-status">
+            <span style="color: #8b949e; font-size: 0.85rem;">{{ listening|length }} listener{{ listening|length|pluralize }}</span>
+        </div>
+    </div>
+    {% if listening %}
+    <table class="ports-table">
+        <tr><th>Bind</th><th>Port</th><th>PID</th><th>Process</th><th>Cmdline</th></tr>
+        {% for r in listening %}
+        <tr>
+            <td>{{ r.host }}</td>
+            <td class="col-port">{{ r.port }}</td>
+            <td>{{ r.pid|default:"—" }}</td>
+            <td>{{ r.owner|default:"—" }}</td>
+            <td class="cmdline" title="{{ r.cmdline }}">{{ r.cmdline|default:"(not visible — root-owned)" }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty-note">No TCP listeners detected.</p>
+    {% endif %}
+</div>
 
 <!-- Nginx Section -->
 <div class="card" style="margin-bottom: 1.5rem;">
@@ -106,61 +208,79 @@
     {% endif %}
 </div>
 
-<!-- Supervisor Section -->
+<!-- Supervisor Section (multi-instance) -->
 <div class="card" style="margin-bottom: 1.5rem;">
     <div class="service-header">
         <h2 style="margin: 0;">Supervisor</h2>
         <div class="section-status">
-            {% if supervisor_running %}
-                <span class="status-badge status-running">Running</span>
+            {% if supervisors %}
+                <span class="status-badge status-running">{{ supervisors|length }} instance{{ supervisors|length|pluralize }}</span>
             {% else %}
                 <span class="status-badge status-stopped">Not Detected</span>
             {% endif %}
         </div>
     </div>
 
-    {% if supervisor_programs %}
-    {% for prog in supervisor_programs %}
-    <div class="card" style="margin-bottom: 0.75rem; background: #0d1117;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+    {% for sup in supervisors %}
+    <div style="margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; margin-bottom: 0.5rem;">
             <div>
-                <strong style="color: #58a6ff;">{{ prog.name }}</strong>
-                {% if prog.state == 'RUNNING' %}
-                    <span class="status-badge status-running">{{ prog.state }}</span>
-                {% elif prog.state == 'STOPPED' or prog.state == 'FATAL' %}
-                    <span class="status-badge status-stopped">{{ prog.state }}</span>
-                {% else %}
-                    <span class="status-badge status-unknown">{{ prog.state }}</span>
-                {% endif %}
-                {% if prog.detail %}
-                    <span style="color: #8b949e; font-size: 0.8rem; margin-left: 0.5rem;">{{ prog.detail }}</span>
-                {% endif %}
-                <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.4rem;">
-                    {% if prog.command %}<strong>Command:</strong> {{ prog.command }}<br>{% endif %}
-                    {% if prog.directory %}<strong>Directory:</strong> {{ prog.directory }}<br>{% endif %}
-                    {% if prog.user %}<strong>User:</strong> {{ prog.user }}<br>{% endif %}
-                    {% if prog.autostart %}<strong>Autostart:</strong> {{ prog.autostart }}{% endif %}
-                    {% if prog.autorestart %} | <strong>Autorestart:</strong> {{ prog.autorestart }}{% endif %}
-                    {% if prog.stdout_logfile %}<br><strong>Log:</strong> {{ prog.stdout_logfile }}{% endif %}
+                <span class="status-badge status-running">{{ sup.label }}</span>
+                <span style="color: #c9d1d9; font-family: ui-monospace, monospace; font-size: 0.85rem;">pid {{ sup.pid }}</span>
+                <span style="color: #8b949e; font-size: 0.8rem; margin-left: 0.5rem;">{{ sup.programs|length }} program{{ sup.programs|length|pluralize }}</span>
+            </div>
+        </div>
+        <div class="sup-meta">
+            <span class="label">conf</span>{{ sup.conf_path }}
+            {% if sup.socket %}<br><span class="label">sock</span>{{ sup.socket }}{% endif %}
+        </div>
+
+        {% if sup.programs %}
+        {% for prog in sup.programs %}
+        <div class="card" style="margin: 0.75rem 0 0; background: #0d1117;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <strong style="color: #58a6ff;">{{ prog.name }}</strong>
+                    {% if prog.state == 'RUNNING' %}
+                        <span class="status-badge status-running">{{ prog.state }}</span>
+                    {% elif prog.state == 'STOPPED' or prog.state == 'FATAL' %}
+                        <span class="status-badge status-stopped">{{ prog.state }}</span>
+                    {% else %}
+                        <span class="status-badge status-unknown">{{ prog.state }}</span>
+                    {% endif %}
+                    {% if prog.detail %}
+                        <span style="color: #8b949e; font-size: 0.8rem; margin-left: 0.5rem;">{{ prog.detail }}</span>
+                    {% endif %}
+                    <div style="color: #8b949e; font-size: 0.85rem; margin-top: 0.4rem;">
+                        {% if prog.command %}<strong>Command:</strong> {{ prog.command }}<br>{% endif %}
+                        {% if prog.directory %}<strong>Directory:</strong> {{ prog.directory }}<br>{% endif %}
+                        {% if prog.user %}<strong>User:</strong> {{ prog.user }}<br>{% endif %}
+                        {% if prog.autostart %}<strong>Autostart:</strong> {{ prog.autostart }}{% endif %}
+                        {% if prog.autorestart %} | <strong>Autorestart:</strong> {{ prog.autorestart }}{% endif %}
+                        {% if prog.stdout_logfile %}<br><strong>Log:</strong> {{ prog.stdout_logfile }}{% endif %}
+                    </div>
+                    <div style="color: #484f58; font-size: 0.8rem; margin-top: 0.2rem;">
+                        {{ prog.config_file }}
+                    </div>
                 </div>
-                <div style="color: #484f58; font-size: 0.8rem; margin-top: 0.2rem;">
-                    {{ prog.config_file }}
-                </div>
+                {% if prog.content %}
+                <button class="config-toggle" onclick="this.parentNode.parentNode.querySelector('.config-content').classList.toggle('visible')">
+                    Show Config
+                </button>
+                {% endif %}
             </div>
             {% if prog.content %}
-            <button class="config-toggle" onclick="this.parentNode.parentNode.querySelector('.config-content').classList.toggle('visible')">
-                Show Config
-            </button>
+            <div class="config-content">{{ prog.content }}</div>
             {% endif %}
         </div>
-        {% if prog.content %}
-        <div class="config-content">{{ prog.content }}</div>
+        {% endfor %}
+        {% else %}
+        <p class="empty-note" style="margin-top: 0.5rem;">No programs configured for this instance.</p>
         {% endif %}
     </div>
+    {% empty %}
+    <p class="empty-note">No supervisord process detected on this host.</p>
     {% endfor %}
-    {% else %}
-    <p style="color: #8b949e;">No Supervisor programs found in /etc/supervisor/conf.d/. This is expected on a local development machine.</p>
-    {% endif %}
 </div>
 
 <!-- Running Gunicorn Instances -->
