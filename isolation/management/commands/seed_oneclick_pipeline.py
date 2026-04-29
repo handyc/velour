@@ -125,6 +125,22 @@ TARGETS = [
      '4 KB genomes with headroom. Good fit for the hunt loop; the '
      'self-replication part would need either SD-card writes or be '
      'dropped in favour of serial-out hex. Not attempted yet.'),
+    ('esp32_s3', 'not_started',
+     'isolation/artifacts/oneclick_class4/esp32_s3/', 300240,
+     'ESP32-S3 SuperMini: 512 KB on-chip SRAM, no PSRAM needed for '
+     'POP=30 (population is 120 KB in BSS). Self-replication via '
+     'LittleFS — /seed.bin holds the inherited tail, /winner_<N>.bin '
+     'is written for each top winner. Tail format (HXC4 magic + '
+     '4 palette + 4096 genome = 4104 B) is byte-identical to '
+     'hunter.c, so device-side winners drop straight back into the '
+     'Linux engine. PRNG is xorshift32 seeded from esp_random(); '
+     'grid-seeding LCG is unchanged so scoring matches the Pi-side '
+     'reference. Built on Arduino-on-S3 + PlatformIO with native '
+     'USB CDC (Serial). Builds clean (RAM 45.9%, Flash 9%; '
+     'firmware.bin=293 KB, mostly Arduino+IDF runtime — the ported '
+     'engine itself is ~10 KB). Desk-built and link-verified; '
+     'awaiting first flash. Bump to "working" after a hunt '
+     'completes on hardware.'),
     ('pi4', 'working',
      'isolation/artifacts/oneclick_class4/pi4.py', None,
      'Standalone Python — no Django. Default params (25 × 12 × '

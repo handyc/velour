@@ -10,6 +10,7 @@ TARGET_CHOICES = [
     ('attiny85',     'ATtiny85 (8KB flash, 512B RAM)'),
     ('esp8266',      'ESP8266 (~80KB RAM)'),
     ('esp32',        'ESP32 (~320KB RAM)'),
+    ('esp32_s3',     'ESP32-S3 SuperMini (512KB SRAM + PSRAM)'),
     ('pi4',          'Raspberry Pi 4 (Linux)'),
 ]
 TARGET_ORDER = [k for (k, _) in TARGET_CHOICES]

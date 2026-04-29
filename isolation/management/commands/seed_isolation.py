@@ -121,6 +121,12 @@ HEX_CA_TARGET_STUBS = {
         'Same as ESP8266 but with room for multiple rulesets side-by-side '
         'and an onboard scorer (detect class-4 locally, vote).'
     ),
+    'esp32_s3': (
+        'ESP32-S3 SuperMini: 512 KB SRAM + PSRAM headroom + native USB-OTG. '
+        'Run a small population on-device, score locally, stream winners '
+        'over USB CDC. The platformio.ini in artifacts/hex_ca_class4/'
+        'esp_st7735s/ already has an esp32s3 env wired up.'
+    ),
     'pi4': (
         'Full Python reimplementation of all three stages in a single '
         'file — the "reference isolation" against which tinier targets '
