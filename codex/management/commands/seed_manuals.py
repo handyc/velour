@@ -314,7 +314,7 @@ A fifth artifact, `adminsetup.sh`, is for the operator's own machine: it rsyncs 
 Every Velour deploy follows a strict naming convention:
 
 :::def
-User: a Linux user named after the project (e.g., `swibliq` for the production Velour)
+User: a Linux user named after the project (e.g., `myapp` for the production Velour)
 Project root: `/var/www/webapps/<user>/`
 App tree: `/var/www/webapps/<user>/apps/<projectname>/`
 Static files: `/var/www/webapps/<user>/static/`
@@ -463,12 +463,12 @@ The second line is for headless Chromium (used by `manage.py snapshot`), only ne
 
 ## Step 2 — create the project user
 
-By convention, every Velour deploy runs as a dedicated non-root user named after the project. For production Velour the user is `swibliq`; for any other deploy you'd pick a different name.
+By convention, every Velour deploy runs as a dedicated non-root user named after the project. The example below uses `myapp`; for your deploy, pick a different name.
 
 ```
-adduser --system --group --home /var/www/webapps/swibliq swibliq
-mkdir -p /var/www/webapps/swibliq/{apps,static,media,run,log,backups}
-chown -R swibliq:swibliq /var/www/webapps/swibliq
+adduser --system --group --home /var/www/webapps/myapp myapp
+mkdir -p /var/www/webapps/myapp/{apps,static,media,run,log,backups}
+chown -R myapp:myapp /var/www/webapps/myapp
 ```
 
 The `apps/` subdirectory will hold the Velour project itself plus any app_factory-generated child projects.
@@ -478,7 +478,7 @@ The `apps/` subdirectory will hold the Velour project itself plus any app_factor
 As the project user:
 
 ```
-sudo -u swibliq -i
+sudo -u myapp -i
 cd ~/apps
 git clone https://github.com/handyc/velour.git
 cd velour
@@ -515,9 +515,9 @@ This produces `deploy/gunicorn.conf.py`, `deploy/supervisor.conf`, `deploy/nginx
 As root:
 
 ```
-cp deploy/supervisor.conf /etc/supervisor/conf.d/swibliq.conf
-cp deploy/nginx.conf /etc/nginx/sites-available/swibliq
-ln -s /etc/nginx/sites-available/swibliq /etc/nginx/sites-enabled/
+cp deploy/supervisor.conf /etc/supervisor/conf.d/myapp.conf
+cp deploy/nginx.conf /etc/nginx/sites-available/myapp
+ln -s /etc/nginx/sites-available/myapp /etc/nginx/sites-enabled/
 supervisorctl reread && supervisorctl update
 nginx -t && systemctl reload nginx
 ```
@@ -531,8 +531,8 @@ Open `https://your-domain/` in a browser. You should see the Velour Chronicle la
 ## Common pitfalls
 
 - Static files 404: did you run `collectstatic`? `venv/bin/python manage.py collectstatic --noinput`.
-- 502 from nginx: gunicorn isn't running. Check `supervisorctl status` and `tail /var/www/webapps/swibliq/log/gunicorn.err`.
-- Permission denied on the socket path: nginx and gunicorn need to share access to `/var/www/webapps/swibliq/run/swibliq.sock`. The supervisor.conf template handles this; if it's wrong, you may have edited the file after generation.""")
+- 502 from nginx: gunicorn isn't running. Check `supervisorctl status` and `tail /var/www/webapps/myapp/log/gunicorn.err`.
+- Permission denied on the socket path: nginx and gunicorn need to share access to `/var/www/webapps/myapp/run/myapp.sock`. The supervisor.conf template handles this; if it's wrong, you may have edited the file after generation.""")
 
     upsert_section(m, 'tut-add-node', 520, 'Tutorial 2 — Adding a node',
         f"{STUB_NOTE}\n\nThis tutorial will walk through adding a new ESP8266 to the lab fleet, from physical hardware setup through firmware flashing to first sensor reading visible in the dashboard.")
@@ -739,7 +739,7 @@ This is one of the few Velour apps that depends on the asynchronous Channels sta
 
 The shell that gets spawned is whatever Velour's user has as their default ($SHELL), so terminal sessions inherit the same environment Velour itself runs in. Useful for poking at db.sqlite3 with `sqlite3`, running ad-hoc Python through `manage.py shell`, or just checking disk usage without leaving the browser.
 
-Security caveat: anyone with login access to Velour gets shell access to the host. Treat it accordingly. The mitigation is that Velour itself is gated behind login_required and runs as a non-root user (typically `swibliq` in production, `handyc` in dev).""",
+Security caveat: anyone with login access to Velour gets shell access to the host. Treat it accordingly. The mitigation is that Velour itself is gated behind login_required and runs as a non-root user (typically `myapp` in production, `handyc` in dev).""",
 
     'app_factory': """The **app_factory** app is the meta layer of Velour — the part that generates other Django projects. It owns templates for `gunicorn.conf.py`, `supervisor.conf`, `nginx.conf`, `setup.sh`, `adminsetup.sh`, `hotswap.sh`, and a small Django-app skeleton. The `manage.py generate_deploy` management command renders all of those for a target user/host combination, producing a complete deploy bundle ready to scp into place.
 
@@ -837,7 +837,7 @@ The other half of mailboxes is the HTTP relay endpoint at `/mailboxes/relay/`. E
 
 There's also `mailboxes.sending.send_mail(..., mailbox='name')` for explicit per-call routing when you want to bypass the default and send through a specific account. Useful for "send this from the lab address" vs "send this from the project address".
 
-The relay endpoint exists because the production host has port 25 blocked by the cloud provider (snel.com), so the only way to send mail from there is to relay through Velour's configured smarthost.""",
+The relay endpoint exists because the production host has port 25 blocked by the cloud provider, so the only way to send mail from there is to relay through Velour's configured smarthost.""",
 
     'mailroom': """The **mailroom** app handles inbound email — the counterpart to mailboxes. It polls IMAP accounts, dedupes messages by `(mailbox, uid)`, stores them as `InboundMessage` rows, and renders them in a familiar list/detail UI.
 

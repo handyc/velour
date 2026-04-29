@@ -88,7 +88,7 @@ def build_pdf(output_path):
     pdf.set_font('Helvetica', '', 11)
     pdf.cell(0, 8, f'Generated: {datetime.now().strftime("%B %d, %Y at %H:%M")}', align='C')
     pdf.ln(8)
-    pdf.cell(0, 8, 'Server: lucdh.nl', align='C')
+    pdf.cell(0, 8, 'Server: example.com', align='C')
 
     # --- Section 1: Project Overview ---
     pdf.add_page()
@@ -125,7 +125,7 @@ def build_pdf(output_path):
         'The system is designed to run in two locations simultaneously:'
     )
     pdf.bullet('Local instance on the developer\'s laptop for development and remote management')
-    pdf.bullet('Remote instance on lucdh.nl for actual server administration')
+    pdf.bullet('Remote instance on example.com for actual server administration')
     pdf.body_text(
         'The recommended synchronization method is SSH tunneling (Option 1), chosen for '
         'its security properties:'
@@ -137,7 +137,7 @@ def build_pdf(output_path):
 
     pdf.sub_title('Architecture Diagram')
     pdf.code_block(
-        '[Your Laptop]                         [lucdh.nl]\n'
+        '[Your Laptop]                         [example.com]\n'
         'Velour (local)  ---SSH--->    Velour (local-only)\n'
         '  - Local terminal                      - Bound to 127.0.0.1:8000\n'
         '  - Remote terminal (via SSH)           - Supervisor/Gunicorn/Nginx\n'
@@ -279,7 +279,7 @@ def build_pdf(output_path):
     pdf.speaker('User')
     pdf.body_text(
         'I would like to have two versions of this system running -- one on the actual host '
-        'server I manage in the cloud, which is located at lucdh.nl, and the other running '
+        'server I manage in the cloud, which is located at example.com, and the other running '
         'locally on this machine (my personal laptop). These two versions of the app would '
         'somehow be synchronized, so that when I am using my laptop, I have a live context '
         'window that interacts with and manages the remote server. How is it possible to do '
@@ -289,7 +289,7 @@ def build_pdf(output_path):
     pdf.speaker('Claude')
     pdf.body_text(
         'Recommended SSH tunnel approach (Option 1) as safest: local Velour connects '
-        'to lucdh.nl via SSH to run commands and sync state. Remote instance never exposed to '
+        'to example.com via SSH to run commands and sync state. Remote instance never exposed to '
         'public internet, only listens on 127.0.0.1. Also presented WireGuard VPN (Option 2) '
         'and HTTPS with mutual TLS (Option 3) as alternatives.'
     )

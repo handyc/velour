@@ -180,7 +180,7 @@ The convention:
 
 | Concern | Path |
 |---|---|
-| Linux user | `<projectname>` (e.g. `swibliq`) |
+| Linux user | `<projectname>` (e.g. `myapp`) |
 | Project root | `/var/www/webapps/<user>/` |
 | App tree | `/var/www/webapps/<user>/apps/<projectname>/` |
 | Static files | `/var/www/webapps/<user>/static/` |
@@ -963,7 +963,7 @@ These two fields are different in kind. They are not poetic. They have downstrea
 
 `hostname` is the base domain Velour lives at. Default `example.com`. **This is the ground truth for the deploy pipeline**: when `app_factory.generate_deploy` renders the nginx configuration template, it reads `Identity.hostname` to compose the `server_name` directive. So changing this field, then re-running `generate_deploy`, produces a fresh nginx vhost with the new hostname. The connection runs in only one direction — Identity does not know which nginx configs reference it — but it's a real load-bearing dependency. If you rename the field, the deploy pipeline breaks. If you delete the row, the deploy pipeline writes an empty `server_name` and nginx refuses to reload.
 
-The convention for sub-app deploys is to prepend the deploy_user as a subdomain: hostname `lucdh.nl` plus deploy_user `blorp` becomes nginx `server_name blorp.lucdh.nl`. So the lab's apps form a tidy DNS hierarchy under one parent zone the operator owns.
+The convention for sub-app deploys is to prepend the deploy_user as a subdomain: hostname `example.com` plus deploy_user `blorp` becomes nginx `server_name blorp.example.com`. So the lab's apps form a tidy DNS hierarchy under one parent zone the operator owns.
 
 `admin_email` is the operator's contact address. Where Velour's password reset emails come from, where alerts are sent, what the chronicle uses as the byline contact link. Optional but recommended.
 
@@ -1280,7 +1280,7 @@ The interesting part of sysinfo isn't the dashboard view — it's the JSON endpo
 ```json
 {
   "ok": true,
-  "hostname": "swibliq.lucdh.nl",
+  "hostname": "myapp.example.com",
   "load": [0.42, 0.51, 0.63],
   "memory": {"total_mb": 4096, "used_pct": 38.4},
   "disk": {"total_gb": 32, "used_pct": 47.2},
@@ -1545,9 +1545,9 @@ The way to read this list: hot-swap is optimized for the common case (fast, safe
 From the developer's machine, the whole hot-swap is three commands:
 
 ```
-rsync -a --delete ./velour-dev/ swibliq@snel.com:/home/swibliq/staging/
-ssh swibliq@snel.com 'cd /home/swibliq/staging && bash hotswap.sh'
-ssh swibliq@snel.com 'tail -f /var/www/webapps/swibliq/log/gunicorn.log'
+rsync -a --delete ./velour-dev/ myapp@example.com:/home/myapp/staging/
+ssh myapp@example.com 'cd /home/myapp/staging && bash hotswap.sh'
+ssh myapp@example.com 'tail -f /var/www/webapps/myapp/log/gunicorn.log'
 ```
 
 Three lines. First line pushes the source. Second line runs the hot-swap. Third line is optional — it's just so the operator sees any startup errors in real time.
@@ -1556,8 +1556,8 @@ Some operators alias this as a shell function called `deploy`:
 
 ```bash
 deploy() {
-    rsync -a --delete ./velour-dev/ swibliq@snel.com:/home/swibliq/staging/
-    ssh swibliq@snel.com 'cd /home/swibliq/staging && bash hotswap.sh'
+    rsync -a --delete ./velour-dev/ myapp@example.com:/home/myapp/staging/
+    ssh myapp@example.com 'cd /home/myapp/staging && bash hotswap.sh'
 }
 ```
 
@@ -3796,7 +3796,7 @@ This chapter walks the workflow end-to-end: what the command produces, what each
 ## What `--hotswap` produces
 
 ```
-$ venv/bin/python manage.py generate_deploy --user swibliq \\
+$ venv/bin/python manage.py generate_deploy --user myapp \\
     --host velour.example.com --hotswap
 deploy/hotswap-2026-04-26T19-44-12/
 ├── hotswap.sh        # the orchestration script (run on the target)
@@ -4223,7 +4223,7 @@ Bind to `0.0.0.0`, not bare `7777`. The bare form binds to `127.0.0.1` only and 
 ### 2. Generate a deploy bundle for production
 
 ```bash
-venv/bin/python manage.py generate_deploy --user swibliq --host snel.com
+venv/bin/python manage.py generate_deploy --user myapp --host example.com
 ```
 
 Writes a self-contained `deploy/` tarball with systemd units, gunicorn config, and an idempotent install script. The convention is one user per app: socket, dir, static, and venv all live under `/var/www/webapps/<user>/`.
@@ -4231,7 +4231,7 @@ Writes a self-contained `deploy/` tarball with systemd units, gunicorn config, a
 ### 3. Hot-swap a live deploy without dropping connections
 
 ```bash
-ssh swibliq@snel.com 'cd app && git pull && venv/bin/python manage.py migrate && systemctl --user reload velour'
+ssh myapp@example.com 'cd app && git pull && venv/bin/python manage.py migrate && systemctl --user reload velour'
 ```
 
 `reload`, not `restart`. Gunicorn's USR2 handler forks new workers, drains the old ones, and the LB never sees a 502.

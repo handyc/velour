@@ -105,7 +105,7 @@ def storage_gb_for_class(wc, count, years):
 
 def cpu_cores_needed(ram_gb_total, peak_factor):
     """Humanities web is I/O-bound; ~1 core per 12 GB of working RAM,
-    with a floor of 4. The current LUCDH box runs 40 Django + 30 WP on
+    with a floor of 4. The current cloud server runs 40 Django + 30 WP on
     4 cores, so this sizing matches reality for the baseline load.
     """
     base = max(4, math.ceil(ram_gb_total / 12))
@@ -205,7 +205,7 @@ def purchase_recommendation(rows, split_wordpress=True):
         return {
             'split': False,
             'boxes': [{
-                'label':     'Unified LUCDH server',
+                'label':     'Unified cloud server',
                 'ram_gb':    _snap_ram(target_ram),
                 'storage_gb':_snap_storage(target_storage),
                 'cpu_cores': _snap_cores(target_cores),

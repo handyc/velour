@@ -1,4 +1,4 @@
-"""Radiant — Foundation-style forecasting for LUCDH's server fleet.
+"""Radiant — Foundation-style forecasting for a cloud server fleet.
 
 Named after Hari Seldon's *Prime Radiant*, the device that displayed the
 equations of psychohistory across time. The app answers one concrete
@@ -6,7 +6,7 @@ question ("what should we buy in May 2026?") while also staring into
 the deep-time horizons where extrapolation is no longer honest.
 
 Shape of the data:
-  * Server          — a physical or virtual machine LUCDH runs
+  * Server          — a physical or virtual machine the operator runs
   * WorkloadClass   — the *kind* of thing a server hosts (prod Django,
                       WordPress-for-class, experimental-isolated, dev,
                       admin-pipeline). Carries the per-class growth
@@ -39,7 +39,7 @@ def regime_for(years):
 
 
 class Server(models.Model):
-    """A machine LUCDH currently runs or plans to acquire."""
+    """A machine the operator currently runs or plans to acquire."""
 
     ROLE_CHOICES = [
         ('main',         'Main — mixed production'),
