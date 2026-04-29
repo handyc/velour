@@ -3,6 +3,7 @@
 Lives outside the management command so the Services view can call
 into the same status/start/stop functions for its toggle buttons.
 """
+import io
 import os
 import shutil
 import signal
@@ -11,6 +12,7 @@ import time
 from pathlib import Path
 
 from django.conf import settings
+from django.core.management import call_command
 
 
 WORKDIR = Path('/tmp/velour-nginx-local')
@@ -83,16 +85,17 @@ def status():
 
 
 def collectstatic():
-    """Run Django's collectstatic into static_root (silent, --noinput)."""
+    """Run Django's collectstatic into STATIC_ROOT in-process. Returns
+    (ok, message). Uses --link so reruns are fast and atomic."""
     sr = static_root()
     sr.mkdir(parents=True, exist_ok=True)
-    return subprocess.run(
-        ['python', 'manage.py', 'collectstatic', '--noinput',
-         f'--clear', f'--link', '-v', '0'],
-        cwd=str(settings.BASE_DIR),
-        capture_output=True, text=True, timeout=60,
-        env={**os.environ, 'STATIC_ROOT': str(sr)},
-    )
+    sink = io.StringIO()
+    try:
+        call_command('collectstatic', interactive=False, clear=True,
+                     link=True, verbosity=0, stdout=sink, stderr=sink)
+    except Exception as e:
+        return False, f'{type(e).__name__}: {e}'
+    return True, sink.getvalue().strip()
 
 
 def start():
@@ -102,10 +105,9 @@ def start():
     if status()['running']:
         return True, f'already running (pid {status()["pid"]})'
     regenerate()
-    # Ensure STATIC_ROOT is populated. Use --link for fast rebuild.
-    cs = collectstatic()
-    if cs.returncode != 0:
-        return False, f'collectstatic failed: {cs.stderr.strip()[:200]}'
+    cs_ok, cs_msg = collectstatic()
+    if not cs_ok:
+        return False, f'collectstatic failed: {cs_msg[:200]}'
     proc = subprocess.run(
         ['nginx', '-p', str(WORKDIR) + '/', '-c', str(CONFFILE)],
         capture_output=True, text=True, timeout=10,
