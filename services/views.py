@@ -3,8 +3,12 @@ import os
 import re
 import subprocess
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.views.decorators.http import require_POST
+
+from . import local_nginx as ln
 
 
 def _run(cmd, default=''):
@@ -305,6 +309,7 @@ def services_home(request):
     systemd_units, systemd_available, systemd_inactive = _get_systemd_units()
     listening = _get_listening_ports()
     gunicorn_instances = _get_running_gunicorn()
+    local_nginx_status = ln.status()
 
     return render(request, 'services/home.html', {
         'nginx_sites':        nginx_sites,
@@ -316,4 +321,22 @@ def services_home(request):
         'systemd_inactive':   systemd_inactive,
         'listening':          listening,
         'gunicorn_instances': gunicorn_instances,
+        'local_nginx':        local_nginx_status,
     })
+
+
+@login_required
+@require_POST
+def local_nginx_toggle(request):
+    action = request.POST.get('action', '')
+    if action == 'start':
+        ok, msg = ln.start()
+    elif action == 'stop':
+        ok, msg = ln.stop()
+    elif action == 'regenerate':
+        ln.regenerate()
+        ok, msg = True, f'config rewritten at {ln.CONFFILE}'
+    else:
+        ok, msg = False, f'unknown action: {action!r}'
+    (messages.success if ok else messages.error)(request, f'local-nginx: {msg}')
+    return redirect('services:home')

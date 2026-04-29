@@ -103,6 +103,69 @@
 {% block content %}
 <h1>Services</h1>
 
+{% if messages %}
+<div style="margin-bottom: 1rem;">
+    {% for m in messages %}
+    <div style="padding: 0.4rem 0.7rem; border-radius: 4px; margin-bottom: 0.3rem;
+                background: {% if m.tags == 'error' %}#3a1518{% else %}#0f2a17{% endif %};
+                border: 1px solid {% if m.tags == 'error' %}#5a2429{% else %}#1f4f2c{% endif %};
+                color: {% if m.tags == 'error' %}#f85149{% else %}#3fb950{% endif %};
+                font-size: 0.88rem; font-family: ui-monospace, monospace;">
+        {{ m }}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Local Nginx (prod-parity proxy in front of runserver) -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">Local Nginx <span style="color: #6e7681; font-size: 0.7rem; font-weight: normal; text-transform: uppercase; letter-spacing: 0.06em; margin-left: 0.4rem;">prod-parity proxy</span></h2>
+        <div class="section-status">
+            {% if not local_nginx.installed %}
+                <span class="status-badge status-unknown">Not Installed</span>
+            {% elif local_nginx.running %}
+                <span class="status-badge status-running">Running · pid {{ local_nginx.pid }}</span>
+            {% else %}
+                <span class="status-badge status-stopped">Stopped</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="sup-meta" style="margin-bottom: 0.6rem;">
+        {% if local_nginx.running %}
+            <span class="label">url</span><a href="http://127.0.0.1:{{ local_nginx.listen_port }}/" target="_blank" style="color: #58a6ff;">http://127.0.0.1:{{ local_nginx.listen_port }}/</a>
+            &nbsp;<span class="label">→</span>127.0.0.1:{{ local_nginx.upstream_port }}
+            <br>
+        {% endif %}
+        <span class="label">conf</span>{{ local_nginx.conf_path }}{% if not local_nginx.conf_exists %} (not yet generated){% endif %}
+        <br><span class="label">static</span>{{ local_nginx.static_root }}
+    </div>
+
+    <p style="color: #8b949e; font-size: 0.85rem; margin: 0 0 0.6rem;">
+        Mirrors the prod stack (nginx → runserver) so you can validate
+        proxy headers, <code>collectstatic</code> output, and
+        <code>SECURE_PROXY_SSL_HEADER</code> behavior locally before
+        pushing a deploy. Off by default — runserver-direct on
+        :{{ local_nginx.upstream_port }} is unaffected.
+    </p>
+
+    {% if local_nginx.installed %}
+    <form method="post" action="{% url 'services:local_nginx_toggle' %}" style="display: inline-flex; gap: 0.4rem;">
+        {% csrf_token %}
+        {% if local_nginx.running %}
+            <button name="action" value="stop" class="status-badge status-stopped" style="cursor: pointer; border: 0; padding: 4px 12px;">Stop</button>
+            <button name="action" value="regenerate" class="status-badge status-unknown" style="cursor: pointer; border: 0; padding: 4px 12px;">Regenerate Config</button>
+        {% else %}
+            <button name="action" value="start" class="status-badge status-running" style="cursor: pointer; border: 0; padding: 4px 12px;">Start</button>
+            <button name="action" value="regenerate" class="status-badge status-unknown" style="cursor: pointer; border: 0; padding: 4px 12px;">Regenerate Config</button>
+        {% endif %}
+    </form>
+    {% else %}
+    <p class="empty-note" style="margin: 0;">Install nginx to enable: <code>sudo apt install nginx</code></p>
+    {% endif %}
+</div>
+
 <!-- systemd Section -->
 {% if systemd_available %}
 <div class="card" style="margin-bottom: 1.5rem;">
