@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ world.title }} — Screen Gubi{% endblock %}
 
@@ -65,7 +66,7 @@
 
 {{ scene|json_script:"scene-data" }}
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="{% static 'js/three/three.min.js' %}"></script>
 <script>
 (function(){
   const scene_data = JSON.parse(document.getElementById('scene-data').textContent);

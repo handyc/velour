@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Graphs - Velour{% endblock %}
 
@@ -63,6 +64,7 @@
     }
     .treemap-item {
         position: absolute;
+        box-sizing: border-box;  /* keep border + padding inside the algo-computed dims */
         border: 1px solid rgba(0,0,0,0.3);
         display: flex;
         align-items: center;
@@ -84,9 +86,16 @@
 
 <div class="graph-controls">
     <select id="graph-selector">
+        <optgroup label="Historical (Last 24 h · ring buffer)">
+            <option value="cpu_24h">CPU Usage · last 24 h</option>
+            <option value="memory_24h">Memory Usage · last 24 h</option>
+            <option value="load_24h">Load Average · last 24 h (1m / 5m / 15m)</option>
+            <option value="swap_24h">Swap Usage · last 24 h</option>
+            <option value="entropy_24h">Kernel Entropy · last 24 h</option>
+        </optgroup>
         <optgroup label="2D Line / Area">
-            <option value="cpu_history">CPU Usage (Live Sampled ~3s)</option>
-            <option value="load_average">Load Average</option>
+            <option value="cpu_history">CPU Usage (Live)</option>
+            <option value="load_average">Load Average (current)</option>
             <option value="entropy">Kernel Entropy Pool (Live)</option>
         </optgroup>
         <optgroup label="Pie / Doughnut">
@@ -109,7 +118,13 @@
     </select>
     <button class="btn btn-primary" id="refresh-btn">Refresh</button>
     <button class="btn btn-secondary" id="save-btn">Save Snapshot</button>
-    <a class="btn btn-secondary" id="pdf-btn" href="#" target="_blank">Export PDF</a>
+    <form id="pdf-form" method="post" action="{% url 'graphs:pdf' %}" target="_blank"
+          style="display:inline; margin:0;">
+        {% csrf_token %}
+        <input type="hidden" name="type" id="pdf-form-type">
+        <input type="hidden" name="data" id="pdf-form-data">
+        <button type="submit" class="btn btn-secondary">Export PDF</button>
+    </form>
     <a class="btn btn-secondary" href="{% url 'graphs:history' %}">History</a>
     <span class="loading" id="loading" style="display:none; padding:0;">Loading...</span>
     <span id="save-msg" style="color: #3fb950; font-size: 0.85rem; display:none;"></span>
@@ -125,8 +140,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="{% static 'js/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'js/three/three.min.js' %}"></script>
+<script src="{% static 'graphs/treemap.js' %}"></script>
 <script>
 (function() {
     const selector = document.getElementById('graph-selector');
@@ -142,9 +158,23 @@
 
     let currentChart = null;
     let threeCleanup = null;
+    let liveCleanup = null;
+    // Whatever is currently on screen — captured by Save Snapshot and
+    // Export PDF so the saved/printed artefact matches the displayed
+    // chart, not whatever system state happens to be live at click time.
+    let lastData = null;
+    let lastGraphType = null;
+
+    const SAMPLE_URL  = '{% url "graphs:sample" %}';
+    const HISTORY_URL = '{% url "graphs:history_json" %}';
+    // Rolling-window length for live charts (samples). At 500 ms poll
+    // that's a 30-second window — enough context to spot a spike, short
+    // enough to keep the chart from shifting too slowly.
+    const LIVE_WINDOW = 60;
+    const LIVE_INTERVAL_MS = 500;
 
     const DESCRIPTIONS = {
-        cpu_history: 'Samples /proc/stat every 150ms to build a live CPU usage trace. Useful for spotting transient spikes.',
+        cpu_history: 'Live: polls /graphs/sample/ every 500 ms and computes CPU% from /proc/stat deltas. 30-second rolling window.',
         memory_history: 'Breakdown of physical memory into used, buffers, cached, and free from /proc/meminfo.',
         disk_usage: 'Used vs available space per mount point from df. Watch for mounts approaching capacity.',
         network_io: 'Cumulative bytes received and transmitted per network interface since boot, from /proc/net/dev.',
@@ -155,8 +185,93 @@
         top_processes: 'Top 15 processes ranked by RSS memory, also showing CPU usage.',
         filesystem_tree: 'Treemap of directory sizes under /home, sized proportionally to disk usage.',
         user_sessions: 'Currently logged-in users and their active session count from the who command.',
-        entropy: 'Available kernel entropy (randomness) sampled every 100ms. Low entropy can stall crypto operations.',
+        entropy: 'Live: kernel entropy_avail polled every 500 ms. 30-second rolling window. Low entropy can stall crypto.',
+
+        cpu_24h:     'Last 24 h CPU usage from the SystemSample ring buffer (~30 s sampling cadence).',
+        memory_24h:  'Last 24 h memory utilisation from the SystemSample ring buffer.',
+        load_24h:    'Last 24 h load average — 1-minute, 5-minute, and 15-minute together.',
+        swap_24h:    'Last 24 h swap utilisation. A trend up means sustained memory pressure.',
+        entropy_24h: 'Last 24 h kernel entropy pool — chronic low entropy can stall crypto operations.',
     };
+
+    // Per-graph configs for live polling. Adding a new live graph type
+    // = adding an entry here + listing it in getChartType / isLiveType.
+    const LIVE_CONFIGS = {
+        cpu_history: {
+            label: 'CPU %', color: '#58a6ff',
+            fillColor: 'rgba(88, 166, 255, 0.12)',
+            ylabel: 'CPU %', yMin: 0, yMax: 100,
+            title: 'CPU Usage (live)',
+            // Computes per-tick value from current + previous sample.
+            // Returns null while we don't have a previous reading yet —
+            // first sample is just a starting point, not a data point.
+            compute: (s, prev) => {
+                if (!prev) return null;
+                const dt = s.cpu_total - prev.cpu_total;
+                const di = s.cpu_idle  - prev.cpu_idle;
+                if (dt <= 0) return 0;
+                return Math.max(0, Math.min(100, (1 - di / dt) * 100));
+            },
+        },
+        entropy: {
+            label: 'Bits', color: '#3fb950',
+            fillColor: 'rgba(63, 185, 80, 0.12)',
+            ylabel: 'Bits',
+            title: 'Kernel Entropy Pool (live)',
+            compute: (s, prev) => s.entropy || 0,
+        },
+    };
+
+    function isLiveType(t) {
+        return Object.prototype.hasOwnProperty.call(LIVE_CONFIGS, t);
+    }
+
+    // Historical (last 24 h) graphs — read from the SystemSample ring
+    // buffer via /graphs/history/json/. Multiple series allowed (load
+    // average plots 1m/5m/15m together).
+    const HISTORICAL_CONFIGS = {
+        cpu_24h: {
+            title: 'CPU Usage · last 24 h',
+            ylabel: 'CPU %', yMin: 0, yMax: 100,
+            series: [
+                { field: 'cpu_pct', label: 'CPU %', color: '#58a6ff', fill: true },
+            ],
+        },
+        memory_24h: {
+            title: 'Memory Usage · last 24 h',
+            ylabel: '%', yMin: 0, yMax: 100,
+            series: [
+                { field: 'mem_used_pct', label: 'Memory used %', color: '#d29922', fill: true },
+            ],
+        },
+        load_24h: {
+            title: 'Load Average · last 24 h',
+            ylabel: 'load',
+            series: [
+                { field: 'load1',  label: '1 min',  color: '#58a6ff', fill: false },
+                { field: 'load5',  label: '5 min',  color: '#3fb950', fill: false },
+                { field: 'load15', label: '15 min', color: '#bc8cff', fill: false },
+            ],
+        },
+        swap_24h: {
+            title: 'Swap Usage · last 24 h',
+            ylabel: 'Swap %', yMin: 0,
+            series: [
+                { field: 'swap_pct', label: 'Swap %', color: '#bc8cff', fill: true },
+            ],
+        },
+        entropy_24h: {
+            title: 'Kernel Entropy · last 24 h',
+            ylabel: 'bits', yMin: 0,
+            series: [
+                { field: 'entropy', label: 'Entropy', color: '#3fb950', fill: true },
+            ],
+        },
+    };
+
+    function isHistoricalType(t) {
+        return Object.prototype.hasOwnProperty.call(HISTORICAL_CONFIGS, t);
+    }
 
     const CHART_COLORS = [
         '#58a6ff','#3fb950','#d29922','#f85149','#bc8cff',
@@ -171,9 +286,92 @@
     }
 
     function destroyChart() {
+        if (liveCleanup)  { liveCleanup();  liveCleanup  = null; }
         if (currentChart) { currentChart.destroy(); currentChart = null; }
         if (threeCleanup) { threeCleanup(); threeCleanup = null; }
         treemapContainer.innerHTML = '';
+    }
+
+    function startLivePolling(cfg) {
+        // Build the chart shell with empty data; tick() pushes points
+        // and calls chart.update('none') to avoid animation flicker.
+        showContainer('chart');
+        const labels = [];
+        const values = [];
+        let prev = null;
+        let stopped = false;
+        let timer = null;
+
+        const yScale = {
+            ticks: { color: '#8b949e' },
+            grid:  { color: 'rgba(48,54,61,0.5)' },
+            title: { display: true, text: cfg.ylabel, color: '#8b949e' },
+        };
+        if (cfg.yMin !== undefined) yScale.min = cfg.yMin;
+        if (cfg.yMax !== undefined) yScale.max = cfg.yMax;
+
+        currentChart = new Chart(getCanvas(), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: cfg.label,
+                    data: values,
+                    borderColor: cfg.color,
+                    backgroundColor: cfg.fillColor,
+                    fill: true, tension: 0.3, pointRadius: 0,
+                    borderWidth: 1.4,
+                }],
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: false,
+                plugins: { legend: { labels: { color: '#c9d1d9' } } },
+                scales: {
+                    x: { ticks: { color: '#8b949e', maxTicksLimit: 6 },
+                         grid:  { color: 'rgba(48,54,61,0.3)' } },
+                    y: yScale,
+                },
+            },
+        });
+
+        async function tick() {
+            try {
+                const r = await fetch(SAMPLE_URL, { credentials: 'same-origin' });
+                if (r.ok) {
+                    const s = await r.json();
+                    const v = cfg.compute(s, prev);
+                    if (v !== null) {
+                        // Show seconds-only labels; full timestamps overflow at 500ms tick rate.
+                        const d = new Date();
+                        const lab = `:${String(d.getSeconds()).padStart(2, '0')}`;
+                        labels.push(lab);
+                        values.push(Number(v.toFixed(1)));
+                        if (labels.length > LIVE_WINDOW) {
+                            labels.shift(); values.shift();
+                        }
+                        if (currentChart) currentChart.update('none');
+                        // Snapshot the rolling window for Save / PDF.
+                        lastData = {
+                            labels: labels.slice(),
+                            values: values.slice(),
+                            ylabel: cfg.ylabel,
+                            title:  cfg.title,
+                        };
+                    }
+                    prev = s;
+                }
+            } catch (e) {
+                // Transient — keep polling.
+            }
+            if (!stopped) timer = setTimeout(tick, LIVE_INTERVAL_MS);
+        }
+        tick();
+
+        return () => {
+            stopped = true;
+            if (timer) clearTimeout(timer);
+        };
     }
 
     function getChartType(graphType) {
@@ -221,6 +419,67 @@
                 },
             },
         });
+    }
+
+    function renderHistoricalChart(cfg, data) {
+        showContainer('chart');
+
+        // Compact x-axis labels — HH:MM is plenty over a 24h span.
+        const labels = (data.ts || []).map(ts => {
+            const d = new Date(ts);
+            return `${String(d.getHours()).padStart(2, '0')}:` +
+                   `${String(d.getMinutes()).padStart(2, '0')}`;
+        });
+
+        const datasets = cfg.series.map(s => ({
+            label: s.label,
+            data: data[s.field] || [],
+            borderColor: s.color,
+            backgroundColor: s.fill
+                ? s.color.replace(/^#/, 'rgba(') /* hack-free fall through below */
+                : s.color,
+            // For filled area: build a translucent rgba from the hex.
+            ...(s.fill ? { backgroundColor: hexToRgba(s.color, 0.15), fill: true } : { fill: false }),
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 1.4,
+        }));
+
+        const yScale = {
+            ticks: { color: '#8b949e' },
+            grid:  { color: 'rgba(48,54,61,0.5)' },
+            title: { display: true, text: cfg.ylabel, color: '#8b949e' },
+        };
+        if (cfg.yMin !== undefined) yScale.min = cfg.yMin;
+        if (cfg.yMax !== undefined) yScale.max = cfg.yMax;
+
+        currentChart = new Chart(getCanvas(), {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                animation: false,
+                plugins: {
+                    legend: { labels: { color: '#c9d1d9' } },
+                    tooltip: { mode: 'index', intersect: false },
+                },
+                scales: {
+                    x: { ticks: { color: '#8b949e', maxTicksLimit: 8 },
+                         grid:  { color: 'rgba(48,54,61,0.3)' } },
+                    y: yScale,
+                },
+            },
+        });
+    }
+
+    function hexToRgba(hex, alpha) {
+        const m = hex.match(/^#([0-9a-f]{6})$/i);
+        if (!m) return hex;
+        const h = m[1];
+        const r = parseInt(h.slice(0, 2), 16);
+        const g = parseInt(h.slice(2, 4), 16);
+        const b = parseInt(h.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     }
 
     function renderDoughnutChart(data) {
@@ -277,46 +536,42 @@
 
     function renderTreemap(data) {
         showContainer('treemap');
-        treemapContainer.innerHTML = '';
-        const items = data.items.sort((a, b) => b.size - a.size);
-        const totalSize = items.reduce((s, i) => s + i.size, 0);
-        const W = treemapContainer.clientWidth;
-        const H = treemapContainer.clientHeight;
+        // Shared squarified-treemap helper at static/graphs/treemap.js.
+        window.HelixTreemap.render(treemapContainer, data.items || [], CHART_COLORS);
+    }
 
-        // Simple squarified treemap layout
-        let x = 0, y = 0, rowH = 0, rowW = W;
-        let remaining = totalSize;
+    // Builds a small CanvasTexture with the label text. Reused across
+    // all sprites — small enough that creating ~80 of them is fine.
+    function makeLabelSprite(text, color) {
+        const fontPx = 22;
+        const padX = 8, padY = 4;
+        const meas = document.createElement('canvas').getContext('2d');
+        meas.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        const tw = Math.ceil(meas.measureText(text).width);
 
-        items.forEach((item, i) => {
-            const frac = item.size / Math.max(remaining, 1);
-            const area = (item.size / totalSize) * W * H;
-            let w, h;
+        const cnv = document.createElement('canvas');
+        cnv.width  = tw + padX * 2;
+        cnv.height = fontPx + padY * 2;
+        const ctx = cnv.getContext('2d');
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        ctx.fillRect(0, 0, cnv.width, cnv.height);
+        ctx.fillStyle = color;
+        ctx.font = `${fontPx}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+        ctx.textBaseline = 'top';
+        ctx.fillText(text, padX, padY);
 
-            if (rowW > 0) {
-                w = Math.max(30, (item.size / totalSize) * W);
-                h = Math.max(20, area / w);
-                if (x + w > W) { x = 0; y += rowH; rowH = 0; }
-                rowH = Math.max(rowH, h);
-            } else {
-                w = 60; h = 30;
-            }
-
-            if (y + h > H) h = H - y;
-            if (h <= 0) return;
-
-            const div = document.createElement('div');
-            div.className = 'treemap-item';
-            div.style.left = x + 'px';
-            div.style.top = y + 'px';
-            div.style.width = w + 'px';
-            div.style.height = h + 'px';
-            div.style.background = CHART_COLORS[i % CHART_COLORS.length];
-            div.title = `${item.path}: ${item.size} MB`;
-            div.textContent = w > 60 ? `${item.path.split('/').pop()} (${item.size}M)` : '';
-            treemapContainer.appendChild(div);
-
-            x += w;
-        });
+        const texture = new THREE.CanvasTexture(cnv);
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: texture, transparent: true, depthTest: false,
+        }));
+        // Scale into world units. The /8 keeps text legible against
+        // the 1.5-unit spheres without overwhelming them.
+        sprite.scale.set(cnv.width / 8, cnv.height / 8, 1);
+        // Render labels above their spheres.
+        sprite.renderOrder = 10;
+        return sprite;
     }
 
     function render3DNetwork(data) {
@@ -334,114 +589,177 @@
         renderer.setSize(W, H);
         threeContainer.appendChild(renderer.domElement);
 
+        // Floating tooltip — DOM element layered over the canvas.
+        const tooltip = document.createElement('div');
+        Object.assign(tooltip.style, {
+            position: 'absolute', pointerEvents: 'none', display: 'none',
+            background: 'rgba(13, 17, 23, 0.95)', color: '#c9d1d9',
+            border: '1px solid #30363d', borderRadius: '4px',
+            padding: '0.4rem 0.6rem',
+            font: '0.78rem ui-monospace, SFMono-Regular, Menlo, monospace',
+            whiteSpace: 'nowrap', zIndex: 10,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)',
+        });
+        threeContainer.style.position = 'relative';
+        threeContainer.appendChild(tooltip);
+
         const nodes = data.nodes || [];
         const links = data.links || [];
 
-        // Assign random 3D positions
         const positions = {};
         const meshes = {};
+        const meshList = [];   // for raycasting
         const groups = {};
         let groupIdx = 0;
 
         nodes.forEach(n => {
-            if (!groups[n.group]) groups[n.group] = groupIdx++;
-            const color = new THREE.Color(CHART_COLORS[groups[n.group] % CHART_COLORS.length]);
-            const geo = new THREE.SphereGeometry(1.5, 12, 12);
-            const mat = new THREE.MeshBasicMaterial({ color });
-            const mesh = new THREE.Mesh(geo, mat);
+            if (!(n.group in groups)) groups[n.group] = groupIdx++;
+            const colorHex = CHART_COLORS[groups[n.group] % CHART_COLORS.length];
+            const color = new THREE.Color(colorHex);
+
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(1.8, 16, 16),
+                new THREE.MeshBasicMaterial({ color }),
+            );
             mesh.position.set(
                 (Math.random() - 0.5) * 300,
                 (Math.random() - 0.5) * 300,
                 (Math.random() - 0.5) * 300,
             );
+            mesh.userData = { node: n, color: colorHex };
             positions[n.id] = mesh.position;
             meshes[n.id] = mesh;
+            meshList.push(mesh);
             scene.add(mesh);
         });
 
-        // Links as lines
-        links.forEach(l => {
-            if (positions[l.source] && positions[l.target]) {
-                const geo = new THREE.BufferGeometry().setFromPoints([
-                    positions[l.source], positions[l.target],
-                ]);
-                const mat = new THREE.LineBasicMaterial({ color: 0x30363d, transparent: true, opacity: 0.4 });
-                scene.add(new THREE.Line(geo, mat));
-            }
-        });
-
-        // Simple force simulation (a few iterations)
-        for (let iter = 0; iter < 50; iter++) {
-            const nodeArr = Object.keys(positions);
-            // Repulsion
-            for (let i = 0; i < nodeArr.length; i++) {
-                for (let j = i+1; j < nodeArr.length; j++) {
-                    const a = positions[nodeArr[i]], b = positions[nodeArr[j]];
+        // Force simulation — relax positions before adding sprites or
+        // links, so the connecting line geometries see the final spots.
+        for (let iter = 0; iter < 80; iter++) {
+            const ids = Object.keys(positions);
+            for (let i = 0; i < ids.length; i++) {
+                for (let j = i + 1; j < ids.length; j++) {
+                    const a = positions[ids[i]], b = positions[ids[j]];
                     const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-                    const dist = Math.max(1, Math.sqrt(dx*dx + dy*dy + dz*dz));
-                    const force = 50 / (dist * dist);
-                    a.x += (dx/dist) * force;
-                    a.y += (dy/dist) * force;
-                    a.z += (dz/dist) * force;
-                    b.x -= (dx/dist) * force;
-                    b.y -= (dy/dist) * force;
-                    b.z -= (dz/dist) * force;
+                    const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy + dz * dz));
+                    const f = 80 / (dist * dist);
+                    a.x += (dx / dist) * f; a.y += (dy / dist) * f; a.z += (dz / dist) * f;
+                    b.x -= (dx / dist) * f; b.y -= (dy / dist) * f; b.z -= (dz / dist) * f;
                 }
             }
-            // Attraction along links
             links.forEach(l => {
                 const a = positions[l.source], b = positions[l.target];
                 if (!a || !b) return;
                 const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-                const dist = Math.max(1, Math.sqrt(dx*dx + dy*dy + dz*dz));
-                const force = (dist - 20) * 0.01;
-                a.x += (dx/dist) * force;
-                a.y += (dy/dist) * force;
-                a.z += (dz/dist) * force;
-                b.x -= (dx/dist) * force;
-                b.y -= (dy/dist) * force;
-                b.z -= (dz/dist) * force;
+                const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy + dz * dz));
+                const f = (dist - 22) * 0.012;
+                a.x += (dx / dist) * f; a.y += (dy / dist) * f; a.z += (dz / dist) * f;
+                b.x -= (dx / dist) * f; b.y -= (dy / dist) * f; b.z -= (dz / dist) * f;
             });
         }
 
-        // Rebuild link geometries after simulation
-        // (they were created before simulation, so recreate)
-        scene.children = scene.children.filter(c => !(c instanceof THREE.Line));
-        links.forEach(l => {
-            if (positions[l.source] && positions[l.target]) {
-                const geo = new THREE.BufferGeometry().setFromPoints([
-                    positions[l.source].clone(), positions[l.target].clone(),
-                ]);
-                const mat = new THREE.LineBasicMaterial({ color: 0x30363d, transparent: true, opacity: 0.4 });
-                scene.add(new THREE.Line(geo, mat));
-            }
+        // Sprite labels — short PID for the always-visible label, full
+        // info shown on hover via the DOM tooltip.
+        nodes.forEach(n => {
+            const mesh = meshes[n.id];
+            if (!mesh) return;
+            const sprite = makeLabelSprite(String(n.id), '#e6edf3');
+            sprite.position.copy(mesh.position);
+            sprite.position.y += 4;  // float above the sphere
+            scene.add(sprite);
         });
 
-        // Orbit controls (manual)
+        // Connecting lines drawn after the simulation so they match
+        // final positions.
+        links.forEach(l => {
+            const a = positions[l.source], b = positions[l.target];
+            if (!a || !b) return;
+            const geo = new THREE.BufferGeometry().setFromPoints([a.clone(), b.clone()]);
+            const mat = new THREE.LineBasicMaterial({
+                color: 0x4a5057, transparent: true, opacity: 0.45,
+            });
+            scene.add(new THREE.Line(geo, mat));
+        });
+
+        // ----- interactions -----
         let isDragging = false, prevX = 0, prevY = 0;
         let rotX = 0, rotY = 0;
-        const pivot = new THREE.Object3D();
-        scene.add(pivot);
+        let dist = 200;
 
-        renderer.domElement.addEventListener('mousedown', e => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
-        renderer.domElement.addEventListener('mouseup', () => isDragging = false);
-        renderer.domElement.addEventListener('mouseleave', () => isDragging = false);
-        renderer.domElement.addEventListener('mousemove', e => {
-            if (!isDragging) return;
-            rotY += (e.clientX - prevX) * 0.005;
-            rotX += (e.clientY - prevY) * 0.005;
+        const raycaster = new THREE.Raycaster();
+        const mouseNDC = new THREE.Vector2();
+        let hovered = null;
+
+        function onMove(e) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            if (isDragging) {
+                rotY += (e.clientX - prevX) * 0.005;
+                rotX += (e.clientY - prevY) * 0.005;
+                rotX = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, rotX));
+                prevX = e.clientX; prevY = e.clientY;
+                tooltip.style.display = 'none';
+                hovered = null;
+                return;
+            }
+            // Raycast for hover.
+            mouseNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouseNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouseNDC, camera3d);
+            const hits = raycaster.intersectObjects(meshList, false);
+            if (hits.length === 0) {
+                if (hovered) {
+                    hovered.material.color.set(hovered.userData.color);
+                    hovered = null;
+                }
+                tooltip.style.display = 'none';
+                return;
+            }
+            const hit = hits[0].object;
+            if (hovered !== hit) {
+                if (hovered) hovered.material.color.set(hovered.userData.color);
+                hovered = hit;
+                // Brighten the hovered sphere.
+                hovered.material.color.set('#ffffff');
+            }
+            const n = hit.userData.node;
+            tooltip.innerHTML =
+                '<div style="color:#79c0ff;">PID ' + n.id + '</div>' +
+                '<div style="color:#e6edf3;">' +
+                  (n.label || n.group || '?').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) +
+                '</div>' +
+                '<div style="color:#8b949e;">group: ' +
+                  String(n.group).replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) +
+                '</div>';
+            tooltip.style.left = (e.clientX - rect.left + 14) + 'px';
+            tooltip.style.top  = (e.clientY - rect.top + 14) + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        renderer.domElement.addEventListener('mousedown', e => {
+            isDragging = true;
             prevX = e.clientX; prevY = e.clientY;
+            tooltip.style.display = 'none';
         });
+        window.addEventListener('mouseup', () => { isDragging = false; });
+        renderer.domElement.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+            if (hovered) {
+                hovered.material.color.set(hovered.userData.color);
+                hovered = null;
+            }
+        });
+        renderer.domElement.addEventListener('mousemove', onMove);
         renderer.domElement.addEventListener('wheel', e => {
-            camera3d.position.z = Math.max(50, Math.min(500, camera3d.position.z + e.deltaY * 0.5));
-        });
+            e.preventDefault();
+            dist = Math.max(50, Math.min(500, dist + e.deltaY * 0.5));
+        }, { passive: false });
 
         let animId;
         function animate() {
             animId = requestAnimationFrame(animate);
-            camera3d.position.x = camera3d.position.z * Math.sin(rotY) * Math.cos(rotX);
-            camera3d.position.y = camera3d.position.z * Math.sin(rotX);
-            camera3d.position.z = camera3d.position.z * Math.cos(rotY) * Math.cos(rotX);
+            camera3d.position.x = dist * Math.sin(rotY) * Math.cos(rotX);
+            camera3d.position.y = dist * Math.sin(rotX);
+            camera3d.position.z = dist * Math.cos(rotY) * Math.cos(rotX);
             camera3d.lookAt(0, 0, 0);
             renderer.render(scene, camera3d);
         }
@@ -450,6 +768,7 @@
         threeCleanup = () => {
             cancelAnimationFrame(animId);
             renderer.dispose();
+            tooltip.remove();
             threeContainer.innerHTML = '';
         };
     }
@@ -460,9 +779,50 @@
         destroyChart();
         descEl.textContent = '';
         titleEl.textContent = '';
+        lastData = null;
+        lastGraphType = graphType;
 
         // Reset canvas (Chart.js needs a fresh one each time)
         chartContainer.innerHTML = '<canvas id="chart-canvas"></canvas>';
+
+        // Live graphs: start the polling loop and return — no /data fetch.
+        if (isLiveType(graphType)) {
+            const cfg = LIVE_CONFIGS[graphType];
+            titleEl.textContent = cfg.title;
+            descEl.textContent  = DESCRIPTIONS[graphType] || '';
+            liveCleanup = startLivePolling(cfg);
+            loading.textContent = `live · ${LIVE_INTERVAL_MS} ms`;
+            loading.style.display = 'inline';
+            return;
+        }
+
+        // Historical (last 24 h): one fetch from the ring buffer, line chart.
+        if (isHistoricalType(graphType)) {
+            const cfg = HISTORICAL_CONFIGS[graphType];
+            titleEl.textContent = cfg.title;
+            descEl.textContent  = DESCRIPTIONS[graphType] || '';
+            try {
+                const r = await fetch(`${HISTORY_URL}?hours=24`,
+                                      { credentials: 'same-origin' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                if (!data.count) {
+                    descEl.innerHTML +=
+                        ' <span style="color:#d29922">— no samples in the ring buffer yet. ' +
+                        'Run <code>manage.py sample_system</code> on a 30-second cron, or just leave a tab on /sysinfo/ open for a while.</span>';
+                }
+                lastData = { ...data, title: cfg.title };
+                renderHistoricalChart(cfg, data);
+            } catch (err) {
+                titleEl.textContent = 'Error';
+                descEl.textContent = err.message;
+            }
+            loading.style.display = 'none';
+            return;
+        }
+
+        // Reset the badge text since live mode may have rewritten it.
+        loading.textContent = 'Loading...';
 
         try {
             const resp = await fetch(`{% url 'graphs:data' %}?type=${graphType}`);
@@ -471,6 +831,7 @@
 
             titleEl.textContent = data.title || graphType;
             descEl.textContent = DESCRIPTIONS[graphType] || '';
+            lastData = data;
 
             if (chartType === 'line') renderLineChart(data);
             else if (chartType === 'doughnut') renderDoughnutChart(data);
@@ -486,32 +847,35 @@
     }
 
     const saveBtn = document.getElementById('save-btn');
-    const pdfBtn = document.getElementById('pdf-btn');
+    const pdfForm = document.getElementById('pdf-form');
+    const pdfFormType = document.getElementById('pdf-form-type');
+    const pdfFormData = document.getElementById('pdf-form-data');
     const saveMsg = document.getElementById('save-msg');
 
-    // Update PDF link when graph changes
-    function updatePdfLink() {
-        pdfBtn.href = `{% url 'graphs:pdf' %}?type=${selector.value}`;
-    }
-
-    selector.addEventListener('change', () => { loadGraph(); updatePdfLink(); });
+    selector.addEventListener('change', loadGraph);
     refreshBtn.addEventListener('click', loadGraph);
 
+    // Snapshot save: capture the on-screen data, not whatever the
+    // server happens to be returning right now.
     saveBtn.addEventListener('click', async () => {
-        const graphType = selector.value;
+        if (!lastData) {
+            saveMsg.textContent = 'Nothing to save yet — the graph is still loading.';
+            saveMsg.style.color = '#d29922';
+            saveMsg.style.display = 'inline';
+            return;
+        }
         try {
-            const resp = await fetch(`{% url 'graphs:data' %}?type=${graphType}`);
-            const data = await resp.json();
             const saveResp = await fetch('{% url "graphs:save" %}', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': '{{ csrf_token }}',
                 },
-                body: JSON.stringify({ type: graphType, data: data }),
+                body: JSON.stringify({ type: lastGraphType, data: lastData }),
             });
             const result = await saveResp.json();
             saveMsg.textContent = result.message || 'Saved!';
+            saveMsg.style.color = '#3fb950';
             saveMsg.style.display = 'inline';
             setTimeout(() => saveMsg.style.display = 'none', 3000);
         } catch (err) {
@@ -521,7 +885,14 @@
         }
     });
 
-    updatePdfLink();
+    // PDF export: stamp the displayed snapshot into the form right
+    // before the browser submits, so the printed page matches the
+    // chart on screen rather than re-fetching live state.
+    pdfForm.addEventListener('submit', () => {
+        pdfFormType.value = lastGraphType || selector.value;
+        pdfFormData.value = lastData ? JSON.stringify(lastData) : '';
+    });
+
     loadGraph();
 })();
 </script>

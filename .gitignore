@@ -8,6 +8,12 @@ __pycache__/
 .eggs/
 build/
 dist/
+# But vendored JS libraries keep their upstream `build/` and `dist/`
+# layout under static/js/ — don't let the Python rules above swallow them.
+!static/js/**/build/
+!static/js/**/build/**
+!static/js/**/dist/
+!static/js/**/dist/**
 develop-eggs/
 sdist/
 parts/

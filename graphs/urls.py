@@ -6,6 +6,8 @@ app_name = 'graphs'
 
 urlpatterns = [
     path('', views.graphs_home, name='home'),
+    path('sample/', views.sample, name='sample'),
+    path('history/json/', views.history, name='history_json'),
     path('data/', views.graph_data, name='data'),
     path('save/', views.graph_save, name='save'),
     path('pdf/', views.graph_pdf, name='pdf'),

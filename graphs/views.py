@@ -5,13 +5,25 @@ import subprocess
 import time
 from datetime import datetime
 
+from datetime import timedelta
+
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.http import require_POST
+from django.utils import timezone
+from django.views.decorators.http import require_GET, require_POST
 from fpdf import FPDF
 
-from .models import GraphSnapshot
+from .models import GraphSnapshot, SystemSample
+
+
+# How often /graphs/sample/ piggy-backs a SystemSample insert. The poll
+# rate is ~500 ms but we don't want a row every half second — once per
+# ~25 s gives 2 880 rows / day at most.
+PERSIST_THROTTLE_SEC = 25
+# Ring-buffer length. SQLite copes happily with the implied row count
+# (~5 800 rows for 48 h) and the index makes lookups instant.
+RETAIN_HOURS = 48
 
 
 GRAPH_TYPE_LABELS = {
@@ -34,6 +46,153 @@ GRAPH_TYPE_LABELS = {
 def graphs_home(request):
     history = GraphSnapshot.objects.all()[:50]
     return render(request, 'graphs/home.html', {'history': history})
+
+
+def _read_proc_state():
+    """Single-shot read of every live metric we care about. No sleeps."""
+    out = {}
+    try:
+        with open('/proc/stat') as f:
+            parts = [int(v) for v in f.readline().split()[1:]]
+        out['cpu_total'] = sum(parts)
+        out['cpu_idle']  = parts[3]
+    except Exception:
+        out['cpu_total'] = out['cpu_idle'] = 0
+    try:
+        with open('/proc/sys/kernel/random/entropy_avail') as f:
+            out['entropy'] = int(f.read().strip())
+    except Exception:
+        out['entropy'] = 0
+    try:
+        with open('/proc/loadavg') as f:
+            la = f.read().split()
+        out['load1']  = float(la[0])
+        out['load5']  = float(la[1])
+        out['load15'] = float(la[2])
+    except Exception:
+        out['load1'] = out['load5'] = out['load15'] = 0.0
+    try:
+        mem = {}
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if ':' not in line:
+                    continue
+                k, v = line.split(':', 1)
+                mem[k.strip()] = int(v.strip().split()[0])  # kB
+        total_kb = mem.get('MemTotal', 0)
+        avail_kb = mem.get('MemAvailable', 0)
+        out['mem_total_kb'] = total_kb
+        out['mem_avail_kb'] = avail_kb
+        out['mem_total_mb'] = total_kb // 1024
+        out['mem_used_mb']  = (total_kb - avail_kb) // 1024
+        out['mem_used_pct'] = (
+            round(100 * (1 - avail_kb / max(total_kb, 1)), 1) if total_kb else 0.0
+        )
+        swap_total_kb = mem.get('SwapTotal', 0)
+        swap_free_kb  = mem.get('SwapFree', 0)
+        out['swap_total_mb'] = swap_total_kb // 1024
+        out['swap_used_mb']  = max(0, (swap_total_kb - swap_free_kb)) // 1024
+    except Exception:
+        out['mem_total_kb'] = out['mem_avail_kb'] = 0
+        out['mem_total_mb'] = out['mem_used_mb'] = 0
+        out['mem_used_pct'] = 0.0
+        out['swap_total_mb'] = out['swap_used_mb'] = 0
+    return out
+
+
+def take_persistent_sample(force=False):
+    """Insert one SystemSample row (and prune old rows). Returns the
+    saved row, or None if throttled. Used both by the throttled
+    side-effect of /graphs/sample/ and by `manage.py sample_system`.
+
+    cpu_pct comes from a quick 80 ms double-read of /proc/stat — that
+    keeps each row internally consistent without depending on the gap
+    to the previous row (which can be hours if nothing was polling).
+    """
+    now = timezone.now()
+    if not force:
+        last = SystemSample.objects.order_by('-ts').first()
+        if last and (now - last.ts).total_seconds() < PERSIST_THROTTLE_SEC:
+            return None
+
+    a = _read_proc_state()
+    time.sleep(0.08)
+    b = _read_proc_state()
+    dt = b['cpu_total'] - a['cpu_total']
+    di = b['cpu_idle']  - a['cpu_idle']
+    cpu_pct = 0.0 if dt <= 0 else max(0.0, min(100.0, (1 - di / dt) * 100))
+
+    row = SystemSample.objects.create(
+        cpu_pct=round(cpu_pct, 2),
+        mem_used_mb=b['mem_used_mb'],
+        mem_total_mb=b['mem_total_mb'],
+        mem_used_pct=b['mem_used_pct'],
+        swap_used_mb=b['swap_used_mb'],
+        swap_total_mb=b['swap_total_mb'],
+        load1=b['load1'],
+        load5=b['load5'],
+        load15=b['load15'],
+        entropy=b['entropy'],
+    )
+    SystemSample.objects.filter(
+        ts__lt=now - timedelta(hours=RETAIN_HOURS)
+    ).delete()
+    return row
+
+
+@login_required
+@require_GET
+def sample(request):
+    """One instantaneous read of the live metrics the browser polls for.
+
+    Returns raw counters (cpu_total, cpu_idle) so the client can compute
+    deltas itself — keeps the live path stateless and ~1.5 ms. Side
+    effect: roughly once every 25 s, also persists a SystemSample row
+    (with an 80 ms cpu-pct double-read tacked on) so the ring buffer
+    accumulates samples for as long as anyone is looking at the page.
+    """
+    out = _read_proc_state()
+    out['ts'] = time.time()
+    take_persistent_sample()
+    return JsonResponse(out)
+
+
+@login_required
+@require_GET
+def history(request):
+    """Parallel-arrays JSON of the ring buffer over the last `hours`."""
+    try:
+        hours = float(request.GET.get('hours', 24))
+    except ValueError:
+        hours = 24
+    hours = max(0.1, min(RETAIN_HOURS, hours))
+    cutoff = timezone.now() - timedelta(hours=hours)
+
+    rows = list(
+        SystemSample.objects
+        .filter(ts__gte=cutoff)
+        .order_by('ts')
+        .values('ts', 'cpu_pct', 'mem_used_pct', 'mem_used_mb',
+                'load1', 'load5', 'load15',
+                'swap_used_mb', 'swap_total_mb', 'entropy')
+    )
+
+    def _swap_pct(r):
+        return (r['swap_used_mb'] / r['swap_total_mb'] * 100) if r['swap_total_mb'] else 0.0
+
+    return JsonResponse({
+        'count':        len(rows),
+        'hours':        hours,
+        'ts':           [r['ts'].isoformat() for r in rows],
+        'cpu_pct':      [r['cpu_pct'] for r in rows],
+        'mem_used_pct': [r['mem_used_pct'] for r in rows],
+        'mem_used_mb':  [r['mem_used_mb'] for r in rows],
+        'load1':        [r['load1'] for r in rows],
+        'load5':        [r['load5'] for r in rows],
+        'load15':       [r['load15'] for r in rows],
+        'swap_pct':     [round(_swap_pct(r), 2) for r in rows],
+        'entropy':      [r['entropy'] for r in rows],
+    })
 
 
 @login_required
@@ -78,31 +237,34 @@ def _run(cmd, default=''):
 
 
 def _cpu_history():
-    """Sample CPU usage over a few seconds to build a mini time series."""
-    samples = []
-    try:
-        for i in range(20):
-            with open('/proc/stat') as f:
-                line = f.readline()
-            parts = line.split()[1:]
-            vals = [int(v) for v in parts]
-            idle = vals[3]
-            total = sum(vals)
-            samples.append((total, idle))
-            if i < 19:
-                time.sleep(0.15)
+    """Single-shot CPU usage point.
 
-        labels = []
-        values = []
-        for i in range(1, len(samples)):
-            dt = samples[i][0] - samples[i-1][0]
-            di = samples[i][1] - samples[i-1][1]
-            usage = round((1 - di / max(dt, 1)) * 100, 1)
-            labels.append(f'{i * 150}ms')
-            values.append(usage)
-        return {'labels': labels, 'values': values, 'ylabel': 'CPU %', 'title': 'CPU Usage (Live Sampled)'}
+    Until 2026-04-29 this slept ~3 seconds inside the request handler
+    while it walked /proc/stat 20 times. That blocked a Django worker
+    end-to-end for the whole capture. The live time-series rendering
+    moved to the browser (it polls /graphs/sample/), so this function
+    only exists now to feed the snapshot save and PDF export paths —
+    we take two /proc/stat reads ~80 ms apart and report the resulting
+    CPU%.
+    """
+    try:
+        with open('/proc/stat') as f:
+            a = [int(v) for v in f.readline().split()[1:]]
+        time.sleep(0.08)
+        with open('/proc/stat') as f:
+            b = [int(v) for v in f.readline().split()[1:]]
+        dt = sum(b) - sum(a)
+        di = b[3] - a[3]
+        usage = round((1 - di / max(dt, 1)) * 100, 1)
     except Exception:
-        return {'labels': [f'{i}s' for i in range(10)], 'values': [0]*10, 'ylabel': 'CPU %', 'title': 'CPU Usage'}
+        usage = 0.0
+    return {
+        'labels': ['now'],
+        'values': [usage],
+        'ylabel': 'CPU %',
+        'title': 'CPU Usage (instant)',
+        'live': True,
+    }
 
 
 def _memory_history():
@@ -315,29 +477,70 @@ def _top_processes():
 
 
 def _filesystem_tree():
-    """Filesystem usage as a treemap."""
+    """Filesystem usage as a treemap.
+
+    Scans BASE_DIR (the velour project root) at depth 1 — that's
+    typically a few hundred MB across a dozen subdirectories, so a
+    `du` call is fast and the result has enough variety to be useful.
+    Cached for 5 min: the underlying scan is O(seconds) on cold
+    filesystem cache, and disk usage rarely changes minute-to-minute.
+
+    The previous implementation scanned `/home`, which on a real
+    workstation can be 60+ GB — well past the 5 s subprocess timeout.
+    Result: every request returned items=[] and the treemap rendered
+    nothing.
+    """
+    from django.conf import settings
+    from django.core.cache import cache
+
+    target = str(settings.BASE_DIR)
+    cache_key = f'graphs.filesystem_tree.{target}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     items = []
     try:
-        raw = _run(['du', '-d', '1', '-m', '/home'], default='')
-        for line in raw.splitlines():
+        # 30 s budget — plenty for a project-sized dir even cold-cache;
+        # the cache makes repeat polling instant.
+        out = subprocess.check_output(
+            ['du', '-d', '1', '-m', target],
+            text=True, timeout=30, stderr=subprocess.DEVNULL,
+        )
+        for line in out.splitlines():
             parts = line.split('\t')
-            if len(parts) == 2:
-                size = int(parts[0])
-                path = parts[1]
-                if size > 0:
-                    items.append({'path': path, 'size': size})
+            if len(parts) != 2:
+                continue
+            size_mb = int(parts[0])
+            path = parts[1]
+            # Skip the root entry — its area equals the sum of children
+            # so including it would distort the treemap layout.
+            if path == target or size_mb <= 0:
+                continue
+            items.append({'path': path, 'size': size_mb})
     except Exception:
-        pass
-    if not items:
-        try:
-            raw = _run(['du', '-d', '1', '-m', '/tmp'], default='')
-            for line in raw.splitlines():
-                parts = line.split('\t')
-                if len(parts) == 2:
-                    items.append({'path': parts[1], 'size': int(parts[0])})
-        except Exception:
-            items = [{'path': '/unknown', 'size': 1}]
-    return {'items': items, 'title': 'Filesystem Usage (Treemap)'}
+        items = []
+
+    items.sort(key=lambda i: -i['size'])
+    # Keep the top N visually-distinct entries, roll the rest into a
+    # single "(other)" tile so the area is still correctly proportioned
+    # but the visualisation isn't dominated by 1-2 px specks of dust.
+    TOP_N = 12
+    head = items[:TOP_N]
+    tail = items[TOP_N:]
+    if tail:
+        head.append({
+            'path': '(other · {} dirs)'.format(len(tail)),
+            'size': sum(i['size'] for i in tail),
+        })
+    items = head
+
+    result = {
+        'items': items,
+        'title': f'Filesystem Usage · {target} (top {TOP_N})',
+    }
+    cache.set(cache_key, result, 60 * 5)  # 5 minutes
+    return result
 
 
 def _user_sessions():
@@ -363,21 +566,22 @@ def _user_sessions():
 
 
 def _entropy():
-    """Available entropy (randomness pool)."""
-    samples = []
+    """Single-shot entropy pool reading.
+
+    Live sampling moved to the browser via /graphs/sample/; this stub
+    returns one current value so PDF/snapshot paths still work.
+    """
     try:
-        for i in range(20):
-            with open('/proc/sys/kernel/random/entropy_avail') as f:
-                samples.append(int(f.read().strip()))
-            if i < 19:
-                time.sleep(0.1)
+        with open('/proc/sys/kernel/random/entropy_avail') as f:
+            value = int(f.read().strip())
     except Exception:
-        samples = [0] * 20
+        value = 0
     return {
-        'labels': [f'{i*100}ms' for i in range(len(samples))],
-        'values': samples,
+        'labels': ['now'],
+        'values': [value],
         'ylabel': 'Bits',
-        'title': 'Kernel Entropy Pool (Live Sampled)',
+        'title': 'Kernel Entropy Pool (instant)',
+        'live': True,
     }
 
 
@@ -452,18 +656,36 @@ def graph_history_data(request, pk):
 
 @login_required
 def graph_pdf(request):
-    """Generate an A4 PDF of the current graph data."""
-    graph_type = request.GET.get('type', 'memory_history')
+    """Generate an A4 PDF of the current graph data.
 
-    # If snapshot ID is provided, use that data
-    snap_id = request.GET.get('snapshot')
-    if snap_id:
-        snap = get_object_or_404(GraphSnapshot, pk=snap_id)
-        data = snap.data
-        timestamp = snap.created_at.strftime('%Y-%m-%d %H:%M:%S')
-    else:
-        data = _get_graph_data(graph_type)
+    Three modes:
+      POST data=<json>&type=<str>   → render that exact blob. The home
+        page uses this so the PDF matches what was on screen at click
+        time (re-fetching could surface a different system state).
+      GET  ?snapshot=N              → render a saved GraphSnapshot.
+      GET  ?type=<str>              → fall back to a fresh fetch
+        (kept for old bookmarks / scripts).
+    """
+    if request.method == 'POST':
+        graph_type = request.POST.get('type', '')
+        raw = request.POST.get('data', '')
+        try:
+            data = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            data = {}
+        if not data:
+            data = _get_graph_data(graph_type)
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        graph_type = request.GET.get('type', 'memory_history')
+        snap_id = request.GET.get('snapshot')
+        if snap_id:
+            snap = get_object_or_404(GraphSnapshot, pk=snap_id)
+            data = snap.data
+            timestamp = snap.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            data = _get_graph_data(graph_type)
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     title = data.get('title', graph_type)
 

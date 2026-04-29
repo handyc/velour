@@ -2,13 +2,84 @@
 
 {% block title %}System Info - Velour{% endblock %}
 
+{% block extra_head %}
+<style>
+    .sysinfo-status {
+        display: inline-flex; align-items: center; gap: 0.4rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.78rem; color: #6e7681;
+        margin-left: 0.7rem; vertical-align: middle;
+    }
+    .sysinfo-status .dot {
+        display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%;
+        background: #3fb950; box-shadow: 0 0 4px rgba(63, 185, 80, 0.6);
+    }
+    .sysinfo-status .dot.stale { background: #d29922; box-shadow: none; }
+    .sysinfo-status .dot.error { background: #f85149; box-shadow: none; }
+    .info-table .spark {
+        display: inline-block; vertical-align: middle; margin-left: 0.6rem;
+    }
+
+    /* Sortable processes table — replaces the old <pre> dump. */
+    .ps-table {
+        width: 100%; border-collapse: collapse;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem;
+    }
+    .ps-table thead tr {
+        border-bottom: 1px solid #30363d;
+        color: #8b949e;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-size: 0.7rem;
+    }
+    .ps-table th {
+        padding: 0.4rem 0.6rem;
+        text-align: left;
+        cursor: pointer;
+        user-select: none;
+    }
+    .ps-table th.num { text-align: right; }
+    .ps-table th .arrow {
+        opacity: 0; margin-left: 0.2rem; font-size: 0.85em;
+    }
+    .ps-table th.sort-active { color: #c9d1d9; }
+    .ps-table th.sort-active .arrow { opacity: 1; }
+    .ps-table th:hover { color: #79c0ff; }
+    .ps-table tbody tr {
+        border-bottom: 1px solid #21262d;
+    }
+    .ps-table tbody tr:hover { background: #161b22; }
+    .ps-table td { padding: 0.3rem 0.6rem; color: #c9d1d9; }
+    .ps-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .ps-table td.user { color: #8b949e; }
+    .ps-table td.comm {
+        color: #c9d1d9; max-width: 32rem;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* Bar shaded behind %CPU cell for at-a-glance hot-process scanning. */
+    .ps-table td.pcpu { position: relative; }
+    .ps-table td.pcpu .bar {
+        position: absolute; left: 0; top: 0; bottom: 0;
+        background: rgba(88, 166, 255, 0.18);
+        z-index: 0;
+    }
+    .ps-table td.pcpu .val { position: relative; z-index: 1; }
+</style>
+{% endblock %}
+
 {% block content %}
-<h1>System Information</h1>
+<h1 style="display: flex; align-items: baseline; gap: 0.7rem;">
+    System Information
+    <span id="sysinfo-status" class="sysinfo-status" title="Live polling state">
+        <span class="dot"></span><span id="sysinfo-status-text">live · 3 s</span>
+    </span>
+</h1>
 
 <div class="dashboard-grid">
     <div class="card">
         <h3>General</h3>
-        <table class="info-table">
+        <table class="info-table" id="basic-table">
             {% for key, val in basic.items %}
             <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
             {% endfor %}
@@ -17,18 +88,18 @@
 
     <div class="card">
         <h3>CPU</h3>
-        <table class="info-table">
+        <table class="info-table" id="cpu-table">
             {% for key, val in cpu.items %}
-            <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
+            <tr data-key="{{ key }}"><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
             {% endfor %}
         </table>
     </div>
 
     <div class="card">
         <h3>Memory</h3>
-        <table class="info-table">
+        <table class="info-table" id="memory-table">
             {% for key, val in memory.items %}
-            <tr><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
+            <tr data-key="{{ key }}"><td class="info-label">{{ key }}</td><td>{{ val }}</td></tr>
             {% endfor %}
         </table>
     </div>
@@ -36,31 +107,292 @@
 
 <h2 style="margin-top: 2rem;">Disk Usage</h2>
 <div class="card">
-    <pre class="info-pre">{% for line in disk_lines %}{{ line }}
+    <pre class="info-pre" id="disk-pre">{% for line in disk_lines %}{{ line }}
 {% endfor %}</pre>
 </div>
 
 <h2 style="margin-top: 2rem;">Network Interfaces</h2>
 <div class="card">
-    <pre class="info-pre">{% for line in net_lines %}{{ line }}
+    <pre class="info-pre" id="net-pre">{% for line in net_lines %}{{ line }}
 {% endfor %}</pre>
 </div>
 
-<h2 style="margin-top: 2rem;">Top Processes (by CPU)</h2>
+<h2 style="margin-top: 2rem;">Top Processes
+    <span style="font-size: 0.7em; font-weight: normal; color: #8b949e;">
+        — instantaneous %CPU (Irix mode), refreshed live · click a column to sort
+    </span>
+</h2>
 <div class="card">
-    <pre class="info-pre">{% for line in ps_lines %}{{ line }}
-{% endfor %}</pre>
+    <table class="ps-table" id="ps-table">
+        <thead>
+            <tr>
+                <th data-sort="pid"  class="num">PID<span class="arrow">↑</span></th>
+                <th data-sort="user">USER<span class="arrow">↑</span></th>
+                <th data-sort="pcpu" class="num sort-active">%CPU<span class="arrow">↓</span></th>
+                <th data-sort="pmem" class="num">%MEM<span class="arrow">↑</span></th>
+                <th data-sort="rss_kb" class="num">RSS<span class="arrow">↑</span></th>
+                <th data-sort="comm">COMMAND<span class="arrow">↑</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {# initial server-rendered rows, replaced by JS on first poll #}
+            {% for r in ps_rows %}
+            <tr>
+                <td class="num">{{ r.pid }}</td>
+                <td class="user">{{ r.user }}</td>
+                <td class="num pcpu"><span class="val">{{ r.pcpu|floatformat:1 }}</span></td>
+                <td class="num">{{ r.pmem|floatformat:1 }}</td>
+                <td class="num">{{ r.rss_kb }}</td>
+                <td class="comm">{{ r.comm }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 
+<div id="who-block">
 {% if who_lines %}
 <h2 style="margin-top: 2rem;">Logged-In Users</h2>
 <div class="card">
-    <pre class="info-pre">{% for line in who_lines %}{{ line }}
+    <pre class="info-pre" id="who-pre">{% for line in who_lines %}{{ line }}
 {% endfor %}</pre>
 </div>
 {% endif %}
+</div>
 
 <div style="margin-top: 1.5rem;">
     <a href="{% url 'dashboard:home' %}" class="btn btn-secondary">Back to Dashboard</a>
 </div>
+
+<script>
+(function () {
+    'use strict';
+
+    const SNAPSHOT_URL = '{% url "sysinfo:snapshot" %}';
+    const HISTORY_URL  = '{% url "graphs:history_json" %}?hours=1';
+    const POLL_MS    = 3000;   // snapshot poll cadence
+    const HISTORY_MS = 60000;  // sparkline refresh cadence
+
+    const statusDot  = document.querySelector('#sysinfo-status .dot');
+    const statusText = document.getElementById('sysinfo-status-text');
+
+    function setStatus(state, text) {
+        statusDot.classList.remove('stale', 'error');
+        if (state) statusDot.classList.add(state);
+        if (text) statusText.textContent = text;
+    }
+
+    // ------------------ DOM updaters ------------------
+
+    function rebuildTable(tbl, obj, sparks) {
+        // obj is a { key: value } mapping. We rebuild all rows. Sparks
+        // is a {key: svgString} map — appended to the value cell.
+        if (!tbl) return;
+        const rows = Object.entries(obj).map(([k, v]) => {
+            const spark = sparks && sparks[k] ? `<span class="spark">${sparks[k]}</span>` : '';
+            return `<tr data-key="${escapeHtml(k)}">` +
+                   `<td class="info-label">${escapeHtml(k)}</td>` +
+                   `<td>${escapeHtml(String(v))}${spark}</td></tr>`;
+        }).join('');
+        tbl.innerHTML = rows;
+    }
+
+    function rebuildPre(el, lines) {
+        if (!el) return;
+        el.textContent = (lines || []).join('\n');
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    }
+
+    function formatKB(kb) {
+        if (kb >= 1024 * 1024) return (kb / 1024 / 1024).toFixed(2) + ' GB';
+        if (kb >= 1024)        return (kb / 1024).toFixed(1) + ' MB';
+        return kb + ' kB';
+    }
+
+    // ------------------ processes table ------------------
+
+    let psSort = { field: 'pcpu', dir: 'desc' };
+    let psLastRows = [];
+
+    function rebuildPsTable(rows) {
+        psLastRows = rows || [];
+        const tbl = document.getElementById('ps-table');
+        if (!tbl) return;
+        const tbody = tbl.querySelector('tbody');
+
+        const sorted = psLastRows.slice().sort((a, b) => {
+            const av = a[psSort.field];
+            const bv = b[psSort.field];
+            if (av === bv) return 0;
+            // String compare for non-numeric fields, numeric otherwise.
+            const cmp = (typeof av === 'string')
+                ? String(av).localeCompare(String(bv))
+                : (av < bv ? -1 : 1);
+            return psSort.dir === 'asc' ? cmp : -cmp;
+        });
+
+        // Find max %CPU for the inline bar shading scale.
+        const maxCpu = sorted.reduce((m, r) => Math.max(m, r.pcpu), 0) || 1;
+
+        tbody.innerHTML = sorted.map(r => {
+            const barW = Math.min(100, (r.pcpu / maxCpu) * 100);
+            return '<tr>' +
+                `<td class="num">${r.pid}</td>` +
+                `<td class="user">${escapeHtml(r.user)}</td>` +
+                `<td class="num pcpu">` +
+                  `<div class="bar" style="width:${barW.toFixed(0)}%"></div>` +
+                  `<span class="val">${r.pcpu.toFixed(1)}</span></td>` +
+                `<td class="num">${r.pmem.toFixed(1)}</td>` +
+                `<td class="num">${formatKB(r.rss_kb)}</td>` +
+                `<td class="comm" title="${escapeHtml(r.comm)}">${escapeHtml(r.comm)}</td>` +
+            '</tr>';
+        }).join('');
+
+        // Update sort-active arrow on header.
+        tbl.querySelectorAll('thead th').forEach(th => {
+            th.classList.remove('sort-active');
+            const arrow = th.querySelector('.arrow');
+            if (th.dataset.sort === psSort.field) {
+                th.classList.add('sort-active');
+                if (arrow) arrow.textContent = psSort.dir === 'asc' ? '↑' : '↓';
+            } else if (arrow) {
+                arrow.textContent = '↑';
+            }
+        });
+    }
+
+    // Wire click-to-sort once. Subsequent table rebuilds preserve the
+    // current sort field/direction.
+    document.addEventListener('click', e => {
+        const th = e.target.closest('#ps-table thead th[data-sort]');
+        if (!th) return;
+        const field = th.dataset.sort;
+        if (psSort.field === field) {
+            psSort.dir = psSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            psSort.field = field;
+            // Numeric fields default to descending (largest first).
+            psSort.dir = ['pid', 'user', 'comm'].includes(field) ? 'asc' : 'desc';
+        }
+        rebuildPsTable(psLastRows);
+    });
+
+    // ------------------ sparklines ------------------
+
+    function sparkline(values, opts) {
+        opts = opts || {};
+        const w = opts.w || 110;
+        const h = opts.h || 16;
+        const color = opts.color || '#58a6ff';
+        if (!values || values.length < 2) return '';
+        let min = Infinity, max = -Infinity;
+        for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
+        // Avoid a flat baseline when all values are identical.
+        if (max - min < 1e-9) { max = min + 1; }
+        const range = max - min;
+        const pts = [];
+        for (let i = 0; i < values.length; i++) {
+            const x = (i / (values.length - 1)) * w;
+            // Round before .toString(16)-style formatting just in case
+            // we ever switch — and to keep the inline SVG compact.
+            const y = Math.round((h - ((values[i] - min) / range) * h) * 10) / 10;
+            pts.push(`${Math.round(x * 10) / 10},${y}`);
+        }
+        const path = `M ${pts[0]} L ${pts.slice(1).join(' L ')}`;
+        const fill = `M 0,${h} L ${pts.join(' L ')} L ${w},${h} Z`;
+        return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
+            <path d="${fill}" fill="${color}" opacity="0.18"/>
+            <path d="${path}" fill="none" stroke="${color}" stroke-width="1.2"/>
+        </svg>`;
+    }
+
+    // Cached most-recent sparkline strings, keyed by the row label they
+    // attach to. Refreshed on the slower history-poll cycle.
+    let sparks = {
+        cpu: { 'Load (1m / 5m / 15m)': '' },
+        mem: { 'Used': '', 'Swap Used': '' },
+    };
+
+    async function refreshHistory() {
+        try {
+            const r = await fetch(HISTORY_URL, { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const data = await r.json();
+            sparks.cpu['Load (1m / 5m / 15m)'] = sparkline(data.cpu_pct, { color: '#58a6ff' });
+            sparks.mem['Used']                 = sparkline(data.mem_used_pct, { color: '#d29922' });
+            sparks.mem['Swap Used']            = sparkline(data.swap_pct, { color: '#bc8cff' });
+        } catch (e) {
+            // Sparklines are decorative — silent failure is fine.
+        }
+    }
+
+    // ------------------ snapshot poll ------------------
+
+    let stopped = false;
+    let snapshotTimer = null;
+    let historyTimer = null;
+
+    async function pollSnapshot() {
+        try {
+            const r = await fetch(SNAPSHOT_URL, { credentials: 'same-origin' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            rebuildTable(document.getElementById('cpu-table'),    data.cpu,    sparks.cpu);
+            rebuildTable(document.getElementById('memory-table'), data.memory, sparks.mem);
+            rebuildPre(document.getElementById('disk-pre'), data.disk_lines);
+            rebuildPre(document.getElementById('net-pre'),  data.net_lines);
+            rebuildPsTable(data.ps_rows);
+            // who block can be empty (no logged-in users) — toggle the section.
+            const whoBlock = document.getElementById('who-block');
+            if (data.who_lines && data.who_lines.length) {
+                if (!document.getElementById('who-pre')) {
+                    whoBlock.innerHTML =
+                        '<h2 style="margin-top: 2rem;">Logged-In Users</h2>' +
+                        '<div class="card"><pre class="info-pre" id="who-pre"></pre></div>';
+                }
+                rebuildPre(document.getElementById('who-pre'), data.who_lines);
+            } else {
+                whoBlock.innerHTML = '';
+            }
+            setStatus(null, `live · ${POLL_MS / 1000} s`);
+        } catch (e) {
+            setStatus('stale', 'paused (network)');
+        }
+        if (!stopped) snapshotTimer = setTimeout(pollSnapshot, POLL_MS);
+    }
+
+    async function pollHistory() {
+        await refreshHistory();
+        if (!stopped) historyTimer = setTimeout(pollHistory, HISTORY_MS);
+    }
+
+    // Pause polling when the tab is hidden — avoids piling up requests
+    // when the user has the page open in a background tab.
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopped = true;
+            if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
+            if (historyTimer)  { clearTimeout(historyTimer);  historyTimer  = null; }
+            setStatus('stale', 'paused (tab hidden)');
+        } else if (stopped) {
+            stopped = false;
+            setStatus(null, `live · ${POLL_MS / 1000} s`);
+            pollSnapshot();
+            pollHistory();
+        }
+    });
+
+    // Kick off — history first so the very first snapshot draw already
+    // has sparklines.
+    refreshHistory().then(() => {
+        pollSnapshot();
+        pollHistory();
+    });
+})();
+</script>
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ species.name }} — L-System{% endblock %}
 
 {% block content %}
@@ -112,7 +113,7 @@
     <button id="preview-refresh" style="background:#30363d;color:#c9d1d9;border:1px solid #484f58;padding:0.2rem 0.6rem;border-radius:3px;font-size:0.82rem;cursor:pointer;">Refresh</button>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="{% static 'js/three/three.min.js' %}"></script>
 <script>
 (function(){
     const container = document.getElementById('preview-container');

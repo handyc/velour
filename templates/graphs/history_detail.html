@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ snapshot.title }} - Graph History{% endblock %}
 
@@ -16,7 +17,8 @@
     #chart-container { display: block; max-height: 250px; }
     #treemap-container { width: 100%; height: 220px; display: none; position: relative; }
     .treemap-item {
-        position: absolute; border: 1px solid rgba(0,0,0,0.3);
+        position: absolute; box-sizing: border-box;
+        border: 1px solid rgba(0,0,0,0.3);
         display: flex; align-items: center; justify-content: center;
         font-size: 11px; color: #fff; text-shadow: 0 0 3px rgba(0,0,0,0.8);
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px;
@@ -47,8 +49,9 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="{% static 'js/chartjs/chart.umd.min.js' %}"></script>
+<script src="{% static 'js/three/three.min.js' %}"></script>
+<script src="{% static 'graphs/treemap.js' %}"></script>
 <script>
 (function() {
     const chartContainer = document.getElementById('chart-container');
@@ -119,26 +122,8 @@
 
     function renderTreemap(data) {
         showContainer('treemap');
-        const items = (data.items||[]).sort((a,b) => b.size - a.size);
-        const total = items.reduce((s,i) => s + i.size, 0);
-        const W = treemapContainer.clientWidth, H = treemapContainer.clientHeight;
-        let x = 0, y = 0, rowH = 0;
-        items.forEach((item, i) => {
-            let w = Math.max(30, (item.size/total)*W);
-            let h = Math.max(20, (item.size/total)*W*H / w);
-            if (x + w > W) { x = 0; y += rowH; rowH = 0; }
-            rowH = Math.max(rowH, h);
-            if (y + h > H) h = H - y;
-            if (h <= 0) return;
-            const div = document.createElement('div');
-            div.className = 'treemap-item';
-            Object.assign(div.style, { left: x+'px', top: y+'px', width: w+'px', height: h+'px',
-                background: CHART_COLORS[i%CHART_COLORS.length] });
-            div.title = `${item.path}: ${item.size} MB`;
-            div.textContent = w > 60 ? `${item.path.split('/').pop()} (${item.size}M)` : '';
-            treemapContainer.appendChild(div);
-            x += w;
-        });
+        // Shared squarified-treemap helper at static/graphs/treemap.js.
+        window.HelixTreemap.render(treemapContainer, data.items || [], CHART_COLORS);
     }
 })();
 </script>
