@@ -28,11 +28,27 @@
 
       <div class="tft-controls">
         <button id="hunt-btn"
-                title="Run a 30-agent / 40-generation GA hunt for a class-4 ruleset.">
+                title="Fresh hunt: 30-agent / 40-gen GA from an identity seed; up to 4 retries until the winner survives a 50-tick × 3-seed verification.">
           Run Hunt
         </button>
+        <button id="refine-btn"
+                title="Warm-start hunt: GA seeded from the current genome with 10% initial mutation rate. Useful when the running CA has gone quiet and you want a livelier neighbour.">
+          Refine
+        </button>
+        <label class="checkbox-label" title="Automatically dispatch a warm-start hunt when the running CA's moving-average activity drops below 2% for ~9 seconds.">
+          <input type="checkbox" id="auto-refine-cb" checked>
+          auto-refine on stall
+        </label>
         <progress id="hunt-progress" max="1" value="0"></progress>
         <span id="hunt-status">idle — using random fallback genome</span>
+      </div>
+
+      <div class="activity-row" title="Per-tick fraction of cells that change. The hunt fitness peaks at 12% (edge of chaos); the dotted line marks 2%, below which auto-refine kicks in.">
+        <span class="act-label">activity</span>
+        <span class="act-now">now <strong id="act-now">0.0%</strong></span>
+        <span class="act-ma">MA(60) <strong id="act-ma">0.0%</strong></span>
+        <canvas id="act-spark" width="200" height="28"></canvas>
+        <span id="act-dwell"></span>
       </div>
 
       <div class="tft-controls">

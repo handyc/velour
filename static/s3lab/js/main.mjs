@@ -29,7 +29,20 @@ const state = {
     history:   {},      // gpio_pin -> Array<0|1> (last N levels)
     historyN:  120,
     hunting:   false,
+    huntKind:  '',      // 'fresh' or 'refine' (warm-start)
+
+    // Activity tracking
+    activityHistory: [],     // last N tick activity ratios (0..1)
+    activityHistoryN: 60,
+    staticDwellTicks: 0,     // consecutive ticks with MA below floor
+    autoRefine: true,
+    lastTickActivity: 0,
 };
+
+// Auto-refine thresholds. Floor < verification floor: we want to dwell
+// only on truly dead rulesets, not just quieter-than-typical class-4.
+const ACT_FLOOR_RUN     = 0.02;
+const STATIC_DWELL_LIMIT = 30;    // ~9 s at 300 ms tick
 
 // Default bindings — match the C sketch's default /gpio_map.txt.
 state.bindings = [
@@ -57,9 +70,16 @@ const tftCanvas    = $('tft');
 const tftCtx       = tftCanvas.getContext('2d');
 const wfCanvas     = $('waveform');
 const wfCtx        = wfCanvas.getContext('2d');
+const actSparkCv   = $('act-spark');
+const actSparkCtx  = actSparkCv.getContext('2d');
+const actNowEl     = $('act-now');
+const actMaEl      = $('act-ma');
+const actDwellEl   = $('act-dwell');
 const huntStatus   = $('hunt-status');
 const huntProgress = $('hunt-progress');
 const huntBtn      = $('hunt-btn');
+const refineBtn    = $('refine-btn');
+const autoRefineCb = $('auto-refine-cb');
 const tickSlider   = $('tick-slider');
 const tickLabel    = $('tick-label');
 const pauseBtn     = $('pause-btn');
@@ -237,6 +257,95 @@ function drawWaveform() {
     }
 }
 
+// ── Activity tracking ─────────────────────────────────────────────────
+
+function recordActivity(ratio) {
+    state.lastTickActivity = ratio;
+    const h = state.activityHistory;
+    h.push(ratio);
+    if (h.length > state.activityHistoryN) h.shift();
+}
+
+function activityMA() {
+    const h = state.activityHistory;
+    if (h.length === 0) return 0;
+    let s = 0;
+    for (let i = 0; i < h.length; i++) s += h[i];
+    return s / h.length;
+}
+
+function drawActivitySparkline() {
+    const W = actSparkCv.width;
+    const H = actSparkCv.height;
+    actSparkCtx.fillStyle = '#0d1117';
+    actSparkCtx.fillRect(0, 0, W, H);
+
+    // 12% reference line — peak of the fitness tent.
+    const peakY = H - (0.12 / 0.6) * H;
+    actSparkCtx.strokeStyle = '#21262d';
+    actSparkCtx.beginPath();
+    actSparkCtx.moveTo(0, peakY);
+    actSparkCtx.lineTo(W, peakY);
+    actSparkCtx.stroke();
+
+    // Floor reference line — auto-refine triggers below this.
+    const floorY = H - (ACT_FLOOR_RUN / 0.6) * H;
+    actSparkCtx.strokeStyle = '#3a1f1f';
+    actSparkCtx.beginPath();
+    actSparkCtx.moveTo(0, floorY);
+    actSparkCtx.lineTo(W, floorY);
+    actSparkCtx.stroke();
+
+    // Activity trace
+    const h = state.activityHistory;
+    if (h.length < 2) return;
+    actSparkCtx.strokeStyle = '#3fb950';
+    actSparkCtx.lineWidth = 1.4;
+    actSparkCtx.beginPath();
+    const dx = W / state.activityHistoryN;
+    for (let i = 0; i < h.length; i++) {
+        const x = i * dx;
+        // 0..0.6 range maps to full height (clip above 0.6).
+        const y = H - Math.min(h[i], 0.6) / 0.6 * H;
+        if (i === 0) actSparkCtx.moveTo(x, y);
+        else         actSparkCtx.lineTo(x, y);
+    }
+    actSparkCtx.stroke();
+}
+
+function updateActivityDisplay() {
+    actNowEl.textContent = `${(state.lastTickActivity * 100).toFixed(1)}%`;
+    actMaEl.textContent  = `${(activityMA() * 100).toFixed(1)}%`;
+    if (state.staticDwellTicks > 0 && state.autoRefine && !state.hunting) {
+        const remaining = STATIC_DWELL_LIMIT - state.staticDwellTicks;
+        actDwellEl.textContent = remaining > 0
+            ? `· static for ${state.staticDwellTicks} ticks → refine in ${remaining}`
+            : '· refining…';
+        actDwellEl.classList.add('warning');
+    } else {
+        actDwellEl.textContent = '';
+        actDwellEl.classList.remove('warning');
+    }
+    drawActivitySparkline();
+}
+
+function checkAutoRefine() {
+    if (!state.autoRefine) return;
+    if (state.hunting) return;
+    if (state.activityHistory.length < state.activityHistoryN) return;
+
+    const ma = activityMA();
+    if (ma < ACT_FLOOR_RUN) {
+        state.staticDwellTicks++;
+        if (state.staticDwellTicks > STATIC_DWELL_LIMIT) {
+            state.staticDwellTicks = 0;
+            startHunt({ warmStart: true, reason: 'auto-refine: stalled' });
+        }
+    } else {
+        state.staticDwellTicks = 0;
+    }
+}
+
 // ── Tick loop ─────────────────────────────────────────────────────────
 
 let lastTickAt = 0;
@@ -253,23 +362,41 @@ function rafLoop(now) {
 function doTick() {
     applyInputBindings(state.cur);
     step_grid(state.genome, state.cur, state.nxt);
+
+    let changed = 0;
+    for (let i = 0; i < GRID_W * GRID_H; i++)
+        if (state.cur[i] !== state.nxt[i]) changed++;
+    recordActivity(changed / (GRID_W * GRID_H));
+
     renderDiff(state.cur, state.nxt);
     applyOutputBindings(state.nxt);
     drawWaveform();
     [state.cur, state.nxt] = [state.nxt, state.cur];
     state.tick++;
     $('tick-count').textContent = state.tick;
+
+    updateActivityDisplay();
+    checkAutoRefine();
 }
 
 // ── Hunt control ─────────────────────────────────────────────────────
 
 let huntWorker = null;
+let huntStartedAt = 0;
+let currentAttempt = 0;
+let totalAttempts = 0;
 
-function startHunt() {
+function startHunt({ warmStart = false, reason = '' } = {}) {
     if (state.hunting) return;
     state.hunting = true;
-    huntBtn.disabled = true;
-    huntStatus.textContent = 'starting…';
+    state.huntKind = warmStart ? 'refine' : 'fresh';
+    huntStartedAt = performance.now();
+    huntBtn.disabled    = true;
+    refineBtn.disabled  = true;
+    const labelPrefix = warmStart ? 'refining' : 'hunting';
+    huntStatus.textContent =
+        reason ? `${labelPrefix} (${reason}) — starting…`
+               : `${labelPrefix} — starting…`;
 
     huntWorker = new Worker(
         new URL('./worker.mjs', import.meta.url),
@@ -277,26 +404,55 @@ function startHunt() {
     );
     huntWorker.onmessage = (e) => {
         const m = e.data;
-        if (m.type === 'progress') {
+        if (m.type === 'attempt') {
+            currentAttempt = m.n;
+            totalAttempts  = m.total;
+        } else if (m.type === 'progress') {
             huntStatus.textContent =
+                `${state.huntKind === 'refine' ? 'refining' : 'hunting'} ` +
+                `[${currentAttempt}/${totalAttempts}]  ` +
                 `gen ${m.gen}/${m.total}  best ${m.best.toFixed(2)}  ` +
                 `mean ${m.mean.toFixed(2)}  tail ${m.tail.toFixed(3)}`;
             huntProgress.value = m.gen / m.total;
-            // Live palette feedback on the TFT banner
+            // Live palette feedback so the on-canvas hunt banner shows
+            // the colour the genome will eventually inherit.
             state.palette = new Uint8Array(m.palette);
             drawHuntBanner(m.gen, m.total, m.best, m.mean);
+        } else if (m.type === 'verify') {
+            const pct = (m.activity_ma * 100).toFixed(1);
+            if (!m.accepted) {
+                huntStatus.textContent =
+                    `[${currentAttempt}/${totalAttempts}] rejected — ${m.reason} ` +
+                    `(${pct}%); retrying…`;
+            } else {
+                huntStatus.textContent =
+                    `[${currentAttempt}/${totalAttempts}] accepted — ${pct}% activity`;
+            }
         } else if (m.type === 'done') {
             state.genome  = new Uint8Array(m.genome);
             state.palette = new Uint8Array(m.palette);
             state.hunting = false;
-            huntBtn.disabled = false;
+            huntBtn.disabled    = false;
+            refineBtn.disabled  = false;
+
+            const elapsed = (performance.now() - huntStartedAt) / 1000;
+            const pct = (m.activity_ma * 100).toFixed(1);
+            const verdict = m.accepted ? 'accepted' : `forced (no candidate passed)`;
             huntStatus.textContent =
                 `done — fitness ${m.fitness.toFixed(2)}  ` +
-                `elapsed ${(m.elapsed_ms / 1000).toFixed(2)} s`;
+                `activity ${pct}%  attempts ${m.attempts}  ` +
+                `${elapsed.toFixed(1)} s  · ${verdict}`;
             huntProgress.value = 1.0;
+
+            // Reset run-time state so post-hunt live display is fresh.
             seed_grid(state.cur, prng());
             renderFull(state.cur);
+            applyOutputBindings(state.cur);
+            state.activityHistory = [];
+            state.staticDwellTicks = 0;
+            state.lastTickActivity = 0;
             updateGenomeInfo();
+            updateActivityDisplay();
             huntWorker.terminate();
             huntWorker = null;
         }
@@ -306,6 +462,15 @@ function startHunt() {
         type:      'run_hunt',
         prng_seed: (Math.random() * 0xffffffff) >>> 0,
         grid_seed: (Math.random() * 0xffffffff) >>> 0,
+        // Warm-start: hand the worker the current genome+palette + bump
+        // the initial mutation rate so the GA explores neighbours
+        // rather than re-finding the same local optimum.
+        seedGenome:          warmStart ? state.genome.buffer.slice(0)  : null,
+        seedPalette:         warmStart ? state.palette.buffer.slice(0) : null,
+        initialMutationRate: warmStart ? 0.10 : 0.05,
+        maxAttempts:         4,
+        activityFloor:       0.03,
+        activityCeil:        0.50,
     });
 }
 
@@ -458,7 +623,15 @@ function showAddDialog(kind) {
 
 // ── Wire up ──────────────────────────────────────────────────────────
 
-huntBtn.addEventListener('click', startHunt);
+huntBtn.addEventListener('click',   () => startHunt());
+refineBtn.addEventListener('click', () => startHunt({ warmStart: true,
+                                                      reason: 'manual refine' }));
+
+autoRefineCb.addEventListener('change', () => {
+    state.autoRefine = autoRefineCb.checked;
+    state.staticDwellTicks = 0;
+    updateActivityDisplay();
+});
 
 pauseBtn.addEventListener('click', () => {
     state.running = !state.running;
@@ -499,5 +672,7 @@ renderFull(state.cur);
 applyOutputBindings(state.cur);
 drawWaveform();
 updateGenomeInfo();
+updateActivityDisplay();
 tickLabel.textContent = `${state.tickMs} ms`;
+autoRefineCb.checked = state.autoRefine;
 requestAnimationFrame(rafLoop);

@@ -109,6 +109,55 @@
     font-size: 0.78rem;
 }
 
+.checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #c9d1d9;
+    padding: 0.3rem 0.55rem;
+    font-family: inherit;
+    font-size: 0.78rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.checkbox-label input { cursor: pointer; }
+
+.activity-row {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    margin: 0.6rem 0 0.4rem 0;
+    font-size: 0.78rem;
+    color: #8b949e;
+}
+.activity-row .act-label {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+    color: #6e7681;
+}
+.activity-row strong {
+    color: #c9d1d9;
+    font-weight: 500;
+    margin-left: 0.2rem;
+}
+#act-spark {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 3px;
+    width: 200px;
+    height: 28px;
+}
+#act-dwell {
+    color: #6e7681;
+    font-size: 0.72rem;
+}
+#act-dwell.warning {
+    color: #d29922;
+}
+
 .gpio-panel { margin-bottom: 1.2rem; }
 .binding-list {
     list-style: none;
