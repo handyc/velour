@@ -1,6 +1,7 @@
 import glob
 import os
 import re
+import shutil
 import subprocess
 
 from django.contrib import messages
@@ -281,6 +282,119 @@ def _get_listening_ports():
     return rows
 
 
+# ---- Backend service probes ----------------------------------------------
+
+# Each probe declares a binary, the version flag, and the process name(s)
+# that mean "this is running." Liveness is checked with pgrep -x, so the
+# names must be exact (no shell-script wrappers). Optional `extra(probe)`
+# returns a dict with richer info when the service is up.
+
+def _apache_extra(probe):
+    """Vhosts from sites-enabled — same shape as nginx parsing."""
+    sites = []
+    for d in ('/etc/apache2/sites-enabled', '/etc/httpd/conf.d'):
+        if not os.path.isdir(d):
+            continue
+        for fn in sorted(os.listdir(d)):
+            fp = os.path.join(d, fn)
+            if not (os.path.isfile(fp) or os.path.islink(fp)):
+                continue
+            try:
+                content = open(fp).read()
+            except (OSError, PermissionError):
+                continue
+            names = re.findall(r'ServerName\s+(\S+)', content, re.IGNORECASE)
+            sites.append({'name': fn, 'server_names': names, 'path': fp})
+    return {'sites': sites}
+
+
+def _docker_extra(probe):
+    """Container count + a slice of running containers."""
+    raw = _run(['docker', 'ps', '--format', '{{.Names}}\t{{.Image}}\t{{.Status}}'])
+    if not raw:
+        # Daemon unreachable (no group access, daemon stopped, etc.)
+        return {'containers': [], 'unreachable': True}
+    rows = []
+    for line in raw.splitlines():
+        parts = line.split('\t')
+        if len(parts) >= 3:
+            rows.append({'name': parts[0], 'image': parts[1], 'status': parts[2]})
+    return {'containers': rows, 'unreachable': False}
+
+
+def _redis_extra(probe):
+    """Server version + database count from redis-cli INFO."""
+    server = _run(['redis-cli', 'INFO', 'server'])
+    keyspace = _run(['redis-cli', 'INFO', 'keyspace'])
+    version = ''
+    for line in (server or '').splitlines():
+        if line.startswith('redis_version:'):
+            version = line.split(':', 1)[1].strip()
+            break
+    dbs = []
+    for line in (keyspace or '').splitlines():
+        if line.startswith('db'):
+            # "db0:keys=42,expires=0,avg_ttl=0"
+            name, _, rest = line.partition(':')
+            keys_m = re.search(r'keys=(\d+)', rest)
+            dbs.append({'name': name, 'keys': int(keys_m.group(1)) if keys_m else 0})
+    return {'redis_version': version, 'dbs': dbs}
+
+
+_BACKEND_PROBES = [
+    {'label': 'Apache',    'bin': 'apache2',     'version_args': ['-v'],
+     'proc_names': ['apache2', 'httpd'],         'extra': _apache_extra},
+    {'label': 'Docker',    'bin': 'docker',      'version_args': ['version', '--format', '{{.Server.Version}}'],
+     'proc_names': ['dockerd'],                  'extra': _docker_extra},
+    {'label': 'MySQL/MariaDB', 'bin': 'mysql',   'version_args': ['--version'],
+     'proc_names': ['mysqld', 'mariadbd'],       'extra': None},
+    {'label': 'PostgreSQL','bin': 'psql',        'version_args': ['--version'],
+     'proc_names': ['postgres'],                 'extra': None},
+    {'label': 'Redis',     'bin': 'redis-cli',   'version_args': ['--version'],
+     'proc_names': ['redis-server'],             'extra': _redis_extra},
+    {'label': 'Memcached', 'bin': 'memcached',   'version_args': ['-V'],
+     'proc_names': ['memcached'],                'extra': None},
+    {'label': 'RabbitMQ',  'bin': 'rabbitmqctl', 'version_args': ['version'],
+     'proc_names': ['beam.smp'],                 'extra': None},
+    {'label': 'MongoDB',   'bin': 'mongod',      'version_args': ['--version'],
+     'proc_names': ['mongod'],                   'extra': None},
+]
+
+
+def _backend_status(probe):
+    bin_path = shutil.which(probe['bin'])
+    if not bin_path:
+        return {
+            'label':   probe['label'],
+            'bin':     probe['bin'],
+            'installed': False,
+            'running': False,
+            'version': '',
+            'extra':   {},
+        }
+    version = _run([bin_path] + probe['version_args'], default='')
+    version_line = (version or '').split('\n')[0].strip()
+    running = any(bool(_run(['pgrep', '-x', n])) for n in probe['proc_names'])
+    extra = {}
+    if running and probe.get('extra'):
+        try:
+            extra = probe['extra'](probe) or {}
+        except Exception:
+            extra = {}
+    return {
+        'label':     probe['label'],
+        'bin':       bin_path,
+        'installed': True,
+        'running':   running,
+        'version':   version_line,
+        'extra':     extra,
+    }
+
+
+def _get_backend_services():
+    return [_backend_status(p) for p in _BACKEND_PROBES]
+
+
 # ---- Gunicorn -------------------------------------------------------------
 
 def _get_running_gunicorn():
@@ -310,6 +424,7 @@ def services_home(request):
     listening = _get_listening_ports()
     gunicorn_instances = _get_running_gunicorn()
     local_nginx_status = ln.status()
+    backends = _get_backend_services()
 
     return render(request, 'services/home.html', {
         'nginx_sites':        nginx_sites,
@@ -322,6 +437,7 @@ def services_home(request):
         'listening':          listening,
         'gunicorn_instances': gunicorn_instances,
         'local_nginx':        local_nginx_status,
+        'backends':           backends,
     })
 
 

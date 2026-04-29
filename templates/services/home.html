@@ -346,6 +346,60 @@
     {% endfor %}
 </div>
 
+<!-- Backend Services (Apache, Docker, DBs, queues) -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <div class="service-header">
+        <h2 style="margin: 0;">Backend Services <span style="color: #6e7681; font-size: 0.7rem; font-weight: normal; text-transform: uppercase; letter-spacing: 0.06em; margin-left: 0.4rem;">probed</span></h2>
+        <div class="section-status">
+            <span style="color: #8b949e; font-size: 0.85rem;">
+                {{ backends|length }} probe{{ backends|length|pluralize }}
+            </span>
+        </div>
+    </div>
+
+    <table class="systemd-table">
+        <tr>
+            <th>Service</th>
+            <th>Status</th>
+            <th>Version</th>
+            <th>Detail</th>
+        </tr>
+        {% for b in backends %}
+        <tr>
+            <td><strong style="color: #c9d1d9;">{{ b.label }}</strong></td>
+            <td>
+                {% if not b.installed %}
+                    <span style="color: #6e7681;">not installed</span>
+                {% elif b.running %}
+                    <span class="sd-active">running</span>
+                {% else %}
+                    <span class="sd-failed">stopped</span>
+                {% endif %}
+            </td>
+            <td style="color: #8b949e;">{{ b.version|default:"—" }}</td>
+            <td class="desc" style="white-space: normal;">
+                {% if not b.installed %}
+                    <span style="color: #484f58;">—</span>
+                {% elif b.label == 'Apache' and b.extra.sites %}
+                    {{ b.extra.sites|length }} vhost{{ b.extra.sites|length|pluralize }}:
+                    {% for s in b.extra.sites|slice:":3" %}{{ s.name }}{% if not forloop.last %}, {% endif %}{% endfor %}{% if b.extra.sites|length > 3 %} …{% endif %}
+                {% elif b.label == 'Docker' and b.extra.unreachable %}
+                    <span style="color: #d29922;">daemon unreachable (no permission?)</span>
+                {% elif b.label == 'Docker' and b.extra.containers %}
+                    {{ b.extra.containers|length }} container{{ b.extra.containers|length|pluralize }} running
+                {% elif b.label == 'Redis' and b.extra.dbs %}
+                    {{ b.extra.dbs|length }} db{{ b.extra.dbs|length|pluralize }}: {% for d in b.extra.dbs %}{{ d.name }}={{ d.keys }} keys{% if not forloop.last %}, {% endif %}{% endfor %}
+                {% elif b.running %}
+                    <span style="color: #6e7681;">{{ b.bin }}</span>
+                {% else %}
+                    <span style="color: #6e7681;">{{ b.bin }} (idle)</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+
 <!-- Running Gunicorn Instances -->
 <div class="card">
     <div class="service-header">
