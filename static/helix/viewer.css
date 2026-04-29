@@ -1,87 +1,274 @@
-/* Helix sequence viewer styles. */
+/* Helix viewer — pro layout. */
+
+/* -------- page chrome -------- */
+.helix-page-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    flex-wrap: wrap; gap: 0.5rem;
+}
+.helix-page-head h1 { margin: 0 0 0.2rem 0; }
+.helix-breadcrumb {
+    color: #8b949e; text-decoration: none; font-weight: normal;
+    font-size: 0.7em; margin-right: 0.4rem;
+}
+.helix-page-actions { display: flex; gap: 0.4rem; }
+.helix-delete-btn { color: #f85149; }
+.helix-description {
+    color: #8b949e; font-style: italic; font-size: 0.9rem; margin-top: 0.5rem;
+}
 
 .helix-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem 1.2rem;
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem;
     padding: 0.5rem 0.7rem;
-    background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    color: #c9d1d9;
-    margin-top: 0.6rem;
+    background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+    font-size: 0.85rem; color: #c9d1d9; margin-top: 0.6rem;
 }
 .helix-meta strong {
-    color: #8b949e;
-    text-transform: uppercase;
-    font-size: 0.7rem;
-    letter-spacing: 0.05em;
-    margin-right: 0.3rem;
+    color: #8b949e; text-transform: uppercase;
+    font-size: 0.7rem; letter-spacing: 0.05em; margin-right: 0.3rem;
 }
 
-#helix-viewer-mount svg {
-    width: 100%;
-    height: auto;
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    display: block;
+/* -------- viewer container -------- */
+.helix-viewer {
+    margin-top: 1rem;
+    background: #0b0f15;
+    border: 1px solid #30363d; border-radius: 6px;
+    overflow: hidden;
 }
 
+/* -------- toolbar -------- */
+.helix-toolbar {
+    display: flex; align-items: center; gap: 0.7rem;
+    padding: 0.45rem 0.6rem;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.8rem;
+}
+.helix-search-wrap { position: relative; flex: 0 1 24rem; min-width: 14rem; }
+#helix-search {
+    width: 100%; box-sizing: border-box;
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.32rem 0.55rem; font: inherit;
+    outline: none;
+}
+#helix-search:focus { border-color: #58a6ff; }
+.helix-search-suggest {
+    position: absolute; top: calc(100% + 2px); left: 0; right: 0; z-index: 30;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 3px;
+    max-height: 18rem; overflow-y: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.helix-search-item {
+    display: grid; grid-template-columns: 1fr auto auto;
+    gap: 0.6rem; padding: 0.32rem 0.55rem;
+    cursor: pointer; border-bottom: 1px solid #21262d;
+}
+.helix-search-item:last-child { border-bottom: none; }
+.helix-search-item:hover { background: #161b22; }
+.helix-search-item .hl-name { color: #c9d1d9; }
+.helix-search-item .hl-type { font-size: 0.78em; }
+.helix-search-item .hl-pos  { color: #6e7681; }
+.helix-search-empty { padding: 0.5rem 0.6rem; color: #6e7681; }
+
+.helix-toolbar-zoom { display: flex; gap: 0.18rem; }
+.helix-toolbar-zoom button {
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.2rem 0.55rem; font: inherit; cursor: pointer;
+    min-width: 2rem; line-height: 1;
+}
+.helix-toolbar-zoom button:hover { border-color: #58a6ff; color: #79c0ff; }
+
+.helix-status { flex: 1; text-align: right; color: #8b949e; }
+.helix-status .hl-tag {
+    color: #6e7681; text-transform: uppercase;
+    font-size: 0.72em; letter-spacing: 0.05em; margin-right: 0.2rem;
+}
+.helix-status .hl-num { color: #c9d1d9; }
+.helix-status .hl-sep { color: #30363d; }
+
+/* -------- SVG canvas -------- */
+.helix-svg {
+    width: 100%; height: auto; display: block;
+    background: #0b0f15;
+    user-select: none;
+    cursor: grab;
+}
+.helix-svg:active { cursor: grabbing; }
+
+/* minimap */
+.helix-minimap-bg { fill: #0d1117; stroke: #21262d; stroke-width: 0.5; }
+.helix-mm-axis    { stroke: #21262d; stroke-width: 0.6; pointer-events: none; }
+.helix-mm-feat    { pointer-events: none; opacity: 0.55; }
+.helix-mm-viewport {
+    fill: rgba(88, 166, 255, 0.12);
+    stroke: #58a6ff; stroke-width: 1.2;
+    pointer-events: none;
+}
+.helix-mm-hit { cursor: crosshair; }
+
+/* GC */
+.helix-gc-bg   { fill: #0d1117; stroke: #21262d; stroke-width: 0.5; }
+.helix-gc-mid  { stroke: #21262d; stroke-width: 0.5; stroke-dasharray: 2 3; pointer-events: none; }
+.helix-gc-area { fill: #79c0ff; opacity: 0.45; pointer-events: none; }
+
+/* tracks */
+.helix-track-bg { fill: #0d1117; stroke: #21262d; stroke-width: 0.5; }
+.helix-row-label {
+    fill: #6e7681; font-size: 9px;
+    font-family: ui-monospace, monospace;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    pointer-events: none;
+}
+.helix-row-sublabel {
+    fill: #4a5057; font-size: 8px;
+    font-family: ui-monospace, monospace; pointer-events: none;
+}
 .helix-feature {
     cursor: pointer;
-    transition: opacity 0.15s;
+    transition: opacity 0.12s ease, stroke-width 0.12s ease;
 }
-.helix-feature:hover { opacity: 0.85; }
-.helix-feature.selected { stroke: #c9d1d9; stroke-width: 1.2; }
+.helix-feature:hover { opacity: 0.82; }
+.helix-feature.selected {
+    stroke: #f0f6fc; stroke-width: 1.4;
+}
+.helix-feat-label {
+    font-size: 9px; font-family: ui-monospace, monospace; font-weight: 600;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.28); stroke-width: 2;
+}
 
-.helix-axis text { fill: #8b949e; font-size: 9px; font-family: ui-monospace, monospace; }
-.helix-axis line { stroke: #30363d; }
-.helix-track-label { fill: #8b949e; font-size: 10px; font-family: ui-monospace, monospace; }
+/* axis */
+.helix-axis-line  { stroke: #30363d; stroke-width: 1; pointer-events: none; }
+.helix-tick       { stroke: #4a5057; stroke-width: 1; pointer-events: none; }
+.helix-tick-label {
+    fill: #8b949e; font-size: 9px;
+    font-family: ui-monospace, monospace; pointer-events: none;
+}
+.helix-axis-hit { cursor: text; }
 
-.helix-feature-detail {
-    margin-top: 0.6rem;
-    padding: 0.7rem 0.9rem;
+/* selection overlay */
+.helix-selection {
+    fill: rgba(240, 198, 116, 0.10);
+    stroke: #f0c674; stroke-width: 1; stroke-dasharray: 4 2;
+    pointer-events: none;
+}
+
+/* legend + help */
+.helix-legend {
+    display: flex; flex-wrap: wrap; gap: 0.3rem 0.8rem;
+    padding: 0.4rem 0.7rem;
     background: #161b22;
-    border: 1px solid #30363d;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    min-height: 2.4rem;
+    border-top: 1px solid #30363d;
+    font-size: 0.78rem; font-family: ui-monospace, monospace;
+}
+.helix-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.helix-legend-swatch {
+    display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 1px;
+}
+.helix-legend-label { color: #c9d1d9; }
+.helix-legend-count { color: #6e7681; }
+.helix-legend-empty { color: #6e7681; font-style: italic; }
+
+.helix-help {
+    display: flex; flex-wrap: wrap; gap: 0.3rem 1rem;
+    padding: 0.32rem 0.7rem;
+    background: #0d1117; border-top: 1px solid #21262d;
+    font-size: 0.72rem; color: #6e7681;
+    font-family: ui-monospace, monospace;
+}
+.helix-help kbd {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 2px; padding: 0 0.3rem;
+    font-size: 0.95em; color: #8b949e; font-family: inherit;
+}
+
+/* -------- feature inspector -------- */
+.helix-feature-detail {
+    margin-top: 0.6rem; padding: 0.7rem 0.9rem;
+    background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+    font-size: 0.85rem; min-height: 2.4rem;
     color: #8b949e;
     font-family: ui-monospace, monospace;
 }
-.helix-feature-detail h4 {
-    margin: 0 0 0.4rem 0;
-    color: #c9d1d9;
+.helix-detail-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+}
+.helix-detail-head h4 {
+    margin: 0; color: #c9d1d9;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-size: 0.95rem;
 }
+.helix-detail-head .hl-type {
+    font-family: ui-monospace, monospace; font-size: 0.85em; font-weight: normal;
+}
+.helix-detail-actions {
+    display: flex; flex-wrap: wrap; gap: 0.3rem;
+    align-items: baseline;
+}
+.hl-zoom-feat {
+    background: #0d1117; color: #79c0ff;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.18rem 0.5rem;
+    font: inherit; font-size: 0.8em; cursor: pointer;
+    white-space: nowrap;
+}
+.hl-zoom-feat:hover { border-color: #58a6ff; }
+
+/* "→ Evolution Engine" — green to match the Evolution app's accent. */
+.hl-evolve {
+    background: #0d1117; color: #56d364;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0.18rem 0.5rem;
+    font: inherit; font-size: 0.8em; cursor: pointer;
+    white-space: nowrap;
+}
+.hl-evolve:hover { border-color: #56d364; }
+
+.hl-evolve-mini {
+    background: transparent; color: #56d364;
+    border: 1px solid #30363d; border-radius: 3px;
+    padding: 0 0.35rem;
+    font: inherit; font-size: 0.85em; cursor: pointer;
+    margin-left: 0.25rem;
+    line-height: 1.4;
+}
+.hl-evolve-mini:hover { border-color: #56d364; }
 .helix-feature-detail .qual-row {
     display: flex; gap: 0.6rem; padding: 0.1rem 0;
 }
 .helix-feature-detail .qual-key {
-    color: #8b949e; min-width: 8rem; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em;
+    color: #6e7681; min-width: 8rem;
+    text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em;
 }
 .helix-feature-detail .qual-val { color: #c9d1d9; word-break: break-word; }
 
+.helix-section-h3 { margin-top: 1.5rem; }
+
+/* -------- sequence panel -------- */
 #helix-sequence-mount {
     background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 4px;
+    border: 1px solid #30363d; border-radius: 4px;
     padding: 0.5rem 0.6rem;
     overflow-x: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.78rem;
-    line-height: 1.45;
+    font-size: 0.78rem; line-height: 1.45;
     color: #c9d1d9;
     margin-top: 0.6rem;
 }
+.helix-seq-placeholder {
+    color: #6e7681; font-style: italic; padding: 0.4rem 0;
+}
 #helix-sequence-mount .seq-row { display: flex; gap: 0.7rem; white-space: pre; }
-#helix-sequence-mount .seq-pos { color: #6e7681; min-width: 5rem; text-align: right; }
-#helix-sequence-mount .b-A { color: #7ee787; }   /* green */
-#helix-sequence-mount .b-T { color: #ff7b72; }   /* red */
-#helix-sequence-mount .b-G { color: #d29922; }   /* yellow */
-#helix-sequence-mount .b-C { color: #79c0ff; }   /* blue */
-#helix-sequence-mount .b-U { color: #ff7b72; }   /* same as T */
-#helix-sequence-mount .b-N { color: #6e7681; }   /* gray */
+#helix-sequence-mount .seq-pos { color: #4a5057; min-width: 6rem; text-align: right; }
+#helix-sequence-mount .b-A { color: #7ee787; }
+#helix-sequence-mount .b-T { color: #ff7b72; }
+#helix-sequence-mount .b-G { color: #d29922; }
+#helix-sequence-mount .b-C { color: #79c0ff; }
+#helix-sequence-mount .b-U { color: #ff7b72; }
+#helix-sequence-mount .b-N { color: #4a5057; }
+#helix-sequence-mount .sel { background: rgba(240, 198, 116, 0.20); }

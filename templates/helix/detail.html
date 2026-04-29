@@ -8,72 +8,48 @@
 {% endblock %}
 
 {% block content %}
-<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:0.5rem;">
-    <h1 style="margin-bottom:0.2rem;">
-        <a href="{% url 'helix:list' %}" style="color:#8b949e;text-decoration:none;font-weight:normal;font-size:0.7em;">← Helix</a>
-        &nbsp;{{ record.title|truncatechars:80 }}
+<div class="helix-page-head">
+    <h1>
+        <a href="{% url 'helix:list' %}" class="helix-breadcrumb">← Helix</a>
+        {{ record.title|truncatechars:80 }}
     </h1>
-    <div>
+    <div class="helix-page-actions">
         <a href="{% url 'helix:download_fasta' record.pk %}" class="btn btn-secondary">Download FASTA</a>
         <form method="post" action="{% url 'helix:delete' record.pk %}" style="display:inline;">
             {% csrf_token %}
-            <button type="submit" class="btn btn-secondary" style="color:#f85149;">Delete</button>
+            <button type="submit" class="btn btn-secondary helix-delete-btn">Delete</button>
         </form>
     </div>
 </div>
 
-{# Header strip — accession, organism, length, GC, source #}
 <div class="helix-meta">
     {% if record.accession %}<span><strong>Accession</strong> {{ record.accession }}</span>{% endif %}
     {% if record.organism %}<span><strong>Organism</strong> <em>{{ record.organism }}</em></span>{% endif %}
     <span><strong>Length</strong> {{ record.length_bp }} {{ record.sequence_type|lower }}</span>
-    {% if record.gc_content %}
-        <span><strong>GC</strong> {{ record.gc_content|floatformat:3 }}</span>
-    {% endif %}
+    {% if record.gc_content %}<span><strong>GC</strong> {{ record.gc_content|floatformat:3 }}</span>{% endif %}
     <span><strong>Format</strong> {{ record.get_source_format_display }}</span>
     <span><strong>Type</strong> {{ record.sequence_type }}</span>
 </div>
 
 {% if record.description and record.description != record.title %}
-<p style="color:#8b949e;font-style:italic;font-size:0.9rem;margin-top:0.5rem;">
-    {{ record.description }}
-</p>
+<p class="helix-description">{{ record.description }}</p>
 {% endif %}
 
-{# Annotation track viewer (SVG) #}
-{% if features %}
-<h3 style="margin-top:1.5rem;">Annotation tracks
-    <span style="color:#8b949e;font-weight:normal;font-size:0.85rem;">
-        — {{ features|length }} features
-        {% for ft, n in feature_type_counts.items %}
-            · {{ n }} <code style="color:#79c0ff;">{{ ft }}</code>
-        {% endfor %}
-    </span>
-</h3>
+{{ features_payload|json_script:"helix-features-data" }}
 
 <div id="helix-viewer-mount"
      data-length="{{ record.length_bp }}"
-     data-features='[
-         {% for f in features %}
-             {"start":{{ f.start }},"end":{{ f.end }},"strand":{{ f.strand }},"type":"{{ f.feature_type|escapejs }}","name":"{{ f.display_name|escapejs }}","qualifiers":{{ f.qualifiers|safe|default:"{}" }}}{% if not forloop.last %},{% endif %}
-         {% endfor %}
-     ]'>
-</div>
+     data-sequence-url="{% url 'helix:sequence_range' record.pk %}"
+     data-gc-url="{% url 'helix:gc_profile' record.pk %}"
+     data-evolve-url="{% url 'helix:to_evolution' record.pk %}"
+     data-qualifiers-url="{% url 'helix:feature_qualifiers' 0 %}"></div>
 
 <div id="helix-feature-detail" class="helix-feature-detail">
-    Click a feature on the track viewer to see its qualifiers.
+    Click a feature on the track viewer to see its qualifiers, or drag on the position ruler to select a region.
 </div>
 
-{% else %}
-<div style="margin-top:1.2rem;padding:0.8rem;background:#161b22;border:1px solid #30363d;border-radius:6px;color:#8b949e;font-size:0.85rem;">
-    No annotation features — this is a plain {{ record.get_source_format_display }} sequence.
-    Upload a GenBank file to see annotation tracks.
-</div>
-{% endif %}
-
-{# Base-by-base sequence view #}
-<h3 style="margin-top:1.5rem;">Sequence</h3>
-<div id="helix-sequence-mount" data-sequence="{{ record.sequence }}"></div>
+<h3 class="helix-section-h3">Sequence</h3>
+<div id="helix-sequence-mount"></div>
 
 <script src="{% static 'helix/viewer.js' %}"></script>
 {% endblock %}

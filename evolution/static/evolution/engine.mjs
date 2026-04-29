@@ -489,6 +489,61 @@ async function naiadWork(agent, ctx) {
     return Math.max(0, Math.min(1, score));
 }
 
+// ── DNA gene type ───────────────────────────────────────────────────
+// The gene is just a string of bases (ACGT). Used by the Helix bridge:
+// pick a slice from a real GenBank record, push it into a run as goal
+// and/or seed, watch a population of point-mutating sequences evolve
+// toward (or, if seeded equal to the goal, drift around) it.
+
+const DNA_BASES = 'ACGT';
+
+function _dnaRandomBase(rng) {
+    return DNA_BASES[Math.floor(rng() * 4)];
+}
+
+function dnaRandom(rng, ctx) {
+    const seed = (ctx && ctx.seed_string) || '';
+    const targetLen = (ctx && ctx.goal && ctx.goal.length)
+        || seed.length || 200;
+    if (seed) {
+        // Start from the seed, padded/trimmed to the goal's length.
+        let s = seed.toUpperCase();
+        if (s.length > targetLen) s = s.substring(0, targetLen);
+        while (s.length < targetLen) s += _dnaRandomBase(rng);
+        return { sequence: s };
+    }
+    let s = '';
+    for (let i = 0; i < targetLen; i++) s += _dnaRandomBase(rng);
+    return { sequence: s };
+}
+
+function dnaMutate(gene, rng, rate, ctx) {
+    const seq = (gene && gene.sequence) || '';
+    if (!seq) return gene;
+    // Engine mutation_rate defaults to 0.25 — applied per-base that's an
+    // implausibly high substitution rate. Scale down so 0.25 → ~1 % per
+    // base per generation (≈2 muts/gen on a 200 bp segment).
+    const perBase = rate * 0.04;
+    let out = '';
+    for (let i = 0; i < seq.length; i++) {
+        if (rng() < perBase) {
+            const cur = seq[i];
+            let b = _dnaRandomBase(rng);
+            while (b === cur) b = _dnaRandomBase(rng);
+            out += b;
+        } else {
+            out += seq[i];
+        }
+    }
+    return { sequence: out };
+}
+
+async function dnaWork(agent, ctx) {
+    const seq = (agent.gene && agent.gene.sequence) || '';
+    agent.output = seq;
+    return scoreString(seq, ctx.goal);
+}
+
 // ── Gene-type registry ──────────────────────────────────────────────
 // The L-system path above is the default. New types just register here.
 // Each handler provides random/mutate/work; the engine dispatches on
@@ -516,6 +571,11 @@ export const GENE_TYPES = {
         mutate: naiadMutate,
         work: naiadWork,
         crossover: naiadCrossover,
+    },
+    dna: {
+        random: dnaRandom,
+        mutate: dnaMutate,
+        work: dnaWork,
     },
 };
 
@@ -678,8 +738,18 @@ export class EvolutionEngine {
     }
 
     _makeFounder(i) {
-        const ctx = { lut_target: this.lutTarget, hexca_target: this.hexcaTarget,
-                      naiad_target: this.naiadTarget };
+        // Mirror the per-generation ctx so gene types can use the same
+        // fields at founding time as during evaluation. The dna gene
+        // type relies on goal + seed_string here to size and seed the
+        // initial sequence.
+        const ctx = {
+            goal: this.goal,
+            seed_string: this.seedString,
+            lut_target: this.lutTarget,
+            hexca_target: this.hexcaTarget,
+            naiad_target: this.naiadTarget,
+            params: this.params,
+        };
         let gene;
         if (this.seedAgent && i === 0) {
             gene = deepClone(this.seedAgent.gene);

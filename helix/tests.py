@@ -243,3 +243,82 @@ class ViewSmokeTests(TestCase):
         resp = self.client.post(reverse('helix:delete', args=[rec.pk]))
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(SequenceRecord.objects.filter(pk=rec.pk).exists())
+
+
+class ToEvolutionTests(TestCase):
+    """Helix → Evolution Engine bridge: slice a sequence and create a run."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user('eve', password='pw')
+        cls.rec = SequenceRecord.objects.create(
+            title='evolve-test', accession='EV1',
+            # 200 bp deterministic sequence — long enough for the
+            # min-length gate, short enough to fit the 5,000 bp cap
+            # several times over.
+            sequence='ACGT' * 50,
+            sequence_type='DNA', source_format='fasta',
+        )
+
+    def setUp(self):
+        self.client.force_login(self.user)
+
+    def test_toward_creates_run_with_goal_only(self):
+        from evolution.models import EvolutionRun
+        resp = self.client.post(
+            reverse('helix:to_evolution', args=[self.rec.pk]),
+            {'start': 0, 'end': 100, 'mode': 'toward'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        run = EvolutionRun.objects.latest('created')
+        self.assertEqual(run.goal_string, 'ACGT' * 25)
+        self.assertEqual(run.params['gene_type'], 'dna')
+        self.assertNotIn('seed_string', run.params)
+        origin = run.params['helix_origin']
+        self.assertEqual(origin['record_pk'], self.rec.pk)
+        self.assertEqual(origin['start'], 0)
+        self.assertEqual(origin['end'], 100)
+        self.assertEqual(origin['mode'], 'toward')
+
+    def test_from_creates_run_with_seed(self):
+        from evolution.models import EvolutionRun
+        resp = self.client.post(
+            reverse('helix:to_evolution', args=[self.rec.pk]),
+            {'start': 20, 'end': 80, 'mode': 'from'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        run = EvolutionRun.objects.latest('created')
+        # Same slice in goal AND seed.
+        self.assertEqual(run.goal_string, ('ACGT' * 50)[20:80])
+        self.assertEqual(run.params['seed_string'], ('ACGT' * 50)[20:80])
+        self.assertEqual(run.params['helix_origin']['mode'], 'from')
+
+    def test_rejects_too_long_slice(self):
+        rec = SequenceRecord.objects.create(
+            title='big', accession='BIG1', sequence='A' * 6000,
+            sequence_type='DNA', source_format='fasta',
+        )
+        resp = self.client.post(
+            reverse('helix:to_evolution', args=[rec.pk]),
+            {'start': 0, 'end': 5500, 'mode': 'toward'},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b'too long', resp.content)
+
+    def test_rejects_too_short_slice(self):
+        resp = self.client.post(
+            reverse('helix:to_evolution', args=[self.rec.pk]),
+            {'start': 0, 'end': 5, 'mode': 'toward'},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn(b'too short', resp.content)
+
+    def test_invalid_mode_falls_back_to_toward(self):
+        from evolution.models import EvolutionRun
+        resp = self.client.post(
+            reverse('helix:to_evolution', args=[self.rec.pk]),
+            {'start': 0, 'end': 50, 'mode': 'sideways'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        run = EvolutionRun.objects.latest('created')
+        self.assertEqual(run.params['helix_origin']['mode'], 'toward')
