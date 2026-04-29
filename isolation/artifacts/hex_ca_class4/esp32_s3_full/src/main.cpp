@@ -44,8 +44,9 @@
 #define GENS         40
 
 // Runtime params
-#define TICK_MS      300        // 3 Hz default
-#define MAX_BINDINGS 64
+#define TICK_MS            300        // 3 Hz default
+#define MAX_BINDINGS       64
+#define MAX_INPUT_BINDINGS 32
 
 // ── TFT pin map / geometry ────────────────────────────────────────────
 #define PIN_SCK      12
@@ -69,6 +70,18 @@ struct GpioBinding {
     u8   state_mask;     // bit N set ⇒ pin HIGH when cell value == N
 };
 
+// Input binding — pin drives cell. Pin uses INPUT_PULLUP, so a button
+// shorting to GND reads LOW. When pin is LOW, cell is forced to
+// low_state; HIGH ⇒ high_state. Per-tick order: read inputs ⇒ clamp
+// cells in cur grid ⇒ step CA ⇒ apply outputs ⇒ render.
+struct InputBinding {
+    int gpio_pin;
+    int cell_x;
+    int cell_y;
+    u8  low_state;
+    u8  high_state;
+};
+
 // ── BSS arenas ────────────────────────────────────────────────────────
 //
 // Peak memory is during the hunt. After hunt completes, pool/pals/fit/
@@ -90,8 +103,10 @@ static u8 grid_b[GRID_W * GRID_H];
 static u8 tmp_genome[GBYTES];
 static u8 tmp_pal[PAL_BYTES];
 
-static GpioBinding bindings[MAX_BINDINGS];
-static int n_bindings = 0;
+static GpioBinding  bindings[MAX_BINDINGS];
+static int          n_bindings = 0;
+static InputBinding input_bindings[MAX_INPUT_BINDINGS];
+static int          n_input_bindings = 0;
 
 // Hex offset deltas
 static const int DY[6]  = { -1, -1,  0,  0,  1,  1 };
@@ -385,8 +400,39 @@ static int parse_binding(const char *line, GpioBinding *out) {
     return 0;
 }
 
+// Parse one input binding line: "input,gpio_pin,cell_x,cell_y,low_state,high_state"
+static int parse_input_binding(const char *line, InputBinding *out) {
+    char buf[64];
+    strncpy(buf, line + 6, sizeof buf - 1);   // skip "input,"
+    buf[sizeof buf - 1] = 0;
+    char *fields[5] = {0};
+    int   nf = 0;
+    fields[nf++] = buf;
+    for (char *p = buf; *p && nf < 5; p++) {
+        if (*p == ',') {
+            *p = 0;
+            fields[nf++] = p + 1;
+        }
+    }
+    if (nf != 5) return -1;
+    out->gpio_pin = atoi(fields[0]);
+    out->cell_x   = atoi(fields[1]);
+    out->cell_y   = atoi(fields[2]);
+    int lo        = atoi(fields[3]);
+    int hi        = atoi(fields[4]);
+    if (lo < 0 || lo >= K) return -1;
+    if (hi < 0 || hi >= K) return -1;
+    if (out->cell_x < 0 || out->cell_x >= GRID_W) return -1;
+    if (out->cell_y < 0 || out->cell_y >= GRID_H) return -1;
+    if (out->gpio_pin < 0 || out->gpio_pin > 48)  return -1;
+    out->low_state  = (u8)lo;
+    out->high_state = (u8)hi;
+    return 0;
+}
+
 static void load_bindings_from_fs() {
     n_bindings = 0;
+    n_input_bindings = 0;
     File f = LittleFS.open("/gpio_map.txt", "r");
     if (!f) return;
     char line[128];
@@ -403,10 +449,26 @@ static void load_bindings_from_fs() {
         char *t = line;
         while (*t == ' ' || *t == '\t') t++;
         if (*t == 0 || *t == '#') continue;
+
+        if (strncmp(t, "input,", 6) == 0) {
+            if (n_input_bindings >= MAX_INPUT_BINDINGS) {
+                Serial.printf("  warn: max %d input bindings; skipping rest\n",
+                              MAX_INPUT_BINDINGS);
+                continue;
+            }
+            InputBinding b;
+            if (parse_input_binding(t, &b) == 0) {
+                input_bindings[n_input_bindings++] = b;
+            } else {
+                Serial.printf("  warn: bad input binding: %s\n", t);
+            }
+            continue;
+        }
+
         if (n_bindings >= MAX_BINDINGS) {
             Serial.printf("  warn: max %d bindings; skipping rest\n",
                           MAX_BINDINGS);
-            break;
+            continue;
         }
         GpioBinding b;
         if (parse_binding(t, &b) == 0) {
@@ -422,9 +484,16 @@ static void write_default_gpio_map() {
     File f = LittleFS.open("/gpio_map.txt", "w");
     if (!f) return;
     f.print(
-        "# CA cell -> GPIO output bindings (combined sketch).\n"
-        "# Format: cell_x,cell_y,gpio_pin,state_mask\n"
+        "# CA cell <-> GPIO bindings (combined sketch).\n"
+        "#\n"
+        "# Output (cell drives pin):\n"
+        "#   cell_x,cell_y,gpio_pin,state_mask\n"
         "# state_mask is 4-bit; bit N set => pin HIGH when cell == N.\n"
+        "#\n"
+        "# Input (pin drives cell):\n"
+        "#   input,gpio_pin,cell_x,cell_y,low_state,high_state\n"
+        "# Pin uses INPUT_PULLUP (button to GND reads LOW). Per-tick:\n"
+        "# read inputs -> step CA -> drive outputs -> render.\n"
         "#\n"
         "# Avoid: GPIO 4-7 + 11-12 (TFT), 19-20 (USB), 0 (BOOT).\n"
         "# Safe defaults on the SuperMini: 1, 2, 3, 8, 9, 10, 13, 14, 21.\n"
@@ -432,6 +501,10 @@ static void write_default_gpio_map() {
         "4,5,2,0x8\n"
         "5,5,3,0x8\n"
         "6,5,8,0x8\n"
+        "#\n"
+        "# Demo inputs (commented out): two buttons clamping corner cells.\n"
+        "# input,9,0,0,0,3\n"
+        "# input,10,13,13,0,3\n"
     );
     f.close();
 }
@@ -445,6 +518,14 @@ static void apply_bindings(const u8 *g) {
         const GpioBinding &b = bindings[i];
         int v = g[b.cell_y * GRID_W + b.cell_x];
         digitalWrite(b.gpio_pin, level_for(b, v));
+    }
+}
+
+static void apply_input_bindings(u8 *g) {
+    for (int i = 0; i < n_input_bindings; i++) {
+        const InputBinding &b = input_bindings[i];
+        int high = digitalRead(b.gpio_pin);
+        g[b.cell_y * GRID_W + b.cell_x] = high ? b.high_state : b.low_state;
     }
 }
 
@@ -532,21 +613,37 @@ void setup() {
         Serial.println("wrote default /gpio_map.txt");
     }
     load_bindings_from_fs();
-    Serial.printf("%d GPIO bindings loaded\n", n_bindings);
+    Serial.printf("%d output bindings, %d input bindings loaded\n",
+                  n_bindings, n_input_bindings);
+
+    auto warn_pin = [](int pin) {
+        if (pin == 19 || pin == 20)
+            Serial.printf("  warn: GPIO %d is USB D+/D- — Serial will die\n",
+                          pin);
+        if (pin == PIN_SCK || pin == PIN_MOSI ||
+            pin == PIN_DC  || pin == PIN_CS  ||
+            pin == PIN_RST || pin == PIN_BL)
+            Serial.printf("  warn: GPIO %d collides with the TFT pin map\n",
+                          pin);
+    };
+
     for (int i = 0; i < n_bindings; i++) {
         const GpioBinding &b = bindings[i];
-        if (b.gpio_pin == 19 || b.gpio_pin == 20)
-            Serial.printf("  warn: GPIO %d is USB D+/D- — Serial will die\n",
-                          b.gpio_pin);
-        if (b.gpio_pin == PIN_SCK || b.gpio_pin == PIN_MOSI ||
-            b.gpio_pin == PIN_DC  || b.gpio_pin == PIN_CS  ||
-            b.gpio_pin == PIN_RST || b.gpio_pin == PIN_BL)
-            Serial.printf("  warn: GPIO %d collides with the TFT pin map\n",
-                          b.gpio_pin);
+        warn_pin(b.gpio_pin);
         pinMode(b.gpio_pin, OUTPUT);
         digitalWrite(b.gpio_pin, LOW);
-        Serial.printf("  cell (%d,%d) -> GPIO %d  mask=0x%X\n",
+        Serial.printf("  out: cell (%d,%d) -> GPIO %d  mask=0x%X\n",
                       b.cell_x, b.cell_y, b.gpio_pin, b.state_mask);
+    }
+
+    for (int i = 0; i < n_input_bindings; i++) {
+        const InputBinding &b = input_bindings[i];
+        warn_pin(b.gpio_pin);
+        pinMode(b.gpio_pin, INPUT_PULLUP);
+        Serial.printf("  in : GPIO %d (pull-up) -> cell (%d,%d) "
+                      "low=%d high=%d\n",
+                      b.gpio_pin, b.cell_x, b.cell_y,
+                      b.low_state, b.high_state);
     }
 
     pinMode(PIN_BL, OUTPUT);
@@ -571,6 +668,7 @@ void setup() {
                   (unsigned)run_seed, TICK_MS);
 
     tft.fillScreen(ST77XX_BLACK);
+    apply_input_bindings(grid_a);
     render_full(grid_a);
     apply_bindings(grid_a);
 
@@ -583,6 +681,7 @@ void loop() {
     static uint32_t tick = 0;
 
     delay(TICK_MS);
+    apply_input_bindings(cur);   // pin reads clamp cells before stepping
     step_grid(genome, cur, nxt);
     render_diff(cur, nxt);
     apply_bindings(nxt);
@@ -592,6 +691,11 @@ void loop() {
 
     if (tick % 30 == 0) {
         Serial.printf("tick %u  ", (unsigned)tick);
+        for (int i = 0; i < n_input_bindings; i++) {
+            const InputBinding &b = input_bindings[i];
+            int v = cur[b.cell_y * GRID_W + b.cell_x];
+            Serial.printf("in%d=c%d ", b.gpio_pin, v);
+        }
         for (int i = 0; i < n_bindings; i++) {
             const GpioBinding &b = bindings[i];
             int v = cur[b.cell_y * GRID_W + b.cell_x];

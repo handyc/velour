@@ -13,14 +13,14 @@ pixels, this sketch turns it into a hardware sequencer.
   file is missing or invalid, the sketch falls back to a random genome
   (almost certainly class-1 garbage) and warns on Serial.
 
-- **`/gpio_map.txt`** — one binding per line:
+- **`/gpio_map.txt`** — output and input bindings, one per line.
 
+  **Output (cell drives pin):**
   ```
   cell_x,cell_y,gpio_pin,state_mask
   ```
-
-  `state_mask` is a 4-bit value (`0x0`..`0xF`). Bit N is set ⇒ the pin
-  goes **HIGH** when the cell value equals **N**.
+  `state_mask` is a 4-bit value (`0x0`..`0xF`). Bit N is set ⇒ pin
+  **HIGH** when cell value equals **N**.
 
   | mask  | meaning                               |
   |-------|---------------------------------------|
@@ -30,8 +30,21 @@ pixels, this sketch turns it into a hardware sequencer.
   | `0xF` | always HIGH                           |
   | `0x0` | always LOW                            |
 
+  **Input (pin drives cell):**
+  ```
+  input,gpio_pin,cell_x,cell_y,low_state,high_state
+  ```
+  Pin uses `INPUT_PULLUP` (button-to-GND wiring reads LOW). When the
+  pin is LOW the cell is forced to `low_state`; when HIGH it's forced
+  to `high_state`. This turns the CA into a logic processor — external
+  signals dictate a few cells, the rule propagates, output cells
+  respond.
+
+  Per-tick order: read inputs → clamp cells → step CA → drive outputs.
+
   `#` lines are comments. A default file is written on first boot
-  with four pins watching a horizontal strip of cells.
+  with four output pins watching a horizontal strip of cells, plus two
+  commented-out input examples.
 
 ## Compile-time config
 

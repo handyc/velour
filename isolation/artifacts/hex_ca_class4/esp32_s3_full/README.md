@@ -41,10 +41,10 @@ Safe defaults on most SuperMini variants: 1, 2, 3, 8, 9, 10, 13, 14, 21.
 
 ## `/gpio_map.txt` format
 
+**Output (cell drives pin):**
 ```
 cell_x,cell_y,gpio_pin,state_mask
 ```
-
 `state_mask` is a 4-bit hex value. Bit N set ⇒ pin HIGH when cell
 value == N. Examples:
 
@@ -54,6 +54,19 @@ value == N. Examples:
 | `0x7` | LOW only when cell == 3 (others HIGH)     |
 | `0xA` | HIGH on states 1 and 3 (alternating)      |
 | `0xF` | always HIGH; `0x0` always LOW             |
+
+**Input (pin drives cell):**
+```
+input,gpio_pin,cell_x,cell_y,low_state,high_state
+```
+Pin uses `INPUT_PULLUP` (button-to-GND wiring reads LOW). When the
+pin is LOW the cell is forced to `low_state`; HIGH ⇒ `high_state`.
+Per-tick order: read inputs → step CA → drive outputs → render.
+
+Together: external signals clamp a few cells, the CA propagates,
+output cells respond. With ~9 free GPIOs after the TFT pin map (1, 2,
+3, 8, 9, 10, 13, 14, 21), a typical "logic processor" wiring is
+4 inputs + 4 outputs.
 
 A default file is written on first boot.
 
