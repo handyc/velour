@@ -135,6 +135,7 @@ INSTALLED_APPS = [
     'helix',
     'quill',
     'ledger',
+    's3lab',
 ]
 
 MIDDLEWARE = [
