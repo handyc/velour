@@ -37,12 +37,26 @@ const state = {
     staticDwellTicks: 0,     // consecutive ticks with MA below floor
     autoRefine: true,
     lastTickActivity: 0,
+    // Periodicity detection — if the grid revisits a recent state, the
+    // CA is stuck in a short cycle even if activity > 0.
+    gridHashes: [],          // last N grid hashes
+    gridHashN: 16,
+    periodicDwell: 0,        // consecutive ticks "inside a short cycle"
 };
 
-// Auto-refine thresholds. Floor < verification floor: we want to dwell
-// only on truly dead rulesets, not just quieter-than-typical class-4.
-const ACT_FLOOR_RUN     = 0.02;
-const STATIC_DWELL_LIMIT = 30;    // ~9 s at 300 ms tick
+// Auto-refine thresholds.
+//   ACT_FLOOR_RUN: any MA below this counts as stalled. Raised to 5%
+//     so we don't tolerate "barely-alive" steady-states that visually
+//     look frozen — class-4 should hover near 10-15% on a healthy run.
+//   STATIC_DWELL_LIMIT: consecutive stalled ticks before refine fires.
+//     ~4.5 s at 300 ms, fast enough to feel responsive.
+//   PERIODIC_DWELL_LIMIT: consecutive ticks the grid has been in a
+//     ≤16-period cycle before refine fires. A short cycle is by
+//     definition visually frozen; trigger faster than the activity
+//     path.
+const ACT_FLOOR_RUN         = 0.05;
+const STATIC_DWELL_LIMIT    = 15;
+const PERIODIC_DWELL_LIMIT  = 8;
 
 // Default bindings: edges of the grid as outputs, interior as inputs.
 // The mental model is "inputs re-seed the centre, outputs read the
@@ -317,6 +331,34 @@ function activityMA() {
     return s / h.length;
 }
 
+// FNV-1a 32-bit hash over the grid bytes. ~1 µs per call on the S3
+// grid (196 cells); cheap enough to call every tick.
+function gridHash(g) {
+    let h = 0x811c9dc5 >>> 0;
+    for (let i = 0; i < g.length; i++) {
+        h ^= g[i];
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h;
+}
+
+// Returns the cycle length if the grid is currently stuck in a cycle
+// of period ≤ gridHashN, otherwise 0. Records the new hash.
+function checkPeriodicity(g) {
+    const h = gridHash(g);
+    const buf = state.gridHashes;
+    let period = 0;
+    for (let i = 0; i < buf.length; i++) {
+        if (buf[i] === h) {
+            period = buf.length - i;   // distance from now
+            break;
+        }
+    }
+    buf.push(h);
+    if (buf.length > state.gridHashN) buf.shift();
+    return period;
+}
+
 function drawActivitySparkline() {
     const W = actSparkCv.width;
     const H = actSparkCv.height;
@@ -359,12 +401,24 @@ function drawActivitySparkline() {
 function updateActivityDisplay() {
     actNowEl.textContent = `${(state.lastTickActivity * 100).toFixed(1)}%`;
     actMaEl.textContent  = `${(activityMA() * 100).toFixed(1)}%`;
-    if (state.staticDwellTicks > 0 && state.autoRefine && !state.hunting) {
-        const remaining = STATIC_DWELL_LIMIT - state.staticDwellTicks;
-        actDwellEl.textContent = remaining > 0
-            ? `· static for ${state.staticDwellTicks} ticks → refine in ${remaining}`
-            : '· refining…';
-        actDwellEl.classList.add('warning');
+
+    if (state.autoRefine && !state.hunting) {
+        if (state.periodicDwell > 0) {
+            const remaining = PERIODIC_DWELL_LIMIT - state.periodicDwell;
+            actDwellEl.textContent = remaining > 0
+                ? `· cycle ≤${state.gridHashN} ticks for ${state.periodicDwell} → refine in ${remaining}`
+                : '· refining (periodic)…';
+            actDwellEl.classList.add('warning');
+        } else if (state.staticDwellTicks > 0) {
+            const remaining = STATIC_DWELL_LIMIT - state.staticDwellTicks;
+            actDwellEl.textContent = remaining > 0
+                ? `· static for ${state.staticDwellTicks} ticks → refine in ${remaining}`
+                : '· refining (stalled)…';
+            actDwellEl.classList.add('warning');
+        } else {
+            actDwellEl.textContent = '';
+            actDwellEl.classList.remove('warning');
+        }
     } else {
         actDwellEl.textContent = '';
         actDwellEl.classList.remove('warning');
@@ -372,17 +426,34 @@ function updateActivityDisplay() {
     drawActivitySparkline();
 }
 
-function checkAutoRefine() {
+function checkAutoRefine(periodFound) {
     if (!state.autoRefine) return;
     if (state.hunting) return;
     if (state.activityHistory.length < state.activityHistoryN) return;
+
+    // Periodicity path — fires faster than the activity path because a
+    // short cycle is, by definition, visually frozen even at non-zero
+    // activity.
+    if (periodFound > 0) {
+        state.periodicDwell++;
+        if (state.periodicDwell > PERIODIC_DWELL_LIMIT) {
+            state.periodicDwell = 0;
+            state.staticDwellTicks = 0;
+            startHunt({ warmStart: true,
+                        reason: `auto-refine: stuck in ${periodFound}-tick cycle` });
+            return;
+        }
+    } else {
+        state.periodicDwell = 0;
+    }
 
     const ma = activityMA();
     if (ma < ACT_FLOOR_RUN) {
         state.staticDwellTicks++;
         if (state.staticDwellTicks > STATIC_DWELL_LIMIT) {
             state.staticDwellTicks = 0;
-            startHunt({ warmStart: true, reason: 'auto-refine: stalled' });
+            startHunt({ warmStart: true,
+                        reason: `auto-refine: stalled (${(ma * 100).toFixed(1)}%)` });
         }
     } else {
         state.staticDwellTicks = 0;
@@ -415,11 +486,15 @@ function doTick() {
     applyOutputBindings(state.nxt);
     drawWaveform();
     [state.cur, state.nxt] = [state.nxt, state.cur];
+
+    // Periodicity check on the *new* current state (post-swap).
+    const period = checkPeriodicity(state.cur);
+
     state.tick++;
     $('tick-count').textContent = state.tick;
 
     updateActivityDisplay();
-    checkAutoRefine();
+    checkAutoRefine(period);
 }
 
 // ── Hunt control ─────────────────────────────────────────────────────
@@ -491,8 +566,10 @@ function startHunt({ warmStart = false, reason = '' } = {}) {
             seed_grid(state.cur, prng());
             renderFull(state.cur);
             applyOutputBindings(state.cur);
-            state.activityHistory = [];
+            state.activityHistory  = [];
+            state.gridHashes       = [];
             state.staticDwellTicks = 0;
+            state.periodicDwell    = 0;
             state.lastTickActivity = 0;
             updateGenomeInfo();
             updateActivityDisplay();
@@ -512,7 +589,11 @@ function startHunt({ warmStart = false, reason = '' } = {}) {
         seedPalette:         warmStart ? state.palette.buffer.slice(0) : null,
         initialMutationRate: warmStart ? 0.10 : 0.05,
         maxAttempts:         4,
-        activityFloor:       0.03,
+        // Verification floor 5% to match the run-time stall floor —
+        // a winner that barely clears 3% on the verify run will
+        // almost certainly trigger the run-time stall path within
+        // seconds. Ceiling 50% rejects pure-chaos rulesets.
+        activityFloor:       0.05,
         activityCeil:        0.50,
     });
 }
