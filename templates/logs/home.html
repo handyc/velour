@@ -2,43 +2,136 @@
 
 {% block title %}Logs - Velour{% endblock %}
 
-{% block content %}
-<h1>System Logs</h1>
-<p>Pick a log source to view, filter, visualize, or export.</p>
+{% block extra_head %}
+<style>
+    .log-section { margin-bottom: 1.75rem; }
+    .log-section h2 {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #8b949e;
+        margin: 0 0 0.6rem;
+        border-bottom: 1px solid #21262d;
+        padding-bottom: 0.3rem;
+    }
+    .log-section h2 .count {
+        color: #6e7681;
+        font-size: 0.75rem;
+        font-weight: normal;
+        margin-left: 0.4rem;
+        text-transform: none;
+        letter-spacing: 0;
+    }
+    .source-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 0.75rem;
+        align-items: center;
+        padding: 0.4rem 0.7rem;
+        background: #0d1117;
+        border: 1px solid #21262d;
+        border-radius: 4px;
+        margin-bottom: 0.3rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.85rem;
+    }
+    .source-row.unreadable { opacity: 0.55; }
+    .source-row .name { color: #c9d1d9; font-weight: 500; }
+    .source-row .desc { color: #6e7681; font-size: 0.75rem; }
+    .source-row .path { color: #6e7681; font-size: 0.72rem; word-break: break-all; }
+    .source-row .actions { display: flex; gap: 0.3rem; flex-wrap: nowrap; }
+    .source-row .actions a {
+        font-size: 0.72rem;
+        padding: 2px 8px;
+        border: 1px solid #30363d;
+        border-radius: 3px;
+        color: #c9d1d9;
+        text-decoration: none;
+        background: #161b22;
+    }
+    .source-row .actions a:hover { border-color: #58a6ff; color: #58a6ff; }
+    .source-row .actions .disabled {
+        color: #484f58;
+        background: transparent;
+        border-color: transparent;
+        cursor: default;
+    }
+    .lead { color: #8b949e; font-size: 0.9rem; margin: 0 0 1rem; }
+</style>
+{% endblock %}
 
-<div class="dashboard-grid">
-    {% for source in sources %}
-    <div class="card">
-        <h3>{{ source.name }}</h3>
-        <table class="info-table">
-            <tr>
-                <td class="info-label">Status</td>
-                <td>
-                    {% if source.readable %}
-                        <span style="color:#2ea043;">readable</span>
-                    {% else %}
-                        <span style="color:#f85149;">unreadable / not found</span>
-                    {% endif %}
-                </td>
-            </tr>
-            <tr>
-                <td class="info-label">Paths</td>
-                <td>
-                    <pre class="info-pre" style="margin:0;padding:0.25rem 0.5rem;">{% for p in source.paths %}{{ p }}
-{% endfor %}</pre>
-                </td>
-            </tr>
-        </table>
-        <div style="margin-top: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            {% if source.readable %}
-                <a href="{% url 'logs:view' %}?source={{ source.id }}" class="btn">View</a>
-                <a href="{% url 'logs:viz' %}?source={{ source.id }}" class="btn btn-secondary">Visualize</a>
-                <a href="{% url 'logs:pdf' %}?source={{ source.id }}" class="btn btn-secondary">PDF</a>
+{% block content %}
+<h1>Logs</h1>
+<p class="lead">
+    Discovered from this host: Velour's own supervisor program logs +
+    the local-nginx logs, plus the well-known system files and one
+    journal stream per active systemd unit.
+</p>
+
+<div class="log-section">
+    <h2>Velour <span class="count">{{ velour_sources|length }} source{{ velour_sources|length|pluralize }}</span></h2>
+    {% for s in velour_sources %}
+    <div class="source-row {% if not s.readable %}unreadable{% endif %}">
+        <div>
+            <div class="name">{{ s.name }}</div>
+            <div class="path">{{ s.paths|join:" · " }}</div>
+        </div>
+        <div class="actions">
+            {% if s.readable %}
+                <a href="{% url 'logs:view' %}?source={{ s.id }}">View</a>
+                <a href="{% url 'logs:viz' %}?source={{ s.id }}">Visualize</a>
+                <a href="{% url 'logs:pdf' %}?source={{ s.id }}">PDF</a>
             {% else %}
-                <span style="color:#8b949e;font-size:0.875rem;">(no readable source)</span>
+                <span class="disabled">unreadable</span>
             {% endif %}
         </div>
     </div>
+    {% empty %}
+    <p style="color: #6e7681; font-size: 0.85rem; font-style: italic;">No Velour-managed logs detected. Start a supervisor or local-nginx to populate this section.</p>
+    {% endfor %}
+</div>
+
+<div class="log-section">
+    <h2>System <span class="count">{{ system_sources|length }} source{{ system_sources|length|pluralize }}</span></h2>
+    {% for s in system_sources %}
+    <div class="source-row {% if not s.readable %}unreadable{% endif %}">
+        <div>
+            <div class="name">{{ s.name }}</div>
+            <div class="path">{{ s.paths|join:" · " }}</div>
+        </div>
+        <div class="actions">
+            {% if s.readable %}
+                <a href="{% url 'logs:view' %}?source={{ s.id }}">View</a>
+                <a href="{% url 'logs:viz' %}?source={{ s.id }}">Visualize</a>
+                <a href="{% url 'logs:pdf' %}?source={{ s.id }}">PDF</a>
+            {% else %}
+                <span class="disabled">unreadable</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="log-section">
+    <h2>Systemd Units <span class="count">{{ unit_sources|length }} active</span></h2>
+    {% for s in unit_sources %}
+    <div class="source-row {% if not s.readable %}unreadable{% endif %}">
+        <div>
+            <div class="name">{{ s.name }}{% if s.desc %} <span class="desc">— {{ s.desc }}</span>{% endif %}</div>
+            <div class="path">journalctl -u {{ s.name }}</div>
+        </div>
+        <div class="actions">
+            {% if s.readable %}
+                <a href="{% url 'logs:view' %}?source={{ s.id }}">View</a>
+                <a href="{% url 'logs:viz' %}?source={{ s.id }}">Visualize</a>
+                <a href="{% url 'logs:pdf' %}?source={{ s.id }}">PDF</a>
+            {% else %}
+                <span class="disabled">unreadable</span>
+            {% endif %}
+        </div>
+    </div>
+    {% empty %}
+    <p style="color: #6e7681; font-size: 0.85rem; font-style: italic;">No active systemd units detected (or systemd unavailable).</p>
     {% endfor %}
 </div>
 

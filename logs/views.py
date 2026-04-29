@@ -11,20 +11,104 @@ from django.shortcuts import render
 from fpdf import FPDF
 
 
-# Log sources to scan (readable without sudo on most systems)
+# Static log sources — well-known system paths readable without sudo
+# on most distributions. The home view merges these with dynamically
+# discovered sources (Velour's own supervisor logs + per-unit systemd
+# journals) so the panel reflects the host as it actually is.
 LOG_SOURCES = [
-    {'id': 'syslog', 'name': 'Syslog', 'paths': ['/var/log/syslog', '/var/log/messages']},
-    {'id': 'auth', 'name': 'Auth Log', 'paths': ['/var/log/auth.log', '/var/log/secure']},
-    {'id': 'kern', 'name': 'Kernel Log', 'paths': ['/var/log/kern.log']},
-    {'id': 'dpkg', 'name': 'Package Manager', 'paths': ['/var/log/dpkg.log', '/var/log/yum.log']},
-    {'id': 'boot', 'name': 'Boot Log', 'paths': ['/var/log/boot.log']},
-    {'id': 'cron', 'name': 'Cron Log', 'paths': ['/var/log/cron.log', '/var/log/cron']},
-    {'id': 'nginx_access', 'name': 'Nginx Access', 'paths': ['/var/log/nginx/access.log']},
-    {'id': 'nginx_error', 'name': 'Nginx Error', 'paths': ['/var/log/nginx/error.log']},
-    {'id': 'supervisor', 'name': 'Supervisor', 'paths': ['/var/log/supervisor/supervisord.log']},
-    {'id': 'dmesg', 'name': 'Dmesg (Kernel Ring)', 'paths': ['__dmesg__']},
-    {'id': 'journalctl', 'name': 'Systemd Journal', 'paths': ['__journalctl__']},
+    {'id': 'syslog',       'group': 'system', 'name': 'Syslog',              'paths': ['/var/log/syslog', '/var/log/messages']},
+    {'id': 'auth',         'group': 'system', 'name': 'Auth Log',            'paths': ['/var/log/auth.log', '/var/log/secure']},
+    {'id': 'kern',         'group': 'system', 'name': 'Kernel Log',          'paths': ['/var/log/kern.log']},
+    {'id': 'dpkg',         'group': 'system', 'name': 'Package Manager',     'paths': ['/var/log/dpkg.log', '/var/log/yum.log']},
+    {'id': 'boot',         'group': 'system', 'name': 'Boot Log',            'paths': ['/var/log/boot.log']},
+    {'id': 'cron',         'group': 'system', 'name': 'Cron Log',            'paths': ['/var/log/cron.log', '/var/log/cron']},
+    {'id': 'nginx_access', 'group': 'system', 'name': 'Nginx Access',        'paths': ['/var/log/nginx/access.log']},
+    {'id': 'nginx_error',  'group': 'system', 'name': 'Nginx Error',         'paths': ['/var/log/nginx/error.log']},
+    {'id': 'supervisor',   'group': 'system', 'name': 'Supervisor (system)', 'paths': ['/var/log/supervisor/supervisord.log']},
+    {'id': 'dmesg',        'group': 'system', 'name': 'Dmesg (Kernel Ring)', 'paths': ['__dmesg__']},
+    {'id': 'journalctl',   'group': 'system', 'name': 'Systemd Journal',     'paths': ['__journalctl__']},
 ]
+
+
+def _velour_log_sources():
+    """Discover log files Velour writes — every supervisor program's
+    stdout_logfile across every running supervisord instance, plus the
+    local-nginx access/error logs if that proxy has been started."""
+    sources = []
+    try:
+        from services.views import _get_supervisors
+        for sup in _get_supervisors():
+            for prog in sup['programs']:
+                logf = prog.get('stdout_logfile') or ''
+                if logf and os.path.isfile(logf):
+                    sources.append({
+                        'id':    f'sup__{sup["label"]}__{prog["name"]}',
+                        'group': 'velour',
+                        'name':  f'{prog["name"]} ({sup["label"]})',
+                        'paths': [logf],
+                    })
+    except Exception:
+        pass
+    try:
+        from services.local_nginx import WORKDIR as _NGINX_WORKDIR
+        for kind in ('access', 'error'):
+            p = _NGINX_WORKDIR / f'{kind}.log'
+            if p.is_file():
+                sources.append({
+                    'id':    f'local_nginx_{kind}',
+                    'group': 'velour',
+                    'name':  f'Local Nginx {kind}',
+                    'paths': [str(p)],
+                })
+    except Exception:
+        pass
+    return sources
+
+
+def _systemd_unit_sources():
+    """One log source per running systemd unit, backed by
+    journalctl -u <unit>. Skips inactive units to keep the list short."""
+    sources = []
+    try:
+        from services.views import _get_systemd_units
+        units, available, _ = _get_systemd_units()
+        if not available:
+            return []
+        for u in units:
+            if u['active'] != 'active':
+                continue
+            sources.append({
+                'id':    f'unit__{u["unit"]}',
+                'group': 'systemd',
+                'name':  u['name'],
+                'paths': [f'__journalctl_unit__{u["unit"]}'],
+                'desc':  u.get('description', ''),
+            })
+    except Exception:
+        pass
+    return sources
+
+
+def _all_sources():
+    """Combine static + dynamic log sources. Annotate each with a
+    'readable' flag so the template can grey-out unreachable ones."""
+    merged = list(LOG_SOURCES) + _velour_log_sources() + _systemd_unit_sources()
+    for s in merged:
+        readable = False
+        for path in s['paths']:
+            if path.startswith('__'):
+                readable = True
+                break
+            if os.path.isfile(path):
+                try:
+                    with open(path) as f:
+                        f.read(1)
+                    readable = True
+                    break
+                except (PermissionError, OSError):
+                    pass
+        s['readable'] = readable
+    return merged
 
 
 def _run(cmd, default=''):
@@ -36,7 +120,7 @@ def _run(cmd, default=''):
 
 def _read_log(source_id, lines=200, grep_filter='', level_filter=''):
     """Read the last N lines from a log source."""
-    source = next((s for s in LOG_SOURCES if s['id'] == source_id), None)
+    source = next((s for s in _all_sources() if s['id'] == source_id), None)
     if not source:
         return [], f'Unknown log source: {source_id}'
 
@@ -55,6 +139,13 @@ def _read_log(source_id, lines=200, grep_filter='', level_filter=''):
             raw = _run(['journalctl', '--no-pager', '-n', str(lines), '--output=short-iso'])
             raw_lines = raw.splitlines()
             source_path = 'journalctl'
+            break
+        elif path.startswith('__journalctl_unit__'):
+            unit = path[len('__journalctl_unit__'):]
+            raw = _run(['journalctl', '--no-pager', '-n', str(lines),
+                        '--output=short-iso', '-u', unit])
+            raw_lines = raw.splitlines()
+            source_path = f'journalctl -u {unit}'
             break
         elif os.path.isfile(path):
             try:
@@ -164,25 +255,15 @@ def _analyze_log(source_id, lines=2000):
 
 @login_required
 def logs_home(request):
-    # Check which sources are available
-    available = []
-    for source in LOG_SOURCES:
-        readable = False
-        for path in source['paths']:
-            if path.startswith('__'):
-                readable = True
-                break
-            if os.path.isfile(path):
-                try:
-                    with open(path) as f:
-                        f.read(1)
-                    readable = True
-                    break
-                except PermissionError:
-                    pass
-        available.append({**source, 'readable': readable})
-
-    return render(request, 'logs/home.html', {'sources': available})
+    sources = _all_sources()
+    velour = [s for s in sources if s['group'] == 'velour']
+    system = [s for s in sources if s['group'] == 'system']
+    units  = [s for s in sources if s['group'] == 'systemd']
+    return render(request, 'logs/home.html', {
+        'velour_sources': velour,
+        'system_sources': system,
+        'unit_sources':   units,
+    })
 
 
 @login_required
@@ -196,7 +277,7 @@ def logs_view(request):
     log_lines, source_path = _read_log(source_id, lines=lines,
                                         grep_filter=grep_filter, level_filter=level_filter)
 
-    source_name = next((s['name'] for s in LOG_SOURCES if s['id'] == source_id), source_id)
+    source_name = next((s['name'] for s in _all_sources() if s['id'] == source_id), source_id)
 
     error_count = sum(1 for l in log_lines if l['severity'] == 'error')
     warn_count = sum(1 for l in log_lines if l['severity'] == 'warning')
@@ -228,7 +309,7 @@ def logs_analyze(request):
 def logs_viz(request):
     """Visualization page for a log source."""
     source_id = request.GET.get('source', 'syslog')
-    source_name = next((s['name'] for s in LOG_SOURCES if s['id'] == source_id), source_id)
+    source_name = next((s['name'] for s in _all_sources() if s['id'] == source_id), source_id)
     return render(request, 'logs/viz.html', {
         'source_id': source_id,
         'source_name': source_name,
@@ -246,7 +327,7 @@ def logs_pdf(request):
     log_lines, source_path = _read_log(source_id, lines=lines,
                                         grep_filter=grep_filter, level_filter=level_filter)
 
-    source_name = next((s['name'] for s in LOG_SOURCES if s['id'] == source_id), source_id)
+    source_name = next((s['name'] for s in _all_sources() if s['id'] == source_id), source_id)
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -315,7 +396,7 @@ def logs_pdf(request):
 def logs_viz_pdf(request):
     """Export log analysis/visualization as A4 PDF."""
     source_id = request.GET.get('source', 'syslog')
-    source_name = next((s['name'] for s in LOG_SOURCES if s['id'] == source_id), source_id)
+    source_name = next((s['name'] for s in _all_sources() if s['id'] == source_id), source_id)
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     data = _analyze_log(source_id)
