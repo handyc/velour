@@ -19,8 +19,8 @@
 #
 # Usage:
 #   bash hotswap.sh                   # defaults to velour
-#   bash hotswap.sh swibliq           # explicit target user
-#   DEPLOY_USER=swibliq bash hotswap.sh
+#   bash hotswap.sh myapp             # explicit target user
+#   DEPLOY_USER=myapp bash hotswap.sh
 
 set -e
 

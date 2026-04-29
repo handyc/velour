@@ -15,8 +15,8 @@ class Migration(migrations.Migration):
             name='RemoteHost',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(help_text='Human label, e.g. "lucdh.nl prod" or "raspberry pi".', max_length=100)),
-                ('url', models.CharField(help_text='Base URL of the remote velour, e.g. https://swibliq.lucdh.nl', max_length=500)),
+                ('name', models.CharField(help_text='Human label, e.g. "production" or "raspberry pi".', max_length=100)),
+                ('url', models.CharField(help_text='Base URL of the remote velour, e.g. https://myapp.example.com', max_length=500)),
                 ('token', models.CharField(help_text='Bearer token the remote gave you (contents of its health_token.txt).', max_length=200)),
                 ('enabled', models.BooleanField(default=True, help_text='Uncheck to skip this host in "Refresh all" polls.')),
                 ('last_polled_at', models.DateTimeField(blank=True, null=True)),

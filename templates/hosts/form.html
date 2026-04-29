@@ -32,12 +32,12 @@
     <label>
         <span>Name</span>
         <input type="text" name="name" value="{{ host.name|default:'' }}" required autofocus>
-        <div class="hint">Any human label — e.g. "lucdh.nl prod", "raspberry pi", "work laptop".</div>
+        <div class="hint">Any human label — e.g. "production", "raspberry pi", "work laptop".</div>
     </label>
 
     <label>
         <span>URL</span>
-        <input type="url" name="url" value="{{ host.url|default:'' }}" placeholder="https://swibliq.lucdh.nl" required>
+        <input type="url" name="url" value="{{ host.url|default:'' }}" placeholder="https://myapp.example.com" required>
         <div class="hint">Base URL of the remote velour. Do not include <code>/sysinfo/health.json</code>; that's appended automatically.</div>
     </label>
 

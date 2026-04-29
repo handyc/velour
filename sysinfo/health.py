@@ -107,7 +107,7 @@ def _supervisor_programs():
     """Parse `supervisorctl status` output into structured program records.
 
     Output looks like:
-        swibliq     RUNNING   pid 1234, uptime 1:23:45
+        myapp       RUNNING   pid 1234, uptime 1:23:45
         velour      STOPPED   Apr 10 10:00 AM
         foo         FATAL     Exited too quickly (process log may have details)
 

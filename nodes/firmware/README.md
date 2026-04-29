@@ -23,7 +23,7 @@ without rewriting anything — it's additive, not a replacement firmware.
 5. Create a `VelourClient` instance at file scope:
    ```cpp
    VelourClient velour(
-       "http://velour.lucdh.nl",           // base URL, no trailing slash
+       "http://velour.example.com",           // base URL, no trailing slash
        "gary",                              // slug
        "PASTE-YOUR-48-CHAR-TOKEN-HERE"      // api_token
    );

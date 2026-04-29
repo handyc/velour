@@ -11,7 +11,7 @@
 //   #include "velour_client.h"
 //
 //   VelourClient velour(
-//       "http://velour.lucdh.nl",      // base URL (no trailing /api/nodes)
+//       "http://velour.example.com",      // base URL (no trailing /api/nodes)
 //       "gary",                         // node slug from /nodes/gary/
 //       "paste-48-char-token-here"      // node.api_token from the detail page
 //   );

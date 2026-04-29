@@ -12,11 +12,11 @@ class RemoteHost(models.Model):
 
     name = models.CharField(
         max_length=100,
-        help_text='Human label, e.g. "lucdh.nl prod" or "raspberry pi".',
+        help_text='Human label, e.g. "production" or "raspberry pi".',
     )
     url = models.CharField(
         max_length=500,
-        help_text='Base URL of the remote velour, e.g. https://swibliq.lucdh.nl',
+        help_text='Base URL of the remote velour, e.g. https://myapp.example.com',
     )
     token = models.CharField(
         max_length=200,

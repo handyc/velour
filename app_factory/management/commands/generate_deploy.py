@@ -30,8 +30,8 @@ def _default_server_name(deploy_user):
     """Compose a default nginx server_name from the Identity singleton.
 
     The base domain is read from identity.models.Identity.hostname, so an
-    operator who sets their hostname to 'lucdh.nl' in the Identity settings
-    gets all generated nginx configs pointing at <deploy_user>.lucdh.nl
+    operator who sets their hostname to 'example.com' in the Identity settings
+    gets all generated nginx configs pointing at <deploy_user>.example.com
     without ever passing --server-name. A fresh velour install with no
     Identity row falls back to 'example.com' — an obviously-placeholder
     domain that won't accidentally collide with a real production host.

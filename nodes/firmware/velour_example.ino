@@ -31,7 +31,7 @@ const char* WIFI_PASSWORD = "your-wifi-password";
 
 // Point this at your velour instance. Examples:
 //   "http://192.168.1.50:7777"         // local dev
-//   "https://velour.lucdh.nl"           // prod, via nginx
+//   "https://velour.example.com"           // prod, via nginx
 // NO trailing slash, NO /api/nodes path — the client appends that.
 const char* VELOUR_URL = "http://192.168.1.50:7777";
 

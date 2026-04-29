@@ -33,7 +33,7 @@ class Identity(models.Model):
     # --- factual settings ------------------------------------------------
     # The base domain this instance lives under. Subdomain composition for
     # deployed apps happens by prepending the deploy_user: so hostname
-    # "lucdh.nl" + deploy_user "blorp" → nginx server_name "blorp.lucdh.nl".
+    # "example.com" + deploy_user "blorp" → nginx server_name "blorp.example.com".
     # Defaults to "example.com" on a fresh install so distribution copies
     # ship with an obviously-not-a-real-domain placeholder.
     hostname = models.CharField(
