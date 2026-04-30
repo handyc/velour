@@ -254,10 +254,28 @@ def distillation_raw(request, slug):
     Default `XFrameOptionsMiddleware` sends `X-Frame-Options: DENY`,
     which blocks the iframe in detail.html even on same-origin
     pages. The decorator overrides DENY → SAMEORIGIN so the embed
-    works without weakening the global default for other views.
+     works without weakening the global default for other views.
+
+    JS-tier outputs are real HTML and pass through unchanged.
+    ATTiny / ESP / circuit tiers emit plain C / text; wrap those in
+    a minimal hacker-green shell so the iframe (which sits on a dark
+    background) doesn't render dark text on dark.
     """
     d = get_object_or_404(Distillation, slug=slug)
-    return HttpResponse(d.output, content_type='text/html; charset=utf-8')
+    body = d.output
+    head = body.lstrip()[:32].lower()
+    is_html = head.startswith('<!doctype') or head.startswith('<html')
+    if not is_html:
+        from django.utils.html import escape
+        body = (
+            '<!DOCTYPE html><html><head><meta charset="utf-8">'
+            '<style>html,body{margin:0;background:#0d1117}'
+            'pre{margin:0;padding:1rem;color:#3fb950;'
+            'font:0.78rem/1.45 ui-monospace,Menlo,Consolas,monospace;'
+            'white-space:pre-wrap;word-wrap:break-word}</style>'
+            f'</head><body><pre>{escape(d.output)}</pre></body></html>'
+        )
+    return HttpResponse(body, content_type='text/html; charset=utf-8')
 
 
 @login_required
