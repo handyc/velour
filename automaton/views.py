@@ -1,14 +1,22 @@
+import hashlib
 import json
 import random
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.db import transaction
+from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.crypto import get_random_string
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from .models import DEFAULT_PALETTE, ExactRule, Rule, RuleSet, Simulation
+from .packed import (
+    PackedRuleset, ansi256_to_hex, encode_genome_bin, hex_to_rgb,
+    nearest_ansi256, parse_genome_bin,
+)
 
 
 @login_required
@@ -123,6 +131,60 @@ def simulation_data_json(request, slug):
 
 
 @login_required
+def export_genome_bin(request, slug):
+    """Emit a 4,104-byte genome.bin for this simulation's RuleSet.
+
+    Same on-the-wire format as s3lab's "Download genome.bin" button:
+    HXC4 magic + 4-byte ANSI-256 palette + 4,096-byte K=4 packed
+    genome. Round-tripping a rule that originally came from s3lab is
+    byte-identical (we recover the original ANSI palette from
+    ``RuleSet.source_metadata``); rules authored in Automaton land
+    with a nearest-match ANSI palette derived from their CSS colours.
+    """
+    sim = get_object_or_404(Simulation, slug=slug)
+    rs = sim.ruleset
+    if rs.n_colors != 4:
+        return HttpResponseBadRequest(
+            f'genome.bin is K=4 only; this RuleSet is K={rs.n_colors}'
+        )
+
+    # Materialise ExactRule rows back into a PackedRuleset. from_explicit
+    # is already the canonical inverse used by the import command, so
+    # the round trip is symmetric.
+    explicit = [
+        {'s': er.self_color,
+         'n': [er.n0_color, er.n1_color, er.n2_color, er.n3_color,
+               er.n4_color, er.n5_color],
+         'r': er.result_color}
+        for er in rs.exact_rules.all().order_by('priority')
+    ]
+    packed = PackedRuleset.from_explicit(explicit, n_colors=4)
+
+    # Palette: prefer the original ANSI codes if this rule was
+    # imported from s3lab; otherwise nearest-match each CSS colour.
+    sm = rs.source_metadata or {}
+    saved = sm.get('palette_ansi256')
+    if isinstance(saved, list) and len(saved) == 4 and all(
+        isinstance(x, int) and 0 <= x <= 255 for x in saved
+    ):
+        palette_bytes = bytes(saved)
+    else:
+        css = list(rs.palette) if rs.palette else list(DEFAULT_PALETTE)
+        # Pad / truncate to exactly 4 colours.
+        while len(css) < 4:
+            css.append('#000000')
+        palette_bytes = bytes(
+            nearest_ansi256(hex_to_rgb(c)) for c in css[:4]
+        )
+
+    blob = encode_genome_bin(palette_bytes, packed)
+    safe = slugify(sim.name) or sim.slug
+    resp = HttpResponse(blob, content_type='application/octet-stream')
+    resp['Content-Disposition'] = f'attachment; filename="{safe}.genome.bin"'
+    return resp
+
+
+@login_required
 def export_simulation_json(request, slug):
     """Export a simulation and its ruleset as downloadable JSON."""
     sim = get_object_or_404(Simulation, slug=slug)
@@ -169,6 +231,47 @@ def export_simulation_json(request, slug):
     response = JsonResponse(data, json_dumps_params={'indent': 2})
     response['Content-Disposition'] = f'attachment; filename="{sim.slug}.json"'
     return response
+
+
+_GRID_MIN = 8
+_GRID_MAX = 128
+
+
+@login_required
+@require_POST
+def resize_simulation(request, slug):
+    """Resize a simulation's grid in place.
+
+    Changing W or H invalidates the saved grid_state (it's a fixed-shape
+    2D array) and the analysis (different topology), so we regenerate a
+    random grid at the new dimensions and clear the analysis. Palette,
+    name, and ruleset are preserved — same simulation, new canvas.
+    """
+    sim = get_object_or_404(Simulation, slug=slug)
+    try:
+        w = int(request.POST.get('width', sim.width))
+        h = int(request.POST.get('height', sim.height))
+    except (TypeError, ValueError):
+        messages.error(request, 'Width and height must be integers.')
+        return redirect('automaton:run', slug=sim.slug)
+    if not (_GRID_MIN <= w <= _GRID_MAX and _GRID_MIN <= h <= _GRID_MAX):
+        messages.error(
+            request,
+            f'Width and height must be between {_GRID_MIN} and {_GRID_MAX}.',
+        )
+        return redirect('automaton:run', slug=sim.slug)
+
+    nc = sim.ruleset.n_colors
+    sim.width = w
+    sim.height = h
+    sim.grid_state = [
+        [random.randint(0, nc - 1) for _ in range(w)] for _ in range(h)
+    ]
+    sim.analysis = {}
+    sim.tick_count = 0
+    sim.save()
+    messages.success(request, f'Resized to {w}×{h} (random init).')
+    return redirect('automaton:run', slug=sim.slug)
 
 
 @login_required
@@ -477,3 +580,119 @@ def merge_random_rulesets(request):
         f'Random merge: "{rs_a.name}" ⊕ "{rs_b.name}" → "{rs.name}" '
         f'({n_exact} exact + {n_count} count rules).')
     return redirect('automaton:home')
+
+
+# Maximum genome.bin payload (4,104 bytes); reject anything larger to keep
+# the endpoint cheap and a corrupt upload from filling the request body.
+_MAX_S3LAB_BYTES = 8192
+
+
+@login_required
+@require_POST
+def import_from_s3lab(request):
+    """One-click POST from s3lab — accept the live genome.bin payload,
+    create a RuleSet + ExactRule rows, return the new ruleset's home URL.
+
+    The body is the raw 4,104 bytes that ``encode_tail`` produces
+    (HXC4 magic + 4-byte palette + 4,096-byte K=4 packed genome).
+    """
+    data = request.body
+    if not data:
+        return HttpResponseBadRequest('empty body')
+    if len(data) > _MAX_S3LAB_BYTES:
+        return HttpResponseBadRequest('payload too large')
+    try:
+        palette, packed = parse_genome_bin(data)
+    except ValueError as e:
+        return HttpResponseBadRequest(f'bad genome.bin: {e}')
+
+    sha1 = hashlib.sha1(packed.data).hexdigest()
+    existing = RuleSet.objects.filter(
+        source_metadata__blob_sha1=sha1,
+    ).first()
+    if existing:
+        # Re-use the most recent Simulation built from this RuleSet
+        # if there is one, else send the user to the home page.
+        sim = existing.simulations.order_by('-created_at').first()
+        url = (reverse('automaton:run', args=[sim.slug])
+               if sim else reverse('automaton:home'))
+        return JsonResponse({
+            'ok':         True,
+            'duplicate':  True,
+            'slug':       existing.slug,
+            'name':       existing.name,
+            'url':        url,
+            'n_explicit': existing.exact_rules.count(),
+        })
+
+    while True:
+        name = f's3lab {get_random_string(6).lower()}'
+        if not RuleSet.objects.filter(name=name).exists():
+            break
+
+    explicit = packed.to_explicit(skip_identity=True)
+    n_explicit = len(explicit)
+
+    # Convert s3lab's 4 ANSI-256 indices into the #rrggbb strings the
+    # automaton canvas understands. Without this RuleSet.palette stays
+    # blank and simulations fall back to DEFAULT_PALETTE — same hex CA
+    # but completely different cell colours.
+    palette_css = [ansi256_to_hex(idx) for idx in palette]
+
+    with transaction.atomic():
+        ruleset = RuleSet.objects.create(
+            name=name,
+            description=(
+                f'Imported live from s3lab (sha1 {sha1[:10]}…). '
+                f'{n_explicit} non-identity patterns out of '
+                f'{4**7:,} possible 7-tuples.'
+            ),
+            n_colors=4,
+            source='operator',
+            palette=palette_css,
+            source_metadata={
+                'origin':           'imported',
+                'source':           's3lab',
+                'blob_sha1':        sha1,
+                'palette_hex':      palette.hex(),
+                'palette_ansi256':  list(palette),
+                'palette_css':      palette_css,
+                'n_explicit':       n_explicit,
+            },
+        )
+        ExactRule.objects.bulk_create([
+            ExactRule(
+                ruleset=ruleset,
+                self_color=er['s'],
+                n0_color=er['n'][0], n1_color=er['n'][1],
+                n2_color=er['n'][2], n3_color=er['n'][3],
+                n4_color=er['n'][4], n5_color=er['n'][5],
+                result_color=er['r'],
+                priority=i,
+            )
+            for i, er in enumerate(explicit)
+        ])
+
+        # Auto-create a starter simulation so the link from s3lab lands
+        # on a running canvas, not an empty filter view. 16×16 grid to
+        # mirror what the operator was looking at in /s3lab/; random
+        # initial colours — the rule does the rest.
+        sim_w, sim_h = 16, 16
+        grid = [[random.randint(0, 3) for _ in range(sim_w)]
+                for _ in range(sim_h)]
+        simulation = Simulation.objects.create(
+            name=name,
+            ruleset=ruleset,
+            width=sim_w, height=sim_h,
+            palette=palette_css,
+            grid_state=grid,
+        )
+
+    return JsonResponse({
+        'ok':         True,
+        'duplicate':  False,
+        'slug':       ruleset.slug,
+        'name':       ruleset.name,
+        'url':        reverse('automaton:run', args=[simulation.slug]),
+        'n_explicit': n_explicit,
+    })

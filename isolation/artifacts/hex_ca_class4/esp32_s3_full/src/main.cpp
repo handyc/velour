@@ -35,8 +35,8 @@
 #define TAIL_MAGIC   "HXC4"
 #define TAIL_BYTES   (MAGIC_BYTES + PAL_BYTES + GBYTES)
 
-#define GRID_W       14
-#define GRID_H       14
+#define GRID_W       16
+#define GRID_H       16
 #define HORIZON      25
 
 // GA params (match hunter.c)
@@ -57,9 +57,9 @@
 #define PIN_BL        7
 #define SPI_HZ       27000000UL
 
-#define CELL          5         // 14*5 = 70 px square grid
-#define XPAD         44         // (160-72)/2 ≈ centred on landscape
-#define YPAD          5         // (80-70)/2
+#define CELL          4         // 16*4 = 64 logical px (was 14*5 = 70)
+#define XPAD         46         // centres the 64-wide grid in the 160-wide panel
+#define YPAD          7         // centres the 64-tall grid in the 80-tall panel
 
 typedef uint8_t u8;
 

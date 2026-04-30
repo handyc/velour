@@ -75,10 +75,12 @@
       <div class="tft-controls">
         <button id="download-genome">Download genome.bin</button>
         <button id="download-gpio-map">Download gpio_map.txt</button>
+        <button id="send-to-automaton" title="Save the live ruleset to the Automaton app as a new RuleSet">→ Automaton</button>
         <label class="upload-label">
           Upload genome.bin
           <input id="upload-genome" type="file" accept=".bin,application/octet-stream">
         </label>
+        <span id="send-status" style="font-size:0.85em;color:#8b949e;"></span>
       </div>
     </div>
 
@@ -106,7 +108,7 @@
   <section class="s3lab-fineprint">
     <p>The algorithm here is a line-for-line port of
       <code>isolation/artifacts/hex_ca_class4/esp32_s3_full/src/main.cpp</code>:
-      same K=4 hex CA, same 14×14 grid, same 4096-byte packed genome, same
+      same K=4 hex CA, same 16×16 grid, same 4096-byte packed genome, same
       class-4 fitness, same 4-bit output state-mask, same INPUT_PULLUP input
       semantics. <code>genome.bin</code> uses the 4104-byte
       <code>HXC4 ‖ palette ‖ genome</code> tail format from the standalone

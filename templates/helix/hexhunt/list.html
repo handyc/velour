@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Helix · Hex Hunt{% endblock %}
+
+{% block content %}
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+    Helix · Hex Hunt
+    <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+        — evolve hex CA rules against organic DNA
+    </span>
+</h1>
+
+<p style="margin-top:-0.4rem;color:#8b949e;font-size:0.9rem;max-width:60ch;">
+    Same K=4, 7-cell hex CA as s3lab and automaton, but the corpus is real
+    DNA windows from <a href="{% url 'helix:list' %}" style="color:#79c0ff;">SequenceRecord</a>
+    — never random seeds. Tournament fitness rewards rules that produce
+    rich behaviour when fed organic input. Discovered rules transfer back
+    to s3lab and automaton as raw 4 KB blobs.
+</p>
+
+<h2 style="margin-top:1.6rem;font-size:1.05rem;color:#c9d1d9;">Corpora</h2>
+{% if corpora %}
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Slug</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Name</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Feature</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Windows</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Window bp</th>
+      <th style="text-align:left;padding:0.4rem 0;">Created</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in corpora %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;color:#79c0ff;">{{ c.slug }}</td>
+      <td style="padding:0.4rem 0.6rem;color:#c9d1d9;">{{ c.name }}</td>
+      <td style="padding:0.4rem 0.6rem;color:#8b949e;">{{ c.feature_type|default:"—" }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ c.windows_count }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ c.window_size }}</td>
+      <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ c.created_at|date:"D d M Y H:i" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;">No corpora yet. Build one with:</p>
+<pre style="background:#0d1117;color:#c9d1d9;padding:0.6rem 0.8rem;border:1px solid #30363d;font-size:0.85rem;">manage.py hexhunt_seed_corpus &lt;record_pk&gt; --feature-type CDS --window-size 256</pre>
+{% endif %}
+
+<h2 style="margin-top:1.6rem;font-size:1.05rem;color:#c9d1d9;">Recent runs</h2>
+{% if runs %}
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Run</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Corpus</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Status</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Top score</th>
+      <th style="text-align:left;padding:0.4rem 0;">Started</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;">
+        <a href="{% url 'helix:hexhunt:run_detail' run.slug %}" style="color:#79c0ff;text-decoration:none;">{{ run.slug }}</a>
+      </td>
+      <td style="padding:0.4rem 0.6rem;font-family:ui-monospace,monospace;color:#c9d1d9;">{{ run.corpus.slug }}</td>
+      <td style="padding:0.4rem 0.6rem;color:{% if run.status == 'done' %}#7ee787{% elif run.status == 'failed' %}#ff7b72{% else %}#d29922{% endif %};">{{ run.status }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">
+        {% if run.scoreboard_json %}{{ run.scoreboard_json.0.score|floatformat:4 }}{% else %}—{% endif %}
+      </td>
+      <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ run.started_at|date:"D d M Y H:i"|default:"—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;">No runs yet. Pick a corpus and run:</p>
+<pre style="background:#0d1117;color:#c9d1d9;padding:0.6rem 0.8rem;border:1px solid #30363d;font-size:0.85rem;">manage.py hexhunt_run &lt;corpus_slug&gt; --pop 256 --gens 200</pre>
+{% endif %}
+
+{% if scans %}
+<h2 style="margin-top:1.6rem;font-size:1.05rem;color:#c9d1d9;">Recent scans</h2>
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Scan</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Rule</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Record</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Windows</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Mean / max</th>
+      <th style="text-align:left;padding:0.4rem 0;">Created</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in scans %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;">
+        <a href="{% url 'helix:hexhunt:scan_detail' s.slug %}" style="color:#79c0ff;text-decoration:none;">{{ s.slug }}</a>
+      </td>
+      <td style="padding:0.4rem 0.6rem;font-family:ui-monospace,monospace;color:#c9d1d9;">{{ s.rule.slug }}</td>
+      <td style="padding:0.4rem 0.6rem;color:#c9d1d9;">{{ s.record.title|truncatechars:40 }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ s.n_windows }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ s.score_mean|floatformat:4 }} / {{ s.score_max|floatformat:4 }}</td>
+      <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ s.created_at|date:"D d M Y H:i" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% if rules %}
+<h2 style="margin-top:1.6rem;font-size:1.05rem;color:#c9d1d9;">Recent rules</h2>
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Slug</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Name</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Origin</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Score</th>
+      <th style="text-align:left;padding:0.4rem 0;">Created</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for rule in rules %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;">
+        <a href="{% url 'helix:hexhunt:rule_detail' rule.slug %}" style="color:#79c0ff;text-decoration:none;">{{ rule.slug }}</a>
+      </td>
+      <td style="padding:0.4rem 0.6rem;color:#c9d1d9;">{{ rule.name|default:"—" }}</td>
+      <td style="padding:0.4rem 0.6rem;color:#8b949e;font-size:0.85rem;">{{ rule.provenance_json.origin|default:"—" }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">
+        {% if rule.provenance_json.score %}{{ rule.provenance_json.score|floatformat:4 }}{% else %}—{% endif %}
+      </td>
+      <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ rule.created_at|date:"D d M Y H:i" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

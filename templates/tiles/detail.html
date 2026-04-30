@@ -74,9 +74,39 @@
 </p>
 {% endif %}
 
+{% if tiles %}
+<h2 style="margin-top: 1.75rem; font-size: 1rem;">Cellular automata</h2>
+<p style="color: #8b949e; font-size: 0.85rem; max-width: 64ch;">
+  Each tile in this set can carry its own K=4 hex CA — the same 4,096-byte rule
+  format used by s3lab, Helix hexhunt, and the ESP firmware. Bind tiles to rules
+  individually, or speciate a population from a single seed and have the variants
+  bound automatically.
+</p>
+<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.4rem 0 0.8rem;">
+  <a href="{% url 'tiles:bindings' tileset.slug %}"
+     class="btn btn-secondary"
+     style="font-size:0.78rem;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:0.35rem 0.7rem;text-decoration:none;">
+    ▸ CA bindings
+  </a>
+  <a href="{% url 'tiles:speciate' tileset.slug %}"
+     class="btn btn-secondary"
+     style="font-size:0.78rem;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:0.35rem 0.7rem;text-decoration:none;">
+    ▸ Speciate from seed
+  </a>
+  <a href="{% url 'tiles:ca_runner' tileset.slug %}"
+     class="btn btn-secondary"
+     style="font-size:0.78rem;background:#1f6feb;border:0;color:#fff;padding:0.35rem 0.7rem;text-decoration:none;">
+    ▸ CA-Wang runner
+  </a>
+</div>
+{% endif %}
+
 {% if greedy and tileset.tile_type == 'square' %}
-<h2 style="margin-top: 1.75rem; font-size: 1rem;">Greedy tiling attempt (6×4)</h2>
-<p style="color: #8b949e; font-size: 0.85rem;">Greedy top-left placement. Empty cells = stuck.</p>
+<h2 style="margin-top: 1.75rem; font-size: 1rem;">
+  Greedy tiling attempt (6×4)
+  <a href="{% url 'tiles:ca_runner' tileset.slug %}" style="margin-left:1rem;color:#79c0ff;text-decoration:none;font-size:0.85rem;font-weight:normal;">▸ CA-Wang runner</a>
+</h2>
+<p style="color: #8b949e; font-size: 0.85rem;">Greedy top-left placement. Empty cells = stuck. Bind a CA RuleSet to any tile (in admin) to bring it to life under the runner.</p>
 <div class="tiling-grid" style="grid-template-columns: repeat({{ greedy.0|length }}, 36px);">
     {% for row in greedy %}
         {% for t in row %}

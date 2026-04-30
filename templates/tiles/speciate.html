@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tileset.name }} · Speciate{% endblock %}
+
+{% block content %}
+<p style="color:#8b949e;font-size:0.85rem;margin-bottom:0.2rem;">
+  <a href="{% url 'tiles:list' %}" style="color:#79c0ff;text-decoration:none;">&larr; Tilesets</a>
+  · <a href="{% url 'tiles:detail' tileset.slug %}" style="color:#79c0ff;text-decoration:none;">{{ tileset.name }}</a>
+  · <a href="{% url 'tiles:bindings' tileset.slug %}" style="color:#79c0ff;text-decoration:none;">CA bindings</a>
+</p>
+
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  Speciate
+  <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+    {{ tileset.name }} · {{ tile_count }} tile{{ tile_count|pluralize }}
+  </span>
+</h1>
+
+<p style="color:#8b949e;max-width:64ch;font-size:0.9rem;">
+  Pick one seed K=4 RuleSet — typically a Class IV rule you found via the s3lab hunter
+  or a hexhunt tournament — and the speciator will generate a population of
+  <em>N</em> mutated variants, persist each as its own RuleSet, and bind one per tile
+  in tileset order. Mutation flips a fraction of the seed's 16,384 lookup entries
+  to a uniformly-random colour; lower rates produce closer cousins.
+</p>
+
+<dl style="display:grid;grid-template-columns:max-content 1fr;gap:0.2rem 1rem;font-size:0.8rem;color:#c9d1d9;margin:0.6rem 0;max-width:48rem;">
+  <dt style="color:#8b949e;">Mutation rate</dt>
+  <dd>
+    <span style="font-family:ui-monospace,monospace;">0.001</span> ≈ 16 entries flipped (barely distinguishable from parent) ·
+    <span style="font-family:ui-monospace,monospace;">0.01</span> ≈ 164 (visibly different but obviously related) ·
+    <span style="font-family:ui-monospace,monospace;">0.05</span> ≈ 819 (more distant cousins) ·
+    <span style="font-family:ui-monospace,monospace;">0.1</span> ≈ 1638 (drift toward chaos)
+  </dd>
+</dl>
+
+{% if not rulesets %}
+<p style="color:#f0883e;background:#21262d;border:1px solid #30363d;padding:0.6rem 0.9rem;">
+  No K=4 RuleSets exist yet. Hunt one in <a href="/s3lab/" style="color:#79c0ff;">s3lab</a> first
+  and import it via the "→ Automaton" button, or use a hexhunt tournament.
+</p>
+{% else %}
+
+<form method="post" style="margin-top:1rem;display:flex;flex-direction:column;gap:0.7rem;font-size:0.9rem;max-width:48rem;">
+  {% csrf_token %}
+
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    Seed RuleSet (parent of the population)
+    <select name="seed_pk" required style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.4rem;">
+      {% for rs in rulesets %}
+        <option value="{{ rs.pk }}">
+          {{ rs.name }} · {{ rs.exact_rules.count }} explicit rules
+          {% if rs.source_metadata.origin %}({{ rs.source_metadata.origin }}){% endif %}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
+    <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;flex:1;min-width:10rem;">
+      Variants to create
+      <input type="number" name="count" min="1" max="256" value="{{ default_count }}"
+             style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.4rem;">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;flex:1;min-width:10rem;">
+      Mutation rate
+      <input type="number" name="rate" step="0.001" min="0" max="1" value="{{ default_rate }}"
+             style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.4rem;">
+    </label>
+    <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;flex:1;min-width:10rem;">
+      RNG seed (0 = nondeterministic)
+      <input type="number" name="rng_seed" value="0"
+             style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.4rem;">
+    </label>
+  </div>
+
+  <label style="display:flex;align-items:center;gap:0.4rem;color:#c9d1d9;">
+    <input type="checkbox" name="bind_to_tiles" value="1" checked>
+    Bind variants to tiles in order (one per tile)
+  </label>
+  <label style="display:flex;align-items:center;gap:0.4rem;color:#c9d1d9;">
+    <input type="checkbox" name="replace_existing" value="1" checked>
+    Replace existing CA bindings on tiles
+  </label>
+
+  <button type="submit"
+          style="align-self:flex-start;background:#1f6feb;color:#fff;border:0;padding:0.5rem 1rem;cursor:pointer;font-size:0.95rem;">
+    Speciate
+  </button>
+</form>
+
+{% endif %}
+{% endblock %}

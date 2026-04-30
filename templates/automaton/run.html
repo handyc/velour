@@ -7,6 +7,10 @@
     .ctrl button{font-size:0.78rem}
     .ctrl .stat{font-size:0.72rem;color:#8b949e;font-family:ui-monospace,Menlo,monospace}
     canvas{border:1px solid #30363d;display:block;margin:0.3rem 0;image-rendering:pixelated}
+    /* Rotate-90° toggle. The canvas pivots inside its wrap; the wrap
+       swaps its own dimensions so surrounding flow doesn't collapse. */
+    .canvas-wrap{display:block;margin:0.3rem 0}
+    .canvas-wrap.rotated canvas{transform:rotate(90deg);transform-origin:top left}
 </style>
 {% endblock %}
 
@@ -21,6 +25,7 @@
     <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
     <button class="btn btn-secondary" onclick="step()">Step</button>
     <button class="btn btn-secondary" onclick="randomize()">Randomize</button>
+    <button class="btn btn-secondary" id="btn-rotate" onclick="toggleRotate()">⟲ Rotate 90°</button>
     <label style="font-size:0.72rem;color:#8b949e">Speed
         <input type="range" id="speed" min="1" max="30" value="10" style="width:80px;vertical-align:middle">
     </label>
@@ -46,16 +51,28 @@
             style="font-size:0.72rem;background:#238636;border-color:#2ea043">Save</button>
 </form>
 
-<canvas id="grid"></canvas>
+<div id="canvas-wrap" class="canvas-wrap">
+    <canvas id="grid"></canvas>
+</div>
 
 <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
     <a href="{% url 'automaton:home' %}" class="btn btn-secondary">Back</a>
     <a href="{% url 'automaton:export_json' sim.slug %}" class="btn btn-secondary">Export JSON</a>
+    <a href="{% url 'automaton:export_genome_bin' sim.slug %}" class="btn btn-secondary" download>Download genome.bin</a>
+    <a href="/s3lab/?from={{ sim.slug }}" class="btn btn-secondary" target="_blank" title="Open in s3lab with this ruleset loaded">→ s3lab</a>
     <button class="btn btn-secondary" onclick="document.getElementById('rename-form').style.display='flex'" style="font-size:0.78rem">Rename</button>
     <form id="rename-form" method="post" action="{% url 'automaton:rename' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
         {% csrf_token %}
         <input type="text" name="name" value="{{ sim.name }}" style="width:12rem;font-size:0.75rem">
         <button type="submit" class="btn" style="font-size:0.75rem;background:#238636;border-color:#2ea043">Save</button>
+    </form>
+    <button class="btn btn-secondary" onclick="document.getElementById('resize-form').style.display='flex'" style="font-size:0.78rem">Resize</button>
+    <form id="resize-form" method="post" action="{% url 'automaton:resize' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
+        {% csrf_token %}
+        <label style="font-size:0.72rem;color:#8b949e">W <input type="number" name="width" value="{{ sim.width }}" min="8" max="128" style="width:4rem;font-size:0.75rem"></label>
+        <label style="font-size:0.72rem;color:#8b949e">H <input type="number" name="height" value="{{ sim.height }}" min="8" max="128" style="width:4rem;font-size:0.75rem"></label>
+        <button type="submit" class="btn" style="font-size:0.75rem;background:#238636;border-color:#2ea043">Resize</button>
+        <span style="color:#8b949e;font-size:0.7rem">(re-randomises the grid)</span>
     </form>
 </div>
 
@@ -249,6 +266,35 @@
         else if (timer) { clearTimeout(timer); timer = null; }
     }
 
+    // 90° rotation toggle. Pivots the canvas via CSS so the same flat-top
+    // hex tiling reads as pointy-top — the underlying neighbour logic is
+    // unchanged. The wrapper swaps its dimensions so document flow stays
+    // intact, and the choice is remembered per-simulation in localStorage.
+    var ROTATE_KEY = 'automaton.rotate.{{ sim.slug }}';
+    function applyRotation(rotated) {
+        var wrap = document.getElementById('canvas-wrap');
+        if (!wrap) return;
+        if (rotated) {
+            wrap.classList.add('rotated');
+            wrap.style.width = canvas.height + 'px';
+            wrap.style.height = canvas.width + 'px';
+            // Shift the rotated canvas back into the wrapper's box.
+            canvas.style.transform =
+                'translate(' + canvas.height + 'px, 0) rotate(90deg)';
+        } else {
+            wrap.classList.remove('rotated');
+            wrap.style.width = '';
+            wrap.style.height = '';
+            canvas.style.transform = '';
+        }
+    }
+    function toggleRotate() {
+        var on = !(localStorage.getItem(ROTATE_KEY) === '1');
+        localStorage.setItem(ROTATE_KEY, on ? '1' : '0');
+        applyRotation(on);
+    }
+    applyRotation(localStorage.getItem(ROTATE_KEY) === '1');
+
     function runLoop() {
         if (!playing) return;
         step();
@@ -306,6 +352,7 @@
     window.togglePlay = togglePlay;
     window.step = step;
     window.randomize = randomize;
+    window.toggleRotate = toggleRotate;
     window.randomPalette = randomPalette;
     window.resetPalette = resetPalette;
 

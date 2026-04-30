@@ -5,6 +5,7 @@ app_name = 'automaton'
 
 urlpatterns = [
     path('',                       views.home,              name='home'),
+    path('import-from-s3lab/',     views.import_from_s3lab, name='import_from_s3lab'),
     path('create/',                views.create_simulation, name='create'),
     path('create-life-rules/',     views.create_life_rules, name='create_life_rules'),
     path('create-exact-rules/',    views.create_exact_rules, name='create_exact_rules'),
@@ -13,6 +14,8 @@ urlpatterns = [
     path('<slug:slug>/',           views.run_simulation,    name='run'),
     path('<slug:slug>/data.json',  views.simulation_data_json, name='data_json'),
     path('<slug:slug>/export.json', views.export_simulation_json, name='export_json'),
+    path('<slug:slug>/genome.bin', views.export_genome_bin, name='export_genome_bin'),
     path('<slug:slug>/rename/',    views.rename_simulation, name='rename'),
+    path('<slug:slug>/resize/',    views.resize_simulation, name='resize'),
     path('<slug:slug>/palette/',   views.update_palette,    name='update_palette'),
 ]

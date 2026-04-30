@@ -279,6 +279,124 @@ class PackedRuleset:
     def from_hex(cls, hex_str: str, n_colors: int = 4) -> 'PackedRuleset':
         return cls(n_colors=n_colors, data=bytes.fromhex(hex_str))
 
+
+# ── genome.bin (s3lab + ESP32-S3 firmware) ──────────────────────────
+#
+# Wire format used by s3lab's "Download genome.bin" button and the
+# ESP32-S3 sketch's winner.bin: 4-byte "HXC4" magic + 4-byte palette
+# + 4,096-byte K=4 packed genome = 4,104 bytes total. The 4,096-byte
+# payload is byte-identical to PackedRuleset.data.
+
+GENOME_BIN_MAGIC = b'HXC4'
+GENOME_BIN_PALETTE_BYTES = 4
+# K=4 packed: 4^7 = 16,384 entries × 2 bits each = 32,768 bits = 4,096 bytes.
+GENOME_BIN_GENOME_BYTES = (4 ** 7 * 2) // 8
+GENOME_BIN_TOTAL = (
+    len(GENOME_BIN_MAGIC) + GENOME_BIN_PALETTE_BYTES + GENOME_BIN_GENOME_BYTES
+)
+
+
+# ANSI-256 colour table — matches s3lab's engine.mjs exactly so a
+# rule imported from /s3lab/ renders with the same cell colours in
+# automaton's canvas.
+
+_ANSI_STD = [
+    (0, 0, 0),       (128, 0, 0),     (0, 128, 0),     (128, 128, 0),
+    (0, 0, 128),     (128, 0, 128),   (0, 128, 128),   (192, 192, 192),
+    (128, 128, 128), (255, 0, 0),     (0, 255, 0),     (255, 255, 0),
+    (0, 0, 255),     (255, 0, 255),   (0, 255, 255),   (255, 255, 255),
+]
+_ANSI_LVL = (0, 95, 135, 175, 215, 255)
+
+
+def ansi256_to_rgb(idx: int) -> Tuple[int, int, int]:
+    """Convert an ANSI-256 colour index to (r, g, b) in 0..255."""
+    idx = int(idx) & 0xFF
+    if idx < 16:
+        return _ANSI_STD[idx]
+    if idx < 232:
+        i = idx - 16
+        return (_ANSI_LVL[i // 36], _ANSI_LVL[(i % 36) // 6], _ANSI_LVL[i % 6])
+    v = 8 + (idx - 232) * 10
+    if v > 255:
+        v = 255
+    return (v, v, v)
+
+
+def ansi256_to_hex(idx: int) -> str:
+    """Convert an ANSI-256 colour index to a CSS ``#rrggbb`` string."""
+    r, g, b = ansi256_to_rgb(idx)
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
+def parse_genome_bin(data: bytes) -> Tuple[bytes, 'PackedRuleset']:
+    """Decode an s3lab / ESP32-S3 ``genome.bin`` into ``(palette, ruleset)``.
+
+    Raises ``ValueError`` on a bad magic, wrong length, or anything else
+    that would land an unintended payload in the database.
+    """
+    if len(data) != GENOME_BIN_TOTAL:
+        raise ValueError(
+            f'genome.bin must be {GENOME_BIN_TOTAL} bytes, got {len(data)}'
+        )
+    magic = data[:len(GENOME_BIN_MAGIC)]
+    if magic != GENOME_BIN_MAGIC:
+        raise ValueError(
+            f'genome.bin magic must be {GENOME_BIN_MAGIC!r}, got {magic!r}'
+        )
+    palette = bytes(data[
+        len(GENOME_BIN_MAGIC):
+        len(GENOME_BIN_MAGIC) + GENOME_BIN_PALETTE_BYTES
+    ])
+    genome = bytes(data[
+        len(GENOME_BIN_MAGIC) + GENOME_BIN_PALETTE_BYTES:
+    ])
+    return palette, PackedRuleset(n_colors=4, data=genome)
+
+
+def encode_genome_bin(palette_ansi: bytes, ruleset: 'PackedRuleset') -> bytes:
+    """Inverse of :func:`parse_genome_bin` — emit the 4,104-byte file."""
+    if len(palette_ansi) != GENOME_BIN_PALETTE_BYTES:
+        raise ValueError(
+            f'palette must be {GENOME_BIN_PALETTE_BYTES} bytes, '
+            f'got {len(palette_ansi)}'
+        )
+    if ruleset.n_colors != 4 or len(ruleset.data) != GENOME_BIN_GENOME_BYTES:
+        raise ValueError('only K=4 rulesets fit the s3lab genome format')
+    return GENOME_BIN_MAGIC + bytes(palette_ansi) + bytes(ruleset.data)
+
+
+def hex_to_rgb(css: str) -> Tuple[int, int, int]:
+    """``'#rrggbb'`` → ``(r, g, b)``. Tolerates ``#rgb``, lowercase, no
+    leading hash. Returns black on anything unparseable so callers can
+    fall through without raising on user-edited palette JSON."""
+    s = (css or '').strip().lstrip('#').lower()
+    if len(s) == 3:
+        s = ''.join(c + c for c in s)
+    if len(s) != 6:
+        return (0, 0, 0)
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return (0, 0, 0)
+
+
+def nearest_ansi256(rgb: Tuple[int, int, int]) -> int:
+    """Closest ANSI-256 index to an (r, g, b) triple by squared
+    Euclidean distance. Used when an Automaton RuleSet has a CSS
+    palette but no recorded ANSI codes (e.g. one that wasn't imported
+    from s3lab — a hand-authored or merged ruleset)."""
+    r, g, b = rgb
+    best_idx, best_d = 0, 1 << 30
+    for idx in range(256):
+        ar, ag, ab = ansi256_to_rgb(idx)
+        d = (ar - r) ** 2 + (ag - g) ** 2 + (ab - b) ** 2
+        if d < best_d:
+            best_idx, best_d = idx, d
+            if d == 0:
+                break
+    return best_idx
+
     def __len__(self) -> int:
         return self.n_situations
 

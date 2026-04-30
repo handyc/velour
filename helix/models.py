@@ -16,6 +16,7 @@ uses on disk.
 """
 
 from django.db import models
+from django.utils.crypto import get_random_string
 
 
 SEQ_TYPE_CHOICES = [
@@ -162,3 +163,232 @@ class AnnotationFeature(models.Model):
                     return v[0]
                 return str(v)
         return self.feature_type
+
+
+# ── Hex-CA hunt on organic sequences ─────────────────────────────────
+#
+# A hunt is the same shape as Velour's automaton/s3lab work — K=4,
+# 7-cell positional hex CA, ``automaton.packed.PackedRuleset`` as the
+# canonical 4,096-byte rule blob — but the *corpus* is windows of real
+# DNA / RNA from SequenceRecord, never random seeds. Tournament fitness
+# is "richness under rule X averaged across organic windows."
+#
+# Rules discovered here can be exported as JSON (slug + base64 table +
+# provenance) and replayed in s3lab on synthetic seeds, but the corpora
+# never mix.
+
+
+class HuntCorpus(models.Model):
+    """A named set of equal-length DNA windows pulled from real records.
+
+    One corpus = one biological hypothesis ("Drosophila CDS at 256 bp").
+    A tournament evolves rules against this corpus; a filter scan
+    applies a rule across a whole record. Windows are materialised once
+    via ``hexhunt_seed_corpus`` and frozen so successive runs score
+    against identical input.
+    """
+
+    slug = models.SlugField(max_length=80, unique=True)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    feature_type = models.CharField(
+        max_length=40, blank=True,
+        help_text='AnnotationFeature.feature_type the windows were drawn '
+                  'from. Blank = mixed / no feature filter.',
+    )
+    window_size = models.PositiveIntegerField(default=256)
+    windows_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.name} (n={self.windows_count}, w={self.window_size})'
+
+
+class HuntWindow(models.Model):
+    """One DNA window in a HuntCorpus — coords, no sequence stored.
+
+    The window's bases are sliced from ``record.sequence`` on demand;
+    that keeps the corpus small even when it points at a 32 Mb
+    chromosome.
+    """
+
+    corpus = models.ForeignKey(
+        HuntCorpus, on_delete=models.CASCADE, related_name='windows',
+    )
+    record = models.ForeignKey(
+        SequenceRecord, on_delete=models.CASCADE, related_name='+',
+    )
+    start = models.PositiveIntegerField()
+    end = models.PositiveIntegerField()
+    feature = models.ForeignKey(
+        AnnotationFeature, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+',
+    )
+    idx = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['corpus', 'idx']
+        indexes = [
+            models.Index(fields=['corpus', 'idx']),
+        ]
+
+    def __str__(self):
+        return f'{self.corpus.slug}#{self.idx} {self.record_id}:{self.start}-{self.end}'
+
+    def sequence(self):
+        return self.record.sequence[self.start:self.end]
+
+
+class HuntRule(models.Model):
+    """One K=4 hex-CA ruleset, packed into 4,096 bytes.
+
+    The byte layout matches ``automaton.packed.PackedRuleset`` and
+    s3lab's in-browser rule format — same indexing
+    (``self*K^6 + n0*K^5 + ... + n5``), same neighbour order
+    (N, NE, SE, S, SW, NW). A rule discovered here can be loaded into
+    s3lab or automaton without translation.
+
+    ``provenance_json`` records how the rule came to be:
+      {"origin": "random", "seed": 1234}
+      {"origin": "mutation", "parent_slug": "...", "rate": 0.001}
+      {"origin": "crossover", "parent_a": "...", "parent_b": "..."}
+      {"origin": "tournament_winner", "run_slug": "..."}
+      {"origin": "imported", "source": "s3lab", "blob_sha1": "..."}
+    """
+
+    slug = models.SlugField(max_length=80, unique=True)
+    table = models.BinaryField(
+        help_text='4,096 bytes — PackedRuleset.data for K=4.',
+    )
+    name = models.CharField(max_length=200, blank=True)
+    parent_rule = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='children',
+    )
+    class_label = models.CharField(
+        max_length=8, blank=True,
+        help_text="Wolfram class best-guess: 'I' / 'II' / 'III' / 'IV'. "
+                  'Optional; populated by analysis, not the engine.',
+    )
+    provenance_json = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name or self.slug
+
+    @classmethod
+    def make_slug(cls):
+        """Compact unique slug — collision-checked."""
+        while True:
+            s = get_random_string(8).lower()
+            if not cls.objects.filter(slug=s).exists():
+                return s
+
+    def packed(self):
+        """Return an ``automaton.packed.PackedRuleset`` view of this rule."""
+        from automaton.packed import PackedRuleset
+        return PackedRuleset(n_colors=4, data=bytes(self.table))
+
+
+class HuntRun(models.Model):
+    """One tournament run: corpus + GA params → ranked rules.
+
+    ``params_json`` keeps everything the engine needs to reproduce the
+    run from scratch — population_size, generations, mutation_rate,
+    scoring_fn, mapping, board shape, step budget, RNG seed.
+    """
+
+    STATUS_CHOICES = [
+        ('pending',  'Pending'),
+        ('running',  'Running'),
+        ('done',     'Done'),
+        ('failed',   'Failed'),
+    ]
+
+    slug = models.SlugField(max_length=80, unique=True)
+    corpus = models.ForeignKey(
+        HuntCorpus, on_delete=models.CASCADE, related_name='runs',
+    )
+    params_json = models.JSONField(default=dict)
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default='pending',
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    top_rule = models.ForeignKey(
+        HuntRule, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+',
+    )
+    scoreboard_json = models.JSONField(
+        default=list, blank=True,
+        help_text='Top-N entries from the final generation: '
+                  '[{"rule_slug":..., "score":..., "rank":...}].',
+    )
+    generation_log_json = models.JSONField(
+        default=list, blank=True,
+        help_text='Per-generation summary: [{"gen":i,"best":x,"mean":y}].',
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.corpus.slug}/{self.slug} ({self.status})'
+
+    @classmethod
+    def make_slug(cls):
+        while True:
+            s = get_random_string(8).lower()
+            if not cls.objects.filter(slug=s).exists():
+                return s
+
+
+class RuleFilterScan(models.Model):
+    """Apply one rule across a whole SequenceRecord, store per-window richness.
+
+    The "rule as motif detector" use case: an evolved Class-IV rule
+    becomes a 4 KB ab-initio scanner. Output ``track_json`` lays
+    alongside Helix's existing annotation tracks at any zoom.
+    """
+
+    slug = models.SlugField(max_length=80, unique=True)
+    rule = models.ForeignKey(
+        HuntRule, on_delete=models.CASCADE, related_name='scans',
+    )
+    record = models.ForeignKey(
+        SequenceRecord, on_delete=models.CASCADE, related_name='+',
+    )
+    window_size = models.PositiveIntegerField(default=256)
+    stride = models.PositiveIntegerField(default=128)
+    scoring_fn = models.CharField(max_length=40, default='gzip')
+    track_json = models.JSONField(
+        default=list, blank=True,
+        help_text='[[start, end, score], ...] — sorted by start.',
+    )
+    n_windows = models.PositiveIntegerField(default=0)
+    score_min = models.FloatField(default=0.0)
+    score_max = models.FloatField(default=0.0)
+    score_mean = models.FloatField(default=0.0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.rule.slug} × {self.record_id} ({self.n_windows}w)'
+
+    @classmethod
+    def make_slug(cls):
+        while True:
+            s = get_random_string(8).lower()
+            if not cls.objects.filter(slug=s).exists():
+                return s

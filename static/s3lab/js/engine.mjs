@@ -16,8 +16,8 @@ export const MAGIC_BYTES = 4;
 export const TAIL_MAGIC  = 'HXC4';
 export const TAIL_BYTES  = MAGIC_BYTES + PAL_BYTES + GBYTES;  // 4104
 
-export const GRID_W      = 14;
-export const GRID_H      = 14;
+export const GRID_W      = 16;
+export const GRID_H      = 16;
 export const HORIZON     = 25;
 
 export const POP         = 30;

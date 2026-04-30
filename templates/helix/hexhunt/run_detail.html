@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Hex Hunt · {{ run.slug }}{% endblock %}
+
+{% block content %}
+<p style="color:#8b949e;font-size:0.85rem;margin-bottom:0.2rem;">
+  <a href="{% url 'helix:hexhunt:list' %}" style="color:#79c0ff;text-decoration:none;">&larr; Hex Hunt</a>
+</p>
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  Run {{ run.slug }}
+  <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+    on corpus <span style="font-family:ui-monospace,monospace;color:#c9d1d9;">{{ run.corpus.slug }}</span>
+    · status <span style="color:{% if run.status == 'done' %}#7ee787{% elif run.status == 'failed' %}#ff7b72{% else %}#d29922{% endif %};">{{ run.status }}</span>
+  </span>
+</h1>
+
+<dl style="display:grid;grid-template-columns:max-content 1fr;gap:0.2rem 1rem;font-size:0.85rem;color:#c9d1d9;margin-top:0.6rem;">
+  <dt style="color:#8b949e;">Corpus name</dt><dd>{{ run.corpus.name }}</dd>
+  {% if run.params_json.mode == 'discriminator' %}
+  <dt style="color:#8b949e;">Mode</dt><dd style="color:#f0883e;">discriminator · pos = <span style="font-family:ui-monospace,monospace;">{{ run.corpus.slug }}</span> · neg = <span style="font-family:ui-monospace,monospace;">{{ run.params_json.neg_corpus }}</span></dd>
+  {% endif %}
+  <dt style="color:#8b949e;">Population × generations</dt><dd>{{ run.params_json.population_size }} × {{ run.params_json.generations }}</dd>
+  <dt style="color:#8b949e;">Windows / gen</dt><dd>{{ run.params_json.windows_per_gen }}</dd>
+  <dt style="color:#8b949e;">Scoring</dt><dd>{{ run.params_json.scoring_fn }}</dd>
+  <dt style="color:#8b949e;">Steps</dt><dd>{{ run.params_json.steps }}</dd>
+  <dt style="color:#8b949e;">Mutation / crossover / survivors</dt><dd>{{ run.params_json.mutation_rate }} / {{ run.params_json.crossover_fraction }} / {{ run.params_json.survivor_fraction }}</dd>
+  <dt style="color:#8b949e;">RNG seed</dt><dd>{{ run.params_json.rng_seed }}</dd>
+  <dt style="color:#8b949e;">Started · finished</dt><dd>{{ run.started_at|date:"D d M Y H:i:s"|default:"—" }} · {{ run.finished_at|date:"D d M Y H:i:s"|default:"—" }}</dd>
+</dl>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Leaderboard</h2>
+{% if scoreboard_rows %}
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;max-width:60rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:right;padding:0.4rem 0.6rem 0.4rem 0;width:3rem;">Rank</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Rule</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">{% if run.params_json.mode == 'discriminator' %}Fitness (pos − neg){% else %}Score{% endif %}</th>
+      {% if run.params_json.mode == 'discriminator' %}
+        <th style="text-align:right;padding:0.4rem 0.6rem;">pos</th>
+        <th style="text-align:right;padding:0.4rem 0.6rem;">neg</th>
+      {% endif %}
+      <th style="text-align:left;padding:0.4rem 0;">Replay</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in scoreboard_rows %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;text-align:right;font-family:ui-monospace,monospace;color:#8b949e;">#{{ row.rank }}</td>
+      <td style="padding:0.4rem 0.6rem;font-family:ui-monospace,monospace;">
+        {% if row.rule %}<a href="{% url 'helix:hexhunt:rule_detail' row.rule.slug %}" style="color:#79c0ff;text-decoration:none;">{{ row.rule.slug }}</a>{% else %}—{% endif %}
+      </td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ row.score|floatformat:4 }}</td>
+      {% if run.params_json.mode == 'discriminator' %}
+        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;color:#7ee787;">{{ row.pos|floatformat:4 }}</td>
+        <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;color:#ff7b72;">{{ row.neg|floatformat:4 }}</td>
+      {% endif %}
+      <td style="padding:0.4rem 0;">
+        {% if row.rule %}<a href="{% url 'helix:hexhunt:rule_detail' row.rule.slug %}" style="color:#7ee787;text-decoration:none;font-size:0.85rem;">▶ play</a>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;">No leaderboard yet. {% if run.status == 'failed' %}Run failed: {{ run.notes }}{% endif %}</p>
+{% endif %}
+
+{% if run.generation_log_json %}
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Generation log</h2>
+<svg id="gen-chart" width="640" height="160" style="background:#0d1117;border:1px solid #30363d;display:block;"></svg>
+<p style="color:#8b949e;font-size:0.8rem;margin-top:0.3rem;">
+  <span style="color:#7ee787;">█</span> best per generation &nbsp;
+  <span style="color:#79c0ff;">█</span> mean per generation
+</p>
+{{ run.generation_log_json|json_script:"gen-log-data" }}
+<script>
+(function(){
+  const log = JSON.parse(document.getElementById('gen-log-data').textContent);
+  if (!log.length) return;
+  const W = 640, H = 160, pad = 24;
+  const svg = document.getElementById('gen-chart');
+  const xs = log.map(d => d.gen);
+  const all = log.flatMap(d => [d.best, d.mean]);
+  const ymin = Math.min(...all), ymax = Math.max(...all);
+  const yspan = (ymax - ymin) || 1;
+  const xspan = (xs[xs.length-1] - xs[0]) || 1;
+  function pt(d, key){
+    const x = pad + (d.gen - xs[0]) / xspan * (W - 2*pad);
+    const y = H - pad - (d[key] - ymin) / yspan * (H - 2*pad);
+    return [x, y];
+  }
+  function poly(key, color){
+    const path = log.map(d => pt(d, key).join(',')).join(' ');
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', color);
+    el.setAttribute('stroke-width', '1.5');
+    el.setAttribute('points', path);
+    svg.appendChild(el);
+  }
+  poly('mean', '#79c0ff');
+  poly('best', '#7ee787');
+  // Axes labels
+  function txt(x, y, s, fill){
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    el.setAttribute('x', x); el.setAttribute('y', y);
+    el.setAttribute('fill', fill || '#8b949e');
+    el.setAttribute('font-family', 'ui-monospace,monospace');
+    el.setAttribute('font-size', '10');
+    el.textContent = s;
+    svg.appendChild(el);
+  }
+  txt(2, 12, ymax.toFixed(4));
+  txt(2, H - 4, ymin.toFixed(4));
+  txt(W - 30, H - 4, 'gen ' + xs[xs.length-1]);
+  txt(pad, H - 4, 'gen ' + xs[0]);
+})();
+</script>
+{% endif %}
+
+{% endblock %}

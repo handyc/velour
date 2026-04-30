@@ -129,6 +129,24 @@ class Tile(models.Model):
     sort_order = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # Optional CA payload: each tile can carry its own K=4 hex-CA rule
+    # so a Wang tiling becomes a *living* tessellation — each tile is
+    # an animated 16×16 hex CA, the lattice is assembled by Wang
+    # edge-colour matching. A null FK keeps the tile static (Phase 1
+    # behaviour). The optional initial-grid JSON lets a tile carry a
+    # specific seed pattern; null = random per render.
+    ca_ruleset = models.ForeignKey(
+        'automaton.RuleSet', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='+',
+        help_text='Optional. The K=4 hex-CA rule this tile animates '
+                  'when rendered through the CA-tiling runner.',
+    )
+    ca_initial_grid = models.JSONField(
+        default=list, blank=True,
+        help_text='Optional 16×16 array of cell colours (0-3). Empty = '
+                  'random init at render time.',
+    )
+
     class Meta:
         ordering = ['tileset', 'sort_order', 'id']
 

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block title %}Hex Hunt · rule {{ rule.slug }}{% endblock %}
+
+{% block content %}
+<p style="color:#8b949e;font-size:0.85rem;margin-bottom:0.2rem;">
+  <a href="{% url 'helix:hexhunt:list' %}" style="color:#79c0ff;text-decoration:none;">&larr; Hex Hunt</a>
+  {% if rule.provenance_json.run_slug %}
+    · <a href="{% url 'helix:hexhunt:run_detail' rule.provenance_json.run_slug %}" style="color:#79c0ff;text-decoration:none;">run {{ rule.provenance_json.run_slug }}</a>
+  {% endif %}
+</p>
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  Rule {{ rule.slug }}
+  {% if rule.name %}<span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">{{ rule.name }}</span>{% endif %}
+</h1>
+
+<dl style="display:grid;grid-template-columns:max-content 1fr;gap:0.2rem 1rem;font-size:0.85rem;color:#c9d1d9;margin-top:0.6rem;">
+  <dt style="color:#8b949e;">Origin</dt><dd>{{ rule.provenance_json.origin|default:"—" }}</dd>
+  {% if rule.provenance_json.score %}<dt style="color:#8b949e;">Discovery score</dt><dd style="font-family:ui-monospace,monospace;">{{ rule.provenance_json.score|floatformat:4 }} ({{ rule.provenance_json.scoring }})</dd>{% endif %}
+  {% if rule.provenance_json.corpus %}<dt style="color:#8b949e;">Bred against</dt><dd style="font-family:ui-monospace,monospace;">{{ rule.provenance_json.corpus }}</dd>{% endif %}
+  {% if rule.class_label %}<dt style="color:#8b949e;">Wolfram class</dt><dd>{{ rule.class_label }}</dd>{% endif %}
+  <dt style="color:#8b949e;">Created</dt><dd>{{ rule.created_at|date:"D d M Y H:i" }}</dd>
+  <dt style="color:#8b949e;">Sample window</dt><dd style="font-family:ui-monospace,monospace;color:#8b949e;">{{ sample_label|default:"random fallback" }}</dd>
+</dl>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Replay</h2>
+<div style="display:flex;gap:1rem;align-items:flex-start;">
+  <canvas id="player" width="384" height="384" style="background:#0d1117;border:1px solid #30363d;image-rendering:pixelated;"></canvas>
+  <div style="font-size:0.85rem;color:#c9d1d9;">
+    <div style="margin-bottom:0.5rem;">
+      <button id="play-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.7rem;cursor:pointer;">▶ play</button>
+      <button id="step-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.7rem;cursor:pointer;">step</button>
+      <button id="reset-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.7rem;cursor:pointer;">reset</button>
+    </div>
+    <div style="margin-bottom:0.5rem;">
+      tick speed
+      <input id="speed" type="range" min="40" max="1000" value="200" step="20" style="vertical-align:middle;">
+      <span id="speed-out" style="font-family:ui-monospace,monospace;color:#8b949e;">200 ms</span>
+    </div>
+    <div>frame <span id="frame-out" style="font-family:ui-monospace,monospace;color:#8b949e;">0</span> / <span id="total-out" style="font-family:ui-monospace,monospace;color:#8b949e;">—</span></div>
+    <div>score (gzip) <span id="score-out" style="font-family:ui-monospace,monospace;color:#7ee787;">—</span></div>
+    <div style="margin-top:1rem;color:#8b949e;font-size:0.8rem;max-width:30ch;">
+      Tick 0 is the DNA window mapped to the 16×16 board:
+      A=0 (yellow), T/U=1 (cyan), G=2 (magenta), C=3 (green).
+      Edge cells are treated as colour 0 during the step.
+    </div>
+  </div>
+</div>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Filter scan</h2>
+<p style="color:#8b949e;font-size:0.85rem;max-width:64ch;">
+  Sweep this rule across a whole sequence and score each window for richness.
+  An evolved Class IV rule becomes a 4 KB ab-initio scanner — peaks may align
+  with biologically meaningful regions. Inline scans cap at {{ inline_scan_max_windows }}
+  windows; bigger jobs need <code style="color:#c9d1d9;">manage.py hexhunt_scan</code>.
+</p>
+<form method="post" action="{% url 'helix:hexhunt:launch_scan' rule.slug %}"
+      style="display:flex;flex-wrap:wrap;gap:0.7rem;align-items:flex-end;font-size:0.85rem;">
+  {% csrf_token %}
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    record
+    <select name="record_pk" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;min-width:18rem;">
+      {% for r in records %}
+        <option value="{{ r.pk }}">{{ r.title|truncatechars:50 }} · {{ r.length_bp }} bp</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    window <input name="window" type="number" min="32" max="1024" value="256"
+                  style="width:5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;">
+  </label>
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    stride <input name="stride" type="number" min="1" max="1024" value="128"
+                  style="width:5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;">
+  </label>
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    score
+    <select name="scoring_fn" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;">
+      <option value="edge">edge</option>
+      <option value="change">change</option>
+      <option value="gzip">gzip</option>
+    </select>
+  </label>
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    start <input name="start" type="number" min="0" value="0"
+                 style="width:8rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;">
+  </label>
+  <label style="display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;">
+    end (0 = full) <input name="end" type="number" min="0" value="0"
+                          style="width:8rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;">
+  </label>
+  <button type="submit" style="background:#1f6feb;color:#fff;border:0;padding:0.4rem 0.9rem;cursor:pointer;">Run scan</button>
+</form>
+
+{% if scans %}
+<table style="width:100%;border-collapse:collapse;font-size:0.85rem;max-width:60rem;margin-top:1rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Scan</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">Record</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Windows</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Mean / max</th>
+      <th style="text-align:left;padding:0.4rem 0;">Created</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for s in scans %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;">
+        <a href="{% url 'helix:hexhunt:scan_detail' s.slug %}" style="color:#79c0ff;text-decoration:none;">{{ s.slug }}</a>
+      </td>
+      <td style="padding:0.4rem 0.6rem;color:#c9d1d9;">{{ s.record.title|truncatechars:40 }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ s.n_windows }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ s.score_mean|floatformat:4 }} / {{ s.score_max|floatformat:4 }}</td>
+      <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ s.created_at|date:"D d M Y H:i" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<script>
+(function(){
+  const replayUrl = "{% url 'helix:hexhunt:rule_replay' rule.slug %}";
+  const cv = document.getElementById('player');
+  const ctx = cv.getContext('2d');
+  const COLORS = ['#d4a72c', '#39c5cf', '#f070a0', '#7ee787'];  // A T/U G C
+
+  let frames = [], W = 16, H = 16, idx = 0, timer = null;
+  function paint(){
+    const f = frames[idx]; if (!f) return;
+    const cell = cv.width / W;
+    const bytes = atob(f);
+    for (let r = 0; r < H; r++){
+      for (let c = 0; c < W; c++){
+        ctx.fillStyle = COLORS[bytes.charCodeAt(r*W + c) & 3];
+        ctx.fillRect(c*cell, r*cell, cell, cell);
+      }
+    }
+    document.getElementById('frame-out').textContent = idx;
+  }
+  function load(){
+    fetch(replayUrl).then(r => r.json()).then(j => {
+      frames = j.frames; W = j.width; H = j.height; idx = 0;
+      document.getElementById('total-out').textContent = (frames.length - 1);
+      document.getElementById('score-out').textContent = j.score.toFixed(4);
+      paint();
+    });
+  }
+  function step(){
+    idx = (idx + 1) % frames.length; paint();
+  }
+  function play(){
+    if (timer){ clearInterval(timer); timer = null; document.getElementById('play-btn').textContent = '▶ play'; return; }
+    const ms = parseInt(document.getElementById('speed').value, 10);
+    timer = setInterval(step, ms);
+    document.getElementById('play-btn').textContent = '⏸ pause';
+  }
+  document.getElementById('play-btn').addEventListener('click', play);
+  document.getElementById('step-btn').addEventListener('click', step);
+  document.getElementById('reset-btn').addEventListener('click', () => { idx = 0; paint(); });
+  document.getElementById('speed').addEventListener('input', e => {
+    document.getElementById('speed-out').textContent = e.target.value + ' ms';
+    if (timer){ clearInterval(timer); timer = setInterval(step, parseInt(e.target.value, 10)); }
+  });
+  load();
+})();
+</script>
+
+{% endblock %}

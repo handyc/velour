@@ -15,4 +15,7 @@ urlpatterns = [
     path('<slug:slug>/save-generated/',       views.tileset_save_generated,       name='save_generated'),
     path('<slug:slug>/generate-complete-hex/', views.tileset_generate_complete_hex, name='generate_complete_hex'),
     path('<slug:slug>/render-artwork/',       views.tileset_render_artwork,       name='render_artwork'),
+    path('<slug:slug>/ca-runner/',            views.ca_runner,                    name='ca_runner'),
+    path('<slug:slug>/bindings/',             views.tile_bindings,                name='bindings'),
+    path('<slug:slug>/speciate/',             views.tile_speciate,                name='speciate'),
 ]

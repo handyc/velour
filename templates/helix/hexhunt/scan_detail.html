@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+
+{% block title %}Hex Hunt · scan {{ scan.slug }}{% endblock %}
+
+{% block content %}
+<p style="color:#8b949e;font-size:0.85rem;margin-bottom:0.2rem;">
+  <a href="{% url 'helix:hexhunt:list' %}" style="color:#79c0ff;text-decoration:none;">&larr; Hex Hunt</a>
+  · <a href="{% url 'helix:hexhunt:rule_detail' scan.rule.slug %}" style="color:#79c0ff;text-decoration:none;">rule {{ scan.rule.slug }}</a>
+  · <a href="{% url 'helix:detail' scan.record.pk %}" style="color:#79c0ff;text-decoration:none;">record {{ scan.record.pk }}</a>
+</p>
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  Scan {{ scan.slug }}
+  <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+    rule <span style="font-family:ui-monospace,monospace;color:#c9d1d9;">{{ scan.rule.slug }}</span>
+    × <span style="font-family:ui-monospace,monospace;color:#c9d1d9;">{{ scan.record.title|truncatechars:50 }}</span>
+  </span>
+</h1>
+
+<dl style="display:grid;grid-template-columns:max-content 1fr;gap:0.2rem 1rem;font-size:0.85rem;color:#c9d1d9;margin-top:0.6rem;">
+  <dt style="color:#8b949e;">Record</dt><dd>{{ scan.record.organism|default:"—" }} · {{ scan.record.accession|default:"—" }} · {{ scan.record.length_bp }} bp</dd>
+  <dt style="color:#8b949e;">Windows</dt><dd>{{ scan.n_windows }} · window {{ scan.window_size }} bp · stride {{ scan.stride }}</dd>
+  <dt style="color:#8b949e;">Scoring</dt><dd>{{ scan.scoring_fn }}</dd>
+  <dt style="color:#8b949e;">Min / mean / max</dt><dd style="font-family:ui-monospace,monospace;">{{ scan.score_min|floatformat:5 }} / {{ scan.score_mean|floatformat:5 }} / {{ scan.score_max|floatformat:5 }}</dd>
+  <dt style="color:#8b949e;">Created</dt><dd>{{ scan.created_at|date:"D d M Y H:i" }}</dd>
+</dl>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Richness track</h2>
+<svg id="track-svg" width="1100" height="220" style="background:#0d1117;border:1px solid #30363d;display:block;width:100%;max-width:1100px;"></svg>
+<p style="color:#8b949e;font-size:0.8rem;margin-top:0.3rem;">
+  Y axis = per-window {{ scan.scoring_fn }} score (linear, min..max).
+  Lane below = annotation features overlapping the scanned region (CDS green, gene blue, mRNA cyan, others grey).
+  Hover any window for details.
+</p>
+<div id="track-readout" style="font-family:ui-monospace,monospace;font-size:0.8rem;color:#8b949e;height:1.4em;">&nbsp;</div>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Score distribution</h2>
+<svg id="hist-svg" width="640" height="120" style="background:#0d1117;border:1px solid #30363d;display:block;"></svg>
+<p style="color:#8b949e;font-size:0.8rem;margin-top:0.3rem;">
+  {{ hist|length }} bins from {{ scan.score_min|floatformat:5 }} to {{ scan.score_max|floatformat:5 }}.
+  An edge-of-chaos rule typically shows a long tail to the right; flat / constant scores mean the rule isn't discriminating.
+</p>
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Mean richness by feature type</h2>
+{% if feature_summary %}
+<table style="width:100%;border-collapse:collapse;font-size:0.9rem;max-width:48rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Feature type</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Windows</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">Mean score</th>
+      <th style="text-align:right;padding:0.4rem 0;">Best score</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in feature_summary %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem 0.4rem 0;color:#c9d1d9;">{{ row.feature_type }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ row.n }}</td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ row.mean|floatformat:5 }}</td>
+      <td style="padding:0.4rem 0;text-align:right;font-family:ui-monospace,monospace;">{{ row.best|floatformat:5 }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#8b949e;">No feature overlap.</p>
+{% endif %}
+
+<h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Top 25 hottest windows</h2>
+<table style="width:100%;border-collapse:collapse;font-size:0.85rem;max-width:48rem;">
+  <thead>
+    <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:right;padding:0.4rem 0.6rem 0.4rem 0;">Start</th>
+      <th style="text-align:right;padding:0.4rem 0.6rem;">End</th>
+      <th style="text-align:right;padding:0.4rem 0;">Score</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in top_windows %}
+    <tr style="border-bottom:1px solid #21262d;">
+      <td style="padding:0.3rem 0.6rem 0.3rem 0;text-align:right;font-family:ui-monospace,monospace;">{{ row.0 }}</td>
+      <td style="padding:0.3rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ row.1 }}</td>
+      <td style="padding:0.3rem 0;text-align:right;font-family:ui-monospace,monospace;color:#7ee787;">{{ row.2|floatformat:5 }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<script id="scan-meta" type="application/json">
+{
+  "track_url":   "{% url 'helix:hexhunt:scan_track_json' scan.slug %}",
+  "record_pk":   {{ scan.record.pk }},
+  "record_len":  {{ scan.record.length_bp }},
+  "window":      {{ scan.window_size }},
+  "stride":      {{ scan.stride }},
+  "score_min":   {{ scan.score_min }},
+  "score_max":   {{ scan.score_max }},
+  "hist":        {{ hist|safe }}
+}
+</script>
+{{ feature_payload|json_script:"scan-feats" }}
+
+<script>
+(function(){
+  const meta = JSON.parse(document.getElementById('scan-meta').textContent);
+  const recordLen = meta.record_len;
+
+  // ── Histogram ──────────────────────────────────────────────────────
+  (function(){
+    const svg = document.getElementById('hist-svg');
+    const W = 640, H = 120, pad = 16;
+    const hist = meta.hist;
+    const m = Math.max.apply(null, hist) || 1;
+    const bw = (W - 2*pad) / hist.length;
+    hist.forEach((c, i) => {
+      const h = (c / m) * (H - 2*pad);
+      const x = pad + i*bw;
+      const y = H - pad - h;
+      const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', x); r.setAttribute('y', y);
+      r.setAttribute('width', Math.max(1, bw - 0.5));
+      r.setAttribute('height', h);
+      r.setAttribute('fill', '#7ee787'); r.setAttribute('opacity', '0.75');
+      svg.appendChild(r);
+    });
+    function txt(x, y, s){
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', x); t.setAttribute('y', y);
+      t.setAttribute('fill', '#8b949e');
+      t.setAttribute('font-family', 'ui-monospace,monospace');
+      t.setAttribute('font-size', '10');
+      t.textContent = s;
+      svg.appendChild(t);
+    }
+    txt(pad, H - 2, meta.score_min.toFixed(4));
+    txt(W - 50, H - 2, meta.score_max.toFixed(4));
+    txt(2, 12, m + ' wins');
+  })();
+
+  // ── Track + feature lane ──────────────────────────────────────────
+  fetch(meta.track_url).then(r => r.json()).then(data => {
+    const track = data.track;
+    if (!track.length) return;
+    const svg = document.getElementById('track-svg');
+    // Match the SVG's intrinsic width from the attribute so the scaling
+    // math doesn't drift when CSS resizes the element.
+    const W = parseInt(svg.getAttribute('width'), 10);
+    const H = parseInt(svg.getAttribute('height'), 10);
+    const padL = 28, padR = 8, padT = 8, padB = 38;  // bottom band = features
+    const plotW = W - padL - padR;
+    const trackH = (H - padT - padB) - 6;            // 6 px gap to features
+    const featH = 18;
+    const featY = H - padB + 4;
+
+    const sMin = meta.score_min, sMax = meta.score_max;
+    const sSpan = (sMax - sMin) || 1;
+
+    function xOf(bp){ return padL + (bp / recordLen) * plotW; }
+
+    // Score line — paint each window as a vertical bar to ``score``.
+    const polylinePts = [];
+    track.forEach(([a, b, s]) => {
+      const cx = xOf((a + b) / 2);
+      const y = padT + trackH - ((s - sMin) / sSpan) * trackH;
+      polylinePts.push(cx + ',' + y);
+    });
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    poly.setAttribute('fill', 'none');
+    poly.setAttribute('stroke', '#7ee787');
+    poly.setAttribute('stroke-width', '0.8');
+    poly.setAttribute('points', polylinePts.join(' '));
+    svg.appendChild(poly);
+
+    // Top-decile dots.
+    const sorted = track.map(r => r[2]).slice().sort((a,b) => b - a);
+    const topThr = sorted[Math.floor(sorted.length * 0.05)] || 0;
+    track.forEach(([a, b, s]) => {
+      if (s < topThr) return;
+      const cx = xOf((a + b) / 2);
+      const y = padT + trackH - ((s - sMin) / sSpan) * trackH;
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', cx); c.setAttribute('cy', y);
+      c.setAttribute('r', '1.6'); c.setAttribute('fill', '#7ee787');
+      svg.appendChild(c);
+    });
+
+    // Y-axis ticks.
+    function txt(x, y, s, fill, anchor){
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', x); t.setAttribute('y', y);
+      t.setAttribute('fill', fill || '#8b949e');
+      t.setAttribute('font-family', 'ui-monospace,monospace');
+      t.setAttribute('font-size', '10');
+      if (anchor) t.setAttribute('text-anchor', anchor);
+      t.textContent = s;
+      svg.appendChild(t);
+    }
+    txt(2, padT + 8, sMax.toFixed(3));
+    txt(2, padT + trackH, sMin.toFixed(3));
+    txt(padL + plotW, featY + featH + 14, recordLen.toLocaleString() + ' bp', '#8b949e', 'end');
+    txt(padL, featY + featH + 14, '0', '#8b949e');
+
+    // Feature lane — render directly from the baked-in payload.
+    const feats = JSON.parse(document.getElementById('scan-feats').textContent);
+    const FEAT_COLORS = {
+      'CDS':  '#7ee787', 'gene': '#79c0ff', 'mRNA': '#a5f3fc',
+      'exon': '#79c0ff', 'ncRNA': '#d2a8ff', 'rRNA': '#d2a8ff',
+      'tRNA': '#d2a8ff', 'regulatory': '#f0883e',
+      'mobile_element': '#6e7681', 'source': '#21262d',
+    };
+    function colourFor(typeName){
+      return FEAT_COLORS[typeName] || '#484f58';
+    }
+    // Baseline.
+    const base = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    base.setAttribute('x1', padL); base.setAttribute('x2', padL + plotW);
+    base.setAttribute('y1', featY + featH/2); base.setAttribute('y2', featY + featH/2);
+    base.setAttribute('stroke', '#30363d'); base.setAttribute('stroke-width', '1');
+    svg.appendChild(base);
+    txt(2, featY + featH/2 + 3, 'feat');
+    // Aggregate features per pixel column to keep the SVG lean even on
+    // 20 k-feature records — one rect per pixel where any feature
+    // overlaps, coloured by the dominant type.
+    const cols = new Array(Math.ceil(plotW)).fill(null);
+    feats.rows.forEach(r => {
+      const a = r[0], b = r[1], ti = r[2];
+      const x0 = Math.max(0, Math.floor(xOf(a) - padL));
+      const x1 = Math.min(cols.length - 1, Math.ceil(xOf(b) - padL));
+      for (let x = x0; x <= x1; x++){
+        const cur = cols[x];
+        // Tie-break: keep first-seen type so CDS doesn't get covered
+        // by the much-noisier mobile_element baseline on Drosophila.
+        if (!cur) cols[x] = ti;
+      }
+    });
+    cols.forEach((ti, x) => {
+      if (ti === null) return;
+      const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      r.setAttribute('x', padL + x); r.setAttribute('y', featY + 2);
+      r.setAttribute('width', 1); r.setAttribute('height', featH - 4);
+      r.setAttribute('fill', colourFor(feats.types[ti]));
+      svg.appendChild(r);
+    });
+
+    // Hover readout — closest window to mouse x.
+    const readout = document.getElementById('track-readout');
+    svg.addEventListener('mousemove', e => {
+      const r = svg.getBoundingClientRect();
+      const cx = e.clientX - r.left;
+      // Map back to bp.
+      const bp = Math.round(((cx - padL) / plotW) * recordLen);
+      // Binary search the track for the nearest window.
+      let lo = 0, hi = track.length - 1, best = 0;
+      while (lo <= hi){
+        const mid = (lo + hi) >> 1;
+        const t = track[mid];
+        if (t[0] <= bp && bp < t[1]){ best = mid; break; }
+        if (t[0] > bp) hi = mid - 1; else { lo = mid + 1; best = mid; }
+      }
+      const t = track[best];
+      readout.textContent =
+        bp.toLocaleString() + ' bp · window ' + t[0].toLocaleString() +
+        '–' + t[1].toLocaleString() + ' · score ' + t[2].toFixed(5);
+    });
+    svg.addEventListener('mouseleave', () => { readout.innerHTML = '&nbsp;'; });
+  });
+})();
+</script>
+
+{% endblock %}

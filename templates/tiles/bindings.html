@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}{{ tileset.name }} · CA bindings{% endblock %}
+
+{% block content %}
+<p style="color:#8b949e;font-size:0.85rem;margin-bottom:0.2rem;">
+  <a href="{% url 'tiles:list' %}" style="color:#79c0ff;text-decoration:none;">&larr; Tilesets</a>
+  · <a href="{% url 'tiles:detail' tileset.slug %}" style="color:#79c0ff;text-decoration:none;">{{ tileset.name }}</a>
+</p>
+
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  CA bindings
+  <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+    {{ tileset.name }} · {{ tiles|length }} tile{{ tiles|length|pluralize }}
+    · <span style="color:#7ee787;">{{ n_bound }}</span> bound to a CA RuleSet
+  </span>
+</h1>
+
+<p style="color:#8b949e;max-width:64ch;font-size:0.9rem;">
+  Pick an automaton K=4 RuleSet for each tile that should animate under the
+  CA-Wang runner. The runner uses the same 4,096-byte rule format as s3lab,
+  Helix hexhunt, and the ESP firmware — so the rule's behaviour is identical
+  across all four. Tiles with no RuleSet stay static (their Wang edge colours
+  still show on the runner's edge stripes). Save once at the bottom.
+</p>
+
+<p style="margin:0.4rem 0 0.8rem;font-size:0.9rem;">
+  Tedious to bind {{ tiles|length }} tiles by hand?
+  <a href="{% url 'tiles:speciate' tileset.slug %}" style="color:#7ee787;text-decoration:none;">
+    ▸ Speciate from a single seed RuleSet
+  </a> — generates a population of related variants and binds them one-per-tile.
+</p>
+
+{% if not rulesets %}
+<p style="color:#f0883e;background:#21262d;border:1px solid #30363d;padding:0.6rem 0.9rem;">
+  No K=4 RuleSets exist yet. Visit <a href="/automaton/" style="color:#79c0ff;">Automaton</a>
+  or import one via <code style="color:#c9d1d9;">manage.py automaton_import_rule</code> /
+  the s3lab "→ Automaton" button.
+</p>
+{% else %}
+
+<form method="post" style="margin-top:1rem;">
+  {% csrf_token %}
+  <table style="width:100%;border-collapse:collapse;font-size:0.9rem;max-width:64rem;">
+    <thead>
+      <tr style="border-bottom:1px solid #30363d;color:#8b949e;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;">
+        <th style="text-align:left;padding:0.4rem 0.6rem 0.4rem 0;">Tile</th>
+        <th style="text-align:left;padding:0.4rem 0.6rem;">Edge colours</th>
+        <th style="text-align:left;padding:0.4rem 0;">CA RuleSet</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tiles %}
+      <tr style="border-bottom:1px solid #21262d;">
+        <td style="padding:0.4rem 0.6rem 0.4rem 0;font-family:ui-monospace,monospace;color:#c9d1d9;">
+          {{ t.name|default:t.pk }}
+        </td>
+        <td style="padding:0.4rem 0.6rem;font-size:0.8rem;color:#8b949e;font-family:ui-monospace,monospace;">
+          {% if tileset.tile_type == 'hex' %}
+            n={{ t.n_color|default:"—" }} ne={{ t.ne_color|default:"—" }} se={{ t.se_color|default:"—" }}
+            <br>s={{ t.s_color|default:"—" }} sw={{ t.sw_color|default:"—" }} nw={{ t.nw_color|default:"—" }}
+          {% else %}
+            n={{ t.n_color|default:"—" }} e={{ t.e_color|default:"—" }} s={{ t.s_color|default:"—" }} w={{ t.w_color|default:"—" }}
+          {% endif %}
+        </td>
+        <td style="padding:0.4rem 0;">
+          <select name="tile_{{ t.pk }}_ruleset" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;min-width:18rem;">
+            <option value="none">— none (static) —</option>
+            {% for rs in rulesets %}
+              <option value="{{ rs.pk }}" {% if t.ca_ruleset_id == rs.pk %}selected{% endif %}>
+                {{ rs.name }} · {{ rs.exact_rules.count }} rules
+              </option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top:1rem;display:flex;gap:0.5rem;align-items:center;">
+    <button type="submit" style="background:#1f6feb;color:#fff;border:0;padding:0.5rem 1rem;cursor:pointer;font-size:0.9rem;">Save bindings</button>
+    <a href="{% url 'tiles:ca_runner' tileset.slug %}" style="color:#7ee787;text-decoration:none;font-size:0.9rem;">▸ Open CA-Wang runner</a>
+  </div>
+</form>
+
+{% endif %}
+
+{% endblock %}

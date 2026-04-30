@@ -121,6 +121,8 @@ const seedBtn      = $('seed-btn');
 const downloadGen  = $('download-genome');
 const uploadGen    = $('upload-genome');
 const downloadMap  = $('download-gpio-map');
+const sendAutoBtn  = $('send-to-automaton');
+const sendStatus   = $('send-status');
 const outputList   = $('output-bindings');
 const inputList    = $('input-bindings');
 const addOutBtn    = $('add-output');
@@ -130,15 +132,15 @@ const tftGenome    = $('tft-genome-info');
 // ── TFT render ────────────────────────────────────────────────────────
 //
 // Faked ST7735S 80×160 landscape, scaled 4x for visibility (640×320).
-// 14×14 grid at 5px cell = 70×70 logical, scaled = 280×280. Rest of
-// the canvas is "off-display" framing: gives the LCD a believable bezel.
+// 16×16 grid at 4px cell = 64×64 logical (was 14×14 at 5px = 70×70).
+// Rest of the canvas is "off-display" framing: bezel for the LCD.
 
 const TFT_W   = 160;       // logical
 const TFT_H   = 80;        // logical
 const TFT_PX  = 4;         // px per logical pixel
-const CELL    = 5;         // logical cell width
-const XPAD    = 44;        // logical
-const YPAD    = 5;         // logical
+const CELL    = 4;         // logical cell width (4px × 16 cells = 64 logical)
+const XPAD    = 46;        // logical — centres the 64+stagger grid in 160 wide
+const YPAD    = 7;         // logical — centres the 64-tall grid in 80 tall
 
 function logicalToCanvas(lx, ly) {
     return [lx * TFT_PX, ly * TFT_PX];
@@ -608,6 +610,41 @@ function downloadGenome() {
     downloadBytes('genome.bin', bytes);
 }
 
+// Read Django's csrftoken cookie — set when the page was rendered. The
+// import endpoint is POST + login_required, so CSRF must be present.
+function getCsrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? m[1] : '';
+}
+
+async function sendToAutomaton() {
+    const bytes = encode_tail(state.palette, state.genome);
+    sendAutoBtn.disabled = true;
+    sendStatus.textContent = 'sending…';
+    try {
+        const resp = await fetch('/automaton/import-from-s3lab/', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-CSRFToken':  getCsrfToken(),
+            },
+            body: bytes,
+        });
+        if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${txt}`);
+        }
+        const j = await resp.json();
+        const tag = j.duplicate ? '(already imported)' : 'imported';
+        sendStatus.innerHTML = `${tag} → <a href="${j.url}" target="_blank" style="color:#7ee787;">${j.name}</a> · ${j.n_explicit.toLocaleString()} rules`;
+    } catch (e) {
+        sendStatus.textContent = 'error: ' + e.message;
+    } finally {
+        sendAutoBtn.disabled = false;
+    }
+}
+
 function downloadGpioMap() {
     const lines = [
         '# CA cell <-> GPIO bindings.',
@@ -630,19 +667,48 @@ function downloadGpioMap() {
     downloadBytes('gpio_map.txt', new TextEncoder().encode(text), 'text/plain');
 }
 
+function applyGenomeBytes(bytes, label) {
+    // Shared apply path for any genome.bin source — file upload, query
+    // param fetch, paste, etc. Keeps the post-decode side-effects in
+    // one place so future loaders all behave the same.
+    const { palette, genome } = decode_tail(bytes);
+    state.palette = palette;
+    state.genome  = genome;
+    seed_grid(state.cur, prng());
+    renderFull(state.cur);
+    updateGenomeInfo();
+    huntStatus.textContent = `loaded ${label} (${bytes.length} B)`;
+}
+
 async function uploadGenome(file) {
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
     try {
-        const { palette, genome } = decode_tail(bytes);
-        state.palette = palette;
-        state.genome  = genome;
-        seed_grid(state.cur, prng());
-        renderFull(state.cur);
-        updateGenomeInfo();
-        huntStatus.textContent = `loaded ${file.name} (${bytes.length} B)`;
+        applyGenomeBytes(bytes, file.name);
     } catch (err) {
         huntStatus.textContent = `upload failed: ${err.message}`;
+    }
+}
+
+// On page load, honour ?from=<automaton-sim-slug> by fetching that
+// simulation's genome.bin and applying it. Lets Automaton's "→ s3lab"
+// button drop you into the lab with the chosen ruleset preloaded.
+async function loadGenomeFromQuery() {
+    const params = new URLSearchParams(window.location.search);
+    const fromSlug = params.get('from');
+    if (!fromSlug) return;
+    const url = `/automaton/${encodeURIComponent(fromSlug)}/genome.bin`;
+    huntStatus.textContent = `fetching ${fromSlug}…`;
+    try {
+        const resp = await fetch(url, { credentials: 'same-origin' });
+        if (!resp.ok) {
+            const txt = await resp.text();
+            throw new Error(`HTTP ${resp.status}: ${txt}`);
+        }
+        const buf = await resp.arrayBuffer();
+        applyGenomeBytes(new Uint8Array(buf), `automaton:${fromSlug}`);
+    } catch (err) {
+        huntStatus.textContent = `import failed: ${err.message}`;
     }
 }
 
@@ -777,6 +843,7 @@ tickSlider.addEventListener('input', () => {
 
 downloadGen.addEventListener('click', downloadGenome);
 downloadMap.addEventListener('click', downloadGpioMap);
+sendAutoBtn.addEventListener('click', sendToAutomaton);
 
 uploadGen.addEventListener('change', () => {
     if (uploadGen.files && uploadGen.files[0]) uploadGenome(uploadGen.files[0]);
@@ -794,4 +861,5 @@ updateGenomeInfo();
 updateActivityDisplay();
 tickLabel.textContent = `${state.tickMs} ms`;
 autoRefineCb.checked = state.autoRefine;
+loadGenomeFromQuery();
 requestAnimationFrame(rafLoop);
