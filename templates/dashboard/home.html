@@ -309,10 +309,11 @@
 {% endif %}
 
 {# Lab & Design — collapsed by default #}
-{% if 'cartography' in installed_app_slugs or 'condenser' in installed_app_slugs or 'displacer' in installed_app_slugs or 'helix' in installed_app_slugs or 'isolation' in installed_app_slugs or 'naiad' in installed_app_slugs or 'oneliner' in installed_app_slugs or 'tiles' in installed_app_slugs or 'zoetrope' in installed_app_slugs %}
+{% if 'cartography' in installed_app_slugs or 'condenser' in installed_app_slugs or 'displacer' in installed_app_slugs or 'helix' in installed_app_slugs or 'isolation' in installed_app_slugs or 'naiad' in installed_app_slugs or 'oneliner' in installed_app_slugs or 's3lab' in installed_app_slugs or 'tiles' in installed_app_slugs or 'zoetrope' in installed_app_slugs %}
 <details class="cat-group">
-    <summary>Lab &amp; Design <span class="cat-count">· 9</span></summary>
+    <summary>Lab &amp; Design <span class="cat-count">· 10</span></summary>
     <div class="tools-grid">
+        {% if 's3lab' in installed_app_slugs %}<a class="card" href="{% url 's3lab:index' %}" title="ESP32-S3 in-browser bench — hex CA + GPIO + ST7735S, hunt + warm-start refine"><h3>S3 Lab</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'naiad' in installed_app_slugs %}<a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'helix' in installed_app_slugs %}<a class="card" href="{% url 'helix:list' %}" title="DNA / RNA viewer + annotator — FASTA + GenBank with feature tracks"><h3>Helix</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'tiles' in installed_app_slugs %}<a class="card" href="{% url 'tiles:list' %}" title="Wang tile sets as substrate for ideas"><h3>Tiles</h3><span class="open-arrow">›</span></a>{% endif %}

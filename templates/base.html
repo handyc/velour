@@ -142,6 +142,7 @@
                 {% if 'casting' in installed_app_slugs %}<a href="{% url 'casting:index' %}">Casting</a>{% endif %}
                 {% if 'oracle' in installed_app_slugs %}<a href="{% url 'oracle:home' %}">Oracle</a>{% endif %}
                 {% if 'det' in installed_app_slugs %}<a href="{% url 'det:index' %}">Det</a>{% endif %}
+                {% if 's3lab' in installed_app_slugs %}<a href="{% url 's3lab:index' %}">S3 Lab</a>{% endif %}
                 {% if 'datalift' in installed_app_slugs %}<a href="{% url 'datalift:job_list' %}">Datalift</a>{% endif %}
                 {% if 'landingpage' in installed_app_slugs %}<a href="{% url 'landingpage:home' %}">News</a>{% endif %}
                 {% if 'winctl' in installed_app_slugs %}<a href="{% url 'winctl:home' %}">Windows</a>{% endif %}
