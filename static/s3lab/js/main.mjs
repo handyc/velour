@@ -60,43 +60,33 @@ const PERIODIC_DWELL_LIMIT  = 8;
 
 // Default bindings: edges of the grid as outputs, interior as inputs.
 // The mental model is "inputs re-seed the centre, outputs read the
-// long-term effect at the edges". Inputs sit on a 2×2 grid four cells
-// in from each corner; outputs sample every other row of each vertical
-// edge (7 cells per edge × 2 edges = 14 outputs).
+// long-term effect at the edges".
+//
+// Pin budget on a SuperMini: TFT eats 4–7 + 11–12, USB takes 19/20,
+// BOOT is 0 — leaving exactly 9 free pins (1, 2, 3, 8, 9, 10, 13, 14,
+// 21). The lab default fills that budget exactly so anything you
+// design here is physically buildable: 5 outputs sample both vertical
+// edges, 4 inputs form a 2×2 grid in the interior.
 //
 // state_mask = 0x8 ⇒ output HIGH when cell == state 3, so each edge
-// pin fires only when a state-3 wave actually reaches it. Inputs use
+// pin fires only when a state-3 wave reaches it. Inputs use
 // low=0 / high=3 so a click on HIGH injects a strong stimulus the
 // outputs can detect propagating outward.
-//
-// The pin numbers below 22 match what's broken out on a SuperMini;
-// pin 33+ are conceptually fine in the lab (the engine doesn't care)
-// but won't all wire to a real device — when you flash, edit
-// /gpio_map.txt down to whatever fits your hardware.
 state.bindings = [
-    // Left edge (x=0), even rows
+    // Left edge (x=0), three sample rows
     { cell_x: 0, cell_y:  0, gpio_pin:  1, state_mask: 0x8 },
-    { cell_x: 0, cell_y:  2, gpio_pin:  2, state_mask: 0x8 },
-    { cell_x: 0, cell_y:  4, gpio_pin:  3, state_mask: 0x8 },
-    { cell_x: 0, cell_y:  6, gpio_pin:  8, state_mask: 0x8 },
-    { cell_x: 0, cell_y:  8, gpio_pin:  9, state_mask: 0x8 },
-    { cell_x: 0, cell_y: 10, gpio_pin: 10, state_mask: 0x8 },
-    { cell_x: 0, cell_y: 12, gpio_pin: 13, state_mask: 0x8 },
-    // Right edge (x=13), even rows
-    { cell_x: 13, cell_y:  0, gpio_pin: 14, state_mask: 0x8 },
-    { cell_x: 13, cell_y:  2, gpio_pin: 21, state_mask: 0x8 },
-    { cell_x: 13, cell_y:  4, gpio_pin: 33, state_mask: 0x8 },
-    { cell_x: 13, cell_y:  6, gpio_pin: 34, state_mask: 0x8 },
-    { cell_x: 13, cell_y:  8, gpio_pin: 35, state_mask: 0x8 },
-    { cell_x: 13, cell_y: 10, gpio_pin: 36, state_mask: 0x8 },
-    { cell_x: 13, cell_y: 12, gpio_pin: 37, state_mask: 0x8 },
+    { cell_x: 0, cell_y:  6, gpio_pin:  2, state_mask: 0x8 },
+    { cell_x: 0, cell_y: 12, gpio_pin:  3, state_mask: 0x8 },
+    // Right edge (x=13), two sample rows
+    { cell_x: 13, cell_y:  3, gpio_pin:  8, state_mask: 0x8 },
+    { cell_x: 13, cell_y:  9, gpio_pin:  9, state_mask: 0x8 },
 ];
 state.inputs = [
     // 2×2 grid in the interior, evenly placed away from the edges
-    { gpio_pin: 38, cell_x:  3, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
-    { gpio_pin: 39, cell_x: 10, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
-    { gpio_pin: 40, cell_x:  3, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
-    { gpio_pin: 41, cell_x: 10, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 10, cell_x:  3, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 13, cell_x: 10, cell_y:  3, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 14, cell_x:  3, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
+    { gpio_pin: 21, cell_x: 10, cell_y: 10, low_state: 0, high_state: 3, level: 1 },
 ];
 
 state.cur = state.gridA;

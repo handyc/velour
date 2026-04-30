@@ -17,12 +17,13 @@
        ready to drop straight onto a real device — same algorithm, same file
        formats, no flashing required for design iteration.</p>
     <p class="lede">Default layout: <strong>inputs</strong> on a 2×2 grid in
-       the interior re-seed central cells; <strong>outputs</strong> on every
-       other row of each vertical edge fire when a state-3 wave reaches the
-       edge. Toggle inputs HIGH/LOW to inject stimulus, watch propagation in
-       the timing diagram. The hardware S3 only has ~9 free GPIOs after the
-       TFT — the lab default uses 18 to give room to design; trim to fit
-       when you flash.</p>
+       the interior re-seed central cells; <strong>outputs</strong> sample
+       both vertical edges and fire when a state-3 wave reaches the edge.
+       Toggle inputs HIGH/LOW to inject stimulus, watch propagation in the
+       timing diagram. The default fills the 9 free GPIOs the SuperMini
+       leaves after the TFT (5 outputs + 4 inputs) — anything you design
+       here is physically buildable; add more pins only if you switch to a
+       module with more breakouts.</p>
   </header>
 
   <section class="s3lab-row">
@@ -112,8 +113,10 @@
       hunter — files round-trip both directions with no conversion. The hunt
       runs in a Web Worker so the UI stays responsive.</p>
     <p>Pin map on the SuperMini: TFT uses 4–7 + 11–12; USB D-/D+ is on 19/20;
-      BOOT on 0. Safe defaults for bindings: 1, 2, 3, 8, 9, 10, 13, 14, 21
-      (~9 free). Typical "logic processor" wiring: 4 inputs + 4 outputs.</p>
+      BOOT on 0. The 9 free pins are 1, 2, 3, 8, 9, 10, 13, 14, 21 — the
+      lab default uses all of them (outputs: 1, 2, 3, 8, 9; inputs: 10, 13,
+      14, 21). Typical "logic processor" wiring is 4 inputs + 4 outputs,
+      which leaves one pin spare.</p>
   </section>
 
 </div>
