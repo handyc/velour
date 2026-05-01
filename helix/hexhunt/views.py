@@ -105,13 +105,22 @@ def rule_detail(request, slug):
 @login_required
 @require_GET
 def rule_replay(request, slug):
-    """Return spacetime frames for a rule run on a chosen sample window.
+    """Return spacetime frames for a rule run on a chosen initial board.
 
     Query params:
-        window=<HuntWindow pk>   pick any window from any corpus
-        steps=<int>              cap at 256
-    Falls back to the first window of the rule's bred-against corpus.
+        init=dna|random         board source (default: dna)
+        window=<HuntWindow pk>  for init=dna: pick any window from any corpus
+        seed=<int>              for init=random: PRNG seed for board init;
+                                also used as the per-window random fill seed
+                                in dna_to_board (Ns / ambiguity codes)
+        steps=<int>             cap at 256
+
+    init=dna falls back to the first window of the rule's bred-against
+    corpus when no window is specified, and to a uniform-random ATGC
+    string of WINDOW_SIZE bases when no corpus is associated.
     """
+    import numpy as np
+
     rule = get_object_or_404(HuntRule, slug=slug)
     try:
         steps = int(request.GET.get('steps', engine.TOTAL_STEPS))
@@ -119,32 +128,46 @@ def rule_replay(request, slug):
         steps = engine.TOTAL_STEPS
     steps = max(1, min(256, steps))
 
-    window_pk = request.GET.get('window')
-    seq = None
-    label = ''
-    if window_pk:
-        from helix.models import HuntWindow
-        w = HuntWindow.objects.select_related('record').filter(pk=window_pk).first()
-        if not w:
-            raise Http404('window not found')
-        seq = w.sequence()
-        label = f'window {w.pk} · {w.record.accession or w.record.title}:{w.start}'
-    else:
-        corpus_slug = (rule.provenance_json or {}).get('corpus')
-        if corpus_slug:
-            corpus = HuntCorpus.objects.filter(slug=corpus_slug).first()
-            if corpus:
-                w = corpus.windows.select_related('record').first()
-                if w:
-                    seq = w.sequence()
-                    label = f'window {w.pk} · {w.record.accession or w.record.title}:{w.start}'
-    if seq is None:
-        # Fallback — uniform-random window so the player still works.
-        import random as _r
-        seq = ''.join(_r.choices('ATGC', k=WINDOW_SIZE))
-        label = 'random fallback window'
+    try:
+        seed = int(request.GET.get('seed', 0)) & 0xFFFFFFFF
+    except ValueError:
+        seed = 0
 
-    board = dna_to_board(seq)
+    init_mode = (request.GET.get('init', 'dna') or 'dna').strip().lower()
+    if init_mode not in ('dna', 'random'):
+        init_mode = 'dna'
+
+    label = ''
+    if init_mode == 'random':
+        rng = np.random.RandomState(seed)
+        board = rng.randint(0, 4, size=(BOARD_H, BOARD_W), dtype=np.int8)
+        label = f'random board · seed {seed}'
+    else:
+        window_pk = request.GET.get('window')
+        seq = None
+        if window_pk:
+            from helix.models import HuntWindow
+            w = HuntWindow.objects.select_related('record').filter(pk=window_pk).first()
+            if not w:
+                raise Http404('window not found')
+            seq = w.sequence()
+            label = f'window {w.pk} · {w.record.accession or w.record.title}:{w.start}'
+        else:
+            corpus_slug = (rule.provenance_json or {}).get('corpus')
+            if corpus_slug:
+                corpus = HuntCorpus.objects.filter(slug=corpus_slug).first()
+                if corpus:
+                    w = corpus.windows.select_related('record').first()
+                    if w:
+                        seq = w.sequence()
+                        label = f'window {w.pk} · {w.record.accession or w.record.title}:{w.start}'
+        if seq is None:
+            import random as _r
+            _r.seed(seed)
+            seq = ''.join(_r.choices('ATGC', k=WINDOW_SIZE))
+            label = 'random fallback window'
+        board = dna_to_board(seq, seed=seed)
+
     rule_table = engine.unpack_rule(rule.packed())
     spacetime = engine.evolve(board, rule_table, steps=steps)
     score = engine.score(spacetime, 'gzip')
@@ -156,6 +179,8 @@ def rule_replay(request, slug):
     ]
     return JsonResponse({
         'rule_slug': rule.slug,
+        'init':      init_mode,
+        'seed':      seed,
         'label':     label,
         'width':     BOARD_W,
         'height':    BOARD_H,

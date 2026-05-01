@@ -33,16 +33,31 @@
       <button id="reset-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.7rem;cursor:pointer;">reset</button>
     </div>
     <div style="margin-bottom:0.5rem;">
+      board
+      <select id="init-mode" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;font-family:inherit;">
+        <option value="dna">DNA window</option>
+        <option value="random">Uniform random</option>
+      </select>
+      <button id="reseed-btn"
+              title="Pick a fresh random seed and reload the replay. For DNA mode the seed only affects how non-ACGT bases (Ns, gaps) are filled. For random mode the whole board is regenerated."
+              style="background:#1f6feb;color:#fff;border:0;padding:0.3rem 0.7rem;cursor:pointer;">Reseed Board</button>
+      <button id="palette-btn"
+              title="Repaint the existing frames with 4 random hues at fixed saturation/lightness. No server roundtrip — just changes how the same data is coloured."
+              style="background:#bc8cff;color:#0d1117;border:0;padding:0.3rem 0.7rem;cursor:pointer;">Random Palette</button>
+    </div>
+    <div style="margin-bottom:0.5rem;">
       tick speed
       <input id="speed" type="range" min="40" max="1000" value="200" step="20" style="vertical-align:middle;">
       <span id="speed-out" style="font-family:ui-monospace,monospace;color:#8b949e;">200 ms</span>
     </div>
     <div>frame <span id="frame-out" style="font-family:ui-monospace,monospace;color:#8b949e;">0</span> / <span id="total-out" style="font-family:ui-monospace,monospace;color:#8b949e;">—</span></div>
     <div>score (gzip) <span id="score-out" style="font-family:ui-monospace,monospace;color:#7ee787;">—</span></div>
+    <div>seed <span id="seed-out" style="font-family:ui-monospace,monospace;color:#8b949e;">—</span> · source <span id="source-out" style="font-family:ui-monospace,monospace;color:#8b949e;">—</span></div>
     <div style="margin-top:1rem;color:#8b949e;font-size:0.8rem;max-width:30ch;">
-      Tick 0 is the DNA window mapped to the 16×16 board:
-      A=0 (yellow), T/U=1 (cyan), G=2 (magenta), C=3 (green).
-      Edge cells are treated as colour 0 during the step.
+      Tick 0 in DNA mode is the window mapped to the 16×16 board:
+      <strong>A=0</strong>, <strong>T/U=1</strong>, <strong>G=2</strong>, <strong>C=3</strong>.
+      In random mode tick 0 is a uniform random K=4 board seeded
+      from the seed shown above. Edge cells are colour 0.
     </div>
   </div>
 </div>
@@ -124,16 +139,21 @@
   const replayUrl = "{% url 'helix:hexhunt:rule_replay' rule.slug %}";
   const cv = document.getElementById('player');
   const ctx = cv.getContext('2d');
-  const COLORS = ['#d4a72c', '#39c5cf', '#f070a0', '#7ee787'];  // A T/U G C
+
+  // Mutable palette — the Random Palette button replaces these in
+  // place and triggers a repaint without a server round-trip.
+  let COLORS = ['#d4a72c', '#39c5cf', '#f070a0', '#7ee787'];  // A T/U G C
 
   let frames = [], W = 16, H = 16, idx = 0, timer = null;
+  let currentSeed = 0;
+  let currentInit = 'dna';
+
   function paint(){
     const f = frames[idx]; if (!f) return;
-    // Shrink the cell width by half so the offset row's right-edge
-    // doesn't overshoot the canvas. The engine's hex topology is
-    // pointy-top with even rows flush-left and odd rows shifted +0.5
-    // cells on x — same convention s3lab's TFT uses, so this view
-    // matches the simulator's geometry.
+    // Shrink the cell width by half so the offset row's right edge
+    // doesn't overshoot the canvas. Engine topology is pointy-top
+    // hex with odd rows shifted +0.5 cells on x — same convention
+    // s3lab's TFT uses, so this matches the simulator's geometry.
     const cell = cv.width / (W + 0.5);
     const bytes = atob(f);
     ctx.fillStyle = '#0d1117';
@@ -147,14 +167,24 @@
     }
     document.getElementById('frame-out').textContent = idx;
   }
+
   function load(){
-    fetch(replayUrl).then(r => r.json()).then(j => {
+    const url = replayUrl + '?init=' + encodeURIComponent(currentInit)
+                          + '&seed=' + (currentSeed >>> 0);
+    fetch(url).then(r => r.json()).then(j => {
       frames = j.frames; W = j.width; H = j.height; idx = 0;
-      document.getElementById('total-out').textContent = (frames.length - 1);
-      document.getElementById('score-out').textContent = j.score.toFixed(4);
+      currentSeed = (j.seed >>> 0);
+      currentInit = j.init || currentInit;
+      document.getElementById('total-out').textContent  = (frames.length - 1);
+      document.getElementById('score-out').textContent  = j.score.toFixed(4);
+      document.getElementById('seed-out').textContent   = currentSeed;
+      document.getElementById('source-out').textContent = j.label || currentInit;
+      const sel = document.getElementById('init-mode');
+      if (sel) sel.value = currentInit;
       paint();
     });
   }
+
   function step(){
     idx = (idx + 1) % frames.length; paint();
   }
@@ -164,6 +194,34 @@
     timer = setInterval(step, ms);
     document.getElementById('play-btn').textContent = '⏸ pause';
   }
+
+  // Random palette generator — 4 hues spaced ~quarter-circle apart on
+  // HSL with uniform saturation/lightness so the result is coherent
+  // (vivid + readable) rather than random RGB which is usually muddy.
+  // hsl→rgb adapted from CSS-style HSL.
+  function randomPalette(){
+    const hueOffset = Math.random() * 360;
+    const sat = 0.55 + Math.random() * 0.25;        // 0.55–0.80
+    const lig = 0.50 + Math.random() * 0.10;        // 0.50–0.60
+    const hues = [0, 90, 180, 270].map(h =>
+      (h + hueOffset + (Math.random() - 0.5) * 30) % 360
+    );
+    return hues.map(h => hslToHex(h, sat, lig));
+  }
+  function hslToHex(h, s, l){
+    h /= 360;
+    function f(n){
+      const k = (n + h * 12) % 12;
+      const a = s * Math.min(l, 1 - l);
+      return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    }
+    const to8 = v => {
+      const x = Math.round(v * 255);
+      return (x < 0 ? 0 : x > 255 ? 255 : x).toString(16).padStart(2, '0');
+    };
+    return '#' + to8(f(0)) + to8(f(8)) + to8(f(4));
+  }
+
   document.getElementById('play-btn').addEventListener('click', play);
   document.getElementById('step-btn').addEventListener('click', step);
   document.getElementById('reset-btn').addEventListener('click', () => { idx = 0; paint(); });
@@ -171,6 +229,22 @@
     document.getElementById('speed-out').textContent = e.target.value + ' ms';
     if (timer){ clearInterval(timer); timer = setInterval(step, parseInt(e.target.value, 10)); }
   });
+  document.getElementById('init-mode').addEventListener('change', e => {
+    currentInit = e.target.value;
+    // Switching mode is a fresh seed too — same seed across modes
+    // would be misleading (different shape of init under each mode).
+    currentSeed = (Math.random() * 0xffffffff) >>> 0;
+    load();
+  });
+  document.getElementById('reseed-btn').addEventListener('click', () => {
+    currentSeed = (Math.random() * 0xffffffff) >>> 0;
+    load();
+  });
+  document.getElementById('palette-btn').addEventListener('click', () => {
+    COLORS = randomPalette();
+    paint();
+  });
+
   load();
 })();
 </script>

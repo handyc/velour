@@ -28,10 +28,6 @@
   <dt style="color:#8b949e;">Started · finished</dt><dd>{{ run.started_at|date:"D d M Y H:i:s"|default:"—" }} · {{ run.finished_at|date:"D d M Y H:i:s"|default:"—" }}</dd>
 </dl>
 
-{# Live progress strip — visible while the run is in flight. The
-   poll script below repaints this every 750ms and reloads the page
-   when status flips to done/failed so the leaderboard renders with
-   server-side rule links. #}
 <section id="progress-strip"
          data-run-slug="{{ run.slug }}"
          data-progress-url="{% url 'helix:hexhunt:run_progress_json' run.slug %}"
