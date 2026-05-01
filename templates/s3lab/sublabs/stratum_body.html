@@ -52,8 +52,13 @@
           title="Run a compact GA hunt: pop=8, gens=20. Half the population mutated from the current elite, half random; the top winners replace the bottom-fitness library slots. Auto-tournament pauses while hunting."
           style="background:#238636;color:#fff;border:0;">🧬 Hunt</button>
   <button id="stratum-refine-btn"
-          title="Warm-start hunt: same pop/gens as Hunt, but the whole population is mutated from the current elite. Use this to iteratively sharpen the rule you already have."
+          title="Warm-start hunt: whole population mutated from the current elite. Iteratively sharpens the rule you already have. Defaults to 64 gens (3× longer than Hunt) since refine benefits more from grinding; tune via the input next to it."
           style="background:#1f6feb;color:#fff;border:0;">🎯 Refine</button>
+  <label class="slider-label" title="Refine generations — how many GA rounds to run when you click Refine. Higher = more thorough but slower (~13s at 64, ~25s at 128).">
+    gens
+    <input type="number" id="stratum-refine-gens" min="5" max="500" step="1" value="64"
+           style="width:4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+  </label>
   <button id="pause-btn" title="Pause both inner CAs and the meta-CA + tournament timers.">Pause</button>
   <button id="reset-lib-btn" title="Throw out the entire library and re-roll 64 fresh random K=64 genomes (with palettes + grids).">Reset Library</button>
   <button id="reseed-meta-btn" title="Re-randomise the meta-CA grid states without disturbing the library.">Reseed Meta</button>

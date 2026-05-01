@@ -115,17 +115,32 @@ const state = {
 
 // ── Hunt parameters ────────────────────────────────────────────────
 //
-// A single Hunt or Refine click runs a compact GA: pop=8, gens=20.
-// The whole thing finishes in ~3-5 s with per-gen yields, so the UI
-// stays responsive (tile rendering keeps painting in between gens).
-// Smaller and faster than /hexnn/'s default 16×60 because we want
-// these buttons to feel like a quick experiment, not a long wait.
+// Hunt and Refine run separate compact GAs with different defaults:
+//
+//   Hunt   — pop=8, gens=20. Half mutated from elite (4× rate), half
+//            random. Quick broad search; ~3-4 s.
+//   Refine — pop=8, gens=64. All mutated from elite at the standard
+//            rate. Iterative sharpening; ~10-13 s. The 3× longer
+//            schedule reflects refine's role: when you're warm-starting
+//            from an already-good rule, more gens of grinding is what
+//            actually moves the needle.
+//
+// gen counts are user-tunable via the input next to each button so
+// you can crank refine higher if 64 isn't enough on a particular rule.
 
-const HUNT_POP_SIZE  = 8;
-const HUNT_GENS      = 20;
-const HUNT_MUT_RATE  = 0.001;     // 4× this for fresh-Hunt's random half
-const HUNT_INSERT    = 3;         // number of top winners pushed into
-                                  // the library after the hunt
+const HUNT_POP_SIZE         = 8;
+const HUNT_GENS_DEFAULT     = 20;
+const REFINE_GENS_DEFAULT   = 64;
+const HUNT_MUT_RATE         = 0.001;   // 4× this for fresh-Hunt's random half
+const HUNT_INSERT           = 3;       // number of top winners pushed into
+                                       // the library after the hunt
+
+function refineGens() {
+    const el = document.getElementById('stratum-refine-gens');
+    const v = el ? parseInt(el.value, 10) : REFINE_GENS_DEFAULT;
+    if (Number.isFinite(v) && v >= 5 && v <= 500) return v;
+    return REFINE_GENS_DEFAULT;
+}
 
 
 function bootstrap() {
@@ -255,6 +270,7 @@ async function runHunt(warmStart) {
     if (state.hunting) return;
     state.hunting = true;
     state.huntKind = warmStart ? 'refine' : 'hunt';
+    const gens = warmStart ? refineGens() : HUNT_GENS_DEFAULT;
     const status = document.getElementById('stratum-hunt-status');
     const huntBtn = document.getElementById('stratum-hunt-btn');
     const refineBtn = document.getElementById('stratum-refine-btn');
@@ -301,7 +317,7 @@ async function runHunt(warmStart) {
 
     // Run gens.
     let bestEver = null;
-    for (let gen = 0; gen < HUNT_GENS; gen++) {
+    for (let gen = 0; gen < gens; gen++) {
         const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
         for (const ind of pop) {
             const sc = score(ind.genome, INNER_W, SCORE_STEPS,
@@ -319,7 +335,7 @@ async function runHunt(warmStart) {
         }
         if (status) {
             status.textContent =
-                `${state.huntKind} gen ${gen + 1}/${HUNT_GENS} ` +
+                `${state.huntKind} gen ${gen + 1}/${gens} ` +
                 `best ${pop[0].fitness.toFixed(4)} (r=${pop[0].r.toFixed(3)})`;
         }
 
