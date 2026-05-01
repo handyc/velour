@@ -106,7 +106,26 @@ const state = {
 
     metaTicks: 0,
     rounds: 0,
+
+    hunting: false,                   // true while a GA hunt is in flight;
+                                      // tournament rounds skip while set
+    huntKind: '',                     // 'hunt' | 'refine' for status text
 };
+
+
+// ── Hunt parameters ────────────────────────────────────────────────
+//
+// A single Hunt or Refine click runs a compact GA: pop=8, gens=20.
+// The whole thing finishes in ~3-5 s with per-gen yields, so the UI
+// stays responsive (tile rendering keeps painting in between gens).
+// Smaller and faster than /hexnn/'s default 16×60 because we want
+// these buttons to feel like a quick experiment, not a long wait.
+
+const HUNT_POP_SIZE  = 8;
+const HUNT_GENS      = 20;
+const HUNT_MUT_RATE  = 0.001;     // 4× this for fresh-Hunt's random half
+const HUNT_INSERT    = 3;         // number of top winners pushed into
+                                  // the library after the hunt
 
 
 function bootstrap() {
@@ -169,6 +188,10 @@ function tickMeta() {
 
 function tickTournament() {
     if (!state.running) return;
+    // Don't trample on a hunt-in-progress; the hunt is going to
+    // bulk-replace several library slots and we don't want a stray
+    // tournament edit between gens.
+    if (state.hunting) return;
 
     let i = (Math.random() * LIB_SIZE) | 0;
     let j = (Math.random() * LIB_SIZE) | 0;
@@ -218,6 +241,156 @@ function tickTournament() {
     state.rounds++;
     updateStatus();
     paintAll();
+}
+
+
+// ── Hunt + Refine: compact GA on a single click ────────────────────
+//
+// Runs a small GA, then inserts the top HUNT_INSERT winners into the
+// library by replacing the bottom-fitness slots. The auto-tournament
+// loop pauses while hunting (state.hunting flag). Per-gen yields keep
+// the UI thread alive — without them the page would freeze for ~4s.
+
+async function runHunt(warmStart) {
+    if (state.hunting) return;
+    state.hunting = true;
+    state.huntKind = warmStart ? 'refine' : 'hunt';
+    const status = document.getElementById('stratum-hunt-status');
+    const huntBtn = document.getElementById('stratum-hunt-btn');
+    const refineBtn = document.getElementById('stratum-refine-btn');
+    if (huntBtn)   huntBtn.disabled   = true;
+    if (refineBtn) refineBtn.disabled = true;
+
+    const t0 = performance.now();
+    const elite = state.library[state.eliteIdx];
+
+    // Build initial population. Each individual = {genome, palette}.
+    const pop = [];
+    pop.push({
+        genome:  elite.genome,                   // elite passes through unchanged
+        palette: new Uint8Array(elite.palette),
+    });
+    if (warmStart) {
+        // Refine: rest are mutations of the elite at HUNT_MUT_RATE.
+        for (let k = 1; k < HUNT_POP_SIZE; k++) {
+            const mutSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+            pop.push({
+                genome:  mutateGenome(elite.genome, HUNT_MUT_RATE, mulberry32(mutSeed)),
+                palette: new Uint8Array(elite.palette),
+            });
+        }
+    } else {
+        // Hunt: half mutated (4× rate), half random with random palettes.
+        const half = HUNT_POP_SIZE / 2;
+        for (let k = 1; k < half; k++) {
+            const mutSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+            pop.push({
+                genome:  mutateGenome(elite.genome, HUNT_MUT_RATE * 4, mulberry32(mutSeed)),
+                palette: new Uint8Array(elite.palette),
+            });
+        }
+        for (let k = half; k < HUNT_POP_SIZE; k++) {
+            const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+            pop.push({
+                genome:  makeGenome(LIB_K, seed),
+                palette: inventPalette(LIB_K, mulberry32(seed ^ 0xA5A5A5A5)),
+            });
+        }
+    }
+    for (const ind of pop) { ind.fitness = 0; ind.r = 0; }
+
+    // Run gens.
+    let bestEver = null;
+    for (let gen = 0; gen < HUNT_GENS; gen++) {
+        const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+        for (const ind of pop) {
+            const sc = score(ind.genome, INNER_W, SCORE_STEPS,
+                              mulberry32(seed), SCORE_BURNIN);
+            ind.fitness = sc.f; ind.r = sc.r;
+        }
+        pop.sort((a, b) => b.fitness - a.fitness);
+
+        if (!bestEver || pop[0].fitness > bestEver.fitness) {
+            bestEver = {
+                genome:  new Uint8Array(pop[0].genome.keys
+                    ? pop[0].genome.keys : []),  // shouldn't happen
+                ...pop[0],
+            };
+        }
+        if (status) {
+            status.textContent =
+                `${state.huntKind} gen ${gen + 1}/${HUNT_GENS} ` +
+                `best ${pop[0].fitness.toFixed(4)} (r=${pop[0].r.toFixed(3)})`;
+        }
+
+        // Reproduce: top half keeps elite, bottom half = crossover-mutate.
+        const half = HUNT_POP_SIZE / 2;
+        const next = [pop[0]];        // elite passes through
+        while (next.length < HUNT_POP_SIZE) {
+            const a = pop[(Math.random() * half) | 0];
+            const b = pop[(Math.random() * half) | 0];
+            const cxRng = mulberry32((Math.random() * 0xFFFFFFFF) >>> 0);
+            const child = mutateGenome(
+                crossover(a.genome, b.genome, cxRng),
+                HUNT_MUT_RATE, cxRng,
+            );
+            // Palette inherit: 50/50 per slot from the two parents.
+            const pal = new Uint8Array(LIB_K);
+            for (let k = 0; k < LIB_K; k++) {
+                pal[k] = (Math.random() < 0.5) ? a.palette[k] : b.palette[k];
+            }
+            next.push({ genome: child, palette: pal, fitness: 0, r: 0 });
+        }
+        pop.length = 0; for (const x of next) pop.push(x);
+
+        // Yield to UI thread so per-gen progress can paint.
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise(r => setTimeout(r, 0));
+    }
+
+    // Insert the top HUNT_INSERT into the library, replacing the
+    // bottom-fitness slots (so we keep diversity in the middle band
+    // and don't immediately overwrite a recently-discovered winner).
+    const ranked = state.library
+        .map((e, i) => ({ e, i }))
+        .sort((a, b) => a.e.fitness - b.e.fitness);
+    const N_INS = Math.min(HUNT_INSERT, HUNT_POP_SIZE);
+    for (let k = 0; k < N_INS; k++) {
+        const slot = ranked[k].i;
+        const winner = pop[k];
+        state.library[slot].genome   = winner.genome;
+        state.library[slot].bins     = buildBins(winner.genome);
+        state.library[slot].palette  = winner.palette;
+        state.library[slot].fitness  = winner.fitness;
+        state.library[slot].r        = winner.r;
+        state.library[slot].gridA    = freshGrid(
+            INNER_W, INNER_H, LIB_K,
+            mulberry32((Math.random() * 0xFFFFFFFF) >>> 0));
+    }
+
+    // Refresh elite — likely changed.
+    let bestIdx = 0, bestF = -Infinity;
+    for (let k = 0; k < LIB_SIZE; k++) {
+        if (state.library[k].fitness > bestF) {
+            bestF = state.library[k].fitness;
+            bestIdx = k;
+        }
+    }
+    state.eliteIdx  = bestIdx;
+    state.eliteBins = state.library[bestIdx].bins;
+
+    state.hunting = false;
+    if (huntBtn)   huntBtn.disabled   = false;
+    if (refineBtn) refineBtn.disabled = false;
+    const dt = ((performance.now() - t0) / 1000).toFixed(1);
+    if (status) {
+        status.textContent =
+            `${state.huntKind} done in ${dt}s · ` +
+            `top score ${pop[0].fitness.toFixed(4)} (r=${pop[0].r.toFixed(3)}) · ` +
+            `inserted ${N_INS} winners`;
+    }
+    paintAll();
+    updateStatus();
 }
 
 
@@ -369,6 +542,120 @@ function updateStatus() {
 }
 
 
+// ── Click-to-download (genome → hexnn-genome-v1 JSON) ──────────────
+//
+// Hit-testing on the hex tile grids: the meta canvas inverse-maps a
+// click to (r, c) accounting for the odd-row offset. Library is the
+// same shape with smaller tiles. The JSON emitted is byte-shape-
+// identical to the /hexnn/ bench's "Download JSON" button so the
+// same file round-trips into that page.
+
+function fnv1a32Hex(keys, outs) {
+    let h = 0x811c9dc5 >>> 0;
+    for (let i = 0; i < keys.length; i++) {
+        h = ((h ^ keys[i]) >>> 0);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    for (let i = 0; i < outs.length; i++) {
+        h = ((h ^ outs[i]) >>> 0);
+        h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+}
+
+function paletteToCssHex(pal) {
+    const out = new Array(pal.length);
+    for (let i = 0; i < pal.length; i++) {
+        const [r, g, b] = ansi256_rgb(pal[i]);
+        const to8 = v => v.toString(16).padStart(2, '0');
+        out[i] = '#' + to8(r) + to8(g) + to8(b);
+    }
+    return out;
+}
+
+function downloadLibraryEntryAsJSON(idx, source) {
+    const e = state.library[idx];
+    const N = e.outs ? e.outs.length : (e.genome.outs ? e.genome.outs.length : 0);
+    // The genome is stored as {K, keys: Uint8Array(N*7), outs: Uint8Array(N)}.
+    const g = e.genome;
+    const keys = [];
+    for (let i = 0; i < g.outs.length; i++) {
+        const off = i * 7;
+        keys.push([
+            g.keys[off], g.keys[off+1], g.keys[off+2], g.keys[off+3],
+            g.keys[off+4], g.keys[off+5], g.keys[off+6],
+        ]);
+    }
+    const outputs = Array.from(g.outs);
+    const fp = fnv1a32Hex(g.keys, g.outs);
+    const payload = {
+        format:         'hexnn-genome-v1',
+        K:              g.K,
+        n_entries:      g.outs.length,
+        palette:        paletteToCssHex(e.palette),
+        palette_name:   `stratum-${source}-${idx}`,
+        fingerprint:    fp,
+        exported_at:    new Date().toISOString(),
+        source:         source,        // 'library' or 'meta:rIcJ'
+        library_index:  idx,
+        fitness:        e.fitness,
+        r:              e.r,
+        keys:           keys,
+        outputs:        outputs,
+    };
+    const blob = new Blob([JSON.stringify(payload)], {type: 'application/json'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `hexnn-K${g.K}-${fp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Inverse of the layout math in paintLibrary / paintMeta. Returns
+// the {row, col} of the tile under (mx, my), or null if the click
+// landed in a gap or outside the grid.
+function tileFromMouse(mx, my, cols, rows, tilePx, tileGap) {
+    // Try odd row first if y suggests it; we just brute-force check
+    // both candidate rows (offset / non-offset) since they overlap on
+    // x. Whichever lands the click inside its tile box wins.
+    const stride = tilePx + tileGap;
+    const r = Math.floor(my / stride);
+    if (r < 0 || r >= rows) return null;
+    if ((my - r * stride) >= tilePx) return null;       // in vertical gap
+    const xOff = (r & 1) ? tilePx / 2 : 0;
+    const localX = mx - xOff;
+    const c = Math.floor(localX / stride);
+    if (c < 0 || c >= cols) return null;
+    if ((localX - c * stride) >= tilePx) return null;   // in horizontal gap
+    return { row: r, col: c };
+}
+
+function onLibraryClick(ev) {
+    const cv = ev.currentTarget;
+    const rect = cv.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    const hit = tileFromMouse(mx, my, LIB_COLS, LIB_ROWS, LIB_TILE_PX, LIB_TILE_GAP);
+    if (!hit) return;
+    const idx = hit.row * LIB_COLS + hit.col;
+    if (idx < 0 || idx >= LIB_SIZE) return;
+    downloadLibraryEntryAsJSON(idx, 'library');
+}
+
+function onMetaClick(ev) {
+    const cv = ev.currentTarget;
+    const rect = cv.getBoundingClientRect();
+    const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    const hit = tileFromMouse(mx, my, META_COLS, META_ROWS, META_TILE_PX, META_TILE_GAP);
+    if (!hit) return;
+    const cellIdx = hit.row * META_COLS + hit.col;
+    const libIdx  = state.metaA[cellIdx] % LIB_SIZE;
+    downloadLibraryEntryAsJSON(libIdx, `meta:r${hit.row}c${hit.col}`);
+}
+
+
 // ── Wire-up ────────────────────────────────────────────────────────
 
 function startTimers() {
@@ -434,6 +721,26 @@ function init() {
         const v = parseFloat(e.target.value);
         if (Number.isFinite(v) && v >= 0) state.mutRate = v;
     };
+
+    // Hunt + Refine buttons run a compact GA on the current elite.
+    const huntBtn = document.getElementById('stratum-hunt-btn');
+    const refineBtn = document.getElementById('stratum-refine-btn');
+    if (huntBtn)   huntBtn.onclick   = () => runHunt(false);
+    if (refineBtn) refineBtn.onclick = () => runHunt(true);
+
+    // Click-to-download genome JSON. Wire on both canvases — clicks
+    // on the meta-CA download whichever library entry is currently
+    // displayed in that meta-cell.
+    const libCv  = document.getElementById('stratum-library');
+    const metaCv = document.getElementById('stratum-meta');
+    if (libCv) {
+        libCv.style.cursor = 'pointer';
+        libCv.addEventListener('click', onLibraryClick);
+    }
+    if (metaCv) {
+        metaCv.style.cursor = 'pointer';
+        metaCv.addEventListener('click', onMetaClick);
+    }
 
     startTimers();
 }

@@ -16,7 +16,10 @@
    meta-cells with the same state show identical patterns — which
    makes regions of the meta-CA visible at a glance. Gold borders
    highlight the elite (the library entry currently driving the
-   meta-CA's stepping).
+   meta-CA's stepping). <strong>Click any tile</strong> on either canvas
+   to download its genome as a hexnn-genome-v1 JSON file
+   (round-trips into the <a href="/hexnn/" style="color:#79c0ff;">/hexnn/</a>
+   page unchanged).
 </p>
 
 <section class="stratum-section"
@@ -45,10 +48,20 @@
 </section>
 
 <div class="tft-controls" style="margin-top:0.6rem;">
+  <button id="stratum-hunt-btn"
+          title="Run a compact GA hunt: pop=8, gens=20. Half the population mutated from the current elite, half random; the top winners replace the bottom-fitness library slots. Auto-tournament pauses while hunting."
+          style="background:#238636;color:#fff;border:0;">🧬 Hunt</button>
+  <button id="stratum-refine-btn"
+          title="Warm-start hunt: same pop/gens as Hunt, but the whole population is mutated from the current elite. Use this to iteratively sharpen the rule you already have."
+          style="background:#1f6feb;color:#fff;border:0;">🎯 Refine</button>
   <button id="pause-btn" title="Pause both inner CAs and the meta-CA + tournament timers.">Pause</button>
   <button id="reset-lib-btn" title="Throw out the entire library and re-roll 64 fresh random K=64 genomes (with palettes + grids).">Reset Library</button>
   <button id="reseed-meta-btn" title="Re-randomise the meta-CA grid states without disturbing the library.">Reseed Meta</button>
-  <span style="color:#8b949e;font-size:0.8rem;margin-left:1rem;">
+  <span id="stratum-hunt-status" style="color:#8b949e;font-size:0.8rem;margin-left:1rem;"></span>
+</div>
+
+<div class="tft-controls" style="margin-top:0.4rem;">
+  <span style="color:#8b949e;font-size:0.8rem;">
     elite #<span id="stratum-elite-idx" style="color:#d4a72c;font-family:ui-monospace,monospace;">0</span> ·
     fit <span id="stratum-elite-fit" style="color:#7ee787;font-family:ui-monospace,monospace;">0.000</span>
     (r=<span id="stratum-elite-r" style="color:#7ee787;font-family:ui-monospace,monospace;">0.000</span>) ·
