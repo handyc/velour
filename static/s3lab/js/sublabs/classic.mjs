@@ -10,7 +10,7 @@ import {
     ansi256_to_css, ansi256_to_rgb,
     encode_tail, decode_tail,
     random_genome, identity_genome, invent_palette,
-} from './engine.mjs';
+} from '../engine.mjs';
 
 // ── State ─────────────────────────────────────────────────────────────
 
@@ -512,7 +512,7 @@ function startHunt({ warmStart = false, reason = '' } = {}) {
                : `${labelPrefix} — starting…`;
 
     huntWorker = new Worker(
-        new URL('./worker.mjs', import.meta.url),
+        new URL('../worker.mjs', import.meta.url),
         { type: 'module' }
     );
     huntWorker.onmessage = (e) => {
