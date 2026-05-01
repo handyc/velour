@@ -402,17 +402,50 @@ function startHunt({ warmStart = false, reason = '' } = {}) {
     };
 
     // Send the live tile as the warm-start seed for refine mode.
+    // User-tunable knobs from the Hunt control row are read at
+    // launch time, so changes apply to the next hunt without a
+    // page reload. We don't double-bump the warm-start mutation rate
+    // the way Classic does — the user already controls this directly.
+    const hp = readHuntParams();
     huntWorker.postMessage({
         type:      'run_hunt',
         prng_seed: (Math.random() * 0xffffffff) >>> 0,
         grid_seed: (Math.random() * 0xffffffff) >>> 0,
         seedGenome:          warmStart ? live.genome.buffer.slice(0)  : null,
         seedPalette:         warmStart ? live.palette.buffer.slice(0) : null,
-        initialMutationRate: warmStart ? 0.10 : 0.05,
-        maxAttempts:         4,
+        initialMutationRate: hp.mut,
+        popSize:             hp.pop,
+        gens:                hp.gens,
+        maxAttempts:         hp.attempts,
         activityFloor:       0.05,
         activityCeil:        0.50,
     });
+}
+
+// Read the four hunt-tuning inputs and clamp to safe ranges. Called
+// at hunt-launch time so changes take effect on the very next run.
+function readHuntParams() {
+    const num = (id, dflt, min, max) => {
+        const el = document.getElementById(id);
+        const v = el ? parseFloat(el.value) : dflt;
+        if (!Number.isFinite(v)) return dflt;
+        return Math.min(max, Math.max(min, v));
+    };
+    return {
+        pop:      num('hunt-pop',      30,   4, 128) | 0,
+        gens:     num('hunt-gens',     40,   5, 300) | 0,
+        mut:      num('hunt-mut',      0.05, 0, 0.5),
+        attempts: num('hunt-attempts', 4,    1, 10)  | 0,
+    };
+}
+
+function paintHuntCost() {
+    const el = document.getElementById('hunt-cost');
+    if (!el) return;
+    const p = readHuntParams();
+    // pop * gens * attempts is the rough fitness-evaluation budget;
+    // each eval is ~1.2ms at 16x16/4 colour, so total is ~ms × that.
+    el.textContent = (p.pop * p.gens * p.attempts).toLocaleString();
 }
 
 // ── Wire-up ──────────────────────────────────────────────────────────
@@ -479,6 +512,14 @@ function init() {
             }
         };
     }
+    // Hunt-tuning inputs — repaint the live cost estimate as the
+    // user adjusts. No need to actually save state; readHuntParams
+    // re-reads the DOM at launch time.
+    ['hunt-pop', 'hunt-gens', 'hunt-mut', 'hunt-attempts'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', paintHuntCost);
+    });
+    paintHuntCost();
     document.getElementById('seed-btn').onclick = () => {
         const live = liveFrame();
         seed_grid(live.gridA, (Math.random() * 0xffffffff) >>> 0);

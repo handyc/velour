@@ -60,10 +60,12 @@ export function verify_winner(genome, baseSeed) {
 
 // ── GA helpers ────────────────────────────────────────────────────────
 
-function sort_pop(pool, pals, fit) {
+function sort_pop(pool, pals, fit, n) {
+    // n = effective population length (so callers can pass a buffer
+    // sized for max-pop and process only the prefix they're using).
     const tmpG = new Uint8Array(GBYTES);
     const tmpP = new Uint8Array(PAL_BYTES);
-    for (let i = 1; i < POP; i++) {
+    for (let i = 1; i < n; i++) {
         const fv = fit[i];
         tmpG.set(pool[i]);
         tmpP.set(pals[i]);
@@ -93,13 +95,19 @@ function run_one_hunt({
     prng_seed, grid_seed,
     seedGenome, seedPalette,
     initialMutationRate,
+    popSize, gens,
     onProgress,
 }) {
+    // Per-call population + generations override the engine.mjs
+    // defaults. Caller passes whatever the UI selected; we default to
+    // POP/GENS so existing callers (Classic) keep their behaviour.
+    const N = (popSize | 0) || POP;
+    const G = (gens    | 0) || GENS;
     seed_prng(prng_seed);
 
-    const pool = Array.from({ length: POP }, () => new Uint8Array(GBYTES));
-    const pals = Array.from({ length: POP }, () => new Uint8Array(PAL_BYTES));
-    const fit  = new Float64Array(POP);
+    const pool = Array.from({ length: N }, () => new Uint8Array(GBYTES));
+    const pals = Array.from({ length: N }, () => new Uint8Array(PAL_BYTES));
+    const fit  = new Float64Array(N);
     const tmpG = new Uint8Array(GBYTES);
 
     const sG = seedGenome  || identity_genome();
@@ -107,42 +115,43 @@ function run_one_hunt({
 
     pool[0].set(sG);
     pals[0].set(sP);
-    for (let i = 1; i < POP; i++) {
+    for (let i = 1; i < N; i++) {
         mutate(pool[i], sG, initialMutationRate);
         pals[i].set(sP);
     }
 
     const t0 = performance.now();
 
-    for (let gen = 0; gen < GENS; gen++) {
-        for (let i = 0; i < POP; i++) {
+    for (let gen = 0; gen < G; gen++) {
+        for (let i = 0; i < N; i++) {
             const r = fitness(pool[i], grid_seed);
             fit[i] = r.score;
         }
-        sort_pop(pool, pals, fit);
+        sort_pop(pool, pals, fit, N);
 
         const r0 = fitness(pool[0], grid_seed);
         let sum = 0;
-        for (let i = 0; i < POP; i++) sum += fit[i];
+        for (let i = 0; i < N; i++) sum += fit[i];
 
         if (onProgress) {
-            onProgress(gen + 1, GENS, fit[0], sum / POP, r0.tail, pals[0]);
+            onProgress(gen + 1, G, fit[0], sum / N, r0.tail, pals[0]);
         }
 
-        for (let i = (POP / 2) | 0; i < POP; i++) {
-            const pa = prng() % ((POP / 2) | 0);
-            const pb = prng() % ((POP / 2) | 0);
+        const half = (N / 2) | 0;
+        for (let i = half; i < N; i++) {
+            const pa = prng() % Math.max(1, half);
+            const pb = prng() % Math.max(1, half);
             cross(tmpG, pool[pa], pool[pb]);
             mutate(pool[i], tmpG, 0.005);
             palette_inherit(pals[i], pals[pa], pals[pb]);
         }
     }
 
-    for (let i = 0; i < POP; i++) {
+    for (let i = 0; i < N; i++) {
         const r = fitness(pool[i], grid_seed);
         fit[i] = r.score;
     }
-    sort_pop(pool, pals, fit);
+    sort_pop(pool, pals, fit, N);
 
     return {
         genome:     pool[0].slice(),
@@ -166,6 +175,8 @@ export function run_hunt({
     seedGenome = null,
     seedPalette = null,
     initialMutationRate = 0.05,
+    popSize = POP,
+    gens    = GENS,
     maxAttempts = 4,
     activityFloor = 0.03,
     activityCeil  = 0.50,
@@ -181,6 +192,7 @@ export function run_hunt({
             grid_seed,
             seedGenome, seedPalette,
             initialMutationRate,
+            popSize, gens,
             onProgress,
         });
 

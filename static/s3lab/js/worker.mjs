@@ -15,6 +15,8 @@ self.onmessage = (event) => {
         grid_seed:           m.grid_seed,
         seedGenome, seedPalette,
         initialMutationRate: m.initialMutationRate,
+        popSize:             m.popSize,    // omit / undefined = use engine.mjs POP default
+        gens:                m.gens,       // omit / undefined = use engine.mjs GENS default
         maxAttempts:         m.maxAttempts,
         activityFloor:       m.activityFloor,
         activityCeil:        m.activityCeil,
