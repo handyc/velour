@@ -26,7 +26,12 @@ const N_FRAMES        = 8;        // total strip slots (including live)
 const TILE_PX         = 96;       // pixel side of one CA tile
 const TILE_GAP        = 8;        // gap between tiles
 const CAPTION_PX      = 24;       // strip below the tile for badges
-const CELL_PX         = TILE_PX / GRID_W;   // 6 px per cell at 16x16
+// Pointy-top hex rendering: odd rows are shifted +CELL_PX/2 on x, so
+// the rightmost cell of an odd row would overshoot a TILE_PX/GRID_W
+// cell width. Divide by GRID_W + 0.5 instead so the offset row's
+// right edge lands exactly at TILE_PX. Same trick s3lab's TFT
+// renderer uses (drawCell in classic.mjs).
+const CELL_PX         = TILE_PX / (GRID_W + 0.5);
 
 // Stall-detection thresholds — same as Classic.
 const ACT_FLOOR_RUN        = 0.05;
@@ -59,9 +64,17 @@ const state = {
     running: true,
     tick: 0,
     runHistory: false,
-    autoRefine: true,
+    autoRefine: true,             // stall-triggered refine
     hunting: false,
     huntKind: '',                 // 'fresh' | 'refine'
+
+    // Periodic-refine timer — independent of stall detection. When
+    // enabled, fires a refine every `timerRefineSec` seconds (skipped
+    // if a hunt is already running so we don't queue refines on
+    // refines).
+    timerRefine:    false,
+    timerRefineSec: 1,
+    timerHandle:    null,
 
     // live-only activity tracking (mirrors Classic)
     activityHistory: [],
@@ -190,11 +203,16 @@ function paintTile(ctx, f, x, y) {
         ansi256_to_css(f.palette[2]),
         ansi256_to_css(f.palette[3]),
     ];
+    // Pointy-top hex layout: odd rows shifted +CELL_PX/2 on x. The
+    // resulting tile has the jagged left/right edge that makes the
+    // hexagonal cell relationships visible. Engine math is hex on
+    // both axes; without the offset, the visualisation hides it.
     for (let cy = 0; cy < GRID_H; cy++) {
+        const xOff = (cy & 1) ? CELL_PX * 0.5 : 0;
         for (let cx = 0; cx < GRID_W; cx++) {
             const v = f.gridA[cy * GRID_W + cx];
             ctx.fillStyle = css[v & 3];
-            ctx.fillRect(x + cx * CELL_PX, y + cy * CELL_PX,
+            ctx.fillRect(x + cx * CELL_PX + xOff, y + cy * CELL_PX,
                          CELL_PX, CELL_PX);
         }
     }
@@ -410,6 +428,26 @@ function stopTimer() {
     if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
 }
 
+// Periodic refine timer — independent of the live runner's tick.
+// Fires a refine every `state.timerRefineSec` seconds when enabled.
+// Skips fires while a hunt is already running so we don't queue
+// refines on top of refines.
+function startTimerRefine() {
+    stopTimerRefine();
+    if (!state.timerRefine) return;
+    const ms = Math.max(100, state.timerRefineSec * 1000);
+    state.timerHandle = setInterval(() => {
+        if (state.hunting) return;
+        startHunt({ warmStart: true, reason: 'timer' });
+    }, ms);
+}
+function stopTimerRefine() {
+    if (state.timerHandle) {
+        clearInterval(state.timerHandle);
+        state.timerHandle = null;
+    }
+}
+
 function init() {
     bootstrap();
     paintStrip();
@@ -424,6 +462,23 @@ function init() {
     document.getElementById('run-history-cb').onchange = (e) => {
         state.runHistory = e.target.checked;
     };
+    const timerCb  = document.getElementById('timer-refine-cb');
+    const timerVal = document.getElementById('timer-refine-sec');
+    if (timerCb) {
+        timerCb.onchange = (e) => {
+            state.timerRefine = e.target.checked;
+            if (state.timerRefine) startTimerRefine(); else stopTimerRefine();
+        };
+    }
+    if (timerVal) {
+        timerVal.oninput = (e) => {
+            const v = parseFloat(e.target.value);
+            if (Number.isFinite(v) && v > 0) {
+                state.timerRefineSec = v;
+                if (state.timerRefine) startTimerRefine();
+            }
+        };
+    }
     document.getElementById('seed-btn').onclick = () => {
         const live = liveFrame();
         seed_grid(live.gridA, (Math.random() * 0xffffffff) >>> 0);
@@ -433,6 +488,13 @@ function init() {
         state.gridHashes = [];
         state.staticDwellTicks = 0;
         state.periodicDwell = 0;
+        paintStrip();
+    };
+    document.getElementById('palette-btn').onclick = () => {
+        // Reseed the engine PRNG before invent_palette so successive
+        // clicks actually pick different colours.
+        seed_prng((Math.random() * 0xffffffff) >>> 0);
+        liveFrame().palette = invent_palette();
         paintStrip();
     };
     document.getElementById('pause-btn').onclick = () => {
