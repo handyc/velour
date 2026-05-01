@@ -322,6 +322,12 @@ class HuntRun(models.Model):
     )
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    last_heartbeat_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Updated by the runner thread on every progress callback. '
+                  'If a row is status=running but stale, the process likely '
+                  'died (e.g. runserver auto-reload).',
+    )
     top_rule = models.ForeignKey(
         HuntRule, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+',
@@ -395,6 +401,12 @@ class RuleFilterScan(models.Model):
         help_text="Default 'done' so historical rows remain valid.",
     )
     notes = models.TextField(blank=True)
+    last_heartbeat_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Updated by the runner thread on every progress callback. '
+                  'If a row is status=running but stale, the process likely '
+                  'died (e.g. runserver auto-reload).',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

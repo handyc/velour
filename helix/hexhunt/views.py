@@ -43,6 +43,10 @@ def run_detail(request, slug):
     run = get_object_or_404(
         HuntRun.objects.select_related('corpus', 'top_rule'), slug=slug,
     )
+    # Catch orphaned runners (e.g. process restarted mid-tournament)
+    # before rendering, so a fresh page load doesn't show an
+    # eternally-spinning "running" status.
+    _maybe_mark_orphan(run, 'run')
     # Reattach scoreboard rule slugs to HuntRule rows for linking.
     rule_map = {
         r.slug: r
@@ -206,6 +210,7 @@ def scan_detail(request, slug):
     scan = get_object_or_404(
         RuleFilterScan.objects.select_related('rule', 'record'), slug=slug,
     )
+    _maybe_mark_orphan(scan, 'scan')
     track = scan.track_json or []
     hist = _track_histogram(track, _HIST_BINS, scan.score_min, scan.score_max)
     top_windows = sorted(track, key=lambda r: -r[2])[:25]
@@ -339,18 +344,24 @@ def _scan_runner_thread(scan_pk: int, rule_pk: int, record_pk: int,
     from .scan import scan_record
 
     try:
+        from django.utils import timezone as djtz
         scan = RuleFilterScan.objects.get(pk=scan_pk)
+        scan.last_heartbeat_at = djtz.now()
+        scan.save(update_fields=['last_heartbeat_at'])
         rule = HuntRule.objects.get(pk=rule_pk)
         record = SequenceRecord.objects.get(pk=record_pk)
         rule_table = engine.unpack_rule(rule.packed())
 
-        # Update n_windows on every progress callback. progress_every
-        # is computed so we get ~30 updates over the span of the scan.
+        # Update n_windows + heartbeat on every progress callback.
+        # progress_every is computed so we get ~30 updates over the
+        # span of the scan; the heartbeat must beat well within the
+        # stale threshold (_ORPHAN_THRESHOLD_SECONDS) at the slowest.
         progress_every = max(20, scan.total_windows // 30 or 20)
 
         def progress(i, n):
             scan.n_windows = i + 1
-            scan.save(update_fields=['n_windows'])
+            scan.last_heartbeat_at = djtz.now()
+            scan.save(update_fields=['n_windows', 'last_heartbeat_at'])
 
         result = scan_record(
             record, rule_table,
@@ -447,16 +458,18 @@ def launch_scan(request, slug):
 def scan_progress_json(request, slug):
     """Polled by scan_detail while status='running'."""
     scan = get_object_or_404(RuleFilterScan, slug=slug)
+    _maybe_mark_orphan(scan, 'scan')
     return JsonResponse({
-        'slug':           scan.slug,
-        'status':         scan.status,
-        'windows_done':   int(scan.n_windows),
-        'windows_total':  int(scan.total_windows or scan.n_windows),
-        'score_min':      scan.score_min,
-        'score_max':      scan.score_max,
-        'score_mean':     scan.score_mean,
-        'notes':          scan.notes or '',
-        'created_at':     scan.created_at.isoformat() if scan.created_at else None,
+        'slug':              scan.slug,
+        'status':            scan.status,
+        'windows_done':      int(scan.n_windows),
+        'windows_total':     int(scan.total_windows or scan.n_windows),
+        'score_min':         scan.score_min,
+        'score_max':         scan.score_max,
+        'score_mean':        scan.score_mean,
+        'notes':             scan.notes or '',
+        'created_at':        scan.created_at.isoformat()        if scan.created_at        else None,
+        'last_heartbeat_at': scan.last_heartbeat_at.isoformat() if scan.last_heartbeat_at else None,
     })
 
 
@@ -484,15 +497,19 @@ def _runner_thread(run_pk: int, corpus_pk: int, params, keep_top: int) -> None:
 
     try:
         run    = HuntRun.objects.get(pk=run_pk)
+        run.last_heartbeat_at = djtz.now()
+        run.save(update_fields=['last_heartbeat_at'])
         corpus = HuntCorpus.objects.get(pk=corpus_pk)
         corpus_windows = list(
             corpus.windows.select_related('record').order_by('idx')
         )
         seqs = [w.sequence() for w in corpus_windows]
 
-        # Per-gen progress: append to the log + save with update_fields
-        # so other queries see fresh state. Single writer (this thread),
-        # so no locking needed.
+        # Per-gen progress: append to the log + bump the heartbeat. The
+        # heartbeat is what protects us from runserver auto-reload (or
+        # any other process death) — if it goes stale the progress
+        # endpoint will mark the row failed instead of leaving it
+        # forever in 'running'.
         gen_log: list = []
         def progress(g):
             gen_log.append({
@@ -500,7 +517,8 @@ def _runner_thread(run_pk: int, corpus_pk: int, params, keep_top: int) -> None:
                 'elapsed_s': g.elapsed_s,
             })
             run.generation_log_json = list(gen_log)
-            run.save(update_fields=['generation_log_json'])
+            run.last_heartbeat_at = djtz.now()
+            run.save(update_fields=['generation_log_json', 'last_heartbeat_at'])
 
         result = run_tournament(seqs, params, on_generation=progress)
 
@@ -650,21 +668,59 @@ def launch_run(request):
     return redirect('helix:hexhunt:run_detail', slug=run.slug)
 
 
+# If a status='running' row hasn't beaten the heartbeat in this many
+# seconds, the runner thread is presumed dead (most likely the
+# runserver process auto-reloaded on a code change). The progress
+# endpoint flips the row to 'failed' on first observation so the UI
+# can stop polling and show a useful error instead of spinning forever.
+_ORPHAN_THRESHOLD_SECONDS = 120
+
+
+def _maybe_mark_orphan(row, kind: str) -> bool:
+    """If `row` is status='running' but its heartbeat is stale, mark
+    it failed in place and return True. Caller should re-read row
+    fields after this returns True."""
+    from django.utils import timezone as djtz
+    from datetime import timedelta
+    if row.status != 'running':
+        return False
+    last = row.last_heartbeat_at or row.started_at or row.created_at
+    if not last:
+        return False
+    if djtz.now() - last < timedelta(seconds=_ORPHAN_THRESHOLD_SECONDS):
+        return False
+    row.status = 'failed'
+    row.notes = (row.notes + '\n' if row.notes else '') + (
+        f'Marked failed by orphan check: no heartbeat in '
+        f'{_ORPHAN_THRESHOLD_SECONDS}s. The runner thread likely died '
+        f'(e.g. runserver auto-reload). Re-launch the {kind} to retry.'
+    )
+    if hasattr(row, 'finished_at') and row.finished_at is None:
+        row.finished_at = djtz.now()
+    update_fields = ['status', 'notes']
+    if hasattr(row, 'finished_at'):
+        update_fields.append('finished_at')
+    row.save(update_fields=update_fields)
+    return True
+
+
 @login_required
 @require_GET
 def run_progress_json(request, slug):
     """Polled by the run_detail page while status='running'."""
     run = get_object_or_404(HuntRun, slug=slug)
+    _maybe_mark_orphan(run, 'run')
     log = run.generation_log_json or []
     params = run.params_json or {}
     return JsonResponse({
-        'slug':         run.slug,
-        'status':       run.status,
-        'gens_done':    len(log),
-        'gens_total':   int(params.get('generations', 0) or 0),
-        'log':          log,
-        'scoreboard':   run.scoreboard_json or [],
-        'notes':        run.notes or '',
-        'started_at':   run.started_at.isoformat()  if run.started_at  else None,
-        'finished_at':  run.finished_at.isoformat() if run.finished_at else None,
+        'slug':              run.slug,
+        'status':            run.status,
+        'gens_done':         len(log),
+        'gens_total':        int(params.get('generations', 0) or 0),
+        'log':               log,
+        'scoreboard':        run.scoreboard_json or [],
+        'notes':             run.notes or '',
+        'started_at':        run.started_at.isoformat()        if run.started_at        else None,
+        'finished_at':       run.finished_at.isoformat()       if run.finished_at       else None,
+        'last_heartbeat_at': run.last_heartbeat_at.isoformat() if run.last_heartbeat_at else None,
     })
