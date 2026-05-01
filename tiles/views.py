@@ -2,7 +2,9 @@ import json
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from .models import Tile, TileSet
@@ -506,6 +508,114 @@ def _persist_packed_as_ruleset(packed, name, palette, source_metadata):
     return rs
 
 
+def _speciate_parse(request, tiles_qs):
+    """Parse + validate the speciate POST. Returns (params, error_msg)
+    where params is a dict on success and error_msg is set on failure."""
+    from automaton.models import RuleSet as _RS
+    seed_pk_raw = request.POST.get('seed_pk', '').strip()
+    try:
+        seed_pk = int(seed_pk_raw)
+        seed = _RS.objects.get(pk=seed_pk, n_colors=4)
+    except (ValueError, _RS.DoesNotExist):
+        return None, 'Pick a valid K=4 seed RuleSet.'
+
+    try:
+        count = int(request.POST.get('count', len(tiles_qs)))
+    except ValueError:
+        count = len(tiles_qs)
+    count = max(1, min(SPECIATE_MAX_COUNT, count))
+
+    try:
+        rate = float(request.POST.get('rate', SPECIATE_DEFAULT_RATE))
+    except ValueError:
+        rate = SPECIATE_DEFAULT_RATE
+    rate = max(0.0, min(1.0, rate))
+
+    try:
+        rng_seed = int(request.POST.get('rng_seed', 0))
+    except ValueError:
+        rng_seed = 0
+
+    return {
+        'seed':           seed,
+        'count':          count,
+        'rate':           rate,
+        'rng_seed':       rng_seed,
+        'replace':        request.POST.get('replace_existing') == '1',
+        'bind_to_tiles':  request.POST.get('bind_to_tiles', '1') == '1',
+    }, None
+
+
+def _speciate_steps(params, tiles_qs):
+    """Run the speciation as a generator that yields progress events.
+
+    Each yielded value is a dict that the caller serialises (the
+    streaming view writes them as newline-delimited JSON; the
+    redirect-style view just consumes them silently). Events:
+      * {'phase': 'mutate', 'i': k, 'n': N, 'name': '...'}  per child
+      * {'phase': 'bind',   'i': k, 'n': M}                  per binding
+      * {'phase': 'done',   'count': N, 'bound': M, 'summary': '...'}
+    """
+    from automaton.models import RuleSet as _RS
+    seed = params['seed']
+    count = params['count']
+    rate = params['rate']
+    rng_seed = params['rng_seed']
+    replace = params['replace']
+    bind_to_tiles = params['bind_to_tiles']
+
+    rng = _rng.Random(rng_seed)
+    seed_packed = _ruleset_to_packed(seed)
+    seed_palette = list(seed.palette) if seed.palette else []
+
+    new_rulesets = []
+    for i in range(count):
+        child = seed_packed.mutate(rate=rate, rng=rng)
+        child_name = f'{seed.name} spec-{i+1:03d}'
+        while _RS.objects.filter(name=child_name).exists():
+            child_name = f'{seed.name} spec-{i+1:03d}-{_rng.Random().randrange(1000):03d}'
+        rs = _persist_packed_as_ruleset(
+            packed=child,
+            name=child_name,
+            palette=seed_palette,
+            source_metadata={
+                'origin':         'speciation',
+                'parent_pk':      seed.pk,
+                'parent_slug':    seed.slug,
+                'parent_name':    seed.name,
+                'mutation_rate':  rate,
+                'spec_index':     i + 1,
+                'rng_seed':       rng_seed,
+                'description':    f'Speciated from {seed.name} '
+                                  f'(rate={rate}, index {i+1}/{count}).',
+            },
+        )
+        new_rulesets.append(rs)
+        yield {'phase': 'mutate', 'i': i + 1, 'n': count, 'name': child_name}
+
+    n_bound = 0
+    if bind_to_tiles and tiles_qs:
+        bind_total = min(len(tiles_qs), len(new_rulesets))
+        for i, tile in enumerate(tiles_qs):
+            if i >= len(new_rulesets):
+                break
+            if not replace and tile.ca_ruleset_id is not None:
+                continue
+            tile.ca_ruleset = new_rulesets[i]
+            tile.save(update_fields=['ca_ruleset'])
+            n_bound += 1
+            yield {'phase': 'bind', 'i': i + 1, 'n': bind_total}
+
+    if bind_to_tiles and tiles_qs:
+        summary = (f'Speciated {len(new_rulesets)} variants from '
+                   f'"{seed.name}" (rate={rate}); bound {n_bound} to tiles.')
+    else:
+        summary = (f'Speciated {len(new_rulesets)} variants from '
+                   f'"{seed.name}" (rate={rate}). Not bound to tiles.')
+    yield {'phase': 'done', 'count': len(new_rulesets),
+           'bound': n_bound, 'summary': summary}
+
+
 @login_required
 def tile_speciate(request, slug):
     """Bulk-speciate a seed RuleSet into N variants and bind them
@@ -518,6 +628,11 @@ def tile_speciate(request, slug):
     population of cousins one mutation step away from a single
     ancestor, which is exactly what you want filling a Wang lattice
     so neighbouring tiles look related but not identical.
+
+    POST with ``stream=1`` returns a streaming text/plain body of
+    newline-delimited JSON progress events; the speciate template
+    drives a live progress bar from those. Without ``stream=1`` the
+    classic redirect-with-flash-message flow runs.
     """
     tileset = get_object_or_404(TileSet, slug=slug)
     tiles_qs = list(tileset.tiles.all())
@@ -526,85 +641,50 @@ def tile_speciate(request, slug):
     rulesets = list(_RS.objects.filter(n_colors=4).order_by('-created_at'))
 
     if request.method == 'POST':
-        seed_pk_raw = request.POST.get('seed_pk', '').strip()
-        try:
-            seed_pk = int(seed_pk_raw)
-            seed = _RS.objects.get(pk=seed_pk, n_colors=4)
-        except (ValueError, _RS.DoesNotExist):
-            messages.error(request, 'Pick a valid K=4 seed RuleSet.')
+        params, err = _speciate_parse(request, tiles_qs)
+        if err is not None:
+            if request.POST.get('stream') == '1':
+                payload = json.dumps({'phase': 'error', 'message': err}) + '\n'
+                return StreamingHttpResponse(
+                    iter([payload]), content_type='text/plain; charset=utf-8')
+            messages.error(request, err)
             return redirect('tiles:speciate', slug=tileset.slug)
 
-        try:
-            count = int(request.POST.get('count', len(tiles_qs)))
-        except ValueError:
-            count = len(tiles_qs)
-        count = max(1, min(SPECIATE_MAX_COUNT, count))
+        if request.POST.get('stream') == '1':
+            redirect_url = reverse('tiles:bindings', args=[tileset.slug])
 
-        try:
-            rate = float(request.POST.get('rate', SPECIATE_DEFAULT_RATE))
-        except ValueError:
-            rate = SPECIATE_DEFAULT_RATE
-        rate = max(0.0, min(1.0, rate))
+            def _stream():
+                # Force an early flush so the browser sees the
+                # progress UI immediately, before the first real
+                # event lands.
+                yield json.dumps({'phase': 'start',
+                                  'count': params['count']}) + '\n'
+                summary = ''
+                for ev in _speciate_steps(params, tiles_qs):
+                    if ev.get('phase') == 'done':
+                        summary = ev.get('summary', '')
+                        ev = dict(ev, redirect=redirect_url)
+                    yield json.dumps(ev) + '\n'
+                # The streaming response sidesteps Django's flash
+                # messages framework (the client navigates manually
+                # after reading the stream), so the summary lands as
+                # a one-shot message in the next page render.
+                if summary:
+                    messages.success(request, summary)
 
-        try:
-            rng_seed = int(request.POST.get('rng_seed', 0))
-        except ValueError:
-            rng_seed = 0
+            resp = StreamingHttpResponse(
+                _stream(), content_type='text/plain; charset=utf-8')
+            resp['Cache-Control'] = 'no-store'
+            resp['X-Accel-Buffering'] = 'no'
+            return resp
 
-        replace = request.POST.get('replace_existing') == '1'
-        bind_to_tiles = request.POST.get('bind_to_tiles', '1') == '1'
-
-        rng = _rng.Random(rng_seed)
-        seed_packed = _ruleset_to_packed(seed)
-        seed_palette = list(seed.palette) if seed.palette else []
-
-        new_rulesets = []
-        for i in range(count):
-            child = seed_packed.mutate(rate=rate, rng=rng)
-            child_name = f'{seed.name} spec-{i+1:03d}'
-            # Defend against a collision (e.g. if the user re-runs).
-            while _RS.objects.filter(name=child_name).exists():
-                child_name = f'{seed.name} spec-{i+1:03d}-{_rng.Random().randrange(1000):03d}'
-            rs = _persist_packed_as_ruleset(
-                packed=child,
-                name=child_name,
-                palette=seed_palette,
-                source_metadata={
-                    'origin':         'speciation',
-                    'parent_pk':      seed.pk,
-                    'parent_slug':    seed.slug,
-                    'parent_name':    seed.name,
-                    'mutation_rate':  rate,
-                    'spec_index':     i + 1,
-                    'rng_seed':       rng_seed,
-                    'description':    f'Speciated from {seed.name} '
-                                      f'(rate={rate}, index {i+1}/{count}).',
-                },
-            )
-            new_rulesets.append(rs)
-
-        if bind_to_tiles and tiles_qs:
-            n_bound = 0
-            for i, tile in enumerate(tiles_qs):
-                if i >= len(new_rulesets):
-                    break
-                if not replace and tile.ca_ruleset_id is not None:
-                    continue
-                tile.ca_ruleset = new_rulesets[i]
-                tile.save(update_fields=['ca_ruleset'])
-                n_bound += 1
-            messages.success(
-                request,
-                f'Speciated {len(new_rulesets)} variants from "{seed.name}" '
-                f'(rate={rate}); bound {n_bound} to tiles.',
-            )
-        else:
-            messages.success(
-                request,
-                f'Speciated {len(new_rulesets)} variants from "{seed.name}" '
-                f'(rate={rate}). Not bound to tiles.',
-            )
-
+        # Non-streaming fallback: drive the same generator silently.
+        summary = ''
+        for ev in _speciate_steps(params, tiles_qs):
+            if ev.get('phase') == 'done':
+                summary = ev.get('summary', '')
+        if summary:
+            messages.success(request, summary)
         return redirect('tiles:bindings', slug=tileset.slug)
 
     return render(request, 'tiles/speciate.html', {

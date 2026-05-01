@@ -56,11 +56,17 @@
   <button type="submit" style="background:#1f6feb;color:#fff;border:0;padding:0.4rem 0.9rem;cursor:pointer;">Apply</button>
 </form>
 
-<div style="display:flex;gap:0.5rem;align-items:center;margin:0.5rem 0;">
+<div style="display:flex;gap:0.5rem;align-items:center;margin:0.5rem 0;flex-wrap:wrap;">
   <button id="play-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.8rem;cursor:pointer;">▶ Play</button>
   <button id="step-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.8rem;cursor:pointer;">Step</button>
   <button id="reset-btn" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.8rem;cursor:pointer;">Reset</button>
-  <span id="tick-out" style="color:#8b949e;font-family:ui-monospace,monospace;margin-left:1rem;">tick 0</span>
+  <label style="color:#8b949e;font-size:0.8rem;display:flex;align-items:center;gap:0.3rem;margin-left:0.5rem;">
+    speed
+    <input id="speed-range" type="range" min="1" max="60" step="1" value="10" style="width:7rem;">
+    <span id="speed-out" style="font-family:ui-monospace,monospace;color:#c9d1d9;min-width:5ch;">10/s</span>
+  </label>
+  <span id="tick-out" style="color:#8b949e;font-family:ui-monospace,monospace;margin-left:0.6rem;">tick 0</span>
+  <span id="rate-out" style="color:#6e7681;font-family:ui-monospace,monospace;font-size:0.8rem;"></span>
   <span style="color:#8b949e;font-size:0.85rem;">layout {{ w }}×{{ h }} tiles · {{ tile_grid_w }}×{{ tile_grid_h }} cells/tile · coupling = <span style="color:#f0883e;">{{ coupling }}</span></span>
 </div>
 
@@ -187,37 +193,25 @@
   // are flat-top hex on offset columns. Neighbour order is N, NE, SE,
   // S, SW, NW, matching the rule index layout.
   const W6 = 4 ** 6;
-  function neighbourCoords(x, y) {
-    const even = (x & 1) === 0;
-    return [
-      [x,   y - 1],                 // N
-      [x+1, even ? y - 1 : y],      // NE
-      [x+1, even ? y     : y + 1],  // SE
-      [x,   y + 1],                 // S
-      [x-1, even ? y     : y + 1],  // SW
-      [x-1, even ? y - 1 : y],      // NW
-    ];
-  }
-  // Read a cell at (x,y) of tile (R,C). If out of tile bounds, find
-  // the relevant neighbouring outer tile and read its matching cell —
-  // hex tilesets have six neighbours per outer tile (column-offset
-  // convention matching the inner CA's neighbour order); square
-  // tilesets have four. When ``coupling`` is decoupled, every
-  // out-of-bounds read returns colour 0 instead.
+  const W5 = 4 ** 5;   // 1024
+  const W4 = 4 ** 4;   // 256
+  const W3 = 4 ** 3;   // 64
+  const W2 = 4 ** 2;   // 16
+  const W1 = 4;
+  // Walk to the neighbouring outer tile. dx, dy ∈ {-1,0,+1}.
   function neighbourOuter(R, C, dx, dy) {
-    // dx, dy are in {-1, 0, +1}. Return the (R, C) of the adjacent
-    // outer tile. For hex outer lattice, diagonal moves get the
-    // column-offset shift; for square it's a plain grid step.
     if (!IS_HEX) return [R + dy, C + dx];
     if (dx === 0) return [R + dy, C];
-    // dx = ±1, hex column offset.
     const evenCol = (C & 1) === 0;
     let dr;
-    if (dy < 0)      dr = evenCol ? -1 :  0;     // upward diagonal
-    else if (dy > 0) dr = evenCol ?  0 : +1;     // downward diagonal
-    else             dr = 0;                     // dy === 0, no offset
+    if (dy < 0)      dr = evenCol ? -1 :  0;
+    else if (dy > 0) dr = evenCol ?  0 : +1;
+    else             dr = 0;
     return [R + dr, C + dx];
   }
+  // Slow-path single-cell read: out-of-tile-bounds either returns 0
+  // (decoupled) or hops to the matching cell in the neighbouring
+  // outer tile (coupled). Only called for boundary cells.
   function readCell(R, C, x, y) {
     let xi = x, yi = y, dx = 0, dy = 0;
     if (xi < 0)         { dx = -1; xi += TW; }
@@ -237,10 +231,15 @@
   }
   let tick = 0;
   function step() {
-    // Two-pass step so coupled neighbours see a consistent snapshot:
-    // build every tile's next-state from the frozen current generation,
-    // then commit them all at once. Decoupled mode produces the same
-    // result either way.
+    // Two-pass so coupled neighbours see a consistent snapshot: build
+    // every tile's next-state from the frozen current generation,
+    // commit at the end. Decoupled mode produces the same result.
+    //
+    // The hot path splits into an *interior* fast path (cells whose 6
+    // neighbours are all in-tile) and a *boundary* slow path. Interior
+    // cells skip every bounds check and the per-cell array allocation
+    // that the original code did via neighbourCoords — at TW=16 that's
+    // 196/256 cells (76%) on the fast path; at TW=32 it's 88%.
     const nextGrids = [];
     for (let r = 0; r < H; r++) {
       const row = [];
@@ -250,22 +249,55 @@
         const tid = layout[r][c];
         const payload = ruleCache[tid];
         if (!payload || !payload.rule) { row.push(tg); continue; }
+        const rule = payload.rule;
         const cur = tg;
         const nxt = new Uint8Array(TW * TH);
-        for (let y = 0; y < TH; y++) {
-          for (let x = 0; x < TW; x++) {
-            const self = cur[y * TW + x];
-            const nbs = neighbourCoords(x, y);
-            const idx = self * W6
-                      + readCell(r, c, nbs[0][0], nbs[0][1]) * (4**5)
-                      + readCell(r, c, nbs[1][0], nbs[1][1]) * (4**4)
-                      + readCell(r, c, nbs[2][0], nbs[2][1]) * (4**3)
-                      + readCell(r, c, nbs[3][0], nbs[3][1]) * (4**2)
-                      + readCell(r, c, nbs[4][0], nbs[4][1]) * 4
-                      + readCell(r, c, nbs[5][0], nbs[5][1]);
-            nxt[y * TW + x] = payload.rule[idx];
+
+        // ── Fast path: interior (1..TW-2, 1..TH-2) ─────────────────
+        for (let y = 1; y < TH - 1; y++) {
+          const yN = y - 1, yS = y + 1;
+          const rowBase  = y  * TW;
+          const rowAbove = yN * TW;
+          const rowBelow = yS * TW;
+          for (let x = 1; x < TW - 1; x++) {
+            const even = (x & 1) === 0;
+            // Even-column flat-top hex: NE/NW share the y-1 row, SE/SW
+            // share y. Odd column: NE/NW on y, SE/SW on y+1. Pick the
+            // right row offset once.
+            const rowEW = even ? rowAbove : rowBase;   // NE & NW row
+            const rowSE = even ? rowBase  : rowBelow;  // SE & SW row
+            const idx = cur[rowBase + x]   * W6   // self
+                      + cur[rowAbove + x]  * W5   // N
+                      + cur[rowEW + (x+1)] * W4   // NE
+                      + cur[rowSE + (x+1)] * W3   // SE
+                      + cur[rowBelow + x]  * W2   // S
+                      + cur[rowSE + (x-1)] * W1   // SW
+                      + cur[rowEW + (x-1)];       // NW
+            nxt[rowBase + x] = rule[idx];
           }
         }
+
+        // ── Slow path: boundary band (top/bottom row + left/right col)
+        function doCell(x, y) {
+          const self_c = cur[y * TW + x];
+          const even = (x & 1) === 0;
+          const yN  = y - 1, yS = y + 1;
+          const yNE = even ? y - 1 : y, ySE = even ? y     : y + 1;
+          const ySW = even ? y     : y + 1, yNW = even ? y - 1 : y;
+          const idx = self_c * W6
+                    + readCell(r, c, x,     yN ) * W5
+                    + readCell(r, c, x + 1, yNE) * W4
+                    + readCell(r, c, x + 1, ySE) * W3
+                    + readCell(r, c, x,     yS ) * W2
+                    + readCell(r, c, x - 1, ySW) * W1
+                    + readCell(r, c, x - 1, yNW);
+          nxt[y * TW + x] = rule[idx];
+        }
+        // Top + bottom rows (full width).
+        for (let x = 0; x < TW; x++) { doCell(x, 0); doCell(x, TH - 1); }
+        // Left + right columns (skip corners already done).
+        for (let y = 1; y < TH - 1; y++) { doCell(0, y); doCell(TW - 1, y); }
+
         row.push(nxt);
       }
       nextGrids.push(row);
@@ -347,18 +379,75 @@
   }
 
   // ── Controls ────────────────────────────────────────────────────
-  let timer = null;
+  // requestAnimationFrame loop with a target ticks-per-second budget.
+  // setInterval(step, 200) had two problems: (1) if step ever took
+  // longer than the interval the browser silently queued more, and
+  // (2) it wasn't synced to display refresh, so the user saw uneven
+  // updates. rAF is naturally backpressured — we only schedule the
+  // next frame when the previous one returned.
+  const speedRange = document.getElementById('speed-range');
+  const speedOut   = document.getElementById('speed-out');
+  const rateOut    = document.getElementById('rate-out');
+  let targetTps = parseFloat(speedRange.value) || 10;
+  speedOut.textContent = targetTps.toFixed(0) + '/s';
+  speedRange.addEventListener('input', () => {
+    targetTps = parseFloat(speedRange.value) || 10;
+    speedOut.textContent = targetTps.toFixed(0) + '/s';
+  });
+
+  let playing = false;
+  let rafId = null;
+  let lastStepAt = 0;
+  // Rolling average of measured ticks/sec, displayed as a "you're
+  // actually getting" readout next to the target rate. Useful at large
+  // grid sizes where the engine maxes out below the slider value.
+  const stepHistory = [];
+  function recordStep(now) {
+    stepHistory.push(now);
+    while (stepHistory.length > 20) stepHistory.shift();
+    if (stepHistory.length >= 2) {
+      const dt = (stepHistory[stepHistory.length - 1] - stepHistory[0]) / 1000;
+      const measured = (stepHistory.length - 1) / Math.max(dt, 0.001);
+      rateOut.textContent = '· measured ' + measured.toFixed(1) + '/s';
+    }
+  }
+
+  function frame(now) {
+    if (!playing) { rafId = null; return; }
+    const dueAfter = 1000 / targetTps;
+    if (now - lastStepAt >= dueAfter) {
+      step();
+      lastStepAt = now;
+      recordStep(now);
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+
   document.getElementById('play-btn').addEventListener('click', () => {
-    if (timer) {
-      clearInterval(timer); timer = null;
+    if (playing) {
+      playing = false;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      stepHistory.length = 0;
+      rateOut.textContent = '';
       document.getElementById('play-btn').textContent = '▶ Play';
     } else {
-      timer = setInterval(step, 200);
+      playing = true;
+      lastStepAt = performance.now() - 1000 / targetTps;  // step on first frame
+      rafId = requestAnimationFrame(frame);
       document.getElementById('play-btn').textContent = '⏸ Pause';
     }
   });
   document.getElementById('step-btn').addEventListener('click', step);
-  document.getElementById('reset-btn').addEventListener('click', reset);
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    if (playing) {
+      playing = false;
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      stepHistory.length = 0;
+      rateOut.textContent = '';
+      document.getElementById('play-btn').textContent = '▶ Play';
+    }
+    reset();
+  });
 
   reset();
 })();

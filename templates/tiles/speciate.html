@@ -83,11 +83,137 @@
     Replace existing CA bindings on tiles
   </label>
 
-  <button type="submit"
+  <button type="submit" id="speciate-submit"
           style="align-self:flex-start;background:#1f6feb;color:#fff;border:0;padding:0.5rem 1rem;cursor:pointer;font-size:0.95rem;">
     Speciate
   </button>
 </form>
+
+<div id="speciate-progress" style="display:none;margin-top:1.2rem;max-width:48rem;font-size:0.9rem;">
+  <div style="display:flex;align-items:center;gap:0.6rem;color:#c9d1d9;">
+    <span id="sp-pulse" style="font-family:ui-monospace,monospace;color:#7ee787;">◐</span>
+    <span id="sp-label">starting…</span>
+  </div>
+  <div style="margin-top:0.5rem;height:0.7rem;background:#0d1117;border:1px solid #30363d;border-radius:2px;overflow:hidden;">
+    <div id="sp-bar" style="height:100%;width:0%;background:#238636;transition:width 0.15s linear;"></div>
+  </div>
+  <div id="sp-detail" style="margin-top:0.4rem;color:#6e7681;font-family:ui-monospace,monospace;font-size:0.78rem;min-height:1.1em;"></div>
+</div>
+
+<script>
+(function(){
+  const form = document.querySelector('form[method="post"]');
+  if (!form) return;
+  const progress = document.getElementById('speciate-progress');
+  const pulseEl  = document.getElementById('sp-pulse');
+  const labelEl  = document.getElementById('sp-label');
+  const barEl    = document.getElementById('sp-bar');
+  const detailEl = document.getElementById('sp-detail');
+  const submitBtn = document.getElementById('speciate-submit');
+  const PULSE = ['◐', '◓', '◑', '◒'];
+  let pulseIdx = 0;
+  let pulseTimer = null;
+
+  function startPulse(){
+    if (pulseTimer) return;
+    pulseTimer = setInterval(() => {
+      pulseIdx = (pulseIdx + 1) % PULSE.length;
+      pulseEl.textContent = PULSE[pulseIdx];
+    }, 140);
+  }
+  function stopPulse(ch){
+    if (pulseTimer) { clearInterval(pulseTimer); pulseTimer = null; }
+    if (ch) pulseEl.textContent = ch;
+  }
+
+  form.addEventListener('submit', async function(ev){
+    // Streaming POST so the browser stays responsive and the user
+    // sees per-child progress instead of a frozen "loading" tab.
+    ev.preventDefault();
+    const fd = new FormData(form);
+    fd.append('stream', '1');
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Speciating…';
+    progress.style.display = 'block';
+    startPulse();
+
+    let resp;
+    try {
+      resp = await fetch(form.action, {method: 'POST', body: fd, credentials: 'same-origin'});
+    } catch (e) {
+      stopPulse('×');
+      labelEl.textContent = 'request failed: ' + e.message;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Speciate';
+      return;
+    }
+    if (!resp.ok || !resp.body) {
+      stopPulse('×');
+      labelEl.textContent = 'server error: HTTP ' + resp.status;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Speciate';
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let total = 0, mutateDone = 0, bindDone = 0, bindTotal = 0;
+    const t0 = performance.now();
+
+    function applyEvent(ev){
+      if (ev.phase === 'start') {
+        total = ev.count || 0;
+        labelEl.textContent = `mutating ${total} variants…`;
+      } else if (ev.phase === 'mutate') {
+        mutateDone = ev.i;
+        const pct = (ev.i / Math.max(1, ev.n)) * 70;  // mutate phase = first 70%
+        barEl.style.width = pct.toFixed(1) + '%';
+        const elapsed = (performance.now() - t0) / 1000;
+        const rate = ev.i / Math.max(elapsed, 0.001);
+        const remain = Math.max(0, (ev.n - ev.i) / rate);
+        labelEl.textContent =
+          `mutating · ${ev.i}/${ev.n} · ~${remain.toFixed(0)}s left`;
+        detailEl.textContent = '+ ' + ev.name;
+      } else if (ev.phase === 'bind') {
+        bindDone = ev.i;
+        bindTotal = ev.n;
+        const pct = 70 + (ev.i / Math.max(1, ev.n)) * 30;
+        barEl.style.width = pct.toFixed(1) + '%';
+        labelEl.textContent = `binding to tiles · ${ev.i}/${ev.n}`;
+      } else if (ev.phase === 'done') {
+        barEl.style.width = '100%';
+        stopPulse('✓');
+        labelEl.textContent = 'done · redirecting…';
+        detailEl.textContent = ev.summary || '';
+        if (ev.redirect) {
+          setTimeout(() => { window.location.href = ev.redirect; }, 350);
+        }
+      } else if (ev.phase === 'error') {
+        stopPulse('×');
+        labelEl.textContent = ev.message || 'error';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Speciate';
+      }
+    }
+
+    while (true) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, {stream: true});
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        try { applyEvent(JSON.parse(line)); }
+        catch (e) { console.warn('bad progress line', line, e); }
+      }
+    }
+  });
+})();
+</script>
 
 {% endif %}
 {% endblock %}
