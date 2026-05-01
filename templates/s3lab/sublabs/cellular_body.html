@@ -1,23 +1,24 @@
 {# Cellular sublab — tiles-are-population spatial GA on hex topology. #}
-<p class="lede">An 8×8 <strong>pointy-top hex tiling</strong> of CA
-   tiles where the grid <em>is</em> the population. Every tile holds
-   one genome + palette + live grid. Every few hundred ms a tournament
-   round picks a random tile and one of its 6 hex-neighbours, scores
-   both, and replaces the loser with a mutated copy of the winner.
-   Watch how good rules sweep regions: palette inheritance makes the
-   spread visible, and a green border on freshly-replaced tiles fades
-   over five seconds so you can see the wave move.</p>
+<p class="lede">A 16×16 <strong>pointy-top hex tiling</strong> of CA
+   tiles where the grid <em>is</em> the population — 256 cells, each
+   holding one genome + palette + live grid. Every few hundred ms a
+   tournament round picks a random tile and one of its 6 hex-neighbours,
+   scores both, and replaces the loser with a mutated copy of the
+   winner. Watch how good rules sweep regions: palette inheritance
+   makes the spread visible, and a green border on freshly-replaced
+   tiles fades over five seconds so you can see the wave move.</p>
 
 <p class="lede" style="margin-top:-0.4rem;color:#6e7681;">
    Self-similar substrate: the hex CA inside each tile and the hex
    tiling of the population share the same 6-neighbour topology.
    Selection pressure flows through the same shape the rules operate
-   on.
+   on. At 256 tiles the per-CA detail blurs — what's legible at this
+   scale is the palette field of each tile and aggregate motion.
 </p>
 
 <section class="cellular-section">
-  <canvas id="cellular" width="429" height="405"
-          aria-label="8×8 hex grid of evolving CA tiles"></canvas>
+  <canvas id="cellular" width="441" height="429"
+          aria-label="16×16 hex grid of evolving CA tiles"></canvas>
 
   <div class="tft-controls" style="margin-top:0.6rem;">
     <button id="pause-btn" title="Pause both the CA stepping and the GA rounds.">Pause</button>
@@ -54,10 +55,11 @@
 <section class="s3lab-fineprint">
   <p>Same engine as Classic and Filmstrip — K=4 hex CA, 16×16 grid,
     4096-byte packed genome — used at two levels: each cell hosts a
-    full CA, and the 64-tile grid hosts a cellular GA. Cost per
+    full CA, and the 256-tile grid hosts a cellular GA. Cost per
     round is two 25-tick fitness evals (~50 µs); at 2 rounds/sec
-    that's a tiny fraction of CPU even with 64 tiles all stepping
-    their own CAs in parallel.</p>
+    that's a tiny fraction of CPU. The dominant cost is just stepping
+    every CA each tick (~10 ms total at 256 cells) — well under the
+    200 ms tick interval, so the runner stays comfortable.</p>
   <p>Topology is toroidal pointy-top hex (odd rows shifted right by
     half a tile). The 6 neighbour offsets follow the standard
     "odd-r offset" convention; the same library that handles cell-level

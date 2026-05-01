@@ -38,7 +38,7 @@ SUBLABS = [
         'template': 's3lab/sublabs/cellular_body.html',
         'name':     'Cellular',
         'blurb':    'Tiles-are-population spatial GA on a pointy-top '
-                    'hex tiling. 64 cells, 6-neighbour tournament '
+                    'hex tiling. 256 cells, 6-neighbour tournament '
                     'selection. Watch good rules sweep regions.',
     },
     # Future sublabs land here. Keep entries small.

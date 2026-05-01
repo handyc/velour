@@ -41,10 +41,16 @@ import {
 
 // ── Layout ─────────────────────────────────────────────────────────
 
-const GRID_COLS    = 8;
-const GRID_ROWS    = 8;
+const GRID_COLS    = 16;
+const GRID_ROWS    = 16;
 const N_CELLS      = GRID_COLS * GRID_ROWS;
-const TILE_PX      = 48;        // matches Filmstrip's compact size
+const TILE_PX      = 24;        // half of Filmstrip — needed to fit
+                                // 16×16 = 256 tiles in a viewport.
+                                // At 24 px tile, each internal CA cell
+                                // is ~1.45 px so individual hex cells
+                                // smear together; what dominates here
+                                // is the palette field per tile and
+                                // aggregate motion.
 const TILE_GAP     = 3;
 const CELL_PX      = TILE_PX / (GRID_W + 0.5);   // pointy-top hex (cells)
 // Pointy-top hex layout for the tile grid itself: odd rows are
