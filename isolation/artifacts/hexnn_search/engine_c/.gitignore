@@ -1,0 +1,3 @@
+# Build artifacts — recreated by `make`.
+*.o
+hexnn
