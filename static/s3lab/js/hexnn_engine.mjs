@@ -254,3 +254,119 @@ export function inventPalette(K, rng) {
     }
     return pal;
 }
+
+
+// ── Palette modes (matches /hexnn/ bench's set) ───────────────────
+//
+// Returns a Uint32Array of K packed RGBA values (little-endian:
+// 0xAA BB GG RR). Pre-packing eliminates the per-frame ANSI lookup
+// in the render loop and enables direct typed-array writes.
+//
+// Modes:
+//   random-ansi  — each cell a random ANSI-256 index (skewed toward
+//                  the 6×6×6 cube, like /hexnn/ default)
+//   viridis      — perceptually-uniform purple→teal→yellow gradient
+//   plasma       — purple→magenta→orange→yellow gradient
+//   grayscale    — black to white
+//   rainbow      — full HSL hue sweep at fixed S/L
+//
+// For deterministic modes (anything but random-ansi), `rng` is used
+// to pick a cyclic phase shift so multiple library entries built in
+// the same mode look distinct from each other while staying in-mode.
+
+export const PALETTE_MODES = ['random-ansi', 'viridis', 'plasma', 'grayscale', 'rainbow'];
+
+function packRGBA(r, g, b) {
+    return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+}
+
+function lerpStops(stops, t) {
+    const f = t * (stops.length - 1);
+    const lo = Math.floor(f);
+    const hi = Math.min(stops.length - 1, lo + 1);
+    const u = f - lo;
+    const a = stops[lo], b = stops[hi];
+    return [
+        Math.round(a[0] + (b[0] - a[0]) * u),
+        Math.round(a[1] + (b[1] - a[1]) * u),
+        Math.round(a[2] + (b[2] - a[2]) * u),
+    ];
+}
+
+const VIRIDIS_STOPS = [[68,1,84],[59,82,139],[33,144,141],[93,201,99],[253,231,37]];
+const PLASMA_STOPS  = [[13,8,135],[126,3,168],[204,71,120],[248,149,64],[240,249,33]];
+
+export function makePaletteRGBA(K, mode, rng) {
+    const out = new Uint32Array(K);
+
+    if (mode === 'viridis' || mode === 'plasma') {
+        const stops = (mode === 'viridis') ? VIRIDIS_STOPS : PLASMA_STOPS;
+        const phase = (rng() * K) | 0;       // cyclic shift for variety
+        for (let i = 0; i < K; i++) {
+            const idx = (i + phase) % K;
+            const [r, g, b] = lerpStops(stops, idx / Math.max(1, K - 1));
+            out[i] = packRGBA(r, g, b);
+        }
+        return out;
+    }
+
+    if (mode === 'grayscale') {
+        const phase = (rng() * K) | 0;
+        for (let i = 0; i < K; i++) {
+            const idx = (i + phase) % K;
+            const v = Math.round(idx / Math.max(1, K - 1) * 255);
+            out[i] = packRGBA(v, v, v);
+        }
+        return out;
+    }
+
+    if (mode === 'rainbow') {
+        const hueOff = rng() * 360;
+        for (let i = 0; i < K; i++) {
+            // HSL → RGB at S=L=0.5; same maths /hexnn/ uses.
+            const h = ((i / Math.max(1, K)) * 360 + hueOff) % 360;
+            const c = (1 - Math.abs(2 * 0.5 - 1)) * 1;
+            const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+            let r = 0, g = 0, bl = 0;
+            if      (h < 60)  { r = c; g = x; }
+            else if (h < 120) { r = x; g = c; }
+            else if (h < 180) { g = c; bl = x; }
+            else if (h < 240) { g = x; bl = c; }
+            else if (h < 300) { r = x; bl = c; }
+            else              { r = c; bl = x; }
+            const m = 0.5 - c / 2;
+            out[i] = packRGBA(
+                Math.round((r  + m) * 255),
+                Math.round((g  + m) * 255),
+                Math.round((bl + m) * 255),
+            );
+        }
+        return out;
+    }
+
+    // random-ansi (default fallback): each cell a random ANSI-256 idx
+    // skewed toward the 6×6×6 cube — same skew /hexnn/ uses.
+    for (let i = 0; i < K; i++) {
+        const ai = ((rng() * 10) | 0) < 9
+                 ? (16  + ((rng() * 216) | 0))
+                 : (232 + ((rng() * 24)  | 0));
+        const [r, g, b] = ansi256_rgb(ai);
+        out[i] = packRGBA(r, g, b);
+    }
+    return out;
+}
+
+// Convert a packed-RGBA palette back to CSS hex strings — used when
+// downloading a genome as hexnn-genome-v1 JSON.
+export function paletteRGBAToCssHex(palRGBA) {
+    const out = new Array(palRGBA.length);
+    const to8 = v => v.toString(16).padStart(2, '0');
+    for (let i = 0; i < palRGBA.length; i++) {
+        const v = palRGBA[i];
+        const r =  v        & 0xFF;
+        const g = (v >>> 8) & 0xFF;
+        const b = (v >>> 16) & 0xFF;
+        out[i] = '#' + to8(r) + to8(g) + to8(b);
+    }
+    return out;
+}

@@ -25,9 +25,10 @@
 // library / meta → if you tile this sublab side-by-side with itself).
 
 import {
-    N_LOG2, N_ENTRIES, ansi256_rgb, mulberry32,
+    N_LOG2, N_ENTRIES, mulberry32,
     makeGenome, buildBins, lookup, stepWithGenomeBins,
-    score, mutateGenome, crossover, freshGrid, inventPalette,
+    score, mutateGenome, crossover, freshGrid,
+    PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
 } from '../hexnn_engine.mjs';
 
 
@@ -77,12 +78,14 @@ const SCORE_BURNIN = 6;
 
 // ── State ──────────────────────────────────────────────────────────
 
-function makeLibraryEntry(seed) {
-    const genome  = makeGenome(LIB_K, seed);
-    const palette = inventPalette(LIB_K, mulberry32(seed ^ 0xA5A5A5A5));
-    const gridA   = freshGrid(INNER_W, INNER_H, LIB_K, mulberry32(seed ^ 0xCAFE_BABE));
-    const bins    = buildBins(genome);
-    return { genome, palette, gridA, bins, fitness: 0, r: 0 };
+function makeLibraryEntry(seed, paletteMode) {
+    const genome      = makeGenome(LIB_K, seed);
+    const paletteRGBA = makePaletteRGBA(LIB_K, paletteMode,
+                                          mulberry32(seed ^ 0xA5A5A5A5));
+    const gridA       = freshGrid(INNER_W, INNER_H, LIB_K,
+                                   mulberry32(seed ^ 0xCAFE_BABE));
+    const bins        = buildBins(genome);
+    return { genome, paletteRGBA, gridA, bins, fitness: 0, r: 0 };
 }
 
 const state = {
@@ -110,6 +113,14 @@ const state = {
     hunting: false,                   // true while a GA hunt is in flight;
                                       // tournament rounds skip while set
     huntKind: '',                     // 'hunt' | 'refine' for status text
+
+    paletteMode: 'random-ansi',       // current palette generator; user-
+                                      // tunable via the select in the UI.
+                                      // Applies to every newly-minted CA
+                                      // (bootstrap, hunt-insert, tournament
+                                      // replacement); changing the mode
+                                      // also rebuilds every existing CA's
+                                      // palette in place.
 };
 
 
@@ -147,7 +158,7 @@ function bootstrap() {
     state.library = [];
     for (let i = 0; i < LIB_SIZE; i++) {
         const seed = ((Math.random() * 0xFFFFFFFF) >>> 0) ^ (i * 2654435761);
-        const e = makeLibraryEntry(seed);
+        const e = makeLibraryEntry(seed, state.paletteMode);
         // Score immediately so we have a fitness ranking.
         const sc = score(e.genome, INNER_W, SCORE_STEPS, mulberry32(seed ^ 0x1234),
                           SCORE_BURNIN);
@@ -232,7 +243,7 @@ function tickTournament() {
     const child = mutateGenome(W.genome, state.mutRate, mulberry32(sharedSeed ^ 0xD00D));
     L.genome   = child;
     L.bins     = buildBins(child);
-    L.palette  = new Uint8Array(W.palette);
+    L.paletteRGBA = new Uint32Array(W.paletteRGBA);
     L.gridA    = freshGrid(INNER_W, INNER_H, LIB_K,
                             mulberry32((Math.random() * 0xFFFFFFFF) >>> 0));
     L.fitness  = W.fitness;     // upper bound; will be re-scored next time
@@ -280,36 +291,38 @@ async function runHunt(warmStart) {
     const t0 = performance.now();
     const elite = state.library[state.eliteIdx];
 
-    // Build initial population. Each individual = {genome, palette}.
+    // Build initial population. Each individual = {genome, paletteRGBA}.
     const pop = [];
     pop.push({
-        genome:  elite.genome,                   // elite passes through unchanged
-        palette: new Uint8Array(elite.palette),
+        genome:      elite.genome,                   // elite passes through
+        paletteRGBA: new Uint32Array(elite.paletteRGBA),
     });
     if (warmStart) {
         // Refine: rest are mutations of the elite at HUNT_MUT_RATE.
         for (let k = 1; k < HUNT_POP_SIZE; k++) {
             const mutSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
             pop.push({
-                genome:  mutateGenome(elite.genome, HUNT_MUT_RATE, mulberry32(mutSeed)),
-                palette: new Uint8Array(elite.palette),
+                genome:      mutateGenome(elite.genome, HUNT_MUT_RATE, mulberry32(mutSeed)),
+                paletteRGBA: new Uint32Array(elite.paletteRGBA),
             });
         }
     } else {
-        // Hunt: half mutated (4× rate), half random with random palettes.
+        // Hunt: half mutated (4× rate), half random with fresh palettes
+        // in the current mode.
         const half = HUNT_POP_SIZE / 2;
         for (let k = 1; k < half; k++) {
             const mutSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
             pop.push({
-                genome:  mutateGenome(elite.genome, HUNT_MUT_RATE * 4, mulberry32(mutSeed)),
-                palette: new Uint8Array(elite.palette),
+                genome:      mutateGenome(elite.genome, HUNT_MUT_RATE * 4, mulberry32(mutSeed)),
+                paletteRGBA: new Uint32Array(elite.paletteRGBA),
             });
         }
         for (let k = half; k < HUNT_POP_SIZE; k++) {
             const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
             pop.push({
-                genome:  makeGenome(LIB_K, seed),
-                palette: inventPalette(LIB_K, mulberry32(seed ^ 0xA5A5A5A5)),
+                genome:      makeGenome(LIB_K, seed),
+                paletteRGBA: makePaletteRGBA(LIB_K, state.paletteMode,
+                                              mulberry32(seed ^ 0xA5A5A5A5)),
             });
         }
     }
@@ -351,11 +364,11 @@ async function runHunt(warmStart) {
                 HUNT_MUT_RATE, cxRng,
             );
             // Palette inherit: 50/50 per slot from the two parents.
-            const pal = new Uint8Array(LIB_K);
+            const pal = new Uint32Array(LIB_K);
             for (let k = 0; k < LIB_K; k++) {
-                pal[k] = (Math.random() < 0.5) ? a.palette[k] : b.palette[k];
+                pal[k] = (Math.random() < 0.5) ? a.paletteRGBA[k] : b.paletteRGBA[k];
             }
-            next.push({ genome: child, palette: pal, fitness: 0, r: 0 });
+            next.push({ genome: child, paletteRGBA: pal, fitness: 0, r: 0 });
         }
         pop.length = 0; for (const x of next) pop.push(x);
 
@@ -376,7 +389,7 @@ async function runHunt(warmStart) {
         const winner = pop[k];
         state.library[slot].genome   = winner.genome;
         state.library[slot].bins     = buildBins(winner.genome);
-        state.library[slot].palette  = winner.palette;
+        state.library[slot].paletteRGBA = winner.paletteRGBA;
         state.library[slot].fitness  = winner.fitness;
         state.library[slot].r        = winner.r;
         state.library[slot].gridA    = freshGrid(
@@ -442,15 +455,10 @@ function ensureBuffers() {
 }
 
 // Shared workhorse: blit one library entry's grid into `buf` at
-// (tileX, tileY) using palette[0..K-1] → packed RGBA.
+// (tileX, tileY) using its pre-packed RGBA palette.
 function blitGridIntoBuffer(buf, bufW, entry, tileX, tileY, tilePx, cellPx) {
     const K = LIB_K;
-    // Pack the entire palette to RGBA32 once per blit.
-    const pal = new Uint32Array(K);
-    for (let p = 0; p < K; p++) {
-        const rgb = ansi256_rgb(entry.palette[p]);
-        pal[p] = packRGBA(rgb[0], rgb[1], rgb[2]);
-    }
+    const pal = entry.paletteRGBA;        // already Uint32Array of RGBA
     const grid = entry.gridA;
     for (let cy = 0; cy < INNER_H; cy++) {
         const py0 = tileY + ((cy * cellPx) | 0);
@@ -579,15 +587,8 @@ function fnv1a32Hex(keys, outs) {
     return h.toString(16).padStart(8, '0');
 }
 
-function paletteToCssHex(pal) {
-    const out = new Array(pal.length);
-    for (let i = 0; i < pal.length; i++) {
-        const [r, g, b] = ansi256_rgb(pal[i]);
-        const to8 = v => v.toString(16).padStart(2, '0');
-        out[i] = '#' + to8(r) + to8(g) + to8(b);
-    }
-    return out;
-}
+// (paletteRGBAToCssHex now lives in hexnn_engine.mjs and is imported
+// at the top of this module.)
 
 async function downloadLibraryEntryAsJSON(idx, source, compress) {
     const e = state.library[idx];
@@ -607,8 +608,8 @@ async function downloadLibraryEntryAsJSON(idx, source, compress) {
         format:         'hexnn-genome-v1',
         K:              g.K,
         n_entries:      g.outs.length,
-        palette:        paletteToCssHex(e.palette),
-        palette_name:   `stratum-${source}-${idx}`,
+        palette:        paletteRGBAToCssHex(e.paletteRGBA),
+        palette_name:   `stratum-${state.paletteMode}-${source}-${idx}`,
         fingerprint:    fp,
         exported_at:    new Date().toISOString(),
         source:         source,        // 'library' or 'meta:rIcJ'
@@ -768,6 +769,24 @@ function init() {
     const refineBtn = document.getElementById('stratum-refine-btn');
     if (huntBtn)   huntBtn.onclick   = () => runHunt(false);
     if (refineBtn) refineBtn.onclick = () => runHunt(true);
+
+    // Palette mode selector — flip every existing library entry's
+    // palette to the new mode in place, then repaint. New library
+    // entries (bootstrap, hunt-insert, tournament replacement) pick
+    // up the same mode automatically via state.paletteMode.
+    const paletteSel = document.getElementById('stratum-palette-mode');
+    if (paletteSel) {
+        paletteSel.value = state.paletteMode;
+        paletteSel.onchange = (e) => {
+            state.paletteMode = e.target.value;
+            for (let i = 0; i < state.library.length; i++) {
+                const seed = ((Math.random() * 0xFFFFFFFF) >>> 0) ^ (i * 2654435761);
+                state.library[i].paletteRGBA = makePaletteRGBA(
+                    LIB_K, state.paletteMode, mulberry32(seed));
+            }
+            paintAll();
+        };
+    }
 
     // Click-to-download genome JSON. Wire on both canvases — clicks
     // on the meta-CA download whichever library entry is currently
