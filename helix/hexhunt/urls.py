@@ -8,6 +8,8 @@ urlpatterns = [
     path('',                       views.list_view,    name='list'),
     path('runs/launch/',           views.launch_run,   name='launch_run'),
     path('runs/<slug:slug>/',      views.run_detail,   name='run_detail'),
+    path('runs/<slug:slug>/progress.json',
+                                   views.run_progress_json, name='run_progress_json'),
     path('rules/<slug:slug>/',     views.rule_detail,  name='rule_detail'),
     path('rules/<slug:slug>/replay/',
                                    views.rule_replay,  name='rule_replay'),

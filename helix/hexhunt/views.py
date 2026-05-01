@@ -371,21 +371,109 @@ def launch_scan(request, slug):
 _INLINE_RUN_MAX_OPS = 64 * 50 * 6      # pop × gens × windows budget
 
 
+def _runner_thread(run_pk: int, corpus_pk: int, params, keep_top: int) -> None:
+    """Background worker for an inline hexhunt tournament.
+
+    Updates HuntRun.generation_log_json each generation so the
+    /helix/hexhunt/runs/<slug>/progress.json poll endpoint can stream
+    progress to the browser. On exit, persists the leaderboard +
+    HuntRule rows the same way the management command does.
+    """
+    import sys
+    import traceback
+    from django.db import close_old_connections, transaction
+    from django.utils import timezone as djtz
+    from helix.hexhunt.tournament import run_tournament
+
+    try:
+        run    = HuntRun.objects.get(pk=run_pk)
+        corpus = HuntCorpus.objects.get(pk=corpus_pk)
+        corpus_windows = list(
+            corpus.windows.select_related('record').order_by('idx')
+        )
+        seqs = [w.sequence() for w in corpus_windows]
+
+        # Per-gen progress: append to the log + save with update_fields
+        # so other queries see fresh state. Single writer (this thread),
+        # so no locking needed.
+        gen_log: list = []
+        def progress(g):
+            gen_log.append({
+                'gen': g.gen, 'best': g.best, 'mean': g.mean,
+                'elapsed_s': g.elapsed_s,
+            })
+            run.generation_log_json = list(gen_log)
+            run.save(update_fields=['generation_log_json'])
+
+        result = run_tournament(seqs, params, on_generation=progress)
+
+        keep = min(keep_top, len(result.final_population))
+        with transaction.atomic():
+            top_rule_obj = None
+            scoreboard = []
+            for rank in range(keep):
+                pr = result.final_population[rank]
+                score_val = result.final_scores[rank]
+                provenance = {
+                    'origin':    'tournament_winner',
+                    'run_slug':  run.slug,
+                    'corpus':    corpus.slug,
+                    'rank':      rank + 1,
+                    'score':     score_val,
+                    'scoring':   params.scoring_fn,
+                }
+                rule = HuntRule.objects.create(
+                    slug=HuntRule.make_slug(),
+                    table=bytes(pr.data),
+                    name=f'{run.slug}#{rank+1:02d}',
+                    provenance_json=provenance,
+                )
+                scoreboard.append({
+                    'rank':      rank + 1,
+                    'score':     score_val,
+                    'rule_slug': rule.slug,
+                })
+                if rank == 0:
+                    top_rule_obj = rule
+            run.top_rule = top_rule_obj
+            run.scoreboard_json = scoreboard
+            run.generation_log_json = list(gen_log)
+            run.status = 'done'
+            run.finished_at = djtz.now()
+            run.save()
+    except Exception as exc:
+        # Print to stderr so a `runserver` operator sees the trace —
+        # daemon-thread exceptions are otherwise swallowed.
+        traceback.print_exc(file=sys.stderr)
+        try:
+            run = HuntRun.objects.get(pk=run_pk)
+            run.status = 'failed'
+            run.notes = f'{type(exc).__name__}: {exc}'
+            run.finished_at = djtz.now()
+            run.save()
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+    finally:
+        close_old_connections()
+
+
 @login_required
 def launch_run(request):
-    """POST handler — kick off a small inline hexhunt tournament.
+    """POST handler — kick off a hexhunt tournament in a daemon thread.
 
-    Mirrors ``launch_scan``: caps inline runs at a small budget; for
-    bigger tournaments, surfaces the equivalent management command so
-    the user can run it on the server side without a browser tab.
+    Validates params and creates the HuntRun row synchronously, then
+    redirects to the run_detail page (302) and runs the tournament in
+    the background. The detail page polls progress.json for live
+    generation updates. Inline budget caps the run at a few seconds of
+    CPU; bigger jobs need the management command.
     """
     if request.method != 'POST':
         raise Http404('use POST')
+    import threading
     from django.contrib import messages
     from django.shortcuts import redirect
-    from django.db import transaction
     from django.utils import timezone as djtz
-    from helix.hexhunt.tournament import TournamentParams, run_tournament
+    from helix.hexhunt.tournament import TournamentParams
 
     corpus_slug = request.POST.get('corpus_slug', '').strip()
     if not corpus_slug:
@@ -419,12 +507,11 @@ def launch_run(request):
         )
         return redirect('helix:hexhunt:list')
 
-    corpus_windows = list(corpus.windows.select_related('record').order_by('idx'))
+    corpus_windows = list(corpus.windows.all())
     if not corpus_windows:
         messages.error(request, f'corpus {corpus.slug!r} has no windows.')
         return redirect('helix:hexhunt:list')
-    seqs = [w.sequence() for w in corpus_windows]
-    windows_used = min(windows, len(seqs))
+    windows_used = min(windows, len(corpus_windows))
 
     params = TournamentParams(
         population_size=pop,
@@ -451,58 +538,36 @@ def launch_run(request):
         started_at=djtz.now(),
     )
 
-    try:
-        result = run_tournament(seqs, params)
-    except Exception as exc:
-        run.status = 'failed'
-        run.notes = f'{type(exc).__name__}: {exc}'
-        run.finished_at = djtz.now()
-        run.save()
-        messages.error(request, f'Hunt failed: {exc}')
-        return redirect('helix:hexhunt:run_detail', slug=run.slug)
-
-    keep = min(keep_top, len(result.final_population))
-    with transaction.atomic():
-        top_rule_obj = None
-        scoreboard = []
-        for rank in range(keep):
-            pr = result.final_population[rank]
-            score_val = result.final_scores[rank]
-            provenance = {
-                'origin':    'tournament_winner',
-                'run_slug':  run.slug,
-                'corpus':    corpus.slug,
-                'rank':      rank + 1,
-                'score':     score_val,
-                'scoring':   params.scoring_fn,
-            }
-            rule = HuntRule.objects.create(
-                slug=HuntRule.make_slug(),
-                table=bytes(pr.data),
-                name=f'{run.slug}#{rank+1:02d}',
-                provenance_json=provenance,
-            )
-            scoreboard.append({
-                'rank':      rank + 1,
-                'score':     score_val,
-                'rule_slug': rule.slug,
-            })
-            if rank == 0:
-                top_rule_obj = rule
-        run.top_rule = top_rule_obj
-        run.scoreboard_json = scoreboard
-        run.generation_log_json = [
-            {'gen': g.gen, 'best': g.best, 'mean': g.mean,
-             'elapsed_s': g.elapsed_s}
-            for g in result.log
-        ]
-        run.status = 'done'
-        run.finished_at = djtz.now()
-        run.save()
+    t = threading.Thread(
+        target=_runner_thread,
+        args=(run.pk, corpus.pk, params, keep_top),
+        daemon=True,
+    )
+    t.start()
 
     messages.success(
         request,
-        f'Run {run.slug} done. Top score {scoreboard[0]["score"]:.4f} '
-        f'across {keep} kept rules.'
+        f'Run {run.slug} launched ({pop} × {gens} × {windows_used} windows). '
+        f'Live progress on this page; the leaderboard appears when it finishes.'
     )
     return redirect('helix:hexhunt:run_detail', slug=run.slug)
+
+
+@login_required
+@require_GET
+def run_progress_json(request, slug):
+    """Polled by the run_detail page while status='running'."""
+    run = get_object_or_404(HuntRun, slug=slug)
+    log = run.generation_log_json or []
+    params = run.params_json or {}
+    return JsonResponse({
+        'slug':         run.slug,
+        'status':       run.status,
+        'gens_done':    len(log),
+        'gens_total':   int(params.get('generations', 0) or 0),
+        'log':          log,
+        'scoreboard':   run.scoreboard_json or [],
+        'notes':        run.notes or '',
+        'started_at':   run.started_at.isoformat()  if run.started_at  else None,
+        'finished_at':  run.finished_at.isoformat() if run.finished_at else None,
+    })

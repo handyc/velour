@@ -28,6 +28,31 @@
   <dt style="color:#8b949e;">Started · finished</dt><dd>{{ run.started_at|date:"D d M Y H:i:s"|default:"—" }} · {{ run.finished_at|date:"D d M Y H:i:s"|default:"—" }}</dd>
 </dl>
 
+{# Live progress strip — visible while the run is in flight. The
+   poll script below repaints this every 750ms and reloads the page
+   when status flips to done/failed so the leaderboard renders with
+   server-side rule links. #}
+<section id="progress-strip"
+         data-run-slug="{{ run.slug }}"
+         data-progress-url="{% url 'helix:hexhunt:run_progress_json' run.slug %}"
+         data-initial-status="{{ run.status }}"
+         style="margin-top:1rem;padding:0.6rem 0.8rem;border:1px solid #30363d;background:#0d1117;display:{% if run.status == 'done' %}none{% else %}block{% endif %};">
+  <div style="display:flex;align-items:baseline;gap:1rem;font-size:0.85rem;flex-wrap:wrap;">
+    <strong style="color:#c9d1d9;">Live</strong>
+    <span style="color:#8b949e;">gen
+      <span id="prog-gens-done" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0</span> /
+      <span id="prog-gens-total" style="color:#c9d1d9;font-family:ui-monospace,monospace;">{{ run.params_json.generations }}</span>
+    </span>
+    <span style="color:#8b949e;">elapsed <span id="prog-elapsed" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0.0s</span></span>
+    <span style="color:#8b949e;">ETA <span id="prog-eta" style="color:#c9d1d9;font-family:ui-monospace,monospace;">—</span></span>
+    <span style="color:#8b949e;">best so far <span id="prog-best" style="color:#7ee787;font-family:ui-monospace,monospace;">—</span></span>
+  </div>
+  <div style="margin-top:0.4rem;height:6px;background:#21262d;overflow:hidden;">
+    <div id="prog-bar"
+         style="height:100%;width:0%;background:#3fb950;transition:width 250ms linear;"></div>
+  </div>
+</section>
+
 <h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Leaderboard</h2>
 {% if scoreboard_rows %}
 <table style="width:100%;border-collapse:collapse;font-size:0.9rem;max-width:60rem;">
@@ -66,57 +91,135 @@
 <p style="color:#8b949e;">No leaderboard yet. {% if run.status == 'failed' %}Run failed: {{ run.notes }}{% endif %}</p>
 {% endif %}
 
-{% if run.generation_log_json %}
 <h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Generation log</h2>
 <svg id="gen-chart" width="640" height="160" style="background:#0d1117;border:1px solid #30363d;display:block;"></svg>
 <p style="color:#8b949e;font-size:0.8rem;margin-top:0.3rem;">
   <span style="color:#7ee787;">█</span> best per generation &nbsp;
   <span style="color:#79c0ff;">█</span> mean per generation
 </p>
-{{ run.generation_log_json|json_script:"gen-log-data" }}
+{{ run.generation_log_json|default_if_none:""|json_script:"gen-log-data" }}
+
 <script>
 (function(){
-  const log = JSON.parse(document.getElementById('gen-log-data').textContent);
-  if (!log.length) return;
+  // ── Chart paint ─────────────────────────────────────────────────
+  const SVGNS = 'http://www.w3.org/2000/svg';
   const W = 640, H = 160, pad = 24;
   const svg = document.getElementById('gen-chart');
-  const xs = log.map(d => d.gen);
-  const all = log.flatMap(d => [d.best, d.mean]);
-  const ymin = Math.min(...all), ymax = Math.max(...all);
-  const yspan = (ymax - ymin) || 1;
-  const xspan = (xs[xs.length-1] - xs[0]) || 1;
-  function pt(d, key){
-    const x = pad + (d.gen - xs[0]) / xspan * (W - 2*pad);
-    const y = H - pad - (d[key] - ymin) / yspan * (H - 2*pad);
-    return [x, y];
+
+  function paintChart(log) {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (!log || !log.length) return;
+    const xs = log.map(d => d.gen);
+    const all = log.flatMap(d => [d.best, d.mean]);
+    const ymin = Math.min(...all), ymax = Math.max(...all);
+    const yspan = (ymax - ymin) || 1;
+    const xspan = (xs[xs.length-1] - xs[0]) || 1;
+    function pt(d, key){
+      const x = pad + (d.gen - xs[0]) / xspan * (W - 2*pad);
+      const y = H - pad - (d[key] - ymin) / yspan * (H - 2*pad);
+      return [x, y];
+    }
+    function poly(key, color){
+      const path = log.map(d => pt(d, key).join(',')).join(' ');
+      const el = document.createElementNS(SVGNS, 'polyline');
+      el.setAttribute('fill', 'none');
+      el.setAttribute('stroke', color);
+      el.setAttribute('stroke-width', '1.5');
+      el.setAttribute('points', path);
+      svg.appendChild(el);
+    }
+    poly('mean', '#79c0ff');
+    poly('best', '#7ee787');
+    function txt(x, y, s, fill){
+      const el = document.createElementNS(SVGNS, 'text');
+      el.setAttribute('x', x); el.setAttribute('y', y);
+      el.setAttribute('fill', fill || '#8b949e');
+      el.setAttribute('font-family', 'ui-monospace,monospace');
+      el.setAttribute('font-size', '10');
+      el.textContent = s;
+      svg.appendChild(el);
+    }
+    txt(2, 12, ymax.toFixed(4));
+    txt(2, H - 4, ymin.toFixed(4));
+    txt(W - 30, H - 4, 'gen ' + xs[xs.length-1]);
+    txt(pad, H - 4, 'gen ' + xs[0]);
   }
-  function poly(key, color){
-    const path = log.map(d => pt(d, key).join(',')).join(' ');
-    const el = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    el.setAttribute('fill', 'none');
-    el.setAttribute('stroke', color);
-    el.setAttribute('stroke-width', '1.5');
-    el.setAttribute('points', path);
-    svg.appendChild(el);
+
+  // Initial paint from the server-rendered log (might be empty).
+  let initial = [];
+  try {
+    const raw = document.getElementById('gen-log-data').textContent;
+    initial = JSON.parse(raw || '[]') || [];
+  } catch (e) { /* empty log on first render */ }
+  paintChart(initial);
+
+  // ── Live poll while status='running' ────────────────────────────
+  const strip = document.getElementById('progress-strip');
+  if (!strip) return;
+  const initialStatus = strip.dataset.initialStatus;
+  const url = strip.dataset.progressUrl;
+  if (initialStatus !== 'running') return;
+
+  const startedAt = Date.now();
+
+  function fmtSec(s) {
+    if (!isFinite(s)) return '—';
+    if (s < 60) return s.toFixed(1) + 's';
+    const m = Math.floor(s / 60), r = Math.round(s - m*60);
+    return m + 'm' + (r < 10 ? '0' + r : r) + 's';
   }
-  poly('mean', '#79c0ff');
-  poly('best', '#7ee787');
-  // Axes labels
-  function txt(x, y, s, fill){
-    const el = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    el.setAttribute('x', x); el.setAttribute('y', y);
-    el.setAttribute('fill', fill || '#8b949e');
-    el.setAttribute('font-family', 'ui-monospace,monospace');
-    el.setAttribute('font-size', '10');
-    el.textContent = s;
-    svg.appendChild(el);
+
+  let pollCancel = null;
+  function pollOnce(){
+    fetch(url, {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(j => {
+        const done  = j.gens_done | 0;
+        const total = j.gens_total | 0;
+        const pct   = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+        document.getElementById('prog-gens-done').textContent  = done;
+        document.getElementById('prog-gens-total').textContent = total;
+        document.getElementById('prog-bar').style.width = pct.toFixed(1) + '%';
+
+        const log = j.log || [];
+        paintChart(log);
+        if (log.length) {
+          const best = log[log.length - 1].best;
+          document.getElementById('prog-best').textContent =
+            (typeof best === 'number') ? best.toFixed(4) : '—';
+        }
+
+        // ETA: rate from average gen elapsed_s, rather than wall-clock,
+        // since wall-clock includes DB save overhead and the network
+        // round-trip. Good enough for ETA.
+        const elapsedWall = (Date.now() - startedAt) / 1000;
+        document.getElementById('prog-elapsed').textContent = fmtSec(elapsedWall);
+        if (done > 0 && total > done) {
+          const sumElapsed = log.reduce((s, g) => s + (g.elapsed_s || 0), 0);
+          const perGen = sumElapsed / done;
+          const remain = perGen * (total - done);
+          document.getElementById('prog-eta').textContent = fmtSec(remain);
+        } else if (done >= total && total > 0) {
+          document.getElementById('prog-eta').textContent = '0s';
+        }
+
+        if (j.status === 'running') {
+          pollCancel = setTimeout(pollOnce, 750);
+        } else {
+          // Done or failed — reload so the leaderboard renders with
+          // server-side rule links + finished_at + per-row rule slugs.
+          if (pollCancel) clearTimeout(pollCancel);
+          // Brief beat so the user sees the bar hit 100%.
+          setTimeout(() => window.location.reload(), 400);
+        }
+      })
+      .catch(() => {
+        // Transient errors (e.g. dev-server reload) — back off and retry.
+        pollCancel = setTimeout(pollOnce, 2000);
+      });
   }
-  txt(2, 12, ymax.toFixed(4));
-  txt(2, H - 4, ymin.toFixed(4));
-  txt(W - 30, H - 4, 'gen ' + xs[xs.length-1]);
-  txt(pad, H - 4, 'gen ' + xs[0]);
+  pollOnce();
 })();
 </script>
-{% endif %}
 
 {% endblock %}
