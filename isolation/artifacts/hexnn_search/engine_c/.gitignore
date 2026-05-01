@@ -1,3 +1,5 @@
 # Build artifacts — recreated by `make`.
 *.o
 hexnn
+hexnn_islands
+hexnn_islands_nompi

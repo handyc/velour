@@ -120,6 +120,36 @@ const uint8_t* engine_elite_keys(const engine_t* eng); /* len = N*7    */
 const uint8_t* engine_elite_outs(const engine_t* eng); /* len = N      */
 const uint8_t* engine_grid(const engine_t* eng);       /* grid_w*grid_h */
 
+/* The elite is laid out as N×7 keys immediately followed by N outs
+ * in one contiguous N×8 byte block — the same shape any driver that
+ * crosses process or network boundaries wants to memcpy as a unit. */
+const uint8_t* engine_elite_bytes(const engine_t* eng); /* len = N*8  */
+size_t         engine_genome_bytes(const engine_t* eng); /* = N*8     */
+
+/* Overwrite the elite with `genome_bytes` (must point at exactly
+ * engine_genome_bytes(eng) bytes laid out as keys|outs). Useful when
+ * importing a peer's elite from MPI / a file / WiFi. */
+void engine_inject_elite(engine_t* eng, const uint8_t* genome_bytes);
+
+/* Score an arbitrary genome (passed as N×8 byte buffer) against a
+ * fresh grid seeded from `grid_seed`. Does not modify the elite or
+ * the live grid; rebuilds bins as a side effect. */
+engine_score_t engine_score_bytes(engine_t* eng,
+                                   const uint8_t* genome_bytes,
+                                   uint32_t grid_seed);
+
+/* Genome distance — Hamming over keys+outs (count of byte positions
+ * that differ). Cheap and good enough for diversity-filter heuristics. */
+uint32_t engine_genome_distance(const uint8_t* a, const uint8_t* b,
+                                size_t bytes);
+
+/* Crossover two raw genome buffers into `dst`. Mirrors the internal
+ * single-cut crossover used by the GA, but driven by the engine's
+ * main PRNG so results are reproducible given a known seed. dst
+ * may alias either input. */
+void engine_crossover_bytes(engine_t* eng, uint8_t* dst,
+                             const uint8_t* a, const uint8_t* b);
+
 /* Re-seed the live grid (does not touch the elite). */
 void engine_seed_live_grid(engine_t* eng, uint32_t grid_seed);
 

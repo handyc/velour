@@ -9,7 +9,13 @@ paste back the Slurm job ID.
 
 Variants:
 
-  --variant cpu       Multi-CPU only (multiprocessing.Pool). Working.
+  --variant cpu       Multi-CPU only (multiprocessing.Pool, Python).
+                      Working. Single-node up to ~64 cores.
+  --variant islands   Portable C engine + MPI islands across many
+                      nodes (up to 288 cores on ALICE). Working —
+                      builds engine.c + mpi_islands.c on the cluster
+                      via mpicc, runs N ranks with a chosen merge
+                      strategy.
   --variant gpu       GPU-only (cupy). Planned — emits a stub handoff
                       pointing at the not-yet-built gpu.py / gpu.sbatch.
   --variant hybrid    GPU + CPU hybrid. Planned — same stub treatment.
@@ -35,6 +41,14 @@ VARIANTS = {
         'sbatch_template': 'isolation/artifacts/hexnn_search/hpc/cpu.sbatch',
         'driver_files':    ['isolation/artifacts/hexnn_search/hpc/cpu.py',
                             'isolation/artifacts/hexnn_search/pi4.py'],
+        'status':          'working',
+    },
+    'islands': {
+        'sbatch_template': 'isolation/artifacts/hexnn_search/engine_c/islands.sbatch',
+        'driver_files':    ['isolation/artifacts/hexnn_search/engine_c/engine.h',
+                            'isolation/artifacts/hexnn_search/engine_c/engine.c',
+                            'isolation/artifacts/hexnn_search/engine_c/mpi_islands.c',
+                            'isolation/artifacts/hexnn_search/engine_c/Makefile'],
         'status':          'working',
     },
     'gpu': {
@@ -64,6 +78,32 @@ def _render_cpu_sbatch(template_path: Path, *, partition: str,
         remote_dir=remote_dir, K=K, n_log2=n_log2, grid=grid,
         steps=steps, burn_in=burn_in, pop=pop, gens=gens, rate=rate,
         seed=seed, output_path=output_path,
+    )
+
+
+def _render_islands_sbatch(template_path: Path, *, partition: str,
+                           time_limit: str, nodes: int, ntasks: int,
+                           cpus_per_task: int, mem_per_cpu: str,
+                           account: str, remote_dir: str,
+                           K: int, n_log2: int, grid: int, steps: int,
+                           burn_in: int, pop_per_island: int,
+                           gens_per_epoch: int, epochs: int, rate: float,
+                           seed: int, merge_strategy: str,
+                           diversity_threshold: int,
+                           output_path: str) -> str:
+    text = template_path.read_text()
+    account_line = f'#SBATCH --account={account}' if account else ''
+    return text.format(
+        partition=partition, time_limit=time_limit, nodes=nodes,
+        ntasks=ntasks, cpus_per_task=cpus_per_task,
+        mem_per_cpu=mem_per_cpu, account_line=account_line,
+        remote_dir=remote_dir, K=K, n_log2=n_log2, grid=grid,
+        steps=steps, burn_in=burn_in,
+        pop_per_island=pop_per_island, gens_per_epoch=gens_per_epoch,
+        epochs=epochs, rate=rate, seed=seed,
+        merge_strategy=merge_strategy,
+        diversity_threshold=diversity_threshold,
+        output_path=output_path,
     )
 
 
@@ -100,6 +140,24 @@ class Command(BaseCommand):
         parser.add_argument('--output',  default='hexnn_winner.json')
         parser.add_argument('--name',    default='',
                             help='Friendly name for the Conduit Job.')
+        # Islands-only flags. Ignored for variant=cpu but parsed
+        # uniformly to keep the CLI orthogonal.
+        parser.add_argument('--ntasks',           type=int, default=16,
+                            help='[islands] number of MPI ranks = islands.')
+        parser.add_argument('--mem-per-cpu',      default='4G',
+                            help='[islands] per-CPU memory; ALICE prefers '
+                                 '--mem-per-cpu over --mem for ntasks>1.')
+        parser.add_argument('--pop-per-island',   type=int, default=64)
+        parser.add_argument('--gens-per-epoch',   type=int, default=30)
+        parser.add_argument('--epochs',           type=int, default=20)
+        parser.add_argument('--merge-strategy',
+                            choices=('migrate-best', 'crossover-merge',
+                                     'tournament-merge', 'diversity-filter'),
+                            default='migrate-best',
+                            help='[islands] inter-island merge strategy.')
+        parser.add_argument('--diversity-threshold', type=int, default=100,
+                            help='[islands] for diversity-filter — minimum '
+                                 'Hamming distance to accept a peer elite.')
 
     def handle(self, **opts):
         variant = VARIANTS[opts['variant']]
@@ -120,17 +178,37 @@ class Command(BaseCommand):
         if not template_path.is_file():
             raise CommandError(f'sbatch template missing: {template_path}')
 
-        script = _render_cpu_sbatch(
-            template_path,
-            partition=opts['partition'], time_limit=opts['time_limit'],
-            nodes=opts['nodes'], cpus_per_task=opts['cpus_per_task'],
-            mem=opts['mem'], account=opts['account'],
-            remote_dir=opts['remote_dir'],
-            K=opts['k'], n_log2=opts['n_log2'], grid=opts['grid'],
-            steps=opts['steps'], burn_in=opts['burn_in'], pop=opts['pop'],
-            gens=opts['gens'], rate=opts['rate'], seed=opts['seed'],
-            output_path=opts['output'],
-        )
+        if opts['variant'] == 'islands':
+            script = _render_islands_sbatch(
+                template_path,
+                partition=opts['partition'], time_limit=opts['time_limit'],
+                nodes=opts['nodes'], ntasks=opts['ntasks'],
+                cpus_per_task=opts['cpus_per_task'],
+                mem_per_cpu=opts['mem_per_cpu'],
+                account=opts['account'],
+                remote_dir=opts['remote_dir'],
+                K=opts['k'], n_log2=opts['n_log2'], grid=opts['grid'],
+                steps=opts['steps'], burn_in=opts['burn_in'],
+                pop_per_island=opts['pop_per_island'],
+                gens_per_epoch=opts['gens_per_epoch'],
+                epochs=opts['epochs'], rate=opts['rate'],
+                seed=opts['seed'],
+                merge_strategy=opts['merge_strategy'],
+                diversity_threshold=opts['diversity_threshold'],
+                output_path=opts['output'],
+            )
+        else:
+            script = _render_cpu_sbatch(
+                template_path,
+                partition=opts['partition'], time_limit=opts['time_limit'],
+                nodes=opts['nodes'], cpus_per_task=opts['cpus_per_task'],
+                mem=opts['mem'], account=opts['account'],
+                remote_dir=opts['remote_dir'],
+                K=opts['k'], n_log2=opts['n_log2'], grid=opts['grid'],
+                steps=opts['steps'], burn_in=opts['burn_in'],
+                pop=opts['pop'], gens=opts['gens'], rate=opts['rate'],
+                seed=opts['seed'], output_path=opts['output'],
+            )
 
         # Driver-file copy instructions: every script the sbatch will
         # invoke needs to land in --remote-dir before submission.

@@ -568,6 +568,12 @@ const uint8_t* engine_elite_keys(const engine_t* eng) {
 const uint8_t* engine_elite_outs(const engine_t* eng) {
     return eng->elite + (size_t)eng->n_entries * 7u;
 }
+const uint8_t* engine_elite_bytes(const engine_t* eng) {
+    return eng->elite;        /* keys then outs, contiguous N*8 bytes */
+}
+size_t engine_genome_bytes(const engine_t* eng) {
+    return GENOME_BYTES(eng->n_entries);
+}
 const uint8_t* engine_grid(const engine_t* eng) {
     return eng->grid_a;
 }
@@ -576,4 +582,30 @@ const engine_config_t* engine_config(const engine_t* eng) {
 }
 uint32_t engine_n_entries(const engine_t* eng) {
     return eng->n_entries;
+}
+
+/* ── Public wrappers for cross-genome ops (MPI, file IO, etc.) ───── */
+
+void engine_inject_elite(engine_t* eng, const uint8_t* genome_bytes) {
+    engine_memcpy(eng->elite, genome_bytes, GENOME_BYTES(eng->n_entries));
+}
+
+engine_score_t engine_score_bytes(engine_t* eng,
+                                   const uint8_t* genome_bytes,
+                                   uint32_t grid_seed) {
+    return engine_score_genome_at(eng, genome_bytes, grid_seed);
+}
+
+uint32_t engine_genome_distance(const uint8_t* a, const uint8_t* b,
+                                size_t bytes) {
+    uint32_t d = 0;
+    for (size_t i = 0; i < bytes; i++) if (a[i] != b[i]) d++;
+    return d;
+}
+
+void engine_crossover_bytes(engine_t* eng, uint8_t* dst,
+                             const uint8_t* a, const uint8_t* b) {
+    /* dst may alias a or b; crossover() handles that since it
+     * writes per-index from the chosen source. */
+    crossover(eng, dst, a, b);
 }

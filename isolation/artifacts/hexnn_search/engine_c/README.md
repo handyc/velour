@@ -118,11 +118,58 @@ and the elite-tie-break lands on a different individual. The drift
 is sub-noise: engine_c happened to find a slightly *better* final
 elite (0.8401 vs 0.8374) on this seed.
 
-### What's next (Phase 2 candidates)
+## Phase 2 — MPI islands (shipped)
 
-- `mpi_islands.c` — multiple populations per Slurm job, with the
-  merge strategies discussed (migrate-best, diversity-filter,
-  crossover-merge, tournament-merge). The big HPC win.
+`mpi_islands.c` runs one island per MPI rank. Each rank has its own
+`engine_t` with its own population; islands run their local Hunt +
+Refine GA between merge points. The merge strategy is picked at
+submit time:
+
+- **migrate-best** — ring topology, conditional replace if peer
+  scores better on a shared grid_seed. Lowest-disruption.
+- **crossover-merge** — paired ranks exchange elites and adopt a
+  hybrid crossover. Injects genuine recombination.
+- **tournament-merge** — Allgather, score every elite on a common
+  seed, every rank adopts the global winner. Aggressive.
+- **diversity-filter** — like migrate-best but reject incoming peers
+  whose Hamming distance from the local elite is below threshold.
+  Best for multi-modal landscapes.
+
+After all epochs finish, every island's elite is gathered, scored on
+a shared seed, and rank 0 emits the global winner JSON.
+
+### Build
+
+```
+make mpi          # needs mpicc (ALICE: module load OpenMPI)
+```
+
+For local correctness checks without an MPI runtime:
+
+```
+make islands-nompi
+./hexnn_islands_nompi --no-mpi --pop-per-island 16 --gens-per-epoch 5 \
+                      --epochs 3
+```
+
+The no-mpi build runs with `world=1`; merge phases turn into no-ops.
+Validates the epoch loop, argv parsing, and JSON output.
+
+### Submit through Velour
+
+```
+venv/bin/python manage.py hexnn_hpc_submit --variant islands \
+    --ntasks 16 --pop-per-island 64 --gens-per-epoch 30 --epochs 20 \
+    --merge-strategy diversity-filter --partition cpu-medium \
+    --time-limit 04:00:00
+```
+
+The Conduit handoff lists the four files to scp into the remote dir
+(engine.h / engine.c / mpi_islands.c / Makefile); the sbatch script
+runs `make mpi` on the head node before `mpirun`.
+
+### What's next (Phase 3+ candidates)
+
 - Refactor `../esp32_s3/src/main.cpp` to call into `engine.c`
   instead of inlining the algorithm. One source of truth.
 - `wasm_browser.c` via emscripten to replace the JS engine in
@@ -130,3 +177,5 @@ elite (0.8401 vs 0.8374) on this seed.
 - Trim `engine.c` to the xcc700 dialect (no structs, no `<stdint.h>`,
   no `for(int i…` declarations — already mostly there) so the chip
   can self-compile.
+- GPU + GPU/CPU hybrid drivers, once we have wall-clock numbers
+  from a real ALICE islands run that motivate the GPU work.
