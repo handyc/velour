@@ -66,7 +66,7 @@
   </label>
   <label>
     seed
-    <input id="hxnn-seed" type="number" value="1" style="width:6rem;">
+    <input id="hxnn-seed" type="number" value="1" autocomplete="off" style="width:6rem;">
   </label>
   <label>
     tick (ms)
@@ -80,41 +80,40 @@
   <button id="hxnn-play">▶ Play</button>
   <button id="hxnn-step">Step</button>
   <button id="hxnn-reseed">Reseed grid</button>
+  <button id="hxnn-orient" title="Rotate the view between flat-top and pointy-top hex rendering. Engine output is identical — only the picture changes.">⬢ Pointy top</button>
   <button id="hxnn-download" title="Download the current rule as a JSON genome (palette + 16,384 prototype keys + outputs)">💾 Download JSON</button>
   <span id="hxnn-tickcount" class="hexnn-stat">tick 0</span>
   <span id="hxnn-bin-stat" class="hexnn-stat"></span>
 </div>
 
 <div class="hexnn-buttons" style="margin-top:0.4rem;border-top:1px solid #21262d;padding-top:0.6rem;">
-  <button id="hxnn-hunt" style="background:#238636;color:#fff;border:0;">🧬 Hunt</button>
+  <button id="hxnn-hunt" style="background:#238636;color:#fff;border:0;" title="Broad search. Half the population is mutated from the current rule, half is randomly generated. Use this to find a new rule class.">🧬 Hunt</button>
+  <button id="hxnn-refine" style="background:#1f6feb;color:#fff;border:0;" title="Narrow improvement. Whole population descends from the current rule (no random fill). Use this to iteratively sharpen the rule you already have.">🎯 Refine</button>
+  <button id="hxnn-auto-btn" style="background:#a371f7;color:#fff;border:0;" title="Run a Hunt round and then keep refining forever — after each round finishes, wait the delay and start the next as a Refine. Stop ends both the current round and the chain.">🔁 Auto</button>
   <button id="hxnn-hunt-stop" disabled>Stop</button>
   <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
     population
-    <input id="hxnn-pop" type="number" min="4" max="64" value="16" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+    <input id="hxnn-pop" type="number" min="4" max="64" step="1" value="16" autocomplete="off" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
   </label>
   <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
     generations
-    <input id="hxnn-gens" type="number" min="5" max="500" value="60" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+    <input id="hxnn-gens" type="number" min="5" max="500" step="1" value="60" autocomplete="off" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
   </label>
   <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
     fitness steps
-    <input id="hxnn-steps" type="number" min="20" max="200" value="80" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+    <input id="hxnn-steps" type="number" min="20" max="200" step="1" value="80" autocomplete="off" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
   </label>
   <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
     mutation rate
-    <input id="hxnn-mut" type="number" step="0.0001" min="0" max="0.05" value="0.0005" style="width:5.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+    <input id="hxnn-mut" type="number" step="0.0001" min="0" max="0.05" value="0.0005" autocomplete="off" style="width:5.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
   </label>
-  <label style="font-size:0.8rem;color:#8b949e;display:flex;align-items:center;gap:0.3rem;cursor:pointer;" title="Seed the entire population from mutated copies of the current rule. No random fill, no crossover with random — every child is a descendant of the current best. Press Hunt repeatedly to keep refining.">
-    <input id="hxnn-refine" type="checkbox" style="margin:0;">
-    <span>refine current rule</span>
-  </label>
-  <label style="font-size:0.8rem;color:#8b949e;display:flex;align-items:center;gap:0.3rem;cursor:pointer;" title="Run the initial round, then keep refining automatically: after each round finishes, wait the delay, force refine on, and start another round. Stop ends both the current round and any pending auto-restart.">
+  <label style="font-size:0.8rem;color:#8b949e;display:flex;align-items:center;gap:0.3rem;cursor:pointer;" title="After this round finishes, automatically start a Refine round on a timer. Keeps narrowing in on the current rule until you hit Stop.">
     <input id="hxnn-auto" type="checkbox" style="margin:0;">
     <span>auto-refine</span>
   </label>
   <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
     delay (s)
-    <input id="hxnn-auto-delay" type="number" min="0" max="60" step="0.5" value="3" style="width:4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+    <input id="hxnn-auto-delay" type="number" min="0" max="60" step="0.5" value="3" autocomplete="off" style="width:4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
   </label>
   <span id="hxnn-hunt-stat" class="hexnn-stat"></span>
 </div>
@@ -291,11 +290,15 @@ function lookup(bins, self_c, n0, n1, n2, n3, n4, n5){
   return bin.outs[best];
 }
 
-// ── Hex render — flat-top, offset columns ──────────────────────────
-function hexCorners(cx, cy, sz){
+// ── Hex render ─────────────────────────────────────────────────────
+// Two orientations supported, both purely visual — neighbour math
+// and engine output are identical. Flat-top puts horizontal edges on
+// top/bottom (corners at angles 0°, 60°, …); pointy-top adds π/6 so
+// the corners are at 30°, 90°, …, with vertical sides.
+function hexCorners(cx, cy, sz, angle0){
   const pts = new Array(6);
   for (let i = 0; i < 6; i++){
-    const a = Math.PI / 3 * i;
+    const a = Math.PI / 3 * i + angle0;
     pts[i] = [cx + sz * Math.cos(a), cy + sz * Math.sin(a)];
   }
   return pts;
@@ -305,6 +308,7 @@ function hexCorners(cx, cy, sz){
 const state = {
   K: 4, W: 16, H: 16, palette: [], paletteName: 'random',
   genome: null, bins: null, grid: null, tick: 0, timer: null, seed: 1,
+  orientation: 'flat',  // 'flat' (top/bottom horizontal) or 'pointy' (sides vertical)
 };
 
 function freshGrid(W, H, K, rng){
@@ -344,24 +348,62 @@ const ctx = cv.getContext('2d');
 
 function draw(){
   const W = state.W, H = state.H;
-  // Choose cell pixel size to fill the canvas.
-  const cellPx = Math.max(4, Math.min(28, Math.floor(Math.min(cv.width / (W * 0.85), cv.height / H))));
-  const colDx = cellPx * 0.75;
-  const rowH  = Math.sqrt(3) * cellPx / 2;
+  const pointy = state.orientation === 'pointy';
+  // Cell pixel budget — denominator is the column-step / cellPx ratio
+  // for the orientation. Flat: cellPx*0.75 horizontally. Pointy:
+  // cellPx*0.75 vertically; horizontal step is √3/2·cellPx.
+  let cellPx;
+  if (pointy) {
+    cellPx = Math.max(4, Math.min(28, Math.floor(Math.min(
+      cv.width / (W * 0.9),
+      cv.height / (H * 0.85),
+    ))));
+  } else {
+    cellPx = Math.max(4, Math.min(28, Math.floor(Math.min(
+      cv.width / (W * 0.85),
+      cv.height / H,
+    ))));
+  }
+  const sz   = cellPx / 2;
+  const sqrt3 = Math.sqrt(3);
   ctx.fillStyle = '#0d1117';
   ctx.fillRect(0, 0, cv.width, cv.height);
-  for (let y = 0; y < H; y++){
-    for (let x = 0; x < W; x++){
-      const v = state.grid[y * W + x];
-      const cx = 4 + x * colDx + cellPx / 2;
-      const cy = 4 + y * rowH + ((x & 1) ? rowH / 2 : 0) + cellPx / 2;
-      const pts = hexCorners(cx, cy, cellPx / 2);
-      ctx.fillStyle = state.palette[v] || '#444';
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.fill();
+
+  if (pointy) {
+    // Pointy-top: rows offset horizontally; vertical step = 1.5·sz.
+    const colW  = sqrt3 * sz;
+    const rowDy = sz * 1.5;
+    for (let y = 0; y < H; y++){
+      for (let x = 0; x < W; x++){
+        const v = state.grid[y * W + x];
+        const cx = 4 + x * colW + ((y & 1) ? colW / 2 : 0) + colW / 2;
+        const cy = 4 + y * rowDy + sz;
+        const pts = hexCorners(cx, cy, sz, Math.PI / 6);
+        ctx.fillStyle = state.palette[v] || '#444';
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  } else {
+    // Flat-top: columns offset vertically; horizontal step = 1.5·sz.
+    const colDx = sz * 1.5;
+    const rowH  = sqrt3 * sz;
+    for (let y = 0; y < H; y++){
+      for (let x = 0; x < W; x++){
+        const v = state.grid[y * W + x];
+        const cx = 4 + x * colDx + sz;
+        const cy = 4 + y * rowH + ((x & 1) ? rowH / 2 : 0) + sz;
+        const pts = hexCorners(cx, cy, sz, 0);
+        ctx.fillStyle = state.palette[v] || '#444';
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
   }
 }
@@ -418,6 +460,12 @@ document.getElementById('hxnn-play').addEventListener('click', () => {
 });
 document.getElementById('hxnn-step').addEventListener('click', step);
 document.getElementById('hxnn-reseed').addEventListener('click', reseed);
+document.getElementById('hxnn-orient').addEventListener('click', () => {
+  state.orientation = state.orientation === 'pointy' ? 'flat' : 'pointy';
+  document.getElementById('hxnn-orient').textContent =
+    state.orientation === 'pointy' ? '⬢ Flat top' : '⬢ Pointy top';
+  draw();
+});
 document.getElementById('hxnn-tick').addEventListener('input', e => {
   document.getElementById('hxnn-tick-out').textContent = e.target.value + ' ms';
   if (state.timer){
@@ -478,9 +526,11 @@ function stepWithGenomeBins(grid, W, H, bins) {
 }
 
 function score(g, W, steps, rng, burnIn) {
-  // Run the genome on a fresh random grid for `steps` ticks. Score
-  // the post-burn-in mean change rate (quantize-to-K=4) under the
-  // edge-of-chaos parabola 4·x·(1-x), which peaks at x=0.5.
+  // Run the genome on a fresh random grid for `steps` ticks, return
+  // both the post-burn-in mean change rate (quantize-to-K=4) AND the
+  // edge-of-chaos parabola fitness 4·r·(1-r) that peaks at r=0.5.
+  // Callers care about r itself — it's where the dynamics regime
+  // lives — so we hand it back alongside the headline number.
   const bins = buildBins(g);
   let cur = freshGrid(W, W, g.K, rng);
   // Quick-prune: if a rule is truly degenerate (all-zero outputs) the
@@ -497,7 +547,7 @@ function score(g, W, steps, rng, burnIn) {
     cur = nxt;
   }
   const r = counted > 0 ? total / counted : 0;
-  return 4 * r * (1 - r);
+  return {f: 4 * r * (1 - r), r};
 }
 
 function mutateGenome(g, rate, rng) {
@@ -553,17 +603,36 @@ let huntController = null;
 let autoTimer = null;          // setTimeout for next auto-round
 let autoCountdownTimer = null; // setInterval for the visible countdown
 
-async function startHunt(){
+// Read a number from an input, clamp it to [min, max], optionally
+// round to integer, and WRITE THE CORRECTED VALUE BACK so the user
+// sees stale/invalid contents — including browser autofill noise —
+// get repaired in the field instead of silently falling back to a
+// hidden default.
+function readClampedNum(id, min, max, fallback, isInt){
+  const el = document.getElementById(id);
+  let v = isInt ? parseInt(el.value, 10) : parseFloat(el.value);
+  if (!Number.isFinite(v)) v = fallback;
+  if (v < min) v = min;
+  if (v > max) v = max;
+  if (isInt) v = Math.round(v);
+  // Only overwrite if the rendered value would change — avoids
+  // sending unwanted 'input' events on every read.
+  const asString = isInt ? String(v) : String(v);
+  if (el.value !== asString) el.value = asString;
+  return v;
+}
+
+async function startHunt(mode){
   if (huntController) return;
   // Defensive: clear any pending auto-restart so an explicit click
   // never collides with a timer-driven one.
   if (autoTimer)          { clearTimeout(autoTimer);   autoTimer = null; }
   if (autoCountdownTimer) { clearInterval(autoCountdownTimer); autoCountdownTimer = null; }
-  const popSize = parseInt(document.getElementById('hxnn-pop').value,   10) || 16;
-  const gens    = parseInt(document.getElementById('hxnn-gens').value,  10) || 60;
-  const steps   = parseInt(document.getElementById('hxnn-steps').value, 10) || 80;
-  const rate    = parseFloat(document.getElementById('hxnn-mut').value) || 0.0005;
-  const refine  = document.getElementById('hxnn-refine').checked;
+  const popSize = readClampedNum('hxnn-pop',   4,  64,   16,    true);
+  const gens    = readClampedNum('hxnn-gens',  5,  500,  60,    true);
+  const steps   = readClampedNum('hxnn-steps', 20, 200,  80,    true);
+  const rate    = readClampedNum('hxnn-mut',   0,  0.05, 0.0005, false);
+  const refine  = mode === 'refine';
   const burnIn  = Math.max(8, Math.floor(steps / 4));
   const W       = state.W;
   const huntSeed = (parseInt(document.getElementById('hxnn-seed').value,10) || 1) * 31 + 17;
@@ -600,6 +669,8 @@ async function startHunt(){
   const log = [];
 
   document.getElementById('hxnn-hunt').disabled = true;
+  document.getElementById('hxnn-refine').disabled = true;
+  document.getElementById('hxnn-auto-btn').disabled = true;
   document.getElementById('hxnn-hunt-stop').disabled = false;
   if (state.timer) { clearInterval(state.timer); state.timer = null;
     document.getElementById('hxnn-play').textContent = '▶ Play'; }
@@ -632,6 +703,7 @@ async function startHunt(){
 
   let bestGenome = pop[0];
   let bestFit = -1;
+  let bestR   = 0;     // change rate of the best-scoring individual
   const t0 = performance.now();
   const PULSE = '◐◓◑◒';
   const stat = document.getElementById('hxnn-hunt-stat');
@@ -647,16 +719,21 @@ async function startHunt(){
     // slow generations.
     const scored = [];
     for (let i = 0; i < pop.length && !stopped; i++) {
-      const f = score(pop[i], W, steps, rng, burnIn);
+      const sc = score(pop[i], W, steps, rng, burnIn);
+      const f = sc.f, rCur = sc.r;
       scored.push({g: pop[i], f});
 
       if (f > bestFit) {
         bestFit = f;
+        bestR   = rCur;
         bestGenome = {K: pop[i].K, keys: new Uint8Array(pop[i].keys), outs: new Uint8Array(pop[i].outs)};
       }
 
       // Live progress: ETA from observed evals/sec; pulse so the user
-      // sees the line move even when fitness stays flat.
+      // sees the line move even when fitness stays flat. We also
+      // surface the underlying change rate r — fitness is 4·r·(1-r)
+      // which is symmetric around r=0.5, so the same fitness can come
+      // from either a sluggish (r<0.5) or noisy (r>0.5) regime.
       const evalsDone = gen * popSize + (i + 1);
       const evalsTotal = gens * popSize;
       const elapsed = (performance.now() - t0) / 1000;
@@ -666,7 +743,8 @@ async function startHunt(){
       const modeTag = refine ? 'refine' : 'hunt';
       stat.textContent =
         `${pulse} ${modeTag} gen ${gen+1}/${gens} · ind ${i+1}/${popSize} · ` +
-        `best ${bestFit.toFixed(4)} · cur ${f.toFixed(4)} · ` +
+        `best ${bestFit.toFixed(4)} (r=${bestR.toFixed(3)}) · ` +
+        `cur ${f.toFixed(4)} (r=${rCur.toFixed(3)}) · ` +
         `~${remain.toFixed(0)}s left · ${bar12(i + 1, popSize)}`;
 
       // Yield every individual — UI gets a chance to paint and the
@@ -701,25 +779,21 @@ async function startHunt(){
   draw();
   const dt = ((performance.now() - t0) / 1000).toFixed(1);
   const baseStat = (stopped ? 'stopped' : 'done') +
-    ` · ${refine ? 'refine' : 'hunt'} · best ${bestFit.toFixed(4)} · ${dt}s · winner applied`;
+    ` · ${refine ? 'refine' : 'hunt'} · best ${bestFit.toFixed(4)} (r=${bestR.toFixed(3)}) · ${dt}s · winner applied`;
   document.getElementById('hxnn-hunt-stat').textContent = baseStat;
 
   huntController = null;
 
-  // Full-auto chain: kick off another round on a timer. The first
-  // round respects whatever the user set; subsequent rounds force
-  // refine on so the rule narrows in on the current best instead of
+  // Full-auto chain: kick off another Refine round on a timer.
+  // Whatever the just-finished round was (Hunt or Refine), the next
+  // one is always Refine — narrows in on the current best instead of
   // resetting to broad-search every time.
   const autoOn = document.getElementById('hxnn-auto').checked;
   if (autoOn && !stopped) {
-    const refineEl = document.getElementById('hxnn-refine');
-    if (!refineEl.checked) { refineEl.checked = true; syncHuntLabel(); }
-
-    const delaySec = Math.max(
-      0, Math.min(60, parseFloat(document.getElementById('hxnn-auto-delay').value) || 0));
+    const delaySec = readClampedNum('hxnn-auto-delay', 0, 60, 3, false);
     if (delaySec <= 0) {
       // Immediate chain — defer one tick so the UI gets a paint.
-      autoTimer = setTimeout(() => { autoTimer = null; startHunt(); }, 0);
+      autoTimer = setTimeout(() => { autoTimer = null; startHunt('refine'); }, 0);
       document.getElementById('hxnn-hunt-stat').textContent =
         baseStat + ' · auto: starting next refine…';
     } else {
@@ -735,15 +809,18 @@ async function startHunt(){
       autoTimer = setTimeout(() => {
         autoTimer = null;
         if (autoCountdownTimer) { clearInterval(autoCountdownTimer); autoCountdownTimer = null; }
-        startHunt();
+        startHunt('refine');
       }, remainMs);
     }
     // Hold the buttons in their hunt-active configuration so Stop
     // works on the pending timer too.
     document.getElementById('hxnn-hunt').disabled = true;
+    document.getElementById('hxnn-refine').disabled = true;
     document.getElementById('hxnn-hunt-stop').disabled = false;
   } else {
     document.getElementById('hxnn-hunt').disabled = false;
+    document.getElementById('hxnn-refine').disabled = false;
+    document.getElementById('hxnn-auto-btn').disabled = false;
     document.getElementById('hxnn-hunt-stop').disabled = true;
   }
 }
@@ -795,7 +872,8 @@ function downloadGenomeJSON(){
 }
 document.getElementById('hxnn-download').addEventListener('click', downloadGenomeJSON);
 
-document.getElementById('hxnn-hunt').addEventListener('click', startHunt);
+document.getElementById('hxnn-hunt'  ).addEventListener('click', () => startHunt('hunt'  ));
+document.getElementById('hxnn-refine').addEventListener('click', () => startHunt('refine'));
 document.getElementById('hxnn-hunt-stop').addEventListener('click', () => {
   // Kills the current round AND any pending auto-restart.
   if (huntController) huntController.stop();
@@ -804,21 +882,22 @@ document.getElementById('hxnn-hunt-stop').addEventListener('click', () => {
   if (!huntController) {
     // We were between rounds — restore button state.
     document.getElementById('hxnn-hunt').disabled = false;
+    document.getElementById('hxnn-refine').disabled = false;
+    document.getElementById('hxnn-auto-btn').disabled = false;
     document.getElementById('hxnn-hunt-stop').disabled = true;
     const stat = document.getElementById('hxnn-hunt-stat');
     stat.textContent = (stat.textContent || '') + ' · auto stopped';
   }
 });
-// Surface refine mode in the button label so it's obvious whether
-// the next click will explore broadly (random fill) or narrow in on
-// the current rule (full warm-start).
-const refineEl = document.getElementById('hxnn-refine');
-const huntBtn  = document.getElementById('hxnn-hunt');
-function syncHuntLabel(){
-  huntBtn.textContent = refineEl.checked ? '🎯 Refine' : '🧬 Hunt';
-}
-refineEl.addEventListener('change', syncHuntLabel);
-syncHuntLabel();
+// 🔁 Auto: one-click "do everything" — flip the auto-refine
+// checkbox on (so the existing chain takes over after each round)
+// and immediately start the first round as a broad Hunt. Stop
+// behaves the same as for Hunt/Refine: kills the running round
+// AND any pending auto-restart.
+document.getElementById('hxnn-auto-btn').addEventListener('click', () => {
+  document.getElementById('hxnn-auto').checked = true;
+  startHunt('hunt');
+});
 
 })();
 </script>
