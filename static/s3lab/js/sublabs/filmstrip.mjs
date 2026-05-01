@@ -30,8 +30,14 @@ import {
 const GRID_COLS       = 8;
 const GRID_ROWS       = 8;
 const N_FRAMES        = GRID_COLS * GRID_ROWS;
-const TILE_PX         = 96;       // pixel side of one CA tile
-const TILE_GAP        = 8;        // gap between tiles
+const TILE_PX         = 48;       // pixel side of one CA tile (half
+                                  // of the original 96 so the whole
+                                  // 8×8 grid fits in a typical
+                                  // viewport without scrolling)
+const TILE_GAP        = 3;        // gap between tiles — tight enough
+                                  // to read the grid as a single
+                                  // population, wide enough to
+                                  // separate individual rules visually
 // Pointy-top hex rendering: odd rows are shifted +CELL_PX/2 on x, so
 // the rightmost cell of an odd row would overshoot a TILE_PX/GRID_W
 // cell width. Divide by GRID_W + 0.5 instead so the offset row's
@@ -499,6 +505,15 @@ function stopTimerRefine() {
 
 function init() {
     bootstrap();
+    // Pin the canvas to whatever the constants say. This keeps the
+    // template's hard-coded width/height attributes from drifting
+    // out of sync if we tune TILE_PX or TILE_GAP later — the JS is
+    // the source of truth.
+    const cv = canvas();
+    if (cv) {
+        cv.width  = CANVAS_PX;
+        cv.height = CANVAS_PX;
+    }
     paintStrip();
 
     document.getElementById('hunt-btn').onclick =
