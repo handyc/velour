@@ -69,6 +69,7 @@ urlpatterns = [
     path('quill/',    include('quill.urls')),
     path('ledger/',   include('ledger.urls')),
     path('s3lab/',    include('s3lab.urls')),
+    path('hexnn/',    include('hexnn.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

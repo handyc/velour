@@ -1,0 +1,659 @@
+{% extends "base.html" %}
+
+{% block title %}Hex NN — nearest-neighbour CA bench{% endblock %}
+
+{% block extra_head %}
+<style>
+  .hexnn-page {max-width:1100px;}
+  .hexnn-ctrls {display:flex;gap:0.7rem;align-items:flex-end;flex-wrap:wrap;font-size:0.85rem;margin:0.6rem 0;}
+  .hexnn-ctrls label {display:flex;flex-direction:column;gap:0.2rem;color:#8b949e;}
+  .hexnn-ctrls input, .hexnn-ctrls select {background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;}
+  .hexnn-buttons {display:flex;gap:0.5rem;align-items:center;margin:0.5rem 0;flex-wrap:wrap;}
+  .hexnn-buttons button {background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem 0.8rem;cursor:pointer;font-size:0.85rem;}
+  .hexnn-buttons button.primary {background:#1f6feb;color:#fff;border:0;}
+  .hexnn-stat {color:#8b949e;font-family:ui-monospace,monospace;font-size:0.8rem;}
+  canvas#hexnn-cv {background:#0d1117;border:1px solid #30363d;display:block;image-rendering:pixelated;}
+  .hexnn-info {color:#8b949e;font-size:0.8rem;max-width:64ch;line-height:1.5;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hexnn-page">
+
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+  Hex NN
+  <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
+    nearest-neighbour CA · K dialable 4–256
+  </span>
+</h1>
+
+<p class="hexnn-info">
+  Sibling to <a href="/s3lab/" style="color:#79c0ff;">/s3lab/</a> — totally separate
+  format, separate engine, separate code path. The rule is {{ n_entries }} prototype
+  7-tuples each with one output colour; at runtime the cell's actual neighbourhood
+  is matched to the <em>closest</em> prototype (squared Euclidean distance,
+  bucketed by self-colour). Lets a single 16K-entry rule cover any K from 4 to 256
+  — colours that differ by one or two shades reinterpret to the same prototype.
+</p>
+
+<div class="hexnn-ctrls">
+  <label>
+    K (colours)
+    <select id="hxnn-k">
+      {% for n in k_choices %}
+        <option value="{{ n }}" {% if n == default_k %}selected{% endif %}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    grid
+    <select id="hxnn-grid">
+      <option value="16">16×16</option>
+      <option value="32">32×32</option>
+      <option value="48">48×48</option>
+      <option value="64">64×64</option>
+    </select>
+  </label>
+  <label>
+    palette
+    <select id="hxnn-palette">
+      <option value="random">random ANSI</option>
+      <option value="viridis">viridis</option>
+      <option value="plasma">plasma</option>
+      <option value="grayscale">grayscale</option>
+      <option value="rainbow">rainbow</option>
+    </select>
+  </label>
+  <label>
+    seed
+    <input id="hxnn-seed" type="number" value="1" style="width:6rem;">
+  </label>
+  <label>
+    tick (ms)
+    <input id="hxnn-tick" type="range" min="40" max="800" step="20" value="200" style="width:7rem;">
+  </label>
+  <span id="hxnn-tick-out" class="hexnn-stat">200 ms</span>
+</div>
+
+<div class="hexnn-buttons">
+  <button class="primary" id="hxnn-newrule">🎲 New rule</button>
+  <button id="hxnn-play">▶ Play</button>
+  <button id="hxnn-step">Step</button>
+  <button id="hxnn-reseed">Reseed grid</button>
+  <span id="hxnn-tickcount" class="hexnn-stat">tick 0</span>
+  <span id="hxnn-bin-stat" class="hexnn-stat"></span>
+</div>
+
+<div class="hexnn-buttons" style="margin-top:0.4rem;border-top:1px solid #21262d;padding-top:0.6rem;">
+  <button id="hxnn-hunt" style="background:#238636;color:#fff;border:0;">🧬 Hunt</button>
+  <button id="hxnn-hunt-stop" disabled>Stop</button>
+  <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
+    population
+    <input id="hxnn-pop" type="number" min="4" max="64" value="16" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+  </label>
+  <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
+    generations
+    <input id="hxnn-gens" type="number" min="5" max="500" value="60" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+  </label>
+  <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
+    fitness steps
+    <input id="hxnn-steps" type="number" min="20" max="200" value="80" style="width:4.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+  </label>
+  <label style="font-size:0.8rem;color:#8b949e;display:flex;flex-direction:column;gap:0.1rem;">
+    mutation rate
+    <input id="hxnn-mut" type="number" step="0.0001" min="0" max="0.05" value="0.0005" style="width:5.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+  </label>
+  <span id="hxnn-hunt-stat" class="hexnn-stat"></span>
+</div>
+<svg id="hxnn-hunt-chart" width="640" height="80" style="display:none;background:#0d1117;border:1px solid #30363d;margin:0.4rem 0;"></svg>
+
+<canvas id="hexnn-cv" width="640" height="480"></canvas>
+
+<p class="hexnn-info" style="margin-top:0.6rem;">
+  At low K (4) prototypes pack the lattice and the system behaves like the
+  positional K=4 family. At high K (64, 256) the prototypes become a sparse
+  Voronoi partition — most random rules look like noise; class IV regions are
+  rarer but visually closer to organic gradients. The "New rule" button
+  generates a fresh random genome at the current K; "Reseed grid" randomises
+  initial cell colours without touching the rule.
+</p>
+
+</div>
+
+<script>
+(function(){
+
+// ── ANSI-256 → CSS hex (matches s3lab's table) ─────────────────────
+const ANSI_STD = [
+  [0,0,0],[128,0,0],[0,128,0],[128,128,0],[0,0,128],[128,0,128],[0,128,128],[192,192,192],
+  [128,128,128],[255,0,0],[0,255,0],[255,255,0],[0,0,255],[255,0,255],[0,255,255],[255,255,255],
+];
+const ANSI_LVL = [0, 95, 135, 175, 215, 255];
+function ansi256_rgb(idx){
+  idx &= 0xFF;
+  if (idx < 16) return ANSI_STD[idx];
+  if (idx < 232){
+    const i = idx - 16;
+    return [ANSI_LVL[(i/36)|0], ANSI_LVL[((i%36)/6)|0], ANSI_LVL[i%6]];
+  }
+  let v = 8 + (idx - 232) * 10;
+  if (v > 255) v = 255;
+  return [v, v, v];
+}
+function rgbToHex(r,g,b){return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('');}
+
+// ── Procedural palette generators ──────────────────────────────────
+function paletteFor(name, K, rng){
+  const out = new Array(K);
+  if (name === 'viridis'){
+    // Approximate viridis stops; interpolate.
+    const stops = [[68,1,84],[59,82,139],[33,144,141],[93,201,99],[253,231,37]];
+    for (let i = 0; i < K; i++){
+      const t = i/(K-1||1);
+      const f = t * (stops.length-1);
+      const a = stops[Math.floor(f)], b = stops[Math.min(stops.length-1, Math.floor(f)+1)];
+      const u = f - Math.floor(f);
+      out[i] = rgbToHex(
+        Math.round(a[0]+(b[0]-a[0])*u),
+        Math.round(a[1]+(b[1]-a[1])*u),
+        Math.round(a[2]+(b[2]-a[2])*u),
+      );
+    }
+  } else if (name === 'plasma'){
+    const stops = [[13,8,135],[126,3,168],[204,71,120],[248,149,64],[240,249,33]];
+    for (let i = 0; i < K; i++){
+      const t = i/(K-1||1);
+      const f = t * (stops.length-1);
+      const a = stops[Math.floor(f)], b = stops[Math.min(stops.length-1, Math.floor(f)+1)];
+      const u = f - Math.floor(f);
+      out[i] = rgbToHex(
+        Math.round(a[0]+(b[0]-a[0])*u),
+        Math.round(a[1]+(b[1]-a[1])*u),
+        Math.round(a[2]+(b[2]-a[2])*u),
+      );
+    }
+  } else if (name === 'grayscale'){
+    for (let i = 0; i < K; i++){
+      const v = Math.round(i/(K-1||1) * 255);
+      out[i] = rgbToHex(v, v, v);
+    }
+  } else if (name === 'rainbow'){
+    for (let i = 0; i < K; i++){
+      const h = i/(K||1) * 360;
+      // HSL → RGB, S=L=0.5
+      const c = (1 - Math.abs(2*0.5-1)) * 1;
+      const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+      let r=0,g=0,b=0;
+      if (h<60){r=c;g=x;}
+      else if (h<120){r=x;g=c;}
+      else if (h<180){g=c;b=x;}
+      else if (h<240){g=x;b=c;}
+      else if (h<300){r=x;b=c;}
+      else {r=c;b=x;}
+      const m = 0.5 - c/2;
+      out[i] = rgbToHex(Math.round((r+m)*255), Math.round((g+m)*255), Math.round((b+m)*255));
+    }
+  } else {
+    // random ANSI (plus the 16 system colours mixed in)
+    for (let i = 0; i < K; i++){
+      const idx = (rng() * 256) | 0;
+      const [r,g,b] = ansi256_rgb(idx);
+      out[i] = rgbToHex(r,g,b);
+    }
+  }
+  return out;
+}
+
+// Mulberry32 — small fast deterministic PRNG.
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ── Genome generation: 16,384 random prototypes ────────────────────
+const N_LOG2 = 14;
+const N_ENTRIES = 1 << N_LOG2;
+
+function makeGenome(K, seed){
+  const rng = mulberry32(seed);
+  const keys = new Uint8Array(N_ENTRIES * 7);
+  const outs = new Uint8Array(N_ENTRIES);
+  for (let i = 0; i < N_ENTRIES; i++){
+    for (let j = 0; j < 7; j++) keys[i*7 + j] = (rng() * K) | 0;
+    outs[i] = (rng() * K) | 0;
+  }
+  return {K, keys, outs};
+}
+
+// Group prototypes by self-colour. Returns an array of length K;
+// bins[s] = {neighbours: Uint8Array(M*6), outs: Uint8Array(M), count}
+function buildBins(g){
+  const K = g.K;
+  const counts = new Array(K).fill(0);
+  for (let i = 0; i < N_ENTRIES; i++) counts[g.keys[i*7]]++;
+  const bins = new Array(K);
+  const cursor = new Array(K).fill(0);
+  for (let s = 0; s < K; s++){
+    bins[s] = {
+      nbs:  new Uint8Array(counts[s] * 6),
+      outs: new Uint8Array(counts[s]),
+      count: counts[s],
+    };
+  }
+  for (let i = 0; i < N_ENTRIES; i++){
+    const s = g.keys[i*7];
+    const k = cursor[s]++;
+    for (let j = 0; j < 6; j++) bins[s].nbs[k*6 + j] = g.keys[i*7 + 1 + j];
+    bins[s].outs[k] = g.outs[i];
+  }
+  return bins;
+}
+
+// Nearest-prototype lookup: scan the bin, pick min squared distance.
+function lookup(bins, self_c, n0, n1, n2, n3, n4, n5){
+  const bin = bins[self_c];
+  if (!bin || bin.count === 0) return self_c;
+  const nbs = bin.nbs;
+  let best = 0, bestD = Infinity;
+  for (let k = 0; k < bin.count; k++){
+    const o = k * 6;
+    const d0 = nbs[o]   - n0,
+          d1 = nbs[o+1] - n1,
+          d2 = nbs[o+2] - n2,
+          d3 = nbs[o+3] - n3,
+          d4 = nbs[o+4] - n4,
+          d5 = nbs[o+5] - n5;
+    const d = d0*d0 + d1*d1 + d2*d2 + d3*d3 + d4*d4 + d5*d5;
+    if (d < bestD){
+      bestD = d; best = k;
+      if (d === 0) break;
+    }
+  }
+  return bin.outs[best];
+}
+
+// ── Hex render — flat-top, offset columns ──────────────────────────
+function hexCorners(cx, cy, sz){
+  const pts = new Array(6);
+  for (let i = 0; i < 6; i++){
+    const a = Math.PI / 3 * i;
+    pts[i] = [cx + sz * Math.cos(a), cy + sz * Math.sin(a)];
+  }
+  return pts;
+}
+
+// ── State + step ────────────────────────────────────────────────────
+const state = {
+  K: 4, W: 16, H: 16, palette: [], paletteName: 'random',
+  genome: null, bins: null, grid: null, tick: 0, timer: null, seed: 1,
+};
+
+function freshGrid(W, H, K, rng){
+  const g = new Uint8Array(W * H);
+  for (let i = 0; i < g.length; i++) g[i] = (rng() * K) | 0;
+  return g;
+}
+
+function step(){
+  const W = state.W, H = state.H;
+  const cur = state.grid;
+  const nxt = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++){
+    for (let x = 0; x < W; x++){
+      const self_c = cur[y * W + x];
+      const even = (x & 1) === 0;
+      const yN  = y - 1, yS = y + 1;
+      const yNE = even ? y - 1 : y, ySE = even ? y : y + 1;
+      const ySW = even ? y     : y + 1, yNW = even ? y - 1 : y;
+      const n0 = (yN  >= 0)             ? cur[yN  * W + x]     : 0;
+      const n1 = (yNE >= 0 && x+1 < W && yNE < H) ? cur[yNE * W + x+1] : 0;
+      const n2 = (ySE < H && x+1 < W && ySE >= 0) ? cur[ySE * W + x+1] : 0;
+      const n3 = (yS  < H)              ? cur[yS  * W + x]     : 0;
+      const n4 = (ySW < H && x-1 >= 0 && ySW >= 0) ? cur[ySW * W + x-1] : 0;
+      const n5 = (yNW >= 0 && x-1 >= 0 && yNW < H) ? cur[yNW * W + x-1] : 0;
+      nxt[y * W + x] = lookup(state.bins, self_c, n0, n1, n2, n3, n4, n5);
+    }
+  }
+  state.grid = nxt;
+  state.tick++;
+  document.getElementById('hxnn-tickcount').textContent = 'tick ' + state.tick;
+  draw();
+}
+
+const cv  = document.getElementById('hexnn-cv');
+const ctx = cv.getContext('2d');
+
+function draw(){
+  const W = state.W, H = state.H;
+  // Choose cell pixel size to fill the canvas.
+  const cellPx = Math.max(4, Math.min(28, Math.floor(Math.min(cv.width / (W * 0.85), cv.height / H))));
+  const colDx = cellPx * 0.75;
+  const rowH  = Math.sqrt(3) * cellPx / 2;
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  for (let y = 0; y < H; y++){
+    for (let x = 0; x < W; x++){
+      const v = state.grid[y * W + x];
+      const cx = 4 + x * colDx + cellPx / 2;
+      const cy = 4 + y * rowH + ((x & 1) ? rowH / 2 : 0) + cellPx / 2;
+      const pts = hexCorners(cx, cy, cellPx / 2);
+      ctx.fillStyle = state.palette[v] || '#444';
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+// ── Wiring ──────────────────────────────────────────────────────────
+function rebuild(){
+  const K = parseInt(document.getElementById('hxnn-k').value, 10);
+  const W = parseInt(document.getElementById('hxnn-grid').value, 10);
+  const seed = parseInt(document.getElementById('hxnn-seed').value, 10) || 1;
+  const palName = document.getElementById('hxnn-palette').value;
+  state.K = K; state.W = W; state.H = W; state.seed = seed; state.paletteName = palName;
+  const rng = mulberry32(seed);
+  state.palette = paletteFor(palName, K, rng);
+  state.genome = makeGenome(K, seed);
+  state.bins = buildBins(state.genome);
+  state.grid = freshGrid(W, W, K, rng);
+  state.tick = 0;
+  // Tell the user how the bins are populated — useful sanity check.
+  let minBin = Infinity, maxBin = 0;
+  for (let s = 0; s < K; s++){
+    const c = state.bins[s].count;
+    if (c < minBin) minBin = c;
+    if (c > maxBin) maxBin = c;
+  }
+  document.getElementById('hxnn-bin-stat').textContent =
+    `K=${K} · ${N_ENTRIES} prototypes · per-self bin ${minBin}–${maxBin}`;
+  document.getElementById('hxnn-tickcount').textContent = 'tick 0';
+  draw();
+}
+
+function reseed(){
+  const rng = mulberry32((parseInt(document.getElementById('hxnn-seed').value,10)||1) + state.tick + 7);
+  state.grid = freshGrid(state.W, state.H, state.K, rng);
+  state.tick = 0;
+  document.getElementById('hxnn-tickcount').textContent = 'tick 0';
+  draw();
+}
+
+document.getElementById('hxnn-newrule').addEventListener('click', () => {
+  document.getElementById('hxnn-seed').value =
+    String((parseInt(document.getElementById('hxnn-seed').value,10) || 1) + 1);
+  rebuild();
+});
+document.getElementById('hxnn-play').addEventListener('click', () => {
+  const btn = document.getElementById('hxnn-play');
+  if (state.timer){
+    clearInterval(state.timer); state.timer = null;
+    btn.textContent = '▶ Play';
+  } else {
+    const ms = parseInt(document.getElementById('hxnn-tick').value, 10);
+    state.timer = setInterval(step, ms);
+    btn.textContent = '⏸ Pause';
+  }
+});
+document.getElementById('hxnn-step').addEventListener('click', step);
+document.getElementById('hxnn-reseed').addEventListener('click', reseed);
+document.getElementById('hxnn-tick').addEventListener('input', e => {
+  document.getElementById('hxnn-tick-out').textContent = e.target.value + ' ms';
+  if (state.timer){
+    clearInterval(state.timer);
+    state.timer = setInterval(step, parseInt(e.target.value, 10));
+  }
+});
+['hxnn-k','hxnn-grid','hxnn-palette','hxnn-seed'].forEach(id => {
+  document.getElementById(id).addEventListener('change', rebuild);
+});
+
+rebuild();
+
+// ── Hunt ───────────────────────────────────────────────────────────
+//
+// In-browser GA. Three axes of mutation: a small fraction of prototype
+// outputs are reassigned to a random colour, AND a small fraction of
+// prototype key coordinates are drifted by ±1 (so prototypes migrate
+// in colour-space rather than teleport — preserves the family-resemblance
+// the nearest-neighbour format gives us). Fitness is the K-agnostic
+// edge-of-chaos parabola on the *quantize-to-K=4* change rate: the user's
+// idea — bucket each cell into one of 4 macro-states before counting
+// transitions, so the fitness metric reads the same dynamic-range whether
+// K=4 or K=256.
+
+function quantize4(v, K) {
+  // Map 0..K-1 → 0..3 by equal-width bins.
+  return Math.floor(v * 4 / K);
+}
+
+function changeRateK4(prev, cur, K) {
+  let changes = 0;
+  for (let i = 0; i < cur.length; i++) {
+    if (quantize4(prev[i], K) !== quantize4(cur[i], K)) changes++;
+  }
+  return changes / cur.length;
+}
+
+function stepWithGenomeBins(grid, W, H, bins) {
+  const nxt = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const self_c = grid[y * W + x];
+      const even = (x & 1) === 0;
+      const yN  = y - 1, yS = y + 1;
+      const yNE = even ? y - 1 : y, ySE = even ? y : y + 1;
+      const ySW = even ? y     : y + 1, yNW = even ? y - 1 : y;
+      const n0 = (yN  >= 0)             ? grid[yN  * W + x]     : 0;
+      const n1 = (yNE >= 0 && x+1 < W && yNE < H) ? grid[yNE * W + x+1] : 0;
+      const n2 = (ySE < H && x+1 < W && ySE >= 0) ? grid[ySE * W + x+1] : 0;
+      const n3 = (yS  < H)              ? grid[yS  * W + x]     : 0;
+      const n4 = (ySW < H && x-1 >= 0 && ySW >= 0) ? grid[ySW * W + x-1] : 0;
+      const n5 = (yNW >= 0 && x-1 >= 0 && yNW < H) ? grid[yNW * W + x-1] : 0;
+      nxt[y * W + x] = lookup(bins, self_c, n0, n1, n2, n3, n4, n5);
+    }
+  }
+  return nxt;
+}
+
+function score(g, W, steps, rng, burnIn) {
+  // Run the genome on a fresh random grid for `steps` ticks. Score
+  // the post-burn-in mean change rate (quantize-to-K=4) under the
+  // edge-of-chaos parabola 4·x·(1-x), which peaks at x=0.5.
+  const bins = buildBins(g);
+  let cur = freshGrid(W, W, g.K, rng);
+  // Quick-prune: if a rule is truly degenerate (all-zero outputs) the
+  // grid will collapse fast — burn-in handles it.
+  for (let s = 0; s < burnIn; s++) {
+    cur = stepWithGenomeBins(cur, W, W, bins);
+  }
+  let total = 0;
+  let counted = 0;
+  for (let s = 0; s < steps - burnIn; s++) {
+    const nxt = stepWithGenomeBins(cur, W, W, bins);
+    total += changeRateK4(cur, nxt, g.K);
+    counted++;
+    cur = nxt;
+  }
+  const r = counted > 0 ? total / counted : 0;
+  return 4 * r * (1 - r);
+}
+
+function mutateGenome(g, rate, rng) {
+  const K = g.K;
+  const n = g.outs.length;
+  const child = {
+    K,
+    keys: new Uint8Array(g.keys),
+    outs: new Uint8Array(g.outs),
+  };
+  // Output mutations: reassign to random K-colour.
+  for (let i = 0; i < n; i++) {
+    if (rng() < rate) child.outs[i] = (rng() * K) | 0;
+  }
+  // Key drift: pick one coordinate of one prototype at a time and
+  // nudge it by ±1 (clamped). Drift, not teleport — prototypes migrate
+  // smoothly in colour-space, which is the whole point of NN.
+  const keyMutations = Math.max(1, Math.round(n * 7 * rate));
+  for (let m = 0; m < keyMutations; m++) {
+    const i = (rng() * n) | 0;
+    const j = (rng() * 7) | 0;
+    const off = i * 7 + j;
+    const cur = child.keys[off];
+    const delta = rng() < 0.5 ? -1 : 1;
+    let v = cur + delta;
+    if (v < 0) v = 0;
+    if (v >= K) v = K - 1;
+    child.keys[off] = v;
+  }
+  return child;
+}
+
+function crossover(a, b, rng) {
+  // Single-cut crossover at a random byte boundary. Both halves
+  // refer to "groups of related prototypes" so the cut produces a
+  // genuine recombination of structural ideas.
+  const n = a.outs.length;
+  const cut = 1 + ((rng() * (n - 1)) | 0);
+  const child = {
+    K: a.K,
+    keys: new Uint8Array(n * 7),
+    outs: new Uint8Array(n),
+  };
+  for (let i = 0; i < n; i++) {
+    const src = i < cut ? a : b;
+    for (let j = 0; j < 7; j++) child.keys[i*7 + j] = src.keys[i*7 + j];
+    child.outs[i] = src.outs[i];
+  }
+  return child;
+}
+
+let huntController = null;
+
+async function startHunt(){
+  if (huntController) return;
+  const popSize = parseInt(document.getElementById('hxnn-pop').value,   10) || 16;
+  const gens    = parseInt(document.getElementById('hxnn-gens').value,  10) || 60;
+  const steps   = parseInt(document.getElementById('hxnn-steps').value, 10) || 80;
+  const rate    = parseFloat(document.getElementById('hxnn-mut').value) || 0.0005;
+  const burnIn  = Math.max(8, Math.floor(steps / 4));
+  const W       = state.W;
+  const huntSeed = (parseInt(document.getElementById('hxnn-seed').value,10) || 1) * 31 + 17;
+  const rng = mulberry32(huntSeed);
+
+  // Seed population: half from current state.genome (warm start), half random.
+  // Lets the user "refine" a specific rule, like s3lab's warm-start hunt.
+  const pop = [];
+  pop.push({K: state.genome.K, keys: new Uint8Array(state.genome.keys), outs: new Uint8Array(state.genome.outs)});
+  for (let i = 1; i < popSize / 2; i++) {
+    pop.push(mutateGenome(state.genome, rate * 4, rng));
+  }
+  while (pop.length < popSize) {
+    pop.push(makeGenome(state.K, ((huntSeed + pop.length * 1009) | 0)));
+  }
+
+  // Set up chart.
+  const chart = document.getElementById('hxnn-hunt-chart');
+  chart.style.display = 'block';
+  while (chart.firstChild) chart.removeChild(chart.firstChild);
+  const chartW = parseInt(chart.getAttribute('width'), 10);
+  const chartH = parseInt(chart.getAttribute('height'), 10);
+  const log = [];
+
+  document.getElementById('hxnn-hunt').disabled = true;
+  document.getElementById('hxnn-hunt-stop').disabled = false;
+  if (state.timer) { clearInterval(state.timer); state.timer = null;
+    document.getElementById('hxnn-play').textContent = '▶ Play'; }
+
+  let stopped = false;
+  huntController = {stop(){ stopped = true; }};
+
+  function paintChart(){
+    while (chart.firstChild) chart.removeChild(chart.firstChild);
+    if (log.length === 0) return;
+    const maxFit = Math.max(...log.map(d => d.best), 0.001);
+    const xStep = (chartW - 8) / Math.max(1, gens - 1);
+    let bestPath = '', meanPath = '';
+    log.forEach((d, i) => {
+      const x = 4 + i * xStep;
+      const yb = chartH - 4 - (d.best / maxFit) * (chartH - 12);
+      const ym = chartH - 4 - (d.mean / maxFit) * (chartH - 12);
+      bestPath += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + yb.toFixed(1) + ' ';
+      meanPath += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + ym.toFixed(1) + ' ';
+    });
+    function svgPath(d, color){
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute('d', d); p.setAttribute('fill', 'none');
+      p.setAttribute('stroke', color); p.setAttribute('stroke-width', '1.4');
+      chart.appendChild(p);
+    }
+    svgPath(meanPath, '#79c0ff');
+    svgPath(bestPath, '#7ee787');
+  }
+
+  let bestGenome = pop[0];
+  let bestFit = -1;
+  const t0 = performance.now();
+
+  for (let gen = 0; gen < gens && !stopped; gen++) {
+    // Score every individual.
+    const scored = pop.map(g => ({g, f: score(g, W, steps, rng, burnIn)}));
+    scored.sort((a, b) => b.f - a.f);
+    const meanFit = scored.reduce((s, x) => s + x.f, 0) / scored.length;
+    log.push({best: scored[0].f, mean: meanFit});
+    paintChart();
+
+    if (scored[0].f > bestFit) {
+      bestFit = scored[0].f;
+      bestGenome = {K: scored[0].g.K, keys: new Uint8Array(scored[0].g.keys), outs: new Uint8Array(scored[0].g.outs)};
+    }
+
+    document.getElementById('hxnn-hunt-stat').textContent =
+      `gen ${gen+1}/${gens} · best ${scored[0].f.toFixed(4)} · mean ${meanFit.toFixed(4)}`;
+
+    // Reproduction: keep top quarter; refill via crossover + mutation.
+    const survivors = scored.slice(0, Math.max(2, Math.floor(popSize / 4))).map(s => s.g);
+    const next = [survivors[0]];               // elite
+    while (next.length < popSize) {
+      const a = survivors[(rng() * survivors.length) | 0];
+      const b = survivors[(rng() * survivors.length) | 0];
+      next.push(mutateGenome(crossover(a, b, rng), rate, rng));
+    }
+    pop.length = 0; for (const g of next) pop.push(g);
+
+    // Yield to keep UI responsive.
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // Apply winner to live state.
+  state.genome = bestGenome;
+  state.bins = buildBins(bestGenome);
+  state.tick = 0;
+  document.getElementById('hxnn-tickcount').textContent = 'tick 0';
+  draw();
+  const dt = ((performance.now() - t0) / 1000).toFixed(1);
+  document.getElementById('hxnn-hunt-stat').textContent =
+    (stopped ? 'stopped' : 'done') +
+    ` · best ${bestFit.toFixed(4)} · ${dt}s · winner applied`;
+
+  document.getElementById('hxnn-hunt').disabled = false;
+  document.getElementById('hxnn-hunt-stop').disabled = true;
+  huntController = null;
+}
+
+document.getElementById('hxnn-hunt').addEventListener('click', startHunt);
+document.getElementById('hxnn-hunt-stop').addEventListener('click', () => {
+  if (huntController) huntController.stop();
+});
+
+})();
+</script>
+{% endblock %}
