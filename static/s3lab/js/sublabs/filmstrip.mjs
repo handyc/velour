@@ -22,16 +22,26 @@ import {
 
 // ── Tunables ──────────────────────────────────────────────────────────
 
-const N_FRAMES        = 8;        // total strip slots (including live)
+// 8×8 grid of CA tiles in row-major order. Oldest sits in the
+// top-left, newest (live) in the bottom-right; on each refine, frames
+// shift one slot through the array — frames[0] (oldest) drops, the
+// new winner becomes frames[N_FRAMES-1] in the bottom-right corner.
+// This is the natural 2-D extension of the 1×8 strip we shipped first.
+const GRID_COLS       = 8;
+const GRID_ROWS       = 8;
+const N_FRAMES        = GRID_COLS * GRID_ROWS;
 const TILE_PX         = 96;       // pixel side of one CA tile
 const TILE_GAP        = 8;        // gap between tiles
-const CAPTION_PX      = 24;       // strip below the tile for badges
 // Pointy-top hex rendering: odd rows are shifted +CELL_PX/2 on x, so
 // the rightmost cell of an odd row would overshoot a TILE_PX/GRID_W
 // cell width. Divide by GRID_W + 0.5 instead so the offset row's
 // right edge lands exactly at TILE_PX. Same trick s3lab's TFT
 // renderer uses (drawCell in classic.mjs).
 const CELL_PX         = TILE_PX / (GRID_W + 0.5);
+// Canvas dimension: GRID_COLS × TILE_PX + (GRID_COLS-1) × TILE_GAP.
+// Same value for height since GRID_COLS == GRID_ROWS today; if the
+// constants ever diverge we'd separate these.
+const CANVAS_PX       = GRID_COLS * TILE_PX + (GRID_COLS - 1) * TILE_GAP;
 
 // Stall-detection thresholds — same as Classic.
 const ACT_FLOOR_RUN        = 0.05;
@@ -180,16 +190,20 @@ function paintStrip() {
     ctx.fillStyle = '#0d1117';
     ctx.fillRect(0, 0, cv.width, cv.height);
 
-    // Right-align the strip so the live tile (newest) sits at the
-    // right edge. Older frames extend leftward.
+    // Bottom-right anchor — most recent (live = frames[N_FRAMES-1])
+    // sits in the bottom-right cell of the grid. We render every
+    // present frame at its row-major slot; missing frames (early run
+    // when the population hasn't filled yet) leave those slots empty
+    // so the bottom-right corner is the live tile from frame zero.
     const total = state.frames.length;
-    const stripW = total * TILE_PX + (total - 1) * TILE_GAP;
-    const x0 = cv.width - stripW;
-
+    const startSlot = N_FRAMES - total;   // first occupied slot index
     for (let i = 0; i < total; i++) {
-        const f = state.frames[i];
-        const x = x0 + i * (TILE_PX + TILE_GAP);
-        paintTile(ctx, f, x, 0);
+        const slot = startSlot + i;
+        const r = (slot / GRID_COLS) | 0;
+        const c = slot - r * GRID_COLS;
+        const x = c * (TILE_PX + TILE_GAP);
+        const y = r * (TILE_PX + TILE_GAP);
+        paintTile(ctx, state.frames[i], x, y);
     }
 
     paintCaptions();
@@ -224,24 +238,26 @@ function paintTile(ctx, f, x, y) {
 }
 
 function paintCaptions() {
+    // 8×8 = 64 frames is too many to caption individually without
+    // visual noise overwhelming the actual CA grid. Show a single
+    // live-tile info line; per-tile detail is left for a hover
+    // tooltip (a follow-up; canvas needs an overlay-div layer for
+    // that to work properly).
     const el = captionsEl();
     if (!el) return;
-    const total = state.frames.length;
-    const items = state.frames.map((f, i) => {
-        const isLive = i === total - 1;
-        const fitTxt = f.fitness != null ? f.fitness.toFixed(2) : '—';
-        const ageMs  = Date.now() - f.born;
-        const ageTxt = ageMs < 60000 ? `${(ageMs / 1000) | 0}s`
-                                     : `${(ageMs / 60000) | 0}m`;
-        const mark   = isLive ? '<span class="frame-live">● live</span>'
-                              : `<span class="frame-age">${ageTxt}</span>`;
-        return `<div class="frame-caption">
-                  <span class="frame-label">${escapeHtml(f.label)}</span>
-                  <span class="frame-fit">fit ${fitTxt}</span>
-                  ${mark}
-                </div>`;
-    });
-    el.innerHTML = items.join('');
+    if (state.frames.length === 0) { el.innerHTML = ''; return; }
+    const live = liveFrame();
+    const fitTxt = live.fitness != null ? live.fitness.toFixed(2) : '—';
+    const ageMs  = Date.now() - live.born;
+    const ageTxt = ageMs < 60000 ? `${(ageMs / 1000) | 0}s`
+                                 : `${(ageMs / 60000) | 0}m`;
+    const filled = state.frames.length;
+    el.innerHTML =
+        `<span class="frame-live">● live</span> ` +
+        `<span class="frame-label">${escapeHtml(live.label)}</span> · ` +
+        `<span class="frame-fit">fit ${fitTxt}</span> · ` +
+        `<span class="frame-age">${ageTxt} since boot</span> · ` +
+        `<span class="frame-fit">${filled}/${N_FRAMES} slots filled</span>`;
 }
 
 function escapeHtml(s) {

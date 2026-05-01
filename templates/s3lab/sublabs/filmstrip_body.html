@@ -1,17 +1,20 @@
 {# Filmstrip sublab — strip of past CA refinements scrolling left. #}
-<p class="lede">A scrolling strip of recent CA refinements. The live
-   tile on the right keeps stepping; every time a refine completes,
-   the strip shifts left and the just-superseded genome becomes a new
-   frame in the history. By default older frames are
-   <strong>frozen</strong> (drawn once, zero CPU); flip
-   <em>run history</em> on to keep them all stepping in parallel.</p>
+<p class="lede">An 8×8 grid of recent CA refinements. The live tile
+   sits in the <strong>bottom-right corner</strong> and keeps
+   stepping; every time a refine completes, all tiles shift one slot
+   in row-major order — the oldest (top-left) falls off, the just-
+   superseded genome lands in the second-to-newest slot, and the new
+   winner takes the bottom-right. By default the 63 history tiles are
+   <strong>frozen</strong> (drawn once, zero CPU); flip <em>run
+   history</em> on to keep them all stepping in parallel (~2 ms / tick
+   for the whole grid at 16×16 K=4 — fits comfortably).</p>
 
 <section class="filmstrip-section">
-  <canvas id="filmstrip" width="824" height="124"
-          aria-label="Strip of recent CA refinements"></canvas>
+  <canvas id="filmstrip" width="824" height="824"
+          aria-label="8×8 grid of recent CA refinements"></canvas>
 
   <div class="filmstrip-captions" id="filmstrip-captions"
-       aria-hidden="true"></div>
+       aria-live="polite"></div>
 
   <div class="tft-controls">
     <button id="hunt-btn"

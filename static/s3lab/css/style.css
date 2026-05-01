@@ -57,36 +57,23 @@ canvas#filmstrip {
     max-width: 100%;
 }
 .filmstrip-captions {
+    /* Single info line for the live tile only — 64 per-frame
+     * captions would drown out the grid itself. Per-frame detail
+     * via hover is a planned follow-up (needs an overlay-div layer
+     * over the canvas, since canvas has no clickable subregions). */
     display: flex;
     flex-direction: row;
-    justify-content: flex-end;
+    align-items: center;
     gap: 0.5rem;
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     color: #8b949e;
-    margin-bottom: 0.6rem;
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    margin: 0.4rem 0 0.6rem 0;
+    flex-wrap: wrap;
 }
-.filmstrip-captions .frame-caption {
-    width: 96px;
-    flex: 0 0 96px;
-    text-align: center;
-    line-height: 1.2;
-}
-.filmstrip-captions .frame-label {
-    display: block;
-    color: #c9d1d9;
-}
-.filmstrip-captions .frame-fit {
-    display: block;
-    color: #6e7681;
-}
-.filmstrip-captions .frame-live {
-    color: #3fb950;
-}
-.filmstrip-captions .frame-age {
-    color: #6e7681;
-}
+.filmstrip-captions .frame-label { color: #c9d1d9; }
+.filmstrip-captions .frame-fit   { color: #6e7681; }
+.filmstrip-captions .frame-live  { color: #3fb950; }
+.filmstrip-captions .frame-age   { color: #6e7681; }
 
 .s3lab-header .lede,
 .s3lab .lede {
