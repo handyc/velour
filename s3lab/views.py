@@ -41,6 +41,16 @@ SUBLABS = [
                     'hex tiling. 256 cells, 6-neighbour tournament '
                     'selection. Watch good rules sweep regions.',
     },
+    {
+        'slug':     'stratum',
+        'module':   'stratum',
+        'template': 's3lab/sublabs/stratum_body.html',
+        'name':     'Stratum',
+        'blurb':    'Two-layer hex CA: 64-entry library of K=64 HexNN '
+                    'rules + a 16×16 meta-CA whose states index the '
+                    'library. The elite library entry drives the meta-CA. '
+                    'One rule playing two scales of itself.',
+    },
     # Future sublabs land here. Keep entries small.
 ]
 SUBLABS_BY_SLUG = {s['slug']: s for s in SUBLABS}

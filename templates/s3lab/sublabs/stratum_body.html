@@ -1,0 +1,104 @@
+{# Stratum sublab — two-layer hex CA: library + meta-CA. #}
+<p class="lede">Two coupled layers of the same K=64 hex CA, evolving
+   together. The <strong>library</strong> on the left is 64 distinct
+   K=64 HexNN rules, each with its own ruleset, palette, and running
+   grid; tournament rounds replace underperformers with mutated copies
+   of winners every few seconds. The <strong>meta-CA</strong> on the
+   right is a 16×16 hex grid whose cell <em>states</em> name library
+   entries — a state of 5 means "show library #5 here." The meta-CA
+   steps using the elite library entry's ruleset, so as evolution
+   shifts who's at the top, the meta-CA's stepping rule changes with
+   it. Watch one rule playing two scales of itself simultaneously.</p>
+
+<p class="lede" style="margin-top:-0.4rem;color:#6e7681;">
+   The library doubles as the meta-CA's palette: instead of mapping a
+   state to a colour, we map it to a whole running CA. Multiple
+   meta-cells with the same state show identical patterns — which
+   makes regions of the meta-CA visible at a glance. Gold borders
+   highlight the elite (the library entry currently driving the
+   meta-CA's stepping).
+</p>
+
+<section class="stratum-section"
+         style="display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start;">
+
+  <div>
+    <h2 style="margin:0 0 0.3rem 0;font-size:0.95rem;color:#c9d1d9;">Library
+      <span style="color:#8b949e;font-size:0.8rem;font-weight:normal;">
+        — 64 K=64 HexNN rules · gold = elite
+      </span>
+    </h2>
+    <canvas id="stratum-library" width="296" height="277"
+            aria-label="64-entry library of K=64 HexNN rules"></canvas>
+  </div>
+
+  <div>
+    <h2 style="margin:0 0 0.3rem 0;font-size:0.95rem;color:#c9d1d9;">Meta-CA
+      <span style="color:#8b949e;font-size:0.8rem;font-weight:normal;">
+        — 16×16, states 0..63 index the library
+      </span>
+    </h2>
+    <canvas id="stratum-meta" width="441" height="429"
+            aria-label="16×16 meta-CA grid"></canvas>
+  </div>
+
+</section>
+
+<div class="tft-controls" style="margin-top:0.6rem;">
+  <button id="pause-btn" title="Pause both inner CAs and the meta-CA + tournament timers.">Pause</button>
+  <button id="reset-lib-btn" title="Throw out the entire library and re-roll 64 fresh random K=64 genomes (with palettes + grids).">Reset Library</button>
+  <button id="reseed-meta-btn" title="Re-randomise the meta-CA grid states without disturbing the library.">Reseed Meta</button>
+  <span style="color:#8b949e;font-size:0.8rem;margin-left:1rem;">
+    elite #<span id="stratum-elite-idx" style="color:#d4a72c;font-family:ui-monospace,monospace;">0</span> ·
+    fit <span id="stratum-elite-fit" style="color:#7ee787;font-family:ui-monospace,monospace;">0.000</span>
+    (r=<span id="stratum-elite-r" style="color:#7ee787;font-family:ui-monospace,monospace;">0.000</span>) ·
+    rounds <span id="stratum-rounds" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0</span> ·
+    meta-ticks <span id="stratum-meta-ticks" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0</span>
+  </span>
+</div>
+
+<div class="tft-controls">
+  <label class="slider-label">
+    inner-tick
+    <input type="range" id="inner-tick" min="40" max="2000" step="10" value="200" style="width:6.5rem;">
+    <span id="inner-tick-out" style="font-family:ui-monospace,monospace;color:#8b949e;">200 ms</span>
+  </label>
+  <label class="slider-label">
+    meta-tick
+    <input type="range" id="meta-tick" min="200" max="20000" step="100" value="2000" style="width:6.5rem;">
+    <span id="meta-tick-out" style="font-family:ui-monospace,monospace;color:#8b949e;">2000 ms</span>
+  </label>
+  <label class="slider-label">
+    tournament
+    <input type="range" id="tourn-tick" min="500" max="30000" step="100" value="5000" style="width:6.5rem;">
+    <span id="tourn-tick-out" style="font-family:ui-monospace,monospace;color:#8b949e;">5000 ms</span>
+  </label>
+  <label class="slider-label">
+    mut
+    <input type="number" id="mut-rate" min="0" max="0.05" step="0.0001" value="0.0008"
+           style="width:5.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+  </label>
+</div>
+
+<section class="s3lab-fineprint">
+  <p>HexNN engine extracted from the <code>/hexnn/</code> bench into
+    <code>static/s3lab/js/hexnn_engine.mjs</code>. Same K-dialable hex CA,
+    same mulberry32 PRNG, same nearest-prototype lookup, same
+    edge-of-chaos parabola fitness on the K=4-quantized change rate —
+    just modular instead of inline. K=64 is dialable up to K=256 if
+    you want to push the rule expressivity further (recompile the
+    constant in <code>stratum.mjs</code>).</p>
+  <p>Each tournament round picks two random library entries, scores
+    them on a shared seed, replaces the loser with a mutated copy of
+    the winner. Loser inherits the winner's palette outright — over
+    several rounds dominant rules visibly share colour schemes, which
+    is how you see family resemblance forming. The elite is whoever
+    has the highest fitness in the current library; if a tournament
+    discovers a better entry the meta-CA's stepping rule changes
+    immediately.</p>
+  <p>Cost budget at default settings: 64 inner CAs × ~64 µs each ≈
+    4 ms per inner tick; one meta-CA step = ~50 µs; one tournament
+    round ≈ 1 ms (two 25-step fitness evals). The dominant cost is the
+    render — 64 library thumbnails + 256 meta-cells, each painting a
+    16×16 inner grid via the shared ImageData buffer.</p>
+</section>
