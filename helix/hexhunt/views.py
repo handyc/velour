@@ -301,17 +301,71 @@ def scan_track_json(request, slug):
     })
 
 
+def _scan_runner_thread(scan_pk: int, rule_pk: int, record_pk: int,
+                         window: int, stride: int, start: int, end: int,
+                         scoring_fn: str) -> None:
+    """Background worker for an inline rule-as-filter scan. Updates
+    the scan's n_windows + status as it sweeps the record so the
+    progress.json poll endpoint can stream a live counter to the
+    browser."""
+    import sys
+    import traceback
+    from django.db import close_old_connections
+    from .scan import scan_record
+
+    try:
+        scan = RuleFilterScan.objects.get(pk=scan_pk)
+        rule = HuntRule.objects.get(pk=rule_pk)
+        record = SequenceRecord.objects.get(pk=record_pk)
+        rule_table = engine.unpack_rule(rule.packed())
+
+        # Update n_windows on every progress callback. progress_every
+        # is computed so we get ~30 updates over the span of the scan.
+        progress_every = max(20, scan.total_windows // 30 or 20)
+
+        def progress(i, n):
+            scan.n_windows = i + 1
+            scan.save(update_fields=['n_windows'])
+
+        result = scan_record(
+            record, rule_table,
+            window_size=window, stride=stride,
+            start=start, end=end, scoring_fn=scoring_fn,
+            on_progress=progress, progress_every=progress_every,
+        )
+        scan.track_json  = result.track
+        scan.n_windows   = result.n_windows
+        scan.score_min   = result.score_min
+        scan.score_max   = result.score_max
+        scan.score_mean  = result.score_mean
+        scan.status      = 'done'
+        scan.save()
+    except Exception as exc:
+        traceback.print_exc(file=sys.stderr)
+        try:
+            scan = RuleFilterScan.objects.get(pk=scan_pk)
+            scan.status = 'failed'
+            scan.notes  = f'{type(exc).__name__}: {exc}'
+            scan.save(update_fields=['status', 'notes'])
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+    finally:
+        close_old_connections()
+
+
 @login_required
 def launch_scan(request, slug):
-    """POST handler — kick off a scan from the rule_detail page.
+    """POST handler — kick off a scan in a daemon thread.
 
-    Inline (synchronous) for small scans; for anything larger than
-    ``_INLINE_SCAN_MAX_WINDOWS`` we refuse and ask the user to run
-    the management command instead. We don't ship a background runner
-    in Phase 2 — that's a Phase 3 concern.
+    Validates and persists the RuleFilterScan synchronously, then
+    redirects to scan_detail and runs the scan in the background. The
+    detail page polls scan_progress.json for live counters and reloads
+    when status flips to done/failed. Inline cap caps the scan size to
+    a few seconds of CPU; bigger scans need the management command.
     """
     if request.method != 'POST':
         raise Http404('use POST')
+    import threading
     rule = get_object_or_404(HuntRule, slug=slug)
     try:
         record_pk = int(request.POST['record_pk'])
@@ -342,25 +396,43 @@ def launch_scan(request, slug):
         )
         return redirect('helix:hexhunt:rule_detail', slug=rule.slug)
 
-    from .scan import scan_record
-    rule_table = engine.unpack_rule(rule.packed())
-    result = scan_record(
-        record, rule_table,
-        window_size=window, stride=stride,
-        start=start, end=end, scoring_fn=scoring_fn,
-    )
     scan = RuleFilterScan.objects.create(
         slug=RuleFilterScan.make_slug(),
         rule=rule, record=record,
         window_size=window, stride=stride, scoring_fn=scoring_fn,
-        track_json=result.track,
-        n_windows=result.n_windows,
-        score_min=result.score_min,
-        score_max=result.score_max,
-        score_mean=result.score_mean,
+        total_windows=n_windows,
+        n_windows=0,
+        status='running',
     )
+
+    t = threading.Thread(
+        target=_scan_runner_thread,
+        args=(scan.pk, rule.pk, record.pk, window, stride, start, end,
+              scoring_fn),
+        daemon=True,
+    )
+    t.start()
+
     from django.shortcuts import redirect
     return redirect('helix:hexhunt:scan_detail', slug=scan.slug)
+
+
+@login_required
+@require_GET
+def scan_progress_json(request, slug):
+    """Polled by scan_detail while status='running'."""
+    scan = get_object_or_404(RuleFilterScan, slug=slug)
+    return JsonResponse({
+        'slug':           scan.slug,
+        'status':         scan.status,
+        'windows_done':   int(scan.n_windows),
+        'windows_total':  int(scan.total_windows or scan.n_windows),
+        'score_min':      scan.score_min,
+        'score_max':      scan.score_max,
+        'score_mean':     scan.score_mean,
+        'notes':          scan.notes or '',
+        'created_at':     scan.created_at.isoformat() if scan.created_at else None,
+    })
 
 
 # Inline tournament cap. Tournament cost ≈ pop × gens × windows × steps;

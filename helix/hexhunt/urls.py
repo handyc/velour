@@ -18,4 +18,6 @@ urlpatterns = [
     path('scans/<slug:slug>/',     views.scan_detail,  name='scan_detail'),
     path('scans/<slug:slug>/track.json',
                                    views.scan_track_json, name='scan_track_json'),
+    path('scans/<slug:slug>/progress.json',
+                                   views.scan_progress_json, name='scan_progress_json'),
 ]

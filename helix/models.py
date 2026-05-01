@@ -374,10 +374,27 @@ class RuleFilterScan(models.Model):
         default=list, blank=True,
         help_text='[[start, end, score], ...] — sorted by start.',
     )
-    n_windows = models.PositiveIntegerField(default=0)
+    n_windows = models.PositiveIntegerField(
+        default=0,
+        help_text='Windows processed so far. Equals total_windows when done.',
+    )
+    total_windows = models.PositiveIntegerField(
+        default=0,
+        help_text='Expected window count, set at launch time.',
+    )
     score_min = models.FloatField(default=0.0)
     score_max = models.FloatField(default=0.0)
     score_mean = models.FloatField(default=0.0)
+    STATUS_CHOICES = [
+        ('running', 'Running'),
+        ('done',    'Done'),
+        ('failed',  'Failed'),
+    ]
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default='done',
+        help_text="Default 'done' so historical rows remain valid.",
+    )
+    notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -17,12 +17,91 @@
 </h1>
 
 <dl style="display:grid;grid-template-columns:max-content 1fr;gap:0.2rem 1rem;font-size:0.85rem;color:#c9d1d9;margin-top:0.6rem;">
+  <dt style="color:#8b949e;">Status</dt>
+  <dd style="color:{% if scan.status == 'done' %}#7ee787{% elif scan.status == 'failed' %}#ff7b72{% else %}#d29922{% endif %};">{{ scan.get_status_display }}</dd>
   <dt style="color:#8b949e;">Record</dt><dd>{{ scan.record.organism|default:"—" }} · {{ scan.record.accession|default:"—" }} · {{ scan.record.length_bp }} bp</dd>
-  <dt style="color:#8b949e;">Windows</dt><dd>{{ scan.n_windows }} · window {{ scan.window_size }} bp · stride {{ scan.stride }}</dd>
+  <dt style="color:#8b949e;">Windows</dt><dd>{{ scan.n_windows }}{% if scan.total_windows and scan.status == 'running' %} / {{ scan.total_windows }}{% endif %} · window {{ scan.window_size }} bp · stride {{ scan.stride }}</dd>
   <dt style="color:#8b949e;">Scoring</dt><dd>{{ scan.scoring_fn }}</dd>
   <dt style="color:#8b949e;">Min / mean / max</dt><dd style="font-family:ui-monospace,monospace;">{{ scan.score_min|floatformat:5 }} / {{ scan.score_mean|floatformat:5 }} / {{ scan.score_max|floatformat:5 }}</dd>
   <dt style="color:#8b949e;">Created</dt><dd>{{ scan.created_at|date:"D d M Y H:i" }}</dd>
+  {% if scan.status == 'failed' and scan.notes %}
+  <dt style="color:#8b949e;">Error</dt><dd style="color:#ff7b72;font-family:ui-monospace,monospace;font-size:0.8rem;">{{ scan.notes }}</dd>
+  {% endif %}
 </dl>
+
+{% if scan.status != 'done' %}
+<section id="scan-progress-strip"
+         data-progress-url="{% url 'helix:hexhunt:scan_progress_json' scan.slug %}"
+         data-initial-status="{{ scan.status }}"
+         style="margin-top:1rem;padding:0.6rem 0.8rem;border:1px solid #30363d;background:#0d1117;">
+  <div style="display:flex;align-items:baseline;gap:1rem;font-size:0.85rem;flex-wrap:wrap;">
+    <strong style="color:#c9d1d9;">Live</strong>
+    <span style="color:#8b949e;">window
+      <span id="scan-prog-done" style="color:#c9d1d9;font-family:ui-monospace,monospace;">{{ scan.n_windows }}</span> /
+      <span id="scan-prog-total" style="color:#c9d1d9;font-family:ui-monospace,monospace;">{{ scan.total_windows }}</span>
+    </span>
+    <span style="color:#8b949e;">elapsed <span id="scan-prog-elapsed" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0.0s</span></span>
+    <span style="color:#8b949e;">ETA <span id="scan-prog-eta" style="color:#c9d1d9;font-family:ui-monospace,monospace;">—</span></span>
+  </div>
+  <div style="margin-top:0.4rem;height:6px;background:#21262d;overflow:hidden;">
+    <div id="scan-prog-bar"
+         style="height:100%;width:0%;background:#3fb950;transition:width 250ms linear;"></div>
+  </div>
+  <p style="color:#8b949e;font-size:0.8rem;margin:0.4rem 0 0 0;">
+    The histogram, top-windows table, and feature-overlap stats render
+    once the scan finishes — they need the full track.
+  </p>
+</section>
+
+<script>
+(function(){
+  const strip = document.getElementById('scan-progress-strip');
+  if (!strip || strip.dataset.initialStatus === 'done') return;
+  const url = strip.dataset.progressUrl;
+  const startedAt = Date.now();
+
+  function fmtSec(s){
+    if (!isFinite(s)) return '—';
+    if (s < 60) return s.toFixed(1) + 's';
+    const m = Math.floor(s / 60), r = Math.round(s - m*60);
+    return m + 'm' + (r < 10 ? '0' + r : r) + 's';
+  }
+
+  function pollOnce(){
+    fetch(url, {credentials: 'same-origin'})
+      .then(r => r.json())
+      .then(j => {
+        const done  = j.windows_done | 0;
+        const total = (j.windows_total | 0) || done;
+        const pct   = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+        document.getElementById('scan-prog-done').textContent  = done;
+        document.getElementById('scan-prog-total').textContent = total;
+        document.getElementById('scan-prog-bar').style.width = pct.toFixed(1) + '%';
+
+        const elapsedWall = (Date.now() - startedAt) / 1000;
+        document.getElementById('scan-prog-elapsed').textContent = fmtSec(elapsedWall);
+        if (done > 0 && total > done) {
+          const perWindow = elapsedWall / done;
+          document.getElementById('scan-prog-eta').textContent =
+            fmtSec(perWindow * (total - done));
+        } else if (done >= total && total > 0) {
+          document.getElementById('scan-prog-eta').textContent = '0s';
+        }
+
+        if (j.status === 'running') {
+          setTimeout(pollOnce, 750);
+        } else {
+          // Brief beat so the user sees the bar hit 100%, then reload
+          // so the rich histogram + feature overlap render.
+          setTimeout(() => window.location.reload(), 400);
+        }
+      })
+      .catch(() => setTimeout(pollOnce, 2000));
+  }
+  pollOnce();
+})();
+</script>
+{% endif %}
 
 <h2 style="margin-top:1.4rem;font-size:1.05rem;color:#c9d1d9;">Richness track</h2>
 <svg id="track-svg" width="1100" height="220" style="background:#0d1117;border:1px solid #30363d;display:block;width:100%;max-width:1100px;"></svg>
