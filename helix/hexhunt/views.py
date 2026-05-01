@@ -361,3 +361,148 @@ def launch_scan(request, slug):
     )
     from django.shortcuts import redirect
     return redirect('helix:hexhunt:scan_detail', slug=scan.slug)
+
+
+# Inline tournament cap. Tournament cost ≈ pop × gens × windows × steps;
+# we keep the inline ceiling well below "browser tab times out". Above
+# this, the user should run the management command (which streams
+# per-gen progress to stdout). Numbers picked empirically — 64×40×4
+# finishes in 3-8 s on a laptop.
+_INLINE_RUN_MAX_OPS = 64 * 50 * 6      # pop × gens × windows budget
+
+
+@login_required
+def launch_run(request):
+    """POST handler — kick off a small inline hexhunt tournament.
+
+    Mirrors ``launch_scan``: caps inline runs at a small budget; for
+    bigger tournaments, surfaces the equivalent management command so
+    the user can run it on the server side without a browser tab.
+    """
+    if request.method != 'POST':
+        raise Http404('use POST')
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from django.db import transaction
+    from django.utils import timezone as djtz
+    from helix.hexhunt.tournament import TournamentParams, run_tournament
+
+    corpus_slug = request.POST.get('corpus_slug', '').strip()
+    if not corpus_slug:
+        raise Http404('missing corpus_slug')
+    corpus = get_object_or_404(HuntCorpus, slug=corpus_slug)
+
+    try:
+        pop     = max(8,    min(128,    int(request.POST.get('pop', 64))))
+        gens    = max(5,    min(120,    int(request.POST.get('gens', 40))))
+        windows = max(1,    min(12,     int(request.POST.get('windows', 4))))
+        seed    = int(request.POST.get('seed', '0') or 0)
+    except ValueError:
+        raise Http404('bad run parameters')
+    score    = request.POST.get('score', 'edge').strip() or 'edge'
+    keep_top = max(1, min(20, int(request.POST.get('keep_top', 5) or 5)))
+    mutation         = float(request.POST.get('mutation', 0.001) or 0.001)
+    crossover        = float(request.POST.get('crossover', 0.20) or 0.20)
+    survivors        = float(request.POST.get('survivors', 0.25) or 0.25)
+    init_mutation    = float(request.POST.get('init_mutation_rate', 0.05) or 0.05)
+
+    # Refuse big jobs inline — show the equivalent CLI invocation.
+    cost = pop * gens * windows
+    if cost > _INLINE_RUN_MAX_OPS:
+        messages.error(
+            request,
+            f'Inline run budget is pop × gens × windows ≤ {_INLINE_RUN_MAX_OPS}; '
+            f'requested {pop} × {gens} × {windows} = {cost}. Run '
+            f'`venv/bin/python manage.py hexhunt_run {corpus.slug} '
+            f'--pop {pop} --gens {gens} --windows {windows} '
+            f'--score {score} --seed {seed}` from a shell instead.'
+        )
+        return redirect('helix:hexhunt:list')
+
+    corpus_windows = list(corpus.windows.select_related('record').order_by('idx'))
+    if not corpus_windows:
+        messages.error(request, f'corpus {corpus.slug!r} has no windows.')
+        return redirect('helix:hexhunt:list')
+    seqs = [w.sequence() for w in corpus_windows]
+    windows_used = min(windows, len(seqs))
+
+    params = TournamentParams(
+        population_size=pop,
+        generations=gens,
+        windows_per_gen=windows_used,
+        mutation_rate=mutation,
+        crossover_fraction=crossover,
+        survivor_fraction=survivors,
+        scoring_fn=score,
+        steps=engine.TOTAL_STEPS,
+        rng_seed=seed,
+        init_mutation_rate=init_mutation,
+    )
+
+    params_dict = dict(params.__dict__)
+    params_dict['mode'] = 'single'
+    params_dict['source'] = 'inline-launch'
+
+    run = HuntRun.objects.create(
+        slug=HuntRun.make_slug(),
+        corpus=corpus,
+        params_json=params_dict,
+        status='running',
+        started_at=djtz.now(),
+    )
+
+    try:
+        result = run_tournament(seqs, params)
+    except Exception as exc:
+        run.status = 'failed'
+        run.notes = f'{type(exc).__name__}: {exc}'
+        run.finished_at = djtz.now()
+        run.save()
+        messages.error(request, f'Hunt failed: {exc}')
+        return redirect('helix:hexhunt:run_detail', slug=run.slug)
+
+    keep = min(keep_top, len(result.final_population))
+    with transaction.atomic():
+        top_rule_obj = None
+        scoreboard = []
+        for rank in range(keep):
+            pr = result.final_population[rank]
+            score_val = result.final_scores[rank]
+            provenance = {
+                'origin':    'tournament_winner',
+                'run_slug':  run.slug,
+                'corpus':    corpus.slug,
+                'rank':      rank + 1,
+                'score':     score_val,
+                'scoring':   params.scoring_fn,
+            }
+            rule = HuntRule.objects.create(
+                slug=HuntRule.make_slug(),
+                table=bytes(pr.data),
+                name=f'{run.slug}#{rank+1:02d}',
+                provenance_json=provenance,
+            )
+            scoreboard.append({
+                'rank':      rank + 1,
+                'score':     score_val,
+                'rule_slug': rule.slug,
+            })
+            if rank == 0:
+                top_rule_obj = rule
+        run.top_rule = top_rule_obj
+        run.scoreboard_json = scoreboard
+        run.generation_log_json = [
+            {'gen': g.gen, 'best': g.best, 'mean': g.mean,
+             'elapsed_s': g.elapsed_s}
+            for g in result.log
+        ]
+        run.status = 'done'
+        run.finished_at = djtz.now()
+        run.save()
+
+    messages.success(
+        request,
+        f'Run {run.slug} done. Top score {scoreboard[0]["score"]:.4f} '
+        f'across {keep} kept rules.'
+    )
+    return redirect('helix:hexhunt:run_detail', slug=run.slug)

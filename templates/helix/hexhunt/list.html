@@ -19,6 +19,13 @@
 </p>
 
 <h2 style="margin-top:1.6rem;font-size:1.05rem;color:#c9d1d9;">Corpora</h2>
+{% if messages %}
+<div style="margin:0.4rem 0;font-size:0.85rem;">
+  {% for m in messages %}
+    <p style="color:{% if m.tags == 'error' %}#ff7b72{% elif m.tags == 'success' %}#7ee787{% else %}#79c0ff{% endif %};margin:0.2rem 0;">{{ m }}</p>
+  {% endfor %}
+</div>
+{% endif %}
 {% if corpora %}
 <table style="width:100%;border-collapse:collapse;font-size:0.9rem;">
   <thead>
@@ -29,6 +36,7 @@
       <th style="text-align:right;padding:0.4rem 0.6rem;">Windows</th>
       <th style="text-align:right;padding:0.4rem 0.6rem;">Window bp</th>
       <th style="text-align:left;padding:0.4rem 0;">Created</th>
+      <th style="text-align:right;padding:0.4rem 0;">Hunt</th>
     </tr>
   </thead>
   <tbody>
@@ -40,10 +48,33 @@
       <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ c.windows_count }}</td>
       <td style="padding:0.4rem 0.6rem;text-align:right;font-family:ui-monospace,monospace;">{{ c.window_size }}</td>
       <td style="padding:0.4rem 0;color:#8b949e;font-size:0.85rem;">{{ c.created_at|date:"D d M Y H:i" }}</td>
+      <td style="padding:0.4rem 0;text-align:right;">
+        <form method="post" action="{% url 'helix:hexhunt:launch_run' %}"
+              style="display:inline-flex;gap:0.3rem;align-items:center;font-size:0.75rem;flex-wrap:wrap;justify-content:flex-end;">
+          {% csrf_token %}
+          <input type="hidden" name="corpus_slug" value="{{ c.slug }}">
+          <label style="color:#8b949e;">pop <input type="number" name="pop"
+                  value="64" min="8" max="128" style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
+          <label style="color:#8b949e;">gens <input type="number" name="gens"
+                  value="40" min="5" max="120" style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
+          <label style="color:#8b949e;">windows <input type="number" name="windows"
+                  value="4" min="1" max="12" style="width:3rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
+          <label style="color:#8b949e;">seed <input type="number" name="seed"
+                  value="0" style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;"></label>
+          <button type="submit"
+                  title="Run a tournament inline (synchronous). Inline cap is pop × gens × windows ≤ 19,200; bigger jobs need the management command."
+                  style="background:#238636;color:#fff;border:0;padding:0.2rem 0.7rem;cursor:pointer;font-family:inherit;font-size:0.75rem;">Run</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
   </tbody>
 </table>
+<p style="color:#8b949e;font-size:0.8rem;margin:0.4rem 0;">
+  Inline runs cap at pop × gens × windows ≤ 19,200 (≈ 8 s on a laptop).
+  For full-strength sweeps (pop=256, gens=200) use
+  <code style="color:#c9d1d9;">manage.py hexhunt_run &lt;corpus&gt; --pop 256 --gens 200</code>.
+</p>
 {% else %}
 <p style="color:#8b949e;">No corpora yet. Build one with:</p>
 <pre style="background:#0d1117;color:#c9d1d9;padding:0.6rem 0.8rem;border:1px solid #30363d;font-size:0.85rem;">manage.py hexhunt_seed_corpus &lt;record_pk&gt; --feature-type CDS --window-size 256</pre>
