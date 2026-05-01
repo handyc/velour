@@ -57,6 +57,10 @@
   <button id="pause-btn" title="Pause both inner CAs and the meta-CA + tournament timers.">Pause</button>
   <button id="reset-lib-btn" title="Throw out the entire library and re-roll 64 fresh random K=64 genomes (with palettes + grids).">Reset Library</button>
   <button id="reseed-meta-btn" title="Re-randomise the meta-CA grid states without disturbing the library.">Reseed Meta</button>
+  <label class="checkbox-label" title="Click-to-download exports compress the JSON via the browser's gzip stream — typically ~10× smaller (≈80 KB instead of 800 KB) since hexnn-genome-v1 has lots of repeated small ints.">
+    <input type="checkbox" id="stratum-gzip-cb" checked>
+    gzip downloads
+  </label>
   <span id="stratum-hunt-status" style="color:#8b949e;font-size:0.8rem;margin-left:1rem;"></span>
 </div>
 

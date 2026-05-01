@@ -573,9 +573,8 @@ function paletteToCssHex(pal) {
     return out;
 }
 
-function downloadLibraryEntryAsJSON(idx, source) {
+async function downloadLibraryEntryAsJSON(idx, source, compress) {
     const e = state.library[idx];
-    const N = e.outs ? e.outs.length : (e.genome.outs ? e.genome.outs.length : 0);
     // The genome is stored as {K, keys: Uint8Array(N*7), outs: Uint8Array(N)}.
     const g = e.genome;
     const keys = [];
@@ -603,11 +602,32 @@ function downloadLibraryEntryAsJSON(idx, source) {
         keys:           keys,
         outputs:        outputs,
     };
-    const blob = new Blob([JSON.stringify(payload)], {type: 'application/json'});
+    const json = JSON.stringify(payload);
+
+    let blob, ext, mime;
+    if (compress && typeof CompressionStream !== 'undefined') {
+        // Stream-compress through gzip. ~10× smaller than raw JSON for
+        // a hexnn-genome-v1 payload (keys are mostly small ints, lots
+        // of repetition). Falls back to raw JSON if the browser is
+        // really old.
+        const cs = new CompressionStream('gzip');
+        const writer = cs.writable.getWriter();
+        const enc = new TextEncoder();
+        writer.write(enc.encode(json));
+        writer.close();
+        const compressed = await new Response(cs.readable).arrayBuffer();
+        blob = new Blob([compressed], {type: 'application/gzip'});
+        ext  = 'json.gz';
+        mime = 'application/gzip';
+    } else {
+        blob = new Blob([json], {type: 'application/json'});
+        ext  = 'json';
+        mime = 'application/json';
+    }
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `hexnn-K${g.K}-${fp}.json`;
+    a.download = `hexnn-K${g.K}-${fp}.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -633,6 +653,11 @@ function tileFromMouse(mx, my, cols, rows, tilePx, tileGap) {
     return { row: r, col: c };
 }
 
+function shouldCompress() {
+    const cb = document.getElementById('stratum-gzip-cb');
+    return cb ? cb.checked : true;        // default on
+}
+
 function onLibraryClick(ev) {
     const cv = ev.currentTarget;
     const rect = cv.getBoundingClientRect();
@@ -641,7 +666,7 @@ function onLibraryClick(ev) {
     if (!hit) return;
     const idx = hit.row * LIB_COLS + hit.col;
     if (idx < 0 || idx >= LIB_SIZE) return;
-    downloadLibraryEntryAsJSON(idx, 'library');
+    downloadLibraryEntryAsJSON(idx, 'library', shouldCompress());
 }
 
 function onMetaClick(ev) {
@@ -652,7 +677,7 @@ function onMetaClick(ev) {
     if (!hit) return;
     const cellIdx = hit.row * META_COLS + hit.col;
     const libIdx  = state.metaA[cellIdx] % LIB_SIZE;
-    downloadLibraryEntryAsJSON(libIdx, `meta:r${hit.row}c${hit.col}`);
+    downloadLibraryEntryAsJSON(libIdx, `meta:r${hit.row}c${hit.col}`, shouldCompress());
 }
 
 
@@ -730,9 +755,8 @@ function init() {
 
     // Click-to-download genome JSON. Wire on both canvases — clicks
     // on the meta-CA download whichever library entry is currently
-    // displayed in that meta-cell.
-    const libCv  = document.getElementById('stratum-library');
-    const metaCv = document.getElementById('stratum-meta');
+    // displayed in that meta-cell. (libCv / metaCv already declared
+    // at the top of init() for the size pinning; reuse them here.)
     if (libCv) {
         libCv.style.cursor = 'pointer';
         libCv.addEventListener('click', onLibraryClick);
