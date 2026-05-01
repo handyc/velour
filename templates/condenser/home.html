@@ -156,6 +156,35 @@ Each tier strips away what can't survive, preserving only the essential logic.
         </div>
     </div>
 
+    <div class="avail-card" style="border-left:3px solid #2ea043">
+        <h3>HexNN → ESP32-S3 SuperMini (whole pipeline on-chip)</h3>
+        <p>Port the full <a href="/hexnn/">HexNN</a> bench to the S3:
+        random genome generation, the Hunt + Refine GA, the
+        nearest-prototype hex stepper, and the live runner — all in
+        one Arduino sketch. Web UI shows the live grid as SVG and
+        downloads the elite as a HexNN genome JSON identical in shape
+        to the browser export.</p>
+        <div style="display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center;margin-bottom:0.4rem">
+            <span class="tier-badge tier-django">Django</span>
+            <span style="color:#6e7681">→</span>
+            <span class="tier-badge tier-esp">ESP32-S3</span>
+        </div>
+        <form method="post" action="{% url 'condenser:distill_hexnn_esp32s3' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.75rem">
+            {% csrf_token %}
+            <button type="submit" class="btn primary" style="background:#238636;border-color:#2ea043;min-width:11rem;text-align:left">Distill HexNN → S3</button>
+            <label style="color:#8b949e">K <input type="number" name="K" value="4" min="2" max="64" style="width:3rem"></label>
+            <label style="color:#8b949e">N=2^<input type="number" name="n_log2" value="11" min="8" max="14" style="width:3rem"></label>
+            <label style="color:#8b949e">W×H <input type="number" name="W" value="16" min="8" max="32" style="width:3rem">×<input type="number" name="H" value="16" min="6" max="24" style="width:3rem"></label>
+            <label style="color:#8b949e">pop <input type="number" name="pop_size" value="8" min="2" max="16" style="width:3rem"></label>
+            <label style="color:#8b949e">gens <input type="number" name="generations" value="30" min="5" max="120" style="width:3rem"></label>
+            <label style="color:#8b949e">mut <input type="number" name="mutation_rate" value="0.0008" step="0.0001" min="0" max="0.05" style="width:5rem"></label>
+            <label style="color:#8b949e"><input type="checkbox" name="run_hunt" checked> hunt-on-boot</label>
+            <label style="color:#8b949e">tick(ms) <input type="number" name="tick_ms" value="200" min="40" max="2000" style="width:4rem"></label>
+            <label style="color:#8b949e">ssid <input type="text" name="wifi_ssid" placeholder="YOUR_WIFI" style="width:7rem"></label>
+            <label style="color:#8b949e">pw <input type="text" name="wifi_pass" placeholder="YOUR_PASS" style="width:7rem"></label>
+        </form>
+    </div>
+
     <div class="avail-card" style="border-left:3px solid #bc8cff">
         <h3>Full chain: Tiles → JS → ESP → ATTiny → 555</h3>
         <p>Run the entire distillation pipeline in one click. Produces all 4 tiers,
