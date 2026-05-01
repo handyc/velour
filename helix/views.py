@@ -12,9 +12,24 @@ from django.http import HttpResponse, Http404, JsonResponse, HttpResponseBadRequ
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
-from .forms import UploadForm
+from .forms import FetchNCBIForm, UploadForm
 from .models import AnnotationFeature, SequenceRecord
 from .parsers import parse_text
+
+
+# NCBI Entrez efetch endpoint. Same URL that Biopython hits internally;
+# we use ``requests`` directly so we can set a per-call timeout.
+_ENTREZ_EFETCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi'
+
+# Default contact address NCBI requires in every Entrez request. Falls
+# back to anonymous if the form leaves email blank and the project
+# hasn't set HELIX_DEFAULT_NCBI_EMAIL — Entrez still answers, just
+# rate-limits more aggressively.
+_DEFAULT_NCBI_EMAIL = 'helix@velour.local'
+
+# Per-accession HTTP timeout. NCBI can be slow on large records; keep
+# it well below typical browser proxy/gateway timeouts.
+_FETCH_TIMEOUT_SECONDS = 90
 
 
 # Cap on a single sequence-range fetch. The viewer never asks for more
@@ -206,8 +221,22 @@ def to_evolution(request, pk):
     return redirect('evolution:run_detail', slug=run.slug)
 
 
+# Curated examples surfaced on the Import page — click-to-copy. Same
+# accessions as ``manage.py fetch_helix_corpus`` ships, picked to span
+# tiny → medium so users see the size/speed trade-off explicitly.
+_FETCH_EXAMPLES = [
+    ('L09137.2',    'pUC19 cloning vector',                  '2.7 kb'),
+    ('NC_001416.1', 'Enterobacteria phage λ',                '48 kb'),
+    ('NC_045512.2', 'SARS-CoV-2 (Wuhan-Hu-1) reference',     '30 kb'),
+    ('NC_001133.9', 'Saccharomyces cerevisiae chromosome I', '230 kb'),
+    ('NC_024511.2', 'Drosophila melanogaster mitochondrion', '19 kb'),
+    ('NC_004353.4', 'Drosophila melanogaster chromosome 4',  '1.4 Mb'),
+]
+
+
 @login_required
 def upload(request):
+    fetch_form = FetchNCBIForm()
     if request.method == 'POST':
         form = UploadForm(request.POST, request.FILES)
         if form.is_valid():
@@ -250,7 +279,103 @@ def upload(request):
             return redirect('helix:list')
     else:
         form = UploadForm()
-    return render(request, 'helix/upload.html', {'form': form})
+    return render(request, 'helix/upload.html', {
+        'form':            form,
+        'fetch_form':      fetch_form,
+        'fetch_examples':  _FETCH_EXAMPLES,
+    })
+
+
+@login_required
+def fetch_ncbi(request):
+    """POST handler — pull one or more sequences from NCBI by accession.
+
+    Synchronous per-accession HTTP fetch with a 90 s timeout each;
+    parses + persists each as a SequenceRecord. Reports success or
+    failure per accession via Django messages so partial successes
+    don't fail the whole batch."""
+    if request.method != 'POST':
+        return redirect('helix:upload')
+
+    import requests
+
+    form = FetchNCBIForm(request.POST)
+    if not form.is_valid():
+        return render(request, 'helix/upload.html', {
+            'form':           UploadForm(),
+            'fetch_form':     form,
+            'fetch_examples': _FETCH_EXAMPLES,
+        })
+
+    accessions = form.cleaned_data['accessions']
+    rettype    = form.cleaned_data['format']
+    email      = (form.cleaned_data.get('email') or '').strip() or _DEFAULT_NCBI_EMAIL
+
+    saved_records = []
+    for acc in accessions:
+        params = {
+            'db':      'nuccore',
+            'id':      acc,
+            'rettype': rettype,
+            'retmode': 'text',
+            'tool':    'velour-helix',
+            'email':   email,
+        }
+        try:
+            resp = requests.get(_ENTREZ_EFETCH_URL, params=params,
+                                timeout=_FETCH_TIMEOUT_SECONDS)
+        except requests.exceptions.Timeout:
+            messages.error(request,
+                f'{acc}: NCBI timed out after {_FETCH_TIMEOUT_SECONDS}s. '
+                f'For genome-scale records use '
+                f'`manage.py fetch_helix_corpus --only {acc}` from a shell.')
+            continue
+        except requests.exceptions.RequestException as e:
+            messages.error(request, f'{acc}: network error — {e}')
+            continue
+
+        if resp.status_code != 200:
+            messages.error(request,
+                f'{acc}: NCBI returned HTTP {resp.status_code}')
+            continue
+
+        text = resp.text or ''
+        # NCBI sometimes returns HTML on rate-limit / bad accession;
+        # surface the first line so the user can act on it.
+        first_line = next((l for l in text.splitlines() if l.strip()), '')
+        if not first_line.startswith(('LOCUS', '>')):
+            snippet = first_line[:80]
+            messages.error(request,
+                f'{acc}: unexpected response — {snippet!r}')
+            continue
+
+        try:
+            fmt, parsed = parse_text(text, filename=f'{acc}.{rettype}')
+        except ValueError as e:
+            messages.error(request, f'{acc}: parse failed — {e}')
+            continue
+        except Exception as e:
+            messages.error(request,
+                f'{acc}: parse failed — {type(e).__name__}: {e}')
+            continue
+
+        if not parsed:
+            messages.warning(request, f'{acc}: no records parsed.')
+            continue
+
+        # Reuse the upload view's persistence helper: one transaction
+        # per accession, features bulk-created.
+        new_records = _persist_records(parsed, request.user, '')
+        saved_records.extend(new_records)
+        n_feat = sum(r.features.count() for r in new_records)
+        mb = sum(r.length_bp for r in new_records) / 1_000_000.0
+        messages.success(request,
+            f'{acc}: imported ({fmt}) — '
+            f'{mb:.2f} Mb · {n_feat} features.')
+
+    if len(saved_records) == 1:
+        return redirect('helix:detail', pk=saved_records[0].pk)
+    return redirect('helix:list')
 
 
 def _persist_records(record_dicts, user, title_override):

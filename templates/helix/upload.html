@@ -3,53 +3,130 @@
 {% block title %}Helix · Upload{% endblock %}
 
 {% block content %}
-<h1>Upload sequence</h1>
+<h1>Import sequence</h1>
 <p style="color:#8b949e;margin-top:-0.4rem;">
-    FASTA (.fa, .fasta, .fna) or GenBank (.gb, .gbk, .genbank). Either pick
-    a file or paste the sequence text below — the parser sniffs the format
-    from the first non-blank line.
+    Three ways in: pull a public accession from NCBI, upload a file, or
+    paste sequence text. FASTA + GenBank both supported — the parser
+    sniffs the format from the first non-blank line.
 </p>
 
-<form method="post" enctype="multipart/form-data" style="max-width:720px;margin-top:1rem;">
-    {% csrf_token %}
+{% if messages %}
+<div style="margin:0.6rem 0;font-size:0.9rem;max-width:720px;">
+    {% for m in messages %}
+    <p style="color:{% if m.tags == 'error' %}#ff7b72{% elif m.tags == 'success' %}#7ee787{% elif m.tags == 'warning' %}#d29922{% else %}#79c0ff{% endif %};margin:0.2rem 0;font-family:ui-monospace,monospace;">
+        {{ m }}
+    </p>
+    {% endfor %}
+</div>
+{% endif %}
 
-    <div class="form-group">
-        <label for="id_file">File</label>
-        {{ form.file }}
-    </div>
+<section style="background:#0d1117;border:1px solid #30363d;border-left:3px solid #2ea043;padding:0.9rem 1.1rem;margin-top:1rem;max-width:720px;">
+    <h2 style="margin:0 0 0.3rem 0;font-size:1.05rem;color:#c9d1d9;">Fetch from NCBI</h2>
+    <p style="color:#8b949e;font-size:0.85rem;margin:0 0 0.7rem 0;">
+        Type or paste accession numbers — one per line, or comma/space-separated.
+        Cap is 20 per request; for genome-scale fetches use
+        <code style="color:#c9d1d9;">manage.py fetch_helix_corpus</code>.
+    </p>
+    <form method="post" action="{% url 'helix:fetch_ncbi' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="id_accessions">Accessions</label>
+            {{ fetch_form.accessions }}
+            {% if fetch_form.accessions.errors %}
+              <div style="color:#ff7b72;font-size:0.8rem;margin-top:0.3rem;">{{ fetch_form.accessions.errors|join:" · " }}</div>
+            {% endif %}
+            <p style="color:#6e7681;font-size:0.78rem;margin:0.3rem 0 0 0;">
+                {{ fetch_form.accessions.help_text }}
+            </p>
+        </div>
+        <div class="form-group" style="display:flex;gap:1rem;align-items:flex-end;">
+            <div style="flex:1;">
+                <label for="id_format">Format</label>
+                {{ fetch_form.format }}
+            </div>
+            <div style="flex:2;">
+                <label for="id_email">Contact email
+                    <span style="color:#8b949e;font-size:0.8rem;">(optional)</span>
+                </label>
+                {{ fetch_form.email }}
+            </div>
+        </div>
+        <div style="margin-top:0.5rem;">
+            <button type="submit" class="btn btn-primary"
+                    style="background:#238636;border-color:#2ea043;">Fetch</button>
+            <span style="color:#6e7681;font-size:0.78rem;margin-left:0.7rem;">
+                Per-record HTTP timeout: 90 s. Multi-record requests run in
+                sequence; partial success is reported per accession.
+            </span>
+        </div>
+    </form>
 
-    <div style="text-align:center;color:#6e7681;font-size:0.85rem;margin:0.5rem 0;">— or —</div>
+    <details style="margin-top:0.8rem;">
+        <summary style="cursor:pointer;color:#8b949e;font-size:0.8rem;">
+            Curated examples (click an accession to copy it into the box above)
+        </summary>
+        <table style="width:100%;border-collapse:collapse;font-size:0.8rem;margin-top:0.4rem;">
+            <tbody>
+                {% for acc, label, size in fetch_examples %}
+                <tr style="border-bottom:1px solid #21262d;">
+                    <td style="padding:0.25rem 0.6rem 0.25rem 0;font-family:ui-monospace,monospace;">
+                        <a href="#" onclick="document.getElementById('id_accessions').value=document.getElementById('id_accessions').value.trim()+(document.getElementById('id_accessions').value.trim()?'\n':'')+'{{ acc }}';return false;" style="color:#79c0ff;text-decoration:none;">{{ acc }}</a>
+                    </td>
+                    <td style="padding:0.25rem 0.6rem;color:#c9d1d9;">{{ label }}</td>
+                    <td style="padding:0.25rem 0;color:#8b949e;font-family:ui-monospace,monospace;font-size:0.75rem;">{{ size }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+</section>
 
-    <div class="form-group">
-        <label for="id_pasted">Pasted text</label>
-        {{ form.pasted }}
-    </div>
+<section style="background:#0d1117;border:1px solid #30363d;border-left:3px solid #58a6ff;padding:0.9rem 1.1rem;margin-top:1rem;max-width:720px;">
+    <h2 style="margin:0 0 0.3rem 0;font-size:1.05rem;color:#c9d1d9;">Upload or paste</h2>
+    <p style="color:#8b949e;font-size:0.85rem;margin:0 0 0.7rem 0;">
+        For sequences you already have on disk, or text from clipboard.
+    </p>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
 
-    <div class="form-group">
-        <label for="id_title_override">Title override
-            <span style="color:#8b949e;font-size:0.8rem;">(optional — only applied to the first record)</span>
-        </label>
-        {{ form.title_override }}
-    </div>
+        <div class="form-group">
+            <label for="id_file">File</label>
+            {{ form.file }}
+        </div>
 
-    {% if form.errors %}
-    <div style="color:#f85149;font-size:0.85rem;margin-bottom:0.8rem;">
-        {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
-    </div>
-    {% endif %}
+        <div style="text-align:center;color:#6e7681;font-size:0.85rem;margin:0.5rem 0;">— or —</div>
 
-    <button type="submit" class="btn btn-primary">Import</button>
-    <a href="{% url 'helix:list' %}" class="btn btn-secondary" style="margin-left:0.5rem;">Cancel</a>
-</form>
+        <div class="form-group">
+            <label for="id_pasted">Pasted text</label>
+            {{ form.pasted }}
+        </div>
 
-<details style="margin-top:2rem;">
-    <summary style="cursor:pointer;color:#8b949e;font-size:0.85rem;">
-        Try with a sample (paste this and submit)
-    </summary>
-    <pre style="background:#161b22;border:1px solid #30363d;padding:0.7rem;font-size:0.78rem;overflow-x:auto;">
+        <div class="form-group">
+            <label for="id_title_override">Title override
+                <span style="color:#8b949e;font-size:0.8rem;">(optional — only applied to the first record)</span>
+            </label>
+            {{ form.title_override }}
+        </div>
+
+        {% if form.errors %}
+        <div style="color:#f85149;font-size:0.85rem;margin-bottom:0.8rem;">
+            {% for error in form.non_field_errors %}{{ error }}<br>{% endfor %}
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary">Import</button>
+        <a href="{% url 'helix:list' %}" class="btn btn-secondary" style="margin-left:0.5rem;">Cancel</a>
+    </form>
+
+    <details style="margin-top:1rem;">
+        <summary style="cursor:pointer;color:#8b949e;font-size:0.85rem;">
+            Try with a sample (paste this and submit)
+        </summary>
+        <pre style="background:#161b22;border:1px solid #30363d;padding:0.7rem;font-size:0.78rem;overflow-x:auto;">
 &gt;sp|P12345|EXAMPLE_HUMAN A toy example sequence
 ATGGCAACCGCAGAATCAACTGTGAACTACAACGCAGTGGAGTACGGCAACGAACGCATC
 GTGAACGGCGGCAACAACGGCAACGGCGGCAACGGCAACGGCAACAACGGCAACTAA
-    </pre>
-</details>
+        </pre>
+    </details>
+</section>
 {% endblock %}

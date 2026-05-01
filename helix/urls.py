@@ -7,6 +7,7 @@ app_name = 'helix'
 urlpatterns = [
     path('',                    views.list_view,      name='list'),
     path('upload/',             views.upload,         name='upload'),
+    path('fetch/',              views.fetch_ncbi,     name='fetch_ncbi'),
     path('hexhunt/',            include('helix.hexhunt.urls')),
     path('<int:pk>/',           views.detail,         name='detail'),
     path('<int:pk>/delete/',    views.delete,         name='delete'),
