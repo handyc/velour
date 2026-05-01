@@ -1,15 +1,15 @@
-// cellular.mjs — sublab: 8x8 toroidal cellular GA where the grid IS
+// cellular.mjs — sublab: 16×16 toroidal cellular GA where the grid IS
 // the population.
 //
 // The substrate is hexagonal at TWO scales: each tile is a hex CA
-// (the engine.mjs default), and the 8x8 *grid of tiles* is itself
+// (the engine.mjs default), and the 16×16 *grid of tiles* is itself
 // a pointy-top hex tiling — odd rows shifted +TILE_PX/2 on x. This
 // makes population-level selection flow through the same 6-neighbour
 // topology that the rules themselves operate on inside each tile.
 // Beautifully self-similar: rules that win at the substrate scale
 // spread through a substrate-shaped population.
 //
-// 64 cells, each holding one genome + palette + live CA grid + last-
+// 256 cells, each holding one genome + palette + live CA grid + last-
 // known fitness. Every cell steps its CA continuously like Filmstrip;
 // the GA happens on a separate, slower clock as a "round":
 //
@@ -35,7 +35,7 @@ import {
     seed_prng, prng,
     seed_grid, step_grid,
     fitness, mutate, palette_inherit,
-    ansi256_to_css,
+    ansi256_to_rgb,
     random_genome, invent_palette, identity_genome,
 } from '../engine.mjs';
 
@@ -204,64 +204,121 @@ function runRound() {
 }
 
 // ── Render ─────────────────────────────────────────────────────────
+//
+// At 256 tiles × 256 cells = 65,536 cells per frame, the per-cell
+// fillStyle + fillRect approach was the bottleneck (CSS-string parse
+// per cell dominates). We replace it with one canvas-sized
+// ImageData buffer aliased as Uint32Array: each cell is a direct
+// 32-bit pixel write, and a single putImageData blits the whole
+// frame. Borders are still drawn with stroke since they're cheap
+// (256 calls/frame, not 65,536).
 
 const canvas = () => document.getElementById('cellular');
+
+// Background colour — Velour panel #0d1117. Pre-packed once.
+function packRGBA(r, g, b) {
+    // Canvas ImageData is byte-order R,G,B,A (bytes 0..3). Aliased as
+    // Uint32 on a little-endian platform (every modern browser/CPU)
+    // the same value reads as 0xAABBGGRR. Pack accordingly so a
+    // single Uint32 write paints one full pixel.
+    return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+}
+const BG_RGBA = packRGBA(0x0d, 0x11, 0x17);
+
+let renderImage = null;     // ImageData for the whole canvas
+let renderBuf32 = null;     // Uint32Array view of renderImage.data
+
+function ensureRenderBuffers(cv) {
+    if (renderImage && renderImage.width === cv.width &&
+                       renderImage.height === cv.height) return;
+    const ctx = cv.getContext('2d');
+    renderImage = ctx.createImageData(cv.width, cv.height);
+    renderBuf32 = new Uint32Array(renderImage.data.buffer);
+}
 
 function paintGrid() {
     const cv = canvas();
     if (!cv) return;
     const ctx = cv.getContext('2d');
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, cv.width, cv.height);
+    ensureRenderBuffers(cv);
 
+    // Reset to background for this frame. Uint32Array.fill is one
+    // memset under the hood — O(n) but ~10× faster than per-pixel.
+    renderBuf32.fill(BG_RGBA);
+
+    // Walk every tile, walk every cell, write packed RGBA into the
+    // canvas-sized buffer at the tile's offset. No state-changing
+    // canvas ops in this loop — just typed-array writes.
+    const W = cv.width;
+    const palRGBA = new Uint32Array(4);
+    for (let i = 0; i < N_CELLS; i++) {
+        const r = (i / GRID_COLS) | 0;
+        const c = i - r * GRID_COLS;
+        const tileXOff = (r & 1) ? TILE_PX / 2 : 0;
+        const tileX = (c * (TILE_PX + TILE_GAP) + tileXOff) | 0;
+        const tileY = (r * (TILE_PX + TILE_GAP)) | 0;
+        const cell = state.cells[i];
+
+        // Pack this cell's palette once per tile — 4 colour lookups +
+        // packs (~0.2 µs per tile, so ~50 µs / frame for the whole grid).
+        for (let p = 0; p < 4; p++) {
+            const rgb = ansi256_to_rgb(cell.palette[p]);
+            palRGBA[p] = packRGBA(rgb[0], rgb[1], rgb[2]);
+        }
+
+        // Pixel-fill the tile. Floor float bounds to integer pixels —
+        // CELL_PX = TILE_PX/(GRID_W+0.5) is irrational, so some cells
+        // render at 1 px and some at 2 px. The slight unevenness adds
+        // visual texture; at 24-px tiles the smear was already there.
+        for (let cy = 0; cy < GRID_H; cy++) {
+            const py0 = tileY + ((cy * CELL_PX) | 0);
+            const py1 = tileY + (((cy + 1) * CELL_PX) | 0);
+            const cellXOff = (cy & 1) ? CELL_PX * 0.5 : 0;
+            for (let cx = 0; cx < GRID_W; cx++) {
+                const v = cell.gridA[cy * GRID_W + cx] & 3;
+                const rgba = palRGBA[v];
+                const px0 = tileX + ((cx * CELL_PX + cellXOff) | 0);
+                const px1 = tileX + (((cx + 1) * CELL_PX + cellXOff) | 0);
+                for (let py = py0; py < py1; py++) {
+                    const rowStart = py * W;
+                    for (let px = px0; px < px1; px++) {
+                        renderBuf32[rowStart + px] = rgba;
+                    }
+                }
+            }
+        }
+    }
+
+    // One blit replaces ~65k fillRect calls.
+    ctx.putImageData(renderImage, 0, 0);
+
+    // Borders go on top of the blitted pixels via regular canvas ops.
+    // 256 strokes is cheap (~1 ms total).
     const now = Date.now();
     for (let i = 0; i < N_CELLS; i++) {
         const r = (i / GRID_COLS) | 0;
         const c = i - r * GRID_COLS;
-        // Pointy-top tile-grid: odd rows shifted +TILE_PX/2 on x, the
-        // same offset trick applied at the cell level inside each tile.
         const xOff = (r & 1) ? TILE_PX / 2 : 0;
         const x = c * (TILE_PX + TILE_GAP) + xOff;
         const y = r * (TILE_PX + TILE_GAP);
-        paintTile(ctx, state.cells[i], x, y, now);
+        const cell = state.cells[i];
+        const ageMs = cell.refinedAt ? (now - cell.refinedAt) : Infinity;
+        const t = Math.min(1, ageMs / RECENCY_FADE_MS);
+        if (t < 1) {
+            const a = (1 - t).toFixed(3);
+            ctx.strokeStyle = `rgba(63, 185, 80, ${a})`;
+            ctx.lineWidth   = 2;
+            ctx.strokeRect(x + 0.5, y + 0.5, TILE_PX - 1, TILE_PX - 1);
+        } else {
+            ctx.strokeStyle = '#21262d';
+            ctx.lineWidth   = 1;
+            ctx.strokeRect(x + 0.5, y + 0.5, TILE_PX - 1, TILE_PX - 1);
+        }
     }
 
     if (state.showArrows && state.lastRound &&
         now - state.lastRound.ts < 1500) {
         paintArrow(ctx, state.lastRound.winner, state.lastRound.loser, now);
-    }
-}
-
-function paintTile(ctx, cell, x, y, now) {
-    const css = [
-        ansi256_to_css(cell.palette[0]),
-        ansi256_to_css(cell.palette[1]),
-        ansi256_to_css(cell.palette[2]),
-        ansi256_to_css(cell.palette[3]),
-    ];
-    for (let cy = 0; cy < GRID_H; cy++) {
-        const xOff = (cy & 1) ? CELL_PX * 0.5 : 0;
-        for (let cx = 0; cx < GRID_W; cx++) {
-            const v = cell.gridA[cy * GRID_W + cx];
-            ctx.fillStyle = css[v & 3];
-            ctx.fillRect(x + cx * CELL_PX + xOff, y + cy * CELL_PX,
-                         CELL_PX, CELL_PX);
-        }
-    }
-    // Recency border: bright green just after a replacement, fading
-    // over RECENCY_FADE_MS to neutral grey. Lets you watch good rules
-    // spread literally as a visual wave.
-    const ageMs = cell.refinedAt ? (now - cell.refinedAt) : Infinity;
-    const t = Math.min(1, ageMs / RECENCY_FADE_MS);
-    if (t < 1) {
-        const a = (1 - t).toFixed(3);
-        ctx.strokeStyle = `rgba(63, 185, 80, ${a})`;
-        ctx.lineWidth   = 2;
-        ctx.strokeRect(x + 0.5, y + 0.5, TILE_PX - 1, TILE_PX - 1);
-    } else {
-        ctx.strokeStyle = '#21262d';
-        ctx.lineWidth   = 1;
-        ctx.strokeRect(x + 0.5, y + 0.5, TILE_PX - 1, TILE_PX - 1);
     }
 }
 
