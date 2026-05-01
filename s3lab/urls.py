@@ -6,5 +6,6 @@ from . import views
 app_name = 's3lab'
 
 urlpatterns = [
-    path('', views.index, name='index'),
+    path('',                  views.index,  name='index'),
+    path('<slug:slug>/',      views.sublab, name='sublab'),
 ]

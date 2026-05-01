@@ -10,7 +10,19 @@
 <div class="s3lab">
 
   <header class="s3lab-header">
-    <h1>S3 Lab</h1>
+    <h1>S3 Lab <span class="active-sublab">— {{ active_sublab.name }}</span></h1>
+    {% if sublabs|length > 1 %}
+    <nav class="sublab-tabs" aria-label="S3 Lab sublabs">
+      {% for s in sublabs %}
+        {% if s.slug == active_sublab.slug %}
+          <span class="sublab-tab active" title="{{ s.blurb }}">{{ s.name }}</span>
+        {% else %}
+          <a class="sublab-tab" href="{% url 's3lab:sublab' s.slug %}"
+             title="{{ s.blurb }}">{{ s.name }}</a>
+        {% endif %}
+      {% endfor %}
+    </nav>
+    {% endif %}
     <p class="lede">In-browser bench for the ESP32-S3 SuperMini + ST7735S
        hex-CA + GPIO setup. Hunt a class-4 ruleset, wire cells to virtual
        GPIO pins, and download <code>genome.bin</code> + <code>gpio_map.txt</code>
@@ -123,5 +135,6 @@
 
 </div>
 
-<script type="module" src="{% static 's3lab/js/main.mjs' %}"></script>
+<script type="module"
+        src="{% static 's3lab/js/sublabs/' %}{{ active_sublab.module }}.mjs"></script>
 {% endblock %}
