@@ -43,7 +43,53 @@
     background: #0d1117;
     cursor: default;
 }
-.s3lab-header .lede {
+
+/* ── Filmstrip sublab ─────────────────────────────────────────── */
+.filmstrip-section {
+    margin: 0.6rem 0 1rem 0;
+}
+canvas#filmstrip {
+    display: block;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    image-rendering: pixelated;
+    margin-bottom: 0.4rem;
+    max-width: 100%;
+}
+.filmstrip-captions {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    color: #8b949e;
+    margin-bottom: 0.6rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+.filmstrip-captions .frame-caption {
+    width: 96px;
+    flex: 0 0 96px;
+    text-align: center;
+    line-height: 1.2;
+}
+.filmstrip-captions .frame-label {
+    display: block;
+    color: #c9d1d9;
+}
+.filmstrip-captions .frame-fit {
+    display: block;
+    color: #6e7681;
+}
+.filmstrip-captions .frame-live {
+    color: #3fb950;
+}
+.filmstrip-captions .frame-age {
+    color: #6e7681;
+}
+
+.s3lab-header .lede,
+.s3lab .lede {
     color: #8b949e;
     margin: 0 0 1.2rem 0;
     line-height: 1.45;

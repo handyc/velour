@@ -1,0 +1,110 @@
+{# Classic sublab — TFT + GPIO + timing diagram. Same surface area
+   the original /s3lab/ shipped with. #}
+<p class="lede">In-browser bench for the ESP32-S3 SuperMini + ST7735S
+   hex-CA + GPIO setup. Hunt a class-4 ruleset, wire cells to virtual
+   GPIO pins, and download <code>genome.bin</code> + <code>gpio_map.txt</code>
+   ready to drop straight onto a real device — same algorithm, same file
+   formats, no flashing required for design iteration.</p>
+<p class="lede">Default layout: <strong>inputs</strong> on a 2×2 grid in
+   the interior re-seed central cells; <strong>outputs</strong> sample
+   both vertical edges and fire when a state-3 wave reaches the edge.
+   Toggle inputs HIGH/LOW to inject stimulus, watch propagation in the
+   timing diagram. The default fills the 9 free GPIOs the SuperMini
+   leaves after the TFT (5 outputs + 4 inputs) — anything you design
+   here is physically buildable; add more pins only if you switch to a
+   module with more breakouts.</p>
+
+<section class="s3lab-row">
+
+  <div class="s3lab-col tft-col">
+    <h2>TFT (ST7735S 80×160)</h2>
+    <canvas id="tft" width="640" height="320"
+            aria-label="Faked ST7735S panel"></canvas>
+    <div class="tft-info" id="tft-genome-info">genome: -</div>
+
+    <div class="tft-controls">
+      <button id="hunt-btn"
+              title="Fresh hunt: 30-agent / 40-gen GA from an identity seed; up to 4 retries until the winner survives a 50-tick × 3-seed verification.">
+        Run Hunt
+      </button>
+      <button id="refine-btn"
+              title="Warm-start hunt: GA seeded from the current genome with 10% initial mutation rate. Useful when the running CA has gone quiet and you want a livelier neighbour.">
+        Refine
+      </button>
+      <label class="checkbox-label" title="Automatically dispatch a warm-start hunt when the running CA's moving-average activity drops below 2% for ~9 seconds.">
+        <input type="checkbox" id="auto-refine-cb" checked>
+        auto-refine on stall
+      </label>
+      <progress id="hunt-progress" max="1" value="0"></progress>
+      <span id="hunt-status">idle — using random fallback genome</span>
+    </div>
+
+    <div class="activity-row" title="Per-tick fraction of cells that change. The hunt fitness peaks at 12% (edge of chaos); the dotted line marks 2%, below which auto-refine kicks in.">
+      <span class="act-label">activity</span>
+      <span class="act-now">now <strong id="act-now">0.0%</strong></span>
+      <span class="act-ma">MA(60) <strong id="act-ma">0.0%</strong></span>
+      <canvas id="act-spark" width="200" height="28"></canvas>
+      <span id="act-dwell"></span>
+    </div>
+
+    <div class="tft-controls">
+      <button id="seed-btn"
+              title="Re-seed the grid with a fresh random pattern.">Reseed Grid</button>
+      <button id="pause-btn">Pause</button>
+      <button id="step-btn">Step 1</button>
+      <label class="slider-label">
+        tick
+        <input id="tick-slider" type="range" min="20" max="2000" step="10" value="300">
+        <span id="tick-label">300 ms</span>
+      </label>
+      <span class="tick-count">tick #<span id="tick-count">0</span></span>
+    </div>
+
+    <div class="tft-controls">
+      <button id="download-genome">Download genome.bin</button>
+      <button id="download-gpio-map">Download gpio_map.txt</button>
+      <button id="send-to-automaton" title="Save the live ruleset to the Automaton app as a new RuleSet">→ Automaton</button>
+      <label class="upload-label">
+        Upload genome.bin
+        <input id="upload-genome" type="file" accept=".bin,application/octet-stream">
+      </label>
+      <span id="send-status" style="font-size:0.85em;color:#8b949e;"></span>
+    </div>
+  </div>
+
+  <div class="s3lab-col gpio-col">
+    <div class="gpio-panel">
+      <h2>Outputs <span class="hint">cell drives pin</span></h2>
+      <ul id="output-bindings" class="binding-list"></ul>
+      <button id="add-output" class="add-binding">+ add output</button>
+    </div>
+
+    <div class="gpio-panel">
+      <h2>Inputs <span class="hint">pin drives cell · click HIGH/LOW to toggle</span></h2>
+      <ul id="input-bindings" class="binding-list"></ul>
+      <button id="add-input" class="add-binding">+ add input</button>
+    </div>
+  </div>
+
+</section>
+
+<section>
+  <h2>Timing diagram <span class="hint">last 120 ticks · output (green) / input (blue)</span></h2>
+  <canvas id="waveform" width="940" height="200"></canvas>
+</section>
+
+<section class="s3lab-fineprint">
+  <p>The algorithm here is a line-for-line port of
+    <code>isolation/artifacts/hex_ca_class4/esp32_s3_full/src/main.cpp</code>:
+    same K=4 hex CA, same 16×16 grid, same 4096-byte packed genome, same
+    class-4 fitness, same 4-bit output state-mask, same INPUT_PULLUP input
+    semantics. <code>genome.bin</code> uses the 4104-byte
+    <code>HXC4 ‖ palette ‖ genome</code> tail format from the standalone
+    hunter — files round-trip both directions with no conversion. The hunt
+    runs in a Web Worker so the UI stays responsive.</p>
+  <p>Pin map on the SuperMini: TFT uses 4–7 + 11–12; USB D-/D+ is on 19/20;
+    BOOT on 0. The 9 free pins are 1, 2, 3, 8, 9, 10, 13, 14, 21 — the
+    lab default uses all of them (outputs: 1, 2, 3, 8, 9; inputs: 10, 13,
+    14, 21). Typical "logic processor" wiring is 4 inputs + 4 outputs,
+    which leaves one pin spare.</p>
+</section>

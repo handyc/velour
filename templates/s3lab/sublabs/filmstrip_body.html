@@ -1,0 +1,76 @@
+{# Filmstrip sublab — strip of past CA refinements scrolling left. #}
+<p class="lede">A scrolling strip of recent CA refinements. The live
+   tile on the right keeps stepping; every time a refine completes,
+   the strip shifts left and the just-superseded genome becomes a new
+   frame in the history. By default older frames are
+   <strong>frozen</strong> (drawn once, zero CPU); flip
+   <em>run history</em> on to keep them all stepping in parallel.</p>
+
+<section class="filmstrip-section">
+  <canvas id="filmstrip" width="824" height="124"
+          aria-label="Strip of recent CA refinements"></canvas>
+
+  <div class="filmstrip-captions" id="filmstrip-captions"
+       aria-hidden="true"></div>
+
+  <div class="tft-controls">
+    <button id="hunt-btn"
+            title="Capture & refine: snapshot the current live tile into the strip, then run a fresh GA hunt for a new live genome.">
+      Run Hunt
+    </button>
+    <button id="refine-btn"
+            title="Same shape as classic — warm-start GA seeded from the current live genome.">
+      Refine
+    </button>
+    <label class="checkbox-label" title="Auto-refine when the live tile's activity drops below 5% for ~4.5 s — the same trigger Classic uses.">
+      <input type="checkbox" id="auto-refine-cb" checked>
+      auto-refine on stall
+    </label>
+    <label class="checkbox-label" title="Step every history tile each tick instead of leaving them frozen. CPU cost is ~Nx — fine at 16x16 grids.">
+      <input type="checkbox" id="run-history-cb">
+      run history
+    </label>
+    <progress id="hunt-progress" max="1" value="0"></progress>
+    <span id="hunt-status">idle</span>
+  </div>
+
+  <div class="activity-row" title="Live tile activity. Same metric Classic uses; auto-refine fires below 5% MA(60) for 15 ticks.">
+    <span class="act-label">live</span>
+    <span class="act-now">now <strong id="act-now">0.0%</strong></span>
+    <span class="act-ma">MA(60) <strong id="act-ma">0.0%</strong></span>
+    <canvas id="act-spark" width="200" height="28"></canvas>
+    <span id="act-dwell"></span>
+  </div>
+
+  <div class="tft-controls">
+    <button id="seed-btn"
+            title="Reseed the live tile's grid with a fresh random pattern.">Reseed Live</button>
+    <button id="pause-btn">Pause</button>
+    <button id="step-btn">Step 1</button>
+    <button id="clear-history-btn"
+            title="Empty the strip — only the live tile remains.">Clear History</button>
+    <label class="slider-label">
+      tick
+      <input id="tick-slider" type="range" min="20" max="2000" step="10" value="200">
+      <span id="tick-label">200 ms</span>
+    </label>
+    <span class="tick-count">tick #<span id="tick-count">0</span></span>
+  </div>
+</section>
+
+<section class="s3lab-fineprint">
+  <p>Same engine as Classic — K=4 hex CA, 16×16 grid, 4096-byte
+    packed genome, 30-agent / 40-gen GA hunt in a Web Worker. The
+    only thing that changes is what you do with the post-refine
+    state: Classic discards the old genome and runs the new one
+    in-place; Filmstrip pushes the old genome onto a ring buffer of
+    the last 7 refinements and shows them all at once. Useful for
+    seeing how a warm-start refine drift relates to the original
+    rule, and for spotting visual lineages over many auto-refine
+    cycles.</p>
+  <p>No GPIO, no timing diagram, no upload — Classic owns those.
+    Switch tabs at any time; both sublabs share the same engine
+    code under <code>static/s3lab/js/engine.mjs</code> /
+    <code>hunt.mjs</code> / <code>worker.mjs</code> but keep their
+    own genome state, so flipping between tabs starts each one fresh.</p>
+</section>

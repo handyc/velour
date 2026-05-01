@@ -7,18 +7,30 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 # Registered sublabs. Add a new entry here when you drop a new
 # sublab module under static/s3lab/js/sublabs/.
 #
-#   slug    URL segment after /s3lab/
-#   module  filename (without extension) under static/s3lab/js/sublabs/
-#   name    label shown on the tab strip
-#   blurb   one-line hover hint; appears as the tab `title`
+#   slug      URL segment after /s3lab/
+#   module    filename (without extension) under static/s3lab/js/sublabs/
+#   template  Django template path for the body partial — included
+#             from index.html via {% include active_sublab.template %}
+#   name      label shown on the tab strip
+#   blurb     one-line hover hint; appears as the tab `title`
 SUBLABS = [
     {
-        'slug':   'classic',
-        'module': 'classic',
-        'name':   'Classic',
-        'blurb':  'The original /s3lab/ bench: hunt + GPIO + TFT + '
-                  'timing diagram. The base frame the other sublabs '
-                  'extend.',
+        'slug':     'classic',
+        'module':   'classic',
+        'template': 's3lab/sublabs/classic_body.html',
+        'name':     'Classic',
+        'blurb':    'The original /s3lab/ bench: hunt + GPIO + TFT + '
+                    'timing diagram. The base frame the other sublabs '
+                    'extend.',
+    },
+    {
+        'slug':     'filmstrip',
+        'module':   'filmstrip',
+        'template': 's3lab/sublabs/filmstrip_body.html',
+        'name':     'Filmstrip',
+        'blurb':    'A scrolling strip of recent CA refinements. Each '
+                    'frame is one past genome; on every refine the '
+                    'strip shifts left and a new live tile appears.',
     },
     # Future sublabs land here. Keep entries small.
 ]
