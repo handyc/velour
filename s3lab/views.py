@@ -32,6 +32,15 @@ SUBLABS = [
                     'frame is one past genome; on every refine the '
                     'strip shifts left and a new live tile appears.',
     },
+    {
+        'slug':     'cellular',
+        'module':   'cellular',
+        'template': 's3lab/sublabs/cellular_body.html',
+        'name':     'Cellular',
+        'blurb':    'Tiles-are-population spatial GA on a pointy-top '
+                    'hex tiling. 64 cells, 6-neighbour tournament '
+                    'selection. Watch good rules sweep regions.',
+    },
     # Future sublabs land here. Keep entries small.
 ]
 SUBLABS_BY_SLUG = {s['slug']: s for s in SUBLABS}
