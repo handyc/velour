@@ -1,0 +1,39 @@
+{# Pagination row for library/class views.
+   Expects: page (django Page), qstr (URL-encoded preserved-params with trailing '&').
+#}
+{% if page.paginator.num_pages > 1 %}
+<nav style="display:flex; gap:0.4rem; align-items:center; margin:1rem 0;
+            font-family:ui-monospace,monospace; font-size:0.85rem;
+            color:#8b949e;">
+  {% if page.has_previous %}
+    <a href="?{{ qstr }}page={{ page.previous_page_number }}"
+       style="color:#79c0ff; text-decoration:none; padding:0.2rem 0.5rem;
+              background:#21262d; border:1px solid #30363d; border-radius:3px;">‹ prev</a>
+  {% else %}
+    <span style="color:#30363d; padding:0.2rem 0.5rem;">‹ prev</span>
+  {% endif %}
+
+  <span>page {{ page.number }} of {{ page.paginator.num_pages }}
+    <span style="color:#6e7681;">·
+      {{ page.start_index }}–{{ page.end_index }} of {{ page.paginator.count }}</span>
+  </span>
+
+  {% if page.has_next %}
+    <a href="?{{ qstr }}page={{ page.next_page_number }}"
+       style="color:#79c0ff; text-decoration:none; padding:0.2rem 0.5rem;
+              background:#21262d; border:1px solid #30363d; border-radius:3px;">next ›</a>
+  {% else %}
+    <span style="color:#30363d; padding:0.2rem 0.5rem;">next ›</span>
+  {% endif %}
+
+  <form method="get" style="display:inline-flex; gap:0.3rem; align-items:center; margin-left:0.4rem;">
+    {% for k, v in request.GET.items %}{% if k != 'page' %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+    <span style="color:#6e7681;">jump:</span>
+    <input type="number" name="page" min="1" max="{{ page.paginator.num_pages }}"
+           value="{{ page.number }}"
+           style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+                  padding:0.15rem 0.3rem; border-radius:3px; width:4rem;
+                  font-family:inherit; font-size:0.85rem;">
+  </form>
+</nav>
+{% endif %}

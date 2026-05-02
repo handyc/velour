@@ -36,16 +36,14 @@
     {% endif %}
   </form>
 
+  {% include "taxon/_paginator.html" %}
+
   <div>
     {% for c in cards %}{% include "taxon/_card.html" %}{% empty %}
       <p style="color:#8b949e;">No rules match.</p>
     {% endfor %}
   </div>
 
-  {% if total > shown %}
-  <p style="color:#8b949e; margin-top:1rem; font-size:0.8rem;">
-    Showing {{ shown }} of {{ total }}. Refine the search to narrow further.
-  </p>
-  {% endif %}
+  {% include "taxon/_paginator.html" %}
 </div>
 {% endblock %}

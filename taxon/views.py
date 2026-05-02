@@ -72,6 +72,27 @@ def index(request):
     })
 
 
+PAGE_SIZE = 60
+
+
+def _paginate(request, qs):
+    """Wrap a queryset in Django's Paginator using ?page= and our
+    PAGE_SIZE. Returns (page_obj, querystring_for_page_links) where
+    the querystring preserves all current GET params except `page`."""
+    from django.core.paginator import Paginator
+    paginator = Paginator(qs, PAGE_SIZE)
+    page_num = request.GET.get('page', '1')
+    try:
+        page = paginator.page(int(page_num))
+    except Exception:
+        page = paginator.page(1)
+    qd = request.GET.copy()
+    qd.pop('page', None)
+    qstr = qd.urlencode()
+    qstr = (qstr + '&') if qstr else ''
+    return page, qstr
+
+
 @login_required
 def library(request):
     from django.db.models import Q
@@ -92,8 +113,8 @@ def library(request):
         qs = qs.order_by('name', 'slug')
     else:
         qs = qs.order_by('-created_at')
-    cards = [_rule_card(r) for r in
-             qs.prefetch_related('classifications')[:300]]   # cap render cost
+    page, qstr = _paginate(request, qs.prefetch_related('classifications'))
+    cards = [_rule_card(r) for r in page.object_list]
     sources = (Rule.objects.values('source')
                .annotate(c=Count('id')).order_by('-c'))
     return render(request, 'taxon/library.html', {
@@ -102,8 +123,10 @@ def library(request):
         'active_source': src,
         'q': q,
         'sort': sort,
-        'total': qs.count(),
+        'total': page.paginator.count,
         'shown': len(cards),
+        'page': page,
+        'qstr': qstr,
     })
 
 
@@ -112,26 +135,45 @@ def class_view(request, n: int):
     if n not in (1, 2, 3, 4):
         return HttpResponseBadRequest('class must be 1, 2, 3, or 4')
     # Latest-classification-per-rule with that wolfram_class. Single
-    # SQL pass via window function: pick the most recent Classification
-    # per rule, filter to those whose latest matches `n`. Was N+1
-    # (529 queries at the current library size).
+    # SQL pass via Subquery — was N+1 (one query per rule × 500+ rules).
     from django.db.models import Subquery, OuterRef
     latest_per_rule = (Classification.objects
                        .filter(rule=OuterRef('pk'))
                        .order_by('-assigned_at'))
-    rules = (Rule.objects
-             .annotate(latest_class=Subquery(
-                 latest_per_rule.values('wolfram_class')[:1]))
-             .filter(latest_class=n)
-             .order_by('-created_at')
-             .prefetch_related('classifications')[:300])
-    cards = [_rule_card(r) for r in rules]
+    sort = request.GET.get('sort', 'newest')
+    src  = request.GET.get('source', '')
+    qs = (Rule.objects
+          .annotate(latest_class=Subquery(
+              latest_per_rule.values('wolfram_class')[:1]))
+          .filter(latest_class=n))
+    if src:
+        qs = qs.filter(source=src)
+    if sort == 'oldest':
+        qs = qs.order_by('created_at')
+    elif sort == 'name':
+        qs = qs.order_by('name', 'slug')
+    else:
+        qs = qs.order_by('-created_at')
+    qs = qs.prefetch_related('classifications')
+    page, qstr = _paginate(request, qs)
+    cards = [_rule_card(r) for r in page.object_list]
+    sources = (Rule.objects
+               .annotate(latest_class=Subquery(latest_per_rule.values('wolfram_class')[:1]))
+               .filter(latest_class=n)
+               .values('source').annotate(c=Count('id')).order_by('-c'))
     return render(request, 'taxon/class.html', {
         'n': n,
         'label': class_label(n),
         'color': class_color(n),
         'cards': cards,
         'class_choices': [(c, lbl) for c, lbl in WOLFRAM_CLASSES],
+        'page': page,
+        'qstr': qstr,
+        'sort': sort,
+        'sources': sources,
+        'active_source': src,
+        'total': page.paginator.count,
+        'shown': len(cards),
     })
 
 
