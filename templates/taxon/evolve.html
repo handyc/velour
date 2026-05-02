@@ -2,13 +2,425 @@
 {% block title %}Taxon — evolve toward class{% endblock %}
 
 {% block content %}
-<div style="max-width:900px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
             font-family:ui-monospace,Menlo,monospace;">
   <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
-  <h1>Evolve toward a target class</h1>
-  <p style="color:#8b949e;">In-browser GA. Pick a target Wolfram class and a
-    fitness function, watch the population converge, then save the elite back
-    into the library.</p>
-  <p style="color:#d29922;">[ Phase 1 stub — UI lands when the GA driver is wired. ]</p>
+  <h1 style="margin-top:0;">Evolve toward target class</h1>
+  <p style="color:#8b949e;">In-browser GA over K=4 hex-CA rulesets. Each
+    generation scores every genome with the same edge-of-chaos parabola
+    fitness s3lab/det/automaton use; the elite reseeds the bottom half
+    via mutation + crossover. The live preview shows the current best
+    genome's CA running on a fresh random grid every tick. When you've
+    found something interesting, name it and click <strong>💾 Save
+    elite</strong> — the rule lands in the library + classifier runs
+    on save so it picks up its Wolfram-class card immediately.</p>
+
+  <div style="display:grid; grid-template-columns: 320px 1fr; gap:1rem; align-items:flex-start;">
+    <aside style="background:#161b22; border:1px solid #30363d; border-radius:5px; padding:0.8rem;">
+      <h3 style="margin:0 0 0.6rem 0; font-size:0.9rem; color:#8b949e;">Settings</h3>
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.78rem; color:#8b949e;"
+               title="The fitness function rewards class-4 (edge-of-chaos) shape regardless of the dropdown — the dropdown is what gets stamped on the saved rule's metadata + name. To select for class 1/2/3 specifically, use /taxon/autosearch/ instead, which runs the actual classifier per candidate.">
+          target class (label)
+          <select id="target-class" style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+            {% for n, label in target_classes %}
+              <option value="{{ n }}" {% if n == 4 %}selected{% endif %}>{{ n }} · {{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.78rem; color:#8b949e;"
+               title="Population size. Larger = more diverse but slower per generation.">
+          population
+          <input id="pop-size" type="number" min="4" max="64" step="2" value="16"
+                 style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.78rem; color:#8b949e;"
+               title="Per-cell mutation rate. 0.001 ≈ 16 flips per K=4 genome; higher = more exploration.">
+          mutation rate
+          <input id="mut-rate" type="number" min="0" max="0.05" step="0.0005" value="0.002"
+                 style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.78rem; color:#8b949e;"
+               title="ms between generations — lower = faster evolution. The preview canvas re-paints between every gen.">
+          gen interval (ms)
+          <input id="gen-ms" type="number" min="0" max="2000" step="10" value="50"
+                 style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+        </label>
+        <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.78rem; color:#8b949e;"
+               title="Top-K elites preserved each generation (the rest get refilled from the elite pool via mutation + crossover).">
+          elite count
+          <input id="elite-n" type="number" min="1" max="16" step="1" value="4"
+                 style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+        </label>
+
+        <div style="display:flex; gap:0.4rem; margin-top:0.6rem;">
+          <button id="ga-start" style="background:#238636; color:#fff; border:0; padding:0.4rem 0.7rem; border-radius:3px; cursor:pointer; font-family:inherit; font-size:0.85rem;">▶ Start</button>
+          <button id="ga-pause" style="background:#1f6feb; color:#fff; border:0; padding:0.4rem 0.7rem; border-radius:3px; cursor:pointer; font-family:inherit; font-size:0.85rem;" disabled>Pause</button>
+          <button id="ga-reset" style="background:#21262d; color:#c9d1d9; border:1px solid #30363d; padding:0.4rem 0.7rem; border-radius:3px; cursor:pointer; font-family:inherit; font-size:0.85rem;">Reset</button>
+        </div>
+      </div>
+
+      <h3 style="margin:1rem 0 0.4rem 0; font-size:0.9rem; color:#8b949e;">Save elite</h3>
+      <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        <input id="save-name" type="text" placeholder="display name (e.g. spiral17)"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.3rem 0.4rem; font-family:inherit; font-size:0.85rem;"
+               value="{% if seed_rule %}{{ seed_rule.name|default:seed_rule.slug }} mut{% endif %}">
+        <button id="ga-save" style="background:#a371f7; color:#fff; border:0; padding:0.4rem 0.7rem; border-radius:3px; cursor:pointer; font-family:inherit; font-size:0.85rem;" disabled
+                title="Persist the current best genome as a new Rule with source='evolve'. Runs the classifier on save.">💾 Save elite</button>
+        <span id="save-status" style="color:#8b949e; font-size:0.78rem; min-height:1rem;"></span>
+      </div>
+
+      {% if seed_rule %}
+      <p style="color:#6e7681; font-size:0.75rem; margin-top:0.8rem;">
+        Seeded from <a href="{% url 'taxon:rule_detail' slug=seed_rule.slug %}" style="color:#79c0ff;">{{ seed_rule.slug }}</a>;
+        starting population is mutations of this genome.
+      </p>
+      {% endif %}
+    </aside>
+
+    <main style="display:flex; flex-direction:column; gap:0.8rem;">
+      <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:0.5rem;">
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.5rem;">
+          <div style="color:#8b949e; font-size:0.7rem;">generation</div>
+          <div id="ga-gen" style="font-family:ui-monospace,monospace; font-size:1.2rem; color:#c9d1d9;">0</div>
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.5rem;">
+          <div style="color:#8b949e; font-size:0.7rem;">best fit</div>
+          <div id="ga-best" style="font-family:ui-monospace,monospace; font-size:1.2rem; color:#7ee787;">—</div>
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.5rem;">
+          <div style="color:#8b949e; font-size:0.7rem;">mean fit</div>
+          <div id="ga-mean" style="font-family:ui-monospace,monospace; font-size:1.2rem; color:#79c0ff;">—</div>
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.5rem;">
+          <div style="color:#8b949e; font-size:0.7rem;">elite stable</div>
+          <div id="ga-stable" style="font-family:ui-monospace,monospace; font-size:1.2rem; color:#d4a72c;">0</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.8rem;">
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.6rem;">
+          <h3 style="margin:0 0 0.4rem 0; font-size:0.85rem; color:#8b949e;">Best genome · live CA</h3>
+          <canvas id="ga-preview" width="384" height="384"
+                  style="image-rendering:pixelated; image-rendering:crisp-edges;
+                         background:#000; display:block; width:100%; max-width:384px;
+                         border:1px solid #21262d;"></canvas>
+          <div id="ga-elite-meta" style="color:#6e7681; font-size:0.75rem; margin-top:0.3rem;">
+            (start the GA to populate)
+          </div>
+        </div>
+        <div style="background:#161b22; border:1px solid #30363d; border-radius:4px; padding:0.6rem;">
+          <h3 style="margin:0 0 0.4rem 0; font-size:0.85rem; color:#8b949e;">Fitness curve · last 100 gens</h3>
+          <canvas id="ga-curve" width="384" height="200"
+                  style="background:#0d1117; display:block; width:100%; max-width:384px;
+                         border:1px solid #21262d;"></canvas>
+          <p style="color:#6e7681; font-size:0.7rem; margin:0.4rem 0 0 0;">
+            green = best · blue = mean · y-axis auto-scales · the curve
+            flattens at the parabola peak (~5.0) once the GA finds a
+            stable edge-of-chaos rule
+          </p>
+        </div>
+      </div>
+    </main>
+  </div>
 </div>
+
+<script type="module">
+import {
+    GBYTES, GRID_W, GRID_H, K,
+    seed_prng, seed_grid, step_grid,
+    fitness, mutate, cross,
+    random_genome, identity_genome, ansi256_to_rgb,
+} from "{% static_v 's3lab/js/engine.mjs' %}";
+
+const SEED_HEX = {{ seed_hex|default:"''"|safe }} && "{{ seed_hex|default:'' }}";
+const SEED_PALETTE = {{ seed_palette_json|safe }};
+
+// ── State ────────────────────────────────────────────────────────
+const state = {
+    pop: [],                  // Uint8Array genomes
+    scores: [],               // numbers, parallel to pop
+    gen: 0,
+    running: false,
+    timer: null,
+    bestGenome: null,
+    bestScore: -Infinity,
+    bestSince: 0,
+    curve: [],                // [[best, mean], ...] last 100 gens
+    palette: SEED_PALETTE.slice(0, 4),
+    fitnessCurve: [],         // separate array shipped with save
+    previewGrid: new Uint8Array(GRID_W * GRID_H),
+    previewBuf: new Uint8Array(GRID_W * GRID_H),
+    previewSeed: 1,
+    previewTimer: null,
+};
+
+function seedFromHex(hex) {
+    const bytes = new Uint8Array(GBYTES);
+    for (let i = 0; i < GBYTES; i++) {
+        bytes[i] = parseInt(hex.substr(i * 2, 2), 16) || 0;
+    }
+    return bytes;
+}
+
+function clonePop(N, seed_genome) {
+    const out = [];
+    seed_prng(((Date.now() | 0) >>> 0) || 1);
+    for (let i = 0; i < N; i++) {
+        if (seed_genome) {
+            const g = new Uint8Array(seed_genome);
+            // Mutate so initial pop has some diversity
+            const m = new Uint8Array(GBYTES);
+            mutate(m, g, 0.003);
+            out.push(m);
+        } else {
+            out.push(random_genome());
+        }
+    }
+    return out;
+}
+
+// ── DOM refs ─────────────────────────────────────────────────────
+const elTarget   = document.getElementById('target-class');
+const elPop      = document.getElementById('pop-size');
+const elMut      = document.getElementById('mut-rate');
+const elInterval = document.getElementById('gen-ms');
+const elElite    = document.getElementById('elite-n');
+const btnStart   = document.getElementById('ga-start');
+const btnPause   = document.getElementById('ga-pause');
+const btnReset   = document.getElementById('ga-reset');
+const btnSave    = document.getElementById('ga-save');
+const elName     = document.getElementById('save-name');
+const elSaveStatus = document.getElementById('save-status');
+const elGen      = document.getElementById('ga-gen');
+const elBest     = document.getElementById('ga-best');
+const elMean     = document.getElementById('ga-mean');
+const elStable   = document.getElementById('ga-stable');
+const elMeta     = document.getElementById('ga-elite-meta');
+const cvPreview  = document.getElementById('ga-preview');
+const ctxPreview = cvPreview.getContext('2d');
+const cvCurve    = document.getElementById('ga-curve');
+const ctxCurve   = cvCurve.getContext('2d');
+
+// ── GA loop ──────────────────────────────────────────────────────
+function scoreAll() {
+    const seed = ((Math.random() * 0xFFFFFFFF) >>> 0) || 1;
+    state.scores = state.pop.map(g => fitness(g, seed).score);
+}
+
+function step() {
+    scoreAll();
+    const order = state.scores
+        .map((s, i) => [s, i])
+        .sort((a, b) => b[0] - a[0]);
+    const eliteN = Math.max(1, Math.min(state.pop.length, parseInt(elElite.value, 10) || 4));
+    const mutRate = parseFloat(elMut.value) || 0.002;
+    const newBest = state.pop[order[0][1]];
+    const newBestScore = order[0][0];
+    if (newBestScore > state.bestScore + 1e-9) {
+        state.bestScore = newBestScore;
+        state.bestGenome = new Uint8Array(newBest);
+        state.bestSince = state.gen;
+        // Reseed preview so the new best gets a fresh canvas
+        state.previewGrid.fill(0);
+        seed_grid(state.previewGrid, ((Math.random() * 0xFFFFFFFF) >>> 0) || 1);
+    }
+    // Build next generation: keep eliteN, refill rest via cross + mutate.
+    const elites = order.slice(0, eliteN).map(([_, i]) => state.pop[i]);
+    const next = elites.map(g => new Uint8Array(g));
+    while (next.length < state.pop.length) {
+        const a = elites[(Math.random() * elites.length) | 0];
+        const b = elites[(Math.random() * elites.length) | 0];
+        const child = new Uint8Array(GBYTES);
+        cross(child, a, b);
+        const mut = new Uint8Array(GBYTES);
+        mutate(mut, child, mutRate);
+        next.push(mut);
+    }
+    state.pop = next;
+    state.gen++;
+    const mean = state.scores.reduce((x, y) => x + y, 0) / state.scores.length;
+    state.curve.push([state.bestScore, mean]);
+    if (state.curve.length > 100) state.curve.shift();
+    state.fitnessCurve.push(state.bestScore);
+    if (state.fitnessCurve.length > 500) state.fitnessCurve.shift();
+
+    elGen.textContent = state.gen;
+    elBest.textContent = state.bestScore.toFixed(3);
+    elMean.textContent = mean.toFixed(3);
+    elStable.textContent = state.gen - state.bestSince;
+    elMeta.textContent =
+        `gen ${state.gen} · ${(state.bestGenome && state.bestGenome.length) || 0} B genome · ` +
+        `palette ANSI ${state.palette.join(',')}`;
+    drawCurve();
+    btnSave.disabled = !state.bestGenome;
+}
+
+// ── Preview canvas — paint live CA of the current best ──────────
+function tickPreview() {
+    if (!state.bestGenome) return;
+    step_grid(state.bestGenome, state.previewGrid, state.previewBuf);
+    state.previewGrid.set(state.previewBuf);
+    drawPreview();
+}
+
+function drawPreview() {
+    const W = cvPreview.width;
+    const H = cvPreview.height;
+    const cellW = W / GRID_W;
+    const cellH = H / GRID_H;
+    for (let y = 0; y < GRID_H; y++) {
+        for (let x = 0; x < GRID_W; x++) {
+            const v = state.previewGrid[y * GRID_W + x] & 3;
+            const ansi = state.palette[v] | 0;
+            const [r, g, b] = ansi256_to_rgb(ansi);
+            ctxPreview.fillStyle = `rgb(${r},${g},${b})`;
+            ctxPreview.fillRect(x * cellW | 0, y * cellH | 0,
+                                Math.ceil(cellW), Math.ceil(cellH));
+        }
+    }
+}
+
+// ── Fitness sparkline ───────────────────────────────────────────
+function drawCurve() {
+    const W = cvCurve.width;
+    const H = cvCurve.height;
+    ctxCurve.clearRect(0, 0, W, H);
+    if (state.curve.length === 0) return;
+    let lo = Infinity, hi = -Infinity;
+    for (const [b, m] of state.curve) {
+        if (b < lo) lo = b; if (b > hi) hi = b;
+        if (m < lo) lo = m; if (m > hi) hi = m;
+    }
+    if (hi - lo < 0.001) hi = lo + 1;
+    const dx = W / Math.max(1, state.curve.length - 1);
+    const norm = (v) => H - 8 - ((v - lo) / (hi - lo)) * (H - 16);
+    // mean line
+    ctxCurve.strokeStyle = '#79c0ff';
+    ctxCurve.lineWidth = 1.2;
+    ctxCurve.beginPath();
+    state.curve.forEach(([_, m], i) => {
+        const x = i * dx; const y = norm(m);
+        if (i === 0) ctxCurve.moveTo(x, y); else ctxCurve.lineTo(x, y);
+    });
+    ctxCurve.stroke();
+    // best line
+    ctxCurve.strokeStyle = '#7ee787';
+    ctxCurve.lineWidth = 1.5;
+    ctxCurve.beginPath();
+    state.curve.forEach(([b, _], i) => {
+        const x = i * dx; const y = norm(b);
+        if (i === 0) ctxCurve.moveTo(x, y); else ctxCurve.lineTo(x, y);
+    });
+    ctxCurve.stroke();
+    // y-axis tick labels
+    ctxCurve.fillStyle = '#6e7681';
+    ctxCurve.font = '10px ui-monospace, monospace';
+    ctxCurve.fillText(hi.toFixed(2), 4, 12);
+    ctxCurve.fillText(lo.toFixed(2), 4, H - 4);
+}
+
+// ── Controls ─────────────────────────────────────────────────────
+function start() {
+    if (state.running) return;
+    if (state.pop.length === 0) {
+        const N = Math.max(4, Math.min(64, parseInt(elPop.value, 10) || 16));
+        state.pop = clonePop(N, SEED_HEX ? seedFromHex(SEED_HEX) : null);
+        seed_grid(state.previewGrid, ((Math.random() * 0xFFFFFFFF) >>> 0) || 1);
+    }
+    state.running = true;
+    btnStart.disabled = true;
+    btnPause.disabled = false;
+    const tick = () => {
+        if (!state.running) return;
+        step();
+        const ms = parseInt(elInterval.value, 10);
+        state.timer = setTimeout(tick, isFinite(ms) ? Math.max(0, ms) : 50);
+    };
+    tick();
+    if (!state.previewTimer) {
+        state.previewTimer = setInterval(tickPreview, 120);
+    }
+}
+
+function pause() {
+    state.running = false;
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    btnStart.disabled = false;
+    btnPause.disabled = true;
+}
+
+function reset() {
+    pause();
+    state.pop = [];
+    state.scores = [];
+    state.gen = 0;
+    state.bestGenome = null;
+    state.bestScore = -Infinity;
+    state.bestSince = 0;
+    state.curve = [];
+    state.fitnessCurve = [];
+    state.previewGrid.fill(0);
+    if (state.previewTimer) { clearInterval(state.previewTimer); state.previewTimer = null; }
+    elGen.textContent = '0';
+    elBest.textContent = '—';
+    elMean.textContent = '—';
+    elStable.textContent = '0';
+    elMeta.textContent = '(start the GA to populate)';
+    btnSave.disabled = true;
+    ctxPreview.fillStyle = '#000';
+    ctxPreview.fillRect(0, 0, cvPreview.width, cvPreview.height);
+    ctxCurve.clearRect(0, 0, cvCurve.width, cvCurve.height);
+}
+
+function csrfToken() {
+    const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function saveElite() {
+    if (!state.bestGenome) return;
+    const fd = new FormData();
+    let hex = '';
+    for (let i = 0; i < state.bestGenome.length; i++) {
+        hex += state.bestGenome[i].toString(16).padStart(2, '0');
+    }
+    fd.append('genome_hex', hex);
+    fd.append('palette', state.palette.slice(0, 4).join(','));
+    fd.append('name', elName.value.trim() || 'evolved');
+    fd.append('target_class', elTarget.value);
+    fd.append('fitness', state.bestScore.toFixed(4));
+    fd.append('generations', state.gen);
+    fd.append('fitness_curve', JSON.stringify(state.fitnessCurve.slice(-200)));
+    elSaveStatus.style.color = '#8b949e';
+    elSaveStatus.textContent = 'saving…';
+    try {
+        const r = await fetch("{% url 'taxon:evolve_save' %}", {
+            method: 'POST', body: fd, credentials: 'same-origin',
+            headers: { 'X-CSRFToken': csrfToken() },
+        });
+        const d = await r.json();
+        if (d.ok) {
+            elSaveStatus.style.color = '#3fb950';
+            elSaveStatus.innerHTML =
+                `saved → <a href="${d.detail_url}" style="color:#79c0ff;">${d.slug}</a>`;
+        } else {
+            elSaveStatus.style.color = '#cf222e';
+            elSaveStatus.textContent = 'save failed: ' + JSON.stringify(d);
+        }
+    } catch (e) {
+        elSaveStatus.style.color = '#cf222e';
+        elSaveStatus.textContent = 'save error: ' + e.message;
+    }
+}
+
+btnStart.addEventListener('click', start);
+btnPause.addEventListener('click', pause);
+btnReset.addEventListener('click', reset);
+btnSave.addEventListener('click', saveElite);
+
+// Initial blank canvas
+ctxPreview.fillStyle = '#000';
+ctxPreview.fillRect(0, 0, cvPreview.width, cvPreview.height);
+</script>
 {% endblock %}
