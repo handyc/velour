@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% load static %}
+{% load assets %}
+
+{% block title %}HexNN — TFT 128×128 emulator{% endblock %}
+
+{% block extra_head %}
+<style>
+  body { background: #0d1117; color: #c9d1d9;
+         font-family: ui-monospace, Menlo, monospace; }
+  .tft-page { max-width: 700px; margin: 1rem auto; padding: 0 1rem; }
+  .tft-page h1 { margin-top: 0.4rem; }
+  .lede { color: #8b949e; line-height: 1.5; }
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+           padding: 0.7rem 0.9rem; margin: 0.6rem 0; }
+  .panel h3 { margin: 0 0 0.4rem 0; font-size: 0.78rem; color: #8b949e;
+              font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .device {
+    /* A boxy "device" frame around the canvas — same aspect ratio as the
+       supermini's TFT bezel, so the live emulation looks like the thing
+       you'd see on the bench. */
+    width: 416px; margin: 1rem auto;
+    background: #1a1d20; padding: 16px;
+    border: 1px solid #30363d; border-radius: 12px;
+    box-shadow: 0 0 24px rgba(0,0,0,0.5);
+  }
+  .device .label {
+    text-align: center; font-size: 0.72rem; color: #6e7681;
+    margin-bottom: 6px; letter-spacing: 0.08em;
+  }
+  canvas#tft-emu {
+    display: block; margin: 0 auto;
+    width: 384px; height: 384px;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #000; border: 1px solid #2a2e33;
+  }
+  .controls { display: flex; gap: 0.5rem; align-items: center;
+              flex-wrap: wrap; margin: 0.6rem 0; }
+  .controls input, .controls button {
+    background: #0d1117; color: #e1e4e8;
+    border: 1px solid #30363d; padding: 0.35rem 0.6rem; border-radius: 4px;
+    font-family: inherit; font-size: 0.85rem;
+  }
+  .controls button { background: #1f6feb; color: white; border: none; cursor: pointer; }
+  .controls button.secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+  table.kv { font-size: 0.85rem; }
+  table.kv td { padding: 0.2rem 0.6rem 0.2rem 0; }
+  table.kv td:first-child { color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="tft-page">
+  <p style="font-size:0.78rem;"><a href="{% url 'hexnn:index' %}" style="color:#58a6ff;">← HexNN bench</a></p>
+  <h1>HexNN — TFT 128×128 emulator</h1>
+  <p class="lede">A pixel-faithful preview of what the
+    <code>hexnn_search/esp32_s3_tft/</code> firmware paints to its
+    1.44" ST7735 panel. Same engine
+    (<code>{% static 's3lab/js/hexnn_engine.mjs' %}</code>), same
+    seed → same genome → same step semantics. The canvas is 128×128
+    native pixels, displayed at 3× zoom so each device pixel is a
+    visible 3×3 block.</p>
+
+  <div class="device">
+    <div class="label">ESP32-S3 SUPERMINI · ST7735 128×128</div>
+    <canvas id="tft-emu" width="128" height="128"
+            aria-label="128×128 pixel-faithful preview of the device TFT"></canvas>
+  </div>
+
+  <div class="panel">
+    <h3>Controls</h3>
+    <div class="controls">
+      <label>seed
+        <input id="seed" type="number" value="42" min="0" max="4294967295" style="width:9rem;">
+      </label>
+      <label>K
+        <input id="K" type="number" value="4" min="2" max="16" style="width:4rem;">
+      </label>
+      <label>tick ms
+        <input id="tickMs" type="number" value="200" min="40" max="2000" style="width:5rem;">
+      </label>
+      <button id="restart-btn">Restart with seed</button>
+      <button id="run-btn"     class="secondary">Pause</button>
+      <button id="reseed-btn"  class="secondary">Reseed grid</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Status</h3>
+    <table class="kv">
+      <tr><td>seed</td>     <td><span id="kv-seed">—</span></td></tr>
+      <tr><td>K</td>        <td><span id="kv-K">—</span></td></tr>
+      <tr><td>tick</td>     <td><span id="kv-tick">0</span></td></tr>
+      <tr><td>fps</td>      <td><span id="kv-fps">0</span></td></tr>
+      <tr><td>cell px</td>  <td>7</td></tr>
+      <tr><td>row step</td> <td>6 (0.866 × cell)</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Algorithm parity</h3>
+    <p class="lede" style="margin:0;">PRNG (mulberry32), genome layout
+      (N=2^14 prototypes, parallel <code>keys</code>+<code>outs</code>
+      Uint8Arrays), <code>buildBins</code>, nearest-prototype lookup
+      with squared-Euclidean distance — all imported directly from
+      <code>hexnn_engine.mjs</code>. The same module the
+      <a href="{% url 'hexnn:index' %}" style="color:#58a6ff;">browser
+        bench</a> uses. The C distillation
+      (<code>condenser.distill_hexnn.distill_hexnn_esp32s3(with_tft=True)</code>)
+      uses the same algorithm written out in C99; this emulator and
+      the device should agree at the same seed (modulo timing jitter
+      from real-world drift in <code>esp_random()</code>).</p>
+  </div>
+</div>
+
+<script type="module">
+import {
+  mulberry32, makeGenome, buildBins, stepWithGenomeBins
+} from '{% static_v "s3lab/js/hexnn_engine.mjs" %}';
+
+// Layout parameters that exactly match the device's
+// _hexnn_tft_blocks() at panel_w=128, W=16:
+//   cell_px = 128 // (16+1) = 7
+//   row_step_y_x1000 = 866   (≈ √3/2 · cell_px)
+const PANEL_W = 128, PANEL_H = 128;
+const W = 16, H = 16;
+const CELL_PX = 7;
+const ROW_STEP_X1000 = 866;
+
+// PAL_HEX[] from distill_hexnn — the same 16-colour palette the
+// emitted firmware uses. Cells are coloured by (state % K).
+const PAL_HEX = [
+  "#e74c3c", "#3498db", "#2ecc71", "#f1c40f",
+  "#9b59b6", "#1abc9c", "#e67e22", "#ecf0f1",
+  "#34495e", "#fd79a8", "#a29bfe", "#ffeaa7",
+  "#55efc4", "#fab1a0", "#dfe6e9", "#74b9ff",
+];
+
+const cv  = document.getElementById('tft-emu');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const seedEl    = document.getElementById('seed');
+const kEl       = document.getElementById('K');
+const tickMsEl  = document.getElementById('tickMs');
+const restart   = document.getElementById('restart-btn');
+const runBtn    = document.getElementById('run-btn');
+const reseedBtn = document.getElementById('reseed-btn');
+
+const kvSeed = document.getElementById('kv-seed');
+const kvK    = document.getElementById('kv-K');
+const kvTick = document.getElementById('kv-tick');
+const kvFps  = document.getElementById('kv-fps');
+
+const state = {
+  K: 4, seed: 42, genome: null, bins: null,
+  grid: null, prevGrid: null,
+  tick: 0, running: true,
+  lastFrameAt: 0, fps: 0,
+};
+
+function freshGridSeeded(K, seed) {
+  const rng = mulberry32(seed);
+  const g = new Uint8Array(W * H);
+  for (let i = 0; i < g.length; i++) g[i] = (rng() * K) | 0;
+  return g;
+}
+
+function renderFull() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, PANEL_W, PANEL_H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const v = state.grid[y * W + x] % state.K;
+      const px = x * CELL_PX;
+      const py = ((y * CELL_PX * ROW_STEP_X1000) / 1000 | 0)
+               + ((x & 1) ? (CELL_PX >> 1) : 0);
+      if (px + CELL_PX > PANEL_W || py + CELL_PX > PANEL_H) continue;
+      ctx.fillStyle = PAL_HEX[v % PAL_HEX.length];
+      ctx.fillRect(px, py, CELL_PX - 1, CELL_PX - 1);
+    }
+  }
+}
+
+function renderDiff() {
+  if (!state.prevGrid) { renderFull(); return; }
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x;
+      const v  = state.grid[idx] % state.K;
+      const pv = state.prevGrid[idx] % state.K;
+      if (v === pv) continue;
+      const px = x * CELL_PX;
+      const py = ((y * CELL_PX * ROW_STEP_X1000) / 1000 | 0)
+               + ((x & 1) ? (CELL_PX >> 1) : 0);
+      if (px + CELL_PX > PANEL_W || py + CELL_PX > PANEL_H) continue;
+      ctx.fillStyle = PAL_HEX[v % PAL_HEX.length];
+      ctx.fillRect(px, py, CELL_PX - 1, CELL_PX - 1);
+    }
+  }
+}
+
+function bootstrap() {
+  state.K     = Math.max(2, Math.min(16, +kEl.value | 0));
+  state.seed  = (+seedEl.value | 0) >>> 0;
+  state.genome = makeGenome(state.K, state.seed);
+  state.bins   = buildBins(state.genome);
+  state.grid   = freshGridSeeded(state.K, state.seed ^ 0xC0DECAFE);
+  state.prevGrid = null;
+  state.tick   = 0;
+  kvSeed.textContent = state.seed;
+  kvK.textContent    = state.K;
+  kvTick.textContent = '0';
+  renderFull();
+}
+
+let lastTickMs = performance.now();
+let frameCount = 0, fpsLastAt = performance.now();
+
+function loop(now) {
+  if (state.running) {
+    const tickMs = Math.max(40, Math.min(2000, +tickMsEl.value | 0));
+    if (now - lastTickMs >= tickMs) {
+      const next = stepWithGenomeBins(state.grid, W, H, state.bins);
+      state.prevGrid = state.grid;
+      state.grid = next;
+      state.tick++;
+      kvTick.textContent = state.tick;
+      renderDiff();
+      lastTickMs = now;
+      frameCount++;
+    }
+  }
+  if (now - fpsLastAt >= 1000) {
+    state.fps = frameCount;
+    kvFps.textContent = state.fps;
+    frameCount = 0;
+    fpsLastAt = now;
+  }
+  requestAnimationFrame(loop);
+}
+
+restart.addEventListener('click', () => bootstrap());
+runBtn.addEventListener('click', () => {
+  state.running = !state.running;
+  runBtn.textContent = state.running ? 'Pause' : 'Run';
+});
+reseedBtn.addEventListener('click', () => {
+  state.grid = freshGridSeeded(state.K,
+    (Math.random() * 0xFFFFFFFF) >>> 0);
+  state.prevGrid = null;
+  renderFull();
+});
+
+bootstrap();
+requestAnimationFrame(loop);
+</script>
+{% endblock %}

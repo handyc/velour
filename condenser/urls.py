@@ -18,6 +18,7 @@ urlpatterns = [
     path('distill/det-esp8266/',   views.distill_det_esp8266,   name='distill_det_esp8266'),
     path('distill/det-esp32s3/',   views.distill_det_esp32s3,   name='distill_det_esp32s3'),
     path('distill/hexnn-esp32s3/', views.distill_hexnn_esp32s3, name='distill_hexnn_esp32s3'),
+    path('distill/hexnn-esp32s3-tft/', views.distill_hexnn_esp32s3_tft, name='distill_hexnn_esp32s3_tft'),
     path('distill/cellular-c/',    views.distill_cellular_c,    name='distill_cellular_c'),
     path('distill/cellular-esp/',  views.distill_cellular_esp,  name='distill_cellular_esp'),
     path('distill/aether/<slug:slug>/stereokit/', views.distill_aether_stereokit, name='distill_aether_stereokit'),

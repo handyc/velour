@@ -20,11 +20,16 @@
 {% block content %}
 <div class="hexnn-page">
 
-<h1 style="display:flex;align-items:baseline;gap:0.7rem;">
+<h1 style="display:flex;align-items:baseline;gap:0.7rem;flex-wrap:wrap;">
   Hex NN
   <span style="color:#8b949e;font-size:0.85rem;font-weight:normal;">
     nearest-neighbour CA · K dialable 4–256
   </span>
+  <a href="{% url 'hexnn:tft_emulator' %}"
+     style="margin-left:auto;font-size:0.78rem;font-weight:normal;
+            background:#21262d;color:#79c0ff;border:1px solid #30363d;
+            padding:0.3rem 0.6rem;border-radius:4px;text-decoration:none;"
+     title="Pixel-faithful 128×128 preview of the esp32_s3_tft firmware.">⬢ TFT 128×128</a>
 </h1>
 
 <p class="hexnn-info">

@@ -590,6 +590,46 @@ def distill_cellular_c(request):
 
 
 @login_required
+def distill_hexnn_esp32s3_tft(request):
+    """HexNN → ESP32-S3 SuperMini + ST7735 (128×128) — full pipeline
+    plus live TFT render alongside the existing WiFi+SVG web UI.
+    """
+    from .distill_hexnn import distill_hexnn_esp32s3 as build
+    K        = max(2, min(64,    int(request.POST.get('K', 4))))
+    n_log2   = max(8, min(14,    int(request.POST.get('n_log2', 11))))
+    W        = max(8, min(32,    int(request.POST.get('W', 16))))
+    H        = max(6, min(24,    int(request.POST.get('H', 16))))
+    horizon  = max(20, min(200,  int(request.POST.get('horizon', 80))))
+    burn_in  = max(4, min(80,    int(request.POST.get('burn_in', 20))))
+    pop_size = max(2, min(16,    int(request.POST.get('pop_size', 8))))
+    gens     = max(5, min(120,   int(request.POST.get('generations', 30))))
+    rate_raw = request.POST.get('mutation_rate', '0.0008').strip()
+    try:    rate = max(0.0, min(0.05, float(rate_raw)))
+    except ValueError: rate = 0.0008
+    run_hunt = request.POST.get('run_hunt', 'on') in ('on', '1', 'true')
+    tick_ms  = max(40, min(2000, int(request.POST.get('tick_ms', 200))))
+    ssid     = request.POST.get('wifi_ssid', 'YOUR_WIFI').strip() or 'YOUR_WIFI'
+    pwd      = request.POST.get('wifi_pass', 'YOUR_PASS').strip() or 'YOUR_PASS'
+    tft_w    = max(80, min(240, int(request.POST.get('tft_w', 128))))
+    tft_h    = max(80, min(240, int(request.POST.get('tft_h', 128))))
+    label = (f'HexNN → ESP32-S3 + TFT {tft_w}x{tft_h} '
+             f'(K={K}, N=2^{n_log2}, {W}x{H}, pop {pop_size}x{gens})')
+    return _distill_and_save(
+        request,
+        name=label,
+        source_app='hexnn',
+        source_tier='django', target_tier='esp',
+        build=lambda: build(K=K, n_log2=n_log2, W=W, H=H, horizon=horizon,
+                            burn_in=burn_in, pop_size=pop_size,
+                            generations=gens, mutation_rate=rate,
+                            run_hunt=run_hunt, tick_ms=tick_ms,
+                            wifi_ssid=ssid, wifi_pass=pwd,
+                            with_tft=True, tft_w=tft_w, tft_h=tft_h),
+        success_fmt=f'HexNN → ESP32-S3 + TFT {tft_w}x{tft_h}: {{size}} bytes.',
+    )
+
+
+@login_required
 def distill_cellular_esp(request):
     """s3lab Cellular sublab → ESP32-S3 SuperMini firmware.
 

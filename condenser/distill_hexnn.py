@@ -24,11 +24,145 @@ the next tier (ESP8266, ATtiny) would have to shed.
 from __future__ import annotations
 
 
+def _empty_tft_blocks() -> dict:
+    """When with_tft=False, every splice point is a no-op."""
+    return {
+        'includes':    '',
+        'globals':     '',
+        'render_fn':   '',
+        'render_call': '',
+        'init':        '',
+    }
+
+
+def _hexnn_tft_blocks(W: int, H: int, panel_w: int, panel_h: int) -> dict:
+    """C blocks for the optional ST7735 render path.
+
+    Layout: pointy-top hex tiles, odd columns shifted +cell/2 on y so
+    visually it matches the SVG render. Tile size derived from the
+    panel + grid dims so distillations at other resolutions don't have
+    to think about pixel packing.
+
+    The pin map (SCK=12 MOSI=11 DC=4 CS=5 RST=6 BL=7) matches the
+    supermini convention used by isolation/artifacts/hex_ca_class4/*
+    and the s3lab/esp32_s3_xcc fork — same panels can be reused.
+    """
+    # Pixel-per-cell budget: each grid column gets a slot of width
+    # panel_w/(W+0.5) so the half-cell stagger fits at the right edge.
+    # Use integer floor; over-fit cells fall outside the canvas.
+    cell_px = max(3, panel_w // (W + 1))
+    # Hex pack: rows are spaced sqrt(3)/2 ≈ 0.866 of cell_px tall.
+    row_step_x1000 = 866   # × cell_px / 1000
+    init_code = (
+        '// ── ST7735 TFT init ─────────────────────────────────────\n'
+        '    pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, HIGH);\n'
+        '    tft.initR(INITR_144GREENTAB);\n'
+        '    tft.setSPISpeed(27000000UL);\n'
+        '    tft.setRotation(0);\n'
+        '    tft.fillScreen(0);\n'
+        '    rebuild_pal_rgb565();\n'
+        '    render_tft_full();'
+    )
+    includes = (
+        '#include <SPI.h>\n'
+        '#include <Adafruit_GFX.h>\n'
+        '#include <Adafruit_ST7735.h>\n'
+        '\n'
+        '// Supermini ST7735 pin map; matches isolation/artifacts/\n'
+        '// hex_ca_class4/* and the s3lab/esp32_s3_xcc fork.\n'
+        '#define TFT_SCK   12\n'
+        '#define TFT_MOSI  11\n'
+        '#define TFT_DC     4\n'
+        '#define TFT_CS     5\n'
+        '#define TFT_RST    6\n'
+        '#define TFT_BL     7\n'
+    )
+    globals_code = f'''// ── TFT state ────────────────────────────────────────────────────
+//
+// Diff-render scaffolding: pal_rgb565[K] cached at boot, last_drawn[]
+// remembers what was last on-screen per cell so we only repaint the
+// cells whose value changed.
+
+static Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCK, TFT_RST);
+static uint16_t pal_rgb565[K];
+static uint8_t  last_drawn[W * H];
+
+// Convert one of the PAL_HEX[] CSS strings to RGB565. The strings are
+// 7-byte "#rrggbb" — fail-soft to black on any malformed value.
+static uint16_t css_hex_to_rgb565(const char *css) {{
+    if (!css || css[0] != '#') return 0;
+    uint32_t v = 0;
+    for (int i = 1; i <= 6; i++) {{
+        char c = css[i];
+        uint32_t d = 0;
+        if      (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else return 0;
+        v = (v << 4) | d;
+    }}
+    uint8_t r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF;
+    return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}}
+
+static void rebuild_pal_rgb565(void) {{
+    for (int i = 0; i < K; i++) pal_rgb565[i] = css_hex_to_rgb565(pal((uint8_t)i));
+}}'''
+    render_fn = f'''// ── TFT render (pointy-top hex tiles, diff-only) ─────────────────
+//
+// Cell pixel size + row stagger derived at distill time:
+//   cell_px = panel_w / (W + 1)        (= {cell_px})
+//   row_step_y = cell_px * 866 / 1000  (≈ √3/2 · cell_px)
+// Tiles are drawn as filled rects (close enough at this size); odd
+// columns shifted +cell_px/2 on y to mirror the SVG bench.
+
+#define TFT_CELL_PX     {cell_px}
+#define TFT_ROW_STEP_X1000  {row_step_x1000}
+#define TFT_PANEL_W     {panel_w}
+#define TFT_PANEL_H     {panel_h}
+
+static inline void tft_draw_one(int x, int y, uint8_t v) {{
+    int px = x * TFT_CELL_PX;
+    int py = (y * TFT_CELL_PX * TFT_ROW_STEP_X1000) / 1000
+           + ((x & 1) ? (TFT_CELL_PX / 2) : 0);
+    if (px + TFT_CELL_PX > TFT_PANEL_W || py + TFT_CELL_PX > TFT_PANEL_H) return;
+    tft.fillRect(px, py, TFT_CELL_PX - 1, TFT_CELL_PX - 1, pal_rgb565[v]);
+}}
+
+static void render_tft_full(void) {{
+    tft.fillScreen(0);
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {{
+        uint8_t v = grid_a[y * W + x] % K;
+        tft_draw_one(x, y, v);
+        last_drawn[y * W + x] = v;
+    }}
+}}
+
+static void render_tft_diff(void) {{
+    for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {{
+        int idx = y * W + x;
+        uint8_t v = grid_a[idx] % K;
+        if (last_drawn[idx] == v) continue;
+        tft_draw_one(x, y, v);
+        last_drawn[idx] = v;
+    }}
+}}'''
+    return {
+        'includes':    includes,
+        'globals':     globals_code,
+        'render_fn':   render_fn,
+        'render_call': 'render_tft_diff();',
+        'init':        init_code,
+    }
+
+
+
 def distill_hexnn_esp32s3(K=4, n_log2=11, W=16, H=16, horizon=80,
                           burn_in=20, pop_size=8, generations=30,
                           mutation_rate=0.0008, run_hunt=True,
                           tick_ms=200,
-                          wifi_ssid='YOUR_WIFI', wifi_pass='YOUR_PASS'):
+                          wifi_ssid='YOUR_WIFI', wifi_pass='YOUR_PASS',
+                          with_tft=False, tft_w=128, tft_h=128):
     """Emit a single .ino-style C++ source for ESP32-S3 SuperMini.
 
     The same source covers the whole HexNN pipeline:
@@ -72,13 +206,23 @@ def distill_hexnn_esp32s3(K=4, n_log2=11, W=16, H=16, horizon=80,
             f'({pop_size} → {pop_size // 2}).'
         )
 
-    return f'''// CONDENSER: HexNN — full pipeline on ESP32-S3 SuperMini
+    # ── Optional ST7735 TFT block (128×128 by default) ──────────────
+    # When with_tft=True, the distillation includes Adafruit_GFX +
+    # Adafruit_ST7735, initialises an 1.44" 128×128 panel, and adds a
+    # diff-renderer that draws the live grid as small hex-offset
+    # rectangles on each tick. Same Adafruit ST7735 init sequence the
+    # other supermini sketches use; pin map matches s3lab's
+    # esp32_s3_xcc / esp32_s3_full forks.
+    tft_block = _hexnn_tft_blocks(W, H, tft_w, tft_h) if with_tft else _empty_tft_blocks()
+
+    return f'''// CONDENSER: HexNN — full pipeline on ESP32-S3 SuperMini{(' + ST7735 ' + str(tft_w) + 'x' + str(tft_h)) if with_tft else ''}
 //
 // One sketch covers the whole /hexnn/ browser app:
 //   1. Generate a random {n_entries}-prototype genome at K={K}.
 //   2. {('Hunt + Refine' if run_hunt else 'Skip GA;')} keep the elite as live state.
 //   3. Run the live grid forever, one step every {tick_ms} ms.
 //   4. Serve hexnn-s3.local over Wi-Fi: SVG render, /winner.json export.
+//{('   5. Render the live grid to a 128x128 ST7735 every tick.' if with_tft else '')}
 //
 // Estimated BSS use: ~{total_bss // 1024} KB. Browser uses N_LOG2=14
 // ({1 << 14} prototypes) by default; this build uses N_LOG2={n_log2} so
@@ -91,6 +235,7 @@ def distill_hexnn_esp32s3(K=4, n_log2=11, W=16, H=16, horizon=80,
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <esp_random.h>
+{tft_block['includes']}
 
 // ── Parameters baked at distillation time ────────────────────────────
 #define K            {K}
@@ -409,10 +554,15 @@ static void reseed_live_grid(uint32_t s) {{
     live_tick = 0;
 }}
 
+{tft_block['globals']}
+
+{tft_block['render_fn']}
+
 static void runner_step(void) {{
     step_grid(grid_a, grid_b);
     memcpy(grid_a, grid_b, sizeof(grid_a));
     live_tick++;
+    {tft_block['render_call']}
 }}
 
 // ── Web UI ───────────────────────────────────────────────────────────
@@ -507,6 +657,7 @@ void setup() {{
     Serial.begin(115200);
     delay(60);
     Serial.println("\\n[hexnn-s3] booting");
+    {tft_block['init']}
 
     uint32_t boot_seed = esp_random();
     Serial.printf("[hexnn-s3] boot seed 0x%08X\\n", boot_seed);
