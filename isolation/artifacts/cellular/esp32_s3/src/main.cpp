@@ -25,6 +25,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include "xcc_addon.h"        // /compile-c via embedded xcc700
 
 // ── compile-time constants ──────────────────────────────────────────
 
@@ -845,6 +846,7 @@ static void comms_setup() {
     server.on("/palette-reroll",  HTTP_POST, handle_palette_reroll);
     server.on("/palettes",        HTTP_POST, handle_palettes);
     server.on("/agent",           HTTP_GET,  handle_agent);
+    xcc_addon_mount(server);  // POST /compile-c — Xtensa ELF from C source
     server.begin();
     Serial.printf("HTTP on :%d\n", HTTP_PORT);
 }

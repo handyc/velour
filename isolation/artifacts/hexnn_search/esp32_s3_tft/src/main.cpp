@@ -21,6 +21,7 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7735.h>
+#include "xcc_addon.h"        // /compile-c via embedded xcc700
 
 // Supermini ST7735 pin map; matches isolation/artifacts/
 // hex_ca_class4/* and the s3lab/esp32_s3_xcc fork.
@@ -591,6 +592,7 @@ void setup() {
     server.on("/winner.json", []() {
         server.send(200, "application/json", render_winner_json());
     });
+    xcc_addon_mount(server);  // POST /compile-c — Xtensa ELF from C source
     server.begin();
     Serial.println("[hexnn-s3] http ready");
     last_step_ms = millis();
