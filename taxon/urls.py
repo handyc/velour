@@ -19,4 +19,10 @@ urlpatterns = [
     path('rules/<slug:slug>/to-automaton/', views.rule_to_automaton, name='rule_to_automaton'),
     path('rules/<slug:slug>/to-s3lab/', views.rule_to_s3lab, name='rule_to_s3lab'),
     path('rules/<slug:slug>/to-device/', views.rule_to_device, name='rule_to_device'),
+
+    # AutoSearch — background hunt for a target Wolfram class.
+    path('autosearch/',                      views.autosearch_view,   name='autosearch'),
+    path('autosearch/start/',                views.autosearch_start,  name='autosearch_start'),
+    path('autosearch/<slug:slug>/stop/',     views.autosearch_stop,   name='autosearch_stop'),
+    path('autosearch/<slug:slug>/status.json', views.autosearch_status, name='autosearch_status'),
 ]

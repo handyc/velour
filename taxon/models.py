@@ -175,6 +175,83 @@ class Classification(models.Model):
         return f'{self.rule.slug} → class {self.wolfram_class}'
 
 
+class AutoSearch(models.Model):
+    """Background loop that hunts for K=4 packed-positional rules of a
+    target Wolfram class. Settings drive: how rules are minted (random,
+    mutated from existing matches, or a hybrid), how strict the
+    classification gate is, and how long the loop runs.
+
+    The runner thread updates ``last_heartbeat`` every iteration and
+    increments ``rules_tried`` / ``rules_kept`` in place via F-expressions
+    so the user-facing status flag isn't trampled. Found rules land in
+    the regular ``Rule`` table with ``source='evolve'`` and a
+    ``source_ref`` of ``autosearch=<slug>`` for back-linking.
+    """
+    STATUS_QUEUED   = 'queued'
+    STATUS_RUNNING  = 'running'
+    STATUS_PAUSED   = 'paused'
+    STATUS_STOPPED  = 'stopped'
+    STATUS_FINISHED = 'finished'
+    STATUS_CRASHED  = 'crashed'
+    STATUS_CHOICES = [
+        (STATUS_QUEUED,   'Queued'),
+        (STATUS_RUNNING,  'Running'),
+        (STATUS_PAUSED,   'Paused'),
+        (STATUS_STOPPED,  'Stopped'),
+        (STATUS_FINISHED, 'Finished'),
+        (STATUS_CRASHED,  'Crashed'),
+    ]
+    SEED_RANDOM = 'random'
+    SEED_MUTATE = 'mutate'
+    SEED_HYBRID = 'hybrid'
+    SEED_CHOICES = [
+        (SEED_RANDOM, 'Random new genomes only'),
+        (SEED_MUTATE, 'Mutate existing class matches'),
+        (SEED_HYBRID, 'Hybrid (random + mutate)'),
+    ]
+
+    slug = models.SlugField(max_length=80, unique=True)
+    name = models.CharField(max_length=120, blank=True)
+
+    target_class = models.PositiveSmallIntegerField(choices=WOLFRAM_CLASSES)
+    target_min_confidence = models.FloatField(default=0.6)
+    seed_strategy = models.CharField(
+        max_length=8, choices=SEED_CHOICES, default=SEED_HYBRID,
+    )
+    mutation_rate = models.FloatField(default=0.005)
+
+    grid = models.PositiveSmallIntegerField(default=24)
+    horizon = models.PositiveSmallIntegerField(default=120)
+    seed = models.PositiveIntegerField(default=42)
+
+    max_seconds = models.PositiveIntegerField(default=300)
+    max_found   = models.PositiveIntegerField(default=20)
+
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_QUEUED,
+    )
+    started_at  = models.DateTimeField(default=timezone.now)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    last_heartbeat = models.DateTimeField(null=True, blank=True)
+
+    rules_tried = models.PositiveIntegerField(default=0)
+    rules_kept  = models.PositiveIntegerField(default=0)
+    last_log    = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ('-started_at',)
+        indexes = [
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self) -> str:
+        return f'{self.name or self.slug} → class {self.target_class}'
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in (self.STATUS_QUEUED, self.STATUS_RUNNING)
+
+
 class EvolutionRun(models.Model):
     """Target-based GA session — evolve toward a Wolfram class or
     a target metric value.

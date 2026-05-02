@@ -22,6 +22,7 @@ from .classifier import class_color, class_label, classify
 from .engine import simulate
 from .metrics import META as METRIC_META, list_metrics, run_all
 from .models import (
+    AutoSearch,
     Classification, EvolutionRun, MetricRun, Rule, WOLFRAM_CLASSES,
 )
 
@@ -467,4 +468,131 @@ def evolve_save(request):
         'ok': True,
         'slug': rule.slug,
         'detail_url': reverse('taxon:rule_detail', args=[rule.slug]),
+    })
+
+
+# ── AutoSearch: background hunt for target-class rules ─────────────
+
+@login_required
+def autosearch_view(request):
+    """Page that launches + monitors background searches."""
+    from . import autosearch
+    autosearch.mark_orphans()
+    recent = AutoSearch.objects.all()[:20]
+    return render(request, 'taxon/autosearch.html', {
+        'wolfram_classes': WOLFRAM_CLASSES,
+        'recent_searches': recent,
+        'active_count': AutoSearch.objects
+            .filter(status__in=(AutoSearch.STATUS_QUEUED,
+                                 AutoSearch.STATUS_RUNNING))
+            .count(),
+    })
+
+
+@login_required
+@require_POST
+def autosearch_start(request):
+    """Create + launch a new search. Returns JSON with the slug so the
+    page can pivot into polling it."""
+    from . import autosearch as autosearch_mod
+
+    def _int(name, default, lo=None, hi=None):
+        try:
+            v = int(request.POST.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        if lo is not None and v < lo: v = lo
+        if hi is not None and v > hi: v = hi
+        return v
+
+    def _float(name, default, lo=None, hi=None):
+        try:
+            v = float(request.POST.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        if lo is not None and v < lo: v = lo
+        if hi is not None and v > hi: v = hi
+        return v
+
+    target_class = _int('target_class', 4, 1, 4)
+    seed_strategy = request.POST.get('seed_strategy', AutoSearch.SEED_HYBRID)
+    if seed_strategy not in dict(AutoSearch.SEED_CHOICES):
+        seed_strategy = AutoSearch.SEED_HYBRID
+
+    search = AutoSearch.objects.create(
+        slug=autosearch_mod.make_slug(target_class),
+        name=request.POST.get('name', '').strip()[:120],
+        target_class=target_class,
+        target_min_confidence=_float('min_confidence', 0.6, 0.0, 1.0),
+        seed_strategy=seed_strategy,
+        mutation_rate=_float('mutation_rate', 0.005, 0.0, 0.1),
+        grid=_int('grid', 24, 8, 64),
+        horizon=_int('horizon', 120, 20, 600),
+        seed=_int('seed', 42, 0, (1 << 31) - 1),
+        max_seconds=_int('max_seconds', 300, 5, 7200),
+        max_found=_int('max_found', 20, 1, 1000),
+    )
+    autosearch_mod.launch(search)
+    return JsonResponse({
+        'ok': True,
+        'slug': search.slug,
+        'status_url': reverse('taxon:autosearch_status', args=[search.slug]),
+    })
+
+
+@login_required
+@require_POST
+def autosearch_stop(request, slug: str):
+    from . import autosearch as autosearch_mod
+    search = get_object_or_404(AutoSearch, slug=slug)
+    autosearch_mod.request_stop(search)
+    return JsonResponse({'ok': True, 'slug': slug})
+
+
+@login_required
+def autosearch_status(request, slug: str):
+    """Polled by the browser every N seconds. Returns the search row's
+    fields plus the most recent matched rules."""
+    from . import autosearch as autosearch_mod
+    autosearch_mod.mark_orphans()
+    search = get_object_or_404(AutoSearch, slug=slug)
+    recent = (Rule.objects
+              .filter(source_ref__contains=f'autosearch={slug}')
+              .order_by('-created_at')[:10])
+    rules = []
+    for r in recent:
+        latest = r.classifications.order_by('-assigned_at').first()
+        rules.append({
+            'slug': r.slug,
+            'name': r.name,
+            'sha1': r.sha1[:10],
+            'detail_url': reverse('taxon:rule_detail', args=[r.slug]),
+            'class_n': latest.wolfram_class if latest else None,
+            'class_label': class_label(latest.wolfram_class) if latest else '—',
+            'class_color': class_color(latest.wolfram_class) if latest else '#888',
+            'confidence': latest.confidence if latest else 0.0,
+            'palette_hex': r.palette_hex,
+        })
+    rate = 0.0
+    if search.last_heartbeat and search.started_at:
+        secs = max(0.001, (search.last_heartbeat - search.started_at).total_seconds())
+        rate = search.rules_tried / secs
+    return JsonResponse({
+        'slug': search.slug,
+        'status': search.status,
+        'status_label': search.get_status_display(),
+        'is_active': search.is_active,
+        'tried': search.rules_tried,
+        'kept': search.rules_kept,
+        'target_class': search.target_class,
+        'target_class_label': class_label(search.target_class),
+        'target_class_color': class_color(search.target_class),
+        'rate_per_sec': rate,
+        'last_log': search.last_log,
+        'last_heartbeat': search.last_heartbeat.isoformat() if search.last_heartbeat else None,
+        'started_at': search.started_at.isoformat() if search.started_at else None,
+        'finished_at': search.finished_at.isoformat() if search.finished_at else None,
+        'max_found': search.max_found,
+        'max_seconds': search.max_seconds,
+        'recent_rules': rules,
     })

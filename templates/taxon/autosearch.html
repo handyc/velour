@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Taxon — AutoSearch{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">Taxon · AutoSearch</h1>
+  <p style="color:#8b949e;">Background hunt for K=4 hex CA rules of a target
+    Wolfram class. Each iteration mints a candidate (random or mutated from
+    an existing match), classifies it, and keeps it in the library if it
+    matches the target class above the confidence threshold. Live progress
+    polls every 2 s.</p>
+
+  <section style="background:#161b22; border:1px solid #30363d; border-radius:6px;
+                  padding:0.9rem 1rem; margin:1rem 0;">
+    <h2 style="font-family:ui-monospace,Menlo,monospace; font-size:1rem;
+               margin:0 0 0.6rem 0;">Start a new search</h2>
+    <form id="autosearch-form" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));
+                                       gap:0.6rem 0.9rem; align-items:end;">
+      {% csrf_token %}
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;">
+        target class
+        <select name="target_class" style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+          {% for n, label in wolfram_classes %}
+            <option value="{{ n }}" {% if n == 4 %}selected{% endif %}>{{ n }} — {{ label|cut:"Class "|cut:"— " }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Class assignment confidence (0–1) below which a match is rejected. Higher = stricter, fewer keeps. Class 4 hits are rare; 0.4 lets more borderline-complex rules through.">
+        min confidence
+        <input name="min_confidence" type="number" min="0" max="1" step="0.05" value="0.6"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="random = always mint fresh genomes. mutate = always pick an existing matching-class rule and mutate. hybrid = 50/50.">
+        seed strategy
+        <select name="seed_strategy" style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+          <option value="hybrid" selected>hybrid</option>
+          <option value="random">random</option>
+          <option value="mutate">mutate library</option>
+        </select>
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Per-situation mutation rate when seeding from an existing rule. 0.005 ≈ 80 flips per K=4 genome.">
+        mutation rate
+        <input name="mutation_rate" type="number" min="0" max="0.1" step="0.001" value="0.005"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Edge length of the test grid. Smaller = faster per iteration but classifier confidence drops.">
+        grid
+        <input name="grid" type="number" min="8" max="64" step="1" value="24"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Tick count per candidate. Longer = better cycle detection but slower.">
+        horizon
+        <input name="horizon" type="number" min="20" max="600" step="10" value="120"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Maximum wall-clock seconds before the loop stops on its own.">
+        max seconds
+        <input name="max_seconds" type="number" min="5" max="7200" step="5" value="300"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <label style="display:flex; flex-direction:column; gap:0.2rem; font-size:0.8rem; color:#8b949e;"
+             title="Stop early once this many matches are kept.">
+        max found
+        <input name="max_found" type="number" min="1" max="1000" step="1" value="20"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d; padding:0.25rem 0.4rem; font-family:inherit;">
+      </label>
+      <button type="submit" style="background:#238636; color:#fff; border:0; padding:0.4rem 0.8rem;
+                                    border-radius:4px; cursor:pointer; font-family:inherit; font-size:0.9rem;
+                                    height:2rem;">▶ Start search</button>
+    </form>
+  </section>
+
+  <section id="autosearch-live" style="display:none; background:#161b22; border:1px solid #30363d;
+                                       border-radius:6px; padding:0.9rem 1rem; margin:1rem 0;">
+    <h2 style="font-family:ui-monospace,Menlo,monospace; font-size:1rem;
+               margin:0 0 0.6rem 0;">
+      Live · <span id="live-slug" style="color:#79c0ff;">—</span>
+      <span id="live-status" style="font-weight:normal; font-size:0.85rem; color:#8b949e; margin-left:0.5rem;">queued</span>
+      <button id="live-stop-btn" style="float:right; background:#cf222e; color:#fff; border:0;
+                                         padding:0.25rem 0.7rem; border-radius:4px; cursor:pointer;
+                                         font-family:inherit; font-size:0.8rem;">⏹ Stop</button>
+    </h2>
+    <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:0.5rem; margin:0.4rem 0;">
+      <div><div style="color:#8b949e; font-size:0.7rem;">target</div>
+        <div id="live-target" style="font-family:ui-monospace,monospace; font-size:1.05rem;">—</div></div>
+      <div><div style="color:#8b949e; font-size:0.7rem;">tried</div>
+        <div id="live-tried" style="font-family:ui-monospace,monospace; font-size:1.05rem;">0</div></div>
+      <div><div style="color:#8b949e; font-size:0.7rem;">kept</div>
+        <div id="live-kept" style="font-family:ui-monospace,monospace; font-size:1.05rem; color:#7ee787;">0</div></div>
+      <div><div style="color:#8b949e; font-size:0.7rem;">rate</div>
+        <div id="live-rate" style="font-family:ui-monospace,monospace; font-size:1.05rem;">— / s</div></div>
+    </div>
+    <div id="live-log" style="font-family:ui-monospace,monospace; font-size:0.78rem; color:#8b949e;
+                              background:#0d1117; padding:0.4rem 0.6rem; border-radius:3px;
+                              border:1px solid #30363d; min-height:1.4rem;">…</div>
+    <h3 style="margin:0.8rem 0 0.4rem 0; font-size:0.85rem; color:#c9d1d9;">Recent finds</h3>
+    <div id="live-rules" style="display:flex; flex-direction:column; gap:0.3rem;">
+      <div style="color:#6e7681; font-size:0.8rem;">none yet — finds appear here as they're classified</div>
+    </div>
+  </section>
+
+  <section style="background:#161b22; border:1px solid #30363d; border-radius:6px;
+                  padding:0.9rem 1rem; margin:1rem 0;">
+    <h2 style="font-family:ui-monospace,Menlo,monospace; font-size:1rem;
+               margin:0 0 0.6rem 0;">Recent searches
+      <span style="color:#8b949e; font-size:0.8rem; font-weight:normal;">— {{ active_count }} active</span>
+    </h2>
+    {% if recent_searches %}
+    <table style="width:100%; border-collapse:collapse; font-family:ui-monospace,monospace; font-size:0.82rem;">
+      <thead><tr style="color:#8b949e; text-align:left;">
+        <th style="padding:0.3rem 0.4rem;">slug</th>
+        <th style="padding:0.3rem 0.4rem;">target</th>
+        <th style="padding:0.3rem 0.4rem;">status</th>
+        <th style="padding:0.3rem 0.4rem;">tried</th>
+        <th style="padding:0.3rem 0.4rem;">kept</th>
+        <th style="padding:0.3rem 0.4rem;">started</th>
+      </tr></thead>
+      <tbody>
+        {% for s in recent_searches %}
+        <tr style="border-top:1px solid #21262d; color:#c9d1d9;">
+          <td style="padding:0.3rem 0.4rem;">
+            <a href="#" data-watch="{{ s.slug }}" style="color:#79c0ff; text-decoration:none;">{{ s.slug }}</a>
+          </td>
+          <td style="padding:0.3rem 0.4rem;">class {{ s.target_class }}</td>
+          <td style="padding:0.3rem 0.4rem;">{{ s.get_status_display }}</td>
+          <td style="padding:0.3rem 0.4rem;">{{ s.rules_tried }}</td>
+          <td style="padding:0.3rem 0.4rem; color:#7ee787;">{{ s.rules_kept }}</td>
+          <td style="padding:0.3rem 0.4rem; color:#6e7681;">{{ s.started_at|date:"Y-m-d H:i:s" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="color:#6e7681; font-size:0.85rem;">no searches yet — fill in the form above to start one</div>
+    {% endif %}
+  </section>
+</div>
+
+<script>
+(() => {
+  const form     = document.getElementById('autosearch-form');
+  const live     = document.getElementById('autosearch-live');
+  const slugEl   = document.getElementById('live-slug');
+  const statEl   = document.getElementById('live-status');
+  const tgtEl    = document.getElementById('live-target');
+  const triedEl  = document.getElementById('live-tried');
+  const keptEl   = document.getElementById('live-kept');
+  const rateEl   = document.getElementById('live-rate');
+  const logEl    = document.getElementById('live-log');
+  const rulesEl  = document.getElementById('live-rules');
+  const stopBtn  = document.getElementById('live-stop-btn');
+
+  let pollSlug = null;
+  let pollTimer = null;
+  const POLL_MS = 2000;
+
+  function csrfToken() {
+    const m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  async function poll() {
+    if (!pollSlug) return;
+    try {
+      const r = await fetch(`/taxon/autosearch/${pollSlug}/status.json`,
+                            { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(`status ${r.status}`);
+      const d = await r.json();
+      slugEl.textContent  = d.slug;
+      statEl.textContent  = d.status_label;
+      statEl.style.color  = d.is_active ? '#3fb950' : '#8b949e';
+      tgtEl.textContent   = d.target_class_label;
+      tgtEl.style.color   = d.target_class_color;
+      triedEl.textContent = d.tried;
+      keptEl.textContent  = d.kept + ' / ' + d.max_found;
+      rateEl.textContent  = d.rate_per_sec.toFixed(2) + ' / s';
+      logEl.textContent   = d.last_log || '…';
+
+      if (d.recent_rules.length === 0) {
+        rulesEl.innerHTML = '<div style="color:#6e7681; font-size:0.8rem;">none yet — finds appear here as they\'re classified</div>';
+      } else {
+        rulesEl.innerHTML = '';
+        for (const ru of d.recent_rules) {
+          const row = document.createElement('a');
+          row.href = ru.detail_url;
+          row.style.cssText = `display:flex; gap:0.5rem; align-items:center;
+                                padding:0.3rem 0.5rem; background:#0d1117;
+                                border:1px solid #30363d; border-left:3px solid ${ru.class_color};
+                                border-radius:3px; text-decoration:none; color:#c9d1d9;
+                                font-family:ui-monospace,monospace; font-size:0.78rem;`;
+          const palStr = (ru.palette_hex || []).slice(0, 6).map(h =>
+            `<span style="display:inline-block;width:0.7rem;height:0.7rem;background:${h};border:1px solid #30363d;"></span>`).join('');
+          row.innerHTML = `
+            <span style="color:${ru.class_color}; min-width:5rem;">class ${ru.class_n}</span>
+            <span style="min-width:8rem;">${ru.sha1}</span>
+            <span style="color:#7ee787; min-width:4rem;">conf ${ru.confidence.toFixed(2)}</span>
+            <span style="display:flex; gap:2px;">${palStr}</span>
+            <span style="color:#6e7681; flex:1; overflow:hidden; text-overflow:ellipsis;">${ru.name}</span>
+          `;
+          rulesEl.appendChild(row);
+        }
+      }
+      if (!d.is_active) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    } catch (e) {
+      logEl.textContent = `poll error: ${e.message || e}`;
+      logEl.style.color = '#f85149';
+    }
+  }
+
+  function startWatching(slug) {
+    pollSlug = slug;
+    live.style.display = '';
+    live.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (pollTimer) clearInterval(pollTimer);
+    poll();
+    pollTimer = setInterval(poll, POLL_MS);
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    try {
+      const r = await fetch('/taxon/autosearch/start/', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrfToken() },
+      });
+      const d = await r.json();
+      if (d.ok) {
+        startWatching(d.slug);
+      } else {
+        alert('start failed: ' + JSON.stringify(d));
+      }
+    } catch (e) {
+      alert('start error: ' + e.message);
+    }
+  });
+
+  stopBtn.addEventListener('click', async () => {
+    if (!pollSlug) return;
+    try {
+      await fetch(`/taxon/autosearch/${pollSlug}/stop/`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'X-CSRFToken': csrfToken() },
+      });
+      poll();
+    } catch (e) {
+      alert('stop error: ' + e.message);
+    }
+  });
+
+  // Click an existing search slug to start watching it.
+  document.querySelectorAll('a[data-watch]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      startWatching(a.dataset.watch);
+    });
+  });
+})();
+</script>
+{% endblock %}
