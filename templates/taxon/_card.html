@@ -22,10 +22,23 @@
   <div style="margin-top:0.4rem; font-size:0.72rem;">
     {% if c.class_n %}
       <span style="color:{{ c.class_color }}; font-weight:600;">class {{ c.class_n }}</span>
-      <span style="color:#8b949e;"> · {{ c.class_label }}</span>
-      <span style="color:#6e7681;"> · {{ c.class_conf|floatformat:2 }}</span>
+      <span style="color:#8b949e;"> · {{ c.class_conf|floatformat:2 }}</span>
     {% else %}
       <span style="color:#6e7681;">unclassified</span>
     {% endif %}
   </div>
+  {% if c.class_basis %}
+  <div style="margin-top:0.2rem; font-size:0.66rem; color:#6e7681;
+              display:flex; gap:0.5rem; flex-wrap:wrap;">
+    {% if c.class_basis.langton_lambda is not None %}
+      <span title="Langton λ — fraction of rule outputs that differ from self-state">λ {{ c.class_basis.langton_lambda|floatformat:2 }}</span>
+    {% endif %}
+    {% if c.class_basis.activity_rate is not None %}
+      <span title="Mean per-tick fraction of cells that changed">act {{ c.class_basis.activity_rate|floatformat:2 }}</span>
+    {% endif %}
+    {% if c.class_basis.attractor_period %}
+      <span title="Period of the cycle the trajectory entered (0 = none)">p {{ c.class_basis.attractor_period|floatformat:0 }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
 </a>

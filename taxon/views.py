@@ -496,7 +496,18 @@ def rule_to_device(request, slug: str):
 
 @login_required
 def import_view(request):
+    """Upload a HXC4 4104-byte K=4 genome OR a strateta-population
+    JSON / .json.gz bundle. Format autodetected from the first bytes:
+    HXC4 starts with 'HXC4' magic; gzip starts with 0x1F 0x8B; raw
+    JSON starts with '{'.
+
+    HXC4 → one Rule, classified inline.
+    strateta-population-v1 → up to LIB_SIZE Rules (kind=hex_nn),
+    classified at the smaller 12×12 × 40-tick budget the
+    taxon_import_strateta command uses (K=256 simulation is heavier).
+    """
     err = None
+    summary = None
     if request.method == 'POST':
         f = request.FILES.get('hxc4')
         if not f:
@@ -504,33 +515,42 @@ def import_view(request):
         else:
             try:
                 blob = f.read()
-                rule = importers.import_hxc4_blob(
-                    blob,
-                    name=request.POST.get('name', '') or f.name,
-                    source=request.POST.get('source', 'manual') or 'manual',
-                    source_ref=f.name,
-                )
-                # Auto-classify on upload.
-                packed = PackedRuleset(n_colors=4, data=bytes(rule.genome))
-                traj, hashes = simulate(packed, 24, 24, 120, 42)
-                results = run_all(traj, hashes, packed)
-                mvals = {}
-                for name, (val, extra) in results.items():
-                    MetricRun.objects.create(
-                        rule=rule, metric=name, value=val,
-                        extra_json=extra,
+                # Format autodetect.
+                fmt = _detect_upload_format(blob)
+                if fmt == 'hxc4':
+                    rule = importers.import_hxc4_blob(
+                        blob,
+                        name=request.POST.get('name', '') or f.name,
+                        source=request.POST.get('source', 'manual') or 'manual',
+                        source_ref=f.name,
                     )
-                    mvals[name] = val
-                cls, conf, basis = classify(mvals)
-                Classification.objects.create(
-                    rule=rule, wolfram_class=cls, confidence=conf,
-                    basis_json=basis,
-                )
-                return redirect('taxon:rule_detail', slug=rule.slug)
+                    packed = PackedRuleset(n_colors=4, data=bytes(rule.genome))
+                    traj, hashes = simulate(packed, 24, 24, 120, 42)
+                    results = run_all(traj, hashes, packed)
+                    mvals = {}
+                    for name, (val, extra) in results.items():
+                        MetricRun.objects.create(
+                            rule=rule, metric=name, value=val,
+                            extra_json=extra,
+                        )
+                        mvals[name] = val
+                    cls, conf, basis = classify(mvals)
+                    Classification.objects.create(
+                        rule=rule, wolfram_class=cls, confidence=conf,
+                        basis_json=basis,
+                    )
+                    return redirect('taxon:rule_detail', slug=rule.slug)
+                elif fmt == 'strateta-population':
+                    summary = _import_strateta_population_blob(blob, f.name)
+                else:
+                    err = ('Unrecognised file. Expected a HXC4 4104-byte '
+                           'genome.bin OR a strateta-population JSON / '
+                           '.json.gz bundle.')
             except Exception as e:
                 err = str(e)
     return render(request, 'taxon/import.html', {
         'err': err,
+        'summary': summary,
         'source_choices': [
             ('manual', 'Manual upload'),
             ('s3lab', 'S3 Lab'),
@@ -539,6 +559,78 @@ def import_view(request):
             ('stratum', 'S3 Lab Stratum'),
         ],
     })
+
+
+def _detect_upload_format(blob: bytes) -> str:
+    """Sniff first bytes — return 'hxc4', 'strateta-population', or
+    'unknown'. HXC4 files start with the 'HXC4' tail magic; gzipped
+    JSON starts with 0x1F 0x8B; raw JSON starts with '{' (after
+    optional whitespace)."""
+    if len(blob) >= 4 and blob[:4] == b'HXC4':
+        return 'hxc4'
+    if len(blob) >= 2 and blob[:2] == b'\x1f\x8b':
+        return 'strateta-population'   # treat all gzipped uploads as JSON
+    head = blob.lstrip()[:1]
+    if head == b'{':
+        return 'strateta-population'
+    return 'unknown'
+
+
+def _import_strateta_population_blob(blob: bytes, fname: str) -> dict:
+    """Decode + import a strateta-population[.gz] blob; classify each
+    new rule. Returns a dict with counts + class distribution suitable
+    for the import.html summary box."""
+    import gzip
+    import json
+    from collections import Counter
+
+    from . import autosearch as _ignored  # noqa — keeps mark_orphans nearby
+    from .hexnn import HexNNRuleset, langton_lambda_hexnn, simulate as hexnn_simulate, unpack_hexnn
+    from .metrics import REGISTRY
+
+    raw = blob
+    if len(raw) >= 2 and raw[:2] == b'\x1f\x8b':
+        raw = gzip.decompress(raw)
+    payload = json.loads(raw.decode('utf-8'))
+    if payload.get('format') != 'strateta-population-v1':
+        raise ValueError(
+            f'not a strateta-population-v1 file (got {payload.get("format")!r})')
+
+    rules = importers.import_strateta_population(
+        payload, source='strateta', source_ref=f'file={fname}')
+
+    grid, horizon, seed = 12, 40, 42
+    cls_counts: Counter[int] = Counter()
+    for rule in rules:
+        K, keys, outs = unpack_hexnn(bytes(rule.genome))
+        ruleset = HexNNRuleset(K, keys, outs)
+        traj, hashes = hexnn_simulate(ruleset, grid, grid, horizon, seed)
+        mvals: dict[str, float] = {}
+        for name, fn in REGISTRY.items():
+            if name == 'langton_lambda':
+                val, extra = langton_lambda_hexnn(ruleset)
+            else:
+                val, extra = fn(traj, hashes, ruleset)
+            MetricRun.objects.create(
+                rule=rule, metric=name, value=val,
+                grid_w=grid, grid_h=grid, horizon=horizon, seed=seed,
+                extra_json=extra,
+            )
+            mvals[name] = val
+        cls, conf, basis = classify(mvals, horizon=horizon, n_colors=K)
+        Classification.objects.create(
+            rule=rule, wolfram_class=cls, confidence=conf, basis_json=basis,
+        )
+        cls_counts[cls] += 1
+
+    return {
+        'fmt':           'strateta-population-v1',
+        'fname':         fname,
+        'imported':      len(rules),
+        'K':             payload.get('K'),
+        'class_counts':  sorted(cls_counts.items()),
+        'first_slug':    rules[0].slug if rules else None,
+    }
 
 
 @login_required

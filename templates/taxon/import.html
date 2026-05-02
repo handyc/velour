@@ -4,19 +4,58 @@
 {% block content %}
 <div style="max-width:700px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
   <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
-  <h1 style="font-family:ui-monospace,Menlo,monospace;">Import a HXC4 genome.bin</h1>
-  <p style="color:#8b949e;">4,104-byte file — output of s3lab "Download genome.bin",
-    automaton "/genome.bin", or stratum elite download.</p>
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">Import rules</h1>
+  <p style="color:#8b949e;">Two formats accepted, autodetected from
+    file content:</p>
+  <ul style="color:#8b949e; font-family:ui-monospace,monospace; font-size:0.85rem;">
+    <li><strong>HXC4 genome.bin</strong> — 4,104-byte K=4 file from
+      s3lab "Download genome.bin" / automaton "/genome.bin" /
+      stratum elite download. One Rule, classified inline.</li>
+    <li><strong>strateta-population JSON</strong> — single .json or
+      .json.gz from /s3lab/strateta/ "💾 Save population". Up to 256
+      Rules at once (kind=hex_nn), classified at the smaller K=256
+      simulation budget (12×12 × 40 ticks per rule).</li>
+  </ul>
 
   {% if err %}<p style="color:#f85149;">{{ err }}</p>{% endif %}
+
+  {% if summary %}
+  <div style="background:#161b22; border:1px solid #30363d;
+              border-left:4px solid #3fb950; border-radius:5px;
+              padding:0.7rem 1rem; margin:1rem 0;
+              font-family:ui-monospace,monospace; font-size:0.85rem;">
+    <p style="margin:0 0 0.4rem 0; color:#3fb950; font-weight:600;">
+      ✓ Imported {{ summary.imported }} rule{{ summary.imported|pluralize }}
+      from {{ summary.fname }}</p>
+    <p style="margin:0 0 0.3rem 0; color:#8b949e;">
+      format: {{ summary.fmt }}{% if summary.K %} · K={{ summary.K }}{% endif %}</p>
+    {% if summary.class_counts %}
+    <p style="margin:0.3rem 0; color:#c9d1d9;">Class distribution:</p>
+    <ul style="margin:0.2rem 0; color:#c9d1d9;">
+      {% for cls, n in summary.class_counts %}
+        <li>class {{ cls }}: {{ n }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if summary.first_slug %}
+    <p style="margin:0.4rem 0 0 0;">
+      <a href="{% url 'taxon:rule_detail' slug=summary.first_slug %}"
+         style="color:#79c0ff;">→ first imported rule</a> ·
+      <a href="{% url 'taxon:library' %}?source=strateta"
+         style="color:#79c0ff;">all strateta rules in library</a>
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <form method="post" enctype="multipart/form-data" style="font-family:ui-monospace,Menlo,monospace;">
     {% csrf_token %}
     <div style="margin:0.5rem 0;">
-      <label>name <input name="name" type="text" style="width:100%; max-width:500px; padding:0.3rem;"></label>
+      <label>name <span style="color:#6e7681; font-size:0.78rem;">(HXC4 only — strateta uses entries' names)</span>
+        <input name="name" type="text" style="width:100%; max-width:500px; padding:0.3rem;"></label>
     </div>
     <div style="margin:0.5rem 0;">
-      <label>source
+      <label>source <span style="color:#6e7681; font-size:0.78rem;">(HXC4 only)</span>
         <select name="source">
           {% for v, label in source_choices %}
             <option value="{{ v }}">{{ label }}</option>
@@ -25,16 +64,18 @@
       </label>
     </div>
     <div style="margin:0.5rem 0;">
-      <label>genome.bin <input name="hxc4" type="file" required></label>
+      <label>file <input name="hxc4" type="file" required
+                          accept=".bin,.json,.gz,application/octet-stream,application/json,application/gzip"></label>
     </div>
     <button type="submit" style="background:#238636; color:#fff; border:none;
       padding:0.5rem 1rem; border-radius:4px; cursor:pointer;">Import + classify</button>
   </form>
 
   <hr style="margin:2rem 0; border-color:#30363d;">
-  <p style="color:#8b949e;">Bulk imports: see
+  <p style="color:#8b949e;">Bulk imports from the shell:
     <code>manage.py taxon_import --automaton-all</code>,
-    <code>--hexhunt-all</code>, or
-    <code>--hxc4 PATH</code>.</p>
+    <code>--hexhunt-all</code>,
+    <code>--hxc4 PATH</code>, or
+    <code>manage.py taxon_import_strateta path/to/file.json.gz</code>.</p>
 </div>
 {% endblock %}
