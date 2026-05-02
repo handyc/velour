@@ -111,6 +111,16 @@
       <button id="refine-btn"
               style="background:#1f6feb;border:none;color:white;"
               title="Find the elite cell (highest fitness), replace every other cell with a low-rate mutation of it. Narrow convergence — accelerates lock-in on the current best.">🎯 Refine</button>
+      <button id="auto-btn"
+              style="background:#a371f7;border:none;color:white;"
+              title="Run a Hunt then keep Refining forever, with a configurable gap between rounds. Cellular's normal tournament runs in the gap; click again to stop after the current round.">🔁 Full auto</button>
+      <label style="font-size:0.78rem; color:#8b949e; display:flex; align-items:center; gap:0.25rem;">
+        every
+        <input id="auto-delay" type="number" min="1" max="60" step="1" value="3"
+               style="width:3rem; background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                      padding:0.25rem 0.4rem; border-radius:3px; font-family:inherit; font-size:0.8rem;">
+        s
+      </label>
       <span id="ga-status" style="color:#8b949e; font-size:0.78rem;"></span>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
@@ -721,6 +731,70 @@ async function runRefine() {
 
 huntBtn.addEventListener('click', runHunt);
 refineBtn.addEventListener('click', runRefine);
+
+// ── Full auto: Hunt once, then Refine on a configurable cadence ────
+//
+// Click once to start: runs Hunt, then loops Refine with a delay
+// (default 3 s) between completions. Cellular's normal tournament
+// keeps running in the gap, so the population evolves naturally
+// between refines. Click again to stop — the in-flight Refine
+// finishes (~1 s), then the loop exits without scheduling the next.
+
+const autoBtn      = document.getElementById('auto-btn');
+const autoDelayEl  = document.getElementById('auto-delay');
+let autoActive = false;
+
+function setAutoButtonState(active) {
+  if (active) {
+    autoBtn.textContent = '⏹ Stop auto';
+    autoBtn.style.background = '#cf222e';
+  } else {
+    autoBtn.textContent = '🔁 Full auto';
+    autoBtn.style.background = '#a371f7';
+  }
+}
+
+async function startCellularAuto() {
+  if (gaRunning || autoActive) return;
+  autoActive = true;
+  setAutoButtonState(true);
+
+  await runHunt();
+
+  while (autoActive) {
+    let delaySec = parseFloat(autoDelayEl.value);
+    if (!Number.isFinite(delaySec) || delaySec < 1) delaySec = 3;
+    if (delaySec > 60) delaySec = 60;
+    let remainingMs = delaySec * 1000;
+    while (autoActive && remainingMs > 0) {
+      gaStatus.textContent =
+        `🔁 auto: next refine in ${(remainingMs / 1000).toFixed(1)}s`;
+      gaStatus.style.color = '#a371f7';
+      await new Promise(r => setTimeout(r, 100));
+      remainingMs -= 100;
+    }
+    if (!autoActive) break;
+    await runRefine();
+  }
+
+  setAutoButtonState(false);
+  if (gaStatus.textContent.startsWith('🔁')) {
+    gaStatus.textContent = 'auto stopped.';
+    gaStatus.style.color = '#8b949e';
+  }
+}
+
+autoBtn.addEventListener('click', () => {
+  if (autoActive) {
+    autoActive = false;
+    setAutoButtonState(false);
+    gaStatus.textContent = 'auto stopping after current round…';
+    gaStatus.style.color = '#a371f7';
+  } else {
+    startCellularAuto();
+  }
+});
+setAutoButtonState(false);
 
 // ── Click-to-download: tap any agent → download its genome.bin ─────
 //
