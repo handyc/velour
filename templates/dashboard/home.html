@@ -288,12 +288,13 @@
 {% endif %}
 
 {# Research & Search — collapsed by default #}
-{% if 'aggregator' in installed_app_slugs or 'agora' in installed_app_slugs or 'automaton' in installed_app_slugs or 'camlfornia' in installed_app_slugs or 'casting' in installed_app_slugs or 'datalift' in installed_app_slugs or 'det' in installed_app_slugs or 'lingua' in installed_app_slugs or 'muka' in installed_app_slugs or 'radiant' in installed_app_slugs or 'reckoner' in installed_app_slugs or 'studious' in installed_app_slugs %}
+{% if 'aggregator' in installed_app_slugs or 'agora' in installed_app_slugs or 'automaton' in installed_app_slugs or 'camlfornia' in installed_app_slugs or 'casting' in installed_app_slugs or 'datalift' in installed_app_slugs or 'det' in installed_app_slugs or 'lingua' in installed_app_slugs or 'muka' in installed_app_slugs or 'radiant' in installed_app_slugs or 'reckoner' in installed_app_slugs or 'studious' in installed_app_slugs or 'taxon' in installed_app_slugs %}
 <details class="cat-group">
-    <summary>Research &amp; Search <span class="cat-count">· 11</span></summary>
+    <summary>Research &amp; Search <span class="cat-count">· 12</span></summary>
     <div class="tools-grid">
         {% if 'det' in installed_app_slugs %}<a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'automaton' in installed_app_slugs %}<a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'taxon' in installed_app_slugs %}<a class="card" href="{% url 'taxon:index' %}" title="Canonical hex CA rule library + Wolfram-class classifier (1–4); imports from automaton/helix/stratum/strateta"><h3>Taxon</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'casting' in installed_app_slugs %}<a class="card" href="{% url 'casting:index' %}" title="Byte-level experiments with .c download + JS port"><h3>Casting</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'reckoner' in installed_app_slugs %}<a class="card" href="{% url 'reckoner:index' %}" title="True cost of compute — picojoules to exajoules"><h3>Reckoner</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'radiant' in installed_app_slugs %}<a class="card" href="{% url 'radiant:index' %}" title="Psychohistorical forecast of the cloud server fleet — 12 horizons"><h3>Radiant</h3><span class="open-arrow">›</span></a>{% endif %}
