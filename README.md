@@ -53,9 +53,6 @@ the grid. The exact final shape varies run-to-run; that's the point.*
   [unrealircd-tui](https://github.com/ValwareIRC/unrealircd-tui)
   and many UnrealIRCd modules.
 
-[ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC), which they
-both work on, sparked my creator's initial idea for this project.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
