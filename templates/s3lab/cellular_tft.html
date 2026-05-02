@@ -166,12 +166,16 @@
   <div class="panel">
     <h3>Status</h3>
     <table class="kv">
-      <tr><td>seed</td>     <td><span id="kv-seed">—</span></td></tr>
-      <tr><td>cells</td>    <td>16 × 16 = 256</td></tr>
-      <tr><td>tick</td>     <td><span id="kv-tick">0</span></td></tr>
-      <tr><td>round</td>    <td><span id="kv-round">0</span></td></tr>
-      <tr><td>last winner</td><td><span id="kv-winner">—</span></td></tr>
-      <tr><td>last loser</td> <td><span id="kv-loser">—</span></td></tr>
+      <tr><td>seed</td>          <td><span id="kv-seed">—</span></td></tr>
+      <tr><td>cells</td>         <td>16 × 16 = 256</td></tr>
+      <tr><td>tick</td>          <td><span id="kv-tick">0</span></td></tr>
+      <tr><td>round</td>         <td><span id="kv-round">0</span></td></tr>
+      <tr><td>last winner</td>   <td><span id="kv-winner">—</span></td></tr>
+      <tr><td>last loser</td>    <td><span id="kv-loser">—</span></td></tr>
+      <tr><td>elite fitness</td> <td><span id="kv-elite">—</span></td></tr>
+      <tr><td>mean fitness</td>  <td><span id="kv-mean">—</span></td></tr>
+      <tr><td>fitness range</td> <td><span id="kv-range">—</span></td></tr>
+      <tr><td>scored cells</td>  <td><span id="kv-scored">0</span> / 256</td></tr>
     </table>
   </div>
 
@@ -333,6 +337,43 @@ const kvTick     = document.getElementById('kv-tick');
 const kvRound    = document.getElementById('kv-round');
 const kvWinner   = document.getElementById('kv-winner');
 const kvLoser    = document.getElementById('kv-loser');
+const kvElite    = document.getElementById('kv-elite');
+const kvMean     = document.getElementById('kv-mean');
+const kvRange    = document.getElementById('kv-range');
+const kvScored   = document.getElementById('kv-scored');
+
+// Fitness stats refresh — pure read pass over state.cells, ~0.1 ms.
+// Each cell carries the score from the last round it competed in
+// (or 0 if it hasn't yet); these are stale w.r.t. the elite genome
+// but accurate enough for a population health readout. Hunt/Refine
+// re-score everyone, so the numbers freshen up after those.
+function updateFitnessStats() {
+  let eliteIdx = -1, eliteScore = -Infinity;
+  let minScore = Infinity, maxScore = -Infinity;
+  let sumNonZero = 0, scoredCount = 0;
+  for (let i = 0; i < state.cells.length; i++) {
+    const s = state.cells[i].score;
+    if (s > eliteScore) { eliteScore = s; eliteIdx = i; }
+    if (s > 0) {
+      sumNonZero += s;
+      scoredCount++;
+      if (s < minScore) minScore = s;
+      if (s > maxScore) maxScore = s;
+    }
+  }
+  if (scoredCount > 0) {
+    const r = (eliteIdx / GRID_COLS) | 0;
+    const c = eliteIdx - r * GRID_COLS;
+    kvElite.textContent = `${eliteScore.toFixed(3)} (cell ${r},${c})`;
+    kvMean.textContent  = (sumNonZero / scoredCount).toFixed(3);
+    kvRange.textContent = `${minScore.toFixed(3)} — ${maxScore.toFixed(3)}`;
+  } else {
+    kvElite.textContent = '—';
+    kvMean.textContent  = '—';
+    kvRange.textContent = '—';
+  }
+  kvScored.textContent = scoredCount;
+}
 
 // Hex pop-grid neighbour table — toroidal, mirrors cellular.mjs.
 const NB_DC_EVEN = [-1, +1, -1,  0, -1,  0];
@@ -514,6 +555,7 @@ function bootstrap() {
   renderFull();
   cv.classList.add('flash');
   setTimeout(() => cv.classList.remove('flash'), 220);
+  updateFitnessStats();
 }
 
 function rerollPalettes() {
@@ -637,6 +679,7 @@ async function scoreAll() {
       await tick();
     }
   }
+  updateFitnessStats();
 }
 
 async function runHunt() {
@@ -991,6 +1034,8 @@ function runRound() {
   kvRound.textContent  = state.rounds;
   kvWinner.textContent = winnerIdx;
   kvLoser.textContent  = loserIdx;
+  // Refresh fitness stats on every round (cheap — 256-cell linear scan).
+  updateFitnessStats();
 }
 
 // ── Main loop ───────────────────────────────────────────────────────
