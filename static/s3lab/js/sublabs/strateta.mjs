@@ -45,13 +45,18 @@ const LIB_COLS    = 16;
 const INNER_W     = 16;          // each library CA's inner grid (hex)
 const INNER_H     = 16;
 
-const LIB_TILE_PX = 24;          // size of one library thumbnail
-const LIB_TILE_GAP = 2;
+// Tile is non-square: width = LIB_TILE_W (drives inner cell size via
+// LIB_CELL_PX = TILE_W / (INNER_W + 0.5) for the pointy-top stagger);
+// height = INNER_H rows × cellPx × 0.866 (the hex y-stride). Gap = 0
+// so neighbouring CAs touch — outer rows alternate +TILE_W/2 on x to
+// tessellate at the population scale.
+const LIB_TILE_W   = 24;
+const LIB_TILE_GAP = 0;
+const LIB_CELL_PX  = LIB_TILE_W / (INNER_W + 0.5);
+const LIB_TILE_H   = Math.max(1, Math.round(INNER_H * LIB_CELL_PX * 0.866));
 
-const LIB_CELL_PX  = LIB_TILE_PX  / (INNER_W + 0.5);
-
-const LIB_CANVAS_W = LIB_COLS * (LIB_TILE_PX + LIB_TILE_GAP) - LIB_TILE_GAP + LIB_TILE_PX / 2;
-const LIB_CANVAS_H = LIB_ROWS * (LIB_TILE_PX + LIB_TILE_GAP) - LIB_TILE_GAP;
+const LIB_CANVAS_W = LIB_COLS * LIB_TILE_W + (LIB_TILE_W / 2 | 0);
+const LIB_CANVAS_H = LIB_ROWS * LIB_TILE_H;
 
 
 // ── Algorithm tunables ─────────────────────────────────────────────
@@ -94,6 +99,7 @@ const state = {
     rounds: 0,
     hunting: false,
     huntKind: '',
+    autoActive: false,
 
     paletteMode: 'random-ansi',
     refineMode:  'edge-of-chaos',     // 'edge-of-chaos' | 'pixel-faithful'
@@ -399,17 +405,16 @@ function paintLibrary() {
     ensureBuffers();
     libBuf.fill(0xFF0D1117);
     for (let r = 0; r < LIB_ROWS; r++) {
-        const yShift = 0;
         for (let c = 0; c < LIB_COLS; c++) {
-            const xShift = (r & 1) ? LIB_TILE_PX / 2 : 0;
-            const tx = c * (LIB_TILE_PX + LIB_TILE_GAP) + xShift;
-            const ty = r * (LIB_TILE_PX + LIB_TILE_GAP) + yShift;
+            const xShift = (r & 1) ? (LIB_TILE_W / 2 | 0) : 0;
+            const tx = c * LIB_TILE_W + xShift;
+            const ty = r * LIB_TILE_H;
             const idx = r * LIB_COLS + c;
             blitGridIntoBuffer(libBuf, LIB_CANVAS_W,
-                                state.library[idx], tx, ty, LIB_TILE_PX, LIB_CELL_PX);
+                                state.library[idx], tx, ty, LIB_TILE_W, LIB_CELL_PX);
             if (idx === state.eliteIdx) {
                 drawBorder(libBuf, LIB_CANVAS_W, LIB_CANVAS_H,
-                            tx, ty, LIB_TILE_PX, LIB_TILE_PX, 0xFFD4A72C);
+                            tx, ty, LIB_TILE_W, LIB_TILE_H, 0xFFD4A72C);
             }
         }
     }
@@ -797,16 +802,13 @@ async function downloadEntryAsJSON(idx, compress) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function tileFromMouse(mx, my, cols, rows, tilePx, tileGap) {
-    const stride = tilePx + tileGap;
-    const r = Math.floor(my / stride);
+function tileFromMouse(mx, my, cols, rows, tileW, tileH) {
+    const r = Math.floor(my / tileH);
     if (r < 0 || r >= rows) return null;
-    if ((my - r * stride) >= tilePx) return null;
-    const xOff = (r & 1) ? tilePx / 2 : 0;
+    const xOff = (r & 1) ? (tileW / 2 | 0) : 0;
     const localX = mx - xOff;
-    const c = Math.floor(localX / stride);
+    const c = Math.floor(localX / tileW);
     if (c < 0 || c >= cols) return null;
-    if ((localX - c * stride) >= tilePx) return null;
     return { row: r, col: c };
 }
 
@@ -819,7 +821,7 @@ function onLibraryClick(ev) {
     const cv = ev.currentTarget;
     const rect = cv.getBoundingClientRect();
     const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-    const hit = tileFromMouse(mx, my, LIB_COLS, LIB_ROWS, LIB_TILE_PX, LIB_TILE_GAP);
+    const hit = tileFromMouse(mx, my, LIB_COLS, LIB_ROWS, LIB_TILE_W, LIB_TILE_H);
     if (!hit) return;
     const idx = hit.row * LIB_COLS + hit.col;
     if (idx < 0 || idx >= LIB_SIZE) return;
@@ -880,6 +882,50 @@ function init() {
     const refineBtn = document.getElementById('strateta-refine-btn');
     if (huntBtn)   huntBtn.onclick   = () => runHunt(false);
     if (refineBtn) refineBtn.onclick = () => runHunt(true);
+
+    // Full auto: Hunt once, then loop Refine on a configurable cadence.
+    // Tournament keeps running in the gap, so the population evolves
+    // naturally between refines. Click again to stop — the in-flight
+    // Refine completes before the loop exits.
+    const autoBtn     = document.getElementById('strateta-auto-btn');
+    const autoDelayEl = document.getElementById('strateta-auto-delay');
+    if (autoBtn) {
+        autoBtn.onclick = () => {
+            if (state.autoActive) {
+                state.autoActive = false;
+                setAutoButtonLabel(false);
+            } else {
+                startStratetaAuto();
+            }
+        };
+    }
+    function setAutoButtonLabel(active) {
+        if (!autoBtn) return;
+        autoBtn.textContent  = active ? '⏹ Stop auto' : '🔁 Full auto';
+        autoBtn.style.background = active ? '#cf222e' : '#a371f7';
+    }
+    async function startStratetaAuto() {
+        if (state.hunting || state.autoActive) return;
+        state.autoActive = true;
+        setAutoButtonLabel(true);
+        await runHunt(false);
+        while (state.autoActive) {
+            let delaySec = parseFloat(autoDelayEl ? autoDelayEl.value : '6');
+            if (!Number.isFinite(delaySec) || delaySec < 1) delaySec = 6;
+            if (delaySec > 120) delaySec = 120;
+            let remainingMs = delaySec * 1000;
+            while (state.autoActive && remainingMs > 0) {
+                setHuntStatus(`🔁 auto: next refine in ${(remainingMs / 1000).toFixed(1)}s · mode ${state.refineMode}`);
+                await new Promise(r => setTimeout(r, 100));
+                remainingMs -= 100;
+            }
+            if (!state.autoActive) break;
+            await runHunt(true);
+        }
+        setAutoButtonLabel(false);
+        const cur = (document.getElementById('strateta-hunt-status')?.textContent) || '';
+        if (cur.startsWith('🔁')) setHuntStatus('auto stopped.');
+    }
 
     const paletteSel = document.getElementById('strateta-palette-mode');
     if (paletteSel) {

@@ -38,6 +38,15 @@
   <button id="strateta-refine-btn"
           title="Warm-start hunt: whole population mutated from current elite. Iteratively sharpens the rule under the active refine mode. Defaults to 48 gens."
           style="background:#1f6feb;color:#fff;border:0;">🎯 Refine</button>
+  <button id="strateta-auto-btn"
+          title="Run a Hunt then keep Refining forever, with a configurable gap between rounds. Tournament keeps running in the gap. Click again to stop after the in-flight Refine completes."
+          style="background:#a371f7;color:#fff;border:0;">🔁 Full auto</button>
+  <label class="slider-label" title="Seconds between successive Refine rounds in Full auto mode.">
+    every
+    <input type="number" id="strateta-auto-delay" min="1" max="120" step="1" value="6"
+           style="width:3.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+    s
+  </label>
   <label class="slider-label" title="Refine generations.">
     gens
     <input type="number" id="strateta-refine-gens" min="5" max="500" step="1" value="48"
