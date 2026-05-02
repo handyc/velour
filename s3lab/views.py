@@ -55,6 +55,16 @@ SUBLABS = [
                     'library. The elite library entry drives the meta-CA. '
                     'One rule playing two scales of itself.',
     },
+    {
+        'slug':     'strateta',
+        'module':   'strateta',
+        'template': 's3lab/sublabs/strateta_body.html',
+        'name':     'Strateta',
+        'blurb':    'K=256 sibling of Stratum. 16×16 library of K=256 '
+                    'HexNN rules — image upload fills 256 palettes from '
+                    'a 256×256-pixel mosaic. Two refine modes: '
+                    'edge-of-chaos or pixel-faithful to the source.',
+    },
     # Future sublabs land here. Keep entries small.
 ]
 SUBLABS_BY_SLUG = {s['slug']: s for s in SUBLABS}

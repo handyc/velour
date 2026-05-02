@@ -1,0 +1,143 @@
+{# Strateta sublab — K=256 image-CA library. #}
+<p class="lede">A 16×16 <strong>library</strong> of K=256 hex CA rules.
+   Upload an image and each of the 256 entries gets its own 256-colour
+   palette sampled from a 16×16 region of the picture — together the
+   library reads as a 256×256-pixel mosaic preview of the source.
+   Multiple images may be uploaded; each entry randomly picks one as
+   its source.</p>
+
+<p class="lede" style="margin-top:-0.4rem;color:#6e7681;">
+   Two refine modes, switchable mid-evolution:
+   <strong>edge-of-chaos</strong> hunts for 110-like dynamics regardless
+   of palette (same fitness as Stratum and Classic);
+   <strong>pixel-faithful</strong> scores each entry by how closely its
+   CA output (after a few steps from a fresh random grid) matches the
+   entry's source-image region pixel-for-pixel. The second mode trains
+   the CA to <em>render</em> the image — its attractor becomes a
+   compressed encoding of the source. Click any tile to download its
+   genome as hexnn-genome-v1 JSON.
+</p>
+
+<section class="strateta-section"
+         style="display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-start;">
+  <div>
+    <h2 style="margin:0 0 0.3rem 0;font-size:0.95rem;color:#c9d1d9;">Library
+      <span style="color:#8b949e;font-size:0.8rem;font-weight:normal;">
+        — 256 K=256 HexNN rules · gold = elite (active mode)
+      </span>
+    </h2>
+    <canvas id="strateta-library" width="416" height="412"
+            aria-label="16×16 library of K=256 HexNN rules"></canvas>
+  </div>
+</section>
+
+<div class="tft-controls" style="margin-top:0.6rem;">
+  <button id="strateta-hunt-btn"
+          title="Compact GA hunt: pop=8, gens=16. Half mutated from elite, half random. Top winners replace the bottom-fitness library slots. Uses the active refine mode's fitness."
+          style="background:#238636;color:#fff;border:0;">🧬 Hunt</button>
+  <button id="strateta-refine-btn"
+          title="Warm-start hunt: whole population mutated from current elite. Iteratively sharpens the rule under the active refine mode. Defaults to 48 gens."
+          style="background:#1f6feb;color:#fff;border:0;">🎯 Refine</button>
+  <label class="slider-label" title="Refine generations.">
+    gens
+    <input type="number" id="strateta-refine-gens" min="5" max="500" step="1" value="48"
+           style="width:4rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+  </label>
+  <label class="slider-label"
+         title="Pick which fitness to drive Hunt / Refine / tournament selection. Edge-of-chaos = the K=4-quantized changeRate parabola from /classic/ (110-like dynamics, palette-blind). Pixel-faithful = 1 - mean RGB squared distance to the entry's source-image region (only meaningful after image upload).">
+    refine mode
+    <select id="strateta-refine-mode"
+            style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+      <option value="edge-of-chaos">edge-of-chaos</option>
+      <option value="pixel-faithful">pixel-faithful</option>
+    </select>
+  </label>
+  <button id="pause-btn" title="Pause inner CAs + tournament timer.">Pause</button>
+  <button id="reset-lib-btn" title="Re-roll all 256 K=256 rules (drops image-derived palettes and source regions).">Reset Library</button>
+  <label class="slider-label"
+         title="Palette generator for fresh / reset entries — same five modes as Stratum and HexNN. Upload an image to override with image-derived palettes.">
+    palette
+    <select id="strateta-palette-mode" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+      <option value="random-ansi">Random ANSI</option>
+      <option value="viridis">Viridis</option>
+      <option value="plasma">Plasma</option>
+      <option value="grayscale">Grayscale</option>
+      <option value="rainbow">Rainbow</option>
+    </select>
+  </label>
+  <label class="slider-label"
+         style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+         title="Pick one image — or many. Each library entry's K=256 palette is sampled from a 16×16 region of its chosen source image, and that same region becomes the entry's pixel-faithful target. Auto-saves the resulting population as a gzipped JSON for later replay.">
+    🖼 Image(s) → palettes
+    <input id="strateta-image-input" type="file" accept="image/*" multiple style="display:none;">
+  </label>
+  <label class="checkbox-label" title="Click-to-download exports compress JSON via the browser's gzip stream (~10× smaller).">
+    <input type="checkbox" id="strateta-gzip-cb" checked>
+    gzip downloads
+  </label>
+  <span id="strateta-hunt-status" style="color:#8b949e;font-size:0.8rem;margin-left:1rem;"></span>
+</div>
+
+<div class="tft-controls" style="margin-top:0.4rem;">
+  <button id="strateta-save-population-btn"
+          title="Download every library entry's genome + palette + grid + source regions as a gzipped strateta-population-v1 JSON. Restorable via 📂 Load population.">💾 Save population</button>
+  <label class="slider-label"
+         style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+         title="Load a strateta-population-v1 JSON or .json.gz file. Replaces the entire library + source regions + thumbnails.">
+    📂 Load population
+    <input id="strateta-load-population-input" type="file" accept=".json,.gz,application/json,application/gzip" style="display:none;">
+  </label>
+</div>
+
+<div class="tft-controls" style="margin-top:0.4rem;">
+  <span style="color:#8b949e;font-size:0.8rem;">
+    elite #<span id="strateta-elite-idx" style="color:#d4a72c;font-family:ui-monospace,monospace;">0</span> ·
+    fit <span id="strateta-elite-fit" style="color:#7ee787;font-family:ui-monospace,monospace;">0.000</span> ·
+    rounds <span id="strateta-rounds" style="color:#c9d1d9;font-family:ui-monospace,monospace;">0</span> ·
+    mode <span id="strateta-refine-mode-status" style="color:#79c0ff;font-family:ui-monospace,monospace;">edge-of-chaos</span>
+  </span>
+</div>
+
+<div class="tft-controls">
+  <label class="slider-label">
+    inner-tick
+    <input type="range" id="inner-tick" min="100" max="2000" step="20" value="400" style="width:6.5rem;">
+    <span id="inner-tick-out" style="font-family:ui-monospace,monospace;color:#8b949e;">400 ms</span>
+  </label>
+  <label class="slider-label">
+    tournament
+    <input type="range" id="tourn-tick" min="500" max="30000" step="100" value="6000" style="width:6.5rem;">
+    <span id="tourn-tick-out" style="font-family:ui-monospace,monospace;color:#8b949e;">6000 ms</span>
+  </label>
+  <label class="slider-label">
+    mut
+    <input type="number" id="mut-rate" min="0" max="0.05" step="0.0001" value="0.0008"
+           style="width:5.5rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.1rem 0.3rem;font-family:inherit;">
+  </label>
+</div>
+
+<section style="margin-top:0.8rem;">
+  <h3 style="margin:0 0 0.3rem 0;font-size:0.85rem;color:#8b949e;">Source images
+    <span style="color:#6e7681;font-weight:normal;">— scroll horizontally if many</span>
+  </h3>
+  <div id="strateta-source-rail"
+       style="display:none; overflow-x:auto; overflow-y:hidden; white-space:nowrap;
+              padding:0.4rem 0.2rem; border:1px solid #30363d; border-radius:3px;
+              background:#0d1117; min-height:84px;">
+  </div>
+</section>
+
+<section class="s3lab-fineprint">
+  <p>Engine: same <code>hexnn_engine.mjs</code> Stratum uses, dialled to
+    K=256. Per-genome cost: 16,384 prototypes × (7 keys + 1 out) = 131
+    KB; the full library = ~33 MB browser memory. Inner ticks at 400
+    ms by default keep the per-frame budget comfortable on most
+    machines (256 entries × 16×16 grid × ~64 lookups ≈ 4 M ops/tick).</p>
+  <p>Pixel-faithful fitness: each entry runs PIX_STEPS=10 from a fresh
+    random grid, then its (palette-rendered) output is compared
+    pixel-for-pixel against its source-image region. Score = 1 - mean
+    squared RGB distance / 195,075. A perfect match scores 1.0; pure
+    noise scores ~0.5; an inverted palette near 0. The mode is most
+    interesting after image upload — without source regions, it
+    silently falls back to edge-of-chaos.</p>
+</section>
