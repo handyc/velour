@@ -22,7 +22,7 @@ from .classifier import class_color, class_label, classify
 from .engine import simulate
 from .metrics import META as METRIC_META, list_metrics, run_all
 from .models import (
-    AutoSearch,
+    Agent, AutoSearch,
     Classification, EvolutionRun, MetricRun, Rule, WOLFRAM_CLASSES,
 )
 
@@ -152,6 +152,7 @@ def rule_detail(request, slug: str):
     # All classifications (history) + latest.
     classifications = list(rule.classifications.all()[:8])
 
+    agents = list(rule.agents.all())
     return render(request, 'taxon/detail.html', {
         'rule': rule,
         'card': card,
@@ -161,7 +162,23 @@ def rule_detail(request, slug: str):
         'genome_hex_full': bytes(rule.genome).hex(),
         'palette_hex': rule.palette_hex,
         'class_choices': [(n, lbl) for n, lbl in WOLFRAM_CLASSES],
+        'agents': agents,
     })
+
+
+@login_required
+@require_POST
+def rule_edit(request, slug: str):
+    """Update a rule's display name + notes. Lets the user tag a rule
+    with whatever it reminds them of ("snowfall17", "marching ants",
+    "feels like Conway"). Doesn't touch genome / palette / sha1."""
+    rule = get_object_or_404(Rule, slug=slug)
+    name = (request.POST.get('name', '') or '').strip()[:120]
+    notes = (request.POST.get('notes', '') or '').strip()
+    rule.name = name
+    rule.notes = notes
+    rule.save(update_fields=['name', 'notes'])
+    return redirect('taxon:rule_detail', slug=slug)
 
 
 @login_required
@@ -266,19 +283,68 @@ def _random_palette(K: int = 4) -> bytes:
     return bytes(out)
 
 
+def _unique_agent_slug(base: str) -> str:
+    base = base[:96] or 'agent'
+    candidate = base
+    n = 2
+    while Agent.objects.filter(slug=candidate).exists():
+        candidate = f'{base[:92]}-{n}'
+        n += 1
+    return candidate
+
+
 @login_required
 @require_POST
 def rule_reroll_palette(request, slug: str):
-    """Pick a fresh random palette for this rule. Genome is unchanged
-    (the rule's identity is its sha1 of the genome bytes; the palette
-    is just rendering metadata). HexNN rules get K=256 fresh ANSI
-    indices, K=4 packed rules get 4. Idempotent — call repeatedly to
-    flip through different colour schemes for the same rule."""
+    """Create a *new* Agent (Ruleset + new random palette) on this
+    rule. Doesn't touch the existing default — click "Make default"
+    on an Agent to promote it. Genome is unchanged (Rule is
+    sha1-addressed by its genome bytes). HexNN rules get K=256 fresh
+    ANSI indices, K=4 packed rules get 4."""
     rule = get_object_or_404(Rule, slug=slug)
     K = max(2, int(rule.n_colors or 4))
-    rule.palette_ansi = _random_palette(K)
-    rule.save()
+    n_existing = rule.agents.count()
+    Agent.objects.create(
+        slug=_unique_agent_slug(f'{rule.slug}-agent-{n_existing + 1:03d}'),
+        name=f'{rule.name or rule.slug} agent #{n_existing + 1}',
+        rule=rule,
+        palette_ansi=_random_palette(K),
+        is_default=False,
+    )
     return redirect('taxon:rule_detail', slug=slug)
+
+
+@login_required
+@require_POST
+def agent_make_default(request, slug: str):
+    """Promote this Agent to be its rule's default — its palette is
+    mirrored into Rule.palette_ansi (drives downloads, device pushes,
+    cards) and the previous default loses the flag."""
+    agent = get_object_or_404(Agent, slug=slug)
+    rule = agent.rule
+    Agent.objects.filter(rule=rule, is_default=True).update(is_default=False)
+    agent.is_default = True
+    agent.save(update_fields=['is_default'])
+    rule.palette_ansi = bytes(agent.palette_ansi)
+    rule.save(update_fields=['palette_ansi'])
+    return redirect('taxon:rule_detail', slug=rule.slug)
+
+
+@login_required
+@require_POST
+def agent_delete(request, slug: str):
+    """Remove an Agent. Refused if it's the rule's only Agent or the
+    current default (promote another first)."""
+    agent = get_object_or_404(Agent, slug=slug)
+    rule_slug = agent.rule.slug
+    siblings = agent.rule.agents.exclude(pk=agent.pk).count()
+    if agent.is_default or siblings == 0:
+        return HttpResponseBadRequest(
+            'cannot delete the default agent or the only agent — '
+            'promote another to default first'
+        )
+    agent.delete()
+    return redirect('taxon:rule_detail', slug=rule_slug)
 
 
 @login_required

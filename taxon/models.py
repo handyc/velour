@@ -128,6 +128,57 @@ class Rule(models.Model):
                 .first())
 
 
+class Agent(models.Model):
+    """A renderable instance of a Ruleset.
+
+    Conceptually: a ``Rule`` is the dynamics (the genome), an ``Agent``
+    is the dynamics paired with a palette + a name. One Rule can have
+    many Agents — same edge-of-chaos behaviour, different colour
+    schemes — because Rule is sha1-content-addressed by genome bytes
+    so two Rules with the same genome but different palettes can't
+    coexist; that variation lives here.
+
+    Phase 1 carries just (rule, palette_ansi, name, slug, notes). Each
+    Rule auto-gets one "default" Agent on creation (data migration
+    backfilled the existing 449 rules); ``Rule.palette_ansi`` stays as
+    a denormalised cache of the current default so existing render /
+    download / push-to-device paths keep working untouched.
+
+    Future Phase 2 ideas (not built): preferred initial-condition seed
+    grid, descriptive personality name, neighbour relationships so
+    spatial GAs can promote Agents (not just Rulesets) to the library.
+    """
+    slug = models.SlugField(max_length=100, unique=True)
+    name = models.CharField(max_length=120, blank=True)
+    rule = models.ForeignKey(
+        'Rule', on_delete=models.CASCADE, related_name='agents',
+    )
+    palette_ansi = models.BinaryField()
+    notes = models.TextField(blank=True)
+    is_default = models.BooleanField(
+        default=False,
+        help_text='True for the agent whose palette is mirrored into '
+                  'Rule.palette_ansi (drives downloads, device pushes, '
+                  'card thumbnails). Exactly one per rule.',
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ('-is_default', '-created_at')
+        indexes = [
+            models.Index(fields=['rule', 'is_default']),
+        ]
+
+    def __str__(self) -> str:
+        tag = ' (default)' if self.is_default else ''
+        return f'{self.name or self.slug}{tag}'
+
+    @property
+    def palette_hex(self) -> list[str]:
+        from automaton.packed import ansi256_to_hex
+        return [ansi256_to_hex(b) for b in bytes(self.palette_ansi)]
+
+
 class MetricRun(models.Model):
     """One metric value computed against one rule.
 

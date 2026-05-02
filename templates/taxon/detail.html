@@ -8,7 +8,39 @@
 
   <div style="display:grid; grid-template-columns: 1fr 220px; gap:1rem; align-items:start;">
     <div>
-      <h1 style="margin-top:0;">{{ rule.name|default:rule.slug }}</h1>
+      <h1 style="margin-top:0; display:flex; align-items:center; gap:0.5rem;">
+        <span id="rule-name-display">{{ rule.name|default:rule.slug }}</span>
+        <button type="button" id="rule-name-edit-btn"
+                style="background:#21262d; color:#79c0ff; border:1px solid #30363d;
+                       padding:0.15rem 0.5rem; border-radius:3px; cursor:pointer;
+                       font-family:inherit; font-size:0.7rem;"
+                title="Rename + add notes — call it whatever it reminds you of (snowfall17, marching ants, …)">✎ rename</button>
+      </h1>
+      <form method="post" action="{% url 'taxon:rule_edit' slug=rule.slug %}"
+            id="rule-name-edit-form" style="display:none; margin:0 0 0.6rem 0;">
+        {% csrf_token %}
+        <input type="text" name="name" value="{{ rule.name }}" maxlength="120"
+               placeholder="display name (e.g. snowfall17)"
+               style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+                      padding:0.3rem 0.5rem; border-radius:3px; font-family:inherit;
+                      width:60%; font-size:0.85rem;">
+        <textarea name="notes" rows="2" placeholder="notes — what it reminds you of, what it's good for, etc."
+                  style="display:block; width:100%; margin-top:0.3rem;
+                         background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+                         padding:0.3rem 0.5rem; border-radius:3px; font-family:inherit;
+                         font-size:0.85rem;">{{ rule.notes }}</textarea>
+        <div style="margin-top:0.3rem;">
+          <button style="background:#1f6feb; color:#fff; border:0; padding:0.3rem 0.7rem;
+                         border-radius:3px; cursor:pointer; font-family:inherit; font-size:0.8rem;">save</button>
+          <button type="button" id="rule-name-cancel-btn"
+                  style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                         padding:0.3rem 0.7rem; border-radius:3px; cursor:pointer;
+                         font-family:inherit; font-size:0.8rem;">cancel</button>
+        </div>
+      </form>
+      {% if rule.notes %}
+      <p style="color:#7ee787; font-size:0.85rem; white-space:pre-wrap; margin:0.3rem 0 0.5rem 0;">{{ rule.notes }}</p>
+      {% endif %}
       <p style="color:#8b949e;">
         sha1 <code>{{ rule.sha1 }}</code> · K={{ rule.n_colors }} · {{ rule.kind }}<br>
         source <strong>{{ rule.get_source_display }}</strong>{% if rule.source_ref %} · <span style="color:#6e7681;">{{ rule.source_ref }}</span>{% endif %}
@@ -129,6 +161,52 @@
                      padding:0.4rem 0.8rem; border-radius:4px; cursor:pointer;
                      font-family:inherit;">Delete</button>
     </form>
+  </div>
+
+  <h2>Agents
+    <span style="color:#8b949e; font-size:0.8rem; font-weight:normal;">
+      — same Ruleset, different palette / identity ({{ agents|length }})
+    </span>
+  </h2>
+  <p style="color:#6e7681; font-size:0.78rem; margin:0.2rem 0 0.6rem 0;">
+    Each Agent is one Ruleset (this rule's genome) paired with a palette
+    + a name. The default Agent's palette is what downloads, → Device,
+    and card thumbnails use. Clicking 🎨 Random palette creates a new
+    Agent — promote it with "Make default" to swap the active scheme.
+  </p>
+  <div style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom:1rem;">
+    {% for a in agents %}
+    <div style="display:flex; gap:0.5rem; align-items:center; padding:0.4rem 0.5rem;
+                background:#0d1117; border:1px solid #30363d; border-radius:4px;
+                {% if a.is_default %}border-left:3px solid #d4a72c;{% endif %}">
+      <span style="display:flex; gap:2px; flex-wrap:wrap; max-width:18rem;">
+        {% for hex in a.palette_hex %}<span style="display:inline-block; width:0.85rem; height:0.85rem;
+                                                     background:{{ hex }}; border:1px solid #30363d;"
+                                            title="{{ hex }}"></span>{% endfor %}
+      </span>
+      <span style="flex:1; font-size:0.82rem;">
+        {{ a.name|default:a.slug }}
+        {% if a.is_default %}<span style="color:#d4a72c; font-size:0.7rem;">[default]</span>{% endif %}
+      </span>
+      <span style="color:#6e7681; font-size:0.7rem;">{{ a.created_at|date:"Y-m-d H:i" }}</span>
+      {% if not a.is_default %}
+      <form method="post" action="{% url 'taxon:agent_make_default' slug=a.slug %}" style="margin:0;">
+        {% csrf_token %}
+        <button style="background:#21262d; color:#d4a72c; border:1px solid #30363d;
+                       padding:0.2rem 0.5rem; border-radius:3px; cursor:pointer;
+                       font-family:inherit; font-size:0.75rem;"
+                title="Promote this Agent's palette to be the rule's default — drives downloads, → Device, card thumbnails.">make default</button>
+      </form>
+      <form method="post" action="{% url 'taxon:agent_delete' slug=a.slug %}" style="margin:0;">
+        {% csrf_token %}
+        <button style="background:#21262d; color:#f85149; border:1px solid #30363d;
+                       padding:0.2rem 0.5rem; border-radius:3px; cursor:pointer;
+                       font-family:inherit; font-size:0.75rem;"
+                title="Remove this Agent. The default can't be deleted — promote another first.">×</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 
   {% if classifications|length > 1 %}
@@ -278,6 +356,24 @@
     });
 
     start();
+  })();
+
+  // Rename + notes toggle.
+  (function(){
+    const editBtn = document.getElementById('rule-name-edit-btn');
+    const cancelBtn = document.getElementById('rule-name-cancel-btn');
+    const display = document.getElementById('rule-name-display');
+    const form = document.getElementById('rule-name-edit-form');
+    if (!editBtn || !form) return;
+    editBtn.addEventListener('click', () => {
+      form.style.display = '';
+      display.style.opacity = '0.4';
+      form.querySelector('input[name="name"]').focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+      form.style.display = 'none';
+      display.style.opacity = '';
+    });
   })();
 </script>
 {% endblock %}
