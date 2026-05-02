@@ -187,6 +187,7 @@ import {
   seed_grid, step_grid,
   fitness, mutate, palette_inherit,
   random_genome, invent_palette, ansi256_to_rgb,
+  encode_tail,
 } from '{% static_v "s3lab/js/engine.mjs" %}';
 
 // ── Layout (matches cellular_esp.cpp render_pop_diff) ───────────────
@@ -720,6 +721,134 @@ async function runRefine() {
 
 huntBtn.addEventListener('click', runHunt);
 refineBtn.addEventListener('click', runRefine);
+
+// ── Click-to-download: tap any agent → download its genome.bin ─────
+//
+// Maps a click on the displayed canvas back to a population (r, c)
+// through three transforms in order:
+//   1. rotation: the canvas has CSS `transform: rotate(N × 90deg)`,
+//      undo it
+//   2. zoom: native_px = display_px / preset.zoom
+//   3. layout: dominant render uses TILE_PX/ROW_STEP_PX hex stagger;
+//      live render uses SUB_W/OUTER_X_OFFSET stagger
+//
+// Output is a standard 4104-byte HXC4 blob (the same format
+// /s3lab/, /automaton/, /taxon/, and the device firmware all
+// speak), so the file round-trips into any of those.
+
+function unrotate(x, y, rotQuarters, w, h) {
+  // (x, y) are coordinates in the rotated frame relative to the
+  // displayed canvas's top-left. This returns the corresponding
+  // coordinates in the unrotated (native canvas) frame.
+  switch (rotQuarters & 3) {
+    case 0: return [x, y];
+    case 1: return [y, w - x];      // canvas rotated 90° CW
+    case 2: return [w - x, h - y];
+    case 3: return [h - y, x];      // canvas rotated 270° CW
+  }
+}
+
+function cellAtNative(px, py) {
+  // px, py: native canvas pixel coords (0..PANEL_W, 0..PANEL_H).
+  // Returns {r, c} or null if outside the population grid.
+  const liveMode = RENDER_MODE === 'live';
+  let yRel, rowStep, xRelBase, xShift, colStep;
+  if (liveMode) {
+    yRel = py - SUB_Y0;
+    rowStep = SUB_H;
+    xRelBase = px - SUB_X0;
+    colStep = SUB_W;
+    // Tentative r so we can pick the right outer x-shift.
+    const rTry = Math.floor(yRel / rowStep);
+    xShift = (rTry & 1) ? OUTER_X_OFFSET : 0;
+  } else {
+    yRel = py - Y0;
+    rowStep = ROW_STEP_PX;
+    xRelBase = px - X0;
+    colStep = TILE_PX;
+    const rTry = Math.floor(yRel / rowStep);
+    xShift = (rTry & 1) ? (TILE_PX >> 1) : 0;
+  }
+  if (yRel < 0) return null;
+  const r = Math.floor(yRel / rowStep);
+  if (r < 0 || r >= GRID_ROWS) return null;
+  const xRel = xRelBase - xShift;
+  if (xRel < 0) return null;
+  const c = Math.floor(xRel / colStep);
+  if (c < 0 || c >= GRID_COLS) return null;
+  return { r, c };
+}
+
+function downloadCellGenome(r, c) {
+  const cell = state.cells[r * GRID_COLS + c];
+  const blob_bytes = encode_tail(cell.palette, cell.genome);
+  const blob = new Blob([blob_bytes], {type: 'application/octet-stream'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+  a.download = `cellular-r${String(r).padStart(2, '0')}-c${String(c).padStart(2, '0')}-${stamp}.genome.bin`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return a.download;
+}
+
+function flashCell(r, c) {
+  // Outline the chosen tile briefly so the user gets visual
+  // confirmation. We draw outside the normal render path; the next
+  // tick (or repaint) will restore the cell's normal pixels.
+  let x, y, w, h;
+  if (RENDER_MODE === 'live') {
+    const outerXShift = (r & 1) ? OUTER_X_OFFSET : 0;
+    x = SUB_X0 + c * SUB_W + outerXShift;
+    y = SUB_Y0 + r * SUB_H;
+    w = SUB_W; h = SUB_H;
+  } else {
+    x = X0 + c * TILE_PX + ((r & 1) ? (TILE_PX >> 1) : 0);
+    y = Y0 + r * ROW_STEP_PX;
+    w = CELL_W; h = CELL_H;
+  }
+  ctx.save();
+  ctx.strokeStyle = '#79c0ff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
+  ctx.restore();
+}
+
+cv.addEventListener('click', (e) => {
+  // Map (clientX, clientY) → unrotated native canvas (px, py).
+  const rect = cv.getBoundingClientRect();
+  const xDisp = e.clientX - rect.left;
+  const yDisp = e.clientY - rect.top;
+  // The displayed bounding box is post-rotation. For 90/270, width
+  // and height appear swapped; for 0/180, they don't. We pass the
+  // ROTATED bounding-box dimensions (rect.width, rect.height) into
+  // unrotate, which already handles that.
+  let savedRot = 0;
+  try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (_) {}
+  const [xr, yr] = unrotate(xDisp, yDisp, savedRot, rect.width, rect.height);
+  // For 90/270, the canvas's native size is (PANEL_H × PANEL_W) in
+  // the rotated frame; unrotate gave us coords in the canvas's
+  // native frame, so we just divide by zoom.
+  const zoom = PANEL_PRESETS[PANEL_KEY].zoom;
+  const px = xr / zoom;
+  const py = yr / zoom;
+  const cell = cellAtNative(px, py);
+  if (!cell) {
+    gaStatus.textContent = 'click missed the population grid.';
+    gaStatus.style.color = '#8b949e';
+    return;
+  }
+  const fname = downloadCellGenome(cell.r, cell.c);
+  flashCell(cell.r, cell.c);
+  gaStatus.textContent = `downloaded cell (${cell.r}, ${cell.c}) → ${fname}`;
+  gaStatus.style.color = '#3fb950';
+});
+
+cv.style.cursor = 'crosshair';
+cv.title = 'Click any agent to download its genome.bin (HXC4, 4104 B).';
 
 const imageInput = document.getElementById('image-input');
 imageInput.addEventListener('change', (e) => {
