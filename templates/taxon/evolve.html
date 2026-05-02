@@ -269,18 +269,33 @@ function tickPreview() {
 }
 
 function drawPreview() {
+    // Pointy-top hex render — same trick used everywhere else in
+    // s3lab. Width-divisor is GRID_W + 0.5 so the half-cell margin on
+    // shifted rows lands at the canvas edge; row stride is cellW * 0.866
+    // (the hex y-stride). Odd rows shift +cellW/2 on x. Each cell's
+    // pixel span is computed from its neighbour position so the
+    // rightmost cell on unshifted rows clamps to the canvas edge —
+    // otherwise an unfilled 1-px sliver shows up as a vertical bar.
     const W = cvPreview.width;
     const H = cvPreview.height;
-    const cellW = W / GRID_W;
-    const cellH = H / GRID_H;
+    const cellW = W / (GRID_W + 0.5);
+    const rowStep = cellW * 0.866;
+    ctxPreview.fillStyle = '#000';
+    ctxPreview.fillRect(0, 0, W, H);
     for (let y = 0; y < GRID_H; y++) {
+        const rowShift = (y & 1) ? cellW / 2 : 0;
+        const py0 = (y * rowStep) | 0;
+        const py1 = ((y + 1) * rowStep) | 0;
+        const cellH = Math.max(1, py1 - py0);
         for (let x = 0; x < GRID_W; x++) {
             const v = state.previewGrid[y * GRID_W + x] & 3;
             const ansi = state.palette[v] | 0;
             const [r, g, b] = ansi256_to_rgb(ansi);
+            const px0 = (x * cellW + rowShift) | 0;
+            const naturalPx1 = ((x + 1) * cellW + rowShift) | 0;
+            const px1 = (x === GRID_W - 1) ? Math.max(naturalPx1, W) : naturalPx1;
             ctxPreview.fillStyle = `rgb(${r},${g},${b})`;
-            ctxPreview.fillRect(x * cellW | 0, y * cellH | 0,
-                                Math.ceil(cellW), Math.ceil(cellH));
+            ctxPreview.fillRect(px0, py0, Math.max(1, px1 - px0), cellH);
         }
     }
 }
