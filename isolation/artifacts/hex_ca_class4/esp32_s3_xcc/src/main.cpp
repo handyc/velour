@@ -603,6 +603,42 @@ static void run_hunt(uint32_t grid_seed) {
         Serial.println("saved as /winner.bin");
 }
 
+// ── Hot-swap slot table (Phase 3A) ────────────────────────────────────
+//
+// The CA run loop calls every per-tick action through this struct so
+// an uploaded ELF can replace any one entry atomically. Phase 3A
+// (this commit) is the table + the replacement of direct calls.
+// Phase 3B+3C will wire /run-elf to actually patch it. Until then
+// HOT.* always points at the baked-in defaults below — behaviour is
+// byte-identical to esp32_s3_full.
+
+typedef void (*step_fn_t)(const u8 *genome, const u8 *in, u8 *out);
+typedef void (*render_fn_t)(const u8 *prev, const u8 *cur);
+typedef void (*gpio_fn_t)(const u8 *grid);
+
+struct HotSlots {
+    step_fn_t   step;
+    render_fn_t render;
+    gpio_fn_t   gpio;
+    bool        step_default;
+    bool        render_default;
+    bool        gpio_default;
+};
+
+static HotSlots HOT = {
+    /* step           */ step_grid,
+    /* render         */ render_diff,
+    /* gpio           */ apply_bindings,
+    /* step_default   */ true,
+    /* render_default */ true,
+    /* gpio_default   */ true,
+};
+
+static const char *slot_state(bool is_default) {
+    return is_default ? "default" : "loaded";
+}
+
+
 // ── WiFi + HTTP + ELF hot-load (Phase 2) ─────────────────────────────
 //
 // All comms code lives in this section so the original CA pipeline
@@ -718,12 +754,18 @@ static void handle_root() {
     } else {
         html += F("(none uploaded yet)");
     }
-    html += F("</td></tr></table>");
+    html += F("</td></tr>");
+    html += "<tr><td>slot: step</td><td>"   + String(slot_state(HOT.step_default))   + "</td></tr>";
+    html += "<tr><td>slot: render</td><td>" + String(slot_state(HOT.render_default)) + "</td></tr>";
+    html += "<tr><td>slot: gpio</td><td>"   + String(slot_state(HOT.gpio_default))   + "</td></tr>";
+    html += F("</table>");
     html += F("<h2>endpoints</h2><ul>"
-             "<li><code>GET /info</code> — JSON status</li>"
+             "<li><code>GET /info</code> — JSON status (uptime, free heap, slots, last ELF)</li>"
              "<li><code>POST /wifi</code> — body <code>ssid=…&amp;password=…</code>; saves + reboots</li>"
              "<li><code>POST /load-elf</code> — raw ELF body, saved to <code>/loaded.elf</code></li>"
-             "<li><code>POST /run-elf</code> — parse + summarise (Phase 2 stub; no execute yet)</li>"
+             "<li><code>POST /run-elf?slot=NAME</code> — load <code>/loaded.elf</code> into slot "
+                 "<code>step</code>, <code>render</code>, or <code>gpio</code>; takes effect next tick</li>"
+             "<li><code>POST /reset-slots</code> — revert every slot to its baked-in default</li>"
              "</ul></body></html>");
     server.send(200, "text/html", html);
 }
@@ -747,6 +789,10 @@ static void handle_info() {
     } else {
         json += "null";
     }
+    json += ",\"slots\":{";
+    json += "\"step\":\""   + String(slot_state(HOT.step_default))   + "\",";
+    json += "\"render\":\"" + String(slot_state(HOT.render_default)) + "\",";
+    json += "\"gpio\":\""   + String(slot_state(HOT.gpio_default))   + "\"}";
     json += "}";
     server.send(200, "application/json", json);
 }
@@ -786,6 +832,143 @@ static bool parse_elf_head(const uint8_t *buf, size_t n,
     entry = (uint32_t)buf[24]        | ((uint32_t)buf[25] << 8) |
             ((uint32_t)buf[26] << 16) | ((uint32_t)buf[27] << 24);
     return true;
+}
+
+
+// ── Phase 3B: minimal native ELF loader for xcc700 output ────────────
+//
+// Scope (intentionally narrow):
+//   - ELF32 little-endian, e_machine == 0x5e (Xtensa) only.
+//   - Single .text section. No .data, no .bss, no globals.
+//   - No external symbols / no relocations resolved. The loaded
+//     function may only call other functions defined in the same
+//     ELF (relative calls), use stack locals, and do arithmetic.
+//   - Caller decides what signature to cast to. Phase 3C wires
+//     specific signatures (step_fn_t, render_fn_t, gpio_fn_t) so
+//     the slot table can pick up the loaded code atomically.
+//
+// What it does NOT do (deliberate Phase 3 backlog):
+//   - R_XTENSA_32 / R_XTENSA_SLOT0_OP relocation resolution
+//   - Symbol table lookups (loaded code can't call into firmware)
+//   - .rodata / .data / .bss section copy + addressing
+//   - Memory-protection or sandboxing
+//
+// Returns: pointer to the executable .text region in IRAM, or
+// nullptr on failure (and writes the diagnostic to *err).
+
+#define LE16(p, off) ((uint16_t)((p)[(off)] | ((p)[(off)+1] << 8)))
+#define LE32(p, off) ((uint32_t)((p)[(off)] | ((p)[(off)+1] << 8) \
+                       | ((p)[(off)+2] << 16) | ((p)[(off)+3] << 24)))
+
+// Section header field offsets (40-byte sh entry, ELF32).
+#define SH_NAME    0
+#define SH_TYPE    4
+#define SH_FLAGS   8
+#define SH_OFFSET  16
+#define SH_SIZE    20
+#define SH_ENTSIZE 36
+
+// We track everything an ELF needs to be usable as a slot.
+struct LoadedElf {
+    void    *exec;       // executable region in IRAM (heap_caps free()-able)
+    size_t   exec_bytes;
+    uint32_t entry;      // copied here for convenience; may be 0
+};
+
+
+// Find a section by name. Walks the section header table, looks up
+// each name in .shstrtab. Returns true + populates offset/size on hit.
+static bool find_section(const uint8_t *buf, size_t n,
+                         const char *want,
+                         uint32_t &out_off, uint32_t &out_size) {
+    if (n < 52) return false;
+    uint32_t e_shoff   = LE32(buf, 32);
+    uint16_t e_shentsz = LE16(buf, 46);
+    uint16_t e_shnum   = LE16(buf, 48);
+    uint16_t e_shstrndx = LE16(buf, 50);
+    if (e_shentsz != 40 || e_shnum == 0) return false;
+    if ((size_t)e_shoff + (size_t)e_shnum * 40 > n) return false;
+    if (e_shstrndx >= e_shnum) return false;
+
+    // Locate the string-table section so we can resolve sh_name.
+    const uint8_t *shstr_hdr = buf + e_shoff + (size_t)e_shstrndx * 40;
+    uint32_t shstr_off  = LE32(shstr_hdr, SH_OFFSET);
+    uint32_t shstr_size = LE32(shstr_hdr, SH_SIZE);
+    if ((size_t)shstr_off + shstr_size > n) return false;
+    const char *strs = (const char *)(buf + shstr_off);
+
+    for (uint16_t i = 0; i < e_shnum; i++) {
+        const uint8_t *sh = buf + e_shoff + (size_t)i * 40;
+        uint32_t name_off = LE32(sh, SH_NAME);
+        if (name_off >= shstr_size) continue;
+        const char *name = strs + name_off;
+        if (strcmp(name, want) == 0) {
+            out_off  = LE32(sh, SH_OFFSET);
+            out_size = LE32(sh, SH_SIZE);
+            return ((size_t)out_off + out_size) <= n;
+        }
+    }
+    return false;
+}
+
+
+// Load .text into executable RAM. Caller frees with heap_caps_free()
+// when done. err is a short, single-line diagnostic on failure.
+static bool load_elf_text(const uint8_t *buf, size_t n,
+                          LoadedElf &out, const char *&err) {
+    uint16_t e_machine, e_class; uint32_t entry;
+    if (!parse_elf_head(buf, n, e_machine, e_class, entry)) {
+        err = "ELF header invalid";
+        return false;
+    }
+    out.entry = entry;
+
+    uint32_t text_off = 0, text_size = 0;
+    if (!find_section(buf, n, ".text", text_off, text_size)) {
+        err = "no .text section";
+        return false;
+    }
+    if (text_size == 0) {
+        err = ".text is empty";
+        return false;
+    }
+    if (text_size > 32 * 1024) {
+        err = ".text exceeds 32 KiB cap";
+        return false;
+    }
+
+    // Allocate from IRAM so the CPU can execute these bytes.
+    // MALLOC_CAP_EXEC + MALLOC_CAP_8BIT is the right combination on
+    // ESP32-S3; on other Xtensa variants the equivalent is the same
+    // pair of caps.
+    void *exec = heap_caps_malloc(text_size,
+                                  MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+    if (!exec) {
+        err = "heap_caps_malloc(EXEC) returned NULL";
+        return false;
+    }
+    memcpy(exec, buf + text_off, text_size);
+
+    // Clear caches so the i-cache picks up the freshly written bytes.
+    // The GCC builtin handles both d-cache flush and i-cache invalidate
+    // for the address range — on Xtensa it expands to the appropriate
+    // dhwbi.l/ihi.l sequence.
+    __builtin___clear_cache((char *)exec, (char *)exec + text_size);
+
+    out.exec = exec;
+    out.exec_bytes = text_size;
+    err = nullptr;
+    return true;
+}
+
+
+static void free_loaded_elf(LoadedElf &le) {
+    if (le.exec) {
+        heap_caps_free(le.exec);
+        le.exec = nullptr;
+        le.exec_bytes = 0;
+        le.entry = 0;
+    }
 }
 
 
@@ -854,15 +1037,57 @@ static void handle_load_elf() {
 }
 
 
-// POST /run-elf — Phase 2 STUB. Reads the saved ELF, re-parses the
-// header, dumps a summary to Serial. Real execution waits for Phase 3
-// (function-pointer table refactor + elf_loader integration).
+// We hold one LoadedElf per slot so we can free the previous IRAM
+// region when a new ELF replaces it (or /reset-slots is called).
+static LoadedElf loaded_step    = {nullptr, 0, 0};
+static LoadedElf loaded_render  = {nullptr, 0, 0};
+static LoadedElf loaded_gpio    = {nullptr, 0, 0};
+
+
+static void revert_slot(const String &name) {
+    if (name == "step")   { HOT.step   = step_grid;       HOT.step_default   = true; free_loaded_elf(loaded_step); }
+    if (name == "render") { HOT.render = render_diff;     HOT.render_default = true; free_loaded_elf(loaded_render); }
+    if (name == "gpio")   { HOT.gpio   = apply_bindings;  HOT.gpio_default   = true; free_loaded_elf(loaded_gpio); }
+}
+
+
+static void revert_all_slots() {
+    revert_slot("step");
+    revert_slot("render");
+    revert_slot("gpio");
+}
+
+
+// POST /run-elf?slot=NAME — Phase 3C.
+//
+// 1. Read the ELF saved by /load-elf.
+// 2. Extract .text into IRAM via load_elf_text().
+// 3. Cast the entry pointer to the slot's signature.
+// 4. Patch HOT.<slot>.
+//
+// Successive /run-elf calls on the same slot free the previous
+// allocation. /reset-slots reverts every slot to its baked-in default.
+//
+// CAVEAT (Phase 3 honest limits): the loaded code must be self-
+// contained — no external symbols, no globals, no .data/.rodata.
+// xcc700 outputs that are pure functions over their args + stack
+// locals satisfy this; anything that needs a syscall / printf /
+// digitalWrite will not link and may crash. The hardware will reset
+// on a true crash; on next boot all slots are defaults.
 static void handle_run_elf() {
     if (!last_elf.present || !LittleFS.exists(LOADED_ELF_PATH)) {
         server.send(404, "text/plain",
                     "no ELF loaded; POST /load-elf first\n");
         return;
     }
+    String slot = server.arg("slot");
+    if (slot.length() == 0) slot = "step";
+    if (slot != "step" && slot != "render" && slot != "gpio") {
+        server.send(400, "text/plain",
+                    "slot must be one of: step, render, gpio\n");
+        return;
+    }
+
     File f = LittleFS.open(LOADED_ELF_PATH, "r");
     if (!f) {
         server.send(500, "text/plain", "open failed\n");
@@ -879,27 +1104,55 @@ static void handle_run_elf() {
     f.read(buf, n);
     f.close();
 
-    uint16_t e_machine = 0;
-    uint8_t  e_class = 0;
-    uint32_t entry = 0;
-    bool ok = parse_elf_head(buf, n, e_machine, e_class, entry);
+    LoadedElf le = {nullptr, 0, 0};
+    const char *err = nullptr;
+    bool ok = load_elf_text(buf, n, le, err);
+    free(buf);
+    if (!ok) {
+        String out = String("LOAD FAIL: ") + (err ? err : "(unknown)") + "\n";
+        Serial.print("[run-elf] "); Serial.print(out);
+        server.send(400, "text/plain", out);
+        return;
+    }
+
+    // Patch the slot. The cast assumes the loaded function matches
+    // the slot's typedef — it's the user's contract (see /s3lab/compile/
+    // examples for the right signatures).
+    if (slot == "step") {
+        free_loaded_elf(loaded_step);
+        loaded_step = le;
+        HOT.step = (step_fn_t)le.exec;
+        HOT.step_default = false;
+    } else if (slot == "render") {
+        free_loaded_elf(loaded_render);
+        loaded_render = le;
+        HOT.render = (render_fn_t)le.exec;
+        HOT.render_default = false;
+    } else if (slot == "gpio") {
+        free_loaded_elf(loaded_gpio);
+        loaded_gpio = le;
+        HOT.gpio = (gpio_fn_t)le.exec;
+        HOT.gpio_default = false;
+    }
 
     String out;
-    out.reserve(220);
-    if (!ok) {
-        out += "PARSE FAIL\n";
-    } else {
-        out += "Phase 2 stub — would execute here.\n";
-        out += "  bytes:     " + String((unsigned)n) + "\n";
-        out += "  e_machine: 0x" + String(e_machine, HEX) + " (Xtensa)\n";
-        out += "  e_class:   " + String((int)e_class) + " (ELF32)\n";
-        out += "  e_entry:   0x" + String(entry, HEX) + "\n";
-        out += "Phase 3 will swap a fixed function-pointer slot.\n";
-    }
-    Serial.print("[run-elf] ");
-    Serial.print(out);
+    out.reserve(200);
+    out += "OK slot=";       out += slot;
+    out += " text_bytes=";   out += String((unsigned)le.exec_bytes);
+    out += " exec=0x";       out += String((uintptr_t)le.exec, HEX);
+    out += " entry=0x";      out += String(le.entry, HEX);
+    out += "\nWill take effect on the next CA tick.\n";
+    Serial.print("[run-elf] "); Serial.print(out);
     server.send(200, "text/plain", out);
-    free(buf);
+}
+
+
+// POST /reset-slots — revert every slot to its baked-in default and
+// free any IRAM held by previously-loaded ELFs.
+static void handle_reset_slots() {
+    revert_all_slots();
+    server.send(200, "text/plain", "all slots reverted to defaults\n");
+    Serial.println("[reset-slots] all slots reverted to defaults");
 }
 
 
@@ -918,11 +1171,12 @@ static void comms_setup() {
         start_ap_fallback();
     }
 
-    server.on("/",          HTTP_GET,  handle_root);
-    server.on("/info",      HTTP_GET,  handle_info);
-    server.on("/wifi",      HTTP_POST, handle_wifi);
-    server.on("/load-elf",  HTTP_POST, handle_load_elf);
-    server.on("/run-elf",   HTTP_POST, handle_run_elf);
+    server.on("/",            HTTP_GET,  handle_root);
+    server.on("/info",        HTTP_GET,  handle_info);
+    server.on("/wifi",        HTTP_POST, handle_wifi);
+    server.on("/load-elf",    HTTP_POST, handle_load_elf);
+    server.on("/run-elf",     HTTP_POST, handle_run_elf);
+    server.on("/reset-slots", HTTP_POST, handle_reset_slots);
     server.onNotFound(handle_not_found);
     server.begin();
     Serial.printf("HTTP: server up on :%d\n", HTTP_PORT);
@@ -1022,9 +1276,9 @@ void loop() {
     delay(TICK_MS);
     server.handleClient();       // service HTTP between every CA tick
     apply_input_bindings(cur);   // pin reads clamp cells before stepping
-    step_grid(genome, cur, nxt);
-    render_diff(cur, nxt);
-    apply_bindings(nxt);
+    HOT.step(genome, cur, nxt);  // Phase 3A: indirect via slot table
+    HOT.render(cur, nxt);
+    HOT.gpio(nxt);
 
     u8 *t = cur; cur = nxt; nxt = t;
     tick++;

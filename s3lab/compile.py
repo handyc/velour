@@ -201,22 +201,100 @@ int main() {
 ''',
     },
     {
-        'slug': 'fitness_stub',
-        'name': 'Hot-swap target — CA fitness stub',
-        'src': '''/* Phase 3 target: this function will eventually replace
-   the fitness slot in the ESP32-S3 firmware. The signature is
-   the future ABI we're prototyping toward — args, return value,
-   and what state it can read are all locked.
+        'slug': 'slot_step_identity',
+        'name': 'Slot: step — identity (output == input)',
+        'src': '''// Phase 3 hot-swap target: STEP slot ABI.
+// Device signature is:
+//     void step(char *genome, char *in, char *out)
+// where genome is 4096 B, in/out are GRID_W*GRID_H = 256 B each.
+// This identity step copies cur to next; the CA freezes in place.
+// POST this ELF to /run-elf?slot=step on the supermini fork.
 
-   For now, this is just C that compiles to Xtensa ELF. */
-
-int score(int activity, int entropy, int period) {
-    /* Reward moderate activity + entropy, penalize short periods. */
-    int s = activity * entropy;
-    if (period < 4) {
-        s = s - 50;
+void step(char *genome, char *in, char *out) {
+    int i = 0;
+    while (i < 256) {
+        out[i] = in[i];
+        i = i + 1;
     }
-    return s;
+}
+''',
+    },
+    {
+        'slug': 'slot_step_invert',
+        'name': 'Slot: step — color-invert (xor 3)',
+        'src': '''// STEP slot, color-invert variant. Each cell's next
+// state is its current state XOR 3, so K=4 colours flip pairwise:
+// 0<->3, 1<->2. The CA loses the genome's actual rule and just
+// strobes between two complementary patterns. Useful as a sanity
+// check that a loaded slot is actually being called.
+
+void step(char *genome, char *in, char *out) {
+    int i = 0;
+    while (i < 256) {
+        out[i] = in[i] ^ 3;
+        i = i + 1;
+    }
+}
+''',
+    },
+    {
+        'slug': 'slot_step_genome',
+        'name': 'Slot: step — re-implement the canonical hex CA',
+        'src': '''// STEP slot, the real thing: re-implement the same hex
+// CA step the firmware ships with. Reads the K=4 genome (2 bits
+// per situation, 4096 bytes), looks up (self, n0..n5), writes
+// the output. xcc700 has no preprocessor + no for + no struct,
+// so all constants are inline and the loops are while-form.
+
+int neighbor(char *in, int y, int x, int dy, int dx) {
+    int yy = y + dy;
+    int xx = x + dx;
+    if (yy < 0) return 0;
+    if (yy > 15) return 0;
+    if (xx < 0) return 0;
+    if (xx > 15) return 0;
+    return in[yy * 16 + xx];
+}
+
+void step(char *genome, char *in, char *out) {
+    int y = 0;
+    while (y < 16) {
+        int even = ((y & 1) == 0);
+        int x = 0;
+        while (x < 16) {
+            int self = in[y * 16 + x];
+            int n0 = neighbor(in, y, x, -1, 0);
+            int n3 = neighbor(in, y, x, 1, 0);
+            int n1 = 0;
+            int n2 = 0;
+            int n4 = 0;
+            int n5 = 0;
+            if (even != 0) {
+                n1 = neighbor(in, y, x, -1, 1);
+                n2 = neighbor(in, y, x,  0, 1);
+                n4 = neighbor(in, y, x,  0, -1);
+                n5 = neighbor(in, y, x, -1, -1);
+            }
+            if (even == 0) {
+                n1 = neighbor(in, y, x,  0, 1);
+                n2 = neighbor(in, y, x,  1, 1);
+                n4 = neighbor(in, y, x,  1, -1);
+                n5 = neighbor(in, y, x,  0, -1);
+            }
+            int idx = self * 4096
+                    + n0   * 1024
+                    + n1   * 256
+                    + n2   * 64
+                    + n3   * 16
+                    + n4   * 4
+                    + n5;
+            int byte_i = idx / 4;
+            int bit_i  = (idx & 3) * 2;
+            out[y * 16 + x] = (genome[byte_i] >> bit_i) & 3;
+            x = x + 1;
+        }
+        y = y + 1;
+    }
 }
 ''',
     },
