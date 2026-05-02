@@ -221,20 +221,21 @@ let Y0         = ((PANEL_H - POP_H) / 2) | 0;
 
 // Sub-CA tile geometry for live mode. Each rendered pixel represents
 // (CA_W / SUB_W) × (CA_H / SUB_H) cells of the actual 16×16 grid.
-// Inner hex stagger: tile_w = sub_w + 1 (an extra column for the
-// shifted half of each odd inner row). Outer hex stagger: x-shift
-// every other outer row by tile_w/2; y-pack rows at floor(tile_h *
-// √3/2). Same shape at both scales = self-similar pointy-top hex.
+// Two-scale hex stagger:
+//   - Inner: every odd sub-row shifted +1 px
+//   - Outer: every odd population row shifted +SUB_W/2 px
+// Tiles abut at stride SUB_W with no internal gutter. The shifted
+// half of an odd inner row lands 1 px past the nominal tile edge,
+// where the next tile's even row picks it up cleanly (different y).
 let SUB_W      = PANEL_PRESETS[PANEL_KEY].sub_w;
 let SUB_H      = PANEL_PRESETS[PANEL_KEY].sub_h;
 let SUB_DX     = (16 / SUB_W) | 0;
 let SUB_DY     = (16 / SUB_H) | 0;
-let TILE_W_LIVE = SUB_W + 1;
-let TILE_H_LIVE = SUB_H;
-let OUTER_ROW_STEP = ((TILE_H_LIVE * ROW_STEP_X1000) / 1000) | 0;
-let OUTER_X_OFFSET = (TILE_W_LIVE / 2) | 0;
-let SUB_X0     = ((PANEL_W - (GRID_COLS * TILE_W_LIVE + OUTER_X_OFFSET)) / 2) | 0;
-let SUB_Y0     = ((PANEL_H - (GRID_ROWS * OUTER_ROW_STEP + (TILE_H_LIVE - OUTER_ROW_STEP))) / 2) | 0;
+let OUTER_X_OFFSET = (SUB_W / 2) | 0;
+// Total live render area: 16 tiles abutting at stride SUB_W, plus
+// outer x-shift on odd rows, plus 1 px for the rightmost overflow.
+let SUB_X0     = ((PANEL_W - (GRID_COLS * SUB_W + OUTER_X_OFFSET + 1)) / 2) | 0;
+let SUB_Y0     = ((PANEL_H - (GRID_ROWS * SUB_H)) / 2) | 0;
 
 let RENDER_MODE = 'dominant';   // 'dominant' | 'live'
 
@@ -265,12 +266,9 @@ function applyPanel(key) {
   SUB_H  = p.sub_h;
   SUB_DX = (16 / SUB_W) | 0;
   SUB_DY = (16 / SUB_H) | 0;
-  TILE_W_LIVE   = SUB_W + 1;
-  TILE_H_LIVE   = SUB_H;
-  OUTER_ROW_STEP = ((TILE_H_LIVE * ROW_STEP_X1000) / 1000) | 0;
-  OUTER_X_OFFSET = (TILE_W_LIVE / 2) | 0;
-  SUB_X0 = ((PANEL_W - (GRID_COLS * TILE_W_LIVE + OUTER_X_OFFSET)) / 2) | 0;
-  SUB_Y0 = ((PANEL_H - (GRID_ROWS * OUTER_ROW_STEP + (TILE_H_LIVE - OUTER_ROW_STEP))) / 2) | 0;
+  OUTER_X_OFFSET = (SUB_W / 2) | 0;
+  SUB_X0 = ((PANEL_W - (GRID_COLS * SUB_W + OUTER_X_OFFSET + 1)) / 2) | 0;
+  SUB_Y0 = ((PANEL_H - (GRID_ROWS * SUB_H)) / 2) | 0;
 
   // Canvas backing-buffer resolution + on-screen size.
   cv.width  = PANEL_W;
@@ -421,25 +419,20 @@ function renderLiveFull() {
 }
 
 function renderLive() {
+  // No gutter: tiles abut at stride SUB_W and the inner-stagger shift
+  // on odd rows lands 1 px past the nominal tile edge. That overflow
+  // pixel coincides with the next tile's odd-row buf_x=0 (which is
+  // its previous-tile-overflow position) — both write the same colour
+  // to the shared pixel, so order doesn't matter and there's no gap.
   for (let r = 0; r < GRID_ROWS; r++) {
     const outerXShift = (r & 1) ? OUTER_X_OFFSET : 0;
-    const ty = SUB_Y0 + r * OUTER_ROW_STEP;
+    const ty = SUB_Y0 + r * SUB_H;
     for (let c = 0; c < GRID_COLS; c++) {
       const cell = state.cells[r * GRID_COLS + c];
-      const tx = SUB_X0 + c * TILE_W_LIVE + outerXShift;
-      // Build the tile with inner hex stagger — odd sub-rows shifted
-      // +1 px (a 1-px black gutter on the un-shifted side of each row).
+      const tx = SUB_X0 + c * SUB_W + outerXShift;
       for (let sy = 0; sy < SUB_H; sy++) {
         const gy = Math.min(GRID_H - 1, sy * SUB_DY);
         const innerShift = sy & 1;
-        // Black-fill the gutter pixel first (column 0 on odd rows
-        // or column TILE_W-1 on even rows).
-        ctx.fillStyle = '#000';
-        if (innerShift) {
-          ctx.fillRect(tx, ty + sy, 1, 1);
-        } else {
-          ctx.fillRect(tx + SUB_W, ty + sy, 1, 1);
-        }
         for (let sx = 0; sx < SUB_W; sx++) {
           const gx = Math.min(GRID_W - 1, sx * SUB_DX);
           const v = cell.gridA[gy * GRID_W + gx] & 3;

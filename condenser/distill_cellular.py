@@ -892,58 +892,85 @@ static void render_pop_full() {{
 
 // Live render — paint every cell's grid_a as a SUB_W × SUB_H subsample
 // of its 16×16 internal CA, with hex stagger at TWO scales:
-//   1. Inside each tile, every odd inner sub-row is x-shifted +1 px
-//      (tile width = SUB_W + 1).
+//   1. Inside each tile, every odd inner sub-row is x-shifted +1 px.
 //   2. Across the population, every odd outer row is x-shifted by
-//      tile_w / 2; outer rows are also hex-y-packed at stride
-//      floor(tile_h × 0.866).
-// Same self-similar shape the JS bench at /s3lab/cellular/ has —
-// pointy-top hex topology at both scales.
+//      tile_w/2.
 //
-// Each tile is built in a (TILE_W × SUB_H) stack buffer with the
-// inner stagger baked in (a 1-px black gutter on the un-shifted
-// half of each row), then drawRGBBitmap-blits in one SPI burst.
+// PUZZLE-PIECE INTERLOCK: tiles abut at stride SUB_W (no gutter
+// between them). The drawn buffer is (SUB_W+1) wide so the
+// shifted half of odd rows can land 1 px past the nominal tile
+// edge. Adjacent tiles share that overlap column — we pre-fill it
+// with the neighbour's cell colour so both tiles write the same
+// value and the order of drawing doesn't matter:
 //
-// No diff cache: at SUB_W=6 (128×128 panel) we push ~7×6=42 px per
-// cell × 256 cells = ~10K pixels = ~21 KB SPI ≈ 6 ms at 27 MHz.
-// Comfortable inside TICK_MS.
-#define TILE_W      (SUB_W + 1)             /* one extra px for inner stagger */
+//   buf[even sy][SUB_W] = right neighbour's cell sx=0  (read-ahead)
+//   buf[odd  sy][0    ] = left  neighbour's cell sx=SUB_W-1 (read-back)
+//
+// Population edges (c=0 leftmost, c=GRID_COLS-1 rightmost) get
+// their corresponding overflow set to BLACK — the natural jagged
+// edge of a hex tessellation.
+
+#define TILE_W      (SUB_W + 1)             /* +1 holds the 1-px shift */
 #define TILE_H      SUB_H
-#define ROW_PACK_X1000  866                  /* outer hex y-pack: √3/2 × 1000 */
-#define OUTER_ROW_STEP  ((TILE_H * ROW_PACK_X1000) / 1000)
-#define OUTER_X_OFFSET  (TILE_W / 2)
+#define OUTER_X_OFFSET  (SUB_W / 2)
 
 static void render_pop_live() {{
-    const int total_w = GRID_COLS * TILE_W + OUTER_X_OFFSET;
-    const int total_h = GRID_ROWS * OUTER_ROW_STEP + (TILE_H - OUTER_ROW_STEP);
+    /* Total width = 16 tiles abutting at stride SUB_W, plus the
+     * outer x-shift on odd rows, plus the rightmost overflow column. */
+    const int total_w = GRID_COLS * SUB_W + OUTER_X_OFFSET + 1;
+    const int total_h = GRID_ROWS * SUB_H;
     const int x0 = (PANEL_W_PX - total_w) / 2;
     const int y0 = (PANEL_H_PX - total_h) / 2;
     uint16_t tile_buf[TILE_W * TILE_H];
     for (int r = 0; r < GRID_ROWS; r++) {{
         const int outer_x_shift = (r & 1) ? OUTER_X_OFFSET : 0;
+        const int ty = y0 + r * SUB_H;
         for (int c = 0; c < GRID_COLS; c++) {{
             const Cell &cell = pop[r * GRID_COLS + c];
-            // Build the tile with internal hex stagger: odd sub-rows
-            // shifted +1 px, leaving a 1-px black gutter on the
-            // unshifted side of each row.
+            const Cell *left  = (c > 0)              ? &pop[r * GRID_COLS + c - 1] : nullptr;
+            const Cell *right = (c < GRID_COLS - 1)  ? &pop[r * GRID_COLS + c + 1] : nullptr;
             for (int sy = 0; sy < SUB_H; sy++) {{
                 int gy = sy * SUB_DY;
                 if (gy >= CA_H) gy = CA_H - 1;
-                const int inner_shift = (sy & 1) ? 1 : 0;
-                for (int tx = 0; tx < TILE_W; tx++) {{
-                    int sx = tx - inner_shift;
-                    uint16_t color = 0;       /* black gutter */
-                    if (sx >= 0 && sx < SUB_W) {{
-                        int gx = sx * SUB_DX;
+                const int inner_shift = sy & 1;
+
+                /* Pre-fill the overlap column on the side that
+                 * doesn't carry our own cells (the other side is a
+                 * normal cell and overwrites this on the same loop). */
+                if (inner_shift) {{
+                    /* buf_x=0 belongs to the LEFT neighbour's odd-row
+                     * rightmost cell. */
+                    if (left) {{
+                        int gx = (SUB_W - 1) * SUB_DX;
                         if (gx >= CA_W) gx = CA_W - 1;
-                        uint8_t v = cell.grid_a[gy * CA_W + gx] % K;
-                        color = ansi256_to_rgb565(cell.palette[v]);
+                        uint8_t v = left->grid_a[gy * CA_W + gx] % K;
+                        tile_buf[sy * TILE_W + 0] = ansi256_to_rgb565(left->palette[v]);
+                    }} else {{
+                        tile_buf[sy * TILE_W + 0] = 0;   /* jagged edge */
                     }}
-                    tile_buf[sy * TILE_W + tx] = color;
+                }} else {{
+                    /* buf_x=SUB_W belongs to the RIGHT neighbour's
+                     * even-row leftmost cell. */
+                    if (right) {{
+                        uint8_t v = right->grid_a[gy * CA_W + 0] % K;
+                        tile_buf[sy * TILE_W + SUB_W] = ansi256_to_rgb565(right->palette[v]);
+                    }} else {{
+                        tile_buf[sy * TILE_W + SUB_W] = 0; /* jagged edge */
+                    }}
+                }}
+
+                /* Our own cells, with internal stagger. */
+                for (int sx = 0; sx < SUB_W; sx++) {{
+                    int gx = sx * SUB_DX;
+                    if (gx >= CA_W) gx = CA_W - 1;
+                    uint8_t v = cell.grid_a[gy * CA_W + gx] % K;
+                    tile_buf[sy * TILE_W + sx + inner_shift] =
+                        ansi256_to_rgb565(cell.palette[v]);
                 }}
             }}
-            tft.drawRGBBitmap(x0 + c * TILE_W + outer_x_shift,
-                              y0 + r * OUTER_ROW_STEP,
+            /* Tiles abut at stride SUB_W (NOT TILE_W) so adjacent
+             * tiles' overlap columns coincide on the shared pixel. */
+            tft.drawRGBBitmap(x0 + c * SUB_W + outer_x_shift, ty,
                               tile_buf, TILE_W, TILE_H);
         }}
     }}
