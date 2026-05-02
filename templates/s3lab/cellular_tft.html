@@ -326,6 +326,10 @@ function applyPanel(key) {
   cv.style.width  = (PANEL_W * p.zoom) + 'px';
   cv.style.height = (PANEL_H * p.zoom) + 'px';
   ctx.imageSmoothingEnabled = false;
+  // Drop the live-render buffer — it'll be rebuilt at the new size on
+  // the first renderLive call.
+  liveImageData = null;
+  livePixelBuf = null;
 
   // Device frame width = canvas + 16-px padding on each side (16 from
   // the .device class).
@@ -415,22 +419,47 @@ function neighbourIdx(i, dir) {
 
 let currentK = 4;
 let currentEngine = 'packed';   // 'packed' | 'nn'
-const NN_N_LOG2 = 11;            // 2048 prototypes
+// N=2^9 = 512 prototypes per genome at K>4. Was 2^11 (2048) but
+// per-cell step + score scales O(N/K) and 2048 made tickAll cost
+// ~250 ms at K=4 NN — locking up the UI. 512 keeps the same
+// memory footprint as the K=4 packed engine (4 KB per genome) and
+// puts step under 50 ms at every K. Bump back up if you find the
+// rule space too narrow.
+const NN_N_LOG2 = 9;
 const NN_N = 1 << NN_N_LOG2;
 
 function isPacked() { return currentEngine === 'packed'; }
 
 // — palette helpers (work for any K) —
 function inventPaletteK(K, rng) {
-  // Mirrors engine.invent_palette but generalised: pick K distinct
-  // ANSI indices, 90% from the 6×6×6 cube, 10% greys.
+  // Mirrors engine.invent_palette but generalised. For small K
+  // (≤32) probabilistic pick + dedupe is fast. For large K we'd
+  // hit the birthday wall (K=256 against a 240-colour cube means
+  // tens of thousands of rejections per palette), so we fall
+  // through to a Fisher-Yates shuffle of the full ANSI 16..255
+  // pool — guaranteed K distinct picks in 240 swaps.
   const out = new Uint8Array(K);
-  let n = 0, seen = new Set();
-  while (n < K) {
-    const c = ((rng() * 10) | 0) < 9
-      ? (16 + ((rng() * 216) | 0))
-      : (232 + ((rng() * 24) | 0));
-    if (!seen.has(c)) { seen.add(c); out[n++] = c; }
+  if (K <= 32) {
+    let n = 0;
+    const seen = new Set();
+    while (n < K) {
+      const c = ((rng() * 10) | 0) < 9
+        ? (16 + ((rng() * 216) | 0))
+        : (232 + ((rng() * 24) | 0));
+      if (!seen.has(c)) { seen.add(c); out[n++] = c; }
+    }
+    return out;
+  }
+  // Pool: ANSI 16..255 = 240 indices (cube + greys). For K=256 we
+  // wrap to 0..15 too. Plenty of headroom.
+  const pool = [];
+  for (let i = 16; i < 256; i++) pool.push(i);
+  if (K > pool.length) for (let i = 0; i < 16; i++) pool.push(i);
+  // Fisher-Yates first K positions.
+  for (let i = 0; i < K; i++) {
+    const j = i + ((rng() * (pool.length - i)) | 0);
+    const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
+    out[i] = pool[i];
   }
   return out;
 }
@@ -646,38 +675,73 @@ function renderLiveFull() {
   renderLive();
 }
 
+// ImageData buffer reused across frames. Allocated lazily; rebuilt
+// when the canvas size changes via applyPanel().
+let liveImageData = null;
+let livePixelBuf  = null;   // Uint32Array view onto liveImageData.data
+let livePackedRgba = null;  // Uint32Array, one packed RGBA per cell-value cache
+
+function ensureLiveBuffers() {
+  if (!liveImageData ||
+      liveImageData.width !== PANEL_W ||
+      liveImageData.height !== PANEL_H) {
+    liveImageData = ctx.createImageData(PANEL_W, PANEL_H);
+    livePixelBuf  = new Uint32Array(liveImageData.data.buffer);
+  }
+}
+
 function renderLive() {
-  // No gutter: tiles abut at stride SUB_W and the inner-stagger shift
-  // on odd rows lands 1 px past the nominal tile edge. That overflow
-  // pixel coincides with the next tile's odd-row buf_x=0 (which is
-  // its previous-tile-overflow position) — both write the same colour
-  // to the shared pixel, so order doesn't matter and there's no gap.
+  // ImageData approach: ~50× faster than 9k individual fillRect
+  // calls. Direct uint32 writes to an off-screen pixel buffer, one
+  // putImageData per frame. Cells overlap on the inner-stagger
+  // overflow column — both writes resolve to the same colour
+  // because we read from neighbours' palettes (same shared-pixel
+  // contract the firmware uses).
+  ensureLiveBuffers();
+  // Clear to opaque black (canvas2d uses pre-multiplied RGBA).
+  livePixelBuf.fill(0xFF000000);
+
   for (let r = 0; r < GRID_ROWS; r++) {
     const outerXShift = (r & 1) ? OUTER_X_OFFSET : 0;
     const ty = SUB_Y0 + r * SUB_H;
     for (let c = 0; c < GRID_COLS; c++) {
       const cell = state.cells[r * GRID_COLS + c];
       const tx = SUB_X0 + c * SUB_W + outerXShift;
+      // Per-cell uint32 RGBA cache, indexed by value 0..K-1.
+      // Recomputed only when palette changes (subPal stamp).
+      if (!cell.subPacked || cell.subPacked.length !== currentK) {
+        cell.subPacked = new Uint32Array(currentK);
+        cell.subPal = -1;
+      }
+      // Stamp = sum of palette bytes; cheap change detector.
+      let stamp = 0;
+      for (let k = 0; k < currentK; k++) stamp = (stamp * 31 + cell.palette[k]) | 0;
+      if (cell.subPal !== stamp) {
+        for (let k = 0; k < currentK; k++) {
+          const [rr, gg, bb] = ansi256_to_rgb(cell.palette[k]);
+          // Canvas ImageData is RGBA in memory (little-endian uint32).
+          cell.subPacked[k] = (0xFF << 24) | (bb << 16) | (gg << 8) | rr;
+        }
+        cell.subPal = stamp;
+      }
+      const subPacked = cell.subPacked;
       for (let sy = 0; sy < SUB_H; sy++) {
+        const yPos = ty + sy;
+        if (yPos < 0 || yPos >= PANEL_H) continue;
         const gy = Math.min(GRID_H - 1, sy * SUB_DY);
         const innerShift = sy & 1;
+        const rowBase = yPos * PANEL_W;
         for (let sx = 0; sx < SUB_W; sx++) {
+          const xPos = tx + sx + innerShift;
+          if (xPos < 0 || xPos >= PANEL_W) continue;
           const gx = Math.min(GRID_W - 1, sx * SUB_DX);
           const v = cell.gridA[gy * GRID_W + gx] % currentK;
-          const ansi = cell.palette[v];
-          if (!cell.subRgb) cell.subRgb = new Array(currentK);
-          if (cell.subRgb.length < currentK) cell.subRgb = new Array(currentK);
-          if (cell.subPal !== ansi || cell.subRgb[v] === undefined) {
-            const [rr, gg, bb] = ansi256_to_rgb(ansi);
-            cell.subRgb[v] = '#' + ((rr << 16) | (gg << 8) | bb).toString(16).padStart(6, '0');
-          }
-          ctx.fillStyle = cell.subRgb[v];
-          ctx.fillRect(tx + sx + innerShift, ty + sy, 1, 1);
+          livePixelBuf[rowBase + xPos] = subPacked[v];
         }
       }
-      cell.subPal = cell.palette[0];
     }
   }
+  ctx.putImageData(liveImageData, 0, 0);
 }
 
 function renderFull() {
