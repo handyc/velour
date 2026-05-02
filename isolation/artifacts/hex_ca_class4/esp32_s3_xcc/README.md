@@ -88,9 +88,16 @@ void render(char *prev, char *cur, char *rgb565);
 // levels[i]. Firmware does the digitalWrite; loaded code doesn't
 // need any external symbols.
 void gpio(char *grid, char *levels);
+
+// fitness: GA scoring during hunt phase. Higher = better.
+// Returns int because xcc700 has no float; the firmware divides
+// by 10000 to recover the original double-range score.
+int fitness(char *genome, int grid_seed);
 ```
 
 `POST /reset-slots` reverts everything to the baked-in defaults.
+`POST /rehunt` kicks off a fresh GA with the current `fitness` slot
+(blocks 10-30 s; updates `/winner.bin` + run loop).
 
 **Native ELF loader** (`load_elf_text` in `src/main.cpp`): walks the
 ELF section header table, finds `.text`, allocates IRAM via

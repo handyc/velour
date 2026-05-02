@@ -329,6 +329,50 @@ void gpio(char *grid, char *levels) {
 ''',
     },
     {
+        'slug': 'slot_fitness_density',
+        'name': 'Slot: fitness — reward 50/50 cell density',
+        'src': '''// Phase 4 FITNESS slot ABI:
+//     int fitness(char *genome, int grid_seed)
+// Higher = better. xcc700 has no float, so the score is an int;
+// the firmware divides by 10000 to scale to the GA's expected
+// dynamic range. A typical default returns 0..50000 (= 0.0..5.0
+// in the original double impl).
+//
+// This example rewards rules whose final grid has roughly equal
+// counts of all four colours — a "balanced" CA. It runs no
+// simulation; it just looks at the genome's lookup-table outputs
+// and counts how often each output appears. Diverse outputs
+// score higher; degenerate "always-output-0" rules score zero.
+
+int fitness(char *genome, int grid_seed) {
+    int counts0 = 0;
+    int counts1 = 0;
+    int counts2 = 0;
+    int counts3 = 0;
+    int idx = 0;
+    while (idx < 16384) {
+        int byte_i = idx / 4;
+        int bit_i  = (idx & 3) * 2;
+        int v = (genome[byte_i] >> bit_i) & 3;
+        if (v == 0) counts0 = counts0 + 1;
+        if (v == 1) counts1 = counts1 + 1;
+        if (v == 2) counts2 = counts2 + 1;
+        if (v == 3) counts3 = counts3 + 1;
+        idx = idx + 1;
+    }
+    // Score peaks when each count is ~4096 (16384/4). Distance from
+    // 4096 penalises imbalance; absolute value via if-else.
+    int d0 = counts0 - 4096; if (d0 < 0) d0 = 0 - d0;
+    int d1 = counts1 - 4096; if (d1 < 0) d1 = 0 - d1;
+    int d2 = counts2 - 4096; if (d2 < 0) d2 = 0 - d2;
+    int d3 = counts3 - 4096; if (d3 < 0) d3 = 0 - d3;
+    int total = d0 + d1 + d2 + d3;
+    // Max imbalance is 16384 (all one colour); zero is perfect.
+    return 50000 - (total * 3);
+}
+''',
+    },
+    {
         'slug': 'slot_step_genome',
         'name': 'Slot: step — re-implement the canonical hex CA',
         'src': '''// STEP slot, the real thing: re-implement the same hex

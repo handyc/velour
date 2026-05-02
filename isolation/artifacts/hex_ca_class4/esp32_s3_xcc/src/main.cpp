@@ -569,7 +569,11 @@ static void run_hunt(uint32_t grid_seed) {
     uint32_t t0 = millis();
 
     for (int gen = 0; gen < GENS; gen++) {
-        for (int i = 0; i < POP; i++) fit[i] = fitness(pool[i], grid_seed);
+        // Phase 4: hunt scoring goes through HOT.fitness — slot returns
+        // an int (0..N), firmware divides by 10000 to get the double the
+        // GA's sort + breed paths expect.
+        for (int i = 0; i < POP; i++)
+            fit[i] = HOT.fitness(pool[i], grid_seed) / 10000.0;
         sort_pop();
         double sum = 0;
         for (int i = 0; i < POP; i++) sum += fit[i];
@@ -588,7 +592,8 @@ static void run_hunt(uint32_t grid_seed) {
     }
 
     // Final scoring + sort
-    for (int i = 0; i < POP; i++) fit[i] = fitness(pool[i], grid_seed);
+    for (int i = 0; i < POP; i++)
+        fit[i] = HOT.fitness(pool[i], grid_seed) / 10000.0;
     sort_pop();
 
     uint32_t elapsed = millis() - t0;
@@ -636,13 +641,23 @@ typedef void (*step_fn_t)(const u8 *genome, const u8 *in, u8 *out);
 typedef void (*render_fn_t)(const u8 *prev, const u8 *cur, u8 *rgb565);
 typedef void (*gpio_fn_t)(const u8 *grid, u8 *levels);
 
+// Fitness slot ABI:
+//   int fitness(char *genome, int grid_seed)
+// Higher = better. xcc700 has no float, so the score is an int.
+// The firmware scales by 1/10000 internally so a slot returning
+// 0..10000 maps to roughly the same dynamic range as the default's
+// 0..5 double output. Slots may return any non-negative int.
+typedef int  (*fitness_fn_t)(const u8 *genome, uint32_t grid_seed);
+
 struct HotSlots {
-    step_fn_t   step;
-    render_fn_t render;
-    gpio_fn_t   gpio;
-    bool        step_default;
-    bool        render_default;
-    bool        gpio_default;
+    step_fn_t    step;
+    render_fn_t  render;
+    gpio_fn_t    gpio;
+    fitness_fn_t fitness;
+    bool         step_default;
+    bool         render_default;
+    bool         gpio_default;
+    bool         fitness_default;
 };
 
 // Pixel-blit sentinel. A render_pixels slot that writes 0xFFFF (low
@@ -673,13 +688,25 @@ static void gpio_levels_default(const u8 *grid, u8 *levels) {
     }
 }
 
+// Wraps the existing double-returning fitness() into the int-returning
+// slot ABI by scaling 1.0 -> 10000. Lets the slot stay xcc700-friendly
+// (no float type) while preserving the dynamic range the GA expects.
+static int fitness_default_int(const u8 *gnm, uint32_t grid_seed) {
+    double s = fitness(gnm, grid_seed);
+    if (s < 0.0) s = 0.0;
+    if (s > 1000000.0) s = 1000000.0;
+    return (int)(s * 10000.0);
+}
+
 struct HotSlots HOT = {
-    /* step           */ step_grid,
-    /* render         */ render_pixels_default,
-    /* gpio           */ gpio_levels_default,
-    /* step_default   */ true,
-    /* render_default */ true,
-    /* gpio_default   */ true,
+    /* step             */ step_grid,
+    /* render           */ render_pixels_default,
+    /* gpio             */ gpio_levels_default,
+    /* fitness          */ fitness_default_int,
+    /* step_default     */ true,
+    /* render_default   */ true,
+    /* gpio_default     */ true,
+    /* fitness_default  */ true,
 };
 
 // Per-tick output buffers — file-scope so setup() can use them too.
@@ -831,17 +858,21 @@ static void handle_root() {
         html += F("(none uploaded yet)");
     }
     html += F("</td></tr>");
-    html += "<tr><td>slot: step</td><td>"   + String(slot_state(HOT.step_default))   + "</td></tr>";
-    html += "<tr><td>slot: render</td><td>" + String(slot_state(HOT.render_default)) + "</td></tr>";
-    html += "<tr><td>slot: gpio</td><td>"   + String(slot_state(HOT.gpio_default))   + "</td></tr>";
+    html += "<tr><td>slot: step</td><td>"    + String(slot_state(HOT.step_default))    + "</td></tr>";
+    html += "<tr><td>slot: render</td><td>"  + String(slot_state(HOT.render_default))  + "</td></tr>";
+    html += "<tr><td>slot: gpio</td><td>"    + String(slot_state(HOT.gpio_default))    + "</td></tr>";
+    html += "<tr><td>slot: fitness</td><td>" + String(slot_state(HOT.fitness_default)) + "</td></tr>";
     html += F("</table>");
     html += F("<h2>endpoints</h2><ul>"
              "<li><code>GET /info</code> — JSON status (uptime, free heap, slots, last ELF)</li>"
              "<li><code>POST /wifi</code> — body <code>ssid=…&amp;password=…</code>; saves + reboots</li>"
              "<li><code>POST /load-elf</code> — raw ELF body, saved to <code>/loaded.elf</code></li>"
              "<li><code>POST /run-elf?slot=NAME</code> — load <code>/loaded.elf</code> into slot "
-                 "<code>step</code>, <code>render</code>, or <code>gpio</code>; takes effect next tick</li>"
+                 "<code>step</code>, <code>render</code>, <code>gpio</code>, or <code>fitness</code>; "
+                 "takes effect next tick (or next hunt for fitness)</li>"
              "<li><code>POST /reset-slots</code> — revert every slot to its baked-in default</li>"
+             "<li><code>POST /rehunt</code> — kick off a fresh GA hunt with the current "
+                 "<code>fitness</code> slot; blocks 10-30 s, updates <code>/winner.bin</code></li>"
              "</ul></body></html>");
     server.send(200, "text/html", html);
 }
@@ -866,9 +897,10 @@ static void handle_info() {
         json += "null";
     }
     json += ",\"slots\":{";
-    json += "\"step\":\""   + String(slot_state(HOT.step_default))   + "\",";
-    json += "\"render\":\"" + String(slot_state(HOT.render_default)) + "\",";
-    json += "\"gpio\":\""   + String(slot_state(HOT.gpio_default))   + "\"}";
+    json += "\"step\":\""    + String(slot_state(HOT.step_default))    + "\",";
+    json += "\"render\":\""  + String(slot_state(HOT.render_default))  + "\",";
+    json += "\"gpio\":\""    + String(slot_state(HOT.gpio_default))    + "\",";
+    json += "\"fitness\":\"" + String(slot_state(HOT.fitness_default)) + "\"}";
     json += "}";
     server.send(200, "application/json", json);
 }
@@ -1120,10 +1152,13 @@ static LoadedElf loaded_render  = {nullptr, 0, 0};
 static LoadedElf loaded_gpio    = {nullptr, 0, 0};
 
 
+static LoadedElf loaded_fitness = {nullptr, 0, 0};
+
 static void revert_slot(const String &name) {
-    if (name == "step")   { HOT.step   = step_grid;              HOT.step_default   = true; free_loaded_elf(loaded_step); }
-    if (name == "render") { HOT.render = render_pixels_default;  HOT.render_default = true; free_loaded_elf(loaded_render); }
-    if (name == "gpio")   { HOT.gpio   = gpio_levels_default;    HOT.gpio_default   = true; free_loaded_elf(loaded_gpio); }
+    if (name == "step")    { HOT.step    = step_grid;              HOT.step_default    = true; free_loaded_elf(loaded_step); }
+    if (name == "render")  { HOT.render  = render_pixels_default;  HOT.render_default  = true; free_loaded_elf(loaded_render); }
+    if (name == "gpio")    { HOT.gpio    = gpio_levels_default;    HOT.gpio_default    = true; free_loaded_elf(loaded_gpio); }
+    if (name == "fitness") { HOT.fitness = fitness_default_int;    HOT.fitness_default = true; free_loaded_elf(loaded_fitness); }
 }
 
 
@@ -1131,6 +1166,7 @@ static void revert_all_slots() {
     revert_slot("step");
     revert_slot("render");
     revert_slot("gpio");
+    revert_slot("fitness");
 }
 
 
@@ -1158,9 +1194,10 @@ static void handle_run_elf() {
     }
     String slot = server.arg("slot");
     if (slot.length() == 0) slot = "step";
-    if (slot != "step" && slot != "render" && slot != "gpio") {
+    if (slot != "step" && slot != "render" &&
+        slot != "gpio" && slot != "fitness") {
         server.send(400, "text/plain",
-                    "slot must be one of: step, render, gpio\n");
+                    "slot must be one of: step, render, gpio, fitness\n");
         return;
     }
 
@@ -1209,6 +1246,11 @@ static void handle_run_elf() {
         loaded_gpio = le;
         HOT.gpio = (gpio_fn_t)le.exec;
         HOT.gpio_default = false;
+    } else if (slot == "fitness") {
+        free_loaded_elf(loaded_fitness);
+        loaded_fitness = le;
+        HOT.fitness = (fitness_fn_t)le.exec;
+        HOT.fitness_default = false;
     }
 
     String out;
@@ -1229,6 +1271,40 @@ static void handle_reset_slots() {
     revert_all_slots();
     server.send(200, "text/plain", "all slots reverted to defaults\n");
     Serial.println("[reset-slots] all slots reverted to defaults");
+}
+
+
+// POST /rehunt — kick off a fresh GA hunt with the current HOT.fitness.
+//
+// Blocks the HTTP handler (and the run loop) for the duration of the
+// hunt — typically 10-30 seconds. Returns once /winner.bin is written.
+// The board's TFT shows the hunt status while it runs, same as boot.
+//
+// CAVEAT: if a custom fitness slot panics, the chip TWDT-resets and
+// the hunt is lost. /reset-slots before /rehunt if you're unsure
+// about your loaded fitness.
+static void handle_rehunt() {
+    server.sendHeader("Connection", "close");
+    server.send(200, "text/plain",
+                "starting fresh hunt; the device will be unresponsive\n"
+                "for ~10-30 seconds. /winner.bin will be updated.\n");
+    server.client().stop();   // flush before the long-running call
+
+    Serial.println("[rehunt] starting fresh GA hunt");
+    uint32_t grid_seed = prng();
+    run_hunt(grid_seed);
+
+    rebuild_palette_rgb();
+
+    // Re-seed the run grid + render the new initial frame so the
+    // run loop picks up the freshly-bred genome cleanly.
+    uint32_t run_seed = esp_random();
+    seed_grid(grid_a, run_seed);
+    HOT.render(nullptr, grid_a, hot_rgb_buf);
+    blit_pixels_to_tft(hot_rgb_buf);
+    HOT.gpio(grid_a, hot_levels_buf);
+    apply_levels_to_pins(hot_levels_buf);
+    Serial.println("[rehunt] complete; run loop resumes next tick");
 }
 
 
@@ -1253,6 +1329,7 @@ static void comms_setup() {
     server.on("/load-elf",    HTTP_POST, handle_load_elf);
     server.on("/run-elf",     HTTP_POST, handle_run_elf);
     server.on("/reset-slots", HTTP_POST, handle_reset_slots);
+    server.on("/rehunt",      HTTP_POST, handle_rehunt);
     server.onNotFound(handle_not_found);
     server.begin();
     Serial.printf("HTTP: server up on :%d\n", HTTP_PORT);
