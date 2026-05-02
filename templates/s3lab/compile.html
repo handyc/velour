@@ -63,8 +63,17 @@
         <span style="color:#30363d;">|</span>
         <input type="text" id="device-url" value="http://hexca.local" size="22"
                title="Device base URL (e.g. http://hexca.local or http://192.168.1.42)">
+        <select id="slot" title="Optionally install the ELF as this slot after upload"
+                style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                       padding:0.3rem 0.4rem; border-radius:4px; font-family:inherit; font-size:0.8rem;">
+          <option value="">no slot (just upload)</option>
+          <option value="step">slot: step</option>
+          <option value="render">slot: render</option>
+          <option value="gpio">slot: gpio</option>
+          <option value="fitness">slot: fitness</option>
+        </select>
         <button type="button" id="push-btn"
-                title="Compile and POST the ELF to <device>/load-elf via Velour proxy.">Compile + push</button>
+                title="Compile, POST the ELF to <device>/load-elf, and (if a slot is chosen) /run-elf to install it.">Compile + push</button>
         <span id="status" style="color:#8b949e; font-size:0.78rem;"></span>
       </div>
       <h3 style="margin-top:1rem; color:#8b949e; font-size:0.85rem;
@@ -211,13 +220,17 @@
 
   pushBtn.addEventListener('click', async () => {
     pushBtn.disabled = true; btn.disabled = true;
+    const slotEl = document.getElementById('slot');
+    const slot = slotEl.value;
     status.textContent = 'compiling + pushing…';
     buildLog.className = 'build-log';
-    buildLog.textContent = '(running xcc700, then POST → ' + deviceUrl.value + '/load-elf)';
+    buildLog.textContent = '(running xcc700; POST → ' + deviceUrl.value + '/load-elf' +
+      (slot ? '; then /run-elf?slot=' + slot : '') + ')';
 
     const fd = new FormData();
     fd.append('source', csource.value);
     fd.append('device_url', deviceUrl.value || 'http://hexca.local');
+    if (slot) fd.append('slot', slot);
 
     let resp, data;
     try {
@@ -251,16 +264,33 @@
     const p = data.push || {};
     if (p && p.ok) {
       lines.push(`push:    ${p.target} → ${p.status} (${p.elapsed_ms} ms)`);
-      lines.push('');
-      lines.push(p.body);
-      buildLog.className = 'build-log ok';
-      status.textContent = 'pushed to device.';
+      if (p.body) { lines.push(''); lines.push(p.body); }
     } else {
       lines.push(`push FAILED: ${p ? p.target : '(no target)'} → ${p ? p.status : '?'}`);
-      lines.push('');
-      lines.push(p ? p.body : '(no response body)');
+      if (p && p.body) { lines.push(''); lines.push(p.body); }
       buildLog.className = 'build-log err';
       status.textContent = 'compile OK; push failed.';
+      buildLog.textContent = lines.join('\n');
+      pushBtn.disabled = false; btn.disabled = false;
+      return;
+    }
+
+    const r = data.run;
+    if (r) {
+      lines.push('');
+      if (r.ok) {
+        lines.push(`run-elf: slot=${r.slot} → ${r.status} (${r.elapsed_ms} ms)`);
+      } else {
+        lines.push(`run-elf FAILED: slot=${r.slot} → ${r.status} (${r.elapsed_ms} ms)`);
+      }
+      if (r.body) { lines.push(''); lines.push(r.body); }
+    }
+
+    buildLog.className = data.ok ? 'build-log ok' : 'build-log err';
+    if (data.ok) {
+      status.textContent = slot ? `installed as slot ${slot}.` : 'pushed to device.';
+    } else {
+      status.textContent = 'compile + push OK; slot install failed.';
     }
     buildLog.textContent = lines.join('\n');
     pushBtn.disabled = false; btn.disabled = false;

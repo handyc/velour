@@ -159,16 +159,18 @@ def compile_run(request):
 @require_POST
 def compile_push(request):
     """Compile + push the resulting ELF to a hexca device on the LAN.
-
-    Server-side proxy avoids the browser's cross-origin block on
-    fetching from hexca.local while running on the Velour origin.
+    Optionally chain a /run-elf?slot=NAME to install it as a slot
+    on the next CA tick.
 
     POST args:
       source       — C source (same as compile_run)
       device_url   — base URL of the device (default http://hexca.local)
+      slot         — optional: step | render | gpio | fitness. If set,
+                     after a successful /load-elf the proxy also POSTs
+                     /run-elf?slot=<slot>.
 
-    Returns JSON {ok, compile, push} where ``compile`` mirrors
-    compile_run's payload and ``push`` is {ok, status, body, elapsed_ms}.
+    Returns JSON {ok, compile, push, run} — ``run`` is null if no
+    slot was requested or if push failed.
     """
     import time
     import urllib.error
@@ -177,6 +179,10 @@ def compile_push(request):
     source = request.POST.get('source', '')
     device_url = (request.POST.get('device_url') or
                   'http://hexca.local').rstrip('/')
+    slot = (request.POST.get('slot') or '').strip()
+    if slot and slot not in ('step', 'render', 'gpio', 'fitness'):
+        return JsonResponse({'ok': False,
+            'error': 'slot must be empty, step, render, gpio, or fitness'})
 
     result = compile_c(source)
     compile_payload = {
@@ -191,11 +197,12 @@ def compile_push(request):
             'ok': False,
             'compile': compile_payload,
             'push': None,
+            'run': None,
         })
 
-    target = f'{device_url}/load-elf'
+    push_target = f'{device_url}/load-elf'
     req = urllib.request.Request(
-        target, data=result.elf, method='POST',
+        push_target, data=result.elf, method='POST',
         headers={'Content-Type': 'application/octet-stream'},
     )
     push_t0 = time.monotonic()
@@ -213,15 +220,164 @@ def compile_push(request):
         status = 0
         push_ok = False
     push_elapsed_ms = int((time.monotonic() - push_t0) * 1000)
+    push_payload = {
+        'ok': push_ok, 'target': push_target, 'status': status,
+        'body': body, 'elapsed_ms': push_elapsed_ms,
+    }
+
+    run_payload = None
+    if push_ok and slot:
+        run_target = f'{device_url}/run-elf'
+        run_req = urllib.request.Request(
+            run_target, data=f'slot={slot}'.encode(), method='POST',
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        run_t0 = time.monotonic()
+        try:
+            with urllib.request.urlopen(run_req, timeout=8.0) as resp:
+                rbody = resp.read(2048).decode('utf-8', errors='replace')
+                rstatus = resp.status
+                run_ok = 200 <= rstatus < 300
+        except urllib.error.HTTPError as e:
+            rbody = e.read(2048).decode('utf-8', errors='replace')
+            rstatus = e.code
+            run_ok = False
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            rbody = f'{type(e).__name__}: {e}'
+            rstatus = 0
+            run_ok = False
+        run_payload = {
+            'ok': run_ok, 'slot': slot, 'target': run_target,
+            'status': rstatus, 'body': rbody,
+            'elapsed_ms': int((time.monotonic() - run_t0) * 1000),
+        }
+
+    overall_ok = push_ok and (run_payload is None or run_payload['ok'])
+    return JsonResponse({
+        'ok': overall_ok,
+        'compile': compile_payload,
+        'push': push_payload,
+        'run': run_payload,
+    })
+
+
+# ── Phase 5: device dashboard + proxied actions ───────────────────────
+
+@ensure_csrf_cookie
+@login_required
+def device_page(request):
+    """Live status page for the supermini fork. Polls /info on the
+    device every couple of seconds via the Velour-side proxy below
+    (so the browser doesn't have to talk to hexca.local directly +
+    avoids CORS)."""
+    return render(request, 's3lab/device.html', {})
+
+
+def _device_url(request) -> str:
+    raw = (request.POST.get('device_url') or
+           request.GET.get('device_url') or
+           'http://hexca.local').rstrip('/')
+    return raw
+
+
+@login_required
+def device_info(request):
+    """GET-only proxy for hexca.local/info. Returns the device's JSON
+    verbatim, or a structured error if the device is unreachable."""
+    import time
+    import urllib.error
+    import urllib.request
+
+    target = f'{_device_url(request)}/info'
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(target, timeout=4.0) as resp:
+            body = resp.read(8192).decode('utf-8', errors='replace')
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        return JsonResponse({
+            'ok': False, 'target': target, 'status': e.code,
+            'body': e.read(2048).decode('utf-8', errors='replace'),
+            'elapsed_ms': int((time.monotonic() - t0) * 1000),
+        })
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return JsonResponse({
+            'ok': False, 'target': target, 'status': 0,
+            'body': f'{type(e).__name__}: {e}',
+            'elapsed_ms': int((time.monotonic() - t0) * 1000),
+        })
+
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    try:
+        import json as _json
+        info = _json.loads(body)
+    except Exception:
+        info = None
+    return JsonResponse({
+        'ok': 200 <= status < 300,
+        'target': target,
+        'status': status,
+        'info': info,
+        'body': body if info is None else '',
+        'elapsed_ms': elapsed_ms,
+    })
+
+
+@login_required
+@require_POST
+def device_action(request):
+    """Server-side proxy for the device's POST endpoints.
+
+    POST args:
+      device_url  — base URL (default http://hexca.local)
+      action      — one of: reset-slots, rehunt, run-elf
+      slot        — only used when action=run-elf
+
+    Returns JSON {ok, target, status, body, elapsed_ms}.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    action = (request.POST.get('action') or '').strip()
+    if action not in ('reset-slots', 'rehunt', 'run-elf'):
+        return JsonResponse({'ok': False, 'error':
+            'action must be reset-slots, rehunt, or run-elf'})
+
+    target = f'{_device_url(request)}/{action}'
+    body_data = b''
+    if action == 'run-elf':
+        slot = (request.POST.get('slot') or 'step').strip()
+        if slot not in ('step', 'render', 'gpio', 'fitness'):
+            return JsonResponse({'ok': False, 'error':
+                'slot must be step, render, gpio, or fitness'})
+        body_data = f'slot={slot}'.encode()
+        target = f'{_device_url(request)}/run-elf'
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    else:
+        headers = {}
+
+    req = urllib.request.Request(target, data=body_data, method='POST',
+                                 headers=headers)
+    # /rehunt blocks 10-30 s; give it a generous timeout.
+    timeout_s = 60.0 if action == 'rehunt' else 10.0
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            body = resp.read(4096).decode('utf-8', errors='replace')
+            status = resp.status
+            ok = 200 <= status < 300
+    except urllib.error.HTTPError as e:
+        body = e.read(4096).decode('utf-8', errors='replace')
+        status = e.code
+        ok = False
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        body = f'{type(e).__name__}: {e}'
+        status = 0
+        ok = False
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
 
     return JsonResponse({
-        'ok': push_ok,
-        'compile': compile_payload,
-        'push': {
-            'ok': push_ok,
-            'target': target,
-            'status': status,
-            'body': body,
-            'elapsed_ms': push_elapsed_ms,
-        },
+        'ok': ok, 'target': target, 'status': status,
+        'body': body, 'elapsed_ms': elapsed_ms,
     })

@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}S3 Lab — Device{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<style>
+  .device-page { max-width: 900px; margin: 1rem auto; padding: 0 1rem;
+                 color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }
+  .device-page h1 { margin-top: 0.4rem; }
+  .device-controls { display: flex; gap: 0.5rem; align-items: center;
+                     margin: 0.6rem 0; flex-wrap: wrap; }
+  .device-controls input { background: #0d1117; color: #e1e4e8;
+                     border: 1px solid #30363d; padding: 0.35rem 0.55rem;
+                     border-radius: 4px; font-family: inherit; font-size: 0.85rem; }
+  .device-controls button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+                     padding: 0.35rem 0.9rem; border-radius: 4px; cursor: pointer;
+                     font-family: inherit; font-size: 0.85rem; }
+  .device-controls button.primary { background: #1f6feb; color: white; border: none; }
+  .device-controls button.danger  { color: #f85149; }
+  .device-controls button:disabled { opacity: 0.5; cursor: wait; }
+
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+           padding: 0.7rem 0.9rem; margin: 0.6rem 0; }
+  .panel h3 { margin: 0 0 0.4rem 0; font-size: 0.78rem; color: #8b949e;
+              font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.kv { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.kv td { padding: 0.25rem 0.4rem; border-bottom: 1px solid #21262d; }
+  table.kv td:first-child { color: #8b949e; width: 32%; }
+  .slot-state { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
+                font-size: 0.78rem; }
+  .slot-state.default { background: #1f3a52; color: #79c0ff; }
+  .slot-state.loaded  { background: #432817; color: #f0883e; }
+  .err { color: #f85149; }
+  .ok  { color: #3fb950; }
+  .log { background: #0d1117; border-radius: 4px; padding: 0.5rem;
+         font-size: 0.78rem; color: #8b949e; white-space: pre-wrap;
+         max-height: 220px; overflow: auto; }
+  .log .line.ok  { color: #3fb950; }
+  .log .line.err { color: #f85149; }
+  .log .line.dim { color: #6e7681; }
+  .lede { color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="device-page">
+  <p style="font-size:0.78rem;"><a href="{% url 's3lab:index' %}" style="color:#58a6ff;">← S3 Lab</a></p>
+  <h1>S3 Lab — Device</h1>
+  <p class="lede">Live status of an <code>esp32_s3_xcc</code> supermini on the LAN.
+    Polls <code>/info</code> every 2 s; buttons proxy through Velour to avoid CORS.</p>
+
+  <div class="device-controls">
+    <label>device URL
+      <input id="device-url" type="text" value="http://hexca.local" size="22">
+    </label>
+    <button type="button" id="poll-btn" class="primary">Poll now</button>
+    <label style="font-size:0.78rem; color:#8b949e;">
+      <input type="checkbox" id="auto-poll" checked> auto-poll
+    </label>
+    <span id="status" style="font-size:0.78rem; color:#8b949e;"></span>
+  </div>
+
+  <div class="panel">
+    <h3>Status</h3>
+    <table class="kv" id="kv">
+      <tr><td>device</td><td><span id="kv-target">—</span></td></tr>
+      <tr><td>uptime</td><td><span id="kv-uptime">—</span></td></tr>
+      <tr><td>free heap</td><td><span id="kv-heap">—</span></td></tr>
+      <tr><td>WiFi</td><td><span id="kv-wifi">—</span></td></tr>
+      <tr><td>last ELF</td><td><span id="kv-lastelf">—</span></td></tr>
+      <tr><td>slots</td><td><span id="kv-slots">—</span></td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Actions (proxied)</h3>
+    <div class="device-controls">
+      <button type="button" data-action="rehunt" class="primary">Rehunt</button>
+      <button type="button" data-action="reset-slots" class="danger">Reset slots</button>
+      <span style="color:#6e7681; font-size:0.75rem;">
+        rehunt blocks 10-30 s while the GA runs.
+      </span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Activity log</h3>
+    <pre id="log" class="log"></pre>
+  </div>
+</div>
+
+<script>
+  const deviceUrl = document.getElementById('device-url');
+  const pollBtn   = document.getElementById('poll-btn');
+  const autoPoll  = document.getElementById('auto-poll');
+  const status    = document.getElementById('status');
+  const log       = document.getElementById('log');
+
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  function logLine(msg, kind) {
+    const t = new Date().toTimeString().slice(0, 8);
+    const div = document.createElement('div');
+    div.className = 'line ' + (kind || 'dim');
+    div.textContent = `[${t}] ${msg}`;
+    log.prepend(div);
+    while (log.childNodes.length > 60) log.removeChild(log.lastChild);
+  }
+
+  function fmtBytes(n) {
+    if (!n && n !== 0) return '—';
+    if (n > 1024) return (n / 1024).toFixed(1) + ' KiB';
+    return n + ' B';
+  }
+  function fmtUptime(s) {
+    if (!s && s !== 0) return '—';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h ? `${h}h ${m}m ${sec}s` : (m ? `${m}m ${sec}s` : `${sec}s`);
+  }
+
+  function renderInfo(info, target) {
+    document.getElementById('kv-target').textContent = target;
+    if (!info) {
+      ['kv-uptime','kv-heap','kv-wifi','kv-lastelf','kv-slots'].forEach(id => {
+        document.getElementById(id).textContent = '—';
+      });
+      return;
+    }
+    document.getElementById('kv-uptime').textContent = fmtUptime(info.uptime_s);
+    document.getElementById('kv-heap').textContent = fmtBytes(info.free_heap);
+    document.getElementById('kv-wifi').textContent =
+      `${info.wifi_mode} · ${info.ssid || '—'} · ${info.ip || '—'}`;
+    if (info.last_elf) {
+      document.getElementById('kv-lastelf').textContent =
+        `${info.last_elf.bytes} B · entry=0x${(info.last_elf.entry || 0).toString(16)} · ` +
+        `recv +${(info.last_elf.recv_at_ms / 1000).toFixed(1)}s`;
+    } else {
+      document.getElementById('kv-lastelf').textContent = '(none uploaded)';
+    }
+    const slots = info.slots || {};
+    const html = ['step','render','gpio','fitness'].map(s => {
+      const v = slots[s] || 'default';
+      return `<span style="margin-right:0.6rem;">${s} <span class="slot-state ${v}">${v}</span></span>`;
+    }).join('');
+    document.getElementById('kv-slots').innerHTML = html;
+  }
+
+  async function poll() {
+    const url = deviceUrl.value || 'http://hexca.local';
+    status.textContent = 'polling…';
+    try {
+      const fd = new URLSearchParams({device_url: url});
+      const resp = await fetch('{% url "s3lab:device_info" %}?' + fd.toString());
+      const data = await resp.json();
+      if (!data.ok) {
+        status.innerHTML = '<span class="err">unreachable</span>';
+        renderInfo(null, data.target);
+        logLine(`/info ${data.status}: ${data.body}`, 'err');
+        return;
+      }
+      renderInfo(data.info, data.target);
+      status.innerHTML = `<span class="ok">OK · ${data.elapsed_ms} ms</span>`;
+    } catch (e) {
+      status.innerHTML = '<span class="err">' + e + '</span>';
+      logLine('poll error: ' + e, 'err');
+    }
+  }
+
+  async function action(name) {
+    const url = deviceUrl.value || 'http://hexca.local';
+    logLine(`POST /${name} …`, 'dim');
+    const fd = new FormData();
+    fd.append('device_url', url);
+    fd.append('action', name);
+    let data;
+    try {
+      const resp = await fetch('{% url "s3lab:device_action" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken() },
+        body: fd,
+      });
+      data = await resp.json();
+    } catch (e) {
+      logLine(`/${name} network error: ${e}`, 'err');
+      return;
+    }
+    const status_class = data.ok ? 'ok' : 'err';
+    logLine(`/${name} → ${data.status} (${data.elapsed_ms} ms): ${data.body}`,
+            status_class);
+    poll();
+  }
+
+  pollBtn.addEventListener('click', poll);
+  document.querySelectorAll('[data-action]').forEach(b => {
+    b.addEventListener('click', e => {
+      const name = b.dataset.action;
+      b.disabled = true;
+      action(name).finally(() => { b.disabled = false; });
+    });
+  });
+
+  let timer = null;
+  function startTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(() => { if (autoPoll.checked) poll(); }, 2000);
+  }
+  autoPoll.addEventListener('change', () => {
+    if (autoPoll.checked) { startTimer(); } else { if (timer) clearInterval(timer); }
+  });
+  startTimer();
+  poll();
+</script>
+{% endblock %}
