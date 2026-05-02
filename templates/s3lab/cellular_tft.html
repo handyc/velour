@@ -2,7 +2,7 @@
 {% load static %}
 {% load assets %}
 
-{% block title %}S3 Lab — Cellular TFT 80×160 emulator{% endblock %}
+{% block title %}S3 Lab — Cellular TFT emulator{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -66,19 +66,21 @@
 {% block content %}
 <div class="tft-page">
   <p style="font-size:0.78rem;"><a href="{% url 's3lab:sublab' slug='cellular' %}" style="color:#58a6ff;">← Cellular sublab</a></p>
-  <h1>Cellular — TFT 80×160 emulator</h1>
-  <p class="lede">Pixel-faithful preview of what the
-    <code>isolation/artifacts/cellular/esp32_s3/</code> firmware paints
-    to its ST7735S 80×160 panel after <code>setRotation(3)</code>
-    (effective 160×80). Same K=4 hex CA engine
+  <h1>Cellular — TFT emulator</h1>
+  <p class="lede">Pixel-faithful preview of what the cellular
+    firmware paints on its ST7735 panel. Two panels supported
+    (<code>isolation/artifacts/cellular/esp32_s3/</code> for 80×160,
+    <code>esp32_s3_128/</code> for 128×128) — flip with the panel
+    selector below. Same K=4 hex CA engine
     (<code>{% static 's3lab/js/engine.mjs' %}</code>),
-    same population GA, same 5×5 hex-offset tile render — one
-    coloured tile per population cell, dominant palette colour. The
-    canvas is 156×78 native pixels, displayed at 4× zoom so each
-    device pixel is a visible 4×4 block.</p>
+    same population GA, same hex-offset tile render. Two render
+    modes: <em>dominant</em> (one colour per population cell) or
+    <em>live</em> (every cell shows a subsampled view of its 16×16
+    internal CA). The canvas is shown at 4× zoom so every device
+    pixel is a visible 4×4 block.</p>
 
   <div class="device" id="device-frame">
-    <div class="label" id="device-label">ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)</div>
+    <div class="label" id="device-label">ESP32-S3 SUPERMINI · ST7735 1.44″ 128×128</div>
     <canvas id="tft-emu"
             aria-label="ST7735 panel preview"></canvas>
   </div>
@@ -112,8 +114,8 @@
     <div class="controls" style="margin-top:0.4rem;">
       <span style="color:#8b949e;font-size:0.8rem;">panel</span>
       <div class="rot-group" id="panel-group" title="Switch the emulator (and pick which firmware variant you'd flash).">
-        <button data-panel="80x160" class="active">80×160 (rot 3)</button>
-        <button data-panel="128x128">128×128 (1.44″)</button>
+        <button data-panel="80x160">80×160 (rot 3)</button>
+        <button data-panel="128x128" class="active">128×128 (1.44″)</button>
       </div>
       <span style="color:#8b949e;font-size:0.8rem; margin-left:0.6rem;">rotation</span>
       <div class="rot-group" id="rot-group">
@@ -199,7 +201,7 @@ const PANEL_PRESETS = {
 
 // Mutable layout — applyPanel() rewrites these whenever the user
 // flips the panel selector. The render loop reads them every frame.
-let PANEL_KEY  = '80x160';
+let PANEL_KEY  = '128x128';
 let PANEL_W    = PANEL_PRESETS[PANEL_KEY].panel_w;
 let PANEL_H    = PANEL_PRESETS[PANEL_KEY].panel_h;
 let TILE_PX    = PANEL_PRESETS[PANEL_KEY].tile_px;
@@ -233,7 +235,7 @@ const deviceLabel = document.getElementById('device-label');
 // canvas + device frame, and triggers a full repaint. Persists to
 // localStorage so a refresh keeps your panel choice.
 function applyPanel(key) {
-  if (!PANEL_PRESETS[key]) key = '80x160';
+  if (!PANEL_PRESETS[key]) key = '128x128';
   PANEL_KEY = key;
   const p = PANEL_PRESETS[key];
   PANEL_W = p.panel_w; PANEL_H = p.panel_h;
@@ -612,9 +614,9 @@ renderGroup.querySelectorAll('button').forEach(b => {
 // Restore persisted panel + rotation, in that order — applyPanel
 // resets layout and triggers a full repaint, so rotation must be
 // re-applied afterwards.
-let savedPanel = '80x160';
-try { savedPanel = localStorage.getItem('cellular-tft-panel') ?? '80x160'; } catch (e) {}
-if (!PANEL_PRESETS[savedPanel]) savedPanel = '80x160';
+let savedPanel = '128x128';
+try { savedPanel = localStorage.getItem('cellular-tft-panel') ?? '128x128'; } catch (e) {}
+if (!PANEL_PRESETS[savedPanel]) savedPanel = '128x128';
 applyPanel(savedPanel);
 setPanelButtonState(savedPanel);
 
