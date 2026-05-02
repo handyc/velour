@@ -554,7 +554,9 @@ static void handle_root() {
             " · " + wifi_ssid_str + " · " + wifi_ip_str + "</td></tr>";
     html += "<tr><td>rounds</td><td>" + String(g_rounds) + "</td></tr>";
     html += "<tr><td>state</td><td>" + String(g_paused ? "PAUSED" : "running") + "</td></tr>";
-    html += "<tr><td>render mode</td><td>" + String(g_render_live ? "live (8×8 sub-CA)" : "dominant") + "</td></tr>";
+    html += "<tr><td>render mode</td><td>" + String(g_render_live ? "live (sub-CA)" : "dominant") + "</td></tr>";
+    html += "<tr><td>auto refine</td><td>" + String(g_auto_refine ? "ON" : "off") +
+            String(g_auto_refine ? (" (every " + String(g_auto_delay_ms / 1000) + " s)") : "") + "</td></tr>";
     html += "<tr><td>last winner</td><td>" + String(last_winner) + "</td></tr>";
     html += "<tr><td>last loser</td><td>" + String(last_loser) + "</td></tr>";
     html += F("</table>");
@@ -563,8 +565,16 @@ static void handle_root() {
               "<li><code>POST /wifi</code> — body <code>ssid=…&amp;password=…</code></li>"
               "<li><code>POST /reset</code> — bootstrap a fresh population</li>"
               "<li><code>POST /pause</code>, <code>POST /resume</code></li>"
-              "<li><code>POST /render-mode</code> — body <code>mode=dominant</code> "
-                  "or <code>mode=live</code> (live = subsampled CA per cell)</li>"
+              "<li><code>POST /render-mode</code> — body <code>mode=dominant|live</code></li>"
+              "<li><code>POST /hunt</code> — score, sort, refresh bottom 128 cells</li>"
+              "<li><code>POST /refine</code> — clone elite into 255 mutants</li>"
+              "<li><code>POST /auto</code> — body <code>mode=on|off&amp;delay=N</code> "
+                  "(N seconds, 1..60; on triggers Hunt then loops Refine)</li>"
+              "<li><code>POST /palette-reroll</code> — invent_palette() per cell</li>"
+              "<li><code>POST /palettes</code> — raw 1024-byte ANSI body, one 4-byte "
+                  "palette per cell in row-major order (image-derived from browser)</li>"
+              "<li><code>GET /agent?r=R&amp;c=C</code> — download an agent's HXC4 "
+                  "genome.bin (4104 B), round-trips into s3lab/automaton/taxon</li>"
               "</ul></body></html>");
     server.send(200, "text/html", html);
 }
@@ -584,7 +594,9 @@ static void handle_info() {
     j += ",\"last_loser\":" + String(last_loser);
     j += ",\"grid_cols\":" + String(GRID_COLS);
     j += ",\"grid_rows\":" + String(GRID_ROWS);
-    j += ",\"render_mode\":\"" + String(g_render_live ? "live" : "dominant") + "\"" + "}";
+    j += ",\"render_mode\":\"" + String(g_render_live ? "live" : "dominant") + "\"";
+    j += ",\"auto_refine\":" + String(g_auto_refine ? "true" : "false");
+    j += ",\"auto_delay_ms\":" + String(g_auto_delay_ms) + "}";
     server.send(200, "application/json", j);
 }
 
@@ -612,6 +624,190 @@ static void handle_reset() {
 static void handle_pause()  { g_paused = true;  server.send(200, "text/plain", "paused\n"); }
 static void handle_resume() { g_paused = false; server.send(200, "text/plain", "resumed\n"); }
 
+// ── Hunt / Refine / auto-loop / palettes / agent download ──────────
+//
+// Browser-side parity: every operation /s3lab/cellular/tft/ exposes
+// is also reachable via HTTP on the device. Memory cost is bounded
+// (the score arrays sit in BSS, ~2.3 KB; the auto loop is just a
+// timestamp comparison in loop()). A Hunt or Refine call blocks the
+// HTTP server for ~1 s on the supermini (256 × fitness() at K=4 +
+// HORIZON=25); curl --max-time 5 covers that with margin.
+
+static double g_scores[N_CELLS];
+static uint8_t g_score_order[N_CELLS];
+
+static void score_population(uint32_t seed) {
+    for (int i = 0; i < N_CELLS; i++)
+        g_scores[i] = fitness(pop[i].genome, seed);
+}
+
+// Selection sort indices by score descending. POP=256 → 65k
+// comparisons, ~5 ms — fine for occasional Hunt/Refine.
+static void sort_indices_by_score_desc() {
+    for (int i = 0; i < N_CELLS; i++) g_score_order[i] = (uint8_t)i;
+    for (int i = 0; i < N_CELLS - 1; i++) {
+        for (int j = i + 1; j < N_CELLS; j++) {
+            if (g_scores[g_score_order[j]] > g_scores[g_score_order[i]]) {
+                uint8_t t = g_score_order[i];
+                g_score_order[i] = g_score_order[j];
+                g_score_order[j] = t;
+            }
+        }
+    }
+}
+
+static void do_hunt() {
+    score_population(esp_random());
+    sort_indices_by_score_desc();
+    int boundary = N_CELLS / 2;
+    for (int k = boundary; k < N_CELLS; k++) {
+        int i = g_score_order[k];
+        Cell &c = pop[i];
+        random_genome_into(c.genome);
+        invent_palette_into(c.palette);
+        seed_grid_at(c.grid_a, prng());
+        c.score = 0;
+        c.refined_at_round = g_rounds;
+        update_dom_cache(i);
+    }
+}
+
+static int do_refine() {
+    score_population(esp_random());
+    int elite = 0;
+    for (int i = 1; i < N_CELLS; i++)
+        if (g_scores[i] > g_scores[elite]) elite = i;
+    Cell &E = pop[elite];
+    const float REFINE_RATE = 0.002f;
+    for (int i = 0; i < N_CELLS; i++) {
+        if (i == elite) continue;
+        Cell &c = pop[i];
+        mutate_into(c.genome, E.genome, REFINE_RATE);
+        palette_inherit_into(c.palette, E.palette, E.palette);
+        seed_grid_at(c.grid_a, prng());
+        c.score = g_scores[elite];
+        c.refined_at_round = g_rounds;
+        update_dom_cache(i);
+    }
+    return elite;
+}
+
+static void handle_hunt() {
+    do_hunt();
+    if (g_render_live) render_pop_live(); else render_pop_diff();
+    server.send(200, "text/plain", "hunt: bottom 128 cells refreshed\n");
+    Serial.println("[hunt] bottom 128 cells refreshed");
+}
+
+static void handle_refine() {
+    int elite = do_refine();
+    if (g_render_live) render_pop_live(); else render_pop_diff();
+    String out = String("refine: cloned cell #") + elite +
+                 " (score " + String(g_scores[elite], 3) + ") into 255 mutants\n";
+    server.send(200, "text/plain", out);
+    Serial.print("[refine] "); Serial.print(out);
+}
+
+// POST /palette-reroll: invent_palette() per cell, mirroring the
+// browser's "🎨 Reroll palettes" button.
+static void handle_palette_reroll() {
+    for (int i = 0; i < N_CELLS; i++) {
+        invent_palette_into(pop[i].palette);
+        update_dom_cache(i);
+    }
+    if (g_render_live) render_pop_live();
+    else                { render_pop_full(); render_pop_diff(); }
+    server.send(200, "text/plain", "rerolled 256 palettes\n");
+}
+
+// POST /palettes: accept exactly N_CELLS * PAL_BYTES (= 1024 bytes)
+// of ANSI indices. Each 4-byte chunk replaces the corresponding
+// cell's palette in row-major order, so the browser can compute
+// image-derived palettes and push them in one round trip.
+static void handle_palettes() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "text/plain", "POST raw 1024-byte palette body\n");
+        return;
+    }
+    const String &body = server.arg("plain");
+    if (body.length() != N_CELLS * PAL_BYTES) {
+        server.send(400, "text/plain",
+                    "expected 1024 bytes (256 cells × 4 ANSI indices)\n");
+        return;
+    }
+    const uint8_t *buf = (const uint8_t *)body.c_str();
+    for (int i = 0; i < N_CELLS; i++) {
+        memcpy(pop[i].palette, buf + i * PAL_BYTES, PAL_BYTES);
+        update_dom_cache(i);
+    }
+    if (g_render_live) render_pop_live();
+    else                { render_pop_full(); render_pop_diff(); }
+    server.send(200, "text/plain", "256 palettes applied\n");
+    Serial.println("[palettes] 256 palettes applied");
+}
+
+// POST /auto body: mode=on|off, optional delay=N (seconds, 1..60).
+// When on: device fires a Refine every `delay` seconds in loop().
+// Initial Hunt happens once on transition off→on, mirroring the
+// browser's "🔁 Full auto" semantics.
+static volatile bool     g_auto_refine = false;
+static volatile uint32_t g_auto_delay_ms = 3000;
+static uint32_t g_next_auto_at = 0;
+
+static void handle_auto() {
+    String mode_s = server.arg("mode");
+    String delay_s = server.arg("delay");
+    if (delay_s.length() > 0) {
+        long d = delay_s.toInt();
+        if (d < 1) d = 1;
+        if (d > 60) d = 60;
+        g_auto_delay_ms = (uint32_t)(d * 1000);
+    }
+    if (mode_s == "on") {
+        if (!g_auto_refine) {
+            g_auto_refine = true;
+            do_hunt();
+            if (g_render_live) render_pop_live(); else render_pop_diff();
+            g_next_auto_at = millis() + g_auto_delay_ms;
+        }
+    } else if (mode_s == "off") {
+        g_auto_refine = false;
+    } else if (mode_s.length() > 0) {
+        server.send(400, "text/plain", "mode must be on or off\n");
+        return;
+    }
+    String out = String("auto: ") + (g_auto_refine ? "on" : "off") +
+                 ", delay = " + String(g_auto_delay_ms / 1000) + "s\n";
+    server.send(200, "text/plain", out);
+}
+
+// GET /agent?r=R&c=C: download a single agent's genome.bin (HXC4
+// 4104-byte format). Same wire format as /s3lab/, /automaton/,
+// /taxon/, and the device's /winner.bin — round-trips into any of
+// those.
+static uint8_t g_agent_buf[TAIL_BYTES];
+
+static void handle_agent() {
+    int r = server.arg("r").toInt();
+    int c = server.arg("c").toInt();
+    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) {
+        server.send(400, "text/plain",
+                    "out of bounds (r=0..15, c=0..15)\n");
+        return;
+    }
+    const Cell &cell = pop[r * GRID_COLS + c];
+    memcpy(g_agent_buf, TAIL_MAGIC, MAGIC_BYTES);
+    memcpy(g_agent_buf + MAGIC_BYTES, cell.palette, PAL_BYTES);
+    memcpy(g_agent_buf + MAGIC_BYTES + PAL_BYTES, cell.genome, GBYTES);
+    String fname = String("agent-r") + (r < 10 ? "0" : "") + r +
+                   "-c" + (c < 10 ? "0" : "") + c + ".genome.bin";
+    server.sendHeader("Content-Disposition",
+                      "attachment; filename=\"" + fname + "\"");
+    server.setContentLength(TAIL_BYTES);
+    server.send(200, "application/octet-stream", "");
+    server.sendContent_P((const char *)g_agent_buf, TAIL_BYTES);
+}
+
 // POST /render-mode body: mode=dominant or mode=live. Flips the
 // per-tick render path and forces an immediate full repaint so the
 // switch is visible without waiting for the next tick.
@@ -636,13 +832,19 @@ static void comms_setup() {
     String ssid, pass;
     if (read_wifi_creds(ssid, pass)) try_connect_sta(ssid, pass);
     else { Serial.println("no /wifi.txt; AP-mode setup"); start_ap_fallback(); }
-    server.on("/",            HTTP_GET,  handle_root);
-    server.on("/info",        HTTP_GET,  handle_info);
-    server.on("/wifi",        HTTP_POST, handle_wifi);
-    server.on("/reset",       HTTP_POST, handle_reset);
-    server.on("/pause",       HTTP_POST, handle_pause);
-    server.on("/resume",      HTTP_POST, handle_resume);
-    server.on("/render-mode", HTTP_POST, handle_render_mode);
+    server.on("/",                HTTP_GET,  handle_root);
+    server.on("/info",            HTTP_GET,  handle_info);
+    server.on("/wifi",            HTTP_POST, handle_wifi);
+    server.on("/reset",           HTTP_POST, handle_reset);
+    server.on("/pause",           HTTP_POST, handle_pause);
+    server.on("/resume",          HTTP_POST, handle_resume);
+    server.on("/render-mode",     HTTP_POST, handle_render_mode);
+    server.on("/hunt",            HTTP_POST, handle_hunt);
+    server.on("/refine",          HTTP_POST, handle_refine);
+    server.on("/auto",            HTTP_POST, handle_auto);
+    server.on("/palette-reroll",  HTTP_POST, handle_palette_reroll);
+    server.on("/palettes",        HTTP_POST, handle_palettes);
+    server.on("/agent",           HTTP_GET,  handle_agent);
     server.begin();
     Serial.printf("HTTP on :%d\n", HTTP_PORT);
 }
@@ -706,6 +908,13 @@ void loop() {
             Serial.printf("round %u  free_heap=%u  free_psram=%u\n",
                           g_rounds, ESP.getFreeHeap(), ESP.getFreePsram());
         }
+    }
+    if (g_auto_refine && now >= g_next_auto_at) {
+        do_refine();
+        if (g_render_live) render_pop_live(); else render_pop_diff();
+        g_next_auto_at = now + g_auto_delay_ms;
+        Serial.printf("[auto] refine fired (next in %u ms)\n",
+                      (unsigned)g_auto_delay_ms);
     }
     delay(5);
 }
