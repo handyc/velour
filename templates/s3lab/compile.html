@@ -60,6 +60,11 @@
         <input type="text" id="elfname" value="a.elf" size="14"
                title="Output filename for the downloaded ELF">
         <button type="button" id="compile-btn">Compile → ELF</button>
+        <span style="color:#30363d;">|</span>
+        <input type="text" id="device-url" value="http://hexca.local" size="22"
+               title="Device base URL (e.g. http://hexca.local or http://192.168.1.42)">
+        <button type="button" id="push-btn"
+                title="Compile and POST the ELF to <device>/load-elf via Velour proxy.">Compile + push</button>
         <span id="status" style="color:#8b949e; font-size:0.78rem;"></span>
       </div>
       <h3 style="margin-top:1rem; color:#8b949e; font-size:0.85rem;
@@ -115,6 +120,8 @@
   const csource = document.getElementById('csource');
   const elfname = document.getElementById('elfname');
   const btn = document.getElementById('compile-btn');
+  const pushBtn = document.getElementById('push-btn');
+  const deviceUrl = document.getElementById('device-url');
   const status = document.getElementById('status');
   const buildLog = document.getElementById('build-log');
 
@@ -200,6 +207,63 @@
     URL.revokeObjectURL(url);
 
     btn.disabled = false;
+  });
+
+  pushBtn.addEventListener('click', async () => {
+    pushBtn.disabled = true; btn.disabled = true;
+    status.textContent = 'compiling + pushing…';
+    buildLog.className = 'build-log';
+    buildLog.textContent = '(running xcc700, then POST → ' + deviceUrl.value + '/load-elf)';
+
+    const fd = new FormData();
+    fd.append('source', csource.value);
+    fd.append('device_url', deviceUrl.value || 'http://hexca.local');
+
+    let resp, data;
+    try {
+      resp = await fetch('{% url "s3lab:compile_push" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken() },
+        body: fd,
+      });
+      data = await resp.json();
+    } catch (e) {
+      buildLog.className = 'build-log err';
+      buildLog.textContent = 'network error: ' + e;
+      pushBtn.disabled = false; btn.disabled = false; status.textContent = '';
+      return;
+    }
+
+    let lines = [];
+    const c = data.compile || {};
+    if (!c.ok) {
+      buildLog.className = 'build-log err';
+      buildLog.textContent = (c.error || 'compile failed') +
+        (c.build_log ? '\n\n' + c.build_log : '');
+      status.textContent = 'compile failed.';
+      pushBtn.disabled = false; btn.disabled = false;
+      return;
+    }
+    lines.push(c.build_log);
+    lines.push('');
+    lines.push(`compile: ${c.elf_bytes} B ELF in ${c.elapsed_ms} ms`);
+
+    const p = data.push || {};
+    if (p && p.ok) {
+      lines.push(`push:    ${p.target} → ${p.status} (${p.elapsed_ms} ms)`);
+      lines.push('');
+      lines.push(p.body);
+      buildLog.className = 'build-log ok';
+      status.textContent = 'pushed to device.';
+    } else {
+      lines.push(`push FAILED: ${p ? p.target : '(no target)'} → ${p ? p.status : '?'}`);
+      lines.push('');
+      lines.push(p ? p.body : '(no response body)');
+      buildLog.className = 'build-log err';
+      status.textContent = 'compile OK; push failed.';
+    }
+    buildLog.textContent = lines.join('\n');
+    pushBtn.disabled = false; btn.disabled = false;
   });
 </script>
 {% endblock %}

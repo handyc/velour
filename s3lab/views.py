@@ -153,3 +153,75 @@ def compile_run(request):
         'source_bytes': result.source_bytes,
         'elapsed_ms': result.elapsed_ms,
     })
+
+
+@login_required
+@require_POST
+def compile_push(request):
+    """Compile + push the resulting ELF to a hexca device on the LAN.
+
+    Server-side proxy avoids the browser's cross-origin block on
+    fetching from hexca.local while running on the Velour origin.
+
+    POST args:
+      source       — C source (same as compile_run)
+      device_url   — base URL of the device (default http://hexca.local)
+
+    Returns JSON {ok, compile, push} where ``compile`` mirrors
+    compile_run's payload and ``push`` is {ok, status, body, elapsed_ms}.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    source = request.POST.get('source', '')
+    device_url = (request.POST.get('device_url') or
+                  'http://hexca.local').rstrip('/')
+
+    result = compile_c(source)
+    compile_payload = {
+        'ok': result.ok,
+        'error': result.error,
+        'build_log': result.build_log,
+        'elf_bytes': result.elf_bytes,
+        'elapsed_ms': result.elapsed_ms,
+    }
+    if not result.ok:
+        return JsonResponse({
+            'ok': False,
+            'compile': compile_payload,
+            'push': None,
+        })
+
+    target = f'{device_url}/load-elf'
+    req = urllib.request.Request(
+        target, data=result.elf, method='POST',
+        headers={'Content-Type': 'application/octet-stream'},
+    )
+    push_t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            body = resp.read(4096).decode('utf-8', errors='replace')
+            status = resp.status
+            push_ok = 200 <= status < 300
+    except urllib.error.HTTPError as e:
+        body = e.read(4096).decode('utf-8', errors='replace')
+        status = e.code
+        push_ok = False
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        body = f'{type(e).__name__}: {e}'
+        status = 0
+        push_ok = False
+    push_elapsed_ms = int((time.monotonic() - push_t0) * 1000)
+
+    return JsonResponse({
+        'ok': push_ok,
+        'compile': compile_payload,
+        'push': {
+            'ok': push_ok,
+            'target': target,
+            'status': status,
+            'body': body,
+            'elapsed_ms': push_elapsed_ms,
+        },
+    })
