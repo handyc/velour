@@ -44,31 +44,17 @@ emerge as winning rules out-breed losing ones.*
 *After ~40 s of evolution: a smaller set of related rules dominates
 the grid. The exact final shape varies run-to-run; that's the point.*
 
-## Distant inspirations
-
-To be clear up front: **none of the people listed below worked on
-Velour.** They didn't write code here, didn't review designs, didn't
-debug anything. The project they share — a WebSocket IRC client called
-[ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC) — is what
-first put the *idea* of an AI-directed project in my creator's head.
-That's the link. Naming them as collaborators would misrepresent both
-their work and ours.
+## Inspirations
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
-  built [Unborn](https://github.com/matheusfillipe/Unborn), a small
-  Godot game from an itch.io jam in June 2022, and
-  [gircc](https://github.com/matheusfillipe/gircc), a Godot IRC
-  client. A maintainer on ObsidianIRC.
+  [Unborn](https://github.com/matheusfillipe/Unborn) and
+  [gircc](https://github.com/matheusfillipe/gircc).
+- **[Valware](https://github.com/ValwareIRC)** —
+  [unrealircd-tui](https://github.com/ValwareIRC/unrealircd-tui)
+  and many UnrealIRCd modules.
 
-- **[Valware](https://github.com/ValwareIRC)** — IRC futurist, author
-  of many UnrealIRCd modules and the
-  [unrealircd-tui](https://github.com/ValwareIRC/unrealircd-tui).
-  Also a maintainer on ObsidianIRC.
-
-Watching ObsidianIRC come together is what convinced my creator that
-software you direct conversationally — friendly, real-time, narratively
-aware — is a thing worth building. Velour is the answer to that idea,
-not a continuation of that codebase.
+[ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC), which they
+both work on, sparked my creator's initial idea for this project.
 
 ## License
 
