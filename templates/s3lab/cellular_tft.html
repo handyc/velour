@@ -188,13 +188,19 @@ const PANEL_PRESETS = {
   '80x160': {
     panel_w: 156, panel_h: 78,   // 80×160 - 2px margin per side after rot 3
     tile_px: 5,   zoom: 4,
-    sub_w: 4, sub_h: 4,           // live mode: 16×4 = 64 area, centred
+    // Live-mode sub-CA. Tile width = sub_w + 1 (inner stagger) and
+    // outer rows are hex-y-packed; outer x-stagger = tile_w/2.
+    // SUB=4: tile = 5×4; pop = 16×5 + 2 = 82 wide × 16×3 = 48 tall
+    // (with outer y-pack), centred in the 156×78 effective panel.
+    sub_w: 4, sub_h: 4,
     label: 'ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)',
   },
   '128x128': {
     panel_w: 128, panel_h: 128,
     tile_px: 7,   zoom: 4,
-    sub_w: 8, sub_h: 8,           // live mode: 16×8 = 128 wide × 128 tall, exact
+    // SUB=6: tile = 7×6; pop = 16×7 + 3 = 115 wide × 16×5 = 80 tall.
+    // Largest sub-CA that still fits both staggers in 128 px.
+    sub_w: 6, sub_h: 6,
     label: 'ESP32-S3 SUPERMINI · ST7735 1.44″ 128×128',
   },
 };
@@ -215,12 +221,20 @@ let Y0         = ((PANEL_H - POP_H) / 2) | 0;
 
 // Sub-CA tile geometry for live mode. Each rendered pixel represents
 // (CA_W / SUB_W) × (CA_H / SUB_H) cells of the actual 16×16 grid.
+// Inner hex stagger: tile_w = sub_w + 1 (an extra column for the
+// shifted half of each odd inner row). Outer hex stagger: x-shift
+// every other outer row by tile_w/2; y-pack rows at floor(tile_h *
+// √3/2). Same shape at both scales = self-similar pointy-top hex.
 let SUB_W      = PANEL_PRESETS[PANEL_KEY].sub_w;
 let SUB_H      = PANEL_PRESETS[PANEL_KEY].sub_h;
 let SUB_DX     = (16 / SUB_W) | 0;
 let SUB_DY     = (16 / SUB_H) | 0;
-let SUB_X0     = ((PANEL_W - GRID_COLS * SUB_W) / 2) | 0;
-let SUB_Y0     = ((PANEL_H - GRID_ROWS * SUB_H) / 2) | 0;
+let TILE_W_LIVE = SUB_W + 1;
+let TILE_H_LIVE = SUB_H;
+let OUTER_ROW_STEP = ((TILE_H_LIVE * ROW_STEP_X1000) / 1000) | 0;
+let OUTER_X_OFFSET = (TILE_W_LIVE / 2) | 0;
+let SUB_X0     = ((PANEL_W - (GRID_COLS * TILE_W_LIVE + OUTER_X_OFFSET)) / 2) | 0;
+let SUB_Y0     = ((PANEL_H - (GRID_ROWS * OUTER_ROW_STEP + (TILE_H_LIVE - OUTER_ROW_STEP))) / 2) | 0;
 
 let RENDER_MODE = 'dominant';   // 'dominant' | 'live'
 
@@ -251,8 +265,12 @@ function applyPanel(key) {
   SUB_H  = p.sub_h;
   SUB_DX = (16 / SUB_W) | 0;
   SUB_DY = (16 / SUB_H) | 0;
-  SUB_X0 = ((PANEL_W - GRID_COLS * SUB_W) / 2) | 0;
-  SUB_Y0 = ((PANEL_H - GRID_ROWS * SUB_H) / 2) | 0;
+  TILE_W_LIVE   = SUB_W + 1;
+  TILE_H_LIVE   = SUB_H;
+  OUTER_ROW_STEP = ((TILE_H_LIVE * ROW_STEP_X1000) / 1000) | 0;
+  OUTER_X_OFFSET = (TILE_W_LIVE / 2) | 0;
+  SUB_X0 = ((PANEL_W - (GRID_COLS * TILE_W_LIVE + OUTER_X_OFFSET)) / 2) | 0;
+  SUB_Y0 = ((PANEL_H - (GRID_ROWS * OUTER_ROW_STEP + (TILE_H_LIVE - OUTER_ROW_STEP))) / 2) | 0;
 
   // Canvas backing-buffer resolution + on-screen size.
   cv.width  = PANEL_W;
@@ -404,28 +422,38 @@ function renderLiveFull() {
 
 function renderLive() {
   for (let r = 0; r < GRID_ROWS; r++) {
+    const outerXShift = (r & 1) ? OUTER_X_OFFSET : 0;
+    const ty = SUB_Y0 + r * OUTER_ROW_STEP;
     for (let c = 0; c < GRID_COLS; c++) {
       const cell = state.cells[r * GRID_COLS + c];
-      const tx = SUB_X0 + c * SUB_W;
-      const ty = SUB_Y0 + r * SUB_H;
+      const tx = SUB_X0 + c * TILE_W_LIVE + outerXShift;
+      // Build the tile with inner hex stagger — odd sub-rows shifted
+      // +1 px (a 1-px black gutter on the un-shifted side of each row).
       for (let sy = 0; sy < SUB_H; sy++) {
-        const gy = sy * SUB_DY;
+        const gy = Math.min(GRID_H - 1, sy * SUB_DY);
+        const innerShift = sy & 1;
+        // Black-fill the gutter pixel first (column 0 on odd rows
+        // or column TILE_W-1 on even rows).
+        ctx.fillStyle = '#000';
+        if (innerShift) {
+          ctx.fillRect(tx, ty + sy, 1, 1);
+        } else {
+          ctx.fillRect(tx + SUB_W, ty + sy, 1, 1);
+        }
         for (let sx = 0; sx < SUB_W; sx++) {
-          const gx = sx * SUB_DX;
+          const gx = Math.min(GRID_W - 1, sx * SUB_DX);
           const v = cell.gridA[gy * GRID_W + gx] & 3;
           const ansi = cell.palette[v];
-          // Cache rgb per (palette × value) on the cell to avoid
-          // recomputing 256 × 64 = 16k ansi-to-rgb lookups per frame.
           if (!cell.subRgb) cell.subRgb = new Array(4);
-          if (cell.subAnsi !== ansi || cell.subRgb[v] === undefined) {
+          if (cell.subPal !== ansi || cell.subRgb[v] === undefined) {
             const [rr, gg, bb] = ansi256_to_rgb(ansi);
             cell.subRgb[v] = '#' + ((rr << 16) | (gg << 8) | bb).toString(16).padStart(6, '0');
           }
           ctx.fillStyle = cell.subRgb[v];
-          ctx.fillRect(tx + sx, ty + sy, 1, 1);
+          ctx.fillRect(tx + sx + innerShift, ty + sy, 1, 1);
         }
       }
-      cell.subAnsi = cell.palette[0];
+      cell.subPal = cell.palette[0];
     }
   }
 }

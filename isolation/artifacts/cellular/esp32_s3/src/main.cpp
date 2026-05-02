@@ -315,35 +315,60 @@ static void render_pop_full() {
 }
 
 // Live render — paint every cell's grid_a as a SUB_W × SUB_H subsample
-// of its 16×16 internal CA. Each cell builds its tile in a stack
-// buffer then drawRGBBitmap-blits it (one SPI burst per cell).
+// of its 16×16 internal CA, with hex stagger at TWO scales:
+//   1. Inside each tile, every odd inner sub-row is x-shifted +1 px
+//      (tile width = SUB_W + 1).
+//   2. Across the population, every odd outer row is x-shifted by
+//      tile_w / 2; outer rows are also hex-y-packed at stride
+//      floor(tile_h × 0.866).
+// Same self-similar shape the JS bench at /s3lab/cellular/ has —
+// pointy-top hex topology at both scales.
 //
-// No diff cache: at SUB_W=8 and 256 cells we push 16K pixels per
-// frame ≈ 32 KB SPI ≈ 10 ms at 27 MHz. Comfortable inside TICK_MS.
+// Each tile is built in a (TILE_W × SUB_H) stack buffer with the
+// inner stagger baked in (a 1-px black gutter on the un-shifted
+// half of each row), then drawRGBBitmap-blits in one SPI burst.
 //
-// Layout: a 2D grid of stride SUB_W × SUB_H, no hex stagger (the
-// rendered area is too small to benefit from stagger when a cell is
-// only 8×8 px). Centre into the panel.
+// No diff cache: at SUB_W=6 (128×128 panel) we push ~7×6=42 px per
+// cell × 256 cells = ~10K pixels = ~21 KB SPI ≈ 6 ms at 27 MHz.
+// Comfortable inside TICK_MS.
+#define TILE_W      (SUB_W + 1)             /* one extra px for inner stagger */
+#define TILE_H      SUB_H
+#define ROW_PACK_X1000  866                  /* outer hex y-pack: √3/2 × 1000 */
+#define OUTER_ROW_STEP  ((TILE_H * ROW_PACK_X1000) / 1000)
+#define OUTER_X_OFFSET  (TILE_W / 2)
+
 static void render_pop_live() {
-    const int total_w = GRID_COLS * SUB_W;
-    const int total_h = GRID_ROWS * SUB_H;
+    const int total_w = GRID_COLS * TILE_W + OUTER_X_OFFSET;
+    const int total_h = GRID_ROWS * OUTER_ROW_STEP + (TILE_H - OUTER_ROW_STEP);
     const int x0 = (PANEL_W_PX - total_w) / 2;
     const int y0 = (PANEL_H_PX - total_h) / 2;
-    uint16_t tile_buf[SUB_W * SUB_H];
+    uint16_t tile_buf[TILE_W * TILE_H];
     for (int r = 0; r < GRID_ROWS; r++) {
+        const int outer_x_shift = (r & 1) ? OUTER_X_OFFSET : 0;
         for (int c = 0; c < GRID_COLS; c++) {
             const Cell &cell = pop[r * GRID_COLS + c];
+            // Build the tile with internal hex stagger: odd sub-rows
+            // shifted +1 px, leaving a 1-px black gutter on the
+            // unshifted side of each row.
             for (int sy = 0; sy < SUB_H; sy++) {
                 int gy = sy * SUB_DY;
-                for (int sx = 0; sx < SUB_W; sx++) {
-                    int gx = sx * SUB_DX;
-                    uint8_t v = cell.grid_a[gy * CA_W + gx] % K;
-                    tile_buf[sy * SUB_W + sx] =
-                        ansi256_to_rgb565(cell.palette[v]);
+                if (gy >= CA_H) gy = CA_H - 1;
+                const int inner_shift = (sy & 1) ? 1 : 0;
+                for (int tx = 0; tx < TILE_W; tx++) {
+                    int sx = tx - inner_shift;
+                    uint16_t color = 0;       /* black gutter */
+                    if (sx >= 0 && sx < SUB_W) {
+                        int gx = sx * SUB_DX;
+                        if (gx >= CA_W) gx = CA_W - 1;
+                        uint8_t v = cell.grid_a[gy * CA_W + gx] % K;
+                        color = ansi256_to_rgb565(cell.palette[v]);
+                    }
+                    tile_buf[sy * TILE_W + tx] = color;
                 }
             }
-            tft.drawRGBBitmap(x0 + c * SUB_W, y0 + r * SUB_H,
-                              tile_buf, SUB_W, SUB_H);
+            tft.drawRGBBitmap(x0 + c * TILE_W + outer_x_shift,
+                              y0 + r * OUTER_ROW_STEP,
+                              tile_buf, TILE_W, TILE_H);
         }
     }
 }
