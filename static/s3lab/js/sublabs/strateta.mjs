@@ -980,6 +980,12 @@ function init() {
     }
 
     // Image(s) → palettes + source rail + auto-export.
+    // Image upload — applies palettes from the source(s) and repaints.
+    // Auto-export was removed 2026-05-02: at LIB_K=256 × LIB_SIZE=256 ×
+    // N_ENTRIES=16384 the JSON build + gzip stalled the browser for
+    // many seconds after every image upload, with no user request.
+    // The 💾 Save population button next to it now does the same
+    // export on demand.
     const imgInput = document.getElementById('strateta-image-input');
     if (imgInput) {
         imgInput.addEventListener('change', async (e) => {
@@ -1000,17 +1006,8 @@ function init() {
                 if (status) {
                     status.style.color = '#3fb950';
                     status.textContent = files.length === 1
-                        ? 'palettes loaded · saving population…'
-                        : `palettes loaded — ${files.length} sources · saving population…`;
-                }
-                const json = buildStratetaPopulationJson(meta);
-                const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                const sz = await downloadGzipped(`strateta-population-K${LIB_K}-${stamp}.json.gz`, json);
-                if (status) {
-                    const kb = (sz / 1024).toFixed(1);
-                    status.textContent = files.length === 1
-                        ? `palettes loaded · population saved (${kb} KB)`
-                        : `palettes loaded — ${files.length} sources · population saved (${kb} KB)`;
+                        ? 'palettes loaded from 1 image — click 💾 Save population to snapshot'
+                        : `palettes loaded — ${files.length} sources — click 💾 Save population to snapshot`;
                 }
             } catch (err) {
                 if (status) {
