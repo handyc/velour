@@ -33,7 +33,23 @@
     width: 384px; height: 384px;
     image-rendering: pixelated; image-rendering: crisp-edges;
     background: #000; border: 1px solid #2a2e33;
+    transition: transform 0.25s ease;
+    transform-origin: 50% 50%;
   }
+  /* Brief flash on restart so the click is unambiguously registered. */
+  canvas#tft-emu.flash {
+    box-shadow: 0 0 0 4px #58a6ff inset, 0 0 18px rgba(88, 166, 255, 0.6);
+    transition: box-shadow 0s;
+  }
+  .rot-group { display: inline-flex; gap: 0; }
+  .rot-group button {
+    border-radius: 0; padding: 0.35rem 0.55rem;
+    background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+  }
+  .rot-group button.active { background: #1f6feb; color: white; border-color: #1f6feb; }
+  .rot-group button:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+  .rot-group button:last-child  { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+  .rot-group button + button { border-left: none; }
   .controls { display: flex; gap: 0.5rem; align-items: center;
               flex-wrap: wrap; margin: 0.6rem 0; }
   .controls input, .controls button {
@@ -80,8 +96,31 @@
         <input id="tickMs" type="number" value="200" min="40" max="2000" style="width:5rem;">
       </label>
       <button id="restart-btn">Restart with seed</button>
+      <button id="random-seed-btn" class="secondary"
+              title="Pick a fresh random seed and restart.">🎲 Random seed</button>
       <button id="run-btn"     class="secondary">Pause</button>
       <button id="reseed-btn"  class="secondary">Reseed grid</button>
+    </div>
+    <div class="controls" style="margin-top:0.4rem;">
+      <button id="hunt-btn"
+              style="background:#238636;border:none;color:white;"
+              title="Broad GA: half the population is mutated from the current rule, half is random. Replaces the current genome with the best after ~10 generations.">🧬 Hunt</button>
+      <button id="refine-btn"
+              style="background:#1f6feb;border:none;color:white;"
+              title="Narrow GA: the whole population descends from the current rule. Press repeatedly to iteratively improve.">🎯 Refine</button>
+      <button id="palette-btn" class="secondary"
+              title="Roll a fresh random palette (same generator the firmware's invent_palette uses).">🎨 Random palette</button>
+      <span id="ga-status" style="color:#8b949e; font-size:0.78rem;"></span>
+    </div>
+    <div class="controls" style="margin-top:0.4rem;">
+      <span style="color:#8b949e;font-size:0.8rem;">rotation</span>
+      <div class="rot-group" id="rot-group">
+        <button data-rot="0" class="active" title="No rotation (tft.setRotation(0))">0°</button>
+        <button data-rot="1" title="tft.setRotation(1) — 90° CW">90°</button>
+        <button data-rot="2" title="tft.setRotation(2) — 180°">180°</button>
+        <button data-rot="3" title="tft.setRotation(3) — 270° CW">270°</button>
+      </div>
+      <span style="color:#6e7681;font-size:0.75rem;">remembered between visits</span>
     </div>
   </div>
 
@@ -115,7 +154,8 @@
 
 <script type="module">
 import {
-  mulberry32, makeGenome, buildBins, stepWithGenomeBins
+  mulberry32, makeGenome, buildBins, stepWithGenomeBins,
+  score, ansi256_rgb
 } from '{% static_v "s3lab/js/hexnn_engine.mjs" %}';
 
 // Layout parameters that exactly match the device's
@@ -127,14 +167,35 @@ const W = 16, H = 16;
 const CELL_PX = 7;
 const ROW_STEP_X1000 = 866;
 
-// PAL_HEX[] from distill_hexnn — the same 16-colour palette the
-// emitted firmware uses. Cells are coloured by (state % K).
-const PAL_HEX = [
+// PAL_HEX[] starts as the same 16-colour palette distill_hexnn emits;
+// the 🎨 Random palette button replaces it with a fresh ANSI-derived
+// set, mirroring what the device's invent_palette() does at boot.
+let PAL_HEX = [
   "#e74c3c", "#3498db", "#2ecc71", "#f1c40f",
   "#9b59b6", "#1abc9c", "#e67e22", "#ecf0f1",
   "#34495e", "#fd79a8", "#a29bfe", "#ffeaa7",
   "#55efc4", "#fab1a0", "#dfe6e9", "#74b9ff",
 ];
+
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// Mirrors invent_palette() in s3lab engines: 90% from the ANSI 6×6×6
+// colour cube (16..231), 10% from the grayscale ramp (232..255).
+function inventPalette(K, rng) {
+  const out = [];
+  while (out.length < K) {
+    const ansi = (rng() * 10 < 9)
+      ? (16 + Math.floor(rng() * 216))
+      : (232 + Math.floor(rng() * 24));
+    if (out.indexOf(ansi) === -1) out.push(ansi);
+  }
+  return out.map(idx => {
+    const [r, g, b] = ansi256_rgb(idx);
+    return rgbToHex(r, g, b);
+  });
+}
 
 const cv  = document.getElementById('tft-emu');
 const ctx = cv.getContext('2d');
@@ -144,8 +205,10 @@ const seedEl    = document.getElementById('seed');
 const kEl       = document.getElementById('K');
 const tickMsEl  = document.getElementById('tickMs');
 const restart   = document.getElementById('restart-btn');
+const randomSeedBtn = document.getElementById('random-seed-btn');
 const runBtn    = document.getElementById('run-btn');
 const reseedBtn = document.getElementById('reseed-btn');
+const rotGroup  = document.getElementById('rot-group');
 
 const kvSeed = document.getElementById('kv-seed');
 const kvK    = document.getElementById('kv-K');
@@ -215,16 +278,25 @@ function renderDiff() {
 
 function bootstrap() {
   state.K     = Math.max(2, Math.min(16, +kEl.value | 0));
-  state.seed  = (+seedEl.value | 0) >>> 0;
+  // Parse seed via a path that handles the full uint32 range. The
+  // earlier `(+x | 0) >>> 0` quietly wrapped values ≥ 2^31 to the
+  // wrong number when the input was edited.
+  let parsedSeed = parseInt(seedEl.value, 10);
+  if (!Number.isFinite(parsedSeed) || parsedSeed < 0) parsedSeed = 0;
+  if (parsedSeed > 0xFFFFFFFF) parsedSeed = 0xFFFFFFFF;
+  state.seed = parsedSeed >>> 0;
   state.genome = makeGenome(state.K, state.seed);
   state.bins   = buildBins(state.genome);
-  state.grid   = freshGridSeeded(state.K, state.seed ^ 0xC0DECAFE);
+  state.grid   = freshGridSeeded(state.K, (state.seed ^ 0xC0DECAFE) >>> 0);
   state.prevGrid = null;
   state.tick   = 0;
   kvSeed.textContent = state.seed;
   kvK.textContent    = state.K;
   kvTick.textContent = '0';
   renderFull();
+  // Visible click confirmation — a single-frame neon-blue inset border.
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
 }
 
 let lastTickMs = performance.now();
@@ -254,6 +326,171 @@ function loop(now) {
 }
 
 restart.addEventListener('click', () => bootstrap());
+randomSeedBtn.addEventListener('click', () => {
+  // Stay within the input's [0, 2^32-1] range.
+  const fresh = (Math.random() * 0xFFFFFFFF) >>> 0;
+  seedEl.value = fresh;
+  bootstrap();
+});
+
+// ── Random palette ─────────────────────────────────────────────────
+const paletteBtn = document.getElementById('palette-btn');
+paletteBtn.addEventListener('click', () => {
+  const rng = mulberry32((Math.random() * 0xFFFFFFFF) >>> 0);
+  PAL_HEX = inventPalette(Math.max(state.K, 4), rng);
+  // Repaint with the new palette without changing dynamics.
+  state.prevGrid = null;
+  renderFull();
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
+});
+
+// ── Hunt + Refine ──────────────────────────────────────────────────
+//
+// Mirrors the Hunt/Refine logic in templates/hexnn/index.html: a
+// short generation-by-generation GA that yields to the event loop
+// between generations so the page stays responsive. Default
+// pop=8, gens=12, steps=60 — about 6-12 s of compute. The numbers
+// are tuned for the TFT-emulator UX (visible progress, < 15 s
+// total) rather than for ALICE-grade hunt depth.
+
+const huntBtn   = document.getElementById('hunt-btn');
+const refineBtn = document.getElementById('refine-btn');
+const gaStatus  = document.getElementById('ga-status');
+let gaRunning = false;
+
+function setGaButtons(disabled) {
+  huntBtn.disabled    = disabled;
+  refineBtn.disabled  = disabled;
+  paletteBtn.disabled = disabled;
+  restart.disabled    = disabled;
+  randomSeedBtn.disabled = disabled;
+}
+
+function cloneGenome(g) {
+  return { K: g.K,
+           keys: new Uint8Array(g.keys),
+           outs: new Uint8Array(g.outs) };
+}
+
+// Same semantics as templates/hexnn/index.html's mutateGenome:
+// (a) per-prototype output reassign at probability `rate`;
+// (b) ~rate × N × 7 single-step key drifts (±1, clamped to [0, K)).
+function mutateGenome(g, rate, rng) {
+  const child = cloneGenome(g);
+  const K = child.K;
+  const n = child.outs.length;
+  for (let i = 0; i < n; i++) {
+    if (rng() < rate) child.outs[i] = (rng() * K) | 0;
+  }
+  const keyMutations = Math.max(1, Math.round(n * 7 * rate));
+  for (let m = 0; m < keyMutations; m++) {
+    const i = (rng() * n) | 0;
+    const j = (rng() * 7) | 0;
+    const off = i * 7 + j;
+    const delta = rng() < 0.5 ? -1 : 1;
+    let v = child.keys[off] + delta;
+    if (v < 0) v = 0;
+    if (v >= K) v = K - 1;
+    child.keys[off] = v;
+  }
+  return child;
+}
+
+function crossoverGenome(a, b, rng) {
+  const cut = (rng() * a.outs.length) | 0;
+  const child = cloneGenome(a);
+  for (let i = cut; i < a.outs.length; i++) {
+    child.outs[i] = b.outs[i];
+    for (let j = 0; j < 7; j++) child.keys[i*7 + j] = b.keys[i*7 + j];
+  }
+  return child;
+}
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+async function runGA(mode) {
+  if (gaRunning) return;
+  gaRunning = true;
+  const wasRunning = state.running;
+  state.running = false;
+  setGaButtons(true);
+
+  const POP = 8, GENS = 12, STEPS = 60, BURN_IN = 15;
+  const RATE = (mode === 'refine') ? 0.0008 : 0.002;
+  const rng = mulberry32(((state.seed + Date.now()) | 0) >>> 0);
+
+  // Seed population:
+  //   refine — current genome + RATE-mutated children
+  //   hunt   — current + heavy-mutated half + random half
+  const pop = [cloneGenome(state.genome)];
+  if (mode === 'refine') {
+    while (pop.length < POP) pop.push(mutateGenome(state.genome, RATE, rng));
+  } else {
+    for (let i = 0; i < POP / 2 - 1; i++) {
+      pop.push(mutateGenome(state.genome, RATE * 4, rng));
+    }
+    while (pop.length < POP) {
+      pop.push(makeGenome(state.K, ((rng() * 0xFFFFFFFF) >>> 0)));
+    }
+  }
+
+  let bestGenome = cloneGenome(pop[0]);
+  let bestF = -Infinity;
+  for (let g = 0; g < GENS; g++) {
+    // Score every individual.
+    const fits = [];
+    for (let i = 0; i < pop.length; i++) {
+      const s = score(pop[i], W, STEPS,
+                      mulberry32(((g * 7919 + i * 31) | 0) >>> 0),
+                      BURN_IN);
+      fits.push(s.f);
+      gaStatus.textContent =
+        `${mode}… gen ${g + 1}/${GENS} · scoring ${i + 1}/${pop.length}`;
+      gaStatus.style.color = '#8b949e';
+      await tick();
+    }
+    // Track best.
+    let genBest = 0;
+    for (let i = 1; i < fits.length; i++) if (fits[i] > fits[genBest]) genBest = i;
+    if (fits[genBest] > bestF) {
+      bestF = fits[genBest];
+      bestGenome = cloneGenome(pop[genBest]);
+    }
+    // Sort + breed: top quarter survive, rest are crossover children.
+    const order = fits.map((f, i) => [f, i]).sort((a, b) => b[0] - a[0]);
+    const surv = Math.max(2, (POP / 4) | 0);
+    const next = [];
+    for (let i = 0; i < surv; i++) next.push(pop[order[i][1]]);
+    while (next.length < POP) {
+      const a = pop[order[(rng() * surv) | 0][1]];
+      const b = pop[order[(rng() * surv) | 0][1]];
+      next.push(mutateGenome(crossoverGenome(a, b, rng), RATE, rng));
+    }
+    pop.length = 0;
+    Array.prototype.push.apply(pop, next);
+  }
+
+  // Adopt the best.
+  state.genome = bestGenome;
+  state.bins   = buildBins(state.genome);
+  state.grid   = freshGridSeeded(state.K, (state.seed ^ 0x12345678) >>> 0);
+  state.prevGrid = null;
+  state.tick = 0;
+  kvTick.textContent = '0';
+  renderFull();
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
+
+  gaStatus.textContent = `${mode} done · best fitness ${bestF.toFixed(3)}`;
+  gaStatus.style.color = '#3fb950';
+  state.running = wasRunning;
+  setGaButtons(false);
+  gaRunning = false;
+}
+
+huntBtn.addEventListener('click', () => runGA('hunt'));
+refineBtn.addEventListener('click', () => runGA('refine'));
 runBtn.addEventListener('click', () => {
   state.running = !state.running;
   runBtn.textContent = state.running ? 'Pause' : 'Run';
@@ -263,7 +500,31 @@ reseedBtn.addEventListener('click', () => {
     (Math.random() * 0xFFFFFFFF) >>> 0);
   state.prevGrid = null;
   renderFull();
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
 });
+
+// ── Rotation. Pure CSS transform on the canvas; pixel data is
+// unchanged. Persists via localStorage, mirrors the device's
+// tft.setRotation(0..3) (which on the panel side rotates 0/90/180/270
+// CW). The 90° and 270° cases would normally swap the panel's logical
+// w/h, but the 1.44" 128x128 is square, so only the visible
+// orientation changes here. ─────────────────────────────────────────
+const ROT_KEY = 'hexnn-tft-rotation';
+function applyRotation(rot) {
+  rot = ((rot | 0) % 4 + 4) % 4;
+  cv.style.transform = `rotate(${rot * 90}deg)`;
+  rotGroup.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', +b.dataset.rot === rot);
+  });
+  try { localStorage.setItem(ROT_KEY, String(rot)); } catch (e) {}
+}
+rotGroup.querySelectorAll('button').forEach(b => {
+  b.addEventListener('click', () => applyRotation(+b.dataset.rot));
+});
+let savedRot = 0;
+try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (e) {}
+applyRotation(savedRot);
 
 bootstrap();
 requestAnimationFrame(loop);
