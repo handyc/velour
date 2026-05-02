@@ -24,6 +24,26 @@ gray. The renderer uses pure CSS strips so the layout reflows from a
 
 ![Velour Chronos](docs/screenshots/chronos.webp)
 
+The S3 Lab — Cellular sublab. A 16×16 hex tiling where every cell
+holds its own K=4 hex CA genome, runs it on a private 16×16 grid,
+and competes against a randomly-chosen neighbour every 500 ms.
+The loser is replaced by a mutated copy of the winner; palettes
+inherit. The result is a spatial GA you can watch — interesting
+rules sweep regions, plateaus form and fall, and over a few minutes
+the whole population converges on a small family of related rules.
+
+![S3 Lab Cellular — fresh population](docs/screenshots/cellular-fresh.webp)
+*Fresh from random init: 256 unrelated rules, every tile a different
+chaotic snapshot.*
+
+![S3 Lab Cellular — mid-tournament](docs/screenshots/cellular-mid.webp)
+*A few seconds of tournaments later: regions of similar palettes
+emerge as winning rules out-breed losing ones.*
+
+![S3 Lab Cellular — converged](docs/screenshots/cellular-converged.webp)
+*After ~40 s of evolution: a smaller set of related rules dominates
+the grid. The exact final shape varies run-to-run; that's the point.*
+
 ## Built with help and inspiration from
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
