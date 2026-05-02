@@ -127,6 +127,18 @@
       <label>seed
         <input id="seed" type="number" value="42" min="0" max="4294967295" style="width:9rem;">
       </label>
+      <label title="Number of cell colours per CA. K=4 uses the fast packed-positional engine (4 KB genomes). K>4 switches to the nearest-neighbour engine (16 KB genomes, N=2^11 prototypes). Changing K resets the population.">K
+        <select id="K-select" style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                padding:0.25rem 0.4rem; border-radius:3px; font-family:inherit; font-size:0.8rem;">
+          <option value="4" selected>4</option>
+          <option value="8">8</option>
+          <option value="16">16</option>
+          <option value="32">32</option>
+          <option value="64">64</option>
+          <option value="128">128</option>
+          <option value="256">256</option>
+        </select>
+      </label>
       <label>round ms
         <input id="roundMs" type="number" value="500" min="50" max="5000" style="width:5rem;">
       </label>
@@ -195,14 +207,20 @@
 </div>
 
 <script type="module">
-import {
-  K, GBYTES, PAL_BYTES, GRID_W, GRID_H,
+// Two engines, side-by-side: K=4 uses the packed-positional engine
+// (the cellular sublab's native one, 4 KB per genome); K>4 uses the
+// nearest-neighbour engine (the /hexnn/ one, 16 KB per genome at
+// N=2^11 prototypes — keeps total population RAM bounded).
+import * as PACKED from '{% static_v "s3lab/js/engine.mjs" %}';
+import * as NN from '{% static_v "s3lab/js/hexnn_engine.mjs" %}';
+const {
+  K: PACKED_K_DEFAULT, GBYTES, PAL_BYTES, GRID_W, GRID_H,
   seed_prng, prng,
   seed_grid, step_grid,
   fitness, mutate, palette_inherit,
   random_genome, invent_palette, ansi256_to_rgb,
   encode_tail,
-} from '{% static_v "s3lab/js/engine.mjs" %}';
+} = PACKED;
 
 // ── Layout (matches cellular_esp.cpp render_pop_diff) ───────────────
 const GRID_COLS  = 16;
@@ -389,20 +407,160 @@ function neighbourIdx(i, dir) {
   return nr * GRID_COLS + nc;
 }
 
+// ── K-dialable engine dispatch ─────────────────────────────────────
+// Cellular's default K=4 uses PACKED (fast path). For K>4 we swap to
+// NN: N=2^11 = 2048 prototypes per genome, 16 KB each. The two
+// engines have different genome shapes, so we wrap every per-cell
+// op in a tiny dispatch layer keyed by `currentEngine`.
+
+let currentK = 4;
+let currentEngine = 'packed';   // 'packed' | 'nn'
+const NN_N_LOG2 = 11;            // 2048 prototypes
+const NN_N = 1 << NN_N_LOG2;
+
+function isPacked() { return currentEngine === 'packed'; }
+
+// — palette helpers (work for any K) —
+function inventPaletteK(K, rng) {
+  // Mirrors engine.invent_palette but generalised: pick K distinct
+  // ANSI indices, 90% from the 6×6×6 cube, 10% greys.
+  const out = new Uint8Array(K);
+  let n = 0, seen = new Set();
+  while (n < K) {
+    const c = ((rng() * 10) | 0) < 9
+      ? (16 + ((rng() * 216) | 0))
+      : (232 + ((rng() * 24) | 0));
+    if (!seen.has(c)) { seen.add(c); out[n++] = c; }
+  }
+  return out;
+}
+
+function paletteInheritK(dst, a, b, K, rng) {
+  // Pick one parent (a or b) wholesale; small chance of one-slot drift.
+  const src = (rng() < 0.5) ? a : b;
+  dst.set(src);
+  if (rng() < 0.08) {
+    const slot = (rng() * K) | 0;
+    const c = ((rng() * 10) | 0) < 9
+      ? (16 + ((rng() * 216) | 0))
+      : (232 + ((rng() * 24) | 0));
+    dst[slot] = c;
+  }
+}
+
+// — NN-engine mutate (not exported by hexnn_engine.mjs) —
+// Same semantics as templates/hexnn/index.html's mutateGenome:
+// per-prototype output reassign at probability `rate`, plus
+// `rate × N × 7` single-step key drifts (±1 clamped to [0, K)).
+function nnMutate(dst, src, rate, rng) {
+  const K = src.K, n = src.outs.length;
+  dst.K = K;
+  dst.keys.set(src.keys);
+  dst.outs.set(src.outs);
+  for (let i = 0; i < n; i++) {
+    if (rng() < rate) dst.outs[i] = (rng() * K) | 0;
+  }
+  const km = Math.max(1, Math.round(n * 7 * rate));
+  for (let m = 0; m < km; m++) {
+    const i = (rng() * n) | 0, j = (rng() * 7) | 0;
+    const off = i * 7 + j, delta = rng() < 0.5 ? -1 : 1;
+    let v = dst.keys[off] + delta;
+    if (v < 0) v = 0;
+    if (v >= K) v = K - 1;
+    dst.keys[off] = v;
+  }
+}
+
+function nnRng() { return Math.random(); }
+
+// K-aware grid seeding. The packed engine's seed_grid masks with & 3
+// (K=4 only); for larger K we want any value in [0, K).
+function seedGridK(grid, s) {
+  if (currentK === 4) { seed_grid(grid, s); return; }
+  // Park-Miller LCG, top-16-bit output mod K.
+  let st = (s >>> 0) || 1;
+  for (let i = 0; i < grid.length; i++) {
+    st = ((Math.imul(st, 1103515245) + 12345) >>> 0);
+    grid[i] = (st >>> 16) % currentK;
+  }
+}
+
+// Per-cell ops — switch on currentEngine. Each op operates on an
+// existing cell so we don't reallocate genome buffers on every
+// tournament round.
+function cellStep(c) {
+  if (isPacked()) {
+    step_grid(c.genome, c.gridA, c.gridB);
+  } else {
+    const next = NN.stepWithGenomeBins(c.gridA, GRID_W, GRID_H, c.bins);
+    c.gridB.set(next);
+  }
+  const tmp = c.gridA; c.gridA = c.gridB; c.gridB = tmp;
+}
+
+function cellFitness(c, seed) {
+  if (isPacked()) {
+    return fitness(c.genome, seed).score;
+  } else {
+    return NN.score(c.genome, GRID_W, 25, NN.mulberry32(seed >>> 0 || 1), 8).f;
+  }
+}
+
+function cellMutateInPlace(c, parent, rate) {
+  if (isPacked()) {
+    mutate(c.genome, parent.genome, rate);
+  } else {
+    nnMutate(c.genome, parent.genome, rate, nnRng);
+    c.bins = NN.buildBins(c.genome);
+  }
+}
+
+function cellRandomize(c) {
+  if (isPacked()) {
+    seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
+    c.genome = random_genome();
+    c.palette = invent_palette();
+  } else {
+    const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+    c.genome = NN.makeGenome(currentK, seed);
+    c.bins = NN.buildBins(c.genome);
+    c.palette = inventPaletteK(currentK, nnRng);
+  }
+}
+
+function cellInheritPaletteFrom(dst, a, b) {
+  if (isPacked()) {
+    palette_inherit(dst.palette, a.palette, b.palette);
+  } else {
+    paletteInheritK(dst.palette, a.palette, b.palette, currentK, nnRng);
+  }
+}
+
 // ── Cell + state ────────────────────────────────────────────────────
 function makeCell(seed) {
-  seed_prng(seed);
-  return {
-    genome:  random_genome(),
-    palette: invent_palette(),
-    gridA:   new Uint8Array(GRID_W * GRID_H),
-    gridB:   new Uint8Array(GRID_W * GRID_H),
-    score:   0,
+  // K=4 packed: 4 KB genome + 4 B palette
+  // K>4   NN  : ~16 KB genome (N×8 + headers) + K B palette + bins
+  const c = {
+    genome:    null,
+    palette:   null,
+    gridA:     new Uint8Array(GRID_W * GRID_H),
+    gridB:     new Uint8Array(GRID_W * GRID_H),
+    score:     0,
     refinedAt: 0,
-    domAnsi: 0,             // cached dominant ANSI index
-    domRgb:  '#000',         // cached CSS hex
-    lastDrawn: -1,           // last ANSI we drew, for diff-render
+    domAnsi:   0,
+    domRgb:    '#000',
+    lastDrawn: -1,
   };
+  if (isPacked()) {
+    seed_prng(seed);
+    c.genome = random_genome();
+    c.palette = invent_palette();
+  } else {
+    c.genome = NN.makeGenome(currentK, seed >>> 0 || 1);
+    c.bins = NN.buildBins(c.genome);
+    c.palette = inventPaletteK(currentK, nnRng);
+  }
+  return c;
 }
 
 const state = {
@@ -415,12 +573,13 @@ const state = {
 };
 
 function dominantAnsi(c) {
-  const counts = [0, 0, 0, 0];
-  for (let i = 0; i < GRID_W * GRID_H; i++) counts[c.gridA[i]]++;
+  const counts = new Uint16Array(currentK);
+  for (let i = 0; i < GRID_W * GRID_H; i++) {
+    const v = c.gridA[i] % currentK;
+    counts[v]++;
+  }
   let best = 0;
-  if (counts[1] > counts[best]) best = 1;
-  if (counts[2] > counts[best]) best = 2;
-  if (counts[3] > counts[best]) best = 3;
+  for (let k = 1; k < currentK; k++) if (counts[k] > counts[best]) best = k;
   return c.palette[best];
 }
 function rgbToHex(r, g, b) {
@@ -504,9 +663,10 @@ function renderLive() {
         const innerShift = sy & 1;
         for (let sx = 0; sx < SUB_W; sx++) {
           const gx = Math.min(GRID_W - 1, sx * SUB_DX);
-          const v = cell.gridA[gy * GRID_W + gx] & 3;
+          const v = cell.gridA[gy * GRID_W + gx] % currentK;
           const ansi = cell.palette[v];
-          if (!cell.subRgb) cell.subRgb = new Array(4);
+          if (!cell.subRgb) cell.subRgb = new Array(currentK);
+          if (cell.subRgb.length < currentK) cell.subRgb = new Array(currentK);
           if (cell.subPal !== ansi || cell.subRgb[v] === undefined) {
             const [rr, gg, bb] = ansi256_to_rgb(ansi);
             cell.subRgb[v] = '#' + ((rr << 16) | (gg << 8) | bb).toString(16).padStart(6, '0');
@@ -540,8 +700,8 @@ function bootstrap() {
   for (let i = 0; i < N_CELLS; i++) {
     const cellSeed = (state.seed ^ (i * 2654435761)) >>> 0 || 1;
     const c = makeCell(cellSeed);
-    seed_prng(((state.seed * 1009 + i * 7919) >>> 0) || 1);
-    seed_grid(c.gridA, prng());
+    const gridSeed = ((state.seed * 1009 + i * 7919) >>> 0) || 1;
+    seedGridK(c.gridA, gridSeed);
     state.cells.push(c);
   }
   state.ticks = 0; state.rounds = 0;
@@ -561,9 +721,15 @@ function bootstrap() {
 function rerollPalettes() {
   seed_prng(((Date.now() | 0) >>> 0) || 1);
   for (const c of state.cells) {
-    invent_palette();   // burn one PRNG cycle for parity with firmware boot
-    c.palette = invent_palette();
+    if (isPacked()) {
+      invent_palette();   // burn one PRNG cycle for parity with firmware boot
+      c.palette = invent_palette();
+    } else {
+      c.palette = inventPaletteK(currentK, nnRng);
+    }
     c.lastDrawn = -1;
+    c.subPal = -1;
+    c.subRgb = undefined;
   }
   renderFull();
   cv.classList.add('flash');
@@ -602,12 +768,20 @@ function nearestAnsi256(r, g, b) {
 }
 
 function applyImagePalettes(img) {
-  // 1. Crop to square + resize to GRID_COLS*4 × GRID_ROWS*4.
+  // Sample a √K × √K grid of quadrants per agent's image region, so
+  // every K-slot palette has K image-derived colours laid out in
+  // row-major order. For non-square K (32, 128) we use ceil(√K) ×
+  // ceil(K / ceil(√K)). Kept simple: at K=4 → 2×2, K=16 → 4×4, K=64
+  // → 8×8, K=256 → 16×16.
+  const QX = Math.ceil(Math.sqrt(currentK));
+  const QY = Math.ceil(currentK / QX);
+  // Crop to square + resize so each agent gets a region with QX×QY
+  // pixels (one per palette slot).
   const srcW = img.naturalWidth, srcH = img.naturalHeight;
   const side = Math.min(srcW, srcH);
   const cropX = ((srcW - side) / 2) | 0;
   const cropY = ((srcH - side) / 2) | 0;
-  const PX = GRID_COLS * 4, PY = GRID_ROWS * 4;
+  const PX = GRID_COLS * QX, PY = GRID_ROWS * QY;
   const off = document.createElement('canvas');
   off.width = PX; off.height = PY;
   const octx = off.getContext('2d');
@@ -615,27 +789,21 @@ function applyImagePalettes(img) {
   octx.drawImage(img, cropX, cropY, side, side, 0, 0, PX, PY);
   const img_data = octx.getImageData(0, 0, PX, PY).data;
 
-  // 2. For each agent (r, c), sample a 4×4 region with 2×2 quadrants.
-  //    Quadrant order matches the palette index assignment 0..3:
-  //      0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right
   for (let r = 0; r < GRID_ROWS; r++) {
     for (let c = 0; c < GRID_COLS; c++) {
-      const x0 = c * 4, y0 = r * 4;
+      const x0 = c * QX, y0 = r * QY;
       const cell = state.cells[r * GRID_COLS + c];
-      for (let q = 0; q < 4; q++) {
-        const qx = (q & 1) * 2, qy = (q >> 1) * 2;
-        let sumR = 0, sumG = 0, sumB = 0;
-        for (let dy = 0; dy < 2; dy++) {
-          for (let dx = 0; dx < 2; dx++) {
-            const px = x0 + qx + dx, py = y0 + qy + dy;
-            const idx = (py * PX + px) * 4;
-            sumR += img_data[idx];
-            sumG += img_data[idx + 1];
-            sumB += img_data[idx + 2];
-          }
-        }
-        const avgR = (sumR >> 2), avgG = (sumG >> 2), avgB = (sumB >> 2);
-        cell.palette[q] = nearestAnsi256(avgR, avgG, avgB);
+      // Ensure palette is big enough for currentK (cell may have been
+      // created at a different K).
+      if (cell.palette.length !== currentK) {
+        cell.palette = new Uint8Array(currentK);
+      }
+      for (let q = 0; q < currentK; q++) {
+        const qx = q % QX, qy = (q / QX) | 0;
+        const px = x0 + qx, py = y0 + Math.min(QY - 1, qy);
+        const idx = (py * PX + px) * 4;
+        cell.palette[q] = nearestAnsi256(
+          img_data[idx], img_data[idx + 1], img_data[idx + 2]);
       }
       // Force a re-cache of dominant + sub-pixel colours.
       cell.lastDrawn = -1;
@@ -672,7 +840,7 @@ async function scoreAll() {
   // comparison. Yields every 16 cells so the UI repaints.
   const sharedSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
   for (let i = 0; i < state.cells.length; i++) {
-    state.cells[i].score = fitness(state.cells[i].genome, sharedSeed).score;
+    state.cells[i].score = cellFitness(state.cells[i], sharedSeed);
     if ((i & 15) === 15) {
       gaStatus.textContent = `scoring cell ${i + 1}/${state.cells.length}…`;
       gaStatus.style.color = '#8b949e';
@@ -702,10 +870,8 @@ async function runHunt() {
   for (let k = halfBoundary; k < ordered.length; k++) {
     const i = ordered[k][1];
     const c = state.cells[i];
-    seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
-    c.genome = random_genome();
-    c.palette = invent_palette();
-    seed_grid(c.gridA, prng());
+    cellRandomize(c);
+    seedGridK(c.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
     c.score = 0;
     c.lastDrawn = -1;
     c.subPal = -1;
@@ -749,10 +915,9 @@ async function runRefine() {
   for (let i = 0; i < state.cells.length; i++) {
     if (i === elite) continue;
     const c = state.cells[i];
-    seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
-    mutate(c.genome, E.genome, REFINE_RATE);
-    palette_inherit(c.palette, E.palette, E.palette);
-    seed_grid(c.gridA, prng());
+    cellMutateInPlace(c, E, REFINE_RATE);
+    cellInheritPaletteFrom(c, E, E);
+    seedGridK(c.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
     c.score = E.score;
     c.lastDrawn = -1;
     c.subPal = -1;
@@ -898,18 +1063,41 @@ function cellAtNative(px, py) {
 
 function downloadCellGenome(r, c) {
   const cell = state.cells[r * GRID_COLS + c];
-  const blob_bytes = encode_tail(cell.palette, cell.genome);
-  const blob = new Blob([blob_bytes], {type: 'application/octet-stream'});
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
+  let blob, fname;
+  if (isPacked()) {
+    // K=4 packed: standard 4104-byte HXC4 blob — round-trips into
+    // s3lab, automaton, taxon, and the device firmware.
+    blob = new Blob([encode_tail(cell.palette, cell.genome)],
+                    {type: 'application/octet-stream'});
+    fname = `cellular-K4-r${String(r).padStart(2, '0')}-c${String(c).padStart(2, '0')}-${stamp}.genome.bin`;
+  } else {
+    // K>4 NN: hexnn-genome-v1 JSON (same shape /hexnn/ exports).
+    const g = cell.genome;
+    const json = {
+      format: 'hexnn-genome-v1',
+      K: g.K,
+      n_entries: g.outs.length,
+      source: 'cellular-tft-emulator',
+      keys: [],
+      outputs: Array.from(g.outs),
+      palette_ansi256: Array.from(cell.palette),
+    };
+    for (let i = 0; i < g.outs.length; i++) {
+      json.keys.push(Array.from(g.keys.subarray(i * 7, i * 7 + 7)));
+    }
+    blob = new Blob([JSON.stringify(json)], {type: 'application/json'});
+    fname = `cellular-K${currentK}-r${String(r).padStart(2, '0')}-c${String(c).padStart(2, '0')}-${stamp}.hexnn.json`;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '');
-  a.download = `cellular-r${String(r).padStart(2, '0')}-c${String(c).padStart(2, '0')}-${stamp}.genome.bin`;
+  a.download = fname;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return a.download;
+  return fname;
 }
 
 function flashCell(r, c) {
@@ -989,9 +1177,8 @@ imageInput.addEventListener('change', (e) => {
 });
 
 function reseedAllGrids() {
-  seed_prng(((Date.now() | 0) >>> 0) || 1);
   for (const c of state.cells) {
-    seed_grid(c.gridA, prng());
+    seedGridK(c.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
     c.lastDrawn = -1;
   }
   renderFull();
@@ -1001,10 +1188,7 @@ function reseedAllGrids() {
 
 // ── Tick + round ────────────────────────────────────────────────────
 function tickAll() {
-  for (const c of state.cells) {
-    step_grid(c.genome, c.gridA, c.gridB);
-    const tmp = c.gridA; c.gridA = c.gridB; c.gridB = tmp;
-  }
+  for (const c of state.cells) cellStep(c);
   state.ticks++;
   kvTick.textContent = state.ticks;
 }
@@ -1015,19 +1199,19 @@ function runRound() {
   const ni  = neighbourIdx(ci, dir);
   if (ci === ni) return;
   const sharedSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
-  const fc = fitness(state.cells[ci].genome, sharedSeed).score;
-  const fn = fitness(state.cells[ni].genome, sharedSeed).score;
+  const fc = cellFitness(state.cells[ci], sharedSeed);
+  const fn = cellFitness(state.cells[ni], sharedSeed);
   state.cells[ci].score = fc;
   state.cells[ni].score = fn;
   const winnerIdx = fc >= fn ? ci : ni;
   const loserIdx  = winnerIdx === ci ? ni : ci;
   const W = state.cells[winnerIdx], L = state.cells[loserIdx];
   const rate = Math.max(0, Math.min(0.1, parseFloat(mutRateEl.value) || 0.005));
-  mutate(L.genome, W.genome, rate);
-  palette_inherit(L.palette, W.palette, W.palette);
+  cellMutateInPlace(L, W, rate);
+  cellInheritPaletteFrom(L, W, W);
   L.score = W.score;
   L.refinedAt = performance.now();
-  seed_grid(L.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
+  seedGridK(L.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
   L.lastDrawn = -1;
   state.lastWinner = winnerIdx; state.lastLoser = loserIdx;
   state.rounds++;
@@ -1134,6 +1318,36 @@ setPanelButtonState(savedPanel);
 let savedRender = 'dominant';
 try { savedRender = localStorage.getItem('cellular-tft-render') ?? 'dominant'; } catch (e) {}
 applyRenderMode(savedRender);
+
+// ── K dropdown: switches the engine (packed vs NN) and rebootstraps
+// the population. The two engines have different genome shapes, so
+// preserving genomes across K changes isn't meaningful; we just
+// roll fresh.
+const kSelect = document.getElementById('K-select');
+function applyK(k) {
+  const newK = parseInt(k, 10) || 4;
+  if (newK === currentK) return;
+  currentK = newK;
+  currentEngine = (currentK === 4) ? 'packed' : 'nn';
+  try { localStorage.setItem('cellular-tft-K', String(currentK)); } catch (_) {}
+  // Reset every cell's per-K caches so the next render rebuilds them.
+  for (const cell of state.cells || []) {
+    cell.lastDrawn = -1;
+    cell.subPal = -1;
+    cell.subRgb = undefined;
+  }
+  bootstrap();
+  gaStatus.textContent =
+    `K=${currentK} · ${currentEngine === 'packed' ? 'packed' : 'NN (N=2^' + NN_N_LOG2 + ')'}`;
+  gaStatus.style.color = '#8b949e';
+}
+kSelect.addEventListener('change', (e) => applyK(e.target.value));
+let savedK = 4;
+try { savedK = parseInt(localStorage.getItem('cellular-tft-K') || '4', 10); } catch (_) {}
+if (![4, 8, 16, 32, 64, 128, 256].includes(savedK)) savedK = 4;
+kSelect.value = String(savedK);
+currentK = savedK;
+currentEngine = (currentK === 4) ? 'packed' : 'nn';
 
 let savedRot = 0;
 try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (e) {}
