@@ -125,7 +125,10 @@
         {% for s in recent_searches %}
         <tr style="border-top:1px solid #21262d; color:#c9d1d9;">
           <td style="padding:0.3rem 0.4rem;">
-            <a href="#" data-watch="{{ s.slug }}" style="color:#79c0ff; text-decoration:none;">{{ s.slug }}</a>
+            <a href="{% url 'taxon:autosearch_detail' slug=s.slug %}"
+               data-watch="{{ s.slug }}"
+               style="color:#79c0ff; text-decoration:none;"
+               title="Open the watch view for this run (also bookmarkable).">{{ s.slug }}</a>
           </td>
           <td style="padding:0.3rem 0.4rem;">class {{ s.target_class }}</td>
           <td style="padding:0.3rem 0.4rem;">{{ s.get_status_display }}</td>
@@ -260,13 +263,21 @@
     }
   });
 
-  // Click an existing search slug to start watching it.
+  // Click an existing search slug to start watching it. Holding
+  // ctrl/cmd or middle-click bypasses preventDefault so the link
+  // opens its permalink in a new tab as the user expects.
   document.querySelectorAll('a[data-watch]').forEach(a => {
     a.addEventListener('click', e => {
+      if (e.ctrlKey || e.metaKey || e.button === 1) return;
       e.preventDefault();
       startWatching(a.dataset.watch);
     });
   });
+
+  // Permalink: if the page was loaded at /taxon/autosearch/<slug>/,
+  // auto-watch that run on mount.
+  const initialWatch = "{{ watch_slug|default:''|escapejs }}";
+  if (initialWatch) startWatching(initialWatch);
 })();
 </script>
 {% endblock %}

@@ -31,4 +31,5 @@ urlpatterns = [
     path('autosearch/start/',                views.autosearch_start,  name='autosearch_start'),
     path('autosearch/<slug:slug>/stop/',     views.autosearch_stop,   name='autosearch_stop'),
     path('autosearch/<slug:slug>/status.json', views.autosearch_status, name='autosearch_status'),
+    path('autosearch/<slug:slug>/',          views.autosearch_view,   name='autosearch_detail'),
 ]

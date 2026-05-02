@@ -57,7 +57,8 @@ def _rule_card(rule: Rule) -> dict:
 
 @login_required
 def index(request):
-    cards = [_rule_card(r) for r in Rule.objects.all()[:24]]
+    cards = [_rule_card(r) for r in
+             Rule.objects.all().prefetch_related('classifications')[:24]]
     summary = _classification_summary()
     total = Rule.objects.count()
     classified = Classification.objects.values('rule').distinct().count()
@@ -91,7 +92,8 @@ def library(request):
         qs = qs.order_by('name', 'slug')
     else:
         qs = qs.order_by('-created_at')
-    cards = [_rule_card(r) for r in qs[:300]]   # cap render cost
+    cards = [_rule_card(r) for r in
+             qs.prefetch_related('classifications')[:300]]   # cap render cost
     sources = (Rule.objects.values('source')
                .annotate(c=Count('id')).order_by('-c'))
     return render(request, 'taxon/library.html', {
@@ -109,13 +111,20 @@ def library(request):
 def class_view(request, n: int):
     if n not in (1, 2, 3, 4):
         return HttpResponseBadRequest('class must be 1, 2, 3, or 4')
-    # Latest-classification-per-rule with that wolfram_class.
-    rule_ids = []
-    for rule in Rule.objects.all():
-        c = rule.latest_classification
-        if c and c.wolfram_class == n:
-            rule_ids.append(rule.id)
-    rules = Rule.objects.filter(id__in=rule_ids)
+    # Latest-classification-per-rule with that wolfram_class. Single
+    # SQL pass via window function: pick the most recent Classification
+    # per rule, filter to those whose latest matches `n`. Was N+1
+    # (529 queries at the current library size).
+    from django.db.models import Subquery, OuterRef
+    latest_per_rule = (Classification.objects
+                       .filter(rule=OuterRef('pk'))
+                       .order_by('-assigned_at'))
+    rules = (Rule.objects
+             .annotate(latest_class=Subquery(
+                 latest_per_rule.values('wolfram_class')[:1]))
+             .filter(latest_class=n)
+             .order_by('-created_at')
+             .prefetch_related('classifications')[:300])
     cards = [_rule_card(r) for r in rules]
     return render(request, 'taxon/class.html', {
         'n': n,
@@ -581,11 +590,19 @@ def evolve_save(request):
 # ── AutoSearch: background hunt for target-class rules ─────────────
 
 @login_required
-def autosearch_view(request):
-    """Page that launches + monitors background searches."""
+def autosearch_view(request, slug: str = None):
+    """Page that launches + monitors background searches.
+
+    With no slug: shows the form + recent runs. With ?slug present
+    (the autosearch_detail URL): same page, but pre-watches the named
+    run via a data attribute so a refresh lands back on the same view.
+    """
     from . import autosearch
     autosearch.mark_orphans()
     recent = AutoSearch.objects.all()[:20]
+    watch = None
+    if slug:
+        watch = get_object_or_404(AutoSearch, slug=slug)
     return render(request, 'taxon/autosearch.html', {
         'wolfram_classes': WOLFRAM_CLASSES,
         'recent_searches': recent,
@@ -593,6 +610,7 @@ def autosearch_view(request):
             .filter(status__in=(AutoSearch.STATUS_QUEUED,
                                  AutoSearch.STATUS_RUNNING))
             .count(),
+        'watch_slug': watch.slug if watch else '',
     })
 
 

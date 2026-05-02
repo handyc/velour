@@ -9,11 +9,15 @@
     {{ c.rule.name|default:c.rule.slug }}
   </div>
   <div style="font-size:0.66rem; color:#8b949e;">{{ c.rule.sha1|slice:":10" }} · {{ c.rule.source }}</div>
-  <div style="margin-top:0.35rem;">
-    {% for hex in c.palette %}
+  <div style="margin-top:0.35rem; display:flex; flex-wrap:wrap; gap:1px; max-width:100%;">
+    {# Cap visible swatches so a 256-colour HexNN palette doesn't blow out the card. #}
+    {% for hex in c.palette|slice:":12" %}
       <span style="display:inline-block; width:14px; height:14px; background:{{ hex }};
-                   border:1px solid #444; vertical-align:middle;"></span>
+                   border:1px solid #444;"></span>
     {% endfor %}
+    {% if c.palette|length > 12 %}
+      <span style="color:#6e7681; font-size:0.7rem; padding-left:0.2rem;">+{{ c.palette|length|add:"-12" }}</span>
+    {% endif %}
   </div>
   <div style="margin-top:0.4rem; font-size:0.72rem;">
     {% if c.class_n %}

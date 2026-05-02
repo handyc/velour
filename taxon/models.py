@@ -119,6 +119,16 @@ class Rule(models.Model):
 
     @property
     def latest_classification(self):
+        # If the caller used .prefetch_related('classifications'), use
+        # the cached list to avoid an N+1 (529 rules × 1 query each
+        # was the original cost on /taxon/classes/<n>/).
+        cache = getattr(self, '_prefetched_objects_cache', None)
+        if cache and 'classifications' in cache:
+            items = list(cache['classifications'])
+            if not items:
+                return None
+            items.sort(key=lambda c: c.assigned_at, reverse=True)
+            return items[0]
         return self.classifications.order_by('-assigned_at').first()
 
     def latest_metric(self, name: str):
