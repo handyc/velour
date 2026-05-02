@@ -644,8 +644,11 @@ def distill_cellular_esp(request):
     except ValueError: mut_rate = 0.005
     tick_ms   = max(20, min(2000, int(request.POST.get('tick_ms', 200))))
     round_ms  = max(50, min(5000, int(request.POST.get('round_ms', 500))))
-    label = (f's3lab Cellular → ESP32-S3 ({grid_cols}×{grid_rows} pop, '
-             f'mut={mut_rate})')
+    panel = (request.POST.get('panel_variant') or '80x160').strip()
+    if panel not in ('80x160', '128x128'):
+        panel = '80x160'
+    label = (f's3lab Cellular → ESP32-S3 + ST7735 {panel} '
+             f'({grid_cols}×{grid_rows} pop, mut={mut_rate})')
     return _distill_and_save(
         request,
         name=label,
@@ -653,8 +656,9 @@ def distill_cellular_esp(request):
         source_tier='django', target_tier='esp',
         build=lambda: build(grid_cols=grid_cols, grid_rows=grid_rows,
                             mut_rate=mut_rate,
-                            tick_ms=tick_ms, round_ms=round_ms),
-        success_fmt='Cellular → ESP32-S3: {size} bytes.',
+                            tick_ms=tick_ms, round_ms=round_ms,
+                            panel_variant=panel),
+        success_fmt=f'Cellular → ESP32-S3 ({panel}): {{size}} bytes.',
     )
 
 

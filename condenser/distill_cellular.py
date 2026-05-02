@@ -478,6 +478,29 @@ int main(int argc, char **argv) {{
 """
 
 
+# Supported ST7735 panel variants. Each preset picks an Adafruit
+# initR token, the effective WxH (post-setRotation), and a default
+# tile size sized to fit the 16×16 population. Add more presets here
+# when a new panel turns up; the rest of distill_cellular_esp keys
+# off these values.
+TFT_VARIANTS = {
+    '80x160': {
+        'init':     'INITR_MINI160x80',
+        'rotation': 3,
+        'panel_w':  160,
+        'panel_h':  80,
+        'tile_px':  5,    # 16*5 + 2 = 82 wide; 16*4 = 64 tall
+    },
+    '128x128': {
+        'init':     'INITR_144GREENTAB',
+        'rotation': 0,
+        'panel_w':  128,
+        'panel_h':  128,
+        'tile_px':  7,    # 16*7 + 3 = 115 wide; 16*6 = 96 tall
+    },
+}
+
+
 def distill_cellular_esp(
     *,
     grid_cols: int = 16,
@@ -489,10 +512,18 @@ def distill_cellular_esp(
     mut_rate: float = 0.005,
     tick_ms: int = 200,
     round_ms: int = 500,
+    panel_variant: str = '80x160',
 ) -> str:
     """Emit an ESP32-S3 SuperMini firmware that runs the full Cellular
-    sublab on-device: 256-cell population in PSRAM, ST7735S render of
+    sublab on-device: 256-cell population in PSRAM, ST7735 render of
     the 16×16 hex-offset tile grid, WiFi + HTTP for live status.
+
+    ``panel_variant`` selects between the supported ST7735 panels in
+    ``TFT_VARIANTS`` — currently ``80x160`` (the original supermini
+    1.8" panel, INITR_MINI160x80 + setRotation(3)) and ``128x128`` (a
+    1.44" square panel, INITR_144GREENTAB + setRotation(0)). The
+    population layout, tile size, and Adafruit init token all change
+    accordingly; algorithm, BSS layout, and HTTP API are identical.
 
     Reuses the chassis pattern from
     ``isolation/artifacts/hex_ca_class4/esp32_s3_xcc/`` (WiFi STA from
@@ -508,17 +539,25 @@ def distill_cellular_esp(
     """
     if K != 4:
         raise ValueError('cellular-esp distillation only validated for K=4')
+    if panel_variant not in TFT_VARIANTS:
+        raise ValueError(
+            f'panel_variant {panel_variant!r} not in '
+            f'{sorted(TFT_VARIANTS.keys())!r}')
+    panel = TFT_VARIANTS[panel_variant]
+    panel_init     = panel['init']
+    panel_rotation = panel['rotation']
+    panel_w_px     = panel['panel_w']
+    panel_h_px     = panel['panel_h']
     n_cells = grid_cols * grid_rows
     nsit = K ** 7
     gbytes = (nsit * 2 + 7) // 8
     pal_bytes = K
     cell_bytes = gbytes + pal_bytes + 2 * (ca_w * ca_h) + 8
 
-    # ST7735S panel is 80×160 (when rotated 3); we want every
-    # population cell as a small colored tile. With 16 cols, 5 px wide
-    # + 0.5 px hex-offset → 16*5 + 2.5 = 82.5 px wide. With 16 rows at
-    # ~0.866*5 = 4.33 px each → ~69 px tall. Fits in 80×160 panel.
-    tile_px = 5
+    # Tile size baked at distill time. Each panel preset picks a value
+    # that fits 16×16 cells with a small margin; users override by
+    # passing a different panel_variant.
+    tile_px = panel['tile_px']
     return f"""\
 // cellular_esp.cpp — distilled from s3lab Cellular sublab.
 //
@@ -567,6 +606,12 @@ def distill_cellular_esp(
 #define MUT_RATE    {mut_rate}
 
 #define TILE_PX     {tile_px}
+
+// Panel pixel dimensions baked at distill time. Different panels use
+// different INITR_* tokens + setRotation values, so the post-rotation
+// effective WxH is what render_pop_diff centres into.
+#define PANEL_W_PX  {panel_w_px}
+#define PANEL_H_PX  {panel_h_px}
 
 // ST7735S pin map (matches esp32_s3_xcc and esp32_s3_full).
 #define PIN_SCK   12
@@ -814,8 +859,8 @@ static void render_pop_full() {{
 static void render_pop_diff() {{
     int total_w = GRID_COLS * TILE_PX + TILE_PX / 2;
     int total_h = (GRID_ROWS * TILE_PX * 866) / 1000;     // hex pack
-    int x0 = (160 - total_w) / 2;
-    int y0 = (80 - total_h) / 2;
+    int x0 = (PANEL_W_PX - total_w) / 2;
+    int y0 = (PANEL_H_PX - total_h) / 2;
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     for (int r = 0; r < GRID_ROWS; r++) {{
@@ -1054,9 +1099,9 @@ void setup() {{
                   (unsigned)need, (unsigned)(need / 1024));
 
     pinMode(PIN_BL, OUTPUT); digitalWrite(PIN_BL, HIGH);
-    tft.initR(INITR_MINI160x80);
+    tft.initR({panel_init});
     tft.setSPISpeed(SPI_HZ);
-    tft.setRotation(3);
+    tft.setRotation({panel_rotation});
     tft.invertDisplay(true);
     tft.fillScreen(ST77XX_BLACK);
 

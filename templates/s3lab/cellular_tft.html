@@ -16,9 +16,10 @@
   .panel h3 { margin: 0 0 0.4rem 0; font-size: 0.78rem; color: #8b949e;
               font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
   .device {
-    /* Wider than tall to mimic the supermini's TFT bezel after the
-       firmware's setRotation(3) — effective 160×80 layout. */
-    width: 656px; margin: 1rem auto;
+    /* Outer device frame. Width adapts to the active panel preset
+       (set inline by the JS panel selector — 80x160 is wide,
+       128x128 is square). */
+    margin: 1rem auto;
     background: #1a1d20; padding: 16px;
     border: 1px solid #30363d; border-radius: 12px;
     box-shadow: 0 0 24px rgba(0,0,0,0.5);
@@ -29,7 +30,7 @@
   }
   canvas#tft-emu {
     display: block; margin: 0 auto;
-    width: 624px; height: 312px;        /* 4× of 156×78 */
+    /* width/height set inline from JS based on the panel preset. */
     image-rendering: pixelated; image-rendering: crisp-edges;
     background: #000; border: 1px solid #2a2e33;
     transition: transform 0.25s ease, box-shadow 0s;
@@ -76,10 +77,10 @@
     canvas is 156×78 native pixels, displayed at 4× zoom so each
     device pixel is a visible 4×4 block.</p>
 
-  <div class="device">
-    <div class="label">ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)</div>
-    <canvas id="tft-emu" width="156" height="78"
-            aria-label="160×80 pixel-faithful preview of the cellular firmware TFT"></canvas>
+  <div class="device" id="device-frame">
+    <div class="label" id="device-label">ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)</div>
+    <canvas id="tft-emu"
+            aria-label="ST7735 panel preview"></canvas>
   </div>
 
   <div class="panel">
@@ -109,12 +110,17 @@
       </label>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
-      <span style="color:#8b949e;font-size:0.8rem;">rotation</span>
+      <span style="color:#8b949e;font-size:0.8rem;">panel</span>
+      <div class="rot-group" id="panel-group" title="Switch the emulator (and pick which firmware variant you'd flash).">
+        <button data-panel="80x160" class="active">80×160 (rot 3)</button>
+        <button data-panel="128x128">128×128 (1.44″)</button>
+      </div>
+      <span style="color:#8b949e;font-size:0.8rem; margin-left:0.6rem;">rotation</span>
       <div class="rot-group" id="rot-group">
-        <button data-rot="0" class="active" title="No rotation (effective 160×80, what the device shows)">0°</button>
-        <button data-rot="1" title="90° CW">90°</button>
-        <button data-rot="2" title="180°">180°</button>
-        <button data-rot="3" title="270° CW">270°</button>
+        <button data-rot="0" class="active">0°</button>
+        <button data-rot="1">90°</button>
+        <button data-rot="2">180°</button>
+        <button data-rot="3">270°</button>
       </div>
       <span style="color:#6e7681;font-size:0.75rem;">remembered between visits</span>
     </div>
@@ -160,24 +166,84 @@ import {
 const GRID_COLS  = 16;
 const GRID_ROWS  = 16;
 const N_CELLS    = GRID_COLS * GRID_ROWS;
-const TILE_PX    = 5;
 const ROW_STEP_X1000 = 866;
-const ROW_STEP_PX = ((TILE_PX * ROW_STEP_X1000) / 1000) | 0;   // = 4
-const CELL_W = TILE_PX - 1;                                     // = 4
-const CELL_H = Math.max(1, ROW_STEP_PX - 1);                    // = 3
 
-// Centre the pop grid inside the 156×78 canvas (mirroring the device's
-// firmware: x0 = (160-82)/2 ≈ 39, y0 ≈ 5, allowing for the 156-px
-// virtual width = 160 - 2px panel margin on each side).
-const POP_W = GRID_COLS * TILE_PX + (TILE_PX / 2 | 0);    // 82
-const POP_H = (GRID_ROWS * ROW_STEP_PX);                  // 64
-const PANEL_W = 156, PANEL_H = 78;
-const X0 = ((PANEL_W - POP_W) / 2) | 0;
-const Y0 = ((PANEL_H - POP_H) / 2) | 0;
+// Panel presets — must match condenser/distill_cellular.py:TFT_VARIANTS
+// so the emulator and the firmware paint at the same coordinates.
+//   panel_w/h   — native pixels (the post-rotation effective size)
+//   tile_px     — tile width baked at distill time
+//   zoom        — display scale; native × zoom = CSS pixels on screen
+//   label       — what shows under the device frame
+const PANEL_PRESETS = {
+  '80x160': {
+    panel_w: 156, panel_h: 78,   // 80×160 - 2px margin per side after rot 3
+    tile_px: 5,   zoom: 4,
+    label: 'ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)',
+  },
+  '128x128': {
+    panel_w: 128, panel_h: 128,
+    tile_px: 7,   zoom: 4,
+    label: 'ESP32-S3 SUPERMINI · ST7735 1.44″ 128×128',
+  },
+};
+
+// Mutable layout — applyPanel() rewrites these whenever the user
+// flips the panel selector. The render loop reads them every frame.
+let PANEL_KEY  = '80x160';
+let PANEL_W    = PANEL_PRESETS[PANEL_KEY].panel_w;
+let PANEL_H    = PANEL_PRESETS[PANEL_KEY].panel_h;
+let TILE_PX    = PANEL_PRESETS[PANEL_KEY].tile_px;
+let ROW_STEP_PX = ((TILE_PX * ROW_STEP_X1000) / 1000) | 0;
+let CELL_W     = TILE_PX - 1;
+let CELL_H     = Math.max(1, ROW_STEP_PX - 1);
+let POP_W      = GRID_COLS * TILE_PX + (TILE_PX / 2 | 0);
+let POP_H      = (GRID_ROWS * ROW_STEP_PX);
+let X0         = ((PANEL_W - POP_W) / 2) | 0;
+let Y0         = ((PANEL_H - POP_H) / 2) | 0;
 
 const cv  = document.getElementById('tft-emu');
 const ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+
+const deviceFrame = document.getElementById('device-frame');
+const deviceLabel = document.getElementById('device-label');
+
+// Apply a panel preset: rewrites all layout constants, resizes the
+// canvas + device frame, and triggers a full repaint. Persists to
+// localStorage so a refresh keeps your panel choice.
+function applyPanel(key) {
+  if (!PANEL_PRESETS[key]) key = '80x160';
+  PANEL_KEY = key;
+  const p = PANEL_PRESETS[key];
+  PANEL_W = p.panel_w; PANEL_H = p.panel_h;
+  TILE_PX = p.tile_px;
+  ROW_STEP_PX = ((TILE_PX * ROW_STEP_X1000) / 1000) | 0;
+  CELL_W = TILE_PX - 1;
+  CELL_H = Math.max(1, ROW_STEP_PX - 1);
+  POP_W  = GRID_COLS * TILE_PX + (TILE_PX / 2 | 0);
+  POP_H  = (GRID_ROWS * ROW_STEP_PX);
+  X0 = ((PANEL_W - POP_W) / 2) | 0;
+  Y0 = ((PANEL_H - POP_H) / 2) | 0;
+
+  // Canvas backing-buffer resolution + on-screen size.
+  cv.width  = PANEL_W;
+  cv.height = PANEL_H;
+  cv.style.width  = (PANEL_W * p.zoom) + 'px';
+  cv.style.height = (PANEL_H * p.zoom) + 'px';
+  ctx.imageSmoothingEnabled = false;
+
+  // Device frame width = canvas + 16-px padding on each side (16 from
+  // the .device class).
+  deviceFrame.style.width = (PANEL_W * p.zoom + 32) + 'px';
+  deviceLabel.textContent = p.label;
+
+  // Force every cell to repaint.
+  if (state.cells.length) {
+    for (const c of state.cells) c.lastDrawn = -1;
+    renderFull();
+  }
+  try { localStorage.setItem('cellular-tft-panel', key); } catch (e) {}
+}
 
 const seedEl     = document.getElementById('seed');
 const roundMsEl  = document.getElementById('roundMs');
@@ -430,6 +496,30 @@ function applyRotation(rot) {
 rotGroup.querySelectorAll('button').forEach(b => {
   b.addEventListener('click', () => applyRotation(+b.dataset.rot));
 });
+
+// ── Panel preset selector ──────────────────────────────────────────
+const panelGroup = document.getElementById('panel-group');
+function setPanelButtonState(key) {
+  panelGroup.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', b.dataset.panel === key);
+  });
+}
+panelGroup.querySelectorAll('button').forEach(b => {
+  b.addEventListener('click', () => {
+    applyPanel(b.dataset.panel);
+    setPanelButtonState(b.dataset.panel);
+  });
+});
+
+// Restore persisted panel + rotation, in that order — applyPanel
+// resets layout and triggers a full repaint, so rotation must be
+// re-applied afterwards.
+let savedPanel = '80x160';
+try { savedPanel = localStorage.getItem('cellular-tft-panel') ?? '80x160'; } catch (e) {}
+if (!PANEL_PRESETS[savedPanel]) savedPanel = '80x160';
+applyPanel(savedPanel);
+setPanelButtonState(savedPanel);
+
 let savedRot = 0;
 try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (e) {}
 applyRotation(savedRot);
