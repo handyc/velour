@@ -64,10 +64,54 @@ With the existing 156 KB base from `esp32_s3_full/`, expected peak is
 ~210 KB / 320 KB DRAM (66%). PSRAM is still untouched. Plenty of
 headroom for the elf_loader integration in Phase 2.5.
 
-## Phase 3 preview
+## Phase 3 — slot table + native ELF loader (SHIPPED)
 
-Once `/run-elf` actually executes uploaded code, the hot loop's
-`step_grid()`, `fitness()`, `render_diff()`, and `apply_bindings()`
-will be referenced through a stable function-pointer table. An
-uploaded ELF will swap any one slot atomically. A watchdog reverts
-to the baked-in implementation on crash.
+The hot loop calls every per-tick action through `HotSlots HOT`.
+A loaded ELF can replace any one slot:
+
+```
+POST /run-elf?slot=step|render|gpio
+```
+
+Currently swappable slots and their ABIs (xcc700-compatible C):
+
+```
+// step: hex CA tick. genome = 4096 B; in/out = 256 cells each.
+void step(char *genome, char *in, char *out);
+
+// render: pure data out. Write desired RGB565 colour per cell into
+// rgb565[i*2..i*2+1] (low byte first). 0xFF 0xFF = "skip this cell."
+// Firmware blits the buffer; loaded code never calls tft.fillRect.
+void render(char *prev, char *cur, char *rgb565);
+
+// gpio: pure data out. Write desired HIGH/LOW per binding into
+// levels[i]. Firmware does the digitalWrite; loaded code doesn't
+// need any external symbols.
+void gpio(char *grid, char *levels);
+```
+
+`POST /reset-slots` reverts everything to the baked-in defaults.
+
+**Native ELF loader** (`load_elf_text` in `src/main.cpp`): walks the
+ELF section header table, finds `.text`, allocates IRAM via
+`heap_caps_malloc(MALLOC_CAP_EXEC | MALLOC_CAP_8BIT)`, copies, calls
+`__builtin___clear_cache` for icache invalidation, and casts the
+entry pointer to the slot's typedef.
+
+Scope is intentionally narrow: ELF32/Xtensa, single .text section,
+no external symbols, no `.data`/`.bss`, no relocations resolved.
+Loaded code must be self-contained — pure functions over args + stack
+locals + arithmetic. `.text` is capped at 32 KiB.
+
+**End-to-end:** write C in `/s3lab/compile/`, click "Compile + push",
+and the new slot kicks in on the next CA tick. No re-flash.
+
+## Phase 3.5+ backlog
+
+- Symbol bridge (let loaded code call `serial_println`, etc. via
+  function-pointer table indices — needs xcc700 to grow function-
+  pointer call syntax, or a manual indexed-call helper).
+- Software watchdog: detect a crashed slot mid-tick and auto-revert
+  before the chip TWDT-resets.
+- More slots: `fitness` (hunt-time), `mutate`, `palette_invent`.
+- Multi-section ELFs once a relocation resolver lands.

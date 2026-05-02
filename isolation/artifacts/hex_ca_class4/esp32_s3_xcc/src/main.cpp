@@ -603,18 +603,38 @@ static void run_hunt(uint32_t grid_seed) {
         Serial.println("saved as /winner.bin");
 }
 
-// ── Hot-swap slot table (Phase 3A) ────────────────────────────────────
+// ── Hot-swap slot table (Phase 3A + 3.5) ──────────────────────────────
 //
 // The CA run loop calls every per-tick action through this struct so
-// an uploaded ELF can replace any one entry atomically. Phase 3A
-// (this commit) is the table + the replacement of direct calls.
-// Phase 3B+3C will wire /run-elf to actually patch it. Until then
-// HOT.* always points at the baked-in defaults below — behaviour is
-// byte-identical to esp32_s3_full.
+// an uploaded ELF can replace any one entry atomically.
+//
+// Phase 3.5 redesign: render and gpio slots are pure-data — they
+// populate output buffers, the firmware does the actual TFT blit and
+// digitalWrite. This means loaded code never has to call into firmware
+// symbols (which xcc700 has no idiom to express anyway), so render
+// and gpio become useful slots, not just "step plus two stubs."
+//
+// ABIs:
+//   step(genome, in, out)
+//     Hex CA tick. genome is 4096 B (K=4 packed). in/out are
+//     GRID_W*GRID_H = 256 cells each.
+//
+//   render_pixels(prev, cur, rgb565)
+//     For every cell, write the desired RGB565 colour into the
+//     two bytes at rgb565[idx*2..idx*2+1] (low byte then high byte).
+//     The firmware reads this buffer and blits each cell to the TFT.
+//     prev is provided so a "diff-only" render can skip unchanged
+//     cells by writing zero to the corresponding two bytes — which
+//     the firmware interprets as "skip" (see SKIP_SENTINEL below).
+//
+//   gpio_levels(grid, levels)
+//     For every output binding (n_bindings entries; bindings[] is a
+//     read-only firmware global), write the desired HIGH (1) /
+//     LOW (0) into levels[i]. The firmware then digitalWrites them.
 
 typedef void (*step_fn_t)(const u8 *genome, const u8 *in, u8 *out);
-typedef void (*render_fn_t)(const u8 *prev, const u8 *cur);
-typedef void (*gpio_fn_t)(const u8 *grid);
+typedef void (*render_fn_t)(const u8 *prev, const u8 *cur, u8 *rgb565);
+typedef void (*gpio_fn_t)(const u8 *grid, u8 *levels);
 
 struct HotSlots {
     step_fn_t   step;
@@ -625,17 +645,73 @@ struct HotSlots {
     bool        gpio_default;
 };
 
-static HotSlots HOT = {
+// Pixel-blit sentinel. A render_pixels slot that writes 0xFFFF (low
+// byte 0xFF, high byte 0xFF) to a cell tells the firmware to leave
+// the TFT pixel for that cell untouched. The default render uses
+// this for cells that didn't change, mirroring render_diff.
+#define RENDER_SKIP_SENTINEL 0xFFFFu
+
+// Phase 3.5 defaults — populate output buffers, no I/O of their own.
+static void render_pixels_default(const u8 *prev, const u8 *cur, u8 *rgb565) {
+    for (int i = 0; i < GRID_W * GRID_H; i++) {
+        if (prev != nullptr && prev[i] == cur[i]) {
+            rgb565[i*2]   = 0xFF;
+            rgb565[i*2+1] = 0xFF;          // SKIP sentinel
+        } else {
+            uint16_t c = pal_rgb565[cur[i]];
+            rgb565[i*2]   = (uint8_t)(c & 0xFF);
+            rgb565[i*2+1] = (uint8_t)(c >> 8);
+        }
+    }
+}
+
+static void gpio_levels_default(const u8 *grid, u8 *levels) {
+    for (int i = 0; i < n_bindings; i++) {
+        const GpioBinding &b = bindings[i];
+        int v = grid[b.cell_y * GRID_W + b.cell_x];
+        levels[i] = (uint8_t)((b.state_mask >> v) & 1);
+    }
+}
+
+struct HotSlots HOT = {
     /* step           */ step_grid,
-    /* render         */ render_diff,
-    /* gpio           */ apply_bindings,
+    /* render         */ render_pixels_default,
+    /* gpio           */ gpio_levels_default,
     /* step_default   */ true,
     /* render_default */ true,
     /* gpio_default   */ true,
 };
 
+// Per-tick output buffers — file-scope so setup() can use them too.
+static u8 hot_rgb_buf[GRID_W * GRID_H * 2];
+static u8 hot_levels_buf[MAX_BINDINGS];
+
 static const char *slot_state(bool is_default) {
     return is_default ? "default" : "loaded";
+}
+
+// Apply the rgb565 buffer the render slot produced to the TFT.
+// SKIP sentinel cells are left untouched — same effect as render_diff.
+static void blit_pixels_to_tft(const u8 *rgb565) {
+    for (int y = 0; y < GRID_H; y++) {
+        for (int x = 0; x < GRID_W; x++) {
+            int i = y * GRID_W + x;
+            uint16_t c = (uint16_t)rgb565[i*2] |
+                         ((uint16_t)rgb565[i*2+1] << 8);
+            if (c == RENDER_SKIP_SENTINEL) continue;
+            int px = XPAD + x * CELL + ((y & 1) ? (CELL / 2) : 0);
+            int py = YPAD + y * CELL;
+            tft.fillRect(px, py, CELL, CELL, c);
+        }
+    }
+}
+
+// Apply the levels buffer the gpio slot produced to the configured
+// output pins.
+static void apply_levels_to_pins(const u8 *levels) {
+    for (int i = 0; i < n_bindings; i++) {
+        digitalWrite(bindings[i].gpio_pin, levels[i] ? HIGH : LOW);
+    }
 }
 
 
@@ -1045,9 +1121,9 @@ static LoadedElf loaded_gpio    = {nullptr, 0, 0};
 
 
 static void revert_slot(const String &name) {
-    if (name == "step")   { HOT.step   = step_grid;       HOT.step_default   = true; free_loaded_elf(loaded_step); }
-    if (name == "render") { HOT.render = render_diff;     HOT.render_default = true; free_loaded_elf(loaded_render); }
-    if (name == "gpio")   { HOT.gpio   = apply_bindings;  HOT.gpio_default   = true; free_loaded_elf(loaded_gpio); }
+    if (name == "step")   { HOT.step   = step_grid;              HOT.step_default   = true; free_loaded_elf(loaded_step); }
+    if (name == "render") { HOT.render = render_pixels_default;  HOT.render_default = true; free_loaded_elf(loaded_render); }
+    if (name == "gpio")   { HOT.gpio   = gpio_levels_default;    HOT.gpio_default   = true; free_loaded_elf(loaded_gpio); }
 }
 
 
@@ -1257,8 +1333,12 @@ void setup() {
 
     tft.fillScreen(ST77XX_BLACK);
     apply_input_bindings(grid_a);
-    render_full(grid_a);
-    apply_bindings(grid_a);
+    // Initial frame uses the same slot path as the run loop so a
+    // hot-loaded render slot affects boot-time as well.
+    HOT.render(nullptr, grid_a, hot_rgb_buf);  // prev=NULL → full render
+    blit_pixels_to_tft(hot_rgb_buf);
+    HOT.gpio(grid_a, hot_levels_buf);
+    apply_levels_to_pins(hot_levels_buf);
 
     // Comms (WiFi + HTTP) come up after the hunt finishes so the WiFi
     // stack doesn't compete with the GA for cycles. The CA run loop
@@ -1276,9 +1356,11 @@ void loop() {
     delay(TICK_MS);
     server.handleClient();       // service HTTP between every CA tick
     apply_input_bindings(cur);   // pin reads clamp cells before stepping
-    HOT.step(genome, cur, nxt);  // Phase 3A: indirect via slot table
-    HOT.render(cur, nxt);
-    HOT.gpio(nxt);
+    HOT.step(genome, cur, nxt);                     // step slot
+    HOT.render(cur, nxt, hot_rgb_buf);              // render slot → buffer
+    blit_pixels_to_tft(hot_rgb_buf);                // firmware does the I/O
+    HOT.gpio(nxt, hot_levels_buf);                  // gpio slot → buffer
+    apply_levels_to_pins(hot_levels_buf);           // firmware does the I/O
 
     u8 *t = cur; cur = nxt; nxt = t;
     tick++;

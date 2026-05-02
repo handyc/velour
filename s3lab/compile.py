@@ -238,6 +238,97 @@ void step(char *genome, char *in, char *out) {
 ''',
     },
     {
+        'slug': 'slot_render_grayscale',
+        'name': 'Slot: render — collapse to grayscale',
+        'src': '''// Phase 3.5 RENDER slot ABI — pure data out, no symbol bridge:
+//     void render(char *prev, char *cur, char *rgb565)
+// rgb565 is 256*2 = 512 bytes (one RGB565 colour per cell, low byte
+// first). Write 0xFF 0xFF to leave the TFT cell untouched. The
+// firmware blits this buffer to the ST7735S — no tft.fillRect call
+// from your code.
+//
+// This example collapses K=4 colours to 4 grayscale shades:
+//   c=0 -> 0x0000 (black)
+//   c=1 -> 0x52AA (dark grey)
+//   c=2 -> 0xA554 (light grey)
+//   c=3 -> 0xFFFF (white) — but 0xFFFF is the SKIP sentinel, so we
+//                          use 0xFFFE for c=3 white.
+
+void render(char *prev, char *cur, char *rgb565) {
+    int i = 0;
+    while (i < 256) {
+        int v = cur[i] & 3;
+        int c = 0;
+        if (v == 1) c = 0x52AA;
+        if (v == 2) c = 0xA554;
+        if (v == 3) c = 0xFFFE;
+        rgb565[i*2]     = c & 0xFF;
+        rgb565[i*2 + 1] = (c >> 8) & 0xFF;
+        i = i + 1;
+    }
+}
+''',
+    },
+    {
+        'slug': 'slot_render_diff_only',
+        'name': 'Slot: render — diff-only (skip unchanged cells)',
+        'src': '''// RENDER slot, diff-mode. Walk every cell; if it didn't change
+// since the previous tick, write the SKIP sentinel (0xFF 0xFF)
+// so the firmware leaves that pixel alone. For changed cells,
+// emit a neon-cyan colour (RGB565 0x07FF) so updates flash.
+// Useful for catching subtle motion in nearly-still patterns.
+
+void render(char *prev, char *cur, char *rgb565) {
+    int i = 0;
+    while (i < 256) {
+        if (prev[i] == cur[i]) {
+            rgb565[i*2]     = 0xFF;
+            rgb565[i*2 + 1] = 0xFF;       // SKIP
+        }
+        if (prev[i] != cur[i]) {
+            rgb565[i*2]     = 0xFF;
+            rgb565[i*2 + 1] = 0x07;       // 0x07FF cyan, low-first
+        }
+        i = i + 1;
+    }
+}
+''',
+    },
+    {
+        'slug': 'slot_gpio_xor',
+        'name': 'Slot: gpio — XOR cell parity into pin levels',
+        'src': '''// Phase 3.5 GPIO slot ABI — pure data out:
+//     void gpio(char *grid, char *levels)
+// levels is an array of HIGH (1) / LOW (0) values, one entry per
+// configured output binding. The firmware reads bindings[] (a
+// read-only fixed array) to know which cell maps to which pin —
+// this slot just decides the level. Default is bindings[i].state_mask
+// & (1 << cell_value).
+//
+// This example drives every output pin from the XOR-parity of the
+// cells in its row, so a single pin reflects "is row N's parity 1?".
+// Useful for collapsing a 16x16 grid into a quick logic vector.
+
+void gpio(char *grid, char *levels) {
+    int i = 0;
+    // We can't read n_bindings from here (no symbol bridge). Drive
+    // up to MAX_BINDINGS=64 entries; firmware truncates to the real
+    // n_bindings when it does the digitalWrites.
+    while (i < 64) {
+        int row = i & 15;            // 16-row wrap; lets pins 16..63 mirror 0..15
+        int p = 0;
+        int x = 0;
+        while (x < 16) {
+            p = p ^ (grid[row * 16 + x] & 1);
+            x = x + 1;
+        }
+        levels[i] = p;
+        i = i + 1;
+    }
+}
+''',
+    },
+    {
         'slug': 'slot_step_genome',
         'name': 'Slot: step — re-implement the canonical hex CA',
         'src': '''// STEP slot, the real thing: re-implement the same hex
