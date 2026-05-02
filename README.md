@@ -47,8 +47,7 @@ the grid. The exact final shape varies run-to-run; that's the point.*
 ## Inspirations
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
-  [Unborn](https://github.com/matheusfillipe/Unborn) and
-  [gircc](https://github.com/matheusfillipe/gircc).
+  [Unborn](https://github.com/matheusfillipe/Unborn).
 - **[Valware](https://github.com/ValwareIRC)** —
   [ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC).
 
