@@ -155,6 +155,14 @@ export function stepWithGenomeBins(grid, W, H, bins) {
 
 
 // ── Score: edge-of-chaos parabola on K=4-quantized change rate ──
+//
+// K=4 quantization was deliberate when the engine was K=4-only — change
+// rate as a fraction of cells whose state actually flipped. Once K
+// scaled to 256, the same K=4 lens collapsed all 256 outputs into 4
+// quartiles, so a rule that toggles 5 ↔ 7 (both quartile 0) reads as
+// "no change" → low fitness → eliminated, even though it's actively
+// using the colour space. The K-aware variant below treats any cell
+// state change as a change, which scales meaningfully across K.
 
 export function quantize4(v, K) {
     return Math.floor(v * 4 / K);
@@ -164,6 +172,17 @@ export function changeRateK4(prev, cur, K) {
     let changes = 0;
     for (let i = 0; i < cur.length; i++) {
         if (quantize4(prev[i], K) !== quantize4(cur[i], K)) changes++;
+    }
+    return changes / cur.length;
+}
+
+// K-aware: count any cell state change, no quantization. At K=4 the
+// result tracks changeRateK4 exactly (no quantization needed); at K=256
+// the GA can finally reward rules that exercise the full colour range.
+export function changeRateExact(prev, cur) {
+    let changes = 0;
+    for (let i = 0; i < cur.length; i++) {
+        if (prev[i] !== cur[i]) changes++;
     }
     return changes / cur.length;
 }
@@ -185,6 +204,27 @@ export function score(g, W, steps, rng, burnIn) {
     for (let s = 0; s < steps - burnIn; s++) {
         const nxt = stepWithGenomeBins(cur, W, W, bins);
         total += changeRateK4(cur, nxt, g.K);
+        counted++;
+        cur = nxt;
+    }
+    const r = counted > 0 ? total / counted : 0;
+    return { f: 4 * r * (1 - r), r };
+}
+
+// Same parabola fitness, K-aware change rate. Use this whenever K>4 —
+// the K=4 score conflates distinct outputs and biases the GA toward
+// rules that don't use the full palette.
+export function scoreKAware(g, W, steps, rng, burnIn) {
+    const bins = buildBins(g);
+    let cur = freshGrid(W, W, g.K, rng);
+    for (let s = 0; s < burnIn; s++) {
+        cur = stepWithGenomeBins(cur, W, W, bins);
+    }
+    let total = 0;
+    let counted = 0;
+    for (let s = 0; s < steps - burnIn; s++) {
+        const nxt = stepWithGenomeBins(cur, W, W, bins);
+        total += changeRateExact(cur, nxt);
         counted++;
         cur = nxt;
     }

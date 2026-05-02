@@ -29,7 +29,7 @@
 import {
     N_LOG2, N_ENTRIES, mulberry32,
     makeGenome, buildBins, lookup, stepWithGenomeBins,
-    score, mutateGenome, crossover, freshGrid,
+    score, scoreKAware, mutateGenome, crossover, freshGrid,
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
     ansi256_rgb,
 } from '../hexnn_engine.mjs';
@@ -148,9 +148,14 @@ function bootstrap() {
 // entry.fitness so downstream selection (tournament, hunt) is uniform.
 
 function edgeOfChaosScore(entry) {
+    // K-aware change rate (scoreKAware) instead of K=4-quantized score
+    // — at K=256 the legacy score collapses 256 outputs into 4 quartile
+    // buckets, biasing the GA toward rules that use only a few values.
+    // Strateta wants the full colour range exercised, so any cell
+    // change counts. Same edge-of-chaos parabola on top.
     const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
-    const sc = score(entry.genome, INNER_W, SCORE_STEPS,
-                      mulberry32(seed | 1), SCORE_BURNIN);
+    const sc = scoreKAware(entry.genome, INNER_W, SCORE_STEPS,
+                            mulberry32(seed | 1), SCORE_BURNIN);
     return { f: sc.f, r: sc.r };
 }
 

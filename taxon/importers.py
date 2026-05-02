@@ -14,7 +14,8 @@ from automaton.packed import (
     PackedRuleset, hex_to_rgb, nearest_ansi256, parse_genome_bin,
 )
 
-from .models import KIND_HEX_K4_PACKED, Rule
+from .hexnn import pack_hexnn
+from .models import KIND_HEX_K4_PACKED, KIND_HEX_NN, Rule
 
 
 def _unique_slug(base: str) -> str:
@@ -141,6 +142,91 @@ def import_automaton_ruleset(rs) -> Optional[Rule]:
         source='automaton',
         source_ref=f'ruleset={rs.slug}',
     )
+
+
+def upsert_hexnn(K: int, keys: bytes, outs: bytes,
+                 palette_ansi: bytes, *,
+                 name: str = '', source: str = 'manual',
+                 source_ref: str = '', notes: str = '') -> Rule:
+    """Insert or update a HexNN-format Rule. Genome stored as taxon's
+    HXNN binary blob (b'HXNN' + u32 K + u32 N + keys + outs).
+
+    palette_ansi is K bytes of ANSI-256 indices; if shorter we pad
+    with 0x10 (mid-range cube grey) so renders don't crash.
+    """
+    blob = pack_hexnn(K, keys, outs)
+    if len(palette_ansi) < K:
+        palette_ansi = palette_ansi + b'\x10' * (K - len(palette_ansi))
+    elif len(palette_ansi) > K:
+        palette_ansi = palette_ansi[:K]
+
+    sha = hashlib.sha1(blob).hexdigest()
+    existing = Rule.objects.filter(sha1=sha).first()
+    if existing:
+        if not existing.name and name:
+            existing.name = name
+        if source_ref and source_ref not in (existing.source_ref or ''):
+            existing.source_ref = (
+                f'{existing.source_ref}; {source_ref}'
+                if existing.source_ref else source_ref
+            )
+        existing.palette_ansi = palette_ansi
+        existing.save()
+        return existing
+
+    rule = Rule(
+        slug=_unique_slug(name or sha[:10]),
+        name=name,
+        notes=notes,
+        kind=KIND_HEX_NN,
+        n_colors=K,
+        genome=blob,
+        palette_ansi=palette_ansi,
+        sha1=sha,
+        source=source,
+        source_ref=source_ref,
+    )
+    rule.save()
+    return rule
+
+
+def import_strateta_population(payload: dict, *,
+                                source: str = 'strateta',
+                                source_ref: str = '') -> list[Rule]:
+    """Import every entry of a strateta-population-v1 payload as Rules.
+
+    The payload's ``library`` is a list of {keys, outputs, palette,
+    grid, fitness} dicts; we only need keys + outputs + palette to
+    build a HexNN Rule. ``palette`` is a list of CSS hex strings; we
+    convert to ANSI-256 indices via nearest-match for storage.
+    """
+    if payload.get('format') != 'strateta-population-v1':
+        raise ValueError(f'not a strateta-population-v1 payload (got {payload.get("format")!r})')
+    K = int(payload['K'])
+    library = payload['library']
+    base_ref = source_ref or 'strateta-population'
+    out: list[Rule] = []
+    for i, lib in enumerate(library):
+        keys = bytes(lib['keys'])
+        outs = bytes(lib['outputs'])
+        if len(keys) != len(outs) * 7:
+            raise ValueError(f'entry {i}: keys length {len(keys)} != outs*7 = {len(outs) * 7}')
+        palette_css = lib.get('palette') or []
+        palette_ansi = bytearray()
+        for h in palette_css:
+            try:
+                r = int(h[1:3], 16); g = int(h[3:5], 16); b = int(h[5:7], 16)
+                palette_ansi.append(nearest_ansi256((r, g, b)))
+            except Exception:
+                palette_ansi.append(0x10)
+        rule = upsert_hexnn(
+            K, keys, outs, bytes(palette_ansi),
+            name=f'strateta entry {i:03d}',
+            source=source,
+            source_ref=f'{base_ref}; entry={i}',
+        )
+        out.append(rule)
+    return out
 
 
 def import_huntrule(hunt_rule) -> Rule:

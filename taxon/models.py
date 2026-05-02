@@ -24,13 +24,18 @@ from django.db import models
 from django.utils import timezone
 
 
-# The genome formats taxon understands. Phase 1 only stores K=4 hex
-# packed-positional (HXC4). HXNN (k-dialable nearest-neighbor used by
-# hexnn / stratum library) is a Phase 2 addition.
+# The genome formats taxon understands.
+# - HXC4: 4,096-byte K=4 packed-positional (the original; what s3lab
+#   classic / cellular / automaton / helix.hexhunt all share).
+# - HXNN: K-dialable nearest-neighbor used by /hexnn/, stratum, strateta.
+#   Stored as taxon's HXNN blob format: b'HXNN' + u32 K + u32 N_entries
+#   + N*7 keys + N outs. ~131 KB at the canonical N=16384.
 KIND_HEX_K4_PACKED = 'hex_k4_packed'
+KIND_HEX_NN        = 'hex_nn'
 
 KIND_CHOICES = [
     (KIND_HEX_K4_PACKED, 'Hex K=4 packed (HXC4)'),
+    (KIND_HEX_NN,        'Hex NN (K-dialable, hexnn-genome / strateta)'),
 ]
 
 
@@ -41,6 +46,7 @@ SOURCE_CHOICES = [
     ('s3lab',       'S3 Lab'),
     ('helix',       'Helix Hex Hunt'),
     ('stratum',     'S3 Lab Stratum'),
+    ('strateta',    'S3 Lab Strateta'),
     ('hexnn',       'HexNN'),
     ('manual',      'Manual upload'),
     ('random',      'Random init'),

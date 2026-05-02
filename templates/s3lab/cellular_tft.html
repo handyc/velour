@@ -603,9 +603,13 @@ function cellStep(c) {
 function cellFitness(c, seed) {
   if (isPacked()) {
     return fitness(c.genome, seed).score;
-  } else {
-    return NN.score(c.genome, GRID_W, 25, NN.mulberry32(seed >>> 0 || 1), 8).f;
   }
+  // K-aware change rate at K>4 — the K=4-quantized NN.score collapses
+  // 256 outputs into 4 quartiles and biases the GA toward rules that
+  // exercise only a few values. scoreKAware counts any cell-state
+  // change so the parabola fitness still picks edge-of-chaos but
+  // across the actual K-colour space.
+  return NN.scoreKAware(c.genome, GRID_W, 25, NN.mulberry32(seed >>> 0 || 1), 8).f;
 }
 
 function cellMutateInPlace(c, parent, rate) {
