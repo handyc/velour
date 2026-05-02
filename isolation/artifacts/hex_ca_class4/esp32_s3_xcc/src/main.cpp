@@ -1082,6 +1082,98 @@ static void free_loaded_elf(LoadedElf &le) {
 }
 
 
+// POST /compile-c with C source as the raw request body. Runs the
+// embedded xcc700 compiler in-process and either:
+//   - returns the resulting Xtensa ELF as octet-stream (default), or
+//   - if ?slot=step|render|gpio|fitness is supplied, also saves the
+//     ELF as the loaded.elf file and immediately runs /run-elf logic
+//     on the named slot — one round-trip from C source to live code.
+//
+// The vendor xcc700 dialect is small (no for/do/switch/struct/float,
+// only // comments, declarations must initialise). Errors come back
+// as plain-text in the response body with HTTP 400.
+extern "C" {
+#include "xcc_embedded.h"
+}
+
+// Forward — defined further down so /compile-c can reach the slot
+// patcher when ?slot= is supplied.
+static bool patch_slot_from_buf(const String &slot,
+                                const uint8_t *buf, size_t n,
+                                String &err_out, uint32_t &entry_out);
+
+static void handle_compile_c() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "text/plain",
+                    "POST C source as request body\n");
+        return;
+    }
+    const String &body = server.arg("plain");
+    if (body.length() == 0) {
+        server.send(400, "text/plain", "empty source\n");
+        return;
+    }
+
+    uint32_t t0 = millis();
+    xcc_result_t r = xcc_compile(body.c_str(), (int)body.length());
+    uint32_t t1 = millis();
+
+    if (r.exit_code != 0 || r.elf == nullptr || r.elf_size == 0) {
+        String resp;
+        resp.reserve(160 + r.err_len);
+        resp += "compile failed (exit=";
+        resp += String(r.exit_code);
+        resp += ", ";
+        resp += String((unsigned)(t1 - t0));
+        resp += " ms)\n";
+        if (r.err_len > 0) resp += String(r.err);
+        server.send(400, "text/plain", resp);
+        return;
+    }
+
+    // Optional: ?slot=NAME — stash the ELF, patch the slot, return
+    // success summary instead of the raw ELF blob.
+    String slot = server.arg("slot");
+    if (slot.length() > 0) {
+        String err;
+        uint32_t entry = 0;
+        bool ok = patch_slot_from_buf(slot, r.elf, (size_t)r.elf_size,
+                                       err, entry);
+        if (!ok) {
+            server.send(500, "text/plain",
+                        String("compile OK, slot patch FAILED: ") + err);
+            return;
+        }
+        String summary;
+        summary.reserve(160);
+        summary += "OK compiled+patched slot=";
+        summary += slot;
+        summary += " (";
+        summary += String(r.elf_size);
+        summary += " B ELF, entry=0x";
+        summary += String(entry, HEX);
+        summary += ", ";
+        summary += String((unsigned)(t1 - t0));
+        summary += " ms)\n";
+        server.send(200, "text/plain", summary);
+        Serial.printf("[compile-c] %u src B → %d ELF B → slot %s in %u ms\n",
+                      (unsigned)body.length(), r.elf_size,
+                      slot.c_str(), (unsigned)(t1 - t0));
+        return;
+    }
+
+    // Default: return the ELF as application/octet-stream so the
+    // caller can /load-elf + /run-elf separately if they want.
+    server.sendHeader("X-Compile-Ms", String((unsigned)(t1 - t0)));
+    server.sendHeader("X-Elf-Size", String(r.elf_size));
+    server.send_P(200, "application/octet-stream",
+                  (const char *)r.elf, r.elf_size);
+    Serial.printf("[compile-c] %u src B → %d ELF B in %u ms\n",
+                  (unsigned)body.length(), r.elf_size,
+                  (unsigned)(t1 - t0));
+}
+
+
 // POST /load-elf with the ELF as the raw request body. We accumulate
 // chunks in a heap buffer (capped at MAX_ELF_BYTES) and then commit
 // to LittleFS in one go so a half-written file can never run.
@@ -1169,6 +1261,51 @@ static void revert_all_slots() {
     revert_slot("render");
     revert_slot("gpio");
     revert_slot("fitness");
+}
+
+
+// Shared slot-patcher used by both /run-elf (loads from LittleFS) and
+// /compile-c?slot= (loads from the just-compiled in-memory ELF).
+// Mutates HOT.<slot> + the matching loaded_<slot> tracker. Returns
+// false on parse / load / unknown-slot failure with a description in
+// err_out; on success entry_out gets the IRAM exec address.
+static bool patch_slot_from_buf(const String &slot,
+                                const uint8_t *buf, size_t n,
+                                String &err_out, uint32_t &entry_out) {
+    if (slot != "step" && slot != "render" &&
+        slot != "gpio" && slot != "fitness") {
+        err_out = "slot must be one of: step, render, gpio, fitness";
+        return false;
+    }
+    LoadedElf le = {nullptr, 0, 0};
+    const char *err = nullptr;
+    if (!load_elf_text(buf, n, le, err)) {
+        err_out = err ? err : "(unknown ELF load error)";
+        return false;
+    }
+    entry_out = (uint32_t)(uintptr_t)le.exec;
+    if (slot == "step") {
+        free_loaded_elf(loaded_step);
+        loaded_step = le;
+        HOT.step = (step_fn_t)le.exec;
+        HOT.step_default = false;
+    } else if (slot == "render") {
+        free_loaded_elf(loaded_render);
+        loaded_render = le;
+        HOT.render = (render_fn_t)le.exec;
+        HOT.render_default = false;
+    } else if (slot == "gpio") {
+        free_loaded_elf(loaded_gpio);
+        loaded_gpio = le;
+        HOT.gpio = (gpio_fn_t)le.exec;
+        HOT.gpio_default = false;
+    } else if (slot == "fitness") {
+        free_loaded_elf(loaded_fitness);
+        loaded_fitness = le;
+        HOT.fitness = (fitness_fn_t)le.exec;
+        HOT.fitness_default = false;
+    }
+    return true;
 }
 
 
@@ -1378,6 +1515,7 @@ static void comms_setup() {
     server.on("/wifi",        HTTP_POST, handle_wifi);
     server.on("/load-elf",    HTTP_POST, handle_load_elf);
     server.on("/run-elf",     HTTP_POST, handle_run_elf);
+    server.on("/compile-c",   HTTP_POST, handle_compile_c);
     server.on("/reset-slots", HTTP_POST, handle_reset_slots);
     server.on("/rehunt",      HTTP_POST, handle_rehunt);
     server.on("/load-genome", HTTP_POST, handle_load_genome);
