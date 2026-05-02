@@ -247,6 +247,64 @@ def rule_edit(request, slug: str):
 
 
 @login_required
+def rule_preview_png(request, slug: str):
+    """Tiny PNG thumbnail of the rule's CA after a brief simulation —
+    drives the card thumbnails on /taxon/library/, /taxon/classes/, and
+    /taxon/. Cached in Django's default cache for an hour. K=4 packed
+    rules render in ~2 ms; K=256 HexNN rules in ~100 ms (one-time cost
+    paid once per rule per cache TTL).
+    """
+    from io import BytesIO
+
+    from django.core.cache import cache
+    from django.utils.cache import patch_response_headers
+    from PIL import Image
+
+    rule = get_object_or_404(Rule, slug=slug)
+    cache_key = f'taxon-preview-{rule.sha1}'
+    cached = cache.get(cache_key)
+    if cached is None:
+        size = 16
+        ticks = 24
+        seed = 42
+        if rule.kind == 'hex_k4_packed':
+            packed = PackedRuleset(n_colors=4, data=bytes(rule.genome))
+            traj, _hashes = simulate(packed, size, size, ticks, seed)
+            grid = traj[-1]
+            palette = list(bytes(rule.palette_ansi))[:4]
+            from automaton.packed import ansi256_to_rgb
+            pal_rgb = [ansi256_to_rgb(p) for p in palette]
+        else:
+            from .hexnn import HexNNRuleset, simulate as hexnn_simulate, unpack_hexnn
+            from automaton.packed import ansi256_to_rgb
+            K, keys, outs = unpack_hexnn(bytes(rule.genome))
+            ruleset = HexNNRuleset(K, keys, outs)
+            traj, _hashes = hexnn_simulate(ruleset, size, size, ticks, seed)
+            grid = traj[-1]
+            palette = list(bytes(rule.palette_ansi))[:K]
+            pal_rgb = [ansi256_to_rgb(p) for p in palette]
+        # Render to a 64×64 PIL Image, scale 4× per cell.
+        scale = 4
+        img = Image.new('RGB', (size * scale, size * scale))
+        px = img.load()
+        for y in range(size):
+            for x in range(size):
+                v = int(grid[y, x]) if hasattr(grid, 'shape') else grid[y * size + x]
+                v = v % len(pal_rgb)
+                r, g, b = pal_rgb[v]
+                for dy in range(scale):
+                    for dx in range(scale):
+                        px[x * scale + dx, y * scale + dy] = (r, g, b)
+        buf = BytesIO()
+        img.save(buf, format='PNG', optimize=True)
+        cached = buf.getvalue()
+        cache.set(cache_key, cached, timeout=3600)
+    resp = HttpResponse(cached, content_type='image/png')
+    patch_response_headers(resp, cache_timeout=3600)
+    return resp
+
+
+@login_required
 def rule_download(request, slug: str):
     """Emit the 4,104-byte HXC4 genome.bin for round-trip to s3lab/ESP."""
     rule = get_object_or_404(Rule, slug=slug)

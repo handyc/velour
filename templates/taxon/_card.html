@@ -5,10 +5,19 @@
           border-left:4px solid {{ c.class_color }}; border-radius:5px;
           text-decoration:none; color:#c9d1d9; vertical-align:top;
           font-family:ui-monospace,Menlo,monospace; font-size:0.78rem;">
-  <div style="font-weight:600; color:#e1e4e8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-    {{ c.rule.name|default:c.rule.slug }}
+  <div style="display:flex; gap:0.5rem; align-items:flex-start;">
+    <img src="{% url 'taxon:rule_preview_png' slug=c.rule.slug %}"
+         loading="lazy" width="48" height="48" alt=""
+         style="image-rendering:pixelated; image-rendering:crisp-edges;
+                background:#0d1117; border:1px solid #30363d; border-radius:2px;
+                flex-shrink:0;">
+    <div style="min-width:0; flex:1;">
+      <div style="font-weight:600; color:#e1e4e8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        {{ c.rule.name|default:c.rule.slug }}
+      </div>
+      <div style="font-size:0.66rem; color:#8b949e;">{{ c.rule.sha1|slice:":10" }} · {{ c.rule.source }}</div>
+    </div>
   </div>
-  <div style="font-size:0.66rem; color:#8b949e;">{{ c.rule.sha1|slice:":10" }} · {{ c.rule.source }}</div>
   <div style="margin-top:0.35rem; display:flex; flex-wrap:wrap; gap:1px; max-width:100%;">
     {# Cap visible swatches so a 256-colour HexNN palette doesn't blow out the card. #}
     {% for hex in c.palette|slice:":12" %}

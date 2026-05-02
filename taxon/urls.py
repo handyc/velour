@@ -16,6 +16,7 @@ urlpatterns = [
     path('rules/<slug:slug>/', views.rule_detail, name='rule_detail'),
     path('rules/<slug:slug>/edit/', views.rule_edit, name='rule_edit'),
     path('rules/<slug:slug>/genome.bin', views.rule_download, name='rule_download'),
+    path('rules/<slug:slug>/preview.png', views.rule_preview_png, name='rule_preview_png'),
     path('rules/<slug:slug>/classify/', views.rule_classify, name='rule_classify'),
     path('rules/<slug:slug>/delete/', views.rule_delete, name='rule_delete'),
     path('rules/<slug:slug>/reroll-palette/', views.rule_reroll_palette, name='rule_reroll_palette'),
