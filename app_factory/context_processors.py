@@ -30,7 +30,23 @@ def _compute_slugs():
 
 
 def installed_app_slugs(request):
+    """Backwards-compatible: ``installed_app_slugs`` is still the full
+    set of installed apps; ``accessible_app_slugs`` is what the request
+    user is allowed to see (intersection of installed × user's
+    ``app:<slug>`` group memberships when per-app enforcement is on).
+    Single-user dev mode (``VELOUR_PER_APP_ACCESS_ENFORCED=False``) keeps
+    accessible == installed so existing templates don't change.
+    """
     global _INSTALLED_APP_SLUGS
     if _INSTALLED_APP_SLUGS is None:
         _INSTALLED_APP_SLUGS = _compute_slugs()
-    return {'installed_app_slugs': _INSTALLED_APP_SLUGS}
+
+    # Avoid an import loop by importing here, not at module load.
+    from .access import apps_accessible_to
+    user = getattr(request, 'user', None)
+    accessible = apps_accessible_to(user) & _INSTALLED_APP_SLUGS
+
+    return {
+        'installed_app_slugs':  _INSTALLED_APP_SLUGS,
+        'accessible_app_slugs': accessible,
+    }

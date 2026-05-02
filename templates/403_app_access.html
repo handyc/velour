@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}403 — no access to {{ attempted_app }}{% endblock %}
+
+{% block content %}
+<div style="max-width:760px; margin:3rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+  <h1 style="color:#f85149; margin-top:0;">403 · access denied</h1>
+  <p>Your account isn't in the <code>app:{{ attempted_app }}</code>
+     group, so you can't reach <code>{{ attempted_path }}</code>.</p>
+  <p style="color:#8b949e; font-size:0.85rem;">
+    An administrator can grant access from the Django admin (Groups →
+    <code>app:{{ attempted_app }}</code>) or from the shell:
+    <code>python manage.py grant_app_access &lt;you&gt; {{ attempted_app }}</code>.
+  </p>
+
+  {% if accessible_apps %}
+  <h2 style="font-size:1rem; margin-top:1.5rem;">Apps you can access:</h2>
+  <ul>
+    {% for slug in accessible_apps %}
+      <li><a href="/{{ slug }}/" style="color:#79c0ff;">{{ slug }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:#8b949e;"><em>You currently have access to no apps.</em>
+    Ask an administrator to add you to one or more
+    <code>app:&lt;slug&gt;</code> groups.</p>
+  {% endif %}
+
+  <p style="margin-top:2rem;"><a href="/dashboard/" style="color:#79c0ff;">← Dashboard</a></p>
+</div>
+{% endblock %}

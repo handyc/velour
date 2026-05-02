@@ -149,7 +149,16 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Per-app access gating (no-op unless VELOUR_PER_APP_ACCESS_ENFORCED).
+    'app_factory.middleware.AppAccessMiddleware',
 ]
+
+# Multi-user / VPS deployments: flip to True to enforce per-app
+# permission gating via Django Groups named ``app:<slug>``. When False
+# (the default for single-user dev / WSL localhost) the middleware is
+# a no-op and every authenticated user can hit every app, matching
+# the prior behaviour. See ``app_factory/access.py``.
+VELOUR_PER_APP_ACCESS_ENFORCED = False
 
 ROOT_URLCONF = 'velour.urls'
 

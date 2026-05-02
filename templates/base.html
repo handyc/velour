@@ -69,7 +69,7 @@
 </head>
 <body>
     <div class="chronos-topbar-row">
-        {% if identity_pulse and 'identity' in installed_app_slugs %}
+        {% if identity_pulse and 'identity' in accessible_app_slugs %}
         <a id="identity-pulse" href="{% url 'identity:home' %}"
            title="{{ identity_pulse.thought }}">
             <span class="pulse-dot m-{{ identity_pulse.mood }}"></span>
@@ -79,7 +79,7 @@
             {% endif %}
         </a>
         {% endif %}
-        {% if 'chronos' in installed_app_slugs %}
+        {% if 'chronos' in accessible_app_slugs %}
         {% include "chronos/_topbar_clock.html" %}
         {% endif %}
     </div>
@@ -93,65 +93,65 @@
                 {# via /apps/create/'s checkbox grid) still renders a clean nav #}
                 {# rather than 500-ing on NoReverseMatch. installed_app_slugs   #}
                 {# comes from app_factory.context_processors.                   #}
-                {% if 'dashboard' in installed_app_slugs %}<a href="{% url 'dashboard:home' %}">Dashboard</a>{% endif %}
-                {% if 'terminal' in installed_app_slugs %}<a href="{% url 'terminal:terminal' %}">Terminal</a>{% endif %}
-                {% if 'app_factory' in installed_app_slugs %}<a href="{% url 'app_factory:list' %}">App Factory</a>{% endif %}
-                {% if 'sysinfo' in installed_app_slugs %}<a href="{% url 'sysinfo:home' %}">System Info</a>{% endif %}
-                {% if 'graphs' in installed_app_slugs %}<a href="{% url 'graphs:home' %}">Graphs</a>{% endif %}
-                {% if 'services' in installed_app_slugs %}<a href="{% url 'services:home' %}">Services</a>{% endif %}
-                {% if 'logs' in installed_app_slugs %}<a href="{% url 'logs:home' %}">Logs</a>{% endif %}
-                {% if 'hosts' in installed_app_slugs %}<a href="{% url 'hosts:list' %}">Hosts</a>{% endif %}
-                {% if 'mail' in installed_app_slugs %}<a href="{% url 'mail:home' %}">Mail</a>{% endif %}
-                {% if 'nodes' in installed_app_slugs %}<a href="{% url 'nodes:list' %}">Fleet</a>{% endif %}
-                {% if 'bodymap' in installed_app_slugs %}<a href="{% url 'bodymap:list' %}">Bodymap</a>{% endif %}
-                {% if 'powerlab' in installed_app_slugs %}<a href="{% url 'powerlab:index' %}">Power Lab</a>{% endif %}
-                {% if 'roomplanner' in installed_app_slugs %}<a href="{% url 'roomplanner:index' %}">Room Planner</a>{% endif %}
-                {% if 'naiad' in installed_app_slugs %}<a href="{% url 'naiad:index' %}">Naiad</a>{% endif %}
-                {% if 'conduit' in installed_app_slugs %}<a href="{% url 'conduit:index' %}">Conduit</a>{% endif %}
-                {% if 'oneliner' in installed_app_slugs %}<a href="{% url 'oneliner:index' %}">Oneliner</a>{% endif %}
-                {% if 'lingua' in installed_app_slugs %}<a href="{% url 'lingua:home' %}">Lingua</a>{% endif %}
-                {% if 'muka' in installed_app_slugs %}<a href="{% url 'muka:index' %}">Muka</a>{% endif %}
-                {% if 'camlfornia' in installed_app_slugs %}<a href="{% url 'camlfornia:index' %}">Camlfornia</a>{% endif %}
-                {% if 'aggregator' in installed_app_slugs %}<a href="{% url 'aggregator:index' %}">Aggregator</a>{% endif %}
-                {% if 'studious' in installed_app_slugs %}<a href="{% url 'studious:index' %}">Studious</a>{% endif %}
-                {% if 'agora' in installed_app_slugs %}<a href="{% url 'agora:index' %}">Agora</a>{% endif %}
-                {% if 'isolation' in installed_app_slugs %}<a href="{% url 'isolation:index' %}">Isolation</a>{% endif %}
-                {% if 'radiant' in installed_app_slugs %}<a href="{% url 'radiant:index' %}">Radiant</a>{% endif %}
-                {% if 'agents' in installed_app_slugs %}<a href="{% url 'agents:index' %}">Agents</a>{% endif %}
-                {% if 'experiments' in installed_app_slugs %}<a href="{% url 'experiments:list' %}">Experiments</a>{% endif %}
-                {% if 'chronos' in installed_app_slugs %}<a href="{% url 'chronos:home' %}">Chronos</a>{% endif %}
-                {% if 'databases' in installed_app_slugs %}<a href="{% url 'databases:list' %}">Databases</a>{% endif %}
-                {% if 'codex' in installed_app_slugs %}<a href="{% url 'codex:list' %}">Codex</a>{% endif %}
-                {% if 'attic' in installed_app_slugs %}<a href="{% url 'attic:list' %}">Attic</a>{% endif %}
-                {% if 'zoetrope' in installed_app_slugs %}<a href="{% url 'zoetrope:list' %}">Zoetrope</a>{% endif %}
-                {% if 'cartography' in installed_app_slugs %}<a href="{% url 'cartography:home' %}">Maps</a>{% endif %}
-                {% if 'hpc' in installed_app_slugs %}<a href="{% url 'hpc:list' %}">HPC</a>{% endif %}
-                {% if 'tiles' in installed_app_slugs %}<a href="{% url 'tiles:list' %}">Tiles</a>{% endif %}
-                {% if 'condenser' in installed_app_slugs %}<a href="{% url 'condenser:home' %}">Condenser</a>{% endif %}
-                {% if 'automaton' in installed_app_slugs %}<a href="{% url 'automaton:home' %}">Automaton</a>{% endif %}
-                {% if 'aether' in installed_app_slugs %}<a href="{% url 'aether:world_list' %}">Aether</a>{% endif %}
-                {% if 'lsystem' in installed_app_slugs %}<a href="{% url 'lsystem:species_list' %}">L-System</a>{% endif %}
-                {% if 'legolith' in installed_app_slugs %}<a href="{% url 'legolith:list' %}">Legolith</a>{% endif %}
-                {% if 'screen_gubi' in installed_app_slugs %}<a href="{% url 'screen_gubi:index' %}">Gubi</a>{% endif %}
-                {% if 'bridge' in installed_app_slugs %}<a href="{% url 'bridge:home' %}">Bridge</a>{% endif %}
-                {% if 'grammar_engine' in installed_app_slugs %}<a href="{% url 'grammar_engine:list' %}">Grammar</a>{% endif %}
-                {% if 'evolution' in installed_app_slugs %}<a href="{% url 'evolution:list' %}">Evolution</a>{% endif %}
-                {% if 'reckoner' in installed_app_slugs %}<a href="{% url 'reckoner:index' %}">Reckoner</a>{% endif %}
-                {% if 'displacer' in installed_app_slugs %}<a href="{% url 'displacer:home' %}">Displacer</a>{% endif %}
-                {% if 'helix' in installed_app_slugs %}<a href="{% url 'helix:list' %}">Helix</a>{% endif %}
-                {% if 'casting' in installed_app_slugs %}<a href="{% url 'casting:index' %}">Casting</a>{% endif %}
-                {% if 'oracle' in installed_app_slugs %}<a href="{% url 'oracle:home' %}">Oracle</a>{% endif %}
-                {% if 'det' in installed_app_slugs %}<a href="{% url 'det:index' %}">Det</a>{% endif %}
-                {% if 's3lab' in installed_app_slugs %}<a href="{% url 's3lab:index' %}">S3 Lab</a>{% endif %}
-                {% if 'hexnn' in installed_app_slugs %}<a href="{% url 'hexnn:index' %}">Hex NN</a>{% endif %}
-                {% if 'taxon' in installed_app_slugs %}<a href="{% url 'taxon:index' %}">Taxon</a>{% endif %}
-                {% if 'datalift' in installed_app_slugs %}<a href="{% url 'datalift:job_list' %}">Datalift</a>{% endif %}
-                {% if 'landingpage' in installed_app_slugs %}<a href="{% url 'landingpage:home' %}">News</a>{% endif %}
-                {% if 'winctl' in installed_app_slugs %}<a href="{% url 'winctl:home' %}">Windows</a>{% endif %}
-                {% if 'maintenance' in installed_app_slugs %}<a href="{% url 'maintenance:home' %}">Maintenance</a>{% endif %}
-                {% if 'security' in installed_app_slugs %}<a href="{% url 'security:home' %}">Security</a>{% endif %}
-                {% if 'identity' in installed_app_slugs %}<a href="{% url 'identity:home' %}">Identity</a>{% endif %}
-                {% if 'agricola' in installed_app_slugs %}<a href="{% url 'agricola:game' %}">Agricola</a>{% endif %}
+                {% if 'dashboard' in accessible_app_slugs %}<a href="{% url 'dashboard:home' %}">Dashboard</a>{% endif %}
+                {% if 'terminal' in accessible_app_slugs %}<a href="{% url 'terminal:terminal' %}">Terminal</a>{% endif %}
+                {% if 'app_factory' in accessible_app_slugs %}<a href="{% url 'app_factory:list' %}">App Factory</a>{% endif %}
+                {% if 'sysinfo' in accessible_app_slugs %}<a href="{% url 'sysinfo:home' %}">System Info</a>{% endif %}
+                {% if 'graphs' in accessible_app_slugs %}<a href="{% url 'graphs:home' %}">Graphs</a>{% endif %}
+                {% if 'services' in accessible_app_slugs %}<a href="{% url 'services:home' %}">Services</a>{% endif %}
+                {% if 'logs' in accessible_app_slugs %}<a href="{% url 'logs:home' %}">Logs</a>{% endif %}
+                {% if 'hosts' in accessible_app_slugs %}<a href="{% url 'hosts:list' %}">Hosts</a>{% endif %}
+                {% if 'mail' in accessible_app_slugs %}<a href="{% url 'mail:home' %}">Mail</a>{% endif %}
+                {% if 'nodes' in accessible_app_slugs %}<a href="{% url 'nodes:list' %}">Fleet</a>{% endif %}
+                {% if 'bodymap' in accessible_app_slugs %}<a href="{% url 'bodymap:list' %}">Bodymap</a>{% endif %}
+                {% if 'powerlab' in accessible_app_slugs %}<a href="{% url 'powerlab:index' %}">Power Lab</a>{% endif %}
+                {% if 'roomplanner' in accessible_app_slugs %}<a href="{% url 'roomplanner:index' %}">Room Planner</a>{% endif %}
+                {% if 'naiad' in accessible_app_slugs %}<a href="{% url 'naiad:index' %}">Naiad</a>{% endif %}
+                {% if 'conduit' in accessible_app_slugs %}<a href="{% url 'conduit:index' %}">Conduit</a>{% endif %}
+                {% if 'oneliner' in accessible_app_slugs %}<a href="{% url 'oneliner:index' %}">Oneliner</a>{% endif %}
+                {% if 'lingua' in accessible_app_slugs %}<a href="{% url 'lingua:home' %}">Lingua</a>{% endif %}
+                {% if 'muka' in accessible_app_slugs %}<a href="{% url 'muka:index' %}">Muka</a>{% endif %}
+                {% if 'camlfornia' in accessible_app_slugs %}<a href="{% url 'camlfornia:index' %}">Camlfornia</a>{% endif %}
+                {% if 'aggregator' in accessible_app_slugs %}<a href="{% url 'aggregator:index' %}">Aggregator</a>{% endif %}
+                {% if 'studious' in accessible_app_slugs %}<a href="{% url 'studious:index' %}">Studious</a>{% endif %}
+                {% if 'agora' in accessible_app_slugs %}<a href="{% url 'agora:index' %}">Agora</a>{% endif %}
+                {% if 'isolation' in accessible_app_slugs %}<a href="{% url 'isolation:index' %}">Isolation</a>{% endif %}
+                {% if 'radiant' in accessible_app_slugs %}<a href="{% url 'radiant:index' %}">Radiant</a>{% endif %}
+                {% if 'agents' in accessible_app_slugs %}<a href="{% url 'agents:index' %}">Agents</a>{% endif %}
+                {% if 'experiments' in accessible_app_slugs %}<a href="{% url 'experiments:list' %}">Experiments</a>{% endif %}
+                {% if 'chronos' in accessible_app_slugs %}<a href="{% url 'chronos:home' %}">Chronos</a>{% endif %}
+                {% if 'databases' in accessible_app_slugs %}<a href="{% url 'databases:list' %}">Databases</a>{% endif %}
+                {% if 'codex' in accessible_app_slugs %}<a href="{% url 'codex:list' %}">Codex</a>{% endif %}
+                {% if 'attic' in accessible_app_slugs %}<a href="{% url 'attic:list' %}">Attic</a>{% endif %}
+                {% if 'zoetrope' in accessible_app_slugs %}<a href="{% url 'zoetrope:list' %}">Zoetrope</a>{% endif %}
+                {% if 'cartography' in accessible_app_slugs %}<a href="{% url 'cartography:home' %}">Maps</a>{% endif %}
+                {% if 'hpc' in accessible_app_slugs %}<a href="{% url 'hpc:list' %}">HPC</a>{% endif %}
+                {% if 'tiles' in accessible_app_slugs %}<a href="{% url 'tiles:list' %}">Tiles</a>{% endif %}
+                {% if 'condenser' in accessible_app_slugs %}<a href="{% url 'condenser:home' %}">Condenser</a>{% endif %}
+                {% if 'automaton' in accessible_app_slugs %}<a href="{% url 'automaton:home' %}">Automaton</a>{% endif %}
+                {% if 'aether' in accessible_app_slugs %}<a href="{% url 'aether:world_list' %}">Aether</a>{% endif %}
+                {% if 'lsystem' in accessible_app_slugs %}<a href="{% url 'lsystem:species_list' %}">L-System</a>{% endif %}
+                {% if 'legolith' in accessible_app_slugs %}<a href="{% url 'legolith:list' %}">Legolith</a>{% endif %}
+                {% if 'screen_gubi' in accessible_app_slugs %}<a href="{% url 'screen_gubi:index' %}">Gubi</a>{% endif %}
+                {% if 'bridge' in accessible_app_slugs %}<a href="{% url 'bridge:home' %}">Bridge</a>{% endif %}
+                {% if 'grammar_engine' in accessible_app_slugs %}<a href="{% url 'grammar_engine:list' %}">Grammar</a>{% endif %}
+                {% if 'evolution' in accessible_app_slugs %}<a href="{% url 'evolution:list' %}">Evolution</a>{% endif %}
+                {% if 'reckoner' in accessible_app_slugs %}<a href="{% url 'reckoner:index' %}">Reckoner</a>{% endif %}
+                {% if 'displacer' in accessible_app_slugs %}<a href="{% url 'displacer:home' %}">Displacer</a>{% endif %}
+                {% if 'helix' in accessible_app_slugs %}<a href="{% url 'helix:list' %}">Helix</a>{% endif %}
+                {% if 'casting' in accessible_app_slugs %}<a href="{% url 'casting:index' %}">Casting</a>{% endif %}
+                {% if 'oracle' in accessible_app_slugs %}<a href="{% url 'oracle:home' %}">Oracle</a>{% endif %}
+                {% if 'det' in accessible_app_slugs %}<a href="{% url 'det:index' %}">Det</a>{% endif %}
+                {% if 's3lab' in accessible_app_slugs %}<a href="{% url 's3lab:index' %}">S3 Lab</a>{% endif %}
+                {% if 'hexnn' in accessible_app_slugs %}<a href="{% url 'hexnn:index' %}">Hex NN</a>{% endif %}
+                {% if 'taxon' in accessible_app_slugs %}<a href="{% url 'taxon:index' %}">Taxon</a>{% endif %}
+                {% if 'datalift' in accessible_app_slugs %}<a href="{% url 'datalift:job_list' %}">Datalift</a>{% endif %}
+                {% if 'landingpage' in accessible_app_slugs %}<a href="{% url 'landingpage:home' %}">News</a>{% endif %}
+                {% if 'winctl' in accessible_app_slugs %}<a href="{% url 'winctl:home' %}">Windows</a>{% endif %}
+                {% if 'maintenance' in accessible_app_slugs %}<a href="{% url 'maintenance:home' %}">Maintenance</a>{% endif %}
+                {% if 'security' in accessible_app_slugs %}<a href="{% url 'security:home' %}">Security</a>{% endif %}
+                {% if 'identity' in accessible_app_slugs %}<a href="{% url 'identity:home' %}">Identity</a>{% endif %}
+                {% if 'agricola' in accessible_app_slugs %}<a href="{% url 'agricola:game' %}">Agricola</a>{% endif %}
                 {% if user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
