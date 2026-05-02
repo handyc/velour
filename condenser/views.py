@@ -557,6 +557,39 @@ def distill_hexnn_esp32s3(request):
 
 
 @login_required
+def distill_cellular_c(request):
+    """s3lab Cellular sublab → standalone C99 host program.
+
+    Phase 1 of the cellular multi-platform port. Emits a single .c
+    file that runs the full population-GA pipeline, ANSI-256 terminal
+    render, no deps beyond libc.
+    """
+    from .distill_cellular import distill_cellular_c as build
+    grid_cols = max(4, min(32, int(request.POST.get('grid_cols', 16))))
+    grid_rows = max(4, min(32, int(request.POST.get('grid_rows', 16))))
+    n_rounds  = max(0, min(100000, int(request.POST.get('n_rounds', 0))))
+    rate_raw  = request.POST.get('mut_rate', '0.005').strip()
+    try:    mut_rate = max(0.0, min(0.05, float(rate_raw)))
+    except ValueError: mut_rate = 0.005
+    tick_ms   = max(20, min(2000, int(request.POST.get('tick_ms', 200))))
+    round_ms  = max(50, min(5000, int(request.POST.get('round_ms', 500))))
+    seed      = max(0, int(request.POST.get('seed', 0)))
+    label = (f's3lab Cellular → host C ({grid_cols}×{grid_rows} pop, '
+             f'mut={mut_rate}, '
+             f'rounds={"∞" if not n_rounds else n_rounds})')
+    return _distill_and_save(
+        request,
+        name=label,
+        source_app='s3lab',
+        source_tier='django', target_tier='c99',
+        build=lambda: build(grid_cols=grid_cols, grid_rows=grid_rows,
+                            n_rounds=n_rounds, mut_rate=mut_rate,
+                            tick_ms=tick_ms, round_ms=round_ms, seed=seed),
+        success_fmt='Cellular → C99: {size} bytes.',
+    )
+
+
+@login_required
 def decision_tree_555(request):
     """Information page: decision trees built from 555 timer ICs."""
     return render(request, 'condenser/decision_tree_555.html', {})
