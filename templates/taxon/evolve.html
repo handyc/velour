@@ -134,7 +134,10 @@ import {
     random_genome, identity_genome, ansi256_to_rgb,
 } from "{% static_v 's3lab/js/engine.mjs' %}";
 
-const SEED_HEX = {{ seed_hex|default:"''"|safe }} && "{{ seed_hex|default:'' }}";
+// |escapejs renders the hex as a JS string literal body (escapes
+// quotes, slashes, newlines). The previous |safe construction emitted
+// the raw hex outside quotes — a syntax error whenever ?seed= was set.
+const SEED_HEX = "{{ seed_hex|default:''|escapejs }}";
 const SEED_PALETTE = {{ seed_palette_json|safe }};
 
 // ── State ────────────────────────────────────────────────────────

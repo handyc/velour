@@ -83,6 +83,12 @@
             title="Reseed the live tile's grid with a fresh random pattern.">Reseed Live</button>
     <button id="palette-btn"
             title="Pick 4 fresh ANSI-256 colours for the live tile and repaint. Older tiles keep their palettes since those represent specific past genomes.">Random Palette</button>
+    <label class="slider-label"
+           style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+           title="Pick one image — or many. Each of the 64 tiles in the strip gets its 4-colour palette sampled from a 2×2 region of its chosen source image (centre-cropped to square first), quantized to nearest ANSI-256. With multiple files each tile randomly picks one as its source. Genomes are unchanged — only palettes shift, so historical tiles are recoloured against their existing dynamics.">
+      🖼 Image(s) → palettes
+      <input id="filmstrip-image-input" type="file" accept="image/*" multiple style="display:none;">
+    </label>
     <button id="pause-btn">Pause</button>
     <button id="step-btn">Step 1</button>
     <button id="clear-history-btn"

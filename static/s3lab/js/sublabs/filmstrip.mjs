@@ -16,7 +16,7 @@ import {
     K, GBYTES, PAL_BYTES, GRID_W, GRID_H,
     seed_prng, prng,
     seed_grid, step_grid,
-    ansi256_to_css,
+    ansi256_to_css, ansi256_to_rgb,
     random_genome, invent_palette,
 } from '../engine.mjs';
 
@@ -103,6 +103,83 @@ const state = {
 };
 
 function liveFrame() { return state.frames[state.frames.length - 1]; }
+
+
+// ── Image → palettes ──────────────────────────────────────────────────
+//
+// Same shape as cellular / strateta / stratum: each tile in the 8×8
+// strip gets its K=4 palette sampled from a position-mapped 2×2 region
+// of its chosen source image, quantized to nearest ANSI-256.
+
+const ANSI_PALETTE_RGB = (() => {
+    const out = new Array(256);
+    for (let i = 0; i < 256; i++) out[i] = ansi256_to_rgb(i);
+    return out;
+})();
+
+function nearestAnsi256(r, g, b) {
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < 256; i++) {
+        const [ar, ag, ab] = ANSI_PALETTE_RGB[i];
+        const dr = ar - r, dg = ag - g, db = ab - b;
+        const d = dr*dr + dg*dg + db*db;
+        if (d < bestD) { bestD = d; best = i; if (d === 0) break; }
+    }
+    return best;
+}
+
+function loadImageFile(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+        img.src = url;
+    });
+}
+
+function rasterizeImageToPlane(img, PX, PY) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const side = Math.min(w, h);
+    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
+    const off = document.createElement('canvas');
+    off.width = PX; off.height = PY;
+    const octx = off.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(img, cx, cy, side, side, 0, 0, PX, PY);
+    return octx.getImageData(0, 0, PX, PY).data;
+}
+
+function applyImagePalettesToStrip(imgs) {
+    if (!Array.isArray(imgs)) imgs = [imgs];
+    imgs = imgs.filter(Boolean);
+    if (imgs.length === 0) return;
+
+    // K=4 → 2×2 sample per tile. 8×8 tiles → 16×16 image plane.
+    const SK = 2;
+    const PX = GRID_COLS * SK, PY = GRID_ROWS * SK;
+    const planes = imgs.map(img => rasterizeImageToPlane(img, PX, PY));
+
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            const idx = r * GRID_COLS + c;
+            const frame = state.frames[idx];
+            if (!frame) continue;
+            const src = planes.length === 1
+                ? planes[0]
+                : planes[(Math.random() * planes.length) | 0];
+            const x0 = c * SK, y0 = r * SK;
+            const newPal = new Uint8Array(K);
+            for (let q = 0; q < K; q++) {
+                const qx = q % SK, qy = (q / SK) | 0;
+                const px = x0 + qx, py = y0 + qy;
+                const ipx = (py * PX + px) * 4;
+                newPal[q] = nearestAnsi256(src[ipx], src[ipx+1], src[ipx+2]);
+            }
+            frame.palette = newPal;
+        }
+    }
+}
 
 // ── Init: empty strip with one fresh live tile ────────────────────────
 
@@ -569,6 +646,30 @@ function init() {
         liveFrame().palette = invent_palette();
         paintStrip();
     };
+
+    // 🖼 Image(s) → palettes — same pattern as cellular/strateta. Each
+    // tile in the 8×8 strip gets its 4-colour palette sampled from a
+    // 2×2 region of its chosen source image (centre-cropped to square).
+    // Multi-image: per-tile random source pick. Genomes are unchanged
+    // — only palettes shift, so historical tiles re-render against
+    // their existing dynamics in the new colour scheme.
+    const filmImgInput = document.getElementById('filmstrip-image-input');
+    if (filmImgInput) {
+        filmImgInput.addEventListener('change', async (e) => {
+            const files = [...(e.target.files || [])]
+                .filter(f => f.type && f.type.startsWith('image/'));
+            if (files.length === 0) return;
+            try {
+                const imgs = await Promise.all(files.map(loadImageFile));
+                applyImagePalettesToStrip(imgs);
+                paintStrip();
+            } catch (err) {
+                console.error('image load failed:', err);
+                alert('image load failed: ' + (err.message || err));
+            }
+            filmImgInput.value = '';
+        });
+    }
     document.getElementById('pause-btn').onclick = () => {
         state.running = !state.running;
         document.getElementById('pause-btn').textContent =
