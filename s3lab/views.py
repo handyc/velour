@@ -1,10 +1,11 @@
 from django.http import Http404, HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from .compile import EXAMPLES, compile_c
+from .models import SlotPatch
 
 
 # Registered sublabs. Add a new entry here when you drop a new
@@ -253,9 +254,164 @@ def compile_push(request):
         }
 
     overall_ok = push_ok and (run_payload is None or run_payload['ok'])
+
+    # Persist the patch + push into the SlotPatch library so it shows
+    # up at /s3lab/slots/. sha1(elf) is the identity — re-pushes of
+    # the same blob just bump push_count + success_count.
+    try:
+        patch = SlotPatch.upsert(
+            source_text=source,
+            elf_blob=result.elf,
+            build_time_ms=result.elapsed_ms,
+            slot=slot or '',
+            name=request.POST.get('name', '').strip(),
+            user=request.user if request.user.is_authenticated else None,
+            last_pushed_to=device_url,
+            push_succeeded=push_ok,
+        )
+        patch_slug = patch.slug
+    except Exception:
+        patch_slug = None
+
     return JsonResponse({
         'ok': overall_ok,
         'compile': compile_payload,
+        'push': push_payload,
+        'run': run_payload,
+        'patch_slug': patch_slug,
+    })
+
+
+# ── Phase 6: SlotPatch library ────────────────────────────────────────
+
+@login_required
+def slots_list(request):
+    from django.db.models import Q
+    qs = SlotPatch.objects.all()
+    slot = (request.GET.get('slot', '') or '').strip()
+    if slot:
+        qs = qs.filter(slot=slot)
+    q = (request.GET.get('q', '') or '').strip()
+    if q:
+        qs = qs.filter(
+            Q(name__icontains=q) | Q(slug__icontains=q) |
+            Q(elf_sha1__istartswith=q) | Q(notes__icontains=q) |
+            Q(last_pushed_to__icontains=q)
+        )
+    sort = request.GET.get('sort', 'newest')
+    if sort == 'oldest':
+        qs = qs.order_by('created_at')
+    elif sort == 'pushcount':
+        qs = qs.order_by('-push_count')
+    else:
+        qs = qs.order_by('-created_at')
+    return render(request, 's3lab/slots_list.html', {
+        'patches': qs[:200],
+        'total': qs.count(),
+        'q': q,
+        'sort': sort,
+        'active_slot': slot,
+        'slots': ['step', 'render', 'gpio', 'fitness'],
+    })
+
+
+@login_required
+def slot_detail(request, slug: str):
+    patch = get_object_or_404(SlotPatch, slug=slug)
+    return render(request, 's3lab/slot_detail.html', {
+        'patch': patch,
+    })
+
+
+@login_required
+def slot_download(request, slug: str):
+    patch = get_object_or_404(SlotPatch, slug=slug)
+    resp = HttpResponse(bytes(patch.elf_blob),
+                        content_type='application/octet-stream')
+    resp['Content-Disposition'] = f'attachment; filename="{patch.slug}.elf"'
+    return resp
+
+
+@login_required
+@require_POST
+def slot_repush(request, slug: str):
+    """Re-push a stored ELF to a device, optionally chaining /run-elf?slot=NAME."""
+    import time
+    import urllib.error
+    import urllib.request
+
+    patch = get_object_or_404(SlotPatch, slug=slug)
+    device_url = (request.POST.get('device_url') or
+                  patch.last_pushed_to or
+                  'http://hexca.local').rstrip('/')
+    slot = (request.POST.get('slot') or patch.slot or '').strip()
+    if slot and slot not in ('step', 'render', 'gpio', 'fitness'):
+        return JsonResponse({'ok': False, 'error':
+            'slot must be empty, step, render, gpio, or fitness'})
+
+    push_target = f'{device_url}/load-elf'
+    elf = bytes(patch.elf_blob)
+    req = urllib.request.Request(
+        push_target, data=elf, method='POST',
+        headers={'Content-Type': 'application/octet-stream'},
+    )
+    push_t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            body = resp.read(4096).decode('utf-8', errors='replace')
+            status = resp.status
+            push_ok = 200 <= status < 300
+    except urllib.error.HTTPError as e:
+        body = e.read(4096).decode('utf-8', errors='replace')
+        status = e.code
+        push_ok = False
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        body = f'{type(e).__name__}: {e}'
+        status = 0
+        push_ok = False
+    push_payload = {
+        'ok': push_ok, 'target': push_target, 'status': status,
+        'body': body, 'elapsed_ms': int((time.monotonic() - push_t0) * 1000),
+    }
+
+    run_payload = None
+    if push_ok and slot:
+        run_target = f'{device_url}/run-elf'
+        run_req = urllib.request.Request(
+            run_target, data=f'slot={slot}'.encode(), method='POST',
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        )
+        run_t0 = time.monotonic()
+        try:
+            with urllib.request.urlopen(run_req, timeout=8.0) as resp:
+                rbody = resp.read(2048).decode('utf-8', errors='replace')
+                rstatus = resp.status
+                run_ok = 200 <= rstatus < 300
+        except urllib.error.HTTPError as e:
+            rbody = e.read(2048).decode('utf-8', errors='replace')
+            rstatus = e.code
+            run_ok = False
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            rbody = f'{type(e).__name__}: {e}'
+            rstatus = 0
+            run_ok = False
+        run_payload = {
+            'ok': run_ok, 'slot': slot, 'target': run_target,
+            'status': rstatus, 'body': rbody,
+            'elapsed_ms': int((time.monotonic() - run_t0) * 1000),
+        }
+
+    # Bump push history on the patch.
+    patch.push_count += 1
+    if push_ok:
+        patch.success_count += 1
+    patch.last_pushed_to = device_url
+    from django.utils import timezone
+    patch.last_push_at = timezone.now()
+    patch.save()
+
+    return JsonResponse({
+        'ok': push_ok and (run_payload is None or run_payload['ok']),
         'push': push_payload,
         'run': run_payload,
     })

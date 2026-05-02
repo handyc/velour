@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}S3 Lab — {{ patch.slug }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<style>
+  .patch-page { max-width: 1100px; margin: 1rem auto; padding: 0 1rem;
+                color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }
+  pre.source { background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+               padding: 0.6rem 0.8rem; color: #e1e4e8; font-size: 0.82rem;
+               overflow: auto; max-height: 480px; }
+  table.kv { font-size: 0.85rem; }
+  table.kv td { padding: 0.2rem 0.4rem; border-bottom: 1px solid #21262d; }
+  table.kv td:first-child { color: #8b949e; }
+  .actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;
+             margin: 0.5rem 0; }
+  .actions input, .actions select { background: #0d1117; color: #e1e4e8;
+        border: 1px solid #30363d; padding: 0.3rem 0.5rem; border-radius: 4px;
+        font-family: inherit; font-size: 0.85rem; }
+  .actions button { background: #1f6feb; color: white; border: none;
+        padding: 0.4rem 0.9rem; border-radius: 4px; cursor: pointer;
+        font-family: inherit; font-size: 0.85rem; }
+  .actions a {
+        background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+        padding: 0.4rem 0.9rem; border-radius: 4px; text-decoration: none;
+        font-family: inherit; font-size: 0.85rem;
+  }
+  pre.log { background: #0d1117; border-radius: 4px; padding: 0.5rem;
+            font-size: 0.78rem; color: #8b949e; white-space: pre-wrap;
+            max-height: 240px; overflow: auto; }
+  pre.log.ok  { color: #3fb950; }
+  pre.log.err { color: #f85149; border-left: 3px solid #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="patch-page">
+  <p style="font-size:0.78rem;"><a href="{% url 's3lab:slots_list' %}" style="color:#58a6ff;">← Slot library</a></p>
+  <h1 style="margin-top:0;">{{ patch.name|default:patch.slug }}</h1>
+  <p style="color:#8b949e;">sha1 <code>{{ patch.elf_sha1 }}</code></p>
+
+  <div style="display:grid; grid-template-columns:1fr 280px; gap:1rem; align-items:start;">
+    <div>
+      <h2>Source</h2>
+      <pre class="source">{{ patch.source_text }}</pre>
+    </div>
+    <div>
+      <table class="kv">
+        <tr><td>slot (default)</td><td>{{ patch.slot|default:"—" }}</td></tr>
+        <tr><td>ELF size</td><td>{{ patch.elf_bytes }} B</td></tr>
+        <tr><td>source size</td><td>{{ patch.source_bytes }} B</td></tr>
+        <tr><td>build time</td><td>{{ patch.build_time_ms }} ms</td></tr>
+        <tr><td>created</td><td>{{ patch.created_at|date:"Y-m-d H:i" }}</td></tr>
+        <tr><td>last pushed to</td><td>{{ patch.last_pushed_to|default:"—" }}</td></tr>
+        <tr><td>last push at</td><td>{{ patch.last_push_at|default:"—" }}</td></tr>
+        <tr><td>pushes</td><td>{{ patch.success_count }} / {{ patch.push_count }} succeeded</td></tr>
+      </table>
+
+      <h3 style="margin-top:1rem;">Re-push</h3>
+      <div class="actions">
+        <input type="text" id="device-url" size="22"
+               value="{{ patch.last_pushed_to|default:'http://hexca.local' }}">
+        <select id="slot">
+          <option value="" {% if not patch.slot %}selected{% endif %}>no slot</option>
+          {% for s in 'step,render,gpio,fitness'|cut:' '|cut:''|stringformat:'s'|slice:':35'|make_list %}{% endfor %}
+          <option value="step"    {% if patch.slot == 'step'    %}selected{% endif %}>slot: step</option>
+          <option value="render"  {% if patch.slot == 'render'  %}selected{% endif %}>slot: render</option>
+          <option value="gpio"    {% if patch.slot == 'gpio'    %}selected{% endif %}>slot: gpio</option>
+          <option value="fitness" {% if patch.slot == 'fitness' %}selected{% endif %}>slot: fitness</option>
+        </select>
+        <button type="button" id="repush-btn">Re-push</button>
+      </div>
+      <a href="{% url 's3lab:slot_download' slug=patch.slug %}"
+         style="display:inline-block; margin-top:0.4rem; color:#58a6ff; font-size:0.8rem;">
+        Download ELF
+      </a>
+    </div>
+  </div>
+
+  <h2>Re-push log</h2>
+  <pre id="log" class="log">(no recent re-push)</pre>
+</div>
+
+<script>
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+  const btn = document.getElementById('repush-btn');
+  const logEl = document.getElementById('log');
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; logEl.className = 'log'; logEl.textContent = 'pushing…';
+    const fd = new FormData();
+    fd.append('device_url', document.getElementById('device-url').value);
+    fd.append('slot', document.getElementById('slot').value);
+    let data;
+    try {
+      const resp = await fetch('{% url "s3lab:slot_repush" slug=patch.slug %}', {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken()},
+        body: fd,
+      });
+      data = await resp.json();
+    } catch (e) {
+      logEl.className = 'log err'; logEl.textContent = 'network error: ' + e;
+      btn.disabled = false; return;
+    }
+
+    const lines = [];
+    const p = data.push || {};
+    if (p.ok) {
+      lines.push(`push:    ${p.target} → ${p.status} (${p.elapsed_ms} ms)`);
+    } else {
+      lines.push(`push FAILED: ${p.target} → ${p.status} (${p.elapsed_ms} ms)`);
+    }
+    if (p.body) { lines.push(''); lines.push(p.body); }
+    const r = data.run;
+    if (r) {
+      lines.push('');
+      if (r.ok) lines.push(`run-elf: slot=${r.slot} → ${r.status} (${r.elapsed_ms} ms)`);
+      else      lines.push(`run-elf FAILED: slot=${r.slot} → ${r.status}`);
+      if (r.body) { lines.push(''); lines.push(r.body); }
+    }
+    logEl.className = data.ok ? 'log ok' : 'log err';
+    logEl.textContent = lines.join('\n');
+    btn.disabled = false;
+  });
+</script>
+{% endblock %}

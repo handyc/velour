@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}S3 Lab — Slot library{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<style>
+  .slots-page { max-width: 1100px; margin: 1rem auto; padding: 0 1rem;
+                color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }
+  .slots-page h1 { margin-top: 0.4rem; }
+  .filter-row { display: flex; gap: 0.4rem; align-items: center;
+                flex-wrap: wrap; margin: 0.6rem 0; }
+  .filter-row input, .filter-row select { background: #0d1117; color: #e1e4e8;
+        border: 1px solid #30363d; padding: 0.35rem 0.55rem; border-radius: 4px;
+        font-family: inherit; font-size: 0.85rem; }
+  .filter-row button { background: #1f6feb; color: white; border: none;
+        padding: 0.4rem 0.9rem; border-radius: 4px; cursor: pointer;
+        font-family: inherit; font-size: 0.85rem; }
+  table.patches { width: 100%; border-collapse: collapse; margin-top: 0.5rem;
+                  font-size: 0.85rem; }
+  table.patches th { color: #8b949e; text-align: left; padding: 0.4rem;
+                     border-bottom: 1px solid #30363d; font-weight: 500; }
+  table.patches td { padding: 0.4rem; border-bottom: 1px solid #21262d; }
+  table.patches tr:hover { background: #161b22; }
+  table.patches a { color: #58a6ff; text-decoration: none; }
+  table.patches a:hover { text-decoration: underline; }
+  .slot-pill { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 3px;
+               font-size: 0.72rem; }
+  .slot-pill.step    { background: #1f3a52; color: #79c0ff; }
+  .slot-pill.render  { background: #432817; color: #f0883e; }
+  .slot-pill.gpio    { background: #1c3a30; color: #56d364; }
+  .slot-pill.fitness { background: #3a1c30; color: #f778ba; }
+  .slot-pill.empty   { background: #21262d; color: #8b949e; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="slots-page">
+  <p style="font-size:0.78rem;"><a href="{% url 's3lab:index' %}" style="color:#58a6ff;">← S3 Lab</a></p>
+  <h1>Slot library
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">— {{ patches|length }} of {{ total }}</span>
+  </h1>
+  <p style="color:#8b949e;">Every successful compile-push lands here. sha1 of the ELF is the identity, so re-pushing the same blob bumps a counter rather than duplicating.</p>
+
+  <form method="get" class="filter-row">
+    <input type="search" name="q" value="{{ q }}" placeholder="search name / sha1 / device URL" size="32">
+    <select name="slot">
+      <option value="">all slots</option>
+      {% for s in slots %}
+        <option value="{{ s }}" {% if active_slot == s %}selected{% endif %}>slot: {{ s }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort">
+      <option value="newest"     {% if sort == 'newest'     %}selected{% endif %}>newest first</option>
+      <option value="oldest"     {% if sort == 'oldest'     %}selected{% endif %}>oldest first</option>
+      <option value="pushcount"  {% if sort == 'pushcount'  %}selected{% endif %}>by push count</option>
+    </select>
+    <button type="submit">Filter</button>
+    {% if q or active_slot or sort != 'newest' %}
+      <a href="{% url 's3lab:slots_list' %}" style="color:#8b949e; font-size:0.78rem;">reset</a>
+    {% endif %}
+  </form>
+
+  {% if patches %}
+  <table class="patches">
+    <thead><tr>
+      <th>name / slug</th>
+      <th>slot</th>
+      <th style="text-align:right;">ELF B</th>
+      <th style="text-align:right;">build ms</th>
+      <th>last pushed</th>
+      <th style="text-align:right;">pushes</th>
+      <th>created</th>
+    </tr></thead>
+    <tbody>
+    {% for p in patches %}
+      <tr>
+        <td><a href="{% url 's3lab:slot_detail' slug=p.slug %}">{{ p.name|default:p.slug }}</a>
+          <div style="color:#6e7681; font-size:0.72rem;">{{ p.elf_sha1|slice:":12" }}</div>
+        </td>
+        <td>
+          {% if p.slot %}
+            <span class="slot-pill {{ p.slot }}">{{ p.slot }}</span>
+          {% else %}
+            <span class="slot-pill empty">—</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;">{{ p.elf_bytes }}</td>
+        <td style="text-align:right; color:#8b949e;">{{ p.build_time_ms }}</td>
+        <td style="color:#8b949e; font-size:0.78rem;">{{ p.last_pushed_to|truncatechars:34 }}</td>
+        <td style="text-align:right;">{{ p.success_count }} / {{ p.push_count }}</td>
+        <td style="color:#8b949e; font-size:0.78rem;">{{ p.created_at|date:"Y-m-d H:i" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p style="color:#8b949e;">No slot patches yet. Compile + push from
+      <a href="{% url 's3lab:compile_page' %}" style="color:#58a6ff;">/s3lab/compile/</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}
