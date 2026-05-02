@@ -95,6 +95,14 @@
               title="Reseed every cell's grid; genomes stay.">Reseed grids</button>
       <button id="palette-btn" class="secondary"
               title="Reroll every cell's palette via the firmware's invent_palette().">🎨 Reroll palettes</button>
+      <label class="secondary"
+             style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                    padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer;
+                    font-family:inherit; font-size:0.85rem;"
+             title="Load an image, crop to square, sample 4 colours per agent at the corresponding spatial position. Each population cell's K=4 palette inherits the colours of the image at its location, so the population mosaic visually matches the source.">
+        🖼 Image → palettes
+        <input id="image-input" type="file" accept="image/*" style="display:none;">
+      </label>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
       <label>seed
@@ -499,6 +507,102 @@ function rerollPalettes() {
   cv.classList.add('flash');
   setTimeout(() => cv.classList.remove('flash'), 220);
 }
+
+// ── Image → palette mosaic ─────────────────────────────────────────
+//
+// Resize the source image to GRID_COLS*4 × GRID_ROWS*4 = 64×64, then
+// for each agent (r, c) sample a 4×4 region: subdivide it into 2×2
+// quadrants of 2×2 pixels each, average each quadrant, map to nearest
+// ANSI-256 index. Result: 4 colours per agent that visually "match"
+// the corresponding spot of the source image, so the population
+// mosaic looks like a low-res version of the picture.
+//
+// We crop to square first (centre crop on the longer axis) so any
+// input aspect ratio works.
+
+const ANSI_PALETTE_RGB = (() => {
+  const out = new Array(256);
+  for (let i = 0; i < 256; i++) out[i] = ansi256_to_rgb(i);
+  return out;
+})();
+
+function nearestAnsi256(r, g, b) {
+  // Squared Euclidean over the 256-entry table. Cheap enough at
+  // 256 cells × 4 colours × 256 indices ≈ 262 k mults — sub-100 ms.
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < 256; i++) {
+    const [ar, ag, ab] = ANSI_PALETTE_RGB[i];
+    const dr = ar - r, dg = ag - g, db = ab - b;
+    const d = dr*dr + dg*dg + db*db;
+    if (d < bestD) { bestD = d; best = i; if (d === 0) break; }
+  }
+  return best;
+}
+
+function applyImagePalettes(img) {
+  // 1. Crop to square + resize to GRID_COLS*4 × GRID_ROWS*4.
+  const srcW = img.naturalWidth, srcH = img.naturalHeight;
+  const side = Math.min(srcW, srcH);
+  const cropX = ((srcW - side) / 2) | 0;
+  const cropY = ((srcH - side) / 2) | 0;
+  const PX = GRID_COLS * 4, PY = GRID_ROWS * 4;
+  const off = document.createElement('canvas');
+  off.width = PX; off.height = PY;
+  const octx = off.getContext('2d');
+  octx.imageSmoothingEnabled = true;
+  octx.drawImage(img, cropX, cropY, side, side, 0, 0, PX, PY);
+  const img_data = octx.getImageData(0, 0, PX, PY).data;
+
+  // 2. For each agent (r, c), sample a 4×4 region with 2×2 quadrants.
+  //    Quadrant order matches the palette index assignment 0..3:
+  //      0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right
+  for (let r = 0; r < GRID_ROWS; r++) {
+    for (let c = 0; c < GRID_COLS; c++) {
+      const x0 = c * 4, y0 = r * 4;
+      const cell = state.cells[r * GRID_COLS + c];
+      for (let q = 0; q < 4; q++) {
+        const qx = (q & 1) * 2, qy = (q >> 1) * 2;
+        let sumR = 0, sumG = 0, sumB = 0;
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const px = x0 + qx + dx, py = y0 + qy + dy;
+            const idx = (py * PX + px) * 4;
+            sumR += img_data[idx];
+            sumG += img_data[idx + 1];
+            sumB += img_data[idx + 2];
+          }
+        }
+        const avgR = (sumR >> 2), avgG = (sumG >> 2), avgB = (sumB >> 2);
+        cell.palette[q] = nearestAnsi256(avgR, avgG, avgB);
+      }
+      // Force a re-cache of dominant + sub-pixel colours.
+      cell.lastDrawn = -1;
+      cell.subPal = -1;
+      cell.subRgb = undefined;
+    }
+  }
+}
+
+const imageInput = document.getElementById('image-input');
+imageInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    applyImagePalettes(img);
+    URL.revokeObjectURL(url);
+    renderFull();
+    cv.classList.add('flash');
+    setTimeout(() => cv.classList.remove('flash'), 220);
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert('Could not decode that image.');
+  };
+  img.src = url;
+  imageInput.value = '';   // allow re-uploading the same file
+});
 
 function reseedAllGrids() {
   seed_prng(((Date.now() | 0) >>> 0) || 1);
