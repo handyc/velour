@@ -417,6 +417,14 @@ def slot_repush(request, slug: str):
     })
 
 
+@ensure_csrf_cookie
+@login_required
+def cellular_tft(request):
+    """Pixel-faithful 80x160 (rot 3 → 160x80) preview of the
+    isolation/artifacts/cellular/esp32_s3/ firmware."""
+    return render(request, 's3lab/cellular_tft.html', {})
+
+
 # ── Cellular sublab → Tiles + Zoetrope cross-app integrations ────────
 
 def _hex_to_bytes(hex_str: str, expected_len: int) -> bytes:

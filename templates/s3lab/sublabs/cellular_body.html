@@ -56,6 +56,11 @@
        title="Take the highest-scoring cell's genome+palette and create a Velour Tiles TileSet from it. Each tile shares the rule but starts from a different random grid; edge colours sample the genome's palette.">→ Tiles (elite cell)</button>
     <button id="export-reel-btn"
        title="Run the Cellular kernel server-side for N rounds, render every Nth frame as PNG via Pillow, and emit a Zoetrope mp4 reel of the population evolving.">→ Zoetrope (record reel)</button>
+    <a href="{% url 's3lab:cellular_tft' %}"
+       style="background:#21262d; color:#79c0ff; border:1px solid #30363d;
+              padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
+              font-family:inherit; font-size:0.85rem;"
+       title="Pixel-faithful 80×160 preview of the cellular_esp.cpp firmware on its ST7735S panel.">⬢ TFT 80×160</a>
     <span id="export-status" style="color:#8b949e; font-size:0.78rem;"></span>
   </div>
 </section>
