@@ -80,6 +80,11 @@
     🖼 Image(s) → palettes
     <input id="strateta-image-input" type="file" accept="image/*" multiple style="display:none;">
   </label>
+  <label class="checkbox-label"
+         title="When checked, GA tournament rounds + Hunt/Refine inserts never overwrite an entry's palette. Useful after image-import: keeps the library mosaic visually intact even as edge-of-chaos mode shuffles the underlying genomes. Pixel-faithful mode never overwrites palettes regardless of this toggle (it needs the image-derived palette as the comparison target).">
+    <input type="checkbox" id="strateta-freeze-palettes-cb">
+    freeze palettes
+  </label>
   <label class="checkbox-label" title="Click-to-download exports compress JSON via the browser's gzip stream (~10× smaller).">
     <input type="checkbox" id="strateta-gzip-cb" checked>
     gzip downloads

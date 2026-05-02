@@ -103,6 +103,10 @@ const state = {
 
     paletteMode: 'random-ansi',
     refineMode:  'edge-of-chaos',     // 'edge-of-chaos' | 'pixel-faithful'
+    freezePalettes: false,            // when true, GA never overwrites
+                                      // an entry's palette — preserves
+                                      // image-derived schemes through
+                                      // tournament rounds + hunts
 
     // Source-image bookkeeping. Per library entry, a 16×16 RGB region
     // (768 bytes) used by pixel-faithful fitness. Index N is a tag
@@ -251,9 +255,10 @@ function tickTournament() {
     L.genome    = child;
     L.bins      = buildBins(child);
     // Pixel-faithful keeps the loser's image-derived palette so the
-    // comparison stays meaningful; edge-of-chaos copies winner palette
+    // comparison stays meaningful; freezePalettes does the same
+    // unconditionally; otherwise edge-of-chaos copies winner palette
     // (so dominant rules visibly share colour schemes, like stratum).
-    if (state.refineMode !== 'pixel-faithful') {
+    if (state.refineMode !== 'pixel-faithful' && !state.freezePalettes) {
         L.paletteRGBA = new Uint32Array(W.paletteRGBA);
     }
     L.gridA   = freshGrid(INNER_W, INNER_H, LIB_K,
@@ -349,7 +354,7 @@ async function runHunt(refineMode) {
         state.library[slot].r           = w.r;
         // Pixel-faithful: keep the slot's own palette (image-derived)
         // so the freshly-inserted rule renders into the right region.
-        if (state.refineMode !== 'pixel-faithful') {
+        if (state.refineMode !== 'pixel-faithful' && !state.freezePalettes) {
             state.library[slot].paletteRGBA = new Uint32Array(w.paletteRGBA);
         }
     }
@@ -972,6 +977,12 @@ function init() {
             updateStatus();
             paintLibrary();
         };
+    }
+
+    const freezeCb = document.getElementById('strateta-freeze-palettes-cb');
+    if (freezeCb) {
+        freezeCb.checked = state.freezePalettes;
+        freezeCb.onchange = (e) => { state.freezePalettes = !!e.target.checked; };
     }
 
     if (libCv) {
