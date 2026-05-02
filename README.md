@@ -50,8 +50,7 @@ the grid. The exact final shape varies run-to-run; that's the point.*
   [Unborn](https://github.com/matheusfillipe/Unborn) and
   [gircc](https://github.com/matheusfillipe/gircc).
 - **[Valware](https://github.com/ValwareIRC)** —
-  [unrealircd-tui](https://github.com/ValwareIRC/unrealircd-tui)
-  and many UnrealIRCd modules.
+  [ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC).
 
 ## License
 
