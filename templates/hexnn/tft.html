@@ -108,6 +108,9 @@
       <button id="refine-btn"
               style="background:#1f6feb;border:none;color:white;"
               title="Narrow GA: the whole population descends from the current rule. Press repeatedly to iteratively improve.">🎯 Refine</button>
+      <button id="auto-btn"
+              style="background:#a371f7;border:none;color:white;"
+              title="Run a Hunt then keep Refining forever, with a 3-second gap between rounds. Click again to stop after the current round finishes.">🔁 Full auto</button>
       <button id="palette-btn" class="secondary"
               title="Roll a fresh random palette (same generator the firmware's invent_palette uses).">🎨 Random palette</button>
       <span id="ga-status" style="color:#8b949e; font-size:0.78rem;"></span>
@@ -356,8 +359,11 @@ paletteBtn.addEventListener('click', () => {
 
 const huntBtn   = document.getElementById('hunt-btn');
 const refineBtn = document.getElementById('refine-btn');
+const autoBtn   = document.getElementById('auto-btn');
 const gaStatus  = document.getElementById('ga-status');
 let gaRunning = false;
+let autoActive = false;
+const AUTO_DELAY_MS = 3000;
 
 function setGaButtons(disabled) {
   huntBtn.disabled    = disabled;
@@ -365,6 +371,9 @@ function setGaButtons(disabled) {
   paletteBtn.disabled = disabled;
   restart.disabled    = disabled;
   randomSeedBtn.disabled = disabled;
+  // Note: autoBtn intentionally NOT disabled — clicking it during a
+  // run flips autoActive off, so the loop exits cleanly after the
+  // current round (no abort mid-generation).
 }
 
 function cloneGenome(g) {
@@ -491,6 +500,68 @@ async function runGA(mode) {
 
 huntBtn.addEventListener('click', () => runGA('hunt'));
 refineBtn.addEventListener('click', () => runGA('refine'));
+
+// ── Full auto: Hunt then Refine on a 3-second cadence ──────────────
+//
+// Click once to start: runs an initial Hunt, then loops Refine with a
+// AUTO_DELAY_MS gap between rounds. Click again at any time to stop —
+// the current round finishes (~6-12 s), then the loop exits without
+// scheduling another. The auto button is the one GA control that
+// stays enabled during runs so the user can always toggle off.
+
+function setAutoButtonState(active) {
+  if (active) {
+    autoBtn.textContent = '⏹ Stop auto';
+    autoBtn.style.background = '#cf222e';
+  } else {
+    autoBtn.textContent = '🔁 Full auto';
+    autoBtn.style.background = '#a371f7';
+  }
+}
+
+async function startAuto() {
+  if (gaRunning || autoActive) return;
+  autoActive = true;
+  setAutoButtonState(true);
+
+  // Initial broad sweep.
+  await runGA('hunt');
+
+  while (autoActive) {
+    // Visible 3-second countdown between rounds.
+    let remaining = AUTO_DELAY_MS;
+    while (autoActive && remaining > 0) {
+      gaStatus.textContent =
+        `🔁 auto: next refine in ${(remaining / 1000).toFixed(1)}s`;
+      gaStatus.style.color = '#a371f7';
+      await new Promise(r => setTimeout(r, 100));
+      remaining -= 100;
+    }
+    if (!autoActive) break;
+    await runGA('refine');
+  }
+
+  setAutoButtonState(false);
+  if (gaStatus.textContent.startsWith('🔁')) {
+    gaStatus.textContent = 'auto stopped.';
+    gaStatus.style.color = '#8b949e';
+  }
+}
+
+autoBtn.addEventListener('click', () => {
+  if (autoActive) {
+    autoActive = false;
+    // If a GA round is running, it'll finish; the loop will exit
+    // naturally afterward. If we're between rounds, the countdown
+    // loop will detect autoActive=false next 100 ms tick.
+    setAutoButtonState(false);
+    gaStatus.textContent = 'auto stopping after current round…';
+    gaStatus.style.color = '#a371f7';
+  } else {
+    startAuto();
+  }
+});
+setAutoButtonState(false);
 runBtn.addEventListener('click', () => {
   state.running = !state.running;
   runBtn.textContent = state.running ? 'Pause' : 'Run';
