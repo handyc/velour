@@ -417,6 +417,303 @@ def slot_repush(request, slug: str):
     })
 
 
+# ── Cellular sublab → Tiles + Zoetrope cross-app integrations ────────
+
+def _hex_to_bytes(hex_str: str, expected_len: int) -> bytes:
+    """Strict hex decoder. Raises ValueError on bad input + length."""
+    s = (hex_str or '').strip()
+    try:
+        b = bytes.fromhex(s)
+    except ValueError as e:
+        raise ValueError(f'bad hex: {e}')
+    if len(b) != expected_len:
+        raise ValueError(f'expected {expected_len} bytes, got {len(b)}')
+    return b
+
+
+@login_required
+@require_POST
+def cellular_to_tiles(request):
+    """Cellular sublab → Tiles. Take the elite cell's genome + palette,
+    materialise a hex TileSet that all share a fresh automaton.RuleSet
+    (one rule, multiple tiles with different initial grids), with
+    per-tile edge colours derived from the palette.
+
+    POST args:
+      genome_hex   — 8192 hex chars (4096-byte K=4 packed genome)
+      palette_hex  — 8 hex chars (4-byte ANSI-256 palette)
+      name         — optional human label
+      n_tiles      — int, default 12
+
+    Returns JSON {ok, tileset_slug, tileset_url, ruleset_slug, n_tiles}.
+    """
+    import random
+    from automaton.packed import PackedRuleset, ansi256_to_hex
+    from tiles.models import Tile, TileSet
+
+    try:
+        genome = _hex_to_bytes(request.POST.get('genome_hex', ''), 4096)
+        palette = _hex_to_bytes(request.POST.get('palette_hex', ''), 4)
+    except ValueError as e:
+        return JsonResponse({'ok': False, 'error': str(e)})
+
+    name = (request.POST.get('name', '') or 'cellular elite').strip()[:120]
+    try:
+        n_tiles = max(1, min(48, int(request.POST.get('n_tiles', 12))))
+    except ValueError:
+        n_tiles = 12
+
+    palette_css = [ansi256_to_hex(idx) for idx in palette]
+
+    # Step 1: create an automaton.RuleSet from the genome (reusing the
+    # exact import path automaton already supports, so the rule shows
+    # up in /automaton/ with a runnable Simulation too).
+    from automaton.models import ExactRule
+    from automaton.models import RuleSet as AutomatonRuleSet
+    from django.utils.crypto import get_random_string
+    from django.db import transaction
+
+    packed = PackedRuleset(n_colors=4, data=genome)
+    explicit = packed.to_explicit(skip_identity=True)
+    base_name = f'{name} ({get_random_string(4).lower()})'
+    while AutomatonRuleSet.objects.filter(name=base_name).exists():
+        base_name = f'{name} ({get_random_string(4).lower()})'
+
+    with transaction.atomic():
+        rs = AutomatonRuleSet.objects.create(
+            name=base_name,
+            description=(f'Imported from s3lab Cellular elite. '
+                         f'{len(explicit)} non-identity patterns.'),
+            n_colors=4, source='operator',
+            palette=palette_css,
+            source_metadata={
+                'origin': 'imported', 'source': 's3lab-cellular',
+                'palette_ansi256': list(palette),
+                'palette_css': palette_css,
+            },
+        )
+        ExactRule.objects.bulk_create([
+            ExactRule(
+                ruleset=rs,
+                self_color=er['s'],
+                n0_color=er['n'][0], n1_color=er['n'][1],
+                n2_color=er['n'][2], n3_color=er['n'][3],
+                n4_color=er['n'][4], n5_color=er['n'][5],
+                result_color=er['r'],
+                priority=i,
+            ) for i, er in enumerate(explicit)
+        ])
+
+        # Step 2: create the TileSet. Hex tiles, 6 edge colours each.
+        # We assign edges by sampling the palette so adjacent tiles
+        # have a non-trivial chance of matching.
+        ts_name = name
+        n = 2
+        while TileSet.objects.filter(name=ts_name).exists():
+            ts_name = f'{name} {n}'; n += 1
+        ts = TileSet.objects.create(
+            name=ts_name,
+            description=(f'Generated from s3lab Cellular elite. '
+                         f'{n_tiles} tiles share one CA rule (RuleSet '
+                         f'"{rs.slug}"); each tile has a different '
+                         f'random initial grid. Edge colours sampled '
+                         f'from the genome palette.'),
+            tile_type='hex',
+            palette=palette_css,
+            source='operator',
+            source_metadata={
+                'origin': 's3lab-cellular',
+                'ruleset_slug': rs.slug,
+                'palette_ansi256': list(palette),
+            },
+        )
+
+        rng = random.Random(0)  # deterministic edge-colour sampling
+        for i in range(n_tiles):
+            init = [[rng.randrange(4) for _ in range(16)] for _ in range(16)]
+            edges = {k: palette_css[rng.randrange(4)]
+                     for k in ('n_color', 'ne_color', 'se_color',
+                               's_color', 'sw_color', 'nw_color')}
+            Tile.objects.create(
+                tileset=ts,
+                name=f'T{i}',
+                ca_ruleset=rs,
+                ca_initial_grid=init,
+                sort_order=i,
+                **edges,
+            )
+
+    return JsonResponse({
+        'ok': True,
+        'tileset_slug': ts.slug,
+        'tileset_url': f'/tiles/{ts.slug}/',
+        'ruleset_slug': rs.slug,
+        'ruleset_url': f'/automaton/{rs.slug}/',
+        'n_tiles': n_tiles,
+    })
+
+
+@login_required
+@require_POST
+def cellular_to_zoetrope(request):
+    """Cellular sublab → Zoetrope. Run the cellular Python kernel
+    server-side for ``rounds`` rounds, render a frame every ``stride``
+    rounds via PIL, save each as an Attic MediaItem, build a Reel and
+    render it to mp4.
+
+    POST args:
+      rounds       — int 30..2000, default 200
+      stride       — int 1..50, render every Nth round, default 5
+      seed         — int, 0 = random
+      fps          — int 4..60, default 10
+      title        — str, optional
+
+    Returns JSON {ok, reel_slug, reel_url, frames, render_status}.
+    """
+    import io
+    import sys
+    import time
+    from pathlib import Path
+    from django.core.files.base import ContentFile
+    from django.utils.crypto import get_random_string
+    from PIL import Image
+
+    rounds = max(30, min(2000, int(request.POST.get('rounds', 200))))
+    stride = max(1, min(50, int(request.POST.get('stride', 5))))
+    seed   = int(request.POST.get('seed', 0))
+    fps    = max(4, min(60, int(request.POST.get('fps', 10))))
+    title  = (request.POST.get('title', '') or
+              f'Cellular {time.strftime("%Y-%m-%d %H:%M")}').strip()[:200]
+
+    # Import the canonical Python kernel from isolation/artifacts so
+    # the same source of truth runs server-side.
+    cell_dir = Path(__file__).resolve().parent.parent / \
+               'isolation/artifacts/cellular/python'
+    if str(cell_dir) not in sys.path:
+        sys.path.insert(0, str(cell_dir))
+    import cellular as kernel        # type: ignore
+
+    # ANSI-256 → RGB lookup. Inline since we can't use kernel's
+    # ANSI-only render — we want PNG frames.
+    def ansi_to_rgb(idx: int) -> tuple[int, int, int]:
+        if idx < 16:
+            std = [(0,0,0),(128,0,0),(0,128,0),(128,128,0),
+                   (0,0,128),(128,0,128),(0,128,128),(192,192,192),
+                   (128,128,128),(255,0,0),(0,255,0),(255,255,0),
+                   (0,0,255),(255,0,255),(0,255,255),(255,255,255)]
+            return std[idx]
+        if idx < 232:
+            lvl = (0, 95, 135, 175, 215, 255)
+            i = idx - 16
+            return (lvl[i // 36], lvl[(i % 36) // 6], lvl[i % 6])
+        v = min(255, 8 + (idx - 232) * 10)
+        return (v, v, v)
+
+    def render_frame(round_no: int) -> bytes:
+        """Render the population to a PNG. Each cell = 32x32 px, with
+        a 1-px black border between tiles. 16x16 cells → 528x528 image."""
+        TILE = 32
+        GAP = 1
+        W = kernel.GRID_COLS * TILE + (kernel.GRID_COLS + 1) * GAP
+        H = kernel.GRID_ROWS * TILE + (kernel.GRID_ROWS + 1) * GAP
+        img = Image.new('RGB', (W, H), (13, 17, 23))
+        px = img.load()
+        for r in range(kernel.GRID_ROWS):
+            for c in range(kernel.GRID_COLS):
+                cell = kernel.pop[r * kernel.GRID_COLS + c]
+                ansi = kernel.dominant_palette_idx(cell)
+                rgb = ansi_to_rgb(ansi)
+                x0 = c * TILE + (c + 1) * GAP
+                y0 = r * TILE + (r + 1) * GAP
+                for dy in range(TILE):
+                    for dx in range(TILE):
+                        px[x0 + dx, y0 + dy] = rgb
+        # Hairline label band along bottom — round number in white.
+        # Skip drawing text (no font deps); just record metadata.
+        buf = io.BytesIO()
+        img.save(buf, format='PNG', optimize=True)
+        return buf.getvalue()
+
+    # Run the kernel + capture frames.
+    if seed == 0:
+        seed = int(time.time()) & 0xFFFFFFFF
+    kernel.bootstrap_pop(seed)
+    kernel._g_rounds = 0
+    kernel._last_winner = -1
+    kernel._last_loser = -1
+
+    from attic.models import MediaItem
+    from zoetrope.models import Reel
+
+    frame_pks: list[int] = []
+    tag = f'cellular-{seed:08x}'
+
+    t0 = time.monotonic()
+    for round_no in range(rounds):
+        kernel.tick_all()
+        kernel.run_round(0.005)
+        if (kernel._g_rounds % stride) == 0:
+            png = render_frame(kernel._g_rounds)
+            mi = MediaItem(
+                title=f'cellular {seed:08x} round {kernel._g_rounds:04d}',
+                tags=tag,
+                caption=(f'Cellular sublab population, round '
+                         f'{kernel._g_rounds}/{rounds} (seed {seed:#x}).'),
+            )
+            fname = f'{tag}-{kernel._g_rounds:04d}.png'
+            mi.file.save(fname, ContentFile(png), save=False)
+            mi.save()
+            frame_pks.append(mi.pk)
+    capture_elapsed = time.monotonic() - t0
+
+    if not frame_pks:
+        return JsonResponse({'ok': False,
+            'error': 'no frames captured (rounds < stride?)'})
+
+    # Build + render the Reel.
+    base_slug = title
+    reel = Reel(
+        title=title,
+        tag_filter=tag,
+        selection_mode='recent',
+        image_count=len(frame_pks),
+        fps=fps,
+        duration_seconds=max(1.0, len(frame_pks) / fps),
+        width=528, height=528,
+        speech_sample_count=0,
+        speech_volume=0.0,
+        frame_order=frame_pks,
+    )
+    # Slug uniqueness
+    n = 2
+    from django.utils.text import slugify
+    base = slugify(title) or 'cellular'
+    cand = base
+    while Reel.objects.filter(slug=cand).exists():
+        cand = f'{base}-{n}'; n += 1
+    reel.slug = cand
+    reel.save()
+
+    render_status = 'pending'
+    render_err = ''
+    try:
+        reel.render()
+        render_status = reel.status
+    except Exception as e:
+        render_err = str(e)
+        render_status = 'error'
+
+    return JsonResponse({
+        'ok': render_status == 'ready',
+        'reel_slug': reel.slug,
+        'reel_url': f'/zoetrope/{reel.slug}/',
+        'frames': len(frame_pks),
+        'capture_elapsed_s': round(capture_elapsed, 1),
+        'render_status': render_status,
+        'render_err': render_err,
+    })
+
+
 # ── Phase 5: device dashboard + proxied actions ───────────────────────
 
 @ensure_csrf_cookie

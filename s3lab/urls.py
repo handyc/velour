@@ -17,5 +17,7 @@ urlpatterns = [
     path('slots/<slug:slug>/',     views.slot_detail,     name='slot_detail'),
     path('slots/<slug:slug>/elf',  views.slot_download,   name='slot_download'),
     path('slots/<slug:slug>/repush/', views.slot_repush,  name='slot_repush'),
+    path('cellular/to-tiles/',     views.cellular_to_tiles,    name='cellular_to_tiles'),
+    path('cellular/to-zoetrope/',  views.cellular_to_zoetrope, name='cellular_to_zoetrope'),
     path('<slug:slug>/',           views.sublab,          name='sublab'),
 ]

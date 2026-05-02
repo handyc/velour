@@ -428,6 +428,111 @@ function init() {
         paintGrid();
     };
 
+    // ── Cross-app exports: Tiles + Zoetrope ────────────────────────
+
+    function csrfToken() {
+        const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+
+    function setStatus(msg, color = '#8b949e') {
+        const el = document.getElementById('export-status');
+        if (el) {
+            el.textContent = msg;
+            el.style.color = color;
+        }
+    }
+
+    function bytesToHex(bytes) {
+        const s = [];
+        for (const b of bytes) s.push(b.toString(16).padStart(2, '0'));
+        return s.join('');
+    }
+
+    function eliteCell() {
+        // Cells start with score=0; only those that have competed in
+        // a round have a real score. Pick the highest-score cell — if
+        // none have competed yet (rounds=0), fall back to cell 0.
+        let best = state.cells[0], bi = 0;
+        for (let i = 1; i < state.cells.length; i++) {
+            if (state.cells[i].score > best.score) {
+                best = state.cells[i]; bi = i;
+            }
+        }
+        return { cell: best, idx: bi };
+    }
+
+    document.getElementById('export-tiles-btn').onclick = async () => {
+        const { cell, idx } = eliteCell();
+        if (!cell) return;
+        setStatus(`exporting cell #${idx} (score ${cell.score.toFixed(2)})…`);
+        const fd = new FormData();
+        fd.append('genome_hex',  bytesToHex(cell.genome));
+        fd.append('palette_hex', bytesToHex(cell.palette));
+        fd.append('name', `cellular cell #${idx}`);
+        fd.append('n_tiles', '12');
+        let data;
+        try {
+            const resp = await fetch('/s3lab/cellular/to-tiles/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken() },
+                body: fd,
+            });
+            data = await resp.json();
+        } catch (e) {
+            setStatus('network error: ' + e, '#f85149');
+            return;
+        }
+        if (!data.ok) {
+            setStatus('error: ' + (data.error || 'unknown'), '#f85149');
+            return;
+        }
+        setStatus(
+            `created TileSet "${data.tileset_slug}" — opening…`,
+            '#3fb950',
+        );
+        window.open(data.tileset_url, '_blank');
+    };
+
+    document.getElementById('export-reel-btn').onclick = async () => {
+        const rounds = 200, stride = 5, fps = 10;
+        if (!confirm(
+            `Render a ${rounds}-round reel server-side?\\n` +
+            `Captures ${rounds / stride} frames at ${fps} fps; ` +
+            `runs the Python cellular kernel for ~30-90 seconds.`
+        )) return;
+        setStatus(`rendering reel (~30-90 s)…`);
+        const fd = new FormData();
+        fd.append('rounds', rounds);
+        fd.append('stride', stride);
+        fd.append('fps', fps);
+        fd.append('title', `Cellular run ${new Date().toISOString().slice(0,16)}`);
+        let data;
+        try {
+            const resp = await fetch('/s3lab/cellular/to-zoetrope/', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': csrfToken() },
+                body: fd,
+            });
+            data = await resp.json();
+        } catch (e) {
+            setStatus('network error: ' + e, '#f85149');
+            return;
+        }
+        if (!data.ok) {
+            setStatus(
+                `failed: ${data.render_status || ''} ${data.render_err || ''}`.trim(),
+                '#f85149',
+            );
+            return;
+        }
+        setStatus(
+            `reel "${data.reel_slug}" rendered (${data.frames} frames in ${data.capture_elapsed_s}s)`,
+            '#3fb950',
+        );
+        window.open(data.reel_url, '_blank');
+    };
+
     startTimers();
 }
 
