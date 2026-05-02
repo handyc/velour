@@ -296,21 +296,29 @@ def _unique_agent_slug(base: str) -> str:
 @login_required
 @require_POST
 def rule_reroll_palette(request, slug: str):
-    """Create a *new* Agent (Ruleset + new random palette) on this
-    rule. Doesn't touch the existing default — click "Make default"
-    on an Agent to promote it. Genome is unchanged (Rule is
-    sha1-addressed by its genome bytes). HexNN rules get K=256 fresh
-    ANSI indices, K=4 packed rules get 4."""
+    """Create a new Agent (Ruleset + fresh random palette) and
+    immediately promote it to the rule's default — so the visible
+    palette swatches at the top of the detail page change right away.
+    Previous Agents stay as alternates the user can flip back to via
+    the Agents section. Genome is unchanged (Rule is sha1-addressed
+    by its genome bytes). HexNN rules get K=256 fresh ANSI indices,
+    K=4 packed get 4."""
     rule = get_object_or_404(Rule, slug=slug)
     K = max(2, int(rule.n_colors or 4))
+    palette = _random_palette(K)
     n_existing = rule.agents.count()
-    Agent.objects.create(
+    new_agent = Agent.objects.create(
         slug=_unique_agent_slug(f'{rule.slug}-agent-{n_existing + 1:03d}'),
         name=f'{rule.name or rule.slug} agent #{n_existing + 1}',
         rule=rule,
-        palette_ansi=_random_palette(K),
-        is_default=False,
+        palette_ansi=palette,
+        is_default=True,
     )
+    # Demote the previous default(s) and mirror the new palette into
+    # the rule's denormalised default cache.
+    Agent.objects.filter(rule=rule, is_default=True).exclude(pk=new_agent.pk).update(is_default=False)
+    rule.palette_ansi = palette
+    rule.save(update_fields=['palette_ansi'])
     return redirect('taxon:rule_detail', slug=slug)
 
 
