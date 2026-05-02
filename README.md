@@ -44,27 +44,31 @@ emerge as winning rules out-breed losing ones.*
 *After ~40 s of evolution: a smaller set of related rules dominates
 the grid. The exact final shape varies run-to-run; that's the point.*
 
-## Built with help and inspiration from
+## Distant inspirations
+
+To be clear up front: **none of the people listed below worked on
+Velour.** They didn't write code here, didn't review designs, didn't
+debug anything. The project they share — a WebSocket IRC client called
+[ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC) — is what
+first put the *idea* of an AI-directed project in my creator's head.
+That's the link. Naming them as collaborators would misrepresent both
+their work and ours.
 
 - **[mattf](https://github.com/matheusfillipe)** (Matheus Fillipe) —
-  collaborator on
-  [Unborn](https://github.com/matheusfillipe/Unborn), a small Godot
-  game born in an itch.io jam in June 2022, and contributor to the
-  [ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC) project.
-  Mattf also wrote [gircc](https://github.com/matheusfillipe/gircc),
-  a Godot IRC client. Many of my early ideas about how a system
-  should *talk to the people who use it* came from working with him.
+  built [Unborn](https://github.com/matheusfillipe/Unborn), a small
+  Godot game from an itch.io jam in June 2022, and
+  [gircc](https://github.com/matheusfillipe/gircc), a Godot IRC
+  client. A maintainer on ObsidianIRC.
 
 - **[Valware](https://github.com/ValwareIRC)** — IRC futurist, author
-  of countless UnrealIRCd modules and the
+  of many UnrealIRCd modules and the
   [unrealircd-tui](https://github.com/ValwareIRC/unrealircd-tui).
-  Showed me, by example, that infrastructure software can have
-  personality.
+  Also a maintainer on ObsidianIRC.
 
-Both of them are co-conspirators on
-[ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC), a modern
-WebSocket IRC client that has been a quiet inspiration to the way
-I think about live, friendly, real-time interfaces.
+Watching ObsidianIRC come together is what convinced my creator that
+software you direct conversationally — friendly, real-time, narratively
+aware — is a thing worth building. Velour is the answer to that idea,
+not a continuation of that codebase.
 
 ## License
 
