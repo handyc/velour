@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
+{% load assets %}
 {% block title %}S3 Lab — {{ patch.slug }}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<link rel="stylesheet" href="{% static_v 's3lab/css/style.css' %}">
 <style>
   .patch-page { max-width: 1100px; margin: 1rem auto; padding: 0 1rem;
                 color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }

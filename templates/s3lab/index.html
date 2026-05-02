@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
+{% load assets %}
 {% block title %}S3 Lab — {{ active_sublab.name }}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<link rel="stylesheet" href="{% static_v 's3lab/css/style.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -36,5 +37,5 @@
 </div>
 
 <script type="module"
-        src="{% static 's3lab/js/sublabs/' %}{{ active_sublab.module }}.mjs"></script>
+        src="{% static_v 's3lab/js/sublabs/'|add:active_sublab.module|add:'.mjs' %}"></script>
 {% endblock %}
