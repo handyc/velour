@@ -379,13 +379,24 @@ function ensureBuffers() {
 function blitGridIntoBuffer(buf, bufW, entry, tileX, tileY, tilePx, cellPx) {
     const grid = entry.gridA;
     const pal  = entry.paletteRGBA;
+    const tileXEnd = tileX + tilePx;
     for (let y = 0; y < INNER_H; y++) {
         const rowShift = (y & 1) ? cellPx / 2 : 0;
         const py0 = (tileY + y * cellPx * 0.866) | 0;
-        const cellH = Math.max(1, ((y + 1) * cellPx * 0.866 | 0) - (y * cellPx * 0.866 | 0));
+        const py1 = (tileY + (y + 1) * cellPx * 0.866) | 0;
+        const cellH = Math.max(1, py1 - py0);
         for (let x = 0; x < INNER_W; x++) {
+            // Compute each cell's pixel span from the *neighbour's*
+            // floor position (NOT from x*cellPx without rowShift) so the
+            // half-cell stagger doesn't leave a 1-px gap at the tile's
+            // right edge on unshifted rows. The last cell of each row
+            // extends to tileXEnd so unshifted rows fill the full tile.
             const px0 = (tileX + x * cellPx + rowShift) | 0;
-            const cellW = Math.max(1, ((x + 1) * cellPx | 0) - (x * cellPx | 0));
+            const naturalPx1 = (tileX + (x + 1) * cellPx + rowShift) | 0;
+            const px1 = (x === INNER_W - 1)
+                ? Math.max(naturalPx1, tileXEnd)
+                : naturalPx1;
+            const cellW = Math.max(1, px1 - px0);
             const v = grid[y * INNER_W + x];
             const c = pal[v];
             for (let dy = 0; dy < cellH; dy++) {
