@@ -873,6 +873,8 @@ static void handle_root() {
              "<li><code>POST /reset-slots</code> — revert every slot to its baked-in default</li>"
              "<li><code>POST /rehunt</code> — kick off a fresh GA hunt with the current "
                  "<code>fitness</code> slot; blocks 10-30 s, updates <code>/winner.bin</code></li>"
+             "<li><code>POST /load-genome</code> — overwrite the working genome + palette "
+                 "with a 4,104-byte HXC4 blob (s3lab/automaton/taxon export format)</li>"
              "</ul></body></html>");
     server.send(200, "text/html", html);
 }
@@ -1265,6 +1267,54 @@ static void handle_run_elf() {
 }
 
 
+// POST /load-genome — overwrite the working genome + palette with a
+// 4,104-byte HXC4 blob (4-byte magic + 4-byte ANSI palette + 4,096-byte
+// K=4 packed genome). Same wire format as s3lab's "Download genome.bin"
+// and Taxon's /taxon/rules/<slug>/genome.bin endpoint, so the device
+// can host any hex CA rule from anywhere in the Velour ecosystem.
+//
+// Effect is immediate — the run loop picks up the new genome on the
+// next tick. /winner.bin is also rewritten so the rule survives a reset.
+static void handle_load_genome() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "text/plain", "POST raw 4104-byte HXC4 body\n");
+        return;
+    }
+    const String &body = server.arg("plain");
+    size_t n = body.length();
+    if (n != TAIL_BYTES) {
+        server.send(400, "text/plain",
+                    "expected 4104 bytes (HXC4 magic + 4B palette + 4096B genome)\n");
+        return;
+    }
+    const uint8_t *buf = (const uint8_t *)body.c_str();
+    if (memcmp(buf, TAIL_MAGIC, MAGIC_BYTES) != 0) {
+        server.send(400, "text/plain",
+                    "magic mismatch — expected HXC4\n");
+        return;
+    }
+
+    memcpy(palette, buf + MAGIC_BYTES, PAL_BYTES);
+    memcpy(genome,  buf + MAGIC_BYTES + PAL_BYTES, GBYTES);
+    rebuild_palette_rgb();
+
+    if (write_winner_to_fs(palette, genome) == 0) {
+        Serial.println("[load-genome] new genome written to /winner.bin");
+    }
+
+    String out;
+    out.reserve(140);
+    out += "OK 4104 B  pal=[";
+    for (int i = 0; i < PAL_BYTES; i++) {
+        out += String((int)palette[i]);
+        if (i < PAL_BYTES - 1) out += ' ';
+    }
+    out += "]  effective on next tick\n";
+    server.send(200, "text/plain", out);
+    Serial.print("[load-genome] "); Serial.print(out);
+}
+
+
 // POST /reset-slots — revert every slot to its baked-in default and
 // free any IRAM held by previously-loaded ELFs.
 static void handle_reset_slots() {
@@ -1330,6 +1380,7 @@ static void comms_setup() {
     server.on("/run-elf",     HTTP_POST, handle_run_elf);
     server.on("/reset-slots", HTTP_POST, handle_reset_slots);
     server.on("/rehunt",      HTTP_POST, handle_rehunt);
+    server.on("/load-genome", HTTP_POST, handle_load_genome);
     server.onNotFound(handle_not_found);
     server.begin();
     Serial.printf("HTTP: server up on :%d\n", HTTP_PORT);

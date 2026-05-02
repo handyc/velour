@@ -237,6 +237,57 @@ def rule_to_s3lab(request, slug: str):
 
 
 @login_required
+@require_POST
+def rule_to_device(request, slug: str):
+    """Push this rule's HXC4 genome to a hexca supermini's /load-genome.
+
+    Velour-side proxy avoids the browser's cross-origin block; default
+    device URL is http://hexca.local. Returns JSON {ok, target, status,
+    body, elapsed_ms}.
+    """
+    import time
+    import urllib.error
+    import urllib.request
+
+    from automaton.packed import PackedRuleset, encode_genome_bin
+
+    rule = get_object_or_404(Rule, slug=slug)
+    if rule.kind != 'hex_k4_packed':
+        return JsonResponse({'ok': False,
+            'error': 'only K=4 packed rules can be pushed to a hexca device'})
+
+    device_url = (request.POST.get('device_url') or
+                  'http://hexca.local').rstrip('/')
+    target = f'{device_url}/load-genome'
+    packed = PackedRuleset(n_colors=4, data=bytes(rule.genome))
+    blob = encode_genome_bin(bytes(rule.palette_ansi), packed)
+    req = urllib.request.Request(
+        target, data=blob, method='POST',
+        headers={'Content-Type': 'application/octet-stream'},
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
+            body = resp.read(4096).decode('utf-8', errors='replace')
+            status = resp.status
+            ok = 200 <= status < 300
+    except urllib.error.HTTPError as e:
+        body = e.read(4096).decode('utf-8', errors='replace')
+        status = e.code
+        ok = False
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        body = f'{type(e).__name__}: {e}'
+        status = 0
+        ok = False
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+    return JsonResponse({
+        'ok': ok, 'target': target, 'status': status,
+        'body': body, 'elapsed_ms': elapsed_ms,
+    })
+
+
+@login_required
 def import_view(request):
     err = None
     if request.method == 'POST':

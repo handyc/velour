@@ -99,6 +99,16 @@
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
               font-family:inherit;" title="Open this rule as the live genome in s3lab Classic">→ S3 Lab</a>
 
+    <button type="button" id="to-device-btn"
+            style="background:#21262d; color:#58a6ff; border:1px solid #30363d;
+                   padding:0.4rem 0.8rem; border-radius:4px; cursor:pointer;
+                   font-family:inherit;"
+            title="Push this rule's genome to a hexca supermini on the LAN.">→ Device</button>
+    <input type="text" id="device-url" value="http://hexca.local" size="20"
+           style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                  padding:0.3rem 0.5rem; border-radius:4px; font-family:inherit; font-size:0.78rem;">
+    <span id="device-result" style="font-size:0.78rem; color:#8b949e;"></span>
+
     <a href="{% url 'taxon:evolve' %}?seed={{ rule.slug }}"
        style="background:#21262d; color:#58a6ff; border:1px solid #30363d;
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
@@ -124,6 +134,45 @@
   </table>
   {% endif %}
 </div>
+
+<script>
+  // → Device button: POST the rule's HXC4 genome to a hexca supermini.
+  (function(){
+    const btn = document.getElementById('to-device-btn');
+    if (!btn) return;
+    const urlEl = document.getElementById('device-url');
+    const result = document.getElementById('device-result');
+    function csrfToken() {
+      const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+      return m ? decodeURIComponent(m[1]) : '';
+    }
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; result.textContent = 'pushing…'; result.style.color = '#8b949e';
+      const fd = new FormData();
+      fd.append('device_url', urlEl.value || 'http://hexca.local');
+      let data;
+      try {
+        const resp = await fetch('{% url "taxon:rule_to_device" slug=rule.slug %}', {
+          method: 'POST',
+          headers: {'X-CSRFToken': csrfToken()},
+          body: fd,
+        });
+        data = await resp.json();
+      } catch (e) {
+        result.textContent = 'error: ' + e; result.style.color = '#f85149';
+        btn.disabled = false; return;
+      }
+      if (data.ok) {
+        result.textContent = `OK ${data.elapsed_ms} ms · ${data.body.trim()}`;
+        result.style.color = '#3fb950';
+      } else {
+        result.textContent = `failed ${data.status}: ${data.body.slice(0, 120)}`;
+        result.style.color = '#f85149';
+      }
+      btn.disabled = false;
+    });
+  })();
+</script>
 
 <script>
   // Live K=4 hex-CA preview. Pure JS; mirrors the canonical step
