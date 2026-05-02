@@ -1,7 +1,10 @@
-from django.http import Http404
+from django.http import Http404, HttpResponse, JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_POST
+
+from .compile import EXAMPLES, compile_c
 
 
 # Registered sublabs. Add a new entry here when you drop a new
@@ -88,3 +91,65 @@ def index(request):
 def sublab(request, slug):
     """Named sublab — same chrome as /s3lab/, different module."""
     return _render_sublab(request, slug)
+
+
+# ── Phase 1: compile-on-Velour for the ESP32-S3 supermini ─────────
+
+@ensure_csrf_cookie
+@login_required
+def compile_page(request):
+    """C-source editor that compiles to a Xtensa LX7 relocatable ELF
+    via the vendored xcc700 binary. The compile itself happens via
+    the compile_run view so the editor stays put on errors."""
+    return render(request, 's3lab/compile.html', {
+        'examples': EXAMPLES,
+    })
+
+
+@login_required
+@require_POST
+def compile_run(request):
+    """Compile C source POSTed in ``source`` and return:
+
+      * On success with ``download=1`` (default): the ELF as a binary
+        download (Content-Type application/octet-stream).
+      * On success with ``download=0``: JSON {ok, build_log, elf_b64,
+        elapsed_ms, elf_bytes}.
+      * On failure: JSON {ok: false, error, build_log, elapsed_ms}
+        with status 200 (the editor expects to display it inline).
+    """
+    import base64
+
+    source = request.POST.get('source', '')
+    name = request.POST.get('name', 'a.elf').strip() or 'a.elf'
+    download = request.POST.get('download', '1') != '0'
+
+    result = compile_c(source)
+
+    if not result.ok:
+        return JsonResponse({
+            'ok': False,
+            'error': result.error,
+            'build_log': result.build_log,
+            'elapsed_ms': result.elapsed_ms,
+        })
+
+    if download:
+        # Inline download — the page's <form target="_blank"> picks this up.
+        if not name.endswith('.elf'):
+            name = name + '.elf'
+        resp = HttpResponse(result.elf, content_type='application/octet-stream')
+        resp['Content-Disposition'] = f'attachment; filename="{name}"'
+        resp['X-Xcc700-Build-Log'] = result.build_log.replace('\n', ' | ')
+        resp['X-Xcc700-Elapsed-Ms'] = str(result.elapsed_ms)
+        resp['X-Xcc700-Elf-Bytes'] = str(result.elf_bytes)
+        return resp
+
+    return JsonResponse({
+        'ok': True,
+        'build_log': result.build_log,
+        'elf_b64': base64.b64encode(result.elf).decode('ascii'),
+        'elf_bytes': result.elf_bytes,
+        'source_bytes': result.source_bytes,
+        'elapsed_ms': result.elapsed_ms,
+    })

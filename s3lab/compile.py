@@ -1,0 +1,223 @@
+"""xcc700 subprocess wrapper.
+
+Phase 1 of the on-device-compile arc: compile a C source string to a
+relocatable Xtensa LX7 ELF via the vendored xcc700 binary at
+``isolation/artifacts/xcc700/xcc700``.
+
+Constraints enforced before invocation:
+  * source must be valid UTF-8
+  * source ≤ 64 KiB (the parser is single-pass; longer files are
+    almost certainly accidents)
+  * runtime ≤ 5 s wall clock (xcc700 self-host completes in <1 s; if
+    it stalls, something's wrong)
+
+The compiler runs in a private temp dir; the ELF is read back into
+memory and the dir wiped. No file leaves the temp dir.
+
+Returns a ``CompileResult`` dataclass so the view can render either
+the build log (success) or the diagnostic line (failure) without
+guessing.
+"""
+from __future__ import annotations
+
+import dataclasses
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+from django.conf import settings
+
+
+XCC700_DIR = settings.BASE_DIR / 'isolation' / 'artifacts' / 'xcc700'
+XCC700_BIN = XCC700_DIR / 'xcc700'
+
+MAX_SOURCE_BYTES = 64 * 1024
+COMPILE_TIMEOUT_S = 5.0
+
+
+@dataclasses.dataclass
+class CompileResult:
+    ok: bool
+    elf: bytes | None
+    build_log: str
+    error: str
+    source_bytes: int
+    elf_bytes: int
+    elapsed_ms: int
+
+
+def compile_c(source: str) -> CompileResult:
+    """Compile ``source`` (C99 subset) to Xtensa LX7 ELF."""
+    if not XCC700_BIN.is_file():
+        return CompileResult(
+            ok=False, elf=None,
+            build_log='',
+            error=f'xcc700 binary missing at {XCC700_BIN}. '
+                  f'Run isolation/artifacts/xcc700/build.sh first.',
+            source_bytes=0, elf_bytes=0, elapsed_ms=0,
+        )
+
+    src_bytes = source.encode('utf-8', errors='replace')
+    if len(src_bytes) > MAX_SOURCE_BYTES:
+        return CompileResult(
+            ok=False, elf=None,
+            build_log='',
+            error=f'source is {len(src_bytes)} bytes; '
+                  f'max is {MAX_SOURCE_BYTES} bytes',
+            source_bytes=len(src_bytes), elf_bytes=0, elapsed_ms=0,
+        )
+
+    workdir = Path(tempfile.mkdtemp(prefix='xcc700-'))
+    src_path = workdir / 'src.c'
+    elf_path = workdir / 'src.elf'
+    try:
+        src_path.write_bytes(src_bytes)
+        try:
+            proc = subprocess.run(
+                [str(XCC700_BIN), str(src_path), '-o', str(elf_path)],
+                cwd=workdir,
+                capture_output=True,
+                timeout=COMPILE_TIMEOUT_S,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return CompileResult(
+                ok=False, elf=None,
+                build_log='',
+                error=f'xcc700 timed out after {COMPILE_TIMEOUT_S}s',
+                source_bytes=len(src_bytes), elf_bytes=0,
+                elapsed_ms=int(COMPILE_TIMEOUT_S * 1000),
+            )
+
+        stdout = proc.stdout.decode('utf-8', errors='replace')
+        stderr = proc.stderr.decode('utf-8', errors='replace')
+        # xcc700 prints its build summary on stdout and any error on
+        # stderr. Try to parse elapsed_ms from the stdout footer
+        # (looks like: "[ 18 ms ] >> 277 Lines/sec <<").
+        elapsed_ms = 0
+        for line in stdout.splitlines():
+            line = line.strip()
+            if line.startswith('[') and 'ms' in line and ']' in line:
+                try:
+                    elapsed_ms = int(line.split('[')[1].split('ms')[0].strip())
+                except (IndexError, ValueError):
+                    pass
+                break
+
+        if proc.returncode != 0 or not elf_path.is_file():
+            err = (stderr.strip() or stdout.strip() or
+                   f'xcc700 returned {proc.returncode}')
+            return CompileResult(
+                ok=False, elf=None,
+                build_log=stdout,
+                error=err,
+                source_bytes=len(src_bytes), elf_bytes=0,
+                elapsed_ms=elapsed_ms,
+            )
+
+        elf = elf_path.read_bytes()
+        # Sanity: the ELF magic should be \x7fELF and the machine type
+        # should be Tensilica Xtensa (e_machine = 0x5e, little-endian).
+        if len(elf) < 20 or elf[:4] != b'\x7fELF':
+            return CompileResult(
+                ok=False, elf=None,
+                build_log=stdout,
+                error='xcc700 produced a file without ELF magic',
+                source_bytes=len(src_bytes), elf_bytes=len(elf),
+                elapsed_ms=elapsed_ms,
+            )
+        # e_machine is at offset 18 (uint16 LE).
+        e_machine = elf[18] | (elf[19] << 8)
+        if e_machine != 0x5e:
+            return CompileResult(
+                ok=False, elf=None,
+                build_log=stdout,
+                error=f'unexpected e_machine 0x{e_machine:04x} '
+                      f'(expected 0x005e Tensilica Xtensa)',
+                source_bytes=len(src_bytes), elf_bytes=len(elf),
+                elapsed_ms=elapsed_ms,
+            )
+
+        return CompileResult(
+            ok=True, elf=elf,
+            build_log=stdout,
+            error='',
+            source_bytes=len(src_bytes), elf_bytes=len(elf),
+            elapsed_ms=elapsed_ms,
+        )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+# ── Examples surfaced in the editor page ──────────────────────────
+
+EXAMPLES = [
+    {
+        'slug': 'minimal',
+        'name': 'Minimal — return 42',
+        'src': '''int main() {
+    int x = 42;
+    return x;
+}
+''',
+    },
+    {
+        'slug': 'add',
+        'name': 'Function call — add two ints',
+        'src': '''int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    int s = add(3, 4);
+    return s;
+}
+''',
+    },
+    {
+        'slug': 'while',
+        'name': 'Loop — sum 1..10',
+        'src': '''int main() {
+    int i = 1;
+    int sum = 0;
+    while (i < 11) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    return sum;
+}
+''',
+    },
+    {
+        'slug': 'pointer',
+        'name': 'Pointer — write through *p',
+        'src': '''int main() {
+    int x = 0;
+    int* p = &x;
+    *p = 99;
+    return x;
+}
+''',
+    },
+    {
+        'slug': 'fitness_stub',
+        'name': 'Hot-swap target — CA fitness stub',
+        'src': '''/* Phase 3 target: this function will eventually replace
+   the fitness slot in the ESP32-S3 firmware. The signature is
+   the future ABI we're prototyping toward — args, return value,
+   and what state it can read are all locked.
+
+   For now, this is just C that compiles to Xtensa ELF. */
+
+int score(int activity, int entropy, int period) {
+    /* Reward moderate activity + entropy, penalize short periods. */
+    int s = activity * entropy;
+    if (period < 4) {
+        s = s - 50;
+    }
+    return s;
+}
+''',
+    },
+]

@@ -21,6 +21,8 @@
              title="{{ s.blurb }}">{{ s.name }}</a>
         {% endif %}
       {% endfor %}
+      <a class="sublab-tab" href="{% url 's3lab:compile_page' %}"
+         title="Compile arbitrary C to Xtensa LX7 ELF via xcc700.">Compile</a>
     </nav>
     {% endif %}
   </header>

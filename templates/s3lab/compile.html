@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}S3 Lab — Compile{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 's3lab/css/style.css' %}">
+<style>
+  .compile-page { max-width: 1100px; margin: 1rem auto; padding: 0 1rem;
+                  color: #c9d1d9; font-family: ui-monospace, Menlo, monospace; }
+  .compile-page h1 { margin-top: 0.4rem; }
+  .compile-page p.lede { color: #8b949e; }
+  .compile-grid { display: grid; grid-template-columns: 1fr 320px; gap: 1rem;
+                  margin-top: 1rem; }
+  .compile-editor { display: flex; flex-direction: column; }
+  textarea.csource { width: 100%; min-height: 380px; background: #0d1117;
+                     color: #e1e4e8; border: 1px solid #30363d; border-radius: 4px;
+                     padding: 0.6rem; font-family: ui-monospace, Menlo, monospace;
+                     font-size: 0.84rem; line-height: 1.4; resize: vertical; }
+  .compile-controls { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
+  .compile-controls input[type=text] { background: #0d1117; color: #e1e4e8;
+                     border: 1px solid #30363d; border-radius: 4px; padding: 0.35rem 0.55rem;
+                     font-family: inherit; font-size: 0.8rem; }
+  .compile-controls button { background: #238636; color: white; border: none;
+                     padding: 0.4rem 1rem; border-radius: 4px; font-family: inherit;
+                     font-size: 0.85rem; cursor: pointer; }
+  .compile-controls button:hover { background: #2ea043; }
+  .compile-controls button:disabled { background: #30363d; cursor: wait; }
+  .compile-side { display: flex; flex-direction: column; gap: 0.8rem; }
+  .panel { background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+           padding: 0.6rem 0.8rem; }
+  .panel h3 { margin: 0 0 0.4rem 0; font-size: 0.85rem; color: #8b949e;
+              font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .examples a { display: block; padding: 0.3rem 0; color: #58a6ff;
+                text-decoration: none; font-size: 0.8rem; }
+  .examples a:hover { color: #79b8ff; text-decoration: underline; }
+  .build-log { background: #0d1117; border-radius: 4px; padding: 0.5rem;
+               white-space: pre-wrap; font-size: 0.78rem; color: #8b949e;
+               max-height: 220px; overflow: auto; }
+  .build-log.ok { color: #3fb950; }
+  .build-log.err { color: #f85149; border-left: 3px solid #f85149; }
+  .ref { font-size: 0.75rem; color: #6e7681; line-height: 1.5; }
+  .ref code { background: #0d1117; padding: 0.05rem 0.25rem; border-radius: 3px;
+              color: #c9d1d9; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="compile-page">
+  <p style="font-size:0.78rem;"><a href="{% url 's3lab:index' %}" style="color:#58a6ff;">← S3 Lab</a></p>
+  <h1>S3 Lab — Compile</h1>
+  <p class="lede">Write C, get a Xtensa LX7 relocatable ELF for the ESP32-S3 supermini.
+    Sub-second roundtrip via the vendored <code>xcc700</code> compiler.
+    Phase 2 will POST this ELF to a device endpoint over WiFi; for now,
+    you get a download.</p>
+
+  <div class="compile-grid">
+    <div class="compile-editor">
+      <textarea id="csource" class="csource" spellcheck="false">{{ examples.0.src }}</textarea>
+      <div class="compile-controls">
+        <input type="text" id="elfname" value="a.elf" size="14"
+               title="Output filename for the downloaded ELF">
+        <button type="button" id="compile-btn">Compile → ELF</button>
+        <span id="status" style="color:#8b949e; font-size:0.78rem;"></span>
+      </div>
+      <h3 style="margin-top:1rem; color:#8b949e; font-size:0.85rem;
+                 text-transform:uppercase; letter-spacing:0.04em; font-weight:500;">Build log</h3>
+      <pre id="build-log" class="build-log">(awaiting first compile)</pre>
+    </div>
+
+    <aside class="compile-side">
+      <div class="panel">
+        <h3>Examples</h3>
+        <div class="examples">
+          {% for ex in examples %}
+            <a href="#" data-example="{{ forloop.counter0 }}">{{ ex.name }}</a>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="panel">
+        <h3>What xcc700 supports</h3>
+        <p class="ref">
+          <code>if/else</code>, <code>while</code>, function defs &amp; calls,
+          <code>int</code>, <code>char</code>, pointers, arrays, basic
+          arithmetic + bitwise.
+        </p>
+        <p class="ref" style="margin-top:0.4rem;">
+          <strong>Not</strong> supported: <code>for</code>, <code>switch</code>,
+          <code>struct</code>, <code>typedef</code>, <code>float</code>,
+          <code>#include</code>, <code>#define</code>, multi-line comments,
+          global initialisers.
+        </p>
+        <p class="ref" style="margin-top:0.4rem; color:#d29922;">
+          Error messages are spartan — usually one line naming the offending
+          token. The compiler bails on first error.
+        </p>
+      </div>
+      <div class="panel">
+        <h3>Output</h3>
+        <p class="ref">
+          ELF 32-bit LSB relocatable, Tensilica Xtensa.<br>
+          Loadable on ESP32-S3 via ESP-IDF <code>elf_loader</code>.
+        </p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+  // Embedded example sources for one-click load.
+  const EXAMPLES = [
+    {% for ex in examples %}{src: {{ ex.src|escapejs|stringformat:"'%s'" }} },
+    {% endfor %}
+  ];
+
+  const csource = document.getElementById('csource');
+  const elfname = document.getElementById('elfname');
+  const btn = document.getElementById('compile-btn');
+  const status = document.getElementById('status');
+  const buildLog = document.getElementById('build-log');
+
+  document.querySelectorAll('[data-example]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const i = +a.dataset.example;
+      if (EXAMPLES[i]) {
+        csource.value = EXAMPLES[i].src;
+        status.textContent = 'loaded example.';
+      }
+    });
+  });
+
+  function csrfToken() {
+    const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    status.textContent = 'compiling…';
+    buildLog.className = 'build-log';
+    buildLog.textContent = '(running xcc700)';
+
+    // Two-step: first ask for JSON to render the build log, then if
+    // ok, repeat as a download. Simpler than parsing the binary +
+    // headers in JS, and the second roundtrip is also sub-second.
+    const fd = new FormData();
+    fd.append('source', csource.value);
+    fd.append('name', elfname.value || 'a.elf');
+    fd.append('download', '0');
+
+    let resp;
+    try {
+      resp = await fetch('{% url "s3lab:compile_run" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken() },
+        body: fd,
+      });
+    } catch (e) {
+      buildLog.className = 'build-log err';
+      buildLog.textContent = 'network error: ' + e;
+      btn.disabled = false; status.textContent = '';
+      return;
+    }
+
+    let data;
+    try { data = await resp.json(); }
+    catch (e) {
+      buildLog.className = 'build-log err';
+      buildLog.textContent = 'unexpected response (' + resp.status + ')';
+      btn.disabled = false; status.textContent = '';
+      return;
+    }
+
+    if (!data.ok) {
+      buildLog.className = 'build-log err';
+      buildLog.textContent = (data.error || 'unknown error') +
+        (data.build_log ? '\n\n' + data.build_log : '');
+      status.textContent = 'failed.';
+      btn.disabled = false;
+      return;
+    }
+
+    buildLog.className = 'build-log ok';
+    buildLog.textContent = data.build_log +
+      `\n\n→ ${data.elf_bytes} B ELF, ${data.elapsed_ms} ms compile.`;
+    status.textContent = `OK — downloading ${data.elf_bytes} B.`;
+
+    // Decode the base64 ELF and trigger a save dialog.
+    const bin = atob(data.elf_b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], {type: 'application/octet-stream'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = elfname.value || 'a.elf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    btn.disabled = false;
+  });
+</script>
+{% endblock %}
