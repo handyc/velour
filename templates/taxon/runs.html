@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Taxon — evolution runs{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+  <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
+  <h1 style="margin-top:0;">Evolution runs
+    <span style="color:#8b949e; font-size:0.8rem; font-weight:normal;">
+      — {{ shown }} of {{ total }}
+    </span>
+  </h1>
+  <p style="color:#8b949e;">Sessions saved by <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">/taxon/evolve/</a>
+    when you click 💾 Save elite. Each row is one GA run that
+    contributed a rule to the library; the best fitness curve is
+    stashed in <code>fitness_curve</code> on the EvolutionRun row.</p>
+
+  {% if runs %}
+  <table style="width:100%; border-collapse:collapse; font-size:0.82rem; margin-top:0.8rem;">
+    <thead>
+      <tr style="color:#8b949e; text-align:left; border-bottom:1px solid #30363d;">
+        <th style="padding:0.4rem 0.5rem;">started</th>
+        <th style="padding:0.4rem 0.5rem;">name</th>
+        <th style="padding:0.4rem 0.5rem;">target</th>
+        <th style="padding:0.4rem 0.5rem;">seed</th>
+        <th style="padding:0.4rem 0.5rem;">elite</th>
+        <th style="padding:0.4rem 0.5rem; text-align:right;">gens</th>
+        <th style="padding:0.4rem 0.5rem; text-align:right;">best fit</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr style="border-bottom:1px solid #21262d; color:#c9d1d9;">
+        <td style="padding:0.35rem 0.5rem; color:#6e7681; white-space:nowrap;">{{ r.started_at|date:"Y-m-d H:i" }}</td>
+        <td style="padding:0.35rem 0.5rem;">{{ r.name|default:r.slug }}</td>
+        <td style="padding:0.35rem 0.5rem;">
+          {% if r.target_kind == 'class' %}class {{ r.target_class }}
+          {% else %}{{ r.target_metric }} = {{ r.target_value|floatformat:3 }}{% endif %}
+        </td>
+        <td style="padding:0.35rem 0.5rem;">
+          {% if r.seed_rule %}
+            <a href="{% url 'taxon:rule_detail' slug=r.seed_rule.slug %}"
+               style="color:#79c0ff;">{{ r.seed_rule.slug|truncatechars:24 }}</a>
+          {% else %}<span style="color:#6e7681;">random</span>{% endif %}
+        </td>
+        <td style="padding:0.35rem 0.5rem;">
+          {% if r.best_rule %}
+            <a href="{% url 'taxon:rule_detail' slug=r.best_rule.slug %}"
+               style="color:#7ee787;">{{ r.best_rule.slug|truncatechars:24 }}</a>
+          {% else %}<span style="color:#6e7681;">—</span>{% endif %}
+        </td>
+        <td style="padding:0.35rem 0.5rem; text-align:right; color:#c9d1d9;">{{ r.generations }}</td>
+        <td style="padding:0.35rem 0.5rem; text-align:right; color:#7ee787;">{{ r.best_fitness|floatformat:3 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#6e7681; margin-top:1rem;">
+    No runs yet. Open <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">/taxon/evolve/</a>,
+    let the GA churn for a while, then 💾 Save elite — the run lands here.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

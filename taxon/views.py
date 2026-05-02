@@ -143,6 +143,20 @@ def metrics_view(request):
 
 
 @login_required
+def runs_view(request):
+    """List of past evolution runs (browser-driven GA sessions saved
+    via /taxon/evolve/save/). Newest first."""
+    runs = (EvolutionRun.objects
+            .select_related('seed_rule', 'best_rule')
+            .order_by('-started_at')[:200])
+    return render(request, 'taxon/runs.html', {
+        'runs': runs,
+        'total': EvolutionRun.objects.count(),
+        'shown': len(runs),
+    })
+
+
+@login_required
 def rule_detail(request, slug: str):
     rule = get_object_or_404(Rule, slug=slug)
     card = _rule_card(rule)
@@ -672,6 +686,32 @@ def autosearch_stop(request, slug: str):
     search = get_object_or_404(AutoSearch, slug=slug)
     autosearch_mod.request_stop(search)
     return JsonResponse({'ok': True, 'slug': slug})
+
+
+@login_required
+def autosearch_list_json(request):
+    """JSON list of recent AutoSearches — drives the live-update of
+    the recent-searches table on /taxon/autosearch/."""
+    from . import autosearch as autosearch_mod
+    autosearch_mod.mark_orphans()
+    rows = []
+    for s in AutoSearch.objects.all()[:20]:
+        rows.append({
+            'slug':         s.slug,
+            'target_class': s.target_class,
+            'status':       s.status,
+            'status_label': s.get_status_display(),
+            'tried':        s.rules_tried,
+            'kept':         s.rules_kept,
+            'started_at':   s.started_at.isoformat() if s.started_at else None,
+            'detail_url':   reverse('taxon:autosearch_detail', args=[s.slug]),
+            'is_active':    s.is_active,
+        })
+    active_count = (AutoSearch.objects
+        .filter(status__in=(AutoSearch.STATUS_QUEUED,
+                             AutoSearch.STATUS_RUNNING))
+        .count())
+    return JsonResponse({'recent': rows, 'active_count': active_count})
 
 
 @login_required

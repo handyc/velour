@@ -109,9 +109,8 @@
                   padding:0.9rem 1rem; margin:1rem 0;">
     <h2 style="font-family:ui-monospace,Menlo,monospace; font-size:1rem;
                margin:0 0 0.6rem 0;">Recent searches
-      <span style="color:#8b949e; font-size:0.8rem; font-weight:normal;">— {{ active_count }} active</span>
+      <span style="color:#8b949e; font-size:0.8rem; font-weight:normal;">— <span id="recent-active-count">{{ active_count }}</span> active</span>
     </h2>
-    {% if recent_searches %}
     <table style="width:100%; border-collapse:collapse; font-family:ui-monospace,monospace; font-size:0.82rem;">
       <thead><tr style="color:#8b949e; text-align:left;">
         <th style="padding:0.3rem 0.4rem;">slug</th>
@@ -121,27 +120,28 @@
         <th style="padding:0.3rem 0.4rem;">kept</th>
         <th style="padding:0.3rem 0.4rem;">started</th>
       </tr></thead>
-      <tbody>
-        {% for s in recent_searches %}
-        <tr style="border-top:1px solid #21262d; color:#c9d1d9;">
-          <td style="padding:0.3rem 0.4rem;">
-            <a href="{% url 'taxon:autosearch_detail' slug=s.slug %}"
-               data-watch="{{ s.slug }}"
-               style="color:#79c0ff; text-decoration:none;"
-               title="Open the watch view for this run (also bookmarkable).">{{ s.slug }}</a>
-          </td>
-          <td style="padding:0.3rem 0.4rem;">class {{ s.target_class }}</td>
-          <td style="padding:0.3rem 0.4rem;">{{ s.get_status_display }}</td>
-          <td style="padding:0.3rem 0.4rem;">{{ s.rules_tried }}</td>
-          <td style="padding:0.3rem 0.4rem; color:#7ee787;">{{ s.rules_kept }}</td>
-          <td style="padding:0.3rem 0.4rem; color:#6e7681;">{{ s.started_at|date:"Y-m-d H:i:s" }}</td>
-        </tr>
-        {% endfor %}
+      <tbody id="recent-tbody">
+        {% if recent_searches %}
+          {% for s in recent_searches %}
+          <tr style="border-top:1px solid #21262d; color:#c9d1d9;">
+            <td style="padding:0.3rem 0.4rem;">
+              <a href="{% url 'taxon:autosearch_detail' slug=s.slug %}"
+                 data-watch="{{ s.slug }}"
+                 style="color:#79c0ff; text-decoration:none;"
+                 title="Open the watch view for this run (also bookmarkable).">{{ s.slug }}</a>
+            </td>
+            <td style="padding:0.3rem 0.4rem;">class {{ s.target_class }}</td>
+            <td style="padding:0.3rem 0.4rem;">{{ s.get_status_display }}</td>
+            <td style="padding:0.3rem 0.4rem;">{{ s.rules_tried }}</td>
+            <td style="padding:0.3rem 0.4rem; color:#7ee787;">{{ s.rules_kept }}</td>
+            <td style="padding:0.3rem 0.4rem; color:#6e7681;">{{ s.started_at|date:"Y-m-d H:i:s" }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="6" style="padding:0.6rem; color:#6e7681; font-size:0.85rem;">no searches yet — fill in the form above to start one</td></tr>
+        {% endif %}
       </tbody>
     </table>
-    {% else %}
-    <div style="color:#6e7681; font-size:0.85rem;">no searches yet — fill in the form above to start one</div>
-    {% endif %}
   </section>
 </div>
 
@@ -278,6 +278,54 @@
   // auto-watch that run on mount.
   const initialWatch = "{{ watch_slug|default:''|escapejs }}";
   if (initialWatch) startWatching(initialWatch);
+
+  // Live-update the recent-searches table every 5 s so a row that
+  // finishes (or a new row from another tab) shows without a refresh.
+  const tbodyEl = document.getElementById('recent-tbody');
+  const activeCountEl = document.getElementById('recent-active-count');
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+  async function refreshRecent() {
+    try {
+      const r = await fetch('/taxon/autosearch/list.json',
+                            { credentials: 'same-origin' });
+      if (!r.ok) return;
+      const d = await r.json();
+      activeCountEl.textContent = d.active_count;
+      if (!d.recent || d.recent.length === 0) {
+        tbodyEl.innerHTML = '<tr><td colspan="6" style="padding:0.6rem; color:#6e7681; font-size:0.85rem;">no searches yet — fill in the form above to start one</td></tr>';
+        return;
+      }
+      const rows = d.recent.map(s => {
+        const stamp = s.started_at ? s.started_at.replace('T', ' ').slice(0, 19) : '';
+        return `<tr style="border-top:1px solid #21262d; color:#c9d1d9;">
+          <td style="padding:0.3rem 0.4rem;">
+            <a href="${escapeHtml(s.detail_url)}" data-watch="${escapeHtml(s.slug)}"
+               style="color:#79c0ff; text-decoration:none;"
+               title="Open the watch view for this run (also bookmarkable).">${escapeHtml(s.slug)}</a>
+          </td>
+          <td style="padding:0.3rem 0.4rem;">class ${s.target_class}</td>
+          <td style="padding:0.3rem 0.4rem; color:${s.is_active ? '#3fb950' : '#8b949e'};">${escapeHtml(s.status_label)}</td>
+          <td style="padding:0.3rem 0.4rem;">${s.tried}</td>
+          <td style="padding:0.3rem 0.4rem; color:#7ee787;">${s.kept}</td>
+          <td style="padding:0.3rem 0.4rem; color:#6e7681;">${escapeHtml(stamp)}</td>
+        </tr>`;
+      });
+      tbodyEl.innerHTML = rows.join('');
+      // Re-bind data-watch handlers to the freshly-rendered rows.
+      tbodyEl.querySelectorAll('a[data-watch]').forEach(a => {
+        a.addEventListener('click', e => {
+          if (e.ctrlKey || e.metaKey || e.button === 1) return;
+          e.preventDefault();
+          startWatching(a.dataset.watch);
+        });
+      });
+    } catch (e) { /* network blip — try again next tick */ }
+  }
+  setInterval(refreshRecent, 5000);
 })();
 </script>
 {% endblock %}

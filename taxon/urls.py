@@ -9,6 +9,7 @@ urlpatterns = [
     path('library/', views.library, name='library'),
     path('classes/<int:n>/', views.class_view, name='class'),
     path('metrics/', views.metrics_view, name='metrics'),
+    path('runs/',    views.runs_view,    name='runs'),
     path('import/', views.import_view, name='import'),
     path('evolve/', views.evolve_view, name='evolve'),
     path('evolve/save/', views.evolve_save, name='evolve_save'),
@@ -29,6 +30,7 @@ urlpatterns = [
     # AutoSearch — background hunt for a target Wolfram class.
     path('autosearch/',                      views.autosearch_view,   name='autosearch'),
     path('autosearch/start/',                views.autosearch_start,  name='autosearch_start'),
+    path('autosearch/list.json',             views.autosearch_list_json, name='autosearch_list_json'),
     path('autosearch/<slug:slug>/stop/',     views.autosearch_stop,   name='autosearch_stop'),
     path('autosearch/<slug:slug>/status.json', views.autosearch_status, name='autosearch_status'),
     path('autosearch/<slug:slug>/',          views.autosearch_view,   name='autosearch_detail'),
