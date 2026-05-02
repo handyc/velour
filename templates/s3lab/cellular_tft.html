@@ -105,6 +105,15 @@
       </label>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
+      <button id="hunt-btn"
+              style="background:#238636;border:none;color:white;"
+              title="Score every cell, sort by fitness, replace the bottom half with fresh random genomes + palettes. Broadens the search — good after a long convergence to break out of a local plateau.">🧬 Hunt</button>
+      <button id="refine-btn"
+              style="background:#1f6feb;border:none;color:white;"
+              title="Find the elite cell (highest fitness), replace every other cell with a low-rate mutation of it. Narrow convergence — accelerates lock-in on the current best.">🎯 Refine</button>
+      <span id="ga-status" style="color:#8b949e; font-size:0.78rem;"></span>
+    </div>
+    <div class="controls" style="margin-top:0.4rem;">
       <label>seed
         <input id="seed" type="number" value="42" min="0" max="4294967295" style="width:9rem;">
       </label>
@@ -582,6 +591,135 @@ function applyImagePalettes(img) {
     }
   }
 }
+
+// ── Hunt + Refine: one-shot population operations ─────────────────
+//
+// These don't replace the running tournament — they reshape the
+// population state. They run ~0.5–1 s synchronously (256 fitness
+// evaluations) with status updates between cells so the page stays
+// responsive. Both work whether the emulator is paused or running.
+
+const huntBtn   = document.getElementById('hunt-btn');
+const refineBtn = document.getElementById('refine-btn');
+const gaStatus  = document.getElementById('ga-status');
+let gaRunning = false;
+
+function setGaButtons(disabled) {
+  huntBtn.disabled    = disabled;
+  refineBtn.disabled  = disabled;
+  paletteBtn.disabled = disabled;
+  resetBtn.disabled   = disabled;
+  randomSeedBtn.disabled = disabled;
+}
+
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+async function scoreAll() {
+  // Re-evaluate every cell's fitness on a shared seed for fair
+  // comparison. Yields every 16 cells so the UI repaints.
+  const sharedSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  for (let i = 0; i < state.cells.length; i++) {
+    state.cells[i].score = fitness(state.cells[i].genome, sharedSeed).score;
+    if ((i & 15) === 15) {
+      gaStatus.textContent = `scoring cell ${i + 1}/${state.cells.length}…`;
+      gaStatus.style.color = '#8b949e';
+      await tick();
+    }
+  }
+}
+
+async function runHunt() {
+  if (gaRunning) return;
+  gaRunning = true;
+  const wasRunning = state.running;
+  state.running = false;
+  setGaButtons(true);
+  gaStatus.textContent = 'hunt: scoring…';
+  gaStatus.style.color = '#238636';
+
+  await scoreAll();
+
+  // Sort by score, find the median, replace bottom half with fresh
+  // random genomes + palettes + grids.
+  const ordered = state.cells.map((c, i) => [c.score, i]).sort((a, b) => b[0] - a[0]);
+  const halfBoundary = ordered.length >> 1;
+
+  gaStatus.textContent = `hunt: refreshing bottom ${ordered.length - halfBoundary} cells…`;
+  for (let k = halfBoundary; k < ordered.length; k++) {
+    const i = ordered[k][1];
+    const c = state.cells[i];
+    seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
+    c.genome = random_genome();
+    c.palette = invent_palette();
+    seed_grid(c.gridA, prng());
+    c.score = 0;
+    c.lastDrawn = -1;
+    c.subPal = -1;
+    c.subRgb = undefined;
+    if ((k & 31) === 31) await tick();
+  }
+
+  renderFull();
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
+  gaStatus.textContent =
+    `hunt done · refreshed ${ordered.length - halfBoundary} cells`;
+  gaStatus.style.color = '#3fb950';
+  state.running = wasRunning;
+  state.lastTickAt = state.lastRoundAt = performance.now();
+  setGaButtons(false);
+  gaRunning = false;
+}
+
+async function runRefine() {
+  if (gaRunning) return;
+  gaRunning = true;
+  const wasRunning = state.running;
+  state.running = false;
+  setGaButtons(true);
+  gaStatus.textContent = 'refine: scoring…';
+  gaStatus.style.color = '#1f6feb';
+
+  await scoreAll();
+
+  // Find the elite cell — highest score wins; on ties, lowest index.
+  let elite = 0;
+  for (let i = 1; i < state.cells.length; i++) {
+    if (state.cells[i].score > state.cells[elite].score) elite = i;
+  }
+  const E = state.cells[elite];
+  const REFINE_RATE = 0.002;
+
+  gaStatus.textContent =
+    `refine: elite cell #${elite} (score ${E.score.toFixed(2)}) · mutating others…`;
+  for (let i = 0; i < state.cells.length; i++) {
+    if (i === elite) continue;
+    const c = state.cells[i];
+    seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
+    mutate(c.genome, E.genome, REFINE_RATE);
+    palette_inherit(c.palette, E.palette, E.palette);
+    seed_grid(c.gridA, prng());
+    c.score = E.score;
+    c.lastDrawn = -1;
+    c.subPal = -1;
+    c.subRgb = undefined;
+    if ((i & 31) === 31) await tick();
+  }
+
+  renderFull();
+  cv.classList.add('flash');
+  setTimeout(() => cv.classList.remove('flash'), 220);
+  gaStatus.textContent =
+    `refine done · cloned cell #${elite} into ${state.cells.length - 1} mutants`;
+  gaStatus.style.color = '#3fb950';
+  state.running = wasRunning;
+  state.lastTickAt = state.lastRoundAt = performance.now();
+  setGaButtons(false);
+  gaRunning = false;
+}
+
+huntBtn.addEventListener('click', runHunt);
+refineBtn.addEventListener('click', runRefine);
 
 const imageInput = document.getElementById('image-input');
 imageInput.addEventListener('change', (e) => {
