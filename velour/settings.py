@@ -137,6 +137,7 @@ INSTALLED_APPS = [
     'ledger',
     's3lab',
     'hexnn',
+    'taxon',
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,27 @@
+{# A small rule card. ``c`` is a dict from views._rule_card. #}
+<a href="{% url 'taxon:rule_detail' slug=c.rule.slug %}" class="taxon-card"
+   style="display:inline-block; width:200px; margin:0.5rem 0.6rem 0.5rem 0;
+          padding:0.5rem 0.6rem; background:#161b22; border:1px solid #30363d;
+          border-left:4px solid {{ c.class_color }}; border-radius:5px;
+          text-decoration:none; color:#c9d1d9; vertical-align:top;
+          font-family:ui-monospace,Menlo,monospace; font-size:0.78rem;">
+  <div style="font-weight:600; color:#e1e4e8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+    {{ c.rule.name|default:c.rule.slug }}
+  </div>
+  <div style="font-size:0.66rem; color:#8b949e;">{{ c.rule.sha1|slice:":10" }} · {{ c.rule.source }}</div>
+  <div style="margin-top:0.35rem;">
+    {% for hex in c.palette %}
+      <span style="display:inline-block; width:14px; height:14px; background:{{ hex }};
+                   border:1px solid #444; vertical-align:middle;"></span>
+    {% endfor %}
+  </div>
+  <div style="margin-top:0.4rem; font-size:0.72rem;">
+    {% if c.class_n %}
+      <span style="color:{{ c.class_color }}; font-weight:600;">class {{ c.class_n }}</span>
+      <span style="color:#8b949e;"> · {{ c.class_label }}</span>
+      <span style="color:#6e7681;"> · {{ c.class_conf|floatformat:2 }}</span>
+    {% else %}
+      <span style="color:#6e7681;">unclassified</span>
+    {% endif %}
+  </div>
+</a>

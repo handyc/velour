@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Taxon — {{ rule.slug }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+  <p><a href="{% url 'taxon:library' %}" style="color:#58a6ff;">← Library</a></p>
+
+  <h1>{{ rule.name|default:rule.slug }}</h1>
+  <p style="color:#8b949e;">
+    sha1 <code>{{ rule.sha1 }}</code> · K={{ rule.n_colors }} · {{ rule.kind }}<br>
+    source <strong>{{ rule.get_source_display }}</strong>{% if rule.source_ref %} · <span style="color:#6e7681;">{{ rule.source_ref }}</span>{% endif %}
+  </p>
+
+  <p>
+    palette:
+    {% for hex in palette_hex %}
+      <span style="display:inline-block; width:20px; height:20px; background:{{ hex }};
+                   border:1px solid #444; vertical-align:middle;" title="{{ hex }}"></span>
+    {% endfor %}
+  </p>
+
+  {% if card.class_n %}
+  <div style="margin:1rem 0; padding:0.7rem 0.9rem; background:#161b22;
+              border:1px solid #30363d; border-left:4px solid {{ card.class_color }}; border-radius:5px;">
+    <div style="color:{{ card.class_color }}; font-weight:600;">Class {{ card.class_n }} — {{ card.class_label }}</div>
+    <div style="color:#8b949e; font-size:0.78rem;">confidence {{ card.class_conf|floatformat:2 }}</div>
+    {% if card.class_basis %}
+    <table style="margin-top:0.5rem; font-size:0.78rem; color:#c9d1d9;">
+      {% for k, v in card.class_basis.items %}
+        <tr><td style="color:#8b949e; padding-right:1rem;">{{ k }}</td><td>{{ v|floatformat:3 }}</td></tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+  {% else %}
+  <p style="color:#8b949e;">Not classified yet.</p>
+  {% endif %}
+
+  <h2>Metrics</h2>
+  <table style="width:100%; border-collapse:collapse;">
+    <thead><tr style="border-bottom:1px solid #30363d;">
+      <th style="text-align:left; padding:0.4rem; color:#8b949e;">metric</th>
+      <th style="text-align:right; padding:0.4rem; color:#8b949e;">value</th>
+      <th style="text-align:left; padding:0.4rem; color:#8b949e;">notes</th>
+    </tr></thead>
+    <tbody>
+    {% for row in metrics_table %}
+      <tr style="border-bottom:1px solid #21262d;">
+        <td style="padding:0.4rem;">{{ row.meta.label }} <span style="color:#6e7681;">{{ row.meta.name }}</span></td>
+        <td style="text-align:right; padding:0.4rem;">
+          {% if row.value is not None %}{{ row.value|floatformat:4 }}{% else %}—{% endif %}
+        </td>
+        <td style="padding:0.4rem; color:#8b949e;">{{ row.meta.blurb }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Actions</h2>
+  <form method="post" action="{% url 'taxon:rule_classify' slug=rule.slug %}"
+        style="display:inline-block;">
+    {% csrf_token %}
+    <button style="background:#1f6feb; color:#fff; border:none; padding:0.4rem 0.8rem;
+                   border-radius:4px; cursor:pointer;">Re-run metrics + classify</button>
+  </form>
+  <a href="{% url 'taxon:rule_download' slug=rule.slug %}"
+     style="margin-left:0.5rem; color:#58a6ff;">Download genome.bin</a>
+  ·
+  <a href="/automaton/import-from-s3lab/?ref=taxon" style="color:#58a6ff;">→ Automaton</a>
+  ·
+  <a href="{% url 'taxon:evolve' %}?seed={{ rule.slug }}" style="color:#58a6ff;">Use as evolve seed</a>
+
+  {% if classifications|length > 1 %}
+  <h2>Classification history</h2>
+  <table style="font-size:0.78rem;">
+    {% for c in classifications %}
+      <tr><td style="padding:0.2rem 0.6rem; color:#8b949e;">{{ c.assigned_at|date:"Y-m-d H:i" }}</td>
+          <td style="padding:0.2rem 0.6rem;">class {{ c.wolfram_class }}</td>
+          <td style="padding:0.2rem 0.6rem; color:#6e7681;">conf {{ c.confidence|floatformat:2 }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Taxon — evolve toward class{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+  <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
+  <h1>Evolve toward a target class</h1>
+  <p style="color:#8b949e;">In-browser GA. Pick a target Wolfram class and a
+    fitness function, watch the population converge, then save the elite back
+    into the library.</p>
+  <p style="color:#d29922;">[ Phase 1 stub — UI lands when the GA driver is wired. ]</p>
+</div>
+{% endblock %}

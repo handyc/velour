@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Taxon — class {{ n }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+  <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">
+    <span style="color:{{ color }};">Class {{ n }}</span>
+    <span style="font-weight:400; color:#8b949e;">— {{ label }}</span>
+  </h1>
+
+  <p style="margin:0.5rem 0;">
+    Switch:
+    {% for cn, lbl in class_choices %}
+      <a href="{% url 'taxon:class' n=cn %}"
+         style="color:{% if cn == n %}#e1e4e8{% else %}#58a6ff{% endif %}; margin-right:0.5em;"
+         >class {{ cn }}</a>
+    {% endfor %}
+  </p>
+
+  <div>
+    {% for c in cards %}{% include "taxon/_card.html" %}{% empty %}
+      <p style="color:#8b949e;">No rules in this class yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

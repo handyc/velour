@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Taxon — CA classification{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">Taxon</h1>
+  <p style="color:#8b949e;">A canonical library + classification layer for the
+    hex CA rules that s3lab, automaton, helix, and stratum produce. Class 4
+    isn't the only goal — class 1 (settled), class 2 (periodic), and class 3
+    (chaotic) all have legitimate uses.</p>
+
+  <div style="display:flex; gap:0.6rem; margin:1rem 0; flex-wrap:wrap;">
+    {% for s in summary %}
+    <a href="{% url 'taxon:class' n=s.n %}" style="text-decoration:none;
+       padding:0.6rem 0.9rem; background:#161b22; border:1px solid #30363d;
+       border-left:4px solid {{ s.color }}; border-radius:5px;
+       font-family:ui-monospace,Menlo,monospace;">
+      <div style="font-size:0.85rem; color:{{ s.color }}; font-weight:600;">Class {{ s.n }}</div>
+      <div style="font-size:0.7rem; color:#8b949e;">{{ s.label }}</div>
+      <div style="font-size:1.4rem; color:#e1e4e8; margin-top:0.2rem;">{{ s.count }}</div>
+    </a>
+    {% endfor %}
+    <div style="padding:0.6rem 0.9rem; background:#161b22; border:1px solid #30363d;
+                border-radius:5px; font-family:ui-monospace,Menlo,monospace;">
+      <div style="font-size:0.85rem; color:#8b949e;">Total</div>
+      <div style="font-size:0.7rem; color:#6e7681;">{{ classified }} classified</div>
+      <div style="font-size:1.4rem; color:#e1e4e8; margin-top:0.2rem;">{{ total_rules }}</div>
+    </div>
+  </div>
+
+  <p style="margin:0.5rem 0;">
+    <a href="{% url 'taxon:library' %}" style="color:#58a6ff;">Library</a> ·
+    <a href="{% url 'taxon:metrics' %}" style="color:#58a6ff;">Metrics</a> ·
+    <a href="{% url 'taxon:import' %}" style="color:#58a6ff;">Import</a> ·
+    <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">Evolve</a>
+  </p>
+
+  <h2 style="margin-top:1.5rem; font-family:ui-monospace,Menlo,monospace;">Recent rules</h2>
+  {% if cards %}
+    <div>
+      {% for c in cards %}{% include "taxon/_card.html" %}{% endfor %}
+    </div>
+  {% else %}
+    <p style="color:#8b949e;">No rules yet. <a href="{% url 'taxon:import' %}" style="color:#58a6ff;">Import</a>
+      from s3lab/automaton/helix, or <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">evolve a fresh one</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

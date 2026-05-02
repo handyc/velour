@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Taxon — library{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+  <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">Library — {{ total }} rules</h1>
+
+  <div style="margin:0.5rem 0;">
+    <a href="{% url 'taxon:library' %}"
+       style="color:{% if not active_source %}#e1e4e8{% else %}#58a6ff{% endif %};">all</a>
+    {% for s in sources %}
+      · <a href="?source={{ s.source }}"
+           style="color:{% if active_source == s.source %}#e1e4e8{% else %}#58a6ff{% endif %};"
+           >{{ s.source }} ({{ s.c }})</a>
+    {% endfor %}
+  </div>
+
+  <div>
+    {% for c in cards %}{% include "taxon/_card.html" %}{% empty %}
+      <p style="color:#8b949e;">No rules yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

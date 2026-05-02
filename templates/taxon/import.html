@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Taxon — import{% endblock %}
+
+{% block content %}
+<div style="max-width:700px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+  <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
+  <h1 style="font-family:ui-monospace,Menlo,monospace;">Import a HXC4 genome.bin</h1>
+  <p style="color:#8b949e;">4,104-byte file — output of s3lab "Download genome.bin",
+    automaton "/genome.bin", or stratum elite download.</p>
+
+  {% if err %}<p style="color:#f85149;">{{ err }}</p>{% endif %}
+
+  <form method="post" enctype="multipart/form-data" style="font-family:ui-monospace,Menlo,monospace;">
+    {% csrf_token %}
+    <div style="margin:0.5rem 0;">
+      <label>name <input name="name" type="text" style="width:100%; max-width:500px; padding:0.3rem;"></label>
+    </div>
+    <div style="margin:0.5rem 0;">
+      <label>source
+        <select name="source">
+          {% for v, label in source_choices %}
+            <option value="{{ v }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div style="margin:0.5rem 0;">
+      <label>genome.bin <input name="hxc4" type="file" required></label>
+    </div>
+    <button type="submit" style="background:#238636; color:#fff; border:none;
+      padding:0.5rem 1rem; border-radius:4px; cursor:pointer;">Import + classify</button>
+  </form>
+
+  <hr style="margin:2rem 0; border-color:#30363d;">
+  <p style="color:#8b949e;">Bulk imports: see
+    <code>manage.py taxon_import --automaton-all</code>,
+    <code>--hexhunt-all</code>, or
+    <code>--hxc4 PATH</code>.</p>
+</div>
+{% endblock %}
