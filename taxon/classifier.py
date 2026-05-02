@@ -65,8 +65,16 @@ def classify(metric_values: Dict[str, float],
     }
 
     # Class 1 — homogeneous / settled.
-    if act < 0.005 and h_norm < 0.10:
-        conf = 1.0 - max(act / 0.005, h_norm / 0.10)
+    # The threshold accommodates the transient. activity_rate is
+    # averaged over the whole trajectory (metrics.py:m_activity_rate)
+    # and the class 1 prototype — a rule that drains every cell to a
+    # single colour in one tick — still has act ≈ 1/(horizon-1) from
+    # that first transient tick. A 0.005 threshold (≈ 1 transient tick
+    # at horizon ≥ 200) excluded all the obvious class 1 rules at the
+    # default horizon=120; 0.02 (~2-3 transient ticks at horizon 120)
+    # admits true class 1 without leaking class 2/3.
+    if act < 0.02 and h_norm < 0.10:
+        conf = 1.0 - max(act / 0.02, h_norm / 0.10)
         return 1, max(0.5, min(1.0, conf)), basis
 
     # Class 2 — short cycle, low-to-moderate activity.

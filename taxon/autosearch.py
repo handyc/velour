@@ -68,12 +68,34 @@ def _stash_match(search: AutoSearch, packed: PackedRuleset, mvals: dict,
     return rule
 
 
+def _drainsink_seeded(search: AutoSearch, rng: random.Random) -> PackedRuleset:
+    """Drainsink ruleset (every situation outputs colour 0) with a
+    small fraction of situations randomised. Class 1 lives in the
+    corner where the rule collapses any state into a single colour;
+    the all-zeros default ``PackedRuleset()`` is the canonical example.
+    Identity (every situation → self) preserves entropy and reads as
+    class 2 instead, so we explicitly seed *drainsink* — not identity —
+    when target is class 1. Pure random sampling can't reach this
+    corner: the probability of randomly producing a near-drainsink
+    K=4 genome is roughly 4^-16384."""
+    parent = PackedRuleset(n_colors=4)        # zero-initialised: drainsink
+    return parent.mutate(rate=search.mutation_rate, rng=rng)
+
+
 def _mint_candidate(search: AutoSearch, rng: random.Random) -> PackedRuleset:
     """Generate one candidate per the search's seed_strategy.
 
-    For 'mutate' / 'hybrid' modes we pull a random existing Rule of the
-    target class and mutate it. If none exist we fall back to random.
+    Class-aware bias: random K=4 genomes are virtually never class 1
+    (active rate ≈ 0.75 by construction), so when target_class == 1 we
+    inject a near-identity genome ~50% of the time. The other classes
+    sample fine from random / library-mutate.
     """
+    # Class 1 special: bias toward drainsink-near genomes. Otherwise
+    # the search would tally millions of misses without ever entering
+    # the class 1 region of rule-space (random K=4 has act ≈ 0.75).
+    if search.target_class == 1 and rng.random() < 0.5:
+        return _drainsink_seeded(search, rng)
+
     want_mutate = (
         search.seed_strategy == AutoSearch.SEED_MUTATE
         or (search.seed_strategy == AutoSearch.SEED_HYBRID and rng.random() < 0.5)
