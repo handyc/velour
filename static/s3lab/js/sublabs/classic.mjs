@@ -695,10 +695,22 @@ async function uploadGenome(file) {
 // button drop you into the lab with the chosen ruleset preloaded.
 async function loadGenomeFromQuery() {
     const params = new URLSearchParams(window.location.search);
-    const fromSlug = params.get('from');
-    if (!fromSlug) return;
-    const url = `/automaton/${encodeURIComponent(fromSlug)}/genome.bin`;
-    huntStatus.textContent = `fetching ${fromSlug}…`;
+    // Two query forms:
+    //   ?from=<slug>         → /automaton/<slug>/genome.bin   (legacy)
+    //   ?from_taxon=<slug>   → /taxon/rules/<slug>/genome.bin (Taxon detail link)
+    let url, label;
+    const taxonSlug = params.get('from_taxon');
+    const automatonSlug = params.get('from');
+    if (taxonSlug) {
+        url = `/taxon/rules/${encodeURIComponent(taxonSlug)}/genome.bin`;
+        label = `taxon:${taxonSlug}`;
+    } else if (automatonSlug) {
+        url = `/automaton/${encodeURIComponent(automatonSlug)}/genome.bin`;
+        label = `automaton:${automatonSlug}`;
+    } else {
+        return;
+    }
+    huntStatus.textContent = `fetching ${label}…`;
     try {
         const resp = await fetch(url, { credentials: 'same-origin' });
         if (!resp.ok) {
@@ -706,7 +718,7 @@ async function loadGenomeFromQuery() {
             throw new Error(`HTTP ${resp.status}: ${txt}`);
         }
         const buf = await resp.arrayBuffer();
-        applyGenomeBytes(new Uint8Array(buf), `automaton:${fromSlug}`);
+        applyGenomeBytes(new Uint8Array(buf), label);
     } catch (err) {
         huntStatus.textContent = `import failed: ${err.message}`;
     }

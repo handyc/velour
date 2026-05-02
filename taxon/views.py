@@ -17,7 +17,7 @@ from automaton.packed import (
     PackedRuleset, ansi256_to_hex, encode_genome_bin,
 )
 
-from . import importers
+from . import exporters, importers
 from .classifier import class_color, class_label, classify
 from .engine import simulate
 from .metrics import META as METRIC_META, list_metrics, run_all
@@ -72,18 +72,35 @@ def index(request):
 
 @login_required
 def library(request):
+    from django.db.models import Q
     qs = Rule.objects.all()
     src = request.GET.get('source', '')
     if src:
         qs = qs.filter(source=src)
-    cards = [_rule_card(r) for r in qs]
+    q = (request.GET.get('q', '') or '').strip()
+    if q:
+        qs = qs.filter(
+            Q(name__icontains=q) | Q(slug__icontains=q) |
+            Q(sha1__istartswith=q) | Q(source_ref__icontains=q)
+        )
+    sort = request.GET.get('sort', 'newest')
+    if sort == 'oldest':
+        qs = qs.order_by('created_at')
+    elif sort == 'name':
+        qs = qs.order_by('name', 'slug')
+    else:
+        qs = qs.order_by('-created_at')
+    cards = [_rule_card(r) for r in qs[:300]]   # cap render cost
     sources = (Rule.objects.values('source')
                .annotate(c=Count('id')).order_by('-c'))
     return render(request, 'taxon/library.html', {
         'cards': cards,
         'sources': sources,
         'active_source': src,
+        'q': q,
+        'sort': sort,
         'total': qs.count(),
+        'shown': len(cards),
     })
 
 
@@ -140,6 +157,7 @@ def rule_detail(request, slug: str):
         'metrics_table': metrics_table,
         'classifications': classifications,
         'genome_hex_preview': bytes(rule.genome).hex()[:96],
+        'genome_hex_full': bytes(rule.genome).hex(),
         'palette_hex': rule.palette_hex,
         'class_choices': [(n, lbl) for n, lbl in WOLFRAM_CLASSES],
     })
@@ -193,6 +211,29 @@ def rule_delete(request, slug: str):
     rule = get_object_or_404(Rule, slug=slug)
     rule.delete()
     return redirect('taxon:library')
+
+
+@login_required
+@require_POST
+def rule_to_automaton(request, slug: str):
+    """Build an automaton.Simulation from this Taxon Rule and redirect
+    to its run page. Idempotent on sha1 — re-running on the same rule
+    re-uses the existing RuleSet and lands on its most recent Sim."""
+    rule = get_object_or_404(Rule, slug=slug)
+    try:
+        sim = exporters.to_automaton(rule)
+    except ValueError as e:
+        return HttpResponseBadRequest(str(e))
+    return redirect('automaton:run', slug=sim.slug)
+
+
+@login_required
+def rule_to_s3lab(request, slug: str):
+    """Open this Taxon Rule in the s3lab Classic sublab. Bounces to
+    /s3lab/?from_taxon=<slug>; the classic JS sublab fetches our
+    genome.bin and applies it as the live genome."""
+    rule = get_object_or_404(Rule, slug=slug)
+    return redirect(f'/s3lab/?from_taxon={rule.slug}')
 
 
 @login_required

@@ -2,24 +2,50 @@
 {% block title %}Taxon — library{% endblock %}
 
 {% block content %}
-<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;">
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
   <p><a href="{% url 'taxon:index' %}" style="color:#58a6ff;">← Taxon</a></p>
-  <h1 style="font-family:ui-monospace,Menlo,monospace;">Library — {{ total }} rules</h1>
+  <h1 style="margin-top:0;">Library
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">— showing {{ shown }} of {{ total }}</span>
+  </h1>
 
-  <div style="margin:0.5rem 0;">
-    <a href="{% url 'taxon:library' %}"
-       style="color:{% if not active_source %}#e1e4e8{% else %}#58a6ff{% endif %};">all</a>
-    {% for s in sources %}
-      · <a href="?source={{ s.source }}"
-           style="color:{% if active_source == s.source %}#e1e4e8{% else %}#58a6ff{% endif %};"
-           >{{ s.source }} ({{ s.c }})</a>
-    {% endfor %}
-  </div>
+  <form method="get" style="margin:0.5rem 0; display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+    <input type="search" name="q" value="{{ q }}" placeholder="search name / slug / sha1 / ref"
+           style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                  padding:0.35rem 0.55rem; border-radius:4px; min-width:280px;
+                  font-family:inherit; font-size:0.85rem;">
+    <select name="source" style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                                 padding:0.35rem 0.4rem; border-radius:4px; font-family:inherit;">
+      <option value="">all sources</option>
+      {% for s in sources %}
+        <option value="{{ s.source }}" {% if active_source == s.source %}selected{% endif %}
+                >{{ s.source }} ({{ s.c }})</option>
+      {% endfor %}
+    </select>
+    <select name="sort" style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                               padding:0.35rem 0.4rem; border-radius:4px; font-family:inherit;">
+      <option value="newest" {% if sort == 'newest' %}selected{% endif %}>newest first</option>
+      <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>oldest first</option>
+      <option value="name"   {% if sort == 'name'   %}selected{% endif %}>by name</option>
+    </select>
+    <button type="submit" style="background:#1f6feb; color:#fff; border:none;
+            padding:0.4rem 0.9rem; border-radius:4px; cursor:pointer;
+            font-family:inherit; font-size:0.85rem;">Filter</button>
+    {% if q or active_source or sort != 'newest' %}
+      <a href="{% url 'taxon:library' %}" style="color:#8b949e; font-size:0.78rem;">reset</a>
+    {% endif %}
+  </form>
 
   <div>
     {% for c in cards %}{% include "taxon/_card.html" %}{% empty %}
-      <p style="color:#8b949e;">No rules yet.</p>
+      <p style="color:#8b949e;">No rules match.</p>
     {% endfor %}
   </div>
+
+  {% if total > shown %}
+  <p style="color:#8b949e; margin-top:1rem; font-size:0.8rem;">
+    Showing {{ shown }} of {{ total }}. Refine the search to narrow further.
+  </p>
+  {% endif %}
 </div>
 {% endblock %}
