@@ -87,6 +87,14 @@
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
               font-family:inherit;">Download genome.bin</a>
 
+    <form method="post" action="{% url 'taxon:rule_reroll_palette' slug=rule.slug %}" style="margin:0;">
+      {% csrf_token %}
+      <button style="background:#21262d; color:#d4a72c; border:1px solid #30363d;
+                     padding:0.4rem 0.8rem; border-radius:4px; cursor:pointer;
+                     font-family:inherit;"
+              title="Pick a new random palette for this rule. Genome is unchanged — the rule is sha1-addressed by genome bytes; palette is just rendering. Click again to flip through more colour schemes.">🎨 Random palette</button>
+    </form>
+
     <form method="post" action="{% url 'taxon:rule_to_automaton' slug=rule.slug %}" style="margin:0;">
       {% csrf_token %}
       <button style="background:#21262d; color:#58a6ff; border:1px solid #30363d;

@@ -248,6 +248,39 @@ def rule_delete(request, slug: str):
     return redirect('taxon:library')
 
 
+def _random_palette(K: int = 4) -> bytes:
+    """Pick K distinct ANSI-256 indices, biased toward the 6×6×6 colour
+    cube the way s3lab's invent_palette does (90% cube, 10% greys)."""
+    import random as _random
+    seen: set[int] = set()
+    out = bytearray()
+    while len(out) < K:
+        if _random.random() < 0.9:
+            idx = 16 + _random.randrange(216)
+        else:
+            idx = 232 + _random.randrange(24)
+        if idx in seen:
+            continue
+        seen.add(idx)
+        out.append(idx)
+    return bytes(out)
+
+
+@login_required
+@require_POST
+def rule_reroll_palette(request, slug: str):
+    """Pick a fresh random palette for this rule. Genome is unchanged
+    (the rule's identity is its sha1 of the genome bytes; the palette
+    is just rendering metadata). HexNN rules get K=256 fresh ANSI
+    indices, K=4 packed rules get 4. Idempotent — call repeatedly to
+    flip through different colour schemes for the same rule."""
+    rule = get_object_or_404(Rule, slug=slug)
+    K = max(2, int(rule.n_colors or 4))
+    rule.palette_ansi = _random_palette(K)
+    rule.save()
+    return redirect('taxon:rule_detail', slug=slug)
+
+
 @login_required
 @require_POST
 def rule_to_automaton(request, slug: str):
