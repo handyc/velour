@@ -122,6 +122,14 @@
         <button data-rot="2">180°</button>
         <button data-rot="3">270°</button>
       </div>
+    </div>
+    <div class="controls" style="margin-top:0.4rem;">
+      <span style="color:#8b949e;font-size:0.8rem;">render</span>
+      <div class="rot-group" id="render-group"
+           title="Dominant: each population cell drawn as a single colour (cheap). Live: each cell drawn as a subsampled view of its 16×16 internal CA — you see actual hex CA texture inside every population tile (8×8 px on 128×128, 4×4 on 80×160).">
+        <button data-render="dominant" class="active">dominant</button>
+        <button data-render="live">live (sub-CA)</button>
+      </div>
       <span style="color:#6e7681;font-size:0.75rem;">remembered between visits</span>
     </div>
   </div>
@@ -178,11 +186,13 @@ const PANEL_PRESETS = {
   '80x160': {
     panel_w: 156, panel_h: 78,   // 80×160 - 2px margin per side after rot 3
     tile_px: 5,   zoom: 4,
+    sub_w: 4, sub_h: 4,           // live mode: 16×4 = 64 area, centred
     label: 'ESP32-S3 SUPERMINI · ST7735S 80×160 (rot 3 → 160×80)',
   },
   '128x128': {
     panel_w: 128, panel_h: 128,
     tile_px: 7,   zoom: 4,
+    sub_w: 8, sub_h: 8,           // live mode: 16×8 = 128 wide × 128 tall, exact
     label: 'ESP32-S3 SUPERMINI · ST7735 1.44″ 128×128',
   },
 };
@@ -200,6 +210,17 @@ let POP_W      = GRID_COLS * TILE_PX + (TILE_PX / 2 | 0);
 let POP_H      = (GRID_ROWS * ROW_STEP_PX);
 let X0         = ((PANEL_W - POP_W) / 2) | 0;
 let Y0         = ((PANEL_H - POP_H) / 2) | 0;
+
+// Sub-CA tile geometry for live mode. Each rendered pixel represents
+// (CA_W / SUB_W) × (CA_H / SUB_H) cells of the actual 16×16 grid.
+let SUB_W      = PANEL_PRESETS[PANEL_KEY].sub_w;
+let SUB_H      = PANEL_PRESETS[PANEL_KEY].sub_h;
+let SUB_DX     = (16 / SUB_W) | 0;
+let SUB_DY     = (16 / SUB_H) | 0;
+let SUB_X0     = ((PANEL_W - GRID_COLS * SUB_W) / 2) | 0;
+let SUB_Y0     = ((PANEL_H - GRID_ROWS * SUB_H) / 2) | 0;
+
+let RENDER_MODE = 'dominant';   // 'dominant' | 'live'
 
 const cv  = document.getElementById('tft-emu');
 const ctx = cv.getContext('2d');
@@ -224,6 +245,12 @@ function applyPanel(key) {
   POP_H  = (GRID_ROWS * ROW_STEP_PX);
   X0 = ((PANEL_W - POP_W) / 2) | 0;
   Y0 = ((PANEL_H - POP_H) / 2) | 0;
+  SUB_W  = p.sub_w;
+  SUB_H  = p.sub_h;
+  SUB_DX = (16 / SUB_W) | 0;
+  SUB_DY = (16 / SUB_H) | 0;
+  SUB_X0 = ((PANEL_W - GRID_COLS * SUB_W) / 2) | 0;
+  SUB_Y0 = ((PANEL_H - GRID_ROWS * SUB_H) / 2) | 0;
 
   // Canvas backing-buffer resolution + on-screen size.
   cv.width  = PANEL_W;
@@ -331,7 +358,7 @@ function tilePos(r, c) {
   ];
 }
 
-function renderFull() {
+function renderDominantFull() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, PANEL_W, PANEL_H);
   for (let r = 0; r < GRID_ROWS; r++) {
@@ -346,7 +373,7 @@ function renderFull() {
   }
 }
 
-function renderDiff() {
+function renderDominantDiff() {
   for (let r = 0; r < GRID_ROWS; r++) {
     for (let c = 0; c < GRID_COLS; c++) {
       const cell = state.cells[r * GRID_COLS + c];
@@ -360,6 +387,55 @@ function renderDiff() {
       cell.lastDrawn = cell.domAnsi;
     }
   }
+}
+
+// Live render — every cell drawn as a SUB_W × SUB_H subsample of its
+// 16×16 internal CA. Mirrors render_pop_live() in cellular_esp.cpp:
+// sample grid_a at (sx*SUB_DX, sy*SUB_DY) for each rendered pixel.
+// Always full-redraws (no diff) — at 16×8 = 128 px tiles × 256 cells
+// it's ~10ms equivalent on the device, even cheaper in the browser.
+function renderLiveFull() {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, PANEL_W, PANEL_H);
+  renderLive();
+}
+
+function renderLive() {
+  for (let r = 0; r < GRID_ROWS; r++) {
+    for (let c = 0; c < GRID_COLS; c++) {
+      const cell = state.cells[r * GRID_COLS + c];
+      const tx = SUB_X0 + c * SUB_W;
+      const ty = SUB_Y0 + r * SUB_H;
+      for (let sy = 0; sy < SUB_H; sy++) {
+        const gy = sy * SUB_DY;
+        for (let sx = 0; sx < SUB_W; sx++) {
+          const gx = sx * SUB_DX;
+          const v = cell.gridA[gy * GRID_W + gx] & 3;
+          const ansi = cell.palette[v];
+          // Cache rgb per (palette × value) on the cell to avoid
+          // recomputing 256 × 64 = 16k ansi-to-rgb lookups per frame.
+          if (!cell.subRgb) cell.subRgb = new Array(4);
+          if (cell.subAnsi !== ansi || cell.subRgb[v] === undefined) {
+            const [rr, gg, bb] = ansi256_to_rgb(ansi);
+            cell.subRgb[v] = '#' + ((rr << 16) | (gg << 8) | bb).toString(16).padStart(6, '0');
+          }
+          ctx.fillStyle = cell.subRgb[v];
+          ctx.fillRect(tx + sx, ty + sy, 1, 1);
+        }
+      }
+      cell.subAnsi = cell.palette[0];
+    }
+  }
+}
+
+function renderFull() {
+  if (RENDER_MODE === 'live') renderLiveFull();
+  else                         renderDominantFull();
+}
+
+function renderDiff() {
+  if (RENDER_MODE === 'live') renderLive();
+  else                         renderDominantDiff();
 }
 
 // ── Bootstrap / actions ─────────────────────────────────────────────
@@ -511,6 +587,28 @@ panelGroup.querySelectorAll('button').forEach(b => {
   });
 });
 
+// ── Render-mode selector ──────────────────────────────────────────
+const renderGroup = document.getElementById('render-group');
+function setRenderButtonState(mode) {
+  renderGroup.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('active', b.dataset.render === mode);
+  });
+}
+function applyRenderMode(mode) {
+  if (mode !== 'live' && mode !== 'dominant') mode = 'dominant';
+  RENDER_MODE = mode;
+  setRenderButtonState(mode);
+  // Force a full repaint.
+  if (state.cells.length) {
+    for (const c of state.cells) c.lastDrawn = -1;
+    renderFull();
+  }
+  try { localStorage.setItem('cellular-tft-render', mode); } catch (e) {}
+}
+renderGroup.querySelectorAll('button').forEach(b => {
+  b.addEventListener('click', () => applyRenderMode(b.dataset.render));
+});
+
 // Restore persisted panel + rotation, in that order — applyPanel
 // resets layout and triggers a full repaint, so rotation must be
 // re-applied afterwards.
@@ -519,6 +617,10 @@ try { savedPanel = localStorage.getItem('cellular-tft-panel') ?? '80x160'; } cat
 if (!PANEL_PRESETS[savedPanel]) savedPanel = '80x160';
 applyPanel(savedPanel);
 setPanelButtonState(savedPanel);
+
+let savedRender = 'dominant';
+try { savedRender = localStorage.getItem('cellular-tft-render') ?? 'dominant'; } catch (e) {}
+applyRenderMode(savedRender);
 
 let savedRot = 0;
 try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (e) {}

@@ -46,6 +46,23 @@
 
 #define TILE_PX     5
 
+// Panel pixel dimensions baked at distill time. Different panels use
+// different INITR_* tokens + setRotation values, so the post-rotation
+// effective WxH is what render_pop_diff centres into.
+#define PANEL_W_PX  160
+#define PANEL_H_PX  80
+
+// Live-mode sub-tile geometry. Each cell's 16×16 internal CA gets
+// subsampled down to SUB_W × SUB_H pixels — every rendered pixel
+// represents a (CA_W/SUB_W) × (CA_H/SUB_H) region of the actual grid.
+// On the 128×128 panel that's 8×8 per cell (16 cells × 8 px = 128 px,
+// exact fit). On the 80×160 panel it's 4×4 (population area = 64×64
+// centred, leaving margin).
+#define SUB_W       4
+#define SUB_H       4
+#define SUB_DX      (CA_W / SUB_W)        // grid stride per rendered px
+#define SUB_DY      (CA_H / SUB_H)
+
 // ST7735S pin map (matches esp32_s3_xcc and esp32_s3_full).
 #define PIN_SCK   12
 #define PIN_MOSI  11
@@ -284,16 +301,58 @@ static Adafruit_ST7735 tft(PIN_CS, PIN_DC, PIN_MOSI, PIN_SCK, PIN_RST);
 // traffic bounded.
 static u8 last_drawn[N_CELLS];
 
+// Render mode — flipped at runtime via POST /render-mode.
+//   false: dominant-colour-per-cell (cheap, the original render)
+//   true : live sub-CA per cell (every rendered pixel = a sample of
+//          the actual grid). Costs ~16k pixel writes per tick (~10
+//          ms SPI at 27 MHz on a 128×128 panel) but shows real CA
+//          motion within every population tile.
+static volatile bool g_render_live = false;
+
 static void render_pop_full() {
     tft.fillScreen(ST77XX_BLACK);
     memset(last_drawn, 0xFF, N_CELLS);
 }
 
+// Live render — paint every cell's grid_a as a SUB_W × SUB_H subsample
+// of its 16×16 internal CA. Each cell builds its tile in a stack
+// buffer then drawRGBBitmap-blits it (one SPI burst per cell).
+//
+// No diff cache: at SUB_W=8 and 256 cells we push 16K pixels per
+// frame ≈ 32 KB SPI ≈ 10 ms at 27 MHz. Comfortable inside TICK_MS.
+//
+// Layout: a 2D grid of stride SUB_W × SUB_H, no hex stagger (the
+// rendered area is too small to benefit from stagger when a cell is
+// only 8×8 px). Centre into the panel.
+static void render_pop_live() {
+    const int total_w = GRID_COLS * SUB_W;
+    const int total_h = GRID_ROWS * SUB_H;
+    const int x0 = (PANEL_W_PX - total_w) / 2;
+    const int y0 = (PANEL_H_PX - total_h) / 2;
+    uint16_t tile_buf[SUB_W * SUB_H];
+    for (int r = 0; r < GRID_ROWS; r++) {
+        for (int c = 0; c < GRID_COLS; c++) {
+            const Cell &cell = pop[r * GRID_COLS + c];
+            for (int sy = 0; sy < SUB_H; sy++) {
+                int gy = sy * SUB_DY;
+                for (int sx = 0; sx < SUB_W; sx++) {
+                    int gx = sx * SUB_DX;
+                    uint8_t v = cell.grid_a[gy * CA_W + gx] % K;
+                    tile_buf[sy * SUB_W + sx] =
+                        ansi256_to_rgb565(cell.palette[v]);
+                }
+            }
+            tft.drawRGBBitmap(x0 + c * SUB_W, y0 + r * SUB_H,
+                              tile_buf, SUB_W, SUB_H);
+        }
+    }
+}
+
 static void render_pop_diff() {
     int total_w = GRID_COLS * TILE_PX + TILE_PX / 2;
     int total_h = (GRID_ROWS * TILE_PX * 866) / 1000;     // hex pack
-    int x0 = (160 - total_w) / 2;
-    int y0 = (80 - total_h) / 2;
+    int x0 = (PANEL_W_PX - total_w) / 2;
+    int y0 = (PANEL_H_PX - total_h) / 2;
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     for (int r = 0; r < GRID_ROWS; r++) {
@@ -443,6 +502,7 @@ static void handle_root() {
             " · " + wifi_ssid_str + " · " + wifi_ip_str + "</td></tr>";
     html += "<tr><td>rounds</td><td>" + String(g_rounds) + "</td></tr>";
     html += "<tr><td>state</td><td>" + String(g_paused ? "PAUSED" : "running") + "</td></tr>";
+    html += "<tr><td>render mode</td><td>" + String(g_render_live ? "live (8×8 sub-CA)" : "dominant") + "</td></tr>";
     html += "<tr><td>last winner</td><td>" + String(last_winner) + "</td></tr>";
     html += "<tr><td>last loser</td><td>" + String(last_loser) + "</td></tr>";
     html += F("</table>");
@@ -451,6 +511,8 @@ static void handle_root() {
               "<li><code>POST /wifi</code> — body <code>ssid=…&amp;password=…</code></li>"
               "<li><code>POST /reset</code> — bootstrap a fresh population</li>"
               "<li><code>POST /pause</code>, <code>POST /resume</code></li>"
+              "<li><code>POST /render-mode</code> — body <code>mode=dominant</code> "
+                  "or <code>mode=live</code> (live = subsampled CA per cell)</li>"
               "</ul></body></html>");
     server.send(200, "text/html", html);
 }
@@ -469,7 +531,8 @@ static void handle_info() {
     j += ",\"last_winner\":" + String(last_winner);
     j += ",\"last_loser\":" + String(last_loser);
     j += ",\"grid_cols\":" + String(GRID_COLS);
-    j += ",\"grid_rows\":" + String(GRID_ROWS) + "}";
+    j += ",\"grid_rows\":" + String(GRID_ROWS);
+    j += ",\"render_mode\":\"" + String(g_render_live ? "live" : "dominant") + "\"" + "}";
     server.send(200, "application/json", j);
 }
 
@@ -489,6 +552,7 @@ static void handle_reset() {
     bootstrap_pop((u32)esp_random());
     g_rounds = 0; last_winner = -1; last_loser = -1;
     render_pop_full();
+    if (g_render_live) render_pop_live(); else render_pop_diff();
     server.send(200, "text/plain", "fresh population\n");
     Serial.println("[reset] fresh population");
 }
@@ -496,16 +560,37 @@ static void handle_reset() {
 static void handle_pause()  { g_paused = true;  server.send(200, "text/plain", "paused\n"); }
 static void handle_resume() { g_paused = false; server.send(200, "text/plain", "resumed\n"); }
 
+// POST /render-mode body: mode=dominant or mode=live. Flips the
+// per-tick render path and forces an immediate full repaint so the
+// switch is visible without waiting for the next tick.
+static void handle_render_mode() {
+    String m = server.arg("mode");
+    if (m == "live") {
+        g_render_live = true;
+    } else if (m == "dominant") {
+        g_render_live = false;
+    } else {
+        server.send(400, "text/plain",
+                    "mode must be \"dominant\" or \"live\"\n");
+        return;
+    }
+    render_pop_full();
+    if (g_render_live) render_pop_live(); else render_pop_diff();
+    server.send(200, "text/plain",
+                String("render mode: ") + (g_render_live ? "live" : "dominant") + "\n");
+}
+
 static void comms_setup() {
     String ssid, pass;
     if (read_wifi_creds(ssid, pass)) try_connect_sta(ssid, pass);
     else { Serial.println("no /wifi.txt; AP-mode setup"); start_ap_fallback(); }
-    server.on("/",       HTTP_GET,  handle_root);
-    server.on("/info",   HTTP_GET,  handle_info);
-    server.on("/wifi",   HTTP_POST, handle_wifi);
-    server.on("/reset",  HTTP_POST, handle_reset);
-    server.on("/pause",  HTTP_POST, handle_pause);
-    server.on("/resume", HTTP_POST, handle_resume);
+    server.on("/",            HTTP_GET,  handle_root);
+    server.on("/info",        HTTP_GET,  handle_info);
+    server.on("/wifi",        HTTP_POST, handle_wifi);
+    server.on("/reset",       HTTP_POST, handle_reset);
+    server.on("/pause",       HTTP_POST, handle_pause);
+    server.on("/resume",      HTTP_POST, handle_resume);
+    server.on("/render-mode", HTTP_POST, handle_render_mode);
     server.begin();
     Serial.printf("HTTP on :%d\n", HTTP_PORT);
 }
@@ -541,8 +626,9 @@ void setup() {
     u32 seed = esp_random() ^ (u32)esp_timer_get_time();
     bootstrap_pop(seed);
     render_pop_full();
-    render_pop_diff();
-    Serial.printf("bootstrapped with seed %u\n", seed);
+    if (g_render_live) render_pop_live(); else render_pop_diff();
+    Serial.printf("bootstrapped with seed %u (render mode: %s)\n",
+                  seed, g_render_live ? "live" : "dominant");
 
     comms_setup();
     Serial.println("=== running tournament GA + TFT ===");
@@ -557,7 +643,8 @@ void loop() {
     uint32_t now = millis();
     if (now >= next_tick_ms) {
         tick_all();
-        render_pop_diff();
+        if (g_render_live) render_pop_live();
+        else                render_pop_diff();
         next_tick_ms = now + TICK_MS;
     }
     if (now >= next_round_ms) {
