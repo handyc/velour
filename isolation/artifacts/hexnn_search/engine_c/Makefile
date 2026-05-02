@@ -16,11 +16,19 @@ CFLAGS  += -Wno-unused-parameter
 BIN     := hexnn
 ISLANDS := hexnn_islands
 ISLANDS_NOMPI := hexnn_islands_nompi
+OMP_BIN := hexnn_omp
 
 SRCS := engine.c cli_linux.c
 OBJS := $(SRCS:.c=.o)
 
-.PHONY: all clean tiny size mpi mpi-check islands-nompi
+# OpenMP build flags. -fopenmp turns on the runtime + spawns the
+# threadpool. The driver uses clock_gettime(CLOCK_MONOTONIC), which
+# needs -lrt on glibc < 2.17 (ALICE's GCC is recent, link is a no-op
+# there but we keep it for portability).
+OMP_FLAGS ?= -fopenmp
+OMP_LIBS  ?= -lrt
+
+.PHONY: all clean tiny size mpi mpi-check islands-nompi omp
 
 all: $(BIN)
 
@@ -54,6 +62,14 @@ islands-nompi: $(ISLANDS_NOMPI)
 $(ISLANDS_NOMPI): engine.c mpi_islands.c engine.h
 	$(CC) $(CFLAGS) -DHEXNN_NO_MPI -o $@ engine.c mpi_islands.c $(LDFLAGS)
 
+# OpenMP single-node build — scales the population across one node's
+# cores. The intended ALICE shape is 1 task × 20 cpus-per-task × 4 h
+# wall clock. See omp.sbatch for the Slurm template.
+omp: $(OMP_BIN)
+
+$(OMP_BIN): engine.c cli_openmp.c engine.h
+	$(CC) $(CFLAGS) $(OMP_FLAGS) -o $@ engine.c cli_openmp.c $(LDFLAGS) $(OMP_LIBS)
+
 # Tiny build with -Os for size comparisons (handy when sizing for
 # constrained targets later in the porting story).
 tiny: CFLAGS := -Os -Wall -Wextra -std=c99 -Wno-unused-parameter
@@ -66,4 +82,4 @@ size: $(BIN)
 	  stat -f '  binary: %z bytes' $(BIN)
 
 clean:
-	rm -f $(OBJS) $(BIN) $(ISLANDS) $(ISLANDS_NOMPI)
+	rm -f $(OBJS) $(BIN) $(ISLANDS) $(ISLANDS_NOMPI) $(OMP_BIN)

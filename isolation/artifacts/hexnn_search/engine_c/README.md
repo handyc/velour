@@ -22,11 +22,14 @@ lives in `engine.c` + `engine.h`; the drivers are thin.
 engine_c/
   engine.h            ← public API
   engine.c            ← pure C99, no platform deps
-  cli_linux.c         ← driver: argv → engine, prints fitness     (this build)
-  Makefile            ← gcc -O3 -Wall, single-target
+  cli_linux.c         ← driver: argv → engine, prints fitness     (single thread)
+  cli_openmp.c        ← driver: parallel-population GA via OpenMP  (one node, ALICE)
+  mpi_islands.c       ← driver: MPI ranks = islands               (multi-node)
+  Makefile            ← gcc -O3 -Wall + targets (default / mpi / omp / tiny)
+  islands.sbatch      ← Slurm template for the MPI islands variant
+  omp.sbatch          ← Slurm template for the OpenMP variant
   README.md           ← you are here
   (planned)
-  mpi_islands.c       ← MPI ranks = islands, with merge strategies
   arduino_s3.cpp      ← Arduino-ESP32 wrapper, replaces parts of
                         ../esp32_s3/src/main.cpp
   wasm_browser.c      ← emscripten exports, replaces the JS engine
@@ -167,6 +170,36 @@ venv/bin/python manage.py hexnn_hpc_submit --variant islands \
 The Conduit handoff lists the four files to scp into the remote dir
 (engine.h / engine.c / mpi_islands.c / Makefile); the sbatch script
 runs `make mpi` on the head node before `mpirun`.
+
+### Phase 2.5 — OpenMP single-node (shipped)
+
+`cli_openmp.c` is the lineage descendant of `distill_hexnn_esp32s3(with_tft=True)`
+ported back to a host CPU and parallelised across one node's cores.
+It exists for the standard ALICE allocation: **1 node × 20 cores ×
+4 hours**. MPI over that shape would buy nothing — shared-memory
+OpenMP is strictly faster within one node.
+
+Architecture: one *master engine* holds the GA population storage,
+plus one *scoring engine per OpenMP thread* (~900 KB each). The hot
+loop scores every genome in parallel, then the master serially
+sorts + breeds. Driver-implemented mutation + `engine_crossover_bytes`
+cover the breeding ABI.
+
+```
+make omp
+OMP_NUM_THREADS=20 OMP_PROC_BIND=close OMP_PLACES=cores \
+  ./hexnn_omp --pop 20 --seconds 14000 --output winner.json -v
+```
+
+Time-budget loop instead of fixed generations — the GA keeps
+breeding until the wall clock hits `--seconds`. A checkpoint is
+written every `--ckpt` generations (default 25) so a slurm
+wall-time kill leaves a recoverable winner on disk.
+
+The Slurm template `omp.sbatch` is set up for the standard ALICE
+slot: `--nodes=1 --ntasks=1 --cpus-per-task=20 --time=4:00:00`,
+with `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` and
+`OMP_PROC_BIND=close OMP_PLACES=cores` for cache locality.
 
 ### What's next (Phase 3+ candidates)
 

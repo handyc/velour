@@ -394,12 +394,19 @@ static void rebuild_pal_rgb565(void) {
 #define TFT_PANEL_W     128
 #define TFT_PANEL_H     128
 
+// Cell render: width is one px less than the column stride, height
+// is one px less than the row stride, so both axes show a 1-px black
+// gap between cells (matches the JS emulator at /hexnn/tft/).
+#define TFT_ROW_STEP_PX  ((TFT_CELL_PX * TFT_ROW_STEP_X1000) / 1000)
+#define TFT_CELL_W       (TFT_CELL_PX - 1)
+#define TFT_CELL_H       ((TFT_ROW_STEP_PX > 1) ? (TFT_ROW_STEP_PX - 1) : 1)
+
 static inline void tft_draw_one(int x, int y, uint8_t v) {
     int px = x * TFT_CELL_PX;
-    int py = (y * TFT_CELL_PX * TFT_ROW_STEP_X1000) / 1000
+    int py = y * TFT_ROW_STEP_PX
            + ((x & 1) ? (TFT_CELL_PX / 2) : 0);
-    if (px + TFT_CELL_PX > TFT_PANEL_W || py + TFT_CELL_PX > TFT_PANEL_H) return;
-    tft.fillRect(px, py, TFT_CELL_PX - 1, TFT_CELL_PX - 1, pal_rgb565[v]);
+    if (px + TFT_CELL_W > TFT_PANEL_W || py + TFT_CELL_H > TFT_PANEL_H) return;
+    tft.fillRect(px, py, TFT_CELL_W, TFT_CELL_H, pal_rgb565[v]);
 }
 
 static void render_tft_full(void) {

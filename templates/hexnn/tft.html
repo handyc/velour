@@ -166,18 +166,29 @@ function freshGridSeeded(K, seed) {
   return g;
 }
 
+// Cell drawn as (CELL_PX-1) × (ROW_STEP_PX-1) so both axes show a
+// 1-px black gap between cells, matching the device-side renderer.
+const ROW_STEP_PX = ((CELL_PX * ROW_STEP_X1000) / 1000) | 0;
+const CELL_W = CELL_PX - 1;
+const CELL_H = Math.max(1, ROW_STEP_PX - 1);
+
+function cellPos(x, y) {
+  return [
+    x * CELL_PX,
+    y * ROW_STEP_PX + ((x & 1) ? (CELL_PX >> 1) : 0),
+  ];
+}
+
 function renderFull() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, PANEL_W, PANEL_H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const v = state.grid[y * W + x] % state.K;
-      const px = x * CELL_PX;
-      const py = ((y * CELL_PX * ROW_STEP_X1000) / 1000 | 0)
-               + ((x & 1) ? (CELL_PX >> 1) : 0);
-      if (px + CELL_PX > PANEL_W || py + CELL_PX > PANEL_H) continue;
+      const [px, py] = cellPos(x, y);
+      if (px + CELL_W > PANEL_W || py + CELL_H > PANEL_H) continue;
       ctx.fillStyle = PAL_HEX[v % PAL_HEX.length];
-      ctx.fillRect(px, py, CELL_PX - 1, CELL_PX - 1);
+      ctx.fillRect(px, py, CELL_W, CELL_H);
     }
   }
 }
@@ -190,12 +201,14 @@ function renderDiff() {
       const v  = state.grid[idx] % state.K;
       const pv = state.prevGrid[idx] % state.K;
       if (v === pv) continue;
-      const px = x * CELL_PX;
-      const py = ((y * CELL_PX * ROW_STEP_X1000) / 1000 | 0)
-               + ((x & 1) ? (CELL_PX >> 1) : 0);
-      if (px + CELL_PX > PANEL_W || py + CELL_PX > PANEL_H) continue;
+      const [px, py] = cellPos(x, y);
+      if (px + CELL_W > PANEL_W || py + CELL_H > PANEL_H) continue;
+      // Clear the cell first so the previous colour doesn't bleed
+      // through if the new cell is smaller after a future tweak.
+      ctx.fillStyle = '#000';
+      ctx.fillRect(px, py, CELL_W, CELL_H);
       ctx.fillStyle = PAL_HEX[v % PAL_HEX.length];
-      ctx.fillRect(px, py, CELL_PX - 1, CELL_PX - 1);
+      ctx.fillRect(px, py, CELL_W, CELL_H);
     }
   }
 }
