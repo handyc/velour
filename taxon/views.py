@@ -181,12 +181,46 @@ def rule_download(request, slug: str):
 @login_required
 @require_POST
 def rule_classify(request, slug: str):
-    """Re-run metrics + classifier for one rule."""
-    rule = get_object_or_404(Rule, slug=slug)
-    horizon = int(request.POST.get('horizon', 120))
-    grid = int(request.POST.get('grid', 24))
-    seed = int(request.POST.get('seed', 42))
+    """Re-run metrics + classifier for one rule.
 
+    HXC4 K=4 packed rules use the existing K=4 simulator + metrics.
+    HexNN K-dialable rules go through taxon.hexnn (different genome
+    shape, different langton-λ definition); horizon + grid default
+    smaller since K=256 simulation is per-step expensive.
+    """
+    from .models import KIND_HEX_NN
+    rule = get_object_or_404(Rule, slug=slug)
+
+    if rule.kind == KIND_HEX_NN:
+        from .hexnn import HexNNRuleset, langton_lambda_hexnn, simulate as hexnn_simulate, unpack_hexnn
+        from .metrics import REGISTRY
+        horizon = int(request.POST.get('horizon', 40))
+        grid    = int(request.POST.get('grid', 12))
+        seed    = int(request.POST.get('seed', 42))
+        K, keys, outs = unpack_hexnn(bytes(rule.genome))
+        ruleset = HexNNRuleset(K, keys, outs)
+        traj, hashes = hexnn_simulate(ruleset, grid, grid, horizon, seed)
+        mvals: dict[str, float] = {}
+        for name, fn in REGISTRY.items():
+            if name == 'langton_lambda':
+                val, extra = langton_lambda_hexnn(ruleset)
+            else:
+                val, extra = fn(traj, hashes, ruleset)
+            MetricRun.objects.create(
+                rule=rule, metric=name, value=val,
+                grid_w=grid, grid_h=grid, horizon=horizon, seed=seed,
+                extra_json=extra,
+            )
+            mvals[name] = val
+        cls, conf, basis = classify(mvals, horizon=horizon, n_colors=K)
+        Classification.objects.create(
+            rule=rule, wolfram_class=cls, confidence=conf, basis_json=basis,
+        )
+        return redirect('taxon:rule_detail', slug=slug)
+
+    horizon = int(request.POST.get('horizon', 120))
+    grid    = int(request.POST.get('grid', 24))
+    seed    = int(request.POST.get('seed', 42))
     packed = PackedRuleset(n_colors=4, data=bytes(rule.genome))
     traj, hashes = simulate(packed, grid, grid, horizon, seed)
     results = run_all(traj, hashes, packed)
