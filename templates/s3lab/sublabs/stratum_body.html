@@ -72,11 +72,28 @@
       <option value="rainbow">Rainbow</option>
     </select>
   </label>
+  <label class="slider-label"
+         style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+         title="Pick one image — or many. With one, each of the 64 library entries gets a 64-colour palette sampled from a position-mapped 8×8 region (so the library mosaic mirrors the picture). With multiple, each entry randomly chooses one of the supplied images as its source. Pixel colours are quantized to nearest ANSI-256, so the visible palette stays bounded at 256 distinct colours regardless of source richness.">
+    🖼 Image(s) → palettes
+    <input id="stratum-image-input" type="file" accept="image/*" multiple style="display:none;">
+  </label>
   <label class="checkbox-label" title="Click-to-download exports compress the JSON via the browser's gzip stream — typically ~10× smaller (≈80 KB instead of 800 KB) since hexnn-genome-v1 has lots of repeated small ints.">
     <input type="checkbox" id="stratum-gzip-cb" checked>
     gzip downloads
   </label>
   <span id="stratum-hunt-status" style="color:#8b949e;font-size:0.8rem;margin-left:1rem;"></span>
+</div>
+
+<div class="tft-controls" style="margin-top:0.4rem;">
+  <button id="stratum-save-population-btn"
+          title="Download every library entry's genome + palette + current grid (plus the meta-CA grid + elite index) as a gzipped stratum-population-v1 JSON. The population effectively encodes a palette signature of whatever image (if any) preseeded it; this snapshots that state for later replay.">💾 Save population</button>
+  <label class="slider-label"
+         style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+         title="Load a stratum-population-v1 JSON or .json.gz file. Replaces the entire library + meta-CA grid + elite index. Files saved by 💾 Save population (or auto-saved after image-import) round-trip exactly.">
+    📂 Load population
+    <input id="stratum-load-population-input" type="file" accept=".json,.gz,application/json,application/gzip" style="display:none;">
+  </label>
 </div>
 
 <div class="tft-controls" style="margin-top:0.4rem;">

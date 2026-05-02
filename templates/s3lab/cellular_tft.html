@@ -94,14 +94,26 @@
       <button id="reseed-btn" class="secondary"
               title="Reseed every cell's grid; genomes stay.">Reseed grids</button>
       <button id="palette-btn" class="secondary"
-              title="Reroll every cell's palette via the firmware's invent_palette().">🎨 Reroll palettes</button>
+              title="Reroll every cell's palette using the selected mode. Random ANSI = invent_palette() (firmware default). Viridis / plasma / grayscale / rainbow = the same gradients /hexnn/ exposes, with a per-cell phase shift; each colour stop is quantized to nearest ANSI-256 since cellular cells store palettes as ANSI indices.">🎨 Reroll palettes</button>
+      <label style="font-size:0.78rem; color:#8b949e; display:flex; align-items:center; gap:0.25rem;"
+             title="Palette generator. Random ANSI = the /hexnn/ default (each cell a random ANSI-256 colour). Viridis / plasma / grayscale / rainbow are the same gradients /hexnn/ exposes; each cell gets a random cyclic phase shift so cells in the same mode are still distinguishable. Applies to Reroll palettes, Reset population, Hunt's bottom-half refresh, and tournament replacements.">
+        palette
+        <select id="palette-mode" style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                padding:0.25rem 0.4rem; border-radius:3px; font-family:inherit; font-size:0.8rem;">
+          <option value="random-ansi" selected>Random ANSI</option>
+          <option value="viridis">Viridis</option>
+          <option value="plasma">Plasma</option>
+          <option value="grayscale">Grayscale</option>
+          <option value="rainbow">Rainbow</option>
+        </select>
+      </label>
       <label class="secondary"
              style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
                     padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer;
                     font-family:inherit; font-size:0.85rem;"
-             title="Load an image, crop to square, sample 4 colours per agent at the corresponding spatial position. Each population cell's K=4 palette inherits the colours of the image at its location, so the population mosaic visually matches the source.">
-        🖼 Image → palettes
-        <input id="image-input" type="file" accept="image/*" style="display:none;">
+             title="Pick one image — or many. With one, each population cell samples its colours from the corresponding spatial spot of the picture (the population mosaic mirrors the source). With multiple, each cell randomly picks one of the supplied images as its source, so the population becomes a collage of references. Colours are quantized to nearest ANSI-256.">
+        🖼 Image(s) → palettes
+        <input id="image-input" type="file" accept="image/*" multiple style="display:none;">
       </label>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
@@ -172,6 +184,19 @@
         <button data-render="live">live (sub-CA)</button>
       </div>
       <span style="color:#6e7681;font-size:0.75rem;">remembered between visits</span>
+    </div>
+    <div class="controls" style="margin-top:0.4rem;">
+      <button id="save-population-btn" class="secondary"
+              title="Download every cell's genome + palette + current grid as a gzipped cellular-population-v1 JSON. Same format the image-import auto-export uses; restorable via 📂 Load population.">💾 Save population</button>
+      <label class="secondary"
+             style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                    padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer;
+                    font-family:inherit; font-size:0.85rem;"
+             title="Load a cellular-population-v1 JSON or .json.gz file. Replaces every cell's genome + palette + grid. K and engine in the file must match the current K (use the K dropdown to switch first if needed).">
+        📂 Load population
+        <input id="load-population-input" type="file" accept=".json,.gz,application/json,application/gzip" style="display:none;">
+      </label>
+      <span style="color:#6e7681;font-size:0.75rem;">image-import auto-saves</span>
     </div>
   </div>
 
@@ -431,6 +456,46 @@ const NN_N = 1 << NN_N_LOG2;
 function isPacked() { return currentEngine === 'packed'; }
 
 // — palette helpers (work for any K) —
+// Selected gradient mode — applied whenever a fresh palette is needed
+// (Reroll, Reset, Hunt's bottom-half refresh, tournament replacement).
+// Random ANSI keeps the firmware's invent_palette() behaviour exactly;
+// the four gradient modes route through NN.makePaletteRGBA and then
+// nearest-ANSI-quantize each colour so cellular's ANSI-indexed
+// palette storage stays well-formed.
+let paletteMode = 'random-ansi';
+
+function paletteModeIsAnsi() { return paletteMode === 'random-ansi'; }
+
+// Quantize a packed-RGBA palette to ANSI-256 indices in place.
+function rgbaPaletteToAnsi(palRGBA) {
+  const out = new Uint8Array(palRGBA.length);
+  for (let i = 0; i < palRGBA.length; i++) {
+    const v = palRGBA[i];
+    const r =  v        & 0xFF;
+    const g = (v >>>  8) & 0xFF;
+    const b = (v >>> 16) & 0xFF;
+    out[i] = nearestAnsi256(r, g, b);
+  }
+  return out;
+}
+
+// Build a cell palette using the active mode. Always returns a
+// Uint8Array of length K (ANSI-256 indices).
+function inventPaletteByMode(K) {
+  if (paletteMode === 'random-ansi') {
+    if (K === 4) {
+      // K=4 packed engine: defer to firmware-parity invent_palette so
+      // ESP burns line up bit-for-bit with the browser preview.
+      return invent_palette();
+    }
+    return inventPaletteK(K, nnRng);
+  }
+  // Gradient modes — generate via the shared library, then quantize.
+  const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+  const rgba = NN.makePaletteRGBA(K, paletteMode, NN.mulberry32(seed || 1));
+  return rgbaPaletteToAnsi(rgba);
+}
+
 function inventPaletteK(K, rng) {
   // Mirrors engine.invent_palette but generalised. For small K
   // (≤32) probabilistic pick + dedupe is fast. For large K we'd
@@ -465,15 +530,23 @@ function inventPaletteK(K, rng) {
 }
 
 function paletteInheritK(dst, a, b, K, rng) {
-  // Pick one parent (a or b) wholesale; small chance of one-slot drift.
+  // Pick one parent (a or b) wholesale, then drift a small fraction
+  // of slots independently. At K=4 the original "8% chance, one slot"
+  // dominates; at K=256 we'd otherwise drift 1 in 256 slots, which is
+  // visually invisible. Scaling the try-count with K (each try at 8%)
+  // keeps the K=4 firmware-parity behaviour while letting K=256
+  // populations evolve subtly varied palettes after a tournament wave.
   const src = (rng() < 0.5) ? a : b;
   dst.set(src);
-  if (rng() < 0.08) {
-    const slot = (rng() * K) | 0;
-    const c = ((rng() * 10) | 0) < 9
-      ? (16 + ((rng() * 216) | 0))
-      : (232 + ((rng() * 24) | 0));
-    dst[slot] = c;
+  const tries = Math.max(1, K >> 2);   // K=4→1, K=64→16, K=256→64
+  for (let m = 0; m < tries; m++) {
+    if (rng() < 0.08) {
+      const slot = (rng() * K) | 0;
+      const c = ((rng() * 10) | 0) < 9
+        ? (16 + ((rng() * 216) | 0))
+        : (232 + ((rng() * 24) | 0));
+      dst[slot] = c;
+    }
   }
 }
 
@@ -548,13 +621,12 @@ function cellRandomize(c) {
   if (isPacked()) {
     seed_prng((Math.random() * 0xFFFFFFFF) >>> 0 || 1);
     c.genome = random_genome();
-    c.palette = invent_palette();
   } else {
     const seed = (Math.random() * 0xFFFFFFFF) >>> 0;
     c.genome = NN.makeGenome(currentK, seed);
     c.bins = NN.buildBins(c.genome);
-    c.palette = inventPaletteK(currentK, nnRng);
   }
+  c.palette = inventPaletteByMode(currentK);
 }
 
 function cellInheritPaletteFrom(dst, a, b) {
@@ -583,12 +655,11 @@ function makeCell(seed) {
   if (isPacked()) {
     seed_prng(seed);
     c.genome = random_genome();
-    c.palette = invent_palette();
   } else {
     c.genome = NN.makeGenome(currentK, seed >>> 0 || 1);
     c.bins = NN.buildBins(c.genome);
-    c.palette = inventPaletteK(currentK, nnRng);
   }
+  c.palette = inventPaletteByMode(currentK);
   return c;
 }
 
@@ -785,12 +856,10 @@ function bootstrap() {
 function rerollPalettes() {
   seed_prng(((Date.now() | 0) >>> 0) || 1);
   for (const c of state.cells) {
-    if (isPacked()) {
+    if (isPacked() && paletteMode === 'random-ansi') {
       invent_palette();   // burn one PRNG cycle for parity with firmware boot
-      c.palette = invent_palette();
-    } else {
-      c.palette = inventPaletteK(currentK, nnRng);
     }
+    c.palette = inventPaletteByMode(currentK);
     c.lastDrawn = -1;
     c.subPal = -1;
     c.subRgb = undefined;
@@ -802,15 +871,15 @@ function rerollPalettes() {
 
 // ── Image → palette mosaic ─────────────────────────────────────────
 //
-// Resize the source image to GRID_COLS*4 × GRID_ROWS*4 = 64×64, then
-// for each agent (r, c) sample a 4×4 region: subdivide it into 2×2
-// quadrants of 2×2 pixels each, average each quadrant, map to nearest
-// ANSI-256 index. Result: 4 colours per agent that visually "match"
-// the corresponding spot of the source image, so the population
-// mosaic looks like a low-res version of the picture.
+// Resize each source image to (GRID_COLS × √K) × (GRID_ROWS × √K), then
+// for each agent (r, c) sample a √K × √K region: one pixel per palette
+// slot, mapped to nearest ANSI-256. Result: K colours per agent that
+// visually "match" the corresponding spot of the (chosen) source image.
 //
-// We crop to square first (centre crop on the longer axis) so any
-// input aspect ratio works.
+// Multi-image: each cell randomly picks one of the supplied images as
+// its source — so the population becomes a collage of several
+// references. We crop each image to square (centre crop on the longer
+// axis) so any input aspect ratio works.
 
 const ANSI_PALETTE_RGB = (() => {
   const out = new Array(256);
@@ -831,37 +900,45 @@ function nearestAnsi256(r, g, b) {
   return best;
 }
 
-function applyImagePalettes(img) {
-  // Sample a √K × √K grid of quadrants per agent's image region, so
-  // every K-slot palette has K image-derived colours laid out in
-  // row-major order. For non-square K (32, 128) we use ceil(√K) ×
-  // ceil(K / ceil(√K)). Kept simple: at K=4 → 2×2, K=16 → 4×4, K=64
-  // → 8×8, K=256 → 16×16.
-  const QX = Math.ceil(Math.sqrt(currentK));
-  const QY = Math.ceil(currentK / QX);
-  // Crop to square + resize so each agent gets a region with QX×QY
-  // pixels (one per palette slot).
+function rasterizeImageToPlane(img, PX, PY) {
   const srcW = img.naturalWidth, srcH = img.naturalHeight;
   const side = Math.min(srcW, srcH);
   const cropX = ((srcW - side) / 2) | 0;
   const cropY = ((srcH - side) / 2) | 0;
-  const PX = GRID_COLS * QX, PY = GRID_ROWS * QY;
   const off = document.createElement('canvas');
   off.width = PX; off.height = PY;
   const octx = off.getContext('2d');
   octx.imageSmoothingEnabled = true;
   octx.drawImage(img, cropX, cropY, side, side, 0, 0, PX, PY);
-  const img_data = octx.getImageData(0, 0, PX, PY).data;
+  return octx.getImageData(0, 0, PX, PY).data;
+}
+
+function applyImagePalettes(imgs) {
+  // Accept a single image or an array. For each agent (r, c) sample
+  // a √K × √K region of its chosen source image — one pixel per palette
+  // slot, mapped to nearest ANSI-256. Sources: single image is shared
+  // by every cell; multiple images are picked at random per cell.
+  if (!Array.isArray(imgs)) imgs = [imgs];
+  imgs = imgs.filter(Boolean);
+  if (imgs.length === 0) return;
+
+  // Sample grid sized to currentK. K=4 → 2×2, K=16 → 4×4, K=64 → 8×8,
+  // K=256 → 16×16. For non-square K (32, 128) we use ceil(√K) × ⌈K/QX⌉.
+  const QX = Math.ceil(Math.sqrt(currentK));
+  const QY = Math.ceil(currentK / QX);
+  const PX = GRID_COLS * QX, PY = GRID_ROWS * QY;
+  const planes = imgs.map(img => rasterizeImageToPlane(img, PX, PY));
 
   for (let r = 0; r < GRID_ROWS; r++) {
     for (let c = 0; c < GRID_COLS; c++) {
       const x0 = c * QX, y0 = r * QY;
       const cell = state.cells[r * GRID_COLS + c];
-      // Ensure palette is big enough for currentK (cell may have been
-      // created at a different K).
       if (cell.palette.length !== currentK) {
         cell.palette = new Uint8Array(currentK);
       }
+      const img_data = planes.length === 1
+        ? planes[0]
+        : planes[(Math.random() * planes.length) | 0];
       for (let q = 0; q < currentK; q++) {
         const qx = q % QX, qy = (q / QX) | 0;
         const px = x0 + qx, py = y0 + Math.min(QY - 1, qy);
@@ -869,7 +946,6 @@ function applyImagePalettes(img) {
         cell.palette[q] = nearestAnsi256(
           img_data[idx], img_data[idx + 1], img_data[idx + 2]);
       }
-      // Force a re-cache of dominant + sub-pixel colours.
       cell.lastDrawn = -1;
       cell.subPal = -1;
       cell.subRgb = undefined;
@@ -976,11 +1052,22 @@ async function runRefine() {
 
   gaStatus.textContent =
     `refine: elite cell #${elite} (score ${E.score.toFixed(2)}) · mutating others…`;
+  // At K>4 we deliberately don't clone the elite's palette into every
+  // non-elite cell — at K=256 that would leave the entire screen
+  // sharing a single 256-colour palette, which reads as "limited
+  // colours". Keep ~75% inheriting (so family resemblance is still
+  // visible) and refresh the rest with a fresh palette in the active
+  // mode so the population stays visually varied.
+  const FRESH_PALETTE_FRACTION = (currentK > 4) ? 0.25 : 0;
   for (let i = 0; i < state.cells.length; i++) {
     if (i === elite) continue;
     const c = state.cells[i];
     cellMutateInPlace(c, E, REFINE_RATE);
-    cellInheritPaletteFrom(c, E, E);
+    if (FRESH_PALETTE_FRACTION > 0 && Math.random() < FRESH_PALETTE_FRACTION) {
+      c.palette = inventPaletteByMode(currentK);
+    } else {
+      cellInheritPaletteFrom(c, E, E);
+    }
     seedGridK(c.gridA, (Math.random() * 0xFFFFFFFF) >>> 0);
     c.score = E.score;
     c.lastDrawn = -1;
@@ -1219,26 +1306,246 @@ cv.addEventListener('click', (e) => {
 cv.style.cursor = 'crosshair';
 cv.title = 'Click any agent to download its genome.bin (HXC4, 4104 B).';
 
+// ── Population save / load (cellular-population-v1) ────────────────
+//
+// Format: gzipped JSON. Captures every cell's genome + palette + grid
+// plus the engine/K/panel metadata needed to faithfully replay the
+// state on reload. Auto-emitted after every image-palette import (the
+// image-derived population effectively encodes the source picture);
+// also reachable via 💾 Save population for any state.
+//
+// Cell genome shape depends on engine: K=4 packed = a single 4096-byte
+// array; K>4 NN = {keys[N×7], outputs[N]}. The reader picks based on
+// the top-level "engine" field.
+
+function u8ToJsonInts(u8) { return '[' + u8.join(',') + ']'; }
+
+function buildCellularPopulationJson(sources) {
+  const parts = [];
+  parts.push('{"format":"cellular-population-v1"');
+  parts.push(',"sublab":"cellular"');
+  parts.push(',"K":' + currentK);
+  parts.push(',"engine":' + JSON.stringify(currentEngine));
+  parts.push(',"grid_cols":' + GRID_COLS + ',"grid_rows":' + GRID_ROWS);
+  parts.push(',"inner_w":' + GRID_W + ',"inner_h":' + GRID_H);
+  if (currentEngine === 'nn') {
+    parts.push(',"n_log2":' + NN_N_LOG2 + ',"n_entries":' + NN_N);
+  }
+  parts.push(',"panel":' + JSON.stringify(PANEL_KEY));
+  parts.push(',"render_mode":' + JSON.stringify(RENDER_MODE));
+  parts.push(',"palette_mode":' + JSON.stringify(paletteMode));
+  parts.push(',"exported_at":' + JSON.stringify(new Date().toISOString()));
+  parts.push(',"sources":' + JSON.stringify(sources || []));
+  parts.push(',"cells":[');
+  for (let i = 0; i < state.cells.length; i++) {
+    const c = state.cells[i];
+    if (i > 0) parts.push(',');
+    if (currentEngine === 'packed') {
+      parts.push('{"genome":' + u8ToJsonInts(c.genome));
+    } else {
+      parts.push('{"keys":'    + u8ToJsonInts(c.genome.keys));
+      parts.push(',"outputs":' + u8ToJsonInts(c.genome.outs));
+    }
+    parts.push(',"palette":' + u8ToJsonInts(c.palette));
+    parts.push(',"grid":'    + u8ToJsonInts(c.gridA));
+    parts.push('}');
+  }
+  parts.push(']}');
+  return parts.join('');
+}
+
+async function downloadGzipped(filename, jsonString) {
+  let blob;
+  if (typeof CompressionStream !== 'undefined') {
+    const cs = new CompressionStream('gzip');
+    const w = cs.writable.getWriter();
+    w.write(new TextEncoder().encode(jsonString));
+    w.close();
+    const buf = await new Response(cs.readable).arrayBuffer();
+    blob = new Blob([buf], {type: 'application/gzip'});
+  } else {
+    blob = new Blob([jsonString], {type: 'application/json'});
+    if (filename.endsWith('.gz')) filename = filename.slice(0, -3);
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return blob.size;
+}
+
+async function loadCellularPopulationFromFile(file) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let json;
+  const looksGz = buf.length >= 2 && buf[0] === 0x1F && buf[1] === 0x8B;
+  if (looksGz) {
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('this browser cannot decompress gzip');
+    }
+    const ds = new DecompressionStream('gzip');
+    const w = ds.writable.getWriter();
+    w.write(buf);
+    w.close();
+    const out = await new Response(ds.readable).arrayBuffer();
+    json = new TextDecoder().decode(out);
+  } else {
+    json = new TextDecoder().decode(buf);
+  }
+  const data = JSON.parse(json);
+  if (data.format !== 'cellular-population-v1') {
+    throw new Error('not a cellular-population-v1 file');
+  }
+  if (data.K !== currentK) {
+    throw new Error(`K mismatch: file=${data.K}, current=${currentK} (switch K via the dropdown first)`);
+  }
+  if (data.engine !== currentEngine) {
+    throw new Error(`engine mismatch: file=${data.engine}, current=${currentEngine}`);
+  }
+  if (!Array.isArray(data.cells) || data.cells.length !== state.cells.length) {
+    throw new Error(`cell count mismatch: file=${data.cells && data.cells.length}, expected=${state.cells.length}`);
+  }
+  for (let i = 0; i < data.cells.length; i++) {
+    const cd = data.cells[i];
+    const c  = state.cells[i];
+    if (currentEngine === 'packed') {
+      const g = new Uint8Array(cd.genome);
+      if (g.length !== GBYTES) throw new Error(`cell ${i}: genome size mismatch`);
+      c.genome = g;
+    } else {
+      const keys = new Uint8Array(cd.keys);
+      const outs = new Uint8Array(cd.outputs);
+      if (keys.length !== NN_N * 7 || outs.length !== NN_N) {
+        throw new Error(`cell ${i}: NN N_ENTRIES mismatch (file expects N=${keys.length / 7} / ${outs.length}, build N=${NN_N})`);
+      }
+      c.genome = { K: data.K, keys, outs };
+      c.bins   = NN.buildBins(c.genome);
+    }
+    c.palette = new Uint8Array(cd.palette);
+    if (c.palette.length !== currentK) throw new Error(`cell ${i}: palette length ${c.palette.length} !== K=${currentK}`);
+    c.gridA = new Uint8Array(cd.grid);
+    if (c.gridA.length !== GRID_W * GRID_H) throw new Error(`cell ${i}: grid size mismatch`);
+    c.score = 0;
+    c.lastDrawn = -1;
+    c.subPal = -1;
+    c.subRgb = undefined;
+    c.refinedAt = 0;
+  }
+}
+
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+    img.src = url;
+  });
+}
+
 const imageInput = document.getElementById('image-input');
-imageInput.addEventListener('change', (e) => {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.onload = () => {
-    applyImagePalettes(img);
-    URL.revokeObjectURL(url);
+imageInput.addEventListener('change', async (e) => {
+  const files = [...(e.target.files || [])]
+    .filter(f => f.type && f.type.startsWith('image/'));
+  if (files.length === 0) return;
+  if (gaStatus) {
+    gaStatus.style.color = '#8b949e';
+    gaStatus.textContent = `loading ${files.length} image${files.length > 1 ? 's' : ''}…`;
+  }
+  try {
+    const imgs = await Promise.all(files.map(loadImageFile));
+    applyImagePalettes(imgs);
     renderFull();
     cv.classList.add('flash');
     setTimeout(() => cv.classList.remove('flash'), 220);
-  };
-  img.onerror = () => {
-    URL.revokeObjectURL(url);
-    alert('Could not decode that image.');
-  };
-  img.src = url;
-  imageInput.value = '';   // allow re-uploading the same file
+    // Auto-export the resulting population — the image-derived cells
+    // are effectively a compressed encoding of the source picture.
+    if (gaStatus) {
+      gaStatus.style.color = '#3fb950';
+      gaStatus.textContent = files.length === 1
+        ? 'palettes loaded · saving population…'
+        : `palettes loaded — ${files.length} sources · saving population…`;
+    }
+    const sources = files.map(f => ({ name: f.name, size: f.size }));
+    const json = buildCellularPopulationJson(sources);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const sz = await downloadGzipped(`cellular-population-K${currentK}-${stamp}.json.gz`, json);
+    if (gaStatus) {
+      const kb = (sz / 1024).toFixed(1);
+      gaStatus.textContent = files.length === 1
+        ? `palettes loaded · population saved (${kb} KB)`
+        : `palettes loaded — ${files.length} sources · population saved (${kb} KB)`;
+    }
+  } catch (err) {
+    if (gaStatus) {
+      gaStatus.style.color = '#cf222e';
+      gaStatus.textContent = 'image load failed';
+    } else {
+      alert('Could not decode one of the images.');
+    }
+    console.error(err);
+  }
+  imageInput.value = '';
 });
+
+// Manual population save — same gzipped JSON format as the image-import
+// auto-export. Snapshots whatever state the population is currently in
+// (image-derived, GA-converged, hand-tweaked, anything).
+const savePopulationBtn = document.getElementById('save-population-btn');
+if (savePopulationBtn) {
+  savePopulationBtn.addEventListener('click', async () => {
+    if (gaStatus) {
+      gaStatus.style.color = '#8b949e';
+      gaStatus.textContent = 'saving population…';
+    }
+    try {
+      const json = buildCellularPopulationJson([]);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const sz = await downloadGzipped(`cellular-population-K${currentK}-${stamp}.json.gz`, json);
+      if (gaStatus) {
+        gaStatus.style.color = '#3fb950';
+        gaStatus.textContent = `population saved (${(sz / 1024).toFixed(1)} KB)`;
+      }
+    } catch (err) {
+      if (gaStatus) {
+        gaStatus.style.color = '#cf222e';
+        gaStatus.textContent = 'save failed';
+      }
+      console.error(err);
+    }
+  });
+}
+
+// Manual population load — replace every cell from a saved file.
+const loadPopulationInput = document.getElementById('load-population-input');
+if (loadPopulationInput) {
+  loadPopulationInput.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (gaStatus) {
+      gaStatus.style.color = '#8b949e';
+      gaStatus.textContent = `loading ${file.name}…`;
+    }
+    try {
+      await loadCellularPopulationFromFile(file);
+      renderFull();
+      cv.classList.add('flash');
+      setTimeout(() => cv.classList.remove('flash'), 220);
+      updateFitnessStats();
+      if (gaStatus) {
+        gaStatus.style.color = '#3fb950';
+        gaStatus.textContent = `population restored from ${file.name}`;
+      }
+    } catch (err) {
+      if (gaStatus) {
+        gaStatus.style.color = '#cf222e';
+        gaStatus.textContent = 'load failed: ' + (err.message || err);
+      }
+      console.error(err);
+    }
+    loadPopulationInput.value = '';
+  });
+}
 
 function reseedAllGrids() {
   for (const c of state.cells) {
@@ -1412,6 +1719,28 @@ if (![4, 8, 16, 32, 64, 128, 256].includes(savedK)) savedK = 4;
 kSelect.value = String(savedK);
 currentK = savedK;
 currentEngine = (currentK === 4) ? 'packed' : 'nn';
+
+// ── Palette mode dropdown ────────────────────────────────────────
+// Random ANSI = invent_palette() default. Viridis / plasma / grayscale
+// / rainbow route through NN.makePaletteRGBA + nearest-ANSI quantize.
+// Switching modes only takes effect on next palette mint (Reroll,
+// Reset, Hunt's bottom-half, tournament replacement) — existing cell
+// palettes stay untouched until then so the screen doesn't flash.
+const paletteModeSel = document.getElementById('palette-mode');
+if (paletteModeSel) {
+  try {
+    const saved = localStorage.getItem('cellular-tft-palette-mode');
+    if (saved && ['random-ansi', 'viridis', 'plasma', 'grayscale', 'rainbow'].includes(saved)) {
+      paletteMode = saved;
+      paletteModeSel.value = saved;
+    }
+  } catch (_) {}
+  paletteModeSel.addEventListener('change', (e) => {
+    paletteMode = e.target.value;
+    try { localStorage.setItem('cellular-tft-palette-mode', paletteMode); } catch (_) {}
+    rerollPalettes();
+  });
+}
 
 let savedRot = 0;
 try { savedRot = +(localStorage.getItem(ROT_KEY) ?? 0); } catch (e) {}

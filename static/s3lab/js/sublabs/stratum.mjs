@@ -29,6 +29,7 @@ import {
     makeGenome, buildBins, lookup, stepWithGenomeBins,
     score, mutateGenome, crossover, freshGrid,
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
+    ansi256_rgb,
 } from '../hexnn_engine.mjs';
 
 
@@ -698,6 +699,221 @@ function onMetaClick(ev) {
 }
 
 
+// ── Image → palettes ───────────────────────────────────────────────
+//
+// Sample an image (or several) into the 64 library entries' palettes.
+// Each entry gets K=64 colours from a position-mapped 8×8 region of
+// its chosen source image, quantized to nearest ANSI-256 — so the
+// global palette stays bounded at 256 distinct colours regardless of
+// how rich the source images are. Single-image mode lays out all 64
+// entries against the same picture (the library mosaic mirrors it).
+// Multi-image mode picks a random source image per entry, so the
+// library becomes a collage of references.
+
+const ANSI_PALETTE_RGB = (() => {
+    const out = new Array(256);
+    for (let i = 0; i < 256; i++) out[i] = ansi256_rgb(i);
+    return out;
+})();
+
+function nearestAnsi256(r, g, b) {
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < 256; i++) {
+        const [ar, ag, ab] = ANSI_PALETTE_RGB[i];
+        const dr = ar - r, dg = ag - g, db = ab - b;
+        const d = dr*dr + dg*dg + db*db;
+        if (d < bestD) { bestD = d; best = i; if (d === 0) break; }
+    }
+    return best;
+}
+
+function packRGBA_(r, g, b) {
+    return ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+}
+
+function loadImageFile(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+        img.src = url;
+    });
+}
+
+function rasterizeToPalettePlane(img, PX, PY) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const side = Math.min(w, h);
+    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
+    const off = document.createElement('canvas');
+    off.width = PX; off.height = PY;
+    const octx = off.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(img, cx, cy, side, side, 0, 0, PX, PY);
+    return octx.getImageData(0, 0, PX, PY).data;
+}
+
+// Serialize a Uint8Array of small ints into a JSON array body without
+// the per-element overhead of Array.from + JSON.stringify (which is
+// painfully slow at the 16,384-entry scale of HexNN genomes).
+function u8ToJsonInts(u8) { return '[' + u8.join(',') + ']'; }
+
+function buildStratumPopulationJson(sources) {
+    const parts = [];
+    parts.push('{"format":"stratum-population-v1"');
+    parts.push(',"sublab":"stratum"');
+    parts.push(',"K":' + LIB_K);
+    parts.push(',"lib_size":' + LIB_SIZE);
+    parts.push(',"lib_rows":' + LIB_ROWS + ',"lib_cols":' + LIB_COLS);
+    parts.push(',"meta_rows":' + META_ROWS + ',"meta_cols":' + META_COLS);
+    parts.push(',"inner_w":' + INNER_W + ',"inner_h":' + INNER_H);
+    parts.push(',"n_entries":' + N_ENTRIES);
+    parts.push(',"elite_idx":' + state.eliteIdx);
+    parts.push(',"exported_at":' + JSON.stringify(new Date().toISOString()));
+    parts.push(',"sources":' + JSON.stringify(sources || []));
+    parts.push(',"library":[');
+    for (let i = 0; i < state.library.length; i++) {
+        const e = state.library[i];
+        if (i > 0) parts.push(',');
+        parts.push('{"keys":'    + u8ToJsonInts(e.genome.keys));
+        parts.push(',"outputs":' + u8ToJsonInts(e.genome.outs));
+        parts.push(',"palette":' + JSON.stringify(paletteRGBAToCssHex(e.paletteRGBA)));
+        parts.push(',"grid":'    + u8ToJsonInts(e.gridA));
+        parts.push(',"fitness":' + (Number.isFinite(e.fitness) ? e.fitness : 0).toFixed(6));
+        parts.push(',"r":'       + (Number.isFinite(e.r)       ? e.r       : 0).toFixed(6));
+        parts.push('}');
+    }
+    parts.push('],"meta_grid":' + u8ToJsonInts(state.metaA));
+    parts.push('}');
+    return parts.join('');
+}
+
+function cssHexPaletteToRGBA(palHex) {
+    const out = new Uint32Array(palHex.length);
+    for (let i = 0; i < palHex.length; i++) {
+        const h = String(palHex[i] || '#000000');
+        const r = parseInt(h.slice(1, 3), 16) || 0;
+        const g = parseInt(h.slice(3, 5), 16) || 0;
+        const b = parseInt(h.slice(5, 7), 16) || 0;
+        out[i] = ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+    }
+    return out;
+}
+
+async function loadStratumPopulationFromFile(file) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let json;
+    const looksGz = buf.length >= 2 && buf[0] === 0x1F && buf[1] === 0x8B;
+    if (looksGz) {
+        if (typeof DecompressionStream === 'undefined') {
+            throw new Error('this browser cannot decompress gzip');
+        }
+        const ds = new DecompressionStream('gzip');
+        const w = ds.writable.getWriter();
+        w.write(buf);
+        w.close();
+        const out = await new Response(ds.readable).arrayBuffer();
+        json = new TextDecoder().decode(out);
+    } else {
+        json = new TextDecoder().decode(buf);
+    }
+    const data = JSON.parse(json);
+    if (data.format !== 'stratum-population-v1') {
+        throw new Error('not a stratum-population-v1 file');
+    }
+    if (data.K !== LIB_K) {
+        throw new Error(`K mismatch: file has K=${data.K}, build expects K=${LIB_K}`);
+    }
+    if (data.lib_size !== LIB_SIZE) {
+        throw new Error(`lib_size mismatch: file=${data.lib_size}, build=${LIB_SIZE}`);
+    }
+    if (!Array.isArray(data.library) || data.library.length !== LIB_SIZE) {
+        throw new Error('library array length mismatch');
+    }
+    state.library = [];
+    for (let i = 0; i < data.library.length; i++) {
+        const lib = data.library[i];
+        const genome = {
+            K: data.K,
+            keys: new Uint8Array(lib.keys),
+            outs: new Uint8Array(lib.outputs),
+        };
+        if (genome.keys.length !== N_ENTRIES * 7 || genome.outs.length !== N_ENTRIES) {
+            throw new Error(`entry ${i}: N_ENTRIES mismatch`);
+        }
+        const bins = buildBins(genome);
+        const palRGBA = cssHexPaletteToRGBA(lib.palette);
+        const gridA   = new Uint8Array(lib.grid);
+        if (gridA.length !== INNER_W * INNER_H) {
+            throw new Error(`entry ${i}: grid size mismatch`);
+        }
+        state.library.push({
+            genome, paletteRGBA: palRGBA, gridA, bins,
+            fitness: Number(lib.fitness) || 0,
+            r:       Number(lib.r)       || 0,
+        });
+    }
+    if (Array.isArray(data.meta_grid) && data.meta_grid.length === META_ROWS * META_COLS) {
+        state.metaA = new Uint8Array(data.meta_grid);
+        state.metaB = new Uint8Array(data.meta_grid.length);
+    }
+    state.eliteIdx = (data.elite_idx >= 0 && data.elite_idx < LIB_SIZE) ? data.elite_idx : 0;
+    state.eliteBins = state.library[state.eliteIdx].bins;
+    state.metaTicks = 0;
+    state.rounds    = 0;
+}
+
+async function downloadGzipped(filename, jsonString) {
+    let blob;
+    if (typeof CompressionStream !== 'undefined') {
+        const cs = new CompressionStream('gzip');
+        const w = cs.writable.getWriter();
+        w.write(new TextEncoder().encode(jsonString));
+        w.close();
+        const buf = await new Response(cs.readable).arrayBuffer();
+        blob = new Blob([buf], {type: 'application/gzip'});
+    } else {
+        blob = new Blob([jsonString], {type: 'application/json'});
+        if (!filename.endsWith('.json')) filename = filename.replace(/\.gz$/, '');
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return blob.size;
+}
+
+function applyImagePalettesToLibrary(imgs) {
+    if (!imgs || imgs.length === 0) return;
+    // K=64 → 8×8 sample grid per entry. 8 cols × 8 rows of entries
+    // → 64×64 sample plane per source image.
+    const SK = 8;
+    const PX = LIB_COLS * SK;
+    const PY = LIB_ROWS * SK;
+    const sources = imgs.map(img => rasterizeToPalettePlane(img, PX, PY));
+
+    for (let er = 0; er < LIB_ROWS; er++) {
+        for (let ec = 0; ec < LIB_COLS; ec++) {
+            const entry = state.library[er * LIB_COLS + ec];
+            if (!entry) continue;
+            const src = sources.length === 1
+                ? sources[0]
+                : sources[(Math.random() * sources.length) | 0];
+            const x0 = ec * SK, y0 = er * SK;
+            for (let k = 0; k < LIB_K; k++) {
+                const kx = k % SK, ky = (k / SK) | 0;
+                const px = x0 + kx, py = y0 + ky;
+                const idx = (py * PX + px) * 4;
+                const ansi = nearestAnsi256(src[idx], src[idx+1], src[idx+2]);
+                const [qr, qg, qb] = ANSI_PALETTE_RGB[ansi];
+                entry.paletteRGBA[k] = packRGBA_(qr, qg, qb);
+            }
+        }
+    }
+}
+
+
 // ── Wire-up ────────────────────────────────────────────────────────
 
 function startTimers() {
@@ -799,6 +1015,117 @@ function init() {
     if (metaCv) {
         metaCv.style.cursor = 'pointer';
         metaCv.addEventListener('click', onMetaClick);
+    }
+
+    // Image(s) → palettes. One file = the library mosaic mirrors that
+    // image's spatial colour layout. Multiple files = each library
+    // entry randomly picks a source image, so the library becomes a
+    // collage of multiple references. All colours quantized to
+    // nearest-ANSI-256 so the global palette ceiling stays bounded.
+    // Auto-export: the image-derived population is effectively a
+    // compressed encoding of the image, so we save it to disk
+    // immediately after applying — restorable via "📂 Load population".
+    const imgInput = document.getElementById('stratum-image-input');
+    if (imgInput) {
+        imgInput.addEventListener('change', async (e) => {
+            const files = [...(e.target.files || [])]
+                .filter(f => f.type && f.type.startsWith('image/'));
+            if (files.length === 0) return;
+            const status = document.getElementById('stratum-hunt-status');
+            if (status) {
+                status.style.color = '#8b949e';
+                status.textContent = `loading ${files.length} image${files.length > 1 ? 's' : ''}…`;
+            }
+            try {
+                const imgs = await Promise.all(files.map(loadImageFile));
+                applyImagePalettesToLibrary(imgs);
+                paintAll();
+                const sources = files.map(f => ({ name: f.name, size: f.size }));
+                if (status) {
+                    status.style.color = '#3fb950';
+                    status.textContent = files.length === 1
+                        ? 'palettes loaded from 1 image · saving population…'
+                        : `palettes loaded — ${files.length} sources · saving population…`;
+                }
+                // Auto-export the resulting population.
+                const json = buildStratumPopulationJson(sources);
+                const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                const sz = await downloadGzipped(`stratum-population-K${LIB_K}-${stamp}.json.gz`, json);
+                if (status) {
+                    const kb = (sz / 1024).toFixed(1);
+                    status.textContent = files.length === 1
+                        ? `palettes loaded · population saved (${kb} KB)`
+                        : `palettes loaded — ${files.length} sources · population saved (${kb} KB)`;
+                }
+            } catch (err) {
+                if (status) {
+                    status.style.color = '#cf222e';
+                    status.textContent = 'image load failed';
+                }
+                console.error(err);
+            }
+            imgInput.value = '';
+        });
+    }
+
+    // Manual population save — same gzipped JSON format as the auto-export
+    // after image-import; useful for snapshotting any state regardless of
+    // how it was reached.
+    const saveBtn = document.getElementById('stratum-save-population-btn');
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            const status = document.getElementById('stratum-hunt-status');
+            if (status) {
+                status.style.color = '#8b949e';
+                status.textContent = 'saving population…';
+            }
+            try {
+                const json = buildStratumPopulationJson([]);
+                const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                const sz = await downloadGzipped(`stratum-population-K${LIB_K}-${stamp}.json.gz`, json);
+                if (status) {
+                    status.style.color = '#3fb950';
+                    status.textContent = `population saved (${(sz / 1024).toFixed(1)} KB)`;
+                }
+            } catch (err) {
+                if (status) {
+                    status.style.color = '#cf222e';
+                    status.textContent = 'save failed';
+                }
+                console.error(err);
+            }
+        };
+    }
+
+    // Manual population load — read a stratum-population-v1[.gz] file and
+    // replace the in-memory library + meta-CA grid.
+    const loadInput = document.getElementById('stratum-load-population-input');
+    if (loadInput) {
+        loadInput.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const status = document.getElementById('stratum-hunt-status');
+            if (status) {
+                status.style.color = '#8b949e';
+                status.textContent = `loading ${file.name}…`;
+            }
+            try {
+                await loadStratumPopulationFromFile(file);
+                paintAll();
+                updateStatus();
+                if (status) {
+                    status.style.color = '#3fb950';
+                    status.textContent = `population restored from ${file.name}`;
+                }
+            } catch (err) {
+                if (status) {
+                    status.style.color = '#cf222e';
+                    status.textContent = 'load failed: ' + (err.message || err);
+                }
+                console.error(err);
+            }
+            loadInput.value = '';
+        });
     }
 
     startTimers();
