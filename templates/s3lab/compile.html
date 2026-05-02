@@ -75,6 +75,11 @@
         </select>
         <button type="button" id="push-btn"
                 title="Compile, POST the ELF to <device>/load-elf, and (if a slot is chosen) /run-elf to install it.">Compile + push</button>
+        <button type="button" id="emulator-run-btn"
+                style="background:#a371f7; color:#fff; border:0;
+                       padding:0.35rem 0.75rem; border-radius:4px;
+                       cursor:pointer; font-family:inherit; font-size:0.85rem;"
+                title="Run the C source in the in-page ESP32-S3 emulator (no flash, no device needed). Picks up the slot from the dropdown above; auto-detects if 'no slot'.">▶ Run in emulator</button>
         <span id="status" style="color:#8b949e; font-size:0.78rem;"></span>
       </div>
       <h3 style="margin-top:1rem; color:#8b949e; font-size:0.85rem;
@@ -118,8 +123,28 @@
       </div>
     </aside>
   </div>
+
+  <section style="margin-top:1.2rem; padding:0.8rem 0; border-top:1px solid #30363d;">
+    <h2 style="font-family:ui-monospace,monospace; font-size:1rem; margin:0 0 0.5rem 0;">
+      In-page emulator
+      <span style="color:#8b949e; font-size:0.75rem; font-weight:normal;">
+        — runs the compiled C as if on an ESP32-S3 SuperMini with a 128×128 ST7735 + 16-pin GPIO row. No flash needed.
+      </span>
+    </h2>
+    <p style="color:#6e7681; font-size:0.78rem; margin:0 0 0.7rem 0;">
+      The emulator runs an in-browser tree-walking interpreter for the
+      xcc700 dialect — same syntax limits as the real compiler. Pick a
+      slot from the dropdown above (or leave on auto), then click
+      <strong>▶ Run in emulator</strong>. <strong>▶ Tick</strong> advances
+      one step; <strong>▶ Run 30</strong> ticks back-to-back. The TFT
+      shows the 16×16 grid (or the slot's RGB565 buffer for render
+      kernels); the LED row beneath shows the first 16 GPIO levels.
+    </p>
+    <div id="compile-emulator-mount"></div>
+  </section>
 </div>
 
+<script type="module" src="{% static_v 's3lab/js/compile_emulator/compile_emulator.mjs' %}"></script>
 <script>
   // Embedded example sources for one-click load.
   const EXAMPLES = [
