@@ -187,7 +187,7 @@
     </div>
     <div class="controls" style="margin-top:0.4rem;">
       <button id="save-population-btn" class="secondary"
-              title="Download every cell's genome + palette + current grid as a gzipped cellular-population-v1 JSON. Same format the image-import auto-export uses; restorable via 📂 Load population.">💾 Save population</button>
+              title="Download every cell's genome + palette + current grid as a gzipped cellular-population-v1 JSON. Restorable via 📂 Load population.">💾 Save population</button>
       <label class="secondary"
              style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
                     padding:0.35rem 0.6rem; border-radius:4px; cursor:pointer;
@@ -196,7 +196,6 @@
         📂 Load population
         <input id="load-population-input" type="file" accept=".json,.gz,application/json,application/gzip" style="display:none;">
       </label>
-      <span style="color:#6e7681;font-size:0.75rem;">image-import auto-saves</span>
     </div>
   </div>
 
@@ -1462,23 +1461,11 @@ imageInput.addEventListener('change', async (e) => {
     renderFull();
     cv.classList.add('flash');
     setTimeout(() => cv.classList.remove('flash'), 220);
-    // Auto-export the resulting population — the image-derived cells
-    // are effectively a compressed encoding of the source picture.
     if (gaStatus) {
       gaStatus.style.color = '#3fb950';
       gaStatus.textContent = files.length === 1
-        ? 'palettes loaded · saving population…'
-        : `palettes loaded — ${files.length} sources · saving population…`;
-    }
-    const sources = files.map(f => ({ name: f.name, size: f.size }));
-    const json = buildCellularPopulationJson(sources);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const sz = await downloadGzipped(`cellular-population-K${currentK}-${stamp}.json.gz`, json);
-    if (gaStatus) {
-      const kb = (sz / 1024).toFixed(1);
-      gaStatus.textContent = files.length === 1
-        ? `palettes loaded · population saved (${kb} KB)`
-        : `palettes loaded — ${files.length} sources · population saved (${kb} KB)`;
+        ? 'palettes loaded'
+        : `palettes loaded — ${files.length} sources`;
     }
   } catch (err) {
     if (gaStatus) {
@@ -1492,9 +1479,9 @@ imageInput.addEventListener('change', async (e) => {
   imageInput.value = '';
 });
 
-// Manual population save — same gzipped JSON format as the image-import
-// auto-export. Snapshots whatever state the population is currently in
-// (image-derived, GA-converged, hand-tweaked, anything).
+// Population save — gzipped cellular-population-v1 JSON. Snapshots
+// whatever state the population is currently in (image-derived,
+// GA-converged, hand-tweaked, anything).
 const savePopulationBtn = document.getElementById('save-population-btn');
 if (savePopulationBtn) {
   savePopulationBtn.addEventListener('click', async () => {
