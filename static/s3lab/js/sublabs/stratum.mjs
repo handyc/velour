@@ -1022,9 +1022,10 @@ function init() {
     // entry randomly picks a source image, so the library becomes a
     // collage of multiple references. All colours quantized to
     // nearest-ANSI-256 so the global palette ceiling stays bounded.
-    // Auto-export: the image-derived population is effectively a
-    // compressed encoding of the image, so we save it to disk
-    // immediately after applying — restorable via "📂 Load population".
+    // Auto-export was removed — at large library sizes the JSON build
+    // + gzip stalled the browser for many seconds with no user request.
+    // The 💾 Save population button next to it now does the same export
+    // on demand.
     const imgInput = document.getElementById('stratum-image-input');
     if (imgInput) {
         imgInput.addEventListener('change', async (e) => {
@@ -1040,22 +1041,11 @@ function init() {
                 const imgs = await Promise.all(files.map(loadImageFile));
                 applyImagePalettesToLibrary(imgs);
                 paintAll();
-                const sources = files.map(f => ({ name: f.name, size: f.size }));
                 if (status) {
                     status.style.color = '#3fb950';
                     status.textContent = files.length === 1
-                        ? 'palettes loaded from 1 image · saving population…'
-                        : `palettes loaded — ${files.length} sources · saving population…`;
-                }
-                // Auto-export the resulting population.
-                const json = buildStratumPopulationJson(sources);
-                const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-                const sz = await downloadGzipped(`stratum-population-K${LIB_K}-${stamp}.json.gz`, json);
-                if (status) {
-                    const kb = (sz / 1024).toFixed(1);
-                    status.textContent = files.length === 1
-                        ? `palettes loaded · population saved (${kb} KB)`
-                        : `palettes loaded — ${files.length} sources · population saved (${kb} KB)`;
+                        ? 'palettes loaded from 1 image — click 💾 Save population to snapshot'
+                        : `palettes loaded — ${files.length} sources — click 💾 Save population to snapshot`;
                 }
             } catch (err) {
                 if (status) {
@@ -1068,9 +1058,9 @@ function init() {
         });
     }
 
-    // Manual population save — same gzipped JSON format as the auto-export
-    // after image-import; useful for snapshotting any state regardless of
-    // how it was reached.
+    // Population save — gzipped stratum-population JSON. Snapshots
+    // whatever state the library is currently in regardless of how it
+    // got there.
     const saveBtn = document.getElementById('stratum-save-population-btn');
     if (saveBtn) {
         saveBtn.onclick = async () => {
