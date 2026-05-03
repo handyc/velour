@@ -51,18 +51,13 @@
       <option value="48">48×48</option>
       <option value="64">64×64</option>
     </select>
-    <label style="font-size:0.78rem; color:#c9d1d9; cursor:pointer;
-                  display:inline-flex; align-items:center; gap:0.3rem;
-                  padding:0.2rem 0.5rem; background:#0d1117;
-                  border:1px solid #30363d; border-radius:3px;"
-           title="Highlight cells in red where the panel differs from the reference panel. The reference panel renders normally and shows its diff count vs itself (always 0).">
-      <input type="checkbox" id="cmp-diff" style="margin:0;">
-      diff vs
-    </label>
+    <span style="color:#6e7681; font-size:0.78rem;">diff vs</span>
     <select id="cmp-ref" style="background:#0d1117; color:#e1e4e8;
             border:1px solid #30363d; padding:0.25rem 0.4rem; border-radius:3px;
             font-family:inherit; font-size:0.78rem;"
-            title="Which panel is the reference for diff mode."></select>
+            title="Highlight cells where each panel differs from the reference. The reference panel renders normally and shows 'ref' instead of a Δ count.">
+      <option value="-1">(off)</option>
+    </select>
   </div>
   {% endif %}
 
@@ -335,26 +330,25 @@
     reseedAll();
   });
 
-  // Populate the reference-panel selector + diff toggle.
+  // Populate the reference-panel selector. The first <option value="-1">
+  // is "(off)" — selecting it disables diff overlay; selecting any
+  // panel turns diff mode on with that panel as the reference.
   const refSel = document.getElementById('cmp-ref');
   panels.forEach((p, i) => {
     const o = document.createElement('option');
     o.value = String(i);
-    // Trim long slugs so the dropdown stays compact.
     const label = (p.canvas.closest('.cmp-panel')?.querySelector('a')?.textContent || p.slug).trim();
-    o.textContent = (i === 0 ? '★ ' : '') + label.slice(0, 28);
+    o.textContent = label.slice(0, 32);
     refSel.appendChild(o);
   });
-  refSel.disabled = !diffMode;
-  refSel.style.opacity = diffMode ? '1' : '0.5';
   refSel.addEventListener('change', e => {
-    refIdx = parseInt(e.target.value, 10) || 0;
-    drawAll();
-  });
-  document.getElementById('cmp-diff').addEventListener('change', e => {
-    diffMode = e.target.checked;
-    refSel.disabled = !diffMode;
-    refSel.style.opacity = diffMode ? '1' : '0.5';
+    const v = parseInt(e.target.value, 10);
+    if (v < 0 || Number.isNaN(v)) {
+      diffMode = false;
+    } else {
+      diffMode = true;
+      refIdx = v;
+    }
     drawAll();
   });
 
