@@ -52,6 +52,23 @@
   </div>
 
   <div class="tft-controls" style="margin-top:0.6rem; gap:0.4rem; flex-wrap:wrap;">
+    <label class="slider-label"
+           style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
+           title="Pick one image — or many. Each of the 256 population cells gets its 4-colour palette sampled from a 2×2 region of its chosen source image (centre-cropped to square first), quantized to nearest ANSI-256. With multiple files each cell randomly picks one as its source. Genomes are unchanged — only palettes shift.">
+      🖼 Image(s) → palettes
+      <input id="cellular-image-input" type="file" accept="image/*" multiple style="display:none;">
+    </label>
+    <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:3px;overflow:hidden;"
+          title="Fetch a URL server-side, scrape colour values from its inline + same-host CSS, render a 256-swatch mosaic, and feed it through the same image-palette flow as 🖼 Image(s) → palettes. Press Enter or click 🌐 to submit.">
+      <input id="cellular-url-palette-input" type="url"
+             placeholder="https://example.com"
+             style="background:#0d1117;color:#e1e4e8;border:0;padding:0.25rem 0.5rem;font-family:inherit;font-size:0.82rem;min-width:200px;outline:none;">
+      <button id="cellular-url-palette-btn" type="button"
+              style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.25rem 0.55rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+    </span>
+  </div>
+
+  <div class="tft-controls" style="margin-top:0.6rem; gap:0.4rem; flex-wrap:wrap;">
     <button id="export-tiles-btn"
        title="Take the highest-scoring cell's genome+palette and create a Velour Tiles TileSet from it. Each tile shares the rule but starts from a different random grid; edge colours sample the genome's palette.">→ Tiles (elite cell)</button>
     <button id="export-reel-btn"

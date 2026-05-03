@@ -38,6 +38,7 @@ import {
     ansi256_to_rgb,
     random_genome, invent_palette, identity_genome,
 } from '../engine.mjs';
+import {wireUrlPalette} from '../url_palette.mjs';
 
 // ── Layout ─────────────────────────────────────────────────────────
 
@@ -358,6 +359,77 @@ function paintArrow(ctx, fromIdx, toIdx, now) {
     ctx.fill();
 }
 
+// ── Image → palettes ────────────────────────────────────────────────
+//
+// 256 cells × K=4 → for each cell, sample a 2×2 region of a per-cell
+// crop of the source image and quantize each pixel to nearest ANSI.
+// The 16×16 population mosaic mirrors the source picture's spatial
+// colour layout. With multiple images, each cell randomly picks one
+// as its source.
+
+function loadImageFile(file) {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload  = () => { URL.revokeObjectURL(url); resolve(img); };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image decode failed')); };
+        img.src = url;
+    });
+}
+
+function rasterizeImageToPlane(img, PX, PY) {
+    const srcW = img.naturalWidth, srcH = img.naturalHeight;
+    const side = Math.min(srcW, srcH);
+    const cropX = ((srcW - side) / 2) | 0;
+    const cropY = ((srcH - side) / 2) | 0;
+    const off = document.createElement('canvas');
+    off.width = PX; off.height = PY;
+    const octx = off.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(img, cropX, cropY, side, side, 0, 0, PX, PY);
+    return octx.getImageData(0, 0, PX, PY).data;
+}
+
+function nearestAnsi256(r, g, b) {
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < 256; i++) {
+        const [ar, ag, ab] = ansi256_to_rgb(i);
+        const dr = ar - r, dg = ag - g, db = ab - b;
+        const d = dr*dr + dg*dg + db*db;
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+}
+
+function applyImagePalettes(imgs) {
+    if (!Array.isArray(imgs)) imgs = [imgs];
+    imgs = imgs.filter(Boolean);
+    if (imgs.length === 0) return;
+
+    // K=4 fixed in this sublab — each cell wants 4 pixels, laid out in
+    // a 2×2 region of the per-cell crop. Plane is 32×32 (16 cells × 2).
+    const QX = 2, QY = 2;
+    const PX = GRID_COLS * QX, PY = GRID_ROWS * QY;
+    const planes = imgs.map(img => rasterizeImageToPlane(img, PX, PY));
+
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            const x0 = c * QX, y0 = r * QY;
+            const cell = state.cells[r * GRID_COLS + c];
+            const data = planes.length === 1
+                ? planes[0]
+                : planes[(Math.random() * planes.length) | 0];
+            for (let q = 0; q < 4; q++) {
+                const qx = q % QX, qy = (q / QX) | 0;
+                const px = x0 + qx, py = y0 + qy;
+                const idx = (py * PX + px) * 4;
+                cell.palette[q] = nearestAnsi256(
+                    data[idx], data[idx + 1], data[idx + 2]);
+            }
+        }
+    }
+}
+
 // ── Wire-up ─────────────────────────────────────────────────────────
 
 function startTimers() {
@@ -532,6 +604,45 @@ function init() {
         );
         window.open(data.reel_url, '_blank');
     };
+
+    // 🖼 Image(s) → palettes — same plane-sample pattern as the TFT
+    // emulator, simplified to K=4 since this sublab is fixed at K=4.
+    const imgInput = document.getElementById('cellular-image-input');
+    if (imgInput) {
+        imgInput.addEventListener('change', async (e) => {
+            const files = [...(e.target.files || [])]
+                .filter(f => f.type && f.type.startsWith('image/'));
+            if (files.length === 0) return;
+            setStatus(`loading ${files.length} image${files.length > 1 ? 's' : ''}…`);
+            try {
+                const imgs = await Promise.all(files.map(loadImageFile));
+                applyImagePalettes(imgs);
+                paintGrid();
+                setStatus(files.length === 1
+                    ? 'palettes loaded'
+                    : `palettes loaded — ${files.length} sources`,
+                    '#3fb950');
+            } catch (err) {
+                setStatus(`image load failed: ${err.message || err}`, '#cf222e');
+                console.error(err);
+            }
+            imgInput.value = '';
+        });
+    }
+
+    // 🌐 URL → palette — server fetches the page, scrapes its CSS for
+    // colours, returns a 256×256 mosaic PNG. We feed it through the
+    // same applyImagePalettes path.
+    wireUrlPalette({
+        input:      document.getElementById('cellular-url-palette-input'),
+        button:     document.getElementById('cellular-url-palette-btn'),
+        statusEl:   document.getElementById('export-status'),
+        storageKey: 'cellular-url-palette-last',
+        onPalette: ({img}) => {
+            applyImagePalettes([img]);
+            paintGrid();
+        },
+    });
 
     startTimers();
 }
