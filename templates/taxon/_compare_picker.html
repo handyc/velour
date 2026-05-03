@@ -1,0 +1,107 @@
+{# Sticky "selected for compare" bar + per-card checkbox attachment.
+   Selection persists in localStorage so users can pick across pages.
+   Include after the cards block. #}
+<div id="cmp-bar"
+     style="display:none; position:fixed; bottom:1rem; left:50%;
+            transform:translateX(-50%); z-index:99;
+            background:#161b22; border:1px solid #30363d; border-radius:6px;
+            padding:0.55rem 0.9rem; box-shadow:0 4px 14px rgba(0,0,0,0.4);
+            gap:0.7rem; align-items:center;
+            font-family:ui-monospace,Menlo,monospace; font-size:0.85rem;
+            color:#c9d1d9;">
+  <span><span id="cmp-bar-count" style="color:#d4a72c; font-weight:600;">0</span>
+    selected · <span id="cmp-bar-skipped" style="color:#6e7681;"></span></span>
+  <a id="cmp-bar-link" href="#"
+     style="background:#1f6feb; color:#fff; text-decoration:none;
+            padding:0.32rem 0.8rem; border-radius:3px;">Compare ›</a>
+  <a id="cmp-bar-clear" href="#"
+     style="color:#8b949e; text-decoration:none; font-size:0.78rem;">clear</a>
+</div>
+
+<script>
+(function(){
+  const KEY = 'taxon-compare-selection';
+  const MAX = 6;
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch(_) { return []; }
+  }
+  function save(list) { localStorage.setItem(KEY, JSON.stringify(list)); }
+  let selected = load();
+
+  const bar = document.getElementById('cmp-bar');
+  const count = document.getElementById('cmp-bar-count');
+  const link = document.getElementById('cmp-bar-link');
+  const skipped = document.getElementById('cmp-bar-skipped');
+
+  function refreshBar() {
+    if (selected.length === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'flex';
+    count.textContent = selected.length;
+    link.href = '{% url "taxon:compare" %}?slugs=' + encodeURIComponent(selected.join(','));
+    // Compare view caps at COMPARE_MAX. Hint at it here too.
+    skipped.textContent = selected.length > MAX
+      ? `(only first ${MAX} will render)` : '';
+  }
+
+  function refreshCards() {
+    document.querySelectorAll('.taxon-card').forEach(card => {
+      const slug = card.dataset.slug;
+      if (!slug) return;
+      const cb = card.querySelector('.cmp-cb');
+      const isSel = selected.includes(slug);
+      if (cb) cb.checked = isSel;
+      card.style.outline = isSel ? '2px solid #d4a72c' : '';
+      card.style.outlineOffset = isSel ? '1px' : '';
+    });
+  }
+
+  function attachCheckboxes() {
+    document.querySelectorAll('.taxon-card').forEach(card => {
+      if (card.querySelector('.cmp-cb-wrap')) return;
+      const slug = card.dataset.slug;
+      if (!slug) return;
+      const wrap = document.createElement('label');
+      wrap.className = 'cmp-cb-wrap';
+      wrap.style.cssText =
+        'position:absolute; top:3px; right:3px; z-index:2;' +
+        'width:18px; height:18px; display:flex; align-items:center;' +
+        'justify-content:center; background:rgba(13,17,23,0.85);' +
+        'border:1px solid #30363d; border-radius:3px; cursor:pointer;';
+      wrap.title = 'Select for compare';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'cmp-cb';
+      cb.checked = selected.includes(slug);
+      cb.style.cssText = 'margin:0; cursor:pointer;';
+      // Stop the click from bubbling to the parent <a> card link.
+      const stop = e => e.stopPropagation();
+      wrap.addEventListener('click', stop);
+      cb.addEventListener('click', stop);
+      cb.addEventListener('change', e => {
+        e.stopPropagation();
+        if (cb.checked) {
+          if (!selected.includes(slug)) selected.push(slug);
+        } else {
+          selected = selected.filter(s => s !== slug);
+        }
+        save(selected); refreshBar(); refreshCards();
+      });
+      wrap.appendChild(cb);
+      card.appendChild(wrap);
+    });
+  }
+
+  document.getElementById('cmp-bar-clear').addEventListener('click', e => {
+    e.preventDefault();
+    selected = [];
+    save(selected); refreshBar(); refreshCards();
+  });
+
+  attachCheckboxes();
+  refreshBar();
+  refreshCards();
+})();
+</script>

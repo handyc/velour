@@ -231,6 +231,50 @@ def rule_detail(request, slug: str):
     })
 
 
+COMPARE_MAX = 6
+
+
+@login_required
+def compare_view(request):
+    """Side-by-side hex-CA preview of N rules running in lockstep on the
+    same seed. Slugs are passed via ?slugs=a,b,c (also accepted via
+    repeated ?slug=a&slug=b for form-style submission). Restricted to
+    K=4 packed-positional rules so a single browser-side engine handles
+    the whole panel."""
+    raw = request.GET.get('slugs', '')
+    slugs = [s for s in raw.split(',') if s]
+    slugs += request.GET.getlist('slug')
+    seen = set()
+    slugs = [s for s in slugs if not (s in seen or seen.add(s))][:COMPARE_MAX]
+
+    rules_by_slug = {r.slug: r for r in Rule.objects.filter(slug__in=slugs)}
+    panels = []
+    skipped = []
+    for s in slugs:
+        rule = rules_by_slug.get(s)
+        if rule is None:
+            skipped.append({'slug': s, 'why': 'not found'})
+            continue
+        if rule.kind != 'hex_k4_packed':
+            skipped.append({'slug': s, 'why': f'kind={rule.kind} (only K=4 packed)'})
+            continue
+        c = rule.latest_classification
+        panels.append({
+            'rule': rule,
+            'palette_hex': rule.palette_hex,
+            'genome_hex_full': bytes(rule.genome).hex(),
+            'class_n': c.wolfram_class if c else None,
+            'class_label': class_label(c.wolfram_class) if c else '—',
+            'class_color': class_color(c.wolfram_class) if c else '#444',
+        })
+    return render(request, 'taxon/compare.html', {
+        'panels': panels,
+        'skipped': skipped,
+        'compare_max': COMPARE_MAX,
+        'slugs_csv': ','.join(p['rule'].slug for p in panels),
+    })
+
+
 @login_required
 @require_POST
 def rule_edit(request, slug: str):

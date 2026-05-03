@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}Taxon — compare{% endblock %}
+
+{% block content %}
+<div style="max-width:1200px; margin:1rem auto; padding:0 1rem; color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+  <p><a href="{% url 'taxon:library' %}" style="color:#58a6ff;">← Library</a></p>
+  <h1 style="margin-top:0;">Compare
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+      — {{ panels|length }} rule{{ panels|length|pluralize }} in lockstep
+    </span>
+  </h1>
+  <p style="color:#6e7681; font-size:0.78rem; margin:0.2rem 0 0.6rem 0;">
+    All panels start from the same random seed and step in lockstep.
+    The genomes differ; the colours each panel paints with come from
+    that rule's default palette. Useful for "did this evolve actually
+    diverge from its parent?" K=4 packed-positional rules only.
+  </p>
+
+  {% if panels %}
+  <div style="margin:0.6rem 0; padding:0.5rem 0.7rem; background:#161b22;
+              border:1px solid #30363d; border-radius:5px;
+              display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
+    <button id="cmp-play"   style="background:#1f6feb; color:#fff; border:0;
+            padding:0.35rem 0.9rem; border-radius:4px; cursor:pointer;
+            font-family:inherit; font-size:0.85rem;">▶ play</button>
+    <button id="cmp-step"   style="background:#21262d; color:#c9d1d9;
+            border:1px solid #30363d; padding:0.35rem 0.7rem; border-radius:4px;
+            cursor:pointer; font-family:inherit; font-size:0.82rem;">step</button>
+    <button id="cmp-reseed" style="background:#21262d; color:#d4a72c;
+            border:1px solid #30363d; padding:0.35rem 0.7rem; border-radius:4px;
+            cursor:pointer; font-family:inherit; font-size:0.82rem;">reseed</button>
+    <span style="color:#6e7681; font-size:0.78rem;">fps</span>
+    <input type="range" id="cmp-fps" min="1" max="30" value="8"
+           style="vertical-align:middle;">
+    <span id="cmp-fps-out" style="font-size:0.78rem; color:#c9d1d9;
+                                  font-variant-numeric:tabular-nums; width:2.2em;
+                                  display:inline-block;">8</span>
+    <span style="color:#6e7681; font-size:0.78rem;">·</span>
+    <span style="font-size:0.78rem; color:#8b949e;">tick</span>
+    <span id="cmp-tick" style="font-size:0.85rem; color:#7ee787;
+                               font-variant-numeric:tabular-nums; min-width:3em;
+                               display:inline-block;">0</span>
+    <span style="color:#6e7681; font-size:0.78rem;">grid</span>
+    <select id="cmp-grid" style="background:#0d1117; color:#e1e4e8;
+            border:1px solid #30363d; padding:0.25rem 0.4rem; border-radius:3px;
+            font-family:inherit; font-size:0.78rem;">
+      <option value="16">16×16</option>
+      <option value="24">24×24</option>
+      <option value="32" selected>32×32</option>
+      <option value="48">48×48</option>
+      <option value="64">64×64</option>
+    </select>
+  </div>
+  {% endif %}
+
+  {% if skipped %}
+  <div style="margin:0.6rem 0; padding:0.5rem 0.7rem; background:#2d1b1b;
+              border:1px solid #5a2828; border-radius:5px; font-size:0.78rem;
+              color:#f0a0a0;">
+    Skipped: {% for s in skipped %}<code style="color:#f0a0a0;">{{ s.slug }}</code>
+    ({{ s.why }}){% if not forloop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if panels %}
+  <div id="cmp-grid-wrap"
+       style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+              gap:0.7rem; margin:0.8rem 0;">
+    {% for p in panels %}
+    <div class="cmp-panel" style="background:#161b22; border:1px solid #30363d;
+                                  border-left:4px solid {{ p.class_color }};
+                                  border-radius:5px; padding:0.55rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center;
+                  gap:0.4rem; margin-bottom:0.4rem;">
+        <a href="{% url 'taxon:rule_detail' slug=p.rule.slug %}"
+           style="color:#e1e4e8; text-decoration:none; font-weight:600;
+                  font-size:0.85rem; overflow:hidden; text-overflow:ellipsis;
+                  white-space:nowrap; flex:1;"
+           title="{{ p.rule.name|default:p.rule.slug }} · {{ p.rule.sha1|slice:':10' }}">
+          {{ p.rule.name|default:p.rule.slug }}
+        </a>
+        <a class="cmp-remove" href="?slugs={{ slugs_csv }}" data-slug="{{ p.rule.slug }}"
+           title="Remove from comparison"
+           style="color:#8b949e; text-decoration:none; font-size:0.85rem;
+                  padding:0 0.3rem; line-height:1;">×</a>
+      </div>
+      <div style="background:#0d1117; border:1px solid #30363d; border-radius:3px;
+                  padding:0.3rem; text-align:center;">
+        <canvas class="cmp-canvas"
+                data-slug="{{ p.rule.slug }}"
+                data-genome="{{ p.genome_hex_full }}"
+                data-palette="{% for h in p.palette_hex %}{{ h }}{% if not forloop.last %},{% endif %}{% endfor %}"
+                width="240" height="240"
+                style="display:block; margin:0 auto; image-rendering:pixelated;
+                       background:#000; max-width:100%; height:auto;
+                       aspect-ratio:1/1;"></canvas>
+      </div>
+      <div style="margin-top:0.35rem; display:flex; gap:1px; flex-wrap:wrap;">
+        {% for hex in p.palette_hex|slice:":12" %}
+          <span style="display:inline-block; width:11px; height:11px; background:{{ hex }};
+                       border:1px solid #444;"></span>
+        {% endfor %}
+      </div>
+      <div style="margin-top:0.3rem; font-size:0.7rem;">
+        {% if p.class_n %}
+          <span style="color:{{ p.class_color }}; font-weight:600;">class {{ p.class_n }}</span>
+          <span style="color:#6e7681;"> · {{ p.rule.sha1|slice:":10" }}</span>
+        {% else %}
+          <span style="color:#6e7681;">unclassified · {{ p.rule.sha1|slice:":10" }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div style="margin:1rem 0; padding:0.6rem 0.8rem; background:#0d1117;
+              border:1px solid #30363d; border-radius:5px;">
+    <form method="get" style="display:flex; gap:0.4rem; align-items:center;
+                              flex-wrap:wrap; font-size:0.82rem;">
+      <input type="hidden" name="slugs" value="{{ slugs_csv }}">
+      <label style="color:#8b949e;">+ add rule by slug</label>
+      <input type="text" name="slug" placeholder="e.g. evolve-abc123"
+             style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                    padding:0.3rem 0.5rem; border-radius:3px; min-width:240px;
+                    font-family:inherit; font-size:0.82rem;">
+      <button style="background:#1f6feb; color:#fff; border:0;
+              padding:0.32rem 0.8rem; border-radius:3px; cursor:pointer;
+              font-family:inherit; font-size:0.82rem;">add</button>
+      <span style="color:#6e7681; font-size:0.74rem;">
+        max {{ compare_max }} panels · find slugs in
+        <a href="{% url 'taxon:library' %}" style="color:#58a6ff;">library</a>
+      </span>
+    </form>
+  </div>
+
+  {% if not panels %}
+  <p style="color:#8b949e; margin-top:1rem;">
+    No rules selected. Pick rules to compare from the
+    <a href="{% url 'taxon:library' %}" style="color:#58a6ff;">library</a>
+    (checkboxes + “Compare selected”) or paste slugs above.
+  </p>
+  {% endif %}
+</div>
+
+{% if panels %}
+<script>
+(function(){
+  // K=4 hex CA engine — same step function as taxon/detail.html, lifted
+  // here so multiple panels can run on a shared seed grid.
+  const K = 4;
+
+  function decodeGenome(hex) {
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++) {
+      out[i] = parseInt(hex.substr(i*2, 2), 16);
+    }
+    return out;
+  }
+
+  function lookup(genome, self_c, n) {
+    const idx = self_c*4096 + n[0]*1024 + n[1]*256 + n[2]*64 + n[3]*16 + n[4]*4 + n[5];
+    return (genome[idx >> 2] >> ((idx & 3) * 2)) & 0x03;
+  }
+
+  function nbrs(grid, gw, gh, r, c) {
+    const even = (c & 1) === 0;
+    const get = (rr, cc) => (rr >= 0 && rr < gh && cc >= 0 && cc < gw)
+      ? grid[rr * gw + cc] : 0;
+    return [
+      get(r-1, c),
+      get(even ? r-1 : r,   c+1),
+      get(even ? r   : r+1, c+1),
+      get(r+1, c),
+      get(even ? r   : r+1, c-1),
+      get(even ? r-1 : r,   c-1),
+    ];
+  }
+
+  function step(grid, gw, gh, genome) {
+    const out = new Uint8Array(grid.length);
+    for (let r = 0; r < gh; r++) {
+      for (let c = 0; c < gw; c++) {
+        out[r * gw + c] = lookup(genome, grid[r*gw+c], nbrs(grid, gw, gh, r, c));
+      }
+    }
+    return out;
+  }
+
+  // Reseed with a deterministic-ish PRNG so all panels share the same
+  // initial state when "reseed" is clicked. We mix the timestamp into
+  // a simple xorshift32 so each reseed is fresh but shared.
+  let prngSeed = (Date.now() ^ 0xdeadbeef) >>> 0;
+  function xorshift32() {
+    let x = prngSeed | 0;
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    prngSeed = x >>> 0;
+    return prngSeed;
+  }
+  function makeSeed(gw, gh) {
+    const g = new Uint8Array(gw * gh);
+    for (let i = 0; i < g.length; i++) g[i] = xorshift32() & 0x03;
+    return g;
+  }
+
+  // Per-panel state — own genome + palette + canvas + (per-step) grid.
+  const panels = Array.from(document.querySelectorAll('.cmp-canvas')).map(canvas => {
+    const palette = canvas.dataset.palette.split(',');
+    const genome = decodeGenome(canvas.dataset.genome);
+    return {canvas, ctx: canvas.getContext('2d'), palette, genome,
+            slug: canvas.dataset.slug, grid: null};
+  });
+
+  let GW = 32, GH = 32;
+  let tick = 0;
+
+  function draw(p) {
+    const ctx = p.ctx;
+    const W = p.canvas.width, H = p.canvas.height;
+    const cell = W / (GW + 0.5);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (let r = 0; r < GH; r++) {
+      for (let c = 0; c < GW; c++) {
+        const v = p.grid[r * GW + c];
+        ctx.fillStyle = p.palette[v] || '#000';
+        const x = (c + (r & 1 ? 0.5 : 0)) * cell;
+        const y = r * cell * 0.866;
+        ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+      }
+    }
+  }
+
+  function reseedAll() {
+    // Generate one seed grid, share it byte-for-byte across all panels
+    // so divergence after step 0 is purely the rule's doing.
+    const seed = makeSeed(GW, GH);
+    for (const p of panels) p.grid = new Uint8Array(seed);
+    tick = 0;
+    document.getElementById('cmp-tick').textContent = '0';
+    for (const p of panels) draw(p);
+  }
+
+  function tickAll() {
+    for (const p of panels) p.grid = step(p.grid, GW, GH, p.genome);
+    tick += 1;
+    document.getElementById('cmp-tick').textContent = String(tick);
+    for (const p of panels) draw(p);
+  }
+
+  let timer = null, fps = 8;
+  function setFps(n) {
+    fps = n;
+    document.getElementById('cmp-fps-out').textContent = String(n);
+    if (timer) { clearInterval(timer); timer = setInterval(tickAll, 1000 / fps); }
+  }
+  function play() {
+    if (timer) return;
+    timer = setInterval(tickAll, 1000 / fps);
+    document.getElementById('cmp-play').textContent = '❚❚ pause';
+  }
+  function pause() {
+    if (!timer) return;
+    clearInterval(timer); timer = null;
+    document.getElementById('cmp-play').textContent = '▶ play';
+  }
+
+  document.getElementById('cmp-play').addEventListener('click', () => {
+    timer ? pause() : play();
+  });
+  document.getElementById('cmp-step').addEventListener('click', () => {
+    pause();
+    tickAll();
+  });
+  document.getElementById('cmp-reseed').addEventListener('click', () => {
+    reseedAll();
+  });
+  document.getElementById('cmp-fps').addEventListener('input', e => {
+    setFps(parseInt(e.target.value, 10));
+  });
+  document.getElementById('cmp-grid').addEventListener('change', e => {
+    GW = GH = parseInt(e.target.value, 10);
+    reseedAll();
+  });
+
+  // Per-panel × button: rebuild ?slugs= without that slug.
+  for (const a of document.querySelectorAll('.cmp-remove')) {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const removed = a.dataset.slug;
+      const remaining = panels.map(p => p.slug).filter(s => s !== removed);
+      const url = new URL(window.location.href);
+      url.searchParams.set('slugs', remaining.join(','));
+      url.searchParams.delete('slug');
+      window.location.href = url.toString();
+    });
+  }
+
+  reseedAll();
+  play();
+})();
+</script>
+{% endif %}
+{% endblock %}

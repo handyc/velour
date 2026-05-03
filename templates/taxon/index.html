@@ -30,6 +30,7 @@
 
   <p style="margin:0.5rem 0;">
     <a href="{% url 'taxon:library' %}" style="color:#58a6ff;">Library</a> ·
+    <a href="{% url 'taxon:compare' %}" style="color:#58a6ff;">Compare</a> ·
     <a href="{% url 'taxon:metrics' %}" style="color:#58a6ff;">Metrics</a> ·
     <a href="{% url 'taxon:import' %}" style="color:#58a6ff;">Import</a> ·
     <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">Evolve</a> ·
@@ -47,4 +48,5 @@
       from s3lab/automaton/helix, or <a href="{% url 'taxon:evolve' %}" style="color:#58a6ff;">evolve a fresh one</a>.</p>
   {% endif %}
 </div>
+{% include "taxon/_compare_picker.html" %}
 {% endblock %}

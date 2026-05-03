@@ -8,6 +8,7 @@ urlpatterns = [
     path('', views.index, name='index'),
     path('library/', views.library, name='library'),
     path('classes/<int:n>/', views.class_view, name='class'),
+    path('compare/', views.compare_view, name='compare'),
     path('metrics/', views.metrics_view, name='metrics'),
     path('runs/',    views.runs_view,    name='runs'),
     path('import/', views.import_view, name='import'),

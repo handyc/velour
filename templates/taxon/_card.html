@@ -1,10 +1,13 @@
 {# A small rule card. ``c`` is a dict from views._rule_card. #}
 <a href="{% url 'taxon:rule_detail' slug=c.rule.slug %}" class="taxon-card"
+   data-slug="{{ c.rule.slug }}"
+   data-kind="{{ c.rule.kind }}"
    style="display:inline-block; width:200px; margin:0.5rem 0.6rem 0.5rem 0;
           padding:0.5rem 0.6rem; background:#161b22; border:1px solid #30363d;
           border-left:4px solid {{ c.class_color }}; border-radius:5px;
           text-decoration:none; color:#c9d1d9; vertical-align:top;
-          font-family:ui-monospace,Menlo,monospace; font-size:0.78rem;">
+          font-family:ui-monospace,Menlo,monospace; font-size:0.78rem;
+          position:relative;">
   <div style="display:flex; gap:0.5rem; align-items:flex-start;">
     <img src="{% url 'taxon:rule_preview_png' slug=c.rule.slug %}"
          loading="lazy" width="48" height="48" alt=""

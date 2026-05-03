@@ -154,6 +154,12 @@
               padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
               font-family:inherit;">Use as evolve seed</a>
 
+    <a href="{% url 'taxon:compare' %}?slugs={{ rule.slug }}"
+       style="background:#21262d; color:#58a6ff; border:1px solid #30363d;
+              padding:0.4rem 0.8rem; border-radius:4px; text-decoration:none;
+              font-family:inherit;"
+       title="Open this rule in the side-by-side compare view. Add more rules from the library checkboxes.">↔ Compare</a>
+
     <form method="post" action="{% url 'taxon:rule_delete' slug=rule.slug %}" style="margin:0;"
           onsubmit="this.querySelector('button').textContent='deleting…'">
       {% csrf_token %}
