@@ -1,6 +1,7 @@
-{# Pagination row for library/class views.
-   Expects: page (django Page), qstr (URL-encoded preserved-params with trailing '&').
-#}
+{% comment %}
+Pagination row for library/class views.
+Expects: page (django Page), qstr (URL-encoded preserved-params with trailing '&').
+{% endcomment %}
 {% if page.paginator.num_pages > 1 %}
 <nav style="display:flex; gap:0.4rem; align-items:center; margin:1rem 0;
             font-family:ui-monospace,monospace; font-size:0.85rem;

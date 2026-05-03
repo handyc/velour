@@ -2,9 +2,11 @@
 {% load static %}
 
 {% block extra_head %}
-{# Leaflet 1.9.4 — vendored under static/js/leaflet/. Marker icons live
-   in images/ alongside leaflet.css; the CSS file references them via
-   relative URL so no additional plumbing needed. #}
+{% comment %}
+Leaflet 1.9.4 — vendored under static/js/leaflet/. Marker icons live
+in images/ alongside leaflet.css; the CSS file references them via
+relative URL so no additional plumbing needed.
+{% endcomment %}
 <link rel="stylesheet" href="{% static 'js/leaflet/leaflet.css' %}"/>
 <script src="{% static 'js/leaflet/leaflet.js' %}"></script>
 
