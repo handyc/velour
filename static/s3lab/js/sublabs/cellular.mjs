@@ -38,7 +38,7 @@ import {
     ansi256_to_rgb,
     random_genome, invent_palette, identity_genome,
 } from '../engine.mjs';
-import {wireUrlPalette} from '../url_palette.mjs';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail} from '../url_palette.mjs';
 
 // ── Layout ─────────────────────────────────────────────────────────
 
@@ -402,56 +402,9 @@ function nearestAnsi256(r, g, b) {
     return best;
 }
 
-function makeImageThumbnail(img) {
-    const TH = 64;
-    const w = img.naturalWidth, h = img.naturalHeight;
-    const side = Math.min(w, h);
-    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
-    const off = document.createElement('canvas');
-    off.width = TH; off.height = TH;
-    const ctx = off.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, cx, cy, side, side, 0, 0, TH, TH);
-    return off.toDataURL('image/png');
-}
-
 function paintSourceRail() {
-    const rail = document.getElementById('cellular-source-rail');
-    if (!rail) return;
-    rail.innerHTML = '';
-    if (!state.sourceImages.length) {
-        rail.style.display = 'none';
-        return;
-    }
-    rail.style.display = '';
-    // Tiny "Sources:" label up front so the rail is self-explanatory.
-    const lbl = document.createElement('span');
-    lbl.textContent = `Sources (${state.sourceImages.length})`;
-    lbl.style.cssText = 'color:#6e7681; font-size:0.7rem; ' +
-                        'margin-right:0.6rem; vertical-align:top; ' +
-                        'display:inline-block; padding-top:1.5rem;';
-    rail.appendChild(lbl);
-    for (const im of state.sourceImages) {
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:inline-block; margin-right:0.4rem; ' +
-                             'vertical-align:top; text-align:center; ' +
-                             'font-size:0.7rem; color:#8b949e;';
-        const img = document.createElement('img');
-        img.src = im.dataURL;
-        img.style.cssText = 'width:64px; height:64px; object-fit:cover; ' +
-                            'border:1px solid #30363d; border-radius:3px; ' +
-                            'image-rendering:pixelated; display:block; ' +
-                            'margin:0 auto;';
-        img.title = im.name;
-        wrap.appendChild(img);
-        const cap = document.createElement('div');
-        cap.textContent = im.name.length > 14 ? im.name.slice(0, 13) + '…' : im.name;
-        cap.style.cssText = 'max-width:64px; overflow:hidden; ' +
-                            'white-space:nowrap; text-overflow:ellipsis; ' +
-                            'margin-top:0.15rem;';
-        wrap.appendChild(cap);
-        rail.appendChild(wrap);
-    }
+    renderSourceRail(document.getElementById('cellular-source-rail'),
+                     state.sourceImages);
 }
 
 function applyImagePalettes(imgs, names) {

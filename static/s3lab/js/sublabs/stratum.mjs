@@ -31,7 +31,7 @@ import {
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
     ansi256_rgb,
 } from '../hexnn_engine.mjs';
-import {wireUrlPalette} from '../url_palette.mjs';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail} from '../url_palette.mjs';
 
 
 // ── Layout ─────────────────────────────────────────────────────────
@@ -123,7 +123,14 @@ const state = {
                                       // replacement); changing the mode
                                       // also rebuilds every existing CA's
                                       // palette in place.
+
+    sourceImages: [],                 // last image / URL palette load
 };
+
+function paintStratumSourceRail() {
+    renderSourceRail(document.getElementById('stratum-source-rail'),
+                     state.sourceImages);
+}
 
 
 // ── Hunt parameters ────────────────────────────────────────────────
@@ -885,8 +892,12 @@ async function downloadGzipped(filename, jsonString) {
     return blob.size;
 }
 
-function applyImagePalettesToLibrary(imgs) {
+function applyImagePalettesToLibrary(imgs, names) {
     if (!imgs || imgs.length === 0) return;
+    state.sourceImages = imgs.map((img, i) => ({
+        name:    (names && names[i]) || `image-${i+1}`,
+        dataURL: makeImageThumbnail(img),
+    }));
     // K=64 → 8×8 sample grid per entry. 8 cols × 8 rows of entries
     // → 64×64 sample plane per source image.
     const SK = 8;
@@ -1040,7 +1051,8 @@ function init() {
             }
             try {
                 const imgs = await Promise.all(files.map(loadImageFile));
-                applyImagePalettesToLibrary(imgs);
+                applyImagePalettesToLibrary(imgs, files.map(f => f.name));
+                paintStratumSourceRail();
                 paintAll();
                 if (status) {
                     status.style.color = '#3fb950';
@@ -1067,8 +1079,9 @@ function init() {
         button:     document.getElementById('stratum-url-palette-btn'),
         statusEl:   document.getElementById('stratum-hunt-status'),
         storageKey: 'stratum-url-palette-last',
-        onPalette: ({img}) => {
-            applyImagePalettesToLibrary([img]);
+        onPalette: ({img, host}) => {
+            applyImagePalettesToLibrary([img], [`url:${host}`]);
+            paintStratumSourceRail();
             paintAll();
         },
     });

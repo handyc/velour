@@ -33,7 +33,8 @@ import {
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
     ansi256_rgb,
 } from '../hexnn_engine.mjs';
-import {wireUrlPalette} from '../url_palette.mjs';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail}
+        from '../url_palette.mjs';
 
 
 // ── Layout ─────────────────────────────────────────────────────────
@@ -475,46 +476,12 @@ function updateStatus() {
 // ── Source thumbnail rail ──────────────────────────────────────────
 //
 // Renders below the library so the user can compare the (image-derived)
-// palettes against their source images at a glance. Scrolls horizontally
-// when many images are loaded.
+// palettes against their source images at a glance. The rail itself
+// is built by the shared renderSourceRail helper.
 
 function paintSourceRail() {
-    const rail = document.getElementById('strateta-source-rail');
-    if (!rail) return;
-    rail.innerHTML = '';
-    if (!state.sourceImages.length) {
-        rail.style.display = 'none';
-        return;
-    }
-    rail.style.display = '';
-    for (let i = 0; i < state.sourceImages.length; i++) {
-        const im = state.sourceImages[i];
-        const wrap = document.createElement('div');
-        wrap.style.display = 'inline-block';
-        wrap.style.marginRight = '0.4rem';
-        wrap.style.verticalAlign = 'top';
-        wrap.style.textAlign = 'center';
-        wrap.style.fontSize = '0.7rem';
-        wrap.style.color = '#8b949e';
-        const img = document.createElement('img');
-        img.src = im.dataURL;
-        img.style.width = '64px';
-        img.style.height = '64px';
-        img.style.objectFit = 'cover';
-        img.style.border = '1px solid #30363d';
-        img.style.borderRadius = '3px';
-        img.style.imageRendering = 'pixelated';
-        img.title = im.name;
-        wrap.appendChild(img);
-        const cap = document.createElement('div');
-        cap.textContent = im.name.length > 14 ? im.name.slice(0, 13) + '…' : im.name;
-        cap.style.maxWidth = '64px';
-        cap.style.overflow = 'hidden';
-        cap.style.whiteSpace = 'nowrap';
-        cap.style.textOverflow = 'ellipsis';
-        wrap.appendChild(cap);
-        rail.appendChild(wrap);
-    }
+    renderSourceRail(document.getElementById('strateta-source-rail'),
+                     state.sourceImages, {label: ''});
 }
 
 
@@ -557,19 +524,6 @@ function rasterizeToPalettePlane(img, PX, PY) {
     octx.imageSmoothingEnabled = true;
     octx.drawImage(img, cx, cy, side, side, 0, 0, PX, PY);
     return octx.getImageData(0, 0, PX, PY).data;
-}
-
-function makeImageThumbnail(img) {
-    const TH = 64;
-    const w = img.naturalWidth, h = img.naturalHeight;
-    const side = Math.min(w, h);
-    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
-    const off = document.createElement('canvas');
-    off.width = TH; off.height = TH;
-    const ctx = off.getContext('2d');
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, cx, cy, side, side, 0, 0, TH, TH);
-    return off.toDataURL('image/png');
 }
 
 // Image(s) → palettes: each library entry gets a 16×16 region of its

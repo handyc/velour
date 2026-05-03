@@ -11,7 +11,7 @@ import {
     encode_tail, decode_tail,
     random_genome, identity_genome, invent_palette,
 } from '../engine.mjs';
-import {wireUrlPalette} from '../url_palette.mjs';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail} from '../url_palette.mjs';
 
 // ── State ─────────────────────────────────────────────────────────────
 
@@ -43,6 +43,11 @@ const state = {
     gridHashes: [],          // last N grid hashes
     gridHashN: 16,
     periodicDwell: 0,        // consecutive ticks "inside a short cycle"
+
+    // Last image / URL loaded as the palette source. Cleared after
+    // Hunt/Refine since those re-pick a palette during the GA, so the
+    // "source" thumbnail is no longer accurate.
+    sourceImages: [],
 };
 
 // Auto-refine thresholds.
@@ -549,6 +554,10 @@ function startHunt({ warmStart = false, reason = '' } = {}) {
             state.hunting = false;
             huntBtn.disabled    = false;
             refineBtn.disabled  = false;
+            // Hunt/Refine re-pick a palette from scratch — the
+            // image/URL source no longer reflects the live palette.
+            state.sourceImages = [];
+            paintClassicSourceRail();
 
             const elapsed = (performance.now() - huntStartedAt) / 1000;
             const pct = (m.activity_ma * 100).toFixed(1);
@@ -755,6 +764,13 @@ function kmeans4Rgb(pixels) {
     return cents;
 }
 
+function paintClassicSourceRail() {
+    renderSourceRail(document.getElementById('classic-source-rail'),
+                     state.sourceImages,
+                     {label: state.sourceImages.length
+                            ? `Palette source` : ''});
+}
+
 async function applyImagePalette(file) {
     huntStatus.textContent = `posterizing ${file.name}…`;
     const url = URL.createObjectURL(file);
@@ -799,6 +815,11 @@ async function applyImagePalette(file) {
         );
     }
     state.palette = ansi;
+    state.sourceImages = [{
+        name:    file.name.startsWith('url-') ? file.name.slice(4).replace(/\.png$/, '') : file.name,
+        dataURL: makeImageThumbnail(img),
+    }];
+    paintClassicSourceRail();
     renderFull(state.cur);
     updateGenomeInfo();
     huntStatus.textContent = `palette ← ${file.name} · [${Array.from(ansi).join(' ')}]`;

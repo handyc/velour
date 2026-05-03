@@ -83,6 +83,10 @@
     <div class="label" id="device-label">ESP32-S3 SUPERMINI · ST7735 1.44″ 128×128</div>
     <canvas id="tft-emu"
             aria-label="ST7735 panel preview"></canvas>
+    <div id="cellular-tft-source-rail"
+         style="display:none; margin-top:0.5rem; padding:0.4rem 0.5rem;
+                background:#0d1117; border:1px solid #21262d; border-radius:4px;
+                white-space:nowrap; overflow-x:auto;"></div>
   </div>
 
   <div class="panel">
@@ -245,7 +249,8 @@
 // N=2^11 prototypes — keeps total population RAM bounded).
 import * as PACKED from '{% static_v "s3lab/js/engine.mjs" %}';
 import * as NN from '{% static_v "s3lab/js/hexnn_engine.mjs" %}';
-import {wireUrlPalette} from '{% static_v "s3lab/js/url_palette.mjs" %}';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail}
+  from '{% static_v "s3lab/js/url_palette.mjs" %}';
 const {
   K: PACKED_K_DEFAULT, GBYTES, PAL_BYTES, GRID_W, GRID_H,
   seed_prng, prng,
@@ -682,7 +687,13 @@ const state = {
   ticks: 0, rounds: 0,
   lastWinner: -1, lastLoser: -1,
   lastRoundAt: 0, lastTickAt: 0,
+  sourceImages: [],   // last image / URL palette load
 };
+
+function paintCellularTftSourceRail() {
+  renderSourceRail(document.getElementById('cellular-tft-source-rail'),
+                   state.sourceImages);
+}
 
 function dominantAnsi(c) {
   const counts = new Uint16Array(currentK);
@@ -925,7 +936,7 @@ function rasterizeImageToPlane(img, PX, PY) {
   return octx.getImageData(0, 0, PX, PY).data;
 }
 
-function applyImagePalettes(imgs) {
+function applyImagePalettes(imgs, names) {
   // Accept a single image or an array. For each agent (r, c) sample
   // a √K × √K region of its chosen source image — one pixel per palette
   // slot, mapped to nearest ANSI-256. Sources: single image is shared
@@ -933,6 +944,11 @@ function applyImagePalettes(imgs) {
   if (!Array.isArray(imgs)) imgs = [imgs];
   imgs = imgs.filter(Boolean);
   if (imgs.length === 0) return;
+
+  state.sourceImages = imgs.map((img, i) => ({
+    name:    (names && names[i]) || `image-${i+1}`,
+    dataURL: makeImageThumbnail(img),
+  }));
 
   // Sample grid sized to currentK. K=4 → 2×2, K=16 → 4×4, K=64 → 8×8,
   // K=256 → 16×16. For non-square K (32, 128) we use ceil(√K) × ⌈K/QX⌉.
@@ -1466,7 +1482,8 @@ imageInput.addEventListener('change', async (e) => {
   }
   try {
     const imgs = await Promise.all(files.map(loadImageFile));
-    applyImagePalettes(imgs);
+    applyImagePalettes(imgs, files.map(f => f.name));
+    paintCellularTftSourceRail();
     renderFull();
     cv.classList.add('flash');
     setTimeout(() => cv.classList.remove('flash'), 220);
@@ -1496,8 +1513,9 @@ wireUrlPalette({
   button:     document.getElementById('cellular-url-palette-btn'),
   statusEl:   gaStatus,
   storageKey: 'cellular-url-palette-last',
-  onPalette: ({img}) => {
-    applyImagePalettes([img]);
+  onPalette: ({img, host}) => {
+    applyImagePalettes([img], [`url:${host}`]);
+    paintCellularTftSourceRail();
     renderFull();
     cv.classList.add('flash');
     setTimeout(() => cv.classList.remove('flash'), 220);

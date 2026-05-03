@@ -19,7 +19,7 @@ import {
     ansi256_to_css, ansi256_to_rgb,
     random_genome, invent_palette,
 } from '../engine.mjs';
-import {wireUrlPalette} from '../url_palette.mjs';
+import {wireUrlPalette, makeImageThumbnail, renderSourceRail} from '../url_palette.mjs';
 
 // ── Tunables ──────────────────────────────────────────────────────────
 
@@ -101,7 +101,14 @@ const state = {
     gridHashes: [],
     gridHashN: 16,
     periodicDwell: 0,
+
+    sourceImages: [],   // last image / URL palette load — drives the rail
 };
+
+function paintFilmstripSourceRail() {
+    renderSourceRail(document.getElementById('filmstrip-source-rail'),
+                     state.sourceImages);
+}
 
 function liveFrame() { return state.frames[state.frames.length - 1]; }
 
@@ -151,10 +158,15 @@ function rasterizeImageToPlane(img, PX, PY) {
     return octx.getImageData(0, 0, PX, PY).data;
 }
 
-function applyImagePalettesToStrip(imgs) {
+function applyImagePalettesToStrip(imgs, names) {
     if (!Array.isArray(imgs)) imgs = [imgs];
     imgs = imgs.filter(Boolean);
     if (imgs.length === 0) return;
+
+    state.sourceImages = imgs.map((img, i) => ({
+        name:    (names && names[i]) || `image-${i+1}`,
+        dataURL: makeImageThumbnail(img),
+    }));
 
     // K=4 → 2×2 sample per tile. 8×8 tiles → 16×16 image plane.
     const SK = 2;
@@ -662,7 +674,8 @@ function init() {
             if (files.length === 0) return;
             try {
                 const imgs = await Promise.all(files.map(loadImageFile));
-                applyImagePalettesToStrip(imgs);
+                applyImagePalettesToStrip(imgs, files.map(f => f.name));
+                paintFilmstripSourceRail();
                 paintStrip();
             } catch (err) {
                 console.error('image load failed:', err);
@@ -680,8 +693,9 @@ function init() {
         button:     document.getElementById('filmstrip-url-palette-btn'),
         statusEl:   document.getElementById('filmstrip-url-palette-status'),
         storageKey: 'filmstrip-url-palette-last',
-        onPalette: ({img}) => {
-            applyImagePalettesToStrip([img]);
+        onPalette: ({img, host}) => {
+            applyImagePalettesToStrip([img], [`url:${host}`]);
+            paintFilmstripSourceRail();
             paintStrip();
         },
     });
