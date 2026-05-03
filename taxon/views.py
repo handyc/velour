@@ -179,8 +179,85 @@ def class_view(request, n: int):
 
 @login_required
 def metrics_view(request):
+    """Metrics page — table of metric definitions plus a λ-vs-activity
+    scatter coloured by Wolfram class. Each rule contributes its
+    *latest* langton_lambda and activity_rate measurements, and the
+    most recent Classification colours the dot."""
+    # One pass through MetricRun gives us the latest λ + activity per
+    # rule. Order by computed_at so the dict ends up holding the newest.
+    latest = {}
+    for mr in (MetricRun.objects
+               .filter(metric__in=('langton_lambda', 'activity_rate'))
+               .order_by('computed_at')
+               .values('rule_id', 'metric', 'value')):
+        latest.setdefault(mr['rule_id'], {})[mr['metric']] = mr['value']
+
+    # Latest classification per rule.
+    cls = {}
+    for c in (Classification.objects
+              .order_by('assigned_at')
+              .values('rule_id', 'wolfram_class')):
+        cls[c['rule_id']] = c['wolfram_class']
+
+    # Map rule_id → slug so each dot can link to its detail page.
+    slugs = dict(Rule.objects.values_list('id', 'slug'))
+
+    # SVG plot geometry — domain [0, 1] × [0, 1] → pixel area below.
+    PLOT_X0, PLOT_X1 = 60, 620
+    PLOT_Y0, PLOT_Y1 = 30, 480
+    plot_w = PLOT_X1 - PLOT_X0
+    plot_h = PLOT_Y1 - PLOT_Y0
+
+    points = []
+    for rid, vals in latest.items():
+        lam = vals.get('langton_lambda')
+        act = vals.get('activity_rate')
+        if lam is None or act is None:
+            continue
+        slug = slugs.get(rid)
+        if slug is None:
+            continue
+        n = cls.get(rid)
+        # Clamp to [0, 1] in case a metric briefly exceeds the band.
+        lx = max(0.0, min(1.0, float(lam)))
+        ay = max(0.0, min(1.0, float(act)))
+        cx = PLOT_X0 + lx * plot_w
+        cy = PLOT_Y1 - ay * plot_h           # invert y: 0 at bottom
+        points.append({
+            'slug': slug,
+            'lam':  lam, 'act': act,
+            'class_n': n,
+            'color':   class_color(n) if n else '#586069',
+            'cx': round(cx, 1),
+            'cy': round(cy, 1),
+        })
+
+    # Per-class counts + pre-baked y-positions for the SVG legend. The
+    # legend sits inside the plot area at top-right; rows are 20 px apart.
+    LEGEND_X0, LEGEND_Y0, ROW_H = 490, 50, 20
+    legend = []
+    for i, n in enumerate((1, 2, 3, 4, None)):
+        legend.append({
+            'n': n,
+            'label': class_label(n) if n else 'unclassified',
+            'color': class_color(n) if n else '#586069',
+            'count': sum(1 for p in points if p['class_n'] == n),
+            'cy':   LEGEND_Y0 + i * ROW_H,
+            'ty':   LEGEND_Y0 + i * ROW_H + 4,    # text baseline shim
+        })
+    legend_box = {
+        'x': LEGEND_X0 - 10,
+        'y': LEGEND_Y0 - 14,
+        'w': 130,
+        'h': len(legend) * ROW_H + 6,
+    }
+
     return render(request, 'taxon/metrics.html', {
         'metrics': list_metrics(),
+        'points': points,
+        'legend': legend,
+        'legend_box': legend_box,
+        'total_points': len(points),
     })
 
 

@@ -7,6 +7,7 @@ app_name = 's3lab'
 
 urlpatterns = [
     path('',                       views.index,           name='index'),
+    path('gallery/',               views.gallery,         name='gallery'),
     path('compile/',               views.compile_page,    name='compile_page'),
     path('compile/run/',           views.compile_run,     name='compile_run'),
     path('compile/push/',          views.compile_push,    name='compile_push'),

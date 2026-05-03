@@ -104,6 +104,57 @@ def sublab(request, slug):
     return _render_sublab(request, slug)
 
 
+@login_required
+def gallery(request):
+    """Sublab directory page: every sublab as a card with a live K=4
+    hex-CA preview that animates using one Taxon rule assigned to that
+    card. Lets a visitor sniff the bench before clicking through."""
+    # One rule per sublab, picked so each card gets a different
+    # genome — preferring class 4 when available, since those make
+    # the most visually interesting thumbnails. If we run out of
+    # class-4s, fall back to anything.
+    cards = []
+    try:
+        from taxon.models import Rule
+        # `cls(latest_classification=4) ORDER BY random()` would be ideal
+        # but cross-DB. Pull a small pool and shuffle in Python.
+        pool = list(
+            Rule.objects.filter(kind='hex_k4_packed')
+            .order_by('-created_at')[:200]
+        )
+        # Prefer class-4 rules; otherwise just use what we have.
+        c4 = [r for r in pool
+              if r.latest_classification
+              and r.latest_classification.wolfram_class == 4]
+        chosen_pool = c4 if len(c4) >= len(SUBLABS) else pool
+        import random
+        random.shuffle(chosen_pool)
+    except Exception:
+        chosen_pool = []
+
+    try:
+        from taxon.classifier import class_color
+    except Exception:
+        def class_color(n): return '#586069'
+
+    for i, sub in enumerate(SUBLABS):
+        rule = chosen_pool[i % len(chosen_pool)] if chosen_pool else None
+        c = rule.latest_classification if rule else None
+        n = c.wolfram_class if c else None
+        cards.append({
+            'sub':      sub,
+            'rule':     rule,
+            'genome_hex': bytes(rule.genome).hex() if rule else '',
+            'palette':  rule.palette_hex if rule else [],
+            'class_n':  n,
+            'class_color': class_color(n) if n else '#30363d',
+        })
+    return render(request, 's3lab/gallery.html', {
+        'cards':   cards,
+        'sublabs': SUBLABS,
+    })
+
+
 # ── Phase 1: compile-on-Velour for the ESP32-S3 supermini ─────────
 
 @ensure_csrf_cookie

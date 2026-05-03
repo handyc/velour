@@ -51,6 +51,18 @@
       <option value="48">48×48</option>
       <option value="64">64×64</option>
     </select>
+    <label style="font-size:0.78rem; color:#c9d1d9; cursor:pointer;
+                  display:inline-flex; align-items:center; gap:0.3rem;
+                  padding:0.2rem 0.5rem; background:#0d1117;
+                  border:1px solid #30363d; border-radius:3px;"
+           title="Highlight cells in red where the panel differs from the reference panel. The reference panel renders normally and shows its diff count vs itself (always 0).">
+      <input type="checkbox" id="cmp-diff" style="margin:0;">
+      diff vs
+    </label>
+    <select id="cmp-ref" style="background:#0d1117; color:#e1e4e8;
+            border:1px solid #30363d; padding:0.25rem 0.4rem; border-radius:3px;
+            font-family:inherit; font-size:0.78rem;"
+            title="Which panel is the reference for diff mode."></select>
   </div>
   {% endif %}
 
@@ -102,13 +114,18 @@
                        border:1px solid #444;"></span>
         {% endfor %}
       </div>
-      <div style="margin-top:0.3rem; font-size:0.7rem;">
-        {% if p.class_n %}
-          <span style="color:{{ p.class_color }}; font-weight:600;">class {{ p.class_n }}</span>
-          <span style="color:#6e7681;"> · {{ p.rule.sha1|slice:":10" }}</span>
-        {% else %}
-          <span style="color:#6e7681;">unclassified · {{ p.rule.sha1|slice:":10" }}</span>
-        {% endif %}
+      <div style="margin-top:0.3rem; font-size:0.7rem;
+                  display:flex; justify-content:space-between; gap:0.5rem;">
+        <span>
+          {% if p.class_n %}
+            <span style="color:{{ p.class_color }}; font-weight:600;">class {{ p.class_n }}</span>
+            <span style="color:#6e7681;"> · {{ p.rule.sha1|slice:":10" }}</span>
+          {% else %}
+            <span style="color:#6e7681;">unclassified · {{ p.rule.sha1|slice:":10" }}</span>
+          {% endif %}
+        </span>
+        <span class="cmp-diff-count" data-slug="{{ p.rule.slug }}"
+              style="color:#6e7681; font-variant-numeric:tabular-nums;"></span>
       </div>
     </div>
     {% endfor %}
@@ -214,21 +231,55 @@
 
   let GW = 32, GH = 32;
   let tick = 0;
+  let diffMode = false;
+  let refIdx = 0;
 
-  function draw(p) {
+  function draw(p, refGrid) {
     const ctx = p.ctx;
     const W = p.canvas.width, H = p.canvas.height;
     const cell = W / (GW + 0.5);
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, W, H);
+    let diffN = 0;
+    const overlay = diffMode && refGrid && refGrid !== p.grid;
     for (let r = 0; r < GH; r++) {
       for (let c = 0; c < GW; c++) {
-        const v = p.grid[r * GW + c];
+        const i = r * GW + c;
+        const v = p.grid[i];
         ctx.fillStyle = p.palette[v] || '#000';
         const x = (c + (r & 1 ? 0.5 : 0)) * cell;
         const y = r * cell * 0.866;
         ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+        if (overlay && refGrid[i] !== v) {
+          diffN += 1;
+          ctx.fillStyle = 'rgba(248, 81, 73, 0.78)';
+          ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+        }
       }
+    }
+    return diffN;
+  }
+
+  function updateDiffCount(slug, n) {
+    const el = document.querySelector(`.cmp-diff-count[data-slug="${slug}"]`);
+    if (!el) return;
+    if (!diffMode) { el.textContent = ''; return; }
+    if (refIdx < panels.length && panels[refIdx].slug === slug) {
+      el.textContent = 'ref';
+      el.style.color = '#d4a72c';
+    } else {
+      const total = GW * GH;
+      const pct = total ? Math.round(100 * n / total) : 0;
+      el.textContent = `Δ ${n} (${pct}%)`;
+      el.style.color = n === 0 ? '#3fb950' : '#f85149';
+    }
+  }
+
+  function drawAll() {
+    const ref = panels[refIdx]?.grid;
+    for (const p of panels) {
+      const dn = draw(p, ref);
+      updateDiffCount(p.slug, dn);
     }
   }
 
@@ -239,14 +290,14 @@
     for (const p of panels) p.grid = new Uint8Array(seed);
     tick = 0;
     document.getElementById('cmp-tick').textContent = '0';
-    for (const p of panels) draw(p);
+    drawAll();
   }
 
   function tickAll() {
     for (const p of panels) p.grid = step(p.grid, GW, GH, p.genome);
     tick += 1;
     document.getElementById('cmp-tick').textContent = String(tick);
-    for (const p of panels) draw(p);
+    drawAll();
   }
 
   let timer = null, fps = 8;
@@ -282,6 +333,29 @@
   document.getElementById('cmp-grid').addEventListener('change', e => {
     GW = GH = parseInt(e.target.value, 10);
     reseedAll();
+  });
+
+  // Populate the reference-panel selector + diff toggle.
+  const refSel = document.getElementById('cmp-ref');
+  panels.forEach((p, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    // Trim long slugs so the dropdown stays compact.
+    const label = (p.canvas.closest('.cmp-panel')?.querySelector('a')?.textContent || p.slug).trim();
+    o.textContent = (i === 0 ? '★ ' : '') + label.slice(0, 28);
+    refSel.appendChild(o);
+  });
+  refSel.disabled = !diffMode;
+  refSel.style.opacity = diffMode ? '1' : '0.5';
+  refSel.addEventListener('change', e => {
+    refIdx = parseInt(e.target.value, 10) || 0;
+    drawAll();
+  });
+  document.getElementById('cmp-diff').addEventListener('change', e => {
+    diffMode = e.target.checked;
+    refSel.disabled = !diffMode;
+    refSel.style.opacity = diffMode ? '1' : '0.5';
+    drawAll();
   });
 
   // Per-panel × button: rebuild ?slugs= without that slug.

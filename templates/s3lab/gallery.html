@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% load assets %}
+{% block title %}S3 Lab — Gallery{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static_v 's3lab/css/style.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="s3lab" style="max-width:1100px; margin:1rem auto; padding:0 1rem;
+                          color:#c9d1d9;">
+
+  <header class="s3lab-header">
+    <h1>S3 Lab <span class="active-sublab">— Gallery</span></h1>
+    <nav class="sublab-tabs" aria-label="S3 Lab sublabs">
+      {% for s in sublabs %}
+        <a class="sublab-tab" href="{% url 's3lab:sublab' s.slug %}"
+           title="{{ s.blurb }}">{{ s.name }}</a>
+      {% endfor %}
+      <span class="sublab-tab active" title="Sublab gallery — live thumbnails of every sublab.">Gallery</span>
+      <a class="sublab-tab" href="{% url 's3lab:compile_page' %}"
+         title="Compile arbitrary C to Xtensa LX7 ELF via xcc700.">Compile</a>
+      <a class="sublab-tab" href="{% url 's3lab:device_page' %}"
+         title="Live status of an esp32_s3_xcc supermini on the LAN.">Device</a>
+      <a class="sublab-tab" href="{% url 's3lab:slots_list' %}"
+         title="History of every compile-pushed slot patch — replayable.">Slots</a>
+    </nav>
+  </header>
+
+  <p style="color:#8b949e; font-size:0.85rem; margin:0.6rem 0 1rem 0;">
+    Each card runs a representative K=4 hex-CA rule pulled from the
+    Taxon library so you can sniff the bench before clicking in. The
+    actual sublabs use richer engines — these previews exist to give
+    the sublab strip a face. Click any card to open the bench.
+  </p>
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));
+              gap:0.8rem; margin:0.6rem 0;">
+    {% for card in cards %}
+    <a href="{% url 's3lab:sublab' card.sub.slug %}"
+       style="display:block; background:#161b22; border:1px solid #30363d;
+              border-left:4px solid {{ card.class_color }}; border-radius:6px;
+              padding:0.6rem; text-decoration:none; color:#c9d1d9;
+              font-family:ui-monospace,Menlo,monospace;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline;
+                  margin-bottom:0.4rem;">
+        <span style="font-weight:600; font-size:0.95rem; color:#e1e4e8;">
+          {{ card.sub.name }}
+        </span>
+        {% if card.class_n %}
+          <span style="color:{{ card.class_color }}; font-size:0.7rem;
+                       font-weight:600;">class {{ card.class_n }}</span>
+        {% endif %}
+      </div>
+      <div style="background:#0d1117; border:1px solid #30363d; border-radius:3px;
+                  padding:0.3rem; text-align:center;">
+        <canvas class="gal-canvas"
+                data-genome="{{ card.genome_hex }}"
+                data-palette="{% for h in card.palette %}{{ h }}{% if not forloop.last %},{% endif %}{% endfor %}"
+                width="240" height="240"
+                style="display:block; margin:0 auto; image-rendering:pixelated;
+                       background:#000; max-width:100%; height:auto;
+                       aspect-ratio:1/1;"></canvas>
+      </div>
+      <p style="font-size:0.74rem; color:#8b949e; margin:0.5rem 0 0 0;
+                line-height:1.35;">
+        {{ card.sub.blurb }}
+      </p>
+      {% if card.rule %}
+        <div style="margin-top:0.35rem; font-size:0.66rem; color:#6e7681;">
+          rule {{ card.rule.sha1|slice:":10" }}
+        </div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+(function(){
+  // Same K=4 hex CA engine as taxon/compare.html, simplified to one
+  // canvas per panel. Each canvas runs independently — we don't share
+  // a seed since each card has its own genome.
+  function decodeGenome(hex) {
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i*2, 2), 16);
+    return out;
+  }
+  function lookup(g, self_c, n) {
+    const idx = self_c*4096 + n[0]*1024 + n[1]*256 + n[2]*64 + n[3]*16 + n[4]*4 + n[5];
+    return (g[idx >> 2] >> ((idx & 3) * 2)) & 0x03;
+  }
+  function nbrs(grid, gw, gh, r, c) {
+    const even = (c & 1) === 0;
+    const get = (rr, cc) => (rr >= 0 && rr < gh && cc >= 0 && cc < gw)
+      ? grid[rr * gw + cc] : 0;
+    return [
+      get(r-1, c),
+      get(even ? r-1 : r,   c+1),
+      get(even ? r   : r+1, c+1),
+      get(r+1, c),
+      get(even ? r   : r+1, c-1),
+      get(even ? r-1 : r,   c-1),
+    ];
+  }
+  function step(grid, gw, gh, genome) {
+    const out = new Uint8Array(grid.length);
+    for (let r = 0; r < gh; r++) {
+      for (let c = 0; c < gw; c++) {
+        out[r*gw+c] = lookup(genome, grid[r*gw+c], nbrs(grid, gw, gh, r, c));
+      }
+    }
+    return out;
+  }
+  const GW = 24, GH = 24;
+  function seed() {
+    const g = new Uint8Array(GW * GH);
+    for (let i = 0; i < g.length; i++) g[i] = (Math.random() * 4) | 0;
+    return g;
+  }
+  function draw(ctx, grid, palette, W, H) {
+    const cell = W / (GW + 0.5);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    for (let r = 0; r < GH; r++) {
+      for (let c = 0; c < GW; c++) {
+        ctx.fillStyle = palette[grid[r*GW+c]] || '#000';
+        const x = (c + (r & 1 ? 0.5 : 0)) * cell;
+        const y = r * cell * 0.866;
+        ctx.fillRect(x, y, cell + 0.5, cell + 0.5);
+      }
+    }
+  }
+
+  for (const canvas of document.querySelectorAll('.gal-canvas')) {
+    const hex = canvas.dataset.genome || '';
+    const palette = (canvas.dataset.palette || '').split(',').filter(Boolean);
+    if (!hex || palette.length < 4) continue;
+    const genome = decodeGenome(hex);
+    const ctx = canvas.getContext('2d');
+    let grid = seed();
+    let stale = 0;
+    function tick() {
+      const next = step(grid, GW, GH, genome);
+      // Detect dead/static panels and reseed so cards never sit silent.
+      let same = true;
+      for (let i = 0; i < grid.length; i++) {
+        if (grid[i] !== next[i]) { same = false; break; }
+      }
+      grid = next;
+      stale = same ? stale + 1 : 0;
+      if (stale > 30) { grid = seed(); stale = 0; }
+      draw(ctx, grid, palette, canvas.width, canvas.height);
+    }
+    draw(ctx, grid, palette, canvas.width, canvas.height);
+    setInterval(tick, 220);   // ~4.5 fps — keeps CPU low across many cards
+  }
+})();
+</script>
+{% endblock %}
