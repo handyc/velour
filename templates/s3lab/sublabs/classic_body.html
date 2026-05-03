@@ -66,6 +66,11 @@
         Upload genome.bin
         <input id="upload-genome" type="file" accept=".bin,application/octet-stream">
       </label>
+      <label class="upload-label"
+             title="Pick an image — it gets posterized down to 4 ANSI-256 colours via k-means (sorted dark→light) and applied as the live palette. Genome is unchanged. Won't render the source image faithfully (that's Strateta's job at K=256), but it's a quick way to seed the bench's colours from a photo or icon. Note: starting a Hunt or Refine afterwards will re-pick a palette during the GA — re-import to restore.">
+        🖼 Image → palette
+        <input id="upload-image-palette" type="file" accept="image/*">
+      </label>
       <span id="send-status" style="font-size:0.85em;color:#8b949e;"></span>
     </div>
   </div>

@@ -120,6 +120,7 @@ const stepBtn      = $('step-btn');
 const seedBtn      = $('seed-btn');
 const downloadGen  = $('download-genome');
 const uploadGen    = $('upload-genome');
+const uploadImgPal = $('upload-image-palette');
 const downloadMap  = $('download-gpio-map');
 const sendAutoBtn  = $('send-to-automaton');
 const sendStatus   = $('send-status');
@@ -690,6 +691,118 @@ async function uploadGenome(file) {
     }
 }
 
+// ── Image → palette ─────────────────────────────────────────────────
+//
+// Decode an image to RGB, k-means(K=4) over a downsampled crop, then
+// snap each centroid to its nearest ANSI-256 index so the result fits
+// state.palette's existing format (and round-trips through genome.bin
+// + Automaton + Taxon export). Centroids are sorted dark→light so
+// cell value 0 is the darkest colour, 3 the brightest — a sensible
+// default ordering when the source image has obvious foreground/
+// background contrast.
+
+function nearestAnsi256(r, g, b) {
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < 256; i++) {
+        const [ar, ag, ab] = ansi256_to_rgb(i);
+        const dr = ar - r, dg = ag - g, db = ab - b;
+        const d = dr*dr + dg*dg + db*db;
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+}
+
+function kmeans4Rgb(pixels) {
+    // pixels: Uint8ClampedArray length n*4 (RGBA).
+    const N = pixels.length >>> 2;
+    if (N < 4) return [[0,0,0],[64,64,64],[128,128,128],[255,255,255]];
+    // Init centroids: pick 4 well-separated samples by sweeping the
+    // pixel array at quarter-strides — better than fully random for
+    // small images.
+    const cents = [];
+    for (let k = 0; k < 4; k++) {
+        const i = ((k + 0.5) * N / 4) | 0;
+        cents.push([pixels[i*4], pixels[i*4+1], pixels[i*4+2]]);
+    }
+    const owner = new Int32Array(N);
+    const sumR = new Float64Array(4);
+    const sumG = new Float64Array(4);
+    const sumB = new Float64Array(4);
+    const cnt  = new Int32Array(4);
+    for (let iter = 0; iter < 12; iter++) {
+        sumR.fill(0); sumG.fill(0); sumB.fill(0); cnt.fill(0);
+        for (let p = 0; p < N; p++) {
+            const r = pixels[p*4], g = pixels[p*4+1], b = pixels[p*4+2];
+            let bestK = 0, bestD = Infinity;
+            for (let k = 0; k < 4; k++) {
+                const dr = cents[k][0] - r, dg = cents[k][1] - g, db = cents[k][2] - b;
+                const d = dr*dr + dg*dg + db*db;
+                if (d < bestD) { bestD = d; bestK = k; }
+            }
+            owner[p] = bestK;
+            sumR[bestK] += r; sumG[bestK] += g; sumB[bestK] += b; cnt[bestK]++;
+        }
+        for (let k = 0; k < 4; k++) {
+            if (cnt[k] > 0) {
+                cents[k] = [sumR[k]/cnt[k], sumG[k]/cnt[k], sumB[k]/cnt[k]];
+            }
+            // Empty cluster: leave centroid as-is rather than respawn —
+            // 4-means on a posterizable image rarely loses a cluster
+            // and a respawn would oscillate.
+        }
+    }
+    return cents;
+}
+
+async function applyImagePalette(file) {
+    huntStatus.textContent = `posterizing ${file.name}…`;
+    const url = URL.createObjectURL(file);
+    let img;
+    try {
+        img = await new Promise((resolve, reject) => {
+            const im = new Image();
+            im.onload  = () => resolve(im);
+            im.onerror = () => reject(new Error('image decode failed'));
+            im.src = url;
+        });
+    } catch (err) {
+        URL.revokeObjectURL(url);
+        huntStatus.textContent = `image: ${err.message}`;
+        return;
+    }
+    URL.revokeObjectURL(url);
+
+    // Centre-crop to a square then downsample to 64×64 — 4096 samples
+    // is plenty for k-means and keeps the iteration loop snappy.
+    const SAMP = 64;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const side = Math.min(w, h);
+    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
+    const off = document.createElement('canvas');
+    off.width = SAMP; off.height = SAMP;
+    const octx = off.getContext('2d');
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(img, cx, cy, side, side, 0, 0, SAMP, SAMP);
+    const data = octx.getImageData(0, 0, SAMP, SAMP).data;
+
+    const cents = kmeans4Rgb(data);
+    // Sort dark → light (luma using BT.601 coefficients).
+    cents.sort((a, b) => (0.299*a[0] + 0.587*a[1] + 0.114*a[2])
+                       - (0.299*b[0] + 0.587*b[1] + 0.114*b[2]));
+    const ansi = new Uint8Array(4);
+    for (let k = 0; k < 4; k++) {
+        ansi[k] = nearestAnsi256(
+            Math.round(cents[k][0]),
+            Math.round(cents[k][1]),
+            Math.round(cents[k][2]),
+        );
+    }
+    state.palette = ansi;
+    renderFull(state.cur);
+    updateGenomeInfo();
+    huntStatus.textContent = `palette ← ${file.name} · [${Array.from(ansi).join(' ')}]`;
+}
+
 // On page load, honour ?from=<automaton-sim-slug> by fetching that
 // simulation's genome.bin and applying it. Lets Automaton's "→ s3lab"
 // button drop you into the lab with the chosen ruleset preloaded.
@@ -859,6 +972,14 @@ sendAutoBtn.addEventListener('click', sendToAutomaton);
 
 uploadGen.addEventListener('change', () => {
     if (uploadGen.files && uploadGen.files[0]) uploadGenome(uploadGen.files[0]);
+});
+
+uploadImgPal.addEventListener('change', () => {
+    if (uploadImgPal.files && uploadImgPal.files[0]) {
+        applyImagePalette(uploadImgPal.files[0]);
+        // Reset so picking the same file twice still re-fires the change.
+        uploadImgPal.value = '';
+    }
 });
 
 addOutBtn.addEventListener('click', () => showAddDialog('out'));
