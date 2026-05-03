@@ -76,10 +76,18 @@
   </label>
   <label class="slider-label"
          style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:0.25rem 0.55rem;border-radius:3px;cursor:pointer;"
-         title="Pick one image — or many. Each library entry's K=256 palette is sampled from a 16×16 region of its chosen source image, and that same region becomes the entry's pixel-faithful target. Auto-saves the resulting population as a gzipped JSON for later replay.">
+         title="Pick one image — or many. Each library entry's K=256 palette is sampled from a 16×16 region of its chosen source image, and that same region becomes the entry's pixel-faithful target.">
     🖼 Image(s) → palettes
     <input id="strateta-image-input" type="file" accept="image/*" multiple style="display:none;">
   </label>
+  <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:3px;overflow:hidden;"
+        title="Fetch a URL server-side, scrape colour values from its inline + same-host CSS (hex, rgb(), hsl(), CSS named colours), and render the result as a 256-swatch mosaic that drives the library palettes. The page's most frequent colours land first. Press Enter or click 🌐 to submit.">
+    <input id="strateta-url-palette-input" type="url"
+           placeholder="https://example.com"
+           style="background:#0d1117;color:#e1e4e8;border:0;padding:0.25rem 0.5rem;font-family:inherit;font-size:0.82rem;min-width:200px;outline:none;">
+    <button id="strateta-url-palette-btn" type="button"
+            style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.25rem 0.55rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+  </span>
   <label class="checkbox-label"
          title="When checked, GA tournament rounds + Hunt/Refine inserts never overwrite an entry's palette. Useful after image-import: keeps the library mosaic visually intact even as edge-of-chaos mode shuffles the underlying genomes. Pixel-faithful mode never overwrites palettes regardless of this toggle (it needs the image-derived palette as the comparison target).">
     <input type="checkbox" id="strateta-freeze-palettes-cb">

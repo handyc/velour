@@ -155,6 +155,282 @@ def gallery(request):
     })
 
 
+# ── URL → palette ──────────────────────────────────────────────────
+#
+# Strateta-side feature: the user gives a URL, the server fetches the
+# page + its (same-origin) stylesheets, scrapes CSS colour values, and
+# returns a 256×256 PNG mosaic. The mosaic is then handed straight to
+# the existing image-palette pipeline so every library entry gets a
+# 16×16 swatch slice of the page's colour signature.
+
+CSS_NAMED_COLORS = {
+    'aliceblue': (240,248,255), 'antiquewhite': (250,235,215),
+    'aqua': (0,255,255), 'aquamarine': (127,255,212),
+    'azure': (240,255,255), 'beige': (245,245,220),
+    'bisque': (255,228,196), 'black': (0,0,0),
+    'blanchedalmond': (255,235,205), 'blue': (0,0,255),
+    'blueviolet': (138,43,226), 'brown': (165,42,42),
+    'burlywood': (222,184,135), 'cadetblue': (95,158,160),
+    'chartreuse': (127,255,0), 'chocolate': (210,105,30),
+    'coral': (255,127,80), 'cornflowerblue': (100,149,237),
+    'cornsilk': (255,248,220), 'crimson': (220,20,60),
+    'cyan': (0,255,255), 'darkblue': (0,0,139),
+    'darkcyan': (0,139,139), 'darkgoldenrod': (184,134,11),
+    'darkgray': (169,169,169), 'darkgreen': (0,100,0),
+    'darkgrey': (169,169,169), 'darkkhaki': (189,183,107),
+    'darkmagenta': (139,0,139), 'darkolivegreen': (85,107,47),
+    'darkorange': (255,140,0), 'darkorchid': (153,50,204),
+    'darkred': (139,0,0), 'darksalmon': (233,150,122),
+    'darkseagreen': (143,188,143), 'darkslateblue': (72,61,139),
+    'darkslategray': (47,79,79), 'darkslategrey': (47,79,79),
+    'darkturquoise': (0,206,209), 'darkviolet': (148,0,211),
+    'deeppink': (255,20,147), 'deepskyblue': (0,191,255),
+    'dimgray': (105,105,105), 'dimgrey': (105,105,105),
+    'dodgerblue': (30,144,255), 'firebrick': (178,34,34),
+    'floralwhite': (255,250,240), 'forestgreen': (34,139,34),
+    'fuchsia': (255,0,255), 'gainsboro': (220,220,220),
+    'ghostwhite': (248,248,255), 'gold': (255,215,0),
+    'goldenrod': (218,165,32), 'gray': (128,128,128),
+    'green': (0,128,0), 'greenyellow': (173,255,47),
+    'grey': (128,128,128), 'honeydew': (240,255,240),
+    'hotpink': (255,105,180), 'indianred': (205,92,92),
+    'indigo': (75,0,130), 'ivory': (255,255,240),
+    'khaki': (240,230,140), 'lavender': (230,230,250),
+    'lavenderblush': (255,240,245), 'lawngreen': (124,252,0),
+    'lemonchiffon': (255,250,205), 'lightblue': (173,216,230),
+    'lightcoral': (240,128,128), 'lightcyan': (224,255,255),
+    'lightgoldenrodyellow': (250,250,210), 'lightgray': (211,211,211),
+    'lightgreen': (144,238,144), 'lightgrey': (211,211,211),
+    'lightpink': (255,182,193), 'lightsalmon': (255,160,122),
+    'lightseagreen': (32,178,170), 'lightskyblue': (135,206,250),
+    'lightslategray': (119,136,153), 'lightslategrey': (119,136,153),
+    'lightsteelblue': (176,196,222), 'lightyellow': (255,255,224),
+    'lime': (0,255,0), 'limegreen': (50,205,50),
+    'linen': (250,240,230), 'magenta': (255,0,255),
+    'maroon': (128,0,0), 'mediumaquamarine': (102,205,170),
+    'mediumblue': (0,0,205), 'mediumorchid': (186,85,211),
+    'mediumpurple': (147,112,219), 'mediumseagreen': (60,179,113),
+    'mediumslateblue': (123,104,238), 'mediumspringgreen': (0,250,154),
+    'mediumturquoise': (72,209,204), 'mediumvioletred': (199,21,133),
+    'midnightblue': (25,25,112), 'mintcream': (245,255,250),
+    'mistyrose': (255,228,225), 'moccasin': (255,228,181),
+    'navajowhite': (255,222,173), 'navy': (0,0,128),
+    'oldlace': (253,245,230), 'olive': (128,128,0),
+    'olivedrab': (107,142,35), 'orange': (255,165,0),
+    'orangered': (255,69,0), 'orchid': (218,112,214),
+    'palegoldenrod': (238,232,170), 'palegreen': (152,251,152),
+    'paleturquoise': (175,238,238), 'palevioletred': (219,112,147),
+    'papayawhip': (255,239,213), 'peachpuff': (255,218,185),
+    'peru': (205,133,63), 'pink': (255,192,203),
+    'plum': (221,160,221), 'powderblue': (176,224,230),
+    'purple': (128,0,128), 'rebeccapurple': (102,51,153),
+    'red': (255,0,0), 'rosybrown': (188,143,143),
+    'royalblue': (65,105,225), 'saddlebrown': (139,69,19),
+    'salmon': (250,128,114), 'sandybrown': (244,164,96),
+    'seagreen': (46,139,87), 'seashell': (255,245,238),
+    'sienna': (160,82,45), 'silver': (192,192,192),
+    'skyblue': (135,206,235), 'slateblue': (106,90,205),
+    'slategray': (112,128,144), 'slategrey': (112,128,144),
+    'snow': (255,250,250), 'springgreen': (0,255,127),
+    'steelblue': (70,130,180), 'tan': (210,180,140),
+    'teal': (0,128,128), 'thistle': (216,191,216),
+    'tomato': (255,99,71), 'turquoise': (64,224,208),
+    'violet': (238,130,238), 'wheat': (245,222,179),
+    'white': (255,255,255), 'whitesmoke': (245,245,245),
+    'yellow': (255,255,0), 'yellowgreen': (154,205,50),
+}
+
+
+def _extract_css_colors(css_text: str) -> list[tuple[int, int, int]]:
+    """Pull (r,g,b) tuples out of a blob of CSS. Handles #RGB, #RRGGBB,
+    rgb()/rgba(), hsl()/hsla(), and the named CSS colours table."""
+    import re, colorsys
+    colors: list[tuple[int, int, int]] = []
+
+    # #RGB / #RRGGBB
+    for m in re.finditer(r'#([0-9a-fA-F]{3,8})\b', css_text):
+        h = m.group(1)
+        if len(h) == 3:
+            r, g, b = (int(c*2, 16) for c in h)
+        elif len(h) == 4:
+            r, g, b = (int(c*2, 16) for c in h[:3])  # drop alpha
+        elif len(h) in (6, 8):
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        else:
+            continue
+        colors.append((r, g, b))
+
+    # rgb(r,g,b) and rgba(r,g,b,a) — accept whole numbers or percents.
+    for m in re.finditer(r'rgba?\(\s*([^)]+)\)', css_text, re.I):
+        parts = [p.strip() for p in m.group(1).replace('/', ',').split(',')]
+        if len(parts) < 3:
+            continue
+        try:
+            comp = []
+            for p in parts[:3]:
+                if p.endswith('%'):
+                    comp.append(int(round(float(p[:-1]) * 2.55)))
+                else:
+                    comp.append(int(round(float(p))))
+            r, g, b = comp
+            r, g, b = max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b))
+            colors.append((r, g, b))
+        except ValueError:
+            continue
+
+    # hsl(h,s,l) and hsla(...)
+    for m in re.finditer(r'hsla?\(\s*([^)]+)\)', css_text, re.I):
+        parts = [p.strip() for p in m.group(1).replace('/', ',').split(',')]
+        if len(parts) < 3:
+            continue
+        try:
+            h_raw = parts[0].rstrip('deg')
+            h = float(h_raw) / 360.0
+            s = float(parts[1].rstrip('%')) / 100.0
+            l = float(parts[2].rstrip('%')) / 100.0
+            r, g, b = colorsys.hls_to_rgb(h % 1.0, l, s)
+            colors.append((int(round(r*255)), int(round(g*255)), int(round(b*255))))
+        except ValueError:
+            continue
+
+    # Named colours — only match whole tokens, case-insensitive.
+    text_lc = css_text.lower()
+    for name, rgb in CSS_NAMED_COLORS.items():
+        # Cheap pre-filter: skip names whose substring isn't even present.
+        if name not in text_lc:
+            continue
+        for _ in re.finditer(r'(?<![A-Za-z0-9_-])' + re.escape(name)
+                             + r'(?![A-Za-z0-9_-])', text_lc):
+            colors.append(rgb)
+
+    return colors
+
+
+def _fetch_url_styles(url: str, timeout: float = 6.0) -> str:
+    """Fetch the URL's HTML + any same-origin stylesheets it links,
+    and return one combined CSS string. Best-effort — partial failures
+    don't poison the whole result."""
+    import requests
+    from urllib.parse import urljoin, urlparse
+    from bs4 import BeautifulSoup
+
+    headers = {'User-Agent': 'Velour-Strateta/1.0 (+style-palette)'}
+    try:
+        resp = requests.get(url, timeout=timeout, headers=headers,
+                            allow_redirects=True)
+        resp.raise_for_status()
+    except Exception as e:
+        raise ValueError(f'fetch failed: {e}')
+
+    html = resp.text
+    base = resp.url
+    base_host = urlparse(base).netloc
+    soup = BeautifulSoup(html, 'html.parser')
+
+    parts: list[str] = []
+
+    # Inline <style> blocks.
+    for tag in soup.find_all('style'):
+        if tag.string:
+            parts.append(tag.string)
+
+    # Inline style="..." attributes.
+    for tag in soup.find_all(style=True):
+        parts.append(tag.get('style', ''))
+
+    # External <link rel="stylesheet"> — same-host only, capped count.
+    css_links = []
+    for link in soup.find_all('link'):
+        rel = link.get('rel') or []
+        if isinstance(rel, str):
+            rel = [rel]
+        if 'stylesheet' not in [r.lower() for r in rel]:
+            continue
+        href = link.get('href')
+        if not href:
+            continue
+        full = urljoin(base, href)
+        if urlparse(full).netloc == base_host:
+            css_links.append(full)
+        if len(css_links) >= 8:
+            break
+
+    for href in css_links:
+        try:
+            r2 = requests.get(href, timeout=timeout, headers=headers)
+            if r2.ok and 'css' in (r2.headers.get('Content-Type', '').lower()
+                                   or 'css'):
+                parts.append(r2.text)
+        except Exception:
+            continue
+
+    return '\n'.join(parts)
+
+
+def _build_palette_png(colors: list[tuple[int, int, int]],
+                       out_size: int = 256) -> bytes:
+    """Take a list of RGB tuples and render a 256×256 PNG mosaic of
+    them. The mosaic is laid out as a 16×16 grid of 16×16 swatches —
+    Strateta then samples one 16×16 tile per library entry, giving 256
+    palette entries per entry."""
+    import io
+    from collections import Counter
+    from PIL import Image
+
+    if not colors:
+        # Greyscale gradient as a fallback.
+        colors = [(int(255 * i / 255), int(255 * i / 255), int(255 * i / 255))
+                  for i in range(256)]
+
+    # Rank by frequency so dominant page colours land first.
+    cnt = Counter(colors)
+    ranked = [c for c, _ in cnt.most_common()]
+    if len(ranked) >= 256:
+        chosen = ranked[:256]
+    else:
+        # Pad by repeating the ranked list — keeps the most common
+        # colours over-represented.
+        chosen = (ranked * ((256 // len(ranked)) + 1))[:256]
+
+    img = Image.new('RGB', (out_size, out_size))
+    SWATCH = out_size // 16     # 16 px swatch in 256-wide canvas
+    for i, rgb in enumerate(chosen):
+        gx, gy = i % 16, i // 16
+        for y in range(SWATCH):
+            for x in range(SWATCH):
+                img.putpixel((gx * SWATCH + x, gy * SWATCH + y), rgb)
+    buf = io.BytesIO()
+    img.save(buf, 'PNG', optimize=True)
+    return buf.getvalue()
+
+
+@login_required
+@require_POST
+def style_palette(request):
+    """POST {url: ...} → 256×256 PNG palette mosaic from the page's CSS.
+    Same-host stylesheets are followed (capped at 8); external CDNs are
+    skipped to keep the request bounded. Errors render as 400 + plain
+    text so the JS side can show them in the status line."""
+    url = (request.POST.get('url') or '').strip()
+    if not url:
+        return HttpResponse('missing url', status=400, content_type='text/plain')
+    if not (url.startswith('http://') or url.startswith('https://')):
+        url = 'https://' + url
+    try:
+        css = _fetch_url_styles(url)
+    except ValueError as e:
+        return HttpResponse(str(e), status=400, content_type='text/plain')
+    colors = _extract_css_colors(css)
+    if not colors:
+        return HttpResponse('no colours found in page styles',
+                            status=400, content_type='text/plain')
+    png = _build_palette_png(colors)
+    resp = HttpResponse(png, content_type='image/png')
+    # Helpful header so the JS side can echo the count to the user.
+    resp['X-Style-Palette-Count'] = str(len(colors))
+    return resp
+
+
 # ── Phase 1: compile-on-Velour for the ESP32-S3 supermini ─────────
 
 @ensure_csrf_cookie
