@@ -31,6 +31,7 @@ import {
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
     ansi256_rgb,
 } from '../hexnn_engine.mjs';
+import {wireUrlPalette} from '../url_palette.mjs';
 
 
 // ── Layout ─────────────────────────────────────────────────────────
@@ -1057,6 +1058,20 @@ function init() {
             imgInput.value = '';
         });
     }
+
+    // 🌐 URL → palette — server returns a 256×256 mosaic PNG of the
+    // page's CSS colours, fed back through the same image-palette
+    // pipeline as a regular upload.
+    wireUrlPalette({
+        input:      document.getElementById('stratum-url-palette-input'),
+        button:     document.getElementById('stratum-url-palette-btn'),
+        statusEl:   document.getElementById('stratum-hunt-status'),
+        storageKey: 'stratum-url-palette-last',
+        onPalette: ({img}) => {
+            applyImagePalettesToLibrary([img]);
+            paintAll();
+        },
+    });
 
     // Population save — gzipped stratum-population JSON. Snapshots
     // whatever state the library is currently in regardless of how it

@@ -115,6 +115,14 @@
         🖼 Image(s) → palettes
         <input id="image-input" type="file" accept="image/*" multiple style="display:none;">
       </label>
+      <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:4px;overflow:hidden;"
+            title="Fetch a URL server-side, scrape colour values from inline + same-host CSS, and pipe the result through the same image-palette flow as 🖼 Image(s) → palettes. Press Enter or click 🌐 to submit.">
+        <input id="cellular-url-palette-input" type="url"
+               placeholder="https://example.com"
+               style="background:#0d1117;color:#e1e4e8;border:0;padding:0.35rem 0.5rem;font-family:inherit;font-size:0.85rem;min-width:200px;outline:none;">
+        <button id="cellular-url-palette-btn" type="button" class="secondary"
+                style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.35rem 0.6rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+      </span>
     </div>
     <div class="controls" style="margin-top:0.4rem;">
       <button id="hunt-btn"
@@ -237,6 +245,7 @@
 // N=2^11 prototypes — keeps total population RAM bounded).
 import * as PACKED from '{% static_v "s3lab/js/engine.mjs" %}';
 import * as NN from '{% static_v "s3lab/js/hexnn_engine.mjs" %}';
+import {wireUrlPalette} from '{% static_v "s3lab/js/url_palette.mjs" %}';
 const {
   K: PACKED_K_DEFAULT, GBYTES, PAL_BYTES, GRID_W, GRID_H,
   seed_prng, prng,
@@ -1477,6 +1486,22 @@ imageInput.addEventListener('change', async (e) => {
     console.error(err);
   }
   imageInput.value = '';
+});
+
+// 🌐 URL → palette — server returns a 256×256 mosaic PNG of the
+// page's CSS colours; we feed it through the same applyImagePalettes
+// path as a regular image upload.
+wireUrlPalette({
+  input:      document.getElementById('cellular-url-palette-input'),
+  button:     document.getElementById('cellular-url-palette-btn'),
+  statusEl:   gaStatus,
+  storageKey: 'cellular-url-palette-last',
+  onPalette: ({img}) => {
+    applyImagePalettes([img]);
+    renderFull();
+    cv.classList.add('flash');
+    setTimeout(() => cv.classList.remove('flash'), 220);
+  },
 });
 
 // Population save — gzipped cellular-population-v1 JSON. Snapshots

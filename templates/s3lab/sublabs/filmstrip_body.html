@@ -89,6 +89,15 @@
       🖼 Image(s) → palettes
       <input id="filmstrip-image-input" type="file" accept="image/*" multiple style="display:none;">
     </label>
+    <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:3px;overflow:hidden;"
+          title="Fetch a URL server-side, scrape its CSS for colour values, render a 256-swatch mosaic, and run it through the same image-palette flow as 🖼 Image(s) → palettes. Press Enter or click 🌐 to submit.">
+      <input id="filmstrip-url-palette-input" type="url"
+             placeholder="https://example.com"
+             style="background:#0d1117;color:#e1e4e8;border:0;padding:0.25rem 0.5rem;font-family:inherit;font-size:0.82rem;min-width:200px;outline:none;">
+      <button id="filmstrip-url-palette-btn" type="button"
+              style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.25rem 0.55rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+    </span>
+    <span id="filmstrip-url-palette-status" style="color:#8b949e;font-size:0.78rem;margin-left:0.5rem;"></span>
     <button id="pause-btn">Pause</button>
     <button id="step-btn">Step 1</button>
     <button id="clear-history-btn"

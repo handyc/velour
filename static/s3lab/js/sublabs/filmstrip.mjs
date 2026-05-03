@@ -19,6 +19,7 @@ import {
     ansi256_to_css, ansi256_to_rgb,
     random_genome, invent_palette,
 } from '../engine.mjs';
+import {wireUrlPalette} from '../url_palette.mjs';
 
 // ── Tunables ──────────────────────────────────────────────────────────
 
@@ -670,6 +671,20 @@ function init() {
             filmImgInput.value = '';
         });
     }
+
+    // 🌐 URL → palette — fetch a page server-side, scrape its CSS, run
+    // the resulting 256-swatch mosaic through the same strip-palette
+    // pipeline as an image upload.
+    wireUrlPalette({
+        input:      document.getElementById('filmstrip-url-palette-input'),
+        button:     document.getElementById('filmstrip-url-palette-btn'),
+        statusEl:   document.getElementById('filmstrip-url-palette-status'),
+        storageKey: 'filmstrip-url-palette-last',
+        onPalette: ({img}) => {
+            applyImagePalettesToStrip([img]);
+            paintStrip();
+        },
+    });
     document.getElementById('pause-btn').onclick = () => {
         state.running = !state.running;
         document.getElementById('pause-btn').textContent =

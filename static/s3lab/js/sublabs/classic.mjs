@@ -11,6 +11,7 @@ import {
     encode_tail, decode_tail,
     random_genome, identity_genome, invent_palette,
 } from '../engine.mjs';
+import {wireUrlPalette} from '../url_palette.mjs';
 
 // ── State ─────────────────────────────────────────────────────────────
 
@@ -980,6 +981,18 @@ uploadImgPal.addEventListener('change', () => {
         // Reset so picking the same file twice still re-fires the change.
         uploadImgPal.value = '';
     }
+});
+
+// 🌐 URL → palette — server scrapes a page's CSS, returns a 256×256
+// mosaic PNG. We hand it back to the same k-means(K=4) posterizer
+// applyImagePalette uses for image uploads, so the K=4 result lines
+// up with how that flow already behaves.
+wireUrlPalette({
+    input:      document.getElementById('classic-url-palette-input'),
+    button:     document.getElementById('classic-url-palette-btn'),
+    statusEl:   huntStatus,
+    storageKey: 'classic-url-palette-last',
+    onPalette:  ({file}) => applyImagePalette(file),
 });
 
 addOutBtn.addEventListener('click', () => showAddDialog('out'));

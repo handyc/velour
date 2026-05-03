@@ -33,6 +33,7 @@ import {
     PALETTE_MODES, makePaletteRGBA, paletteRGBAToCssHex,
     ansi256_rgb,
 } from '../hexnn_engine.mjs';
+import {wireUrlPalette} from '../url_palette.mjs';
 
 
 // ── Layout ─────────────────────────────────────────────────────────
@@ -1031,76 +1032,21 @@ function init() {
         });
     }
 
-    // 🌐 URL → palette. Same end-state as image upload, but the
-    // server fetches the URL, scrapes colour values from inline +
-    // same-host CSS, and returns a 256×256 mosaic PNG which we then
-    // run through the existing image-palette pipeline.
-    const urlBtn   = document.getElementById('strateta-url-palette-btn');
-    const urlInput = document.getElementById('strateta-url-palette-input');
-    const URL_KEY  = 'strateta-url-palette-last';
-    if (urlBtn && urlInput) {
-        urlInput.value = localStorage.getItem(URL_KEY) || '';
-        const submit = async () => {
-            const url = (urlInput.value || '').trim();
-            if (!url) { urlInput.focus(); return; }
-            localStorage.setItem(URL_KEY, url);
-            const status = document.getElementById('strateta-hunt-status');
-            if (status) {
-                status.style.color = '#8b949e';
-                status.textContent = `fetching ${url}…`;
-            }
-            urlBtn.disabled = true;
-            try {
-                const fd = new FormData();
-                fd.append('url', url);
-                const m = document.cookie.match(/(?:^|; )csrftoken=([^;]+)/);
-                const csrf = m ? decodeURIComponent(m[1]) : '';
-                const resp = await fetch('/s3lab/style-palette/', {
-                    method: 'POST',
-                    headers: {'X-CSRFToken': csrf},
-                    body: fd,
-                    credentials: 'same-origin',
-                });
-                if (!resp.ok) {
-                    const txt = await resp.text();
-                    throw new Error(txt || `HTTP ${resp.status}`);
-                }
-                const count = resp.headers.get('X-Style-Palette-Count') || '?';
-                const blob = await resp.blob();
-                const objUrl = URL.createObjectURL(blob);
-                const img = await new Promise((resolve, reject) => {
-                    const im = new Image();
-                    im.onload  = () => resolve(im);
-                    im.onerror = () => reject(new Error('palette decode failed'));
-                    im.src = objUrl;
-                });
-                URL.revokeObjectURL(objUrl);
-                let host;
-                try { host = new URL(url, window.location.href).host; }
-                catch (_) { host = url; }
-                applyImagePalettesToLibrary([img], [{name: `url:${host}`,
-                                                     size: blob.size}]);
-                paintSourceRail();
-                paintLibrary();
-                if (status) {
-                    status.style.color = '#3fb950';
-                    status.textContent = `palette from ${host} (${count} CSS colours found)`;
-                }
-            } catch (err) {
-                if (status) {
-                    status.style.color = '#cf222e';
-                    status.textContent = `URL palette failed: ${err.message || err}`;
-                }
-                console.error(err);
-            } finally {
-                urlBtn.disabled = false;
-            }
-        };
-        urlBtn.addEventListener('click', submit);
-        urlInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); submit(); }
-        });
-    }
+    // 🌐 URL → palette. Same end-state as image upload — the server
+    // returns a 256×256 mosaic PNG that we feed back through
+    // applyImagePalettesToLibrary.
+    wireUrlPalette({
+        input:      document.getElementById('strateta-url-palette-input'),
+        button:     document.getElementById('strateta-url-palette-btn'),
+        statusEl:   document.getElementById('strateta-hunt-status'),
+        storageKey: 'strateta-url-palette-last',
+        onPalette: ({img, host, blob}) => {
+            applyImagePalettesToLibrary([img], [{name: `url:${host}`,
+                                                 size: blob.size}]);
+            paintSourceRail();
+            paintLibrary();
+        },
+    });
 
     const saveBtn = document.getElementById('strateta-save-population-btn');
     if (saveBtn) {

@@ -71,6 +71,14 @@
         🖼 Image → palette
         <input id="upload-image-palette" type="file" accept="image/*">
       </label>
+      <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:4px;overflow:hidden;"
+            title="Fetch a URL server-side, scrape colours from inline + same-host CSS, render a 256-swatch mosaic, then run the same k-means(K=4) posterizer 🖼 Image → palette uses. Quick way to grab a site's colour scheme. Press Enter or click 🌐 to submit.">
+        <input id="classic-url-palette-input" type="url"
+               placeholder="https://example.com"
+               style="background:#0d1117;color:#e1e4e8;border:0;padding:0.35rem 0.5rem;font-family:inherit;font-size:0.85rem;min-width:200px;outline:none;">
+        <button id="classic-url-palette-btn" type="button"
+                style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.35rem 0.6rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+      </span>
       <span id="send-status" style="font-size:0.85em;color:#8b949e;"></span>
     </div>
   </div>

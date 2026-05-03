@@ -78,6 +78,14 @@
     🖼 Image(s) → palettes
     <input id="stratum-image-input" type="file" accept="image/*" multiple style="display:none;">
   </label>
+  <span style="display:inline-flex;align-items:stretch;gap:0;border:1px solid #30363d;border-radius:3px;overflow:hidden;"
+        title="Fetch a URL server-side, scrape colour values from inline + same-host CSS, render a 256-swatch mosaic, and feed it through the same image-palette flow as 🖼 Image(s) → palettes. Press Enter or click 🌐 to submit.">
+    <input id="stratum-url-palette-input" type="url"
+           placeholder="https://example.com"
+           style="background:#0d1117;color:#e1e4e8;border:0;padding:0.25rem 0.5rem;font-family:inherit;font-size:0.82rem;min-width:200px;outline:none;">
+    <button id="stratum-url-palette-btn" type="button"
+            style="background:#21262d;color:#c9d1d9;border:0;border-left:1px solid #30363d;padding:0.25rem 0.55rem;cursor:pointer;font-family:inherit;font-size:0.85rem;">🌐</button>
+  </span>
   <label class="checkbox-label" title="Click-to-download exports compress the JSON via the browser's gzip stream — typically ~10× smaller (≈80 KB instead of 800 KB) since hexnn-genome-v1 has lots of repeated small ints.">
     <input type="checkbox" id="stratum-gzip-cb" checked>
     gzip downloads
