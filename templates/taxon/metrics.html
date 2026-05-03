@@ -9,15 +9,39 @@
   <h2 style="font-family:ui-monospace,Menlo,monospace; margin-top:1rem;">
     Landscape
     <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
-      — λ vs activity, {{ total_points }} rule{{ total_points|pluralize }}, coloured by class
+      — {{ x_meta.label }} vs {{ y_meta.label }}, {{ total_points }} rule{{ total_points|pluralize }}, coloured by class
     </span>
   </h2>
   <p style="color:#6e7681; font-size:0.78rem; margin:0.2rem 0 0.6rem 0;">
-    Each dot is one rule: x = Langton λ (fraction of rule outputs that
-    differ from self-state), y = Activity rate (mean per-tick fraction
-    of cells that changed). The class-4 narrow band tends to live at
-    moderate λ + moderate activity. Click a dot to open the rule.
+    Each dot is one rule. {{ x_meta.label }}: {{ x_meta.blurb }}
+    {{ y_meta.label }}: {{ y_meta.blurb }} Click a dot to open the rule.
   </p>
+
+  <form method="get" style="margin:0.4rem 0 0.7rem 0; display:flex; gap:0.5rem;
+                            align-items:center; flex-wrap:wrap;
+                            font-family:ui-monospace,Menlo,monospace; font-size:0.82rem;">
+    <span style="color:#6e7681;">x</span>
+    <select name="x" onchange="this.form.submit()"
+            style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                   padding:0.25rem 0.4rem; border-radius:3px; font-family:inherit;">
+      {% for m in metrics %}
+        <option value="{{ m.name }}" {% if m.name == x_metric %}selected{% endif %}>{{ m.label }}</option>
+      {% endfor %}
+    </select>
+    <span style="color:#6e7681;">y</span>
+    <select name="y" onchange="this.form.submit()"
+            style="background:#0d1117; color:#e1e4e8; border:1px solid #30363d;
+                   padding:0.25rem 0.4rem; border-radius:3px; font-family:inherit;">
+      {% for m in metrics %}
+        <option value="{{ m.name }}" {% if m.name == y_metric %}selected{% endif %}>{{ m.label }}</option>
+      {% endfor %}
+    </select>
+    <noscript>
+      <button style="background:#1f6feb; color:#fff; border:0;
+              padding:0.3rem 0.7rem; border-radius:3px; cursor:pointer;
+              font-family:inherit;">apply</button>
+    </noscript>
+  </form>
 
   {% if points %}
   <div style="background:#161b22; border:1px solid #30363d; border-radius:5px;
@@ -30,44 +54,38 @@
       <rect x="60" y="30" width="560" height="450"
             fill="#0d1117" stroke="#30363d"/>
 
-      {% comment %}
-      Gridlines at 0, 0.25, 0.5, 0.75, 1.0 on both axes.
-      x px: 60, 200, 340, 480, 620.
-      y px: 480, 367.5, 255, 142.5, 30 (inverted).
-      {% endcomment %}
+      {# Gridlines + tick labels — server-precomputed for both axes. #}
       <g stroke="#21262d" stroke-width="1">
-        <line x1="200" y1="30" x2="200" y2="480"/>
-        <line x1="340" y1="30" x2="340" y2="480"/>
-        <line x1="480" y1="30" x2="480" y2="480"/>
-        <line x1="60"  y1="367.5" x2="620" y2="367.5"/>
-        <line x1="60"  y1="255"   x2="620" y2="255"/>
-        <line x1="60"  y1="142.5" x2="620" y2="142.5"/>
+        {% for t in x_ticks %}
+          {% if not forloop.first and not forloop.last %}
+            <line x1="{{ t.pos }}" y1="30" x2="{{ t.pos }}" y2="480"/>
+          {% endif %}
+        {% endfor %}
+        {% for t in y_ticks %}
+          {% if not forloop.first and not forloop.last %}
+            <line x1="60" y1="{{ t.pos }}" x2="620" y2="{{ t.pos }}"/>
+          {% endif %}
+        {% endfor %}
       </g>
 
-      {# Tick labels — x. #}
       <g fill="#8b949e" font-size="11" text-anchor="middle">
-        <text x="60"  y="498">0.0</text>
-        <text x="200" y="498">0.25</text>
-        <text x="340" y="498">0.5</text>
-        <text x="480" y="498">0.75</text>
-        <text x="620" y="498">1.0</text>
+        {% for t in x_ticks %}
+          <text x="{{ t.pos }}" y="498">{{ t.label }}</text>
+        {% endfor %}
       </g>
-      {# Tick labels — y. #}
       <g fill="#8b949e" font-size="11" text-anchor="end">
-        <text x="54" y="484">0.0</text>
-        <text x="54" y="371">0.25</text>
-        <text x="54" y="259">0.5</text>
-        <text x="54" y="146">0.75</text>
-        <text x="54" y="34">1.0</text>
+        {% for t in y_ticks %}
+          {# +4 shim so the label sits on the gridline visually. #}
+          <text x="54" y="{{ t.pos }}" dy="4">{{ t.label }}</text>
+        {% endfor %}
       </g>
 
-      {# Axis titles. #}
       <text x="340" y="525" fill="#c9d1d9" font-size="13" text-anchor="middle">
-        Langton λ
+        {{ x_meta.label }}
       </text>
       <text x="20" y="255" fill="#c9d1d9" font-size="13" text-anchor="middle"
             transform="rotate(-90 20 255)">
-        Activity rate
+        {{ y_meta.label }}
       </text>
 
       {# Points. #}
@@ -76,7 +94,7 @@
         <a xlink:href="{% url 'taxon:rule_detail' slug=p.slug %}">
           <circle cx="{{ p.cx }}" cy="{{ p.cy }}" r="2.7"
                   fill="{{ p.color }}" fill-opacity="0.78" stroke="none">
-            <title>{{ p.slug }} · λ={{ p.lam|floatformat:3 }} · act={{ p.act|floatformat:3 }}{% if p.class_n %} · class {{ p.class_n }}{% else %} · unclassified{% endif %}</title>
+            <title>{{ p.slug }} · {{ x_meta.label }}={{ p.xv|floatformat:3 }} · {{ y_meta.label }}={{ p.yv|floatformat:3 }}{% if p.class_n %} · class {{ p.class_n }}{% else %} · unclassified{% endif %}</title>
           </circle>
         </a>
       {% endfor %}

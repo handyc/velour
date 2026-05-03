@@ -179,15 +179,28 @@ def class_view(request, n: int):
 
 @login_required
 def metrics_view(request):
-    """Metrics page — table of metric definitions plus a λ-vs-activity
-    scatter coloured by Wolfram class. Each rule contributes its
-    *latest* langton_lambda and activity_rate measurements, and the
-    most recent Classification colours the dot."""
-    # One pass through MetricRun gives us the latest λ + activity per
-    # rule. Order by computed_at so the dict ends up holding the newest.
+    """Metrics page — table of metric definitions plus a configurable
+    scatter coloured by Wolfram class. ?x= and ?y= each pick one of
+    the five metrics; defaults are langton_lambda × activity_rate.
+    Each rule contributes its *latest* measurement of the chosen
+    metrics; the most recent Classification colours the dot."""
+    metrics_meta = {m['name']: m for m in list_metrics()}
+
+    x_metric = request.GET.get('x', 'langton_lambda')
+    y_metric = request.GET.get('y', 'activity_rate')
+    if x_metric not in metrics_meta:
+        x_metric = 'langton_lambda'
+    if y_metric not in metrics_meta:
+        y_metric = 'activity_rate'
+    x_meta = metrics_meta[x_metric]
+    y_meta = metrics_meta[y_metric]
+
+    # One pass per axis. Order by computed_at so the dict ends up
+    # holding the newest value per rule.
+    needed = {x_metric, y_metric}
     latest = {}
     for mr in (MetricRun.objects
-               .filter(metric__in=('langton_lambda', 'activity_rate'))
+               .filter(metric__in=needed)
                .order_by('computed_at')
                .values('rule_id', 'metric', 'value')):
         latest.setdefault(mr['rule_id'], {})[mr['metric']] = mr['value']
@@ -202,35 +215,68 @@ def metrics_view(request):
     # Map rule_id → slug so each dot can link to its detail page.
     slugs = dict(Rule.objects.values_list('id', 'slug'))
 
-    # SVG plot geometry — domain [0, 1] × [0, 1] → pixel area below.
+    # SVG plot geometry — fixed pixel area; the *data* domain comes
+    # from each axis metric's range_hint.
     PLOT_X0, PLOT_X1 = 60, 620
     PLOT_Y0, PLOT_Y1 = 30, 480
     plot_w = PLOT_X1 - PLOT_X0
     plot_h = PLOT_Y1 - PLOT_Y0
 
+    x_min, x_max = x_meta['range']
+    y_min, y_max = y_meta['range']
+    x_span = (x_max - x_min) or 1.0
+    y_span = (y_max - y_min) or 1.0
+
     points = []
     for rid, vals in latest.items():
-        lam = vals.get('langton_lambda')
-        act = vals.get('activity_rate')
-        if lam is None or act is None:
+        xv = vals.get(x_metric)
+        yv = vals.get(y_metric)
+        if xv is None or yv is None:
             continue
         slug = slugs.get(rid)
         if slug is None:
             continue
         n = cls.get(rid)
-        # Clamp to [0, 1] in case a metric briefly exceeds the band.
-        lx = max(0.0, min(1.0, float(lam)))
-        ay = max(0.0, min(1.0, float(act)))
-        cx = PLOT_X0 + lx * plot_w
-        cy = PLOT_Y1 - ay * plot_h           # invert y: 0 at bottom
+        # Clamp to declared range; outliers pin to the edge rather than
+        # exit the plot area.
+        xc = max(x_min, min(x_max, float(xv)))
+        yc = max(y_min, min(y_max, float(yv)))
+        cx = PLOT_X0 + (xc - x_min) / x_span * plot_w
+        cy = PLOT_Y1 - (yc - y_min) / y_span * plot_h
         points.append({
             'slug': slug,
-            'lam':  lam, 'act': act,
+            'xv':   xv, 'yv': yv,
             'class_n': n,
             'color':   class_color(n) if n else '#586069',
             'cx': round(cx, 1),
             'cy': round(cy, 1),
         })
+
+    # Pre-bake five evenly-spaced ticks for each axis so the template
+    # doesn't have to do arithmetic.
+    def axis_ticks(lo, hi, plot_lo, plot_hi, axis):
+        out = []
+        for i in range(5):
+            f = i / 4.0
+            v = lo + f * (hi - lo)
+            px = plot_lo + f * (plot_hi - plot_lo)
+            # Format: drop trailing zeros, keep small floats readable.
+            if abs(v) >= 10:
+                lbl = f'{v:.0f}'
+            elif abs(v - round(v)) < 1e-9:
+                lbl = f'{v:.1f}'
+            else:
+                lbl = f'{v:.2f}'
+            out.append({'pos': round(px, 1), 'label': lbl})
+        return out
+
+    x_ticks = axis_ticks(x_min, x_max, PLOT_X0, PLOT_X1, 'x')
+    # Y axis ticks: visual top is y=1 (high value); we built [0..4]
+    # bottom-up, so reverse positions for display.
+    y_ticks_raw = axis_ticks(y_min, y_max, PLOT_Y0, PLOT_Y1, 'y')
+    # Flip y so the highest data value is at the top of the plot.
+    y_ticks = [{'pos': PLOT_Y0 + PLOT_Y1 - t['pos'], 'label': t['label']}
+               for t in y_ticks_raw]
 
     # Per-class counts + pre-baked y-positions for the SVG legend. The
     # legend sits inside the plot area at top-right; rows are 20 px apart.
@@ -258,6 +304,9 @@ def metrics_view(request):
         'legend': legend,
         'legend_box': legend_box,
         'total_points': len(points),
+        'x_meta': x_meta, 'y_meta': y_meta,
+        'x_metric': x_metric, 'y_metric': y_metric,
+        'x_ticks': x_ticks, 'y_ticks': y_ticks,
     })
 
 
