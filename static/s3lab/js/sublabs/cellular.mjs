@@ -107,6 +107,7 @@ const state = {
     roundHandle: null,
     rounds: 0,
     selectionMechanic: 'tournament',  // future: 'crossover' | 'tide'
+    sourceImages: [],               // Array<{name, dataURL}> of last image/url import
 };
 
 // ── Boot ───────────────────────────────────────────────────────────
@@ -401,10 +402,69 @@ function nearestAnsi256(r, g, b) {
     return best;
 }
 
-function applyImagePalettes(imgs) {
+function makeImageThumbnail(img) {
+    const TH = 64;
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const side = Math.min(w, h);
+    const cx = ((w - side) / 2) | 0, cy = ((h - side) / 2) | 0;
+    const off = document.createElement('canvas');
+    off.width = TH; off.height = TH;
+    const ctx = off.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, cx, cy, side, side, 0, 0, TH, TH);
+    return off.toDataURL('image/png');
+}
+
+function paintSourceRail() {
+    const rail = document.getElementById('cellular-source-rail');
+    if (!rail) return;
+    rail.innerHTML = '';
+    if (!state.sourceImages.length) {
+        rail.style.display = 'none';
+        return;
+    }
+    rail.style.display = '';
+    // Tiny "Sources:" label up front so the rail is self-explanatory.
+    const lbl = document.createElement('span');
+    lbl.textContent = `Sources (${state.sourceImages.length})`;
+    lbl.style.cssText = 'color:#6e7681; font-size:0.7rem; ' +
+                        'margin-right:0.6rem; vertical-align:top; ' +
+                        'display:inline-block; padding-top:1.5rem;';
+    rail.appendChild(lbl);
+    for (const im of state.sourceImages) {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:inline-block; margin-right:0.4rem; ' +
+                             'vertical-align:top; text-align:center; ' +
+                             'font-size:0.7rem; color:#8b949e;';
+        const img = document.createElement('img');
+        img.src = im.dataURL;
+        img.style.cssText = 'width:64px; height:64px; object-fit:cover; ' +
+                            'border:1px solid #30363d; border-radius:3px; ' +
+                            'image-rendering:pixelated; display:block; ' +
+                            'margin:0 auto;';
+        img.title = im.name;
+        wrap.appendChild(img);
+        const cap = document.createElement('div');
+        cap.textContent = im.name.length > 14 ? im.name.slice(0, 13) + '…' : im.name;
+        cap.style.cssText = 'max-width:64px; overflow:hidden; ' +
+                            'white-space:nowrap; text-overflow:ellipsis; ' +
+                            'margin-top:0.15rem;';
+        wrap.appendChild(cap);
+        rail.appendChild(wrap);
+    }
+}
+
+function applyImagePalettes(imgs, names) {
     if (!Array.isArray(imgs)) imgs = [imgs];
     imgs = imgs.filter(Boolean);
     if (imgs.length === 0) return;
+
+    // Capture thumbnails for the source rail. ``names`` is an optional
+    // parallel array (used by URL → palette to surface "url:host").
+    state.sourceImages = imgs.map((img, i) => ({
+        name:    (names && names[i]) || `image-${i+1}`,
+        dataURL: makeImageThumbnail(img),
+    }));
 
     // K=4 fixed in this sublab — each cell wants 4 pixels, laid out in
     // a 2×2 region of the per-cell crop. Plane is 32×32 (16 cells × 2).
@@ -486,6 +546,8 @@ function init() {
     };
     document.getElementById('reset-btn').onclick = () => {
         bootstrap();
+        state.sourceImages = [];
+        paintSourceRail();
         document.getElementById('cellular-rounds').textContent = 0;
         paintGrid();
     };
@@ -616,7 +678,8 @@ function init() {
             setStatus(`loading ${files.length} image${files.length > 1 ? 's' : ''}…`);
             try {
                 const imgs = await Promise.all(files.map(loadImageFile));
-                applyImagePalettes(imgs);
+                applyImagePalettes(imgs, files.map(f => f.name));
+                paintSourceRail();
                 paintGrid();
                 setStatus(files.length === 1
                     ? 'palettes loaded'
@@ -632,14 +695,17 @@ function init() {
 
     // 🌐 URL → palette — server fetches the page, scrapes its CSS for
     // colours, returns a 256×256 mosaic PNG. We feed it through the
-    // same applyImagePalettes path.
+    // same applyImagePalettes path. The mosaic itself becomes the
+    // thumbnail in the source rail — it shows the colour signature
+    // we extracted, which is what's actually driving the palettes.
     wireUrlPalette({
         input:      document.getElementById('cellular-url-palette-input'),
         button:     document.getElementById('cellular-url-palette-btn'),
         statusEl:   document.getElementById('export-status'),
         storageKey: 'cellular-url-palette-last',
-        onPalette: ({img}) => {
-            applyImagePalettes([img]);
+        onPalette: ({img, host}) => {
+            applyImagePalettes([img], [`url:${host}`]);
+            paintSourceRail();
             paintGrid();
         },
     });
