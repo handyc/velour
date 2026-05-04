@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Forge — gate catalog{% endblock %}
+
+{% block content %}
+<div style="max-width:1200px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<p style="margin-bottom:0.2rem;font-size:0.82rem;">
+  <a href="{% url 'forge:list' %}" style="color:#58a6ff;">← Forge</a>
+</p>
+
+<h1 style="margin-top:0;">Gate catalog
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — circuits with at least one fitness=1.0 evolution run
+  </span>
+</h1>
+<p style="color:#6e7681;font-size:0.78rem;max-width:60rem;line-height:1.4;">
+  Any circuit you've evolved to a perfect score on a target gate is
+  a verified gate. Use these as building blocks: clone one to a new
+  circuit and modify it, or wire several side by side to compose
+  larger logic. Reverification keeps the catalog honest — re-run the
+  GA after edits.
+</p>
+
+{% if gates %}
+<table style="width:100%;border-collapse:collapse;font-size:0.85rem;
+       background:#0d1117;border:1px solid #30363d;border-radius:6px;
+       overflow:hidden;">
+  <thead>
+    <tr style="background:#161b22;color:#8b949e;font-size:0.72rem;
+        text-transform:uppercase;letter-spacing:0.05em;">
+      <th style="text-align:left;padding:0.4rem 0.6rem;">name</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">type</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">size</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">fitness</th>
+      <th style="text-align:left;padding:0.4rem 0.6rem;">verified</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for g in gates %}
+    <tr style="border-top:1px solid #21262d;">
+      <td style="padding:0.4rem 0.6rem;">
+        <a href="{% url 'forge:detail' g.circuit.slug %}"
+           style="color:#c9d1d9;text-decoration:none;font-weight:500;">
+          {{ g.circuit.name }}
+        </a>
+      </td>
+      <td style="padding:0.4rem 0.6rem;">
+        <span style="background:#1f6feb;color:#fff;padding:0.1rem 0.5rem;
+              border-radius:3px;font-size:0.72rem;font-weight:600;">
+          {{ g.gate_type }}
+        </span>
+      </td>
+      <td style="padding:0.4rem 0.6rem;color:#8b949e;font-size:0.78rem;">
+        {{ g.circuit.width }}×{{ g.circuit.height }}
+      </td>
+      <td style="padding:0.4rem 0.6rem;color:#7ee787;font-weight:600;">
+        {{ g.fitness|floatformat:2 }}
+      </td>
+      <td style="padding:0.4rem 0.6rem;color:#8b949e;font-size:0.78rem;">
+        {{ g.verified_at|default:"—"|date:"M d H:i" }}
+      </td>
+      <td style="padding:0.4rem 0.6rem;text-align:right;">
+        <form method="post" action="{% url 'forge:clone' g.circuit.slug %}"
+              style="display:inline;">
+          {% csrf_token %}
+          <button type="submit" style="background:#21262d;color:#c9d1d9;
+                  border:1px solid #30363d;padding:0.2rem 0.6rem;
+                  cursor:pointer;font-size:0.72rem;font-family:inherit;">
+            ⎘ Clone
+          </button>
+        </form>
+        <a href="{% url 'forge:evolve' g.circuit.slug %}"
+           style="background:#21262d;color:#a371f7;border:1px solid #30363d;
+           padding:0.2rem 0.6rem;text-decoration:none;font-size:0.72rem;
+           margin-left:0.2rem;display:inline-block;">
+          ▶ Evolve
+        </a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#6e7681;font-size:0.85rem;">
+  No verified gates yet. Open a circuit, click <em>Evolve →</em>, set a
+  target, and run the GA. When it hits fitness 1.0 the circuit shows
+  up here automatically.
+</p>
+{% endif %}
+
+</div>
+{% endblock %}

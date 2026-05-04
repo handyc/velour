@@ -33,6 +33,63 @@ def circuit_list(request):
 
 
 @login_required
+def gate_list(request):
+    """Catalogue of verified gates — circuits with at least one
+    EvolutionRun at fitness >= 1.0. The annotation buys us per-gate
+    type, fitness, last verification time without an N+1."""
+    from django.db.models import Max, Q
+    qs = (Circuit.objects
+          .filter(evolution_runs__best_fitness__gte=1.0 - 1e-9)
+          .annotate(
+              best_run_fitness=Max('evolution_runs__best_fitness',
+                                   filter=Q(evolution_runs__status='done')),
+              last_verified=Max('evolution_runs__finished_at',
+                                filter=Q(evolution_runs__best_fitness__gte=1.0 - 1e-9)),
+          )
+          .distinct()
+          .order_by('-last_verified', '-updated_at'))
+
+    gates = []
+    for c in qs:
+        # Derive gate type from the most recent perfect run's target preset.
+        run = (c.evolution_runs
+               .filter(best_fitness__gte=1.0 - 1e-9)
+               .order_by('-finished_at').first())
+        gate_type = '?'
+        if run and run.target:
+            gate_type = run.target.get('preset') or '?'
+        gates.append({
+            'circuit':  c,
+            'gate_type': gate_type,
+            'fitness':  c.best_run_fitness or 0.0,
+            'verified_at': c.last_verified,
+            'best_run': run,
+        })
+    return render(request, 'forge/gates.html', {'gates': gates})
+
+
+@login_required
+@require_POST
+def circuit_clone(request, slug):
+    """Make a copy of `circuit` so the user can iterate without
+    overwriting a verified gate."""
+    src = get_object_or_404(Circuit, slug=slug)
+    name = request.POST.get('name', '').strip() or f'{src.name} (copy)'
+    dup = Circuit.objects.create(
+        name=name[:160],
+        description=src.description,
+        width=src.width, height=src.height,
+        palette=list(src.palette),
+        grid=[row[:] for row in src.grid],
+        rule_sha1=src.rule_sha1,
+        rule_name=src.rule_name,
+        ports=[dict(p) for p in (src.ports or [])],
+        target=dict(src.target or {}),
+    )
+    return redirect('forge:detail', slug=dup.slug)
+
+
+@login_required
 def circuit_new(request):
     """Make a blank 16x16 wireworld circuit and bounce to its editor."""
     name = request.POST.get('name', '').strip() or 'untitled circuit'
