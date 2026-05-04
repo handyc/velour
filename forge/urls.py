@@ -7,6 +7,7 @@ app_name = 'forge'
 urlpatterns = [
     path('',                  views.circuit_list,    name='list'),
     path('gates/',            views.gate_list,       name='gates'),
+    path('gates.json',        views.gates_json,      name='gates_json'),
     path('new/',              views.circuit_new,     name='new'),
     path('<slug:slug>/',      views.circuit_detail,  name='detail'),
     path('<slug:slug>/clone/', views.circuit_clone,  name='clone'),

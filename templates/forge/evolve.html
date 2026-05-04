@@ -30,11 +30,19 @@
         border-radius:6px;padding:0.7rem 0.9rem;display:grid;
         grid-template-columns:1fr 1fr;gap:0.5rem 0.7rem;font-size:0.78rem;">
     <label style="grid-column:1/3;color:#8b949e;">Target preset
-      <select name="preset" style="display:block;width:100%;
+      <select name="preset" id="ga-preset" style="display:block;width:100%;
               background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
               padding:0.25rem;">
-        <option>AND</option><option>OR</option><option>XOR</option>
-        <option>NAND</option><option>NOR</option><option>XNOR</option>
+        <optgroup label="2-input single-output">
+          <option>AND</option><option>OR</option><option>XOR</option>
+          <option>NAND</option><option>NOR</option><option>XNOR</option>
+        </optgroup>
+        <optgroup label="multi-output">
+          <option>HALF_ADDER</option>
+          <option>FULL_ADDER</option>
+          <option>DECODE_1</option>
+          <option>DECODE_2</option>
+        </optgroup>
       </select>
     </label>
     <label style="color:#8b949e;">inputs
@@ -192,6 +200,28 @@ const ports = JSON.parse(document.getElementById('circuit-ports').textContent) |
 
 let activeRunId = null;
 let pollTimer = null;
+
+// Same defaults as the score panel — keeps the two forms in sync.
+const PRESET_PORTS_GA = {
+    'AND':        {inputs:'A,B',   outputs:'Q'},
+    'OR':         {inputs:'A,B',   outputs:'Q'},
+    'XOR':        {inputs:'A,B',   outputs:'Q'},
+    'NAND':       {inputs:'A,B',   outputs:'Q'},
+    'NOR':        {inputs:'A,B',   outputs:'Q'},
+    'XNOR':       {inputs:'A,B',   outputs:'Q'},
+    'HALF_ADDER': {inputs:'A,B',   outputs:'Q,R'},
+    'FULL_ADDER': {inputs:'A,B,C', outputs:'Q,R'},
+    'DECODE_1':   {inputs:'A',     outputs:'Q,R'},
+    'DECODE_2':   {inputs:'A,B',   outputs:'Q,R,S,T'},
+};
+document.getElementById('ga-preset').addEventListener('change', e => {
+    const p = e.target.value;
+    const f = document.getElementById('ga-form');
+    if (PRESET_PORTS_GA[p]){
+        f.querySelector('[name="inputs"]').value  = PRESET_PORTS_GA[p].inputs;
+        f.querySelector('[name="outputs"]').value = PRESET_PORTS_GA[p].outputs;
+    }
+});
 
 document.getElementById('ga-form').addEventListener('submit', async (e) => {
     e.preventDefault();

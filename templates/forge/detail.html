@@ -97,6 +97,46 @@
 
     <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
 
+    <details style="font-size:0.78rem;">
+      <summary style="cursor:pointer;color:#8b949e;">Import gate</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;
+           margin-top:0.3rem;color:#8b949e;font-size:0.72rem;">
+        <label style="grid-column:1/3;">gate
+          <select id="gate-select" style="width:100%;background:#0d1117;
+                  color:#c9d1d9;border:1px solid #30363d;padding:0.2rem;">
+            <option value="">— loading…</option>
+          </select>
+        </label>
+        <label>anchor x
+          <input id="gate-x" type="number" min="0" max="63" value="0"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.2rem;">
+        </label>
+        <label>anchor y
+          <input id="gate-y" type="number" min="0" max="63" value="0"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.2rem;">
+        </label>
+        <label style="grid-column:1/3;">prefix (renames ports)
+          <input id="gate-prefix" type="text" value="g1_" maxlength="8"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.2rem;">
+        </label>
+        <button id="gate-stamp" type="button" style="grid-column:1/3;
+                background:#8957e5;color:#fff;border:0;
+                padding:0.3rem 0.6rem;cursor:pointer;font-weight:600;
+                font-size:0.72rem;border-radius:3px;">Stamp into circuit</button>
+      </div>
+      <div style="color:#6e7681;font-size:0.65rem;margin-top:0.3rem;
+           line-height:1.4;">
+        Wire cells (color 1) of the gate are OR'd into the design at
+        (x, y). Ports get the prefix prepended to their names so they
+        don't collide. Save when ready.
+      </div>
+    </details>
+
+    <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
+
     <div>
       <span style="color:#8b949e;">Ports</span>
       <div id="ports-list" style="margin-top:0.3rem;display:flex;
@@ -742,6 +782,81 @@ function applyPreset(name){
 
 document.getElementById('t-preset').addEventListener('change', e => {
     applyPreset(e.target.value);
+});
+
+// ---------- gate stamping ----------
+let gateCache = null;
+async function loadGates(){
+    try {
+        const r = await fetch('{% url "forge:gates_json" %}');
+        const data = await r.json();
+        gateCache = data.gates || [];
+    } catch (e) { gateCache = []; }
+    const sel = document.getElementById('gate-select');
+    sel.innerHTML = '';
+    if (!gateCache.length){
+        const o = document.createElement('option');
+        o.textContent = '(no verified gates yet — evolve some)';
+        sel.appendChild(o);
+        document.getElementById('gate-stamp').disabled = true;
+        return;
+    }
+    for (const g of gateCache){
+        const o = document.createElement('option');
+        o.value = g.slug;
+        o.textContent = `${g.gate_type} · ${g.name} · ${g.width}×${g.height}`;
+        sel.appendChild(o);
+    }
+}
+loadGates();
+
+document.getElementById('gate-stamp').addEventListener('click', () => {
+    if (trajectory){
+        alert('Reset to design mode before stamping.');
+        return;
+    }
+    if (!gateCache || !gateCache.length) return;
+    const slug = document.getElementById('gate-select').value;
+    const gate = gateCache.find(g => g.slug === slug);
+    if (!gate) return;
+    const ax = parseInt(document.getElementById('gate-x').value, 10) || 0;
+    const ay = parseInt(document.getElementById('gate-y').value, 10) || 0;
+    const prefix = (document.getElementById('gate-prefix').value || 'g_')
+        .slice(0, 8);
+
+    // Bounds check.
+    if (ax < 0 || ay < 0 || ax + gate.width > W || ay + gate.height > H){
+        alert(`Gate ${gate.width}×${gate.height} doesn't fit at `
+            + `(${ax},${ay}) inside ${W}×${H}.`);
+        return;
+    }
+    // OR wire cells (value 1) into the design grid; leave existing
+    // wires alone. Don't carry over heads/tails — they're transient.
+    let stamped = 0;
+    for (let y = 0; y < gate.height; y++){
+        for (let x = 0; x < gate.width; x++){
+            if ((gate.grid[y][x] | 0) === 1 && design[ay + y][ax + x] === 0){
+                design[ay + y][ax + x] = 1;
+                stamped++;
+            }
+        }
+    }
+    // Prefix-add gate ports, offset by anchor.
+    for (const p of (gate.ports || [])){
+        ports.push({
+            role: p.role,
+            name: prefix + (p.name || ''),
+            x: p.x + ax,
+            y: p.y + ay,
+            schedule: [],
+        });
+    }
+    paintGrid(design);
+    drawPorts();
+    updatePortsList();
+    const status = document.getElementById('save-status');
+    status.textContent = `stamped ${gate.gate_type}: +${stamped} cells, +${(gate.ports||[]).length} ports. Save to commit.`;
+    status.style.color = '#a371f7';
 });
 
 // Restore saved target on page load: preset, inputs, outputs, ticks,

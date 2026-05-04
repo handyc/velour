@@ -33,6 +33,37 @@ def circuit_list(request):
 
 
 @login_required
+def gates_json(request):
+    """Verified-gate catalog as JSON for the import-gate UI."""
+    from django.db.models import Max, Q
+    qs = (Circuit.objects
+          .filter(evolution_runs__best_fitness__gte=1.0 - 1e-9)
+          .annotate(best_run_fitness=Max(
+              'evolution_runs__best_fitness',
+              filter=Q(evolution_runs__status='done')))
+          .distinct()
+          .order_by('-updated_at'))
+    out = []
+    for c in qs:
+        run = (c.evolution_runs
+               .filter(best_fitness__gte=1.0 - 1e-9)
+               .order_by('-finished_at').first())
+        gate_type = (run.target.get('preset') if run and run.target
+                     else '?')
+        out.append({
+            'slug':      c.slug,
+            'name':      c.name,
+            'gate_type': gate_type,
+            'width':     c.width,
+            'height':    c.height,
+            'grid':      c.grid,
+            'ports':     c.ports,
+            'fitness':   c.best_run_fitness or 0.0,
+        })
+    return JsonResponse({'ok': True, 'gates': out})
+
+
+@login_required
 def gate_list(request):
     """Catalogue of verified gates — circuits with at least one
     EvolutionRun at fitness >= 1.0. The annotation buys us per-gate
