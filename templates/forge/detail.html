@@ -791,11 +791,14 @@ function applyPreset(name){
     }
     const wrap = document.getElementById('custom-rows-wrap');
     const ta   = document.getElementById('custom-rows');
-    if (name === 'CUSTOM'){
+    if (name === 'CUSTOM' || name === 'CUSTOM_ANALOG'){
         wrap.style.display = '';
         wrap.open = true;
         if (!ta.value.trim()){
-            ta.value = presetRowsAsJson('AND');
+            // Sensible defaults: AND for digital, PASSTHROUGH for analog.
+            ta.value = presetRowsAsJson(
+                name === 'CUSTOM_ANALOG' ? 'PASSTHROUGH' : 'AND'
+            );
         }
     } else {
         wrap.style.display = '';

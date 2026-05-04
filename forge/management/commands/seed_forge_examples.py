@@ -55,6 +55,11 @@ PRESETS = [
       {'role':'output', 'name':'Q', 'x':13, 'y':8}],
      dict(pop_size=32, generations=40, mutation_rate=0.04, seed=2),
      {'ticks': 60, 'eval_window': [15, 60]}),
+    ('HIGHPASS_05', 'example-analog-highpass-16', 'analog',
+     [{'role':'input',  'name':'A', 'x':2,  'y':8},
+      {'role':'output', 'name':'Q', 'x':13, 'y':8}],
+     dict(pop_size=32, generations=40, mutation_rate=0.04, seed=1),
+     {'ticks': 60, 'eval_window': [15, 60]}),
 ]
 
 
