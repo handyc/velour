@@ -333,12 +333,18 @@ function updatePortsList(){
         row.innerHTML =
             `<span style="display:inline-block;width:10px;height:10px;`
           + `border-radius:50%;border:2px solid ${colour};`
-          + `background:transparent;"></span>`
-          + `<span>${p.role} (${p.x},${p.y})</span>`
+          + `background:transparent;flex-shrink:0;"></span>`
+          + `<span style="color:#8b949e;">${p.role}</span>`
+          + `<input data-i="${i}" class="port-name" value="${p.name || ''}" `
+          + `placeholder="${p.role==='input'?'A':'Q'}" `
+          + `style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;`
+          + `padding:0.1rem 0.3rem;font:inherit;font-size:0.7rem;`
+          + `width:3.5rem;">`
+          + `<span style="color:#6e7681;">(${p.x},${p.y})</span>`
           + `<button data-i="${i}" class="port-del" style="margin-left:auto;`
           + `background:#21262d;color:#ff7b72;border:1px solid #30363d;`
-          + `border-radius:3px;font-size:0.65rem;padding:0 0.4rem;cursor:pointer;`
-          + `">×</button>`;
+          + `border-radius:3px;font-size:0.65rem;padding:0 0.4rem;`
+          + `cursor:pointer;flex-shrink:0;">×</button>`;
         el.appendChild(row);
     }
     el.querySelectorAll('.port-del').forEach(b => {
@@ -347,6 +353,12 @@ function updatePortsList(){
             ports.splice(i, 1);
             drawPorts();
             updatePortsList();
+        });
+    });
+    el.querySelectorAll('.port-name').forEach(inp => {
+        inp.addEventListener('change', e => {
+            const i = parseInt(e.currentTarget.dataset.i, 10);
+            ports[i].name = e.currentTarget.value.trim().slice(0, 40);
         });
     });
 }
@@ -391,8 +403,15 @@ function togglePort(x, y, role){
             ports[idx].role = role;
         }
     } else {
-        ports.push({role, x, y, name: `${role}-${ports.length+1}`,
-                    schedule: []});
+        // Auto-name to match the score panel: inputs → A,B,C…; outputs → Q,R,S…
+        const used = new Set(ports.filter(p => p.role === role)
+                                  .map(p => p.name));
+        const seq = role === 'input'
+            ? ['A','B','C','D','E','F','G','H']
+            : ['Q','R','S','T','U','V','W','X'];
+        const name = seq.find(n => !used.has(n))
+            || `${role}-${ports.length+1}`;
+        ports.push({role, x, y, name, schedule: []});
     }
     drawPorts();
     updatePortsList();
