@@ -1275,3 +1275,66 @@ def wang_run(request):
         'palette': rule.palette_hex,
     }
     return JsonResponse(res)
+
+
+# ---------------------------------------------------------------------------
+# Complete hex Wang tileset generator (pipe model, K**3 tiles)
+# ---------------------------------------------------------------------------
+
+@login_required
+@require_POST
+def wang_tileset_generate(request):
+    """Generate a complete K=4 hex Wang tileset (64 tiles, pipe model)
+    in the tiles app, optionally bound to a taxon Rule's CA. Redirects
+    to the viewer page for the new set.
+    """
+    from .wang_tileset import generate_complete_hex_tileset
+
+    sha = (request.POST.get('sha') or '').strip()
+    name = (request.POST.get('name') or '').strip()
+    rule = Rule.objects.filter(sha1__startswith=sha).first() if sha else None
+
+    if not name:
+        if rule:
+            name = f'wang-pipe-K4-{rule.sha1[:8]}'
+        else:
+            name = 'wang-pipe-K4'
+
+    palette = None
+    if rule and rule.palette_hex:
+        palette = list(rule.palette_hex)[:4]
+
+    description = (
+        f'Complete hex Wang tileset (pipe model, K=4 → 64 tiles).'
+        + (f' CA payload: rule {rule.sha1[:12]}.' if rule else '')
+    )
+
+    # The Tile model's ca_ruleset is automaton.RuleSet, not taxon.Rule.
+    # We pass None for now and let the user wire that up downstream.
+    ts = generate_complete_hex_tileset(
+        name=name, description=description, k=4, palette=palette,
+        source_metadata={
+            'rule_sha1': rule.sha1 if rule else '',
+            'rule_slug': rule.slug if rule else '',
+        },
+    )
+    return redirect('taxon:wang_tileset_view', slug=ts.slug)
+
+
+@login_required
+def wang_tileset_view(request, slug: str):
+    """Render a generated complete hex Wang tileset as 64 SVG hexes.
+
+    Each hex shows its 6 edge colours so the (axis_v, axis_ne, axis_nw)
+    triple is visually obvious. The pipe constraint (opposite edges
+    matching) reads as the hex having only 3 distinct edge colours.
+    """
+    from tiles.models import TileSet
+
+    ts = get_object_or_404(TileSet, slug=slug, tile_type='hex')
+    tiles = list(ts.tiles.order_by('sort_order', 'pk'))
+    return render(request, 'taxon/wang_tileset.html', {
+        'tileset': ts,
+        'tiles': tiles,
+        'k': len(ts.palette) or 4,
+    })

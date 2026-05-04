@@ -96,6 +96,25 @@
           font-size:0.85rem;cursor:pointer;font-weight:600;">Run</button>
 </form>
 
+<form method="post" action="{% url 'taxon:wang_tileset_generate' %}"
+      id="tileset-form" style="margin-top:0.6rem;display:flex;gap:0.6rem;
+      align-items:center;flex-wrap:wrap;background:#0d1117;
+      border:1px solid #30363d;border-radius:6px;padding:0.5rem 0.8rem;">
+  {% csrf_token %}
+  <input type="hidden" name="sha" id="ts-sha" value="">
+  <span style="font-size:0.78rem;color:#8b949e;">Generate complete K=4 hex
+    Wang tileset (pipe model, 64 tiles) using the picked rule's
+    palette.</span>
+  <input type="text" name="name" placeholder="(optional name override)"
+         style="flex:1;min-width:140px;background:#161b22;color:#c9d1d9;
+         border:1px solid #30363d;padding:0.25rem 0.4rem;font-size:0.78rem;">
+  <button type="submit" style="background:#8957e5;color:#fff;
+          border:1px solid #a371f7;padding:0.3rem 0.8rem;border-radius:4px;
+          font-size:0.78rem;cursor:pointer;font-weight:600;">
+    Generate 64-tile set
+  </button>
+</form>
+
 <div id="status" style="margin-top:0.8rem;font-size:0.82rem;color:#8b949e;
      min-height:1.2em;">Pick a rule and press Run. Defaults give an
      IDENTICAL result on a class-2 rule with stable color 1.</div>
@@ -437,6 +456,7 @@ $('play').addEventListener('click', togglePlay);
 $('diff-overlay').addEventListener('change', render);
 
 // Auto-fill stable_color when a rule with stable colors is picked.
+// Also propagate the rule sha to the tileset-generate form.
 $('f-sha').addEventListener('change', () => {
     const opt = $('f-sha').selectedOptions[0];
     const stable = (opt?.dataset.stable || '').split(',').filter(Boolean);
@@ -446,6 +466,7 @@ $('f-sha').addEventListener('change', () => {
     } else {
         $('f-stable').value = '';
     }
+    $('ts-sha').value = $('f-sha').value;
 });
 $('f-sha').dispatchEvent(new Event('change'));
 </script>

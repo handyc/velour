@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Taxon — {{ tileset.name }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1400px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+<p>
+  <a href="{% url 'taxon:wang' %}" style="color:#58a6ff;">← Wang lab</a>
+  &nbsp;·&nbsp;
+  <a href="/tiles/{{ tileset.slug }}/" style="color:#58a6ff;">view in tiles app</a>
+</p>
+
+<h1 style="margin-top:0;">{{ tileset.name }}
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — {{ tiles|length }} tiles · K={{ k }} · pipe model
+  </span>
+</h1>
+<p style="color:#8b949e;font-size:0.85rem;margin:0.2rem 0 0.6rem 0;">
+  {{ tileset.description }}
+</p>
+
+<p style="color:#6e7681;font-size:0.78rem;margin:0.2rem 0 1rem 0;">
+  Each hex carries the (axis_v, axis_ne, axis_nw) triple as its
+  edge colours, with opposite edges matching. The 4 colours along
+  each axis correspond to substrate / signal-1 / signal-2 / combined.
+  Two hex tiles can be placed next to each other iff their shared
+  edge colours match — this is the standard hex Wang constraint.
+</p>
+
+<div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;
+     padding:0.6rem 0.8rem;margin-bottom:1rem;display:flex;gap:0.8rem;
+     flex-wrap:wrap;align-items:center;font-size:0.78rem;">
+  <span style="color:#8b949e;">palette:</span>
+  {% for c in tileset.palette %}
+    <span style="display:inline-flex;align-items:center;gap:0.3rem;">
+      <span style="display:inline-block;width:14px;height:14px;
+            background:{{ c }};border:1px solid #30363d;
+            border-radius:2px;"></span>
+      <code style="color:#c9d1d9;">{{ c }}</code>
+      <span style="color:#6e7681;">{% if forloop.counter0 == 0 %}substrate{% elif forloop.counter0 == 1 %}signal-1{% elif forloop.counter0 == 2 %}signal-2{% else %}combined{% endif %}</span>
+    </span>
+  {% endfor %}
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(8, 1fr);gap:0.6rem;">
+  {% for tile in tiles %}
+  <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;
+       padding:0.4rem;display:flex;flex-direction:column;align-items:center;
+       gap:0.25rem;">
+    <svg viewBox="-55 -55 110 110" width="100%"
+         style="max-width:120px;height:auto;display:block;">
+      {# Hex with flat top — 6 edges as straight strokes between vertices.
+         Vertex positions (radius 50, flat-top hex): #}
+      {# v0 = top-right, then clockwise. Edges, starting at top: n, ne,
+         se, s, sw, nw — matching the Tile field naming. #}
+      {% with R=50 %}
+      <polygon points="-25,-43 25,-43 50,0 25,43 -25,43 -50,0"
+               fill="#0a0a0a" stroke="#30363d" stroke-width="1"/>
+
+      {# Edge strokes: n (top), ne, se, s (bottom), sw, nw #}
+      <line x1="-25" y1="-43" x2="25"  y2="-43"
+            stroke="{{ tile.n_color }}"  stroke-width="8" stroke-linecap="round"/>
+      <line x1="25"  y1="-43" x2="50"  y2="0"
+            stroke="{{ tile.ne_color }}" stroke-width="8" stroke-linecap="round"/>
+      <line x1="50"  y1="0"   x2="25"  y2="43"
+            stroke="{{ tile.se_color }}" stroke-width="8" stroke-linecap="round"/>
+      <line x1="25"  y1="43"  x2="-25" y2="43"
+            stroke="{{ tile.s_color }}"  stroke-width="8" stroke-linecap="round"/>
+      <line x1="-25" y1="43"  x2="-50" y2="0"
+            stroke="{{ tile.sw_color }}" stroke-width="8" stroke-linecap="round"/>
+      <line x1="-50" y1="0"   x2="-25" y2="-43"
+            stroke="{{ tile.nw_color }}" stroke-width="8" stroke-linecap="round"/>
+      {% endwith %}
+    </svg>
+    <code style="color:#8b949e;font-size:0.65rem;line-height:1.2;
+          text-align:center;">{{ tile.name }}</code>
+  </div>
+  {% endfor %}
+</div>
+
+</div>
+{% endblock %}
