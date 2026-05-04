@@ -138,3 +138,59 @@ def grid_svg(request):
             f'attachment; filename="gridprint-{pattern}.svg"'
         )
     return resp
+
+
+@login_required
+def print_view(request):
+    """Tiny HTML wrapper around the SVG that auto-fires window.print() on
+    load. Print button on /gridprint/ opens this in a new window so the
+    browser's print pipeline runs against real HTML (not raw SVG mime,
+    which Firefox can't print from)."""
+    # Reuse grid_svg's logic by calling the function directly. Strip the
+    # ?download=1 flag so we don't get a Content-Disposition.
+    from django.http import QueryDict
+    q = request.GET.copy()
+    q.pop('download', None)
+    request.GET = q
+    svg_resp = grid_svg(request)
+    svg_body = svg_resp.content.decode('utf-8', errors='replace')
+
+    landscape = request.GET.get('landscape') == '1'
+    page_size = 'A4 landscape' if landscape else 'A4 portrait'
+
+    html = f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Gridprint — print</title>
+<style>
+  @page {{ size: {page_size}; margin: 0; }}
+  html, body {{ margin: 0; padding: 0; background: #fff; }}
+  svg {{ display: block; width: 100vw; height: 100vh; }}
+  @media screen {{
+    body {{ background: #222; padding: 1rem; box-sizing: border-box; }}
+    svg {{ box-shadow: 0 0 0 1px #444; max-width: calc(100vw - 2rem);
+           max-height: calc(100vh - 6rem); width: auto; height: auto;
+           background: #fff; margin: 0 auto; }}
+    .help {{ color: #aaa; font: 13px ui-monospace, monospace;
+             text-align: center; margin: 0 0 0.6rem 0; }}
+    .help button {{ background:#1f6feb;color:#fff;border:0;
+                    padding:0.3rem 0.8rem;border-radius:3px;
+                    cursor:pointer;font: inherit; }}
+  }}
+  @media print {{
+    .help {{ display: none !important; }}
+  }}
+</style></head>
+<body>
+<p class="help">If the dialog didn't open, click
+  <button onclick="window.print()">Print again</button>.
+</p>
+{svg_body}
+<script>
+  // Wait one frame so the SVG is laid out, then fire the dialog. Some
+  // browsers ignore print() called too early (during DOMContentLoaded).
+  window.addEventListener('load', () => {{
+    requestAnimationFrame(() => window.print());
+  }});
+</script>
+</body></html>
+"""
+    return HttpResponse(html, content_type='text/html; charset=utf-8')

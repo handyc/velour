@@ -150,7 +150,7 @@
   const downloadBtn = document.getElementById('download-btn');
   const rawLink = document.getElementById('raw-link');
 
-  function buildUrl(extras){
+  function buildParams(){
     const params = new URLSearchParams();
     for (const el of form.querySelectorAll('[name]')) {
       if (el.type === 'checkbox') {
@@ -160,8 +160,15 @@
         if (v !== '') params.set(el.name, v);
       }
     }
+    return params;
+  }
+  function buildUrl(extras){
+    const params = buildParams();
     if (extras) for (const [k, v] of Object.entries(extras)) params.set(k, v);
     return '{% url "gridprint:grid_svg" %}?' + params.toString();
+  }
+  function buildPrintUrl(){
+    return '{% url "gridprint:print" %}?' + buildParams().toString();
   }
 
   function refresh(){
@@ -177,15 +184,10 @@
   });
 
   printBtn.addEventListener('click', () => {
-    // Use the iframe's window for printing — that way the @page A4
-    // rules from the SVG govern the print, not the wrapper page.
-    const ifr = document.getElementById('preview');
-    if (ifr.contentWindow){
-      ifr.contentWindow.focus();
-      ifr.contentWindow.print();
-    } else {
-      window.print();
-    }
+    // Open the dedicated print HTML in a new tab; that page auto-fires
+    // window.print() on load. Firefox refuses to print() into an iframe
+    // whose document is raw SVG, hence the wrapper.
+    window.open(buildPrintUrl(), '_blank');
   });
 
   downloadBtn.addEventListener('click', () => {
