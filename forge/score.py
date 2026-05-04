@@ -100,7 +100,15 @@ def score_circuit(*, grid: list[list[int]],
                        f'({height}, {width})'),
         }
 
+    # Heads-saturation thresholds for graded scoring. Picked empirically:
+    # 3 heads of credit covers a clean pulse train under standard
+    # wireworld dynamics (head→tail→wire takes 3 ticks) without
+    # over-rewarding circuits that just spew pulses everywhere.
+    SAT_HEADS = 3
+    FALSE_POS_PENALTY = 0.2
+
     correct = 0
+    graded_total = 0.0
     row_results = []
     for row in rows:
         in_bits = list(row.get('in', []))
@@ -108,14 +116,13 @@ def score_circuit(*, grid: list[list[int]],
         if (len(in_bits) != len(in_names)
                 or len(out_expected) != len(out_names)):
             row_results.append({
-                'ok': False, 'in': in_bits,
-                'expected': out_expected, 'actual': [],
+                'ok': False, 'score': 0.0, 'in': in_bits,
+                'expected': out_expected, 'actual': [], 'heads': [],
                 'reason': 'row width mismatch',
             })
             continue
 
         g = base.copy()
-        # Inject input pulses at t=0 for active inputs.
         for name, bit in zip(in_names, in_bits):
             if not bit:
                 continue
@@ -127,28 +134,54 @@ def score_circuit(*, grid: list[list[int]],
             g = hex_step(g, lut, n_colors=4)
             traj.append(g.copy())
 
-        actual = []
-        for name in out_names:
+        actual: list[int] = []
+        head_counts: list[int] = []
+        per_output_scores: list[float] = []
+        t_max = min(t_hi, len(traj))
+        for name, expected_bit in zip(out_names, out_expected):
             p = outputs_by_name[name]
-            saw_head = any(int(traj[t][p['y'], p['x']]) == 2
-                           for t in range(t_lo, min(t_hi, len(traj))))
-            actual.append(1 if saw_head else 0)
+            head_count = 0
+            for t in range(t_lo, t_max):
+                if int(traj[t][p['y'], p['x']]) == 2:
+                    head_count += 1
+            head_counts.append(head_count)
+            saw = head_count > 0
+            actual.append(1 if saw else 0)
+            if expected_bit == 1:
+                # Want a pulse — saturate at SAT_HEADS heads.
+                per_output_scores.append(min(1.0, head_count / SAT_HEADS))
+            else:
+                # Want quiet — gentle decay with head count.
+                per_output_scores.append(
+                    max(0.0, 1.0 - head_count * FALSE_POS_PENALTY)
+                )
 
-        ok = actual == out_expected
+        row_score = (sum(per_output_scores) / len(per_output_scores)
+                     if per_output_scores else 0.0)
+        # `ok` = exact bit match (used for the UI ✓/✗ and the
+        # `correct` row counter); `score` = graded value driving the GA.
+        # The two only diverge when a circuit gets the right pattern but
+        # produces fewer heads than the saturation threshold (or extra
+        # heads on a row that wanted silence).
+        ok = (actual == out_expected)
         if ok:
             correct += 1
+        graded_total += row_score
         row_results.append({
-            'ok': ok, 'in': in_bits,
+            'ok': ok, 'score': row_score,
+            'in': in_bits,
             'expected': out_expected, 'actual': actual,
+            'heads': head_counts,
         })
 
     total = len(rows)
+    fitness = (graded_total / total) if total else 0.0
     return {
         'ok': True,
         'inputs': in_names,
         'outputs': out_names,
         'ticks': ticks, 'eval_window': [t_lo, t_hi],
         'correct': correct, 'total': total,
-        'fitness': correct / total if total else 0.0,
+        'fitness': fitness,
         'rows': row_results,
     }

@@ -645,35 +645,44 @@ function renderScore(data){
     const pct = Math.round(data.fitness * 100);
     const colour = pct === 100 ? '#7ee787' : pct >= 50 ? '#f0c040' : '#ff7b72';
     let html = `<div style="display:flex;gap:0.6rem;align-items:center;
-                margin-bottom:0.4rem;font-size:0.85rem;">
+                margin-bottom:0.4rem;font-size:0.85rem;flex-wrap:wrap;">
         <span style="background:${colour};color:#0d1117;padding:0.15rem 0.5rem;
               border-radius:3px;font-weight:600;">
-          ${data.correct} / ${data.total}  ·  ${pct}%
+          fitness ${data.fitness.toFixed(2)}
+        </span>
+        <span style="color:#8b949e;font-size:0.78rem;">
+          ${data.correct} / ${data.total} exact matches
         </span>
         <span style="color:#8b949e;font-size:0.72rem;">
           target <strong>${data.preset || 'CUSTOM'}</strong> ·
-          inputs ${data.inputs.join(',')} → outputs ${data.outputs.join(',')}
+          ${data.inputs.join(',')} → ${data.outputs.join(',')}
           · ticks ${data.ticks} · window [${data.eval_window[0]}, ${data.eval_window[1]}]
         </span>
       </div>`;
     html += '<table style="width:100%;border-collapse:collapse;font-size:0.78rem;">';
     html += '<thead><tr style="color:#8b949e;font-size:0.7rem;">'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">in</th>'
-          + '<th style="text-align:left;padding:0.2rem 0.4rem;">expected</th>'
-          + '<th style="text-align:left;padding:0.2rem 0.4rem;">actual</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">exp</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">obs</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">heads</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">score</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">ok</th>'
           + '</tr></thead><tbody>';
     for (const r of data.rows){
         const okMark = r.ok
             ? '<span style="color:#7ee787;">✓</span>'
             : '<span style="color:#ff7b72;">✗</span>';
-        const inS = r.in.join(', ');
-        const exS = r.expected.join(', ');
-        const acS = r.actual.length ? r.actual.join(', ') : '—';
+        const inS  = r.in.join(', ');
+        const exS  = r.expected.join(', ');
+        const acS  = r.actual.length ? r.actual.join(', ') : '—';
+        const hdS  = (r.heads || []).join(', ');
+        const scS  = (r.score != null) ? r.score.toFixed(2) : '—';
         html += `<tr style="border-top:1px solid #21262d;">
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${inS}</td>
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${exS}</td>
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${acS}</td>
+            <td style="padding:0.2rem 0.4rem;color:#8b949e;">${hdS}</td>
+            <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${scS}</td>
             <td style="padding:0.2rem 0.4rem;">${okMark}</td>
           </tr>`;
     }
