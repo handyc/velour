@@ -696,8 +696,11 @@ function renderScore(data){
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">heads</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">score</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">ok</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">replay</th>'
           + '</tr></thead><tbody>';
-    for (const r of data.rows){
+    const inNames = data.inputs || [];
+    for (let ri = 0; ri < data.rows.length; ri++){
+        const r = data.rows[ri];
         const okMark = r.ok
             ? '<span style="color:#7ee787;">✓</span>'
             : '<span style="color:#ff7b72;">✗</span>';
@@ -713,10 +716,60 @@ function renderScore(data){
             <td style="padding:0.2rem 0.4rem;color:#8b949e;">${hdS}</td>
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${scS}</td>
             <td style="padding:0.2rem 0.4rem;">${okMark}</td>
+            <td style="padding:0.2rem 0.4rem;">
+              <button class="row-replay" data-ri="${ri}"
+                      style="background:#21262d;color:#c9d1d9;
+                      border:1px solid #30363d;border-radius:3px;
+                      padding:0.05rem 0.4rem;cursor:pointer;
+                      font:inherit;font-size:0.7rem;">▶</button>
+            </td>
           </tr>`;
     }
     html += '</tbody></table>';
     el.innerHTML = html;
+    // Wire replay buttons
+    el.querySelectorAll('.row-replay').forEach(b => {
+        b.addEventListener('click', () => {
+            const ri = parseInt(b.dataset.ri, 10);
+            replayScoreRow(data, ri);
+        });
+    });
+}
+
+async function replayScoreRow(scoreData, rowIndex){
+    const inNames = scoreData.inputs || [];
+    const row = scoreData.rows[rowIndex];
+    const ticks = scoreData.ticks || 30;
+    // Build a runtime ports list: input ports get schedule=[0] when
+    // their row-bit is 1, schedule=[-1] (never fires) when 0. Output
+    // ports pass through. Anything else (extra inputs/outputs) keeps
+    // its own schedule.
+    const bitByName = {};
+    for (let i = 0; i < inNames.length; i++) bitByName[inNames[i]] = row.in[i];
+    const runtimePorts = ports.map(p => {
+        if (p.role !== 'input') return p;
+        if (!(p.name in bitByName)) return p;
+        return {...p, schedule: bitByName[p.name] ? [0] : [-1]};
+    });
+    // Reuse the existing Run plumbing
+    const r = await fetch(URL_RUN, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({
+            grid: design, ports: runtimePorts, ticks, autosave: false,
+        }),
+    });
+    if (!r.ok) return;
+    const data = await r.json();
+    trajectory = data.trajectory;
+    frame = 0;
+    document.getElementById('t-slider').max = trajectory.length - 1;
+    document.getElementById('t-slider').value = 0;
+    setMode('playback');
+    showFrame(0);
+    showOutputs(data.outputs);
+    // Auto-play
+    if (!playing) togglePlay();
 }
 
 rebuildSvg();
