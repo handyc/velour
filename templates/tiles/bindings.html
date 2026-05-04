@@ -39,8 +39,8 @@
 </p>
 {% else %}
 
-{# Bulk-bind: one selector + Apply button that overwrites every tile.
-   Useful for generated tilesets where every tile shares one rule. #}
+{% comment %}Bulk-bind: one selector + Apply button that overwrites every tile.
+Useful for generated tilesets where every tile shares one rule.{% endcomment %}
 <form method="post" style="margin-top:0.8rem;background:#0d1117;
       border:1px solid #30363d;border-radius:6px;padding:0.6rem 0.9rem;
       display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
@@ -87,8 +87,8 @@
           {% endif %}
         </td>
         <td style="padding:0.4rem 0;">
-          {# Empty placeholder select — JS clones the shared options
-             template into it on demand to keep the page lightweight. #}
+          {% comment %}Empty placeholder select — JS clones the shared options
+          template into it on demand to keep the page lightweight.{% endcomment %}
           <select name="tile_{{ t.pk }}_ruleset"
                   class="rs-select" data-current="{{ t.ca_ruleset_id|default_if_none:'none' }}"
                   style="background:#0d1117;color:#c9d1d9;
@@ -108,10 +108,10 @@
 </form>
 </details>
 
-{# Shared ruleset list. Django's json_script renders a single
-   <script id="rs-data" type="application/json">…</script> tag; the
-   per-tile selects and the bulk selector clone options from this
-   one source of truth instead of duplicating them in HTML. #}
+{% comment %}Shared ruleset list. Django's json_script renders a single
+<script id="rs-data" type="application/json">…</script> tag; the
+per-tile selects and the bulk selector clone options from this
+one source of truth instead of duplicating them in HTML.{% endcomment %}
 {{ rulesets|json_script:"rs-data" }}
 <script>
 (function(){

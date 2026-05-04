@@ -49,15 +49,15 @@
        gap:0.25rem;">
     <svg viewBox="-55 -55 110 110" width="100%"
          style="max-width:120px;height:auto;display:block;">
-      {# Hex with flat top — 6 edges as straight strokes between vertices.
-         Vertex positions (radius 50, flat-top hex): #}
-      {# v0 = top-right, then clockwise. Edges, starting at top: n, ne,
-         se, s, sw, nw — matching the Tile field naming. #}
+      {% comment %}Hex with flat top — 6 edges as straight strokes between
+      vertices. Vertex positions (radius 50, flat-top hex). v0 = top-right,
+      then clockwise. Edges starting at top: n, ne, se, s, sw, nw —
+      matching the Tile field naming.{% endcomment %}
       {% with R=50 %}
       <polygon points="-25,-43 25,-43 50,0 25,43 -25,43 -50,0"
                fill="#0a0a0a" stroke="#30363d" stroke-width="1"/>
 
-      {# Edge strokes: n (top), ne, se, s (bottom), sw, nw #}
+      {# Edge strokes #}
       <line x1="-25" y1="-43" x2="25"  y2="-43"
             stroke="{{ tile.n_color }}"  stroke-width="8" stroke-linecap="round"/>
       <line x1="25"  y1="-43" x2="50"  y2="0"
