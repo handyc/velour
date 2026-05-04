@@ -63,20 +63,29 @@ class Page:
 
 
 def _wrap(body: str, page: Page, *, title: str = '',
-          show_border: bool = False) -> str:
+          show_border: bool = False,
+          with_dimensions: bool = True) -> str:
     """Wrap a body of SVG elements in the A4 envelope, clipped to the
-    printable area. The clip-path makes geometric overruns invisible
-    when printed."""
+    printable area.
+
+    When ``with_dimensions`` is True the root <svg> carries explicit
+    mm width/height so it prints at physical scale. When False, only
+    the viewBox is set so the SVG scales freely to whatever container
+    embeds it — what we want for the in-page preview iframe.
+    """
     border = (
         f'<rect x="{page.left}" y="{page.top}" '
         f'width="{page.inner_w}" height="{page.inner_h}" '
         f'fill="none" stroke="#cccccc" stroke-width="0.1" '
         f'stroke-dasharray="0.6 0.6" />'
     ) if show_border else ''
+    dims = (f' width="{page.w_mm}mm" height="{page.h_mm}mm"'
+            if with_dimensions else '')
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'width="{page.w_mm}mm" height="{page.h_mm}mm" '
-        f'viewBox="0 0 {page.w_mm} {page.h_mm}">'
+        f'<svg xmlns="http://www.w3.org/2000/svg"'
+        f'{dims}'
+        f' viewBox="0 0 {page.w_mm} {page.h_mm}"'
+        f' preserveAspectRatio="xMidYMid meet">'
         f'<title>{title}</title>'
         f'<defs><clipPath id="page-area">'
         f'<rect x="{page.left}" y="{page.top}" '
@@ -111,7 +120,8 @@ def _line(x1, y1, x2, y2, style: Style) -> str:
 # ---------------------------------------------------------------------------
 
 def square_grid(*, page: Page, cell_mm: float, style: Style,
-                fill: list[list[str]] | None = None) -> str:
+                fill: list[list[str]] | None = None,
+                with_dimensions: bool = True) -> str:
     """Square grid lines. If `fill` is given (rows of rgb/hex strings),
     paints each cell first. Empty string in `fill` means "leave blank"."""
     pieces: list[str] = []
@@ -143,7 +153,8 @@ def square_grid(*, page: Page, cell_mm: float, style: Style,
     while y <= page.bottom + 1e-6:
         pieces.append(_line(page.left, y, page.right, y, style))
         y += cell_mm
-    return _wrap(''.join(pieces), page, title='Square grid')
+    return _wrap(''.join(pieces), page, title='Square grid',
+                 with_dimensions=with_dimensions)
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +190,8 @@ def _flat_hex_vertices(cx: float, cy: float, R: float) -> list[tuple]:
 
 def hex_grid(*, page: Page, side_mm: float, style: Style,
              pointy_top: bool = True,
-             fill: list[list[str]] | None = None) -> str:
+             fill: list[list[str]] | None = None,
+             with_dimensions: bool = True) -> str:
     """Hex tessellation. `side_mm` is the hex circumradius (= side length).
 
     fill, if given, is a 2D array of CSS colour strings (or '' for blank).
@@ -270,14 +282,16 @@ def hex_grid(*, page: Page, side_mm: float, style: Style,
 
     return _wrap(''.join(pieces), page,
                  title='Hex grid (pointy-top)' if pointy_top
-                 else 'Hex grid (flat-top)')
+                 else 'Hex grid (flat-top)',
+                 with_dimensions=with_dimensions)
 
 
 # ---------------------------------------------------------------------------
 # Triangle grid (equilateral)
 # ---------------------------------------------------------------------------
 
-def triangle_grid(*, page: Page, side_mm: float, style: Style) -> str:
+def triangle_grid(*, page: Page, side_mm: float, style: Style,
+                  with_dimensions: bool = True) -> str:
     """Equilateral triangle grid drawn as 3 sets of parallel lines.
 
     Lines are emitted long and clipped by the page area's clipPath so we
@@ -321,14 +335,16 @@ def triangle_grid(*, page: Page, side_mm: float, style: Style) -> str:
             page.bottom + 1, style))
         x0 += side_mm
 
-    return _wrap(''.join(pieces), page, title='Triangle grid')
+    return _wrap(''.join(pieces), page, title='Triangle grid',
+                 with_dimensions=with_dimensions)
 
 
 # ---------------------------------------------------------------------------
 # Rhombus grid (60° / 120° diamonds)
 # ---------------------------------------------------------------------------
 
-def rhombus_grid(*, page: Page, side_mm: float, style: Style) -> str:
+def rhombus_grid(*, page: Page, side_mm: float, style: Style,
+                 with_dimensions: bool = True) -> str:
     """60° rhombus tessellation drawn as 2 sets of parallel lines:
     horizontals + 60° diagonals. Each tile is a 60°-120° rhombus."""
     sqrt3 = math.sqrt(3)
@@ -351,7 +367,8 @@ def rhombus_grid(*, page: Page, side_mm: float, style: Style) -> str:
             page.bottom + 1, style))
         x0 += side_mm
 
-    return _wrap(''.join(pieces), page, title='Rhombus grid (60°)')
+    return _wrap(''.join(pieces), page, title='Rhombus grid (60°)',
+                 with_dimensions=with_dimensions)
 
 
 # ---------------------------------------------------------------------------
@@ -368,16 +385,19 @@ PATTERNS = {
 
 
 def render(pattern: str, *, page: Page, cell_mm: float,
-           style: Style, fill: list[list[str]] | None = None) -> str:
+           style: Style, fill: list[list[str]] | None = None,
+           with_dimensions: bool = True) -> str:
     """One-stop entry point used by the view."""
     try:
         _, fn = PATTERNS[pattern]
     except KeyError:
         raise ValueError(f'unknown pattern: {pattern}')
+    common = {'page': page, 'style': style,
+              'with_dimensions': with_dimensions}
     # Triangle and rhombus don't accept fill yet (no natural cell shape
     # in the line-set rendering).
     if pattern in ('triangle', 'rhombus'):
-        return fn(page=page, side_mm=cell_mm, style=style)
+        return fn(side_mm=cell_mm, **common)
     if pattern == 'square':
-        return fn(page=page, cell_mm=cell_mm, style=style, fill=fill)
-    return fn(page=page, side_mm=cell_mm, style=style, fill=fill)
+        return fn(cell_mm=cell_mm, fill=fill, **common)
+    return fn(side_mm=cell_mm, fill=fill, **common)

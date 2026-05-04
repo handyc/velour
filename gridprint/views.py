@@ -109,8 +109,9 @@ def grid_svg(request):
         # (rebuild with border if requested)
         return HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
 
+    embed = request.GET.get('embed') == '1'
     body = svg.render(pattern, page=page, cell_mm=cell, style=style,
-                      fill=fill)
+                      fill=fill, with_dimensions=not embed)
     if border:
         body = body.replace(
             '</svg>',

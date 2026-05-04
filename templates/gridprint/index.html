@@ -130,13 +130,15 @@
     </div>
   </form>
 
-  <div>
-    <iframe id="preview" src="" style="width:100%;
-            height:80vh;background:#fff;border:1px solid #30363d;
-            border-radius:6px;"></iframe>
+  <div id="preview-pane" style="display:flex;flex-direction:column;
+       align-items:center;">
+    <iframe id="preview" src="" style="display:block;background:#fff;
+            border:1px solid #30363d;border-radius:6px;
+            aspect-ratio:210/297;height:min(85vh, 1100px);
+            max-width:100%;width:auto;"></iframe>
     <p style="font-size:0.72rem;color:#6e7681;margin:0.3rem 0 0;">
-      Preview is the actual A4 SVG ({{ a4_w|floatformat:0 }} × {{ a4_h|floatformat:0 }} mm).
-      The print dialog uses this same SVG sized to one page.
+      Preview shows the full A4 page ({{ a4_w|floatformat:0 }} × {{ a4_h|floatformat:0 }} mm) scaled to fit.
+      Print + download use the same SVG at physical scale.
     </p>
   </div>
 </div>
@@ -172,9 +174,15 @@
   }
 
   function refresh(){
-    const url = buildUrl();
-    preview.src = url;
-    rawLink.href = url;
+    // The iframe loads the SVG with embed=1 so the SVG drops its
+    // intrinsic mm dimensions and scales to fit the iframe container.
+    preview.src = buildUrl({embed: '1'});
+    rawLink.href = buildUrl();   // raw download link keeps mm dims
+
+    // Swap aspect-ratio when landscape is toggled so the preview pane
+    // always matches the printed page orientation.
+    const landscape = form.querySelector('[name="landscape"]').checked;
+    preview.style.aspectRatio = landscape ? '297/210' : '210/297';
   }
   // Debounced refresh on any change.
   let timer = null;
