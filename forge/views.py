@@ -290,6 +290,7 @@ def circuit_score(request, slug):
                                 status=400)
 
     full_target = {
+        'preset':  preset or 'CUSTOM',
         'inputs':  target.get('inputs', ['A', 'B']),
         'outputs': target.get('outputs', ['Q']),
         'rows':    rows or [],
@@ -303,6 +304,10 @@ def circuit_score(request, slug):
     )
     result['preset'] = preset or 'CUSTOM'
     result['target'] = full_target
+
+    # Persist target on the circuit so re-opening the page restores it.
+    c.target = full_target
+    c.save(update_fields=['target', 'updated_at'])
     return JsonResponse(result)
 
 

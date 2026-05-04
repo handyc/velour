@@ -168,6 +168,9 @@
               <option>DECODE_1</option>
               <option>DECODE_2</option>
             </optgroup>
+            <optgroup label="custom">
+              <option>CUSTOM</option>
+            </optgroup>
           </select>
         </label>
         <label style="color:#8b949e;">inputs
@@ -199,6 +202,23 @@
                 padding:0.4rem 0.9rem;cursor:pointer;font-size:0.78rem;
                 font-weight:600;">Score</button>
       </form>
+
+      <details id="custom-rows-wrap" style="margin-top:0.5rem;display:none;">
+        <summary style="cursor:pointer;color:#8b949e;font-size:0.72rem;">
+          truth-table rows (JSON)
+        </summary>
+        <textarea id="custom-rows" rows="8"
+                  style="width:100%;background:#0d1117;color:#c9d1d9;
+                  border:1px solid #30363d;padding:0.4rem;
+                  font:inherit;font-size:0.72rem;line-height:1.4;
+                  margin-top:0.3rem;"></textarea>
+        <p style="font-size:0.7rem;color:#6e7681;margin:0.2rem 0 0;">
+          Each row is <code>{"in": [bits…], "out": [bits…]}</code>.
+          The <em>in</em> bits map to the <em>inputs</em> port-name list
+          above (in order); same for <em>out</em>.
+        </p>
+      </details>
+
       <div id="score-result" style="margin-top:0.6rem;"></div>
     </div>
   </div>
@@ -209,6 +229,7 @@
 {{ circuit.grid|json_script:"initial-grid" }}
 {{ circuit.ports|json_script:"initial-ports" }}
 {{ palette|json_script:"palette" }}
+{{ circuit.target|json_script:"saved-target" }}
 
 <script>
 const CSRF = document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1];
@@ -633,13 +654,94 @@ const PRESET_PORTS = {
     'DECODE_1':   {inputs:'A',     outputs:'Q,R'},
     'DECODE_2':   {inputs:'A,B',   outputs:'Q,R,S,T'},
 };
-document.getElementById('t-preset').addEventListener('change', e => {
-    const p = e.target.value;
-    if (PRESET_PORTS[p]){
-        document.getElementById('t-inputs').value  = PRESET_PORTS[p].inputs;
-        document.getElementById('t-outputs').value = PRESET_PORTS[p].outputs;
+// Built-in preset → row arrays. Mirrors forge/score.py so the editor
+// can autofill the JSON textarea client-side without an extra fetch.
+const PRESET_ROWS = {
+    'AND':  [[0,0,0],[0,1,0],[1,0,0],[1,1,1]],
+    'OR':   [[0,0,0],[0,1,1],[1,0,1],[1,1,1]],
+    'XOR':  [[0,0,0],[0,1,1],[1,0,1],[1,1,0]],
+    'NAND': [[0,0,1],[0,1,1],[1,0,1],[1,1,0]],
+    'NOR':  [[0,0,1],[0,1,0],[1,0,0],[1,1,0]],
+    'XNOR': [[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+    'HALF_ADDER': [[0,0,0,0],[0,1,1,0],[1,0,1,0],[1,1,0,1]],
+    'FULL_ADDER': [
+        [0,0,0,0,0],[0,0,1,1,0],[0,1,0,1,0],[0,1,1,0,1],
+        [1,0,0,1,0],[1,0,1,0,1],[1,1,0,0,1],[1,1,1,1,1],
+    ],
+    'DECODE_1':   [[0,1,0],[1,0,1]],
+    'DECODE_2':   [
+        [0,0,1,0,0,0],[0,1,0,1,0,0],[1,0,0,0,1,0],[1,1,0,0,0,1],
+    ],
+};
+
+function presetRowsAsJson(presetName){
+    const flat = PRESET_ROWS[presetName];
+    if (!flat) return '[]';
+    const widthIn  = (PRESET_PORTS[presetName] || {inputs:'A,B'}).inputs.split(',').length;
+    const widthOut = (PRESET_PORTS[presetName] || {outputs:'Q'}).outputs.split(',').length;
+    const rows = flat.map(r => ({
+        in:  r.slice(0, widthIn),
+        out: r.slice(widthIn, widthIn + widthOut),
+    }));
+    return JSON.stringify(rows, null, 2);
+}
+
+function applyPreset(name){
+    if (PRESET_PORTS[name]){
+        document.getElementById('t-inputs').value  = PRESET_PORTS[name].inputs;
+        document.getElementById('t-outputs').value = PRESET_PORTS[name].outputs;
     }
+    const wrap = document.getElementById('custom-rows-wrap');
+    const ta   = document.getElementById('custom-rows');
+    if (name === 'CUSTOM'){
+        wrap.style.display = '';
+        wrap.open = true;
+        if (!ta.value.trim()){
+            ta.value = presetRowsAsJson('AND');
+        }
+    } else {
+        wrap.style.display = '';
+        wrap.open = false;
+        ta.value = presetRowsAsJson(name);
+    }
+}
+
+document.getElementById('t-preset').addEventListener('change', e => {
+    applyPreset(e.target.value);
 });
+
+// Restore saved target on page load: preset, inputs, outputs, ticks,
+// eval_window, custom rows. Fall back to AND if nothing saved.
+(function restoreTarget(){
+    let saved = null;
+    try {
+        saved = JSON.parse(
+            document.getElementById('saved-target').textContent || '{}');
+    } catch (e) { saved = {}; }
+    const preset = (saved && saved.preset) ? String(saved.preset).toUpperCase() : 'AND';
+    const presetEl = document.getElementById('t-preset');
+    if ([...presetEl.options].some(o => o.value === preset)){
+        presetEl.value = preset;
+    }
+    if (saved && Array.isArray(saved.inputs) && saved.inputs.length){
+        document.getElementById('t-inputs').value = saved.inputs.join(',');
+    }
+    if (saved && Array.isArray(saved.outputs) && saved.outputs.length){
+        document.getElementById('t-outputs').value = saved.outputs.join(',');
+    }
+    if (saved && saved.ticks){
+        document.getElementById('t-ticks').value = saved.ticks;
+    }
+    if (saved && Array.isArray(saved.eval_window)){
+        document.getElementById('t-eval-lo').value = saved.eval_window[0];
+        document.getElementById('t-eval-hi').value = saved.eval_window[1];
+    }
+    applyPreset(preset);
+    if (preset === 'CUSTOM' && saved && Array.isArray(saved.rows)){
+        document.getElementById('custom-rows').value =
+            JSON.stringify(saved.rows, null, 2);
+    }
+})();
 
 document.getElementById('score-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -655,6 +757,17 @@ document.getElementById('score-form').addEventListener('submit', async (e) => {
         preset, inputs: inNames, outputs: outNames,
         ticks, eval_window: [t_lo, t_hi],
     };
+    if (preset === 'CUSTOM'){
+        try {
+            target.rows = JSON.parse(
+                document.getElementById('custom-rows').value || '[]');
+        } catch (err) {
+            const status = document.getElementById('save-status');
+            status.textContent = 'truth-table JSON parse error: ' + err.message;
+            status.style.color = '#ff7b72';
+            return;
+        }
+    }
     const r = await fetch(URL_SCORE, {
         method: 'POST',
         headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
