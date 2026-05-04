@@ -78,6 +78,7 @@ class World:
     n_hills: int = 0
     n_lamps: int = 0
     n_rocks: int = 0
+    n_giant_trees: int = 0
     objects: list[PlacedObject] = field(default_factory=list)
 
     @property
@@ -158,7 +159,7 @@ def build_world(name: str, biome: str, seed: int,
                 n_buildings: int, n_trees: int,
                 n_flowers: int, n_people: int,
                 n_hills: int = 0, n_lamps: int = 0,
-                n_rocks: int = 0,
+                n_rocks: int = 0, n_giant_trees: int = 0,
                 library_placements: list[tuple[str, int]] | None = None) -> World:
     """Deterministic world assembly. All randomness threads through `seed`."""
     rng = random.Random(seed)
@@ -167,7 +168,8 @@ def build_world(name: str, biome: str, seed: int,
                   baseplate_color=baseplate_color,
                   n_buildings=n_buildings, n_trees=n_trees,
                   n_flowers=n_flowers, n_people=n_people,
-                  n_hills=n_hills, n_lamps=n_lamps, n_rocks=n_rocks)
+                  n_hills=n_hills, n_lamps=n_lamps, n_rocks=n_rocks,
+                  n_giant_trees=n_giant_trees)
 
     occupancy = [[False] * BASEPLATE_STUDS for _ in range(BASEPLATE_STUDS)]
 
@@ -186,6 +188,17 @@ def build_world(name: str, biome: str, seed: int,
             kind="building", x=pos[0], y=pos[1],
             seed=seed * 1000 + sub,
             meta={"w": w, "d": d, "floors": floors}))
+        sub += 1
+
+    for _ in range(n_giant_trees):
+        fw, fd = L.footprint_giant_tree()
+        pos = _try_place(rng, occupancy, fw, fd, margin=1)
+        if pos is None:
+            sub += 1
+            continue
+        world.objects.append(PlacedObject(
+            kind="giant_tree", x=pos[0], y=pos[1],
+            seed=seed * 1000 + sub))
         sub += 1
 
     for _ in range(n_trees):
@@ -306,6 +319,8 @@ def world_to_bricks(world: World) -> list[L.Placement]:
             placements.extend(L.make_building(rng, origin=origin, dims=dims))
         elif obj.kind == "tree":
             placements.extend(L.make_tree(rng, origin=origin))
+        elif obj.kind == "giant_tree":
+            placements.extend(L.make_giant_tree(rng, origin=origin))
         elif obj.kind == "flower":
             placements.extend(L.make_flower(rng, origin=origin))
         elif obj.kind == "person":

@@ -185,6 +185,224 @@ def _mega_slug(name: str, seed: int, grid: int) -> str:
     return f'megalegoworld-{base}-{grid}x{grid}-s{seed:04d}'
 
 
+def _megaforest_slug(name: str, seed: int, grid: int) -> str:
+    base = slugify(name)[:50] or 'megaforest'
+    return f'megaforest-{base}-{grid}x{grid}-s{seed:04d}'
+
+
+# Stud coordinates inside each tile baseplate where we anchor interactables.
+# All grid-aligned; the megaforest builder picks one of these per object so
+# the swing and barbecue never overlap each other (or sit on a giant tree
+# the world's brick-occupancy already reserved).
+_INTERACT_SLOTS = [
+    (6, 6),   (6, 24),   (24, 6),  (24, 24),
+    (16, 6),  (16, 24),  (6, 16),  (24, 16),
+]
+
+
+def build_megaforest_in_aether(
+    *, name: str, seed: int, grid: int = 4,
+    n_buildings: int = 1, n_giant_trees: int = 4,
+    n_trees: int = 1, n_flowers: int = 4, n_people: int = 1,
+    n_lamps: int = 2, n_rocks: int = 1,
+    n_swings_per_tile: int = 1, n_bbq_per_tile: int = 1,
+    scale: float = DEFAULT_SCALE, show_studs: bool = True,
+    hdri_asset: str | None = None,
+) -> tuple[World, dict]:
+    """Build a grid of legoworlds populated with super-tall L-system trees,
+    plus interactive swings and barbecues per tile.
+
+    Each tile is its own legolith World (so giant tree placements respect
+    a per-tile occupancy grid) flattened to bricks; swings and barbecues
+    are *separate* Aether Entities sitting on top of the brick payload —
+    they self-render and handle their own interaction in scripts.
+    """
+    brick_script = Script.objects.filter(slug=LEGOWORLD_SCRIPT_SLUG).first()
+    if brick_script is None:
+        raise RuntimeError(
+            f'Aether script "{LEGOWORLD_SCRIPT_SLUG}" missing — run '
+            '`manage.py seed_legoworld_script` first.')
+
+    swing_scripts = {
+        'build':    Script.objects.filter(slug='giants-swing-build').first(),
+        'update':   Script.objects.filter(slug='giants-swing-update').first(),
+        'interact': Script.objects.filter(slug='giants-swing-interact').first(),
+    }
+    bbq_scripts = {
+        'build':    Script.objects.filter(slug='giants-bbq-build').first(),
+        'update':   Script.objects.filter(slug='giants-bbq-update').first(),
+        'interact': Script.objects.filter(slug='giants-bbq-interact').first(),
+    }
+    missing = [k for k, v in {**swing_scripts, **bbq_scripts}.items() if v is None]
+    if missing:
+        raise RuntimeError(
+            'Aether MegaForest scripts missing — run '
+            '`manage.py seed_giants_scripts` first.')
+
+    rng = _random.Random(seed)
+    biome_names = sorted(BIOMES.keys())
+
+    slug = _megaforest_slug(name, seed, grid)
+    World.objects.filter(slug=slug).delete()
+
+    baseplate_m = BASEPLATE_STUDS * scale
+    total_span = baseplate_m * grid
+    ground_size = total_span * 1.4 + baseplate_m
+
+    center_biome = rng.choice(biome_names)
+    sky = _SKY_FOR_BIOME.get(center_biome, '#9bb8d8')
+    ground = _GROUND_AROUND.get(center_biome, '#2a2a2a')
+
+    if hdri_asset is None:
+        hdri_pick = rng.choice(HDRI_SLUGS) if HDRI_SLUGS else ''
+    else:
+        hdri_pick = hdri_asset
+    skybox = 'hdri' if hdri_pick else 'procedural'
+
+    title = f'MegaForest — {name} ({grid}×{grid}, s{seed:04d})'
+    aether_world = World.objects.create(
+        slug=slug, title=title,
+        description=(
+            f'{grid}×{grid} grid of L-system Legolith biomes, populated with '
+            f'super-tall pines/sequoias/baobabs and interactive swings + '
+            f'barbecues. Click a swing to ride it, click a grill to start '
+            f'cooking. Same avatars and controls as the rest of Aether.'
+        ),
+        skybox=skybox, hdri_asset=hdri_pick, sky_color=sky,
+        ground_color=ground, ground_size=ground_size,
+        ambient_light=0.6,
+        fog_near=ground_size * 0.5, fog_far=ground_size * 1.7,
+        fog_color=sky,
+        gravity=-9.81, allow_flight=False,
+        spawn_x=0.0, spawn_y=1.6, spawn_z=baseplate_m * 0.55 + 1.5,
+        soundscape='', ambient_volume=0.0,
+        published=True, featured=False,
+    )
+
+    tile_biomes: list[str] = []
+    total_bricks = 0
+    total_objects = 0
+    total_studs = 0
+    total_swings = 0
+    total_bbqs = 0
+
+    for row in range(grid):
+        for col in range(grid):
+            tile_seed = (seed * 10007 + row * 131 + col) & 0x7FFFFFFF
+            tile_biome = rng.choice(biome_names)
+            tile_biomes.append(tile_biome)
+            tile_name = f'{name} r{row}c{col}'
+
+            legolith_world = W.build_world(
+                name=tile_name, biome=tile_biome, seed=tile_seed,
+                n_buildings=n_buildings, n_trees=n_trees,
+                n_flowers=n_flowers, n_people=n_people,
+                n_hills=0, n_lamps=n_lamps, n_rocks=n_rocks,
+                n_giant_trees=n_giant_trees,
+            )
+            bricks = build_brick_payload(legolith_world)
+            total_bricks += len(bricks)
+            total_objects += len(legolith_world.objects)
+            total_studs += sum(
+                b[0] * b[1] for b in bricks
+                if b[7] and b[0] * b[1] <= 32 * 32
+            )
+
+            dx = (col - (grid - 1) / 2.0) * baseplate_m
+            dz = (row - (grid - 1) / 2.0) * baseplate_m
+
+            anchor = Entity.objects.create(
+                world=aether_world,
+                name=f'Tile r{row}c{col} bricks — {tile_biome} ({len(bricks)})',
+                primitive='box', primitive_color='#000000',
+                pos_x=dx, pos_y=0.0, pos_z=dz,
+                scale_x=1.0, scale_y=1.0, scale_z=1.0,
+                cast_shadow=False, receive_shadow=False, visible=True,
+                behavior='scripted',
+            )
+            EntityScript.objects.create(
+                entity=anchor, script=brick_script,
+                props={
+                    'bricks': bricks,
+                    'scale': scale,
+                    'showStuds': show_studs,
+                    'center': BASEPLATE_STUDS / 2,
+                },
+            )
+
+            # Pick distinct stud slots for swings and BBQs in this tile.
+            tile_rng = _random.Random(tile_seed ^ 0xBADCAFE)
+            slots = list(_INTERACT_SLOTS)
+            tile_rng.shuffle(slots)
+            need = n_swings_per_tile + n_bbq_per_tile
+            picks = slots[:need]
+            sw_slots = picks[:n_swings_per_tile]
+            bq_slots = picks[n_swings_per_tile:n_swings_per_tile + n_bbq_per_tile]
+
+            def _world_xy(stud_x: int, stud_y: int) -> tuple[float, float]:
+                wx = dx + (stud_x - BASEPLATE_STUDS / 2.0) * scale
+                wz = dz + (stud_y - BASEPLATE_STUDS / 2.0) * scale
+                return wx, wz
+
+            for (sx, sy) in sw_slots:
+                wx, wz = _world_xy(sx, sy)
+                e = Entity.objects.create(
+                    world=aether_world,
+                    name=f'Swing r{row}c{col}',
+                    primitive='box', primitive_color='#000000',
+                    pos_x=wx, pos_y=0.0, pos_z=wz,
+                    rot_y=tile_rng.choice([0, 90, 180, 270]),
+                    scale_x=1.0, scale_y=1.0, scale_z=1.0,
+                    cast_shadow=False, receive_shadow=False, visible=True,
+                    behavior='scripted',
+                )
+                props = {'scale': scale}
+                EntityScript.objects.bulk_create([
+                    EntityScript(entity=e, script=swing_scripts['build'],
+                                 props=props),
+                    EntityScript(entity=e, script=swing_scripts['update'],
+                                 props=props),
+                    EntityScript(entity=e, script=swing_scripts['interact'],
+                                 props=props),
+                ])
+                total_swings += 1
+
+            for (sx, sy) in bq_slots:
+                wx, wz = _world_xy(sx, sy)
+                e = Entity.objects.create(
+                    world=aether_world,
+                    name=f'Barbecue r{row}c{col}',
+                    primitive='box', primitive_color='#000000',
+                    pos_x=wx, pos_y=0.0, pos_z=wz,
+                    rot_y=tile_rng.choice([0, 90, 180, 270]),
+                    scale_x=1.0, scale_y=1.0, scale_z=1.0,
+                    cast_shadow=False, receive_shadow=False, visible=True,
+                    behavior='scripted',
+                )
+                props = {'scale': scale}
+                EntityScript.objects.bulk_create([
+                    EntityScript(entity=e, script=bbq_scripts['build'],
+                                 props=props),
+                    EntityScript(entity=e, script=bbq_scripts['update'],
+                                 props=props),
+                    EntityScript(entity=e, script=bbq_scripts['interact'],
+                                 props=props),
+                ])
+                total_bbqs += 1
+
+    stats = {
+        'tiles': grid * grid,
+        'grid': grid,
+        'bricks': total_bricks,
+        'studs_estimate': total_studs,
+        'objects': total_objects,
+        'biomes': tile_biomes,
+        'swings': total_swings,
+        'barbecues': total_bbqs,
+    }
+    return aether_world, stats
+
+
 def build_megalegoworld_in_aether(
     *, name: str, seed: int, grid: int = 4,
     n_buildings: int = 4, n_trees: int = 6, n_flowers: int = 4,

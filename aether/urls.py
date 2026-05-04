@@ -11,6 +11,7 @@ urlpatterns = [
     path('generate-random/', views.generate_random_world, name='generate_random'),
     path('generate-legoworld/', views.legoworld_generate, name='generate_legoworld'),
     path('generate-megalegoworld/', views.megalegoworld_generate, name='generate_megalegoworld'),
+    path('generate-megaforest/', views.megaforest_generate, name='generate_megaforest'),
     path('generate-megacity/', views.generate_megacity, name='generate_megacity'),
     path('merge/', views.world_merge, name='world_merge'),
     path('boogaloo/', views.boogaloo, name='boogaloo'),

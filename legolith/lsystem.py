@@ -219,6 +219,124 @@ def make_tree(rng: random.Random, origin=(0, 0, 0.0)) -> list[Placement]:
     return run_turtle(prog, origin=origin)
 
 
+def footprint_giant_tree() -> tuple[int, int]:
+    return 4, 4
+
+
+def make_giant_tree(rng: random.Random, origin=(0, 0, 0.0)) -> list[Placement]:
+    """Super-tall L-system tree (~10-14 brick-heights). Four variants:
+
+        pine     — narrow 1x1 trunk + downsweeping conifer rings
+        sequoia  — thick 2x2 trunk + dense layered crown
+        baobab   — bulbous 2x2 trunk narrowing to twin spires
+        fantasy  — twin candy-stripe trunk with arching blossom branches
+
+    Trunks here use the LSystem-grammar/turtle pipeline so the tree-shape
+    grammar stays readable; canopies use direct brick placements because
+    the turtle alphabet does not (yet) speak in concentric rings.
+    """
+    variant = rng.choices(['pine', 'sequoia', 'baobab', 'fantasy'],
+                          weights=[3, 3, 2, 2])[0]
+    trunk_h = rng.randint(10, 14)
+    bark = rng.choice([BROWN, '#5a3a20', '#6b4a2e', '#7a553a', '#3e2917'])
+    leaf = rng.choice([BRICK_GREEN, DARK_GREEN, LIGHT_GREEN, '#1a4f1a'])
+    blossom = rng.choice([PINK, BRICK_WHITE, BRICK_YELLOW, BRICK_PURPLE])
+
+    ox, oy, oz = origin
+    out: list[Placement] = []
+
+    if variant == 'pine':
+        cx, cy = ox + 1, oy + 1
+        # Trunk by L-system: axiom T -> {bark}{S:1,1,3}F^h
+        rules = {'T': '{C:' + _hx(bark) + '}{S:1,1,3}' + 'F' * trunk_h}
+        prog = LSystem('T', rules, iterations=1).expand()
+        out.extend(run_turtle(prog, origin=(cx, cy, oz)))
+        # 5 conifer rings, shrinking from r=2 to r=0 + apex blossom
+        rings = [(2, [(-2, 0), (2, 0), (0, -2), (0, 2),
+                      (-1, -1), (1, -1), (-1, 1), (1, 1)]),
+                 (1, [(-1, 0), (1, 0), (0, -1), (0, 1)]),
+                 (1, [(-1, 0), (1, 0), (0, -1), (0, 1)]),
+                 (0, []),
+                 (0, [])]
+        ring_z0 = oz + (trunk_h - 4) * BRICK_H
+        for ri, (_, offsets) in enumerate(rings):
+            z = ring_z0 + ri * BRICK_H
+            out.append((Brick(1, 1, 3, leaf), (cx, cy, z)))
+            for dx, dy in offsets:
+                out.append((Brick(1, 1, 3, leaf), (cx + dx, cy + dy, z)))
+        out.append((Brick(1, 1, 1, blossom),
+                    (cx, cy, oz + (trunk_h + 5) * BRICK_H)))
+
+    elif variant == 'sequoia':
+        # 2x2 thick trunk
+        rules = {'T': '{C:' + _hx(bark) + '}{S:2,2,3}' + 'F' * trunk_h}
+        prog = LSystem('T', rules, iterations=1).expand()
+        out.extend(run_turtle(prog, origin=(ox + 1, oy + 1, oz)))
+        cz = oz + trunk_h * BRICK_H
+        out.append((Brick(4, 4, 3, leaf), (ox, oy, cz)))
+        out.append((Brick(4, 4, 3, leaf), (ox, oy, cz + BRICK_H)))
+        out.append((Brick(3, 3, 3, leaf), (ox, oy, cz + 2 * BRICK_H)))
+        out.append((Brick(2, 2, 3, leaf),
+                    (ox + 1, oy + 1, cz + 3 * BRICK_H)))
+        for dx, dy in [(0, 0), (3, 0), (0, 3), (3, 3), (1, 1), (2, 2)]:
+            out.append((Brick(1, 1, 1, blossom),
+                        (ox + dx, oy + dy, cz + 4 * BRICK_H)))
+
+    elif variant == 'baobab':
+        # Lower trunk: bulbous 2x2; upper trunk: twin 1x1 spires
+        lower = max(3, trunk_h - 5)
+        rules_lo = {'L': '{C:' + _hx(bark) + '}{S:2,2,3}' + 'F' * lower}
+        out.extend(run_turtle(
+            LSystem('L', rules_lo, iterations=1).expand(),
+            origin=(ox + 1, oy + 1, oz),
+        ))
+        # Twin spires
+        spire_h = trunk_h - lower
+        rules_sp = {'S': '{C:' + _hx(bark) + '}{S:1,1,3}' + 'F' * spire_h}
+        spire_z = oz + lower * BRICK_H
+        prog = LSystem('S', rules_sp, iterations=1).expand()
+        out.extend(run_turtle(prog, origin=(ox + 1, oy + 1, spire_z)))
+        out.extend(run_turtle(prog, origin=(ox + 2, oy + 2, spire_z)))
+        # Wide flat crown
+        cz = oz + trunk_h * BRICK_H
+        for dx, dy in [(0, 1), (3, 1), (1, 0), (1, 3), (0, 2), (3, 2),
+                       (2, 0), (2, 3)]:
+            for k in range(2):
+                out.append((Brick(1, 1, 3, leaf),
+                            (ox + dx, oy + dy, cz + k * BRICK_H)))
+        out.append((Brick(2, 2, 3, leaf),
+                    (ox + 1, oy + 1, cz + BRICK_H)))
+        for dx, dy in [(0, 1), (3, 2), (2, 0), (1, 3)]:
+            out.append((Brick(1, 1, 1, blossom),
+                        (ox + dx, oy + dy, cz + 2 * BRICK_H)))
+
+    else:  # fantasy
+        c1, c2 = bark, '#a04030'
+        # Twin candy-stripe trunk via two passes with alternating colors
+        for k in range(trunk_h):
+            color = c1 if (k % 2 == 0) else c2
+            rules = {'T': '{C:' + _hx(color) + '}{S:1,1,3}F'}
+            prog = LSystem('T', rules, iterations=1).expand()
+            out.extend(run_turtle(prog,
+                                  origin=(ox + 1, oy + 1, oz + k * BRICK_H)))
+            out.extend(run_turtle(prog,
+                                  origin=(ox + 2, oy + 2, oz + k * BRICK_H)))
+        cz = oz + trunk_h * BRICK_H
+        # Arching corner branches
+        for px, py in [(0, 0), (3, 0), (0, 3), (3, 3)]:
+            for k in range(2):
+                out.append((Brick(1, 1, 3, leaf),
+                            (ox + px, oy + py, cz + k * BRICK_H)))
+            out.append((Brick(1, 1, 1, blossom),
+                        (ox + px, oy + py, cz + 2 * BRICK_H)))
+        out.append((Brick(2, 2, 3, leaf),
+                    (ox + 1, oy + 1, cz + BRICK_H)))
+        out.append((Brick(2, 2, 1, blossom),
+                    (ox + 1, oy + 1, cz + 2 * BRICK_H)))
+
+    return out
+
+
 def footprint_flower() -> tuple[int, int]:
     return 1, 1
 
@@ -444,13 +562,14 @@ def make_rock(rng: random.Random, origin=(0, 0, 0.0)) -> list[Placement]:
 Generator = Callable[[random.Random, tuple[int, int, float]], list[Placement]]
 
 GENERATORS: dict[str, Generator] = {
-    "tree":     make_tree,
-    "flower":   make_flower,
-    "building": make_building,
-    "person":   make_person,
-    "hill":     make_hill,
-    "lamp":     make_lamp,
-    "rock":     make_rock,
+    "tree":        make_tree,
+    "giant_tree":  make_giant_tree,
+    "flower":      make_flower,
+    "building":    make_building,
+    "person":      make_person,
+    "hill":        make_hill,
+    "lamp":        make_lamp,
+    "rock":        make_rock,
 }
 
 
@@ -478,11 +597,12 @@ def make_from_spec(spec: dict, origin=(0, 0, 0.0)) -> list[Placement]:
     )
 
 FOOTPRINTS: dict[str, Callable] = {
-    "tree":     footprint_tree,
-    "flower":   footprint_flower,
-    "person":   footprint_person,
-    "hill":     footprint_hill,
-    "lamp":     footprint_lamp,
-    "rock":     footprint_rock,
+    "tree":        footprint_tree,
+    "giant_tree":  footprint_giant_tree,
+    "flower":      footprint_flower,
+    "person":      footprint_person,
+    "hill":        footprint_hill,
+    "lamp":        footprint_lamp,
+    "rock":        footprint_rock,
     # building footprint is rng-dependent; handled specially in worlds.py
 }

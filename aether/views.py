@@ -1410,6 +1410,35 @@ def megalegoworld_generate(request):
 
 @login_required
 @require_POST
+def megaforest_generate(request):
+    """Build a MegaForest variant — giant trees + swings + barbecues."""
+    from .legoworld import DEFAULT_SCALE, build_megaforest_in_aether
+
+    seed = random.randint(1, 99999)
+    name = (request.POST.get('name') or 'forest').strip()[:50] or 'forest'
+
+    try:
+        world, stats = build_megaforest_in_aether(
+            name=name, seed=seed, grid=4,
+            n_giant_trees=5, n_trees=1, n_flowers=4, n_people=1,
+            n_swings_per_tile=1, n_bbq_per_tile=1,
+            scale=DEFAULT_SCALE,
+        )
+    except RuntimeError as exc:
+        messages.error(request, str(exc))
+        return redirect('aether:world_list')
+
+    messages.success(
+        request,
+        f'Built "{world.title}" — {stats["tiles"]} tiles, '
+        f'{stats["bricks"]} bricks, {stats["swings"]} swings, '
+        f'{stats["barbecues"]} barbecues.',
+    )
+    return redirect('aether:world_enter', slug=world.slug)
+
+
+@login_required
+@require_POST
 def generate_megacity(request):
     """Build a 4x4 matrix of cafe districts merged into one Aether world."""
     from django.core.management import call_command
