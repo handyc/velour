@@ -98,6 +98,31 @@
     <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
 
     <details style="font-size:0.78rem;">
+      <summary style="cursor:pointer;color:#8b949e;">Export to ESP32-S3</summary>
+      <div style="margin-top:0.3rem;color:#6e7681;font-size:0.7rem;
+           line-height:1.4;">
+        Generates a paste-ready <code style="color:#c9d1d9;">PORTS</code>
+        + <code style="color:#c9d1d9;">GRID</code> pair for the
+        <code style="color:#c9d1d9;">esp32_s3_forge</code> firmware.
+        Open <code style="color:#c9d1d9;">pio device monitor</code>,
+        paste both lines, and the running CA swaps to this circuit
+        without a re-flash.
+      </div>
+      <div style="margin-top:0.3rem;display:flex;gap:0.3rem;flex-wrap:wrap;">
+        <a href="{% url 'forge:firmware' circuit.slug %}" target="_blank"
+           style="background:#21262d;color:#7ee787;
+           border:1px solid #30363d;padding:0.2rem 0.5rem;
+           border-radius:3px;font-size:0.72rem;
+           text-decoration:none;">View .txt</a>
+        <a href="{% url 'forge:firmware' circuit.slug %}?download=1"
+           style="background:#21262d;color:#7ee787;
+           border:1px solid #30363d;padding:0.2rem 0.5rem;
+           border-radius:3px;font-size:0.72rem;
+           text-decoration:none;">⬇ Download</a>
+      </div>
+    </details>
+
+    <details style="font-size:0.78rem;">
       <summary style="cursor:pointer;color:#8b949e;">Import gate</summary>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.3rem;
            margin-top:0.3rem;color:#8b949e;font-size:0.72rem;">

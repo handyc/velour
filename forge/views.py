@@ -598,6 +598,56 @@ def circuit_evolve_promote(request, slug, run_id):
 
 
 @login_required
+def circuit_firmware(request, slug):
+    """Plain-text export of the circuit's grid + ports for the
+    esp32_s3_forge firmware. Drop this into a UART terminal to load
+    the circuit live without re-flashing.
+
+    Three lines:
+        GRID <256 hex digits>
+        PORTS <ix> <iy> <ox> <oy>
+        # (a comment line summarising the target)
+
+    Only K=4 16x16 grids are supported by the firmware, so we
+    refuse non-matching shapes. Multi-port circuits export only
+    the first input/output (the firmware handles a single I/O pair).
+    """
+    c = get_object_or_404(Circuit, slug=slug)
+    if c.width != 16 or c.height != 16:
+        return HttpResponseBadRequest(
+            f'firmware export requires 16x16 grid (got {c.width}x{c.height})'
+        )
+    grid = c.grid or [[0] * 16 for _ in range(16)]
+    flat = ''.join(f'{int(v) & 0xf:x}' for row in grid for v in row)
+    inputs  = [p for p in (c.ports or []) if p.get('role') == 'input']
+    outputs = [p for p in (c.ports or []) if p.get('role') == 'output']
+    if not inputs or not outputs:
+        return HttpResponseBadRequest(
+            'firmware export needs at least one input and one output port'
+        )
+    ip = inputs[0]
+    op = outputs[0]
+    target = c.target or {}
+    lines = [
+        f'# {c.name} — target {target.get("preset", "?")}'
+        f' ({target.get("kind", "logic")})',
+        f'PORTS {ip["x"]} {ip["y"]} {op["x"]} {op["y"]}',
+        f'GRID {flat}',
+        '',
+    ]
+    if len(inputs) > 1 or len(outputs) > 1:
+        lines.insert(0, '# (multiple ports defined; firmware uses only '
+                        'the first input + first output)')
+    body = '\n'.join(lines)
+    resp = HttpResponse(body, content_type='text/plain; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="{c.slug}.forge.txt"'
+        )
+    return resp
+
+
+@login_required
 @require_POST
 def circuit_delete(request, slug):
     c = get_object_or_404(Circuit, slug=slug)

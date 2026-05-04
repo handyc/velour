@@ -15,6 +15,7 @@ urlpatterns = [
     path('<slug:slug>/run/',  views.circuit_run,     name='run'),
     path('<slug:slug>/score/', views.circuit_score,  name='score'),
     path('<slug:slug>/transfer/', views.circuit_transfer, name='transfer'),
+    path('<slug:slug>/firmware.txt', views.circuit_firmware, name='firmware'),
     path('<slug:slug>/evolve/',           views.circuit_evolve,         name='evolve'),
     path('<slug:slug>/evolve/start/',     views.circuit_evolve_start,   name='evolve_start'),
     path('<slug:slug>/evolve/<int:run_id>/status.json',
