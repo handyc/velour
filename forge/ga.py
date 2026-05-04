@@ -41,15 +41,19 @@ class Hyper:
     # Plateau-breaking — when the best fitness hasn't improved in
     # `stagnation_limit` gens, replace the non-elite portion of the
     # population with fresh random individuals at varied densities.
-    # The mutation rate bumps to `restart_mutation_rate` for the next
-    # `restart_burst` generations. Set stagnation_limit=0 to disable.
-    #
-    # 20 gens of stalling is the empirical sweet spot — short enough
-    # to escape local optima, long enough that crossover gets to
-    # explore around a good solution before the kick.
     stagnation_limit: int = 20
     restart_mutation_rate: float = 0.08
     restart_burst: int = 4
+    # Smart-init — with `spine_prob`, each new random individual gets
+    # a wire spine (color 1) along a hex shortest-path between one
+    # random input port and one random output port. The intent was to
+    # boost baseline connectivity, but empirically the shared spine
+    # collapses population diversity faster than crossover can mix it
+    # back, and benchmarks across AND/NAND/XOR/HALF_ADDER showed it
+    # *hurt* convergence at 0.7. Default off; available as a knob for
+    # experimentation. 0.2-0.3 might still be useful — the "some get
+    # paths, most stay diverse" sweet spot.
+    spine_prob: float = 0.0
 
 
 def _empty_grid(h: int, w: int) -> list[list[int]]:
@@ -66,14 +70,71 @@ def _force_port_wires(grid: list[list[int]],
                 grid[y][x] = 1
 
 
+# Hex neighbour offsets for the simulator's flat-top / offset-columns
+# topology — must stay in lockstep with taxon.engine and forge/sim.py.
+# Each tuple is (dr, dc); the order matches (N, NE, SE, S, SW, NW).
+_HEX_NBRS_EVEN = [(-1, 0), (-1,  1), ( 0,  1), ( 1, 0), ( 0, -1), (-1, -1)]
+_HEX_NBRS_ODD  = [(-1, 0), ( 0,  1), ( 1,  1), ( 1, 0), ( 1, -1), ( 0, -1)]
+
+
+def hex_shortest_path(start_xy: tuple[int, int],
+                      end_xy: tuple[int, int],
+                      h: int, w: int) -> list[tuple[int, int]]:
+    """BFS in the hex topology used by the simulator. start/end are
+    (x, y) (column, row). Returns the path as a list of (x, y) cells
+    including both endpoints, or [] if unreachable. The neighbour
+    offsets match `forge/sim.py`'s convention exactly so a wire laid
+    along this path actually conducts under the wireworld rule.
+    """
+    sx, sy = start_xy
+    ex, ey = end_xy
+    if not (0 <= sx < w and 0 <= sy < h
+            and 0 <= ex < w and 0 <= ey < h):
+        return []
+    if (sx, sy) == (ex, ey):
+        return [(sx, sy)]
+    visited: dict[tuple[int, int], tuple[int, int] | None] = {(sy, sx): None}
+    frontier: list[tuple[int, int]] = [(sy, sx)]
+    while frontier:
+        nxt: list[tuple[int, int]] = []
+        for r, c in frontier:
+            offs = _HEX_NBRS_EVEN if (c % 2 == 0) else _HEX_NBRS_ODD
+            for dr, dc in offs:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < h and 0 <= nc < w and (nr, nc) not in visited:
+                    visited[(nr, nc)] = (r, c)
+                    if (nr, nc) == (ey, ex):
+                        path = [(nc, nr)]
+                        cur = visited[(nr, nc)]
+                        while cur is not None:
+                            path.append((cur[1], cur[0]))
+                            cur = visited[cur]
+                        return list(reversed(path))
+                    nxt.append((nr, nc))
+        frontier = nxt
+    return []
+
+
 def random_individual(rng: random.Random, h: int, w: int,
                       density: float,
-                      ports: list[dict[str, Any]]) -> list[list[int]]:
+                      ports: list[dict[str, Any]],
+                      *, spine_prob: float = 0.0) -> list[list[int]]:
     g = _empty_grid(h, w)
     for y in range(h):
         for x in range(w):
             g[y][x] = 1 if rng.random() < density else 0
     _force_port_wires(g, ports)
+
+    if spine_prob > 0 and rng.random() < spine_prob:
+        inputs = [p for p in ports if p.get('role') == 'input']
+        outputs = [p for p in ports if p.get('role') == 'output']
+        if inputs and outputs:
+            ip = rng.choice(inputs)
+            op = rng.choice(outputs)
+            path = hex_shortest_path((ip['x'], ip['y']),
+                                     (op['x'], op['y']), h, w)
+            for px, py in path:
+                g[py][px] = 1
     return g
 
 
@@ -138,7 +199,8 @@ def run_ga(*, width: int, height: int,
 
     # init pop
     pop = [random_individual(rng, height, width,
-                             hyper.init_density, ports)
+                             hyper.init_density, ports,
+                             spine_prob=hyper.spine_prob)
            for _ in range(hyper.pop_size)]
 
     history: list[dict] = []
@@ -204,7 +266,8 @@ def run_ga(*, width: int, height: int,
                 d = densities[d_i % len(densities)]
                 d_i += 1
                 new_pop.append(random_individual(
-                    rng, height, width, d, ports))
+                    rng, height, width, d, ports,
+                    spine_prob=hyper.spine_prob))
         else:
             while len(new_pop) < hyper.pop_size:
                 p1 = tournament(rng, scored, hyper.tournament_k)

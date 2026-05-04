@@ -58,7 +58,8 @@ def _worker(run_id: int) -> None:
             seed=run.seed, elite=1,
         )
 
-        pop = [random_individual(rng, h, w, hyper.init_density, ports)
+        pop = [random_individual(rng, h, w, hyper.init_density, ports,
+                                 spine_prob=hyper.spine_prob)
                for _ in range(hyper.pop_size)]
         history: list[dict[str, Any]] = []
         best_grid = pop[0]
@@ -124,7 +125,8 @@ def _worker(run_id: int) -> None:
                     d = densities[d_i % len(densities)]
                     d_i += 1
                     new_pop.append(random_individual(
-                        rng, h, w, d, ports))
+                        rng, h, w, d, ports,
+                        spine_prob=hyper.spine_prob))
             else:
                 while len(new_pop) < hyper.pop_size:
                     p1 = tournament(rng, scored, hyper.tournament_k)
