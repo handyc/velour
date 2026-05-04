@@ -249,6 +249,12 @@
         <button type="submit" style="background:#8957e5;color:#fff;border:0;
                 padding:0.4rem 0.9rem;cursor:pointer;font-size:0.78rem;
                 font-weight:600;">Score</button>
+        <button type="button" id="transfer-btn"
+                style="background:#21262d;color:#a371f7;border:1px solid #30363d;
+                padding:0.4rem 0.9rem;cursor:pointer;font-size:0.78rem;
+                font-weight:600;" title="Sweep input rate 0→1 and plot output">
+          ∿ Transfer plot
+        </button>
       </form>
 
       <details id="custom-rows-wrap" style="margin-top:0.5rem;display:none;">
@@ -268,6 +274,17 @@
       </details>
 
       <div id="score-result" style="margin-top:0.6rem;"></div>
+      <div id="transfer-result" style="margin-top:0.6rem;display:none;">
+        <div style="font-size:0.78rem;color:#8b949e;margin-bottom:0.2rem;">
+          Transfer function: input rate (x) → output rate (y), sampled
+          across [0, 1]. Diagonal = passthrough; flat top = saturating
+          low-pass; step = high-pass.
+        </div>
+        <canvas id="transfer-chart" width="640" height="240"
+                style="background:#0a0a0a;border:1px solid #30363d;
+                border-radius:4px;width:100%;max-width:640px;
+                height:auto;display:block;"></canvas>
+      </div>
     </div>
   </div>
 </div>
@@ -1042,6 +1059,113 @@ function renderScore(data){
             replayScoreRow(data, ri);
         });
     });
+}
+
+// ---------- Transfer-function plot ----------
+const URL_TRANSFER = '{% url "forge:transfer" circuit.slug %}';
+
+document.getElementById('transfer-btn').addEventListener('click', async () => {
+    const ticks = parseInt(document.getElementById('t-ticks').value, 10) || 60;
+    const t_lo = parseInt(document.getElementById('t-eval-lo').value, 10) || 0;
+    const t_hi = parseInt(document.getElementById('t-eval-hi').value, 10) || ticks;
+    const r = await fetch(URL_TRANSFER, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({
+            grid: design, ports: ports,
+            ticks, eval_window: [t_lo, t_hi], steps: 11,
+        }),
+    });
+    const data = await r.json();
+    if (!data.ok){
+        alert(data.reason || 'transfer plot failed');
+        return;
+    }
+    drawTransfer(data);
+});
+
+function drawTransfer(data){
+    const wrap = document.getElementById('transfer-result');
+    wrap.style.display = '';
+    const c = document.getElementById('transfer-chart');
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const padL = 38, padR = 12, padT = 12, padB = 24;
+    const W = c.width - padL - padR;
+    const H = c.height - padT - padB;
+    // axes
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + H);
+    ctx.lineTo(padL + W, padT + H);
+    ctx.stroke();
+    // gridlines
+    ctx.strokeStyle = '#1d2330';
+    for (let i = 1; i <= 4; i++){
+        const y = padT + H * i / 4;
+        ctx.beginPath(); ctx.moveTo(padL, y);
+        ctx.lineTo(padL + W, y); ctx.stroke();
+        const x = padL + W * i / 4;
+        ctx.beginPath(); ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + H); ctx.stroke();
+    }
+    // diagonal "ideal passthrough" reference
+    ctx.strokeStyle = '#21262d';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padL, padT + H);
+    ctx.lineTo(padL + W, padT);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Plot one line per output
+    const colours = ['#7ee787', '#f0c040', '#58a6ff', '#ff7b72',
+                     '#a371f7', '#3df0ff'];
+    const N = data.samples.length;
+    const nOut = (data.outputs || []).length;
+    for (let oi = 0; oi < nOut; oi++){
+        ctx.strokeStyle = colours[oi % colours.length];
+        ctx.fillStyle   = colours[oi % colours.length];
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        for (let i = 0; i < N; i++){
+            const s = data.samples[i];
+            const x = padL + s.input_rate * W;
+            const y = padT + H - s.output_rates[oi] * H;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        for (let i = 0; i < N; i++){
+            const s = data.samples[i];
+            const x = padL + s.input_rate * W;
+            const y = padT + H - s.output_rates[oi] * H;
+            ctx.beginPath();
+            ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+    // labels
+    ctx.fillStyle = '#6e7681';
+    ctx.font = '10px ui-monospace';
+    ctx.fillText('1.0', 12, padT + 8);
+    ctx.fillText('0.0', 12, padT + H);
+    ctx.fillText('0.0', padL - 4, c.height - 8);
+    ctx.fillText('1.0', padL + W - 12, c.height - 8);
+    ctx.fillText('input rate →',
+                 padL + W / 2 - 28, c.height - 4);
+    ctx.save();
+    ctx.translate(10, padT + H / 2 + 30);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('output rate', 0, 0);
+    ctx.restore();
+    // Legend
+    let lx = padL + 8;
+    for (let oi = 0; oi < nOut; oi++){
+        ctx.fillStyle = colours[oi % colours.length];
+        ctx.fillText(data.outputs[oi], lx, padT + 12);
+        lx += 30;
+    }
 }
 
 async function replayScoreRow(scoreData, rowIndex){

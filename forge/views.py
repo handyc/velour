@@ -315,6 +315,100 @@ def circuit_run(request, slug):
 
 @login_required
 @require_POST
+def circuit_transfer(request, slug):
+    """Sweep input rate(s) from 0 to 1 and return observed output
+    rates. For a single-input circuit this is the classic transfer
+    function (input rate → output rate). For multi-input circuits we
+    sweep ALL inputs synchronously together at the same rate, giving
+    a "common-mode" curve.
+
+    Body JSON:
+        grid:   2D array (live design)
+        ports:  list of port dicts (live)
+        ticks:  default 60
+        eval_window: default [15, ticks]
+        steps:  number of rate samples (default 11, range 3..41)
+        target: optional, used only for input/output port-name lists
+    """
+    import numpy as np
+
+    from .score import _decode_rate, _rate_to_period
+    from .sim import hex_step, wireworld_lookup
+
+    c = get_object_or_404(Circuit, slug=slug)
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest('bad JSON')
+
+    grid_data = payload.get('grid') or c.grid
+    ports = payload.get('ports') if 'ports' in payload else (c.ports or [])
+    ticks = max(10, min(200, int(payload.get('ticks', 60))))
+    ew = payload.get('eval_window') or [max(0, ticks // 4), ticks]
+    t_lo = max(0, int(ew[0]))
+    t_hi = min(ticks + 1, max(t_lo + 1, int(ew[1])))
+    steps = max(3, min(41, int(payload.get('steps', 11))))
+
+    target = payload.get('target') or c.target or {}
+    in_names = target.get('inputs') or [
+        p['name'] for p in ports if p.get('role') == 'input'
+    ]
+    out_names = target.get('outputs') or [
+        p['name'] for p in ports if p.get('role') == 'output'
+    ]
+    inputs_by_name = {p['name']: p for p in ports
+                      if p.get('role') == 'input'}
+    outputs_by_name = {p['name']: p for p in ports
+                       if p.get('role') == 'output'}
+    in_ports = [inputs_by_name[n] for n in in_names if n in inputs_by_name]
+    out_ports = [outputs_by_name[n] for n in out_names if n in outputs_by_name]
+    if not in_ports or not out_ports:
+        return JsonResponse({'ok': False,
+                             'reason': 'need at least one input and output port'},
+                            status=400)
+
+    base = np.array(grid_data, dtype=np.uint8)
+    if base.shape != (c.height, c.width):
+        return HttpResponseBadRequest('grid shape mismatch')
+
+    lut = wireworld_lookup()
+    window_size = t_hi - t_lo
+
+    samples: list[dict] = []
+    for k in range(steps):
+        rate = k / (steps - 1) if steps > 1 else 0.0
+        period = _rate_to_period(rate)
+        g = base.copy()
+        traj = [g.copy()]
+        for t in range(ticks):
+            if period is not None and t % period == 0:
+                for p in in_ports:
+                    g = g.copy()
+                    g[p['y'], p['x']] = 2
+            g = hex_step(g, lut, n_colors=4)
+            traj.append(g.copy())
+        observed = []
+        for p in out_ports:
+            count = 0
+            for t in range(t_lo, min(t_hi, len(traj))):
+                if int(traj[t][p['y'], p['x']]) == 2:
+                    count += 1
+            observed.append(_decode_rate(count, window_size))
+        samples.append({'input_rate': rate, 'output_rates': observed})
+
+    return JsonResponse({
+        'ok':       True,
+        'inputs':   [p['name'] for p in in_ports],
+        'outputs':  [p['name'] for p in out_ports],
+        'ticks':    ticks,
+        'eval_window': [t_lo, t_hi],
+        'steps':    steps,
+        'samples':  samples,
+    })
+
+
+@login_required
+@require_POST
 def circuit_score(request, slug):
     """Score the circuit against a target truth table.
 
