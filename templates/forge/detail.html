@@ -131,6 +131,67 @@
       <h3 style="margin:0 0 0.4rem 0;font-size:0.92rem;">Outputs</h3>
       <div id="outputs"></div>
     </div>
+
+    <div style="margin-top:0.8rem;background:#0d1117;border:1px solid #30363d;
+         border-radius:6px;padding:0.6rem 0.8rem;">
+      <h3 style="margin:0 0 0.4rem 0;font-size:0.92rem;">Target / score</h3>
+      <p style="font-size:0.72rem;color:#6e7681;margin:0 0 0.5rem 0;
+         max-width:64ch;line-height:1.4;">
+        Pick a preset gate; the scorer runs the simulation once per
+        truth-table row, pulses inputs at t=0, and looks for a head at
+        each output during the eval window. Inputs map to ports named
+        <code style="color:#c9d1d9;">A</code> /
+        <code style="color:#c9d1d9;">B</code>; output is named
+        <code style="color:#c9d1d9;">Q</code>. Rename ports to match
+        in the grid (right-click → input, name auto-set to
+        <code style="color:#c9d1d9;">input-N</code> — edit the name
+        in the ports list later).
+      </p>
+      <form id="score-form" style="display:flex;gap:0.5rem;align-items:end;
+            flex-wrap:wrap;font-size:0.78rem;">
+        <label style="color:#8b949e;">preset
+          <select id="t-preset"
+                  style="display:block;background:#161b22;color:#c9d1d9;
+                  border:1px solid #30363d;padding:0.25rem 0.4rem;">
+            <option>AND</option>
+            <option>OR</option>
+            <option>XOR</option>
+            <option>NAND</option>
+            <option>NOR</option>
+            <option>XNOR</option>
+          </select>
+        </label>
+        <label style="color:#8b949e;">inputs
+          <input id="t-inputs" type="text" value="A,B" size="6"
+                 style="display:block;background:#161b22;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem 0.4rem;">
+        </label>
+        <label style="color:#8b949e;">outputs
+          <input id="t-outputs" type="text" value="Q" size="4"
+                 style="display:block;background:#161b22;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem 0.4rem;">
+        </label>
+        <label style="color:#8b949e;">ticks
+          <input id="t-ticks" type="number" value="30" min="1" max="200"
+                 style="display:block;background:#161b22;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem 0.4rem;width:5rem;">
+        </label>
+        <label style="color:#8b949e;">eval lo / hi
+          <span style="display:flex;gap:0.2rem;">
+            <input id="t-eval-lo" type="number" value="5" min="0" max="200"
+                   style="background:#161b22;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem 0.4rem;width:4rem;">
+            <input id="t-eval-hi" type="number" value="30" min="1" max="200"
+                   style="background:#161b22;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem 0.4rem;width:4rem;">
+          </span>
+        </label>
+        <button type="submit" style="background:#8957e5;color:#fff;border:0;
+                padding:0.4rem 0.9rem;cursor:pointer;font-size:0.78rem;
+                font-weight:600;">Score</button>
+      </form>
+      <div id="score-result" style="margin-top:0.6rem;"></div>
+    </div>
   </div>
 </div>
 
@@ -526,6 +587,78 @@ function showOutputs(outputs){
         wrap.appendChild(reads);
         el.appendChild(wrap);
     }
+}
+
+// ---------- target / score ----------
+const URL_SCORE = '{% url "forge:score" circuit.slug %}';
+
+document.getElementById('score-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const preset = document.getElementById('t-preset').value;
+    const inNames = document.getElementById('t-inputs').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+    const outNames = document.getElementById('t-outputs').value
+        .split(',').map(s => s.trim()).filter(Boolean);
+    const ticks = parseInt(document.getElementById('t-ticks').value, 10) || 30;
+    const t_lo = parseInt(document.getElementById('t-eval-lo').value, 10) || 0;
+    const t_hi = parseInt(document.getElementById('t-eval-hi').value, 10) || ticks;
+    const target = {
+        preset, inputs: inNames, outputs: outNames,
+        ticks, eval_window: [t_lo, t_hi],
+    };
+    const r = await fetch(URL_SCORE, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({grid: design, ports, target}),
+    });
+    const data = await r.json();
+    renderScore(data);
+});
+
+function renderScore(data){
+    const el = document.getElementById('score-result');
+    if (!data.ok){
+        el.innerHTML = `<div style="color:#ff7b72;font-size:0.8rem;">
+            ✗ ${data.reason || 'score failed'}</div>`;
+        return;
+    }
+    const pct = Math.round(data.fitness * 100);
+    const colour = pct === 100 ? '#7ee787' : pct >= 50 ? '#f0c040' : '#ff7b72';
+    let html = `<div style="display:flex;gap:0.6rem;align-items:center;
+                margin-bottom:0.4rem;font-size:0.85rem;">
+        <span style="background:${colour};color:#0d1117;padding:0.15rem 0.5rem;
+              border-radius:3px;font-weight:600;">
+          ${data.correct} / ${data.total}  ·  ${pct}%
+        </span>
+        <span style="color:#8b949e;font-size:0.72rem;">
+          target <strong>${data.preset || 'CUSTOM'}</strong> ·
+          inputs ${data.inputs.join(',')} → outputs ${data.outputs.join(',')}
+          · ticks ${data.ticks} · window [${data.eval_window[0]}, ${data.eval_window[1]}]
+        </span>
+      </div>`;
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.78rem;">';
+    html += '<thead><tr style="color:#8b949e;font-size:0.7rem;">'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">in</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">expected</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">actual</th>'
+          + '<th style="text-align:left;padding:0.2rem 0.4rem;">ok</th>'
+          + '</tr></thead><tbody>';
+    for (const r of data.rows){
+        const okMark = r.ok
+            ? '<span style="color:#7ee787;">✓</span>'
+            : '<span style="color:#ff7b72;">✗</span>';
+        const inS = r.in.join(', ');
+        const exS = r.expected.join(', ');
+        const acS = r.actual.length ? r.actual.join(', ') : '—';
+        html += `<tr style="border-top:1px solid #21262d;">
+            <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${inS}</td>
+            <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${exS}</td>
+            <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${acS}</td>
+            <td style="padding:0.2rem 0.4rem;">${okMark}</td>
+          </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
 }
 
 rebuildSvg();

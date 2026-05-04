@@ -22,6 +22,7 @@ from automaton.packed import PackedRuleset
 from taxon.engine import _step
 
 from .models import Circuit
+from .score import preset_truth_table, score_circuit
 from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE, build_wireworld_rule
 
 
@@ -202,6 +203,59 @@ def circuit_run(request, slug):
         'palette': c.palette_or_default,
         'autosaved': autosave,
     })
+
+
+@login_required
+@require_POST
+def circuit_score(request, slug):
+    """Score the circuit against a target truth table.
+
+    Request JSON:
+        grid:   2D array (live, may differ from saved)
+        ports:  list of port dicts (live)
+        target: {
+            preset: 'AND'|'OR'|'XOR'|'NAND'|'NOR'|'XNOR'|'CUSTOM',
+            inputs: ['A', 'B'],
+            outputs: ['Q'],
+            rows: [{in, out}, …]   # required if preset == 'CUSTOM'
+            ticks: 30,
+            eval_window: [5, 30],
+        }
+    """
+    c = get_object_or_404(Circuit, slug=slug)
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest('bad JSON')
+
+    grid = payload.get('grid') or c.grid
+    ports = payload.get('ports') if 'ports' in payload else (c.ports or [])
+    target = payload.get('target') or {}
+
+    preset = (target.get('preset') or '').strip().upper()
+    rows = target.get('rows')
+    if preset and preset != 'CUSTOM' and not rows:
+        rows = preset_truth_table(preset)
+        if rows is None:
+            return JsonResponse({'ok': False,
+                                 'reason': f'unknown preset: {preset}'},
+                                status=400)
+
+    full_target = {
+        'inputs':  target.get('inputs', ['A', 'B']),
+        'outputs': target.get('outputs', ['Q']),
+        'rows':    rows or [],
+        'ticks':   target.get('ticks', 30),
+        'eval_window': target.get('eval_window'),
+    }
+
+    result = score_circuit(
+        grid=grid, ports=ports,
+        width=c.width, height=c.height, target=full_target,
+    )
+    result['preset'] = preset or 'CUSTOM'
+    result['target'] = full_target
+    return JsonResponse(result)
 
 
 @login_required

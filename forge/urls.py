@@ -10,5 +10,6 @@ urlpatterns = [
     path('<slug:slug>/',      views.circuit_detail,  name='detail'),
     path('<slug:slug>/save/', views.circuit_save,    name='save'),
     path('<slug:slug>/run/',  views.circuit_run,     name='run'),
+    path('<slug:slug>/score/', views.circuit_score,  name='score'),
     path('<slug:slug>/delete/', views.circuit_delete, name='delete'),
 ]
