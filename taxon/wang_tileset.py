@@ -70,14 +70,32 @@ def _default_palette(k: int = 4) -> list[str]:
     return ['#101010', '#2a8c5b', '#d8a93a', '#c04a4a'][:k]
 
 
+def _ruleset_for_rule(rule):
+    """Idempotently create / fetch an automaton.RuleSet for a taxon Rule.
+
+    Reuses taxon.exporters.to_automaton, which is sha1-deduped, so
+    re-running on the same rule never creates a second RuleSet.
+    Returns None if `rule` is None or non-K=4.
+    """
+    if rule is None or rule.kind != 'hex_k4_packed' or rule.n_colors != 4:
+        return None
+    from . import exporters
+    sim = exporters.to_automaton(rule)
+    return sim.ruleset
+
+
 def generate_complete_hex_tileset(
     *, name: str, description: str = '',
     k: int = 4, palette: list[str] | None = None,
-    ca_ruleset=None,
+    rule=None,
     source: str = 'operator',
     source_metadata: dict | None = None,
 ) -> TileSet:
     """Create a TileSet of k**3 hex Wang tiles in the pipe model.
+
+    If `rule` (a taxon.Rule) is given, every tile's ca_ruleset is bound
+    to the corresponding automaton.RuleSet so the tiles app's CA-Wang
+    runner can animate them.
 
     If a TileSet with the same name exists it is replaced (delete +
     recreate) so re-runs are idempotent. Each Tile's name is the
@@ -88,6 +106,8 @@ def generate_complete_hex_tileset(
     palette = palette or _default_palette(k)
     if len(palette) < k:
         raise ValueError(f'palette has {len(palette)} colours, need ≥{k}')
+
+    ca_ruleset = _ruleset_for_rule(rule)
 
     TileSet.objects.filter(name=name).delete()
 

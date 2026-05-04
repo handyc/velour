@@ -1309,10 +1309,12 @@ def wang_tileset_generate(request):
         + (f' CA payload: rule {rule.sha1[:12]}.' if rule else '')
     )
 
-    # The Tile model's ca_ruleset is automaton.RuleSet, not taxon.Rule.
-    # We pass None for now and let the user wire that up downstream.
+    # Pass the rule through; the generator converts it to an
+    # automaton.RuleSet (sha1-deduped) and binds every tile to it,
+    # so the tiles app's CA-Wang runner can animate the tiling.
     ts = generate_complete_hex_tileset(
         name=name, description=description, k=4, palette=palette,
+        rule=rule,
         source_metadata={
             'rule_sha1': rule.sha1 if rule else '',
             'rule_slug': rule.slug if rule else '',
