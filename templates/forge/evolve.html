@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+{% block title %}Forge — evolve {{ circuit.name }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<p style="margin-bottom:0.2rem;font-size:0.82rem;">
+  <a href="{% url 'forge:detail' circuit.slug %}" style="color:#58a6ff;">← {{ circuit.name }}</a>
+  · <a href="{% url 'forge:list' %}" style="color:#58a6ff;">all circuits</a>
+</p>
+
+<h1 style="margin-top:0;">Evolve
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — GA over configurations · {{ circuit.width }}×{{ circuit.height }}
+  </span>
+</h1>
+<p style="color:#8b949e;font-size:0.8rem;max-width:64ch;line-height:1.5;">
+  Genome = the wire layout (color 0/1 per cell). Heads/tails are
+  transient simulation state and aren't part of the genome. Port
+  positions stay fixed across the population — every individual has
+  the same I/O slots. Fitness is the truth-table score from the
+  Score panel on the editor.
+</p>
+
+<div style="display:grid;grid-template-columns:340px 1fr;gap:1rem;
+     align-items:flex-start;">
+
+  <form id="ga-form" style="background:#161b22;border:1px solid #30363d;
+        border-radius:6px;padding:0.7rem 0.9rem;display:grid;
+        grid-template-columns:1fr 1fr;gap:0.5rem 0.7rem;font-size:0.78rem;">
+    <label style="grid-column:1/3;color:#8b949e;">Target preset
+      <select name="preset" style="display:block;width:100%;
+              background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+              padding:0.25rem;">
+        <option>AND</option><option>OR</option><option>XOR</option>
+        <option>NAND</option><option>NOR</option><option>XNOR</option>
+      </select>
+    </label>
+    <label style="color:#8b949e;">inputs
+      <input name="inputs" value="A,B" type="text"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">outputs
+      <input name="outputs" value="Q" type="text"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">ticks/row
+      <input name="ticks" value="30" type="number" min="4" max="200"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">eval window
+      <input name="eval_window" value="1,30" type="text"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+
+    <hr style="grid-column:1/3;border:0;border-top:1px solid #21262d;">
+
+    <label style="color:#8b949e;">pop size
+      <input name="pop_size" value="32" type="number" min="4" max="128"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">generations
+      <input name="generations" value="30" type="number" min="1" max="200"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">mutation rate
+      <input name="mutation_rate" value="0.03" type="number"
+             step="0.005" min="0" max="1"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">crossover rate
+      <input name="crossover_rate" value="0.85" type="number"
+             step="0.05" min="0" max="1"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">tournament k
+      <input name="tournament_k" value="3" type="number" min="2" max="10"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">init density
+      <input name="init_density" value="0.20" type="number"
+             step="0.05" min="0" max="1"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="color:#8b949e;">seed
+      <input name="seed" value="7" type="number" min="0"
+             style="display:block;width:100%;background:#0d1117;
+             color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+    </label>
+
+    <button type="submit" style="grid-column:1/3;background:#8957e5;
+            color:#fff;border:0;padding:0.45rem;cursor:pointer;
+            font-weight:600;font-size:0.85rem;border-radius:3px;">
+      ▶ Evolve
+    </button>
+  </form>
+
+  <div>
+    <div id="run-status" style="background:#0d1117;border:1px solid #30363d;
+         border-radius:6px;padding:0.6rem 0.8rem;display:none;">
+      <div style="display:flex;gap:0.7rem;align-items:center;
+           flex-wrap:wrap;">
+        <span id="run-badge" style="font-weight:600;font-size:0.85rem;
+              padding:0.15rem 0.5rem;border-radius:3px;"></span>
+        <span id="run-summary" style="color:#8b949e;font-size:0.78rem;
+              flex:1;"></span>
+        <button id="promote-btn" style="display:none;background:#238636;
+                color:#fff;border:0;padding:0.3rem 0.8rem;cursor:pointer;
+                font-size:0.78rem;font-weight:600;border-radius:3px;">
+          Promote best → editor
+        </button>
+      </div>
+      <canvas id="fit-chart" width="900" height="180"
+              style="width:100%;max-width:900px;height:auto;
+              background:#0a0a0a;border:1px solid #30363d;
+              border-radius:4px;margin-top:0.5rem;display:block;"></canvas>
+      <svg id="best-svg" xmlns="http://www.w3.org/2000/svg"
+           style="display:block;background:#0a0a0a;
+           border:1px solid #30363d;border-radius:6px;
+           margin-top:0.5rem;"></svg>
+    </div>
+
+    <div style="margin-top:1rem;background:#0d1117;border:1px solid #30363d;
+         border-radius:6px;padding:0.5rem 0.8rem;">
+      <h3 style="margin:0 0 0.4rem 0;font-size:0.95rem;">Recent runs</h3>
+      {% if runs %}
+      <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <thead><tr style="color:#8b949e;font-size:0.7rem;">
+          <th style="text-align:left;padding:0.2rem 0.4rem;">when</th>
+          <th style="text-align:left;padding:0.2rem 0.4rem;">target</th>
+          <th style="text-align:left;padding:0.2rem 0.4rem;">pop × gen</th>
+          <th style="text-align:left;padding:0.2rem 0.4rem;">best</th>
+          <th style="text-align:left;padding:0.2rem 0.4rem;">status</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+        {% for r in runs %}
+        <tr style="border-top:1px solid #21262d;">
+          <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">{{ r.started_at|date:"M d H:i" }}</td>
+          <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">{{ r.target.preset|default:"—" }}</td>
+          <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">{{ r.pop_size }} × {{ r.generations }}</td>
+          <td style="padding:0.2rem 0.4rem;color:{% if r.best_fitness >= 1.0 %}#7ee787{% elif r.best_fitness >= 0.5 %}#f0c040{% else %}#ff7b72{% endif %};font-weight:600;">{{ r.best_fitness|floatformat:2 }}</td>
+          <td style="padding:0.2rem 0.4rem;color:#8b949e;">{{ r.status }}{% if r.current_gen %} · gen {{ r.current_gen }}{% endif %}</td>
+          <td style="padding:0.2rem 0.4rem;">
+            <button class="resume-run" data-run="{{ r.pk }}"
+                    style="background:#21262d;color:#c9d1d9;
+                    border:1px solid #30363d;padding:0.15rem 0.5rem;
+                    cursor:pointer;font-size:0.7rem;">view</button>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="color:#6e7681;font-size:0.78rem;margin:0;">
+        No runs yet. Set a target above and click <em>Evolve</em>.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+</div>
+
+{{ circuit.grid|json_script:"circuit-grid" }}
+{{ circuit.ports|json_script:"circuit-ports" }}
+{{ palette|json_script:"circuit-palette" }}
+
+<script>
+const CSRF = document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1];
+const SLUG = '{{ circuit.slug }}';
+const W = {{ circuit.width }};
+const H = {{ circuit.height }};
+const URL_START   = '{% url "forge:evolve_start" circuit.slug %}';
+const URL_STATUS  = (rid) => `/forge/${SLUG}/evolve/${rid}/status.json`;
+const URL_PROMOTE = (rid) => `/forge/${SLUG}/evolve/${rid}/promote/`;
+
+const PAL = JSON.parse(document.getElementById('circuit-palette').textContent);
+const initialGrid = JSON.parse(document.getElementById('circuit-grid').textContent);
+const ports = JSON.parse(document.getElementById('circuit-ports').textContent) || [];
+
+let activeRunId = null;
+let pollTimer = null;
+
+document.getElementById('ga-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const get = n => f.querySelector(`[name="${n}"]`).value;
+    const ev = get('eval_window').split(',').map(s => parseInt(s.trim(), 10) || 0);
+    const target = {
+        preset:  get('preset'),
+        inputs:  get('inputs').split(',').map(s => s.trim()).filter(Boolean),
+        outputs: get('outputs').split(',').map(s => s.trim()).filter(Boolean),
+        ticks:   parseInt(get('ticks'), 10),
+        eval_window: [ev[0], ev[1] || parseInt(get('ticks'), 10)],
+    };
+    const payload = {
+        target,
+        pop_size:       parseInt(get('pop_size'), 10),
+        generations:    parseInt(get('generations'), 10),
+        mutation_rate:  parseFloat(get('mutation_rate')),
+        crossover_rate: parseFloat(get('crossover_rate')),
+        tournament_k:   parseInt(get('tournament_k'), 10),
+        init_density:   parseFloat(get('init_density')),
+        seed:           parseInt(get('seed'), 10),
+        ports,
+    };
+    const r = await fetch(URL_START, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!data.ok){
+        alert(data.reason || 'evolve start failed');
+        return;
+    }
+    startPolling(data.run_id);
+});
+
+document.querySelectorAll('.resume-run').forEach(b => {
+    b.addEventListener('click', () => startPolling(parseInt(b.dataset.run, 10)));
+});
+
+function startPolling(runId){
+    activeRunId = runId;
+    document.getElementById('run-status').style.display = '';
+    document.getElementById('promote-btn').style.display = 'none';
+    if (pollTimer) clearInterval(pollTimer);
+    poll();
+    pollTimer = setInterval(poll, 800);
+}
+
+async function poll(){
+    if (!activeRunId) return;
+    const r = await fetch(URL_STATUS(activeRunId));
+    if (!r.ok) return;
+    const data = await r.json();
+    renderRun(data);
+    if (!data.is_active){
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+function renderRun(data){
+    const badge = document.getElementById('run-badge');
+    const summary = document.getElementById('run-summary');
+    const promo = document.getElementById('promote-btn');
+
+    const status = data.status;
+    const fit = data.best_fitness || 0;
+    const colour = status === 'done' && fit >= 1
+        ? '#7ee787'
+        : status === 'failed' ? '#ff7b72'
+        : status === 'done' ? '#f0c040'
+        : '#3df0ff';
+    badge.style.background = colour;
+    badge.style.color = '#0d1117';
+    badge.textContent = status === 'running'
+        ? `${status} · gen ${data.current_gen + 1}/${data.generations}`
+        : `${status}`;
+    const tgt = data.target || {};
+    summary.textContent =
+        `target ${tgt.preset || '?'} · best ${fit.toFixed(2)} · ` +
+        `${(data.fitness_history || []).length} gens recorded` +
+        (data.error ? ` · ${data.error.slice(0, 60)}` : '');
+
+    promo.style.display = (status === 'done' && data.best_grid &&
+                           data.best_grid.length) ? '' : 'none';
+    promo.onclick = async () => {
+        const r = await fetch(URL_PROMOTE(data.run_id), {
+            method: 'POST',
+            headers: {'X-CSRFToken': CSRF},
+        });
+        const j = await r.json();
+        if (j.ok && j.detail_url) location.href = j.detail_url;
+    };
+
+    drawChart(data.fitness_history || []);
+    drawBest(data.best_grid);
+}
+
+function drawChart(history){
+    const c = document.getElementById('fit-chart');
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, c.width, c.height);
+    if (!history.length) return;
+    const padL = 32, padR = 8, padT = 8, padB = 18;
+    const W = c.width - padL - padR;
+    const H = c.height - padT - padB;
+    // axes
+    ctx.strokeStyle = '#21262d';
+    ctx.beginPath();
+    ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + H);
+    ctx.lineTo(padL + W, padT + H);
+    ctx.stroke();
+    // gridlines
+    ctx.strokeStyle = '#1d2330';
+    for (let i = 1; i <= 4; i++){
+        const y = padT + H * i / 4;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + W, y); ctx.stroke();
+    }
+    // labels
+    ctx.fillStyle = '#6e7681';
+    ctx.font = '10px ui-monospace';
+    ctx.fillText('1.0', 4, padT + 8);
+    ctx.fillText('0.0', 4, padT + H);
+    const T = history.length;
+    function plot(getter, colour){
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        for (let i = 0; i < T; i++){
+            const x = padL + (T === 1 ? W : (i / (T - 1)) * W);
+            const y = padT + H - getter(history[i]) * H;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    plot(h => h.mean, '#8b949e');
+    plot(h => h.best, '#7ee787');
+    // Legend
+    ctx.fillStyle = '#7ee787';
+    ctx.fillText('best', padL + 6, padT + 12);
+    ctx.fillStyle = '#8b949e';
+    ctx.fillText('mean', padL + 40, padT + 12);
+}
+
+function drawBest(grid){
+    const svg = document.getElementById('best-svg');
+    svg.innerHTML = '';
+    if (!grid || !grid.length) {
+        svg.style.display = 'none';
+        return;
+    }
+    svg.style.display = 'block';
+    const SQ3 = Math.sqrt(3);
+    const R = 12;
+    const COL_STEP = R * SQ3;
+    const ROW_STEP = R * 1.5;
+    const w = grid[0].length;
+    const h = grid.length;
+    const svgW = w * COL_STEP + COL_STEP / 2 + 4;
+    const svgH = h * ROW_STEP + R + 4;
+    svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+    svg.setAttribute('width', Math.min(600, svgW));
+    svg.setAttribute('height', svgH * Math.min(600, svgW) / svgW);
+    for (let y = 0; y < h; y++){
+        for (let x = 0; x < w; x++){
+            const cx = x * COL_STEP + (y & 1) * (COL_STEP / 2) + R * SQ3 / 2;
+            const cy = y * ROW_STEP + R;
+            const half = SQ3 / 2;
+            const points = [
+                [cx,            cy - R],
+                [cx + R*half,   cy - R/2],
+                [cx + R*half,   cy + R/2],
+                [cx,            cy + R],
+                [cx - R*half,   cy + R/2],
+                [cx - R*half,   cy - R/2],
+            ].map(p => p.map(v => v.toFixed(2)).join(',')).join(' ');
+            const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            poly.setAttribute('points', points);
+            poly.setAttribute('fill', PAL[grid[y][x] | 0] || '#101010');
+            poly.setAttribute('stroke', '#1d2330');
+            poly.setAttribute('stroke-width', '0.6');
+            svg.appendChild(poly);
+        }
+    }
+    // mark ports
+    for (const p of ports){
+        const cx = p.x * COL_STEP + (p.y & 1) * (COL_STEP / 2) + R * SQ3 / 2;
+        const cy = p.y * ROW_STEP + R;
+        const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        c.setAttribute('cx', cx);
+        c.setAttribute('cy', cy);
+        c.setAttribute('r', R * 0.45);
+        c.setAttribute('fill', 'none');
+        c.setAttribute('stroke', p.role === 'input' ? '#3df0ff' : '#ff7b72');
+        c.setAttribute('stroke-width', '1.6');
+        svg.appendChild(c);
+    }
+}
+</script>
+{% endblock %}

@@ -14,6 +14,7 @@ from django.http import (
     HttpResponse, HttpResponseBadRequest, JsonResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 import numpy as np
@@ -21,7 +22,8 @@ import numpy as np
 from automaton.packed import PackedRuleset
 from taxon.engine import _step
 
-from .models import Circuit
+from .models import Circuit, EvolutionRun
+from .runner import is_running, start_run
 from .score import preset_truth_table, score_circuit
 from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE, build_wireworld_rule
 
@@ -256,6 +258,123 @@ def circuit_score(request, slug):
     result['preset'] = preset or 'CUSTOM'
     result['target'] = full_target
     return JsonResponse(result)
+
+
+@login_required
+def circuit_evolve(request, slug):
+    """Evolve page — recent GA runs + form to start a new one."""
+    c = get_object_or_404(Circuit, slug=slug)
+    runs = c.evolution_runs.order_by('-started_at')[:20]
+    return render(request, 'forge/evolve.html', {
+        'circuit':  c,
+        'runs':     runs,
+        'palette':  c.palette_or_default,
+    })
+
+
+@login_required
+@require_POST
+def circuit_evolve_start(request, slug):
+    """Create an EvolutionRun row and spawn the GA thread."""
+    c = get_object_or_404(Circuit, slug=slug)
+
+    try:
+        payload = json.loads(request.body or b'{}')
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest('bad JSON')
+
+    grid = payload.get('grid')
+    ports = payload.get('ports')
+    if grid is not None:
+        c.grid = grid
+    if ports is not None:
+        c.ports = ports
+    if grid is not None or ports is not None:
+        c.save(update_fields=['grid', 'ports', 'updated_at'])
+
+    target = payload.get('target') or {}
+    preset = (target.get('preset') or '').strip().upper() or 'AND'
+    rows = target.get('rows') or preset_truth_table(preset)
+    if rows is None:
+        return JsonResponse({'ok': False,
+                             'reason': f'unknown preset: {preset}'},
+                            status=400)
+    full_target = {
+        'preset':  preset,
+        'inputs':  target.get('inputs', ['A', 'B']),
+        'outputs': target.get('outputs', ['Q']),
+        'rows':    rows,
+        'ticks':   int(target.get('ticks', 30)),
+        'eval_window': target.get('eval_window'),
+    }
+
+    def _i(name, default, lo, hi):
+        try:
+            v = int(payload.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    def _f(name, default, lo, hi):
+        try:
+            v = float(payload.get(name, default))
+        except (TypeError, ValueError):
+            v = default
+        return max(lo, min(hi, v))
+
+    run = EvolutionRun.objects.create(
+        circuit=c, status='queued',
+        pop_size=_i('pop_size', 32, 4, 128),
+        generations=_i('generations', 30, 1, 200),
+        mutation_rate=_f('mutation_rate', 0.03, 0.0, 1.0),
+        crossover_rate=_f('crossover_rate', 0.85, 0.0, 1.0),
+        tournament_k=_i('tournament_k', 3, 2, 10),
+        init_density=_f('init_density', 0.20, 0.0, 1.0),
+        seed=_i('seed', 7, 0, 2**31 - 1),
+        target=full_target,
+    )
+    start_run(run.pk)
+    return JsonResponse({'ok': True, 'run_id': run.pk})
+
+
+@login_required
+def circuit_evolve_status(request, slug, run_id):
+    """JSON status for a running / completed evolution run."""
+    c = get_object_or_404(Circuit, slug=slug)
+    run = get_object_or_404(EvolutionRun, pk=run_id, circuit=c)
+    return JsonResponse({
+        'ok': True,
+        'run_id': run.pk,
+        'status': run.status,
+        'is_active': run.is_active,
+        'is_alive': is_running(run.pk),
+        'current_gen': run.current_gen,
+        'generations': run.generations,
+        'best_fitness': run.best_fitness,
+        'fitness_history': run.fitness_history,
+        'best_grid': run.best_grid,
+        'finished_at': run.finished_at.isoformat() if run.finished_at else None,
+        'started_at': run.started_at.isoformat(),
+        'error': run.error,
+        'target': run.target,
+    })
+
+
+@login_required
+@require_POST
+def circuit_evolve_promote(request, slug, run_id):
+    """Copy a finished run's best_grid into the circuit's design."""
+    c = get_object_or_404(Circuit, slug=slug)
+    run = get_object_or_404(EvolutionRun, pk=run_id, circuit=c)
+    if not run.best_grid:
+        return JsonResponse({'ok': False, 'reason': 'no best grid'},
+                            status=400)
+    c.grid = run.best_grid
+    c.save(update_fields=['grid', 'updated_at'])
+    return JsonResponse({
+        'ok': True, 'fitness': run.best_fitness,
+        'detail_url': reverse('forge:detail', args=[c.slug]),
+    })
 
 
 @login_required

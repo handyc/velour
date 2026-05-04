@@ -90,3 +90,53 @@ class Circuit(models.Model):
     @property
     def palette_or_default(self) -> list[str]:
         return list(self.palette) if self.palette else list(WIREWORLD_PALETTE)
+
+
+class EvolutionRun(models.Model):
+    """One GA run anchored to a Circuit's port positions + target."""
+
+    STATUS_CHOICES = [
+        ('queued',  'Queued'),
+        ('running', 'Running'),
+        ('done',    'Done'),
+        ('failed',  'Failed'),
+    ]
+
+    circuit = models.ForeignKey(
+        Circuit, on_delete=models.CASCADE, related_name='evolution_runs',
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES,
+                              default='queued')
+    error = models.TextField(blank=True)
+
+    # Hyperparameters used for this run (echoed for traceability).
+    pop_size       = models.PositiveSmallIntegerField(default=32)
+    generations    = models.PositiveSmallIntegerField(default=30)
+    mutation_rate  = models.FloatField(default=0.03)
+    crossover_rate = models.FloatField(default=0.85)
+    tournament_k   = models.PositiveSmallIntegerField(default=3)
+    init_density   = models.FloatField(default=0.20)
+    seed           = models.IntegerField(default=7)
+
+    # Target spec (preset name + truth table) snapshotted at run start.
+    target = models.JSONField(default=dict, blank=True)
+
+    # Progress + result.
+    current_gen   = models.PositiveSmallIntegerField(default=0)
+    fitness_history = models.JSONField(default=list, blank=True)
+    best_grid     = models.JSONField(default=list, blank=True)
+    best_fitness  = models.FloatField(default=0.0)
+
+    started_at  = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-started_at']
+
+    def __str__(self):
+        return (f'{self.circuit.slug} run #{self.pk} '
+                f'({self.status}, best={self.best_fitness:.2f})')
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in ('queued', 'running')
