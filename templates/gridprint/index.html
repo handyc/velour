@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Gridprint — tessellated graph paper{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<h1 style="margin-top:0;">Gridprint
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — A4 tessellated graph paper, printable
+  </span>
+</h1>
+<p style="color:#8b949e;font-size:0.85rem;margin:0.2rem 0 0.8rem 0;">
+  Pick a tessellation, set the cell size, line colour, alpha, and stroke
+  width, hit <strong>Print</strong>. Optional: fill cells from a saved
+  Automaton simulation or a Taxon rule run live.
+</p>
+
+<div style="display:grid;grid-template-columns:320px 1fr;gap:1rem;
+     align-items:flex-start;">
+
+  <form id="g" style="background:#161b22;border:1px solid #30363d;
+        border-radius:6px;padding:0.7rem 0.9rem;display:grid;
+        grid-template-columns:1fr 1fr;gap:0.5rem 0.7rem;">
+
+    <label style="grid-column:1/3;font-size:0.78rem;color:#8b949e;">Pattern
+      <select name="pattern" style="width:100%;background:#0d1117;
+              color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+        {% for slug, item in patterns %}
+          <option value="{{ slug }}"
+            {% if slug == 'hex_pointy' %}selected{% endif %}>
+            {{ item.0 }}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label style="font-size:0.78rem;color:#8b949e;">Cell (mm)
+      <input type="number" name="cell" value="8" step="0.5" min="2" max="80"
+             style="width:100%;background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="font-size:0.78rem;color:#8b949e;">Margin (mm)
+      <input type="number" name="margin" value="10" step="1" min="0" max="40"
+             style="width:100%;background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;">
+    </label>
+
+    <label style="font-size:0.78rem;color:#8b949e;">Stroke colour
+      <input type="color" name="color" value="#888888"
+             style="width:100%;height:1.6rem;background:#0d1117;
+             border:1px solid #30363d;padding:0.1rem;">
+    </label>
+    <label style="font-size:0.78rem;color:#8b949e;">Alpha
+      <input type="number" name="alpha" value="1.0" step="0.05" min="0" max="1"
+             style="width:100%;background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;">
+    </label>
+
+    <label style="font-size:0.78rem;color:#8b949e;">Stroke width (mm)
+      <input type="number" name="width" value="0.20" step="0.05" min="0.05" max="2.5"
+             style="width:100%;background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;">
+    </label>
+    <label style="font-size:0.78rem;color:#8b949e;">Fill alpha
+      <input type="number" name="fill_alpha" value="0.85" step="0.05" min="0" max="1"
+             style="width:100%;background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;">
+    </label>
+
+    <label style="font-size:0.78rem;color:#8b949e;">
+      <input type="checkbox" name="landscape" value="1"> landscape
+    </label>
+    <label style="font-size:0.78rem;color:#8b949e;">
+      <input type="checkbox" name="border" value="1"> show border
+    </label>
+
+    <details style="grid-column:1/3;background:#0d1117;border:1px solid #30363d;
+            border-radius:4px;padding:0.4rem 0.6rem;">
+      <summary style="cursor:pointer;color:#8b949e;font-size:0.78rem;">
+        Fill cells from a CA source (optional)
+      </summary>
+      <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;
+           margin-top:0.4rem;font-size:0.78rem;color:#8b949e;">
+        <label>From automaton sim slug
+          <input type="text" name="from_automaton"
+                 placeholder="(e.g. taxon-foo-bar)"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem;">
+        </label>
+        <label>From taxon rule slug
+          <input type="text" name="from_taxon"
+                 placeholder="(e.g. class-4-...)"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem;">
+        </label>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">ticks
+            <input type="number" name="ticks" value="24" min="0" max="500"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="flex:1;">fw
+            <input type="number" name="fw" value="16" min="2" max="64"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="flex:1;">fh
+            <input type="number" name="fh" value="16" min="2" max="64"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <div style="grid-column:1/3;display:flex;gap:0.4rem;flex-wrap:wrap;
+         margin-top:0.3rem;">
+      <button type="button" id="print-btn" style="background:#1f6feb;
+              color:#fff;border:0;padding:0.4rem 0.9rem;cursor:pointer;
+              font-size:0.85rem;">Print…</button>
+      <button type="button" id="download-btn" style="background:#21262d;
+              color:#c9d1d9;border:1px solid #30363d;
+              padding:0.4rem 0.9rem;cursor:pointer;font-size:0.85rem;">
+        Download SVG
+      </button>
+      <a href="#" id="raw-link" target="_blank"
+         style="color:#58a6ff;text-decoration:none;font-size:0.85rem;
+         padding:0.45rem 0;">Open raw SVG ↗</a>
+    </div>
+  </form>
+
+  <div>
+    <iframe id="preview" src="" style="width:100%;
+            height:80vh;background:#fff;border:1px solid #30363d;
+            border-radius:6px;"></iframe>
+    <p style="font-size:0.72rem;color:#6e7681;margin:0.3rem 0 0;">
+      Preview is the actual A4 SVG ({{ a4_w|floatformat:0 }} × {{ a4_h|floatformat:0 }} mm).
+      The print dialog uses this same SVG sized to one page.
+    </p>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){
+  const form = document.getElementById('g');
+  const preview = document.getElementById('preview');
+  const printBtn = document.getElementById('print-btn');
+  const downloadBtn = document.getElementById('download-btn');
+  const rawLink = document.getElementById('raw-link');
+
+  function buildUrl(extras){
+    const params = new URLSearchParams();
+    for (const el of form.querySelectorAll('[name]')) {
+      if (el.type === 'checkbox') {
+        if (el.checked) params.set(el.name, '1');
+      } else {
+        const v = (el.value || '').trim();
+        if (v !== '') params.set(el.name, v);
+      }
+    }
+    if (extras) for (const [k, v] of Object.entries(extras)) params.set(k, v);
+    return '{% url "gridprint:grid_svg" %}?' + params.toString();
+  }
+
+  function refresh(){
+    const url = buildUrl();
+    preview.src = url;
+    rawLink.href = url;
+  }
+  // Debounced refresh on any change.
+  let timer = null;
+  form.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 200);
+  });
+
+  printBtn.addEventListener('click', () => {
+    // Use the iframe's window for printing — that way the @page A4
+    // rules from the SVG govern the print, not the wrapper page.
+    const ifr = document.getElementById('preview');
+    if (ifr.contentWindow){
+      ifr.contentWindow.focus();
+      ifr.contentWindow.print();
+    } else {
+      window.print();
+    }
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    window.location = buildUrl({download: '1'});
+  });
+
+  refresh();
+})();
+</script>
+
+<style>
+@media print {
+  /* Print only the iframe content; everything else hidden. */
+  body > * { display: none !important; }
+  iframe#preview { display: block !important; width: 100% !important;
+                   height: 100% !important; border: 0 !important; }
+}
+@page { size: A4; margin: 0; }
+</style>
+{% endblock %}

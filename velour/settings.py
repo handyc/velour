@@ -138,6 +138,7 @@ INSTALLED_APPS = [
     's3lab',
     'hexnn',
     'taxon',
+    'gridprint',
 ]
 
 MIDDLEWARE = [
