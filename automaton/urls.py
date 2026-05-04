@@ -18,4 +18,5 @@ urlpatterns = [
     path('<slug:slug>/rename/',    views.rename_simulation, name='rename'),
     path('<slug:slug>/resize/',    views.resize_simulation, name='resize'),
     path('<slug:slug>/palette/',   views.update_palette,    name='update_palette'),
+    path('<slug:slug>/load-image/', views.load_image,       name='load_image'),
 ]

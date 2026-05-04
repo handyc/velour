@@ -696,3 +696,73 @@ def import_from_s3lab(request):
         'url':        reverse('automaton:run', args=[simulation.slug]),
         'n_explicit': n_explicit,
     })
+
+
+@login_required
+@require_POST
+def load_image(request, slug):
+    """Replace the simulation's grid_state from an uploaded image.
+
+    The image is resized to (sim.width, sim.height) and each pixel's
+    RGB is quantized to the nearest palette colour (Euclidean distance
+    in RGB). Result is a 2D array of palette indices in [0,
+    n_colors). Tick count resets to 0 so the new grid is the new
+    initial state.
+    """
+    from io import BytesIO
+
+    from PIL import Image
+
+    sim = get_object_or_404(Simulation, slug=slug)
+    upload = request.FILES.get('image')
+    if not upload:
+        messages.error(request, 'No image uploaded.')
+        return redirect('automaton:run', slug=sim.slug)
+
+    try:
+        img = Image.open(BytesIO(upload.read())).convert('RGB')
+    except Exception as exc:
+        messages.error(request, f'Could not read image: {exc}')
+        return redirect('automaton:run', slug=sim.slug)
+
+    img = img.resize((sim.width, sim.height), Image.Resampling.LANCZOS)
+
+    # Build palette as RGB triples for nearest-neighbour quantisation.
+    palette = list(sim.palette or [])
+    if not palette:
+        palette = ['#101010', '#808080', '#c0c0c0', '#ffffff']
+    pal_rgb = []
+    for css in palette[:sim.ruleset.n_colors]:
+        c = css.lstrip('#')
+        if len(c) == 3:
+            c = ''.join(ch * 2 for ch in c)
+        try:
+            pal_rgb.append((int(c[0:2], 16),
+                            int(c[2:4], 16),
+                            int(c[4:6], 16)))
+        except (ValueError, IndexError):
+            pal_rgb.append((128, 128, 128))
+
+    grid = []
+    pixels = img.load()
+    for y in range(sim.height):
+        row = []
+        for x in range(sim.width):
+            r, g, b = pixels[x, y]
+            best_i, best_d = 0, 10 ** 9
+            for i, (pr, pg, pb) in enumerate(pal_rgb):
+                d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2
+                if d < best_d:
+                    best_d, best_i = d, i
+            row.append(best_i)
+        grid.append(row)
+
+    sim.grid_state = grid
+    sim.tick_count = 0
+    sim.save(update_fields=['grid_state', 'tick_count'])
+    messages.success(
+        request,
+        f'Loaded "{upload.name}" into the {sim.width}×{sim.height} grid '
+        f'(quantised to {len(pal_rgb)} palette colours).'
+    )
+    return redirect('automaton:run', slug=sim.slug)

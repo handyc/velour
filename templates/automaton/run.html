@@ -26,6 +26,17 @@
     <button class="btn btn-secondary" onclick="step()">Step</button>
     <button class="btn btn-secondary" onclick="randomize()">Randomize</button>
     <button class="btn btn-secondary" id="btn-rotate" onclick="toggleRotate()">⟲ Rotate 90°</button>
+    <form method="post" action="{% url 'automaton:load_image' sim.slug %}"
+          enctype="multipart/form-data" style="display:inline-flex;gap:0.3rem;
+          align-items:center;margin:0;">
+        {% csrf_token %}
+        <input type="file" name="image" accept="image/*" required
+               style="font-size:0.72rem;color:#c9d1d9;width:14ch;
+               background:#0d1117;border:1px solid #30363d;
+               border-radius:3px;padding:0.15rem;">
+        <button type="submit" class="btn btn-secondary"
+                style="font-size:0.72rem;">Load image</button>
+    </form>
     <label style="font-size:0.72rem;color:#8b949e">Speed
         <input type="range" id="speed" min="1" max="30" value="10" style="width:80px;vertical-align:middle">
     </label>
