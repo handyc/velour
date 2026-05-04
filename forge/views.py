@@ -149,13 +149,21 @@ def circuit_save(request, slug):
                 continue
             if not (0 <= x < c.width and 0 <= y < c.height):
                 continue
-            clean.append({
+            entry = {
                 'role': role,
                 'name': str(p.get('name', ''))[:40],
                 'x': x, 'y': y,
                 'schedule': [int(t) for t in (p.get('schedule') or [])
                              if isinstance(t, (int, float))],
-            })
+            }
+            try:
+                period = int(p.get('period') or 0)
+                if period > 0:
+                    entry['period'] = period
+                    entry['offset'] = int(p.get('offset') or 0)
+            except (TypeError, ValueError):
+                pass
+            clean.append(entry)
         c.ports = clean
 
     name = payload.get('name')
@@ -183,6 +191,22 @@ def circuit_run(request, slug):
     ports = c.ports or []
     ticks = 24
     autosave = False
+
+    def _pulses_at(port: dict, t: int) -> bool:
+        """Honour either an explicit schedule list, a periodic
+        period/offset pair, or fall back to "every tick". A schedule
+        of [-1] is the standard "never fires" sentinel used by the
+        score-row replay button."""
+        sched = port.get('schedule')
+        period = port.get('period')
+        if sched is not None:
+            if not sched:
+                return True   # empty list = always-on (existing behaviour)
+            return t in sched
+        if period and int(period) > 0:
+            offset = int(port.get('offset') or 0)
+            return t >= offset and (t - offset) % int(period) == 0
+        return True   # neither set = every tick
 
     if request.method == 'POST':
         try:
@@ -225,8 +249,7 @@ def circuit_run(request, slug):
         for p in ports:
             if p.get('role') != 'input':
                 continue
-            sched = p.get('schedule') or [t_now]
-            if t_now in sched:
+            if _pulses_at(p, t_now):
                 grid = grid.copy()
                 grid[p['y'], p['x']] = 2
         grid = hex_step(grid, lut, n_colors=4)

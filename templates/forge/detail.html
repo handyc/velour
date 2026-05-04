@@ -391,6 +391,40 @@ function updatePortsList(){
             ports[i].name = e.currentTarget.value.trim().slice(0, 40);
         });
     });
+    // Add a per-port pulse-train row (period/offset) for inputs only —
+    // outputs read passively, no schedule.
+    for (let i = 0; i < ports.length; i++){
+        if (ports[i].role !== 'input') continue;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:0.25rem;align-items:center;'
+            + 'margin-left:1.4rem;font-size:0.65rem;color:#6e7681;';
+        row.innerHTML =
+            `<span>pulse</span>`
+          + `<input data-i="${i}" data-key="period" class="port-num" `
+          + `value="${ports[i].period || ''}" placeholder="period" `
+          + `style="width:3rem;background:#0d1117;color:#c9d1d9;`
+          + `border:1px solid #30363d;padding:0.05rem 0.3rem;`
+          + `font:inherit;">`
+          + `<input data-i="${i}" data-key="offset" class="port-num" `
+          + `value="${ports[i].offset || ''}" placeholder="offset" `
+          + `style="width:3rem;background:#0d1117;color:#c9d1d9;`
+          + `border:1px solid #30363d;padding:0.05rem 0.3rem;`
+          + `font:inherit;">`
+          + `<span style="color:#6e7681;">empty period = always-on</span>`;
+        el.appendChild(row);
+    }
+    el.querySelectorAll('.port-num').forEach(inp => {
+        inp.addEventListener('change', e => {
+            const i = parseInt(e.currentTarget.dataset.i, 10);
+            const key = e.currentTarget.dataset.key;
+            const v = parseInt(e.currentTarget.value || '0', 10);
+            if (!Number.isFinite(v) || v <= 0){
+                delete ports[i][key];
+            } else {
+                ports[i][key] = v;
+            }
+        });
+    });
 }
 
 let mouseDown = false;
