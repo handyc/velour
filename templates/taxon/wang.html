@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+{% block title %}Taxon — Wang composition lab{% endblock %}
+
+{% block content %}
+<div style="max-width:1400px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<p><a href="{% url 'taxon:library' %}" style="color:#58a6ff;">← Library</a></p>
+
+<h1 style="margin-top:0;">Wang-tile composition lab
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — buffer-band protocol on a 2×2 join
+  </span>
+</h1>
+<p style="color:#6e7681;font-size:0.78rem;margin:0.2rem 0 0.8rem 0;">
+  Picks 4 buffer-clean tiles, simulates each one standalone, composes
+  them into a 2×2 grid, simulates the join, and overlays the diff.
+  Cells where the joined tile differs from its standalone twin are
+  highlighted red. <em>natural</em> mode = no boundary forcing,
+  <em>pin_outer</em> pins only the outer band of each grid (joined
+  seams run free), <em>pin_all</em> pins all seams (composition
+  trivially holds — no inter-tile signal flow).
+</p>
+
+<form id="wang-form" style="background:#161b22;border:1px solid #30363d;
+       border-radius:6px;padding:0.7rem 1rem;display:grid;
+       grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+       gap:0.6rem 1rem;align-items:end;">
+  <label style="font-size:0.75rem;color:#8b949e;">Rule
+    <select name="sha" id="f-sha" style="width:100%;background:#0d1117;
+            color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+      {% for r in candidate_rules %}
+      <option value="{{ r.sha_short }}"
+              data-class="{{ r.wolfram_class }}"
+              data-stable="{{ r.stable_colors|join:',' }}"
+              data-palette="{{ r.palette|join:',' }}">
+        {{ r.sha_short }} · class {{ r.wolfram_class }}
+        · conf {{ r.confidence|floatformat:2 }}{% if r.stable_colors %}
+        · stable={{ r.stable_colors|join:"," }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Mode
+    <select name="mode" id="f-mode" style="width:100%;background:#0d1117;
+            color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+      <option value="natural">natural</option>
+      <option value="pin_outer">pin outer</option>
+      <option value="pin_all">pin all</option>
+    </select>
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Tile size
+    <input type="number" name="tile" id="f-tile" value="16" min="8" max="48"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Buffer
+    <input type="number" name="buffer" id="f-buffer" value="3" min="1" max="12"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Steps T
+    <input type="number" name="steps" id="f-steps" value="12" min="2" max="40"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Candidates
+    <input type="number" name="candidates" id="f-cand" value="200"
+           min="4" max="1000"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Density
+    <input type="number" name="density" id="f-density" value="0.10"
+           min="0.01" max="1.0" step="0.01"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Stable color
+    <select name="stable_color" id="f-stable" style="width:100%;
+            background:#0d1117;color:#c9d1d9;
+            border:1px solid #30363d;padding:0.25rem;">
+      <option value="">(none — random)</option>
+      <option value="1">color 1</option>
+      <option value="2">color 2</option>
+      <option value="3">color 3</option>
+    </select>
+  </label>
+  <label style="font-size:0.75rem;color:#8b949e;">Seed
+    <input type="number" name="seed" id="f-seed" value="7"
+           style="width:100%;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <button type="submit" id="f-run" style="background:#238636;color:#fff;
+          border:1px solid #2ea043;padding:0.4rem 1.0rem;border-radius:4px;
+          font-size:0.85rem;cursor:pointer;font-weight:600;">Run</button>
+</form>
+
+<div id="status" style="margin-top:0.8rem;font-size:0.82rem;color:#8b949e;
+     min-height:1.2em;">Pick a rule and press Run. Defaults give an
+     IDENTICAL result on a class-2 rule with stable color 1.</div>
+
+<div id="verdict" style="margin-top:0.6rem;display:none;
+     padding:0.5rem 0.8rem;border-radius:4px;font-weight:600;
+     font-size:0.95rem;"></div>
+
+<div id="results" style="margin-top:1rem;display:none;">
+  <div style="display:flex;gap:0.6rem;flex-wrap:wrap;align-items:center;
+       background:#0d1117;border:1px solid #30363d;border-radius:6px;
+       padding:0.5rem 0.8rem;">
+    <button id="play" style="background:#21262d;color:#c9d1d9;
+            border:1px solid #30363d;padding:0.25rem 0.7rem;border-radius:4px;
+            cursor:pointer;font-size:0.8rem;">▶ play</button>
+    <input type="range" id="t-slider" min="0" max="0" value="0"
+           style="flex:1;min-width:200px;">
+    <span id="t-label" style="color:#8b949e;font-size:0.78rem;
+          min-width:60px;">t = 0</span>
+    <label style="color:#8b949e;font-size:0.78rem;">
+      <input type="checkbox" id="diff-overlay" checked> highlight drift
+    </label>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;
+       margin-top:1rem;">
+    <div>
+      <h3 style="font-size:0.95rem;color:#c9d1d9;margin:0 0 0.3rem 0;">
+        Standalone tiles
+      </h3>
+      <p style="font-size:0.72rem;color:#6e7681;margin:0 0 0.5rem 0;">
+        Each tile run on its own with the chosen pin policy.
+      </p>
+      <div id="standalone" style="display:grid;
+           grid-template-columns:1fr 1fr;gap:0.4rem;"></div>
+      <div style="margin-top:0.6rem;">
+        <h4 style="font-size:0.85rem;color:#c9d1d9;margin:0 0 0.3rem 0;">
+          Drift per step (joined − standalone)
+        </h4>
+        <canvas id="diff-chart" width="380" height="120"
+                style="background:#0d1117;border:1px solid #30363d;
+                border-radius:4px;width:100%;max-width:380px;"></canvas>
+      </div>
+    </div>
+    <div>
+      <h3 style="font-size:0.95rem;color:#c9d1d9;margin:0 0 0.3rem 0;">
+        2×2 join
+      </h3>
+      <p style="font-size:0.72rem;color:#6e7681;margin:0 0 0.5rem 0;">
+        Tile boundaries are drawn in cyan. Drift cells (where the
+        joined tile differs from its standalone copy) are framed red
+        when overlay is on.
+      </p>
+      <canvas id="joined" width="600" height="600" style="background:#0a0a0a;
+              border:1px solid #30363d;border-radius:6px;
+              width:100%;height:auto;"></canvas>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const csrftoken = document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1];
+
+let state = null;     // last result from /wang/run/
+let frame = 0;
+let playing = false;
+let playTimer = null;
+
+const PALETTE_DEFAULT = ['#101010', '#2a8c5b', '#d8a93a', '#c04a4a'];
+
+function palette(){
+    const opt = $('f-sha').selectedOptions[0];
+    const pal = opt?.dataset.palette?.split(',').filter(Boolean);
+    return pal && pal.length === 4 ? pal : PALETTE_DEFAULT;
+}
+
+function drawHexGrid(canvas, grid, opts){
+    opts = opts || {};
+    const ctx = canvas.getContext('2d');
+    const H = grid.length, W = grid[0].length;
+    const pal = opts.palette || palette();
+    const cell = Math.floor(Math.min(canvas.width / (W + 0.5),
+                                     canvas.height / H));
+    const r = cell / 2;
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (let y = 0; y < H; y++){
+        const offset = (y % 2) ? cell / 2 : 0;
+        for (let x = 0; x < W; x++){
+            const v = grid[y][x] | 0;
+            ctx.fillStyle = pal[v % pal.length];
+            ctx.fillRect(x * cell + offset, y * cell, cell, cell);
+        }
+    }
+    // Tile-boundary cyan lines for joined view
+    if (opts.seamAt){
+        ctx.strokeStyle = '#3df0ff';
+        ctx.lineWidth = 1.4;
+        for (const cx of opts.seamAt.cols){
+            ctx.beginPath();
+            ctx.moveTo(cx * cell, 0);
+            ctx.lineTo(cx * cell, H * cell);
+            ctx.stroke();
+        }
+        for (const cy of opts.seamAt.rows){
+            ctx.beginPath();
+            ctx.moveTo(0, cy * cell);
+            ctx.lineTo(W * cell + cell / 2, cy * cell);
+            ctx.stroke();
+        }
+    }
+    // Drift overlay — outline cells where the joined tile != standalone
+    if (opts.driftMask){
+        ctx.strokeStyle = '#ff5050';
+        ctx.lineWidth = 1.2;
+        for (let y = 0; y < H; y++){
+            const offset = (y % 2) ? cell / 2 : 0;
+            for (let x = 0; x < W; x++){
+                if (opts.driftMask[y][x]){
+                    ctx.strokeRect(x * cell + offset + 0.5,
+                                   y * cell + 0.5,
+                                   cell - 1, cell - 1);
+                }
+            }
+        }
+    }
+}
+
+function diffMaskBetween(a, b){
+    const H = a.length, W = a[0].length;
+    const mask = [];
+    for (let y = 0; y < H; y++){
+        const row = new Array(W);
+        for (let x = 0; x < W; x++) row[x] = (a[y][x] !== b[y][x]) ? 1 : 0;
+        mask.push(row);
+    }
+    return mask;
+}
+
+function joinedDriftMask(t){
+    if (!state || !state.ok) return null;
+    const sz = state.size;
+    const big = state.joined.traj[t];
+    const fullMask = [];
+    for (let y = 0; y < big.length; y++)
+        fullMask.push(new Array(big[0].length).fill(0));
+    const offsets = [[0,0],[0,sz],[sz,0],[sz,sz]];
+    for (let i = 0; i < 4; i++){
+        const [dr, dc] = offsets[i];
+        const standalone = state.tiles[i].traj[t];
+        for (let y = 0; y < sz; y++){
+            for (let x = 0; x < sz; x++){
+                if (big[y + dr][x + dc] !== standalone[y][x]){
+                    fullMask[y + dr][x + dc] = 1;
+                }
+            }
+        }
+    }
+    return fullMask;
+}
+
+function render(){
+    if (!state || !state.ok) return;
+    const t = frame;
+    $('t-label').textContent = `t = ${t}`;
+
+    // 4 standalone tiles
+    const standalone = $('standalone');
+    standalone.innerHTML = '';
+    for (let i = 0; i < 4; i++){
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'background:#0d1117;border:1px solid #30363d;'+
+            'border-radius:4px;padding:0.3rem;';
+        const label = document.createElement('div');
+        label.style.cssText = 'font-size:0.72rem;color:#8b949e;'+
+            'margin-bottom:0.2rem;';
+        const labels = ['top-left','top-right','bot-left','bot-right'];
+        const motion = state.tiles[i].motion;
+        label.textContent = `${labels[i]} · motion=${motion}`;
+        wrap.appendChild(label);
+        const c = document.createElement('canvas');
+        c.width = 220; c.height = 220;
+        c.style.cssText = 'width:100%;height:auto;display:block;';
+        wrap.appendChild(c);
+        standalone.appendChild(wrap);
+        drawHexGrid(c, state.tiles[i].traj[t]);
+    }
+
+    // joined panel
+    const sz = state.size;
+    const seamAt = {rows:[sz], cols:[sz]};
+    const drift = $('diff-overlay').checked ? joinedDriftMask(t) : null;
+    drawHexGrid($('joined'), state.joined.traj[t],
+                {seamAt, driftMask: drift});
+
+    drawDiffChart();
+}
+
+function drawDiffChart(){
+    if (!state || !state.ok) return;
+    const c = $('diff-chart');
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, c.width, c.height);
+    const padL = 28, padR = 8, padT = 6, padB = 18;
+    const w = c.width - padL - padR;
+    const h = c.height - padT - padB;
+    const T = state.diffs[0].length;
+    let mx = 1;
+    for (const row of state.diffs)
+        for (const v of row) if (v > mx) mx = v;
+    const colors = ['#58a6ff','#f0c040','#7ee787','#ff7b72'];
+    for (let i = 0; i < 4; i++){
+        ctx.strokeStyle = colors[i];
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        for (let t = 0; t < T; t++){
+            const x = padL + t / (T - 1) * w;
+            const y = padT + h - (state.diffs[i][t] / mx) * h;
+            if (t === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+    // current frame marker
+    if (frame >= 0 && frame < T){
+        ctx.strokeStyle = '#3df0ff';
+        ctx.beginPath();
+        const x = padL + frame / Math.max(1, T - 1) * w;
+        ctx.moveTo(x, padT);
+        ctx.lineTo(x, padT + h);
+        ctx.stroke();
+    }
+    ctx.fillStyle = '#6e7681';
+    ctx.font = '10px ui-monospace';
+    ctx.fillText(`max ${mx}`, 4, padT + 10);
+    ctx.fillText(`t=0`,        padL,          c.height - 4);
+    ctx.fillText(`t=${T - 1}`, c.width - 28,  c.height - 4);
+}
+
+function setVerdict(v, msg){
+    const el = $('verdict');
+    el.style.display = 'block';
+    if (v === 'identical'){
+        el.style.background = '#0e3f1f';
+        el.style.color = '#7ee787';
+        el.textContent = '✓ IDENTICAL — composition theorem holds.';
+    } else if (v === 'identical-with-seam-traffic'){
+        el.style.background = '#3a2e0a';
+        el.style.color = '#f0c040';
+        el.textContent = '~ IDENTICAL with seam traffic — protocol band '+
+                         'would need to encode the non-zero edge pattern.';
+    } else if (v === 'drift'){
+        el.style.background = '#3f0e0e';
+        el.style.color = '#ff7b72';
+        el.textContent = '✗ DRIFT — joined dynamics differ from standalone. '+
+                         'Naive boundary forcing is not a sufficient '+
+                         'Wang protocol.';
+    } else {
+        el.style.background = '#21262d';
+        el.style.color = '#c9d1d9';
+        el.textContent = msg || 'no result';
+    }
+}
+
+async function runExperiment(ev){
+    if (ev) ev.preventDefault();
+    $('status').textContent = 'running…';
+    $('verdict').style.display = 'none';
+    $('results').style.display = 'none';
+    if (playing) togglePlay();
+    const payload = {
+        sha:           $('f-sha').value,
+        mode:          $('f-mode').value,
+        tile:          $('f-tile').value,
+        buffer:        $('f-buffer').value,
+        steps:         $('f-steps').value,
+        candidates:    $('f-cand').value,
+        density:       $('f-density').value,
+        seed:          $('f-seed').value,
+        stable_color:  $('f-stable').value || null,
+    };
+    try{
+        const r = await fetch('{% url "taxon:wang_run" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken,
+            },
+            body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+        state = data;
+        if (!data.ok){
+            $('status').textContent = '';
+            setVerdict('failed', data.reason || 'experiment failed');
+            return;
+        }
+        $('status').textContent =
+            `Buffer-clean candidates: ${data.clean} / ${data.candidates}.  `+
+            `seam non-zero across all ${data.steps + 1} steps: ${data.seam_total}.`;
+        setVerdict(data.verdict);
+        $('results').style.display = '';
+        const T = data.steps;
+        $('t-slider').max = T;
+        $('t-slider').value = T;
+        frame = T;
+        render();
+    } catch(e){
+        $('status').textContent = 'error: ' + e.message;
+    }
+}
+
+function togglePlay(){
+    playing = !playing;
+    $('play').textContent = playing ? '❚❚ pause' : '▶ play';
+    if (playing){
+        const T = parseInt($('t-slider').max, 10);
+        playTimer = setInterval(() => {
+            frame = (frame + 1) % (T + 1);
+            $('t-slider').value = frame;
+            render();
+        }, 250);
+    } else if (playTimer){
+        clearInterval(playTimer);
+        playTimer = null;
+    }
+}
+
+$('wang-form').addEventListener('submit', runExperiment);
+$('t-slider').addEventListener('input', e => {
+    frame = parseInt(e.target.value, 10);
+    render();
+});
+$('play').addEventListener('click', togglePlay);
+$('diff-overlay').addEventListener('change', render);
+
+// Auto-fill stable_color when a rule with stable colors is picked.
+$('f-sha').addEventListener('change', () => {
+    const opt = $('f-sha').selectedOptions[0];
+    const stable = (opt?.dataset.stable || '').split(',').filter(Boolean);
+    if (stable.length){
+        $('f-stable').value = stable[0];
+        $('f-mode').value = 'natural';
+    } else {
+        $('f-stable').value = '';
+    }
+});
+$('f-sha').dispatchEvent(new Event('change'));
+</script>
+{% endblock %}

@@ -1123,3 +1123,155 @@ def autosearch_status(request, slug: str):
         'max_seconds': search.max_seconds,
         'recent_rules': rules,
     })
+
+
+# ---------------------------------------------------------------------------
+# Wang-tile + CA buffer-band composition lab
+# ---------------------------------------------------------------------------
+
+@login_required
+def wang_view(request):
+    """Page that lets you pick a rule + parameters and run the experiment
+    in the browser. Defaults pick a class-2 rule with a single-cell still
+    life on color 1 — that's the easiest path to a successful run."""
+    from .wang import MODES
+
+    # Surface a few good starting points: rules that are quiescent on
+    # zero AND have at least one single-cell still-life colour. Tagged
+    # with their Wolfram class so the picker can sort.
+    candidate_rules = []
+    for cl in (Classification.objects
+               .select_related('rule')
+               .order_by('-confidence')):
+        r = cl.rule
+        if r.n_colors != 4:
+            continue
+        try:
+            packed = PackedRuleset(n_colors=4, data=bytes(r.genome))
+        except Exception:
+            continue
+        if packed.get(0, [0] * 6) != 0:
+            continue
+        stable = []
+        for c in (1, 2, 3):
+            if packed.get(c, [0] * 6) != c:
+                continue
+            ok = True
+            for s in range(6):
+                nbs = [0] * 6
+                nbs[s] = c
+                if packed.get(0, nbs) != 0:
+                    ok = False
+                    break
+            if ok:
+                stable.append(c)
+        candidate_rules.append({
+            'sha_short': r.sha1[:12],
+            'slug': r.slug,
+            'wolfram_class': cl.wolfram_class,
+            'class_color': class_color(cl.wolfram_class),
+            'confidence': cl.confidence,
+            'stable_colors': stable,
+            'palette': r.palette_hex,
+        })
+
+    # Sort: class-2 + stable colors first (most likely to give 'IDENTICAL'),
+    # then class-4 (the user's research target, but harder), then the rest.
+    def rank(c):
+        cls = c['wolfram_class']
+        has_stable = bool(c['stable_colors'])
+        return (
+            0 if (cls == 2 and has_stable) else
+            1 if cls == 4 else
+            2 if (cls == 2) else 3,
+            -c['confidence'],
+        )
+    candidate_rules.sort(key=rank)
+    candidate_rules = candidate_rules[:80]
+
+    return render(request, 'taxon/wang.html', {
+        'modes': MODES,
+        'candidate_rules': candidate_rules,
+    })
+
+
+@login_required
+@require_POST
+def wang_run(request):
+    """JSON endpoint — runs one experiment and returns trajectories.
+
+    Request: POST JSON or form with sha (rule sha1 prefix), tile, buffer,
+    steps, candidates, density, seed, stable_color (optional), mode.
+
+    Response: full result dict from taxon.wang.run_experiment.
+    """
+    from .wang import Params, run_experiment
+
+    if request.content_type == 'application/json':
+        try:
+            payload = json.loads(request.body or b'{}')
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest('bad JSON')
+    else:
+        payload = request.POST
+
+    def _int(name, default):
+        try:
+            return int(payload.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _float(name, default):
+        try:
+            return float(payload.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    sha = (payload.get('sha') or '').strip()
+    rule = Rule.objects.filter(sha1__startswith=sha).first() if sha else None
+    if rule is None:
+        return JsonResponse({'ok': False,
+                             'reason': 'rule not found'}, status=404)
+    packed = PackedRuleset(n_colors=rule.n_colors, data=bytes(rule.genome))
+
+    sc_raw = (payload.get('stable_color') or '').strip() if isinstance(
+        payload.get('stable_color'), str) else payload.get('stable_color')
+    stable_color = None
+    if sc_raw not in (None, '', 'null'):
+        try:
+            stable_color = int(sc_raw)
+            if not (1 <= stable_color < rule.n_colors):
+                stable_color = None
+        except (TypeError, ValueError):
+            stable_color = None
+
+    mode = (payload.get('mode') or 'natural').strip()
+    if mode not in ('natural', 'pin_outer', 'pin_all'):
+        mode = 'natural'
+
+    params = Params(
+        size=_int('tile', 16),
+        buffer=_int('buffer', 3),
+        steps=_int('steps', 12),
+        candidates=_int('candidates', 200),
+        density=_float('density', 0.10),
+        seed=_int('seed', 7),
+        stable_color=stable_color,
+        mode=mode,
+    )
+
+    try:
+        res = run_experiment(packed, params)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'reason': str(exc)}, status=400)
+
+    cl = (Classification.objects.filter(rule=rule)
+          .order_by('-confidence').first())
+    res['rule'] = {
+        'sha_short': rule.sha1[:12],
+        'slug': rule.slug,
+        'wolfram_class': cl.wolfram_class if cl else None,
+        'confidence': cl.confidence if cl else None,
+        'palette': rule.palette_hex,
+    }
+    return JsonResponse(res)
