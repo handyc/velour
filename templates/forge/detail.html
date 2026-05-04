@@ -154,12 +154,20 @@
           <select id="t-preset"
                   style="display:block;background:#161b22;color:#c9d1d9;
                   border:1px solid #30363d;padding:0.25rem 0.4rem;">
-            <option>AND</option>
-            <option>OR</option>
-            <option>XOR</option>
-            <option>NAND</option>
-            <option>NOR</option>
-            <option>XNOR</option>
+            <optgroup label="2-input single-output">
+              <option>AND</option>
+              <option>OR</option>
+              <option>XOR</option>
+              <option>NAND</option>
+              <option>NOR</option>
+              <option>XNOR</option>
+            </optgroup>
+            <optgroup label="multi-output">
+              <option>HALF_ADDER</option>
+              <option>FULL_ADDER</option>
+              <option>DECODE_1</option>
+              <option>DECODE_2</option>
+            </optgroup>
           </select>
         </label>
         <label style="color:#8b949e;">inputs
@@ -611,6 +619,27 @@ function showOutputs(outputs){
 
 // ---------- target / score ----------
 const URL_SCORE = '{% url "forge:score" circuit.slug %}';
+
+// Default port names per preset (mirrors PRESET_DEFAULTS in forge/score.py).
+const PRESET_PORTS = {
+    'AND':        {inputs:'A,B',   outputs:'Q'},
+    'OR':         {inputs:'A,B',   outputs:'Q'},
+    'XOR':        {inputs:'A,B',   outputs:'Q'},
+    'NAND':       {inputs:'A,B',   outputs:'Q'},
+    'NOR':        {inputs:'A,B',   outputs:'Q'},
+    'XNOR':       {inputs:'A,B',   outputs:'Q'},
+    'HALF_ADDER': {inputs:'A,B',   outputs:'Q,R'},
+    'FULL_ADDER': {inputs:'A,B,C', outputs:'Q,R'},
+    'DECODE_1':   {inputs:'A',     outputs:'Q,R'},
+    'DECODE_2':   {inputs:'A,B',   outputs:'Q,R,S,T'},
+};
+document.getElementById('t-preset').addEventListener('change', e => {
+    const p = e.target.value;
+    if (PRESET_PORTS[p]){
+        document.getElementById('t-inputs').value  = PRESET_PORTS[p].inputs;
+        document.getElementById('t-outputs').value = PRESET_PORTS[p].outputs;
+    }
+});
 
 document.getElementById('score-form').addEventListener('submit', async (e) => {
     e.preventDefault();

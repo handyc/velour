@@ -28,10 +28,9 @@ import numpy as np
 from .sim import hex_step, wireworld_lookup
 
 
-# Standard 2-input gate truth tables. Used by /score/ when the page
-# sends preset='AND' etc. and lets the server generate the rows.
+# Standard 2-input single-output gates. Output bit per row.
 _GATES_2: dict[str, list[int]] = {
-    'AND':  [0, 0, 0, 1],   # A=0,B=0 -> 0; ...; A=1,B=1 -> 1
+    'AND':  [0, 0, 0, 1],
     'OR':   [0, 1, 1, 1],
     'XOR':  [0, 1, 1, 0],
     'NAND': [1, 1, 1, 0],
@@ -40,15 +39,67 @@ _GATES_2: dict[str, list[int]] = {
 }
 
 
+# Multi-output presets. Each row gives input bits followed by expected
+# output bits. Stored as (inputs, outputs) tuples per row.
+_GATES_MULTI: dict[str, list[tuple[list[int], list[int]]]] = {
+    # A, B → sum, carry
+    'HALF_ADDER': [
+        ([0, 0], [0, 0]),
+        ([0, 1], [1, 0]),
+        ([1, 0], [1, 0]),
+        ([1, 1], [0, 1]),
+    ],
+    # A, B, Cin → sum, Cout
+    'FULL_ADDER': [
+        ([0, 0, 0], [0, 0]),
+        ([0, 0, 1], [1, 0]),
+        ([0, 1, 0], [1, 0]),
+        ([0, 1, 1], [0, 1]),
+        ([1, 0, 0], [1, 0]),
+        ([1, 0, 1], [0, 1]),
+        ([1, 1, 0], [0, 1]),
+        ([1, 1, 1], [1, 1]),
+    ],
+    # 1-bit → 2-bit "1 hot": 0 → 10, 1 → 01
+    'DECODE_1':   [([0], [1, 0]), ([1], [0, 1])],
+    # 2-bit one-hot encoder: 00,01,10,11 → 0001,0010,0100,1000
+    'DECODE_2':   [
+        ([0, 0], [1, 0, 0, 0]),
+        ([0, 1], [0, 1, 0, 0]),
+        ([1, 0], [0, 0, 1, 0]),
+        ([1, 1], [0, 0, 0, 1]),
+    ],
+}
+
+
+# Preset metadata: preferred input/output port names.
+PRESET_DEFAULTS: dict[str, dict[str, list[str]]] = {
+    'AND':         {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'OR':          {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'XOR':         {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'NAND':        {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'NOR':         {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'XNOR':        {'inputs': ['A', 'B'],      'outputs': ['Q']},
+    'HALF_ADDER':  {'inputs': ['A', 'B'],      'outputs': ['Q', 'R']},
+    'FULL_ADDER':  {'inputs': ['A', 'B', 'C'], 'outputs': ['Q', 'R']},
+    'DECODE_1':    {'inputs': ['A'],           'outputs': ['Q', 'R']},
+    'DECODE_2':    {'inputs': ['A', 'B'],      'outputs': ['Q', 'R', 'S', 'T']},
+}
+
+
 def preset_truth_table(preset: str) -> list[dict[str, list[int]]] | None:
-    """Generate a 2-input truth table for a preset gate name."""
-    table = _GATES_2.get(preset.upper())
-    if table is None:
-        return None
-    rows = []
-    for i, out in enumerate(table):
-        rows.append({'in': [(i >> 1) & 1, i & 1], 'out': [out]})
-    return rows
+    """Generate a truth table for a preset gate name."""
+    p = preset.upper()
+    if p in _GATES_2:
+        table = _GATES_2[p]
+        rows = []
+        for i, out in enumerate(table):
+            rows.append({'in': [(i >> 1) & 1, i & 1], 'out': [out]})
+        return rows
+    if p in _GATES_MULTI:
+        return [{'in': list(in_), 'out': list(out_)}
+                for (in_, out_) in _GATES_MULTI[p]]
+    return None
 
 
 def score_circuit(*, grid: list[list[int]],
