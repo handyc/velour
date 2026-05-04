@@ -122,40 +122,69 @@ def circuit_save(request, slug):
 def circuit_run(request, slug):
     """Step the circuit forward and return the trajectory.
 
-    Query params:
-        ticks=N    (default 24, max 200)
+    Accepts either:
+      - GET ?ticks=N — runs from the *saved* grid (legacy)
+      - POST {grid, ports, ticks} JSON — runs from the supplied (live)
+        grid without touching the DB. The page uses POST so you don't
+        have to Save before pressing Play.
     """
     c = get_object_or_404(Circuit, slug=slug)
-    try:
-        ticks = max(0, min(200, int(request.GET.get('ticks', 24))))
-    except (TypeError, ValueError):
-        ticks = 24
+
+    grid_data = c.grid
+    ports = c.ports or []
+    ticks = 24
+    autosave = False
+
+    if request.method == 'POST':
+        try:
+            payload = json.loads(request.body or b'{}')
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest('bad JSON')
+        if 'grid' in payload:
+            grid_data = payload['grid']
+        if 'ports' in payload:
+            ports = payload['ports'] or []
+        if 'ticks' in payload:
+            try:
+                ticks = max(0, min(200, int(payload['ticks'])))
+            except (TypeError, ValueError):
+                pass
+        autosave = bool(payload.get('autosave', False))
+    else:
+        try:
+            ticks = max(0, min(200, int(request.GET.get('ticks', 24))))
+        except (TypeError, ValueError):
+            ticks = 24
 
     packed = _wireworld_packed()
-    grid = np.array(c.grid, dtype=np.uint8)
+    try:
+        grid = np.array(grid_data, dtype=np.uint8)
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest('grid must be a 2D int array')
     if grid.shape != (c.height, c.width):
-        return HttpResponseBadRequest('grid shape mismatch')
+        return HttpResponseBadRequest(
+            f'grid shape {tuple(grid.shape)} != ({c.height}, {c.width})')
+
+    if autosave and request.method == 'POST':
+        c.grid = grid.tolist()
+        c.ports = ports
+        c.save(update_fields=['grid', 'ports', 'updated_at'])
 
     traj = [grid.tolist()]
     for _ in range(ticks):
-        # Inputs: any port with role=input pulses its cell to head (2)
-        # at every tick whose offset matches `len(traj) - 1`.
         t_now = len(traj) - 1
-        for p in (c.ports or []):
+        for p in ports:
             if p.get('role') != 'input':
                 continue
             sched = p.get('schedule') or [t_now]
             if t_now in sched:
-                # Force the cell to head BEFORE stepping; the rule will
-                # then propagate as usual.
                 grid = grid.copy()
                 grid[p['y'], p['x']] = 2
         grid = _step(grid, packed)
         traj.append(grid.tolist())
 
-    # Output reads — ALL output cell values across all ticks.
     outputs = []
-    for p in (c.ports or []):
+    for p in ports:
         if p.get('role') != 'output':
             continue
         outputs.append({
@@ -171,6 +200,7 @@ def circuit_run(request, slug):
         'trajectory': traj,
         'outputs': outputs,
         'palette': c.palette_or_default,
+        'autosaved': autosave,
     })
 
 

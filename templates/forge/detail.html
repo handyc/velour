@@ -110,6 +110,11 @@
   </div>
 
   <div>
+    <div id="mode-indicator" style="font-size:0.72rem;color:#7ee787;
+         padding:0.2rem 0.6rem;background:#0d1117;border:1px solid #30363d;
+         border-radius:4px;margin-bottom:0.4rem;display:inline-block;">
+      ✎ design mode — clicks paint cells
+    </div>
     <svg id="grid" xmlns="http://www.w3.org/2000/svg"
          style="display:block;background:#0a0a0a;
          border:1px solid #30363d;border-radius:6px;width:100%;
@@ -382,15 +387,46 @@ document.getElementById('save').addEventListener('click', async () => {
 
 async function run(){
     const ticks = parseInt(document.getElementById('ticks').value, 10) || 24;
-    const r = await fetch(`${URL_RUN}?ticks=${ticks}`);
-    if (!r.ok) return;
+    // Send the live `design` (and ports) so Play uses what's painted,
+    // not whatever was saved last. autosave=true persists the same
+    // payload — refreshing the page won't lose your work.
+    const r = await fetch(URL_RUN, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({
+            grid: design, ports: ports, ticks, autosave: true,
+        }),
+    });
+    if (!r.ok){
+        const t = await r.text();
+        document.getElementById('save-status').textContent =
+            'run error: ' + t.slice(0, 60);
+        document.getElementById('save-status').style.color = '#ff7b72';
+        return;
+    }
     const data = await r.json();
     trajectory = data.trajectory;
     frame = 0;
     document.getElementById('t-slider').max = trajectory.length - 1;
     document.getElementById('t-slider').value = 0;
+    setMode('playback');
     showFrame(0);
     showOutputs(data.outputs);
+}
+
+function setMode(mode){
+    const ind = document.getElementById('mode-indicator');
+    if (mode === 'playback'){
+        ind.textContent = '▶ playback — clicks disabled, hit ↺ reset to edit';
+        ind.style.color = '#f0c040';
+        ind.style.borderColor = '#7d5a10';
+        document.getElementById('grid').style.cursor = 'not-allowed';
+    } else {
+        ind.textContent = '✎ design mode — clicks paint cells';
+        ind.style.color = '#7ee787';
+        ind.style.borderColor = '#30363d';
+        document.getElementById('grid').style.cursor = 'crosshair';
+    }
 }
 
 function showFrame(t){
@@ -403,13 +439,18 @@ function showFrame(t){
 }
 
 function reset(){
-    if (playing) togglePlay();
+    if (playing){
+        playing = false;
+        document.getElementById('play').textContent = '▶ Play';
+        clearInterval(playTimer);
+    }
     trajectory = null;
     frame = 0;
     document.getElementById('t-slider').max = 0;
     document.getElementById('t-slider').value = 0;
     document.getElementById('t-label').textContent = 't = 0 / 0';
     paintGrid(design);
+    setMode('design');
     document.getElementById('outputs-pane').style.display = 'none';
 }
 
