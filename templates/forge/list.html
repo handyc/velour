@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Forge — circuits{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<h1 style="margin-top:0;">Forge
+  <span style="color:#8b949e;font-weight:400;font-size:0.85rem;">
+    — circuits as evolved hex CA configurations
+  </span>
+</h1>
+<p style="color:#8b949e;font-size:0.85rem;max-width:60rem;">
+  A circuit lives as a hex CA configuration: cells coloured for the
+  wireworld substrate (empty / wire / head / tail) plus input and
+  output ports. The CA rule is fixed; the layout is what you design
+  (and, in a later phase, evolve). Click <em>New circuit</em> below
+  to start a 16×16 blank.
+</p>
+
+<form method="post" action="{% url 'forge:new' %}"
+      style="margin:0.6rem 0 1rem;display:flex;gap:0.5rem;align-items:center;
+      flex-wrap:wrap;background:#161b22;border:1px solid #30363d;
+      border-radius:6px;padding:0.6rem 0.9rem;">
+  {% csrf_token %}
+  <input type="text" name="name" placeholder="circuit name"
+         style="flex:1;min-width:160px;background:#0d1117;color:#c9d1d9;
+         border:1px solid #30363d;padding:0.3rem 0.5rem;font-size:0.85rem;">
+  <label style="font-size:0.78rem;color:#8b949e;">w
+    <input type="number" name="width" value="16" min="4" max="64"
+           style="width:4rem;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <label style="font-size:0.78rem;color:#8b949e;">h
+    <input type="number" name="height" value="16" min="4" max="64"
+           style="width:4rem;background:#0d1117;color:#c9d1d9;
+           border:1px solid #30363d;padding:0.25rem;">
+  </label>
+  <button type="submit" style="background:#238636;color:#fff;border:0;
+          padding:0.4rem 1.0rem;cursor:pointer;font-size:0.85rem;
+          font-weight:600;">+ New circuit</button>
+</form>
+
+{% if circuits %}
+<div style="display:flex;flex-direction:column;gap:0.35rem;">
+  {% for c in circuits %}
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:4px;
+       padding:0.5rem 0.8rem;display:flex;align-items:center;gap:0.8rem;">
+    <a href="{% url 'forge:detail' c.slug %}"
+       style="color:#0d1117;background:#58a6ff;padding:0.2rem 0.6rem;
+       border-radius:3px;text-decoration:none;font-size:0.75rem;
+       font-weight:600;white-space:nowrap;">Open</a>
+    <a href="{% url 'forge:detail' c.slug %}"
+       style="color:#c9d1d9;text-decoration:none;font-weight:500;
+       font-size:0.88rem;">{{ c.name }}</a>
+    <span style="color:#6e7681;font-size:0.78rem;">
+      {{ c.width }}×{{ c.height }} · {{ c.rule_name }}
+    </span>
+    <span style="color:#8b949e;font-size:0.72rem;flex:1;
+          text-align:right;">{{ c.updated_at|date:"Y-m-d H:i" }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p style="color:#6e7681;">No circuits yet. Create one above.</p>
+{% endif %}
+
+</div>
+{% endblock %}

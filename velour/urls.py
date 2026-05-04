@@ -34,6 +34,7 @@ urlpatterns = [
     path('hpc/', include('hpc.urls')),
     path('tiles/', include('tiles.urls')),
     path('gridprint/', include('gridprint.urls')),
+    path('forge/', include('forge.urls')),
     path('condenser/', include('condenser.urls')),
     path('automaton/', include('automaton.urls')),
     path('aether/', include('aether.urls')),

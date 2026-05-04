@@ -139,6 +139,7 @@ INSTALLED_APPS = [
     'hexnn',
     'taxon',
     'gridprint',
+    'forge',
 ]
 
 MIDDLEWARE = [

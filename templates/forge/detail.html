@@ -1,0 +1,492 @@
+{% extends "base.html" %}
+{% block title %}Forge — {{ circuit.name }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px;margin:1rem auto;padding:0 1rem;color:#c9d1d9;
+            font-family:ui-monospace,Menlo,monospace;">
+
+<p style="margin-bottom:0.2rem;font-size:0.82rem;">
+  <a href="{% url 'forge:list' %}" style="color:#58a6ff;">← Forge</a>
+</p>
+
+<h1 style="margin:0 0 0.4rem 0;display:flex;align-items:baseline;gap:0.6rem;">
+  <input id="cname" value="{{ circuit.name }}"
+         style="background:transparent;color:#c9d1d9;border:0;border-bottom:1px dashed #30363d;
+         font:inherit;font-size:1.4rem;flex:1;min-width:200px;padding:0;">
+  <span style="color:#8b949e;font-weight:400;font-size:0.78rem;">
+    {{ circuit.width }}×{{ circuit.height }} · {{ circuit.rule_name }}
+  </span>
+</h1>
+<p style="color:#6e7681;font-size:0.78rem;margin:0.2rem 0 0.8rem 0;">
+  Click cells to paint. Tools: <kbd>1</kbd> wire, <kbd>2</kbd> head,
+  <kbd>3</kbd> tail, <kbd>0</kbd> empty.
+  Right-click toggles input port; shift+click toggles output port.
+  Save to persist; Run to play the simulation.
+</p>
+
+<div style="display:grid;grid-template-columns:280px 1fr;gap:1rem;
+     align-items:flex-start;">
+
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;
+       padding:0.7rem 0.8rem;display:flex;flex-direction:column;
+       gap:0.5rem;font-size:0.8rem;">
+    <div>
+      <span style="color:#8b949e;">Brush:</span>
+      <div style="display:flex;gap:0.3rem;margin-top:0.25rem;">
+        {% for c in palette %}
+        <button class="brush" data-brush="{{ forloop.counter0 }}"
+                style="width:2.4rem;height:1.6rem;border:1px solid #30363d;
+                background:{{ c }};cursor:pointer;color:#0d1117;
+                font:600 0.7rem ui-monospace;border-radius:2px;">
+          {{ forloop.counter0 }}
+        </button>
+        {% endfor %}
+      </div>
+      <div style="color:#6e7681;font-size:0.7rem;margin-top:0.3rem;">
+        0 empty · 1 wire · 2 head · 3 tail
+      </div>
+    </div>
+
+    <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+      <button id="step-back" style="background:#21262d;color:#c9d1d9;
+              border:1px solid #30363d;padding:0.3rem 0.6rem;cursor:pointer;
+              font-size:0.78rem;">⏮</button>
+      <button id="play" style="background:#1f6feb;color:#fff;border:0;
+              padding:0.3rem 0.8rem;cursor:pointer;font-size:0.78rem;
+              font-weight:600;">▶ Play</button>
+      <button id="step-fwd" style="background:#21262d;color:#c9d1d9;
+              border:1px solid #30363d;padding:0.3rem 0.6rem;cursor:pointer;
+              font-size:0.78rem;">⏭</button>
+      <button id="reset" style="background:#21262d;color:#c9d1d9;
+              border:1px solid #30363d;padding:0.3rem 0.6rem;cursor:pointer;
+              font-size:0.78rem;">↺ reset</button>
+    </div>
+    <label style="color:#8b949e;display:flex;flex-direction:column;gap:0.2rem;">
+      ticks
+      <input type="number" id="ticks" value="40" min="1" max="200"
+             style="background:#0d1117;color:#c9d1d9;
+             border:1px solid #30363d;padding:0.25rem;width:6rem;">
+    </label>
+    <input type="range" id="t-slider" min="0" max="0" value="0"
+           style="width:100%;">
+    <span id="t-label" style="color:#8b949e;font-size:0.72rem;">t = 0 / 0</span>
+
+    <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
+
+    <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+      <button id="save" style="background:#238636;color:#fff;border:0;
+              padding:0.35rem 0.8rem;cursor:pointer;font-size:0.78rem;
+              font-weight:600;">Save</button>
+      <button id="clear" style="background:#21262d;color:#c9d1d9;
+              border:1px solid #30363d;padding:0.35rem 0.6rem;cursor:pointer;
+              font-size:0.78rem;">clear all</button>
+      <form method="post" action="{% url 'forge:delete' circuit.slug %}"
+            style="display:inline;"
+            onsubmit="return true;">
+        {% csrf_token %}
+        <button type="submit" style="background:#21262d;color:#ff7b72;
+                border:1px solid #30363d;padding:0.35rem 0.6rem;cursor:pointer;
+                font-size:0.78rem;">delete</button>
+      </form>
+    </div>
+    <div id="save-status" style="font-size:0.72rem;color:#7ee787;
+         min-height:1em;"></div>
+
+    <hr style="border:0;border-top:1px solid #21262d;margin:0.2rem 0;">
+
+    <div>
+      <span style="color:#8b949e;">Ports</span>
+      <div id="ports-list" style="margin-top:0.3rem;display:flex;
+           flex-direction:column;gap:0.2rem;font-size:0.72rem;
+           color:#c9d1d9;"></div>
+      <div style="color:#6e7681;font-size:0.7rem;margin-top:0.3rem;
+           line-height:1.4;">
+        right-click → input · shift+click → output
+        <br>inputs auto-pulse at every tick by default.
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <svg id="grid" xmlns="http://www.w3.org/2000/svg"
+         style="display:block;background:#0a0a0a;
+         border:1px solid #30363d;border-radius:6px;width:100%;
+         height:auto;cursor:crosshair;"></svg>
+    <p style="font-size:0.72rem;color:#6e7681;margin:0.3rem 0 0;">
+      Pointy-top hex grid, offset-column convention (matches automaton
+      / s3lab). 6 neighbours per cell; signals propagate at one cell
+      per tick along wire (1) cells.
+    </p>
+
+    <div id="outputs-pane" style="margin-top:0.8rem;background:#0d1117;
+         border:1px solid #30363d;border-radius:6px;padding:0.6rem 0.8rem;
+         display:none;">
+      <h3 style="margin:0 0 0.4rem 0;font-size:0.92rem;">Outputs</h3>
+      <div id="outputs"></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+{{ circuit.grid|json_script:"initial-grid" }}
+{{ circuit.ports|json_script:"initial-ports" }}
+{{ palette|json_script:"palette" }}
+
+<script>
+const CSRF = document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1];
+const W = {{ circuit.width }};
+const H = {{ circuit.height }};
+const SLUG = '{{ circuit.slug }}';
+const URL_SAVE = '{% url "forge:save" circuit.slug %}';
+const URL_RUN  = '{% url "forge:run"  circuit.slug %}';
+
+const PAL = JSON.parse(document.getElementById('palette').textContent);
+let initialGrid = JSON.parse(document.getElementById('initial-grid').textContent);
+let ports = JSON.parse(document.getElementById('initial-ports').textContent) || [];
+if (!Array.isArray(initialGrid) || initialGrid.length !== H){
+    initialGrid = Array.from({length: H}, () => new Array(W).fill(0));
+}
+
+// Working "design" grid (what edits happen on) and "view" grid (what's
+// shown — either the design or a frame from a run trajectory).
+let design = initialGrid.map(row => row.slice());
+let trajectory = null;        // null = showing design; array = run frames
+let frame = 0;
+let brush = 1;
+let playing = false;
+let playTimer = null;
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const grid = document.getElementById('grid');
+
+// Hex geometry — pointy-top, offset-row layout (odd rows pushed +x by
+// half a cell). Cell circumradius R, width = R*sqrt(3), height = 2R,
+// vertical step = 1.5R.
+const SQ3 = Math.sqrt(3);
+const CELL_PX = 24;          // cell circumradius in px (preview)
+const R = CELL_PX;
+const COL_STEP = R * SQ3;
+const ROW_STEP = R * 1.5;
+
+function hexCenter(x, y){
+    return {
+        cx: x * COL_STEP + (y & 1) * (COL_STEP / 2) + R * SQ3 / 2,
+        cy: y * ROW_STEP + R,
+    };
+}
+function hexPoints(cx, cy){
+    const r = R;
+    const half = SQ3 / 2;
+    return [
+        [cx,        cy - r],
+        [cx + r*half, cy - r/2],
+        [cx + r*half, cy + r/2],
+        [cx,        cy + r],
+        [cx - r*half, cy + r/2],
+        [cx - r*half, cy - r/2],
+    ].map(([x,y]) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
+}
+
+const svgW = W * COL_STEP + COL_STEP / 2 + 2;
+const svgH = H * ROW_STEP + R + 2;
+grid.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+
+const cellEls = [];     // [y][x] = polygon element
+const portEls = new Map();   // key "x,y" -> element
+
+function rebuildSvg(){
+    grid.innerHTML = '';
+    cellEls.length = 0;
+    portEls.clear();
+    for (let y = 0; y < H; y++){
+        const row = [];
+        for (let x = 0; x < W; x++){
+            const {cx, cy} = hexCenter(x, y);
+            const poly = document.createElementNS(SVG_NS, 'polygon');
+            poly.setAttribute('points', hexPoints(cx, cy));
+            poly.setAttribute('stroke', '#1d2330');
+            poly.setAttribute('stroke-width', '1');
+            poly.dataset.x = x;
+            poly.dataset.y = y;
+            poly.addEventListener('mousedown', onCellMouse);
+            poly.addEventListener('mouseenter', onCellHover);
+            poly.addEventListener('contextmenu', onCellContext);
+            grid.appendChild(poly);
+            row.push(poly);
+        }
+        cellEls.push(row);
+    }
+    paintGrid(design);
+    drawPorts();
+    updatePortsList();
+}
+
+function paintGrid(g){
+    for (let y = 0; y < H; y++){
+        for (let x = 0; x < W; x++){
+            const v = (g[y] && g[y][x]) | 0;
+            cellEls[y][x].setAttribute('fill', PAL[v] || '#101010');
+        }
+    }
+}
+
+function drawPorts(){
+    // Remove old port markers
+    for (const el of portEls.values()) el.remove();
+    portEls.clear();
+    for (const p of ports){
+        const {cx, cy} = hexCenter(p.x, p.y);
+        const c = document.createElementNS(SVG_NS, 'circle');
+        c.setAttribute('cx', cx);
+        c.setAttribute('cy', cy);
+        c.setAttribute('r', R * 0.45);
+        c.setAttribute('fill', 'none');
+        c.setAttribute('stroke', p.role === 'input' ? '#3df0ff' : '#ff7b72');
+        c.setAttribute('stroke-width', '2.2');
+        c.setAttribute('pointer-events', 'none');
+        grid.appendChild(c);
+        portEls.set(`${p.x},${p.y}`, c);
+    }
+}
+
+function updatePortsList(){
+    const el = document.getElementById('ports-list');
+    if (!ports.length){
+        el.innerHTML = '<span style="color:#6e7681;">— none —</span>';
+        return;
+    }
+    el.innerHTML = '';
+    for (let i = 0; i < ports.length; i++){
+        const p = ports[i];
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:0.3rem;align-items:center;';
+        const colour = p.role === 'input' ? '#3df0ff' : '#ff7b72';
+        row.innerHTML =
+            `<span style="display:inline-block;width:10px;height:10px;`
+          + `border-radius:50%;border:2px solid ${colour};`
+          + `background:transparent;"></span>`
+          + `<span>${p.role} (${p.x},${p.y})</span>`
+          + `<button data-i="${i}" class="port-del" style="margin-left:auto;`
+          + `background:#21262d;color:#ff7b72;border:1px solid #30363d;`
+          + `border-radius:3px;font-size:0.65rem;padding:0 0.4rem;cursor:pointer;`
+          + `">×</button>`;
+        el.appendChild(row);
+    }
+    el.querySelectorAll('.port-del').forEach(b => {
+        b.addEventListener('click', e => {
+            const i = parseInt(e.currentTarget.dataset.i, 10);
+            ports.splice(i, 1);
+            drawPorts();
+            updatePortsList();
+        });
+    });
+}
+
+let mouseDown = false;
+function onCellMouse(e){
+    if (e.button !== 0) return;
+    mouseDown = true;
+    paintCell(e);
+}
+function onCellHover(e){
+    if (!mouseDown) return;
+    paintCell(e);
+}
+function onCellContext(e){
+    e.preventDefault();
+    togglePort(parseInt(e.currentTarget.dataset.x, 10),
+               parseInt(e.currentTarget.dataset.y, 10),
+               'input');
+}
+function paintCell(e){
+    if (trajectory) return;     // can't paint while showing run
+    const x = parseInt(e.currentTarget.dataset.x, 10);
+    const y = parseInt(e.currentTarget.dataset.y, 10);
+    if (e.shiftKey){
+        togglePort(x, y, 'output');
+        return;
+    }
+    if (design[y][x] !== brush){
+        design[y][x] = brush;
+        e.currentTarget.setAttribute('fill', PAL[brush] || '#101010');
+    }
+}
+window.addEventListener('mouseup', () => mouseDown = false);
+
+function togglePort(x, y, role){
+    const idx = ports.findIndex(p => p.x === x && p.y === y);
+    if (idx >= 0){
+        if (ports[idx].role === role){
+            ports.splice(idx, 1);
+        } else {
+            ports[idx].role = role;
+        }
+    } else {
+        ports.push({role, x, y, name: `${role}-${ports.length+1}`,
+                    schedule: []});
+    }
+    drawPorts();
+    updatePortsList();
+}
+
+// Brush selection
+document.querySelectorAll('.brush').forEach(b => {
+    b.addEventListener('click', () => {
+        brush = parseInt(b.dataset.brush, 10);
+        document.querySelectorAll('.brush').forEach(x => {
+            x.style.outline = (parseInt(x.dataset.brush, 10) === brush)
+                ? '2px solid #58a6ff' : 'none';
+        });
+    });
+});
+document.querySelector('.brush[data-brush="1"]').click();
+window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (['0','1','2','3'].includes(e.key)){
+        const b = document.querySelector(`.brush[data-brush="${e.key}"]`);
+        if (b) b.click();
+    }
+});
+
+document.getElementById('clear').addEventListener('click', () => {
+    if (trajectory) return;
+    design = Array.from({length: H}, () => new Array(W).fill(0));
+    paintGrid(design);
+});
+
+document.getElementById('save').addEventListener('click', async () => {
+    const status = document.getElementById('save-status');
+    status.textContent = 'saving…';
+    status.style.color = '#8b949e';
+    const r = await fetch(URL_SAVE, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({
+            grid: design, ports: ports,
+            name: document.getElementById('cname').value,
+        }),
+    });
+    if (r.ok){
+        status.textContent = 'saved.';
+        status.style.color = '#7ee787';
+        setTimeout(() => status.textContent = '', 1500);
+    } else {
+        const txt = await r.text();
+        status.textContent = 'error: ' + txt.slice(0, 60);
+        status.style.color = '#ff7b72';
+    }
+});
+
+async function run(){
+    const ticks = parseInt(document.getElementById('ticks').value, 10) || 24;
+    const r = await fetch(`${URL_RUN}?ticks=${ticks}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    trajectory = data.trajectory;
+    frame = 0;
+    document.getElementById('t-slider').max = trajectory.length - 1;
+    document.getElementById('t-slider').value = 0;
+    showFrame(0);
+    showOutputs(data.outputs);
+}
+
+function showFrame(t){
+    if (!trajectory) return;
+    frame = Math.max(0, Math.min(trajectory.length - 1, t));
+    paintGrid(trajectory[frame]);
+    document.getElementById('t-label').textContent =
+        `t = ${frame} / ${trajectory.length - 1}`;
+    document.getElementById('t-slider').value = frame;
+}
+
+function reset(){
+    if (playing) togglePlay();
+    trajectory = null;
+    frame = 0;
+    document.getElementById('t-slider').max = 0;
+    document.getElementById('t-slider').value = 0;
+    document.getElementById('t-label').textContent = 't = 0 / 0';
+    paintGrid(design);
+    document.getElementById('outputs-pane').style.display = 'none';
+}
+
+function togglePlay(){
+    if (!trajectory){
+        run().then(() => {
+            playing = true;
+            document.getElementById('play').textContent = '❚❚ Pause';
+            playTimer = setInterval(() => {
+                if (frame >= trajectory.length - 1){
+                    playing = false;
+                    document.getElementById('play').textContent = '▶ Play';
+                    clearInterval(playTimer);
+                    return;
+                }
+                showFrame(frame + 1);
+            }, 120);
+        });
+        return;
+    }
+    playing = !playing;
+    document.getElementById('play').textContent = playing ? '❚❚ Pause' : '▶ Play';
+    if (playing){
+        playTimer = setInterval(() => {
+            if (frame >= trajectory.length - 1){
+                playing = false;
+                document.getElementById('play').textContent = '▶ Play';
+                clearInterval(playTimer);
+                return;
+            }
+            showFrame(frame + 1);
+        }, 120);
+    } else {
+        clearInterval(playTimer);
+    }
+}
+
+document.getElementById('play').addEventListener('click', togglePlay);
+document.getElementById('reset').addEventListener('click', reset);
+document.getElementById('step-fwd').addEventListener('click', () => {
+    if (!trajectory){ run().then(() => showFrame(0)); return; }
+    showFrame(frame + 1);
+});
+document.getElementById('step-back').addEventListener('click', () => {
+    if (!trajectory) return;
+    showFrame(frame - 1);
+});
+document.getElementById('t-slider').addEventListener('input', e =>
+    showFrame(parseInt(e.target.value, 10)));
+
+function showOutputs(outputs){
+    const pane = document.getElementById('outputs-pane');
+    if (!outputs || !outputs.length){
+        pane.style.display = 'none';
+        return;
+    }
+    pane.style.display = '';
+    const el = document.getElementById('outputs');
+    el.innerHTML = '';
+    for (const o of outputs){
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'margin-bottom:0.4rem;';
+        const head = document.createElement('div');
+        head.style.cssText = 'font-size:0.78rem;color:#c9d1d9;';
+        head.textContent = `${o.name || 'out'} @ (${o.x}, ${o.y})`;
+        wrap.appendChild(head);
+        const reads = document.createElement('div');
+        reads.style.cssText = 'font-size:0.7rem;color:#8b949e;'
+            + 'font-family:ui-monospace;letter-spacing:0.05em;';
+        // Compress: show as a sparkbar — '·_+#' for 0..3
+        const tokens = ['·', '─', '▲', '▼'];
+        reads.textContent = o.reads.map(v => tokens[v] || '?').join('');
+        wrap.appendChild(reads);
+        el.appendChild(wrap);
+    }
+}
+
+rebuildSvg();
+</script>
+{% endblock %}
