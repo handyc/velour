@@ -1,27 +1,38 @@
-# wnnr — terminal duck toy in C
+# wnnr — a tiny Win95-style window in your terminal
 
-Faithful translation of [`advanced/wnnr`](https://github.com/handyc/ALICEworkshop/blob/main/advanced/wnnr)
-from the ALICE workshop. The original is a small bash script; this
-is a single-file C program (libc + POSIX termios + ANSI escapes,
-no curses) that does the same thing.
+Lean and mean. Single .c file, libc + POSIX termios + ANSI 256-colour
+escapes, no curses, no SLURM, no third-party libraries. Compiles
+clean with `-std=c99 -Wall -Wextra -Wpedantic`.
 
-## What it does
+```
+                ┌─────────────────────────────────────────┐
+                │ wnnr - window                  _ [] X   │  ← royal-blue title
+                ├─────────────────────────────────────────┤
+                │ File  Edit  View  Help                  │  ← grey menu bar
+                ├─────────────────────────────────────────┤
+                │  Position: (35,  6)                     │
+                │  Mon May  5 02:13:42 2026               │
+                │  Moves: 7                               │
+                │                                         │
+                │  arrow keys move | r recolour | s save  │
+                └─────────────────────────────────────────┘
+```
 
-- Spawns N coloured "ducks" (text boxes) at random positions on the
-  terminal. N defaults to 1..5 random; pass an integer to fix it
-  (`./wnnr 8`).
-- Each duck shows its `x y` coordinates with its assigned background
-  colour, and the current `date` 3 lines below.
-- Arrow keys move duck 0 around the screen.
-- `r` randomises the foreground + background colours.
-- `s` saves the state (positions + colours) to `./savepoint` and exits.
-- `q` quits.
-- `k` and `l` shell out — by default to `squeue -u $USER` and
-  `squeue` (the ALICE workshop's HPC monitor commands). Override
-  via `WNNR_K` and `WNNR_L` environment variables to make them run
-  whatever you like.
+The classic Win95 grey (`#c0c0c0` ≈ ANSI 256 colour 7) for the
+window background, royal blue (colour 21) for the title bar, white
+top/left bevel + dark-grey bottom/right shadow to fake the 3D look.
 
-The screen idles for 60 s waiting for a key before redrawing.
+## Controls
+
+| key | action |
+|---|---|
+| ← ↑ ↓ → | drag the window around the desktop |
+| `r` | re-roll the title-bar colour (still Win95-y; pick from a small set of bright shades) |
+| `s` | save window position + title colour to `./savepoint`, then exit |
+| `q` | quit |
+
+On launch, if `./savepoint` exists, the window restores to that
+position. The clock auto-refreshes every 5 s.
 
 ## Build
 
@@ -35,33 +46,22 @@ Or directly:
 cc -std=c99 -O2 -Wall -Wextra -o wnnr wnnr.c
 ```
 
-No external libraries — just libc, POSIX termios, and ANSI escape
-sequences. Should compile on any recent Linux/macOS/BSD without
-fuss.
-
-## Use
+## Run
 
 ```sh
-./wnnr            # 1..5 random ducks
-./wnnr 8          # exactly 8 ducks
-WNNR_K='qstat'   ./wnnr 4   # k key runs PBS qstat instead of squeue
-WNNR_L='top -bn1' ./wnnr 4   # l key snapshots top
+./wnnr
 ```
 
-## Differences from the bash original
+The window centres itself on the terminal automatically — no
+arguments. Resize-aware via `TIOCGWINSZ`; falls back to 80×24 if
+the ioctl fails.
 
-- **Cursor hidden** while running (`ESC[?25l`/`ESC[?25h`); restored
-  on exit including signal-driven exit (Ctrl+C).
-- **No `quack1`/`quack2`** with hard-coded SLURM partition colour
-  schemes. The `k`/`l` keys still shell out, but to a default
-  `squeue` invocation that any cluster user can run, and you can
-  point them at any command via env.
-- **Save format** is a single line of space-separated ints — same
-  semantics as the bash version's `echo "${myX[@]}" "${myY[@]}"
-  "${r[@]}" > savepoint`, just emitted by `fprintf`.
-- **Drain timeout** for ESC sequences is 200 µs (vs. bash's
-  0.0001 s = 100 µs). The longer drain reliably catches arrow keys
-  on slow terminals (SSH from outside the data centre).
-- **Bounds clamping** on duck 0 movement: x ∈ [0, 78], y ∈ [0, 30].
-  The bash version had no clamp — you could send your duck off
-  screen.
+## What's gone vs. the bash original
+
+- No SLURM (`k`/`l` keys removed).
+- No multi-duck mode — one window only.
+- No tput dependency. Pure ANSI escapes.
+
+What's left is the spirit of the toy: a single coloured box you
+can shove around the screen, with a date readout, save/quit keys,
+and a colour re-roll for fun.
