@@ -21,7 +21,10 @@ import numpy as np
 
 from .models import Circuit, EvolutionRun
 from .runner import is_running, start_run
-from .score import preset_truth_table, score_circuit
+from .score import (
+    analog_preset_rows, preset_truth_table,
+    score_circuit, score_circuit_analog,
+)
 from .sim import hex_step, wireworld_lookup
 from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE
 
@@ -335,9 +338,13 @@ def circuit_score(request, slug):
     target = payload.get('target') or {}
 
     preset = (target.get('preset') or '').strip().upper()
+    kind = (target.get('kind') or '').strip().lower() or 'logic'
     rows = target.get('rows')
     if preset and preset != 'CUSTOM' and not rows:
-        rows = preset_truth_table(preset)
+        if kind == 'analog':
+            rows = analog_preset_rows(preset)
+        else:
+            rows = preset_truth_table(preset)
         if rows is None:
             return JsonResponse({'ok': False,
                                  'reason': f'unknown preset: {preset}'},
@@ -345,21 +352,27 @@ def circuit_score(request, slug):
 
     full_target = {
         'preset':  preset or 'CUSTOM',
+        'kind':    kind,
         'inputs':  target.get('inputs', ['A', 'B']),
         'outputs': target.get('outputs', ['Q']),
         'rows':    rows or [],
-        'ticks':   target.get('ticks', 30),
+        'ticks':   target.get('ticks', 60 if kind == 'analog' else 30),
         'eval_window': target.get('eval_window'),
     }
 
-    result = score_circuit(
-        grid=grid, ports=ports,
-        width=c.width, height=c.height, target=full_target,
-    )
+    if kind == 'analog':
+        result = score_circuit_analog(
+            grid=grid, ports=ports,
+            width=c.width, height=c.height, target=full_target,
+        )
+    else:
+        result = score_circuit(
+            grid=grid, ports=ports,
+            width=c.width, height=c.height, target=full_target,
+        )
     result['preset'] = preset or 'CUSTOM'
     result['target'] = full_target
 
-    # Persist target on the circuit so re-opening the page restores it.
     c.target = full_target
     c.save(update_fields=['target', 'updated_at'])
     return JsonResponse(result)
@@ -399,17 +412,22 @@ def circuit_evolve_start(request, slug):
 
     target = payload.get('target') or {}
     preset = (target.get('preset') or '').strip().upper() or 'AND'
-    rows = target.get('rows') or preset_truth_table(preset)
+    kind = (target.get('kind') or '').strip().lower() or 'logic'
+    rows = target.get('rows')
+    if not rows:
+        rows = (analog_preset_rows(preset) if kind == 'analog'
+                else preset_truth_table(preset))
     if rows is None:
         return JsonResponse({'ok': False,
                              'reason': f'unknown preset: {preset}'},
                             status=400)
     full_target = {
         'preset':  preset,
+        'kind':    kind,
         'inputs':  target.get('inputs', ['A', 'B']),
         'outputs': target.get('outputs', ['Q']),
         'rows':    rows,
-        'ticks':   int(target.get('ticks', 30)),
+        'ticks':   int(target.get('ticks', 60 if kind == 'analog' else 30)),
         'eval_window': target.get('eval_window'),
     }
 

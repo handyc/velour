@@ -208,8 +208,16 @@
               <option>DECODE_1</option>
               <option>DECODE_2</option>
             </optgroup>
+            <optgroup label="analog (rate-coded)">
+              <option>PASSTHROUGH</option>
+              <option>HALF</option>
+              <option>LOWPASS_05</option>
+              <option>HIGHPASS_05</option>
+              <option>AVERAGE</option>
+            </optgroup>
             <optgroup label="custom">
               <option>CUSTOM</option>
+              <option>CUSTOM_ANALOG</option>
             </optgroup>
           </select>
         </label>
@@ -727,7 +735,17 @@ const PRESET_PORTS = {
     'FULL_ADDER': {inputs:'A,B,C', outputs:'Q,R'},
     'DECODE_1':   {inputs:'A',     outputs:'Q,R'},
     'DECODE_2':   {inputs:'A,B',   outputs:'Q,R,S,T'},
+    'PASSTHROUGH':{inputs:'A',     outputs:'Q'},
+    'HALF':       {inputs:'A',     outputs:'Q'},
+    'LOWPASS_05': {inputs:'A',     outputs:'Q'},
+    'HIGHPASS_05':{inputs:'A',     outputs:'Q'},
+    'AVERAGE':    {inputs:'A,B',   outputs:'Q'},
 };
+// Set of preset names that should send target.kind='analog'.
+const ANALOG_PRESETS = new Set([
+    'PASSTHROUGH', 'HALF', 'LOWPASS_05', 'HIGHPASS_05', 'AVERAGE',
+    'CUSTOM_ANALOG',
+]);
 // Built-in preset → row arrays. Mirrors forge/score.py so the editor
 // can autofill the JSON textarea client-side without an extra fetch.
 const PRESET_ROWS = {
@@ -746,6 +764,12 @@ const PRESET_ROWS = {
     'DECODE_2':   [
         [0,0,1,0,0,0],[0,1,0,1,0,0],[1,0,0,0,1,0],[1,1,0,0,0,1],
     ],
+    // Analog (rate-coded floats in [0, 1])
+    'PASSTHROUGH':[[0.0,0.0],[0.33,0.33],[0.67,0.67],[1.0,1.0]],
+    'HALF':       [[0.0,0.0],[0.33,0.16],[0.67,0.33],[1.0,0.5]],
+    'LOWPASS_05': [[0.0,0.0],[0.33,0.33],[0.5,0.5],[0.67,0.5],[1.0,0.5]],
+    'HIGHPASS_05':[[0.0,0.0],[0.2,0.0],[0.5,0.5],[0.8,0.8],[1.0,1.0]],
+    'AVERAGE':    [[0.0,0.0,0.0],[1.0,0.0,0.5],[0.0,1.0,0.5],[1.0,1.0,1.0],[0.5,0.5,0.5]],
 };
 
 function presetRowsAsJson(presetName){
@@ -906,7 +930,10 @@ document.getElementById('score-form').addEventListener('submit', async (e) => {
         preset, inputs: inNames, outputs: outNames,
         ticks, eval_window: [t_lo, t_hi],
     };
-    if (preset === 'CUSTOM'){
+    if (ANALOG_PRESETS.has(preset)){
+        target.kind = 'analog';
+    }
+    if (preset === 'CUSTOM' || preset === 'CUSTOM_ANALOG'){
         try {
             target.rows = JSON.parse(
                 document.getElementById('custom-rows').value || '[]');
@@ -935,6 +962,10 @@ function renderScore(data){
     }
     const pct = Math.round(data.fitness * 100);
     const colour = pct === 100 ? '#7ee787' : pct >= 50 ? '#f0c040' : '#ff7b72';
+    const isAnalog = data.kind === 'analog';
+    const matchLabel = isAnalog
+        ? `${data.correct} / ${data.total} rows ≥0.95`
+        : `${data.correct} / ${data.total} exact matches`;
     let html = `<div style="display:flex;gap:0.6rem;align-items:center;
                 margin-bottom:0.4rem;font-size:0.85rem;flex-wrap:wrap;">
         <span style="background:${colour};color:#0d1117;padding:0.15rem 0.5rem;
@@ -942,40 +973,52 @@ function renderScore(data){
           fitness ${data.fitness.toFixed(2)}
         </span>
         <span style="color:#8b949e;font-size:0.78rem;">
-          ${data.correct} / ${data.total} exact matches
+          ${matchLabel}
         </span>
         <span style="color:#8b949e;font-size:0.72rem;">
-          target <strong>${data.preset || 'CUSTOM'}</strong> ·
+          target <strong>${data.preset || 'CUSTOM'}</strong>${isAnalog ? ' (analog)' : ''} ·
           ${data.inputs.join(',')} → ${data.outputs.join(',')}
           · ticks ${data.ticks} · window [${data.eval_window[0]}, ${data.eval_window[1]}]
         </span>
       </div>`;
+    const fmt = v => (typeof v === 'number'
+        ? (Number.isInteger(v) ? String(v) : v.toFixed(2))
+        : String(v));
+    const fmtList = arr => (arr || []).map(fmt).join(', ');
     html += '<table style="width:100%;border-collapse:collapse;font-size:0.78rem;">';
     html += '<thead><tr style="color:#8b949e;font-size:0.7rem;">'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">in</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">exp</th>'
-          + '<th style="text-align:left;padding:0.2rem 0.4rem;">obs</th>'
-          + '<th style="text-align:left;padding:0.2rem 0.4rem;">heads</th>'
+          + (isAnalog
+             ? '<th style="text-align:left;padding:0.2rem 0.4rem;">observed rate</th>'
+             : '<th style="text-align:left;padding:0.2rem 0.4rem;">obs</th>'
+               + '<th style="text-align:left;padding:0.2rem 0.4rem;">heads</th>')
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">score</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">ok</th>'
           + '<th style="text-align:left;padding:0.2rem 0.4rem;">replay</th>'
           + '</tr></thead><tbody>';
-    const inNames = data.inputs || [];
     for (let ri = 0; ri < data.rows.length; ri++){
         const r = data.rows[ri];
         const okMark = r.ok
             ? '<span style="color:#7ee787;">✓</span>'
             : '<span style="color:#ff7b72;">✗</span>';
-        const inS  = r.in.join(', ');
-        const exS  = r.expected.join(', ');
-        const acS  = r.actual.length ? r.actual.join(', ') : '—';
-        const hdS  = (r.heads || []).join(', ');
+        const inS  = fmtList(r.in);
+        const exS  = fmtList(r.expected);
         const scS  = (r.score != null) ? r.score.toFixed(2) : '—';
+        let middleCells;
+        if (isAnalog){
+            const obsS = fmtList(r.observed);
+            middleCells = `<td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${obsS}</td>`;
+        } else {
+            const acS = (r.actual && r.actual.length) ? fmtList(r.actual) : '—';
+            const hdS = fmtList(r.heads);
+            middleCells = `<td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${acS}</td>`
+                        + `<td style="padding:0.2rem 0.4rem;color:#8b949e;">${hdS}</td>`;
+        }
         html += `<tr style="border-top:1px solid #21262d;">
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${inS}</td>
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${exS}</td>
-            <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${acS}</td>
-            <td style="padding:0.2rem 0.4rem;color:#8b949e;">${hdS}</td>
+            ${middleCells}
             <td style="padding:0.2rem 0.4rem;color:#c9d1d9;">${scS}</td>
             <td style="padding:0.2rem 0.4rem;">${okMark}</td>
             <td style="padding:0.2rem 0.4rem;">

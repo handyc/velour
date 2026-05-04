@@ -25,7 +25,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
-from .score import score_circuit
+from .score import score_circuit, score_circuit_analog
 
 
 @dataclass
@@ -173,8 +173,16 @@ def tournament(rng: random.Random,
 
 def fitness(grid: list[list[int]], ports: list[dict[str, Any]],
             width: int, height: int, target: dict[str, Any]) -> float:
-    res = score_circuit(grid=grid, ports=ports,
-                        width=width, height=height, target=target)
+    """Dispatch to the right scorer based on target.kind. Default is
+    logic (truth-table). Analog uses rate-coded inputs/outputs and
+    per-row absolute-error fitness."""
+    kind = (target.get('kind') or 'logic').lower()
+    if kind == 'analog':
+        res = score_circuit_analog(grid=grid, ports=ports,
+                                   width=width, height=height, target=target)
+    else:
+        res = score_circuit(grid=grid, ports=ports,
+                            width=width, height=height, target=target)
     if not res.get('ok'):
         return 0.0
     return float(res.get('fitness', 0.0))

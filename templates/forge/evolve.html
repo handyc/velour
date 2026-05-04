@@ -43,6 +43,13 @@
           <option>DECODE_1</option>
           <option>DECODE_2</option>
         </optgroup>
+        <optgroup label="analog (rate-coded)">
+          <option>PASSTHROUGH</option>
+          <option>HALF</option>
+          <option>LOWPASS_05</option>
+          <option>HIGHPASS_05</option>
+          <option>AVERAGE</option>
+        </optgroup>
       </select>
     </label>
     <label style="color:#8b949e;">inputs
@@ -213,7 +220,15 @@ const PRESET_PORTS_GA = {
     'FULL_ADDER': {inputs:'A,B,C', outputs:'Q,R'},
     'DECODE_1':   {inputs:'A',     outputs:'Q,R'},
     'DECODE_2':   {inputs:'A,B',   outputs:'Q,R,S,T'},
+    'PASSTHROUGH':{inputs:'A',     outputs:'Q'},
+    'HALF':       {inputs:'A',     outputs:'Q'},
+    'LOWPASS_05': {inputs:'A',     outputs:'Q'},
+    'HIGHPASS_05':{inputs:'A',     outputs:'Q'},
+    'AVERAGE':    {inputs:'A,B',   outputs:'Q'},
 };
+const ANALOG_PRESET_NAMES_GA = new Set([
+    'PASSTHROUGH', 'HALF', 'LOWPASS_05', 'HIGHPASS_05', 'AVERAGE',
+]);
 document.getElementById('ga-preset').addEventListener('change', e => {
     const p = e.target.value;
     const f = document.getElementById('ga-form');
@@ -228,13 +243,17 @@ document.getElementById('ga-form').addEventListener('submit', async (e) => {
     const f = e.target;
     const get = n => f.querySelector(`[name="${n}"]`).value;
     const ev = get('eval_window').split(',').map(s => parseInt(s.trim(), 10) || 0);
+    const presetName = get('preset');
     const target = {
-        preset:  get('preset'),
+        preset:  presetName,
         inputs:  get('inputs').split(',').map(s => s.trim()).filter(Boolean),
         outputs: get('outputs').split(',').map(s => s.trim()).filter(Boolean),
         ticks:   parseInt(get('ticks'), 10),
         eval_window: [ev[0], ev[1] || parseInt(get('ticks'), 10)],
     };
+    if (ANALOG_PRESET_NAMES_GA.has(presetName)){
+        target.kind = 'analog';
+    }
     const payload = {
         target,
         pop_size:       parseInt(get('pop_size'), 10),
