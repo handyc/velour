@@ -25,20 +25,7 @@ from typing import Any
 
 import numpy as np
 
-from automaton.packed import PackedRuleset
-from taxon.engine import _step
-
-from .wireworld import build_wireworld_rule
-
-
-_PACKED: PackedRuleset | None = None
-
-
-def _packed() -> PackedRuleset:
-    global _PACKED
-    if _PACKED is None:
-        _PACKED = build_wireworld_rule()
-    return _PACKED
+from .sim import hex_step, wireworld_lookup
 
 
 # Standard 2-input gate truth tables. Used by /score/ when the page
@@ -104,7 +91,7 @@ def score_circuit(*, grid: list[list[int]],
     t_lo = max(0, int(ew[0]))
     t_hi = min(ticks + 1, max(t_lo + 1, int(ew[1])))
 
-    packed = _packed()
+    lut = wireworld_lookup()
     base = np.array(grid, dtype=np.uint8)
     if base.shape != (height, width):
         return {
@@ -137,7 +124,7 @@ def score_circuit(*, grid: list[list[int]],
 
         traj = [g.copy()]
         for _ in range(ticks):
-            g = _step(g, packed)
+            g = hex_step(g, lut, n_colors=4)
             traj.append(g.copy())
 
         actual = []

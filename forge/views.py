@@ -19,22 +19,11 @@ from django.views.decorators.http import require_POST
 
 import numpy as np
 
-from automaton.packed import PackedRuleset
-from taxon.engine import _step
-
 from .models import Circuit, EvolutionRun
 from .runner import is_running, start_run
 from .score import preset_truth_table, score_circuit
-from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE, build_wireworld_rule
-
-
-def _wireworld_packed() -> PackedRuleset:
-    """Cached singleton — built once per process."""
-    pr = getattr(_wireworld_packed, '_cached', None)
-    if pr is None:
-        pr = build_wireworld_rule()
-        _wireworld_packed._cached = pr
-    return pr
+from .sim import hex_step, wireworld_lookup
+from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE
 
 
 @login_required
@@ -159,7 +148,7 @@ def circuit_run(request, slug):
         except (TypeError, ValueError):
             ticks = 24
 
-    packed = _wireworld_packed()
+    lut = wireworld_lookup()
     try:
         grid = np.array(grid_data, dtype=np.uint8)
     except (TypeError, ValueError):
@@ -183,7 +172,7 @@ def circuit_run(request, slug):
             if t_now in sched:
                 grid = grid.copy()
                 grid[p['y'], p['x']] = 2
-        grid = _step(grid, packed)
+        grid = hex_step(grid, lut, n_colors=4)
         traj.append(grid.tolist())
 
     outputs = []
