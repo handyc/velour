@@ -39,8 +39,11 @@ def circuit_list(request):
 def gates_json(request):
     """Verified-gate catalog as JSON for the import-gate UI."""
     from django.db.models import Max, Q
+    # 0.95 covers analog gates (which top out near 0.98 because of
+    # rate-coding discretization); logic gates that hit 1.0 still
+    # qualify and stay at the top of the list.
     qs = (Circuit.objects
-          .filter(evolution_runs__best_fitness__gte=1.0 - 1e-9)
+          .filter(evolution_runs__best_fitness__gte=0.95)
           .annotate(best_run_fitness=Max(
               'evolution_runs__best_fitness',
               filter=Q(evolution_runs__status='done')))
@@ -69,25 +72,25 @@ def gates_json(request):
 @login_required
 def gate_list(request):
     """Catalogue of verified gates — circuits with at least one
-    EvolutionRun at fitness >= 1.0. The annotation buys us per-gate
-    type, fitness, last verification time without an N+1."""
+    EvolutionRun at fitness >= 0.95. (1.0 for logic, ≥0.95 covers
+    analog rate-coded runs that lose a tiny bit to discretization.)"""
     from django.db.models import Max, Q
+    THRESHOLD = 0.95
     qs = (Circuit.objects
-          .filter(evolution_runs__best_fitness__gte=1.0 - 1e-9)
+          .filter(evolution_runs__best_fitness__gte=THRESHOLD)
           .annotate(
               best_run_fitness=Max('evolution_runs__best_fitness',
                                    filter=Q(evolution_runs__status='done')),
               last_verified=Max('evolution_runs__finished_at',
-                                filter=Q(evolution_runs__best_fitness__gte=1.0 - 1e-9)),
+                                filter=Q(evolution_runs__best_fitness__gte=THRESHOLD)),
           )
           .distinct()
           .order_by('-last_verified', '-updated_at'))
 
     gates = []
     for c in qs:
-        # Derive gate type from the most recent perfect run's target preset.
         run = (c.evolution_runs
-               .filter(best_fitness__gte=1.0 - 1e-9)
+               .filter(best_fitness__gte=THRESHOLD)
                .order_by('-finished_at').first())
         gate_type = '?'
         if run and run.target:

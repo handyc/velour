@@ -20,32 +20,41 @@ from forge.ga import (
     Hyper, fitness, mutate, crossover, random_individual, tournament,
 )
 from forge.models import Circuit, EvolutionRun
-from forge.score import preset_truth_table
+from forge.score import analog_preset_rows, preset_truth_table
 from forge.wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE
 
 
 PRESETS = [
-    # name,     slug,             ports, hyper-overrides
-    ('AND',     'example-and-16',
+    # (preset, slug, kind, ports, hyper-overrides, target-overrides)
+    ('AND', 'example-and-16', 'logic',
      [{'role':'input',  'name':'A', 'x':2,  'y':4},
       {'role':'input',  'name':'B', 'x':2,  'y':11},
       {'role':'output', 'name':'Q', 'x':13, 'y':8}],
-     dict(pop_size=64, generations=80,  mutation_rate=0.04, seed=11)),
-    ('OR',      'example-or-16',
+     dict(pop_size=64, generations=80, mutation_rate=0.04, seed=11),
+     {}),
+    ('OR', 'example-or-16', 'logic',
      [{'role':'input',  'name':'A', 'x':2,  'y':4},
       {'role':'input',  'name':'B', 'x':2,  'y':11},
       {'role':'output', 'name':'Q', 'x':13, 'y':8}],
-     dict(pop_size=64, generations=80,  mutation_rate=0.04, seed=1)),
-    ('XOR',     'example-xor-16',
+     dict(pop_size=64, generations=80, mutation_rate=0.04, seed=1),
+     {}),
+    ('XOR', 'example-xor-16', 'logic',
      [{'role':'input',  'name':'A', 'x':2,  'y':4},
       {'role':'input',  'name':'B', 'x':2,  'y':11},
       {'role':'output', 'name':'Q', 'x':13, 'y':8}],
-     dict(pop_size=64, generations=120, mutation_rate=0.04, seed=2)),
-    ('NAND',    'example-nand-16',
+     dict(pop_size=64, generations=120, mutation_rate=0.04, seed=2),
+     {}),
+    ('NAND', 'example-nand-16', 'logic',
      [{'role':'input',  'name':'A', 'x':2,  'y':4},
       {'role':'input',  'name':'B', 'x':2,  'y':11},
       {'role':'output', 'name':'Q', 'x':13, 'y':8}],
-     dict(pop_size=64, generations=120, mutation_rate=0.04, seed=4)),
+     dict(pop_size=64, generations=120, mutation_rate=0.04, seed=4),
+     {}),
+    ('PASSTHROUGH', 'example-analog-passthrough-16', 'analog',
+     [{'role':'input',  'name':'A', 'x':2,  'y':8},
+      {'role':'output', 'name':'Q', 'x':13, 'y':8}],
+     dict(pop_size=32, generations=40, mutation_rate=0.04, seed=2),
+     {'ticks': 60, 'eval_window': [15, 60]}),
 ]
 
 
@@ -101,20 +110,25 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         force = opts['force']
-        for preset, slug, ports, hyper_kwargs in PRESETS:
+        for preset, slug, kind, ports, hyper_kwargs, target_overrides in PRESETS:
             existing = Circuit.objects.filter(slug=slug).first()
             if existing and not force:
                 self.stdout.write(self.style.NOTICE(
                     f'  [keep] {slug} (exists; use --force to re-evolve)'))
                 continue
 
+            in_names = sorted({p['name'] for p in ports if p['role']=='input'})
+            out_names = sorted({p['name'] for p in ports if p['role']=='output'})
+            rows = (analog_preset_rows(preset) if kind == 'analog'
+                    else preset_truth_table(preset))
             target = {
                 'preset':  preset,
-                'inputs':  ['A', 'B'],
-                'outputs': ['Q'],
-                'rows':    preset_truth_table(preset),
-                'ticks':   30,
-                'eval_window': [1, 30],
+                'kind':    kind,
+                'inputs':  in_names,
+                'outputs': out_names,
+                'rows':    rows,
+                'ticks':   target_overrides.get('ticks', 30),
+                'eval_window': target_overrides.get('eval_window', [1, 30]),
             }
             hyper = Hyper(**hyper_kwargs)
             self.stdout.write(f'  [evolving] {slug} ({preset})…')
