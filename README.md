@@ -50,9 +50,9 @@ the grid. The exact final shape varies run-to-run; that's the point.*
   [Unborn](https://github.com/matheusfillipe/Unborn).
 - **[Valware](https://github.com/ValwareIRC)** —
   [ObsidianIRC](https://github.com/ObsidianIRC/ObsidianIRC).
-- **[handyz](https://github.com/handyz)** — proposed the MegaForest
-  variant of MegaLegoworld: super-tall L-system trees, ridable swings,
-  and clickable barbecues. `Generate MegaForest` on the Aether page.
+- **handyz** — proposed the MegaForest variant of MegaLegoworld:
+  super-tall L-system trees, ridable swings, and clickable barbecues.
+  `Generate MegaForest` on the Aether page.
 
 ## License
 

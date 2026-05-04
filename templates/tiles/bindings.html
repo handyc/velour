@@ -39,7 +39,30 @@
 </p>
 {% else %}
 
-<form method="post" style="margin-top:1rem;">
+{# Bulk-bind: one selector + Apply button that overwrites every tile.
+   Useful for generated tilesets where every tile shares one rule. #}
+<form method="post" style="margin-top:0.8rem;background:#0d1117;
+      border:1px solid #30363d;border-radius:6px;padding:0.6rem 0.9rem;
+      display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+  {% csrf_token %}
+  <span style="color:#8b949e;font-size:0.85rem;">Bulk bind all
+    {{ tiles|length }} tiles to:</span>
+  <select name="bulk_ruleset" id="bulk-ruleset"
+          style="background:#0d1117;color:#c9d1d9;
+          border:1px solid #30363d;padding:0.3rem;min-width:18rem;">
+    <option value="none">— none (static) —</option>
+  </select>
+  <button type="submit" style="background:#8957e5;color:#fff;border:0;
+          padding:0.4rem 0.9rem;cursor:pointer;font-size:0.85rem;
+          font-weight:600;">Apply to all</button>
+</form>
+
+<details style="margin-top:0.8rem;background:#0d1117;border:1px solid #30363d;
+         border-radius:6px;">
+  <summary style="cursor:pointer;padding:0.5rem 0.9rem;color:#8b949e;
+           font-size:0.85rem;">Per-tile bindings ({{ tiles|length }})</summary>
+
+<form method="post" style="padding:0.6rem 0.9rem;">
   {% csrf_token %}
   <table style="width:100%;border-collapse:collapse;font-size:0.9rem;max-width:64rem;">
     <thead>
@@ -64,13 +87,13 @@
           {% endif %}
         </td>
         <td style="padding:0.4rem 0;">
-          <select name="tile_{{ t.pk }}_ruleset" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;padding:0.3rem;min-width:18rem;">
-            <option value="none">— none (static) —</option>
-            {% for rs in rulesets %}
-              <option value="{{ rs.pk }}" {% if t.ca_ruleset_id == rs.pk %}selected{% endif %}>
-                {{ rs.name }} · {{ rs.exact_rules.count }} rules
-              </option>
-            {% endfor %}
+          {# Empty placeholder select — JS clones the shared options
+             template into it on demand to keep the page lightweight. #}
+          <select name="tile_{{ t.pk }}_ruleset"
+                  class="rs-select" data-current="{{ t.ca_ruleset_id|default_if_none:'none' }}"
+                  style="background:#0d1117;color:#c9d1d9;
+                  border:1px solid #30363d;padding:0.3rem;min-width:18rem;">
+            <option value="">…click to pick…</option>
           </select>
         </td>
       </tr>
@@ -83,6 +106,62 @@
     <a href="{% url 'tiles:ca_runner' tileset.slug %}" style="color:#7ee787;text-decoration:none;font-size:0.9rem;">▸ Open CA-Wang runner</a>
   </div>
 </form>
+</details>
+
+{# Shared ruleset list. Django's json_script renders a single
+   <script id="rs-data" type="application/json">…</script> tag; the
+   per-tile selects and the bulk selector clone options from this
+   one source of truth instead of duplicating them in HTML. #}
+{{ rulesets|json_script:"rs-data" }}
+<script>
+(function(){
+    const data = JSON.parse(document.getElementById('rs-data').textContent);
+    function buildOptions(currentId){
+        const frag = document.createDocumentFragment();
+        const noneOpt = document.createElement('option');
+        noneOpt.value = 'none';
+        noneOpt.textContent = '— none (static) —';
+        if (currentId === 'none' || currentId === '' || currentId === null)
+            noneOpt.selected = true;
+        frag.appendChild(noneOpt);
+        for (const rs of data){
+            const o = document.createElement('option');
+            o.value = String(rs.pk);
+            o.textContent = `${rs.name} · ${rs.rule_count} rules`;
+            if (String(currentId) === String(rs.pk)) o.selected = true;
+            frag.appendChild(o);
+        }
+        return frag;
+    }
+    // Bulk-bind selector
+    const bulk = document.getElementById('bulk-ruleset');
+    if (bulk){
+        bulk.innerHTML = '';
+        bulk.appendChild(buildOptions('none'));
+    }
+    // Per-tile selects: lazy population on first focus to keep
+    // initial render snappy (browsers don't have to lay out 64*N
+    // option elements up-front).
+    function populate(sel){
+        if (sel.dataset.populated) return;
+        sel.innerHTML = '';
+        sel.appendChild(buildOptions(sel.dataset.current));
+        sel.dataset.populated = '1';
+    }
+    document.querySelectorAll('select.rs-select').forEach(sel => {
+        sel.addEventListener('focus', () => populate(sel), {once: true});
+        sel.addEventListener('mousedown', () => populate(sel), {once: true});
+    });
+    // Form-submit: ensure every per-tile select is populated so its
+    // selected value reaches the server even if the user never opened it.
+    const detailsForm = document.querySelector('details form[method="post"]');
+    if (detailsForm){
+        detailsForm.addEventListener('submit', () => {
+            document.querySelectorAll('select.rs-select').forEach(populate);
+        });
+    }
+})();
+</script>
 
 {% endif %}
 

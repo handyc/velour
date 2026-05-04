@@ -420,22 +420,57 @@ def tile_bindings(request, slug):
     view shows a per-tile dropdown of every K=4 RuleSet and saves
     them in one form.
     """
+    from django.db.models import Count
     tileset = get_object_or_404(TileSet, slug=slug)
     tiles_qs = list(tileset.tiles.all())
 
     from automaton.models import RuleSet
+    # Annotate exact_rules count once — without this, the template's
+    # {{ rs.exact_rules.count }} fires one query per ruleset, which on
+    # a 575-ruleset DB makes the page take 18s. With the annotation
+    # it's a single GROUP BY.
     rulesets = list(
-        RuleSet.objects.filter(n_colors=4).order_by('-created_at')
+        RuleSet.objects.filter(n_colors=4)
+        .annotate(rule_count=Count('exact_rules'))
+        .order_by('-created_at')
+        .values('pk', 'name', 'rule_count')
     )
 
     if request.method == 'POST':
         from automaton.models import RuleSet as _RS
-        valid_pks = set(_RS.objects.filter(n_colors=4).values_list('pk', flat=True))
+        valid_pks = set(_RS.objects.filter(n_colors=4)
+                        .values_list('pk', flat=True))
+
+        # Bulk-bind: a single dropdown choice that applies to every tile.
+        bulk_raw = (request.POST.get('bulk_ruleset') or '').strip()
+        if bulk_raw:
+            target = None
+            if bulk_raw != 'none':
+                try:
+                    pk = int(bulk_raw)
+                    if pk in valid_pks:
+                        target = pk
+                except ValueError:
+                    pass
+            n_changed = (tileset.tiles
+                         .exclude(ca_ruleset_id=target)
+                         .update(ca_ruleset_id=target))
+            label = '(none — static)' if target is None else f'#{target}'
+            messages.success(
+                request,
+                f'Bulk-bound {n_changed} tile{"s" if n_changed != 1 else ""}'
+                f' to {label}.')
+            return redirect('tiles:bindings', slug=tileset.slug)
+
+        # Per-tile bindings (legacy path; only changes tiles whose select
+        # was actually rendered with a non-default value).
         n_changed = 0
         for t in tiles_qs:
             raw = request.POST.get(f'tile_{t.pk}_ruleset', '').strip()
+            if raw == '':
+                continue   # not present in form — skip
             new_pk = None
-            if raw and raw != 'none':
+            if raw != 'none':
                 try:
                     pk = int(raw)
                     if pk in valid_pks:
@@ -449,8 +484,8 @@ def tile_bindings(request, slug):
         if n_changed:
             messages.success(
                 request,
-                f'Updated CA bindings for {n_changed} tile{"s" if n_changed != 1 else ""}.',
-            )
+                f'Updated CA bindings for {n_changed} '
+                f'tile{"s" if n_changed != 1 else ""}.')
         else:
             messages.info(request, 'No binding changes.')
         return redirect('tiles:bindings', slug=tileset.slug)
