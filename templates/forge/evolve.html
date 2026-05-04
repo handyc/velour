@@ -333,11 +333,27 @@ function drawChart(history){
     }
     plot(h => h.mean, '#8b949e');
     plot(h => h.best, '#7ee787');
+    // Mark restart events as vertical purple dashes
+    ctx.strokeStyle = '#a371f7';
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 1;
+    for (let i = 0; i < T; i++){
+        if (history[i].restart){
+            const x = padL + (T === 1 ? W : (i / (T - 1)) * W);
+            ctx.beginPath();
+            ctx.moveTo(x, padT);
+            ctx.lineTo(x, padT + H);
+            ctx.stroke();
+        }
+    }
+    ctx.setLineDash([]);
     // Legend
     ctx.fillStyle = '#7ee787';
     ctx.fillText('best', padL + 6, padT + 12);
     ctx.fillStyle = '#8b949e';
     ctx.fillText('mean', padL + 40, padT + 12);
+    ctx.fillStyle = '#a371f7';
+    ctx.fillText('| restart', padL + 80, padT + 12);
 }
 
 function drawBest(grid){

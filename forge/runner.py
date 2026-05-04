@@ -63,21 +63,32 @@ def _worker(run_id: int) -> None:
         history: list[dict[str, Any]] = []
         best_grid = pop[0]
         best_fit = -1.0
+        stagnation = 0
+        burst_left = 0
 
         for gen in range(hyper.generations):
             scored = [(fitness(g, ports, w, h, target), g) for g in pop]
             scored.sort(key=lambda t: -t[0])
             gen_best = scored[0][0]
             mean = sum(f for f, _ in scored) / len(scored)
-            if gen_best > best_fit:
+            improved = gen_best > best_fit + 1e-9
+            if improved:
                 best_fit = gen_best
                 best_grid = [row.copy() for row in scored[0][1]]
+                stagnation = 0
+            else:
+                stagnation += 1
+
+            do_restart = (hyper.stagnation_limit > 0
+                          and stagnation >= hyper.stagnation_limit
+                          and best_fit < 1.0 - 1e-9)
+
             history.append({
                 'gen': gen, 'best': gen_best, 'mean': mean,
                 'min': scored[-1][0],
+                'stagnation': stagnation, 'restart': do_restart,
             })
 
-            # Persist every generation so the page polling sees progress.
             run.current_gen = gen
             run.fitness_history = history
             run.best_grid = best_grid
@@ -90,18 +101,40 @@ def _worker(run_id: int) -> None:
             if best_fit >= 1.0 - 1e-9:
                 break
 
+            cur_mut = (hyper.restart_mutation_rate
+                       if (burst_left > 0 or do_restart)
+                       else hyper.mutation_rate)
+            if burst_left > 0:
+                burst_left -= 1
+            if do_restart:
+                burst_left = hyper.restart_burst
+                stagnation = 0
+
             new_pop = []
             for i in range(hyper.elite):
                 new_pop.append([row.copy() for row in scored[i][1]])
-            while len(new_pop) < hyper.pop_size:
-                p1 = tournament(rng, scored, hyper.tournament_k)
-                if rng.random() < hyper.crossover_rate:
-                    p2 = tournament(rng, scored, hyper.tournament_k)
-                    child = crossover(rng, p1, p2, ports)
-                else:
-                    child = [row.copy() for row in p1]
-                child = mutate(rng, child, hyper.mutation_rate, ports)
-                new_pop.append(child)
+
+            if do_restart:
+                densities = [hyper.init_density * 0.5,
+                             hyper.init_density,
+                             hyper.init_density * 1.5,
+                             min(0.5, hyper.init_density * 2.0)]
+                d_i = 0
+                while len(new_pop) < hyper.pop_size:
+                    d = densities[d_i % len(densities)]
+                    d_i += 1
+                    new_pop.append(random_individual(
+                        rng, h, w, d, ports))
+            else:
+                while len(new_pop) < hyper.pop_size:
+                    p1 = tournament(rng, scored, hyper.tournament_k)
+                    if rng.random() < hyper.crossover_rate:
+                        p2 = tournament(rng, scored, hyper.tournament_k)
+                        child = crossover(rng, p1, p2, ports)
+                    else:
+                        child = [row.copy() for row in p1]
+                    child = mutate(rng, child, cur_mut, ports)
+                    new_pop.append(child)
             pop = new_pop
 
         run.status = 'done'

@@ -38,6 +38,18 @@ class Hyper:
     init_density: float = 0.20
     seed: int = 7
     elite: int = 1                # carry top-N over unchanged
+    # Plateau-breaking — when the best fitness hasn't improved in
+    # `stagnation_limit` gens, replace the non-elite portion of the
+    # population with fresh random individuals at varied densities.
+    # The mutation rate bumps to `restart_mutation_rate` for the next
+    # `restart_burst` generations. Set stagnation_limit=0 to disable.
+    #
+    # 20 gens of stalling is the empirical sweet spot — short enough
+    # to escape local optima, long enough that crossover gets to
+    # explore around a good solution before the kick.
+    stagnation_limit: int = 20
+    restart_mutation_rate: float = 0.08
+    restart_burst: int = 4
 
 
 def _empty_grid(h: int, w: int) -> list[list[int]]:
@@ -132,37 +144,77 @@ def run_ga(*, width: int, height: int,
     history: list[dict] = []
     overall_best_grid = pop[0]
     overall_best_fit = -1.0
+    stagnation = 0
+    burst_left = 0
 
     for gen in range(hyper.generations):
         scored = [(fitness(g, ports, width, height, target), g) for g in pop]
         scored.sort(key=lambda t: -t[0])
         best_fit = scored[0][0]
         mean_fit = sum(f for f, _ in scored) / len(scored)
-        if best_fit > overall_best_fit:
+        improved = best_fit > overall_best_fit + 1e-9
+        if improved:
             overall_best_fit = best_fit
             overall_best_grid = [row.copy() for row in scored[0][1]]
+            stagnation = 0
+        else:
+            stagnation += 1
+
+        # Decide whether to fire a restart this generation.
+        do_restart = (hyper.stagnation_limit > 0
+                      and stagnation >= hyper.stagnation_limit
+                      and overall_best_fit < 1.0 - 1e-9)
+
         history.append({
             'gen': gen, 'best': best_fit, 'mean': mean_fit,
             'min': scored[-1][0],
+            'stagnation': stagnation,
+            'restart': do_restart,
         })
         # Early stop on perfect score
         if overall_best_fit >= 1.0 - 1e-9:
             break
 
-        # Build next generation
+        # Effective mutation rate: bumped during the restart burst.
+        cur_mut = (hyper.restart_mutation_rate
+                   if (burst_left > 0 or do_restart)
+                   else hyper.mutation_rate)
+        if burst_left > 0:
+            burst_left -= 1
+        if do_restart:
+            burst_left = hyper.restart_burst
+            stagnation = 0
+
         new_pop: list[list[list[int]]] = []
-        # Elitism: top `elite` carry over
+        # Elitism: top `elite` always carry over (also seeds the restart).
         for i in range(min(hyper.elite, hyper.pop_size)):
             new_pop.append([row.copy() for row in scored[i][1]])
-        while len(new_pop) < hyper.pop_size:
-            p1 = tournament(rng, scored, hyper.tournament_k)
-            if rng.random() < hyper.crossover_rate:
-                p2 = tournament(rng, scored, hyper.tournament_k)
-                child = crossover(rng, p1, p2, ports)
-            else:
-                child = [row.copy() for row in p1]
-            child = mutate(rng, child, hyper.mutation_rate, ports)
-            new_pop.append(child)
+
+        if do_restart:
+            # Replace the rest with fresh random individuals at varied
+            # densities so the new pool spans high-wire and low-wire
+            # individuals — the original init_density is kept for the
+            # middle band.
+            densities = [hyper.init_density * 0.5,
+                         hyper.init_density,
+                         hyper.init_density * 1.5,
+                         min(0.5, hyper.init_density * 2.0)]
+            d_i = 0
+            while len(new_pop) < hyper.pop_size:
+                d = densities[d_i % len(densities)]
+                d_i += 1
+                new_pop.append(random_individual(
+                    rng, height, width, d, ports))
+        else:
+            while len(new_pop) < hyper.pop_size:
+                p1 = tournament(rng, scored, hyper.tournament_k)
+                if rng.random() < hyper.crossover_rate:
+                    p2 = tournament(rng, scored, hyper.tournament_k)
+                    child = crossover(rng, p1, p2, ports)
+                else:
+                    child = [row.copy() for row in p1]
+                child = mutate(rng, child, cur_mut, ports)
+                new_pop.append(child)
         pop = new_pop
 
     final_fit = [fitness(g, ports, width, height, target) for g in pop]
