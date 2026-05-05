@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sample.name }} — Viralyst{% endblock %}
+
+{% block extra_head %}
+{% include "viralyst/_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="vwrap">
+  <p class="hint"><a class="lk" href="{% url 'viralyst:index' %}">← all samples</a> &middot;
+    <a class="lk" href="{% url 'viralyst:corpus_detail' slug=sample.corpus.slug %}">{{ sample.corpus.name }}</a></p>
+
+  <h1>{{ sample.name }}
+    <span class="pill pill-{{ sample.language.family }}" style="margin-left:0.4rem">{{ sample.language.name }}</span>
+    <span class="kind" style="margin-left:0.4rem">{{ sample.get_kind_display }}</span>
+    {% if sample.is_quarantined %}<span class="badge-q">quarantined</span>{% endif %}
+  </h1>
+
+  <dl class="meta-box">
+    {% if sample.year %}<dt>year</dt><dd>{{ sample.year }}</dd>{% endif %}
+    {% if sample.author %}<dt>author</dt><dd>{{ sample.author }}</dd>{% endif %}
+    <dt>language</dt>
+    <dd><a class="lk" href="{% url 'viralyst:language_detail' slug=sample.language.slug %}">{{ sample.language.name }}</a>
+        ({{ sample.language.get_tier_display }})</dd>
+    <dt>corpus</dt>
+    <dd><a class="lk" href="{% url 'viralyst:corpus_detail' slug=sample.corpus.slug %}">{{ sample.corpus.name }}</a></dd>
+    <dt>licence</dt>
+    <dd>{{ sample.licence }}</dd>
+    {% if sample.origin_url %}
+      <dt>upstream</dt>
+      <dd><a class="lk" href="{{ sample.origin_url }}" target="_blank" rel="noopener">{{ sample.origin_url }}</a></dd>
+    {% endif %}
+    <dt>source size</dt>
+    <dd>{{ sample.source_bytes }} B &middot; {{ sample.n_lines }} lines &middot; longest line {{ sample.longest_line }} ch</dd>
+    {% if sample.binary_size_bytes %}
+      <dt>original binary</dt>
+      <dd>{{ sample.binary_size_bytes }} B (stripped, when known)</dd>
+    {% endif %}
+  </dl>
+
+  {% if sample.notes_md %}
+    <p class="note" style="white-space:pre-wrap;border-left:2px solid #30363d;padding:0.5rem 0.8rem;margin:0.6rem 0;color:#c9d1d9">{{ sample.notes_md }}</p>
+  {% endif %}
+
+  <h2>Source <span class="note" style="font-weight:normal">— <a class="lk" href="{% url 'viralyst:sample_raw' slug=sample.slug %}">raw</a></span></h2>
+  <div class="src">
+    <table>
+      {% for n, line, w in rows %}
+        <tr>
+          <td class="ln">{{ n }}</td>
+          <td class="code{% if w > 80 %} over{% endif %}">{{ line }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

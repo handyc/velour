@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ language.name }} — Viralyst{% endblock %}
+
+{% block extra_head %}
+{% include "viralyst/_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="vwrap">
+  <p class="hint"><a class="lk" href="{% url 'viralyst:index' %}">← back</a></p>
+  <h1>{{ language.name }}
+    <span class="pill pill-{{ language.family }}" style="margin-left:0.4rem">{{ language.get_family_display }}</span>
+    <span class="pill" style="margin-left:0.2rem">{{ language.get_tier_display }}</span>
+  </h1>
+
+  {% if language.notes_md %}
+    <p class="note" style="white-space:pre-wrap;border-left:2px solid #30363d;padding:0.5rem 0.8rem;margin:0.6rem 0">{{ language.notes_md }}</p>
+  {% endif %}
+
+  <h2>Samples</h2>
+  <table class="v">
+    <thead><tr>
+      <th>name</th>
+      <th>kind</th>
+      <th>year</th>
+      <th class="num">src B</th>
+      <th class="num">bin B</th>
+      <th>corpus</th>
+    </tr></thead>
+    <tbody>
+      {% for s in samples %}
+      <tr>
+        <td><a class="name" href="{% url 'viralyst:sample_detail' slug=s.slug %}">{{ s.name }}</a></td>
+        <td class="kind">{{ s.get_kind_display }}</td>
+        <td class="num">{{ s.year|default_if_none:"—" }}</td>
+        <td class="num">{{ s.source_bytes }}</td>
+        <td class="num">{% if s.binary_size_bytes %}{{ s.binary_size_bytes }}{% else %}—{% endif %}</td>
+        <td class="note">{{ s.corpus.name }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="note">No samples in this language yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

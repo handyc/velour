@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ corpus.name }} — Viralyst{% endblock %}
+
+{% block extra_head %}
+{% include "viralyst/_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="vwrap">
+  <p class="hint"><a class="lk" href="{% url 'viralyst:index' %}">← back</a></p>
+  <h1>{{ corpus.name }}</h1>
+
+  <dl class="meta-box">
+    {% if corpus.url %}
+      <dt>upstream</dt>
+      <dd><a class="lk" href="{{ corpus.url }}" target="_blank" rel="noopener">{{ corpus.url }}</a></dd>
+    {% endif %}
+    <dt>licence</dt>
+    <dd>{{ corpus.license_summary|default:"—" }}</dd>
+    <dt>samples</dt>
+    <dd>{{ samples|length }}</dd>
+  </dl>
+
+  {% if corpus.notes_md %}
+    <p class="note" style="white-space:pre-wrap;border-left:2px solid #30363d;padding:0.5rem 0.8rem;margin:0.6rem 0">{{ corpus.notes_md }}</p>
+  {% endif %}
+
+  <h2>Samples</h2>
+  <table class="v">
+    <thead><tr>
+      <th>name</th>
+      <th>kind</th>
+      <th>language</th>
+      <th>year</th>
+      <th class="num">src B</th>
+    </tr></thead>
+    <tbody>
+      {% for s in samples %}
+      <tr>
+        <td><a class="name" href="{% url 'viralyst:sample_detail' slug=s.slug %}">{{ s.name }}</a></td>
+        <td class="kind">{{ s.get_kind_display }}</td>
+        <td><span class="pill pill-{{ s.language.family }}">{{ s.language.name }}</span></td>
+        <td class="num">{{ s.year|default_if_none:"—" }}</td>
+        <td class="num">{{ s.source_bytes }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="note">No samples.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

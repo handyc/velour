@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}Viralyst — tiny historical programs{% endblock %}
+
+{% block extra_head %}
+{% include "viralyst/_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="vwrap">
+  <h1>Viralyst</h1>
+  <p class="hint">
+    A guided IDE for very small programs (under 64&nbsp;KB), with an
+    eye on self-replicating code, classic DOS / Unix utilities, and
+    the languages built to fit a binary in the smallest possible
+    space. Phase&nbsp;1: source-only catalogue. <strong>{{ total }}</strong>
+    sample{{ total|pluralize }} so far.
+  </p>
+
+  <div class="filter-bar">
+    kind:
+    <a href="?{% if lang %}lang={{ lang }}{% endif %}"
+       class="{% if not kind %}on{% endif %}">all</a>
+    {% for slug, label in kinds %}
+      <a href="?kind={{ slug }}{% if lang %}&lang={{ lang }}{% endif %}"
+         class="{% if kind == slug %}on{% endif %}">{{ label|cut:" / source / reconstruction only"|cut:" / self-reproducing" }}</a>
+    {% endfor %}
+  </div>
+
+  <h2>Corpora</h2>
+  <table class="v">
+    <thead><tr>
+      <th>name</th>
+      <th>licence</th>
+      <th class="num">samples</th>
+    </tr></thead>
+    <tbody>
+      {% for c in corpora %}
+      <tr>
+        <td><a class="name" href="{% url 'viralyst:corpus_detail' slug=c.slug %}">{{ c.name }}</a></td>
+        <td class="note">{{ c.license_summary|default:"—" }}</td>
+        <td class="num">{{ c.samples.count }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="3" class="note">No corpora yet — run
+        <code>./manage.py seed_viralyst</code> to seed the Phase 1 set.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Languages</h2>
+  <table class="v">
+    <thead><tr>
+      <th>name</th>
+      <th>family</th>
+      <th>tier</th>
+      <th class="num">samples</th>
+    </tr></thead>
+    <tbody>
+      {% for L in languages %}
+      <tr>
+        <td><a class="name" href="{% url 'viralyst:language_detail' slug=L.slug %}">{{ L.name }}</a></td>
+        <td><span class="pill pill-{{ L.family }}">{{ L.get_family_display }}</span></td>
+        <td class="note">{{ L.get_tier_display }}</td>
+        <td class="num">{{ L.samples.count }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="note">No languages yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Samples{% if kind or lang %} <span class="note">(filtered)</span>{% endif %}</h2>
+  <table class="v">
+    <thead><tr>
+      <th>name</th>
+      <th>kind</th>
+      <th>lang</th>
+      <th>year</th>
+      <th>author</th>
+      <th class="num">src B</th>
+      <th class="num">bin B</th>
+      <th>corpus</th>
+    </tr></thead>
+    <tbody>
+      {% for s in samples %}
+      <tr>
+        <td><a class="name" href="{% url 'viralyst:sample_detail' slug=s.slug %}">{{ s.name }}</a></td>
+        <td class="kind">{{ s.get_kind_display }}</td>
+        <td><span class="pill pill-{{ s.language.family }}">{{ s.language.name }}</span></td>
+        <td class="num">{{ s.year|default_if_none:"—" }}</td>
+        <td class="note">{{ s.author|default:"—" }}</td>
+        <td class="num">{{ s.source_bytes }}</td>
+        <td class="num">{% if s.binary_size_bytes %}{{ s.binary_size_bytes }}{% else %}—{% endif %}</td>
+        <td class="note">{{ s.corpus.name }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="note">No samples match this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

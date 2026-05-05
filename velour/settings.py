@@ -140,6 +140,7 @@ INSTALLED_APPS = [
     'taxon',
     'gridprint',
     'forge',
+    'viralyst',
 ]
 
 MIDDLEWARE = [

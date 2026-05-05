@@ -310,9 +310,9 @@
 {% endif %}
 
 {# Lab & Design — collapsed by default #}
-{% if 'cartography' in accessible_app_slugs or 'condenser' in accessible_app_slugs or 'displacer' in accessible_app_slugs or 'helix' in accessible_app_slugs or 'isolation' in accessible_app_slugs or 'naiad' in accessible_app_slugs or 'oneliner' in accessible_app_slugs or 's3lab' in accessible_app_slugs or 'tiles' in accessible_app_slugs or 'zoetrope' in accessible_app_slugs %}
+{% if 'cartography' in accessible_app_slugs or 'condenser' in accessible_app_slugs or 'displacer' in accessible_app_slugs or 'helix' in accessible_app_slugs or 'isolation' in accessible_app_slugs or 'naiad' in accessible_app_slugs or 'oneliner' in accessible_app_slugs or 's3lab' in accessible_app_slugs or 'tiles' in accessible_app_slugs or 'viralyst' in accessible_app_slugs or 'zoetrope' in accessible_app_slugs %}
 <details class="cat-group">
-    <summary>Lab &amp; Design <span class="cat-count">· 10</span></summary>
+    <summary>Lab &amp; Design <span class="cat-count">· 11</span></summary>
     <div class="tools-grid">
         {% if 's3lab' in accessible_app_slugs %}<a class="card" href="{% url 's3lab:index' %}" title="ESP32-S3 in-browser bench — hex CA + GPIO + ST7735S, hunt + warm-start refine"><h3>S3 Lab</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'naiad' in accessible_app_slugs %}<a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>{% endif %}
@@ -321,6 +321,7 @@
         {% if 'condenser' in accessible_app_slugs %}<a class="card" href="{% url 'condenser:home' %}" title="Distill apps through constrained tiers"><h3>Condenser</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'isolation' in accessible_app_slugs %}<a class="card" href="{% url 'isolation:index' %}" title="Re-package cross-app pipelines as MVPs for tiny targets"><h3>Isolation</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'oneliner' in accessible_app_slugs %}<a class="card" href="{% url 'oneliner:index' %}" title="Museum for sub-80-col C programs — compiles + runs"><h3>Oneliner</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'viralyst' in accessible_app_slugs %}<a class="card" href="{% url 'viralyst:index' %}" title="Guided IDE for tiny historical programs — quines, viruses (source-only), classic DOS/Unix utilities, sub-64KB demos"><h3>Viralyst</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'zoetrope' in accessible_app_slugs %}<a class="card" href="{% url 'zoetrope:list' %}" title="Spin Attic images into short mp4 films"><h3>Zoetrope</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'displacer' in accessible_app_slugs %}<a class="card" href="{% url 'displacer:home' %}" title="Oral-history site scaffold — themes, articles, pages"><h3>Displacer</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'cartography' in accessible_app_slugs %}<a class="card" href="{% url 'cartography:home' %}" title="Multi-scale cartography — Earth, Mars, Moon, sky"><h3>Maps</h3><span class="open-arrow">›</span></a>{% endif %}
