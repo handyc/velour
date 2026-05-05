@@ -44,6 +44,35 @@
           font-weight:600;">+ New circuit</button>
 </form>
 
+<form method="post" action="{% url 'forge:new_glyph' %}"
+      style="margin:0 0 1rem;display:flex;gap:0.5rem;align-items:center;
+      flex-wrap:wrap;background:#161b22;border:1px solid #6e40c9;
+      border-radius:6px;padding:0.6rem 0.9rem;">
+  {% csrf_token %}
+  <span style="font-size:0.78rem;color:#bf8eff;letter-spacing:0.02em;">
+    Glyph evolution
+  </span>
+  <input type="text" name="name" placeholder="name (optional)"
+         style="flex:1;min-width:160px;background:#0d1117;color:#c9d1d9;
+         border:1px solid #30363d;padding:0.3rem 0.5rem;font-size:0.85rem;">
+  <label style="font-size:0.78rem;color:#8b949e;">letter
+    <select name="letter"
+            style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;
+            padding:0.25rem 0.4rem;font-size:0.85rem;">
+      {% for letter in glyph_letters %}
+        <option value="{{ letter }}">{{ letter }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" style="background:#6e40c9;color:#fff;border:0;
+          padding:0.4rem 1.0rem;cursor:pointer;font-size:0.85rem;
+          font-weight:600;">+ New glyph circuit</button>
+  <span style="font-size:0.7rem;color:#8b949e;">
+    seeds a 16×16 grid with the letter's start/end ports; the GA
+    finds the strokes via Chamfer + IoU fitness.
+  </span>
+</form>
+
 {% if circuits %}
 <div style="display:flex;flex-direction:column;gap:0.35rem;">
   {% for c in circuits %}

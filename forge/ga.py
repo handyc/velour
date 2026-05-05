@@ -25,6 +25,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any
 
+from .glyph import score_circuit_glyph
 from .score import score_circuit, score_circuit_analog
 
 
@@ -173,13 +174,21 @@ def tournament(rng: random.Random,
 
 def fitness(grid: list[list[int]], ports: list[dict[str, Any]],
             width: int, height: int, target: dict[str, Any]) -> float:
-    """Dispatch to the right scorer based on target.kind. Default is
-    logic (truth-table). Analog uses rate-coded inputs/outputs and
-    per-row absolute-error fitness."""
+    """Dispatch to the right scorer based on target.kind.
+
+    - logic   : truth-table evaluation (default for backward-compat).
+    - analog  : rate-coded inputs/outputs, per-row absolute-error fitness.
+    - glyph   : static Chamfer-distance match against a target letter
+                from forge.glyph.GLYPH_GRIDS. Wireworld dynamics not
+                run; the candidate's wire layout itself is the ink.
+    """
     kind = (target.get('kind') or 'logic').lower()
     if kind == 'analog':
         res = score_circuit_analog(grid=grid, ports=ports,
                                    width=width, height=height, target=target)
+    elif kind == 'glyph':
+        res = score_circuit_glyph(grid=grid, ports=ports,
+                                  width=width, height=height, target=target)
     else:
         res = score_circuit(grid=grid, ports=ports,
                             width=width, height=height, target=target)

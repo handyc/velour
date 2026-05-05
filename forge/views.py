@@ -19,6 +19,10 @@ from django.views.decorators.http import require_POST
 
 import numpy as np
 
+from .glyph import (
+    GLYPH_GRIDS, GLYPH_LETTERS, glyph_height, glyph_width,
+    make_glyph_ports, make_glyph_target, score_circuit_glyph,
+)
 from .models import Circuit, EvolutionRun
 from .runner import is_running, start_run
 from .score import (
@@ -32,7 +36,10 @@ from .wireworld import WIREWORLD_NAME, WIREWORLD_PALETTE
 @login_required
 def circuit_list(request):
     circuits = Circuit.objects.all()
-    return render(request, 'forge/list.html', {'circuits': circuits})
+    return render(request, 'forge/list.html', {
+        'circuits': circuits,
+        'glyph_letters': GLYPH_LETTERS,
+    })
 
 
 @login_required
@@ -136,6 +143,36 @@ def circuit_new(request):
         name=name, width=width, height=height,
         palette=list(WIREWORLD_PALETTE),
         rule_name=WIREWORLD_NAME,
+    )
+    return redirect('forge:detail', slug=c.slug)
+
+
+@login_required
+@require_POST
+def circuit_new_glyph(request):
+    """Create a glyph-evolution circuit pre-wired with letter target +
+    endpoint ports. The body is empty (start/end forced to wire by GA);
+    user clicks Evolve to find the rest of the strokes."""
+    letter = (request.POST.get('letter') or '').strip().upper()
+    if letter not in GLYPH_LETTERS:
+        messages.error(request, f'Unknown glyph: {letter!r}')
+        return redirect('forge:list')
+
+    name = (request.POST.get('name') or '').strip() or f'glyph {letter}'
+    h = glyph_height(letter)
+    w = glyph_width(letter)
+    ports = make_glyph_ports(letter)
+    target = make_glyph_target(letter)
+
+    grid = [[0] * w for _ in range(h)]
+    for p in ports:
+        grid[p['y']][p['x']] = 1
+
+    c = Circuit.objects.create(
+        name=name[:160], width=w, height=h,
+        palette=list(WIREWORLD_PALETTE),
+        rule_name=WIREWORLD_NAME,
+        grid=grid, ports=ports, target=target,
     )
     return redirect('forge:detail', slug=c.slug)
 
@@ -436,6 +473,30 @@ def circuit_score(request, slug):
 
     preset = (target.get('preset') or '').strip().upper()
     kind = (target.get('kind') or '').strip().lower() or 'logic'
+
+    if kind == 'glyph':
+        # Glyph mode skips the truth-table preset machinery entirely;
+        # the target is just `{kind, letter, normalize_max}`.
+        letter = (target.get('letter') or '').upper()
+        if letter not in GLYPH_LETTERS:
+            return JsonResponse(
+                {'ok': False, 'reason': f'unknown glyph letter: {letter!r}'},
+                status=400)
+        full_target = {
+            **make_glyph_target(letter),
+            'normalize_max': float(
+                target.get('normalize_max', 4.0) or 4.0),
+        }
+        result = score_circuit_glyph(
+            grid=grid, ports=ports,
+            width=c.width, height=c.height, target=full_target,
+        )
+        result['preset'] = full_target['preset']
+        result['target'] = full_target
+        c.target = full_target
+        c.save(update_fields=['target', 'updated_at'])
+        return JsonResponse(result)
+
     rows = target.get('rows')
     if preset and preset != 'CUSTOM' and not rows:
         if kind == 'analog':
@@ -508,25 +569,44 @@ def circuit_evolve_start(request, slug):
         c.save(update_fields=['grid', 'ports', 'updated_at'])
 
     target = payload.get('target') or {}
-    preset = (target.get('preset') or '').strip().upper() or 'AND'
     kind = (target.get('kind') or '').strip().lower() or 'logic'
-    rows = target.get('rows')
-    if not rows:
-        rows = (analog_preset_rows(preset) if kind == 'analog'
-                else preset_truth_table(preset))
-    if rows is None:
-        return JsonResponse({'ok': False,
-                             'reason': f'unknown preset: {preset}'},
-                            status=400)
-    full_target = {
-        'preset':  preset,
-        'kind':    kind,
-        'inputs':  target.get('inputs', ['A', 'B']),
-        'outputs': target.get('outputs', ['Q']),
-        'rows':    rows,
-        'ticks':   int(target.get('ticks', 60 if kind == 'analog' else 30)),
-        'eval_window': target.get('eval_window'),
-    }
+
+    if kind == 'glyph':
+        # Glyph mode: target is determined by letter; no truth-table.
+        # If the page didn't supply a letter, fall back to whatever the
+        # circuit was last saved with.
+        letter = (target.get('letter') or '').upper()
+        if letter not in GLYPH_LETTERS:
+            saved = c.target or {}
+            letter = (saved.get('letter') or '').upper()
+        if letter not in GLYPH_LETTERS:
+            return JsonResponse(
+                {'ok': False,
+                 'reason': 'glyph evolve needs a letter (A..Z within the corpus)'},
+                status=400)
+        full_target = {
+            **make_glyph_target(letter),
+            'normalize_max': float(target.get('normalize_max', 4.0) or 4.0),
+        }
+    else:
+        preset = (target.get('preset') or '').strip().upper() or 'AND'
+        rows = target.get('rows')
+        if not rows:
+            rows = (analog_preset_rows(preset) if kind == 'analog'
+                    else preset_truth_table(preset))
+        if rows is None:
+            return JsonResponse({'ok': False,
+                                 'reason': f'unknown preset: {preset}'},
+                                status=400)
+        full_target = {
+            'preset':  preset,
+            'kind':    kind,
+            'inputs':  target.get('inputs', ['A', 'B']),
+            'outputs': target.get('outputs', ['Q']),
+            'rows':    rows,
+            'ticks':   int(target.get('ticks', 60 if kind == 'analog' else 30)),
+            'eval_window': target.get('eval_window'),
+        }
 
     def _i(name, default, lo, hi):
         try:
@@ -542,14 +622,27 @@ def circuit_evolve_start(request, slug):
             v = default
         return max(lo, min(hi, v))
 
+    # Glyph mode wants very different defaults from logic/analog —
+    # smaller mutation rate (cleanup-friendly), longer runs (the
+    # convergence trail is longer), lower init density (less noise to
+    # carry forward).
+    if kind == 'glyph':
+        pop_def, gen_def       = 80, 250
+        mut_def, cross_def     = 0.015, 0.85
+        tourn_def, dens_def    = 3, 0.05
+    else:
+        pop_def, gen_def       = 32, 30
+        mut_def, cross_def     = 0.03, 0.85
+        tourn_def, dens_def    = 3, 0.20
+
     run = EvolutionRun.objects.create(
         circuit=c, status='queued',
-        pop_size=_i('pop_size', 32, 4, 128),
-        generations=_i('generations', 30, 1, 200),
-        mutation_rate=_f('mutation_rate', 0.03, 0.0, 1.0),
-        crossover_rate=_f('crossover_rate', 0.85, 0.0, 1.0),
-        tournament_k=_i('tournament_k', 3, 2, 10),
-        init_density=_f('init_density', 0.20, 0.0, 1.0),
+        pop_size=_i('pop_size', pop_def, 4, 128),
+        generations=_i('generations', gen_def, 1, 1000),
+        mutation_rate=_f('mutation_rate', mut_def, 0.0, 1.0),
+        crossover_rate=_f('crossover_rate', cross_def, 0.0, 1.0),
+        tournament_k=_i('tournament_k', tourn_def, 2, 10),
+        init_density=_f('init_density', dens_def, 0.0, 1.0),
         seed=_i('seed', 7, 0, 2**31 - 1),
         target=full_target,
     )

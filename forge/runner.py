@@ -49,13 +49,26 @@ def _worker(run_id: int) -> None:
 
         rng = random.Random(run.seed)
         h, w = circuit.height, circuit.width
+        # Glyph mode benefits from much higher elitism + lower mutation
+        # rate during the cleanup phase (extra-ink removal). With
+        # elite=1 the GA finds the rough shape but stalls at ~0.6
+        # fitness; elite=8 lets the cleaner candidates survive long
+        # enough to chain into perfect matches.
+        kind = (target.get('kind') or '').lower()
+        if kind == 'glyph':
+            elite = 8
+            stagnation_limit = 60
+        else:
+            elite = 1
+            stagnation_limit = 20
         hyper = Hyper(
             pop_size=run.pop_size, generations=run.generations,
             mutation_rate=run.mutation_rate,
             crossover_rate=run.crossover_rate,
             tournament_k=run.tournament_k,
             init_density=run.init_density,
-            seed=run.seed, elite=1,
+            seed=run.seed, elite=elite,
+            stagnation_limit=stagnation_limit,
         )
 
         pop = [random_individual(rng, h, w, hyper.init_density, ports,

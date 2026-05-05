@@ -9,6 +9,7 @@ urlpatterns = [
     path('gates/',            views.gate_list,       name='gates'),
     path('gates.json',        views.gates_json,      name='gates_json'),
     path('new/',              views.circuit_new,     name='new'),
+    path('new/glyph/',        views.circuit_new_glyph, name='new_glyph'),
     path('<slug:slug>/',      views.circuit_detail,  name='detail'),
     path('<slug:slug>/clone/', views.circuit_clone,  name='clone'),
     path('<slug:slug>/save/', views.circuit_save,    name='save'),

@@ -50,6 +50,13 @@
           <option>HIGHPASS_05</option>
           <option>AVERAGE</option>
         </optgroup>
+        <optgroup label="glyph (Chamfer + IoU)">
+          <option>GLYPH_L</option>
+          <option>GLYPH_T</option>
+          <option>GLYPH_I</option>
+          <option>GLYPH_V</option>
+          <option>GLYPH_X</option>
+        </optgroup>
       </select>
     </label>
     <label style="color:#8b949e;">inputs
@@ -191,6 +198,7 @@
 {{ circuit.grid|json_script:"circuit-grid" }}
 {{ circuit.ports|json_script:"circuit-ports" }}
 {{ palette|json_script:"circuit-palette" }}
+{{ circuit.target|json_script:"circuit-target" }}
 
 <script>
 const CSRF = document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1];
@@ -229,12 +237,45 @@ const PRESET_PORTS_GA = {
 const ANALOG_PRESET_NAMES_GA = new Set([
     'PASSTHROUGH', 'HALF', 'LOWPASS_05', 'HIGHPASS_05', 'AVERAGE',
 ]);
+const GLYPH_PRESETS = new Set([
+    'GLYPH_L', 'GLYPH_T', 'GLYPH_I', 'GLYPH_V', 'GLYPH_X',
+]);
+// When the user picks a glyph preset, swap in glyph-friendly GA
+// defaults: lower mutation rate (cleanup phase), longer run, lower
+// init density. The form fields stay editable so the user can override.
+function applyGlyphDefaults(form){
+    form.querySelector('[name="pop_size"]').value       = 80;
+    form.querySelector('[name="generations"]').value    = 250;
+    form.querySelector('[name="mutation_rate"]').value  = 0.015;
+    form.querySelector('[name="init_density"]').value   = 0.05;
+}
+// Pre-select the matching preset when the circuit was created in
+// glyph mode, so users can hit "Evolve" right away.
+(function preselectFromCircuit(){
+    const t = (() => {
+        try {
+            return JSON.parse(document.getElementById('circuit-target').textContent || '{}');
+        } catch (_) { return {}; }
+    })();
+    if (t && t.kind === 'glyph' && t.letter){
+        const sel = document.getElementById('ga-preset');
+        const want = 'GLYPH_' + String(t.letter).toUpperCase();
+        for (const opt of sel.options){
+            if (opt.value === want){ sel.value = want; break; }
+        }
+        applyGlyphDefaults(document.getElementById('ga-form'));
+    }
+})();
+
 document.getElementById('ga-preset').addEventListener('change', e => {
     const p = e.target.value;
     const f = document.getElementById('ga-form');
     if (PRESET_PORTS_GA[p]){
         f.querySelector('[name="inputs"]').value  = PRESET_PORTS_GA[p].inputs;
         f.querySelector('[name="outputs"]').value = PRESET_PORTS_GA[p].outputs;
+    }
+    if (GLYPH_PRESETS.has(p)){
+        applyGlyphDefaults(f);
     }
 });
 
@@ -253,6 +294,9 @@ document.getElementById('ga-form').addEventListener('submit', async (e) => {
     };
     if (ANALOG_PRESET_NAMES_GA.has(presetName)){
         target.kind = 'analog';
+    } else if (GLYPH_PRESETS.has(presetName)){
+        target.kind = 'glyph';
+        target.letter = presetName.replace('GLYPH_', '');
     }
     const payload = {
         target,
