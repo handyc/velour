@@ -121,6 +121,21 @@ each a self-contained fork rather than a dependency on the previous:
   (e.g. File's "Save" and Edit's "Cut" overlapping). The fix is a
   single body-area teal-fill at the top of each `menu_run` iteration.
 
+- **`office7.c`** — adds a new app on top of office6:
+  - new **`ask`** app — dual-pane LLM chat. History above (you>/ai>
+    alternating, hard-wrapped, scroll-pinned to bottom), single-line
+    input below. ENTER sends; ^N clears the chat; ^E (or File →
+    Settings) opens an inline editor for `api_key` / `endpoint` /
+    `model`, persisted to `./office7.conf` (mode 0600). HTTPS is
+    handled by `fork()` + `execve("curl", ...)` — no in-process TLS,
+    just `curl -sS -X POST -H Authorization: Bearer $K -d @req.json`
+    against an OpenAI-compatible Chat Completions endpoint
+    (`https://api.openai.com/v1/chat/completions` by default; works
+    with any provider that speaks the same wire format). The reply
+    is parsed by greping for the first `"content":"…"` in the JSON.
+    Suite clipboard `^V` pastes into the input field. The conf file
+    is gitignored.
+
 - **`office5.c`** — same apps as office4, but fixes the menu display
   bugs that surfaced once office4 hit a real terminal:
   - Pulldown columns now line up with the title letter. office4 had
@@ -143,8 +158,8 @@ each a self-contained fork rather than a dependency on the previous:
     matching Win95's chrome.
 
 ```
-make            # builds all six: office, office2, office3, office4, office5, office6
-make office6    # just the latest fork
+make            # builds all seven
+make office7    # just the latest fork
 ```
 
 Sizes (after `-Wl,-z,common-page-size=512`, which shaves ~2 KB
@@ -158,6 +173,7 @@ without breaking the raw `_start`):
 | office4 | 25160 | 32 KB |
 | office5 | 25160 | 32 KB |
 | office6 | 25160 | 32 KB |
+| office7 | 33672 | 64 KB |
 
 The 16 KB cap held through office3. office4 adds three full new
 apps plus a menu engine, clipboard infrastructure, and per-app
@@ -169,7 +185,7 @@ shadow, the menu-mode status string) net out roughly even with
 the small simplifications they replace.
 
 `-Wl,-z,max-page-size=512` looks similar but **breaks** the binary at
-runtime — don't use it. The dispatcher in office6 accepts argv[0]
-basename `office`, `office2`, `office3`, `office4`, `office5`, or
-`office6` interchangeably, so a symlink with any of those names
-dispatches correctly.
+runtime — don't use it. The dispatcher in office7 accepts argv[0]
+basename `office`, `office2`, `office3`, `office4`, `office5`,
+`office6`, or `office7` interchangeably, so a symlink with any of
+those names dispatches correctly.

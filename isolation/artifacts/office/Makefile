@@ -9,7 +9,7 @@ LDFLAGS ?= -nostdlib -nostartfiles -static \
            -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noseparate-code \
            -Wl,-z,common-page-size=512 -s
 
-all: office office2 office3 office4 office5 office6
+all: office office2 office3 office4 office5 office6 office7
 
 office: office.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
@@ -41,7 +41,13 @@ office6: office6.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "office6: $$(stat -c %s $@) bytes"
 
+office7: office7.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office7: $$(stat -c %s $@) bytes"
+
 clean:
-	rm -f office office2 office3 office4 office5 office6 outbox.txt canvas.txt
+	rm -f office office2 office3 office4 office5 office6 office7 \
+	      outbox.txt canvas.txt office7.conf garden.bin
 
 .PHONY: clean
