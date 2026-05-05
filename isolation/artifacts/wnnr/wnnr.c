@@ -1,14 +1,18 @@
-/* wnnr — Win95-style window in a terminal. Linux x86_64, no libc.
+/* wnnr — Win95-style window in a terminal. Linux x86_64.
  *
- * Compiled with -nostdlib + raw syscalls; strips to ~1 KB. Same
- * Win95 visuals as the libc version: royal-blue title bar, grey
- * menu bar. Arrow keys move the window. q quits.
+ * Two build paths from one source:
  *
- * Build with the Makefile (sets all the right flags). Or by hand:
- *   cc -std=c99 -Os -s -static -nostdlib -nostartfiles \
- *      -fno-stack-protector -fno-asynchronous-unwind-tables \
- *      -fno-unwind-tables -ffunction-sections -fdata-sections \
- *      -Wl,--gc-sections -Wl,--build-id=none -o wnnr wnnr.c
+ *   cc wnnr.c -o wnnr             # easy mode, ~14 KB binary
+ *                                 # (links libc; main() is the entry)
+ *
+ *   make                          # no-libc mode, ~1.5 KB binary
+ *                                 # (raw syscalls, _start is the entry)
+ *
+ * Same Win95 visuals either way: royal-blue title bar, grey menu
+ * bar. Arrow keys move the window. q quits.
+ *
+ * Pass -DTINY -nostdlib -nostartfiles to compile by hand into the
+ * tiny variant; the Makefile does this automatically.
  */
 
 /* ── syscalls ────────────────────────────────────────────── */
@@ -95,10 +99,10 @@ static void draw(int x, int y) {
     bflush();
 }
 
-/* ── entry point (no libc → linker calls _start directly) ── */
+/* ── shared body ────────────────────────────────────────── */
 static struct ti orig;
 
-void _start(void) {
+static void run(void) {
     io(0, TCGETS, &orig);
     struct ti t = orig;
     t.lflag &= ~(ICANON | ECHO);
@@ -130,5 +134,22 @@ void _start(void) {
 
     io(0, TCSETS, &orig);
     ws("\x1b[0m\x1b[?25h\x1b[2J\x1b[H");
-    qu(0);
 }
+
+
+/* ── entry point ────────────────────────────────────────── */
+#ifdef TINY
+/* No-libc build: linker calls _start directly. Raw syscall to exit. */
+__attribute__((noreturn))
+void _start(void) {
+    run();
+    qu(0);
+    __builtin_unreachable();
+}
+#else
+/* Default build: libc provides crt0 and main is the entry. */
+int main(void) {
+    run();
+    return 0;
+}
+#endif
