@@ -1,4 +1,4 @@
-# office — eight apps in 12.8 KB
+# office — twelve apps in a single ELF
 
 A Win95-style office suite in a single statically-linked Linux x86_64
 ELF. No libc, no curses, no third-party libraries — just the same
@@ -21,7 +21,17 @@ The shell launches; type a command, hit Enter:
 | `paint` | 60×16 ASCII canvas, arrows move, letters paint, `s` writes `canvas.txt` |
 | `hex <file>` | 16-bytes-per-line hex+ASCII view of a file |
 | `bfc <prog.bf>` | Brainfuck interpreter — runs the program, shows output |
+| `find` | grep substring across files in cwd, Enter opens hit in notepad (office4) |
+| `calc` | single-line expression evaluator, reuses sheet's formula engine (office4) |
+| `mines` | 16×16 Minesweeper, 40 mines, first-click safe (office4) |
 | `exit` | leave the shell |
+
+In office4+ the top menu bar is **real**: press **Alt+F / Alt+E / Alt+V / Alt+H**
+(DOS mnemonic) or **F10** (Unix-curses convention) to open it. Arrows
+navigate, Enter selects, Esc cancels. Underlined letters in the bar
+mark the mnemonic, just like Borland and Win95 did. office5 fixed
+the column alignment, dimmed unavailable menus, and added a Win95
+drop shadow.
 
 You can also invoke any subapp directly:
 
@@ -64,7 +74,7 @@ libc — useful if you want to compile by hand without the flag wall.
 
 ## Sibling forks
 
-`office.c` is the baseline. Two extended versions sit alongside it,
+`office.c` is the baseline. Three extended versions sit alongside it,
 each a self-contained fork rather than a dependency on the previous:
 
 - **`office2.c`** — adds three things the baseline didn't do:
@@ -88,21 +98,78 @@ each a self-contained fork rather than a dependency on the previous:
   - new `files` app: directory browser using raw `getdents64`. Enter
     opens the selected file in `notepad`; `h` opens it in `hex`.
 
+- **`office4.c`** — adds the suite-feel polish on top of office3:
+  - the top menu bar (`File Edit View Help`) is now **real**.
+    Activated by **Alt+F/E/V/H** (DOS mnemonics) or **F10** (curses
+    convention). Arrow keys navigate; Enter selects; Esc cancels.
+    Underlined letters mark the mnemonic.
+  - **cross-app clipboard**: `^X` cut, `^C` copy, `^V` paste. Works
+    across notepad, word, sheet (cell), hex (16-byte row), and the
+    Body field of mail / the input field of calc.
+  - new **`find`** app — grep across files in cwd. Enter on a hit
+    opens the file in notepad with the cursor on that line.
+  - new **`calc`** app — single-line expression input that reuses
+    the sheet's `+ - * /`, parens, and SUM/MIN/MAX/AVG evaluator.
+  - new **`mines`** app — 16×16 Minesweeper, 40 mines. Arrows move,
+    space reveals (first reveal is always safe), `f` toggles a flag,
+    `r` resets, `q` exits.
+
+- **`office6.c`** — same apps + fixes as office5; one further fix:
+  arrowing left/right between menus now erases the previous pulldown
+  before drawing the new one. office5 left the old pulldown on screen
+  during navigation, so the user could see two menus active at once
+  (e.g. File's "Save" and Edit's "Cut" overlapping). The fix is a
+  single body-area teal-fill at the top of each `menu_run` iteration.
+
+- **`office5.c`** — same apps as office4, but fixes the menu display
+  bugs that surfaced once office4 hit a real terminal:
+  - Pulldown columns now line up with the title letter. office4 had
+    the per-title step at `slen+3` instead of `slen+2`, so each
+    successive menu's pulldown drifted right (Edit was 1 col off,
+    View 2, Help 3).
+  - The menu bar now blanks all 80 columns. office4 left the rightmost
+    4 cells in the teal desktop background.
+  - `Alt+letter` on a menu the current app doesn't have is now a
+    no-op. office4 silently auto-advanced to the next non-empty
+    menu (so `Alt+V` on notepad opened Help). Arrow ←/→ navigation
+    inside an open menu still skips empty menus.
+  - Titles for menus the current app doesn't have are dimmed (gray
+    foreground), so a glance at the bar shows you Edit isn't
+    available in `paint`.
+  - The status line at the bottom changes to
+    `ESC cancel | ARROWS navigate | ENTER select` while a menu is
+    open, replacing whatever the app set.
+  - Pulldowns now drop a 1-cell dark shadow on the right and bottom,
+    matching Win95's chrome.
+
 ```
-make            # builds all three: office, office2, office3
-make office3    # just the latest fork
+make            # builds all six: office, office2, office3, office4, office5, office6
+make office6    # just the latest fork
 ```
 
 Sizes (after `-Wl,-z,common-page-size=512`, which shaves ~2 KB
 without breaking the raw `_start`):
 
-| binary  | bytes |
-|---------|-------|
-| office  | 10240 |
-| office2 | 11776 |
-| office3 | 14848 |
+| binary  | bytes | cap   |
+|---------|-------|-------|
+| office  | 10240 | 16 KB |
+| office2 | 11776 | 16 KB |
+| office3 | 14848 | 16 KB |
+| office4 | 25160 | 32 KB |
+| office5 | 25160 | 32 KB |
+| office6 | 25160 | 32 KB |
+
+The 16 KB cap held through office3. office4 adds three full new
+apps plus a menu engine, clipboard infrastructure, and per-app
+About bodies — about 7 KB of extra code, so the cap moved up to
+32 KB. office5 is byte-for-byte the same size as office4 because
+the menu fixes are pure logic adjustments (the +3 → +2 step, the
+no-auto-advance check, the dim-empty-titles branch, the drop
+shadow, the menu-mode status string) net out roughly even with
+the small simplifications they replace.
 
 `-Wl,-z,max-page-size=512` looks similar but **breaks** the binary at
-runtime — don't use it. The dispatcher in office3 accepts argv[0]
-basename `office`, `office2`, or `office3` interchangeably, so a
-symlink with any of those names dispatches correctly.
+runtime — don't use it. The dispatcher in office6 accepts argv[0]
+basename `office`, `office2`, `office3`, `office4`, `office5`, or
+`office6` interchangeably, so a symlink with any of those names
+dispatches correctly.
