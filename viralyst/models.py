@@ -178,3 +178,19 @@ class Sample(models.Model):
     @property
     def licence(self) -> str:
         return self.license_override or self.corpus.license_summary or '—'
+
+    @property
+    def runner(self) -> str:
+        """Which in-page runner (if any) can execute this sample.
+
+        Phase 2 starts with Brainfuck (pure JS, no server compile).
+        Returning '' means "no runner; this stays a museum piece."
+        Adding a language here is enough to make samples in that
+        language runnable — sample_detail.html branches on this."""
+        return {
+            'brainfuck': 'bf',
+        }.get(self.language.slug, '')
+
+    @property
+    def is_runnable(self) -> bool:
+        return bool(self.runner)

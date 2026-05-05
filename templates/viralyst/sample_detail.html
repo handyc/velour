@@ -1,9 +1,38 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}{{ sample.name }} — Viralyst{% endblock %}
 
 {% block extra_head %}
 {% include "viralyst/_styles.html" %}
+<style>
+  .vy-run-panel {
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 0.6rem 0.8rem;
+    margin: 0.8rem 0;
+    background: #0d1117;
+  }
+  .vy-run-panel h3 { margin: 0 0 0.4rem 0; font-size: 0.95rem; color: #c9d1d9; }
+  .vy-run-panel .vy-row { display: flex; gap: 0.5rem; align-items: stretch; margin: 0.4rem 0; }
+  .vy-run-panel textarea, .vy-run-panel pre {
+    background: #010409; color: #c9d1d9; border: 1px solid #21262d;
+    border-radius: 3px; padding: 0.4rem 0.5rem;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.85rem; line-height: 1.35;
+    margin: 0; flex: 1; min-height: 4rem; max-height: 14rem;
+    overflow: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .vy-run-panel textarea { resize: vertical; }
+  .vy-run-panel button {
+    background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+    padding: 0.35rem 0.8rem; border-radius: 3px; font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .vy-run-panel button:hover { background: #30363d; }
+  .vy-run-panel .vy-stat { color: #8b949e; font-size: 0.8rem; margin-left: 0.6rem; }
+  .vy-run-panel .vy-label { color: #8b949e; font-size: 0.75rem; min-width: 4rem; padding-top: 0.45rem; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -41,6 +70,30 @@
 
   {% if sample.notes_md %}
     <p class="note" style="white-space:pre-wrap;border-left:2px solid #30363d;padding:0.5rem 0.8rem;margin:0.6rem 0;color:#c9d1d9">{{ sample.notes_md }}</p>
+  {% endif %}
+
+  {% if sample.is_runnable %}
+    <div class="vy-run-panel">
+      <h3>Run · in-browser {{ sample.language.name }} interpreter</h3>
+      {# Hidden source feed for the JS — keeps the visible source one source of truth #}
+      <textarea id="vy-source" hidden>{{ sample.source_code }}</textarea>
+      {% if sample.runner == 'bf' %}
+        <div class="vy-row">
+          <span class="vy-label">stdin</span>
+          <textarea id="vy-input" placeholder="bytes the program reads via ',' (most BF programs are pure output)"></textarea>
+        </div>
+      {% endif %}
+      <div class="vy-row">
+        <button id="vy-run">▶ Run</button>
+        <button id="vy-reset">Clear</button>
+        <span id="vy-stat" class="vy-stat">idle</span>
+      </div>
+      <div class="vy-row">
+        <span class="vy-label">stdout</span>
+        <pre id="vy-output"></pre>
+      </div>
+    </div>
+    <script src="{% static 'viralyst/runners/bf.js' %}"></script>
   {% endif %}
 
   <h2>Source <span class="note" style="font-weight:normal">— <a class="lk" href="{% url 'viralyst:sample_raw' slug=sample.slug %}">raw</a></span></h2>
