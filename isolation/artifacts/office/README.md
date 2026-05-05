@@ -121,7 +121,7 @@ each a self-contained fork rather than a dependency on the previous:
   (e.g. File's "Save" and Edit's "Cut" overlapping). The fix is a
   single body-area teal-fill at the top of each `menu_run` iteration.
 
-- **`office7.c`** — adds a new app on top of office6:
+- **`office7.c`** — adds two new apps on top of office6 (one per commit):
   - new **`ask`** app — dual-pane LLM chat. History above (you>/ai>
     alternating, hard-wrapped, scroll-pinned to bottom), single-line
     input below. ENTER sends; ^N clears the chat; ^E (or File →
@@ -135,6 +135,25 @@ each a self-contained fork rather than a dependency on the previous:
     is parsed by greping for the first `"content":"…"` in the JSON.
     Suite clipboard `^V` pastes into the input field. The conf file
     is gitignored.
+  - new **`garden`** app — interactive-evolution colour/layout
+    breeder (Karl-Sims / Dawkins biomorph style). 64 `Genome`
+    instances (16 bytes each, 1 KB total) shown as an 8×8 grid of
+    thumbnails. Each genome controls the suite's title bar, menu
+    bar, desktop, selected-item, drop-shadow, and accent colours,
+    plus a clock-corner pip, border style, and mnemonic-underline
+    flag. The previously-hardcoded `COL_*` macros now redirect to
+    the global `g_genome`, so all twelve other apps automatically
+    repaint with whichever genome is active. SPACE marks a thumb
+    as a parent; ENTER advances the generation (uniform crossover
+    of two random marked parents per unmarked slot, then per-byte
+    mutation at ~9% rate); P previews the cursor's genome by
+    painting the suite chrome with those colours and a fake
+    selected menu title; R re-randomises the population; S writes
+    `./garden.bin` (1040 B); the file is auto-loaded on next
+    launch. MVP is 80×24 with 10×3 thumbs filling the screen;
+    on terminals reporting larger size via TIOCGWINSZ the thumbs
+    grow and the spare rows show a top status (`gen N · M marked`)
+    and a bottom keybind hint.
 
 - **`office5.c`** — same apps as office4, but fixes the menu display
   bugs that surfaced once office4 hit a real terminal:
@@ -173,7 +192,7 @@ without breaking the raw `_start`):
 | office4 | 25160 | 32 KB |
 | office5 | 25160 | 32 KB |
 | office6 | 25160 | 32 KB |
-| office7 | 33672 | 64 KB |
+| office7 | 37800 | 64 KB |
 
 The 16 KB cap held through office3. office4 adds three full new
 apps plus a menu engine, clipboard infrastructure, and per-app

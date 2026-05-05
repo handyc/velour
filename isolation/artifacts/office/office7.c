@@ -44,6 +44,7 @@ static long sys4(long n, long a, long b, long c, long d) {
 #define SYS_fork  57
 #define SYS_execve 59
 #define SYS_wait4  61
+#define SYS_time   201
 #define SYS_getdents64 217
 #define SYS_exit_group 231
 
@@ -160,12 +161,41 @@ static int read_key(unsigned char *out, int max) {
 }
 
 
-/* ── Win95 chrome around the active app ────────────────── */
-#define COL_TITLE_BG 21
-#define COL_TITLE_FG 15
-#define COL_BAR_BG    7
-#define COL_BAR_FG    0
-#define COL_DESKTOP  30
+/* ── Win95 chrome around the active app ────────────────── *
+ * Colours (and a couple of layout flags) live in a 16-byte Genome
+ * struct so the garden app can breed UI variants by mutating bytes.
+ * Default values match office6 exactly, so apps that don't touch
+ * g_genome render identically to the previous fork. */
+struct Genome {
+    unsigned char title_bg;      /* 0  default 21 (blue) */
+    unsigned char title_fg;      /* 1  default 15 (white) */
+    unsigned char bar_bg;        /* 2  default  7 (light grey) */
+    unsigned char bar_fg;        /* 3  default  0 (black) */
+    unsigned char desktop;       /* 4  default 30 (teal) */
+    unsigned char select_bg;     /* 5  default 15 (white) */
+    unsigned char select_fg;     /* 6  default  0 (black) */
+    unsigned char shadow_bg;     /* 7  default  0 (black) */
+    unsigned char shadow_fg;     /* 8  default  8 (dim grey) */
+    unsigned char accent;        /* 9  for thumbnail title trim */
+    unsigned char clock_corner;  /* 10 0=TL 1=TR 2=BL 3=BR */
+    unsigned char show_clock;    /* 11 0=off, 1=on */
+    unsigned char border;        /* 12 0='-' 1='=' 2='_' 3='~' */
+    unsigned char menu_under;    /* 13 underline mnemonic letter */
+    unsigned char reserved[2];   /* 14-15 */
+};
+static struct Genome g_genome = {
+    21, 15, 7, 0, 30, 15, 0, 0, 8, 21, 1, 0, 0, 1, {0, 0}
+};
+
+#define COL_TITLE_BG  (g_genome.title_bg)
+#define COL_TITLE_FG  (g_genome.title_fg)
+#define COL_BAR_BG    (g_genome.bar_bg)
+#define COL_BAR_FG    (g_genome.bar_fg)
+#define COL_DESKTOP   (g_genome.desktop)
+#define COL_SEL_BG    (g_genome.select_bg)
+#define COL_SEL_FG    (g_genome.select_fg)
+#define COL_SHADOW_BG (g_genome.shadow_bg)
+#define COL_SHADOW_FG (g_genome.shadow_fg)
 
 #define SCREEN_W 80
 #define SCREEN_H 24
@@ -206,7 +236,7 @@ static void menu_bar(int active_idx) {
     int used = 1;
     for (int i = 0; i < 4; i++) {
         int empty = current_ms && ms_count(current_ms, i) == 0;
-        if (i == active_idx) sgrbgfg(15, 0);
+        if (i == active_idx) sgrbgfg(COL_SEL_BG, COL_SEL_FG);
         else if (empty)      sgrbgfg(COL_BAR_BG, 8);     /* dim fg */
         else                 sgrbgfg(COL_BAR_BG, COL_BAR_FG);
         fbs(" ");
@@ -398,11 +428,23 @@ static const MS ms_mines   = { mF_mines, NA(mF_mines), 0, 0,
 static const MS ms_shell   = { mF_quit, NA(mF_quit), 0, 0,
                                0, 0, mH_about, NA(mH_about) };
 #define MA_SETTINGS 0xa6
+#define MA_BREED    0xa7   /* garden: ENTER */
+#define MA_PREVIEW  0xa8   /* garden: P */
+#define MA_RANDOM   0xa9   /* garden: R */
 /* ask: New = clear chat, Settings = edit api_key/endpoint/model, Quit. */
 static const MI mF_ask[]   = {{"New     ^N", MA_NEW},
                               {"Settings^E", MA_SETTINGS},
                               {"Quit    ^Q", MA_QUIT}};
 static const MS ms_ask     = { mF_ask, NA(mF_ask), 0, 0,
+                               0, 0, mH_about, NA(mH_about) };
+/* garden: File = Save/Load/Quit; Edit = Breed/Preview/Random. */
+static const MI mF_garden[] = {{"Save    ^S", MA_SAVE},
+                               {"Random  ^R", MA_RANDOM},
+                               {"Quit    ^Q", MA_QUIT}};
+static const MI mE_garden[] = {{"Breed   ENT", MA_BREED},
+                               {"Preview P  ", MA_PREVIEW}};
+static const MS ms_garden  = { mF_garden, NA(mF_garden),
+                               mE_garden, NA(mE_garden),
                                0, 0, mH_about, NA(mH_about) };
 
 /* Read a key into k[]. Returns -1 if k is not a menu-activation
@@ -462,14 +504,15 @@ static int menu_run(const MS *m, int start) {
 
         for (int i = 0; i < n[mi]; i++) {
             cup(x, 2 + i);
-            sgrbgfg(i == sel ? 15 : COL_BAR_BG, i == sel ? 0 : COL_BAR_FG);
+            sgrbgfg(i == sel ? COL_SEL_BG : COL_BAR_BG,
+                    i == sel ? COL_SEL_FG : COL_BAR_FG);
             fbs(" ");
             int w = slen(items[mi][i].label);
             fbw(items[mi][i].label, w);
             blanks(max_w - w + 1);
         }
         /* drop shadow: 1-cell dark band on the right and bottom. */
-        sgrbgfg(0, 8);
+        sgrbgfg(COL_SHADOW_BG, COL_SHADOW_FG);
         for (int i = 0; i < n[mi]; i++) {
             cup(x + box_w, 2 + i);
             fbs(" ");
@@ -519,7 +562,7 @@ static void show_about(const char *title) {
     body_clear();
     body_at(2, 3, "office7 — Win95-style suite, no libc.", SCREEN_W - 4);
     body_at(2, 5, "  notepad word mail sheet paint hex bfc", SCREEN_W - 4);
-    body_at(2, 6, "  files find calc mines ask", SCREEN_W - 4);
+    body_at(2, 6, "  files find calc mines ask garden", SCREEN_W - 4);
     body_at(2, 8, "  Alt+F / F10 opens menus everywhere.", SCREEN_W - 4);
     body_at(2, 9, "  ^X / ^C / ^V copy across editors.", SCREEN_W - 4);
     status(" press any key ");
@@ -543,6 +586,7 @@ static int run_find(int, char**);
 static int run_calc(int, char**);
 static int run_mines(int, char**);
 static int run_ask(int, char**);
+static int run_garden(int, char**);
 
 /* Captured at startup so the ask app can hand curl an inherited
  * environment (PATH, HOME, SSL_CERT_FILE, etc). _start passes envp
@@ -573,7 +617,8 @@ static int run_shell(int argc, char **argv) {
         body_at(2, 3, "Welcome to Office. Built-in commands:", SCREEN_W - 4);
         body_at(2, 4, "  notepad  word  mail  sheet  paint  hex  bfc",
                 SCREEN_W - 4);
-        body_at(2, 5, "  files  find  calc  mines  ask  exit", SCREEN_W - 4);
+        body_at(2, 5, "  files  find  calc  mines  ask  garden  exit",
+                SCREEN_W - 4);
         body_at(2, 6, "  (Alt+F / F10 opens menus in every app)", SCREEN_W - 4);
         if (msg[0]) {
             sgrbgfg(COL_BAR_BG, msg_kind == 2 ? 88 : 22);
@@ -631,6 +676,7 @@ static int run_shell(int argc, char **argv) {
             else if (scmp(cmd, "calc") == 0)  rc = run_calc(sub_argc, sub_argv);
             else if (scmp(cmd, "mines") == 0) rc = run_mines(sub_argc, sub_argv);
             else if (scmp(cmd, "ask") == 0)   rc = run_ask(sub_argc, sub_argv);
+            else if (scmp(cmd, "garden") == 0) rc = run_garden(sub_argc, sub_argv);
             else { mcpy(msg, "unknown command", 16); msg_kind = 2; }
 
             (void)rc;
@@ -2738,6 +2784,418 @@ static int run_ask(int argc, char **argv) {
 }
 
 
+/* ── garden: interactive-evolution colour/layout breeder ──
+ *
+ * 64 Genome instances (1 KB total) shown as an 8x8 grid of
+ * thumbnails. The user marks favourites with SPACE and ENTER
+ * advances the generation: marked genomes survive, unmarked
+ * slots are filled by uniform crossover of two random marked
+ * parents, then per-byte mutation. P previews the cursor's
+ * genome full-screen with the suite chrome painted in those
+ * colours. S saves the population to ./garden.bin (1024 B);
+ * the file is auto-loaded on next launch.
+ *
+ * Layout: default 80x24 packs 8x8 thumbs at 10 cols x 3 rows
+ * each, no chrome. If TIOCGWINSZ reports a larger terminal we
+ * grow each thumb up to the available cell budget and reserve
+ * the spare rows for a top status line + bottom help line.
+ */
+
+#define TIOCGWINSZ 0x5413
+struct winsize { unsigned short ws_row, ws_col, ws_xpx, ws_ypx; };
+
+#define GARDEN_FILE  "garden.bin"
+#define GARDEN_MAGIC 0x47524431u   /* "GRD1" little-endian */
+
+static struct Genome g_pop[64];
+static unsigned long long g_marked;     /* 1 bit per slot */
+static int g_generation;
+
+static unsigned long long g_rng_state;
+
+static unsigned long long garden_rdtsc(void) {
+    unsigned long h, l;
+    __asm__ volatile ("rdtsc" : "=d"(h), "=a"(l));
+    return ((unsigned long long)h << 32) | l;
+}
+static void garden_rng_seed_if_unset(void) {
+    if (!g_rng_state) g_rng_state = garden_rdtsc() | 1ULL;
+}
+static unsigned int garden_rng(void) {
+    g_rng_state = g_rng_state * 6364136223846793005ULL +
+                  1442695040888963407ULL;
+    return (unsigned int)(g_rng_state >> 32);
+}
+
+static void garden_random_genome(struct Genome *g) {
+    /* Pick from a pleasing palette range so initial pop isn't all neon. */
+    g->title_bg     = (unsigned char)(garden_rng() & 0xff);
+    g->title_fg     = (unsigned char)(garden_rng() & 0xff);
+    g->bar_bg       = (unsigned char)(garden_rng() & 0xff);
+    g->bar_fg       = (unsigned char)(garden_rng() & 0xff);
+    g->desktop      = (unsigned char)(garden_rng() & 0xff);
+    g->select_bg    = (unsigned char)(garden_rng() & 0xff);
+    g->select_fg    = (unsigned char)(garden_rng() & 0xff);
+    g->shadow_bg    = (unsigned char)(garden_rng() & 0xff);
+    g->shadow_fg    = (unsigned char)(garden_rng() & 0xff);
+    g->accent       = (unsigned char)(garden_rng() & 0xff);
+    g->clock_corner = (unsigned char)(garden_rng() & 3);
+    g->show_clock   = (unsigned char)(garden_rng() & 1);
+    g->border       = (unsigned char)(garden_rng() & 3);
+    g->menu_under   = (unsigned char)(garden_rng() & 1);
+    g->reserved[0]  = 0;
+    g->reserved[1]  = 0;
+}
+
+static void garden_init_pop(void) {
+    garden_rng_seed_if_unset();
+    for (int i = 0; i < 64; i++) garden_random_genome(&g_pop[i]);
+    /* Seed slot 0 with the office6 defaults so the user always has
+     * a "boring but recognisable" starting point to breed from. */
+    g_pop[0] = (struct Genome){
+        21, 15, 7, 0, 30, 15, 0, 0, 8, 21, 1, 0, 0, 1, {0, 0}
+    };
+    g_marked = 0;
+    g_generation = 0;
+}
+
+static void garden_mutate(struct Genome *g) {
+    unsigned char *b = (unsigned char *)g;
+    int n = (int)sizeof *g;
+    for (int i = 0; i < n; i++) {
+        unsigned int r = garden_rng();
+        if ((r & 0xff) < 24) {                /* ~9% per byte mutates */
+            if (i <= 9) {                     /* colour bytes drift */
+                int delta = (int)((r >> 8) & 7) - 3;   /* -3..+3 */
+                b[i] = (unsigned char)((int)b[i] + delta);
+            } else if (i == 10) {             /* clock_corner 0..3 */
+                b[i] = (unsigned char)((r >> 8) & 3);
+            } else if (i == 11 || i == 13) {  /* booleans */
+                b[i] ^= 1;
+            } else if (i == 12) {             /* border 0..3 */
+                b[i] = (unsigned char)((r >> 8) & 3);
+            }
+        }
+    }
+}
+
+static void garden_breed(void) {
+    int parents[64], np = 0;
+    for (int i = 0; i < 64; i++)
+        if ((g_marked >> i) & 1) parents[np++] = i;
+    if (np == 0) return;
+
+    struct Genome next[64];
+    for (int i = 0; i < 64; i++) {
+        if ((g_marked >> i) & 1) {
+            next[i] = g_pop[i];               /* survive untouched */
+            continue;
+        }
+        int a = parents[garden_rng() % np];
+        int b = parents[garden_rng() % np];
+        unsigned char *pa = (unsigned char *)&g_pop[a];
+        unsigned char *pb = (unsigned char *)&g_pop[b];
+        unsigned char *po = (unsigned char *)&next[i];
+        unsigned int mask = garden_rng();
+        for (int k = 0; k < (int)sizeof next[i]; k++) {
+            po[k] = (mask & 1) ? pa[k] : pb[k];
+            mask >>= 1;
+            if (k % 32 == 31) mask = garden_rng();
+        }
+        garden_mutate(&next[i]);
+    }
+    for (int i = 0; i < 64; i++) g_pop[i] = next[i];
+    g_marked = 0;
+    g_generation++;
+}
+
+static int garden_save(void) {
+    int fd = (int)op(GARDEN_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    unsigned int hdr[4];
+    hdr[0] = GARDEN_MAGIC;
+    hdr[1] = (unsigned int)g_generation;
+    hdr[2] = (unsigned int)(g_marked & 0xffffffffu);
+    hdr[3] = (unsigned int)(g_marked >> 32);
+    wr(fd, hdr, sizeof hdr);
+    wr(fd, g_pop, sizeof g_pop);
+    cl(fd);
+    return 0;
+}
+
+static int garden_load(void) {
+    int fd = (int)op(GARDEN_FILE, O_RDONLY, 0);
+    if (fd < 0) return 0;
+    unsigned int hdr[4];
+    long n = rd(fd, hdr, sizeof hdr);
+    if (n != (long)sizeof hdr || hdr[0] != GARDEN_MAGIC) {
+        cl(fd); return 0;
+    }
+    n = rd(fd, g_pop, sizeof g_pop);
+    cl(fd);
+    if (n != (long)sizeof g_pop) return 0;
+    g_generation = (int)hdr[1];
+    g_marked = (unsigned long long)hdr[2] | ((unsigned long long)hdr[3] << 32);
+    return 1;
+}
+
+static int garden_term_size(int *cols, int *rows) {
+    struct winsize ws = { 0, 0, 0, 0 };
+    long r = io(0, TIOCGWINSZ, &ws);
+    if (r < 0 || ws.ws_col == 0 || ws.ws_row == 0) {
+        *cols = 80; *rows = 24; return 0;
+    }
+    *cols = ws.ws_col; *rows = ws.ws_row;
+    return 1;
+}
+
+/* Render one thumbnail at screen pos (x,y), w x h cells.
+ * w is at least 10, h at least 3. The cursor and marked flags
+ * draw distinguishing borders. */
+static void garden_render_thumb(int idx, int x, int y, int w, int h,
+                                int is_cursor, int is_marked) {
+    struct Genome *g = &g_pop[idx];
+    static const char border_chars[4] = { '-', '=', '_', '~' };
+    char bc = border_chars[g->border & 3];
+
+    /* row 0: title bar */
+    cup(x, y);
+    sgrbgfg(g->title_bg, g->title_fg);
+    fbs(" O7");
+    int slots = w - 6;
+    for (int i = 0; i < slots; i++) fbw(" ", 1);
+    fbs("_X ");
+
+    /* row 1: menu bar — always exactly 1 row */
+    cup(x, y + 1);
+    sgrbgfg(g->bar_bg, g->bar_fg);
+    if (w >= 10) {
+        fbs(" F E V H");
+        blanks(w - 8);
+    } else {
+        fbs(" FEVH");
+        blanks(w - 5);
+    }
+
+    /* rows 2..h-2: desktop body */
+    for (int r = 2; r < h - 1; r++) {
+        cup(x, y + r);
+        sgrbg(g->desktop);
+        blanks(w);
+    }
+    /* clock pip — only in body rows, so hidden in MVP h=3 thumbs */
+    if (g->show_clock && h >= 4) {
+        int cx = x + ((g->clock_corner & 1) ? w - 6 : 1);
+        int cy = y + ((g->clock_corner & 2) ? h - 2 : 2);
+        cup(cx, cy);
+        sgrbgfg(g->desktop, g->accent);
+        fbs("12:00");
+    }
+
+    /* status row (last row) — used for marked/cursor indicators */
+    cup(x, y + h - 1);
+    sgrbgfg(g->bar_bg, g->bar_fg);
+    char bcs[2] = { bc, 0 };
+    for (int i = 0; i < w; i++) fbs(bcs);
+
+    /* overlay cursor + marked — border highlights drawn last */
+    if (is_marked) {
+        cup(x, y);
+        sgrbgfg(226, 0);                  /* yellow bg, black fg */
+        fbs("*");
+    }
+    if (is_cursor) {
+        /* invert title row first cell as a cursor caret */
+        cup(x + w - 1, y);
+        sgrbgfg(15, 0);
+        fbs(">");
+        cup(x, y);
+        sgrbgfg(15, 0);
+        fbs("<");
+    }
+}
+
+static void garden_render_grid(int cursor, int cols, int rows) {
+    /* Compute thumb size — clip down so 8x8 fits. Reserve at most
+     * 2 rows for header/footer when there's spare height. */
+    int chrome_top = 0, chrome_bot = 0;
+    int thumb_w = cols / 8;
+    int thumb_h = rows / 8;
+    if (thumb_w < 10) thumb_w = 10;
+    if (thumb_h < 3)  thumb_h = 3;
+    if (thumb_w * 8 > cols) thumb_w = cols / 8;
+    if (thumb_h * 8 > rows) thumb_h = rows / 8;
+    if (thumb_w < 10) thumb_w = 10;       /* MVP minimum */
+    if (thumb_h < 3)  thumb_h = 3;
+
+    if (rows >= 8 * thumb_h + 2) { chrome_top = 1; chrome_bot = 1; }
+
+    /* Optional top chrome */
+    if (chrome_top) {
+        cup(0, 0);
+        sgrbgfg(COL_TITLE_BG, COL_TITLE_FG);
+        fbs(" Garden — interactive evolution");
+        char buf[32];
+        int bn = sapp(buf, 0, "  gen ");
+        bn += utoa((unsigned)g_generation, buf + bn);
+        bn = sapp(buf, bn, "  ");
+        int marks = 0;
+        for (int i = 0; i < 64; i++) if ((g_marked >> i) & 1) marks++;
+        bn += utoa((unsigned)marks, buf + bn);
+        bn = sapp(buf, bn, " marked");
+        buf[bn] = 0;
+        fbw(buf, bn);
+        blanks(cols - 32 - bn);
+    }
+
+    int origin_y = chrome_top ? 1 : 0;
+    int origin_x = (cols - thumb_w * 8) / 2;
+    if (origin_x < 0) origin_x = 0;
+
+    for (int gy = 0; gy < 8; gy++) {
+        for (int gx = 0; gx < 8; gx++) {
+            int idx = gy * 8 + gx;
+            int marked = (int)((g_marked >> idx) & 1);
+            int is_cursor = (idx == cursor);
+            garden_render_thumb(idx,
+                                origin_x + gx * thumb_w,
+                                origin_y + gy * thumb_h,
+                                thumb_w, thumb_h,
+                                is_cursor, marked);
+        }
+    }
+
+    if (chrome_bot) {
+        cup(0, rows - 1);
+        sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+        fbs(" SPACE mark | ENTER breed | P preview | R random | "
+            "S save | Q quit");
+        blanks(cols);
+    }
+}
+
+/* Preview the cursor's genome by painting the suite chrome with
+ * its colours and a sample body. Press any key to return. */
+static void garden_preview(int idx) {
+    struct Genome saved = g_genome;
+    g_genome = g_pop[idx];
+
+    paint_desktop();
+    chrome("Preview");
+    body_clear();
+    body_at(2, 3, "this is what the suite looks like with this genome.",
+            SCREEN_W - 4);
+    body_at(2, 5, "  notepad word mail sheet paint hex bfc files",
+            SCREEN_W - 4);
+    body_at(2, 6, "  find calc mines ask garden", SCREEN_W - 4);
+    body_at(2, 8, "  Alt+F / F10 opens the menu — try it.",
+            SCREEN_W - 4);
+    body_at(2, 9, "  selected items use the genome's select_bg/fg.",
+            SCREEN_W - 4);
+    body_at(2, 11, "  press any key to return to the garden.",
+            SCREEN_W - 4);
+    /* draw a fake selected menu title to show the SEL colours */
+    cup(0, 1);
+    sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+    fbs(" ");
+    sgrbgfg(COL_SEL_BG, COL_SEL_FG);
+    fbs(" File ");
+    sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+    fbs(" Edit  View  Help");
+    blanks(SCREEN_W - 24);
+    status(" PREVIEW · any key returns ");
+    fbflush();
+    unsigned char k[8];
+    read_key(k, sizeof k);
+
+    g_genome = saved;
+}
+
+static int run_garden(int argc, char **argv) {
+    (void)argc; (void)argv;
+    current_ms = &ms_garden;
+
+    if (!garden_load()) garden_init_pop();
+    garden_rng_seed_if_unset();
+
+    term_raw();
+    int cursor = 0;
+    int last_msg_ttl = 0;
+    static char last_msg[64];
+    last_msg[0] = 0;
+
+    while (1) {
+        int cols, rows;
+        garden_term_size(&cols, &rows);
+        cls();
+        garden_render_grid(cursor, cols, rows);
+
+        if (last_msg[0] && last_msg_ttl > 0) {
+            cup(0, rows - 1);
+            sgrbgfg(COL_BAR_BG, 22);
+            fbs(" ");
+            fbs(last_msg);
+            blanks(cols - 1 - slen(last_msg));
+            last_msg_ttl--;
+            if (last_msg_ttl == 0) last_msg[0] = 0;
+        }
+        fbflush();
+
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+
+        int act = -1, ami = menu_activation(k, n);
+        if (ami >= 0) act = menu_run(&ms_garden, ami);
+        if (act == MA_ABOUT)   { show_about("Garden"); continue; }
+        if (act == MA_QUIT)    break;
+        if (act == MA_SAVE)    {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (act == MA_RANDOM)  { garden_init_pop(); continue; }
+        if (act == MA_BREED)   { garden_breed(); continue; }
+        if (act == MA_PREVIEW) { garden_preview(cursor); continue; }
+
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
+            int gx = cursor % 8, gy = cursor / 8;
+            switch (k[2]) {
+            case 'A': if (gy > 0) cursor -= 8; break;
+            case 'B': if (gy < 7) cursor += 8; break;
+            case 'C': if (gx < 7) cursor++;    break;
+            case 'D': if (gx > 0) cursor--;    break;
+            }
+            continue;
+        }
+        if (k[0] == ' ')              { g_marked ^= (1ULL << cursor); continue; }
+        if (k[0] == '\r' || k[0] == '\n') { garden_breed(); continue; }
+        if (k[0] == 'p' || k[0] == 'P') { garden_preview(cursor); continue; }
+        if (k[0] == 'r' || k[0] == 'R') { garden_init_pop(); continue; }
+        if (k[0] == 's' || k[0] == 'S') {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'l' || k[0] == 'L') {
+            if (garden_load()) {
+                int ml = sapp(last_msg, 0, "loaded garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'q' || k[0] == 0x11) break;
+    }
+
+    term_cooked();
+    return 0;
+}
+
+
 /* ── dispatch ─────────────────────────────────────────── */
 static const char *basename_(const char *p) {
     const char *b = p;
@@ -2773,6 +3231,7 @@ int main_c(int argc, char **argv, char **envp) {
     if (scmp(cmd, "calc")    == 0) return run_calc   (sub_argc, sub_argv);
     if (scmp(cmd, "mines")   == 0) return run_mines  (sub_argc, sub_argv);
     if (scmp(cmd, "ask")     == 0) return run_ask    (sub_argc, sub_argv);
+    if (scmp(cmd, "garden")  == 0) return run_garden (sub_argc, sub_argv);
     return run_shell(sub_argc, sub_argv);
 }
 
