@@ -7,7 +7,7 @@
 static struct termios o;
 static void r(void){tcsetattr(0,0,&o);fputs("\x1b[0m\x1b[?25h\x1b[2J\x1b[H",stdout);}
 static void d(int x,int y){
- fputs("\x1b[2J",stdout);
+ fputs("\x1b[0m\x1b[2J",stdout);
  printf("\x1b[%d;%dH\x1b[48;5;21;38;5;15m%-*s",y+1,x+1,W," wnnr - window         _ [] X ");
  printf("\x1b[%d;%dH\x1b[48;5;7;38;5;0m%-*s",y+2,x+1,W," File  Edit  View  Help");
  for(int j=3;j<11;j++)printf("\x1b[%d;%dH\x1b[48;5;7m%*s",y+j,x+1,W,"");
