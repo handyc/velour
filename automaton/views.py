@@ -297,6 +297,32 @@ def rename_simulation(request, slug):
     return redirect('automaton:run', slug=sim.slug)
 
 
+@login_required
+@require_POST
+def rename_ruleset(request, pk):
+    """Rename a ruleset; re-slug for collision-free uniqueness."""
+    rs = get_object_or_404(RuleSet, pk=pk)
+    new_name = request.POST.get('name', '').strip()
+    if not new_name:
+        messages.error(request, 'Name cannot be empty.')
+        return redirect('automaton:home')
+    if RuleSet.objects.filter(name=new_name).exclude(pk=rs.pk).exists():
+        messages.error(request,
+                       f'A ruleset named "{new_name}" already exists.')
+        return redirect('automaton:home')
+    rs.name = new_name
+    base = slugify(new_name)[:220] or 'ruleset'
+    candidate = base
+    n = 2
+    while RuleSet.objects.filter(slug=candidate).exclude(pk=rs.pk).exists():
+        candidate = f'{base}-{n}'
+        n += 1
+    rs.slug = candidate
+    rs.save()
+    messages.success(request, f'Ruleset renamed to "{rs.name}".')
+    return redirect('automaton:home')
+
+
 _HEX_COLOR_LEN = 7    # "#rrggbb"
 
 

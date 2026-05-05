@@ -11,6 +11,7 @@ urlpatterns = [
     path('create-exact-rules/',    views.create_exact_rules, name='create_exact_rules'),
     path('merge/',                 views.merge_rulesets,    name='merge_rulesets'),
     path('merge-random/',          views.merge_random_rulesets, name='merge_random_rulesets'),
+    path('ruleset/<int:pk>/rename/', views.rename_ruleset,  name='rename_ruleset'),
     path('<slug:slug>/',           views.run_simulation,    name='run'),
     path('<slug:slug>/data.json',  views.simulation_data_json, name='data_json'),
     path('<slug:slug>/export.json', views.export_simulation_json, name='export_json'),

@@ -35,6 +35,31 @@
 </div>
 
 {% if rulesets %}
+<h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Rulesets
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">{{ rulesets.count }}</span>
+</h2>
+<div class="sim-list">
+    {% for rs in rulesets %}
+    <div class="sim-row" style="border-left-color:#6e40c9">
+        <span class="name">{{ rs.name }}</span>
+        <span style="color:#6e7681;font-size:0.7rem">({{ rs.n_colors }}c · {{ rs.rule_count|default_if_none:rs.rules.count }} rules)</span>
+        <button class="btn btn-secondary"
+                onclick="document.getElementById('rs-rename-{{ rs.pk }}').style.display='flex';this.style.display='none'"
+                style="margin-left:auto;font-size:0.7rem;padding:0.1rem 0.5rem">rename</button>
+        <form id="rs-rename-{{ rs.pk }}"
+              method="post"
+              action="{% url 'automaton:rename_ruleset' rs.pk %}"
+              style="display:none;gap:0.3rem;align-items:center;margin-left:auto">
+            {% csrf_token %}
+            <input type="text" name="name" value="{{ rs.name }}"
+                   style="width:14rem;font-size:0.72rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.15rem 0.3rem">
+            <button type="submit" class="btn"
+                    style="font-size:0.7rem;padding:0.1rem 0.55rem;background:#238636;border-color:#2ea043">save</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+
 {% if rulesets.count > 1 %}
 <h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Merge rulesets</h2>
 <p style="color:#6e7681;font-size:0.7rem;margin:0 0 0.3rem">
