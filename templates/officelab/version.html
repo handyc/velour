@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — {{ va.name }}{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; {{ va.name }}</h1>
+  {% with active=va.name %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    Source <code>{{ va.name }}.c</code> is
+    <strong>{{ va.source_lines|intcomma }}</strong> lines and compiles
+    to a stripped binary of <strong>{{ va.binary_size|intcomma }}</strong>
+    bytes
+    {% if va.delta_vs_prev %}
+      ({% if va.delta_vs_prev > 0 %}+{% endif %}{{ va.delta_vs_prev|intcomma }} vs previous fork)
+    {% endif %}.
+    Of that, <strong>{{ overhead|intcomma }}</strong> is the Linux ELF
+    + <code>_start</code> + syscall-stub baseline, leaving
+    <strong>{{ useful_bytes|intcomma }}</strong> bytes of useful work.
+  </p>
+
+  <div class="budgetline">
+    <span class="label">budget 64 KB</span>
+    <span class="bar-track" style="width: 480px;">
+      <span class="bar" style="width: {{ budget_pct|floatformat:1 }}%;"></span>
+    </span>
+    <span class="value">{{ budget_pct|floatformat:1 }}%</span>
+    <span class="value">{{ budget_left|intcomma }} B left</span>
+  </div>
+
+  <h2>Bytes by feature</h2>
+  <p class="hint">
+    Each row is a feature (per-app + shared infrastructure), sorted
+    by code-size descending. Percentage column is share of the
+    stripped binary.
+  </p>
+
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">feature</th>
+        <th>text (code)</th>
+        <th>data</th>
+        <th>code+data</th>
+        <th>bss (runtime RAM)</th>
+        <th>% of binary</th>
+        <th>symbols</th>
+        <th class="l">share</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in feature_rows %}
+      <tr>
+        <td class="l">
+          {% if r.name == 'uncategorized' %}
+            <strong style="color:#f0883e;">{{ r.name }}</strong>
+          {% else %}{{ r.name }}{% endif %}
+        </td>
+        <td>{{ r.text|intcomma }}</td>
+        <td class="{% if r.data == 0 %}zero{% endif %}">{{ r.data|intcomma }}</td>
+        <td>{{ r.code|intcomma }}</td>
+        <td class="{% if r.bss == 0 %}zero{% endif %}">{{ r.bss|intcomma }}</td>
+        <td>{{ r.pct_binary|floatformat:1 }}%</td>
+        <td class="zero">{{ r.sym_count }}</td>
+        <td class="l">
+          <span class="bar-track" style="width: 240px;">
+            <span class="bar" style="width: {{ r.pct_binary|floatformat:2 }}%;"></span>
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr style="border-top: 2px solid #30363d;">
+        <td class="l"><strong>attributed total</strong></td>
+        <td></td><td></td>
+        <td><strong>{{ code_total|intcomma }}</strong></td>
+        <td><strong>{{ bss_total|intcomma }}</strong></td>
+        <td></td><td></td><td></td>
+      </tr>
+      <tr>
+        <td class="l">baseline (ELF + _start)</td>
+        <td colspan="2"></td>
+        <td>{{ overhead|intcomma }}</td>
+        <td colspan="4"></td>
+      </tr>
+      <tr>
+        <td class="l">elf overhead (sections, padding, .rodata pool)</td>
+        <td colspan="2"></td>
+        <td>{{ elf_overhead|intcomma }}</td>
+        <td colspan="4" class="zero">
+          binary &minus; attributed &minus; baseline
+        </td>
+      </tr>
+      <tr style="border-top: 2px solid #30363d;">
+        <td class="l"><strong>binary on disk</strong></td>
+        <td colspan="2"></td>
+        <td><strong>{{ va.binary_size|intcomma }}</strong></td>
+        <td colspan="4"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% if va.uncategorized %}
+  <h2>Uncategorized symbols ({{ va.uncategorized|length }})</h2>
+  <p class="hint">
+    These didn't match any pattern in <code>officelab/analyzer.py</code>.
+    If you added a new feature whose helpers are showing up here,
+    extend <code>FEATURE_PATTERNS</code>.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr><th class="l">symbol</th><th>size</th><th>section</th></tr>
+    </thead>
+    <tbody>
+      {% for s in va.uncategorized %}
+      <tr>
+        <td class="l">{{ s.name }}</td>
+        <td>{{ s.size|intcomma }}</td>
+        <td>{{ s.section }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+</div>
+{% endblock %}

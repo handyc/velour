@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}officelab — build the analysis binaries first{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1>officelab</h1>
+  <p class="hint">
+    The analyser needs the <em>unstripped twin</em> of each office
+    binary (so <code>nm</code> can see per-symbol sizes) before it
+    can attribute bytes to features. Build them with:
+  </p>
+  <pre><code class="cmd">cd {{ office_dir }} &amp;&amp; {{ build_cmd }}</code></pre>
+  <p class="hint">
+    This produces <code>office.dbg</code> &hellip;
+    <code>office7.dbg</code> + <code>minimal.dbg</code> alongside the
+    shipping binaries. The <code>.dbg</code> files don't ship and are
+    gitignored. Once they exist, refresh this page.
+  </p>
+  <p class="hint">
+    Cap: <strong>{{ budget }}</strong> bytes per fork (officelab's 64 KB target).
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — office suite binary atlas{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a></h1>
+  {% with active='index' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    Per-feature byte attribution for the no-libc office suite at
+    <code>isolation/artifacts/office/</code>. Each fork is a single
+    Linux x86_64 ELF; the 64 KB cap is the long-term target.
+    <strong>Baseline overhead</strong> (Linux ELF + raw <code>_start</code>
+    + syscall stub) is <code>{{ baseline.binary_size|intcomma }}</code>
+    bytes &mdash; the floor underneath every binary on this list.
+  </p>
+
+  <h2>Versions</h2>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">fork</th>
+        <th>binary</th>
+        <th>delta</th>
+        <th>useful (binary &minus; baseline)</th>
+        <th>features</th>
+        <th>source LOC</th>
+        <th class="l">budget vs 64 KB</th>
+        <th class="l">new in this fork</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in versions %}
+      <tr>
+        <td class="l"><a class="vlink" href="{% url 'officelab:version' r.name %}">{{ r.name }}</a></td>
+        <td>{{ r.binary_size|intcomma }}</td>
+        <td class="{% if r.delta > 0 %}delta-pos{% elif r.delta < 0 %}delta-neg{% else %}zero{% endif %}">
+          {% if r.delta > 0 %}+{% endif %}{{ r.delta|intcomma }}
+        </td>
+        <td>{{ r.useful_bytes|intcomma }}</td>
+        <td>{{ r.feature_count }}</td>
+        <td>{{ r.source_lines|intcomma }}</td>
+        <td class="l" style="min-width: 280px;">
+          <span class="bar-track">
+            <span class="bar {% if r.over_budget %}over{% endif %}"
+                  style="width: {{ r.budget_pct|floatformat:1 }}%;"></span>
+          </span>
+          <span style="color:#8b949e; font-size:0.78rem;">
+            {{ r.budget_pct|floatformat:1 }}% &middot; {{ r.budget_left|intcomma }} B left
+          </span>
+        </td>
+        <td class="l" style="color:#8b949e; font-size:0.8rem;">
+          {% for f in r.new_features %}<span style="margin-right:0.4em;">{{ f }}</span>{% empty %}&mdash;{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Quick read</h2>
+  <div class="tile-grid">
+    <div class="tile">
+      <div class="name">Latest fork</div>
+      <div class="num">{{ latest.name }}</div>
+      <div class="sub">{{ latest.binary_size|intcomma }} B
+        &middot; {{ latest.budget_pct|floatformat:1 }}% of 64 KB</div>
+    </div>
+    <div class="tile">
+      <div class="name">Headroom</div>
+      <div class="num">{{ latest.budget_left|intcomma }} B</div>
+      <div class="sub">remaining under the 64 KB cap</div>
+    </div>
+    <div class="tile">
+      <div class="name">Biggest jump</div>
+      <div class="num">{{ biggest.name }}</div>
+      <div class="sub">+{{ biggest.delta|intcomma }} B vs previous fork</div>
+    </div>
+    <div class="tile">
+      <div class="name">OS / boot tax</div>
+      <div class="num">{{ baseline.binary_size|intcomma }} B</div>
+      <div class="sub">ELF + raw <code>_start</code> + syscall stub
+        &middot; <a class="vlink" href="{% url 'officelab:version' 'minimal' %}">see minimal</a></div>
+    </div>
+  </div>
+
+  <h2>How byte attribution works</h2>
+  <p class="hint">
+    For each fork the analyser shells out to <code>nm --print-size</code>
+    on the unstripped <code>*.dbg</code> twin (built with the same
+    flags as the shipping binary, just without <code>-s</code>). Each
+    symbol is matched against an ordered prefix/exact pattern table
+    in <code>officelab/analyzer.py</code> &mdash; first match wins,
+    so add specific patterns above general ones. Bytes left over after
+    every symbol is attributed (ELF headers, program headers,
+    alignment padding, the .rodata pool of ANSI escape strings, etc.)
+    show up as <em>elf overhead</em> on the per-version page.
+  </p>
+  <p class="hint">
+    If you add a new feature to office7+ and see uncategorized bytes,
+    extend the pattern table and reload &mdash; the analyser runs
+    live on every page load (no cache, no DB).
+  </p>
+</div>
+{% endblock %}

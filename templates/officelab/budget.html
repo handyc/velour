@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — 64 KB budget{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; budget</h1>
+  {% with active='budget' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    Where the bytes go in <strong>{{ latest.name }}</strong>
+    ({{ latest.binary_size|intcomma }} B). The 64 KB cap leaves
+    <strong>{{ budget_left|intcomma }}</strong> B of headroom for
+    new features.
+  </p>
+
+  <div class="budgetline">
+    <span class="label">stripped binary</span>
+    <span class="bar-track" style="width: 540px;">
+      <span class="bar {% if over_budget %}over{% endif %}"
+            style="width: {{ budget_pct|floatformat:2 }}%;"></span>
+    </span>
+    <span class="value">{{ budget_pct|floatformat:1 }}%</span>
+    <span class="value">{{ latest.binary_size|intcomma }} / {{ budget|intcomma }}</span>
+  </div>
+
+  <h2>Bytes per feature (descending)</h2>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">feature</th>
+        <th>code+data</th>
+        <th>bss (runtime)</th>
+        <th>symbols</th>
+        <th class="l">share of binary</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in feature_rows %}
+      <tr>
+        <td class="l">{{ r.name }}</td>
+        <td>{{ r.code|intcomma }}</td>
+        <td class="{% if r.bss == 0 %}zero{% endif %}">{{ r.bss|intcomma }}</td>
+        <td class="zero">{{ r.syms }}</td>
+        <td class="l">
+          <span class="bar-track" style="width: 360px;">
+            <span class="bar"
+                  style="width: {% widthratio r.code latest.binary_size 100 %}%;"></span>
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Adding the next feature</h2>
+  <p class="hint">
+    Past growth has run roughly:
+  </p>
+  <ul class="hint" style="margin: 0 0 0 1.2rem; line-height: 1.7;">
+    <li>each new app costs <strong>~1&ndash;3 KB</strong> of code (mines was 1393 B, calc 591 B, find 1375 B)</li>
+    <li>the menu engine alone was <strong>~1.6 KB</strong> when first added in office4</li>
+    <li>cross-app clipboard infrastructure was small (a few hundred bytes) but the BSS is ~4 KB</li>
+    <li>the LLM <em>ask</em> app was the most expensive single addition at <strong>5.4 KB</strong> (curl-execve plumbing + JSON build/parse + chat scrollback)</li>
+    <li>the <em>garden</em> GA breeder was <strong>3.3 KB</strong> (mostly thumbnail rendering)</li>
+  </ul>
+  <p class="hint">
+    Headroom of <strong>{{ budget_left|intcomma }} B</strong> means
+    you can comfortably add another small app or two. A second LLM
+    feature would not fit without compression. Per-app slimming would
+    free another 2&ndash;5 KB if you really need it (mail can lose
+    To/Subject; sheet's expression parser is the biggest lever inside
+    a single app at ~3.4 KB).
+  </p>
+</div>
+{% endblock %}

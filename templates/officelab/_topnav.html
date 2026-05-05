@@ -1,0 +1,10 @@
+<div class="topnav">
+  <a href="{% url 'officelab:index' %}"
+     class="{% if active == 'index' %}on{% endif %}">overview</a>
+  <a href="{% url 'officelab:budget' %}"
+     class="{% if active == 'budget' %}on{% endif %}">budget</a>
+  {% for v in all_versions %}
+    <a href="{% url 'officelab:version' v %}"
+       class="{% if active == v %}on{% endif %}">{{ v }}</a>
+  {% endfor %}
+</div>

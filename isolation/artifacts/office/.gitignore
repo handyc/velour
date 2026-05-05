@@ -5,6 +5,8 @@ office4
 office5
 office6
 office7
+minimal
+*.dbg
 office7.conf
 canvas.txt
 outbox.txt
