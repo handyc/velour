@@ -1,4 +1,4 @@
-# office — eight apps in 9408 bytes
+# office — eight apps in 12.8 KB
 
 A Win95-style office suite in a single statically-linked Linux x86_64
 ELF. No libc, no curses, no third-party libraries — just the same
@@ -14,10 +14,10 @@ The shell launches; type a command, hit Enter:
 
 | command | what it does |
 |---|---|
-| `notepad <file>` | line-scrolling text viewer (arrows scroll, `s` save, `q` back) |
-| `word <file>` | same as notepad, with word-wrap |
-| `mail` | compose To / Subject / Body, ctrl-S writes `outbox.txt` |
-| `sheet <csv>` | 8×12 cell grid, arrows to navigate, `e` edit, `s` save |
+| `notepad <file>` | full edit: arrows move cursor, type to insert, bksp to delete, ^S save, ^Q quit |
+| `word <file>` | same edit model as notepad, with word-wrap |
+| `mail` | compose To / Subject / Body, ^S writes `outbox.txt` |
+| `sheet <csv>` | 8×12 cell grid, arrows navigate, `e` edit, `s` save |
 | `paint` | 60×16 ASCII canvas, arrows move, letters paint, `s` writes `canvas.txt` |
 | `hex <file>` | 16-bytes-per-line hex+ASCII view of a file |
 | `bfc <prog.bf>` | Brainfuck interpreter — runs the program, shows output |
@@ -46,15 +46,15 @@ Same trick as `wnnr`:
 - The "compiler" is a Brainfuck interpreter, runs in-process and shows output. A real C compiler is impossible in 16 KB. (Even `xcc700`, my 700-line K&R-subset compiler, is ~50 KB compiled.)
 - `mail` writes to `./outbox.txt`. There is no SMTP, no IMAP, no network code.
 - `sheet` has no formulas — just a CSV cell grid editor.
-- `notepad` and `word` scroll but don't insert/delete characters yet (binary size is the constraint; an in-place edit buffer + cursor adds ~1 KB).
+- `notepad` and `word` are full editors: cursor positioned at `bcur`, printable chars insert, backspace deletes, enter inserts newline, auto-scroll keeps cursor in view. ^S saves, ^Q quits. The terminal cursor is shown at the active position so you can see what you're typing.
 - `paint` paints whatever character you press at the cursor position. `0`-`7` cycles foreground colour.
 - `hex` is read-only (scroll only).
 
 ## Build
 
 ```sh
-make            # 9.4 KB stripped, no libc
-cc office.c -o office_libc      # ~17 KB libc build (works too via the
+make            # 12.8 KB stripped, no libc
+cc office.c -o office_libc      # ~18 KB libc build (works too via the
                                 # int main() fallback)
 ```
 

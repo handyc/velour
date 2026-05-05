@@ -122,6 +122,8 @@ struct ti {
 };
 #define ICANON 0x002
 #define ECHO   0x008
+#define IXON   0x400         /* iflag: ^S/^Q flow-control intercept */
+#define ICRNL  0x100         /* iflag: CR→NL translation */
 #define TCGETS 0x5401
 #define TCSETS 0x5402
 
@@ -131,6 +133,7 @@ static void term_raw(void) {
     io(0, TCGETS, &term_orig);
     struct ti t = term_orig;
     t.lflag &= ~(ICANON | ECHO);
+    t.iflag &= ~(IXON | ICRNL); /* let Ctrl-S/Ctrl-Q + CR pass through */
     t.cc[6] = 1;        /* VMIN  */
     t.cc[5] = 2;        /* VTIME (200 ms) */
     io(0, TCSETS, &t);
@@ -230,14 +233,16 @@ static int   btop;     /* top-of-view byte offset */
 static char  fname[256];
 
 static int load_file(const char *path) {
+    /* Always remember the path so a subsequent save targets it,
+     * even if the file doesn't exist yet (new-file case). */
+    int i = 0;
+    while (i < (int)sizeof fname - 1 && path[i]) { fname[i] = path[i]; i++; }
+    fname[i] = 0;
     int fd = (int)op(path, O_RDONLY, 0);
     if (fd < 0) { blen = 0; return 0; }
     blen = (int)rd(fd, buf, BUF_CAP - 1);
     if (blen < 0) blen = 0;
     cl(fd);
-    int i = 0;
-    while (i < (int)sizeof fname - 1 && path[i]) { fname[i] = path[i]; i++; }
-    fname[i] = 0;
     return blen;
 }
 
@@ -361,48 +366,79 @@ static int run_shell(int argc, char **argv) {
 }
 
 
-/* ── notepad: line-oriented editor with arrow scrolling ─ */
-/* Find offset of byte at the start of the n-th visible line, given
- * btop is the offset of the first visible line. */
-static int line_start(int from, int up_or_down) {
-    /* up_or_down > 0 = move forward `up_or_down` lines; < 0 = back */
-    int o = from;
-    if (up_or_down >= 0) {
-        for (int i = 0; i < up_or_down && o < blen; ) {
-            if (buf[o++] == '\n') i++;
-        }
-    } else {
-        int back = -up_or_down;
-        if (o > 0) o--;
-        for (int i = 0; i < back && o > 0; ) {
-            o--;
-            if (buf[o] == '\n') i++;
-        }
-        if (o > 0 && buf[o] == '\n') o++;
-        if (o < 0) o = 0;
-    }
-    return o;
+/* ── notepad: cursor-driven edit ───────────────────────── */
+/* Helpers over `buf`/`blen` for line navigation. */
+static int line_start_at(int p) {
+    while (p > 0 && buf[p - 1] != '\n') p--;
+    return p;
 }
+static int line_start_after(int p) {
+    while (p < blen && buf[p] != '\n') p++;
+    if (p < blen) p++;
+    return p;
+}
+static int line_count_between(int a, int b) {
+    int n = 0;
+    if (a > b) { int t = a; a = b; b = t; }
+    for (int i = a; i < b; i++) if (buf[i] == '\n') n++;
+    return n;
+}
+
+static int col_of(int p) { return p - line_start_at(p); }
+
+static int move_up(int p) {
+    int ls = line_start_at(p);
+    if (ls == 0) return p;
+    int col = p - ls;
+    int prev_start = line_start_at(ls - 1);
+    int prev_end = ls - 1;
+    int prev_len = prev_end - prev_start;
+    if (col > prev_len) col = prev_len;
+    return prev_start + col;
+}
+static int move_down(int p) {
+    int next_start = line_start_after(p);
+    if (next_start > blen) return p;
+    int col = col_of(p);
+    int next_end = next_start;
+    while (next_end < blen && buf[next_end] != '\n') next_end++;
+    int next_len = next_end - next_start;
+    if (col > next_len) col = next_len;
+    return next_start + col;
+}
+
+/* Keep btop so that bcur is visible. */
+static void adjust_btop(int rows) {
+    if (bcur < btop) btop = line_start_at(bcur);
+    while (line_count_between(btop, bcur) >= rows && btop < blen) {
+        btop = line_start_after(btop);
+    }
+}
+
+static int cur_sx, cur_sy;
 
 static void notepad_draw(const char *title, int word_wrap) {
     paint_desktop();
     chrome(title);
     body_clear();
-    int y = 2, x = 2;
+    cur_sx = -1; cur_sy = -1;
+    sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+    int y = 2;
     int o = btop;
     int maxw = SCREEN_W - 4;
-    while (y < SCREEN_H - 1 && o < blen) {
-        cup(x, y);
-        int line_w = 0;
+    while (y < SCREEN_H - 1) {
+        cup(2, y);
+        int xil = 0;
+        if (o == bcur) { cur_sx = 2 + xil; cur_sy = y; }
         while (o < blen && buf[o] != '\n') {
-            if (line_w >= maxw) {
+            if (xil >= maxw) {
                 if (word_wrap) {
                     y++;
-                    if (y >= SCREEN_H - 1) break;
-                    cup(x, y);
-                    line_w = 0;
+                    if (y >= SCREEN_H - 1) goto rendered;
+                    cup(2, y);
+                    xil = 0;
+                    if (o == bcur) { cur_sx = 2 + xil; cur_sy = y; }
                 } else {
-                    /* skip the rest of this line */
                     while (o < blen && buf[o] != '\n') o++;
                     break;
                 }
@@ -411,41 +447,62 @@ static void notepad_draw(const char *title, int word_wrap) {
             if (c == '\t') c = ' ';
             if (c >= 32 && c < 127) fbw(&c, 1);
             else fbw(".", 1);
-            line_w++;
+            xil++;
             o++;
+            if (o == bcur && cur_sx < 0) { cur_sx = 2 + xil; cur_sy = y; }
         }
         if (o < blen && buf[o] == '\n') o++;
+        else if (o >= blen) { y++; break; }
         y++;
     }
-    char hint[80];
-    int hn = 0;
-    const char *h = "  arrows scroll | s save | q back to shell";
-    while (h[hn]) { hint[hn] = h[hn]; hn++; }
-    hint[hn] = 0;
-    status(hint);
+rendered:
+    if (cur_sx < 0) {
+        cur_sx = 2;
+        cur_sy = y < SCREEN_H - 1 ? y : SCREEN_H - 2;
+    }
+    if (cur_sy >= SCREEN_H - 1) cur_sy = SCREEN_H - 2;
+    status("  arrows | enter | bksp | ^S save | ^Q quit");
+    cup(cur_sx, cur_sy);
+    fbs(ESC "[?25h");
     fbflush();
 }
 
 static int notepad_loop(const char *title, int word_wrap) {
     term_raw();
-    btop = 0; bcur = 0;
+    bcur = 0; btop = 0;
     while (1) {
+        adjust_btop(SCREEN_H - 4);
         notepad_draw(title, word_wrap);
         unsigned char k[8];
         int n = read_key(k, sizeof k);
         if (n <= 0) continue;
-        if (k[0] == 'q') break;
-        if (k[0] == 's') save_file(fname);
+        if (k[0] == 0x11) break;                 /* Ctrl-Q */
+        if (k[0] == 0x13) { save_file(fname); continue; }    /* Ctrl-S */
+        if (k[0] == 0x7f || k[0] == 8) {
+            if (bcur > 0) { buf_erase(bcur - 1); bcur--; }
+            continue;
+        }
+        if (k[0] == '\r' || k[0] == '\n') {
+            buf_insert(bcur, '\n');
+            bcur++;
+            continue;
+        }
         if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
             switch (k[2]) {
-            case 'A': btop = line_start(btop, -1); break;
-            case 'B': btop = line_start(btop, +1); break;
-            case 'C': /* page right not impl */ break;
-            case 'D': /* page left  not impl */ break;
+            case 'A': bcur = move_up(bcur);     break;
+            case 'B': bcur = move_down(bcur);   break;
+            case 'C': if (bcur < blen) bcur++;  break;
+            case 'D': if (bcur > 0)    bcur--;  break;
             }
+            continue;
         }
-        if (k[0] == ' ') btop = line_start(btop, +(SCREEN_H - 4));
+        if (k[0] >= 32 && k[0] < 127) {
+            buf_insert(bcur, (char)k[0]);
+            bcur++;
+        }
     }
+    fbs(ESC "[?25l");
+    fbflush();
     return 0;
 }
 
