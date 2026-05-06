@@ -29,7 +29,7 @@ OFFICE_DIR = Path(settings.BASE_DIR) / "isolation" / "artifacts" / "office"
 VERSIONS = ["office", "office2", "office3", "office4",
             "office5", "office6", "office7", "office8", "office9",
             "office10", "office11", "office12", "office13", "office14",
-            "office15"]
+            "office15", "office16"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
