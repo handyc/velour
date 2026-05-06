@@ -41,7 +41,9 @@
 <div class="sim-list">
     {% for rs in rulesets %}
     <div class="sim-row" style="border-left-color:#6e40c9">
-        <span class="name">{{ rs.name }}</span>
+        <a class="name" href="{% url 'automaton:run_ruleset' rs.pk %}"
+           title="run this ruleset on a 32×32 random grid (reuses the latest existing simulation if one exists)"
+           style="text-decoration:none">{{ rs.name }}</a>
         <span style="color:#6e7681;font-size:0.7rem">({{ rs.n_colors }}c · {{ rs.rule_count|default_if_none:rs.rules.count }} rules)</span>
         <button class="btn btn-secondary"
                 onclick="document.getElementById('rs-rename-{{ rs.pk }}').style.display='flex';this.style.display='none'"

@@ -323,6 +323,28 @@ def rename_ruleset(request, pk):
     return redirect('automaton:home')
 
 
+@login_required
+def run_ruleset(request, pk):
+    """One-click run: jump straight to a simulation of this ruleset.
+    Reuses the most recently created sim that already uses this
+    ruleset; falls back to creating a fresh 32×32 random grid if no
+    simulation exists yet.  Lets the home-page list link directly to
+    a running canvas without forcing the user through the create form."""
+    rs = get_object_or_404(RuleSet, pk=pk)
+    sim = Simulation.objects.filter(ruleset=rs).first()  # ordering: -created_at
+    if sim is None:
+        palette = list(rs.palette) if rs.palette else list(DEFAULT_PALETTE)
+        nc = rs.n_colors
+        grid = [[random.randint(0, nc - 1) for _ in range(32)]
+                for _ in range(32)]
+        sim = Simulation.objects.create(
+            name=f'{rs.name} (32×32)', ruleset=rs,
+            width=32, height=32, palette=palette,
+            grid_state=grid, tick_count=0,
+        )
+    return redirect('automaton:run', slug=sim.slug)
+
+
 _HEX_COLOR_LEN = 7    # "#rrggbb"
 
 
