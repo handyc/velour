@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — planner{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; planner</h1>
+  {% with active='planner' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    Sketching pad for the next fork. Type one candidate per line as
+    <code>name = bytes</code>; the running total accumulates on top of
+    <code>{{ latest.name }}</code>'s
+    <strong>{{ latest.binary_size|intcomma }}</strong> B and shows
+    whether each step still fits under the 64 KB cap. Bytes accept
+    <code>1.5k</code>, <code>2048</code>, <code>1m</code>.
+  </p>
+
+  <div class="budgetline">
+    <span class="label">at {{ latest.name }}</span>
+    <span class="bar-track" style="width: 480px;">
+      <span class="bar" style="width: {{ budget_pct|floatformat:1 }}%;"></span>
+    </span>
+    <span class="value">{{ budget_pct|floatformat:1 }}%</span>
+    <span class="value">{{ budget_left|intcomma }} B left</span>
+  </div>
+
+  <form method="get" class="plannerform">
+    <textarea name="plan" rows="8" spellcheck="false"
+              placeholder="# one per line:
+spreadsheet-csv-export = 1.2k
+markdown-renderer = 800
+hex-search = 600">{{ plan_text }}</textarea>
+    <div class="row">
+      <button type="submit">plan</button>
+      <a href="{% url 'officelab:planner' %}" class="vlink" style="margin-left: 0.8rem;">reset</a>
+    </div>
+  </form>
+
+  {% if plan_errors %}
+  <ul class="plan-errors">
+    {% for e in plan_errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if plan_rows %}
+  <h2>Plan</h2>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">candidate</th>
+        <th>est bytes</th>
+        <th>running total</th>
+        <th>budget left</th>
+        <th class="l">% of cap</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in plan_rows %}
+      <tr>
+        <td class="l">{{ r.name }}</td>
+        <td>{{ r.bytes|intcomma }}</td>
+        <td>{{ r.running|intcomma }}</td>
+        <td class="{% if r.left < 0 %}delta-pos{% endif %}">{{ r.left|intcomma }}</td>
+        <td class="l" style="min-width: 280px;">
+          <span class="bar-track" style="width: 220px;">
+            <span class="bar {% if r.over %}over{% endif %}"
+                  style="width: {{ r.budget_pct|floatformat:1 }}%;"></span>
+          </span>
+          <span style="color:#8b949e; font-size:0.78rem; margin-left:0.4em;">
+            {{ r.budget_pct|floatformat:1 }}%{% if r.over %} · over{% endif %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+      <tr style="border-top: 2px solid #30363d;">
+        <td class="l"><strong>total added</strong></td>
+        <td><strong>{{ plan_total|intcomma }}</strong></td>
+        <td><strong class="{% if plan_over %}delta-pos{% else %}delta-neg{% endif %}">{{ plan_final|intcomma }}</strong></td>
+        <td colspan="2" class="l zero">
+          {% if plan_over %}
+            over budget by {{ plan_final|intcomma }} − 65,536 B
+          {% else %}
+            fits with {{ plan_final|intcomma }} ≤ 65,536 B
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Reference: existing features in {{ latest.name }}</h2>
+  <p class="hint">
+    Calibration data — what your existing features actually cost
+    today. Use these as ballpark estimates when sketching new ones
+    of similar complexity.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">feature</th>
+        <th>code+data</th>
+        <th>bss</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in ref_rows %}
+      <tr>
+        <td class="l">{{ r.name }}</td>
+        <td>{{ r.code|intcomma }}</td>
+        <td class="{% if r.bss == 0 %}zero{% endif %}">{{ r.bss|intcomma }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Reference: fork-delta when each feature first appeared</h2>
+  <p class="hint">
+    Noisy: a fork delta blends the new feature with whatever shared
+    infrastructure landed alongside it. Treat it as an upper bound on
+    the marginal cost of an analogous feature.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">feature</th>
+        <th class="l">introduced in</th>
+        <th>fork Δ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in first_seen %}
+      <tr>
+        <td class="l">{{ r.name }}</td>
+        <td class="l">{{ r.introduced }}</td>
+        <td>{% if r.fork_delta is None %}—{% else %}{% if r.fork_delta > 0 %}+{% endif %}{{ r.fork_delta|intcomma }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

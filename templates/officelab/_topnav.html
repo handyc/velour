@@ -3,6 +3,16 @@
      class="{% if active == 'index' %}on{% endif %}">overview</a>
   <a href="{% url 'officelab:budget' %}"
      class="{% if active == 'budget' %}on{% endif %}">budget</a>
+  <a href="{% url 'officelab:diff' %}"
+     class="{% if active == 'diff' %}on{% endif %}">diff</a>
+  <a href="{% url 'officelab:planner' %}"
+     class="{% if active == 'planner' %}on{% endif %}">planner</a>
+  <form method="post" action="{% url 'officelab:rebuild' %}" class="rebuild-form">
+    {% csrf_token %}
+    <button type="submit"
+            title="run `make all dbg` in isolation/artifacts/office/ and reload the analyser"
+            {% if active == 'rebuild' %}class="on"{% endif %}>rebuild</button>
+  </form>
   {% for v in all_versions %}
     <a href="{% url 'officelab:version' v %}"
        class="{% if active == v %}on{% endif %}">{{ v }}</a>

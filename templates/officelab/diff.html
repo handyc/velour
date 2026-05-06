@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — diff {{ va_a.name }} → {{ va_b.name }}{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; diff
+    <code>{{ va_a.name }}</code> &rarr; <code>{{ va_b.name }}</code></h1>
+  {% with active='diff' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <form method="get" class="difform">
+    <label>a
+      <select name="a">
+        {% for v in all_versions %}
+        <option value="{{ v }}" {% if v == va_a.name %}selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>b
+      <select name="b">
+        {% for v in all_versions %}
+        <option value="{{ v }}" {% if v == va_b.name %}selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">compare</button>
+  </form>
+
+  <p class="hint">
+    <code>{{ va_a.name }}</code> = <strong>{{ va_a.binary_size|intcomma }}</strong> B
+    ({{ budget_pct_a|floatformat:1 }}% of 64 KB)
+    &middot;
+    <code>{{ va_b.name }}</code> = <strong>{{ va_b.binary_size|intcomma }}</strong> B
+    ({{ budget_pct_b|floatformat:1 }}% of 64 KB)
+    &middot;
+    <strong class="{% if binary_delta > 0 %}delta-pos{% elif binary_delta < 0 %}delta-neg{% endif %}">
+      Δ {% if binary_delta > 0 %}+{% endif %}{{ binary_delta|intcomma }} B
+    </strong>
+  </p>
+
+  <h2>By feature</h2>
+  <p class="hint">
+    code+data totals per feature, sorted by |Δ| descending. Features
+    that exist in only one fork show an <em>added</em> / <em>removed</em>
+    label.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">feature</th>
+        <th>{{ va_a.name }}</th>
+        <th>{{ va_b.name }}</th>
+        <th>Δ bytes</th>
+        <th class="l">state</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in feat_rows %}
+      <tr>
+        <td class="l">{{ r.name }}</td>
+        <td class="{% if r.a == 0 %}zero{% endif %}">{{ r.a|intcomma }}</td>
+        <td class="{% if r.b == 0 %}zero{% endif %}">{{ r.b|intcomma }}</td>
+        <td class="{% if r.delta > 0 %}delta-pos{% elif r.delta < 0 %}delta-neg{% else %}zero{% endif %}">
+          {% if r.delta > 0 %}+{% endif %}{{ r.delta|intcomma }}
+        </td>
+        <td class="l zero">{{ r.state }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Symbol churn (top {{ sym_n }})</h2>
+  <p class="hint">
+    Per-symbol diff, sorted by |Δ| desc. Override the cutoff with
+    <code>?n=120</code>. Unchanged symbols are filtered out.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">symbol</th>
+        <th class="l">feature</th>
+        <th>section</th>
+        <th>{{ va_a.name }}</th>
+        <th>{{ va_b.name }}</th>
+        <th>Δ</th>
+        <th class="l">state</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sym_rows %}
+      <tr>
+        <td class="l"><code>{{ s.name }}</code></td>
+        <td class="l">{{ s.feature }}</td>
+        <td class="zero">{{ s.section }}</td>
+        <td class="{% if s.a == 0 %}zero{% endif %}">{{ s.a|intcomma }}</td>
+        <td class="{% if s.b == 0 %}zero{% endif %}">{{ s.b|intcomma }}</td>
+        <td class="{% if s.delta > 0 %}delta-pos{% elif s.delta < 0 %}delta-neg{% endif %}">
+          {% if s.delta > 0 %}+{% endif %}{{ s.delta|intcomma }}
+        </td>
+        <td class="l zero">{{ s.state }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

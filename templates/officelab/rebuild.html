@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}officelab — rebuild{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; rebuild</h1>
+  {% with active='rebuild' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    <code class="cmd">{{ cmd }}</code> in <code>{{ cwd }}</code>
+    &middot; finished in {{ elapsed|floatformat:2 }} s
+    &middot; rc =
+    <strong class="{% if ok %}delta-neg{% else %}delta-pos{% endif %}">{{ rc }}</strong>
+    {% if timed_out %} &middot; <strong class="delta-pos">timed out</strong>{% endif %}
+  </p>
+
+  {% if ok %}
+  <p class="hint">
+    Build succeeded.
+    <a class="vlink" href="{% url 'officelab:index' %}">Back to overview</a>
+    — analyser will re-read the new binaries on next render (cache
+    is mtime-keyed).
+  </p>
+  {% else %}
+  <p class="hint" style="color:#f85149;">
+    Build failed. Read the log below; fix the source under
+    <code>{{ cwd }}</code> and run <code class="cmd">{{ cmd }}</code>
+    again from the toolbar above.
+  </p>
+  {% endif %}
+
+  {% if stdout %}
+  <h2>stdout</h2>
+  <pre class="rebuild-log">{{ stdout }}</pre>
+  {% endif %}
+
+  {% if stderr %}
+  <h2>stderr</h2>
+  <pre class="rebuild-log err">{{ stderr }}</pre>
+  {% endif %}
+</div>
+{% endblock %}

@@ -103,6 +103,47 @@
     </tbody>
   </table>
 
+  <h2>Top {{ top_n }} symbols</h2>
+  <p class="hint">
+    Where the bytes go inside this fork — every named symbol with a
+    size, sorted descending. Bar width is share of the largest symbol
+    on this page so the long tail is still readable. Override the
+    cutoff with <code>?n=120</code>.
+  </p>
+  <table class="ol">
+    <thead>
+      <tr>
+        <th class="l">symbol</th>
+        <th class="l">feature</th>
+        <th>section</th>
+        <th>bytes</th>
+        <th>% of binary</th>
+        <th class="l">share of largest</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in top_syms %}
+      <tr>
+        <td class="l"><code>{{ s.name }}</code></td>
+        <td class="l">
+          {% if s.feature == 'uncategorized' %}
+            <strong style="color:#f0883e;">{{ s.feature }}</strong>
+          {% else %}{{ s.feature }}{% endif %}
+        </td>
+        <td class="zero">{{ s.section }}</td>
+        <td>{{ s.size|intcomma }}</td>
+        <td>{{ s.pct|floatformat:2 }}%</td>
+        <td class="l">
+          <span class="bar-track" style="width: 240px;">
+            <span class="bar{% if s.is_bss %} bss{% endif %}"
+                  style="width: {% widthratio s.size top_size_max 100 %}%;"></span>
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
   {% if va.uncategorized %}
   <h2>Uncategorized symbols ({{ va.uncategorized|length }})</h2>
   <p class="hint">
