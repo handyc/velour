@@ -30,7 +30,7 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office5", "office6", "office7", "office8", "office9",
             "office10", "office11", "office12", "office13", "office14",
             "office15", "office16", "office17", "office18", "office19",
-            "office20", "office21"]
+            "office20", "office21", "office22"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -85,7 +85,10 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
      ["run_hxhnt", "hx_", "HX_", "mF_hxhnt", "mE_hxhnt", "ms_hxhnt"],
      ["mdays", "u2", "atoi_"]),
 
-    # rpg — tiny tile explorer driven by the .hxseed ruleset (office20+).
+    # rpg — tile explorer driven by the .hxseed ruleset (office20+);
+    # office22+ adds entity layer (plants/buildings/animals/items),
+    # player stats (HP/MP/inventory), spells, and z-sorted occluding
+    # sprites that overdraw cells north of tall objects.
     ("rpg",
      ["run_rpg", "rpg_", "RPG_"],
      []),
