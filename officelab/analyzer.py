@@ -28,7 +28,8 @@ OFFICE_DIR = Path(settings.BASE_DIR) / "isolation" / "artifacts" / "office"
 # All known versions, in order.  `minimal` is the baseline.
 VERSIONS = ["office", "office2", "office3", "office4",
             "office5", "office6", "office7", "office8", "office9",
-            "office10", "office11", "office12", "office13", "office14"]
+            "office10", "office11", "office12", "office13", "office14",
+            "office15"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -73,7 +74,15 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     ("garden",
      ["run_garden", "garden_", "mF_garden", "mE_garden", "ms_garden"],
      ["g_pop", "g_marked", "g_generation", "g_rng_state", "g_genome",
-      "border_chars", "last_msg"]),
+      "border_chars", "last_msg", "hex_mode"]),
+
+    # hxhnt — class-4 hex-CA hunter, ported from
+    # isolation/artifacts/oneclick_class4/hunter.c into office15+.
+    # `u2` is the 2-digit zero-padder added alongside clock_render in
+    # office11; `atoi_` is hxhnt's own arg parser.
+    ("hxhnt",
+     ["run_hxhnt", "hx_", "HX_", "mF_hxhnt", "mE_hxhnt", "ms_hxhnt"],
+     ["mdays", "u2", "atoi_"]),
 
     ("notepad",
      ["run_notepad", "notepad_", "npad_"],
@@ -144,10 +153,11 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
 
     # chrome + the static `sp` space-filler buffer used by blanks() +
     # the office8 screen_w/screen_h runtime dimensions queried by term_init.
+    # office11 added g_tz_offset_sec for the home-screen clock's TZ.
     ("chrome",
      ["chrome", "paint_desktop", "body_clear", "body_at",
       "status", "blanks", "term_init"],
-     ["sp", "screen_w", "screen_h"]),
+     ["sp", "screen_w", "screen_h", "g_tz_offset_sec"]),
 
     ("term",
      ["term_raw", "term_cooked"],
