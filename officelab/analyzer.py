@@ -30,7 +30,7 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office5", "office6", "office7", "office8", "office9",
             "office10", "office11", "office12", "office13", "office14",
             "office15", "office16", "office17", "office18", "office19",
-            "office20"]
+            "office20", "office21"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -89,6 +89,13 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     ("rpg",
      ["run_rpg", "rpg_", "RPG_"],
      []),
+
+    # lsys — character-mode L-system viewer (office21+).  4 category
+    # interpretations of the same axiom+rule grammar.
+    ("lsys",
+     ["run_lsys", "lsys_", "LSYS_"],
+     ["g_lsys_min_x", "g_lsys_min_y", "g_lsys_max_x", "g_lsys_max_y",
+      "g_lsys_ox", "g_lsys_oy", "g_lsys_glyph", "g_lsys_col"]),
 
     # office19+ — generic splice export shared by hxhnt and garden.
     ("export",
