@@ -177,16 +177,16 @@ static long do_clone(unsigned long flags) {
 }
 
 
-/* ── seccomp BPF allowlist ────────────────────────────────────────
+/* ── seccomp BPF allowlists ───────────────────────────────────────
  *
- * The preview-genome path inside the jailed office7 only needs:
- *   write (frame buffer flush), read (one keystroke), exit_group.
- * The transition into office7 also needs execve — the seccomp filter
- * is installed *before* execve, so the execve syscall itself must be
- * allowed.  ioctl + rt_sigreturn are kept as defensive holes (no path
- * uses them today, but the cost is two BPF instructions and the
- * defence-in-depth narrative gets simpler if a stray TIOCGWINSZ
- * doesn't crater the preview).
+ * Two filters: a tight one for `preview-genome` (no file I/O, no
+ * fork) and a loose one that covers the full office9 suite (open,
+ * close, lseek, getdents64, time, fork, wait4) so V mode can
+ * actually use notepad / sheet / files / etc. inside the jail.
+ *
+ * The transition into office9 also needs execve — the filter is
+ * installed *before* execve, so the execve syscall itself must be
+ * allowed in both filters.
  *
  * Disallowed syscalls are answered with SECCOMP_RET_KILL_PROCESS so
  * a violation shows up as a clear SIGSYS rather than a quietly-failing
@@ -210,36 +210,61 @@ struct sock_fprog  { unsigned short len;  struct sock_filter *filter; };
 
 #define SYS_rt_sigreturn 15
 #define SYS_ioctl        16
+#define SYS_open          2
+#define SYS_close         3
+#define SYS_lseek         8
+#define SYS_fork         57
+#define SYS_wait4_v      61
+#define SYS_time        201
+#define SYS_getdents64  217
 
-static struct sock_filter seccomp_filter[] = {
-    /* [0] A = arch */
-    { BPF_LD_W_ABS,  0, 0, 4 },
-    /* [1] if arch == x86_64 → fall through; else jump 6 → [8] kill */
-    { BPF_JMP_JEQ_K, 0, 6, AUDIT_ARCH_X86_64 },
-    /* [2] A = nr */
-    { BPF_LD_W_ABS,  0, 0, 0 },
-    /* [3..7] allow if nr matches one of our six */
-    { BPF_JMP_JEQ_K, 5, 0, SYS_write        },     /* jt=5 → [9] allow */
-    { BPF_JMP_JEQ_K, 4, 0, SYS_read         },     /* jt=4 → [9] allow */
+/* Tight: preview-genome uses read/write/ioctl/exit_group only.
+ * execve + rt_sigreturn rounded out for the jail-→office handoff
+ * and any signal that arrives mid-render. */
+static struct sock_filter seccomp_preview[] = {
+    { BPF_LD_W_ABS,  0, 0, 4 },                            /* [0] A=arch */
+    { BPF_JMP_JEQ_K, 0, 6, AUDIT_ARCH_X86_64 },            /* [1] arch != x86_64 → kill */
+    { BPF_LD_W_ABS,  0, 0, 0 },                            /* [2] A=nr */
+    { BPF_JMP_JEQ_K, 5, 0, SYS_write        },             /* [3] → allow */
+    { BPF_JMP_JEQ_K, 4, 0, SYS_read         },
     { BPF_JMP_JEQ_K, 3, 0, SYS_ioctl        },
     { BPF_JMP_JEQ_K, 2, 0, SYS_rt_sigreturn },
     { BPF_JMP_JEQ_K, 1, 0, SYS_execve       },
-    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },     /* jt=0 → [9]; jf=1 → [10] */
-    /* [9] allow */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW },
-    /* [10] kill — also reached by the arch mismatch jump */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS },
+    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [8] jf=1 → kill */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [9] */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [10] */
 };
 
-static int install_seccomp(void) {
+/* Loose: union of every syscall office9's apps issue.  Order picks
+ * the most-frequent calls (read/write) first so the filter exits
+ * the chain quickly on the hot path. */
+static struct sock_filter seccomp_full[] = {
+    { BPF_LD_W_ABS,  0, 0, 4 },                            /* [0] arch */
+    { BPF_JMP_JEQ_K, 0,13, AUDIT_ARCH_X86_64 },            /* [1] arch != x86_64 → [15] kill */
+    { BPF_LD_W_ABS,  0, 0, 0 },                            /* [2] nr */
+    { BPF_JMP_JEQ_K,12, 0, SYS_write        },             /* [3] → allow [16] */
+    { BPF_JMP_JEQ_K,11, 0, SYS_read         },
+    { BPF_JMP_JEQ_K,10, 0, SYS_ioctl        },
+    { BPF_JMP_JEQ_K, 9, 0, SYS_open         },
+    { BPF_JMP_JEQ_K, 8, 0, SYS_close        },
+    { BPF_JMP_JEQ_K, 7, 0, SYS_lseek        },
+    { BPF_JMP_JEQ_K, 6, 0, SYS_getdents64   },
+    { BPF_JMP_JEQ_K, 5, 0, SYS_time         },
+    { BPF_JMP_JEQ_K, 4, 0, SYS_fork         },
+    { BPF_JMP_JEQ_K, 3, 0, SYS_execve       },
+    { BPF_JMP_JEQ_K, 2, 0, SYS_wait4_v      },
+    { BPF_JMP_JEQ_K, 1, 0, SYS_rt_sigreturn },
+    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [15] jf=1 → [17] kill */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [16] */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [17] */
+};
+
+static int install_seccomp(struct sock_filter *filter, unsigned short n) {
     /* Required for unprivileged seccomp install: ensures setuid
      * binaries can't gain privileges past the filter. */
     if (sys5(SYS_prctl, PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0)
         return -1;
-    struct sock_fprog prog = {
-        .len    = (unsigned short)(sizeof seccomp_filter / sizeof seccomp_filter[0]),
-        .filter = seccomp_filter,
-    };
+    struct sock_fprog prog = { .len = n, .filter = filter };
     if (sys5(SYS_prctl, PR_SET_SECCOMP, SECCOMP_MODE_FILTER,
              (long)&prog, 0, 0) < 0)
         return -1;
@@ -249,11 +274,26 @@ static int install_seccomp(void) {
 
 int main_c(int argc, char **argv, char **envp) {
     if (argc < 3) {
-        wr(2, "usage: jail OFFICE7_PATH GENOME_HEX\n", 36);
+        wr(2, "usage: jail OFFICE_PATH SUBCOMMAND [ARGS...]\n"
+              "       jail OFFICE_PATH HEX  (legacy: preview-genome)\n", 99);
         return 2;
     }
-    const char *src    = argv[1];
-    const char *genome = argv[2];
+    const char *src = argv[1];
+
+    /* Argv to feed the jailed office.  Legacy 3-arg form
+     * `jail PATH HEX` is rewritten to `jail PATH preview-genome HEX`
+     * so office7 keeps working unchanged. */
+    char *xargs[16];
+    int xn = 0;
+    xargs[xn++] = (char *)"office";
+    if (argc == 3) {
+        xargs[xn++] = (char *)"preview-genome";
+        xargs[xn++] = argv[2];
+    } else {
+        for (int i = 2; i < argc && xn < 15; i++)
+            xargs[xn++] = argv[i];
+    }
+    xargs[xn] = 0;
 
     /* Per-invocation jail dir under /tmp.  Parent's pid keeps it
      * unique enough; we unlink + rmdir on exit so collisions only
@@ -305,18 +345,21 @@ int main_c(int argc, char **argv, char **envp) {
         }
         sys1(SYS_chdir, (long)"/");
 
-        /* Last guardrail: lock the syscall surface to read/write/
-         * ioctl/exit_group/execve/rt_sigreturn before handing off
-         * to office7.  Failure here is non-fatal — the child still
-         * runs under namespace + chroot isolation, which is already
-         * a real jail; seccomp just narrows the kernel attack
-         * surface further on hosts that support it. */
-        install_seccomp();
+        /* Pick the right seccomp filter for this subcommand.  Tight
+         * for preview-genome (no file I/O); full for view-genome and
+         * anything else (suite needs open/close/lseek/getdents64/
+         * time/fork/wait4 to actually function).  Failure here is
+         * non-fatal — namespaces + chroot are already a real jail. */
+        int is_preview = xargs[1] && xargs[1][0] == 'p' &&
+                         xargs[1][1] == 'r';   /* preview-genome */
+        if (is_preview) {
+            install_seccomp(seccomp_preview,
+                            sizeof seccomp_preview / sizeof seccomp_preview[0]);
+        } else {
+            install_seccomp(seccomp_full,
+                            sizeof seccomp_full / sizeof seccomp_full[0]);
+        }
 
-        char *xargs[] = { (char *)"office7",
-                          (char *)"preview-genome",
-                          (char *)genome,
-                          0 };
         sys3(SYS_execve, (long)"/office7", (long)xargs, (long)envp);
         wr(2, "jail/child: execve failed\n", 26);
         sys3(SYS_exit_group, 127, 0, 0);
