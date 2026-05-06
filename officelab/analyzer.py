@@ -27,7 +27,7 @@ OFFICE_DIR = Path(settings.BASE_DIR) / "isolation" / "artifacts" / "office"
 
 # All known versions, in order.  `minimal` is the baseline.
 VERSIONS = ["office", "office2", "office3", "office4",
-            "office5", "office6", "office7"]
+            "office5", "office6", "office7", "office8"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -141,11 +141,12 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
       "mF_full", "mF_save", "mF_quit", "mE_full", "mH_about", "MA_"],
      ["names", "titles"]),
 
-    # chrome + the static `sp` space-filler buffer used by blanks().
+    # chrome + the static `sp` space-filler buffer used by blanks() +
+    # the office8 screen_w/screen_h runtime dimensions queried by term_init.
     ("chrome",
      ["chrome", "paint_desktop", "body_clear", "body_at",
-      "status", "blanks"],
-     ["sp"]),
+      "status", "blanks", "term_init"],
+     ["sp", "screen_w", "screen_h"]),
 
     ("term",
      ["term_raw", "term_cooked"],
