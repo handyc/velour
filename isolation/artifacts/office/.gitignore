@@ -6,6 +6,7 @@ office5
 office6
 office7
 minimal
+jail
 *.dbg
 office7.conf
 canvas.txt

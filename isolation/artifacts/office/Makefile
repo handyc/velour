@@ -18,8 +18,8 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
 VERSIONS = office office2 office3 office4 office5 office6 office7
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
-all: $(VERSIONS) minimal
-dbg: $(DBG)
+all: $(VERSIONS) minimal jail
+dbg: $(DBG) jail.dbg
 
 office: office.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
@@ -72,8 +72,19 @@ minimal: minimal.c
 minimal.dbg: minimal.c
 	$(CC) $(CFLAGS) $(DBGFLAGS) -o $@ $<
 
+# Namespace launcher used by office7's garden preview.  Sibling
+# binary, not part of the suite — kept out of the office.c → office7.c
+# fork lineage so the suite stays single-file.
+jail: jail.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "jail: $$(stat -c %s $@) bytes"
+jail.dbg: jail.c
+	$(CC) $(CFLAGS) $(DBGFLAGS) -o $@ $<
+
 clean:
 	rm -f office office2 office3 office4 office5 office6 office7 \
-	      minimal $(DBG) outbox.txt canvas.txt office7.conf garden.bin
+	      minimal jail $(DBG) jail.dbg \
+	      outbox.txt canvas.txt office7.conf garden.bin
 
 .PHONY: all dbg clean

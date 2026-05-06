@@ -3074,12 +3074,11 @@ static void garden_render_grid(int cursor, int cols, int rows) {
     }
 }
 
-/* Preview the cursor's genome by painting the suite chrome with
- * its colours and a sample body. Press any key to return. */
-static void garden_preview(int idx) {
-    struct Genome saved = g_genome;
-    g_genome = g_pop[idx];
-
+/* Render the preview screen using whatever's in g_genome and wait
+ * for one keystroke. Caller is responsible for genome bookkeeping;
+ * called both by the in-process fallback (garden_preview) and by
+ * the jailed child (run_preview_genome). */
+static void garden_preview_render(const char *footer) {
     paint_desktop();
     chrome("Preview");
     body_clear();
@@ -3103,12 +3102,82 @@ static void garden_preview(int idx) {
     sgrbgfg(COL_BAR_BG, COL_BAR_FG);
     fbs(" Edit  View  Help");
     blanks(SCREEN_W - 24);
-    status(" PREVIEW · any key returns ");
+    status(footer);
     fbflush();
     unsigned char k[8];
     read_key(k, sizeof k);
+}
 
+/* Encode a 16-byte genome into 32 lowercase hex chars + NUL. */
+static void garden_genome_hex(const struct Genome *g, char *out33) {
+    static const char garden_hx[] = "0123456789abcdef";
+    const unsigned char *b = (const unsigned char *)g;
+    for (int i = 0; i < (int)sizeof *g; i++) {
+        out33[i*2]     = garden_hx[(b[i] >> 4) & 0xf];
+        out33[i*2 + 1] = garden_hx[ b[i]       & 0xf];
+    }
+    out33[32] = 0;
+}
+
+/* Spawn the namespace jail launcher with the chosen genome.  The
+ * jail binary is expected sibling to office7 in cwd ("./jail").
+ * Returns 0 on a clean child exit, non-zero if exec failed (caller
+ * falls back to in-process preview). */
+static int garden_preview_jail(int idx) {
+    char hex[33];
+    garden_genome_hex(&g_pop[idx], hex);
+    char *jargv[] = { "./jail", "./office7", hex, 0 };
+    long pid = forkk();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        execvee("./jail", jargv, g_envp);
+        qu(127);
+    }
+    int st = 0;
+    wait4_(&st);
+    /* low byte of (st >> 8) holds the child's exit code if it exited
+     * normally; we don't peek further — any return path here means
+     * the parent regains the terminal. */
+    return (st & 0x7f) ? -1 : 0;
+}
+
+/* Preview the cursor's genome.  Tries the namespace jail first
+ * (real isolated child paints the screen); if that fails — jail
+ * binary missing, kernel without unprivileged user namespaces, etc.
+ * — falls back to the in-process g_genome swap so the feature still
+ * works on hardened hosts. */
+static void garden_preview(int idx) {
+    if (garden_preview_jail(idx) == 0) return;
+
+    struct Genome saved = g_genome;
+    g_genome = g_pop[idx];
+    garden_preview_render(" PREVIEW · any key returns ");
     g_genome = saved;
+}
+
+/* `office7 preview-genome <32-hex>` — the in-jail entry point.
+ * Parses 16 bytes into g_genome and renders the preview screen.
+ * The parent already put the tty in raw mode and we inherit its
+ * fd 0/1/2, so we don't touch tcsetattr; one read for any key,
+ * then exit (the parent regains the terminal automatically). */
+static int garden_hexv(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static int run_preview_genome(int argc, char **argv) {
+    if (argc < 2) return 2;
+    const char *h = argv[1];
+    unsigned char *g = (unsigned char *)&g_genome;
+    for (int i = 0; i < (int)sizeof g_genome; i++) {
+        int hi = garden_hexv(h[i*2]);
+        int lo = garden_hexv(h[i*2 + 1]);
+        if (hi < 0 || lo < 0) return 2;
+        g[i] = (unsigned char)((hi << 4) | lo);
+    }
+    garden_preview_render(" PREVIEW · jailed · any key returns ");
+    return 0;
 }
 
 static int run_garden(int argc, char **argv) {
@@ -3232,6 +3301,7 @@ int main_c(int argc, char **argv, char **envp) {
     if (scmp(cmd, "mines")   == 0) return run_mines  (sub_argc, sub_argv);
     if (scmp(cmd, "ask")     == 0) return run_ask    (sub_argc, sub_argv);
     if (scmp(cmd, "garden")  == 0) return run_garden (sub_argc, sub_argv);
+    if (scmp(cmd, "preview-genome") == 0) return run_preview_genome(sub_argc, sub_argv);
     return run_shell(sub_argc, sub_argv);
 }
 
