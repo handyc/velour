@@ -13,6 +13,7 @@
             title="run `make all dbg` in isolation/artifacts/office/ and reload the analyser"
             {% if active == 'rebuild' %}class="on"{% endif %}>rebuild</button>
   </form>
+  <span class="vsep"></span>
   {% for v in all_versions %}
     <a href="{% url 'officelab:version' v %}"
        class="{% if active == v %}on{% endif %}">{{ v }}</a>
