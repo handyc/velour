@@ -15,7 +15,7 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
             -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noseparate-code \
             -Wl,-z,common-page-size=512
 
-VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10
+VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
 all: $(VERSIONS) minimal jail
@@ -71,6 +71,11 @@ office10: office10.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "office10: $$(stat -c %s $@) bytes"
 
+office11: office11.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office11: $$(stat -c %s $@) bytes"
+
 # Unstripped twins for the officelab analyser.  Same source, same
 # CFLAGS, same LDFLAGS *minus* `-s` so nm can see every function.
 %.dbg: %.c
@@ -98,7 +103,7 @@ jail.dbg: jail.c
 	$(CC) $(CFLAGS) $(DBGFLAGS) -o $@ $<
 
 clean:
-	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 \
+	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 \
 	      minimal jail $(DBG) jail.dbg \
 	      outbox.txt canvas.txt office7.conf garden.bin
 

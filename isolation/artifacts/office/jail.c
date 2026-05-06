@@ -213,6 +213,7 @@ struct sock_fprog  { unsigned short len;  struct sock_filter *filter; };
 #define SYS_open          2
 #define SYS_close         3
 #define SYS_lseek         8
+#define SYS_getpid_v     39
 #define SYS_fork         57
 #define SYS_wait4_v      61
 #define SYS_time        201
@@ -235,28 +236,30 @@ static struct sock_filter seccomp_preview[] = {
     { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [10] */
 };
 
-/* Loose: union of every syscall office9's apps issue.  Order picks
- * the most-frequent calls (read/write) first so the filter exits
- * the chain quickly on the hot path. */
+/* Loose: union of every syscall office9..office11's apps issue.
+ * office11 added getpid for the home-screen instance ID.  Order
+ * picks the most-frequent calls (read/write) first so the filter
+ * exits the chain quickly on the hot path. */
 static struct sock_filter seccomp_full[] = {
     { BPF_LD_W_ABS,  0, 0, 4 },                            /* [0] arch */
-    { BPF_JMP_JEQ_K, 0,13, AUDIT_ARCH_X86_64 },            /* [1] arch != x86_64 → [15] kill */
+    { BPF_JMP_JEQ_K, 0,14, AUDIT_ARCH_X86_64 },            /* [1] arch != x86_64 → [16] (jeq exit_group), then [18] kill */
     { BPF_LD_W_ABS,  0, 0, 0 },                            /* [2] nr */
-    { BPF_JMP_JEQ_K,12, 0, SYS_write        },             /* [3] → allow [16] */
-    { BPF_JMP_JEQ_K,11, 0, SYS_read         },
-    { BPF_JMP_JEQ_K,10, 0, SYS_ioctl        },
-    { BPF_JMP_JEQ_K, 9, 0, SYS_open         },
-    { BPF_JMP_JEQ_K, 8, 0, SYS_close        },
-    { BPF_JMP_JEQ_K, 7, 0, SYS_lseek        },
-    { BPF_JMP_JEQ_K, 6, 0, SYS_getdents64   },
-    { BPF_JMP_JEQ_K, 5, 0, SYS_time         },
+    { BPF_JMP_JEQ_K,13, 0, SYS_write        },             /* [3] → allow [17] */
+    { BPF_JMP_JEQ_K,12, 0, SYS_read         },
+    { BPF_JMP_JEQ_K,11, 0, SYS_ioctl        },
+    { BPF_JMP_JEQ_K,10, 0, SYS_open         },
+    { BPF_JMP_JEQ_K, 9, 0, SYS_close        },
+    { BPF_JMP_JEQ_K, 8, 0, SYS_lseek        },
+    { BPF_JMP_JEQ_K, 7, 0, SYS_getdents64   },
+    { BPF_JMP_JEQ_K, 6, 0, SYS_time         },
+    { BPF_JMP_JEQ_K, 5, 0, SYS_getpid_v     },
     { BPF_JMP_JEQ_K, 4, 0, SYS_fork         },
     { BPF_JMP_JEQ_K, 3, 0, SYS_execve       },
     { BPF_JMP_JEQ_K, 2, 0, SYS_wait4_v      },
     { BPF_JMP_JEQ_K, 1, 0, SYS_rt_sigreturn },
-    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [15] jf=1 → [17] kill */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [16] */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [17] */
+    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [16] jf=1 → [18] kill */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [17] */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [18] */
 };
 
 static int install_seccomp(struct sock_filter *filter, unsigned short n) {
