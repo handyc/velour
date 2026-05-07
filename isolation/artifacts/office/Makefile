@@ -15,7 +15,7 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
             -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noseparate-code \
             -Wl,-z,common-page-size=512
 
-VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49
+VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
 all: $(VERSIONS) minimal jail
@@ -270,6 +270,11 @@ office49: office49.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "office49: $$(stat -c %s $@) bytes"
 
+office50: office50.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office50: $$(stat -c %s $@) bytes"
+
 # Unstripped twins for the officelab analyser.  Same source, same
 # CFLAGS, same LDFLAGS *minus* `-s` so nm can see every function.
 %.dbg: %.c
@@ -297,7 +302,7 @@ jail.dbg: jail.c
 	$(CC) $(CFLAGS) $(DBGFLAGS) -o $@ $<
 
 clean:
-	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 \
+	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 \
 	      minimal jail $(DBG) jail.dbg \
 	      outbox.txt canvas.txt office*.conf garden.bin hxhnt.seed hxhnt_winner_*.seed hxh-*
 
