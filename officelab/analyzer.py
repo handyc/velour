@@ -75,8 +75,13 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
      # req.5, resp.11, auth.4, content.10, etc.  `tmp` is only used
      # as a static array in ask_load_conf / ask_save_conf, so it's
      # safe to attribute to ask across the suite.
+     # office46+ added the multi-provider grabber: openai_tags,
+     # anthropic_tags, gemini_tags are static const tag arrays in
+     # the README parser, and proxy_url is the pekpik endpoint
+     # forced after a successful grab.
      ["req", "resp", "auth", "content", "emsg", "errmsg", "input",
-      "labels", "needle", "tmp"]),
+      "labels", "needle", "tmp",
+      "openai_tags", "anthropic_tags", "gemini_tags", "proxy_url"]),
 
     ("garden",
      ["run_garden", "garden_", "mF_garden", "mE_garden", "ms_garden"],
@@ -98,8 +103,12 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # adds the meta-overworld stack; office40 adds wander paths;
     # office41 the seamless 3×3 mosaic.
     ("rpg",
-     ["run_rpg", "rpg_", "RPG_"],
-     []),
+     ["run_rpg", "rpg_", "RPG_", "xterm256_to_rgb", "xterm_"],
+     # function-local statics inside rpg_*: `moved` is the
+     # 192×192 entity-step bitmap; `anchor` and `band_y` are
+     # palette tables; `dirs` is the hex-direction key map;
+     # `DX`/`DY` are sprite-walk direction tables.
+     ["moved", "anchor", "band_y", "dirs", "DX", "DY"]),
 
     # bytebeat — tiny PCM synth with curl→aplay/paplay/ffplay
     # playback (office39+).  bb_eval / bb_render_and_play and the
@@ -200,7 +209,7 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # office11 added g_tz_offset_sec for the home-screen clock's TZ.
     ("chrome",
      ["chrome", "paint_desktop", "body_clear", "body_at",
-      "status", "blanks", "term_init"],
+      "status", "blanks", "term_init", "unix_to_calendar"],
      ["sp", "screen_w", "screen_h", "g_tz_offset_sec"]),
 
     ("term",
@@ -209,7 +218,7 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
 
     ("framebuffer",
      ["fb", "cls", "cup", "sgr"],
-     []),
+     ["g_last_bg", "g_last_fg"]),
 
     ("libc_replacements",
      [],

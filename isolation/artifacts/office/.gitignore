@@ -54,7 +54,8 @@ hxh-*
 minimal
 jail
 *.dbg
-office7.conf
+office*.conf
+.test-build*.c
 canvas.txt
 outbox.txt
 garden.bin

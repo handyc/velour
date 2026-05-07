@@ -37,12 +37,12 @@
 
 /* ── config ─────────────────────────────────────────────────
  * Each world cell is a 64×64 hex CA — same as office50 rpg —
- * but in this hi-res port we render the inner CA at FULL
- * resolution (one screen pixel per CA cell, no down-sampling).
- * The visible window scales to fill the browser, so a typical
- * 1920×1080 screen shows roughly 30×16 tiles. */
-const INNER = 64;                 // CA grid side
-const TILE_PX = INNER;            // one screen px per CA cell
+ * computed at full resolution, then scale-blitted onto the
+ * canvas at a quarter of its on-screen footprint (1/4 area =
+ * half linear).  The CA still ticks at 64×64 so the simulation
+ * fidelity is preserved; the display is downsampled. */
+const INNER = 64;                 // CA grid side (computation)
+const TILE_PX = 32;               // on-screen tile size (1/4 of 64×64)
 const HEX_OFFSET = TILE_PX / 2;   // odd rows shift half a tile east
 const GEN_STEPS = 5;
 const INNER_STEPS = 2;            // inner-CA tick count for cell texture
@@ -110,7 +110,7 @@ let MAP_W = 0, MAP_H = 0;
 let map = null;
 let palette = [...PALETTE_ANCHOR];
 
-const cellTexCache = new Map();   // key = wy*MAP_W+wx → ImageData(64×64)
+const cellTexCache = new Map();   // key = wy*MAP_W+wx → 64×64 offscreen canvas
 
 function regenWorld() {
   const rng = mulberry32(worldSeed);
@@ -152,13 +152,15 @@ function buildMap() {
   cellTexCache.clear();
 }
 
-/* Build a 64×64 ImageData for one cell: inner CA from the cell hash,
- * stepped INNER_STEPS times under the world ruleset, painted with the
- * cell's per-cell jittered 4-colour palette. */
+/* Build a 64×64 offscreen canvas for one cell: inner CA from the cell
+ * hash, stepped INNER_STEPS times under the world ruleset, painted
+ * with the cell's per-cell jittered 4-colour palette.  We cache a
+ * canvas (not raw ImageData) because the main render scales each tile
+ * down to TILE_PX and putImageData doesn't honour transforms. */
 function getCellTexture(wx, wy) {
   const key = wy * MAP_W + wx;
-  let img = cellTexCache.get(key);
-  if (img) return img;
+  let off = cellTexCache.get(key);
+  if (off) return off;
 
   /* Inner CA seed — same recipe as office50 rpg_compute_cell. */
   const rng = mulberry32(hash3(wx, wy, worldSeed));
@@ -186,8 +188,8 @@ function getCellTexture(wx, wy) {
     ];
   }
 
-  /* Paint the 64×64 RGBA buffer.  One CA cell = one screen pixel. */
-  img = ctx.createImageData(INNER, INNER);
+  /* Paint the 64×64 RGBA buffer at full resolution. */
+  const img = ctx.createImageData(INNER, INNER);
   const data = img.data;
   for (let i = 0, p = 0; i < INNER * INNER; i++, p += 4) {
     const c = inner[i] & 3;
@@ -196,8 +198,12 @@ function getCellTexture(wx, wy) {
     data[p + 2] = pal[c][2];
     data[p + 3] = 255;
   }
-  cellTexCache.set(key, img);
-  return img;
+  off = document.createElement("canvas");
+  off.width = INNER;
+  off.height = INNER;
+  off.getContext("2d").putImageData(img, 0, 0);
+  cellTexCache.set(key, off);
+  return off;
 }
 
 /* ── canvas + viewport ──────────────────────────────────── */
@@ -244,20 +250,20 @@ function render() {
                - ((py & 1) ? HEX_OFFSET : 0);
       const ty = cy + dy * TILE_PX           - TILE_PX / 2;
       if (tx + TILE_PX < 0 || tx > W || ty + TILE_PX < 0 || ty > H) continue;
-      const img = getCellTexture(wx, wy);
-      ctx.putImageData(img, tx, ty);
+      const off = getCellTexture(wx, wy);
+      ctx.drawImage(off, tx, ty, TILE_PX, TILE_PX);
     }
   }
 
-  /* Player sprite — 1 cell wide × 2 chars tall in the C version,
-   * here translated as a slim head-over-body block centred in the
-   * player's tile. */
-  const headW = 12, headH = 18;
-  const bodyW = 16, bodyH = 22;
+  /* Player sprite — slim head-over-body block, centred in the
+   * player's tile.  Sized to ~half a tile so it stays readable
+   * at the smaller display footprint. */
+  const headW = 6,  headH = 9;
+  const bodyW = 8,  bodyH = 11;
   ctx.fillStyle = "#ffe300";
-  ctx.fillRect((cx - headW / 2) | 0, (cy - 22) | 0, headW, headH);
+  ctx.fillRect((cx - headW / 2) | 0, (cy - 11) | 0, headW, headH);
   ctx.fillStyle = "#ff3ad0";
-  ctx.fillRect((cx - bodyW / 2) | 0, cy - 4, bodyW, bodyH);
+  ctx.fillRect((cx - bodyW / 2) | 0, cy - 2, bodyW, bodyH);
 
   status.textContent =
     `pos (${px},${py})   terrain ${["rock","sand","soil","water"][map[py*MAP_W+px]&3]}` +
