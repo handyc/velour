@@ -365,7 +365,6 @@ function getCellTexture(wx, wy) {
   let sx = (wx / MAP_W) | 0; if (sx < 0) sx = 0; else if (sx > 2) sx = 2;
   let sy = (wy / MAP_H) | 0; if (sy < 0) sy = 0; else if (sy > 2) sy = 2;
   const subPal = palettes[sy * 3 + sx];
-  const terrain = mapArr[wy * TILE_W + wx] & 3;
   const [br, bg, bb] = subPal[terrain];
   const pSt = newState(key ^ 0xdeadbeef);
   const pal = new Array(4);
