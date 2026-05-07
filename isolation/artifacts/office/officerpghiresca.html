@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>office rpg — hi-res · genome workshop · CA blocks</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000;
+               color: #ccc; font-family: ui-monospace, "SF Mono", Menlo,
+               Consolas, monospace; overflow: hidden; user-select: none; }
+  #screen   { display: block; image-rendering: pixelated;
+              image-rendering: crisp-edges; position: absolute;
+              left: 0; top: 0; }
+  #hud      { position: absolute; left: 12px; bottom: 10px;
+              font-size: 0.78rem; line-height: 1.5; color: #aaa;
+              background: rgba(0, 0, 0, 0.55); padding: 6px 10px;
+              border: 1px solid #333; border-radius: 4px;
+              pointer-events: none; max-width: 50%; }
+  #hud kbd  { background: #1a1a1a; border: 1px solid #444;
+              border-bottom-width: 2px; padding: 0 4px;
+              border-radius: 3px; color: #ccc; font-size: 0.72rem; }
+  #stats    { color: #cdc; }
+  #stats .lo { color: #f88; }
+  #action   { color: #5a5; min-height: 1.2em; }
+  #title    { position: absolute; top: 8px; right: 12px;
+              font-size: 0.72rem; color: #555; background: rgba(0,0,0,.4);
+              padding: 4px 8px; border-radius: 3px; pointer-events: none; }
+  .modal    { position: absolute; left: 50%; top: 50%;
+              transform: translate(-50%, -50%);
+              background: rgba(0, 0, 0, 0.92); border: 1px solid #555;
+              padding: 18px 26px; min-width: 280px; color: #ddd;
+              font-size: 0.9rem; line-height: 1.6; border-radius: 6px;
+              box-shadow: 0 0 28px rgba(0,0,0,.8); }
+  .modal h2 { margin: 0 0 10px 0; font-size: 1rem; color: #fff;
+              border-bottom: 1px solid #444; padding-bottom: 6px; }
+  .modal .row { display: flex; justify-content: space-between; gap: 16px; }
+  .modal .sel { color: #fc6; }
+  .modal .dim { color: #666; }
+  .modal .hint { margin-top: 12px; font-size: 0.78rem; color: #888;
+                 border-top: 1px solid #333; padding-top: 8px; }
+  #death h2 { color: #f55; }
+  [hidden]  { display: none !important; }
+
+  /* Genome workshop modal — large, multi-column. */
+  #gaModal { max-width: none; padding: 16px 22px; }
+  #gaModal h2 { margin: 0 0 12px 0; }
+  .ga-workshop { display: flex; gap: 22px; align-items: flex-start; }
+  .ga-workshop .ga-col { display: flex; flex-direction: column; gap: 8px; }
+  .ga-workshop h3 { margin: 0 0 4px 0; font-size: 0.78rem; color: #aac;
+                    font-weight: normal; text-transform: uppercase;
+                    letter-spacing: 0.06em; }
+  .ga-workshop canvas { border: 1px solid #444; image-rendering: pixelated;
+                        background: #111; }
+  .ga-workshop canvas#ruleGrid { cursor: crosshair; }
+  .ga-workshop button { background: #222; color: #ddd; border: 1px solid #444;
+                        padding: 5px 12px; font: inherit; cursor: pointer;
+                        border-radius: 3px; font-size: 0.82rem; }
+  .ga-workshop button:hover { background: #333; }
+  .ga-workshop button.primary { background: #2a4a2a; color: #afa;
+                                 border-color: #4a6a4a; font-weight: bold; }
+  .ga-workshop button.primary:hover { background: #3a5a3a; }
+  .ga-workshop input[type=number] { background: #111; color: #ddd;
+                                     border: 1px solid #444; padding: 3px 6px;
+                                     border-radius: 3px; font: inherit;
+                                     width: 56px; }
+  .ga-workshop .key { background: #1a1a1a; border: 1px solid #444;
+                       padding: 0 5px; border-radius: 2px; color: #888;
+                       font-size: 0.7rem; }
+  .ga-workshop .legend { font-size: 0.72rem; color: #888; }
+  .ga-workshop .legend span.swatch { display: inline-block; width: 12px;
+                       height: 12px; vertical-align: middle;
+                       border: 1px solid #555; margin: 0 2px 0 8px; }
+  #gaStats { font-size: 0.82rem; color: #aac; min-height: 1.3em; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<div id="title">office rpg · hi-res</div>
+<div id="hud">
+  <div id="stats"></div>
+  <div id="action"></div>
+  <div id="hint">
+    <kbd>w</kbd><kbd>e</kbd> NW/NE · <kbd>a</kbd><kbd>d</kbd> W/E ·
+    <kbd>z</kbd><kbd>x</kbd> SW/SE ·
+    <kbd>i</kbd> inv · <kbd>m</kbd> zap · <kbd>l</kbd> live ·
+    <kbd>k</kbd> speeds · <kbd>0</kbd>-<kbd>3</kbd> bend ·
+    <kbd>4</kbd>-<kbd>7</kbd> recolour · <kbd>g</kbd> genome ·
+    <kbd>r</kbd> reseed
+  </div>
+</div>
+<div id="invModal" class="modal" hidden>
+  <h2>Inventory</h2>
+  <div id="invList"></div>
+  <div class="hint">any key to close</div>
+</div>
+<div id="speedModal" class="modal" hidden>
+  <h2>Animation speed (frames per minute)</h2>
+  <div id="speedList"></div>
+  <div class="hint">↑/↓ select · space toggle · +/− nudge · 0 reset · q close</div>
+</div>
+<div id="death" class="modal" hidden>
+  <h2>You died</h2>
+  <div>Press any key to start a new game.</div>
+</div>
+
+<div id="gaModal" class="modal" hidden>
+  <h2>Genome workshop — refine the 16384 hex CA rules</h2>
+  <div class="ga-workshop">
+    <div class="ga-col">
+      <h3>Rule grid · 128 × 128</h3>
+      <canvas id="ruleGrid" width="512" height="512"></canvas>
+      <div class="legend">
+        click a cell to cycle the output 0→1→2→3
+        <br>
+        <span class="swatch" style="background:#1e1e28"></span>0
+        <span class="swatch" style="background:rgb(60,100,200)"></span>1
+        <span class="swatch" style="background:rgb(60,200,100)"></span>2
+        <span class="swatch" style="background:rgb(240,140,60)"></span>3
+      </div>
+    </div>
+    <div class="ga-col">
+      <h3>Live preview · 32 × 32</h3>
+      <canvas id="prevCanvas" width="256" height="256"></canvas>
+      <button id="prevReseed">Reseed preview</button>
+    </div>
+    <div class="ga-col" style="flex: 1 1 auto; min-width: 220px;">
+      <h3>Genetic algorithm</h3>
+      <div>
+        Gens: <input type="number" id="gaGens" value="20" min="1" max="200">
+        <button id="gaRunBtn">Run GA</button>
+        <button id="gaStopBtn">Stop</button>
+      </div>
+      <div id="gaStats">Idle</div>
+
+      <h3 style="margin-top:18px;">Genome actions</h3>
+      <button id="gaRandomBtn">Reset to random</button>
+      <button id="gaCurrentBtn">Reset to game's current</button>
+
+      <h3 style="margin-top:18px;">Apply</h3>
+      <button id="gaApplyBtn" class="primary">Apply to game</button>
+      <button id="gaCloseBtn">Close (esc)</button>
+
+      <div class="legend" style="margin-top:14px;">
+        Open from the game with <span class="key">g</span>. The
+        workshop edits a private copy of the ruleset; nothing changes
+        in the game until you press <em>Apply</em>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ──────────────────────────────────────────────────────────────
+ * office rpg, hi-res JS port — all features of office53.c packed
+ * into a single self-contained HTML.  Faithful subsystems:
+ *   • hex CA terrain (4-state, 16384-entry ruleset, GEN_STEPS=5)
+ *   • per-sub-overworld palette (4 jittered anchors per panel)
+ *   • per-cell inner CA texture (64×64, INNER_STEPS=2), world-stable
+ *     hashed so cells don't shimmer when the mosaic shifts (office51)
+ *   • 4 entity categories × 64 variants, sprites built on demand from
+ *     a per-category L-system axiom+rule library, raster→3-col×N-row
+ *     downsample, 4-colour palette blended from a hash of the rule
+ *     string and the category base RGB
+ *   • terrain-biased entity placement + 1/32 NPC chance on grass/soil
+ *   • closed-loop wander paths (a/b/c hex-direction pairs + Fisher-
+ *     Yates shuffle) for animals + NPCs, ticked once per player move
+ *   • player stats (HP/MP/inv) + bumping (pickup / animal melee /
+ *     blocking / NPC greet) + zap spell
+ *   • 3×3 mosaic of 64×64 panels with WORLD_LEVELS=63 carry-up coord
+ *     stack — walk indefinitely without ever seeing an edge
+ *   • silent terrain GA on 0/1/2/3 (office53): pop=20, fitness =
+ *     late-stage activity, winner replaces ruleset; cell cache
+ *     invalidated, world repopulates with evolved CA on next render
+ *   • category bend on 4/5/6/7: cat_bend[] salt → sprite recolour
+ *   • live inner-CA animation toggle (l) + per-terrain fpm (k)
+ *   • inventory (i), death + new-game restart
+ *
+ * No external dependencies, no Django, no build step.  Drop into a
+ * browser and play.
+ * ────────────────────────────────────────────────────────────── */
+
+/* ── Constants ─────────────────────────────────────────────── */
+const MAP_W = 64, MAP_H = 64;             /* one panel */
+const TILE_W = 3 * MAP_W, TILE_H = 3 * MAP_H;   /* 192×192 mosaic */
+const TILE_PX = 32;                       /* on-screen tile size */
+const HEX_OFFSET = TILE_PX / 2;           /* odd rows shift +half-tile */
+const GEN_STEPS = 5;                      /* terrain CA ticks */
+const INNER_STEPS = 2;                    /* per-cell inner CA ticks */
+const WORLD_LEVELS = 63;                  /* meta-overworld depth */
+const RULESET_BYTES = 16384;              /* self*4096 + 6 neighbours */
+const PATH_MAX = 64;
+const CAT_VARIANTS = 64;
+const ANIM_FRAMES_PER_MIN = 600;
+const SPRITE_W = 3;
+const SPRITE_H_MAX = 5;
+
+/* ── DOM ────────────────────────────────────────────────────── */
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+const statsEl  = document.getElementById("stats");
+const actionEl = document.getElementById("action");
+const invModal = document.getElementById("invModal");
+const invList  = document.getElementById("invList");
+const spdModal = document.getElementById("speedModal");
+const spdList  = document.getElementById("speedList");
+const deathEl  = document.getElementById("death");
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", () => { resize(); needsRender = true; });
+
+/* ── PRNG ─────────────────────────────────────────────────── */
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function mulberryInt(state) {
+  /* Same as mulberry32 but advances a {s} container in-place and
+   * returns a uint32 rather than a [0,1) float, for the C-style
+   * (rng & 3) etc.  */
+  state.s = (state.s + 0x6d2b79f5) | 0;
+  let t = state.s;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0);
+}
+function newState(seed) { return { s: seed >>> 0 }; }
+
+/* SplitMix-style 32-bit hash of (a, b, c) → uint32 seed.  Stable
+ * across runs so the same world coords always rehydrate the same
+ * world. */
+function hash3(a, b, c) {
+  let h = ((a | 0) * 0x9e3779b9) ^ ((b | 0) * 0x85ebca6b) ^
+          ((c | 0) * 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/* FNV-1a string hash (for L-system rule strings → palette salt). */
+function strHash(h, s) {
+  for (let i = 0; i < s.length; i++) {
+    h = ((h ^ s.charCodeAt(i)) >>> 0);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/* ── Hex CA stepping ────────────────────────────────────── */
+const HX_DY  = [-1, -1,  0,  0,  1,  1];
+const HX_DXE = [ 0,  1, -1,  1,  0,  1];
+const HX_DXO = [-1,  0, -1,  1, -1,  0];
+
+function sitIdx(self, n) {
+  let idx = self;
+  for (let k = 0; k < 6; k++) idx = idx * 4 + (n[k] & 3);
+  return idx;
+}
+function hexStep(g, inGrid, outGrid, w, h) {
+  const n = [0, 0, 0, 0, 0, 0];
+  for (let y = 0; y < h; y++) {
+    const dx = (y & 1) ? HX_DXO : HX_DXE;
+    for (let x = 0; x < w; x++) {
+      const self = inGrid[y * w + x];
+      for (let k = 0; k < 6; k++) {
+        const yy = y + HX_DY[k];
+        const xx = x + dx[k];
+        n[k] = (yy >= 0 && yy < h && xx >= 0 && xx < w)
+             ? inGrid[yy * w + xx] : 0;
+      }
+      outGrid[y * w + x] = g[sitIdx(self, n)];
+    }
+  }
+}
+
+/* ── Terrain anchors + xterm-256 NPC palette ──────────────── */
+const TERRAIN_ANCHOR = [
+  [ 90,  90,  92],   /* rock  — neutral grey */
+  [220, 200, 140],   /* sand  — warm tan */
+  [ 90, 130,  60],   /* soil  — moss green */
+  [ 30,  80, 180],   /* water — deep blue */
+];
+/* The 16 NPC palette entries — same xterm-256 codes as office53,
+ * resolved here directly to RGB so we don't ship the whole 256-cube. */
+const NPC_PAL_RGB = [
+  [255,   0,   0],  /* 196  red       */
+  [255, 135,   0],  /* 202  orange    */
+  [255, 215,   0],  /* 220  yellow-or */
+  [255, 255,   0],  /* 226  yellow    */
+  [175, 255,   0],  /* 154  lime      */
+  [135, 255,   0],  /* 118  green     */
+  [  0, 255, 255],  /* 51   cyan      */
+  [  0, 175, 255],  /* 39   l.blue    */
+  [  0, 135, 255],  /* 33   blue      */
+  [135, 135, 255],  /* 93   purple    */
+  [255,   0, 255],  /* 201  magenta   */
+  [255,   0, 175],  /* 198  pink      */
+  [218, 218, 218],  /* 252  l.gray    */
+  [188, 188, 188],  /* 245  gray      */
+  [ 88,  88,  88],  /* 240  d.gray    */
+  [  8,   8,   8],  /* 232  d.dark    */
+];
+function rgbStr(r, g, b) {
+  return "rgb(" + (r|0) + "," + (g|0) + "," + (b|0) + ")";
+}
+function clamp255(v) { return v < 0 ? 0 : (v > 255 ? 255 : v|0); }
+
+/* ── World coord stack ─────────────────────────────────────── */
+const worldPos = new Int32Array(WORLD_LEVELS * 2);
+function worldAdvance(dx, dy) {
+  let cx = dx, cy = dy;
+  for (let level = 0; level < WORLD_LEVELS && (cx || cy); level++) {
+    worldPos[level * 2    ] += cx;
+    worldPos[level * 2 + 1] += cy;
+    cx = 0; cy = 0;
+    if (worldPos[level * 2    ] <  0) { worldPos[level * 2    ] += 64; cx = -1; }
+    if (worldPos[level * 2    ] >= 64){ worldPos[level * 2    ] -= 64; cx = +1; }
+    if (worldPos[level * 2 + 1] <  0) { worldPos[level * 2 + 1] += 64; cy = -1; }
+    if (worldPos[level * 2 + 1] >= 64){ worldPos[level * 2 + 1] -= 64; cy = +1; }
+  }
+}
+function currentWorldSeed() {
+  let h = 0x811c9dc5 >>> 0;     /* FNV-1a 32-bit offset basis */
+  for (let i = 0; i < WORLD_LEVELS; i++) {
+    h = (h ^ (worldPos[i * 2    ] | 0)) >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;
+    h = (h ^ (worldPos[i * 2 + 1] | 0)) >>> 0;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h | 1;
+}
+function neighborSeed(dx, dy) {
+  const snap = new Int32Array(worldPos);
+  worldAdvance(dx, dy);
+  const s = currentWorldSeed();
+  worldPos.set(snap);
+  return s;
+}
+
+/* ── Mosaic state ───────────────────────────────────────────── */
+const mapArr     = new Uint8Array(TILE_W * TILE_H);
+const catAt      = new Uint8Array(TILE_W * TILE_H);  /* 0=none, 1..4 */
+const idxAt      = new Uint8Array(TILE_W * TILE_H);  /* variant 0..63 */
+const hpAt       = new Uint8Array(TILE_W * TILE_H);  /* animal HP */
+const npcAt      = new Uint8Array(TILE_W * TILE_H);  /* head|body nibbles */
+const pathStep   = new Uint8Array(TILE_W * TILE_H);
+const pathId     = new Uint8Array(TILE_W * TILE_H);
+const panelSeed  = new Uint32Array(9);   /* world seed per sub-panel */
+const palettes   = new Array(9);          /* 4 RGB triples per sub-panel */
+let ruleset = new Uint8Array(RULESET_BYTES);   /* hex CA rule lookup */
+
+/* Scratch for CA stepping — sized for one panel. */
+const scratchA = new Uint8Array(MAP_W * MAP_H);
+const scratchB = new Uint8Array(MAP_W * MAP_H);
+
+/* ── Palette derivation ────────────────────────────────────── */
+/* Derive the 4-anchor palette for one sub-panel from its world seed.
+ * Each terrain anchor drifts ±32 per channel — neighbours read as
+ * different biomes but rock stays rocky etc. */
+function paletteForSeed(seed) {
+  const st = newState(seed | 1);
+  const out = new Array(4);
+  for (let i = 0; i < 4; i++) {
+    const dr = ((mulberryInt(st) >>> 25) & 0x3f) - 32;   /* high 6 bits */
+    const dg = ((mulberryInt(st) >>> 25) & 0x3f) - 32;
+    const db = ((mulberryInt(st) >>> 25) & 0x3f) - 32;
+    out[i] = [
+      clamp255(TERRAIN_ANCHOR[i][0] + dr),
+      clamp255(TERRAIN_ANCHOR[i][1] + dg),
+      clamp255(TERRAIN_ANCHOR[i][2] + db),
+    ];
+  }
+  return out;
+}
+
+function refreshPalettes() {
+  for (let cy = -1; cy <= 1; cy++) {
+    for (let cx = -1; cx <= 1; cx++) {
+      const slot = (cy + 1) * 3 + (cx + 1);
+      const ns = neighborSeed(cx, cy);
+      panelSeed[slot] = ns;
+      palettes[slot]  = paletteForSeed(ns);
+    }
+  }
+}
+
+/* ── Cell-world hash (office51) ────────────────────────────── */
+/* Keyed on the cell's *world* position (panel seed + local x, y) so
+ * the same world cell looks identical regardless of where in the
+ * mosaic it currently sits. */
+function cellWorldHash(wx, wy) {
+  let sx = (wx / MAP_W) | 0;
+  let sy = (wy / MAP_H) | 0;
+  if (sx < 0) sx = 0; else if (sx > 2) sx = 2;
+  if (sy < 0) sy = 0; else if (sy > 2) sy = 2;
+  const localX = wx - sx * MAP_W;
+  const localY = wy - sy * MAP_H;
+  return hash3(panelSeed[sy * 3 + sx] ^ localX, localY ^ 0xa5a5a5a5, 0x5f5f5f5f);
+}
+
+/* ── Per-cell texture cache ────────────────────────────────── */
+/* Map keyed by world hash → 64×64 offscreen canvas.  Cleared on shift
+ * since panel coords mean different world cells then; the cells'
+ * hashes still resolve to the same canvases, but the cache rebuilds
+ * lazily as cells render. */
+const cellTexCache = new Map();
+
+function getCellTexture(wx, wy) {
+  const cidx = wy * TILE_W + wx;
+  const terrain = mapArr[cidx] & 3;
+  let key = cellWorldHash(wx, wy);
+  /* Live-anim: salt the cache key with each terrain's step counter so
+   * cells of an active terrain rebuild on every step → visible shift. */
+  if (animating && terrainAnim[terrain].on && terrainAnim[terrain].fpm > 0) {
+    key = (key ^ Math.imul(terrainStepFrame[terrain] | 0, 0x9e3779b9)) >>> 0;
+  }
+  let off = cellTexCache.get(key);
+  if (off) return off;
+
+  /* Inner CA seed — same recipe as office53 rpg_compute_cell. */
+  const st = newState(key);
+  for (let i = 0; i < MAP_W * MAP_H; i++)
+    scratchA[i] = (mulberryInt(st) >>> 30) & 3;
+  let a = scratchA, b = scratchB;
+  for (let t = 0; t < INNER_STEPS; t++) {
+    hexStep(ruleset, a, b, MAP_W, MAP_H);
+    [a, b] = [b, a];
+  }
+  const inner = a;
+
+  /* Per-cell palette — anchor + ±64 jitter per channel per of 4 slots. */
+  let sx = (wx / MAP_W) | 0; if (sx < 0) sx = 0; else if (sx > 2) sx = 2;
+  let sy = (wy / MAP_H) | 0; if (sy < 0) sy = 0; else if (sy > 2) sy = 2;
+  const subPal = palettes[sy * 3 + sx];
+  const [br, bg, bb] = subPal[terrain];
+  const pSt = newState(key ^ 0xdeadbeef);
+  const pal = new Array(4);
+  for (let k = 0; k < 4; k++) {
+    const dr = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    const dg = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    const db = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    pal[k] = [clamp255(br + dr), clamp255(bg + dg), clamp255(bb + db)];
+  }
+
+  const img = new ImageData(MAP_W, MAP_H);
+  const data = img.data;
+  for (let i = 0, p = 0; i < MAP_W * MAP_H; i++, p += 4) {
+    const c = inner[i] & 3;
+    data[p    ] = pal[c][0];
+    data[p + 1] = pal[c][1];
+    data[p + 2] = pal[c][2];
+    data[p + 3] = 255;
+  }
+  off = document.createElement("canvas");
+  off.width = MAP_W;
+  off.height = MAP_H;
+  off.getContext("2d").putImageData(img, 0, 0);
+  cellTexCache.set(key, off);
+  return off;
+}
+
+/* ── Block-CA texture (CA-everywhere) ────────────────────────
+ *
+ * Replaces solid coloured blocks (player head/body, NPC head/body,
+ * each non-zero L-system grid cell) with a 64×64 hex CA, stepped
+ * under the same mother ruleset as terrain, and rendered with a
+ * 4-colour palette derived from the block's seed RGB ± per-channel
+ * jitter.  Drawn into a 64×64 offscreen canvas which the caller
+ * scales down to whatever block size they want.  Cached by
+ * (seedRgb, salt) — `salt` is the caller's stable identifier
+ * (e.g. NPC byte, or a (cat, idx, palIdx) tuple) so the same block
+ * always looks the same. */
+const blockTexCache = new Map();
+const BLOCK_W = 64, BLOCK_H = 64;
+const blockBufA = new Uint8Array(BLOCK_W * BLOCK_H);
+const blockBufB = new Uint8Array(BLOCK_W * BLOCK_H);
+
+function getBlockTexture(seedRgb, salt) {
+  /* Cache key folds salt + colour together.  Stringify for Map
+   * stability — salt collisions across different RGBs would
+   * otherwise pick wrong textures. */
+  const key = (salt >>> 0) + ":" + seedRgb[0] + "," + seedRgb[1] + "," + seedRgb[2];
+  let off = blockTexCache.get(key);
+  if (off) return off;
+
+  /* Inner CA seed from salt — independent of the cell-texture cache
+   * so terrain and blocks live in their own deterministic spaces. */
+  const st = newState((salt | 1) ^ 0xc0ffeebb);
+  for (let i = 0; i < BLOCK_W * BLOCK_H; i++)
+    blockBufA[i] = (mulberryInt(st) >>> 30) & 3;
+  let a = blockBufA, b = blockBufB;
+  for (let t = 0; t < INNER_STEPS; t++) {
+    hexStep(ruleset, a, b, BLOCK_W, BLOCK_H);
+    [a, b] = [b, a];
+  }
+  const inner = a;
+
+  /* 4-colour palette: seedRgb ± 64 per channel per of 4 slots — same
+   * recipe as getCellTexture but driven by the block seed colour
+   * rather than a per-panel terrain anchor. */
+  const pSt = newState(((salt + 1) | 1) ^ 0xbeefcace);
+  const pal = new Array(4);
+  for (let k = 0; k < 4; k++) {
+    const dr = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    const dg = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    const db = ((mulberryInt(pSt) >>> 24) & 0x7f) - 64;
+    pal[k] = [
+      clamp255(seedRgb[0] + dr),
+      clamp255(seedRgb[1] + dg),
+      clamp255(seedRgb[2] + db),
+    ];
+  }
+
+  const img = new ImageData(BLOCK_W, BLOCK_H);
+  const data = img.data;
+  for (let i = 0, p = 0; i < BLOCK_W * BLOCK_H; i++, p += 4) {
+    const c = inner[i] & 3;
+    data[p    ] = pal[c][0];
+    data[p + 1] = pal[c][1];
+    data[p + 2] = pal[c][2];
+    data[p + 3] = 255;
+  }
+  off = document.createElement("canvas");
+  off.width  = BLOCK_W;
+  off.height = BLOCK_H;
+  off.getContext("2d").putImageData(img, 0, 0);
+  blockTexCache.set(key, off);
+  return off;
+}
+
+/* Stable salt helper — combines a string label with optional
+ * integer suffix.  Keeps salt values in 32-bit range for fast hash. */
+function blockSalt(label, n) {
+  let h = strHash(0x811c9dc5 >>> 0, label);
+  if (n !== undefined) h = (h ^ Math.imul(n | 0, 0x9e3779b9)) >>> 0;
+  return h >>> 0;
+}
+
+/* ── L-system entity sprites ─────────────────────────────── */
+/* 4 categories × 4 archetypes.  Same definitions as office53. */
+const cats = [
+  null,
+  /* RC_PLANT */ {
+    cat: 'P', name: "plant", height: 5, hp: 0, blocking: true,
+    axioms: ["F", "F", "F", "F"],
+    rules: ["FF+[+F-F-F]-[-F+F+F]", "F[+F]F[-F]F",
+            "F[+F][-F]F[+F][-F]F", "F[+F]F[-F]F[+F]"],
+    base: [ 30, 130,  50],
+  },
+  /* RC_BUILDING */ {
+    cat: 'B', name: "building", height: 4, hp: 0, blocking: true,
+    axioms: ["F", "F", "F", "F"],
+    rules: ["F+F+F-F-F+F+F", "F+F-F-F+F+F+F-F",
+            "F+F+F+F",       "F+F-F+F-F"],
+    base: [180, 150, 110],
+  },
+  /* RC_ANIMAL */ {
+    cat: 'A', name: "animal", height: 2, hp: 4, blocking: false,
+    axioms: ["F", "F", "F", "F"],
+    rules: ["F[+F]F[-F]", "F+F-F", "F-F+F-F", "F+F-F+F"],
+    base: [200,  90,  60],
+  },
+  /* RC_ITEM */ {
+    cat: 'I', name: "item", height: 1, hp: 0, blocking: false,
+    axioms: ["F+F+F+F", "F+F+F+F+F+F", "F", "F"],
+    rules: ["F", "F", "F[+F][-F]F", "F+F-F+F-F"],
+    base: [220, 200,  80],
+  },
+];
+const RC_PLANT = 1, RC_BUILDING = 2, RC_ANIMAL = 3, RC_ITEM = 4;
+
+/* (idx 0..63) → (archetype 0..3, iters 1..4, angle 1..2). */
+function variantDecode(idx) {
+  return [idx & 3, 1 + ((idx >> 2) & 3), 1 + ((idx >> 4) & 1)];
+}
+
+/* L-system expansion — iterate `axiom` under F→`rule` for `iters`
+ * steps.  Cap output length so ridiculous expansions don't blow up. */
+function lsysExpand(axiom, rule, iters) {
+  let s = axiom;
+  for (let it = 0; it < iters; it++) {
+    if (s.length > 8192) break;
+    let n = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      n += (c === 70) ? rule : s[i];   /* 'F' = 70 */
+    }
+    s = n;
+  }
+  return s;
+}
+
+/* Walk the turtle for 8-direction turns (each angle step = 45°),
+ * producing a {xs, ys} point cloud.  '+' / '-' rotate by angleSteps,
+ * '[' / ']' push/pop. */
+function spriteWalk(cmds, angleSteps) {
+  const DX = [ 0,  1,  1,  1,  0, -1, -1, -1];
+  const DY = [-1, -1,  0,  1,  1,  1,  0, -1];
+  const xs = [0], ys = [0];
+  let x = 0, y = 0, dir = 0;       /* facing up */
+  const stack = [];
+  for (let i = 0; i < cmds.length; i++) {
+    const c = cmds[i];
+    if (c === 'F') {
+      x += DX[dir]; y += DY[dir];
+      xs.push(x); ys.push(y);
+    } else if (c === '+') {
+      dir = (((dir + angleSteps) % 8) + 8) % 8;
+    } else if (c === '-') {
+      dir = (((dir - angleSteps) % 8) + 8) % 8;
+    } else if (c === '[') {
+      stack.push(x, y, dir);
+    } else if (c === ']') {
+      if (stack.length) {
+        dir = stack.pop(); y = stack.pop(); x = stack.pop();
+      }
+    }
+  }
+  return { xs, ys };
+}
+
+/* Build the (3 × height) palette-index grid + 4-colour palette for one
+ * (cat, idx) variant.  Lazy + cached, keyed by (cat, idx, catBend) so
+ * a category-bend (which bumps catBend) yields fresh palette colours
+ * on the very next call. */
+const spriteCache = new Map();
+
+function buildSprite(cat, idx) {
+  const ec = cats[cat];
+  const cb = player.catBend[cat - 1] | 0;
+  const key = (cat << 16) | (idx << 8) | (cb & 0xff);
+  let entry = spriteCache.get(key);
+  if (entry) return entry;
+
+  const [arch, iters, angle] = variantDecode(idx);
+  const axiom = ec.axioms[arch];
+  const rule  = ec.rules[arch];
+  const cmds  = lsysExpand(axiom, rule, iters);
+  const cloud = spriteWalk(cmds, angle);
+
+  const h = Math.min(SPRITE_H_MAX, Math.max(1, ec.height));
+
+  /* Bbox + bin into 3×h grid. */
+  let minX = cloud.xs[0], maxX = cloud.xs[0];
+  let minY = cloud.ys[0], maxY = cloud.ys[0];
+  for (let i = 1; i < cloud.xs.length; i++) {
+    if (cloud.xs[i] < minX) minX = cloud.xs[i];
+    if (cloud.xs[i] > maxX) maxX = cloud.xs[i];
+    if (cloud.ys[i] < minY) minY = cloud.ys[i];
+    if (cloud.ys[i] > maxY) maxY = cloud.ys[i];
+  }
+  let bw = maxX - minX + 1, bh = maxY - minY + 1;
+  if (bw < 1) bw = 1; if (bh < 1) bh = 1;
+  const counts = new Uint32Array(SPRITE_W * h);
+  for (let i = 0; i < cloud.xs.length; i++) {
+    const x = cloud.xs[i] - minX, y = cloud.ys[i] - minY;
+    let bx = (x * SPRITE_W) / bw | 0;
+    let by = (y * h) / bh | 0;
+    if (bx >= SPRITE_W) bx = SPRITE_W - 1;
+    if (by >= h) by = h - 1;
+    counts[by * SPRITE_W + bx]++;
+  }
+  let maxHits = 1;
+  for (let i = 0; i < counts.length; i++)
+    if (counts[i] > maxHits) maxHits = counts[i];
+  const grid = new Uint8Array(SPRITE_W * h);    /* 0=transparent, 1..3 */
+  for (let i = 0; i < counts.length; i++) {
+    const c = counts[i];
+    if (c === 0) grid[i] = 0;
+    else if (c * 3 <= maxHits)     grid[i] = 1;
+    else if (c * 3 <= 2 * maxHits) grid[i] = 2;
+    else                           grid[i] = 3;
+  }
+
+  /* Palette — hash of axiom+rule+cat+idx+catBend → ±32 jitter on the
+   * category base RGB, then 3 brightness slots (light/mid/dark). */
+  let hh = 0x811c9dc5 >>> 0;
+  hh = strHash(hh, axiom);
+  hh = strHash(hh, rule);
+  hh ^= Math.imul(cat | 0, 0x9e3779b9) >>> 0;
+  hh ^= Math.imul(idx | 0, 0xc2b2ae35) >>> 0;
+  hh ^= Math.imul(cb  | 0, 0x7feb352d) >>> 0;
+  const dr = ((hh      ) & 0x3f) - 32;
+  const dg = ((hh >>  8) & 0x3f) - 32;
+  const db = ((hh >> 16) & 0x3f) - 32;
+  const br = ec.base[0] + dr;
+  const bg = ec.base[1] + dg;
+  const bb = ec.base[2] + db;
+  const pal = [
+    null,                                /* 0 = transparent */
+    [ clamp255(br + (255 - br) * 55 / 100),
+      clamp255(bg + (255 - bg) * 55 / 100),
+      clamp255(bb + (255 - bb) * 55 / 100) ],
+    [ clamp255(br), clamp255(bg), clamp255(bb) ],
+    [ clamp255(br * 45 / 100),
+      clamp255(bg * 45 / 100),
+      clamp255(bb * 45 / 100) ],
+  ];
+
+  /* Rasterise at the on-screen resolution.  Each grid cell is
+   * (TILE_PX/SPRITE_W) px wide and the same tall — so every sprite
+   * lines up cleanly with the underlying terrain pixels.  Where the
+   * old version painted solid coloured rectangles, we now blit a
+   * 64×64 CA texture (seeded by the block's palette colour) into
+   * each block — matching the terrain's textured look. */
+  const cellPx = TILE_PX / SPRITE_W;
+  const off = document.createElement("canvas");
+  off.width  = SPRITE_W * cellPx | 0;
+  off.height = h        * cellPx | 0;
+  const c = off.getContext("2d");
+  c.imageSmoothingEnabled = false;
+  /* Stable salt per (cat, idx, catBend, palIdx) — every level-1
+   * block of "plant variant 5" gets the same CA texture, level-2
+   * gets another, level-3 a third.  cat-bend mutates all three. */
+  const baseSalt = (Math.imul(cat | 0, 0x9e3779b9) ^
+                    Math.imul(idx | 0, 0x85ebca6b) ^
+                    Math.imul(cb  | 0, 0xc2b2ae3d)) >>> 0;
+  for (let r = 0; r < h; r++) {
+    for (let col = 0; col < SPRITE_W; col++) {
+      const p = grid[r * SPRITE_W + col];
+      if (p === 0) continue;
+      const tex = getBlockTexture(pal[p], (baseSalt ^ (p * 0x7feb352d)) >>> 0);
+      c.drawImage(tex,
+                  col * cellPx | 0, r * cellPx | 0,
+                  (cellPx + 1) | 0, (cellPx + 1) | 0);
+    }
+  }
+  entry = { canvas: off, height: h };
+  spriteCache.set(key, entry);
+  return entry;
+}
+
+/* Drop sprites that no longer match the current cat-bend salt — keeps
+ * the cache from growing without bound across many recolours. */
+function pruneSpriteCache() {
+  if (spriteCache.size < 1024) return;
+  spriteCache.clear();
+}
+
+/* ── Entity placement ────────────────────────────────────── */
+/* Same terrain-biased table as office53 rpg_cat_for: rock, sand,
+ * soil, water each weight categories differently. */
+function catFor(colour, r) {
+  switch (colour & 3) {
+    case 0:                                   /* rock */
+      if (r <  10) return RC_BUILDING;
+      if (r <  18) return RC_BUILDING;
+      if (r <  22) return RC_ITEM;
+      if (r <  28) return RC_ITEM;
+      return 0;
+    case 1:                                   /* sand */
+      if (r <  15) return RC_PLANT;
+      if (r <  30) return RC_PLANT;
+      if (r <  38) return RC_ANIMAL;
+      if (r <  43) return RC_ANIMAL;
+      return 0;
+    case 2:                                   /* soil */
+      if (r <  12) return RC_PLANT;
+      if (r <  22) return RC_PLANT;
+      if (r <  28) return RC_BUILDING;
+      if (r <  32) return RC_BUILDING;
+      if (r <  40) return RC_ANIMAL;
+      if (r <  46) return RC_ANIMAL;
+      if (r <  50) return RC_ITEM;
+      return 0;
+    case 3:                                   /* water */
+      if (r <  12) return RC_ANIMAL;
+      return 0;
+  }
+  return 0;
+}
+
+/* ── Per-panel CA + entity init ────────────────────────────── */
+function regenPanel(sx, sy) {
+  /* Generates the terrain CA for one panel (sx, sy ∈ {0,1,2}) using
+   * its per-neighbour world seed. */
+  const ws = neighborSeed(sx - 1, sy - 1);
+  const st = newState(ws);
+  for (let i = 0; i < MAP_W * MAP_H; i++)
+    scratchA[i] = mulberryInt(st) & 3;
+  let a = scratchA, b = scratchB;
+  for (let t = 0; t < GEN_STEPS; t++) {
+    hexStep(ruleset, a, b, MAP_W, MAP_H);
+    [a, b] = [b, a];
+  }
+  const subX = sx * MAP_W, subY = sy * MAP_H;
+  for (let y = 0; y < MAP_H; y++) {
+    const dst = (subY + y) * TILE_W + subX;
+    const src = y * MAP_W;
+    for (let x = 0; x < MAP_W; x++) mapArr[dst + x] = a[src + x];
+  }
+}
+
+function regenPanelEntities(sx, sy) {
+  const ws = (neighborSeed(sx - 1, sy - 1) ^ 0xa5a5a5a5) >>> 0;
+  const st = newState(ws);
+  const subX = sx * MAP_W, subY = sy * MAP_H;
+  for (let yy = 0; yy < MAP_H; yy++) {
+    for (let xx = 0; xx < MAP_W; xx++) {
+      const gidx = (subY + yy) * TILE_W + (subX + xx);
+      const c = mapArr[gidx];
+      const r = mulberryInt(st) & 0xff;
+      const cat = catFor(c, r);
+      catAt[gidx] = cat;
+      idxAt[gidx] = 0;
+      hpAt [gidx] = 0;
+      npcAt[gidx] = 0;
+      pathStep[gidx] = 0;
+      pathId[gidx]   = 0;
+      if (cat) {
+        const vidx = mulberryInt(st) & (CAT_VARIANTS - 1);
+        idxAt[gidx] = vidx;
+        if (cats[cat].cat === 'A') hpAt[gidx] = cats[cat].hp;
+      } else if (c === 1 || c === 2) {
+        const q = mulberryInt(st);
+        if ((q & 31) === 0) {
+          let b = (q >>> 8) & 0xff;
+          if (!b) b = 0xa5;
+          npcAt[gidx] = b;
+        }
+      }
+    }
+  }
+}
+
+function regenMosaic() {
+  for (let sy = 0; sy < 3; sy++)
+    for (let sx = 0; sx < 3; sx++)
+      regenPanel(sx, sy);
+}
+function regenMosaicEntities(spawnX, spawnY) {
+  for (let sy = 0; sy < 3; sy++)
+    for (let sx = 0; sx < 3; sx++)
+      regenPanelEntities(sx, sy);
+  /* Clear a 3×3 around spawn so the player isn't boxed in. */
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = spawnX + dx, ny = spawnY + dy;
+      if (nx < 0 || nx >= TILE_W || ny < 0 || ny >= TILE_H) continue;
+      catAt[ny * TILE_W + nx] = 0;
+      npcAt[ny * TILE_W + nx] = 0;
+    }
+  }
+}
+
+/* ── Closed-loop wander paths ────────────────────────────── */
+function pathBuild(seed) {
+  const st = newState(seed | 1);
+  /* Bump once to escape low-entropy starting states. */
+  mulberryInt(st);
+  const a = mulberryInt(st) % 11;
+  const b = mulberryInt(st) % 11;
+  const c = mulberryInt(st) % 11;
+  let n = 2 * (a + b + c);
+  if (n > PATH_MAX) n = PATH_MAX;
+  const out = new Uint8Array(n);
+  let p = 0;
+  for (let i = 0; i < a && p < n; i++) out[p++] = 0;   /* E  */
+  for (let i = 0; i < a && p < n; i++) out[p++] = 3;   /* W  */
+  for (let i = 0; i < b && p < n; i++) out[p++] = 1;   /* NE */
+  for (let i = 0; i < b && p < n; i++) out[p++] = 4;   /* SW */
+  for (let i = 0; i < c && p < n; i++) out[p++] = 2;   /* NW */
+  for (let i = 0; i < c && p < n; i++) out[p++] = 5;   /* SE */
+  /* Fisher-Yates shuffle. */
+  for (let i = n - 1; i > 0; i--) {
+    const j = mulberryInt(st) % (i + 1);
+    const t = out[i]; out[i] = out[j]; out[j] = t;
+  }
+  return out;
+}
+
+function pathDxDy(dir, y) {
+  const odd = y & 1;
+  switch (dir) {
+    case 0: return [ 1, 0];                             /* E  */
+    case 1: return [odd ?  1 :  0, -1];                 /* NE */
+    case 2: return [odd ?  0 : -1, -1];                 /* NW */
+    case 3: return [-1, 0];                             /* W  */
+    case 4: return [odd ?  0 : -1,  1];                 /* SW */
+    case 5: return [odd ?  1 :  0,  1];                 /* SE */
+  }
+  return [0, 0];
+}
+
+function pathTick(pX, pY) {
+  const moved = new Uint8Array(TILE_W * TILE_H);
+  const wseed = currentWorldSeed();
+  for (let y = 0; y < TILE_H; y++) {
+    for (let x = 0; x < TILE_W; x++) {
+      const i = y * TILE_W + x;
+      if (moved[i]) continue;
+      const isNpc = npcAt[i] !== 0;
+      const isAnimal = catAt[i] === RC_ANIMAL;
+      if (!isNpc && !isAnimal) continue;
+      const pseed = (wseed ^ Math.imul(i, 0x9e3779b9) ^
+                     Math.imul(pathId[i], 0x85ebca6b)) >>> 0;
+      const path = pathBuild(pseed);
+      if (path.length === 0) { pathId[i]++; continue; }
+      const step = pathStep[i] % path.length;
+      const [dx, dy] = pathDxDy(path[step], y);
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= TILE_W || ny < 0 || ny >= TILE_H) continue;
+      const ni = ny * TILE_W + nx;
+      if (nx === pX && ny === pY) continue;
+      if (catAt[ni] || npcAt[ni]) continue;
+      if (isNpc) {
+        npcAt[ni] = npcAt[i]; npcAt[i] = 0;
+      } else {
+        catAt[ni] = catAt[i]; idxAt[ni] = idxAt[i]; hpAt[ni] = hpAt[i];
+        catAt[i]  = 0;        idxAt[i]  = 0;        hpAt[i]  = 0;
+      }
+      const nstep = (step + 1) % path.length;
+      let npid = pathId[i];
+      if (nstep === 0) npid = (npid + 1) & 0xff;
+      pathStep[i] = 0; pathId[i] = 0;
+      pathStep[ni] = nstep; pathId[ni] = npid;
+      moved[ni] = 1;
+    }
+  }
+}
+
+/* ── Player + world state ────────────────────────────────── */
+const player = {
+  hp: 20, maxHp: 20,
+  mp: 30, maxMp: 30,
+  inv: new Uint8Array(CAT_VARIANTS),
+  invCount: 0,
+  bendSkill: new Uint8Array(4),
+  catBend:   new Uint8Array(4),
+  alive: true,
+};
+let px = TILE_W >> 1, py = TILE_H >> 1;
+let actionMsg = "";
+
+function setAction(s) {
+  actionMsg = s;
+  actionEl.textContent = s;
+}
+
+function spawnPlayer() {
+  px = TILE_W >> 1;
+  py = TILE_H >> 1;
+}
+
+/* ── Movement + interactions ─────────────────────────────── */
+function moveStep(dir) {
+  if (!player.alive) return false;
+  const odd = py & 1;
+  let nx = px, ny = py;
+  switch (dir) {
+    case 'a': nx = px - 1;                                break;
+    case 'd': nx = px + 1;                                break;
+    case 'w': ny = py - 1; nx = px + (odd ? 0 : -1);      break;
+    case 'e': ny = py - 1; nx = px + (odd ? 1 : 0);       break;
+    case 'z': ny = py + 1; nx = px + (odd ? 0 : -1);      break;
+    case 'x': ny = py + 1; nx = px + (odd ? 1 : 0);       break;
+    default: return false;
+  }
+  if (nx < 0 || nx >= TILE_W || ny < 0 || ny >= TILE_H) return false;
+  const i = ny * TILE_W + nx;
+  /* NPC: stall + greet. */
+  if (npcAt[i]) {
+    setAction("npc: hello, traveller");
+    return false;
+  }
+  const cat = catAt[i];
+  if (cat) {
+    const ec = cats[cat];
+    const vidx = idxAt[i];
+    if (ec.cat === 'I') {
+      player.inv[vidx] = (player.inv[vidx] + 1) & 0xff;
+      player.invCount++;
+      catAt[i] = 0;
+      setAction("picked up " + ec.name);
+      px = nx; py = ny;
+      return true;
+    }
+    if (ec.cat === 'A') {
+      const dmgE = (Math.random() * 4 | 0) + 1;
+      const dmgP = (Math.random() * 3 | 0) + 1;
+      let hp = hpAt[i];
+      hp = (hp > dmgE) ? hp - dmgE : 0;
+      hpAt[i] = hp;
+      let msg = "hit " + ec.name + " for " + dmgE;
+      if (hp === 0) {
+        catAt[i] = 0;
+        msg += "; killed!";
+      } else {
+        player.hp -= dmgP;
+        if (player.hp < 0) player.hp = 0;
+        msg += "; took " + dmgP;
+        if (player.hp === 0) {
+          player.alive = false;
+          msg += " — you died";
+          deathEl.hidden = false;
+        }
+      }
+      setAction(msg);
+      return false;
+    }
+    if (ec.blocking) {
+      setAction("blocked by " + ec.name);
+      return false;
+    }
+  }
+  px = nx; py = ny;
+  return true;
+}
+
+/* ── Mosaic shift on cross ───────────────────────────────── */
+function maybeShift() {
+  let mdx = 0, mdy = 0;
+  if (px <  MAP_W)         mdx = -1;
+  else if (px >= 2 * MAP_W) mdx = +1;
+  if (py <  MAP_H)         mdy = -1;
+  else if (py >= 2 * MAP_H) mdy = +1;
+  if (!mdx && !mdy) return;
+  px -= mdx * MAP_W;
+  py -= mdy * MAP_H;
+  worldAdvance(mdx, mdy);
+  refreshPalettes();
+  regenMosaic();
+  regenMosaicEntities(px, py);
+  cellTexCache.clear();         /* world coords changed under cells */
+}
+
+/* ── Spell zap ─────────────────────────────────────────────── */
+function castZap() {
+  if (!player.alive) return;
+  if (player.mp < 3) { setAction("not enough mana"); return; }
+  let bestI = -1, bestD = 999;
+  for (let dy = -3; dy <= 3; dy++) {
+    for (let dx = -3; dx <= 3; dx++) {
+      const nx = px + dx, ny = py + dy;
+      if (nx < 0 || nx >= TILE_W || ny < 0 || ny >= TILE_H) continue;
+      const i = ny * TILE_W + nx;
+      if (catAt[i] !== RC_ANIMAL) continue;
+      const d = Math.abs(dx) + Math.abs(dy);
+      if (d < bestD) { bestD = d; bestI = i; }
+    }
+  }
+  if (bestI < 0) { setAction("no target in range"); return; }
+  player.mp -= 3;
+  let hp = hpAt[bestI];
+  hp = (hp > 6) ? hp - 6 : 0;
+  hpAt[bestI] = hp;
+  let msg = "zap! animal takes 6";
+  if (hp === 0) { catAt[bestI] = 0; msg += "; killed!"; }
+  setAction(msg);
+}
+
+/* ── Bending: terrain GA (silent — office53 style) ───────── */
+/* Ports the spirit of hxhnt's GA: pop=20, evolve a 16384-byte ruleset
+ * over `gens` gens, fitness rewards late-stage activity (cells still
+ * changing after the CA has had time to settle).  Winner replaces the
+ * live ruleset; cell cache is invalidated and the world repaints with
+ * the new CA on the next render — no view takeover. */
+function gaFitness(rs, seed) {
+  /* Run a small 32×32 grid for 30 steps, count cell changes between
+   * steps 24-30 → late-stage activity.  Penalise dead-end rulesets
+   * (everything stuck on one state) so bending tends toward
+   * class-4-ish patterns. */
+  const W = 32, H = 32, T = 30, COUNT_FROM = 24;
+  const a = new Uint8Array(W * H);
+  const b = new Uint8Array(W * H);
+  const st = newState(seed | 1);
+  for (let i = 0; i < W * H; i++) a[i] = mulberryInt(st) & 3;
+  let cur = a, nxt = b;
+  let activity = 0;
+  for (let t = 0; t < T; t++) {
+    hexStep(rs, cur, nxt, W, H);
+    if (t >= COUNT_FROM) {
+      let chg = 0;
+      for (let i = 0; i < W * H; i++) if (cur[i] !== nxt[i]) chg++;
+      activity += chg;
+    }
+    [cur, nxt] = [nxt, cur];
+  }
+  /* State variety bonus — count distinct states present at the end. */
+  const seen = [0, 0, 0, 0];
+  for (let i = 0; i < W * H; i++) seen[cur[i] & 3] = 1;
+  const variety = seen[0] + seen[1] + seen[2] + seen[3];
+  return activity + variety * 100;
+}
+
+function gaMutate(dst, src, off) {
+  dst.set(src);
+  /* Flip 0..off bytes randomly to a fresh value. */
+  const flips = (Math.random() * off | 0) + 1;
+  for (let i = 0; i < flips; i++) {
+    const at = (Math.random() * RULESET_BYTES) | 0;
+    dst[at] = (Math.random() * 4) | 0;
+  }
+}
+function gaCrossover(dst, a, b) {
+  const cut = (Math.random() * RULESET_BYTES) | 0;
+  for (let i = 0; i < RULESET_BYTES; i++)
+    dst[i] = (i < cut) ? a[i] : b[i];
+}
+
+function gaSession(pop, gens, seed) {
+  /* Pool[0] = current default; rest = mutated copies. */
+  const pool = new Array(pop);
+  const fits = new Float64Array(pop);
+  pool[0] = new Uint8Array(ruleset);
+  for (let i = 1; i < pop; i++) {
+    pool[i] = new Uint8Array(RULESET_BYTES);
+    gaMutate(pool[i], ruleset, 32);
+  }
+  const tmp = new Uint8Array(RULESET_BYTES);
+  for (let g = 0; g < gens; g++) {
+    for (let i = 0; i < pop; i++) fits[i] = gaFitness(pool[i], seed);
+    /* Sort by fitness desc — bubble for tiny pop. */
+    for (let i = 0; i < pop; i++) {
+      for (let j = i + 1; j < pop; j++) {
+        if (fits[j] > fits[i]) {
+          const tf = fits[i]; fits[i] = fits[j]; fits[j] = tf;
+          const tp = pool[i]; pool[i] = pool[j]; pool[j] = tp;
+        }
+      }
+    }
+    /* Bottom half = breed top half. */
+    for (let i = (pop >> 1); i < pop; i++) {
+      const pa = (Math.random() * (pop >> 1)) | 0;
+      const pb = (Math.random() * (pop >> 1)) | 0;
+      gaCrossover(tmp, pool[pa], pool[pb]);
+      gaMutate(pool[i], tmp, 4);
+    }
+  }
+  /* Final tournament — adopt #0. */
+  for (let i = 0; i < pop; i++) fits[i] = gaFitness(pool[i], seed);
+  let bestI = 0;
+  for (let i = 1; i < pop; i++) if (fits[i] > fits[bestI]) bestI = i;
+  ruleset.set(pool[bestI]);
+}
+
+function bendTerrain(t) {
+  if (!player.alive) return;
+  if (t < 0 || t > 3) return;
+  const cost = Math.max(1, 5 - player.bendSkill[t]);
+  let gens = (player.mp / cost) | 0;
+  if (gens < 1) { setAction("low mana"); return; }
+  if (gens > 10) gens = 10;
+  player.mp -= gens * cost;
+  const seed = (Date.now() ^ Math.random() * 1e9) >>> 0;
+  gaSession(20, gens, seed);
+  /* Match office53: terrain LAYOUT stays, only cell textures rebuild
+   * with the new ruleset.  Entities/inventory survive — bending is a
+   * visual mutation, not a world reset.  Block textures (player /
+   * NPC / L-system blocks) also rebuild because they all step under
+   * the mother ruleset. */
+  cellTexCache.clear();
+  blockTexCache.clear();
+  spriteCache.clear();          /* sprites embed block textures */
+  if (player.bendSkill[t] < 9) player.bendSkill[t]++;
+  setAction("bent " + ["rock", "sand", "soil", "water"][t]);
+}
+
+function bendCategory(catSlot) {
+  if (!player.alive) return;
+  if (player.mp < 3) { setAction("low mana"); return; }
+  player.mp -= 3;
+  player.catBend[catSlot] = (player.catBend[catSlot] + 1) & 0xff;
+  pruneSpriteCache();
+  /* Brutal but cheap: clear all sprite entries so every (cat, idx)
+   * variant rebuilds with the new salt on next render.  Block
+   * textures keyed by (cat,idx,catBend) tuples also drift, so clear
+   * those too — old entries would otherwise linger as dead memory. */
+  spriteCache.clear();
+  blockTexCache.clear();
+  const names = ["plant", "building", "animal", "item"];
+  setAction("bent " + names[catSlot]);
+}
+
+/* ── Live inner-CA animation (l toggle, k speeds) ─────────── */
+const terrainAnim = [
+  { fpm:   2, dflt:   2, acc: 0, on: 1 },     /* rock */
+  { fpm:  12, dflt:  12, acc: 0, on: 1 },     /* sand */
+  { fpm:  60, dflt:  60, acc: 0, on: 1 },     /* soil */
+  { fpm: 600, dflt: 600, acc: 0, on: 1 },     /* water */
+];
+let animating = false;
+const terrainStepFrame = new Int32Array(4);   /* per-terrain step count */
+
+function animateTick() {
+  /* Per-terrain accumulators tick up; when one crosses 600 we bump
+   * its step counter, which getCellTexture folds into the cell-hash
+   * salt for cells of that terrain.  The next render rebuilds those
+   * cells with a different inner-CA seed → visible shift.
+   *   600 fpm = step every frame (water by default)
+   *    60 fpm = step every 10 frames (soil)
+   *     2 fpm = step ~every 5 minutes at 60 fps (rock) */
+  let anyStepped = false;
+  for (let t = 0; t < 4; t++) {
+    if (!terrainAnim[t].on) continue;
+    let a = terrainAnim[t].acc + terrainAnim[t].fpm;
+    if (a >= ANIM_FRAMES_PER_MIN) {
+      a -= ANIM_FRAMES_PER_MIN;
+      terrainStepFrame[t]++;
+      anyStepped = true;
+    }
+    terrainAnim[t].acc = a;
+  }
+  if (anyStepped && cellTexCache.size > 4096) {
+    /* Stale frame-salted entries linger in the cache; periodic clear
+     * caps growth without disturbing on-screen cells (they refill
+     * within one render). */
+    cellTexCache.clear();
+  }
+  return anyStepped;
+}
+
+/* ── HUD ─────────────────────────────────────────────────── */
+const TERRAIN_NAMES = ["rock", "sand", "soil", "water"];
+
+function renderHUD() {
+  const i = py * TILE_W + px;
+  const terrain = TERRAIN_NAMES[mapArr[i] & 3];
+  const hpClass = player.hp <= player.maxHp / 4 ? "lo" : "";
+  const mpClass = player.mp <= player.maxMp / 4 ? "lo" : "";
+  statsEl.innerHTML =
+    `<span class="${hpClass}">HP ${player.hp}/${player.maxHp}</span> · ` +
+    `<span class="${mpClass}">MP ${player.mp}/${player.maxMp}</span> · ` +
+    `inv ${player.invCount} · terrain ${terrain} · ` +
+    `pos ${px},${py} · seed ${currentWorldSeed().toString(16)}` +
+    (animating ? " · <em>live</em>" : "");
+}
+
+/* ── Modal: Inventory ────────────────────────────────────── */
+function showInventory() {
+  let html = "";
+  for (let k = 0; k < CAT_VARIANTS; k++) {
+    const n = player.inv[k];
+    if (!n) continue;
+    html += `<div class="row"><span>item v${k.toString().padStart(2, "0")}</span><span>×${n}</span></div>`;
+  }
+  if (!html) html = `<div class="dim">(empty)</div>`;
+  invList.innerHTML = html;
+  invModal.hidden = false;
+  modalOpen = "inv";
+}
+
+/* ── Modal: Speed settings ─────────────────────────────── */
+let speedSel = 0;
+function renderSpeedModal() {
+  let html = "";
+  for (let t = 0; t < 4; t++) {
+    const a = terrainAnim[t];
+    const name = TERRAIN_NAMES[t].padEnd(7);
+    const onoff = a.on ? "[on ]" : "[off]";
+    const cls = (t === speedSel) ? "sel" : "";
+    html += `<div class="row ${cls}"><span>${t === speedSel ? "&gt; " : "&nbsp;&nbsp;"}${name} ${onoff}</span><span>${a.fpm.toString().padStart(4)} fpm</span></div>`;
+  }
+  spdList.innerHTML = html;
+}
+function showSpeedSettings() {
+  spdModal.hidden = false;
+  modalOpen = "speed";
+  renderSpeedModal();
+}
+function speedNudge(t, delta) {
+  let f = terrainAnim[t].fpm;
+  if (delta > 0) {
+    if      (f <    5) f += 1;
+    else if (f <   30) f += 5;
+    else if (f <  120) f += 10;
+    else if (f <  600) f += 50;
+    else if (f < 1200) f += 100;
+  } else {
+    if      (f >  600) f -= 100;
+    else if (f >  120) f -= 50;
+    else if (f >   30) f -= 10;
+    else if (f >    5) f -= 5;
+    else if (f >    0) f -= 1;
+  }
+  if (f < 0) f = 0;
+  if (f > 1200) f = 1200;
+  terrainAnim[t].fpm = f;
+}
+
+let modalOpen = null;     /* null | "inv" | "speed" */
+function closeModals() {
+  invModal.hidden = true;
+  spdModal.hidden = true;
+  modalOpen = null;
+}
+
+/* ── Render ─────────────────────────────────────────────── */
+let needsRender = true;
+function requestRender() { needsRender = true; }
+
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+
+  /* Player at the geometric centre of the canvas; viewport adapts. */
+  const tilesAcross = Math.ceil(W / TILE_PX) + 2;
+  const tilesDown   = Math.ceil(H / TILE_PX) + 2;
+  const cx = (W / 2) | 0;
+  const cy = (H / 2) | 0;
+  const halfX = (tilesAcross >> 1);
+  const halfY = (tilesDown   >> 1);
+
+  /* For pointy-top hex offset that reads well at scale, every odd row
+   * (in *world* coords) shifts +half-tile east.  We cancel the
+   * player-row's offset by subtracting it from every tile's screen x
+   * — that way the player always sits at canvas centre regardless of
+   * which row parity they're on. */
+  const playerOddOff = (py & 1) ? HEX_OFFSET : 0;
+
+  /* Pass 1 — terrain. */
+  for (let dy = -halfY; dy <= halfY; dy++) {
+    const wy = py + dy;
+    if (wy < 0 || wy >= TILE_H) continue;
+    const rowOffset = (wy & 1) ? HEX_OFFSET : 0;
+    const ty = cy + dy * TILE_PX - (TILE_PX / 2 | 0);
+    if (ty + TILE_PX < 0 || ty > H) continue;
+    for (let dx = -halfX; dx <= halfX; dx++) {
+      const wx = px + dx;
+      if (wx < 0 || wx >= TILE_W) continue;
+      const tx = cx + dx * TILE_PX + rowOffset - (TILE_PX / 2 | 0)
+               - playerOddOff;
+      if (tx + TILE_PX < 0 || tx > W) continue;
+      const tex = getCellTexture(wx, wy);
+      ctx.drawImage(tex, tx, ty, TILE_PX, TILE_PX);
+    }
+  }
+
+  /* Pass 2 — entity sprites.  Iterate north → south so southern
+   * (visually closer) entities paint over the tops of taller northern
+   * neighbours. */
+  for (let dy = -halfY; dy <= halfY; dy++) {
+    const wy = py + dy;
+    if (wy < 0 || wy >= TILE_H) continue;
+    const rowOffset = (wy & 1) ? HEX_OFFSET : 0;
+    const ty = cy + dy * TILE_PX - (TILE_PX / 2 | 0);
+    for (let dx = -halfX; dx <= halfX; dx++) {
+      const wx = px + dx;
+      if (wx < 0 || wx >= TILE_W) continue;
+      const i = wy * TILE_W + wx;
+      const cat = catAt[i];
+      if (!cat) continue;
+      const tx = cx + dx * TILE_PX + rowOffset - (TILE_PX / 2 | 0)
+               - playerOddOff;
+      const sp = buildSprite(cat, idxAt[i]);
+      /* Sprite is SPRITE_W tile-pixels wide, sp.height tile-pixels
+       * tall.  Bottom-aligned with cell bottom. */
+      const drawW = TILE_PX;
+      const drawH = TILE_PX * sp.height / SPRITE_W;
+      const drawX = tx;
+      const drawY = ty + TILE_PX - drawH;
+      ctx.drawImage(sp.canvas, drawX | 0, drawY | 0, drawW | 0, drawH | 0);
+    }
+  }
+
+  /* Pass 3 — NPCs.  Each NPC's head + body are CA-textured blocks
+   * (same mother ruleset as terrain) seeded by their xterm-256
+   * palette colours.  Salt = the NPC byte so the same NPC always
+   * looks the same. */
+  for (let dy = -halfY; dy <= halfY; dy++) {
+    const wy = py + dy;
+    if (wy < 0 || wy >= TILE_H) continue;
+    const rowOffset = (wy & 1) ? HEX_OFFSET : 0;
+    const ty = cy + dy * TILE_PX - (TILE_PX / 2 | 0);
+    for (let dx = -halfX; dx <= halfX; dx++) {
+      const wx = px + dx;
+      if (wx < 0 || wx >= TILE_W) continue;
+      const i = wy * TILE_W + wx;
+      const b = npcAt[i];
+      if (!b) continue;
+      const tx = cx + dx * TILE_PX + rowOffset - (TILE_PX / 2 | 0)
+               - playerOddOff;
+      const head = NPC_PAL_RGB[(b >> 4) & 0xf];
+      const body = NPC_PAL_RGB[ b       & 0xf];
+      const headH = TILE_PX * 0.4 | 0;
+      const bodyH = TILE_PX * 0.55 | 0;
+      const w = TILE_PX * 0.45 | 0;
+      const blockX = tx + ((TILE_PX - w) / 2 | 0);
+      const headTex = getBlockTexture(head, blockSalt("npc_h", b));
+      const bodyTex = getBlockTexture(body, blockSalt("npc_b", b));
+      ctx.drawImage(headTex, blockX, ty + (TILE_PX * 0.05) | 0,
+                    w, headH);
+      ctx.drawImage(bodyTex, blockX,
+                    ty + headH + (TILE_PX * 0.05) | 0, w, bodyH);
+    }
+  }
+
+  /* Pass 4 — player.  Head + body are CA-textured blocks with the
+   * yellow / magenta palette as seed colours.  Stable salts so the
+   * player always looks the same until the mother ruleset changes. */
+  const headW = (TILE_PX * 0.32) | 0;
+  const headH = (TILE_PX * 0.42) | 0;
+  const bodyW = (TILE_PX * 0.42) | 0;
+  const bodyH = (TILE_PX * 0.5)  | 0;
+  const playerHeadTex = getBlockTexture([255, 227,   0], blockSalt("player_head"));
+  const playerBodyTex = getBlockTexture([255,  58, 208], blockSalt("player_body"));
+  ctx.drawImage(playerHeadTex,
+                (cx - headW / 2) | 0, (cy - bodyH / 2 - headH) | 0,
+                headW, headH);
+  ctx.drawImage(playerBodyTex,
+                (cx - bodyW / 2) | 0, (cy - bodyH / 2) | 0,
+                bodyW, bodyH);
+
+  renderHUD();
+}
+
+/* ── Game loop ──────────────────────────────────────────── */
+let workshopFrameCount = 0;
+function frame() {
+  if (animating) {
+    if (animateTick()) needsRender = true;
+  }
+  if (needsRender) {
+    render();
+    needsRender = false;
+  }
+  /* Genome workshop: tick the preview CA continuously while open
+   * so the user sees the rule's class-1/3/4 character at a glance. */
+  if (modalOpen === "ga") {
+    workshopFrameCount++;
+    if ((workshopFrameCount & 3) === 0) {
+      stepPreview();
+      drawPreview();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ── New game ──────────────────────────────────────────── */
+function newGame() {
+  /* Reset world stack to origin. */
+  for (let i = 0; i < worldPos.length; i++) worldPos[i] = 0;
+  /* Reseed the ruleset.  Mostly random — bending shapes it from there. */
+  const seed = (Date.now() ^ Math.random() * 1e9) >>> 0;
+  const st = newState(seed);
+  for (let i = 0; i < RULESET_BYTES; i++) ruleset[i] = mulberryInt(st) & 3;
+  /* Build mosaic + entities + caches. */
+  refreshPalettes();
+  regenMosaic();
+  spawnPlayer();
+  regenMosaicEntities(px, py);
+  cellTexCache.clear();
+  spriteCache.clear();
+  blockTexCache.clear();
+  player.hp = player.maxHp = 20;
+  player.mp = player.maxMp = 30;
+  player.inv.fill(0);
+  player.invCount = 0;
+  player.bendSkill.fill(0);
+  player.catBend.fill(0);
+  player.alive = true;
+  deathEl.hidden = true;
+  setAction("welcome — wadezx to walk, 0-3 to bend, m to zap, i for inv");
+  needsRender = true;
+}
+
+/* ── Keyboard ──────────────────────────────────────────── */
+function handleKey(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+  /* Death overlay — any key starts a new game. */
+  if (!player.alive) {
+    e.preventDefault();
+    newGame();
+    return;
+  }
+
+  /* Modal handling. */
+  if (modalOpen === "inv") {
+    e.preventDefault();
+    closeModals();
+    needsRender = true;
+    return;
+  }
+  if (modalOpen === "speed") {
+    e.preventDefault();
+    if (k === "ArrowUp")   { speedSel = (speedSel + 3) & 3; renderSpeedModal(); return; }
+    if (k === "ArrowDown") { speedSel = (speedSel + 1) & 3; renderSpeedModal(); return; }
+    if (k === " ")         { terrainAnim[speedSel].on ^= 1; renderSpeedModal(); return; }
+    if (k === "+" || k === "=") { speedNudge(speedSel, +1); renderSpeedModal(); return; }
+    if (k === "-" || k === "_") { speedNudge(speedSel, -1); renderSpeedModal(); return; }
+    if (k === "0")         { terrainAnim[speedSel].fpm = terrainAnim[speedSel].dflt; renderSpeedModal(); return; }
+    if (k === "q" || k === "Escape" || k === "k") { closeModals(); return; }
+    return;
+  }
+  if (modalOpen === "ga") {
+    /* Workshop is open — only Escape closes; everything else falls
+     * through to the modal's own buttons / canvas clicks. */
+    if (k === "Escape" || k === "q") { e.preventDefault(); closeGaWorkshop(); }
+    return;
+  }
+
+  /* Movement. */
+  if ("wadezx".indexOf(k) !== -1) {
+    e.preventDefault();
+    if (moveStep(k)) {
+      pathTick(px, py);
+      maybeShift();
+    }
+    needsRender = true;
+    /* Slow regen: every 4 actions, +1 HP/MP. */
+    moveCounter++;
+    if (moveCounter >= 4) {
+      moveCounter = 0;
+      if (player.hp < player.maxHp) player.hp++;
+      if (player.mp < player.maxMp) player.mp++;
+    }
+    return;
+  }
+
+  /* Inventory popup. */
+  if (k === "i") { e.preventDefault(); showInventory(); return; }
+
+  /* Zap spell. */
+  if (k === "m") {
+    e.preventDefault();
+    castZap();
+    needsRender = true;
+    return;
+  }
+
+  /* Live animation toggle. */
+  if (k === "l") {
+    e.preventDefault();
+    animating = !animating;
+    setAction(animating ? "live anim on" : "live anim off");
+    needsRender = true;
+    return;
+  }
+
+  /* Speed settings. */
+  if (k === "k") { e.preventDefault(); showSpeedSettings(); return; }
+
+  /* Terrain bends 0..3 — silent GA, world repopulates next render. */
+  if (k >= "0" && k <= "3") {
+    e.preventDefault();
+    bendTerrain(parseInt(k));
+    needsRender = true;
+    return;
+  }
+  /* Category bends 4..7 — palette salt only. */
+  if (k >= "4" && k <= "7") {
+    e.preventDefault();
+    bendCategory(parseInt(k) - 4);
+    needsRender = true;
+    return;
+  }
+
+  /* Reseed (r). */
+  if (k === "r") {
+    e.preventDefault();
+    newGame();
+    return;
+  }
+
+  /* Genome workshop (g) — see + refine the 16384 hex CA rules. */
+  if (k === "g") {
+    e.preventDefault();
+    openGaWorkshop();
+    return;
+  }
+}
+let moveCounter = 0;
+
+/* ── Genome workshop ──────────────────────────────────────
+ *
+ * Modal screen for visualising and refining the 16384-entry hex CA
+ * ruleset.  Edits happen on a private copy (editGenome) — nothing
+ * changes in the live game until "Apply to game" is pressed.
+ *
+ *   • Rule grid: 128×128 colour cells, one per rule entry; click to
+ *     cycle the output state 0→1→2→3.
+ *   • Live preview: a 32×32 hex CA running continuously under
+ *     editGenome so the user can feel the ruleset's behaviour at a
+ *     glance — class-1 (uniform), 3 (chaos), or 4 (interesting).
+ *   • Async GA runner: same fitness as the in-game silent bend, but
+ *     paced one generation per setTimeout so the UI stays responsive
+ *     and the user watches the rule grid + preview shift between
+ *     gens.  Adjustable gen count, stop button, live stats.
+ *   • Reset / apply / close.
+ * ─────────────────────────────────────────────────────────── */
+
+const editGenome = new Uint8Array(RULESET_BYTES);
+
+/* Live preview state. */
+const PREV_W = 32, PREV_H = 32;
+const prevA = new Uint8Array(PREV_W * PREV_H);
+const prevB = new Uint8Array(PREV_W * PREV_H);
+let prevCur = prevA, prevNxt = prevB;
+
+const RULE_GRID_W = 128, RULE_GRID_H = 128;   /* 16384 = 128 × 128 */
+const RULE_GRID_PX = 4;                        /* 4 px per rule */
+const RULE_PALETTE = [
+  [ 30,  30,  40],   /* 0 */
+  [ 60, 100, 200],   /* 1 */
+  [ 60, 200, 100],   /* 2 */
+  [240, 140,  60],   /* 3 */
+];
+
+const ruleGridEl = document.getElementById("ruleGrid");
+const prevCanvas = document.getElementById("prevCanvas");
+const gaModal    = document.getElementById("gaModal");
+const gaStatsEl  = document.getElementById("gaStats");
+const gaGensEl   = document.getElementById("gaGens");
+const ruleGridCtx = ruleGridEl.getContext("2d");
+const prevCtx     = prevCanvas.getContext("2d");
+ruleGridCtx.imageSmoothingEnabled = false;
+prevCtx.imageSmoothingEnabled = false;
+
+function reseedPreview() {
+  for (let i = 0; i < PREV_W * PREV_H; i++)
+    prevA[i] = (Math.random() * 4) | 0;
+  prevCur = prevA;
+  prevNxt = prevB;
+}
+function stepPreview() {
+  hexStep(editGenome, prevCur, prevNxt, PREV_W, PREV_H);
+  [prevCur, prevNxt] = [prevNxt, prevCur];
+}
+function drawPreview() {
+  const px = 8;   /* 32 cells × 8 px = 256 px canvas */
+  for (let y = 0; y < PREV_H; y++) {
+    for (let x = 0; x < PREV_W; x++) {
+      const s = prevCur[y * PREV_W + x] & 3;
+      const c = RULE_PALETTE[s];
+      prevCtx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+      prevCtx.fillRect(x * px, y * px, px, px);
+    }
+  }
+}
+
+function drawRuleGrid() {
+  /* Render via a fast ImageData blit — 128*128*4*4 = 262144 px is
+   * too many fillRects for smooth edits. */
+  const W = RULE_GRID_W * RULE_GRID_PX;
+  const H = RULE_GRID_H * RULE_GRID_PX;
+  const img = ruleGridCtx.createImageData(W, H);
+  const data = img.data;
+  for (let row = 0; row < RULE_GRID_H; row++) {
+    for (let col = 0; col < RULE_GRID_W; col++) {
+      const s = editGenome[row * RULE_GRID_W + col] & 3;
+      const c = RULE_PALETTE[s];
+      /* Paint a RULE_GRID_PX × RULE_GRID_PX block. */
+      for (let py = 0; py < RULE_GRID_PX; py++) {
+        for (let px = 0; px < RULE_GRID_PX; px++) {
+          const off = ((row * RULE_GRID_PX + py) * W +
+                       (col * RULE_GRID_PX + px)) * 4;
+          data[off]     = c[0];
+          data[off + 1] = c[1];
+          data[off + 2] = c[2];
+          data[off + 3] = 255;
+        }
+      }
+    }
+  }
+  ruleGridCtx.putImageData(img, 0, 0);
+}
+
+function onRuleGridClick(e) {
+  const rect = ruleGridEl.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * ruleGridEl.width  / rect.width;
+  const cy = (e.clientY - rect.top)  * ruleGridEl.height / rect.height;
+  const col = (cx / RULE_GRID_PX) | 0;
+  const row = (cy / RULE_GRID_PX) | 0;
+  if (col < 0 || col >= RULE_GRID_W || row < 0 || row >= RULE_GRID_H) return;
+  const idx = row * RULE_GRID_W + col;
+  editGenome[idx] = (editGenome[idx] + 1) & 3;
+  /* Repaint just the changed cell. */
+  const c = RULE_PALETTE[editGenome[idx]];
+  ruleGridCtx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+  ruleGridCtx.fillRect(col * RULE_GRID_PX, row * RULE_GRID_PX,
+                        RULE_GRID_PX, RULE_GRID_PX);
+}
+ruleGridEl.addEventListener("click", onRuleGridClick);
+
+/* GA workshop runner — async, one generation per setTimeout so the
+ * rule grid + preview update visibly between gens. */
+let gaWorkshop = null;
+function gaWorkshopStart() {
+  if (gaWorkshop) return;
+  let gens = parseInt(gaGensEl.value, 10);
+  if (!Number.isFinite(gens) || gens < 1) gens = 20;
+  if (gens > 200) gens = 200;
+  const pop = 20;
+  const pool = new Array(pop);
+  pool[0] = new Uint8Array(editGenome);
+  for (let i = 1; i < pop; i++) {
+    pool[i] = new Uint8Array(RULESET_BYTES);
+    gaMutate(pool[i], editGenome, 32);
+  }
+  gaWorkshop = {
+    pool, fits: new Float64Array(pop), pop,
+    gen: 0, totalGens: gens,
+    seed: (Date.now() ^ Math.random() * 1e9) >>> 0,
+    stopped: false,
+  };
+  setTimeout(gaWorkshopStep, 0);
+}
+
+function gaWorkshopStep() {
+  if (!gaWorkshop || gaWorkshop.stopped) { gaWorkshop = null; return; }
+  const ga = gaWorkshop;
+  for (let i = 0; i < ga.pop; i++) ga.fits[i] = gaFitness(ga.pool[i], ga.seed);
+  /* Sort by fitness desc — bubble for tiny pop. */
+  for (let i = 0; i < ga.pop; i++) {
+    for (let j = i + 1; j < ga.pop; j++) {
+      if (ga.fits[j] > ga.fits[i]) {
+        const tf = ga.fits[i]; ga.fits[i] = ga.fits[j]; ga.fits[j] = tf;
+        const tp = ga.pool[i]; ga.pool[i] = ga.pool[j]; ga.pool[j] = tp;
+      }
+    }
+  }
+  /* Adopt the current best as the editGenome — visual feedback. */
+  editGenome.set(ga.pool[0]);
+  /* Breed bottom half. */
+  const tmp = new Uint8Array(RULESET_BYTES);
+  for (let i = (ga.pop >> 1); i < ga.pop; i++) {
+    const pa = (Math.random() * (ga.pop >> 1)) | 0;
+    const pb = (Math.random() * (ga.pop >> 1)) | 0;
+    gaCrossover(tmp, ga.pool[pa], ga.pool[pb]);
+    gaMutate(ga.pool[i], tmp, 4);
+  }
+  ga.gen++;
+  drawRuleGrid();
+  reseedPreview();             /* run the new ruleset on a fresh seed */
+  updateGaStats();
+  if (ga.gen >= ga.totalGens) { gaWorkshop = null; return; }
+  setTimeout(gaWorkshopStep, 30);
+}
+
+function gaWorkshopStop() {
+  if (gaWorkshop) gaWorkshop.stopped = true;
+  gaWorkshop = null;
+  updateGaStats();
+}
+
+function updateGaStats() {
+  if (!gaWorkshop) {
+    gaStatsEl.textContent = "Idle";
+    return;
+  }
+  const ga = gaWorkshop;
+  let avg = 0;
+  for (let i = 0; i < ga.pop; i++) avg += ga.fits[i];
+  avg /= ga.pop;
+  const best = ga.fits[0] || 0;
+  gaStatsEl.textContent =
+    "Gen " + ga.gen + "/" + ga.totalGens +
+    "   ·   best fitness " + best.toFixed(0) +
+    "   ·   avg " + avg.toFixed(0);
+}
+
+function applyEditGenome() {
+  ruleset.set(editGenome);
+  cellTexCache.clear();
+  blockTexCache.clear();
+  spriteCache.clear();
+  /* Match the in-game silent bend's behaviour: textures update next
+   * render, but the terrain layout + entities + inventory persist. */
+  closeGaWorkshop();
+  setAction("genome applied");
+  needsRender = true;
+}
+
+function resetEditToRandom() {
+  for (let i = 0; i < RULESET_BYTES; i++) editGenome[i] = (Math.random() * 4) | 0;
+  drawRuleGrid();
+  reseedPreview();
+}
+function resetEditToCurrent() {
+  editGenome.set(ruleset);
+  drawRuleGrid();
+  reseedPreview();
+}
+
+function openGaWorkshop() {
+  if (modalOpen) return;
+  modalOpen = "ga";
+  editGenome.set(ruleset);
+  reseedPreview();
+  drawRuleGrid();
+  drawPreview();
+  updateGaStats();
+  gaModal.hidden = false;
+}
+function closeGaWorkshop() {
+  gaWorkshopStop();
+  gaModal.hidden = true;
+  modalOpen = null;
+  needsRender = true;
+}
+
+/* Wire up the modal buttons. */
+document.getElementById("prevReseed").addEventListener("click", () => {
+  reseedPreview(); drawPreview();
+});
+document.getElementById("gaRunBtn").addEventListener("click", gaWorkshopStart);
+document.getElementById("gaStopBtn").addEventListener("click", gaWorkshopStop);
+document.getElementById("gaRandomBtn").addEventListener("click", resetEditToRandom);
+document.getElementById("gaCurrentBtn").addEventListener("click", resetEditToCurrent);
+document.getElementById("gaApplyBtn").addEventListener("click", applyEditGenome);
+document.getElementById("gaCloseBtn").addEventListener("click", closeGaWorkshop);
+
+window.addEventListener("keydown", handleKey);
+
+/* ── Bootstrap ──────────────────────────────────────────── */
+newGame();
+frame();
+
+</script>
+</body>
+</html>
