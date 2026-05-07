@@ -36,7 +36,7 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office33", "office34", "office35", "office36", "office37",
             "office38", "office39", "office40", "office41", "office42",
             "office43", "office44", "office45", "office46", "office47",
-            "office48", "office49", "office50"]
+            "office48", "office49", "office50", "office51", "office52"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -101,7 +101,12 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # player stats (HP/MP/inventory), spells, and z-sorted occluding
     # sprites that overdraw cells north of tall objects.  office37+
     # adds the meta-overworld stack; office40 adds wander paths;
-    # office41 the seamless 3×3 mosaic.
+    # office41 the seamless 3×3 mosaic.  office51 adds the world-
+    # stable cell hash (rpg_cell_world_hash + rpg_panel_seed cache),
+    # the partial-regen shift (rpg_panel_regen_into / rpg_panel_splat
+    # / rpg_panel_copy_live), and the 2-cell-margin shadow pre-load
+    # (rpg_preload_panel + rpg_preload_advance_one + rpg_preload_*) —
+    # all caught by the `rpg_` prefix.
     ("rpg",
      ["run_rpg", "rpg_", "RPG_", "xterm256_to_rgb", "xterm_"],
      # function-local statics inside rpg_*: `moved` is the
@@ -218,7 +223,10 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
 
     ("framebuffer",
      ["fb", "cls", "cup", "sgr"],
-     ["g_last_bg", "g_last_fg"]),
+     # `beg` and `end` are office52's static const DECSET 2026
+     # sequences inside fbflush (synchronized output begin/end);
+     # they're framebuffer plumbing, not their own feature.
+     ["g_last_bg", "g_last_fg", "beg", "end"]),
 
     ("libc_replacements",
      [],
