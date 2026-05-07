@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>office rpg — hi-res JS port (test)</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #000;
+               color: #ccc; font-family: ui-monospace, "SF Mono", Menlo,
+               Consolas, monospace; overflow: hidden; }
+  #screen   { display: block; image-rendering: pixelated;
+              image-rendering: crisp-edges; position: absolute;
+              left: 0; top: 0; }
+  #hud      { position: absolute; left: 12px; bottom: 10px;
+              font-size: 0.78rem; line-height: 1.5; color: #888;
+              background: rgba(0, 0, 0, 0.55); padding: 6px 10px;
+              border: 1px solid #333; border-radius: 4px;
+              pointer-events: none; }
+  #hud kbd  { background: #1a1a1a; border: 1px solid #444;
+              border-bottom-width: 2px; padding: 0 4px;
+              border-radius: 3px; color: #ccc; font-size: 0.72rem; }
+  #status   { color: #5a5; margin-top: 4px; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<div id="hud">
+  <div>
+    <kbd>w</kbd><kbd>e</kbd> NW/NE &nbsp;
+    <kbd>a</kbd><kbd>d</kbd> W/E &nbsp;
+    <kbd>z</kbd><kbd>x</kbd> SW/SE &nbsp;
+    <kbd>r</kbd> reseed
+  </div>
+  <div id="status"></div>
+</div>
+<script>
+"use strict";
+
+/* ── config ─────────────────────────────────────────────────
+ * Each world cell is a 64×64 hex CA — same as office50 rpg —
+ * but in this hi-res port we render the inner CA at FULL
+ * resolution (one screen pixel per CA cell, no down-sampling).
+ * The visible window scales to fill the browser, so a typical
+ * 1920×1080 screen shows roughly 30×16 tiles. */
+const INNER = 64;                 // CA grid side
+const TILE_PX = INNER;            // one screen px per CA cell
+const HEX_OFFSET = TILE_PX / 2;   // odd rows shift half a tile east
+const GEN_STEPS = 5;
+const INNER_STEPS = 2;            // inner-CA tick count for cell texture
+
+const PALETTE_ANCHOR = [
+  [ 90,  90,  92],   // rock
+  [220, 200, 140],   // sand
+  [ 90, 130,  60],   // soil
+  [ 30,  80, 180],   // water
+];
+
+/* ── PRNG ─────────────────────────────────────────────────── */
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash3(a, b, c) {
+  let h = (a * 0x9e3779b9) ^ (b * 0x85ebca6b) ^ (c * 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/* ── hex CA stepping ────────────────────────────────────── */
+const HX_DY  = [-1, -1,  0,  0,  1,  1];
+const HX_DXE = [ 0,  1, -1,  1,  0,  1];
+const HX_DXO = [-1,  0, -1,  1, -1,  0];
+function sitIdx(self, n) {
+  let idx = self;
+  for (let k = 0; k < 6; k++) idx = idx * 4 + (n[k] & 3);
+  return idx;
+}
+function hexStep(g, inGrid, outGrid, w, h) {
+  const n = [0,0,0,0,0,0];
+  for (let y = 0; y < h; y++) {
+    const odd = y & 1;
+    for (let x = 0; x < w; x++) {
+      const self = inGrid[y * w + x];
+      for (let k = 0; k < 6; k++) {
+        const yy = y + HX_DY[k];
+        const xx = x + (odd ? HX_DXO[k] : HX_DXE[k]);
+        n[k] = (yy >= 0 && yy < h && xx >= 0 && xx < w)
+             ? inGrid[yy * w + xx] : 0;
+      }
+      outGrid[y * w + x] = g[sitIdx(self, n)];
+    }
+  }
+}
+
+/* ── world state ────────────────────────────────────────── */
+let worldSeed = 0xdeadbeef;
+let ruleset   = new Uint8Array(4096);
+const innerA  = new Uint8Array(INNER * INNER);
+const innerB  = new Uint8Array(INNER * INNER);
+
+/* The visible region's footprint can grow at runtime (resize),
+ * so the world map and texture cache are sized lazily. */
+let MAP_W = 0, MAP_H = 0;
+let map = null;
+let palette = [...PALETTE_ANCHOR];
+
+const cellTexCache = new Map();   // key = wy*MAP_W+wx → ImageData(64×64)
+
+function regenWorld() {
+  const rng = mulberry32(worldSeed);
+  for (let i = 0; i < 4096; i++) ruleset[i] = (rng() * 4) | 0;
+
+  /* Per-overworld palette (mirrors office50): drift each anchor ±32. */
+  palette = PALETTE_ANCHOR.map(([r, g, b]) => {
+    const dr = ((rng() * 64) | 0) - 32;
+    const dg = ((rng() * 64) | 0) - 32;
+    const db = ((rng() * 64) | 0) - 32;
+    return [
+      Math.max(0, Math.min(255, r + dr)),
+      Math.max(0, Math.min(255, g + dg)),
+      Math.max(0, Math.min(255, b + db)),
+    ];
+  });
+
+  /* Build an outer terrain map sized to the current window — we just
+   * need enough cells to cover any view + a small margin.  Re-sized
+   * on window resize too. */
+  buildMap();
+}
+
+function buildMap() {
+  /* Always make the map a fixed 256×256 ring around the player so a
+   * little panning works without a regen.  That's 64K cells, which is
+   * fine for memory (64K bytes for the terrain layer). */
+  MAP_W = 256;
+  MAP_H = 256;
+  map = new Uint8Array(MAP_W * MAP_H);
+  const rng = mulberry32(worldSeed ^ 0x5a5a5a5a);
+  for (let i = 0; i < MAP_W * MAP_H; i++) map[i] = (rng() * 4) | 0;
+  let a = map, b = new Uint8Array(MAP_W * MAP_H);
+  for (let t = 0; t < GEN_STEPS; t++) {
+    hexStep(ruleset, a, b, MAP_W, MAP_H);
+    [a, b] = [b, a];
+  }
+  if (a !== map) map.set(a);
+  cellTexCache.clear();
+}
+
+/* Build a 64×64 ImageData for one cell: inner CA from the cell hash,
+ * stepped INNER_STEPS times under the world ruleset, painted with the
+ * cell's per-cell jittered 4-colour palette. */
+function getCellTexture(wx, wy) {
+  const key = wy * MAP_W + wx;
+  let img = cellTexCache.get(key);
+  if (img) return img;
+
+  /* Inner CA seed — same recipe as office50 rpg_compute_cell. */
+  const rng = mulberry32(hash3(wx, wy, worldSeed));
+  for (let i = 0; i < INNER * INNER; i++) innerA[i] = (rng() * 4) | 0;
+  let a = innerA, b = innerB;
+  for (let t = 0; t < INNER_STEPS; t++) {
+    hexStep(ruleset, a, b, INNER, INNER);
+    [a, b] = [b, a];
+  }
+  const inner = a;
+
+  /* Per-cell palette: terrain anchor + ±64 jitter on each of 4 slots. */
+  const terrain = map[key] & 3;
+  const [br, bg, bb] = palette[terrain];
+  const pRng = mulberry32(hash3(wx ^ 0xa5, wy ^ 0x5a, worldSeed));
+  const pal = new Array(4);
+  for (let k = 0; k < 4; k++) {
+    const dr = ((pRng() * 128) | 0) - 64;
+    const dg = ((pRng() * 128) | 0) - 64;
+    const db = ((pRng() * 128) | 0) - 64;
+    pal[k] = [
+      Math.max(0, Math.min(255, br + dr)) | 0,
+      Math.max(0, Math.min(255, bg + dg)) | 0,
+      Math.max(0, Math.min(255, bb + db)) | 0,
+    ];
+  }
+
+  /* Paint the 64×64 RGBA buffer.  One CA cell = one screen pixel. */
+  img = ctx.createImageData(INNER, INNER);
+  const data = img.data;
+  for (let i = 0, p = 0; i < INNER * INNER; i++, p += 4) {
+    const c = inner[i] & 3;
+    data[p    ] = pal[c][0];
+    data[p + 1] = pal[c][1];
+    data[p + 2] = pal[c][2];
+    data[p + 3] = 255;
+  }
+  cellTexCache.set(key, img);
+  return img;
+}
+
+/* ── canvas + viewport ──────────────────────────────────── */
+const canvas = document.getElementById("screen");
+const ctx    = canvas.getContext("2d");
+const status = document.getElementById("status");
+
+function resize() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", () => { resize(); render(); });
+
+/* Player starts in the middle of the map. */
+let px = MAP_W >> 1;
+let py = MAP_H >> 1;
+
+/* ── render ─────────────────────────────────────────────── */
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+
+  /* Number of tiles in each direction.  Add a 2-tile margin so the
+   * hex offset and partial-edge tiles still draw. */
+  const tilesAcross = Math.ceil(W / TILE_PX) + 2;
+  const tilesDown   = Math.ceil(H / TILE_PX) + 2;
+  /* Player at the geometric centre of the canvas. */
+  const cx = (W / 2) | 0;
+  const cy = (H / 2) | 0;
+  const halfX = (tilesAcross >> 1);
+  const halfY = (tilesDown   >> 1);
+
+  for (let dy = -halfY; dy <= halfY; dy++) {
+    const wy = py + dy;
+    if (wy < 0 || wy >= MAP_H) continue;
+    const odd = wy & 1;
+    const rowOffset = odd ? HEX_OFFSET : 0;
+    for (let dx = -halfX; dx <= halfX; dx++) {
+      const wx = px + dx;
+      if (wx < 0 || wx >= MAP_W) continue;
+      const tx = cx + dx * TILE_PX + rowOffset - TILE_PX / 2
+               - ((py & 1) ? HEX_OFFSET : 0);
+      const ty = cy + dy * TILE_PX           - TILE_PX / 2;
+      if (tx + TILE_PX < 0 || tx > W || ty + TILE_PX < 0 || ty > H) continue;
+      const img = getCellTexture(wx, wy);
+      ctx.putImageData(img, tx, ty);
+    }
+  }
+
+  /* Player sprite — 1 cell wide × 2 chars tall in the C version,
+   * here translated as a slim head-over-body block centred in the
+   * player's tile. */
+  const headW = 12, headH = 18;
+  const bodyW = 16, bodyH = 22;
+  ctx.fillStyle = "#ffe300";
+  ctx.fillRect((cx - headW / 2) | 0, (cy - 22) | 0, headW, headH);
+  ctx.fillStyle = "#ff3ad0";
+  ctx.fillRect((cx - bodyW / 2) | 0, cy - 4, bodyW, bodyH);
+
+  status.textContent =
+    `pos (${px},${py})   terrain ${["rock","sand","soil","water"][map[py*MAP_W+px]&3]}` +
+    `   tiles ${tilesAcross}×${tilesDown}   seed 0x${worldSeed.toString(16)}`;
+}
+
+/* ── movement ───────────────────────────────────────────── */
+function move(dir) {
+  const odd = py & 1;
+  let nx = px, ny = py;
+  switch (dir) {
+    case 'a': nx = px - 1;                            break;
+    case 'd': nx = px + 1;                            break;
+    case 'w': ny = py - 1; nx = px + (odd ?  0 : -1); break;
+    case 'e': ny = py - 1; nx = px + (odd ?  1 :  0); break;
+    case 'z': ny = py + 1; nx = px + (odd ?  0 : -1); break;
+    case 'x': ny = py + 1; nx = px + (odd ?  1 :  0); break;
+  }
+  if (nx >= 0 && nx < MAP_W && ny >= 0 && ny < MAP_H) {
+    px = nx; py = ny;
+  }
+  render();
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if ("wadezx".indexOf(k) !== -1) {
+    e.preventDefault();
+    move(k);
+  } else if (k === 'r') {
+    e.preventDefault();
+    worldSeed = (Math.random() * 0xffffffff) >>> 0;
+    regenWorld();
+    px = MAP_W >> 1;
+    py = MAP_H >> 1;
+    render();
+  }
+});
+
+/* Bootstrap */
+regenWorld();
+render();
+</script>
+</body>
+</html>
