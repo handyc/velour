@@ -72,8 +72,8 @@ def index(request):
 
     rows = _build_overview(versions, baseline)
 
-    # The two recent forks (office7) added the biggest jump — surface
-    # that explicitly so the user knows where their budget went.
+    # Surface the fork that grew the binary most so the user knows
+    # where their budget went.
     biggest_jump = max(rows, key=lambda r: r['delta']) if rows else None
 
     return render(request, 'officelab/index.html', {

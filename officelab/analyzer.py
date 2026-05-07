@@ -1,4 +1,4 @@
-"""Per-feature byte attribution for the office..office7 ELFs.
+"""Per-feature byte attribution for the office..officeN ELFs.
 
 The analyser shells out to `nm --print-size` and `size` on the
 unstripped *.dbg binaries built by isolation/artifacts/office/Makefile.
@@ -93,10 +93,26 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # rpg — tile explorer driven by the .hxseed ruleset (office20+);
     # office22+ adds entity layer (plants/buildings/animals/items),
     # player stats (HP/MP/inventory), spells, and z-sorted occluding
-    # sprites that overdraw cells north of tall objects.
+    # sprites that overdraw cells north of tall objects.  office37+
+    # adds the meta-overworld stack; office40 adds wander paths;
+    # office41 the seamless 3×3 mosaic.
     ("rpg",
      ["run_rpg", "rpg_", "RPG_"],
      []),
+
+    # bytebeat — tiny PCM synth with curl→aplay/paplay/ffplay
+    # playback (office39+).  bb_eval / bb_render_and_play and the
+    # preset name/formula tables.
+    ("bytebeat",
+     ["run_bytebeat", "bb_", "BB_"],
+     []),
+
+    # screensaver — auto-plays the rpg world in fullscreen until
+    # any keypress (office43+).  Owns g_rpg_fullscreen because it's
+    # the only caller; rpg sets it to 0 on entry/exit.
+    ("screensaver",
+     ["run_screensaver"],
+     ["g_rpg_fullscreen"]),
 
     # lsys — character-mode L-system viewer (office21+).  4 category
     # interpretations of the same axiom+rule grammar.
