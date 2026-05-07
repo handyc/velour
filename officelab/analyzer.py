@@ -35,7 +35,7 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office29", "office30", "office31", "office32",
             "office33", "office34", "office35", "office36", "office37",
             "office38", "office39", "office40", "office41", "office42",
-            "office43", "office44", "office45", "office46"]
+            "office43", "office44", "office45", "office46", "office47"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
