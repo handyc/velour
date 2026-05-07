@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>office rpg — block-mode JS port (test)</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #111; color: #ccc;
+               font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  body { padding: 20px; }
+  h1   { font-size: 1rem; font-weight: 500; margin: 0 0 12px; color: #888; }
+  canvas { display: block; image-rendering: pixelated;
+           image-rendering: crisp-edges; box-shadow: 0 0 0 1px #333; }
+  #hud  { margin-top: 10px; font-size: 0.85rem; line-height: 1.6; color: #888; }
+  #hud kbd { background: #222; border: 1px solid #444; border-bottom-width: 2px;
+             padding: 1px 6px; border-radius: 3px; color: #ccc; font-size: 0.8rem; }
+  #status { margin-top: 6px; color: #5a5; }
+</style>
+</head>
+<body>
+<h1>office rpg — block-mode JS port (test)</h1>
+<canvas id="screen" width="608" height="408"></canvas>
+<div id="hud">
+  <div>
+    <kbd>w</kbd> <kbd>e</kbd> NW/NE &nbsp;
+    <kbd>a</kbd> <kbd>d</kbd> W/E &nbsp;
+    <kbd>z</kbd> <kbd>x</kbd> SW/SE &nbsp;
+    <kbd>r</kbd> reseed world
+  </div>
+  <div id="status"></div>
+</div>
+<script>
+"use strict";
+
+/* ── config (mirrors the C constants in office50.c rpg) ─────── */
+const MAP_W = 64, MAP_H = 64;             // world cells per overworld
+const VIS_W = 8,  VIS_H = 8;              // visible window in cells
+const PLAYER_VX = 4, PLAYER_VY = 4;       // player at this slot of window
+const RPG_CELL_W = 8, RPG_CELL_H = 3;     // each cell = 8x3 chars
+const CELL_PX_W = 8, CELL_PX_H = 16;      // char rendered as this many px
+const MID_SHIFT = 2;                      // mid-line +2 chars for hex feel
+const GEN_STEPS = 5;                      // CA ticks for terrain gen
+
+/* Terrain palette — rock / sand / soil / water archetype RGBs.
+ * Same anchor values as office50's rpg_palette_for_seed. */
+const PALETTE_ANCHOR = [
+  [ 90,  90,  92],   // rock  — neutral grey
+  [220, 200, 140],   // sand  — warm tan
+  [ 90, 130,  60],   // soil  — moss green
+  [ 30,  80, 180],   // water — deep blue
+];
+
+/* ── PRNG (deterministic, swappable seed) ──────────────────── */
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function hash2(a, b) {
+  let h = (a * 0x9e3779b9) ^ (b * 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/* ── hex CA stepping (mirrors C hx_step_grid) ──────────────── */
+const HX_DY  = [-1, -1,  0,  0,  1,  1];
+const HX_DXE = [ 0,  1, -1,  1,  0,  1];
+const HX_DXO = [-1,  0, -1,  1, -1,  0];
+function sitIdx(self, n) {
+  let idx = self;
+  for (let k = 0; k < 6; k++) idx = idx * 4 + (n[k] & 3);
+  return idx;
+}
+function hexStep(g, inGrid, outGrid, w, h) {
+  const n = [0,0,0,0,0,0];
+  for (let y = 0; y < h; y++) {
+    const odd = y & 1;
+    for (let x = 0; x < w; x++) {
+      const self = inGrid[y * w + x];
+      for (let k = 0; k < 6; k++) {
+        const yy = y + HX_DY[k];
+        const xx = x + (odd ? HX_DXO[k] : HX_DXE[k]);
+        n[k] = (yy >= 0 && yy < h && xx >= 0 && xx < w)
+             ? inGrid[yy * w + xx] : 0;
+      }
+      outGrid[y * w + x] = g[sitIdx(self, n)];
+    }
+  }
+}
+
+/* ── world state ───────────────────────────────────────────── */
+let worldSeed = 0xdeadbeef;
+let ruleset   = new Uint8Array(4096);
+let map       = new Uint8Array(MAP_W * MAP_H);
+let scratch   = new Uint8Array(MAP_W * MAP_H);
+let palette   = [...PALETTE_ANCHOR];   // 4 RGB triples
+
+/* Per-cell texture cache.  Keyed by cell index in the world map. */
+const cellSamples = new Map();
+const cellPals    = new Map();
+
+function regen() {
+  const rng = mulberry32(worldSeed);
+  /* Random ruleset. */
+  for (let i = 0; i < 4096; i++) ruleset[i] = (rng() * 4) | 0;
+  /* Random initial map, then step. */
+  for (let i = 0; i < MAP_W * MAP_H; i++) map[i] = (rng() * 4) | 0;
+  let a = map, b = scratch;
+  for (let t = 0; t < GEN_STEPS; t++) {
+    hexStep(ruleset, a, b, MAP_W, MAP_H);
+    [a, b] = [b, a];
+  }
+  if (a !== map) { map.set(a); }
+
+  /* Per-overworld palette: drift each anchor by ±32. */
+  palette = PALETTE_ANCHOR.map(([r, g, b]) => {
+    const dr = ((rng() * 64) | 0) - 32;
+    const dg = ((rng() * 64) | 0) - 32;
+    const db = ((rng() * 64) | 0) - 32;
+    return [
+      Math.max(0, Math.min(255, r + dr)),
+      Math.max(0, Math.min(255, g + dg)),
+      Math.max(0, Math.min(255, b + db)),
+    ];
+  });
+
+  cellSamples.clear();
+  cellPals.clear();
+}
+
+/* Inner-CA texture for a cell: 64×64 hex CA from cell-hash seed,
+ * stepped a couple of times, sampled to 8×3 by mode-vote. */
+const innerA = new Uint8Array(MAP_W * MAP_H);
+const innerB = new Uint8Array(MAP_W * MAP_H);
+function getCellSample(wx, wy) {
+  const key = wy * MAP_W + wx;
+  let s = cellSamples.get(key);
+  if (s) return s;
+  const rng = mulberry32(hash2(wx, wy) ^ worldSeed);
+  for (let i = 0; i < MAP_W * MAP_H; i++) innerA[i] = (rng() * 4) | 0;
+  hexStep(ruleset, innerA, innerB, MAP_W, MAP_H);
+  hexStep(ruleset, innerB, innerA, MAP_W, MAP_H);
+  /* Sample 8×3 from 64×64 with the same {0,21,43,64} band split as C. */
+  const bandY = [0, 21, 43, 64];
+  s = new Uint8Array(24);
+  for (let r = 0; r < 3; r++) {
+    const y0 = bandY[r], y1 = bandY[r + 1];
+    for (let c = 0; c < 8; c++) {
+      const x0 = c * 8, x1 = x0 + 8;
+      const counts = [0, 0, 0, 0];
+      for (let y = y0; y < y1; y++)
+        for (let x = x0; x < x1; x++)
+          counts[innerA[y * MAP_W + x] & 3]++;
+      let best = 0;
+      for (let k = 1; k < 4; k++) if (counts[k] > counts[best]) best = k;
+      s[r * 8 + c] = best;
+    }
+  }
+  cellSamples.set(key, s);
+  return s;
+}
+
+/* Per-cell palette: terrain base RGB + 4 ±64 jitters. */
+function getCellPal(wx, wy) {
+  const key = wy * MAP_W + wx;
+  let p = cellPals.get(key);
+  if (p) return p;
+  const terrain = map[key] & 3;
+  const [br, bg, bb] = palette[terrain];
+  const rng = mulberry32(hash2(wx ^ 0xa5, wy ^ 0x5a) ^ worldSeed);
+  p = new Array(4);
+  for (let k = 0; k < 4; k++) {
+    const dr = ((rng() * 128) | 0) - 64;
+    const dg = ((rng() * 128) | 0) - 64;
+    const db = ((rng() * 128) | 0) - 64;
+    p[k] = [
+      Math.max(0, Math.min(255, br + dr)),
+      Math.max(0, Math.min(255, bg + dg)),
+      Math.max(0, Math.min(255, bb + db)),
+    ];
+  }
+  cellPals.set(key, p);
+  return p;
+}
+
+/* ── player ────────────────────────────────────────────────── */
+let px = MAP_W >> 1;
+let py = MAP_H >> 1;
+
+/* ── render ────────────────────────────────────────────────── */
+const canvas = document.getElementById("screen");
+const ctx    = canvas.getContext("2d");
+const status = document.getElementById("status");
+
+function render() {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const cellPxW = RPG_CELL_W * CELL_PX_W;     // 64 px
+  const cellPxH = RPG_CELL_H * CELL_PX_H;     // 48 px
+  const midShiftPx = MID_SHIFT * CELL_PX_W;   // 16 px
+
+  /* Centre the 8×8 cell grid (with hex jitter) inside the canvas. */
+  const gridW = VIS_W * cellPxW + cellPxW / 2 + midShiftPx;
+  const gridH = VIS_H * cellPxH;
+  const ox = ((canvas.width  - gridW) / 2) | 0;
+  const oy = ((canvas.height - gridH) / 2) | 0;
+
+  for (let vy = 0; vy < VIS_H; vy++) {
+    const rowOffset = (vy & 1) ? cellPxW / 2 : 0;
+    for (let vx = 0; vx < VIS_W; vx++) {
+      const wx = px + vx - PLAYER_VX;
+      const wy = py + vy - PLAYER_VY;
+      const baseX = ox + rowOffset + vx * cellPxW;
+      const baseY = oy + vy * cellPxH;
+      if (wx < 0 || wx >= MAP_W || wy < 0 || wy >= MAP_H) continue;
+      const sample = getCellSample(wx, wy);
+      const pal    = getCellPal(wx, wy);
+      for (let line = 0; line < RPG_CELL_H; line++) {
+        const lineX = baseX + (line === 1 ? midShiftPx : 0);
+        const yy    = baseY + line * CELL_PX_H;
+        for (let col = 0; col < RPG_CELL_W; col++) {
+          const c = sample[line * RPG_CELL_W + col] & 3;
+          const [r, g, b] = pal[c];
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillRect(lineX + col * CELL_PX_W, yy, CELL_PX_W, CELL_PX_H);
+        }
+      }
+    }
+  }
+
+  /* Player: 1×2 sprite, head + body in distinct hot colours. */
+  const rowOff = (PLAYER_VY & 1) ? cellPxW / 2 : 0;
+  const sx = ox + rowOff + PLAYER_VX * cellPxW + cellPxW / 2;
+  const sy = oy + PLAYER_VY * cellPxH;
+  ctx.fillStyle = "#ffe300";   // bright yellow head
+  ctx.fillRect(sx, sy, CELL_PX_W, CELL_PX_H);
+  ctx.fillStyle = "#ff3ad0";   // bright magenta body
+  ctx.fillRect(sx, sy + CELL_PX_H, CELL_PX_W, CELL_PX_H);
+
+  status.textContent =
+    `pos (${px},${py})   terrain ${["rock","sand","soil","water"][map[py*MAP_W+px]&3]}   ` +
+    `seed 0x${worldSeed.toString(16)}`;
+}
+
+/* ── movement (hex offsets, parity-aware — same as office C) ── */
+function move(dir) {
+  const odd = py & 1;
+  let nx = px, ny = py;
+  switch (dir) {
+    case 'a': nx = px - 1;                         break;
+    case 'd': nx = px + 1;                         break;
+    case 'w': ny = py - 1; nx = px + (odd ?  0 : -1); break;
+    case 'e': ny = py - 1; nx = px + (odd ?  1 :  0); break;
+    case 'z': ny = py + 1; nx = px + (odd ?  0 : -1); break;
+    case 'x': ny = py + 1; nx = px + (odd ?  1 :  0); break;
+  }
+  if (nx >= 0 && nx < MAP_W && ny >= 0 && ny < MAP_H) {
+    px = nx; py = ny;
+  }
+  render();
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if ("wadezx".indexOf(k) !== -1) {
+    e.preventDefault();
+    move(k);
+  } else if (k === 'r') {
+    e.preventDefault();
+    worldSeed = (Math.random() * 0xffffffff) >>> 0;
+    regen();
+    px = MAP_W >> 1;
+    py = MAP_H >> 1;
+    render();
+  }
+});
+
+/* Bootstrap */
+regen();
+render();
+</script>
+</body>
+</html>
