@@ -60,6 +60,9 @@ VERSIONS = ["office", "office2", "office3", "office4",
             # network stack + screensaver + garden dropped, plus a
             # 4 KB persistent system-prompt slot for the LLM client.
             "supercell",
+            # Tighter sibling: ask + standalone hxhnt/lsys dropped,
+            # rpg+hxhnt-engine+L-system folded into a single `xpg` app.
+            "officex",
             ]
 BASELINE = "minimal"
 
@@ -135,7 +138,7 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # (rpg_preload_panel + rpg_preload_advance_one + rpg_preload_*) —
     # all caught by the `rpg_` prefix.
     ("rpg",
-     ["run_rpg", "rpg_", "RPG_", "xterm256_to_rgb", "xterm_"],
+     ["run_rpg", "run_xpg", "rpg_", "RPG_", "xterm256_to_rgb", "xterm_"],
      # function-local statics inside rpg_*: `moved` is the
      # 192×192 entity-step bitmap; `anchor` and `band_y` are
      # palette tables; `dirs` is the hex-direction key map;

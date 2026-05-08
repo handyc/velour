@@ -17,7 +17,7 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
 
 VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 office60 office61 office62 office63 office64 office65 office66 \
            officetiny officeproductivity officeresearcher officegamer officesysadmin officehoneypot \
-           supercell
+           supercell officex
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
 all: $(VERSIONS) minimal jail
@@ -428,6 +428,16 @@ supercell: supercell.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "supercell: $$(stat -c %s $@) bytes"
 
+# Tighter sibling of supercell — drops ask + the standalone hxhnt
+# and lsys menu entries; rpg, hxhnt's CA/GA engine, and L-system
+# sprite expansion are merged into a single app called `xpg`.
+# Core productivity (notepad/sheet/hex/files/calc-via-sheet) plus
+# xpg, nothing else.
+officex: officex.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "officex: $$(stat -c %s $@) bytes"
+
 # Unstripped twins for the officelab analyser.  Same source, same
 # CFLAGS, same LDFLAGS *minus* `-s` so nm can see every function.
 %.dbg: %.c
@@ -456,7 +466,7 @@ jail.dbg: jail.c
 
 clean:
 	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 office60 office61 office62 office63 office64 office65 office66 office66-lite \
-	      $(PRESETS) supercell \
+	      $(PRESETS) supercell officex \
 	      minimal jail $(DBG) jail.dbg \
 	      outbox.txt canvas.txt office*.conf garden.bin hxhnt.seed hxhnt_winner_*.seed hxh-*
 
