@@ -4594,12 +4594,24 @@ static int coder_proj_push(void) {
      * then rewrite — saves us from needing O_APPEND.  Caps at
      * CODER_PROJ_MAX so a runaway project doesn't grow unbounded. */
     static char proj[CODER_PROJ_MAX];
+    /* Reserve ~5 KB at the top so a fresh step header + source body
+     * + frame markers can always be appended without writing past
+     * the buffer end.  Refusing the push when the file is already
+     * within that reserve was the missing guard that caused
+     * intermittent SIGSEGVs after many push iterations. */
+    #define CODER_PROJ_RESERVE 5120
     int existing = 0;
     int rfd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
     if (rfd >= 0) {
-        existing = (int)rd(rfd, proj, sizeof proj);
+        existing = (int)rd(rfd, proj, sizeof proj - CODER_PROJ_RESERVE);
         cl(rfd);
         if (existing < 0) existing = 0;
+    }
+    if (existing >= (int)sizeof proj - CODER_PROJ_RESERVE) {
+        /* File is at or beyond the reserve threshold — bail rather
+         * than corrupt the buffer.  Negative return distinguishes
+         * 'project full' from 'no source binary' (== 0). */
+        return -1;
     }
 
     int step = coder_proj_count_steps() + 1;
@@ -5323,7 +5335,11 @@ static int run_coder(int argc, char **argv) {
         }
         if (k[0] == 'p') {
             int step = coder_proj_push();
-            if (step <= 0) {
+            if (step == -1) {
+                coder_paint("push failed — coder_project.txt is full (60 KB), trim it");
+                continue;
+            }
+            if (step == 0) {
                 coder_paint("push failed — no /tmp/coder_attempt.c?");
                 continue;
             }
