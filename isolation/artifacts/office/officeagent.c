@@ -4773,6 +4773,194 @@ static int coder_extract_code(const char *src, int sn, char *out, int cap) {
     return n;
 }
 
+/* ── long-term project workflow ────────────────────────────────────
+ * Two hotkeys:
+ *   p — push the current /tmp/coder_attempt.c as a step in the
+ *       project, appending it to coder_project.txt and writing a
+ *       one-line summary into BANK_PROJECT so subsequent iterations
+ *       see the full plan.
+ *   c — compose: re-prompt the LLM with the project bank + every
+ *       saved snippet and ask it to produce a single merged program.
+ *
+ * Storage: a single text file `coder_project.txt` in the cwd, with
+ * one entry per step framed as:
+ *
+ *     [step NN] <goal text>
+ *     @@@
+ *     <full source code>
+ *     @@@
+ *
+ * Plain text so the user can hand-edit it; @@@ is the source frame
+ * delimiter.  The file caps at CODER_PROJ_MAX bytes — too small for
+ * a giant project, big enough for a sensible 5-10 step flow. */
+
+#define CODER_PROJ_FILE  "coder_project.txt"
+#define CODER_PROJ_MAX   65536
+
+static int coder_proj_count_steps(void) {
+    int fd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
+    if (fd < 0) return 0;
+    static char buf[CODER_PROJ_MAX];
+    int n = (int)rd(fd, buf, sizeof buf);
+    cl(fd);
+    if (n <= 0) return 0;
+    int count = 0;
+    for (int i = 0; i + 6 < n; i++) {
+        if ((i == 0 || buf[i-1] == '\n') &&
+            buf[i] == '[' && buf[i+1] == 's' && buf[i+2] == 't' &&
+            buf[i+3] == 'e' && buf[i+4] == 'p' && buf[i+5] == ' ') count++;
+    }
+    return count;
+}
+
+/* Append the current /tmp/coder_attempt.c to coder_project.txt under
+ * a fresh step header.  Also append a short summary line to
+ * BANK_PROJECT so the next coder_iterate() sees the running plan.
+ * Returns the step number (>=1) on success, 0 on failure. */
+static int coder_proj_push(void) {
+    int srcfd = (int)op("/tmp/coder_attempt.c", O_RDONLY, 0);
+    if (srcfd < 0) return 0;
+    static char src[CODER_DRAFT_CAP];
+    int sn = (int)rd(srcfd, src, sizeof src);
+    cl(srcfd);
+    if (sn <= 0) return 0;
+
+    /* Read existing file (if any), append the new entry in memory,
+     * then rewrite — saves us from needing O_APPEND.  Caps at
+     * CODER_PROJ_MAX so a runaway project doesn't grow unbounded. */
+    static char proj[CODER_PROJ_MAX];
+    int existing = 0;
+    int rfd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
+    if (rfd >= 0) {
+        existing = (int)rd(rfd, proj, sizeof proj);
+        cl(rfd);
+        if (existing < 0) existing = 0;
+    }
+
+    int step = coder_proj_count_steps() + 1;
+
+    int p = existing;
+    /* Header */
+    p = sapp(proj, p, "[step ");
+    if (step < 10) proj[p++] = '0';
+    p += utoa((unsigned)step, proj + p);
+    p = sapp(proj, p, "] ");
+    int gl = g_coder_goal_len;
+    if (p + gl > CODER_PROJ_MAX - 32) gl = CODER_PROJ_MAX - 32 - p;
+    if (gl > 0) { mcpy(proj + p, g_coder_goal, gl); p += gl; }
+    proj[p++] = '\n';
+    p = sapp(proj, p, "@@@\n");
+    int take = sn;
+    if (p + take > CODER_PROJ_MAX - 8) take = CODER_PROJ_MAX - 8 - p;
+    if (take > 0) { mcpy(proj + p, src, take); p += take; }
+    if (take > 0 && proj[p-1] != '\n') proj[p++] = '\n';
+    p = sapp(proj, p, "@@@\n");
+
+    int fd = (int)op(CODER_PROJ_FILE,
+                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return 0;
+    wr(fd, proj, (size_t)p);
+    cl(fd);
+
+    /* Mirror the summary into BANK_PROJECT so subsequent iterations
+     * carry the running plan in their LLM context. */
+    bank_load(BANK_PROJECT);
+    char line[CODER_GOAL_CAP + 32];
+    int lp = sapp(line, 0, "step ");
+    if (step < 10) line[lp++] = '0';
+    lp += utoa((unsigned)step, line + lp);
+    lp = sapp(line, lp, ": ");
+    int gtake = g_coder_goal_len;
+    if (lp + gtake > (int)sizeof line - 2) gtake = sizeof line - 2 - lp;
+    if (gtake > 0) { mcpy(line + lp, g_coder_goal, gtake); lp += gtake; }
+    line[lp++] = '\n';
+    int avail = BANK_BYTES - 1 - g_bank_len[BANK_PROJECT];
+    if (lp > avail) lp = avail;
+    if (lp > 0) {
+        mcpy(g_bank[BANK_PROJECT] + g_bank_len[BANK_PROJECT], line, lp);
+        g_bank_len[BANK_PROJECT] += lp;
+        g_bank[BANK_PROJECT][g_bank_len[BANK_PROJECT]] = 0;
+        bank_save(BANK_PROJECT);
+    }
+
+    return step;
+}
+
+/* Compose: ask the LLM to merge every saved snippet into one
+ * working program.  Result goes into /tmp/coder_attempt.c +
+ * compiled.  Returns 0 on clean compile, 1 on compile-but-warn,
+ * -1 if there are no snippets, -2 if the LLM call failed. */
+static int coder_compose(void) {
+    int fd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
+    if (fd < 0) return -1;
+    static char snippets[CODER_PROJ_MAX];
+    int sn = (int)rd(fd, snippets, sizeof snippets - 1);
+    cl(fd);
+    if (sn <= 0) return -1;
+    snippets[sn] = 0;
+
+    static char prompt[CODER_PROJ_MAX + 4096];
+    int p = 0;
+    p = sapp(prompt, p,
+             "You are a C code merger.  Below is a project plan and "
+             "a sequence of working C programs (each delimited by "
+             "@@@).  Combine them into a SINGLE C program that "
+             "preserves ALL features from each step and compiles "
+             "cleanly with `cc -O2 -o out file.c`.  Return ONLY the "
+             "merged C source, wrapped in ```c ... ``` if you must.\n\n"
+             "[project plan]\n");
+    bank_load(BANK_PROJECT);
+    int avail = (int)sizeof prompt - p - 1024;
+    int take = g_bank_len[BANK_PROJECT];
+    if (take > avail) take = avail;
+    if (take > 0) { mcpy(prompt + p, g_bank[BANK_PROJECT], take); p += take; }
+    p = sapp(prompt, p, "\n\n[snippets]\n");
+    avail = (int)sizeof prompt - p - 256;
+    take = sn;
+    if (take > avail) take = avail;
+    mcpy(prompt + p, snippets, take);
+    p += take;
+    p = sapp(prompt, p, "\n");
+
+    ask_n_msgs = 0;
+    ask_buf_use = 0;
+    ask_msg_add(0, prompt, p);
+    bank_load(BANK_PERSONALITY);
+
+    static char content[ASK_BUF_CAP];
+    char fail_reason[160];
+    int cn = ask_send_retrying(content, sizeof content,
+                               fail_reason, sizeof fail_reason);
+    if (cn < 0) {
+        int x = sapp(g_coder_err, 0, "compose failed: ");
+        int t = (int)slen(fail_reason);
+        if (x + t > CODER_ERR_CAP - 1) t = CODER_ERR_CAP - 1 - x;
+        mcpy(g_coder_err + x, fail_reason, t);
+        g_coder_err[x + t] = 0;
+        g_coder_err_len = x + t;
+        return -2;
+    }
+
+    g_coder_draft_len = coder_extract_code(content, cn,
+                                           g_coder_draft, CODER_DRAFT_CAP);
+    int wfd = (int)op("/tmp/coder_attempt.c",
+                      O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (wfd >= 0) {
+        wr(wfd, g_coder_draft, (size_t)g_coder_draft_len);
+        cl(wfd);
+    }
+    int comp_rc = coder_compile(/*strict=*/0);
+    int efd = (int)op("/tmp/coder_err.txt", O_RDONLY, 0);
+    if (efd >= 0) {
+        long en = rd(efd, g_coder_err, CODER_ERR_CAP - 1);
+        cl(efd);
+        if (en < 0) en = 0;
+        g_coder_err_len = (int)en;
+        g_coder_err[g_coder_err_len] = 0;
+    }
+    return comp_rc == 0 ? 0 : 1;
+}
+
 /* One iteration: build prompt, call LLM, extract code, compile,
  * (optionally run).  Updates g_coder_draft + g_coder_err.
  * Returns 0 on success at the configured target, 1 otherwise. */
@@ -5089,7 +5277,7 @@ static void coder_paint(const char *status_msg) {
         ln[p] = 0;
         body_at(2, 22, ln, SCREEN_W - 4);
     }
-    status("e=goal ENT=ask a=auto x=exec t=target 1-4=bank r=log s=save q=quit");
+    status("ENT=ask a=auto x=exec p=push c=compose t=tgt 1-4=bank r/s e q");
     fbflush();
 }
 
@@ -5167,6 +5355,39 @@ static int run_coder(int argc, char **argv) {
             coder_log_recent();
             bank_save(BANK_RECENT);
             coder_paint("logged to recent");
+            continue;
+        }
+        if (k[0] == 'p') {
+            int step = coder_proj_push();
+            if (step <= 0) {
+                coder_paint("push failed — no /tmp/coder_attempt.c?");
+                continue;
+            }
+            char st[80];
+            int sp = sapp(st, 0, "pushed step ");
+            if (step < 10) st[sp++] = '0';
+            sp += utoa((unsigned)step, st + sp);
+            sp = sapp(st, sp, " to coder_project.txt");
+            st[sp] = 0;
+            coder_paint(st);
+            continue;
+        }
+        if (k[0] == 'c') {
+            if (!ask_api_key[0]) {
+                coder_paint("no api_key — open ask Settings");
+                continue;
+            }
+            coder_paint("composing merged program …");
+            int rc = coder_compose();
+            if (rc == -1) {
+                coder_paint("no snippets yet — press p to push first");
+            } else if (rc == -2) {
+                coder_paint("compose: LLM call failed (see [compile output])");
+            } else if (rc == 0) {
+                coder_paint("✓ composed merged program (cc clean)");
+            } else {
+                coder_paint("× composed but cc had issues — see output");
+            }
             continue;
         }
         if (k[0] == 'x') {
