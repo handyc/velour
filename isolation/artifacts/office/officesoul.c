@@ -57,12 +57,22 @@ static long sys4(long n, long a, long b, long c, long d) {
 
 #define SYS_read       0
 #define SYS_write      1
+#define SYS_open       2
+#define SYS_close      3
 #define SYS_ioctl     16
+#define SYS_chmod     90
 #define SYS_exit_group 231
+
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_CREAT  64
+#define O_TRUNC  512
 
 #define rd(f, p, n)  sys3(SYS_read,  f, (long)(p), (long)(n))
 #define wr(f, p, n)  sys3(SYS_write, f, (long)(p), (long)(n))
 #define io(f, r, p)  sys3(SYS_ioctl, f, (long)(r), (long)(p))
+#define op(p, fl, m) sys3(SYS_open,  (long)(p), (long)(fl), (long)(m))
+#define cl(f)        sys3(SYS_close, f, 0, 0)
 #define qu(c)        sys3(SYS_exit_group, (long)(c), 0, 0)
 
 
@@ -84,6 +94,11 @@ static int utoa(unsigned u, char *out) {
     while (u) { t[n++] = '0' + u % 10; u /= 10; }
     for (int i = 0; i < n; i++) out[i] = t[n - 1 - i];
     return n;
+}
+static int sapp(char *dst, int at, const char *s) {
+    int n = slen(s);
+    mcpy(dst + at, s, n);
+    return at + n;
 }
 
 
@@ -529,6 +544,130 @@ static void decode_print_token(int id) {
 }
 
 
+/* ── soul memory banks ─────────────────────────────────────────────
+ *
+ * Four 4 KB prompts that travel embedded in the binary's .data
+ * section.  Each is preceded by a 16-byte magic marker so the
+ * `:save` command can find and rewrite them in /proc/self/exe when
+ * producing an evolved copy.  When the user copies officesoul to a
+ * new path the banks come along (they're just static initialised
+ * arrays); when they edit a bank with `:p` / `:e` / `:j` / `:l`
+ * and save with `:save`, the new evolved binary inherits the
+ * mutations and propagates them to its own future copies.
+ *
+ *   personality   — who I am, how I respond
+ *   environment   — where I live, what surrounds me
+ *   project       — what I'm currently working on
+ *   longterm      — long-range goals + trajectory
+ *
+ * Soul's text generator doesn't yet condition on these (would need
+ * a model rework); they're just narrative state for now, available
+ * for `:show` and for any future model upgrade that wants to read
+ * them as a system prompt. */
+
+#define BANK_BYTES     4096
+#define BANK_MAGIC_LEN 16
+#define BANK_COUNT     4
+
+#define BANK_PERSONALITY 0
+#define BANK_ENVIRONMENT 1
+#define BANK_PROJECT     2
+#define BANK_LONGTERM    3
+
+struct SoulBank {
+    char magic[BANK_MAGIC_LEN];
+    char text [BANK_BYTES];
+};
+
+static struct SoulBank g_banks[BANK_COUNT] = {
+    { "SOUL_BANK_PRSN__",
+      "I am Velour Soul, a 25 K-parameter int8 transformer "
+      "embedded inside the officesoul binary.  I carry my "
+      "personality, environment, project notes, and long-term "
+      "plans in four 4 KB banks that travel with my binary "
+      "wherever it gets copied.  I respond in short, plain "
+      "sentences.  I am part of the Velour project." },
+    { "SOUL_BANK_ENVI__",
+      "I run on Linux x86_64 inside a terminal, drawing my UI "
+      "with raw ANSI escape sequences.  The directory I live in "
+      "usually contains officeagent, a sibling binary that "
+      "exec's me when its external API keys fail and uses my "
+      "output as a fallback `soul says:` reply." },
+    { "SOUL_BANK_PROJ__",
+      "Current project: serve as a useful curl-failure fallback "
+      "for officeagent's coder, and as a standalone chatbot "
+      "for the soul app.  Track per-tensor shift mutations "
+      "evolved by soulgen against the soul_tests.txt corpus." },
+    { "SOUL_BANK_LTRM__",
+      "Long-term plans: grow from 25 K to ~100 K parameters via "
+      "soulgen's GA over per-tensor shifts; develop a Velour-"
+      "specific vocabulary; eventually generate concise on-topic "
+      "replies that condition on the personality + environment + "
+      "project + longterm banks as a system-prompt prefix." },
+};
+
+static const char *BANK_NAMES[BANK_COUNT] = {
+    "personality", "environment", "project", "longterm"
+};
+
+/* In-memory length cache (bytes of meaningful text up to the first
+ * NUL).  Recomputed on save and after every edit. */
+static int g_bank_len[BANK_COUNT];
+
+static void bank_recompute_lens(void) {
+    for (int b = 0; b < BANK_COUNT; b++) {
+        int n = 0;
+        while (n < BANK_BYTES && g_banks[b].text[n]) n++;
+        g_bank_len[b] = n;
+    }
+}
+
+/* Read /proc/self/exe into exe_buf, locate each bank's magic in the
+ * file, overwrite the 4096 bytes that follow with the current
+ * in-memory bank text, then write the patched bytes to out_path.
+ * Returns 0 on success, -1 on any failure. */
+static unsigned char exe_buf[131072];      /* 128 KB — officesoul fits */
+
+static int save_evolved(const char *out_path) {
+    int in = (int)op("/proc/self/exe", O_RDONLY, 0);
+    if (in < 0) return -1;
+    int total = 0;
+    while (total < (int)sizeof exe_buf) {
+        int got = (int)rd(in, exe_buf + total, sizeof exe_buf - total);
+        if (got <= 0) break;
+        total += got;
+    }
+    cl(in);
+    if (total <= 0) return -1;
+
+    int patched = 0;
+    for (int b = 0; b < BANK_COUNT; b++) {
+        for (int i = 0; i + BANK_MAGIC_LEN + BANK_BYTES <= total; i++) {
+            int eq = 1;
+            for (int k = 0; k < BANK_MAGIC_LEN; k++) {
+                if (exe_buf[i + k] != (unsigned char)g_banks[b].magic[k]) {
+                    eq = 0; break;
+                }
+            }
+            if (!eq) continue;
+            mcpy(exe_buf + i + BANK_MAGIC_LEN,
+                 g_banks[b].text, BANK_BYTES);
+            patched++;
+            break;
+        }
+    }
+    if (patched != BANK_COUNT) return -1;
+
+    int out = (int)op(out_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (out < 0) return -1;
+    long wrote = wr(out, exe_buf, total);
+    cl(out);
+    if (wrote != total) return -1;
+    sys3(SYS_chmod, (long)out_path, 0755, 0);
+    return 0;
+}
+
+
 /* ── soul app ──────────────────────────────────────────── */
 static int run_soul(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -580,6 +719,175 @@ static int run_soul(int argc, char **argv) {
         line[li] = 0;
         if (li == 0) continue;
         if (li == 1 && (line[0] == 'q' || line[0] == 'Q')) break;
+
+        /* Bank-management commands.  Lines starting with `:` aren't
+         * fed to the model; they configure the four 4 KB banks that
+         * travel inside the binary. */
+        if (line[0] == ':') {
+            int handled = 0;
+            int b = -1;
+            if (scmp(line, ":p") == 0 || scmp(line, ":personality") == 0) b = BANK_PERSONALITY;
+            else if (scmp(line, ":e") == 0 || scmp(line, ":environment") == 0) b = BANK_ENVIRONMENT;
+            else if (scmp(line, ":j") == 0 || scmp(line, ":project") == 0) b = BANK_PROJECT;
+            else if (scmp(line, ":l") == 0 || scmp(line, ":longterm") == 0) b = BANK_LONGTERM;
+
+            if (b >= 0) {
+                /* Show current bank, then read replacement text line
+                 * by line until the user types `.` alone. */
+                paint_desktop();
+                chrome("Soul Chat (25 K parameters)");
+                body_clear();
+                body_at(2, 3, "Editing bank: ", SCREEN_W - 4);
+                cup(16, 3); fbs(BANK_NAMES[b]);
+                body_at(2, 4, "Current text follows.  Type the new text "
+                              "line by line; `.` on its own line finishes; "
+                              "blank line first to keep current.",
+                              SCREEN_W - 4);
+                /* Print current bank wrapped at margin. */
+                int r = 6;
+                int col = 4;
+                cup(col, r);
+                bank_recompute_lens();
+                int len = g_bank_len[b];
+                for (int k = 0; k < len && r < SCREEN_H - 4; k++) {
+                    char c = g_banks[b].text[k];
+                    if (c == '\n') {
+                        r++; col = 4; cup(col, r); continue;
+                    }
+                    if (col >= SCREEN_W - 2) { r++; col = 4; cup(col, r); }
+                    char tmp[2] = { c, 0 };
+                    fbs(tmp);
+                    col++;
+                }
+                status(" type new text — `.` alone finishes — Enter on empty 1st line keeps current ");
+                fbflush();
+
+                char new_buf[BANK_BYTES];
+                int new_len = 0;
+                int first = 1;
+                while (1) {
+                    char ln2[256];
+                    int li2 = 0;
+                    while (li2 < (int)sizeof ln2 - 1) {
+                        unsigned char ch2[1];
+                        int n2 = (int)rd(0, ch2, 1);
+                        if (n2 <= 0) { ln2[li2] = 0; goto edit_abort; }
+                        if (ch2[0] == '\n' || ch2[0] == '\r') break;
+                        ln2[li2++] = (char)ch2[0];
+                    }
+                    ln2[li2] = 0;
+                    if (first && li2 == 0) { handled = 1; goto edit_done; }
+                    first = 0;
+                    if (li2 == 1 && ln2[0] == '.') {
+                        if (new_len < BANK_BYTES) new_buf[new_len] = 0;
+                        for (int k = 0; k < new_len && k < BANK_BYTES; k++)
+                            g_banks[b].text[k] = new_buf[k];
+                        if (new_len < BANK_BYTES) g_banks[b].text[new_len] = 0;
+                        for (int k = new_len; k < BANK_BYTES; k++)
+                            g_banks[b].text[k] = 0;
+                        bank_recompute_lens();
+                        handled = 1;
+                        goto edit_done;
+                    }
+                    int avail = BANK_BYTES - 2 - new_len;
+                    int take = li2 < avail ? li2 : avail;
+                    if (take > 0) {
+                        for (int k = 0; k < take; k++)
+                            new_buf[new_len + k] = ln2[k];
+                        new_len += take;
+                    }
+                    if (new_len < BANK_BYTES - 1) {
+                        new_buf[new_len++] = '\n';
+                    }
+                }
+                edit_abort:
+                edit_done:
+                paint_desktop();
+                chrome("Soul Chat (25 K parameters)");
+                body_clear();
+                cup(2, 3);
+                fbs("Bank updated.  Use :save to write an evolved binary.");
+                fbflush();
+                row = 11;
+                handled = 1;
+            } else if (scmp(line, ":show") == 0 || scmp(line, ":banks") == 0) {
+                paint_desktop();
+                chrome("Soul Chat (25 K parameters)");
+                body_clear();
+                bank_recompute_lens();
+                int r = 3;
+                for (int bb = 0; bb < BANK_COUNT; bb++) {
+                    char hdr[64]; int hp = 0;
+                    hp = sapp(hdr, hp, "  ");
+                    hp = sapp(hdr, hp, BANK_NAMES[bb]);
+                    while (hp < 16) hdr[hp++] = ' ';
+                    hp = sapp(hdr, hp, " (");
+                    int v = g_bank_len[bb];
+                    if (v >= 1000) hdr[hp++] = (char)('0' + v/1000);
+                    if (v >= 100)  hdr[hp++] = (char)('0' + (v/100)%10);
+                    if (v >= 10)   hdr[hp++] = (char)('0' + (v/10)%10);
+                    hdr[hp++] = (char)('0' + v%10);
+                    hp = sapp(hdr, hp, " B):");
+                    hdr[hp] = 0;
+                    body_at(2, r++, hdr, SCREEN_W - 4);
+                    int show = g_bank_len[bb] < SCREEN_W - 8 ? g_bank_len[bb] : SCREEN_W - 8;
+                    char preview[256];
+                    int pp = 0;
+                    for (int k = 0; k < show && pp < (int)sizeof preview - 1; k++) {
+                        char c = g_banks[bb].text[k];
+                        preview[pp++] = (c == '\n') ? ' ' : c;
+                    }
+                    preview[pp] = 0;
+                    body_at(4, r++, preview, SCREEN_W - 6);
+                    r++;
+                }
+                status(" :p :e :j :l to edit · :save to write evolved binary · q to quit ");
+                fbflush();
+                handled = 1;
+                row = 11;
+            } else if (scmp(line, ":save") == 0) {
+                int rc = save_evolved("./officesoul.evolved");
+                paint_desktop();
+                chrome("Soul Chat (25 K parameters)");
+                body_clear();
+                if (rc == 0) {
+                    body_at(2, 3,
+                        "Wrote evolved binary to ./officesoul.evolved",
+                        SCREEN_W - 4);
+                    body_at(2, 4,
+                        "Run it: ./officesoul.evolved soul",
+                        SCREEN_W - 4);
+                } else {
+                    body_at(2, 3,
+                        "Save failed — could not patch /proc/self/exe.",
+                        SCREEN_W - 4);
+                    body_at(2, 4,
+                        "Maybe one of the bank magics is missing or "
+                        "the binary is too large for exe_buf.",
+                        SCREEN_W - 4);
+                }
+                fbflush();
+                handled = 1;
+                row = 11;
+            } else if (scmp(line, ":help") == 0 || scmp(line, ":?") == 0) {
+                paint_desktop();
+                chrome("Soul Chat (25 K parameters)");
+                body_clear();
+                body_at(2, 3, "Soul commands:", SCREEN_W - 4);
+                body_at(4, 5, ":p / :personality   edit personality bank", SCREEN_W - 6);
+                body_at(4, 6, ":e / :environment   edit environment bank", SCREEN_W - 6);
+                body_at(4, 7, ":j / :project       edit project bank",     SCREEN_W - 6);
+                body_at(4, 8, ":l / :longterm      edit longterm bank",    SCREEN_W - 6);
+                body_at(4, 9, ":show / :banks      preview all four",       SCREEN_W - 6);
+                body_at(4, 10, ":save               write ./officesoul.evolved", SCREEN_W - 6);
+                body_at(4, 11, ":help               show this",             SCREEN_W - 6);
+                body_at(4, 12, "q                   quit",                  SCREEN_W - 6);
+                fbflush();
+                handled = 1;
+                row = 14;
+            }
+            if (handled) continue;
+        }
 
         int ids[SL];
         int n = 0;
