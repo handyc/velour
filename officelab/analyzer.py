@@ -26,6 +26,9 @@ from django.conf import settings
 OFFICE_DIR = Path(settings.BASE_DIR) / "isolation" / "artifacts" / "office"
 
 # All known versions, in order.  `minimal` is the baseline.
+# office54..office59 are the 64-bit feval / sheet / scientific-calc
+# refresh.  office60 starts the network-stack series — see the
+# tier-1..tier-5 feature blocks below.
 VERSIONS = ["office", "office2", "office3", "office4",
             "office5", "office6", "office7", "office8", "office9",
             "office10", "office11", "office12", "office13", "office14",
@@ -37,7 +40,16 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office38", "office39", "office40", "office41", "office42",
             "office43", "office44", "office45", "office46", "office47",
             "office48", "office49", "office50", "office51", "office52",
-            "office53"]
+            "office53", "office54", "office55", "office56", "office57",
+            "office58", "office59",
+            # network stack: office60 + identity panel; office61 + http;
+            # office62 + echo/finger/gopher/probe; office63 + dns/ftp;
+            # office64 + ssh-honeypot/telnet hybrid; office65 + sheet
+            # change-trigger macros.
+            "office60", "office61", "office62", "office63", "office64",
+            # office65 + sheet macros; office66 + OFFICE_FEATURE_*
+            # selective-build guards (full + lite variants).
+            "office65", "office66"]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
@@ -162,6 +174,13 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
       "range_reduce", "cell", "cellrow", "cellcol"],
      ["fp", "rscratch", "cval"]),
 
+    # office65: change-trigger macros attached to cells.  Sparse
+    # 16-slot table + DSL parser + recompute-prev-snapshot pass.
+    ("sheet_macros",
+     ["macro_"],
+     ["macro_pending", "macro_pending_n",
+      "macro_self_row", "macro_self_col"]),
+
     ("paint",
      ["run_paint", "canvas", "canvas_fg", "paint_", "ms_paint"],
      ["brush", "cur_sx", "cur_sy", "px", "py"]),
@@ -236,7 +255,72 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
 
     ("syscalls",
      [],
-     ["sys3", "sys4", "forkk", "wait4_", "execvee"]),
+     # sys5 was added in office61 for the 5-arg setsockopt call.  The
+     # 6-arg sendto/recvfrom and the SSH peek inline-asm syscalls live
+     # inside their owning features (run_dns, run_sshtel) since they're
+     # not generic helpers.
+     ["sys3", "sys4", "sys5", "forkk", "wait4_", "execvee"]),
+
+    # ── tier-1: identity + namespace introspection (office60+) ──
+    # `g_instance_token` is filled at startup from the UTS hostname's
+    # "garden-XXXXXXXX" suffix that jail.c sethostname()s before exec,
+    # so a jailed office can render stable identity even though
+    # getpid() collapses to 1.
+    ("net_panel",
+     ["run_net", "net_"],
+     ["g_instance_token"]),
+
+    # ── tier-2: minimal HTTP server (office61+) ──
+    # http_start / http_log / http_log_lines / http_build_ports are
+    # also reused by the tier-3 protocol servers (echo / finger /
+    # gopher) and by tier-4's FTP virtual-file builder, but they're
+    # introduced for the HTTP path so the bytes belong here.  Tiny
+    # endian helper htons16_ lives next to the listen-socket setup.
+    ("http",
+     ["run_http", "http_"],
+     ["htons16_"]),
+
+    # ── tier-3: small protocol servers + outbound probe (office62+) ──
+    # srv_run/srv_handle_*/srv_parse_port form the shared accept-loop
+    # used by all three listeners; probe_parse_ipv4 + run_probe are
+    # the outbound diagnostic.
+    ("echo",
+     ["run_echo", "srv_handle_echo"],
+     []),
+    ("finger",
+     ["run_finger", "srv_handle_finger"],
+     []),
+    ("gopher",
+     ["run_gopher", "srv_handle_gopher"],
+     ["g_gopher_port"]),
+    ("tcp_runner",
+     ["srv_run", "srv_parse_port"],
+     []),
+    ("probe",
+     ["run_probe", "probe_"],
+     # Function-local statics inside run_probe — argv-line splitter
+     # buffers (host/port/send) used when the home shell passes the
+     # whole "HOST PORT [SEND]" string as a single arg.
+     ["host_buf", "port_buf", "send_buf"]),
+
+    # ── tier-4: DNS resolver + FTP server (office63+) ──
+    # ftp_data_start is a blocking-listener variant of http_start used
+    # only by FTP's PASV data ports, so it lives in the ftp feature.
+    ("dns",
+     ["run_dns", "dns_"],
+     []),
+    ("ftp",
+     ["run_ftp", "ftp_"],
+     # Sequential PASV port pool counter (function-local static
+     # inside the PASV-handler block).
+     ["next_data_port"]),
+
+    # ── tier-5: SSH-banner / telnet hybrid honeypot (office64+) ──
+    # First-byte sniffer; "SSH-" → banner-only honeypot, anything else
+    # → diag-only telnet line shell.  No crypto, no auth.
+    ("sshtel",
+     ["run_sshtel", "sshtel_"],
+     []),
 
     # ── boot ──
     ("baseline",

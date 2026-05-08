@@ -74,7 +74,8 @@ urlpatterns = [
     path('hexnn/',    include('hexnn.urls')),
     path('taxon/',    include('taxon.urls')),
     path('viralyst/',  include('viralyst.urls')),
-    path('officelab/', include('officelab.urls')),
+    path('officelab/',   include('officelab.urls')),
+    path('officeforge/', include('officeforge.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

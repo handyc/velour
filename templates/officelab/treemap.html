@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% load humanize static %}
+{% block title %}officelab — treemap{% endblock %}
+{% block extra_head %}{% include "officelab/_styles.html" %}
+<style>
+  /* Container is positioned + sized; tile children are absolutely
+   * positioned by the squarify renderer, sized in pixels. */
+  #tm {
+    position: relative;
+    width: 100%;
+    height: 460px;
+    background: #f5f5f0;
+    border: 1px solid #ccc;
+    overflow: hidden;
+  }
+  .treemap-item {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid rgba(0,0,0,.30);
+    color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,.25);
+    font: .72rem ui-monospace, monospace;
+    padding: 3px 5px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 1.15;
+    cursor: default;
+  }
+  /* Text colour stays white on every category since the backgrounds
+   * are now mid-saturation enough to need light foreground.  The
+   * earlier dark-text-on-pastel scheme made tiles nearly invisible
+   * against the page background. */
+  .treemap-item.cat-headroom {
+    background: repeating-linear-gradient(
+        45deg, #d4d4cc, #d4d4cc 6px, #c4c4bc 6px, #c4c4bc 12px) !important;
+    color: #555;
+    text-shadow: none;
+    font-style: italic;
+  }
+  /* ELF overhead — bytes that exist on disk but aren't any feature's
+   * code (section headers, alignment padding).  Treat them as a
+   * distinct grey-ish category so the user sees them but they don't
+   * compete visually with the real feature blocks. */
+  .treemap-item.cat-overhead {
+    color: #fff;
+    text-shadow: 0 1px 1px rgba(0,0,0,.25);
+  }
+  .legend { display:flex; gap:1.4em; flex-wrap:wrap;
+            font-size:.85em; margin:.6em 0; align-items:center; }
+  .legend .swatch {
+    display:inline-block; width:14px; height:14px; vertical-align:middle;
+    border:1px solid rgba(0,0,0,.2); margin-right:.3em;
+  }
+  .controls { display:flex; gap:1.4em; flex-wrap:wrap;
+              align-items:baseline; margin:.6em 0 .9em; }
+  .controls form { display:inline-flex; gap:.4em; align-items:baseline; }
+  .controls select { font: inherit; padding:1px 4px; }
+  .over-banner {
+    background: #fee; border-left: 4px solid #a30;
+    padding: .5em .8em; margin: .6em 0;
+    font-family: ui-monospace, monospace;
+  }
+</style>{% endblock %}
+
+{% block content %}
+<div class="olwrap">
+  <h1><a href="{% url 'officelab:index' %}">officelab</a> &middot; treemap</h1>
+  {% with active='treemap' %}
+    {% include "officelab/_topnav.html" %}
+  {% endwith %}
+
+  <p class="hint">
+    How <strong>{{ target.name }}</strong>'s
+    {{ binary_size|intcomma }} B fill the 64 KB target. Each tile is
+    one feature sized by its on-disk bytes (text + data); the dark
+    grey tile is ELF overhead (section headers + alignment padding,
+    not any feature's code); the diagonally striped tile is unused
+    budget headroom (when under the cap).
+  </p>
+
+  <div class="controls">
+    <form method="get" action="">
+      <label for="vsel">Version:</label>
+      <select id="vsel" name="v" onchange="this.form.submit()">
+        {% for v in all_versions %}
+          <option value="{{ v }}"
+                  {% if v == target.name %}selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <span>binary: <strong>{{ binary_size|intcomma }}</strong> B</span>
+    <span>= symbols {{ sym_total|intcomma }}
+          + ELF overhead {{ overhead|intcomma }}</span>
+    <span>budget: {{ budget|intcomma }}</span>
+    {% if over_budget %}
+      <span style="color:#a30"><strong>over by {{ overage|intcomma }} B</strong></span>
+    {% else %}
+      <span style="color:#0a5">headroom: <strong>{{ headroom|intcomma }}</strong> B</span>
+    {% endif %}
+  </div>
+
+  {% if over_budget %}
+    <div class="over-banner">
+      Binary is <strong>{{ overage|intcomma }} B over</strong> the 64 KB
+      target. The treemap below shows only what's actually present in
+      the binary; there is no headroom tile because the target is
+      already exceeded. Try
+      <a href="{% url 'officelab:budget' %}">/budget</a> for a
+      sortable per-feature list, or
+      <a href="/officeforge/">/officeforge/</a> to build a leaner variant.
+    </div>
+  {% endif %}
+
+  <div class="legend">
+    <span><span class="swatch" style="background:#4ea870"></span>core</span>
+    <span><span class="swatch" style="background:#4f7fb8"></span>extras</span>
+    <span><span class="swatch" style="background:#b25d8a"></span>network</span>
+    <span><span class="swatch" style="background:#7a7a72"></span>infra (always-on)</span>
+    <span><span class="swatch" style="background:#a08868"></span>other / uncategorized</span>
+    <span><span class="swatch" style="background:#444"></span>ELF overhead</span>
+    <span><span class="swatch" style="background:repeating-linear-gradient(45deg,#d4d4cc,#d4d4cc 4px,#c4c4bc 4px,#c4c4bc 8px)"></span>headroom</span>
+  </div>
+
+  <div id="tm"></div>
+</div>
+
+{{ items|json_script:"tm-data" }}
+{% comment %}
+?v=2 cache-busts an older version of treemap.js that didn't yet
+support the options arg (colorFor/classFor/format*).  Without this,
+a cached old script silently returned undefined for tile colour,
+making every tile transparent against the page background.
+{% endcomment %}
+<script src="{% static 'graphs/treemap.js' %}?v=2"></script>
+<script>
+(function () {
+  const items = JSON.parse(document.getElementById('tm-data').textContent);
+  const container = document.getElementById('tm');
+
+  // Mid-saturation category backgrounds — the earlier pastels were
+  // so light they faded into the page background and the user
+  // couldn't see any colour at all.  All text is white-on-tile
+  // (CSS) so backgrounds need ≥40% saturation for legibility.
+  const BG = {
+    core:     '#4ea870',   // sea green
+    extras:   '#4f7fb8',   // steel blue
+    network:  '#b25d8a',   // mauve
+    infra:    '#7a7a72',   // slate grey (always-on)
+    other:    '#a08868',   // tan (uncategorized leftovers)
+    overhead: '#444',      // dark grey: ELF headers + alignment padding
+    headroom: '#d4d4cc',   // overridden by striped CSS pattern
+  };
+
+  function fmtBytes(n) {
+    if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+    return n + ' B';
+  }
+
+  // Adapt analyzer items {name, size, ...} to treemap items {path, size}.
+  const tmItems = items.map(it => Object.assign({}, it, { path: it.name }));
+
+  // Pass a non-empty palette as a fallback so that even an older
+  // cached treemap.js (without options support) renders coloured
+  // tiles instead of transparent ones.  When the new options arg
+  // works, colorFor below takes over and overrides this.
+  const FALLBACK_PALETTE = [
+    BG.core, BG.extras, BG.network, BG.infra, BG.other,
+    '#cc7a4f', '#7a4fb8', '#4fb8aa', '#b8aa4f', '#cc4f7a',
+  ];
+
+  HelixTreemap.render(container, tmItems, FALLBACK_PALETTE, {
+    formatTitle: it => {
+      if (it.name === '_headroom')
+        return 'unused budget headroom · ' + fmtBytes(it.size);
+      if (it.name === '_elf_overhead')
+        return 'ELF overhead · ' + fmtBytes(it.size) +
+               ' (program/section headers + alignment padding)';
+      return it.name + ' · ' + fmtBytes(it.size) +
+             ' (text ' + (it.text || 0) + ' + data ' + (it.data || 0) +
+             ' + bss ' + (it.bss || 0) + '; ' + (it.syms || 0) + ' syms · ' +
+             (it.category || 'other') + ')';
+    },
+    formatLabel: it => {
+      let name = it.name;
+      if (name === '_headroom')      name = 'headroom';
+      else if (name === '_elf_overhead') name = 'ELF overhead';
+      return name + ' · ' + fmtBytes(it.size);
+    },
+    colorFor: it => BG[it.category] || BG.other,
+    classFor: it => 'cat-' + (it.category || 'other'),
+  });
+})();
+</script>
+{% endblock %}

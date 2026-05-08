@@ -461,6 +461,145 @@ def _parse_bytes(s: str) -> int:
         raise ValueError(f"can't parse `{s}` as bytes")
 
 
+# Category map — mirrors OfficeForge's grouping so the same colour
+# convention reads consistently across both apps.  "infra" is the
+# always-on bedrock (boot, syscalls, terminal, framebuffer, etc.) that
+# can't be toggled off; the four colour bands let you eyeball the
+# binary's composition at a glance.
+TREEMAP_CATEGORIES = {
+    # core
+    "notepad": "core", "sheet": "core", "hex": "core",
+    "files": "core", "calc": "core", "shell": "core",
+
+    # extras (selectable but optional)
+    "ask": "extras", "garden": "extras", "hxhnt": "extras",
+    "rpg": "extras", "lsys": "extras", "screensaver": "extras",
+    "sheet_macros": "extras", "bytebeat": "extras", "bfc": "extras",
+    "mines": "extras", "word": "extras", "paint": "extras",
+    "find": "extras", "mail": "extras", "export": "extras",
+
+    # network stack — tier-1..tier-5 of office60..office64
+    "net_panel": "network", "http": "network",
+    "echo": "network", "finger": "network", "gopher": "network",
+    "tcp_runner": "network", "probe": "network",
+    "dns": "network", "ftp": "network", "sshtel": "network",
+
+    # always-on infrastructure
+    "baseline": "infra", "menu": "infra", "chrome": "infra",
+    "framebuffer": "infra", "term": "infra", "syscalls": "infra",
+    "libc_replacements": "infra", "shared_buf": "infra",
+    "clipboard": "infra",
+
+    # uncategorized symbols and the synthetic headroom tile
+    "uncategorized": "other",
+    "_headroom":     "headroom",
+    "_overage":      "overage",
+}
+
+
+def treemap(request):
+    """Treemap showing how the latest fork's bytes fill the 64 KB
+    target.  Each feature is one tile sized by its (text + data + bss);
+    a synthetic "headroom" tile fills the remaining budget when under,
+    or is replaced by an "overage" tile when over."""
+    versions, baseline = analyse_all()
+    if not versions:
+        return render(request, 'officelab/needs_build.html',
+                      _missing_dbg_context())
+
+    requested = request.GET.get('v', '').strip()
+    target = None
+    if requested:
+        for v in versions:
+            if v.name == requested:
+                target = v
+                break
+    if target is None:
+        target = versions[-1]
+
+    # Size each tile by what actually lands on disk: text + data only.
+    # bss is a runtime allocation (zeros reserved at process start),
+    # not stored in the ELF.  Including it would make rpg dwarf the
+    # treemap by its 1.8 MB world-buffer that doesn't cost any disk.
+    items = []
+    sym_total = 0
+    for name, b in target.features.items():
+        sz = b.text + b.data
+        if sz <= 0:
+            continue
+        items.append({
+            "name":     name,
+            "size":     sz,
+            "text":     b.text,
+            "data":     b.data,
+            "bss":      b.bss,
+            "syms":     len(b.syms),
+            "category": TREEMAP_CATEGORIES.get(name, "other"),
+        })
+        sym_total += sz
+    # uncategorized lump (text + data only, same rule)
+    uncat_text_data = sum(
+        s.size for s in target.uncategorized
+        if s.section in ("t", "T", "d", "D", "r", "R")
+    )
+    uncat_bss = sum(
+        s.size for s in target.uncategorized
+        if s.section in ("b", "B")
+    )
+    if uncat_text_data > 0:
+        items.append({
+            "name":     "uncategorized",
+            "size":     uncat_text_data,
+            "text":     uncat_text_data, "data": 0, "bss": uncat_bss,
+            "syms":     len(target.uncategorized),
+            "category": "other",
+        })
+        sym_total += uncat_text_data
+
+    # ELF overhead: everything in the binary that nm doesn't enumerate
+    # — program/section headers, the gap-padding ld inserts to align
+    # sections to the 512-byte page-size we set, dropped-symbol stubs
+    # if any.  Without surfacing this as a tile, the treemap claimed
+    # headroom that didn't exist (e.g. office53 reported 8987 B of
+    # phantom headroom but was actually 1376 B *over* the 64 KB cap).
+    overhead = max(0, target.binary_size - sym_total)
+    if overhead > 0:
+        items.append({
+            "name":     "_elf_overhead",
+            "size":     overhead,
+            "text":     0, "data": 0, "bss": 0, "syms": 0,
+            "category": "overhead",
+        })
+
+    # Now headroom is computed from the *actual binary size*, not the
+    # symbol sum.  This matches the budget page's number.
+    over_budget = target.binary_size > BUDGET_BYTES
+    overage     = max(0, target.binary_size - BUDGET_BYTES)
+    headroom    = max(0, BUDGET_BYTES - target.binary_size)
+    if not over_budget and headroom > 0:
+        items.append({
+            "name":     "_headroom",
+            "size":     headroom,
+            "text":     0, "data": 0, "bss": 0, "syms": 0,
+            "category": "headroom",
+        })
+
+    items.sort(key=lambda x: -x["size"])
+
+    return render(request, "officelab/treemap.html", {
+        "target":         target,
+        "items":          items,
+        "all_versions":  [v.name for v in versions],
+        "budget":         BUDGET_BYTES,
+        "binary_size":    target.binary_size,
+        "sym_total":      sym_total,
+        "overhead":       overhead,
+        "over_budget":    over_budget,
+        "overage":        overage,
+        "headroom":       headroom,
+    })
+
+
 def budget(request):
     versions, baseline = analyse_all()
     if not versions:

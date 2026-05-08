@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}OfficeForge{% endblock %}
+
+{% block content %}
+<style>
+  .of-row { display:flex; gap:1em; align-items:baseline;
+            padding:.2em .4em; border-bottom:1px solid #eee; }
+  .of-row:hover { background:#f8f8f8; }
+  .of-row.disabled { opacity:.5; }
+  .of-name  { flex:1; }
+  .of-bytes { font-variant-numeric:tabular-nums; color:#666;
+              min-width:6em; text-align:right; }
+  .of-cat   { font-size:.8em; color:#888; min-width:5em; }
+  .of-cat.core    { color:#0a5; }
+  .of-cat.extras  { color:#06a; }
+  .of-cat.network { color:#a06; }
+  .of-budget { font-family:monospace; padding:.6em 1em;
+               background:#f0f0f0; border-left:4px solid #0a5;
+               margin:1em 0; }
+  .of-budget.over { border-left-color:#a30; background:#fee; }
+  .of-bar    { height:8px; background:#0a5; transition:width .15s; }
+  .of-bar.over { background:#a30; }
+  .of-bar-track { height:8px; background:#ddd; border-radius:2px;
+                  overflow:hidden; margin:.4em 0; }
+  fieldset { border:1px solid #ddd; margin:.6em 0; padding:.6em 1em; }
+  legend { padding:0 .4em; font-weight:bold; }
+  button { padding:.5em 1.2em; font-size:1em; cursor:pointer; }
+  .of-presets { display:flex; flex-wrap:wrap; gap:.5em; margin:.6em 0 1.2em 0; }
+  .of-preset {
+    border:1px solid #aaa; background:#f5f5f5; padding:.5em .8em;
+    cursor:pointer; text-align:left; min-width:9em; max-width:18em;
+    border-radius:3px; line-height:1.3;
+  }
+  .of-preset:hover { background:#fff5e0; border-color:#888; }
+  .of-preset .pname { font-weight:bold; display:block; }
+  .of-preset .pbytes { font-family:monospace; color:#666; font-size:.85em; }
+  .of-preset .pdesc  { display:block; color:#444; font-size:.78em;
+                       margin-top:.25em; }
+  .of-preset.over { border-left:4px solid #a30; }
+  .of-preset.under { border-left:4px solid #0a5; }
+</style>
+
+<h1>OfficeForge</h1>
+<p>Pick features for your custom <code>{{ source_fork }}</code> build.
+   The 64 KB target was the original goal of the office project; with
+   every feature on, the binary is now over.  Trim a few apps to get
+   back under.</p>
+
+<form method="post" action="{% url 'officeforge:build' %}">
+  {% csrf_token %}
+
+  <h3 style="margin-bottom:.3em;">Presets</h3>
+  <p style="margin-top:0;color:#666;font-size:.9em;">
+    One-click combinations. Click to apply, then tweak below.
+  </p>
+  <div class="of-presets">
+    {% for p in presets %}
+      <button type="button" class="of-preset {% if p.bytes > budget_target %}over{% else %}under{% endif %}"
+              data-preset-macros="{{ p.macros|join:',' }}"
+              data-preset-slug="{{ p.slug }}">
+        <span class="pname">{{ p.name }}</span>
+        <span class="pbytes">~{{ p.bytes }} B</span>
+        <span class="pdesc">{{ p.desc }}</span>
+      </button>
+    {% endfor %}
+  </div>
+
+  <div class="of-budget" id="budget">
+    <div>
+      <strong id="budget-est">—</strong> est. binary
+      &nbsp;·&nbsp; baseline <span id="budget-base">{{ baseline_bytes }}</span>
+      &nbsp;·&nbsp; selected <span id="budget-feat">0</span>
+      &nbsp;·&nbsp; target <strong>{{ budget_target }}</strong>
+    </div>
+    <div class="of-bar-track">
+      <div class="of-bar" id="budget-bar" style="width:0%"></div>
+    </div>
+    <div id="budget-msg" style="font-size:.9em;color:#666;"></div>
+  </div>
+
+  {% regroup features by category as feature_groups %}
+  {% for group in feature_groups %}
+    <fieldset>
+      <legend>{{ group.grouper|title }}</legend>
+      {% for f in group.list %}
+        <label class="of-row" data-bytes="{{ f.bytes }}"
+               {% if f.depends_on %}data-depends-on="{{ f.depends_on }}"{% endif %}>
+          <input type="checkbox" name="f_{{ f.macro }}" value="1"
+                 data-macro="{{ f.macro }}"
+                 {% if f.default_on %}checked{% endif %}>
+          <span class="of-name">{{ f.label }}{% if f.depends_on %}
+            <small>(needs {{ f.depends_on|lower }})</small>{% endif %}</span>
+          <span class="of-cat {{ f.category }}">{{ f.category }}</span>
+          <span class="of-bytes">{{ f.bytes }} B</span>
+        </label>
+      {% endfor %}
+    </fieldset>
+  {% endfor %}
+
+  <p>
+    <button type="submit">Build &amp; download</button>
+    <small>shells out to <code>cc</code> with
+      <code>-DOFFICE_FEATURE_&lt;name&gt;=0</code> for each unchecked
+      feature; produces a stripped static binary.</small>
+  </p>
+</form>
+
+<script>
+(function() {
+  const baseline = {{ baseline_bytes }};
+  const target   = {{ budget_target }};
+  const rows = document.querySelectorAll('.of-row');
+  const elEst  = document.getElementById('budget-est');
+  const elFeat = document.getElementById('budget-feat');
+  const elBar  = document.getElementById('budget-bar');
+  const elBudg = document.getElementById('budget');
+  const elMsg  = document.getElementById('budget-msg');
+
+  function macroOf(row) {
+    const cb = row.querySelector('input[type=checkbox]');
+    return cb ? cb.dataset.macro : '';
+  }
+  function checkedOf(macro) {
+    const cb = document.querySelector(`input[data-macro="${macro}"]`);
+    return cb && cb.checked;
+  }
+  function applyDeps() {
+    rows.forEach(r => {
+      const dep = r.dataset.dependsOn;
+      const cb = r.querySelector('input[type=checkbox]');
+      if (dep) {
+        const ok = checkedOf(dep);
+        if (!ok) { cb.checked = false; cb.disabled = true; r.classList.add('disabled'); }
+        else     { cb.disabled = false;                     r.classList.remove('disabled'); }
+      }
+    });
+  }
+  function recalc() {
+    applyDeps();
+    let feat = 0, n = 0;
+    rows.forEach(r => {
+      const cb = r.querySelector('input[type=checkbox]');
+      if (cb && cb.checked && !cb.disabled) {
+        feat += parseInt(r.dataset.bytes || 0, 10);
+        n++;
+      }
+    });
+    const est = baseline + feat;
+    elEst.textContent = est + ' B';
+    elFeat.textContent = feat + ' B (' + n + ' features)';
+    const pct = Math.min(100, est / target * 100);
+    elBar.style.width = pct + '%';
+    if (est > target) {
+      elBar.classList.add('over');
+      elBudg.classList.add('over');
+      elMsg.textContent = 'Over the 64 KB target by ' + (est - target) + ' B — uncheck more.';
+    } else {
+      elBar.classList.remove('over');
+      elBudg.classList.remove('over');
+      elMsg.textContent = 'Under target with ' + (target - est) + ' B headroom.';
+    }
+  }
+  document.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', recalc);
+  });
+
+  // Preset buttons — clicking sets all checkboxes to match the
+  // preset's macro list, then recalcs the budget bar.
+  document.querySelectorAll('.of-preset').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      const raw = btn.getAttribute('data-preset-macros') || '';
+      const want = new Set(raw ? raw.split(',') : []);
+      document.querySelectorAll('input[type=checkbox][data-macro]').forEach(cb => {
+        cb.checked = want.has(cb.dataset.macro);
+      });
+      recalc();
+    });
+  });
+
+  recalc();
+})();
+</script>
+{% endblock %}

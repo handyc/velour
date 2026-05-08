@@ -78,6 +78,7 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define SYS_getgid     104
 #define SYS_chroot     161
 #define SYS_prctl      157
+#define SYS_sethostname 170
 #define SYS_exit_group 231
 
 #define O_RDONLY 0
@@ -216,6 +217,16 @@ struct sock_fprog  { unsigned short len;  struct sock_filter *filter; };
 #define SYS_getpid_v     39
 #define SYS_fork         57
 #define SYS_wait4_v      61
+#define SYS_uname_v      63
+#define SYS_readlink_v   89
+#define SYS_socket_v     41
+#define SYS_connect_v    42
+#define SYS_accept_v     43
+#define SYS_bind_v       49
+#define SYS_listen_v     50
+#define SYS_setsockopt_v 54
+#define SYS_sendto_v    44
+#define SYS_recvfrom_v  45
 #define SYS_time        201
 #define SYS_getdents64  217
 
@@ -236,30 +247,42 @@ static struct sock_filter seccomp_preview[] = {
     { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [10] */
 };
 
-/* Loose: union of every syscall office9..office11's apps issue.
- * office11 added getpid for the home-screen instance ID.  Order
- * picks the most-frequent calls (read/write) first so the filter
- * exits the chain quickly on the hot path. */
+/* Loose: union of every syscall office9..office63's apps issue.
+ * office11 added getpid for the home-screen instance ID; office60
+ * added uname + readlink (net panel); office61 added socket/bind/
+ * listen/accept/setsockopt (tier-2 HTTP); office62 added connect
+ * (tier-3 outbound probe); office63 added sendto/recvfrom (tier-4
+ * UDP DNS resolver). */
 static struct sock_filter seccomp_full[] = {
-    { BPF_LD_W_ABS,  0, 0, 4 },                            /* [0] arch */
-    { BPF_JMP_JEQ_K, 0,14, AUDIT_ARCH_X86_64 },            /* [1] arch != x86_64 → [16] (jeq exit_group), then [18] kill */
-    { BPF_LD_W_ABS,  0, 0, 0 },                            /* [2] nr */
-    { BPF_JMP_JEQ_K,13, 0, SYS_write        },             /* [3] → allow [17] */
-    { BPF_JMP_JEQ_K,12, 0, SYS_read         },
-    { BPF_JMP_JEQ_K,11, 0, SYS_ioctl        },
-    { BPF_JMP_JEQ_K,10, 0, SYS_open         },
-    { BPF_JMP_JEQ_K, 9, 0, SYS_close        },
-    { BPF_JMP_JEQ_K, 8, 0, SYS_lseek        },
-    { BPF_JMP_JEQ_K, 7, 0, SYS_getdents64   },
-    { BPF_JMP_JEQ_K, 6, 0, SYS_time         },
-    { BPF_JMP_JEQ_K, 5, 0, SYS_getpid_v     },
-    { BPF_JMP_JEQ_K, 4, 0, SYS_fork         },
-    { BPF_JMP_JEQ_K, 3, 0, SYS_execve       },
-    { BPF_JMP_JEQ_K, 2, 0, SYS_wait4_v      },
-    { BPF_JMP_JEQ_K, 1, 0, SYS_rt_sigreturn },
-    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [16] jf=1 → [18] kill */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [17] */
-    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [18] */
+    { BPF_LD_W_ABS,  0, 0, 4 },                            /* [0]  arch */
+    { BPF_JMP_JEQ_K, 0,24, AUDIT_ARCH_X86_64 },            /* [1]  arch != x86_64 → [26] (jeq exit_group), then [28] kill */
+    { BPF_LD_W_ABS,  0, 0, 0 },                            /* [2]  nr */
+    { BPF_JMP_JEQ_K,23, 0, SYS_write        },             /* [3]  → allow [27] */
+    { BPF_JMP_JEQ_K,22, 0, SYS_read         },             /* [4]  */
+    { BPF_JMP_JEQ_K,21, 0, SYS_ioctl        },             /* [5]  */
+    { BPF_JMP_JEQ_K,20, 0, SYS_open         },             /* [6]  */
+    { BPF_JMP_JEQ_K,19, 0, SYS_close        },             /* [7]  */
+    { BPF_JMP_JEQ_K,18, 0, SYS_lseek        },             /* [8]  */
+    { BPF_JMP_JEQ_K,17, 0, SYS_getdents64   },             /* [9]  */
+    { BPF_JMP_JEQ_K,16, 0, SYS_time         },             /* [10] */
+    { BPF_JMP_JEQ_K,15, 0, SYS_uname_v      },             /* [11] office60 */
+    { BPF_JMP_JEQ_K,14, 0, SYS_readlink_v   },             /* [12] office60 */
+    { BPF_JMP_JEQ_K,13, 0, SYS_socket_v     },             /* [13] office61 */
+    { BPF_JMP_JEQ_K,12, 0, SYS_connect_v    },             /* [14] office62 */
+    { BPF_JMP_JEQ_K,11, 0, SYS_bind_v       },             /* [15] office61 */
+    { BPF_JMP_JEQ_K,10, 0, SYS_listen_v     },             /* [16] office61 */
+    { BPF_JMP_JEQ_K, 9, 0, SYS_accept_v     },             /* [17] office61 */
+    { BPF_JMP_JEQ_K, 8, 0, SYS_setsockopt_v },             /* [18] office61 */
+    { BPF_JMP_JEQ_K, 7, 0, SYS_sendto_v     },             /* [19] office63 */
+    { BPF_JMP_JEQ_K, 6, 0, SYS_recvfrom_v   },             /* [20] office63 */
+    { BPF_JMP_JEQ_K, 5, 0, SYS_getpid_v     },             /* [21] */
+    { BPF_JMP_JEQ_K, 4, 0, SYS_fork         },             /* [22] */
+    { BPF_JMP_JEQ_K, 3, 0, SYS_execve       },             /* [23] */
+    { BPF_JMP_JEQ_K, 2, 0, SYS_wait4_v      },             /* [24] */
+    { BPF_JMP_JEQ_K, 1, 0, SYS_rt_sigreturn },             /* [25] */
+    { BPF_JMP_JEQ_K, 0, 1, SYS_exit_group   },             /* [26] jf=1 → [28] kill */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_ALLOW         },    /* [27] */
+    { BPF_RET_K,     0, 0, SECCOMP_RET_KILL_PROCESS  },    /* [28] */
 };
 
 static int install_seccomp(struct sock_filter *filter, unsigned short n) {
@@ -275,17 +298,87 @@ static int install_seccomp(struct sock_filter *filter, unsigned short n) {
 }
 
 
+/* ev/Tier-1: build a per-launch identity token + matching hostname so
+ * the jailed office can show something distinct from PID 1.  Mixes
+ * the parent's PID with rdtsc and a small LCG to spread bits, then
+ * formats the low 32 bits as 8 lowercase hex chars.  Not cryptographic
+ * — just unique enough that two jails launched in the same second
+ * pick different tokens. */
+static unsigned long jail_random_u32(unsigned long pid_seed) {
+    unsigned long h, l;
+    __asm__ volatile ("rdtsc" : "=d"(h), "=a"(l));
+    unsigned long s = (h << 32) | l;
+    s ^= pid_seed * 6364136223846793005UL;
+    s = s * 2862933555777941757UL + 3037000493UL;
+    return (unsigned long)(unsigned int)(s ^ (s >> 32));
+}
+
+static void jail_format_token(char *out, unsigned long v) {
+    static const char hexd[] = "0123456789abcdef";
+    for (int i = 0; i < 8; i++) {
+        out[7 - i] = hexd[v & 0xf];
+        v >>= 4;
+    }
+    out[8] = 0;
+}
+
 int main_c(int argc, char **argv, char **envp) {
+    /* tier-4: optional `--with-net` flag — drops CLONE_NEWNET so the
+     * jailed child shares the host's network namespace.  Default is
+     * still full isolation (empty net-ns).  Walk argv once and splice
+     * the flag out so the rest of the dispatch stays unchanged. */
+    int with_net = 0;
+    {
+        int w = 0;
+        for (int r = 0; r < argc; r++) {
+            const char *a = argv[r];
+            if (a && a[0] == '-' && a[1] == '-' && a[2] == 'w' &&
+                a[3] == 'i' && a[4] == 't' && a[5] == 'h' && a[6] == '-' &&
+                a[7] == 'n' && a[8] == 'e' && a[9] == 't' && a[10] == 0) {
+                with_net = 1;
+                continue;
+            }
+            argv[w++] = argv[r];
+        }
+        argv[w] = 0;
+        argc = w;
+    }
+
     if (argc < 3) {
-        wr(2, "usage: jail OFFICE_PATH SUBCOMMAND [ARGS...]\n"
-              "       jail OFFICE_PATH HEX  (legacy: preview-genome)\n", 99);
+        wr(2, "usage: jail [--with-net] OFFICE_PATH SUBCOMMAND [ARGS...]\n"
+              "       jail [--with-net] OFFICE_PATH HEX  (legacy: preview-genome)\n",
+              112);
         return 2;
     }
     const char *src = argv[1];
 
+    /* Per-launch UTS hostname "garden-XXXXXXXX".  The 8 hex chars are
+     * a per-launch token derived from rdtsc + parent pid; office60+
+     * reads it via uname() and surfaces it as the instance ID (PID is
+     * always 1 inside the pid-ns, so this is the only stable per-jail
+     * identity).  Carried in the hostname only — not as argv — so
+     * legacy office7..office59 binaries ignore it harmlessly. */
+    long pid_for_token = sys1(SYS_getpid, 0);
+    unsigned long tok_v = jail_random_u32((unsigned long)pid_for_token);
+    static char hostname[24];             /* "garden-XXXXXXXX\0" */
+    {
+        const char *pre = "garden-";
+        int o = 0;
+        for (int i = 0; pre[i]; i++) hostname[o++] = pre[i];
+        char tok_s[9];
+        jail_format_token(tok_s, tok_v);
+        for (int i = 0; tok_s[i]; i++) hostname[o++] = tok_s[i];
+        hostname[o] = 0;
+    }
+    int hostname_len = 7 + 8;             /* slen("garden-") + 8 hex */
+
     /* Argv to feed the jailed office.  Legacy 3-arg form
      * `jail PATH HEX` is rewritten to `jail PATH preview-genome HEX`
-     * so office7 keeps working unchanged. */
+     * so office7 keeps working unchanged.  We carry the per-launch
+     * identity in the UTS hostname only ("garden-XXXXXXXX") so that
+     * older office binaries (office7..office59), which don't know
+     * --instance=, see argv unchanged.  office60+ extract the 8 hex
+     * chars of the hostname suffix when rendering identity. */
     char *xargs[16];
     int xn = 0;
     xargs[xn++] = (char *)"office";
@@ -323,7 +416,12 @@ int main_c(int argc, char **argv, char **envp) {
     long gid = sys1(SYS_getgid, 0);
 
     unsigned long flags = CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNS
-                        | CLONE_NEWNET  | CLONE_NEWUTS | SIGCHLD;
+                        | CLONE_NEWUTS | SIGCHLD;
+    /* Keep the network isolated unless --with-net was passed.  Without
+     * net-ns we share the host's network stack — DNS works, outbound
+     * connections work, but the child can also see (and reach) the
+     * host's listening sockets.  Trade-off depending on the use case. */
+    if (!with_net) flags |= CLONE_NEWNET;
     long child = do_clone(flags);
     if (child < 0) {
         sys3(SYS_unlink, (long)dst, 0, 0);
@@ -341,6 +439,37 @@ int main_c(int argc, char **argv, char **envp) {
         deny_setgroups();
         write_id_map("/proc/self/uid_map", uid);
         write_id_map("/proc/self/gid_map", gid);
+
+        /* Per-launch UTS hostname for the new uts-ns.  Now that
+         * uid_map is in place we have CAP_SYS_ADMIN over namespaces
+         * we created, so sethostname() succeeds.  office60+ uses
+         * uname() to read this and surface the suffix as the
+         * instance token (PID is always 1 in here, so this is the
+         * only stable per-instance identity). */
+        sys3(SYS_sethostname, (long)hostname, (long)hostname_len, 0);
+
+        /* tier-4: bring up `lo` inside the new net-ns so the jailed
+         * office can at least bind/connect on 127.0.0.1.  Without
+         * this, lo exists but is DOWN, so even loopback sockets fail.
+         * SIOCSIFFLAGS = 0x8914; IFF_UP = 1, IFF_LOOPBACK = 8,
+         * IFF_RUNNING = 0x40.  ifreq is 40 bytes: name[16] + flags.
+         * Skipped when --with-net was passed (we share host's net-ns
+         * and lo is already up there). */
+        if (!with_net) {
+            long sfd = sys3(41 /*SYS_socket*/, 2 /*AF_INET*/, 2 /*SOCK_DGRAM*/, 0);
+            if (sfd >= 0) {
+                char ifr[40];
+                int o = 0;
+                ifr[o++] = 'l'; ifr[o++] = 'o';
+                while (o < 16) ifr[o++] = 0;
+                /* ifr_flags is a short at offset 16 (little-endian). */
+                ifr[16] = (char)(1 | 8 | 0x40);   /* IFF_UP|LOOPBACK|RUNNING */
+                ifr[17] = 0;
+                while (o < 40) ifr[o++] = 0;
+                sys3(SYS_ioctl, sfd, 0x8914 /*SIOCSIFFLAGS*/, (long)ifr);
+                sys3(SYS_close, sfd, 0, 0);
+            }
+        }
 
         if (sys1(SYS_chroot, (long)dir) < 0) {
             wr(2, "jail/child: chroot failed\n", 26);

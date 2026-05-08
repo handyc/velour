@@ -7,6 +7,7 @@ app_name = 'officelab'
 urlpatterns = [
     path('',                  views.index,         name='index'),
     path('budget/',           views.budget,        name='budget'),
+    path('treemap/',          views.treemap,       name='treemap'),
     path('diff/',             views.diff_view,     name='diff'),
     path('planner/',          views.planner,       name='planner'),
     path('rebuild/',          views.rebuild,       name='rebuild'),

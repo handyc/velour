@@ -86,9 +86,25 @@
         }
     }
 
-    function renderTreemap(container, items, palette) {
+    function renderTreemap(container, items, palette, options) {
         if (!container) return;
         container.innerHTML = '';
+        options = options || {};
+        // Optional callbacks let callers reuse this layout for different
+        // domains (filesystem MB, ELF bytes, etc.) without forking the
+        // squarify code.  Defaults preserve the original filesystem-MB
+        // behaviour so existing callers stay unaffected.
+        var formatTitle = options.formatTitle || function (it) {
+            return it.path + ': ' + it.size + ' MB';
+        };
+        var formatLabel = options.formatLabel || function (it) {
+            return it.path.split('/').pop() + ' · ' + it.size + 'M';
+        };
+        var colorOf = options.colorFor || function (it, i) {
+            return palette[i % palette.length];
+        };
+        var classOf = options.classFor || function () { return ''; };
+
         var sorted = (items || []).slice().sort(function (a, b) {
             return b.size - a.size;
         });
@@ -124,20 +140,21 @@
             var p = placements[i];
             if (p.w < MIN_DIM || p.h < MIN_DIM) continue;
             var div = document.createElement('div');
-            div.className = 'treemap-item';
+            var extraCls = classOf(p.item, i);
+            div.className = 'treemap-item' + (extraCls ? ' ' + extraCls : '');
             div.style.left   = p.x.toFixed(1) + 'px';
             div.style.top    = p.y.toFixed(1) + 'px';
             div.style.width  = Math.max(0, p.w - 1).toFixed(1) + 'px';
             div.style.height = Math.max(0, p.h - 1).toFixed(1) + 'px';
-            div.style.background = palette[i % palette.length];
-            div.title = p.item.path + ': ' + p.item.size + ' MB';
+            div.style.background = colorOf(p.item, i);
+            div.title = formatTitle(p.item);
             // Only label tiles big enough to read.
             if (p.w >= 50 && p.h >= 16) {
-                div.textContent = p.item.path.split('/').pop() + ' · ' + p.item.size + 'M';
+                div.textContent = formatLabel(p.item);
             }
             container.appendChild(div);
         }
     }
 
-    root.HelixTreemap = { render: renderTreemap };
+    root.HelixTreemap = { render: renderTreemap, squarify: squarify };
 }(window));

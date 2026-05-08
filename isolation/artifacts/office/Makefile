@@ -15,7 +15,7 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
             -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,noseparate-code \
             -Wl,-z,common-page-size=512
 
-VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59
+VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 office60 office61 office62 office63 office64 office65 office66
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
 all: $(VERSIONS) minimal jail
@@ -320,6 +320,63 @@ office59: office59.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "office59: $$(stat -c %s $@) bytes"
 
+office60: office60.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office60: $$(stat -c %s $@) bytes"
+
+office61: office61.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office61: $$(stat -c %s $@) bytes"
+
+office62: office62.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office62: $$(stat -c %s $@) bytes"
+
+office63: office63.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office63: $$(stat -c %s $@) bytes"
+
+office64: office64.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office64: $$(stat -c %s $@) bytes"
+
+office65: office65.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office65: $$(stat -c %s $@) bytes"
+
+# office66: full build (every OFFICE_FEATURE_* defaults to 1).  The
+# `office66-lite` target shows how to override the defaults to drop
+# all the Tier-1..Tier-5 network code + the heaviest apps and produce
+# a sub-64-KB binary.
+office66: office66.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office66: $$(stat -c %s $@) bytes"
+
+office66-lite: office66.c
+	$(CC) $(CFLAGS) \
+	    -DOFFICE_FEATURE_RPG=0      \
+	    -DOFFICE_FEATURE_HXHNT=0    \
+	    -DOFFICE_FEATURE_ASK=0      \
+	    -DOFFICE_FEATURE_NET=0      \
+	    -DOFFICE_FEATURE_HTTP=0     \
+	    -DOFFICE_FEATURE_ECHO=0     \
+	    -DOFFICE_FEATURE_FINGER=0   \
+	    -DOFFICE_FEATURE_GOPHER=0   \
+	    -DOFFICE_FEATURE_PROBE=0    \
+	    -DOFFICE_FEATURE_DNS=0      \
+	    -DOFFICE_FEATURE_FTP=0      \
+	    -DOFFICE_FEATURE_SSHTEL=0   \
+	    $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office66-lite: $$(stat -c %s $@) bytes"
+
 # Unstripped twins for the officelab analyser.  Same source, same
 # CFLAGS, same LDFLAGS *minus* `-s` so nm can see every function.
 %.dbg: %.c
@@ -347,7 +404,7 @@ jail.dbg: jail.c
 	$(CC) $(CFLAGS) $(DBGFLAGS) -o $@ $<
 
 clean:
-	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 \
+	rm -f office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 office60 office61 office62 office63 office64 office65 office66 office66-lite \
 	      minimal jail $(DBG) jail.dbg \
 	      outbox.txt canvas.txt office*.conf garden.bin hxhnt.seed hxhnt_winner_*.seed hxh-*
 
