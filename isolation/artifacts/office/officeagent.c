@@ -1502,9 +1502,10 @@ static void cb_set(const char *s, int n) {
  * keypress handlers. Specials use 0xA0+ — apps handle separately. */
 typedef struct { const char *label; unsigned char act; } MI;
 
-#define MA_NEW    0x0e   /* ^N */
-#define MA_SAVE   0x13   /* ^S */
-#define MA_QUIT   0x11   /* ^Q */
+#define MA_NEW         0x0e   /* ^N */
+#define MA_SAVE        0x13   /* ^S */
+#define MA_PROMPT_SYNC 0x10   /* ^P — ask: send personality as hidden primer */
+#define MA_QUIT        0x11   /* ^Q */
 #define MA_CUT    0x18   /* ^X */
 #define MA_COPY   0x03   /* ^C */
 #define MA_PASTE  0x16   /* ^V */
@@ -1563,8 +1564,13 @@ static const MS ms_shell   = { mF_quit, NA(mF_quit), 0, 0,
 #define MA_VIEW     0xaa   /* garden: V */
 #define MA_EXPORT   0xab   /* garden: X — splice export */
 #define MA_EVOLVE   0xab   /* hxhnt: Edit → Evolve */
-/* ask: New = clear chat, Settings = edit api_key/endpoint/model, Quit. */
+/* ask: New = clear chat, Sync = primer-send personality, Settings,
+ * Quit.  "Sync" sends the personality bank as a hidden user-role
+ * message + captures the LLM's ack as a hidden assistant message,
+ * both kept in the conversation context for subsequent turns but
+ * never rendered. */
 static const MI mF_ask[]   = {{"New     ^N", MA_NEW},
+                              {"Sync    ^P", MA_PROMPT_SYNC},
                               {"Settings^E", MA_SETTINGS},
                               {"Quit    ^Q", MA_QUIT}};
 static const MS ms_ask     = { mF_ask, NA(mF_ask), 0, 0,
@@ -3072,6 +3078,7 @@ static int  ask_buf_use;
 static int  ask_msg_off[ASK_MAX_MSGS];
 static int  ask_msg_len[ASK_MAX_MSGS];
 static int  ask_msg_role[ASK_MAX_MSGS];   /* 0=user, 1=assistant */
+static unsigned char ask_msg_hidden[ASK_MAX_MSGS]; /* 1 = skip in renderer */
 static int  ask_n_msgs;
 
 static int sapp(char *dst, int at, const char *s) {
@@ -3080,7 +3087,7 @@ static int sapp(char *dst, int at, const char *s) {
     return at + n;
 }
 
-static void ask_msg_add(int role, const char *text, int tlen) {
+static void ask_msg_add2(int role, const char *text, int tlen, int hidden) {
     if (tlen > ASK_BUF_CAP - 16) tlen = ASK_BUF_CAP - 16;
     /* drop oldest until it fits */
     while ((ask_buf_use + tlen > ASK_BUF_CAP || ask_n_msgs >= ASK_MAX_MSGS)
@@ -3090,18 +3097,24 @@ static void ask_msg_add(int role, const char *text, int tlen) {
             ask_buf[i] = ask_buf[i + dlen];
         ask_buf_use -= dlen;
         for (int i = 1; i < ask_n_msgs; i++) {
-            ask_msg_off[i-1]  = ask_msg_off[i] - dlen;
-            ask_msg_len[i-1]  = ask_msg_len[i];
-            ask_msg_role[i-1] = ask_msg_role[i];
+            ask_msg_off[i-1]    = ask_msg_off[i] - dlen;
+            ask_msg_len[i-1]    = ask_msg_len[i];
+            ask_msg_role[i-1]   = ask_msg_role[i];
+            ask_msg_hidden[i-1] = ask_msg_hidden[i];
         }
         ask_n_msgs--;
     }
-    ask_msg_off[ask_n_msgs]  = ask_buf_use;
-    ask_msg_len[ask_n_msgs]  = tlen;
-    ask_msg_role[ask_n_msgs] = role;
+    ask_msg_off[ask_n_msgs]    = ask_buf_use;
+    ask_msg_len[ask_n_msgs]    = tlen;
+    ask_msg_role[ask_n_msgs]   = role;
+    ask_msg_hidden[ask_n_msgs] = (unsigned char)(hidden ? 1 : 0);
     mcpy(ask_buf + ask_buf_use, text, tlen);
     ask_buf_use += tlen;
     ask_n_msgs++;
+}
+
+static void ask_msg_add(int role, const char *text, int tlen) {
+    ask_msg_add2(role, text, tlen, 0);
 }
 
 /* line-oriented "key=value" lookup. */
@@ -3450,6 +3463,7 @@ static void ask_render_history(int hist_top, int hist_h) {
     /* count wrapped lines first so we can scroll-pin to bottom */
     int total = 0;
     for (int i = 0; i < ask_n_msgs; i++) {
+        if (ask_msg_hidden[i]) continue;
         int tlen = ask_msg_len[i];
         if (tlen == 0) { total++; continue; }
         int pos = 0;
@@ -3470,6 +3484,7 @@ static void ask_render_history(int hist_top, int hist_h) {
 
     sgrbgfg(COL_BAR_BG, COL_BAR_FG);
     for (int i = 0; i < ask_n_msgs && row < hist_h; i++) {
+        if (ask_msg_hidden[i]) continue;
         const char *prefix = ask_msg_role[i] ? "ai>  " : "you> ";
         int role = ask_msg_role[i];
         int tlen = ask_msg_len[i];
@@ -3816,7 +3831,9 @@ static int run_ask(int argc, char **argv) {
     static char input[ASK_INPUT_CAP];
     int inlen = 0;
     static char errmsg[256];
+    static char notice[128];
     errmsg[0] = 0;
+    notice[0] = 0;
 
     term_raw();
     int hist_top = 2;
@@ -3846,10 +3863,15 @@ static int run_ask(int argc, char **argv) {
             status(errmsg);
             sgrbgfg(COL_BAR_BG, COL_BAR_FG);
             errmsg[0] = 0;
+        } else if (notice[0]) {
+            sgrbgfg(COL_BAR_BG, 28);
+            status(notice);
+            sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+            notice[0] = 0;
         } else if (!ask_api_key[0]) {
             status("no api_key set — File > Settings (Alt+F)");
         } else {
-            status("ENTER send | ^N clear | ^E settings | ^Q quit");
+            status("ENTER send | ^N clear | ^P sync | ^E settings | ^Q quit");
         }
         fbflush();
 
@@ -3863,10 +3885,78 @@ static int run_ask(int argc, char **argv) {
         if (act == MA_QUIT)     break;
         if (act == MA_NEW)      { ask_n_msgs = 0; ask_buf_use = 0; continue; }
         if (act == MA_SETTINGS) { ask_settings_modal(); continue; }
+        if (act == MA_PROMPT_SYNC) k[0] = 0x10;   /* fall through to ^P */
 
         if (k[0] == 0x11) break;                                     /* ^Q */
         if (k[0] == 0x0e) { ask_n_msgs = 0; ask_buf_use = 0; continue; } /* ^N */
         if (k[0] == 0x05) { ask_settings_modal(); continue; }            /* ^E */
+        if (k[0] == 0x10) {                                          /* ^P sync */
+            if (!ask_api_key[0]) {
+                int el = sapp(errmsg, 0, "no api_key set — open Settings");
+                errmsg[el] = 0;
+                continue;
+            }
+            prompt_load();
+            if (g_llm_prompt_len <= 0) {
+                int el = sapp(errmsg, 0,
+                              "personality bank empty — fill via prompt 1");
+                errmsg[el] = 0;
+                continue;
+            }
+            /* Checkpoint so we can roll back on failure. */
+            int ck_n = ask_n_msgs, ck_use = ask_buf_use;
+            ask_msg_add2(0, g_llm_prompt, g_llm_prompt_len, 1);
+
+            cup(0, SCREEN_H - 3);
+            sgrbgfg(COL_BAR_BG, 8);
+            for (int x = 0; x < SCREEN_W; x++) fbs("-");
+            cup(0, SCREEN_H - 2);
+            sgrbgfg(15, 0);
+            fbs(" > "); blanks(SCREEN_W - 3);
+            sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+            status("syncing personality ...");
+            fbflush();
+
+            int rc = ask_call_curl();
+            static char resp[ASK_RESP_CAP];
+            int rn = -1;
+            int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
+            if (fd >= 0) {
+                rn = (int)rd(fd, resp, sizeof resp - 1);
+                cl(fd);
+            }
+            if (rc < 0 || rn < 0) {
+                ask_n_msgs = ck_n; ask_buf_use = ck_use;
+                int el = sapp(errmsg, 0, "sync failed — curl/network");
+                errmsg[el] = 0;
+                continue;
+            }
+            resp[rn] = 0;
+            static char content[ASK_BUF_CAP];
+            int cn = ask_extract_content(resp, rn, content, sizeof content);
+            if (cn < 0) {
+                ask_n_msgs = ck_n; ask_buf_use = ck_use;
+                static char emsg[256];
+                int en = ask_extract_error(resp, rn, emsg, sizeof emsg);
+                int p = sapp(errmsg, 0, "sync failed: ");
+                if (en > 0) {
+                    for (int i = 0; i < en && p < (int)sizeof errmsg - 1; i++)
+                        errmsg[p++] = emsg[i];
+                } else {
+                    p = sapp(errmsg, p, "no content in response");
+                }
+                errmsg[p] = 0;
+                continue;
+            }
+            ask_msg_add2(1, content, cn, 1);
+            int p = sapp(notice, 0, "personality synced (");
+            p += utoa((unsigned)g_llm_prompt_len, notice + p);
+            p = sapp(notice, p, " B sent, ");
+            p += utoa((unsigned)cn, notice + p);
+            p = sapp(notice, p, " B ack — both hidden)");
+            notice[p] = 0;
+            continue;
+        }
 
         if (k[0] == '\r' || k[0] == '\n') {
             if (inlen == 0) continue;
