@@ -5053,9 +5053,11 @@ static int run_coder(int argc, char **argv) {
             continue;
         }
         if (k[0] == 'x') {
-            /* Execute the latest /tmp/coder_attempt and dump its
-             * stdout+stderr into the compile-output panel.  Exit
-             * code shown in the status line. */
+            /* Execute the latest /tmp/coder_attempt and show its
+             * stdout+stderr on a dedicated full-body panel — the
+             * compile-output strip is only 4 lines tall, so longer
+             * programs (10-line counters, multi-step demos) had
+             * their output truncated to a single visible row. */
             int probe = (int)op("/tmp/coder_attempt", O_RDONLY, 0);
             if (probe < 0) {
                 coder_paint("no binary — press ENTER to build first");
@@ -5064,19 +5066,69 @@ static int run_coder(int argc, char **argv) {
             cl(probe);
             coder_paint("running /tmp/coder_attempt …");
             int exit_code = coder_runtest();
-            int hp = sapp(g_coder_err, 0, "[runtime, exit=");
-            hp += utoa((unsigned)exit_code, g_coder_err + hp);
-            hp = sapp(g_coder_err, hp, "]\n");
-            int fd = (int)op("/tmp/coder_run.txt", O_RDONLY, 0);
-            if (fd >= 0) {
-                int rn = (int)rd(fd, g_coder_err + hp,
-                                 CODER_ERR_CAP - hp - 1);
-                if (rn > 0) hp += rn;
-                cl(fd);
+
+            paint_desktop();
+            {
+                char title[64];
+                int tp = sapp(title, 0, "coder · runtime · exit=");
+                tp += utoa((unsigned)exit_code, title + tp);
+                title[tp] = 0;
+                chrome(title);
             }
-            if (hp >= CODER_ERR_CAP) hp = CODER_ERR_CAP - 1;
-            g_coder_err[hp] = 0;
-            g_coder_err_len = hp;
+            body_clear();
+
+            static char rb[8192];
+            int rn = 0;
+            int rfd = (int)op("/tmp/coder_run.txt", O_RDONLY, 0);
+            if (rfd >= 0) {
+                rn = (int)rd(rfd, rb, sizeof rb - 1);
+                if (rn < 0) rn = 0;
+                cl(rfd);
+            }
+            rb[rn] = 0;
+
+            int last_row = SCREEN_H - 4;   /* leave status bar room */
+            if (rn == 0) {
+                body_at(2, 4, "(no output captured)", SCREEN_W - 4);
+            } else {
+                int row = 3;
+                int line_start = 0;
+                int extra = 0;
+                for (int i = 0; i <= rn; i++) {
+                    if (i == rn || rb[i] == '\n') {
+                        int len = i - line_start;
+                        if (len > SCREEN_W - 4) len = SCREEN_W - 4;
+                        if (row < last_row) {
+                            char tmp[256];
+                            int tl = len;
+                            if (tl > (int)sizeof tmp - 1) tl = sizeof tmp - 1;
+                            mcpy(tmp, rb + line_start, tl);
+                            tmp[tl] = 0;
+                            body_at(2, row++, tmp, SCREEN_W - 4);
+                        } else {
+                            extra++;
+                        }
+                        line_start = i + 1;
+                    }
+                }
+                if (extra > 0) {
+                    char ln[80];
+                    int q = sapp(ln, 0, "(+");
+                    q += utoa((unsigned)extra, ln + q);
+                    q = sapp(ln, q, " more lines — buffer is 8 KB)");
+                    ln[q] = 0;
+                    body_at(2, last_row, ln, SCREEN_W - 4);
+                }
+            }
+            status(" press any key to return ");
+            fbflush();
+
+            for (;;) {
+                unsigned char kk[8];
+                int kn = read_key(kk, sizeof kk);
+                if (kn > 0) break;
+            }
+
             char st[64];
             int p = sapp(st, 0, "ran (exit=");
             p += utoa((unsigned)exit_code, st + p);
