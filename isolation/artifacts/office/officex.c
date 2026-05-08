@@ -4125,17 +4125,24 @@ static void xterm256_to_rgb(int code, int *r, int *g, int *b) {
 
 static unsigned long rpg_neighbor_seed(int dx, int dy);
 
-/* Derive a 4-colour palette for one overworld from its seed.  Each
- * terrain class anchors on a recognisable archetype (rock/sand/soil/
- * water) and drifts ~±32 per channel based on the seed, so different
- * overworlds visibly differ but rock is still rocky and water blue. */
+/* Derive a 4-colour palette for one overworld from its seed.  The 4
+ * terrain classes anchor on the *current* hx_seed_pal — the same
+ * palette hxhnt's V-viewer shows and that 'r' randomises / GA evolves
+ * — decoded from xterm-256 to 24-bit RGB.  Each panel then drifts
+ * ~±32 per channel from those anchors, so different sub-worlds
+ * visibly differ while still all reading as the same hxhnt-flavoured
+ * world.  Replacing/randomising hx_seed_pal in the V viewer takes
+ * effect immediately on return because xpg invalidates rpg_cell_done
+ * and re-runs rpg_palettes_refresh. */
 static void rpg_palette_for_seed(unsigned long s, struct RpgRGB out[4]) {
-    static const struct RpgRGB anchor[4] = {
-        {  90,  90,  92 },   /* rock  — neutral grey */
-        { 220, 200, 140 },   /* sand  — warm tan */
-        {  90, 130,  60 },   /* soil  — moss green */
-        {  30,  80, 180 },   /* water — deep blue */
-    };
+    struct RpgRGB anchor[4];
+    for (int i = 0; i < 4; i++) {
+        int r, g, b;
+        xterm256_to_rgb(hx_seed_pal[i], &r, &g, &b);
+        anchor[i].r = (unsigned char)r;
+        anchor[i].g = (unsigned char)g;
+        anchor[i].b = (unsigned char)b;
+    }
     s |= 1ULL;
     for (int i = 0; i < 4; i++) {
         s = s * 6364136223846793005UL + 1442695040888963407UL;
