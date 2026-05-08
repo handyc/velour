@@ -49,7 +49,14 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "office60", "office61", "office62", "office63", "office64",
             # office65 + sheet macros; office66 + OFFICE_FEATURE_*
             # selective-build guards (full + lite variants).
-            "office65", "office66"]
+            "office65", "office66",
+            # Pre-baked named variants forked from office66 — each is
+            # a real .c file with the OFFICE_FEATURE_* matrix hard-set
+            # to one of OfficeForge's same-named presets and free to
+            # diverge from here on.
+            "officetiny", "officeproductivity", "officeresearcher",
+            "officegamer", "officesysadmin", "officehoneypot",
+            ]
 BASELINE = "minimal"
 
 # 64 KB binary cap that the user is shooting for.
