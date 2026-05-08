@@ -1712,10 +1712,7 @@ static void show_about(const char *title) {
 
 /* ── forward declarations of apps ──────────────────────── */
 static int run_shell(int, char**);
-static int run_notepad(int, char**);
 static int run_sheet(int, char**);
-static int run_hex(int, char**);
-static int run_files(int, char**);
 static int run_ask(int, char**);
 static int run_prompt(int, char**);
 static int run_coder(int, char**);
@@ -2052,23 +2049,6 @@ static int notepad_loop(const char *title) {
     return 0;
 }
 
-static int run_notepad(int argc, char **argv) {
-    current_ms = &ms_notepad;
-    if (argc > 1 && argv[1][0]) load_file(argv[1]);
-    else { blen = 0; fname[0] = 0; }
-    bcur = 0; btop = 0;
-    /* find may have set a target line: walk to it. */
-    if (npad_target_line > 1) {
-        int p = 0, ln = 1;
-        while (p < blen && ln < npad_target_line) {
-            if (buf[p] == '\n') ln++;
-            p++;
-        }
-        bcur = p;
-        npad_target_line = 0;
-    }
-    return notepad_loop("Notepad");
-}
 
 
 /* ── sheet: CSV view + arrow-key navigation, single-cell edit ── */
@@ -2766,172 +2746,6 @@ static int run_sheet(int argc, char **argv) {
 
 
 /* ── hex editor: 16 bytes/line view + nibble write ─────── */
-static int run_hex(int argc, char **argv) {
-    current_ms = &ms_hex;
-    if (argc > 1 && argv[1][0]) load_file(argv[1]);
-    else { blen = 0; fname[0] = 0; }
-    bcur = 0; btop = 0;
-    int nibhi = 1;            /* next digit goes to high nibble */
-    int ascii_pane = 0;       /* 0 = hex side, 1 = ascii side */
-    term_raw();
-    while (1) {
-        int rows = SCREEN_H - 4;
-        if (bcur < btop) btop = (bcur / 16) * 16;
-        if (bcur >= btop + rows * 16) btop = ((bcur / 16) - rows + 1) * 16;
-        if (btop < 0) btop = 0;
-
-        paint_desktop();
-        chrome("Hex");
-        body_clear();
-        for (int r = 0; r < rows; r++) {
-            int o = btop + r * 16;
-            cup(2, 3 + r);
-            sgrbgfg(7, 8);
-            char hx[8];
-            unsigned u = (unsigned)o;
-            for (int s = 16, i = 0; s; s -= 4, i++) {
-                int v = (u >> (s - 4)) & 0xf;
-                hx[i] = (char)(v < 10 ? '0' + v : 'a' + v - 10);
-            }
-            fbw(hx, 8);
-            fbw("  ", 2);
-            char asc[16];
-            int  cur_in_row = -1;
-            int  an = 0;
-            for (int j = 0; j < 16; j++) {
-                int oo = o + j;
-                int is_cur = (oo == bcur);
-                if (is_cur) cur_in_row = j;
-                if (oo >= blen) {
-                    sgrbgfg(is_cur && !ascii_pane ? 15 : 7, 8);
-                    fbw("__ ", 3);
-                    asc[an++] = ' ';
-                    continue;
-                }
-                unsigned u8 = (unsigned char)buf[oo];
-                int hi = (u8 >> 4) & 0xf, lo = u8 & 0xf;
-                char hh = (char)(hi < 10 ? '0' + hi : 'a' + hi - 10);
-                char ll = (char)(lo < 10 ? '0' + lo : 'a' + lo - 10);
-                int hex_hi_hi = is_cur && !ascii_pane && nibhi;
-                int hex_hi_lo = is_cur && !ascii_pane && !nibhi;
-                sgrbgfg(hex_hi_hi ? 15 : 7, 0); fbw(&hh, 1);
-                sgrbgfg(hex_hi_lo ? 15 : 7, 0); fbw(&ll, 1);
-                sgrbgfg(7, 0); fbw(" ", 1);
-                asc[an++] = (u8 >= 32 && u8 < 127) ? (char)u8 : '.';
-            }
-            fbw(" ", 1);
-            /* render ascii column with selective highlight */
-            for (int j = 0; j < an; j++) {
-                int hl = (ascii_pane && cur_in_row == j);
-                sgrbgfg(hl ? 15 : 7, 0);
-                fbw(asc + j, 1);
-            }
-        }
-        status(ascii_pane
-            ? "  ASCII mode | tab→hex | printable overwrites | ^S save | q"
-            : "  HEX mode | tab→ASCII | 0-9 a-f write | i ins | x del | ^S save | q");
-        fbflush();
-
-        unsigned char k[8];
-        int n = read_key(k, sizeof k);
-        if (n <= 0) continue;
-
-        int act = -1, mi = menu_activation(k, n);
-        if (mi >= 0) act = menu_run(&ms_hex, mi);
-        if (act == MA_ABOUT) {
-            show_about("Hex");
-            continue;
-        }
-        if (act > 0) { k[0] = (unsigned char)act; n = 1; }
-
-        if (k[0] == 0x13) { save_file(fname); continue; }
-        if (k[0] == '\t' || k[0] == MA_HEXTOG) {
-            ascii_pane = !ascii_pane; nibhi = 1; continue;
-        }
-        if (k[0] == 0x03 || k[0] == 0x18) {                 /* copy/cut row */
-            int s = (bcur / 16) * 16;
-            int e = s + 16; if (e > blen) e = blen;
-            cb_set(buf + s, e - s);
-            if (k[0] == 0x18) {
-                int span = e - s;
-                for (int i = s; i + span < blen; i++) buf[i] = buf[i + span];
-                blen -= span;
-                if (bcur > blen) bcur = blen;
-            }
-            nibhi = 1;
-            continue;
-        }
-        if (k[0] == 0x16) {                                  /* paste */
-            for (int i = 0; i < cb_n; i++) {
-                if (blen >= BUF_CAP - 1) break;
-                for (int j = blen; j > bcur; j--) buf[j] = buf[j - 1];
-                buf[bcur] = cb[i];
-                blen++; bcur++;
-            }
-            nibhi = 1;
-            continue;
-        }
-        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
-            switch (k[2]) {
-            case 'A': if (bcur >= 16) bcur -= 16; nibhi = 1; break;
-            case 'B': if (bcur + 16 <= blen) bcur += 16;
-                      else if (bcur < blen) bcur = blen;
-                      nibhi = 1; break;
-            case 'C': if (bcur < blen) bcur++; nibhi = 1; break;
-            case 'D': if (bcur > 0) bcur--; nibhi = 1; break;
-            }
-            continue;
-        }
-        if (ascii_pane) {
-            if (k[0] == 'q' || k[0] == 0x11) break;     /* q or Ctrl-Q */
-            if (k[0] >= 32 && k[0] < 127) {
-                if (bcur >= blen) {
-                    if (blen >= BUF_CAP - 1) continue;
-                    buf[blen++] = 0;
-                }
-                buf[bcur] = (char)k[0];
-                if (bcur < BUF_CAP - 1 && bcur + 1 <= blen) bcur++;
-            }
-            continue;
-        }
-        if (k[0] == 'q') break;
-        if (k[0] == 'i') {
-            if (blen < BUF_CAP - 1) {
-                for (int i = blen; i > bcur; i--) buf[i] = buf[i - 1];
-                buf[bcur] = 0; blen++; nibhi = 1;
-            }
-            continue;
-        }
-        if (k[0] == 'x') {
-            if (bcur < blen) {
-                buf_erase(bcur);
-                if (bcur >= blen && bcur > 0) bcur--;
-                nibhi = 1;
-            }
-            continue;
-        }
-        int hv = -1;
-        if (k[0] >= '0' && k[0] <= '9') hv = k[0] - '0';
-        else if (k[0] >= 'a' && k[0] <= 'f') hv = k[0] - 'a' + 10;
-        else if (k[0] >= 'A' && k[0] <= 'F') hv = k[0] - 'A' + 10;
-        if (hv >= 0) {
-            if (bcur >= blen) {
-                if (blen >= BUF_CAP - 1) continue;
-                buf[blen++] = 0;
-            }
-            unsigned char b = (unsigned char)buf[bcur];
-            if (nibhi) {
-                buf[bcur] = (char)((b & 0x0f) | (hv << 4));
-                nibhi = 0;
-            } else {
-                buf[bcur] = (char)((b & 0xf0) | hv);
-                if (bcur < BUF_CAP - 1) bcur++;
-                nibhi = 1;
-            }
-        }
-    }
-    return 0;
-}
 
 
 /* ── files: directory browser ─────────────────────────── */
@@ -2974,72 +2788,6 @@ static int files_scan(const char *path) {
     return files_count;
 }
 
-static int run_files(int argc, char **argv) {
-    current_ms = &ms_files;
-    (void)argc; (void)argv;
-    files_scan(".");
-    int sel = 0;
-    term_raw();
-    while (1) {
-        paint_desktop();
-        chrome("Files");
-        body_clear();
-        body_at(2, 2, "  ./", SCREEN_W - 4);
-        int top = sel < SCREEN_H - 7 ? 0 : sel - (SCREEN_H - 7);
-        for (int i = 0; i < SCREEN_H - 5 && top + i < files_count; i++) {
-            int idx = top + i;
-            cup(2, 4 + i);
-            if (idx == sel) sgrbgfg(15, 0); else sgrbgfg(7, 0);
-            char tag = files_type[idx] == 4 ? '/' : ' ';
-            fbw(" ", 1);
-            fbw(&tag, 1);
-            fbw(" ", 1);
-            int nl = slen(files_name[idx]);
-            if (nl > SCREEN_W - 8) nl = SCREEN_W - 8;
-            fbw(files_name[idx], nl);
-            blanks(SCREEN_W - 8 - nl);
-        }
-        status("  arrows | enter open in notepad | h hex | q back");
-        fbflush();
-        unsigned char k[8];
-        int n = read_key(k, sizeof k);
-        if (n <= 0) continue;
-
-        int act = -1, ami = menu_activation(k, n);
-        if (ami >= 0) act = menu_run(&ms_files, ami);
-        if (act == MA_ABOUT) {
-            show_about("Files");
-            continue;
-        }
-        if (k[0] == 'q' || act == MA_QUIT) break;
-        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
-            if (k[2] == 'A' && sel > 0) sel--;
-            if (k[2] == 'B' && sel + 1 < files_count) sel++;
-            continue;
-        }
-        if (k[0] == '\r' || k[0] == '\n') {
-            if (sel >= 0 && sel < files_count) {
-                if (files_type[sel] == 4) {
-                    /* descend not supported in v1 — would need cwd tracking */
-                    continue;
-                }
-                char *sub_argv[3] = { (char *)"notepad", files_name[sel], 0 };
-                run_notepad(2, sub_argv);
-                term_raw();
-            }
-            continue;
-        }
-        if (k[0] == 'h') {
-            if (sel >= 0 && sel < files_count && files_type[sel] != 4) {
-                char *sub_argv[3] = { (char *)"hex", files_name[sel], 0 };
-                run_hex(2, sub_argv);
-                term_raw();
-            }
-            continue;
-        }
-    }
-    return 0;
-}
 
 
 /* ── ask: dual-pane LLM chat (HTTPS via execve curl) ─────
@@ -6757,47 +6505,6 @@ static void hx_run_continuous_hunt(void) {
 
 /* ── main entry point ──────────────────────────────────────────────── */
 
-static int run_hxhnt(int argc, char **argv) {
-    current_ms = &ms_hxhnt;
-    term_raw();
-
-    /* hx_active_init() ran at office startup — defensive-call in case
-     * this fork was invoked through an unusual path. */
-    hx_active_init();
-
-    /* CLI form: `hxhnt POP GENS [SEED]` runs one GA session and exits. */
-    int pop = 0, gens = 0;
-    unsigned rseed = 42;
-    int mode = (argc > 1) ? hx_parse_args(argv[1], &pop, &gens, &rseed) : 0;
-    if (mode > 0) {
-        hx_run_ga(pop, gens, rseed);
-        term_cooked();
-        return 0;
-    }
-
-    /* Interactive: display the seed; the user can press 'g' to start
-     * a GA at sane defaults, 'r' to randomise the palette, 'd' to
-     * persist the current state as the new default.  After a GA the
-     * winner becomes the live seed and we loop back into display so
-     * the user immediately sees the evolved CA in motion. */
-    while (1) {
-        int act = hx_display_seed(hx_seed_genome, hx_seed_pal,
-                                  (unsigned int)time_());
-        if (act == 'g') {
-            unsigned int gseed = (unsigned int)(time_() ^ (long)hx_rand());
-            hx_run_ga(20, 20, gseed);
-            continue;
-        }
-        if (act == 'h') {
-            hx_run_continuous_hunt();
-            continue;
-        }
-        break;
-    }
-
-    term_cooked();
-    return 0;
-}
 
 
 /* ── rpg: tiny tile explorer driven by the .hxseed ruleset ──────────
@@ -8994,68 +8701,6 @@ static void lsys_walk(const char *cmds, int len, int angle_steps, int mode) {
 #undef LSYS_VISIT
 }
 
-static int run_lsys(int argc, char **argv) {
-    (void)argc; (void)argv;
-    int sel = 0;            /* current grammar */
-    int cat = LC_PLANT;     /* current interpretation */
-    term_raw();
-    while (1) {
-        paint_desktop();
-        chrome("lsys");
-
-        const struct LSystem *L = &lsys_lib[sel];
-        int len = 0;
-        const char *cmds = lsys_expand(L, &len);
-        g_lsys_glyph = lsys_cat_glyph[cat];
-        g_lsys_col   = lsys_cat_col  [cat];
-
-        lsys_walk(cmds, len, L->angle_steps, 0);
-        int bw = g_lsys_max_x - g_lsys_min_x + 1;
-        int bh = g_lsys_max_y - g_lsys_min_y + 1;
-        g_lsys_ox = (SCREEN_W - bw) / 2 - g_lsys_min_x;
-        int avail_h = SCREEN_H - 4;
-        int top = 2 + (avail_h - bh) / 2;
-        if (top < 2) top = 2;
-        g_lsys_oy = top - g_lsys_min_y;
-
-        lsys_walk(cmds, len, L->angle_steps, 1);
-        sgr0();
-
-        /* Info line just under the title bar. */
-        cup(2, 1);
-        sgrbgfg(COL_TITLE_BG, COL_TITLE_FG);
-        char info[96]; int ip = 0;
-        info[ip++] = ' ';
-        info[ip++] = (char)('1' + sel);
-        info[ip++] = ' ';
-        ip = sapp(info, ip, L->name);
-        ip = sapp(info, ip, "  cat=");
-        ip = sapp(info, ip, lsys_cat_name[cat]);
-        ip = sapp(info, ip, " '");
-        info[ip++] = lsys_cat_glyph[cat];
-        info[ip++] = '\'';
-        ip = sapp(info, ip, "  iter=");
-        ip += utoa((unsigned)L->iterations, info + ip);
-        ip = sapp(info, ip, "  cmds=");
-        ip += utoa((unsigned)len, info + ip);
-        info[ip++] = ' ';
-        info[ip] = 0;
-        fbs(info);
-        sgr0();
-
-        status(" 1-6 grammar · TAB category · q quit ");
-        fbflush();
-
-        unsigned char k[8];
-        int n = read_key(k, sizeof k);
-        if (n <= 0) continue;
-        if (k[0] == 'q' || k[0] == 'Q' || k[0] == 0x1b) break;
-        if (k[0] >= '1' && k[0] <= '0' + LSYS_N) sel = k[0] - '1';
-        else if (k[0] == '\t') cat = (cat + 1) % LC_COUNT;
-    }
-    term_cooked();
-    return 0;
-}
 
 /* ── dispatch ─────────────────────────────────────────── */
 static const char *basename_(const char *p) {
