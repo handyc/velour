@@ -43,6 +43,14 @@
  * for v2.  In v1 we lean on the pekpik proxy that ask already
  * prefers — same provider behaviour as ask.
  *
+ * Persistent DB: a TinyDB-style B-tree node store at ./coder.db
+ * (vendored + ported from Penge666/TinyDB).  Each failed
+ * iteration inserts a row tagged by 64-bit token-hash bitmap;
+ * each subsequent prompt does top-K retrieval against the
+ * current goal+error to surface relevant prior failures even
+ * after the recent.bin bank has rolled over.  16 rows max in
+ * v1 (single root leaf, no node splitting).
+ *
  * Calc is merged into sheet — typing `=2^32` in any cell evaluates
  * with the same 64-bit feval_* chain calc used.  `calc` is kept
  * as an alias for `sheet`.  `rpg`, `hxhnt`, and `lsys` all alias
@@ -929,6 +937,7 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 
 #define O_RDONLY 0
 #define O_WRONLY 1
+#define O_RDWR   2
 #define O_CREAT  64
 #define O_TRUNC  512
 
@@ -942,6 +951,7 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define execvee(p, a, e)   sys3(SYS_execve, (long)(p), (long)(a), (long)(e))
 #define wait4_(s)          sys4(SYS_wait4, -1, (long)(s), 0, 0)
 #define dup2_(o, n)        sys3(SYS_dup2, (long)(o), (long)(n), 0)
+#define lseek_(f, off, w)  sys3(SYS_lseek, (long)(f), (long)(off), (long)(w))
 #define getpid_()          sys3(SYS_getpid, 0, 0, 0)
 #define time_()            sys3(SYS_time,   0, 0, 0)
 
@@ -4017,6 +4027,285 @@ static int run_prompt(int argc, char **argv) {
 }
 
 
+/* ── coder.db: TinyDB-style B-tree node store ──────────────
+ *
+ * Vendored + ported from Penge666/TinyDB
+ * (https://github.com/Penge666/TinyDB), which is itself a
+ * SQLite tutorial-style implementation: paged file layout,
+ * one fixed-size leaf-node root, sorted insert with binary
+ * search, no node-splitting yet.  We strip out the SQL
+ * front-end + libc dependencies and replace the user-row
+ * (id/username/email) with a memory-node row tailored for
+ * the agent: { id, bank, timestamp, tag_bitmap, body[] }.
+ *
+ * coder_log_recent() inserts a row each time an iteration
+ * fails; coder_build_prompt() scans the table and picks the
+ * top-K rows whose tag_bitmap overlaps the current prompt
+ * for inclusion as context.  The DB file is `coder.db` in
+ * cwd; it travels next to the binary so jail.c-cloned
+ * children inherit the same memory.
+ *
+ * Layout (every page is PAGE_SIZE = 4096 bytes):
+ *   common header  6 B  (type, is_root, parent_pointer)
+ *   leaf header    4 B  (num_cells)
+ *   N × cells      244 B each (4-byte key + 240-byte row)
+ * Max cells per leaf = (4096 - 14) / 244 = 16.
+ *
+ * v1 has one root leaf and no splitting.  When the leaf
+ * fills, the oldest row (lowest id) is evicted to make room.
+ * Multi-page B-tree splitting is a v2 feature. */
+
+#define TDB_PAGE_SIZE         4096
+#define TDB_MAX_PAGES         8
+#define TDB_NODE_TYPE_OFFSET  0
+#define TDB_IS_ROOT_OFFSET    1
+#define TDB_PARENT_OFFSET     2
+#define TDB_HEADER_COMMON     6
+#define TDB_NUM_CELLS_OFFSET  TDB_HEADER_COMMON
+#define TDB_HEADER_LEAF       (TDB_HEADER_COMMON + 4)
+
+#define TDB_KEY_SIZE          4
+#define TDB_BANK_OFFSET       0
+#define TDB_PAD_OFFSET        1
+#define TDB_TIMESTAMP_OFFSET  4
+#define TDB_TAGBITS_OFFSET    8
+#define TDB_BODY_OFFSET       16
+#define TDB_BODY_SIZE         224
+#define TDB_ROW_SIZE          240
+#define TDB_CELL_SIZE         (TDB_KEY_SIZE + TDB_ROW_SIZE)
+#define TDB_MAX_CELLS         ((TDB_PAGE_SIZE - TDB_HEADER_LEAF) / TDB_CELL_SIZE)
+
+typedef struct {
+    unsigned int  bank;          /* 0..3 = BANK_PERSONALITY..PROJECT */
+    unsigned int  timestamp;
+    unsigned long long tag_bitmap;
+    int           body_len;
+    char          body[TDB_BODY_SIZE];
+} TdbRow;
+
+static int            g_tdb_fd = -1;
+static unsigned int   g_tdb_num_pages;
+static unsigned int   g_tdb_next_id;
+static unsigned char  g_tdb_pages[TDB_MAX_PAGES][TDB_PAGE_SIZE];
+static unsigned char  g_tdb_loaded[TDB_MAX_PAGES];   /* 0 = not loaded */
+static unsigned char  g_tdb_dirty [TDB_MAX_PAGES];
+
+static unsigned int tdb_load_u32(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1] << 8) |
+           ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24);
+}
+static void tdb_store_u32(unsigned char *p, unsigned int v) {
+    p[0] = (unsigned char)(v & 0xff);
+    p[1] = (unsigned char)((v >> 8) & 0xff);
+    p[2] = (unsigned char)((v >> 16) & 0xff);
+    p[3] = (unsigned char)((v >> 24) & 0xff);
+}
+static unsigned long long tdb_load_u64(const unsigned char *p) {
+    unsigned long long v = 0;
+    for (int i = 0; i < 8; i++) v |= ((unsigned long long)p[i]) << (i * 8);
+    return v;
+}
+static void tdb_store_u64(unsigned char *p, unsigned long long v) {
+    for (int i = 0; i < 8; i++) p[i] = (unsigned char)((v >> (i * 8)) & 0xff);
+}
+
+static unsigned char *tdb_get_page(unsigned int page_num) {
+    if (page_num >= TDB_MAX_PAGES) return 0;
+    if (g_tdb_loaded[page_num]) return g_tdb_pages[page_num];
+    /* Default: zero-init; if the page exists on disk, read it in. */
+    mset(g_tdb_pages[page_num], 0, TDB_PAGE_SIZE);
+    if (g_tdb_fd >= 0 && page_num < g_tdb_num_pages) {
+        lseek_(g_tdb_fd, (long)page_num * TDB_PAGE_SIZE, 0);
+        rd(g_tdb_fd, g_tdb_pages[page_num], TDB_PAGE_SIZE);
+    } else if (page_num == 0) {
+        /* Brand-new root: leaf, root, num_cells = 0. */
+        g_tdb_pages[0][TDB_NODE_TYPE_OFFSET] = 1; /* leaf */
+        g_tdb_pages[0][TDB_IS_ROOT_OFFSET] = 1;
+        tdb_store_u32(g_tdb_pages[0] + TDB_NUM_CELLS_OFFSET, 0);
+    }
+    g_tdb_loaded[page_num] = 1;
+    return g_tdb_pages[page_num];
+}
+
+static unsigned char *tdb_leaf_cell(unsigned char *node, unsigned int i) {
+    return node + TDB_HEADER_LEAF + i * TDB_CELL_SIZE;
+}
+
+static unsigned int tdb_leaf_num_cells(unsigned char *node) {
+    return tdb_load_u32(node + TDB_NUM_CELLS_OFFSET);
+}
+
+static void tdb_leaf_set_num_cells(unsigned char *node, unsigned int n) {
+    tdb_store_u32(node + TDB_NUM_CELLS_OFFSET, n);
+}
+
+/* Binary search for the cell index where `key` would live (insert
+ * point or match position).  Mirrors TinyDB's leaf_node_find. */
+static unsigned int tdb_leaf_find(unsigned char *node, unsigned int key) {
+    unsigned int n = tdb_leaf_num_cells(node);
+    unsigned int lo = 0, hi = n;
+    while (lo != hi) {
+        unsigned int mid = (lo + hi) / 2;
+        unsigned int kmid = tdb_load_u32(tdb_leaf_cell(node, mid));
+        if (kmid == key) return mid;
+        if (key < kmid) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+}
+
+static void tdb_open(void) {
+    if (g_tdb_fd >= 0) return;
+    int fd = (int)op("coder.db", O_RDWR | O_CREAT, 0644);
+    if (fd < 0) {
+        /* Read-only fallback so a missing-file scenario still works. */
+        fd = (int)op("coder.db", O_RDONLY, 0);
+    }
+    g_tdb_fd = fd;
+    g_tdb_num_pages = 0;
+    g_tdb_next_id = 1;
+    for (int i = 0; i < TDB_MAX_PAGES; i++) {
+        g_tdb_loaded[i] = 0; g_tdb_dirty[i] = 0;
+    }
+    if (fd >= 0) {
+        long len = lseek_(fd, 0, 2);   /* SEEK_END */
+        lseek_(fd, 0, 0);
+        if (len > 0) g_tdb_num_pages = (unsigned int)(len / TDB_PAGE_SIZE);
+        if (g_tdb_num_pages > TDB_MAX_PAGES) g_tdb_num_pages = TDB_MAX_PAGES;
+    }
+    /* Force the root page in so a fresh DB has one initialised leaf. */
+    unsigned char *root = tdb_get_page(0);
+    if (g_tdb_num_pages == 0) {
+        g_tdb_num_pages = 1;
+        g_tdb_dirty[0] = 1;
+    }
+    /* Seed the auto-id counter from the highest existing key. */
+    unsigned int n = tdb_leaf_num_cells(root);
+    if (n > 0) {
+        unsigned int last = tdb_load_u32(tdb_leaf_cell(root, n - 1));
+        if (last >= g_tdb_next_id) g_tdb_next_id = last + 1;
+    }
+}
+
+static void tdb_close(void) {
+    if (g_tdb_fd < 0) return;
+    for (unsigned int p = 0; p < g_tdb_num_pages && p < TDB_MAX_PAGES; p++) {
+        if (!g_tdb_loaded[p] || !g_tdb_dirty[p]) continue;
+        lseek_(g_tdb_fd, (long)p * TDB_PAGE_SIZE, 0);
+        wr(g_tdb_fd, g_tdb_pages[p], TDB_PAGE_SIZE);
+        g_tdb_dirty[p] = 0;
+    }
+    cl(g_tdb_fd);
+    g_tdb_fd = -1;
+}
+
+/* Insert a row with auto-generated key.  If the leaf is full, evict
+ * the lowest-key row first (simple FIFO eviction — first-id-wins is
+ * also first-inserted-wins because ids are auto-increment). */
+static int tdb_insert(const TdbRow *row) {
+    tdb_open();
+    unsigned char *node = tdb_get_page(0);
+    unsigned int n = tdb_leaf_num_cells(node);
+    if (n >= TDB_MAX_CELLS) {
+        /* Drop the head cell. */
+        for (unsigned int i = 1; i < n; i++) {
+            mcpy((char *)tdb_leaf_cell(node, i - 1),
+                 (char *)tdb_leaf_cell(node, i), TDB_CELL_SIZE);
+        }
+        n--;
+        tdb_leaf_set_num_cells(node, n);
+    }
+    unsigned int key = g_tdb_next_id++;
+    unsigned int pos = tdb_leaf_find(node, key);   /* always == n */
+    if (pos < n) {
+        for (unsigned int i = n; i > pos; i--) {
+            mcpy((char *)tdb_leaf_cell(node, i),
+                 (char *)tdb_leaf_cell(node, i - 1), TDB_CELL_SIZE);
+        }
+    }
+    unsigned char *cell = tdb_leaf_cell(node, pos);
+    tdb_store_u32(cell, key);
+    unsigned char *body = cell + TDB_KEY_SIZE;
+    body[TDB_BANK_OFFSET] = (unsigned char)row->bank;
+    body[TDB_PAD_OFFSET]   = 0;
+    body[TDB_PAD_OFFSET+1] = 0;
+    body[TDB_PAD_OFFSET+2] = 0;
+    tdb_store_u32(body + TDB_TIMESTAMP_OFFSET, row->timestamp);
+    tdb_store_u64(body + TDB_TAGBITS_OFFSET,   row->tag_bitmap);
+    int blen = row->body_len;
+    if (blen > TDB_BODY_SIZE) blen = TDB_BODY_SIZE;
+    if (blen < 0) blen = 0;
+    mcpy((char *)body + TDB_BODY_OFFSET, row->body, blen);
+    /* zero-pad the tail so old data doesn't bleed into the new cell */
+    if (blen < TDB_BODY_SIZE)
+        mset(body + TDB_BODY_OFFSET + blen, 0, TDB_BODY_SIZE - blen);
+    tdb_leaf_set_num_cells(node, n + 1);
+    g_tdb_dirty[0] = 1;
+    return (int)key;
+}
+
+/* Read row N (0..num_cells-1) from the root leaf into `out`.
+ * Returns 0 on success, -1 if out of range. */
+static int tdb_read(unsigned int idx, TdbRow *out) {
+    tdb_open();
+    unsigned char *node = tdb_get_page(0);
+    unsigned int n = tdb_leaf_num_cells(node);
+    if (idx >= n) return -1;
+    unsigned char *cell = tdb_leaf_cell(node, idx);
+    unsigned char *body = cell + TDB_KEY_SIZE;
+    out->bank      = body[TDB_BANK_OFFSET];
+    out->timestamp = tdb_load_u32(body + TDB_TIMESTAMP_OFFSET);
+    out->tag_bitmap= tdb_load_u64(body + TDB_TAGBITS_OFFSET);
+    int blen = TDB_BODY_SIZE;
+    while (blen > 0 && body[TDB_BODY_OFFSET + blen - 1] == 0) blen--;
+    out->body_len = blen;
+    mcpy(out->body, (char *)body + TDB_BODY_OFFSET, blen);
+    return 0;
+}
+
+static unsigned int tdb_count(void) {
+    tdb_open();
+    return tdb_leaf_num_cells(tdb_get_page(0));
+}
+
+/* Build a 64-bit tag bitmap by hashing alphanumeric tokens.  Same
+ * function used at insert and at retrieval, so two strings overlap
+ * iff they share any token modulo bucket collisions. */
+static unsigned long long tdb_tag_bitmap(const char *txt, int len) {
+    unsigned long long bits = 0;
+    int i = 0;
+    while (i < len) {
+        while (i < len) {
+            char c = txt[i];
+            int alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9');
+            if (alnum) break;
+            i++;
+        }
+        if (i >= len) break;
+        unsigned int h = 5381;
+        while (i < len) {
+            char c = txt[i];
+            int alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9');
+            if (!alnum) break;
+            if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
+            h = h * 33 + (unsigned char)c;
+            i++;
+        }
+        bits |= 1ULL << (h & 63);
+    }
+    return bits;
+}
+
+/* popcount for 64-bit values without -mpopcnt — small enough that
+ * GCC at -Os might inline a swar-style implementation anyway. */
+static int tdb_popcount(unsigned long long v) {
+    int c = 0;
+    while (v) { c += (int)(v & 1); v >>= 1; }
+    return c;
+}
+
+
 /* ── coder: iterative LLM-driven code generator ─────────────
  *
  * The user enters a goal; coder builds a prompt from the four
@@ -4135,8 +4424,12 @@ static int coder_build_prompt(char *out, int cap) {
                  "printing diagnostics.\n\n");
     else
         p = sapp(out, p, "Target: good-enough.  cc must compile.\n\n");
-    /* Banks */
-    for (int b = 1; b < BANK_COUNT; b++) {   /* 1..3, skip personality */
+    /* Banks: project + longterm get full inclusion (user-curated,
+     * static-ish).  recent gets DB-backed top-K retrieval — pull
+     * the rows whose tag_bitmap overlaps the current goal+error
+     * the most, regardless of whether they're still in the bank
+     * file (they may have been evicted by the rolling buffer). */
+    for (int b = 2; b < BANK_COUNT; b++) {   /* longterm + project */
         if (g_bank_len[b] <= 0) continue;
         if (p + 64 + g_bank_len[b] > cap - 1024) break;
         p = sapp(out, p, "[");
@@ -4145,6 +4438,50 @@ static int coder_build_prompt(char *out, int cap) {
         mcpy(out + p, g_bank[b], g_bank_len[b]);
         p += g_bank_len[b];
         out[p++] = '\n'; out[p++] = '\n';
+    }
+    /* Top-K node retrieval from coder.db keyed by tag overlap with
+     * the current goal + previous error.  K = 4 by default; each
+     * row is up to 224 B body so the worst-case context add is
+     * ~1 KB. */
+    {
+        unsigned long long q = tdb_tag_bitmap(g_coder_goal, g_coder_goal_len) |
+                               tdb_tag_bitmap(g_coder_err,  g_coder_err_len);
+        unsigned int n = tdb_count();
+        int K = 4;
+        int picked[16]; int scores[16];
+        unsigned int idxs[16];
+        int found = 0;
+        for (unsigned int i = 0; i < n && found < (int)(sizeof picked / sizeof picked[0]); i++) {
+            TdbRow r;
+            if (tdb_read(i, &r) != 0) continue;
+            int s = tdb_popcount(q & r.tag_bitmap);
+            if (s == 0) continue;
+            picked[found] = 1;
+            scores[found] = s;
+            idxs[found] = i;
+            found++;
+        }
+        /* Cheap O(K·N): pick the K highest-scoring rows.  N≤16, fine. */
+        if (found > 0 && p < cap - 256) {
+            p = sapp(out, p, "[recent (top-K from coder.db)]\n");
+            for (int k = 0; k < K; k++) {
+                int best = -1, best_s = 0;
+                for (int j = 0; j < found; j++) {
+                    if (picked[j] != 1) continue;
+                    if (scores[j] > best_s) { best_s = scores[j]; best = j; }
+                }
+                if (best < 0) break;
+                picked[best] = 0;
+                TdbRow r;
+                if (tdb_read(idxs[best], &r) != 0) continue;
+                if (p + r.body_len + 32 > cap - 256) break;
+                p = sapp(out, p, "  · ");
+                mcpy(out + p, r.body, r.body_len);
+                p += r.body_len;
+                if (out[p-1] != '\n') out[p++] = '\n';
+            }
+            out[p++] = '\n';
+        }
     }
     /* Goal */
     p = sapp(out, p, "[goal]\n");
@@ -4300,9 +4637,14 @@ static int coder_iterate(void) {
 }
 
 /* Append the most recent (goal,error,draft-snippet) trio to the
- * recent bank, dropping head bytes if it overflows.  Called after
- * each failed iteration so the next prompt has the failure log. */
+ * recent bank for human reading, AND insert a tagged row into the
+ * coder.db node store for the agent's own context retrieval.
+ * The bank version is plain text so the user can browse it via
+ * the prompt editor; the DB version carries a tag bitmap so the
+ * next prompt build can pull the most relevant prior failures
+ * even after the bank has rolled over. */
 static void coder_log_recent(void) {
+    /* Compose a one-line summary of (iter, goal, error). */
     char rec[1024];
     int p = 0;
     p = sapp(rec, p, "--- iter ");
@@ -4317,9 +4659,8 @@ static void coder_log_recent(void) {
     mcpy(rec + p, g_coder_err, en); p += en;
     rec[p++] = '\n';
     if (p > BANK_BYTES - 1) p = BANK_BYTES - 1;
-    /* If recent bank is full, drop bytes from the front. */
+    /* Bank: drop oldest lines until it fits. */
     while (g_bank_len[BANK_RECENT] + p > BANK_BYTES - 1) {
-        /* drop one line from the front */
         int i = 0;
         while (i < g_bank_len[BANK_RECENT] && g_bank[BANK_RECENT][i] != '\n') i++;
         if (i >= g_bank_len[BANK_RECENT]) { g_bank_len[BANK_RECENT] = 0; break; }
@@ -4330,6 +4671,16 @@ static void coder_log_recent(void) {
     }
     mcpy(g_bank[BANK_RECENT] + g_bank_len[BANK_RECENT], rec, p);
     g_bank_len[BANK_RECENT] += p;
+    /* DB: insert a row tagged by goal + error tokens. */
+    TdbRow row;
+    row.bank = BANK_RECENT;
+    row.timestamp = (unsigned int)time_();
+    row.tag_bitmap = tdb_tag_bitmap(g_coder_goal, g_coder_goal_len) |
+                     tdb_tag_bitmap(g_coder_err,  g_coder_err_len);
+    int dlen = p; if (dlen > TDB_BODY_SIZE) dlen = TDB_BODY_SIZE;
+    mcpy(row.body, rec, dlen);
+    row.body_len = dlen;
+    tdb_insert(&row);
 }
 
 static void coder_paint(const char *status_msg) {
@@ -4403,7 +4754,7 @@ static void coder_paint(const char *status_msg) {
         }
         if (n_lines == 0) body_at(2, 17, "  (none)", SCREEN_W - 4);
     }
-    /* Banks summary */
+    /* Banks summary + coder.db row count */
     {
         char ln[80];
         int p = 0;
@@ -4418,6 +4769,10 @@ static void coder_paint(const char *status_msg) {
             ln[p++] = ']';
             ln[p++] = ' ';
         }
+        p = sapp(ln, p, " db: ");
+        p += utoa((unsigned)tdb_count(), ln + p);
+        p = sapp(ln, p, "/");
+        p += utoa((unsigned)TDB_MAX_CELLS, ln + p);
         ln[p] = 0;
         body_at(2, 22, ln, SCREEN_W - 4);
     }
@@ -4453,6 +4808,7 @@ static int coder_input_goal(void) {
 static int run_coder(int argc, char **argv) {
     (void)argc; (void)argv;
     bank_load_all();
+    tdb_open();
     /* Restore saved state if present. */
     {
         int fd = (int)op("coder_state.bin", O_RDONLY, 0);
@@ -4551,8 +4907,9 @@ static int run_coder(int argc, char **argv) {
             continue;
         }
     }
-    /* Persist all banks on exit. */
+    /* Persist all banks + flush the DB on exit. */
     for (int b = 0; b < BANK_COUNT; b++) bank_save(b);
+    tdb_close();
     term_cooked();
     return 0;
 }
