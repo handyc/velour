@@ -5277,7 +5277,7 @@ static void coder_paint(const char *status_msg) {
         ln[p] = 0;
         body_at(2, 22, ln, SCREEN_W - 4);
     }
-    status("ENT=ask a=auto x=exec p=push c=compose t=tgt 1-4=bank r/s e q");
+    status("ENT=ask a=auto m=mission p=push c=compose x=exec t=tgt 1-4 r/s/e/q");
     fbflush();
 }
 
@@ -5304,6 +5304,179 @@ static int coder_input_goal(void) {
             g_coder_goal[g_coder_goal_len] = 0;
         }
     }
+}
+
+/* ── mission mode ──────────────────────────────────────────────────
+ * Take an overarching goal in g_coder_goal, ask the LLM to break it
+ * into 3-5 sequential C-program subtasks, then for each subtask:
+ *   1. set g_coder_goal to the subtask
+ *   2. run coder_iterate (with up to MISSION_PER_STEP_MAX retries)
+ *   3. on success, coder_proj_push
+ * Finally, restore the overarching goal and run coder_compose to
+ * merge every saved snippet into one program.  The merged binary is
+ * test-run automatically.  Mission status updates are paint'd to the
+ * screen between every subtask + iteration.
+ *
+ * Bounds: MISSION_MAX_SUBTASKS subtasks × MISSION_PER_STEP_MAX
+ * iterations × ASK_RETRY_MAX retries — at the cap this is still
+ * dozens of LLM calls, so a "clone of Windows 95" mission can take
+ * many minutes.  No mid-mission cancel — quit the terminal if you
+ * need to escape. */
+
+#define MISSION_MAX_SUBTASKS    5
+#define MISSION_PER_STEP_MAX    3
+
+static int coder_breakdown(const char *goal, int gn,
+                           char subtasks[][CODER_GOAL_CAP],
+                           int max_subtasks) {
+    static char prompt[2048];
+    int p = 0;
+    p = sapp(prompt, p,
+             "You are a project planner.  Break the following "
+             "overarching goal into between 3 and ");
+    if (max_subtasks < 10) prompt[p++] = (char)('0' + max_subtasks);
+    p = sapp(prompt, p,
+             " sequential C-program subtasks.  Each subtask MUST be "
+             "implementable as a self-contained C program with main() "
+             "and printf-style output that compiles cleanly with "
+             "`cc file.c`, and that can later be merged with the "
+             "others.  Reply with ONLY a numbered list, one subtask "
+             "per line, in the form `1. subtask description`.  No "
+             "code, no preamble, no postscript.\n\nGoal: ");
+    int take = gn;
+    if (p + take > (int)sizeof prompt - 8) take = sizeof prompt - 8 - p;
+    if (take > 0) { mcpy(prompt + p, goal, take); p += take; }
+    p = sapp(prompt, p, "\n");
+
+    ask_n_msgs = 0;
+    ask_buf_use = 0;
+    ask_msg_add(0, prompt, p);
+    bank_load(BANK_PERSONALITY);
+
+    static char content[ASK_BUF_CAP];
+    char fail_reason[160];
+    int cn = ask_send_retrying(content, sizeof content,
+                               fail_reason, sizeof fail_reason);
+    if (cn < 0) return -1;
+
+    int n_subtasks = 0;
+    int i = 0;
+    while (i < cn && n_subtasks < max_subtasks) {
+        while (i < cn && (content[i] == ' ' || content[i] == '\t' ||
+                          content[i] == '\n' || content[i] == '\r')) i++;
+        if (i >= cn) break;
+        if (content[i] >= '0' && content[i] <= '9') {
+            while (i < cn && content[i] >= '0' && content[i] <= '9') i++;
+            if (i < cn && (content[i] == '.' || content[i] == ')')) {
+                i++;
+                while (i < cn && (content[i] == ' ' || content[i] == '\t')) i++;
+                int s = i;
+                while (i < cn && content[i] != '\n' && content[i] != '\r') i++;
+                int len = i - s;
+                if (len > CODER_GOAL_CAP - 1) len = CODER_GOAL_CAP - 1;
+                if (len > 0) {
+                    mcpy(subtasks[n_subtasks], content + s, len);
+                    subtasks[n_subtasks][len] = 0;
+                    n_subtasks++;
+                }
+            } else {
+                while (i < cn && content[i] != '\n') i++;
+            }
+        } else {
+            while (i < cn && content[i] != '\n') i++;
+        }
+        if (i < cn) i++;
+    }
+    return n_subtasks;
+}
+
+static void coder_mission(void) {
+    static char subtasks[MISSION_MAX_SUBTASKS][CODER_GOAL_CAP];
+    static char mission_goal[CODER_GOAL_CAP];
+
+    int mission_gn = g_coder_goal_len;
+    if (mission_gn > CODER_GOAL_CAP - 1) mission_gn = CODER_GOAL_CAP - 1;
+    mcpy(mission_goal, g_coder_goal, mission_gn);
+    mission_goal[mission_gn] = 0;
+
+    coder_paint("mission: planning subtasks…");
+    int n_subs = coder_breakdown(mission_goal, mission_gn,
+                                 subtasks, MISSION_MAX_SUBTASKS);
+    if (n_subs <= 0) {
+        coder_paint("mission: planner returned no subtasks");
+        return;
+    }
+
+    int success_count = 0;
+    for (int s = 0; s < n_subs; s++) {
+        int gn = (int)slen(subtasks[s]);
+        if (gn > CODER_GOAL_CAP - 1) gn = CODER_GOAL_CAP - 1;
+        mcpy(g_coder_goal, subtasks[s], gn);
+        g_coder_goal[gn] = 0;
+        g_coder_goal_len = gn;
+
+        char st[160];
+        int sp = sapp(st, 0, "mission ");
+        sp += utoa((unsigned)(s + 1), st + sp);
+        sp = sapp(st, sp, "/");
+        sp += utoa((unsigned)n_subs, st + sp);
+        sp = sapp(st, sp, ": ");
+        int t = gn < 60 ? gn : 60;
+        if (sp + t > (int)sizeof st - 1) t = sizeof st - 1 - sp;
+        if (t > 0) { mcpy(st + sp, subtasks[s], t); sp += t; }
+        st[sp] = 0;
+        coder_paint(st);
+
+        int rc = 1;
+        for (int it = 0; it < MISSION_PER_STEP_MAX; it++) {
+            g_coder_iter++;
+            rc = coder_iterate();
+            if (rc == 0) break;
+        }
+        if (rc == 0) {
+            coder_proj_push();
+            success_count++;
+        }
+    }
+
+    if (success_count == 0) {
+        coder_paint("mission: every subtask failed");
+        return;
+    }
+
+    /* Restore overarching goal so the compose call references it. */
+    mcpy(g_coder_goal, mission_goal, mission_gn);
+    g_coder_goal[mission_gn] = 0;
+    g_coder_goal_len = mission_gn;
+
+    coder_paint("mission: composing merged program…");
+    int comp_rc = coder_compose();
+
+    int exit_code = -1;
+    if (comp_rc >= 0) {
+        int probe = (int)op("/tmp/coder_attempt", O_RDONLY, 0);
+        if (probe >= 0) {
+            cl(probe);
+            exit_code = coder_runtest();
+        }
+    }
+
+    char st[160];
+    int sp = sapp(st, 0, "mission done: ");
+    sp += utoa((unsigned)success_count, st + sp);
+    sp = sapp(st, sp, "/");
+    sp += utoa((unsigned)n_subs, st + sp);
+    sp = sapp(st, sp, " subtasks");
+    if (comp_rc == 0)      sp = sapp(st, sp, " · merged clean");
+    else if (comp_rc == 1) sp = sapp(st, sp, " · merged with warnings");
+    else if (comp_rc == -2) sp = sapp(st, sp, " · compose failed");
+    else                    sp = sapp(st, sp, " · no merge");
+    if (exit_code >= 0) {
+        sp = sapp(st, sp, " · run exit=");
+        sp += utoa((unsigned)exit_code, st + sp);
+    }
+    st[sp] = 0;
+    coder_paint(st);
 }
 
 static int run_coder(int argc, char **argv) {
@@ -5388,6 +5561,18 @@ static int run_coder(int argc, char **argv) {
             } else {
                 coder_paint("× composed but cc had issues — see output");
             }
+            continue;
+        }
+        if (k[0] == 'm') {
+            if (g_coder_goal_len == 0) {
+                coder_paint("(no goal — press e to enter overarching mission)");
+                continue;
+            }
+            if (!ask_api_key[0]) {
+                coder_paint("no api_key — open ask Settings");
+                continue;
+            }
+            coder_mission();
             continue;
         }
         if (k[0] == 'x') {
