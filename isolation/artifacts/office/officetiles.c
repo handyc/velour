@@ -375,6 +375,145 @@ static int wsq_tessellate(void) {
 }
 
 
+/* ── hexagonal Wang tiles ──────────────────────────────────────────
+ *
+ * Pointy-top hex with offset coords.  Each tile carries 6 edge
+ * colors labelled NW, NE, W, E, SW, SE.  Neighbour stepping
+ * depends on row parity:
+ *
+ *   even row r:  NW=(r-1,c-1)  NE=(r-1,c)    W=(r,c-1)
+ *                E =(r,c+1)    SW=(r+1,c-1)  SE=(r+1,c)
+ *   odd  row r:  NW=(r-1,c)    NE=(r-1,c+1)  W=(r,c-1)
+ *                E =(r,c+1)    SW=(r+1,c)    SE=(r+1,c+1)
+ *
+ * Edge pairing on adjacency: A.NW ↔ B.SE, A.NE ↔ B.SW, A.E ↔ B.W.
+ *
+ * Tessellation follows the same row-major backtracker as the square
+ * version, except at placement of (r,c) we constrain against the
+ * already-placed W, NW and NE neighbours (NE is in the previous
+ * row but hasn't been visited yet at the same column index, so it
+ * counts as "already placed" only on odd rows where its column is
+ * c+1; we skip the NE check on even rows for that reason).
+ */
+
+#define WHX_MAX_TILES   24
+#define WHX_GRID_W      14
+#define WHX_GRID_H       9
+
+struct WangHx {
+    unsigned char nw, ne, w, e, sw, se;
+};
+
+static struct WangHx g_hset[WHX_MAX_TILES];
+static int           g_hset_count = 12;
+static int           g_hset_colors = 2;
+static unsigned char g_hgrid[WHX_GRID_H][WHX_GRID_W];
+static int           g_hgrid_valid = 0;
+
+/* Mode flag: 0 = square Wang, 1 = hex Wang.  Both modes share the
+ * cycle-count / cycle-colors indices so 'c' and 'n' apply to
+ * whichever set the user is viewing. */
+static int g_mode = 0;
+
+static void whx_random(void) {
+    rng_seed_if_unset();
+    for (int t = 0; t < g_hset_count; t++) {
+        for (int retry = 0; retry < 4; retry++) {
+            g_hset[t].nw = (unsigned char)rng_range(g_hset_colors);
+            g_hset[t].ne = (unsigned char)rng_range(g_hset_colors);
+            g_hset[t].w  = (unsigned char)rng_range(g_hset_colors);
+            g_hset[t].e  = (unsigned char)rng_range(g_hset_colors);
+            g_hset[t].sw = (unsigned char)rng_range(g_hset_colors);
+            g_hset[t].se = (unsigned char)rng_range(g_hset_colors);
+            int dup = 0;
+            for (int p = 0; p < t; p++) {
+                if (g_hset[p].nw == g_hset[t].nw && g_hset[p].ne == g_hset[t].ne &&
+                    g_hset[p].w  == g_hset[t].w  && g_hset[p].e  == g_hset[t].e  &&
+                    g_hset[p].sw == g_hset[t].sw && g_hset[p].se == g_hset[t].se) {
+                    dup = 1; break;
+                }
+            }
+            if (!dup) break;
+        }
+    }
+    g_hgrid_valid = 0;
+}
+
+static void whx_mutate(void) {
+    rng_seed_if_unset();
+    if (g_hset_count <= 0) return;
+    int t = rng_range(g_hset_count);
+    g_hset[t].nw = (unsigned char)rng_range(g_hset_colors);
+    g_hset[t].ne = (unsigned char)rng_range(g_hset_colors);
+    g_hset[t].w  = (unsigned char)rng_range(g_hset_colors);
+    g_hset[t].e  = (unsigned char)rng_range(g_hset_colors);
+    g_hset[t].sw = (unsigned char)rng_range(g_hset_colors);
+    g_hset[t].se = (unsigned char)rng_range(g_hset_colors);
+    g_hgrid_valid = 0;
+}
+
+static unsigned char g_htile_order[WHX_MAX_TILES];
+
+static void whx_shuffle_order(void) {
+    for (int i = 0; i < g_hset_count; i++) g_htile_order[i] = (unsigned char)i;
+    for (int i = g_hset_count - 1; i > 0; i--) {
+        int j = rng_range(i + 1);
+        unsigned char tmp = g_htile_order[i];
+        g_htile_order[i] = g_htile_order[j];
+        g_htile_order[j] = tmp;
+    }
+}
+
+static int whx_tile_fits(int t, int r, int c) {
+    int odd = r & 1;
+    /* W neighbour */
+    if (c > 0) {
+        unsigned char wn = g_hgrid[r][c - 1];
+        if (g_hset[wn].e != g_hset[t].w) return 0;
+    }
+    /* NW neighbour */
+    int nwc = odd ? c     : c - 1;
+    if (r > 0 && nwc >= 0 && nwc < WHX_GRID_W) {
+        unsigned char n = g_hgrid[r - 1][nwc];
+        if (g_hset[n].se != g_hset[t].nw) return 0;
+    }
+    /* NE neighbour */
+    int nec = odd ? c + 1 : c;
+    if (r > 0 && nec >= 0 && nec < WHX_GRID_W) {
+        unsigned char n = g_hgrid[r - 1][nec];
+        if (g_hset[n].sw != g_hset[t].ne) return 0;
+    }
+    return 1;
+}
+
+static int g_whx_attempts;
+#define WHX_TESS_BUDGET 200000
+
+static int whx_solve(int r, int c) {
+    if (++g_whx_attempts > WHX_TESS_BUDGET) return 0;
+    if (r >= WHX_GRID_H) return 1;
+    int nr = r, nc = c + 1;
+    if (nc >= WHX_GRID_W) { nr = r + 1; nc = 0; }
+    for (int i = 0; i < g_hset_count; i++) {
+        int t = g_htile_order[i];
+        if (!whx_tile_fits(t, r, c)) continue;
+        g_hgrid[r][c] = (unsigned char)t;
+        if (whx_solve(nr, nc)) return 1;
+    }
+    return 0;
+}
+
+static int whx_tessellate(void) {
+    rng_seed_if_unset();
+    whx_shuffle_order();
+    g_whx_attempts = 0;
+    mset(g_hgrid, 0, sizeof g_hgrid);
+    int ok = whx_solve(0, 0);
+    g_hgrid_valid = ok;
+    return ok;
+}
+
+
 /* ── render ────────────────────────────────────────────────────────
  *
  * Each tile is drawn as a 3×2 block: top-half coloured by N+E
@@ -411,21 +550,52 @@ static void wsq_render(void) {
     sgr0();
 }
 
+/* Hex render: 4-char wide colored block per hex, two ANSI rows tall.
+ * Odd rows shift +2 to fake the offset-hex layout.  Top sub-row uses
+ * NW+NE edge colours; bottom sub-row uses SW+SE.  Total drawn area
+ * is 14 hexes × 4 chars + 2 offset = 58 cols, 9 hexes × 2 rows = 18
+ * rows — fits in the 80×24 body. */
+static void whx_render(void) {
+    int x0 = 4;
+    int y0 = 3;
+    for (int r = 0; r < WHX_GRID_H; r++) {
+        int row_x_off = (r & 1) ? 2 : 0;
+        for (int sub = 0; sub < 2; sub++) {
+            cup(x0 + row_x_off, y0 + r * 2 + sub);
+            for (int c = 0; c < WHX_GRID_W; c++) {
+                int t = g_hgrid[r][c];
+                int top = (g_hset[t].nw + g_hset[t].ne +
+                           g_hset[t].w) / 3;
+                int bot = (g_hset[t].sw + g_hset[t].se +
+                           g_hset[t].e) / 3;
+                int col = sub == 0 ? top : bot;
+                if (col < 0) col = 0; if (col > 3) col = 3;
+                sgrbg(EDGE_PALETTE[col]);
+                fbs("    ");
+            }
+        }
+    }
+    sgr0();
+}
+
 static void render_tileset_glyph(int x, int y) {
-    /* Show each tile as a mini 3-cell horizontal: [N|E|S] colour
-     * preview, so the user can scan the full set at a glance.  Drawn
-     * on the right margin while the grid lives on the left. */
+    /* Show each tile as a mini horizontal of edge-colour swatches
+     * (4 swatches for square N/E/S/W, 6 for hex NW/NE/W/E/SW/SE).
+     * Header row reports the current set's count × colours. */
+    int count  = g_mode == 0 ? g_set_count  : g_hset_count;
+    int colors = g_mode == 0 ? g_set_colors : g_hset_colors;
+
     cup(x, y);
     sgrbgfg(COL_BAR_BG, COL_BAR_FG);
-    fbs("set: ");
-    char nb[12]; int nn = utoa(g_set_count, nb);
+    fbs(g_mode == 0 ? "sq: " : "hex: ");
+    char nb[12]; int nn = utoa((unsigned)count, nb);
     fbw(nb, nn);
     fbs("t × ");
-    nn = utoa(g_set_colors, nb);
+    nn = utoa((unsigned)colors, nb);
     fbw(nb, nn);
     fbs("c");
 
-    for (int t = 0; t < g_set_count && y + 2 + t < SCREEN_H - 2; t++) {
+    for (int t = 0; t < count && y + 2 + t < SCREEN_H - 2; t++) {
         cup(x, y + 2 + t);
         sgrbgfg(COL_BAR_BG, COL_BAR_FG);
         char buf[12];
@@ -435,10 +605,19 @@ static void render_tileset_glyph(int x, int y) {
         buf[p++] = ' ';
         buf[p] = 0;
         fbs(buf);
-        sgrbg(EDGE_PALETTE[g_set[t].n & 3]); fbs(" ");
-        sgrbg(EDGE_PALETTE[g_set[t].e & 3]); fbs(" ");
-        sgrbg(EDGE_PALETTE[g_set[t].s & 3]); fbs(" ");
-        sgrbg(EDGE_PALETTE[g_set[t].w & 3]); fbs(" ");
+        if (g_mode == 0) {
+            sgrbg(EDGE_PALETTE[g_set[t].n & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_set[t].e & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_set[t].s & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_set[t].w & 3]); fbs(" ");
+        } else {
+            sgrbg(EDGE_PALETTE[g_hset[t].nw & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_hset[t].ne & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_hset[t].w  & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_hset[t].e  & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_hset[t].sw & 3]); fbs(" ");
+            sgrbg(EDGE_PALETTE[g_hset[t].se & 3]); fbs(" ");
+        }
         sgr0();
     }
 }
@@ -500,6 +679,44 @@ static int wsq_load(const char *path) {
     return 0;
 }
 
+/* Hex tile set persistence — separate magic so a square load
+ * doesn't accidentally clobber the hex set and vice versa. */
+static int whx_save(const char *path) {
+    int fd = (int)op(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    unsigned char hdr[16];
+    mset(hdr, 0, 16);
+    mcpy(hdr, "OFCT2", 5);
+    store_u32(hdr + 8, (unsigned)g_hset_count);
+    store_u32(hdr + 12, (unsigned)g_hset_colors);
+    wr(fd, hdr, 16);
+    wr(fd, g_hset, sizeof(struct WangHx) * (size_t)g_hset_count);
+    cl(fd);
+    return 0;
+}
+
+static int whx_load(const char *path) {
+    int fd = (int)op(path, O_RDONLY, 0);
+    if (fd < 0) return -1;
+    unsigned char hdr[16];
+    int n = (int)rd(fd, hdr, 16);
+    if (n != 16 || hdr[0] != 'O' || hdr[1] != 'F' || hdr[2] != 'C' ||
+        hdr[3] != 'T' || hdr[4] != '2') {
+        cl(fd); return -1;
+    }
+    unsigned int cnt = load_u32(hdr + 8);
+    unsigned int cols = load_u32(hdr + 12);
+    if (cnt > WHX_MAX_TILES || cols > WSQ_MAX_COLORS || cols < 1) {
+        cl(fd); return -1;
+    }
+    g_hset_count = (int)cnt;
+    g_hset_colors = (int)cols;
+    rd(fd, g_hset, sizeof(struct WangHx) * (size_t)cnt);
+    cl(fd);
+    g_hgrid_valid = 0;
+    return 0;
+}
+
 
 /* ── dwell ─────────────────────────────────────────────────────────
  * Pass a short text description of the current tile set to
@@ -512,27 +729,41 @@ static int  g_dwell_reply_len;
 
 static int dwell_describe(char *out, int cap) {
     int p = 0;
-    p = sapp(out, p, "wang tile set: ");
-    char nb[12]; int nn = utoa((unsigned)g_set_count, nb);
+    int count   = g_mode == 0 ? g_set_count   : g_hset_count;
+    int colors  = g_mode == 0 ? g_set_colors  : g_hset_colors;
+    int valid   = g_mode == 0 ? g_grid_valid  : g_hgrid_valid;
+
+    p = sapp(out, p, g_mode == 0 ? "square wang set: " : "hex wang set: ");
+    char nb[12]; int nn = utoa((unsigned)count, nb);
     for (int i = 0; i < nn && p < cap - 1; i++) out[p++] = nb[i];
     p = sapp(out, p, " tiles, ");
-    nn = utoa((unsigned)g_set_colors, nb);
+    nn = utoa((unsigned)colors, nb);
     for (int i = 0; i < nn && p < cap - 1; i++) out[p++] = nb[i];
     p = sapp(out, p, " colors, ");
-    p = sapp(out, p, g_grid_valid ? "tessellated " : "no tessellation ");
-    /* Edge histogram. */
+    p = sapp(out, p, valid ? "tessellated " : "no tessellation ");
     int hist[WSQ_MAX_COLORS] = {0};
-    for (int t = 0; t < g_set_count; t++) {
-        hist[g_set[t].n]++;
-        hist[g_set[t].e]++;
-        hist[g_set[t].s]++;
-        hist[g_set[t].w]++;
+    if (g_mode == 0) {
+        for (int t = 0; t < count; t++) {
+            hist[g_set[t].n]++;
+            hist[g_set[t].e]++;
+            hist[g_set[t].s]++;
+            hist[g_set[t].w]++;
+        }
+    } else {
+        for (int t = 0; t < count; t++) {
+            hist[g_hset[t].nw]++;
+            hist[g_hset[t].ne]++;
+            hist[g_hset[t].w ]++;
+            hist[g_hset[t].e ]++;
+            hist[g_hset[t].sw]++;
+            hist[g_hset[t].se]++;
+        }
     }
     p = sapp(out, p, "edges: ");
-    for (int c = 0; c < g_set_colors; c++) {
+    for (int c = 0; c < colors; c++) {
         nn = utoa((unsigned)hist[c], nb);
         for (int i = 0; i < nn && p < cap - 1; i++) out[p++] = nb[i];
-        if (c + 1 < g_set_colors && p < cap - 1) out[p++] = '/';
+        if (c + 1 < colors && p < cap - 1) out[p++] = '/';
     }
     if (p < cap) out[p] = 0;
     return p;
@@ -585,27 +816,33 @@ static void paint(const char *msg) {
     chrome("officetiles");
     body_clear();
 
+    int count  = g_mode == 0 ? g_set_count  : g_hset_count;
+    int colors = g_mode == 0 ? g_set_colors : g_hset_colors;
+    int valid  = g_mode == 0 ? g_grid_valid : g_hgrid_valid;
+
     char hdr[80];
     int p = 0;
-    p = sapp(hdr, p, "Wang tile set · ");
-    char nb[12]; int nn = utoa((unsigned)g_set_count, nb);
+    p = sapp(hdr, p, g_mode == 0 ? "square Wang · " : "hex Wang · ");
+    char nb[12]; int nn = utoa((unsigned)count, nb);
     for (int i = 0; i < nn; i++) hdr[p++] = nb[i];
     p = sapp(hdr, p, " tiles · ");
-    nn = utoa((unsigned)g_set_colors, nb);
+    nn = utoa((unsigned)colors, nb);
     for (int i = 0; i < nn; i++) hdr[p++] = nb[i];
     p = sapp(hdr, p, " colors · ");
-    p = sapp(hdr, p, g_grid_valid ? "tessellated" : "(press t to tessellate)");
+    p = sapp(hdr, p, valid ? "tessellated" : "(press t to tessellate)");
     hdr[p] = 0;
     body_at(2, 2, hdr, SCREEN_W - 4);
 
-    if (g_grid_valid) {
-        wsq_render();
+    if (valid) {
+        if (g_mode == 0) wsq_render();
+        else             whx_render();
     } else {
         body_at(6, 6, "no tessellation yet — press t to attempt", SCREEN_W - 8);
     }
 
     /* Tile-set glyphs in the right margin. */
-    render_tileset_glyph(56, 3);
+    int glyph_x = g_mode == 0 ? 56 : 60;
+    render_tileset_glyph(glyph_x, 3);
 
     if (g_dwell_reply_len > 0) {
         sgrbgfg(COL_BAR_BG, COL_BAR_FG);
@@ -618,14 +855,17 @@ static void paint(const char *msg) {
     }
 
     if (msg) status(msg);
-    else     status(" g=gen m=mutate t=tessellate c=colors n=count s=save l=load d=dwell q=quit ");
+    else     status(" g=gen m=mutate t=tessellate c=colors n=count h=hex/sq s=save l=load d=dwell q ");
     fbflush();
 }
 
 static int run_tiles(void) {
-    g_set_colors = CYCLE_COLORS[g_cycle_colors_idx];
-    g_set_count  = CYCLE_COUNTS[g_cycle_count_idx];
+    g_set_colors  = CYCLE_COLORS[g_cycle_colors_idx];
+    g_set_count   = CYCLE_COUNTS[g_cycle_count_idx];
+    g_hset_colors = g_set_colors;
+    g_hset_count  = g_set_count;
     wsq_random();
+    whx_random();
 
     term_raw();
     paint(0);
@@ -634,44 +874,60 @@ static int run_tiles(void) {
         int n = read_key(k, sizeof k);
         if (n <= 0) continue;
         if (k[0] == 'q' || k[0] == 'Q' || k[0] == 0x1b) break;
+        if (k[0] == 'h' || k[0] == 'H') {
+            g_mode = !g_mode;
+            paint(g_mode == 0 ? "switched to square Wang"
+                              : "switched to hex Wang");
+            continue;
+        }
         if (k[0] == 'g' || k[0] == 'G') {
-            wsq_random();
+            if (g_mode == 0) wsq_random(); else whx_random();
             paint("regenerated random set");
             continue;
         }
         if (k[0] == 'm' || k[0] == 'M') {
-            wsq_mutate();
+            if (g_mode == 0) wsq_mutate(); else whx_mutate();
             paint("mutated one tile");
             continue;
         }
         if (k[0] == 't' || k[0] == 'T') {
-            int ok = wsq_tessellate();
+            int ok = (g_mode == 0) ? wsq_tessellate() : whx_tessellate();
             if (ok) paint("tessellation succeeded");
             else    paint("tessellation FAILED — set is not valid");
             continue;
         }
         if (k[0] == 'c' || k[0] == 'C') {
-            g_cycle_colors_idx = (g_cycle_colors_idx + 1) % (int)(sizeof CYCLE_COLORS / sizeof CYCLE_COLORS[0]);
-            g_set_colors = CYCLE_COLORS[g_cycle_colors_idx];
-            wsq_random();
+            g_cycle_colors_idx = (g_cycle_colors_idx + 1) %
+                (int)(sizeof CYCLE_COLORS / sizeof CYCLE_COLORS[0]);
+            int v = CYCLE_COLORS[g_cycle_colors_idx];
+            if (g_mode == 0) { g_set_colors = v; wsq_random(); }
+            else             { g_hset_colors = v; whx_random(); }
             paint("cycled color count");
             continue;
         }
         if (k[0] == 'n' || k[0] == 'N') {
-            g_cycle_count_idx = (g_cycle_count_idx + 1) % (int)(sizeof CYCLE_COUNTS / sizeof CYCLE_COUNTS[0]);
-            g_set_count = CYCLE_COUNTS[g_cycle_count_idx];
-            wsq_random();
+            g_cycle_count_idx = (g_cycle_count_idx + 1) %
+                (int)(sizeof CYCLE_COUNTS / sizeof CYCLE_COUNTS[0]);
+            int v = CYCLE_COUNTS[g_cycle_count_idx];
+            if (g_mode == 0) { g_set_count = v; wsq_random(); }
+            else             { g_hset_count = v; whx_random(); }
             paint("cycled tile count");
             continue;
         }
         if (k[0] == 's' || k[0] == 'S') {
-            int rc = wsq_save("tiles.bin");
+            int rc = (g_mode == 0)
+                ? wsq_save("tiles.bin")
+                : whx_save("tiles.bin");
             paint(rc == 0 ? "saved tiles.bin" : "save failed");
             continue;
         }
         if (k[0] == 'l' || k[0] == 'L') {
-            int rc = wsq_load("tiles.bin");
-            paint(rc == 0 ? "loaded tiles.bin" : "load failed (no file or bad header)");
+            int rc = (g_mode == 0)
+                ? wsq_load("tiles.bin")
+                : whx_load("tiles.bin");
+            paint(rc == 0
+                  ? "loaded tiles.bin"
+                  : "load failed (no file, bad header, or wrong mode)");
             continue;
         }
         if (k[0] == 'd' || k[0] == 'D') {
