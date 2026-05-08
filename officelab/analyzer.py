@@ -56,6 +56,10 @@ VERSIONS = ["office", "office2", "office3", "office4",
             # diverge from here on.
             "officetiny", "officeproductivity", "officeresearcher",
             "officegamer", "officesysadmin", "officehoneypot",
+            # Hand-edited fork of office64 — calc merged into sheet,
+            # network stack + screensaver + garden dropped, plus a
+            # 4 KB persistent system-prompt slot for the LLM client.
+            "supercell",
             ]
 BASELINE = "minimal"
 
@@ -90,7 +94,10 @@ def _re(*alts: str) -> str:
 FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # ── per-app code ──
     ("ask",
-     ["run_ask", "ask_", "mF_ask", "ms_ask"],
+     ["run_ask", "ask_", "mF_ask", "ms_ask",
+      # supercell: 4 KB system-prompt slot used by ask_build_request
+      # to inject {"role":"system"} into every chat completion.
+      "run_prompt", "prompt_load", "g_llm_prompt"],
      # function-local statics inside ask_*: gcc-disambiguated as
      # req.5, resp.11, auth.4, content.10, etc.  `tmp` is only used
      # as a static array in ask_load_conf / ask_save_conf, so it's
