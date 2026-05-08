@@ -716,7 +716,46 @@ static const char *basename_(const char *p) {
     return r;
 }
 
+/* Batch generation: load weights, encode the prompt, run
+ * forward_argmax up to max_new tokens, write the decoded reply to
+ * stdout, exit.  No tty.  Used by officeagent's coder when every
+ * external API key has failed — same role the embedded soul used to
+ * play before the move-out.  Argv form: `./officesoul --gen "<prompt>"`. */
+static int run_gen(const char *prompt) {
+    soul_open();
+
+    int ids[SL];
+    int n = 0;
+    ids[n++] = SEP;
+    int body[SL];
+    int bn = encode(prompt, body, SL - 2);
+    for (int i = 0; i < bn && n < SL - 1; i++) ids[n++] = body[i];
+    ids[n++] = SEP;
+
+    const int max_new = 24;
+    for (int gen = 0; gen < max_new && n < SL; gen++) {
+        int tok_id = forward_argmax(ids, n);
+        if (tok_id == PAD || tok_id == SEP || tok_id == END) break;
+        if (tok_id != UNK) {
+            const char *str = (const char *)(VOCAB_STR_BLOB +
+                                             VOCAB_OFFSETS[tok_id]);
+            wr(1, str, VOCAB_LEN_TBL[tok_id]);
+        }
+        ids[n++] = tok_id;
+    }
+    wr(1, "\n", 1);
+    return 0;
+}
+
 int main_c(int argc, char **argv) {
+    /* Non-interactive batch mode: `./officesoul --gen "<prompt>"`
+     * → write the model's reply to stdout and exit.  Has to come
+     * before the wrapper-name unwrap so the flag works regardless
+     * of argv[0]. */
+    if (argc >= 3 && scmp(argv[1], "--gen") == 0) {
+        return run_gen(argv[2]);
+    }
+
     const char *cmd = (argc > 0) ? basename_(argv[0]) : "officesoul";
     int sub_argc = argc;
     char **sub_argv = argv;

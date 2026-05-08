@@ -878,10 +878,12 @@
 #define APP_NAME    "office64"
 #define APP_VERSION "41"
 
-/* Embedded 25 K-parameter int8 transformer for the `soul` app —
- * port of gizmo64k/soulplayer-c64.  Weights + tokenizer ship as
- * static const arrays so the soul travels with the binary. */
-#include "soul_data.h"
+/* Soul moved out: 25 K-param int8 transformer + GA now lives in
+ * officesoul (a separate binary, ~35 KB).  officeagent shells out
+ * to `./officesoul --gen "<prompt>"` for coder's curl-failure
+ * fallback, and to `./officesoul soul` for the interactive `soul`
+ * app.  Drops ~30 KB of embedded weights + tokenizer + transformer
+ * code from this binary. */
 
 
 /* ── syscalls ──────────────────────────────────────────── */
@@ -1720,12 +1722,11 @@ static int run_coder(int, char**);
 static int run_soul(int, char**);
 static int run_xpg(int, char**);
 
-/* Soul helpers — defined alongside run_soul further down.  Forward-
- * declared here so the coder can call sl_generate as a curl
- * fallback and sl_save_test to auto-promote successful goals into
- * the soul's evolution test set. */
-static int sl_generate(const char *text, char *out, int out_cap, int max_new);
-static void sl_save_test(const char *prompt, const char *expected);
+/* Coder's soul fallback shells out to ./officesoul --gen and
+ * captures its stdout.  Returns bytes copied into `out` (0 on any
+ * failure).  Defined alongside run_soul further down. */
+static int soul_external_gen(const char *prompt, int pn,
+                             char *out, int out_cap);
 
 /* Per-instance identity that survives PID-namespace flattening.
  * jail.c injects `--instance=<8hex>` into argv before execve so this
@@ -5063,12 +5064,14 @@ static int coder_iterate(void) {
                      ? g_coder_goal_len : CODER_GOAL_CAP - 1;
             mcpy(gz, g_coder_goal, gl); gz[gl] = 0;
             char reply[256];
-            int rl = sl_generate(gz, reply, sizeof reply, 16);
-            p = sapp(g_coder_err, p, "\n  soul says: ");
-            int take = rl;
-            if (p + take > CODER_ERR_CAP - 1) take = CODER_ERR_CAP - 1 - p;
-            mcpy(g_coder_err + p, reply, take);
-            p += take;
+            int rl = soul_external_gen(gz, gl, reply, sizeof reply);
+            if (rl > 0) {
+                p = sapp(g_coder_err, p, "\n  soul says: ");
+                int take = rl;
+                if (p + take > CODER_ERR_CAP - 1) take = CODER_ERR_CAP - 1 - p;
+                mcpy(g_coder_err + p, reply, take);
+                p += take;
+            }
         }
         g_coder_err[p] = 0;
         g_coder_err_len = p;
@@ -5124,9 +5127,11 @@ static int coder_iterate(void) {
                     _exp[_k] = _c;                                          \
                 }                                                           \
                 _exp[_el] = 0;                                              \
-                tdb_open();                                                 \
-                sl_save_test(_goal, _exp);                                  \
-                tdb_close();                                                \
+                /* Auto-promote disabled when soul moved out of this        \
+                 * binary.  officesoul reads its own soul_tests.txt;        \
+                 * the user can press 't' inside officesoul to add the      \
+                 * test there if they want the GA to learn from it. */     \
+                (void)_goal; (void)_exp;                                    \
             }                                                               \
         }                                                                   \
     } while (0)
@@ -5742,807 +5747,68 @@ static int run_coder(int argc, char **argv) {
 }
 
 
-/* ── soul: 25 K-parameter int8 transformer ──────────────────
- *
- * Port of gizmo64k/soulplayer-c64.  Two transformer layers,
- * 4 attention heads × 8 dims, 32-d embeddings, 64-unit FFN,
- * 64-token context window (PE has 64 rows in soul.bin), 128-
- * token vocab.  Same arithmetic as the upstream's numerics.py.
- *
- * Two extras over a vanilla port:
- *   1. The 24 per-tensor shifts are *runtime mutable* via a
- *      24-byte delta array (g_sl_dlt) loaded from
- *      coder_shifts.bin at startup, so a soulgen-style GA can
- *      tune the soul without recompiling.
- *   2. A `g` hotkey inside `soul` runs the GA in-place: pop=16,
- *      gens=20, fitness from coder.db rows tagged bank==4 (with
- *      a built-in fallback test set if the DB is empty).
- *      Winning shifts persist to coder_shifts.bin on save.
- *
- * Coder hook: when ask_call_curl fails (timeout, 429, etc.),
- * the coder calls sl_generate() instead and surfaces the
- * soul's reply where the LLM's response would have gone. */
-
-#define SL_VS         128
-#define SL_ED          32
-#define SL_NH           4
-#define SL_HD           8
-#define SL_FF          64
-#define SL_NL_LAY       2
-#define SL_CTX         64
-#define SL_ACT_SHIFT    8
-#define SL_N_SHIFTS    24
-
-#define SL_PAD 0
-#define SL_SEP 1
-#define SL_UNK 2
-#define SL_END 3
-
-/* coder.db rows tagged with this bank value are mined as soul-
- * evolution test cases (body = "prompt\nexpected"). */
-#define BANK_SOUL_TESTS 4
-
-typedef struct { const signed char *q; int rows, cols; int base_s; int idx; } SLW8;
-typedef struct { const short        *q; int rows, cols; int base_s; int idx; } SLW16;
-
-static SLW8  SL_M_te, SL_M_pe, SL_M_norm, SL_M_out;
-typedef struct {
-    SLW8  n1, q, k, v, proj, n2, fc1_w, fc2_w;
-    SLW16 fc1_b, fc2_b;
-} SLLayer;
-static SLLayer SL_Lyr[SL_NL_LAY];
-static int     SL_off;
-static int     SL_loaded = 0;
-
-/* 24 signed-int8 shift deltas, applied on top of each tensor's
- * baseline shift.  All-zeros = use the soul as trained.  Persisted
- * to coder_shifts.bin between sessions. */
-static signed char g_sl_dlt[SL_N_SHIFTS];
-static int         g_sl_idx_seq;
-
-static int  sl_u8 (void) { return SOUL_BIN_DATA[SL_off++]; }
-static int  sl_u16(void) {
-    int lo = SOUL_BIN_DATA[SL_off++];
-    int hi = SOUL_BIN_DATA[SL_off++];
-    return lo | (hi << 8);
-}
-static int  sl_i8 (void) {
-    int v = SOUL_BIN_DATA[SL_off++];
-    return v >= 128 ? v - 256 : v;
-}
-
-static void sl_load_w8 (SLW8  *m, int rows, int cols) {
-    sl_u8(); sl_u16(); sl_u16();
-    int s = sl_i8();
-    m->q = (const signed char *)(SOUL_BIN_DATA + SL_off);
-    m->base_s = s;
-    m->rows = rows; m->cols = cols;
-    m->idx = g_sl_idx_seq++;
-    SL_off += rows * cols;
-}
-static void sl_load_w16(SLW16 *m, int n) {
-    sl_u8(); sl_u16(); sl_u16();
-    int s = sl_i8();
-    m->q = (const short *)(SOUL_BIN_DATA + SL_off);
-    m->base_s = s;
-    m->rows = n; m->cols = 1;
-    m->idx = g_sl_idx_seq++;
-    SL_off += n * 2;
-}
-
-static void sl_open(void) {
-    if (SL_loaded) return;
-    SL_off = 0;
-    g_sl_idx_seq = 0;
-    sl_load_w8(&SL_M_te, SL_VS, SL_ED);
-    sl_load_w8(&SL_M_pe, SL_CTX, SL_ED);
-    for (int L = 0; L < SL_NL_LAY; L++) {
-        SLLayer *ly = &SL_Lyr[L];
-        sl_load_w8 (&ly->n1,    SL_ED, 1);
-        sl_load_w8 (&ly->q,     SL_ED, SL_ED);
-        sl_load_w8 (&ly->k,     SL_ED, SL_ED);
-        sl_load_w8 (&ly->v,     SL_ED, SL_ED);
-        sl_load_w8 (&ly->proj,  SL_ED, SL_ED);
-        sl_load_w8 (&ly->n2,    SL_ED, 1);
-        sl_load_w8 (&ly->fc1_w, SL_FF, SL_ED);
-        sl_load_w16(&ly->fc1_b, SL_FF);
-        sl_load_w8 (&ly->fc2_w, SL_ED, SL_FF);
-        sl_load_w16(&ly->fc2_b, SL_ED);
-    }
-    sl_load_w8(&SL_M_norm, SL_ED, 1);
-    sl_load_w8(&SL_M_out,  SL_VS, SL_ED);
-    SL_loaded = 1;
-}
-
-/* Load shift deltas from coder_shifts.bin (if present). */
-static void sl_dlt_load(void) {
-    for (int i = 0; i < SL_N_SHIFTS; i++) g_sl_dlt[i] = 0;
-    int fd = (int)op("coder_shifts.bin", O_RDONLY, 0);
-    if (fd < 0) return;
-    rd(fd, g_sl_dlt, SL_N_SHIFTS);
-    cl(fd);
-}
-static void sl_dlt_save(void) {
-    int fd = (int)op("coder_shifts.bin",
-                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) return;
-    wr(fd, g_sl_dlt, SL_N_SHIFTS);
-    cl(fd);
-}
-static int sl_eff_shift(const SLW8 *m) {
-    int s = m->base_s + (int)g_sl_dlt[m->idx];
-    if (s < -128) s = -128;
-    if (s >  127) s =  127;
-    return s;
-}
-static int sl_eff_shift_w16(const SLW16 *m) {
-    int s = m->base_s + (int)g_sl_dlt[m->idx];
-    if (s < -128) s = -128;
-    if (s >  127) s =  127;
-    return s;
-}
-
-/* arithmetic */
-static int sl_sat16(int v) {
-    if (v >  32767) return  32767;
-    if (v < -32768) return -32768;
-    return v;
-}
-static int sl_sar32(int v, int sh) {
-    if (sh >= 0) return v >> sh;
-    return v << (-sh);
-}
-static unsigned sl_isqrt_u32(unsigned v) {
-    if (v == 0) return 0;
-    unsigned r = 0, b = 1u << 30;
-    while (b > v) b >>= 2;
-    while (b) {
-        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; }
-        else r >>= 1;
-        b >>= 2;
-    }
-    return r;
-}
-
-static const unsigned char SL_EXP_LUT[128] = {
-    255, 240, 225, 212, 199, 187, 175, 165,
-    155, 146, 137, 128, 121, 113, 107, 100,
-     94,  88,  83,  78,  73,  69,  64,  60,
-     57,  53,  50,  47,  44,  41,  39,  36,
-     34,  32,  30,  28,  26,  25,  23,  22,
-     21,  19,  18,  17,  16,  15,  14,  13,
-     12,  12,  11,  10,  10,   9,   8,   8,
-      8,   7,   7,   6,   6,   5,   5,   5,
-      5,   4,   4,   4,   4,   3,   3,   3,
-      3,   3,   3,   2,   2,   2,   2,   2,
-      2,   2,   2,   2,   2,   1,   1,   1,
-      1,   1,   1,   1,   1,   1,   1,   1,
-      1,   1,   1,   1,   1,   1,   1,   1,
-      1,   1,   1,   1,   1,   1,   1,   1,
-      1,   1,   1,   1,   1,   1,   1,   1,
-      1,   1,   1,   1,   1,   1,   1,   0,
-};
-
-static int sl_deshift(int v, int s) {
-    int diff = SL_ACT_SHIFT - s;
-    if (diff >= 0) return v << diff;
-    return v >> (-diff);
-}
-
-static void sl_matvec(const SLW8 *Wm, const short *x, int rows, int cols,
-                      int post_shift, short *out) {
-    int total = sl_eff_shift(Wm) + post_shift;
-    for (int r = 0; r < rows; r++) {
-        const signed char *row = Wm->q + r * cols;
-        int acc = 0;
-        for (int c = 0; c < cols; c++) acc += (int)row[c] * (int)x[c];
-        out[r] = (short)sl_sat16(sl_sar32(acc, total));
-    }
-}
-static void sl_matvec_b(const SLW8 *Wm, const SLW16 *bm, const short *x,
-                        int rows, int cols, int post_shift, short *out) {
-    int total = sl_eff_shift(Wm) + post_shift;
-    (void)bm;
-    int s_b __attribute__((unused)) = sl_eff_shift_w16(bm);
-    for (int r = 0; r < rows; r++) {
-        const signed char *row = Wm->q + r * cols;
-        int acc = bm->q[r];
-        for (int c = 0; c < cols; c++) acc += (int)row[c] * (int)x[c];
-        out[r] = (short)sl_sat16(sl_sar32(acc, total));
-    }
-}
-static void sl_rms_norm(const short *x, const SLW8 *gain, int n, short *out) {
-    int sum_sq = 0;
-    for (int i = 0; i < n; i++) {
-        int xs = ((int)x[i]) >> 4;
-        sum_sq += xs * xs;
-    }
-    int mean_sq = sum_sq / n;
-    if (mean_sq < 1) mean_sq = 1;
-    unsigned rms = sl_isqrt_u32((unsigned)mean_sq);
-    if (rms < 1) rms = 1;
-    unsigned inv = (1u << 19) / rms;
-    if (inv > 32767) inv = 32767;
-    int s_g = sl_eff_shift(gain);
-    for (int i = 0; i < n; i++) {
-        int y_raw = (((int)x[i]) * (int)inv) >> 15;
-        int y = (y_raw * (int)gain->q[i]) >> s_g;
-        out[i] = (short)sl_sat16(y);
-    }
-}
-static void sl_softmax_ws(const int *scores, int n,
-                          const short *vals, int hd, short *out) {
-    int sf[SL_CTX];
-    int max_sf = -2000000000;
-    for (int i = 0; i < n; i++) {
-        sf[i] = scores[i] >> 14;
-        if (sf[i] > max_sf) max_sf = sf[i];
-    }
-    unsigned char w[SL_CTX];
-    int w_sum = 0;
-    for (int i = 0; i < n; i++) {
-        int d = max_sf - sf[i];
-        if (d < 0) d = 0;
-        if (d > 127) d = 127;
-        w[i] = SL_EXP_LUT[d];
-        w_sum += w[i];
-    }
-    if (w_sum == 0) w_sum = 1;
-    for (int j = 0; j < hd; j++) {
-        int acc = 0;
-        for (int i = 0; i < n; i++) acc += (int)w[i] * (int)vals[i * hd + j];
-        out[j] = (short)sl_sat16(acc / w_sum);
-    }
-}
-
-static short SL_h    [SL_CTX][SL_ED];
-static short SL_qall [SL_CTX][SL_ED];
-static short SL_kall [SL_CTX][SL_ED];
-static short SL_vall [SL_CTX][SL_ED];
-static short SL_attn [SL_CTX][SL_ED];
-
-static int sl_forward(const int *ids, int T) {
-    int s_te = sl_eff_shift(&SL_M_te);
-    int s_pe = sl_eff_shift(&SL_M_pe);
-    for (int t = 0; t < T; t++) {
-        int tok = ids[t];
-        for (int d = 0; d < SL_ED; d++) {
-            int v = sl_deshift(SL_M_te.q[tok * SL_ED + d], s_te) +
-                    sl_deshift(SL_M_pe.q[t   * SL_ED + d], s_pe);
-            SL_h[t][d] = (short)sl_sat16(v);
-        }
-    }
-    for (int L = 0; L < SL_NL_LAY; L++) {
-        SLLayer *ly = &SL_Lyr[L];
-        for (int t = 0; t < T; t++) {
-            short xn[SL_ED];
-            sl_rms_norm(SL_h[t], &ly->n1, SL_ED, xn);
-            sl_matvec(&ly->q, xn, SL_ED, SL_ED, 1, SL_qall[t]);
-            sl_matvec(&ly->k, xn, SL_ED, SL_ED, 1, SL_kall[t]);
-            sl_matvec(&ly->v, xn, SL_ED, SL_ED, 1, SL_vall[t]);
-        }
-        for (int tq = 0; tq < T; tq++) {
-            for (int head = 0; head < SL_NH; head++) {
-                int off = head * SL_HD;
-                int n_keys = tq + 1;
-                int scores[SL_CTX];
-                short v_head[SL_CTX * SL_HD];
-                for (int tk = 0; tk < n_keys; tk++) {
-                    int s = 0;
-                    for (int d = 0; d < SL_HD; d++)
-                        s += (int)SL_qall[tq][off + d] *
-                             (int)SL_kall[tk][off + d];
-                    scores[tk] = s;
-                    for (int d = 0; d < SL_HD; d++)
-                        v_head[tk * SL_HD + d] = SL_vall[tk][off + d];
-                }
-                short out_head[SL_HD];
-                sl_softmax_ws(scores, n_keys, v_head, SL_HD, out_head);
-                for (int d = 0; d < SL_HD; d++)
-                    SL_attn[tq][off + d] = out_head[d];
-            }
-        }
-        for (int t = 0; t < T; t++) {
-            short att_proj[SL_ED];
-            sl_matvec(&ly->proj, SL_attn[t], SL_ED, SL_ED, 1, att_proj);
-            for (int d = 0; d < SL_ED; d++)
-                SL_h[t][d] = (short)sl_sat16((int)SL_h[t][d] + (int)att_proj[d]);
-        }
-        for (int t = 0; t < T; t++) {
-            short yn[SL_ED], z[SL_FF], w2[SL_ED];
-            sl_rms_norm(SL_h[t], &ly->n2, SL_ED, yn);
-            sl_matvec_b(&ly->fc1_w, &ly->fc1_b, yn, SL_FF, SL_ED, 1, z);
-            for (int i = 0; i < SL_FF; i++) if (z[i] < 0) z[i] = 0;
-            sl_matvec_b(&ly->fc2_w, &ly->fc2_b, z, SL_ED, SL_FF, 1, w2);
-            for (int d = 0; d < SL_ED; d++)
-                SL_h[t][d] = (short)sl_sat16((int)SL_h[t][d] + (int)w2[d]);
-        }
-    }
-    short y[SL_ED], logits[SL_VS];
-    sl_rms_norm(SL_h[T - 1], &SL_M_norm, SL_ED, y);
-    sl_matvec(&SL_M_out, y, SL_VS, SL_ED, 0, logits);
-    int best = 4, best_v = logits[4];
-    for (int i = 5; i < SL_VS; i++) {
-        if (logits[i] > best_v) { best_v = logits[i]; best = i; }
-    }
-    return best;
-}
-
-static int sl_vocab_lookup(const char *s, int len) {
-    for (int i = 0; i < SL_VS; i++) {
-        if (VOCAB_LEN_TBL[i] != len) continue;
-        const unsigned char *str = VOCAB_STR_BLOB + VOCAB_OFFSETS[i];
-        int eq = 1;
-        for (int j = 0; j < len; j++) {
-            if (str[j] != (unsigned char)s[j]) { eq = 0; break; }
-        }
-        if (eq) return i;
-    }
-    return -1;
-}
-static int sl_encode(const char *text, int *ids, int cap) {
-    int n = 0;
-    for (int i = 0; text[i] && n < cap; i++) {
-        char c = text[i];
-        if (c >= 'A' && c <= 'Z') c = (char)(c + 32);
-        int id = sl_vocab_lookup(&c, 1);
-        if (id >= 0) ids[n++] = id;
-    }
-    for (int m = 0; m < MERGES_N; m++) {
-        int a = MERGES_AB[m][0], b = MERGES_AB[m][1], id = MERGES_ID[m];
-        int w = 0;
-        for (int r = 0; r < n; ) {
-            if (r + 1 < n && ids[r] == a && ids[r+1] == b) {
-                ids[w++] = id; r += 2;
-            } else {
-                ids[w++] = ids[r++];
-            }
-        }
-        n = w;
-    }
-    return n;
-}
-
-/* One-shot generation — used by ask as a fallback when curl fails,
- * by the GA fitness function, and by the soul's REPL. */
-static int sl_generate(const char *text, char *out, int out_cap, int max_new) {
-    sl_open();
-    sl_dlt_load();
-    int ids[SL_CTX];
-    int n = 0;
-    ids[n++] = SL_SEP;
-    int body[SL_CTX];
-    int bn = sl_encode(text, body, SL_CTX - 2);
-    for (int i = 0; i < bn && n < SL_CTX - 1; i++) ids[n++] = body[i];
-    ids[n++] = SL_SEP;
-    int o = 0;
-    for (int gen = 0; gen < max_new && n < SL_CTX; gen++) {
-        int tok = sl_forward(ids, n);
-        if (tok == SL_PAD || tok == SL_SEP || tok == SL_END) break;
-        int len = VOCAB_LEN_TBL[tok];
-        if (o + len >= out_cap - 1) break;
-        const unsigned char *str = VOCAB_STR_BLOB + VOCAB_OFFSETS[tok];
-        for (int i = 0; i < len; i++) out[o++] = (char)str[i];
-        ids[n++] = tok;
-    }
-    out[o] = 0;
-    return o;
-}
-
-
-/* ── soulgen: in-process GA over per-tensor shifts ──────────
- *
- * Genome = 24 signed-int8 deltas (mirrors g_sl_dlt[] layout).
- * Mutation = ±1 to a random index, clamped to ±4.  Crossover =
- * single-cut blend.  Tournament-2 selection, breed bottom half.
- * Fitness = sum of longest-common-substring lengths between the
- * soul's reply and the expected substring across a test set.
- *
- * Test source priority:
- *   1. coder.db rows tagged bank == BANK_SOUL_TESTS, body =
- *      "prompt\nexpected"
- *   2. Built-in fallback test set (below) if the DB is empty.
- *
- * Press 't' inside the soul UI to add a new (prompt, expected)
- * row to the DB; tests survive across sessions because coder.db
- * does. */
-
-typedef struct { const char *prompt; const char *expected; } SLTest;
-static const SLTest SL_BUILTIN_TESTS[] = {
-    { "hi",                "welcome" },
-    { "hello",             "ready" },
-    { "what is velour",    "meta" },
-    { "what is office",    "under" },
-    { "what is xpg",       "hexca" },
-    { "who are you",       "soul" },
-    { "i'm sad",           "soldering" },
-    { "tell me something", "tiny" },
-    { "give me advice",    "commit" },
-    { "i'm coding",        "break" },
-    { "my code crashed",   "stack" },
-    { "bye",               "iron" },
-};
-#define SL_BUILTIN_N (int)(sizeof SL_BUILTIN_TESTS / sizeof SL_BUILTIN_TESTS[0])
-
-#define SL_GA_MAX_TESTS 32
-static char  SL_test_p[SL_GA_MAX_TESTS][80];
-static char  SL_test_e[SL_GA_MAX_TESTS][80];
-static int   SL_n_tests;
-
-static void sl_load_tests(void) {
-    SL_n_tests = 0;
-    /* Mine coder.db for rows tagged BANK_SOUL_TESTS. */
-    tdb_open();
-    unsigned int n = tdb_count();
-    for (unsigned int i = 0; i < n && SL_n_tests < SL_GA_MAX_TESTS; i++) {
-        TdbRow r;
-        if (tdb_read(i, &r) != 0) continue;
-        if (r.bank != BANK_SOUL_TESTS) continue;
-        /* split body on first newline */
-        int nl = -1;
-        for (int j = 0; j < r.body_len; j++) {
-            if (r.body[j] == '\n') { nl = j; break; }
-        }
-        if (nl < 0) continue;
-        int pn = nl;
-        if (pn > (int)sizeof SL_test_p[0] - 1) pn = sizeof SL_test_p[0] - 1;
-        mcpy(SL_test_p[SL_n_tests], r.body, pn);
-        SL_test_p[SL_n_tests][pn] = 0;
-        int en = r.body_len - nl - 1;
-        if (en > (int)sizeof SL_test_e[0] - 1) en = sizeof SL_test_e[0] - 1;
-        if (en > 0) mcpy(SL_test_e[SL_n_tests], r.body + nl + 1, en);
-        SL_test_e[SL_n_tests][en > 0 ? en : 0] = 0;
-        SL_n_tests++;
-    }
-    /* Fallback: built-in tests if the DB has nothing. */
-    if (SL_n_tests == 0) {
-        for (int i = 0; i < SL_BUILTIN_N; i++) {
-            int p = 0;
-            const char *pp = SL_BUILTIN_TESTS[i].prompt;
-            while (pp[p] && p < (int)sizeof SL_test_p[0] - 1) {
-                SL_test_p[i][p] = pp[p]; p++;
-            }
-            SL_test_p[i][p] = 0;
-            int e = 0;
-            const char *ee = SL_BUILTIN_TESTS[i].expected;
-            while (ee[e] && e < (int)sizeof SL_test_e[0] - 1) {
-                SL_test_e[i][e] = ee[e]; e++;
-            }
-            SL_test_e[i][e] = 0;
-        }
-        SL_n_tests = SL_BUILTIN_N;
-    }
-}
-
-/* Save a (prompt, expected) row into coder.db with bank=4 so the
- * GA picks it up next time. */
-static void sl_save_test(const char *prompt, const char *expected) {
-    TdbRow r;
-    r.bank = BANK_SOUL_TESTS;
-    r.timestamp = (unsigned int)time_();
-    r.tag_bitmap = tdb_tag_bitmap(prompt, slen((char *)prompt)) |
-                   tdb_tag_bitmap(expected, slen((char *)expected));
-    int p = 0;
-    int pl = slen((char *)prompt);
-    if (pl > 80) pl = 80;
-    mcpy(r.body, prompt, pl); p += pl;
-    r.body[p++] = '\n';
-    int el = slen((char *)expected);
-    if (p + el > TDB_BODY_SIZE) el = TDB_BODY_SIZE - p;
-    mcpy(r.body + p, expected, el); p += el;
-    r.body_len = p;
-    tdb_insert(&r);
-}
-
-static int sl_substr_overlap(const char *expected, const char *actual) {
-    int el = slen((char *)expected), al = slen((char *)actual);
-    if (el == 0 || al == 0) return 0;
-    int best = 0;
-    for (int len = el; len >= 1 && len > best; len--) {
-        for (int i = 0; i + len <= el; i++) {
-            for (int j = 0; j + len <= al; j++) {
-                int k = 0;
-                while (k < len) {
-                    char a = expected[i+k], b = actual[j+k];
-                    if (a >= 'A' && a <= 'Z') a += 32;
-                    if (b >= 'A' && b <= 'Z') b += 32;
-                    if (a != b) break;
-                    k++;
-                }
-                if (k == len) { if (len > best) best = len; goto found; }
-            }
-        }
-        found: ;
-    }
-    return best;
-}
-
-static int sl_fitness(int max_new) {
-    int score = 0;
-    for (int i = 0; i < SL_n_tests; i++) {
-        char actual[256];
-        sl_generate(SL_test_p[i], actual, sizeof actual, max_new);
-        score += sl_substr_overlap(SL_test_e[i], actual);
-    }
-    return score;
-}
-
-#define SL_POP 16
-typedef struct { signed char d[SL_N_SHIFTS]; int score; } SLIndiv;
-
-static unsigned SL_rng = 1;
-static unsigned sl_rnd(void) {
-    SL_rng ^= SL_rng << 13; SL_rng ^= SL_rng >> 17; SL_rng ^= SL_rng << 5;
-    return SL_rng;
-}
-static int sl_rnd_n(int n) { return (int)(sl_rnd() % (unsigned)n); }
-static void sl_apply(const SLIndiv *g) {
-    for (int i = 0; i < SL_N_SHIFTS; i++) g_sl_dlt[i] = g->d[i];
-}
-static void sl_mutate(SLIndiv *g, int hits) {
-    for (int h = 0; h < hits; h++) {
-        int i = sl_rnd_n(SL_N_SHIFTS);
-        int delta = (int)(sl_rnd() % 3) - 1;
-        int v = g->d[i] + delta;
-        if (v < -4) v = -4; if (v > 4) v = 4;
-        g->d[i] = (signed char)v;
-    }
-}
-static void sl_xover(const SLIndiv *a, const SLIndiv *b, SLIndiv *out) {
-    int cut = sl_rnd_n(SL_N_SHIFTS);
-    for (int i = 0; i < SL_N_SHIFTS; i++)
-        out->d[i] = (i < cut) ? a->d[i] : b->d[i];
-}
-static int sl_cmp_desc(const SLIndiv *a, const SLIndiv *b) {
-    return b->score - a->score;
-}
-
-/* GA loop with per-generation UI updates.  `gens` controls effort.
- * Returns the final best score; updates g_sl_dlt + saves to disk. */
-static int sl_evolve(int gens, void (*on_gen)(int g, int best, const SLIndiv *bi)) {
-    sl_open(); sl_dlt_load(); sl_load_tests();
-    SLIndiv P[SL_POP], N[SL_POP], best;
-    /* Seed: first individual = current g_sl_dlt[], rest = mutated copies. */
-    for (int i = 0; i < SL_N_SHIFTS; i++) P[0].d[i] = g_sl_dlt[i];
-    P[0].score = 0;
-    for (int i = 1; i < SL_POP; i++) { P[i] = P[0]; sl_mutate(&P[i], 2); }
-    sl_apply(&P[0]);
-    P[0].score = sl_fitness(16);
-    best = P[0];
-
-    for (int g = 0; g < gens; g++) {
-        for (int i = 0; i < SL_POP; i++) {
-            sl_apply(&P[i]);
-            P[i].score = sl_fitness(16);
-            if (P[i].score > best.score) best = P[i];
-        }
-        if (on_gen) on_gen(g, best.score, &best);
-        /* Tournament + breed (insertion-sort by score desc; SL_POP=16 is small). */
-        for (int i = 1; i < SL_POP; i++) {
-            SLIndiv tmp = P[i]; int j = i;
-            while (j > 0 && sl_cmp_desc(&P[j-1], &tmp) > 0) { P[j] = P[j-1]; j--; }
-            P[j] = tmp;
-        }
-        int keep = SL_POP / 2;
-        for (int i = 0; i < keep; i++) N[i] = P[i];
-        for (int i = keep; i < SL_POP; i++) {
-            int a = sl_rnd_n(keep), b = sl_rnd_n(keep);
-            int pa = P[a].score >= P[b].score ? a : b;
-            int c = sl_rnd_n(keep), d = sl_rnd_n(keep);
-            int pb = P[c].score >= P[d].score ? c : d;
-            sl_xover(&P[pa], &P[pb], &N[i]);
-            sl_mutate(&N[i], 1 + sl_rnd_n(2));
-        }
-        for (int i = 0; i < SL_POP; i++) P[i] = N[i];
-    }
-    sl_apply(&best);
-    sl_dlt_save();
-    return best.score;
-}
-
-
-/* ── soul UI: chat + evolve modes ───────────────────────────── */
-
-static void sl_paint_chat_chrome(int row_seed) {
-    paint_desktop();
-    chrome("Soul Chat (25 K params · evolved shifts loaded)");
-    body_clear();
-    body_at(2, 3, "  .---------.", SCREEN_W - 4);
-    body_at(2, 4, " |  O     O  |", SCREEN_W - 4);
-    body_at(2, 5, " |     V     |", SCREEN_W - 4);
-    body_at(2, 6, " |..|-----|..|", SCREEN_W - 4);
-    body_at(2, 8, "Type a message + ENTER.  g=evolve, t=add test, q=quit.",
-            SCREEN_W - 4);
-    {
-        char ln[80]; int p = 0;
-        p = sapp(ln, p, "shifts: ");
-        int sum = 0;
-        for (int i = 0; i < SL_N_SHIFTS; i++) {
-            int v = g_sl_dlt[i]; if (v < 0) v = -v; sum += v;
-        }
-        p += utoa((unsigned)sum, ln + p);
-        p = sapp(ln, p, " bits from baseline");
-        ln[p] = 0;
-        body_at(2, 9, ln, SCREEN_W - 4);
-    }
-    status("soul: 64-token context · int8 weights");
-    fbflush();
-    (void)row_seed;
-}
-
-static void sl_evolve_paint(int g, int best, const SLIndiv *bi) {
-    char ln[80]; int p = 0;
-    p = sapp(ln, p, "gen ");
-    p += utoa((unsigned)g, ln + p);
-    while (p < 8) ln[p++] = ' ';
-    p = sapp(ln, p, "best score: ");
-    p += utoa((unsigned)best, ln + p);
-    p = sapp(ln, p, "  delta sum: ");
-    int sum = 0;
-    for (int i = 0; i < SL_N_SHIFTS; i++) {
-        int v = bi->d[i]; if (v < 0) v = -v; sum += v;
-    }
-    p += utoa((unsigned)sum, ln + p);
-    ln[p] = 0;
-    int row = 6 + (g % 14);
-    body_at(2, row, ln, SCREEN_W - 4);
-    fbflush();
-}
+/* ── soul: shell out to ./officesoul ────────────────────────────────
+ * The 25 K-param int8 transformer used to live embedded in this
+ * binary (~30 KB of weights + tokenizer + transformer code).
+ * It now lives in a sibling binary, officesoul, that we exec for
+ * both the interactive `soul` app and the coder fallback.  Saves
+ * the embedded weight blob (which dominated officeagent's size). */
 
 static int run_soul(int argc, char **argv) {
     (void)argc; (void)argv;
-    sl_open();
-    sl_dlt_load();
-    /* Capture tty so term_cooked has something real to restore.  Same
-     * fix as officesoul — without this the sub-app exits immediately
-     * on stdin reads when the terminal hadn't been touched yet. */
-    io(0, TCGETS, &term_orig);
-    {
-        struct ti t = term_orig;
-        t.lflag |= ICANON | ECHO;
-        t.iflag |= ICRNL;
-        io(0, TCSETS, &t);
+    /* Hand the tty over to officesoul cleanly. */
+    term_cooked();
+    long pid = forkk();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        char *av[] = { (char *)"./officesoul", (char *)"soul", 0 };
+        execvee("./officesoul", av, g_envp);
+        /* Fall back to PATH lookup so a system-installed officesoul
+         * works even without the leading dot-slash. */
+        char *av2[] = { (char *)"officesoul", (char *)"soul", 0 };
+        execvee("/usr/local/bin/officesoul", av2, g_envp);
+        execvee("/usr/bin/officesoul",       av2, g_envp);
+        qu(127);
     }
-    sl_paint_chat_chrome(11);
-
-    int row = 11;
-    char line[256];
-    while (1) {
-        cup(2, row);
-        sgrbgfg(COL_BAR_BG, COL_BAR_FG);
-        fbs("YOU> ");
-        fbflush();
-        int li = 0;
-        while (li < (int)sizeof line - 1) {
-            unsigned char ch[1];
-            int n = (int)rd(0, ch, 1);
-            if (n <= 0) { line[li] = 0; goto sl_quit; }
-            if (ch[0] == '\n' || ch[0] == '\r') break;
-            line[li++] = (char)ch[0];
-        }
-        line[li] = 0;
-        if (li == 0) continue;
-        if (li == 1 && (line[0] == 'q' || line[0] == 'Q')) break;
-
-        if (li == 1 && (line[0] == 'g' || line[0] == 'G')) {
-            /* Evolve mode: GA with live UI. */
-            paint_desktop();
-            chrome("Soul · evolving");
-            body_clear();
-            body_at(2, 3, "Running GA over per-tensor shifts...", SCREEN_W - 4);
-            sl_load_tests();
-            char nt[64]; int p = 0;
-            p = sapp(nt, p, "tests: ");
-            p += utoa((unsigned)SL_n_tests, nt + p);
-            p = sapp(nt, p, "  pop: ");
-            p += utoa((unsigned)SL_POP, nt + p);
-            p = sapp(nt, p, "  gens: 20");
-            nt[p] = 0;
-            body_at(2, 4, nt, SCREEN_W - 4);
-            fbflush();
-            int score = sl_evolve(20, sl_evolve_paint);
-            char done[80]; int q = 0;
-            q = sapp(done, q, "done · best score = ");
-            q += utoa((unsigned)score, done + q);
-            q = sapp(done, q, " (saved to coder_shifts.bin)");
-            done[q] = 0;
-            body_at(2, 22, done, SCREEN_W - 4);
-            status("press any key to return to chat");
-            fbflush();
-            unsigned char k[16];
-            rd(0, k, 1);
-            sl_paint_chat_chrome(11);
-            row = 11;
-            continue;
-        }
-
-        if (li == 1 && (line[0] == 't' || line[0] == 'T')) {
-            /* Add a test pair to coder.db. */
-            cup(2, row + 1);
-            fbs("test prompt> ");
-            fbflush();
-            char tp[80]; int tpi = 0;
-            while (tpi < (int)sizeof tp - 1) {
-                unsigned char ch[1];
-                if ((int)rd(0, ch, 1) <= 0) goto sl_quit;
-                if (ch[0] == '\n' || ch[0] == '\r') break;
-                tp[tpi++] = (char)ch[0];
-            }
-            tp[tpi] = 0;
-            cup(2, row + 2);
-            fbs("expected substring> ");
-            fbflush();
-            char te[80]; int tei = 0;
-            while (tei < (int)sizeof te - 1) {
-                unsigned char ch[1];
-                if ((int)rd(0, ch, 1) <= 0) goto sl_quit;
-                if (ch[0] == '\n' || ch[0] == '\r') break;
-                te[tei++] = (char)ch[0];
-            }
-            te[tei] = 0;
-            if (tpi > 0 && tei > 0) {
-                tdb_open();
-                sl_save_test(tp, te);
-                tdb_close();
-                cup(2, row + 3);
-                fbs("(test saved to coder.db)");
-                fbflush();
-            }
-            row += 4;
-            if (row >= SCREEN_H - 3) { sl_paint_chat_chrome(11); row = 11; }
-            continue;
-        }
-
-        /* Default: chat. */
-        int ids[SL_CTX];
-        int n = 0;
-        ids[n++] = SL_SEP;
-        int body[SL_CTX];
-        int bn = sl_encode(line, body, SL_CTX - 2);
-        for (int i = 0; i < bn && n < SL_CTX - 1; i++) ids[n++] = body[i];
-        ids[n++] = SL_SEP;
-        /* Track column + row so we can wrap a long reply onto multiple
-         * lines instead of letting the tty's auto-wrap stomp on the
-         * next YOU> prompt.  Continuation lines indent under the C64>
-         * prefix.  When the response would run off the bottom of the
-         * page, repaint the chrome and continue from row 12. */
-        int resp_row = row + 1;
-        cup(2, resp_row);
-        fbs("C64> ");
-        fbflush();
-        int col = 7;                       /* col after "  C64> " */
-        const int margin = SCREEN_W - 2;   /* don't write past col 78 */
-        for (int gen = 0; gen < SL_CTX && n < SL_CTX; gen++) {
-            int tok = sl_forward(ids, n);
-            if (tok == SL_PAD || tok == SL_SEP || tok == SL_END) break;
-            int len = VOCAB_LEN_TBL[tok];
-            if (col + len > margin) {
-                resp_row++;
-                if (resp_row >= SCREEN_H - 2) {
-                    sl_paint_chat_chrome(11);
-                    resp_row = 12;
-                }
-                cup(4, resp_row);          /* hanging indent under C64> */
-                col = 4;
-            }
-            fbw((const char *)(VOCAB_STR_BLOB + VOCAB_OFFSETS[tok]),
-                VOCAB_LEN_TBL[tok]);
-            col += len;
-            fbflush();
-            ids[n++] = tok;
-        }
-        fbflush();
-        row = resp_row + 2;                /* one blank line, then YOU> */
-        if (row >= SCREEN_H - 3) { sl_paint_chat_chrome(11); row = 11; }
-    }
-sl_quit:
-    sl_dlt_save();
-    paint_desktop();
-    chrome("Soul Chat");
-    body_clear();
-    body_at(2, 3, "  -- the only winning move is love!", SCREEN_W - 4);
-    fbflush();
+    int status = 0;
+    wait4_(&status);
     return 0;
+}
+
+static int soul_external_gen(const char *prompt, int pn,
+                             char *out, int out_cap) {
+    /* NUL-terminate the prompt for argv. */
+    char buf[CODER_GOAL_CAP + 1];
+    int n = pn < CODER_GOAL_CAP ? pn : CODER_GOAL_CAP;
+    mcpy(buf, prompt, n);
+    buf[n] = 0;
+
+    long pid = forkk();
+    if (pid < 0) return 0;
+    if (pid == 0) {
+        int fd = (int)op("/tmp/coder_soul_out.txt",
+                         O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) { dup2_(fd, 1); cl(fd); }
+        char *av[] = { (char *)"./officesoul",
+                       (char *)"--gen", buf, 0 };
+        execvee("./officesoul",          av, g_envp);
+        execvee("/usr/local/bin/officesoul", av, g_envp);
+        execvee("/usr/bin/officesoul",       av, g_envp);
+        qu(127);
+    }
+    int status = 0;
+    wait4_(&status);
+
+    int fd = (int)op("/tmp/coder_soul_out.txt", O_RDONLY, 0);
+    if (fd < 0) return 0;
+    int got = (int)rd(fd, out, out_cap - 1);
+    cl(fd);
+    if (got < 0) got = 0;
+    out[got] = 0;
+    while (got > 0 && (out[got-1] == '\n' || out[got-1] == '\r')) {
+        got--; out[got] = 0;
+    }
+    return got;
 }
 
 
