@@ -63,6 +63,10 @@ VERSIONS = ["office", "office2", "office3", "office4",
             # Tighter sibling: ask + standalone hxhnt/lsys dropped,
             # rpg+hxhnt-engine+L-system folded into a single `xpg` app.
             "officex",
+            # Toy "Claude Code": 6 apps (shell/sheet/xpg/ask/prompt
+            # /coder), 4 × 4 KB persistent memory banks, iterative
+            # cc-driven LLM code generator.
+            "officeagent",
             ]
 BASELINE = "minimal"
 
@@ -96,6 +100,13 @@ def _re(*alts: str) -> str:
 
 FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
     # ── per-app code ──
+    ("coder",
+     # officeagent: iterative LLM-driven code generator, plus the
+     # 4-bank persistent memory the agent reads + writes.
+     ["run_coder", "coder_", "g_coder_", "bank_", "g_bank",
+      "run_prompt_edit_bank", "BANK_"],
+     []),
+
     ("ask",
      ["run_ask", "ask_", "mF_ask", "ms_ask",
       # supercell: 4 KB system-prompt slot used by ask_build_request
