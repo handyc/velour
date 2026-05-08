@@ -1565,6 +1565,18 @@ static const MS ms_shell   = { mF_quit, NA(mF_quit), 0, 0,
 #define MA_RANDOM   0xa9   /* garden: R */
 #define MA_VIEW     0xaa   /* garden: V */
 #define MA_EXPORT   0xab   /* garden: X — splice export */
+
+/* garden: File = Save/Random/Quit; Edit = Breed/Preview/View/Export. */
+static const MI mF_garden[] = {{"Save    ^S", MA_SAVE},
+                               {"Random  ^R", MA_RANDOM},
+                               {"Quit    ^Q", MA_QUIT}};
+static const MI mE_garden[] = {{"Breed   ENT", MA_BREED},
+                               {"Preview P  ", MA_PREVIEW},
+                               {"View    V  ", MA_VIEW},
+                               {"Export  X  ", MA_EXPORT}};
+static const MS ms_garden  = { mF_garden, NA(mF_garden),
+                               mE_garden, NA(mE_garden),
+                               0, 0, mH_about, NA(mH_about) };
 #define MA_EVOLVE   0xab   /* hxhnt: Edit → Evolve */
 /* ask: New = clear chat, Sync = primer-send personality, Settings,
  * Quit.  "Sync" sends the personality bank as a hidden user-role
@@ -1718,6 +1730,9 @@ static int run_prompt(int, char**);
 static int run_coder(int, char**);
 static int run_soul(int, char**);
 static int run_xpg(int, char**);
+static int run_garden(int, char**);
+static int run_preview_genome(int, char**);
+static int run_view_genome(int, char**);
 
 /* Coder's soul fallback shells out to ./officesoul --gen and
  * captures its stdout.  Returns bytes copied into `out` (0 on any
@@ -1852,6 +1867,7 @@ static int run_shell(int argc, char **argv) {
             else if (scmp(cmd, "prompt") == 0) rc = run_prompt(sub_argc, sub_argv);
             else if (scmp(cmd, "coder") == 0)  rc = run_coder(sub_argc, sub_argv);
             else if (scmp(cmd, "soul") == 0)   rc = run_soul(sub_argc, sub_argv);
+            else if (scmp(cmd, "garden") == 0) rc = run_garden(sub_argc, sub_argv);
             /* xpg subsumes rpg + hxhnt + lsys.  Aliases route here. */
             else if (scmp(cmd, "xpg")   == 0 || scmp(cmd, "rpg") == 0 ||
                      scmp(cmd, "hxhnt") == 0 || scmp(cmd, "lsys") == 0)
@@ -5560,6 +5576,581 @@ static int soul_external_gen(const char *prompt, int pn,
 }
 
 
+/* ── garden: GA + jail-isolated preview ──────────────────────────
+ *
+ * Genome population breeder; selected genomes can be live-previewed
+ * inside a real namespace+seccomp jail (./jail) that exec's this
+ * binary's own preview-genome / view-genome subcommands.  Restored
+ * after the office53→officeagent fork dropped it during the dead-
+ * code cleanup.  Splice-export to a runnable hxh-* style binary
+ * shares hxhnt's gd_splice_export / hx_make_export_name helpers. */
+
+#define GARDEN_FILE  "garden.bin"
+#define GARDEN_MAGIC 0x47524431u   /* "GRD1" little-endian */
+
+static struct Genome g_pop[64];
+static unsigned long long g_marked;     /* 1 bit per slot */
+static int g_generation;
+
+static unsigned long long g_rng_state;
+
+static unsigned long long garden_rdtsc(void) {
+    unsigned long h, l;
+    __asm__ volatile ("rdtsc" : "=d"(h), "=a"(l));
+    return ((unsigned long long)h << 32) | l;
+}
+static void garden_rng_seed_if_unset(void) {
+    if (!g_rng_state) g_rng_state = garden_rdtsc() | 1ULL;
+}
+static unsigned int garden_rng(void) {
+    g_rng_state = g_rng_state * 6364136223846793005ULL +
+                  1442695040888963407ULL;
+    return (unsigned int)(g_rng_state >> 32);
+}
+
+static void garden_random_genome(struct Genome *g) {
+    /* Pick from a pleasing palette range so initial pop isn't all neon. */
+    g->title_bg     = (unsigned char)(garden_rng() & 0xff);
+    g->title_fg     = (unsigned char)(garden_rng() & 0xff);
+    g->bar_bg       = (unsigned char)(garden_rng() & 0xff);
+    g->bar_fg       = (unsigned char)(garden_rng() & 0xff);
+    g->desktop      = (unsigned char)(garden_rng() & 0xff);
+    g->select_bg    = (unsigned char)(garden_rng() & 0xff);
+    g->select_fg    = (unsigned char)(garden_rng() & 0xff);
+    g->shadow_bg    = (unsigned char)(garden_rng() & 0xff);
+    g->shadow_fg    = (unsigned char)(garden_rng() & 0xff);
+    g->accent       = (unsigned char)(garden_rng() & 0xff);
+    g->clock_corner = (unsigned char)(garden_rng() & 3);
+    g->show_clock   = (unsigned char)(garden_rng() & 1);
+    g->border       = (unsigned char)(garden_rng() & 3);
+    g->menu_under   = (unsigned char)(garden_rng() & 1);
+    g->clock_style  = (unsigned char)(garden_rng() & 7);
+    g->reserved     = 0;
+}
+
+static void garden_init_pop(void) {
+    garden_rng_seed_if_unset();
+    for (int i = 0; i < 64; i++) garden_random_genome(&g_pop[i]);
+    /* Seed slot 0 with the office6 defaults so the user always has
+     * a "boring but recognisable" starting point to breed from. */
+    g_pop[0] = (struct Genome){
+        21, 15, 7, 0, 30, 15, 0, 0, 8, 21, 1, 0, 0, 1, 1, 0
+    };
+    g_marked = 0;
+    g_generation = 0;
+}
+
+static void garden_mutate(struct Genome *g) {
+    unsigned char *b = (unsigned char *)g;
+    int n = (int)sizeof *g;
+    for (int i = 0; i < n; i++) {
+        unsigned int r = garden_rng();
+        if ((r & 0xff) < 24) {                /* ~9% per byte mutates */
+            if (i <= 9) {                     /* colour bytes drift */
+                int delta = (int)((r >> 8) & 7) - 3;   /* -3..+3 */
+                b[i] = (unsigned char)((int)b[i] + delta);
+            } else if (i == 10) {             /* clock_corner 0..3 */
+                b[i] = (unsigned char)((r >> 8) & 3);
+            } else if (i == 11 || i == 13) {  /* booleans */
+                b[i] ^= 1;
+            } else if (i == 12) {             /* border 0..3 */
+                b[i] = (unsigned char)((r >> 8) & 3);
+            } else if (i == 14) {             /* clock_style 0..7 */
+                b[i] = (unsigned char)((r >> 8) & 7);
+            }
+        }
+    }
+}
+
+static void garden_breed(void) {
+    int parents[64], np = 0;
+    for (int i = 0; i < 64; i++)
+        if ((g_marked >> i) & 1) parents[np++] = i;
+    if (np == 0) return;
+
+    struct Genome next[64];
+    for (int i = 0; i < 64; i++) {
+        if ((g_marked >> i) & 1) {
+            next[i] = g_pop[i];               /* survive untouched */
+            continue;
+        }
+        int a = parents[garden_rng() % np];
+        int b = parents[garden_rng() % np];
+        unsigned char *pa = (unsigned char *)&g_pop[a];
+        unsigned char *pb = (unsigned char *)&g_pop[b];
+        unsigned char *po = (unsigned char *)&next[i];
+        unsigned int mask = garden_rng();
+        for (int k = 0; k < (int)sizeof next[i]; k++) {
+            po[k] = (mask & 1) ? pa[k] : pb[k];
+            mask >>= 1;
+            if (k % 32 == 31) mask = garden_rng();
+        }
+        garden_mutate(&next[i]);
+    }
+    for (int i = 0; i < 64; i++) g_pop[i] = next[i];
+    g_marked = 0;
+    g_generation++;
+}
+
+static int garden_save(void) {
+    int fd = (int)op(GARDEN_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    unsigned int hdr[4];
+    hdr[0] = GARDEN_MAGIC;
+    hdr[1] = (unsigned int)g_generation;
+    hdr[2] = (unsigned int)(g_marked & 0xffffffffu);
+    hdr[3] = (unsigned int)(g_marked >> 32);
+    wr(fd, hdr, sizeof hdr);
+    wr(fd, g_pop, sizeof g_pop);
+    cl(fd);
+    return 0;
+}
+
+static int garden_load(void) {
+    int fd = (int)op(GARDEN_FILE, O_RDONLY, 0);
+    if (fd < 0) return 0;
+    unsigned int hdr[4];
+    long n = rd(fd, hdr, sizeof hdr);
+    if (n != (long)sizeof hdr || hdr[0] != GARDEN_MAGIC) {
+        cl(fd); return 0;
+    }
+    n = rd(fd, g_pop, sizeof g_pop);
+    cl(fd);
+    if (n != (long)sizeof g_pop) return 0;
+    g_generation = (int)hdr[1];
+    g_marked = (unsigned long long)hdr[2] | ((unsigned long long)hdr[3] << 32);
+    return 1;
+}
+
+static int garden_term_size(int *cols, int *rows) {
+    struct winsize ws = { 0, 0, 0, 0 };
+    long r = io(0, TIOCGWINSZ, &ws);
+    if (r < 0 || ws.ws_col == 0 || ws.ws_row == 0) {
+        *cols = 80; *rows = 24; return 0;
+    }
+    *cols = ws.ws_col; *rows = ws.ws_row;
+    return 1;
+}
+
+/* Render one thumbnail at screen pos (x,y), w x h cells.
+ * w is at least 10, h at least 3. The cursor and marked flags
+ * draw distinguishing borders. */
+static void garden_render_thumb(int idx, int x, int y, int w, int h,
+                                int is_cursor, int is_marked) {
+    struct Genome *g = &g_pop[idx];
+    static const char border_chars[4] = { '-', '=', '_', '~' };
+    char bc = border_chars[g->border & 3];
+
+    /* row 0: title bar */
+    cup(x, y);
+    sgrbgfg(g->title_bg, g->title_fg);
+    fbs(" O7");
+    int slots = w - 6;
+    for (int i = 0; i < slots; i++) fbw(" ", 1);
+    fbs("_X ");
+
+    /* row 1: menu bar — always exactly 1 row */
+    cup(x, y + 1);
+    sgrbgfg(g->bar_bg, g->bar_fg);
+    if (w >= 10) {
+        fbs(" F E V H");
+        blanks(w - 8);
+    } else {
+        fbs(" FEVH");
+        blanks(w - 5);
+    }
+
+    /* rows 2..h-2: desktop body */
+    for (int r = 2; r < h - 1; r++) {
+        cup(x, y + r);
+        sgrbg(g->desktop);
+        blanks(w);
+    }
+    /* clock pip — only in body rows, so hidden in MVP h=3 thumbs */
+    if (g->show_clock && h >= 4) {
+        int cx = x + ((g->clock_corner & 1) ? w - 6 : 1);
+        int cy = y + ((g->clock_corner & 2) ? h - 2 : 2);
+        cup(cx, cy);
+        sgrbgfg(g->desktop, g->accent);
+        fbs("12:00");
+    }
+
+    /* status row (last row) — used for marked/cursor indicators */
+    cup(x, y + h - 1);
+    sgrbgfg(g->bar_bg, g->bar_fg);
+    char bcs[2] = { bc, 0 };
+    for (int i = 0; i < w; i++) fbs(bcs);
+
+    /* overlay cursor + marked — border highlights drawn last */
+    if (is_marked) {
+        cup(x, y);
+        sgrbgfg(226, 0);                  /* yellow bg, black fg */
+        fbs("*");
+    }
+    if (is_cursor) {
+        /* invert title row first cell as a cursor caret */
+        cup(x + w - 1, y);
+        sgrbgfg(15, 0);
+        fbs(">");
+        cup(x, y);
+        sgrbgfg(15, 0);
+        fbs("<");
+    }
+}
+
+/* Hex mode: every other row of thumbnails is x-shifted by half a
+ * thumb width.  Toggled by 'h' in run_garden; persists session-local. */
+static int hex_mode;
+
+static void garden_render_grid(int cursor, int cols, int rows) {
+    /* Compute thumb size — clip down so 8x8 fits. Reserve at most
+     * 2 rows for header/footer when there's spare height.  In hex
+     * mode the staggered odd row pushes the rightmost thumb half a
+     * width past the regular grid, so 8.5 × thumb_w must fit cols
+     * — pick the floor of `cols * 2 / 17`. */
+    int chrome_top = 0, chrome_bot = 0;
+    int thumb_w = hex_mode ? (cols * 2) / 17 : cols / 8;
+    int thumb_h = rows / 8;
+    if (thumb_w < 6) thumb_w = 6;
+    if (thumb_h < 3) thumb_h = 3;
+
+    if (rows >= 8 * thumb_h + 2) { chrome_top = 1; chrome_bot = 1; }
+
+    /* Optional top chrome */
+    if (chrome_top) {
+        cup(0, 0);
+        sgrbgfg(COL_TITLE_BG, COL_TITLE_FG);
+        fbs(" Garden — interactive evolution");
+        char buf[32];
+        int bn = sapp(buf, 0, "  gen ");
+        bn += utoa((unsigned)g_generation, buf + bn);
+        bn = sapp(buf, bn, "  ");
+        int marks = 0;
+        for (int i = 0; i < 64; i++) if ((g_marked >> i) & 1) marks++;
+        bn += utoa((unsigned)marks, buf + bn);
+        bn = sapp(buf, bn, " marked");
+        buf[bn] = 0;
+        fbw(buf, bn);
+        blanks(cols - 32 - bn);
+    }
+
+    int origin_y = chrome_top ? 1 : 0;
+    /* In hex mode, the unshifted (even) rows still center at the
+     * (cols - 8w)/2 offset; odd rows pick up an extra w/2. */
+    int origin_x = (cols - thumb_w * 8) / 2;
+    if (hex_mode) origin_x -= thumb_w / 4;        /* nudge left so the
+                                                     half-width offset
+                                                     of odd rows still
+                                                     centres visually */
+    if (origin_x < 0) origin_x = 0;
+
+    for (int gy = 0; gy < 8; gy++) {
+        int row_x = origin_x + (hex_mode && (gy & 1) ? thumb_w / 2 : 0);
+        for (int gx = 0; gx < 8; gx++) {
+            int idx = gy * 8 + gx;
+            int marked = (int)((g_marked >> idx) & 1);
+            int is_cursor = (idx == cursor);
+            garden_render_thumb(idx,
+                                row_x + gx * thumb_w,
+                                origin_y + gy * thumb_h,
+                                thumb_w, thumb_h,
+                                is_cursor, marked);
+        }
+    }
+
+    if (chrome_bot) {
+        cup(0, rows - 1);
+        sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+        if (hex_mode) {
+            fbs(" hex · w/e/a/d/z/x move | s select | h grid | "
+                "ENT breed | V view | Q quit");
+            blanks(cols > 70 ? cols - 70 : 0);
+        } else {
+            fbs(" SPC mark | ENT breed | P preview | V view | "
+                "h hex | R random | Q quit");
+            blanks(cols > 70 ? cols - 70 : 0);
+        }
+    }
+}
+
+/* Render the preview screen using whatever's in g_genome and wait
+ * for one keystroke. Caller is responsible for genome bookkeeping;
+ * called both by the in-process fallback (garden_preview) and by
+ * the jailed child (run_preview_genome). */
+static void garden_preview_render(const char *footer) {
+    paint_desktop();
+    chrome("Preview");
+    body_clear();
+    body_at(2, 3, "this is what the suite looks like with this genome.",
+            SCREEN_W - 4);
+    body_at(2, 5, "  notepad word mail sheet paint hex bfc files",
+            SCREEN_W - 4);
+    body_at(2, 6, "  find calc mines ask garden", SCREEN_W - 4);
+    body_at(2, 8, "  Alt+F / F10 opens the menu — try it.",
+            SCREEN_W - 4);
+    body_at(2, 9, "  selected items use the genome's select_bg/fg.",
+            SCREEN_W - 4);
+    body_at(2, 11, "  press any key to return to the garden.",
+            SCREEN_W - 4);
+    /* draw a fake selected menu title to show the SEL colours */
+    cup(0, 1);
+    sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+    fbs(" ");
+    sgrbgfg(COL_SEL_BG, COL_SEL_FG);
+    fbs(" File ");
+    sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+    fbs(" Edit  View  Help");
+    blanks(SCREEN_W - 24);
+    status(footer);
+    fbflush();
+    unsigned char k[8];
+    read_key(k, sizeof k);
+}
+
+/* Encode a 16-byte genome into 32 lowercase hex chars + NUL. */
+static void garden_genome_hex(const struct Genome *g, char *out33) {
+    static const char garden_hx[] = "0123456789abcdef";
+    const unsigned char *b = (const unsigned char *)g;
+    for (int i = 0; i < (int)sizeof *g; i++) {
+        out33[i*2]     = garden_hx[(b[i] >> 4) & 0xf];
+        out33[i*2 + 1] = garden_hx[ b[i]       & 0xf];
+    }
+    out33[32] = 0;
+}
+
+/* Spawn the namespace jail launcher with an arbitrary office9
+ * subcommand.  Used by both garden_preview_jail and garden_view_jail.
+ * Returns 0 on a clean child exit, non-zero if anything broke. */
+static int garden_jail_spawn(const char *subcmd, const char *hex) {
+    char *jargv[] = { "./jail", "./" APP_NAME,
+                      (char *)subcmd, (char *)hex, 0 };
+    long pid = forkk();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        execvee("./jail", jargv, g_envp);
+        qu(127);
+    }
+    int st = 0;
+    wait4_(&st);
+    return (st & 0x7f) ? -1 : 0;
+}
+
+static int garden_preview_jail(int idx) {
+    char hex[33];
+    garden_genome_hex(&g_pop[idx], hex);
+    return garden_jail_spawn("preview-genome", hex);
+}
+
+/* Preview the cursor's genome.  Tries the namespace jail first
+ * (real isolated child paints the screen); if that fails — jail
+ * binary missing, kernel without unprivileged user namespaces, etc.
+ * — falls back to the in-process g_genome swap so the feature still
+ * works on hardened hosts. */
+static void garden_preview(int idx) {
+    if (garden_preview_jail(idx) == 0) return;
+
+    struct Genome saved = g_genome;
+    g_genome = g_pop[idx];
+    garden_preview_render(" PREVIEW · any key returns ");
+    g_genome = saved;
+}
+
+/* V key — drop the user into the suite shell with the cursor's
+ * genome applied, inside a jail.  Files saved during V live inside
+ * the jail dir and vanish on exit, so this is non-destructive. */
+static int garden_view_jail(int idx) {
+    char hex[33];
+    garden_genome_hex(&g_pop[idx], hex);
+    return garden_jail_spawn("view-genome", hex);
+}
+
+static void garden_view(int idx) {
+    if (garden_view_jail(idx) == 0) return;
+    /* Jail unavailable — degrade to the static preview so the user
+     * at least sees the chrome under that genome. */
+    garden_preview(idx);
+}
+
+/* `office7 preview-genome <32-hex>` — the in-jail entry point.
+ * Parses 16 bytes into g_genome and renders the preview screen.
+ * The parent already put the tty in raw mode and we inherit its
+ * fd 0/1/2, so we don't touch tcsetattr; one read for any key,
+ * then exit (the parent regains the terminal automatically). */
+static int garden_hexv(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+static int garden_load_genome_hex(const char *h) {
+    unsigned char *g = (unsigned char *)&g_genome;
+    for (int i = 0; i < (int)sizeof g_genome; i++) {
+        int hi = garden_hexv(h[i*2]);
+        int lo = garden_hexv(h[i*2 + 1]);
+        if (hi < 0 || lo < 0) return -1;
+        g[i] = (unsigned char)((hi << 4) | lo);
+    }
+    return 0;
+}
+
+static int run_preview_genome(int argc, char **argv) {
+    if (argc < 2) return 2;
+    if (garden_load_genome_hex(argv[1]) < 0) return 2;
+    garden_preview_render(" PREVIEW · jailed · any key returns ");
+    return 0;
+}
+
+/* `office9 view-genome <32-hex>` — the in-jail entry point for V.
+ * Loads the genome and drops into run_shell, so the user can type
+ * `notepad`, `sheet`, etc. and see them with the chosen colours.
+ * Pressing Q in the shell tears down the jail and returns to garden. */
+static int run_view_genome(int argc, char **argv) {
+    if (argc < 2) return 2;
+    if (garden_load_genome_hex(argv[1]) < 0) return 2;
+    return run_shell(0, 0);
+}
+
+static int run_garden(int argc, char **argv) {
+    (void)argc; (void)argv;
+    current_ms = &ms_garden;
+
+    if (!garden_load()) garden_init_pop();
+    garden_rng_seed_if_unset();
+
+    term_raw();
+    int cursor = 0;
+    int last_msg_ttl = 0;
+    static char last_msg[64];
+    last_msg[0] = 0;
+
+    while (1) {
+        int cols, rows;
+        garden_term_size(&cols, &rows);
+        cls();
+        garden_render_grid(cursor, cols, rows);
+
+        if (last_msg[0] && last_msg_ttl > 0) {
+            cup(0, rows - 1);
+            sgrbgfg(COL_BAR_BG, 22);
+            fbs(" ");
+            fbs(last_msg);
+            blanks(cols - 1 - slen(last_msg));
+            last_msg_ttl--;
+            if (last_msg_ttl == 0) last_msg[0] = 0;
+        }
+        fbflush();
+
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+
+        int act = -1, ami = menu_activation(k, n);
+        if (ami >= 0) act = menu_run(&ms_garden, ami);
+        if (act == MA_ABOUT)   { show_about("Garden"); continue; }
+        if (act == MA_QUIT)    break;
+        if (act == MA_SAVE)    {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (act == MA_RANDOM)  { garden_init_pop(); continue; }
+        if (act == MA_BREED)   { garden_breed(); continue; }
+        if (act == MA_PREVIEW) { garden_preview(cursor); continue; }
+        if (act == MA_VIEW)    { garden_view(cursor); term_raw(); continue; }
+        if (act == MA_EXPORT) {
+            /* Splice the cursor's gene into a fresh runnable binary
+             * so its chrome reflects this thumb when launched. */
+            char nm[HX_EXPORT_NAME_LEN + 1];
+            hx_make_export_name(nm, gd_export_seq++);
+            int rc = gd_splice_export(nm,
+                                      (const unsigned char *)&g_pop[cursor]);
+            int ml = sapp(last_msg, 0, rc == 0 ? "exported " : "export failed ");
+            if (rc == 0) ml = sapp(last_msg, ml, nm);
+            last_msg[ml] = 0; last_msg_ttl = 1;
+            continue;
+        }
+
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
+            int gx = cursor % 8, gy = cursor / 8;
+            switch (k[2]) {
+            case 'A': if (gy > 0) cursor -= 8; break;
+            case 'B': if (gy < 7) cursor += 8; break;
+            case 'C': if (gx < 7) cursor++;    break;
+            case 'D': if (gx > 0) cursor--;    break;
+            }
+            continue;
+        }
+        if (k[0] == 'h' || k[0] == 'H') { hex_mode = !hex_mode; continue; }
+
+        /* Hex mode rebinds: w/e/a/d/z/x for hex-aware movement,
+         * s = select-self (toggle marked).  Save in hex mode is on
+         * the menu (Alt+F → Save) or via ^S. */
+        if (hex_mode) {
+            char c = k[0];
+            if (c >= 'A' && c <= 'Z') c += 32;
+            if (c == 's') { g_marked ^= (1ULL << cursor); continue; }
+            if (c == 'a' || c == 'd' || c == 'w' || c == 'e' ||
+                c == 'z' || c == 'x') {
+                int gx = cursor % 8, gy = cursor / 8;
+                int odd = gy & 1;
+                int ngx = gx, ngy = gy;
+                switch (c) {
+                case 'a': ngx = gx - 1;                              break;
+                case 'd': ngx = gx + 1;                              break;
+                case 'w': ngy = gy - 1; ngx = gx + (odd ? 0 : -1);   break;
+                case 'e': ngy = gy - 1; ngx = gx + (odd ? 1 : 0);    break;
+                case 'z': ngy = gy + 1; ngx = gx + (odd ? 0 : -1);   break;
+                case 'x': ngy = gy + 1; ngx = gx + (odd ? 1 : 0);    break;
+                }
+                if (ngx >= 0 && ngx < 8 && ngy >= 0 && ngy < 8)
+                    cursor = ngy * 8 + ngx;
+                continue;
+            }
+        }
+
+        if (k[0] == ' ')              { g_marked ^= (1ULL << cursor); continue; }
+        if (k[0] == '\r' || k[0] == '\n') { garden_breed(); continue; }
+        if (k[0] == 'p' || k[0] == 'P') { garden_preview(cursor); continue; }
+        if (k[0] == 'v' || k[0] == 'V') { garden_view(cursor); term_raw(); continue; }
+        if (k[0] == 'r' || k[0] == 'R') { garden_init_pop(); continue; }
+        if (k[0] == 's' || k[0] == 'S') {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'l' || k[0] == 'L') {
+            if (garden_load()) {
+                int ml = sapp(last_msg, 0, "loaded garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'q' || k[0] == 0x11) break;
+        /* 'x' / 'X' export shortcut.  Hex mode catches lowercase 'x'
+         * earlier as SE movement; an export from hex mode either uses
+         * uppercase 'X' (which falls through here) or the Edit→Export
+         * menu (MA_EXPORT). */
+        if (k[0] == 'X' || (k[0] == 'x' && !hex_mode)) {
+            char nm[HX_EXPORT_NAME_LEN + 1];
+            hx_make_export_name(nm, gd_export_seq++);
+            int rc = gd_splice_export(nm,
+                                      (const unsigned char *)&g_pop[cursor]);
+            int ml = sapp(last_msg, 0, rc == 0 ? "exported " : "export failed ");
+            if (rc == 0) ml = sapp(last_msg, ml, nm);
+            last_msg[ml] = 0; last_msg_ttl = 1;
+            continue;
+        }
+    }
+
+    term_cooked();
+    return 0;
+}
+
+
 /* ── hxhnt: class-4 hex-CA hunter ────────────────────────────────────
  *
  * Direct port of isolation/artifacts/oneclick_class4/hunter.c, just
@@ -8838,6 +9429,13 @@ skip_legacy_basename_chain:
     if (scmp(cmd, "prompt")  == 0) return run_prompt (sub_argc, sub_argv);
     if (scmp(cmd, "coder")   == 0) return run_coder  (sub_argc, sub_argv);
     if (scmp(cmd, "soul")    == 0) return run_soul   (sub_argc, sub_argv);
+    if (scmp(cmd, "garden")  == 0) return run_garden (sub_argc, sub_argv);
+    /* Subcommands the jail (./jail) exec's into a fresh officeagent
+     * with the genome hex on argv — `preview-genome <HEX>` paints the
+     * jailed colour scheme and waits for a key, `view-genome <HEX>`
+     * loads colours and drops into the home shell. */
+    if (scmp(cmd, "preview-genome") == 0) return run_preview_genome(sub_argc, sub_argv);
+    if (scmp(cmd, "view-genome")    == 0) return run_view_genome   (sub_argc, sub_argv);
     /* xpg subsumes rpg + hxhnt + lsys. */
     if (scmp(cmd, "xpg")     == 0 || scmp(cmd, "rpg")   == 0 ||
         scmp(cmd, "hxhnt")   == 0 || scmp(cmd, "lsys")  == 0)
