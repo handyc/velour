@@ -5854,6 +5854,30 @@ static int run_xpg(int argc, char **argv) {
             io(0, TCSETS, &rt);
             continue;
         }
+        if (k[0] == 'V') {
+            /* Drop into hxhnt's classic 64×64 live CA viewer for the
+             * current mother ruleset.  'g' kicks off a GA, 'h' a
+             * continuous hunt, '['/']' nudge mutation rate, 'r'
+             * randomises palette, 'd' saves, 'x' splice-exports,
+             * 'q' returns to xpg.  After return, refresh xpg's
+             * caches in case the rule was evolved. */
+            int act = hx_display_seed(hx_seed_genome, hx_seed_pal,
+                                      (unsigned int)time_());
+            if (act == 'g') {
+                unsigned int gseed = (unsigned int)(time_() ^ (long)hx_rand());
+                hx_run_ga(20, 20, gseed);
+            } else if (act == 'h') {
+                hx_run_continuous_hunt();
+            }
+            rpg_palettes_refresh();
+            rpg_genome_live_cache = -1;
+            mset(rpg_cell_done, 0, sizeof rpg_cell_done);
+            rpg_anim_reset();
+            rt.cc[6] = rpg_animating ? 0 : 1;
+            rt.cc[5] = rpg_animating ? 1 : 0;
+            io(0, TCSETS, &rt);
+            continue;
+        }
         if (k[0] == 'k' || k[0] == 'K') {
             rpg_show_anim_settings();
             /* Settings panel set blocking termios; restore whatever
