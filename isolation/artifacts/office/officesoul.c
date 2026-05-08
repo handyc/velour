@@ -589,26 +589,45 @@ static int run_soul(int argc, char **argv) {
         for (int i = 0; i < bn && n < SL - 1; i++) ids[n++] = body[i];
         ids[n++] = SEP;
 
-        cup(2, row + 1);
+        /* Wrap long replies so they don't stomp on the next YOU> line.
+         * Track column + row, indent continuation lines under C64>,
+         * repaint chrome if the response would run off the page. */
+        int resp_row = row + 1;
+        cup(2, resp_row);
         fbs("C64> ");
         fbflush();
+        int col = 7;
+        const int margin = SCREEN_W - 2;
         for (int gen = 0; gen < SL && n < SL; gen++) {
             int tok_id = forward_argmax(ids, n);
             if (tok_id == PAD || tok_id == SEP || tok_id == END) break;
+            int len = VOCAB_LEN_TBL[tok_id];
+            if (col + len > margin) {
+                resp_row++;
+                if (resp_row >= SCREEN_H - 2) {
+                    paint_desktop();
+                    chrome("Soul Chat (25 K parameters)");
+                    body_clear();
+                    status("soul: keep typing — page reset");
+                    resp_row = 12;
+                    fbflush();
+                }
+                cup(4, resp_row);
+                col = 4;
+            }
             decode_print_token(tok_id);
+            col += len;
             fbflush();
             ids[n++] = tok_id;
         }
-        fbs("\n");
         fbflush();
-        row += 2;
+        row = resp_row + 2;
         if (row >= SCREEN_H - 3) {
-            /* Repaint when the page fills. */
             paint_desktop();
             chrome("Soul Chat (25 K parameters)");
             body_clear();
             status("soul: keep typing — page reset");
-            row = 3;
+            row = 12;
             fbflush();
         }
     }

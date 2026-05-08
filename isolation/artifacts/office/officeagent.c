@@ -5745,20 +5745,38 @@ static int run_soul(int argc, char **argv) {
         int bn = sl_encode(line, body, SL_CTX - 2);
         for (int i = 0; i < bn && n < SL_CTX - 1; i++) ids[n++] = body[i];
         ids[n++] = SL_SEP;
-        cup(2, row + 1);
+        /* Track column + row so we can wrap a long reply onto multiple
+         * lines instead of letting the tty's auto-wrap stomp on the
+         * next YOU> prompt.  Continuation lines indent under the C64>
+         * prefix.  When the response would run off the bottom of the
+         * page, repaint the chrome and continue from row 12. */
+        int resp_row = row + 1;
+        cup(2, resp_row);
         fbs("C64> ");
         fbflush();
+        int col = 7;                       /* col after "  C64> " */
+        const int margin = SCREEN_W - 2;   /* don't write past col 78 */
         for (int gen = 0; gen < SL_CTX && n < SL_CTX; gen++) {
             int tok = sl_forward(ids, n);
             if (tok == SL_PAD || tok == SL_SEP || tok == SL_END) break;
+            int len = VOCAB_LEN_TBL[tok];
+            if (col + len > margin) {
+                resp_row++;
+                if (resp_row >= SCREEN_H - 2) {
+                    sl_paint_chat_chrome(11);
+                    resp_row = 12;
+                }
+                cup(4, resp_row);          /* hanging indent under C64> */
+                col = 4;
+            }
             fbw((const char *)(VOCAB_STR_BLOB + VOCAB_OFFSETS[tok]),
                 VOCAB_LEN_TBL[tok]);
+            col += len;
             fbflush();
             ids[n++] = tok;
         }
-        fbs("\n");
         fbflush();
-        row += 2;
+        row = resp_row + 2;                /* one blank line, then YOU> */
         if (row >= SCREEN_H - 3) { sl_paint_chat_chrome(11); row = 11; }
     }
 sl_quit:
