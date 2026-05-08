@@ -4572,58 +4572,93 @@ static int coder_extract_code(const char *src, int sn, char *out, int cap) {
 static int coder_iterate(void) {
     static char prompt_buf[24576];
     int pn = coder_build_prompt(prompt_buf, sizeof prompt_buf);
-    /* Reset ask state to one user message containing the prompt. */
-    ask_n_msgs = 0;
-    ask_buf_use = 0;
-    ask_msg_add(0, prompt_buf, pn);
-    bank_load(BANK_PERSONALITY);
-    /* Helper: when curl / provider fails, fall through to the on-board
-     * soul so the user sees something useful instead of a bare error.
-     * The soul produces chat-style output (not C code), so we only
-     * surface it in the err panel and bail — the previous draft (if
-     * any) stays intact for the next iteration. */
-    #define CODER_SOUL_FALLBACK(prefix) do {                              \
-        int p = sapp(g_coder_err, 0, prefix);                             \
-        if (g_coder_goal_len > 0) {                                       \
-            char _gz[CODER_GOAL_CAP];                                     \
-            int _gl = g_coder_goal_len < CODER_GOAL_CAP - 1                \
-                      ? g_coder_goal_len : CODER_GOAL_CAP - 1;            \
-            mcpy(_gz, g_coder_goal, _gl); _gz[_gl] = 0;                   \
-            char _reply[256];                                             \
-            int _rl = sl_generate(_gz, _reply, sizeof _reply, 16);        \
-            p = sapp(g_coder_err, p, "\n  soul says: ");                  \
-            int _take = _rl;                                              \
-            if (p + _take > CODER_ERR_CAP - 1)                            \
-                _take = CODER_ERR_CAP - 1 - p;                            \
-            mcpy(g_coder_err + p, _reply, _take);                         \
-            p += _take;                                                   \
-        }                                                                 \
-        g_coder_err[p] = 0; g_coder_err_len = p;                          \
-    } while (0)
-
-    if (ask_call_curl() != 0) {
-        CODER_SOUL_FALLBACK("(curl failed — check ask config)");
-        return 1;
-    }
+    /* Free-tier API keys on the upstream alistaitsacle/free-llm-api-keys
+     * README rotate hour-by-hour as old keys hit their quota and new
+     * ones get added.  So a key that worked yesterday almost certainly
+     * doesn't today.  When curl/content fails, grab a fresh key from
+     * the README and retry — up to CODER_RETRY_MAX attempts.  Only
+     * after all retries fail do we fall through to the on-board soul.
+     * On success after a retry, persist the working key to
+     * office_ask.conf so the next iteration starts warm. */
+    #define CODER_RETRY_MAX 3
     static char raw[ASK_RESP_CAP];
-    int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
-    if (fd < 0) {
-        CODER_SOUL_FALLBACK("(no response file)");
-        return 1;
-    }
-    long n = rd(fd, raw, sizeof raw);
-    cl(fd);
-    if (n <= 0) {
-        CODER_SOUL_FALLBACK("(empty response — likely 429 / rate-limited)");
-        return 1;
-    }
     static char content[ASK_BUF_CAP];
-    int cn = ask_extract_content(raw, (int)n, content, sizeof content);
+    int cn = -1;
+    const char *fail_reason = "(curl failed — check ask config)";
+    int succeeded_after_retry = 0;
+    for (int attempt = 0; attempt < CODER_RETRY_MAX; attempt++) {
+        if (attempt > 0) {
+            /* Show progress; the retry message lives in the status bar
+             * until the next coder_paint() after iterate returns. */
+            char st[80]; int sp = 0;
+            sp = sapp(st, sp, "coder: provider rejected — fetching fresh key (try ");
+            sp += utoa((unsigned)(attempt + 1), st + sp);
+            sp = sapp(st, sp, "/");
+            sp += utoa((unsigned)CODER_RETRY_MAX, st + sp);
+            sp = sapp(st, sp, ")…"); st[sp] = 0;
+            status(st); fbflush();
+            ask_fetch_random_key();
+            succeeded_after_retry = 1;
+        }
+        /* Re-build the messages each pass — ask_call_curl mutates the
+         * temp request file, but ask_buf is preserved.  We reset
+         * defensively so a half-finished prior call can't corrupt
+         * the new attempt. */
+        ask_n_msgs = 0;
+        ask_buf_use = 0;
+        ask_msg_add(0, prompt_buf, pn);
+        bank_load(BANK_PERSONALITY);
+        if (ask_call_curl() != 0) {
+            fail_reason = "(curl failed)";
+            continue;
+        }
+        int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
+        if (fd < 0) { fail_reason = "(no response file)"; continue; }
+        long n = rd(fd, raw, sizeof raw);
+        cl(fd);
+        if (n <= 0) {
+            fail_reason = "(empty response — likely 429 / rate-limited)";
+            continue;
+        }
+        cn = ask_extract_content(raw, (int)n, content, sizeof content);
+        if (cn < 0) {
+            fail_reason = "(no 'content' or 'text' field — provider error?)";
+            continue;
+        }
+        /* Got a real response.  If we burned a retry to find a working
+         * key, save it to disk so the next iteration starts here. */
+        if (succeeded_after_retry) ask_save_conf();
+        break;
+    }
+
     if (cn < 0) {
-        CODER_SOUL_FALLBACK("(no 'content' or 'text' field — provider error?)");
+        /* All retries exhausted — fall back to the soul so the user
+         * sees something useful instead of a bare error.  The soul
+         * produces chat-style output (not C code), so we only surface
+         * it in the err panel; the previous draft (if any) stays
+         * intact for the next iteration. */
+        int p = sapp(g_coder_err, 0, fail_reason);
+        p = sapp(g_coder_err, p, " (after ");
+        p += utoa((unsigned)CODER_RETRY_MAX, g_coder_err + p);
+        p = sapp(g_coder_err, p, " retries)");
+        if (g_coder_goal_len > 0) {
+            char gz[CODER_GOAL_CAP];
+            int gl = g_coder_goal_len < CODER_GOAL_CAP - 1
+                     ? g_coder_goal_len : CODER_GOAL_CAP - 1;
+            mcpy(gz, g_coder_goal, gl); gz[gl] = 0;
+            char reply[256];
+            int rl = sl_generate(gz, reply, sizeof reply, 16);
+            p = sapp(g_coder_err, p, "\n  soul says: ");
+            int take = rl;
+            if (p + take > CODER_ERR_CAP - 1) take = CODER_ERR_CAP - 1 - p;
+            mcpy(g_coder_err + p, reply, take);
+            p += take;
+        }
+        g_coder_err[p] = 0;
+        g_coder_err_len = p;
         return 1;
     }
-    #undef CODER_SOUL_FALLBACK
+    #undef CODER_RETRY_MAX
     g_coder_draft_len = coder_extract_code(content, cn,
                                            g_coder_draft, CODER_DRAFT_CAP);
     /* Write source + compile. */
