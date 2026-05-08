@@ -2281,11 +2281,22 @@ static long long feval_atom(int depth) {
     }
     for (int i = 0; i < 16; i++) {
         if (match_func(LOG_OPS[i].name)) {
-            long long a = feval_expr(depth);
-            fskip_ws(); if (*fp == ',') fp++;
-            long long b = feval_expr(depth);
+            /* n-ary, left-folded: OP(a, b, c, …) = OP(OP(OP(a, b), c), …)
+             * 2-arg invocations are unchanged.  3+ args chain through
+             * the same truth table, e.g. AND(A1, B1, C1) is a 3-way
+             * conjunction; XOR over 4 args is parity; for the
+             * non-associative ops (NIA, NIB, IMP, CIMP) left-fold is
+             * the consistent reading. */
+            long long acc = feval_expr(depth);
+            while (1) {
+                fskip_ws();
+                if (*fp != ',') break;
+                fp++;
+                long long b = feval_expr(depth);
+                acc = binlog(acc, b, LOG_OPS[i].tt);
+            }
             fskip_ws(); if (*fp == ')') fp++;
-            return binlog(a, b, LOG_OPS[i].tt);
+            return acc;
         }
     }
     int row, col;
