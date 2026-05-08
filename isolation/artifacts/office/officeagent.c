@@ -1714,6 +1714,13 @@ static int run_coder(int, char**);
 static int run_soul(int, char**);
 static int run_xpg(int, char**);
 
+/* Soul helpers — defined alongside run_soul further down.  Forward-
+ * declared here so the coder can call sl_generate as a curl
+ * fallback and sl_save_test to auto-promote successful goals into
+ * the soul's evolution test set. */
+static int sl_generate(const char *text, char *out, int out_cap, int max_new);
+static void sl_save_test(const char *prompt, const char *expected);
+
 /* Per-instance identity that survives PID-namespace flattening.
  * jail.c injects `--instance=<8hex>` into argv before execve so this
  * office process can identify itself even when getpid() always returns
@@ -4570,38 +4577,53 @@ static int coder_iterate(void) {
     ask_buf_use = 0;
     ask_msg_add(0, prompt_buf, pn);
     bank_load(BANK_PERSONALITY);
+    /* Helper: when curl / provider fails, fall through to the on-board
+     * soul so the user sees something useful instead of a bare error.
+     * The soul produces chat-style output (not C code), so we only
+     * surface it in the err panel and bail — the previous draft (if
+     * any) stays intact for the next iteration. */
+    #define CODER_SOUL_FALLBACK(prefix) do {                              \
+        int p = sapp(g_coder_err, 0, prefix);                             \
+        if (g_coder_goal_len > 0) {                                       \
+            char _gz[CODER_GOAL_CAP];                                     \
+            int _gl = g_coder_goal_len < CODER_GOAL_CAP - 1                \
+                      ? g_coder_goal_len : CODER_GOAL_CAP - 1;            \
+            mcpy(_gz, g_coder_goal, _gl); _gz[_gl] = 0;                   \
+            char _reply[256];                                             \
+            int _rl = sl_generate(_gz, _reply, sizeof _reply, 16);        \
+            p = sapp(g_coder_err, p, "\n  soul says: ");                  \
+            int _take = _rl;                                              \
+            if (p + _take > CODER_ERR_CAP - 1)                            \
+                _take = CODER_ERR_CAP - 1 - p;                            \
+            mcpy(g_coder_err + p, _reply, _take);                         \
+            p += _take;                                                   \
+        }                                                                 \
+        g_coder_err[p] = 0; g_coder_err_len = p;                          \
+    } while (0)
+
     if (ask_call_curl() != 0) {
-        int p = sapp(g_coder_err, 0, "(curl failed — check ask config)");
-        g_coder_err[p] = 0; g_coder_err_len = p;
+        CODER_SOUL_FALLBACK("(curl failed — check ask config)");
         return 1;
     }
     static char raw[ASK_RESP_CAP];
     int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
     if (fd < 0) {
-        int p = sapp(g_coder_err, 0, "(no response file)");
-        g_coder_err[p] = 0; g_coder_err_len = p;
+        CODER_SOUL_FALLBACK("(no response file)");
         return 1;
     }
     long n = rd(fd, raw, sizeof raw);
     cl(fd);
     if (n <= 0) {
-        int p = sapp(g_coder_err, 0, "(empty response)");
-        g_coder_err[p] = 0; g_coder_err_len = p;
+        CODER_SOUL_FALLBACK("(empty response — likely 429 / rate-limited)");
         return 1;
     }
     static char content[ASK_BUF_CAP];
     int cn = ask_extract_content(raw, (int)n, content, sizeof content);
     if (cn < 0) {
-        int p = sapp(g_coder_err, 0,
-                     "(no 'content' or 'text' field — provider error?)");
-        /* Stuff a chunk of the raw response into err so the user sees
-         * what came back; helps debug API key / quota / 429 issues. */
-        int rn = (int)n; if (rn > CODER_ERR_CAP - p - 4) rn = CODER_ERR_CAP - p - 4;
-        g_coder_err[p++] = '\n';
-        mcpy(g_coder_err + p, raw, rn); p += rn;
-        g_coder_err[p] = 0; g_coder_err_len = p;
+        CODER_SOUL_FALLBACK("(no 'content' or 'text' field — provider error?)");
         return 1;
     }
+    #undef CODER_SOUL_FALLBACK
     g_coder_draft_len = coder_extract_code(content, cn,
                                            g_coder_draft, CODER_DRAFT_CAP);
     /* Write source + compile. */
@@ -4622,10 +4644,50 @@ static int coder_iterate(void) {
         g_coder_err[g_coder_err_len] = 0;
     }
     if (comp_rc != 0) return 1;
+    /* Auto-promote: when an iteration meets the target, insert a
+     * (goal, keyword) row into coder.db with bank=BANK_SOUL_TESTS so
+     * the soul's GA picks it up.  Keyword = the longest alphabetic
+     * word ≥ 4 chars from the goal (e.g. "fizzbuzz" from "write a
+     * fizzbuzz program" → soul learns to mention 'fizzbuzz' on that
+     * prompt).  Skipped if no usable word, so single-letter goals
+     * don't pollute the test set. */
+    #define CODER_PROMOTE_SUCCESS() do {                                    \
+        if (g_coder_goal_len > 0) {                                         \
+            int _bs = -1, _bl = 0;                                          \
+            int _i = 0;                                                     \
+            while (_i < g_coder_goal_len) {                                 \
+                while (_i < g_coder_goal_len && !((g_coder_goal[_i]>='a'&&g_coder_goal[_i]<='z')||(g_coder_goal[_i]>='A'&&g_coder_goal[_i]<='Z'))) _i++; \
+                int _s = _i;                                                \
+                while (_i < g_coder_goal_len && ((g_coder_goal[_i]>='a'&&g_coder_goal[_i]<='z')||(g_coder_goal[_i]>='A'&&g_coder_goal[_i]<='Z'))) _i++; \
+                int _len = _i - _s;                                         \
+                if (_len >= 4 && _len > _bl) { _bs = _s; _bl = _len; }      \
+            }                                                               \
+            if (_bs >= 0) {                                                 \
+                char _goal[80], _exp[24];                                   \
+                int _gl = g_coder_goal_len < 79 ? g_coder_goal_len : 79;    \
+                mcpy(_goal, g_coder_goal, _gl); _goal[_gl] = 0;             \
+                int _el = _bl < 23 ? _bl : 23;                              \
+                for (int _k = 0; _k < _el; _k++) {                          \
+                    char _c = g_coder_goal[_bs + _k];                       \
+                    if (_c >= 'A' && _c <= 'Z') _c += 32;                   \
+                    _exp[_k] = _c;                                          \
+                }                                                           \
+                _exp[_el] = 0;                                              \
+                tdb_open();                                                 \
+                sl_save_test(_goal, _exp);                                  \
+                tdb_close();                                                \
+            }                                                               \
+        }                                                                   \
+    } while (0)
+
     /* good_enough success on compile. */
-    if (g_coder_target == 0) return 0;
+    if (g_coder_target == 0) { CODER_PROMOTE_SUCCESS(); return 0; }
     /* clean: warnings show up as non-empty err even on clean exit. */
-    if (g_coder_target == 1) return g_coder_err_len > 0 ? 1 : 0;
+    if (g_coder_target == 1) {
+        if (g_coder_err_len > 0) return 1;
+        CODER_PROMOTE_SUCCESS();
+        return 0;
+    }
     /* perfect: also try to run. */
     int run_rc = coder_runtest();
     if (run_rc != 0) {
@@ -4640,6 +4702,8 @@ static int coder_iterate(void) {
         }
         return 1;
     }
+    CODER_PROMOTE_SUCCESS();
+    #undef CODER_PROMOTE_SUCCESS
     return 0;
 }
 
