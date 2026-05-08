@@ -4922,6 +4922,27 @@ static int coder_compose(void) {
     p += take;
     p = sapp(prompt, p, "\n");
 
+    /* Free-tier aggregators (gpt4free / pekpik / etc.) commonly cap
+     * at 8-16 KB total request size even when the underlying model
+     * supports 128 K+.  Bail early at ~12 KB so we don't burn a
+     * retry slot on a request that's guaranteed to fail.  Gemini
+     * direct keys have a 1 M-token window — if you're using one,
+     * trim coder_project.txt by hand or comment out this guard. */
+    #define CODER_COMPOSE_WARN_BYTES 12000
+    if (p > CODER_COMPOSE_WARN_BYTES) {
+        int x = sapp(g_coder_err, 0, "compose aborted — prompt is ");
+        x += utoa((unsigned)p, g_coder_err + x);
+        x = sapp(g_coder_err, x, " B (>");
+        x += utoa((unsigned)CODER_COMPOSE_WARN_BYTES, g_coder_err + x);
+        x = sapp(g_coder_err, x, " B free-tier cap).\n  trim "
+                                  CODER_PROJ_FILE
+                                  " or use a Gemini-direct key.");
+        g_coder_err[x] = 0;
+        g_coder_err_len = x;
+        return -3;
+    }
+    #undef CODER_COMPOSE_WARN_BYTES
+
     ask_n_msgs = 0;
     ask_buf_use = 0;
     ask_msg_add(0, prompt, p);
@@ -5470,6 +5491,7 @@ static void coder_mission(void) {
     if (comp_rc == 0)      sp = sapp(st, sp, " · merged clean");
     else if (comp_rc == 1) sp = sapp(st, sp, " · merged with warnings");
     else if (comp_rc == -2) sp = sapp(st, sp, " · compose failed");
+    else if (comp_rc == -3) sp = sapp(st, sp, " · prompt too big to merge");
     else                    sp = sapp(st, sp, " · no merge");
     if (exit_code >= 0) {
         sp = sapp(st, sp, " · run exit=");
@@ -5556,6 +5578,8 @@ static int run_coder(int argc, char **argv) {
                 coder_paint("no snippets yet — press p to push first");
             } else if (rc == -2) {
                 coder_paint("compose: LLM call failed (see [compile output])");
+            } else if (rc == -3) {
+                coder_paint("compose: prompt too large for free-tier cap (see output)");
             } else if (rc == 0) {
                 coder_paint("✓ composed merged program (cc clean)");
             } else {
