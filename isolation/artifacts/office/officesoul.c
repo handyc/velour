@@ -59,21 +59,24 @@ static long sys4(long n, long a, long b, long c, long d) {
 #define SYS_write      1
 #define SYS_open       2
 #define SYS_close      3
+#define SYS_lseek      8
 #define SYS_ioctl     16
 #define SYS_chmod     90
 #define SYS_exit_group 231
 
 #define O_RDONLY 0
 #define O_WRONLY 1
+#define O_RDWR   2
 #define O_CREAT  64
 #define O_TRUNC  512
 
-#define rd(f, p, n)  sys3(SYS_read,  f, (long)(p), (long)(n))
-#define wr(f, p, n)  sys3(SYS_write, f, (long)(p), (long)(n))
-#define io(f, r, p)  sys3(SYS_ioctl, f, (long)(r), (long)(p))
-#define op(p, fl, m) sys3(SYS_open,  (long)(p), (long)(fl), (long)(m))
-#define cl(f)        sys3(SYS_close, f, 0, 0)
-#define qu(c)        sys3(SYS_exit_group, (long)(c), 0, 0)
+#define rd(f, p, n)     sys3(SYS_read,  f, (long)(p), (long)(n))
+#define wr(f, p, n)     sys3(SYS_write, f, (long)(p), (long)(n))
+#define io(f, r, p)     sys3(SYS_ioctl, f, (long)(r), (long)(p))
+#define op(p, fl, m)    sys3(SYS_open,  (long)(p), (long)(fl), (long)(m))
+#define cl(f)           sys3(SYS_close, f, 0, 0)
+#define lseek_(f, o, w) sys3(SYS_lseek, f, (long)(o), (long)(w))
+#define qu(c)           sys3(SYS_exit_group, (long)(c), 0, 0)
 
 
 /* ── string + memory helpers (no libc) ─────────────────── */
@@ -86,6 +89,11 @@ static void *mcpy(void *d, const void *s, size_t n) {
     char *dd = (char *)d;
     const char *ss = (const char *)s;
     while (n--) *dd++ = *ss++;
+    return d;
+}
+static void *mset(void *d, int v, size_t n) {
+    unsigned char *dd = (unsigned char *)d;
+    while (n--) *dd++ = (unsigned char)v;
     return d;
 }
 static int utoa(unsigned u, char *out) {
@@ -668,6 +676,203 @@ static int save_evolved(const char *out_path) {
 }
 
 
+/* ── tdb: tiny single-file B-tree DB ───────────────────────────────
+ *
+ * Ported verbatim from officeagent's TinyDB port (which itself
+ * comes from Penge666/TinyDB).  Single-file pager + B-tree, v1
+ * has one root leaf and no splitting; when the leaf fills, the
+ * oldest row is evicted.  Each row carries a 4-byte bank tag, a
+ * 32-bit timestamp, a 64-bit token-hash bitmap, and a 224-byte
+ * body — enough for a (prompt, reply) pair plus a small
+ * approval/feedback marker.
+ *
+ * The DB lives at ./soul.db in the cwd the binary is launched
+ * from, so a copy of officesoul carries its own conversation log
+ * in a file alongside it.  v1 stores only one bank (conversation
+ * log); future banks could carry user-flagged training tests,
+ * evolved test corpora, etc. */
+
+#define TDB_PAGE_SIZE         4096
+#define TDB_MAX_PAGES         8
+#define TDB_NODE_TYPE_OFFSET  0
+#define TDB_IS_ROOT_OFFSET    1
+#define TDB_PARENT_OFFSET     2
+#define TDB_HEADER_COMMON     6
+#define TDB_NUM_CELLS_OFFSET  TDB_HEADER_COMMON
+#define TDB_HEADER_LEAF       (TDB_HEADER_COMMON + 4)
+
+#define TDB_KEY_SIZE          4
+#define TDB_BANK_OFFSET       0
+#define TDB_PAD_OFFSET        1
+#define TDB_TIMESTAMP_OFFSET  4
+#define TDB_TAGBITS_OFFSET    8
+#define TDB_BODY_OFFSET       16
+#define TDB_BODY_SIZE         224
+#define TDB_ROW_SIZE          240
+#define TDB_CELL_SIZE         (TDB_KEY_SIZE + TDB_ROW_SIZE)
+#define TDB_MAX_CELLS         ((TDB_PAGE_SIZE - TDB_HEADER_LEAF) / TDB_CELL_SIZE)
+
+#define TDB_BANK_CONVO   0
+#define TDB_BANK_FLAGGED 1
+#define TDB_BANK_NOTES   2
+#define TDB_BANK_FREE    3
+
+typedef struct {
+    unsigned int  bank;
+    unsigned int  timestamp;
+    unsigned long long tag_bitmap;
+    int           body_len;
+    char          body[TDB_BODY_SIZE];
+} TdbRow;
+
+static int            g_tdb_fd = -1;
+static unsigned int   g_tdb_num_pages;
+static unsigned int   g_tdb_next_id;
+static unsigned char  g_tdb_pages[TDB_MAX_PAGES][TDB_PAGE_SIZE];
+static unsigned char  g_tdb_loaded[TDB_MAX_PAGES];
+static unsigned char  g_tdb_dirty [TDB_MAX_PAGES];
+
+static unsigned int tdb_load_u32(const unsigned char *p) {
+    return (unsigned int)p[0] | ((unsigned int)p[1] << 8) |
+           ((unsigned int)p[2] << 16) | ((unsigned int)p[3] << 24);
+}
+static void tdb_store_u32(unsigned char *p, unsigned int v) {
+    p[0] = (unsigned char)(v & 0xff);
+    p[1] = (unsigned char)((v >> 8) & 0xff);
+    p[2] = (unsigned char)((v >> 16) & 0xff);
+    p[3] = (unsigned char)((v >> 24) & 0xff);
+}
+static unsigned long long tdb_load_u64(const unsigned char *p) {
+    unsigned long long v = 0;
+    for (int i = 0; i < 8; i++) v |= ((unsigned long long)p[i]) << (i * 8);
+    return v;
+}
+static void tdb_store_u64(unsigned char *p, unsigned long long v) {
+    for (int i = 0; i < 8; i++) p[i] = (unsigned char)((v >> (i * 8)) & 0xff);
+}
+
+static unsigned char *tdb_get_page(unsigned int page_num) {
+    if (page_num >= TDB_MAX_PAGES) return 0;
+    if (g_tdb_loaded[page_num]) return g_tdb_pages[page_num];
+    mset(g_tdb_pages[page_num], 0, TDB_PAGE_SIZE);
+    if (g_tdb_fd >= 0 && page_num < g_tdb_num_pages) {
+        lseek_(g_tdb_fd, (long)page_num * TDB_PAGE_SIZE, 0);
+        rd(g_tdb_fd, g_tdb_pages[page_num], TDB_PAGE_SIZE);
+    } else if (page_num == 0) {
+        g_tdb_pages[0][TDB_NODE_TYPE_OFFSET] = 1;
+        g_tdb_pages[0][TDB_IS_ROOT_OFFSET] = 1;
+        tdb_store_u32(g_tdb_pages[0] + TDB_NUM_CELLS_OFFSET, 0);
+    }
+    g_tdb_loaded[page_num] = 1;
+    return g_tdb_pages[page_num];
+}
+
+static unsigned char *tdb_leaf_cell(unsigned char *node, unsigned int i) {
+    return node + TDB_HEADER_LEAF + i * TDB_CELL_SIZE;
+}
+static unsigned int tdb_leaf_num_cells(unsigned char *node) {
+    return tdb_load_u32(node + TDB_NUM_CELLS_OFFSET);
+}
+static void tdb_leaf_set_num_cells(unsigned char *node, unsigned int n) {
+    tdb_store_u32(node + TDB_NUM_CELLS_OFFSET, n);
+}
+
+static void tdb_open(void) {
+    if (g_tdb_fd >= 0) return;
+    int fd = (int)op("soul.db", O_RDWR | O_CREAT, 0644);
+    if (fd < 0) fd = (int)op("soul.db", O_RDONLY, 0);
+    g_tdb_fd = fd;
+    g_tdb_num_pages = 0;
+    g_tdb_next_id = 1;
+    for (int i = 0; i < TDB_MAX_PAGES; i++) {
+        g_tdb_loaded[i] = 0; g_tdb_dirty[i] = 0;
+    }
+    if (fd >= 0) {
+        long len = lseek_(fd, 0, 2);
+        lseek_(fd, 0, 0);
+        if (len > 0) g_tdb_num_pages = (unsigned int)(len / TDB_PAGE_SIZE);
+        if (g_tdb_num_pages > TDB_MAX_PAGES) g_tdb_num_pages = TDB_MAX_PAGES;
+    }
+    unsigned char *root = tdb_get_page(0);
+    if (g_tdb_num_pages == 0) {
+        g_tdb_num_pages = 1;
+        g_tdb_dirty[0] = 1;
+    }
+    unsigned int n = tdb_leaf_num_cells(root);
+    if (n > 0) {
+        unsigned int last = tdb_load_u32(tdb_leaf_cell(root, n - 1));
+        if (last >= g_tdb_next_id) g_tdb_next_id = last + 1;
+    }
+}
+
+static void tdb_close(void) {
+    if (g_tdb_fd < 0) return;
+    for (unsigned int p = 0; p < g_tdb_num_pages && p < TDB_MAX_PAGES; p++) {
+        if (!g_tdb_loaded[p] || !g_tdb_dirty[p]) continue;
+        lseek_(g_tdb_fd, (long)p * TDB_PAGE_SIZE, 0);
+        wr(g_tdb_fd, g_tdb_pages[p], TDB_PAGE_SIZE);
+        g_tdb_dirty[p] = 0;
+    }
+    cl(g_tdb_fd);
+    g_tdb_fd = -1;
+}
+
+static int tdb_insert(const TdbRow *row) {
+    tdb_open();
+    unsigned char *node = tdb_get_page(0);
+    unsigned int n = tdb_leaf_num_cells(node);
+    if (n >= TDB_MAX_CELLS) {
+        for (unsigned int i = 1; i < n; i++) {
+            mcpy((char *)tdb_leaf_cell(node, i - 1),
+                 (char *)tdb_leaf_cell(node, i), TDB_CELL_SIZE);
+        }
+        n--;
+        tdb_leaf_set_num_cells(node, n);
+    }
+    unsigned int key = g_tdb_next_id++;
+    unsigned char *cell = tdb_leaf_cell(node, n);
+    tdb_store_u32(cell, key);
+    unsigned char *body = cell + TDB_KEY_SIZE;
+    body[TDB_BANK_OFFSET] = (unsigned char)row->bank;
+    body[TDB_PAD_OFFSET]   = 0;
+    body[TDB_PAD_OFFSET+1] = 0;
+    body[TDB_PAD_OFFSET+2] = 0;
+    tdb_store_u32(body + TDB_TIMESTAMP_OFFSET, row->timestamp);
+    tdb_store_u64(body + TDB_TAGBITS_OFFSET,   row->tag_bitmap);
+    int blen = row->body_len;
+    if (blen > TDB_BODY_SIZE) blen = TDB_BODY_SIZE;
+    if (blen < 0) blen = 0;
+    mcpy((char *)body + TDB_BODY_OFFSET, row->body, blen);
+    if (blen < TDB_BODY_SIZE)
+        mset(body + TDB_BODY_OFFSET + blen, 0, TDB_BODY_SIZE - blen);
+    tdb_leaf_set_num_cells(node, n + 1);
+    g_tdb_dirty[0] = 1;
+    return (int)key;
+}
+
+static int tdb_read(unsigned int idx, TdbRow *out) {
+    tdb_open();
+    unsigned char *node = tdb_get_page(0);
+    unsigned int n = tdb_leaf_num_cells(node);
+    if (idx >= n) return -1;
+    unsigned char *cell = tdb_leaf_cell(node, idx);
+    unsigned char *body = cell + TDB_KEY_SIZE;
+    out->bank      = body[TDB_BANK_OFFSET];
+    out->timestamp = tdb_load_u32(body + TDB_TIMESTAMP_OFFSET);
+    out->tag_bitmap= tdb_load_u64(body + TDB_TAGBITS_OFFSET);
+    int blen = TDB_BODY_SIZE;
+    while (blen > 0 && body[TDB_BODY_OFFSET + blen - 1] == 0) blen--;
+    out->body_len = blen;
+    mcpy(out->body, (char *)body + TDB_BODY_OFFSET, blen);
+    return 0;
+}
+
+static unsigned int tdb_count(void) {
+    tdb_open();
+    return tdb_leaf_num_cells(tdb_get_page(0));
+}
+
+
 /* ── soul app ──────────────────────────────────────────── */
 static int run_soul(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -869,6 +1074,40 @@ static int run_soul(int argc, char **argv) {
                 fbflush();
                 handled = 1;
                 row = 11;
+            } else if (scmp(line, ":log") == 0) {
+                paint_desktop();
+                chrome("Soul Chat — conversation log");
+                body_clear();
+                unsigned int total = tdb_count();
+                int r = 3;
+                int show = total > 18 ? 18 : (int)total;
+                int start = (int)total - show;
+                for (int i = 0; i < show && r < SCREEN_H - 2; i++) {
+                    TdbRow row__;
+                    if (tdb_read((unsigned int)(start + i), &row__) < 0) break;
+                    char preview[256];
+                    int pp = 0;
+                    int max = row__.body_len < SCREEN_W - 6 ? row__.body_len : SCREEN_W - 6;
+                    for (int k = 0; k < max && pp < (int)sizeof preview - 1; k++) {
+                        char c = row__.body[k];
+                        preview[pp++] = (c == '\t') ? ' ' : (c == '\n' ? ' ' : c);
+                    }
+                    preview[pp] = 0;
+                    body_at(2, r++, preview, SCREEN_W - 4);
+                }
+                {
+                    char st[80]; int sp = 0;
+                    sp = sapp(st, sp, " ");
+                    char nb[12]; int nn = utoa(total, nb); for (int k = 0; k < nn; k++) st[sp++] = nb[k];
+                    sp = sapp(st, sp, " rows in soul.db (showing last ");
+                    nn = utoa((unsigned)show, nb); for (int k = 0; k < nn; k++) st[sp++] = nb[k];
+                    sp = sapp(st, sp, ") · 16-row leaf, FIFO eviction ");
+                    st[sp] = 0;
+                    status(st);
+                }
+                fbflush();
+                handled = 1;
+                row = 11;
             } else if (scmp(line, ":help") == 0 || scmp(line, ":?") == 0) {
                 paint_desktop();
                 chrome("Soul Chat (25 K parameters)");
@@ -879,9 +1118,10 @@ static int run_soul(int argc, char **argv) {
                 body_at(4, 7, ":j / :project       edit project bank",     SCREEN_W - 6);
                 body_at(4, 8, ":l / :longterm      edit longterm bank",    SCREEN_W - 6);
                 body_at(4, 9, ":show / :banks      preview all four",       SCREEN_W - 6);
-                body_at(4, 10, ":save               write ./officesoul.evolved", SCREEN_W - 6);
-                body_at(4, 11, ":help               show this",             SCREEN_W - 6);
-                body_at(4, 12, "q                   quit",                  SCREEN_W - 6);
+                body_at(4, 10, ":log                last 18 rows from soul.db", SCREEN_W - 6);
+                body_at(4, 11, ":save               write ./officesoul.evolved", SCREEN_W - 6);
+                body_at(4, 12, ":help               show this",             SCREEN_W - 6);
+                body_at(4, 13, "q                   quit",                  SCREEN_W - 6);
                 fbflush();
                 handled = 1;
                 row = 14;
@@ -906,6 +1146,12 @@ static int run_soul(int argc, char **argv) {
         fbflush();
         int col = 7;
         const int margin = SCREEN_W - 2;
+        /* Mirror the generated tokens into a small buffer so the
+         * conversation log can store the reply alongside the
+         * prompt.  Capped at half the row body so prompt + reply
+         * both fit inside one TDB row. */
+        char reply_buf[112];
+        int reply_len = 0;
         for (int gen = 0; gen < SL && n < SL; gen++) {
             int tok_id = forward_argmax(ids, n);
             if (tok_id == PAD || tok_id == SEP || tok_id == END) break;
@@ -924,11 +1170,38 @@ static int run_soul(int argc, char **argv) {
                 col = 4;
             }
             decode_print_token(tok_id);
+            const unsigned char *tstr = VOCAB_STR_BLOB + VOCAB_OFFSETS[tok_id];
+            int tlen = VOCAB_LEN_TBL[tok_id];
+            if (reply_len + tlen < (int)sizeof reply_buf - 1) {
+                for (int k = 0; k < tlen; k++)
+                    reply_buf[reply_len++] = (char)tstr[k];
+            }
             col += len;
             fbflush();
             ids[n++] = tok_id;
         }
         fbflush();
+        reply_buf[reply_len] = 0;
+
+        /* Log the (prompt, reply) pair into soul.db so future runs
+         * (or copies of this binary) can review the conversation
+         * via `:log`.  Body layout: "prompt\treply" — tab-separated,
+         * up to TDB_BODY_SIZE (224 B). */
+        {
+            TdbRow row_;
+            mset(&row_, 0, sizeof row_);
+            row_.bank = TDB_BANK_CONVO;
+            row_.timestamp = 0;
+            row_.tag_bitmap = 0;
+            int bp = 0;
+            int plen = li < 110 ? li : 110;
+            for (int k = 0; k < plen; k++) row_.body[bp++] = line[k];
+            if (bp < TDB_BODY_SIZE - 2) row_.body[bp++] = '\t';
+            int rlen = reply_len < (TDB_BODY_SIZE - bp) ? reply_len : (TDB_BODY_SIZE - bp);
+            for (int k = 0; k < rlen; k++) row_.body[bp++] = reply_buf[k];
+            row_.body_len = bp;
+            tdb_insert(&row_);
+        }
         row = resp_row + 2;
         if (row >= SCREEN_H - 3) {
             paint_desktop();
@@ -940,6 +1213,10 @@ static int run_soul(int argc, char **argv) {
         }
     }
 done:
+    /* Flush dirty pages back to soul.db so the conversation log
+     * survives the next launch (and any future copy of this
+     * binary's cwd-sibling soul.db). */
+    tdb_close();
     paint_desktop();
     chrome("Soul Chat");
     body_clear();
