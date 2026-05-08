@@ -3823,6 +3823,77 @@ static void ask_settings_modal(void) {
     }
 }
 
+/* Call the LLM up to ASK_RETRY_MAX times.  On every miss (curl
+ * failure, empty body, missing content/text, provider error JSON)
+ * fetch a fresh random key from the upstream README and try again —
+ * the same auto-retry loop coder uses, so an expired/rate-limited
+ * key in office_ask.conf doesn't ground a chat.  On success after
+ * at least one retry, ask_save_conf() persists the working key.
+ * Returns extracted content length, or -1 with fail_reason filled. */
+static int ask_send_retrying(char *content_out, int content_cap,
+                             char *fail_reason_out, int fr_cap) {
+    #define ASK_RETRY_MAX 3
+    static char resp[ASK_RESP_CAP];
+    int succeeded_after_retry = 0;
+    fail_reason_out[0] = 0;
+    for (int attempt = 0; attempt < ASK_RETRY_MAX; attempt++) {
+        if (attempt > 0) {
+            char st[96]; int sp = 0;
+            sp = sapp(st, sp, "ask: provider rejected — fresh key (try ");
+            sp += utoa((unsigned)(attempt + 1), st + sp);
+            sp = sapp(st, sp, "/");
+            sp += utoa((unsigned)ASK_RETRY_MAX, st + sp);
+            sp = sapp(st, sp, ")"); st[sp] = 0;
+            status(st); fbflush();
+            ask_fetch_random_key();
+            succeeded_after_retry = 1;
+        }
+        int rc = ask_call_curl();
+        if (rc < 0) {
+            int p = sapp(fail_reason_out, 0, "curl failed");
+            fail_reason_out[p < fr_cap - 1 ? p : fr_cap - 1] = 0;
+            continue;
+        }
+        int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
+        if (fd < 0) {
+            int p = sapp(fail_reason_out, 0, "no response file");
+            fail_reason_out[p < fr_cap - 1 ? p : fr_cap - 1] = 0;
+            continue;
+        }
+        int rn = (int)rd(fd, resp, sizeof resp - 1);
+        cl(fd);
+        if (rn <= 0) {
+            int p = sapp(fail_reason_out, 0,
+                         "empty response — likely 429 / rate-limited");
+            fail_reason_out[p < fr_cap - 1 ? p : fr_cap - 1] = 0;
+            continue;
+        }
+        resp[rn] = 0;
+        int cn = ask_extract_content(resp, rn, content_out, content_cap);
+        if (cn < 0) {
+            char emsg[256];
+            int en = ask_extract_error(resp, rn, emsg, sizeof emsg);
+            int p;
+            if (en > 0) {
+                p = sapp(fail_reason_out, 0, "api: ");
+                int take = en;
+                if (p + take > fr_cap - 1) take = fr_cap - 1 - p;
+                mcpy(fail_reason_out + p, emsg, take);
+                p += take;
+            } else {
+                p = sapp(fail_reason_out, 0, "no content/text in response");
+            }
+            if (p > fr_cap - 1) p = fr_cap - 1;
+            fail_reason_out[p] = 0;
+            continue;
+        }
+        if (succeeded_after_retry) ask_save_conf();
+        return cn;
+    }
+    #undef ASK_RETRY_MAX
+    return -1;
+}
+
 static int run_ask(int argc, char **argv) {
     (void)argc; (void)argv;
     current_ms = &ms_ask;
@@ -3917,35 +3988,18 @@ static int run_ask(int argc, char **argv) {
             status("syncing personality ...");
             fbflush();
 
-            int rc = ask_call_curl();
-            static char resp[ASK_RESP_CAP];
-            int rn = -1;
-            int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
-            if (fd >= 0) {
-                rn = (int)rd(fd, resp, sizeof resp - 1);
-                cl(fd);
-            }
-            if (rc < 0 || rn < 0) {
-                ask_n_msgs = ck_n; ask_buf_use = ck_use;
-                int el = sapp(errmsg, 0, "sync failed — curl/network");
-                errmsg[el] = 0;
-                continue;
-            }
-            resp[rn] = 0;
             static char content[ASK_BUF_CAP];
-            int cn = ask_extract_content(resp, rn, content, sizeof content);
+            char fail_reason[160];
+            int cn = ask_send_retrying(content, sizeof content,
+                                       fail_reason, sizeof fail_reason);
             if (cn < 0) {
                 ask_n_msgs = ck_n; ask_buf_use = ck_use;
-                static char emsg[256];
-                int en = ask_extract_error(resp, rn, emsg, sizeof emsg);
                 int p = sapp(errmsg, 0, "sync failed: ");
-                if (en > 0) {
-                    for (int i = 0; i < en && p < (int)sizeof errmsg - 1; i++)
-                        errmsg[p++] = emsg[i];
-                } else {
-                    p = sapp(errmsg, p, "no content in response");
-                }
-                errmsg[p] = 0;
+                int take = (int)slen(fail_reason);
+                if (p + take > (int)sizeof errmsg - 1)
+                    take = sizeof errmsg - 1 - p;
+                mcpy(errmsg + p, fail_reason, take);
+                errmsg[p + take] = 0;
                 continue;
             }
             ask_msg_add2(1, content, cn, 1);
@@ -3984,38 +4038,16 @@ static int run_ask(int argc, char **argv) {
             status("sending ...");
             fbflush();
 
-            int rc = ask_call_curl();
-
-            static char resp[ASK_RESP_CAP];
-            int rn = -1;
-            int fd = (int)op(ASK_RESP_FILE, O_RDONLY, 0);
-            if (fd >= 0) {
-                rn = (int)rd(fd, resp, sizeof resp - 1);
-                cl(fd);
-            }
-            if (rc < 0 || rn < 0) {
-                int el = sapp(errmsg, 0,
-                              "curl failed — install curl or check network");
-                errmsg[el] = 0;
+            static char content[ASK_BUF_CAP];
+            char fail_reason[160];
+            int cn = ask_send_retrying(content, sizeof content,
+                                       fail_reason, sizeof fail_reason);
+            if (cn >= 0) {
+                ask_msg_add(1, content, cn);
             } else {
-                resp[rn] = 0;
-                static char content[ASK_BUF_CAP];
-                int cn = ask_extract_content(resp, rn, content, sizeof content);
-                if (cn >= 0) {
-                    ask_msg_add(1, content, cn);
-                } else {
-                    static char emsg[256];
-                    int en = ask_extract_error(resp, rn, emsg, sizeof emsg);
-                    if (en > 0) {
-                        int p = sapp(errmsg, 0, "api: ");
-                        for (int i = 0; i < en && p < (int)sizeof errmsg - 1; i++)
-                            errmsg[p++] = emsg[i];
-                        errmsg[p] = 0;
-                    } else {
-                        int el = sapp(errmsg, 0, "no content in response");
-                        errmsg[el] = 0;
-                    }
-                }
+                int p = sapp(errmsg, 0, fail_reason);
+                if (p > (int)sizeof errmsg - 1) p = sizeof errmsg - 1;
+                errmsg[p] = 0;
             }
             continue;
         }
