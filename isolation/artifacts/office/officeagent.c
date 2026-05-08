@@ -4972,7 +4972,7 @@ static void coder_paint(const char *status_msg) {
         ln[p] = 0;
         body_at(2, 22, ln, SCREEN_W - 4);
     }
-    status("e=goal ENT=run a=auto t=target 1-4=bank r=log s=save q=quit");
+    status("e=goal ENT=ask a=auto x=exec t=target 1-4=bank r=log s=save q=quit");
     fbflush();
 }
 
@@ -5050,6 +5050,38 @@ static int run_coder(int argc, char **argv) {
             coder_log_recent();
             bank_save(BANK_RECENT);
             coder_paint("logged to recent");
+            continue;
+        }
+        if (k[0] == 'x') {
+            /* Execute the latest /tmp/coder_attempt and dump its
+             * stdout+stderr into the compile-output panel.  Exit
+             * code shown in the status line. */
+            int probe = (int)op("/tmp/coder_attempt", O_RDONLY, 0);
+            if (probe < 0) {
+                coder_paint("no binary — press ENTER to build first");
+                continue;
+            }
+            cl(probe);
+            coder_paint("running /tmp/coder_attempt …");
+            int exit_code = coder_runtest();
+            int hp = sapp(g_coder_err, 0, "[runtime, exit=");
+            hp += utoa((unsigned)exit_code, g_coder_err + hp);
+            hp = sapp(g_coder_err, hp, "]\n");
+            int fd = (int)op("/tmp/coder_run.txt", O_RDONLY, 0);
+            if (fd >= 0) {
+                int rn = (int)rd(fd, g_coder_err + hp,
+                                 CODER_ERR_CAP - hp - 1);
+                if (rn > 0) hp += rn;
+                cl(fd);
+            }
+            if (hp >= CODER_ERR_CAP) hp = CODER_ERR_CAP - 1;
+            g_coder_err[hp] = 0;
+            g_coder_err_len = hp;
+            char st[64];
+            int p = sapp(st, 0, "ran (exit=");
+            p += utoa((unsigned)exit_code, st + p);
+            st[p++] = ')'; st[p] = 0;
+            coder_paint(st);
             continue;
         }
         if (k[0] == 's') {
