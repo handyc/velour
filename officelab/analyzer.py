@@ -78,8 +78,48 @@ VERSIONS = ["office", "office2", "office3", "office4",
             ]
 BASELINE = "minimal"
 
-# 64 KB binary cap that the user is shooting for.
-BUDGET_BYTES = 64 * 1024
+# Multi-tier goal system.  64 KB is the original prized target;
+# each successive tier doubles the previous, up to 1 MB.  A binary
+# is graded by the tightest tier it still fits inside — being over
+# tier 1 but inside tier 2 is still an accomplishment, not a fail.
+# BUDGET_TIERS is the canonical list; BUDGET_BYTES kept as an alias
+# for tier 1 so callers that only know the 64 KB goal still work.
+BUDGET_TIERS = [
+    (1, "64 KB",  64 * 1024),
+    (2, "128 KB", 128 * 1024),
+    (3, "256 KB", 256 * 1024),
+    (4, "512 KB", 512 * 1024),
+    (5, "1 MB",   1024 * 1024),
+]
+BUDGET_BYTES = BUDGET_TIERS[0][2]
+
+
+def tier_for(size: int) -> dict:
+    """Smallest tier this binary fits inside (>=size), or a synthetic
+    'over 1 MB' record for binaries past the top tier.  Result is a
+    plain dict so templates can read ``.name``, ``.headroom``, etc.
+    without importing the analyzer."""
+    for idx, name, ceiling in BUDGET_TIERS:
+        if size <= ceiling:
+            return {
+                "index":         idx,
+                "name":          name,
+                "bytes":         ceiling,
+                "headroom":      ceiling - size,
+                "headroom_pct":  100.0 * (ceiling - size) / ceiling,
+                "fill_pct":      min(100.0, 100.0 * size / ceiling),
+                "over":          False,
+            }
+    biggest = BUDGET_TIERS[-1]
+    return {
+        "index":         None,
+        "name":          "over 1 MB",
+        "bytes":         biggest[2],
+        "headroom":      0,
+        "headroom_pct":  0.0,
+        "fill_pct":      100.0,
+        "over":          True,
+    }
 
 
 # ── feature pattern table ────────────────────────────────────────────

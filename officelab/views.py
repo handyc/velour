@@ -16,11 +16,13 @@ from django.views.decorators.http import require_POST
 from . import analyzer
 from .analyzer import (
     BUDGET_BYTES,
+    BUDGET_TIERS,
     OFFICE_DIR,
     VersionAnalysis,
     analyse_all,
     analyse_one,
     feature_order,
+    tier_for,
 )
 
 
@@ -44,9 +46,14 @@ def _build_overview(versions: list[VersionAnalysis], baseline: VersionAnalysis |
             'delta':          v.delta_vs_prev or 0,
             'source_lines':   v.source_lines,
             'useful_bytes':   useful,
+            # Tier-1 budget metrics kept under the same keys for
+            # back-compat; over_budget here means 'over the 64 KB
+            # tier', not 'over every tier'.  Use .tier.over for the
+            # 1 MB ceiling check.
             'budget_pct':     min(100.0, 100.0 * v.binary_size / BUDGET_BYTES),
             'budget_left':    max(0, BUDGET_BYTES - v.binary_size),
             'over_budget':    v.binary_size > BUDGET_BYTES,
+            'tier':           tier_for(v.binary_size),
             'new_features':   v.new_features,
             'feature_count':  sum(
                 1 for f, b in v.features.items() if b.text + b.data > 0
@@ -81,6 +88,7 @@ def index(request):
         'all_versions': [v.name for v in versions],
         'baseline':     baseline,
         'budget':       BUDGET_BYTES,
+        'budget_tiers': BUDGET_TIERS,
         'biggest':      biggest_jump,
         'latest':       rows[-1] if rows else None,
     })

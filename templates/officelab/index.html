@@ -13,10 +13,27 @@
   <p class="hint">
     Per-feature byte attribution for the no-libc office suite at
     <code>isolation/artifacts/office/</code>. Each fork is a single
-    Linux x86_64 ELF; the 64 KB cap is the long-term target.
+    Linux x86_64 ELF.  Forks are graded against five tiered goals
+    &mdash; the original 64 KB target plus four widening bands
+    (128 KB, 256 KB, 512 KB, 1 MB) so a fork that's outgrown 64 KB
+    is still scored by the next band it fits, not just marked over.
     <strong>Baseline overhead</strong> (Linux ELF + raw <code>_start</code>
     + syscall stub) is <code>{{ baseline.binary_size|intcomma }}</code>
     bytes &mdash; the floor underneath every binary on this list.
+  </p>
+
+  <p class="hint" style="font-size:0.85rem;">
+    <strong>Tiers:</strong>
+    {% for idx, name, b in budget_tiers %}
+      <span style="display:inline-block; padding:0 .4em;
+                   border-radius:3px; margin-right:.3em;
+                   {% if idx == 1 %}background:#0a5;color:#fff;
+                   {% elif idx == 2 %}background:#06a;color:#fff;
+                   {% elif idx == 3 %}background:#a90;color:#fff;
+                   {% elif idx == 4 %}background:#a50;color:#fff;
+                   {% else %}background:#a30;color:#fff;{% endif %}">
+        T{{ idx }} {{ name }}</span>
+    {% endfor %}
   </p>
 
   <h2>Versions</h2>
@@ -29,7 +46,7 @@
         <th>useful (binary &minus; baseline)</th>
         <th>features</th>
         <th>source LOC</th>
-        <th class="l">budget vs 64 KB</th>
+        <th class="l">tier &middot; fill of tier ceiling</th>
         <th class="l">new in this fork</th>
       </tr>
     </thead>
@@ -45,12 +62,24 @@
         <td>{{ r.feature_count }}</td>
         <td>{{ r.source_lines|intcomma }}</td>
         <td class="l" style="min-width: 280px;">
-          <span class="bar-track">
-            <span class="bar {% if r.over_budget %}over{% endif %}"
-                  style="width: {{ r.budget_pct|floatformat:1 }}%;"></span>
+          <span style="display:inline-block; padding:0 .4em;
+                       border-radius:3px; font-size:.78rem;
+                       margin-right:.4em; vertical-align:middle;
+                       {% if r.tier.over %}background:#600;color:#fff;
+                       {% elif r.tier.index == 1 %}background:#0a5;color:#fff;
+                       {% elif r.tier.index == 2 %}background:#06a;color:#fff;
+                       {% elif r.tier.index == 3 %}background:#a90;color:#fff;
+                       {% elif r.tier.index == 4 %}background:#a50;color:#fff;
+                       {% else %}background:#a30;color:#fff;{% endif %}">
+            {% if r.tier.over %}over 1 MB{% else %}T{{ r.tier.index }} {{ r.tier.name }}{% endif %}
+          </span>
+          <span class="bar-track" style="display:inline-block;
+                       width:140px; vertical-align:middle;">
+            <span class="bar {% if r.tier.over %}over{% endif %}"
+                  style="width: {{ r.tier.fill_pct|floatformat:1 }}%;"></span>
           </span>
           <span style="color:#8b949e; font-size:0.78rem;">
-            {{ r.budget_pct|floatformat:1 }}% &middot; {{ r.budget_left|intcomma }} B left
+            {{ r.tier.fill_pct|floatformat:1 }}% &middot; {{ r.tier.headroom|intcomma }} B left
           </span>
         </td>
         <td class="l" style="color:#8b949e; font-size:0.8rem;">
@@ -66,13 +95,14 @@
     <div class="tile">
       <div class="name">Latest fork</div>
       <div class="num">{{ latest.name }}</div>
-      <div class="sub">{{ latest.binary_size|intcomma }} B
-        &middot; {{ latest.budget_pct|floatformat:1 }}% of 64 KB</div>
+      <div class="sub">{{ latest.binary_size|intcomma }} B &middot;
+        {% if latest.tier.over %}over 1 MB{% else %}tier {{ latest.tier.index }} ({{ latest.tier.name }}){% endif %}</div>
     </div>
     <div class="tile">
       <div class="name">Headroom</div>
-      <div class="num">{{ latest.budget_left|intcomma }} B</div>
-      <div class="sub">remaining under the 64 KB cap</div>
+      <div class="num">{{ latest.tier.headroom|intcomma }} B</div>
+      <div class="sub">remaining under
+        {% if latest.tier.over %}the 1 MB ceiling{% else %}the {{ latest.tier.name }} tier{% endif %}</div>
     </div>
     <div class="tile">
       <div class="name">Biggest jump</div>
