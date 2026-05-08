@@ -3905,6 +3905,36 @@ static int ask_send_retrying(char *content_out, int content_cap,
     return -1;
 }
 
+/* bash-style ↑/↓ history.  Persists across run_ask invocations
+ * (static), capped at ASK_HIST_MAX entries × ASK_HIST_ENTRY bytes.
+ * Long pastes are silently truncated on push.  hist[0] is the most
+ * recent entry. */
+#define ASK_HIST_MAX    8
+#define ASK_HIST_ENTRY  1024
+static char ask_hist[ASK_HIST_MAX][ASK_HIST_ENTRY];
+static int  ask_hist_len[ASK_HIST_MAX];
+static int  ask_hist_n = 0;
+
+static void ask_hist_push(const char *text, int tlen) {
+    if (tlen <= 0) return;
+    if (tlen > ASK_HIST_ENTRY - 1) tlen = ASK_HIST_ENTRY - 1;
+    /* Skip exact duplicates of the most recent entry. */
+    if (ask_hist_n > 0 && ask_hist_len[0] == tlen) {
+        int eq = 1;
+        for (int i = 0; i < tlen; i++)
+            if (ask_hist[0][i] != text[i]) { eq = 0; break; }
+        if (eq) return;
+    }
+    int last = ask_hist_n < ASK_HIST_MAX ? ask_hist_n : ASK_HIST_MAX - 1;
+    for (int i = last; i > 0; i--) {
+        mcpy(ask_hist[i], ask_hist[i-1], ask_hist_len[i-1]);
+        ask_hist_len[i] = ask_hist_len[i-1];
+    }
+    mcpy(ask_hist[0], text, tlen);
+    ask_hist_len[0] = tlen;
+    if (ask_hist_n < ASK_HIST_MAX) ask_hist_n++;
+}
+
 static int run_ask(int argc, char **argv) {
     (void)argc; (void)argv;
     current_ms = &ms_ask;
@@ -3916,6 +3946,11 @@ static int run_ask(int argc, char **argv) {
     static char notice[128];
     errmsg[0] = 0;
     notice[0] = 0;
+    /* Per-session history cursor.  -1 = at the live draft (no
+     * history selected); 0..ask_hist_n-1 = walking backwards. */
+    int hist_pos = -1;
+    static char hist_draft[ASK_INPUT_CAP];
+    int hist_draft_len = 0;
 
     term_raw();
     int hist_top = 2;
@@ -4030,6 +4065,8 @@ static int run_ask(int argc, char **argv) {
                 errmsg[el] = 0;
                 continue;
             }
+            ask_hist_push(input, inlen);
+            hist_pos = -1;
             ask_msg_add(0, input, inlen);
             inlen = 0;
             input[0] = 0;
@@ -4065,6 +4102,43 @@ static int run_ask(int argc, char **argv) {
         if (k[0] == 0x7f || k[0] == 8) {
             if (inlen > 0) inlen--;
             input[inlen] = 0;
+            continue;
+        }
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[' && k[2] == 'A') {
+            /* ↑ — recall older entry.  On the first press, snapshot
+             * whatever is currently in the input box so ↓ can return
+             * to it. */
+            if (ask_hist_n == 0) continue;
+            if (hist_pos == -1) {
+                int t = inlen < ASK_INPUT_CAP - 1 ? inlen : ASK_INPUT_CAP - 1;
+                mcpy(hist_draft, input, t);
+                hist_draft_len = t;
+                hist_pos = 0;
+            } else if (hist_pos < ask_hist_n - 1) {
+                hist_pos++;
+            } else {
+                continue;            /* already at oldest */
+            }
+            inlen = ask_hist_len[hist_pos];
+            mcpy(input, ask_hist[hist_pos], inlen);
+            input[inlen] = 0;
+            continue;
+        }
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[' && k[2] == 'B') {
+            /* ↓ — walk forward.  At the newest entry, one more press
+             * restores the live draft. */
+            if (hist_pos < 0) continue;
+            if (hist_pos > 0) {
+                hist_pos--;
+                inlen = ask_hist_len[hist_pos];
+                mcpy(input, ask_hist[hist_pos], inlen);
+                input[inlen] = 0;
+            } else {
+                hist_pos = -1;
+                inlen = hist_draft_len;
+                mcpy(input, hist_draft, inlen);
+                input[inlen] = 0;
+            }
             continue;
         }
         if (k[0] == 0x16) {                  /* ^V paste from suite clipboard */
