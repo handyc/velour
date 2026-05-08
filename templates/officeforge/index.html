@@ -46,6 +46,31 @@
    every feature on, the binary is now over.  Trim a few apps to get
    back under.</p>
 
+{% if named_forks %}
+<h3 style="margin-bottom:.3em;">Named forks</h3>
+<p style="margin-top:0;color:#666;font-size:.9em;">
+  Hand-curated divergent forks &mdash; not selectable here, but they
+  build under their own names in <code>isolation/artifacts/office/</code>.
+  Each is a real <code>.c</code> file free to diverge from the
+  <code>OFFICE_FEATURE_*</code> matrix.
+</p>
+<div class="of-presets">
+  {% for f in named_forks %}
+    <div class="of-preset" style="cursor:default;
+         {% if f.bytes and f.bytes > budget_target %}border-left:4px solid #a30;
+         {% elif f.bytes %}border-left:4px solid #06a;{% endif %}">
+      <span class="pname">{{ f.name }}</span>
+      <span class="pbytes">
+        {% if f.bytes %}{{ f.bytes }} B
+        {% else %}<em>not built</em>{% endif %}
+        &middot; {{ f.app_count }} apps
+      </span>
+      <span class="pdesc">{{ f.desc }}</span>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <form method="post" action="{% url 'officeforge:build' %}">
   {% csrf_token %}
 

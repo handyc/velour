@@ -121,6 +121,44 @@ PRESETS = [
 # Which fork is the source-of-truth for selective builds.
 SOURCE_FORK = "office66"
 
+# Named forks — hand-curated divergent builds that aren't selectable
+# presets of office66.  They're listed here for discoverability so a
+# user reading the OfficeForge page can see the full landscape, not
+# just the OFFICE_FEATURE_* matrix.  Sizes come from analyzer.
+NAMED_FORKS = [
+    ("supercell",
+     "Supercell",
+     "Hand-edited fork of office64.  Word + Notepad merged, "
+     "Sheet + Calc merged, LLM Chat with a 4 KB persistent system-"
+     "prompt slot, file browser, RPG, hex hunter + CA/GA tooling, "
+     "L-system viewer.  Network stack + screensaver + garden dropped.",
+     16),
+    ("officex",
+     "OfficeX",
+     "Tighter sibling of supercell.  rpg + hxhnt-engine + L-system "
+     "folded into a single `xpg` app + the core productivity suite.  "
+     "Hit V from inside xpg for a live 64×64 hex-CA viewer of the "
+     "current mother ruleset.",
+     8),
+    ("officeagent",
+     "OfficeAgent",
+     "Toy 'Claude Code'.  6 apps: shell / sheet / xpg / ask / "
+     "prompt / coder.  Coder is an iterative cc-driven LLM code "
+     "generator with 4 × 4 KB persistent memory banks.  Now ships "
+     "with the embedded 25 K-param soul transformer (fronts coder "
+     "if every API key fails) and a long-term project workflow: "
+     "p = push step, c = compose merged program, m = mission "
+     "(autonomous multi-step build from one overarching goal).",
+     12),
+    ("officesoul",
+     "OfficeSoul",
+     "Single-app fork around the embedded soul.  Same 25 K-param "
+     "int8 transformer + soulgen GA over per-tensor shifts as "
+     "officeagent's run_soul, but stripped of every other office "
+     "app — a self-contained, terminal-only mini-LLM.",
+     1),
+]
+
 # What's always on (no toggle): infra + shared helpers + the home shell.
 ALWAYS_ON = (
     "baseline", "shell", "menu", "chrome", "framebuffer",
@@ -229,9 +267,23 @@ def index(request):
             "bytes": costs.get(macro, 0),
         })
     presets = _preset_estimates(costs, baseline)
+
+    # Look up the actual binary size for each named fork via analyzer.
+    named_forks = []
+    for slug, name, desc, app_count in NAMED_FORKS:
+        a = analyzer.analyse_one(slug)
+        named_forks.append({
+            "slug":       slug,
+            "name":       name,
+            "desc":       desc,
+            "app_count":  app_count,
+            "bytes":      a.binary_size if a else None,
+        })
+
     return render(request, "officeforge/index.html", {
         "features": rows,
         "presets": presets,
+        "named_forks": named_forks,
         "baseline_bytes": baseline,
         "budget_target": analyzer.BUDGET_BYTES,
         "source_fork": SOURCE_FORK,

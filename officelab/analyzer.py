@@ -65,8 +65,16 @@ VERSIONS = ["office", "office2", "office3", "office4",
             "officex",
             # Toy "Claude Code": 6 apps (shell/sheet/xpg/ask/prompt
             # /coder), 4 × 4 KB persistent memory banks, iterative
-            # cc-driven LLM code generator.
+            # cc-driven LLM code generator.  Now includes soul (an
+            # embedded 25K-param int8 transformer that fronts coder
+            # if every API key fails) and a long-term project
+            # workflow (p=push, c=compose, m=mission).
             "officeagent",
+            # Single-app fork around the embedded soul: same int8
+            # transformer + soulgen GA over per-tensor shifts as
+            # officeagent's run_soul, but stripped of every other
+            # office app — a self-contained, terminal-only mini-LLM.
+            "officesoul",
             ]
 BASELINE = "minimal"
 
@@ -123,6 +131,24 @@ FEATURE_PATTERNS: list[tuple[str, list[str], list[str]]] = [
      ["req", "resp", "auth", "content", "emsg", "errmsg", "input",
       "labels", "needle", "tmp",
       "openai_tags", "anthropic_tags", "gemini_tags", "proxy_url"]),
+
+    # soul — embedded 25 K-param int8 transformer used as a coder
+    # fallback when every external API key has failed, and as the
+    # backbone of officesoul (single-app fork).  Architecture:
+    # SL=64-token context, 2 layers × 4 heads × 8 dims, 32-d embed,
+    # 64-d FFN, 128-token vocab, RMSNorm, integer softmax via
+    # 128-byte EXP_LUT, Q8.8 fixed-point activations.  Per-tensor
+    # int8 weight scales with shift deltas evolved by soulgen's GA.
+    # Storage:
+    #   SOUL_BIN_DATA   — the trained weights blob (~27 KB)
+    #   VOCAB_*         — generated 128-token vocab + str blob
+    #   MERGES_*        — BPE merge table
+    #   SL_M_te/pe/norm/out + SL_Lyr[]  — per-tensor int8 + meta
+    #   g_sl_dlt        — 24 signed shift deltas (the GA's chromosome)
+    ("soul",
+     ["run_soul", "sl_", "SL_", "g_sl_", "soul_"],
+     ["VOCAB_OFFSETS", "VOCAB_LEN_TBL", "VOCAB_STR_BLOB",
+      "MERGES_AB", "MERGES_ID", "MERGES_N", "SOUL_BIN_DATA"]),
 
     ("garden",
      ["run_garden", "garden_", "mF_garden", "mE_garden", "ms_garden"],

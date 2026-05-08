@@ -477,6 +477,8 @@ TREEMAP_CATEGORIES = {
     "sheet_macros": "extras", "bytebeat": "extras", "bfc": "extras",
     "mines": "extras", "word": "extras", "paint": "extras",
     "find": "extras", "mail": "extras", "export": "extras",
+    # soul — embedded int8 transformer (officeagent + officesoul)
+    "soul": "extras",
 
     # network stack — tier-1..tier-5 of office60..office64
     "net_panel": "network", "http": "network",
