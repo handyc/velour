@@ -1,0 +1,20 @@
+# Velour soul evaluation set.  One line per test case:
+#   <prompt>=>><expected_substring>
+# Fitness = sum of (max contiguous substring overlap between
+# generated text and expected_substring) across all cases.
+# `=>>` is the separator (a `=>` could appear inside text).
+hi=>>welcome
+hello=>>ready
+what is velour=>>meta
+what is office=>>under
+what is xpg=>>hexca
+what is the soul=>>weights
+who are you=>>soul
+i'm sad=>>soldering
+tell me something=>>tiny
+give me advice=>>commit
+i'm coding=>>break
+i'm stuck=>>print
+my code crashed=>>stack
+my build failed=>>error
+bye=>>iron

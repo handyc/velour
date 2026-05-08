@@ -27,7 +27,7 @@
 #define HD 8           /* head dim (ED / NH) */
 #define FF 64          /* FFN hidden */
 #define NL 2           /* num layers */
-#define SL 20          /* sequence length cap */
+#define SL 64          /* sequence length cap (PE has SL rows) */
 #define ACT_SHIFT 8    /* Q8.8 activations */
 
 #define PAD 0

@@ -207,7 +207,7 @@ static void body_at(int x, int y, const char *s, int max) {
 #define HD           8         /* head dim */
 #define FF          64         /* FFN hidden */
 #define NL_LAY       2         /* num transformer layers */
-#define SL          20         /* sequence length cap */
+#define SL          64         /* sequence length cap (PE has SL rows) */
 #define ACT_SHIFT    8         /* Q8.8 activations */
 
 #define PAD 0
@@ -533,10 +533,21 @@ static void decode_print_token(int id) {
 static int run_soul(int argc, char **argv) {
     (void)argc; (void)argv;
     soul_open();
-    /* Cooked stdin so input() works line-buffered with backspace. */
-    /* Already cooked when this is called from main_c; if called from
-     * the shell, the shell switched to raw — restore cooked first. */
-    term_cooked();
+    /* Capture the tty's real settings so term_cooked has something to
+     * restore.  When run_soul is reached straight from main_c (i.e.
+     * `./officesoul soul`) nobody has called term_raw yet, so
+     * term_orig is still zero-init bss; without this snapshot,
+     * term_cooked would push VMIN=0/VTIME=0 and rd(0,…) would
+     * return 0 forever, exiting the chat before the user can type. */
+    io(0, TCGETS, &term_orig);
+    /* Force line-buffered input + visible echo regardless of how the
+     * terminal was previously configured. */
+    {
+        struct ti t = term_orig;
+        t.lflag |= ICANON | ECHO;
+        t.iflag |= ICRNL;
+        io(0, TCSETS, &t);
+    }
 
     paint_desktop();
     chrome("Soul Chat (25 K parameters)");
