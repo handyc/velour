@@ -75,6 +75,12 @@ VERSIONS = ["office", "office2", "office3", "office4",
             # officeagent's run_soul, but stripped of every other
             # office app — a self-contained, terminal-only mini-LLM.
             "officesoul",
+            # Wang tile generator + tessellator.  Sibling binary so
+            # it doesn't compete for officesoul's tight T1 budget.
+            # Generates square Wang tile sets (2-4 colors), brute-
+            # force tessellates a 16×12 grid, exec's ./officesoul
+            # --gen on `:dwell` to interpret a set with the LLM.
+            "officetiles",
             ]
 BASELINE = "minimal"
 

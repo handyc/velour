@@ -155,7 +155,18 @@ NAMED_FORKS = [
      "Single-app fork around the embedded soul.  Same 25 K-param "
      "int8 transformer + soulgen GA over per-tensor shifts as "
      "officeagent's run_soul, but stripped of every other office "
-     "app — a self-contained, terminal-only mini-LLM.",
+     "app — a self-contained, terminal-only mini-LLM.  Now carries "
+     "4 × 4 KB embedded prompt banks + a TDB conversation log at "
+     "soul.db.",
+     1),
+    ("officetiles",
+     "OfficeTiles",
+     "Wang tile generator + tessellator.  Generates random square "
+     "Wang tile sets (2-4 colors, up to 24 tiles), brute-force "
+     "tessellates a 16×12 grid, saves to tiles.bin.  `d` (dwell) "
+     "exec's ./officesoul --gen with a description of the current "
+     "set so the LLM can interpret it.  v1: square tiles only; "
+     "hex tiles + CA wiring are follow-ups.",
      1),
 ]
 
