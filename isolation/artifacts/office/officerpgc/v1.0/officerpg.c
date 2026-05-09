@@ -10915,6 +10915,12 @@ int main_c(int argc, char **argv, char **envp) {
                 "\n"
                 "  ./officerpg              run interactive rpg\n"
                 "  ./officerpg saver        run journey-mode screensaver\n"
+                "  ./officerpg test [opts]  deterministic walk + report\n"
+                "    --steps N              walk N moves (default 30)\n"
+                "    --seed N               LCG seed (default 0xdeadbeef)\n"
+                "    --per-cell-rules       enable rule pool before walk\n"
+                "    --ga-rounds N          force N pool-GA rounds after walk\n"
+                "    --no-io                skip bundle + shot writes\n"
                 "  ./officerpg --help       print this help\n"
                 "  ./officerpg --version    print version\n"
                 "\n"
@@ -10956,15 +10962,26 @@ int main_c(int argc, char **argv, char **envp) {
         if (sub_argc > 1 && scmp(sub_argv[1], "test") == 0) {
             int steps = 30;
             unsigned long seed = 0xdeadbeefUL;
+            int per_cell_rules = 0;
+            int ga_rounds = 0;
+            int no_io = 0;
             for (int a = 2; a < sub_argc; a++) {
                 if (scmp(sub_argv[a], "--steps") == 0 && a + 1 < sub_argc) {
                     steps = (int)atoi_(sub_argv[++a]);
                 } else if (scmp(sub_argv[a], "--seed") == 0 && a + 1 < sub_argc) {
                     seed = (unsigned long)atoi_(sub_argv[++a]);
+                } else if (scmp(sub_argv[a], "--per-cell-rules") == 0) {
+                    per_cell_rules = 1;
+                } else if (scmp(sub_argv[a], "--ga-rounds") == 0 && a + 1 < sub_argc) {
+                    ga_rounds = (int)atoi_(sub_argv[++a]);
+                } else if (scmp(sub_argv[a], "--no-io") == 0) {
+                    no_io = 1;
                 }
             }
             if (steps < 1)    steps = 1;
             if (steps > 9999) steps = 9999;
+            if (ga_rounds < 0) ga_rounds = 0;
+            if (ga_rounds > 9999) ga_rounds = 9999;
             hx_active_init();
             rpg_sprites_init();
             mset(rpg_world_pos, 0, sizeof rpg_world_pos);
@@ -10973,6 +10990,15 @@ int main_c(int argc, char **argv, char **envp) {
             rpg_load_overworld(px, py);
             rpg_player_init();
             rpg_preload_invalidate();
+            /* v1.0: optional per-cell rules toggle.  Enabled here
+             * (after init, before the walk) so the deterministic
+             * walk's terrain renders pull from the pool — exercises
+             * rpg_ensure_rule_pool + rpg_get_cell_ruleset on every
+             * cell that gets computed. */
+            if (per_cell_rules) {
+                rpg_ensure_rule_pool();
+                rpg_per_cell_rules_on = 1;
+            }
             static const char dirs[6] = { 'a','d','w','e','z','x' };
             unsigned long s = seed | 1UL;
             char action[80]; action[0] = 0;
@@ -10998,15 +11024,40 @@ int main_c(int argc, char **argv, char **envp) {
                     rpg_shift_mosaic(meta_dx, meta_dy, px, py, c);
                 }
             }
-            rpg_save_bundle(NULL);
-            /* Render once into the framebuffer so the shot file
-             * captures the post-walk state.  Don't fbflush — the
-             * shot path reads fb directly and we're not actually
-             * showing this frame on a tty. */
-            paint_desktop();
-            chrome("rpg");
-            rpg_render_view(px, py);
-            rpg_save_shot_to_file();
+            /* v1.0: optional GA rounds.  Forces consecutive ticks
+             * past the period gate so each call actually mutates
+             * the pool.  Only meaningful with --per-cell-rules. */
+            for (int g = 0; g < ga_rounds; g++) {
+                rpg_pool_ga_last_frame = -1;
+                rpg_pool_ga_tick(0);
+            }
+            if (!no_io) {
+                rpg_save_bundle(NULL);
+                /* Render once into the framebuffer so the shot file
+                 * captures the post-walk state.  Don't fbflush — the
+                 * shot path reads fb directly and we're not actually
+                 * showing this frame on a tty. */
+                paint_desktop();
+                chrome("rpg");
+                rpg_render_view(px, py);
+                rpg_save_shot_to_file();
+            }
+            /* v1.0: report deterministic state to stdout so a CI
+             * harness can diff output across builds. */
+            char rep[160]; int rl = 0;
+            rl = sapp(rep, rl, "test ok · steps=");
+            rl += utoa((unsigned)steps, rep + rl);
+            rl = sapp(rep, rl, " · pos=");
+            rl += utoa((unsigned)px, rep + rl); rep[rl++] = ',';
+            rl += utoa((unsigned)py, rep + rl);
+            rl = sapp(rep, rl, " · pool=");
+            rep[rl++] = rpg_rule_pool_built ? 'Y' : 'N';
+            rl = sapp(rep, rl, " · per-cell=");
+            rep[rl++] = rpg_per_cell_rules_on ? 'Y' : 'N';
+            rl = sapp(rep, rl, " · ga=");
+            rl += utoa((unsigned)rpg_pool_ga_rounds, rep + rl);
+            rep[rl++] = '\n';
+            wr(1, rep, rl);
             return 0;
         }
         return run_rpg(sub_argc, sub_argv);
