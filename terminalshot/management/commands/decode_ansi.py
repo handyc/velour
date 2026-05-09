@@ -39,6 +39,18 @@ class Command(BaseCommand):
             '--show-bytes', type=int, default=0,
             help='If >0, print the first N raw bytes (hex) before '
                  'decoding — useful for sanity-checking the file.')
+        parser.add_argument(
+            '--frames', action='store_true',
+            help='Split the stream by DECSET 2026 sync markers and '
+                 'render each frame independently with a divider — '
+                 'useful for animated sessions like the saver.')
+        parser.add_argument(
+            '--frame', type=int, default=None,
+            help='With --frames, render only the Nth frame (0-based; '
+                 'negative indices count from the end).')
+        parser.add_argument(
+            '--frame-count', action='store_true',
+            help='Print only the number of detected frames.')
 
     def handle(self, *args, **opts):
         path = opts['path']
@@ -55,6 +67,35 @@ class Command(BaseCommand):
                 f'first {n} bytes (hex):'))
             self.stdout.write('  ' + ' '.join(
                 f'{b:02x}' for b in blob[:n]))
+
+        if opts['frame_count']:
+            slices = D.split_frames(blob)
+            self.stdout.write(f'{len(slices)} frame(s)')
+            return
+
+        if opts['frames'] or opts['frame'] is not None:
+            grids = D.parse_frames(blob,
+                                   cols=opts['cols'], rows=opts['rows'])
+            if opts['frame'] is not None:
+                idx = opts['frame']
+                if idx < 0: idx += len(grids)
+                if idx < 0 or idx >= len(grids):
+                    raise CommandError(
+                        f'frame {opts["frame"]} out of range '
+                        f'(stream has {len(grids)} frames)')
+                grids = [(idx, grids[idx])]
+            else:
+                grids = list(enumerate(grids))
+            for n_, grid in grids:
+                self.stdout.write(self.style.NOTICE(
+                    f'== frame {n_} ({opts["cols"]}×{opts["rows"]}) =='))
+                self.stdout.write(D.render_shaded(grid))
+                self.stdout.write('')
+            if not opts['no_palette']:
+                self.stdout.write(self.style.NOTICE('== final-frame palette =='))
+                self.stdout.write(D.color_summary(grids[-1][1]))
+            return
+
         grid = D.parse(blob, cols=opts['cols'], rows=opts['rows'])
         self.stdout.write(self.style.NOTICE(
             f'== shaded {opts["cols"]}×{opts["rows"]} (cells '

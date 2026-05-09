@@ -184,12 +184,75 @@ def _rgb_to_cube(r: int, g: int, b: int) -> int:
     return 16 + to_cube(r) * 36 + to_cube(g) * 6 + to_cube(b)
 
 
+def split_frames(data) -> list[bytes]:
+    """Split a stream that uses DECSET 2026 (synchronized output)
+    into one bytes-payload per frame.  Each emitted slice is one
+    self-contained `\\033[?2026h … \\033[?2026l` block, ready to
+    feed into `parse()` independently.
+
+    officerpg's fbflush wraps every frame this way, so a captured
+    session lays down one well-formed slice per render iteration.
+    Streams without sync markers get a single-frame fallback (the
+    whole input is the one frame).
+    """
+    if isinstance(data, (bytes, bytearray)):
+        s = bytes(data)
+    else:
+        s = data.encode('utf-8', errors='replace')
+    BEGIN = b'\x1b[?2026h'
+    frames: list[bytes] = []
+    i = 0
+    n = len(s)
+    while i < n:
+        j = s.find(BEGIN, i + 1)
+        if j == -1:
+            frames.append(s[i:])
+            break
+        frames.append(s[i:j])
+        i = j
+    if not frames:
+        frames = [s]
+    # Drop empty leading frames (a stream that opens with a
+    # BEGIN marker would otherwise yield a zero-byte first slice).
+    return [f for f in frames if f]
+
+
 def parse(data, cols: int = 80, rows: int = 24) -> TerminalGrid:
     """Parse a byte stream of vt100/xterm-256 escape sequences into
-    a TerminalGrid.  `data` may be `bytes` or `str`."""
+    a fresh TerminalGrid.  Convenience wrapper around parse_into."""
+    g = TerminalGrid(cols=cols, rows=rows)
+    parse_into(g, data)
+    return g
+
+
+def parse_frames(data, cols: int = 80, rows: int = 24) -> list[TerminalGrid]:
+    """Replay a sync-output-bracketed stream and snapshot the grid
+    after each frame.  Cells / cursor / pen state carry across
+    frames so an incremental repaint reads as the running cumulative
+    image, not as 24 rows of "default cell" plus the new patch.
+
+    Returns a list of independent TerminalGrid instances — caller
+    can render any of them, scrub through them, or pull just the
+    last one for the equivalent of a single-frame parse().
+    """
+    import copy
+    slices = split_frames(data)
+    snapshots: list[TerminalGrid] = []
+    g = TerminalGrid(cols=cols, rows=rows)
+    for sl in slices:
+        parse_into(g, sl)
+        snapshots.append(copy.deepcopy(g))
+    return snapshots
+
+
+def parse_into(g: TerminalGrid, data) -> TerminalGrid:
+    """Apply an ANSI byte stream onto an existing TerminalGrid.
+    Lets a caller replay a multi-frame stream while carrying
+    cell + cursor + pen state across frame boundaries — important
+    for analysis of incremental redraws (status-bar-only updates,
+    partial repaints, etc.)."""
     if isinstance(data, (bytes, bytearray)):
         data = data.decode('utf-8', errors='replace')
-    g = TerminalGrid(cols=cols, rows=rows)
     i = 0
     n = len(data)
     while i < n:
