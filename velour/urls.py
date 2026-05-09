@@ -76,6 +76,7 @@ urlpatterns = [
     path('viralyst/',  include('viralyst.urls')),
     path('officelab/',   include('officelab.urls')),
     path('officeforge/', include('officeforge.urls')),
+    path('h4kslnk/',     include('h4kslnk.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

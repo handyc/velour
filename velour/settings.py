@@ -144,6 +144,7 @@ INSTALLED_APPS = [
     'viralyst',
     'officelab',
     'officeforge',
+    'h4kslnk',
 ]
 
 MIDDLEWARE = [

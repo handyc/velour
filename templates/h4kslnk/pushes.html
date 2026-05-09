@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}vibegames pushes — h4kslnk{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.4rem; }
+  .nav { font-size: 0.8rem; margin-bottom: 0.6rem; color: #6e7681; }
+  a { color: #58a6ff; text-decoration: none; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem;
+           border-bottom: 1px solid #21262d; vertical-align: top; }
+  th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+       text-transform: uppercase; }
+  td.num { font-family: ui-monospace, monospace; color: #8b949e;
+           text-align: right; font-variant-numeric: tabular-nums; }
+  td.code { font-family: ui-monospace, monospace; color: #d2a8ff;
+            font-size: 0.75rem; }
+  .ok   { color: #2ea043; }
+  .fail { color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p class="nav"><a href="{% url 'h4kslnk:dashboard' %}">← h4kslnk</a></p>
+  <h1>vibegames pushes</h1>
+  <table>
+    <thead><tr><th>When</th><th>Project</th><th>File</th>
+      <th>Source</th><th>Bytes</th><th>Resp</th></tr></thead>
+    <tbody>
+      {% for p in pushes %}
+        <tr>
+          <td class="num">{{ p.pushed_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ p.project }}</td>
+          <td>{{ p.filename }}</td>
+          <td class="code">{{ p.source_path }}</td>
+          <td class="num">{{ p.bytes_sent }}</td>
+          <td class="num
+            {% if p.response_code >= 200 and p.response_code < 300 %}ok
+            {% else %}fail{% endif %}">{{ p.response_code|default:"—" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6" style="color:#6e7681;font-style:italic;">
+          no pushes yet</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

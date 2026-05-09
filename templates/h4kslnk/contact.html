@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}{{ contact.display }} — h4kslnk{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 800px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.4rem; }
+  .meta { font-size: 0.8rem; color: #8b949e; }
+  .notes { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5;
+           background: #0d1117; padding: 1rem; border-radius: 6px;
+           border: 1px solid #21262d; margin-top: 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem;
+          margin-top: 1rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem;
+           border-bottom: 1px solid #21262d; }
+  th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+       text-transform: uppercase; }
+  a { color: #58a6ff; text-decoration: none; }
+  .nav { font-size: 0.8rem; margin-bottom: 0.6rem; color: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p class="nav"><a href="{% url 'h4kslnk:dashboard' %}">← h4kslnk</a></p>
+  <h1>{{ contact.display }}</h1>
+  <p class="meta">nick <code>{{ contact.nick }}</code>
+    {% if contact.role %} · {{ contact.role }}{% endif %}
+    {% if contact.timezone %} · {{ contact.timezone }}{% endif %}</p>
+  {% if contact.notes %}<div class="notes">{{ contact.notes }}</div>{% endif %}
+
+  <h2 style="font-size:0.85rem;color:#8b949e;margin-top:1.5rem;">
+    Bot sessions targeting {{ contact.nick }}</h2>
+  {% if sessions %}
+    <table>
+      <thead><tr><th>Nick</th><th>Status</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td><a href="{% url 'h4kslnk:session' s.pk %}">{{ s.nick }}</a></td>
+            <td>{{ s.status }}</td>
+            <td>{{ s.created_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p style="color:#6e7681;font-size:0.8rem;font-style:italic;">no sessions</p>
+  {% endif %}
+</div>
+{% endblock %}

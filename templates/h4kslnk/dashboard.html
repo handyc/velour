@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}h4kslnk{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.3rem; margin: 0 0 0.2rem; }
+  .wrap h2 { font-size: 0.95rem; margin: 1.6rem 0 0.4rem;
+             color: #8b949e; text-transform: uppercase;
+             letter-spacing: 0.05em; font-weight: 500; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th, td { text-align: left; padding: 0.35rem 0.5rem;
+           border-bottom: 1px solid #21262d; vertical-align: top; }
+  th { color: #8b949e; font-weight: 500; font-size: 0.7rem;
+       text-transform: uppercase; letter-spacing: 0.05em; }
+  td.num { font-family: ui-monospace, monospace; color: #8b949e;
+           text-align: right; font-variant-numeric: tabular-nums; }
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .target { font-size: 0.7rem; padding: 0.1rem 0.4rem;
+            border-radius: 3px; background: #21262d;
+            color: #8b949e; text-transform: uppercase; }
+  .target-vibegames { color: #79c0ff; }
+  .target-irc       { color: #d2a8ff; }
+  .target-shorts    { color: #d29922; }
+  .st-running { color: #2ea043; }
+  .st-done    { color: #6e7681; }
+  .st-error   { color: #f85149; }
+  .empty { color: #6e7681; font-size: 0.8rem; font-style: italic; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>h4kslnk</h1>
+  <p class="hint">outbound link to the h4ks.com ecosystem —
+    games.h4ks.com, s.h4ks.com, chat.h4ks.com.  Policies live here,
+    pushes are logged, IRC bot sessions can be launched and audited.</p>
+
+  <h2>Policies</h2>
+  {% if policies %}
+    <table>
+      <thead><tr><th>Target</th><th>Title</th><th>Updated</th></tr></thead>
+      <tbody>
+        {% for p in policies %}
+          <tr>
+            <td><span class="target target-{{ p.target }}">{{ p.target }}</span></td>
+            <td><a href="{% url 'h4kslnk:policy' p.slug %}">{{ p.title }}</a></td>
+            <td class="num">{{ p.updated_at|date:"Y-m-d" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">no policies seeded — run
+      <code>manage.py seed_h4ks_policies</code></p>
+  {% endif %}
+
+  <h2>Known IRC contacts</h2>
+  {% if contacts %}
+    <table>
+      <thead><tr><th>Nick</th><th>Display</th><th>Role</th><th>TZ</th></tr></thead>
+      <tbody>
+        {% for c in contacts %}
+          <tr>
+            <td><a href="{% url 'h4kslnk:contact' c.nick %}">{{ c.nick }}</a></td>
+            <td>{{ c.display }}</td>
+            <td>{{ c.role }}</td>
+            <td>{{ c.timezone }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">no contacts — seed via
+      <code>manage.py seed_h4ks_policies</code></p>
+  {% endif %}
+
+  <h2>Recent bot sessions</h2>
+  {% if sessions %}
+    <table>
+      <thead><tr><th>Nick</th><th>Target</th><th>Status</th>
+        <th>Cap</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for s in sessions %}
+          <tr>
+            <td><a href="{% url 'h4kslnk:session' s.pk %}">{{ s.nick }}</a></td>
+            <td>{{ s.target }}</td>
+            <td class="st-{{ s.status }}">{{ s.status }}</td>
+            <td class="num">{{ s.message_cap }}</td>
+            <td class="num">{{ s.created_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="empty">no bot sessions yet</p>
+  {% endif %}
+
+  <h2>Recent vibegames pushes</h2>
+  {% if pushes %}
+    <table>
+      <thead><tr><th>Project</th><th>File</th><th>Bytes</th>
+        <th>Resp</th><th>When</th></tr></thead>
+      <tbody>
+        {% for p in pushes %}
+          <tr>
+            <td>{{ p.project }}</td>
+            <td>{{ p.filename }}</td>
+            <td class="num">{{ p.bytes_sent }}</td>
+            <td class="num">{{ p.response_code|default:"—" }}</td>
+            <td class="num">{{ p.pushed_at|date:"Y-m-d H:i" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint"><a href="{% url 'h4kslnk:pushes' %}">all pushes →</a></p>
+  {% else %}
+    <p class="empty">no pushes yet — run
+      <code>manage.py h4ks_push &lt;file&gt; &lt;project&gt;</code></p>
+  {% endif %}
+</div>
+{% endblock %}

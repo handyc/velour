@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}{{ policy.title }} — h4kslnk{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 800px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.2rem; margin: 0 0 0.4rem; }
+  .target { font-size: 0.7rem; padding: 0.1rem 0.4rem;
+            border-radius: 3px; background: #21262d;
+            color: #8b949e; text-transform: uppercase; }
+  .body { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5;
+          background: #0d1117; padding: 1rem; border-radius: 6px;
+          border: 1px solid #21262d; margin-top: 1rem; }
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .nav { font-size: 0.8rem; margin-bottom: 0.6rem; color: #6e7681; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p class="nav"><a href="{% url 'h4kslnk:dashboard' %}">← h4kslnk</a></p>
+  <h1>{{ policy.title }}
+    <span class="target">{{ policy.target }}</span></h1>
+  <div class="body">{{ policy.body }}</div>
+</div>
+{% endblock %}

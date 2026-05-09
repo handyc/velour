@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}{{ session.nick }} → {{ session.target }} — h4kslnk{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 900px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.1rem; margin: 0 0 0.4rem; }
+  .meta { font-size: 0.8rem; color: #8b949e; }
+  .nav { font-size: 0.8rem; margin-bottom: 0.6rem; color: #6e7681; }
+  a { color: #58a6ff; text-decoration: none; }
+  .log { background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+         padding: 0.8rem; margin-top: 1rem; font-family: ui-monospace, monospace;
+         font-size: 0.78rem; line-height: 1.5; }
+  .row { display: flex; gap: 0.6rem; padding: 0.15rem 0; }
+  .row .arrow { width: 1rem; flex-shrink: 0; }
+  .row .who { width: 9rem; flex-shrink: 0; color: #8b949e; }
+  .row .body { flex: 1; white-space: pre-wrap; word-break: break-word; }
+  .row .when { width: 5rem; flex-shrink: 0; color: #4d535a;
+               text-align: right; font-variant-numeric: tabular-nums; }
+  .out  .arrow { color: #2ea043; }
+  .in   .arrow { color: #79c0ff; }
+  .sys  .arrow { color: #6e7681; }
+  .sys  .body  { color: #8b949e; font-style: italic; }
+  .st-running { color: #2ea043; }
+  .st-done    { color: #6e7681; }
+  .st-error   { color: #f85149; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p class="nav"><a href="{% url 'h4kslnk:dashboard' %}">← h4kslnk</a></p>
+  <h1>{{ session.nick }} → {{ session.target }}
+    <span class="st-{{ session.status }}">[{{ session.status }}]</span></h1>
+  <p class="meta">{{ session.server }}:{{ session.port }}
+    {% if session.use_tls %}+TLS{% endif %} · cap {{ session.message_cap }}
+    {% if session.autonomous %}· autonomous{% else %}· operator-gated{% endif %}
+    {% if session.purpose %}· <em>{{ session.purpose }}</em>{% endif %}</p>
+  {% if session.error %}
+    <p class="st-error">{{ session.error }}</p>
+  {% endif %}
+
+  <div class="log">
+    {% for m in messages %}
+      <div class="row {{ m.direction }}">
+        <span class="arrow">{% if m.direction == 'out' %}→{% elif m.direction == 'in' %}←{% else %}·{% endif %}</span>
+        <span class="who">{{ m.sender|default:session.nick }}</span>
+        <span class="body">{{ m.body }}</span>
+        <span class="when">{{ m.at|date:"H:i:s" }}</span>
+      </div>
+    {% empty %}
+      <div class="row sys"><span class="arrow">·</span>
+        <span class="body">no messages yet</span></div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
