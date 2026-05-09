@@ -103,6 +103,7 @@ INSTALLED_APPS = [
     'hpc',
     'tiles',
     'tessera',
+    'terminalshot',
     'condenser',
     'automaton',
     'aether',

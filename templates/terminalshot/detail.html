@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ cap.name }} — Terminal Shot{% endblock %}
+{% block content %}
+<style>
+  .ts-meta { color: #888; font-size: 0.85rem; }
+  .ts-meta a { color: #ace; }
+  .ts-section h2 { margin-top: 24px; font-size: 1rem; color: #ccc; }
+  .ts-shaded {
+    background: #050505; padding: 8px;
+    color: #aaa; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.8rem; line-height: 1.0;
+    overflow-x: auto;
+  }
+  .ts-palette {
+    background: #050505; padding: 8px;
+    color: #999; font-family: ui-monospace, Menlo, monospace;
+    font-size: 0.8rem; line-height: 1.2;
+    overflow-x: auto;
+  }
+  .ts-html-frame {
+    background: #000; padding: 8px;
+    overflow-x: auto;
+  }
+</style>
+
+<p>
+  <a href="{% url 'terminalshot:index' %}" style="color:#888;">← back</a>
+</p>
+<h1 style="margin-bottom: 4px;">{{ cap.name }}</h1>
+<p class="ts-meta">
+  {{ cols }}×{{ rows }} grid &middot; {{ bytes }} input bytes
+  &middot; {{ cap.created_at|date:"D d M Y H:i" }}
+  {% if cap.notes %}<br><em>{{ cap.notes }}</em>{% endif %}
+</p>
+
+<div class="ts-section">
+  <h2>HTML render (true colour)</h2>
+  <div class="ts-html-frame">{{ html_grid|safe }}</div>
+</div>
+
+<div class="ts-section">
+  <h2>Shaded text (luminance-mapped, paste-friendly)</h2>
+  <pre class="ts-shaded">{{ shaded }}</pre>
+</div>
+
+<div class="ts-section">
+  <h2>Palette</h2>
+  <pre class="ts-palette">{{ palette }}</pre>
+</div>
+{% endblock %}
