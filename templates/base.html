@@ -149,6 +149,8 @@
                 {% if 'forge' in accessible_app_slugs %}<a href="{% url 'forge:list' %}">Forge</a>{% endif %}
                 {% if 'officelab' in accessible_app_slugs %}<a href="{% url 'officelab:index' %}">Officelab</a>{% endif %}
                 {% if 'officeforge' in accessible_app_slugs %}<a href="{% url 'officeforge:index' %}">OfficeForge</a>{% endif %}
+                {% if 'tilesmith' in accessible_app_slugs %}<a href="{% url 'tilesmith:index' %}">Tilesmith</a>{% endif %}
+                {% if 'h4kslnk' in accessible_app_slugs %}<a href="{% url 'h4kslnk:dashboard' %}">h4kslnk</a>{% endif %}
                 {% if 'viralyst' in accessible_app_slugs %}<a href="{% url 'viralyst:index' %}">Viralyst</a>{% endif %}
                 {% if 'datalift' in accessible_app_slugs %}<a href="{% url 'datalift:job_list' %}">Datalift</a>{% endif %}
                 {% if 'landingpage' in accessible_app_slugs %}<a href="{% url 'landingpage:home' %}">News</a>{% endif %}

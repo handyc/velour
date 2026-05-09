@@ -310,14 +310,16 @@
 {% endif %}
 
 {# Lab & Design — collapsed by default #}
-{% if 'cartography' in accessible_app_slugs or 'condenser' in accessible_app_slugs or 'displacer' in accessible_app_slugs or 'helix' in accessible_app_slugs or 'isolation' in accessible_app_slugs or 'naiad' in accessible_app_slugs or 'officelab' in accessible_app_slugs or 'officeforge' in accessible_app_slugs or 'oneliner' in accessible_app_slugs or 's3lab' in accessible_app_slugs or 'tiles' in accessible_app_slugs or 'viralyst' in accessible_app_slugs or 'zoetrope' in accessible_app_slugs %}
+{% if 'cartography' in accessible_app_slugs or 'condenser' in accessible_app_slugs or 'displacer' in accessible_app_slugs or 'helix' in accessible_app_slugs or 'isolation' in accessible_app_slugs or 'naiad' in accessible_app_slugs or 'officelab' in accessible_app_slugs or 'officeforge' in accessible_app_slugs or 'oneliner' in accessible_app_slugs or 's3lab' in accessible_app_slugs or 'tiles' in accessible_app_slugs or 'tilesmith' in accessible_app_slugs or 'viralyst' in accessible_app_slugs or 'zoetrope' in accessible_app_slugs or 'h4kslnk' in accessible_app_slugs %}
 <details class="cat-group">
-    <summary>Lab &amp; Design <span class="cat-count">· 13</span></summary>
+    <summary>Lab &amp; Design <span class="cat-count">· 15</span></summary>
     <div class="tools-grid">
         {% if 's3lab' in accessible_app_slugs %}<a class="card" href="{% url 's3lab:index' %}" title="ESP32-S3 in-browser bench — hex CA + GPIO + ST7735S, hunt + warm-start refine"><h3>S3 Lab</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'naiad' in accessible_app_slugs %}<a class="card" href="{% url 'naiad:index' %}" title="Water-purification design lab — chain stages, compare spec"><h3>Naiad</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'helix' in accessible_app_slugs %}<a class="card" href="{% url 'helix:list' %}" title="DNA / RNA viewer + annotator — FASTA + GenBank with feature tracks"><h3>Helix</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'tiles' in accessible_app_slugs %}<a class="card" href="{% url 'tiles:list' %}" title="Wang tile sets as substrate for ideas"><h3>Tiles</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'tilesmith' in accessible_app_slugs %}<a class="card" href="{% url 'tilesmith:index' %}" title="Edit tile shapes that always tile the offset-hex plane — Escher edge-pair mirror enforced"><h3>Tilesmith</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'h4kslnk' in accessible_app_slugs %}<a class="card" href="{% url 'h4kslnk:dashboard' %}" title="Outbound link to h4ks.com — vibegames push, IRC bot sessions, policies, contacts"><h3>h4kslnk</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'condenser' in accessible_app_slugs %}<a class="card" href="{% url 'condenser:home' %}" title="Distill apps through constrained tiers"><h3>Condenser</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'isolation' in accessible_app_slugs %}<a class="card" href="{% url 'isolation:index' %}" title="Re-package cross-app pipelines as MVPs for tiny targets"><h3>Isolation</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'oneliner' in accessible_app_slugs %}<a class="card" href="{% url 'oneliner:index' %}" title="Museum for sub-80-col C programs — compiles + runs"><h3>Oneliner</h3><span class="open-arrow">›</span></a>{% endif %}
