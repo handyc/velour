@@ -87,6 +87,9 @@ class Command(BaseCommand):
             # editor with 7-swatch situation display + 16×16 live
             # preview stepped under the current genome.
             'genome-workshop',
+            # v1.4 — `seed-from-image` subcommand: PPM/PGM → k-means
+            # K=4 → palette + 64×64 quantised cell grid → bundle.
+            'image-presets',
         }
         # Features that cannot meaningfully ship in a nostdlib ANSI-C
         # terminal binary.  Three reasons collapse here:
@@ -98,7 +101,7 @@ class Command(BaseCommand):
         #     bio-lab breeder, genome-workshop editor); image-upload
         #     presets; circular concept (lite-terminal in a terminal).
         ANSIC_NA = {
-            'image-presets', 'flower-rule-view',
+            'flower-rule-view',
             'bio-lab', 'rgba-pal-alpha',
             # music-stereo / music-waltz / music-smooth stay N/A on
             # pc-speaker (monophonic only).  music-mood ported in
