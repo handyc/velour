@@ -6034,6 +6034,13 @@ static const unsigned char rpg_npc_pal[16] = {
      33,  93, 201, 198, 252, 245, 240, 232,
 };
 
+/* v0.2: animal-action-anim — bss arrays declared up front so they
+ * see the same TILE_W/H as the rest of the entity layers.  The
+ * AA_* enum + helper functions live below the RC_* enum (where
+ * RC_ANIMAL / RC_PLANT become visible). */
+static unsigned char rpg_animal_action[RPG_TILE_W * RPG_TILE_H];
+static unsigned char rpg_animal_action_ttl[RPG_TILE_W * RPG_TILE_H];
+
 /* office50 wander layer.  Each animal/NPC has a current step index
  * within a procedural closed-loop path and a path-generation counter
  * that lets us re-seed a fresh loop when the current one completes.
@@ -6477,6 +6484,88 @@ enum {
 };
 
 #define RPG_CAT_VARIANTS 64
+
+/* v0.2: animal-action-anim port (JS ev61).  Per-cell action state
+ * + ticking TTL gives each animal a transient "what they're doing
+ * right now" badge.  Bound to the renderer as a single-cell
+ * coloured halo above each animal — terminal resolution can't
+ * carry the JS version's full 10-map × personal-CA tint, but the
+ * action signal still reads at a glance.
+ *
+ * AA_WALK is the default (no halo); ATTACK is set when the player
+ * hits the animal; FLEE is set on every same-variant hex-neighbour
+ * of that hit; EAT is set in path_tick when an animal walks
+ * adjacent to a plant cell.  TTL is in render-frames (~30 by
+ * default), decrements once per render, and at 0 the cell reverts
+ * to AA_WALK. */
+enum {
+    AA_WALK   = 0,
+    AA_ATTACK = 1,
+    AA_FLEE   = 2,
+    AA_EAT    = 3,
+};
+#define AA_TTL_DEFAULT  30
+/* xterm-256 indices for each action's halo glyph. */
+static const unsigned char rpg_animal_action_color[4] = {
+    0,     /* AA_WALK   — no halo */
+    196,   /* AA_ATTACK — red    */
+    220,   /* AA_FLEE   — yellow */
+     46,   /* AA_EAT    — green  */
+};
+
+static void rpg_animal_action_tick(void) {
+    /* Cheap linear sweep over 36864 bytes; once-per-render so
+     * negligible against the cell-paint cost.  Cells whose timer
+     * expires fall back to AA_WALK and the halo stops drawing. */
+    for (int i = 0; i < RPG_TILE_W * RPG_TILE_H; i++) {
+        if (rpg_animal_action_ttl[i] == 0) continue;
+        if (--rpg_animal_action_ttl[i] == 0)
+            rpg_animal_action[i] = AA_WALK;
+    }
+}
+
+/* Hex-neighbour offsets for offset-r layout — the same six
+ * directions the move-step switch in rpg_move uses, broken out so
+ * kin-spook + eat-detection can share. */
+static void rpg_hex_neighbour(int x, int y, int dir,
+                              int *nx_out, int *ny_out) {
+    int odd = y & 1;
+    int nx = x, ny = y;
+    switch (dir) {
+    case 0: nx = x + 1;                            break;   /* E  */
+    case 1: nx = x + (odd ? 1 :  0); ny = y - 1;   break;   /* NE */
+    case 2: nx = x + (odd ? 0 : -1); ny = y - 1;   break;   /* NW */
+    case 3: nx = x - 1;                            break;   /* W  */
+    case 4: nx = x + (odd ? 0 : -1); ny = y + 1;   break;   /* SW */
+    case 5: nx = x + (odd ? 1 :  0); ny = y + 1;   break;   /* SE */
+    }
+    *nx_out = nx; *ny_out = ny;
+}
+
+static void rpg_animal_spook_kin(int x, int y, int variant) {
+    for (int k = 0; k < 6; k++) {
+        int nx, ny;
+        rpg_hex_neighbour(x, y, k, &nx, &ny);
+        if (nx < 0 || nx >= RPG_TILE_W || ny < 0 || ny >= RPG_TILE_H)
+            continue;
+        int ni = ny * RPG_TILE_W + nx;
+        if (rpg_cat_at[ni] != RC_ANIMAL) continue;
+        if (rpg_idx_at[ni] != (unsigned char)variant) continue;
+        rpg_animal_action    [ni] = AA_FLEE;
+        rpg_animal_action_ttl[ni] = AA_TTL_DEFAULT;
+    }
+}
+
+static int rpg_animal_near_plant(int x, int y) {
+    for (int k = 0; k < 6; k++) {
+        int nx, ny;
+        rpg_hex_neighbour(x, y, k, &nx, &ny);
+        if (nx < 0 || nx >= RPG_TILE_W || ny < 0 || ny >= RPG_TILE_H)
+            continue;
+        if (rpg_cat_at[ny * RPG_TILE_W + nx] == RC_PLANT) return 1;
+    }
+    return 0;
+}
 
 struct EntityCategory {
     char cat;
@@ -7242,6 +7331,31 @@ static int rpg_save_bundle(char *action) {
     return 0;
 }
 
+/* v0.2: shot-export port — write the next render's frame buffer
+ * to officerpg-shot.ans.  cat'ing the file in a same-sized
+ * terminal replays the rendering exactly (the file is just the
+ * ANSI escape sequence the terminal would have received).  The
+ * pending flag is checked by run_rpg's render loop just before
+ * fbflush — that timing means the file holds the SAME frame the
+ * user sees, with its status row's "shot →" confirmation included.
+ *
+ * Lowercase 'e' is the NE move so the export hotkey is uppercase
+ * 'E'; lowercase 's' is reserved (legacy) and shift+S is bundle-
+ * save, so this slot is the natural fit for an ANSI screenshot. */
+#define RPG_SHOT_FILE "officerpg-shot.ans"
+static int rpg_shot_pending = 0;
+
+static int rpg_save_shot_to_file(void) {
+    int fd = (int)op(RPG_SHOT_FILE,
+                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    static const char clr[] = "\033[2J\033[H";
+    wr(fd, clr, sizeof clr - 1);
+    wr(fd, fb, fbn);
+    cl(fd);
+    return 0;
+}
+
 /* v0.2: load bundle counterpart — Shift+L reads the file written
  * by Shift+S back into memory.  Validates the magic + version
  * before touching any in-memory state, so a stale or alien file
@@ -7306,6 +7420,11 @@ static void rpg_load_overworld(int spawn_x, int spawn_y) {
     rpg_init_entities(spawn_x, spawn_y);
     rpg_genome_live_cache = -1;
     mset(rpg_cell_done, 0, sizeof rpg_cell_done);
+    /* v0.2: animals just regenerated — drop any stale action
+     * state from the prior overworld so new spawns start in
+     * AA_WALK with no ghost timers. */
+    mset(rpg_animal_action,     0, sizeof rpg_animal_action);
+    mset(rpg_animal_action_ttl, 0, sizeof rpg_animal_action_ttl);
     rpg_anim_reset();
 }
 
@@ -7488,6 +7607,21 @@ static void rpg_path_tick(int player_x, int player_y) {
                 rpg_cat_at[idx] = 0;
                 rpg_idx_at[idx] = 0;
                 rpg_hp_at [idx] = 0;
+                /* v0.2: carry the action + TTL with the moving
+                 * animal, then bump to EAT briefly if it just
+                 * walked next to a plant cell.  Otherwise WALK
+                 * (no halo) is the default at the new cell. */
+                unsigned char a   = rpg_animal_action    [idx];
+                unsigned char ttl = rpg_animal_action_ttl[idx];
+                rpg_animal_action    [idx] = 0;
+                rpg_animal_action_ttl[idx] = 0;
+                if (rpg_animal_near_plant(nx, ny)) {
+                    rpg_animal_action    [nidx] = AA_EAT;
+                    rpg_animal_action_ttl[nidx] = AA_TTL_DEFAULT;
+                } else {
+                    rpg_animal_action    [nidx] = a;
+                    rpg_animal_action_ttl[nidx] = ttl;
+                }
             }
             int nstep = (step + 1) % n;
             unsigned char npid = rpg_path_id[idx];
@@ -7509,6 +7643,9 @@ static void rpg_path_tick(int player_x, int player_y) {
  *      Sprites are 3 cols wide × height rows tall, ' ' is transparent.
  * The player is drawn dead-last so nothing covers them. */
 static void rpg_render_view(int px, int py) {
+    /* v0.2: drop animal action TTLs once per render so attack /
+     * flee / eat halos fade back to walk after their window. */
+    rpg_animal_action_tick();
     int origin_y = g_rpg_fullscreen ? 0 : 1;
     int origin_x = (SCREEN_W - (RPG_VIS_W * RPG_CELL_W + RPG_CELL_W / 2)) / 2;
     if (origin_x < 0) origin_x = 0;
@@ -7597,6 +7734,26 @@ static void rpg_render_view(int px, int py) {
                     cup(sx, sy);
                     sgrbg(spal[pidx]);
                     fbs(" ");
+                }
+            }
+            /* v0.2: action-anim halo — paint a 1-cell coloured
+             * patch one row above the sprite top when the animal
+             * has a non-WALK action active.  Sits just outside
+             * the sprite's tallest pixel so it doesn't occlude
+             * the L-system shape. */
+            if (cat == RC_ANIMAL) {
+                unsigned char act = rpg_animal_action[idx];
+                if (act != AA_WALK) {
+                    int sy = base_y + 2 - h;
+                    if (sy >= origin_y &&
+                        sy < origin_y + rows_v * RPG_CELL_H) {
+                        int sx = art_x + RPG_SPRITE_W / 2;
+                        if (sx >= 0 && sx < SCREEN_W) {
+                            cup(sx, sy);
+                            sgrbg(rpg_animal_action_color[act & 3]);
+                            fbs(" ");
+                        }
+                    }
                 }
             }
         }
@@ -7698,14 +7855,23 @@ static int rpg_move(int *px, int *py, char c, char *msg) {
             int dmg_e = (int)(hx_rand() % 4) + 1;
             int dmg_p = (int)(hx_rand() % 3) + 1;
             int hp = rpg_hp_at[idx];
+            int variant_hit = rpg_idx_at[idx];
             hp = (hp > dmg_e) ? hp - dmg_e : 0;
             rpg_hp_at[idx] = (unsigned char)hp;
             int n = sapp(msg, 0, "hit ");
             n = sapp(msg, n, ec->name);
             n = sapp(msg, n, " for ");
             n += utoa((unsigned)dmg_e, msg + n);
+            /* v0.2 animal-action-anim: hit animal flips to ATTACK
+             * halo + every same-variant hex-neighbour to FLEE so
+             * the swing reads visibly as it happens. */
+            rpg_animal_action    [idx] = AA_ATTACK;
+            rpg_animal_action_ttl[idx] = AA_TTL_DEFAULT;
+            rpg_animal_spook_kin(nx, ny, variant_hit);
             if (hp == 0) {
                 rpg_cat_at[idx] = 0;
+                rpg_animal_action    [idx] = AA_WALK;
+                rpg_animal_action_ttl[idx] = 0;
                 n = sapp(msg, n, "; killed!");
             } else {
                 rpg_player.hp -= dmg_p;
@@ -8024,6 +8190,15 @@ static int run_rpg(int argc, char **argv) {
         hl = sapp(hint, hl, "wadezx=move i=inv m=zap l=live k=speeds 0-7=bend q ");
         hint[hl] = 0;
         status(hint);
+        /* v0.2: if a shot was requested by the previous key-handler
+         * (E pressed), capture the just-built frame buffer to disk
+         * BEFORE fbflush wipes it.  The file contains the exact
+         * ANSI sequence the terminal sees, so cat'ing it back
+         * replays the snapshot. */
+        if (rpg_shot_pending) {
+            rpg_save_shot_to_file();
+            rpg_shot_pending = 0;
+        }
         fbflush();
 
         if (rpg_player.hp <= 0) {
@@ -8112,6 +8287,16 @@ static int run_rpg(int argc, char **argv) {
         if (raw == 'S') {
             action[0] = 0;
             rpg_save_bundle(action);
+            idle_ticks = 0;
+            continue;
+        }
+        /* v0.2: 'E' (shift+e) — port of JS shot-export.  Sets the
+         * pending flag; the render loop captures fb to disk on the
+         * next frame so the file content matches the on-screen
+         * frame including this command's "shot →" confirmation. */
+        if (raw == 'E') {
+            rpg_shot_pending = 1;
+            action[sapp(action, 0, "shot → officerpg-shot.ans")] = 0;
             idle_ticks = 0;
             continue;
         }
