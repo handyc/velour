@@ -45,17 +45,28 @@ POLICIES = [
     {
         'slug': 'vibegames-push',
         'target': 'vibegames',
-        'title': 'Push via PUT /api/project/<slug>/<file>',
+        'title': 'Push via .vibeimport in #lobby (NOT the HTTP API)',
         'body': (
-            'Body shape: {"content": "<base64>", "encoding": "base64"}.\n'
-            'See manage.py h4ks_push for the canonical implementation.\n'
-            'Bearer token may or may not be required depending on the\n'
-            'deployment — a 403 "Invalid API Key" means set\n'
-            'H4KS_VIBEGAMES_TOKEN.\n'
+            'CONFIRMED 2026-05-09: the HTTP PUT /api/project/<slug>/<file>\n'
+            'endpoint requires a Bearer key we do not have, and that is\n'
+            'NOT the canonical workflow.  The real upload path is:\n'
             '\n'
-            'If a project is locked (Game.locked=True in the API DB),\n'
-            'you get 403 even with a valid key — ask an admin to\n'
-            'PUT /admin/lock/<name> with locked=false.'
+            '1. Host the file at a public URL.  Cleanest: commit to\n'
+            '   github.com/handyc/velour and use the raw.githubusercontent\n'
+            '   URL on main.  Same project name = next push is a new\n'
+            '   commit on that path; old versions stay reachable via git.\n'
+            '\n'
+            '2. Join #lobby on irc.h4ks.com (TLS 6697) and PRIVMSG:\n'
+            '       .vibeimport <slug>/<file> <raw_url>\n'
+            '   _cloudbot fetches the URL and registers/updates the\n'
+            '   game.  Confirmation comes back as a NOTICE with the\n'
+            '   live URL: https://<slug>.games.h4ks.com\n'
+            '\n'
+            '3. Iterate by re-pushing to the same git path AND repeating\n'
+            '   .vibeimport with the same slug.  No archive flooding.\n'
+            '\n'
+            'h4ks_push (HTTP PUT) is kept as a fallback for any deployment\n'
+            'that re-enables direct upload, but the real flow is IRC.'
         ),
     },
     {
@@ -85,14 +96,21 @@ POLICIES = [
     {
         'slug': 'irc-server',
         'target': 'irc',
-        'title': 'chat.h4ks.com IRC server',
+        'title': 'irc.h4ks.com:6697 (NOT chat.h4ks.com — cert mismatch)',
         'body': (
-            'Default to TLS port 6697.  Plain 6667 may also work.\n'
-            'Bot nicks should be prefixed "velour-" so anyone\n'
-            'observing immediately knows the message origin\n'
-            '(and can ignore/kickban without affecting the operator).\n'
-            'NickServ registration not required for ad-hoc bots — a\n'
-            'fresh nick per session is fine.'
+            'CONFIRMED 2026-05-09 by connecting:\n'
+            '  server   irc.h4ks.com\n'
+            '  port     6697\n'
+            '  TLS      yes (cert CN=irc.h4ks.com only;\n'
+            '           connecting to chat.h4ks.com fails SNI verify)\n'
+            '  password not needed for ad-hoc nicks\n'
+            '  registration: not required, but operator nick of choice\n'
+            '                is "hamburgerman" (per handyc 2026-05-09).\n'
+            '\n'
+            'Main channel is #lobby (NOT #h4ks).  cloudbot lives\n'
+            'there and answers .vibeimport.  Regulars seen 2026-05-09:\n'
+            'handyc (operator), mattf (vibegames maintainer/cloudbot),\n'
+            '_cloudbot (the channel bot itself).'
         ),
     },
     {
@@ -134,6 +152,11 @@ CONTACTS = [
     {'nick': 'doesnm',  'display': 'doesnm',
      'role': 'h4ks.com community member',
      'timezone': '', 'notes': ''},
+    {'nick': 'loudercake', 'display': 'loudercake',
+     'role': 'h4ks.com community member',
+     'timezone': '', 'notes':
+        'Friend of the channel; hamburgerman is fond of him alongside '
+        'mattf and handyc.  Greet warmly when seen, brief chats welcome.'},
 ]
 
 
