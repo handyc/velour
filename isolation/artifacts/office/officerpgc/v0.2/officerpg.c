@@ -7167,6 +7167,50 @@ static void rpg_player_init(void) {
     mset(rpg_player.cat_bend,   0, sizeof rpg_player.cat_bend);
 }
 
+/* v0.2: shot-bundle-full port — write the complete world state
+ * (mosaic + every entity layer + active ruleset + world-coord
+ * stack + player state) to a fixed file in cwd, mirroring the JS
+ * `s` hotkey from ev57.  No image is bundled (the C build renders
+ * to ANSI cells, not pixels); everything else needed to reproduce
+ * the world deterministically goes in.  Format is a magic+version
+ * header followed by the in-memory arrays back-to-back so reload
+ * is a straight read-into-place. */
+#define RPG_BUNDLE_FILE     "officerpg-state.bin"
+#define RPG_BUNDLE_MAGIC    0x52504731u   /* "RPG1" little-endian */
+#define RPG_BUNDLE_VERSION  1
+
+static int rpg_save_bundle(char *action) {
+    int fd = (int)op(RPG_BUNDLE_FILE,
+                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        if (action) action[sapp(action, 0, "save: open failed")] = 0;
+        return -1;
+    }
+    /* Header: magic, version, world coord stack flat. */
+    unsigned int hdr[2 + RPG_WORLD_LEVELS * 2];
+    hdr[0] = RPG_BUNDLE_MAGIC;
+    hdr[1] = RPG_BUNDLE_VERSION;
+    for (int i = 0; i < RPG_WORLD_LEVELS; i++) {
+        hdr[2 + i * 2    ] = (unsigned int)rpg_world_pos[i][0];
+        hdr[2 + i * 2 + 1] = (unsigned int)rpg_world_pos[i][1];
+    }
+    wr(fd, hdr, sizeof hdr);
+    /* Mosaic + entity layers (192*192 each = 36864 B). */
+    wr(fd, rpg_map,        sizeof rpg_map);
+    wr(fd, rpg_cat_at,     sizeof rpg_cat_at);
+    wr(fd, rpg_npc_at,     sizeof rpg_npc_at);
+    wr(fd, rpg_idx_at,     sizeof rpg_idx_at);
+    wr(fd, rpg_hp_at,      sizeof rpg_hp_at);
+    /* Active hex CA ruleset (4096 B in this layout). */
+    wr(fd, hx_seed_genome, sizeof hx_seed_genome);
+    /* Player snapshot — hp/mp/inv/skill/bend caps. */
+    wr(fd, &rpg_player,    sizeof rpg_player);
+    cl(fd);
+    if (action)
+        action[sapp(action, 0, "saved bundle → officerpg-state.bin")] = 0;
+    return 0;
+}
+
 /* Re-seed the RNG from the world coord stack and regenerate the
  * 3×3 mosaic + entities.  spawn (x, y) is in mosaic coords (0..192)
  * and determines the 3×3 clear-zone around the player's entry point.
@@ -7966,8 +8010,18 @@ static int run_rpg(int argc, char **argv) {
             idle_ticks = 0;
             continue;
         }
-        char c = k[0];
+        char raw = k[0];
+        char c = raw;
         if (c >= 'A' && c <= 'Z') c += 32;
+        /* v0.2: 'S' (shift+s) writes the full world state to disk —
+         * port of JS shot-bundle-full.  Lowercase 's' stays reserved
+         * for future use as it has been since office50. */
+        if (raw == 'S') {
+            action[0] = 0;
+            rpg_save_bundle(action);
+            idle_ticks = 0;
+            continue;
+        }
         if (c == 's') continue;   /* reserved */
         action[0] = 0;
         rpg_move(&px, &py, c, action);
