@@ -33,6 +33,7 @@ urlpatterns = [
     path('cartography/', include('cartography.urls')),
     path('hpc/', include('hpc.urls')),
     path('tiles/', include('tiles.urls')),
+    path('tessera/', include('tessera.urls')),
     path('gridprint/', include('gridprint.urls')),
     path('forge/', include('forge.urls')),
     path('condenser/', include('condenser.urls')),

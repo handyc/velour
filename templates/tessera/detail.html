@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ set.name }} — Tessera{% endblock %}
+{% block content %}
+<style>
+  .tess-grid { border-collapse: collapse; }
+  .tess-grid td { padding: 0; border: 0; }
+  .tess-grid img {
+    display: block;
+    width: 64px; height: 64px;
+    image-rendering: pixelated;
+  }
+  .tess-source { display: inline-block; margin-right: 6px;
+                 padding: 2px; background: #111;
+                 border: 1px solid #333; }
+  .tess-source img { display: block; width: 96px; height: 96px;
+                     image-rendering: pixelated; }
+  .tess-source span { display: block; text-align: center;
+                      color: #888; font-size: 0.7rem; padding-top: 2px; }
+  .tess-meta { color: #888; font-size: 0.85rem; }
+  .tess-meta a { color: #ace; }
+</style>
+
+<p>
+  <a href="{% url 'tessera:index' %}" style="color:#888;">← back</a>
+</p>
+<h1 style="margin-bottom: 4px;">{{ set.name }}</h1>
+<p class="tess-meta">
+  seed {{ set.seed }} &middot; {{ set.tile_px }}px tiles &middot;
+  {{ set.get_method_display }} &middot; blend power
+  {{ set.blend_power }} &middot; created
+  {{ set.created_at|date:"D d M Y H:i" }}
+  &middot;
+  <a href="{% url 'tessera:tiling' set.slug %}">tiling test →</a>
+</p>
+
+<h2 style="margin-top: 24px; font-size: 1rem;">Edge sources</h2>
+<p class="tess-meta">
+  One toroidally-tileable image per colour.  Every tile in the set
+  whose Nth edge is colour <em>c</em> samples its top row from
+  source <em>c</em>; vertical / horizontal wrap of each source is
+  what makes adjacent-tile seams identical.
+</p>
+<div>
+  {% for c in "0123" %}
+  <div class="tess-source">
+    <img src="{% url 'tessera:source-png' set.slug c %}"
+         alt="source colour {{ c }}">
+    <span>colour {{ c }}</span>
+  </div>
+  {% endfor %}
+</div>
+
+<h2 style="margin-top: 24px; font-size: 1rem;">All 256 tiles</h2>
+<p class="tess-meta">
+  Row index = (north_colour × 4 + east_colour); column index =
+  (south_colour × 4 + west_colour).  Each cell shows tile id
+  <code>nesw</code>.  Click any tile to see it full-size.
+</p>
+<table class="tess-grid">
+  {% for row in grid %}
+  <tr>
+    {% for tid in row %}
+    <td>
+      <a href="{% url 'tessera:tile-png' set.slug tid %}"
+         title="tile {{ tid }}">
+        <img src="{% url 'tessera:tile-png' set.slug tid %}"
+             alt="tile {{ tid }}">
+      </a>
+    </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

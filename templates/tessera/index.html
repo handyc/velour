@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Tessera{% endblock %}
+{% block content %}
+<style>
+  .tess-row { padding: 6px 0; border-bottom: 1px solid #1a1a1a; }
+  .tess-row a { color: #cfc; }
+  .tess-meta { color: #777; font-size: 0.85rem; }
+  .tess-form input, .tess-form select {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; }
+  .tess-form { margin-top: 16px; padding: 10px;
+               border: 1px dashed #444; border-radius: 4px; }
+  .tess-form label { display: inline-block; min-width: 90px;
+                     color: #aaa; }
+</style>
+
+<h1 style="margin-bottom: 4px;">Tessera</h1>
+<p style="color:#888; max-width: 60em; margin-top: 0;">
+  Seamless 4-edge-color square Wang tile sets.  Each set generates the
+  full 4<sup>4</sup>=256-tile catalogue from four toroidally-tileable
+  source images blended via inverse-distance weighting from each edge.
+  Adjacent tiles sharing a colour sample <em>the same pixel of the same
+  source</em> across the seam, so seamlessness is a topological property
+  of the construction rather than a stitching pass.
+</p>
+
+{% if sets %}
+  <h2 style="margin-top: 24px; font-size: 1.05rem;">Existing sets</h2>
+  {% for s in sets %}
+  <div class="tess-row">
+    <a href="{% url 'tessera:detail' s.slug %}">{{ s.name }}</a>
+    <span class="tess-meta">
+      &middot; seed {{ s.seed }} &middot; {{ s.tile_px }}px
+      &middot; {{ s.get_method_display }}
+      &middot; {{ s.created_at|date:"D d M Y H:i" }}
+    </span>
+  </div>
+  {% endfor %}
+{% else %}
+  <p style="color:#888;"><em>No sets yet.  Create one below.</em></p>
+{% endif %}
+
+<form class="tess-form" method="post" action="{% url 'tessera:create' %}">
+  {% csrf_token %}
+  <h2 style="margin-top: 0; font-size: 1.05rem;">New set</h2>
+  <div><label>name</label>
+    <input type="text" name="name" required style="width: 24em;">
+  </div>
+  <div style="margin-top: 6px;"><label>seed</label>
+    <input type="number" name="seed" value="0" style="width: 8em;">
+  </div>
+  <div style="margin-top: 6px;"><label>method</label>
+    <select name="method">
+      <option value="fbm-tileable">fBm noise (toroidally tileable)</option>
+      <option value="domain-warp">fBm + domain warp</option>
+      <option value="hex-ca">Hex CA evolved</option>
+    </select>
+  </div>
+  <div style="margin-top: 10px;">
+    <button type="submit"
+            style="background:#222; color:#cfc;
+                   border:1px solid #555; padding:6px 14px;
+                   font-family:inherit;">Generate 256-tile set</button>
+  </div>
+</form>
+{% endblock %}

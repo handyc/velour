@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     'oracle',
     'hpc',
     'tiles',
+    'tessera',
     'condenser',
     'automaton',
     'aether',

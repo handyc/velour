@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ set.name }} tiling — Tessera{% endblock %}
+{% block content %}
+<style>
+  .tess-tile-grid { border-collapse: collapse; }
+  .tess-tile-grid td { padding: 0; border: 0; }
+  .tess-tile-grid img {
+    display: block;
+    width: 96px; height: 96px;
+    image-rendering: pixelated;
+  }
+  .tess-meta { color: #888; font-size: 0.85rem; }
+  .tess-meta a { color: #ace; }
+  .tess-meta input { background: #111; color: #ccc;
+                     border: 1px solid #333; padding: 2px 4px;
+                     width: 5em; }
+</style>
+
+<p>
+  <a href="{% url 'tessera:detail' set.slug %}" style="color:#888;">←
+  {{ set.name }}</a>
+</p>
+<h1 style="margin-bottom: 4px;">{{ set.name }} — tiling test</h1>
+<p class="tess-meta">
+  Wang-legal layout: each tile's north edge matches the tile above;
+  west edge matches the tile left.  If the source-image construction
+  is genuinely toroidal and IDW is doing its job, the seams between
+  cells should be invisible — even when zoomed in.
+</p>
+
+<form method="get" class="tess-meta" style="margin: 10px 0;">
+  rows <input type="number" name="rows" value="{{ rows }}" min="1" max="24">
+  cols <input type="number" name="cols" value="{{ cols }}" min="1" max="32">
+  seed <input type="number" name="seed" value="0">
+  <button type="submit"
+          style="background:#222; color:#cfc;
+                 border:1px solid #555; padding:2px 10px;
+                 font-family:inherit;">re-roll</button>
+</form>
+
+<table class="tess-tile-grid">
+  {% for row in grid_ids %}
+  <tr>
+    {% for tid in row %}
+    <td>
+      <img src="{% url 'tessera:tile-png' set.slug tid %}"
+           alt="tile {{ tid }}">
+    </td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
