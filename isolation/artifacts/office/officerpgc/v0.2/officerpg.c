@@ -8154,39 +8154,70 @@ static int run_screensaver(int argc, char **argv) {
     /* Journey-planner state.  Heading is rotated through the 6 hex
      * slots; ring tracks the last few visited cells for oscillation
      * detection; chaos counter forces N random-walk ticks after we
-     * spot a position repeat 3+ times in the ring. */
-    int journey_heading = (int)((s >> 17) % 6);
-    int journey_steps   = 0;
-    int journey_chaos   = 0;
+     * spot a position repeat 3+ times in the ring.
+     *
+     * autoplay-stuck (ev45 escalation ladder): each successive
+     * chaos trigger within RPG_JOURNEY_RESTUCK ticks of the previous
+     * one bumps `chaos_level` up — bigger heading kick on exit and
+     * longer random-walk burst.  A clean run (no restuck for
+     * RPG_JOURNEY_CALM ticks) resets the level back to 1. */
+    int journey_heading      = (int)((s >> 17) % 6);
+    int journey_steps        = 0;        /* since last drift     */
+    int journey_total_steps  = 0;        /* since session start  */
+    int journey_chaos        = 0;        /* random-walk counter  */
+    int journey_chaos_level  = 1;        /* L1..L3 escalation    */
+    int journey_last_chaos   = -1000;    /* tick of last burst   */
     short journey_ring[RPG_JOURNEY_RING][2];
     for (int i = 0; i < RPG_JOURNEY_RING; i++) {
         journey_ring[i][0] = -1; journey_ring[i][1] = -1;
     }
     int journey_ring_n = 0;
 
+    static const signed char rpg_chaos_ticks[4] = { 8, 8, 16, 24 };
+
     for (;;) {
         unsigned char k[8];
         int n = read_key(k, sizeof k);
         if (n > 0) break;
 
+        journey_total_steps++;
+
         /* Oscillation detection — count how many ring entries match
          * the player's current cell.  3+ hits in a 6-cell ring is a
          * clear A↔B bounce or U-turn, so trigger a chaos burst. */
+        int chaos_will_start = 0;
         if (journey_chaos == 0) {
             int hits = 0;
             for (int i = 0; i < journey_ring_n; i++)
                 if (journey_ring[i][0] == px && journey_ring[i][1] == py)
                     hits++;
-            if (hits >= 3) journey_chaos = 8;
+            if (hits >= 3) chaos_will_start = 1;
         }
+        if (chaos_will_start) {
+            int delta = journey_total_steps - journey_last_chaos;
+            if (delta < 60 && journey_chaos_level < 3)
+                journey_chaos_level++;
+            else if (delta >= 200)
+                journey_chaos_level = 1;
+            journey_chaos       = rpg_chaos_ticks[journey_chaos_level];
+            journey_last_chaos  = journey_total_steps;
+        }
+
+        int prev_chaos = journey_chaos;
         if (journey_chaos > 0) journey_chaos--;
+
         /* Heading drift — every ~30 steps, rotate ±1 slot so the run
          * doesn't pin to one azimuth indefinitely.  At chaos exit we
-         * also kick by ±2 slots so the resume direction isn't the
-         * same one that got stuck. */
+         * kick by chaos_level slots so the resume direction isn't
+         * the same one that got stuck — bigger kick at higher
+         * escalation. */
         journey_steps++;
-        if (journey_chaos == 0 && journey_steps == 1)
-            journey_heading = (journey_heading + 4 + (int)(s & 3)) % 6;
+        if (prev_chaos > 0 && journey_chaos == 0) {
+            s = s * 6364136223846793005UL + 1442695040888963407UL;
+            int kick = journey_chaos_level;
+            int sign = ((s >> 33) & 1) ? 1 : -1;
+            journey_heading = ((journey_heading + sign * kick) % 6 + 6) % 6;
+        }
         if (journey_steps >= 30) {
             journey_steps = 0;
             s = s * 6364136223846793005UL + 1442695040888963407UL;
