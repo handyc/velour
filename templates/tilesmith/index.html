@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Tilesmith{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.3rem; margin: 0 0 0.2rem; }
+  .wrap h2 { font-size: 0.95rem; margin: 1.6rem 0 0.4rem;
+             color: #8b949e; text-transform: uppercase;
+             letter-spacing: 0.05em; font-weight: 500; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 12px; }
+  .card { background: #0d1117; border: 1px solid #21262d; border-radius: 6px;
+          padding: 10px; transition: border-color 0.1s; }
+  .card:hover { border-color: #58a6ff; }
+  .card a { color: #58a6ff; text-decoration: none; font-weight: 500; }
+  .card .meta { font-size: 0.72rem; color: #6e7681; margin-top: 4px; }
+  .preset-tag { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
+                background: #1a2a3a; color: #79c0ff; border: 1px solid #2a4a6a;
+                letter-spacing: 0.04em; }
+  .new-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+             padding: 0.45rem 0.9rem; border-radius: 4px;
+             font-size: 0.85rem; text-decoration: none; display: inline-block;
+             margin-top: 6px; }
+  .new-btn:hover { background: #30363d; }
+  form.new { display: flex; gap: 8px; align-items: center; }
+  form.new input, form.new select { background: #0d1117;
+    border: 1px solid #21262d; color: #c9d1d9; padding: 4px 8px;
+    border-radius: 4px; font-family: inherit; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <h1>Tilesmith</h1>
+  <p class="hint">Edit a tile shape; modifications on one edge are
+    auto-mirrored on its lattice twin so the result always tessellates
+    as offset-hex.  3 starter presets below; clone any to begin.</p>
+
+  <h2>New tile</h2>
+  <form class="new" method="post" action="{% url 'tilesmith:create' %}">
+    {% csrf_token %}
+    <input type="text" name="name" placeholder="Tile name" required>
+    <select name="clone_from">
+      <option value="">— blank rectangle —</option>
+      {% for p in presets %}
+        <option value="{{ p.slug }}">clone preset: {{ p.name }}</option>
+      {% endfor %}
+    </select>
+    <button class="new-btn" type="submit">Create</button>
+  </form>
+
+  <h2>Presets</h2>
+  <div class="grid">
+    {% for p in presets %}
+      <div class="card">
+        <a href="{% url 'tilesmith:edit' p.slug %}">{{ p.name }}</a>
+        <span class="preset-tag">preset</span>
+        <div class="meta">{{ p.base_w }}×{{ p.base_h }} ·
+          {{ p.lattice }} · read-only</div>
+      </div>
+    {% empty %}
+      <p style="color:#6e7681;">no presets — run
+        <code>manage.py seed_tilesmith</code></p>
+    {% endfor %}
+  </div>
+
+  <h2>Your tiles</h2>
+  <div class="grid">
+    {% for s in specs %}
+      <div class="card">
+        <a href="{% url 'tilesmith:edit' s.slug %}">{{ s.name }}</a>
+        <div class="meta">{{ s.base_w }}×{{ s.base_h }} ·
+          {{ s.lattice }} · updated {{ s.updated_at|date:"Y-m-d H:i" }}</div>
+      </div>
+    {% empty %}
+      <p style="color:#6e7681;font-style:italic;">no custom tiles yet</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

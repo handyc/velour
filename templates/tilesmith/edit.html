@@ -1,0 +1,601 @@
+{% extends "base.html" %}
+
+{% block title %}{{ spec.name }} — Tilesmith{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1280px; margin: 1rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .wrap h1 { font-size: 1.15rem; margin: 0 0 0.4rem;
+             display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .wrap h1 input { background: #0d1117; border: 1px solid #21262d;
+    color: #c9d1d9; padding: 4px 8px; border-radius: 4px;
+    font-family: inherit; font-size: 1.1rem; }
+  .nav { font-size: 0.8rem; color: #6e7681; }
+  .nav a { color: #58a6ff; text-decoration: none; margin-right: 12px; }
+  .preset-tag { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
+                background: #1a2a3a; color: #79c0ff; border: 1px solid #2a4a6a;
+                letter-spacing: 0.04em; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+           margin-top: 12px; }
+  .pane { background: #0d1117; border: 1px solid #21262d;
+          border-radius: 6px; padding: 10px; }
+  .pane h3 { font-size: 0.78rem; margin: 0 0 8px;
+             color: #8b949e; text-transform: uppercase;
+             letter-spacing: 0.05em; font-weight: 500; }
+  canvas { background: #050a10; display: block; border-radius: 4px;
+           cursor: crosshair; image-rendering: pixelated; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px;
+              margin-top: 10px; align-items: center; font-size: 0.8rem; }
+  .controls label { display: flex; align-items: center; gap: 4px; }
+  .controls input[type=number] { background: #0d1117;
+    border: 1px solid #21262d; color: #c9d1d9; padding: 3px 6px;
+    border-radius: 4px; width: 60px; font-family: inherit; }
+  button, .btn { background: #21262d; border: 1px solid #30363d;
+    color: #c9d1d9; padding: 0.35rem 0.7rem; border-radius: 4px;
+    font-size: 0.78rem; cursor: pointer; font-family: inherit;
+    text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { background: #30363d; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:hover { background: #388bfd; }
+  button.danger { background: #21262d; border-color: #f85149; color: #f85149; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .legend { color: #6e7681; font-size: 0.72rem; line-height: 1.4; }
+  .legend kbd { background: #1a1a1a; border: 1px solid #333;
+                padding: 0 4px; border-radius: 2px; color: #aaa;
+                font-family: ui-monospace, monospace; }
+  details { margin-top: 12px; }
+  details summary { cursor: pointer; color: #8b949e; font-size: 0.78rem;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+  details textarea { width: 100%; min-height: 120px; background: #050a10;
+    color: #c9d1d9; border: 1px solid #21262d; border-radius: 4px;
+    padding: 8px; font-family: ui-monospace, monospace; font-size: 0.75rem;
+    margin-top: 6px; }
+  .save-status { font-size: 0.72rem; color: #6e7681; }
+  .save-status.saved { color: #2ea043; }
+  .save-status.error { color: #f85149; }
+  .pair-color-0 { color: #f0883e; }
+  .pair-color-1 { color: #79c0ff; }
+  .pair-color-2 { color: #d2a8ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <p class="nav">
+    <a href="{% url 'tilesmith:index' %}">← Tilesmith</a>
+    {% if spec.is_preset %}<span class="preset-tag">preset (read-only)</span>{% endif %}
+  </p>
+  <h1>
+    <input type="text" id="tileName" value="{{ spec.name }}"
+      {% if spec.is_preset %}readonly{% endif %}>
+    <span class="save-status" id="saveStatus">·</span>
+  </h1>
+
+  <div class="panes">
+    <div class="pane">
+      <h3>Edit single tile
+        <span style="float:right;font-weight:400;text-transform:none;
+          letter-spacing:0;color:#6e7681;">
+          click an edge to add a control point ·
+          drag a CP perpendicular to its edge ·
+          right-click to delete</span></h3>
+      <canvas id="editCanvas" width="500" height="500"></canvas>
+      <div class="controls">
+        <label>W <input type="number" id="baseW"
+          value="{{ spec.base_w }}" min="8" max="1024"
+          {% if spec.is_preset %}readonly{% endif %}></label>
+        <label>H <input type="number" id="baseH"
+          value="{{ spec.base_h }}" min="8" max="1024"
+          {% if spec.is_preset %}readonly{% endif %}></label>
+        <button id="resetBtn"
+          {% if spec.is_preset %}disabled{% endif %}>Reset to rectangle</button>
+        <button id="presetMenuBtn"
+          {% if spec.is_preset %}disabled{% endif %}>Load preset…</button>
+        <span style="flex:1"></span>
+        <button id="saveBtn" class="primary"
+          {% if spec.is_preset %}disabled{% endif %}>Save</button>
+        {% if not spec.is_preset %}
+          <form method="post" action="{% url 'tilesmith:delete' spec.slug %}"
+            style="display:inline;"
+            onsubmit="return confirm('Delete this tile?');">
+            {% csrf_token %}
+            <button class="danger">Delete</button>
+          </form>
+        {% endif %}
+      </div>
+      <p class="legend">Edge colours:
+        <span class="pair-color-0">pair A (right ↔ left)</span>,
+        <span class="pair-color-1">pair B (TR-half ↔ BL-half)</span>,
+        <span class="pair-color-2">pair C (TL-half ↔ BR-half)</span>.
+        Each pair is one boundary; editing either side mirrors to the other.</p>
+    </div>
+
+    <div class="pane">
+      <h3>Tessellation preview · offset-hex
+        <span style="float:right;font-weight:400;text-transform:none;
+          letter-spacing:0;color:#6e7681;">
+          live · 6×4 grid</span></h3>
+      <canvas id="tessCanvas" width="500" height="500"></canvas>
+      <p class="legend" style="margin-top:8px;">
+        Identical tiles laid in the offset-hex pattern that
+        officerpg uses (odd rows shifted +W/2).  If your edits
+        aren't tessellating cleanly, that's a bug — speak up.</p>
+    </div>
+  </div>
+
+  <details>
+    <summary>JSON spec</summary>
+    <textarea id="jsonView" spellcheck="false"
+      {% if spec.is_preset %}readonly{% endif %}></textarea>
+    <p class="legend">Edits to the JSON apply when you click outside
+      the box.  Round-trippable — copy/paste between tiles or save
+      to a file.</p>
+  </details>
+</div>
+
+<script>
+"use strict";
+
+/* ── Tilesmith edit page ────────────────────────────────────
+ * Tile model:
+ *   tile = { name, base_w, base_h, edges }
+ *   edges = [edge0, edge1, edge2, edge3, edge4, edge5]
+ *   each edge = sorted array of {p ∈ (0,1), off ∈ ℝ}
+ *
+ * Edge layout (CW around tile in canvas coords):
+ *   0 top-left half      (0,0) → (W/2, 0)        outward = (0, -1)
+ *   1 top-right half     (W/2, 0) → (W, 0)       outward = (0, -1)
+ *   2 right              (W, 0) → (W, H)         outward = (+1, 0)
+ *   3 bottom-right half  (W, H) → (W/2, H)       outward = (0, +1)
+ *   4 bottom-left half   (W/2, H) → (0, H)       outward = (0, +1)
+ *   5 left               (0, H) → (0, 0)         outward = (-1, 0)
+ *
+ * Lattice-twin pairs (offset-hex):
+ *   0 ↔ 3, 1 ↔ 4, 2 ↔ 5
+ *
+ * Mirror invariant: edge i's CP at (p, d) twins to edge PAIR[i]'s
+ * CP at (1-p, -d).  We always store both; mirrorEdge() recomputes
+ * one side from the other after any edit.
+ */
+
+const SLUG     = {{ spec.slug|safe|default:'""' }};
+const IS_PRESET = {{ spec.is_preset|yesno:"true,false" }};
+const SAVE_URL = "{% url 'tilesmith:save' spec.slug %}";
+const CSRF     = "{{ csrf_token }}";
+
+const PAIR = [3, 4, 5, 0, 1, 2];
+
+const EDGE_GEOM = [
+  /* start, end, outward (in tile coords with H mapped via base_h) */
+  { startX: 0,    startY: 0,    endX: 0.5, endY: 0,   outX: 0,  outY: -1, pair: 0 },
+  { startX: 0.5,  startY: 0,    endX: 1,   endY: 0,   outX: 0,  outY: -1, pair: 1 },
+  { startX: 1,    startY: 0,    endX: 1,   endY: 1,   outX: 1,  outY:  0, pair: 2 },
+  { startX: 1,    startY: 1,    endX: 0.5, endY: 1,   outX: 0,  outY: +1, pair: 0 },
+  { startX: 0.5,  startY: 1,    endX: 0,   endY: 1,   outX: 0,  outY: +1, pair: 1 },
+  { startX: 0,    startY: 1,    endX: 0,   endY: 0,   outX: -1, outY:  0, pair: 2 },
+];
+
+const PAIR_COLOR = ["#f0883e", "#79c0ff", "#d2a8ff"];
+
+const tile = {
+  name:   {{ spec.name|default:'""'|safe|stringformat:"r" }},
+  base_w: {{ spec.base_w }},
+  base_h: {{ spec.base_h }},
+  edges:  {{ edges_json|safe }},
+};
+if (!Array.isArray(tile.edges) || tile.edges.length !== 6) {
+  tile.edges = [[], [], [], [], [], []];
+}
+tile.edges.forEach((e, i) => { if (!Array.isArray(e)) tile.edges[i] = []; });
+
+/* Mirror edge `src` → edge `dst`.  dst[k].p = 1 - src.reverse[k].p,
+ * dst[k].off = -src.reverse[k].off — reversal keeps p sorted. */
+function mirrorEdge(src) {
+  return src.slice().reverse().map(cp => ({
+    p:   1 - cp.p,
+    off: -cp.off,
+  }));
+}
+function syncMirror(edgeIdx) {
+  const twin = PAIR[edgeIdx];
+  tile.edges[twin] = mirrorEdge(tile.edges[edgeIdx]);
+}
+
+/* Coordinate conversion: tile-units → canvas px on the editor.
+ * Editor canvas is 500×500 with a margin so bumps have room. */
+const editCanvas = document.getElementById("editCanvas");
+const editCtx = editCanvas.getContext("2d");
+const EDIT_MARGIN = 80;        /* px reserved on each side for outward bumps */
+
+function tileToEditPx(tx, ty) {
+  /* tx, ty in tile coords [0..1].  Map to canvas. */
+  const innerW = editCanvas.width  - 2 * EDIT_MARGIN;
+  const innerH = editCanvas.height - 2 * EDIT_MARGIN;
+  return [EDIT_MARGIN + tx * innerW, EDIT_MARGIN + ty * innerH];
+}
+function editPxToTile(px, py) {
+  const innerW = editCanvas.width  - 2 * EDIT_MARGIN;
+  const innerH = editCanvas.height - 2 * EDIT_MARGIN;
+  return [(px - EDIT_MARGIN) / innerW, (py - EDIT_MARGIN) / innerH];
+}
+/* Tile-unit perpendicular displacement amounts to "off" in our
+ * stored offsets.  Treat off as a fraction of base_w (so off=1
+ * = full tile width displacement).  In editor px the perp shows
+ * as off * (innerW or innerH depending on edge orientation). */
+function offToEditPx(off, edgeIdx) {
+  const g = EDGE_GEOM[edgeIdx];
+  const innerW = editCanvas.width  - 2 * EDIT_MARGIN;
+  const innerH = editCanvas.height - 2 * EDIT_MARGIN;
+  /* Vertical edges (left/right): outward in x — scale by innerW. */
+  if (g.outX !== 0) return [g.outX * off * innerW / tile.base_w, 0];
+  /* Horizontal edges (top/bottom): outward in y — scale by innerH. */
+  return [0, g.outY * off * innerH / tile.base_h];
+}
+
+/* Compute the (canvas px) point on edge i at parameter p with
+ * perpendicular offset off.  Returns [x, y]. */
+function edgePoint(edgeIdx, p, off) {
+  const g = EDGE_GEOM[edgeIdx];
+  const tx = g.startX + p * (g.endX - g.startX);
+  const ty = g.startY + p * (g.endY - g.startY);
+  const [px, py]   = tileToEditPx(tx, ty);
+  const [dx, dy]   = offToEditPx(off, edgeIdx);
+  return [px + dx, py + dy];
+}
+
+/* Trace the full tile boundary as an SVG-style path on the given
+ * 2D context, starting at the top-left corner.  At any non-corner
+ * control points along an edge we line through that point.  Caller
+ * controls fill/stroke. */
+function tracePath(ctx, originX, originY, scaleW, scaleH) {
+  /* Helper: where is point (tx, ty) in tile-unit space, mapped to
+   * (originX + tx*scaleW, originY + ty*scaleH), with offset perp
+   * scaled the same way. */
+  function pt(tx, ty, dxOff, dyOff) {
+    return [originX + tx * scaleW + dxOff,
+            originY + ty * scaleH + dyOff];
+  }
+  /* Per-edge offsets in pixel space — scale off by tile_w fraction. */
+  function offToPx(off, g) {
+    if (g.outX !== 0) return [g.outX * off * scaleW / tile.base_w, 0];
+    return [0, g.outY * off * scaleH / tile.base_h];
+  }
+  /* Start at corner (0,0). */
+  let [x0, y0] = pt(0, 0, 0, 0);
+  ctx.moveTo(x0, y0);
+  for (let i = 0; i < 6; i++) {
+    const g = EDGE_GEOM[i];
+    /* CPs in order, then end corner. */
+    for (const cp of tile.edges[i]) {
+      const tx = g.startX + cp.p * (g.endX - g.startX);
+      const ty = g.startY + cp.p * (g.endY - g.startY);
+      const [dx, dy] = offToPx(cp.off, g);
+      ctx.lineTo(originX + tx * scaleW + dx,
+                 originY + ty * scaleH + dy);
+    }
+    /* End corner of this edge. */
+    const [ex, ey] = pt(g.endX, g.endY, 0, 0);
+    ctx.lineTo(ex, ey);
+  }
+  ctx.closePath();
+}
+
+function drawEditCanvas() {
+  editCtx.fillStyle = "#050a10";
+  editCtx.fillRect(0, 0, editCanvas.width, editCanvas.height);
+
+  /* Tile baseline rectangle (faint guide). */
+  const [r0x, r0y] = tileToEditPx(0, 0);
+  const [r1x, r1y] = tileToEditPx(1, 1);
+  editCtx.strokeStyle = "#222";
+  editCtx.lineWidth = 1;
+  editCtx.setLineDash([3, 4]);
+  editCtx.strokeRect(r0x, r0y, r1x - r0x, r1y - r0y);
+  editCtx.setLineDash([]);
+
+  /* Mid-line marker at top/bottom (where the half-edges split). */
+  const [mxa, mya] = tileToEditPx(0.5, 0);
+  const [mxb, myb] = tileToEditPx(0.5, 1);
+  editCtx.strokeStyle = "#1a2a3a";
+  editCtx.beginPath();
+  editCtx.moveTo(mxa, mya - 5); editCtx.lineTo(mxa, mya + 5);
+  editCtx.moveTo(mxb, myb - 5); editCtx.lineTo(mxb, myb + 5);
+  editCtx.stroke();
+
+  /* Trace + fill the tile boundary. */
+  const innerW = editCanvas.width  - 2 * EDIT_MARGIN;
+  const innerH = editCanvas.height - 2 * EDIT_MARGIN;
+  editCtx.beginPath();
+  tracePath(editCtx, EDIT_MARGIN, EDIT_MARGIN, innerW, innerH);
+  editCtx.fillStyle = "#1a2a3a";
+  editCtx.fill();
+
+  /* Re-stroke each edge in its pair colour. */
+  for (let i = 0; i < 6; i++) {
+    const g = EDGE_GEOM[i];
+    editCtx.strokeStyle = PAIR_COLOR[g.pair];
+    editCtx.lineWidth = 2.4;
+    editCtx.beginPath();
+    let [px, py] = edgePoint(i, 0, 0);
+    editCtx.moveTo(px, py);
+    for (const cp of tile.edges[i]) {
+      [px, py] = edgePoint(i, cp.p, cp.off);
+      editCtx.lineTo(px, py);
+    }
+    [px, py] = edgePoint(i, 1, 0);
+    editCtx.lineTo(px, py);
+    editCtx.stroke();
+  }
+
+  /* Control points. */
+  for (let i = 0; i < 6; i++) {
+    const col = PAIR_COLOR[EDGE_GEOM[i].pair];
+    for (let j = 0; j < tile.edges[i].length; j++) {
+      const cp = tile.edges[i][j];
+      const [px, py] = edgePoint(i, cp.p, cp.off);
+      editCtx.fillStyle = col;
+      editCtx.beginPath();
+      editCtx.arc(px, py, 5, 0, Math.PI * 2);
+      editCtx.fill();
+      editCtx.strokeStyle = "#0d1117";
+      editCtx.lineWidth = 1.5;
+      editCtx.stroke();
+    }
+  }
+
+  /* Tile corner markers. */
+  editCtx.fillStyle = "#444";
+  for (const [tx, ty] of [[0,0],[0.5,0],[1,0],[1,1],[0.5,1],[0,1]]) {
+    const [px, py] = tileToEditPx(tx, ty);
+    editCtx.fillRect(px - 1.5, py - 1.5, 3, 3);
+  }
+}
+
+/* ── Tessellation preview ──────────────────────────────────── */
+const tessCanvas = document.getElementById("tessCanvas");
+const tessCtx = tessCanvas.getContext("2d");
+function drawTess() {
+  tessCtx.fillStyle = "#050a10";
+  tessCtx.fillRect(0, 0, tessCanvas.width, tessCanvas.height);
+
+  const COLS = 6, ROWS = 5;
+  /* Each tile occupies tileW × tileH in canvas px.  Account for
+   * outward bumps by reserving padding equal to max abs(off)
+   * estimated via the actual edges_json. */
+  const maxOff = (() => {
+    let m = 0;
+    for (const e of tile.edges) for (const cp of e) {
+      if (Math.abs(cp.off) > m) m = Math.abs(cp.off);
+    }
+    return m;
+  })();
+  const padFrac = maxOff / Math.max(1, tile.base_w);
+  const tilePx = Math.floor(
+    Math.min((tessCanvas.width  - tessCanvas.width  * 2 * padFrac) / (COLS + 0.5),
+             (tessCanvas.height - tessCanvas.height * 2 * padFrac) / ROWS));
+  const padX = (tessCanvas.width  - tilePx * (COLS + 0.5)) / 2;
+  const padY = (tessCanvas.height - tilePx * ROWS)         / 2;
+
+  /* Draw tiles with row offset (offset-hex). */
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const ox = padX + col * tilePx + (row % 2 ? tilePx / 2 : 0);
+      const oy = padY + row * tilePx;
+      tessCtx.beginPath();
+      tracePath(tessCtx, ox, oy, tilePx, tilePx);
+      /* Alternating fills for visual separation. */
+      const hue = ((col * 7 + row * 13) % 80) + 200;
+      tessCtx.fillStyle = `hsl(${hue}, 30%, ${22 + ((col + row) % 2) * 6}%)`;
+      tessCtx.fill();
+      tessCtx.strokeStyle = "#0d1117";
+      tessCtx.lineWidth = 1;
+      tessCtx.stroke();
+    }
+  }
+}
+
+/* ── Editor interaction ────────────────────────────────────── */
+let dragState = null;   /* { edgeIdx, cpIdx } when dragging a CP */
+
+function findCpAt(canvasX, canvasY, slack = 8) {
+  for (let i = 0; i < 6; i++) {
+    for (let j = 0; j < tile.edges[i].length; j++) {
+      const cp = tile.edges[i][j];
+      const [px, py] = edgePoint(i, cp.p, cp.off);
+      const dx = px - canvasX, dy = py - canvasY;
+      if (dx * dx + dy * dy <= slack * slack) return { edgeIdx: i, cpIdx: j };
+    }
+  }
+  return null;
+}
+
+/* Project a click onto the nearest edge baseline; returns
+ * { edgeIdx, p } or null if too far from any edge. */
+function projectToEdge(canvasX, canvasY, slack = 14) {
+  let best = null;
+  for (let i = 0; i < 6; i++) {
+    const g = EDGE_GEOM[i];
+    const [sx, sy] = tileToEditPx(g.startX, g.startY);
+    const [ex, ey] = tileToEditPx(g.endX,   g.endY);
+    const dx = ex - sx, dy = ey - sy;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-6) continue;
+    let t = ((canvasX - sx) * dx + (canvasY - sy) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = sx + t * dx, py = sy + t * dy;
+    const ddx = px - canvasX, ddy = py - canvasY;
+    const dist2 = ddx * ddx + ddy * ddy;
+    if (best === null || dist2 < best.dist2) {
+      best = { edgeIdx: i, p: t, dist2 };
+    }
+  }
+  if (best && best.dist2 <= slack * slack && best.p > 0.02 && best.p < 0.98) {
+    return { edgeIdx: best.edgeIdx, p: best.p };
+  }
+  return null;
+}
+
+/* Convert a canvas-px displacement vector into "off" along edge i.
+ * outward direction is unit vector EDGE_GEOM[i].outX/outY in tile
+ * coords; in canvas px those scale by innerW/innerH respectively.
+ * We project (dx, dy) onto the outward direction and divide by the
+ * scale factor to get back to tile units, multiplied by base_w. */
+function pxToOff(edgeIdx, dx, dy) {
+  const g = EDGE_GEOM[edgeIdx];
+  const innerW = editCanvas.width  - 2 * EDIT_MARGIN;
+  const innerH = editCanvas.height - 2 * EDIT_MARGIN;
+  if (g.outX !== 0) {
+    return g.outX * dx * tile.base_w / innerW;
+  }
+  return g.outY * dy * tile.base_h / innerH;
+}
+
+editCanvas.addEventListener("mousedown", (e) => {
+  if (IS_PRESET) return;
+  const rect = editCanvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * editCanvas.width  / rect.width;
+  const cy = (e.clientY - rect.top)  * editCanvas.height / rect.height;
+  if (e.button === 2) {
+    /* Right-click: delete CP if hit. */
+    const hit = findCpAt(cx, cy);
+    if (hit) {
+      tile.edges[hit.edgeIdx].splice(hit.cpIdx, 1);
+      syncMirror(hit.edgeIdx);
+      redrawAll();
+      e.preventDefault();
+    }
+    return;
+  }
+  /* Left-click: drag existing CP or add a new one on an edge. */
+  const hit = findCpAt(cx, cy);
+  if (hit) {
+    dragState = hit;
+  } else {
+    const proj = projectToEdge(cx, cy);
+    if (proj) {
+      tile.edges[proj.edgeIdx].push({ p: proj.p, off: 0 });
+      tile.edges[proj.edgeIdx].sort((a, b) => a.p - b.p);
+      const newIdx = tile.edges[proj.edgeIdx].findIndex(c => c.p === proj.p);
+      syncMirror(proj.edgeIdx);
+      dragState = { edgeIdx: proj.edgeIdx, cpIdx: newIdx };
+      redrawAll();
+    }
+  }
+});
+editCanvas.addEventListener("mousemove", (e) => {
+  if (!dragState) return;
+  const rect = editCanvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * editCanvas.width  / rect.width;
+  const cy = (e.clientY - rect.top)  * editCanvas.height / rect.height;
+  /* Compute the new perpendicular offset.  Take cursor position,
+   * project onto the edge baseline to get p, then displacement
+   * perpendicular gives us off. */
+  const g = EDGE_GEOM[dragState.edgeIdx];
+  const [sx, sy] = tileToEditPx(g.startX, g.startY);
+  const [ex, ey] = tileToEditPx(g.endX,   g.endY);
+  const dx = ex - sx, dy = ey - sy;
+  const len2 = dx * dx + dy * dy || 1;
+  let t = ((cx - sx) * dx + (cy - sy) * dy) / len2;
+  t = Math.max(0.02, Math.min(0.98, t));
+  const baseX = sx + t * dx, baseY = sy + t * dy;
+  const off = pxToOff(dragState.edgeIdx, cx - baseX, cy - baseY);
+  /* Update CP and re-sort if p changed. */
+  const cp = tile.edges[dragState.edgeIdx][dragState.cpIdx];
+  cp.p = t;
+  cp.off = off;
+  tile.edges[dragState.edgeIdx].sort((a, b) => a.p - b.p);
+  dragState.cpIdx = tile.edges[dragState.edgeIdx].indexOf(cp);
+  syncMirror(dragState.edgeIdx);
+  redrawAll();
+});
+window.addEventListener("mouseup", () => { dragState = null; markDirty(); });
+editCanvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+/* ── JSON view ─────────────────────────────────────────────── */
+const jsonView = document.getElementById("jsonView");
+function refreshJson() {
+  jsonView.value = JSON.stringify({
+    name: document.getElementById("tileName").value,
+    base_w: tile.base_w, base_h: tile.base_h,
+    edges: tile.edges,
+  }, null, 2);
+}
+jsonView.addEventListener("blur", () => {
+  if (IS_PRESET) return;
+  try {
+    const j = JSON.parse(jsonView.value);
+    if (Array.isArray(j.edges) && j.edges.length === 6) {
+      tile.edges = j.edges.map(e => Array.isArray(e) ? e.slice() : []);
+      tile.base_w = j.base_w | 0 || tile.base_w;
+      tile.base_h = j.base_h | 0 || tile.base_h;
+      document.getElementById("baseW").value = tile.base_w;
+      document.getElementById("baseH").value = tile.base_h;
+      if (j.name) document.getElementById("tileName").value = j.name;
+      redrawAll();
+      markDirty();
+    }
+  } catch (err) {
+    setStatus("invalid JSON: " + err.message, "error");
+  }
+});
+
+/* ── Save / dirty state ────────────────────────────────────── */
+let dirty = false;
+function markDirty() { dirty = true; setStatus("· unsaved", ""); }
+function setStatus(text, klass) {
+  const el = document.getElementById("saveStatus");
+  el.textContent = text;
+  el.className = "save-status" + (klass ? " " + klass : "");
+}
+
+async function save() {
+  if (IS_PRESET) return;
+  setStatus("saving…", "");
+  try {
+    const resp = await fetch(SAVE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": CSRF },
+      body: JSON.stringify({
+        name:   document.getElementById("tileName").value,
+        base_w: parseInt(document.getElementById("baseW").value, 10) || 64,
+        base_h: parseInt(document.getElementById("baseH").value, 10) || 64,
+        edges:  tile.edges,
+      }),
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    dirty = false;
+    setStatus("· saved", "saved");
+  } catch (e) {
+    setStatus("save failed: " + e.message, "error");
+  }
+}
+
+document.getElementById("saveBtn").addEventListener("click", save);
+document.getElementById("tileName").addEventListener("input", markDirty);
+document.getElementById("baseW").addEventListener("change", (e) => {
+  tile.base_w = Math.max(8, Math.min(1024, parseInt(e.target.value, 10) || 64));
+  redrawAll(); markDirty();
+});
+document.getElementById("baseH").addEventListener("change", (e) => {
+  tile.base_h = Math.max(8, Math.min(1024, parseInt(e.target.value, 10) || 64));
+  redrawAll(); markDirty();
+});
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (IS_PRESET) return;
+  if (!confirm("Reset to a plain rectangle (clear all edges)?")) return;
+  tile.edges = [[], [], [], [], [], []];
+  redrawAll(); markDirty();
+});
+
+/* Auto-save every 4 s while dirty so we don't lose work. */
+setInterval(() => { if (dirty && !IS_PRESET) save(); }, 4000);
+window.addEventListener("beforeunload", (e) => {
+  if (dirty && !IS_PRESET) { e.preventDefault(); e.returnValue = ""; }
+});
+
+function redrawAll() { drawEditCanvas(); drawTess(); refreshJson(); }
+redrawAll();
+setStatus("· loaded", "saved");
+</script>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}New tile — Tilesmith{% endblock %}
+
+{% block content %}
+<div style="max-width:600px;margin:2rem auto;padding:0 1rem;color:#c9d1d9;">
+  <h1>New tile</h1>
+  <form method="post">
+    {% csrf_token %}
+    <p>
+      <label>Name <input type="text" name="name" required
+        style="background:#0d1117;border:1px solid #21262d;
+        color:#c9d1d9;padding:4px 8px;border-radius:4px;
+        font-family:inherit;"></label>
+    </p>
+    <p>
+      <label>Start from
+        <select name="clone_from"
+          style="background:#0d1117;border:1px solid #21262d;
+          color:#c9d1d9;padding:4px 8px;border-radius:4px;
+          font-family:inherit;">
+          <option value="">— blank rectangle —</option>
+          {% for p in presets %}
+            <option value="{{ p.slug }}">{{ p.name }}</option>
+          {% endfor %}
+        </select></label>
+    </p>
+    <button type="submit"
+      style="background:#21262d;border:1px solid #30363d;
+      color:#c9d1d9;padding:0.45rem 0.9rem;border-radius:4px;">
+      Create</button>
+    <a href="{% url 'tilesmith:index' %}"
+      style="color:#58a6ff;text-decoration:none;margin-left:12px;">cancel</a>
+  </form>
+</div>
+{% endblock %}

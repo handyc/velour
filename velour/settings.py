@@ -145,6 +145,7 @@ INSTALLED_APPS = [
     'officelab',
     'officeforge',
     'h4kslnk',
+    'tilesmith',
 ]
 
 MIDDLEWARE = [
