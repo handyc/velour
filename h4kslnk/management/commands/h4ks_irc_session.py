@@ -39,7 +39,7 @@ class Command(BaseCommand):
     help = 'Open an IRC session, REPL stdin → PRIVMSG, log everything to DB.'
 
     def add_arguments(self, parser):
-        parser.add_argument('--server', default='chat.h4ks.com')
+        parser.add_argument('--server', default='irc.h4ks.com')
         parser.add_argument('--port', type=int, default=6697)
         parser.add_argument('--no-tls', action='store_true')
         parser.add_argument('--nick', required=True,
