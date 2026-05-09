@@ -85,6 +85,10 @@ class Command(BaseCommand):
                     f'{commit[:8] if commit else "—"}')
 
         # ── ansi-c chain (forward-compat) ───────────────────────────
+        # bytes_size for the C builds is the COMPILED BINARY size
+        # (officerpg next to officerpg.c) when present — that's the
+        # number we care about against the 64 KB cap.  Falls back to
+        # the source size when the binary hasn't been built yet.
         c_dir_abs = os.path.join(settings.BASE_DIR, ANSI_C_DIR)
         if v_c and os.path.isdir(c_dir_abs):
             for entry in sorted(os.listdir(c_dir_abs)):
@@ -94,9 +98,17 @@ class Command(BaseCommand):
                 main_c = os.path.join(sub, 'officerpg.c')
                 if not os.path.isfile(main_c):
                     continue
-                rel = os.path.join(ANSI_C_DIR, entry, 'officerpg.c')
-                size = os.path.getsize(main_c)
-                commit = _last_commit_for(rel)
+                # Prefer the compiled binary's size when available.
+                bin_path = os.path.join(sub, 'officerpg')
+                if os.path.isfile(bin_path) and os.access(bin_path, os.X_OK):
+                    size_path = bin_path
+                    rel = os.path.join(ANSI_C_DIR, entry, 'officerpg')
+                else:
+                    size_path = main_c
+                    rel = os.path.join(ANSI_C_DIR, entry, 'officerpg.c')
+                size = os.path.getsize(size_path)
+                commit = _last_commit_for(
+                    os.path.join(ANSI_C_DIR, entry, 'officerpg.c'))
                 _, created = Build.objects.update_or_create(
                     variant=v_c, label=entry,
                     defaults={
