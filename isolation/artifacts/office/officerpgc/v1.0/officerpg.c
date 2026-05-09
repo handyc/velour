@@ -10983,6 +10983,14 @@ int main_c(int argc, char **argv, char **envp) {
             if (ga_rounds < 0) ga_rounds = 0;
             if (ga_rounds > 9999) ga_rounds = 9999;
             hx_active_init();
+            /* v1.0: hx_active_init uses rdtsc when there's no
+             * hxhnt.seed file, so the embedded genome differs per
+             * run.  Override with a seed-derived genome + palette
+             * so `test --seed N` is reproducible across processes
+             * regardless of host state. */
+            hx_rng_state = (unsigned long long)seed | 1ULL;
+            hx_random_genome(hx_seed_genome);
+            hx_invent_palette(hx_seed_pal);
             rpg_sprites_init();
             mset(rpg_world_pos, 0, sizeof rpg_world_pos);
             int px = RPG_TILE_W / 2;
