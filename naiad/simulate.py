@@ -1,29 +1,67 @@
-"""Phase-1 simulation of water flowing through a System.
+"""Domain-aware simulation of a System.
 
-Model: each stage attenuates each contaminant independently by a
-fixed fraction (the `removal` JSON on StageType). Contaminants the
-stage doesn't mention pass through. Contaminants not present in the
-source profile are not invented. Stages apply in position order.
+Phase 1: water purification only.  Each stage attenuated each
+contaminant fraction (`removal` JSON on StageType), with optional
+transformations (`converts`).
 
-Intentionally simple — real membrane kinetics, biological
-competition, and flow bottlenecks will be their own phases. This
-gets the data-flow plumbing right so those can slot in later
-without reshaping the schema.
+Phase 2 (ev40 era): adds the data-domain simulator.  System.domain
+selects which transformation model runs:
+
+  domain='water' → contaminant attenuation, additive transforms
+  domain='data'  → metric-vector composition for OSI 7-layer
+                   pipelines (latency adds, throughput/range cap,
+                   reliability multiplies, etc.)
+
+Both share the same trace shape so the existing funnel UI works for
+either domain — it just shows different keys per row.
+
+Intentionally simple — real membrane kinetics, real TCP congestion
+control, etc. are out of scope.  This gets the data-flow plumbing
+right so subsystems can refine the math without reshaping the model.
 """
 
 from __future__ import annotations
 
-from .models import CONTAMINANT_KEYS, Stage, System, WaterProfile
+from .models import (
+    CONTAMINANT_KEYS,
+    NETWORK_METRIC_KEYS,
+    NETWORK_METRIC_DIRECTION,
+    Stage, System, WaterProfile,
+)
 
 
+# ────────────────────────────────────────────────────────────────
+# Public entry point — dispatches on domain
+# ────────────────────────────────────────────────────────────────
 def simulate(system: System, source: WaterProfile,
              target: WaterProfile | None = None) -> dict:
-    """Run `source` through `system`'s stages. Returns a dict with
-    trace (per-stage remaining values), output (final values),
-    passed (bool or None), and failures (list of contaminants that
-    missed the target). Does NOT write a TestRun — the caller
-    decides whether to persist.
+    """Run `source` through `system`'s stages.  Returns a dict with
+    trace (per-stage values), output (final values), passed (bool or
+    None), and failures (list of metric/contaminant keys missing the
+    target).  Dispatches on system.domain — water or data.
+
+    Domain mismatch (system.domain != source.domain) returns a
+    no-op trace with passed=False so the UI flags it loudly.
     """
+    if source and source.domain and source.domain != system.domain:
+        return {
+            'trace': [{'position': -1, 'stage': 'error',
+                       'label': 'domain mismatch',
+                       'values': dict(source.values or {})}],
+            'output': dict(source.values or {}),
+            'passed': False,
+            'failures': ['__domain_mismatch__'],
+        }
+    if system.domain == 'data':
+        return _simulate_data(system, source, target)
+    return _simulate_water(system, source, target)
+
+
+# ────────────────────────────────────────────────────────────────
+# Water domain — Phase 1 logic, unchanged behaviour
+# ────────────────────────────────────────────────────────────────
+def _simulate_water(system: System, source: WaterProfile,
+                    target: WaterProfile | None) -> dict:
     current = dict(source.values or {})
     trace = []
     stages = list(Stage.objects.filter(system=system)
@@ -63,11 +101,6 @@ def simulate(system: System, source: WaterProfile,
 
     passed = None
     failures: list[str] = []
-    # Targets literally set to 0 are interpreted as "below detection" —
-    # compared against DETECTION_EPS — otherwise no finite chain can ever
-    # drive a contaminant to mathematical zero, so every system trivially
-    # "fails" on bacteria=0 / protozoa=0 / etc. 1e-6 is well below the
-    # reporting resolution of any commodity water test kit.
     DETECTION_EPS = 1e-6
     if target is not None and target.values:
         passed = True
@@ -77,7 +110,6 @@ def simulate(system: System, source: WaterProfile,
             except (TypeError, ValueError):
                 continue
             if key not in output:
-                # Source didn't measure it; we can't prove pass nor fail.
                 continue
             if lim <= 0:
                 lim = DETECTION_EPS
@@ -91,3 +123,163 @@ def simulate(system: System, source: WaterProfile,
         'passed':   passed,
         'failures': failures,
     }
+
+
+# ────────────────────────────────────────────────────────────────
+# Data domain — OSI 7-layer pipeline composition
+# ────────────────────────────────────────────────────────────────
+
+# Additive transforms: stage value is added to current.
+# Used for metrics where each stage layers on top of the previous.
+_DATA_ADDITIVE = {'latency_ms', 'jitter_ms', 'cost_eur_month', 'energy_watts'}
+
+# Multiplicative transforms: stage value multiplies current.
+# Reliability uses this — each layer either degrades (val<1) or
+# adds redundancy (val>1).  Capped at the [0, 99.99]% range so
+# infinite chains can't asymptote past 100%.
+_DATA_MULTIPLY = {'reliability_pct'}
+
+# Cap-or-multiply: values < 1 act as multipliers, values >= 1 act
+# as caps (the chain is bottlenecked by the most restrictive stage).
+# Used for "amount-of-something" metrics where each stage either
+# downsizes the budget or imposes its own ceiling.
+_DATA_CAP_OR_MUL = {'throughput_kbps', 'range_m', 'payload_bytes',
+                    'duty_cycle_pct'}
+
+
+def _apply_data_stage(current: dict, params: dict) -> None:
+    """Mutate `current` by applying one stage's transformations."""
+    for key, raw in params.items():
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if key in _DATA_ADDITIVE:
+            current[key] = float(current.get(key, 0.0)) + val
+        elif key in _DATA_MULTIPLY:
+            cur = float(current.get(key, 100.0))
+            new = cur * val
+            # 99.99% asymptote so a long redundant chain doesn't
+            # claim 100% reliability — there's always residual risk.
+            if new > 99.99:
+                new = 99.99
+            if new < 0:
+                new = 0.0
+            current[key] = new
+        elif key in _DATA_CAP_OR_MUL:
+            cur = float(current.get(key, val))
+            if 0 < val < 1.0:
+                # multiplicative — fractional scaling
+                current[key] = cur * val
+            else:
+                # cap — pipeline limited by tightest stage
+                current[key] = min(cur, val)
+        # Unknown keys are ignored (forward-compat — adding new
+        # metrics to a stage doesn't crash old simulators).
+
+
+def _simulate_data(system: System, source: WaterProfile,
+                   target: WaterProfile | None) -> dict:
+    current = dict(source.values or {})
+    trace = []
+    stages = list(Stage.objects.filter(system=system)
+                  .select_related('stage_type')
+                  .order_by('position'))
+
+    trace.append({
+        'position': -1,
+        'stage':    'source',
+        'label':    source.name,
+        'values':   dict(current),
+    })
+
+    for stg in stages:
+        params = stg.stage_type.removal or {}
+        _apply_data_stage(current, params)
+        trace.append({
+            'position': stg.position,
+            'stage':    stg.stage_type.slug,
+            'label':    stg.label or stg.stage_type.name,
+            'values':   dict(current),
+        })
+
+    output = dict(current)
+
+    passed = None
+    failures: list[str] = []
+    if target is not None and target.values:
+        passed = True
+        for key, want in target.values.items():
+            try:
+                target_val = float(want)
+            except (TypeError, ValueError):
+                continue
+            if key not in output:
+                continue
+            actual = float(output[key])
+            direction = NETWORK_METRIC_DIRECTION.get(key, 'lower')
+            ok = (actual <= target_val) if direction == 'lower' \
+                 else (actual >= target_val)
+            if not ok:
+                passed = False
+                failures.append(key)
+
+    return {
+        'trace':    trace,
+        'output':   output,
+        'passed':   passed,
+        'failures': failures,
+    }
+
+
+# ────────────────────────────────────────────────────────────────
+# Fitness scoring (used by the GA in evolve_dispatch + UI funnel)
+# ────────────────────────────────────────────────────────────────
+def fitness(result: dict, target: WaterProfile, domain: str = 'water') -> float:
+    """Single-number score in [0, 1] for how close `result['output']`
+    is to `target.values`.  1.0 = exactly meets every target metric;
+    0.0 = far from every target.
+
+    Water domain: lower contaminant = better.  Score per key =
+    max(0, 1 - actual / max(target, eps)).
+    Data domain: each metric uses its NETWORK_METRIC_DIRECTION
+    (lower-better or higher-better) to compute a [0, 1] score; final
+    is the mean.
+    """
+    if not target or not target.values:
+        return 0.0
+    output = result.get('output') or {}
+    if not output:
+        return 0.0
+
+    scores = []
+    for key, want in target.values.items():
+        try:
+            want_val = float(want)
+        except (TypeError, ValueError):
+            continue
+        if key not in output:
+            continue
+        actual = float(output[key])
+        if domain == 'data':
+            direction = NETWORK_METRIC_DIRECTION.get(key, 'lower')
+            if direction == 'higher':
+                if want_val <= 0:
+                    scores.append(1.0 if actual > 0 else 0.0)
+                else:
+                    scores.append(min(1.0, actual / want_val))
+            else:
+                if want_val <= 0 and actual <= 0:
+                    scores.append(1.0)
+                elif want_val <= 0:
+                    scores.append(0.0)
+                else:
+                    scores.append(max(0.0, 1.0 - actual / max(want_val, 1e-9)))
+        else:
+            # water — always "lower is better"
+            eps = max(want_val, 1e-9)
+            scores.append(max(0.0, min(1.0, 1.0 - actual / eps)))
+
+    if not scores:
+        return 0.0
+    return sum(scores) / len(scores)

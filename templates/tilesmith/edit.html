@@ -71,6 +71,24 @@
       {% if spec.is_preset %}readonly{% endif %}>
     <span class="save-status" id="saveStatus">·</span>
   </h1>
+  {% if spec.is_preset %}
+    <div style="background:#1a2a3a;border:1px solid #2a4a6a;
+      border-radius:6px;padding:10px 14px;margin:8px 0;color:#79c0ff;
+      display:flex;align-items:center;gap:14px;">
+      <strong>Read-only preset.</strong>
+      <span style="color:#8b949e;flex:1;">
+        Click + drag does nothing here.  Clone first, then edit the
+        copy — your changes save automatically every 4 s.</span>
+      <form method="post" action="{% url 'tilesmith:create' %}" style="display:inline;">
+        {% csrf_token %}
+        <input type="hidden" name="name" value="{{ spec.name }} (copy)">
+        <input type="hidden" name="clone_from" value="{{ spec.slug }}">
+        <button type="submit" class="primary"
+          style="background:#1f6feb;border-color:#1f6feb;color:#fff;
+          padding:6px 14px;font-weight:500;">Clone to edit →</button>
+      </form>
+    </div>
+  {% endif %}
 
   <div class="panes">
     <div class="pane">
@@ -451,7 +469,10 @@ function pxToOff(edgeIdx, dx, dy) {
 }
 
 editCanvas.addEventListener("mousedown", (e) => {
-  if (IS_PRESET) return;
+  if (IS_PRESET) {
+    setStatus("read-only preset — click 'Clone to edit' above", "error");
+    return;
+  }
   const rect = editCanvas.getBoundingClientRect();
   const cx = (e.clientX - rect.left) * editCanvas.width  / rect.width;
   const cy = (e.clientY - rect.top)  * editCanvas.height / rect.height;
@@ -466,12 +487,15 @@ editCanvas.addEventListener("mousedown", (e) => {
     }
     return;
   }
-  /* Left-click: drag existing CP or add a new one on an edge. */
+  /* Left-click: drag existing CP or add a new one on an edge.
+   * Hit-slack widened to 22 px so the click target is roomier than
+   * the drawn 2.4 px stroke; helps when the user tries to click
+   * exactly on the edge. */
   const hit = findCpAt(cx, cy);
   if (hit) {
     dragState = hit;
   } else {
-    const proj = projectToEdge(cx, cy);
+    const proj = projectToEdge(cx, cy, 22);
     if (proj) {
       tile.edges[proj.edgeIdx].push({ p: proj.p, off: 0 });
       tile.edges[proj.edgeIdx].sort((a, b) => a.p - b.p);
@@ -479,6 +503,8 @@ editCanvas.addEventListener("mousedown", (e) => {
       syncMirror(proj.edgeIdx);
       dragState = { edgeIdx: proj.edgeIdx, cpIdx: newIdx };
       redrawAll();
+    } else {
+      setStatus("click on an edge to add a control point", "");
     }
   }
 });

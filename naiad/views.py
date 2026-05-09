@@ -169,6 +169,7 @@ def run_test(request, slug):
     result = simulate(system, source, target)
     run = TestRun.objects.create(
         system=system, source=source, target=target,
+        domain=system.domain,
         trace=result['trace'], output=result['output'],
         passed=result['passed'], failures=result['failures'],
     )
