@@ -27,6 +27,7 @@ FEATURES = [
     ('music-mood',       'Mood-modulated bytebeat music',            'ev42', 110),
     ('music-stereo',     'Stereo music (score-CA L / meta-CA R)',    'ev47', 112),
     ('music-smooth',     'Worker scheduler + slip recovery',         'ev49', 114),
+    ('music-waltz',      'Waltz / 3-4 meter toggle',                 'ev60', 113),
     ('lite-terminal',    'Embedded lite terminal sub-game',          'ev18', 120),
     ('full-auto-mode',   'Full-auto mode (live+music+map+journey)',  'ev45', 125),
     ('shot-export',      'Live browser-shot export + replay',        'ev44', 130),
@@ -69,6 +70,11 @@ class Command(BaseCommand):
         # browser-only (none yet — even music can be PC-speaker'd).
         js = Variant.objects.get(slug='js-html')
         c  = Variant.objects.get(slug='ansi-c')
+        # Browser-only audio path — Web Audio doesn't exist in a nostdlib
+        # ANSI-C terminal binary; pc-speaker is the C-side counterpart.
+        BROWSER_AUDIO_ONLY = {
+            'music-mood', 'music-stereo', 'music-smooth', 'music-waltz',
+        }
         for f in Feature.objects.all():
             # PC speaker is C-only so the JS variant marks it n/a.
             if f.slug == 'pc-speaker':
@@ -80,7 +86,9 @@ class Command(BaseCommand):
             PortStatus.objects.update_or_create(
                 feature=f, variant=js, defaults={'state': 'done'})
             PortStatus.objects.update_or_create(
-                feature=f, variant=c,  defaults={'state': 'todo'})
+                feature=f, variant=c,
+                defaults={'state':
+                          'na' if f.slug in BROWSER_AUDIO_ONLY else 'todo'})
         self.stdout.write(self.style.SUCCESS(
             f'Seeded {Variant.objects.count()} variants, '
             f'{Feature.objects.count()} features, '
