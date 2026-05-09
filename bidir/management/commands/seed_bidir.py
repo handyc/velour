@@ -65,16 +65,32 @@ class Command(BaseCommand):
                 })
             self.stdout.write(f'feature {f.slug} ✓')
 
-        # JS/HTML variant gets `done` for everything that's been
-        # shipped there; ANSI-C starts at `todo` for everything that
-        # exists in JS/HTML, plus `na` for things that are inherently
-        # browser-only (none yet — even music can be PC-speaker'd).
         js = Variant.objects.get(slug='js-html')
         c  = Variant.objects.get(slug='ansi-c')
-        # Browser-only audio path — Web Audio doesn't exist in a nostdlib
-        # ANSI-C terminal binary; pc-speaker is the C-side counterpart.
-        BROWSER_AUDIO_ONLY = {
-            'music-mood', 'music-stereo', 'music-smooth', 'music-waltz',
+        # Features actually shipped in the ANSI-C port (officerpgc).
+        ANSIC_DONE = {
+            'hex-ca', 'lsystem-sprites', 'hex-meta-grid',
+            'block-ca-textures', 'autoplay-journey', 'autoplay-stuck',
+            'inv-zap-bend', 'full-auto-mode', 'shot-export',
+            'shot-bundle-full', 'death-respawn', 'per-cell-rules',
+            'per-cell-rules-ga', 'hex-meta-cascade',
+            'animal-action-anim', 'pc-speaker',
+        }
+        # Features that cannot meaningfully ship in a nostdlib ANSI-C
+        # terminal binary.  Three reasons collapse here:
+        #   - Browser audio (Web Audio API has no terminal analog;
+        #     pc-speaker is the C-side counterpart).
+        #   - Sub-cell pixel rendering (terminal cells are character-
+        #     sized; tile-shape geometry + zoom assume a canvas).
+        #   - Browser-side interactive UIs (flower-rule-view modal,
+        #     bio-lab breeder, genome-workshop editor); image-upload
+        #     presets; circular concept (lite-terminal in a terminal).
+        ANSIC_NA = {
+            'lsystem-genome', 'image-presets', 'flower-rule-view',
+            'genome-workshop', 'bio-lab', 'rgba-pal-alpha',
+            'music-mood', 'music-stereo', 'music-waltz', 'music-smooth',
+            'lite-terminal', 'tile-shape', 'tile-shape-seam',
+            'tile-shape-evolve', 'tile-shape-auto', 'tile-zoom',
         }
         for f in Feature.objects.all():
             # PC speaker is C-only so the JS variant marks it n/a.
@@ -82,14 +98,18 @@ class Command(BaseCommand):
                 PortStatus.objects.update_or_create(
                     feature=f, variant=js, defaults={'state': 'na'})
                 PortStatus.objects.update_or_create(
-                    feature=f, variant=c,  defaults={'state': 'todo'})
+                    feature=f, variant=c,  defaults={'state': 'done'})
                 continue
             PortStatus.objects.update_or_create(
                 feature=f, variant=js, defaults={'state': 'done'})
+            if f.slug in ANSIC_DONE:
+                state = 'done'
+            elif f.slug in ANSIC_NA:
+                state = 'na'
+            else:
+                state = 'todo'
             PortStatus.objects.update_or_create(
-                feature=f, variant=c,
-                defaults={'state':
-                          'na' if f.slug in BROWSER_AUDIO_ONLY else 'todo'})
+                feature=f, variant=c, defaults={'state': state})
         self.stdout.write(self.style.SUCCESS(
             f'Seeded {Variant.objects.count()} variants, '
             f'{Feature.objects.count()} features, '
