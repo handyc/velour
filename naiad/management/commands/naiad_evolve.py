@@ -137,6 +137,12 @@ class Ctx:
     target: dict
     types:  dict   # slug -> StageType
     slugs:  list
+    # Phase 3b: domain-aware GA.  domain='water' uses the existing
+    # contaminant-removal scoring; domain='data' uses the OSI 7-layer
+    # transformation model + reliability-weighted fitness from
+    # naiad.simulate.  System.fitness_weights flows through to weights.
+    domain:  str  = 'water'
+    weights: dict = field(default_factory=dict)
     # Weights match the JS defaults.
     cost_cap:       float = 300.0
     watt_cap:       float = 200.0
@@ -154,6 +160,8 @@ class Ctx:
 
 
 def simulate(stages: list[str], ctx: Ctx) -> dict:
+    if ctx.domain == 'data':
+        return _simulate_data(stages, ctx)
     current = dict(ctx.source)
     for slug in stages:
         st = ctx.types.get(slug)
@@ -176,7 +184,45 @@ def simulate(stages: list[str], ctx: Ctx) -> dict:
     return current
 
 
+# ── Phase 3b: data-domain inline simulator ──────────────────────────
+# Mirrors naiad.simulate._apply_data_stage but inline so the GA
+# doesn't pay a per-stage function-call + dict-copy overhead.
+_DATA_ADD_KEYS = ('latency_ms', 'jitter_ms', 'cost_eur_month', 'energy_watts')
+_DATA_CAP_KEYS = ('throughput_kbps', 'range_m', 'payload_bytes', 'duty_cycle_pct')
+
+def _simulate_data(stages: list[str], ctx: Ctx) -> dict:
+    current = dict(ctx.source)
+    for slug in stages:
+        st = ctx.types.get(slug)
+        if st is None:
+            continue
+        for key, raw in (st.removal or {}).items():
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if key in _DATA_ADD_KEYS:
+                current[key] = float(current.get(key, 0.0)) + val
+            elif key == 'reliability_pct':
+                cur = float(current.get(key, 100.0))
+                new = cur * val
+                if new > 99.99:
+                    new = 99.99
+                if new < 0:
+                    new = 0.0
+                current[key] = new
+            elif key in _DATA_CAP_KEYS:
+                cur = float(current.get(key, val))
+                if 0 < val < 1.0:
+                    current[key] = cur * val
+                else:
+                    current[key] = min(cur, val)
+    return current
+
+
 def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
+    if ctx.domain == 'data':
+        return _score_data(stages, ctx)
     output = simulate(stages, ctx)
     all_pass = True
     failures: list[str] = []
@@ -244,6 +290,88 @@ def score(stages: list[str], ctx: Ctx) -> tuple[float, bool, list[str], dict]:
         'volume': total_volume,
         'biomass': total_biomass,
         'output': output,
+    }
+    return max(0.0, min(1.0, s)), all_pass, failures, stats
+
+
+_DATA_DEFAULT_WEIGHTS = {
+    'reliability_pct':  5.0,
+    'latency_ms':       1.0,
+    'jitter_ms':        1.0,
+    'throughput_kbps':  1.0,
+    'cost_eur_month':   1.0,
+    'energy_watts':     1.0,
+    'range_m':          1.0,
+    'payload_bytes':    1.0,
+    'duty_cycle_pct':   1.0,
+}
+_HIGHER_IS_BETTER = {'throughput_kbps', 'reliability_pct', 'range_m',
+                     'payload_bytes', 'duty_cycle_pct'}
+
+def _score_data(stages: list[str], ctx: Ctx
+                ) -> tuple[float, bool, list[str], dict]:
+    """Domain-aware GA score for OSI 7-layer pipelines.  Uses the
+    same gene representation as water (list of stage slugs) but
+    replaces water's removal-fraction model with the data
+    transformation model + reliability-weighted fitness.
+
+    Penalties for data domain are simpler than water's:
+      - chain length (fewer hops = better when fitness ties)
+      - cost (cumulative cost_eur_month is part of `output`)
+    Biomass / volume / maintenance penalties don't apply.
+    """
+    output = _simulate_data(stages, ctx)
+    eff_weights = dict(_DATA_DEFAULT_WEIGHTS)
+    for k, v in (ctx.weights or {}).items():
+        try: eff_weights[k] = float(v)
+        except (TypeError, ValueError): pass
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+    failures: list[str] = []
+    for key, want_raw in ctx.target.items():
+        try: want = float(want_raw)
+        except (TypeError, ValueError): continue
+        if key not in output: continue
+        actual = float(output[key])
+        higher_better = key in _HIGHER_IS_BETTER
+        if higher_better:
+            ok = actual >= want
+            s = (1.0 if want <= 0 and actual > 0 else
+                 0.0 if want <= 0 else
+                 min(1.0, actual / want))
+        else:
+            ok = actual <= want
+            s = (1.0 if want <= 0 and actual <= 0 else
+                 0.0 if want <= 0 else
+                 max(0.0, 1.0 - actual / max(want, 1e-9)))
+        if not ok:
+            failures.append(key)
+        w = float(eff_weights.get(key, 1.0))
+        weighted_sum += s * w
+        weight_total += w
+
+    base = (weighted_sum / weight_total) if weight_total > 0 else 0.0
+
+    # Lightweight penalties — chain length + recurring cost.  Cap at
+    # 30% combined impact so the fitness signal is dominated by
+    # target-meeting, not chain compactness.
+    length_pen = min(1.0, len(stages) / max(ctx.length_cap, 1.0))
+    cost_amt = float(output.get('cost_eur_month', 0.0))
+    cost_pen = min(1.0, cost_amt / max(ctx.cost_cap, 1.0))
+    pen = (ctx.w_length * length_pen + ctx.w_cost * cost_pen)
+    s = base * (1.0 - pen * 0.3)
+
+    all_pass = (len(failures) == 0)
+    stats = {
+        'output': output,
+        'cost':   cost_amt,
+        'length': len(stages),
+        'watts':  float(output.get('energy_watts', 0.0)),
+        # zero-out water-only stats so the printer doesn't crash
+        'maint_load': 0.0,
+        'volume':     0.0,
+        'biomass':    0.0,
     }
     return max(0.0, min(1.0, s)), all_pass, failures, stats
 
@@ -377,12 +505,18 @@ class Command(BaseCommand):
                 system, target_slug=opts['via_conduit'], opts=opts)
             return
 
-        types = {st.slug: st for st in StageType.objects.all()}
+        # Phase 3b: filter the stage catalog to the system's domain
+        # so the GA only breeds in-domain pipelines (data system can't
+        # mate Ethernet with a UV sterilizer).
+        types = {st.slug: st for st in
+                 StageType.objects.filter(domain=system.domain)}
         ctx = Ctx(
-            source = dict(system.source.values or {}),
-            target = dict(system.target.values or {}),
-            types  = types,
-            slugs  = sorted(types.keys()),
+            source  = dict(system.source.values or {}),
+            target  = dict(system.target.values or {}),
+            types   = types,
+            slugs   = sorted(types.keys()),
+            domain  = system.domain,
+            weights = dict(system.fitness_weights or {}),
         )
         # Apply preset first, then let any explicit cap override it.
         preset_name = opts.get('preset')
@@ -474,7 +608,7 @@ class Command(BaseCommand):
         for i, slug in enumerate(best_gene):
             self.stdout.write(f'  {i:2d}. {slug}')
 
-        # output per contaminant vs target
+        # output per contaminant/metric vs target
         self.stdout.write('')
         self.stdout.write('output vs target:')
         for key in sorted(ctx.target.keys()):
@@ -482,9 +616,20 @@ class Command(BaseCommand):
                 continue
             out = stats['output'][key]
             lim = ctx.target[key]
-            flag = '' if out <= max(lim, ctx.detection_eps) else '  ← fail'
-            self.stdout.write(f'  {key:12s} {out:>14.4g}   '
-                              f'(limit {lim}){flag}')
+            higher_better = (ctx.domain == 'data' and key in _HIGHER_IS_BETTER)
+            try:
+                lim_f = float(lim)
+            except (TypeError, ValueError):
+                lim_f = 0.0
+            if higher_better:
+                ok = float(out) >= lim_f
+                arrow = '≥'
+            else:
+                ok = float(out) <= max(lim_f, ctx.detection_eps)
+                arrow = '≤'
+            flag = '' if ok else '  ← fail'
+            self.stdout.write(f'  {key:18s} {out:>14.4g}   '
+                              f'({arrow} {lim}){flag}')
 
         if opts['save']:
             self._save(system, best_gene, opts['save'], best_score, passed)
