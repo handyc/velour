@@ -256,6 +256,12 @@ class System(models.Model):
         related_name='systems_as_target',
         limit_choices_to={'scope': 'target'},
         help_text='Optional output spec. TestRun compares against this.')
+    fitness_weights = models.JSONField(
+        default=dict, blank=True,
+        help_text='Per-metric weight overrides for the GA fitness '
+                  'function.  Empty = use domain defaults (data: '
+                  'reliability_pct=5, others=1; water: all=1).  '
+                  'Bigger weight = "evolve harder against this".')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -235,7 +235,45 @@ def _simulate_data(system: System, source: WaterProfile,
 # ────────────────────────────────────────────────────────────────
 # Fitness scoring (used by the GA in evolve_dispatch + UI funnel)
 # ────────────────────────────────────────────────────────────────
-def fitness(result: dict, target: WaterProfile, domain: str = 'water') -> float:
+# ────────────────────────────────────────────────────────────────
+# Fitness scoring (used by the GA in evolve_dispatch + UI funnel)
+# ────────────────────────────────────────────────────────────────
+
+# Default per-metric weights for the data domain.  Reliability is
+# heavily preferred per the user's directive — operational uptime
+# is the default goal, with speed/cost as user-elevated overrides.
+# Water domain uses uniform weight=1 by default — the existing
+# water GA's penalty system already encodes its multi-objective
+# trade-offs separately.
+DATA_DEFAULT_WEIGHTS = {
+    'reliability_pct':  5.0,
+    'latency_ms':       1.0,
+    'jitter_ms':        1.0,
+    'throughput_kbps':  1.0,
+    'cost_eur_month':   1.0,
+    'energy_watts':     1.0,
+    'range_m':          1.0,
+    'payload_bytes':    1.0,
+    'duty_cycle_pct':   1.0,
+}
+
+
+def _resolve_weights(domain: str, overrides: dict | None) -> dict:
+    """Compose effective per-metric weights: domain defaults +
+    user/system overrides.  Overrides win on key collision."""
+    base = dict(DATA_DEFAULT_WEIGHTS) if domain == 'data' else {}
+    if overrides:
+        for k, v in overrides.items():
+            try:
+                base[k] = float(v)
+            except (TypeError, ValueError):
+                continue
+    return base
+
+
+def fitness(result: dict, target: WaterProfile,
+            domain: str = 'water',
+            weights: dict | None = None) -> float:
     """Single-number score in [0, 1] for how close `result['output']`
     is to `target.values`.  1.0 = exactly meets every target metric;
     0.0 = far from every target.
@@ -244,7 +282,9 @@ def fitness(result: dict, target: WaterProfile, domain: str = 'water') -> float:
     max(0, 1 - actual / max(target, eps)).
     Data domain: each metric uses its NETWORK_METRIC_DIRECTION
     (lower-better or higher-better) to compute a [0, 1] score; final
-    is the mean.
+    is the WEIGHTED MEAN of per-metric scores.  Reliability is the
+    default-heavy weight (uptime > everything else unless told
+    otherwise) — pass `weights={...}` to override.
     """
     if not target or not target.values:
         return 0.0
@@ -252,7 +292,10 @@ def fitness(result: dict, target: WaterProfile, domain: str = 'water') -> float:
     if not output:
         return 0.0
 
-    scores = []
+    eff_weights = _resolve_weights(domain, weights)
+
+    weighted_sum = 0.0
+    weight_total = 0.0
     for key, want in target.values.items():
         try:
             want_val = float(want)
@@ -265,21 +308,25 @@ def fitness(result: dict, target: WaterProfile, domain: str = 'water') -> float:
             direction = NETWORK_METRIC_DIRECTION.get(key, 'lower')
             if direction == 'higher':
                 if want_val <= 0:
-                    scores.append(1.0 if actual > 0 else 0.0)
+                    s = 1.0 if actual > 0 else 0.0
                 else:
-                    scores.append(min(1.0, actual / want_val))
+                    s = min(1.0, actual / want_val)
             else:
                 if want_val <= 0 and actual <= 0:
-                    scores.append(1.0)
+                    s = 1.0
                 elif want_val <= 0:
-                    scores.append(0.0)
+                    s = 0.0
                 else:
-                    scores.append(max(0.0, 1.0 - actual / max(want_val, 1e-9)))
+                    s = max(0.0, 1.0 - actual / max(want_val, 1e-9))
         else:
             # water — always "lower is better"
             eps = max(want_val, 1e-9)
-            scores.append(max(0.0, min(1.0, 1.0 - actual / eps)))
+            s = max(0.0, min(1.0, 1.0 - actual / eps))
 
-    if not scores:
+        w = float(eff_weights.get(key, 1.0))
+        weighted_sum += s * w
+        weight_total += w
+
+    if weight_total <= 0:
         return 0.0
-    return sum(scores) / len(scores)
+    return weighted_sum / weight_total
