@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Bidir — Velour{% endblock %}
+
+{% block extra_head %}
+<style>
+  .bdr-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .bdr-wrap h1 { margin-bottom: 0.25rem; font-size: 1.4rem; }
+  .bdr-wrap .lede { color: #8b949e; max-width: 70ch; line-height: 1.55;
+                    margin: 0 0 1.25rem; font-size: 0.9rem; }
+  .panel { background: #0d1117; border: 1px solid #30363d;
+           border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+  .matrix { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .matrix th, .matrix td { padding: 0.36rem 0.5rem; text-align: left;
+                            border-bottom: 1px solid #21262d; }
+  .matrix th { color: #8b949e; font-weight: normal;
+               font-size: 0.7rem; letter-spacing: 0.04em; }
+  .matrix td.feat { color: #c9d1d9; }
+  .matrix td.feat a { color: #c9d1d9; text-decoration: none; }
+  .matrix td.feat a:hover { color: #58a6ff; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 3px;
+          font-family: ui-monospace, monospace; font-size: 0.68rem;
+          letter-spacing: 0.04em; text-transform: uppercase; }
+  .pill.todo    { color: #8b949e; background: #161b22; }
+  .pill.partial { color: #d29922; background: rgba(210,153,34,0.12); }
+  .pill.done    { color: #2ea043; background: rgba(46,160,67,0.14); }
+  .pill.na      { color: #6e7681; background: #1c1f25;
+                  text-decoration: line-through; }
+  .canonical { color: #58a6ff; font-size: 0.65rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bdr-wrap">
+  <h1>Bidir — bidirectional port tracking</h1>
+  <p class="lede">
+    Every named feature once, with a parity row across runtime
+    variants — JS/HTML, ANSI-C, MCU. The canonical variant is the
+    reference; the others are scored against it. Used to plan
+    backports (officerpg's C clone), forward-ports (firmware
+    behaviour mirrored into a browser sim), and to spot gaps.
+  </p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #58a6ff">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>feature</th>
+          {% for v in variants %}
+            <th>
+              {{ v.name }}
+              {% if v.is_canonical %}<div class="canonical">canonical</div>{% endif %}
+            </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="feat">
+            <a href="{% url 'bidir:feature_detail' slug=row.feature.slug %}">
+              {{ row.feature.name }}
+            </a>
+            {% if row.feature.introduced_in %}
+              <span style="color:#6e7681;font-size:0.66rem">
+                · {{ row.feature.introduced_in }}
+              </span>
+            {% endif %}
+          </td>
+          {% for c in row.cells %}
+            <td><span class="pill {{ c.state }}">{{ c.state }}</span></td>
+          {% endfor %}
+        </tr>
+        {% empty %}
+        <tr><td colspan="100" style="color:#6e7681">
+          No features yet. Run <code>manage.py seed_bidir</code> to
+          load the officerpg parity table.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <p style="font-size:0.78rem;color:#6e7681">
+    <a href="{% url 'bidir:builds' %}" style="color:#58a6ff">Builds →</a>
+  </p>
+</div>
+{% endblock %}

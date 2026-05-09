@@ -146,6 +146,7 @@ INSTALLED_APPS = [
     'officeforge',
     'h4kslnk',
     'tilesmith',
+    'bidir',
 ]
 
 MIDDLEWARE = [

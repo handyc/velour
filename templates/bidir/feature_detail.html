@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}{{ feature.name }} — Bidir{% endblock %}
+
+{% block extra_head %}
+<style>
+  .bdr-wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .panel { background: #0d1117; border: 1px solid #30363d;
+           border-radius: 6px; padding: 0.8rem 1rem; margin-bottom: 1rem; }
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 3px;
+          font-size: 0.68rem; text-transform: uppercase; }
+  .pill.todo    { color: #8b949e; background: #161b22; }
+  .pill.partial { color: #d29922; background: rgba(210,153,34,0.12); }
+  .pill.done    { color: #2ea043; background: rgba(46,160,67,0.14); }
+  .pill.na      { color: #6e7681; background: #1c1f25;
+                  text-decoration: line-through; }
+  form.row { display: flex; gap: 0.5rem; align-items: center;
+             padding: 0.4rem 0; border-bottom: 1px dashed #21262d;
+             font-size: 0.78rem; }
+  form.row:last-child { border-bottom: none; }
+  form.row .vname { flex: 0 0 9rem; color: #c9d1d9; }
+  form.row select, form.row input {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.2rem 0.4rem; font-size: 0.76rem;
+    font-family: inherit;
+  }
+  form.row input[type=text] { flex: 1; }
+  form.row button {
+    background: #238636; border: 1px solid #2ea043; color: white;
+    padding: 0.25rem 0.6rem; border-radius: 3px; font-size: 0.74rem;
+    cursor: pointer;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bdr-wrap">
+  <p style="font-size:0.78rem">
+    <a href="{% url 'bidir:index' %}" style="color:#58a6ff">← matrix</a>
+  </p>
+  <h1 style="font-size:1.2rem">{{ feature.name }}</h1>
+  {% if feature.introduced_in %}
+    <p style="color:#6e7681;font-size:0.78rem;margin-top:-0.4rem">
+      introduced {{ feature.introduced_in }}
+    </p>
+  {% endif %}
+  {% if feature.description %}
+    <p style="color:#8b949e;font-size:0.85rem">{{ feature.description }}</p>
+  {% endif %}
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="panel" style="border-left:2px solid #58a6ff">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <h2 style="font-size:0.92rem;margin:0 0 0.5rem">Per-variant status</h2>
+    {% for c in cells %}
+      <form class="row" method="post"
+            action="{% url 'bidir:set_status' slug=feature.slug %}">
+        {% csrf_token %}
+        <input type="hidden" name="variant" value="{{ c.variant.slug }}">
+        <span class="vname">{{ c.variant.name }}</span>
+        <select name="state">
+          <option value="todo"    {% if c.state == 'todo'    %}selected{% endif %}>todo</option>
+          <option value="partial" {% if c.state == 'partial' %}selected{% endif %}>partial</option>
+          <option value="done"    {% if c.state == 'done'    %}selected{% endif %}>done</option>
+          <option value="na"      {% if c.state == 'na'      %}selected{% endif %}>n/a</option>
+        </select>
+        <input type="text" name="notes" value="{{ c.notes }}"
+               placeholder="notes (optional)">
+        <button type="submit">save</button>
+      </form>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
