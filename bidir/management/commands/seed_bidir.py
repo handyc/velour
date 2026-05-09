@@ -79,6 +79,10 @@ class Command(BaseCommand):
             # JS bytebeat → A-pentatonic note picker on KIOCSOUND;
             # HP ratio modulates scale (major/minor) and tempo.
             'music-mood',
+            # v1.2 — background L-system GA over the per-category
+            # rule library.  Tournament-2 + within-category, fitness
+            # = expanded F-count + bbox area.  Toggle G.
+            'lsystem-genome',
         }
         # Features that cannot meaningfully ship in a nostdlib ANSI-C
         # terminal binary.  Three reasons collapse here:
@@ -90,7 +94,7 @@ class Command(BaseCommand):
         #     bio-lab breeder, genome-workshop editor); image-upload
         #     presets; circular concept (lite-terminal in a terminal).
         ANSIC_NA = {
-            'lsystem-genome', 'image-presets', 'flower-rule-view',
+            'image-presets', 'flower-rule-view',
             'genome-workshop', 'bio-lab', 'rgba-pal-alpha',
             # music-stereo / music-waltz / music-smooth stay N/A on
             # pc-speaker (monophonic only).  music-mood ported in
