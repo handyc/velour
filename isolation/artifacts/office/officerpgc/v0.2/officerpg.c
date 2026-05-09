@@ -7167,6 +7167,37 @@ static void rpg_player_init(void) {
     mset(rpg_player.cat_bend,   0, sizeof rpg_player.cat_bend);
 }
 
+/* v0.2: pc-speaker port — the C-only audio counterpart to the JS
+ * Web Audio score.  KIOCSOUND on /dev/tty1 is the only portable
+ * way to drive the actual PC speaker from userland; it requires a
+ * privileged seat at the console (root or membership in the tty
+ * group, plus a host that has a real PC speaker).  Most modern
+ * environments (WSL, ssh, GUI terminal emulators) won't satisfy
+ * either, so the open just fails and we ring the BEL byte instead.
+ *
+ * Plays a four-note A-major arpeggio (A4, C♯5, E5, A5) — the same
+ * "the action succeeded" flavour Web Audio uses for waltz down-
+ * beats — with hx_sleep_ms between ioctl calls so the notes
+ * separate audibly.  Always emits the stop ioctl on the way out,
+ * otherwise the speaker holds the last tone until the next reboot. */
+#define KIOCSOUND 0x4B2F
+static int rpg_pc_speaker_chime(void) {
+    int fd = (int)op("/dev/tty1", O_WRONLY, 0);
+    if (fd < 0) {
+        wr(1, "\a", 1);
+        return -1;
+    }
+    static const short notes_hz[4] = { 440, 554, 659, 880 };
+    for (int i = 0; i < 4; i++) {
+        long period = 1193180L / notes_hz[i];   /* PIT divisor */
+        io(fd, KIOCSOUND, period);
+        hx_sleep_ms(140);
+    }
+    io(fd, KIOCSOUND, 0);
+    cl(fd);
+    return 0;
+}
+
 /* v0.2: shot-bundle-full port — write the complete world state
  * (mosaic + every entity layer + active ruleset + world-coord
  * stack + player state) to a fixed file in cwd, mirroring the JS
@@ -8019,6 +8050,18 @@ static int run_rpg(int argc, char **argv) {
         if (raw == 'S') {
             action[0] = 0;
             rpg_save_bundle(action);
+            idle_ticks = 0;
+            continue;
+        }
+        /* v0.2: 'B' (beep) — pc-speaker chime port.  Tries KIOCSOUND
+         * on /dev/tty1; if that's not accessible, rings the BEL.
+         * Audible feedback you can trigger anywhere in the world. */
+        if (c == 'b') {
+            action[0] = 0;
+            int rc = rpg_pc_speaker_chime();
+            action[sapp(action, 0,
+                rc == 0 ? "♪ pc speaker"
+                        : "♪ bell (no pc speaker)")] = 0;
             idle_ticks = 0;
             continue;
         }
