@@ -81,6 +81,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# --- PlatformIO build state (per-board ESP firmware projects) -------------
+# Each isolation/artifacts/*/<esp_*>/ is a self-contained pio project; .pio/
+# holds the toolchain build cache + libdeps and should never be tracked.
+.pio/
+
 # --- Claude harness state (machine-local, not source) ---------------------
 .claude/
 memory/

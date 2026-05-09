@@ -75,12 +75,15 @@ supercell
 officex
 officeagent
 coder.db
+coder_project.txt
+coder_shifts.bin
+coder_state.bin
 personality.bin
 recent.bin
 longterm.bin
 project.bin
-coder_state.bin
 prompt.bin
+soul.db
 officesoul
 sheet*.csv
 hxhnt.seed
