@@ -8020,10 +8020,99 @@ static int run_rpg(int argc, char **argv) {
 /* ── saver: rpg screensaver (office50) ────────────────────
  * Auto-plays the rpg world in fullscreen — clears the screen black,
  * sets g_rpg_fullscreen so render_view drops origin_y to 0, and
- * loops a random hex-direction move every ~250 ms.  Animals + NPCs
- * keep wandering on their closed-loop paths each tick; the 3×3
- * mosaic shifts as the player crosses sub-overworlds.  Any keypress
- * exits cleanly.  No chrome, no status bar — just the world. */
+ * loops a directed hex move every ~300 ms.  Animals + NPCs keep
+ * wandering on their closed-loop paths each tick; the 3×3 mosaic
+ * shifts as the player crosses sub-overworlds.  Any keypress exits
+ * cleanly.  No chrome, no status bar — just the world.
+ *
+ * v0.2: simplified port of the JS autoplay-journey planner.  Picks
+ * a hex heading on engage and forward-projects each candidate move
+ * onto it — so the player walks in a real direction instead of
+ * drifting randomly, while still reading as exploratory.  6 recent
+ * positions kept in a ring to detect oscillation; on hit, switch
+ * to a chaos burst (uniform-random over legal cells) for a few
+ * ticks before resuming the heading.  Heading drifts ±1 slot
+ * every ~30 steps so the run still wanders new territory. */
+
+/* Hex unit vectors scaled ×2 so a/d (horizontal) and w/e/z/x
+ * (vertical-with-half-tile-x) sit on integer coordinates and the
+ * dot product is a clean projection scalar. */
+static const signed char rpg_hex_ddx[6] = { -2, +2, -1, +1, -1, +1 };
+static const signed char rpg_hex_ddy[6] = {  0,  0, -2, -2, +2, +2 };
+static const char        rpg_hex_dirs[6] = { 'a', 'd', 'w', 'e', 'z', 'x' };
+
+/* Same simulate-move-without-applying as JS autoplaySimMove.  Used
+ * by the journey planner to score candidate moves before commit. */
+static void rpg_sim_move(int x, int y, char dir, int *nx, int *ny) {
+    int odd = y & 1;
+    *nx = x; *ny = y;
+    switch (dir) {
+    case 'a': *nx = x - 1; break;
+    case 'd': *nx = x + 1; break;
+    case 'w': *ny = y - 1; *nx = x + (odd ? 0 : -1); break;
+    case 'e': *ny = y - 1; *nx = x + (odd ? 1 : 0); break;
+    case 'z': *ny = y + 1; *nx = x + (odd ? 0 : -1); break;
+    case 'x': *ny = y + 1; *nx = x + (odd ? 1 : 0); break;
+    }
+}
+
+#define RPG_JOURNEY_RING 6
+
+/* Pick the next move for the screensaver / autoplay planner.
+ * `heading` is one of 0..5 indexing into rpg_hex_ddx/ddy.
+ * `chaos`   non-zero → random walk (oscillation-break), uses rng
+ *           only for tie-breaking and ignores heading projection.
+ * `ring`    last RPG_JOURNEY_RING (x, y) cells; revisits get a
+ *           small penalty so the planner doesn't bounce.
+ * Returns the chosen direction character. */
+static char rpg_journey_pick(int px, int py, int heading,
+                             int chaos, unsigned long *rng,
+                             const short ring[][2], int ring_n) {
+    int hdx = rpg_hex_ddx[heading & 5];
+    int hdy = rpg_hex_ddy[heading & 5];
+    int best_score = -1000000;
+    int best_i     = 0;
+    /* Step the rng once up front so noise is stable across the loop. */
+    *rng = *rng * 6364136223846793005UL + 1442695040888963407UL;
+    unsigned long noise = *rng >> 32;
+    for (int i = 0; i < 6; i++) {
+        int nx, ny;
+        rpg_sim_move(px, py, rpg_hex_dirs[i], &nx, &ny);
+        if (nx < 0 || nx >= RPG_TILE_W ||
+            ny < 0 || ny >= RPG_TILE_H) continue;
+        int idx = ny * RPG_TILE_W + nx;
+        int pen = 0;
+        /* Hard penalties: water, NPC, plant, building.  Same set
+         * the JS version treats as blocking / costly. */
+        if ((rpg_map[idx] & 3) == 3) pen += 100;
+        if (rpg_npc_at[idx])         pen += 100;
+        unsigned char cat = rpg_cat_at[idx];
+        if (cat == RC_PLANT || cat == RC_BUILDING) pen += 100;
+        /* Anti-revisit: any cell in the ring gets +1, more for
+         * fresher entries.  Subtle on its own; in chaos mode the
+         * caller raises the weight by passing a high heading slot. */
+        for (int r = 0; r < ring_n; r++) {
+            if (ring[r][0] == nx && ring[r][1] == ny) {
+                pen += 2 + (ring_n - r);
+                break;
+            }
+        }
+        int score;
+        if (chaos) {
+            /* Random walk: legal moves all roughly tied, jitter
+             * picks among them.  Penalties still dominate so we
+             * don't bury into water during the burst. */
+            score = -pen + (int)((noise >> (i * 4)) & 0xf);
+        } else {
+            /* Forward projection in the heading's direction. */
+            int ddx = nx - px, ddy = ny - py;
+            int proj = ddx * hdx + ddy * hdy;
+            score = proj * 4 - pen + (int)((noise >> (i * 4)) & 0x3);
+        }
+        if (score > best_score) { best_score = score; best_i = i; }
+    }
+    return rpg_hex_dirs[best_i];
+}
 static int run_screensaver(int argc, char **argv) {
     (void)argc; (void)argv;
     hx_active_init();
@@ -8054,7 +8143,6 @@ static int run_screensaver(int argc, char **argv) {
     fbs("\033[2J");
     fbflush();
 
-    static const char dirs[6] = { 'a', 'd', 'w', 'e', 'z', 'x' };
     unsigned long s;
     {
         unsigned long h, l;
@@ -8063,13 +8151,61 @@ static int run_screensaver(int argc, char **argv) {
     }
     char action[80]; action[0] = 0;
 
+    /* Journey-planner state.  Heading is rotated through the 6 hex
+     * slots; ring tracks the last few visited cells for oscillation
+     * detection; chaos counter forces N random-walk ticks after we
+     * spot a position repeat 3+ times in the ring. */
+    int journey_heading = (int)((s >> 17) % 6);
+    int journey_steps   = 0;
+    int journey_chaos   = 0;
+    short journey_ring[RPG_JOURNEY_RING][2];
+    for (int i = 0; i < RPG_JOURNEY_RING; i++) {
+        journey_ring[i][0] = -1; journey_ring[i][1] = -1;
+    }
+    int journey_ring_n = 0;
+
     for (;;) {
         unsigned char k[8];
         int n = read_key(k, sizeof k);
         if (n > 0) break;
 
-        s = s * 6364136223846793005UL + 1442695040888963407UL;
-        char c = dirs[(s >> 33) % 6];
+        /* Oscillation detection — count how many ring entries match
+         * the player's current cell.  3+ hits in a 6-cell ring is a
+         * clear A↔B bounce or U-turn, so trigger a chaos burst. */
+        if (journey_chaos == 0) {
+            int hits = 0;
+            for (int i = 0; i < journey_ring_n; i++)
+                if (journey_ring[i][0] == px && journey_ring[i][1] == py)
+                    hits++;
+            if (hits >= 3) journey_chaos = 8;
+        }
+        if (journey_chaos > 0) journey_chaos--;
+        /* Heading drift — every ~30 steps, rotate ±1 slot so the run
+         * doesn't pin to one azimuth indefinitely.  At chaos exit we
+         * also kick by ±2 slots so the resume direction isn't the
+         * same one that got stuck. */
+        journey_steps++;
+        if (journey_chaos == 0 && journey_steps == 1)
+            journey_heading = (journey_heading + 4 + (int)(s & 3)) % 6;
+        if (journey_steps >= 30) {
+            journey_steps = 0;
+            s = s * 6364136223846793005UL + 1442695040888963407UL;
+            journey_heading = (journey_heading + 5 + (int)((s >> 33) & 3)) % 6;
+        }
+
+        char c = rpg_journey_pick(px, py, journey_heading,
+                                  journey_chaos > 0, &s,
+                                  journey_ring, journey_ring_n);
+
+        /* Push current cell onto the ring (FIFO of the last N). */
+        for (int i = RPG_JOURNEY_RING - 1; i > 0; i--) {
+            journey_ring[i][0] = journey_ring[i - 1][0];
+            journey_ring[i][1] = journey_ring[i - 1][1];
+        }
+        journey_ring[0][0] = (short)px;
+        journey_ring[0][1] = (short)py;
+        if (journey_ring_n < RPG_JOURNEY_RING) journey_ring_n++;
+
         action[0] = 0;
         rpg_move(&px, &py, c, action);
         rpg_path_tick(px, py);
@@ -10111,8 +10247,17 @@ int main_c(int argc, char **argv, char **envp) {
     /* officerpg v0.1: when invoked as "officerpg", skip the office
      * shell entirely and launch directly into the rpg.  q/ESC inside
      * the rpg drops back to the (mostly-empty) shell, which the
-     * user can then `q` again to exit. */
+     * user can then `q` again to exit.
+     *
+     * v0.2: also expose `./officerpg saver` (or `screensaver`) as a
+     * subcommand that runs the journey-planner screensaver instead
+     * — same code path as office's saver app, just reachable from
+     * the standalone build so --gc-sections keeps it in. */
     if (scmp(cmd, "officerpg") == 0) {
+        if (sub_argc > 1 &&
+            (scmp(sub_argv[1], "saver")       == 0 ||
+             scmp(sub_argv[1], "screensaver") == 0))
+            return run_screensaver(sub_argc - 1, sub_argv + 1);
         return run_rpg(sub_argc, sub_argv);
     }
     /* office61: programmatic prefix match — if cmd is "office" or
