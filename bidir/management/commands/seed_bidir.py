@@ -83,6 +83,10 @@ class Command(BaseCommand):
             # rule library.  Tournament-2 + within-category, fitness
             # = expanded F-count + bbox area.  Toggle G.
             'lsystem-genome',
+            # v1.3 — `workshop` subcommand: interactive 16384-rule
+            # editor with 7-swatch situation display + 16×16 live
+            # preview stepped under the current genome.
+            'genome-workshop',
         }
         # Features that cannot meaningfully ship in a nostdlib ANSI-C
         # terminal binary.  Three reasons collapse here:
@@ -95,7 +99,7 @@ class Command(BaseCommand):
         #     presets; circular concept (lite-terminal in a terminal).
         ANSIC_NA = {
             'image-presets', 'flower-rule-view',
-            'genome-workshop', 'bio-lab', 'rgba-pal-alpha',
+            'bio-lab', 'rgba-pal-alpha',
             # music-stereo / music-waltz / music-smooth stay N/A on
             # pc-speaker (monophonic only).  music-mood ported in
             # v1.1 — see ANSIC_DONE.
