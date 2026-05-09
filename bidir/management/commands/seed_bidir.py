@@ -28,6 +28,7 @@ FEATURES = [
     ('music-stereo',     'Stereo music (score-CA L / meta-CA R)',    'ev47', 112),
     ('music-smooth',     'Worker scheduler + slip recovery',         'ev49', 114),
     ('music-waltz',      'Waltz / 3-4 meter toggle',                 'ev60', 113),
+    ('animal-action-anim', 'Per-animal CA + 10 action maps',         'ev61', 156),
     ('lite-terminal',    'Embedded lite terminal sub-game',          'ev18', 120),
     ('full-auto-mode',   'Full-auto mode (live+music+map+journey)',  'ev45', 125),
     ('shot-export',      'Live browser-shot export + replay',        'ev44', 130),
