@@ -20,17 +20,26 @@ from .simulate import simulate
 
 @login_required
 def index(request):
+    domain = (request.GET.get('domain') or '').strip().lower()
+    if domain not in ('water', 'data'):
+        domain = ''
     systems = System.objects.select_related('source', 'target').all()
     stage_types = StageType.objects.all()
     profiles = WaterProfile.objects.all()
     recent_runs = (TestRun.objects
                    .select_related('system', 'source', 'target')
                    .order_by('-created_at')[:10])
+    if domain:
+        systems = systems.filter(domain=domain)
+        stage_types = stage_types.filter(domain=domain)
+        profiles = profiles.filter(domain=domain)
+        recent_runs = recent_runs.filter(domain=domain)
     return render(request, 'naiad/index.html', {
         'systems':      systems,
         'stage_types':  stage_types,
         'profiles':     profiles,
         'recent_runs':  recent_runs,
+        'domain_filter': domain,
     })
 
 
@@ -67,11 +76,15 @@ def system_detail(request, slug):
         System.objects.select_related('source', 'target'), slug=slug)
     stages = (Stage.objects.filter(system=system)
               .select_related('stage_type').order_by('position'))
-    stage_types = StageType.objects.all()
+    # Phase 3b: filter the stage picker to the system's domain so we
+    # don't suggest cross-domain mismatches.
+    stage_types = StageType.objects.filter(domain=system.domain)
     test_runs = (system.test_runs.select_related('source', 'target')
                  .order_by('-created_at')[:10])
-    sources = WaterProfile.objects.filter(scope='source')
-    targets = WaterProfile.objects.filter(scope='target')
+    sources = WaterProfile.objects.filter(
+        scope='source', domain=system.domain)
+    targets = WaterProfile.objects.filter(
+        scope='target', domain=system.domain)
 
     # Recent Conduit jobs that targeted this system as their parent,
     # so the user can jump to status / import a completed winner
@@ -133,6 +146,51 @@ def add_stage(request, slug):
 
 @login_required
 @require_POST
+@require_POST
+@login_required
+def update_weights(request, slug):
+    """Save System.fitness_weights from the system_detail UI.  Body:
+    a `weights_json` form field carrying an object like
+    {"reliability_pct": 5, "latency_ms": 1}.  Or a `preset` field
+    naming one of the 4 quick-presets defined inline below."""
+    system = get_object_or_404(System, slug=slug)
+    PRESETS = {
+        'reliability':  {'reliability_pct': 5, 'latency_ms': 1,
+                         'throughput_kbps': 1, 'cost_eur_month': 1},
+        'balanced':     {'reliability_pct': 1, 'latency_ms': 1,
+                         'throughput_kbps': 1, 'cost_eur_month': 1,
+                         'energy_watts': 1},
+        'speed':        {'latency_ms': 5, 'jitter_ms': 3,
+                         'throughput_kbps': 3, 'reliability_pct': 1},
+        'cheap':        {'cost_eur_month': 5, 'energy_watts': 3,
+                         'reliability_pct': 1, 'latency_ms': 1},
+    }
+    preset = (request.POST.get('preset') or '').strip()
+    if preset and preset in PRESETS:
+        system.fitness_weights = dict(PRESETS[preset])
+    elif preset == 'clear':
+        system.fitness_weights = {}
+    else:
+        raw = request.POST.get('weights_json', '').strip()
+        try:
+            parsed = json.loads(raw) if raw else {}
+            if not isinstance(parsed, dict):
+                raise ValueError('not an object')
+            clean = {}
+            for k, v in parsed.items():
+                try:
+                    clean[str(k)] = float(v)
+                except (TypeError, ValueError):
+                    pass
+            system.fitness_weights = clean
+        except Exception as e:
+            messages.error(request, f'Invalid weights JSON: {e}')
+            return redirect('naiad:system_detail', slug=system.slug)
+    system.save(update_fields=['fitness_weights', 'updated_at'])
+    messages.success(request, 'Fitness weights updated.')
+    return redirect('naiad:system_detail', slug=system.slug)
+
+
 def remove_stage(request, slug, stage_id):
     system = get_object_or_404(System, slug=slug)
     stage = get_object_or_404(Stage, pk=stage_id, system=system)

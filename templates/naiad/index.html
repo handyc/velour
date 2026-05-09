@@ -115,6 +115,20 @@
     {% endfor %}
   {% endif %}
 
+  <div class="panel" style="display:flex;gap:0.6rem;align-items:baseline;
+                            font-size:0.78rem">
+    <span style="color:#8b949e">Domain:</span>
+    <a href="?" style="color:{% if not domain_filter %}#58a6ff{% else %}#6e7681{% endif %};
+                       text-decoration:none">all</a>
+    <a href="?domain=water" style="color:{% if domain_filter == 'water' %}#58a6ff{% else %}#6e7681{% endif %};
+                                  text-decoration:none">water</a>
+    <a href="?domain=data" style="color:{% if domain_filter == 'data' %}#58a6ff{% else %}#6e7681{% endif %};
+                                 text-decoration:none">data (OSI)</a>
+    <span style="color:#6e7681;margin-left:auto;font-family:monospace;font-size:0.7rem">
+      {{ systems|length }} systems · {{ stage_types|length }} stage types
+    </span>
+  </div>
+
   <div class="panels">
     <div>
       <div class="panel">
@@ -126,6 +140,7 @@
               {{ s.name }}
             </a>
             <span class="meta">
+              [{{ s.domain }}]
               {{ s.source.name }}
               {% if s.target %}→ {{ s.target.name }}{% endif %}
             </span>

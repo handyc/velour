@@ -243,6 +243,65 @@
       to aim at.
     </p>
     {% endif %}
+
+    {# Phase 3c: fitness-weights editor.  Empty = use domain defaults
+       (data: reliability_pct=5, others=1; water: all=1).  4 quick
+       presets cover the common stances; a JSON box lets you go finer. #}
+    <h2 style="margin-top:14px;">Fitness weights
+      <span style="font-size:0.7rem;color:#8b949e;font-weight:400;
+        text-transform:none;letter-spacing:0;">
+        ({{ system.get_domain_display }} domain)</span></h2>
+    <p style="color:#8b949e;font-size:0.74rem;margin:0 0 6px;">
+      Bigger weight = "evolve harder against this metric."
+      {% if system.domain == 'data' %}
+      Default puts <strong>reliability×5</strong> — uptime first.
+      {% else %}
+      Default is uniform weight=1 — water uses the existing
+      cost/volume/biomass penalty system separately.
+      {% endif %}
+    </p>
+    <form method="post"
+          action="{% url 'naiad:update_weights' slug=system.slug %}"
+          style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;">
+      {% csrf_token %}
+      <button type="submit" name="preset" value="reliability"
+        title="reliability_pct=5; latency/throughput/cost=1"
+        class="btn">Reliability-first</button>
+      <button type="submit" name="preset" value="balanced"
+        title="all metrics weight=1"
+        class="btn">Balanced</button>
+      <button type="submit" name="preset" value="speed"
+        title="latency=5, jitter=3, throughput=3"
+        class="btn">Speed</button>
+      <button type="submit" name="preset" value="cheap"
+        title="cost=5, energy=3"
+        class="btn">Cheap</button>
+      <button type="submit" name="preset" value="clear"
+        title="back to domain defaults"
+        class="btn" style="margin-left:auto;color:#8b949e;">
+        Clear (use defaults)</button>
+    </form>
+    <details style="margin-top:6px;">
+      <summary style="cursor:pointer;color:#8b949e;font-size:0.74rem;">
+        Custom weights (JSON)</summary>
+      <form method="post"
+            action="{% url 'naiad:update_weights' slug=system.slug %}"
+            style="margin-top:6px;">
+        {% csrf_token %}
+        <textarea name="weights_json" spellcheck="false"
+          style="width:100%;min-height:80px;background:#050a10;
+          color:#c9d1d9;border:1px solid #21262d;border-radius:4px;
+          padding:8px;font-family:ui-monospace,monospace;font-size:0.75rem;"
+          >{{ system.fitness_weights|default:"{}" }}</textarea>
+        <button type="submit" class="btn"
+          style="margin-top:4px;">Save weights</button>
+      </form>
+    </details>
+    {% if system.fitness_weights %}
+      <p style="margin-top:6px;font-size:0.72rem;color:#8b949e;
+        font-family:ui-monospace,monospace;">
+        current: {{ system.fitness_weights }}</p>
+    {% endif %}
   </div>
 
   <div class="panel">
