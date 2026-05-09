@@ -8211,7 +8211,8 @@ static int run_rpg(int argc, char **argv) {
             hl = sapp(hint, hl, action);
             hl = sapp(hint, hl, " · ");
         }
-        hl = sapp(hint, hl, "wadezx=move i=inv m=zap l=live k=speeds 0-7=bend q ");
+        hl = sapp(hint, hl, "wadezx=move i=inv m=zap l=live k=speeds 0-7=bend "
+                            "S=save L=load E=shot b=beep h=halos q ");
         hint[hl] = 0;
         status(hint);
         /* v0.2: if a shot was requested by the previous key-handler
@@ -10672,10 +10673,112 @@ int main_c(int argc, char **argv, char **envp) {
      * — same code path as office's saver app, just reachable from
      * the standalone build so --gc-sections keeps it in. */
     if (scmp(cmd, "officerpg") == 0) {
+        /* v0.2: --help / -h before all other subcommands so a
+         * stale CLI invocation always lands on something
+         * informative.  We deliberately don't accept '-h' alone
+         * since lowercase 'h' inside run_rpg toggles halos and
+         * users muscle-memorying that key shouldn't quit. */
+        if (sub_argc > 1 &&
+            (scmp(sub_argv[1], "--help") == 0 ||
+             scmp(sub_argv[1], "help")   == 0)) {
+            static const char H[] =
+                "officerpg — hex CA + L-system rpg (ANSI-C v0.2)\n"
+                "\n"
+                "  ./officerpg              run interactive rpg\n"
+                "  ./officerpg saver        run journey-mode screensaver\n"
+                "  ./officerpg --help       print this help\n"
+                "  ./officerpg --version    print version\n"
+                "\n"
+                "interactive keys:\n"
+                "  wadezx        offset-r hex move\n"
+                "  i             inventory\n"
+                "  m             cast zap\n"
+                "  l             toggle live animation\n"
+                "  k             open speed-settings panel\n"
+                "  0-3           bend terrain (cost MP)\n"
+                "  4-7           recolour palette (cost MP)\n"
+                "  S             save world bundle (officerpg-state.bin)\n"
+                "  L             load world bundle\n"
+                "  E             ANSI screenshot (officerpg-shot.ans)\n"
+                "  b             pc-speaker chime / BEL fallback\n"
+                "  h             toggle animal action halos (off by default)\n"
+                "  q  ESC        quit\n";
+            wr(1, H, sizeof H - 1);
+            return 0;
+        }
+        if (sub_argc > 1 &&
+            (scmp(sub_argv[1], "--version") == 0 ||
+             scmp(sub_argv[1], "version")   == 0)) {
+            static const char V[] = "officerpg ANSI-C v0.2\n";
+            wr(1, V, sizeof V - 1);
+            return 0;
+        }
         if (sub_argc > 1 &&
             (scmp(sub_argv[1], "saver")       == 0 ||
              scmp(sub_argv[1], "screensaver") == 0))
             return run_screensaver(sub_argc - 1, sub_argv + 1);
+        /* v0.2: non-interactive `test` subcommand — runs N
+         * deterministic moves from a seed, then writes the
+         * bundle + ANSI shot before exiting cleanly.  Lets
+         * scripted regressions drive the binary without a
+         * human at the keyboard, paired with the terminalshot
+         * decoder for output verification. */
+        if (sub_argc > 1 && scmp(sub_argv[1], "test") == 0) {
+            int steps = 30;
+            unsigned long seed = 0xdeadbeefUL;
+            for (int a = 2; a < sub_argc; a++) {
+                if (scmp(sub_argv[a], "--steps") == 0 && a + 1 < sub_argc) {
+                    steps = (int)atoi_(sub_argv[++a]);
+                } else if (scmp(sub_argv[a], "--seed") == 0 && a + 1 < sub_argc) {
+                    seed = (unsigned long)atoi_(sub_argv[++a]);
+                }
+            }
+            if (steps < 1)    steps = 1;
+            if (steps > 9999) steps = 9999;
+            hx_active_init();
+            rpg_sprites_init();
+            mset(rpg_world_pos, 0, sizeof rpg_world_pos);
+            int px = RPG_TILE_W / 2;
+            int py = RPG_TILE_H / 2;
+            rpg_load_overworld(px, py);
+            rpg_player_init();
+            rpg_preload_invalidate();
+            static const char dirs[6] = { 'a','d','w','e','z','x' };
+            unsigned long s = seed | 1UL;
+            char action[80]; action[0] = 0;
+            for (int t = 0; t < steps; t++) {
+                s = s * 6364136223846793005UL + 1442695040888963407UL;
+                char c = dirs[(s >> 33) % 6];
+                action[0] = 0;
+                rpg_move(&px, &py, c, action);
+                rpg_path_tick(px, py);
+                rpg_preload_advance_one(px, py);
+                int mdx = 0, mdy = 0;
+                if (px <  RPG_MAP_W)         mdx = -1;
+                else if (px >= 2 * RPG_MAP_W)mdx =  1;
+                if (py <  RPG_MAP_H)         mdy = -1;
+                else if (py >= 2 * RPG_MAP_H)mdy =  1;
+                if (mdx || mdy) {
+                    px -= mdx * RPG_MAP_W;
+                    py -= mdy * RPG_MAP_H;
+                    int meta_dx = mdx, meta_dy = mdy;
+                    int hdx = 0, hdy = 0;
+                    rpg_hex_meta_shift(c, rpg_world_pos[0][1], &hdx, &hdy);
+                    if (hdx || hdy) { meta_dx = hdx; meta_dy = hdy; }
+                    rpg_shift_mosaic(meta_dx, meta_dy, px, py, c);
+                }
+            }
+            rpg_save_bundle(NULL);
+            /* Render once into the framebuffer so the shot file
+             * captures the post-walk state.  Don't fbflush — the
+             * shot path reads fb directly and we're not actually
+             * showing this frame on a tty. */
+            paint_desktop();
+            chrome("rpg");
+            rpg_render_view(px, py);
+            rpg_save_shot_to_file();
+            return 0;
+        }
         return run_rpg(sub_argc, sub_argv);
     }
     /* office61: programmatic prefix match — if cmd is "office" or
