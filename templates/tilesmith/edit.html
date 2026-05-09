@@ -427,28 +427,58 @@ function findCpAt(canvasX, canvasY, slack = 8) {
   return null;
 }
 
-/* Project a click onto the nearest edge baseline; returns
- * { edgeIdx, p } or null if too far from any edge. */
+/* Project a click onto the nearest *visible* edge segment — that
+ * is, the polyline through corner → CP_1 → CP_2 → … → corner —
+ * not just the corner-to-corner baseline.  Returns
+ * { edgeIdx, p, off } whose (p, off) plant the new CP exactly
+ * where the user clicked, on top of the visible chord between the
+ * two adjacent CPs.  This is what makes "halve forever" work: each
+ * subdivision lands on the curve, not on the original hex edge,
+ * so further halvings of the new sub-segment behave correctly. */
 function projectToEdge(canvasX, canvasY, slack = 14) {
   let best = null;
   for (let i = 0; i < 6; i++) {
-    const g = EDGE_GEOM[i];
-    const [sx, sy] = tileToEditPx(g.startX, g.startY);
-    const [ex, ey] = tileToEditPx(g.endX,   g.endY);
-    const dx = ex - sx, dy = ey - sy;
-    const len2 = dx * dx + dy * dy;
-    if (len2 < 1e-6) continue;
-    let t = ((canvasX - sx) * dx + (canvasY - sy) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    const px = sx + t * dx, py = sy + t * dy;
-    const ddx = px - canvasX, ddy = py - canvasY;
-    const dist2 = ddx * ddx + ddy * ddy;
-    if (best === null || dist2 < best.dist2) {
-      best = { edgeIdx: i, p: t, dist2 };
+    /* Build the polyline for this edge in canvas-px:
+     *   corner_start, CP_1, CP_2, …, corner_end
+     * Each entry remembers its baseline parameter p so a midpoint
+     * along a sub-segment maps back to a sensible baseline-p. */
+    const polyline = [];
+    {
+      const [x0, y0] = edgePoint(i, 0, 0);
+      polyline.push({ pxX: x0, pxY: y0, p: 0 });
+    }
+    for (const cp of tile.edges[i]) {
+      const [x, y] = edgePoint(i, cp.p, cp.off);
+      polyline.push({ pxX: x, pxY: y, p: cp.p });
+    }
+    {
+      const [x1, y1] = edgePoint(i, 1, 0);
+      polyline.push({ pxX: x1, pxY: y1, p: 1 });
+    }
+    /* Walk every adjacent pair as a chord and project the click. */
+    for (let s = 0; s < polyline.length - 1; s++) {
+      const a = polyline[s], b = polyline[s + 1];
+      const dx = b.pxX - a.pxX, dy = b.pxY - a.pxY;
+      const len2 = dx * dx + dy * dy;
+      if (len2 < 1e-6) continue;
+      let t = ((canvasX - a.pxX) * dx + (canvasY - a.pxY) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const projX = a.pxX + t * dx;
+      const projY = a.pxY + t * dy;
+      const ddx = projX - canvasX, ddy = projY - canvasY;
+      const dist2 = ddx * ddx + ddy * ddy;
+      if (best === null || dist2 < best.dist2) {
+        /* New CP's baseline-p = lerp(a.p, b.p, t).  off is the
+         * perpendicular distance from the baseline at that p. */
+        const newP = a.p + t * (b.p - a.p);
+        const [baseX, baseY] = edgePoint(i, newP, 0);
+        const newOff = pxToOff(i, projX - baseX, projY - baseY);
+        best = { edgeIdx: i, p: newP, off: newOff, dist2 };
+      }
     }
   }
   if (best && best.dist2 <= slack * slack && best.p > 0.02 && best.p < 0.98) {
-    return { edgeIdx: best.edgeIdx, p: best.p };
+    return { edgeIdx: best.edgeIdx, p: best.p, off: best.off };
   }
   return null;
 }
@@ -497,9 +527,15 @@ editCanvas.addEventListener("mousedown", (e) => {
   } else {
     const proj = projectToEdge(cx, cy, 22);
     if (proj) {
-      tile.edges[proj.edgeIdx].push({ p: proj.p, off: 0 });
+      /* Plant the new CP at the click location on the visible chord
+       * — its `off` is whatever distance from the baseline puts it
+       * exactly there, so further halvings of either sub-segment
+       * stay grounded on the curve the user can see.  This is the
+       * "halve forever" behaviour. */
+      const newCp = { p: proj.p, off: proj.off };
+      tile.edges[proj.edgeIdx].push(newCp);
       tile.edges[proj.edgeIdx].sort((a, b) => a.p - b.p);
-      const newIdx = tile.edges[proj.edgeIdx].findIndex(c => c.p === proj.p);
+      const newIdx = tile.edges[proj.edgeIdx].indexOf(newCp);
       syncMirror(proj.edgeIdx);
       dragState = { edgeIdx: proj.edgeIdx, cpIdx: newIdx };
       redrawAll();
