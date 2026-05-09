@@ -159,7 +159,6 @@
  * one side from the other after any edit.
  */
 
-const SLUG     = {{ spec.slug|safe|default:'""' }};
 const IS_PRESET = {{ spec.is_preset|yesno:"true,false" }};
 const SAVE_URL = "{% url 'tilesmith:save' spec.slug %}";
 const CSRF     = "{{ csrf_token }}";
@@ -179,7 +178,7 @@ const EDGE_GEOM = [
 const PAIR_COLOR = ["#f0883e", "#79c0ff", "#d2a8ff"];
 
 const tile = {
-  name:   {{ spec.name|default:'""'|safe|stringformat:"r" }},
+  name:   "{{ spec.name|escapejs }}",
   base_w: {{ spec.base_w }},
   base_h: {{ spec.base_h }},
   edges:  {{ edges_json|safe }},
