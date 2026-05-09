@@ -57,13 +57,26 @@
             <th>
               {{ v.name }}
               {% if v.is_canonical %}<div class="canonical">canonical</div>{% endif %}
+              {% with lb=latest_builds|default_if_none:'' %}
+                {% if lb|length and lb.0 %}{# noop #}{% endif %}
+              {% endwith %}
+              {% if latest_builds %}
+                {% for vid, label in latest_builds.items %}
+                  {% if vid == v.id %}
+                    <div style="color:#6e7681;font-size:0.62rem;
+                                font-family:ui-monospace,monospace">
+                      latest {{ label }}
+                    </div>
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
             </th>
           {% endfor %}
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
-        <tr>
+        <tr id="row-{{ row.feature.slug }}">
           <td class="feat">
             <a href="{% url 'bidir:feature_detail' slug=row.feature.slug %}">
               {{ row.feature.name }}
@@ -75,7 +88,25 @@
             {% endif %}
           </td>
           {% for c in row.cells %}
-            <td><span class="pill {{ c.state }}">{{ c.state }}</span></td>
+            <td>
+              {# Inline status select — submits onChange, no JS file. #}
+              <form method="post" style="display:inline"
+                    action="{% url 'bidir:quickset_status' %}">
+                {% csrf_token %}
+                <input type="hidden" name="feature" value="{{ row.feature.slug }}">
+                <input type="hidden" name="variant" value="{{ c.variant.slug }}">
+                <select name="state" onchange="this.form.submit()"
+                        class="pill {{ c.state }}"
+                        style="padding:1px 4px;border:1px solid #30363d;
+                               background:transparent;font-size:0.66rem;
+                               text-transform:uppercase;cursor:pointer">
+                  <option value="todo"    {% if c.state == 'todo' %}selected{% endif %}>todo</option>
+                  <option value="partial" {% if c.state == 'partial' %}selected{% endif %}>partial</option>
+                  <option value="done"    {% if c.state == 'done' %}selected{% endif %}>done</option>
+                  <option value="na"      {% if c.state == 'na' %}selected{% endif %}>n/a</option>
+                </select>
+              </form>
+            </td>
           {% endfor %}
         </tr>
         {% empty %}
