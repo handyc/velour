@@ -7242,6 +7242,58 @@ static int rpg_save_bundle(char *action) {
     return 0;
 }
 
+/* v0.2: load bundle counterpart — Shift+L reads the file written
+ * by Shift+S back into memory.  Validates the magic + version
+ * before touching any in-memory state, so a stale or alien file
+ * leaves the live world untouched.  Caches that depend on world
+ * coords (cell-done, anim) get reset after the load so the next
+ * render rebuilds from the freshly-restored layers. */
+static int rpg_load_bundle(char *action) {
+    int fd = (int)op(RPG_BUNDLE_FILE, O_RDONLY, 0);
+    if (fd < 0) {
+        if (action) action[sapp(action, 0, "load: no bundle file")] = 0;
+        return -1;
+    }
+    unsigned int hdr[2 + RPG_WORLD_LEVELS * 2];
+    long n = rd(fd, hdr, sizeof hdr);
+    if (n != (long)sizeof hdr ||
+        hdr[0] != RPG_BUNDLE_MAGIC ||
+        hdr[1] != RPG_BUNDLE_VERSION) {
+        cl(fd);
+        if (action) action[sapp(action, 0, "load: bad header")] = 0;
+        return -1;
+    }
+    /* Stage into scratch first so a partial read doesn't corrupt
+     * the live world.  rpg_buf is the existing CA scratch ring
+     * which is already 192×192 = same size as one mosaic layer. */
+    int ok = 1;
+    ok &= rd(fd, rpg_map,        sizeof rpg_map)        == (long)sizeof rpg_map;
+    ok &= rd(fd, rpg_cat_at,     sizeof rpg_cat_at)     == (long)sizeof rpg_cat_at;
+    ok &= rd(fd, rpg_npc_at,     sizeof rpg_npc_at)     == (long)sizeof rpg_npc_at;
+    ok &= rd(fd, rpg_idx_at,     sizeof rpg_idx_at)     == (long)sizeof rpg_idx_at;
+    ok &= rd(fd, rpg_hp_at,      sizeof rpg_hp_at)      == (long)sizeof rpg_hp_at;
+    ok &= rd(fd, hx_seed_genome, sizeof hx_seed_genome) == (long)sizeof hx_seed_genome;
+    ok &= rd(fd, &rpg_player,    sizeof rpg_player)     == (long)sizeof rpg_player;
+    cl(fd);
+    if (!ok) {
+        if (action) action[sapp(action, 0, "load: short read")] = 0;
+        return -1;
+    }
+    for (int i = 0; i < RPG_WORLD_LEVELS; i++) {
+        rpg_world_pos[i][0] = (int)hdr[2 + i * 2    ];
+        rpg_world_pos[i][1] = (int)hdr[2 + i * 2 + 1];
+    }
+    /* Cell-derived caches are stale now; the next render will
+     * lazy-rebuild them on demand. */
+    mset(rpg_cell_done, 0, sizeof rpg_cell_done);
+    rpg_genome_live_cache = -1;
+    rpg_palettes_refresh();
+    rpg_preload_invalidate();
+    if (action)
+        action[sapp(action, 0, "loaded bundle ← officerpg-state.bin")] = 0;
+    return 0;
+}
+
 /* Re-seed the RNG from the world coord stack and regenerate the
  * 3×3 mosaic + entities.  spawn (x, y) is in mosaic coords (0..192)
  * and determines the 3×3 clear-zone around the player's entry point.
@@ -7994,7 +8046,17 @@ static int run_rpg(int argc, char **argv) {
             idle_ticks = 0;
             continue;
         }
-        if (k[0] == 'l' || k[0] == 'L') {
+        /* v0.2: uppercase 'L' loads the saved bundle (port of
+         * JS shot-bundle-full reload).  Lowercase 'l' keeps its
+         * legacy live-anim-toggle role; they were aliased before
+         * this fork so we tighten the match here. */
+        if (k[0] == 'L') {
+            action[0] = 0;
+            rpg_load_bundle(action);
+            idle_ticks = 0;
+            continue;
+        }
+        if (k[0] == 'l') {
             rpg_animating = !rpg_animating;
             if (rpg_animating) {
                 rpg_anim_reset();
