@@ -20,7 +20,7 @@ VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office
            supercell officex officeagent officesoul officetiles
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
-all: $(VERSIONS) minimal jail
+all: $(VERSIONS) minimal jail officesoulmin soulvote
 dbg: $(DBG) jail.dbg
 
 office: office.c
@@ -457,6 +457,21 @@ officesoul: officesoul.c soul_data.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "officesoul: $$(stat -c %s $@) bytes"
+
+# Headless soul: same model, no Win95 chrome / banks / tdb / shell.
+# Drop-in for piped use and the soulvote ensemble orchestrator.
+officesoulmin: officesoulmin.c soul_data.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "officesoulmin: $$(stat -c %s $@) bytes"
+
+# N-agent ensemble over officesoulmin.  Forks N children with
+# different --seed, votes per token position.  No isolation here —
+# jail wrap-up is a separate fork once the ensemble proves out.
+soulvote: soulvote.c soul_data.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "soulvote: $$(stat -c %s $@) bytes"
 
 soul_data.h: gen_soul_data.py
 	python3 gen_soul_data.py
