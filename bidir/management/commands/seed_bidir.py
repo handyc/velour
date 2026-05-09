@@ -75,6 +75,10 @@ class Command(BaseCommand):
             'shot-bundle-full', 'death-respawn', 'per-cell-rules',
             'per-cell-rules-ga', 'hex-meta-cascade',
             'animal-action-anim', 'pc-speaker',
+            # v1.1 — monophonic pc-speaker port of music-mood (ev42).
+            # JS bytebeat → A-pentatonic note picker on KIOCSOUND;
+            # HP ratio modulates scale (major/minor) and tempo.
+            'music-mood',
         }
         # Features that cannot meaningfully ship in a nostdlib ANSI-C
         # terminal binary.  Three reasons collapse here:
@@ -88,7 +92,10 @@ class Command(BaseCommand):
         ANSIC_NA = {
             'lsystem-genome', 'image-presets', 'flower-rule-view',
             'genome-workshop', 'bio-lab', 'rgba-pal-alpha',
-            'music-mood', 'music-stereo', 'music-waltz', 'music-smooth',
+            # music-stereo / music-waltz / music-smooth stay N/A on
+            # pc-speaker (monophonic only).  music-mood ported in
+            # v1.1 — see ANSIC_DONE.
+            'music-stereo', 'music-waltz', 'music-smooth',
             'lite-terminal', 'tile-shape', 'tile-shape-seam',
             'tile-shape-evolve', 'tile-shape-auto', 'tile-zoom',
         }
