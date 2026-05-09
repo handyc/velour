@@ -33,6 +33,9 @@
 #define NSIT        16384     // K^7
 #define GBYTES      4096   // NSIT*2/8
 #define PAL_BYTES   4
+#define MAGIC_BYTES 4
+#define TAIL_MAGIC  "HXC4"
+#define TAIL_BYTES  (MAGIC_BYTES + PAL_BYTES + GBYTES)
 #define CA_W        16
 #define CA_H        16
 #define HORIZON     25
@@ -484,6 +487,10 @@ static String wifi_ip_str = "", wifi_ssid_str = "";
 static bool wifi_sta_connected = false;
 static volatile bool g_paused = false;
 
+static volatile bool     g_auto_refine = false;
+static volatile uint32_t g_auto_delay_ms = 3000;
+static uint32_t g_next_auto_at = 0;
+
 static bool read_wifi_creds(String &ssid, String &pass) {
     if (!LittleFS.exists(WIFI_CRED_PATH)) return false;
     File f = LittleFS.open(WIFI_CRED_PATH, "r");
@@ -751,10 +758,6 @@ static void handle_palettes() {
 // When on: device fires a Refine every `delay` seconds in loop().
 // Initial Hunt happens once on transition off→on, mirroring the
 // browser's "🔁 Full auto" semantics.
-static volatile bool     g_auto_refine = false;
-static volatile uint32_t g_auto_delay_ms = 3000;
-static uint32_t g_next_auto_at = 0;
-
 static void handle_auto() {
     String mode_s = server.arg("mode");
     String delay_s = server.arg("delay");
