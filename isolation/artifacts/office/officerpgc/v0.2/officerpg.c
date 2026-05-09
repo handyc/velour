@@ -6505,6 +6505,13 @@ enum {
     AA_EAT    = 3,
 };
 #define AA_TTL_DEFAULT  30
+/* v0.2 / port of ev67: master toggle for the animation subsystem.
+ * Default OFF — the per-render-frame tick + halo paint run on
+ * every visible animal even when no action is active, and the
+ * L-system sprite + 1×2 colour block already convey "this is an
+ * animal" without the halo.  `h` toggles it on inside run_rpg. */
+static int rpg_animal_anim_on = 0;
+
 /* xterm-256 indices for each action's halo glyph. */
 static const unsigned char rpg_animal_action_color[4] = {
     0,     /* AA_WALK   — no halo */
@@ -7609,18 +7616,23 @@ static void rpg_path_tick(int player_x, int player_y) {
                 rpg_hp_at [idx] = 0;
                 /* v0.2: carry the action + TTL with the moving
                  * animal, then bump to EAT briefly if it just
-                 * walked next to a plant cell.  Otherwise WALK
-                 * (no halo) is the default at the new cell. */
-                unsigned char a   = rpg_animal_action    [idx];
-                unsigned char ttl = rpg_animal_action_ttl[idx];
-                rpg_animal_action    [idx] = 0;
-                rpg_animal_action_ttl[idx] = 0;
-                if (rpg_animal_near_plant(nx, ny)) {
-                    rpg_animal_action    [nidx] = AA_EAT;
-                    rpg_animal_action_ttl[nidx] = AA_TTL_DEFAULT;
-                } else {
-                    rpg_animal_action    [nidx] = a;
-                    rpg_animal_action_ttl[nidx] = ttl;
+                 * walked next to a plant cell.  Skipped when
+                 * the halo subsystem is off so path-tick stays
+                 * at its pre-anim cost — the rpg_animal_near_
+                 * plant call alone is six neighbour reads × N
+                 * walking animals every tick. */
+                if (rpg_animal_anim_on) {
+                    unsigned char a   = rpg_animal_action    [idx];
+                    unsigned char ttl = rpg_animal_action_ttl[idx];
+                    rpg_animal_action    [idx] = 0;
+                    rpg_animal_action_ttl[idx] = 0;
+                    if (rpg_animal_near_plant(nx, ny)) {
+                        rpg_animal_action    [nidx] = AA_EAT;
+                        rpg_animal_action_ttl[nidx] = AA_TTL_DEFAULT;
+                    } else {
+                        rpg_animal_action    [nidx] = a;
+                        rpg_animal_action_ttl[nidx] = ttl;
+                    }
                 }
             }
             int nstep = (step + 1) % n;
@@ -7643,9 +7655,12 @@ static void rpg_path_tick(int player_x, int player_y) {
  *      Sprites are 3 cols wide × height rows tall, ' ' is transparent.
  * The player is drawn dead-last so nothing covers them. */
 static void rpg_render_view(int px, int py) {
-    /* v0.2: drop animal action TTLs once per render so attack /
-     * flee / eat halos fade back to walk after their window. */
-    rpg_animal_action_tick();
+    /* v0.2 / ev67-port: drop per-cell action TTLs once per
+     * render so halos fade back to walk after their window.
+     * Skipped entirely when the halo subsystem is off (the
+     * default) so the linear 36864-cell sweep doesn't run
+     * when the feature is disengaged. */
+    if (rpg_animal_anim_on) rpg_animal_action_tick();
     int origin_y = g_rpg_fullscreen ? 0 : 1;
     int origin_x = (SCREEN_W - (RPG_VIS_W * RPG_CELL_W + RPG_CELL_W / 2)) / 2;
     if (origin_x < 0) origin_x = 0;
@@ -7736,12 +7751,15 @@ static void rpg_render_view(int px, int py) {
                     fbs(" ");
                 }
             }
-            /* v0.2: action-anim halo — paint a 1-cell coloured
-             * patch one row above the sprite top when the animal
-             * has a non-WALK action active.  Sits just outside
-             * the sprite's tallest pixel so it doesn't occlude
-             * the L-system shape. */
-            if (cat == RC_ANIMAL) {
+            /* v0.2 / ev67-port: action-anim halo — paint a
+             * 1-cell coloured patch one row above the sprite
+             * top when the animal has a non-WALK action active.
+             * Gated on rpg_animal_anim_on so the visible-cell
+             * loop runs at pre-anim cost when off (the action
+             * arrays are also kept at zero in that mode, so the
+             * `act != AA_WALK` test would always fail anyway —
+             * the explicit gate is one cmp per animal cell). */
+            if (rpg_animal_anim_on && cat == RC_ANIMAL) {
                 unsigned char act = rpg_animal_action[idx];
                 if (act != AA_WALK) {
                     int sy = base_y + 2 - h;
@@ -7864,14 +7882,20 @@ static int rpg_move(int *px, int *py, char c, char *msg) {
             n += utoa((unsigned)dmg_e, msg + n);
             /* v0.2 animal-action-anim: hit animal flips to ATTACK
              * halo + every same-variant hex-neighbour to FLEE so
-             * the swing reads visibly as it happens. */
-            rpg_animal_action    [idx] = AA_ATTACK;
-            rpg_animal_action_ttl[idx] = AA_TTL_DEFAULT;
-            rpg_animal_spook_kin(nx, ny, variant_hit);
+             * the swing reads visibly as it happens.  Gated on
+             * rpg_animal_anim_on (ev67 port) — when off, the
+             * action arrays stay zero and no bookkeeping runs. */
+            if (rpg_animal_anim_on) {
+                rpg_animal_action    [idx] = AA_ATTACK;
+                rpg_animal_action_ttl[idx] = AA_TTL_DEFAULT;
+                rpg_animal_spook_kin(nx, ny, variant_hit);
+            }
             if (hp == 0) {
                 rpg_cat_at[idx] = 0;
-                rpg_animal_action    [idx] = AA_WALK;
-                rpg_animal_action_ttl[idx] = 0;
+                if (rpg_animal_anim_on) {
+                    rpg_animal_action    [idx] = AA_WALK;
+                    rpg_animal_action_ttl[idx] = 0;
+                }
                 n = sapp(msg, n, "; killed!");
             } else {
                 rpg_player.hp -= dmg_p;
@@ -8297,6 +8321,25 @@ static int run_rpg(int argc, char **argv) {
         if (raw == 'E') {
             rpg_shot_pending = 1;
             action[sapp(action, 0, "shot → officerpg-shot.ans")] = 0;
+            idle_ticks = 0;
+            continue;
+        }
+        /* v0.2 / ev67-port: 'h' toggles the animal halo subsystem.
+         * Off by default — the per-frame tick + halo paint slow
+         * the render under live + journey, and the L-system
+         * sprite already conveys "this is an animal" without
+         * the halo.  Engaging clears any in-flight TTLs so a
+         * fresh re-engage starts from a clean state. */
+        if (c == 'h') {
+            rpg_animal_anim_on = !rpg_animal_anim_on;
+            if (!rpg_animal_anim_on) {
+                mset(rpg_animal_action,     0, sizeof rpg_animal_action);
+                mset(rpg_animal_action_ttl, 0, sizeof rpg_animal_action_ttl);
+            }
+            action[0] = 0;
+            action[sapp(action, 0,
+                rpg_animal_anim_on ? "animal halos ON"
+                                   : "animal halos OFF")] = 0;
             idle_ticks = 0;
             continue;
         }
