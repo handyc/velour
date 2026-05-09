@@ -61,6 +61,51 @@ CONTAMINANT_LABELS = {k: label for (k, label, _unit) in CONTAMINANTS}
 CONTAMINANT_UNITS = {k: unit for (k, _label, unit) in CONTAMINANTS}
 
 
+# ─── Data-domain metrics (OSI 7-layer pipelines) ─────────────────
+# Parallel structure to CONTAMINANTS for the data domain.  A
+# "WaterProfile" with domain='data' uses these keys in its `values`
+# JSON instead.  Sources are starting conditions (link capacity at
+# the physical layer); targets are application-level requirements
+# (latency budget, minimum throughput, etc.).
+#
+# Convention: "higher is better" for throughput/reliability/range,
+# "lower is better" for latency/cost/energy.  The simulator (Phase 2)
+# threads these through stage transformations and the fitness
+# function compares to the target profile.
+NETWORK_METRICS = [
+    # (key,                label,                              unit, better)
+    ('latency_ms',         'One-way latency',                  'ms',     'lower'),
+    ('throughput_kbps',    'Throughput',                       'kbps',   'higher'),
+    ('reliability_pct',    'Packet delivery success',          '%',      'higher'),
+    ('jitter_ms',          'Latency jitter',                   'ms',     'lower'),
+    ('range_m',            'Effective range',                  'm',      'higher'),
+    ('cost_eur_month',     'Recurring cost',                   'EUR/mo', 'lower'),
+    ('energy_watts',       'Power draw at the local end',      'W',      'lower'),
+    ('payload_bytes',      'Max single message payload',       'B',      'higher'),
+    ('duty_cycle_pct',     'Allowed duty cycle (TX/total)',    '%',      'higher'),
+]
+NETWORK_METRIC_KEYS = [m[0] for m in NETWORK_METRICS]
+NETWORK_METRIC_LABELS = {k: label for (k, label, _u, _b) in NETWORK_METRICS}
+NETWORK_METRIC_UNITS = {k: unit for (k, _l, unit, _b) in NETWORK_METRICS}
+NETWORK_METRIC_DIRECTION = {k: better for (k, _l, _u, better) in NETWORK_METRICS}
+
+
+# ─── Domain choice — shared by StageType / WaterProfile / System ─
+DOMAIN_CHOICES = [
+    ('water', 'Water purification'),
+    ('data',  'Data communication (OSI 7-layer)'),
+]
+
+
+def keys_for_domain(domain):
+    """Return the canonical metric/contaminant key list for a domain.
+    Used by the simulator + the profile editor's "all known keys"
+    drop-down."""
+    if domain == 'data':
+        return NETWORK_METRIC_KEYS
+    return CONTAMINANT_KEYS
+
+
 class StageType(models.Model):
     """A catalog entry for a kind of treatment stage — "activated
     carbon block", "UV sterilizer", "reverse osmosis membrane",
@@ -72,6 +117,7 @@ class StageType(models.Model):
     Phase 1 — they don't yet constrain system throughput."""
 
     KIND_CHOICES = [
+        # Water-domain kinds
         ('physical',    'Physical filtration'),
         ('adsorption',  'Adsorption (carbon, resin)'),
         ('membrane',    'Membrane (RO, NF, UF, MF)'),
@@ -80,6 +126,14 @@ class StageType(models.Model):
         ('ozone',       'Ozone disinfection'),
         ('chemical',    'Chemical dosing'),
         ('ion_exchange','Ion exchange'),
+        # Data-domain kinds — OSI 7 layers
+        ('osi_phy',     'OSI L1 — Physical'),
+        ('osi_dll',     'OSI L2 — Data Link'),
+        ('osi_net',     'OSI L3 — Network'),
+        ('osi_trans',   'OSI L4 — Transport'),
+        ('osi_session', 'OSI L5 — Session'),
+        ('osi_pres',    'OSI L6 — Presentation'),
+        ('osi_app',     'OSI L7 — Application'),
         ('other',       'Other'),
     ]
 
@@ -87,6 +141,11 @@ class StageType(models.Model):
     name = models.CharField(max_length=120)
     kind = models.CharField(max_length=16, choices=KIND_CHOICES,
                             default='other')
+    domain = models.CharField(
+        max_length=8, choices=DOMAIN_CHOICES, default='water',
+        help_text='What kind of pipeline this stage belongs to.  '
+                  'Water stages and data stages live in the same '
+                  'catalog but Systems are single-domain.')
     description = models.TextField(blank=True)
 
     # Fraction of each contaminant removed per pass, 0..1.
@@ -160,11 +219,15 @@ class WaterProfile(models.Model):
     name = models.CharField(max_length=120)
     scope = models.CharField(max_length=8, choices=SCOPE_CHOICES,
                              default='source')
+    domain = models.CharField(
+        max_length=8, choices=DOMAIN_CHOICES, default='water',
+        help_text='water → values are CONTAMINANTS keys; '
+                  'data → values are NETWORK_METRICS keys.')
     values = models.JSONField(default=dict, blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['scope', 'name']
+        ordering = ['domain', 'scope', 'name']
 
     def __str__(self):
         return f'{self.name} ({self.get_scope_display()})'
@@ -178,11 +241,15 @@ class System(models.Model):
     slug = models.SlugField(unique=True)
     name = models.CharField(max_length=120)
     description = models.TextField(blank=True)
+    domain = models.CharField(
+        max_length=8, choices=DOMAIN_CHOICES, default='water',
+        help_text='Mixed-domain pipelines are not supported in Phase 1.')
     source = models.ForeignKey(
         WaterProfile, on_delete=models.PROTECT,
         related_name='systems_as_source',
         limit_choices_to={'scope': 'source'},
-        help_text='Input water this system is being designed for.')
+        help_text='Input profile this system is being designed for. '
+                  'Source.domain must match System.domain.')
     target = models.ForeignKey(
         WaterProfile, on_delete=models.SET_NULL,
         null=True, blank=True,
@@ -237,6 +304,11 @@ class TestRun(models.Model):
         WaterProfile, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='test_runs_as_target',
         limit_choices_to={'scope': 'target'})
+    domain = models.CharField(
+        max_length=8, choices=DOMAIN_CHOICES, default='water',
+        help_text='Inherited from System at run-time; stored on the '
+                  'run so old runs stay interpretable after a System '
+                  'is repurposed.')
     trace = models.JSONField(
         default=list,
         help_text='List of {position, stage, values_after} dicts, one '
