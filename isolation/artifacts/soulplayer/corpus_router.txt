@@ -1,0 +1,112 @@
+<SEP>take care<SEP>chat<SEP>
+<SEP>what is taxon<SEP>apps<SEP>
+<SEP>what is office<SEP>apps<SEP>
+<SEP>i love you<SEP>chat<SEP>
+<SEP>hello<SEP>chat<SEP>
+<SEP>thank you<SEP>chat<SEP>
+<SEP>do you sleep<SEP>chat<SEP>
+<SEP>what is dropout<SEP>theory<SEP>
+<SEP>what is bodymap<SEP>apps<SEP>
+<SEP>i'm coding<SEP>mood<SEP>
+<SEP>my test failed<SEP>mood<SEP>
+<SEP>what is a kernel<SEP>theory<SEP>
+<SEP>i'm overwhelmed<SEP>mood<SEP>
+<SEP>my build failed<SEP>mood<SEP>
+<SEP>what is supercell<SEP>apps<SEP>
+<SEP>what is a hex<SEP>theory<SEP>
+<SEP>what is an epoch<SEP>theory<SEP>
+<SEP>how's it going<SEP>chat<SEP>
+<SEP>what is naiad<SEP>apps<SEP>
+<SEP>what is an esp<SEP>apps<SEP>
+<SEP>what is attention<SEP>theory<SEP>
+<SEP>what is a transformer<SEP>theory<SEP>
+<SEP>give me advice<SEP>mood<SEP>
+<SEP>what is a layer<SEP>theory<SEP>
+<SEP>what is loss<SEP>theory<SEP>
+<SEP>what is cross entropy<SEP>theory<SEP>
+<SEP>what is rmsnorm<SEP>theory<SEP>
+<SEP>my pr failed<SEP>mood<SEP>
+<SEP>what is leiden<SEP>chat<SEP>
+<SEP>what is lsys<SEP>apps<SEP>
+<SEP>i found a bug<SEP>mood<SEP>
+<SEP>what is the coder<SEP>apps<SEP>
+<SEP>what is a bias<SEP>theory<SEP>
+<SEP>what is the lab<SEP>chat<SEP>
+<SEP>what is chronos<SEP>apps<SEP>
+<SEP>thanks<SEP>chat<SEP>
+<SEP>what is the fleet<SEP>apps<SEP>
+<SEP>what is softmax<SEP>theory<SEP>
+<SEP>i need help<SEP>mood<SEP>
+<SEP>what is a ga<SEP>theory<SEP>
+<SEP>good afternoon<SEP>chat<SEP>
+<SEP>what is q eight eight<SEP>theory<SEP>
+<SEP>i'm hungry<SEP>mood<SEP>
+<SEP>what is officemoe<SEP>apps<SEP>
+<SEP>i don't know<SEP>mood<SEP>
+<SEP>what is gary<SEP>apps<SEP>
+<SEP>hey<SEP>chat<SEP>
+<SEP>i'm bored<SEP>mood<SEP>
+<SEP>what is int eight<SEP>theory<SEP>
+<SEP>what is a token<SEP>theory<SEP>
+<SEP>what is hxhnt<SEP>apps<SEP>
+<SEP>what is here<SEP>chat<SEP>
+<SEP>what is tinydb<SEP>apps<SEP>
+<SEP>what is the soul<SEP>apps<SEP>
+<SEP>i'm stuck<SEP>mood<SEP>
+<SEP>what's your name<SEP>chat<SEP>
+<SEP>what is adam<SEP>theory<SEP>
+<SEP>what is layernorm<SEP>theory<SEP>
+<SEP>tell me a joke<SEP>chat<SEP>
+<SEP>how are you<SEP>chat<SEP>
+<SEP>what is rpg<SEP>apps<SEP>
+<SEP>i fixed it<SEP>mood<SEP>
+<SEP>what is helix<SEP>apps<SEP>
+<SEP>good night<SEP>chat<SEP>
+<SEP>what is xpg<SEP>apps<SEP>
+<SEP>what is hazel<SEP>apps<SEP>
+<SEP>what is terry<SEP>apps<SEP>
+<SEP>goodbye<SEP>chat<SEP>
+<SEP>what is forge<SEP>apps<SEP>
+<SEP>i'm sad<SEP>mood<SEP>
+<SEP>i can't sleep<SEP>mood<SEP>
+<SEP>what is quantization<SEP>theory<SEP>
+<SEP>i'm tired<SEP>mood<SEP>
+<SEP>tell me about you<SEP>chat<SEP>
+<SEP>what is a tensor<SEP>theory<SEP>
+<SEP>what is mabel<SEP>apps<SEP>
+<SEP>i'm scared<SEP>mood<SEP>
+<SEP>where am i<SEP>chat<SEP>
+<SEP>hi<SEP>chat<SEP>
+<SEP>give me a tip<SEP>mood<SEP>
+<SEP>i'm lost<SEP>mood<SEP>
+<SEP>what is a ca<SEP>theory<SEP>
+<SEP>tell me something<SEP>mood<SEP>
+<SEP>what is aether<SEP>apps<SEP>
+<SEP>i'm anxious<SEP>mood<SEP>
+<SEP>what is training<SEP>theory<SEP>
+<SEP>are you real<SEP>chat<SEP>
+<SEP>what is gradient<SEP>theory<SEP>
+<SEP>i'm angry<SEP>mood<SEP>
+<SEP>what is a head<SEP>theory<SEP>
+<SEP>what is bpe<SEP>theory<SEP>
+<SEP>tell me about velour<SEP>apps<SEP>
+<SEP>what time is it<SEP>chat<SEP>
+<SEP>i'm excited<SEP>mood<SEP>
+<SEP>what next<SEP>mood<SEP>
+<SEP>good morning<SEP>chat<SEP>
+<SEP>what is a fork<SEP>apps<SEP>
+<SEP>what is relu<SEP>theory<SEP>
+<SEP>bye<SEP>chat<SEP>
+<SEP>what is a weight<SEP>theory<SEP>
+<SEP>i need a break<SEP>mood<SEP>
+<SEP>my code crashed<SEP>mood<SEP>
+<SEP>see you<SEP>chat<SEP>
+<SEP>what should i do<SEP>mood<SEP>
+<SEP>who are you<SEP>chat<SEP>
+<SEP>what is velour<SEP>apps<SEP>
+<SEP>tell me about office<SEP>apps<SEP>
+<SEP>tell me about rpg<SEP>apps<SEP>
+<SEP>i'm happy<SEP>mood<SEP>
+<SEP>yo<SEP>chat<SEP>
+<SEP>later<SEP>chat<SEP>
+<SEP>what is overfit<SEP>theory<SEP>

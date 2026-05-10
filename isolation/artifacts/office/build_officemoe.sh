@@ -19,7 +19,7 @@ TOK=$SOULPLAYER/velour_models/tokenizer.json
 CFLAGS="-Os -nostdlib -fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables -static"
 
 cd "$SOULPLAYER"
-for name in chat apps theory mood; do
+for name in chat apps theory mood router; do
     pt=/tmp/soul_${name}.pt
     hdr=/tmp/soul_data_float_${name}.h
     if [ ! -f "$pt" ]; then
@@ -30,7 +30,7 @@ for name in chat apps theory mood; do
 done
 
 cd "$OFFICE"
-for name in chat apps theory mood; do
+for name in chat apps theory mood router; do
     hdr=/tmp/soul_data_float_${name}.h
     out=/tmp/officesoulflt_${name}
     cc $CFLAGS \
