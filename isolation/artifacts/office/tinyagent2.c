@@ -1,17 +1,23 @@
-/* tinyagent.c -- aggressively minimised fork of officecoder.
+/* tinyagent2.c -- sub-version checkpoint of tinyagent.  Forked from
+ * tinyagent.c on 2026-05-10 as the "known-good 30.7 KB" baseline so
+ * further risky size-cuts can experiment here without endangering
+ * the working tinyagent build.  Source is byte-identical to tinyagent.c
+ * at fork time; build emits ./tinyagent2 from tinyagent2.ld.
+ *
  * Linux x86_64.  No libc.  Same FULL coder + ask feature set;
  * smallest possible binary by deleting every dead path the source
- * still carried, plus stripping non-essential ELF sections
- * post-build via objcopy.
+ * still carried, plus packing .text/.rodata/.data into a single
+ * RWX LOAD segment via tinyagent2.ld (saves the 1968 B page-align gap).
  *
  *   ask  coder      (default subcommand: coder)
  *
- * Forked from officecoder 2026-05-10.  Trim chronology:
+ * Trim chronology:
  *
  *   officeagent (full multi-app):       75 944 B  (74.2 KB)
  *   officecoder (only ask+coder dispatch, --gc-sections drops rest):
  *                                       38 024 B  (37.1 KB)
- *   tinyagent (this fork):              33 656 B  (32.9 KB)
+ *   tinyagent  (source-level dead trim):33 656 B  (32.9 KB)
+ *   tinyagent  (+ packed linker script):31 448 B  (30.7 KB)  ← this
  *
  * Cuts vs officecoder (4.3 KB saved):
  *
@@ -39,16 +45,15 @@
  *   4. Post-build objcopy strips .comment + .note.gnu.property
  *      sections.  ~200 B.
  *
- * Build:
+ * Build (uses tinyagent2.ld to pack segments):
  *   cc -Os -static -nostdlib -ffreestanding -fno-stack-protector
  *      -fno-pic -no-pie -fno-asynchronous-unwind-tables
  *      -fno-unwind-tables -fno-ident
  *      -ffunction-sections -fdata-sections
  *      -Wl,--gc-sections -Wl,--build-id=none
- *      -Wl,-z,noseparate-code -Wl,-z,norelro -s
- *      -o tinyagent tinyagent.c
- *   objcopy --remove-section=.comment \
- *           --remove-section=.note.gnu.property tinyagent
+ *      -Wl,-T,tinyagent2.ld -s
+ *      -o tinyagent2 tinyagent2.c
+ *   (linker warns about RWX LOAD segment — expected, accepted)
  *
  * Feature set retained EXACTLY: full coder hotkey palette
  *   (ENT=ask, a=auto(8x), m=mission, p=push-step, c=compose,
