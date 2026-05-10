@@ -4823,8 +4823,134 @@ static void coder_paint(const char *status_msg) {
         ln[p] = 0;
         body_at(2, 22, ln, SCREEN_W - 4);
     }
-    status("ENT=ask a=auto m=mission p=push c=compose x=exec t=tgt 1-4 r/s/e/q");
+    status("ENT=ask a=auto m=mission p=push c=compose x=exec g=grow t=tgt 1-4 r/s/e/q");
     fbflush();
+}
+
+/* Capability-name input for the `g` hotkey.  Allows only
+ * [A-Za-z0-9_-], same charset as `grow gen`. */
+#define CODER_NAME_CAP 32
+static char g_coder_name[CODER_NAME_CAP];
+static int  g_coder_name_len;
+
+static int coder_input_name(void) {
+    g_coder_name_len = 0;
+    g_coder_name[0] = 0;
+    while (1) {
+        coder_paint("capability name — ENTER to confirm, ESC to cancel");
+        cup(8, 3);
+        sgrbgfg(15, 0);
+        fbs("name: ");
+        fbw(g_coder_name, g_coder_name_len);
+        fbs(" ");
+        fbflush();
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+        if (k[0] == '\r' || k[0] == '\n') return g_coder_name_len;
+        if (k[0] == 0x1b) return -1;
+        if ((k[0] == 0x7f || k[0] == 8) && g_coder_name_len > 0) {
+            g_coder_name_len--;
+            g_coder_name[g_coder_name_len] = 0;
+            continue;
+        }
+        unsigned char c = k[0];
+        int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                 (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (ok && g_coder_name_len < CODER_NAME_CAP - 1) {
+            g_coder_name[g_coder_name_len++] = (char)c;
+            g_coder_name[g_coder_name_len] = 0;
+        }
+    }
+}
+
+/* Promote /tmp/coder_attempt.c to a v2 capability tail of the
+ * running binary's next generation.  Re-compiles with -O2, runs a
+ * 5-second smoke test (exit-0 check), reads the resulting ELF,
+ * calls tg_append_to_copy with type 'G' and task = current
+ * g_coder_goal.  Returns 0 on success and writes the new
+ * generation path into new_path_out; -1 on any failure. */
+static long tg_wait_with_timeout(long pid, int *status,
+                                 int timeout_sec, int *timed_out);
+/* Defined later, in the tg_* section.  Reads bin_path from disk
+ * into the internal payload buffer and appends it as a v2 tail. */
+static int tg_promote_compiled_bin(const char *bin_path, const char *name,
+                                   const char *task, int task_len, char type,
+                                   char *new_path_out, int new_path_cap);
+static int  ja_utoa(unsigned int v, char *out);
+static long ja_self_path(char *out, long cap);
+static int coder_promote_attempt(const char *name,
+                                 char *new_path_out, int new_path_cap) {
+    char pid_s[16];
+    ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
+    char bin_path[64];
+    int bp = sapp(bin_path, 0, "/tmp/tg_promo_");
+    bp = sapp(bin_path, bp, pid_s);
+    bin_path[bp] = 0;
+
+    long cpid = forkk();
+    if (cpid < 0) return -1;
+    if (cpid == 0) {
+        int nfd = (int)op("/dev/null", O_WRONLY, 0);
+        if (nfd >= 0) { dup2_(nfd, 1); dup2_(nfd, 2); cl(nfd); }
+        char *cargv[] = {
+            (char *)"cc", (char *)"-O2", (char *)"-o", bin_path,
+            (char *)"/tmp/coder_attempt.c", 0
+        };
+        execvee("/usr/bin/cc", cargv, g_envp);
+        execvee("/bin/cc",     cargv, g_envp);
+        qu(127);
+    }
+    int st = 0;
+    wait4_(&st);
+    if ((st & 0x7f) || ((st >> 8) & 0xff) != 0) {
+        sys3(SYS_unlink, (long)bin_path, 0, 0);
+        return -1;
+    }
+
+    /* Smoke test: empty stdin, 5 s, exit 0 required. */
+    int rv_pfd[2];
+    if (pipe_(rv_pfd) < 0) {
+        sys3(SYS_unlink, (long)bin_path, 0, 0);
+        return -1;
+    }
+    long rv_pid = forkk();
+    if (rv_pid < 0) {
+        cl(rv_pfd[0]); cl(rv_pfd[1]);
+        sys3(SYS_unlink, (long)bin_path, 0, 0);
+        return -1;
+    }
+    if (rv_pid == 0) {
+        cl(rv_pfd[0]);
+        int nfd = (int)op("/dev/null", O_RDONLY, 0);
+        if (nfd >= 0) { dup2_(nfd, 0); cl(nfd); }
+        dup2_(rv_pfd[1], 1);
+        dup2_(rv_pfd[1], 2);
+        cl(rv_pfd[1]);
+        char *cargv[] = { bin_path, 0 };
+        execvee(bin_path, cargv, g_envp);
+        qu(127);
+    }
+    cl(rv_pfd[1]);
+    /* Drain child stdout/stderr so it doesn't block on pipe. */
+    static char drain[4096];
+    while (rd(rv_pfd[0], drain, sizeof drain) > 0) { /* discard */ }
+    cl(rv_pfd[0]);
+    int rv_st = 0;
+    int timed_out = 0;
+    tg_wait_with_timeout(rv_pid, &rv_st, 5, &timed_out);
+    if (timed_out || (rv_st & 0x7f) || ((rv_st >> 8) & 0xff) != 0) {
+        sys3(SYS_unlink, (long)bin_path, 0, 0);
+        return -1;
+    }
+
+    int task_len = g_coder_goal_len;
+    if (task_len > 191) task_len = 191;
+    int rc = tg_promote_compiled_bin(bin_path, name, g_coder_goal,
+                                      task_len, 'G',
+                                      new_path_out, new_path_cap);
+    sys3(SYS_unlink, (long)bin_path, 0, 0);
+    return rc;
 }
 
 static int coder_input_goal(void) {
@@ -5140,6 +5266,42 @@ static int run_coder(int argc, char **argv) {
                 continue;
             }
             coder_mission();
+            continue;
+        }
+        if (k[0] == 'g') {
+            /* Phase 6 prelude: promote the current /tmp/coder_attempt
+             * as a capability tail of the running binary's next
+             * generation.  Compile-with-O2 + smoke-test, then append
+             * via tg_append_to_copy.  The running coder is unchanged;
+             * quit and relaunch into the .NNN file to use the new
+             * tail. */
+            int probe = (int)op("/tmp/coder_attempt.c", O_RDONLY, 0);
+            if (probe < 0) {
+                coder_paint("no /tmp/coder_attempt.c — press ENTER to build first");
+                continue;
+            }
+            cl(probe);
+            int nlen = coder_input_name();
+            if (nlen <= 0) {
+                coder_paint("promotion cancelled");
+                continue;
+            }
+            coder_paint("promoting — compiling -O2 + smoke-testing");
+            fbflush();
+            char new_path[512];
+            int rc = coder_promote_attempt(g_coder_name, new_path,
+                                            sizeof new_path);
+            if (rc < 0) {
+                coder_paint("promotion failed (compile or smoke-test)");
+                continue;
+            }
+            char st_msg[256];
+            int sp = sapp(st_msg, 0, "promoted '");
+            sp = sapp(st_msg, sp, g_coder_name);
+            sp = sapp(st_msg, sp, "' -> ");
+            sp = sapp(st_msg, sp, new_path);
+            st_msg[sp] = 0;
+            coder_paint(st_msg);
             continue;
         }
         if (k[0] == 'x') {
@@ -9902,6 +10064,22 @@ static int tg_append_to_copy(const char *name, char type,
     cl(fd);
     sys3(SYS_chmod, (long)out_path, 0755, 0);
     return 0;
+}
+
+/* Load a freshly-compiled binary from bin_path and append it as a
+ * v2 capability tail.  Encapsulates the tg_buf / tg_payload_buf
+ * juggling so callers outside the tg_* section (the `g` hotkey in
+ * run_coder) don't need direct access to those buffers. */
+static int tg_promote_compiled_bin(const char *bin_path, const char *name,
+                                   const char *task, int task_len, char type,
+                                   char *new_path_out, int new_path_cap) {
+    long bin_size = tg_load_file(bin_path);
+    if (bin_size < 0) return -1;
+    if (bin_size > (long)sizeof tg_payload_buf) return -1;
+    mcpy(tg_payload_buf, tg_buf, bin_size);
+    return tg_append_to_copy(name, type, task, task_len,
+                             tg_payload_buf, bin_size,
+                             new_path_out, new_path_cap);
 }
 
 /* `grow self-test` — append a small text tail to self, write to the
