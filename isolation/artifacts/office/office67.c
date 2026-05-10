@@ -4540,12 +4540,13 @@ static int soul_resolve_moe(char *out, int cap) {
 #endif
 
 /* Fork + pipe + exec officemoe; capture stdout into resp[0..*resp_n].
- * Returns 0 on success (even if child writes nothing), -1 on spawn fail. */
+ * Returns 0 on success (even if child writes nothing), -1 on spawn fail.
+ * Uses forkk() (SYS_fork) for parity with garden's V-mode jail spawn. */
 static int soul_invoke_moe(const char *moe_path, const char *prompt,
                            char *resp, int cap, int *resp_n) {
     int pipefd[2];
     if (sys3(SYS_pipe2, (long)pipefd, 0, 0) < 0) return -1;
-    long pid = sys4(SYS_clone, 17 /* SIGCHLD */, 0, 0, 0);
+    long pid = forkk();
     if (pid < 0) {
         cl(pipefd[0]);
         cl(pipefd[1]);
@@ -4555,16 +4556,20 @@ static int soul_invoke_moe(const char *moe_path, const char *prompt,
         cl(pipefd[0]);
         sys3(SYS_dup2, pipefd[1], 1, 0);
         cl(pipefd[1]);
-        char *argv2[6];
+        char *argv2[7];
         argv2[0] = (char *)moe_path;
         argv2[1] = (char *)"--temp";
         argv2[2] = (char *)"0";
         argv2[3] = (char *)"--max";
         argv2[4] = (char *)"24";
         argv2[5] = (char *)prompt;
-        char *envp[1] = { 0 };
-        sys3(SYS_execve, (long)moe_path, (long)argv2, (long)envp);
-        wr(2, "officemoe spawn failed\n", 23);
+        argv2[6] = 0;
+        /* Empty envp: officemoe doesn't need PATH/HOME/etc., and an
+         * inherited stale envp (e.g. from pty.fork in test harnesses)
+         * caused execve to silently drop output.  No env keeps it
+         * deterministic. */
+        char *empty_envp[1] = { 0 };
+        execvee(moe_path, argv2, empty_envp);
         qu(127);
     }
     cl(pipefd[1]);
