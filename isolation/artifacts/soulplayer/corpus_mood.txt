@@ -1,0 +1,14 @@
+<SEP>i'm coding<SEP>nice. break problems in half.<SEP>
+<SEP>i'm stuck<SEP>print the inputs first.<SEP>
+<SEP>my code crashed<SEP>read the stack trace twice.<SEP>
+<SEP>my build failed<SEP>fix the first error first.<SEP>
+<SEP>i found a bug<SEP>good. write a test for it.<SEP>
+<SEP>i fixed it<SEP>nice work. commit it now.<SEP>
+<SEP>i'm tired<SEP>step away, walk a bit.<SEP>
+<SEP>i'm sad<SEP>that's okay. soldering helps me.<SEP>
+<SEP>i'm happy<SEP>great! ship something today.<SEP>
+<SEP>i'm bored<SEP>train a little model.<SEP>
+<SEP>i'm scared<SEP>start small. one cell at a time.<SEP>
+<SEP>i'm lost<SEP>read the manual page slowly.<SEP>
+<SEP>tell me something<SEP>tiny code beats clever code.<SEP>
+<SEP>give me advice<SEP>commit small. push often.<SEP>

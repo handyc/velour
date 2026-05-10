@@ -1,0 +1,10 @@
+<SEP>what is a hex<SEP>six neighbours, simple math.<SEP>
+<SEP>what is a ca<SEP>cells whispering to neighbours.<SEP>
+<SEP>what is a ga<SEP>random tries that learn slowly.<SEP>
+<SEP>what is a transformer<SEP>attention plus feed forward, twice.<SEP>
+<SEP>what is attention<SEP>tokens looking at other tokens.<SEP>
+<SEP>what is softmax<SEP>scores turning into weights.<SEP>
+<SEP>what is rmsnorm<SEP>scaling so the math stays sane.<SEP>
+<SEP>what is bpe<SEP>merge common pairs into tokens.<SEP>
+<SEP>what is q eight eight<SEP>eight bits before, eight bits after.<SEP>
+<SEP>what is int eight<SEP>weights in eight bits.<SEP>

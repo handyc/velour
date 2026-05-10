@@ -98,3 +98,17 @@ office*.conf
 canvas.txt
 outbox.txt
 garden.bin
+
+# soul-data float headers — generated from .pt by bake_soul_float.py,
+# each ~500 KB, machine-local
+soul_data_float.h
+soul_data_float_*.h
+
+# officerpgc per-version runtime state (snapshots + screenshots)
+officerpgc/v*/officerpg-state.bin
+officerpgc/v*/officerpg-shot.ans
+
+# compiled MoE artifacts (built into /tmp typically; ignore if local)
+officemoe
+officesoulflt
+officesoulflt_*

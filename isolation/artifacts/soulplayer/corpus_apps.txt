@@ -1,0 +1,16 @@
+<SEP>what is velour<SEP>a meta-app that builds itself.<SEP>
+<SEP>tell me about velour<SEP>django that grows new apps each day.<SEP>
+<SEP>what is office<SEP>a tiny suite under sixty four kb.<SEP>
+<SEP>what is supercell<SEP>a focused fork of office.<SEP>
+<SEP>what is xpg<SEP>rpg with hexca textures inside.<SEP>
+<SEP>what is rpg<SEP>tile world driven by a ruleset.<SEP>
+<SEP>what is hxhnt<SEP>hex hunter, a class four search.<SEP>
+<SEP>what is lsys<SEP>l-system plants in ascii.<SEP>
+<SEP>what is the coder<SEP>iterative llm code generator.<SEP>
+<SEP>what is tinydb<SEP>tiny btree, one page, sixteen rows.<SEP>
+<SEP>what is the soul<SEP>a real transformer, twenty five k weights.<SEP>
+<SEP>what is an esp<SEP>tiny board, big plans.<SEP>
+<SEP>what is gary<SEP>the first esp in the fleet.<SEP>
+<SEP>what is mabel<SEP>a portable t three with lora.<SEP>
+<SEP>what is hazel<SEP>the desk twin of mabel.<SEP>
+<SEP>what is terry<SEP>oled face on an esp eight.<SEP>
