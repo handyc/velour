@@ -17,13 +17,48 @@ from . import analyzer
 from .analyzer import (
     BUDGET_BYTES,
     BUDGET_TIERS,
+    FAMILIES,
     OFFICE_DIR,
     VersionAnalysis,
     analyse_all,
+    analyse_family,
     analyse_one,
+    analyse_paths,
     feature_order,
     tier_for,
 )
+
+
+def _family(request) -> str:
+    """Pick the active family from ?family=, defaulting to 'office'.
+    Unknown values fall back to 'office' so old links keep working."""
+    f = (request.GET.get('family') or 'office').strip()
+    return f if f in FAMILIES else 'office'
+
+
+def _family_context(family: str) -> dict:
+    """Stamp every render with the tab-switch context: which family is
+    active, the list of all families, and a `family_qs` string the
+    nav links can splice into existing URLs (e.g. `?family=officerpgc`)
+    so they stay on the same tab when navigating."""
+    return {
+        'family':     family,
+        'families':   FAMILIES,
+        'family_qs':  f"?family={family}" if family != 'office' else '',
+    }
+
+
+def _analyse_one_in_family(family: str, version: str):
+    """Resolve a single VersionAnalysis inside `family`.  For the
+    office family this is the existing analyse_one; for others it
+    walks the family's version list."""
+    if family == 'office':
+        return analyse_one(version)
+    versions, _ = analyse_family(family)
+    for v in versions:
+        if v.name == version:
+            return v
+    return None
 
 
 def _features_sorted_by_size(va: VersionAnalysis) -> list[tuple[str, int, int, int, int]]:
@@ -72,10 +107,11 @@ def _missing_dbg_context() -> dict:
 
 
 def index(request):
-    versions, baseline = analyse_all()
+    family = _family(request)
+    versions, baseline = analyse_family(family)
     if not versions:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     rows = _build_overview(versions, baseline)
 
@@ -91,18 +127,22 @@ def index(request):
         'budget_tiers': BUDGET_TIERS,
         'biggest':      biggest_jump,
         'latest':       rows[-1] if rows else None,
+        **_family_context(family),
     })
 
 
 def version_view(request, version: str):
-    if version not in analyzer.VERSIONS + [analyzer.BASELINE]:
-        raise Http404(f"unknown version: {version}")
-    va = analyse_one(version)
+    family = _family(request)
+    versions, baseline = analyse_family(family)
+    valid_names = [v.name for v in versions]
+    if family == 'office':
+        valid_names = analyzer.VERSIONS + [analyzer.BASELINE]
+    if version not in valid_names:
+        raise Http404(f"unknown version in family {family}: {version}")
+    va = _analyse_one_in_family(family, version)
     if va is None:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
-
-    versions, baseline = analyse_all()
+                      {**_missing_dbg_context(), **_family_context(family)})
     overhead = baseline.binary_size if baseline else 0
 
     feature_rows = []
@@ -147,6 +187,7 @@ def version_view(request, version: str):
         'top_syms':     top_syms,
         'top_n':        top_n,
         'top_size_max': top_size_max,
+        **_family_context(family),
     })
 
 
@@ -197,10 +238,11 @@ def diff_view(request):
     churn list ranks raw |Δ| so the things that actually moved bubble
     up first, regardless of whether they were added, deleted, or
     just resized."""
-    versions, baseline = analyse_all()
+    family = _family(request)
+    versions, baseline = analyse_family(family)
     if len(versions) < 2:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     names = [v.name for v in versions]
     default_b = names[-1]
@@ -212,11 +254,11 @@ def diff_view(request):
     if a not in valid: a = default_a
     if b not in valid: b = default_b
 
-    va_a = analyse_one(a)
-    va_b = analyse_one(b)
+    va_a = _analyse_one_in_family(family, a)
+    va_b = _analyse_one_in_family(family, b)
     if va_a is None or va_b is None:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     feat_rows = _diff_features(va_a, va_b)
     sym_rows  = _diff_symbols(va_a, va_b, request)
@@ -233,6 +275,7 @@ def diff_view(request):
         'budget':       BUDGET_BYTES,
         'budget_pct_a': min(100.0, 100.0 * va_a.binary_size / BUDGET_BYTES),
         'budget_pct_b': min(100.0, 100.0 * va_b.binary_size / BUDGET_BYTES),
+        **_family_context(family),
     })
 
 
@@ -349,10 +392,11 @@ def planner(request):
     fits under the 64 KB cap, plus a running total. The 'reference'
     table seeds estimates from existing features so the user has a
     sense of typical costs."""
-    versions, baseline = analyse_all()
+    family = _family(request)
+    versions, baseline = analyse_family(family)
     if not versions:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     latest = versions[-1]
     overhead = baseline.binary_size if baseline else 0
@@ -415,6 +459,7 @@ def planner(request):
         'ref_rows':     ref_rows,
         'first_seen':   first_seen,
         'all_versions': [v.name for v in versions],
+        **_family_context(family),
     })
 
 
@@ -512,10 +557,11 @@ def treemap(request):
     target.  Each feature is one tile sized by its (text + data + bss);
     a synthetic "headroom" tile fills the remaining budget when under,
     or is replaced by an "overage" tile when over."""
-    versions, baseline = analyse_all()
+    family = _family(request)
+    versions, baseline = analyse_family(family)
     if not versions:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     requested = request.GET.get('v', '').strip()
     target = None
@@ -607,14 +653,16 @@ def treemap(request):
         "over_budget":    over_budget,
         "overage":        overage,
         "headroom":       headroom,
+        **_family_context(family),
     })
 
 
 def budget(request):
-    versions, baseline = analyse_all()
+    family = _family(request)
+    versions, baseline = analyse_family(family)
     if not versions:
         return render(request, 'officelab/needs_build.html',
-                      _missing_dbg_context())
+                      {**_missing_dbg_context(), **_family_context(family)})
 
     latest = versions[-1]
     overhead = baseline.binary_size if baseline else 0
@@ -641,4 +689,5 @@ def budget(request):
         'budget_left':  max(0, BUDGET_BYTES - latest.binary_size),
         'budget_pct':   min(100.0, 100.0 * latest.binary_size / BUDGET_BYTES),
         'over_budget':  latest.binary_size > BUDGET_BYTES,
+        **_family_context(family),
     })

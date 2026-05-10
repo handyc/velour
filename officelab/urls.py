@@ -11,5 +11,7 @@ urlpatterns = [
     path('diff/',             views.diff_view,     name='diff'),
     path('planner/',          views.planner,       name='planner'),
     path('rebuild/',          views.rebuild,       name='rebuild'),
-    path('v/<slug:version>/', views.version_view,  name='version'),
+    # `str` (default) converter allows dots in officerpgc version
+    # tags like "v1.7"; slug would 404 on those.
+    path('v/<str:version>/', views.version_view,  name='version'),
 ]

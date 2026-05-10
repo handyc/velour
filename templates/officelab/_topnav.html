@@ -1,23 +1,34 @@
+{# Family tab strip — switches the analyser between office* / officerpgc/v*/ / siblings (jail.c, officesuite.c) — keeps the active page when switching. #}
+<div class="topnav family-tabs">
+  {% for f_key, f_meta in families.items %}
+    <a href="?family={{ f_key }}"
+       title="{{ f_meta.describe }}"
+       class="family-tab{% if family == f_key %} on{% endif %}">{{ f_meta.label }}</a>
+  {% endfor %}
+</div>
+
 <div class="topnav">
-  <a href="{% url 'officelab:index' %}"
+  <a href="{% url 'officelab:index' %}{{ family_qs }}"
      class="{% if active == 'index' %}on{% endif %}">overview</a>
-  <a href="{% url 'officelab:budget' %}"
+  <a href="{% url 'officelab:budget' %}{{ family_qs }}"
      class="{% if active == 'budget' %}on{% endif %}">budget</a>
-  <a href="{% url 'officelab:treemap' %}"
+  <a href="{% url 'officelab:treemap' %}{{ family_qs }}"
      class="{% if active == 'treemap' %}on{% endif %}">treemap</a>
-  <a href="{% url 'officelab:diff' %}"
+  <a href="{% url 'officelab:diff' %}{{ family_qs }}"
      class="{% if active == 'diff' %}on{% endif %}">diff</a>
-  <a href="{% url 'officelab:planner' %}"
+  <a href="{% url 'officelab:planner' %}{{ family_qs }}"
      class="{% if active == 'planner' %}on{% endif %}">planner</a>
+  {% if family == 'office' %}
   <form method="post" action="{% url 'officelab:rebuild' %}" class="rebuild-form">
     {% csrf_token %}
     <button type="submit"
             title="run `make all dbg` in isolation/artifacts/office/ and reload the analyser"
             {% if active == 'rebuild' %}class="on"{% endif %}>rebuild</button>
   </form>
+  {% endif %}
   <span class="vsep"></span>
   {% for v in all_versions %}
-    <a href="{% url 'officelab:version' v %}"
+    <a href="{% url 'officelab:version' v %}{{ family_qs }}"
        class="{% if active == v %}on{% endif %}">{{ v }}</a>
   {% endfor %}
 </div>

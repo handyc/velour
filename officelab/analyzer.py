@@ -560,6 +560,36 @@ def _wc_lines(c_path: Path) -> int:
 # ── public api ────────────────────────────────────────────────────────
 
 
+def analyse_paths(name: str, c_path: "Path", bin_path: "Path",
+                  dbg_path: "Path | None" = None) -> VersionAnalysis | None:
+    """Family-agnostic core: build a VersionAnalysis from explicit
+    paths.  `dbg_path` defaults to bin_path (officerpgc binaries are
+    not separately stripped, so the binary itself carries symbols)."""
+    if not c_path.exists() or not bin_path.exists():
+        return None
+    sym_path = dbg_path if (dbg_path and dbg_path.exists()) else bin_path
+    text, data, bss = _run_size(sym_path)
+    syms = _run_nm(sym_path)
+    feats: dict[str, FeatureBucket] = {}
+    uncat: list[SymbolRow] = []
+    for s in syms:
+        if s.feature == "uncategorized":
+            uncat.append(s)
+        b = feats.setdefault(s.feature, FeatureBucket(s.feature))
+        if s.is_code: b.text += s.size
+        elif s.is_bss: b.bss += s.size
+        elif s.is_data: b.data += s.size
+        b.syms.append(s)
+    binary_size = bin_path.stat().st_size
+    dbg_size = sym_path.stat().st_size
+    return VersionAnalysis(
+        name=name, binary_size=binary_size, dbg_size=dbg_size,
+        text=text, data=data, bss=bss,
+        source_lines=_wc_lines(c_path),
+        features=feats, uncategorized=uncat,
+    )
+
+
 def analyse_one(version: str) -> VersionAnalysis | None:
     """Build a VersionAnalysis for `office`/`office7`/etc.  Returns
     None if the .dbg or source is missing — caller should hint the
@@ -643,3 +673,119 @@ def analyse_all() -> tuple[list[VersionAnalysis], VersionAnalysis | None]:
 def feature_order() -> list[str]:
     """Stable ordering for table columns / chart segments."""
     return [f for f, _, _ in FEATURE_PATTERNS] + ["uncategorized"]
+
+
+# ── multi-family analysis (office | officerpgc | siblings) ───────────
+#
+# OfficeLab originally only knew the office* tree.  These helpers
+# extend it to other binary families that share the same source
+# style + feature taxonomy: officerpgc/v0.x..v1.x (RPG fork) and
+# misc siblings at the office root (jail.c, minimal.c, officesuite.c
+# itself, etc.).
+
+def _ver_sort_key(name: str) -> tuple:
+    """Sort officerpgc directory names ('v0.1', 'v1.7', ...) numerically."""
+    if name.startswith("v"):
+        parts = name[1:].split(".")
+        try:
+            return tuple(int(p) for p in parts)
+        except ValueError:
+            return (999, name)
+    return (999, name)
+
+
+def _officerpgc_versions() -> list[VersionAnalysis]:
+    base = OFFICE_DIR / "officerpgc"
+    if not base.exists():
+        return []
+    out: list[VersionAnalysis] = []
+    dirs = [d for d in base.iterdir() if d.is_dir()]
+    dirs.sort(key=lambda p: _ver_sort_key(p.name))
+    prev_size = None
+    prev_feats: set[str] = set()
+    for d in dirs:
+        c = d / "officerpg.c"
+        b = d / "officerpg"
+        if not c.exists() or not b.exists():
+            continue
+        a = analyse_paths(name=d.name, c_path=c, bin_path=b, dbg_path=b)
+        if a is None:
+            continue
+        if prev_size is not None:
+            a.delta_vs_prev = a.binary_size - prev_size
+        cur = {f for f, b_ in a.features.items()
+               if (b_.text + b_.data) > 0}
+        a.new_features = sorted(cur - prev_feats)
+        prev_feats = cur
+        prev_size = a.binary_size
+        out.append(a)
+    return out
+
+
+# Sibling binaries: standalone .c files at the office root that aren't
+# in the office.c..officeNN sequence.  Best-effort: include any of these
+# names that have BOTH a .c source AND a binary (or .dbg) on disk.
+SIBLING_NAMES = ["jail", "officesuite"]
+
+
+def _siblings_versions() -> list[VersionAnalysis]:
+    out: list[VersionAnalysis] = []
+    prev_size = None
+    prev_feats: set[str] = set()
+    for n in SIBLING_NAMES:
+        c = OFFICE_DIR / f"{n}.c"
+        b = OFFICE_DIR / n
+        d = OFFICE_DIR / f"{n}.dbg"
+        if not c.exists():
+            continue
+        # Prefer the .dbg if present (richer symbol info); fall back
+        # to the stripped binary; nm still works on stripped if the
+        # symbol table wasn't fully discarded but yields fewer rows.
+        bin_path = b if b.exists() else (d if d.exists() else None)
+        if bin_path is None:
+            continue
+        dbg_path = d if d.exists() else bin_path
+        a = analyse_paths(name=n, c_path=c, bin_path=bin_path,
+                          dbg_path=dbg_path)
+        if a is None:
+            continue
+        if prev_size is not None:
+            a.delta_vs_prev = a.binary_size - prev_size
+        cur = {f for f, b_ in a.features.items()
+               if (b_.text + b_.data) > 0}
+        a.new_features = sorted(cur - prev_feats)
+        prev_feats = cur
+        prev_size = a.binary_size
+        out.append(a)
+    return out
+
+
+# Public family registry.  Keys are the URL-safe slugs callers pass in.
+FAMILIES: dict[str, dict] = {
+    "office": {
+        "label":      "office",
+        "describe":   "office.c..office68 + named variants (officex, officesoul, etc.)",
+        "fetcher":    None,    # special-cased to analyse_all() below
+    },
+    "officerpgc": {
+        "label":      "officerpgc",
+        "describe":   "officerpgc/v0.1..v1.7 — RPG fork tracking the JS officerpghires port",
+        "fetcher":    _officerpgc_versions,
+    },
+    "siblings": {
+        "label":      "siblings",
+        "describe":   "Standalone .c siblings at the office root (jail.c, officesuite.c, ...)",
+        "fetcher":    _siblings_versions,
+    },
+}
+
+
+def analyse_family(family: str) -> tuple[list[VersionAnalysis],
+                                         VersionAnalysis | None]:
+    """Returns (versions, baseline) for the named family.  Falls back
+    to the office family for unknown names."""
+    if family == "officerpgc":
+        return _officerpgc_versions(), analyse_baseline()
+    if family == "siblings":
+        return _siblings_versions(), analyse_baseline()
+    return analyse_all()

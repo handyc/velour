@@ -12,6 +12,18 @@
 /* Versions wrap onto a second row when there are too many to fit */
 .olwrap .topnav .vsep { width: 100%; height: 0; }
 
+/* Family tabs — switches the analyser between office / officerpgc /
+   siblings.  Slightly larger + de-saturated bar above the page nav. */
+.olwrap .family-tabs { gap: 0.5rem 0.8rem; margin-bottom: 0.5rem;
+                       padding-bottom: 0.4rem;
+                       border-bottom: 1px solid #21262d;
+                       font-size: 0.92rem; }
+.olwrap .family-tab { padding: 0.18rem 0.7rem; border-radius: 3px;
+                      background: #161b22; color: #8b949e; }
+.olwrap .family-tab:hover { background: #21262d; text-decoration: none; }
+.olwrap .family-tab.on { background: #1f6feb; color: #f0f6fc;
+                         font-weight: 600; }
+
 table.ol { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
            font-size: 0.85rem; }
