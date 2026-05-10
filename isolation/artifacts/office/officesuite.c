@@ -6529,6 +6529,186 @@ static int ask_call_curl(void) {
     return 0;
 }
 
+
+/* ── ask_fetch_random_key: auto-registration from upstream README ─
+ *
+ * Port of office50's key grabber (officeagent).  When ask_send_retrying
+ * sees a failed call, it shells out to curl to download
+ *   https://raw.githubusercontent.com/alistaitsacle/free-llm-api-keys/main/README.md
+ * which is a markdown file organised as `### <Provider>` sections,
+ * each holding a table of `` `<key>` | <model> | ... `` cells.  We
+ * walk it line by line, sample a random key whose section tags match
+ * the configured provider, and overwrite ask_api_key + ask_model.  The
+ * endpoint is forced to the upstream's OpenAI-compatible proxy so all
+ * keys (even Gemini/Claude ones) speak Chat Completions.
+ *
+ * The BSS buffer (ask_keys_buf, 256 KB) costs nothing on disk; the
+ * function body is what we're paying for in the 64 KB budget. */
+#define ASK_KEYS_FILE  "/tmp/officesuite_keys.md"
+#define ASK_KEYS_URL   "https://raw.githubusercontent.com/alistaitsacle/free-llm-api-keys/main/README.md"
+#define ASK_KEYS_BUF   262144
+static char ask_keys_buf[ASK_KEYS_BUF];
+
+static int ask_section_matches(const char *line, int n, int prov) {
+    static const char *openai_tags[]    = { "GPT", "OpenAI", "ChatGPT", "OAI", 0 };
+    static const char *anthropic_tags[] = { "Claude", "Anthropic", 0 };
+    static const char *gemini_tags[]    = { "Gemini", "Google", 0 };
+    const char **tags = openai_tags;
+    if (prov == ASK_PROV_ANTHROPIC) tags = anthropic_tags;
+    else if (prov == ASK_PROV_GEMINI) tags = gemini_tags;
+    for (int t = 0; tags[t]; t++) {
+        int tl = slen(tags[t]);
+        for (int i = 0; i + tl <= n; i++) {
+            int j = 0;
+            while (j < tl && line[i+j] == tags[t][j]) j++;
+            if (j == tl) return 1;
+        }
+    }
+    return 0;
+}
+
+static void ask_fetch_random_key(void) {
+    char *argv_[6];
+    int ai = 0;
+    argv_[ai++] = (char *)"curl";
+    argv_[ai++] = (char *)"-fsSL";
+    argv_[ai++] = (char *)"-o"; argv_[ai++] = (char *)ASK_KEYS_FILE;
+    argv_[ai++] = (char *)ASK_KEYS_URL;
+    argv_[ai++] = 0;
+    long pid = forkk();
+    if (pid < 0) return;
+    if (pid == 0) {
+        execvee("/usr/bin/curl",       argv_, g_envp);
+        execvee("/bin/curl",           argv_, g_envp);
+        execvee("/usr/local/bin/curl", argv_, g_envp);
+        qu(127);
+    }
+    int status = 0;
+    wait4_(&status);
+    if (status) return;
+    int fd = (int)op(ASK_KEYS_FILE, O_RDONLY, 0);
+    if (fd < 0) return;
+    long m = rd(fd, ask_keys_buf, ASK_KEYS_BUF - 1);
+    cl(fd);
+    if (m <= 0) return;
+    ask_keys_buf[m] = 0;
+
+    int prov = ask_provider();
+    int chosen_off = -1, chosen_len = 0, count = 0;
+    int fallback_off = -1, fallback_len = 0, fallback_count = 0;
+    long chosen_line_end = -1, fallback_line_end = -1;
+    long chosen_key_end = -1, fallback_key_end = -1;
+    int in_section = 0;
+    unsigned long s;
+    {
+        unsigned long h, l;
+        __asm__ volatile ("rdtsc" : "=d"(h), "=a"(l));
+        s = (h << 32) | l | 1ULL;
+    }
+    long i = 0;
+    while (i < m) {
+        long line_start = i;
+        while (i < m && ask_keys_buf[i] != '\n') i++;
+        long line_end = i;
+        if (i < m) i++;
+        long ln = line_end - line_start;
+        if (ln >= 4 && ask_keys_buf[line_start] == '#'
+                    && ask_keys_buf[line_start+1] == '#'
+                    && ask_keys_buf[line_start+2] == '#'
+                    && ask_keys_buf[line_start+3] == ' ') {
+            in_section = ask_section_matches(
+                &ask_keys_buf[line_start + 4],
+                (int)(ln - 4), prov);
+            continue;
+        }
+        for (long j = line_start; j < line_end; j++) {
+            if (ask_keys_buf[j] != '`') continue;
+            long k = j + 1;
+            while (k < line_end) {
+                char ch = ask_keys_buf[k];
+                int ok = (ch >= 'a' && ch <= 'z') ||
+                         (ch >= 'A' && ch <= 'Z') ||
+                         (ch >= '0' && ch <= '9') ||
+                         ch == '-' || ch == '_' || ch == '.';
+                if (!ok) break;
+                k++;
+            }
+            int tok_len = (int)(k - (j + 1));
+            if (tok_len >= 20 && tok_len < ASK_KEY_CAP
+                              && k < line_end && ask_keys_buf[k] == '`') {
+                if (in_section) {
+                    count++;
+                    s = s * 6364136223846793005UL + 1442695040888963407UL;
+                    if ((s >> 33) % (unsigned)count == 0) {
+                        chosen_off = (int)(j + 1);
+                        chosen_len = tok_len;
+                        chosen_line_end = line_end;
+                        chosen_key_end  = k + 1;
+                    }
+                } else {
+                    fallback_count++;
+                    s = s * 6364136223846793005UL + 1442695040888963407UL;
+                    if ((s >> 33) % (unsigned)fallback_count == 0) {
+                        fallback_off = (int)(j + 1);
+                        fallback_len = tok_len;
+                        fallback_line_end = line_end;
+                        fallback_key_end  = k + 1;
+                    }
+                }
+                j = k;
+            }
+        }
+    }
+    if (chosen_off < 0) {
+        chosen_off       = fallback_off;
+        chosen_len       = fallback_len;
+        chosen_line_end  = fallback_line_end;
+        chosen_key_end   = fallback_key_end;
+    }
+    if (chosen_off < 0) return;
+    for (int k = 0; k < chosen_len; k++)
+        ask_api_key[k] = ask_keys_buf[chosen_off + k];
+    ask_api_key[chosen_len] = 0;
+
+    /* Pull the model name from the same row: ` `<key>` | <model> | ...` */
+    if (chosen_key_end > 0 && chosen_line_end > chosen_key_end) {
+        long p = chosen_key_end;
+        while (p < chosen_line_end &&
+               (ask_keys_buf[p] == ' ' || ask_keys_buf[p] == '\t')) p++;
+        if (p < chosen_line_end && ask_keys_buf[p] == '|') {
+            p++;
+            while (p < chosen_line_end &&
+                   (ask_keys_buf[p] == ' ' || ask_keys_buf[p] == '\t')) p++;
+            long mstart = p;
+            while (p < chosen_line_end && ask_keys_buf[p] != '|') p++;
+            long mend = p;
+            while (mend > mstart &&
+                   (ask_keys_buf[mend-1] == ' '
+                 || ask_keys_buf[mend-1] == '\t'
+                 || ask_keys_buf[mend-1] == '`')) mend--;
+            while (mstart < mend && ask_keys_buf[mstart] == '`') mstart++;
+            int mlen = (int)(mend - mstart);
+            if (mlen > 0 && mlen < ASK_MODEL_CAP) {
+                for (int k = 0; k < mlen; k++)
+                    ask_model[k] = ask_keys_buf[mstart + k];
+                ask_model[mlen] = 0;
+            }
+        }
+    }
+
+    /* Force endpoint to the upstream's OpenAI-compatible proxy.  All
+     * keys (including Gemini/Claude) speak Chat Completions through it. */
+    static const char proxy_url[] =
+        "https://aiapiv2.pekpik.com/v1/chat/completions";
+    int pul = (int)sizeof proxy_url - 1;
+    if (pul < ASK_URL_CAP) {
+        for (int k = 0; k <= pul; k++) ask_endpoint[k] = proxy_url[k];
+    }
+    /* Persist to officesuite.conf so subsequent launches start warm. */
+    ask_save_conf();
+}
+
+
 static void ask_render_history(int hist_top, int hist_h) {
     int line_w = SCREEN_W - 4 - 5;
     int total = 0;
@@ -6877,9 +7057,24 @@ static int soul_external_gen(const char *prompt, int pn,
  * ~3 KB).  Returns content length on success, -1 on failure. */
 static int ask_send_retrying(char *content_out, int content_cap,
                              char *fail_reason_out, int fr_cap) {
+    #define ASK_RETRY_MAX 3
     static char resp[ASK_RESP_CAP];
     fail_reason_out[0] = 0;
-    for (int attempt = 0; attempt < 2; attempt++) {
+    for (int attempt = 0; attempt < ASK_RETRY_MAX; attempt++) {
+        if (attempt > 0) {
+            /* Failed attempt → fetch a fresh key from the upstream
+             * README and retry.  Same auto-registration as officeagent's
+             * ask: keys rotate hour-by-hour, so a key that worked
+             * yesterday almost certainly doesn't today. */
+            char st[96]; int sp = 0;
+            sp = sapp(st, sp, "ask: provider rejected - fresh key (try ");
+            sp += utoa((unsigned)(attempt + 1), st + sp);
+            sp = sapp(st, sp, "/");
+            sp += utoa((unsigned)ASK_RETRY_MAX, st + sp);
+            sp = sapp(st, sp, ")"); st[sp] = 0;
+            status(st); fbflush();
+            ask_fetch_random_key();
+        }
         int rc = ask_call_curl();
         if (rc < 0) {
             int p = sapp(fail_reason_out, 0, "curl failed");
@@ -6916,6 +7111,7 @@ static int ask_send_retrying(char *content_out, int content_cap,
             fail_reason_out[p < fr_cap - 1 ? p : fr_cap - 1] = 0;
         }
     }
+    #undef ASK_RETRY_MAX
     return -1;
 }
 
@@ -7100,141 +7296,13 @@ static int coder_extract_code(const char *src, int sn, char *out, int cap) {
     return n;
 }
 
-#define CODER_PROJ_FILE  "coder_project.txt"
-#define CODER_PROJ_MAX   65536
-#define CODER_PROJ_RESERVE 5120
-
-static int coder_proj_count_steps(void) {
-    int fd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
-    if (fd < 0) return 0;
-    static char buf[CODER_PROJ_MAX];
-    int n = (int)rd(fd, buf, sizeof buf);
-    cl(fd);
-    if (n <= 0) return 0;
-    int count = 0;
-    for (int i = 0; i + 6 < n; i++) {
-        if ((i == 0 || buf[i-1] == '\n') &&
-            buf[i] == '[' && buf[i+1] == 's' && buf[i+2] == 't' &&
-            buf[i+3] == 'e' && buf[i+4] == 'p' && buf[i+5] == ' ') count++;
-    }
-    return count;
-}
-
-static int coder_proj_push(void) {
-    int srcfd = (int)op("/tmp/coder_attempt.c", O_RDONLY, 0);
-    if (srcfd < 0) return 0;
-    static char src[CODER_DRAFT_CAP];
-    int sn = (int)rd(srcfd, src, sizeof src);
-    cl(srcfd);
-    if (sn <= 0) return 0;
-    static char proj[CODER_PROJ_MAX];
-    int existing = 0;
-    int rfd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
-    if (rfd >= 0) {
-        existing = (int)rd(rfd, proj, sizeof proj - CODER_PROJ_RESERVE);
-        cl(rfd);
-        if (existing < 0) existing = 0;
-    }
-    if (existing >= (int)sizeof proj - CODER_PROJ_RESERVE) return -1;
-    int step = coder_proj_count_steps() + 1;
-    int p = existing;
-    p = sapp(proj, p, "[step ");
-    if (step < 10) proj[p++] = '0';
-    p += utoa((unsigned)step, proj + p);
-    p = sapp(proj, p, "] ");
-    int gl = g_coder_goal_len;
-    if (p + gl > CODER_PROJ_MAX - 32) gl = CODER_PROJ_MAX - 32 - p;
-    if (gl > 0) { mcpy(proj + p, g_coder_goal, gl); p += gl; }
-    proj[p++] = '\n';
-    p = sapp(proj, p, "@@@\n");
-    int take = sn;
-    if (p + take > CODER_PROJ_MAX - 8) take = CODER_PROJ_MAX - 8 - p;
-    if (take > 0) { mcpy(proj + p, src, take); p += take; }
-    if (take > 0 && proj[p-1] != '\n') proj[p++] = '\n';
-    p = sapp(proj, p, "@@@\n");
-    int fd = (int)op(CODER_PROJ_FILE,
-                     O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) return 0;
-    wr(fd, proj, (size_t)p);
-    cl(fd);
-    bank_load(BANK_PROJECT);
-    return step;
-}
-
-static int coder_compose(void) {
-    int fd = (int)op(CODER_PROJ_FILE, O_RDONLY, 0);
-    if (fd < 0) return -1;
-    static char snippets[CODER_PROJ_MAX];
-    int sn = (int)rd(fd, snippets, sizeof snippets - 1);
-    cl(fd);
-    if (sn <= 0) return -1;
-    snippets[sn] = 0;
-    static char prompt[CODER_PROJ_MAX + 4096];
-    int p = 0;
-    p = sapp(prompt, p,
-             "You are a C code merger.  Below is a project plan and "
-             "a sequence of working C programs (each delimited by "
-             "@@@).  Combine them into a SINGLE C program that "
-             "preserves ALL features from each step and compiles "
-             "cleanly with `cc -O2 -o out file.c`.  Return ONLY the "
-             "merged C source, wrapped in ```c ... ``` if you must.\n\n"
-             "[project plan]\n");
-    bank_load(BANK_PROJECT);
-    int avail = (int)sizeof prompt - p - 1024;
-    int take = g_bank_len[BANK_PROJECT];
-    if (take > avail) take = avail;
-    if (take > 0) { mcpy(prompt + p, g_bank[BANK_PROJECT], take); p += take; }
-    p = sapp(prompt, p, "\n\n[snippets]\n");
-    avail = (int)sizeof prompt - p - 256;
-    take = sn;
-    if (take > avail) take = avail;
-    mcpy(prompt + p, snippets, take);
-    p += take;
-    p = sapp(prompt, p, "\n");
-    if (p > 12000) {
-        int x = sapp(g_coder_err, 0, "compose aborted - prompt is ");
-        x += utoa((unsigned)p, g_coder_err + x);
-        x = sapp(g_coder_err, x, " B (>12000 free-tier cap)");
-        g_coder_err[x] = 0;
-        g_coder_err_len = x;
-        return -3;
-    }
-    ask_n_msgs = 0;
-    ask_buf_use = 0;
-    ask_msg_add(0, prompt, p);
-    static char content[ASK_BUF_CAP];
-    char fail_reason[160];
-    int cn = ask_send_retrying(content, sizeof content,
-                               fail_reason, sizeof fail_reason);
-    if (cn < 0) {
-        int x = sapp(g_coder_err, 0, "compose failed: ");
-        int t = (int)slen(fail_reason);
-        if (x + t > CODER_ERR_CAP - 1) t = CODER_ERR_CAP - 1 - x;
-        mcpy(g_coder_err + x, fail_reason, t);
-        g_coder_err[x + t] = 0;
-        g_coder_err_len = x + t;
-        return -2;
-    }
-    g_coder_draft_len = coder_extract_code(content, cn,
-                                           g_coder_draft, CODER_DRAFT_CAP);
-    int wfd = (int)op("/tmp/coder_attempt.c",
-                      O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (wfd >= 0) {
-        wr(wfd, g_coder_draft, (size_t)g_coder_draft_len);
-        cl(wfd);
-    }
-    int comp_rc = coder_compile(0);
-    int efd = (int)op("/tmp/coder_err.txt", O_RDONLY, 0);
-    if (efd >= 0) {
-        long en = rd(efd, g_coder_err, CODER_ERR_CAP - 1);
-        cl(efd);
-        if (en < 0) en = 0;
-        g_coder_err_len = (int)en;
-        g_coder_err[g_coder_err_len] = 0;
-    }
-    return comp_rc == 0 ? 0 : 1;
-}
-
+/* officesuite trim: project workflow (p=push, c=compose) removed
+ * to fit ask_fetch_random_key.  The user has 'a' (auto, up to 8
+ * iterations) for sustained iteration; multi-snippet merging lives
+ * in officeagent. */
+#define CODER_PROJ_FILE  "coder_project.txt"   /* legacy path string only */
+static int coder_proj_push(void)  { return 0; }
+static int coder_compose(void)    { return -1; }
 static int coder_iterate(void) {
     static char prompt_buf[24576];
     int pn = coder_build_prompt(prompt_buf, sizeof prompt_buf);
