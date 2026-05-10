@@ -117,6 +117,9 @@ officesuite
 # officecoder — coder-only fork of officeagent (37 KB)
 officecoder
 
+# tinyagent — aggressively-minimised fork of officecoder (33 KB)
+tinyagent
+
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
 officesoulflt
