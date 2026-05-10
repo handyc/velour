@@ -5335,6 +5335,17 @@ static int run_coder(int argc, char **argv) {
         int n = read_key(k, sizeof k);
         if (n < 0) continue;
         if (n == 0) break;          /* tty closed / pipe EOF */
+        /* officecoder: run_coder was missing the menu_activation
+         * hook the other run_* functions have, so the File/Help
+         * chrome was inert.  Alt+F / Alt+H / F10 now open them. */
+        int act = -1, mi = menu_activation(k, n);
+        if (mi >= 0) act = menu_run(&ms_shell, mi);
+        if (act == MA_ABOUT) {
+            show_about("coder");
+            coder_paint("ready");
+            continue;
+        }
+        if (act == MA_QUIT) break;
         if (k[0] == 'q') break;
         if (k[0] == 'e') { coder_input_goal(); coder_paint("ready"); continue; }
         if (k[0] == 't') {
