@@ -1020,6 +1020,8 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define SYS_dup2   33
 #define SYS_pipe   22
 #define SYS_unlink 87
+#define SYS_clone  56
+#define SYS_prctl 157
 #define SYS_chmod  90
 #define SYS_uname  63
 #define SYS_readlink 89
@@ -10026,18 +10028,147 @@ static int tg_subcmd_gen(int argc, char **argv) {
     return 0;
 }
 
-/* `grow exec <name> [args...]` — find tail by name, extract bytes
- * to /tmp/tg_cap_<pid>_<name>, chmod +x, fork+execve with the
- * remaining argv.  Parent waits, unlinks the temp, returns the
- * child's exit code.  This is the invocation half of the system:
- * once a capability is in your tail chain you can run it whenever
- * you like, and it travels with the binary. */
+/* ── Phase 3: sandbox primitives for capability invocation ──────
+ *
+ * Wrap the extracted capability in fresh user/pid/mnt/uts/net
+ * namespaces (so it can't see host processes, hostname or network)
+ * plus a seccomp BPF deny-list that blocks the worst syscalls:
+ *
+ *   - socket(41), connect(42)   defence-in-depth alongside NEWNET
+ *   - clone(56), fork(57), vfork(58), execve(59)
+ *                                no spawning more processes (no fork
+ *                                bombs, no privilege escalation via
+ *                                a setuid execve)
+ *   - ptrace(101)                no debugger attach
+ *   - mount(165)                 no filesystem games
+ *
+ * Everything else is allowed (default-allow), so glibc startup —
+ * which makes ~20 different syscalls before main() — runs fine.
+ *
+ * This is NOT a full chroot.  The capability can still read the
+ * host filesystem (a path-aware seccomp filter or a real chroot
+ * with bind-mounted /lib would close that hole).  The threat model
+ * here is "LLM-generated buggy code that might do something
+ * stupid", not "actively hostile attacker".  For belt-and-braces
+ * containment, build static binaries and use Phase-4's chroot. */
+
+#define TG_CLONE_NEWNS    0x00020000
+#define TG_CLONE_NEWUTS   0x04000000
+#define TG_CLONE_NEWUSER  0x10000000
+#define TG_CLONE_NEWPID   0x20000000
+#define TG_CLONE_NEWNET   0x40000000
+#define TG_SIGCHLD        17
+
+struct tg_sock_filter {
+    unsigned short code;
+    unsigned char  jt, jf;
+    unsigned int   k;
+};
+struct tg_sock_fprog {
+    unsigned short len;
+    struct tg_sock_filter *filter;
+};
+
+#define TG_BPF_LD_W_ABS  0x20
+#define TG_BPF_JMP_JEQ_K 0x15
+#define TG_BPF_RET_K     0x06
+#define TG_AUDIT_ARCH_X86_64        0xC000003E
+#define TG_SECCOMP_RET_ALLOW        0x7FFF0000u
+#define TG_SECCOMP_RET_KILL_PROCESS 0x80000000u
+#define TG_SECCOMP_MODE_FILTER      2
+#define TG_PR_SET_NO_NEW_PRIVS      38
+#define TG_PR_SET_SECCOMP           22
+
+/* Default-allow deny-list.  execve is intentionally ALLOWED because
+ * the child's own execve is what loads the capability after the
+ * filter is installed; the loaded binary inherits the filter and is
+ * still bound by it.  clone3 (435) is the modern variant of clone
+ * that newer glibc uses for pthread_create — block it too so
+ * fork-bombs through pthread are caught. */
+static struct tg_sock_filter tg_seccomp_deny[] = {
+    { TG_BPF_LD_W_ABS,  0, 0, 4 },                            /* [0]  A = arch */
+    { TG_BPF_JMP_JEQ_K, 0, 9, TG_AUDIT_ARCH_X86_64 },          /* [1]  bad arch → [11] kill */
+    { TG_BPF_LD_W_ABS,  0, 0, 0 },                            /* [2]  A = nr */
+    { TG_BPF_JMP_JEQ_K, 7, 0,  41 },  /* socket  */            /* [3]  → kill */
+    { TG_BPF_JMP_JEQ_K, 6, 0,  42 },  /* connect */            /* [4] */
+    { TG_BPF_JMP_JEQ_K, 5, 0,  56 },  /* clone   */            /* [5] */
+    { TG_BPF_JMP_JEQ_K, 4, 0,  57 },  /* fork    */            /* [6] */
+    { TG_BPF_JMP_JEQ_K, 3, 0,  58 },  /* vfork   */            /* [7] */
+    { TG_BPF_JMP_JEQ_K, 2, 0, 101 },  /* ptrace  */            /* [8] */
+    { TG_BPF_JMP_JEQ_K, 1, 0, 165 },  /* mount   */            /* [9] */
+    { TG_BPF_JMP_JEQ_K, 0, 1, 435 },  /* clone3 — match: [11] kill, else [12] allow */
+    { TG_BPF_RET_K,     0, 0, TG_SECCOMP_RET_KILL_PROCESS },   /* [11] */
+    { TG_BPF_RET_K,     0, 0, TG_SECCOMP_RET_ALLOW }           /* [12] */
+};
+
+static long tg_clone_ns(unsigned long flags) {
+    return sys5(SYS_clone, (long)flags, 0, 0, 0, 0);
+}
+
+static int tg_deny_setgroups(void) {
+    int fd = (int)op("/proc/self/setgroups", O_WRONLY, 0);
+    if (fd < 0) return -1;
+    long w = wr(fd, "deny\n", 5);
+    cl(fd);
+    return w == 5 ? 0 : -1;
+}
+
+static int tg_write_id_map(const char *path, long id) {
+    int fd = (int)op(path, O_WRONLY, 0);
+    if (fd < 0) return -1;
+    char line[64];
+    int p = 0;
+    line[p++] = '0'; line[p++] = ' ';
+    p += utoa((unsigned long)id, line + p);
+    line[p++] = ' '; line[p++] = '1'; line[p++] = '\n';
+    long w = wr(fd, line, p);
+    cl(fd);
+    return w == p ? 0 : -1;
+}
+
+static int tg_install_seccomp(void) {
+    if (sys5(SYS_prctl, TG_PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0) return -1;
+    struct tg_sock_fprog prog = {
+        (unsigned short)(sizeof tg_seccomp_deny / sizeof tg_seccomp_deny[0]),
+        tg_seccomp_deny
+    };
+    if (sys5(SYS_prctl, TG_PR_SET_SECCOMP, TG_SECCOMP_MODE_FILTER,
+             (long)&prog, 0, 0) < 0) return -1;
+    return 0;
+}
+
+
+/* `grow exec [--no-sandbox] <name> [args...]` — find tail by name,
+ * extract bytes to /tmp/tg_cap_<pid>_<name>, chmod +x, run it.
+ *
+ * Default: clone into fresh user/pid/mnt/uts/net namespaces, deny
+ * setgroups + map uid/gid 0 → host uid/gid, install seccomp deny-
+ * list, then execve.  --no-sandbox skips all of that and uses plain
+ * fork+execve (useful when the kernel lacks unprivileged userns).
+ *
+ * Parent waits, unlinks the temp, returns the child's exit code.
+ * If the child was killed by SIGSYS the parent prints a hint that
+ * the seccomp filter caught a blocked syscall. */
 static int tg_subcmd_exec(int argc, char **argv) {
-    if (argc < 2 || !argv[1]) {
-        wr(2, "usage: grow exec <name> [args...]\n", 34);
+    /* Optional --no-sandbox / --sandbox flags as the first arg.
+     * Default is sandbox=on for safety. */
+    int sandbox = 1;
+    int arg_off = 1;
+    while (arg_off < argc && argv[arg_off]) {
+        if (scmp(argv[arg_off], "--no-sandbox") == 0) {
+            sandbox = 0; arg_off++; continue;
+        }
+        if (scmp(argv[arg_off], "--sandbox") == 0) {
+            sandbox = 1; arg_off++; continue;
+        }
+        break;
+    }
+    if (arg_off >= argc || !argv[arg_off]) {
+        wr(2, "usage: grow exec [--no-sandbox|--sandbox] "
+              "<name> [args...]\n", 59);
         return 1;
     }
-    const char *want = argv[1];
+    const char *want = argv[arg_off];
     int want_len = slen(want);
 
     char self_path[512];
@@ -10106,17 +10237,52 @@ static int tg_subcmd_exec(int argc, char **argv) {
     cl(xfd);
     sys3(SYS_chmod, (long)ext_path, 0755, 0);
 
-    /* fork+execve: child takes ext_path + argv[2..argc-1]. */
-    long cpid = forkk();
+    /* Spawn: clone(NEW*) under sandbox, plain fork otherwise.  Capture
+     * host uid/gid for uid_map writing inside the namespace. */
+    long host_uid = sys3(102 /*SYS_getuid*/, 0, 0, 0);
+    long host_gid = sys3(104 /*SYS_getgid*/, 0, 0, 0);
+    int sandbox_active = sandbox;
+
+    long cpid;
+    if (sandbox) {
+        unsigned long flags = TG_CLONE_NEWUSER | TG_CLONE_NEWPID |
+                              TG_CLONE_NEWNS   | TG_CLONE_NEWUTS  |
+                              TG_CLONE_NEWNET  | TG_SIGCHLD;
+        cpid = tg_clone_ns(flags);
+        if (cpid < 0) {
+            wr(2, "grow exec: sandbox unavailable (kernel without "
+                  "unprivileged userns?) — falling back to plain "
+                  "exec, capability runs unsandboxed\n", 122);
+            sandbox_active = 0;
+            cpid = forkk();
+        }
+    } else {
+        cpid = forkk();
+    }
     if (cpid < 0) {
         sys3(SYS_unlink, (long)ext_path, 0, 0);
+        wr(2, "grow exec: clone/fork failed\n", 29);
         return 1;
     }
     if (cpid == 0) {
+        if (sandbox_active) {
+            /* Inside the freshly-cloned child.  Until uid_map is
+             * written we have the overflow uid; once mapped we are
+             * root inside the namespace (no real privilege).
+             * setgroups must be denied before gid_map is accepted
+             * (kernel 3.19+).  Failures here are silent — the user
+             * namespace + seccomp filter still apply even if id-map
+             * is partial. */
+            tg_deny_setgroups();
+            tg_write_id_map("/proc/self/uid_map", host_uid);
+            tg_write_id_map("/proc/self/gid_map", host_gid);
+            tg_install_seccomp();
+        }
         char *cargv[32];
         int ci = 0;
         cargv[ci++] = ext_path;
-        for (int i = 2; i < argc && ci < 31; i++) cargv[ci++] = argv[i];
+        for (int i = arg_off + 1; i < argc && ci < 31; i++)
+            cargv[ci++] = argv[i];
         cargv[ci] = 0;
         execvee(ext_path, cargv, g_envp);
         qu(127);
@@ -10124,8 +10290,17 @@ static int tg_subcmd_exec(int argc, char **argv) {
     int st = 0;
     wait4_(&st);
     sys3(SYS_unlink, (long)ext_path, 0, 0);
-    if (st & 0x7f) return 1;
-    return (st >> 8) & 0xff;
+
+    int sig = st & 0x7f;
+    int ec  = (st >> 8) & 0xff;
+    if (sig) {
+        if (sig == 31 /*SIGSYS*/ && sandbox_active) {
+            wr(2, "grow exec: capability killed by seccomp "
+                  "(SIGSYS) — tried a denied syscall\n", 74);
+        }
+        return 128 + sig;
+    }
+    return ec;
 }
 
 static int tg_run_grow(int argc, char **argv) {
