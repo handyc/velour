@@ -9589,13 +9589,40 @@ static int ja_run_decompose(int argc, char **argv) {
  * read-self → append-tail → write-copy → re-scan loop end-to-end. */
 
 #define TG_NAME_LEN     32
+#define TG_TASK_LEN    192
 #define TG_MAGIC_LEN     8
-#define TG_TRAILER_LEN  48           /* name(32) + len(8) + magic(8) */
-#define TG_BUF_CAP      (4 * 1024 * 1024)  /* 4 MB: room for static binaries */
-#define TG_PAYLOAD_CAP  (4 * 1024 * 1024)  /* 4 MB */
-#define TG_CHILD_OUT_CAP (24 * 1024) /* LLM stdout buffer for `grow gen` */
+#define TG_TRAILER_V1_LEN  48      /* name(32) + len(8) + magic(8) */
+#define TG_TRAILER_V2_LEN 256      /* name + task + len + created + type +
+                                    * reserved + magic; see tg_read_trailer */
+#define TG_BUF_CAP      (4 * 1024 * 1024)
+#define TG_PAYLOAD_CAP  (4 * 1024 * 1024)
+#define TG_CHILD_OUT_CAP (24 * 1024)
 
-static const char tg_magic[TG_MAGIC_LEN] = "TAGW0001";
+/* Two magics: TAGW0001 was Phase 1's minimal trailer (name + len +
+ * magic = 48 B).  TAGW0002 carries metadata: an LLM task description
+ * for `grow gen`, a creation timestamp, and a one-byte type tag.
+ * Scanners try v2 first (newer writes), fall back to v1 (legacy). */
+static const char tg_magic_v1[TG_MAGIC_LEN] = "TAGW0001";
+static const char tg_magic_v2[TG_MAGIC_LEN] = "TAGW0002";
+
+/* Parsed view of a tail's trailer.  All pointers reference bytes
+ * inside the loaded tg_buf — caller must not free or mutate. */
+struct tg_tail_info {
+    int           version;        /* 1 or 2 */
+    int           trailer_len;    /* TG_TRAILER_V1_LEN or _V2_LEN */
+    const char   *name;
+    int           name_len;
+    unsigned long payload_len;
+    /* v2-only fields: */
+    const char   *task;           /* "" for v1 */
+    int           task_len;
+    unsigned long created_unix;   /* 0 for v1 */
+    char          type;           /* '?' for v1; otherwise:
+                                   *   'A' = `grow add`
+                                   *   'G' = `grow gen` (dynamic)
+                                   *   'S' = `grow gen --static`
+                                   *   'T' = self-test sample */
+};
 
 /* Shared buffer for "load file into memory then walk it".  One
  * subcommand uses it at a time so reuse is safe.  Lives in BSS — no
@@ -9607,9 +9634,9 @@ static char tg_buf[TG_BUF_CAP];
  * Phase-2 `grow add` and `grow gen` both need this. */
 static char tg_payload_buf[TG_PAYLOAD_CAP];
 
-static int tg_match_magic(const char *p) {
+static int tg_magic_match(const char *p, const char *m) {
     for (int i = 0; i < TG_MAGIC_LEN; i++)
-        if (p[i] != tg_magic[i]) return 0;
+        if (p[i] != m[i]) return 0;
     return 1;
 }
 
@@ -9624,17 +9651,66 @@ static unsigned long tg_unpack_u64_le(const char *in) {
     return v;
 }
 
-/* Count the tail chain on buf[0..size).  Stops at first non-matching
- * trailer or corrupt length.  Returns 0 on a tail-less binary. */
+/* Parse the trailer ending at byte offset `end` in buf into *info.
+ * v2 layout (256 B):
+ *   [0..31]    name (null-padded)
+ *   [32..223]  task (null-padded)
+ *   [224..231] payload_len (u64 LE)
+ *   [232..239] created_unix (u64 LE)
+ *   [240]      type
+ *   [241..247] reserved (zero)
+ *   [248..255] magic "TAGW0002"
+ * v1 layout (48 B): name + payload_len + magic "TAGW0001"
+ * Returns 1 on success, 0 if no trailer match (end of chain). */
+static int tg_read_trailer(const char *buf, long end,
+                           struct tg_tail_info *info) {
+    if (end < 8) return 0;
+    const char *m = buf + end - 8;
+    if (end >= TG_TRAILER_V2_LEN && tg_magic_match(m, tg_magic_v2)) {
+        const char *tr = buf + end - TG_TRAILER_V2_LEN;
+        info->version = 2;
+        info->trailer_len = TG_TRAILER_V2_LEN;
+        info->name = tr;
+        int nl = 0;
+        while (nl < TG_NAME_LEN && tr[nl]) nl++;
+        info->name_len = nl;
+        info->task = tr + TG_NAME_LEN;
+        int tl = 0;
+        while (tl < TG_TASK_LEN && tr[TG_NAME_LEN + tl]) tl++;
+        info->task_len = tl;
+        info->payload_len  = tg_unpack_u64_le(tr + TG_NAME_LEN + TG_TASK_LEN);
+        info->created_unix = tg_unpack_u64_le(tr + TG_NAME_LEN + TG_TASK_LEN + 8);
+        info->type         = tr[TG_NAME_LEN + TG_TASK_LEN + 16];
+        return 1;
+    }
+    if (end >= TG_TRAILER_V1_LEN && tg_magic_match(m, tg_magic_v1)) {
+        const char *tr = buf + end - TG_TRAILER_V1_LEN;
+        info->version = 1;
+        info->trailer_len = TG_TRAILER_V1_LEN;
+        info->name = tr;
+        int nl = 0;
+        while (nl < TG_NAME_LEN && tr[nl]) nl++;
+        info->name_len = nl;
+        info->task = "";
+        info->task_len = 0;
+        info->payload_len  = tg_unpack_u64_le(tr + TG_NAME_LEN);
+        info->created_unix = 0;
+        info->type = '?';
+        return 1;
+    }
+    return 0;
+}
+
+/* Count the tail chain on buf[0..size).  Handles v1 and v2 trailers
+ * interleaved.  Stops at first non-matching trailer. */
 static int tg_count_tails(const char *buf, long size) {
     int count = 0;
     long end = size;
-    while (end >= TG_TRAILER_LEN) {
-        const char *tr = buf + end - TG_TRAILER_LEN;
-        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
-        unsigned long plen = tg_unpack_u64_le(tr + TG_NAME_LEN);
-        long step = (long)TG_TRAILER_LEN + (long)plen;
-        if (plen > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) break;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
         end -= step;
         count++;
     }
@@ -9696,8 +9772,9 @@ static int tg_next_path(const char *self, char *out, int cap) {
 }
 
 /* `grow list` — load self, walk the tail chain, print each tail as
- *   tail N: <name> (<bytes> B)
- * one per line.  Empty binary prints "no tails". */
+ *   tail N: <name> [type] (<bytes> B) <created>
+ * one per line.  v1 tails (legacy, no metadata) just show name +
+ * size.  v2 tails include type tag and created-date when set. */
 static int tg_subcmd_list(void) {
     char self_path[512];
     if (ja_self_path(self_path, sizeof self_path) < 0) {
@@ -9712,26 +9789,35 @@ static int tg_subcmd_list(void) {
 
     int count = 0;
     long end = size;
-    while (end >= TG_TRAILER_LEN) {
-        const char *tr = tg_buf + end - TG_TRAILER_LEN;
-        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
-        unsigned long plen = tg_unpack_u64_le(tr + TG_NAME_LEN);
-        long step = (long)TG_TRAILER_LEN + (long)plen;
-        if (plen > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) {
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) {
             wr(2, "tg: corrupt tail chain\n", 23);
             return 1;
         }
-        int nl = 0;
-        while (nl < TG_NAME_LEN && tr[nl]) nl++;
         wr(1, "tail ", 5);
         char i_s[8]; ja_utoa((unsigned int)count, i_s);
         wr(1, i_s, slen(i_s));
         wr(1, ": ", 2);
-        wr(1, tr, nl);
+        wr(1, info.name, info.name_len);
+        if (info.version == 2) {
+            wr(1, " [", 2);
+            wr(1, &info.type, 1);
+            wr(1, "]", 1);
+        }
         wr(1, " (", 2);
-        char l_s[24]; ja_utoa((unsigned int)plen, l_s);
+        char l_s[24]; ja_utoa((unsigned int)info.payload_len, l_s);
         wr(1, l_s, slen(l_s));
-        wr(1, " B)\n", 4);
+        wr(1, " B)", 3);
+        if (info.version == 2 && info.created_unix > 0) {
+            wr(1, " @", 2);
+            char c_s[24];
+            ja_utoa((unsigned int)info.created_unix, c_s);
+            wr(1, c_s, slen(c_s));
+        }
+        wr(1, "\n", 1);
         end -= step;
         count++;
     }
@@ -9739,17 +9825,21 @@ static int tg_subcmd_list(void) {
     return 0;
 }
 
-/* Append (name, payload[0..plen)) to a copy of self.  Computes the
- * new file path via tg_next_path; on success the path is null-
- * terminated in out_path and 0 returned. */
-static int tg_append_to_copy(const char *name,
+/* Append a v2 tail (name, type, task, payload) to a copy of self.
+ * task may be NULL or empty.  Writes a 256-byte trailer with all
+ * metadata fields; falls back to host-time SYS_time for the
+ * creation timestamp.  Computes the new file path via tg_next_path;
+ * on success the path is null-terminated in out_path and 0
+ * returned. */
+static int tg_append_to_copy(const char *name, char type,
+                             const char *task, int task_len,
                              const char *payload, long plen,
                              char *out_path, int out_path_cap) {
     char self_path[512];
     if (ja_self_path(self_path, sizeof self_path) < 0) return -1;
     long self_size = tg_load_file(self_path);
     if (self_size < 0) return -1;
-    if (self_size + plen + TG_TRAILER_LEN > (long)sizeof tg_buf) return -1;
+    if (self_size + plen + TG_TRAILER_V2_LEN > (long)sizeof tg_buf) return -1;
 
     if (tg_next_path(self_path, out_path, out_path_cap) < 0)
         return -1;
@@ -9769,14 +9859,23 @@ static int tg_append_to_copy(const char *name,
         if (n <= 0) { cl(fd); return -1; }
         w += n;
     }
-    char trailer[TG_TRAILER_LEN];
-    mset(trailer, 0, TG_TRAILER_LEN);
+    char trailer[TG_TRAILER_V2_LEN];
+    mset(trailer, 0, TG_TRAILER_V2_LEN);
     int nl = slen(name);
     if (nl > TG_NAME_LEN - 1) nl = TG_NAME_LEN - 1;
     mcpy(trailer, name, nl);
-    tg_pack_u64_le(trailer + TG_NAME_LEN, (unsigned long)plen);
-    mcpy(trailer + TG_NAME_LEN + 8, tg_magic, TG_MAGIC_LEN);
-    if (wr(fd, trailer, TG_TRAILER_LEN) != TG_TRAILER_LEN) {
+    int tl = task_len;
+    if (tl < 0) tl = 0;
+    if (tl > TG_TASK_LEN - 1) tl = TG_TASK_LEN - 1;
+    if (task && tl > 0) mcpy(trailer + TG_NAME_LEN, task, tl);
+    tg_pack_u64_le(trailer + TG_NAME_LEN + TG_TASK_LEN, (unsigned long)plen);
+    long now = sys3(SYS_time, 0, 0, 0);
+    if (now < 0) now = 0;
+    tg_pack_u64_le(trailer + TG_NAME_LEN + TG_TASK_LEN + 8, (unsigned long)now);
+    trailer[TG_NAME_LEN + TG_TASK_LEN + 16] = type;
+    mcpy(trailer + TG_TRAILER_V2_LEN - TG_MAGIC_LEN,
+         tg_magic_v2, TG_MAGIC_LEN);
+    if (wr(fd, trailer, TG_TRAILER_V2_LEN) != TG_TRAILER_V2_LEN) {
         cl(fd); return -1;
     }
     cl(fd);
@@ -9796,7 +9895,10 @@ static int tg_subcmd_self_test(void) {
     long plen = (long)sizeof payload - 1;
 
     char new_path[512];
-    if (tg_append_to_copy("growtest_hello", payload, plen,
+    static const char selftest_task[] = "growtest self-test sample tail";
+    if (tg_append_to_copy("growtest_hello", 'T',
+                          selftest_task, (int)sizeof selftest_task - 1,
+                          payload, plen,
                           new_path, sizeof new_path) < 0) {
         wr(2, "self-test: append-to-copy failed\n", 33);
         return 1;
@@ -9824,13 +9926,14 @@ static int tg_subcmd_self_test(void) {
         return 1;
     }
 
-    /* Inspect the last tail's trailer and compare against payload. */
-    long end = size;
-    const char *tr = tg_buf + end - TG_TRAILER_LEN;
-    unsigned long got_len = tg_unpack_u64_le(tr + TG_NAME_LEN);
-    const char *got_payload = tg_buf + end - TG_TRAILER_LEN - got_len;
-
-    if ((long)got_len != plen) {
+    /* Inspect the last tail (which is v2) and compare bytes. */
+    struct tg_tail_info info;
+    if (!tg_read_trailer(tg_buf, size, &info)) {
+        wr(2, "self-test: trailer parse failed\n", 32);
+        return 1;
+    }
+    const char *got_payload = tg_buf + size - info.trailer_len - info.payload_len;
+    if ((long)info.payload_len != plen) {
         wr(2, "self-test: length mismatch\n", 27);
         return 1;
     }
@@ -9885,7 +9988,10 @@ static int tg_subcmd_add(int argc, char **argv) {
     }
 
     char new_path[512];
-    if (tg_append_to_copy(name, tg_payload_buf, size,
+    /* `add` stores the source file path as the task field so a
+     * later `grow info` can show where the tail came from. */
+    if (tg_append_to_copy(name, 'A', path, slen(path),
+                          tg_payload_buf, size,
                           new_path, sizeof new_path) < 0) {
         wr(2, "grow add: append-to-copy failed\n", 32);
         return 1;
@@ -10043,7 +10149,13 @@ static int tg_subcmd_gen(int argc, char **argv) {
     mcpy(tg_payload_buf, tg_buf, bin_size);
 
     char new_path[512];
-    if (tg_append_to_copy(name, tg_payload_buf, bin_size,
+    /* Type 'S' for static, 'G' for dynamic.  Task is the user's
+     * original prompt, preserved so `grow info` can show why this
+     * capability exists later. */
+    char tg_type = use_static ? 'S' : 'G';
+    int task_len_eff = slen(task);
+    if (tg_append_to_copy(name, tg_type, task, task_len_eff,
+                          tg_payload_buf, bin_size,
                           new_path, sizeof new_path) < 0) {
         wr(2, "grow gen: append-to-copy failed\n", 32);
         return 1;
@@ -10250,22 +10362,18 @@ static int tg_subcmd_exec(int argc, char **argv) {
     long end = size;
     const char *payload = 0;
     unsigned long plen = 0;
-    while (end >= TG_TRAILER_LEN) {
-        const char *tr = tg_buf + end - TG_TRAILER_LEN;
-        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
-        unsigned long len = tg_unpack_u64_le(tr + TG_NAME_LEN);
-        long step = (long)TG_TRAILER_LEN + (long)len;
-        if (len > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) break;
-
-        int nl = 0;
-        while (nl < TG_NAME_LEN && tr[nl]) nl++;
-        if (nl == want_len) {
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.name_len == want_len) {
             int m = 1;
-            for (int i = 0; i < nl; i++)
-                if (tr[i] != want[i]) { m = 0; break; }
+            for (int i = 0; i < info.name_len; i++)
+                if (info.name[i] != want[i]) { m = 0; break; }
             if (m) {
-                payload = tg_buf + end - TG_TRAILER_LEN - len;
-                plen = len;
+                payload = tg_buf + end - info.trailer_len - info.payload_len;
+                plen = info.payload_len;
                 break;
             }
         }
@@ -10435,18 +10543,15 @@ static int tg_subcmd_rm(int argc, char **argv) {
 
     long end = size;
     long tail_start = -1, tail_end = -1;
-    while (end >= TG_TRAILER_LEN) {
-        const char *tr = tg_buf + end - TG_TRAILER_LEN;
-        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
-        unsigned long plen = tg_unpack_u64_le(tr + TG_NAME_LEN);
-        long step = (long)TG_TRAILER_LEN + (long)plen;
-        if (plen > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) break;
-        int nl = 0;
-        while (nl < TG_NAME_LEN && tr[nl]) nl++;
-        if (nl == want_len) {
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.name_len == want_len) {
             int m = 1;
-            for (int i = 0; i < nl; i++)
-                if (tr[i] != want[i]) { m = 0; break; }
+            for (int i = 0; i < info.name_len; i++)
+                if (info.name[i] != want[i]) { m = 0; break; }
             if (m) {
                 tail_end   = end;
                 tail_start = end - step;
@@ -10502,10 +10607,87 @@ static int tg_subcmd_rm(int argc, char **argv) {
     return 0;
 }
 
+/* `grow info <name>` — surface the v2 metadata stored alongside a
+ * capability: type tag, payload size, creation timestamp, and the
+ * task description that produced it.  Useful for asking "why is
+ * this tail in my binary?" months later. */
+static int tg_subcmd_info(int argc, char **argv) {
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: grow info <name>\n", 24);
+        return 1;
+    }
+    const char *want = argv[1];
+    int want_len = slen(want);
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) {
+        wr(2, "grow info: cannot load self\n", 28);
+        return 1;
+    }
+
+    long end = size;
+    struct tg_tail_info hit;
+    int found = 0;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.name_len == want_len) {
+            int m = 1;
+            for (int i = 0; i < info.name_len; i++)
+                if (info.name[i] != want[i]) { m = 0; break; }
+            if (m) { hit = info; found = 1; break; }
+        }
+        end -= step;
+    }
+    if (!found) {
+        wr(2, "grow info: tail '", 17);
+        wr(2, want, want_len);
+        wr(2, "' not found\n", 12);
+        return 1;
+    }
+
+    wr(1, "name:    ", 9);
+    wr(1, hit.name, hit.name_len);
+    wr(1, "\n", 1);
+    wr(1, "version: ", 9);
+    char v_s[8]; ja_utoa((unsigned int)hit.version, v_s);
+    wr(1, v_s, slen(v_s));
+    wr(1, "\n", 1);
+    wr(1, "type:    ", 9);
+    if (hit.type == 'A')      wr(1, "A (add)", 7);
+    else if (hit.type == 'G') wr(1, "G (gen dynamic)", 15);
+    else if (hit.type == 'S') wr(1, "S (gen static)", 14);
+    else if (hit.type == 'T') wr(1, "T (self-test)", 13);
+    else                       wr(1, &hit.type, 1);
+    wr(1, "\n", 1);
+    wr(1, "size:    ", 9);
+    char s_s[24]; ja_utoa((unsigned int)hit.payload_len, s_s);
+    wr(1, s_s, slen(s_s));
+    wr(1, " B\n", 3);
+    wr(1, "created: ", 9);
+    if (hit.created_unix > 0) {
+        char c_s[24]; ja_utoa((unsigned int)hit.created_unix, c_s);
+        wr(1, c_s, slen(c_s));
+        wr(1, " (unix)", 7);
+    } else {
+        wr(1, "(unknown — v1 tail)", 19);
+    }
+    wr(1, "\n", 1);
+    wr(1, "task:    ", 9);
+    if (hit.task_len > 0) wr(1, hit.task, hit.task_len);
+    else                   wr(1, "(none)", 6);
+    wr(1, "\n", 1);
+    return 0;
+}
+
 static int tg_run_grow(int argc, char **argv) {
     g_headless = 1;     /* keep stdout clean for piping / scripts */
     if (argc < 2 || !argv[1]) {
-        wr(2, "usage: grow <list|add|gen|exec|rm|self-test>\n", 45);
+        wr(2, "usage: grow <list|add|gen|exec|rm|info|self-test>\n", 50);
         return 1;
     }
     if (scmp(argv[1], "list")      == 0) return tg_subcmd_list();
@@ -10514,6 +10696,7 @@ static int tg_run_grow(int argc, char **argv) {
     if (scmp(argv[1], "add")       == 0) return tg_subcmd_add (argc - 1, argv + 1);
     if (scmp(argv[1], "gen")       == 0) return tg_subcmd_gen (argc - 1, argv + 1);
     if (scmp(argv[1], "exec")      == 0) return tg_subcmd_exec(argc - 1, argv + 1);
+    if (scmp(argv[1], "info")      == 0) return tg_subcmd_info(argc - 1, argv + 1);
     wr(2, "grow: unknown verb '", 20);
     wr(2, argv[1], slen(argv[1]));
     wr(2, "'\n", 2);
