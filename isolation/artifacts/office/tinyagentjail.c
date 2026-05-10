@@ -1201,6 +1201,13 @@ static int clock_render(unsigned style, char *out) {
 static char fb[65536];
 static int  fbn;
 
+/* tinyagentjail headless mode: when set, fbflush() drops the buffer
+ * instead of writing it to fd 1.  The decompose subcommand sets this
+ * so its child stdout (which the parent jail reads through a pipe)
+ * stays clean of terminal escape sequences from status() / chrome
+ * paints that ask_send_retrying emits during retries. */
+static int g_headless = 0;
+
 static void fbw(const char *s, int n) {
     if (fbn + n > (int)sizeof fb) return;
     mcpy(fb + fbn, s, n);
@@ -1215,6 +1222,7 @@ static void fbu(unsigned u)    { fbn += utoa(u, fb + fbn); }
  * paint_desktop + chrome + cell-region pre-paint mid-flicker.
  * Terminals that don't know the sequence ignore it. */
 static void fbflush(void) {
+    if (g_headless) { fbn = 0; return; }
     static const char beg[] = "\033[?2026h";
     static const char end[] = "\033[?2026l";
     wr(1, beg, sizeof beg - 1);
@@ -2556,6 +2564,14 @@ static char ask_model[ASK_MODEL_CAP] = "gpt-4o-mini";
 
 static char ask_buf[ASK_BUF_CAP];
 static int  ask_buf_use;
+
+/* tinyagentjail: max_tokens cap for the next ask call.  Default 1024
+ * is conservative for interactive use (pekpik proxy charges by
+ * max_tokens) but reasoning models (gpt-5.5, o1-style) burn the
+ * whole budget on hidden reasoning, leaving content empty.  The
+ * decompose subcommand bumps this to 8192 before each call so the
+ * model has headroom for both reasoning and the visible answer. */
+static int g_ask_max_tokens = 1024;
 static int  ask_msg_off[ASK_MAX_MSGS];
 static int  ask_msg_len[ASK_MAX_MSGS];
 static int  ask_msg_role[ASK_MAX_MSGS];   /* 0=user, 1=assistant */
@@ -2788,7 +2804,8 @@ static int ask_build_request(char *out, int cap) {
      * OpenAI / proxies it's optional, but the pekpik proxy was
      * applying a very large default per call against GPT-5.5 keys
      * (eating the whole rate-limit budget on every message). */
-    at = sapp(out, at, "\",\"max_tokens\":1024");
+    at = sapp(out, at, "\",\"max_tokens\":");
+    at += utoa((unsigned)g_ask_max_tokens, out + at);
     if (has_sys) {
         at = sapp(out, at, ",\"system\":\"");
         at = ask_json_esc(out, at, g_llm_prompt, g_llm_prompt_len);
@@ -8844,6 +8861,261 @@ static int ja_run_self_test(int argc, char **argv) {
 }
 
 
+/* Phase-2: decompose-or-answer prompt template + dispatcher.
+ *
+ * The LLM at every level emits exactly one of:
+ *
+ *   ANSWER:
+ *   <text or code that solves the task directly>
+ *
+ *   SUBTASKS:
+ *   - <one-line concrete subtask>
+ *   - <one-line concrete subtask>
+ *   - ...
+ *
+ * Parser scans for the first occurrence of either marker and treats
+ * the rest as the body.  At depth 0 we use a force-answer prompt and,
+ * as a belt-and-braces guard, even a SUBTASKS reply is treated as
+ * literal text (we never recurse below depth 0).
+ *
+ * Subtasks are dispatched by execve-ing self with `decompose <task>`
+ * + --jail-depth=parent_depth-1, so each child runs the same code
+ * path with a smaller budget.  Parent collects each child's stdout
+ * through a pipe and emits "--- subtask: <name>\n<child output>"
+ * blocks separated by horizontal rules.  Phase 3 will replace the
+ * naive aggregator with a synthesis LLM call + a compile/test
+ * verifier per child. */
+
+static const char ja_dec_sys_decompose[] =
+    "You are a sub-agent in a recursive software-construction tree.\n"
+    "Your job is to either ANSWER the task directly, or DECOMPOSE it\n"
+    "into 2-4 smaller, independent subtasks that can be solved in\n"
+    "parallel and assembled later.\n"
+    "\n"
+    "Output EXACTLY ONE of these blocks, with NO preamble:\n"
+    "\n"
+    "ANSWER:\n"
+    "<your direct answer or code>\n"
+    "\n"
+    "or\n"
+    "\n"
+    "SUBTASKS:\n"
+    "- <subtask 1, one line, concrete and self-contained>\n"
+    "- <subtask 2, one line, concrete and self-contained>\n"
+    "- <subtask 3, one line, concrete and self-contained>\n"
+    "\n"
+    "Bias toward ANSWER when:\n"
+    "  - the task is concrete and small (a single function or file)\n"
+    "  - depth_remaining is small\n"
+    "  - the parts are not cleanly independent\n"
+    "Bias toward SUBTASKS when:\n"
+    "  - the task spans multiple files / modules / responsibilities\n"
+    "  - the parts can be done independently and aggregated later\n"
+    "Each subtask line must be self-contained: a child agent will\n"
+    "see only that one line plus this same instruction set.";
+
+static const char ja_dec_sys_force[] =
+    "You are a sub-agent in a recursive software-construction tree.\n"
+    "Your depth budget is exhausted — you MUST answer directly. NO\n"
+    "decomposition allowed.\n"
+    "\n"
+    "Output:\n"
+    "ANSWER:\n"
+    "<your direct answer or code>";
+
+/* Find the first occurrence of needle in haystack[0..hlen).  Returns
+ * index of first byte or -1.  Used to spot ANSWER:/SUBTASKS: markers. */
+static int ja_find(const char *hay, int hlen, const char *needle) {
+    int nl = slen(needle);
+    if (nl <= 0 || nl > hlen) return -1;
+    for (int i = 0; i + nl <= hlen; i++) {
+        int j = 0;
+        while (j < nl && hay[i + j] == needle[j]) j++;
+        if (j == nl) return i;
+    }
+    return -1;
+}
+
+/* Phase-2 entry point.  argv[0] is "decompose" (already peeled by
+ * main_c), argv[1] is the task description.  ja_cfg.depth holds the
+ * remaining depth budget (already decremented by the parent's child-
+ * argv construction).  Output goes to stdout (which is a pipe back
+ * to the parent jail when this process was spawned by one). */
+static int ja_run_decompose(int argc, char **argv) {
+    g_headless = 1;             /* gate fbflush + status output */
+    g_ask_max_tokens = 8192;    /* reasoning models need headroom */
+
+    const char *goal = (argc > 1 && argv[1]) ? argv[1] : 0;
+    if (!goal || !goal[0]) {
+        wr(2, "ja decompose: missing task argument\n", 36);
+        return 1;
+    }
+
+    /* Set up ask: load conf; if no api_key, fetch one from the
+     * upstream README pool (auto-rotate is the existing behaviour). */
+    ask_load_conf();
+    if (!ask_api_key[0]) {
+        ask_fetch_random_key();
+    }
+
+    /* Build the user message.  We fold the system prompt + depth +
+     * task into one user message so we don't depend on per-provider
+     * "system" role handling.  ask_msg_add caps at ASK_BUF_CAP, so
+     * keep this conservative. */
+    static char user_msg[6144];
+    int p = 0;
+    const char *sys_prompt = (ja_cfg.depth <= 0)
+        ? ja_dec_sys_force
+        : ja_dec_sys_decompose;
+    p = sapp(user_msg, p, sys_prompt);
+    p = sapp(user_msg, p, "\n\nDepth remaining: ");
+    char d_s[8]; ja_utoa((unsigned int)ja_cfg.depth, d_s);
+    p = sapp(user_msg, p, d_s);
+    p = sapp(user_msg, p, "\nFan-out cap: ");
+    char f_s[8]; ja_utoa((unsigned int)ja_cfg.fanout, f_s);
+    p = sapp(user_msg, p, f_s);
+    p = sapp(user_msg, p, "\n\nTask:\n");
+    p = sapp(user_msg, p, goal);
+
+    ask_n_msgs = 0;
+    ask_buf_use = 0;
+    ask_msg_add(0 /*user*/, user_msg, p);
+
+    static char content[8192];
+    char fail_reason[256];
+    int cn = ask_send_retrying(content, sizeof content,
+                               fail_reason, sizeof fail_reason);
+    if (cn < 0) {
+        wr(2, "ja decompose: LLM call failed: ", 31);
+        wr(2, fail_reason, slen(fail_reason));
+        wr(2, "\n", 1);
+        return 1;
+    }
+
+    /* Parse the response.  Look for the FIRST occurrence of either
+     * marker and treat everything after it as the body. */
+    int ans_at = ja_find(content, cn, "ANSWER:");
+    int sub_at = ja_find(content, cn, "SUBTASKS:");
+
+    int is_subtasks;
+    int body_start;
+    if (sub_at < 0 && ans_at < 0) {
+        /* LLM ignored format.  Treat whole response as ANSWER. */
+        is_subtasks = 0;
+        body_start = 0;
+    } else if (sub_at < 0) {
+        is_subtasks = 0;
+        body_start = ans_at + 7;
+    } else if (ans_at < 0) {
+        is_subtasks = 1;
+        body_start = sub_at + 9;
+    } else if (ans_at < sub_at) {
+        is_subtasks = 0;
+        body_start = ans_at + 7;
+    } else {
+        is_subtasks = 1;
+        body_start = sub_at + 9;
+    }
+    /* Skip leading whitespace after the marker */
+    while (body_start < cn &&
+           (content[body_start] == ' ' || content[body_start] == '\n' ||
+            content[body_start] == '\r' || content[body_start] == '\t'))
+        body_start++;
+
+    /* At depth 0 (force-answer), even a SUBTASKS reply is treated as
+     * literal text — we never spawn below depth 0. */
+    if (!is_subtasks || ja_cfg.depth <= 0) {
+        wr(1, content + body_start, cn - body_start);
+        if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+        return 0;
+    }
+
+    /* SUBTASKS path: parse list lines, spawn a child per subtask, read
+     * its stdout, aggregate.  Subtask line format is "- <text>\n" or
+     * "* <text>\n"; tolerate leading whitespace. */
+    char self_path[512];
+    if (ja_self_path(self_path, (long)sizeof(self_path)) < 0) {
+        wr(2, "ja: readlink /proc/self/exe failed\n", 35);
+        return 1;
+    }
+
+    char depth_arg[24] = "--jail-depth=";
+    int dap = 13;
+    dap += ja_utoa((unsigned int)(ja_cfg.depth - 1), depth_arg + dap);
+    char fanout_arg[24] = "--jail-fanout=";
+    int fap = 14;
+    fap += ja_utoa((unsigned int)ja_cfg.fanout, fanout_arg + fap);
+    char budget_arg[28] = "--jail-budget=";
+    int bap = 14;
+    bap += ja_utoa((unsigned int)ja_cfg.budget, budget_arg + bap);
+
+    wr(1, "DECOMPOSED: ", 12);
+    wr(1, goal, slen(goal));
+    wr(1, "\n", 1);
+
+    static char subtask_buf[512];
+    static char child_out[16384];
+    int n_spawned = 0;
+    int max_children = ja_cfg.fanout;
+    if (max_children > 8) max_children = 8;
+
+    int j = body_start;
+    while (j < cn && n_spawned < max_children) {
+        /* Skip leading whitespace on this line */
+        while (j < cn && (content[j] == ' ' || content[j] == '\t')) j++;
+        if (j >= cn) break;
+        int is_item = (content[j] == '-' || content[j] == '*') &&
+                      (j + 1 < cn) && content[j + 1] == ' ';
+        if (!is_item) {
+            /* Skip to end of this line */
+            while (j < cn && content[j] != '\n') j++;
+            if (j < cn) j++;
+            continue;
+        }
+        j += 2;
+        int sp = 0;
+        while (j < cn && content[j] != '\n' &&
+               sp < (int)sizeof(subtask_buf) - 1) {
+            subtask_buf[sp++] = content[j++];
+        }
+        subtask_buf[sp] = 0;
+        if (j < cn) j++;
+        if (sp == 0) continue;
+
+        char *xargv[8] = {
+            self_path, (char *)"decompose",
+            depth_arg, fanout_arg, budget_arg, subtask_buf, 0, 0
+        };
+        long got = 0;
+        int rc = ja_spawn_self_collect(xargv, child_out,
+                                       (long)sizeof(child_out), &got);
+
+        wr(1, "--- subtask ", 12);
+        char i_s[8]; ja_utoa((unsigned int)n_spawned, i_s);
+        wr(1, i_s, slen(i_s));
+        wr(1, ": ", 2);
+        wr(1, subtask_buf, sp);
+        wr(1, "\n", 1);
+        if (rc < 0) {
+            wr(1, "(spawn failed)\n", 15);
+        } else {
+            wr(1, child_out, got);
+            if (got > 0 && child_out[got - 1] != '\n') wr(1, "\n", 1);
+        }
+        n_spawned++;
+    }
+
+    if (n_spawned == 0) {
+        /* LLM said SUBTASKS but emitted no parseable list items.
+         * Fall back to printing the body as-is so the parent at least
+         * gets text instead of nothing. */
+        wr(1, content + body_start, cn - body_start);
+        if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+    }
+    return 0;
+}
+
+
 /* ── dispatch ─────────────────────────────────────────── */
 static const char *basename_(const char *p) {
     const char *b = p;
@@ -8860,10 +9132,13 @@ int main_c(int argc, char **argv, char **envp) {
     if (ja_cfg.self_test) {
         return ja_run_self_test(argc, argv);
     }
+    /* Headless modes — handle BEFORE term_init so children with piped
+     * stdout (no tty) work cleanly. */
+    if (argc >= 2 && argv[1] && scmp(argv[1], "decompose") == 0) {
+        return ja_run_decompose(argc - 1, argv + 1);
+    }
     term_init();
-    /* tinyagentjail dispatch: ask | coder (default coder).  Phase 2
-     * will route a "decompose" subcommand through ja_spawn_self_collect
-     * with a per-child --jail-depth=parent_depth-1. */
+    /* Interactive modes: ask | coder (default coder). */
     if (argc >= 2 && argv[1]) {
         if (scmp(argv[1], "ask")   == 0) return run_ask  (argc - 1, argv + 1);
         if (scmp(argv[1], "coder") == 0) return run_coder(argc - 1, argv + 1);
