@@ -10035,21 +10035,37 @@ static int tg_subcmd_add(int argc, char **argv) {
  * capability tail to the next-generation file.  The magic moment:
  * an agent grows itself by building a real binary from natural
  * language and embedding it into its own corpus. */
+/* Forward decl: tg_wait_with_timeout is defined near tg_subcmd_exec
+ * (further down).  Phase 5's verifier in tg_subcmd_gen uses it. */
+static long tg_wait_with_timeout(long pid, int *status,
+                                 int timeout_sec, int *timed_out);
+
 static int tg_subcmd_gen(int argc, char **argv) {
-    /* Optional --static flag (precedes positional args).  Static
-     * builds work with `grow exec --chroot` because the capability
-     * carries everything it needs; cost is much bigger payload
-     * (glibc-static hello ~800 KB vs dynamic ~16 KB). */
+    /* Flags: --static (use cc -static), --no-verify (Phase 5 skip
+     * the runtime test).  Defaults: dynamic linking, runtime verify
+     * ON.  Verify runs the compiled binary with empty stdin and a
+     * 5-second wall-clock cap, then checks exit code == 0 and that
+     * the LLM-provided EXPECTED: substring appears in stdout.  If
+     * either check fails the gen refuses to promote — the bad code
+     * never reaches the tail chain. */
     int use_static = 0;
+    int do_verify  = 1;
     int arg_off = 1;
     while (arg_off < argc && argv[arg_off]) {
-        if (scmp(argv[arg_off], "--static") == 0) {
+        if (scmp(argv[arg_off], "--static")    == 0) {
             use_static = 1; arg_off++; continue;
+        }
+        if (scmp(argv[arg_off], "--no-verify") == 0) {
+            do_verify = 0; arg_off++; continue;
+        }
+        if (scmp(argv[arg_off], "--verify")    == 0) {
+            do_verify = 1; arg_off++; continue;
         }
         break;
     }
     if (arg_off + 1 >= argc || !argv[arg_off] || !argv[arg_off + 1]) {
-        wr(2, "usage: grow gen [--static] <name> <task>\n", 41);
+        wr(2, "usage: grow gen [--static] [--no-verify] "
+              "<name> <task>\n", 56);
         return 1;
     }
     const char *name = argv[arg_off];
@@ -10062,15 +10078,27 @@ static int tg_subcmd_gen(int argc, char **argv) {
     }
 
     /* Wrap the user's task with explicit "complete program" guidance.
-     * The decompose leaf prompt will then steer the LLM toward a
-     * runnable single-file C program. */
+     * Phase 5: when verify is on, also ask the LLM to emit an
+     * EXPECTED: line below the code fence — a short substring the
+     * runtime test will look for in the program's stdout. */
     static char enhanced[2048];
     int ep = 0;
     ep = sapp(enhanced, ep,
               "Write a COMPLETE, standalone C program with main() "
               "that solves the following task.  Include all required "
               "headers.  Use only the standard C library.  Wrap the "
-              "code in a ```c ... ``` fence.  Task: ");
+              "code in a ```c ... ``` fence.");
+    if (do_verify) {
+        ep = sapp(enhanced, ep,
+                  "  Then, on a new line AFTER the closing ```, "
+                  "write the literal line:\n"
+                  "EXPECTED: <one short substring that your program "
+                  "prints to stdout when run with no stdin>\n"
+                  "If your program reads from stdin and would hang "
+                  "without input, write `EXPECTED: <none>` so the "
+                  "verifier just checks the exit code.");
+    }
+    ep = sapp(enhanced, ep, "  Task: ");
     ep = sapp(enhanced, ep, task);
     enhanced[ep] = 0;
 
@@ -10152,6 +10180,136 @@ static int tg_subcmd_gen(int argc, char **argv) {
         wr(2, "grow gen: cc -O2 -o failed (cannot link, missing libc?)\n", 56);
         sys3(SYS_unlink, (long)bin_path, 0, 0);
         return 1;
+    }
+
+    /* Phase 5 runtime verifier: run the freshly-compiled binary
+     * with empty stdin and a 5 s wall-clock cap, capture its
+     * stdout+stderr, then check exit code and (optionally) that
+     * the LLM-provided EXPECTED: substring appears in the output.
+     * Refuses to promote on any failure so bad code never reaches
+     * the tail chain.  --no-verify skips this whole block. */
+    if (do_verify) {
+        int rv_pfd[2];
+        if (pipe_(rv_pfd) < 0) {
+            sys3(SYS_unlink, (long)bin_path, 0, 0);
+            wr(2, "grow gen: verify pipe failed\n", 29);
+            return 1;
+        }
+        long rv_pid = forkk();
+        if (rv_pid < 0) {
+            cl(rv_pfd[0]); cl(rv_pfd[1]);
+            sys3(SYS_unlink, (long)bin_path, 0, 0);
+            return 1;
+        }
+        if (rv_pid == 0) {
+            cl(rv_pfd[0]);
+            /* stdin from /dev/null so anything reading exits on EOF */
+            int nfd = (int)op("/dev/null", O_RDONLY, 0);
+            if (nfd >= 0) { dup2_(nfd, 0); cl(nfd); }
+            dup2_(rv_pfd[1], 1);    /* stdout → pipe */
+            dup2_(rv_pfd[1], 2);    /* stderr → same pipe (merged) */
+            cl(rv_pfd[1]);
+            char *cargv[] = { (char *)bin_path, 0 };
+            execvee(bin_path, cargv, g_envp);
+            qu(127);
+        }
+        cl(rv_pfd[1]);
+        static char rv_out[8192];
+        long rv_len = 0;
+        while (rv_len < (long)sizeof rv_out - 1) {
+            long n = rd(rv_pfd[0], rv_out + rv_len,
+                        (long)sizeof rv_out - 1 - rv_len);
+            if (n <= 0) break;
+            rv_len += n;
+        }
+        rv_out[rv_len] = 0;
+        cl(rv_pfd[0]);
+        int rv_st = 0;
+        int rv_timed_out = 0;
+        tg_wait_with_timeout(rv_pid, &rv_st, 5, &rv_timed_out);
+
+        int rv_sig = rv_st & 0x7f;
+        int rv_ec  = (rv_st >> 8) & 0xff;
+        int rv_fail = 0;
+        if (rv_timed_out) {
+            wr(2, "grow gen: verify FAILED — capability "
+                  "exceeded 5 s timeout (hung or infinite loop)\n", 81);
+            rv_fail = 1;
+        } else if (rv_sig) {
+            wr(2, "grow gen: verify FAILED — capability killed "
+                  "by signal ", 54);
+            char s_s[8]; ja_utoa((unsigned int)rv_sig, s_s);
+            wr(2, s_s, slen(s_s));
+            wr(2, " (segfault / abort)\n", 20);
+            rv_fail = 1;
+        } else if (rv_ec != 0) {
+            wr(2, "grow gen: verify FAILED — capability exited "
+                  "with code ", 54);
+            char c_s[8]; ja_utoa((unsigned int)rv_ec, c_s);
+            wr(2, c_s, slen(c_s));
+            wr(2, "\n", 1);
+            rv_fail = 1;
+        }
+        /* Extract EXPECTED: from child_out (the LLM response from
+         * decompose).  Look for the line "EXPECTED: <text>". */
+        if (!rv_fail) {
+            const char *expected = 0;
+            int expected_len = 0;
+            static const char marker[] = "EXPECTED:";
+            int mlen = (int)sizeof marker - 1;
+            for (int i = 0; i + mlen < (int)got; i++) {
+                if (i > 0 && child_out[i - 1] != '\n') continue;
+                int m = 1;
+                for (int k = 0; k < mlen; k++)
+                    if (child_out[i + k] != marker[k]) { m = 0; break; }
+                if (!m) continue;
+                int j = i + mlen;
+                while (j < (int)got &&
+                       (child_out[j] == ' ' || child_out[j] == '\t')) j++;
+                int e = j;
+                while (e < (int)got &&
+                       child_out[e] != '\n' && child_out[e] != '\r') e++;
+                expected = child_out + j;
+                expected_len = e - j;
+                while (expected_len > 0 &&
+                       (expected[expected_len - 1] == ' ' ||
+                        expected[expected_len - 1] == '\t')) expected_len--;
+                break;
+            }
+            int is_none = (expected_len == 6 && expected &&
+                           expected[0] == '<' && expected[1] == 'n' &&
+                           expected[2] == 'o' && expected[3] == 'n' &&
+                           expected[4] == 'e' && expected[5] == '>');
+            if (expected_len > 0 && !is_none) {
+                /* Substring search in rv_out */
+                int found = 0;
+                for (long i = 0; i + expected_len <= rv_len; i++) {
+                    int m = 1;
+                    for (int k = 0; k < expected_len; k++)
+                        if (rv_out[i + k] != expected[k]) { m = 0; break; }
+                    if (m) { found = 1; break; }
+                }
+                if (!found) {
+                    wr(2, "grow gen: verify FAILED — EXPECTED '", 36);
+                    wr(2, expected, expected_len);
+                    wr(2, "' not in stdout\nstdout was:\n", 28);
+                    wr(2, rv_out, rv_len);
+                    if (rv_len > 0 && rv_out[rv_len - 1] != '\n')
+                        wr(2, "\n", 1);
+                    rv_fail = 1;
+                }
+            }
+        }
+        if (rv_fail) {
+            sys3(SYS_unlink, (long)bin_path, 0, 0);
+            wr(2, "grow gen: refusing to promote — rerun with "
+                  "--no-verify to skip the runtime check\n", 80);
+            return 1;
+        }
+        wr(2, "grow gen: verify OK (", 21);
+        char l_s[16]; ja_utoa((unsigned int)rv_len, l_s);
+        wr(2, l_s, slen(l_s));
+        wr(2, " B captured)\n", 13);
     }
 
     /* Read compiled binary into tg_buf, then immediately copy out
