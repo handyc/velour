@@ -1020,10 +1020,14 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define SYS_dup2   33
 #define SYS_pipe   22
 #define SYS_unlink 87
-#define SYS_clone  56
-#define SYS_prctl 157
-#define SYS_kill   62
-#define WNOHANG     1
+#define SYS_clone   56
+#define SYS_prctl  157
+#define SYS_kill    62
+#define SYS_chroot 161
+#define SYS_chdir   80
+#define SYS_mkdir   83
+#define SYS_rmdir   84
+#define WNOHANG      1
 #define SYS_chmod  90
 #define SYS_uname  63
 #define SYS_readlink 89
@@ -9586,9 +9590,9 @@ static int ja_run_decompose(int argc, char **argv) {
 
 #define TG_NAME_LEN     32
 #define TG_MAGIC_LEN     8
-#define TG_TRAILER_LEN  48          /* name(32) + len(8) + magic(8) */
-#define TG_BUF_CAP      (128 * 1024) /* upper bound on self bytes + tails */
-#define TG_PAYLOAD_CAP  (64 * 1024)  /* max single capability size */
+#define TG_TRAILER_LEN  48           /* name(32) + len(8) + magic(8) */
+#define TG_BUF_CAP      (4 * 1024 * 1024)  /* 4 MB: room for static binaries */
+#define TG_PAYLOAD_CAP  (4 * 1024 * 1024)  /* 4 MB */
 #define TG_CHILD_OUT_CAP (24 * 1024) /* LLM stdout buffer for `grow gen` */
 
 static const char tg_magic[TG_MAGIC_LEN] = "TAGW0001";
@@ -9897,12 +9901,24 @@ static int tg_subcmd_add(int argc, char **argv) {
  * an agent grows itself by building a real binary from natural
  * language and embedding it into its own corpus. */
 static int tg_subcmd_gen(int argc, char **argv) {
-    if (argc < 3 || !argv[1] || !argv[2]) {
-        wr(2, "usage: grow gen <name> <task>\n", 30);
+    /* Optional --static flag (precedes positional args).  Static
+     * builds work with `grow exec --chroot` because the capability
+     * carries everything it needs; cost is much bigger payload
+     * (glibc-static hello ~800 KB vs dynamic ~16 KB). */
+    int use_static = 0;
+    int arg_off = 1;
+    while (arg_off < argc && argv[arg_off]) {
+        if (scmp(argv[arg_off], "--static") == 0) {
+            use_static = 1; arg_off++; continue;
+        }
+        break;
+    }
+    if (arg_off + 1 >= argc || !argv[arg_off] || !argv[arg_off + 1]) {
+        wr(2, "usage: grow gen [--static] <name> <task>\n", 41);
         return 1;
     }
-    const char *name = argv[1];
-    const char *task = argv[2];
+    const char *name = argv[arg_off];
+    const char *task = argv[arg_off + 1];
 
     char self_path[512];
     if (ja_self_path(self_path, sizeof self_path) < 0) {
@@ -9981,10 +9997,15 @@ static int tg_subcmd_gen(int argc, char **argv) {
     if (cpid == 0) {
         int nfd = (int)op("/dev/null", O_WRONLY, 0);
         if (nfd >= 0) { dup2_(nfd, 1); dup2_(nfd, 2); cl(nfd); }
-        char *cargv[] = {
+        char *cargv_dyn[] = {
             (char *)"cc", (char *)"-O2", (char *)"-o", bin_path,
             src_path, 0
         };
+        char *cargv_static[] = {
+            (char *)"cc", (char *)"-O2", (char *)"-static",
+            (char *)"-o", bin_path, src_path, 0
+        };
+        char **cargv = use_static ? cargv_static : cargv_dyn;
         execvee("/usr/bin/cc", cargv, g_envp);
         execvee("/bin/cc",     cargv, g_envp);
         qu(127);
@@ -10176,10 +10197,14 @@ static long tg_wait_with_timeout(long pid, int *status,
  * If the child was killed by SIGSYS the parent prints a hint that
  * the seccomp filter caught a blocked syscall. */
 static int tg_subcmd_exec(int argc, char **argv) {
-    /* Flags: --no-sandbox / --sandbox / --timeout=N.  Defaults:
-     * sandbox=on, timeout=30s.  Flags must come before <name>. */
+    /* Flags: --no-sandbox / --sandbox / --timeout=N / --chroot.
+     * Defaults: sandbox=on, timeout=30s, chroot=off.  --chroot
+     * requires the capability to be a static binary (gen --static
+     * or add of an existing static binary) because the chroot has
+     * no /lib for a dynamic loader to find libc. */
     int sandbox = 1;
     int timeout_sec = 30;
+    int use_chroot = 0;
     int arg_off = 1;
     while (arg_off < argc && argv[arg_off]) {
         if (scmp(argv[arg_off], "--no-sandbox") == 0) {
@@ -10188,6 +10213,9 @@ static int tg_subcmd_exec(int argc, char **argv) {
         if (scmp(argv[arg_off], "--sandbox") == 0) {
             sandbox = 1; arg_off++; continue;
         }
+        if (scmp(argv[arg_off], "--chroot") == 0) {
+            use_chroot = 1; arg_off++; continue;
+        }
         if (ja_strpfx(argv[arg_off], "--timeout=")) {
             timeout_sec = ja_atoi(argv[arg_off] + 10);
             arg_off++; continue;
@@ -10195,8 +10223,8 @@ static int tg_subcmd_exec(int argc, char **argv) {
         break;
     }
     if (arg_off >= argc || !argv[arg_off]) {
-        wr(2, "usage: grow exec [--no-sandbox|--sandbox] "
-              "[--timeout=N] <name> [args...]\n", 73);
+        wr(2, "usage: grow exec [--no-sandbox] [--chroot] "
+              "[--timeout=N] <name> [args...]\n", 74);
         return 1;
     }
     const char *want = argv[arg_off];
@@ -10242,20 +10270,38 @@ static int tg_subcmd_exec(int argc, char **argv) {
         return 1;
     }
 
-    /* Extract to /tmp/tg_cap_<pid>_<name>.  Truncate name to 32 chars
-     * to keep path bounded. */
-    char ext_path[128];
-    int xp = sapp(ext_path, 0, "/tmp/tg_cap_");
+    /* Extract path.  Two layouts depending on --chroot:
+     *   default: /tmp/tg_cap_<pid>_<name>   (one file)
+     *   chroot:  /tmp/tg_jail_<pid>/cap     (in a fresh dir)
+     * The chroot variant requires CAP_SYS_ADMIN inside the user
+     * namespace (we get it from the uid_map mapping). */
     char pid_s[16];
     ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
-    xp = sapp(ext_path, xp, pid_s);
-    ext_path[xp++] = '_';
-    int nm_len = want_len > 32 ? 32 : want_len;
-    mcpy(ext_path + xp, want, nm_len); xp += nm_len;
-    ext_path[xp] = 0;
+    char jail_dir[64];
+    char ext_path[128];
+    if (use_chroot) {
+        int jp = sapp(jail_dir, 0, "/tmp/tg_jail_");
+        jp = sapp(jail_dir, jp, pid_s);
+        jail_dir[jp] = 0;
+        if (sys3(SYS_mkdir, (long)jail_dir, 0700, 0) < 0) {
+            wr(2, "grow exec: cannot mkdir chroot jail\n", 36);
+            return 1;
+        }
+        int xp = sapp(ext_path, 0, jail_dir);
+        xp = sapp(ext_path, xp, "/cap");
+        ext_path[xp] = 0;
+    } else {
+        int xp = sapp(ext_path, 0, "/tmp/tg_cap_");
+        xp = sapp(ext_path, xp, pid_s);
+        ext_path[xp++] = '_';
+        int nm_len = want_len > 32 ? 32 : want_len;
+        mcpy(ext_path + xp, want, nm_len); xp += nm_len;
+        ext_path[xp] = 0;
+    }
 
     int xfd = (int)op(ext_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
     if (xfd < 0) {
+        if (use_chroot) sys3(SYS_rmdir, (long)jail_dir, 0, 0);
         wr(2, "grow exec: cannot create extract file\n", 38);
         return 1;
     }
@@ -10307,21 +10353,37 @@ static int tg_subcmd_exec(int argc, char **argv) {
             tg_deny_setgroups();
             tg_write_id_map("/proc/self/uid_map", host_uid);
             tg_write_id_map("/proc/self/gid_map", host_gid);
-            tg_install_seccomp();
         }
+        /* --chroot: pin the child's filesystem view to the jail dir.
+         * After chroot, the capability sees only what's at /cap.
+         * Must happen BEFORE seccomp because chroot is on the deny
+         * list in older kernels (it's not on ours, but be tidy). */
+        const char *exec_path = ext_path;
+        char *argv0 = ext_path;
+        if (use_chroot) {
+            if (sys3(SYS_chroot, (long)jail_dir, 0, 0) < 0) {
+                wr(2, "child: chroot failed\n", 21);
+                qu(125);
+            }
+            sys3(SYS_chdir, (long)"/", 0, 0);
+            exec_path = "/cap";
+            argv0 = (char *)"/cap";
+        }
+        if (sandbox_active) tg_install_seccomp();
         char *cargv[32];
         int ci = 0;
-        cargv[ci++] = ext_path;
+        cargv[ci++] = argv0;
         for (int i = arg_off + 1; i < argc && ci < 31; i++)
             cargv[ci++] = argv[i];
         cargv[ci] = 0;
-        execvee(ext_path, cargv, g_envp);
+        execvee(exec_path, cargv, g_envp);
         qu(127);
     }
     int st = 0;
     int timed_out = 0;
     tg_wait_with_timeout(cpid, &st, timeout_sec, &timed_out);
     sys3(SYS_unlink, (long)ext_path, 0, 0);
+    if (use_chroot) sys3(SYS_rmdir, (long)jail_dir, 0, 0);
 
     int sig = st & 0x7f;
     int ec  = (st >> 8) & 0xff;
