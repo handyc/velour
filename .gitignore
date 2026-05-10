@@ -113,3 +113,16 @@ clone_init.json.applied
 # --- Isolation oneclick-hex-class4 compiled hunter (keep .c + .py source) -
 /isolation/artifacts/oneclick_class4/hunter
 /isolation/artifacts/oneclick_class4/winner_*
+
+# --- Office runtime state spilled into the project root --------------------
+# Written when officesuite / officeagent is launched with cwd at the
+# project root (e.g. ad-hoc imgpreset tests, coder iterations).  Each is
+# regenerated on demand and machine-local.
+/hxhnt.seed
+/personality.bin
+/recent.bin
+/longterm.bin
+/project.bin
+/coder_state.bin
+/coder_project.txt
+/officesuite.conf

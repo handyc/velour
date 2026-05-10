@@ -104,9 +104,15 @@ garden.bin
 soul_data_float.h
 soul_data_float_*.h
 
-# officerpgc per-version runtime state (snapshots + screenshots)
+# officerpgc per-version runtime state (snapshots + screenshots) +
+# compiled binaries (each v*/ ships its source; the binary is a local
+# build artifact)
 officerpgc/v*/officerpg-state.bin
 officerpgc/v*/officerpg-shot.ans
+officerpgc/v*/officerpg
+
+# officesuite — Windows-style office front end built from officesuite.c
+officesuite
 
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
