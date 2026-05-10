@@ -9659,25 +9659,34 @@ static long tg_load_file(const char *path) {
     return got == size ? size : -1;
 }
 
-/* Compute the next-generation path for `self`.  If self ends in
- * ".NNN" (three digits), strip and replace with the new count;
- * otherwise append ".NNN".  new_count must be 1-999. */
-static int tg_next_path(const char *self, int new_count,
-                        char *out, int cap) {
+/* Parse the trailing ".NNN" generation number from a path; returns
+ * 0 if no suffix.  ".001" → 1, no suffix → 0. */
+static int tg_path_gen(const char *self) {
     int sl = slen(self);
-    int strip = 0;
     if (sl >= 4 && self[sl - 4] == '.' &&
         self[sl - 3] >= '0' && self[sl - 3] <= '9' &&
         self[sl - 2] >= '0' && self[sl - 2] <= '9' &&
         self[sl - 1] >= '0' && self[sl - 1] <= '9') {
-        strip = 4;
+        return (self[sl - 3] - '0') * 100 +
+               (self[sl - 2] - '0') *  10 +
+               (self[sl - 1] - '0');
     }
+    return 0;
+}
+
+/* Compute the next-generation path for `self` (gen+1, monotonic).
+ * `self` may or may not already end in ".NNN".  The suffix tracks
+ * how many modifications (gen, add, rm) have been applied — NOT
+ * the current tail count, which can go down via `grow rm`. */
+static int tg_next_path(const char *self, char *out, int cap) {
+    int sl = slen(self);
+    int cur = tg_path_gen(self);
+    int strip = cur > 0 ? 4 : 0;
     int base = sl - strip;
     if (base + 5 > cap) return -1;
     mcpy(out, self, base);
     out[base] = '.';
-    int n = new_count;
-    if (n < 0) n = 0;
+    int n = cur + 1;
     if (n > 999) n = 999;
     out[base + 1] = (char)('0' + (n / 100) % 10);
     out[base + 2] = (char)('0' + (n /  10) % 10);
@@ -9742,8 +9751,7 @@ static int tg_append_to_copy(const char *name,
     if (self_size < 0) return -1;
     if (self_size + plen + TG_TRAILER_LEN > (long)sizeof tg_buf) return -1;
 
-    int new_count = tg_count_tails(tg_buf, self_size) + 1;
-    if (tg_next_path(self_path, new_count, out_path, out_path_cap) < 0)
+    if (tg_next_path(self_path, out_path, out_path_cap) < 0)
         return -1;
 
     int fd = (int)op(out_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
@@ -10404,14 +10412,105 @@ static int tg_subcmd_exec(int argc, char **argv) {
     return ec;
 }
 
+/* `grow rm <name>` — write a new-generation file with the named
+ * tail removed.  Finds the most-recent-from-EOF tail with that
+ * name (same resolution `grow exec` uses), splices it out of the
+ * binary, writes to <self>.<gen+1>.  The original file is left
+ * untouched so generations remain a history. */
+static int tg_subcmd_rm(int argc, char **argv) {
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: grow rm <name>\n", 22);
+        return 1;
+    }
+    const char *want = argv[1];
+    int want_len = slen(want);
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) {
+        wr(2, "grow rm: cannot load self\n", 26);
+        return 1;
+    }
+
+    long end = size;
+    long tail_start = -1, tail_end = -1;
+    while (end >= TG_TRAILER_LEN) {
+        const char *tr = tg_buf + end - TG_TRAILER_LEN;
+        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
+        unsigned long plen = tg_unpack_u64_le(tr + TG_NAME_LEN);
+        long step = (long)TG_TRAILER_LEN + (long)plen;
+        if (plen > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) break;
+        int nl = 0;
+        while (nl < TG_NAME_LEN && tr[nl]) nl++;
+        if (nl == want_len) {
+            int m = 1;
+            for (int i = 0; i < nl; i++)
+                if (tr[i] != want[i]) { m = 0; break; }
+            if (m) {
+                tail_end   = end;
+                tail_start = end - step;
+                break;
+            }
+        }
+        end -= step;
+    }
+    if (tail_start < 0) {
+        wr(2, "grow rm: tail '", 15);
+        wr(2, want, want_len);
+        wr(2, "' not found\n", 12);
+        return 1;
+    }
+
+    char new_path[512];
+    if (tg_next_path(self_path, new_path, sizeof new_path) < 0) {
+        wr(2, "grow rm: cannot compute next path\n", 34);
+        return 1;
+    }
+
+    int fd = (int)op(new_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (fd < 0) {
+        wr(2, "grow rm: cannot write new-gen file\n", 35);
+        return 1;
+    }
+    /* Write bytes 0..tail_start (everything before the removed tail) */
+    long w = 0;
+    while (w < tail_start) {
+        long n = wr(fd, tg_buf + w, tail_start - w);
+        if (n <= 0) { cl(fd); return 1; }
+        w += n;
+    }
+    /* Write bytes tail_end..size (everything after the removed tail) */
+    long r = tail_end;
+    while (r < size) {
+        long n = wr(fd, tg_buf + r, size - r);
+        if (n <= 0) { cl(fd); return 1; }
+        r += n;
+    }
+    cl(fd);
+    sys3(SYS_chmod, (long)new_path, 0755, 0);
+
+    long removed_bytes = tail_end - tail_start;
+    wr(1, "removed '", 9);
+    wr(1, want, want_len);
+    wr(1, "' (", 3);
+    char r_s[24]; ja_utoa((unsigned int)removed_bytes, r_s);
+    wr(1, r_s, slen(r_s));
+    wr(1, " B) -> ", 7);
+    wr(1, new_path, slen(new_path));
+    wr(1, "\n", 1);
+    return 0;
+}
+
 static int tg_run_grow(int argc, char **argv) {
     g_headless = 1;     /* keep stdout clean for piping / scripts */
     if (argc < 2 || !argv[1]) {
-        wr(2, "usage: grow <list|add|gen|exec|self-test>\n", 42);
+        wr(2, "usage: grow <list|add|gen|exec|rm|self-test>\n", 45);
         return 1;
     }
     if (scmp(argv[1], "list")      == 0) return tg_subcmd_list();
     if (scmp(argv[1], "self-test") == 0) return tg_subcmd_self_test();
+    if (scmp(argv[1], "rm")        == 0) return tg_subcmd_rm  (argc - 1, argv + 1);
     if (scmp(argv[1], "add")       == 0) return tg_subcmd_add (argc - 1, argv + 1);
     if (scmp(argv[1], "gen")       == 0) return tg_subcmd_gen (argc - 1, argv + 1);
     if (scmp(argv[1], "exec")      == 0) return tg_subcmd_exec(argc - 1, argv + 1);
