@@ -9584,6 +9584,8 @@ static int ja_run_decompose(int argc, char **argv) {
 #define TG_MAGIC_LEN     8
 #define TG_TRAILER_LEN  48          /* name(32) + len(8) + magic(8) */
 #define TG_BUF_CAP      (128 * 1024) /* upper bound on self bytes + tails */
+#define TG_PAYLOAD_CAP  (64 * 1024)  /* max single capability size */
+#define TG_CHILD_OUT_CAP (24 * 1024) /* LLM stdout buffer for `grow gen` */
 
 static const char tg_magic[TG_MAGIC_LEN] = "TAGW0001";
 
@@ -9591,6 +9593,11 @@ static const char tg_magic[TG_MAGIC_LEN] = "TAGW0001";
  * subcommand uses it at a time so reuse is safe.  Lives in BSS — no
  * on-disk cost for the binary, only memsz. */
 static char tg_buf[TG_BUF_CAP];
+
+/* Separate payload buffer so a caller can hold a payload across a
+ * tg_append_to_copy() call (which clobbers tg_buf with self bytes).
+ * Phase-2 `grow add` and `grow gen` both need this. */
+static char tg_payload_buf[TG_PAYLOAD_CAP];
 
 static int tg_match_magic(const char *p) {
     for (int i = 0; i < TG_MAGIC_LEN; i++)
@@ -9821,14 +9828,317 @@ static int tg_subcmd_self_test(void) {
     return 0;
 }
 
+/* `grow add <name> <file>` — append an arbitrary existing file
+ * (typically a small compiled binary) as a new capability tail.
+ * Useful for promoting capabilities built outside the agent (e.g.
+ * by `cc -o` outside the recursive pipeline). */
+static int tg_subcmd_add(int argc, char **argv) {
+    if (argc < 3 || !argv[1] || !argv[2]) {
+        wr(2, "usage: grow add <name> <file>\n", 30);
+        return 1;
+    }
+    const char *name = argv[1];
+    const char *path = argv[2];
+
+    /* Read file into tg_payload_buf (NOT tg_buf — append_to_copy
+     * will need tg_buf for self bytes). */
+    int fd = (int)op(path, O_RDONLY, 0);
+    if (fd < 0) {
+        wr(2, "grow add: cannot open '", 23);
+        wr(2, path, slen(path));
+        wr(2, "'\n", 2);
+        return 1;
+    }
+    long size = sys3(SYS_lseek, fd, 0, 2);
+    sys3(SYS_lseek, fd, 0, 0);
+    if (size <= 0 || size > (long)sizeof tg_payload_buf) {
+        cl(fd);
+        wr(2, "grow add: file empty or larger than TG_PAYLOAD_CAP\n", 51);
+        return 1;
+    }
+    long got = 0;
+    while (got < size) {
+        long n = rd(fd, tg_payload_buf + got, size - got);
+        if (n <= 0) break;
+        got += n;
+    }
+    cl(fd);
+    if (got != size) {
+        wr(2, "grow add: short read\n", 21);
+        return 1;
+    }
+
+    char new_path[512];
+    if (tg_append_to_copy(name, tg_payload_buf, size,
+                          new_path, sizeof new_path) < 0) {
+        wr(2, "grow add: append-to-copy failed\n", 32);
+        return 1;
+    }
+    wr(1, "appended '", 10);
+    wr(1, name, slen(name));
+    wr(1, "' (", 3);
+    char l_s[24]; ja_utoa((unsigned int)size, l_s);
+    wr(1, l_s, slen(l_s));
+    wr(1, " B) -> ", 7);
+    wr(1, new_path, slen(new_path));
+    wr(1, "\n", 1);
+    return 0;
+}
+
+/* `grow gen <name> <task>` — drive the full pipeline end-to-end:
+ * wrap the task with "write a complete standalone C program",
+ * invoke a depth-0 decompose child for verified C code, fully
+ * compile it with `cc -O2 -o`, read the resulting ELF, append as a
+ * capability tail to the next-generation file.  The magic moment:
+ * an agent grows itself by building a real binary from natural
+ * language and embedding it into its own corpus. */
+static int tg_subcmd_gen(int argc, char **argv) {
+    if (argc < 3 || !argv[1] || !argv[2]) {
+        wr(2, "usage: grow gen <name> <task>\n", 30);
+        return 1;
+    }
+    const char *name = argv[1];
+    const char *task = argv[2];
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) {
+        wr(2, "tg: readlink failed\n", 20);
+        return 1;
+    }
+
+    /* Wrap the user's task with explicit "complete program" guidance.
+     * The decompose leaf prompt will then steer the LLM toward a
+     * runnable single-file C program. */
+    static char enhanced[2048];
+    int ep = 0;
+    ep = sapp(enhanced, ep,
+              "Write a COMPLETE, standalone C program with main() "
+              "that solves the following task.  Include all required "
+              "headers.  Use only the standard C library.  Wrap the "
+              "code in a ```c ... ``` fence.  Task: ");
+    ep = sapp(enhanced, ep, task);
+    enhanced[ep] = 0;
+
+    wr(2, "grow gen: invoking LLM for '", 28);
+    wr(2, name, slen(name));
+    wr(2, "'...\n", 5);
+
+    /* Spawn ourselves with `decompose --jail-depth=0 <enhanced>` so
+     * we reuse the existing verifier-retry leaf path.  Child stdout
+     * lands in tg_child_out (which is sized for VERIFIED-C-OK plus
+     * a typical leaf code block). */
+    char depth_arg[] = "--jail-depth=0";
+    char *xargv[] = {
+        self_path, (char *)"decompose", depth_arg,
+        (char *)enhanced, 0
+    };
+    static char child_out[TG_CHILD_OUT_CAP];
+    long got = 0;
+    int rc = ja_spawn_self_collect(xargv, child_out,
+                                   (long)sizeof child_out, &got);
+    if (rc < 0 || got <= 0) {
+        wr(2, "grow gen: LLM invocation failed\n", 32);
+        return 1;
+    }
+
+    /* Extract the ```c code block from the child's stdout. */
+    static char code[JA_CODE_CAP];
+    int is_c = 0;
+    int code_len = ja_extract_code(child_out, (int)got,
+                                   code, sizeof code, &is_c);
+    if (code_len <= 0 || !is_c) {
+        wr(2, "grow gen: no C code in LLM response\n", 36);
+        return 1;
+    }
+
+    /* Compile -O2 -o real ELF.  /tmp/tg_gen_<pid>.c → /tmp/tg_gen_<pid>. */
+    char pid_s[16];
+    ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
+    char src_path[64];
+    int sp = sapp(src_path, 0, "/tmp/tg_gen_");
+    sp = sapp(src_path, sp, pid_s);
+    sp = sapp(src_path, sp, ".c");
+    src_path[sp] = 0;
+    char bin_path[64];
+    int bp = sapp(bin_path, 0, "/tmp/tg_gen_");
+    bp = sapp(bin_path, bp, pid_s);
+    bin_path[bp] = 0;
+
+    int sfd = (int)op(src_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (sfd < 0) {
+        wr(2, "grow gen: cannot write source\n", 30);
+        return 1;
+    }
+    wr(sfd, code, code_len);
+    cl(sfd);
+
+    long cpid = forkk();
+    if (cpid < 0) { sys3(SYS_unlink, (long)src_path, 0, 0); return 1; }
+    if (cpid == 0) {
+        int nfd = (int)op("/dev/null", O_WRONLY, 0);
+        if (nfd >= 0) { dup2_(nfd, 1); dup2_(nfd, 2); cl(nfd); }
+        char *cargv[] = {
+            (char *)"cc", (char *)"-O2", (char *)"-o", bin_path,
+            src_path, 0
+        };
+        execvee("/usr/bin/cc", cargv, g_envp);
+        execvee("/bin/cc",     cargv, g_envp);
+        qu(127);
+    }
+    int st = 0;
+    wait4_(&st);
+    sys3(SYS_unlink, (long)src_path, 0, 0);
+    if ((st & 0x7f) || ((st >> 8) & 0xff) != 0) {
+        wr(2, "grow gen: cc -O2 -o failed (cannot link, missing libc?)\n", 56);
+        sys3(SYS_unlink, (long)bin_path, 0, 0);
+        return 1;
+    }
+
+    /* Read compiled binary into tg_buf, then immediately copy out
+     * into tg_payload_buf because tg_append_to_copy will clobber
+     * tg_buf with our own self bytes. */
+    long bin_size = tg_load_file(bin_path);
+    sys3(SYS_unlink, (long)bin_path, 0, 0);
+    if (bin_size < 0) {
+        wr(2, "grow gen: cannot read compiled binary\n", 38);
+        return 1;
+    }
+    if (bin_size > (long)sizeof tg_payload_buf) {
+        wr(2, "grow gen: compiled binary > TG_PAYLOAD_CAP\n", 43);
+        return 1;
+    }
+    mcpy(tg_payload_buf, tg_buf, bin_size);
+
+    char new_path[512];
+    if (tg_append_to_copy(name, tg_payload_buf, bin_size,
+                          new_path, sizeof new_path) < 0) {
+        wr(2, "grow gen: append-to-copy failed\n", 32);
+        return 1;
+    }
+    wr(1, "promoted '", 10);
+    wr(1, name, slen(name));
+    wr(1, "' (", 3);
+    char l_s[24]; ja_utoa((unsigned int)bin_size, l_s);
+    wr(1, l_s, slen(l_s));
+    wr(1, " B compiled ELF) -> ", 20);
+    wr(1, new_path, slen(new_path));
+    wr(1, "\n", 1);
+    return 0;
+}
+
+/* `grow exec <name> [args...]` — find tail by name, extract bytes
+ * to /tmp/tg_cap_<pid>_<name>, chmod +x, fork+execve with the
+ * remaining argv.  Parent waits, unlinks the temp, returns the
+ * child's exit code.  This is the invocation half of the system:
+ * once a capability is in your tail chain you can run it whenever
+ * you like, and it travels with the binary. */
+static int tg_subcmd_exec(int argc, char **argv) {
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: grow exec <name> [args...]\n", 34);
+        return 1;
+    }
+    const char *want = argv[1];
+    int want_len = slen(want);
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) {
+        wr(2, "grow exec: cannot load self\n", 28);
+        return 1;
+    }
+
+    /* Walk the chain looking for the most recent tail with this name. */
+    long end = size;
+    const char *payload = 0;
+    unsigned long plen = 0;
+    while (end >= TG_TRAILER_LEN) {
+        const char *tr = tg_buf + end - TG_TRAILER_LEN;
+        if (!tg_match_magic(tr + TG_NAME_LEN + 8)) break;
+        unsigned long len = tg_unpack_u64_le(tr + TG_NAME_LEN);
+        long step = (long)TG_TRAILER_LEN + (long)len;
+        if (len > (unsigned long)(end - TG_TRAILER_LEN) || step <= 0) break;
+
+        int nl = 0;
+        while (nl < TG_NAME_LEN && tr[nl]) nl++;
+        if (nl == want_len) {
+            int m = 1;
+            for (int i = 0; i < nl; i++)
+                if (tr[i] != want[i]) { m = 0; break; }
+            if (m) {
+                payload = tg_buf + end - TG_TRAILER_LEN - len;
+                plen = len;
+                break;
+            }
+        }
+        end -= step;
+    }
+    if (!payload) {
+        wr(2, "grow exec: tail '", 17);
+        wr(2, want, want_len);
+        wr(2, "' not found\n", 12);
+        return 1;
+    }
+
+    /* Extract to /tmp/tg_cap_<pid>_<name>.  Truncate name to 32 chars
+     * to keep path bounded. */
+    char ext_path[128];
+    int xp = sapp(ext_path, 0, "/tmp/tg_cap_");
+    char pid_s[16];
+    ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
+    xp = sapp(ext_path, xp, pid_s);
+    ext_path[xp++] = '_';
+    int nm_len = want_len > 32 ? 32 : want_len;
+    mcpy(ext_path + xp, want, nm_len); xp += nm_len;
+    ext_path[xp] = 0;
+
+    int xfd = (int)op(ext_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (xfd < 0) {
+        wr(2, "grow exec: cannot create extract file\n", 38);
+        return 1;
+    }
+    long w = 0;
+    while (w < (long)plen) {
+        long n = wr(xfd, payload + w, (long)plen - w);
+        if (n <= 0) { cl(xfd); return 1; }
+        w += n;
+    }
+    cl(xfd);
+    sys3(SYS_chmod, (long)ext_path, 0755, 0);
+
+    /* fork+execve: child takes ext_path + argv[2..argc-1]. */
+    long cpid = forkk();
+    if (cpid < 0) {
+        sys3(SYS_unlink, (long)ext_path, 0, 0);
+        return 1;
+    }
+    if (cpid == 0) {
+        char *cargv[32];
+        int ci = 0;
+        cargv[ci++] = ext_path;
+        for (int i = 2; i < argc && ci < 31; i++) cargv[ci++] = argv[i];
+        cargv[ci] = 0;
+        execvee(ext_path, cargv, g_envp);
+        qu(127);
+    }
+    int st = 0;
+    wait4_(&st);
+    sys3(SYS_unlink, (long)ext_path, 0, 0);
+    if (st & 0x7f) return 1;
+    return (st >> 8) & 0xff;
+}
+
 static int tg_run_grow(int argc, char **argv) {
     g_headless = 1;     /* keep stdout clean for piping / scripts */
     if (argc < 2 || !argv[1]) {
-        wr(2, "usage: grow <list|self-test>\n", 29);
+        wr(2, "usage: grow <list|add|gen|exec|self-test>\n", 42);
         return 1;
     }
     if (scmp(argv[1], "list")      == 0) return tg_subcmd_list();
     if (scmp(argv[1], "self-test") == 0) return tg_subcmd_self_test();
+    if (scmp(argv[1], "add")       == 0) return tg_subcmd_add (argc - 1, argv + 1);
+    if (scmp(argv[1], "gen")       == 0) return tg_subcmd_gen (argc - 1, argv + 1);
+    if (scmp(argv[1], "exec")      == 0) return tg_subcmd_exec(argc - 1, argv + 1);
     wr(2, "grow: unknown verb '", 20);
     wr(2, argv[1], slen(argv[1]));
     wr(2, "'\n", 2);
