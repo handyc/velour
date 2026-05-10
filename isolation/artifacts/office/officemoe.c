@@ -349,6 +349,204 @@ static int float_fmt(float f, char *out) {
 }
 
 
+/* ── hex CA-based routing (experimental, --ca-route) ────────
+ * 8x8 toroidal hex grid (pointy-top, odd rows shifted), K=4 colors.
+ * State persists across invocations via /tmp/officemoe_ca_state.bin.
+ * Per query:
+ *   1. Load grid + step count.  Initialise on first run.
+ *   2. Step CA once with a hardcoded weighted-vote rule.
+ *   3. Count cells of each color.  Dominant color picks the
+ *      specialist GROUP; step parity picks within the group when
+ *      a group has 2 specialists.
+ *   4. Save state.
+ *
+ * Specialist groups (1+2+2+1 = 6):
+ *   color 0 → greet
+ *   color 1 → farewell (even step) | mood (odd step)
+ *   color 2 → apps     (even step) | fleet (odd step)
+ *   color 3 → theory
+ *
+ * Routing is *prompt-independent* by design — the CA holds session
+ * state, so two queries asked at different times in the same session
+ * route differently even if the prompt is identical.  This is the
+ * stateful-conversation framing the user picked over per-prompt
+ * routing.
+ *
+ * V1 uses a hardcoded weighted-vote rule.  The GA-evolution work
+ * (search rule space for "good" routing on a held-out conversation)
+ * is queued and not in this commit.
+ */
+
+#define CA_W 8
+#define CA_H 8
+#define CA_N (CA_W * CA_H)
+#define CA_STATE_FILE "/tmp/officemoe_ca_state.bin"
+
+#ifndef SYS_open
+#define SYS_open  2
+#endif
+#ifndef O_RDONLY
+#define O_RDONLY 0
+#endif
+#ifndef O_WRONLY
+#define O_WRONLY 1
+#endif
+#ifndef O_CREAT
+#define O_CREAT  64
+#endif
+#ifndef O_TRUNC
+#define O_TRUNC  512
+#endif
+
+#define op(p, fl, m)  sys3(SYS_open,  (long)(p), (long)(fl), (long)(m))
+#define cl(f)         sys1(SYS_close, (long)(f))
+
+static unsigned char ca_grid[CA_N];
+static unsigned int ca_step_count;
+static int ca_neighbors_xy[CA_N][6][2];
+static int ca_neighbors_inited;
+
+/* Hardcoded asymmetric rule.  For each (self, n0, n1, n2, n3) where
+ * ni = neighbor count of color i (sum=6), the next color is a hash
+ * of those plus self.  Picked deliberately asymmetric so cells don't
+ * synchronize into a period-4 limit cycle.  GA-evolved successors
+ * will replace this with a real Class-4 rule. */
+static unsigned char ca_rule_apply(int self_c, int n0, int n1,
+                                   int n2, int n3) {
+    /* V1: pure deterministic hash of (self, n0..n3).  Won't freeze,
+     * not Class-4 either — just varied so all 4 colors keep showing
+     * up in the count distribution.  GA-evolved replacements queued. */
+    unsigned int h = (unsigned int)self_c * 0x9E3779B9u
+                   + (unsigned int)n0     * 0x85EBCA6Bu
+                   + (unsigned int)n1     * 0xC2B2AE35u
+                   + (unsigned int)n2     * 0x27D4EB2Fu
+                   + (unsigned int)n3     * 0x165667B1u;
+    h ^= h >> 16;
+    h *= 0x85EBCA6Bu;
+    h ^= h >> 13;
+    return (unsigned char)(h & 3);
+}
+
+static void ca_init_neighbors(void) {
+    if (ca_neighbors_inited) return;
+    for (int y = 0; y < CA_H; y++) {
+        for (int x = 0; x < CA_W; x++) {
+            int idx = y * CA_W + x;
+            int odd = y & 1;
+            ca_neighbors_xy[idx][0][0] = (x - 1 + CA_W) % CA_W;
+            ca_neighbors_xy[idx][0][1] = y;
+            ca_neighbors_xy[idx][1][0] = (x + 1) % CA_W;
+            ca_neighbors_xy[idx][1][1] = y;
+            int nw_x = odd ? x : (x - 1 + CA_W) % CA_W;
+            int ne_x = odd ? (x + 1) % CA_W : x;
+            ca_neighbors_xy[idx][2][0] = nw_x;
+            ca_neighbors_xy[idx][2][1] = (y - 1 + CA_H) % CA_H;
+            ca_neighbors_xy[idx][3][0] = ne_x;
+            ca_neighbors_xy[idx][3][1] = (y - 1 + CA_H) % CA_H;
+            ca_neighbors_xy[idx][4][0] = nw_x;
+            ca_neighbors_xy[idx][4][1] = (y + 1) % CA_H;
+            ca_neighbors_xy[idx][5][0] = ne_x;
+            ca_neighbors_xy[idx][5][1] = (y + 1) % CA_H;
+        }
+    }
+    ca_neighbors_inited = 1;
+}
+
+static void ca_init_default(void) {
+    /* Pseudo-random seed (hash per cell index) so initial pattern
+     * doesn't have block-synchronisation symmetries that make the
+     * rule degenerate to a uniform period-4 cycle. */
+    for (int i = 0; i < CA_N; i++) {
+        unsigned int h = (unsigned int)i * 0x9E3779B9u;
+        h ^= h >> 13;
+        ca_grid[i] = (unsigned char)((h >> 28) & 3);
+    }
+    ca_step_count = 0;
+}
+
+static int ca_load(void) {
+    int fd = (int)op(CA_STATE_FILE, O_RDONLY, 0);
+    if (fd < 0) {
+        ca_init_default();
+        return 0;
+    }
+    long n = rd(fd, ca_grid, CA_N);
+    if (n != CA_N) { cl(fd); ca_init_default(); return 0; }
+    rd(fd, &ca_step_count, 4);
+    cl(fd);
+    return 0;
+}
+
+static void ca_save(void) {
+    int fd = (int)op(CA_STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    wr(fd, ca_grid, CA_N);
+    wr(fd, &ca_step_count, 4);
+    cl(fd);
+}
+
+static void ca_step(void) {
+    static unsigned char shadow[CA_N];
+    for (int y = 0; y < CA_H; y++) {
+        for (int x = 0; x < CA_W; x++) {
+            int idx = y * CA_W + x;
+            int self_c = ca_grid[idx];
+            int counts[4] = { 0, 0, 0, 0 };
+            for (int k = 0; k < 6; k++) {
+                int nx = ca_neighbors_xy[idx][k][0];
+                int ny = ca_neighbors_xy[idx][k][1];
+                int nc = ca_grid[ny * CA_W + nx];
+                counts[nc]++;
+            }
+            shadow[idx] = ca_rule_apply(self_c, counts[0], counts[1],
+                                        counts[2], counts[3]);
+        }
+    }
+    for (int i = 0; i < CA_N; i++) ca_grid[i] = shadow[i];
+    ca_step_count++;
+}
+
+static const char *route_via_ca(int verbose) {
+    ca_init_neighbors();
+    ca_load();
+    ca_step();
+    int counts[4] = { 0, 0, 0, 0 };
+    for (int i = 0; i < CA_N; i++) counts[ca_grid[i]]++;
+    int dom = 0; int dom_v = counts[0];
+    for (int t = 1; t < 4; t++)
+        if (counts[t] > dom_v) { dom_v = counts[t]; dom = t; }
+    int parity = ca_step_count & 1;
+    const char *kind;
+    switch (dom) {
+        case 0:  kind = "greet"; break;
+        case 1:  kind = parity ? "mood"  : "farewell"; break;
+        case 2:  kind = parity ? "fleet" : "apps";     break;
+        case 3:  kind = "theory"; break;
+        default: kind = "greet";
+    }
+    if (verbose) {
+        wr(2, "[ca step=", 9);
+        char nb[16]; int nl = 0;
+        unsigned int v = ca_step_count;
+        if (v == 0) nb[nl++] = '0';
+        else { while (v) { nb[nl++] = '0' + (v % 10); v /= 10; } }
+        for (int i = nl; i > 0; i--) wr(2, &nb[i - 1], 1);
+        wr(2, " counts=", 8);
+        for (int i = 0; i < 4; i++) {
+            char d[4]; int dn = 0;
+            int c = counts[i];
+            if (c == 0) d[dn++] = '0';
+            else { while (c) { d[dn++] = '0' + (c % 10); c /= 10; } }
+            for (int j = dn; j > 0; j--) wr(2, &d[j - 1], 1);
+            if (i < 3) wr(2, ",", 1);
+        }
+        wr(2, "] ", 2);
+    }
+    ca_save();
+    return kind;
+}
+
+
 /* ── main ──────────────────────────────────────────────── */
 static char prompt_buf[4096];
 
@@ -357,6 +555,7 @@ int main_c(int argc, char **argv) {
     int verbose = 0;
     int use_keyword = 0;
     int use_bofN = 0;
+    int use_ca = 0;
     int score_only = 0;
     int is_prompt_arg[64];
     for (int i = 0; i < 64; i++) is_prompt_arg[i] = 0;
@@ -373,6 +572,9 @@ int main_c(int argc, char **argv) {
         if (scmp(a, "--bofN") == 0 || scmp(a, "--bestofn") == 0) {
             use_bofN = 1; continue;
         }
+        if (scmp(a, "--ca-route") == 0 || scmp(a, "--ca") == 0) {
+            use_ca = 1; continue;
+        }
         if (scmp(a, "--score-only") == 0) {
             score_only = 1; continue;
         }
@@ -385,8 +587,9 @@ int main_c(int argc, char **argv) {
                 "  (default)      router-soul: 1 forward pass picks specialist\n"
                 "  --bofN         best-of-N: each specialist scores prompt, max wins\n"
                 "  --keyword      legacy keyword router\n"
+                "  --ca-route     hex CA holds session state, dominant color picks group\n"
                 "  --score-only   print specialist=<f> table (forces --bofN)\n"
-                "Specialists: chat | apps | theory | mood\n";
+                "Specialists: greet | farewell | apps | fleet | theory | mood\n";
             wr(1, H, sizeof H - 1);
             return 0;
         }
@@ -426,7 +629,9 @@ int main_c(int argc, char **argv) {
     int got_score[N_KINDS];
     for (int i = 0; i < N_KINDS; i++) { scores[i] = 0; got_score[i] = 0; }
     int actually_bofN = use_bofN || score_only;
-    if (use_keyword) {
+    if (use_ca) {
+        kind = route_via_ca(verbose);
+    } else if (use_keyword) {
         kind = classify_keyword(prompt_buf, plen);
     } else if (actually_bofN) {
         float best = -1e30f;
@@ -502,6 +707,7 @@ int main_c(int argc, char **argv) {
         if (scmp(a, "--verbose") == 0 || scmp(a, "-v") == 0) continue;
         if (scmp(a, "--keyword") == 0) continue;
         if (scmp(a, "--bofN") == 0 || scmp(a, "--bestofn") == 0) continue;
+        if (scmp(a, "--ca-route") == 0 || scmp(a, "--ca") == 0) continue;
         if (scmp(a, "--score-only") == 0) continue;
         if (scmp(a, "--") == 0) continue;
         new_argv[na++] = argv[i];
