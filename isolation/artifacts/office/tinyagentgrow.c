@@ -1022,6 +1022,8 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define SYS_unlink 87
 #define SYS_clone  56
 #define SYS_prctl 157
+#define SYS_kill   62
+#define WNOHANG     1
 #define SYS_chmod  90
 #define SYS_uname  63
 #define SYS_readlink 89
@@ -10137,6 +10139,30 @@ static int tg_install_seccomp(void) {
     return 0;
 }
 
+/* Wait for pid with a wall-clock timeout.  timeout_sec=0 disables.
+ * Polls every 100 ms with wait4(WNOHANG); on deadline sends SIGKILL
+ * and final blocking wait4.  Sets *timed_out to 1 if the kill path
+ * was taken, 0 otherwise.  Returns child pid on success, -1 on
+ * wait4 error. */
+static long tg_wait_with_timeout(long pid, int *status,
+                                 int timeout_sec, int *timed_out) {
+    *timed_out = 0;
+    if (timeout_sec <= 0) {
+        return sys4(SYS_wait4, pid, (long)status, 0, 0);
+    }
+    long polls = (long)timeout_sec * 10;
+    for (long i = 0; i < polls; i++) {
+        long rc = sys4(SYS_wait4, pid, (long)status, WNOHANG, 0);
+        if (rc == pid) return rc;
+        if (rc < 0)    return rc;
+        struct { long s; long ns; } ts = { 0, 100000000L };  /* 100 ms */
+        sys3(SYS_nanosleep, (long)&ts, 0, 0);
+    }
+    *timed_out = 1;
+    sys3(SYS_kill, pid, 9, 0);   /* SIGKILL */
+    return sys4(SYS_wait4, pid, (long)status, 0, 0);
+}
+
 
 /* `grow exec [--no-sandbox] <name> [args...]` — find tail by name,
  * extract bytes to /tmp/tg_cap_<pid>_<name>, chmod +x, run it.
@@ -10150,9 +10176,10 @@ static int tg_install_seccomp(void) {
  * If the child was killed by SIGSYS the parent prints a hint that
  * the seccomp filter caught a blocked syscall. */
 static int tg_subcmd_exec(int argc, char **argv) {
-    /* Optional --no-sandbox / --sandbox flags as the first arg.
-     * Default is sandbox=on for safety. */
+    /* Flags: --no-sandbox / --sandbox / --timeout=N.  Defaults:
+     * sandbox=on, timeout=30s.  Flags must come before <name>. */
     int sandbox = 1;
+    int timeout_sec = 30;
     int arg_off = 1;
     while (arg_off < argc && argv[arg_off]) {
         if (scmp(argv[arg_off], "--no-sandbox") == 0) {
@@ -10161,11 +10188,15 @@ static int tg_subcmd_exec(int argc, char **argv) {
         if (scmp(argv[arg_off], "--sandbox") == 0) {
             sandbox = 1; arg_off++; continue;
         }
+        if (ja_strpfx(argv[arg_off], "--timeout=")) {
+            timeout_sec = ja_atoi(argv[arg_off] + 10);
+            arg_off++; continue;
+        }
         break;
     }
     if (arg_off >= argc || !argv[arg_off]) {
         wr(2, "usage: grow exec [--no-sandbox|--sandbox] "
-              "<name> [args...]\n", 59);
+              "[--timeout=N] <name> [args...]\n", 73);
         return 1;
     }
     const char *want = argv[arg_off];
@@ -10288,11 +10319,19 @@ static int tg_subcmd_exec(int argc, char **argv) {
         qu(127);
     }
     int st = 0;
-    wait4_(&st);
+    int timed_out = 0;
+    tg_wait_with_timeout(cpid, &st, timeout_sec, &timed_out);
     sys3(SYS_unlink, (long)ext_path, 0, 0);
 
     int sig = st & 0x7f;
     int ec  = (st >> 8) & 0xff;
+    if (timed_out) {
+        wr(2, "grow exec: capability exceeded ", 31);
+        char t_s[8]; ja_utoa((unsigned int)timeout_sec, t_s);
+        wr(2, t_s, slen(t_s));
+        wr(2, "s timeout — killed by parent\n", 30);
+        return 124;     /* GNU timeout(1) convention */
+    }
     if (sig) {
         if (sig == 31 /*SIGSYS*/ && sandbox_active) {
             wr(2, "grow exec: capability killed by seccomp "
