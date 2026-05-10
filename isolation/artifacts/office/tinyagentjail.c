@@ -8944,6 +8944,30 @@ static const char ja_dec_sys_force[] =
     "ANSWER:\n"
     "<your direct answer or code>";
 
+/* Phase-4 synthesis system prompt: merge N child code blocks into
+ * one coherent C file.  Used by parents whose children returned
+ * verified ```c blocks. */
+static const char ja_dec_sys_synth[] =
+    "You are a synthesis agent in a recursive software-construction\n"
+    "tree.  Below are N independent pieces of C code, each produced\n"
+    "by a child sub-agent for one subtask and each individually\n"
+    "verified to compile.  Merge them into ONE coherent C source\n"
+    "file that:\n"
+    "\n"
+    "  - includes every required header exactly once at the top,\n"
+    "  - preserves every function from the children with its\n"
+    "    original semantics (rename only on name conflict),\n"
+    "  - adds a main() that invokes the merged functions if the\n"
+    "    original task implies a runnable program,\n"
+    "  - compiles cleanly with cc -fsyntax-only.\n"
+    "\n"
+    "Output EXACTLY this format with NO preamble:\n"
+    "\n"
+    "ANSWER:\n"
+    "```c\n"
+    "<the single merged C file>\n"
+    "```";
+
 /* Find the first occurrence of needle in haystack[0..hlen).  Returns
  * index of first byte or -1.  Used to spot ANSWER:/SUBTASKS: markers. */
 static int ja_find(const char *hay, int hlen, const char *needle) {
@@ -8966,6 +8990,23 @@ static int ja_find(const char *hay, int hlen, const char *needle) {
 #define JA_CODE_CAP        8192
 #define JA_ERR_CAP         1536
 #define JA_RETRY_MSG_CAP  12288
+
+/* Phase 4 (synthesis aggregation): per-child code blocks are
+ * extracted from each spawn's stdout and accumulated into a single
+ * synth_input buffer with subtask headers, then handed to one
+ * synthesis LLM call.  Caps:
+ *   PER_CHILD     = max bytes of per-child code passed to synth
+ *   ACCUM         = total synth_input buffer (≤ 4 children × PER_CHILD)
+ *   USER_MSG      = full synth user message (system prompt + accum
+ *                   + original goal); fits inside ASK_BUF_CAP minus
+ *                   JSON overhead
+ *   MAX_CHILDREN  = synth only the first N children with valid C
+ *   RETRIES       = compile-retry rounds for the synthesised file */
+#define JA_SYNTH_PER_CHILD_CAP   3072
+#define JA_SYNTH_ACCUM_CAP      14336
+#define JA_SYNTH_USER_MSG_CAP   16384
+#define JA_SYNTH_MAX_CHILDREN       4
+#define JA_SYNTH_RETRIES            1
 
 /*
  * Extract the first ```c (or ```C / ```cpp) fenced block from text.
@@ -9062,6 +9103,100 @@ static int ja_compile_c(const char *src, int src_len,
     if (st & 0x7f) return -1;
     return (st >> 8) & 0xff;
 }
+
+/* Phase-4: parent synthesis.  Build a synth prompt from N child
+ * code blocks + the original goal, call the LLM, compile-verify the
+ * merged result with retry.  On success emit "SYNTHESIZED-C-OK\n"
+ * + the merged code block to stdout and return 0.  Returns -1 on
+ * any failure (caller falls back to Phase-2 per-child emit). */
+static int ja_synth_emit(const char *goal,
+                         const char *synth_accum, int synth_use) {
+    static char user_msg[JA_SYNTH_USER_MSG_CAP];
+    int p = 0;
+    p = sapp(user_msg, p, ja_dec_sys_synth);
+    p = sapp(user_msg, p, "\n\nOriginal task:\n");
+    p = sapp(user_msg, p, goal);
+    p = sapp(user_msg, p, "\n\nChild outputs to merge:\n\n");
+    int avail = (int)sizeof(user_msg) - p - 8;
+    int take = synth_use < avail ? synth_use : avail;
+    mcpy(user_msg + p, synth_accum, take); p += take;
+    user_msg[p] = 0;
+
+    ask_n_msgs = 0;
+    ask_buf_use = 0;
+    ask_msg_add(0, user_msg, p);
+
+    static char content[8192];
+    char fail_reason[256];
+    int cn = ask_send_retrying(content, sizeof content,
+                               fail_reason, sizeof fail_reason);
+    if (cn < 0) {
+        wr(2, "ja synth: LLM call failed: ", 27);
+        wr(2, fail_reason, slen(fail_reason));
+        wr(2, "\n", 1);
+        return -1;
+    }
+    int ans_at = ja_find(content, cn, "ANSWER:");
+    int body_start = ans_at >= 0 ? ans_at + 7 : 0;
+    while (body_start < cn &&
+           (content[body_start] == ' ' || content[body_start] == '\n' ||
+            content[body_start] == '\r' || content[body_start] == '\t'))
+        body_start++;
+
+    for (int attempt = 0; attempt <= JA_SYNTH_RETRIES; attempt++) {
+        int is_c = 0;
+        static char code_buf[JA_CODE_CAP];
+        int code_len = ja_extract_code(content + body_start,
+                                       cn - body_start,
+                                       code_buf, sizeof code_buf, &is_c);
+        if (code_len <= 0 || !is_c) return -1;
+
+        static char err_buf[JA_ERR_CAP];
+        int rc = ja_compile_c(code_buf, code_len,
+                              err_buf, sizeof err_buf);
+        if (rc == 0) {
+            wr(1, "SYNTHESIZED-C-OK\n", 17);
+            wr(1, content + body_start, cn - body_start);
+            if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+            return 0;
+        }
+        if (attempt >= JA_SYNTH_RETRIES) return -1;
+
+        static char retry_msg[JA_RETRY_MSG_CAP];
+        int rp = 0;
+        rp = sapp(retry_msg, rp,
+                  "Your synthesised C file did not compile.\n\n"
+                  "Compiler error (cc -fsyntax-only):\n");
+        int el = slen(err_buf);
+        if (el > 1200) el = 1200;
+        mcpy(retry_msg + rp, err_buf, el); rp += el;
+        rp = sapp(retry_msg, rp, "\n\nYour previous synthesis:\n```c\n");
+        int cl_ = code_len;
+        if (cl_ > 6000) cl_ = 6000;
+        mcpy(retry_msg + rp, code_buf, cl_); rp += cl_;
+        rp = sapp(retry_msg, rp,
+                  "\n```\n\nFix it and emit ANSWER: with the corrected "
+                  "single C file wrapped in ```c ... ```.\n\n"
+                  "Original task:\n");
+        rp = sapp(retry_msg, rp, goal);
+
+        ask_n_msgs = 0;
+        ask_buf_use = 0;
+        ask_msg_add(0, retry_msg, rp);
+        int new_cn = ask_send_retrying(content, sizeof content,
+                                       fail_reason, sizeof fail_reason);
+        if (new_cn < 0) return -1;
+        cn = new_cn;
+        ans_at = ja_find(content, cn, "ANSWER:");
+        body_start = ans_at >= 0 ? ans_at + 7 : 0;
+        while (body_start < cn &&
+               (content[body_start] == ' ' || content[body_start] == '\n' ||
+                content[body_start] == '\r' || content[body_start] == '\t'))
+            body_start++;
+    }
+    return -1;
+}
+
 
 /* Phase-2 entry point.  argv[0] is "decompose" (already peeled by
  * main_c), argv[1] is the task description.  ja_cfg.depth holds the
@@ -9272,6 +9407,21 @@ static int ja_run_decompose(int argc, char **argv) {
 
     static char subtask_buf[512];
     static char child_out[16384];
+    /* Phase-4: per-child storage so we can attempt synthesis after
+     * all children return.  Each slot keeps the child's full stdout
+     * + the subtask description we sent to it.  These are static so
+     * they sit in BSS (no on-disk cost). */
+    static char per_child_out[8][16384];
+    static int  per_child_len[8];
+    static char per_child_desc[8][384];
+    static int  per_child_desc_len[8];
+    /* Synth accumulator: ```c code blocks extracted from per-child
+     * stdout, framed with /* subtask N: <desc> *\/ comments so the
+     * synthesis LLM sees clean per-child input. */
+    static char synth_accum[JA_SYNTH_ACCUM_CAP];
+    int synth_use = 0;
+    int n_with_code = 0;
+
     int n_spawned = 0;
     int max_children = ja_cfg.fanout;
     if (max_children > 8) max_children = 8;
@@ -9307,17 +9457,51 @@ static int ja_run_decompose(int argc, char **argv) {
         int rc = ja_spawn_self_collect(xargv, child_out,
                                        (long)sizeof(child_out), &got);
 
-        wr(1, "--- subtask ", 12);
-        char i_s[8]; ja_utoa((unsigned int)n_spawned, i_s);
-        wr(1, i_s, slen(i_s));
-        wr(1, ": ", 2);
-        wr(1, subtask_buf, sp);
-        wr(1, "\n", 1);
-        if (rc < 0) {
-            wr(1, "(spawn failed)\n", 15);
+        /* Save this child's full stdout + description into our
+         * Phase-4 slots.  Truncate defensively to slot size. */
+        long copy = got;
+        if (copy > (long)sizeof(per_child_out[0]) - 1)
+            copy = (long)sizeof(per_child_out[0]) - 1;
+        if (rc >= 0 && copy > 0) {
+            mcpy(per_child_out[n_spawned], child_out, copy);
+            per_child_len[n_spawned] = (int)copy;
         } else {
-            wr(1, child_out, got);
-            if (got > 0 && child_out[got - 1] != '\n') wr(1, "\n", 1);
+            per_child_len[n_spawned] = 0;
+        }
+        int dlen = sp < (int)sizeof(per_child_desc[0]) - 1
+                   ? sp : (int)sizeof(per_child_desc[0]) - 1;
+        mcpy(per_child_desc[n_spawned], subtask_buf, dlen);
+        per_child_desc_len[n_spawned] = dlen;
+
+        /* If this child returned a ```c block and we still have room
+         * in the synth slot count + accumulator, extract + frame it
+         * for the synthesis prompt. */
+        if (rc >= 0 && got > 0 && n_with_code < JA_SYNTH_MAX_CHILDREN) {
+            static char ctmp[JA_CODE_CAP];
+            int is_c = 0;
+            int code_len = ja_extract_code(child_out, (int)got,
+                                           ctmp, sizeof ctmp, &is_c);
+            if (code_len > 0 && is_c) {
+                int cap = JA_SYNTH_PER_CHILD_CAP - 1;
+                if (code_len > cap) code_len = cap;
+                int need = code_len + dlen + 64;
+                if (synth_use + need < (int)sizeof(synth_accum)) {
+                    int p = synth_use;
+                    p = sapp(synth_accum, p, "/* subtask ");
+                    char i_s[8];
+                    ja_utoa((unsigned int)n_with_code, i_s);
+                    p = sapp(synth_accum, p, i_s);
+                    p = sapp(synth_accum, p, ": ");
+                    mcpy(synth_accum + p, subtask_buf, dlen);
+                    p += dlen;
+                    p = sapp(synth_accum, p, " */\n```c\n");
+                    mcpy(synth_accum + p, ctmp, code_len);
+                    p += code_len;
+                    p = sapp(synth_accum, p, "\n```\n\n");
+                    synth_use = p;
+                    n_with_code++;
+                }
+            }
         }
         n_spawned++;
     }
@@ -9328,6 +9512,31 @@ static int ja_run_decompose(int argc, char **argv) {
          * gets text instead of nothing. */
         wr(1, content + body_start, cn - body_start);
         if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+        return 0;
+    }
+
+    /* Phase-4: try synthesis if at least 2 children produced valid
+     * C code.  On success this single call emits the merged file;
+     * on failure we fall through to Phase-2 per-child emit. */
+    if (n_with_code >= 2 && ja_synth_emit(goal, synth_accum, synth_use) == 0) {
+        return 0;
+    }
+
+    /* Phase-2 fallback emit: per-child stdout with subtask headers. */
+    for (int i = 0; i < n_spawned; i++) {
+        wr(1, "--- subtask ", 12);
+        char i_s[8]; ja_utoa((unsigned int)i, i_s);
+        wr(1, i_s, slen(i_s));
+        wr(1, ": ", 2);
+        wr(1, per_child_desc[i], per_child_desc_len[i]);
+        wr(1, "\n", 1);
+        if (per_child_len[i] == 0) {
+            wr(1, "(spawn failed)\n", 15);
+        } else {
+            wr(1, per_child_out[i], per_child_len[i]);
+            if (per_child_out[i][per_child_len[i] - 1] != '\n')
+                wr(1, "\n", 1);
+        }
     }
     return 0;
 }

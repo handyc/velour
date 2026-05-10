@@ -124,6 +124,12 @@ tinyagent2
 # tinyagentjail — tinyagent + recursive sub-agent spawning (target <64 KB)
 tinyagentjail
 
+# metaoffice — Win95-style office TUI built from tinyagentjail's
+# Phase-3/4 output (binaries; sources are kept under git as demo
+# artifacts of what the recursive build pipeline produced)
+metaoffice
+metaoffice2
+
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
 officesoulflt
