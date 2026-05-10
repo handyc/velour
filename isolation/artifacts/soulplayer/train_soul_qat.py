@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 """train_soul_qat.py — quantization-aware-training fork of train_soul.py.
 
-Wraps every nn.Linear / nn.Embedding / RMSNorm gain with a fake-quantize
-pass on the forward path: weights are rounded to int8 (per-tensor shift,
-same scheme as quant_w8) and dequantized before use.  Backward uses the
-straight-through estimator (gradient flows through the round as if it
-were identity).  This nudges training toward weights that survive
-serialise_soul -> officesoulmin.c's int8 forward without large cos-sim
-degradation.
+**Outcome (2026-05-10):** weight-only QAT did NOT fix the int8
+mismatch.  Diag on theory soul:
+  - float-trained:  embed cos_sim 0.999 → layer0_attn 0.84 → final 0.37
+  - QAT-trained:    embed cos_sim 0.999 → layer0_attn -0.10 → final 0.08
 
-Activations are NOT fake-quantized in this first pass — that would
-require also matching the accumulator/post_shift scheme exactly.  See
-diag_int8.py findings: weight QAT fixes ~half the divergence, the
-remainder is activation-side noise from the int16 + post_shift=1
-pipeline.
+Why it failed: with adaptive per-tensor shift, fake-quantizing weights
+encourages the model to drift to a region where weights round cleanly,
+but the activation magnitudes drift along with them (embed norms
+dropped 7× from 6.9 to 0.93 in QAT).  officesoulmin.c uses a FIXED
+activation scale (ACT_SHIFT=8) and a fixed post_shift=1 attenuation
+per matvec; QAT doesn't know about either, so the trained activation
+scales no longer match what the int8 forward expects.  Float inference
+on the QAT model still works fine (same answers as the float-trained
+soul), but feeding the same weights through serialise_soul →
+officesoulmin produces gibberish, just like before.
 
-Usage:
+**What would actually fix it (not done):** simulate the full int8
+forward in PyTorch — quantize *activations* to int16 at scale 2^8,
+right-shift by post_shift=1 after each matmul, replicate the EXP_LUT
+softmax and isqrt rms_norm — and put the STE through *all* of those.
+That makes the network solve the actual constrained-arithmetic
+problem, not a weight-rounding stand-in.  ~1-2 days of work.
+
+For now, officesoulflt + officemoe (float inference, ~120 KB) remain
+the only path that produces working output from freshly-trained souls.
+
+Usage (kept for future experiments — runs but produces no useful
+int8 model):
   python3 train_soul_qat.py --corpus my_corpus.txt --out /tmp/qat.bin
 """
 import argparse, json, math, sys, time
