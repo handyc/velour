@@ -81,6 +81,7 @@ urlpatterns = [
     path('h4kslnk/',     include('h4kslnk.urls')),
     path('tilesmith/',   include('tilesmith.urls')),
     path('bidir/',       include('bidir.urls')),
+    path('umbra/',       include('umbra.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

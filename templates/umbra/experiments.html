@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Umbra · experiments{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>Experiments</h1>
+  <p class="lede">
+    Author and store FHE pipelines as Python.  Phase 1: text storage
+    + scheme tagging.  Phase 2: server-side execution + timing.
+  </p>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes</a>
+    <a href="{% url 'umbra:references' %}">references</a>
+    <a href="{% url 'umbra:experiments' %}" class="active">experiments ({{ experiment_count }})</a>
+  </nav>
+
+  <p style="margin-bottom: 1rem;">
+    <a href="{% url 'umbra:experiment_create' %}" class="btn">+ New experiment</a>
+  </p>
+
+  <div class="panel">
+    {% for e in expts %}
+    <div class="expt-row">
+      <a href="{% url 'umbra:experiment_detail' e.slug %}">
+        <strong>{{ e.name }}</strong>
+        {% if e.description %}<br>
+          <span style="color: #8b949e; font-size: 0.74rem;">{{ e.description|truncatewords:18 }}</span>
+        {% endif %}
+      </a>
+      <span class="meta">{{ e.scheme.name|default:"—" }}</span>
+      <span class="meta">{{ e.status }}</span>
+      <span class="meta">{{ e.updated_at|date:"M j H:i" }}</span>
+    </div>
+    {% empty %}
+    <p class="empty">No experiments yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

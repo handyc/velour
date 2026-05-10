@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}{{ expt.name }} — Umbra{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>{{ expt.name }}</h1>
+  {% if expt.description %}
+  <p class="lede">{{ expt.description }}</p>
+  {% endif %}
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes</a>
+    <a href="{% url 'umbra:references' %}">references</a>
+    <a href="{% url 'umbra:experiments' %}" class="active">experiments</a>
+  </nav>
+
+  <p style="margin-bottom: 1rem;">
+    <a href="{% url 'umbra:experiment_edit' expt.slug %}" class="btn">edit</a>
+    <span class="meta" style="color: #6e7681; font-family: monospace; font-size: 0.74rem; margin-left: 0.6rem;">
+      scheme: {{ expt.scheme.name|default:"—" }} ·
+      status: {{ expt.status }} ·
+      updated: {{ expt.updated_at|date:"M j Y H:i" }}
+    </span>
+  </p>
+
+  <div class="panel">
+    <h2>Code</h2>
+    <pre class="codeblock">{{ expt.code }}</pre>
+  </div>
+
+  {% if expt.last_output or expt.last_error %}
+  <div class="panel">
+    <h2>Last run</h2>
+    {% if expt.last_run_ms %}
+    <p class="hint">elapsed: {{ expt.last_run_ms }} ms</p>
+    {% endif %}
+    {% if expt.last_output %}
+    <h3 style="font-size: 0.82rem; color: #c9d1d9; margin: 0.6rem 0 0.3rem;">stdout</h3>
+    <pre class="codeblock">{{ expt.last_output }}</pre>
+    {% endif %}
+    {% if expt.last_error %}
+    <h3 style="font-size: 0.82rem; color: #ffa198; margin: 0.6rem 0 0.3rem;">stderr</h3>
+    <pre class="codeblock">{{ expt.last_error }}</pre>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="panel">
+    <p class="empty">No runs yet.  Phase 2 will add a <code>run</code> button
+      and a <code>manage.py umbra_run {{ expt.slug }}</code> command that
+      executes the code and captures output here.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

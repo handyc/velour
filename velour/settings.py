@@ -149,6 +149,7 @@ INSTALLED_APPS = [
     'h4kslnk',
     'tilesmith',
     'bidir',
+    'umbra',
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Umbra · references{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>References</h1>
+  <p class="lede">
+    Curated entry-points into the FHE landscape — papers, libraries,
+    awesome-lists, talks, tutorials.
+  </p>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes</a>
+    <a href="{% url 'umbra:references' %}" class="active">references ({{ reference_count }})</a>
+    <a href="{% url 'umbra:experiments' %}">experiments</a>
+  </nav>
+
+  {% for kind, refs in ref_groups %}
+  <div class="panel">
+    <h2>{{ kind|title }} <span style="font-weight: 400; color: #6e7681; font-size: 0.78rem;">({{ refs|length }})</span></h2>
+    {% for r in refs %}
+    <div class="ref-row kind-{{ r.kind }}">
+      <a href="{{ r.url }}" target="_blank" rel="noopener">
+        <strong>{{ r.title }}</strong>
+        {% if r.authors %}<span style="color: #6e7681;"> · {{ r.authors }}</span>{% endif %}
+        {% if r.summary %}<br>
+          <span style="color: #8b949e; font-size: 0.74rem;">{{ r.summary|truncatewords:24 }}</span>
+        {% endif %}
+      </a>
+      <span class="meta">{{ r.year|default:"—" }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% empty %}
+  <div class="panel"><p class="empty">No references catalogued yet.</p></div>
+  {% endfor %}
+</div>
+{% endblock %}

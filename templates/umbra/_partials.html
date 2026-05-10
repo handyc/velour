@@ -1,0 +1,92 @@
+{# Shared style for every Umbra page.  Follows the dashboard's
+   GitHub-dark palette, with a slightly cooler accent (slate-blue)
+   so it doesn't get visually confused with Naiad/Forge. #}
+<style>
+  .um-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+             color: #c9d1d9; }
+  .um-wrap h1 { margin: 0 0 0.25rem; font-size: 1.4rem; color: #e6edf3; }
+  .um-wrap .lede { color: #8b949e; max-width: 78ch; line-height: 1.55;
+                   margin: 0 0 1.25rem; font-size: 0.88rem; }
+  .um-wrap .lede em { color: #c9d1d9; font-style: normal; }
+
+  .um-nav { display: flex; gap: 1rem; margin-bottom: 1rem;
+            padding-bottom: 0.5rem; border-bottom: 1px solid #21262d; }
+  .um-nav a { color: #8b949e; text-decoration: none; font-size: 0.82rem; }
+  .um-nav a:hover { color: #79c0ff; }
+  .um-nav a.active { color: #e6edf3; border-bottom: 2px solid #79c0ff;
+                     padding-bottom: 0.3rem; }
+
+  .um-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .um-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+  @media (max-width: 800px) {
+    .um-grid, .um-grid-3 { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 0.85rem 1rem; margin-bottom: 1rem;
+  }
+  .panel h2 { font-size: 0.92rem; margin: 0 0 0.5rem; color: #e6edf3; }
+  .panel .hint { color: #6e7681; font-size: 0.7rem; margin: 0.4rem 0 0; }
+
+  .scheme-row, .ref-row, .expt-row {
+    background: #161b22; border-left: 2px solid #79c0ff;
+    border-radius: 0 3px 3px 0; padding: 0.42rem 0.6rem;
+    font-size: 0.78rem; margin-bottom: 2px;
+    display: flex; gap: 0.6rem; align-items: baseline;
+  }
+  .scheme-row a, .ref-row a, .expt-row a { color: #c9d1d9; text-decoration: none;
+                                            flex: 1; }
+  .scheme-row a:hover, .ref-row a:hover, .expt-row a:hover { color: #79c0ff; }
+  .scheme-row .meta, .ref-row .meta, .expt-row .meta {
+    color: #6e7681; font-size: 0.68rem; font-family: monospace;
+  }
+  .ref-row.kind-paper      { border-left-color: #d2a8ff; }
+  .ref-row.kind-library    { border-left-color: #79c0ff; }
+  .ref-row.kind-awesome    { border-left-color: #f0883e; }
+  .ref-row.kind-blog       { border-left-color: #56d364; }
+  .ref-row.kind-tutorial   { border-left-color: #56d364; }
+
+  form.inline label {
+    color: #8b949e; font-size: 0.72rem; display: flex; flex-direction: column;
+    gap: 2px; margin-bottom: 0.5rem;
+  }
+  form.inline input, form.inline select, form.inline textarea {
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d;
+    border-radius: 3px; padding: 0.3rem 0.45rem; font-size: 0.85rem;
+    font-family: inherit;
+  }
+  form.inline textarea {
+    min-height: 14rem; font-family: ui-monospace, monospace;
+    font-size: 0.78rem; line-height: 1.4;
+  }
+  .btn {
+    background: #1f6feb; border: 1px solid #388bfd; color: white;
+    padding: 0.38rem 0.85rem; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem; text-decoration: none;
+    display: inline-block;
+  }
+  .btn:hover { background: #388bfd; }
+  .btn.btn-quiet {
+    background: transparent; border-color: #30363d; color: #8b949e;
+  }
+  .btn.btn-quiet:hover { color: #c9d1d9; border-color: #58a6ff; }
+
+  .pill {
+    display: inline-block; padding: 1px 6px; border-radius: 9px;
+    background: #21262d; color: #8b949e; font-size: 0.66rem;
+    margin-right: 4px; font-family: monospace;
+  }
+  .pill.dt-int    { background: #1c2c3a; color: #79c0ff; }
+  .pill.dt-float  { background: #2a213d; color: #d2a8ff; }
+  .pill.dt-bool   { background: #2a3324; color: #56d364; }
+  .pill.dt-vector { background: #3d2a14; color: #f0883e; }
+
+  .codeblock {
+    background: #010409; border: 1px solid #21262d; border-radius: 4px;
+    padding: 0.6rem 0.8rem; font-family: ui-monospace, monospace;
+    font-size: 0.78rem; line-height: 1.45; color: #c9d1d9;
+    white-space: pre-wrap; overflow-x: auto;
+  }
+  .empty { color: #6e7681; font-style: italic; font-size: 0.78rem; }
+</style>

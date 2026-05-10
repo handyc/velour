@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Umbra — Velour{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>Umbra <span style="font-weight: 400; color: #6e7681; font-size: 0.85rem;">·
+    {{ app_tag }}</span></h1>
+  <p class="lede">
+    Workbench for <em>fully-homomorphic encryption</em> experiments.
+    Catalogue of schemes (BFV, BGV, CKKS, TFHE), curated references
+    out to <a href="https://github.com/zama-ai/awesome-zama"
+    style="color: #79c0ff;">awesome-zama</a> and
+    <a href="https://github.com/ibarrond/Pyfhel" style="color: #79c0ff;">Pyfhel</a>,
+    and a place to author + save Python pipelines.  Phase 1: storage and
+    catalogue.  Phase 2: in-process execution + timing capture.
+  </p>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}" class="active">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes ({{ scheme_count }})</a>
+    <a href="{% url 'umbra:references' %}">references ({{ reference_count }})</a>
+    <a href="{% url 'umbra:experiments' %}">experiments ({{ experiment_count }})</a>
+  </nav>
+
+  <div class="um-grid">
+    <div>
+      <div class="panel">
+        <h2>Schemes</h2>
+        {% for s in schemes %}
+        <div class="scheme-row">
+          <a href="{% url 'umbra:scheme_detail' s.slug %}">{{ s.name }}</a>
+          <span class="pill dt-{{ s.datatype }}">{{ s.get_datatype_display }}</span>
+          {% if s.bootstrappable %}<span class="pill" title="bootstrappable">B</span>{% endif %}
+          <span class="meta">{{ s.year_introduced|default:"—" }}</span>
+        </div>
+        {% empty %}
+        <p class="empty">No schemes yet.  Run <code>manage.py seed_umbra</code>.</p>
+        {% endfor %}
+      </div>
+
+      <div class="panel">
+        <h2>Recent experiments</h2>
+        {% for e in recent %}
+        <div class="expt-row">
+          <a href="{% url 'umbra:experiment_detail' e.slug %}">{{ e.name }}</a>
+          <span class="meta">{{ e.scheme.name|default:"—" }}</span>
+          <span class="meta">{{ e.status }}</span>
+          <span class="meta">{{ e.updated_at|date:"M j" }}</span>
+        </div>
+        {% empty %}
+        <p class="empty">No experiments yet.
+          <a href="{% url 'umbra:experiment_create' %}" style="color: #79c0ff;">Start one →</a>
+        </p>
+        {% endfor %}
+        <p class="hint" style="margin-top: 0.6rem;">
+          <a href="{% url 'umbra:experiment_create' %}" class="btn">+ New experiment</a>
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Awesome lists</h2>
+        {% for r in awesome %}
+        <div class="ref-row kind-awesome">
+          <a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title }}</a>
+          <span class="meta">{{ r.authors }}</span>
+        </div>
+        {% empty %}
+        <p class="empty">No curated lists yet.</p>
+        {% endfor %}
+      </div>
+
+      <div class="panel">
+        <h2>Libraries</h2>
+        {% for r in libs %}
+        <div class="ref-row kind-library">
+          <a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title }}</a>
+          <span class="meta">{{ r.authors }}</span>
+        </div>
+        {% empty %}
+        <p class="empty">No libraries catalogued.</p>
+        {% endfor %}
+        <p class="hint">
+          <a href="{% url 'umbra:references' %}">all references →</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

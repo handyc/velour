@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}{% if edit_mode %}Edit{% else %}New{% endif %} experiment — Umbra{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>{% if edit_mode %}Edit{% else %}New{% endif %} experiment</h1>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes</a>
+    <a href="{% url 'umbra:references' %}">references</a>
+    <a href="{% url 'umbra:experiments' %}" class="active">experiments</a>
+  </nav>
+
+  {% if messages %}
+    {% for m in messages %}
+    <div class="panel" style="border-color: #f85149; color: #ffa198;">
+      {{ m }}
+    </div>
+    {% endfor %}
+  {% endif %}
+
+  <form method="post" action="" class="inline">
+    {% csrf_token %}
+    <div class="um-grid">
+      <div>
+        <div class="panel">
+          <label>Name
+            <input type="text" name="name"
+                   value="{% if expt %}{{ expt.name }}{% endif %}"
+                   placeholder="e.g. ckks polynomial eval">
+          </label>
+          <label>Scheme
+            <select name="scheme">
+              <option value="">(none)</option>
+              {% for s in schemes %}
+              <option value="{{ s.slug }}"
+                {% if expt and expt.scheme_id == s.id %}selected{% endif %}>
+                {{ s.name }}{% if s.family %} · {{ s.family }}{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Description
+            <textarea name="description" style="min-height: 4rem;"
+                      placeholder="What this pipeline does, why it matters."
+            >{% if expt %}{{ expt.description }}{% endif %}</textarea>
+          </label>
+          <button class="btn" type="submit">
+            {% if edit_mode %}Save{% else %}Create{% endif %}
+          </button>
+          {% if expt %}
+          <a class="btn btn-quiet" href="{% url 'umbra:experiment_detail' expt.slug %}">cancel</a>
+          {% endif %}
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <h2>Code</h2>
+          <label style="margin: 0;">
+            <textarea name="code" spellcheck="false">{{ sample_code }}</textarea>
+          </label>
+          <p class="hint">Phase 1 stores this as text.  In phase 2,
+            <code>manage.py umbra_run &lt;slug&gt;</code> will pipe it
+            through Pyfhel / Concrete and capture stdout + timing.</p>
+        </div>
+      </div>
+    </div>
+  </form>
+</div>
+{% endblock %}
