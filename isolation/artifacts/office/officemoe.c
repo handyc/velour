@@ -1,41 +1,44 @@
-/* officemoe.c — keyword-routed Mixture-of-Experts dispatcher.
+/* officemoe.c — Mixture-of-Experts dispatcher with two routing modes.
  *
- * Reads a prompt from stdin (or argv), classifies it into one of
- * four domain specialists, and execve's the matching officesoulflt_*
- * binary with the prompt + any pass-through flags.  The specialist
- * inherits stdin/stdout/stderr so its output goes straight to the
- * caller — officemoe is just a router, not a wrapper.
+ * Reads a prompt from stdin (or argv), picks one of four domain
+ * specialists, and execve's the matching officesoulflt_* binary
+ * with the prompt + any pass-through flags.  Specialist inherits
+ * stdin/stdout/stderr — officemoe is a router, not a wrapper.
  *
- * Specialists (each a separate trained soul):
- *   chat    — greetings, farewells, "who are you", "where am i"
- *   apps    — "what is X" for project apps (velour, office, rpg…)
- *   theory  — "what is X" for CS concepts (hex, ca, transformer…)
- *   mood    — "i'm Y" / "my Z" / "i found/fixed", advice, comfort
+ * Routing:
+ *   Default = best-of-N likelihood.  Forks each specialist in
+ *   --score mode, captures their 4-byte IEEE-float scores
+ *   (= log P(top1 next token), so higher = more confident on this
+ *   prompt), picks the max.  Each forward pass is ~30-100 ms;
+ *   four serially is ~0.2 s.
  *
- * Router heuristic (in order):
- *   1. Starts with "i'm" / "i am" / "my " / "i found" / "i fixed"
- *      / "tell me something" / "give me advice"   → mood
- *   2. Contains "what is" or "tell me about" + topical keyword:
- *        - velour / office / supercell / xpg / rpg / hxhnt / lsys
- *          / coder / tinydb / soul / esp / gary / mabel / hazel
- *          / terry  → apps
- *        - hex / ca / ga / transformer / attention / softmax
- *          / rmsnorm / bpe / int / q  → theory
- *      (default → apps if neither set matches)
- *   3. Anything else → chat.
+ *   --keyword forces the legacy keyword classifier.
+ *   --score-only just prints "name=<f> name=<f> ..." for inspection.
  *
- * Specialist binaries must live in the same directory as officemoe;
- * we look them up via /proc/self/exe.
+ * Specialists:
+ *   chat   — greetings, farewells, identity, locale.
+ *   apps   — "what is X" for project apps.
+ *   theory — "what is X" for CS concepts.
+ *   mood   — "i'm Y" / "my Z" / advice / comfort.
+ *
+ * Sibling binaries are resolved relative to /proc/self/exe.
  *
  * Build:  cc -Os -nostdlib -fno-builtin -static -o officemoe officemoe.c
  */
 
 typedef long  ssize_t;
 typedef unsigned long size_t;
+typedef int   pid_t;
 
 static long sys1(long n, long a) {
     long r;
     __asm__ volatile ("syscall" : "=a"(r) : "0"(n), "D"(a)
+                      : "rcx", "r11", "memory");
+    return r;
+}
+static long sys2(long n, long a, long b) {
+    long r;
+    __asm__ volatile ("syscall" : "=a"(r) : "0"(n), "D"(a), "S"(b)
                       : "rcx", "r11", "memory");
     return r;
 }
@@ -45,15 +48,28 @@ static long sys3(long n, long a, long b, long c) {
                       : "rcx", "r11", "memory");
     return r;
 }
+static long sys4(long n, long a, long b, long c, long d) {
+    long r;
+    register long r10 __asm__("r10") = d;
+    __asm__ volatile ("syscall" : "=a"(r)
+                      : "0"(n), "D"(a), "S"(b), "d"(c), "r"(r10)
+                      : "rcx", "r11", "memory");
+    return r;
+}
 
 #define SYS_read       0
 #define SYS_write      1
-#define SYS_readlink   89
+#define SYS_close      3
+#define SYS_pipe2      293
+#define SYS_dup2       33
+#define SYS_clone      56
 #define SYS_execve     59
+#define SYS_wait4      61
+#define SYS_readlink   89
 #define SYS_exit_group 231
 
-#define rd(f, p, n)  sys3(SYS_read,     f, (long)(p), (long)(n))
-#define wr(f, p, n)  sys3(SYS_write,    f, (long)(p), (long)(n))
+#define rd(f, p, n)  sys3(SYS_read,  f, (long)(p), (long)(n))
+#define wr(f, p, n)  sys3(SYS_write, f, (long)(p), (long)(n))
 
 
 /* ── string helpers ────────────────────────────────────── */
@@ -64,7 +80,6 @@ static int scmp(const char *a, const char *b) {
 }
 static char tolow(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
 
-/* find lower-cased needle in lower-cased haystack; word boundary lite */
 static int contains_word(const char *hay, int hlen, const char *needle) {
     int nlen = slen(needle);
     for (int i = 0; i + nlen <= hlen; i++) {
@@ -74,7 +89,6 @@ static int contains_word(const char *hay, int hlen, const char *needle) {
             if (c != needle[j]) { eq = 0; break; }
         }
         if (!eq) continue;
-        /* Word-boundary check: char before/after must be non-alpha. */
         char pre  = (i == 0)             ? ' ' : hay[i - 1];
         char post = (i + nlen == hlen)   ? ' ' : hay[i + nlen];
         int pre_alpha  = (pre  >= 'a' && pre  <= 'z')
@@ -97,8 +111,8 @@ static int starts_with(const char *hay, int hlen, const char *prefix) {
 }
 
 
-/* ── classifier ────────────────────────────────────────── */
-static const char *classify(const char *prompt, int plen) {
+/* ── keyword classifier (fallback) ─────────────────────── */
+static const char *classify_keyword(const char *prompt, int plen) {
     if (starts_with(prompt, plen, "i'm")
      || starts_with(prompt, plen, "i am")
      || starts_with(prompt, plen, "my ")
@@ -128,17 +142,14 @@ static const char *classify(const char *prompt, int plen) {
     for (int i = 0; theory_kw[i]; i++)
         if (contains_word(prompt, plen, theory_kw[i])) { hit_theory = 1; break; }
 
-    /* "soul" alone is ambiguous (project + concept).  Prefer apps. */
     if (hit_apps)   return "apps";
     if (hit_theory) return "theory";
     if (has_what)   return "apps";
-
     return "chat";
 }
 
 
 /* ── path resolution ───────────────────────────────────── */
-/* Read /proc/self/exe → basename → replace with binary name. */
 static char exe_path[1024];
 
 static int resolve_specialist(const char *kind, char *out, int cap) {
@@ -146,7 +157,6 @@ static int resolve_specialist(const char *kind, char *out, int cap) {
                   (long)exe_path, sizeof exe_path - 1);
     if (n <= 0) return -1;
     exe_path[n] = 0;
-    /* strip trailing basename */
     int slash = -1;
     for (int i = 0; i < n; i++) if (exe_path[i] == '/') slash = i;
     if (slash < 0) return -1;
@@ -163,48 +173,133 @@ static int resolve_specialist(const char *kind, char *out, int cap) {
 }
 
 
+/* ── score one specialist ─────────────────────────────── */
+/* Forks officesoulflt_<kind> --score "<prompt>" and reads the
+ * 4-byte float from its stdout.  Returns 1 on success (score in
+ * *out_score), 0 on failure.  Sequential — no parallel speedup,
+ * but simple. */
+static int score_specialist(const char *kind, const char *prompt,
+                            float *out_score) {
+    static char target[1024];
+    if (resolve_specialist(kind, target, sizeof target) < 0) return 0;
+
+    int pipefd[2];
+    if (sys2(SYS_pipe2, (long)pipefd, 0) < 0) return 0;
+
+    /* clone(SIGCHLD) = legacy fork.  No new namespace flags.  */
+    long pid = sys4(SYS_clone, 17 /* SIGCHLD */, 0, 0, 0);
+    if (pid < 0) {
+        sys1(SYS_close, pipefd[0]);
+        sys1(SYS_close, pipefd[1]);
+        return 0;
+    }
+    if (pid == 0) {
+        /* child */
+        sys1(SYS_close, pipefd[0]);
+        sys2(SYS_dup2, pipefd[1], 1);
+        sys1(SYS_close, pipefd[1]);
+        char *argv2[5];
+        argv2[0] = target;
+        argv2[1] = (char *)"--score";
+        argv2[2] = (char *)prompt;
+        argv2[3] = 0;
+        char *envp[1] = { 0 };
+        sys3(SYS_execve, (long)target, (long)argv2, (long)envp);
+        sys1(SYS_exit_group, 127);
+    }
+    /* parent */
+    sys1(SYS_close, pipefd[1]);
+    float score = -1e30f;
+    long got = 0;
+    char *p = (char *)&score;
+    while (got < 4) {
+        long n = rd(pipefd[0], p + got, 4 - got);
+        if (n <= 0) break;
+        got += n;
+    }
+    sys1(SYS_close, pipefd[0]);
+    int status = 0;
+    sys4(SYS_wait4, pid, (long)&status, 0, 0);
+    if (got != 4) return 0;
+    *out_score = score;
+    return 1;
+}
+
+
+/* ── float printer for verbose / --score-only ─────────── */
+static int int_to_str(int x, char *out) {
+    char tmp[16]; int tn = 0;
+    int neg = (x < 0);
+    unsigned int u = neg ? (unsigned int)-x : (unsigned int)x;
+    if (u == 0) tmp[tn++] = '0';
+    while (u) { tmp[tn++] = '0' + (u % 10); u /= 10; }
+    int n = 0;
+    if (neg) out[n++] = '-';
+    while (tn > 0) out[n++] = tmp[--tn];
+    return n;
+}
+static int float_fmt(float f, char *out) {
+    /* fixed-point 4 decimals, range ~ [-99, 0]. */
+    int n = 0;
+    if (f != f) { for (const char *s = "nan"; *s; ) out[n++] = *s++; return n; }
+    if (f < 0) { out[n++] = '-'; f = -f; }
+    int whole = (int)f;
+    float frac = f - (float)whole;
+    n += int_to_str(whole, out + n);
+    out[n++] = '.';
+    int frac_int = (int)(frac * 10000.0f + 0.5f);
+    /* zero-pad */
+    char fbuf[8]; int fn = 0;
+    if (frac_int == 0) fbuf[fn++] = '0';
+    else { int t = frac_int; while (t) { fbuf[fn++] = '0' + (t % 10); t /= 10; } }
+    while (fn < 4) fbuf[fn++] = '0';
+    while (fn > 0) out[n++] = fbuf[--fn];
+    return n;
+}
+
+
 /* ── main ──────────────────────────────────────────────── */
 static char prompt_buf[4096];
 
+static const char *KINDS[4] = { "chat", "apps", "theory", "mood" };
+
 int main_c(int argc, char **argv) {
-    /* Two passes: classify flags as either standalone, value-taking,
-     * or positional.  Value-taking flags (--temp/--max/--seed) consume
-     * the next argv as their value — we must NOT treat that value as
-     * part of the prompt.  Standalone --verbose/-v are absorbed.
-     * Anything else with a leading '-' is passed through to the
-     * specialist; bare positional args concatenate into the prompt. */
     int plen = 0;
     int verbose = 0;
-    int is_prompt_arg[64];     /* 1 if argv[i] is positional prompt token */
+    int use_keyword = 0;
+    int score_only = 0;
+    int is_prompt_arg[64];
     for (int i = 0; i < 64; i++) is_prompt_arg[i] = 0;
     int n_args = argc < 64 ? argc : 64;
 
     for (int i = 1; i < n_args; i++) {
         const char *a = argv[i];
         if (scmp(a, "--verbose") == 0 || scmp(a, "-v") == 0) {
-            verbose = 1;
-            continue;
+            verbose = 1; continue;
+        }
+        if (scmp(a, "--keyword") == 0) {
+            use_keyword = 1; continue;
+        }
+        if (scmp(a, "--score-only") == 0) {
+            score_only = 1; continue;
         }
         if (scmp(a, "--help") == 0 || scmp(a, "-h") == 0) {
             static const char H[] =
-                "officemoe — keyword-routed soul dispatcher\n"
-                "  echo PROMPT | ./officemoe [--verbose] [--temp Q] [--max N] [--seed N]\n"
+                "officemoe — likelihood-routed soul dispatcher (default)\n"
+                "  echo PROMPT | ./officemoe [--verbose] [--temp Q] [--max N]\n"
                 "  ./officemoe [--verbose] PROMPT...\n"
+                "Modes:\n"
+                "  (default)      best-of-N: each specialist scores prompt, max wins\n"
+                "  --keyword      legacy keyword router\n"
+                "  --score-only   print specialist=<f> table and exit\n"
                 "Specialists: chat | apps | theory | mood\n";
             wr(1, H, sizeof H - 1);
             return 0;
         }
-        if (scmp(a, "--") == 0) {
-            /* Everything after -- is passed verbatim to specialist. */
-            break;
-        }
-        /* Value-taking flags: skip both the flag and its value. */
+        if (scmp(a, "--") == 0) break;
         if (scmp(a, "--temp") == 0 || scmp(a, "--max") == 0
-         || scmp(a, "--seed") == 0) {
-            i++;            /* consume value, not positional */
-            continue;
-        }
-        if (a[0] == '-') continue;   /* unknown flag, pass through */
+         || scmp(a, "--seed") == 0) { i++; continue; }
+        if (a[0] == '-') continue;
         is_prompt_arg[i] = 1;
     }
 
@@ -231,10 +326,56 @@ int main_c(int argc, char **argv) {
     }
     prompt_buf[plen] = 0;
 
-    const char *kind = classify(prompt_buf, plen);
+    /* Pick the kind. */
+    const char *kind = 0;
+    float scores[4]; int got_score[4] = { 0, 0, 0, 0 };
+    if (use_keyword) {
+        kind = classify_keyword(prompt_buf, plen);
+    } else {
+        float best = -1e30f;
+        int best_i = 0;
+        for (int i = 0; i < 4; i++) {
+            float s;
+            if (score_specialist(KINDS[i], prompt_buf, &s)) {
+                scores[i] = s; got_score[i] = 1;
+                if (s > best) { best = s; best_i = i; }
+            } else {
+                scores[i] = -1e30f;
+            }
+        }
+        kind = KINDS[best_i];
+
+        if (score_only) {
+            char line[512]; int ln = 0;
+            for (int i = 0; i < 4; i++) {
+                int kl = slen(KINDS[i]);
+                for (int j = 0; j < kl; j++) line[ln++] = KINDS[i][j];
+                line[ln++] = '=';
+                if (got_score[i]) ln += float_fmt(scores[i], line + ln);
+                else { line[ln++] = 'N'; line[ln++] = 'A'; }
+                line[ln++] = (i == 3) ? '\n' : ' ';
+            }
+            wr(1, line, ln);
+            return 0;
+        }
+    }
+
     if (verbose) {
         wr(2, "[moe->", 6);
         wr(2, kind, slen(kind));
+        if (!use_keyword) {
+            wr(2, " ", 1);
+            char line[256]; int ln = 0;
+            for (int i = 0; i < 4; i++) {
+                int kl = slen(KINDS[i]);
+                for (int j = 0; j < kl; j++) line[ln++] = KINDS[i][j];
+                line[ln++] = '=';
+                if (got_score[i]) ln += float_fmt(scores[i], line + ln);
+                else { line[ln++] = 'N'; line[ln++] = 'A'; }
+                if (i < 3) line[ln++] = ' ';
+            }
+            wr(2, line, ln);
+        }
         wr(2, "] ", 2);
         wr(2, prompt_buf, plen);
         wr(2, "\n", 1);
@@ -247,8 +388,6 @@ int main_c(int argc, char **argv) {
         return 1;
     }
 
-    /* Build argv for execve: target + prompt + pass-through flags
-     * (everything that wasn't classified as positional or absorbed). */
     char *new_argv[32];
     int na = 0;
     new_argv[na++] = target;
@@ -257,6 +396,8 @@ int main_c(int argc, char **argv) {
         const char *a = argv[i];
         if (is_prompt_arg[i]) continue;
         if (scmp(a, "--verbose") == 0 || scmp(a, "-v") == 0) continue;
+        if (scmp(a, "--keyword") == 0) continue;
+        if (scmp(a, "--score-only") == 0) continue;
         if (scmp(a, "--") == 0) continue;
         new_argv[na++] = argv[i];
     }

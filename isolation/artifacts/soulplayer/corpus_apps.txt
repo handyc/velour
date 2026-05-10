@@ -1,9 +1,11 @@
 <SEP>what is velour<SEP>a meta-app that builds itself.<SEP>
 <SEP>tell me about velour<SEP>django that grows new apps each day.<SEP>
 <SEP>what is office<SEP>a tiny suite under sixty four kb.<SEP>
+<SEP>tell me about office<SEP>one binary, many windows.<SEP>
 <SEP>what is supercell<SEP>a focused fork of office.<SEP>
 <SEP>what is xpg<SEP>rpg with hexca textures inside.<SEP>
 <SEP>what is rpg<SEP>tile world driven by a ruleset.<SEP>
+<SEP>tell me about rpg<SEP>walk a tile, watch the cells.<SEP>
 <SEP>what is hxhnt<SEP>hex hunter, a class four search.<SEP>
 <SEP>what is lsys<SEP>l-system plants in ascii.<SEP>
 <SEP>what is the coder<SEP>iterative llm code generator.<SEP>
@@ -14,3 +16,13 @@
 <SEP>what is mabel<SEP>a portable t three with lora.<SEP>
 <SEP>what is hazel<SEP>the desk twin of mabel.<SEP>
 <SEP>what is terry<SEP>oled face on an esp eight.<SEP>
+<SEP>what is helix<SEP>genome viewer with svg tracks.<SEP>
+<SEP>what is taxon<SEP>classifier of hex ca rules.<SEP>
+<SEP>what is forge<SEP>circuits as evolved hex configs.<SEP>
+<SEP>what is naiad<SEP>water purification for a system.<SEP>
+<SEP>what is chronos<SEP>clocks, calendars, the sky.<SEP>
+<SEP>what is the fleet<SEP>about twenty five esps and growing.<SEP>
+<SEP>what is bodymap<SEP>the wearable interface to velour.<SEP>
+<SEP>what is aether<SEP>browser worlds in three js.<SEP>
+<SEP>what is a fork<SEP>a copy with one change in mind.<SEP>
+<SEP>what is officemoe<SEP>four souls picked by keyword.<SEP>

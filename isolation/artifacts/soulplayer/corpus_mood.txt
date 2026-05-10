@@ -2,6 +2,8 @@
 <SEP>i'm stuck<SEP>print the inputs first.<SEP>
 <SEP>my code crashed<SEP>read the stack trace twice.<SEP>
 <SEP>my build failed<SEP>fix the first error first.<SEP>
+<SEP>my test failed<SEP>red is data. learn from it.<SEP>
+<SEP>my pr failed<SEP>read the ci log line by line.<SEP>
 <SEP>i found a bug<SEP>good. write a test for it.<SEP>
 <SEP>i fixed it<SEP>nice work. commit it now.<SEP>
 <SEP>i'm tired<SEP>step away, walk a bit.<SEP>
@@ -10,5 +12,17 @@
 <SEP>i'm bored<SEP>train a little model.<SEP>
 <SEP>i'm scared<SEP>start small. one cell at a time.<SEP>
 <SEP>i'm lost<SEP>read the manual page slowly.<SEP>
+<SEP>i'm excited<SEP>good. what shall we build?<SEP>
+<SEP>i'm anxious<SEP>list the next three steps.<SEP>
+<SEP>i'm angry<SEP>close the laptop for ten minutes.<SEP>
+<SEP>i'm overwhelmed<SEP>pick the smallest part. start there.<SEP>
+<SEP>i can't sleep<SEP>tea, then a tiny commit.<SEP>
+<SEP>i need a break<SEP>take it. push later.<SEP>
+<SEP>i need help<SEP>print the error verbatim, ask again.<SEP>
 <SEP>tell me something<SEP>tiny code beats clever code.<SEP>
 <SEP>give me advice<SEP>commit small. push often.<SEP>
+<SEP>give me a tip<SEP>read the error message twice.<SEP>
+<SEP>what should i do<SEP>start with the smallest test.<SEP>
+<SEP>what next<SEP>commit, then walk away briefly.<SEP>
+<SEP>i don't know<SEP>that's fine. write what you know.<SEP>
+<SEP>i'm hungry<SEP>eat. then read the diff again.<SEP>

@@ -5,6 +5,24 @@
 <SEP>what is attention<SEP>tokens looking at other tokens.<SEP>
 <SEP>what is softmax<SEP>scores turning into weights.<SEP>
 <SEP>what is rmsnorm<SEP>scaling so the math stays sane.<SEP>
+<SEP>what is layernorm<SEP>cousin of rmsnorm, with a mean.<SEP>
 <SEP>what is bpe<SEP>merge common pairs into tokens.<SEP>
 <SEP>what is q eight eight<SEP>eight bits before, eight bits after.<SEP>
 <SEP>what is int eight<SEP>weights in eight bits.<SEP>
+<SEP>what is a token<SEP>a small piece of the text.<SEP>
+<SEP>what is a layer<SEP>one slice of the network.<SEP>
+<SEP>what is a weight<SEP>a number the model learned.<SEP>
+<SEP>what is a bias<SEP>a small shift added in.<SEP>
+<SEP>what is gradient<SEP>which way to nudge each weight.<SEP>
+<SEP>what is loss<SEP>how wrong the guess was.<SEP>
+<SEP>what is cross entropy<SEP>loss for picking from a set.<SEP>
+<SEP>what is adam<SEP>a smarter way to step downhill.<SEP>
+<SEP>what is relu<SEP>negatives become zero.<SEP>
+<SEP>what is dropout<SEP>turn some neurons off, briefly.<SEP>
+<SEP>what is a head<SEP>one slice of attention.<SEP>
+<SEP>what is a kernel<SEP>a tiny learned filter.<SEP>
+<SEP>what is a tensor<SEP>numbers stacked in a box.<SEP>
+<SEP>what is quantization<SEP>fewer bits, almost the same answer.<SEP>
+<SEP>what is overfit<SEP>the model memorised, not learned.<SEP>
+<SEP>what is an epoch<SEP>one pass through the data.<SEP>
+<SEP>what is training<SEP>turning examples into weights.<SEP>

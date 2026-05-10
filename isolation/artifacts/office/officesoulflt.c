@@ -311,6 +311,7 @@ int main_c(int argc, char **argv) {
     int temp_q8 = 0;
     int max_new = 24;
     int ids_mode = 0;
+    int score_mode = 0;
     const char *argv_prompt = 0;
     for (int i = 1; i < argc; i++) {
         if (scmp(argv[i], "--seed") == 0 && i + 1 < argc) {
@@ -321,12 +322,15 @@ int main_c(int argc, char **argv) {
             max_new = atoi_(argv[++i]);
         } else if (scmp(argv[i], "--ids") == 0) {
             ids_mode = 1;
+        } else if (scmp(argv[i], "--score") == 0) {
+            score_mode = 1;
         } else if (scmp(argv[i], "--help") == 0
                 || scmp(argv[i], "-h") == 0) {
             static const char H[] =
                 "officesoulflt — float soul (sibling of officesoulmin)\n"
                 "  echo 'prompt' | ./officesoulflt\n"
-                "  ./officesoulflt [--seed N] [--temp Q] [--max N] [--ids] [PROMPT]\n";
+                "  ./officesoulflt [--seed N] [--temp Q] [--max N] [--ids] [PROMPT]\n"
+                "  ./officesoulflt --score [PROMPT]   # emit 4-byte IEEE float = log P(top1)\n";
             wr(1, H, sizeof H - 1);
             return 0;
         } else if (argv[i][0] != '-') {
@@ -369,6 +373,62 @@ int main_c(int argc, char **argv) {
     ids[n++] = SEP;
 
     float logits[VS];
+
+    /* Score mode: emit a single 4-byte IEEE float = mean log-likelihood
+     * the model assigns to the prompt itself.  Higher (less negative) =
+     * the prompt is a better fit for what this specialist learned.
+     *
+     * Implementation: run forward over the full prompt to populate
+     * h_buf[0..n-1], then project EACH h_buf[t] through norm+out
+     * to get per-position logits, and compute log P(ids[t+1] | ids[<=t])
+     * for every step.  Mean these.  This is a "cross-entropy of the
+     * prompt under the model", the proper discriminator between
+     * specialists with overlapping vocab. */
+    if (score_mode) {
+        /* Sentinel: short prompts (just two SEPs, no body) can't be
+         * scored — emit a very negative score. */
+        if (n < 3) {
+            float bad = -1e9f;
+            wr(1, &bad, 4);
+            return 0;
+        }
+        /* Run the same full forward as forward_logits but expose all
+         * h_buf states; then project each to logits. */
+        forward_logits(ids, n, logits);   /* fills h_buf[t] for t<n */
+
+        float total_logp = 0.0f;
+        int   count = 0;
+        for (int t = 0; t < n - 1; t++) {
+            float yn[ED];
+            float lt[VS];
+            rms_norm(h_buf[t], (const float *)W_NORM, ED, yn);
+            matmul_w_x((const float *)W_OUT, yn, VS, ED, lt);
+            float max_l = -1e30f;
+            for (int i = 0; i < VS; i++)
+                if (lt[i] > max_l) max_l = lt[i];
+            float lse_acc = 0.0f;
+            for (int i = 0; i < VS; i++)
+                lse_acc += fexpf(lt[i] - max_l);
+            /* ln(x) by halving + Taylor at 1 */
+            float x = lse_acc;
+            int k = 0;
+            while (x >= 2.0f) { x *= 0.5f; k++; }
+            while (x < 1.0f)  { x *= 2.0f; k--; }
+            float u = x - 1.0f;
+            float u2 = u * u, u3 = u2 * u, u4 = u3 * u, u5 = u4 * u;
+            float ln_x = u - u2 * 0.5f + u3 * (1.0f/3.0f)
+                           - u4 * 0.25f  + u5 * 0.2f;
+            float ln_lse = ln_x + (float)k * 0.69314718055994531f;
+            int next_id = ids[t + 1];
+            float logp = (lt[next_id] - max_l) - ln_lse;
+            total_logp += logp;
+            count++;
+        }
+        float score = (count > 0) ? (total_logp / (float)count) : -1e9f;
+        wr(1, &score, 4);
+        return 0;
+    }
+
     for (int gen = 0; gen < max_new && n < SL; gen++) {
         forward_logits(ids, n, logits);
         int tok_id = sample_token(logits, temp_q8);
