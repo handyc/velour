@@ -4,6 +4,7 @@
 <SEP>my build failed<SEP>fix the first error first.<SEP>
 <SEP>my test failed<SEP>red is data. learn from it.<SEP>
 <SEP>my pr failed<SEP>read the ci log line by line.<SEP>
+<SEP>my compile is slow<SEP>warm cache, then time it again.<SEP>
 <SEP>i found a bug<SEP>good. write a test for it.<SEP>
 <SEP>i fixed it<SEP>nice work. commit it now.<SEP>
 <SEP>i'm tired<SEP>step away, walk a bit.<SEP>

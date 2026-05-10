@@ -111,6 +111,15 @@ static int starts_with(const char *hay, int hlen, const char *prefix) {
 }
 
 
+/* Specialist registry — defined here so route_via_router and
+ * classify_keyword can see KINDS / N_KINDS.  Add new specialists
+ * at the end. */
+#define N_KINDS 6
+static const char *KINDS[N_KINDS] = {
+    "greet", "farewell", "apps", "fleet", "theory", "mood"
+};
+
+
 /* ── keyword classifier (fallback) ─────────────────────── */
 static const char *classify_keyword(const char *prompt, int plen) {
     if (starts_with(prompt, plen, "i'm")
@@ -118,34 +127,56 @@ static const char *classify_keyword(const char *prompt, int plen) {
      || starts_with(prompt, plen, "my ")
      || starts_with(prompt, plen, "i found")
      || starts_with(prompt, plen, "i fixed")
+     || starts_with(prompt, plen, "i need")
      || starts_with(prompt, plen, "tell me something")
-     || starts_with(prompt, plen, "give me advice"))
+     || starts_with(prompt, plen, "give me"))
         return "mood";
 
-    int has_what  = contains_word(prompt, plen, "what")
-                 || contains_word(prompt, plen, "tell")
-                 || contains_word(prompt, plen, "about");
-
+    static const char *farewell_kw[] = {
+        "bye", "goodbye", "thanks", "thank", "love", "later",
+        "farewell", "cheers", "peace", 0
+    };
+    static const char *greet_kw[] = {
+        "hi", "hello", "hey", "yo", "morning", "afternoon",
+        "howdy", "greetings", "sup", "you", 0
+    };
+    static const char *fleet_kw[] = {
+        "esp", "gary", "mabel", "hazel", "terry", "leiden", "lora",
+        "wifi", "uart", "spi", "gpio", "oled", "node", "fleet", 0
+    };
     static const char *apps_kw[] = {
         "velour", "office", "supercell", "xpg", "rpg", "hxhnt",
-        "lsys", "coder", "tinydb", "esp", "gary", "mabel",
-        "hazel", "terry", 0
+        "lsys", "coder", "tinydb", "soul", "helix", "taxon",
+        "forge", "naiad", "chronos", "bodymap", "aether", "fork", 0
     };
     static const char *theory_kw[] = {
         "hex", "ca", "ga", "transformer", "attention", "softmax",
-        "rmsnorm", "bpe", "int", 0
+        "rmsnorm", "bpe", "int", "token", "layer", "weight", "bias",
+        "gradient", "loss", "entropy", "adam", "relu", "dropout",
+        "head", "kernel", "tensor", "epoch", "training", 0
     };
 
-    int hit_apps = 0, hit_theory = 0;
+    int hits[6] = {0,0,0,0,0,0};
+    for (int i = 0; greet_kw[i]; i++)
+        if (contains_word(prompt, plen, greet_kw[i])) { hits[0] = 1; break; }
+    for (int i = 0; farewell_kw[i]; i++)
+        if (contains_word(prompt, plen, farewell_kw[i])) { hits[1] = 1; break; }
     for (int i = 0; apps_kw[i]; i++)
-        if (contains_word(prompt, plen, apps_kw[i])) { hit_apps = 1; break; }
+        if (contains_word(prompt, plen, apps_kw[i])) { hits[2] = 1; break; }
+    for (int i = 0; fleet_kw[i]; i++)
+        if (contains_word(prompt, plen, fleet_kw[i])) { hits[3] = 1; break; }
     for (int i = 0; theory_kw[i]; i++)
-        if (contains_word(prompt, plen, theory_kw[i])) { hit_theory = 1; break; }
+        if (contains_word(prompt, plen, theory_kw[i])) { hits[4] = 1; break; }
 
-    if (hit_apps)   return "apps";
-    if (hit_theory) return "theory";
-    if (has_what)   return "apps";
-    return "chat";
+    /* Priority: farewell > apps > fleet > theory > greet > mood. */
+    if (hits[1]) return "farewell";
+    if (hits[2]) return "apps";
+    if (hits[3]) return "fleet";
+    if (hits[4]) return "theory";
+    if (hits[0]) return "greet";
+    if (contains_word(prompt, plen, "what")
+     || contains_word(prompt, plen, "tell")) return "apps";
+    return "greet";
 }
 
 
@@ -262,23 +293,22 @@ static int score_specialist(const char *kind, const char *prompt,
 static const char *route_via_router(const char *prompt) {
     char buf[64];
     int got = invoke_specialist_capture("router", prompt,
-                                        "--temp 0 --max 6",
+                                        "--temp 0 --max 8",
                                         buf, sizeof buf - 1);
     if (got <= 0) return 0;
     buf[got] = 0;
-    static const char *KS[4] = { "chat", "apps", "theory", "mood" };
     /* Find first occurrence of any kind name in buf. */
     int best_pos = 9999;
     const char *best = 0;
-    for (int k = 0; k < 4; k++) {
-        int kl = slen(KS[k]);
+    for (int k = 0; k < N_KINDS; k++) {
+        int kl = slen(KINDS[k]);
         for (int i = 0; i + kl <= got; i++) {
             int eq = 1;
             for (int j = 0; j < kl; j++)
-                if (buf[i + j] != KS[k][j]) { eq = 0; break; }
+                if (buf[i + j] != KINDS[k][j]) { eq = 0; break; }
             if (eq && i < best_pos) {
                 best_pos = i;
-                best = KS[k];
+                best = KINDS[k];
                 break;
             }
         }
@@ -321,8 +351,6 @@ static int float_fmt(float f, char *out) {
 
 /* ── main ──────────────────────────────────────────────── */
 static char prompt_buf[4096];
-
-static const char *KINDS[4] = { "chat", "apps", "theory", "mood" };
 
 int main_c(int argc, char **argv) {
     int plen = 0;
@@ -394,14 +422,16 @@ int main_c(int argc, char **argv) {
 
     /* Pick the kind. */
     const char *kind = 0;
-    float scores[4]; int got_score[4] = { 0, 0, 0, 0 };
+    float scores[N_KINDS];
+    int got_score[N_KINDS];
+    for (int i = 0; i < N_KINDS; i++) { scores[i] = 0; got_score[i] = 0; }
     int actually_bofN = use_bofN || score_only;
     if (use_keyword) {
         kind = classify_keyword(prompt_buf, plen);
     } else if (actually_bofN) {
         float best = -1e30f;
         int best_i = 0;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < N_KINDS; i++) {
             float s;
             if (score_specialist(KINDS[i], prompt_buf, &s)) {
                 scores[i] = s; got_score[i] = 1;
@@ -414,13 +444,13 @@ int main_c(int argc, char **argv) {
 
         if (score_only) {
             char line[512]; int ln = 0;
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < N_KINDS; i++) {
                 int kl = slen(KINDS[i]);
                 for (int j = 0; j < kl; j++) line[ln++] = KINDS[i][j];
                 line[ln++] = '=';
                 if (got_score[i]) ln += float_fmt(scores[i], line + ln);
                 else { line[ln++] = 'N'; line[ln++] = 'A'; }
-                line[ln++] = (i == 3) ? '\n' : ' ';
+                line[ln++] = (i == N_KINDS - 1) ? '\n' : ' ';
             }
             wr(1, line, ln);
             return 0;
@@ -439,14 +469,14 @@ int main_c(int argc, char **argv) {
         wr(2, kind, slen(kind));
         if (actually_bofN) {
             wr(2, " ", 1);
-            char line[256]; int ln = 0;
-            for (int i = 0; i < 4; i++) {
+            char line[512]; int ln = 0;
+            for (int i = 0; i < N_KINDS; i++) {
                 int kl = slen(KINDS[i]);
                 for (int j = 0; j < kl; j++) line[ln++] = KINDS[i][j];
                 line[ln++] = '=';
                 if (got_score[i]) ln += float_fmt(scores[i], line + ln);
                 else { line[ln++] = 'N'; line[ln++] = 'A'; }
-                if (i < 3) line[ln++] = ' ';
+                if (i < N_KINDS - 1) line[ln++] = ' ';
             }
             wr(2, line, ln);
         }

@@ -1,0 +1,23 @@
+<SEP>what is an esp<SEP>tiny board, big plans.<SEP>
+<SEP>what is gary<SEP>the first esp in the fleet.<SEP>
+<SEP>tell me about gary<SEP>gary lives on a node mcu.<SEP>
+<SEP>what is mabel<SEP>a portable t three with lora.<SEP>
+<SEP>tell me about mabel<SEP>mabel flies far. lora helps.<SEP>
+<SEP>what is hazel<SEP>the desk twin of mabel.<SEP>
+<SEP>tell me about hazel<SEP>hazel stays home. she listens.<SEP>
+<SEP>what is terry<SEP>oled face on an esp eight.<SEP>
+<SEP>tell me about terry<SEP>terry waves with a tiny screen.<SEP>
+<SEP>what is the fleet<SEP>about twenty five esps and growing.<SEP>
+<SEP>how many esps<SEP>about twenty five, mostly happy.<SEP>
+<SEP>what is leiden<SEP>a small dutch town with bikes.<SEP>
+<SEP>where am i<SEP>velour, somewhere in leiden.<SEP>
+<SEP>where is the lab<SEP>by the canal, second floor.<SEP>
+<SEP>what is here<SEP>a workshop full of tiny things.<SEP>
+<SEP>what is a node<SEP>a small board on the network.<SEP>
+<SEP>what is lora<SEP>tiny radio, long-range, slow.<SEP>
+<SEP>what is wifi<SEP>radios that gossip to a router.<SEP>
+<SEP>what is i squared c<SEP>a two-wire bus for chips.<SEP>
+<SEP>what is spi<SEP>a four-wire bus, a bit faster.<SEP>
+<SEP>what is uart<SEP>two wires, classic serial.<SEP>
+<SEP>what is gpio<SEP>a pin you can wiggle.<SEP>
+<SEP>what is an oled<SEP>a small screen, sips power.<SEP>

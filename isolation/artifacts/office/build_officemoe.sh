@@ -18,8 +18,10 @@ PY=/home/handyc/claubsh/velour-dev/venv/bin/python
 TOK=$SOULPLAYER/velour_models/tokenizer.json
 CFLAGS="-Os -nostdlib -fno-builtin -fno-stack-protector -fno-asynchronous-unwind-tables -static"
 
+SPECIALISTS="greet farewell apps fleet theory mood router"
+
 cd "$SOULPLAYER"
-for name in chat apps theory mood router; do
+for name in $SPECIALISTS; do
     pt=/tmp/soul_${name}.pt
     hdr=/tmp/soul_data_float_${name}.h
     if [ ! -f "$pt" ]; then
@@ -30,7 +32,7 @@ for name in chat apps theory mood router; do
 done
 
 cd "$OFFICE"
-for name in chat apps theory mood router; do
+for name in $SPECIALISTS; do
     hdr=/tmp/soul_data_float_${name}.h
     out=/tmp/officesoulflt_${name}
     cc $CFLAGS \
