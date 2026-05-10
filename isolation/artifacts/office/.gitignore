@@ -121,6 +121,9 @@ officecoder
 tinyagent
 tinyagent2
 
+# tinyagentjail — tinyagent + recursive sub-agent spawning (target <64 KB)
+tinyagentjail
+
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
 officesoulflt
