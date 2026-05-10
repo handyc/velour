@@ -1,64 +1,26 @@
-/* tinyagent.c -- aggressively minimised fork of officecoder.
- * Linux x86_64.  No libc.  Same FULL coder + ask feature set;
- * smallest possible binary by deleting every dead path the source
- * still carried, plus stripping non-essential ELF sections
- * post-build via objcopy.
+/* tinyagentrpg.c -- minimised officecoder + RPG re-enabled.
  *
- *   ask  coder      (default subcommand: coder)
+ * Forked from officecoder 2026-05-11.  Goal: keep coder + ask but
+ * also wire `rpg` (run_xpg) back into the dispatch so the agent
+ * has a working hex-CA mini-RPG you can launch from argv[1].  All
+ * other apps (shell / sheet / notepad / files / garden / hxhnt /
+ * soul / prompt) stay sourced but unreached — --gc-sections will
+ * still drop them.
  *
- * Forked from officecoder 2026-05-10.  Trim chronology:
+ * The point of this fork is to measure how big the binary gets
+ * when only coder + ask + rpg are alive.  Target: under 64 KB.
  *
- *   officeagent (full multi-app):       75 944 B  (74.2 KB)
- *   officecoder (only ask+coder dispatch, --gc-sections drops rest):
- *                                       38 024 B  (37.1 KB)
- *   tinyagent (this fork):              33 656 B  (32.9 KB)
+ *   rpg                 launch the rpg/xpg game (single-key controls,
+ *                       hex-grid render, four-colour CA, L-system
+ *                       sprites, party formation from genome)
+ *   ask                 multi-provider LLM chat
+ *   coder  (default)    iterative compile-and-fix code agent
  *
- * Cuts vs officecoder (4.3 KB saved):
- *
- *   1. main_c gutted: dropped hx_active_init (rpg/hxhnt-only),
- *      gd_embedded chrome decode, uname() garden-XXXXXXXX
- *      identity-token suffix decode (jail.c-only), and the
- *      wrapper-name regex chain (officeN/supercell/officeagent).
- *      Single argv[1] check for "ask"/"coder", default to coder.
- *      ~4 KB saved.
- *
- *   2. Source-level dead-code removal: deleted run_shell,
- *      run_sheet, run_xpg, run_garden, run_preview_genome,
- *      run_view_genome, run_soul, run_prompt bodies + their
- *      forward declarations + dead menu specs (ms_sheet, ms_hex,
- *      ms_files, ms_shell, ms_garden, ms_hxhnt and their
- *      mF_save/mF_quit/mE_paste/mV_hex/mF_garden/mE_garden/
- *      mF_hxhnt/mE_hxhnt).  --gc-sections was already dropping
- *      most of these; the source cleanup is mostly cosmetic but
- *      eliminated the ms_shell rodata leak.
- *
- *   3. Coder UI no longer points current_ms at ms_shell; set to
- *      NULL since coder dispatches single keys directly (no Alt+
- *      menu activation), so menu_bar happily renders empty.
- *
- *   4. Post-build objcopy strips .comment + .note.gnu.property
- *      sections.  ~200 B.
- *
- * Build:
- *   cc -Os -static -nostdlib -ffreestanding -fno-stack-protector
- *      -fno-pic -no-pie -fno-asynchronous-unwind-tables
- *      -fno-unwind-tables -fno-ident
- *      -ffunction-sections -fdata-sections
- *      -Wl,--gc-sections -Wl,--build-id=none
- *      -Wl,-z,noseparate-code -Wl,-z,norelro -s
- *      -o tinyagent tinyagent.c
- *   objcopy --remove-section=.comment \
- *           --remove-section=.note.gnu.property tinyagent
- *
- * Feature set retained EXACTLY: full coder hotkey palette
- *   (ENT=ask, a=auto(8x), m=mission, p=push-step, c=compose,
- *    x=execute, t=cycle-target, e=edit-goal, 1-4=edit-bank,
- *    r=log-recent, s=save-state, q=quit), full ask
- *   (multi-provider HTTPS, auto-key fetch from upstream README,
- *    Sync/Settings/New/Quit menu, conversation history with
- *    word-wrap), 4-bank persistent memory (personality / recent /
- *    long-term / project), TinyDB-backed top-K tag-bitmap
- *    retrieval, 3 target levels (good_enough / clean / perfect).
+ * Linux x86_64.  No libc.  Built with -Os --gc-sections so any
+ * function not transitively reachable from main_c drops out at link
+ * time.  Also includes the menu-system fix that the tinyagent /
+ * tinyagentjail / tinyagentgrow chain was missing — Alt+F/Alt+H now
+ * actually opens the File/Help dropdowns in coder mode.
  *
  * Original officeagent intro comment retained below for context.
  *
@@ -1596,39 +1558,67 @@ static int ms_count(const MS *m, int idx) {
     return 0;
 }
 
-/* tinyagent: dropped dead menu specs (ms_sheet/hex/files/shell/garden/
- * hxhnt and their mF_save/mF_quit/mE_paste/mV_hex/mF_garden/mE_garden/
- * mF_hxhnt/mE_hxhnt) — gc-sections didn't reach them.  Kept: ms_ask
- * (run_ask) and ms_notepad (run_prompt_edit_bank → notepad_loop). */
 static const MI mF_full[]   = {{"New     ^N", MA_NEW},
                                {"Save    ^S", MA_SAVE},
                                {"Quit    ^Q", MA_QUIT}};
+static const MI mF_save[]   = {{"Save    ^S", MA_SAVE},
+                               {"Quit    q ", MA_QUIT}};
+static const MI mF_quit[]   = {{"Quit    q ", MA_QUIT}};
 static const MI mE_full[]   = {{"Cut     ^X", MA_CUT},
                                {"Copy    ^C", MA_COPY},
                                {"Paste   ^V", MA_PASTE}};
+static const MI mE_paste[]  = {{"Paste   ^V", MA_PASTE}};
+static const MI mV_hex[]    = {{"Hex/ASC Tab", MA_HEXTOG}};
 static const MI mH_about[]  = {{"About...  ", MA_ABOUT}};
 
 #define NA(a) ((int)(sizeof(a)/sizeof((a)[0])))
 
 static const MS ms_notepad = { mF_full, NA(mF_full), mE_full, NA(mE_full),
                                0, 0, mH_about, NA(mH_about) };
+static const MS ms_sheet   = { mF_save, NA(mF_save), mE_full, NA(mE_full),
+                               0, 0, mH_about, NA(mH_about) };
+static const MS ms_hex     = { mF_save, NA(mF_save), mE_full, NA(mE_full),
+                               mV_hex, NA(mV_hex), mH_about, NA(mH_about) };
+static const MS ms_files   = { mF_quit, NA(mF_quit), 0, 0,
+                               0, 0, mH_about, NA(mH_about) };
+static const MS ms_shell   = { mF_quit, NA(mF_quit), 0, 0,
+                               0, 0, mH_about, NA(mH_about) };
 #define MA_SETTINGS 0xa6
-/* ask: New = clear chat, Sync = primer-send personality, Settings, Quit. */
+#define MA_BREED    0xa7   /* garden: ENTER */
+#define MA_PREVIEW  0xa8   /* garden: P */
+#define MA_RANDOM   0xa9   /* garden: R */
+#define MA_VIEW     0xaa   /* garden: V */
+#define MA_EXPORT   0xab   /* garden: X — splice export */
+
+/* garden: File = Save/Random/Quit; Edit = Breed/Preview/View/Export. */
+static const MI mF_garden[] = {{"Save    ^S", MA_SAVE},
+                               {"Random  ^R", MA_RANDOM},
+                               {"Quit    ^Q", MA_QUIT}};
+static const MI mE_garden[] = {{"Breed   ENT", MA_BREED},
+                               {"Preview P  ", MA_PREVIEW},
+                               {"View    V  ", MA_VIEW},
+                               {"Export  X  ", MA_EXPORT}};
+static const MS ms_garden  = { mF_garden, NA(mF_garden),
+                               mE_garden, NA(mE_garden),
+                               0, 0, mH_about, NA(mH_about) };
+#define MA_EVOLVE   0xab   /* hxhnt: Edit → Evolve */
+/* ask: New = clear chat, Sync = primer-send personality, Settings,
+ * Quit.  "Sync" sends the personality bank as a hidden user-role
+ * message + captures the LLM's ack as a hidden assistant message,
+ * both kept in the conversation context for subsequent turns but
+ * never rendered. */
 static const MI mF_ask[]   = {{"New     ^N", MA_NEW},
                               {"Sync    ^P", MA_PROMPT_SYNC},
                               {"Settings^E", MA_SETTINGS},
                               {"Quit    ^Q", MA_QUIT}};
 static const MS ms_ask     = { mF_ask, NA(mF_ask), 0, 0,
                                0, 0, mH_about, NA(mH_about) };
-
-/* tinyagent: coder menu — File: Save state, Quit; Help: About.
- * Reuses mH_about; mF_coder is a small new array.  ~40 B rodata
- * total.  The corresponding fix is in run_coder's input loop
- * which now calls menu_activation + menu_run and handles the
- * returned action bytes. */
-static const MI mF_coder[] = {{"Save    ^S", MA_SAVE},
+/* hxhnt: File = Save/Quit; Edit = Evolve. */
+static const MI mF_hxhnt[] = {{"Save    ^S", MA_SAVE},
                               {"Quit    ^Q", MA_QUIT}};
-static const MS ms_coder   = { mF_coder, NA(mF_coder), 0, 0,
+static const MI mE_hxhnt[] = {{"Evolve  E ", MA_EVOLVE}};
+static const MS ms_hxhnt   = { mF_hxhnt, NA(mF_hxhnt),
+                               mE_hxhnt, NA(mE_hxhnt),
                                0, 0, mH_about, NA(mH_about) };
 
 /* Read a key into k[]. Returns -1 if k is not a menu-activation
@@ -1757,8 +1747,16 @@ static void show_about(const char *title) {
 
 
 /* ── forward declarations of apps ──────────────────────── */
+static int run_shell(int, char**);
+static int run_sheet(int, char**);
 static int run_ask(int, char**);
+static int run_prompt(int, char**);
 static int run_coder(int, char**);
+static int run_soul(int, char**);
+static int run_xpg(int, char**);
+static int run_garden(int, char**);
+static int run_preview_genome(int, char**);
+static int run_view_genome(int, char**);
 
 /* Coder's soul fallback shells out to ./officesoul --gen and
  * captures its stdout.  Returns bytes copied into `out` (0 on any
@@ -1792,6 +1790,134 @@ static int npad_target_line;
 
 
 /* ── shell: run apps by name + a few built-ins ─────────── */
+static int run_shell(int argc, char **argv) {
+    current_ms = &ms_shell;
+    (void)argc; (void)argv;
+    term_raw_polling();   /* 1-s tick so the home-screen clock advances */
+    int running = 1;
+    char line[256];
+    int  llen = 0;
+    int  cur_y = 3;
+    int  msg_kind = 0;       /* 0 = none, 1 = ok, 2 = err */
+    char msg[64];
+    msg[0] = 0;
+
+    while (running) {
+        paint_desktop();
+        chrome("OfficeAgent");
+        body_clear();
+        /* Live clock + this instance's pid in the genome's accent
+         * colour, just below the menu bar.  Each office process
+         * (host shell, V-mode jail child, future spawns) shows its
+         * own pid here. */
+        {
+            char buf[64];
+            int p = 2;
+            buf[0] = ' '; buf[1] = ' ';
+            p += clock_render(g_genome.clock_style, buf + p);
+            buf[p++] = ' '; buf[p++] = ' '; buf[p++] = ' ';
+            buf[p++] = 'p'; buf[p++] = 'i'; buf[p++] = 'd'; buf[p++] = ' ';
+            p += utoa((unsigned)getpid_(), buf + p);
+            /* If jail.c injected a per-instance token, surface it
+             * alongside the pid so identity survives PID-namespace
+             * flattening (every jailed office is pid 1). */
+            if (g_instance_token[0]) {
+                buf[p++] = ' '; buf[p++] = '·'; buf[p++] = ' ';
+                int tn = 0;
+                while (g_instance_token[tn] && tn < 16) {
+                    buf[p++] = g_instance_token[tn++];
+                }
+            }
+            buf[p] = 0;
+            cup(2, 2);
+            sgrbgfg(COL_BAR_BG, g_genome.accent);
+            fbw(buf, p);
+            sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+        }
+        body_at(2, 3, "Welcome to OfficeAgent. Built-in commands:", SCREEN_W - 4);
+        body_at(2, 4, "  sheet  xpg  ask  prompt  coder  soul  exit",
+                SCREEN_W - 4);
+        body_at(2, 5, "  (coder = iterative LLM code generator; soul = on-board",
+                SCREEN_W - 4);
+        body_at(2, 6, "   25 K transformer + GA evolution; prompt edits 4 KB banks.)",
+                SCREEN_W - 4);
+        if (msg[0]) {
+            sgrbgfg(COL_BAR_BG, msg_kind == 2 ? 88 : 22);
+            body_at(2, 9, msg, SCREEN_W - 4);
+            sgrbgfg(COL_BAR_BG, COL_BAR_FG);
+        }
+        cup(2, cur_y + 7);
+        sgrbgfg(15, 0);
+        fbs(" > ");
+        fbw(line, llen);
+        blanks(SCREEN_W - 7 - llen);
+        status("type a command, ENTER to run, q to quit");
+        fbflush();
+
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+
+        int act = -1, ami = menu_activation(k, n);
+        if (ami >= 0) act = menu_run(&ms_shell, ami);
+        if (act == MA_ABOUT) {
+            show_about("OfficeAgent");
+            continue;
+        }
+        if (act == MA_QUIT) { running = 0; break; }
+
+        if (k[0] == '\r' || k[0] == '\n') {
+            line[llen] = 0;
+            msg[0] = 0; msg_kind = 0;
+            if (llen == 0) { continue; }
+            if (scmp(line, "exit") == 0 || scmp(line, "quit") == 0) {
+                running = 0;
+                break;
+            }
+            /* Tokenise by spaces (just first arg) */
+            int sp = 0;
+            while (sp < llen && line[sp] != ' ') sp++;
+            char cmd[32];
+            int cn = sp < (int)sizeof cmd - 1 ? sp : (int)sizeof cmd - 1;
+            mcpy(cmd, line, cn); cmd[cn] = 0;
+            char *path = (sp < llen) ? line + sp + 1 : (char *)"";
+            char *sub_argv[3] = { cmd, path, 0 };
+            int sub_argc = (sp < llen) ? 2 : 1;
+
+            int rc = -1;
+            if (scmp(cmd, "sheet") == 0 || scmp(cmd, "calc") == 0)
+                                               rc = run_sheet(sub_argc, sub_argv);
+            else if (scmp(cmd, "ask") == 0)    rc = run_ask(sub_argc, sub_argv);
+            else if (scmp(cmd, "prompt") == 0) rc = run_prompt(sub_argc, sub_argv);
+            else if (scmp(cmd, "coder") == 0)  rc = run_coder(sub_argc, sub_argv);
+            else if (scmp(cmd, "soul") == 0)   rc = run_soul(sub_argc, sub_argv);
+            else if (scmp(cmd, "garden") == 0) rc = run_garden(sub_argc, sub_argv);
+            /* xpg subsumes rpg + hxhnt + lsys.  Aliases route here. */
+            else if (scmp(cmd, "xpg")   == 0 || scmp(cmd, "rpg") == 0 ||
+                     scmp(cmd, "hxhnt") == 0 || scmp(cmd, "lsys") == 0)
+                                               rc = run_xpg(sub_argc, sub_argv);
+            else { mcpy(msg, "unknown command", 16); msg_kind = 2; }
+
+            (void)rc;
+            llen = 0;
+            /* Sub-app left the tty in regular raw mode (VMIN=1).  Put
+             * the polling mode back so the clock keeps ticking. */
+            term_raw_polling();
+            continue;
+        }
+        if (k[0] == 0x7f || k[0] == 8) {  /* backspace */
+            if (llen > 0) llen--;
+            continue;
+        }
+        if (k[0] == 'q' && llen == 0) { running = 0; break; }
+        if (k[0] >= 32 && k[0] < 127 && llen < (int)sizeof line - 1) {
+            line[llen++] = (char)k[0];
+        }
+    }
+
+    term_cooked();
+    return 0;
+}
 
 
 /* ── notepad: cursor-driven edit ───────────────────────── */
@@ -2468,6 +2594,195 @@ static void sheet_kronecker(void) {
     cellrow = 0; cellcol = 0;
 }
 
+static int run_sheet(int argc, char **argv) {
+    current_ms = &ms_sheet;
+    cur_sheet = 0;
+    sheet_msg[0] = 0;
+    if (argc > 1 && argv[1][0]) {
+        load_file(argv[1]);
+        sheet_load_csv();
+    } else {
+        /* Wipe all 3 sheets so a fresh launch starts clean. */
+        mset(cell, 0, sizeof cell);
+        fname[0] = 0;
+    }
+    cellrow = 0; cellcol = 0;
+    term_raw();
+
+    int editing = 0;
+    int eidx = 0;
+
+    while (1) {
+        paint_desktop();
+        chrome("Sheet");
+        body_clear();
+        /* Tab strip at row 1 — `[A] B  C`-style with active inverted. */
+        cup(2, 1);
+        for (int s = 0; s < NSHEETS; s++) {
+            if (s == cur_sheet) sgrbgfg(15, 0);
+            else                sgrbgfg(7, 0);
+            fbw(" ", 1);
+            fbw(s == cur_sheet ? "[" : " ", 1);
+            char ch = (char)('A' + s);
+            fbw(&ch, 1);
+            fbw(s == cur_sheet ? "]" : " ", 1);
+            fbw(" ", 1);
+        }
+        sgrbgfg(7, 8);
+        if (sheet_msg[0]) fbs(sheet_msg);
+        /* Column headers */
+        cup(2, 2);
+        sgrbgfg(7, 8);
+        fbs("    ");
+        for (int c = 0; c < SHEET_COLS; c++) {
+            char h = 'A' + c;
+            fbw(" ", 1);
+            fbw(&h, 1);
+            for (int j = 0; j < CELL_W - 2; j++) fbw(" ", 1);
+        }
+        for (int r = 0; r < SHEET_ROWS && r + 3 < SCREEN_H - 1; r++) {
+            cup(2, 3 + r);
+            sgrbgfg(7, 8);
+            char rh[3] = { ' ', (char)('1' + r % 9), ' ' };
+            fbw(rh, 3);
+            fbw(" ", 1);
+            for (int c = 0; c < SHEET_COLS; c++) {
+                int sel = (r == cellrow && c == cellcol);
+                if (sel) sgrbgfg(15, 0);
+                else     sgrbgfg(7, 0);
+                char shown[24];
+                int  len;
+                int  is_formula = (cell[cur_sheet][r][c][0] == '=');
+                if (is_formula && !(editing && sel)) {
+                    long long v = sheet_eval(cell[cur_sheet][r][c]);
+                    len = litoa_(v, shown);
+                    if (len > CELL_W - 1) len = CELL_W - 1;
+                    sgrbgfg(sel ? 15 : 7, sel ? 0 : 21);   /* blue fg = formula */
+                    fbw(shown, len);
+                } else {
+                    len = slen(cell[cur_sheet][r][c]);
+                    if (len > CELL_W - 1) len = CELL_W - 1;
+                    fbw(cell[cur_sheet][r][c], len);
+                }
+                sgrbgfg(sel ? 15 : 7, 0);
+                blanks(CELL_W - len);
+            }
+        }
+        char hint[80] = { 0 };
+        int hn = 0;
+        const char *h = editing
+            ? "  editing — enter commits, esc cancels  (=A1+B2 for formulas)"
+            : "  arrows|type=replace|e edit|tab/1-3|M A.B|K A(x)B|s save|q back";
+        while (h[hn]) { hint[hn] = h[hn]; hn++; }
+        status(hint);
+        fbflush();
+
+        unsigned char k[8];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+
+        if (editing) {
+            if (k[0] == '\r' || k[0] == '\n') {
+                cell[cur_sheet][cellrow][cellcol][eidx] = 0;
+                editing = 0;
+                continue;
+            }
+            if (k[0] == 0x1b && n == 1) {
+                editing = 0;
+                continue;
+            }
+            if (k[0] == 0x7f || k[0] == 8) {
+                if (eidx > 0) cell[cur_sheet][cellrow][cellcol][--eidx] = 0;
+                continue;
+            }
+            if (k[0] == 0x16) {                          /* ^V paste in edit */
+                for (int i = 0; i < cb_n && eidx < 15; i++) {
+                    if (cb[i] >= 32 && cb[i] < 127)
+                        cell[cur_sheet][cellrow][cellcol][eidx++] = cb[i];
+                }
+                cell[cur_sheet][cellrow][cellcol][eidx] = 0;
+                continue;
+            }
+            if (k[0] >= 32 && k[0] < 127 && eidx < 15) {
+                cell[cur_sheet][cellrow][cellcol][eidx++] = (char)k[0];
+            }
+            continue;
+        }
+
+        int act = -1, ami = menu_activation(k, n);
+        if (ami >= 0) act = menu_run(&ms_sheet, ami);
+        if (act == MA_ABOUT) {
+            show_about("Sheet");
+            continue;
+        }
+        if (act > 0) { k[0] = (unsigned char)act; n = 1; }
+
+        if (k[0] == 'q' || k[0] == MA_QUIT) break;
+        if (k[0] == 's' || k[0] == MA_SAVE) sheet_save_csv();
+        if (k[0] == 'e') {
+            editing = 1;
+            eidx = slen(cell[cur_sheet][cellrow][cellcol]);
+        }
+        /* office55 — tab cycle + 1/2/3 jump + M multiply.  Clear any
+         * stale matrix-multiply message on every nav action so the
+         * banner doesn't linger after the user moves on. */
+        if (k[0] == '\t') {
+            cur_sheet = (cur_sheet + 1) % NSHEETS;
+            cellrow = 0; cellcol = 0;
+            sheet_msg[0] = 0;
+            continue;
+        }
+        if (k[0] >= '1' && k[0] <= ('0' + NSHEETS)) {
+            cur_sheet = k[0] - '1';
+            cellrow = 0; cellcol = 0;
+            sheet_msg[0] = 0;
+            continue;
+        }
+        if (k[0] == 'M' || k[0] == 'm') {
+            sheet_multiply();
+            continue;
+        }
+        if (k[0] == 'K' || k[0] == 'k') {
+            sheet_kronecker();
+            continue;
+        }
+        if (k[0] == 0x03 || k[0] == 0x18) {              /* copy / cut cell */
+            cb_set(cell[cur_sheet][cellrow][cellcol],
+                   slen(cell[cur_sheet][cellrow][cellcol]));
+            if (k[0] == 0x18) cell[cur_sheet][cellrow][cellcol][0] = 0;
+        }
+        if (k[0] == 0x16) {                              /* paste cell */
+            int put = cb_n; if (put > 15) put = 15;
+            int j = 0;
+            for (int i = 0; i < put; i++) {
+                if (cb[i] >= 32 && cb[i] < 127) cell[cur_sheet][cellrow][cellcol][j++] = cb[i];
+            }
+            cell[cur_sheet][cellrow][cellcol][j] = 0;
+        }
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
+            switch (k[2]) {
+            case 'A': if (cellrow > 0) cellrow--; break;
+            case 'B': if (cellrow < SHEET_ROWS - 1) cellrow++; break;
+            case 'C': if (cellcol < SHEET_COLS - 1) cellcol++; break;
+            case 'D': if (cellcol > 0) cellcol--; break;
+            }
+        }
+        /* Excel-style overwrite: any printable char that isn't a
+         * reserved hotkey starts a fresh edit, replacing whatever
+         * was in the cell.  Lets the user type "42" over "=A1+B2"
+         * without first backspacing through the formula. */
+        if (!editing && k[0] >= 32 && k[0] < 127 &&
+            k[0] != 'q' && k[0] != 's' && k[0] != 'e' &&
+            k[0] != 'm' && k[0] != 'M' && k[0] != 'k' && k[0] != 'K' &&
+            !(k[0] >= '1' && k[0] <= '3')) {
+            cell[cur_sheet][cellrow][cellcol][0] = (char)k[0];
+            cell[cur_sheet][cellrow][cellcol][1] = 0;
+            eidx = 1;
+            editing = 1;
+        }
+    }
+    return 0;
+}
 
 
 /* ── hex editor: 16 bytes/line view + nibble write ─────── */
@@ -3678,6 +3993,48 @@ static int run_prompt_edit_bank(int b) {
     return rc;
 }
 
+static int run_prompt(int argc, char **argv) {
+    /* `prompt N` (1..4) → edit bank N-1 directly. */
+    if (argc > 1 && argv[1][0] >= '1' && argv[1][0] <= '4' && argv[1][1] == 0) {
+        return run_prompt_edit_bank(argv[1][0] - '1');
+    }
+    /* Otherwise show a chooser. */
+    current_ms = &ms_notepad;
+    while (1) {
+        bank_load_all();
+        paint_desktop();
+        chrome("Memory Banks");
+        body_clear();
+        body_at(2, 3, "Pick a bank to edit:", SCREEN_W - 4);
+        for (int b = 0; b < BANK_COUNT; b++) {
+            char ln[80];
+            int p = 2;
+            ln[0] = ' '; ln[1] = ' ';
+            ln[p++] = '['; ln[p++] = '1' + b; ln[p++] = ']'; ln[p++] = ' ';
+            p = sapp(ln, p, BANK_LABEL[b]);
+            while (p < 24) ln[p++] = ' ';
+            p = sapp(ln, p, " (");
+            p += utoa((unsigned)g_bank_len[b], ln + p);
+            p = sapp(ln, p, "/4096 B,  ");
+            p = sapp(ln, p, BANK_FILE[b]);
+            p = sapp(ln, p, ")");
+            ln[p] = 0;
+            body_at(2, 5 + b, ln, SCREEN_W - 4);
+        }
+        body_at(2, 5 + BANK_COUNT + 1,
+                "ENTER 1-4 picks a bank.  q quits.", SCREEN_W - 4);
+        status("memory bank chooser");
+        fbflush();
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+        if (k[0] == 'q' || k[0] == 0x1b) break;
+        if (k[0] >= '1' && k[0] <= '4') {
+            run_prompt_edit_bank(k[0] - '1');
+        }
+    }
+    return 0;
+}
 
 
 /* ── coder.db: TinyDB-style B-tree node store ──────────────
@@ -4971,10 +5328,7 @@ static int run_coder(int argc, char **argv) {
             cl(fd);
         }
     }
-    /* tinyagent: ms_coder restores Alt+F/H menu activation.  The
-     * fix in the input loop below calls menu_activation + menu_run
-     * so the menus the chrome promises are actually live. */
-    current_ms = &ms_coder;
+    current_ms = &ms_shell;
     term_raw();
     coder_paint("ready");
     while (1) {
@@ -4982,17 +5336,6 @@ static int run_coder(int argc, char **argv) {
         int n = read_key(k, sizeof k);
         if (n < 0) continue;
         if (n == 0) break;          /* tty closed / pipe EOF */
-        /* Menu activation: Alt+F / Alt+H / F10 open File / Help.
-         * menu_run returns the selected action byte, or 0 on cancel. */
-        int act = -1, mi = menu_activation(k, n);
-        if (mi >= 0) act = menu_run(&ms_coder, mi);
-        if (act == MA_ABOUT) {
-            show_about("coder");
-            coder_paint("ready");
-            continue;
-        }
-        if (act == MA_QUIT) break;
-        if (act == MA_SAVE) k[0] = 's';   /* fall through to inline save-state */
         if (k[0] == 'q') break;
         if (k[0] == 'e') { coder_input_goal(); coder_paint("ready"); continue; }
         if (k[0] == 't') {
@@ -5215,6 +5558,26 @@ static int run_coder(int argc, char **argv) {
  * both the interactive `soul` app and the coder fallback.  Saves
  * the embedded weight blob (which dominated officeagent's size). */
 
+static int run_soul(int argc, char **argv) {
+    (void)argc; (void)argv;
+    /* Hand the tty over to officesoul cleanly. */
+    term_cooked();
+    long pid = forkk();
+    if (pid < 0) return -1;
+    if (pid == 0) {
+        char *av[] = { (char *)"./officesoul", (char *)"soul", 0 };
+        execvee("./officesoul", av, g_envp);
+        /* Fall back to PATH lookup so a system-installed officesoul
+         * works even without the leading dot-slash. */
+        char *av2[] = { (char *)"officesoul", (char *)"soul", 0 };
+        execvee("/usr/local/bin/officesoul", av2, g_envp);
+        execvee("/usr/bin/officesoul",       av2, g_envp);
+        qu(127);
+    }
+    int status = 0;
+    wait4_(&status);
+    return 0;
+}
 
 static int soul_external_gen(const char *prompt, int pn,
                              char *out, int out_cap) {
@@ -5670,12 +6033,162 @@ static int garden_load_genome_hex(const char *h) {
     return 0;
 }
 
+static int run_preview_genome(int argc, char **argv) {
+    if (argc < 2) return 2;
+    if (garden_load_genome_hex(argv[1]) < 0) return 2;
+    garden_preview_render(" PREVIEW · jailed · any key returns ");
+    return 0;
+}
 
 /* `office9 view-genome <32-hex>` — the in-jail entry point for V.
  * Loads the genome and drops into run_shell, so the user can type
  * `notepad`, `sheet`, etc. and see them with the chosen colours.
  * Pressing Q in the shell tears down the jail and returns to garden. */
+static int run_view_genome(int argc, char **argv) {
+    if (argc < 2) return 2;
+    if (garden_load_genome_hex(argv[1]) < 0) return 2;
+    return run_shell(0, 0);
+}
 
+static int run_garden(int argc, char **argv) {
+    (void)argc; (void)argv;
+    current_ms = &ms_garden;
+
+    if (!garden_load()) garden_init_pop();
+    garden_rng_seed_if_unset();
+
+    term_raw();
+    int cursor = 0;
+    int last_msg_ttl = 0;
+    static char last_msg[64];
+    last_msg[0] = 0;
+
+    while (1) {
+        int cols, rows;
+        garden_term_size(&cols, &rows);
+        cls();
+        garden_render_grid(cursor, cols, rows);
+
+        if (last_msg[0] && last_msg_ttl > 0) {
+            cup(0, rows - 1);
+            sgrbgfg(COL_BAR_BG, 22);
+            fbs(" ");
+            fbs(last_msg);
+            blanks(cols - 1 - slen(last_msg));
+            last_msg_ttl--;
+            if (last_msg_ttl == 0) last_msg[0] = 0;
+        }
+        fbflush();
+
+        unsigned char k[16];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+
+        int act = -1, ami = menu_activation(k, n);
+        if (ami >= 0) act = menu_run(&ms_garden, ami);
+        if (act == MA_ABOUT)   { show_about("Garden"); continue; }
+        if (act == MA_QUIT)    break;
+        if (act == MA_SAVE)    {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (act == MA_RANDOM)  { garden_init_pop(); continue; }
+        if (act == MA_BREED)   { garden_breed(); continue; }
+        if (act == MA_PREVIEW) { garden_preview(cursor); continue; }
+        if (act == MA_VIEW)    { garden_view(cursor); term_raw(); continue; }
+        if (act == MA_EXPORT) {
+            /* Splice the cursor's gene into a fresh runnable binary
+             * so its chrome reflects this thumb when launched. */
+            char nm[HX_EXPORT_NAME_LEN + 1];
+            hx_make_export_name(nm, gd_export_seq++);
+            int rc = gd_splice_export(nm,
+                                      (const unsigned char *)&g_pop[cursor]);
+            int ml = sapp(last_msg, 0, rc == 0 ? "exported " : "export failed ");
+            if (rc == 0) ml = sapp(last_msg, ml, nm);
+            last_msg[ml] = 0; last_msg_ttl = 1;
+            continue;
+        }
+
+        if (n >= 3 && k[0] == 0x1b && k[1] == '[') {
+            int gx = cursor % 8, gy = cursor / 8;
+            switch (k[2]) {
+            case 'A': if (gy > 0) cursor -= 8; break;
+            case 'B': if (gy < 7) cursor += 8; break;
+            case 'C': if (gx < 7) cursor++;    break;
+            case 'D': if (gx > 0) cursor--;    break;
+            }
+            continue;
+        }
+        if (k[0] == 'h' || k[0] == 'H') { hex_mode = !hex_mode; continue; }
+
+        /* Hex mode rebinds: w/e/a/d/z/x for hex-aware movement,
+         * s = select-self (toggle marked).  Save in hex mode is on
+         * the menu (Alt+F → Save) or via ^S. */
+        if (hex_mode) {
+            char c = k[0];
+            if (c >= 'A' && c <= 'Z') c += 32;
+            if (c == 's') { g_marked ^= (1ULL << cursor); continue; }
+            if (c == 'a' || c == 'd' || c == 'w' || c == 'e' ||
+                c == 'z' || c == 'x') {
+                int gx = cursor % 8, gy = cursor / 8;
+                int odd = gy & 1;
+                int ngx = gx, ngy = gy;
+                switch (c) {
+                case 'a': ngx = gx - 1;                              break;
+                case 'd': ngx = gx + 1;                              break;
+                case 'w': ngy = gy - 1; ngx = gx + (odd ? 0 : -1);   break;
+                case 'e': ngy = gy - 1; ngx = gx + (odd ? 1 : 0);    break;
+                case 'z': ngy = gy + 1; ngx = gx + (odd ? 0 : -1);   break;
+                case 'x': ngy = gy + 1; ngx = gx + (odd ? 1 : 0);    break;
+                }
+                if (ngx >= 0 && ngx < 8 && ngy >= 0 && ngy < 8)
+                    cursor = ngy * 8 + ngx;
+                continue;
+            }
+        }
+
+        if (k[0] == ' ')              { g_marked ^= (1ULL << cursor); continue; }
+        if (k[0] == '\r' || k[0] == '\n') { garden_breed(); continue; }
+        if (k[0] == 'p' || k[0] == 'P') { garden_preview(cursor); continue; }
+        if (k[0] == 'v' || k[0] == 'V') { garden_view(cursor); term_raw(); continue; }
+        if (k[0] == 'r' || k[0] == 'R') { garden_init_pop(); continue; }
+        if (k[0] == 's' || k[0] == 'S') {
+            if (garden_save() == 0) {
+                int ml = sapp(last_msg, 0, "saved garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'l' || k[0] == 'L') {
+            if (garden_load()) {
+                int ml = sapp(last_msg, 0, "loaded garden.bin");
+                last_msg[ml] = 0; last_msg_ttl = 1;
+            }
+            continue;
+        }
+        if (k[0] == 'q' || k[0] == 0x11) break;
+        /* 'x' / 'X' export shortcut.  Hex mode catches lowercase 'x'
+         * earlier as SE movement; an export from hex mode either uses
+         * uppercase 'X' (which falls through here) or the Edit→Export
+         * menu (MA_EXPORT). */
+        if (k[0] == 'X' || (k[0] == 'x' && !hex_mode)) {
+            char nm[HX_EXPORT_NAME_LEN + 1];
+            hx_make_export_name(nm, gd_export_seq++);
+            int rc = gd_splice_export(nm,
+                                      (const unsigned char *)&g_pop[cursor]);
+            int ml = sapp(last_msg, 0, rc == 0 ? "exported " : "export failed ");
+            if (rc == 0) ml = sapp(last_msg, ml, nm);
+            last_msg[ml] = 0; last_msg_ttl = 1;
+            continue;
+        }
+    }
+
+    term_cooked();
+    return 0;
+}
 
 
 /* ── hxhnt: class-4 hex-CA hunter ────────────────────────────────────
@@ -8468,6 +8981,204 @@ static void rpg_show_anim_settings(void) {
     }
 }
 
+static int run_xpg(int argc, char **argv) {
+    (void)argc; (void)argv;
+    /* Inherit the active hxhnt ruleset + palette.  hx_active_init()
+     * already populated these at office startup; rpg_load_overworld
+     * refreshes terrain RGBs + the panel-seed cache itself so any
+     * palette change the user made in hxhnt this session takes
+     * effect on the next mosaic generation. */
+    hx_active_init();
+    rpg_sprites_init();
+    /* Reset the level-stack to the origin overworld each rpg launch.
+     * Sessions don't persist coords yet — a future fork can save the
+     * stack to a .rpg file alongside hxhnt.seed so re-entry resumes
+     * where the player left off. */
+    mset(rpg_world_pos, 0, sizeof rpg_world_pos);
+
+    int px = RPG_TILE_W / 2;       /* spawn at the centre of the mosaic */
+    int py = RPG_TILE_H / 2;
+
+    rpg_load_overworld(px, py);
+    rpg_player_init();
+    rpg_preload_invalidate();      /* fresh shadow each launch */
+
+    char action[80]; action[0] = 0;
+    int idle_ticks = 0;
+    int rows_v_cached = RPG_VIS_H;
+    rpg_animating = 0;
+    rpg_frame = 0;
+    rpg_terrain_anim_init();
+
+    /* Set up termios manually so we can switch between blocking and
+     * polling on the 'l' toggle.  Initial state: blocking. */
+    struct ti rt = term_orig;
+    rt.lflag &= ~(ICANON | ECHO);
+    rt.iflag &= ~(IXON | ICRNL);
+    rt.cc[6] = 1; rt.cc[5] = 0;     /* VMIN=1 (blocking), VTIME=0 */
+    io(0, TCSETS, &rt);
+    while (1) {
+        if (rpg_animating) {
+            rpg_animate_step(px, py, rows_v_cached);
+            rpg_frame++;
+        }
+
+        paint_desktop();
+        chrome("xpg");
+        rpg_render_view(px, py);
+
+        char hint[160]; int hl = 0;
+        hl = sapp(hint, hl, " HP ");
+        hl += utoa((unsigned)rpg_player.hp, hint + hl); hint[hl++] = '/';
+        hl += utoa((unsigned)rpg_player.max_hp, hint + hl);
+        hl = sapp(hint, hl, "  MP ");
+        hl += utoa((unsigned)rpg_player.mp, hint + hl); hint[hl++] = '/';
+        hl += utoa((unsigned)rpg_player.max_mp, hint + hl);
+        hl = sapp(hint, hl, "  inv ");
+        hl += utoa((unsigned)rpg_player.inv_count, hint + hl);
+        hl = sapp(hint, hl, "  | ");
+        if (rpg_animating) {
+            hl = sapp(hint, hl, "[live] ");
+        }
+        if (action[0]) {
+            hl = sapp(hint, hl, action);
+            hl = sapp(hint, hl, " · ");
+        }
+        hl = sapp(hint, hl, "wadezx=move i=inv m=zap l=live k=speeds 0-7=bend q ");
+        hint[hl] = 0;
+        status(hint);
+        fbflush();
+
+        if (rpg_player.hp <= 0) {
+            cup(2, 0);
+            sgrbgfg(196, 15);
+            fbs(" YOU DIED — press any key ");
+            sgr0();
+            fbflush();
+            unsigned char k[4]; read_key(k, sizeof k);
+            break;
+        }
+
+        unsigned char k[8];
+        int n = read_key(k, sizeof k);
+        if (n <= 0) continue;
+        if (k[0] == 'q' || k[0] == 'Q' || k[0] == 0x1b) break;
+        if (k[0] == 'i' || k[0] == 'I') { rpg_show_inventory(); continue; }
+        if (k[0] == 'm' || k[0] == 'M') {
+            rpg_cast_zap(px, py, action);
+            idle_ticks = 0;
+            continue;
+        }
+        if (k[0] == 'l' || k[0] == 'L') {
+            rpg_animating = !rpg_animating;
+            if (rpg_animating) {
+                rpg_anim_reset();
+                rt.cc[6] = 0; rt.cc[5] = 1;   /* poll: 100 ms */
+            } else {
+                rt.cc[6] = 1; rt.cc[5] = 0;   /* block */
+                /* Force per-cell-cache rebuild so static view returns
+                 * to its baseline 1-or-2-step CA outcome. */
+                mset(rpg_cell_done, 0, sizeof rpg_cell_done);
+            }
+            io(0, TCSETS, &rt);
+            continue;
+        }
+        if (k[0] == 'V') {
+            /* Drop into hxhnt's classic 64×64 live CA viewer for the
+             * current mother ruleset.  Same UI office64 had: 'g' to
+             * run a GA, 'h' to hunt, '['/']' to nudge mutation rate,
+             * 'r' to randomise palette, 'd' to save, 'x' to splice-
+             * export, 'q' to come back to xpg.  After return, refresh
+             * xpg's caches in case the user evolved the rule. */
+            int act = hx_display_seed(hx_seed_genome, hx_seed_pal,
+                                      (unsigned int)time_());
+            if (act == 'g') {
+                unsigned int gseed = (unsigned int)(time_() ^ (long)hx_rand());
+                hx_run_ga(20, 20, gseed);
+            } else if (act == 'h') {
+                hx_run_continuous_hunt();
+            }
+            rpg_palettes_refresh();
+            rpg_genome_live_cache = -1;
+            mset(rpg_cell_done, 0, sizeof rpg_cell_done);
+            rpg_anim_reset();
+            rt.cc[6] = rpg_animating ? 0 : 1;
+            rt.cc[5] = rpg_animating ? 1 : 0;
+            io(0, TCSETS, &rt);
+            continue;
+        }
+        if (k[0] == 'k' || k[0] == 'K') {
+            rpg_show_anim_settings();
+            /* Settings panel set blocking termios; restore whatever
+             * the rpg loop had. */
+            rt.cc[6] = rpg_animating ? 0 : 1;
+            rt.cc[5] = rpg_animating ? 1 : 0;
+            io(0, TCSETS, &rt);
+            continue;
+        }
+        if (k[0] >= '0' && k[0] <= '3') {
+            int t = k[0] - '0';
+            action[0] = 0;
+            rpg_bend(t, action);
+            rt.cc[6] = rpg_animating ? 0 : 1;
+            rt.cc[5] = rpg_animating ? 1 : 0;
+            io(0, TCSETS, &rt);
+            idle_ticks = 0;
+            continue;
+        }
+        if (k[0] >= '4' && k[0] <= '7') {
+            int slot = k[0] - '4';
+            action[0] = 0;
+            if (rpg_player.mp < 3) {
+                action[sapp(action, 0, "low mana")] = 0;
+            } else {
+                rpg_player.mp -= 3;
+                rpg_player.cat_bend[slot]++;
+                mset(rpg_sprite_done[RC_PLANT + slot], 0, RPG_CAT_VARIANTS);
+                action[sapp(action, 0, "bent")] = 0;
+            }
+            idle_ticks = 0;
+            continue;
+        }
+        char c = k[0];
+        if (c >= 'A' && c <= 'Z') c += 32;
+        if (c == 's') continue;   /* reserved */
+        action[0] = 0;
+        rpg_move(&px, &py, c, action);
+        rpg_path_tick(px, py);
+        /* office51 — pre-load the projected new edge panels into the
+         * shadow buffer one panel per tick whenever the player is
+         * within RPG_PRELOAD_MARGIN cells of a central-panel boundary.
+         * By the time the cross fires below, most/all of the work is
+         * already done off-screen. */
+        rpg_preload_advance_one(px, py);
+        /* Mosaic shift — if the player has stepped out of the central
+         * 64×64 sub-region of the 192×192 mosaic, advance the world
+         * stack and regenerate so they're back in the centre.  This
+         * guarantees the player never sees an unloaded edge. */
+        {
+            int mdx = 0, mdy = 0;
+            if (px <  RPG_MAP_W)         mdx = -1;
+            else if (px >= 2 * RPG_MAP_W)mdx =  1;
+            if (py <  RPG_MAP_H)         mdy = -1;
+            else if (py >= 2 * RPG_MAP_H)mdy =  1;
+            if (mdx || mdy) {
+                px -= mdx * RPG_MAP_W;
+                py -= mdy * RPG_MAP_H;
+                rpg_shift_mosaic(mdx, mdy, px, py);
+            }
+        }
+        /* Slow regen: every 4 actions, +1 HP/MP. */
+        idle_ticks++;
+        if (idle_ticks >= 4) {
+            idle_ticks = 0;
+            if (rpg_player.hp < rpg_player.max_hp) rpg_player.hp++;
+            if (rpg_player.mp < rpg_player.max_mp) rpg_player.mp++;
+        }
+    }
+    term_cooked();
+    return 0;
+}
 
 
 /* ── lsys: character-mode L-system viewer ────────────────
@@ -8632,21 +9343,90 @@ static const char *basename_(const char *p) {
 int main_c(int argc, char **argv, char **envp) {
     g_envp = envp;
     term_init();
-    /* tinyagent: dropped from officecoder's main_c —
-     *   - hx_active_init: hxhnt palette/genome bootstrap, rpg-only
-     *   - gd_embedded chrome decode: relied on garden state
-     *   - uname(2)-based "garden-XXXXXXXX" identity token:
-     *     jail.c-spawned subprocesses only
-     *   - tz_init_from_envp: only reached by clock_render +
-     *     sheet_make_save_fname, both GC'd in this fork
-     *   - wrapper-name detection (officecoder/officeagent/supercell/
-     *     officeN): we only ship one binary, so peel argv[1] iff it
-     *     matches "ask" or "coder"; default to coder otherwise. */
-    if (argc >= 2 && argv[1]) {
-        if (scmp(argv[1], "ask")   == 0) return run_ask  (argc - 1, argv + 1);
-        if (scmp(argv[1], "coder") == 0) return run_coder(argc - 1, argv + 1);
+    tz_init_from_envp(envp);
+    /* Bootstrap the active hxhnt palette + genome before any app
+     * touches them.  hxhnt evolves these; rpg derives terrain RGBs
+     * from the palette and uses the genome for its CA stepping. */
+    hx_active_init();
+    /* Suite-wide chrome lives in the .gdnseed embedded region.  A
+     * fresh build's gd_embedded matches the office6 default (so the
+     * blue/grey Win95 look survives); a spliced binary's region was
+     * overwritten by garden's export with the user's chosen gene. */
+    /* Per-instance identity.  jail.c (sibling tool) sethostname()s
+     * the new UTS NS to "garden-XXXXXXXX" before exec, where the
+     * 8 hex chars are a per-launch token.  Pull that suffix into
+     * g_instance_token so home + net panels can show stable identity
+     * even though getpid() returns 1 inside the pid-ns.  Outside the
+     * jail the hostname won't start with "garden-" and the token
+     * stays empty. */
+    {
+        char uts[6 * 65];
+        mset(uts, 0, sizeof uts);
+        if (sys3(SYS_uname, (long)uts, 0, 0) == 0) {
+            const char *node = uts + 65;       /* nodename field */
+            if (node[0] == 'g' && node[1] == 'a' && node[2] == 'r' &&
+                node[3] == 'd' && node[4] == 'e' && node[5] == 'n' &&
+                node[6] == '-') {
+                int t = 0;
+                const char *v = node + 7;
+                while (v[t] && t < (int)sizeof g_instance_token - 1) {
+                    g_instance_token[t] = v[t]; t++;
+                }
+                g_instance_token[t] = 0;
+            }
+        }
     }
-    return run_coder(argc, argv);
+
+    const char *cmd = (argc > 0) ? basename_(argv[0]) : "officecoder";
+    int sub_argc = argc;
+    char **sub_argv = argv;
+    /* If cmd is "officeagent" / "supercell" (or any officeN wrapper,
+     * kept for jail.c parity), peel argv[0] and treat argv[1] as
+     * the subcommand. */
+    {
+        int is_wrapper = 0;
+        if (scmp(cmd, "officecoder")  == 0 ||
+            scmp(cmd, "officeagent")  == 0 ||
+            scmp(cmd, "supercell")    == 0 ||
+            scmp(cmd, "tinyagentrpg") == 0) is_wrapper = 1;
+        if (cmd[0] == 'o' && cmd[1] == 'f' && cmd[2] == 'f' &&
+            cmd[3] == 'i' && cmd[4] == 'c' && cmd[5] == 'e') {
+            const char *t = cmd + 6;
+            if (*t == 0) is_wrapper = 1;
+            else {
+                int all_digit = 1;
+                while (*t) {
+                    if (*t < '0' || *t > '9') { all_digit = 0; break; }
+                    t++;
+                }
+                is_wrapper = is_wrapper || all_digit;
+            }
+        }
+        if (is_wrapper && argc > 1) {
+            cmd = argv[1];
+            sub_argv = argv + 1;
+            sub_argc = argc - 1;
+            goto skip_legacy_basename_chain;
+        }
+    }
+skip_legacy_basename_chain:
+    (void)0;
+    /* officecoder: ask + coder only.  Every other subcommand the
+     * officeagent dispatch used to handle (sheet, prompt, soul,
+     * garden, preview-genome, view-genome, xpg, hxh-*, shell) is
+     * absent here — the apps remain in the source for diff-friendly
+     * porting from officeagent, but with no caller `--gc-sections`
+     * drops them at link time.  Default subcommand is `coder` so
+     * `./officecoder` lands in the agent UI directly. */
+    if (scmp(cmd, "ask")   == 0) return run_ask  (sub_argc, sub_argv);
+    if (scmp(cmd, "coder") == 0) return run_coder(sub_argc, sub_argv);
+    /* tinyagentrpg: re-enable rpg.  Dispatching to run_xpg makes
+     * --gc-sections keep run_xpg + the hex-CA / L-system / sprite
+     * machinery in the binary.  `xpg` is the original officeagent
+     * subcommand name, kept as an alias. */
+    if (scmp(cmd, "rpg")   == 0) return run_xpg  (sub_argc, sub_argv);
+    if (scmp(cmd, "xpg")   == 0) return run_xpg  (sub_argc, sub_argv);
+    return run_coder(sub_argc, sub_argv);
 }
 
 

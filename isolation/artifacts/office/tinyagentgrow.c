@@ -1669,6 +1669,16 @@ static const MI mF_ask[]   = {{"New     ^N", MA_NEW},
 static const MS ms_ask     = { mF_ask, NA(mF_ask), 0, 0,
                                0, 0, mH_about, NA(mH_about) };
 
+/* tinyagent: coder menu — File: Save state, Quit; Help: About.
+ * Reuses mH_about; mF_coder is a small new array.  ~40 B rodata
+ * total.  The corresponding fix is in run_coder's input loop
+ * which now calls menu_activation + menu_run and handles the
+ * returned action bytes. */
+static const MI mF_coder[] = {{"Save    ^S", MA_SAVE},
+                              {"Quit    ^Q", MA_QUIT}};
+static const MS ms_coder   = { mF_coder, NA(mF_coder), 0, 0,
+                               0, 0, mH_about, NA(mH_about) };
+
 /* Read a key into k[]. Returns -1 if k is not a menu-activation
  * (Alt+f/e/v/h or F10), else the menu index 0..3 to start at. */
 static int menu_activation(const unsigned char *k, int kn) {
@@ -5038,10 +5048,10 @@ static int run_coder(int argc, char **argv) {
             cl(fd);
         }
     }
-    /* tinyagent: was `current_ms = &ms_shell` — coder's UI is single-key
-     * dispatch (no Alt+menu activation), so the menu spec is decorative.
-     * Setting it to NULL drops ms_shell + mF_quit from the binary. */
-    current_ms = 0;
+    /* tinyagent: ms_coder restores Alt+F/H menu activation.  The
+     * fix in the input loop below calls menu_activation + menu_run
+     * so the menus the chrome promises are actually live. */
+    current_ms = &ms_coder;
     term_raw();
     coder_paint("ready");
     while (1) {
@@ -5049,6 +5059,17 @@ static int run_coder(int argc, char **argv) {
         int n = read_key(k, sizeof k);
         if (n < 0) continue;
         if (n == 0) break;          /* tty closed / pipe EOF */
+        /* Menu activation: Alt+F / Alt+H / F10 open File / Help.
+         * menu_run returns the selected action byte, or 0 on cancel. */
+        int act = -1, mi = menu_activation(k, n);
+        if (mi >= 0) act = menu_run(&ms_coder, mi);
+        if (act == MA_ABOUT) {
+            show_about("coder");
+            coder_paint("ready");
+            continue;
+        }
+        if (act == MA_QUIT) break;
+        if (act == MA_SAVE) k[0] = 's';   /* fall through to inline save-state */
         if (k[0] == 'q') break;
         if (k[0] == 'e') { coder_input_goal(); coder_paint("ready"); continue; }
         if (k[0] == 't') {
