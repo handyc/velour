@@ -994,6 +994,7 @@ static long sys5(long n, long a, long b, long c, long d, long e) {
 #define SYS_wait4  61
 #define SYS_dup2   33
 #define SYS_pipe   22
+#define SYS_unlink 87
 #define SYS_chmod  90
 #define SYS_uname  63
 #define SYS_readlink 89
@@ -2860,7 +2861,27 @@ static int ask_extract_string(const char *src, int sn, const char *key,
                 else if (e == '"')  { out[o++] = '"';  k += 2; }
                 else if (e == '\\') { out[o++] = '\\'; k += 2; }
                 else if (e == '/')  { out[o++] = '/';  k += 2; }
-                else if (e == 'u')  { out[o++] = '?';  k += 6; }
+                else if (e == 'u')  {
+                    /* Decode \uXXXX to a byte if the codepoint is
+                     * printable ASCII (0x20..0x7e).  Anything else
+                     * (Latin-1+, emoji, control chars) falls back to
+                     * '?'.  This is the difference between getting
+                     * a literal '>' and ASCII '?' in code that the
+                     * compiler will then reject. */
+                    int v = 0, ok = (k + 5 < sn);
+                    for (int hx = 0; ok && hx < 4; hx++) {
+                        char ch = src[k+2+hx];
+                        int d = -1;
+                        if (ch >= '0' && ch <= '9')      d = ch - '0';
+                        else if (ch >= 'a' && ch <= 'f') d = ch - 'a' + 10;
+                        else if (ch >= 'A' && ch <= 'F') d = ch - 'A' + 10;
+                        if (d < 0) { ok = 0; break; }
+                        v = (v << 4) | d;
+                    }
+                    if (ok && v >= 0x20 && v < 0x7f) out[o++] = (char)v;
+                    else                              out[o++] = '?';
+                    k += 6;
+                }
                 else                { out[o++] = e;    k += 2; }
             } else {
                 out[o++] = c; k++;
@@ -8936,6 +8957,112 @@ static int ja_find(const char *hay, int hlen, const char *needle) {
     return -1;
 }
 
+/* Phase 3: leaf compile verification.
+ *
+ * Caps for the verify-retry path.  Code blocks cap at 8 KB (most
+ * leaf-level functions are way smaller); compiler error capture at
+ * 1.5 KB (enough for ~30 typical cc error lines); retry prompt
+ * 12 KB so it stays under ASK_BUF_CAP comfortably. */
+#define JA_CODE_CAP        8192
+#define JA_ERR_CAP         1536
+#define JA_RETRY_MSG_CAP  12288
+
+/*
+ * Extract the first ```c (or ```C / ```cpp) fenced block from text.
+ * Returns block length written to out (without surrounding ``` lines),
+ * 0 if no fenced code block found, -1 if found but not C.  *is_c_out
+ * gets 1 for c/C/cpp, 0 for any other language tag.  Caller can use
+ * is_c_out=0 to skip the compile step and emit the body verbatim. */
+static int ja_extract_code(const char *text, int tlen,
+                           char *out, int cap, int *is_c_out) {
+    *is_c_out = 0;
+    for (int i = 0; i + 3 < tlen; i++) {
+        if (text[i] != '`' || text[i+1] != '`' || text[i+2] != '`') continue;
+        int j = i + 3;
+        while (j < tlen && text[j] != '\n' && text[j] != '\r') j++;
+        int lang_len = j - (i + 3);
+        if (lang_len == 1 && (text[i+3] == 'c' || text[i+3] == 'C'))
+            *is_c_out = 1;
+        else if (lang_len == 3 && text[i+3] == 'c' &&
+                 text[i+4] == 'p' && text[i+5] == 'p')
+            *is_c_out = 1;
+        while (j < tlen && (text[j] == '\n' || text[j] == '\r')) j++;
+        int k = j;
+        while (k + 2 < tlen) {
+            if (text[k] == '`' && text[k+1] == '`' && text[k+2] == '`') break;
+            k++;
+        }
+        int len = k - j;
+        if (len > cap - 1) len = cap - 1;
+        mcpy(out, text + j, len);
+        out[len] = 0;
+        return len;
+    }
+    return 0;
+}
+
+/* Write src to /tmp/jail_verify_<pid>.c and run `cc -fsyntax-only`
+ * against it (no codegen, no link — faster, and good enough for
+ * leaf verification: we only care that the LLM wrote valid C).
+ * Returns 0 if cc exited 0, >0 cc exit code, -1 plumbing error.
+ * cc's stderr lands in err_out (truncated to err_cap-1). */
+static int ja_compile_c(const char *src, int src_len,
+                        char *err_out, int err_cap) {
+    char path[64];
+    int pp = sapp(path, 0, "/tmp/jail_verify_");
+    char pid_s[16];
+    ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
+    pp = sapp(path, pp, pid_s);
+    pp = sapp(path, pp, ".c");
+    path[pp] = 0;
+
+    int fd = (int)op(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+    wr(fd, src, src_len);
+    cl(fd);
+
+    int pfd[2];
+    if (pipe_(pfd) < 0) {
+        sys3(SYS_unlink, (long)path, 0, 0);
+        return -1;
+    }
+    long cpid = forkk();
+    if (cpid < 0) {
+        cl(pfd[0]); cl(pfd[1]);
+        sys3(SYS_unlink, (long)path, 0, 0);
+        return -1;
+    }
+    if (cpid == 0) {
+        cl(pfd[0]);
+        dup2_(pfd[1], 2);          /* stderr → pipe */
+        cl(pfd[1]);
+        int nfd = (int)op("/dev/null", O_WRONLY, 0);
+        if (nfd >= 0) { dup2_(nfd, 1); cl(nfd); }
+        char *cargv[] = {
+            (char *)"cc", (char *)"-fsyntax-only",
+            (char *)"-Wno-implicit-function-declaration",
+            path, 0
+        };
+        execvee("/usr/bin/cc", cargv, g_envp);
+        execvee("/bin/cc",     cargv, g_envp);
+        qu(127);
+    }
+    cl(pfd[1]);
+    long total = 0;
+    while (total < err_cap - 1) {
+        long n = rd(pfd[0], err_out + total, err_cap - 1 - total);
+        if (n <= 0) break;
+        total += n;
+    }
+    err_out[total] = 0;
+    cl(pfd[0]);
+    int st = 0;
+    wait4_(&st);
+    sys3(SYS_unlink, (long)path, 0, 0);
+    if (st & 0x7f) return -1;
+    return (st >> 8) & 0xff;
+}
+
 /* Phase-2 entry point.  argv[0] is "decompose" (already peeled by
  * main_c), argv[1] is the task description.  ja_cfg.depth holds the
  * remaining depth budget (already decremented by the parent's child-
@@ -9025,9 +9152,99 @@ static int ja_run_decompose(int argc, char **argv) {
     /* At depth 0 (force-answer), even a SUBTASKS reply is treated as
      * literal text — we never spawn below depth 0. */
     if (!is_subtasks || ja_cfg.depth <= 0) {
-        wr(1, content + body_start, cn - body_start);
-        if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
-        return 0;
+        /* Phase-3: leaf compile verification.  If the body contains
+         * a fenced ```c block, run `cc -fsyntax-only` on it.  On
+         * failure, build a retry prompt with the compile error +
+         * previous code and re-ask up to JA_VERIFY_RETRIES times.
+         * Bodies without C code are emitted as-is (no verifier
+         * exists yet for python/shell/etc — Phase 4 territory). */
+        #define JA_VERIFY_RETRIES 2
+        static char code_buf[JA_CODE_CAP];
+        static char err_buf[JA_ERR_CAP];
+        static char retry_msg[JA_RETRY_MSG_CAP];
+
+        for (int attempt = 0; ; attempt++) {
+            int is_c = 0;
+            int code_len = ja_extract_code(content + body_start,
+                                           cn - body_start,
+                                           code_buf, sizeof code_buf,
+                                           &is_c);
+            if (code_len <= 0 || !is_c) {
+                /* No C block — emit verbatim, can't verify */
+                wr(1, content + body_start, cn - body_start);
+                if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+                return 0;
+            }
+            int rc = ja_compile_c(code_buf, code_len,
+                                  err_buf, sizeof err_buf);
+            if (rc == 0) {
+                /* Clean compile — emit body and mark verified */
+                wr(1, "VERIFIED-C-OK\n", 14);
+                wr(1, content + body_start, cn - body_start);
+                if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+                return 0;
+            }
+            if (attempt >= JA_VERIFY_RETRIES) {
+                /* Out of retries — emit anyway with a warning marker
+                 * so the parent (or user) knows the code is suspect. */
+                wr(1, "VERIFIED-C-FAIL (",   17);
+                char a_s[8];
+                ja_utoa((unsigned int)(attempt + 1), a_s);
+                wr(1, a_s, slen(a_s));
+                wr(1, " attempts)\n",       11);
+                wr(1, content + body_start, cn - body_start);
+                if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+                return 0;
+            }
+            /* Build retry prompt: force-answer + error + previous
+             * code + original goal.  Truncate err + code defensively
+             * so the prompt fits ASK_BUF_CAP comfortably. */
+            int p = 0;
+            p = sapp(retry_msg, p, ja_dec_sys_force);
+            p = sapp(retry_msg, p,
+                     "\n\nYour previous attempt did not compile.\n\n"
+                     "Compiler error (cc -fsyntax-only):\n");
+            int el = slen(err_buf);
+            if (el > 1200) el = 1200;
+            mcpy(retry_msg + p, err_buf, el); p += el;
+            p = sapp(retry_msg, p,
+                     "\n\nYour previous code:\n```c\n");
+            int cl_ = code_len;
+            if (cl_ > 3000) cl_ = 3000;
+            mcpy(retry_msg + p, code_buf, cl_); p += cl_;
+            p = sapp(retry_msg, p,
+                     "\n```\n\nFix it and emit ANSWER: with corrected "
+                     "code wrapped in ```c ... ``` so it can be "
+                     "verified.\n\nOriginal task:\n");
+            p = sapp(retry_msg, p, goal);
+
+            ask_n_msgs = 0;
+            ask_buf_use = 0;
+            ask_msg_add(0, retry_msg, p);
+
+            int new_cn = ask_send_retrying(content, sizeof content,
+                                           fail_reason, sizeof fail_reason);
+            if (new_cn < 0) {
+                wr(2, "ja: retry LLM call failed: ", 27);
+                wr(2, fail_reason, slen(fail_reason));
+                wr(2, "\n", 1);
+                /* Emit what we had before the failed retry */
+                wr(1, content + body_start, cn - body_start);
+                if (cn > 0 && content[cn - 1] != '\n') wr(1, "\n", 1);
+                return 0;
+            }
+            cn = new_cn;
+            int a2 = ja_find(content, cn, "ANSWER:");
+            int s2 = ja_find(content, cn, "SUBTASKS:");
+            if (a2 >= 0 && (s2 < 0 || a2 < s2)) body_start = a2 + 7;
+            else if (s2 >= 0)                   body_start = s2 + 9;
+            else                                body_start = 0;
+            while (body_start < cn &&
+                   (content[body_start] == ' ' || content[body_start] == '\n' ||
+                    content[body_start] == '\r' || content[body_start] == '\t'))
+                body_start++;
+        }
+        #undef JA_VERIFY_RETRIES
     }
 
     /* SUBTASKS path: parse list lines, spawn a child per subtask, read
