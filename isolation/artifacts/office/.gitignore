@@ -114,6 +114,9 @@ officerpgc/v*/officerpg
 # officesuite — Windows-style office front end built from officesuite.c
 officesuite
 
+# officecoder — coder-only fork of officeagent (37 KB)
+officecoder
+
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
 officesoulflt
