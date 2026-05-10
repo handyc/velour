@@ -366,6 +366,11 @@ office67: office67.c
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "office67: $$(stat -c %s $@) bytes"
 
+office68: office68.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "office68: $$(stat -c %s $@) bytes"
+
 office66-lite: office66.c
 	$(CC) $(CFLAGS) \
 	    -DOFFICE_FEATURE_RPG=0      \
