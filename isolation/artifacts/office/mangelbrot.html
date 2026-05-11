@@ -567,18 +567,9 @@ function regenerateSheet() {
   BTN_DLT.disabled          = true;
   BTN_REROLL_PAL.disabled   = true;
   BTN_REROLL_KEYS.disabled  = true;
-  /* New sheet → hex set is stale.  Force a fresh Generate Hex Set
-   * before any tiling reads from the (now-empty) hex canvas. */
-  BTN_HEX_GEN.disabled      = true;
-  BTN_HEX_TILE.disabled     = true;
-  BTN_DL_HEXSET.disabled    = true;
-  BTN_DL_HEXTILE.disabled   = true;
-  hexSetReady = false;
-  HEX_SET_CTX.fillStyle = "#ff00ff";
-  HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
-  HEX_TIL_CTX.fillStyle = "#ff00ff";
-  HEX_TIL_CTX.fillRect(0, 0, HEX_TIL_CANVAS.width, HEX_TIL_CANVAS.height);
-  HEX_STATUS.textContent = "sheet refreshed — click Generate Hex Set to rebuild";
+  /* Hex set is independent of the sprite sheet — each hex tile
+   * renders its own unique mandelshot — so we leave its canvas
+   * + status alone here. */
   /* Lazy-init per-sprite slot stash; old contents will be overwritten
    * as renderSprite walks each cell. */
   if (!spriteSlots) {
@@ -617,7 +608,6 @@ function regenerateSheet() {
       BTN_WANG.disabled        = false;
       BTN_REROLL_PAL.disabled  = false;
       BTN_REROLL_KEYS.disabled = false;
-      BTN_HEX_GEN.disabled     = false;
       /* Tiling-derived actions stay disabled until a Wang Tile run. */
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
@@ -888,6 +878,18 @@ const HEX_SET_CANVAS  = document.getElementById("hexSet");
 const HEX_SET_CTX     = HEX_SET_CANVAS.getContext("2d");
 const HEX_TIL_CANVAS  = document.getElementById("hexTiling");
 const HEX_TIL_CTX     = HEX_TIL_CANVAS.getContext("2d");
+
+/* One reusable 64×64 scratch canvas — every hex tile renders its
+ * unique mandelshot into this, then drawHexTile blits + clips it
+ * into the 4096-tile sheet.  Avoids 4096 canvas allocations. */
+const HEX_TMP_CANVAS  = document.createElement("canvas");
+HEX_TMP_CANVAS.width  = SPRITE_PX;
+HEX_TMP_CANVAS.height = SPRITE_PX;
+const HEX_TMP_CTX     = HEX_TMP_CANVAS.getContext("2d");
+const HEX_TMP_IMG     = HEX_TMP_CTX.createImageData(SPRITE_PX, SPRITE_PX);
+/* Reusable iter→slot scratch so each tile reuses the same Int16Array. */
+const HEX_SLOT_SCRATCH = new Int16Array(SPRITE_PX * SPRITE_PX);
+const HEX_HIST_SCRATCH = new Int32Array(257);
 const HEX_STATUS      = document.getElementById("hexStatus");
 const BTN_HEX_GEN     = document.getElementById("hexGen");
 const BTN_HEX_TILE    = document.getElementById("hexTile");
@@ -935,11 +937,52 @@ function drawHexTile(ctx, x0, y0, baseSprite, edgeColors) {
   }
 }
 
-/* Generate the full 4096-tile hex set.  Builds a small pool (16) of
- * base 64×64 Mandelbrot crops by sampling from the live un-pixelized
- * SRC mirror, then walks every tile index and paints it via
- * drawHexTile.  Async via setTimeout chunks so the page stays
- * responsive; 4096 tiles take ≈1-3 s total. */
+/* Render one fresh mangelshot (random view, drift-evolved palette)
+ * into the reusable HEX_TMP_CANVAS.  Bypasses renderSprite()'s
+ * per-pixel storage since the hex set is one-shot — we don't need
+ * to recolour it.  Reuses the slot/hist scratch arrays. */
+function renderHexTileMangel() {
+  initOrDriftPalette();
+  const { cx, cy, span, iter } = pickView();
+  const ds = span / SPRITE_PX;
+  const ox = cx - ds * SPRITE_PX * 0.5;
+  const oy = cy - ds * SPRITE_PX * 0.5;
+  const slots = HEX_SLOT_SCRATCH;
+  const hist  = HEX_HIST_SCRATCH;
+  for (let i = 0; i < 257; i++) hist[i] = 0;
+  for (let y = 0; y < SPRITE_PX; y++) {
+    for (let x = 0; x < SPRITE_PX; x++) {
+      const it = mandel(ox + x * ds, oy + y * ds, iter);
+      const sl = slotForIter(it, iter);
+      slots[y * SPRITE_PX + x] = sl;
+      hist[sl + 1]++;
+    }
+  }
+  let maxIdx = 0;
+  for (let i = 1; i < 257; i++) if (hist[i] > hist[maxIdx]) maxIdx = i;
+  const transparent = maxIdx - 1;
+  const d = HEX_TMP_IMG.data;
+  for (let p = 0, i = 0; p < d.length; p += 4, i++) {
+    const sl = slots[i];
+    if (sl === transparent) {
+      d[p] = KEY_R; d[p+1] = KEY_G; d[p+2] = KEY_B;
+    } else if (sl < 0) {
+      d[p] = 0; d[p+1] = 0; d[p+2] = 0;
+    } else {
+      d[p]   = palTable[sl*3 + 0];
+      d[p+1] = palTable[sl*3 + 1];
+      d[p+2] = palTable[sl*3 + 2];
+    }
+    d[p+3] = 255;
+  }
+  HEX_TMP_CTX.putImageData(HEX_TMP_IMG, 0, 0);
+}
+
+/* Generate the full 4096-tile hex set — each tile gets its own
+ * unique mandelshot.  Resets the palette state so the run starts
+ * fresh, then drifts across 4096 tiles for slow colour walking.
+ * Chunked via setTimeout (32 tiles per slice) so the page stays
+ * responsive; total cost is ~1-3 s on a modern laptop. */
 let hexSetReady = false;
 
 function generateHexSet() {
@@ -952,29 +995,14 @@ function generateHexSet() {
   HEX_SET_CTX.fillStyle = "#ff00ff";
   HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
 
-  /* 16 base sprites — sampled directly from the existing 8×8 sheet,
-   * one per cell.  Cheap (just drawImage from SRC) and ties the hex
-   * set's colour scheme to whatever's currently on the sheet, so
-   * Reroll Palette / Reroll RGB Keys also re-skin the hex tiles
-   * after a re-Generate. */
-  const POOL = 16;
-  const baseSprites = new Array(POOL);
-  for (let p = 0; p < POOL; p++) {
-    const cv = document.createElement("canvas");
-    cv.width = HEX_TILE_PX; cv.height = HEX_TILE_PX;
-    const c = cv.getContext("2d");
-    /* Pull one of the 64 sheet sprites by walking diagonally so we
-     * get a good cross-section of palettes. */
-    const sx = ((p * 5) % SHEET_TILES) * SPRITE_PX;
-    const sy = ((p * 3) % SHEET_TILES) * SPRITE_PX;
-    c.drawImage(SRC, sx, sy, SPRITE_PX, SPRITE_PX,
-                     0, 0, HEX_TILE_PX, HEX_TILE_PX);
-    baseSprites[p] = cv;
-  }
+  /* Fresh palette state for the hex run.  The drift continues across
+   * all 4096 tiles, so the sheet walks slowly through colour space
+   * while every individual tile is its own unique mangelshot. */
+  palInited = false;
 
-  /* Chunked paint loop. */
-  const CHUNK = 256;
+  const CHUNK = 32;
   let n = 0;
+  const t0 = performance.now();
   function step() {
     const end = Math.min(n + CHUNK, HEX_TILE_COUNT);
     for (; n < end; n++) {
@@ -990,10 +1018,12 @@ function generateHexSet() {
         ((n >>  8) & 3),
         ((n >> 10) & 3),
       ];
-      const base = baseSprites[n % POOL];
-      drawHexTile(HEX_SET_CTX, x0, y0, base, edges);
+      renderHexTileMangel();
+      drawHexTile(HEX_SET_CTX, x0, y0, HEX_TMP_CANVAS, edges);
     }
-    HEX_STATUS.textContent = "hex set · " + n + " / " + HEX_TILE_COUNT;
+    HEX_STATUS.textContent =
+      "hex set · " + n + " / " + HEX_TILE_COUNT +
+      " · " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
     if (n < HEX_TILE_COUNT) {
       setTimeout(step, 0);
     } else {
@@ -1001,7 +1031,10 @@ function generateHexSet() {
       BTN_HEX_GEN.disabled    = false;
       BTN_HEX_TILE.disabled   = false;
       BTN_DL_HEXSET.disabled  = false;
-      HEX_STATUS.textContent  = HEX_TILE_COUNT + " tiles ready · click Generate Hex Tiling";
+      HEX_STATUS.textContent  =
+        HEX_TILE_COUNT + " unique mandelshots tiled · " +
+        ((performance.now() - t0) / 1000).toFixed(1) + " s · " +
+        "click Generate Hex Tiling";
     }
   }
   setTimeout(step, 0);
@@ -1155,9 +1188,11 @@ BTN_PIXTILE.disabled      = true;
 BTN_DLT.disabled          = true;
 BTN_REROLL_PAL.disabled   = true;
 BTN_REROLL_KEYS.disabled  = true;
-/* Hex set + tiling buttons stay disabled until the base sheet renders;
- * the set itself is built on demand by clicking Generate Hex Set. */
-BTN_HEX_GEN.disabled      = true;
+/* Hex set is independent of the sprite sheet now that every tile
+ * renders its own unique mandelshot, so Generate Hex Set is
+ * available from page load.  Tile / download buttons still wait
+ * for the set itself to exist. */
+BTN_HEX_GEN.disabled      = false;
 BTN_HEX_TILE.disabled     = true;
 BTN_DL_HEXSET.disabled    = true;
 BTN_DL_HEXTILE.disabled   = true;
