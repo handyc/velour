@@ -125,4 +125,5 @@ clone_init.json.applied
 /project.bin
 /coder_state.bin
 /coder_project.txt
+/coder.db
 /officesuite.conf
