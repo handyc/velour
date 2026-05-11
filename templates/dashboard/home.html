@@ -288,9 +288,9 @@
 {% endif %}
 
 {# Research & Search — collapsed by default #}
-{% if 'aggregator' in accessible_app_slugs or 'agora' in accessible_app_slugs or 'automaton' in accessible_app_slugs or 'camlfornia' in accessible_app_slugs or 'casting' in accessible_app_slugs or 'datalift' in accessible_app_slugs or 'det' in accessible_app_slugs or 'lingua' in accessible_app_slugs or 'muka' in accessible_app_slugs or 'radiant' in accessible_app_slugs or 'reckoner' in accessible_app_slugs or 'studious' in accessible_app_slugs or 'taxon' in accessible_app_slugs %}
+{% if 'aggregator' in accessible_app_slugs or 'agora' in accessible_app_slugs or 'automaton' in accessible_app_slugs or 'camlfornia' in accessible_app_slugs or 'casting' in accessible_app_slugs or 'datalift' in accessible_app_slugs or 'det' in accessible_app_slugs or 'lingua' in accessible_app_slugs or 'muka' in accessible_app_slugs or 'radiant' in accessible_app_slugs or 'reckoner' in accessible_app_slugs or 'studious' in accessible_app_slugs or 'tableau' in accessible_app_slugs or 'taxon' in accessible_app_slugs %}
 <details class="cat-group">
-    <summary>Research &amp; Search <span class="cat-count">· 12</span></summary>
+    <summary>Research &amp; Search <span class="cat-count">· 13</span></summary>
     <div class="tools-grid">
         {% if 'det' in accessible_app_slugs %}<a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'automaton' in accessible_app_slugs %}<a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>{% endif %}
@@ -301,6 +301,7 @@
         {% if 'lingua' in accessible_app_slugs %}<a class="card" href="{% url 'lingua:home' %}" title="Offline Argos MT + flashcards + TTS stack"><h3>Lingua</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'muka' in accessible_app_slugs %}<a class="card" href="{% url 'muka:index' %}" title="Syntactic trees — Oromoid for 'tree'. Covers Konso and many more languages."><h3>Muka</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'camlfornia' in accessible_app_slugs %}<a class="card" href="{% url 'camlfornia:index' %}" title="Learn OCaml in the browser — lessons + editor + runner"><h3>Camlfornia</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'tableau' in accessible_app_slugs %}<a class="card" href="{% url 'tableau:index' %}" title="Tarski's World clone — build a world of cubes/tets/dodecs (square or hex board), write first-order sentences, watch truth values update live"><h3>Tableau</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'aggregator' in accessible_app_slugs %}<a class="card" href="{% url 'aggregator:index' %}" title="Custom newspaper from RSS/Atom feeds — composed on request"><h3>Aggregator</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'studious' in accessible_app_slugs %}<a class="card" href="{% url 'studious:index' %}" title="Scholar library + argument workshop — ingest works, extract claims, braid cross-scholar arguments"><h3>Studious</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'agora' in accessible_app_slugs %}<a class="card" href="{% url 'agora:index' %}" title="University master framework — departments, courses, terms, sections, enrollments; calls out to other apps for coursework"><h3>Agora</h3><span class="open-arrow">›</span></a>{% endif %}
