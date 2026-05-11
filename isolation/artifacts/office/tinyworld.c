@@ -11397,6 +11397,369 @@ static int tg_subcmd_chain(int argc, char **argv) {
     return last_exit;
 }
 
+
+/* ── Templates: canon + grown ─────────────────────────────
+ *
+ * Two-source lookup for small idiomatic source fragments the coder
+ * (or any human) can splice when writing C:
+ *
+ *   canon  → compiled into .rodata at build time, always present,
+ *            named in tg_tmpl_canon[].  Captures lessons learned
+ *            (e.g. the metaoffice2 menu-input bug → `winmenu` does
+ *            the sel/drain split correctly).
+ *   grown  → v2 tails with type='P' (Pattern), appended at runtime
+ *            via `tmpl add`.  Survives across binaries through the
+ *            same tail-carrying mechanism as grow chain stages.
+ *
+ * `tmpl list` shows both, separated by source.  cat/get prefer canon
+ * when names collide; canon names are reserved against `tmpl add`.
+ * `tmpl rm` only removes type='P' tails — canon is immutable. */
+
+static const char tg_tmpl_winmenu[] =
+    "/* Win95-style TUI menu loop.  Capture the digit BEFORE draining\n"
+    " * stdin — the obvious-looking `while (ch != '\\n') ch = getchar();`\n"
+    " * loop clobbers the selection and falls through to default. */\n"
+    "#include <stdio.h>\n"
+    "\n"
+    "int main(void) {\n"
+    "    int sel, drain;\n"
+    "    for (;;) {\n"
+    "        printf(\"\\033[2J\\033[H\");\n"
+    "        printf(\" 1. Option A\\n\");\n"
+    "        printf(\" 2. Option B\\n\");\n"
+    "        printf(\" q. Quit\\n\\nSelect: \");\n"
+    "        fflush(stdout);\n"
+    "        sel = getchar();\n"
+    "        if (sel == EOF || sel == 'q' || sel == 'Q') break;\n"
+    "        drain = sel;\n"
+    "        while (drain != '\\n' && drain != EOF) drain = getchar();\n"
+    "        switch (sel) {\n"
+    "        case '1': /* option_a(); */ break;\n"
+    "        case '2': /* option_b(); */ break;\n"
+    "        default:  printf(\"\\nUnknown selection.\\n\"); break;\n"
+    "        }\n"
+    "        printf(\"\\nPress Enter to continue...\");\n"
+    "        while ((drain = getchar()) != '\\n' && drain != EOF) ;\n"
+    "    }\n"
+    "    return 0;\n"
+    "}\n";
+
+static const char tg_tmpl_cls[] =
+    "printf(\"\\033[2J\\033[H\");\n"
+    "fflush(stdout);\n";
+
+static const char tg_tmpl_cgetint[] =
+    "/* EOF-safe prompt for an int with a default. */\n"
+    "static int prompt_int(const char *prompt, int dflt) {\n"
+    "    char buf[32]; int n;\n"
+    "    printf(\"%s [%d]: \", prompt, dflt);\n"
+    "    fflush(stdout);\n"
+    "    if (!fgets(buf, sizeof buf, stdin)) return dflt;\n"
+    "    return (sscanf(buf, \"%d\", &n) == 1) ? n : dflt;\n"
+    "}\n";
+
+static const char tg_tmpl_bgcells[] =
+    "/* Hex-offset color-block grid row.  Caller defines ROWS, COLS,\n"
+    " * palette[] (SGR codes 40..47) and NPAL = ARRAY_SIZE(palette). */\n"
+    "for (int r = 0; r < ROWS; r++) {\n"
+    "    if (r & 1) putchar(' ');\n"
+    "    putchar(' ');\n"
+    "    for (int c = 0; c < COLS; c++)\n"
+    "        printf(\"\\033[%dm  \\033[0m \", palette[(r + c) % NPAL]);\n"
+    "    putchar('\\n');\n"
+    "}\n";
+
+static const char tg_tmpl_box[] =
+    "/* Single-line Unicode box around msg.  ┌─┐│└┘ via UTF-8 escapes\n"
+    " * so the source itself stays ASCII-safe. */\n"
+    "static void box_print(const char *msg) {\n"
+    "    int n = 0; while (msg[n]) n++;\n"
+    "    printf(\"\\xe2\\x94\\x8c\");\n"
+    "    for (int i = 0; i < n + 2; i++) printf(\"\\xe2\\x94\\x80\");\n"
+    "    printf(\"\\xe2\\x94\\x90\\n\\xe2\\x94\\x82 %s \\xe2\\x94\\x82\\n\\xe2\\x94\\x94\", msg);\n"
+    "    for (int i = 0; i < n + 2; i++) printf(\"\\xe2\\x94\\x80\");\n"
+    "    printf(\"\\xe2\\x94\\x98\\n\");\n"
+    "}\n";
+
+static const struct {
+    const char *name;
+    const char *src;
+    const char *tag;
+} tg_tmpl_canon[] = {
+    { "winmenu", tg_tmpl_winmenu, "Win95-style TUI menu (select+drain+switch, fflush)" },
+    { "cls",     tg_tmpl_cls,     "clear screen + cursor home + flush" },
+    { "cgetint", tg_tmpl_cgetint, "prompt for int with default, EOF-safe" },
+    { "bgcells", tg_tmpl_bgcells, "hex-offset color-block grid row" },
+    { "box",     tg_tmpl_box,     "single-line Unicode box around a message" },
+};
+#define TG_TMPL_CANON_N (sizeof tg_tmpl_canon / sizeof tg_tmpl_canon[0])
+
+static const char *tg_tmpl_canon_get(const char *name, int name_len) {
+    for (unsigned i = 0; i < TG_TMPL_CANON_N; i++) {
+        const char *cn = tg_tmpl_canon[i].name;
+        int cl = slen(cn);
+        if (cl != name_len) continue;
+        int match = 1;
+        for (int j = 0; j < cl; j++)
+            if (cn[j] != name[j]) { match = 0; break; }
+        if (match) return tg_tmpl_canon[i].src;
+    }
+    return 0;
+}
+
+static int tg_tmpl_grown_get(const char *name, int name_len, long size,
+                             const char **payload_out, long *plen_out) {
+    long end = size;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.type == 'P' && info.name_len == name_len) {
+            int match = 1;
+            for (int i = 0; i < name_len; i++)
+                if (info.name[i] != name[i]) { match = 0; break; }
+            if (match) {
+                *payload_out = tg_buf + end - info.trailer_len - info.payload_len;
+                *plen_out = (long)info.payload_len;
+                return 1;
+            }
+        }
+        end -= step;
+    }
+    return 0;
+}
+
+static void tg_tmpl_pad(const char *s, int slen_in, int width) {
+    wr(1, s, slen_in);
+    for (int i = slen_in; i < width; i++) wr(1, " ", 1);
+}
+
+static int tg_subcmd_tmpl_list(void) {
+    for (unsigned i = 0; i < TG_TMPL_CANON_N; i++) {
+        wr(1, "canon  ", 7);
+        const char *nm = tg_tmpl_canon[i].name;
+        tg_tmpl_pad(nm, slen(nm), 10);
+        wr(1, "  ", 2);
+        char l_s[24]; ja_utoa((unsigned int)slen(tg_tmpl_canon[i].src), l_s);
+        tg_tmpl_pad(l_s, slen(l_s), 5);
+        wr(1, " B  ", 4);
+        wr(1, tg_tmpl_canon[i].tag, slen(tg_tmpl_canon[i].tag));
+        wr(1, "\n", 1);
+    }
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 0;
+    long size = tg_load_file(self_path);
+    if (size < 0) return 0;
+    long end = size;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.type == 'P') {
+            wr(1, "grown  ", 7);
+            tg_tmpl_pad(info.name, info.name_len, 10);
+            wr(1, "  ", 2);
+            char l_s[24]; ja_utoa((unsigned int)info.payload_len, l_s);
+            tg_tmpl_pad(l_s, slen(l_s), 5);
+            wr(1, " B  ", 4);
+            if (info.task_len > 0) wr(1, info.task, info.task_len);
+            else                   wr(1, "(no task)", 9);
+            wr(1, "\n", 1);
+        }
+        end -= step;
+    }
+    return 0;
+}
+
+static int tg_subcmd_tmpl_cat(int argc, char **argv) {
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: tmpl cat <name>\n", 23);
+        return 1;
+    }
+    const char *name = argv[1];
+    int name_len = slen(name);
+    const char *src = tg_tmpl_canon_get(name, name_len);
+    if (src) { wr(1, src, slen(src)); return 0; }
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) return 1;
+    const char *payload = 0;
+    long plen = 0;
+    if (tg_tmpl_grown_get(name, name_len, size, &payload, &plen)) {
+        wr(1, payload, plen);
+        return 0;
+    }
+    wr(2, "tmpl: '", 7);
+    wr(2, name, name_len);
+    wr(2, "' not found (neither canon nor grown)\n", 38);
+    return 1;
+}
+
+static int tg_subcmd_tmpl_add(int argc, char **argv) {
+    if (argc < 3 || !argv[1] || !argv[2]) {
+        wr(2, "usage: tmpl add <name> <file> [task...]\n", 40);
+        return 1;
+    }
+    const char *name = argv[1];
+    const char *path = argv[2];
+    int name_len = slen(name);
+
+    if (tg_tmpl_canon_get(name, name_len)) {
+        wr(2, "tmpl add: '", 11);
+        wr(2, name, name_len);
+        wr(2, "' is reserved by a canon template\n", 34);
+        return 1;
+    }
+
+    static char task[TG_TASK_LEN];
+    int task_len = 0;
+    for (int i = 3; i < argc && argv[i] && task_len + 1 < (int)sizeof task; i++) {
+        if (task_len > 0 && task_len + 1 < (int)sizeof task)
+            task[task_len++] = ' ';
+        int al = slen(argv[i]);
+        int room = (int)sizeof task - 1 - task_len;
+        if (al > room) al = room;
+        if (al > 0) { mcpy(task + task_len, argv[i], al); task_len += al; }
+    }
+
+    int fd = (int)op(path, O_RDONLY, 0);
+    if (fd < 0) {
+        wr(2, "tmpl add: cannot open '", 23);
+        wr(2, path, slen(path));
+        wr(2, "'\n", 2);
+        return 1;
+    }
+    long size = sys3(SYS_lseek, fd, 0, 2);
+    sys3(SYS_lseek, fd, 0, 0);
+    if (size <= 0 || size > (long)sizeof tg_payload_buf) {
+        cl(fd);
+        wr(2, "tmpl add: file empty or larger than TG_PAYLOAD_CAP\n", 51);
+        return 1;
+    }
+    long got = 0;
+    while (got < size) {
+        long n = rd(fd, tg_payload_buf + got, size - got);
+        if (n <= 0) break;
+        got += n;
+    }
+    cl(fd);
+    if (got != size) { wr(2, "tmpl add: short read\n", 21); return 1; }
+
+    char new_path[512];
+    if (tg_append_to_copy(name, 'P', task, task_len,
+                          tg_payload_buf, size,
+                          new_path, sizeof new_path) < 0) {
+        wr(2, "tmpl add: append-to-copy failed\n", 32);
+        return 1;
+    }
+    wr(1, "appended template '", 19);
+    wr(1, name, name_len);
+    wr(1, "' (", 3);
+    char l_s[24]; ja_utoa((unsigned int)size, l_s);
+    wr(1, l_s, slen(l_s));
+    wr(1, " B) -> ", 7);
+    wr(1, new_path, slen(new_path));
+    wr(1, "\n", 1);
+    return 0;
+}
+
+static int tg_subcmd_tmpl_rm(int argc, char **argv) {
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: tmpl rm <name>\n", 22);
+        return 1;
+    }
+    const char *want = argv[1];
+    int want_len = slen(want);
+    if (tg_tmpl_canon_get(want, want_len)) {
+        wr(2, "tmpl rm: '", 10);
+        wr(2, want, want_len);
+        wr(2, "' is a canon template; cannot remove\n", 37);
+        return 1;
+    }
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) { wr(2, "tmpl rm: cannot load self\n", 26); return 1; }
+
+    long end = size;
+    long tail_start = -1, tail_end = -1;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.type == 'P' && info.name_len == want_len) {
+            int match = 1;
+            for (int i = 0; i < info.name_len; i++)
+                if (info.name[i] != want[i]) { match = 0; break; }
+            if (match) { tail_end = end; tail_start = end - step; break; }
+        }
+        end -= step;
+    }
+    if (tail_start < 0) {
+        wr(2, "tmpl rm: template '", 19);
+        wr(2, want, want_len);
+        wr(2, "' not found among grown templates\n", 34);
+        return 1;
+    }
+
+    char new_path[512];
+    if (tg_next_path(self_path, new_path, sizeof new_path) < 0) {
+        wr(2, "tmpl rm: cannot compute next path\n", 34);
+        return 1;
+    }
+    int fd = (int)op(new_path, O_WRONLY | O_CREAT | O_TRUNC, 0755);
+    if (fd < 0) { wr(2, "tmpl rm: cannot write new-gen file\n", 35); return 1; }
+    long w = 0;
+    while (w < tail_start) {
+        long n = wr(fd, tg_buf + w, tail_start - w);
+        if (n <= 0) { cl(fd); return 1; }
+        w += n;
+    }
+    long r = tail_end;
+    while (r < size) {
+        long n = wr(fd, tg_buf + r, size - r);
+        if (n <= 0) { cl(fd); return 1; }
+        r += n;
+    }
+    cl(fd);
+    sys3(SYS_chmod, (long)new_path, 0755, 0);
+
+    long removed = tail_end - tail_start;
+    wr(1, "removed template '", 18);
+    wr(1, want, want_len);
+    wr(1, "' (", 3);
+    char r_s[24]; ja_utoa((unsigned int)removed, r_s);
+    wr(1, r_s, slen(r_s));
+    wr(1, " B) -> ", 7);
+    wr(1, new_path, slen(new_path));
+    wr(1, "\n", 1);
+    return 0;
+}
+
+static int tg_run_tmpl(int argc, char **argv) {
+    g_headless = 1;
+    if (argc < 2 || !argv[1]) {
+        wr(2, "usage: tmpl <list|cat|get|add|rm>\n", 34);
+        return 1;
+    }
+    if (scmp(argv[1], "list") == 0) return tg_subcmd_tmpl_list();
+    if (scmp(argv[1], "cat")  == 0) return tg_subcmd_tmpl_cat(argc - 1, argv + 1);
+    if (scmp(argv[1], "get")  == 0) return tg_subcmd_tmpl_cat(argc - 1, argv + 1);
+    if (scmp(argv[1], "add")  == 0) return tg_subcmd_tmpl_add(argc - 1, argv + 1);
+    if (scmp(argv[1], "rm")   == 0) return tg_subcmd_tmpl_rm (argc - 1, argv + 1);
+    wr(2, "tmpl: unknown verb '", 20);
+    wr(2, argv[1], slen(argv[1]));
+    wr(2, "'\n", 2);
+    return 1;
+}
+
 static int tg_run_grow(int argc, char **argv) {
     g_headless = 1;     /* keep stdout clean for piping / scripts */
     if (argc < 2 || !argv[1]) {
@@ -11621,6 +11984,9 @@ int main_c(int argc, char **argv, char **envp) {
     }
     if (argc >= 2 && argv[1] && scmp(argv[1], "grow") == 0) {
         return tg_run_grow(argc - 1, argv + 1);
+    }
+    if (argc >= 2 && argv[1] && scmp(argv[1], "tmpl") == 0) {
+        return tg_run_tmpl(argc - 1, argv + 1);
     }
     term_init();
     /* Interactive modes: ask | coder | xpg (default coder).  xpg
