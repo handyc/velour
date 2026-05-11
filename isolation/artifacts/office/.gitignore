@@ -133,6 +133,10 @@ tinyagentgrow.[0-9][0-9][0-9]
 # tinyagentrpg — officecoder + rpg re-enabled, target <64 KB
 tinyagentrpg
 
+# tinyworld — tinyagentgrow + rpg/xpg/hxhnt/lsys dispatch ported back
+tinyworld
+tinyworld.[0-9][0-9][0-9]
+
 # metaoffice — Win95-style office TUI built from tinyagentjail's
 # Phase-3/4 output (binaries; sources are kept under git as demo
 # artifacts of what the recursive build pipeline produced)
