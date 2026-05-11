@@ -161,6 +161,50 @@
   <div class="status" id="tileStatus" style="margin-top: 8px;">click Wang Tile to assemble a 12 × 12 tiling</div>
 </div>
 
+<div id="hexWrap" style="margin-top: 24px;">
+  <h2 style="font: 600 16px ui-sans-serif; margin: 0 0 6px;">hex wang tiles</h2>
+  <p class="lede" style="margin-bottom: 12px;">
+    A complete 4-colour hex Wang set has 4<sup>6</sup> = <b>4096</b> tiles
+    — one tile for every combination of edge colours.  Click <i>Generate
+    Hex Set</i> to build the whole spritesheet (4096 × 4096 px, shown
+    scaled).  Each tile is a hexagonal Mandelbrot crop with 4 px coloured
+    stripes on the 6 edges.  <i>Generate Hex Tiling</i> then lays a
+    random hex tiling: for every cell the picker reads the colours of
+    already-placed neighbours and indexes directly into the full set
+    (no fuzzy matching needed, every constraint has an exact match).
+    Edge palette:
+    <span style="display:inline-block;width:10px;height:10px;background:#dc3c3c;vertical-align:-1px;"></span>
+    <span style="display:inline-block;width:10px;height:10px;background:#3cc864;vertical-align:-1px;"></span>
+    <span style="display:inline-block;width:10px;height:10px;background:#3c6ee6;vertical-align:-1px;"></span>
+    <span style="display:inline-block;width:10px;height:10px;background:#f0c83c;vertical-align:-1px;"></span>
+  </p>
+  <div style="display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;">
+    <div class="stage" style="display: inline-block;">
+      <div style="font: 12px ui-monospace; color: #8b949e; margin-bottom: 6px;">
+        full hex set · 4096 × 4096 px, scaled to fit
+      </div>
+      <canvas id="hexSet" width="4096" height="4096"
+              style="display: block; width: 512px; height: 512px;
+                     background: #ff00ff;
+                     image-rendering: pixelated; image-rendering: crisp-edges;"></canvas>
+    </div>
+    <div class="stage" style="display: inline-block;">
+      <div style="font: 12px ui-monospace; color: #8b949e; margin-bottom: 6px;">
+        random hex tiling
+      </div>
+      <canvas id="hexTiling" width="768" height="704"
+              style="display: block; background: #ff00ff;"></canvas>
+    </div>
+  </div>
+  <div style="display: flex; gap: 10px; margin-top: 12px; max-width: 1100px; flex-wrap: wrap;">
+    <button id="hexGen" style="flex: 1; min-width: 200px;">Generate Hex Set</button>
+    <button id="hexTile" style="flex: 1; min-width: 200px;">Generate Hex Tiling</button>
+    <button id="dlHexSet" class="alt" style="flex: 1; min-width: 200px;">Download Hex Set JPG</button>
+    <button id="dlHexTile" class="alt" style="flex: 1; min-width: 200px;">Download Hex Tiling JPG</button>
+  </div>
+  <div class="status" id="hexStatus" style="margin-top: 8px;">click Generate Hex Set to build the 4096-tile sheet</div>
+</div>
+
 <footer>
   Each sprite picks a curated Mandelbrot center, perturbs it, and chooses
   a random log-span in 2<sup>-10</sup>‥2<sup>0</sup>.  The 256-entry palette is
@@ -490,6 +534,18 @@ function regenerateSheet() {
   BTN_DLT.disabled          = true;
   BTN_REROLL_PAL.disabled   = true;
   BTN_REROLL_KEYS.disabled  = true;
+  /* New sheet → hex set is stale.  Force a fresh Generate Hex Set
+   * before any tiling reads from the (now-empty) hex canvas. */
+  BTN_HEX_GEN.disabled      = true;
+  BTN_HEX_TILE.disabled     = true;
+  BTN_DL_HEXSET.disabled    = true;
+  BTN_DL_HEXTILE.disabled   = true;
+  hexSetReady = false;
+  HEX_SET_CTX.fillStyle = "#ff00ff";
+  HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+  HEX_TIL_CTX.fillStyle = "#ff00ff";
+  HEX_TIL_CTX.fillRect(0, 0, HEX_TIL_CANVAS.width, HEX_TIL_CANVAS.height);
+  HEX_STATUS.textContent = "sheet refreshed — click Generate Hex Set to rebuild";
   /* Lazy-init per-sprite slot stash; old contents will be overwritten
    * as renderSprite walks each cell. */
   if (!spriteSlots) {
@@ -528,6 +584,7 @@ function regenerateSheet() {
       BTN_WANG.disabled        = false;
       BTN_REROLL_PAL.disabled  = false;
       BTN_REROLL_KEYS.disabled = false;
+      BTN_HEX_GEN.disabled     = false;
       /* Tiling-derived actions stay disabled until a Wang Tile run. */
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
@@ -766,6 +823,256 @@ function downloadJpg() {
   a.remove();
 }
 
+/* ── Hex Wang Tiles ──────────────────────────────────
+ *
+ * The full 4-colour hex Wang set has exactly 4^6 = 4096 tiles, one
+ * for every assignment of {0..3} to the 6 edges.  Tile index encodes
+ * the edge colours: e0..e5 = (i >> (k*2)) & 3.
+ *
+ * Each tile is a 64 × 64 sprite: a hexagonal clip over a shared
+ * Mandelbrot crop, with a 4-px coloured stripe along each of the 6
+ * edges.  The 4 corners of the 64×64 box sit outside the hex and
+ * are left as magenta (colour key).
+ *
+ * Edge order (pointy-top, k=0 at top vertex, clockwise):
+ *   0 top-right, 1 right, 2 bottom-right, 3 bottom-left, 4 left, 5 top-left
+ */
+const HEX_EDGE_COLORS = [
+  [220, 60,  60],   /* 0 red */
+  [60,  200, 100],  /* 1 green */
+  [60,  110, 230],  /* 2 blue */
+  [240, 200, 60],   /* 3 yellow */
+];
+const HEX_TILE_PX     = 64;
+const HEX_TILES_AXIS  = 64;                      /* 64 × 64 = 4096 */
+const HEX_TILE_COUNT  = HEX_TILES_AXIS * HEX_TILES_AXIS;
+const HEX_SHEET_PX    = HEX_TILE_PX * HEX_TILES_AXIS;   /* 4096 */
+const HEX_R           = 32;                      /* hex circumradius in tile px */
+const HEX_SQRT3       = 1.7320508075688772;
+const HEX_INSCRIBED_W = HEX_R * HEX_SQRT3;       /* ~55.4 */
+
+const HEX_SET_CANVAS  = document.getElementById("hexSet");
+const HEX_SET_CTX     = HEX_SET_CANVAS.getContext("2d");
+const HEX_TIL_CANVAS  = document.getElementById("hexTiling");
+const HEX_TIL_CTX     = HEX_TIL_CANVAS.getContext("2d");
+const HEX_STATUS      = document.getElementById("hexStatus");
+const BTN_HEX_GEN     = document.getElementById("hexGen");
+const BTN_HEX_TILE    = document.getElementById("hexTile");
+const BTN_DL_HEXSET   = document.getElementById("dlHexSet");
+const BTN_DL_HEXTILE  = document.getElementById("dlHexTile");
+
+/* Pointy-top hex vertex k=0..5 starting at top vertex, clockwise.
+ * Canvas Y points down. */
+function hexVertex(cx, cy, R, k) {
+  const ang = -Math.PI / 2 + k * Math.PI / 3;
+  return [cx + R * Math.cos(ang), cy + R * Math.sin(ang)];
+}
+
+function hexPath(ctx, cx, cy, R) {
+  ctx.beginPath();
+  for (let k = 0; k < 6; k++) {
+    const [x, y] = hexVertex(cx, cy, R, k);
+    if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+}
+
+/* Render one hex tile into ctx at top-left (x0, y0).  Clips a 64×64
+ * Mandelbrot view (the un-pixelized sprite at baseSprite) into the
+ * hex, then strokes each of the 6 edges in its assigned colour. */
+function drawHexTile(ctx, x0, y0, baseSprite, edgeColors) {
+  const cx = x0 + HEX_TILE_PX / 2;
+  const cy = y0 + HEX_TILE_PX / 2;
+  ctx.save();
+  hexPath(ctx, cx, cy, HEX_R);
+  ctx.clip();
+  ctx.drawImage(baseSprite, x0, y0);
+  ctx.restore();
+  for (let k = 0; k < 6; k++) {
+    const [x1, y1] = hexVertex(cx, cy, HEX_R, k);
+    const [x2, y2] = hexVertex(cx, cy, HEX_R, (k + 1) % 6);
+    const c = HEX_EDGE_COLORS[edgeColors[k]];
+    ctx.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    ctx.lineWidth = 4;
+    ctx.lineCap   = "round";
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+}
+
+/* Generate the full 4096-tile hex set.  Builds a small pool (16) of
+ * base 64×64 Mandelbrot crops by sampling from the live un-pixelized
+ * SRC mirror, then walks every tile index and paints it via
+ * drawHexTile.  Async via setTimeout chunks so the page stays
+ * responsive; 4096 tiles take ≈1-3 s total. */
+let hexSetReady = false;
+
+function generateHexSet() {
+  hexSetReady = false;
+  BTN_HEX_TILE.disabled  = true;
+  BTN_DL_HEXSET.disabled = true;
+  BTN_DL_HEXTILE.disabled = true;
+  BTN_HEX_GEN.disabled   = true;
+
+  HEX_SET_CTX.fillStyle = "#ff00ff";
+  HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+
+  /* 16 base sprites — sampled directly from the existing 8×8 sheet,
+   * one per cell.  Cheap (just drawImage from SRC) and ties the hex
+   * set's colour scheme to whatever's currently on the sheet, so
+   * Reroll Palette / Reroll RGB Keys also re-skin the hex tiles
+   * after a re-Generate. */
+  const POOL = 16;
+  const baseSprites = new Array(POOL);
+  for (let p = 0; p < POOL; p++) {
+    const cv = document.createElement("canvas");
+    cv.width = HEX_TILE_PX; cv.height = HEX_TILE_PX;
+    const c = cv.getContext("2d");
+    /* Pull one of the 64 sheet sprites by walking diagonally so we
+     * get a good cross-section of palettes. */
+    const sx = ((p * 5) % SHEET_TILES) * SPRITE_PX;
+    const sy = ((p * 3) % SHEET_TILES) * SPRITE_PX;
+    c.drawImage(SRC, sx, sy, SPRITE_PX, SPRITE_PX,
+                     0, 0, HEX_TILE_PX, HEX_TILE_PX);
+    baseSprites[p] = cv;
+  }
+
+  /* Chunked paint loop. */
+  const CHUNK = 256;
+  let n = 0;
+  function step() {
+    const end = Math.min(n + CHUNK, HEX_TILE_COUNT);
+    for (; n < end; n++) {
+      const col = n % HEX_TILES_AXIS;
+      const row = (n / HEX_TILES_AXIS) | 0;
+      const x0  = col * HEX_TILE_PX;
+      const y0  = row * HEX_TILE_PX;
+      const edges = [
+        ( n        & 3),
+        ((n >>  2) & 3),
+        ((n >>  4) & 3),
+        ((n >>  6) & 3),
+        ((n >>  8) & 3),
+        ((n >> 10) & 3),
+      ];
+      const base = baseSprites[n % POOL];
+      drawHexTile(HEX_SET_CTX, x0, y0, base, edges);
+    }
+    HEX_STATUS.textContent = "hex set · " + n + " / " + HEX_TILE_COUNT;
+    if (n < HEX_TILE_COUNT) {
+      setTimeout(step, 0);
+    } else {
+      hexSetReady = true;
+      BTN_HEX_GEN.disabled    = false;
+      BTN_HEX_TILE.disabled   = false;
+      BTN_DL_HEXSET.disabled  = false;
+      HEX_STATUS.textContent  = HEX_TILE_COUNT + " tiles ready · click Generate Hex Tiling";
+    }
+  }
+  setTimeout(step, 0);
+}
+
+/* Lay a random hex tiling using the just-generated 4096-tile set.
+ *
+ * Pointy-top "odd-r" offset coords: every odd row is shifted right
+ * by half a hex width.  For each cell, the already-placed neighbours
+ * (W, NW, NE) constrain edges 4, 5, 0; the rest are random.  Since
+ * we have every possible 6-tuple in the set, the picker always finds
+ * an exact match — Wang's actual guarantee. */
+const HEX_TIL_COLS = 11;
+const HEX_TIL_ROWS = 12;
+
+function neighborOffsets(row) {
+  const oddShift = (row & 1) ? 1 : 0;
+  return {
+    W:  [-1, 0],
+    NW: [oddShift - 1, -1],
+    NE: [oddShift,     -1],
+  };
+}
+
+function generateHexTiling() {
+  if (!hexSetReady) return;
+  /* placed[row][col] = edge tuple [e0..e5]; null = not placed yet */
+  const placed = [];
+  for (let r = 0; r < HEX_TIL_ROWS; r++) placed.push(new Array(HEX_TIL_COLS).fill(null));
+
+  /* Step pixel positions for pointy-top odd-r layout. */
+  const stepX = HEX_INSCRIBED_W;            /* ≈ 55.4 */
+  const stepY = HEX_R * 1.5;                /* 48 */
+  /* Width budget: 11 cols + half-shift, leading edge slack. */
+  const padX = HEX_TILE_PX / 2 + 2;
+  const padY = HEX_TILE_PX / 2 + 2;
+
+  HEX_TIL_CTX.fillStyle = "#ff00ff";
+  HEX_TIL_CTX.fillRect(0, 0, HEX_TIL_CANVAS.width, HEX_TIL_CANVAS.height);
+
+  for (let r = 0; r < HEX_TIL_ROWS; r++) {
+    const off = neighborOffsets(r);
+    for (let c = 0; c < HEX_TIL_COLS; c++) {
+      function neighbor(d) {
+        const [dc, dr] = off[d];
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nc >= HEX_TIL_COLS || nr < 0 || nr >= HEX_TIL_ROWS) return null;
+        return placed[nr][nc];
+      }
+      const wN  = neighbor("W");
+      const nwN = neighbor("NW");
+      const neN = neighbor("NE");
+      /* Constraint edges read from already-placed neighbours.  Pointy
+       * top edge correspondence (this cell's edge ← that neighbour's):
+       *   e4 (left)     ← W .e1 (right)
+       *   e5 (top-left) ← NW.e2 (bottom-right)
+       *   e0 (top-right)← NE.e3 (bottom-left)        */
+      const e4 = wN  ? wN[1]  : ((Math.random() * 4) | 0);
+      const e5 = nwN ? nwN[2] : ((Math.random() * 4) | 0);
+      const e0 = neN ? neN[3] : ((Math.random() * 4) | 0);
+      const e1 = (Math.random() * 4) | 0;
+      const e2 = (Math.random() * 4) | 0;
+      const e3 = (Math.random() * 4) | 0;
+      const tuple = [e0, e1, e2, e3, e4, e5];
+      placed[r][c] = tuple;
+      const tileIdx = e0 + 4*e1 + 16*e2 + 64*e3 + 256*e4 + 1024*e5;
+      const srcCol = tileIdx % HEX_TILES_AXIS;
+      const srcRow = (tileIdx / HEX_TILES_AXIS) | 0;
+      /* Pixel position of the hex *center* on the tiling canvas. */
+      const cx = padX + c * stepX + ((r & 1) ? stepX / 2 : 0);
+      const cy = padY + r * stepY;
+      HEX_TIL_CTX.drawImage(
+        HEX_SET_CANVAS,
+        srcCol * HEX_TILE_PX, srcRow * HEX_TILE_PX, HEX_TILE_PX, HEX_TILE_PX,
+        cx - HEX_TILE_PX / 2, cy - HEX_TILE_PX / 2, HEX_TILE_PX, HEX_TILE_PX);
+    }
+  }
+  BTN_DL_HEXTILE.disabled = false;
+  HEX_STATUS.textContent =
+    HEX_TIL_COLS + " × " + HEX_TIL_ROWS + " hex tiling laid";
+}
+
+function downloadHexSetJpg() {
+  const url = HEX_SET_CANVAS.toDataURL("image/jpeg", 0.85);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-hexset-" + _datestamp() + ".jpg";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function downloadHexTilingJpg() {
+  const url = HEX_TIL_CANVAS.toDataURL("image/jpeg", 0.92);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-hextiling-" + _datestamp() + ".jpg";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function _datestamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
+         "-" +
+         pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+
 BTN_REGEN.addEventListener("click", regenerateSheet);
 BTN_DL.addEventListener("click", downloadJpg);
 BTN_PIX.addEventListener("click", pixelize);
@@ -774,6 +1081,10 @@ BTN_PIXTILE.addEventListener("click", pixelizeTiling);
 BTN_DLT.addEventListener("click", downloadTilingJpg);
 BTN_REROLL_PAL.addEventListener("click", rerollPaletteRandom);
 BTN_REROLL_KEYS.addEventListener("click", rerollPaletteKeys);
+BTN_HEX_GEN.addEventListener("click", generateHexSet);
+BTN_HEX_TILE.addEventListener("click", generateHexTiling);
+BTN_DL_HEXSET.addEventListener("click", downloadHexSetJpg);
+BTN_DL_HEXTILE.addEventListener("click", downloadHexTilingJpg);
 SEL_BLK.addEventListener("change", () => {
   /* Block-size acts as a live slider for whichever layer is currently
    * showing a pixelization — sheet, tiling, or both. */
@@ -793,6 +1104,12 @@ BTN_PIXTILE.disabled      = true;
 BTN_DLT.disabled          = true;
 BTN_REROLL_PAL.disabled   = true;
 BTN_REROLL_KEYS.disabled  = true;
+/* Hex set + tiling buttons stay disabled until the base sheet renders;
+ * the set itself is built on demand by clicking Generate Hex Set. */
+BTN_HEX_GEN.disabled      = true;
+BTN_HEX_TILE.disabled     = true;
+BTN_DL_HEXSET.disabled    = true;
+BTN_DL_HEXTILE.disabled   = true;
 
 /* First sheet on load. */
 regenerateSheet();
