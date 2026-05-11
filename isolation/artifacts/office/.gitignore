@@ -137,6 +137,10 @@ tinyagentrpg
 tinyworld
 tinyworld.[0-9][0-9][0-9]
 
+# tinierworld — tinyworld with V-key hxhnt drop-in + lsys alias trimmed
+tinierworld
+tinierworld.[0-9][0-9][0-9]
+
 # metaoffice — Win95-style office TUI built from tinyagentjail's
 # Phase-3/4 output (binaries; sources are kept under git as demo
 # artifacts of what the recursive build pipeline produced)
