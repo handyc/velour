@@ -33,19 +33,29 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/select.h>
+#include <sys/ioctl.h>
 
-/* ── Geometry ────────────────────────────────────────────── */
-#define SCR_W  100
-#define SCR_H   30
+/* ── Geometry ────────────────────────────────────────────── *
+ *
+ * SCR_W/SCR_H are the framebuffer's MAXIMUM size (used as static
+ * array dimensions).  VIS_W/VIS_H are what the real terminal can
+ * show; cells outside that range are computed but never emitted,
+ * which prevents the wrap/scroll storm that occurs when a 100x30
+ * layout meets an 80x24 terminal.
+ *
+ * The main window and taskbar positions are RUNTIME variables — at
+ * startup we measure the terminal with TIOCGWINSZ and recompute
+ * them so the layout always fits and looks reasonable. */
+#define SCR_W  120
+#define SCR_H   40
 
-/* Main window. */
-#define WIN_R0   6
-#define WIN_R1  21
-#define WIN_C0  25
-#define WIN_C1  74
+static int VIS_W = 100;
+static int VIS_H =  30;
 
-/* Taskbar is the bottom row of the desktop. */
-#define TASK_R  (SCR_H - 1)
+/* Main window (filled in by layout_for_size()). */
+static int WIN_R0 = 6,  WIN_R1 = 21;
+static int WIN_C0 = 25, WIN_C1 = 74;
+static int TASK_R = 29;
 
 /* ── 256-color palette (xterm slots picked to match Win95 system colors). ─ */
 enum {
@@ -75,7 +85,53 @@ static void term_reset(void) {
     fflush(stdout);
 }
 
+/* Measure the terminal, set VIS_W/VIS_H, and place the main window +
+ * taskbar so the layout fits.  Window is centered horizontally, sits
+ * a few rows below the top, and the taskbar always pins to the last
+ * visible row.  Clamps to a sane minimum so tiny terminals still
+ * render *something*. */
+static void layout_for_size(void) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col && ws.ws_row) {
+        VIS_W = ws.ws_col;
+        VIS_H = ws.ws_row;
+    } else {
+        VIS_W = 80; VIS_H = 24;
+    }
+    if (VIS_W > SCR_W) VIS_W = SCR_W;
+    if (VIS_H > SCR_H) VIS_H = SCR_H;
+    if (VIS_W < 40)    VIS_W = 40;
+    if (VIS_H < 12)    VIS_H = 12;
+
+    /* Taskbar always at bottom row of visible area. */
+    TASK_R = VIS_H - 1;
+
+    /* Main window: target 60-70% of available area, centered, with a
+     * little margin at top and a 2-row gap above the taskbar. */
+    int target_w = VIS_W - 8;
+    int target_h = VIS_H - 6;
+    if (target_w > 60) target_w = 60;     /* don't grow unbounded */
+    if (target_h > 18) target_h = 18;
+    if (target_w < 30) target_w = 30;
+    if (target_h <  8) target_h =  8;
+
+    WIN_C0 = (VIS_W - target_w) / 2;
+    WIN_C1 = WIN_C0 + target_w - 1;
+    WIN_R0 = (VIS_H - target_h - 2) / 2;  /* -2 leaves room above taskbar */
+    if (WIN_R0 < 1) WIN_R0 = 1;
+    WIN_R1 = WIN_R0 + target_h - 1;
+    if (WIN_R1 > TASK_R - 2) WIN_R1 = TASK_R - 2;
+}
+
+/* SIGWINCH: terminal resize.  Re-measure, set a "needs repaint" flag,
+ * and let the main loop pick it up (we can't safely touch many
+ * globals from a signal handler).  Cursor clamping happens on the
+ * next paint. */
+static volatile sig_atomic_t g_winch_dirty = 0;
+static void on_winch(int sig) { (void)sig; g_winch_dirty = 1; }
+
 static void term_setup_raw(void) {
+    layout_for_size();
     if (tcgetattr(STDIN_FILENO, &g_saved_tios) == 0) {
         g_tios_saved = 1;
         struct termios t = g_saved_tios;
@@ -209,8 +265,12 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
     /* Begin synchronized update; reset SGR. */
     p += snprintf(buf + p, sizeof buf - p, "\033[?2026h\033[0m");
 
-    for (int r = 0; r < SCR_H; r++) {
-        for (int c = 0; c < SCR_W; c++) {
+    /* Iterate only within the terminal's actual visible window.  Cells
+     * beyond VIS_W / VIS_H are computed in g_fb but never emitted —
+     * this keeps wrap/scroll out of an 80x24 terminal that's hosting
+     * a 120x40-capable framebuffer. */
+    for (int r = 0; r < VIS_H; r++) {
+        for (int c = 0; c < VIS_W; c++) {
             cell_t cell = g_fb[r][c];
             int inv = cursor_visible && cursor_r == r && cursor_c == c;
             int was_cursor_prev = g_fb_prev_valid &&
@@ -282,8 +342,11 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
 enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT, MODE_START };
 
 static int g_mode = MODE_DESKTOP;
-static int g_cur_r = WIN_R0 + 3;
-static int g_cur_c = WIN_C0 + 5;
+/* Cursor: positioned by layout_for_size() onto the center of the
+ * main window once geometry is known.  Initial value is just a safe
+ * within-bounds fallback. */
+static int g_cur_r = 5;
+static int g_cur_c = 10;
 static int g_menu_sel = 0;          /* index within open menu */
 static int g_hex_grid = 0;          /* 0 = square, 1 = hex (deferred) */
 
@@ -320,18 +383,23 @@ static void paint_desktop(void) {
 static void paint_taskbar(void) {
     /* Taskbar across the entire bottom row.  One-row highlight above
      * to mimic the Win95 3D-raised edge. */
-    fb_fill(TASK_R, 0, TASK_R, SCR_W - 1, ' ', C_TEXT, C_BTN);
-    for (int c = 0; c < SCR_W; c++) fb_put(TASK_R - 1, c, ' ', C_TEXT, C_BTN_HL, 0);
-    /* Start button: highlight/shadow simulated by surrounding chars. */
+    fb_fill(TASK_R, 0, TASK_R, VIS_W - 1, ' ', C_TEXT, C_BTN);
+    for (int c = 0; c < VIS_W; c++) fb_put(TASK_R - 1, c, ' ', C_TEXT, C_BTN_HL, 0);
+    /* Start button. */
     draw_button(TASK_R, 0, 9, "Start", g_mode == MODE_START);
-    /* Window-on-taskbar pill for the open About window. */
-    draw_button(TASK_R, 11, 30, "win95term", 0);
-    /* Clock on right. */
+    /* Window-on-taskbar pill for the open window — only if there's
+     * room between the Start button and the clock. */
+    if (VIS_W >= 40) {
+        int pill_c1 = (VIS_W - 8) - 2;
+        if (pill_c1 > 30) pill_c1 = 30;
+        draw_button(TASK_R, 11, pill_c1, "win95term", 0);
+    }
+    /* Clock on the right. */
     time_t now = time(NULL);
     struct tm tm; localtime_r(&now, &tm);
     char clock[16];
     snprintf(clock, sizeof clock, "%02d:%02d", tm.tm_hour, tm.tm_min);
-    fb_text(TASK_R, SCR_W - 7, clock, C_TEXT, C_BTN, 0);
+    fb_text(TASK_R, VIS_W - 7, clock, C_TEXT, C_BTN, 0);
 }
 
 static void paint_main_window(void) {
@@ -402,8 +470,26 @@ static void paint_dropdown(int mode, int anchor_col, const char **items, int n) 
     (void)mode;
 }
 
+/* Compute the About dialog's geometry — centered on the main window,
+ * sized to fit, clamped to a sane min/max.  Used by paint and
+ * hit-test so they can't disagree. */
+static void about_geom(int *r0, int *c0, int *r1, int *c1) {
+    int dw = 40, dh = 10;
+    int win_w = WIN_C1 - WIN_C0 + 1;
+    int win_h = WIN_R1 - WIN_R0 + 1;
+    if (dw > win_w - 4) dw = win_w - 4;
+    if (dh > win_h - 4) dh = win_h - 4;
+    if (dw < 24) dw = 24;
+    if (dh < 7)  dh = 7;
+    *c0 = (WIN_C0 + WIN_C1) / 2 - dw / 2;
+    *r0 = (WIN_R0 + WIN_R1) / 2 - dh / 2;
+    *c1 = *c0 + dw - 1;
+    *r1 = *r0 + dh - 1;
+}
+
 static void paint_about_dialog(void) {
-    int r0 = 9, r1 = 19, c0 = 30, c1 = 70;
+    int r0, c0, r1, c1;
+    about_geom(&r0, &c0, &r1, &c1);
     draw_outset(r0, c0, r1, c1, C_BTN);
     /* Title bar */
     fb_fill(r0 + 1, c0 + 1, r0 + 1, c1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
@@ -443,9 +529,9 @@ static void move_cursor(int dr, int dc) {
     int nr = g_cur_r + dr;
     int nc = g_cur_c + dc;
     if (nr < 0) nr = 0;
-    if (nr >= SCR_H) nr = SCR_H - 1;
+    if (nr >= VIS_H) nr = VIS_H - 1;
     if (nc < 0) nc = 0;
-    if (nc >= SCR_W) nc = SCR_W - 1;
+    if (nc >= VIS_W) nc = VIS_W - 1;
     g_cur_r = nr;
     g_cur_c = nc;
 }
@@ -479,7 +565,8 @@ enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
 static int hit_test(void) {
     int r = g_cur_r, c = g_cur_c;
     if (g_mode == MODE_ABOUT) {
-        int r0 = 9, r1 = 19, c0 = 30, c1 = 70;
+        int r0, c0, r1, c1;
+        about_geom(&r0, &c0, &r1, &c1);
         int btn_r = r1 - 1;
         int btn_c0 = (c0 + c1) / 2 - 4;
         int btn_c1 = btn_c0 + 8;
@@ -537,10 +624,14 @@ static int handle_click(void) {
         g_menu_sel = 0;
         break;
     case HIT_FILE_ABOUT:
-    case HIT_HELP_ABOUT:
+    case HIT_HELP_ABOUT: {
         g_mode = MODE_ABOUT;
-        g_cur_r = 18; g_cur_c = 50;       /* land on OK */
+        int r0, c0, r1, c1;
+        about_geom(&r0, &c0, &r1, &c1);
+        g_cur_r = r1 - 1;
+        g_cur_c = (c0 + c1) / 2;          /* land on the OK button */
         break;
+    }
     case HIT_FILE_EXIT:
         return 1;
     case HIT_HELP_KEYS:
@@ -585,6 +676,11 @@ int main(int argc, char **argv) {
         /* Paint a single frame to stdout and exit.  No raw mode, no
          * alt-screen — caller pipes this somewhere (e.g. `| less -R`
          * or `| sed` to strip escapes). */
+        layout_for_size();
+        /* Clamp the initial cursor to the visible area so the --once
+         * dump always shows a cursor cell on a fresh terminal. */
+        if (g_cur_r >= VIS_H) g_cur_r = VIS_H / 2;
+        if (g_cur_c >= VIS_W) g_cur_c = VIS_W / 2;
         paint_frame();
         render_to_stdout(g_cur_r, g_cur_c, 1);
         fputs("\033[0m\n", stdout);
@@ -594,11 +690,24 @@ int main(int argc, char **argv) {
     term_setup_raw();
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
+    signal(SIGWINCH, on_winch);
     atexit(term_teardown);
+    /* Drop the initial cursor into the freshly-laid-out window. */
+    g_cur_r = (WIN_R0 + WIN_R1) / 2;
+    g_cur_c = (WIN_C0 + WIN_C1) / 2;
+    g_fb_prev_valid = 0;            /* full repaint on first frame */
 
     int dirty = 1;
     int last_minute = -1;
     while (1) {
+        if (g_winch_dirty) {
+            g_winch_dirty = 0;
+            layout_for_size();
+            g_fb_prev_valid = 0;
+            if (g_cur_r >= VIS_H) g_cur_r = VIS_H - 1;
+            if (g_cur_c >= VIS_W) g_cur_c = VIS_W - 1;
+            dirty = 1;
+        }
         if (dirty) {
             paint_frame();
             render_to_stdout(g_cur_r, g_cur_c, 1);
