@@ -357,7 +357,20 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
 
 /* ── UI state ────────────────────────────────────────────── */
 enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT,
-       MODE_START, MODE_CONTEXT, MODE_DP };
+       MODE_START, MODE_CONTEXT, MODE_DP, MODE_PROGRAMS };
+
+/* What app is "open" inside the main window.  Switches title bar and
+ * content body.  NONE = the original welcome screen. */
+enum app_kind { APP_WELCOME = 0, APP_NOTEPAD, APP_CALC, APP_PAINT, APP_DOS };
+static int g_current_app = APP_WELCOME;
+
+/* Notepad's tiny text buffer.  Insert-only on the end (no internal
+ * cursor movement yet) — chars typed in Notepad mode append; Backspace
+ * removes the last char.  Plenty of room for "real Notepad" later. */
+#define NOTEPAD_CAP 4096
+static char g_notepad_buf[NOTEPAD_CAP];
+static int  g_notepad_len = 0;
+static int  g_notepad_editing = 0;
 
 /* Context-menu anchor in screen coordinates (set when `f` fires). */
 static int g_ctx_r = 0;
@@ -455,7 +468,16 @@ static void paint_main_window(void) {
     /* Title bar (one row inside the frame). */
     int tr = WIN_R0 + 1;
     fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
-    fb_text(tr, WIN_C0 + 2, "win95term", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    /* Title text reflects the currently-open app. */
+    const char *title;
+    switch (g_current_app) {
+    case APP_NOTEPAD: title = "Untitled - Notepad"; break;
+    case APP_CALC:    title = "Calculator";         break;
+    case APP_PAINT:   title = "untitled - Paint";   break;
+    case APP_DOS:     title = "MS-DOS Prompt";      break;
+    default:          title = "win95term";          break;
+    }
+    fb_text(tr, WIN_C0 + 2, title, C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
     /* [_] [o] [x] window buttons on the right side of the title bar.
      * Mini-buttons are flat-face (see draw_titlebar_button comment). */
     draw_titlebar_button(tr, WIN_C1 - 9, WIN_C1 - 7, "_");
@@ -479,11 +501,67 @@ static void paint_main_window(void) {
     int br = WIN_R0 + 3;            /* body start row */
     int sr = WIN_R1 - 1;            /* status row */
     draw_inset(br, WIN_C0 + 1, sr - 1, WIN_C1 - 1, C_FIELD_BG);
-    fb_text(br + 2, WIN_C0 + 4, "Welcome to win95term.",          C_TEXT, C_FIELD_BG, ATTR_BOLD);
-    fb_text(br + 4, WIN_C0 + 4, "Move the cursor with:",          C_TEXT, C_FIELD_BG, 0);
-    fb_text(br + 5, WIN_C0 + 6, " w  e        a/d  left/right",   C_TEXT, C_FIELD_BG, 0);
-    fb_text(br + 6, WIN_C0 + 6, " z  x        s  click, f  rclick",C_TEXT, C_FIELD_BG, 0);
-    fb_text(br + 8, WIN_C0 + 4, "Try: hover File, press s, pick About.", C_TEXT, C_FIELD_BG, 0);
+    switch (g_current_app) {
+    case APP_NOTEPAD: {
+        /* Render the notepad buffer wrapped at the content width. */
+        int x = WIN_C0 + 3, y = br + 2;
+        int max_x = WIN_C1 - 2;
+        for (int i = 0; i < g_notepad_len; i++) {
+            char c = g_notepad_buf[i];
+            if (c == '\n' || x > max_x) {
+                x = WIN_C0 + 3;
+                y++;
+                if (y >= sr - 1) break;
+                if (c == '\n') continue;
+            }
+            fb_put(y, x++, c, C_TEXT, C_FIELD_BG, 0);
+        }
+        /* Blinking caret approximation: a solid block at the insertion point. */
+        if (g_notepad_editing && y < sr - 1)
+            fb_put(y, x, '_', C_TEXT, C_FIELD_BG, ATTR_BOLD);
+        else if (!g_notepad_editing && g_notepad_len == 0)
+            fb_text(br + 2, WIN_C0 + 4, "Press s in the body to start typing.",
+                    C_BTN_SH, C_FIELD_BG, 0);
+        break;
+    }
+    case APP_CALC: {
+        /* A static fake calc keypad — just for the look. */
+        fb_text(br + 1, WIN_C0 + 3, "                          0.", C_TEXT, C_FIELD_BG, ATTR_BOLD);
+        static const char *rows[] = {
+            "  Backspace   CE     C   ",
+            "   MC   7   8   9   /  sqrt",
+            "   MR   4   5   6   *   %  ",
+            "   MS   1   2   3   -  1/x ",
+            "   M+   0  +/-  .   +   =  ",
+        };
+        for (int i = 0; i < 5; i++) {
+            int rr = br + 3 + i;
+            if (rr >= sr - 1) break;
+            fb_text(rr, WIN_C0 + 3, rows[i], C_TEXT, C_FIELD_BG, 0);
+        }
+        break;
+    }
+    case APP_PAINT:
+        fb_text(br + 2, WIN_C0 + 4, "Paint canvas (placeholder)",
+                C_BTN_SH, C_FIELD_BG, 0);
+        fb_text(br + 4, WIN_C0 + 4, "Real raster editor on a future commit.",
+                C_BTN_SH, C_FIELD_BG, 0);
+        break;
+    case APP_DOS:
+        /* Black background DOS prompt look — paint over the field. */
+        fb_fill(br + 1, WIN_C0 + 2, sr - 2, WIN_C1 - 2, ' ', 15, 16);
+        fb_text(br + 1, WIN_C0 + 3, "Microsoft(R) Windows 95",        15, 16, 0);
+        fb_text(br + 2, WIN_C0 + 3, "(C)Copyright Microsoft Corp 1981-1995.", 15, 16, 0);
+        fb_text(br + 4, WIN_C0 + 3, "C:\\WINDOWS>_",                  15, 16, ATTR_BOLD);
+        break;
+    default:
+        fb_text(br + 2, WIN_C0 + 4, "Welcome to win95term.",          C_TEXT, C_FIELD_BG, ATTR_BOLD);
+        fb_text(br + 4, WIN_C0 + 4, "Move the cursor with:",          C_TEXT, C_FIELD_BG, 0);
+        fb_text(br + 5, WIN_C0 + 6, " w  e        a/d  left/right",   C_TEXT, C_FIELD_BG, 0);
+        fb_text(br + 6, WIN_C0 + 6, " z  x        s  click, f  rclick",C_TEXT, C_FIELD_BG, 0);
+        fb_text(br + 8, WIN_C0 + 4, "Try: Start > Programs > Notepad.", C_TEXT, C_FIELD_BG, 0);
+        break;
+    }
 
     /* Status bar (one row above the frame's bottom edge). */
     fb_fill(sr, WIN_C0 + 1, sr, WIN_C1 - 1, ' ', C_TEXT, C_BTN);
@@ -495,7 +573,10 @@ static void paint_main_window(void) {
              : g_mode == MODE_FILE_MENU ? "File menu"
              : g_mode == MODE_HELP_MENU ? "Help menu"
              : g_mode == MODE_ABOUT     ? "About dialog"
-             : g_mode == MODE_START     ? "Start menu" : "?");
+             : g_mode == MODE_START     ? "Start menu"
+             : g_mode == MODE_PROGRAMS  ? "Programs"
+             : g_mode == MODE_CONTEXT   ? "Context menu"
+             : g_mode == MODE_DP        ? "Display Properties" : "?");
     fb_text(sr, WIN_C0 + 2, st, C_TEXT, C_BTN, 0);
 }
 
@@ -591,6 +672,55 @@ static void paint_start_menu(void) {
         int fg = sel ? C_HL_FG : C_TEXT;
         fb_fill(rr, c0 + 3, rr, c1 - 1, ' ', fg, bg);
         fb_text(rr, c0 + 3, g_start_items[i], fg, bg, 0);
+    }
+}
+
+/* ── Programs cascading submenu ──────────────────────────
+ *
+ * Pops out to the right of the Start menu when the user clicks
+ * "Programs".  Same hover-highlight visual as the parent.  Items
+ * map to g_current_app values; selecting one swaps the main
+ * window's title and content. */
+static const char *g_programs_items[] = {
+    " Notepad           ",
+    " Calculator        ",
+    " Paint             ",
+    " MS-DOS Prompt     ",
+    "───────────────────",
+    " Windows Explorer  ",
+};
+static const int g_programs_n = sizeof g_programs_items / sizeof g_programs_items[0];
+
+static void programs_geom(int *r0, int *c0, int *r1, int *c1) {
+    int sr0, sc0, sr1, sc1;
+    start_geom(&sr0, &sc0, &sr1, &sc1);
+    int w = 22;
+    int h = g_programs_n + 2;
+    *r0 = sr0 + 1;          /* "Programs" is item index 0 → row sr0 + 1 */
+    *c0 = sc1 + 1;
+    *r1 = *r0 + h - 1;
+    *c1 = *c0 + w - 1;
+    if (*c1 >= VIS_W) {
+        /* Not enough room on the right — pop to the LEFT of the
+         * Start menu instead (rare; happens in very narrow terms). */
+        *c0 = sc0 - w; if (*c0 < 0) *c0 = 0;
+        *c1 = *c0 + w - 1;
+    }
+    if (*r1 >= TASK_R) *r1 = TASK_R - 1;
+}
+
+static void paint_programs_submenu(void) {
+    int r0, c0, r1, c1;
+    programs_geom(&r0, &c0, &r1, &c1);
+    draw_outset(r0, c0, r1, c1, C_BTN);
+    for (int i = 0; i < g_programs_n; i++) {
+        int rr = r0 + 1 + i;
+        if (rr > r1 - 1) break;
+        int sel = (g_cur_r == rr && g_cur_c >= c0 + 1 && g_cur_c <= c1 - 1);
+        int bg = sel ? C_HL_BG : C_BTN;
+        int fg = sel ? C_HL_FG : C_TEXT;
+        fb_fill(rr, c0 + 1, rr, c1 - 1, ' ', fg, bg);
+        fb_text(rr, c0 + 1, g_programs_items[i], fg, bg, 0);
     }
 }
 
@@ -822,8 +952,9 @@ static void paint_frame(void) {
     }
     paint_taskbar();
     /* Overlays paint AFTER the taskbar so they stack on top. */
-    if (g_mode == MODE_START)   paint_start_menu();
-    if (g_mode == MODE_CONTEXT) paint_context_menu();
+    if (g_mode == MODE_START || g_mode == MODE_PROGRAMS) paint_start_menu();
+    if (g_mode == MODE_PROGRAMS) paint_programs_submenu();
+    if (g_mode == MODE_CONTEXT)  paint_context_menu();
 }
 
 /* ── Cursor movement ─────────────────────────────────────── */
@@ -885,7 +1016,10 @@ enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
        /* Display Properties widgets. */
        HIT_DP_COLOR_0, HIT_DP_COLOR_1, HIT_DP_COLOR_2, HIT_DP_COLOR_3,
        HIT_DP_CHECK_ICONS, HIT_DP_CHECK_CLOCK, HIT_DP_CHECK_HEX,
-       HIT_DP_OK, HIT_DP_CANCEL, HIT_DP_TITLE_X };
+       HIT_DP_OK, HIT_DP_CANCEL, HIT_DP_TITLE_X,
+       /* Programs submenu items. */
+       HIT_PROG_NOTEPAD, HIT_PROG_CALC, HIT_PROG_PAINT, HIT_PROG_DOS,
+       HIT_PROG_SEP, HIT_PROG_EXPLORER };
 
 static int hit_test(void) {
     int r = g_cur_r, c = g_cur_c;
@@ -934,8 +1068,27 @@ static int hit_test(void) {
     /* Start button. */
     if (r == TASK_R && c <= 9) return HIT_START;
 
-    /* Start menu items. */
-    if (g_mode == MODE_START) {
+    /* Programs submenu items. */
+    if (g_mode == MODE_PROGRAMS) {
+        int pr0, pc0, pr1, pc1;
+        programs_geom(&pr0, &pc0, &pr1, &pc1);
+        if (r >= pr0 + 1 && r <= pr0 + g_programs_n &&
+            c >= pc0 + 1 && c <= pc1 - 1) {
+            int idx = r - (pr0 + 1);
+            static const int map[] = {
+                HIT_PROG_NOTEPAD, HIT_PROG_CALC, HIT_PROG_PAINT,
+                HIT_PROG_DOS, HIT_PROG_SEP, HIT_PROG_EXPLORER
+            };
+            if (idx >= 0 && idx < (int)(sizeof map / sizeof map[0]))
+                return map[idx];
+        }
+        /* Click outside the submenu in PROGRAMS mode falls through to
+         * Start-menu hit-testing below so the user can navigate back. */
+    }
+
+    /* Start menu items (also applies when in PROGRAMS mode so the
+     * cursor can hop back into the parent menu). */
+    if (g_mode == MODE_START || g_mode == MODE_PROGRAMS) {
         int sr0, sc0, sr1, sc1;
         start_geom(&sr0, &sc0, &sr1, &sc1);
         if (r >= sr0 + 1 && r <= sr0 + g_start_n &&
@@ -1044,13 +1197,31 @@ static int handle_click(void) {
         g_cur_r = r1 - 1; g_cur_c = (c0 + c1) / 2;
         break;
     }
-    case HIT_START_PROGRAMS:
+    case HIT_START_PROGRAMS: {
+        /* Open the cascading Programs submenu and land the cursor on
+         * its first item. */
+        g_mode = MODE_PROGRAMS;
+        int pr0, pc0, pr1, pc1;
+        programs_geom(&pr0, &pc0, &pr1, &pc1);
+        (void)pr1; (void)pc1;
+        g_cur_r = pr0 + 1;
+        g_cur_c = pc0 + 2;
+        break;
+    }
+    case HIT_PROG_NOTEPAD: g_current_app = APP_NOTEPAD; g_mode = MODE_DESKTOP; break;
+    case HIT_PROG_CALC:    g_current_app = APP_CALC;    g_mode = MODE_DESKTOP; break;
+    case HIT_PROG_PAINT:   g_current_app = APP_PAINT;   g_mode = MODE_DESKTOP; break;
+    case HIT_PROG_DOS:     g_current_app = APP_DOS;     g_mode = MODE_DESKTOP; break;
+    case HIT_PROG_EXPLORER:
+        /* Explorer is a future phase — close menu for now. */
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_PROG_SEP:
+        break;
     case HIT_START_HELP:
     case HIT_CTX_VIEW:
     case HIT_CTX_NEW:
-        /* Stubs: just close the menu — submenus are a future
-         * phase.  HIT_START_RUN and HIT_CTX_PROPERTIES open the
-         * Display Properties dialog (handled below). */
+        /* Other stubs: just close.  Submenus are a future phase. */
         g_mode = MODE_DESKTOP;
         break;
     case HIT_CTX_REFRESH:
@@ -1100,10 +1271,20 @@ static int handle_click(void) {
         /* Separators do nothing. */
         break;
     default:
-        /* Click on empty space closes any open menu. */
+        /* Click on empty space closes any open menu (but NOT modal
+         * dialogs — those need an explicit OK/Cancel/×). */
         if (g_mode == MODE_FILE_MENU || g_mode == MODE_HELP_MENU ||
-            g_mode == MODE_START      || g_mode == MODE_CONTEXT)
+            g_mode == MODE_START      || g_mode == MODE_PROGRAMS ||
+            g_mode == MODE_CONTEXT)
             g_mode = MODE_DESKTOP;
+        /* Click inside the Notepad body area starts/stops editing. */
+        if (g_mode == MODE_DESKTOP && g_current_app == APP_NOTEPAD) {
+            int br = WIN_R0 + 3, sr = WIN_R1 - 1;
+            if (g_cur_r > br && g_cur_r < sr &&
+                g_cur_c > WIN_C0 + 1 && g_cur_c < WIN_C1 - 1) {
+                g_notepad_editing = !g_notepad_editing;
+            }
+        }
         break;
     }
     return 0;
@@ -1190,6 +1371,28 @@ int main(int argc, char **argv) {
                 dirty = 1;
             }
             continue;
+        }
+
+        /* Notepad editing intercepts most keys.  Esc exits editing,
+         * Backspace deletes the last char, Enter inserts a newline,
+         * Ctrl-C still quits.  Printable bytes append to the buffer. */
+        if (g_notepad_editing && g_current_app == APP_NOTEPAD) {
+            if (c == 0x03) break;                     /* Ctrl-C */
+            if (c == 0x1b) { g_notepad_editing = 0; dirty = 1; continue; }
+            if (c == 0x7f || c == 8) {                /* DEL or Backspace */
+                if (g_notepad_len > 0) g_notepad_len--;
+                dirty = 1; continue;
+            }
+            if (c == '\r' || c == '\n') {
+                if (g_notepad_len < NOTEPAD_CAP - 1)
+                    g_notepad_buf[g_notepad_len++] = '\n';
+                dirty = 1; continue;
+            }
+            if (c >= 32 && c < 127 && g_notepad_len < NOTEPAD_CAP - 1) {
+                g_notepad_buf[g_notepad_len++] = (char)c;
+                dirty = 1; continue;
+            }
+            continue;                                 /* swallow everything else */
         }
 
         if (c == 'q' || c == 'Q' || c == 0x03) break;   /* q or Ctrl-C */
