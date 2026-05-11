@@ -59,7 +59,7 @@ static int TASK_R = 29;
 
 /* ── 256-color palette (xterm slots picked to match Win95 system colors). ─ */
 enum {
-    g_desk_color_DEFAULT = 23, /* desktop teal (Win95 default-ish) */
+    C_DESK_DEFAULT = 23, /* desktop teal (Win95 default-ish) */
     C_BTN       = 251,   /* button face #c6c6c6 ~ Win95 silver */
     C_BTN_HL    =  15,   /* button highlight (white) */
     C_BTN_SH    = 240,   /* button shadow (dark gray) */
@@ -377,10 +377,18 @@ static int g_ctx_r = 0;
 static int g_ctx_c = 0;
 
 /* Display Properties settings — mutable at runtime via the dialog. */
-static int g_desk_color  = g_desk_color_DEFAULT;   /* xterm 256 slot */
+static int g_desk_color  = C_DESK_DEFAULT;   /* xterm 256 slot */
 static int g_show_icons  = 1;
 static int g_show_clock  = 1;
 /* g_hex_grid is declared further down already. */
+
+/* Window state for the main window's title-bar _ / o / x buttons. */
+static int g_win_minimized = 0;
+static int g_win_maximized = 0;
+static int g_win_saved_r0  = 0;
+static int g_win_saved_c0  = 0;
+static int g_win_saved_r1  = 0;
+static int g_win_saved_c1  = 0;
 
 static int g_mode = MODE_DESKTOP;
 /* Cursor: positioned by layout_for_size() onto the center of the
@@ -444,12 +452,19 @@ static void paint_taskbar(void) {
     for (int c = 0; c < VIS_W; c++) fb_put(TASK_R - 1, c, ' ', C_TEXT, C_BTN_HL, 0);
     /* Start button. */
     draw_button(TASK_R, 0, 9, "Start", g_mode == MODE_START);
-    /* Window-on-taskbar pill for the open window — only if there's
-     * room between the Start button and the clock. */
+    /* Window-on-taskbar pill — depressed when the window is foreground
+     * (matching Win95: an open active window shows its taskbar entry
+     * "pressed in") and raised when minimized. */
     if (VIS_W >= 40) {
         int pill_c1 = (VIS_W - 8) - 2;
         if (pill_c1 > 30) pill_c1 = 30;
-        draw_button(TASK_R, 11, pill_c1, "win95term", 0);
+        const char *pill_label =
+              g_current_app == APP_NOTEPAD ? "Untitled - Notepad"
+            : g_current_app == APP_CALC    ? "Calculator"
+            : g_current_app == APP_PAINT   ? "Paint"
+            : g_current_app == APP_DOS     ? "MS-DOS Prompt"
+            : "win95term";
+        draw_button(TASK_R, 11, pill_c1, pill_label, !g_win_minimized);
     }
     /* Clock on the right (if user hasn't hidden it). */
     if (g_show_clock) {
@@ -938,7 +953,9 @@ static void paint_dp_dialog(void) {
 
 static void paint_frame(void) {
     paint_desktop();
-    paint_main_window();
+    /* Skip the main window entirely when minimized — the taskbar pill
+     * is the only handle left. */
+    if (!g_win_minimized) paint_main_window();
     if (g_mode == MODE_FILE_MENU) {
         int anchor = WIN_C0 + g_menubar[0].col_off;
         paint_dropdown(MODE_FILE_MENU, anchor, g_file_items, g_file_n);
@@ -1006,6 +1023,10 @@ static void handle_movement(char k) {
  * the click handler to act on. */
 enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
        HIT_HELP_KEYS, HIT_HELP_ABOUT, HIT_DIALOG_OK, HIT_TITLE_X,
+       /* Main-window title-bar mini-buttons (in addition to TITLE_X). */
+       HIT_TITLE_MIN, HIT_TITLE_MAX,
+       /* Click on the taskbar pill restores a minimized window. */
+       HIT_TASKBAR_PILL,
        HIT_START,
        /* Start-menu items (in order). */
        HIT_START_PROGRAMS, HIT_START_HELP, HIT_START_RUN,
@@ -1033,8 +1054,15 @@ static int hit_test(void) {
         if (r == r0 + 1 && c >= c1 - 3 && c <= c1 - 1) return HIT_DIALOG_OK;  /* x button closes */
         return HIT_NONE;
     }
-    /* Title bar close button. */
-    if (r == WIN_R0 + 1 && c >= WIN_C1 - 3 && c <= WIN_C1 - 1) return HIT_TITLE_X;
+    /* Title bar mini-buttons.  Order on the right: _ then o then x. */
+    if (r == WIN_R0 + 1) {
+        if (c >= WIN_C1 - 9 && c <= WIN_C1 - 7) return HIT_TITLE_MIN;
+        if (c >= WIN_C1 - 6 && c <= WIN_C1 - 4) return HIT_TITLE_MAX;
+        if (c >= WIN_C1 - 3 && c <= WIN_C1 - 1) return HIT_TITLE_X;
+    }
+    /* Taskbar pill restores a minimized window. */
+    if (r == TASK_R && c >= 11 && c <= 30 && g_win_minimized)
+        return HIT_TASKBAR_PILL;
     /* Menu bar items. */
     if (r == WIN_R0 + 2) {
         for (int i = 0; i < g_menubar_n; i++) {
@@ -1175,7 +1203,42 @@ static int handle_click(void) {
         g_mode = MODE_ABOUT;
         break;
     case HIT_DIALOG_OK:
+        g_mode = MODE_DESKTOP;
+        break;
     case HIT_TITLE_X:
+        /* Close the running app — revert to the welcome screen and
+         * any modal back to desktop. */
+        g_current_app = APP_WELCOME;
+        g_notepad_editing = 0;
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_TITLE_MIN:
+        /* Minimize: stash current window rect, mark minimized.  The
+         * taskbar pill is the only way back. */
+        g_win_saved_r0 = WIN_R0; g_win_saved_c0 = WIN_C0;
+        g_win_saved_r1 = WIN_R1; g_win_saved_c1 = WIN_C1;
+        g_win_minimized = 1;
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_TITLE_MAX:
+        /* Maximize toggle: fill the visible area (minus taskbar) on
+         * first click; restore the prior rect on second. */
+        if (!g_win_maximized) {
+            g_win_saved_r0 = WIN_R0; g_win_saved_c0 = WIN_C0;
+            g_win_saved_r1 = WIN_R1; g_win_saved_c1 = WIN_C1;
+            WIN_R0 = 0;          WIN_C0 = 0;
+            WIN_R1 = TASK_R - 2; WIN_C1 = VIS_W - 1;
+            g_win_maximized = 1;
+        } else {
+            WIN_R0 = g_win_saved_r0; WIN_C0 = g_win_saved_c0;
+            WIN_R1 = g_win_saved_r1; WIN_C1 = g_win_saved_c1;
+            g_win_maximized = 0;
+        }
+        g_fb_prev_valid = 0;   /* force full repaint at new size */
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_TASKBAR_PILL:
+        g_win_minimized = 0;
         g_mode = MODE_DESKTOP;
         break;
     case HIT_START: {
