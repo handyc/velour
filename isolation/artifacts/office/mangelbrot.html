@@ -67,6 +67,15 @@
   button:disabled { background: #2a2f37; color: var(--dim); cursor: not-allowed; }
   button.alt { background: #21262d; color: var(--fg); border: 1px solid var(--line); }
   button.alt:hover { background: #30363d; }
+  .pix-row {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .pix-row button { flex: 1; }
+  select {
+    background: #0d1117; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px; font: 13px ui-monospace, monospace;
+    cursor: pointer;
+  }
   .status {
     font: 12px ui-monospace, "SF Mono", Menlo, monospace;
     color: var(--dim);
@@ -107,6 +116,14 @@
   </div>
   <div class="controls">
     <button id="regen">Regenerate</button>
+    <div class="pix-row">
+      <button id="pixelize" class="alt">Pixelize</button>
+      <select id="blockSize" title="block size in pixels">
+        <option value="2">2×</option>
+        <option value="4" selected>4×</option>
+        <option value="8">8×</option>
+      </select>
+    </div>
     <button id="download" class="alt">Download JPG</button>
     <div class="status" id="status">starting…</div>
     <div class="legend">
@@ -133,6 +150,15 @@ const CTX       = SHEET.getContext("2d");
 const STATUS    = document.getElementById("status");
 const BTN_REGEN = document.getElementById("regen");
 const BTN_DL    = document.getElementById("download");
+const BTN_PIX   = document.getElementById("pixelize");
+const SEL_BLK   = document.getElementById("blockSize");
+
+/* Hidden mirror of the un-pixelized sheet — Pixelize reads from here
+ * and writes to the visible canvas, so the operation is idempotent
+ * and clicking it twice with the same block size is a no-op. */
+const SRC = document.createElement("canvas");
+SRC.width = 512; SRC.height = 512;
+const SRC_CTX = SRC.getContext("2d");
 
 const SPRITE_PX   = 64;
 const SHEET_TILES = 8;
@@ -310,6 +336,7 @@ function regenerateSheet() {
   CTX.fillRect(0, 0, SHEET_PX, SHEET_PX);
   BTN_REGEN.disabled = true;
   BTN_DL.disabled    = true;
+  BTN_PIX.disabled   = true;
   let n = 0;
   STATUS.textContent = "0/" + TOTAL;
   function step() {
@@ -326,12 +353,66 @@ function regenerateSheet() {
     if (n < TOTAL) {
       requestAnimationFrame(step);
     } else {
+      /* Snapshot the fresh sheet for Pixelize to read from. */
+      SRC_CTX.drawImage(SHEET, 0, 0);
       BTN_REGEN.disabled = false;
       BTN_DL.disabled    = false;
+      BTN_PIX.disabled   = false;
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
   }
   requestAnimationFrame(step);
+}
+
+/* ── Pixelize ─────────────────────────────────────────
+ * Reads from the offscreen SRC mirror (un-pixelized sheet), block-
+ * averages every block × block pixel region, writes the result back
+ * to the visible canvas.  Operates per-sprite so block edges line up
+ * with the 64-px sprite grid even when block doesn't divide 64
+ * evenly (it does for 2/4/8, but the per-sprite loop is robust
+ * regardless).  The magenta colour key is preserved: if more than
+ * half the pixels in a block are key, the whole block becomes key;
+ * key pixels are otherwise excluded from the colour average so the
+ * outline doesn't smear into the sprite. */
+function pixelize() {
+  const block = parseInt(SEL_BLK.value, 10) | 0;
+  if (block < 1) return;
+  const src = SRC_CTX.getImageData(0, 0, SHEET_PX, SHEET_PX);
+  const dst = CTX.createImageData(SHEET_PX, SHEET_PX);
+  const sd = src.data, dd = dst.data;
+  for (let by = 0; by < SHEET_PX; by += block) {
+    const bh = Math.min(block, SHEET_PX - by);
+    for (let bx = 0; bx < SHEET_PX; bx += block) {
+      const bw = Math.min(block, SHEET_PX - bx);
+      let sR = 0, sG = 0, sB = 0, n = 0, keys = 0, total = 0;
+      for (let dy = 0; dy < bh; dy++) {
+        for (let dx = 0; dx < bw; dx++) {
+          const p = ((by + dy) * SHEET_PX + (bx + dx)) * 4;
+          const r = sd[p], g = sd[p+1], b = sd[p+2];
+          total++;
+          if (r === KEY_R && g === KEY_G && b === KEY_B) {
+            keys++;
+          } else {
+            sR += r; sG += g; sB += b; n++;
+          }
+        }
+      }
+      let outR, outG, outB;
+      if (n === 0 || keys > total / 2) {
+        outR = KEY_R; outG = KEY_G; outB = KEY_B;
+      } else {
+        outR = (sR / n) | 0; outG = (sG / n) | 0; outB = (sB / n) | 0;
+      }
+      for (let dy = 0; dy < bh; dy++) {
+        for (let dx = 0; dx < bw; dx++) {
+          const p = ((by + dy) * SHEET_PX + (bx + dx)) * 4;
+          dd[p] = outR; dd[p+1] = outG; dd[p+2] = outB; dd[p+3] = 255;
+        }
+      }
+    }
+  }
+  CTX.putImageData(dst, 0, 0);
+  STATUS.textContent = "pixelized at " + block + "× block";
 }
 
 /* ── Download as JPG ──────────────────────────────────
@@ -354,6 +435,16 @@ function downloadJpg() {
 
 BTN_REGEN.addEventListener("click", regenerateSheet);
 BTN_DL.addEventListener("click", downloadJpg);
+BTN_PIX.addEventListener("click", pixelize);
+SEL_BLK.addEventListener("change", () => {
+  /* If the canvas already shows a pixelization, re-apply at the new
+   * block size so the select doubles as a live slider. */
+  if (!BTN_PIX.disabled && STATUS.textContent.startsWith("pixelized")) pixelize();
+});
+
+/* Pixelize is meaningless until the first sheet finishes rendering. */
+BTN_PIX.disabled = true;
+BTN_DL.disabled  = true;
 
 /* First sheet on load. */
 regenerateSheet();
