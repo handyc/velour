@@ -19,6 +19,11 @@
   </nav>
 
   <p style="margin-bottom: 1rem;">
+    <form method="post" action="{% url 'umbra:experiment_run' expt.slug %}"
+          style="display: inline;">
+      {% csrf_token %}
+      <button type="submit" class="btn" style="margin-right: 0.4rem;">run</button>
+    </form>
     <a href="{% url 'umbra:experiment_edit' expt.slug %}" class="btn">edit</a>
     <span class="meta" style="color: #6e7681; font-family: monospace; font-size: 0.74rem; margin-left: 0.6rem;">
       scheme: {{ expt.scheme.name|default:"—" }} ·
@@ -49,9 +54,8 @@
   </div>
   {% else %}
   <div class="panel">
-    <p class="empty">No runs yet.  Phase 2 will add a <code>run</code> button
-      and a <code>manage.py umbra_run {{ expt.slug }}</code> command that
-      executes the code and captures output here.</p>
+    <p class="empty">No runs yet.  Press <strong>run</strong> above to execute
+      the code in a sandboxed subprocess (CPU/memory/wall-clock capped).</p>
   </div>
   {% endif %}
 </div>

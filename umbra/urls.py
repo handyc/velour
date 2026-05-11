@@ -16,4 +16,6 @@ urlpatterns = [
          views.experiment_detail,  name='experiment_detail'),
     path('experiments/<slug:slug>/edit/',
          views.experiment_edit,    name='experiment_edit'),
+    path('experiments/<slug:slug>/run/',
+         views.experiment_run,     name='experiment_run'),
 ]

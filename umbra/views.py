@@ -10,22 +10,29 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 
 from .models import Scheme, Reference, Experiment
+from .runner import run_experiment
 
 
 SAMPLE_CODE = """\
-# Pyfhel BFV add example.
-# Phase 1 stores this as text — phase 2 will run it.
-from Pyfhel import Pyfhel
+# TenSEAL CKKS — element-wise multiply + encrypted dot product.
+import tenseal as ts
 
-he = Pyfhel()
-he.contextGen(scheme='BFV', n=2**13, t=65537, t_bits=20)
-he.keyGen()
+ctx = ts.context(
+    ts.SCHEME_TYPE.CKKS,
+    poly_modulus_degree=8192,
+    coeff_mod_bit_sizes=[60, 40, 40, 60],
+)
+ctx.global_scale = 2 ** 40
+ctx.generate_galois_keys()
 
-a = he.encryptInt(42)
-b = he.encryptInt(58)
+a = ts.ckks_vector(ctx, [1.0, 2.0, 3.0, 4.0])
+b = ts.ckks_vector(ctx, [10.0, 20.0, 30.0, 40.0])
 
-c = a + b                    # ciphertext addition
-print('a + b =', he.decryptInt(c))   # -> 100
+c = a * b                                # element-wise ciphertext multiply
+print('a * b =', [round(x, 4) for x in c.decrypt()])
+
+d = a.dot(b)                             # encrypted dot product
+print('a . b =', round(d.decrypt()[0], 4))   # -> 300.0
 """
 
 
@@ -105,6 +112,18 @@ def experiment_detail(request, slug):
     e = get_object_or_404(Experiment, slug=slug)
     ctx = _ctx(); ctx['expt'] = e
     return render(request, 'umbra/experiment_detail.html', ctx)
+
+
+def experiment_run(request, slug):
+    if request.method != 'POST':
+        return redirect('umbra:experiment_detail', slug=slug)
+    e = get_object_or_404(Experiment, slug=slug)
+    run_experiment(e)
+    if e.status == Experiment.STATUS_DONE:
+        messages.success(request, f'Ran "{e.name}" in {e.last_run_ms} ms.')
+    else:
+        messages.error(request, f'Run failed after {e.last_run_ms} ms.')
+    return redirect('umbra:experiment_detail', slug=e.slug)
 
 
 def experiment_edit(request, slug):
