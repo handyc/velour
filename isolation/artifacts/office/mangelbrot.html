@@ -124,6 +124,10 @@
         <option value="8">8×</option>
       </select>
     </div>
+    <div class="pix-row">
+      <button id="rerollPal" class="alt" style="flex: 1; min-width: 0;">Reroll Palette</button>
+      <button id="rerollKeys" class="alt" style="flex: 1; min-width: 0;">Reroll RGB Keys</button>
+    </div>
     <button id="download" class="alt">Download Sheet JPG</button>
     <div class="status" id="status">starting…</div>
     <div class="legend">
@@ -175,6 +179,8 @@ const BTN_REGEN = document.getElementById("regen");
 const BTN_DL    = document.getElementById("download");
 const BTN_PIX   = document.getElementById("pixelize");
 const SEL_BLK   = document.getElementById("blockSize");
+const BTN_REROLL_PAL  = document.getElementById("rerollPal");
+const BTN_REROLL_KEYS = document.getElementById("rerollKeys");
 const BTN_WANG     = document.getElementById("wang");
 const BTN_PIXTILE  = document.getElementById("pixTile");
 const BTN_DLT      = document.getElementById("downloadTile");
@@ -332,6 +338,13 @@ function slotForIter(iter, maxIter) {
   return ((iter * palMult + palOff) >>> 0) & 0xff;
 }
 
+/* Per-sprite slot indices + dominant slot, retained so the recolor
+ * buttons (Reroll Palette / Reroll RGB Keys) can repaint without
+ * re-running the Mandelbrot iteration.  Allocated lazily on first
+ * regenerateSheet call. */
+let spriteSlots = null;    /* Array<Int16Array(4096)> — one per sprite */
+let spriteTrans = null;    /* Int16Array(64)         — transparent slot per sprite */
+
 /* ── Render one 64×64 sprite at (sx, sy) on the sheet canvas ── */
 function renderSprite(sx, sy) {
   initOrDriftPalette();
@@ -354,6 +367,12 @@ function renderSprite(sx, sy) {
   for (let i = 1; i < 257; i++) if (hist[i] > hist[maxIdx]) maxIdx = i;
   const transparent = maxIdx - 1;          /* -1..255 */
 
+  /* Stash for the recolor path.  Index is derived from (sx, sy)
+   * since the caller hands us pixel coords. */
+  const idx = ((sy / SPRITE_PX) | 0) * SHEET_TILES + ((sx / SPRITE_PX) | 0);
+  spriteSlots[idx] = slots;
+  spriteTrans[idx] = transparent;
+
   const img = CTX.createImageData(SPRITE_PX, SPRITE_PX);
   const d = img.data;
   for (let p = 0, i = 0; p < d.length; p += 4, i++) {
@@ -372,6 +391,88 @@ function renderSprite(sx, sy) {
   CTX.putImageData(img, sx, sy);
 }
 
+/* Repaint sprite `idx` using `pal256` (Uint8ClampedArray of 256*3
+ * RGB bytes) and the given transparent slot.  Writes to both the
+ * visible SHEET and the un-pixelized SRC mirror so subsequent
+ * Pixelize reads see the new colours.  The Mandelbrot iteration
+ * doesn't re-run; we just look up new RGBs for each stored slot. */
+function applyPaletteToSprite(idx, pal256, transparent) {
+  const slots = spriteSlots[idx];
+  if (!slots) return;
+  const img = CTX.createImageData(SPRITE_PX, SPRITE_PX);
+  const d = img.data;
+  for (let p = 0, i = 0; p < d.length; p += 4, i++) {
+    const sl = slots[i];
+    if (sl === transparent) {
+      d[p] = KEY_R; d[p+1] = KEY_G; d[p+2] = KEY_B;
+    } else if (sl < 0) {
+      d[p] = 0; d[p+1] = 0; d[p+2] = 0;
+    } else {
+      d[p]   = pal256[sl*3 + 0];
+      d[p+1] = pal256[sl*3 + 1];
+      d[p+2] = pal256[sl*3 + 2];
+    }
+    d[p+3] = 255;
+  }
+  const sx = (idx % SHEET_TILES) * SPRITE_PX;
+  const sy = ((idx / SHEET_TILES) | 0) * SPRITE_PX;
+  CTX.putImageData(img, sx, sy);
+  SRC_CTX.putImageData(img, sx, sy);
+}
+
+/* Reroll Palette: 256 fully-random RGB triples (no structure, no
+ * 4-base derivation), applied uniformly to every sprite.  Per-
+ * sprite transparent slot is preserved so the magenta key stays in
+ * the same locations. */
+function rerollPaletteRandom() {
+  const pal = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256 * 3; i++) pal[i] = (rnd() * 256) | 0;
+  for (let i = 0; i < TOTAL; i++) {
+    applyPaletteToSprite(i, pal, spriteTrans[i]);
+  }
+  STATUS.textContent = "recoloured · 256 random colours";
+}
+
+/* Reroll RGB Keys: pick 4 new RGB bases, walk each sprite drifting
+ * the bases by ±PAL_DRIFT/channel, rebuild the 256-entry table from
+ * 4 ramps per sprite, and apply.  Preserves the original drift
+ * character — neighbouring sprites share a colour family. */
+function rerollPaletteKeys() {
+  const base = [
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+  ];
+  const pal = new Uint8ClampedArray(256 * 3);
+  function fillPal() {
+    for (let k = 0; k < 4; k++) {
+      const a = base[k];
+      const b = base[(k + 1) & 3];
+      for (let j = 0; j < 64; j++) {
+        const slot = k * 64 + j;
+        pal[slot*3 + 0] = ((a[0] * (63 - j) + b[0] * j) / 63) | 0;
+        pal[slot*3 + 1] = ((a[1] * (63 - j) + b[1] * j) / 63) | 0;
+        pal[slot*3 + 2] = ((a[2] * (63 - j) + b[2] * j) / 63) | 0;
+      }
+    }
+  }
+  fillPal();
+  applyPaletteToSprite(0, pal, spriteTrans[0]);
+  for (let i = 1; i < TOTAL; i++) {
+    /* Same ±PAL_DRIFT drift as the live render path. */
+    for (let k = 0; k < 4; k++) {
+      for (let c = 0; c < 3; c++) {
+        const d = ((rnd() * (2*PAL_DRIFT + 1)) | 0) - PAL_DRIFT;
+        base[k][c] = clampByte(base[k][c] + d);
+      }
+    }
+    fillPal();
+    applyPaletteToSprite(i, pal, spriteTrans[i]);
+  }
+  STATUS.textContent = "recoloured · 4 new RGB keys + drift";
+}
+
 /* ── Sheet driver ───────────────────────────────────── */
 let renderToken = 0;        /* invalidate in-flight runs when user re-clicks Regenerate */
 
@@ -381,12 +482,20 @@ function regenerateSheet() {
   palInited = false;        /* reroll palette per sheet */
   CTX.fillStyle = "#ff00ff";
   CTX.fillRect(0, 0, SHEET_PX, SHEET_PX);
-  BTN_REGEN.disabled    = true;
-  BTN_DL.disabled       = true;
-  BTN_PIX.disabled      = true;
-  BTN_WANG.disabled     = true;
-  BTN_PIXTILE.disabled  = true;
-  BTN_DLT.disabled      = true;
+  BTN_REGEN.disabled        = true;
+  BTN_DL.disabled           = true;
+  BTN_PIX.disabled          = true;
+  BTN_WANG.disabled         = true;
+  BTN_PIXTILE.disabled      = true;
+  BTN_DLT.disabled          = true;
+  BTN_REROLL_PAL.disabled   = true;
+  BTN_REROLL_KEYS.disabled  = true;
+  /* Lazy-init per-sprite slot stash; old contents will be overwritten
+   * as renderSprite walks each cell. */
+  if (!spriteSlots) {
+    spriteSlots = new Array(TOTAL);
+    spriteTrans = new Int16Array(TOTAL);
+  }
   /* New sheet → stored edge averages are stale; clear the visible
    * tiling so the user doesn't think the old layout still matches. */
   tileEdges = null;
@@ -413,10 +522,12 @@ function regenerateSheet() {
     } else {
       /* Snapshot the fresh sheet for Pixelize to read from. */
       SRC_CTX.drawImage(SHEET, 0, 0);
-      BTN_REGEN.disabled = false;
-      BTN_DL.disabled    = false;
-      BTN_PIX.disabled   = false;
-      BTN_WANG.disabled  = false;
+      BTN_REGEN.disabled       = false;
+      BTN_DL.disabled          = false;
+      BTN_PIX.disabled         = false;
+      BTN_WANG.disabled        = false;
+      BTN_REROLL_PAL.disabled  = false;
+      BTN_REROLL_KEYS.disabled = false;
       /* Tiling-derived actions stay disabled until a Wang Tile run. */
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
@@ -661,6 +772,8 @@ BTN_PIX.addEventListener("click", pixelize);
 BTN_WANG.addEventListener("click", generateWangTiling);
 BTN_PIXTILE.addEventListener("click", pixelizeTiling);
 BTN_DLT.addEventListener("click", downloadTilingJpg);
+BTN_REROLL_PAL.addEventListener("click", rerollPaletteRandom);
+BTN_REROLL_KEYS.addEventListener("click", rerollPaletteKeys);
 SEL_BLK.addEventListener("change", () => {
   /* Block-size acts as a live slider for whichever layer is currently
    * showing a pixelization — sheet, tiling, or both. */
@@ -673,11 +786,13 @@ SEL_BLK.addEventListener("change", () => {
 /* Sheet- and tiling-derived actions are meaningless until their
  * respective generators have run.  Disable everything that depends
  * on something rendered. */
-BTN_PIX.disabled     = true;
-BTN_DL.disabled      = true;
-BTN_WANG.disabled    = true;
-BTN_PIXTILE.disabled = true;
-BTN_DLT.disabled     = true;
+BTN_PIX.disabled          = true;
+BTN_DL.disabled           = true;
+BTN_WANG.disabled         = true;
+BTN_PIXTILE.disabled      = true;
+BTN_DLT.disabled          = true;
+BTN_REROLL_PAL.disabled   = true;
+BTN_REROLL_KEYS.disabled  = true;
 
 /* First sheet on load. */
 regenerateSheet();
