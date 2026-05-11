@@ -11041,10 +11041,300 @@ static int tg_subcmd_info(int argc, char **argv) {
     return 0;
 }
 
+/* ── Phase 6: grow chain ─────────────────────────────────
+ *
+ *   grow chain <tail1> [tail2] ...        explicit pipeline
+ *   grow chain --auto "<task>"            LLM picks the pipeline
+ *
+ * Composes multiple capability tails into a Unix-style pipeline:
+ * stdin → tail1 → tail2 → ... → stdout.  No sandbox per stage in
+ * v1 (Phase 6b can layer that on); each tail was already verified
+ * at gen time anyway.  Cleans up extracted /tmp files on exit. */
+
+#define TG_CHAIN_MAX 8
+
+/* Find the most-recent-from-EOF tail with `name`.  Returns 1 if
+ * found, writing payload pointer + length to *out.  Caller must
+ * have tg_buf loaded with `size` bytes of self contents. */
+static int tg_lookup_tail(const char *name, int name_len, long size,
+                          const char **payload_out, long *plen_out) {
+    long end = size;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (info.name_len == name_len) {
+            int m = 1;
+            for (int i = 0; i < name_len; i++)
+                if (info.name[i] != name[i]) { m = 0; break; }
+            if (m) {
+                *payload_out = tg_buf + end - info.trailer_len - info.payload_len;
+                *plen_out = (long)info.payload_len;
+                return 1;
+            }
+        }
+        end -= step;
+    }
+    return 0;
+}
+
+/* --auto: build a prompt listing every tail's name + task, ask the
+ * LLM to emit a pipeline, parse `tail1 | tail2 | ...` into names.
+ * Returns the number of stages parsed (0 on failure). */
+static int tg_chain_pick(const char *task, long self_size,
+                         char names[TG_CHAIN_MAX][TG_NAME_LEN + 1]) {
+    /* Build the available-tails block of the prompt. */
+    static char tail_list[4096];
+    int tl = 0;
+    int n_tails = 0;
+    long end = self_size;
+    while (end > 0) {
+        struct tg_tail_info info;
+        if (!tg_read_trailer(tg_buf, end, &info)) break;
+        long step = (long)info.trailer_len + (long)info.payload_len;
+        if (step <= 0 || step > end) break;
+        if (tl + info.name_len + info.task_len + 8 < (int)sizeof tail_list) {
+            mcpy(tail_list + tl, info.name, info.name_len);
+            tl += info.name_len;
+            tail_list[tl++] = ' '; tail_list[tl++] = '-'; tail_list[tl++] = ' ';
+            if (info.task_len > 0) {
+                int copy = info.task_len > 120 ? 120 : info.task_len;
+                mcpy(tail_list + tl, info.task, copy); tl += copy;
+            } else {
+                static const char none[] = "(no task)";
+                mcpy(tail_list + tl, none, sizeof none - 1);
+                tl += (int)sizeof none - 1;
+            }
+            tail_list[tl++] = '\n';
+        }
+        end -= step;
+        n_tails++;
+    }
+    tail_list[tl] = 0;
+    if (n_tails == 0) {
+        wr(2, "grow chain --auto: no tails to choose from\n", 43);
+        return 0;
+    }
+
+    /* Build the user message. */
+    static char prompt[6144];
+    int pp = 0;
+    pp = sapp(prompt, pp,
+              "You compose Unix-style pipelines from small capabilities.  "
+              "Each capability reads stdin and writes stdout.  Available:\n\n");
+    mcpy(prompt + pp, tail_list, tl); pp += tl;
+    pp = sapp(prompt, pp, "\nUser task: ");
+    pp = sapp(prompt, pp, task);
+    pp = sapp(prompt, pp,
+              "\n\nPick a pipeline that solves the task.  Output EXACTLY one of:\n"
+              "  ANSWER: name1 | name2 | name3\n"
+              "  ANSWER: <none>\n");
+    prompt[pp] = 0;
+
+    g_headless = 1;
+    g_ask_max_tokens = 8192;   /* reasoning models need headroom; 2048 came back empty */
+    ask_load_conf();
+    if (!ask_api_key[0]) ask_fetch_random_key();
+    ask_n_msgs = 0;
+    ask_buf_use = 0;
+    ask_msg_add(0, prompt, pp);
+
+    static char content[4096];
+    char fail_reason[256];
+    int cn = ask_send_retrying(content, sizeof content,
+                               fail_reason, sizeof fail_reason);
+    if (cn < 0) {
+        wr(2, "grow chain --auto: LLM call failed: ", 36);
+        wr(2, fail_reason, slen(fail_reason));
+        wr(2, "\n", 1);
+        return 0;
+    }
+    int ans_at = ja_find(content, cn, "ANSWER:");
+    if (ans_at < 0) {
+        wr(2, "grow chain --auto: no ANSWER: in LLM response\n", 46);
+        return 0;
+    }
+    int p = ans_at + 7;
+    while (p < cn && (content[p] == ' ' || content[p] == '\t')) p++;
+    /* Read line (until newline) */
+    int line_end = p;
+    while (line_end < cn && content[line_end] != '\n' &&
+           content[line_end] != '\r') line_end++;
+    /* Detect <none> */
+    if (line_end - p >= 6 &&
+        content[p] == '<' && content[p+1] == 'n' && content[p+2] == 'o' &&
+        content[p+3] == 'n' && content[p+4] == 'e' && content[p+5] == '>') {
+        wr(2, "grow chain --auto: LLM picked <none>\n", 37);
+        return 0;
+    }
+    /* Parse name1 | name2 | ... */
+    int n_stages = 0;
+    int i = p;
+    while (i < line_end && n_stages < TG_CHAIN_MAX) {
+        while (i < line_end && (content[i] == ' ' || content[i] == '\t' ||
+                                content[i] == '|')) i++;
+        if (i >= line_end) break;
+        int j = i;
+        while (j < line_end && content[j] != '|' && content[j] != ' ' &&
+               content[j] != '\t') j++;
+        int nl = j - i;
+        if (nl > TG_NAME_LEN) nl = TG_NAME_LEN;
+        mcpy(names[n_stages], content + i, nl);
+        names[n_stages][nl] = 0;
+        n_stages++;
+        i = j;
+    }
+    if (n_stages > 0) {
+        wr(2, "grow chain --auto: pipeline = ", 30);
+        for (int k = 0; k < n_stages; k++) {
+            if (k > 0) wr(2, " | ", 3);
+            wr(2, names[k], slen(names[k]));
+        }
+        wr(2, "\n", 1);
+    }
+    return n_stages;
+}
+
+static int tg_subcmd_chain(int argc, char **argv) {
+    int auto_mode = 0;
+    int start = 1;
+    if (argc > 1 && argv[1] && scmp(argv[1], "--auto") == 0) {
+        auto_mode = 1; start = 2;
+    }
+    if (start >= argc || !argv[start]) {
+        wr(2, "usage: grow chain <tail1> [tail2] ...\n"
+              "       grow chain --auto \"<task>\"\n", 73);
+        return 1;
+    }
+
+    char self_path[512];
+    if (ja_self_path(self_path, sizeof self_path) < 0) return 1;
+    long size = tg_load_file(self_path);
+    if (size < 0) {
+        wr(2, "grow chain: cannot load self\n", 29);
+        return 1;
+    }
+
+    char stage_names[TG_CHAIN_MAX][TG_NAME_LEN + 1];
+    int n_stages = 0;
+    if (auto_mode) {
+        n_stages = tg_chain_pick(argv[start], size, stage_names);
+        if (n_stages <= 0) return 1;
+        /* tg_chain_pick may have clobbered tg_buf via ask machinery;
+         * reload self before resolving tails. */
+        size = tg_load_file(self_path);
+        if (size < 0) return 1;
+    } else {
+        for (int i = start; i < argc && argv[i] && n_stages < TG_CHAIN_MAX; i++) {
+            int nl = slen(argv[i]);
+            if (nl > TG_NAME_LEN) nl = TG_NAME_LEN;
+            mcpy(stage_names[n_stages], argv[i], nl);
+            stage_names[n_stages][nl] = 0;
+            n_stages++;
+        }
+    }
+
+    /* Resolve each name + extract payload to /tmp/tg_chain_<pid>_N. */
+    char ext_paths[TG_CHAIN_MAX][96];
+    char pid_s[16];
+    ja_utoa((unsigned int)(getpid_() & 0xffffffff), pid_s);
+    for (int i = 0; i < n_stages; i++) {
+        const char *payload = 0;
+        long plen = 0;
+        if (!tg_lookup_tail(stage_names[i], slen(stage_names[i]),
+                            size, &payload, &plen)) {
+            wr(2, "grow chain: tail '", 18);
+            wr(2, stage_names[i], slen(stage_names[i]));
+            wr(2, "' not found\n", 12);
+            for (int j = 0; j < i; j++)
+                sys3(SYS_unlink, (long)ext_paths[j], 0, 0);
+            return 1;
+        }
+        int p = 0;
+        p = sapp(ext_paths[i], p, "/tmp/tg_chain_");
+        p = sapp(ext_paths[i], p, pid_s);
+        ext_paths[i][p++] = '_';
+        ext_paths[i][p++] = (char)('0' + (i % 10));
+        ext_paths[i][p] = 0;
+        int fd = (int)op(ext_paths[i], O_WRONLY | O_CREAT | O_TRUNC, 0755);
+        if (fd < 0) {
+            wr(2, "grow chain: cannot create extract file\n", 39);
+            for (int j = 0; j < i; j++)
+                sys3(SYS_unlink, (long)ext_paths[j], 0, 0);
+            return 1;
+        }
+        long w = 0;
+        while (w < plen) {
+            long n = wr(fd, payload + w, plen - w);
+            if (n <= 0) { cl(fd); break; }
+            w += n;
+        }
+        cl(fd);
+        sys3(SYS_chmod, (long)ext_paths[i], 0755, 0);
+    }
+
+    /* Build pipe chain: N-1 pipes for N stages. */
+    int pipes[TG_CHAIN_MAX - 1][2];
+    for (int i = 0; i < n_stages - 1; i++) {
+        if (pipe_(pipes[i]) < 0) {
+            for (int j = 0; j < n_stages; j++)
+                sys3(SYS_unlink, (long)ext_paths[j], 0, 0);
+            wr(2, "grow chain: pipe failed\n", 24);
+            return 1;
+        }
+    }
+
+    long pids[TG_CHAIN_MAX];
+    for (int i = 0; i < n_stages; i++) {
+        pids[i] = forkk();
+        if (pids[i] < 0) {
+            for (int j = 0; j < n_stages - 1; j++) {
+                cl(pipes[j][0]); cl(pipes[j][1]);
+            }
+            for (int j = 0; j < n_stages; j++)
+                sys3(SYS_unlink, (long)ext_paths[j], 0, 0);
+            wr(2, "grow chain: fork failed\n", 24);
+            return 1;
+        }
+        if (pids[i] == 0) {
+            /* Child for stage i.  Stage 0 keeps stdin from parent.
+             * Stage k>0 reads from pipes[k-1][0].  Stage last keeps
+             * stdout to parent; others write to pipes[i][1]. */
+            if (i > 0)               dup2_(pipes[i - 1][0], 0);
+            if (i < n_stages - 1)    dup2_(pipes[i][1],     1);
+            for (int j = 0; j < n_stages - 1; j++) {
+                cl(pipes[j][0]); cl(pipes[j][1]);
+            }
+            char *cargv[2] = { ext_paths[i], 0 };
+            execvee(ext_paths[i], cargv, g_envp);
+            qu(127);
+        }
+    }
+    /* Parent closes all pipe fds. */
+    for (int i = 0; i < n_stages - 1; i++) {
+        cl(pipes[i][0]); cl(pipes[i][1]);
+    }
+    /* Wait all stages; return the LAST stage's exit code. */
+    int last_exit = 0;
+    for (int i = 0; i < n_stages; i++) {
+        int st = 0;
+        sys4(SYS_wait4, pids[i], (long)&st, 0, 0);
+        if (i == n_stages - 1) {
+            if (st & 0x7f) last_exit = 128 + (st & 0x7f);
+            else           last_exit = (st >> 8) & 0xff;
+        }
+    }
+    /* Cleanup extracted files. */
+    for (int i = 0; i < n_stages; i++)
+        sys3(SYS_unlink, (long)ext_paths[i], 0, 0);
+    return last_exit;
+}
+
 static int tg_run_grow(int argc, char **argv) {
     g_headless = 1;     /* keep stdout clean for piping / scripts */
     if (argc < 2 || !argv[1]) {
-        wr(2, "usage: grow <list|add|gen|exec|rm|info|self-test>\n", 50);
+        wr(2, "usage: grow <list|add|gen|exec|rm|info|chain|self-test>\n", 56);
         return 1;
     }
     if (scmp(argv[1], "list")      == 0) return tg_subcmd_list();
@@ -11054,6 +11344,7 @@ static int tg_run_grow(int argc, char **argv) {
     if (scmp(argv[1], "gen")       == 0) return tg_subcmd_gen (argc - 1, argv + 1);
     if (scmp(argv[1], "exec")      == 0) return tg_subcmd_exec(argc - 1, argv + 1);
     if (scmp(argv[1], "info")      == 0) return tg_subcmd_info(argc - 1, argv + 1);
+    if (scmp(argv[1], "chain")     == 0) return tg_subcmd_chain(argc - 1, argv + 1);
     wr(2, "grow: unknown verb '", 20);
     wr(2, argv[1], slen(argv[1]));
     wr(2, "'\n", 2);
