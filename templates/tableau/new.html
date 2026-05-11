@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Tableau — new world{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 560px; margin: 24px auto; padding: 0 16px;">
+  <p><a href="{% url 'tableau:index' %}">← back</a></p>
+  <h1 style="margin-top: 0;">New world</h1>
+
+  <form method="post" action="{% url 'tableau:world_new' %}" class="form-stacked">
+    {% csrf_token %}
+
+    <label>
+      Name
+      <input type="text" name="name" value="untitled" maxlength="80"
+             style="width: 100%; box-sizing: border-box;">
+    </label>
+
+    <label style="display: block; margin-top: 14px;">
+      Board mode
+    </label>
+    <label style="display: block; margin-left: 12px;">
+      <input type="radio" name="mode" value="square" checked>
+      square — classic LPL 8×8 with LeftOf/RightOf/FrontOf/BackOf,
+      SameRow/SameCol, Adjoins, Between.
+    </label>
+    <label style="display: block; margin-left: 12px; margin-top: 6px;">
+      <input type="radio" name="mode" value="hex">
+      hex — axial board with Adjacent, NorthOf/SouthOf, three
+      SameAxis predicates, BetweenHex.
+    </label>
+
+    <label style="display: block; margin-top: 14px;">
+      Dim (square side, or hex axial radius)
+      <input type="number" name="dim" value="8" min="1" max="12"
+             style="width: 80px;">
+    </label>
+
+    <p style="margin-top: 18px;">
+      <button type="submit" class="btn primary">Create</button>
+      <a href="{% url 'tableau:index' %}" class="btn">Cancel</a>
+    </p>
+  </form>
+</div>
+{% endblock %}

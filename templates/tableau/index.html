@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Tableau — Tarski-style FOL worlds{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 880px; margin: 24px auto; padding: 0 16px;">
+  <h1 style="margin-top: 0;">Tableau</h1>
+  <p class="muted">
+    A Tarski's World clone — arrange cubes, tetrahedra, and dodecahedra
+    on a board, write first-order sentences about them, and watch the
+    truth values update live as the world changes.  Square boards take
+    the classic LPL predicate set (LeftOf, RightOf, FrontOf, BackOf,
+    SameRow, SameCol, Adjoins, Between).  Hex boards use a native set
+    (Adjacent, NorthOf, SouthOf, SameQAxis / SameRAxis / SameSAxis,
+    BetweenHex).  Shared predicates (Cube, Tet, Dodec, Small, Medium,
+    Large, Larger, Smaller, SameSize, SameShape) work on both.
+  </p>
+
+  <p><a href="{% url 'tableau:world_new' %}" class="btn">+ new world</a></p>
+
+  <h2 style="margin-top: 28px;">Worlds</h2>
+  {% if worlds %}
+    <table class="data-table" style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid #30363d; text-align: left;">
+          <th style="padding: 6px 8px;">name</th>
+          <th style="padding: 6px 8px;">mode</th>
+          <th style="padding: 6px 8px;">dim</th>
+          <th style="padding: 6px 8px;">blocks</th>
+          <th style="padding: 6px 8px;">sentences</th>
+          <th style="padding: 6px 8px;">updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for w in worlds %}
+        <tr style="border-bottom: 1px solid #21262d;">
+          <td style="padding: 6px 8px;"><a href="{% url 'tableau:world_detail' w.pk %}">{{ w.name }}</a></td>
+          <td style="padding: 6px 8px;">{{ w.mode }}</td>
+          <td style="padding: 6px 8px;">{{ w.dim }}</td>
+          <td style="padding: 6px 8px;">{{ w.blocks.count }}</td>
+          <td style="padding: 6px 8px;">{{ w.sentences.count }}</td>
+          <td style="padding: 6px 8px; color: #8b949e;">{{ w.updated_at|date:"Y-m-d H:i" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No worlds yet — create one to get started.</p>
+  {% endif %}
+</div>
+{% endblock %}

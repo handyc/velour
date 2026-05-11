@@ -150,6 +150,7 @@ INSTALLED_APPS = [
     'tilesmith',
     'bidir',
     'umbra',
+    'tableau',
 ]
 
 MIDDLEWARE = [
