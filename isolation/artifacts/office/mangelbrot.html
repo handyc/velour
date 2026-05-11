@@ -212,7 +212,7 @@
   <div style="display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;">
     <div class="stage" style="display: inline-block;">
       <div style="font: 12px ui-monospace; color: #8b949e; margin-bottom: 6px;">
-        full hex set · 4096 × 4096 px, scaled to fit
+        full hex set · 1024 mangelshots × 4 palettes = 4096 tiles, scaled
       </div>
       <canvas id="hexSet" width="4096" height="4096"
               style="display: block; width: 512px; height: 512px;
@@ -227,11 +227,34 @@
               style="display: block; background: #ff00ff;"></canvas>
     </div>
   </div>
-  <div style="display: flex; gap: 10px; margin-top: 12px; max-width: 1100px; flex-wrap: wrap;">
-    <button id="hexGen" style="flex: 1; min-width: 200px;">Generate Hex Set</button>
-    <button id="hexTile" style="flex: 1; min-width: 200px;">Generate Hex Tiling</button>
-    <button id="dlHexSet" class="alt" style="flex: 1; min-width: 200px;">Download Hex Set JPG</button>
-    <button id="dlHexTile" class="alt" style="flex: 1; min-width: 200px;">Download Hex Tiling JPG</button>
+  <div style="display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; margin-top: 18px;">
+    <div class="stage" style="display: inline-block;">
+      <div style="font: 12px ui-monospace; color: #8b949e; margin-bottom: 6px;">
+        8 px pixelated hex set · auto-generated alongside
+      </div>
+      <canvas id="hexPix" width="4096" height="4096"
+              style="display: block; width: 512px; height: 512px;
+                     background: #ff00ff;
+                     image-rendering: pixelated; image-rendering: crisp-edges;"></canvas>
+    </div>
+    <div class="stage" style="display: inline-block;">
+      <div style="font: 12px ui-monospace; color: #8b949e; margin-bottom: 6px;">
+        random pixelated board
+      </div>
+      <canvas id="hexPixBoard" width="768" height="704"
+              style="display: block; background: #ff00ff;"></canvas>
+    </div>
+  </div>
+  <div style="display: flex; gap: 10px; margin-top: 14px; max-width: 1100px; flex-wrap: wrap;">
+    <button id="hexGen"        style="flex: 1; min-width: 180px;">Generate Hex Set</button>
+    <button id="hexTile"       style="flex: 1; min-width: 180px;">Generate Hex Tiling</button>
+    <button id="hexPixBoardBtn" style="flex: 1; min-width: 180px;">Random Pixelated Board</button>
+  </div>
+  <div style="display: flex; gap: 10px; margin-top: 8px; max-width: 1100px; flex-wrap: wrap;">
+    <button id="dlHexSet"   class="alt" style="flex: 1; min-width: 180px;">Download Hex Set JPG</button>
+    <button id="dlHexTile"  class="alt" style="flex: 1; min-width: 180px;">Download Hex Tiling JPG</button>
+    <button id="dlHexPix"   class="alt" style="flex: 1; min-width: 180px;">Download Pixelated Set JPG</button>
+    <button id="dlHexPixBd" class="alt" style="flex: 1; min-width: 180px;">Download Pixelated Board JPG</button>
   </div>
   <div class="status" id="hexStatus" style="margin-top: 8px;">click Generate Hex Set to build the 4096-tile sheet</div>
 </div>
@@ -878,6 +901,10 @@ const HEX_SET_CANVAS  = document.getElementById("hexSet");
 const HEX_SET_CTX     = HEX_SET_CANVAS.getContext("2d");
 const HEX_TIL_CANVAS  = document.getElementById("hexTiling");
 const HEX_TIL_CTX     = HEX_TIL_CANVAS.getContext("2d");
+const HEX_PIX_CANVAS  = document.getElementById("hexPix");
+const HEX_PIX_CTX     = HEX_PIX_CANVAS.getContext("2d");
+const HEX_PB_CANVAS   = document.getElementById("hexPixBoard");
+const HEX_PB_CTX      = HEX_PB_CANVAS.getContext("2d");
 
 /* One reusable 64×64 scratch canvas — every hex tile renders its
  * unique mandelshot into this, then drawHexTile blits + clips it
@@ -893,8 +920,28 @@ const HEX_HIST_SCRATCH = new Int32Array(257);
 const HEX_STATUS      = document.getElementById("hexStatus");
 const BTN_HEX_GEN     = document.getElementById("hexGen");
 const BTN_HEX_TILE    = document.getElementById("hexTile");
+const BTN_HEX_PB      = document.getElementById("hexPixBoardBtn");
 const BTN_DL_HEXSET   = document.getElementById("dlHexSet");
 const BTN_DL_HEXTILE  = document.getElementById("dlHexTile");
+const BTN_DL_HEXPIX   = document.getElementById("dlHexPix");
+const BTN_DL_HEXPB    = document.getElementById("dlHexPixBd");
+
+/* Shared mult/offset for the iter→slot map.  Held across all 4 hex
+ * palettes so the same mandelshot lights up the same slot regardless
+ * of which palette renders it — dominant slot is then consistent
+ * across the 4 colour-variants of one mandelshot. */
+let HEX_MULT   = 0;
+let HEX_OFFSET = 0;
+
+/* 1024 stored mandelshots + their dominant slots.  ~8 MB of Int16
+ * for the slots, 2 KB for the dom indices; allocated lazily on first
+ * Generate Hex Set click. */
+const HEX_MANGELSHOTS  = 1024;
+const HEX_NUM_PALETTES = 4;
+let hexMangelSlots = null;     /* Array<Int16Array(SPRITE_PX*SPRITE_PX)> */
+let hexMangelTrans = null;     /* Int16Array(1024) */
+/* 4 × 256-entry RGB tables (Uint8ClampedArray of 256*3 each). */
+let hexPalettes    = null;
 
 /* Pointy-top hex vertex k=0..5 starting at top vertex, clockwise.
  * Canvas Y points down. */
@@ -937,30 +984,64 @@ function drawHexTile(ctx, x0, y0, baseSprite, edgeColors) {
   }
 }
 
-/* Render one fresh mangelshot (random view, drift-evolved palette)
- * into the reusable HEX_TMP_CANVAS.  Bypasses renderSprite()'s
- * per-pixel storage since the hex set is one-shot — we don't need
- * to recolour it.  Reuses the slot/hist scratch arrays. */
-function renderHexTileMangel() {
-  initOrDriftPalette();
+/* Compute and store one mandelshot's per-pixel slot indices into
+ * hexMangelSlots[idx], plus its dominant slot into hexMangelTrans
+ * [idx].  Uses the shared HEX_MULT / HEX_OFFSET iter→slot map so
+ * dominant slot is consistent across the 4 palettes. */
+function computeMangelshot(idx) {
   const { cx, cy, span, iter } = pickView();
   const ds = span / SPRITE_PX;
   const ox = cx - ds * SPRITE_PX * 0.5;
   const oy = cy - ds * SPRITE_PX * 0.5;
-  const slots = HEX_SLOT_SCRATCH;
+  const slots = new Int16Array(SPRITE_PX * SPRITE_PX);
   const hist  = HEX_HIST_SCRATCH;
   for (let i = 0; i < 257; i++) hist[i] = 0;
   for (let y = 0; y < SPRITE_PX; y++) {
     for (let x = 0; x < SPRITE_PX; x++) {
       const it = mandel(ox + x * ds, oy + y * ds, iter);
-      const sl = slotForIter(it, iter);
+      let sl;
+      if (it === iter) sl = -1;
+      else sl = (((it * HEX_MULT + HEX_OFFSET) >>> 0) & 0xff);
       slots[y * SPRITE_PX + x] = sl;
       hist[sl + 1]++;
     }
   }
   let maxIdx = 0;
   for (let i = 1; i < 257; i++) if (hist[i] > hist[maxIdx]) maxIdx = i;
-  const transparent = maxIdx - 1;
+  hexMangelSlots[idx] = slots;
+  hexMangelTrans[idx] = maxIdx - 1;
+}
+
+/* Build one 256-entry RGB palette from 4 fully-random RGB bases via
+ * the canonical 4-ramp recipe — returned as a Uint8ClampedArray of
+ * 256*3 bytes ready for tile composition. */
+function buildHexPalette() {
+  const base = [
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+    [(rnd()*256)|0, (rnd()*256)|0, (rnd()*256)|0],
+  ];
+  const pal = new Uint8ClampedArray(256 * 3);
+  for (let k = 0; k < 4; k++) {
+    const a = base[k];
+    const b = base[(k + 1) & 3];
+    for (let j = 0; j < 64; j++) {
+      const slot = k * 64 + j;
+      pal[slot*3 + 0] = ((a[0] * (63 - j) + b[0] * j) / 63) | 0;
+      pal[slot*3 + 1] = ((a[1] * (63 - j) + b[1] * j) / 63) | 0;
+      pal[slot*3 + 2] = ((a[2] * (63 - j) + b[2] * j) / 63) | 0;
+    }
+  }
+  return pal;
+}
+
+/* Compose one hex tile into HEX_TMP_CANVAS using stored mandelshot
+ * `mIdx` (its slot indices + dominant slot) and palette `pIdx`. */
+function composeHexTile(mIdx, pIdx) {
+  const slots = hexMangelSlots[mIdx];
+  const transparent = hexMangelTrans[mIdx];
+  const pal = hexPalettes[pIdx];
   const d = HEX_TMP_IMG.data;
   for (let p = 0, i = 0; p < d.length; p += 4, i++) {
     const sl = slots[i];
@@ -969,72 +1050,178 @@ function renderHexTileMangel() {
     } else if (sl < 0) {
       d[p] = 0; d[p+1] = 0; d[p+2] = 0;
     } else {
-      d[p]   = palTable[sl*3 + 0];
-      d[p+1] = palTable[sl*3 + 1];
-      d[p+2] = palTable[sl*3 + 2];
+      d[p]   = pal[sl*3 + 0];
+      d[p+1] = pal[sl*3 + 1];
+      d[p+2] = pal[sl*3 + 2];
     }
     d[p+3] = 255;
   }
   HEX_TMP_CTX.putImageData(HEX_TMP_IMG, 0, 0);
 }
 
-/* Generate the full 4096-tile hex set — each tile gets its own
- * unique mandelshot.  Resets the palette state so the run starts
- * fresh, then drifts across 4096 tiles for slow colour walking.
- * Chunked via setTimeout (32 tiles per slice) so the page stays
- * responsive; total cost is ~1-3 s on a modern laptop. */
+/* 8 px pixelize HEX_SET_CANVAS into HEX_PIX_CANVAS, then re-stroke
+ * the 6 edge stripes on every tile so they stay crisp.  Aligned to
+ * tile boundaries (64-px tiles, 8-px blocks) so no block ever
+ * straddles a tile edge.  Operates in one ImageData pass for speed. */
+function buildPixelatedHexSet() {
+  const block = 8;
+  const W = HEX_SHEET_PX, H = HEX_SHEET_PX;
+  const src = HEX_SET_CTX.getImageData(0, 0, W, H);
+  const dst = HEX_PIX_CTX.createImageData(W, H);
+  const sd = src.data, dd = dst.data;
+  for (let by = 0; by < H; by += block) {
+    for (let bx = 0; bx < W; bx += block) {
+      let sR = 0, sG = 0, sB = 0, n = 0, keys = 0, total = 0;
+      for (let dy = 0; dy < block; dy++) {
+        for (let dx = 0; dx < block; dx++) {
+          const p = ((by + dy) * W + (bx + dx)) * 4;
+          const r = sd[p], g = sd[p+1], b = sd[p+2];
+          total++;
+          if (r === KEY_R && g === KEY_G && b === KEY_B) {
+            keys++;
+          } else {
+            sR += r; sG += g; sB += b; n++;
+          }
+        }
+      }
+      let oR, oG, oB;
+      if (n === 0 || keys > total / 2) {
+        oR = KEY_R; oG = KEY_G; oB = KEY_B;
+      } else {
+        oR = (sR / n) | 0; oG = (sG / n) | 0; oB = (sB / n) | 0;
+      }
+      for (let dy = 0; dy < block; dy++) {
+        for (let dx = 0; dx < block; dx++) {
+          const p = ((by + dy) * W + (bx + dx)) * 4;
+          dd[p] = oR; dd[p+1] = oG; dd[p+2] = oB; dd[p+3] = 255;
+        }
+      }
+    }
+  }
+  HEX_PIX_CTX.putImageData(dst, 0, 0);
+  /* Re-stroke crisp 4-px coloured edges on every tile so they
+   * survive the block-average. */
+  for (let n = 0; n < HEX_TILE_COUNT; n++) {
+    const col = n % HEX_TILES_AXIS;
+    const row = (n / HEX_TILES_AXIS) | 0;
+    const cx  = col * HEX_TILE_PX + HEX_TILE_PX / 2;
+    const cy  = row * HEX_TILE_PX + HEX_TILE_PX / 2;
+    for (let k = 0; k < 6; k++) {
+      const [x1, y1] = hexVertex(cx, cy, HEX_R, k);
+      const [x2, y2] = hexVertex(cx, cy, HEX_R, (k + 1) % 6);
+      const edge = ((n >> (k * 2)) & 3);
+      const c = HEX_EDGE_COLORS[edge];
+      HEX_PIX_CTX.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+      HEX_PIX_CTX.lineWidth = 4;
+      HEX_PIX_CTX.lineCap   = "round";
+      HEX_PIX_CTX.beginPath();
+      HEX_PIX_CTX.moveTo(x1, y1);
+      HEX_PIX_CTX.lineTo(x2, y2);
+      HEX_PIX_CTX.stroke();
+    }
+  }
+}
+
+/* Generate the full 4096-tile hex set:
+ *   1. Pick a shared HEX_MULT / HEX_OFFSET for the iter→slot map.
+ *   2. Render 1024 unique mandelshots, storing slot indices + dom.
+ *   3. Build 4 distinct 256-entry palettes (4 RGB bases each, ramp).
+ *   4. For tile i ∈ [0, 4096):  mandelshot[i & 0x3FF] × palette[i>>10]
+ *      → composite into HEX_TMP_CANVAS, drawHexTile into the sheet.
+ *   5. Auto-build the 8 px pixelated version (block-average + re-
+ *      stroke edges) into HEX_PIX_CANVAS.
+ * Chunked via setTimeout; mandelshot phase is the heavy one. */
 let hexSetReady = false;
 
 function generateHexSet() {
   hexSetReady = false;
-  BTN_HEX_TILE.disabled  = true;
-  BTN_DL_HEXSET.disabled = true;
-  BTN_DL_HEXTILE.disabled = true;
-  BTN_HEX_GEN.disabled   = true;
+  BTN_HEX_TILE.disabled    = true;
+  BTN_HEX_PB.disabled      = true;
+  BTN_DL_HEXSET.disabled   = true;
+  BTN_DL_HEXTILE.disabled  = true;
+  BTN_DL_HEXPIX.disabled   = true;
+  BTN_DL_HEXPB.disabled    = true;
+  BTN_HEX_GEN.disabled     = true;
 
   HEX_SET_CTX.fillStyle = "#ff00ff";
   HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+  HEX_PIX_CTX.fillStyle = "#ff00ff";
+  HEX_PIX_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+  HEX_TIL_CTX.fillStyle = "#ff00ff";
+  HEX_TIL_CTX.fillRect(0, 0, HEX_TIL_CANVAS.width, HEX_TIL_CANVAS.height);
+  HEX_PB_CTX.fillStyle = "#ff00ff";
+  HEX_PB_CTX.fillRect(0, 0, HEX_PB_CANVAS.width, HEX_PB_CANVAS.height);
 
-  /* Fresh palette state for the hex run.  The drift continues across
-   * all 4096 tiles, so the sheet walks slowly through colour space
-   * while every individual tile is its own unique mangelshot. */
-  palInited = false;
+  /* Shared iter→slot map across the 4 palettes. */
+  HEX_MULT   = PALETTE_MULTS[(rnd() * PALETTE_MULTS.length) | 0];
+  HEX_OFFSET = (rnd() * 256) | 0;
 
-  const CHUNK = 32;
-  let n = 0;
+  if (!hexMangelSlots) {
+    hexMangelSlots = new Array(HEX_MANGELSHOTS);
+    hexMangelTrans = new Int16Array(HEX_MANGELSHOTS);
+  }
+  hexPalettes = new Array(HEX_NUM_PALETTES);
+  for (let p = 0; p < HEX_NUM_PALETTES; p++) hexPalettes[p] = buildHexPalette();
+
   const t0 = performance.now();
+  let phase = 0;       /* 0 = mandel, 1 = composite, 2 = pixelize */
+  let nM    = 0;       /* mandelshot counter */
+  let nT    = 0;       /* tile counter */
+
   function step() {
-    const end = Math.min(n + CHUNK, HEX_TILE_COUNT);
-    for (; n < end; n++) {
-      const col = n % HEX_TILES_AXIS;
-      const row = (n / HEX_TILES_AXIS) | 0;
-      const x0  = col * HEX_TILE_PX;
-      const y0  = row * HEX_TILE_PX;
-      const edges = [
-        ( n        & 3),
-        ((n >>  2) & 3),
-        ((n >>  4) & 3),
-        ((n >>  6) & 3),
-        ((n >>  8) & 3),
-        ((n >> 10) & 3),
-      ];
-      renderHexTileMangel();
-      drawHexTile(HEX_SET_CTX, x0, y0, HEX_TMP_CANVAS, edges);
+    if (phase === 0) {
+      const CHUNK = 32;
+      const end = Math.min(nM + CHUNK, HEX_MANGELSHOTS);
+      for (; nM < end; nM++) computeMangelshot(nM);
+      HEX_STATUS.textContent =
+        "rendering mandelshots · " + nM + " / " + HEX_MANGELSHOTS +
+        " · " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
+      if (nM < HEX_MANGELSHOTS) { setTimeout(step, 0); return; }
+      phase = 1;
     }
-    HEX_STATUS.textContent =
-      "hex set · " + n + " / " + HEX_TILE_COUNT +
-      " · " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
-    if (n < HEX_TILE_COUNT) {
-      setTimeout(step, 0);
-    } else {
-      hexSetReady = true;
-      BTN_HEX_GEN.disabled    = false;
-      BTN_HEX_TILE.disabled   = false;
-      BTN_DL_HEXSET.disabled  = false;
-      HEX_STATUS.textContent  =
-        HEX_TILE_COUNT + " unique mandelshots tiled · " +
-        ((performance.now() - t0) / 1000).toFixed(1) + " s · " +
-        "click Generate Hex Tiling";
+    if (phase === 1) {
+      const CHUNK = 256;
+      const end = Math.min(nT + CHUNK, HEX_TILE_COUNT);
+      for (; nT < end; nT++) {
+        const col = nT % HEX_TILES_AXIS;
+        const row = (nT / HEX_TILES_AXIS) | 0;
+        const x0  = col * HEX_TILE_PX;
+        const y0  = row * HEX_TILE_PX;
+        const edges = [
+          ( nT        & 3),
+          ((nT >>  2) & 3),
+          ((nT >>  4) & 3),
+          ((nT >>  6) & 3),
+          ((nT >>  8) & 3),
+          ((nT >> 10) & 3),
+        ];
+        composeHexTile(nT & (HEX_MANGELSHOTS - 1), nT >>> 10);
+        drawHexTile(HEX_SET_CTX, x0, y0, HEX_TMP_CANVAS, edges);
+      }
+      HEX_STATUS.textContent =
+        "compositing tiles · " + nT + " / " + HEX_TILE_COUNT +
+        " · " + ((performance.now() - t0) / 1000).toFixed(1) + " s";
+      if (nT < HEX_TILE_COUNT) { setTimeout(step, 0); return; }
+      phase = 2;
+    }
+    if (phase === 2) {
+      HEX_STATUS.textContent =
+        "building 8 px pixelated version · " +
+        ((performance.now() - t0) / 1000).toFixed(1) + " s";
+      setTimeout(() => {
+        buildPixelatedHexSet();
+        hexSetReady = true;
+        BTN_HEX_GEN.disabled   = false;
+        BTN_HEX_TILE.disabled  = false;
+        BTN_HEX_PB.disabled    = false;
+        BTN_DL_HEXSET.disabled = false;
+        BTN_DL_HEXPIX.disabled = false;
+        HEX_STATUS.textContent =
+          HEX_MANGELSHOTS + " mangelshots × " + HEX_NUM_PALETTES +
+          " palettes = " + HEX_TILE_COUNT + " tiles · " +
+          ((performance.now() - t0) / 1000).toFixed(1) + " s · " +
+          "click Generate Hex Tiling or Random Pixelated Board";
+      }, 0);
     }
   }
   setTimeout(step, 0);
@@ -1131,6 +1318,68 @@ function downloadHexTilingJpg() {
   a.download = "mangelbrot-hextiling-" + _datestamp() + ".jpg";
   document.body.appendChild(a); a.click(); a.remove();
 }
+function downloadHexPixJpg() {
+  const url = HEX_PIX_CANVAS.toDataURL("image/jpeg", 0.85);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-hexset-pixelated-" + _datestamp() + ".jpg";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+function downloadHexPixBoardJpg() {
+  const url = HEX_PB_CANVAS.toDataURL("image/jpeg", 0.92);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-hexboard-pixelated-" + _datestamp() + ".jpg";
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* Lay a random pixelated hex tiling — same picker as generateHex-
+ * Tiling but reads tiles from HEX_PIX_CANVAS instead of HEX_SET_-
+ * CANVAS, and paints them into HEX_PB_CANVAS. */
+function generateHexPixBoard() {
+  if (!hexSetReady) return;
+  const placed = [];
+  for (let r = 0; r < HEX_TIL_ROWS; r++) placed.push(new Array(HEX_TIL_COLS).fill(null));
+  const stepX = HEX_INSCRIBED_W;
+  const stepY = HEX_R * 1.5;
+  const padX = HEX_TILE_PX / 2 + 2;
+  const padY = HEX_TILE_PX / 2 + 2;
+  HEX_PB_CTX.fillStyle = "#ff00ff";
+  HEX_PB_CTX.fillRect(0, 0, HEX_PB_CANVAS.width, HEX_PB_CANVAS.height);
+  for (let r = 0; r < HEX_TIL_ROWS; r++) {
+    const off = neighborOffsets(r);
+    for (let c = 0; c < HEX_TIL_COLS; c++) {
+      function neighbor(d) {
+        const [dc, dr] = off[d];
+        const nc = c + dc, nr = r + dr;
+        if (nc < 0 || nc >= HEX_TIL_COLS || nr < 0 || nr >= HEX_TIL_ROWS) return null;
+        return placed[nr][nc];
+      }
+      const wN  = neighbor("W");
+      const nwN = neighbor("NW");
+      const neN = neighbor("NE");
+      const e4 = wN  ? wN[1]  : ((Math.random() * 4) | 0);
+      const e5 = nwN ? nwN[2] : ((Math.random() * 4) | 0);
+      const e0 = neN ? neN[3] : ((Math.random() * 4) | 0);
+      const e1 = (Math.random() * 4) | 0;
+      const e2 = (Math.random() * 4) | 0;
+      const e3 = (Math.random() * 4) | 0;
+      placed[r][c] = [e0, e1, e2, e3, e4, e5];
+      const tileIdx = e0 + 4*e1 + 16*e2 + 64*e3 + 256*e4 + 1024*e5;
+      const srcCol = tileIdx % HEX_TILES_AXIS;
+      const srcRow = (tileIdx / HEX_TILES_AXIS) | 0;
+      const cx = padX + c * stepX + ((r & 1) ? stepX / 2 : 0);
+      const cy = padY + r * stepY;
+      HEX_PB_CTX.drawImage(
+        HEX_PIX_CANVAS,
+        srcCol * HEX_TILE_PX, srcRow * HEX_TILE_PX, HEX_TILE_PX, HEX_TILE_PX,
+        cx - HEX_TILE_PX / 2, cy - HEX_TILE_PX / 2, HEX_TILE_PX, HEX_TILE_PX);
+    }
+  }
+  BTN_DL_HEXPB.disabled = false;
+  HEX_STATUS.textContent =
+    HEX_TIL_COLS + " × " + HEX_TIL_ROWS + " pixelated hex board laid";
+}
 function _datestamp() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
@@ -1149,8 +1398,11 @@ BTN_REROLL_PAL.addEventListener("click", rerollPaletteRandom);
 BTN_REROLL_KEYS.addEventListener("click", rerollPaletteKeys);
 BTN_HEX_GEN.addEventListener("click", generateHexSet);
 BTN_HEX_TILE.addEventListener("click", generateHexTiling);
+BTN_HEX_PB.addEventListener("click", generateHexPixBoard);
 BTN_DL_HEXSET.addEventListener("click", downloadHexSetJpg);
 BTN_DL_HEXTILE.addEventListener("click", downloadHexTilingJpg);
+BTN_DL_HEXPIX.addEventListener("click", downloadHexPixJpg);
+BTN_DL_HEXPB.addEventListener("click", downloadHexPixBoardJpg);
 
 /* ── Tabs ─────────────────────────────────────────────
  * Two-tab layout keeps the page short: the sprites/Wang section is
@@ -1188,14 +1440,16 @@ BTN_PIXTILE.disabled      = true;
 BTN_DLT.disabled          = true;
 BTN_REROLL_PAL.disabled   = true;
 BTN_REROLL_KEYS.disabled  = true;
-/* Hex set is independent of the sprite sheet now that every tile
- * renders its own unique mandelshot, so Generate Hex Set is
- * available from page load.  Tile / download buttons still wait
- * for the set itself to exist. */
+/* Hex set is independent of the sprite sheet, so Generate Hex Set
+ * is available from page load.  Tile / download / board buttons
+ * still wait for the set itself to exist. */
 BTN_HEX_GEN.disabled      = false;
 BTN_HEX_TILE.disabled     = true;
+BTN_HEX_PB.disabled       = true;
 BTN_DL_HEXSET.disabled    = true;
 BTN_DL_HEXTILE.disabled   = true;
+BTN_DL_HEXPIX.disabled    = true;
+BTN_DL_HEXPB.disabled     = true;
 
 /* First sheet on load. */
 regenerateSheet();
