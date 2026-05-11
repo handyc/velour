@@ -5882,6 +5882,34 @@ function handleKey(e) {
     return;
   }
 
+  /* ev85/88: mangeltile shortcuts.  These three Shift+letter combos
+   * are placed BEFORE the unshifted letter handlers so they win the
+   * key — otherwise the movement handler grabs Shift+E (= NE-move),
+   * the reseed handler grabs Shift+R, and the workshop handler grabs
+   * Shift+G. */
+  if (e.shiftKey && (k === "g" || e.code === "KeyG")) {
+    e.preventDefault();
+    if (e.repeat) return;
+    mangelOn = !mangelOn;
+    cellMangelCache.clear();
+    cellTexCache.clear();
+    setAction("mangeltiles " + (mangelOn ? "on" : "off (CA cells back)"));
+    needsRender = true;
+    return;
+  }
+  if (e.shiftKey && (k === "r" || e.code === "KeyR")) {
+    e.preventDefault();
+    if (e.repeat) return;
+    cycleMangelRes(+1);
+    return;
+  }
+  if (e.shiftKey && (k === "e" || e.code === "KeyE")) {
+    e.preventDefault();
+    if (e.repeat) return;
+    setMangelRes(MANGEL_RES_DEFAULT);
+    return;
+  }
+
   /* Movement. */
   if ("wadezx".indexOf(k) !== -1) {
     e.preventDefault();
@@ -6034,33 +6062,8 @@ function handleKey(e) {
     musicMutateCurrent();
     return;
   }
-  /* ev85: Shift+G toggles mangeltiles ↔ CA tile cells.  Mangel is on
-   * by default; this is the escape hatch back to the legacy CA. */
-  if (e.shiftKey && (k === "g" || e.code === "KeyG")) {
-    e.preventDefault();
-    if (e.repeat) return;
-    mangelOn = !mangelOn;
-    cellMangelCache.clear();
-    cellTexCache.clear();
-    setAction("mangeltiles " + (mangelOn ? "on" : "off (CA cells back)"));
-    needsRender = true;
-    return;
-  }
-  /* ev88: Shift+R cycles mangeltile resolution up the preset ladder
-   * (16 → 24 → 32 → 48 → 64 → 96 → wrap).  Shift+E resets to the
-   * default 32 (1:1 with TILE_PX). */
-  if (e.shiftKey && (k === "r" || e.code === "KeyR")) {
-    e.preventDefault();
-    if (e.repeat) return;
-    cycleMangelRes(+1);
-    return;
-  }
-  if (e.shiftKey && (k === "e" || e.code === "KeyE")) {
-    e.preventDefault();
-    if (e.repeat) return;
-    setMangelRes(MANGEL_RES_DEFAULT);
-    return;
-  }
+  /* ev88: stub — Shift handlers for mangeltile control moved earlier
+   * in the keydown chain so they win over their unshifted twins. */
   if (e.shiftKey && (k === "x" || e.code === "KeyX")) {
     e.preventDefault();
     if (e.repeat) return;
