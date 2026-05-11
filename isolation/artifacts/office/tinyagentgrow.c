@@ -1807,6 +1807,12 @@ static void show_about(const char *title) {
 /* ── forward declarations of apps ──────────────────────── */
 static int run_ask(int, char**);
 static int run_coder(int, char**);
+/* Phase 2 of the template system: coder's 'T' / Ctrl-T hotkey opens
+ * a numbered picker and splices the chosen template onto
+ * /tmp/coder_attempt.c.  Defined after the template section so they
+ * can call tg_tmpl_* directly. */
+static int coder_pick_template(char *out_name, int out_cap);
+static int coder_splice_template(const char *name, int name_len);
 
 /* Coder's soul fallback shells out to ./officesoul --gen and
  * captures its stdout.  Returns bytes copied into `out` (0 on any
@@ -5201,6 +5207,29 @@ static int run_coder(int argc, char **argv) {
         if (k[0] == 't') {
             g_coder_target = (g_coder_target + 1) % 3;
             coder_paint("target changed");
+            continue;
+        }
+        if (k[0] == 'T' || k[0] == 0x14) {
+            /* Template picker — show canon + grown, splice the
+             * chosen one onto /tmp/coder_attempt.c.  Ctrl-T (0x14)
+             * is an alias for the lazy / for terminals that swallow
+             * Shift on stand-alone letters. */
+            static char picked[CODER_NAME_CAP];
+            int nlen = coder_pick_template(picked, sizeof picked);
+            if (nlen <= 0) {
+                coder_paint("template picker cancelled");
+                continue;
+            }
+            if (coder_splice_template(picked, nlen) < 0) {
+                coder_paint("template splice failed");
+                continue;
+            }
+            char st[128];
+            int sp = sapp(st, 0, "spliced template '");
+            sp = sapp(st, sp, picked);
+            sp = sapp(st, sp, "' -> /tmp/coder_attempt.c");
+            st[sp] = 0;
+            coder_paint(st);
             continue;
         }
         if (k[0] >= '1' && k[0] <= '4') {
@@ -11709,6 +11738,162 @@ static int tg_run_tmpl(int argc, char **argv) {
     wr(2, argv[1], slen(argv[1]));
     wr(2, "'\n", 2);
     return 1;
+}
+
+
+/* ── Coder template hotkey (Phase 2) ──────────────────────
+ *
+ * The 'T' / Ctrl-T branch in run_coder's input loop calls these.
+ * Defined down here (not up with the other coder helpers) so the
+ * picker can call tg_tmpl_canon_get / tg_tmpl_grown_get directly
+ * without forward decls of the tmpl machinery. */
+
+/* Show a numbered picker (max 9 entries) of canon + grown templates.
+ * Returns the chosen template's name length on success (name copied
+ * into out_name, null-terminated) or -1 on cancel / empty list.
+ *
+ * Storage note: candidate `name` and `tag` pointers reference either
+ * .rodata (canon) or bytes inside tg_buf (grown).  tg_buf isn't
+ * clobbered during the picker session — coder_paint / cup / fbs only
+ * touch screen state — so the pointers remain valid until we copy
+ * the chosen name into out_name and return. */
+static int coder_pick_template(char *out_name, int out_cap) {
+    struct cand {
+        const char *name;
+        int         name_len;
+        const char *tag;
+        int         tag_len;
+        int         is_canon;
+    };
+    static struct cand cands[9];
+    int n = 0;
+
+    for (unsigned i = 0; i < TG_TMPL_CANON_N && n < 9; i++) {
+        cands[n].name     = tg_tmpl_canon[i].name;
+        cands[n].name_len = slen(tg_tmpl_canon[i].name);
+        cands[n].tag      = tg_tmpl_canon[i].tag;
+        cands[n].tag_len  = slen(tg_tmpl_canon[i].tag);
+        cands[n].is_canon = 1;
+        n++;
+    }
+
+    char self_path[512];
+    long size = -1;
+    if (ja_self_path(self_path, sizeof self_path) >= 0)
+        size = tg_load_file(self_path);
+    if (size > 0) {
+        long end = size;
+        while (end > 0 && n < 9) {
+            struct tg_tail_info info;
+            if (!tg_read_trailer(tg_buf, end, &info)) break;
+            long step = (long)info.trailer_len + (long)info.payload_len;
+            if (step <= 0 || step > end) break;
+            if (info.type == 'P') {
+                cands[n].name     = info.name;
+                cands[n].name_len = info.name_len;
+                if (info.task_len > 0) {
+                    cands[n].tag     = info.task;
+                    cands[n].tag_len = info.task_len;
+                } else {
+                    cands[n].tag     = "(no task)";
+                    cands[n].tag_len = 9;
+                }
+                cands[n].is_canon = 0;
+                n++;
+            }
+            end -= step;
+        }
+    }
+
+    if (n == 0) return -1;
+
+    while (1) {
+        coder_paint("template — 1-9 to insert, ESC to cancel");
+        for (int i = 0; i < n; i++) {
+            cup(8 + i, 3);
+            sgrbgfg(15, 0);
+            char buf[120];
+            int p = 0;
+            buf[p++] = (char)('1' + i);
+            buf[p++] = '.';
+            buf[p++] = ' ';
+            mcpy(buf + p, cands[i].is_canon ? "canon " : "grown ", 6);
+            p += 6;
+            int nl = cands[i].name_len;
+            if (nl > 12) nl = 12;
+            mcpy(buf + p, cands[i].name, nl); p += nl;
+            while (p < 24) buf[p++] = ' ';
+            int tl = cands[i].tag_len;
+            int room = (int)sizeof buf - p - 1;
+            if (tl > room) tl = room;
+            mcpy(buf + p, cands[i].tag, tl); p += tl;
+            buf[p] = 0;
+            fbs(buf);
+        }
+        fbflush();
+
+        unsigned char k[16];
+        int nk = read_key(k, sizeof k);
+        if (nk <= 0) continue;
+        if (k[0] == 0x1b) return -1;
+        if (k[0] >= '1' && k[0] <= '9') {
+            int idx = k[0] - '1';
+            if (idx < n) {
+                int wnl = cands[idx].name_len;
+                if (wnl > out_cap - 1) wnl = out_cap - 1;
+                mcpy(out_name, cands[idx].name, wnl);
+                out_name[wnl] = 0;
+                return wnl;
+            }
+        }
+    }
+}
+
+/* Append the named template's source to /tmp/coder_attempt.c with a
+ * single-line separator comment of the form
+ *   <slash-star> --- template: NAME --- <star-slash>
+ * Creates the file if missing.  Returns 0 on success, -1 if the
+ * template lookup or any file op fails. */
+static int coder_splice_template(const char *name, int name_len) {
+    const char *src = tg_tmpl_canon_get(name, name_len);
+    long src_len = 0;
+    if (src) {
+        src_len = (long)slen(src);
+    } else {
+        char self_path[512];
+        if (ja_self_path(self_path, sizeof self_path) < 0) return -1;
+        long size = tg_load_file(self_path);
+        if (size < 0) return -1;
+        const char *payload = 0;
+        long plen = 0;
+        if (!tg_tmpl_grown_get(name, name_len, size, &payload, &plen))
+            return -1;
+        src = payload;
+        src_len = plen;
+    }
+
+    int fd = (int)op("/tmp/coder_attempt.c", O_WRONLY | O_CREAT, 0644);
+    if (fd < 0) return -1;
+    /* Seek to end so we append rather than overwrite an in-progress
+     * draft.  Fresh empty file: SEEK_END returns 0, we write at byte 0. */
+    sys3(SYS_lseek, fd, 0, 2);
+
+    static char sep[80];
+    int sp = 0;
+    sp = sapp(sep, sp, "\n/* --- template: ");
+    int nl = name_len > 32 ? 32 : name_len;
+    mcpy(sep + sp, name, nl); sp += nl;
+    sp = sapp(sep, sp, " --- */\n");
+    if (wr(fd, sep, sp) != sp) { cl(fd); return -1; }
+
+    long w = 0;
+    while (w < src_len) {
+        long m = wr(fd, src + w, src_len - w);
+        if (m <= 0) { cl(fd); return -1; }
+        w += m;
+    }
+    cl(fd);
+    return 0;
 }
 
 static int tg_run_grow(int argc, char **argv) {
