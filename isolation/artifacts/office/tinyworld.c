@@ -1633,6 +1633,7 @@ typedef struct { const char *label; unsigned char act; } MI;
 #define MA_REFLOW 0x0a   /* ^J */
 #define MA_HEXTOG 0x09   /* tab */
 #define MA_ABOUT  0xa0
+#define MA_RPG    0xa1   /* tinyworld: View → RPG... drops into run_xpg */
 #define MA_RESET  0xa5
 
 struct MS_t {
@@ -1685,8 +1686,12 @@ static const MS ms_ask     = { mF_ask, NA(mF_ask), 0, 0,
  * returned action bytes. */
 static const MI mF_coder[] = {{"Save    ^S", MA_SAVE},
                               {"Quit    ^Q", MA_QUIT}};
+/* tinyworld: View → RPG... drops the user into run_xpg.  Single
+ * entry for now; future items (HxHnt..., L-system...) can join. */
+static const MI mV_coder[] = {{"RPG...    ", MA_RPG}};
 static const MS ms_coder   = { mF_coder, NA(mF_coder), 0, 0,
-                               0, 0, mH_about, NA(mH_about) };
+                               mV_coder, NA(mV_coder),
+                               mH_about, NA(mH_about) };
 
 /* Read a key into k[]. Returns -1 if k is not a menu-activation
  * (Alt+f/e/v/h or F10), else the menu index 0..3 to start at. */
@@ -5205,6 +5210,15 @@ static int run_coder(int argc, char **argv) {
         if (mi >= 0) act = menu_run(&ms_coder, mi);
         if (act == MA_ABOUT) {
             show_about("coder");
+            coder_paint("ready");
+            continue;
+        }
+        if (act == MA_RPG) {
+            /* Drop into run_xpg.  It sets its own termios + chrome;
+             * on return, restore coder's raw mode + redraw. */
+            run_xpg(0, 0);
+            current_ms = &ms_coder;
+            term_raw();
             coder_paint("ready");
             continue;
         }
