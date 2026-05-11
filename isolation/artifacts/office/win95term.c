@@ -1,0 +1,562 @@
+/* win95term.c — Win95/98 look-and-feel in an ANSI terminal.
+ *
+ * MVP: 100×30 desktop with one window (title bar, menu bar, content,
+ * status bar), a Start-button taskbar with a clock, a File menu with
+ * an About dialog, and a hex-direction cursor controlled by:
+ *
+ *     w  e        (NW)  (NE)
+ *      \/
+ *   a -- d       (W) -- (E)
+ *      /\
+ *     z  x        (SW)  (SE)
+ *
+ *     s = click / activate
+ *     f = right-click (context menu)
+ *     q = quit
+ *     G = toggle hex/square cursor model (square is default)
+ *
+ * Build (no TINY constraints — debug-friendly, unlimited size):
+ *     cc -O2 -g -Wall -Wextra -o win95term win95term.c
+ *
+ * Run interactively:
+ *     ./win95term
+ * One-shot frame dump (for visual verification or piping to less -R):
+ *     ./win95term --once
+ *     ./win95term --once | sed 's/\x1b\[[0-9;?]*[mHJlh]//g'    # ASCII-only
+ */
+#define _DEFAULT_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <termios.h>
+#include <signal.h>
+#include <time.h>
+#include <sys/select.h>
+
+/* ── Geometry ────────────────────────────────────────────── */
+#define SCR_W  100
+#define SCR_H   30
+
+/* Main window. */
+#define WIN_R0   6
+#define WIN_R1  21
+#define WIN_C0  25
+#define WIN_C1  74
+
+/* Taskbar is the bottom row of the desktop. */
+#define TASK_R  (SCR_H - 1)
+
+/* ── 256-color palette (xterm slots picked to match Win95 system colors). ─ */
+enum {
+    C_DESK      =  23,   /* desktop teal (Win95 default-ish) */
+    C_BTN       = 251,   /* button face #c6c6c6 ~ Win95 silver */
+    C_BTN_HL    =  15,   /* button highlight (white) */
+    C_BTN_SH    = 240,   /* button shadow (dark gray) */
+    C_BTN_DK    = 236,   /* deeper shadow / window outline */
+    C_TEXT      =  16,   /* default text (black) */
+    C_TITLE_BG  =  18,   /* active title bar (Win95 navy) */
+    C_TITLE_FG  =  15,   /* active title text (white) */
+    C_INACT_BG  = 244,   /* inactive title bar (gray) */
+    C_FIELD_BG  =  15,   /* white field background (text area) */
+    C_HL_BG     =  20,   /* menu selection blue */
+    C_HL_FG     =  15,   /* menu selection white */
+    C_LINK      =  21    /* hyperlink-ish accent */
+};
+
+/* ── Terminal I/O helpers ────────────────────────────────── */
+static struct termios g_saved_tios;
+static int g_tios_saved = 0;
+
+static void term_reset(void) {
+    /* Show cursor, default colors, move to bottom row, newline. */
+    fputs("\033[?25h\033[0m\033[" "30" ";1H\n", stdout);
+    if (g_tios_saved) tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_tios);
+    fflush(stdout);
+}
+
+static void term_setup_raw(void) {
+    if (tcgetattr(STDIN_FILENO, &g_saved_tios) == 0) {
+        g_tios_saved = 1;
+        struct termios t = g_saved_tios;
+        t.c_lflag &= ~(ICANON | ECHO);
+        t.c_cc[VMIN] = 0;
+        t.c_cc[VTIME] = 1;          /* 100 ms read timeout for clock refresh */
+        tcsetattr(STDIN_FILENO, TCSANOW, &t);
+    }
+    /* Alt screen, hide cursor, clear. */
+    fputs("\033[?1049h\033[?25l\033[2J\033[H", stdout);
+    fflush(stdout);
+}
+
+static void term_teardown(void) {
+    fputs("\033[?25h\033[?1049l\033[0m", stdout);
+    term_reset();
+}
+
+static void on_signal(int sig) { (void)sig; term_teardown(); _exit(0); }
+
+/* ── Frame buffer ────────────────────────────────────────── */
+typedef struct {
+    unsigned char ch;       /* ASCII glyph (we use box-drawing later via lookup) */
+    unsigned char fg;       /* xterm 256 fg */
+    unsigned char bg;       /* xterm 256 bg */
+    unsigned char attr;     /* bit 0 = bold, bit 1 = underline, bit 2 = inverse */
+} cell_t;
+
+#define ATTR_BOLD  0x01
+#define ATTR_UNDER 0x02
+#define ATTR_INV   0x04
+
+static cell_t g_fb[SCR_H][SCR_W];
+
+static void fb_clear(int bg) {
+    for (int r = 0; r < SCR_H; r++)
+        for (int c = 0; c < SCR_W; c++) {
+            g_fb[r][c].ch   = ' ';
+            g_fb[r][c].fg   = C_TEXT;
+            g_fb[r][c].bg   = (unsigned char)bg;
+            g_fb[r][c].attr = 0;
+        }
+}
+
+static void fb_put(int r, int c, char ch, int fg, int bg, int attr) {
+    if (r < 0 || r >= SCR_H || c < 0 || c >= SCR_W) return;
+    g_fb[r][c].ch   = (unsigned char)ch;
+    g_fb[r][c].fg   = (unsigned char)fg;
+    g_fb[r][c].bg   = (unsigned char)bg;
+    g_fb[r][c].attr = (unsigned char)attr;
+}
+
+static void fb_text(int r, int c, const char *s, int fg, int bg, int attr) {
+    for (int i = 0; s[i]; i++) fb_put(r, c + i, s[i], fg, bg, attr);
+}
+
+/* Fill a rectangle [r0..r1] × [c0..c1] inclusive. */
+static void fb_fill(int r0, int c0, int r1, int c1, char ch, int fg, int bg) {
+    for (int r = r0; r <= r1; r++)
+        for (int c = c0; c <= c1; c++)
+            fb_put(r, c, ch, fg, bg, 0);
+}
+
+/* ── Win95-style 3D etched borders ────────────────────────
+ *
+ * outset = highlight on top/left, shadow on bottom/right (raised button)
+ * inset  = shadow on top/left, highlight on bottom/right (sunken field) */
+static void draw_outset(int r0, int c0, int r1, int c1, int face) {
+    /* Top + left edges = highlight */
+    for (int c = c0; c <= c1; c++) fb_put(r0, c, ' ', C_TEXT, C_BTN_HL, 0);
+    for (int r = r0; r <= r1; r++) fb_put(r, c0, ' ', C_TEXT, C_BTN_HL, 0);
+    /* Bottom + right edges = shadow */
+    for (int c = c0; c <= c1; c++) fb_put(r1, c, ' ', C_TEXT, C_BTN_SH, 0);
+    for (int r = r0; r <= r1; r++) fb_put(r, c1, ' ', C_TEXT, C_BTN_SH, 0);
+    /* Bottom-right outer = darker shadow (the Win95 double-thick edge) */
+    fb_put(r1, c1, ' ', C_TEXT, C_BTN_DK, 0);
+    /* Interior fill */
+    if (r1 - r0 >= 2 && c1 - c0 >= 2)
+        fb_fill(r0 + 1, c0 + 1, r1 - 1, c1 - 1, ' ', C_TEXT, face);
+}
+
+static void draw_inset(int r0, int c0, int r1, int c1, int face) {
+    for (int c = c0; c <= c1; c++) fb_put(r0, c, ' ', C_TEXT, C_BTN_SH, 0);
+    for (int r = r0; r <= r1; r++) fb_put(r, c0, ' ', C_TEXT, C_BTN_SH, 0);
+    for (int c = c0; c <= c1; c++) fb_put(r1, c, ' ', C_TEXT, C_BTN_HL, 0);
+    for (int r = r0; r <= r1; r++) fb_put(r, c1, ' ', C_TEXT, C_BTN_HL, 0);
+    if (r1 - r0 >= 2 && c1 - c0 >= 2)
+        fb_fill(r0 + 1, c0 + 1, r1 - 1, c1 - 1, ' ', C_TEXT, face);
+}
+
+/* A small etched button on one row.  `label` is centered.  When
+ * `pressed`, the highlight/shadow flip to mimic the depressed look. */
+static void draw_button(int r, int c0, int c1, const char *label, int pressed) {
+    if (pressed) draw_inset(r, c0, r, c1, C_BTN);
+    else         draw_outset(r, c0, r, c1, C_BTN);
+    int w = c1 - c0 - 1;
+    int len = (int)strlen(label);
+    if (len > w) len = w;
+    int pad = (w - len) / 2;
+    fb_text(r, c0 + 1 + pad, label, C_TEXT, C_BTN, 0);
+}
+
+/* ── Compositor: dump frame buffer to stdout with ANSI escapes ─ */
+static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
+    static char buf[1 << 16];
+    int p = 0;
+    int prev_fg = -1, prev_bg = -1, prev_attr = -1;
+    p += snprintf(buf + p, sizeof buf - p, "\033[H");        /* home */
+    for (int r = 0; r < SCR_H; r++) {
+        p += snprintf(buf + p, sizeof buf - p, "\033[%d;1H", r + 1);
+        for (int c = 0; c < SCR_W; c++) {
+            cell_t cell = g_fb[r][c];
+            int inv = cursor_visible && cursor_r == r && cursor_c == c;
+            int fg  = inv ? cell.bg : cell.fg;
+            int bg  = inv ? cell.fg : cell.bg;
+            int at  = cell.attr;
+            if (fg != prev_fg || bg != prev_bg || at != prev_attr) {
+                p += snprintf(buf + p, sizeof buf - p, "\033[0");
+                if (at & ATTR_BOLD)  p += snprintf(buf + p, sizeof buf - p, ";1");
+                if (at & ATTR_UNDER) p += snprintf(buf + p, sizeof buf - p, ";4");
+                if (at & ATTR_INV)   p += snprintf(buf + p, sizeof buf - p, ";7");
+                p += snprintf(buf + p, sizeof buf - p, ";38;5;%d;48;5;%dm", fg, bg);
+                prev_fg = fg; prev_bg = bg; prev_attr = at;
+            }
+            buf[p++] = (char)cell.ch;
+            if (p > (int)sizeof buf - 64) { fwrite(buf, 1, p, stdout); p = 0; }
+        }
+    }
+    p += snprintf(buf + p, sizeof buf - p, "\033[0m");
+    fwrite(buf, 1, p, stdout);
+    fflush(stdout);
+}
+
+/* ── UI state ────────────────────────────────────────────── */
+enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT, MODE_START };
+
+static int g_mode = MODE_DESKTOP;
+static int g_cur_r = WIN_R0 + 3;
+static int g_cur_c = WIN_C0 + 5;
+static int g_menu_sel = 0;          /* index within open menu */
+static int g_hex_grid = 0;          /* 0 = square, 1 = hex (deferred) */
+
+/* Menu bar items: positions and hotkey letters. */
+typedef struct { const char *label; char hot; int col_off; int mode; } menu_t;
+static menu_t g_menubar[] = {
+    { "File", 'F', 2,  MODE_FILE_MENU },
+    { "Help", 'H', 9,  MODE_HELP_MENU },
+};
+static const int g_menubar_n = sizeof g_menubar / sizeof g_menubar[0];
+
+static const char *g_file_items[] = { "About win95term", "Exit" };
+static const int   g_file_n       = 2;
+
+static const char *g_help_items[] = { "Keyboard help", "About win95term" };
+static const int   g_help_n       = 2;
+
+/* ── Painters ────────────────────────────────────────────── */
+static void paint_desktop(void) {
+    fb_clear(C_DESK);
+    /* A few decorative "icons" on the desktop (left column). */
+    static const char *icons[][2] = {
+        { "[#]", "My Computer" },
+        { "[?]", "Help"        },
+        { "[X]", "Recycle Bin" },
+    };
+    for (unsigned i = 0; i < sizeof icons / sizeof icons[0]; i++) {
+        int r = 2 + (int)i * 3;
+        fb_text(r,     2, icons[i][0], C_BTN_HL, C_DESK, ATTR_BOLD);
+        fb_text(r + 1, 1, icons[i][1], C_BTN_HL, C_DESK, 0);
+    }
+}
+
+static void paint_taskbar(void) {
+    /* Taskbar across the entire bottom row.  One-row highlight above
+     * to mimic the Win95 3D-raised edge. */
+    fb_fill(TASK_R, 0, TASK_R, SCR_W - 1, ' ', C_TEXT, C_BTN);
+    for (int c = 0; c < SCR_W; c++) fb_put(TASK_R - 1, c, ' ', C_TEXT, C_BTN_HL, 0);
+    /* Start button: highlight/shadow simulated by surrounding chars. */
+    draw_button(TASK_R, 0, 9, "Start", g_mode == MODE_START);
+    /* Window-on-taskbar pill for the open About window. */
+    draw_button(TASK_R, 11, 30, "win95term", 0);
+    /* Clock on right. */
+    time_t now = time(NULL);
+    struct tm tm; localtime_r(&now, &tm);
+    char clock[16];
+    snprintf(clock, sizeof clock, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    fb_text(TASK_R, SCR_W - 7, clock, C_TEXT, C_BTN, 0);
+}
+
+static void paint_main_window(void) {
+    /* Window frame: outset border around (WIN_R0..WIN_R1, WIN_C0..WIN_C1). */
+    draw_outset(WIN_R0, WIN_C0, WIN_R1, WIN_C1, C_BTN);
+
+    /* Title bar (one row inside the frame). */
+    int tr = WIN_R0 + 1;
+    fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
+    fb_text(tr, WIN_C0 + 2, "win95term", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    /* [_] [□] [×] window buttons on the right side of the title bar. */
+    draw_button(tr, WIN_C1 - 9, WIN_C1 - 7, "_", 0);
+    draw_button(tr, WIN_C1 - 6, WIN_C1 - 4, "o", 0);   /* maximize square */
+    draw_button(tr, WIN_C1 - 3, WIN_C1 - 1, "x", 0);
+
+    /* Menu bar (one row below title). */
+    int mr = WIN_R0 + 2;
+    fb_fill(mr, WIN_C0 + 1, mr, WIN_C1 - 1, ' ', C_TEXT, C_BTN);
+    for (int i = 0; i < g_menubar_n; i++) {
+        int hot_col = WIN_C0 + g_menubar[i].col_off + 1;
+        int bg = (g_mode == g_menubar[i].mode) ? C_HL_BG : C_BTN;
+        int fg = (g_mode == g_menubar[i].mode) ? C_HL_FG : C_TEXT;
+        for (int j = 0; g_menubar[i].label[j]; j++) {
+            int a = (g_menubar[i].label[j] == g_menubar[i].hot) ? ATTR_UNDER : 0;
+            fb_put(mr, hot_col + j, g_menubar[i].label[j], fg, bg, a);
+        }
+    }
+
+    /* Content area: sunken field. */
+    int br = WIN_R0 + 3;            /* body start row */
+    int sr = WIN_R1 - 1;            /* status row */
+    draw_inset(br, WIN_C0 + 1, sr - 1, WIN_C1 - 1, C_FIELD_BG);
+    fb_text(br + 2, WIN_C0 + 4, "Welcome to win95term.",          C_TEXT, C_FIELD_BG, ATTR_BOLD);
+    fb_text(br + 4, WIN_C0 + 4, "Move the cursor with:",          C_TEXT, C_FIELD_BG, 0);
+    fb_text(br + 5, WIN_C0 + 6, " w  e        a/d  left/right",   C_TEXT, C_FIELD_BG, 0);
+    fb_text(br + 6, WIN_C0 + 6, " z  x        s  click, f  rclick",C_TEXT, C_FIELD_BG, 0);
+    fb_text(br + 8, WIN_C0 + 4, "Try: hover File, press s, pick About.", C_TEXT, C_FIELD_BG, 0);
+
+    /* Status bar (one row above the frame's bottom edge). */
+    fb_fill(sr, WIN_C0 + 1, sr, WIN_C1 - 1, ' ', C_TEXT, C_BTN);
+    char st[64];
+    snprintf(st, sizeof st, "cursor: (%d,%d)  grid: %s  mode: %s",
+             g_cur_r, g_cur_c,
+             g_hex_grid ? "hex" : "square",
+             g_mode == MODE_DESKTOP    ? "desktop"
+             : g_mode == MODE_FILE_MENU ? "File menu"
+             : g_mode == MODE_HELP_MENU ? "Help menu"
+             : g_mode == MODE_ABOUT     ? "About dialog"
+             : g_mode == MODE_START     ? "Start menu" : "?");
+    fb_text(sr, WIN_C0 + 2, st, C_TEXT, C_BTN, 0);
+}
+
+static void paint_dropdown(int mode, int anchor_col, const char **items, int n) {
+    int r0 = WIN_R0 + 3;
+    int c0 = anchor_col;
+    int w  = 22;
+    int r1 = r0 + n + 1;
+    int c1 = c0 + w;
+    draw_outset(r0, c0, r1, c1, C_BTN);
+    for (int i = 0; i < n; i++) {
+        int rr = r0 + 1 + i;
+        int sel = (i == g_menu_sel);
+        int bg = sel ? C_HL_BG : C_BTN;
+        int fg = sel ? C_HL_FG : C_TEXT;
+        fb_fill(rr, c0 + 1, rr, c1 - 1, ' ', fg, bg);
+        fb_text(rr, c0 + 2, items[i], fg, bg, 0);
+    }
+    (void)mode;
+}
+
+static void paint_about_dialog(void) {
+    int r0 = 9, r1 = 19, c0 = 30, c1 = 70;
+    draw_outset(r0, c0, r1, c1, C_BTN);
+    /* Title bar */
+    fb_fill(r0 + 1, c0 + 1, r0 + 1, c1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
+    fb_text(r0 + 1, c0 + 2, "About win95term", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    draw_button(r0 + 1, c1 - 3, c1 - 1, "x", 0);
+    /* Body */
+    fb_text(r0 + 3, c0 + 4, "win95term v0.1",         C_TEXT, C_BTN, ATTR_BOLD);
+    fb_text(r0 + 4, c0 + 4, "Win95/98 look-and-feel,", C_TEXT, C_BTN, 0);
+    fb_text(r0 + 5, c0 + 4, "rendered in 256-color ANSI.", C_TEXT, C_BTN, 0);
+    fb_text(r0 + 7, c0 + 4, "Cursor: w/e/a/d/z/x.",    C_TEXT, C_BTN, 0);
+    fb_text(r0 + 8, c0 + 4, "Click: s.   Right-click: f.", C_TEXT, C_BTN, 0);
+    /* OK button (centered, depressed look if cursor is on it) */
+    int btn_r = r1 - 1;
+    int btn_c0 = (c0 + c1) / 2 - 4;
+    int btn_c1 = btn_c0 + 8;
+    int hovering = (g_cur_r == btn_r && g_cur_c >= btn_c0 && g_cur_c <= btn_c1);
+    draw_button(btn_r, btn_c0, btn_c1, "OK", hovering);
+}
+
+static void paint_frame(void) {
+    paint_desktop();
+    paint_main_window();
+    if (g_mode == MODE_FILE_MENU) {
+        int anchor = WIN_C0 + g_menubar[0].col_off;
+        paint_dropdown(MODE_FILE_MENU, anchor, g_file_items, g_file_n);
+    } else if (g_mode == MODE_HELP_MENU) {
+        int anchor = WIN_C0 + g_menubar[1].col_off;
+        paint_dropdown(MODE_HELP_MENU, anchor, g_help_items, g_help_n);
+    } else if (g_mode == MODE_ABOUT) {
+        paint_about_dialog();
+    }
+    paint_taskbar();
+}
+
+/* ── Cursor movement ─────────────────────────────────────── */
+static void move_cursor(int dr, int dc) {
+    int nr = g_cur_r + dr;
+    int nc = g_cur_c + dc;
+    if (nr < 0) nr = 0;
+    if (nr >= SCR_H) nr = SCR_H - 1;
+    if (nc < 0) nc = 0;
+    if (nc >= SCR_W) nc = SCR_W - 1;
+    g_cur_r = nr;
+    g_cur_c = nc;
+}
+
+/* Square-grid mapping for w/e/a/d/z/x.  Hex mode is deferred; the
+ * toggle keeps the function around so the wiring is consistent. */
+static void handle_movement(char k) {
+    int dr = 0, dc = 0;
+    if (g_hex_grid) {
+        /* Pointy-top offset hex: even/odd row column-shift parity.
+         * For now we route the keys to the same deltas as square; the
+         * visual offset will land in a later commit. */
+    }
+    switch (k) {
+    case 'w': dr = -1; dc = -1; break;
+    case 'e': dr = -1; dc =  1; break;
+    case 'a': dr =  0; dc = -1; break;
+    case 'd': dr =  0; dc =  1; break;
+    case 'z': dr =  1; dc = -1; break;
+    case 'x': dr =  1; dc =  1; break;
+    }
+    move_cursor(dr, dc);
+}
+
+/* What's under the cursor right now?  Returns a small integer code for
+ * the click handler to act on. */
+enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
+       HIT_HELP_KEYS, HIT_HELP_ABOUT, HIT_DIALOG_OK, HIT_TITLE_X,
+       HIT_START };
+
+static int hit_test(void) {
+    int r = g_cur_r, c = g_cur_c;
+    if (g_mode == MODE_ABOUT) {
+        int r0 = 9, r1 = 19, c0 = 30, c1 = 70;
+        int btn_r = r1 - 1;
+        int btn_c0 = (c0 + c1) / 2 - 4;
+        int btn_c1 = btn_c0 + 8;
+        if (r == btn_r && c >= btn_c0 && c <= btn_c1) return HIT_DIALOG_OK;
+        if (r == r0 + 1 && c >= c1 - 3 && c <= c1 - 1) return HIT_DIALOG_OK;  /* x button closes */
+        return HIT_NONE;
+    }
+    /* Title bar close button. */
+    if (r == WIN_R0 + 1 && c >= WIN_C1 - 3 && c <= WIN_C1 - 1) return HIT_TITLE_X;
+    /* Menu bar items. */
+    if (r == WIN_R0 + 2) {
+        for (int i = 0; i < g_menubar_n; i++) {
+            int c0 = WIN_C0 + g_menubar[i].col_off + 1;
+            int c1 = c0 + (int)strlen(g_menubar[i].label) - 1;
+            if (c >= c0 && c <= c1) {
+                return (i == 0) ? HIT_MENU_FILE : HIT_MENU_HELP;
+            }
+        }
+    }
+    /* File dropdown items. */
+    if (g_mode == MODE_FILE_MENU) {
+        int r0 = WIN_R0 + 3;
+        int c0 = WIN_C0 + g_menubar[0].col_off;
+        if (r >= r0 + 1 && r <= r0 + g_file_n && c >= c0 && c <= c0 + 22) {
+            int idx = r - (r0 + 1);
+            if (idx == 0) return HIT_FILE_ABOUT;
+            if (idx == 1) return HIT_FILE_EXIT;
+        }
+    }
+    /* Help dropdown items. */
+    if (g_mode == MODE_HELP_MENU) {
+        int r0 = WIN_R0 + 3;
+        int c0 = WIN_C0 + g_menubar[1].col_off;
+        if (r >= r0 + 1 && r <= r0 + g_help_n && c >= c0 && c <= c0 + 22) {
+            int idx = r - (r0 + 1);
+            if (idx == 0) return HIT_HELP_KEYS;
+            if (idx == 1) return HIT_HELP_ABOUT;
+        }
+    }
+    /* Start button. */
+    if (r == TASK_R && c <= 9) return HIT_START;
+    return HIT_NONE;
+}
+
+/* ── Click handlers ──────────────────────────────────────── */
+static int handle_click(void) {
+    int hit = hit_test();
+    switch (hit) {
+    case HIT_MENU_FILE:
+        g_mode = (g_mode == MODE_FILE_MENU) ? MODE_DESKTOP : MODE_FILE_MENU;
+        g_menu_sel = 0;
+        break;
+    case HIT_MENU_HELP:
+        g_mode = (g_mode == MODE_HELP_MENU) ? MODE_DESKTOP : MODE_HELP_MENU;
+        g_menu_sel = 0;
+        break;
+    case HIT_FILE_ABOUT:
+    case HIT_HELP_ABOUT:
+        g_mode = MODE_ABOUT;
+        g_cur_r = 18; g_cur_c = 50;       /* land on OK */
+        break;
+    case HIT_FILE_EXIT:
+        return 1;
+    case HIT_HELP_KEYS:
+        /* Future: keyboard-help dialog.  For now collapse to About. */
+        g_mode = MODE_ABOUT;
+        break;
+    case HIT_DIALOG_OK:
+    case HIT_TITLE_X:
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_START:
+        g_mode = (g_mode == MODE_START) ? MODE_DESKTOP : MODE_START;
+        break;
+    default:
+        /* Click on empty space closes any open menu. */
+        if (g_mode == MODE_FILE_MENU || g_mode == MODE_HELP_MENU ||
+            g_mode == MODE_START)
+            g_mode = MODE_DESKTOP;
+        break;
+    }
+    return 0;
+}
+
+static int handle_rclick(void) {
+    /* Right-click on desktop opens a minimal context menu — placeholder
+     * for now: just flips the grid mode and lights the status row. */
+    if (g_mode == MODE_DESKTOP) {
+        g_hex_grid = !g_hex_grid;
+    }
+    return 0;
+}
+
+/* ── Main loop ───────────────────────────────────────────── */
+int main(int argc, char **argv) {
+    int once = 0;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--once")) once = 1;
+        else if (!strcmp(argv[i], "--hex"))  g_hex_grid = 1;
+    }
+
+    if (once) {
+        /* Paint a single frame to stdout and exit.  No raw mode, no
+         * alt-screen — caller pipes this somewhere (e.g. `| less -R`
+         * or `| sed` to strip escapes). */
+        paint_frame();
+        render_to_stdout(g_cur_r, g_cur_c, 1);
+        fputs("\033[0m\n", stdout);
+        return 0;
+    }
+
+    term_setup_raw();
+    signal(SIGINT,  on_signal);
+    signal(SIGTERM, on_signal);
+    atexit(term_teardown);
+
+    int dirty = 1;
+    while (1) {
+        if (dirty) {
+            paint_frame();
+            render_to_stdout(g_cur_r, g_cur_c, 1);
+            dirty = 0;
+        }
+        unsigned char c;
+        int n = read(STDIN_FILENO, &c, 1);
+        if (n <= 0) { dirty = 1; continue; }    /* timeout — refresh clock */
+
+        if (c == 'q' || c == 'Q' || c == 0x03) break;   /* q or Ctrl-C */
+        if (c == 'G') { g_hex_grid = !g_hex_grid; dirty = 1; continue; }
+        if (c == 0x1b) {                                /* ESC closes menus */
+            if (g_mode != MODE_DESKTOP) g_mode = MODE_DESKTOP;
+            dirty = 1; continue;
+        }
+        if (c == 's' || c == '\r' || c == '\n') {
+            if (handle_click()) break;
+            dirty = 1; continue;
+        }
+        if (c == 'f') {
+            handle_rclick();
+            dirty = 1; continue;
+        }
+        if (c == 'w' || c == 'e' || c == 'a' || c == 'd' ||
+            c == 'z' || c == 'x') {
+            handle_movement((char)c);
+            dirty = 1; continue;
+        }
+    }
+    return 0;
+}
