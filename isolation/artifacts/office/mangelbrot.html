@@ -96,19 +96,46 @@
   }
   footer { color: var(--dim); margin-top: 24px; font-size: 12px; max-width: 540px; line-height: 1.5; }
   footer code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+  .tabs {
+    display: flex; gap: 4px; margin: 0 0 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    background: transparent; color: var(--dim);
+    border: 1px solid var(--line); border-bottom: 0;
+    border-top-left-radius: 6px; border-top-right-radius: 6px;
+    padding: 9px 18px;
+    cursor: pointer; font: 600 14px inherit;
+    margin-bottom: -1px;
+    transition: background .15s, color .15s;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active {
+    background: var(--panel); color: var(--fg);
+    border-color: var(--line);
+    border-bottom: 1px solid var(--panel);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
 </style>
 </head>
 <body>
 
 <h1>mangelbrot</h1>
 <p class="lede">
-  Generates an 8 × 8 sheet of 64 × 64 Mandelbrot sprites — each a random
-  view through a 256-entry palette built from 4 RGB base colours.  The
-  bases drift across the sheet so neighbouring sprites feel related.
-  The most populated slot in each sprite is rendered as
-  <span class="swatch"></span> magenta (<code style="background:var(--panel);padding:1px 4px;border-radius:3px;">#ff00ff</code>)
+  Procedural Mandelbrot sprite sheets, Wang tilings, and a complete
+  4-colour hex Wang set.  The most populated slot in each sprite is
+  rendered as <span class="swatch"></span> magenta
+  (<code style="background:var(--panel);padding:1px 4px;border-radius:3px;">#ff00ff</code>)
   so a downstream tool can colour-key it as transparent.
 </p>
+
+<div class="tabs">
+  <button class="tab active" id="tabSprites" type="button">Sprites &amp; Wang Tiling</button>
+  <button class="tab"        id="tabHex"     type="button">Hex Wang Set</button>
+</div>
+
+<div class="tab-panel active" id="panelSprites">
 
 <div id="wrap">
   <div class="stage">
@@ -161,7 +188,11 @@
   <div class="status" id="tileStatus" style="margin-top: 8px;">click Wang Tile to assemble a 12 × 12 tiling</div>
 </div>
 
-<div id="hexWrap" style="margin-top: 24px;">
+</div> <!-- /panelSprites -->
+
+<div class="tab-panel" id="panelHex">
+
+<div id="hexWrap">
   <h2 style="font: 600 16px ui-sans-serif; margin: 0 0 6px;">hex wang tiles</h2>
   <p class="lede" style="margin-bottom: 12px;">
     A complete 4-colour hex Wang set has 4<sup>6</sup> = <b>4096</b> tiles
@@ -204,6 +235,8 @@
   </div>
   <div class="status" id="hexStatus" style="margin-top: 8px;">click Generate Hex Set to build the 4096-tile sheet</div>
 </div>
+
+</div> <!-- /panelHex -->
 
 <footer>
   Each sprite picks a curated Mandelbrot center, perturbs it, and chooses
@@ -1085,6 +1118,24 @@ BTN_HEX_GEN.addEventListener("click", generateHexSet);
 BTN_HEX_TILE.addEventListener("click", generateHexTiling);
 BTN_DL_HEXSET.addEventListener("click", downloadHexSetJpg);
 BTN_DL_HEXTILE.addEventListener("click", downloadHexTilingJpg);
+
+/* ── Tabs ─────────────────────────────────────────────
+ * Two-tab layout keeps the page short: the sprites/Wang section is
+ * shown by default, the (much taller) hex section is hidden until
+ * the user clicks the second tab.  Just a class toggle, no routing. */
+const TAB_SPRITES   = document.getElementById("tabSprites");
+const TAB_HEX       = document.getElementById("tabHex");
+const PANEL_SPRITES = document.getElementById("panelSprites");
+const PANEL_HEX     = document.getElementById("panelHex");
+function showTab(which) {
+  const isHex = (which === "hex");
+  TAB_SPRITES.classList.toggle("active",  !isHex);
+  TAB_HEX.classList.toggle("active",       isHex);
+  PANEL_SPRITES.classList.toggle("active", !isHex);
+  PANEL_HEX.classList.toggle("active",     isHex);
+}
+TAB_SPRITES.addEventListener("click", () => showTab("sprites"));
+TAB_HEX.addEventListener("click",     () => showTab("hex"));
 SEL_BLK.addEventListener("change", () => {
   /* Block-size acts as a live slider for whichever layer is currently
    * showing a pixelization — sheet, tiling, or both. */
