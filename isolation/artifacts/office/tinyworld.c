@@ -2617,7 +2617,14 @@ static int files_scan(const char *path) {
 #define ASK_KEY_CAP    256
 #define ASK_URL_CAP    256
 #define ASK_MODEL_CAP  64
-#define ASK_REQ_CAP    20480
+/* Worst-case: 4 KB personality bank repeated twice (system field +
+ * belt-and-suspenders system message), 16 KB messages buffer, each
+ * potentially doubled by ask_json_esc escapes, plus scaffolding.
+ * Bumped from 20480 → 65536 after mission mode exposed an overflow
+ * crash via "sometimes, fetch-key try 3/3 → SIGSEGV".  Cap-respecting
+ * checks were also added throughout ask_build_request + ask_json_esc
+ * so the overflow can't recur even if the worst case grows. */
+#define ASK_REQ_CAP    65536
 #define ASK_RESP_CAP   20480
 
 static char ask_api_key[ASK_KEY_CAP];
@@ -2745,8 +2752,13 @@ static int ask_provider(void) {
     return ASK_PROV_OPENAI;
 }
 
-static int ask_json_esc(char *out, int at, const char *s, int n) {
+/* cap = total writable size of out; the caller passes it so this
+ * function can stop instead of overflowing.  Each iteration may emit
+ * up to 2 bytes, so we leave a 2-byte margin on the test. */
+static int ask_json_esc_cap(char *out, int at, int cap,
+                            const char *s, int n) {
     for (int i = 0; i < n; i++) {
+        if (at + 2 > cap) break;
         unsigned char c = (unsigned char)s[i];
         if      (c == '"')  { out[at++] = '\\'; out[at++] = '"'; }
         else if (c == '\\') { out[at++] = '\\'; out[at++] = '\\'; }
@@ -2757,6 +2769,14 @@ static int ask_json_esc(char *out, int at, const char *s, int n) {
         else                { out[at++] = (char)c; }
     }
     return at;
+}
+
+/* Back-compat wrapper.  Callers that haven't been updated to pass a
+ * real cap pass 0x7fffffff (effectively unbounded) — but inside this
+ * file the only remaining caller is ask_build_request which now
+ * routes through the _cap variant directly. */
+static int ask_json_esc(char *out, int at, const char *s, int n) {
+    return ask_json_esc_cap(out, at, 0x7fffffff, s, n);
 }
 
 /* ── 4-bank persistent memory ──────────────────────────────
@@ -2826,73 +2846,80 @@ static void bank_load_all(void) {
  * request.  Now it just reloads the personality bank — same effect. */
 static void prompt_load(void) { bank_load(BANK_PERSONALITY); }
 
+/* Cap-respecting JSON request builder.  Every write site checks
+ * `at + needed <= cap - TAIL` where TAIL leaves room for the JSON
+ * close tokens, so a worst-case request never overflows `out`. */
+static int sapp_cap(char *out, int at, int cap, const char *s) {
+    int n = slen(s);
+    int avail = cap - at;
+    if (n > avail) n = avail;
+    if (n > 0) mcpy(out + at, s, n);
+    return at + n;
+}
+
+#define ABR_TAIL 32   /* reserve for trailing "]}" + comma + safety */
+#define ABR_PUT(s)  do { if (at + (int)slen(s) + ABR_TAIL > cap) goto abr_done; \
+                          at = sapp(out, at, s); } while (0)
+#define ABR_ESC(p, n)  do { at = ask_json_esc_cap(out, at, cap - ABR_TAIL, (p), (n)); } while (0)
+
 static int ask_build_request(char *out, int cap) {
-    (void)cap;
     prompt_load();
     int at = 0;
     int prov = ask_provider();
     int has_sys = (g_llm_prompt_len > 0);
     if (prov == ASK_PROV_GEMINI) {
-        /* Gemini: {"systemInstruction":{"parts":[{"text":"…"}]},
-         *          "contents":[{"role":"user|model","parts":[{"text":"…"}]}]} */
-        at = sapp(out, at, "{");
+        ABR_PUT("{");
         if (has_sys) {
-            at = sapp(out, at, "\"systemInstruction\":{\"parts\":[{\"text\":\"");
-            at = ask_json_esc(out, at, g_llm_prompt, g_llm_prompt_len);
-            at = sapp(out, at, "\"}]},");
+            ABR_PUT("\"systemInstruction\":{\"parts\":[{\"text\":\"");
+            ABR_ESC(g_llm_prompt, g_llm_prompt_len);
+            ABR_PUT("\"}]},");
         }
-        at = sapp(out, at, "\"contents\":[");
+        ABR_PUT("\"contents\":[");
         for (int i = 0; i < ask_n_msgs; i++) {
+            if (at + 1 + ABR_TAIL > cap) break;
             if (i > 0) out[at++] = ',';
-            at = sapp(out, at, "{\"role\":\"");
-            at = sapp(out, at, ask_msg_role[i] ? "model" : "user");
-            at = sapp(out, at, "\",\"parts\":[{\"text\":\"");
-            at = ask_json_esc(out, at, ask_buf + ask_msg_off[i], ask_msg_len[i]);
-            at = sapp(out, at, "\"}]}");
+            ABR_PUT("{\"role\":\"");
+            ABR_PUT(ask_msg_role[i] ? "model" : "user");
+            ABR_PUT("\",\"parts\":[{\"text\":\"");
+            ABR_ESC(ask_buf + ask_msg_off[i], ask_msg_len[i]);
+            ABR_PUT("\"}]}");
         }
-        at = sapp(out, at, "]}");
-        return at;
+        ABR_PUT("]}");
+        goto abr_done;
     }
-    /* OpenAI + Anthropic both use messages[].  Anthropic also needs
-     * a top-level max_tokens field, and rejects model strings it
-     * doesn't recognise — but the user supplies the model, so we
-     * just pass it through.  System prompt: OpenAI takes a
-     * {"role":"system"} message; Anthropic prefers a top-level
-     * "system" field but also tolerates the system role inside
-     * messages[] via OpenAI-compat proxies, which is what most of
-     * the keys in the wild are anyway. */
-    at = sapp(out, at, "{\"model\":\"");
-    at = ask_json_esc(out, at, ask_model, slen(ask_model));
-    /* office50 — always cap max_tokens.  Anthropic *requires* it; for
-     * OpenAI / proxies it's optional, but the pekpik proxy was
-     * applying a very large default per call against GPT-5.5 keys
-     * (eating the whole rate-limit budget on every message). */
-    at = sapp(out, at, "\",\"max_tokens\":");
-    at += utoa((unsigned)g_ask_max_tokens, out + at);
+    ABR_PUT("{\"model\":\"");
+    ABR_ESC(ask_model, slen(ask_model));
+    ABR_PUT("\",\"max_tokens\":");
+    /* utoa never writes more than 10 digits for unsigned int — safe
+     * under the ABR_TAIL reserve. */
+    if (at + 16 + ABR_TAIL <= cap) at += utoa((unsigned)g_ask_max_tokens, out + at);
     if (has_sys) {
-        at = sapp(out, at, ",\"system\":\"");
-        at = ask_json_esc(out, at, g_llm_prompt, g_llm_prompt_len);
-        at = sapp(out, at, "\"");
+        ABR_PUT(",\"system\":\"");
+        ABR_ESC(g_llm_prompt, g_llm_prompt_len);
+        ABR_PUT("\"");
     }
-    at = sapp(out, at, ",\"messages\":[");
+    ABR_PUT(",\"messages\":[");
     if (has_sys) {
-        /* Belt and suspenders: also include the prompt as a system
-         * message for OpenAI-compat endpoints that ignore "system". */
-        at = sapp(out, at, "{\"role\":\"system\",\"content\":\"");
-        at = ask_json_esc(out, at, g_llm_prompt, g_llm_prompt_len);
-        at = sapp(out, at, "\"},");
+        ABR_PUT("{\"role\":\"system\",\"content\":\"");
+        ABR_ESC(g_llm_prompt, g_llm_prompt_len);
+        ABR_PUT("\"},");
     }
     for (int i = 0; i < ask_n_msgs; i++) {
+        if (at + 1 + ABR_TAIL > cap) break;
         if (i > 0) out[at++] = ',';
-        at = sapp(out, at, "{\"role\":\"");
-        at = sapp(out, at, ask_msg_role[i] ? "assistant" : "user");
-        at = sapp(out, at, "\",\"content\":\"");
-        at = ask_json_esc(out, at, ask_buf + ask_msg_off[i], ask_msg_len[i]);
-        at = sapp(out, at, "\"}");
+        ABR_PUT("{\"role\":\"");
+        ABR_PUT(ask_msg_role[i] ? "assistant" : "user");
+        ABR_PUT("\",\"content\":\"");
+        ABR_ESC(ask_buf + ask_msg_off[i], ask_msg_len[i]);
+        ABR_PUT("\"}");
     }
-    at = sapp(out, at, "]}");
+    ABR_PUT("]}");
+abr_done:
     return at;
 }
+#undef ABR_PUT
+#undef ABR_ESC
+#undef ABR_TAIL
 
 /* Find first "<key>":"..." string in JSON, decoding \" \n \t \\ \/ \uXXXX.
  * Skips any "<key>":[...] / "<key>":{...} occurrences (Anthropic's
