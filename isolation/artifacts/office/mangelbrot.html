@@ -124,13 +124,32 @@
         <option value="8">8×</option>
       </select>
     </div>
-    <button id="download" class="alt">Download JPG</button>
+    <button id="download" class="alt">Download Sheet JPG</button>
+    <button id="wang">Wang Tile</button>
+    <button id="downloadTile" class="alt" hidden>Download Tiling JPG</button>
     <div class="status" id="status">starting…</div>
     <div class="legend">
       sprite&nbsp;&nbsp;&nbsp;64 × 64<br>
       sheet&nbsp;&nbsp;&nbsp;&nbsp;8 × 8 sprites<br>
       output&nbsp;&nbsp;&nbsp;512 × 512 px JPG
     </div>
+  </div>
+</div>
+
+<div id="tilingWrap" hidden style="margin-top: 24px;">
+  <h2 style="font: 600 16px ui-sans-serif; margin: 0 0 6px;">wang tiling</h2>
+  <p class="lede" style="margin-bottom: 12px;">
+    Each sprite's four edges are averaged into a colour (skipping the
+    magenta key).  For every cell of a 12 × 12 grid the picker finds
+    the tile whose left + top edges best match the cell to the west
+    and the cell to the north, ties broken by drawing uniformly from
+    the top 6 candidates — generous enough that the tiling stays
+    varied, strict enough that adjacent edges blend.
+  </p>
+  <div class="stage" style="display: inline-block;">
+    <canvas id="tiling" width="768" height="768"
+            style="image-rendering: pixelated; image-rendering: crisp-edges;
+                   display: block; width: 768px; height: 768px;"></canvas>
   </div>
 </div>
 
@@ -152,6 +171,13 @@ const BTN_REGEN = document.getElementById("regen");
 const BTN_DL    = document.getElementById("download");
 const BTN_PIX   = document.getElementById("pixelize");
 const SEL_BLK   = document.getElementById("blockSize");
+const BTN_WANG  = document.getElementById("wang");
+const BTN_DLT   = document.getElementById("downloadTile");
+const TILING_WRAP = document.getElementById("tilingWrap");
+const TILING     = document.getElementById("tiling");
+const TILING_CTX = TILING.getContext("2d");
+const WANG_COLS = 12, WANG_ROWS = 12;
+const WANG_TOP_K = 6;          /* random pick among the top-N best matches */
 
 /* Hidden mirror of the un-pixelized sheet — Pixelize reads from here
  * and writes to the visible canvas, so the operation is idempotent
@@ -337,6 +363,9 @@ function regenerateSheet() {
   BTN_REGEN.disabled = true;
   BTN_DL.disabled    = true;
   BTN_PIX.disabled   = true;
+  BTN_WANG.disabled  = true;
+  /* New sheet → stored edge averages are stale. */
+  tileEdges = null;
   let n = 0;
   STATUS.textContent = "0/" + TOTAL;
   function step() {
@@ -358,6 +387,7 @@ function regenerateSheet() {
       BTN_REGEN.disabled = false;
       BTN_DL.disabled    = false;
       BTN_PIX.disabled   = false;
+      BTN_WANG.disabled  = false;
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
   }
@@ -415,6 +445,119 @@ function pixelize() {
   STATUS.textContent = "pixelized at " + block + "× block";
 }
 
+/* ── Wang tiling ──────────────────────────────────────
+ * Treat every sprite as a Wang tile by averaging the colour along
+ * each of its four edges (top / right / bottom / left), ignoring
+ * any pixel that's the magenta colour key.  An all-key edge falls
+ * back to the key colour, which then matches *any* other key edge
+ * trivially.  Tile picking is fuzzy: for each cell we score every
+ * tile by sum-of-L1-distance of its left+top edges to the required
+ * edges, sort, and draw uniformly from the top-K to keep variety. */
+let tileEdges = null;         /* [ { top, right, bottom, left } ] × 64 */
+
+function _edgeMean(data, idxs) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (const p of idxs) {
+    const R = data[p], G = data[p + 1], B = data[p + 2];
+    if (R === KEY_R && G === KEY_G && B === KEY_B) continue;
+    r += R; g += G; b += B; n++;
+  }
+  if (n === 0) return [KEY_R, KEY_G, KEY_B];
+  return [(r / n) | 0, (g / n) | 0, (b / n) | 0];
+}
+
+function _spriteEdges(sx, sy) {
+  const img = SRC_CTX.getImageData(sx, sy, SPRITE_PX, SPRITE_PX).data;
+  const top = [], right = [], bottom = [], left = [];
+  for (let x = 0; x < SPRITE_PX; x++) top.push((0 * SPRITE_PX + x) * 4);
+  for (let y = 0; y < SPRITE_PX; y++) right.push((y * SPRITE_PX + (SPRITE_PX - 1)) * 4);
+  for (let x = 0; x < SPRITE_PX; x++) bottom.push(((SPRITE_PX - 1) * SPRITE_PX + x) * 4);
+  for (let y = 0; y < SPRITE_PX; y++) left.push((y * SPRITE_PX + 0) * 4);
+  return {
+    top:    _edgeMean(img, top),
+    right:  _edgeMean(img, right),
+    bottom: _edgeMean(img, bottom),
+    left:   _edgeMean(img, left),
+  };
+}
+
+function _colDist(a, b) {
+  return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]);
+}
+
+function computeTileEdges() {
+  tileEdges = new Array(TOTAL);
+  for (let i = 0; i < TOTAL; i++) {
+    const row = (i / SHEET_TILES) | 0;
+    const col = i % SHEET_TILES;
+    tileEdges[i] = _spriteEdges(col * SPRITE_PX, row * SPRITE_PX);
+  }
+}
+
+/* Pick a tile index whose left edge matches needLeft (or any if null)
+ * and whose top edge matches needTop (or any if null).  Score is sum-
+ * of-L1; we draw uniformly from the top-K scorers. */
+function pickWangTile(needLeft, needTop) {
+  const scored = new Array(TOTAL);
+  for (let i = 0; i < TOTAL; i++) {
+    let s = 0;
+    if (needLeft) s += _colDist(tileEdges[i].left, needLeft);
+    if (needTop)  s += _colDist(tileEdges[i].top,  needTop);
+    scored[i] = { i, s };
+  }
+  scored.sort((a, b) => a.s - b.s);
+  const k = Math.min(WANG_TOP_K, scored.length);
+  return scored[(Math.random() * k) | 0].i;
+}
+
+function generateWangTiling() {
+  if (!tileEdges) computeTileEdges();
+  /* picked[row][col] = tile index */
+  const picked = new Array(WANG_ROWS);
+  for (let r = 0; r < WANG_ROWS; r++) {
+    picked[r] = new Array(WANG_COLS);
+    for (let c = 0; c < WANG_COLS; c++) {
+      const needLeft = (c > 0) ? tileEdges[picked[r][c-1]].right : null;
+      const needTop  = (r > 0) ? tileEdges[picked[r-1][c]].bottom : null;
+      picked[r][c] = pickWangTile(needLeft, needTop);
+    }
+  }
+  /* Paint each picked tile into the tiling canvas. */
+  TILING_CTX.fillStyle = "#ff00ff";
+  TILING_CTX.fillRect(0, 0, WANG_COLS * SPRITE_PX, WANG_ROWS * SPRITE_PX);
+  for (let r = 0; r < WANG_ROWS; r++) {
+    for (let c = 0; c < WANG_COLS; c++) {
+      const i = picked[r][c];
+      const srcCol = i % SHEET_TILES;
+      const srcRow = (i / SHEET_TILES) | 0;
+      /* Draw from the un-pixelized SRC mirror so the tiling shows the
+       * original sprite colours regardless of the Pixelize state. */
+      TILING_CTX.drawImage(
+        SRC,
+        srcCol * SPRITE_PX, srcRow * SPRITE_PX, SPRITE_PX, SPRITE_PX,
+        c * SPRITE_PX,      r * SPRITE_PX,      SPRITE_PX, SPRITE_PX);
+    }
+  }
+  TILING_WRAP.hidden = false;
+  BTN_DLT.hidden = false;
+  STATUS.textContent = WANG_COLS + "×" + WANG_ROWS + " wang tiling ready";
+}
+
+function downloadTilingJpg() {
+  const url = TILING.toDataURL("image/jpeg", 0.92);
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ts = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
+             "-" +
+             pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-tiling-" + ts + ".jpg";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 /* ── Download as JPG ──────────────────────────────────
  * JPEG has no alpha, so the magenta key bakes in as a flat colour.
  * Filename is mangelbrot-<YYYYMMDD>-<HHMMSS>.jpg in local time. */
@@ -436,15 +579,18 @@ function downloadJpg() {
 BTN_REGEN.addEventListener("click", regenerateSheet);
 BTN_DL.addEventListener("click", downloadJpg);
 BTN_PIX.addEventListener("click", pixelize);
+BTN_WANG.addEventListener("click", generateWangTiling);
+BTN_DLT.addEventListener("click", downloadTilingJpg);
 SEL_BLK.addEventListener("change", () => {
   /* If the canvas already shows a pixelization, re-apply at the new
    * block size so the select doubles as a live slider. */
   if (!BTN_PIX.disabled && STATUS.textContent.startsWith("pixelized")) pixelize();
 });
 
-/* Pixelize is meaningless until the first sheet finishes rendering. */
-BTN_PIX.disabled = true;
-BTN_DL.disabled  = true;
+/* Sheet-derived actions are meaningless until the first sheet finishes. */
+BTN_PIX.disabled  = true;
+BTN_DL.disabled   = true;
+BTN_WANG.disabled = true;
 
 /* First sheet on load. */
 regenerateSheet();
