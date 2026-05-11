@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mangelbrot — 64×64 Mandelbrot sprite sheet</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --fg: #c9d1d9;
+    --dim: #8b949e;
+    --accent: #1f6feb;
+    --accent-hi: #388bfd;
+    --panel: #161b22;
+    --line: #30363d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px ui-sans-serif, system-ui, -apple-system, sans-serif;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  h1 {
+    font: 600 20px ui-sans-serif, system-ui, sans-serif;
+    margin: 0 0 6px;
+    letter-spacing: .3px;
+  }
+  p.lede { color: var(--dim); margin: 0 0 18px; max-width: 540px; line-height: 1.5; }
+  #wrap {
+    display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start;
+  }
+  .stage {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px;
+  }
+  canvas#sheet {
+    background: #ff00ff;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    width: 512px;
+    height: 512px;
+  }
+  .controls {
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 16px;
+    min-width: 220px;
+  }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    padding: 9px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font: 600 14px inherit;
+    transition: background .15s;
+  }
+  button:hover { background: var(--accent-hi); }
+  button:disabled { background: #2a2f37; color: var(--dim); cursor: not-allowed; }
+  button.alt { background: #21262d; color: var(--fg); border: 1px solid var(--line); }
+  button.alt:hover { background: #30363d; }
+  .status {
+    font: 12px ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--dim);
+    margin-top: 4px;
+    min-height: 16px;
+  }
+  .legend {
+    font: 12px ui-monospace, monospace;
+    color: var(--dim);
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+    line-height: 1.6;
+  }
+  .swatch {
+    display: inline-block; width: 10px; height: 10px;
+    background: #ff00ff; vertical-align: -1px;
+    border: 1px solid rgba(255,255,255,.2);
+  }
+  footer { color: var(--dim); margin-top: 24px; font-size: 12px; max-width: 540px; line-height: 1.5; }
+  footer code { background: var(--panel); padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<h1>mangelbrot</h1>
+<p class="lede">
+  Generates an 8 × 8 sheet of 64 × 64 Mandelbrot sprites — each a random
+  view through a 256-entry palette built from 4 RGB base colours.  The
+  bases drift across the sheet so neighbouring sprites feel related.
+  The most populated slot in each sprite is rendered as
+  <span class="swatch"></span> magenta (<code style="background:var(--panel);padding:1px 4px;border-radius:3px;">#ff00ff</code>)
+  so a downstream tool can colour-key it as transparent.
+</p>
+
+<div id="wrap">
+  <div class="stage">
+    <canvas id="sheet" width="512" height="512"></canvas>
+  </div>
+  <div class="controls">
+    <button id="regen">Regenerate</button>
+    <button id="download" class="alt">Download JPG</button>
+    <div class="status" id="status">starting…</div>
+    <div class="legend">
+      sprite&nbsp;&nbsp;&nbsp;64 × 64<br>
+      sheet&nbsp;&nbsp;&nbsp;&nbsp;8 × 8 sprites<br>
+      output&nbsp;&nbsp;&nbsp;512 × 512 px JPG
+    </div>
+  </div>
+</div>
+
+<footer>
+  Each sprite picks a curated Mandelbrot center, perturbs it, and chooses
+  a random log-span in 2<sup>-10</sup>‥2<sup>0</sup>.  The 256-entry palette is
+  built as four 64-step ramps through the 4 RGB bases.  Per-sprite a tiny
+  ±6/channel drift is applied to each base, so the sheet's colour scheme
+  walks smoothly instead of jumping.
+</footer>
+
+<script>
+"use strict";
+
+const SHEET     = document.getElementById("sheet");
+const CTX       = SHEET.getContext("2d");
+const STATUS    = document.getElementById("status");
+const BTN_REGEN = document.getElementById("regen");
+const BTN_DL    = document.getElementById("download");
+
+const SPRITE_PX   = 64;
+const SHEET_TILES = 8;
+const TOTAL       = SHEET_TILES * SHEET_TILES;
+const SHEET_PX    = SPRITE_PX * SHEET_TILES;       /* 512 */
+const KEY_R = 0xff, KEY_G = 0x00, KEY_B = 0xff;    /* magenta colour key */
+
+/* ── PRNG ──────────────────────────────────────────────
+ * Mulberry32; cheap and good enough for picking views and
+ * drifting palette bytes. */
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let rnd = makeRng(Math.floor(Math.random() * 0xffffffff));
+
+/* Curated "interesting" centers — boundary points where the set's
+ * filigree is dense at zoom.  Picked so a random log-span doesn't
+ * land on solid black or featureless escape. */
+const CENTERS = [
+  [-0.75,     0.10000],
+  [-1.25,     0],
+  [-0.16,     1.04],
+  [-0.7269,   0.1889],
+  [ 0.275,    0],
+  [-0.55,     0.5641],
+  [-1.7493,   0],
+  [-0.70,     0.27015],
+  [-0.74543,  0.11301],
+  [-0.10109, -0.95628],
+  [-1.401155, 0],
+  [-0.39,     0.59],
+];
+
+/* Multipliers for the iter→palette-slot map.  Small primes coprime
+ * with 256 (all odd) so the slot index walks the whole palette
+ * cleanly rather than collapsing into bands. */
+const PALETTE_MULTS = [5,7,11,13,17,19,23,29,31,37,41,43,47,53,59];
+const PAL_DRIFT     = 6;
+
+/* ── Persistent palette state (carried across sprites within a sheet) ── */
+let baseRgb;          /* [4][3] */
+let palMult, palOff;
+let palTable;         /* Uint8ClampedArray(256*3) */
+let palInited = false;
+
+function clampByte(v) { return v < 0 ? 0 : v > 255 ? 255 : v | 0; }
+
+function rebuildPalette() {
+  const out = new Uint8ClampedArray(256 * 3);
+  for (let k = 0; k < 4; k++) {
+    const a = baseRgb[k];
+    const b = baseRgb[(k + 1) & 3];
+    for (let j = 0; j < 64; j++) {
+      const slot = k * 64 + j;
+      out[slot*3 + 0] = ((a[0] * (63 - j) + b[0] * j) / 63) | 0;
+      out[slot*3 + 1] = ((a[1] * (63 - j) + b[1] * j) / 63) | 0;
+      out[slot*3 + 2] = ((a[2] * (63 - j) + b[2] * j) / 63) | 0;
+    }
+  }
+  palTable = out;
+}
+
+function initOrDriftPalette() {
+  if (!palInited) {
+    baseRgb = [];
+    for (let i = 0; i < 4; i++) {
+      baseRgb.push([
+        (rnd() * 256) | 0,
+        (rnd() * 256) | 0,
+        (rnd() * 256) | 0,
+      ]);
+    }
+    palMult   = PALETTE_MULTS[(rnd() * PALETTE_MULTS.length) | 0];
+    palOff    = (rnd() * 256) | 0;
+    palInited = true;
+  } else {
+    for (let i = 0; i < 4; i++) {
+      for (let c = 0; c < 3; c++) {
+        const d = ((rnd() * (2*PAL_DRIFT + 1)) | 0) - PAL_DRIFT;
+        baseRgb[i][c] = clampByte(baseRgb[i][c] + d);
+      }
+    }
+  }
+  rebuildPalette();
+}
+
+/* ── View pick ────────────────────────────────────────── */
+function pickView() {
+  const ci = (rnd() * CENTERS.length) | 0;
+  let cx = CENTERS[ci][0];
+  let cy = CENTERS[ci][1];
+  const e = -((rnd() * 11) | 0);            /* 0..-10 */
+  const span = Math.pow(2, e);
+  cx += ((rnd() * 2 - 1) * 0.25) * span;
+  cy += ((rnd() * 2 - 1) * 0.25) * span;
+  let iter = 192;
+  let s = span;
+  while (s < 1.0 && iter < 4096) { iter += 64; s *= 2.0; }
+  return { cx, cy, span, iter };
+}
+
+/* ── Mandelbrot iter + slot map ──────────────────────── */
+function mandel(cx, cy, maxIter) {
+  let zx = 0, zy = 0, x2 = 0, y2 = 0;
+  let i = 0;
+  while (i < maxIter && x2 + y2 < 4.0) {
+    zy = 2 * zx * zy + cy;
+    zx = x2 - y2 + cx;
+    x2 = zx * zx; y2 = zy * zy;
+    i++;
+  }
+  return i;
+}
+
+function slotForIter(iter, maxIter) {
+  if (iter === maxIter) return -1;
+  return ((iter * palMult + palOff) >>> 0) & 0xff;
+}
+
+/* ── Render one 64×64 sprite at (sx, sy) on the sheet canvas ── */
+function renderSprite(sx, sy) {
+  initOrDriftPalette();
+  const { cx, cy, span, iter } = pickView();
+  const ds = span / SPRITE_PX;
+  const ox = cx - ds * SPRITE_PX * 0.5;
+  const oy = cy - ds * SPRITE_PX * 0.5;
+
+  const slots = new Int16Array(SPRITE_PX * SPRITE_PX);
+  const hist  = new Int32Array(257);
+  for (let y = 0; y < SPRITE_PX; y++) {
+    for (let x = 0; x < SPRITE_PX; x++) {
+      const it = mandel(ox + x * ds, oy + y * ds, iter);
+      const sl = slotForIter(it, iter);
+      slots[y * SPRITE_PX + x] = sl;
+      hist[sl + 1]++;
+    }
+  }
+  let maxIdx = 0;
+  for (let i = 1; i < 257; i++) if (hist[i] > hist[maxIdx]) maxIdx = i;
+  const transparent = maxIdx - 1;          /* -1..255 */
+
+  const img = CTX.createImageData(SPRITE_PX, SPRITE_PX);
+  const d = img.data;
+  for (let p = 0, i = 0; p < d.length; p += 4, i++) {
+    const sl = slots[i];
+    if (sl === transparent) {
+      d[p] = KEY_R; d[p+1] = KEY_G; d[p+2] = KEY_B;
+    } else if (sl < 0) {
+      d[p] = 0; d[p+1] = 0; d[p+2] = 0;
+    } else {
+      d[p]   = palTable[sl*3 + 0];
+      d[p+1] = palTable[sl*3 + 1];
+      d[p+2] = palTable[sl*3 + 2];
+    }
+    d[p+3] = 255;
+  }
+  CTX.putImageData(img, sx, sy);
+}
+
+/* ── Sheet driver ───────────────────────────────────── */
+let renderToken = 0;        /* invalidate in-flight runs when user re-clicks Regenerate */
+
+function regenerateSheet() {
+  /* Bump the token so any pending RAF callbacks abort. */
+  const myToken = ++renderToken;
+  palInited = false;        /* reroll palette per sheet */
+  CTX.fillStyle = "#ff00ff";
+  CTX.fillRect(0, 0, SHEET_PX, SHEET_PX);
+  BTN_REGEN.disabled = true;
+  BTN_DL.disabled    = true;
+  let n = 0;
+  STATUS.textContent = "0/" + TOTAL;
+  function step() {
+    if (myToken !== renderToken) return;       /* superseded — bail */
+    /* Render a small batch per RAF so we get visible progress without
+     * starving the event loop.  4 sprites per frame ≈ 16 frames total. */
+    const BATCH = 4;
+    for (let k = 0; k < BATCH && n < TOTAL; k++, n++) {
+      const row = (n / SHEET_TILES) | 0;
+      const col = n % SHEET_TILES;
+      renderSprite(col * SPRITE_PX, row * SPRITE_PX);
+    }
+    STATUS.textContent = n + "/" + TOTAL;
+    if (n < TOTAL) {
+      requestAnimationFrame(step);
+    } else {
+      BTN_REGEN.disabled = false;
+      BTN_DL.disabled    = false;
+      STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+/* ── Download as JPG ──────────────────────────────────
+ * JPEG has no alpha, so the magenta key bakes in as a flat colour.
+ * Filename is mangelbrot-<YYYYMMDD>-<HHMMSS>.jpg in local time. */
+function downloadJpg() {
+  const url = SHEET.toDataURL("image/jpeg", 0.92);
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const ts = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) +
+             "-" +
+             pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mangelbrot-" + ts + ".jpg";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+BTN_REGEN.addEventListener("click", regenerateSheet);
+BTN_DL.addEventListener("click", downloadJpg);
+
+/* First sheet on load. */
+regenerateSheet();
+</script>
+</body>
+</html>
