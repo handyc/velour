@@ -360,7 +360,7 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
 
 /* ── UI state ────────────────────────────────────────────── */
 enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT,
-       MODE_START, MODE_CONTEXT, MODE_DP, MODE_PROGRAMS };
+       MODE_START, MODE_CONTEXT, MODE_DP, MODE_PROGRAMS, MODE_WIN_DRAG };
 
 /* What app is "open" inside the main window.  Switches title bar and
  * content body.  NONE = the original welcome screen. */
@@ -489,7 +489,8 @@ static void paint_main_window(void) {
     int tr = WIN_R0 + 1;
     int focused = (g_mode == MODE_DESKTOP || g_mode == MODE_FILE_MENU ||
                    g_mode == MODE_HELP_MENU || g_mode == MODE_START ||
-                   g_mode == MODE_PROGRAMS || g_mode == MODE_CONTEXT);
+                   g_mode == MODE_PROGRAMS || g_mode == MODE_CONTEXT ||
+                   g_mode == MODE_WIN_DRAG);
     int t_bg = focused ? C_TITLE_BG : C_INACT_BG;
     int t_fg = focused ? C_TITLE_FG : C_BTN_HL;
     fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', t_fg, t_bg);
@@ -615,7 +616,8 @@ static void paint_main_window(void) {
              : g_mode == MODE_START     ? "Start menu"
              : g_mode == MODE_PROGRAMS  ? "Programs"
              : g_mode == MODE_CONTEXT   ? "Context menu"
-             : g_mode == MODE_DP        ? "Display Properties" : "?");
+             : g_mode == MODE_DP        ? "Display Properties"
+             : g_mode == MODE_WIN_DRAG  ? "drag (M to exit)" : "?");
     fb_text(sr, WIN_C0 + 2, st, C_TEXT, C_BTN, 0);
 }
 
@@ -1522,6 +1524,18 @@ int main(int argc, char **argv) {
 
         if (c == 'q' || c == 'Q' || c == 0x03) break;   /* q or Ctrl-C */
         if (c == 'G') { g_hex_grid = !g_hex_grid; dirty = 1; continue; }
+        if (c == 'M') {
+            /* Toggle window-drag mode.  Lands the cursor on the title
+             * bar so the user sees what they're dragging. */
+            if (g_mode == MODE_WIN_DRAG) {
+                g_mode = MODE_DESKTOP;
+            } else if (g_mode == MODE_DESKTOP && !g_win_minimized) {
+                g_mode = MODE_WIN_DRAG;
+                g_cur_r = WIN_R0 + 1;
+                g_cur_c = (WIN_C0 + WIN_C1) / 2;
+            }
+            dirty = 1; continue;
+        }
         if (c == 0x1b) {                                /* ESC closes menus */
             if (g_mode != MODE_DESKTOP) g_mode = MODE_DESKTOP;
             dirty = 1; continue;
@@ -1536,7 +1550,32 @@ int main(int argc, char **argv) {
         }
         if (c == 'w' || c == 'e' || c == 'a' || c == 'd' ||
             c == 'z' || c == 'x') {
-            handle_movement((char)c);
+            if (g_mode == MODE_WIN_DRAG) {
+                /* Move the window instead of the cursor.  Square
+                 * deltas (hex mode irrelevant when dragging since
+                 * the window is rectangular). */
+                int dr = 0, dc = 0;
+                switch ((char)c) {
+                case 'w': dr = -1; dc = -1; break;
+                case 'e': dr = -1; dc =  1; break;
+                case 'a': dr =  0; dc = -1; break;
+                case 'd': dr =  0; dc =  1; break;
+                case 'z': dr =  1; dc = -1; break;
+                case 'x': dr =  1; dc =  1; break;
+                }
+                int nr0 = WIN_R0 + dr, nc0 = WIN_C0 + dc;
+                int nr1 = WIN_R1 + dr, nc1 = WIN_C1 + dc;
+                if (nr0 >= 0 && nc0 >= 0 &&
+                    nr1 < TASK_R - 1 && nc1 < VIS_W) {
+                    WIN_R0 = nr0; WIN_C0 = nc0;
+                    WIN_R1 = nr1; WIN_C1 = nc1;
+                    g_cur_r = WIN_R0 + 1;
+                    g_cur_c += dc;
+                    g_fb_prev_valid = 0;     /* moved — force full repaint */
+                }
+            } else {
+                handle_movement((char)c);
+            }
             dirty = 1; continue;
         }
     }
