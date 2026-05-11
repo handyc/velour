@@ -182,10 +182,24 @@ const TILING_WRAP  = document.getElementById("tilingWrap");
 const TILING       = document.getElementById("tiling");
 const TILING_CTX   = TILING.getContext("2d");
 const TILE_STATUS  = document.getElementById("tileStatus");
+
+const SPRITE_PX   = 64;
+const SHEET_TILES = 8;
+const TOTAL       = SHEET_TILES * SHEET_TILES;
+const SHEET_PX    = SPRITE_PX * SHEET_TILES;       /* 512 */
+const KEY_R = 0xff, KEY_G = 0x00, KEY_B = 0xff;    /* magenta colour key */
+
 const WANG_COLS = 12, WANG_ROWS = 12;
 const WANG_PX_W = WANG_COLS * SPRITE_PX;   /* 768 */
 const WANG_PX_H = WANG_ROWS * SPRITE_PX;   /* 768 */
 const WANG_TOP_K = 6;          /* random pick among the top-N best matches */
+
+/* Hidden mirror of the un-pixelized sheet — Pixelize reads from here
+ * and writes to the visible canvas, so the operation is idempotent
+ * and clicking it twice with the same block size is a no-op. */
+const SRC = document.createElement("canvas");
+SRC.width = SHEET_PX; SRC.height = SHEET_PX;
+const SRC_CTX = SRC.getContext("2d");
 
 /* Offscreen mirror of the un-pixelized tiling — Pixelize Tiling reads
  * from here and writes to TILING, same idempotent pattern as the
@@ -198,19 +212,6 @@ const TSRC_CTX = TSRC.getContext("2d");
  * "transparent waiting to be filled" instead of black-mystery-box. */
 TILING_CTX.fillStyle = "#ff00ff";
 TILING_CTX.fillRect(0, 0, WANG_PX_W, WANG_PX_H);
-
-/* Hidden mirror of the un-pixelized sheet — Pixelize reads from here
- * and writes to the visible canvas, so the operation is idempotent
- * and clicking it twice with the same block size is a no-op. */
-const SRC = document.createElement("canvas");
-SRC.width = 512; SRC.height = 512;
-const SRC_CTX = SRC.getContext("2d");
-
-const SPRITE_PX   = 64;
-const SHEET_TILES = 8;
-const TOTAL       = SHEET_TILES * SHEET_TILES;
-const SHEET_PX    = SPRITE_PX * SHEET_TILES;       /* 512 */
-const KEY_R = 0xff, KEY_G = 0x00, KEY_B = 0xff;    /* magenta colour key */
 
 /* ── PRNG ──────────────────────────────────────────────
  * Mulberry32; cheap and good enough for picking views and
