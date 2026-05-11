@@ -245,6 +245,23 @@ static void draw_button(int r, int c0, int c1, const char *label, int pressed) {
     fb_text(r, c0 + 1 + pad, label, C_TEXT, C_BTN, 0);
 }
 
+/* Title-bar mini-button: like the _ / [] / X cluster on the right of
+ * a Win95 title bar.  A single-row 3D etch can't render properly
+ * (top + bottom edges collapse onto the same line), so we paint a
+ * flat face-color cell with the label centered.  Surrounding navy
+ * title-bar background gives the implied edge. */
+static void draw_titlebar_button(int r, int c0, int c1, const char *label) {
+    int w = c1 - c0 + 1;
+    int len = (int)strlen(label);
+    if (len > w) len = w;
+    int pad = (w - len) / 2;
+    for (int c = c0; c <= c1; c++) {
+        int rel = c - c0;
+        char ch = (rel >= pad && rel < pad + len) ? label[rel - pad] : ' ';
+        fb_put(r, c, ch, C_TEXT, C_BTN, 0);
+    }
+}
+
 /* ── Compositor: emit frame buffer with ANSI escapes ──────
  *
  * Three flicker-reduction tricks:
@@ -372,16 +389,31 @@ static const int   g_help_n       = 2;
 /* ── Painters ────────────────────────────────────────────── */
 static void paint_desktop(void) {
     fb_clear(C_DESK);
-    /* A few decorative "icons" on the desktop (left column). */
+    /* Decorative icons down the left side.  Skip if there's not even
+     * room for the 3-char glyph + a 1-col gap before the window;
+     * otherwise truncate the label to the desktop strip width so it
+     * doesn't bleed under the window's left edge. */
     static const char *icons[][2] = {
         { "[#]", "My Computer" },
         { "[?]", "Help"        },
         { "[X]", "Recycle Bin" },
     };
+    int strip_w = WIN_C0 - 1;   /* available cols from col 1 to window-1 */
+    if (strip_w < 4) return;     /* not enough room — skip icons */
+    int label_max = strip_w - 1; /* labels start at col 1 */
     for (unsigned i = 0; i < sizeof icons / sizeof icons[0]; i++) {
         int r = 2 + (int)i * 3;
-        fb_text(r,     2, icons[i][0], C_BTN_HL, C_DESK, ATTR_BOLD);
-        fb_text(r + 1, 1, icons[i][1], C_BTN_HL, C_DESK, 0);
+        if (r + 1 >= TASK_R - 1) break;   /* would collide with taskbar */
+        fb_text(r, 2, icons[i][0], C_BTN_HL, C_DESK, ATTR_BOLD);
+        /* Truncate label to fit. */
+        const char *lbl = icons[i][1];
+        char buf[32];
+        int ll = (int)strlen(lbl);
+        if (ll > label_max) ll = label_max;
+        if (ll < 0) ll = 0;
+        memcpy(buf, lbl, ll);
+        buf[ll] = 0;
+        fb_text(r + 1, 1, buf, C_BTN_HL, C_DESK, 0);
     }
 }
 
@@ -415,10 +447,11 @@ static void paint_main_window(void) {
     int tr = WIN_R0 + 1;
     fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
     fb_text(tr, WIN_C0 + 2, "win95term", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
-    /* [_] [□] [×] window buttons on the right side of the title bar. */
-    draw_button(tr, WIN_C1 - 9, WIN_C1 - 7, "_", 0);
-    draw_button(tr, WIN_C1 - 6, WIN_C1 - 4, "o", 0);   /* maximize square */
-    draw_button(tr, WIN_C1 - 3, WIN_C1 - 1, "x", 0);
+    /* [_] [o] [x] window buttons on the right side of the title bar.
+     * Mini-buttons are flat-face (see draw_titlebar_button comment). */
+    draw_titlebar_button(tr, WIN_C1 - 9, WIN_C1 - 7, "_");
+    draw_titlebar_button(tr, WIN_C1 - 6, WIN_C1 - 4, "o");   /* maximize */
+    draw_titlebar_button(tr, WIN_C1 - 3, WIN_C1 - 1, "x");
 
     /* Menu bar (one row below title). */
     int mr = WIN_R0 + 2;
@@ -600,7 +633,7 @@ static void paint_about_dialog(void) {
     /* Title bar */
     fb_fill(r0 + 1, c0 + 1, r0 + 1, c1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
     fb_text(r0 + 1, c0 + 2, "About win95term", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
-    draw_button(r0 + 1, c1 - 3, c1 - 1, "x", 0);
+    draw_titlebar_button(r0 + 1, c1 - 3, c1 - 1, "x");
     /* Body */
     fb_text(r0 + 3, c0 + 4, "win95term v0.1",         C_TEXT, C_BTN, ATTR_BOLD);
     fb_text(r0 + 4, c0 + 4, "Win95/98 look-and-feel,", C_TEXT, C_BTN, 0);
@@ -645,22 +678,35 @@ static void move_cursor(int dr, int dc) {
     g_cur_c = nc;
 }
 
-/* Square-grid mapping for w/e/a/d/z/x.  Hex mode is deferred; the
- * toggle keeps the function around so the wiring is consistent. */
+/* Map w/e/a/d/z/x to (dr, dc) deltas.
+ *
+ * Square mode (default): six classical compass-ish moves.  W/E up,
+ * A/D side, Z/X down, all diagonal where applicable.
+ *
+ * Hex mode (G toggles): pointy-top offset coordinates.  On odd rows
+ * the column deltas for NW/NE/SW/SE shift by +1 so that w/e/z/x
+ * traverse the actual hex neighborhood.  W/E remain row-aligned. */
 static void handle_movement(char k) {
     int dr = 0, dc = 0;
     if (g_hex_grid) {
-        /* Pointy-top offset hex: even/odd row column-shift parity.
-         * For now we route the keys to the same deltas as square; the
-         * visual offset will land in a later commit. */
-    }
-    switch (k) {
-    case 'w': dr = -1; dc = -1; break;
-    case 'e': dr = -1; dc =  1; break;
-    case 'a': dr =  0; dc = -1; break;
-    case 'd': dr =  0; dc =  1; break;
-    case 'z': dr =  1; dc = -1; break;
-    case 'x': dr =  1; dc =  1; break;
+        int odd = (g_cur_r & 1);
+        switch (k) {
+        case 'w': dr = -1; dc = odd ?  0 : -1; break;  /* NW */
+        case 'e': dr = -1; dc = odd ?  1 :  0; break;  /* NE */
+        case 'a': dr =  0; dc = -1;            break;  /* W  */
+        case 'd': dr =  0; dc =  1;            break;  /* E  */
+        case 'z': dr =  1; dc = odd ?  0 : -1; break;  /* SW */
+        case 'x': dr =  1; dc = odd ?  1 :  0; break;  /* SE */
+        }
+    } else {
+        switch (k) {
+        case 'w': dr = -1; dc = -1; break;
+        case 'e': dr = -1; dc =  1; break;
+        case 'a': dr =  0; dc = -1; break;
+        case 'd': dr =  0; dc =  1; break;
+        case 'z': dr =  1; dc = -1; break;
+        case 'x': dr =  1; dc =  1; break;
+        }
     }
     move_cursor(dr, dc);
 }
