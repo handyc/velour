@@ -339,7 +339,12 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
 }
 
 /* ── UI state ────────────────────────────────────────────── */
-enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT, MODE_START };
+enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT,
+       MODE_START, MODE_CONTEXT };
+
+/* Context-menu anchor in screen coordinates (set when `f` fires). */
+static int g_ctx_r = 0;
+static int g_ctx_c = 0;
 
 static int g_mode = MODE_DESKTOP;
 /* Cursor: positioned by layout_for_size() onto the center of the
@@ -487,6 +492,107 @@ static void about_geom(int *r0, int *c0, int *r1, int *c1) {
     *r1 = *r0 + dh - 1;
 }
 
+/* ── Start menu flyout ───────────────────────────────────
+ *
+ * Pops up ABOVE the Start button.  Left side has a 2-column navy
+ * stripe with "Windows 95" stacked vertically (the iconic look).
+ * Items list runs down the right side; cursor over an item lights
+ * it up via the standard C_HL_BG / C_HL_FG selection palette. */
+static const char *g_start_items[] = {
+    " Programs           ", /* >'s deferred — no submenu yet */
+    " Help              ",
+    " Run...            ",
+    " About win95term   ",
+    "───────────────────",     /* separator */
+    " Shut Down...      ",
+};
+static const int g_start_n = sizeof g_start_items / sizeof g_start_items[0];
+
+static void start_geom(int *r0, int *c0, int *r1, int *c1) {
+    int w  = 22;
+    int h  = g_start_n + 2;       /* +2 for top/bottom 3D frame */
+    *c0 = 0;
+    *r1 = TASK_R - 1;             /* sit on the highlight row above taskbar */
+    *r0 = *r1 - h + 1;
+    if (*r0 < 0) *r0 = 0;
+    *c1 = *c0 + w - 1;
+    if (*c1 >= VIS_W) *c1 = VIS_W - 1;
+}
+
+static void paint_start_menu(void) {
+    int r0, c0, r1, c1;
+    start_geom(&r0, &c0, &r1, &c1);
+    draw_outset(r0, c0, r1, c1, C_BTN);
+
+    /* Left stripe: 2 cols wide, navy.  "Windows 95" stacked
+     * top-down so it reads naturally even though it's vertical. */
+    int sr0 = r0 + 1, sr1 = r1 - 1, sc0 = c0 + 1, sc1 = c0 + 2;
+    fb_fill(sr0, sc0, sr1, sc1, ' ', C_TITLE_FG, C_TITLE_BG);
+    static const char stripe[] = "Windows95";
+    int stripe_len = (int)(sizeof stripe - 1);
+    int stripe_rows = sr1 - sr0 + 1;
+    int start_r = sr0 + (stripe_rows - stripe_len) / 2;
+    if (start_r < sr0) start_r = sr0;
+    for (int i = 0; i < stripe_len; i++) {
+        int rr = start_r + i;
+        if (rr > sr1) break;
+        fb_put(rr, sc0 + 1, stripe[i], C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    }
+
+    /* Items, with cursor-row selection.  Item rows start two cols
+     * inside the stripe. */
+    for (int i = 0; i < g_start_n; i++) {
+        int rr = r0 + 1 + i;
+        if (rr > r1 - 1) break;
+        int sel = (g_cur_r == rr && g_cur_c >= c0 + 3 && g_cur_c <= c1 - 1);
+        int bg = sel ? C_HL_BG : C_BTN;
+        int fg = sel ? C_HL_FG : C_TEXT;
+        fb_fill(rr, c0 + 3, rr, c1 - 1, ' ', fg, bg);
+        fb_text(rr, c0 + 3, g_start_items[i], fg, bg, 0);
+    }
+}
+
+/* ── Right-click context menu ────────────────────────────
+ *
+ * Pops up at the cursor's position when `f` is pressed.  Clamped to
+ * stay within the visible area.  Re-uses the dropdown look. */
+static const char *g_ctx_items[] = {
+    " View             ",
+    " Refresh          ",
+    "──────────────────",
+    " New              ",
+    " Properties       ",
+};
+static const int g_ctx_n = sizeof g_ctx_items / sizeof g_ctx_items[0];
+
+static void context_geom(int *r0, int *c0, int *r1, int *c1) {
+    int w = 20;
+    int h = g_ctx_n + 2;
+    *r0 = g_ctx_r;
+    *c0 = g_ctx_c;
+    if (*r0 + h > VIS_H) *r0 = VIS_H - h;
+    if (*c0 + w > VIS_W) *c0 = VIS_W - w;
+    if (*r0 < 0) *r0 = 0;
+    if (*c0 < 0) *c0 = 0;
+    *r1 = *r0 + h - 1;
+    *c1 = *c0 + w - 1;
+}
+
+static void paint_context_menu(void) {
+    int r0, c0, r1, c1;
+    context_geom(&r0, &c0, &r1, &c1);
+    draw_outset(r0, c0, r1, c1, C_BTN);
+    for (int i = 0; i < g_ctx_n; i++) {
+        int rr = r0 + 1 + i;
+        if (rr > r1 - 1) break;
+        int sel = (g_cur_r == rr && g_cur_c >= c0 + 1 && g_cur_c <= c1 - 1);
+        int bg = sel ? C_HL_BG : C_BTN;
+        int fg = sel ? C_HL_FG : C_TEXT;
+        fb_fill(rr, c0 + 1, rr, c1 - 1, ' ', fg, bg);
+        fb_text(rr, c0 + 1, g_ctx_items[i], fg, bg, 0);
+    }
+}
+
 static void paint_about_dialog(void) {
     int r0, c0, r1, c1;
     about_geom(&r0, &c0, &r1, &c1);
@@ -522,6 +628,9 @@ static void paint_frame(void) {
         paint_about_dialog();
     }
     paint_taskbar();
+    /* Overlays paint AFTER the taskbar so they stack on top. */
+    if (g_mode == MODE_START)   paint_start_menu();
+    if (g_mode == MODE_CONTEXT) paint_context_menu();
 }
 
 /* ── Cursor movement ─────────────────────────────────────── */
@@ -560,7 +669,13 @@ static void handle_movement(char k) {
  * the click handler to act on. */
 enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
        HIT_HELP_KEYS, HIT_HELP_ABOUT, HIT_DIALOG_OK, HIT_TITLE_X,
-       HIT_START };
+       HIT_START,
+       /* Start-menu items (in order). */
+       HIT_START_PROGRAMS, HIT_START_HELP, HIT_START_RUN,
+       HIT_START_ABOUT, HIT_START_SEP, HIT_START_SHUTDOWN,
+       /* Context-menu items (in order). */
+       HIT_CTX_VIEW, HIT_CTX_REFRESH, HIT_CTX_SEP,
+       HIT_CTX_NEW, HIT_CTX_PROPERTIES };
 
 static int hit_test(void) {
     int r = g_cur_r, c = g_cur_c;
@@ -608,6 +723,38 @@ static int hit_test(void) {
     }
     /* Start button. */
     if (r == TASK_R && c <= 9) return HIT_START;
+
+    /* Start menu items. */
+    if (g_mode == MODE_START) {
+        int sr0, sc0, sr1, sc1;
+        start_geom(&sr0, &sc0, &sr1, &sc1);
+        if (r >= sr0 + 1 && r <= sr0 + g_start_n &&
+            c >= sc0 + 3 && c <= sc1 - 1) {
+            int idx = r - (sr0 + 1);
+            static const int map[] = {
+                HIT_START_PROGRAMS, HIT_START_HELP, HIT_START_RUN,
+                HIT_START_ABOUT, HIT_START_SEP, HIT_START_SHUTDOWN
+            };
+            if (idx >= 0 && idx < (int)(sizeof map / sizeof map[0]))
+                return map[idx];
+        }
+    }
+
+    /* Context menu items. */
+    if (g_mode == MODE_CONTEXT) {
+        int xr0, xc0, xr1, xc1;
+        context_geom(&xr0, &xc0, &xr1, &xc1);
+        if (r >= xr0 + 1 && r <= xr0 + g_ctx_n &&
+            c >= xc0 + 1 && c <= xc1 - 1) {
+            int idx = r - (xr0 + 1);
+            static const int map[] = {
+                HIT_CTX_VIEW, HIT_CTX_REFRESH, HIT_CTX_SEP,
+                HIT_CTX_NEW, HIT_CTX_PROPERTIES
+            };
+            if (idx >= 0 && idx < (int)(sizeof map / sizeof map[0]))
+                return map[idx];
+        }
+    }
     return HIT_NONE;
 }
 
@@ -642,13 +789,48 @@ static int handle_click(void) {
     case HIT_TITLE_X:
         g_mode = MODE_DESKTOP;
         break;
-    case HIT_START:
-        g_mode = (g_mode == MODE_START) ? MODE_DESKTOP : MODE_START;
+    case HIT_START: {
+        if (g_mode == MODE_START) { g_mode = MODE_DESKTOP; break; }
+        g_mode = MODE_START;
+        int sr0, sc0, sr1, sc1;
+        start_geom(&sr0, &sc0, &sr1, &sc1);
+        g_cur_r = sr0 + 1;            /* land on first item */
+        g_cur_c = sc0 + 4;
+        break;
+    }
+    case HIT_START_SHUTDOWN:
+        /* Win95's "Shut Down" doesn't fool around — quit. */
+        return 1;
+    case HIT_START_ABOUT: {
+        g_mode = MODE_ABOUT;
+        int r0, c0, r1, c1;
+        about_geom(&r0, &c0, &r1, &c1);
+        g_cur_r = r1 - 1; g_cur_c = (c0 + c1) / 2;
+        break;
+    }
+    case HIT_START_PROGRAMS:
+    case HIT_START_HELP:
+    case HIT_START_RUN:
+    case HIT_CTX_VIEW:
+    case HIT_CTX_NEW:
+    case HIT_CTX_PROPERTIES:
+        /* Stubs: just close the menu — submenus + Run dialog are
+         * future phases. */
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_CTX_REFRESH:
+        /* Force a full repaint: invalidate the diff buffer. */
+        g_fb_prev_valid = 0;
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_START_SEP:
+    case HIT_CTX_SEP:
+        /* Separators do nothing. */
         break;
     default:
         /* Click on empty space closes any open menu. */
         if (g_mode == MODE_FILE_MENU || g_mode == MODE_HELP_MENU ||
-            g_mode == MODE_START)
+            g_mode == MODE_START      || g_mode == MODE_CONTEXT)
             g_mode = MODE_DESKTOP;
         break;
     }
@@ -656,10 +838,20 @@ static int handle_click(void) {
 }
 
 static int handle_rclick(void) {
-    /* Right-click on desktop opens a minimal context menu — placeholder
-     * for now: just flips the grid mode and lights the status row. */
+    /* Right-click opens a context menu anchored at the cursor.  Only
+     * available from the desktop (not from inside other modal menus). */
     if (g_mode == MODE_DESKTOP) {
-        g_hex_grid = !g_hex_grid;
+        g_ctx_r = g_cur_r;
+        g_ctx_c = g_cur_c;
+        g_mode = MODE_CONTEXT;
+        /* Land cursor on first item so it highlights immediately. */
+        int xr0, xc0, xr1, xc1;
+        context_geom(&xr0, &xc0, &xr1, &xc1);
+        g_cur_r = xr0 + 1;
+        g_cur_c = xc0 + 2;
+    } else if (g_mode == MODE_CONTEXT) {
+        /* Second right-click closes the menu. */
+        g_mode = MODE_DESKTOP;
     }
     return 0;
 }
