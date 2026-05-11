@@ -249,6 +249,7 @@
     <button id="hexGen"        style="flex: 1; min-width: 180px;">Generate Hex Set</button>
     <button id="hexTile"       style="flex: 1; min-width: 180px;">Generate Hex Tiling</button>
     <button id="hexPixBoardBtn" style="flex: 1; min-width: 180px;">Random Pixelated Board</button>
+    <button id="hexCaBake"     style="flex: 1; min-width: 180px;" title="Treat each tile index as a 6-neighbour hex-CA rule key; bake the rule's 4096-entry output into the set. Tiling = one CA step.">Bake CA Rule</button>
   </div>
   <div style="display: flex; gap: 10px; margin-top: 8px; max-width: 1100px; flex-wrap: wrap;">
     <button id="dlHexSet"   class="alt" style="flex: 1; min-width: 180px;">Download Hex Set JPG</button>
@@ -921,6 +922,7 @@ const HEX_STATUS      = document.getElementById("hexStatus");
 const BTN_HEX_GEN     = document.getElementById("hexGen");
 const BTN_HEX_TILE    = document.getElementById("hexTile");
 const BTN_HEX_PB      = document.getElementById("hexPixBoardBtn");
+const BTN_HEX_CA      = document.getElementById("hexCaBake");
 const BTN_DL_HEXSET   = document.getElementById("dlHexSet");
 const BTN_DL_HEXTILE  = document.getElementById("dlHexTile");
 const BTN_DL_HEXPIX   = document.getElementById("dlHexPix");
@@ -1137,6 +1139,7 @@ function generateHexSet() {
   hexSetReady = false;
   BTN_HEX_TILE.disabled    = true;
   BTN_HEX_PB.disabled      = true;
+  BTN_HEX_CA.disabled      = true;
   BTN_DL_HEXSET.disabled   = true;
   BTN_DL_HEXTILE.disabled  = true;
   BTN_DL_HEXPIX.disabled   = true;
@@ -1214,6 +1217,7 @@ function generateHexSet() {
         BTN_HEX_GEN.disabled   = false;
         BTN_HEX_TILE.disabled  = false;
         BTN_HEX_PB.disabled    = false;
+        BTN_HEX_CA.disabled    = false;
         BTN_DL_HEXSET.disabled = false;
         BTN_DL_HEXPIX.disabled = false;
         HEX_STATUS.textContent =
@@ -1325,6 +1329,76 @@ function downloadHexPixJpg() {
   a.download = "mangelbrot-hexset-pixelated-" + _datestamp() + ".jpg";
   document.body.appendChild(a); a.click(); a.remove();
 }
+/* ── Bake CA Rule into the Wang set ──────────────────
+ *
+ * Bridges the 4096 ↔ 4096 correspondence: every hex Wang tile index
+ * i is the 6-tuple (e0..e5) ∈ {0..3}^6, which is also the LUT key
+ * for a 6-neighbour hex-CA rule.  This bakes a fresh random rule
+ * (Uint8Array of length 4096, each byte ∈ {0..3}) into the existing
+ * 4096-tile set: each tile keeps its coloured edge stripes, but its
+ * interior is replaced with a flat fill of the rule's output state
+ * for that key — drawn from one of 4 distinct "state colours" lifted
+ * from the first palette's bases.
+ *
+ * Once baked, generating a hex tiling on this set produces a hex grid
+ * where every cell's interior shows the rule output for that cell's
+ * 6-neighbour input.  That's literally one CA step rendered as a
+ * Wang tiling.  Iterating the tiling = iterating the CA. */
+function bakeCaRuleIntoHexSet() {
+  if (!hexSetReady) return;
+  /* Random rule LUT: one output state per 6-tuple. */
+  const ruleLUT = new Uint8Array(HEX_TILE_COUNT);
+  for (let i = 0; i < HEX_TILE_COUNT; i++) ruleLUT[i] = (Math.random() * 4) | 0;
+  /* Four state colours pulled from the first palette's bases.  Slots
+   * 0 / 64 / 128 / 192 of palette[0] are the 4 RGB bases by
+   * construction of the ramps. */
+  const STATE_RGB = [
+    [hexPalettes[0][  0], hexPalettes[0][  1], hexPalettes[0][  2]],
+    [hexPalettes[0][192], hexPalettes[0][193], hexPalettes[0][194]],
+    [hexPalettes[0][384], hexPalettes[0][385], hexPalettes[0][386]],
+    [hexPalettes[0][576], hexPalettes[0][577], hexPalettes[0][578]],
+  ];
+  /* Repaint every tile: hex-clipped flat fill of STATE_RGB[ruleLUT[i]],
+   * then re-stroke the 6 coloured edges to keep the Wang labels. */
+  HEX_SET_CTX.fillStyle = "#ff00ff";
+  HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+  for (let i = 0; i < HEX_TILE_COUNT; i++) {
+    const col = i % HEX_TILES_AXIS;
+    const row = (i / HEX_TILES_AXIS) | 0;
+    const x0  = col * HEX_TILE_PX;
+    const y0  = row * HEX_TILE_PX;
+    const cx  = x0 + HEX_TILE_PX / 2;
+    const cy  = y0 + HEX_TILE_PX / 2;
+    const out = ruleLUT[i];
+    const rgb = STATE_RGB[out];
+    HEX_SET_CTX.save();
+    hexPath(HEX_SET_CTX, cx, cy, HEX_R);
+    HEX_SET_CTX.clip();
+    HEX_SET_CTX.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
+    HEX_SET_CTX.fillRect(x0, y0, HEX_TILE_PX, HEX_TILE_PX);
+    HEX_SET_CTX.restore();
+    /* Re-stroke the 6 edges. */
+    for (let k = 0; k < 6; k++) {
+      const [x1, y1] = hexVertex(cx, cy, HEX_R, k);
+      const [x2, y2] = hexVertex(cx, cy, HEX_R, (k + 1) % 6);
+      const edge = ((i >> (k * 2)) & 3);
+      const c = HEX_EDGE_COLORS[edge];
+      HEX_SET_CTX.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+      HEX_SET_CTX.lineWidth = 4;
+      HEX_SET_CTX.lineCap   = "round";
+      HEX_SET_CTX.beginPath();
+      HEX_SET_CTX.moveTo(x1, y1);
+      HEX_SET_CTX.lineTo(x2, y2);
+      HEX_SET_CTX.stroke();
+    }
+  }
+  /* Re-build the pixelated mirror so both views are CA-baked. */
+  buildPixelatedHexSet();
+  HEX_STATUS.textContent =
+    "baked CA rule (" + HEX_TILE_COUNT +
+    " entries) — tilings are now hex-CA snapshots";
+}
+
 function downloadHexPixBoardJpg() {
   const url = HEX_PB_CANVAS.toDataURL("image/jpeg", 0.92);
   const a = document.createElement("a");
@@ -1399,6 +1473,7 @@ BTN_REROLL_KEYS.addEventListener("click", rerollPaletteKeys);
 BTN_HEX_GEN.addEventListener("click", generateHexSet);
 BTN_HEX_TILE.addEventListener("click", generateHexTiling);
 BTN_HEX_PB.addEventListener("click", generateHexPixBoard);
+BTN_HEX_CA.addEventListener("click", bakeCaRuleIntoHexSet);
 BTN_DL_HEXSET.addEventListener("click", downloadHexSetJpg);
 BTN_DL_HEXTILE.addEventListener("click", downloadHexTilingJpg);
 BTN_DL_HEXPIX.addEventListener("click", downloadHexPixJpg);
@@ -1446,6 +1521,7 @@ BTN_REROLL_KEYS.disabled  = true;
 BTN_HEX_GEN.disabled      = false;
 BTN_HEX_TILE.disabled     = true;
 BTN_HEX_PB.disabled       = true;
+BTN_HEX_CA.disabled       = true;
 BTN_DL_HEXSET.disabled    = true;
 BTN_DL_HEXTILE.disabled   = true;
 BTN_DL_HEXPIX.disabled    = true;
