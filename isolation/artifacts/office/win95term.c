@@ -245,6 +245,9 @@ static void draw_button(int r, int c0, int c1, const char *label, int pressed) {
     fb_text(r, c0 + 1 + pad, label, C_TEXT, C_BTN, 0);
 }
 
+/* Forward decls for widget renderers defined later in the file. */
+static void draw_scrollbar_v(int r0, int r1, int c, int total, int visible, int offset);
+
 /* Title-bar mini-button: like the _ / [] / X cluster on the right of
  * a Win95 title bar.  A single-row 3D etch can't render properly
  * (top + bottom edges collapse onto the same line), so we paint a
@@ -480,9 +483,16 @@ static void paint_main_window(void) {
     /* Window frame: outset border around (WIN_R0..WIN_R1, WIN_C0..WIN_C1). */
     draw_outset(WIN_R0, WIN_C0, WIN_R1, WIN_C1, C_BTN);
 
-    /* Title bar (one row inside the frame). */
+    /* Title bar (one row inside the frame).  Goes navy/active when
+     * the main window has focus (no modal up); gray/inactive
+     * otherwise — Win95 convention. */
     int tr = WIN_R0 + 1;
-    fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
+    int focused = (g_mode == MODE_DESKTOP || g_mode == MODE_FILE_MENU ||
+                   g_mode == MODE_HELP_MENU || g_mode == MODE_START ||
+                   g_mode == MODE_PROGRAMS || g_mode == MODE_CONTEXT);
+    int t_bg = focused ? C_TITLE_BG : C_INACT_BG;
+    int t_fg = focused ? C_TITLE_FG : C_BTN_HL;
+    fb_fill(tr, WIN_C0 + 1, tr, WIN_C1 - 1, ' ', t_fg, t_bg);
     /* Title text reflects the currently-open app. */
     const char *title;
     switch (g_current_app) {
@@ -492,7 +502,7 @@ static void paint_main_window(void) {
     case APP_DOS:     title = "MS-DOS Prompt";      break;
     default:          title = "win95term";          break;
     }
-    fb_text(tr, WIN_C0 + 2, title, C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    fb_text(tr, WIN_C0 + 2, title, t_fg, t_bg, ATTR_BOLD);
     /* [_] [o] [x] window buttons on the right side of the title bar.
      * Mini-buttons are flat-face (see draw_titlebar_button comment). */
     draw_titlebar_button(tr, WIN_C1 - 9, WIN_C1 - 7, "_");
@@ -518,25 +528,39 @@ static void paint_main_window(void) {
     draw_inset(br, WIN_C0 + 1, sr - 1, WIN_C1 - 1, C_FIELD_BG);
     switch (g_current_app) {
     case APP_NOTEPAD: {
-        /* Render the notepad buffer wrapped at the content width. */
+        /* Reserve a 3-col scrollbar strip on the right.  Body wraps
+         * at max_x; the scrollbar paints in cols WIN_C1-4..WIN_C1-2. */
+        int sb_c     = WIN_C1 - 3;
+        int max_x    = sb_c - 2;
+        int sb_top   = br + 1;
+        int sb_bot   = sr - 1;
+        int visible  = sb_bot - sb_top - 1;     /* rows of text we can show */
         int x = WIN_C0 + 3, y = br + 2;
-        int max_x = WIN_C1 - 2;
+        int rows_used = 1;
         for (int i = 0; i < g_notepad_len; i++) {
             char c = g_notepad_buf[i];
             if (c == '\n' || x > max_x) {
                 x = WIN_C0 + 3;
                 y++;
+                rows_used++;
                 if (y >= sr - 1) break;
                 if (c == '\n') continue;
             }
             fb_put(y, x++, c, C_TEXT, C_FIELD_BG, 0);
         }
-        /* Blinking caret approximation: a solid block at the insertion point. */
         if (g_notepad_editing && y < sr - 1)
             fb_put(y, x, '_', C_TEXT, C_FIELD_BG, ATTR_BOLD);
         else if (!g_notepad_editing && g_notepad_len == 0)
             fb_text(br + 2, WIN_C0 + 4, "Press s in the body to start typing.",
                     C_BTN_SH, C_FIELD_BG, 0);
+        /* Scrollbar: total = rows used so far (approximate); visible
+         * = body height; offset stays at 0 because we don't scroll
+         * yet.  When the buffer overflows, the thumb will shrink
+         * proportionally — even without real scrolling, the cue is
+         * authentic. */
+        draw_scrollbar_v(sb_top, sb_bot, sb_c,
+                         rows_used > visible ? rows_used : visible,
+                         visible, 0);
         break;
     }
     case APP_CALC: {
@@ -829,6 +853,44 @@ static void draw_radio(int r, int c, int filled, const char *label, int focused)
     fb_put(r, c + 2, ')', fg, bg, 0);
     fb_put(r, c + 3, ' ', fg, bg, 0);
     fb_text(r, c + 4, label, fg, bg, 0);
+}
+
+/* Vertical scrollbar.  Renders ▲ at top, ▼ at bottom (substituted
+ * with '^' / 'v' for ASCII safety), a stippled track between, and a
+ * thumb whose size and position reflect (visible / total) and
+ * (offset / total).  For MVP the scrollbar is visual only — no
+ * dragging.  Total = number of "lines" of content; visible = the
+ * track height; offset = first visible line. */
+static void draw_scrollbar_v(int r0, int r1, int c, int total, int visible, int offset) {
+    if (r1 <= r0 + 1) return;
+    /* Up / down arrow caps. */
+    fb_put(r0, c,     ' ', C_TEXT, C_BTN, 0);  draw_button(r0, c - 1, c + 1, "^", 0);
+    (void)0;
+    fb_put(r1, c,     ' ', C_TEXT, C_BTN, 0);  draw_button(r1, c - 1, c + 1, "v", 0);
+    /* Track. */
+    int track_top = r0 + 1, track_bot = r1 - 1;
+    if (track_bot < track_top) return;
+    int track_h = track_bot - track_top + 1;
+    for (int r = track_top; r <= track_bot; r++) {
+        fb_put(r, c - 1, ' ', C_TEXT, C_BTN_SH, 0);
+        fb_put(r, c,     ':', C_BTN_SH, C_BTN_HL, 0);  /* stipple */
+        fb_put(r, c + 1, ' ', C_TEXT, C_BTN_SH, 0);
+    }
+    /* Thumb. */
+    if (total <= visible || total <= 0) {
+        /* No scrolling needed — paint the whole track as the thumb. */
+        for (int r = track_top; r <= track_bot; r++)
+            fb_fill(r, c - 1, r, c + 1, ' ', C_TEXT, C_BTN);
+        return;
+    }
+    int thumb_h = (visible * track_h) / total;
+    if (thumb_h < 1) thumb_h = 1;
+    if (thumb_h > track_h) thumb_h = track_h;
+    int thumb_top = track_top + (offset * (track_h - thumb_h)) / (total - visible);
+    if (thumb_top < track_top) thumb_top = track_top;
+    if (thumb_top + thumb_h - 1 > track_bot) thumb_top = track_bot - thumb_h + 1;
+    for (int r = thumb_top; r < thumb_top + thumb_h; r++)
+        fb_fill(r, c - 1, r, c + 1, ' ', C_TEXT, C_BTN);
 }
 
 /* Group box: an etched rectangle with a label inserted into the top
