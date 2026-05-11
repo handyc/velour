@@ -125,8 +125,6 @@
       </select>
     </div>
     <button id="download" class="alt">Download Sheet JPG</button>
-    <button id="wang">Wang Tile</button>
-    <button id="downloadTile" class="alt" hidden>Download Tiling JPG</button>
     <div class="status" id="status">starting…</div>
     <div class="legend">
       sprite&nbsp;&nbsp;&nbsp;64 × 64<br>
@@ -136,7 +134,7 @@
   </div>
 </div>
 
-<div id="tilingWrap" hidden style="margin-top: 24px;">
+<div id="tilingWrap" style="margin-top: 24px;">
   <h2 style="font: 600 16px ui-sans-serif; margin: 0 0 6px;">wang tiling</h2>
   <p class="lede" style="margin-bottom: 12px;">
     Each sprite's four edges are averaged into a colour (skipping the
@@ -151,6 +149,12 @@
             style="image-rendering: pixelated; image-rendering: crisp-edges;
                    display: block; width: 768px; height: 768px;"></canvas>
   </div>
+  <div style="display: flex; gap: 10px; margin-top: 12px; max-width: 768px; flex-wrap: wrap;">
+    <button id="wang" style="flex: 1; min-width: 180px;">Wang Tile</button>
+    <button id="pixTile" class="alt" style="flex: 1; min-width: 180px;">Pixelize Tiling</button>
+    <button id="downloadTile" class="alt" style="flex: 1; min-width: 180px;">Download Tiling JPG</button>
+  </div>
+  <div class="status" id="tileStatus" style="margin-top: 8px;">click Wang Tile to assemble a 12 × 12 tiling</div>
 </div>
 
 <footer>
@@ -171,13 +175,29 @@ const BTN_REGEN = document.getElementById("regen");
 const BTN_DL    = document.getElementById("download");
 const BTN_PIX   = document.getElementById("pixelize");
 const SEL_BLK   = document.getElementById("blockSize");
-const BTN_WANG  = document.getElementById("wang");
-const BTN_DLT   = document.getElementById("downloadTile");
-const TILING_WRAP = document.getElementById("tilingWrap");
-const TILING     = document.getElementById("tiling");
-const TILING_CTX = TILING.getContext("2d");
+const BTN_WANG     = document.getElementById("wang");
+const BTN_PIXTILE  = document.getElementById("pixTile");
+const BTN_DLT      = document.getElementById("downloadTile");
+const TILING_WRAP  = document.getElementById("tilingWrap");
+const TILING       = document.getElementById("tiling");
+const TILING_CTX   = TILING.getContext("2d");
+const TILE_STATUS  = document.getElementById("tileStatus");
 const WANG_COLS = 12, WANG_ROWS = 12;
+const WANG_PX_W = WANG_COLS * SPRITE_PX;   /* 768 */
+const WANG_PX_H = WANG_ROWS * SPRITE_PX;   /* 768 */
 const WANG_TOP_K = 6;          /* random pick among the top-N best matches */
+
+/* Offscreen mirror of the un-pixelized tiling — Pixelize Tiling reads
+ * from here and writes to TILING, same idempotent pattern as the
+ * sheet SRC mirror. */
+const TSRC = document.createElement("canvas");
+TSRC.width = WANG_PX_W; TSRC.height = WANG_PX_H;
+const TSRC_CTX = TSRC.getContext("2d");
+
+/* Magenta fill on load so the empty tiling canvas reads as
+ * "transparent waiting to be filled" instead of black-mystery-box. */
+TILING_CTX.fillStyle = "#ff00ff";
+TILING_CTX.fillRect(0, 0, WANG_PX_W, WANG_PX_H);
 
 /* Hidden mirror of the un-pixelized sheet — Pixelize reads from here
  * and writes to the visible canvas, so the operation is idempotent
@@ -360,12 +380,20 @@ function regenerateSheet() {
   palInited = false;        /* reroll palette per sheet */
   CTX.fillStyle = "#ff00ff";
   CTX.fillRect(0, 0, SHEET_PX, SHEET_PX);
-  BTN_REGEN.disabled = true;
-  BTN_DL.disabled    = true;
-  BTN_PIX.disabled   = true;
-  BTN_WANG.disabled  = true;
-  /* New sheet → stored edge averages are stale. */
+  BTN_REGEN.disabled    = true;
+  BTN_DL.disabled       = true;
+  BTN_PIX.disabled      = true;
+  BTN_WANG.disabled     = true;
+  BTN_PIXTILE.disabled  = true;
+  BTN_DLT.disabled      = true;
+  /* New sheet → stored edge averages are stale; clear the visible
+   * tiling so the user doesn't think the old layout still matches. */
   tileEdges = null;
+  TILING_CTX.fillStyle = "#ff00ff";
+  TILING_CTX.fillRect(0, 0, WANG_PX_W, WANG_PX_H);
+  TSRC_CTX.fillStyle = "#ff00ff";
+  TSRC_CTX.fillRect(0, 0, WANG_PX_W, WANG_PX_H);
+  TILE_STATUS.textContent = "sheet refreshed — click Wang Tile to re-tile";
   let n = 0;
   STATUS.textContent = "0/" + TOTAL;
   function step() {
@@ -388,6 +416,7 @@ function regenerateSheet() {
       BTN_DL.disabled    = false;
       BTN_PIX.disabled   = false;
       BTN_WANG.disabled  = false;
+      /* Tiling-derived actions stay disabled until a Wang Tile run. */
       STATUS.textContent = TOTAL + "/" + TOTAL + " · ready";
     }
   }
@@ -538,9 +567,58 @@ function generateWangTiling() {
         c * SPRITE_PX,      r * SPRITE_PX,      SPRITE_PX, SPRITE_PX);
     }
   }
-  TILING_WRAP.hidden = false;
-  BTN_DLT.hidden = false;
-  STATUS.textContent = WANG_COLS + "×" + WANG_ROWS + " wang tiling ready";
+  /* Snapshot for Pixelize Tiling, then enable the dependent buttons. */
+  TSRC_CTX.drawImage(TILING, 0, 0);
+  BTN_PIXTILE.disabled = false;
+  BTN_DLT.disabled     = false;
+  TILE_STATUS.textContent =
+    WANG_COLS + " × " + WANG_ROWS + " wang tiling ready";
+  STATUS.textContent =
+    WANG_COLS + "×" + WANG_ROWS + " wang tiling ready";
+}
+
+/* Pixelize Tiling — same recipe as the sheet pixelize, but reads
+ * from TSRC and writes to TILING.  Uses the sprite-side block-size
+ * select so one slider controls both layers. */
+function pixelizeTiling() {
+  const block = parseInt(SEL_BLK.value, 10) | 0;
+  if (block < 1) return;
+  const src = TSRC_CTX.getImageData(0, 0, WANG_PX_W, WANG_PX_H);
+  const dst = TILING_CTX.createImageData(WANG_PX_W, WANG_PX_H);
+  const sd = src.data, dd = dst.data;
+  for (let by = 0; by < WANG_PX_H; by += block) {
+    const bh = Math.min(block, WANG_PX_H - by);
+    for (let bx = 0; bx < WANG_PX_W; bx += block) {
+      const bw = Math.min(block, WANG_PX_W - bx);
+      let sR = 0, sG = 0, sB = 0, n = 0, keys = 0, total = 0;
+      for (let dy = 0; dy < bh; dy++) {
+        for (let dx = 0; dx < bw; dx++) {
+          const p = ((by + dy) * WANG_PX_W + (bx + dx)) * 4;
+          const r = sd[p], g = sd[p+1], b = sd[p+2];
+          total++;
+          if (r === KEY_R && g === KEY_G && b === KEY_B) {
+            keys++;
+          } else {
+            sR += r; sG += g; sB += b; n++;
+          }
+        }
+      }
+      let outR, outG, outB;
+      if (n === 0 || keys > total / 2) {
+        outR = KEY_R; outG = KEY_G; outB = KEY_B;
+      } else {
+        outR = (sR / n) | 0; outG = (sG / n) | 0; outB = (sB / n) | 0;
+      }
+      for (let dy = 0; dy < bh; dy++) {
+        for (let dx = 0; dx < bw; dx++) {
+          const p = ((by + dy) * WANG_PX_W + (bx + dx)) * 4;
+          dd[p] = outR; dd[p+1] = outG; dd[p+2] = outB; dd[p+3] = 255;
+        }
+      }
+    }
+  }
+  TILING_CTX.putImageData(dst, 0, 0);
+  TILE_STATUS.textContent = "tiling pixelized at " + block + "× block";
 }
 
 function downloadTilingJpg() {
@@ -580,17 +658,25 @@ BTN_REGEN.addEventListener("click", regenerateSheet);
 BTN_DL.addEventListener("click", downloadJpg);
 BTN_PIX.addEventListener("click", pixelize);
 BTN_WANG.addEventListener("click", generateWangTiling);
+BTN_PIXTILE.addEventListener("click", pixelizeTiling);
 BTN_DLT.addEventListener("click", downloadTilingJpg);
 SEL_BLK.addEventListener("change", () => {
-  /* If the canvas already shows a pixelization, re-apply at the new
-   * block size so the select doubles as a live slider. */
-  if (!BTN_PIX.disabled && STATUS.textContent.startsWith("pixelized")) pixelize();
+  /* Block-size acts as a live slider for whichever layer is currently
+   * showing a pixelization — sheet, tiling, or both. */
+  if (!BTN_PIX.disabled && STATUS.textContent.startsWith("pixelized"))
+    pixelize();
+  if (!BTN_PIXTILE.disabled && TILE_STATUS.textContent.startsWith("tiling pixelized"))
+    pixelizeTiling();
 });
 
-/* Sheet-derived actions are meaningless until the first sheet finishes. */
-BTN_PIX.disabled  = true;
-BTN_DL.disabled   = true;
-BTN_WANG.disabled = true;
+/* Sheet- and tiling-derived actions are meaningless until their
+ * respective generators have run.  Disable everything that depends
+ * on something rendered. */
+BTN_PIX.disabled     = true;
+BTN_DL.disabled      = true;
+BTN_WANG.disabled    = true;
+BTN_PIXTILE.disabled = true;
+BTN_DLT.disabled     = true;
 
 /* First sheet on load. */
 regenerateSheet();
