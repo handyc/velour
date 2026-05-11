@@ -4232,15 +4232,22 @@ static int coder_build_prompt(char *out, int cap) {
             out[p++] = '\n';
         }
     }
-    /* Goal */
-    p = sapp(out, p, "[goal]\n");
-    if (g_coder_goal_len > 0) {
-        mcpy(out + p, g_coder_goal, g_coder_goal_len);
-        p += g_coder_goal_len;
-    } else {
-        p = sapp(out, p, "(no goal entered)");
+    /* Goal — bounds-checked.  Without this guard, mission mode could
+     * accumulate banks + tdb top-K close enough to cap that the
+     * "[goal]\n" + goal-body + 2 newlines (≤ 264 B) overflowed
+     * prompt_buf into the next static buffer in BSS — intermittent
+     * SIGSEGV reported during long mission runs. */
+    if (p + 16 + g_coder_goal_len < cap - 1) {
+        p = sapp(out, p, "[goal]\n");
+        if (g_coder_goal_len > 0) {
+            mcpy(out + p, g_coder_goal, g_coder_goal_len);
+            p += g_coder_goal_len;
+        } else {
+            p = sapp(out, p, "(no goal entered)");
+        }
+        if (p < cap - 1) out[p++] = '\n';
+        if (p < cap - 1) out[p++] = '\n';
     }
-    out[p++] = '\n'; out[p++] = '\n';
     /* Previous draft */
     if (g_coder_draft_len > 0 && p + g_coder_draft_len < cap - 512) {
         p = sapp(out, p, "[previous attempt]\n```c\n");
@@ -4255,9 +4262,13 @@ static int coder_build_prompt(char *out, int cap) {
         p += g_coder_err_len;
         out[p++] = '\n'; out[p++] = '\n';
     }
-    p = sapp(out, p,
-             "Now produce the next draft.  Address any errors above "
-             "and respect the target.");
+    /* Trailing instruction — also bounds-checked since the goal-
+     * section guard above can leave p anywhere up to cap-1. */
+    if (p + 64 < cap - 1) {
+        p = sapp(out, p,
+                 "Now produce the next draft.  Address any errors above "
+                 "and respect the target.");
+    }
     return p;
 }
 
