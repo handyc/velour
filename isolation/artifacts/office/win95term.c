@@ -59,7 +59,7 @@ static int TASK_R = 29;
 
 /* ── 256-color palette (xterm slots picked to match Win95 system colors). ─ */
 enum {
-    C_DESK      =  23,   /* desktop teal (Win95 default-ish) */
+    g_desk_color_DEFAULT = 23, /* desktop teal (Win95 default-ish) */
     C_BTN       = 251,   /* button face #c6c6c6 ~ Win95 silver */
     C_BTN_HL    =  15,   /* button highlight (white) */
     C_BTN_SH    = 240,   /* button shadow (dark gray) */
@@ -357,11 +357,17 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
 
 /* ── UI state ────────────────────────────────────────────── */
 enum { MODE_DESKTOP = 0, MODE_FILE_MENU, MODE_HELP_MENU, MODE_ABOUT,
-       MODE_START, MODE_CONTEXT };
+       MODE_START, MODE_CONTEXT, MODE_DP };
 
 /* Context-menu anchor in screen coordinates (set when `f` fires). */
 static int g_ctx_r = 0;
 static int g_ctx_c = 0;
+
+/* Display Properties settings — mutable at runtime via the dialog. */
+static int g_desk_color  = g_desk_color_DEFAULT;   /* xterm 256 slot */
+static int g_show_icons  = 1;
+static int g_show_clock  = 1;
+/* g_hex_grid is declared further down already. */
 
 static int g_mode = MODE_DESKTOP;
 /* Cursor: positioned by layout_for_size() onto the center of the
@@ -388,7 +394,7 @@ static const int   g_help_n       = 2;
 
 /* ── Painters ────────────────────────────────────────────── */
 static void paint_desktop(void) {
-    fb_clear(C_DESK);
+    fb_clear(g_desk_color);
     /* Decorative icons down the left side.  Skip if there's not even
      * room for the 3-char glyph + a 1-col gap before the window;
      * otherwise truncate the label to the desktop strip width so it
@@ -398,13 +404,14 @@ static void paint_desktop(void) {
         { "[?]", "Help"        },
         { "[X]", "Recycle Bin" },
     };
+    if (!g_show_icons) return;   /* user toggled icons off */
     int strip_w = WIN_C0 - 1;   /* available cols from col 1 to window-1 */
     if (strip_w < 4) return;     /* not enough room — skip icons */
     int label_max = strip_w - 1; /* labels start at col 1 */
     for (unsigned i = 0; i < sizeof icons / sizeof icons[0]; i++) {
         int r = 2 + (int)i * 3;
         if (r + 1 >= TASK_R - 1) break;   /* would collide with taskbar */
-        fb_text(r, 2, icons[i][0], C_BTN_HL, C_DESK, ATTR_BOLD);
+        fb_text(r, 2, icons[i][0], C_BTN_HL, g_desk_color, ATTR_BOLD);
         /* Truncate label to fit. */
         const char *lbl = icons[i][1];
         char buf[32];
@@ -413,7 +420,7 @@ static void paint_desktop(void) {
         if (ll < 0) ll = 0;
         memcpy(buf, lbl, ll);
         buf[ll] = 0;
-        fb_text(r + 1, 1, buf, C_BTN_HL, C_DESK, 0);
+        fb_text(r + 1, 1, buf, C_BTN_HL, g_desk_color, 0);
     }
 }
 
@@ -431,12 +438,14 @@ static void paint_taskbar(void) {
         if (pill_c1 > 30) pill_c1 = 30;
         draw_button(TASK_R, 11, pill_c1, "win95term", 0);
     }
-    /* Clock on the right. */
-    time_t now = time(NULL);
-    struct tm tm; localtime_r(&now, &tm);
-    char clock[16];
-    snprintf(clock, sizeof clock, "%02d:%02d", tm.tm_hour, tm.tm_min);
-    fb_text(TASK_R, VIS_W - 7, clock, C_TEXT, C_BTN, 0);
+    /* Clock on the right (if user hasn't hidden it). */
+    if (g_show_clock) {
+        time_t now = time(NULL);
+        struct tm tm; localtime_r(&now, &tm);
+        char clock[16];
+        snprintf(clock, sizeof clock, "%02d:%02d", tm.tm_hour, tm.tm_min);
+        fb_text(TASK_R, VIS_W - 7, clock, C_TEXT, C_BTN, 0);
+    }
 }
 
 static void paint_main_window(void) {
@@ -534,7 +543,7 @@ static void about_geom(int *r0, int *c0, int *r1, int *c1) {
 static const char *g_start_items[] = {
     " Programs           ", /* >'s deferred — no submenu yet */
     " Help              ",
-    " Run...            ",
+    " Settings...       ", /* Was "Run..." — now opens Display Properties */
     " About win95term   ",
     "───────────────────",     /* separator */
     " Shut Down...      ",
@@ -648,6 +657,155 @@ static void paint_about_dialog(void) {
     draw_button(btn_r, btn_c0, btn_c1, "OK", hovering);
 }
 
+/* ── Widget primitives ──────────────────────────────────── *
+ *
+ * Checkbox, radio button, group box.  All paint inline at (r, c)
+ * onto the framebuffer using the C_FIELD_BG (white) for the bullet
+ * and C_BTN (silver) for the surrounding label area.  Hit-testing
+ * uses the same anchor coordinates.
+ *
+ * Checkbox glyphs: "[x]" filled, "[ ]" empty.
+ * Radio glyphs:    "(*)" filled, "( )" empty. */
+static void draw_checkbox(int r, int c, int checked, const char *label, int focused) {
+    int bg = focused ? C_HL_BG : C_BTN;
+    int fg = focused ? C_HL_FG : C_TEXT;
+    fb_put(r, c,     '[', fg, bg, 0);
+    fb_put(r, c + 1, checked ? 'x' : ' ', fg, bg, ATTR_BOLD);
+    fb_put(r, c + 2, ']', fg, bg, 0);
+    fb_put(r, c + 3, ' ', fg, bg, 0);
+    fb_text(r, c + 4, label, fg, bg, 0);
+}
+
+static void draw_radio(int r, int c, int filled, const char *label, int focused) {
+    int bg = focused ? C_HL_BG : C_BTN;
+    int fg = focused ? C_HL_FG : C_TEXT;
+    fb_put(r, c,     '(', fg, bg, 0);
+    fb_put(r, c + 1, filled ? '*' : ' ', fg, bg, ATTR_BOLD);
+    fb_put(r, c + 2, ')', fg, bg, 0);
+    fb_put(r, c + 3, ' ', fg, bg, 0);
+    fb_text(r, c + 4, label, fg, bg, 0);
+}
+
+/* Group box: an etched rectangle with a label inserted into the top
+ * edge.  In Win95 this is the "─── Color scheme ─────" pattern
+ * around a cluster of related controls.  Uses ASCII '─' / '│'
+ * substitutes (terminal box-drawing) to keep the source ASCII-safe. */
+static void draw_groupbox(int r0, int c0, int r1, int c1, const char *label) {
+    /* Top edge */
+    fb_put(r0, c0, '+', C_BTN_SH, C_BTN, 0);
+    for (int c = c0 + 1; c < c1; c++) fb_put(r0, c, '-', C_BTN_SH, C_BTN, 0);
+    fb_put(r0, c1, '+', C_BTN_SH, C_BTN, 0);
+    /* Bottom edge */
+    fb_put(r1, c0, '+', C_BTN_SH, C_BTN, 0);
+    for (int c = c0 + 1; c < c1; c++) fb_put(r1, c, '-', C_BTN_SH, C_BTN, 0);
+    fb_put(r1, c1, '+', C_BTN_SH, C_BTN, 0);
+    /* Side edges */
+    for (int r = r0 + 1; r < r1; r++) {
+        fb_put(r, c0, '|', C_BTN_SH, C_BTN, 0);
+        fb_put(r, c1, '|', C_BTN_SH, C_BTN, 0);
+    }
+    /* Label embedded in the top edge — pad with spaces so it doesn't
+     * touch the surrounding dashes. */
+    if (label && *label) {
+        int label_len = (int)strlen(label);
+        int lc = c0 + 2;
+        fb_put(r0, lc - 1, ' ', C_TEXT, C_BTN, 0);
+        fb_text(r0, lc, label, C_TEXT, C_BTN, ATTR_BOLD);
+        fb_put(r0, lc + label_len, ' ', C_TEXT, C_BTN, 0);
+    }
+}
+
+/* ── Display Properties dialog ──────────────────────────── *
+ *
+ * A real applied dialog using the new widgets.  Checkboxes toggle
+ * g_show_icons / g_show_clock / g_hex_grid; radio buttons pick the
+ * desktop color (g_desk_color).  Cursor over a widget highlights
+ * it; pressing s on a widget changes its value.  OK applies (no-op,
+ * since state is mutated live) and closes; Cancel reverts and closes. */
+
+/* Color presets for the radio group. */
+static const struct { int slot; const char *name; } g_color_presets[] = {
+    { 23,  "Win95 Teal"   },
+    { 18,  "Navy Solid"   },
+    { 53,  "Plum"         },
+    { 230, "Cream Linen"  },
+};
+static const int g_n_color_presets = sizeof g_color_presets / sizeof g_color_presets[0];
+
+/* Snapshot of state at dialog open — used to roll back on Cancel. */
+static int g_dp_saved_color = 0;
+static int g_dp_saved_icons = 0;
+static int g_dp_saved_clock = 0;
+static int g_dp_saved_hex   = 0;
+
+static void dp_geom(int *r0, int *c0, int *r1, int *c1) {
+    int dw = 44, dh = 16;
+    int win_w = WIN_C1 - WIN_C0 + 1;
+    int win_h = WIN_R1 - WIN_R0 + 1;
+    if (dw > win_w - 2) dw = win_w - 2;
+    if (dh > win_h - 2) dh = win_h - 2;
+    if (dw < 30) dw = 30;
+    if (dh < 12) dh = 12;
+    *c0 = (WIN_C0 + WIN_C1) / 2 - dw / 2;
+    *r0 = (WIN_R0 + WIN_R1) / 2 - dh / 2;
+    *c1 = *c0 + dw - 1;
+    *r1 = *r0 + dh - 1;
+}
+
+/* Per-widget hit boxes computed from the dialog rect.  Returns the
+ * widget row baseline so the painter and hit-test can agree. */
+static int dp_row_color(int r0, int i) { return r0 + 3 + i; }       /* radio row */
+static int dp_row_check(int r0, int i) { return r0 + 9 + i; }       /* checkbox row */
+static int dp_row_ok(int r1)           { return r1 - 1; }           /* OK/Cancel row */
+
+static void paint_dp_dialog(void) {
+    int r0, c0, r1, c1;
+    dp_geom(&r0, &c0, &r1, &c1);
+    draw_outset(r0, c0, r1, c1, C_BTN);
+
+    /* Title bar */
+    fb_fill(r0 + 1, c0 + 1, r0 + 1, c1 - 1, ' ', C_TITLE_FG, C_TITLE_BG);
+    fb_text(r0 + 1, c0 + 2, "Display Properties", C_TITLE_FG, C_TITLE_BG, ATTR_BOLD);
+    draw_titlebar_button(r0 + 1, c1 - 3, c1 - 1, "x");
+
+    /* Group: Color scheme (radio buttons) */
+    draw_groupbox(r0 + 2, c0 + 2, r0 + 7, c1 - 2, "Color scheme");
+    for (int i = 0; i < g_n_color_presets; i++) {
+        int rr = dp_row_color(r0, i);
+        if (rr >= r0 + 7) break;
+        int focused = (g_cur_r == rr && g_cur_c >= c0 + 4 && g_cur_c <= c1 - 4);
+        int filled  = (g_desk_color == g_color_presets[i].slot);
+        draw_radio(rr, c0 + 4, filled, g_color_presets[i].name, focused);
+    }
+
+    /* Group: Options (checkboxes) */
+    draw_groupbox(r0 + 8, c0 + 2, r1 - 3, c1 - 2, "Options");
+    {
+        int rr = dp_row_check(r0, 0);
+        int focused = (g_cur_r == rr && g_cur_c >= c0 + 4 && g_cur_c <= c1 - 4);
+        draw_checkbox(rr, c0 + 4, g_show_icons, "Show desktop icons", focused);
+    }
+    {
+        int rr = dp_row_check(r0, 1);
+        int focused = (g_cur_r == rr && g_cur_c >= c0 + 4 && g_cur_c <= c1 - 4);
+        draw_checkbox(rr, c0 + 4, g_show_clock, "Show taskbar clock", focused);
+    }
+    {
+        int rr = dp_row_check(r0, 2);
+        int focused = (g_cur_r == rr && g_cur_c >= c0 + 4 && g_cur_c <= c1 - 4);
+        draw_checkbox(rr, c0 + 4, g_hex_grid, "Hex-grid cursor", focused);
+    }
+
+    /* OK / Cancel buttons */
+    int btn_r = dp_row_ok(r1);
+    int ok_c0 = c1 - 22, ok_c1 = c1 - 13;
+    int cn_c0 = c1 - 10, cn_c1 = c1 - 2;
+    int ok_hover = (g_cur_r == btn_r && g_cur_c >= ok_c0 && g_cur_c <= ok_c1);
+    int cn_hover = (g_cur_r == btn_r && g_cur_c >= cn_c0 && g_cur_c <= cn_c1);
+    draw_button(btn_r, ok_c0, ok_c1, "OK",     ok_hover);
+    draw_button(btn_r, cn_c0, cn_c1, "Cancel", cn_hover);
+}
+
 static void paint_frame(void) {
     paint_desktop();
     paint_main_window();
@@ -659,6 +817,8 @@ static void paint_frame(void) {
         paint_dropdown(MODE_HELP_MENU, anchor, g_help_items, g_help_n);
     } else if (g_mode == MODE_ABOUT) {
         paint_about_dialog();
+    } else if (g_mode == MODE_DP) {
+        paint_dp_dialog();
     }
     paint_taskbar();
     /* Overlays paint AFTER the taskbar so they stack on top. */
@@ -721,7 +881,11 @@ enum { HIT_NONE, HIT_MENU_FILE, HIT_MENU_HELP, HIT_FILE_ABOUT, HIT_FILE_EXIT,
        HIT_START_ABOUT, HIT_START_SEP, HIT_START_SHUTDOWN,
        /* Context-menu items (in order). */
        HIT_CTX_VIEW, HIT_CTX_REFRESH, HIT_CTX_SEP,
-       HIT_CTX_NEW, HIT_CTX_PROPERTIES };
+       HIT_CTX_NEW, HIT_CTX_PROPERTIES,
+       /* Display Properties widgets. */
+       HIT_DP_COLOR_0, HIT_DP_COLOR_1, HIT_DP_COLOR_2, HIT_DP_COLOR_3,
+       HIT_DP_CHECK_ICONS, HIT_DP_CHECK_CLOCK, HIT_DP_CHECK_HEX,
+       HIT_DP_OK, HIT_DP_CANCEL, HIT_DP_TITLE_X };
 
 static int hit_test(void) {
     int r = g_cur_r, c = g_cur_c;
@@ -784,6 +948,32 @@ static int hit_test(void) {
             if (idx >= 0 && idx < (int)(sizeof map / sizeof map[0]))
                 return map[idx];
         }
+    }
+
+    /* Display Properties widgets. */
+    if (g_mode == MODE_DP) {
+        int dr0, dc0, dr1, dc1;
+        dp_geom(&dr0, &dc0, &dr1, &dc1);
+        /* Title bar × */
+        if (r == dr0 + 1 && c >= dc1 - 3 && c <= dc1 - 1) return HIT_DP_TITLE_X;
+        /* Color radios */
+        for (int i = 0; i < g_n_color_presets; i++) {
+            int rr = dp_row_color(dr0, i);
+            if (rr >= dr0 + 7) break;
+            if (r == rr && c >= dc0 + 4 && c <= dc1 - 4)
+                return HIT_DP_COLOR_0 + i;
+        }
+        /* Option checkboxes */
+        if (r == dp_row_check(dr0, 0) && c >= dc0 + 4 && c <= dc1 - 4) return HIT_DP_CHECK_ICONS;
+        if (r == dp_row_check(dr0, 1) && c >= dc0 + 4 && c <= dc1 - 4) return HIT_DP_CHECK_CLOCK;
+        if (r == dp_row_check(dr0, 2) && c >= dc0 + 4 && c <= dc1 - 4) return HIT_DP_CHECK_HEX;
+        /* OK / Cancel buttons */
+        int btn_r = dp_row_ok(dr1);
+        int ok_c0 = dc1 - 22, ok_c1 = dc1 - 13;
+        int cn_c0 = dc1 - 10, cn_c1 = dc1 - 2;
+        if (r == btn_r && c >= ok_c0 && c <= ok_c1) return HIT_DP_OK;
+        if (r == btn_r && c >= cn_c0 && c <= cn_c1) return HIT_DP_CANCEL;
+        return HIT_NONE;
     }
 
     /* Context menu items. */
@@ -856,17 +1046,53 @@ static int handle_click(void) {
     }
     case HIT_START_PROGRAMS:
     case HIT_START_HELP:
-    case HIT_START_RUN:
     case HIT_CTX_VIEW:
     case HIT_CTX_NEW:
-    case HIT_CTX_PROPERTIES:
-        /* Stubs: just close the menu — submenus + Run dialog are
-         * future phases. */
+        /* Stubs: just close the menu — submenus are a future
+         * phase.  HIT_START_RUN and HIT_CTX_PROPERTIES open the
+         * Display Properties dialog (handled below). */
         g_mode = MODE_DESKTOP;
         break;
     case HIT_CTX_REFRESH:
         /* Force a full repaint: invalidate the diff buffer. */
         g_fb_prev_valid = 0;
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_START_RUN:
+    case HIT_CTX_PROPERTIES: {
+        /* Open Display Properties.  Snapshot state for Cancel-rollback,
+         * then land cursor on the first widget so it highlights. */
+        g_dp_saved_color = g_desk_color;
+        g_dp_saved_icons = g_show_icons;
+        g_dp_saved_clock = g_show_clock;
+        g_dp_saved_hex   = g_hex_grid;
+        g_mode = MODE_DP;
+        int dr0, dc0, dr1, dc1;
+        dp_geom(&dr0, &dc0, &dr1, &dc1);
+        (void)dr1; (void)dc1;
+        g_cur_r = dp_row_color(dr0, 0);
+        g_cur_c = dc0 + 6;
+        break;
+    }
+    case HIT_DP_COLOR_0:
+    case HIT_DP_COLOR_1:
+    case HIT_DP_COLOR_2:
+    case HIT_DP_COLOR_3:
+        g_desk_color = g_color_presets[hit - HIT_DP_COLOR_0].slot;
+        break;
+    case HIT_DP_CHECK_ICONS: g_show_icons = !g_show_icons; break;
+    case HIT_DP_CHECK_CLOCK: g_show_clock = !g_show_clock; break;
+    case HIT_DP_CHECK_HEX:   g_hex_grid   = !g_hex_grid;   break;
+    case HIT_DP_OK:
+    case HIT_DP_TITLE_X:
+        g_mode = MODE_DESKTOP;
+        break;
+    case HIT_DP_CANCEL:
+        /* Roll back. */
+        g_desk_color = g_dp_saved_color;
+        g_show_icons = g_dp_saved_icons;
+        g_show_clock = g_dp_saved_clock;
+        g_hex_grid   = g_dp_saved_hex;
         g_mode = MODE_DESKTOP;
         break;
     case HIT_START_SEP:
