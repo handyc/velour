@@ -17,7 +17,7 @@ DBGFLAGS ?= -nostdlib -nostartfiles -static \
 
 VERSIONS = office office2 office3 office4 office5 office6 office7 office8 office9 office10 office11 office12 office13 office14 office15 office16 office17 office18 office19 office20 office21 office22 office23 office24 office25 office26 office27 office28 office29 office30 office31 office32 office33 office34 office35 office36 office37 office38 office39 office40 office41 office42 office43 office44 office45 office46 office47 office48 office49 office50 office51 office52 office53 office54 office55 office56 office57 office58 office59 office60 office61 office62 office63 office64 office65 office66 \
            officetiny officeproductivity officeresearcher officegamer officesysadmin officehoneypot \
-           supercell officex officeagent officesoul officetiles officemandel officemandelshot officemangel officemangel2 officemangel3 officemangel4 officemangel5 officemangel6 officemangel7 officemangel8
+           supercell officex officeagent officesoul officetiles officemandel officemandelshot officemangel officemangel2 officemangel3 officemangel4 officemangel5 officemangel6 officemangel7 officemangel8 officemangel9
 DBG      = $(addsuffix .dbg,$(VERSIONS)) minimal.dbg
 
 all: $(VERSIONS) minimal jail officesoulmin soulvote
@@ -495,6 +495,13 @@ officemangel8: officemangel8.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 	@strip --remove-section=.comment $@ 2>/dev/null || true
 	@echo "officemangel8: $$(stat -c %s $@) bytes"
+
+# Mangler v9: like mangel8 but the per-tick ANSI export is 16×16
+# cells instead of 64×64 — tile-sized snapshots, much smaller files.
+officemangel9: officemangel9.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	@strip --remove-section=.comment $@ 2>/dev/null || true
+	@echo "officemangel9: $$(stat -c %s $@) bytes"
 
 PRESETS = officetiny officeproductivity officeresearcher \
           officegamer officesysadmin officehoneypot
