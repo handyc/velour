@@ -232,8 +232,15 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
                        !was_prev_cursor;
             if (same) continue;
 
-            int fg = inv ? cell.bg : cell.fg;
-            int bg = inv ? cell.fg : cell.bg;
+            /* Cursor cell: render as the Win95 selection highlight
+             * (white text on navy blue), NOT a raw fg/bg swap.  A swap
+             * collapses to a solid black square in white-bg areas
+             * (which dominate the window content), making it look like
+             * the cursor is eating the UI.  The highlight is also
+             * authentic — Win95 menus light up exactly this way on
+             * keyboard focus. */
+            int fg = inv ? C_HL_FG : cell.fg;
+            int bg = inv ? C_HL_BG : cell.bg;
             int at = cell.attr;
 
             /* Move cursor if we skipped any cells since last emit. */
