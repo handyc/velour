@@ -110,6 +110,17 @@ typedef struct {
 
 static cell_t g_fb[SCR_H][SCR_W];
 
+/* Shadow of the last fully-rendered frame.  Cells that match prev are
+ * skipped during emission so the wire only carries differences — huge
+ * flicker reduction vs. repainting all 3000 cells per keystroke. */
+static cell_t g_fb_prev[SCR_H][SCR_W];
+static int    g_fb_prev_valid = 0;
+/* Remember where the cursor was on the previous frame so we can force
+ * a re-emit of that cell (otherwise the diff skips it and the old
+ * inverted cursor stays visible). */
+static int    g_prev_cur_r = -1;
+static int    g_prev_cur_c = -1;
+
 static void fb_clear(int bg) {
     for (int r = 0; r < SCR_H; r++)
         for (int c = 0; c < SCR_W; c++) {
@@ -178,20 +189,63 @@ static void draw_button(int r, int c0, int c1, const char *label, int pressed) {
     fb_text(r, c0 + 1 + pad, label, C_TEXT, C_BTN, 0);
 }
 
-/* ── Compositor: dump frame buffer to stdout with ANSI escapes ─ */
+/* ── Compositor: emit frame buffer with ANSI escapes ──────
+ *
+ * Three flicker-reduction tricks:
+ *   1. DEC private mode 2026 (\033[?2026h…l) wraps the whole frame so
+ *      a compliant terminal commits the update atomically — no tearing
+ *      while the bytes are still streaming.
+ *   2. A shadow buffer (g_fb_prev) lets us skip cells that haven't
+ *      changed since last frame; only differences are emitted.
+ *   3. Runs of unchanged cells are bridged with a single \033[<r>;<c>H
+ *      cursor move instead of "\b" or per-cell rewrites. */
 static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
-    static char buf[1 << 16];
+    static char buf[1 << 17];
     int p = 0;
     int prev_fg = -1, prev_bg = -1, prev_attr = -1;
-    p += snprintf(buf + p, sizeof buf - p, "\033[H");        /* home */
+    int last_r = -1, last_c = -1;
+    int diff = g_fb_prev_valid;                 /* second frame onward */
+
+    /* Begin synchronized update; reset SGR. */
+    p += snprintf(buf + p, sizeof buf - p, "\033[?2026h\033[0m");
+
     for (int r = 0; r < SCR_H; r++) {
-        p += snprintf(buf + p, sizeof buf - p, "\033[%d;1H", r + 1);
         for (int c = 0; c < SCR_W; c++) {
             cell_t cell = g_fb[r][c];
             int inv = cursor_visible && cursor_r == r && cursor_c == c;
-            int fg  = inv ? cell.bg : cell.fg;
-            int bg  = inv ? cell.fg : cell.bg;
-            int at  = cell.attr;
+            int was_cursor_prev = g_fb_prev_valid &&
+                /* previous cursor cell needs re-emit even if g_fb unchanged */
+                0; /* simpler approach: always emit cursor + neighbors below */
+            (void)was_cursor_prev;
+
+            cell_t prev = diff ? g_fb_prev[r][c] : (cell_t){0,0,0,0};
+            int was_prev_cursor = (r == g_prev_cur_r && c == g_prev_cur_c);
+            /* Re-emit a cell if its contents changed, OR it's the new
+             * cursor (so we apply inversion), OR it WAS the old cursor
+             * (so we strip the previous inversion). */
+            int same = diff &&
+                       prev.ch   == cell.ch &&
+                       prev.fg   == cell.fg &&
+                       prev.bg   == cell.bg &&
+                       prev.attr == cell.attr &&
+                       !inv &&
+                       !was_prev_cursor;
+            if (same) continue;
+
+            int fg = inv ? cell.bg : cell.fg;
+            int bg = inv ? cell.fg : cell.bg;
+            int at = cell.attr;
+
+            /* Move cursor if we skipped any cells since last emit. */
+            if (last_r != r || last_c != c - 0) {
+                if (last_r == r && c == last_c + 1) {
+                    /* contiguous — no move needed */
+                } else {
+                    p += snprintf(buf + p, sizeof buf - p,
+                                  "\033[%d;%dH", r + 1, c + 1);
+                    prev_fg = prev_bg = prev_attr = -1;
+                }
+            }
             if (fg != prev_fg || bg != prev_bg || at != prev_attr) {
                 p += snprintf(buf + p, sizeof buf - p, "\033[0");
                 if (at & ATTR_BOLD)  p += snprintf(buf + p, sizeof buf - p, ";1");
@@ -201,12 +255,20 @@ static void render_to_stdout(int cursor_r, int cursor_c, int cursor_visible) {
                 prev_fg = fg; prev_bg = bg; prev_attr = at;
             }
             buf[p++] = (char)cell.ch;
-            if (p > (int)sizeof buf - 64) { fwrite(buf, 1, p, stdout); p = 0; }
+            last_r = r; last_c = c;
+
+            if (p > (int)sizeof buf - 128) { fwrite(buf, 1, p, stdout); p = 0; }
         }
     }
-    p += snprintf(buf + p, sizeof buf - p, "\033[0m");
+    p += snprintf(buf + p, sizeof buf - p, "\033[0m\033[?2026l");
     fwrite(buf, 1, p, stdout);
     fflush(stdout);
+
+    /* Snapshot for next frame's diff. */
+    memcpy(g_fb_prev, g_fb, sizeof g_fb_prev);
+    g_fb_prev_valid = 1;
+    g_prev_cur_r = cursor_visible ? cursor_r : -1;
+    g_prev_cur_c = cursor_visible ? cursor_c : -1;
 }
 
 /* ── UI state ────────────────────────────────────────────── */
@@ -528,6 +590,7 @@ int main(int argc, char **argv) {
     atexit(term_teardown);
 
     int dirty = 1;
+    int last_minute = -1;
     while (1) {
         if (dirty) {
             paint_frame();
@@ -536,7 +599,18 @@ int main(int argc, char **argv) {
         }
         unsigned char c;
         int n = read(STDIN_FILENO, &c, 1);
-        if (n <= 0) { dirty = 1; continue; }    /* timeout — refresh clock */
+        if (n <= 0) {
+            /* No input within VTIME — only repaint if the wall clock
+             * minute has rolled over.  Otherwise sit silent and let
+             * the terminal stay perfectly still. */
+            time_t now = time(NULL);
+            struct tm tm; localtime_r(&now, &tm);
+            if (tm.tm_min != last_minute) {
+                last_minute = tm.tm_min;
+                dirty = 1;
+            }
+            continue;
+        }
 
         if (c == 'q' || c == 'Q' || c == 0x03) break;   /* q or Ctrl-C */
         if (c == 'G') { g_hex_grid = !g_hex_grid; dirty = 1; continue; }
