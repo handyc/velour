@@ -13,10 +13,24 @@ level lookup tables under seal.  Every linguistic atom in this
 module (char-class classification, codepoint matching, equality)
 compiles to a tensor of PBS calls.
 
-Threat model: key, encrypt, ops, decrypt all happen in one Django
-request.  Demonstration of the sealed pipeline shape, not yet a
-real privacy boundary.  A two-process split (key-holder vs op-
-runner) lands later.
+Threat model — TWO MODES:
+
+  • **In-process pipeline** (`run_session` + the web UI): key,
+    encrypt, ops, decrypt all in one Django request.  Demo of the
+    sealed *shape*.  No real privacy.  Use only for local
+    exploration.
+
+  • **Split-process protocol** (`umbra/sealedlex_protocol.py` +
+    the `sealedlex_encrypt/_evaluate/_decrypt` management
+    commands): researcher's laptop holds the secret key and runs
+    encrypt + decrypt; the compute provider (e.g. Leiden ALICE)
+    runs evaluate with ONLY the public artefacts (server +
+    evaluation keys + ciphertexts).  This is the honest privacy
+    boundary; the evaluate process structurally cannot decrypt.
+
+The split protocol is the recommended path for any real research
+use.  See the docstring of `umbra/sealedlex_protocol.py` for the
+wire format and workflow.
 
 Codepoint encoding: each cell is encoded as a fixed-length sequence
 of alphabet *indices*, not raw bytes.  A LanguageProfile owns the
@@ -515,6 +529,79 @@ def _build_match_codepoint_circuit(profile: LanguageProfile, cell_len: int,
         return np.sum(table[cells], axis=1)
 
     return circuit.compile(_inputset(cell_len, profile.alphabet_size))
+
+
+# Op-output shape: 'matrix' (N_CELLS, cell_len) for char_class_map, or
+# 'vector' (N_CELLS,) for the count/length/match/equal ops.  The
+# protocol layer (umbra/sealedlex_protocol.py) needs to know the shape
+# to decode chunked outputs back into CSV cells.
+OP_OUTPUT_SHAPE = {
+    OP_CHAR_CLASS_MAP:  'matrix',
+    OP_COUNT_CLASS:     'vector',
+    OP_LENGTH:          'vector',
+    OP_MATCH_CODEPOINT: 'vector',
+    OP_EQUAL_TO:        'vector',
+}
+
+
+def compile_op(profile: LanguageProfile, cell_len: int, op: dict):
+    """Public dispatch that returns a compiled Concrete Circuit for an
+    op dict.  Used by both the in-process pipeline and the split-protocol
+    encrypt side.  The op's parameters (target class, codepoint, constant
+    string) bake into the circuit's LUTs — the result is a specialised
+    circuit usable only for THIS op."""
+    kind = op.get('op')
+    if kind == OP_CHAR_CLASS_MAP:
+        return _build_class_map_circuit(profile, cell_len)
+    if kind == OP_COUNT_CLASS:
+        target = int(op.get('target', CLASS_VOWEL))
+        return _build_count_class_circuit(profile, cell_len, target)
+    if kind == OP_LENGTH:
+        return _build_length_circuit(profile, cell_len)
+    if kind == OP_MATCH_CODEPOINT:
+        char = (op.get('char') or '')[:1]
+        if not char:
+            raise ValueError('match_codepoint needs a non-empty char')
+        target_index = profile.encode_char(char)
+        return _build_match_codepoint_circuit(profile, cell_len, target_index)
+    if kind == OP_EQUAL_TO:
+        constant = op.get('constant') or ''
+        if not constant:
+            raise ValueError('equal_to needs a non-empty constant')
+        pattern = np.full(cell_len, profile.pad_index, dtype=np.int64)
+        for i, ch in enumerate(constant[:cell_len]):
+            pattern[i] = profile.encode_char(ch)
+        return _build_equal_to_circuit(profile, cell_len, pattern)
+    raise ValueError(f'unknown op {kind!r}')
+
+
+def required_cell_len(op: dict, sel) -> int:
+    """The cell_len an op needs given its selection.  equal_to extends
+    the length to fit the constant.  Capped at MAX_CELL_LEN."""
+    base = min(MAX_CELL_LEN, max((len(text) for _, text in sel), default=1) or 1)
+    if op.get('op') == OP_EQUAL_TO:
+        constant = op.get('constant') or ''
+        base = min(MAX_CELL_LEN, max(base, len(constant)))
+    return base
+
+
+def encode_chunk(profile: LanguageProfile, chunk_sel, cell_len: int) -> np.ndarray:
+    """Public alias for _pad_to_max — encrypt-side input prep."""
+    return _pad_to_max(profile, chunk_sel, cell_len)
+
+
+def decode_op_chunk_output(op: dict, raw_output) -> list:
+    """Turn one chunk's decrypted output array into a list of CSV-cell
+    strings, one per row in the chunk.  Length matches MAX_CELLS; the
+    caller maps the first len(chunk_sel) entries to actual rows and
+    discards the rest (they're pad rows).
+
+    char_class_map → strings of class digits.
+    All other ops  → str(int) of a count / 0|1 indicator."""
+    shape = OP_OUTPUT_SHAPE.get(op.get('op'))
+    if shape == 'matrix':
+        return [_decode_class_cell(row) for row in raw_output]
+    return [str(int(v)) for v in raw_output]
 
 
 def _build_equal_to_circuit(profile: LanguageProfile, cell_len: int,
