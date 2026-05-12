@@ -109,8 +109,13 @@ def tiling_test(request, slug):
     colours produce identical pixel sequences along their shared
     boundary."""
     s = get_object_or_404(TessSet, slug=slug)
-    rows = int(request.GET.get('rows', 6))
-    cols = int(request.GET.get('cols', 8))
+    # Default grid size depends on topology: hex defaults to 8×8 so
+    # the offset-r tessellation is visible at a glance; square keeps
+    # its long-form 6×8 default.
+    default_rows = 8 if s.topology == 'hex' else 6
+    default_cols = 8
+    rows = int(request.GET.get('rows', default_rows))
+    cols = int(request.GET.get('cols', default_cols))
     rows = max(1, min(rows, 24))
     cols = max(1, min(cols, 32))
     import random
@@ -147,10 +152,34 @@ def tiling_test(request, slug):
             [f'{t[0]}{t[1]}{t[2]}{t[3]}' for t in row]
             for row in grid
         ]
+    placements = None
+    container_w = container_h = 0
+    if s.topology == 'hex':
+        # Pointy-top offset-r tessellation.  Tile bounding box is
+        # 96×96 with the inscribed hex centred — but the template
+        # uses clip-path to clip each <img> to just the hex shape,
+        # so adjacent bounding boxes can safely overlap.  Step sizes
+        # are slightly larger than the ideal (2·inradius ≈ 83.14,
+        # 1.5·R = 72) so a ~1 px magenta seam shows through the
+        # container background.
+        TILE_PX = 96
+        H_STEP, V_STEP, ROW_SHIFT = 84, 73, 42
+        placements = []
+        for r_i, row in enumerate(grid_ids):
+            for c_i, tid in enumerate(row):
+                x = c_i * H_STEP + (ROW_SHIFT if r_i % 2 else 0)
+                y = r_i * V_STEP
+                placements.append({'left': x, 'top': y, 'tid': tid})
+        container_w = max(p['left'] for p in placements) + TILE_PX
+        container_h = max(p['top'] for p in placements) + TILE_PX
     return render(request, 'tessera/tiling.html', {
         'set': s,
         'grid_ids': grid_ids,
         'rows': rows, 'cols': cols,
+        'placements': placements,
+        'container_w': container_w,
+        'container_h': container_h,
+        'seed': request.GET.get('seed', '0'),
     })
 
 
