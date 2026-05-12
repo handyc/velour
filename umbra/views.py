@@ -16,9 +16,12 @@ from . import csvlab, corpuslab
 from .csvlab import OP_CHOICES
 from .corpuslab import (
     OP_CHOICES as CORPUS_OP_CHOICES,
-    CLASS_CHOICES as CORPUS_CLASS_CHOICES,
     MAX_CELLS as CORPUS_MAX_CELLS,
     MAX_CELL_LEN as CORPUS_MAX_CELL_LEN,
+    PROFILES as CORPUS_PROFILES,
+    DEFAULT_PROFILE as CORPUS_DEFAULT_PROFILE,
+    get_profile as corpus_get_profile,
+    profile_choices as corpus_profile_choices,
 )
 from .models import Scheme, Reference, Experiment, CsvLabSession, CorpusLabSession
 from .runner import run_experiment
@@ -347,7 +350,7 @@ def csvlab_download(request, slug):
 # per-cell character analyses run without the operator seeing the bytes.
 # This is the Leiden humanities/area-studies/low-resource-language path.
 
-SAMPLE_CORPUS_CSV = """form,gloss,language
+SAMPLE_CORPUS_CSV_ASCII = """form,gloss,language
 guru,teacher,Sanskrit
 shishya,student,Sanskrit
 namaste,greetings,Hindi
@@ -356,14 +359,26 @@ ela,cow,Konso
 heera,star,Konso
 """
 
+SAMPLE_CORPUS_CSV_DEVA = """form,gloss,language
+गुरु,teacher,Sanskrit
+शिष्य,student,Sanskrit
+नमस्ते,greetings,Hindi
+पानी,water,Hindi
+मित्र,friend,Sanskrit
+देव,god,Sanskrit
+"""
+
 
 def corpuslab_index(request):
     sessions = CorpusLabSession.objects.all()[:20]
     ctx = _ctx(); ctx.update(
         sessions=sessions,
-        sample_csv=SAMPLE_CORPUS_CSV,
+        sample_csv=SAMPLE_CORPUS_CSV_ASCII,
+        sample_csv_deva=SAMPLE_CORPUS_CSV_DEVA,
         max_cells=CORPUS_MAX_CELLS,
         max_cell_len=CORPUS_MAX_CELL_LEN,
+        profile_choices=corpus_profile_choices(),
+        default_profile=CORPUS_DEFAULT_PROFILE,
     )
     return render(request, 'umbra/corpuslab_index.html', ctx)
 
@@ -372,6 +387,9 @@ def corpuslab_upload(request):
     if request.method != 'POST':
         return redirect('umbra:corpuslab')
     name = (request.POST.get('name') or '').strip()
+    profile_slug = (request.POST.get('language_profile') or '').strip()
+    if profile_slug not in CORPUS_PROFILES:
+        profile_slug = CORPUS_DEFAULT_PROFILE
     csv_text = ''
     uploaded = request.FILES.get('file')
     if uploaded:
@@ -394,8 +412,12 @@ def corpuslab_upload(request):
     if rows <= 1:
         messages.error(request, 'CSV needs a header row plus data rows.')
         return redirect('umbra:corpuslab')
-    s = CorpusLabSession.objects.create(name=name, original_csv=csv_text,
-                                        ops_json='[]')
+    s = CorpusLabSession.objects.create(
+        name=name,
+        original_csv=csv_text,
+        ops_json='[]',
+        language_profile=profile_slug,
+    )
     return redirect('umbra:corpuslab_session', slug=s.slug)
 
 
@@ -421,12 +443,14 @@ def corpuslab_session(request, slug):
                 total_cells += 1
                 drow.append((val, changed))
             result_grid_diff.append(drow)
+    profile = corpus_get_profile(s.language_profile)
     ctx = _ctx()
     ctx.update(session=s, grid=grid, ops=ops,
                result_grid_diff=result_grid_diff,
                changed_cells=changed_cells, total_cells=total_cells,
                op_choices=CORPUS_OP_CHOICES,
-               class_choices=CORPUS_CLASS_CHOICES,
+               class_choices=profile.class_choices(),
+               profile=profile,
                max_cells=CORPUS_MAX_CELLS,
                max_cell_len=CORPUS_MAX_CELL_LEN)
     return render(request, 'umbra/corpuslab_session.html', ctx)

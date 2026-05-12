@@ -68,6 +68,13 @@
           <label>Name (optional)
             <input type="text" name="name" placeholder="Konso forms set 3">
           </label>
+          <label>Language profile (codepoint alphabet)
+            <select name="language_profile">
+              {% for slug, label in profile_choices %}
+              <option value="{{ slug }}"{% if slug == default_profile %} selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
           <label>File
             <input type="file" name="file" accept=".csv,text/csv">
           </label>
@@ -78,9 +85,13 @@ ela,cow,Konso"></textarea>
           <button class="btn" type="submit">Upload</button>
         </form>
         <p class="hint" style="margin-top: 0.5rem;">
-          Sample: copy the block below into the paste box and submit.
+          ASCII sample (copy + submit with the <em>ASCII</em> profile):
         </p>
         <pre class="csv-pre">{{ sample_csv }}</pre>
+        <p class="hint" style="margin-top: 0.5rem;">
+          Devanagari sample (copy + submit with the <em>Devanagari</em> profile):
+        </p>
+        <pre class="csv-pre">{{ sample_csv_deva }}</pre>
       </div>
     </div>
 
@@ -90,6 +101,7 @@ ela,cow,Konso"></textarea>
         {% for s in sessions %}
         <div class="expt-row">
           <a href="{% url 'umbra:corpuslab_session' s.slug %}">{{ s }}</a>
+          <span class="meta">{{ s.language_profile }}</span>
           <span class="meta">{{ s.rows }}×{{ s.cols }}</span>
           <span class="meta">{{ s.cells }} cells</span>
           <span class="meta">{{ s.updated_at|date:"M j H:i" }}</span>

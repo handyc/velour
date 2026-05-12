@@ -179,6 +179,9 @@ class CorpusLabSession(models.Model):
     result_csv     = models.TextField(blank=True)
     ops_json       = models.TextField(blank=True, default='[]',
         help_text='JSON list of {op, ...} dicts; see corpuslab.OP_*.')
+    language_profile = models.CharField(max_length=32, default='ascii',
+        help_text="Codepoint alphabet to use under PBS — 'ascii' or "
+                  "'devanagari'.  See corpuslab.PROFILES.")
     rows           = models.PositiveIntegerField(default=0)
     cols           = models.PositiveIntegerField(default=0)
     cells          = models.PositiveIntegerField(default=0,
