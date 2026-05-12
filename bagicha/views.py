@@ -1,10 +1,12 @@
 from django.http import Http404, JsonResponse
 from django.shortcuts import render
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from . import grammar
 
 
+@ensure_csrf_cookie
 def index(request):
     try:
         n = max(1, min(12, int(request.GET.get('n', 6))))
