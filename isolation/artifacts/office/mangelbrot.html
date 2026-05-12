@@ -250,6 +250,7 @@
     <button id="hexTile"       style="flex: 1; min-width: 180px;">Generate Hex Tiling</button>
     <button id="hexPixBoardBtn" style="flex: 1; min-width: 180px;">Random Pixelated Board</button>
     <button id="hexCaBake"     style="flex: 1; min-width: 180px;" title="Treat each tile index as a 6-neighbour hex-CA rule key; bake the rule's 4096-entry output into the set. Tiling = one CA step.">Bake CA Rule</button>
+    <button id="hexCaRead"     style="flex: 1; min-width: 180px;" title="Reverse direction of the bijection: read each tile's mandelshot interior, quantize the dominant colour to one of 4 states, and use those 4096 readings AS the CA rule LUT. The mandelbrot data itself becomes a CA rule.">Bake Rule from Tiles</button>
   </div>
   <div style="display: flex; gap: 10px; margin-top: 8px; max-width: 1100px; flex-wrap: wrap;">
     <button id="dlHexSet"   class="alt" style="flex: 1; min-width: 180px;">Download Hex Set JPG</button>
@@ -923,6 +924,7 @@ const BTN_HEX_GEN     = document.getElementById("hexGen");
 const BTN_HEX_TILE    = document.getElementById("hexTile");
 const BTN_HEX_PB      = document.getElementById("hexPixBoardBtn");
 const BTN_HEX_CA      = document.getElementById("hexCaBake");
+const BTN_HEX_CA_READ = document.getElementById("hexCaRead");
 const BTN_DL_HEXSET   = document.getElementById("dlHexSet");
 const BTN_DL_HEXTILE  = document.getElementById("dlHexTile");
 const BTN_DL_HEXPIX   = document.getElementById("dlHexPix");
@@ -1218,6 +1220,7 @@ function generateHexSet() {
         BTN_HEX_TILE.disabled  = false;
         BTN_HEX_PB.disabled    = false;
         BTN_HEX_CA.disabled    = false;
+        BTN_HEX_CA_READ.disabled = false;
         BTN_DL_HEXSET.disabled = false;
         BTN_DL_HEXPIX.disabled = false;
         HEX_STATUS.textContent =
@@ -1344,22 +1347,21 @@ function downloadHexPixJpg() {
  * where every cell's interior shows the rule output for that cell's
  * 6-neighbour input.  That's literally one CA step rendered as a
  * Wang tiling.  Iterating the tiling = iterating the CA. */
-function bakeCaRuleIntoHexSet() {
-  if (!hexSetReady) return;
-  /* Random rule LUT: one output state per 6-tuple. */
-  const ruleLUT = new Uint8Array(HEX_TILE_COUNT);
-  for (let i = 0; i < HEX_TILE_COUNT; i++) ruleLUT[i] = (Math.random() * 4) | 0;
-  /* Four state colours pulled from the first palette's bases.  Slots
-   * 0 / 64 / 128 / 192 of palette[0] are the 4 RGB bases by
-   * construction of the ramps. */
-  const STATE_RGB = [
+/* The 4 state colours used by both bakers.  Slots 0/192/384/576 of
+ * palette[0] are the 4 RGB bases by construction of the 64-step ramps. */
+function _hexStateRgb() {
+  return [
     [hexPalettes[0][  0], hexPalettes[0][  1], hexPalettes[0][  2]],
     [hexPalettes[0][192], hexPalettes[0][193], hexPalettes[0][194]],
     [hexPalettes[0][384], hexPalettes[0][385], hexPalettes[0][386]],
     [hexPalettes[0][576], hexPalettes[0][577], hexPalettes[0][578]],
   ];
-  /* Repaint every tile: hex-clipped flat fill of STATE_RGB[ruleLUT[i]],
-   * then re-stroke the 6 coloured edges to keep the Wang labels. */
+}
+
+/* Paint the 4096-tile hex set so each tile's interior is a flat fill of
+ * the rule's output state for that tile's 6-tuple, with Wang edge
+ * stripes restroked over the top.  Shared by both bake directions. */
+function _paintHexSetWithRule(ruleLUT, STATE_RGB) {
   HEX_SET_CTX.fillStyle = "#ff00ff";
   HEX_SET_CTX.fillRect(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
   for (let i = 0; i < HEX_TILE_COUNT; i++) {
@@ -1369,15 +1371,13 @@ function bakeCaRuleIntoHexSet() {
     const y0  = row * HEX_TILE_PX;
     const cx  = x0 + HEX_TILE_PX / 2;
     const cy  = y0 + HEX_TILE_PX / 2;
-    const out = ruleLUT[i];
-    const rgb = STATE_RGB[out];
+    const rgb = STATE_RGB[ruleLUT[i]];
     HEX_SET_CTX.save();
     hexPath(HEX_SET_CTX, cx, cy, HEX_R);
     HEX_SET_CTX.clip();
     HEX_SET_CTX.fillStyle = "rgb(" + rgb[0] + "," + rgb[1] + "," + rgb[2] + ")";
     HEX_SET_CTX.fillRect(x0, y0, HEX_TILE_PX, HEX_TILE_PX);
     HEX_SET_CTX.restore();
-    /* Re-stroke the 6 edges. */
     for (let k = 0; k < 6; k++) {
       const [x1, y1] = hexVertex(cx, cy, HEX_R, k);
       const [x2, y2] = hexVertex(cx, cy, HEX_R, (k + 1) % 6);
@@ -1392,11 +1392,84 @@ function bakeCaRuleIntoHexSet() {
       HEX_SET_CTX.stroke();
     }
   }
-  /* Re-build the pixelated mirror so both views are CA-baked. */
   buildPixelatedHexSet();
+}
+
+function bakeCaRuleIntoHexSet() {
+  if (!hexSetReady) return;
+  const ruleLUT = new Uint8Array(HEX_TILE_COUNT);
+  for (let i = 0; i < HEX_TILE_COUNT; i++) ruleLUT[i] = (Math.random() * 4) | 0;
+  _paintHexSetWithRule(ruleLUT, _hexStateRgb());
   HEX_STATUS.textContent =
-    "baked CA rule (" + HEX_TILE_COUNT +
+    "baked random CA rule (" + HEX_TILE_COUNT +
     " entries) — tilings are now hex-CA snapshots";
+}
+
+/* Wang → CA direction.  Read each tile's mandelshot interior, find the
+ * dominant colour, quantize it to one of 4 state colours, and use the
+ * 4096 readings AS the rule LUT.  Then paint that derived rule back
+ * over the set the same way the random baker would — so the visual
+ * before/after is directly comparable.
+ *
+ * Note: this only makes sense when the tile interiors still show the
+ * mandelshot data.  After Bake CA Rule (random) the interiors are flat
+ * fills, and this function will just re-read those flats.  Click
+ * Generate Hex Set first to refresh. */
+function bakeCaRuleFromTiles() {
+  if (!hexSetReady) return;
+  const STATE_RGB = _hexStateRgb();
+  /* One sheet-wide getImageData read.  Sheet is 4096×4096 → ~67 MB of
+   * RGBA, but the read itself is fast and per-tile sampling becomes
+   * an indexed lookup. */
+  const sheet = HEX_SET_CTX.getImageData(0, 0, HEX_SHEET_PX, HEX_SHEET_PX);
+  const data  = sheet.data;
+  const stride = HEX_SHEET_PX * 4;
+  const ruleLUT = new Uint8Array(HEX_TILE_COUNT);
+  /* Sample a 12×12 patch around each tile's centre — comfortably inside
+   * the inscribed circle of the hex, well clear of the 4 px edge
+   * strokes at the periphery. */
+  const SAMPLE_HALF = 6;
+  const votes = new Int32Array(4);
+  for (let i = 0; i < HEX_TILE_COUNT; i++) {
+    const col = i % HEX_TILES_AXIS;
+    const row = (i / HEX_TILES_AXIS) | 0;
+    const cx  = col * HEX_TILE_PX + (HEX_TILE_PX >> 1);
+    const cy  = row * HEX_TILE_PX + (HEX_TILE_PX >> 1);
+    votes[0] = votes[1] = votes[2] = votes[3] = 0;
+    for (let dy = -SAMPLE_HALF; dy < SAMPLE_HALF; dy++) {
+      const py = cy + dy;
+      const rowOff = py * stride;
+      for (let dx = -SAMPLE_HALF; dx < SAMPLE_HALF; dx++) {
+        const off = rowOff + (cx + dx) * 4;
+        const r = data[off], g = data[off + 1], b = data[off + 2];
+        let best = 0, bestD = Infinity;
+        for (let s = 0; s < 4; s++) {
+          const dr = r - STATE_RGB[s][0];
+          const dg = g - STATE_RGB[s][1];
+          const db = b - STATE_RGB[s][2];
+          const d = dr * dr + dg * dg + db * db;
+          if (d < bestD) { bestD = d; best = s; }
+        }
+        votes[best]++;
+      }
+    }
+    let dom = 0;
+    if (votes[1] > votes[dom]) dom = 1;
+    if (votes[2] > votes[dom]) dom = 2;
+    if (votes[3] > votes[dom]) dom = 3;
+    ruleLUT[i] = dom;
+  }
+  /* Histogram of states across the LUT — useful sanity check that the
+   * extracted rule isn't degenerate (e.g. all one state because the
+   * mandelshots only ever land near one base colour). */
+  const hist = [0, 0, 0, 0];
+  for (let i = 0; i < HEX_TILE_COUNT; i++) hist[ruleLUT[i]]++;
+  _paintHexSetWithRule(ruleLUT, STATE_RGB);
+  HEX_STATUS.textContent =
+    "extracted CA rule from mandelshot interiors (" + HEX_TILE_COUNT +
+    " entries · state histogram " + hist.join("/") +
+    ") — the mandelbrot data IS the rule. " +
+    "Click Generate Hex Set to refresh source before re-extracting.";
 }
 
 function downloadHexPixBoardJpg() {
@@ -1474,6 +1547,7 @@ BTN_HEX_GEN.addEventListener("click", generateHexSet);
 BTN_HEX_TILE.addEventListener("click", generateHexTiling);
 BTN_HEX_PB.addEventListener("click", generateHexPixBoard);
 BTN_HEX_CA.addEventListener("click", bakeCaRuleIntoHexSet);
+BTN_HEX_CA_READ.addEventListener("click", bakeCaRuleFromTiles);
 BTN_DL_HEXSET.addEventListener("click", downloadHexSetJpg);
 BTN_DL_HEXTILE.addEventListener("click", downloadHexTilingJpg);
 BTN_DL_HEXPIX.addEventListener("click", downloadHexPixJpg);
@@ -1522,6 +1596,7 @@ BTN_HEX_GEN.disabled      = false;
 BTN_HEX_TILE.disabled     = true;
 BTN_HEX_PB.disabled       = true;
 BTN_HEX_CA.disabled       = true;
+BTN_HEX_CA_READ.disabled  = true;
 BTN_DL_HEXSET.disabled    = true;
 BTN_DL_HEXTILE.disabled   = true;
 BTN_DL_HEXPIX.disabled    = true;
