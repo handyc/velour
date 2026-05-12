@@ -159,3 +159,46 @@ class Experiment(models.Model):
                 i += 1
             self.slug = slug
         super().save(*args, **kwargs)
+
+
+class CsvLabSession(models.Model):
+    """CSV uploaded, parsed, encrypted cell-by-cell with CKKS, then
+    mutated by a queued list of ops, then decrypted back to a CSV.
+    All in-process — the secret key, ops, and decryption share one
+    Django request, so this is a *demonstration* of the round-trip,
+    not a real privacy boundary.  See ops_json schema in csvlab.py."""
+
+    name          = models.CharField(max_length=128, blank=True)
+    slug          = models.SlugField(max_length=128, unique=True)
+    original_csv  = models.TextField()
+    result_csv    = models.TextField(blank=True)
+    ops_json      = models.TextField(blank=True, default='[]',
+        help_text='JSON list of {op, ...} dicts; see csvlab.OP_*.')
+    rows          = models.PositiveIntegerField(default=0)
+    cols          = models.PositiveIntegerField(default=0)
+    numeric_cells = models.PositiveIntegerField(default=0)
+    ciphertext_bytes = models.PositiveIntegerField(default=0,
+        help_text='Total serialized size of all cell ciphertexts.')
+    encrypt_ms    = models.PositiveIntegerField(default=0)
+    ops_ms        = models.PositiveIntegerField(default=0)
+    decrypt_ms    = models.PositiveIntegerField(default=0)
+    last_error    = models.TextField(blank=True)
+    created_at    = models.DateTimeField(auto_now_add=True)
+    updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name or f'csvlab-{self.pk}'
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.name)[:120] or 'csv'
+            slug = base
+            i = 2
+            while CsvLabSession.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f'{base}-{i}'
+                i += 1
+            self.slug = slug
+        super().save(*args, **kwargs)

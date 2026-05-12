@@ -18,4 +18,12 @@ urlpatterns = [
          views.experiment_edit,    name='experiment_edit'),
     path('experiments/<slug:slug>/run/',
          views.experiment_run,     name='experiment_run'),
+
+    path('csvlab/',                       views.csvlab_index,     name='csvlab'),
+    path('csvlab/upload/',                views.csvlab_upload,    name='csvlab_upload'),
+    path('csvlab/<slug:slug>/',           views.csvlab_session,   name='csvlab_session'),
+    path('csvlab/<slug:slug>/add-op/',    views.csvlab_add_op,    name='csvlab_add_op'),
+    path('csvlab/<slug:slug>/clear-ops/', views.csvlab_clear_ops, name='csvlab_clear_ops'),
+    path('csvlab/<slug:slug>/run/',       views.csvlab_run,       name='csvlab_run'),
+    path('csvlab/<slug:slug>/download/',  views.csvlab_download,  name='csvlab_download'),
 ]

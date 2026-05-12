@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}CSV Lab — Umbra{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}
+<style>
+  .csv-pre { background: #010409; border: 1px solid #21262d; border-radius: 4px;
+             padding: 0.5rem 0.7rem; font-family: ui-monospace, monospace;
+             font-size: 0.74rem; line-height: 1.45; color: #c9d1d9;
+             white-space: pre; overflow-x: auto; }
+  .pedagogy {
+    background: #2a213d; border-left: 3px solid #d2a8ff;
+    color: #c9d1d9; padding: 0.5rem 0.8rem; font-size: 0.78rem;
+    border-radius: 0 4px 4px 0; margin-bottom: 1rem;
+  }
+  .pedagogy strong { color: #d2a8ff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>CSV Lab <span style="font-weight: 400; color: #6e7681; font-size: 0.85rem;">·
+    encrypt → mutate → decrypt round trip</span></h1>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:schemes' %}">schemes ({{ scheme_count }})</a>
+    <a href="{% url 'umbra:references' %}">references ({{ reference_count }})</a>
+    <a href="{% url 'umbra:experiments' %}">experiments ({{ experiment_count }})</a>
+    <a href="{% url 'umbra:csvlab' %}" class="active">CSV lab ({{ csvlab_count }})</a>
+  </nav>
+
+  <div class="pedagogy">
+    <strong>Pedagogical demo.</strong> Secret key, encryption, cell ops,
+    and decryption all run in the same Django request — so this shows
+    the round-trip math works, not a real privacy boundary.  Every
+    numeric cell becomes its own CKKS ciphertext; ops touch only
+    ciphertexts; the server decrypts at the end.
+  </div>
+
+  <div class="um-grid">
+    <div>
+      <div class="panel">
+        <h2>Upload or paste a CSV</h2>
+        <form method="post" action="{% url 'umbra:csvlab_upload' %}"
+              enctype="multipart/form-data" class="inline">
+          {% csrf_token %}
+          <label>Name (optional)
+            <input type="text" name="name" placeholder="employees Q3">
+          </label>
+          <label>File
+            <input type="file" name="file" accept=".csv,text/csv">
+          </label>
+          <label>…or paste CSV directly
+            <textarea name="csv_text" placeholder="header,row,…
+val,val,val"></textarea>
+          </label>
+          <button class="btn" type="submit">Upload</button>
+        </form>
+        <p class="hint" style="margin-top: 0.5rem;">
+          Sample: copy the block below into the paste box and submit.
+        </p>
+        <pre class="csv-pre">{{ sample_csv }}</pre>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Recent sessions</h2>
+        {% for s in sessions %}
+        <div class="expt-row">
+          <a href="{% url 'umbra:csvlab_session' s.slug %}">{{ s }}</a>
+          <span class="meta">{{ s.rows }}×{{ s.cols }}</span>
+          <span class="meta">{{ s.numeric_cells }} num</span>
+          <span class="meta">{{ s.updated_at|date:"M j H:i" }}</span>
+        </div>
+        {% empty %}
+        <p class="empty">No CSV-lab sessions yet.  Upload one to start.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

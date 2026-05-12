@@ -5,11 +5,16 @@ as text.  When phase 2 lands, an execution runner will pipe the code
 through a Pyfhel / Concrete subprocess and write back to
 last_output / last_error / last_run_ms.
 """
+import json
+
 from django.contrib import messages
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 
-from .models import Scheme, Reference, Experiment
+from . import csvlab
+from .csvlab import OP_CHOICES
+from .models import Scheme, Reference, Experiment, CsvLabSession
 from .runner import run_experiment
 
 
@@ -43,6 +48,7 @@ def _ctx():
         'scheme_count':     Scheme.objects.count(),
         'reference_count':  Reference.objects.count(),
         'experiment_count': Experiment.objects.count(),
+        'csvlab_count':     CsvLabSession.objects.count(),
     }
 
 
@@ -142,3 +148,151 @@ def experiment_edit(request, slug):
     ctx.update(expt=e, schemes=Scheme.objects.all(), edit_mode=True,
                sample_code=e.code or SAMPLE_CODE)
     return render(request, 'umbra/experiment_form.html', ctx)
+
+
+SAMPLE_CSV = """name,score,bonus
+Alice,10,1
+Bob,7,2
+Carol,3,0
+"""
+
+
+def csvlab_index(request):
+    sessions = CsvLabSession.objects.all()[:20]
+    ctx = _ctx(); ctx.update(sessions=sessions, sample_csv=SAMPLE_CSV)
+    return render(request, 'umbra/csvlab_index.html', ctx)
+
+
+def csvlab_upload(request):
+    if request.method != 'POST':
+        return redirect('umbra:csvlab')
+    name = (request.POST.get('name') or '').strip()
+    csv_text = ''
+    uploaded = request.FILES.get('file')
+    if uploaded:
+        try:
+            csv_text = uploaded.read().decode('utf-8', errors='replace')
+        except Exception as exc:
+            messages.error(request, f'Could not read file: {exc!r}')
+            return redirect('umbra:csvlab')
+        if not name:
+            name = uploaded.name
+    else:
+        csv_text = request.POST.get('csv_text') or ''
+        if not name:
+            name = 'pasted'
+    csv_text = csv_text.strip()
+    if not csv_text:
+        messages.error(request, 'No CSV content provided.')
+        return redirect('umbra:csvlab')
+    s = CsvLabSession.objects.create(name=name, original_csv=csv_text,
+                                     ops_json='[]')
+    return redirect('umbra:csvlab_session', slug=s.slug)
+
+
+def csvlab_session(request, slug):
+    s = get_object_or_404(CsvLabSession, slug=slug)
+    grid, _, _ = csvlab.parse_csv(s.original_csv)
+    try:
+        ops = json.loads(s.ops_json or '[]')
+    except Exception:
+        ops = []
+    result_grid = []
+    if s.result_csv:
+        result_grid, _, _ = csvlab.parse_csv(s.result_csv)
+    ctx = _ctx()
+    ctx.update(session=s, grid=grid, ops=ops, result_grid=result_grid,
+               op_choices=OP_CHOICES)
+    return render(request, 'umbra/csvlab_session.html', ctx)
+
+
+def _parse_op_form(post):
+    """Build a single op dict from the form, or None if no op selected."""
+    kind = post.get('op_kind') or ''
+    if not kind:
+        return None
+    if kind == csvlab.OP_ADD_CONST or kind == csvlab.OP_MUL_CONST:
+        return {
+            'op':    kind,
+            'row':   int(post.get('row') or 0),
+            'col':   int(post.get('col') or 0),
+            'value': float(post.get('value') or 0),
+        }
+    if kind == csvlab.OP_SUM_CELLS:
+        return {
+            'op':  kind,
+            'a':   [int(post.get('a_row') or 0), int(post.get('a_col') or 0)],
+            'b':   [int(post.get('b_row') or 0), int(post.get('b_col') or 0)],
+            'dst': [int(post.get('dst_row') or 0), int(post.get('dst_col') or 0)],
+        }
+    if kind == csvlab.OP_COL_TOTAL:
+        return {
+            'op':  kind,
+            'col': int(post.get('col') or 0),
+            'dst': [int(post.get('dst_row') or 0), int(post.get('dst_col') or 0)],
+            'skip_header': bool(post.get('skip_header')),
+        }
+    return None
+
+
+def csvlab_add_op(request, slug):
+    s = get_object_or_404(CsvLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:csvlab_session', slug=slug)
+    try:
+        ops = json.loads(s.ops_json or '[]')
+    except Exception:
+        ops = []
+    try:
+        new_op = _parse_op_form(request.POST)
+    except (TypeError, ValueError) as exc:
+        messages.error(request, f'Bad op fields: {exc!r}')
+        return redirect('umbra:csvlab_session', slug=slug)
+    if new_op is None:
+        messages.error(request, 'No op kind selected.')
+        return redirect('umbra:csvlab_session', slug=slug)
+    ops.append(new_op)
+    s.ops_json = json.dumps(ops)
+    s.save(update_fields=['ops_json', 'updated_at'])
+    messages.success(request, f'Queued {new_op["op"]}.')
+    return redirect('umbra:csvlab_session', slug=slug)
+
+
+def csvlab_clear_ops(request, slug):
+    s = get_object_or_404(CsvLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:csvlab_session', slug=slug)
+    s.ops_json   = '[]'
+    s.result_csv = ''
+    s.last_error = ''
+    s.save(update_fields=['ops_json', 'result_csv', 'last_error', 'updated_at'])
+    messages.success(request, 'Ops cleared.')
+    return redirect('umbra:csvlab_session', slug=slug)
+
+
+def csvlab_run(request, slug):
+    s = get_object_or_404(CsvLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:csvlab_session', slug=slug)
+    csvlab.run_session(s)
+    s.save()
+    if s.last_error:
+        messages.warning(request,
+            f'Ran with {len(s.last_error.splitlines())} op error(s).')
+    else:
+        messages.success(request,
+            f'Ran in {s.encrypt_ms + s.ops_ms + s.decrypt_ms} ms '
+            f'({s.numeric_cells} cells, '
+            f'{s.ciphertext_bytes // 1024} KB ciphertext).')
+    return redirect('umbra:csvlab_session', slug=slug)
+
+
+def csvlab_download(request, slug):
+    s = get_object_or_404(CsvLabSession, slug=slug)
+    if not s.result_csv:
+        messages.error(request, 'No result yet — run the session first.')
+        return redirect('umbra:csvlab_session', slug=slug)
+    fname = slugify(s.name) or s.slug
+    resp = HttpResponse(s.result_csv, content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="{fname}.result.csv"'
+    return resp
