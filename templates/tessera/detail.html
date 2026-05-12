@@ -25,7 +25,10 @@
 </p>
 <h1 style="margin-bottom: 4px;">{{ set.name }}</h1>
 <p class="tess-meta">
-  seed {{ set.seed }} &middot; {{ set.tile_px }}px tiles &middot;
+  <b>{{ set.get_topology_display }}</b> &middot;
+  <b>{{ set.get_blend_method_display }}</b> &middot;
+  {{ set.tile_count }} tiles &middot;
+  seed {{ set.seed }} &middot; {{ set.tile_px }}px &middot;
   {{ set.get_method_display }} &middot; blend power
   {{ set.blend_power }} &middot; created
   {{ set.created_at|date:"D d M Y H:i" }}
@@ -50,11 +53,18 @@
   {% endfor %}
 </div>
 
-<h2 style="margin-top: 24px; font-size: 1rem;">All 256 tiles</h2>
+<h2 style="margin-top: 24px; font-size: 1rem;">{{ grid_label }}</h2>
 <p class="tess-meta">
+  {% if edges_per_tile == 6 %}
+  Tile ids are 6-digit base-4 strings — edges 0..5 clockwise from
+  the top.  The 16-tile sample below varies edges 0 and 1; edges
+  2..5 are fixed at colour 0.  Browse the full 4⁶ space by direct
+  URL <code>/tessera/{slug}/tile/EEEEEE.png</code>.
+  {% else %}
   Row index = (north_colour × 4 + east_colour); column index =
   (south_colour × 4 + west_colour).  Each cell shows tile id
   <code>nesw</code>.  Click any tile to see it full-size.
+  {% endif %}
 </p>
 <table class="tess-grid">
   {% for row in grid %}

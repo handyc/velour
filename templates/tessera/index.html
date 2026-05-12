@@ -16,12 +16,11 @@
 
 <h1 style="margin-bottom: 4px;">Tessera</h1>
 <p style="color:#888; max-width: 60em; margin-top: 0;">
-  Seamless 4-edge-color square Wang tile sets.  Each set generates the
-  full 4<sup>4</sup>=256-tile catalogue from four toroidally-tileable
-  source images blended via inverse-distance weighting from each edge.
-  Adjacent tiles sharing a colour sample <em>the same pixel of the same
-  source</em> across the seam, so seamlessness is a topological property
-  of the construction rather than a stitching pass.
+  4-edge-color Wang tile sets.  Pick a <em>topology</em> (square
+  → 4<sup>4</sup>=256 tiles, hex → 4<sup>6</sup>=4096 tiles) and a
+  <em>blend method</em> (IDW for Tessera's seamless math, wedge-cut
+  for a stained-glass aesthetic).  Each set generates from four
+  toroidally-tileable source images.
 </p>
 
 {% if sets %}
@@ -30,6 +29,9 @@
   <div class="tess-row">
     <a href="{% url 'tessera:detail' s.slug %}">{{ s.name }}</a>
     <span class="tess-meta">
+      &middot; <b>{{ s.get_topology_display }}</b>
+      &middot; <b>{{ s.get_blend_method_display }}</b>
+      &middot; {{ s.tile_count }} tiles
       &middot; seed {{ s.seed }} &middot; {{ s.tile_px }}px
       &middot; {{ s.get_method_display }}
       &middot; {{ s.created_at|date:"D d M Y H:i" }}
@@ -49,18 +51,30 @@
   <div style="margin-top: 6px;"><label>seed</label>
     <input type="number" name="seed" value="0" style="width: 8em;">
   </div>
-  <div style="margin-top: 6px;"><label>method</label>
+  <div style="margin-top: 6px;"><label>source method</label>
     <select name="method">
       <option value="fbm-tileable">fBm noise (toroidally tileable)</option>
       <option value="domain-warp">fBm + domain warp</option>
       <option value="hex-ca">Hex CA evolved</option>
     </select>
   </div>
+  <div style="margin-top: 6px;"><label>topology</label>
+    <select name="topology">
+      <option value="square">square — 4 edges, 256 tiles</option>
+      <option value="hex">hex — 6 edges, 4096 tiles</option>
+    </select>
+  </div>
+  <div style="margin-top: 6px;"><label>blend</label>
+    <select name="blend_method">
+      <option value="idw">IDW (seamless math)</option>
+      <option value="wedge">wedge-cut (stained-glass)</option>
+    </select>
+  </div>
   <div style="margin-top: 10px;">
     <button type="submit"
             style="background:#222; color:#cfc;
                    border:1px solid #555; padding:6px 14px;
-                   font-family:inherit;">Generate 256-tile set</button>
+                   font-family:inherit;">Generate tile set</button>
   </div>
 </form>
 {% endblock %}

@@ -204,6 +204,70 @@ def make_source_images(seed: int, palette, w: int, h: int,
 # Tile compositing — IDW from 4 edges.
 # ---------------------------------------------------------------
 
+# ── Hex geometry ────────────────────────────────────────────────────
+#
+# Pointy-top hex inscribed in a (W, H) box, centred at (cx, cy) =
+# ((W-1)/2, (H-1)/2).  Six vertices, counted clockwise from the top:
+#   k=0  (cx,         cy - R)               top
+#   k=1  (cx + R·s,   cy - R/2)             top-right
+#   k=2  (cx + R·s,   cy + R/2)             bottom-right
+#   k=3  (cx,         cy + R)               bottom
+#   k=4  (cx - R·s,   cy + R/2)             bottom-left
+#   k=5  (cx - R·s,   cy - R/2)             top-left
+# where s = sqrt(3)/2 and R is the circumradius — chosen so the hex
+# fits inside (W, H).
+#
+# Edge i runs from vertex i to vertex (i+1) % 6, clockwise.
+
+_HEX_SQRT3_2 = 0.8660254037844386
+
+
+def _hex_geometry(w: int, h: int):
+    """Return (cx, cy, R, vertices) where vertices is a (6, 2) array
+    of (x, y) for the hexagon inscribed in a (w, h) rectangle."""
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+    # Pointy-top hexagon's bounding box is (2 R · sqrt(3)/2, 2 R) =
+    # (R·sqrt(3), 2 R).  Fit into (w, h) by taking the binding axis.
+    R = min((w - 1) / (2 * _HEX_SQRT3_2), (h - 1) / 2.0)
+    verts = np.array([
+        [cx,                    cy - R],
+        [cx + R * _HEX_SQRT3_2, cy - R / 2],
+        [cx + R * _HEX_SQRT3_2, cy + R / 2],
+        [cx,                    cy + R],
+        [cx - R * _HEX_SQRT3_2, cy + R / 2],
+        [cx - R * _HEX_SQRT3_2, cy - R / 2],
+    ], dtype=np.float64)
+    return cx, cy, R, verts
+
+
+def _hex_mask_and_edge_distances(w: int, h: int):
+    """For an (h, w) pixel grid: build a boolean inside-hexagon mask
+    AND a (6, h, w) array of perpendicular distances to each of the
+    six edges (positive on the inside, negative outside).  Pixels
+    outside the hex get masked out by the caller."""
+    cx, cy, R, verts = _hex_geometry(w, h)
+    yy, xx = np.meshgrid(np.arange(h, dtype=np.float64),
+                         np.arange(w, dtype=np.float64), indexing='ij')
+    # For each edge i: signed distance = (P - V_i) · n_i  where n_i is
+    # the inward unit normal.  Inward normal points from the edge
+    # midpoint toward the hex centre.
+    dists = np.zeros((6, h, w), dtype=np.float64)
+    for i in range(6):
+        v0 = verts[i]
+        v1 = verts[(i + 1) % 6]
+        mid = (v0 + v1) / 2
+        # Inward normal: unit vector from mid toward the centre.
+        nx, ny = (cx - mid[0]), (cy - mid[1])
+        L = (nx * nx + ny * ny) ** 0.5
+        nx, ny = nx / L, ny / L
+        dists[i] = (xx - mid[0]) * nx + (yy - mid[1]) * ny
+    inside = np.all(dists > -0.5, axis=0)   # half-pixel slack
+    return inside, dists
+
+
+# ── Inverse-distance blend (square + hex) ───────────────────────────
+
 def composite_tile(sources, n: int, e: int, s: int, w: int,
                    power: float = 2.0,
                    blur_sigma: float = 0.0) -> np.ndarray:
@@ -244,6 +308,223 @@ def composite_tile(sources, n: int, e: int, s: int, w: int,
         img = img.filter(ImageFilter.GaussianBlur(radius=blur_sigma))
         out = np.asarray(img)
     return out
+
+
+def composite_tile_idw_hex(sources, edges, power: float = 2.0,
+                           blur_sigma: float = 0.0,
+                           magenta_outside: bool = True) -> np.ndarray:
+    """6-edge IDW blend with a hex clip mask.
+
+    `edges` is a 6-tuple of edge colours in [0, 3] for edges 0..5
+    (clockwise from top).  Each interior pixel of the inscribed
+    hexagon is the inverse-distance-weighted blend of the 6
+    edge sources.  Pixels outside the hex are filled with magenta
+    (the conventional "transparency" key for the rest of the suite).
+
+    Seam-cancellation for hex tiling: at edge i, the weight w_i →
+    ∞, so the pixel collapses to S_{e_i} sampled at that pixel's
+    (x, y).  Two adjacent hex tiles sharing edge i (one tile's edge
+    i ↔ neighbour's edge i+3) cover the same physical pixels at the
+    shared edge — and both sample their copy of S_c at the SAME
+    (x, y) coordinate, so the seam matches by construction provided
+    the source images are themselves toroidally tileable (existing
+    Tessera property)."""
+    H, W = sources[0].shape[:2]
+    inside, dists = _hex_mask_and_edge_distances(W, H)
+    eps = 0.5
+    # IDW weights from positive distances (clamp at eps for the
+    # divergent-on-edge behaviour).
+    weights = []
+    for i in range(6):
+        d = np.maximum(dists[i], 0) + eps
+        weights.append(1.0 / (d ** power))
+    w_stack = np.stack(weights, axis=0)
+    total = np.sum(w_stack, axis=0)[..., None]
+    out = np.zeros((H, W, 3), dtype=np.float64)
+    for i in range(6):
+        out += sources[edges[i]].astype(np.float64) * weights[i][..., None]
+    out = out / total
+    # Magenta outside the hex.
+    if magenta_outside:
+        bg = np.array([255, 0, 255], dtype=np.float64)
+        out = np.where(inside[..., None], out, bg)
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    if blur_sigma > 0:
+        img = Image.fromarray(out)
+        img = img.filter(ImageFilter.GaussianBlur(radius=blur_sigma))
+        out = np.asarray(img)
+    return out
+
+
+# ── Wedge-cut (square + hex) ────────────────────────────────────────
+#
+# Each tile is divided into N triangular wedges meeting at the centre.
+# Wedge i sources from S_{edge_color_i}'s bottom row — that 1D strip
+# becomes the wedge's outer edge (the actual tile edge), and the
+# interior linearly interpolates inward to the source image's top row
+# at the apex (centre).  The "stained-glass" aesthetic the user
+# described.
+#
+# Seam cancellation requires that the bottom row of each source image
+# be effectively palindromic on its u-axis so adjacent tiles' wedges
+# meeting at the same physical edge sample the same pixels — Tessera's
+# toroidal sources already give S_c[*, 0] = S_c[*, W-1] which means the
+# bottom row wraps cleanly, but isn't strictly palindromic.  Visible
+# seam variance for wedge-cut is generally small but non-zero;
+# documented honestly in the model help text.
+
+
+def _wedge_uv(w: int, h: int, n_wedges: int):
+    """For an (h, w) pixel grid, compute per-pixel (wedge_idx, u, v).
+
+    `wedge_idx`: which of the N wedges this pixel belongs to.
+    `u`: position along the outer edge of that wedge (0..1).
+    `v`: depth from outer edge (0) to apex (1).
+
+    Returns: (wedge_idx, u, v) all shape (h, w).  For square (N=4)
+    the wedges are the 4 triangles formed by the centre and the
+    midpoints of opposite edges; for hex (N=6) the 6 triangles
+    meeting at the centre of an inscribed hexagon.  Pixels outside
+    the inscribed shape (hex only) get wedge_idx=-1.
+    """
+    yy, xx = np.meshgrid(np.arange(h, dtype=np.float64),
+                         np.arange(w, dtype=np.float64), indexing='ij')
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+    dx = xx - cx
+    dy = yy - cy
+    angle = np.arctan2(dy, dx)                    # (-π, π]
+    # Convert to "clockwise from top" 0..2π so wedge_idx = floor(...)
+    # works cleanly.  Top is angle = -π/2.
+    a_norm = (np.pi / 2 - angle) % (2 * np.pi)    # (0, 2π]; top = 0
+    wedge_idx = np.floor(a_norm / (2 * np.pi / n_wedges)).astype(np.int64)
+    wedge_idx = np.clip(wedge_idx, 0, n_wedges - 1)
+    # Within each wedge, u is position along its outer edge and v is
+    # depth from edge to centre.  Compute by projecting onto each
+    # wedge's outer-edge frame.
+    # The outer edge of wedge i runs between vertices V_i and V_{i+1};
+    # u = projection along V_{i+1}-V_i normalised, v = 1 - (distance
+    # from centre / radius).
+    if n_wedges == 6:
+        cx_h, cy_h, R, verts = _hex_geometry(w, h)
+        inside, _ = _hex_mask_and_edge_distances(w, h)
+    else:
+        # Square: vertices at the four corners.
+        R = max(w, h) / 2.0
+        verts = np.array([
+            [w - 1,     0    ],   # NE
+            [w - 1, h - 1    ],   # SE
+            [0,     h - 1    ],   # SW
+            [0,         0    ],   # NW
+        ], dtype=np.float64)
+        # Renumber so wedge 0 = top (between NW and NE)
+        verts = np.array([
+            [0,         0    ],   # NW       wedge 0 top edge: NW→NE
+            [w - 1,     0    ],   # NE
+            [w - 1, h - 1    ],   # SE
+            [0,     h - 1    ],   # SW
+        ], dtype=np.float64)
+        inside = np.ones((h, w), dtype=bool)
+    u = np.zeros_like(xx)
+    v = np.zeros_like(xx)
+    for i in range(n_wedges):
+        v0 = verts[i]
+        v1 = verts[(i + 1) % n_wedges]
+        edge_vec = v1 - v0
+        edge_len = (edge_vec[0] ** 2 + edge_vec[1] ** 2) ** 0.5
+        edge_ux = edge_vec[0] / edge_len
+        edge_uy = edge_vec[1] / edge_len
+        mask = (wedge_idx == i)
+        u_i = ((xx - v0[0]) * edge_ux + (yy - v0[1]) * edge_uy) / edge_len
+        # Distance from centre along inward direction → v ∈ [0, 1].
+        # v = 0 at outer edge (max distance), v = 1 at centre.
+        # Approximate outer-edge distance via perpendicular distance
+        # to the v0→v1 line, divided by the wedge's apothem.
+        # Inward normal to edge i.
+        nx_, ny_ = (cx - (v0[0] + v1[0]) / 2), (cy - (v0[1] + v1[1]) / 2)
+        L = (nx_ * nx_ + ny_ * ny_) ** 0.5
+        nx_, ny_ = nx_ / L, ny_ / L
+        d_inward = (xx - v0[0]) * nx_ + (yy - v0[1]) * ny_
+        # apothem (distance from centre to edge midpoint)
+        ap = L
+        v_i = np.clip(d_inward / ap, 0.0, 1.0)
+        u = np.where(mask, np.clip(u_i, 0.0, 1.0), u)
+        v = np.where(mask, v_i, v)
+    wedge_idx[~inside] = -1
+    return wedge_idx, u, v
+
+
+def _wedge_render(sources, edges, n_wedges: int,
+                  magenta_outside: bool = True) -> np.ndarray:
+    """Common renderer: take the N-wedge layout for the topology, look
+    each pixel up in the appropriate source by its (u, v) inside its
+    wedge.
+
+    Source coord: x = u · (W-1)  (so u runs along the source's full
+    width); y = (1 - v) · (H-1)  (outer edge sources from row H-1,
+    apex sources from row 0).  This keeps S_c's bottom row visible at
+    every edge — the cleanest seam-matching mapping when the source
+    is toroidal (S_c[H-1, *] = S_c[0, *])."""
+    H, W = sources[0].shape[:2]
+    wedge_idx, u, v = _wedge_uv(W, H, n_wedges)
+    x_src = np.clip(u * (W - 1), 0, W - 1).astype(np.int64)
+    y_src = np.clip((1 - v) * (H - 1), 0, H - 1).astype(np.int64)
+    out = np.zeros((H, W, 3), dtype=np.uint8)
+    for i in range(n_wedges):
+        src = sources[edges[i]]
+        mask = (wedge_idx == i)
+        # Vectorised indexing: gather src[y_src, x_src] then mask in.
+        gathered = src[y_src, x_src]
+        out = np.where(mask[..., None], gathered, out)
+    if magenta_outside:
+        bg = np.array([255, 0, 255], dtype=np.uint8)
+        outside = (wedge_idx < 0)
+        out = np.where(outside[..., None], bg, out)
+    return out
+
+
+def composite_tile_wedge_square(sources, edges,
+                                blur_sigma: float = 0.0) -> np.ndarray:
+    """4-wedge stained-glass square tile.  `edges` is (n, e, s, w)."""
+    out = _wedge_render(sources, edges, 4, magenta_outside=False)
+    if blur_sigma > 0:
+        img = Image.fromarray(out)
+        img = img.filter(ImageFilter.GaussianBlur(radius=blur_sigma))
+        out = np.asarray(img)
+    return out
+
+
+def composite_tile_wedge_hex(sources, edges,
+                             blur_sigma: float = 0.0,
+                             magenta_outside: bool = True) -> np.ndarray:
+    """6-wedge stained-glass hex tile.  `edges` is a 6-tuple."""
+    out = _wedge_render(sources, edges, 6,
+                        magenta_outside=magenta_outside)
+    if blur_sigma > 0:
+        img = Image.fromarray(out)
+        img = img.filter(ImageFilter.GaussianBlur(radius=blur_sigma))
+        out = np.asarray(img)
+    return out
+
+
+def composite_tile_for(tess_set, edges, blur_sigma: float = 0.0,
+                       power: float = 2.0) -> np.ndarray:
+    """Dispatch on (topology, blend_method).  `edges` is a 4-tuple
+    for square or a 6-tuple for hex."""
+    sources = get_sources_for(tess_set)
+    if tess_set.topology == 'hex':
+        if tess_set.blend_method == 'wedge':
+            return composite_tile_wedge_hex(sources, edges,
+                                            blur_sigma=blur_sigma)
+        return composite_tile_idw_hex(sources, edges, power=power,
+                                      blur_sigma=blur_sigma)
+    # square
+    if tess_set.blend_method == 'wedge':
+        return composite_tile_wedge_square(sources, edges,
+                                           blur_sigma=blur_sigma)
+    n, e, s, w = edges
+    return composite_tile(sources, n, e, s, w,
+                          power=power, blur_sigma=blur_sigma)
 
 
 def png_bytes(arr: np.ndarray) -> bytes:

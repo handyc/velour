@@ -31,6 +31,14 @@ class TessSet(models.Model):
         ('hex-ca',       'Hex CA evolved (Velour-style)'),
         ('domain-warp',  'fBm + domain warp'),
     ]
+    TOPOLOGY_CHOICES = [
+        ('square', 'square — 4 edges, 4⁴ = 256 tiles'),
+        ('hex',    "hex — 6 edges, 4⁶ = 4096 tiles"),
+    ]
+    BLEND_CHOICES = [
+        ('idw',   'IDW blend — Tessera-style seamless math'),
+        ('wedge', 'wedge cut — stained-glass aesthetic'),
+    ]
 
     name       = models.CharField(max_length=80, unique=True)
     slug       = models.SlugField(max_length=80, unique=True)
@@ -43,6 +51,15 @@ class TessSet(models.Model):
         help_text='Output tile size in pixels (square).')
     method     = models.CharField(
         max_length=20, choices=METHOD_CHOICES, default='fbm-tileable')
+    topology   = models.CharField(
+        max_length=8, choices=TOPOLOGY_CHOICES, default='square',
+        help_text='Square (4 edges → 256 tiles) or hex (6 edges → '
+                  '4096 tiles).')
+    blend_method = models.CharField(
+        max_length=8, choices=BLEND_CHOICES, default='idw',
+        help_text='IDW blends the edge sources smoothly across the '
+                  'interior; wedge slices each source into N triangles '
+                  'around the centre.  Aesthetically very different.')
     palette    = models.JSONField(
         default=list,
         help_text='Four [r,g,b] RGB anchors, one per edge color. '
@@ -82,5 +99,9 @@ class TessSet(models.Model):
 
     @property
     def tile_count(self):
-        """Always 256 = 4^4 for a full edge-coloured Wang set."""
-        return 256
+        """4⁴=256 for square, 4⁶=4096 for hex."""
+        return 4096 if self.topology == 'hex' else 256
+
+    @property
+    def edges_per_tile(self):
+        return 6 if self.topology == 'hex' else 4
