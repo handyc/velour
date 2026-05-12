@@ -141,6 +141,18 @@
           <label>dst col (blank → overwrite)<input type="number" name="dst_col" min="0" placeholder="—"></label>
         </div>
 
+        <div class="op-fields" data-kinds="match_codepoint">
+          <label>col<input type="number" name="col" min="0" value="0"></label>
+          <label>char (1 char)<input type="text" name="char" maxlength="1" size="3" placeholder="्"></label>
+          <label>dst col (blank → overwrite)<input type="number" name="dst_col" min="0" placeholder="—"></label>
+        </div>
+
+        <div class="op-fields" data-kinds="equal_to">
+          <label>col<input type="number" name="col" min="0" value="0"></label>
+          <label>constant string<input type="text" name="constant" placeholder="गुरु"></label>
+          <label>dst col (blank → overwrite)<input type="number" name="dst_col" min="0" placeholder="—"></label>
+        </div>
+
         <button class="btn" type="submit" style="margin-top: 0.5rem;">+ Queue op</button>
       </form>
       <p class="hint" style="margin-top: 0.4rem;">
@@ -163,6 +175,8 @@
             {% if op.op == 'char_class_map' %}char_class_map col={{ op.col }}
             {% elif op.op == 'count_class' %}count_class col={{ op.col }} target={{ op.target }}{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
             {% elif op.op == 'length' %}length col={{ op.col }}{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
+            {% elif op.op == 'match_codepoint' %}match_codepoint col={{ op.col }} char={{ op.char }}{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
+            {% elif op.op == 'equal_to' %}equal_to col={{ op.col }} == "{{ op.constant }}"{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
             {% else %}{{ op.op }}{% endif %}
             {% if op.error %}<span class="err-msg">{{ op.error }}</span>{% endif %}
           </span>

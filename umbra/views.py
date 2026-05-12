@@ -368,6 +368,15 @@ SAMPLE_CORPUS_CSV_DEVA = """form,gloss,language
 देव,god,Sanskrit
 """
 
+SAMPLE_CORPUS_CSV_GEEZ = """form,gloss,language
+ሰላም,peace/hello,Amharic
+ቡና,coffee,Amharic
+ውሃ,water,Amharic
+ሰው,person,Amharic
+ሐሰት,lie,Amharic
+ሰላት,prayer,Amharic
+"""
+
 
 def corpuslab_index(request):
     sessions = CorpusLabSession.objects.all()[:20]
@@ -375,6 +384,7 @@ def corpuslab_index(request):
         sessions=sessions,
         sample_csv=SAMPLE_CORPUS_CSV_ASCII,
         sample_csv_deva=SAMPLE_CORPUS_CSV_DEVA,
+        sample_csv_geez=SAMPLE_CORPUS_CSV_GEEZ,
         max_cells=CORPUS_MAX_CELLS,
         max_cell_len=CORPUS_MAX_CELL_LEN,
         profile_choices=corpus_profile_choices(),
@@ -476,6 +486,22 @@ def _parse_corpus_op_form(post):
             'op':     kind,
             'col':    int(post.get('col') or 0),
             'dst_col': int(dst) if (dst not in (None, '', 'null')) else None,
+        }
+    if kind == corpuslab.OP_MATCH_CODEPOINT:
+        dst = post.get('dst_col')
+        return {
+            'op':     kind,
+            'col':    int(post.get('col') or 0),
+            'char':   (post.get('char') or '')[:1],
+            'dst_col': int(dst) if (dst not in (None, '', 'null')) else None,
+        }
+    if kind == corpuslab.OP_EQUAL_TO:
+        dst = post.get('dst_col')
+        return {
+            'op':       kind,
+            'col':      int(post.get('col') or 0),
+            'constant': (post.get('constant') or ''),
+            'dst_col':  int(dst) if (dst not in (None, '', 'null')) else None,
         }
     return None
 

@@ -39,6 +39,18 @@ Ops queue is a list of dicts; coordinates are 0-indexed.
 
   {"op": "length", "col": C, "dst_col": null}
       -> count non-padding alphabet indices per cell.
+
+  {"op": "match_codepoint", "col": C, "char": "्", "dst_col": null}
+      -> count occurrences of a specific character (codepoint) per
+         cell.  More granular than count_class — the researcher picks
+         a literal char (e.g. the Devanagari halant ्) rather than a
+         coarse class.
+
+  {"op": "equal_to", "col": C, "constant": "गुरु", "dst_col": null}
+      -> per cell, returns 1 if the cell equals the constant string
+         (after profile encoding + truncation to MAX_CELL_LEN), else
+         0.  Composes per-position diff indicators under PBS, sums,
+         then a final zero-check LUT.
 """
 import csv
 import io
@@ -51,14 +63,18 @@ from concrete import fhe
 
 # ── Op identifiers ──────────────────────────────────────────────────
 
-OP_CHAR_CLASS_MAP = 'char_class_map'
-OP_COUNT_CLASS    = 'count_class'
-OP_LENGTH         = 'length'
+OP_CHAR_CLASS_MAP  = 'char_class_map'
+OP_COUNT_CLASS     = 'count_class'
+OP_LENGTH          = 'length'
+OP_MATCH_CODEPOINT = 'match_codepoint'
+OP_EQUAL_TO        = 'equal_to'
 
 OP_CHOICES = [
-    (OP_CHAR_CLASS_MAP, 'replace each char with its class digit'),
-    (OP_COUNT_CLASS,    'count chars matching a target class'),
-    (OP_LENGTH,         'cell length (non-padding chars)'),
+    (OP_CHAR_CLASS_MAP,  'replace each char with its class digit'),
+    (OP_COUNT_CLASS,     'count chars matching a target class'),
+    (OP_LENGTH,          'cell length (non-padding chars)'),
+    (OP_MATCH_CODEPOINT, 'count occurrences of a specific char'),
+    (OP_EQUAL_TO,        'cell == constant string (1 or 0)'),
 ]
 
 
@@ -262,11 +278,89 @@ class _DevanagariProfile(LanguageProfile):
         ]
 
 
+# ── Ge'ez / Ethiopic profile (Amharic, Tigrinya, Tigre, Ge'ez) ──────
+#
+# Ethiopic is a syllabary — every character is one CV syllable.  We
+# can't usefully distinguish vowel-vs-consonant at the codepoint level
+# the way ASCII or Devanagari does, because each Ge'ez codepoint
+# contains both.  For this v1 profile:
+#   • Standalone vowel syllables (U+12A0-U+12A6: አ ኡ ኢ ኣ ኤ እ ኦ) classify
+#     as VOWEL.
+#   • Other CV syllables classify as CONSONANT.
+#   • Ethiopic digits (U+1369-U+137C) classify as DIGIT.
+#   • Ethiopic punctuation (U+1361-U+1368: ፡ ። ፣ ፤ ፥ ፦ ፧ ፨) classify
+#     as PUNCT.
+#
+# Index layout: 0 = pad sentinel, 1..254 = U+1200 + (i-1) (covers
+# U+1200-U+12FD, essentially the whole Ethiopic Syllabary block),
+# 255 = unknown catch-all.  Alphabet bumped to 256 so almost-all
+# Amharic + Tigrinya forms fit.  Trade-off: 8-bit PBS is ~1.5–2x
+# slower per byte than 7-bit ASCII/Devanagari.
+
+_GEEZ_OFFSET = 0x1200
+_GEEZ_STANDALONE_VOWELS = set(range(0x12A0, 0x12A7))
+_GEEZ_DIGITS = set(range(0x1369, 0x137D))
+_GEEZ_PUNCT  = set(range(0x1361, 0x1369))
+
+
+def _geez_class_of_codepoint(cp: int) -> int:
+    if cp in _GEEZ_STANDALONE_VOWELS:                  return CLASS_VOWEL
+    if cp in _GEEZ_DIGITS:                             return CLASS_DIGIT
+    if cp in _GEEZ_PUNCT:                              return CLASS_PUNCT
+    if 0x1200 <= cp <= 0x137F:                         return CLASS_CONSONANT
+    return CLASS_OTHER
+
+
+class _GeezProfile(LanguageProfile):
+    slug = 'geez'
+    name = "Ge'ez / Ethiopic (Amharic, Tigrinya)"
+    description = (
+        'Unicode block U+1200-U+12FD (most of the Ethiopic Syllabary). '
+        'Each codepoint is one CV syllable; standalone vowels '
+        '(U+12A0-U+12A6) classify as VOWEL, other syllables as '
+        'CONSONANT.  Ethiopic digits + punctuation handled.  Pair '
+        'with match_codepoint for character-specific queries (e.g. '
+        '"how many ሰ in this word?"). 8-bit PBS — about 1.5x slower '
+        'per byte than ASCII / Devanagari.'
+    )
+
+    alphabet_size  = 256
+    _UNKNOWN_INDEX = 255
+
+    def encode_char(self, ch: str) -> int:
+        if not ch:
+            return self.pad_index
+        cp = ord(ch[0])
+        if _GEEZ_OFFSET <= cp <= _GEEZ_OFFSET + 253:
+            return (cp - _GEEZ_OFFSET) + 1
+        return self._UNKNOWN_INDEX
+
+    def decode_index(self, idx: int) -> str:
+        if idx == self.pad_index or idx == self._UNKNOWN_INDEX:
+            return ''
+        return chr(_GEEZ_OFFSET + idx - 1)
+
+    def class_for_index(self, idx: int) -> int:
+        if idx == self.pad_index:        return CLASS_OTHER
+        if idx == self._UNKNOWN_INDEX:   return CLASS_OTHER
+        return _geez_class_of_codepoint(_GEEZ_OFFSET + idx - 1)
+
+    def class_choices(self):
+        return [
+            (CLASS_VOWEL,     'standalone vowel (አ ኡ ኢ ኣ ኤ እ ኦ)'),
+            (CLASS_CONSONANT, 'CV syllable (consonant + vowel)'),
+            (CLASS_DIGIT,     'Ethiopic digit'),
+            (CLASS_PUNCT,     'Ethiopic punctuation'),
+            (CLASS_OTHER,     'other / non-Ethiopic'),
+        ]
+
+
 # ── Profile registry ────────────────────────────────────────────────
 
 PROFILES = {
     'ascii':       _AsciiProfile(),
     'devanagari':  _DevanagariProfile(),
+    'geez':        _GeezProfile(),
 }
 DEFAULT_PROFILE = 'ascii'
 
@@ -401,6 +495,50 @@ def _build_length_circuit(profile: LanguageProfile, cell_len: int):
     return circuit.compile(_inputset(cell_len, profile.alphabet_size))
 
 
+def _build_match_codepoint_circuit(profile: LanguageProfile, cell_len: int,
+                                   target_index: int):
+    indicator = np.array(
+        [1 if i == target_index else 0 for i in range(profile.alphabet_size)],
+        dtype=np.int64,
+    )
+    table = fhe.LookupTable(indicator.tolist())
+
+    @fhe.compiler({'cells': 'encrypted'})
+    def circuit(cells):
+        return np.sum(table[cells], axis=1)
+
+    return circuit.compile(_inputset(cell_len, profile.alphabet_size))
+
+
+def _build_equal_to_circuit(profile: LanguageProfile, cell_len: int,
+                            pattern_indices):
+    """Per-position diff LUTs that map each encrypted index to (index
+    != pattern[i] ? 1 : 0).  Sum the diffs across positions and pass
+    through a final zero-check LUT — 1 if all positions matched, else 0.
+
+    Concrete handles the depth automatically: cell_len position-wise
+    PBS calls per cell + 1 final PBS for the zero-check."""
+    diff_luts = []
+    for i in range(cell_len):
+        target = int(pattern_indices[i])
+        diff_luts.append(fhe.LookupTable(
+            [0 if v == target else 1
+             for v in range(profile.alphabet_size)]
+        ))
+    zero_lut = fhe.LookupTable(
+        [1 if v == 0 else 0 for v in range(cell_len + 1)]
+    )
+
+    @fhe.compiler({'cells': 'encrypted'})
+    def circuit(cells):
+        total = diff_luts[0][cells[:, 0]]
+        for i in range(1, cell_len):
+            total = total + diff_luts[i][cells[:, i]]
+        return zero_lut[total]
+
+    return circuit.compile(_inputset(cell_len, profile.alphabet_size))
+
+
 # ── Op implementations ─────────────────────────────────────────────
 #
 # Each op compiles its circuit once for the chosen cell_len, then
@@ -468,6 +606,72 @@ def _apply_count_class(profile, grid, op, timing, cap, progress_cb=None):
     timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
 
 
+def _apply_match_codepoint(profile, grid, op, timing, cap, progress_cb=None):
+    col  = int(op['col'])
+    char = (op.get('char') or '')[:1]
+    if not char:
+        raise ValueError('match_codepoint needs a non-empty char')
+    target_index = profile.encode_char(char)
+    sel = _select_cells(grid, col, cap=cap)
+    if not sel:
+        raise ValueError(f'no non-empty cells in column {col} (rows 1..)')
+    cell_len = min(MAX_CELL_LEN, max(len(text) for _, text in sel) or 1)
+
+    t0 = time.monotonic()
+    circuit = _build_match_codepoint_circuit(profile, cell_len, target_index)
+    timing['compile_ms'] += int((time.monotonic() - t0) * 1000)
+
+    dst_col = op.get('dst_col')
+    t1 = time.monotonic()
+    for r, count in _run_chunked(profile, sel, cell_len, circuit, progress_cb):
+        cell = str(int(count))
+        if dst_col is None:
+            grid[r][col] = cell
+        else:
+            dc = int(dst_col)
+            while len(grid[r]) <= dc:
+                grid[r].append('')
+            grid[r][dc] = cell
+    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
+
+
+def _apply_equal_to(profile, grid, op, timing, cap, progress_cb=None):
+    col      = int(op['col'])
+    constant = op.get('constant') or ''
+    if not constant:
+        raise ValueError('equal_to needs a non-empty constant')
+    sel = _select_cells(grid, col, cap=cap)
+    if not sel:
+        raise ValueError(f'no non-empty cells in column {col} (rows 1..)')
+    # cell_len must accommodate both the longest selected cell AND the
+    # constant — otherwise truncation would make all comparisons false.
+    cell_len = min(MAX_CELL_LEN,
+                   max(len(constant),
+                       max(len(text) for _, text in sel) or 1))
+
+    # Encode the constant string to alphabet indices, pad to cell_len.
+    pattern = np.full(cell_len, profile.pad_index, dtype=np.int64)
+    for i, ch in enumerate(constant[:cell_len]):
+        pattern[i] = profile.encode_char(ch)
+
+    t0 = time.monotonic()
+    circuit = _build_equal_to_circuit(profile, cell_len, pattern)
+    timing['compile_ms'] += int((time.monotonic() - t0) * 1000)
+
+    dst_col = op.get('dst_col')
+    t1 = time.monotonic()
+    for r, eq in _run_chunked(profile, sel, cell_len, circuit, progress_cb):
+        cell = str(int(eq))   # '0' or '1'
+        if dst_col is None:
+            grid[r][col] = cell
+        else:
+            dc = int(dst_col)
+            while len(grid[r]) <= dc:
+                grid[r].append('')
+            grid[r][dc] = cell
+    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
+
+
 def _apply_length(profile, grid, op, timing, cap, progress_cb=None):
     col = int(op['col'])
     sel = _select_cells(grid, col, cap=cap)
@@ -504,9 +708,11 @@ def apply_ops(profile, grid, ops, cap=MAX_CELLS, progress_cb=None):
         kind = op.get('op')
         op_cb = (lambda ci, total, n: progress_cb(i, kind, ci, total, n)) if progress_cb else None
         try:
-            if   kind == OP_CHAR_CLASS_MAP: _apply_char_class_map(profile, grid, op, timing, cap, op_cb)
-            elif kind == OP_COUNT_CLASS:    _apply_count_class(profile, grid, op, timing, cap, op_cb)
-            elif kind == OP_LENGTH:         _apply_length(profile, grid, op, timing, cap, op_cb)
+            if   kind == OP_CHAR_CLASS_MAP:  _apply_char_class_map(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_COUNT_CLASS:     _apply_count_class(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_LENGTH:          _apply_length(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_MATCH_CODEPOINT: _apply_match_codepoint(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_EQUAL_TO:        _apply_equal_to(profile, grid, op, timing, cap, op_cb)
             else: raise ValueError(f'unknown op {kind!r}')
             op['status'] = 'ok'
         except Exception as exc:
