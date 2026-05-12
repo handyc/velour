@@ -35,8 +35,16 @@ def _decode_tile_id(tile_id: str, expected_len: int) -> tuple:
 
 
 def _png_response(payload: bytes) -> HttpResponse:
+    # ETag from the payload + must-revalidate so browsers refresh
+    # when the render code changes.  The previous `immutable` header
+    # made existing browsers serve stale PNGs from before render
+    # bugfixes — switching to revalidation costs one conditional GET
+    # per tile but actually delivers updates.
+    import hashlib
+    etag = hashlib.md5(payload).hexdigest()
     resp = HttpResponse(payload, content_type='image/png')
-    resp['Cache-Control'] = 'public, max-age=86400, immutable'
+    resp['Cache-Control'] = 'public, max-age=60, must-revalidate'
+    resp['ETag'] = f'"{etag}"'
     return resp
 
 

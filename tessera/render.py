@@ -348,7 +348,14 @@ def composite_tile_idw_hex(sources, edges, power: float = 2.0,
     # apothem = perpendicular distance from centre to any edge of the
     # inscribed hex; depth coord = 0 at edge → H-1 at centre.
     apothem = R * _HEX_SQRT3_2
-    eps = 0.5
+    # Weight floor `eps_w` sits inside d^p, NOT (d+eps)^p — the old
+    # form left the dominant edge with only ≈99.87 % weight at the
+    # seam (1 / (0+0.5)² = 4, with five other edges totalling ≈ 0.005),
+    # which leaked ≈1–15 RGB across the boundary.  Floor inside d^p
+    # gives 1 / eps_w ≈ 10⁶ at d=0 and ≈16 at d=0.5, so the edge
+    # sample wins by ten-million-to-one near the boundary while the
+    # blend in the interior is unchanged.
+    eps_w = 1e-6
     half = 3  # edges 0..2 use eff_u = u; edges 3..5 use eff_u = 1-u
     out = np.zeros((H, W, 3), dtype=np.float64)
     total = np.zeros((H, W), dtype=np.float64)
@@ -365,7 +372,7 @@ def composite_tile_idw_hex(sources, edges, power: float = 2.0,
         d_i = np.maximum(dists[i], 0.0)
         y_src = np.clip((1.0 - d_i / apothem) * (H - 1),
                         0, H - 1).astype(np.int64)
-        w_i = 1.0 / ((d_i + eps) ** power)
+        w_i = 1.0 / (d_i ** power + eps_w)
         src = sources[edges[i]]
         out += src[y_src, x_src].astype(np.float64) * w_i[..., None]
         total += w_i
