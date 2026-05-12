@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ session }} — Corpus Lab{% endblock %}
+{% block title %}{{ session }} — SealedLex{% endblock %}
 
 {% block extra_head %}{% include "umbra/_partials.html" %}
 <style>
@@ -102,13 +102,13 @@
 
   <nav class="um-nav">
     <a href="{% url 'umbra:index' %}">overview</a>
-    <a href="{% url 'umbra:corpuslab' %}">← back to Corpus lab</a>
+    <a href="{% url 'umbra:sealedlex' %}">← back to SealedLex</a>
   </nav>
 
   <div class="ctl-grid">
     <div class="panel">
       <h2>Queue an op</h2>
-      <form method="post" action="{% url 'umbra:corpuslab_add_op' session.slug %}"
+      <form method="post" action="{% url 'umbra:sealedlex_add_op' session.slug %}"
             class="inline">
         {% csrf_token %}
         <label>Kind
@@ -184,12 +184,12 @@
         {% endfor %}
       </ol>
       <div style="display: flex; gap: 0.5rem; margin-top: 0.7rem;">
-        <form method="post" action="{% url 'umbra:corpuslab_run' session.slug %}"
+        <form method="post" action="{% url 'umbra:sealedlex_run' session.slug %}"
               id="run-form">
           {% csrf_token %}
           <button class="btn" type="submit" id="run-btn">Run round trip</button>
         </form>
-        <form method="post" action="{% url 'umbra:corpuslab_clear_ops' session.slug %}">
+        <form method="post" action="{% url 'umbra:sealedlex_clear_ops' session.slug %}">
           {% csrf_token %}
           <button class="btn btn-quiet" type="submit">Clear ops + result</button>
         </form>
@@ -256,7 +256,7 @@
     </div>
 
     <div class="download-row">
-      <a class="btn" href="{% url 'umbra:corpuslab_download' session.slug %}">Download result.csv</a>
+      <a class="btn" href="{% url 'umbra:sealedlex_download' session.slug %}">Download result.csv</a>
       <span class="meta" style="color: #6e7681; font-size: 0.75rem;">
         UTF-8, comma-separated, LF line endings
       </span>

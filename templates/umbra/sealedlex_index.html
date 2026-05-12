@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Corpus Lab — Umbra{% endblock %}
+{% block title %}SealedLex — Umbra{% endblock %}
 
 {% block extra_head %}{% include "umbra/_partials.html" %}
 <style>
@@ -21,50 +21,51 @@
 
 {% block content %}
 <div class="um-wrap">
-  <h1>Corpus Lab <span style="font-weight: 400; color: #6e7681; font-size: 0.85rem;">·
-    linguistic CSV through Concrete TFHE</span></h1>
+  <h1>SealedLex <span style="font-weight: 400; color: #6e7681; font-size: 0.85rem;">·
+    sealed linguistic CSV through Concrete TFHE</span></h1>
 
   <nav class="um-nav">
     <a href="{% url 'umbra:index' %}">overview</a>
     <a href="{% url 'umbra:schemes' %}">schemes ({{ scheme_count }})</a>
     <a href="{% url 'umbra:references' %}">references ({{ reference_count }})</a>
     <a href="{% url 'umbra:experiments' %}">experiments ({{ experiment_count }})</a>
-    <a href="{% url 'umbra:csvlab' %}">CSV lab ({{ csvlab_count }})</a>
-    <a href="{% url 'umbra:corpuslab' %}" class="active">Corpus lab ({{ corpuslab_count }})</a>
+    <a href="{% url 'umbra:sealedlex' %}" class="active">sealedlex ({{ sealedlex_count }})</a>
   </nav>
 
   <div class="pedagogy">
-    <strong>Linguistic CSV through TFHE.</strong>  For humanities work
-    on low-resource languages — Hindi, Sanskrit, Konso, African sign
-    languages, and others — where each cell is one linguistic form and
-    you want per-character analyses (char-class counts, vowel counts,
-    cell lengths) to run sealed.  Concrete's <em>programmable
-    bootstrapping</em> gives us native byte-level lookup tables under
-    seal, which is exactly what per-cell symbolic ops need.
+    <strong>Sealed linguistic-CSV pipeline.</strong>  For humanities and
+    area-studies work on low-resource languages — Hindi, Sanskrit,
+    Konso, Amharic, Tigrinya, and others — where each cell is one
+    linguistic form and you want per-character analyses (char-class
+    counts, codepoint matches, length, cell equality) to run sealed.
+    Concrete's <em>programmable bootstrapping</em> gives native
+    byte-level lookup tables under seal, which is exactly the shape
+    per-cell symbolic ops want.
     <br><br>
-    Same threat model as the CSV lab: key, encrypt, ops, decrypt all in
-    one Django request.  Pedagogical demo of the sealed pipeline shape,
-    not a real privacy boundary.
+    Threat model: key, encrypt, ops, decrypt all in one Django
+    request.  Pedagogical demo of the sealed pipeline shape, not yet
+    a real privacy boundary.  A two-process split lands later.
     <br><br>
     Hard caps for in-request runs: <strong>{{ max_cells }} cells</strong>
     per op, padded to <strong>{{ max_cell_len }} bytes</strong> per
     cell.  Each byte burns one PBS call (~200 ms), so the wall fills
-    quickly.  Bigger corpora go through <code>manage.py corpuslab_run
+    quickly.  Bigger corpora go through <code>manage.py sealedlex_run
     &lt;slug&gt;</code> (no cap; chunks of <em>{{ max_cells }}</em> reuse
-    the same compiled circuit), and <code>manage.py corpuslab_slurm
+    the same compiled circuit), and <code>manage.py sealedlex_slurm
     &lt;slug&gt;</code> generates a Leiden ALICE batch script
     (defaults 20 CPUs × 4 h).
     <br><br>
-    <strong>Honest caveat.</strong>  ASCII bytes only for the moment —
-    Devanagari, Ge'ez, Tifinagh and other non-ASCII scripts read as
-    class <em>other</em>.  Codepoint-aware LUTs land in a follow-up.
+    <strong>Language profiles.</strong> ASCII covers Latin-script
+    forms; Devanagari covers Hindi / Sanskrit / Marathi; Ge'ez covers
+    Amharic / Tigrinya / Ge'ez.  More profiles land per Leiden's
+    research needs.
   </div>
 
   <div class="um-grid">
     <div>
       <div class="panel">
         <h2>Upload or paste a linguistic CSV</h2>
-        <form method="post" action="{% url 'umbra:corpuslab_upload' %}"
+        <form method="post" action="{% url 'umbra:sealedlex_upload' %}"
               enctype="multipart/form-data" class="inline">
           {% csrf_token %}
           <label>Name (optional)
@@ -106,14 +107,14 @@ ela,cow,Konso"></textarea>
         <h2>Recent sessions</h2>
         {% for s in sessions %}
         <div class="expt-row">
-          <a href="{% url 'umbra:corpuslab_session' s.slug %}">{{ s }}</a>
+          <a href="{% url 'umbra:sealedlex_session' s.slug %}">{{ s }}</a>
           <span class="meta">{{ s.language_profile }}</span>
           <span class="meta">{{ s.rows }}×{{ s.cols }}</span>
           <span class="meta">{{ s.cells }} cells</span>
           <span class="meta">{{ s.updated_at|date:"M j H:i" }}</span>
         </div>
         {% empty %}
-        <p class="empty">No corpus-lab sessions yet.  Upload one to start.</p>
+        <p class="empty">No sealedlex sessions yet.  Upload one to start.</p>
         {% endfor %}
       </div>
     </div>

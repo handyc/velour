@@ -141,7 +141,7 @@ print('sum(3,5,7,11,13) =', he.decryptInt(total)[0])   # -> 39
         'scheme_slug': 'tfhe',
         'code': '''\
 # TFHE via Concrete: byte -> char-class under seal via PBS.
-# This is the atom for Corpus Lab's sealed linguistic ops.
+# This is the atom for SealedLex's sealed linguistic ops.
 import time, numpy as np
 from concrete import fhe
 
@@ -177,8 +177,8 @@ for ch, expected in samples:
         'name':        'TFHE — vowel count under seal (Concrete)',
         'description': 'Per-byte indicator under PBS, then sum across '
                        'cell — produces an encrypted vowel count for a '
-                       'short padded form.  Same shape as the Corpus '
-                       'Lab count_class op.',
+                       'short padded form.  Same shape as the SealedLex '
+                       'count_class op.',
         'scheme_slug': 'tfhe',
         'code': '''\
 # TFHE via Concrete: encrypted vowel count for an 8-byte cell.

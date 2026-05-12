@@ -1,6 +1,6 @@
-"""Run a CorpusLabSession's queued ops with no in-request cap.
+"""Run a SealedLexSession's queued ops with no in-request cap.
 
-The web UI caps each op at corpuslab.MAX_CELLS cells so a single
+The web UI caps each op at sealedlex.MAX_CELLS cells so a single
 Django request finishes inside the runner wall.  Large linguistic
 corpora belong here instead: the command processes the whole CSV in
 chunks of MAX_CELLS, amortising the Concrete circuit compile across
@@ -8,11 +8,11 @@ every chunk.
 
 Designed to be Slurm-friendly: prints structured progress lines to
 stdout so a tail-driven dashboard or a slurm log can show liveness,
-and writes results back to the same CorpusLabSession in the database.
+and writes results back to the same SealedLexSession in the database.
 
 Typical Leiden ALICE invocation:
 
-    venv/bin/python manage.py corpuslab_run <slug>
+    venv/bin/python manage.py sealedlex_run <slug>
 
 …inside a Slurm job that asked for the default 20 cores × 4 h.
 Concrete is multithreaded via HPX so a single op benefits from cores
@@ -23,12 +23,12 @@ import time
 
 from django.core.management.base import BaseCommand, CommandError
 
-from umbra import corpuslab
-from umbra.models import CorpusLabSession
+from umbra import sealedlex
+from umbra.models import SealedLexSession
 
 
 class Command(BaseCommand):
-    help = ('Run a CorpusLabSession\'s queued ops uncapped — for ALICE '
+    help = ('Run a SealedLexSession\'s queued ops uncapped — for ALICE '
             'or any out-of-request batch run.')
 
     def add_arguments(self, parser):
@@ -41,21 +41,21 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         try:
-            s = CorpusLabSession.objects.get(slug=opts['slug'])
-        except CorpusLabSession.DoesNotExist:
+            s = SealedLexSession.objects.get(slug=opts['slug'])
+        except SealedLexSession.DoesNotExist:
             raise CommandError(f'no session with slug {opts["slug"]!r}')
 
-        grid, rows, cols = corpuslab.parse_csv(s.original_csv or '')
-        n_nonempty = corpuslab.count_nonempty(grid)
-        profile    = corpuslab.get_profile(s.language_profile)
+        grid, rows, cols = sealedlex.parse_csv(s.original_csv or '')
+        n_nonempty = sealedlex.count_nonempty(grid)
+        profile    = sealedlex.get_profile(s.language_profile)
 
         self.stdout.write(f'session   : {s.slug}  ({s.name})')
         self.stdout.write(f'profile   : {profile.slug}  ({profile.name})')
         self.stdout.write(f'grid      : {rows} rows × {cols} cols, '
                           f'{n_nonempty} non-empty cells')
         self.stdout.write(f'cap       : {opts["cap"] or "uncapped"} cells / op')
-        self.stdout.write(f'chunk size: {corpuslab.MAX_CELLS} cells '
-                          f'× {corpuslab.MAX_CELL_LEN} chars')
+        self.stdout.write(f'chunk size: {sealedlex.MAX_CELLS} cells '
+                          f'× {sealedlex.MAX_CELL_LEN} chars')
 
         if opts['dry_run']:
             self.stdout.write(self.style.WARNING('dry run, exiting'))
@@ -70,7 +70,7 @@ class Command(BaseCommand):
             self.stdout.flush()
 
         t0 = time.monotonic()
-        corpuslab.run_session(s, cap=opts['cap'], progress_cb=progress)
+        sealedlex.run_session(s, cap=opts['cap'], progress_cb=progress)
         s.save()
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 

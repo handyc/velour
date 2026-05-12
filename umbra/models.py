@@ -161,27 +161,27 @@ class Experiment(models.Model):
         super().save(*args, **kwargs)
 
 
-class CorpusLabSession(models.Model):
+class SealedLexSession(models.Model):
     """Linguistic CSV (one form per cell) encrypted byte-by-byte under
     Concrete TFHE.  Each cell becomes a fixed-length byte array padded
     with 0-sentinels; ops are per-cell sealed transformations applied
     via programmable bootstrapping (PBS) — table-lookups under seal.
 
-    Same threat model as CsvLabSession: key, encryption, ops, decryption
-    all in one Django request.  Pedagogical demo of the sealed
-    linguistic-CSV pipeline shape, not a real privacy boundary.
+    Threat model: key, encryption, ops, decryption all in one Django
+    request.  Pedagogical demo of the sealed linguistic-CSV pipeline
+    shape, not a real privacy boundary.
 
-    Ops schema lives in corpuslab.py."""
+    Ops schema lives in sealedlex.py."""
 
     name           = models.CharField(max_length=128, blank=True)
     slug           = models.SlugField(max_length=128, unique=True)
     original_csv   = models.TextField()
     result_csv     = models.TextField(blank=True)
     ops_json       = models.TextField(blank=True, default='[]',
-        help_text='JSON list of {op, ...} dicts; see corpuslab.OP_*.')
+        help_text='JSON list of {op, ...} dicts; see sealedlex.OP_*.')
     language_profile = models.CharField(max_length=32, default='ascii',
-        help_text="Codepoint alphabet to use under PBS — 'ascii' or "
-                  "'devanagari'.  See corpuslab.PROFILES.")
+        help_text="Codepoint alphabet to use under PBS — 'ascii', "
+                  "'devanagari', or 'geez'.  See sealedlex.PROFILES.")
     rows           = models.PositiveIntegerField(default=0)
     cols           = models.PositiveIntegerField(default=0)
     cells          = models.PositiveIntegerField(default=0,
@@ -202,57 +202,14 @@ class CorpusLabSession(models.Model):
         ordering = ['-updated_at']
 
     def __str__(self):
-        return self.name or f'corpuslab-{self.pk}'
+        return self.name or f'sealedlex-{self.pk}'
 
     def save(self, *args, **kwargs):
         if not self.slug:
-            base = slugify(self.name)[:120] or 'corpus'
+            base = slugify(self.name)[:120] or 'sealedlex'
             slug = base
             i = 2
-            while CorpusLabSession.objects.filter(slug=slug).exclude(pk=self.pk).exists():
-                slug = f'{base}-{i}'
-                i += 1
-            self.slug = slug
-        super().save(*args, **kwargs)
-
-
-class CsvLabSession(models.Model):
-    """CSV uploaded, parsed, encrypted cell-by-cell with CKKS, then
-    mutated by a queued list of ops, then decrypted back to a CSV.
-    All in-process — the secret key, ops, and decryption share one
-    Django request, so this is a *demonstration* of the round-trip,
-    not a real privacy boundary.  See ops_json schema in csvlab.py."""
-
-    name          = models.CharField(max_length=128, blank=True)
-    slug          = models.SlugField(max_length=128, unique=True)
-    original_csv  = models.TextField()
-    result_csv    = models.TextField(blank=True)
-    ops_json      = models.TextField(blank=True, default='[]',
-        help_text='JSON list of {op, ...} dicts; see csvlab.OP_*.')
-    rows          = models.PositiveIntegerField(default=0)
-    cols          = models.PositiveIntegerField(default=0)
-    numeric_cells = models.PositiveIntegerField(default=0)
-    ciphertext_bytes = models.PositiveIntegerField(default=0,
-        help_text='Total serialized size of all cell ciphertexts.')
-    encrypt_ms    = models.PositiveIntegerField(default=0)
-    ops_ms        = models.PositiveIntegerField(default=0)
-    decrypt_ms    = models.PositiveIntegerField(default=0)
-    last_error    = models.TextField(blank=True)
-    created_at    = models.DateTimeField(auto_now_add=True)
-    updated_at    = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['-updated_at']
-
-    def __str__(self):
-        return self.name or f'csvlab-{self.pk}'
-
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            base = slugify(self.name)[:120] or 'csv'
-            slug = base
-            i = 2
-            while CsvLabSession.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+            while SealedLexSession.objects.filter(slug=slug).exclude(pk=self.pk).exists():
                 slug = f'{base}-{i}'
                 i += 1
             self.slug = slug

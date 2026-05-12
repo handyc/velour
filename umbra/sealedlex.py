@@ -1,30 +1,37 @@
-"""Linguistic CSV → Concrete TFHE round-trip pipeline.
+"""SealedLex — sealed linguistic-CSV pipeline via Concrete TFHE.
 
-Where csvlab.py does CKKS arithmetic on numeric cells, this module does
-TFHE programmable-bootstrapping (PBS) on the *codepoints* of every
-cell.  The point: humanities/linguistic research at Leiden works with
-CSVs where each cell holds one linguistic form (a word, a morpheme, a
-gloss) in a low-resource language.  This pipeline lets researchers
-send those forms through a sealed pipeline and perform per-cell
-character-level analyses without the operating party seeing the bytes.
+Humanities and linguistics research at Leiden University works with
+CSVs where each cell holds one linguistic form (a word, a morpheme,
+a gloss) in a low-resource language — Hindi, Sanskrit, Konso,
+Amharic, Tigrinya, African sign languages, and so on.  SealedLex
+lets researchers send those forms through a sealed pipeline and
+perform per-cell character-level analyses without the operating
+party seeing the bytes.
 
-Same threat model as csvlab.py: key, encrypt, ops, decrypt all happen
-in one Django request.  Demonstration of the sealed shape, not a
-privacy boundary.  A two-process split lands later.
+The mechanism is Concrete's programmable bootstrapping (PBS): byte-
+level lookup tables under seal.  Every linguistic atom in this
+module (char-class classification, codepoint matching, equality)
+compiles to a tensor of PBS calls.
 
-Codepoint encoding: each cell is encoded as a fixed-length sequence of
-alphabet *indices*, not raw bytes.  A LanguageProfile owns the mapping
-from Unicode codepoint to alphabet index and the class-of-index LUT.
-This is what lets the same pipeline classify Hindi (Devanagari) and
-ASCII (Latin) without growing the LUT to 65 536+ entries — we keep
-alphabet size at 128 (7-bit PBS) by curating per-language alphabets.
+Threat model: key, encrypt, ops, decrypt all happen in one Django
+request.  Demonstration of the sealed pipeline shape, not yet a
+real privacy boundary.  A two-process split (key-holder vs op-
+runner) lands later.
 
-Wire shape: a CorpusLabSession stores the raw CSV plus a JSON queue of
-per-cell ops and the active language profile.  run_session() picks the
-profile, pads every non-empty cell to a common length, encodes each
-char as an alphabet index, compiles one Concrete circuit per op-kind,
-runs the circuit on the padded index tensor, and decodes the output
-back into a CSV grid.
+Codepoint encoding: each cell is encoded as a fixed-length sequence
+of alphabet *indices*, not raw bytes.  A LanguageProfile owns the
+mapping from Unicode codepoint to alphabet index and the class-of-
+index LUT.  This is what lets the same pipeline classify Hindi
+(Devanagari) and Amharic (Ge'ez) and ASCII (Latin) without growing
+the LUT to 65,536+ entries — we keep alphabet size small (128 or
+256 entries) by curating per-language alphabets.
+
+Wire shape: a SealedLexSession stores the raw CSV plus a JSON queue
+of per-cell ops and the active language profile.  run_session()
+picks the profile, pads every non-empty cell to a common length,
+encodes each char as an alphabet index, compiles one Concrete
+circuit per op-kind, runs the circuit on the padded index tensor,
+and decodes the output back into a CSV grid.
 
 Ops queue is a list of dicts; coordinates are 0-indexed.
 
@@ -95,7 +102,7 @@ CLASS_HALANT    = 5
 # Concrete PBS at 7-bit alphabet → ~200 ms per encrypted index on this
 # machine.  At 8 cells × 8 chars = 64 ops, a single run finishes in
 # ~13 s, comfortably under the runner's 60 s wall.  ALICE-scale work
-# uses a Slurm-array follow-up (`manage.py corpuslab_run`).
+# uses a Slurm-array follow-up (`manage.py sealedlex_run`).
 
 MAX_CELLS    = 8
 MAX_CELL_LEN = 8
