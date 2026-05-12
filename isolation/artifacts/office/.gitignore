@@ -147,6 +147,21 @@ tinierworld.[0-9][0-9][0-9]
 metaoffice
 metaoffice2
 
+# officemandel / officemandelshot — tiny terminal Mandelbrot viewers
+officemandel
+officemandelshot
+
+# officemangel — mangeltile-flavoured office fork chain (binaries)
+officemangel
+officemangel[0-9]
+officemangel[0-9][0-9]
+
+# win95term — Win95 look-and-feel TUI (binary)
+win95term
+
+# sheet-*.ans — ledger screenshot dumps
+sheet-*.ans
+
 # compiled MoE artifacts (built into /tmp typically; ignore if local)
 officemoe
 officesoulflt
