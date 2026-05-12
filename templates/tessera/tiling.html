@@ -8,61 +8,46 @@
   .tess-tile-grid td { padding: 0; border: 0; }
   .tess-tile-grid img {
     display: block;
-    width: 96px; height: 96px;
+    width: 64px; height: 64px;
     image-rendering: pixelated;
   }
   .tess-hex-grid { position: relative; background: magenta; }
   .tess-hex-grid img {
     position: absolute;
-    width: 96px; height: 96px;
+    width: 64px; height: 64px;
     image-rendering: pixelated;
-    /* pointy-top inscribed hex: vertex-to-centre = 48 px,
-       inradius = 48·√3/2 ≈ 41.57 → 6.7% / 93.3% horizontals. */
+    /* pointy-top inscribed hex: vertex-to-centre = 32 px,
+       inradius = 32·√3/2 ≈ 27.71 → 6.7% / 93.3% horizontals. */
     clip-path: polygon(50% 0%,
                        93.3% 25%, 93.3% 75%,
                        50% 100%,
                        6.7% 75%,  6.7% 25%);
   }
-  .tess-meta { color: #888; font-size: 0.85rem; }
-  .tess-meta a { color: #ace; }
-  .tess-meta input { background: #111; color: #ccc;
-                     border: 1px solid #333; padding: 2px 4px;
-                     width: 5em; }
-  .tess-meta button { background:#222; color:#cfc;
-                      border:1px solid #555; padding:2px 10px;
-                      font-family:inherit; cursor: pointer; }
+  .tess-bar { color: #888; font-size: 0.85rem;
+              margin: 4px 0 6px; }
+  .tess-bar a { color: #ace; }
+  .tess-bar input { background: #111; color: #ccc;
+                    border: 1px solid #333; padding: 1px 3px;
+                    width: 4em; }
+  .tess-bar button { background:#222; color:#cfc;
+                     border:1px solid #555; padding:1px 8px;
+                     font-family:inherit; cursor: pointer; }
 </style>
 
-<p>
-  <a href="{% url 'tessera:detail' set.slug %}" style="color:#888;">←
-  {{ set.name }}</a>
-</p>
-<h1 style="margin-bottom: 4px;">{{ set.name }} — tiling test</h1>
-<p class="tess-meta">
-  {% if set.topology == 'hex' %}
-  Pointy-top offset-r hex tessellation.  v1 lays constraint-free
-  tiles per cell — the catalogue shows the math works per tile,
-  but the patch isn't yet Wang-legal under hex adjacency.  1 px
-  magenta seam between cells.
-  {% else %}
-  Wang-legal layout: each tile's north edge matches the tile
-  above; west edge matches the tile left.  If the source-image
-  construction is genuinely toroidal and IDW is doing its job,
-  the seams between cells should be invisible — even when zoomed
-  in.  (1 px magenta seam between cells for visual reference.)
-  {% endif %}
+<p class="tess-bar" style="margin-top:0;">
+  <a href="{% url 'tessera:detail' set.slug %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">{{ set.name }}</b> tiling test —
+  {% if set.topology == 'hex' %}offset-r hex, Wang-legal{% else %}square, Wang-legal{% endif %}
+  · 1 px magenta seam
 </p>
 
-<form method="get" class="tess-meta" style="margin: 10px 0;"
-      id="tess-tiling-form">
+<form method="get" class="tess-bar" id="tess-tiling-form">
   rows <input type="number" name="rows" value="{{ rows }}" min="1" max="24">
   cols <input type="number" name="cols" value="{{ cols }}" min="1" max="32">
   seed <input type="number" name="seed" value="{{ seed }}" id="tess-seed">
   <button type="submit">re-roll</button>
   <button type="button" id="tess-random-reroll"
-          title="pick a random seed and re-roll in one click">
-    🎲 random seed
-  </button>
+          title="pick a random seed and re-roll in one click">🎲 random</button>
 </form>
 <script>
   document.getElementById('tess-random-reroll')

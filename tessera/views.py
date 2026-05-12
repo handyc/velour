@@ -180,14 +180,14 @@ def tiling_test(request, slug):
     container_w = container_h = 0
     if s.topology == 'hex':
         # Pointy-top offset-r tessellation.  Tile bounding box is
-        # 96×96 with the inscribed hex centred — but the template
-        # uses clip-path to clip each <img> to just the hex shape,
-        # so adjacent bounding boxes can safely overlap.  Step sizes
-        # are slightly larger than the ideal (2·inradius ≈ 83.14,
-        # 1.5·R = 72) so a ~1 px magenta seam shows through the
-        # container background.
-        TILE_PX = 96
-        H_STEP, V_STEP, ROW_SHIFT = 84, 73, 42
+        # 64×64 with the inscribed hex centred — the template uses
+        # clip-path to clip each <img> to just the hex shape, so
+        # adjacent bounding boxes can safely overlap.  Step sizes are
+        # slightly larger than the ideal (2·inradius ≈ 55.4, 1.5·R =
+        # 48) so a ~1 px magenta seam shows through the container
+        # background.
+        TILE_PX = 64
+        H_STEP, V_STEP, ROW_SHIFT = 56, 49, 28
         placements = []
         for r_i, row in enumerate(grid_ids):
             for c_i, tid in enumerate(row):
