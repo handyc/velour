@@ -1396,7 +1396,9 @@ function spatialTournamentBatch(force) {
  * agent's mangelGen counter; cellMangelCache is keyed off that, so
  * stale tiles drop out automatically on the next render. */
 
-let mangelOn = true;          /* ev85: CA tile cells off by default */
+let mangelOn = false;         /* ev89: off by default — Shift+G to turn on.
+                               * The per-tile Mandelbrot render eats too
+                               * much CPU to leave on without consent. */
 
 const MANGEL_GENE_LEN = 17;
 /* ev86 perf knobs — mangeltiles run on a coarser agent grid than the
