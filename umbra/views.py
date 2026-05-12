@@ -12,9 +12,15 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 
-from . import csvlab
+from . import csvlab, corpuslab
 from .csvlab import OP_CHOICES
-from .models import Scheme, Reference, Experiment, CsvLabSession
+from .corpuslab import (
+    OP_CHOICES as CORPUS_OP_CHOICES,
+    CLASS_CHOICES as CORPUS_CLASS_CHOICES,
+    MAX_CELLS as CORPUS_MAX_CELLS,
+    MAX_CELL_LEN as CORPUS_MAX_CELL_LEN,
+)
+from .models import Scheme, Reference, Experiment, CsvLabSession, CorpusLabSession
 from .runner import run_experiment
 
 
@@ -49,6 +55,7 @@ def _ctx():
         'reference_count':  Reference.objects.count(),
         'experiment_count': Experiment.objects.count(),
         'csvlab_count':     CsvLabSession.objects.count(),
+        'corpuslab_count':  CorpusLabSession.objects.count(),
     }
 
 
@@ -329,6 +336,182 @@ def csvlab_download(request, slug):
     if not s.result_csv:
         messages.error(request, 'No result yet — run the session first.')
         return redirect('umbra:csvlab_session', slug=slug)
+    fname = slugify(s.name) or s.slug
+    resp = HttpResponse(s.result_csv, content_type='text/csv; charset=utf-8')
+    resp['Content-Disposition'] = f'attachment; filename="{fname}.result.csv"'
+    return resp
+
+
+# ── Corpus Lab — TFHE sealed linguistic ops ─────────────────────────
+# Linguistic CSVs (one form per cell), sealed under Concrete TFHE so
+# per-cell character analyses run without the operator seeing the bytes.
+# This is the Leiden humanities/area-studies/low-resource-language path.
+
+SAMPLE_CORPUS_CSV = """form,gloss,language
+guru,teacher,Sanskrit
+shishya,student,Sanskrit
+namaste,greetings,Hindi
+panee,water,Hindi
+ela,cow,Konso
+heera,star,Konso
+"""
+
+
+def corpuslab_index(request):
+    sessions = CorpusLabSession.objects.all()[:20]
+    ctx = _ctx(); ctx.update(
+        sessions=sessions,
+        sample_csv=SAMPLE_CORPUS_CSV,
+        max_cells=CORPUS_MAX_CELLS,
+        max_cell_len=CORPUS_MAX_CELL_LEN,
+    )
+    return render(request, 'umbra/corpuslab_index.html', ctx)
+
+
+def corpuslab_upload(request):
+    if request.method != 'POST':
+        return redirect('umbra:corpuslab')
+    name = (request.POST.get('name') or '').strip()
+    csv_text = ''
+    uploaded = request.FILES.get('file')
+    if uploaded:
+        try:
+            csv_text = uploaded.read().decode('utf-8', errors='replace')
+        except Exception as exc:
+            messages.error(request, f'Could not read file: {exc!r}')
+            return redirect('umbra:corpuslab')
+        if not name:
+            name = uploaded.name
+    else:
+        csv_text = request.POST.get('csv_text') or ''
+        if not name:
+            name = 'pasted'
+    csv_text = csv_text.strip()
+    if not csv_text:
+        messages.error(request, 'No CSV content provided.')
+        return redirect('umbra:corpuslab')
+    grid, rows, cols = corpuslab.parse_csv(csv_text)
+    if rows <= 1:
+        messages.error(request, 'CSV needs a header row plus data rows.')
+        return redirect('umbra:corpuslab')
+    s = CorpusLabSession.objects.create(name=name, original_csv=csv_text,
+                                        ops_json='[]')
+    return redirect('umbra:corpuslab_session', slug=s.slug)
+
+
+def corpuslab_session(request, slug):
+    s = get_object_or_404(CorpusLabSession, slug=slug)
+    grid, _, _ = corpuslab.parse_csv(s.original_csv)
+    try:
+        ops = json.loads(s.ops_json or '[]')
+    except Exception:
+        ops = []
+    result_grid_diff = []
+    changed_cells = 0
+    total_cells = 0
+    if s.result_csv:
+        result_grid, _, _ = corpuslab.parse_csv(s.result_csv)
+        for r, row in enumerate(result_grid):
+            drow = []
+            for c, val in enumerate(row):
+                orig = grid[r][c] if r < len(grid) and c < len(grid[r]) else ''
+                changed = (val != orig)
+                if changed:
+                    changed_cells += 1
+                total_cells += 1
+                drow.append((val, changed))
+            result_grid_diff.append(drow)
+    ctx = _ctx()
+    ctx.update(session=s, grid=grid, ops=ops,
+               result_grid_diff=result_grid_diff,
+               changed_cells=changed_cells, total_cells=total_cells,
+               op_choices=CORPUS_OP_CHOICES,
+               class_choices=CORPUS_CLASS_CHOICES,
+               max_cells=CORPUS_MAX_CELLS,
+               max_cell_len=CORPUS_MAX_CELL_LEN)
+    return render(request, 'umbra/corpuslab_session.html', ctx)
+
+
+def _parse_corpus_op_form(post):
+    kind = post.get('op_kind') or ''
+    if not kind:
+        return None
+    if kind == corpuslab.OP_CHAR_CLASS_MAP:
+        return {'op': kind, 'col': int(post.get('col') or 0)}
+    if kind == corpuslab.OP_COUNT_CLASS:
+        dst = post.get('dst_col')
+        return {
+            'op':     kind,
+            'col':    int(post.get('col') or 0),
+            'target': int(post.get('target') or corpuslab.CLASS_VOWEL),
+            'dst_col': int(dst) if (dst not in (None, '', 'null')) else None,
+        }
+    if kind == corpuslab.OP_LENGTH:
+        dst = post.get('dst_col')
+        return {
+            'op':     kind,
+            'col':    int(post.get('col') or 0),
+            'dst_col': int(dst) if (dst not in (None, '', 'null')) else None,
+        }
+    return None
+
+
+def corpuslab_add_op(request, slug):
+    s = get_object_or_404(CorpusLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:corpuslab_session', slug=slug)
+    try:
+        ops = json.loads(s.ops_json or '[]')
+    except Exception:
+        ops = []
+    try:
+        new_op = _parse_corpus_op_form(request.POST)
+    except (TypeError, ValueError) as exc:
+        messages.error(request, f'Bad op fields: {exc!r}')
+        return redirect('umbra:corpuslab_session', slug=slug)
+    if new_op is None:
+        messages.error(request, 'No op kind selected.')
+        return redirect('umbra:corpuslab_session', slug=slug)
+    ops.append(new_op)
+    s.ops_json = json.dumps(ops)
+    s.save(update_fields=['ops_json', 'updated_at'])
+    messages.success(request, f'Queued {new_op["op"]}.')
+    return redirect('umbra:corpuslab_session', slug=slug)
+
+
+def corpuslab_clear_ops(request, slug):
+    s = get_object_or_404(CorpusLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:corpuslab_session', slug=slug)
+    s.ops_json   = '[]'
+    s.result_csv = ''
+    s.last_error = ''
+    s.save(update_fields=['ops_json', 'result_csv', 'last_error', 'updated_at'])
+    messages.success(request, 'Ops cleared.')
+    return redirect('umbra:corpuslab_session', slug=slug)
+
+
+def corpuslab_run(request, slug):
+    s = get_object_or_404(CorpusLabSession, slug=slug)
+    if request.method != 'POST':
+        return redirect('umbra:corpuslab_session', slug=slug)
+    corpuslab.run_session(s)
+    s.save()
+    if s.last_error:
+        messages.warning(request,
+            f'Ran with {len(s.last_error.splitlines())} op error(s).')
+    else:
+        messages.success(request,
+            f'Ran in {s.compile_ms + s.ops_ms} ms '
+            f'({s.cells} cells, {s.chars_total} encrypted bytes).')
+    return redirect('umbra:corpuslab_session', slug=slug)
+
+
+def corpuslab_download(request, slug):
+    s = get_object_or_404(CorpusLabSession, slug=slug)
+    if not s.result_csv:
+        messages.error(request, 'No result yet — run the session first.')
+        return redirect('umbra:corpuslab_session', slug=slug)
     fname = slugify(s.name) or s.slug
     resp = HttpResponse(s.result_csv, content_type='text/csv; charset=utf-8')
     resp['Content-Disposition'] = f'attachment; filename="{fname}.result.csv"'

@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}{{ session }} — Corpus Lab{% endblock %}
+
+{% block extra_head %}{% include "umbra/_partials.html" %}
+<style>
+  .um-wrap { max-width: 1400px; }
+  .ctl-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 1rem;
+              margin-bottom: 1rem; }
+  @media (max-width: 900px) { .ctl-grid { grid-template-columns: 1fr; } }
+
+  .grid-panel { padding: 0; }
+  .grid-panel > .grid-head {
+    padding: 0.7rem 1rem; border-bottom: 1px solid #21262d;
+    display: flex; align-items: baseline; gap: 0.6rem;
+  }
+  .grid-panel > .grid-head h2 { margin: 0; font-size: 1rem; }
+  .grid-panel > .grid-head .meta {
+    color: #6e7681; font-size: 0.78rem; font-family: ui-monospace, monospace;
+  }
+  .grid-panel.input  > .grid-head { border-top: 2px solid #58a6ff; }
+  .grid-panel.output > .grid-head { border-top: 2px solid #56d364; }
+  .grid-scroll { max-height: 460px; overflow: auto; background: #010409; }
+  table.gridv { border-collapse: separate; border-spacing: 0;
+                font-family: ui-monospace, monospace; font-size: 0.78rem;
+                width: 100%; }
+  table.gridv th, table.gridv td {
+    border-right: 1px solid #21262d; border-bottom: 1px solid #21262d;
+    padding: 0.25rem 0.6rem; color: #c9d1d9;
+    background: #0d1117; min-width: 3em; text-align: left;
+    white-space: nowrap;
+  }
+  table.gridv thead th, table.gridv tr:first-child th {
+    position: sticky; top: 0; z-index: 2;
+    background: #161b22; color: #8b949e; font-weight: 500;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  table.gridv th.rownum, table.gridv td.rownum {
+    position: sticky; left: 0; z-index: 1;
+    background: #161b22; color: #6e7681; font-size: 0.7rem;
+    text-align: right; min-width: 2.6em; padding-right: 0.55rem;
+  }
+  table.gridv thead th.rownum, table.gridv tr:first-child th.rownum { z-index: 3; }
+  table.gridv td.changed {
+    background: #1f2a1c; color: #d2f5b8;
+    box-shadow: inset 0 0 0 1px #56d364;
+  }
+
+  .ops-list { list-style: none; padding: 0; margin: 0; }
+  .ops-list li {
+    background: #161b22; border-left: 2px solid #56d364;
+    padding: 0.32rem 0.55rem; margin-bottom: 2px;
+    font-family: ui-monospace, monospace; font-size: 0.75rem;
+    display: flex; align-items: baseline; gap: 0.45rem;
+  }
+  .ops-list li .meta { color: #6e7681; }
+  .ops-list li.ok    { border-left-color: #56d364; }
+  .ops-list li.err   { border-left-color: #f85149; background: #2a1717; }
+  .ops-list li.pend  { border-left-color: #d2a8ff; }
+  .ops-list .badge { padding: 0 6px; border-radius: 9px; font-size: 0.66rem;
+                     font-family: monospace; white-space: nowrap; }
+  .ops-list .badge.ok   { background: #1c3a23; color: #56d364; }
+  .ops-list .badge.err  { background: #3d1c1c; color: #ff7b72; }
+  .ops-list .badge.pend { background: #2a213d; color: #d2a8ff; }
+  .ops-list .body { flex: 1; color: #c9d1d9; }
+  .ops-list .err-msg { color: #ff7b72; font-size: 0.7rem;
+                       margin-top: 2px; display: block; }
+
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem;
+           padding: 0.7rem 1rem; border-top: 1px solid #21262d;
+           background: #0d1117; }
+  .stats > div { background: #010409; border: 1px solid #21262d;
+                 border-radius: 3px; padding: 0.4rem 0.6rem; }
+  .stats .label { color: #6e7681; font-size: 0.65rem; text-transform: uppercase;
+                  letter-spacing: 0.04em; }
+  .stats .val   { color: #e6edf3; font-family: ui-monospace, monospace;
+                  font-size: 0.95rem; }
+  .stats .val.diff { color: #56d364; }
+
+  .op-fields { display: none; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.4rem; }
+  .op-fields.active { display: flex; }
+  .op-fields label { font-size: 0.7rem; }
+  .op-fields input[type=number] { width: 4.5rem; }
+
+  .err-banner { background: #3d1c1c; border-left: 3px solid #f85149;
+                color: #ffa198; padding: 0.5rem 0.8rem;
+                font-family: ui-monospace, monospace; font-size: 0.75rem;
+                margin: 0; white-space: pre-wrap; }
+  .download-row { padding: 0.7rem 1rem; border-top: 1px solid #21262d;
+                  display: flex; gap: 0.5rem; align-items: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="um-wrap">
+  <h1>{{ session }}
+    <span style="font-weight: 400; color: #6e7681; font-size: 0.85rem;">·
+    {{ session.rows }}×{{ session.cols }} ·
+    Concrete TFHE PBS</span>
+  </h1>
+
+  <nav class="um-nav">
+    <a href="{% url 'umbra:index' %}">overview</a>
+    <a href="{% url 'umbra:corpuslab' %}">← back to Corpus lab</a>
+  </nav>
+
+  <div class="ctl-grid">
+    <div class="panel">
+      <h2>Queue an op</h2>
+      <form method="post" action="{% url 'umbra:corpuslab_add_op' session.slug %}"
+            class="inline">
+        {% csrf_token %}
+        <label>Kind
+          <select name="op_kind" id="op-kind">
+            <option value="">— pick one —</option>
+            {% for value, label in op_choices %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <div class="op-fields" data-kinds="char_class_map">
+          <label>col (0-indexed)<input type="number" name="col" min="0" value="0"></label>
+        </div>
+
+        <div class="op-fields" data-kinds="count_class">
+          <label>col<input type="number" name="col" min="0" value="0"></label>
+          <label>target class
+            <select name="target">
+              {% for value, label in class_choices %}
+              <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>dst col (blank → overwrite)<input type="number" name="dst_col" min="0" placeholder="—"></label>
+        </div>
+
+        <div class="op-fields" data-kinds="length">
+          <label>col<input type="number" name="col" min="0" value="0"></label>
+          <label>dst col (blank → overwrite)<input type="number" name="dst_col" min="0" placeholder="—"></label>
+        </div>
+
+        <button class="btn" type="submit" style="margin-top: 0.5rem;">+ Queue op</button>
+      </form>
+      <p class="hint" style="margin-top: 0.4rem;">
+        Each op runs ~200 ms per encrypted byte.
+        Caps: {{ max_cells }} cells × {{ max_cell_len }} bytes per op.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>Op queue ({{ ops|length }})</h2>
+      {% if ops %}
+      <ol class="ops-list">
+        {% for op in ops %}
+        <li class="{% if op.status == 'ok' %}ok{% elif op.status == 'error' %}err{% else %}pend{% endif %}">
+          <span class="meta">#{{ forloop.counter0 }}</span>
+          {% if op.status == 'ok' %}<span class="badge ok">✓ applied</span>
+          {% elif op.status == 'error' %}<span class="badge err">✗ error</span>
+          {% else %}<span class="badge pend">pending</span>{% endif %}
+          <span class="body">
+            {% if op.op == 'char_class_map' %}char_class_map col={{ op.col }}
+            {% elif op.op == 'count_class' %}count_class col={{ op.col }} target={{ op.target }}{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
+            {% elif op.op == 'length' %}length col={{ op.col }}{% if op.dst_col is not None %} → col {{ op.dst_col }}{% endif %}
+            {% else %}{{ op.op }}{% endif %}
+            {% if op.error %}<span class="err-msg">{{ op.error }}</span>{% endif %}
+          </span>
+        </li>
+        {% endfor %}
+      </ol>
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.7rem;">
+        <form method="post" action="{% url 'umbra:corpuslab_run' session.slug %}"
+              id="run-form">
+          {% csrf_token %}
+          <button class="btn" type="submit" id="run-btn">Run round trip</button>
+        </form>
+        <form method="post" action="{% url 'umbra:corpuslab_clear_ops' session.slug %}">
+          {% csrf_token %}
+          <button class="btn btn-quiet" type="submit">Clear ops + result</button>
+        </form>
+      </div>
+      {% else %}
+      <p class="empty">No ops queued. Pick a kind above to add one.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="panel grid-panel input">
+    <div class="grid-head">
+      <h2>Input <span style="color: #58a6ff;">·</span> plaintext</h2>
+      <span class="meta">{{ grid|length }} rows × {{ session.cols }} cols</span>
+    </div>
+    <div class="grid-scroll">
+      <table class="gridv">
+        <thead><tr><th class="rownum">#</th>
+          {% for c in grid.0 %}<th>col {{ forloop.counter0 }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+        {% for row in grid %}
+        <tr>
+          <td class="rownum">{{ forloop.counter0 }}</td>
+          {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if session.result_csv %}
+  <div class="panel grid-panel output">
+    <div class="grid-head">
+      <h2>Output <span style="color: #56d364;">·</span> decrypted</h2>
+      <span class="meta">
+        <span style="color: #56d364;">{{ changed_cells }}</span>
+        of {{ total_cells }} cells changed (green)
+      </span>
+    </div>
+    <div class="grid-scroll">
+      <table class="gridv">
+        <thead><tr><th class="rownum">#</th>
+          {% for c in result_grid_diff.0 %}<th>col {{ forloop.counter0 }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+        {% for row in result_grid_diff %}
+        <tr>
+          <td class="rownum">{{ forloop.counter0 }}</td>
+          {% for cell in row %}<td{% if cell.1 %} class="changed"{% endif %}>{{ cell.0 }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="stats">
+      <div><div class="label">compile</div><div class="val">{{ session.compile_ms }} ms</div></div>
+      <div><div class="label">ops (PBS)</div><div class="val">{{ session.ops_ms }} ms</div></div>
+      <div><div class="label">cells</div><div class="val">{{ session.cells }}</div></div>
+      <div><div class="label">bytes encrypted</div><div class="val">{{ session.chars_total }}</div></div>
+      <div><div class="label">changed</div><div class="val diff">{{ changed_cells }} / {{ total_cells }}</div></div>
+    </div>
+
+    <div class="download-row">
+      <a class="btn" href="{% url 'umbra:corpuslab_download' session.slug %}">Download result.csv</a>
+      <span class="meta" style="color: #6e7681; font-size: 0.75rem;">
+        UTF-8, comma-separated, LF line endings
+      </span>
+    </div>
+
+    {% if session.last_error %}
+    <div class="err-banner">{{ session.last_error }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+  (function () {
+    var f = document.getElementById('run-form');
+    var b = document.getElementById('run-btn');
+    if (f && b) {
+      f.addEventListener('submit', function () {
+        b.disabled = true;
+        b.textContent = 'Running…';
+      });
+    }
+  })();
+
+  (function () {
+    var sel = document.getElementById('op-kind');
+    var blocks = document.querySelectorAll('.op-fields');
+    function setBlock(b, active) {
+      if (active) b.classList.add('active'); else b.classList.remove('active');
+      b.querySelectorAll('input, select, textarea').forEach(function (el) {
+        el.disabled = !active;
+      });
+    }
+    function refresh() {
+      var kind = sel.value;
+      blocks.forEach(function (b) {
+        var kinds = (b.getAttribute('data-kinds') || '').split(/\s+/);
+        setBlock(b, !!kind && kinds.indexOf(kind) !== -1);
+      });
+    }
+    if (sel) { sel.addEventListener('change', refresh); refresh(); }
+  })();
+</script>
+{% endblock %}

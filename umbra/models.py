@@ -161,6 +161,58 @@ class Experiment(models.Model):
         super().save(*args, **kwargs)
 
 
+class CorpusLabSession(models.Model):
+    """Linguistic CSV (one form per cell) encrypted byte-by-byte under
+    Concrete TFHE.  Each cell becomes a fixed-length byte array padded
+    with 0-sentinels; ops are per-cell sealed transformations applied
+    via programmable bootstrapping (PBS) — table-lookups under seal.
+
+    Same threat model as CsvLabSession: key, encryption, ops, decryption
+    all in one Django request.  Pedagogical demo of the sealed
+    linguistic-CSV pipeline shape, not a real privacy boundary.
+
+    Ops schema lives in corpuslab.py."""
+
+    name           = models.CharField(max_length=128, blank=True)
+    slug           = models.SlugField(max_length=128, unique=True)
+    original_csv   = models.TextField()
+    result_csv     = models.TextField(blank=True)
+    ops_json       = models.TextField(blank=True, default='[]',
+        help_text='JSON list of {op, ...} dicts; see corpuslab.OP_*.')
+    rows           = models.PositiveIntegerField(default=0)
+    cols           = models.PositiveIntegerField(default=0)
+    cells          = models.PositiveIntegerField(default=0,
+        help_text='Non-empty cells in the grid.')
+    max_cell_len   = models.PositiveIntegerField(default=0,
+        help_text='Padded length each cell was zero-padded to before encrypt.')
+    chars_total    = models.PositiveIntegerField(default=0,
+        help_text='Total bytes encrypted (cells × max_cell_len).')
+    compile_ms     = models.PositiveIntegerField(default=0)
+    encrypt_ms     = models.PositiveIntegerField(default=0)
+    ops_ms         = models.PositiveIntegerField(default=0)
+    decrypt_ms     = models.PositiveIntegerField(default=0)
+    last_error     = models.TextField(blank=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name or f'corpuslab-{self.pk}'
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.name)[:120] or 'corpus'
+            slug = base
+            i = 2
+            while CorpusLabSession.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f'{base}-{i}'
+                i += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+
 class CsvLabSession(models.Model):
     """CSV uploaded, parsed, encrypted cell-by-cell with CKKS, then
     mutated by a queued list of ops, then decrypted back to a CSV.

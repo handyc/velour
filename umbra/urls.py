@@ -26,4 +26,12 @@ urlpatterns = [
     path('csvlab/<slug:slug>/clear-ops/', views.csvlab_clear_ops, name='csvlab_clear_ops'),
     path('csvlab/<slug:slug>/run/',       views.csvlab_run,       name='csvlab_run'),
     path('csvlab/<slug:slug>/download/',  views.csvlab_download,  name='csvlab_download'),
+
+    path('corpuslab/',                       views.corpuslab_index,     name='corpuslab'),
+    path('corpuslab/upload/',                views.corpuslab_upload,    name='corpuslab_upload'),
+    path('corpuslab/<slug:slug>/',           views.corpuslab_session,   name='corpuslab_session'),
+    path('corpuslab/<slug:slug>/add-op/',    views.corpuslab_add_op,    name='corpuslab_add_op'),
+    path('corpuslab/<slug:slug>/clear-ops/', views.corpuslab_clear_ops, name='corpuslab_clear_ops'),
+    path('corpuslab/<slug:slug>/run/',       views.corpuslab_run,       name='corpuslab_run'),
+    path('corpuslab/<slug:slug>/download/',  views.corpuslab_download,  name='corpuslab_download'),
 ]

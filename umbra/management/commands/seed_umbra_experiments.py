@@ -133,6 +133,91 @@ print('sum(3,5,7,11,13) =', he.decryptInt(total)[0])   # -> 39
 ''',
     },
     {
+        'name':        'TFHE — encrypted char-class lookup (Concrete)',
+        'description': 'Programmable bootstrapping on a per-byte LUT — '
+                       'the building block for sealed linguistic ops. '
+                       'Classifies an encrypted ASCII char as '
+                       'vowel/consonant/digit/punct/other.',
+        'scheme_slug': 'tfhe',
+        'code': '''\
+# TFHE via Concrete: byte -> char-class under seal via PBS.
+# This is the atom for Corpus Lab's sealed linguistic ops.
+import time, numpy as np
+from concrete import fhe
+
+# Char classes: 0=other 1=vowel 2=consonant 3=digit 4=punct.
+VOWELS = set(ord(c) for c in "aeiouAEIOU")
+PUNCT  = set(map(ord, ' !"\\\'\\,.:;?'))
+def classify(c):
+    if c in VOWELS:                            return 1
+    if (97 <= c <= 122) or (65 <= c <= 90):    return 2
+    if 48 <= c <= 57:                          return 3
+    if c in PUNCT:                             return 4
+    return 0
+
+table = fhe.LookupTable([classify(i) for i in range(128)])
+
+@fhe.compiler({"c": "encrypted"})
+def char_class(c):
+    return table[c]
+
+t0 = time.monotonic()
+circuit = char_class.compile([(i,) for i in range(128)])
+print("compile_ms:", int((time.monotonic() - t0) * 1000))
+
+samples = [("a", 1), ("b", 2), ("3", 3), (",", 4), ("@", 0), ("I", 1)]
+print("char | class | latency")
+for ch, expected in samples:
+    t1 = time.monotonic()
+    got = circuit.encrypt_run_decrypt(ord(ch))
+    print(f"  {ch!r:5} -> {got}  ({int((time.monotonic() - t1) * 1000)} ms)  expected {expected}")
+''',
+    },
+    {
+        'name':        'TFHE — vowel count under seal (Concrete)',
+        'description': 'Per-byte indicator under PBS, then sum across '
+                       'cell — produces an encrypted vowel count for a '
+                       'short padded form.  Same shape as the Corpus '
+                       'Lab count_class op.',
+        'scheme_slug': 'tfhe',
+        'code': '''\
+# TFHE via Concrete: encrypted vowel count for an 8-byte cell.
+import time, numpy as np
+from concrete import fhe
+
+VOWELS = set(ord(c) for c in "aeiouAEIOU")
+indicator = np.array([1 if i in VOWELS else 0 for i in range(128)],
+                     dtype=np.int64)
+table = fhe.LookupTable(indicator.tolist())
+
+CELL_LEN = 8
+
+@fhe.compiler({"cell": "encrypted"})
+def vowel_count(cell):
+    return np.sum(table[cell])
+
+inputset = [np.random.randint(0, 128, size=CELL_LEN, dtype=np.int64)
+            for _ in range(8)]
+t0 = time.monotonic()
+circuit = vowel_count.compile(inputset)
+print("compile_ms:", int((time.monotonic() - t0) * 1000))
+
+def encode(text):
+    arr = np.zeros(CELL_LEN, dtype=np.int64)
+    for i, ch in enumerate(text[:CELL_LEN]):
+        b = ord(ch)
+        arr[i] = b if 0 < b < 128 else 0
+    return arr
+
+for word in ["guru", "shishya", "namaste", "panee", "ela", "heera"]:
+    arr = encode(word)
+    t1  = time.monotonic()
+    got = circuit.encrypt_run_decrypt(arr)
+    expected = sum(1 for c in word[:CELL_LEN] if ord(c) in VOWELS)
+    print(f"  {word!r:10} -> {int(got)} vowels  ({int((time.monotonic() - t1) * 1000)} ms)  expected {expected}")
+''',
+    },
+    {
         'name':        'CKKS — encrypted cosine similarity',
         'description': 'Cosine similarity between two encrypted vectors '
                        'via dot product + plaintext norms. Often used in '
