@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Bibliography — Bagīcā{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .back { font-size: 0.78rem; margin-bottom: 1rem; }
+  .back a { color: #58a6ff; text-decoration: none; margin-right: 1.2rem; }
+  h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
+  p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1.6rem; }
+
+  .entry { border-bottom: 1px solid #1c2128; padding: 0.9rem 0; }
+  .entry .citation { font-size: 0.95rem; color: #c9d1d9; line-height: 1.45; }
+  .entry .citation .author { color: #f0f6fc; font-weight: 500; }
+  .entry .citation .title  { color: #f0c674; font-style: italic; }
+  .entry .citation .pub    { color: #8b949e; }
+  .entry .note { color: #6e7681; font-size: 0.82rem;
+                 margin-top: 0.35rem; line-height: 1.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+
+  <div class="back">
+    <a href="{% url 'bagicha:index' %}">← back to garden</a>
+    <a href="{% url 'bagicha:resources' %}">→ learning resources</a>
+  </div>
+
+  <h1>Bibliography — Hindi grammar &amp; reference</h1>
+  <p class="hint">
+    A short shelf for anyone wanting to read further. Reference grammars
+    first, then teaching texts, then the historical lexicons.
+  </p>
+
+  {% for e in entries %}
+    <div class="entry">
+      <div class="citation">
+        <span class="author">{{ e.author }}</span> ({{ e.year }}).
+        <span class="title">{{ e.title }}</span>{% if e.edition %}, <span>{{ e.edition }}</span>{% endif %}.
+        <span class="pub">{{ e.publisher }}.</span>
+      </div>
+      <div class="note">{{ e.note }}</div>
+    </div>
+  {% endfor %}
+
+</div>
+{% endblock %}

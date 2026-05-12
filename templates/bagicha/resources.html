@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Learning resources — Bagīcā{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem;
+          color: #c9d1d9; }
+  .back { font-size: 0.78rem; margin-bottom: 1rem; }
+  .back a { color: #58a6ff; text-decoration: none; margin-right: 1.2rem; }
+  h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
+  p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1.6rem; }
+
+  h2 { font-size: 0.78rem; color: #8b949e; font-weight: 500;
+       text-transform: uppercase; letter-spacing: 0.05em;
+       margin: 1.5rem 0 0.6rem;
+       border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; }
+
+  .item { padding: 0.65rem 0; border-bottom: 1px solid #1c2128; }
+  .item a { color: #58a6ff; text-decoration: none; font-size: 0.95rem; }
+  .item a:hover { text-decoration: underline; }
+  .item .kind { color: #d2a8ff; font-size: 0.66rem;
+                text-transform: uppercase; letter-spacing: 0.04em;
+                margin-left: 0.5rem; }
+  .item .note { color: #6e7681; font-size: 0.82rem;
+                margin-top: 0.25rem; line-height: 1.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+
+  <div class="back">
+    <a href="{% url 'bagicha:index' %}">← back to garden</a>
+    <a href="{% url 'bagicha:bibliography' %}">→ bibliography</a>
+  </div>
+
+  <h1>Learning resources</h1>
+  <p class="hint">
+    A curated catalogue of Hindi-learning resources around the web:
+    dictionaries, free courses, lexical databases, and institutional
+    portals.
+  </p>
+
+  <h2>Dictionaries</h2>
+  {% for l in links %}{% if l.kind == 'dictionary' %}
+    <div class="item">
+      <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">{{ l.name }} ↗</a>
+      <span class="kind">{{ l.kind }}</span>
+      <div class="note">{{ l.note }}</div>
+    </div>
+  {% endif %}{% endfor %}
+
+  <h2>Courses</h2>
+  {% for l in links %}{% if l.kind == 'course' %}
+    <div class="item">
+      <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">{{ l.name }} ↗</a>
+      <span class="kind">{{ l.kind }}</span>
+      <div class="note">{{ l.note }}</div>
+    </div>
+  {% endif %}{% endfor %}
+
+  <h2>Corpora &amp; institutions</h2>
+  {% for l in links %}{% if l.kind == 'corpus' or l.kind == 'institution' %}
+    <div class="item">
+      <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">{{ l.name }} ↗</a>
+      <span class="kind">{{ l.kind }}</span>
+      <div class="note">{{ l.note }}</div>
+    </div>
+  {% endif %}{% endfor %}
+
+</div>
+{% endblock %}

@@ -151,6 +151,7 @@ INSTALLED_APPS = [
     'bidir',
     'umbra',
     'tableau',
+    'bagicha',
 ]
 
 MIDDLEWARE = [

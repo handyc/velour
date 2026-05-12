@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}{{ word.dev }} · {{ word.translit }} — Bagīcā{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem; color: #c9d1d9; }
+  .back { font-size: 0.78rem; color: #6e7681; margin-bottom: 1rem; }
+  .back a { color: #58a6ff; text-decoration: none; }
+
+  .lemma { font-size: 3.3rem; color: #f0f6fc; line-height: 1.1;
+           margin: 0.2rem 0 0.2rem; }
+  .roman { font-size: 1.05rem; color: #8b949e; font-style: italic;
+           margin: 0 0 0.1rem; }
+  .gloss { font-size: 1rem; color: #c9d1d9; margin: 0 0 1.3rem; }
+  .gloss::before { content: "“"; color: #6e7681; }
+  .gloss::after  { content: "”"; color: #6e7681; }
+
+  .section { border-top: 1px solid #21262d; padding-top: 1rem;
+             margin-top: 1.4rem; }
+  .section h2 { font-size: 0.78rem; color: #8b949e; font-weight: 500;
+                text-transform: uppercase; letter-spacing: 0.05em;
+                margin: 0 0 0.7rem; }
+
+  table.props { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  table.props td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #1c2128;
+                   vertical-align: top; }
+  table.props td.k { color: #6e7681; width: 12rem;
+                     text-transform: uppercase; font-size: 0.7rem;
+                     letter-spacing: 0.04em; }
+  table.props td.v { color: #c9d1d9; }
+  table.props td.v .dev { color: #f0c674; font-size: 1.1rem;
+                          margin-right: 0.3rem; }
+
+  .links { display: flex; flex-direction: column; gap: 0.6rem; }
+  .links .link { border: 1px solid #21262d; border-radius: 5px;
+                 padding: 0.65rem 0.9rem; background: #0d1117; }
+  .links .link a { color: #58a6ff; text-decoration: none;
+                   font-size: 0.9rem; }
+  .links .link a:hover { text-decoration: underline; }
+  .links .link .why { color: #6e7681; font-size: 0.75rem;
+                      margin-top: 0.2rem; }
+
+  .related { display: flex; flex-wrap: wrap; gap: 0.4rem 0.7rem; }
+  .related a { color: #c9d1d9; background: #161b22;
+               border: 1px solid #30363d; border-radius: 4px;
+               padding: 0.3rem 0.6rem; font-size: 0.85rem;
+               text-decoration: none; }
+  .related a:hover { border-color: #8b949e; }
+  .related .dev { color: #f0c674; }
+  .related .gl { color: #6e7681; font-size: 0.75rem;
+                 margin-left: 0.3rem; }
+
+  .note { color: #c9d1d9; font-size: 0.88rem; line-height: 1.5;
+          padding: 0.7rem 0.9rem; background: #0d1117;
+          border-left: 3px solid #d2a8ff; border-radius: 0 4px 4px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+
+  <div class="back">
+    <a href="{% url 'bagicha:index' %}">← back to garden</a>
+  </div>
+
+  <div class="lemma">{{ word.dev }}</div>
+  <p class="roman">{{ word.translit }}</p>
+  <p class="gloss">{{ word.gloss }}</p>
+
+  <div class="section">
+    <h2>Lexical properties</h2>
+    <table class="props">
+      <tr><td class="k">Part of speech</td>      <td class="v">{{ word.pos }}</td></tr>
+      {% if word.gender %}     <tr><td class="k">Gender</td>      <td class="v">{{ word.gender }}{% if word.gender == 'm' %} (masculine){% else %} (feminine){% endif %}</td></tr>{% endif %}
+      {% if word.category %}   <tr><td class="k">Category</td>    <td class="v">{{ word.category }}</td></tr>{% endif %}
+      {% if word.number %}     <tr><td class="k">Number</td>      <td class="v">{{ word.number }}</td></tr>{% endif %}
+      {% if word.tense %}      <tr><td class="k">Tense</td>       <td class="v">{{ word.tense }}</td></tr>{% endif %}
+      {% if word.person %}     <tr><td class="k">Person</td>      <td class="v">{{ word.person }}</td></tr>{% endif %}
+      {% if word.inflection %} <tr><td class="k">Inflection class</td><td class="v">{{ word.inflection }}</td></tr>{% endif %}
+      {% if word.plural_direct %}<tr><td class="k">Plural (direct)</td><td class="v"><span class="dev">{{ word.plural_direct }}</span></td></tr>{% endif %}
+      {% if word.plural_oblique %}<tr><td class="k">Plural (oblique)</td><td class="v"><span class="dev">{{ word.plural_oblique }}</span></td></tr>{% endif %}
+      {% if word.oblique_sg %} <tr><td class="k">Singular (oblique)</td><td class="v"><span class="dev">{{ word.oblique_sg }}</span></td></tr>{% endif %}
+      {% if word.forms %}
+        {% for slot, form in word.forms.items %}
+          <tr><td class="k">Form · {{ slot }}</td><td class="v"><span class="dev">{{ form }}</span></td></tr>
+        {% endfor %}
+      {% endif %}
+    </table>
+  </div>
+
+  {% if word.note %}
+    <div class="section">
+      <h2>Note</h2>
+      <div class="note">{{ word.note }}</div>
+    </div>
+  {% endif %}
+
+  <div class="section">
+    <h2>Dictionary lookups</h2>
+    <div class="links">
+      {% for l in links %}
+        <div class="link">
+          <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">{{ l.name }} ↗</a>
+          <div class="why">{{ l.why }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if related %}
+    <div class="section">
+      <h2>Related vocabulary</h2>
+      <div class="related">
+        {% for k, w in related %}
+          <a href="{% url 'bagicha:word' k %}">
+            <span class="dev">{{ w.dev }}</span>
+            <span class="gl">{{ w.gloss }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Bagīcā — Hindi sentence garden{% endblock %}
+
+{% block extra_head %}
+<style>
+  .wrap { max-width: 1080px; margin: 1.5rem auto; padding: 0 1rem; color: #c9d1d9; }
+  .wrap h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
+  .wrap h1 .dev { font-size: 1.45rem; color: #f0c674; margin-right: 0.4rem; }
+  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1.4rem; }
+  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
+  .toolbar { display: flex; gap: 0.6rem; align-items: center;
+             margin-bottom: 1.2rem; font-size: 0.78rem; }
+  .toolbar .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+                  padding: 0.35rem 0.8rem; border-radius: 4px;
+                  text-decoration: none; }
+  .toolbar .btn:hover { border-color: #8b949e; }
+  .toolbar .meta { color: #6e7681; }
+
+  .sentence { border: 1px solid #21262d; border-radius: 6px;
+              padding: 1rem 1.1rem; margin-bottom: 1.2rem;
+              background: #0d1117; }
+  .sentence .tmpl { font-size: 0.68rem; color: #6e7681;
+                    text-transform: uppercase; letter-spacing: 0.05em;
+                    margin-bottom: 0.5rem; }
+  .sentence .devline { font-size: 1.55rem; line-height: 1.5;
+                       color: #f0f6fc; margin-bottom: 0.25rem;
+                       word-spacing: 0.2em; }
+  .sentence .devline a { color: #f0f6fc; text-decoration: none;
+                         border-bottom: 1px dotted #4a4f55;
+                         padding-bottom: 1px; }
+  .sentence .devline a:hover { color: #79c0ff;
+                               border-bottom-color: #79c0ff; }
+  .sentence .translit { font-size: 0.9rem; color: #8b949e;
+                        font-style: italic; margin-bottom: 0.25rem; }
+  .sentence .gloss { font-size: 0.85rem; color: #c9d1d9;
+                     margin-bottom: 0.9rem; }
+  .sentence .gloss::before { content: "“"; color: #6e7681; }
+  .sentence .gloss::after  { content: "”"; color: #6e7681; }
+
+  table.parse { width: 100%; border-collapse: collapse;
+                font-size: 0.78rem; margin-top: 0.3rem; }
+  table.parse th, table.parse td { text-align: left; padding: 0.3rem 0.55rem;
+                                   border-bottom: 1px solid #1c2128;
+                                   vertical-align: top; }
+  table.parse th { color: #6e7681; font-weight: 500; font-size: 0.66rem;
+                   text-transform: uppercase; letter-spacing: 0.04em; }
+  table.parse td.dev { color: #f0f6fc; font-size: 1rem; }
+  table.parse td.dev a { color: #f0f6fc; text-decoration: none;
+                         border-bottom: 1px dotted #4a4f55; }
+  table.parse td.dev a:hover { color: #79c0ff; border-bottom-color: #79c0ff; }
+  table.parse td.tr   { color: #8b949e; font-style: italic; }
+  table.parse td.pos  { color: #d2a8ff; font-size: 0.7rem;
+                        text-transform: uppercase; letter-spacing: 0.04em; }
+  table.parse td.gl   { color: #c9d1d9; }
+  table.parse td.lab  { color: #79c0ff; font-size: 0.72rem; }
+
+  .footnav { margin-top: 1.6rem; padding-top: 1rem;
+             border-top: 1px solid #21262d;
+             color: #6e7681; font-size: 0.78rem; }
+  .footnav a { color: #58a6ff; text-decoration: none; margin-right: 1.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+
+  <h1><span class="dev">बग़ीचा</span>Bagīcā — Hindi sentence garden</h1>
+  <p class="hint">
+    Syntactically correct Hindi sentences about fruits and flowers, with
+    every word linked to a dictionary entry and annotated for gender,
+    number, and case agreement. Refresh to draw a new bouquet. Vocabulary:
+    {{ word_count }} entries.
+  </p>
+
+  <div class="toolbar">
+    <a class="btn" href="?n={{ n }}">↻ regenerate</a>
+    <span class="meta">currently showing {{ n }} sentences</span>
+    <span class="meta">·</span>
+    <a class="btn" href="?n=3">3</a>
+    <a class="btn" href="?n=6">6</a>
+    <a class="btn" href="?n=10">10</a>
+  </div>
+
+  {% for s in sentences %}
+    <div class="sentence">
+      <div class="tmpl">{{ s.template }}</div>
+      <div class="devline">
+        {% for t in s.tokens %}<a href="{% url 'bagicha:word' t.key %}"
+          title="{{ t.translit }} — {{ t.gloss }}{% if t.label %} · {{ t.label }}{% endif %}">{{ t.surface }}</a>{% if not forloop.last %} {% endif %}{% endfor %}।
+      </div>
+      <div class="translit">{{ s.translit }}</div>
+      <div class="gloss">{{ s.gloss }}</div>
+
+      <table class="parse">
+        <thead>
+          <tr>
+            <th>word</th>
+            <th>romanisation</th>
+            <th>part of speech</th>
+            <th>gloss</th>
+            <th>analysis</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in s.tokens %}
+            <tr>
+              <td class="dev"><a href="{% url 'bagicha:word' t.key %}">{{ t.surface }}</a></td>
+              <td class="tr">{{ t.translit }}</td>
+              <td class="pos">{{ t.pos }}</td>
+              <td class="gl">{{ t.gloss }}</td>
+              <td class="lab">{{ t.label|default:"—" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endfor %}
+
+  <div class="footnav">
+    <a href="{% url 'bagicha:bibliography' %}">→ bibliography</a>
+    <a href="{% url 'bagicha:resources' %}">→ learning resources</a>
+  </div>
+
+</div>
+{% endblock %}
