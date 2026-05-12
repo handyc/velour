@@ -182,6 +182,9 @@
         <input type="number" id="ga-edge-weight" value="50" min="0" max="100" step="5"
                style="background:#111; color:#ccc; border:1px solid #333;
                       padding:1px 3px; width:4em;"></label>
+      <label title="when a new generation produces a leader, load it into the live canvas and re-seed from the image so you can watch GA progress in real time">auto-adopt leader
+        <input type="checkbox" id="ga-auto-adopt" checked
+               style="vertical-align:-2px;"></label>
     </div>
     <div style="margin-top:6px;">
       <button type="button" id="ga-run"
@@ -682,6 +685,7 @@
       randInit:   Math.max(0, Math.min(100, num('ga-rand-init', 25))) / 100,
       reseedEval: document.getElementById('ga-reseed').checked,
       edgeWeight: Math.max(0, Math.min(100, num('ga-edge-weight', 50))) / 100,
+      autoAdopt:  document.getElementById('ga-auto-adopt').checked,
     };
   }
 
@@ -745,6 +749,7 @@
     var gen = 0;
     var allBest = [];
     var bestEver = null;
+    var prevAdoptedRule = null;
 
     function evalPop (population, seedSalt, doneCb) {
       var i = 0;
@@ -782,6 +787,18 @@
       var best = scored[0];
       allBest.push(best.score);
       if (!bestEver || best.score > bestEver.score) bestEver = best;
+      // Auto-adopt: swap the live canvas's rule to the generation's
+      // leader and re-seed so each tick onward reflects the search's
+      // best find.  Only fires when the leader actually changes (and
+      // not while the user is still configuring — `cfg.autoAdopt`
+      // gates it explicitly).
+      if (cfg.autoAdopt && best.rule !== prevAdoptedRule) {
+        rule = best.rule;
+        seed();
+        resetLiveStats();
+        draw();
+        prevAdoptedRule = best.rule;
+      }
       // Progress line shows both raw metrics so you can see whether
       // the leader is winning on edge, on preserve, or both.
       var line = 'gen ' + String(gen + 1).padStart(3) +
@@ -825,6 +842,13 @@
         ' — ' + gen + ' gens, best ' +
         (bestEver ? bestEver.score.toFixed(3) : '—');
       renderResults((scored || []).slice(0, 8));
+      if (cfg.autoAdopt && bestEver && bestEver.rule !== prevAdoptedRule) {
+        rule = bestEver.rule;
+        seed();
+        resetLiveStats();
+        draw();
+        prevAdoptedRule = bestEver.rule;
+      }
     }
 
     evalPop(pop, 0, nextGen);
