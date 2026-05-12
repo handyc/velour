@@ -309,9 +309,10 @@ def count_nonempty(grid) -> int:
     return sum(1 for row in grid for cell in row if cell.strip())
 
 
-def _select_cells(grid, col: int):
-    """Pick (row_index, cell_text) for the target column, up to
-    MAX_CELLS, skipping empty cells and the header row (row 0)."""
+def _select_cells(grid, col: int, cap=None):
+    """Pick (row_index, cell_text) for the target column, skipping empty
+    cells and the header row.  `cap` limits the selection (None = no
+    cap, used by the chunked CLI runner)."""
     sel = []
     for r in range(1, len(grid)):
         if col >= len(grid[r]):
@@ -320,9 +321,16 @@ def _select_cells(grid, col: int):
         if not cell.strip():
             continue
         sel.append((r, cell))
-        if len(sel) >= MAX_CELLS:
+        if cap is not None and len(sel) >= cap:
             break
     return sel
+
+
+def _chunks(sel, size):
+    """Yield (chunk_index, slice_of_sel) for non-overlapping chunks
+    of `size` cells.  The final chunk may be short."""
+    for ci in range(0, len(sel), size):
+        yield ci // size, sel[ci:ci + size]
 
 
 def _encode_cell(profile: LanguageProfile, text: str, length: int) -> np.ndarray:
@@ -394,10 +402,30 @@ def _build_length_circuit(profile: LanguageProfile, cell_len: int):
 
 
 # ── Op implementations ─────────────────────────────────────────────
+#
+# Each op compiles its circuit once for the chosen cell_len, then
+# applies it to chunks of MAX_CELLS cells.  The compile cost
+# amortises across the whole corpus, so a 1024-cell run pays exactly
+# one compile and 128 chunk runs.  No special cap on the corpus
+# size beyond what the caller passes via the `cap` parameter.
 
-def _apply_char_class_map(profile, grid, op, timing):
+def _run_chunked(profile, sel, cell_len, circuit, progress_cb=None):
+    """Iterate the selection in MAX_CELLS chunks, calling the supplied
+    Concrete circuit per chunk.  Yields (row_index, result_for_row).
+    `circuit` is expected to accept a (MAX_CELLS, cell_len) tensor."""
+    n_chunks = (len(sel) + MAX_CELLS - 1) // MAX_CELLS
+    for ci, chunk in _chunks(sel, MAX_CELLS):
+        plain_in = _pad_to_max(profile, chunk, cell_len)
+        out = circuit.encrypt_run_decrypt(plain_in)
+        for i, (r, _) in enumerate(chunk):
+            yield r, out[i]
+        if progress_cb:
+            progress_cb(ci + 1, n_chunks, len(chunk))
+
+
+def _apply_char_class_map(profile, grid, op, timing, cap, progress_cb=None):
     col = int(op['col'])
-    sel = _select_cells(grid, col)
+    sel = _select_cells(grid, col, cap=cap)
     if not sel:
         raise ValueError(f'no non-empty cells in column {col} (rows 1..)')
     cell_len = min(MAX_CELL_LEN, max(len(text) for _, text in sel) or 1)
@@ -407,20 +435,17 @@ def _apply_char_class_map(profile, grid, op, timing):
     timing['compile_ms'] += int((time.monotonic() - t0) * 1000)
 
     t1 = time.monotonic()
-    plain_in = _pad_to_max(profile, sel, cell_len)
-    out = circuit.encrypt_run_decrypt(plain_in)
+    for r, row_out in _run_chunked(profile, sel, cell_len, circuit, progress_cb):
+        grid[r][col] = _decode_class_cell(row_out)
     timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
 
-    for i, (r, _) in enumerate(sel):
-        grid[r][col] = _decode_class_cell(out[i])
 
-
-def _apply_count_class(profile, grid, op, timing):
+def _apply_count_class(profile, grid, op, timing, cap, progress_cb=None):
     col    = int(op['col'])
     target = int(op.get('target', CLASS_VOWEL))
     if target not in {0, 1, 2, 3, 4, 5}:
         raise ValueError(f'bad target class {target}')
-    sel = _select_cells(grid, col)
+    sel = _select_cells(grid, col, cap=cap)
     if not sel:
         raise ValueError(f'no non-empty cells in column {col} (rows 1..)')
     cell_len = min(MAX_CELL_LEN, max(len(text) for _, text in sel) or 1)
@@ -429,14 +454,10 @@ def _apply_count_class(profile, grid, op, timing):
     circuit = _build_count_class_circuit(profile, cell_len, target)
     timing['compile_ms'] += int((time.monotonic() - t0) * 1000)
 
-    t1 = time.monotonic()
-    plain_in = _pad_to_max(profile, sel, cell_len)
-    counts = circuit.encrypt_run_decrypt(plain_in)
-    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
-
     dst_col = op.get('dst_col')
-    for i, (r, _) in enumerate(sel):
-        cell = str(int(counts[i]))
+    t1 = time.monotonic()
+    for r, count in _run_chunked(profile, sel, cell_len, circuit, progress_cb):
+        cell = str(int(count))
         if dst_col is None:
             grid[r][col] = cell
         else:
@@ -444,11 +465,12 @@ def _apply_count_class(profile, grid, op, timing):
             while len(grid[r]) <= dc:
                 grid[r].append('')
             grid[r][dc] = cell
+    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
 
 
-def _apply_length(profile, grid, op, timing):
+def _apply_length(profile, grid, op, timing, cap, progress_cb=None):
     col = int(op['col'])
-    sel = _select_cells(grid, col)
+    sel = _select_cells(grid, col, cap=cap)
     if not sel:
         raise ValueError(f'no non-empty cells in column {col} (rows 1..)')
     cell_len = min(MAX_CELL_LEN, max(len(text) for _, text in sel) or 1)
@@ -457,14 +479,10 @@ def _apply_length(profile, grid, op, timing):
     circuit = _build_length_circuit(profile, cell_len)
     timing['compile_ms'] += int((time.monotonic() - t0) * 1000)
 
-    t1 = time.monotonic()
-    plain_in = _pad_to_max(profile, sel, cell_len)
-    lengths = circuit.encrypt_run_decrypt(plain_in)
-    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
-
     dst_col = op.get('dst_col')
-    for i, (r, _) in enumerate(sel):
-        cell = str(int(lengths[i]))
+    t1 = time.monotonic()
+    for r, length in _run_chunked(profile, sel, cell_len, circuit, progress_cb):
+        cell = str(int(length))
         if dst_col is None:
             grid[r][col] = cell
         else:
@@ -472,19 +490,23 @@ def _apply_length(profile, grid, op, timing):
             while len(grid[r]) <= dc:
                 grid[r].append('')
             grid[r][dc] = cell
+    timing['ops_ms'] += int((time.monotonic() - t1) * 1000)
 
 
-def apply_ops(profile, grid, ops):
+def apply_ops(profile, grid, ops, cap=MAX_CELLS, progress_cb=None):
+    """Replay ops on the grid, capping each op's selection at `cap`
+    cells.  Pass cap=None to run uncapped (CLI use)."""
     errors = []
     timing = {'compile_ms': 0, 'ops_ms': 0}
     for i, op in enumerate(ops):
         op.pop('status', None)
         op.pop('error',  None)
         kind = op.get('op')
+        op_cb = (lambda ci, total, n: progress_cb(i, kind, ci, total, n)) if progress_cb else None
         try:
-            if   kind == OP_CHAR_CLASS_MAP: _apply_char_class_map(profile, grid, op, timing)
-            elif kind == OP_COUNT_CLASS:    _apply_count_class(profile, grid, op, timing)
-            elif kind == OP_LENGTH:         _apply_length(profile, grid, op, timing)
+            if   kind == OP_CHAR_CLASS_MAP: _apply_char_class_map(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_COUNT_CLASS:    _apply_count_class(profile, grid, op, timing, cap, op_cb)
+            elif kind == OP_LENGTH:         _apply_length(profile, grid, op, timing, cap, op_cb)
             else: raise ValueError(f'unknown op {kind!r}')
             op['status'] = 'ok'
         except Exception as exc:
@@ -494,7 +516,7 @@ def apply_ops(profile, grid, ops):
     return errors, timing
 
 
-def run_session(session):
+def run_session(session, cap=MAX_CELLS, progress_cb=None):
     try:
         ops = json.loads(session.ops_json or '[]')
         if not isinstance(ops, list):
@@ -519,7 +541,7 @@ def run_session(session):
 
     profile = get_profile(session.language_profile)
 
-    errs, timing = apply_ops(profile, grid, ops)
+    errs, timing = apply_ops(profile, grid, ops, cap=cap, progress_cb=progress_cb)
     session.compile_ms = timing['compile_ms']
     session.ops_ms     = timing['ops_ms']
     session.encrypt_ms = 0

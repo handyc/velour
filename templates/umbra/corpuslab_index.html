@@ -49,9 +49,11 @@
     Hard caps for in-request runs: <strong>{{ max_cells }} cells</strong>
     per op, padded to <strong>{{ max_cell_len }} bytes</strong> per
     cell.  Each byte burns one PBS call (~200 ms), so the wall fills
-    quickly.  Bigger corpora belong on ALICE — a
-    <code>manage.py corpuslab_run</code> follow-up will batch via
-    Slurm arrays.
+    quickly.  Bigger corpora go through <code>manage.py corpuslab_run
+    &lt;slug&gt;</code> (no cap; chunks of <em>{{ max_cells }}</em> reuse
+    the same compiled circuit), and <code>manage.py corpuslab_slurm
+    &lt;slug&gt;</code> generates a Leiden ALICE batch script
+    (defaults 20 CPUs × 4 h).
     <br><br>
     <strong>Honest caveat.</strong>  ASCII bytes only for the moment —
     Devanagari, Ge'ez, Tifinagh and other non-ASCII scripts read as
