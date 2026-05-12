@@ -100,11 +100,24 @@
     <input type="number" id="breath-speed" value="180" min="40" max="2000" step="20"
            style="background:#111; color:#ccc; border:1px solid #333;
                   padding:1px 4px; width: 5em;"> ms
-    <span style="margin-left:10px;">global palette →</span>
+    <span style="margin-left:10px;">palette →</span>
     {% for h in result.ca_palette_hex %}<span
+      id="palette-swatch-{{ forloop.counter0 }}"
       style="display:inline-block; width:14px; height:14px; vertical-align:-3px;
              background:{{ h }}; border:1px solid #333; margin-left:2px;"
       title="{{ h }}"></span>{% endfor %}
+    <button type="button" id="breath-palette-random"
+            style="background:#222; color:#cfc; border:1px solid #555;
+                   padding:2px 10px; margin-left:8px;
+                   font-family:inherit;"
+            title="re-roll 4 random RGB anchors (keeps rule + grid state)"
+            >🎨 randomize palette</button>
+    <button type="button" id="breath-palette-reset"
+            style="background:#222; color:#aaa; border:1px solid #555;
+                   padding:2px 10px; margin-left:4px;
+                   font-family:inherit;"
+            title="restore the image-derived global palette"
+            >restore</button>
   </div>
   <div class="bake-meta" style="margin-top:6px; font-family:monospace;">
     edge-of-chaos:
@@ -130,8 +143,35 @@
 <script>
 (function () {
   var payload = {{ result.ca_payload|safe }};
-  var palette = payload.palette;  // (4, 3)
+  // Keep a copy of the image-derived palette so "restore" can return
+  // to it after experimentation with random palettes.
+  var bakedPalette = payload.palette.map(function (c) { return c.slice(); });
+  var palette = payload.palette;  // (4, 3) — mutated in place by recolour
   var rule    = payload.table;    // (4096,)
+
+  function hex2 (n) {
+    var h = n.toString(16);
+    return h.length === 1 ? '0' + h : h;
+  }
+  function syncSwatches () {
+    for (var i = 0; i < 4; i++) {
+      var el = document.getElementById('palette-swatch-' + i);
+      if (!el) continue;
+      var c = palette[i];
+      var hex = '#' + hex2(c[0]) + hex2(c[1]) + hex2(c[2]);
+      el.style.background = hex;
+      el.title = hex;
+    }
+  }
+  function setPalette (newPalette) {
+    for (var i = 0; i < 4; i++) {
+      palette[i][0] = newPalette[i][0];
+      palette[i][1] = newPalette[i][1];
+      palette[i][2] = newPalette[i][2];
+    }
+    syncSwatches();
+    draw();
+  }
 
   var canvas = document.getElementById('breath-canvas');
   var ctx    = canvas.getContext('2d');
@@ -293,6 +333,42 @@
   document.getElementById('breath-speed').addEventListener('change', function () {
     var v = parseInt(this.value, 10);
     if (!isNaN(v) && v >= 40 && v <= 5000) stepMs = v;
+  });
+  document.getElementById('breath-palette-random').addEventListener('click', function () {
+    // Random RGBs with reasonable saturation/value so the 4 colours
+    // stay visually distinct (avoid the all-dark or all-pastel
+    // degenerate cases that pure RGB-uniform random often hits).
+    var fresh = [];
+    for (var i = 0; i < 4; i++) {
+      // HSV → RGB: hue evenly spaced + jitter, S/V in moderate ranges.
+      var h = ((i / 4) + Math.random() * 0.18) % 1;
+      var s = 0.55 + Math.random() * 0.35;
+      var v = 0.55 + Math.random() * 0.40;
+      var k = Math.floor(h * 6) | 0;
+      var f = h * 6 - k;
+      var p = v * (1 - s);
+      var q = v * (1 - f * s);
+      var t = v * (1 - (1 - f) * s);
+      var r, g, b;
+      switch (k % 6) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        case 5: r = v; g = p; b = q; break;
+      }
+      fresh.push([Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)]);
+    }
+    // Shuffle so the hue order isn't always 0=red,1=yellow,2=green,3=blue.
+    for (var n = fresh.length - 1; n > 0; n--) {
+      var m = (Math.random() * (n + 1)) | 0;
+      var tmp = fresh[n]; fresh[n] = fresh[m]; fresh[m] = tmp;
+    }
+    setPalette(fresh);
+  });
+  document.getElementById('breath-palette-reset').addEventListener('click', function () {
+    setPalette(bakedPalette);
   });
 
   // ── Edge-of-chaos search ─────────────────────────────────────────
