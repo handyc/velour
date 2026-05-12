@@ -36,6 +36,11 @@
     the round-trip math works, not a real privacy boundary.  Every
     numeric cell becomes its own CKKS ciphertext; ops touch only
     ciphertexts; the server decrypts at the end.
+    <br><br>
+    Hard cap: <strong>{{ max_numeric_cells }} numeric cells</strong> per
+    CSV. Each cell becomes ~330 KB of ciphertext and takes ~7 ms to
+    encrypt, so anything larger hangs the request.  String cells are
+    free — they're never encrypted.
   </div>
 
   <div class="um-grid">

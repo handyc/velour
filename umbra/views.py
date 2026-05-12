@@ -159,7 +159,8 @@ Carol,3,0
 
 def csvlab_index(request):
     sessions = CsvLabSession.objects.all()[:20]
-    ctx = _ctx(); ctx.update(sessions=sessions, sample_csv=SAMPLE_CSV)
+    ctx = _ctx(); ctx.update(sessions=sessions, sample_csv=SAMPLE_CSV,
+                             max_numeric_cells=csvlab.MAX_NUMERIC_CELLS)
     return render(request, 'umbra/csvlab_index.html', ctx)
 
 
@@ -184,6 +185,16 @@ def csvlab_upload(request):
     csv_text = csv_text.strip()
     if not csv_text:
         messages.error(request, 'No CSV content provided.')
+        return redirect('umbra:csvlab')
+    grid, rows, cols = csvlab.parse_csv(csv_text)
+    n_numeric = csvlab.count_numeric_cells(grid)
+    if n_numeric > csvlab.MAX_NUMERIC_CELLS:
+        messages.error(request,
+            f'CSV has {n_numeric} numeric cells ({rows}×{cols} grid). '
+            f'Cap is {csvlab.MAX_NUMERIC_CELLS} — each numeric cell '
+            f'becomes its own ~330 KB CKKS ciphertext and takes ~7 ms '
+            f'to encrypt, so larger inputs hang the request. Trim and '
+            f'try again.')
         return redirect('umbra:csvlab')
     s = CsvLabSession.objects.create(name=name, original_csv=csv_text,
                                      ops_json='[]')

@@ -64,6 +64,15 @@ POLY_MODULUS_DEGREE = 8192
 COEFF_MOD_BIT_SIZES = [60, 40, 40, 60]
 GLOBAL_SCALE        = 2 ** 40
 
+# Each numeric cell becomes its own CKKS ciphertext (~330 KB at
+# poly_modulus_degree=8192), so the pipeline is bandwidth-bound on
+# cell count more than anything else.  Empirically, encrypting takes
+# roughly 7 ms / cell on this machine, so 500 cells caps a run at
+# under ~5 s — still snappy enough to demo, but big enough to make
+# the FHE-is-expensive point.  Defense in depth: checked at upload
+# AND at run time.
+MAX_NUMERIC_CELLS = 500
+
 
 def _new_context():
     ctx = ts.context(
@@ -98,6 +107,10 @@ def _try_float(s: str):
         return float(s2)
     except ValueError:
         return None
+
+
+def count_numeric_cells(grid) -> int:
+    return sum(1 for row in grid for cell in row if _try_float(cell) is not None)
 
 
 def _fmt(x: float) -> str:
@@ -266,6 +279,20 @@ def run_session(session):
     grid, rows, cols = parse_csv(session.original_csv or '')
     session.rows = rows
     session.cols = cols
+
+    n = count_numeric_cells(grid)
+    if n > MAX_NUMERIC_CELLS:
+        session.numeric_cells   = n
+        session.ciphertext_bytes = 0
+        session.encrypt_ms = session.ops_ms = session.decrypt_ms = 0
+        session.result_csv = ''
+        session.last_error = (
+            f'too large: {n} numeric cells exceeds MAX_NUMERIC_CELLS='
+            f'{MAX_NUMERIC_CELLS}. At ~7 ms/cell to encrypt + ~330 KB/cell '
+            f'of ciphertext, the full round trip would take minutes and '
+            f'hold the request the whole time. Trim the CSV first.'
+        )
+        return session
 
     ctx = _new_context()
 
