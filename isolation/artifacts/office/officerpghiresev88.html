@@ -1417,9 +1417,24 @@ let   MANGEL_RES         = MANGEL_RES_DEFAULT;
 const MANGEL_TICK_MS      = 1500;                        /* was 900 */
 const MANGEL_BATCH        = 2;                           /* was 4 */
 const MANGEL_ITER_CAP     = 384;                         /* ev87: was 4096 */
-const MANGEL_RENDER_BUDGET = 3;   /* ev87: max fresh tile renders per frame */
+/* ev89: budget is the cap on fresh (cache-miss) mangel tile renders
+ * inside a single frame.  Cache hits are free and don't count.  When
+ * music is on we drop the budget hard because the per-tile Mandelbrot
+ * loop can otherwise block the main thread long enough to starve the
+ * 250 ms audio scheduler tick and drain the 2.5 s look-ahead — which
+ * is what was killing audio after the ev85-87 mangel additions.  The
+ * frame-budget tournament throttle a few lines below is the other
+ * half of the same fix. */
+const MANGEL_RENDER_BUDGET_QUIET = 4;
+const MANGEL_RENDER_BUDGET_MUSIC = 1;
 let   mangelLastTick      = 0;
-let   mangelFrameRenderCt = 0;    /* ev87: budget counter, reset per rAF */
+let   mangelFrameRenderCt = 0;    /* ev87/89: budget counter, reset per render() */
+
+function mangelFrameRenderBudget() {
+  return ((typeof musicOn !== "undefined") && musicOn)
+    ? MANGEL_RENDER_BUDGET_MUSIC
+    : MANGEL_RENDER_BUDGET_QUIET;
+}
 
 /* Curated "interesting" Mandelbrot centres — the same set the mangel
  * sprite sheet uses, so a fresh agent starts somewhere visually
@@ -1696,6 +1711,14 @@ function getCellMangelTexture(wx, wy) {
   const cacheKey = wx + "," + wy + "@" + key + "#" + gen;
   let off = cellMangelCache.get(cacheKey);
   if (off) return off;
+  /* ev89: per-frame fresh-render budget — when exceeded, return null so
+   * the caller skips the mangel overlay layer THIS frame.  Stale cache
+   * entries from the previous gen would be invalid (they're keyed on
+   * gen) so we can't fall back to those; better to show pure CA for
+   * one frame than to spend 100+ ms on a single render() call and lose
+   * the audio scheduler tick.  Budget refills next render(). */
+  if (mangelFrameRenderCt >= mangelFrameRenderBudget()) return null;
+  mangelFrameRenderCt++;
 
   const cellSpan = gene[2] / MANGEL_AGENT_SIZE;
   const cellCx   = gene[0] - gene[2] / 2 + (cellLx + 0.5) * cellSpan;
@@ -4941,6 +4964,8 @@ function drawNotchedTile(tex, tx, ty) {
 }
 
 function render() {
+  /* ev89: refill the per-frame fresh-mangel-render budget. */
+  mangelFrameRenderCt = 0;
   const W = canvas.width, H = canvas.height;
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
@@ -5017,12 +5042,14 @@ function render() {
       if (tx + TILE_PX < 0 || tx > W) continue;
       /* ev87: when mangelOn, paint the CA cell first then overlay
        * the mangel tile.  Mangel pixels marked transparent (alpha 0,
-       * which we use for in-set black) reveal the CA underneath. */
+       * which we use for in-set black) reveal the CA underneath.
+       * ev89: getCellMangelTexture may return null when the per-frame
+       * render budget is exhausted — show pure CA for that one tile
+       * this frame and let the next render fill the mangel in. */
+      drawNotchedTile(getCellTexture(wx, wy), tx, ty);
       if (mangelOn) {
-        drawNotchedTile(getCellTexture(wx, wy), tx, ty);
-        drawNotchedTile(getCellMangelTexture(wx, wy), tx, ty);
-      } else {
-        drawNotchedTile(getCellTexture(wx, wy), tx, ty);
+        const mtex = getCellMangelTexture(wx, wy);
+        if (mtex) drawNotchedTile(mtex, tx, ty);
       }
     }
   }
