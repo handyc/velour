@@ -233,6 +233,9 @@ def bake_ca(request):
         f = request.FILES.get('image')
         max_side = max(32, min(int(request.POST.get('max_side', 160) or 160), 320))
         top_n = max(4, min(int(request.POST.get('top_n', 36) or 36), 256))
+        palette_method = (request.POST.get('palette_method') or 'median-cut').strip()
+        if palette_method not in ('median-cut', 'kmeans', 'rule-centres'):
+            palette_method = 'median-cut'
         if f:
             from PIL import Image
             import numpy as np
@@ -259,7 +262,20 @@ def bake_ca(request):
             # baked rules collapsed into one global 4-colour palette
             # and a complete 4096-entry CA table (Hamming-nearest
             # fill for 6-tuples the image never produced).
-            gp, table = BCA.build_global_palette_and_table(rules, k=4)
+            # Palette source: by default extract directly from the
+            # image (median-cut), which matches what the viewer's eye
+            # picks as the dominant colours.  Fallback: the legacy
+            # k-means-on-rule-centres method, which clusters in rule
+            # space rather than image space (over-represents textured
+            # regions, under-represents flat dominant colour).
+            if palette_method in ('median-cut', 'kmeans'):
+                palette_override = BCA.palette_from_image(
+                    img, k=4, method=palette_method)
+                # Force alpha=255 so downstream uses a clean (k,4) RGBA.
+            else:
+                palette_override = None
+            gp, table = BCA.build_global_palette_and_table(
+                rules, k=4, palette_override=palette_override)
             # Quantise the input image down to the CA's grid resolution
             # and label each pixel with the nearest global-palette entry.
             # This gives the canvas a meaningful starting state — the
@@ -287,6 +303,7 @@ def bake_ca(request):
                 'image_size':   f'{img.width}×{img.height}',
                 'top_n':        top_n,
                 'max_side':     max_side,
+                'palette_method': palette_method,
                 'ca_payload':   json.dumps(ca_payload),
                 'ca_palette_hex': ['#{:02x}{:02x}{:02x}'.format(*gp[i, :3])
                                    for i in range(4)],

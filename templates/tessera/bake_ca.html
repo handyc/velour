@@ -50,6 +50,14 @@
   <label style="margin-left:6px;">top N</label>
   <input type="number" name="top_n" value="{{ result.top_n|default:36 }}"
          min="4" max="256" style="width:5em;">
+  <label style="margin-left:6px;"
+         title="how the 4-colour global palette is chosen.  median-cut and kmeans extract from the image directly; rule-centres clusters in rule-space (legacy)">palette</label>
+  <select name="palette_method" style="background:#111; color:#ccc;
+          border:1px solid #333; padding:1px 3px;">
+    <option value="median-cut" {% if result.palette_method == "median-cut" %}selected{% endif %}>median-cut (image)</option>
+    <option value="kmeans" {% if result.palette_method == "kmeans" %}selected{% endif %}>k-means (image)</option>
+    <option value="rule-centres" {% if result.palette_method == "rule-centres" %}selected{% endif %}>rule-centres (legacy)</option>
+  </select>
   <button type="submit" style="background:#222; color:#cfc;
           border:1px solid #555; padding:3px 12px; margin-left:8px;
           font-family:inherit;">Bake</button>

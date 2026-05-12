@@ -23,6 +23,63 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from PIL import Image
+
+
+def palette_from_image(img, k: int = 4,
+                       method: str = 'median-cut') -> np.ndarray:
+    """Extract k visually-dominant colours straight from the image —
+    the perceptual palette, not a derivative of the per-rule baking.
+
+    `method`:
+      'median-cut'   PIL's median-cut quantizer.  Standard "give me k
+                     colours that look like this image" algorithm;
+                     usually the most faithful match to what a viewer
+                     would pick.
+      'kmeans'       k-means++ in RGB on a 128² down-sample.  Smoother
+                     centroids than median-cut, but slightly less
+                     faithful to peaky distributions.
+
+    Returns: (k, 4) uint8 with alpha forced to 255.
+    """
+    rgb = img.convert('RGB')
+    if max(rgb.size) > 128:
+        rgb = rgb.copy()
+        rgb.thumbnail((128, 128), Image.Resampling.LANCZOS)
+    out = np.zeros((k, 4), dtype=np.uint8)
+    out[:, 3] = 255
+    if method == 'median-cut':
+        q = rgb.quantize(colors=k, method=Image.Quantize.MEDIANCUT,
+                         dither=Image.Dither.NONE)
+        pal = q.getpalette()
+        for i in range(k):
+            out[i, 0] = pal[i * 3]
+            out[i, 1] = pal[i * 3 + 1]
+            out[i, 2] = pal[i * 3 + 2]
+        return out
+    # kmeans fallback
+    pixels = np.asarray(rgb, dtype=np.float64).reshape(-1, 3)
+    rng = np.random.default_rng(0)
+    # k-means++ init
+    idx = [int(rng.integers(0, len(pixels)))]
+    for _ in range(1, k):
+        d2 = np.min(np.sum((pixels[:, None, :] - pixels[idx][None, :, :]) ** 2,
+                           axis=2), axis=1)
+        if d2.sum() <= 0:
+            idx.append(int(rng.integers(0, len(pixels))))
+            continue
+        probs = d2 / d2.sum()
+        idx.append(int(rng.choice(len(pixels), p=probs)))
+    centroids = pixels[idx].copy()
+    for _ in range(16):
+        d = np.sum((pixels[:, None, :] - centroids[None, :, :]) ** 2, axis=2)
+        a = np.argmin(d, axis=1)
+        for j in range(k):
+            m = (a == j)
+            if np.any(m):
+                centroids[j] = pixels[m].mean(axis=0)
+    out[:, :3] = np.clip(centroids, 0, 255).astype(np.uint8)
+    return out
 
 
 def _hex_neighbour_indices(y: int, x: int, W: int):
@@ -123,14 +180,19 @@ def bake_rules(arr_rgba: np.ndarray, sample_step: int = 1) -> dict:
 
 
 def build_global_palette_and_table(rules: dict,
-                                   k: int = 4) -> tuple:
+                                   k: int = 4,
+                                   palette_override: np.ndarray = None) -> tuple:
     """Collapse the per-rule palettes into ONE global k-colour palette
-    (k-means on the central pixels weighted by rule frequency) and
-    build a complete 16384-entry rule table mapping (self, 6-tuple) →
-    output label in {0..k-1}.  Each hexagonal Wang tile (4⁶ = 4096
+    and build a complete 16384-entry rule table mapping (self, 6-tuple)
+    → output label in {0..k-1}.  Each hexagonal Wang tile (4⁶ = 4096
     configurations of 6 edge colours) gets one output per self-state
     (4 states × 4096 tiles = 16384 entries), so a complete CA rule
     is exactly four labelings of the Wang catalogue, one per self.
+
+    If `palette_override` is provided it's used directly; otherwise
+    the palette comes from k-means on the central pixels weighted by
+    rule frequency (kept as a fallback, but `palette_from_image` is
+    the perceptually faithful default — the view should pass that).
 
     Missing 6-tuples (configurations the image never produced) are
     filled by Hamming-nearest baked rule, breaking ties by frequency.
@@ -145,29 +207,35 @@ def build_global_palette_and_table(rules: dict,
     Returns: (global_palette (k, 4) uint8, table (16384,) int8).
     """
     if not rules:
-        gp = np.array([[60, 60, 60, 255], [150, 150, 150, 255],
-                       [210, 210, 210, 255], [255, 255, 255, 255]],
-                      dtype=np.uint8)
+        if palette_override is not None:
+            gp = palette_override.astype(np.uint8)
+        else:
+            gp = np.array([[60, 60, 60, 255], [150, 150, 150, 255],
+                           [210, 210, 210, 255], [255, 255, 255, 255]],
+                          dtype=np.uint8)
         return gp, np.zeros(16384, dtype=np.int8)
 
-    centres = np.array([info['palette'][0] for info in rules.values()],
-                       dtype=np.float64)             # (N, 4)
-    weights = np.array([info['count'] for info in rules.values()],
-                       dtype=np.float64)             # (N,)
-
-    # k-means seeded from the k most-frequent rules' central pixels
-    # so the initial centroids actually fall on real image content.
-    top_k_idx = np.argsort(-weights)[:k]
-    palette = centres[top_k_idx].copy()
-    for _ in range(8):
-        d = np.sum((centres[:, None, :] - palette[None, :, :]) ** 2, axis=2)
-        assign = np.argmin(d, axis=1)
-        for j in range(k):
-            mask = (assign == j)
-            if np.any(mask):
-                palette[j] = np.average(centres[mask], axis=0,
-                                        weights=weights[mask])
-    palette = np.clip(palette, 0, 255).astype(np.uint8)
+    if palette_override is not None:
+        palette = palette_override.astype(np.uint8)
+        weights = np.array([info['count'] for info in rules.values()],
+                           dtype=np.float64)
+    else:
+        centres = np.array([info['palette'][0] for info in rules.values()],
+                           dtype=np.float64)         # (N, 4)
+        weights = np.array([info['count'] for info in rules.values()],
+                           dtype=np.float64)         # (N,)
+        # k-means seeded from the k most-frequent rules' central pixels.
+        top_k_idx = np.argsort(-weights)[:k]
+        palette = centres[top_k_idx].copy()
+        for _ in range(8):
+            d = np.sum((centres[:, None, :] - palette[None, :, :]) ** 2, axis=2)
+            assign = np.argmin(d, axis=1)
+            for j in range(k):
+                mask = (assign == j)
+                if np.any(mask):
+                    palette[j] = np.average(centres[mask], axis=0,
+                                            weights=weights[mask])
+        palette = np.clip(palette, 0, 255).astype(np.uint8)
 
     # Each baked rule's output label = global-palette index closest
     # to its central pixel.
