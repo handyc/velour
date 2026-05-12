@@ -42,7 +42,8 @@
   <p style="color:#888;"><em>No sets yet.  Create one below.</em></p>
 {% endif %}
 
-<form class="tess-form" method="post" action="{% url 'tessera:create' %}">
+<form class="tess-form" method="post" action="{% url 'tessera:create' %}"
+      enctype="multipart/form-data" id="tess-new-form">
   {% csrf_token %}
   <h2 style="margin-top: 0; font-size: 1.05rem;">New set</h2>
   <div><label>name</label>
@@ -52,10 +53,12 @@
     <input type="number" name="seed" value="0" style="width: 8em;">
   </div>
   <div style="margin-top: 6px;"><label>source method</label>
-    <select name="method">
+    <select name="method" id="tess-method-select">
       <option value="fbm-tileable">fBm noise (toroidally tileable)</option>
       <option value="domain-warp">fBm + domain warp</option>
       <option value="hex-ca">Hex CA evolved</option>
+      <option value="upload-4">upload 4 images (one per colour)</option>
+      <option value="upload-1-palette">upload 1 image (4 random palette shifts)</option>
     </select>
   </div>
   <div style="margin-top: 6px;"><label>topology</label>
@@ -70,6 +73,29 @@
       <option value="wedge">wedge-cut (stained-glass)</option>
     </select>
   </div>
+  <div id="tess-upload-4" style="display:none; margin-top: 8px;
+        padding: 6px; border:1px dotted #444;">
+    <div style="color:#aaa; font-size:0.85rem; margin-bottom:4px;">
+      One image per colour.  Each is resized to <code>tile_px</code>
+      and edge-blended to be toroidal so the seam math still holds.
+    </div>
+    {% for letter, idx in upload_slots %}
+    <div style="margin-top:4px;"><label>colour {{ idx }}</label>
+      <input type="file" name="upload_{{ letter }}" accept="image/*">
+    </div>
+    {% endfor %}
+  </div>
+  <div id="tess-upload-1" style="display:none; margin-top: 8px;
+        padding: 6px; border:1px dotted #444;">
+    <div style="color:#aaa; font-size:0.85rem; margin-bottom:4px;">
+      One image — four random HSV hue/saturation/value shifts
+      (seeded by <em>seed</em>) derive four distinct colour sources
+      from it.  Toroidal edge-blend applied as for the 4-image mode.
+    </div>
+    <div style="margin-top:4px;"><label>image</label>
+      <input type="file" name="upload_a" accept="image/*">
+    </div>
+  </div>
   <div style="margin-top: 10px;">
     <button type="submit"
             style="background:#222; color:#cfc;
@@ -77,4 +103,17 @@
                    font-family:inherit;">Generate tile set</button>
   </div>
 </form>
+<script>
+  (function () {
+    var sel = document.getElementById('tess-method-select');
+    var u4  = document.getElementById('tess-upload-4');
+    var u1  = document.getElementById('tess-upload-1');
+    function sync () {
+      u4.style.display = (sel.value === 'upload-4') ? 'block' : 'none';
+      u1.style.display = (sel.value === 'upload-1-palette') ? 'block' : 'none';
+    }
+    sel.addEventListener('change', sync);
+    sync();
+  })();
+</script>
 {% endblock %}

@@ -53,6 +53,7 @@ def index(request):
     sets = TessSet.objects.all()
     return render(request, 'tessera/index.html', {
         'sets': sets,
+        'upload_slots': list(zip('abcd', '0123')),
     })
 
 
@@ -208,16 +209,22 @@ def tiling_test(request, slug):
     })
 
 
+_VALID_METHODS = {m[0] for m in TessSet.METHOD_CHOICES}
+
+
 @require_POST
 def create_set(request):
     """Bare-bones create.  Accepts name + seed + method + topology +
-    blend_method.  Anything missing or unknown falls back to defaults
-    (square IDW fbm-tileable)."""
+    blend_method, plus optional file uploads for the upload-* methods.
+    Anything missing or unknown falls back to defaults (square IDW
+    fbm-tileable)."""
     name   = (request.POST.get('name') or '').strip()
     seed_s = (request.POST.get('seed') or '0').strip()
     method = (request.POST.get('method') or 'fbm-tileable').strip()
     topology = (request.POST.get('topology') or 'square').strip()
     blend_method = (request.POST.get('blend_method') or 'idw').strip()
+    if method not in _VALID_METHODS:
+        method = 'fbm-tileable'
     if topology not in ('square', 'hex'):
         topology = 'square'
     if blend_method not in ('idw', 'wedge'):
@@ -234,7 +241,19 @@ def create_set(request):
     while TessSet.objects.filter(slug=slug).exists():
         n += 1
         slug = f'{base}-{n}'
-    obj = TessSet.objects.create(
+    obj = TessSet(
         name=name, slug=slug, seed=seed, method=method,
         topology=topology, blend_method=blend_method)
+    # File uploads — only attach when the chosen method actually
+    # consumes them so we don't litter MEDIA_ROOT with orphans.
+    if method == 'upload-4':
+        for letter in ('a', 'b', 'c', 'd'):
+            f = request.FILES.get(f'upload_{letter}')
+            if f:
+                setattr(obj, f'upload_{letter}', f)
+    elif method == 'upload-1-palette':
+        f = request.FILES.get('upload_a')
+        if f:
+            obj.upload_a = f
+    obj.save()
     return HttpResponseRedirect(reverse('tessera:detail', args=[obj.slug]))

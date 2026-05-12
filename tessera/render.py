@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -168,14 +169,115 @@ def _hex_ca_field(rng: np.random.Generator, w: int, h: int) -> np.ndarray:
     return grid.astype(np.float64) / 3.0
 
 
+def _make_toroidal(img: np.ndarray, blend_px: int = None) -> np.ndarray:
+    """Cross-fade `img` against its own torus-rolled copies so the
+    left/right and top/bottom seams of the resulting image match.
+
+    User-uploaded photos aren't toroidal by construction; without
+    this step, two adjacent tiles sampling the same uploaded source
+    at x=0 vs x=W-1 would pull markedly different pixels and the
+    seam would scream.  Blend width defaults to 12 % of the shorter
+    side — large enough to hide a hard transition, small enough that
+    the interior still reads as the original.
+    """
+    h, w = img.shape[:2]
+    bp = blend_px if blend_px is not None else max(2, min(h, w) // 8)
+    out = img.astype(np.float64).copy()
+    # Horizontal seam: blend column 0..bp with rolled column (W-bp)..W
+    rolled_x = np.roll(out, w // 2, axis=1)
+    ramp_x = np.linspace(0, 1, bp)[None, :, None]   # (1, bp, 1)
+    # Left edge: fade from rolled (which carries the right edge) to original.
+    out[:, :bp] = rolled_x[:, :bp] * (1 - ramp_x) + out[:, :bp] * ramp_x
+    # Right edge: fade from original to rolled (which carries the left edge).
+    out[:, -bp:] = out[:, -bp:] * (1 - ramp_x[:, ::-1]) + rolled_x[:, -bp:] * ramp_x[:, ::-1]
+    # Vertical seam
+    rolled_y = np.roll(out, h // 2, axis=0)
+    ramp_y = np.linspace(0, 1, bp)[:, None, None]   # (bp, 1, 1)
+    out[:bp]  = rolled_y[:bp]  * (1 - ramp_y) + out[:bp]  * ramp_y
+    out[-bp:] = out[-bp:] * (1 - ramp_y[::-1]) + rolled_y[-bp:] * ramp_y[::-1]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _load_upload(field_file, w: int, h: int) -> np.ndarray:
+    """Open the ImageFieldFile, resize to (w, h), force RGB, make
+    toroidal.  Returns a (h, w, 3) uint8 array."""
+    img = Image.open(field_file.path).convert('RGB')
+    img = img.resize((w, h), Image.Resampling.LANCZOS)
+    arr = np.asarray(img, dtype=np.uint8)
+    return _make_toroidal(arr)
+
+
+def _palette_shift(rgb: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """Apply a random hue rotation + saturation/value jitter in HSV.
+    Returns a new (h, w, 3) uint8 array with the same structure but a
+    different palette feel — used by `upload-1-palette` to derive
+    four distinct colour-source images from one uploaded photo."""
+    # Vectorised RGB→HSV→shifted→RGB.
+    rgb_f = rgb.astype(np.float64) / 255.0
+    r, g, b = rgb_f[..., 0], rgb_f[..., 1], rgb_f[..., 2]
+    maxc = np.maximum(np.maximum(r, g), b)
+    minc = np.minimum(np.minimum(r, g), b)
+    v = maxc
+    s = np.where(maxc > 0, (maxc - minc) / np.maximum(maxc, 1e-9), 0)
+    rc = (maxc - r) / np.maximum(maxc - minc, 1e-9)
+    gc = (maxc - g) / np.maximum(maxc - minc, 1e-9)
+    bc = (maxc - b) / np.maximum(maxc - minc, 1e-9)
+    h = np.where(r == maxc, bc - gc,
+        np.where(g == maxc, 2.0 + rc - bc, 4.0 + gc - rc))
+    h = (h / 6.0) % 1.0
+    h = np.where(maxc == minc, 0, h)
+    # Random shifts.
+    h = (h + rng.uniform(0, 1)) % 1.0
+    s = np.clip(s * rng.uniform(0.5, 1.4), 0, 1)
+    v = np.clip(v * rng.uniform(0.7, 1.15), 0, 1)
+    # HSV→RGB.
+    i = (h * 6.0).astype(np.int64) % 6
+    f = h * 6.0 - i
+    p = v * (1 - s)
+    q = v * (1 - f * s)
+    t = v * (1 - (1 - f) * s)
+    cond = [i == k for k in range(6)]
+    r2 = np.select(cond, [v, q, p, p, t, v])
+    g2 = np.select(cond, [t, v, v, q, p, p])
+    b2 = np.select(cond, [p, p, t, v, v, q])
+    out = np.stack([r2, g2, b2], axis=-1)
+    return np.clip(out * 255, 0, 255).astype(np.uint8)
+
+
 def make_source_images(seed: int, palette, w: int, h: int,
-                       method: str = 'fbm-tileable') -> list[np.ndarray]:
+                       method: str = 'fbm-tileable',
+                       tess_set=None) -> list[np.ndarray]:
     """Return 4 toroidally-tileable RGB source images, one per color.
 
-    Each image is the tile-color anchor RGB modulated by a tileable
-    scalar field; the anchors give the four edges visually distinct
-    moods, the field gives every tile its own internal grain.
+    For procedural methods, each image is the tile-color anchor RGB
+    modulated by a tileable scalar field.  For upload methods, the
+    user-provided image(s) are resized + edge-blended to be toroidal
+    and used directly (palette is ignored).
     """
+    # Upload paths: bypass procedural generation entirely.
+    if method == 'upload-4' and tess_set is not None:
+        slots = [tess_set.upload_a, tess_set.upload_b,
+                 tess_set.upload_c, tess_set.upload_d]
+        sources = []
+        for slot in slots:
+            if slot and slot.name:
+                sources.append(_load_upload(slot, w, h))
+            else:
+                # Missing slot: fall back to a flat grey so the tile
+                # still renders.  User notices and re-uploads.
+                sources.append(np.full((h, w, 3), 128, dtype=np.uint8))
+        return sources
+    if method == 'upload-1-palette' and tess_set is not None:
+        if tess_set.upload_a and tess_set.upload_a.name:
+            base = _load_upload(tess_set.upload_a, w, h)
+        else:
+            base = np.full((h, w, 3), 128, dtype=np.uint8)
+        sources = []
+        for c in range(4):
+            rng = np.random.default_rng(np.int64(seed) * 7919 + c * 31 + 1)
+            sources.append(_palette_shift(base, rng))
+        return sources
+
     sources: list[np.ndarray] = []
     for c, anchor in enumerate(palette[:4]):
         # Per-color sub-seed so neighbouring colors diverge but
@@ -597,8 +699,19 @@ _SRC_CACHE_MAX = 8
 
 def get_sources_for(tess_set):
     """Memoised source-image build for one TessSet."""
+    # Upload mtimes are part of the cache key so re-uploaded files
+    # invalidate cleanly without an explicit bust.
+    def _slot_key(slot):
+        if slot and slot.name:
+            try:
+                return (slot.name, os.path.getmtime(slot.path))
+            except OSError:
+                return (slot.name, None)
+        return None
     key = (tess_set.pk, tess_set.seed, tess_set.tile_px,
-           tess_set.method, tuple(map(tuple, tess_set.palette)))
+           tess_set.method, tuple(map(tuple, tess_set.palette)),
+           _slot_key(tess_set.upload_a), _slot_key(tess_set.upload_b),
+           _slot_key(tess_set.upload_c), _slot_key(tess_set.upload_d))
     cached = _SRC_CACHE.get(key)
     if cached is not None:
         return cached
@@ -608,6 +721,7 @@ def get_sources_for(tess_set):
         tess_set.seed, tess_set.palette,
         tess_set.tile_px, tess_set.tile_px,
         method=tess_set.method,
+        tess_set=tess_set,
     )
     _SRC_CACHE[key] = sources
     return sources

@@ -27,9 +27,11 @@ class TessSet(models.Model):
     """
 
     METHOD_CHOICES = [
-        ('fbm-tileable', 'fBm noise (toroidally tileable)'),
-        ('hex-ca',       'Hex CA evolved (Velour-style)'),
-        ('domain-warp',  'fBm + domain warp'),
+        ('fbm-tileable',     'fBm noise (toroidally tileable)'),
+        ('hex-ca',           'Hex CA evolved (Velour-style)'),
+        ('domain-warp',      'fBm + domain warp'),
+        ('upload-4',         'upload 4 images (one per colour)'),
+        ('upload-1-palette', 'upload 1 image (4 random palette shifts)'),
     ]
     TOPOLOGY_CHOICES = [
         ('square', 'square — 4 edges, 4⁴ = 256 tiles'),
@@ -77,6 +79,19 @@ class TessSet(models.Model):
                   'sharper edge handover (tile interior reads more '
                   'as four quadrants); lower → mushier middle.  2.0 '
                   'is the classical Shepard default.')
+    # Four upload slots used by the `upload-4` and `upload-1-palette`
+    # methods.  For upload-4 all four are required (one per colour);
+    # for upload-1-palette only `upload_a` is read and four random
+    # palette shifts derive the other three sources.  Other methods
+    # ignore these fields entirely.
+    upload_a = models.ImageField(
+        upload_to='tessera/uploads/', blank=True, null=True)
+    upload_b = models.ImageField(
+        upload_to='tessera/uploads/', blank=True, null=True)
+    upload_c = models.ImageField(
+        upload_to='tessera/uploads/', blank=True, null=True)
+    upload_d = models.ImageField(
+        upload_to='tessera/uploads/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
