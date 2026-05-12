@@ -14,17 +14,24 @@ import time
 from .models import Experiment
 
 
-CPU_SECONDS    = 20
-ADDR_SPACE_MB  = 1024
-WALL_TIMEOUT_S = 25
+# Wall clock bounds the user experience; CPU bounds runaway loops.
+# RLIMIT_CPU counts CPU-seconds *summed across threads*, so any
+# parallel runtime (Concrete's HPX, TenSEAL's OpenMP) burns through
+# the limit much faster than wall clock would suggest.  Give CPU
+# enough headroom for parallel backends; wall clock is the real cap.
+CPU_SECONDS    = 240
+WALL_TIMEOUT_S = 60
 MAX_OUTPUT     = 64 * 1024
+
+# Note: RLIMIT_AS was 1 GiB but Concrete's MLIR runtime reserves much
+# more virtual address space than it actually pages in (key gen alone
+# can reserve multiple GiB of arena), and any AS cap tripped its OOM
+# path silently.  We no longer set a virtual-address-space limit.
 
 
 def _preexec_limits():
     resource.setrlimit(resource.RLIMIT_CPU,
                        (CPU_SECONDS, CPU_SECONDS))
-    cap = ADDR_SPACE_MB * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
 
 
 def run_experiment(experiment: Experiment) -> Experiment:
