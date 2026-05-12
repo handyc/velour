@@ -99,6 +99,26 @@
              background:{{ h }}; border:1px solid #333; margin-left:2px;"
       title="{{ h }}"></span>{% endfor %}
   </div>
+  <div class="bake-meta" style="margin-top:6px; font-family:monospace;">
+    edge-of-chaos:
+    <b><span id="live-score" style="color:#cfc;">—</span></b>
+    <span id="live-spark"
+          style="margin-left:8px; letter-spacing:1px;
+                 color:#ace;"></span>
+    <span style="margin-left:8px; color:#666; font-family:sans-serif;">
+      (4·chg·(1−chg) on the post-burn-in change rate; peaks at chg=0.5)
+    </span>
+  </div>
+  <div style="margin-top:8px;">
+    <button type="button" id="run-search"
+            style="background:#222; color:#cfc; border:1px solid #555;
+                   padding:2px 10px; font-family:inherit;">
+      🔍 search ~64 variants
+    </button>
+    <span class="bake-meta" id="search-status"
+          style="margin-left:10px;"></span>
+  </div>
+  <div id="search-results" style="margin-top:8px;"></div>
 </div>
 <script>
 (function () {
@@ -132,9 +152,19 @@
   }
 
   // Neighbour offsets matching the baker: 0 TR, 1 R, 2 BR, 3 BL, 4 L,
-  // 5 TL under offset-r (odd rows shifted right).
+  // 5 TL under offset-r (odd rows shifted right).  We also count
+  // changes per tick to feed the live edge-of-chaos readout.
+  var BURN_IN = 32;
+  var LIVE_WINDOW = 96;
+  var liveChanges = [];
+  var sparkHistory = [];
+  var SPARK_LEN = 24;
+  var SPARK_CHARS = '▁▂▃▄▅▆▇█';
+  var ticksSinceReset = 0;
+
   function tick () {
     var next = new Int8Array(GRID_W * GRID_H);
+    var changed = 0;
     for (var y = 0; y < GRID_H; y++) {
       var shift = y & 1;
       var tlx_off = -1 + shift;
@@ -148,10 +178,51 @@
         var n5 = getCell(y - 1, x + tlx_off);
         var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
                 | (n3 << 4) | (n4 << 2) | n5;
-        next[y * GRID_W + x] = rule[key];
+        var v = rule[key];
+        next[y * GRID_W + x] = v;
+        if (v !== grid[y * GRID_W + x]) changed++;
       }
     }
     grid = next;
+    ticksSinceReset++;
+    if (ticksSinceReset > BURN_IN) {
+      liveChanges.push(changed / (GRID_W * GRID_H));
+      if (liveChanges.length > LIVE_WINDOW) liveChanges.shift();
+    }
+    updateLiveDisplay();
+  }
+
+  function updateLiveDisplay () {
+    var scoreEl = document.getElementById('live-score');
+    var sparkEl = document.getElementById('live-spark');
+    if (liveChanges.length < 4) {
+      scoreEl.textContent = 'warming up (' +
+        Math.max(0, BURN_IN - ticksSinceReset) + ' burn-in ticks left)';
+      sparkEl.textContent = '';
+      return;
+    }
+    var sum = 0;
+    for (var i = 0; i < liveChanges.length; i++) sum += liveChanges[i];
+    var mean = sum / liveChanges.length;
+    var score = 4 * mean * (1 - mean);
+    scoreEl.textContent = 'chg ' + mean.toFixed(3) +
+                          '  score ' + score.toFixed(3);
+    sparkHistory.push(score);
+    if (sparkHistory.length > SPARK_LEN) sparkHistory.shift();
+    var spark = '';
+    for (var j = 0; j < sparkHistory.length; j++) {
+      var idx = Math.max(0, Math.min(SPARK_CHARS.length - 1,
+                  Math.floor(sparkHistory[j] * (SPARK_CHARS.length - 1) + 0.5)));
+      spark += SPARK_CHARS[idx];
+    }
+    sparkEl.textContent = spark;
+  }
+
+  function resetLiveStats () {
+    liveChanges = [];
+    sparkHistory = [];
+    ticksSinceReset = 0;
+    updateLiveDisplay();
   }
 
   function draw () {
@@ -193,12 +264,183 @@
     this.textContent = running ? 'pause' : 'play';
   });
   document.getElementById('breath-reset').addEventListener('click', function () {
-    seed(); draw();
+    seed(); draw(); resetLiveStats();
   });
   document.getElementById('breath-speed').addEventListener('change', function () {
     var v = parseInt(this.value, 10);
     if (!isNaN(v) && v >= 40 && v <= 5000) stepMs = v;
   });
+
+  // ── Edge-of-chaos search ─────────────────────────────────────────
+  // Mirrors helix/hexhunt/engine.py::score_edge: run a candidate rule
+  // for BURN_IN burn-in steps + 96 measurement steps on a small grid,
+  // mean change rate over the measurement window → 4·chg·(1−chg).
+  // Candidates are: perturbations of the baked rule at various flip
+  // rates, plus a handful of pure-random rules.  All eval runs share
+  // the same initial seed so comparisons are apples-to-apples.
+
+  function mulberry32 (s) {
+    return function () {
+      s |= 0; s = s + 0x6D2B79F5 | 0;
+      var t = Math.imul(s ^ s >>> 15, 1 | s);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function perturbRule (base, fraction) {
+    var out = new Int8Array(4096);
+    for (var i = 0; i < 4096; i++) out[i] = base[i];
+    var nFlips = Math.max(1, Math.floor(4096 * fraction));
+    for (var k = 0; k < nFlips; k++) {
+      var idx = (Math.random() * 4096) | 0;
+      out[idx] = (Math.random() * 4) | 0;
+    }
+    return out;
+  }
+  function randomRule () {
+    var out = new Int8Array(4096);
+    for (var i = 0; i < 4096; i++) out[i] = (Math.random() * 4) | 0;
+    return out;
+  }
+
+  var EVAL_W = 24, EVAL_H = 16;
+  var EVAL_BURN_IN = 32, EVAL_TOTAL = 128;
+
+  function evalRule (cand, initSeed) {
+    var W = EVAL_W, H = EVAL_H, area = W * H;
+    var g = new Int8Array(area);
+    var rng = mulberry32(initSeed);
+    for (var i = 0; i < area; i++) g[i] = (rng() * 4) | 0;
+    var sumChange = 0, nMeas = 0;
+    for (var t = 0; t < EVAL_TOTAL; t++) {
+      var nx = new Int8Array(area);
+      var changed = 0;
+      for (var y = 0; y < H; y++) {
+        var shift = y & 1;
+        var brx_off = shift;
+        var tlx_off = -1 + shift;
+        for (var x = 0; x < W; x++) {
+          var n0 = g[(((y - 1) % H + H) % H) * W + (((x + brx_off) % W + W) % W)];
+          var n1 = g[y * W + (((x + 1) % W + W) % W)];
+          var n2 = g[(((y + 1) % H + H) % H) * W + (((x + brx_off) % W + W) % W)];
+          var n3 = g[(((y + 1) % H + H) % H) * W + (((x + tlx_off) % W + W) % W)];
+          var n4 = g[y * W + (((x - 1) % W + W) % W)];
+          var n5 = g[(((y - 1) % H + H) % H) * W + (((x + tlx_off) % W + W) % W)];
+          var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
+                  | (n3 << 4) | (n4 << 2) | n5;
+          var v = cand[key];
+          nx[y * W + x] = v;
+          if (v !== g[y * W + x]) changed++;
+        }
+      }
+      g = nx;
+      if (t >= EVAL_BURN_IN) { sumChange += changed / area; nMeas++; }
+    }
+    var mean = nMeas ? sumChange / nMeas : 0;
+    return { changeRate: mean, score: 4 * mean * (1 - mean) };
+  }
+
+  var searchRunning = false;
+  var lastResults = null;
+  document.getElementById('run-search').addEventListener('click', function () {
+    if (searchRunning) return;
+    var btn = this;
+    searchRunning = true;
+    btn.disabled = true;
+    btn.textContent = 'searching…';
+    var statusEl = document.getElementById('search-status');
+    var resultsEl = document.getElementById('search-results');
+    resultsEl.innerHTML = '';
+
+    // Build candidate pool.  More small perturbations than big ones —
+    // class-IV is usually a small perturbation away from a stable rule.
+    var fractions = [0.005, 0.01, 0.02, 0.04, 0.08, 0.15, 0.25, 0.50];
+    var candidates = [];
+    // Always include the baked rule itself as a reference.
+    candidates.push({ rule: rule, origin: 'baked (image)' });
+    for (var i = 0; i < fractions.length; i++) {
+      for (var j = 0; j < 6; j++) {
+        candidates.push({
+          rule: perturbRule(rule, fractions[i]),
+          origin: 'perturb ' + (fractions[i]*100).toFixed(1) + '%',
+        });
+      }
+    }
+    for (var k = 0; k < 16; k++) {
+      candidates.push({ rule: randomRule(), origin: 'random' });
+    }
+
+    var results = [];
+    var idx = 0;
+    var BATCH = 4;
+    var INIT_SEED = 0xC0FFEE;
+    function chunk () {
+      var done = Math.min(idx + BATCH, candidates.length);
+      while (idx < done) {
+        var c = candidates[idx];
+        var r = evalRule(c.rule, INIT_SEED + idx);
+        results.push({
+          rule: c.rule, origin: c.origin,
+          score: r.score, changeRate: r.changeRate,
+        });
+        idx++;
+      }
+      statusEl.textContent = idx + ' / ' + candidates.length + ' evaluated';
+      if (idx < candidates.length) {
+        setTimeout(chunk, 0);
+      } else {
+        results.sort(function (a, b) { return b.score - a.score; });
+        lastResults = results;
+        renderResults(results.slice(0, 8));
+        searchRunning = false;
+        btn.disabled = false;
+        btn.textContent = '🔍 search ~64 variants';
+      }
+    }
+    chunk();
+  });
+
+  function renderResults (top) {
+    var el = document.getElementById('search-results');
+    if (!top.length) { el.innerHTML = ''; return; }
+    var rows = [
+      '<table class="bake-meta" style="border-collapse:collapse;">' +
+      '<tr style="color:#666;">' +
+      '<th style="padding:2px 8px; text-align:left;">#</th>' +
+      '<th style="padding:2px 8px; text-align:left;">origin</th>' +
+      '<th style="padding:2px 8px; text-align:right;">score</th>' +
+      '<th style="padding:2px 8px; text-align:right;">chg</th>' +
+      '<th></th></tr>'
+    ];
+    top.forEach(function (r, i) {
+      rows.push(
+        '<tr>' +
+        '<td style="padding:2px 8px; color:#888;">' + (i + 1) + '</td>' +
+        '<td style="padding:2px 8px;">' + r.origin + '</td>' +
+        '<td style="padding:2px 8px; text-align:right; color:#cfc;">' +
+          r.score.toFixed(3) + '</td>' +
+        '<td style="padding:2px 8px; text-align:right;">' +
+          r.changeRate.toFixed(3) + '</td>' +
+        '<td style="padding:2px 8px;">' +
+          '<button class="adopt" data-i="' + i + '" ' +
+          'style="background:#222; color:#cfc; border:1px solid #555;' +
+          ' padding:1px 8px; font-family:inherit;">adopt</button>' +
+        '</td></tr>'
+      );
+    });
+    rows.push('</table>');
+    el.innerHTML = rows.join('');
+    var btns = el.querySelectorAll('.adopt');
+    for (var b = 0; b < btns.length; b++) {
+      btns[b].addEventListener('click', function () {
+        var i = parseInt(this.getAttribute('data-i'), 10);
+        rule = top[i].rule;
+        seed();
+        resetLiveStats();
+        draw();
+      });
+    }
+  }
 
   seed();
   loop();
