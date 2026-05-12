@@ -68,15 +68,15 @@
   Wang as bone, CA as breath
 </h2>
 <p class="bake-meta" style="max-width:60em; margin-top:0;">
-  The 4096-entry table below is the same baked rule collapsed to one
-  global 4-colour palette (k-means on the central pixels, weighted
-  by rule frequency).  6-tuples the image never produced are filled
-  by Hamming-nearest baked rule (frequency-weighted tiebreak), so
-  the table is dense.  Each hex on the canvas is a Wang-tessellation
-  cell carrying one state ∈ {0..3}; every tick reads its 6 neighbour
-  states, packs the 12-bit key, looks up the next state, and
-  redraws.  The Wang adjacency is the spatial bone; the table is the
-  breath.
+  The 16,384-entry table below is the full 4-colour hex CA — exactly
+  4 self-states × 4⁶ = 4096 Wang tiles of 6 edge colours = 4 labelings
+  of the hex Wang catalogue, one per self-state.  The image baker
+  fills one layer (output for self=0); it broadcasts across all four
+  rows initially, and GA mutation lets the four self-states diverge
+  under selection.  Each hex on the canvas reads its own state plus
+  its 6 neighbour states, packs a 14-bit key (self || 6-tuple), looks
+  up the new state, and redraws.  Wang adjacency is the spatial
+  bone; the table is the breath.
 </p>
 <div style="margin-top: 8px;">
   <canvas id="breath-canvas" width="230" height="200"
@@ -202,7 +202,21 @@
   // to it after experimentation with random palettes.
   var bakedPalette = payload.palette.map(function (c) { return c.slice(); });
   var palette = payload.palette;  // (4, 3) — mutated in place by recolour
-  var rule    = payload.table;    // (4096,)
+  // Rule table is 16384 entries indexed by `(self << 12) | <6-tuple>`,
+  // so a complete 4-colour hex CA: 4 self-states × 4096 neighbour
+  // configurations.  Baked layers broadcast across the four self
+  // rows initially; GA mutation makes them diverge.
+  var RULE_SIZE = 16384;
+  var rule = (payload.table.length === RULE_SIZE)
+    ? payload.table
+    : (function () {
+        // Backward compat with old 4096-entry payloads: broadcast.
+        var t = new Array(RULE_SIZE);
+        for (var s = 0; s < 4; s++) {
+          for (var k = 0; k < 4096; k++) t[(s << 12) | k] = payload.table[k];
+        }
+        return t;
+      })();
 
   function hex2 (n) {
     var h = n.toString(16);
@@ -289,18 +303,19 @@
       var tlx_off = -1 + shift;
       var brx_off =  0 + shift;
       for (var x = 0; x < GRID_W; x++) {
+        var idx = y * GRID_W + x;
+        var self_ = grid[idx];
         var n0 = getCell(y - 1, x + brx_off);
         var n1 = getCell(y,     x + 1);
         var n2 = getCell(y + 1, x + brx_off);
         var n3 = getCell(y + 1, x + tlx_off);
         var n4 = getCell(y,     x - 1);
         var n5 = getCell(y - 1, x + tlx_off);
-        var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
+        var key = (self_ << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6)
                 | (n3 << 4) | (n4 << 2) | n5;
         var v = rule[key];
-        var idx = y * GRID_W + x;
         next[idx] = v;
-        if (v !== grid[idx]) changed++;
+        if (v !== self_) changed++;
         if (hasImage && v === payload.image_state[idx]) matchedImg++;
       }
     }
@@ -466,18 +481,18 @@
     };
   }
   function perturbRule (base, fraction) {
-    var out = new Int8Array(4096);
-    for (var i = 0; i < 4096; i++) out[i] = base[i];
-    var nFlips = Math.max(1, Math.floor(4096 * fraction));
+    var out = new Int8Array(RULE_SIZE);
+    for (var i = 0; i < RULE_SIZE; i++) out[i] = base[i];
+    var nFlips = Math.max(1, Math.floor(RULE_SIZE * fraction));
     for (var k = 0; k < nFlips; k++) {
-      var idx = (Math.random() * 4096) | 0;
+      var idx = (Math.random() * RULE_SIZE) | 0;
       out[idx] = (Math.random() * 4) | 0;
     }
     return out;
   }
   function randomRule () {
-    var out = new Int8Array(4096);
-    for (var i = 0; i < 4096; i++) out[i] = (Math.random() * 4) | 0;
+    var out = new Int8Array(RULE_SIZE);
+    for (var i = 0; i < RULE_SIZE; i++) out[i] = (Math.random() * 4) | 0;
     return out;
   }
 
@@ -564,18 +579,20 @@
         var brx_off = shift;
         var tlx_off = -1 + shift;
         for (var x = 0; x < W; x++) {
+          var idx_ = y * W + x;
+          var self_ = g[idx_];
           var n0 = g[(((y - 1) % H + H) % H) * W + (((x + brx_off) % W + W) % W)];
           var n1 = g[y * W + (((x + 1) % W + W) % W)];
           var n2 = g[(((y + 1) % H + H) % H) * W + (((x + brx_off) % W + W) % W)];
           var n3 = g[(((y + 1) % H + H) % H) * W + (((x + tlx_off) % W + W) % W)];
           var n4 = g[y * W + (((x - 1) % W + W) % W)];
           var n5 = g[(((y - 1) % H + H) % H) * W + (((x + tlx_off) % W + W) % W)];
-          var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
+          var key = (self_ << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6)
                   | (n3 << 4) | (n4 << 2) | n5;
           var v = cand[key];
-          nx[y * W + x] = v;
-          if (v !== g[y * W + x]) changed++;
-          if (evalImage && v === evalImage[y * W + x]) matchedImg++;
+          nx[idx_] = v;
+          if (v !== self_) changed++;
+          if (evalImage && v === evalImage[idx_]) matchedImg++;
         }
       }
       g = nx;
@@ -616,16 +633,18 @@
   // every gen so adopt-during-run works.
 
   function uniformCrossover (a, b) {
-    var out = new Int8Array(4096);
-    for (var i = 0; i < 4096; i++) out[i] = Math.random() < 0.5 ? a[i] : b[i];
+    var out = new Int8Array(RULE_SIZE);
+    for (var i = 0; i < RULE_SIZE; i++) {
+      out[i] = Math.random() < 0.5 ? a[i] : b[i];
+    }
     return out;
   }
 
   function mutateInPlace (rule, fraction) {
     if (fraction <= 0) return rule;
-    var nFlips = Math.max(1, Math.round(4096 * fraction));
+    var nFlips = Math.max(1, Math.round(RULE_SIZE * fraction));
     for (var k = 0; k < nFlips; k++) {
-      var idx = (Math.random() * 4096) | 0;
+      var idx = (Math.random() * RULE_SIZE) | 0;
       rule[idx] = (Math.random() * 4) | 0;
     }
     return rule;
@@ -688,8 +707,8 @@
                ' + #' + (parents.indexOf(b) + 1);
     } else {
       var p = tournamentPick(parents, cfg.tourn);
-      childRule = new Int8Array(4096);
-      for (var k = 0; k < 4096; k++) childRule[k] = p.rule[k];
+      childRule = new Int8Array(RULE_SIZE);
+      for (var k = 0; k < RULE_SIZE; k++) childRule[k] = p.rule[k];
       origin = 'mut of #' + (parents.indexOf(p) + 1);
     }
     mutateInPlace(childRule, cfg.mutFrac);

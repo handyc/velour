@@ -126,24 +126,29 @@ def build_global_palette_and_table(rules: dict,
                                    k: int = 4) -> tuple:
     """Collapse the per-rule palettes into ONE global k-colour palette
     (k-means on the central pixels weighted by rule frequency) and
-    build a complete 4096-entry rule table mapping 6-tuple → output
-    label in {0..k-1}.
+    build a complete 16384-entry rule table mapping (self, 6-tuple) →
+    output label in {0..k-1}.  Each hexagonal Wang tile (4⁶ = 4096
+    configurations of 6 edge colours) gets one output per self-state
+    (4 states × 4096 tiles = 16384 entries), so a complete CA rule
+    is exactly four labelings of the Wang catalogue, one per self.
 
     Missing 6-tuples (configurations the image never produced) are
     filled by Hamming-nearest baked rule, breaking ties by frequency.
+    Initially the four self-rows are identical broadcasts of the
+    baked layer — the GA can mutate per-self entries later, so the
+    self dimensions diverge under selection.
 
-    The semantics: each Wang-tessellation cell carries a label
-    ∈ {0..k-1}; a CA tick reads 6 neighbour labels, packs them into
-    a 12-bit key, and the table gives the new self-label.  The
-    global palette then maps that label to an RGB the user sees.
+    Key encoding: `key = (self << 12) | (n0 << 10) | (n1 << 8) |
+                          (n2 << 6) | (n3 << 4) | (n4 << 2) | n5`
+    (14-bit key, [0, 16383]).
 
-    Returns: (global_palette (k, 4) uint8, table (4096,) int8).
+    Returns: (global_palette (k, 4) uint8, table (16384,) int8).
     """
     if not rules:
         gp = np.array([[60, 60, 60, 255], [150, 150, 150, 255],
                        [210, 210, 210, 255], [255, 255, 255, 255]],
                       dtype=np.uint8)
-        return gp, np.zeros(4096, dtype=np.int8)
+        return gp, np.zeros(16384, dtype=np.int8)
 
     centres = np.array([info['palette'][0] for info in rules.values()],
                        dtype=np.float64)             # (N, 4)
@@ -170,7 +175,9 @@ def build_global_palette_and_table(rules: dict,
         return (k_tuple[0] << 10) | (k_tuple[1] << 8) | (k_tuple[2] << 6) \
              | (k_tuple[3] << 4) | (k_tuple[4] << 2) | k_tuple[5]
 
-    table = np.full(4096, -1, dtype=np.int8)
+    # Bake the 6-tuple → output sub-table first (one layer), then
+    # broadcast across all 4 self-states for the full 16384-entry rule.
+    layer = np.full(4096, -1, dtype=np.int8)
     rule_keys = np.array(list(rules.keys()), dtype=np.int64)  # (N, 6)
     rule_counts = weights.copy()
     rule_outputs = np.zeros(len(rules), dtype=np.int8)
@@ -180,13 +187,12 @@ def build_global_palette_and_table(rules: dict,
         d = np.sum((info['palette'][0].astype(np.int64)
                     - palette.astype(np.int64)) ** 2, axis=1)
         out = int(np.argmin(d))
-        table[idx] = out
+        layer[idx] = out
         rule_outputs[i] = out
 
     # Fill missing 6-tuples by Hamming-nearest baked rule, ties → freq.
-    missing = np.where(table == -1)[0]
+    missing = np.where(layer == -1)[0]
     if missing.size and rule_keys.size:
-        # Decode missing indices to (M, 6) tuples (column-major).
         m = missing.shape[0]
         mtuples = np.zeros((m, 6), dtype=np.int64)
         mtuples[:, 0] = (missing >> 10) & 3
@@ -195,21 +201,21 @@ def build_global_palette_and_table(rules: dict,
         mtuples[:, 3] = (missing >> 4)  & 3
         mtuples[:, 4] = (missing >> 2)  & 3
         mtuples[:, 5] = missing & 3
-        # Compute Hamming distance (M, N).  Tiebreaker: maximise count.
         for batch_start in range(0, m, 256):
             batch = mtuples[batch_start:batch_start + 256]
-            # Broadcast: (B, 1, 6) vs (1, N, 6) → (B, N, 6) → sum diff
             hd = np.sum(batch[:, None, :] != rule_keys[None, :, :], axis=2)
             min_h = hd.min(axis=1, keepdims=True)
-            # Mask of best candidates per row.
             mask = (hd == min_h)
-            # Pick the highest-count one among ties.
             counts = np.where(mask, rule_counts[None, :], -1.0)
             best = np.argmax(counts, axis=1)
             for j, bi in enumerate(best):
-                table[missing[batch_start + j]] = rule_outputs[bi]
-    table = table.astype(np.int8)
-    table[table < 0] = 0
+                layer[missing[batch_start + j]] = rule_outputs[bi]
+    layer = layer.astype(np.int8)
+    layer[layer < 0] = 0
+
+    # Broadcast the single baked layer to all 4 self-rows.  Initial
+    # rule has no self-dependence; GA selection introduces it.
+    table = np.tile(layer, 4).astype(np.int8)   # shape (16384,)
     return palette, table
 
 
