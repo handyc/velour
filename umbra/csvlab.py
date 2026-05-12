@@ -165,9 +165,16 @@ def apply_ops(cipher_grid, plain_grid, ops):
     """Replay ops on the ciphertext grid in order.  Returns a list of
     (op_index, error_message) for ops that couldn't be applied.
     plain_grid is the parallel grid of string cells; sort ops permute
-    both grids together so non-numeric cells follow their rows."""
+    both grids together so non-numeric cells follow their rows.
+
+    Each op dict is mutated in place with a `status` ('ok' or 'error')
+    and, on failure, an `error` string — so the queue UI can show per-op
+    outcomes after a run.  No leading underscore: Django templates
+    refuse underscore-prefixed attribute lookups."""
     errors = []
     for i, op in enumerate(ops):
+        op.pop('status', None)
+        op.pop('error',  None)
         kind = op.get('op')
         try:
             if kind == OP_ADD_CONST:
@@ -234,7 +241,10 @@ def apply_ops(cipher_grid, plain_grid, ops):
                 plain_grid[:]  = new_plain
             else:
                 raise ValueError(f'unknown op {kind!r}')
+            op['status'] = 'ok'
         except Exception as exc:
+            op['status'] = 'error'
+            op['error']  = str(exc)
             errors.append((i, str(exc)))
     return errors
 
@@ -311,6 +321,9 @@ def run_session(session):
     session.decrypt_ms = int((time.monotonic() - t2) * 1000)
 
     session.result_csv = emit_csv(out_grid)
+    # Persist per-op _status / _error stamps so the queue UI can render
+    # "applied" vs "errored" badges next to each op.
+    session.ops_json = json.dumps(ops)
     if errs:
         session.last_error = '\n'.join(f'op#{i}: {msg}' for i, msg in errs)
     else:

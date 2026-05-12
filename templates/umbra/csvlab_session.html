@@ -22,8 +22,22 @@
     background: #161b22; border-left: 2px solid #d2a8ff;
     padding: 0.3rem 0.55rem; margin-bottom: 2px;
     font-family: ui-monospace, monospace; font-size: 0.75rem;
+    display: flex; align-items: baseline; gap: 0.45rem;
   }
-  .ops-list li .meta { color: #6e7681; margin-right: 0.4rem; }
+  .ops-list li .meta { color: #6e7681; }
+  .ops-list li.ok    { border-left-color: #56d364; }
+  .ops-list li.err   { border-left-color: #f85149; background: #2a1717; }
+  .ops-list li.pend  { border-left-color: #d2a8ff; }
+  .ops-list .badge {
+    padding: 0 6px; border-radius: 9px; font-size: 0.66rem;
+    font-family: monospace;
+  }
+  .ops-list .badge.ok   { background: #1c3a23; color: #56d364; }
+  .ops-list .badge.err  { background: #3d1c1c; color: #ff7b72; }
+  .ops-list .badge.pend { background: #2a213d; color: #d2a8ff; }
+  .ops-list .body { flex: 1; color: #c9d1d9; }
+  .ops-list .err-msg { color: #ff7b72; font-size: 0.7rem;
+                       margin-top: 2px; display: block; }
 
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem;
            margin-top: 0.5rem; }
@@ -146,19 +160,39 @@
         {% if ops %}
         <ol class="ops-list">
           {% for op in ops %}
-          <li><span class="meta">#{{ forloop.counter0 }}</span>{{ op }}</li>
+          <li class="{% if op.status == 'ok' %}ok{% elif op.status == 'error' %}err{% else %}pend{% endif %}">
+            <span class="meta">#{{ forloop.counter0 }}</span>
+            {% if op.status == 'ok' %}<span class="badge ok">✓ applied</span>
+            {% elif op.status == 'error' %}<span class="badge err">✗ error</span>
+            {% else %}<span class="badge pend">pending</span>{% endif %}
+            <span class="body">
+              {% if op.op == 'add_const' %}add ({{ op.row }},{{ op.col }}) += {{ op.value }}
+              {% elif op.op == 'mul_const' %}mul ({{ op.row }},{{ op.col }}) ×= {{ op.value }}
+              {% elif op.op == 'sum_cells' %}sum ({{ op.a.0 }},{{ op.a.1 }}) + ({{ op.b.0 }},{{ op.b.1 }}) → ({{ op.dst.0 }},{{ op.dst.1 }})
+              {% elif op.op == 'col_total' %}total col={{ op.col }} → ({{ op.dst.0 }},{{ op.dst.1 }}){% if op.skip_header %} (skip header){% endif %}
+              {% elif op.op == 'sort_col' %}sort col={{ op.col }} {{ op.order }}{% if op.skip_header %} (skip header){% endif %}
+              {% else %}{{ op.op }}{% endif %}
+              {% if op.error %}<span class="err-msg">{{ op.error }}</span>{% endif %}
+            </span>
+          </li>
           {% endfor %}
         </ol>
-        <div style="display: flex; gap: 0.5rem; margin-top: 0.6rem;">
-          <form method="post" action="{% url 'umbra:csvlab_run' session.slug %}">
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.6rem;" id="run-row">
+          <form method="post" action="{% url 'umbra:csvlab_run' session.slug %}"
+                id="run-form">
             {% csrf_token %}
-            <button class="btn" type="submit">Run round trip</button>
+            <button class="btn" type="submit" id="run-btn">Run round trip</button>
           </form>
           <form method="post" action="{% url 'umbra:csvlab_clear_ops' session.slug %}">
             {% csrf_token %}
             <button class="btn btn-quiet" type="submit">Clear ops + result</button>
           </form>
         </div>
+        <p class="hint" style="margin-top: 0.5rem;">
+          When you run, every op gets a <span class="badge ok">✓ applied</span> or
+          <span class="badge err">✗ error</span> badge above, and the
+          decrypted output appears below.
+        </p>
         {% else %}
         <p class="empty">No ops queued. Add one on the left.</p>
         {% endif %}
@@ -202,6 +236,21 @@
 </div>
 
 <script>
+  // Acknowledge the Run click so the user knows the request is in flight.
+  // The whole pipeline (encrypt + ops + decrypt) is synchronous on the
+  // server, so the browser will just hang during the request — this
+  // turns "did my click do anything?" into a clear "Running…" state.
+  (function () {
+    var f = document.getElementById('run-form');
+    var b = document.getElementById('run-btn');
+    if (f && b) {
+      f.addEventListener('submit', function () {
+        b.disabled = true;
+        b.textContent = 'Running…';
+      });
+    }
+  })();
+
   // Reveal only the op-fields whose data-kinds contains the chosen kind,
   // AND disable inputs in the inactive blocks so they don't submit —
   // multiple blocks share names like `col` and `dst_row`.
