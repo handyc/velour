@@ -8,7 +8,10 @@ Two surfaces:
     Concrete TFHE.  The Leiden humanities path.
 """
 import json
+import subprocess
+import sys
 
+from django.conf import settings
 from django.contrib import messages
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -357,12 +360,44 @@ def sealedlex_clear_ops(request, slug):
     return redirect('umbra:sealedlex_session', slug=slug)
 
 
+SEALEDLEX_WEB_WALL_S = 180
+
+
 def sealedlex_run(request, slug):
+    """Run the session's ops in a subprocess.
+
+    Concrete-Python's tracer uses thread-local state that isn't
+    initialised in Django's request-handler worker threads — inline
+    `sealedlex.run_session(s)` from a non-main thread fails with
+    `'_thread._local' object has no attribute 'stack'` on compile.
+    Delegating to `manage.py sealedlex_run` gives a clean Python
+    process where Concrete's main-thread initialisation runs
+    normally, and the command writes results back to the same
+    session row via the ORM."""
     s = get_object_or_404(SealedLexSession, slug=slug)
     if request.method != 'POST':
         return redirect('umbra:sealedlex_session', slug=slug)
-    sealedlex.run_session(s)
-    s.save()
+    cap = sealedlex.MAX_CELLS   # in-request safety cap; CLI users go uncapped
+    try:
+        proc = subprocess.run(
+            [sys.executable, 'manage.py', 'sealedlex_run',
+             s.slug, '--cap', str(cap)],
+            cwd=str(settings.BASE_DIR),
+            capture_output=True, text=True,
+            timeout=SEALEDLEX_WEB_WALL_S, check=False,
+        )
+        s.refresh_from_db()
+        if proc.returncode != 0:
+            err = (proc.stderr or '').strip()[-1500:]
+            extra = f'subprocess exit {proc.returncode}\n{err}'
+            s.last_error = (s.last_error + '\n' + extra) if s.last_error else extra
+            s.save(update_fields=['last_error'])
+    except subprocess.TimeoutExpired:
+        s.refresh_from_db()
+        extra = f'subprocess timed out after {SEALEDLEX_WEB_WALL_S}s'
+        s.last_error = (s.last_error + '\n' + extra) if s.last_error else extra
+        s.save(update_fields=['last_error'])
+
     if s.last_error:
         messages.warning(request,
             f'Ran with {len(s.last_error.splitlines())} op error(s).')
