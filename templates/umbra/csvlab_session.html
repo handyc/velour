@@ -16,6 +16,11 @@
                         text-align: right; min-width: 2em; }
   table.gridv td.numeric { color: #79c0ff; }
   table.gridv td.text    { color: #c9d1d9; text-align: left; }
+  /* Diff highlight: cells whose value differs from the input at the
+     same coordinate. Sort ops light up the whole reordered row; add/
+     mul/sum ops light up just the targeted cells. */
+  table.gridv td.changed { background: #1f2a1c; color: #d2f5b8;
+                           outline: 1px solid #56d364; }
 
   .ops-list { list-style: none; padding: 0; margin: 0; }
   .ops-list li {
@@ -107,8 +112,8 @@
           </label>
 
           <div class="op-fields" data-kinds="add_const mul_const">
-            <label>row<input type="number" name="row" min="0" value="1"></label>
-            <label>col<input type="number" name="col" min="0" value="1"></label>
+            <label>row (0-indexed)<input type="number" name="row" min="0" value="1"></label>
+            <label>col (0-indexed)<input type="number" name="col" min="0" value="1"></label>
             <label>value<input type="number" step="any" name="value" value="1"></label>
           </div>
 
@@ -131,7 +136,7 @@
           </div>
 
           <div class="op-fields" data-kinds="sort_col">
-            <label>col<input type="number" name="col" min="0" value="0"></label>
+            <label>col (0-indexed)<input type="number" name="col" min="0" value="0"></label>
             <label>order
               <select name="order">
                 <option value="asc">ascending (A → Z)</option>
@@ -200,16 +205,19 @@
 
       {% if session.result_csv %}
       <div class="panel">
-        <h2>Output grid (decrypted)</h2>
+        <h2>Output grid (decrypted)
+          <span style="font-weight: 400; color: #6e7681; font-size: 0.75rem;">·
+          {{ changed_cells }} of {{ total_cells }} cells changed (green)</span>
+        </h2>
         <div style="overflow-x: auto;">
           <table class="gridv">
             <tr><th></th>
-              {% for c in result_grid.0 %}<th>col {{ forloop.counter0 }}</th>{% endfor %}
+              {% for c in result_grid_diff.0 %}<th>col {{ forloop.counter0 }}</th>{% endfor %}
             </tr>
-            {% for row in result_grid %}
+            {% for row in result_grid_diff %}
             <tr>
               <th class="rownum">{{ forloop.counter0 }}</th>
-              {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+              {% for cell in row %}<td{% if cell.1 %} class="changed"{% endif %}>{{ cell.0 }}</td>{% endfor %}
             </tr>
             {% endfor %}
           </table>

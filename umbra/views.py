@@ -208,11 +208,30 @@ def csvlab_session(request, slug):
         ops = json.loads(s.ops_json or '[]')
     except Exception:
         ops = []
-    result_grid = []
+    # Pair the result_grid with a parallel mask of "(value, changed_bool)"
+    # tuples so the template can highlight cells whose text differs from
+    # the same coordinate in the original input.  For sort ops this lights
+    # up every cell in every reordered row — exactly the visual cue that
+    # makes a sort visible.
+    result_grid_diff = []
+    changed_cells = 0
+    total_cells = 0
     if s.result_csv:
         result_grid, _, _ = csvlab.parse_csv(s.result_csv)
+        for r, row in enumerate(result_grid):
+            drow = []
+            for c, val in enumerate(row):
+                orig = grid[r][c] if r < len(grid) and c < len(grid[r]) else ''
+                changed = (val != orig)
+                if changed:
+                    changed_cells += 1
+                total_cells += 1
+                drow.append((val, changed))
+            result_grid_diff.append(drow)
     ctx = _ctx()
-    ctx.update(session=s, grid=grid, ops=ops, result_grid=result_grid,
+    ctx.update(session=s, grid=grid, ops=ops,
+               result_grid_diff=result_grid_diff,
+               changed_cells=changed_cells, total_cells=total_cells,
                op_choices=OP_CHOICES)
     return render(request, 'umbra/csvlab_session.html', ctx)
 
