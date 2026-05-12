@@ -83,6 +83,7 @@ def detail(request, slug):
         'grid_label':     grid_label,
         'edges_per_tile': edges_per_tile,
         'palette_json':   json.dumps(s.palette),
+        'render_version': R.RENDER_VERSION,
     })
 
 
@@ -203,6 +204,7 @@ def tiling_test(request, slug):
         'container_w': container_w,
         'container_h': container_h,
         'seed': request.GET.get('seed', '0'),
+        'render_version': R.RENDER_VERSION,
     })
 
 

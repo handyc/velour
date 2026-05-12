@@ -77,7 +77,7 @@
 <div class="tess-hex-grid"
      style="width:{{ container_w }}px; height:{{ container_h }}px;">
   {% for p in placements %}
-  <img src="{% url 'tessera:tile-png' set.slug p.tid %}"
+  <img src="{% url 'tessera:tile-png' set.slug p.tid %}?v={{ render_version }}"
        alt="tile {{ p.tid }}"
        title="tile {{ p.tid }}"
        style="left:{{ p.left }}px; top:{{ p.top }}px;">
@@ -89,7 +89,7 @@
   <tr>
     {% for tid in row %}
     <td>
-      <img src="{% url 'tessera:tile-png' set.slug tid %}"
+      <img src="{% url 'tessera:tile-png' set.slug tid %}?v={{ render_version }}"
            alt="tile {{ tid }}" title="tile {{ tid }}">
     </td>
     {% endfor %}

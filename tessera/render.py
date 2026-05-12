@@ -221,6 +221,11 @@ def make_source_images(seed: int, palette, w: int, h: int,
 
 _HEX_SQRT3_2 = 0.8660254037844386
 
+# Bump RENDER_VERSION whenever the rendering math changes so the
+# templates can append ?v=N to PNG URLs and force browsers off the
+# stale immutable cache entries left by previous revisions.
+RENDER_VERSION = 4
+
 
 def _hex_geometry(w: int, h: int):
     """Return (cx, cy, R, vertices) where vertices is a (6, 2) array
@@ -421,14 +426,38 @@ def _wedge_uv(w: int, h: int, n_wedges: int):
     """
     yy, xx = np.meshgrid(np.arange(h, dtype=np.float64),
                          np.arange(w, dtype=np.float64), indexing='ij')
-    cx = (w - 1) / 2.0
-    cy = (h - 1) / 2.0
+    # Geometry first so we know V_0's position before angular indexing.
+    if n_wedges == 6:
+        cx, cy, R, verts = _hex_geometry(w, h)
+        inside, _ = _hex_mask_and_edge_distances(w, h)
+    else:
+        # Square: vertices at the four corners (CW from NW so wedge 0
+        # = NW→NE = top edge).
+        cx = (w - 1) / 2.0
+        cy = (h - 1) / 2.0
+        R = max(w, h) / 2.0
+        verts = np.array([
+            [0,         0    ],   # NW       wedge 0 top edge: NW→NE
+            [w - 1,     0    ],   # NE
+            [w - 1, h - 1    ],   # SE
+            [0,     h - 1    ],   # SW
+        ], dtype=np.float64)
+        inside = np.ones((h, w), dtype=bool)
     dx = xx - cx
     dy = yy - cy
     angle = np.arctan2(dy, dx)                    # (-π, π]
-    # Convert to "clockwise from top" 0..2π so wedge_idx = floor(...)
-    # works cleanly.  Top is angle = -π/2.
-    a_norm = (np.pi / 2 - angle) % (2 * np.pi)    # (0, 2π]; top = 0
+    # Map to "clockwise from V_0" 0..2π so wedge_idx = floor(...)
+    # picks the wedge whose far edge runs V_i→V_{i+1}.  In screen
+    # coords (y-down), CW means angle *increasing*, so the offset is
+    # -atan2(V0.y-cy, V0.x-cx).  Hex: V_0 is at top, offset = π/2.
+    # Square: V_0 is at NW, offset = 3π/4 (= wedge boundaries on the
+    # diagonals).  Bug fix 2026-05-12: hardcoded offset = π/2 was
+    # correct for hex but rotated square wedges 45°, scrambling
+    # which edge colour each square wedge displayed and making
+    # Wang-matched neighbours look mismatched even though propagation
+    # was correct.
+    v0_angle = math.atan2(verts[0, 1] - cy, verts[0, 0] - cx)
+    a_norm = (angle - v0_angle) % (2 * np.pi)
     wedge_idx = np.floor(a_norm / (2 * np.pi / n_wedges)).astype(np.int64)
     wedge_idx = np.clip(wedge_idx, 0, n_wedges - 1)
     # Within each wedge, u is position along its outer edge and v is
@@ -437,26 +466,6 @@ def _wedge_uv(w: int, h: int, n_wedges: int):
     # The outer edge of wedge i runs between vertices V_i and V_{i+1};
     # u = projection along V_{i+1}-V_i normalised, v = 1 - (distance
     # from centre / radius).
-    if n_wedges == 6:
-        cx_h, cy_h, R, verts = _hex_geometry(w, h)
-        inside, _ = _hex_mask_and_edge_distances(w, h)
-    else:
-        # Square: vertices at the four corners.
-        R = max(w, h) / 2.0
-        verts = np.array([
-            [w - 1,     0    ],   # NE
-            [w - 1, h - 1    ],   # SE
-            [0,     h - 1    ],   # SW
-            [0,         0    ],   # NW
-        ], dtype=np.float64)
-        # Renumber so wedge 0 = top (between NW and NE)
-        verts = np.array([
-            [0,         0    ],   # NW       wedge 0 top edge: NW→NE
-            [w - 1,     0    ],   # NE
-            [w - 1, h - 1    ],   # SE
-            [0,     h - 1    ],   # SW
-        ], dtype=np.float64)
-        inside = np.ones((h, w), dtype=bool)
     u = np.zeros_like(xx)
     v = np.zeros_like(xx)
     for i in range(n_wedges):

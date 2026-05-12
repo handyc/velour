@@ -46,7 +46,7 @@
 <div>
   {% for c in "0123" %}
   <div class="tess-source">
-    <img src="{% url 'tessera:source-png' set.slug c %}"
+    <img src="{% url 'tessera:source-png' set.slug c %}?v={{ render_version }}"
          alt="source colour {{ c }}">
     <span>colour {{ c }}</span>
   </div>
@@ -71,9 +71,9 @@
   <tr>
     {% for tid in row %}
     <td>
-      <a href="{% url 'tessera:tile-png' set.slug tid %}"
+      <a href="{% url 'tessera:tile-png' set.slug tid %}?v={{ render_version }}"
          title="tile {{ tid }}">
-        <img src="{% url 'tessera:tile-png' set.slug tid %}"
+        <img src="{% url 'tessera:tile-png' set.slug tid %}?v={{ render_version }}"
              alt="tile {{ tid }}">
       </a>
     </td>
