@@ -260,10 +260,25 @@ def bake_ca(request):
             # and a complete 4096-entry CA table (Hamming-nearest
             # fill for 6-tuples the image never produced).
             gp, table = BCA.build_global_palette_and_table(rules, k=4)
+            # Quantise the input image down to the CA's grid resolution
+            # and label each pixel with the nearest global-palette entry.
+            # This gives the canvas a meaningful starting state — the
+            # image itself — so we can watch the rule preserve or
+            # dissolve it rather than starting from random noise.
+            GRID = 64
+            small = img.resize((GRID, GRID), Image.Resampling.LANCZOS)
+            small_arr = np.asarray(small.convert('RGBA'),
+                                   dtype=np.uint8)
+            diffs = (small_arr[:, :, None, :].astype(np.int32)
+                     - gp[None, None, :, :].astype(np.int32))
+            qdists = np.sum(diffs ** 2, axis=-1)        # (G, G, 4)
+            image_state = np.argmin(qdists, axis=-1)    # (G, G)
             import json
             ca_payload = {
                 'palette': [[int(c) for c in gp[i, :3]] for i in range(4)],
                 'table':   [int(v) for v in table.tolist()],
+                'grid':    GRID,
+                'image_state': [int(v) for v in image_state.ravel().tolist()],
             }
             result = {
                 'top':          top,

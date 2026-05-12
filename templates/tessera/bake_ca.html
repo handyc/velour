@@ -79,7 +79,7 @@
   breath.
 </p>
 <div style="margin-top: 8px;">
-  <canvas id="breath-canvas" width="560" height="320"
+  <canvas id="breath-canvas" width="230" height="200"
           style="background:#080808; border:1px solid #222;
                  image-rendering: pixelated;"></canvas>
   <div class="bake-meta" style="margin-top:6px;">
@@ -88,7 +88,14 @@
                    padding:2px 10px; font-family:inherit;">pause</button>
     <button type="button" id="breath-reset"
             style="background:#222; color:#cfc; border:1px solid #555;
-                   padding:2px 10px; font-family:inherit;">re-seed</button>
+                   padding:2px 10px; font-family:inherit;"
+            title="restart from the image's nearest-palette quantisation"
+            >re-seed (image)</button>
+    <button type="button" id="breath-scramble"
+            style="background:#222; color:#cfc; border:1px solid #555;
+                   padding:2px 10px; font-family:inherit;"
+            title="restart from random noise"
+            >scramble</button>
     <span style="margin-left:10px;">tick</span>
     <input type="number" id="breath-speed" value="180" min="40" max="2000" step="20"
            style="background:#111; color:#ccc; border:1px solid #333;
@@ -128,21 +135,35 @@
 
   var canvas = document.getElementById('breath-canvas');
   var ctx    = canvas.getContext('2d');
-  var HEX_R  = 14;
+  var HEX_R  = 2;
   var S      = HEX_R * Math.sqrt(3) / 2;
   var H_STEP = 2 * S;            // same-row centre-to-centre
   var V_STEP = 1.5 * HEX_R;      // row-to-row centre-to-centre
 
-  // Fit a hex grid into the canvas with a 4-px margin.
-  var GRID_W = Math.floor((canvas.width  - 4 - S) / H_STEP);
-  var GRID_H = Math.floor((canvas.height - 4 - HEX_R) / V_STEP);
+  // Fixed 64×64 grid — the same resolution the server quantises the
+  // input image to, so the initial state IS the image.
+  var GRID_W = (payload.grid || 64);
+  var GRID_H = (payload.grid || 64);
   var grid = new Int8Array(GRID_W * GRID_H);
 
-  function seed () {
+  // Initial seed comes from the image's nearest-palette quantisation
+  // (`payload.image_state`).  Random scramble is available via a
+  // separate button so we can see the rule run on noise too.
+  function seedFromImage () {
+    if (payload.image_state && payload.image_state.length === grid.length) {
+      for (var i = 0; i < grid.length; i++) {
+        grid[i] = payload.image_state[i];
+      }
+    } else {
+      seedRandom();
+    }
+  }
+  function seedRandom () {
     for (var i = 0; i < grid.length; i++) {
       grid[i] = (Math.random() * 4) | 0;
     }
   }
+  var seed = seedFromImage;
 
   function getCell (y, x) {
     // Toroidal wrap so edges don't kill the dynamics.
@@ -264,7 +285,10 @@
     this.textContent = running ? 'pause' : 'play';
   });
   document.getElementById('breath-reset').addEventListener('click', function () {
-    seed(); draw(); resetLiveStats();
+    seed = seedFromImage; seed(); draw(); resetLiveStats();
+  });
+  document.getElementById('breath-scramble').addEventListener('click', function () {
+    seed = seedRandom; seed(); draw(); resetLiveStats();
   });
   document.getElementById('breath-speed').addEventListener('change', function () {
     var v = parseInt(this.value, 10);
