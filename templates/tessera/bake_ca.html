@@ -170,6 +170,10 @@
       <label title="re-seed eval grid each generation so we don't overfit to one init">re-seed eval
         <input type="checkbox" id="ga-reseed" checked
                style="vertical-align:-2px;"></label>
+      <label title="fitness = w·edge + (1−w)·preserve.  100 = pure edge-of-chaos; 0 = pure image preservation; 50 = balanced">edge weight %
+        <input type="number" id="ga-edge-weight" value="50" min="0" max="100" step="5"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
     </div>
     <div style="margin-top:6px;">
       <button type="button" id="ga-run"
@@ -269,6 +273,7 @@
   var BURN_IN = 32;
   var LIVE_WINDOW = 96;
   var liveChanges = [];
+  var livePreserve = [];
   var sparkHistory = [];
   var SPARK_LEN = 24;
   var SPARK_CHARS = '▁▂▃▄▅▆▇█';
@@ -277,6 +282,8 @@
   function tick () {
     var next = new Int8Array(GRID_W * GRID_H);
     var changed = 0;
+    var matchedImg = 0;
+    var hasImage = !!payload.image_state;
     for (var y = 0; y < GRID_H; y++) {
       var shift = y & 1;
       var tlx_off = -1 + shift;
@@ -291,15 +298,22 @@
         var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
                 | (n3 << 4) | (n4 << 2) | n5;
         var v = rule[key];
-        next[y * GRID_W + x] = v;
-        if (v !== grid[y * GRID_W + x]) changed++;
+        var idx = y * GRID_W + x;
+        next[idx] = v;
+        if (v !== grid[idx]) changed++;
+        if (hasImage && v === payload.image_state[idx]) matchedImg++;
       }
     }
     grid = next;
     ticksSinceReset++;
+    var area = GRID_W * GRID_H;
     if (ticksSinceReset > BURN_IN) {
-      liveChanges.push(changed / (GRID_W * GRID_H));
+      liveChanges.push(changed / area);
       if (liveChanges.length > LIVE_WINDOW) liveChanges.shift();
+    }
+    if (hasImage) {
+      livePreserve.push(matchedImg / area);
+      if (livePreserve.length > LIVE_WINDOW) livePreserve.shift();
     }
     updateLiveDisplay();
   }
@@ -313,12 +327,24 @@
       sparkEl.textContent = '';
       return;
     }
-    var sum = 0;
-    for (var i = 0; i < liveChanges.length; i++) sum += liveChanges[i];
-    var mean = sum / liveChanges.length;
-    var score = 4 * mean * (1 - mean);
-    scoreEl.textContent = 'chg ' + mean.toFixed(3) +
-                          '  score ' + score.toFixed(3);
+    var sumC = 0;
+    for (var i = 0; i < liveChanges.length; i++) sumC += liveChanges[i];
+    var meanC = sumC / liveChanges.length;
+    var score = 4 * meanC * (1 - meanC);
+    var line = 'chg ' + meanC.toFixed(3) + '  edge ' + score.toFixed(3);
+    if (livePreserve.length) {
+      var sumP = 0;
+      for (var k = 0; k < livePreserve.length; k++) sumP += livePreserve[k];
+      var meanP = sumP / livePreserve.length;
+      var denom = 1 - IMG_BASELINE;
+      var meanPNorm = denom > 0
+        ? Math.max(0, (meanP - IMG_BASELINE) / denom)
+        : 0;
+      line += '  preserve ' + meanPNorm.toFixed(3) +
+              ' (raw ' + meanP.toFixed(3) +
+              ', baseline ' + IMG_BASELINE.toFixed(3) + ')';
+    }
+    scoreEl.textContent = line;
     sparkHistory.push(score);
     if (sparkHistory.length > SPARK_LEN) sparkHistory.shift();
     var spark = '';
@@ -332,6 +358,7 @@
 
   function resetLiveStats () {
     liveChanges = [];
+    livePreserve = [];
     sparkHistory = [];
     ticksSinceReset = 0;
     updateLiveDisplay();
@@ -454,18 +481,84 @@
     return out;
   }
 
-  var EVAL_W = 24, EVAL_H = 16;
-  var EVAL_BURN_IN = 32, EVAL_TOTAL = 128;
+  // Eval grid is a 2× downsample of the 64×64 image_state — small
+  // enough that a GA pop of ~50 fits in a few seconds, large enough
+  // that the image is recognisable.  Init for every candidate IS the
+  // image (not random) so both metrics are evaluated against the
+  // same well-defined starting board.
+  // Short horizon, no burn-in: the image is loudest in the first
+  // few dozen ticks; averaging 96 steps drowns preserve in the
+  // chaotic tail and the GA effectively ignores preservation.
+  var EVAL_W = 32, EVAL_H = 32;
+  var EVAL_BURN_IN = 0, EVAL_TOTAL = 32;
+  var evalImage = null;
+  function buildEvalImage () {
+    if (!payload.image_state || !payload.grid) return null;
+    var src = payload.image_state;
+    var G   = payload.grid;
+    var stride = G / EVAL_W;  // = 2 for 64→32
+    var out = new Int8Array(EVAL_W * EVAL_H);
+    for (var y = 0; y < EVAL_H; y++) {
+      var sy = Math.min(G - 1, Math.floor(y * stride));
+      for (var x = 0; x < EVAL_W; x++) {
+        var sx = Math.min(G - 1, Math.floor(x * stride));
+        out[y * EVAL_W + x] = src[sy * G + sx];
+      }
+    }
+    return out;
+  }
+  evalImage = buildEvalImage();
 
+  // Random-match baseline for 4-colour preservation: sum p_c² over
+  // the image's colour histogram.  A rule that ignores the image
+  // entirely averages to ≈ this value; we subtract it so the
+  // preserve metric reads 0 at random and 1 at perfect fidelity.
+  // (Without this, the GA's balanced weight is biased toward edge-
+  // of-chaos because raw preserve maxes out near 0.25–0.30 while
+  // raw edge reaches 1.0.)
+  var IMG_BASELINE = (function () {
+    if (!evalImage) return 0.25;
+    var counts = [0, 0, 0, 0];
+    for (var i = 0; i < evalImage.length; i++) counts[evalImage[i]]++;
+    var total = evalImage.length;
+    var s = 0;
+    for (var c = 0; c < 4; c++) {
+      var p = counts[c] / total;
+      s += p * p;
+    }
+    return s;
+  })();
+
+  // Per-candidate evaluation returns BOTH metrics so the GA can
+  // combine them however the user weights them.
+  //   edgeScore     = 4·chg·(1−chg) over the post-burn-in window
+  //                   (peaks at chg=0.5; HexHunt's score_edge formula)
+  //   preserveScore = mean per-step fraction of cells that still
+  //                   match the original image_state across the whole
+  //                   trajectory (no burn-in skip — the early frames
+  //                   carry the most image signal)
   function evalRule (cand, initSeed) {
     var W = EVAL_W, H = EVAL_H, area = W * H;
     var g = new Int8Array(area);
-    var rng = mulberry32(initSeed);
-    for (var i = 0; i < area; i++) g[i] = (rng() * 4) | 0;
-    var sumChange = 0, nMeas = 0;
+    if (evalImage) {
+      // Mostly the image, with `initSeed` driving a few percent of
+      // cells to random so different generations don't all converge
+      // to the same trajectory.  Tiny perturbation by default.
+      var rng = mulberry32(initSeed);
+      var jitter = 0.02;
+      for (var i = 0; i < area; i++) {
+        g[i] = rng() < jitter ? ((rng() * 4) | 0) : evalImage[i];
+      }
+    } else {
+      var rng2 = mulberry32(initSeed);
+      for (var i2 = 0; i2 < area; i2++) g[i2] = (rng2() * 4) | 0;
+    }
+    var sumChange = 0, nMeasChange = 0;
+    var sumMatch  = 0, nMeasMatch  = 0;
     for (var t = 0; t < EVAL_TOTAL; t++) {
       var nx = new Int8Array(area);
       var changed = 0;
+      var matchedImg = 0;
       for (var y = 0; y < H; y++) {
         var shift = y & 1;
         var brx_off = shift;
@@ -482,13 +575,33 @@
           var v = cand[key];
           nx[y * W + x] = v;
           if (v !== g[y * W + x]) changed++;
+          if (evalImage && v === evalImage[y * W + x]) matchedImg++;
         }
       }
       g = nx;
-      if (t >= EVAL_BURN_IN) { sumChange += changed / area; nMeas++; }
+      if (t >= EVAL_BURN_IN) { sumChange += changed / area; nMeasChange++; }
+      if (evalImage) { sumMatch += matchedImg / area; nMeasMatch++; }
     }
-    var mean = nMeas ? sumChange / nMeas : 0;
-    return { changeRate: mean, score: 4 * mean * (1 - mean) };
+    var meanCh = nMeasChange ? sumChange / nMeasChange : 0;
+    var preserveRaw = nMeasMatch ? sumMatch / nMeasMatch : 0;
+    var denom = 1 - IMG_BASELINE;
+    var preserveNorm = denom > 0
+      ? Math.max(0, (preserveRaw - IMG_BASELINE) / denom)
+      : 0;
+    return {
+      changeRate:       meanCh,
+      edgeScore:        4 * meanCh * (1 - meanCh),
+      preserveScore:    preserveRaw,    // GA fitness uses raw value
+      preserveScoreNrm: preserveNorm,   // display-only baseline-corrected
+    };
+  }
+
+  function combineFitness (m, edgeWeight) {
+    // Weighted sum of raw scores.  Both in [0, 1]; preserve has a
+    // floor near IMG_BASELINE so at 50/50 weight edge tends to
+    // dominate.  Push the slider toward 0 to bias selection toward
+    // image-faithful rules; toward 100 to favour rich dynamics.
+    return edgeWeight * m.edgeScore + (1 - edgeWeight) * m.preserveScore;
   }
 
   // ── Multi-generation GA ──────────────────────────────────────────
@@ -533,14 +646,15 @@
       return (isNaN(v) ? def : v);
     }
     return {
-      pop:       Math.max(4, Math.round(num('ga-pop', 48))),
-      gens:      Math.max(1, Math.round(num('ga-gens', 20))),
-      elite:     Math.max(0, Math.round(num('ga-elite', 3))),
-      mutFrac:   Math.max(0, num('ga-mut', 2)) / 100,
-      xRate:     Math.max(0, Math.min(1, num('ga-xrate', 0.5))),
-      tourn:     Math.max(1, Math.round(num('ga-tourn', 3))),
-      randInit:  Math.max(0, Math.min(100, num('ga-rand-init', 25))) / 100,
+      pop:        Math.max(4, Math.round(num('ga-pop', 48))),
+      gens:       Math.max(1, Math.round(num('ga-gens', 20))),
+      elite:      Math.max(0, Math.round(num('ga-elite', 3))),
+      mutFrac:    Math.max(0, num('ga-mut', 2)) / 100,
+      xRate:      Math.max(0, Math.min(1, num('ga-xrate', 0.5))),
+      tourn:      Math.max(1, Math.round(num('ga-tourn', 3))),
+      randInit:   Math.max(0, Math.min(100, num('ga-rand-init', 25))) / 100,
       reseedEval: document.getElementById('ga-reseed').checked,
+      edgeWeight: Math.max(0, Math.min(100, num('ga-edge-weight', 50))) / 100,
     };
   }
 
@@ -615,10 +729,16 @@
         while (i < done) {
           var c = population[i];
           var r = evalRule(c.rule, INIT_SEED_BASE + seedSalt + i);
+          var fitness = combineFitness(r, cfg.edgeWeight);
           scored.push({
             rule: c.rule, origin: c.origin,
-            score: r.score, changeRate: r.changeRate,
-            generation: c.generation,
+            score:            fitness,        // for sort + display
+            fitness:          fitness,
+            edgeScore:        r.edgeScore,
+            preserveScore:    r.preserveScore,
+            preserveScoreNrm: r.preserveScoreNrm,
+            changeRate:       r.changeRate,
+            generation:       c.generation,
           });
           i++;
         }
@@ -635,11 +755,14 @@
       var best = scored[0];
       allBest.push(best.score);
       if (!bestEver || best.score > bestEver.score) bestEver = best;
-      // Sparkline-ish progress line.
+      // Progress line shows both raw metrics so you can see whether
+      // the leader is winning on edge, on preserve, or both.
       var line = 'gen ' + String(gen + 1).padStart(3) +
-                 '  best ' + best.score.toFixed(3) +
+                 '  fit ' + best.score.toFixed(3) +
+                 '  edge ' + best.edgeScore.toFixed(3) +
+                 '  pres ' + best.preserveScore.toFixed(3) +
                  '  best-ever ' + bestEver.score.toFixed(3) +
-                 '  origin: ' + best.origin;
+                 '  • ' + best.origin;
       progressEl.innerHTML += line + '<br>';
       progressEl.scrollTop = progressEl.scrollHeight;
       renderResults(scored.slice(0, 8));
@@ -692,18 +815,39 @@
       '<tr style="color:#666;">' +
       '<th style="padding:2px 8px; text-align:left;">#</th>' +
       '<th style="padding:2px 8px; text-align:left;">origin</th>' +
-      '<th style="padding:2px 8px; text-align:right;">score</th>' +
+      '<th style="padding:2px 8px; text-align:right;" ' +
+        'title="combined fitness (sort key)">fit</th>' +
+      '<th style="padding:2px 8px; text-align:right;" ' +
+        'title="edge-of-chaos: 4·chg·(1−chg)">edge</th>' +
+      '<th style="padding:2px 8px; text-align:right;" ' +
+        'title="raw image-match fraction">pres</th>' +
+      '<th style="padding:2px 8px; text-align:right;" ' +
+        'title="baseline-corrected preservation (0=random, 1=perfect)">pres↑</th>' +
       '<th style="padding:2px 8px; text-align:right;">chg</th>' +
       '<th></th></tr>'
     ];
     top.forEach(function (r, i) {
+      var edge = (r.edgeScore !== undefined) ? r.edgeScore.toFixed(3) : '—';
+      var presRaw = (r.preserveScore !== undefined)
+        ? r.preserveScore.toFixed(3) : '—';
+      var presNorm = (r.preserveScoreNrm !== undefined)
+        ? r.preserveScoreNrm.toFixed(3) : '—';
       rows.push(
         '<tr>' +
         '<td style="padding:2px 8px; color:#888;">' + (i + 1) + '</td>' +
         '<td style="padding:2px 8px;">' + r.origin + '</td>' +
         '<td style="padding:2px 8px; text-align:right; color:#cfc;">' +
           r.score.toFixed(3) + '</td>' +
-        '<td style="padding:2px 8px; text-align:right;">' +
+        '<td style="padding:2px 8px; text-align:right; color:#ace;">' +
+          edge + '</td>' +
+        '<td style="padding:2px 8px; text-align:right; color:#fca;" ' +
+          'title="raw match fraction (random baseline ≈ ' +
+            IMG_BASELINE.toFixed(2) + ')">' +
+          presRaw + '</td>' +
+        '<td style="padding:2px 8px; text-align:right; color:#fa8;" ' +
+          'title="baseline-corrected: 0 = random, 1 = perfect">' +
+          presNorm + '</td>' +
+        '<td style="padding:2px 8px;">' +
           r.changeRate.toFixed(3) + '</td>' +
         '<td style="padding:2px 8px;">' +
           '<button class="adopt" data-i="' + i + '" ' +
