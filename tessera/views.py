@@ -17,10 +17,12 @@ from django.http import HttpResponse, Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils.text import slugify
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import (
+    require_GET, require_POST, require_http_methods)
 
 from .models import TessSet
 from . import render as R
+from . import bake_ca as BCA
 
 
 def _decode_tile_id(tile_id: str, expected_len: int) -> tuple:
@@ -220,6 +222,61 @@ def tiling_test(request, slug):
 
 
 _VALID_METHODS = {m[0] for m in TessSet.METHOD_CHOICES}
+
+
+@require_http_methods(['GET', 'POST'])
+def bake_ca(request):
+    """Upload an RGBA image, get back a ranked catalogue of hex-flower
+    CA-rule keys + averaged palettes found in the image."""
+    result = None
+    if request.method == 'POST':
+        f = request.FILES.get('image')
+        max_side = max(32, min(int(request.POST.get('max_side', 160) or 160), 320))
+        top_n = max(4, min(int(request.POST.get('top_n', 36) or 36), 256))
+        if f:
+            from PIL import Image
+            import numpy as np
+            img = Image.open(f).convert('RGBA')
+            if max(img.size) > max_side:
+                img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            arr = np.asarray(img, dtype=np.uint8)
+            rules = BCA.bake_rules(arr)
+            ranked = sorted(rules.items(), key=lambda kv: -kv[1]['count'])
+            top = []
+            for key, info in ranked[:top_n]:
+                pal = info['palette']
+                neighbour_rgbas = [pal[lab] for lab in key]
+                svg = BCA.hex_flower_svg(pal[0], neighbour_rgbas, labels=key)
+                top.append({
+                    'key_str':     ''.join(str(l) for l in key),
+                    'count':       info['count'],
+                    'svg':         svg,
+                    'palette_hex': ['#{:02x}{:02x}{:02x}'.format(
+                                        *pal[i, :3]) for i in range(4)],
+                })
+            total_pixels = (arr.shape[0] - 2) * (arr.shape[1] - 2)
+            # The "Wang as bone, CA as breath" payload — the same
+            # baked rules collapsed into one global 4-colour palette
+            # and a complete 4096-entry CA table (Hamming-nearest
+            # fill for 6-tuples the image never produced).
+            gp, table = BCA.build_global_palette_and_table(rules, k=4)
+            import json
+            ca_payload = {
+                'palette': [[int(c) for c in gp[i, :3]] for i in range(4)],
+                'table':   [int(v) for v in table.tolist()],
+            }
+            result = {
+                'top':          top,
+                'total_rules':  len(rules),
+                'total_pixels': total_pixels,
+                'image_size':   f'{img.width}×{img.height}',
+                'top_n':        top_n,
+                'max_side':     max_side,
+                'ca_payload':   json.dumps(ca_payload),
+                'ca_palette_hex': ['#{:02x}{:02x}{:02x}'.format(*gp[i, :3])
+                                   for i in range(4)],
+            }
+    return render(request, 'tessera/bake_ca.html', {'result': result})
 
 
 @require_POST

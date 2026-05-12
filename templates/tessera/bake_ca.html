@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}CA rule baker — Tessera{% endblock %}
+{% block content %}
+<style>
+  .bake-form { margin-top: 10px; padding: 8px;
+               border: 1px dashed #444; border-radius: 4px; }
+  .bake-form input, .bake-form select {
+    background:#111; color:#ccc; border:1px solid #333;
+    padding:3px 6px; font-family:inherit; }
+  .bake-form label { color:#aaa; margin-right:6px; }
+  .bake-meta { color:#888; font-size: 0.85rem; }
+  .bake-meta a { color:#ace; }
+  .bake-grid { display: grid;
+               grid-template-columns: repeat(auto-fill, 110px);
+               gap: 10px; margin-top: 14px; }
+  .bake-cell { background:#0a0a0a; padding:6px;
+               border:1px solid #222; text-align:center; }
+  .bake-cell .key   { font-family: monospace; color:#cfc;
+                      font-size:0.8rem; letter-spacing: 0.05em; }
+  .bake-cell .count { color:#888; font-size:0.7rem; margin-bottom:2px; }
+  .bake-cell .pal   { display:flex; gap:1px; margin-top:3px;
+                      justify-content:center; }
+  .bake-cell .pal div { width:18px; height:14px; border:1px solid #333; }
+  .bake-cell svg    { display:block; margin: 2px auto; }
+</style>
+
+<p class="bake-meta" style="margin-top:0;">
+  <a href="{% url 'tessera:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">CA rule baker</b>
+</p>
+<p class="bake-meta" style="max-width:60em;">
+  Upload any RGBA image.  For every interior pixel the tool samples
+  it + its 6 offset-r hex neighbours, quantises the 7-sample group
+  into a 4-colour palette (0 = centre pixel exact, 1–3 = three
+  neighbours furthest from centre), and records the 6-tuple of
+  palette labels as a CA-rule key.  Pixels sharing a 6-tuple are
+  aggregated; their palettes averaged.  The output is a ranked
+  catalogue of hex-flower configurations the image actually
+  exhibits — an identity (no-change) CA rule densely populated only
+  where the image has corresponding texture.
+</p>
+
+<form class="bake-form" method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  <label>image</label>
+  <input type="file" name="image" accept="image/*" required>
+  <label style="margin-left:14px;">max side</label>
+  <input type="number" name="max_side" value="{{ result.max_side|default:160 }}"
+         min="32" max="320" style="width:5em;">
+  <label style="margin-left:6px;">top N</label>
+  <input type="number" name="top_n" value="{{ result.top_n|default:36 }}"
+         min="4" max="256" style="width:5em;">
+  <button type="submit" style="background:#222; color:#cfc;
+          border:1px solid #555; padding:3px 12px; margin-left:8px;
+          font-family:inherit;">Bake</button>
+</form>
+
+{% if result %}
+<p class="bake-meta" style="margin-top:14px;">
+  <b>{{ result.image_size }}</b> &middot;
+  {{ result.total_pixels }} interior pixels &middot;
+  <b>{{ result.total_rules }}</b> distinct rule keys
+  (top {{ result.top|length }} below; central hex = palette[0] =
+  exact centre pixel; outer numbers are palette labels 0–3).
+</p>
+
+<h2 style="margin: 18px 0 4px; font-size: 1rem; color: #cfc;">
+  Wang as bone, CA as breath
+</h2>
+<p class="bake-meta" style="max-width:60em; margin-top:0;">
+  The 4096-entry table below is the same baked rule collapsed to one
+  global 4-colour palette (k-means on the central pixels, weighted
+  by rule frequency).  6-tuples the image never produced are filled
+  by Hamming-nearest baked rule (frequency-weighted tiebreak), so
+  the table is dense.  Each hex on the canvas is a Wang-tessellation
+  cell carrying one state ∈ {0..3}; every tick reads its 6 neighbour
+  states, packs the 12-bit key, looks up the next state, and
+  redraws.  The Wang adjacency is the spatial bone; the table is the
+  breath.
+</p>
+<div style="margin-top: 8px;">
+  <canvas id="breath-canvas" width="560" height="320"
+          style="background:#080808; border:1px solid #222;
+                 image-rendering: pixelated;"></canvas>
+  <div class="bake-meta" style="margin-top:6px;">
+    <button type="button" id="breath-toggle"
+            style="background:#222; color:#cfc; border:1px solid #555;
+                   padding:2px 10px; font-family:inherit;">pause</button>
+    <button type="button" id="breath-reset"
+            style="background:#222; color:#cfc; border:1px solid #555;
+                   padding:2px 10px; font-family:inherit;">re-seed</button>
+    <span style="margin-left:10px;">tick</span>
+    <input type="number" id="breath-speed" value="180" min="40" max="2000" step="20"
+           style="background:#111; color:#ccc; border:1px solid #333;
+                  padding:1px 4px; width: 5em;"> ms
+    <span style="margin-left:10px;">global palette →</span>
+    {% for h in result.ca_palette_hex %}<span
+      style="display:inline-block; width:14px; height:14px; vertical-align:-3px;
+             background:{{ h }}; border:1px solid #333; margin-left:2px;"
+      title="{{ h }}"></span>{% endfor %}
+  </div>
+</div>
+<script>
+(function () {
+  var payload = {{ result.ca_payload|safe }};
+  var palette = payload.palette;  // (4, 3)
+  var rule    = payload.table;    // (4096,)
+
+  var canvas = document.getElementById('breath-canvas');
+  var ctx    = canvas.getContext('2d');
+  var HEX_R  = 14;
+  var S      = HEX_R * Math.sqrt(3) / 2;
+  var H_STEP = 2 * S;            // same-row centre-to-centre
+  var V_STEP = 1.5 * HEX_R;      // row-to-row centre-to-centre
+
+  // Fit a hex grid into the canvas with a 4-px margin.
+  var GRID_W = Math.floor((canvas.width  - 4 - S) / H_STEP);
+  var GRID_H = Math.floor((canvas.height - 4 - HEX_R) / V_STEP);
+  var grid = new Int8Array(GRID_W * GRID_H);
+
+  function seed () {
+    for (var i = 0; i < grid.length; i++) {
+      grid[i] = (Math.random() * 4) | 0;
+    }
+  }
+
+  function getCell (y, x) {
+    // Toroidal wrap so edges don't kill the dynamics.
+    y = ((y % GRID_H) + GRID_H) % GRID_H;
+    x = ((x % GRID_W) + GRID_W) % GRID_W;
+    return grid[y * GRID_W + x];
+  }
+
+  // Neighbour offsets matching the baker: 0 TR, 1 R, 2 BR, 3 BL, 4 L,
+  // 5 TL under offset-r (odd rows shifted right).
+  function tick () {
+    var next = new Int8Array(GRID_W * GRID_H);
+    for (var y = 0; y < GRID_H; y++) {
+      var shift = y & 1;
+      var tlx_off = -1 + shift;
+      var brx_off =  0 + shift;
+      for (var x = 0; x < GRID_W; x++) {
+        var n0 = getCell(y - 1, x + brx_off);
+        var n1 = getCell(y,     x + 1);
+        var n2 = getCell(y + 1, x + brx_off);
+        var n3 = getCell(y + 1, x + tlx_off);
+        var n4 = getCell(y,     x - 1);
+        var n5 = getCell(y - 1, x + tlx_off);
+        var key = (n0 << 10) | (n1 << 8) | (n2 << 6)
+                | (n3 << 4) | (n4 << 2) | n5;
+        next[y * GRID_W + x] = rule[key];
+      }
+    }
+    grid = next;
+  }
+
+  function draw () {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < GRID_H; y++) {
+      var shift = (y & 1) * S;
+      for (var x = 0; x < GRID_W; x++) {
+        var cx = 2 + S + x * H_STEP + shift;
+        var cy = 2 + HEX_R + y * V_STEP;
+        var c = palette[grid[y * GRID_W + x]];
+        ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+        ctx.beginPath();
+        for (var i = 0; i < 6; i++) {
+          var a = -Math.PI / 2 + i * Math.PI / 3;
+          var px = cx + HEX_R * Math.cos(a);
+          var py = cy + HEX_R * Math.sin(a);
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+  }
+
+  var running = true;
+  var stepMs = 180;
+  var timer = null;
+  function loop () {
+    if (running) tick();
+    draw();
+    timer = setTimeout(loop, stepMs);
+  }
+
+  document.getElementById('breath-toggle').addEventListener('click', function () {
+    running = !running;
+    this.textContent = running ? 'pause' : 'play';
+  });
+  document.getElementById('breath-reset').addEventListener('click', function () {
+    seed(); draw();
+  });
+  document.getElementById('breath-speed').addEventListener('change', function () {
+    var v = parseInt(this.value, 10);
+    if (!isNaN(v) && v >= 40 && v <= 5000) stepMs = v;
+  });
+
+  seed();
+  loop();
+})();
+</script>
+<div class="bake-grid">
+  {% for r in result.top %}
+  <div class="bake-cell">
+    <div class="count">×{{ r.count }}</div>
+    <div class="key">{{ r.key_str }}</div>
+    {{ r.svg|safe }}
+    <div class="pal">
+      {% for h in r.palette_hex %}<div style="background:{{ h }}" title="palette[{{ forloop.counter0 }}] = {{ h }}"></div>{% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
