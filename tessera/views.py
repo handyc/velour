@@ -122,19 +122,34 @@ def tiling_test(request, slug):
     rng = random.Random(int(request.GET.get('seed', 0)))
 
     if s.topology == 'hex':
-        # Pointy-top offset-r hex.  Each tile has 6 edges 0..5 (CW
-        # from top).  Neighbour mapping:
-        #   N      neighbour at (r-2, c)            shares edges 0↔3 — skip
-        #   For pointy-top w/ horizontal-stagger: just use the
-        #   already-placed W (edge 5 of current = edge 2 of W), NW,
-        #   and NE neighbours when present.
-        # For v1 we just generate constraint-free tiles per cell —
-        # tilings *aren't* edge-coherent under the simple grid, but
-        # the catalogue still shows the math works per tile.  A real
-        # hex tiling lays tiles on the offset-r lattice and chains
-        # the constraint properly; out of scope for this commit.
-        grid = [[tuple(rng.randrange(4) for _ in range(6))
-                 for _ in range(cols)] for _ in range(rows)]
+        # Pointy-top offset-r hex.  Edges are 0..5 clockwise from the
+        # top (0 upper-right slope, 1 right vertical, 2 lower-right
+        # slope, 3 lower-left slope, 4 left vertical, 5 upper-left
+        # slope).  Wang correspondence between neighbours: edge i of
+        # any tile = edge (i+3)%6 of its neighbour across that edge.
+        #
+        # Offset-r layout (odd rows shifted right by ROW_SHIFT).  For
+        # tile (r, c) with shift = r%2, the row-above neighbours are
+        # at (r-1, c-1+shift) [up-left] and (r-1, c+shift) [up-right].
+        # Scan order is row by row, left to right, so already-placed
+        # neighbours are: left (r, c-1), up-left, and up-right.  Edges
+        # 1, 2, 3 (right vertical, lower-right slope, lower-left slope)
+        # remain free — they constrain the not-yet-placed right /
+        # down-right / down-left neighbours.
+        grid = [[None] * cols for _ in range(rows)]
+        for r in range(rows):
+            shift = r % 2
+            for c in range(cols):
+                edges = [rng.randrange(4) for _ in range(6)]
+                if c > 0:                                    # left
+                    edges[4] = grid[r][c - 1][1]
+                ul_c = c - 1 + shift
+                if r > 0 and 0 <= ul_c < cols:               # up-left
+                    edges[5] = grid[r - 1][ul_c][2]
+                ur_c = c + shift
+                if r > 0 and 0 <= ur_c < cols:               # up-right
+                    edges[0] = grid[r - 1][ur_c][3]
+                grid[r][c] = tuple(edges)
         grid_ids = [
             [''.join(str(d) for d in t) for t in row]
             for row in grid

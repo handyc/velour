@@ -317,34 +317,59 @@ def composite_tile_idw_hex(sources, edges, power: float = 2.0,
 
     `edges` is a 6-tuple of edge colours in [0, 3] for edges 0..5
     (clockwise from top).  Each interior pixel of the inscribed
-    hexagon is the inverse-distance-weighted blend of the 6
-    edge sources.  Pixels outside the hex are filled with magenta
-    (the conventional "transparency" key for the rest of the suite).
+    hexagon is the inverse-distance-weighted blend of the 6 edge
+    sources — but unlike square Tessera, each edge does NOT sample
+    the source at the tile-local coordinate.  Instead, every edge
+    pulls a 1-D strip out of S_c's bottom row, parametrised by the
+    pixel's projection onto that edge (with u flipped on edges 3..5
+    so adjacent tiles agree on absolute u at the seam).  The IDW
+    weights then blur the six strips into the smooth interior the
+    user expects.
 
-    Seam-cancellation for hex tiling: at edge i, the weight w_i →
-    ∞, so the pixel collapses to S_{e_i} sampled at that pixel's
-    (x, y).  Two adjacent hex tiles sharing edge i (one tile's edge
-    i ↔ neighbour's edge i+3) cover the same physical pixels at the
-    shared edge — and both sample their copy of S_c at the SAME
-    (x, y) coordinate, so the seam matches by construction provided
-    the source images are themselves toroidally tileable (existing
-    Tessera property)."""
+    Seam-cancellation for hex tiling: at edge i, d_i → 0 ⇒ w_i → ∞,
+    so the boundary pixel collapses to S_{e_i}[H-1, eff_u·(W-1)].
+    Two adjacent hex tiles sharing edge i ↔ (i+3) %% 6 see the same
+    physical point with the same eff_u (the flip on i≥3 cancels the
+    CW-frame reversal between neighbours) ⇒ identical pixel.
+
+    Source coord y = (1 - d/apothem)·(H-1):  bottom row at the edge,
+    top row at the centre, exactly as wedge-cut.  This gives a
+    "hex-toroidal-equivalent" rendering on top of the existing
+    rectangular-toroidal sources, without needing to regenerate
+    sources on a hex domain."""
     H, W = sources[0].shape[:2]
     inside, dists = _hex_mask_and_edge_distances(W, H)
+    cx, cy, R, verts = _hex_geometry(W, H)
+    yy, xx = np.meshgrid(
+        np.arange(H, dtype=np.float64),
+        np.arange(W, dtype=np.float64),
+        indexing='ij',
+    )
+    # apothem = perpendicular distance from centre to any edge of the
+    # inscribed hex; depth coord = 0 at edge → H-1 at centre.
+    apothem = R * _HEX_SQRT3_2
     eps = 0.5
-    # IDW weights from positive distances (clamp at eps for the
-    # divergent-on-edge behaviour).
-    weights = []
-    for i in range(6):
-        d = np.maximum(dists[i], 0) + eps
-        weights.append(1.0 / (d ** power))
-    w_stack = np.stack(weights, axis=0)
-    total = np.sum(w_stack, axis=0)[..., None]
+    half = 3  # edges 0..2 use eff_u = u; edges 3..5 use eff_u = 1-u
     out = np.zeros((H, W, 3), dtype=np.float64)
+    total = np.zeros((H, W), dtype=np.float64)
     for i in range(6):
-        out += sources[edges[i]].astype(np.float64) * weights[i][..., None]
-    out = out / total
-    # Magenta outside the hex.
+        v0 = verts[i]
+        v1 = verts[(i + 1) % 6]
+        evx, evy = v1[0] - v0[0], v1[1] - v0[1]
+        edge_len = (evx * evx + evy * evy) ** 0.5
+        ux_, uy_ = evx / edge_len, evy / edge_len
+        u_i = ((xx - v0[0]) * ux_ + (yy - v0[1]) * uy_) / edge_len
+        eff_u = u_i if i < half else (1.0 - u_i)
+        eff_u = np.clip(eff_u, 0.0, 1.0)
+        x_src = np.clip(eff_u * (W - 1), 0, W - 1).astype(np.int64)
+        d_i = np.maximum(dists[i], 0.0)
+        y_src = np.clip((1.0 - d_i / apothem) * (H - 1),
+                        0, H - 1).astype(np.int64)
+        w_i = 1.0 / ((d_i + eps) ** power)
+        src = sources[edges[i]]
+        out += src[y_src, x_src].astype(np.float64) * w_i[..., None]
+        total += w_i
+    out = out / total[..., None]
     if magenta_outside:
         bg = np.array([255, 0, 255], dtype=np.float64)
         out = np.where(inside[..., None], out, bg)
@@ -460,21 +485,29 @@ def _wedge_render(sources, edges, n_wedges: int,
     each pixel up in the appropriate source by its (u, v) inside its
     wedge.
 
-    Source coord: x = u · (W-1)  (so u runs along the source's full
-    width); y = (1 - v) · (H-1)  (outer edge sources from row H-1,
-    apex sources from row 0).  This keeps S_c's bottom row visible at
-    every edge — the cleanest seam-matching mapping when the source
-    is toroidal (S_c[H-1, *] = S_c[0, *])."""
+    Source coord: x = eff_u · (W-1)  with `eff_u` flipped on the back
+    half of the edges; y = (1 - v) · (H-1)  (outer edge sources from
+    row H-1, apex sources from row 0).
+
+    Why the flip: two adjacent tiles share a physical edge but each
+    parameterises it in its own CW frame, so tile L's u and tile R's u
+    run in opposite directions on the same edge.  Flipping u for half
+    the edges (i ≥ n_wedges/2) makes the *effective* u agree, so both
+    tiles sample S_c's bottom row at the same column and the seam is
+    pixel-identical when the Wang colours match.  Half-set assignment
+    must be consistent under the (i ↔ (i+n_wedges/2)) partner pairing,
+    which i<half / i≥half satisfies."""
     H, W = sources[0].shape[:2]
     wedge_idx, u, v = _wedge_uv(W, H, n_wedges)
-    x_src = np.clip(u * (W - 1), 0, W - 1).astype(np.int64)
     y_src = np.clip((1 - v) * (H - 1), 0, H - 1).astype(np.int64)
     out = np.zeros((H, W, 3), dtype=np.uint8)
+    half = n_wedges // 2
     for i in range(n_wedges):
+        eff_u = u if i < half else (1.0 - u)
+        x_src_i = np.clip(eff_u * (W - 1), 0, W - 1).astype(np.int64)
         src = sources[edges[i]]
         mask = (wedge_idx == i)
-        # Vectorised indexing: gather src[y_src, x_src] then mask in.
-        gathered = src[y_src, x_src]
+        gathered = src[y_src, x_src_i]
         out = np.where(mask[..., None], gathered, out)
     if magenta_outside:
         bg = np.array([255, 0, 255], dtype=np.uint8)
