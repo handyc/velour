@@ -129,14 +129,65 @@
       (4·chg·(1−chg) on the post-burn-in change rate; peaks at chg=0.5)
     </span>
   </div>
-  <div style="margin-top:8px;">
-    <button type="button" id="run-search"
-            style="background:#222; color:#cfc; border:1px solid #555;
-                   padding:2px 10px; font-family:inherit;">
-      🔍 search ~64 variants
-    </button>
-    <span class="bake-meta" id="search-status"
-          style="margin-left:10px;"></span>
+  <div class="bake-meta" id="ga-controls"
+       style="margin-top:10px; padding:6px 8px;
+              border:1px dashed #333; border-radius:3px;
+              background:#0a0a0a;">
+    <div style="margin-bottom:4px; color:#cfc;">
+      <b>Edge-of-chaos GA</b>
+      <span style="color:#666;">— multi-generation search</span>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px 14px;
+                align-items:baseline;">
+      <label>pop
+        <input type="number" id="ga-pop" value="48" min="4" max="512"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
+      <label>gens
+        <input type="number" id="ga-gens" value="20" min="1" max="500"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
+      <label title="top-N kept verbatim into the next generation">elite
+        <input type="number" id="ga-elite" value="3" min="0" max="64"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:3em;"></label>
+      <label title="fraction of table entries randomly flipped per mutation">mut %
+        <input type="number" id="ga-mut" value="2" min="0" max="100" step="0.5"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
+      <label title="probability of uniform crossover; otherwise pure mutation of one parent">x-rate
+        <input type="number" id="ga-xrate" value="0.5" min="0" max="1" step="0.05"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
+      <label title="how many candidates competed per parent pick">tourn
+        <input type="number" id="ga-tourn" value="3" min="1" max="32"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:3em;"></label>
+      <label title="initial population mix: baked + perturbed + this many fresh-random">rand init %
+        <input type="number" id="ga-rand-init" value="25" min="0" max="100"
+               style="background:#111; color:#ccc; border:1px solid #333;
+                      padding:1px 3px; width:4em;"></label>
+      <label title="re-seed eval grid each generation so we don't overfit to one init">re-seed eval
+        <input type="checkbox" id="ga-reseed" checked
+               style="vertical-align:-2px;"></label>
+    </div>
+    <div style="margin-top:6px;">
+      <button type="button" id="ga-run"
+              style="background:#222; color:#cfc; border:1px solid #555;
+                     padding:2px 12px; font-family:inherit;">
+        ▶ run GA
+      </button>
+      <button type="button" id="ga-stop" disabled
+              style="background:#222; color:#a88; border:1px solid #555;
+                     padding:2px 12px; font-family:inherit;
+                     margin-left:4px;">
+        ■ stop
+      </button>
+      <span class="bake-meta" id="search-status"
+            style="margin-left:10px;"></span>
+    </div>
+    <div id="ga-progress" class="bake-meta"
+         style="margin-top:6px; font-family:monospace; color:#ace;"></div>
   </div>
   <div id="search-results" style="margin-top:8px;"></div>
 </div>
@@ -440,64 +491,197 @@
     return { changeRate: mean, score: 4 * mean * (1 - mean) };
   }
 
-  var searchRunning = false;
-  var lastResults = null;
-  document.getElementById('run-search').addEventListener('click', function () {
-    if (searchRunning) return;
-    var btn = this;
-    searchRunning = true;
-    btn.disabled = true;
-    btn.textContent = 'searching…';
-    var statusEl = document.getElementById('search-status');
-    var resultsEl = document.getElementById('search-results');
-    resultsEl.innerHTML = '';
+  // ── Multi-generation GA ──────────────────────────────────────────
+  // Iterative search:  score → sort → keep top `elite` verbatim →
+  // breed the rest by tournament selection + (uniform crossover with
+  // probability x-rate, else pure mutation) + mutation.  Eval init
+  // seed optionally rotates each generation so we don't reward rules
+  // that happen to behave well on one specific starting board.
+  //
+  // Knobs all live in the #ga-controls panel above; gen-by-gen
+  // progress streams into #ga-progress, the leaderboard updates
+  // every gen so adopt-during-run works.
 
-    // Build candidate pool.  More small perturbations than big ones —
-    // class-IV is usually a small perturbation away from a stable rule.
+  function uniformCrossover (a, b) {
+    var out = new Int8Array(4096);
+    for (var i = 0; i < 4096; i++) out[i] = Math.random() < 0.5 ? a[i] : b[i];
+    return out;
+  }
+
+  function mutateInPlace (rule, fraction) {
+    if (fraction <= 0) return rule;
+    var nFlips = Math.max(1, Math.round(4096 * fraction));
+    for (var k = 0; k < nFlips; k++) {
+      var idx = (Math.random() * 4096) | 0;
+      rule[idx] = (Math.random() * 4) | 0;
+    }
+    return rule;
+  }
+
+  function tournamentPick (scored, k) {
+    var best = null;
+    for (var t = 0; t < k; t++) {
+      var c = scored[(Math.random() * scored.length) | 0];
+      if (best === null || c.score > best.score) best = c;
+    }
+    return best;
+  }
+
+  function gaParams () {
+    function num (id, def) {
+      var v = parseFloat(document.getElementById(id).value);
+      return (isNaN(v) ? def : v);
+    }
+    return {
+      pop:       Math.max(4, Math.round(num('ga-pop', 48))),
+      gens:      Math.max(1, Math.round(num('ga-gens', 20))),
+      elite:     Math.max(0, Math.round(num('ga-elite', 3))),
+      mutFrac:   Math.max(0, num('ga-mut', 2)) / 100,
+      xRate:     Math.max(0, Math.min(1, num('ga-xrate', 0.5))),
+      tourn:     Math.max(1, Math.round(num('ga-tourn', 3))),
+      randInit:  Math.max(0, Math.min(100, num('ga-rand-init', 25))) / 100,
+      reseedEval: document.getElementById('ga-reseed').checked,
+    };
+  }
+
+  function buildInitialPopulation (cfg) {
+    var pool = [];
+    pool.push({ rule: rule, origin: 'baked', generation: 0 });
+    var nRand = Math.round(cfg.pop * cfg.randInit);
+    var nPert = cfg.pop - 1 - nRand;
     var fractions = [0.005, 0.01, 0.02, 0.04, 0.08, 0.15, 0.25, 0.50];
-    var candidates = [];
-    // Always include the baked rule itself as a reference.
-    candidates.push({ rule: rule, origin: 'baked (image)' });
-    for (var i = 0; i < fractions.length; i++) {
-      for (var j = 0; j < 6; j++) {
-        candidates.push({
-          rule: perturbRule(rule, fractions[i]),
-          origin: 'perturb ' + (fractions[i]*100).toFixed(1) + '%',
-        });
-      }
+    for (var i = 0; i < nPert; i++) {
+      var f = fractions[i % fractions.length];
+      pool.push({
+        rule: perturbRule(rule, f),
+        origin: 'perturb ' + (f*100).toFixed(1) + '%',
+        generation: 0,
+      });
     }
-    for (var k = 0; k < 16; k++) {
-      candidates.push({ rule: randomRule(), origin: 'random' });
+    for (var j = 0; j < nRand; j++) {
+      pool.push({ rule: randomRule(), origin: 'random', generation: 0 });
+    }
+    return pool;
+  }
+
+  function breedChild (parents, cfg) {
+    var origin, childRule;
+    if (Math.random() < cfg.xRate && parents.length >= 2) {
+      var a = tournamentPick(parents, cfg.tourn);
+      var b = tournamentPick(parents, cfg.tourn);
+      childRule = uniformCrossover(a.rule, b.rule);
+      origin = 'x of #' + (parents.indexOf(a) + 1) +
+               ' + #' + (parents.indexOf(b) + 1);
+    } else {
+      var p = tournamentPick(parents, cfg.tourn);
+      childRule = new Int8Array(4096);
+      for (var k = 0; k < 4096; k++) childRule[k] = p.rule[k];
+      origin = 'mut of #' + (parents.indexOf(p) + 1);
+    }
+    mutateInPlace(childRule, cfg.mutFrac);
+    return { rule: childRule, origin: origin };
+  }
+
+  var gaRunning = false;
+  var gaShouldStop = false;
+  var gaBtn  = document.getElementById('ga-run');
+  var stopBtn = document.getElementById('ga-stop');
+  var statusEl = document.getElementById('search-status');
+  var progressEl = document.getElementById('ga-progress');
+
+  gaBtn.addEventListener('click', function () {
+    if (gaRunning) return;
+    gaRunning = true;
+    gaShouldStop = false;
+    gaBtn.disabled = true;
+    stopBtn.disabled = false;
+    var cfg = gaParams();
+    progressEl.innerHTML = '';
+    statusEl.textContent = 'gen 0 / ' + cfg.gens;
+
+    var pop = buildInitialPopulation(cfg);
+    var INIT_SEED_BASE = 0xC0FFEE;
+    var gen = 0;
+    var allBest = [];
+    var bestEver = null;
+
+    function evalPop (population, seedSalt, doneCb) {
+      var i = 0;
+      var BATCH = 6;
+      var scored = [];
+      function chunk () {
+        if (gaShouldStop) return doneCb(scored, true);
+        var done = Math.min(i + BATCH, population.length);
+        while (i < done) {
+          var c = population[i];
+          var r = evalRule(c.rule, INIT_SEED_BASE + seedSalt + i);
+          scored.push({
+            rule: c.rule, origin: c.origin,
+            score: r.score, changeRate: r.changeRate,
+            generation: c.generation,
+          });
+          i++;
+        }
+        statusEl.textContent = 'gen ' + (gen + 1) + ' / ' + cfg.gens +
+                               '  — eval ' + i + ' / ' + population.length;
+        if (i < population.length) setTimeout(chunk, 0);
+        else doneCb(scored, false);
+      }
+      chunk();
     }
 
-    var results = [];
-    var idx = 0;
-    var BATCH = 4;
-    var INIT_SEED = 0xC0FFEE;
-    function chunk () {
-      var done = Math.min(idx + BATCH, candidates.length);
-      while (idx < done) {
-        var c = candidates[idx];
-        var r = evalRule(c.rule, INIT_SEED + idx);
-        results.push({
-          rule: c.rule, origin: c.origin,
-          score: r.score, changeRate: r.changeRate,
+    function nextGen (scored) {
+      scored.sort(function (a, b) { return b.score - a.score; });
+      var best = scored[0];
+      allBest.push(best.score);
+      if (!bestEver || best.score > bestEver.score) bestEver = best;
+      // Sparkline-ish progress line.
+      var line = 'gen ' + String(gen + 1).padStart(3) +
+                 '  best ' + best.score.toFixed(3) +
+                 '  best-ever ' + bestEver.score.toFixed(3) +
+                 '  origin: ' + best.origin;
+      progressEl.innerHTML += line + '<br>';
+      progressEl.scrollTop = progressEl.scrollHeight;
+      renderResults(scored.slice(0, 8));
+
+      gen++;
+      if (gen >= cfg.gens || gaShouldStop) return finish(scored);
+      // Build next-gen population: elite + bred children.
+      var next = [];
+      var nElite = Math.min(cfg.elite, scored.length);
+      for (var e = 0; e < nElite; e++) {
+        next.push({
+          rule: scored[e].rule,
+          origin: 'elite (gen ' + scored[e].generation + ')',
+          generation: gen,
         });
-        idx++;
       }
-      statusEl.textContent = idx + ' / ' + candidates.length + ' evaluated';
-      if (idx < candidates.length) {
-        setTimeout(chunk, 0);
-      } else {
-        results.sort(function (a, b) { return b.score - a.score; });
-        lastResults = results;
-        renderResults(results.slice(0, 8));
-        searchRunning = false;
-        btn.disabled = false;
-        btn.textContent = '🔍 search ~64 variants';
+      var bredFrom = scored.slice(0, Math.max(cfg.tourn,
+                                               Math.ceil(cfg.pop * 0.5)));
+      while (next.length < cfg.pop) {
+        var child = breedChild(bredFrom, cfg);
+        child.generation = gen;
+        next.push(child);
       }
+      var salt = cfg.reseedEval ? gen * 1000 : 0;
+      evalPop(next, salt, nextGen);
     }
-    chunk();
+
+    function finish (scored) {
+      gaRunning = false;
+      gaBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = (gaShouldStop ? 'stopped' : 'done') +
+        ' — ' + gen + ' gens, best ' +
+        (bestEver ? bestEver.score.toFixed(3) : '—');
+      renderResults((scored || []).slice(0, 8));
+    }
+
+    evalPop(pop, 0, nextGen);
+  });
+
+  stopBtn.addEventListener('click', function () {
+    if (gaRunning) gaShouldStop = true;
   });
 
   function renderResults (top) {
