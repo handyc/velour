@@ -4,26 +4,29 @@
 
 {% block extra_head %}
 <style>
-  .wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1rem;
-          color: #c9d1d9; }
-  .back { font-size: 0.78rem; margin-bottom: 1rem; }
-  .back a { color: #58a6ff; text-decoration: none; margin-right: 1.2rem; }
-  h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
-  p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1.6rem; }
+  body.bagicha-page { background: #ffffff !important; color: #222; }
+  .wrap { max-width: 880px; margin: 1.5rem auto; padding: 0 1.2rem; color: #222;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                       Helvetica, Arial, sans-serif; }
+  .back { font-size: 0.82rem; margin-bottom: 1rem; }
+  .back a { color: #1d4d8a; text-decoration: none; margin-right: 1.2rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.2rem; color: #1a1a1a; }
+  p.hint { color: #555; font-size: 0.86rem; margin: 0 0 1.6rem;
+           max-width: 65ch; line-height: 1.5; }
 
-  h2 { font-size: 0.78rem; color: #8b949e; font-weight: 500;
+  h2 { font-size: 0.78rem; color: #5a6472; font-weight: 600;
        text-transform: uppercase; letter-spacing: 0.05em;
-       margin: 1.5rem 0 0.6rem;
-       border-bottom: 1px solid #21262d; padding-bottom: 0.3rem; }
+       margin: 1.5rem 0 0.55rem;
+       border-bottom: 1px solid #e3e6ea; padding-bottom: 0.3rem; }
 
-  .item { padding: 0.65rem 0; border-bottom: 1px solid #1c2128; }
-  .item a { color: #58a6ff; text-decoration: none; font-size: 0.95rem; }
+  .item { padding: 0.7rem 0; border-bottom: 1px solid #eef1f5; }
+  .item a { color: #1d4d8a; text-decoration: none; font-size: 0.95rem; }
   .item a:hover { text-decoration: underline; }
-  .item .kind { color: #d2a8ff; font-size: 0.66rem;
+  .item .kind { color: #5e35b1; font-size: 0.66rem;
                 text-transform: uppercase; letter-spacing: 0.04em;
                 margin-left: 0.5rem; }
-  .item .note { color: #6e7681; font-size: 0.82rem;
-                margin-top: 0.25rem; line-height: 1.5; }
+  .item .note { color: #555; font-size: 0.85rem;
+                margin-top: 0.25rem; line-height: 1.55; }
 </style>
 {% endblock %}
 
@@ -71,3 +74,5 @@
 
 </div>
 {% endblock %}
+
+{% block extra_js %}<script>document.body.classList.add('bagicha-page');</script>{% endblock %}

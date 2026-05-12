@@ -4,75 +4,235 @@
 
 {% block extra_head %}
 <style>
-  .wrap { max-width: 1080px; margin: 1.5rem auto; padding: 0 1rem; color: #c9d1d9; }
-  .wrap h1 { font-size: 1.45rem; margin: 0 0 0.2rem; }
-  .wrap h1 .dev { font-size: 1.45rem; color: #f0c674; margin-right: 0.4rem; }
-  .wrap p.hint { color: #6e7681; font-size: 0.78rem; margin: 0 0 1.4rem; }
-  .wrap p.hint a { color: #58a6ff; text-decoration: none; }
-  .toolbar { display: flex; gap: 0.6rem; align-items: center;
-             margin-bottom: 1.2rem; font-size: 0.78rem; }
-  .toolbar .btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
-                  padding: 0.35rem 0.8rem; border-radius: 4px;
+  /* --- White theme override (scoped via body class) ------------------- */
+  body.bagicha-page { background: #ffffff !important; color: #222; }
+
+  .wrap { max-width: 1080px; margin: 1.5rem auto; padding: 0 1.2rem; color: #222;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                       Helvetica, Arial, sans-serif; }
+  .wrap h1 { font-size: 1.6rem; margin: 0 0 0.1rem; color: #1a1a1a;
+             display: flex; align-items: center; gap: 0.6rem; }
+  .wrap h1 .dev { font-size: 1.7rem; color: #1d4d8a; font-weight: 600; }
+  .wrap p.hint { color: #555; font-size: 0.86rem; margin: 0 0 1.4rem;
+                 max-width: 65ch; line-height: 1.5; }
+  .wrap p.hint a { color: #1d4d8a; text-decoration: none; }
+
+  /* --- Space-Invader pet --------------------------------------------- */
+  .invader-host { display: inline-block; vertical-align: middle;
+                  margin-left: 0.6rem; animation: hop 1.2s ease-in-out infinite; }
+  @keyframes hop {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-6px); }
+  }
+  .invader { width: 44px; height: 36px; image-rendering: pixelated; }
+  .invader .frameB { display: none; }
+  .invader.flip .frameA { display: none; }
+  .invader.flip .frameB { display: block; }
+
+  /* --- Translator panel ---------------------------------------------- */
+  .translator { border: 1px solid #d6dbe2; background: #f6f8fb;
+                border-radius: 8px; padding: 1rem 1.1rem 0.9rem;
+                margin: 1rem 0 1.8rem; }
+  .translator h2 { font-size: 0.78rem; color: #5a6472; font-weight: 600;
+                   margin: 0 0 0.5rem; text-transform: uppercase;
+                   letter-spacing: 0.06em; }
+  .translator textarea { width: 100%; min-height: 3.2rem; resize: vertical;
+                         border: 1px solid #c7cfdb; border-radius: 5px;
+                         padding: 0.55rem 0.7rem; font-size: 0.95rem;
+                         font-family: inherit; background: #fff; color: #222;
+                         box-sizing: border-box; }
+  .translator .controls { margin-top: 0.55rem; display: flex; gap: 0.55rem;
+                          align-items: center; flex-wrap: wrap; }
+  .translator button.go { background: #1d4d8a; border: 1px solid #1d4d8a;
+                          color: #fff; padding: 0.42rem 1rem; border-radius: 5px;
+                          font-size: 0.82rem; font-weight: 500; cursor: pointer; }
+  .translator button.go:hover { background: #163d6f; }
+  .translator .ex { font-size: 0.74rem; color: #6a737d; }
+  .translator .ex a { color: #1d4d8a; text-decoration: none;
+                      margin-right: 0.6rem; cursor: pointer;
+                      border-bottom: 1px dotted #b8c2cc; }
+  .translator .ex a:hover { color: #0a2a55; }
+
+  #xlate-result { display: none; margin-top: 0.9rem; padding-top: 0.7rem;
+                  border-top: 1px solid #dde3eb; }
+  #xlate-result .meta { font-size: 0.74rem; color: #6a737d; margin-bottom: 0.4rem; }
+  #xlate-result .row { display: grid;
+                       grid-template-columns: 1.3fr 1.3fr 1fr 2fr 2.4rem;
+                       gap: 0.5rem; padding: 0.38rem 0;
+                       border-bottom: 1px solid #eef1f5; align-items: center;
+                       font-size: 0.85rem; }
+  #xlate-result .row .src    { color: #444; font-weight: 500; }
+  #xlate-result .row .dev    { color: #1a1a1a; font-size: 1.05rem; }
+  #xlate-result .row .dev a  { color: #1a1a1a; border-bottom: 1px dotted #c2c8d0;
+                               text-decoration: none; }
+  #xlate-result .row .dev a:hover { color: #1d4d8a; border-bottom-color: #1d4d8a; }
+  #xlate-result .row .tr     { color: #6a737d; font-style: italic; }
+  #xlate-result .row .gl     { color: #2b2b2b; }
+  #xlate-result .row .role   { color: #5e35b1; font-size: 0.7rem;
+                               text-transform: uppercase; letter-spacing: 0.03em; }
+  #xlate-result .row.unmatched .src { color: #b3261e; }
+  #xlate-result .row.unmatched .gl  { color: #b3261e; font-style: italic; }
+
+  /* --- Toolbar ------------------------------------------------------- */
+  .toolbar { display: flex; gap: 0.5rem; align-items: center;
+             margin: 0 0 1.2rem; font-size: 0.82rem; }
+  .toolbar .btn { background: #fff; border: 1px solid #c7cfdb; color: #1d4d8a;
+                  padding: 0.32rem 0.75rem; border-radius: 5px;
                   text-decoration: none; }
-  .toolbar .btn:hover { border-color: #8b949e; }
-  .toolbar .meta { color: #6e7681; }
+  .toolbar .btn:hover { border-color: #1d4d8a; }
+  .toolbar .meta { color: #6a737d; }
 
-  .sentence { border: 1px solid #21262d; border-radius: 6px;
-              padding: 1rem 1.1rem; margin-bottom: 1.2rem;
-              background: #0d1117; }
-  .sentence .tmpl { font-size: 0.68rem; color: #6e7681;
-                    text-transform: uppercase; letter-spacing: 0.05em;
-                    margin-bottom: 0.5rem; }
-  .sentence .devline { font-size: 1.55rem; line-height: 1.5;
-                       color: #f0f6fc; margin-bottom: 0.25rem;
-                       word-spacing: 0.2em; }
-  .sentence .devline a { color: #f0f6fc; text-decoration: none;
-                         border-bottom: 1px dotted #4a4f55;
-                         padding-bottom: 1px; }
-  .sentence .devline a:hover { color: #79c0ff;
-                               border-bottom-color: #79c0ff; }
-  .sentence .translit { font-size: 0.9rem; color: #8b949e;
+  /* --- Sentence cards ----------------------------------------------- */
+  .sentence { border: 1px solid #e3e6ea; border-radius: 8px;
+              padding: 1rem 1.1rem; margin-bottom: 1.1rem; background: #fcfcfd; }
+  .sentence .tmpl-row { display: flex; justify-content: space-between;
+                        align-items: center; margin-bottom: 0.55rem; }
+  .sentence .tmpl { font-size: 0.68rem; color: #6a737d;
+                    text-transform: uppercase; letter-spacing: 0.05em; }
+  .sentence .devline { font-size: 1.65rem; line-height: 1.55;
+                       color: #1a1a1a; margin-bottom: 0.25rem;
+                       word-spacing: 0.18em; }
+  .sentence .devline a { color: #1a1a1a; text-decoration: none;
+                         border-bottom: 1px dotted #c2c8d0; padding-bottom: 1px; }
+  .sentence .devline a:hover { color: #1d4d8a; border-bottom-color: #1d4d8a; }
+  .sentence .translit { font-size: 0.95rem; color: #6a737d;
                         font-style: italic; margin-bottom: 0.25rem; }
-  .sentence .gloss { font-size: 0.85rem; color: #c9d1d9;
-                     margin-bottom: 0.9rem; }
-  .sentence .gloss::before { content: "“"; color: #6e7681; }
-  .sentence .gloss::after  { content: "”"; color: #6e7681; }
+  .sentence .gloss { font-size: 0.9rem; color: #333; margin-bottom: 0.85rem; }
+  .sentence .gloss::before { content: "“"; color: #aaa; }
+  .sentence .gloss::after  { content: "”"; color: #aaa; }
 
+  /* --- Play button --------------------------------------------------- */
+  .play { display: inline-flex; align-items: center; justify-content: center;
+          width: 1.55rem; height: 1.55rem; padding: 0; margin: 0 0 0 0.15rem;
+          background: #fff; color: #1d4d8a;
+          border: 1px solid #c7cfdb; border-radius: 50%;
+          cursor: pointer; font-size: 0.62rem; line-height: 1;
+          vertical-align: middle; transition: all 0.12s; }
+  .play:hover { background: #1d4d8a; color: #fff; border-color: #1d4d8a; }
+  .play.playing { background: #8b1a1a; color: #fff; border-color: #8b1a1a; }
+  .play-big { width: 2rem; height: 2rem; font-size: 0.78rem; }
+
+  /* --- Parse table --------------------------------------------------- */
   table.parse { width: 100%; border-collapse: collapse;
-                font-size: 0.78rem; margin-top: 0.3rem; }
-  table.parse th, table.parse td { text-align: left; padding: 0.3rem 0.55rem;
-                                   border-bottom: 1px solid #1c2128;
-                                   vertical-align: top; }
-  table.parse th { color: #6e7681; font-weight: 500; font-size: 0.66rem;
+                font-size: 0.82rem; margin-top: 0.4rem; }
+  table.parse th, table.parse td { text-align: left; padding: 0.34rem 0.55rem;
+                                   border-bottom: 1px solid #eef1f5;
+                                   vertical-align: middle; }
+  table.parse th { color: #6a737d; font-weight: 500; font-size: 0.66rem;
                    text-transform: uppercase; letter-spacing: 0.04em; }
-  table.parse td.dev { color: #f0f6fc; font-size: 1rem; }
-  table.parse td.dev a { color: #f0f6fc; text-decoration: none;
-                         border-bottom: 1px dotted #4a4f55; }
-  table.parse td.dev a:hover { color: #79c0ff; border-bottom-color: #79c0ff; }
-  table.parse td.tr   { color: #8b949e; font-style: italic; }
-  table.parse td.pos  { color: #d2a8ff; font-size: 0.7rem;
+  table.parse td.dev { color: #1a1a1a; font-size: 1.05rem; }
+  table.parse td.dev a { color: #1a1a1a; text-decoration: none;
+                         border-bottom: 1px dotted #c2c8d0; }
+  table.parse td.dev a:hover { color: #1d4d8a; border-bottom-color: #1d4d8a; }
+  table.parse td.tr   { color: #6a737d; font-style: italic; }
+  table.parse td.pos  { color: #5e35b1; font-size: 0.7rem;
                         text-transform: uppercase; letter-spacing: 0.04em; }
-  table.parse td.gl   { color: #c9d1d9; }
-  table.parse td.lab  { color: #79c0ff; font-size: 0.72rem; }
+  table.parse td.gl   { color: #2b2b2b; }
+  table.parse td.lab  { color: #1d4d8a; font-size: 0.74rem; }
+  table.parse td.act  { width: 2.4rem; text-align: center; }
 
   .footnav { margin-top: 1.6rem; padding-top: 1rem;
-             border-top: 1px solid #21262d;
-             color: #6e7681; font-size: 0.78rem; }
-  .footnav a { color: #58a6ff; text-decoration: none; margin-right: 1.2rem; }
+             border-top: 1px solid #e3e6ea;
+             color: #6a737d; font-size: 0.82rem; }
+  .footnav a { color: #1d4d8a; text-decoration: none; margin-right: 1.2rem; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="wrap">
 
-  <h1><span class="dev">बग़ीचा</span>Bagīcā — Hindi sentence garden</h1>
+  <h1>
+    <span class="dev">बग़ीचा</span>
+    <span>Bagīcā — Hindi sentence garden</span>
+    <span class="invader-host" title="hi! 👋">
+      <svg class="invader" viewBox="0 0 11 9" xmlns="http://www.w3.org/2000/svg">
+        <g class="frameA" fill="#1d4d8a">
+          <rect x="2" y="0" width="1" height="1"/>
+          <rect x="8" y="0" width="1" height="1"/>
+          <rect x="3" y="1" width="1" height="1"/>
+          <rect x="7" y="1" width="1" height="1"/>
+          <rect x="2" y="2" width="7" height="1"/>
+          <rect x="1" y="3" width="2" height="1"/>
+          <rect x="4" y="3" width="1" height="1"/>
+          <rect x="6" y="3" width="1" height="1"/>
+          <rect x="8" y="3" width="2" height="1"/>
+          <rect x="0" y="4" width="11" height="1"/>
+          <rect x="0" y="5" width="2" height="1"/>
+          <rect x="3" y="5" width="5" height="1"/>
+          <rect x="9" y="5" width="2" height="1"/>
+          <rect x="0" y="6" width="1" height="1"/>
+          <rect x="2" y="6" width="1" height="1"/>
+          <rect x="8" y="6" width="1" height="1"/>
+          <rect x="10" y="6" width="1" height="1"/>
+          <rect x="3" y="7" width="2" height="1"/>
+          <rect x="6" y="7" width="2" height="1"/>
+        </g>
+        <g class="frameA" fill="#fff">
+          <rect x="3" y="3" width="1" height="1"/>
+          <rect x="7" y="3" width="1" height="1"/>
+        </g>
+        <g class="frameA" fill="#8b1a1a">
+          <rect x="4" y="6" width="3" height="1"/>
+        </g>
+        <g class="frameB" fill="#1d4d8a">
+          <rect x="2" y="0" width="1" height="1"/>
+          <rect x="8" y="0" width="1" height="1"/>
+          <rect x="3" y="1" width="1" height="1"/>
+          <rect x="7" y="1" width="1" height="1"/>
+          <rect x="2" y="2" width="7" height="1"/>
+          <rect x="1" y="3" width="2" height="1"/>
+          <rect x="4" y="3" width="1" height="1"/>
+          <rect x="6" y="3" width="1" height="1"/>
+          <rect x="8" y="3" width="2" height="1"/>
+          <rect x="0" y="4" width="11" height="1"/>
+          <rect x="0" y="5" width="2" height="1"/>
+          <rect x="3" y="5" width="5" height="1"/>
+          <rect x="9" y="5" width="2" height="1"/>
+          <rect x="1" y="6" width="1" height="1"/>
+          <rect x="3" y="6" width="1" height="1"/>
+          <rect x="7" y="6" width="1" height="1"/>
+          <rect x="9" y="6" width="1" height="1"/>
+          <rect x="0" y="7" width="2" height="1"/>
+          <rect x="9" y="7" width="2" height="1"/>
+        </g>
+        <g class="frameB" fill="#fff">
+          <rect x="3" y="3" width="1" height="1"/>
+          <rect x="7" y="3" width="1" height="1"/>
+        </g>
+        <g class="frameB" fill="#8b1a1a">
+          <rect x="4" y="6" width="3" height="1"/>
+        </g>
+      </svg>
+    </span>
+  </h1>
   <p class="hint">
-    Syntactically correct Hindi sentences about fruits and flowers, with
-    every word linked to a dictionary entry and annotated for gender,
-    number, and case agreement. Refresh to draw a new bouquet. Vocabulary:
+    Syntactically correct Hindi sentences about fruits and flowers, each
+    word linked to a dictionary entry, annotated for gender / number /
+    case agreement, and pronounceable via the ▶ buttons. Vocabulary:
     {{ word_count }} entries.
   </p>
 
+  <!-- ============ Translator ============ -->
+  <div class="translator">
+    <h2>Translate a sentence</h2>
+    <textarea id="xlate-input" placeholder="Type a Hindi or English sentence — e.g. यह गुलाब लाल है or 'these grapes are sweet'"></textarea>
+    <div class="controls">
+      <button class="go" id="xlate-go" type="button">Translate</button>
+      <button class="play play-big" type="button"
+              data-tts-from="#xlate-input" data-tts-lang="hi-IN"
+              title="speak the input">▶</button>
+      <span class="ex">
+        try:
+        <a data-fill="यह सेब लाल है।">यह सेब लाल है।</a>
+        <a data-fill="ये अंगूर मीठे हैं।">ये अंगूर मीठे हैं।</a>
+        <a data-fill="this rose is beautiful">this rose is beautiful</a>
+        <a data-fill="these lotuses are fragrant">these lotuses are fragrant</a>
+      </span>
+    </div>
+    <div id="xlate-result"></div>
+  </div>
+
+  <!-- ============ Toolbar ============ -->
   <div class="toolbar">
     <a class="btn" href="?n={{ n }}">↻ regenerate</a>
     <span class="meta">currently showing {{ n }} sentences</span>
@@ -82,9 +242,15 @@
     <a class="btn" href="?n=10">10</a>
   </div>
 
+  <!-- ============ Sentence cards ============ -->
   {% for s in sentences %}
     <div class="sentence">
-      <div class="tmpl">{{ s.template }}</div>
+      <div class="tmpl-row">
+        <div class="tmpl">{{ s.template }}</div>
+        <button class="play play-big" type="button"
+                data-tts="{{ s.devanagari }}" data-tts-lang="hi-IN"
+                title="speak this sentence">▶</button>
+      </div>
       <div class="devline">
         {% for t in s.tokens %}<a href="{% url 'bagicha:word' t.key %}"
           title="{{ t.translit }} — {{ t.gloss }}{% if t.label %} · {{ t.label }}{% endif %}">{{ t.surface }}</a>{% if not forloop.last %} {% endif %}{% endfor %}।
@@ -97,9 +263,10 @@
           <tr>
             <th>word</th>
             <th>romanisation</th>
-            <th>part of speech</th>
+            <th>POS</th>
             <th>gloss</th>
             <th>analysis</th>
+            <th>say</th>
           </tr>
         </thead>
         <tbody>
@@ -110,6 +277,9 @@
               <td class="pos">{{ t.pos }}</td>
               <td class="gl">{{ t.gloss }}</td>
               <td class="lab">{{ t.label|default:"—" }}</td>
+              <td class="act"><button class="play" type="button"
+                      data-tts="{{ t.surface }}" data-tts-lang="hi-IN"
+                      title="speak {{ t.translit }}">▶</button></td>
             </tr>
           {% endfor %}
         </tbody>
@@ -123,4 +293,113 @@
   </div>
 
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  document.body.classList.add('bagicha-page');
+
+  // --- Invader walk-cycle: flip frames twice per hop ------------------
+  (function () {
+    const inv = document.querySelector('.invader');
+    if (!inv) return;
+    setInterval(() => inv.classList.toggle('flip'), 250);
+  })();
+
+  // --- TTS playback -----------------------------------------------------
+  // Web Speech API; lang hi-IN. The button briefly turns red while
+  // speaking. If the browser has no hi-IN voice it falls back to the
+  // platform default — still audible, just not as natural.
+  function speak(text, lang, btn) {
+    if (!('speechSynthesis' in window) || !text) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang || 'hi-IN';
+    u.rate = 0.85;
+    if (btn) {
+      btn.classList.add('playing');
+      u.onend = u.onerror = () => btn.classList.remove('playing');
+    }
+    window.speechSynthesis.speak(u);
+  }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.play');
+    if (!btn) return;
+    let text = btn.dataset.tts;
+    if (!text && btn.dataset.ttsFrom) {
+      const src = document.querySelector(btn.dataset.ttsFrom);
+      text = src ? src.value : '';
+    }
+    speak(text, btn.dataset.ttsLang || 'hi-IN', btn);
+  });
+
+  // --- Translation ------------------------------------------------------
+  const input  = document.getElementById('xlate-input');
+  const result = document.getElementById('xlate-result');
+  const goBtn  = document.getElementById('xlate-go');
+
+  function getCookie(name) {
+    const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return m ? decodeURIComponent(m[2]) : '';
+  }
+
+  function renderTranslation(data) {
+    if (!data.tokens || !data.tokens.length) {
+      result.style.display = 'none';
+      return;
+    }
+    const parts = [];
+    parts.push(`<div class="meta">direction: <strong>${data.direction}</strong> · matched ${data.matched}/${data.total} tokens</div>`);
+    for (const t of data.tokens) {
+      if (t.matched) {
+        parts.push(`<div class="row">
+          <span class="src">${t.token}</span>
+          <span class="dev"><a href="/bagicha/word/${t.key}/">${t.dev}</a></span>
+          <span class="tr">${t.translit}</span>
+          <span class="gl">${t.gloss} <span class="role">${t.pos}${t.role && t.role !== 'lemma' ? ' · ' + t.role : ''}</span></span>
+          <span><button class="play" type="button" data-tts="${t.dev}" data-tts-lang="hi-IN" title="speak ${t.translit}">▶</button></span>
+        </div>`);
+      } else {
+        parts.push(`<div class="row unmatched">
+          <span class="src">${t.token}</span>
+          <span class="dev">—</span>
+          <span class="tr">—</span>
+          <span class="gl">${t.note ? t.note : 'not in vocabulary'}</span>
+          <span></span>
+        </div>`);
+      }
+    }
+    result.innerHTML = parts.join('');
+    result.style.display = 'block';
+  }
+
+  async function doTranslate() {
+    const text = (input.value || '').trim();
+    if (!text) { result.style.display = 'none'; return; }
+    const body = new URLSearchParams({ text });
+    try {
+      const r = await fetch("{% url 'bagicha:translate' %}", {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCookie('csrftoken'),
+                   'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      const data = await r.json();
+      renderTranslation(data);
+    } catch (err) {
+      result.innerHTML = `<div class="meta">translation failed: ${err}</div>`;
+      result.style.display = 'block';
+    }
+  }
+  goBtn.addEventListener('click', doTranslate);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doTranslate();
+  });
+  document.querySelectorAll('.translator .ex a').forEach((a) => {
+    a.addEventListener('click', () => {
+      input.value = a.dataset.fill;
+      doTranslate();
+    });
+  });
+</script>
 {% endblock %}

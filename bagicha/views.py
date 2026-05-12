@@ -1,5 +1,6 @@
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import render
+from django.views.decorators.http import require_POST
 
 from . import grammar
 
@@ -47,3 +48,12 @@ def resources(request):
     return render(request, 'bagicha/resources.html', {
         'links': grammar.LEARNING_LINKS,
     })
+
+
+@require_POST
+def translate(request):
+    text = (request.POST.get('text') or '').strip()[:600]
+    if not text:
+        return JsonResponse({'tokens': [], 'matched': 0, 'total': 0,
+                             'direction': '', 'is_hindi': False})
+    return JsonResponse(grammar.translate(text))

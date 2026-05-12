@@ -15,6 +15,7 @@ are likewise omitted from the flower set.
 from __future__ import annotations
 
 import random
+import re
 from urllib.parse import quote
 
 
@@ -603,3 +604,104 @@ LEARNING_LINKS = [
         'note': 'Scanned Platts, Bahri, Caturvedi & McGregor — the historical stack.',
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Translation (closed-vocabulary, word-by-word)
+# ---------------------------------------------------------------------------
+#
+# This is not a full MT system — it's a pedagogical lookup. The reverse
+# index covers every inflected surface that the generator can emit, so
+# any sentence the generator produces round-trips perfectly. Free text
+# falls back to "unmatched" on unknown tokens.
+
+DEVANAGARI_RE = re.compile(r'[ऀ-ॿ]')
+TOKEN_RE = re.compile(r"[^\s।.,!?;:'\"()\[\]]+")
+
+
+def _build_indices():
+    surface: dict[str, tuple[str, str]] = {}
+    gloss: dict[str, tuple[str, str]] = {}
+    for key, w in WORDS.items():
+        surface[w['dev']] = (key, 'lemma')
+        # Order matters under setdefault — registering oblique_sg first
+        # means it wins the bagīce ambiguity (oblique.sg ≡ plural.direct).
+        for slot in ('oblique_sg', 'plural_direct', 'plural_oblique'):
+            if slot in w:
+                surface.setdefault(w[slot], (key, slot.replace('_', '.')))
+        if 'forms' in w:
+            for s, form in w['forms'].items():
+                surface.setdefault(form, (key, f'agree.{s}'))
+        g_main = w['gloss'].split(' / ')[0].split('(')[0].strip().lower()
+        gloss.setdefault(g_main, (key, 'lemma'))
+        if w['gloss'] != g_main:
+            gloss.setdefault(w['gloss'].lower(), (key, 'lemma'))
+    # Hand-rolled English aliases that fall outside the canonical gloss.
+    for alias, target in {
+        'a': 'ek', 'an': 'ek',
+        'the': None,
+        'roses': 'gulab', 'lotuses': 'kamal', 'jasmines': 'chameli',
+        'hibiscuses': 'gudhal', 'tuberoses': 'rajanigandha', 'oleanders': 'kaner',
+        'apples': 'seb', 'pomegranates': 'anar', 'grapes': 'angur',
+        'watermelons': 'tarbuz', 'guavas': 'amrud', 'cherries': 'cherry',
+        'plums': 'alubukhara',
+        'bloom': 'khilna', 'blooms': 'khilna', 'blossoms': 'khilna',
+        'fragrant': 'sugandhit', 'beautiful': 'sundar',
+    }.items():
+        if target is None:
+            gloss.setdefault(alias, ('', 'function-word'))
+        else:
+            gloss.setdefault(alias, (target, 'alias'))
+    return surface, gloss
+
+
+_SURFACE_INDEX, _GLOSS_INDEX = _build_indices()
+
+
+def translate(text: str) -> dict:
+    """Word-by-word translation of free-form Hindi or English input.
+
+    Direction is auto-detected from script. Each emitted token records
+    the input form, the matched lemma (if any), the inflectional role
+    of the matched surface, and full grammar metadata.
+    """
+    raw_tokens = TOKEN_RE.findall(text)
+    is_hindi = any(DEVANAGARI_RE.search(t) for t in raw_tokens)
+    direction = 'hi→en' if is_hindi else 'en→hi'
+
+    out = []
+    matched_count = 0
+    for tok_text in raw_tokens:
+        hit = (_SURFACE_INDEX.get(tok_text) if is_hindi
+               else _GLOSS_INDEX.get(tok_text.lower()))
+        if hit and hit[0]:
+            key, role = hit
+            w = WORDS[key]
+            matched_count += 1
+            out.append({
+                'token':    tok_text,
+                'matched':  True,
+                'key':      key,
+                'role':     role,
+                'dev':      w['dev'],
+                'translit': w['translit'],
+                'gloss':    w['gloss'],
+                'pos':      w['pos'],
+                'gender':   w.get('gender', ''),
+                'note':     w.get('note', ''),
+            })
+        elif hit and hit[1] == 'function-word':
+            out.append({
+                'token': tok_text, 'matched': False,
+                'note': 'English function word with no direct Hindi counterpart.',
+            })
+        else:
+            out.append({'token': tok_text, 'matched': False})
+
+    return {
+        'direction': direction,
+        'is_hindi':  is_hindi,
+        'tokens':    out,
+        'matched':   matched_count,
+        'total':     len(out),
+    }
