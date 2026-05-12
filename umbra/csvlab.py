@@ -25,6 +25,14 @@ Coordinates are 0-indexed (header row is row 0 if present).
       -> grid[dst] = sum(grid[r][C] for r in column, skipping header
                          row 0 when skip_header is true)
 
+  {"op": "sort_col",   "col": C, "order": "asc"|"desc",
+                       "skip_header": true}
+      -> permute rows by lexicographic order of column C.  CKKS
+         cannot compare ciphertexts, so for numeric cells the sort
+         keys are obtained by mid-pipeline decryption — this op
+         briefly steps outside the ciphertext space, which is the
+         honest FHE story for ordering operations.
+
 Non-numeric cells (including headers) are left as plaintext strings.
 Ops that name a non-numeric cell or a missing coordinate are
 recorded in last_error and skipped.
@@ -41,12 +49,14 @@ OP_ADD_CONST  = 'add_const'
 OP_MUL_CONST  = 'mul_const'
 OP_SUM_CELLS  = 'sum_cells'
 OP_COL_TOTAL  = 'col_total'
+OP_SORT_COL   = 'sort_col'
 
 OP_CHOICES = [
     (OP_ADD_CONST, 'add constant to cell'),
     (OP_MUL_CONST, 'multiply cell by constant'),
     (OP_SUM_CELLS, 'sum two cells into a third'),
     (OP_COL_TOTAL, 'column total into a cell'),
+    (OP_SORT_COL,  'sort rows by column (alphabetical)'),
 ]
 
 
@@ -126,9 +136,23 @@ def encrypt_grid(ctx, grid):
     return cipher_grid, byte_total
 
 
-def apply_ops(cipher_grid, ops):
+def _sort_key_for_row(cipher_grid, plain_grid, r, col):
+    """Build a string sort key for row r at column col.  Non-numeric
+    cells use the plaintext string; numeric cells get decrypted +
+    formatted via _fmt so the key matches what the output CSV will
+    show.  CKKS can't compare ciphertexts directly — this is where
+    the round trip steps outside the ciphertext space."""
+    cell = cipher_grid[r][col] if col < len(cipher_grid[r]) else None
+    if cell is None:
+        return plain_grid[r][col] if col < len(plain_grid[r]) else ''
+    return _fmt(cell.decrypt()[0])
+
+
+def apply_ops(cipher_grid, plain_grid, ops):
     """Replay ops on the ciphertext grid in order.  Returns a list of
-    (op_index, error_message) for ops that couldn't be applied."""
+    (op_index, error_message) for ops that couldn't be applied.
+    plain_grid is the parallel grid of string cells; sort ops permute
+    both grids together so non-numeric cells follow their rows."""
     errors = []
     for i, op in enumerate(ops):
         kind = op.get('op')
@@ -169,6 +193,32 @@ def apply_ops(cipher_grid, ops):
                 if acc is None:
                     raise ValueError(f'column {col} has no numeric cells')
                 cipher_grid[dr][dc] = acc
+            elif kind == OP_SORT_COL:
+                col = int(op['col'])
+                order = (op.get('order') or 'asc').lower()
+                if order not in ('asc', 'desc'):
+                    raise ValueError(f'bad order {order!r}')
+                skip_header = bool(op.get('skip_header', True))
+                start_row = 1 if skip_header else 0
+                if cipher_grid and (col < 0 or col >= len(cipher_grid[0])):
+                    raise ValueError(f'column {col} out of bounds')
+                # Build (key, original_index) pairs; sort stably, then
+                # permute both grids in tandem.  Numeric cells require
+                # decryption to obtain a comparable key — that's the
+                # FHE-can't-compare moment.
+                idxs = list(range(start_row, len(cipher_grid)))
+                keys = [_sort_key_for_row(cipher_grid, plain_grid, r, col)
+                        for r in idxs]
+                order_pairs = sorted(zip(keys, idxs),
+                                     key=lambda kv: kv[0],
+                                     reverse=(order == 'desc'))
+                new_cipher = list(cipher_grid)
+                new_plain  = list(plain_grid)
+                for dst, (_, src) in zip(idxs, order_pairs):
+                    new_cipher[dst] = cipher_grid[src]
+                    new_plain[dst]  = plain_grid[src]
+                cipher_grid[:] = new_cipher
+                plain_grid[:]  = new_plain
             else:
                 raise ValueError(f'unknown op {kind!r}')
         except Exception as exc:
@@ -226,7 +276,7 @@ def run_session(session):
     session.numeric_cells = sum(1 for row in cipher_grid for x in row if x is not None)
 
     t1 = time.monotonic()
-    errs = apply_ops(cipher_grid, ops)
+    errs = apply_ops(cipher_grid, grid, ops)
     session.ops_ms = int((time.monotonic() - t1) * 1000)
 
     t2 = time.monotonic()

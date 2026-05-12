@@ -232,6 +232,13 @@ def _parse_op_form(post):
             'dst': [int(post.get('dst_row') or 0), int(post.get('dst_col') or 0)],
             'skip_header': bool(post.get('skip_header')),
         }
+    if kind == csvlab.OP_SORT_COL:
+        return {
+            'op':    kind,
+            'col':   int(post.get('col') or 0),
+            'order': (post.get('order') or 'asc').lower(),
+            'skip_header': bool(post.get('skip_header')),
+        }
     return None
 
 

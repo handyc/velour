@@ -116,8 +116,27 @@
             </label>
           </div>
 
+          <div class="op-fields" data-kinds="sort_col">
+            <label>col<input type="number" name="col" min="0" value="0"></label>
+            <label>order
+              <select name="order">
+                <option value="asc">ascending (A → Z)</option>
+                <option value="desc">descending (Z → A)</option>
+              </select>
+            </label>
+            <label style="flex-direction: row; align-items: center; gap: 0.3rem;">
+              <input type="checkbox" name="skip_header" checked> skip header row
+            </label>
+          </div>
+
           <button class="btn" type="submit" style="margin-top: 0.5rem;">+ Queue op</button>
         </form>
+
+        <p class="hint" style="margin-top: 0.4rem;">
+          Note: <em>sort</em> decrypts the sort-key column mid-pipeline —
+          CKKS can't compare ciphertexts, so ordering operations must
+          briefly step outside the encrypted space.
+        </p>
       </div>
     </div>
 
@@ -183,16 +202,23 @@
 </div>
 
 <script>
-  // Reveal only the op-fields whose data-kinds contains the chosen kind.
+  // Reveal only the op-fields whose data-kinds contains the chosen kind,
+  // AND disable inputs in the inactive blocks so they don't submit —
+  // multiple blocks share names like `col` and `dst_row`.
   (function () {
     var sel = document.getElementById('op-kind');
     var blocks = document.querySelectorAll('.op-fields');
+    function setBlock(b, active) {
+      if (active) b.classList.add('active'); else b.classList.remove('active');
+      b.querySelectorAll('input, select, textarea').forEach(function (el) {
+        el.disabled = !active;
+      });
+    }
     function refresh() {
       var kind = sel.value;
       blocks.forEach(function (b) {
         var kinds = (b.getAttribute('data-kinds') || '').split(/\s+/);
-        if (kind && kinds.indexOf(kind) !== -1) b.classList.add('active');
-        else b.classList.remove('active');
+        setBlock(b, !!kind && kinds.indexOf(kind) !== -1);
       });
     }
     if (sel) { sel.addEventListener('change', refresh); refresh(); }
