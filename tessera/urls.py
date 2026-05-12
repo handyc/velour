@@ -13,4 +13,8 @@ urlpatterns = [
                                       views.source_png,   name='source-png'),
     path('<slug:slug>/tile/<str:tile_id>.png',
                                       views.tile_png,     name='tile-png'),
+    path('<slug:slug>/swap-source/<int:color_idx>/',
+                                      views.swap_source,  name='swap-source'),
+    path('<slug:slug>/swap-palette/<int:color_idx>/',
+                                      views.swap_palette, name='swap-palette'),
 ]

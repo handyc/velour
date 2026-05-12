@@ -38,17 +38,57 @@
 
 <h2 style="margin-top: 24px; font-size: 1rem;">Edge sources</h2>
 <p class="tess-meta">
-  One toroidally-tileable image per colour.  Every tile in the set
-  whose Nth edge is colour <em>c</em> samples its top row from
-  source <em>c</em>; vertical / horizontal wrap of each source is
-  what makes adjacent-tile seams identical.
+  One toroidally-tileable image per colour.
+  {% if is_upload_method %}
+    Click any source to swap that colour's image.
+    {% if set.method == 'upload-1-palette' %} (Only colour 0 is editable;
+    1–3 are random palette shifts of it.){% endif %}
+  {% else %}
+    Click any source to recolour that palette anchor (RGB picker).
+  {% endif %}
 </p>
 <div>
-  {% for c in "0123" %}
+  {% for c in palette_view %}
   <div class="tess-source">
-    <img src="{% url 'tessera:source-png' set.slug c %}?v={{ render_version }}"
-         alt="source colour {{ c }}">
-    <span>colour {{ c }}</span>
+    {% if is_upload_method %}
+      {% if set.method == 'upload-1-palette' and c.idx != 0 %}
+        <img src="{% url 'tessera:source-png' set.slug c.idx %}?v={{ render_version }}&amp;t={{ set.created_at|date:'U' }}"
+             alt="source colour {{ c.idx }}"
+             title="derived palette shift (not directly editable)"
+             style="cursor:not-allowed; opacity:0.9;">
+      {% else %}
+        <form method="post" enctype="multipart/form-data"
+              action="{% url 'tessera:swap-source' set.slug c.idx %}"
+              style="display:inline;" id="swap-form-{{ c.idx }}">
+          {% csrf_token %}
+          <input type="file" name="file" accept="image/*"
+                 id="swap-file-{{ c.idx }}" style="display:none;"
+                 onchange="document.getElementById('swap-form-{{ c.idx }}').submit();">
+          <img src="{% url 'tessera:source-png' set.slug c.idx %}?v={{ render_version }}&amp;t={{ set.created_at|date:'U' }}"
+               alt="source colour {{ c.idx }}"
+               title="click to replace this colour image"
+               style="cursor:pointer;"
+               onclick="document.getElementById('swap-file-{{ c.idx }}').click();">
+        </form>
+      {% endif %}
+    {% else %}
+      <form method="post"
+            action="{% url 'tessera:swap-palette' set.slug c.idx %}"
+            style="display:inline;" id="pal-form-{{ c.idx }}">
+        {% csrf_token %}
+        <input type="color" name="rgb" value="{{ c.hex }}"
+               id="pal-color-{{ c.idx }}" style="display:none;"
+               onchange="document.getElementById('pal-form-{{ c.idx }}').submit();">
+        <img src="{% url 'tessera:source-png' set.slug c.idx %}?v={{ render_version }}"
+             alt="source colour {{ c.idx }}"
+             title="click to pick a new RGB for colour {{ c.idx }} ({{ c.hex }})"
+             style="cursor:pointer;"
+             onclick="document.getElementById('pal-color-{{ c.idx }}').click();">
+      </form>
+    {% endif %}
+    <span>colour {{ c.idx }}
+      {% if not is_upload_method %}<br>{{ c.hex }}{% endif %}
+    </span>
   </div>
   {% endfor %}
 </div>

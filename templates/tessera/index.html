@@ -76,14 +76,17 @@
   <div id="tess-upload-4" style="display:none; margin-top: 8px;
         padding: 6px; border:1px dotted #444;">
     <div style="color:#aaa; font-size:0.85rem; margin-bottom:4px;">
-      One image per colour.  Each is resized to <code>tile_px</code>
-      and edge-blended to be toroidal so the seam math still holds.
+      Select up to 4 images at once (one per colour).  Each is
+      resized to <code>tile_px</code> and edge-blended to be toroidal
+      so the seam math still holds.  You can swap any single colour
+      later from the detail page.
     </div>
-    {% for letter, idx in upload_slots %}
-    <div style="margin-top:4px;"><label>colour {{ idx }}</label>
-      <input type="file" name="upload_{{ letter }}" accept="image/*">
+    <div style="margin-top:4px;"><label>4 images</label>
+      <input type="file" name="upload_files" accept="image/*" multiple
+             id="tess-multi-upload">
+      <span id="tess-multi-summary" style="color:#888; margin-left:8px;
+            font-size:0.85rem;"></span>
     </div>
-    {% endfor %}
   </div>
   <div id="tess-upload-1" style="display:none; margin-top: 8px;
         padding: 6px; border:1px dotted #444;">
@@ -114,6 +117,17 @@
     }
     sel.addEventListener('change', sync);
     sync();
+
+    var multi = document.getElementById('tess-multi-upload');
+    var summary = document.getElementById('tess-multi-summary');
+    multi.addEventListener('change', function () {
+      var n = multi.files ? multi.files.length : 0;
+      if (n === 0) { summary.textContent = ''; return; }
+      var names = [];
+      for (var i = 0; i < Math.min(n, 4); i++) names.push(multi.files[i].name);
+      summary.textContent = n + ' selected → ' + names.join(', ') +
+        (n > 4 ? ' (extras ignored)' : (n < 4 ? ' (missing ' + (4-n) + ')' : ''));
+    });
   })();
 </script>
 {% endblock %}

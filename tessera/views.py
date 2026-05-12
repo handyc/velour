@@ -78,13 +78,23 @@ def detail(request, slug):
                         grid[n * 4 + e][s_ * 4 + w] = f'{n}{e}{s_}{w}'
         grid_label = f'all {s.tile_count} square tiles'
         edges_per_tile = 4
+    palette_view = []
+    for i in range(4):
+        rgb = s.palette[i] if i < len(s.palette) else [128, 128, 128]
+        palette_view.append({
+            'idx': i,
+            'rgb': rgb,
+            'hex': '#{:02x}{:02x}{:02x}'.format(*[max(0, min(255, int(c))) for c in rgb]),
+        })
     return render(request, 'tessera/detail.html', {
-        'set':            s,
-        'grid':           grid,
-        'grid_label':     grid_label,
-        'edges_per_tile': edges_per_tile,
-        'palette_json':   json.dumps(s.palette),
-        'render_version': R.RENDER_VERSION,
+        'set':              s,
+        'grid':             grid,
+        'grid_label':       grid_label,
+        'edges_per_tile':   edges_per_tile,
+        'palette_json':     json.dumps(s.palette),
+        'palette_view':     palette_view,
+        'is_upload_method': s.method in ('upload-4', 'upload-1-palette'),
+        'render_version':   R.RENDER_VERSION,
     })
 
 
@@ -213,6 +223,51 @@ _VALID_METHODS = {m[0] for m in TessSet.METHOD_CHOICES}
 
 
 @require_POST
+def swap_source(request, slug, color_idx):
+    """Replace one colour's source image with an uploaded file.
+    Only meaningful for upload-* methods; for procedural methods,
+    use swap_palette instead."""
+    s = get_object_or_404(TessSet, slug=slug)
+    if color_idx < 0 or color_idx > 3:
+        raise Http404('color_idx out of range')
+    f = request.FILES.get('file')
+    if not f:
+        return HttpResponseRedirect(reverse('tessera:detail', args=[s.slug]))
+    if s.method == 'upload-1-palette' and color_idx != 0:
+        # Sources 1..3 are derived; swapping them doesn't make sense.
+        return HttpResponseRedirect(reverse('tessera:detail', args=[s.slug]))
+    slot_letter = 'abcd'[color_idx]
+    setattr(s, f'upload_{slot_letter}', f)
+    s.save()
+    return HttpResponseRedirect(reverse('tessera:detail', args=[s.slug]))
+
+
+@require_POST
+def swap_palette(request, slug, color_idx):
+    """Update one palette anchor RGB.  Only meaningful for procedural
+    methods (fbm-tileable, domain-warp, hex-ca); upload methods
+    ignore the palette."""
+    s = get_object_or_404(TessSet, slug=slug)
+    if color_idx < 0 or color_idx > 3:
+        raise Http404('color_idx out of range')
+    rgb = (request.POST.get('rgb') or '').strip()
+    # Expect "#rrggbb" from <input type="color">.
+    if len(rgb) == 7 and rgb.startswith('#'):
+        try:
+            r = int(rgb[1:3], 16); g = int(rgb[3:5], 16); b = int(rgb[5:7], 16)
+        except ValueError:
+            return HttpResponseRedirect(reverse('tessera:detail', args=[s.slug]))
+        palette = list(s.palette)
+        # Pad to 4 entries if for some reason it's short.
+        while len(palette) < 4:
+            palette.append([128, 128, 128])
+        palette[color_idx] = [r, g, b]
+        s.palette = palette
+        s.save()
+    return HttpResponseRedirect(reverse('tessera:detail', args=[s.slug]))
+
+
+@require_POST
 def create_set(request):
     """Bare-bones create.  Accepts name + seed + method + topology +
     blend_method, plus optional file uploads for the upload-* methods.
@@ -247,8 +302,11 @@ def create_set(request):
     # File uploads — only attach when the chosen method actually
     # consumes them so we don't litter MEDIA_ROOT with orphans.
     if method == 'upload-4':
-        for letter in ('a', 'b', 'c', 'd'):
-            f = request.FILES.get(f'upload_{letter}')
+        # Prefer the bulk multi-select field; fall back to per-slot
+        # legacy fields for backward-compat.
+        bulk = request.FILES.getlist('upload_files')[:4]
+        for i, letter in enumerate(('a', 'b', 'c', 'd')):
+            f = bulk[i] if i < len(bulk) else request.FILES.get(f'upload_{letter}')
             if f:
                 setattr(obj, f'upload_{letter}', f)
     elif method == 'upload-1-palette':
