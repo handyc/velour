@@ -1559,7 +1559,7 @@
     // direction (-1 or +1) and walks the platform top, reversing at
     // gaps or walls.
     monsters = [];
-    var rng = E.makeRng((seed[COMPONENT] * 0x9e3779b9) >>> 0);
+    var rng = window.DoomCAEngine.makeRng((seed[COMPONENT] * 0x9e3779b9) >>> 0);
     for (var attempt = 0; monsters.length < MONSTER_COUNT && attempt < MONSTER_COUNT * 40; attempt++) {
       var mx = (rng() * GRID) | 0;
       var my = (rng() * GRID) | 0;
