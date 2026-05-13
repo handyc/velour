@@ -783,7 +783,40 @@
   var BEST_KEEP = 12;
   var bestEverList = loadBestEver();
 
+  // Cheap fingerprint identifying a unique gene.  Combines the
+  // discrete fields + a sparse sample of rule bytes (positions 0 /
+  // 4096 / 8192 / 12288 / 16383) which gives ~10^15 distinguishable
+  // hashes for random rules — plenty for our top-12 list.
+  function geneFingerprint (g) {
+    var r = g.rule;
+    return g.world_mode + '|' + g.monster_count + '|' + g.seed_byte +
+      '|' + g.wall_threshold + '|' + g.pure_mode + '|' +
+      r[0] + ',' + r[4096] + ',' + r[8192] + ',' + r[12288] + ',' + r[16383];
+  }
+
   function recordBest (agent, k) {
+    // Dedup: if this exact gene is already in the list, replace it
+    // only if our fitness is higher (which it can't really be, since
+    // re-evaluation of the same gene gives the same fitness, but
+    // also covers numeric drift).  Otherwise skip — no point filling
+    // top-K with the same elite from every generation.
+    agent._fp = geneFingerprint(agent.gene);
+    for (var i = 0; i < bestEverList.length; i++) {
+      if (bestEverList[i]._fp === undefined) {
+        bestEverList[i]._fp = geneFingerprint(bestEverList[i].gene);
+      }
+      if (bestEverList[i]._fp === agent._fp) {
+        // Already present — refresh evaln + gen so the card shows
+        // the most recent discovery generation (so the user can see
+        // it's still "alive" in the population).
+        if (agent.fitness >= bestEverList[i].fitness) {
+          bestEverList[i].fitness = agent.fitness;
+          bestEverList[i].evaln   = agent.evaln;
+          bestEverList[i].gen     = agent.gen;
+        }
+        return;
+      }
+    }
     bestEverList.push(agent);
     bestEverList.sort(function (a, b) { return b.fitness - a.fitness; });
     if (bestEverList.length > k) bestEverList.length = k;
@@ -1078,7 +1111,8 @@
       drawGenePreview(canv, a.gene);
       var n = document.createElement('div');
       n.className = 'name';
-      n.textContent = '#' + (idx + 1) + ' · fitness ' + a.fitness.toFixed(3);
+      var genBadge = (a.gen != null) ? ' · g' + (a.gen + 1) : '';
+      n.textContent = '#' + (idx + 1) + ' · fit ' + a.fitness.toFixed(3) + genBadge;
       card.appendChild(n);
       var m = document.createElement('div');
       m.className = 'meta';
