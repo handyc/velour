@@ -65,6 +65,13 @@ class GameSession(models.Model):
                   'shift/scent/evolved modes it is only used at init '
                   'to derive ground vs wall from the pact seed.')
 
+    pure_mode = models.BooleanField(
+        default=False,
+        help_text='If true (and world_mode is shift/scent/evolved), '
+                  'the pact rule is NOT applied on wait ticks; only '
+                  'the mode\'s own rule + player moves change the '
+                  'world.  Trades atmosphere for predictability.')
+
     notes       = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
     created_by  = models.ForeignKey(

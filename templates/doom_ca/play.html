@@ -110,6 +110,7 @@
   var WALL_THRESH = payload.wall_threshold;
   var MONSTER_COUNT = payload.monster_count;
   var MODE = payload.world_mode;
+  var PURE_MODE = !!payload.pure_mode;
   var RULE_SIZE = 16384;
   var COMPONENTS = payload.components;
 
@@ -129,7 +130,8 @@
              'illustration of what a GA-evolved Doom-signature rule would look like.',
   };
   document.getElementById('dc-mode-note').textContent =
-      MODE_NOTES[MODE] || '';
+      (MODE_NOTES[MODE] || '') +
+      (PURE_MODE ? '  · pure mode (no pact-rule wait ticks).' : '');
 
   // ─── lift hex2bytes + seed expansion ──────────────────────────
   function hex2bytes (h) {
@@ -582,8 +584,8 @@
     } else if (MODE === 'shift') {
       // The shift was already applied as the "move".  Optionally run
       // the pact rule on wait ticks for ambient drift; but keep the
-      // player cell pinned.
-      if (!skipPactTick) {
+      // player cell pinned.  Pure mode skips this entirely.
+      if (!skipPactTick && !PURE_MODE) {
         for (var t = 0; t < rate; t++) {
           tickPactRule();
           // Protect the player + recreate it

@@ -29,6 +29,7 @@ def create(request):
         'name': '', 'pact_slug': '', 'component': '0',
         'world_mode': 'overlay',
         'monster_count': '8', 'wall_threshold': '2',
+        'pure_mode': '',
         'notes': '',
     }
 
@@ -51,6 +52,7 @@ def create(request):
         except ValueError:
             wall_threshold = 2
         world_mode = form['world_mode'] if form['world_mode'] in valid_modes else 'overlay'
+        pure_mode = bool(form['pure_mode'])
         pact = Pact.objects.filter(slug=form['pact_slug']).first()
         if pact is None:
             errors.append('Pick an existing spoeqi pact.')
@@ -63,6 +65,7 @@ def create(request):
                 world_mode=world_mode,
                 monster_count=monster_count,
                 wall_threshold=wall_threshold,
+                pure_mode=pure_mode,
                 notes=form['notes'].strip(),
                 created_by=request.user if request.user.is_authenticated else None,
             )
@@ -90,6 +93,7 @@ def play(request, slug):
         'pact_name':      pact.name,
         'component':      session.component,
         'world_mode':     session.world_mode,
+        'pure_mode':      session.pure_mode,
         'monster_count':  session.monster_count,
         'wall_threshold': session.wall_threshold,
         'component_grid': pact.component_grid,

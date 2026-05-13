@@ -69,6 +69,28 @@
   </div>
 
   <div class="field">
+    <label>World mode — how the CA drives the game</label>
+    {% for value, label in world_mode_choices %}
+    <label class="radio" style="display:block; margin-left:8px; margin-bottom:4px; color:#aaa; font-size:0.85rem;">
+      <input type="radio" name="world_mode" value="{{ value }}"
+             {% if form.world_mode == value %}checked{% endif %}>
+      {{ label }}
+    </label>
+    {% endfor %}
+    <div class="hint">
+      <b>overlay</b>: pact rule runs; player + monsters tracked as JS
+      overlay; camera follows.  Most playable, least pure.<br>
+      <b>shift</b>: world scrolls under an anchored player via 6
+      pre-built directional rules; monsters drift with the world.<br>
+      <b>scent</b>: a single hand-built rule grows monsters fluid-like
+      toward the player; walls block; player anchored.<br>
+      <b>evolved</b>: the pact rule with per-key patches that target
+      Doom-signature dynamics — an illustration of what a GA-evolved
+      rule would look like.
+    </div>
+  </div>
+
+  <div class="field">
     <label for="monster_count">Monsters (0–64)</label>
     <input id="monster_count" name="monster_count" type="number" min="0"
            max="64" value="{{ form.monster_count }}" style="width: 6em;">
@@ -82,6 +104,21 @@
       <option value="3" {% if form.wall_threshold == "3" %}selected{% endif %}>3 — sparse (~25 % walls)</option>
     </select>
     <div class="hint">Cell states ≥ this are impassable.</div>
+  </div>
+
+  <div class="field">
+    <label style="display:inline;">
+      <input type="checkbox" name="pure_mode" value="1"
+             {% if form.pure_mode %}checked{% endif %}>
+      pure mode (suppress pact-rule wait tick)
+    </label>
+    <div class="hint">
+      Only meaningful for shift / scent / evolved modes.  When on,
+      the pact rule is <i>not</i> applied between player moves —
+      only the mode's own rule changes the world.  Static walls,
+      predictable monsters, true pure-CA dynamics.  Off = ambient
+      world drift from the pact rule (more chaotic, more horror).
+    </div>
   </div>
 
   <div class="field">
