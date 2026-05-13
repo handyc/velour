@@ -34,11 +34,31 @@
     </form>
 </div>
 
-{% if rulesets %}
+{% if total_rulesets %}
+{# Shared datalist: built once, referenced by all three ruleset
+   typeahead inputs below.  Option `value` carries the id so the
+   server can resolve it regardless of how the user typed it. #}
+<datalist id="ruleset-options">
+    {% for rs in rulesets %}
+    <option value="#{{ rs.pk }} — {{ rs.name }} ({{ rs.n_colors }}c)"></option>
+    {% endfor %}
+</datalist>
+
 <h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Rulesets
-    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">{{ rulesets.count }}</span>
+    <span style="color:#6e7681;font-weight:normal;font-size:0.72rem">
+        {% if ruleset_query %}{{ shown_rulesets }} match{{ shown_rulesets|pluralize:",es" }} · {{ total_rulesets }} total{% else %}{{ shown_rulesets }} of {{ total_rulesets }} (most-recent first){% endif %}
+    </span>
 </h2>
-<div class="sim-list">
+<form method="get" style="margin:0 0 0.35rem 0;display:flex;gap:0.4rem;align-items:center;font-size:0.78rem">
+    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+    <input type="text" name="rq" value="{{ ruleset_query }}"
+           placeholder="filter rulesets by name…"
+           style="flex:1;max-width:20rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.2rem 0.35rem;font-size:0.78rem">
+    <button type="submit" class="btn btn-secondary" style="font-size:0.72rem;padding:0.2rem 0.6rem">Filter</button>
+    {% if ruleset_query %}<a href="{% if query %}?q={{ query }}{% else %}{% url 'automaton:home' %}{% endif %}" style="color:#8b949e;font-size:0.72rem">clear</a>{% endif %}
+</form>
+{% if rulesets %}
+<div class="sim-list" style="max-height:22rem;overflow-y:auto">
     {% for rs in rulesets %}
     <div class="sim-row" style="border-left-color:#6e40c9">
         <a class="name" href="{% url 'automaton:run_ruleset' rs.pk %}"
@@ -61,23 +81,29 @@
     </div>
     {% endfor %}
 </div>
+{% else %}
+<p style="color:#6e7681;font-size:0.78rem">
+    {% if ruleset_query %}No rulesets match "{{ ruleset_query }}".{% else %}No rulesets yet.{% endif %}
+</p>
+{% endif %}
 
-{% if rulesets.count > 1 %}
+{% if total_rulesets > 1 %}
 <h2 style="font-size:0.9rem;margin:0.75rem 0 0.3rem">Merge rulesets</h2>
 <p style="color:#6e7681;font-size:0.7rem;margin:0 0 0.3rem">
     Union of all unique rules from both parents. A takes priority on collisions.
+    Start typing a ruleset name or id (#NNN).
 </p>
 <form method="post" action="{% url 'automaton:merge_rulesets' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
     {% csrf_token %}
     <label style="color:#8b949e;font-size:0.72rem">A
-        <select name="ruleset_a">
-            {% for rs in rulesets %}<option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>{% endfor %}
-        </select>
+        <input type="text" name="ruleset_a" list="ruleset-options"
+               placeholder="#id or name"
+               style="width:18rem;font-size:0.72rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.15rem 0.3rem">
     </label>
     <label style="color:#8b949e;font-size:0.72rem">B
-        <select name="ruleset_b">
-            {% for rs in rulesets %}<option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>{% endfor %}
-        </select>
+        <input type="text" name="ruleset_b" list="ruleset-options"
+               placeholder="#id or name"
+               style="width:18rem;font-size:0.72rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.15rem 0.3rem">
     </label>
     <input type="text" name="name" placeholder="merged name (optional)" style="width:9rem;font-size:0.72rem">
     <button type="submit" class="btn" style="background:#1f6feb;border-color:#388bfd">Merge</button>
@@ -92,11 +118,9 @@
 <form method="post" action="{% url 'automaton:create' %}" style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;font-size:0.78rem">
     {% csrf_token %}
     <label style="color:#8b949e;font-size:0.72rem">Rules
-        <select name="ruleset">
-            {% for rs in rulesets %}
-            <option value="{{ rs.pk }}">{{ rs.name }} ({{ rs.n_colors }}c)</option>
-            {% endfor %}
-        </select>
+        <input type="text" name="ruleset" list="ruleset-options"
+               placeholder="#id or name"
+               style="width:18rem;font-size:0.72rem;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:3px;padding:0.15rem 0.3rem">
     </label>
     <label style="color:#8b949e;font-size:0.72rem">W <input type="number" name="width" value="32" min="8" max="128" style="width:3.5rem"></label>
     <label style="color:#8b949e;font-size:0.72rem">H <input type="number" name="height" value="32" min="8" max="128" style="width:3.5rem"></label>

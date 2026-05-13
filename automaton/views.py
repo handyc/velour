@@ -19,22 +19,56 @@ from .packed import (
 )
 
 
+def _resolve_ruleset_token(token):
+    """Parse a typeahead/select value into a RuleSet, or None.
+
+    Accepts a raw int id (`"123"`) — what the old <select> dropdowns
+    sent — or a datalist option label that begins `"#123 — …"`.  Falls
+    back to a unique name match (case-insensitive) if neither form
+    parses.
+    """
+    if not token:
+        return None
+    s = str(token).strip()
+    if s.isdigit():
+        return RuleSet.objects.filter(pk=int(s)).first()
+    if s.startswith('#'):
+        rest = s[1:].split(' ', 1)[0].rstrip('—-')
+        if rest.isdigit():
+            return RuleSet.objects.filter(pk=int(rest)).first()
+    matches = list(RuleSet.objects.filter(name__iexact=s)[:2])
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 @login_required
 def home(request):
-    q = (request.GET.get('q') or '').strip()
+    q  = (request.GET.get('q')  or '').strip()
+    rq = (request.GET.get('rq') or '').strip()
     sims = Simulation.objects.select_related('ruleset')
     rulesets = RuleSet.objects.all()
     if q:
         sims = sims.filter(name__icontains=q)
-        rulesets = rulesets.filter(name__icontains=q)
+    if rq:
+        rulesets = rulesets.filter(name__icontains=rq)
     total_sims = Simulation.objects.count()
+    total_rulesets = RuleSet.objects.count()
     simulations = list(sims[:200])
+    # Cap the visible ruleset list — with hundreds of entries the old
+    # unbounded list made the home page unusable.  Show the most
+    # recently updated first; user filters with the `rq` query.
+    rulesets_visible = list(
+        rulesets.order_by('-id')[:120])
     return render(request, 'automaton/home.html', {
-        'simulations':  simulations,
-        'rulesets':     rulesets,
-        'query':        q,
-        'shown_sims':   len(simulations),
-        'total_sims':   total_sims,
+        'simulations':       simulations,
+        'rulesets':          rulesets_visible,
+        'query':             q,
+        'ruleset_query':     rq,
+        'shown_sims':        len(simulations),
+        'total_sims':        total_sims,
+        'shown_rulesets':    len(rulesets_visible),
+        'total_rulesets':    total_rulesets,
     })
 
 
@@ -42,12 +76,16 @@ def home(request):
 @require_POST
 def create_simulation(request):
     """Create a new simulation from a ruleset + optional tileset."""
-    ruleset_id = request.POST.get('ruleset', '')
+    ruleset_token = request.POST.get('ruleset', '')
     width = int(request.POST.get('width', 32))
     height = int(request.POST.get('height', 32))
     name = request.POST.get('name', '').strip()
 
-    ruleset = get_object_or_404(RuleSet, pk=ruleset_id)
+    ruleset = _resolve_ruleset_token(ruleset_token)
+    if ruleset is None:
+        messages.error(request,
+            f'Could not find a ruleset matching "{ruleset_token}".')
+        return redirect('automaton:home')
 
     # Prefer the ruleset's canonical palette if set; otherwise the built-in
     # default, optionally overlaid by a picked tileset.
@@ -597,13 +635,11 @@ def _merge_two(rs_a, rs_b, name=None):
 @require_POST
 def merge_rulesets(request):
     """Combine two explicit rulesets into a new one keeping unique rules."""
-    a_id = request.POST.get('ruleset_a', '')
-    b_id = request.POST.get('ruleset_b', '')
-    if not a_id or not b_id or a_id == b_id:
+    rs_a = _resolve_ruleset_token(request.POST.get('ruleset_a', ''))
+    rs_b = _resolve_ruleset_token(request.POST.get('ruleset_b', ''))
+    if rs_a is None or rs_b is None or rs_a.pk == rs_b.pk:
         messages.error(request, 'Pick two different rulesets to merge.')
         return redirect('automaton:home')
-    rs_a = get_object_or_404(RuleSet, pk=a_id)
-    rs_b = get_object_or_404(RuleSet, pk=b_id)
     name = request.POST.get('name', '').strip() or None
     rs, n_exact, n_count = _merge_two(rs_a, rs_b, name=name)
     messages.success(request,
