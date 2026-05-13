@@ -1521,11 +1521,17 @@
   var ticksSinceWorld = 0;
   var jumpPressed   = false;   // edge-triggered
 
+  // Platform mode needs enough surfaces to stand on or the world
+  // reads as empty sky.  Clamp the gene's wall_threshold to at most
+  // 2 here so state-2 and state-3 cells are both platforms — without
+  // this, an evolved gene with wall_threshold=3 leaves only ~25 % of
+  // cells as walls and the level looks like a thin scatter of dots.
+  var PLATFORM_WALL_THRESH = Math.min(WALL_THRESH, 2);
   function platformIsWall (cx, cy) {
     if (cy < 0 || cy >= GRID) return true;          // ceiling/floor walls
     var x = ((cx % GRID) + GRID) % GRID;
     var cell = get(x, cy);
-    return isWallForOverlay(cell);
+    return cell >= PLATFORM_WALL_THRESH;
   }
 
   function initPlatformMode () {
