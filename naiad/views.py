@@ -28,12 +28,13 @@ def index(request):
     profiles = WaterProfile.objects.all()
     recent_runs = (TestRun.objects
                    .select_related('system', 'source', 'target')
-                   .order_by('-created_at')[:10])
+                   .order_by('-created_at'))
     if domain:
         systems = systems.filter(domain=domain)
         stage_types = stage_types.filter(domain=domain)
         profiles = profiles.filter(domain=domain)
         recent_runs = recent_runs.filter(domain=domain)
+    recent_runs = recent_runs[:10]
     return render(request, 'naiad/index.html', {
         'systems':      systems,
         'stage_types':  stage_types,
