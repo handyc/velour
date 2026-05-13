@@ -624,21 +624,53 @@
     return violations;
   }
 
+  // Rewrite a gene's rule table in-place so it satisfies every active
+  // constraint.  Used to be a fail-fast check (fitness = 0 on any
+  // violation) but with K=4 hex CAs the probability that a random
+  // rule satisfies even one hard constraint is ~0, so the GA
+  // stalled at fitness 0 forever.  Reshaping respects the user's
+  // intent (no walls under the player, etc.) without nuking the
+  // population.
+  function enforceConstraints (gene, activeConstraints) {
+    if (!activeConstraints) return;
+    var rule = gene.rule;
+    if (activeConstraints['no-wall-under-player']) {
+      for (var k = 0x2000; k < 0x3000; k++) {
+        if (rule[k] === WALL_S) rule[k] = GROUND_S;
+      }
+    }
+    if (activeConstraints['no-monster-under-player']) {
+      for (var k = 0x2000; k < 0x3000; k++) {
+        if (rule[k] === MONSTER_S) rule[k] = GROUND_S;
+      }
+    }
+    if (activeConstraints['player-must-persist']) {
+      for (var k = 0x2000; k < 0x3000; k++) rule[k] = PLAYER_S;
+    }
+    if (activeConstraints['no-spontaneous-walls']) {
+      for (var k = 0; k < 16384; k++) {
+        var self_ = (k >> 12) & 3;
+        if (self_ === WALL_S) continue;
+        var anyWall = false;
+        for (var i = 0; i < 6; i++) {
+          if (((k >> (2 * (5 - i))) & 3) === WALL_S) { anyWall = true; break; }
+        }
+        if (!anyWall && rule[k] === WALL_S) rule[k] = GROUND_S;
+      }
+    }
+  }
+
   // ─── Fitness ──────────────────────────────────────────────────
   function evaluate (gene, opts) {
     var n = opts.sims;
     var max = opts.maxTurns;
-    // Hard-constraint check first.  If any active constraint is
-    // violated, fitness = 0 with a special marker — no need to even
-    // run the simulator.
-    var violations = opts.constraints
-      ? checkConstraints(gene, opts.constraints) : [];
-    if (violations.length > 0) {
-      return {
-        fitness: 0,
-        constraintViolations: violations,
-        components: {}, stats: {},
-      };
+    // Reshape the rule table in-place to satisfy active constraints
+    // BEFORE simulating.  This replaces the old fail-fast check that
+    // would set fitness = 0 on any violation — with K=4 hex CAs the
+    // probability of a random rule satisfying even one hard
+    // constraint is essentially zero, which stalled the GA.
+    if (opts.constraints) {
+      enforceConstraints(gene, opts.constraints);
     }
     var results = [];
     for (var i = 0; i < n; i++) {
@@ -1094,8 +1126,11 @@
   }
 
   function modeMix (pop) {
-    var c = {overlay:0, shift:0, scent:0, evolved:0};
-    for (var i = 0; i < pop.length; i++) c[pop[i].gene.world_mode]++;
+    var c = {overlay:0, shift:0, scent:0, evolved:0, platform:0, ink:0};
+    for (var i = 0; i < pop.length; i++) {
+      var m = pop[i].gene.world_mode;
+      c[m] = (c[m] || 0) + 1;
+    }
     return Object.entries(c).filter(function (kv) { return kv[1]; })
       .map(function (kv) { return kv[0] + '=' + kv[1]; }).join(' ');
   }
