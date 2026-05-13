@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Vampyrik — Velour{% endblock %}
+{% block extra_head %}{% include "vampyrik/_style.html" %}{% endblock %}
+{% block content %}
+<div class="v-wrap">
+  <h1>Vampyrik</h1>
+  <p class="lede">
+    A catalogue of vampire lore — the variants that walked, drained, or
+    shapeshifted through the world's folk traditions, with their attested
+    appearance, behaviours, and counter-rites.  Browse by tradition or
+    cross the <a href="{% url 'vampyrik:taxonomy' %}">taxonomy</a> of
+    traits, origins, and weaknesses that knit them together.
+  </p>
+
+  <div class="v-stats">
+    <b>{{ traditions|length }}</b> traditions ·
+    <b>{{ n_creatures }}</b> creatures ·
+    <b>{{ n_traits }}</b> traits ·
+    <b>{{ n_origins }}</b> origins ·
+    <b>{{ n_weaknesses }}</b> weaknesses
+  </div>
+
+  <h2>Traditions</h2>
+  <div class="v-grid">
+    {% for t in traditions %}
+      <div class="v-card">
+        <a href="{% url 'vampyrik:tradition' slug=t.slug %}"
+           class="name">{{ t.name }}</a>
+        <div class="meta">{{ t.region }} · {{ t.era }} ·
+          {{ t.n_creatures }} creature{{ t.n_creatures|pluralize }}</div>
+        {% if t.summary %}<div class="blurb">{{ t.summary|truncatewords:24 }}</div>{% endif %}
+      </div>
+    {% empty %}
+      <div class="v-card">No traditions seeded yet — run
+        <code>manage.py seed_vampyrik</code>.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

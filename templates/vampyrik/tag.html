@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ tag.name }} — Vampyrik{% endblock %}
+{% block extra_head %}{% include "vampyrik/_style.html" %}{% endblock %}
+{% block content %}
+<div class="v-wrap">
+  <p class="crumb">
+    <a href="{% url 'vampyrik:index' %}">Vampyrik</a> /
+    <a href="{% url 'vampyrik:taxonomy' %}">taxonomy</a>
+  </p>
+  <h1>{{ tag.name }}</h1>
+  {% if tag.kind %}<div class="v-stats">kind: {{ tag.get_kind_display }}</div>{% endif %}
+  {% if tag.destroys %}<div class="v-stats" style="color:#ffb4a4;">destroys the creature</div>{% endif %}
+  {% if tag.description %}<p>{{ tag.description|linebreaks }}</p>{% endif %}
+
+  <h2>Attested in</h2>
+  <div class="v-creatures">
+    {% for c in creatures %}
+      <div class="v-creature-row">
+        <a class="name" href="{% url 'vampyrik:creature' slug=c.slug %}"
+        >{{ c.name }}</a>
+        <span class="alt">{{ c.tradition.name }}</span>
+      </div>
+    {% empty %}
+      <div class="v-creature-row">No creatures yet for this tag.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

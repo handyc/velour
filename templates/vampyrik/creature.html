@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ creature.name }} — Vampyrik{% endblock %}
+{% block extra_head %}{% include "vampyrik/_style.html" %}{% endblock %}
+{% block content %}
+<div class="v-wrap">
+  <p class="crumb">
+    <a href="{% url 'vampyrik:index' %}">Vampyrik</a> /
+    <a href="{% url 'vampyrik:tradition' slug=creature.tradition.slug %}"
+       >{{ creature.tradition.name }}</a>
+  </p>
+  <h1>{{ creature.name }}</h1>
+  {% if creature.alt_names %}
+    <div class="v-stats"><em>also:</em> {{ creature.alt_names }}</div>
+  {% endif %}
+
+  {% if creature.summary %}<p>{{ creature.summary|linebreaks }}</p>{% endif %}
+
+  <dl class="v-block">
+    {% if creature.appearance %}
+      <dt>appearance</dt><dd>{{ creature.appearance|linebreaks }}</dd>
+    {% endif %}
+    {% if creature.behaviour %}
+      <dt>behaviour</dt><dd>{{ creature.behaviour|linebreaks }}</dd>
+    {% endif %}
+    {% if creature.notes %}
+      <dt>notes</dt><dd>{{ creature.notes|linebreaks }}</dd>
+    {% endif %}
+  </dl>
+
+  {% if creature.traits.exists %}
+    <h3>Traits</h3>
+    <div class="v-tags">
+      {% for t in creature.traits.all %}
+        <a class="v-tag kind-{{ t.kind }}"
+           href="{% url 'vampyrik:trait' slug=t.slug %}">{{ t.name }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if creature.origins.exists %}
+    <h3>Origins</h3>
+    <div class="v-tags">
+      {% for o in creature.origins.all %}
+        <a class="v-tag"
+           href="{% url 'vampyrik:origin' slug=o.slug %}">{{ o.name }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if creature.weaknesses.exists %}
+    <h3>Weaknesses</h3>
+    <div class="v-tags">
+      {% for w in creature.weaknesses.all %}
+        <a class="v-tag {% if w.destroys %}destroys{% endif %}"
+           href="{% url 'vampyrik:weakness' slug=w.slug %}"
+           title="{% if w.destroys %}destroys{% else %}wards / repels{% endif %}"
+        >{{ w.name }}{% if w.destroys %} †{% endif %}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if kindred %}
+    <h3>Kindred creatures</h3>
+    <div class="v-tags">
+      {% for k in kindred %}
+        <a class="v-tag"
+           href="{% url 'vampyrik:creature' slug=k.slug %}"
+           title="{{ k.shared }} shared trait{{ k.shared|pluralize }}"
+        >{{ k.name }} <small>({{ k.tradition.name }})</small></a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if creature.sources.exists %}
+    <h3>Sources</h3>
+    <ul class="v-sources">
+      {% for s in creature.sources.all %}
+        <li>{{ s }}{% if s.year %} · {{ s.year }}{% endif %}{% if s.details %} — {{ s.details }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+{% endblock %}

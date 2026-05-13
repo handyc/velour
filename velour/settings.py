@@ -156,6 +156,7 @@ INSTALLED_APPS = [
     'doom_ca',
     'retrogames',
     'metaevolve',
+    'vampyrik',
 ]
 
 MIDDLEWARE = [

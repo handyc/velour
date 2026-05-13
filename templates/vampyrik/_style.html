@@ -1,0 +1,75 @@
+{% comment %}
+Shared style block for vampyrik pages.  Quiet, dark palette tuned for
+folklore reading; data-ink discipline, no chrome.
+{% endcomment %}
+<style>
+  .v-wrap { max-width: 1100px; margin: 1.5rem auto; padding: 0 1rem;
+            color: #c9d1d9; font-size: 0.92rem; line-height: 1.55; }
+  .v-wrap a { color: #d4afff; text-decoration: none; }
+  .v-wrap a:hover { color: #f0c8ff; text-decoration: underline; }
+  .v-wrap h1 { color: #f4e6f9; font-size: 1.4rem; margin: 0 0 0.15rem;
+               font-weight: 600; letter-spacing: 0.02em; }
+  .v-wrap h2 { color: #e6d6ec; font-size: 1.05rem; margin: 1.1rem 0 0.45rem;
+               font-weight: 600; }
+  .v-wrap h3 { color: #d4afff; font-size: 0.92rem; margin: 0.8rem 0 0.3rem;
+               font-weight: 600; }
+  .v-wrap .lede { color: #9d97a8; max-width: 70ch; margin: 0 0 1.1rem;
+                  font-size: 0.85rem; font-style: italic; }
+  .v-wrap .crumb { color: #6e6478; font-size: 0.78rem; margin-bottom: 0.4rem; }
+  .v-wrap .crumb a { color: #9d97a8; }
+
+  .v-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px; margin: 0.6rem 0 1.4rem;
+  }
+  .v-card {
+    background: #161018; border: 1px solid #2a1f30; border-left: 3px solid #5a2870;
+    padding: 0.55rem 0.7rem; border-radius: 2px;
+  }
+  .v-card .name { color: #f4e6f9; font-size: 0.95rem; }
+  .v-card .meta { color: #786580; font-size: 0.72rem; font-family: monospace;
+                  margin-top: 2px; }
+  .v-card .blurb { color: #9d97a8; font-size: 0.78rem;
+                   margin-top: 4px; }
+
+  .v-creatures { display: flex; flex-direction: column; gap: 4px;
+                 margin: 0.4rem 0 1rem; }
+  .v-creature-row {
+    background: #110d14; border-left: 2px solid #5a2870;
+    padding: 0.45rem 0.7rem; display: flex; gap: 0.7rem;
+    align-items: baseline; flex-wrap: wrap;
+  }
+  .v-creature-row .name { flex: 1; color: #f4e6f9; font-size: 0.9rem; }
+  .v-creature-row .alt  { color: #786580; font-size: 0.74rem;
+                          font-style: italic; }
+  .v-creature-row .tags { color: #9d97a8; font-size: 0.72rem;
+                          font-family: monospace; }
+  .v-creature-row .tags .pip { color: #d4afff; }
+
+  .v-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 0.2rem 0; }
+  .v-tag  {
+    background: #1d1322; color: #d4afff; font-size: 0.72rem;
+    padding: 1px 7px; border: 1px solid #3a2148; border-radius: 9px;
+    font-family: monospace; text-decoration: none;
+  }
+  .v-tag:hover { background: #2a1932; }
+  .v-tag.destroys { color: #ffb4a4; border-color: #5e2a22; }
+  .v-tag.kind-physical    { border-color: #324862; }
+  .v-tag.kind-behavioural { border-color: #4a3e22; }
+  .v-tag.kind-supernatural{ border-color: #3a2148; }
+  .v-tag.kind-apotropaic  { border-color: #3a4e2a; color: #c2e2a4; }
+
+  .v-block { margin: 0.4rem 0 1rem; }
+  .v-block dt { color: #9d97a8; font-size: 0.72rem;
+                text-transform: uppercase; letter-spacing: 0.06em;
+                margin-top: 0.6rem; }
+  .v-block dd { margin: 0.1rem 0 0; color: #d2cdda; }
+
+  .v-stats { color: #786580; font-size: 0.78rem; font-family: monospace;
+             margin: 0.2rem 0 0.8rem; }
+  .v-stats b { color: #d4afff; font-weight: normal; }
+
+  .v-sources { color: #786580; font-size: 0.76rem;
+               margin-top: 0.6rem; }
+  .v-sources li { margin: 2px 0; }
+</style>

@@ -88,6 +88,7 @@ urlpatterns = [
     path('doom-ca/',     include('doom_ca.urls')),
     path('retrogames/',  include('retrogames.urls')),
     path('metaevolve/',  include('metaevolve.urls')),
+    path('vampyrik/',    include('vampyrik.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

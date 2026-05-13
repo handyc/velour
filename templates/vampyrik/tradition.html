@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ tradition.name }} — Vampyrik{% endblock %}
+{% block extra_head %}{% include "vampyrik/_style.html" %}{% endblock %}
+{% block content %}
+<div class="v-wrap">
+  <p class="crumb"><a href="{% url 'vampyrik:index' %}">← Vampyrik</a></p>
+  <h1>{{ tradition.name }}</h1>
+  <div class="v-stats">
+    {% if tradition.region %}<b>{{ tradition.region }}</b>{% endif %}
+    {% if tradition.era %} · {{ tradition.era }}{% endif %}
+    · {{ creatures|length }} creature{{ creatures|length|pluralize }}
+  </div>
+  {% if tradition.summary %}<p>{{ tradition.summary|linebreaks }}</p>{% endif %}
+
+  <h2>Creatures</h2>
+  <div class="v-creatures">
+    {% for c in creatures %}
+      <div class="v-creature-row">
+        <a href="{% url 'vampyrik:creature' slug=c.slug %}"
+           class="name">{{ c.name }}</a>
+        {% if c.alt_names %}<span class="alt">{{ c.alt_names }}</span>{% endif %}
+        <span class="tags">
+          <span class="pip">⛬</span> {{ c.traits.count }} traits ·
+          <span class="pip">↩</span> {{ c.origins.count }} origins ·
+          <span class="pip">†</span> {{ c.weaknesses.count }} weaknesses
+        </span>
+      </div>
+    {% empty %}
+      <div class="v-creature-row">No creatures recorded for this tradition.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

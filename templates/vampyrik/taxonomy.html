@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Taxonomy — Vampyrik{% endblock %}
+{% block extra_head %}{% include "vampyrik/_style.html" %}{% endblock %}
+{% block content %}
+<div class="v-wrap">
+  <p class="crumb"><a href="{% url 'vampyrik:index' %}">← Vampyrik</a></p>
+  <h1>Taxonomy</h1>
+  <p class="lede">
+    The tag space that crosses traditions: traits a creature can have,
+    origins by which one is made, and weaknesses by which one is unmade.
+    Counts are creatures attesting that tag.
+  </p>
+
+  <h2>Traits</h2>
+  <div class="v-tags">
+    {% for t in traits %}
+      <a class="v-tag kind-{{ t.kind }}"
+         href="{% url 'vampyrik:trait' slug=t.slug %}"
+         title="{{ t.get_kind_display }}">{{ t.name }} <small>·{{ t.n }}</small></a>
+    {% endfor %}
+  </div>
+
+  <h2>Origins</h2>
+  <div class="v-tags">
+    {% for o in origins %}
+      <a class="v-tag"
+         href="{% url 'vampyrik:origin' slug=o.slug %}"
+      >{{ o.name }} <small>·{{ o.n }}</small></a>
+    {% endfor %}
+  </div>
+
+  <h2>Weaknesses</h2>
+  <div class="v-tags">
+    {% for w in weaknesses %}
+      <a class="v-tag {% if w.destroys %}destroys{% endif %}"
+         href="{% url 'vampyrik:weakness' slug=w.slug %}"
+         title="{% if w.destroys %}destroys{% else %}wards / repels{% endif %}"
+      >{{ w.name }}{% if w.destroys %} †{% endif %} <small>·{{ w.n }}</small></a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
