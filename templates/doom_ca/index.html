@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Doom CA{% endblock %}
+{% block content %}
+<style>
+  .dc-page  { max-width: 64em; }
+  .dc-meta  { color: #888; font-size: 0.85rem; }
+  .dc-meta a { color: #ace; }
+  .session-row { padding: 8px 0; border-bottom: 1px solid #1a1a1a;
+                 display: flex; gap: 14px; align-items: baseline; }
+  .session-row .name { color: #cfc; font-weight: 600; }
+  .session-row .pact { color: #aaa; font-family: monospace; }
+  .session-row .meta { color: #888; font-size: 0.8rem; }
+  .empty { color: #666; padding: 22px 0; font-style: italic; }
+  .new-btn { display: inline-block; background: #222; color: #cfc;
+             border: 1px solid #555; padding: 4px 14px;
+             text-decoration: none; font-family: inherit; }
+  .new-btn:hover { border-color: #8b949e; }
+</style>
+
+<div class="dc-page">
+<h1 style="margin-top: 0;">Doom CA</h1>
+<p class="dc-meta" style="max-width: 56em;">
+  A Doom-shaped game whose world is a 4-colour hex CA running under a
+  sealed <a href="{% url 'spoeqi:index' %}">spoeqi</a> pact's rule.
+  Cell states map to ground / wall by threshold; player and monsters
+  are app-tracked overlays.  The CA's class-4 dynamics make walls
+  shift slowly past as the camera follows the player.
+</p>
+<p class="dc-meta" style="max-width: 56em;">
+  Determinism is inherited: two players with the same pact + same
+  component + same keypress sequence get a byte-identical game.  In
+  fleet mode you can pick any of the 64 components — each is a
+  different rule = a different "level".
+</p>
+
+<p style="margin: 18px 0 14px;">
+  {% if pacts_exist %}
+  <a class="new-btn" href="{% url 'doom_ca:create' %}">+ new game</a>
+  {% else %}
+  <span class="empty">No spoeqi pacts to source a world from.
+    <a href="{% url 'spoeqi:create' %}">Create one first.</a></span>
+  {% endif %}
+</p>
+
+{% if sessions %}
+<div>
+  {% for s in sessions %}
+  <div class="session-row">
+    <a class="name" href="{% url 'doom_ca:play' slug=s.slug %}">{{ s.name }}</a>
+    <span class="pact">pact {{ s.pact.name }} · tile {{ s.component }}</span>
+    <span class="meta">{{ s.monster_count }} monsters · wall ≥ {{ s.wall_threshold }}</span>
+    <span class="meta">{{ s.created_at|date:"Y-m-d H:i" }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">No games yet.</p>
+{% endif %}
+</div>
+{% endblock %}

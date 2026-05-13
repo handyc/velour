@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}new Doom CA game{% endblock %}
+{% block content %}
+<style>
+  .dc-page  { max-width: 50em; }
+  .dc-meta  { color: #888; font-size: 0.85rem; }
+  .field    { margin: 10px 0; }
+  .field label { display: block; color: #aaa; margin-bottom: 3px; }
+  .field input, .field select, .field textarea {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 26em;
+  }
+  .field textarea { width: 100%; min-height: 4em; }
+  .errors { background: #2a0a0a; border: 1px solid #532;
+            padding: 6px 10px; margin: 10px 0; color: #fcc; }
+  .submit { background: #222; color: #cfc; border: 1px solid #555;
+            padding: 5px 18px; font-family: inherit; margin-top: 10px; }
+  .hint   { color: #666; font-size: 0.8rem; margin-top: 2px; }
+</style>
+
+<div class="dc-page">
+<p class="dc-meta">
+  <a href="{% url 'doom_ca:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">new Doom CA game</b>
+</p>
+
+{% if errors %}
+<div class="errors">
+  <ul style="margin: 0; padding-left: 18px;">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+
+  <div class="field">
+    <label for="name">Game name</label>
+    <input id="name" name="name" type="text" value="{{ form.name }}" required>
+  </div>
+
+  <div class="field">
+    <label for="pact_slug">Source pact (spoeqi)</label>
+    <select id="pact_slug" name="pact_slug" required>
+      <option value="">— choose a pact —</option>
+      {% for p in pacts %}
+      <option value="{{ p.slug }}"
+              {% if form.pact_slug == p.slug %}selected{% endif %}>
+        {{ p.name }} · {{ p.get_rule_diversity_display }} · {{ p.component_grid }}×{{ p.component_grid }}
+      </option>
+      {% endfor %}
+    </select>
+    <div class="hint">
+      The pact's sealed CA rule + seed drive the game world.
+      Fleet pacts give 64 different "levels" via the component picker below.
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="component">Component (0–{{ components|add:"-1" }})</label>
+    <input id="component" name="component" type="number" min="0"
+           max="{{ components|add:"-1" }}" value="{{ form.component }}"
+           style="width: 6em;">
+    <div class="hint">
+      Which of the 64 components is the playfield.  In fleet mode
+      each component runs a different rule — different game.
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="monster_count">Monsters (0–64)</label>
+    <input id="monster_count" name="monster_count" type="number" min="0"
+           max="64" value="{{ form.monster_count }}" style="width: 6em;">
+  </div>
+
+  <div class="field">
+    <label for="wall_threshold">Wall threshold (1–3)</label>
+    <select id="wall_threshold" name="wall_threshold">
+      <option value="1" {% if form.wall_threshold == "1" %}selected{% endif %}>1 — dense (~75 % walls)</option>
+      <option value="2" {% if form.wall_threshold == "2" %}selected{% endif %}>2 — medium (~50 % walls)</option>
+      <option value="3" {% if form.wall_threshold == "3" %}selected{% endif %}>3 — sparse (~25 % walls)</option>
+    </select>
+    <div class="hint">Cell states ≥ this are impassable.</div>
+  </div>
+
+  <div class="field">
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes">{{ form.notes }}</textarea>
+  </div>
+
+  <button type="submit" class="submit">Start game</button>
+</form>
+</div>
+{% endblock %}

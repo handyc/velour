@@ -153,6 +153,7 @@ INSTALLED_APPS = [
     'tableau',
     'bagicha',
     'spoeqi',
+    'doom_ca',
 ]
 
 MIDDLEWARE = [

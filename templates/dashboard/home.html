@@ -288,13 +288,14 @@
 {% endif %}
 
 {# Research & Search — collapsed by default #}
-{% if 'aggregator' in accessible_app_slugs or 'agora' in accessible_app_slugs or 'automaton' in accessible_app_slugs or 'camlfornia' in accessible_app_slugs or 'casting' in accessible_app_slugs or 'datalift' in accessible_app_slugs or 'det' in accessible_app_slugs or 'lingua' in accessible_app_slugs or 'muka' in accessible_app_slugs or 'radiant' in accessible_app_slugs or 'reckoner' in accessible_app_slugs or 'spoeqi' in accessible_app_slugs or 'studious' in accessible_app_slugs or 'tableau' in accessible_app_slugs or 'taxon' in accessible_app_slugs %}
+{% if 'aggregator' in accessible_app_slugs or 'agora' in accessible_app_slugs or 'automaton' in accessible_app_slugs or 'camlfornia' in accessible_app_slugs or 'casting' in accessible_app_slugs or 'datalift' in accessible_app_slugs or 'det' in accessible_app_slugs or 'doom_ca' in accessible_app_slugs or 'lingua' in accessible_app_slugs or 'muka' in accessible_app_slugs or 'radiant' in accessible_app_slugs or 'reckoner' in accessible_app_slugs or 'spoeqi' in accessible_app_slugs or 'studious' in accessible_app_slugs or 'tableau' in accessible_app_slugs or 'taxon' in accessible_app_slugs %}
 <details class="cat-group">
-    <summary>Research &amp; Search <span class="cat-count">· 14</span></summary>
+    <summary>Research &amp; Search <span class="cat-count">· 15</span></summary>
     <div class="tools-grid">
         {% if 'det' in accessible_app_slugs %}<a class="card" href="{% url 'det:index' %}" title="Class-4 hex CA ruleset search — Rule 110 analogs + tournaments"><h3>Det</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'automaton' in accessible_app_slugs %}<a class="card" href="{% url 'automaton:home' %}" title="Hex cellular automata — 4-color Game of Life"><h3>Automaton</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'spoeqi' in accessible_app_slugs %}<a class="card" href="{% url 'spoeqi:index' %}" title="Shared-state CA pacts — pre-shared 64-byte seed × Hexhunt class-4 rule, identical evolution on two machines without transmission. Pipeline source for Automaton + Tessera."><h3>spoeqi</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'doom_ca' in accessible_app_slugs %}<a class="card" href="{% url 'doom_ca:index' %}" title="Doom-shaped game on a 4-colour hex CA — world is a spoeqi pact's component, player + monsters overlay, camera follows player.  Two parties with same pact + same keypress sequence play byte-identical game."><h3>Doom CA</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'taxon' in accessible_app_slugs %}<a class="card" href="{% url 'taxon:index' %}" title="Canonical hex CA rule library + Wolfram-class classifier (1–4); imports from automaton/helix/stratum/strateta"><h3>Taxon</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'casting' in accessible_app_slugs %}<a class="card" href="{% url 'casting:index' %}" title="Byte-level experiments with .c download + JS port"><h3>Casting</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'reckoner' in accessible_app_slugs %}<a class="card" href="{% url 'reckoner:index' %}" title="True cost of compute — picojoules to exajoules"><h3>Reckoner</h3><span class="open-arrow">›</span></a>{% endif %}
