@@ -112,6 +112,9 @@ def create_search(request):
     horizon_mode = request.POST.get('horizon_mode', 'off')
     if horizon_mode not in {'off', 'available', 'use_only'}:
         horizon_mode = 'off'
+    deep_chaos_mode = request.POST.get('deep_chaos_mode', 'off')
+    if deep_chaos_mode not in {'off', 'available', 'use_only'}:
+        deep_chaos_mode = 'off'
 
     run = SearchRun.objects.create(
         label=label, n_colors=n_colors,
@@ -121,6 +124,7 @@ def create_search(request):
         screen_width=W, screen_height=H,
         horizon=horizon,
         horizon_mode=horizon_mode,
+        deep_chaos_mode=deep_chaos_mode,
     )
     try:
         execute(run)

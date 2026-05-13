@@ -73,7 +73,7 @@ def _rules_hash(rules):
 
 
 def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
-                      packed=None):
+                      packed=None, deep_chaos=False):
     """Run a ruleset forward up to `horizon` ticks from a seeded
     random grid. Stops early if we detect a short cycle. Returns
     (analysis_dict, final_grid, prev_grid).
@@ -81,6 +81,13 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
     When ``packed`` is a ``PackedRuleset`` instance, the per-tick
     simulator is ``step_packed`` — one memory fetch per cell per
     tick, no wildcard walk. Falls back to ``step_exact`` otherwise.
+
+    When ``deep_chaos`` is True, and no short cycle was caught in the
+    first `horizon` ticks, keep stepping up to `horizon * 10` ticks
+    with a deeper cycle-detector lookback (max_period=64).  Records
+    `aperiodic_runtime` = first tick a cycle was detected (or the
+    deep horizon if none).  Costs ~5-10x normal evaluation when the
+    candidate is genuinely aperiodic.
     """
     from automaton.detector import step_packed
     grid = engine.seeded_random_grid(W, H, n_colors, grid_seed)
@@ -89,6 +96,7 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
     activity_samples = []
     period = None
     entered_at = None
+    aperiodic_runtime = None
     for t in range(1, horizon + 1):
         if packed is not None:
             nxt = step_packed(grid, W, H, packed)
@@ -103,7 +111,32 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
             p, ea = engine.detect_cycle(history, max_period=16)
             if p is not None:
                 period, entered_at = p, ea
+                aperiodic_runtime = t
                 break
+
+    # Deep edge-of-chaos: only if the cheap detector saw no cycle.
+    if deep_chaos and period is None:
+        deep_horizon = horizon * 10
+        for t in range(horizon + 1, deep_horizon + 1):
+            if packed is not None:
+                nxt = step_packed(grid, W, H, packed)
+            else:
+                nxt = step_exact(grid, W, H, rules)
+            activity_samples.append(engine.activity_rate(grid, nxt))
+            history.append(nxt)
+            prev = grid
+            grid = nxt
+            # Check less frequently as history grows — cycle detect is
+            # O(history × max_period).  Every 8 ticks is fine since we
+            # only need to *bound* aperiodic_runtime, not pin it exactly.
+            if t % 8 == 0:
+                p, ea = engine.detect_cycle(history, max_period=64)
+                if p is not None:
+                    period, entered_at = p, ea
+                    aperiodic_runtime = t
+                    break
+        if aperiodic_runtime is None:
+            aperiodic_runtime = deep_horizon
 
     uniform = engine.is_uniform(grid)
     block_ent = engine.block_entropy_grid(grid, k=2)
@@ -115,7 +148,7 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
     tail_slice = activity_samples[-max(1, len(activity_samples) // 3):]
     activity_tail = sum(tail_slice) / len(tail_slice) if tail_slice else 0.0
 
-    return {
+    out = {
         'uniform':         uniform,
         'period':          period,
         'entered_at':      entered_at,
@@ -125,10 +158,27 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
         'density_profile': [round(d, 4) for d in dens],
         'color_diversity': color_diversity,
         'horizon_band':    round(horizon_band, 4),
-    }, grid, prev
+    }
+    if deep_chaos:
+        out['aperiodic_runtime'] = aperiodic_runtime
+    return out, grid, prev
 
 
-def _score(analysis, n_colors, horizon_mode='off'):
+def _deep_chaos_bonus(analysis, base_horizon=60):
+    """Log-scaled bonus from the aperiodic_runtime measurement.
+    Returns 0 if deep-chaos wasn't run for this candidate.  Tuned so
+    runtime = base_horizon * 1   →  0.0
+             base_horizon * 10  →  ~1.5  (matches the aperiodic flag)
+             base_horizon * 100 →  ~3.0  (capped)
+    """
+    ar = analysis.get('aperiodic_runtime')
+    if ar is None or ar <= base_horizon:
+        return 0.0
+    import math
+    return round(min(3.0, 1.5 * math.log10(ar / base_horizon)), 3)
+
+
+def _score(analysis, n_colors, horizon_mode='off', deep_chaos_mode='off'):
     """Class-4-likeness as a single float. Higher is better.
 
     The five signals and their weights are tuned so a moderate score
@@ -143,6 +193,13 @@ def _score(analysis, n_colors, horizon_mode='off'):
                     as the activity-band component)
       'use_only'  — score IS the horizon-band metric, scaled to be
                     comparable to the class-4 score range (×6.0)
+
+    `deep_chaos_mode` controls how the aperiodic_runtime measurement
+    participates (only meaningful when the worker actually ran deep):
+      'off'       — ignore (default)
+      'available' — log-scaled bonus on top of class-4 signals
+      'use_only'  — score IS the deep aperiodicity bonus, scaled ×2
+                    so a runtime of ~horizon×100 lands at 6.0
     """
     hb = analysis.get('horizon_band', 0.0)
     if horizon_mode == 'use_only':
@@ -150,6 +207,12 @@ def _score(analysis, n_colors, horizon_mode='off'):
         # banded grid scores ~6, in line with top class-4 candidates.
         s = round(6.0 * hb, 3)
         return s, {'horizon_band': s}
+    if deep_chaos_mode == 'use_only':
+        # Bypass the class-4 signals.  _deep_chaos_bonus already maxes
+        # at 3.0; scale ×2 so the top of the range matches class-4.
+        bonus = _deep_chaos_bonus(analysis)
+        s = round(2.0 * bonus, 3)
+        return s, {'deep_chaos': s}
     score = 0.0
     breakdown = {}
 
@@ -206,6 +269,15 @@ def _score(analysis, n_colors, horizon_mode='off'):
             score += contrib
             breakdown['horizon_band'] = round(contrib, 3)
 
+    # 7. Deep edge-of-chaos bonus — log-scaled aperiodic runtime.
+    # Only contributes when the worker actually measured it (i.e.
+    # deep_chaos_mode != 'off' AND the cheap detector caught no cycle).
+    if deep_chaos_mode == 'available':
+        contrib = _deep_chaos_bonus(analysis)
+        if contrib > 0:
+            score += contrib
+            breakdown['deep_chaos'] = contrib
+
     return round(score, 3), breakdown
 
 
@@ -234,7 +306,8 @@ def _classify(analysis, score, n_colors):
 def _score_one(cand_idx: int, run_seed: str, n_colors: int,
                n_rules: int, wildcard_pct: int,
                W: int, H: int, horizon: int,
-               horizon_mode: str = 'off') -> dict:
+               horizon_mode: str = 'off',
+               deep_chaos_mode: str = 'off') -> dict:
     """Pure-Python worker: deterministically generate and score the
     ruleset at index cand_idx. Picklable for ProcessPoolExecutor.
     Rules are seeded by `{run_seed}-rules-{cand_idx}` (not sequential
@@ -245,11 +318,14 @@ def _score_one(cand_idx: int, run_seed: str, n_colors: int,
     grid_seed = f'{run_seed}-cand-{cand_idx}'
     analysis, _final, _prev = _step_and_measure(
         rules, W, H, n_colors, horizon, grid_seed,
+        deep_chaos=(deep_chaos_mode != 'off'),
     )
-    score, breakdown = _score(analysis, n_colors, horizon_mode)
+    score, breakdown = _score(analysis, n_colors,
+                              horizon_mode, deep_chaos_mode)
     analysis['score_breakdown'] = breakdown
     analysis['grid_seed'] = grid_seed
     analysis['horizon_mode'] = horizon_mode
+    analysis['deep_chaos_mode'] = deep_chaos_mode
     est = _classify(analysis, score, n_colors)
     return {
         'cand_idx':   cand_idx,
@@ -347,7 +423,7 @@ def execute(run, progress_cb=None, n_workers=1, time_limit_seconds=None,
                     i, run.seed, run.n_colors,
                     run.n_rules_per_candidate, run.wildcard_pct,
                     run.screen_width, run.screen_height, run.horizon,
-                    run.horizon_mode,
+                    run.horizon_mode, run.deep_chaos_mode,
                 ))
         else:
             window = max(1, n_workers * 4)
@@ -362,7 +438,7 @@ def execute(run, progress_cb=None, n_workers=1, time_limit_seconds=None,
                         next_idx, run.seed, run.n_colors,
                         run.n_rules_per_candidate, run.wildcard_pct,
                         run.screen_width, run.screen_height, run.horizon,
-                        run.horizon_mode,
+                        run.horizon_mode, run.deep_chaos_mode,
                     )
                     futures[fut] = next_idx
                     next_idx += 1

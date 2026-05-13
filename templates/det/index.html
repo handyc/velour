@@ -205,6 +205,14 @@
           <option value="use_only">use only (replaces class-4 score)</option>
         </select>
       </label>
+      <label title="Deep edge-of-chaos: when no short cycle is caught in the first `horizon` ticks, keep running up to horizon×10 with a deeper lookback (max_period=64) and record aperiodic_runtime.  Costs ~5-10x per-candidate evaluation.">
+        deep chaos
+        <select name="deep_chaos_mode">
+          <option value="off" selected>off</option>
+          <option value="available">available (log-scaled bonus)</option>
+          <option value="use_only">use only (replaces class-4 score)</option>
+        </select>
+      </label>
       <label>label
         <input type="text" name="label" placeholder="optional"
                style="width:9rem">

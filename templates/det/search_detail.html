@@ -76,6 +76,9 @@
     {% if run.horizon_mode and run.horizon_mode != 'off' %}
       · <b style="color:#58a6ff">horizon profile: {{ run.horizon_mode }}</b>
     {% endif %}
+    {% if run.deep_chaos_mode and run.deep_chaos_mode != 'off' %}
+      · <b style="color:#a371f7">deep chaos: {{ run.deep_chaos_mode }}</b>
+    {% endif %}
     {% if run.error %}<br><span style="color:#f85149">error: {{ run.error }}</span>{% endif %}
   </div>
 

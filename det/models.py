@@ -74,6 +74,22 @@ class SearchRun(models.Model):
                   'match). Useful for hunting CAs whose attractors look '
                   'like landscape strata.')
 
+    DEEP_CHAOS_MODE_CHOICES = [
+        ('off',       'off - skip the deep-aperiodicity measurement'),
+        ('available', 'available - measure aperiodic_runtime, add it '
+                      'as a log-scaled bonus alongside class-4 signals'),
+        ('use_only',  'use only - score is the deep aperiodicity '
+                      'measurement alone, ignore class-4 signals'),
+    ]
+    deep_chaos_mode = models.CharField(
+        max_length=12, choices=DEEP_CHAOS_MODE_CHOICES, default='off',
+        help_text='Measure how many ticks each candidate stays '
+                  'aperiodic, with an extended horizon (~10x the '
+                  'normal one) and a deeper cycle-detector lookback. '
+                  'Costs ~5-10x per-candidate evaluation but actually '
+                  'discriminates between "loops at tick 80" and '
+                  '"still aperiodic at tick 600". Off by default.')
+
     seed = models.CharField(max_length=64, blank=True,
         help_text='RNG seed for reproducibility. Auto-set from '
                   'timestamp if blank.')

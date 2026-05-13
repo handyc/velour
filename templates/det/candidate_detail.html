@@ -153,6 +153,11 @@
         <dd>{{ cand.analysis.horizon_band }}
           <span style="color:#6e7681">(P[horiz-same] − P[vert-same], in [0,1])</span></dd>
         {% endif %}
+        {% if cand.analysis.aperiodic_runtime %}
+        <dt>aperiodic runtime</dt>
+        <dd>{{ cand.analysis.aperiodic_runtime }} ticks
+          <span style="color:#6e7681">(first cycle detected, or deep horizon if none)</span></dd>
+        {% endif %}
         <dt>grid seed</dt>
         <dd>{{ cand.analysis.grid_seed }}</dd>
       </dl>
