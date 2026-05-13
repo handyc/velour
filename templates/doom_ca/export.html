@@ -79,6 +79,7 @@
   <span>ammo <b class="ammo" id="dc-ammo">0</b></span>
   <span class="keyIcon dim" id="dc-key">🔑</span>
   <span class="objective" id="dc-objective">— find the exit —</span>
+  <span id="dc-music" style="color:#fb6; font-family:monospace; font-size:0.85rem;">♪ off</span>
 </div>
 
 <p class="keys">
@@ -90,6 +91,7 @@
   <kbd>Q</kbd> NW &nbsp; <kbd>E</kbd> NE &nbsp;
   <kbd>Z</kbd> SW &nbsp; <kbd>C</kbd> SE &nbsp;
   <kbd>Space</kbd> fire &nbsp; <kbd>.</kbd> wait &nbsp; <kbd>R</kbd> restart
+  &nbsp; <kbd>M</kbd> music &nbsp; <kbd>V</kbd> style
 </p>
 
 <div class="controls">
@@ -119,6 +121,7 @@
 </div>
 
 <script>{{ engine_js|safe }}</script>
+<script>{{ music_js|safe }}</script>
 <script>window.__doomPayload = {{ payload_json|safe }};</script>
 <script>{{ runtime_js|safe }}</script>
 </body>

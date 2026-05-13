@@ -86,6 +86,15 @@ class GameSession(models.Model):
         help_text='If 1, a locked door + key are placed on the spawn→exit '
                   'path (0 = open level, just find the exit).')
 
+    # Music: which of the 16 hand-crafted styles plays by default.  0 =
+    # common (4/4); see music.js MUSIC_STYLES for the full list.  Same
+    # CA rule drives both the world and the music, so picking a style
+    # changes the meter but not the timbre or harmony.
+    music_style_idx = models.PositiveSmallIntegerField(
+        default=0,
+        help_text='Default music meter (0..15). 0=common, 14=doom-march, '
+                  '15=ambient-drift; user can cycle live with V.')
+
     notes       = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
     created_by  = models.ForeignKey(

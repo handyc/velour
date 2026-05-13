@@ -896,5 +896,94 @@
   canvas.tabIndex = 0;
   canvas.focus();
 
+  // ─── Music wiring ──────────────────────────────────────────
+  // DoomMusic is optional — if music.js wasn't loaded the runtime
+  // still works.  When loaded, give it this game's component rule so
+  // the same CA that drives the world drives the soundtrack.
+  function pushMusicSignals () {
+    if (!window.DoomMusic || !window.DoomMusic.isOn ||
+        !window.DoomMusic.isOn() || !player) return;
+    // Count walls adjacent to the player (0..6).
+    var wallAdj = 0;
+    for (var d = 0; d < 6; d++) {
+      var nb = neighbourCoord(player.x, player.y, d);
+      var cell = get(nb[0], nb[1]);
+      var isWall = (MODE === 'overlay') ? (cell >= WALL_THRESH) : (cell === WALL);
+      if (isWall) wallAdj++;
+    }
+    // Nearest monster distance + monsters-in-viewport count.
+    var nearest = 1e9, inView = 0, half = 7;
+    var arr = (MODE === 'overlay')
+      ? monsters.filter(function (m) { return m.alive; })
+      : monsters;
+    for (var i = 0; i < arr.length; i++) {
+      var m = arr[i];
+      var d2 = hexDist(player.x, player.y, m.x, m.y);
+      if (d2 < nearest) nearest = d2;
+      if (d2 <= half) inView++;
+    }
+    window.DoomMusic.updateSignals({
+      hp: player.hp, ammo: player.ammo,
+      hasShotgun: player.hasShotgun,
+      wallAdj: wallAdj,
+      nearestMonsterDist: nearest,
+      monstersInView: inView,
+    });
+  }
+
+  if (window.DoomMusic && payload.rules_hex) {
+    var ruleBase = COMPONENT * RULE_SIZE;
+    var ruleSlice = rulesFlat.subarray(ruleBase, ruleBase + RULE_SIZE);
+    window.DoomMusic.setRuleTable(ruleSlice);
+    if (payload.music_style_idx != null) {
+      window.DoomMusic.setStyleIndex(payload.music_style_idx);
+    }
+  }
+  // 'm' toggles music, 'v' cycles style.  Persisted in localStorage
+  // so the listening choice carries across sessions on the same browser.
+  var MUSIC_PREF_KEY = 'doom_ca.music_on';
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'm' || ev.key === 'M') {
+      if (!window.DoomMusic) return;
+      var on = window.DoomMusic.toggle();
+      try { localStorage.setItem(MUSIC_PREF_KEY, on ? '1' : '0'); } catch (e) {}
+      var s = document.getElementById('dc-music');
+      if (s) s.textContent = on
+        ? '♪ ' + window.DoomMusic.getStyleName()
+        : '♪ off';
+      ev.preventDefault();
+    } else if (ev.key === 'v' || ev.key === 'V') {
+      if (!window.DoomMusic || !window.DoomMusic.isOn()) return;
+      window.DoomMusic.cycleStyle();
+      var s2 = document.getElementById('dc-music');
+      if (s2) s2.textContent = '♪ ' + window.DoomMusic.getStyleName();
+      ev.preventDefault();
+    }
+  });
+  // Auto-start if user previously had music on.  Browsers gate
+  // AudioContext on a user gesture, so this won't actually play
+  // until the user presses a key — which they will, to play the game.
+  try {
+    if (localStorage.getItem(MUSIC_PREF_KEY) === '1' && window.DoomMusic) {
+      // Delay actual start until first keydown; just mark intent.
+      var armed = false;
+      var armer = function () {
+        if (armed) return; armed = true;
+        window.DoomMusic.start();
+        var s3 = document.getElementById('dc-music');
+        if (s3) s3.textContent = '♪ ' + window.DoomMusic.getStyleName();
+        document.removeEventListener('keydown', armer);
+      };
+      document.addEventListener('keydown', armer);
+    }
+  } catch (e) {}
+
+  // Hook signal update into afterMove via monkey-patch (afterMove is
+  // a local, so we tap via wrapping playerMove/wait/fire).  Simplest:
+  // call pushMusicSignals at the top of the keydown handler queue.
+  document.addEventListener('keydown', function () {
+    setTimeout(pushMusicSignals, 0);
+  });
+
   init();
 })();

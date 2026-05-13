@@ -118,6 +118,7 @@ def play(request, slug):
         'health_pack_count': session.health_pack_count,
         'ammo_pack_count':   session.ammo_pack_count,
         'door_count':        session.door_count,
+        'music_style_idx':   session.music_style_idx,
         'component_grid': pact.component_grid,
         'rules_hex':      pact.rules_hex,
         'seed_hex':       pact.seed_hex,
@@ -188,6 +189,7 @@ def export(request, slug):
         'health_pack_count': session.health_pack_count,
         'ammo_pack_count':   session.ammo_pack_count,
         'door_count':        session.door_count,
+        'music_style_idx':   session.music_style_idx,
         'component_grid': pact.component_grid,
         'rules_hex':      rule_one,
         'seed_hex':       seed_one,
@@ -201,6 +203,7 @@ def export(request, slug):
 
     static_dir = Path(__file__).resolve().parent / 'static' / 'doom_ca'
     engine_js  = (static_dir / 'engine.js').read_text()
+    music_js   = (static_dir / 'music.js').read_text()
     runtime_js = (static_dir / 'play_runtime.js').read_text()
 
     html = render_to_string('doom_ca/export.html', {
@@ -208,6 +211,7 @@ def export(request, slug):
         'pact':    pact,
         'payload_json': json.dumps(payload),
         'engine_js':  engine_js,
+        'music_js':   music_js,
         'runtime_js': runtime_js,
     })
     resp = HttpResponse(html, content_type='text/html; charset=utf-8')
@@ -274,6 +278,7 @@ def materialize_agent(request):
     health_pack_count = max(0, min(12, int(gene.get('health_pack_count', 3))))
     ammo_pack_count   = max(0, min(12, int(gene.get('ammo_pack_count',   3))))
     door_count        = max(0, min(1,  int(gene.get('door_count',        1))))
+    music_style_idx   = max(0, min(15, int(gene.get('music_style_idx',   0))))
     base_name    = (gene.get('name') or 'evolved-pact').strip()[:60]
 
     # Validate the optional palette: 4 × [r, g, b], each 0..255
@@ -325,6 +330,7 @@ def materialize_agent(request):
         health_pack_count=health_pack_count,
         ammo_pack_count=ammo_pack_count,
         door_count=door_count,
+        music_style_idx=music_style_idx,
         notes=f'Evolved gene (fitness shown in evolve page).',
         created_by=request.user if request.user.is_authenticated else None,
     )
