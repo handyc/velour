@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ game.name }} — Retrogames{% endblock %}
+{% block content %}
+<style>
+  .rg-page  { max-width: 50em; }
+  .rg-meta  { color: #888; font-size: 0.85rem; }
+  .rg-meta a { color: #ace; }
+  .header   { margin: 10px 0 14px; }
+  .header .name { color: #cfc; font-weight: 600; font-size: 1.3rem; }
+  .header .meta { color: #888; font-size: 0.85rem; font-family: monospace; }
+  .field { margin: 8px 0; }
+  .field label { display: block; color: #888; font-size: 0.78rem;
+                 font-family: monospace; text-transform: uppercase; }
+  .field .v { color: #ccc; max-width: 50em; }
+  .field .mech { color: #ace; font-family: monospace; font-size: 0.82rem; }
+  .actions { margin-top: 18px; }
+  .actions a { background: #1a2a1a; color: #cfc; border: 1px solid #2a5a2a;
+               padding: 4px 12px; font-family: inherit; text-decoration: none;
+               display: inline-block; }
+</style>
+<div class="rg-page">
+<p class="rg-meta">
+  <a href="{% url 'retrogames:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Retrogames</b> ·
+  <a href="{% url 'retrogames:platform' slug=game.platform.slug %}">{{ game.platform.name }}</a>
+</p>
+
+<div class="header">
+  <span class="name">{{ game.name }}</span>
+  <span class="meta"> · {{ game.platform.name }}
+    {% if game.year %} · {{ game.year }}{% endif %}
+    · {{ game.get_genre_display }}</span>
+</div>
+
+{% if game.developer %}
+<div class="field"><label>Developer</label><div class="v">{{ game.developer }}</div></div>
+{% endif %}
+{% if game.publisher %}
+<div class="field"><label>Publisher</label><div class="v">{{ game.publisher }}</div></div>
+{% endif %}
+{% if game.description %}
+<div class="field"><label>Description</label><div class="v">{{ game.description }}</div></div>
+{% endif %}
+{% if game.mechanics %}
+<div class="field"><label>Mechanics</label><div class="v mech">{{ game.mechanics }}</div></div>
+{% endif %}
+{% if game.wikipedia_url %}
+<div class="field"><label>Reference</label><div class="v"><a href="{{ game.wikipedia_url }}" target="_blank">{{ game.wikipedia_url }}</a></div></div>
+{% endif %}
+
+<div class="actions">
+  <a href="{% url 'doom_ca:evolve' %}">→ evolve a doom_ca pact toward this</a>
+</div>
+</div>
+{% endblock %}

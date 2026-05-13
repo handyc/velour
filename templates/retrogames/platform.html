@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ platform.name }} — Retrogames{% endblock %}
+{% block content %}
+<style>
+  .rg-page  { max-width: 64em; }
+  .rg-meta  { color: #888; font-size: 0.85rem; }
+  .rg-meta a { color: #ace; }
+  .header   { margin: 10px 0 14px; }
+  .header .name { color: #cfc; font-weight: 600; font-size: 1.2rem;
+                  font-family: monospace; }
+  .header .meta { color: #888; font-size: 0.85rem; font-family: monospace; }
+  .header p { max-width: 50em; color: #aaa; font-size: 0.88rem; }
+  .game-row { padding: 7px 0; border-bottom: 1px solid #1a1a1a;
+              display: flex; gap: 12px; align-items: baseline;
+              flex-wrap: wrap; }
+  .game-row .name { color: #cfc; font-weight: 600; font-family: monospace; }
+  .game-row .year { color: #888; font-family: monospace; font-size: 0.82rem; }
+  .game-row .genre { color: #ace; font-family: monospace; font-size: 0.78rem; }
+  .game-row .dev { color: #888; font-size: 0.78rem; }
+  .game-row .mech { color: #777; font-size: 0.75rem; font-style: italic;
+                    flex-basis: 100%; padding-left: 1.5em; }
+</style>
+<div class="rg-page">
+<p class="rg-meta">
+  <a href="{% url 'retrogames:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Retrogames</b>
+</p>
+
+<div class="header">
+  <span class="name">{{ platform.name }}</span>
+  <span class="meta"> · {{ platform.manufacturer }}
+    {% if platform.year_release %}· {{ platform.year_release }}{% if platform.year_retire %}–{{ platform.year_retire }}{% endif %}{% endif %}
+    {% if platform.bit_depth %} · {{ platform.bit_depth }}-bit{% endif %}</span>
+  {% if platform.notes %}<p>{{ platform.notes }}</p>{% endif %}
+</div>
+
+<div>
+  {% for g in games %}
+  <div class="game-row">
+    <a class="name" href="{% url 'retrogames:game' pid=g.platform.id slug=g.slug %}">{{ g.name }}</a>
+    {% if g.year %}<span class="year">{{ g.year }}</span>{% endif %}
+    <span class="genre">{{ g.get_genre_display }}</span>
+    {% if g.developer %}<span class="dev">{{ g.developer }}</span>{% endif %}
+    {% if g.mechanics %}<span class="mech">{{ g.mechanics }}</span>{% endif %}
+  </div>
+  {% empty %}
+  <p class="rg-meta">No games seeded yet for this platform.</p>
+  {% endfor %}
+</div>
+</div>
+{% endblock %}

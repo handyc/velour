@@ -86,6 +86,7 @@ urlpatterns = [
     path('bagicha/',     include('bagicha.urls')),
     path('spoeqi/',      include('spoeqi.urls')),
     path('doom-ca/',     include('doom_ca.urls')),
+    path('retrogames/',  include('retrogames.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

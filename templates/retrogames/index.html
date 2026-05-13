@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Retrogames catalogue{% endblock %}
+{% block content %}
+<style>
+  .rg-page  { max-width: 64em; }
+  .rg-meta  { color: #888; font-size: 0.85rem; }
+  .rg-meta a { color: #ace; }
+  .platform-row { padding: 8px 0; border-bottom: 1px solid #1a1a1a;
+                  display: flex; gap: 14px; align-items: baseline; }
+  .platform-row .name { color: #cfc; font-weight: 600; font-family: monospace; }
+  .platform-row .meta { color: #888; font-size: 0.78rem; font-family: monospace; }
+  .platform-row .count { color: #ace; font-family: monospace; }
+</style>
+<div class="rg-page">
+<h1 style="margin-top: 0;">Retrogames catalogue</h1>
+<p class="rg-meta" style="max-width: 56em;">
+  A curated catalogue of console &amp; home-computer games — focusing
+  on the under-archived stretch between Atari and NES (Odyssey², Channel F,
+  Astrocade, Intellivision, ColecoVision, Vectrex, Atari 5200, Atari 7800)
+  alongside selected classics from each major platform.  Games carry
+  enough metadata (genre, mechanics, plain-English description) that a
+  <a href="{% url 'doom_ca:evolve' %}">doom_ca</a> evolution can later
+  target one as an archetype and a human reviewer can sanity-check
+  the resulting gene against the original.
+</p>
+<p class="rg-meta">{{ game_total }} games · {{ platforms|length }} platforms.</p>
+
+<div>
+  {% for p in platforms %}
+  <div class="platform-row">
+    <a class="name" href="{% url 'retrogames:platform' slug=p.slug %}">{{ p.name }}</a>
+    <span class="meta">{{ p.manufacturer }} ·
+      {% if p.year_release %}{{ p.year_release }}{% if p.year_retire %}–{{ p.year_retire }}{% endif %}{% endif %}
+      {% if p.bit_depth %} · {{ p.bit_depth }}-bit{% endif %}</span>
+    <span class="count">{{ p.game_count }} game{{ p.game_count|pluralize }}</span>
+  </div>
+  {% endfor %}
+</div>
+</div>
+{% endblock %}

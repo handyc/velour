@@ -95,6 +95,15 @@ class GameSession(models.Model):
         help_text='Default music meter (0..15). 0=common, 14=doom-march, '
                   '15=ambient-drift; user can cycle live with V.')
 
+    # Aspirational target — which classic game this evolution is aiming
+    # toward.  Nullable: most sessions don't target anything specific.
+    target_game = models.ForeignKey(
+        'retrogames.Game', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='target_of_sessions',
+        help_text='Optional: a catalogue entry this evolution is trying '
+                  'to approach.  Used as a hint to the user, not (yet) '
+                  'as a fitness target.')
+
     notes       = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
     created_by  = models.ForeignKey(

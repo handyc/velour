@@ -154,6 +154,7 @@ INSTALLED_APPS = [
     'bagicha',
     'spoeqi',
     'doom_ca',
+    'retrogames',
 ]
 
 MIDDLEWARE = [
