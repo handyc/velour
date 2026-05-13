@@ -207,9 +207,16 @@ def export(request, slug):
     }
 
     static_dir = Path(__file__).resolve().parent / 'static' / 'doom_ca'
-    engine_js  = (static_dir / 'engine.js').read_text()
-    music_js   = (static_dir / 'music.js').read_text()
-    runtime_js = (static_dir / 'play_runtime.js').read_text()
+    # Escape any "</" inside the inlined JS so the browser's HTML
+    # parser doesn't terminate the <script> block prematurely on a
+    # literal `</script>` that lives inside a JS comment or string.
+    # music.js contains exactly this in its top-of-file usage block,
+    # which silently killed the music when the export was opened.
+    def _inline_js(path):
+        return path.read_text().replace('</', r'<\/')
+    engine_js  = _inline_js(static_dir / 'engine.js')
+    music_js   = _inline_js(static_dir / 'music.js')
+    runtime_js = _inline_js(static_dir / 'play_runtime.js')
 
     html = render_to_string('doom_ca/export.html', {
         'session': session,
