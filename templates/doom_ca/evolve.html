@@ -209,6 +209,26 @@
     Playability acts as a soft veto — sub-3-turn deaths cap that
     component at low values, so genes that never survive get pruned.
   </p>
+
+  <div class="adv-section-header">Hard constraints (rules that violate get fitness 0)</div>
+  <div class="config-row" style="gap: 4px 18px;">
+    <label title="Reject any gene whose rule turns PLAYER into WALL (means a wall can grow under you and crush you in pure-CA modes).">
+      <input id="c-no-wall-under-player" type="checkbox" checked>
+      no wall may grow under player
+    </label>
+    <label title="Reject any gene whose rule turns PLAYER into MONSTER (means a monster can spawn in your cell).">
+      <input id="c-no-monster-under-player" type="checkbox">
+      no monster may grow under player
+    </label>
+    <label title="Reject any gene whose rule outputs anything other than PLAYER when self=PLAYER (strict: player cell never changes under the rule).">
+      <input id="c-player-must-persist" type="checkbox">
+      player cell must persist (strict)
+    </label>
+    <label title="Reject any gene whose rule creates walls ex nihilo — i.e., outputs WALL when neither self nor any neighbour is already WALL.">
+      <input id="c-no-spontaneous-walls" type="checkbox">
+      no walls from void
+    </label>
+  </div>
 </details>
 </div>
 
@@ -525,10 +545,84 @@
     };
   }
 
+  // ─── Hard constraints on rule structure ─────────────────────
+  // Each constraint scans the gene's 16,384-entry rule and returns
+  // a string explaining the violation, or null if the rule passes.
+  // Encoded keys: key = (self<<12) | (n0<<10) | ... | n5, where
+  // states are 0=ground, 1=wall, 2=player, 3=monster.
+  var GROUND_S = 0, WALL_S = 1, PLAYER_S = 2, MONSTER_S = 3;
+
+  var CONSTRAINTS = {
+    'no-wall-under-player': function (rule) {
+      // Scan all keys where self=PLAYER (0x2000..0x2FFF).
+      for (var k = 0x2000; k < 0x3000; k++) {
+        if (rule[k] === WALL_S) return 'rule turns PLAYER → WALL at key 0x'
+            + k.toString(16);
+      }
+      return null;
+    },
+    'no-monster-under-player': function (rule) {
+      for (var k = 0x2000; k < 0x3000; k++) {
+        if (rule[k] === MONSTER_S) return 'rule turns PLAYER → MONSTER at key 0x'
+            + k.toString(16);
+      }
+      return null;
+    },
+    'player-must-persist': function (rule) {
+      for (var k = 0x2000; k < 0x3000; k++) {
+        if (rule[k] !== PLAYER_S) return 'PLAYER cell mutates at key 0x'
+            + k.toString(16) + ' → ' + rule[k];
+      }
+      return null;
+    },
+    'no-spontaneous-walls': function (rule) {
+      // Forbid WALL output when self and all 6 neighbours are non-wall.
+      for (var k = 0; k < 16384; k++) {
+        var self_ = (k >> 12) & 3;
+        if (self_ === WALL_S) continue;
+        var anyWall = false;
+        for (var i = 0; i < 6; i++) {
+          var n = (k >> (2 * (5 - i))) & 3;
+          if (n === WALL_S) { anyWall = true; break; }
+        }
+        if (!anyWall && rule[k] === WALL_S) {
+          return 'wall appears from no-wall context at key 0x'
+            + k.toString(16);
+        }
+      }
+      return null;
+    },
+  };
+
+  function checkConstraints (gene, activeConstraints) {
+    // Returns array of violation strings.  Empty = passes all.
+    var violations = [];
+    for (var key in activeConstraints) {
+      if (!activeConstraints[key]) continue;
+      var fn = CONSTRAINTS[key];
+      if (!fn) continue;
+      var msg = fn(gene.rule);
+      if (msg) violations.push(key + ': ' + msg);
+    }
+    return violations;
+  }
+
   // ─── Fitness ──────────────────────────────────────────────────
   function evaluate (gene, opts) {
     var n = opts.sims;
     var max = opts.maxTurns;
+    // Hard-constraint check first.  If any active constraint is
+    // violated, fitness = 0 with a special marker — no need to even
+    // run the simulator.
+    var violations = opts.constraints
+      ? checkConstraints(gene, opts.constraints) : [];
+    if (violations.length > 0) {
+      return {
+        fitness: 0,
+        constraintViolations: violations,
+        components: {}, stats: {},
+      };
+    }
     var results = [];
     for (var i = 0; i < n; i++) {
       results.push(E.simulateGame(gene, {maxTurns: max, aiSeed: i + 1}));
@@ -671,6 +765,12 @@
         hpend:       parseFloat(document.getElementById('w-hpend').value),
         openness:    parseFloat(document.getElementById('w-openness').value),
         corridor:    parseFloat(document.getElementById('w-corridor').value),
+      },
+      constraints: {
+        'no-wall-under-player':    document.getElementById('c-no-wall-under-player').checked,
+        'no-monster-under-player': document.getElementById('c-no-monster-under-player').checked,
+        'player-must-persist':     document.getElementById('c-player-must-persist').checked,
+        'no-spontaneous-walls':    document.getElementById('c-no-spontaneous-walls').checked,
       },
     };
   }
@@ -859,7 +959,8 @@
       for (var i = 0; i < population.length; i++) {
         var indiv = population[i];
         indiv.evaln = evaluate(indiv.gene, {
-          sims: cfg.sims, maxTurns: cfg.maxTurns, weights: cfg.weights});
+          sims: cfg.sims, maxTurns: cfg.maxTurns, weights: cfg.weights,
+          constraints: cfg.constraints});
         indiv.fitness = indiv.evaln.fitness;
         evalCount++;
         if ((evalCount & 7) === 0) {
