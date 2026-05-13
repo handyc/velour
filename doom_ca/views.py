@@ -136,6 +136,86 @@ def play(request, slug):
     })
 
 
+def export(request, slug):
+    """Render the game as a single-file standalone HTML page.
+
+    All assets (engine.js, play_runtime.js, CSS) are inlined, and the
+    deterministic keystream bytes used for monster placement are
+    pre-baked into the payload so the page runs from a file:// URL
+    with no network access.  Use case: drop into h4ks.com / any host.
+    """
+    from django.http import HttpResponse
+    from django.template.loader import render_to_string
+    from pathlib import Path
+    import json
+
+    from spoeqi import keystream
+
+    session = get_object_or_404(
+        GameSession.objects.select_related('pact'), slug=slug)
+    pact = session.pact
+
+    # Pre-fetch the monster-placement bytes the same way the live
+    # page asks for them (generation 0, n = MONSTER_COUNT*4 + 32).
+    n_bytes = session.monster_count * 4 + 32
+    tap_bytes = keystream.tap(pact, session.component, 0, n_bytes)
+
+    # Trim the 64-component rule pack down to just this game's
+    # component (32 KB instead of 2 MB) and remap component → 0.
+    rule_size_chars = 16384 * 2
+    rule_start = session.component * rule_size_chars
+    rule_one = pact.rules_hex[rule_start : rule_start + rule_size_chars]
+    seed_one = pact.seed_hex[session.component * 2 :
+                              (session.component + 1) * 2]
+    palette = pact.palette
+    if isinstance(palette[0][0], list):
+        palette_one = palette[session.component]
+    else:
+        palette_one = palette
+
+    payload = {
+        'session_slug':   session.slug,
+        'session_name':   session.name,
+        'pact_slug':      pact.slug,
+        'pact_name':      pact.name,
+        # Standalone payload uses component=0 and a one-component
+        # rule pack + 1-byte seed, so the runtime indexes are simple.
+        'component':      0,
+        'world_mode':     session.world_mode,
+        'pure_mode':      session.pure_mode,
+        'monster_count':  session.monster_count,
+        'wall_threshold': session.wall_threshold,
+        'health_pack_count': session.health_pack_count,
+        'ammo_pack_count':   session.ammo_pack_count,
+        'door_count':        session.door_count,
+        'component_grid': pact.component_grid,
+        'rules_hex':      rule_one,
+        'seed_hex':       seed_one,
+        'palette':        palette_one,
+        'components':     1,
+        # Standalone: no server, so no tap URL — the bytes are in the
+        # payload instead.  runtime.js detects tap_prefetched_hex and
+        # returns those bytes synchronously.
+        'tap_prefetched_hex': tap_bytes.hex(),
+    }
+
+    static_dir = Path(__file__).resolve().parent / 'static' / 'doom_ca'
+    engine_js  = (static_dir / 'engine.js').read_text()
+    runtime_js = (static_dir / 'play_runtime.js').read_text()
+
+    html = render_to_string('doom_ca/export.html', {
+        'session': session,
+        'pact':    pact,
+        'payload_json': json.dumps(payload),
+        'engine_js':  engine_js,
+        'runtime_js': runtime_js,
+    })
+    resp = HttpResponse(html, content_type='text/html; charset=utf-8')
+    fname = f'{session.slug}.html'
+    resp['Content-Disposition'] = f'attachment; filename="{fname}"'
+    return resp
+
+
 @require_POST
 def delete(request, slug):
     session = get_object_or_404(GameSession, slug=slug)

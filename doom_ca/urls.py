@@ -12,4 +12,5 @@ urlpatterns = [
     path('evolve/materialize/', views.materialize_agent, name='materialize'),
     path('<slug:slug>/',       views.play,   name='play'),
     path('<slug:slug>/delete/', views.delete, name='delete'),
+    path('<slug:slug>/export/', views.export, name='export'),
 ]
