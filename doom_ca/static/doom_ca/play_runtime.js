@@ -61,6 +61,7 @@
   // Show the right controls hint for the active mode.
   var keysHex = document.getElementById('dc-keys-hex');
   var keysPlat = document.getElementById('dc-keys-platform');
+  var keysInkExtra = document.getElementById('dc-keys-ink-extra');
   if (MODE === 'platform') {
     if (keysHex)  keysHex.style.display  = 'none';
     if (keysPlat) keysPlat.style.display = '';
@@ -68,6 +69,7 @@
     if (keysHex)  keysHex.style.display  = '';
     if (keysPlat) keysPlat.style.display = 'none';
   }
+  if (keysInkExtra) keysInkExtra.style.display = (MODE === 'ink') ? '' : 'none';
 
   function hex2bytes (h) {
     var out = new Uint8Array(h.length / 2);
@@ -1121,7 +1123,7 @@
       for (var i = 0; i < brushBots.length; i++) {
         if (brushBots[i].alive) revealed++;
       }
-      monsterDisplay = revealed + ' revealed';
+      monsterDisplay = revealed + ' revealed · drip r=' + inkRadius;
     } else if (MODE === 'overlay') {
       monsterDisplay = monsters.filter(function (m) { return m.alive; }).length;
     } else {
@@ -1204,6 +1206,14 @@
     if (ev.key === '.') {
       playerWait(); ev.preventDefault(); return;
     }
+    if (MODE === 'ink' && (ev.key === '+' || ev.key === '=' || ev.key === ']')) {
+      inkRadius = Math.min(4, inkRadius + 1);
+      updateReadouts(); ev.preventDefault(); return;
+    }
+    if (MODE === 'ink' && (ev.key === '-' || ev.key === '_' || ev.key === '[')) {
+      inkRadius = Math.max(0, inkRadius - 1);
+      updateReadouts(); ev.preventDefault(); return;
+    }
     var k = ev.key.length === 1 ? ev.key.toUpperCase() : ev.key;
     var dir = cardinalToHex(k);
     if (dir >= 0) { playerMove(dir); ev.preventDefault(); }
@@ -1224,7 +1234,51 @@
   // the engine which collide with state-2/3 in this mode.
   var INK_GROUND = 0, INK_WALL = 1, INK_PLAYER = 2, INK_MONSTER = 3;
   var brushBots = [];   // revealed bots: {x, y, lastDir, alive}
+  var inkRadius = 1;    // hex-disk radius of the player's drip splash;
+                        // grow with =/+, shrink with -/_; range [0, 4].
   function inkIsWall (s) { return s === INK_WALL; }
+
+  function splashInk (cx, cy, radius, value) {
+    // Hex-disk splash of `value` at (cx, cy) out to `radius` rings.
+    // Walls (state-1) and brush-bot heads are preserved; everything
+    // else gets overwritten.  Unrevealed state-3 cells get painted —
+    // that's deliberate: a wide splash can erase hidden monsters
+    // without revealing them, trading information for cells.
+    if (radius <= 0) {
+      var s = get(cx, cy);
+      if (s !== INK_WALL) set(cx, cy, value);
+      return;
+    }
+    var seen = new Set();
+    var frontier = [[cx, cy]];
+    seen.add(cy * GRID + cx);
+    for (var r = 0; r < radius; r++) {
+      var next = [];
+      for (var i = 0; i < frontier.length; i++) {
+        var fx = frontier[i][0], fy = frontier[i][1];
+        for (var d = 0; d < 6; d++) {
+          var nb = neighbourCoord(fx, fy, d);
+          var key = nb[1] * GRID + nb[0];
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.push(nb);
+        }
+      }
+      frontier = next;
+    }
+    seen.forEach(function (key) {
+      var x = key % GRID, y = (key / GRID) | 0;
+      var s = get(x, y);
+      if (s === INK_WALL) return;
+      // Preserve revealed bot heads so a wide player splash doesn't
+      // wipe them mid-chase.
+      for (var i = 0; i < brushBots.length; i++) {
+        var b = brushBots[i];
+        if (b.alive && b.x === x && b.y === y) return;
+      }
+      set(x, y, value);
+    });
+  }
   function initInkMode () {
     var raw = seedGrid(seed[COMPONENT]);
     world = new Uint8Array(GRID * GRID);
@@ -1351,14 +1405,13 @@
       afterMoveInk();
       return;
     }
-    // Drip-move: target ← state-2; source stays state-2.
+    // Drip-move: target ← state-2; source stays state-2.  Splash
+    // ink in a hex-disk of the current radius around the new
+    // position.  Source cell also gets re-stamped so the trail is
+    // continuous even at radius 0.
+    set(player.x, player.y, INK_PLAYER);
+    splashInk(nx, ny, inkRadius, INK_PLAYER);
     set(nx, ny, INK_PLAYER);
-    if (get(player.x, player.y) !== INK_PLAYER) {
-      // First step: we may have stepped off our spawn before its
-      // cell was set to state-2.  Stamp it now so the trail is
-      // continuous.
-      set(player.x, player.y, INK_PLAYER);
-    }
     player.x = nx; player.y = ny;
     if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
     pickupAt(targetIdx);
