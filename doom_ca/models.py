@@ -24,6 +24,18 @@ class GameSession(models.Model):
     monsters, what counts as a wall.  The actual playthrough state
     lives in the browser — this row only records the *setup*."""
 
+    WORLD_MODE_CHOICES = [
+        ('overlay',  'overlay — pact rule + JS-tracked player/monsters '
+                     '(camera follows player)'),
+        ('shift',    'shift — pure-CA: 6 directional shift rules anchor '
+                     'the player at centre, world scrolls past'),
+        ('scent',    'scent — pure-CA: single rule, monsters spread '
+                     'fluid-like toward the player; walls block'),
+        ('evolved',  'evolved — pact rule with per-key patches for '
+                     'player-preserve, wall-cluster-stability, monster-'
+                     'attack-adjacent (illustrative GA target)'),
+    ]
+
     name        = models.CharField(max_length=80, unique=True)
     slug        = models.SlugField(max_length=80, unique=True)
 
@@ -36,6 +48,10 @@ class GameSession(models.Model):
                   'playfield.  Different components = different rules '
                   '(in fleet mode) = different worlds.')
 
+    world_mode  = models.CharField(
+        max_length=10, choices=WORLD_MODE_CHOICES, default='overlay',
+        help_text='How the CA drives the game world.  See class doc.')
+
     monster_count = models.PositiveSmallIntegerField(
         default=8,
         help_text='Number of monsters spawned at game start.')
@@ -44,7 +60,10 @@ class GameSession(models.Model):
     # 1 → 75 % walls (very dense), 2 → 50 %, 3 → 25 % (sparse).
     wall_threshold = models.PositiveSmallIntegerField(
         default=2,
-        help_text='Cell states ≥ this are walls.  1 dense, 3 sparse.')
+        help_text='Cell states ≥ this are walls.  1 dense, 3 sparse. '
+                  'In overlay mode this is the cell-state cutoff; in '
+                  'shift/scent/evolved modes it is only used at init '
+                  'to derive ground vs wall from the pact seed.')
 
     notes       = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)

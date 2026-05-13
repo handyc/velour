@@ -24,8 +24,10 @@ def index(request):
 def create(request):
     pacts = Pact.objects.all().order_by('-created_at')[:200]
     errors = []
+    valid_modes = {k for k, _ in GameSession.WORLD_MODE_CHOICES}
     form = {
         'name': '', 'pact_slug': '', 'component': '0',
+        'world_mode': 'overlay',
         'monster_count': '8', 'wall_threshold': '2',
         'notes': '',
     }
@@ -48,6 +50,7 @@ def create(request):
             wall_threshold = max(1, min(3, int(form['wall_threshold'])))
         except ValueError:
             wall_threshold = 2
+        world_mode = form['world_mode'] if form['world_mode'] in valid_modes else 'overlay'
         pact = Pact.objects.filter(slug=form['pact_slug']).first()
         if pact is None:
             errors.append('Pick an existing spoeqi pact.')
@@ -57,6 +60,7 @@ def create(request):
                 name=form['name'].strip(),
                 pact=pact,
                 component=component,
+                world_mode=world_mode,
                 monster_count=monster_count,
                 wall_threshold=wall_threshold,
                 notes=form['notes'].strip(),
@@ -71,6 +75,7 @@ def create(request):
         'form':       form,
         'errors':     errors,
         'components': COMPONENTS,
+        'world_mode_choices': GameSession.WORLD_MODE_CHOICES,
     })
 
 
@@ -84,6 +89,7 @@ def play(request, slug):
         'pact_slug':      pact.slug,
         'pact_name':      pact.name,
         'component':      session.component,
+        'world_mode':     session.world_mode,
         'monster_count':  session.monster_count,
         'wall_threshold': session.wall_threshold,
         'component_grid': pact.component_grid,

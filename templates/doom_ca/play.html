@@ -6,11 +6,12 @@
   .dc-meta  { color: #888; font-size: 0.85rem; }
   .dc-meta a { color: #ace; }
   .header-row { display: flex; gap: 16px; align-items: baseline;
-                margin-bottom: 8px; }
+                margin-bottom: 8px; flex-wrap: wrap; }
   .header-row .name { color: #cfc; font-weight: 600; font-size: 1.1rem; }
   .badge { background: #1a1a1a; color: #ace; border: 1px solid #333;
            padding: 1px 8px; border-radius: 8px; font-size: 0.78rem;
            font-family: monospace; }
+  .badge.mode { background: #1a2a1a; color: #cfc; border-color: #2a4a2a; }
   #dc-canvas { background: #050505; border: 1px solid #222;
                image-rendering: pixelated; display: block;
                margin: 12px 0; }
@@ -34,6 +35,9 @@
   .danger-row { margin-top: 24px; font-size: 0.78rem; color: #888; }
   .danger-row button { background: #1a0a0a; color: #fcc; border: 1px solid #532;
                        padding: 2px 10px; font-family: inherit; cursor: pointer; }
+  .mode-note { color: #aaa; font-size: 0.82rem; max-width: 60em;
+               border-left: 2px solid #2a4a2a; padding: 4px 10px;
+               margin: 6px 0; background: #0a120a; }
 </style>
 
 <div class="dc-page">
@@ -44,30 +48,33 @@
 
 <div class="header-row">
   <span class="name">{{ session.name }}</span>
+  <span class="badge mode">mode: {{ session.world_mode }}</span>
   <span class="badge">pact
     <a href="{% url 'spoeqi:detail' slug=pact.slug %}" style="color:#ace; text-decoration:none;"
     >{{ pact.name }}</a></span>
   <span class="badge">tile {{ session.component }}</span>
   <span class="badge">{{ session.monster_count }} monsters</span>
   <span class="badge">wall ≥ {{ session.wall_threshold }}</span>
-  <span class="badge">{{ pact.component_grid }}×{{ pact.component_grid }} world (toroidal)</span>
+  <span class="badge">{{ pact.component_grid }}×{{ pact.component_grid }} toroidal</span>
 </div>
+
+<div class="mode-note" id="dc-mode-note"></div>
 
 <p class="keys">
   Move:
-  <kbd>W</kbd>/<kbd>↑</kbd> north &nbsp;
-  <kbd>S</kbd>/<kbd>↓</kbd> south &nbsp;
-  <kbd>A</kbd>/<kbd>←</kbd> west &nbsp;
-  <kbd>D</kbd>/<kbd>→</kbd> east &nbsp;
+  <kbd>W</kbd>/<kbd>↑</kbd> N &nbsp;
+  <kbd>S</kbd>/<kbd>↓</kbd> S &nbsp;
+  <kbd>A</kbd>/<kbd>←</kbd> W &nbsp;
+  <kbd>D</kbd>/<kbd>→</kbd> E &nbsp;
   <kbd>Q</kbd> NW &nbsp; <kbd>E</kbd> NE &nbsp;
   <kbd>Z</kbd> SW &nbsp; <kbd>C</kbd> SE &nbsp;
-  <kbd>Space</kbd> wait
+  <kbd>Space</kbd> wait &nbsp; <kbd>R</kbd> restart
 </p>
 
 <div class="controls">
   <button id="dc-reset">↻ restart</button>
   <button id="dc-pause">pause world tick</button>
-  <span>world tick (CA generations between player moves)
+  <span>world tick (CA gens / player move)
     <input id="dc-world-rate" type="number" min="0" max="10" step="1" value="1"
            style="background:#111;color:#ccc;border:1px solid #333;padding:1px 4px;width:4em;">
   </span>
@@ -78,8 +85,8 @@
 <div class="readouts">
   <span>turn <b id="dc-turn">0</b></span>
   <span>player <b id="dc-pos">—</b></span>
-  <span>monsters left <b id="dc-mleft">—</b></span>
-  <span>CA generation <b id="dc-gen">0</b></span>
+  <span>monsters <b id="dc-mleft">—</b></span>
+  <span>CA gen <b id="dc-gen">0</b></span>
   <span id="dc-status"></span>
 </div>
 
@@ -98,12 +105,33 @@
 <script>
 (function () {
   var payload = {{ payload|safe }};
-  var GRID = payload.component_grid;            // toroidal world side
+  var GRID = payload.component_grid;
   var COMPONENT = payload.component;
   var WALL_THRESH = payload.wall_threshold;
   var MONSTER_COUNT = payload.monster_count;
+  var MODE = payload.world_mode;
+  var RULE_SIZE = 16384;
+  var COMPONENTS = payload.components;
 
-  // ─── lift spoeqi's seed + rule into this page ─────────────────
+  var MODE_NOTES = {
+    overlay: 'overlay mode — the pact rule runs the CA freely; player + ' +
+             'monsters are tracked as JS state on top.  Camera follows ' +
+             'the player; walls (cells ≥ wall threshold) scroll past.',
+    shift:   'shift mode — pure-CA.  Player is encoded as cell-state 2 and ' +
+             'anchored at the centre by 6 hand-built directional rules.  ' +
+             'Pressing a direction shifts the entire world the opposite ' +
+             'way; the world stays still on Space (wait runs the pact rule).',
+    scent:   'scent mode — pure-CA.  A single hand-built rule grows ' +
+             'monsters fluid-like toward the player.  Player is anchored; ' +
+             'walls block.  No JS pursuit logic — the rule is the AI.',
+    evolved: 'evolved mode — the pact rule with per-key patches: player ' +
+             'preserved, walls cluster, monsters attack on adjacency.  An ' +
+             'illustration of what a GA-evolved Doom-signature rule would look like.',
+  };
+  document.getElementById('dc-mode-note').textContent =
+      MODE_NOTES[MODE] || '';
+
+  // ─── lift hex2bytes + seed expansion ──────────────────────────
   function hex2bytes (h) {
     var out = new Uint8Array(h.length / 2);
     for (var i = 0; i < out.length; i++) {
@@ -114,7 +142,6 @@
   var rulesFlat = hex2bytes(payload.rules_hex);
   var seed      = hex2bytes(payload.seed_hex);
 
-  // Mirror of spoeqi's splitmix64 + xoshiro128** seed expansion.
   var SPLITMIX_INC  = 0x9E3779B97F4A7C15n;
   var SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9n;
   var SPLITMIX_MUL2 = 0x94D049BB133111EBn;
@@ -170,23 +197,179 @@
     return g;
   }
 
-  // ─── world state ───────────────────────────────────────────────
-  var world;     // Uint8Array length GRID×GRID, cell values 0..3
-  var swap;
-  var generation;
-  var turn;
-  var player;    // {x, y}
-  var monsters;  // [{x, y, alive}, …]
-  var gameOver;  // false | 'lost' | 'won'
+  // ─── rule construction helpers ────────────────────────────────
+  // Cell encoding for shift/scent/evolved:
+  //   0 = ground, 1 = wall, 2 = player, 3 = monster
+  var GROUND = 0, WALL = 1, PLAYER = 2, MONSTER = 3;
 
-  function isWall (state) { return state >= WALL_THRESH; }
+  // 6 hex-neighbour indices in the spoeqi key encoding (TR, R, BR, BL, L, TL).
+  // key = (self << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6) | (n3 << 4)
+  //     | (n4 << 2) | n5
+  function unpackKey (k) {
+    return {
+      self_: (k >> 12) & 3,
+      n: [(k>>10)&3, (k>>8)&3, (k>>6)&3, (k>>4)&3, (k>>2)&3, k&3]
+    };
+  }
+
+  // Build the 6 shift rules.  Direction d picks neighbour index d as
+  // the "source" — i.e. this cell takes its d-direction neighbour's
+  // colour.  Player cells (state PLAYER) stay; walls adjacent to the
+  // player halt.  Other monsters/walls/ground flow.
+  function buildShiftRule (d) {
+    var tbl = new Uint8Array(RULE_SIZE);
+    for (var k = 0; k < RULE_SIZE; k++) {
+      var u = unpackKey(k);
+      if (u.self_ === PLAYER) {
+        tbl[k] = PLAYER;
+        continue;
+      }
+      // Wall halts when adjacent to player → looks like walls bunch
+      // up against the player rather than passing through.
+      if (u.self_ === WALL) {
+        var blocked = false;
+        for (var i = 0; i < 6; i++) if (u.n[i] === PLAYER) { blocked = true; break; }
+        if (blocked) { tbl[k] = WALL; continue; }
+      }
+      // CRITICAL: if the source-direction neighbour is the anchored
+      // player, don't take its value (would smear PLAYER colour).
+      // Instead, output GROUND — the player carves a single-cell-
+      // wide trail through whatever was behind them.  "Keep self"
+      // (a previous attempt) caused a propagating-lock pathology
+      // where rows of cells froze to a single value.
+      if (u.n[d] === PLAYER) {
+        tbl[k] = GROUND;
+        continue;
+      }
+      tbl[k] = u.n[d];
+    }
+    return tbl;
+  }
+
+  // Single "scent" rule.  Walls + player are static.  Monsters
+  // dissolve when none of their 6 neighbours are player and at least
+  // one is ground; otherwise stay (so monsters cells flow into ground
+  // adjacent to other monsters / players).  Ground turns into monster
+  // when it has a monster neighbour AND another neighbour is either
+  // player or ground (so the "front" extends).  This is a fluid-
+  // pursuit caricature — visually convincing, not a true gradient.
+  function buildScentRule () {
+    var tbl = new Uint8Array(RULE_SIZE);
+    for (var k = 0; k < RULE_SIZE; k++) {
+      var u = unpackKey(k);
+      if (u.self_ === PLAYER) { tbl[k] = PLAYER; continue; }
+      if (u.self_ === WALL)   { tbl[k] = WALL;   continue; }
+      var hasMonster = 0, hasPlayer = 0, hasGround = 0, hasWall = 0;
+      for (var i = 0; i < 6; i++) {
+        if (u.n[i] === MONSTER) hasMonster++;
+        else if (u.n[i] === PLAYER) hasPlayer++;
+        else if (u.n[i] === GROUND) hasGround++;
+        else if (u.n[i] === WALL)   hasWall++;
+      }
+      if (u.self_ === MONSTER) {
+        // Adjacent to player → stay (attack imminent)
+        if (hasPlayer) { tbl[k] = MONSTER; continue; }
+        // Surrounded by walls + others → trapped
+        if (hasGround === 0 && hasMonster <= 1) { tbl[k] = MONSTER; continue; }
+        // Else vacate (let the spread continue)
+        tbl[k] = GROUND;
+        continue;
+      }
+      // self_ === GROUND
+      // Extend monster front: become monster if a monster neighbour
+      // exists and another neighbour is player/ground (the front
+      // advances; isolated monster cells without a path stagnate).
+      if (hasMonster >= 1 && (hasPlayer || hasGround >= 2)) {
+        tbl[k] = MONSTER;
+        continue;
+      }
+      tbl[k] = GROUND;
+    }
+    return tbl;
+  }
+
+  // "Evolved" rule: start from the pact's component rule, then patch
+  // specific keys to enforce Doom-signature constraints.
+  function buildEvolvedRule () {
+    var base = rulesFlat.slice(COMPONENT * RULE_SIZE,
+                                (COMPONENT + 1) * RULE_SIZE);
+    var tbl = new Uint8Array(base);
+    for (var k = 0; k < RULE_SIZE; k++) {
+      var u = unpackKey(k);
+      if (u.self_ === PLAYER) { tbl[k] = PLAYER; continue; }
+      // Monster adjacent to player → attack on next tick (stays monster).
+      if (u.self_ === MONSTER) {
+        var nbPlayer = false;
+        for (var i = 0; i < 6; i++) if (u.n[i] === PLAYER) nbPlayer = true;
+        if (nbPlayer) { tbl[k] = MONSTER; continue; }
+      }
+      // Walls in clusters survive; isolated walls erode to ground.
+      if (u.self_ === WALL) {
+        var nbWalls = 0;
+        for (var j = 0; j < 6; j++) if (u.n[j] === WALL) nbWalls++;
+        if (nbWalls >= 2) tbl[k] = WALL;
+        else if (nbWalls === 0) tbl[k] = GROUND;
+        // (single neighbour wall: let pact rule decide — already set)
+      }
+      // Ground adjacent to player becomes wall — leaves trail of safety
+      // hooks the player can't walk back through (anti-camp).
+      if (u.self_ === GROUND) {
+        var nbPlayer2 = false;
+        for (var i = 0; i < 6; i++) if (u.n[i] === PLAYER) nbPlayer2 = true;
+        if (nbPlayer2) tbl[k] = WALL;
+      }
+    }
+    return tbl;
+  }
+
+  // Hex-neighbour offsets for offset-r layout: 6 directions (TR, R,
+  // BR, BL, L, TL).  Used both as game logic (player move) and to
+  // sample neighbours in the renderer / tap.
+  function neighbourCoord (x, y, d) {
+    var shift = y & 1;
+    var dx = [shift, 1, shift, -1 + shift, -1, -1 + shift][d];
+    var dy = [-1, 0, 1, 1, 0, -1][d];
+    return [(x + dx + GRID) % GRID, (y + dy + GRID) % GRID];
+  }
+  function hexDist (ax, ay, bx, by) {
+    var dx = bx - ax;
+    if (dx >  GRID / 2) dx -= GRID;
+    if (dx < -GRID / 2) dx += GRID;
+    var dy = by - ay;
+    if (dy >  GRID / 2) dy -= GRID;
+    if (dy < -GRID / 2) dy += GRID;
+    return Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dx + dy));
+  }
+
+  // ─── shared world buffers ─────────────────────────────────────
+  var world, swap, generation, turn, player, monsters, gameOver;
+  var canvas = document.getElementById('dc-canvas');
+  var ctx = canvas.getContext('2d');
+  var VIEW = 21;
+  var CELL_PX = Math.floor(canvas.width / VIEW);
+  var H_STEP = CELL_PX;
+  var V_STEP = CELL_PX * 0.85;
+
+  var palette = payload.palette;
+  function isPerComponent (p) { return Array.isArray(p[0][0]); }
+  var componentPalette = isPerComponent(palette) ? palette[COMPONENT] : palette;
+  var COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
+  var COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
+  var COL_GROUND  = '#1a1a1a';
+  var COL_PLAYER  = '#58a6ff';
+  var COL_MONSTER = '#f85149';
+  var COL_PLAYER_HALO = 'rgba(88,166,255,0.18)';
+
   function get (x, y) {
     return world[((y + GRID) % GRID) * GRID + ((x + GRID) % GRID)];
   }
+  function set (x, y, v) {
+    world[((y + GRID) % GRID) * GRID + ((x + GRID) % GRID)] = v;
+  }
 
-  function tickCA () {
+  // Tick a rule table (16384 bytes) once over `world`.
+  function tickRule (ruleTable) {
     var W = GRID, H = GRID;
-    var ruleBase = COMPONENT * 16384;
     for (var y = 0; y < H; y++) {
       var shift = y & 1;
       var tlx_off = -1 + shift;
@@ -208,256 +391,274 @@
         var n5 = world[yU * W + xTL];
         var key = (self_ << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6)
                 | (n3 << 4) | (n4 << 2) | n5;
-        swap[idx] = rulesFlat[ruleBase + key];
+        swap[idx] = ruleTable[key];
       }
     }
     var tmp = world; world = swap; swap = tmp;
     generation++;
   }
+  // Wrapper for the pact's stock rule (overlay mode).
+  function tickPactRule () {
+    var base = COMPONENT * RULE_SIZE;
+    var subRule = rulesFlat.subarray(base, base + RULE_SIZE);
+    tickRule(subRule);
+  }
 
-  // Find a non-wall cell starting from (cx, cy) by spiral scan.
-  function findGroundNear (cx, cy) {
+  // ─── mode-specific data ───────────────────────────────────────
+  var shiftRules = null;     // array[6] of Uint8Array
+  var scentRule = null;
+  var evolvedRule = null;
+
+  function isWallForOverlay (state) { return state >= WALL_THRESH; }
+
+  function findGroundNear (cx, cy, walls) {
     for (var r = 0; r < GRID; r++) {
       for (var dy = -r; dy <= r; dy++) {
         for (var dx = -r; dx <= r; dx++) {
           if (Math.abs(dy) !== r && Math.abs(dx) !== r) continue;
           var x = (cx + dx + GRID) % GRID;
           var y = (cy + dy + GRID) % GRID;
-          if (!isWall(get(x, y))) return {x: x, y: y};
+          if (!walls(get(x, y))) return {x: x, y: y};
         }
       }
     }
-    return {x: cx, y: cy};   // give up, all walls
+    return {x: cx, y: cy};
   }
 
-  // ─── tap helper (server-side keystream) ───────────────────────
-  // We use the tap for monster initial placement + tie-breaking.
-  // Async fetch; we cache per (component, gen) and use it
-  // synchronously where possible.
-  var tapCache = {};
-  function tapKey (c, g, n) { return c + ':' + g + ':' + n; }
+  // ─── tap helper ───────────────────────────────────────────────
+  var tieBreakBytes = null;
   function tapAsync (component, gen, nBytes) {
-    var k = tapKey(component, gen, nBytes);
-    if (tapCache[k]) return Promise.resolve(tapCache[k]);
     var url = payload.tap_url_template
       .replace('{component}', component)
       .replace('{gen}', gen)
       .replace('{n}', nBytes);
     return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.ok) throw new Error(d.error || 'tap failed');
-      tapCache[k] = hex2bytes(d.bytes_hex);
-      return tapCache[k];
+      return hex2bytes(d.bytes_hex);
     });
   }
 
   // ─── initial setup ────────────────────────────────────────────
-  function reset () {
-    world = seedGrid(seed[COMPONENT]).slice();
+  function init () {
     swap  = new Uint8Array(GRID * GRID);
     generation = 0;
     turn = 0;
     gameOver = false;
-    // Player starts at world centre on the nearest ground cell.
-    var c = Math.floor(GRID / 2);
-    player = findGroundNear(c, c);
-    // Spawn monsters at random ground cells far from the player.
-    monsters = [];
-    var attempts = 0;
-    // Use the keystream (component, gen=0, MONSTER_COUNT*4 bytes) to
-    // pick monster x,y pairs.
-    tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 4).then(function (bytes) {
-      var bi = 0;
-      while (monsters.length < MONSTER_COUNT && attempts < MONSTER_COUNT * 20) {
-        attempts++;
-        var mx = bytes[bi % bytes.length] % GRID; bi++;
-        var my = bytes[bi % bytes.length] % GRID; bi++;
-        if (isWall(get(mx, my))) continue;
-        var dx = (mx - player.x + GRID + GRID/2) % GRID - GRID/2;
-        var dy = (my - player.y + GRID + GRID/2) % GRID - GRID/2;
-        if (Math.abs(dx) + Math.abs(dy) < 3) continue;
-        // Avoid duplicate monster positions
-        var dup = false;
-        for (var i = 0; i < monsters.length; i++) {
-          if (monsters[i].x === mx && monsters[i].y === my) { dup = true; break; }
+
+    if (MODE === 'overlay') {
+      world = seedGrid(seed[COMPONENT]).slice();
+      var c = Math.floor(GRID / 2);
+      player = findGroundNear(c, c, isWallForOverlay);
+      monsters = [];
+      tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 32).then(function (bytes) {
+        var bi = 0, attempts = 0;
+        while (monsters.length < MONSTER_COUNT && attempts < MONSTER_COUNT * 20) {
+          attempts++;
+          var mx = bytes[bi % bytes.length] % GRID; bi++;
+          var my = bytes[bi % bytes.length] % GRID; bi++;
+          if (isWallForOverlay(get(mx, my))) continue;
+          var dx2 = (mx - player.x + GRID + GRID/2) % GRID - GRID/2;
+          var dy2 = (my - player.y + GRID + GRID/2) % GRID - GRID/2;
+          if (Math.abs(dx2) + Math.abs(dy2) < 3) continue;
+          var dup = false;
+          for (var i = 0; i < monsters.length; i++) {
+            if (monsters[i].x === mx && monsters[i].y === my) { dup = true; break; }
+          }
+          if (dup) continue;
+          monsters.push({x: mx, y: my, alive: true});
         }
-        if (dup) continue;
-        monsters.push({x: mx, y: my, alive: true});
+        tieBreakBytes = bytes;
+        draw(); updateReadouts();
+      });
+    } else {
+      // shift / scent / evolved — encode player + monsters into the grid.
+      var raw = seedGrid(seed[COMPONENT]);
+      // Translate the pact's 0..3 colours into ground/wall by threshold.
+      var grid = new Uint8Array(GRID * GRID);
+      for (var i = 0; i < raw.length; i++) {
+        grid[i] = (raw[i] >= WALL_THRESH) ? WALL : GROUND;
       }
-      draw();
-      updateReadouts();
-    });
-    draw();
-    updateReadouts();
-  }
-
-  // ─── movement helpers ────────────────────────────────────────
-  // Hex offset-r: even rows ((y&1)===0) have NW=(x-1,y-1), NE=(x,y-1).
-  // Odd  rows ((y&1)===1) have NW=(x,y-1), NE=(x+1,y-1).
-  function hexNeighbours (x, y) {
-    var shift = y & 1;
-    return [
-      {x: (x + shift     + GRID) % GRID, y: (y - 1 + GRID) % GRID, dir: 'NE'},
-      {x: (x + 1         + GRID) % GRID, y: y,                     dir: 'E'},
-      {x: (x + shift     + GRID) % GRID, y: (y + 1) % GRID,         dir: 'SE'},
-      {x: (x - 1 + shift + GRID) % GRID, y: (y + 1) % GRID,         dir: 'SW'},
-      {x: (x - 1         + GRID) % GRID, y: y,                     dir: 'W'},
-      {x: (x - 1 + shift + GRID) % GRID, y: (y - 1 + GRID) % GRID, dir: 'NW'},
-    ];
-  }
-
-  // Resolve a "cardinal" key to a hex-direction index 0..5 (TR,R,BR,BL,L,TL).
-  function cardinalToHex (key) {
-    // 0:NE, 1:E, 2:SE, 3:SW, 4:W, 5:NW
-    switch (key) {
-      case 'W':  case 'ArrowUp':   return 0;   // bias N → NE
-      case 'D':  case 'ArrowRight':return 1;   // E
-      case 'X':  case 'ArrowDown': return 2;   // bias S → SE
-      case 'A':  case 'ArrowLeft': return 4;   // W
-      case 'Q':                    return 5;   // NW
-      case 'E':                    return 0;   // NE
-      case 'Z':                    return 3;   // SW
-      case 'C':                    return 2;   // SE
-      case 'S':                    return 2;   // S → SE
+      world = grid;
+      var c = Math.floor(GRID / 2);
+      // Stomp the centre cell as ground first, then mark as player.
+      world[c * GRID + c] = PLAYER;
+      player = {x: c, y: c};
+      monsters = [];
+      tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 32).then(function (bytes) {
+        var bi = 0, placed = 0, attempts = 0;
+        while (placed < MONSTER_COUNT && attempts < MONSTER_COUNT * 30) {
+          attempts++;
+          var mx = bytes[bi % bytes.length] % GRID; bi++;
+          var my = bytes[bi % bytes.length] % GRID; bi++;
+          if (get(mx, my) !== GROUND) continue;
+          if (hexDist(mx, my, player.x, player.y) < 3) continue;
+          set(mx, my, MONSTER);
+          placed++;
+        }
+        monsters = countMonsterCells();
+        tieBreakBytes = bytes;
+        // Mode-specific rule build (cached for the rest of the session)
+        if (MODE === 'shift') {
+          shiftRules = [];
+          for (var d = 0; d < 6; d++) shiftRules.push(buildShiftRule(d));
+        }
+        if (MODE === 'scent')   scentRule   = buildScentRule();
+        if (MODE === 'evolved') evolvedRule = buildEvolvedRule();
+        draw(); updateReadouts();
+      });
     }
-    return -1;
   }
 
-  // Wrap-aware delta for finding nearest direction toward player.
-  function wrappedDelta (a, b) {
-    var d = b - a;
-    if (d >  GRID / 2) d -= GRID;
-    if (d < -GRID / 2) d += GRID;
-    return d;
+  function countMonsterCells () {
+    var out = [];
+    for (var y = 0; y < GRID; y++) {
+      for (var x = 0; x < GRID; x++) {
+        if (world[y * GRID + x] === MONSTER) out.push({x: x, y: y});
+      }
+    }
+    return out;
   }
 
-  // Manhattan-ish hex distance (good enough for monster steering).
-  function hexDist (ax, ay, bx, by) {
-    var dx = wrappedDelta(ax, bx);
-    var dy = wrappedDelta(ay, by);
-    return Math.abs(dx) + Math.abs(dy);
-  }
-
-  // ─── turn-step ───────────────────────────────────────────────
+  // ─── input → game step ────────────────────────────────────────
   function playerMove (dirIdx) {
     if (gameOver) return;
-    var nb = hexNeighbours(player.x, player.y);
-    var target = nb[dirIdx];
-    if (isWall(get(target.x, target.y))) return;   // bonk
-    // Stepping onto a monster = death
-    var monsterHere = monsters.find(function (m) {
-      return m.alive && m.x === target.x && m.y === target.y;
-    });
-    if (monsterHere) {
-      gameOver = 'lost';
+    if (MODE === 'overlay') {
+      // Existing logic: move player position, walk-into-monster = death.
+      var nb = neighbourCoord(player.x, player.y, dirIdx);
+      var nx = nb[0], ny = nb[1];
+      if (isWallForOverlay(get(nx, ny))) return;
+      var hit = monsters.find(function (m) {
+        return m.alive && m.x === nx && m.y === ny; });
+      if (hit) gameOver = 'lost';
+      player.x = nx; player.y = ny;
+      afterMove();
+      return;
     }
-    player = {x: target.x, y: target.y};
-    afterMove();
+    // shift/scent/evolved: the player cell is anchored at centre.
+    // "Moving" = applying the shift rule in the direction the player
+    // intends, so the world scrolls under the anchored player.
+    // shiftRules[d] makes every cell take its d-direction neighbour
+    // (so the world shifts AWAY from d, and the player feels they
+    // moved IN direction d).  Use dirIdx directly.
+    var target = neighbourCoord(player.x, player.y, dirIdx);
+    var occupant = get(target[0], target[1]);
+    if (MODE === 'shift') {
+      // Wall in the intended direction → can't shift; just wait.
+      if (occupant === WALL) { afterMove(); return; }
+      if (occupant === MONSTER) { gameOver = 'lost'; }
+      tickRule(shiftRules[dirIdx]);
+      // The rule already pins the centre cell; re-mark defensively.
+      set(player.x, player.y, PLAYER);
+      monsters = countMonsterCells();
+      afterMove(/*skipPactTick=*/true);
+      return;
+    }
+    if (MODE === 'scent' || MODE === 'evolved') {
+      // In single-rule modes, the player "presses" a direction by
+      // swapping the centre cell with its neighbour — i.e. the
+      // CA-rule's update will naturally do the right thing on the
+      // next tick because the player is now adjacent to whatever
+      // was there.  Movement happens visually as a swap then tick.
+      if (occupant === WALL) { afterMove(); return; }
+      if (occupant === MONSTER) { gameOver = 'lost'; }
+      // Swap: place player at target, ground at old player.
+      set(player.x, player.y, GROUND);
+      set(target[0], target[1], PLAYER);
+      player.x = target[0]; player.y = target[1];
+      afterMove();
+      return;
+    }
   }
 
-  function playerWait () {
-    if (gameOver) return;
-    afterMove();
-  }
+  function playerWait () { if (!gameOver) afterMove(); }
 
-  function afterMove () {
+  function afterMove (skipPactTick) {
     turn++;
-    // Tick the world `worldRate` generations between player moves —
-    // lower = static walls, higher = chaotic.
-    for (var t = 0; t < worldRate; t++) tickCA();
-    // Walls may have crushed the player.
-    if (isWall(get(player.x, player.y))) {
-      gameOver = 'lost';
+    var rate = paused ? 0 : worldRate;
+    if (MODE === 'overlay') {
+      for (var t = 0; t < rate; t++) tickPactRule();
+      if (isWallForOverlay(get(player.x, player.y))) gameOver = 'lost';
+      moveOverlayMonsters();
+    } else if (MODE === 'shift') {
+      // The shift was already applied as the "move".  Optionally run
+      // the pact rule on wait ticks for ambient drift; but keep the
+      // player cell pinned.
+      if (!skipPactTick) {
+        for (var t = 0; t < rate; t++) {
+          tickPactRule();
+          // Protect the player + recreate it
+          // (the pact rule has no notion of "PLAYER colour preservation")
+          set(player.x, player.y, PLAYER);
+        }
+        monsters = countMonsterCells();
+      }
+      checkGameOver_singleRule();
+    } else if (MODE === 'scent') {
+      for (var t = 0; t < rate; t++) tickRule(scentRule);
+      monsters = countMonsterCells();
+      checkGameOver_singleRule();
+    } else if (MODE === 'evolved') {
+      for (var t = 0; t < rate; t++) tickRule(evolvedRule);
+      monsters = countMonsterCells();
+      checkGameOver_singleRule();
     }
-    // Monster turns
-    moveMonsters();
-    draw();
-    updateReadouts();
+    if (monsters.length === 0 && !gameOver) gameOver = 'won';
+    draw(); updateReadouts();
   }
 
-  function moveMonsters () {
+  function checkGameOver_singleRule () {
+    // In pure-CA modes, "monster reaches player" = monster adjacent
+    // and rule has produced contact.  Player cell may have been
+    // overwritten by a monster-eats-player rule step.
+    if (get(player.x, player.y) !== PLAYER) {
+      gameOver = 'lost';
+    } else {
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(player.x, player.y, d);
+        if (get(nb[0], nb[1]) === MONSTER) {
+          // Already adjacent — close enough to count as game over
+          // on next tick.  Players see "I lost on the next move".
+        }
+      }
+    }
+  }
+
+  function moveOverlayMonsters () {
     for (var i = 0; i < monsters.length; i++) {
       var m = monsters[i];
       if (!m.alive || gameOver === 'lost') continue;
-      var here = hexDist(m.x, m.y, player.x, player.y);
-      if (here === 0) continue;   // already on player (shouldn't happen)
-      // Score each adjacent cell by distance to player; pick the
-      // smallest.  Tie-break by tap byte indexed by turn + monster.
-      var nb = hexNeighbours(m.x, m.y);
-      var best = -1;
-      var bestDist = 1e9;
-      var ties = [];
-      for (var k = 0; k < 6; k++) {
-        var cell = nb[k];
-        if (isWall(get(cell.x, cell.y))) continue;
-        // Don't crowd into another monster's cell.
+      var best = -1, bestDist = 1e9, ties = [];
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(m.x, m.y, d);
+        var nx = nb[0], ny = nb[1];
+        if (isWallForOverlay(get(nx, ny))) continue;
         var crowded = false;
         for (var j = 0; j < monsters.length; j++) {
           if (j === i) continue;
-          if (monsters[j].alive
-              && monsters[j].x === cell.x && monsters[j].y === cell.y) {
+          if (monsters[j].alive && monsters[j].x === nx && monsters[j].y === ny) {
             crowded = true; break;
           }
         }
         if (crowded) continue;
-        var d = hexDist(cell.x, cell.y, player.x, player.y);
-        if (d < bestDist) {
-          bestDist = d; best = k; ties = [k];
-        } else if (d === bestDist) {
-          ties.push(k);
-        }
+        var dist = hexDist(nx, ny, player.x, player.y);
+        if (dist < bestDist) { bestDist = dist; best = d; ties = [d]; }
+        else if (dist === bestDist) ties.push(d);
       }
       if (best >= 0) {
         var pick = ties[0];
         if (ties.length > 1) {
-          var tieByte = (tieBreakBytes && tieBreakBytes.length)
+          var b = (tieBreakBytes && tieBreakBytes.length)
             ? tieBreakBytes[(i + turn) % tieBreakBytes.length] : 0;
-          pick = ties[tieByte % ties.length];
+          pick = ties[b % ties.length];
         }
-        var dest = nb[pick];
-        m.x = dest.x; m.y = dest.y;
-        if (m.x === player.x && m.y === player.y) {
-          gameOver = 'lost';
-        }
+        var dest = neighbourCoord(m.x, m.y, pick);
+        m.x = dest[0]; m.y = dest[1];
+        if (m.x === player.x && m.y === player.y) gameOver = 'lost';
       }
     }
-    // Win condition: no monsters left (we don't currently kill them
-    // — but if the user sets monster_count=0 this fires immediately).
-    var aliveCount = monsters.reduce(function (a, m) {
-      return a + (m.alive ? 1 : 0); }, 0);
-    if (aliveCount === 0) gameOver = 'won';
   }
 
-  // Preload some tie-break bytes (independent of generation so the
-  // sequence is stable across world ticks).
-  var tieBreakBytes = null;
-  tapAsync(COMPONENT, 0, 256).then(function (b) { tieBreakBytes = b; });
-
-  // ─── render ──────────────────────────────────────────────────
-  var canvas = document.getElementById('dc-canvas');
-  var ctx = canvas.getContext('2d');
-  // Viewport is VIEW × VIEW cells; cell pixel size derived to fit.
-  var VIEW = 21;   // odd so the player is exactly centred
-  var CELL_PX, S, H_STEP, V_STEP;
-  function recomputeRender () {
-    CELL_PX = Math.floor(canvas.width / VIEW);
-    S = CELL_PX * 0.5 * Math.sqrt(3) / 2 * 2;   // distance flat→flat
-    H_STEP = CELL_PX;                           // approximate hex pitch
-    V_STEP = CELL_PX * 0.85;                    // shorter vertical step
-  }
-  recomputeRender();
-
-  // Wall and ground colours; player + monster colours come from the
-  // palette so a per-component palette pact gets matching theming.
-  var palette = payload.palette;
-  function isPerComponent (p) { return Array.isArray(p[0][0]); }
-  var componentPalette = isPerComponent(palette) ? palette[COMPONENT] : palette;
-  var COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
-  var COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
-  var COL_GROUND  = '#1a1a1a';
-  var COL_PLAYER  = '#58a6ff';
-  var COL_MONSTER = '#f85149';
-  var COL_PLAYER_HALO = 'rgba(88,166,255,0.18)';
-
+  // ─── render ───────────────────────────────────────────────────
   function draw () {
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -467,36 +668,48 @@
         var wx = (player.x + dx + GRID) % GRID;
         var wy = (player.y + dy + GRID) % GRID;
         var cell = get(wx, wy);
-        // Hex offset render: odd rows shift right by half a cell.
         var rowShift = (wy & 1) ? CELL_PX * 0.5 : 0;
         var screenX = (dx + half) * H_STEP + rowShift;
         var screenY = (dy + half) * V_STEP;
-        if (isWall(cell)) {
-          ctx.fillStyle = (cell === 3) ? COL_WALL : COL_WALL_DK;
+        var fill;
+        if (MODE === 'overlay') {
+          fill = (cell >= WALL_THRESH)
+            ? (cell === 3 ? COL_WALL : COL_WALL_DK)
+            : COL_GROUND;
         } else {
-          ctx.fillStyle = COL_GROUND;
+          fill = (cell === WALL) ? COL_WALL
+               : (cell === GROUND) ? COL_GROUND
+               : (cell === PLAYER) ? '#050505'
+               : '#050505';   // monster, drawn separately
         }
+        ctx.fillStyle = fill;
         ctx.fillRect(screenX, screenY, CELL_PX, CELL_PX);
       }
     }
-    // Monsters
-    for (var i = 0; i < monsters.length; i++) {
-      var m = monsters[i];
-      if (!m.alive) continue;
-      var dx2 = wrappedDelta(player.x, m.x);
-      var dy2 = wrappedDelta(player.y, m.y);
-      if (Math.abs(dx2) > half || Math.abs(dy2) > half) continue;
-      var rowShift = (m.y & 1) ? CELL_PX * 0.5 : 0;
-      var sx = (dx2 + half) * H_STEP + rowShift + CELL_PX / 2;
-      var sy = (dy2 + half) * V_STEP + CELL_PX / 2;
+    // Monsters as red circles.
+    var mDrawList = (MODE === 'overlay')
+      ? monsters.filter(function (m) { return m.alive; })
+      : monsters;
+    for (var i = 0; i < mDrawList.length; i++) {
+      var m = mDrawList[i];
+      var ddx = m.x - player.x;
+      if (ddx >  GRID / 2) ddx -= GRID;
+      if (ddx < -GRID / 2) ddx += GRID;
+      var ddy = m.y - player.y;
+      if (ddy >  GRID / 2) ddy -= GRID;
+      if (ddy < -GRID / 2) ddy += GRID;
+      if (Math.abs(ddx) > half || Math.abs(ddy) > half) continue;
+      var rs = (m.y & 1) ? CELL_PX * 0.5 : 0;
+      var sx = (ddx + half) * H_STEP + rs + CELL_PX / 2;
+      var sy = (ddy + half) * V_STEP + CELL_PX / 2;
       ctx.fillStyle = COL_MONSTER;
       ctx.beginPath();
       ctx.arc(sx, sy, CELL_PX * 0.35, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Player (centre)
-    var pRowShift = (player.y & 1) ? CELL_PX * 0.5 : 0;
-    var px = half * H_STEP + pRowShift + CELL_PX / 2;
+    // Player.
+    var prs = (player.y & 1) ? CELL_PX * 0.5 : 0;
+    var px = half * H_STEP + prs + CELL_PX / 2;
     var py = half * V_STEP + CELL_PX / 2;
     ctx.fillStyle = COL_PLAYER_HALO;
     ctx.beginPath();
@@ -506,7 +719,6 @@
     ctx.beginPath();
     ctx.arc(px, py, CELL_PX * 0.4, 0, Math.PI * 2);
     ctx.fill();
-    // Cross-hair tick
     ctx.strokeStyle = 'rgba(88,166,255,0.7)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -531,55 +743,47 @@
     }
   }
 
-  // ─── input ────────────────────────────────────────────────────
-  var worldRate = 1;
+  // ─── input handling ───────────────────────────────────────────
+  function cardinalToHex (k) {
+    switch (k) {
+      case 'W':  case 'ArrowUp':   return 0;
+      case 'D':  case 'ArrowRight':return 1;
+      case 'X':  case 'ArrowDown': return 2;
+      case 'A':  case 'ArrowLeft': return 4;
+      case 'Q':                    return 5;
+      case 'E':                    return 0;
+      case 'Z':                    return 3;
+      case 'C':                    return 2;
+      case 'S':                    return 2;
+    }
+    return -1;
+  }
+  var worldRate = 1, paused = false;
   document.getElementById('dc-world-rate').addEventListener('change', function () {
     worldRate = Math.max(0, Math.min(10, parseInt(this.value, 10) || 1));
   });
-  var paused = false;
   document.getElementById('dc-pause').addEventListener('click', function () {
     paused = !paused;
     this.textContent = paused ? 'unpause world tick' : 'pause world tick';
   });
-  document.getElementById('dc-reset').addEventListener('click', function () {
-    reset();
-  });
+  document.getElementById('dc-reset').addEventListener('click', init);
 
-  // Keep arrow-key + WASD focus even when the canvas isn't focused.
   document.addEventListener('keydown', function (ev) {
     if (gameOver) {
-      if (ev.key === 'r' || ev.key === 'R') {
-        reset(); ev.preventDefault();
-      }
+      if (ev.key === 'r' || ev.key === 'R') { init(); ev.preventDefault(); }
       return;
     }
     if (ev.key === ' ' || ev.key === 'Space') {
-      playerWait();
-      ev.preventDefault();
-      return;
+      playerWait(); ev.preventDefault(); return;
     }
-    // Normalise to upper for letter keys.
     var k = ev.key.length === 1 ? ev.key.toUpperCase() : ev.key;
     var dir = cardinalToHex(k);
-    if (dir >= 0) {
-      playerMove(dir);
-      ev.preventDefault();
-    }
+    if (dir >= 0) { playerMove(dir); ev.preventDefault(); }
   });
   canvas.tabIndex = 0;
   canvas.focus();
 
-  // Override worldRate to 0 when paused (and skip the world tick).
-  // (We just patch afterMove via a wrapper.)
-  var origAfterMove = afterMove;
-  afterMove = function () {
-    var saveRate = worldRate;
-    if (paused) worldRate = 0;
-    origAfterMove();
-    worldRate = saveRate;
-  };
-
-  reset();
+  init();
 })();
 </script>
 {% endblock %}
