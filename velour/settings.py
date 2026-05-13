@@ -152,6 +152,7 @@ INSTALLED_APPS = [
     'umbra',
     'tableau',
     'bagicha',
+    'spoeqi',
 ]
 
 MIDDLEWARE = [

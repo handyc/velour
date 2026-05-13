@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block title %}new Pact — spoeqi{% endblock %}
+{% block content %}
+<style>
+  .spoeqi-page  { max-width: 56em; }
+  .spoeqi-meta  { color: #888; font-size: 0.85rem; }
+  .field        { margin: 10px 0; }
+  .field label  { display: block; color: #aaa; margin-bottom: 3px; }
+  .field input[type="text"], .field input[type="number"],
+  .field textarea, .field select {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 30em;
+  }
+  .field textarea { width: 100%; min-height: 4em;
+                    font-family: monospace; font-size: 0.85rem; }
+  .field .hint  { color: #666; font-size: 0.8rem; margin-top: 2px; }
+  .field-row    { display: flex; gap: 14px; align-items: baseline; }
+  .field-row input { width: 14em; }
+  .errors       { background: #2a0a0a; border: 1px solid #532;
+                  padding: 6px 10px; margin: 10px 0; color: #fcc; }
+  .submit       { background: #222; color: #cfc; border: 1px solid #555;
+                  padding: 5px 18px; font-family: inherit; margin-top: 10px; }
+  .group        { border: 1px dashed #2a2a2a; padding: 8px 12px;
+                  margin: 14px 0; }
+  .group > h3   { margin: 0 0 6px; font-size: 0.95rem; color: #ace;
+                  font-weight: normal; }
+  .radio        { margin-right: 10px; color: #aaa; font-size: 0.85rem; }
+</style>
+
+<div class="spoeqi-page">
+<p class="spoeqi-meta"><a href="{% url 'spoeqi:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">new Pact</b></p>
+
+<p class="spoeqi-meta" style="max-width: 50em;">
+  Seal a Pact and you've fixed: the {{ components }}-byte seed
+  matrix, the {{ rule_table_size }}-entry CA rule, the palette, and
+  the launch time.  After save these are immutable — that's what
+  "sealed" means.  The render side is deterministic; identical
+  pacts produce identical canvases.
+</p>
+
+{% if errors %}
+<div class="errors">
+  <ul style="margin: 0; padding-left: 18px;">
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+
+  <div class="field">
+    <label for="name">Pact name</label>
+    <input id="name" name="name" type="text" value="{{ form.name }}" required
+           placeholder="e.g. alice-bob-launch-1">
+  </div>
+
+  <div class="field-row">
+    <div class="field">
+      <label for="party_a">Party A</label>
+      <input id="party_a" name="party_a" type="text" value="{{ form.party_a }}">
+    </div>
+    <div class="field">
+      <label for="party_b">Party B</label>
+      <input id="party_b" name="party_b" type="text" value="{{ form.party_b }}">
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Clock model</label>
+    <label class="radio">
+      <input type="radio" name="clock_model" value="synced"
+             {% if form.clock_model == "synced" %}checked{% endif %}>
+      synced (both viewers see identical state at the same wall-clock)
+    </label>
+    <br>
+    <label class="radio">
+      <input type="radio" name="clock_model" value="local"
+             {% if form.clock_model == "local" %}checked{% endif %}>
+      local (each viewer's CA ticks from its own page-load — divergence is the point)
+    </label>
+  </div>
+
+  <div class="field">
+    <label for="tick_ms">Tick (ms)</label>
+    <input id="tick_ms" name="tick_ms" type="number" min="20" max="5000" step="10"
+           value="{{ form.tick_ms }}" style="width: 8em;">
+    <div class="hint">Milliseconds per CA generation.  Lower = faster evolution.</div>
+  </div>
+
+  <div class="field">
+    <label for="component_grid">Component grid (cells per side, hex)</label>
+    <select id="component_grid" name="component_grid"
+            style="background:#111; color:#ccc; border:1px solid #333;
+                   padding:3px 6px; font-family:monospace;">
+      {% for n, label in component_grid_choices %}
+      <option value="{{ n }}"
+              {% if form.component_grid|stringformat:"s" == n|stringformat:"s" %}selected{% endif %}>
+        {{ label }}
+      </option>
+      {% endfor %}
+    </select>
+    <div class="hint">
+      Each of the 64 component CAs runs on a side×side hex grid.
+      Cells auto-scale: 16×16 renders as hex polygons; 64×64 renders
+      as filled pixels so 262,144 cells stay fluid in the browser.
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Seed matrix (64 bytes)</h3>
+    <label class="radio">
+      <input type="radio" name="seed_mode" value="random"
+             {% if form.seed_mode == "random" %}checked{% endif %}>
+      generate cryptographic random (recommended)
+    </label>
+    <label class="radio">
+      <input type="radio" name="seed_mode" value="paste"
+             {% if form.seed_mode == "paste" %}checked{% endif %}>
+      paste below
+    </label>
+    <div class="field">
+      <textarea name="seed_text" placeholder="128 hex chars OR 64 comma/whitespace-separated integers (0–255)">{{ form.seed_text }}</textarea>
+      <div class="hint">
+        Both formats accepted.  If two parties pre-share the same
+        seed, both should paste it here when sealing their pact.
+      </div>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Rule diversity across the 64 components</h3>
+    <label class="radio">
+      <input type="radio" name="rule_diversity" value="shared"
+             {% if form.rule_diversity == "shared" %}checked{% endif %}>
+      shared — 1 rule × 64 seeds (cheapest; ~16 KB rule data)
+    </label>
+    <label class="radio">
+      <input type="radio" name="rule_diversity" value="mutated"
+             {% if form.rule_diversity == "mutated" %}checked{% endif %}>
+      mutated — 1 base + 64 perturbations (~1 MiB)
+    </label>
+    <label class="radio">
+      <input type="radio" name="rule_diversity" value="fleet"
+             {% if form.rule_diversity == "fleet" %}checked{% endif %}
+             {% if not fleet_pool %}disabled{% endif %}>
+      fleet — 64 independent Hexhunt class-4 rules (~1 MiB,
+      pool: {{ fleet_pool }} available)
+    </label>
+    <div class="field" style="margin-left: 22px; margin-top: 6px;">
+      <label for="mutation_density">Mutation density (entries flipped per component, mutated only)</label>
+      <input id="mutation_density" name="mutation_density" type="number"
+             min="0" max="8192" step="64" value="{{ form.mutation_density }}"
+             style="width: 8em;">
+      <div class="hint">
+        Sample size, not change count — ~25 % of samples land on the
+        current value and are no-ops.  1024 ≈ 6 % of the table; try
+        256 for subtle drift, 4096 for strong divergence.
+      </div>
+    </div>
+    <div class="hint">
+      <b>Security note:</b> shared-rule pacts leak 1/64 of the state
+      to anyone who recovers the rule + one seed byte.  Fleet pacts
+      require an attacker to recover 64 separate rules — the keystream
+      surface grows linearly with diversity.
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Base CA rule (16,384 entries × {0,1,2,3})</h3>
+    {% if det_candidates %}
+    <label class="radio">
+      <input type="radio" name="rule_mode" value="det"
+             {% if form.rule_mode == "det" %}checked{% endif %}>
+      <b style="color:#cfc;">Hexhunt class-4</b>
+      <span class="hint" style="display:inline; margin-left:6px;">
+        (recommended — bred by Det for sustained dynamics)
+      </span>
+    </label>
+    <div class="field" style="margin-left: 22px; margin-top: 4px;">
+      <select name="det_candidate_id"
+              style="background:#111; color:#ccc; border:1px solid #333;
+                     padding:3px 6px; font-family:monospace; min-width: 36em;">
+        {% for c in det_candidates %}
+        <option value="{{ c.id }}"
+                {% if form.det_candidate_id|stringformat:"s" == c.id|stringformat:"s" %}selected{% endif %}>
+          {{ c.label }}
+        </option>
+        {% endfor %}
+      </select>
+      <div class="hint">
+        Class-4 (edge-of-chaos) rules from the Hexhunt search at
+        <a href="{% url 'det:index' %}" style="color:#ace;">/det/</a>.
+        Higher score → more sustained dynamics.  Top candidates
+        score ~6.5–6.8 of a possible ~7.
+      </div>
+    </div>
+    {% endif %}
+    <label class="radio">
+      <input type="radio" name="rule_mode" value="random"
+             {% if form.rule_mode == "random" %}checked{% endif %}>
+      random (uniform; usually class-3 chaos — visually noisy)
+    </label>
+    <label class="radio">
+      <input type="radio" name="rule_mode" value="paste"
+             {% if form.rule_mode == "paste" %}checked{% endif %}>
+      paste below
+    </label>
+    <label class="radio">
+      <input type="radio" name="rule_mode" value="identity"
+             {% if form.rule_mode == "identity" %}checked{% endif %}>
+      identity (debug; cells freeze immediately)
+    </label>
+    <div class="field">
+      <textarea name="rule_text" placeholder="32768 hex chars OR JSON array of 16384 integers in {0,1,2,3}">{{ form.rule_text }}</textarea>
+      <div class="hint">
+        For paste mode: copy a rule baked by
+        <a href="{% url 'tessera:bake-ca' %}" style="color:#ace;">Tessera bake-ca</a>.
+      </div>
+    </div>
+  </div>
+
+  <div class="group">
+    <h3>Palette</h3>
+    <label class="radio">
+      <input type="radio" name="palette_mode" value="default"
+             {% if form.palette_mode == "default" %}checked{% endif %}>
+      default — warm / cool / verdant / amber
+    </label>
+    <label class="radio">
+      <input type="radio" name="palette_mode" value="random"
+             {% if form.palette_mode == "random" %}checked{% endif %}>
+      random — 4 HSV-spaced hues, sealed at creation
+    </label>
+    <label class="radio">
+      <input type="radio" name="palette_mode" value="random_per_component"
+             {% if form.palette_mode == "random_per_component" %}checked{% endif %}>
+      random per component — 64 separate palettes, one per tile
+    </label>
+    <label class="radio">
+      <input type="radio" name="palette_mode" value="custom"
+             {% if form.palette_mode == "custom" %}checked{% endif %}>
+      custom (JSON)
+    </label>
+    <div class="field" style="margin-top: 4px;">
+      <textarea name="palette_text" style="min-height: 2.6em;"
+                placeholder='[[r,g,b], [r,g,b], [r,g,b], [r,g,b]]'>{{ form.palette_text }}</textarea>
+      <div class="hint">
+        Only used when palette mode is "custom".  Random and default
+        modes ignore this field but viewers can still re-roll the
+        palette client-side on the pact page (no re-seal needed).
+      </div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes">{{ form.notes }}</textarea>
+  </div>
+
+  <button type="submit" class="submit">Seal pact</button>
+</form>
+</div>
+{% endblock %}

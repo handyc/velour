@@ -84,6 +84,7 @@ urlpatterns = [
     path('umbra/',       include('umbra.urls')),
     path('tableau/',     include('tableau.urls')),
     path('bagicha/',     include('bagicha.urls')),
+    path('spoeqi/',      include('spoeqi.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

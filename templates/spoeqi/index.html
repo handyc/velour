@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}spoeqi — shared-state CA pacts{% endblock %}
+{% block content %}
+<style>
+  .spoeqi-page  { max-width: 64em; }
+  .spoeqi-meta  { color: #888; font-size: 0.85rem; }
+  .spoeqi-meta a { color: #ace; }
+  .pact-row     { padding: 8px 0; border-bottom: 1px solid #1a1a1a;
+                  display: flex; gap: 14px; align-items: baseline; }
+  .pact-row .name { color: #cfc; font-weight: 600; }
+  .pact-row .parties { color: #aaa; font-family: monospace; }
+  .pact-row .clock   { color: #888; font-size: 0.8rem; }
+  .pact-row time     { color: #888; font-size: 0.8rem; font-family: monospace; }
+  .empty { color: #666; padding: 22px 0; font-style: italic; }
+  .new-btn { display: inline-block; background: #222; color: #cfc;
+             border: 1px solid #555; padding: 4px 14px;
+             text-decoration: none; font-family: inherit; }
+  .new-btn:hover { border-color: #8b949e; }
+</style>
+
+<div class="spoeqi-page">
+<h1 style="margin-top: 0;">spoeqi</h1>
+<p class="spoeqi-meta" style="max-width: 56em;">
+  <b>spooky / P→Q / key.</b> A <em>Pact</em> is a pre-shared 64-byte
+  seed packet plus a sealed 4-colour hex CA rule.  Two parties holding
+  identical Pacts will see identical CA evolution forever, without
+  transmitting anything — the "transmission" is deterministic
+  computation from the same seed.  No information actually crosses
+  between parties; what's shared is the <em>computational state</em>.
+  Useful as a substrate for keystream extraction, model-perturbation
+  synchronisation, or just the metaphor.
+</p>
+<p class="spoeqi-meta">
+  Each Pact runs {{ components }} component CAs in parallel
+  ({{ component_grid }}×{{ component_grid }} hex cells each), arranged
+  on an 8×8 grid keyed by the 8×8 seed matrix.
+</p>
+
+<p style="margin: 18px 0 14px;">
+  <a class="new-btn" href="{% url 'spoeqi:create' %}">+ new Pact</a>
+</p>
+
+{% if pacts %}
+<div>
+  {% for p in pacts %}
+  <div class="pact-row">
+    <a class="name" href="{% url 'spoeqi:detail' slug=p.slug %}">{{ p.name }}</a>
+    <span class="parties">{{ p.party_a }} ⇄ {{ p.party_b }}</span>
+    <span class="clock">{{ p.get_clock_model_display|truncatechars:30 }}</span>
+    <time>launched {{ p.launch_time|date:"Y-m-d H:i:s" }}</time>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">No pacts sealed yet.</p>
+{% endif %}
+</div>
+{% endblock %}

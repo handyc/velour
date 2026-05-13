@@ -1,0 +1,782 @@
+{% extends "base.html" %}
+{% block title %}{{ pact.name }} — spoeqi{% endblock %}
+{% block content %}
+<style>
+  .spoeqi-page  { max-width: 96em; }
+  .spoeqi-meta  { color: #888; font-size: 0.85rem; }
+  .spoeqi-meta a { color: #ace; }
+  .header-row   { display: flex; gap: 16px; align-items: baseline;
+                  margin-bottom: 10px; }
+  .header-row .name { color: #cfc; font-weight: 600; font-size: 1.15rem; }
+  .header-row .parties { color: #aaa; font-family: monospace; }
+  .badge        { background: #1a1a1a; color: #ace; border: 1px solid #333;
+                  padding: 1px 8px; border-radius: 8px; font-size: 0.78rem;
+                  font-family: monospace; }
+  .badge.warn   { color: #fc8; border-color: #532; }
+  .controls     { margin: 10px 0; display: flex; gap: 10px; align-items: baseline;
+                  flex-wrap: wrap; font-size: 0.85rem; color: #aaa; }
+  .controls button {
+    background: #222; color: #cfc; border: 1px solid #555;
+    padding: 3px 12px; font-family: inherit; cursor: pointer;
+  }
+  .controls input[type="number"] {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 1px 4px; width: 6em;
+  }
+  #spoeqi-canvas {
+    background: #050505; border: 1px solid #222;
+    image-rendering: pixelated; display: block;
+    margin: 14px auto 0;
+  }
+  .readouts {
+    display: flex; gap: 24px; margin-top: 12px;
+    font-family: monospace; font-size: 0.8rem; color: #888;
+    flex-wrap: wrap;
+  }
+  .readouts span b { color: #cfc; font-weight: normal; }
+  .palette-row  { display: inline-flex; gap: 2px; vertical-align: -3px; }
+  .palette-row div { width: 14px; height: 14px; border: 1px solid #333; }
+  details { margin-top: 18px; }
+  details summary { color: #ace; cursor: pointer; }
+  details pre { background: #0a0a0a; color: #888; padding: 8px;
+                border: 1px solid #1a1a1a; max-height: 12em;
+                overflow: auto; font-size: 0.75rem; }
+  .danger-row { margin-top: 26px; color: #888; font-size: 0.8rem; }
+  .danger-row button { background: #1a0a0a; color: #fcc; border: 1px solid #532;
+                       padding: 2px 10px; font-family: inherit; cursor: pointer; }
+</style>
+
+<div class="spoeqi-page">
+<p class="spoeqi-meta"><a href="{% url 'spoeqi:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Pact</b></p>
+
+<div class="header-row">
+  <span class="name">{{ pact.name }}</span>
+  <span class="parties">{{ pact.party_a }} ⇄ {{ pact.party_b }}</span>
+  <span class="badge">{{ pact.get_clock_model_display|truncatechars:24 }}</span>
+  <span class="badge">tick {{ pact.tick_ms }} ms</span>
+  <span class="badge">{{ pact.component_grid }}×{{ pact.component_grid }} cells</span>
+  <span class="badge"
+        title="Rule diversity across the 64 components">{{ pact.rule_diversity }}</span>
+  <span class="badge warn" title="Sealed at launch; identical for every viewer">sealed</span>
+</div>
+
+<p class="spoeqi-meta" style="max-width: 64em;">
+  64 component CAs running in lockstep — each a 4-colour hex CA on a
+  {{ pact.component_grid }}×{{ pact.component_grid }} grid
+  ({{ cells_per_tile }} cells per tile × 64 = {{ cells_total }} cells per generation).
+  Each tile is seeded by one byte of the 64-byte matrix; all tiles
+  share the sealed rule.  Information is not transmitted between
+  parties — both sides <em>compute</em> the same evolution from the
+  shared seed.
+  <br><b style="color:#cfc;">Click any tile</b> to export its rule
+  and current state to Automaton for further analysis (opens in a new tab).
+</p>
+
+<div class="controls">
+  <button id="toggle">pause</button>
+  <button id="restep">re-seed</button>
+  <span>palette
+    <span id="palette-swatches" style="display:inline-flex; gap:2px; vertical-align:-3px;">
+      {% for c in swatch_palette %}<span
+        class="palette-cell"
+        style="display:inline-block; width:14px; height:14px; border:1px solid #333; background: rgb({{ c.0 }}, {{ c.1 }}, {{ c.2 }});"></span>{% endfor %}
+    </span>
+    {% if palette_is_per_component %}
+    <span id="palette-mode-tag" style="color:#aaa; font-size:0.78rem;"
+          title="64 palettes — one per tile">(per-tile · tile 00 shown)</span>
+    {% else %}
+    <span id="palette-mode-tag" style="color:#666; font-size:0.78rem;"></span>
+    {% endif %}
+    <button id="palette-random" title="Re-roll a single palette shared across all 64 tiles">🎲</button>
+    <button id="palette-random-per" title="Re-roll 64 separate palettes — one per tile">🎲²</button>
+    <button id="palette-restore" title="Restore the palette sealed in the Pact">↻</button>
+  </span>
+  <span>tick override
+    <input id="tick-override" type="number" min="20" max="5000" step="10" value="{{ pact.tick_ms }}"> ms
+  </span>
+</div>
+
+<canvas id="spoeqi-canvas" width="1056" height="1056"></canvas>
+
+<div class="readouts">
+  <span>generation <b id="r-gen">0</b></span>
+  <span>local Δt <b id="r-dt">0</b> ms</span>
+  <span>changed cells / tick (mean) <b id="r-chg">—</b></span>
+  <span>edge-of-chaos score <b id="r-edge">—</b> <span id="r-spark"></span></span>
+</div>
+
+{% if fleet_legend %}
+<details open style="margin-top: 18px;">
+  <summary style="color:#ace;">Fleet roster — 64 independent Hexhunt rules</summary>
+  <p class="spoeqi-meta">
+    Each component runs a different rule sampled from the Det class-4
+    library.  Component hex digit = top-left of each tile; Det
+    Candidate ID = top-right.
+  </p>
+  <div style="display: grid;
+              grid-template-columns: repeat(8, 1fr);
+              gap: 4px 8px; font-family: monospace; font-size: 0.72rem;
+              color: #aaa; max-width: 1000px; margin-top: 8px;">
+    {% for row in fleet_legend %}
+    <div style="white-space: nowrap;">
+      <span style="color: #ccc;">{{ row.component_hex }}</span>
+      &nbsp;
+      <a href="{% url 'det:candidate_detail' pk=row.candidate_id %}"
+         style="color: #ace; text-decoration: none;"
+         title="{% if row.score %}score {{ row.score|floatformat:2 }} · {{ row.est_class }} · {{ row.n_rules }} rules{% else %}candidate removed{% endif %}"
+        >#{{ row.candidate_id }}</a>
+      {% if row.score %}<span style="color: #666;">·{{ row.score|floatformat:1 }}</span>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<details>
+  <summary>seed / rule fingerprint (sealed; identical on both ends)</summary>
+  <p class="spoeqi-meta">
+    Launch: {{ pact.launch_time|date:"Y-m-d H:i:s.u" }} UTC
+    ({{ pact.launch_time|timesince }} ago)
+  </p>
+  <p class="spoeqi-meta">seed (64 bytes, hex):</p>
+  <pre id="dump-seed">{{ pact.seed_hex }}</pre>
+  <p class="spoeqi-meta">rule (first 256 bytes shown):</p>
+  <pre id="dump-rule"></pre>
+  <p class="spoeqi-meta">rule SHA-256 (full):</p>
+  <pre id="dump-rulehash">computing…</pre>
+</details>
+
+<div class="danger-row">
+  <form method="post" action="{% url 'spoeqi:delete' slug=pact.slug %}"
+        style="display:inline;">
+    {% csrf_token %}
+    <button type="submit"
+            onclick="return confirm('Dissolve this Pact? The seed and rule will be lost.');">
+      dissolve pact
+    </button>
+  </form>
+</div>
+</div>
+
+<script>
+(function () {
+  var payload = {{ payload|safe }};
+  var SERVER_NOW_MS = {{ now_ms }};   // ms since epoch when this page was rendered
+  var CLIENT_T0     = Date.now();     // ms since epoch when JS starts
+
+  // ─── unpack seed and rule ────────────────────────────────────────
+  function hex2bytes (h) {
+    var out = new Uint8Array(h.length / 2);
+    for (var i = 0; i < out.length; i++)
+      out[i] = parseInt(h.substr(i * 2, 2), 16);
+    return out;
+  }
+  var seed = hex2bytes(payload.seed_hex);          // 64 bytes
+  // 64 × 16384 = 1 MiB.  Shared-rule pacts broadcast a single rule to
+  // all 64 slots server-side so the JS engine sees a uniform layout.
+  var rulesFlat = hex2bytes(payload.rules_hex);
+  // Palette can be:
+  //   single        — [[r,g,b]×4]
+  //   per-component — [[[r,g,b]×4]×64]
+  // Detected via `Array.isArray(palette[0][0])`.
+  var palette = payload.palette;
+  function isPerComponent (p) { return Array.isArray(p[0][0]); }
+  function paletteFor (c) {
+    return isPerComponent(palette) ? palette[c] : palette;
+  }
+  var COMPONENTS = payload.components;             // 64
+  var GRID = payload.component_grid;               // 16
+  var TICK_MS = payload.tick_ms;
+  var CLOCK_MODE = payload.clock_model;
+
+  // ─── deterministic seed expansion ───────────────────────────────
+  // splitmix64 → 4 64-bit values → xoshiro128** state.  Then xoshiro
+  // fills the 16×16 grid with 4-state cells.  Both ends share the
+  // same byte → same expansion → identical initial grid.
+  function splitmix64 (state) {
+    // state is [hi, lo] in unsigned 32-bit ints.  splitmix64 with
+    // a single seed input: x = seed; z = (x += 0x9E3779B97F4A7C15);
+    // z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9; ... → 64 bits out.
+    // We keep state in two 32-bit halves to avoid BigInt cost.
+    function add64 (ahi, alo, bhi, blo) {
+      var lo = (alo + blo) >>> 0;
+      var carry = (lo < alo) ? 1 : 0;
+      var hi = (ahi + bhi + carry) >>> 0;
+      return [hi, lo];
+    }
+    function mul64 (ahi, alo, bhi, blo) {
+      // 64×64 → 64 bits (low only)
+      var a0 = alo & 0xFFFF, a1 = alo >>> 16;
+      var a2 = ahi & 0xFFFF, a3 = ahi >>> 16;
+      var b0 = blo & 0xFFFF, b1 = blo >>> 16;
+      var b2 = bhi & 0xFFFF, b3 = bhi >>> 16;
+      var c0 = a0 * b0;
+      var c1 = a1 * b0 + a0 * b1;
+      var c2 = a2 * b0 + a1 * b1 + a0 * b2;
+      var c3 = a3 * b0 + a2 * b1 + a1 * b2 + a0 * b3;
+      var lo = (c0 & 0xFFFF) | ((c1 & 0xFFFF) << 16);
+      var hiPart = (c0 >>> 16) + c1 + ((c2 & 0xFFFF) << 16);
+      var hi = ((hiPart / 0x100000000) >>> 0) + (c2 >>> 16) + c3;
+      // re-add to settle low overflow
+      lo = lo >>> 0;
+      hi = hi >>> 0;
+      return [hi, lo];
+    }
+    function xor64 (ahi, alo, bhi, blo) {
+      return [(ahi ^ bhi) >>> 0, (alo ^ blo) >>> 0];
+    }
+    function shru64 (hi, lo, n) {
+      if (n === 0) return [hi, lo];
+      if (n < 32) return [hi >>> n, ((hi << (32 - n)) | (lo >>> n)) >>> 0];
+      if (n === 32) return [0, hi];
+      return [0, hi >>> (n - 32)];
+    }
+    state = add64(state[0], state[1], 0x9E3779B9, 0x7F4A7C15);
+    var z = state;
+    var zs = shru64(z[0], z[1], 30);
+    z = xor64(z[0], z[1], zs[0], zs[1]);
+    z = mul64(z[0], z[1], 0xBF58476D, 0x1CE4E5B9);
+    zs = shru64(z[0], z[1], 27);
+    z = xor64(z[0], z[1], zs[0], zs[1]);
+    z = mul64(z[0], z[1], 0x94D049BB, 0x133111EB);
+    zs = shru64(z[0], z[1], 31);
+    z = xor64(z[0], z[1], zs[0], zs[1]);
+    return { state: state, out: z };
+  }
+
+  function makeXoshiro (byteSeed) {
+    // Expand 1 byte to 4 × 64-bit xoshiro state words via splitmix64.
+    var sm = [0, byteSeed & 0xFF];
+    var s = new Uint32Array(8);   // 4 × (hi, lo) = 8 × 32-bit
+    for (var i = 0; i < 4; i++) {
+      var r = splitmix64(sm);
+      sm = r.state;
+      s[i * 2]     = r.out[0];
+      s[i * 2 + 1] = r.out[1];
+    }
+    // Guard against the all-zero state (vanishingly rare but breaks
+    // xoshiro).
+    if ((s[0]|s[1]|s[2]|s[3]|s[4]|s[5]|s[6]|s[7]) === 0) {
+      s[0] = 0x9E3779B9; s[1] = 0x7F4A7C15;
+    }
+
+    function rotl32 (x, k) {
+      return ((x << k) | (x >>> (32 - k))) >>> 0;
+    }
+    function add32 (a, b) { return ((a + b) | 0) >>> 0; }
+    function mul32 (a, b) {
+      var a0 = a & 0xFFFF, a1 = a >>> 16;
+      var b0 = b & 0xFFFF, b1 = b >>> 16;
+      return ((a0 * b0) + (((a1 * b0 + a0 * b1) & 0xFFFF) << 16)) >>> 0;
+    }
+
+    // xoshiro128** — 32-bit four-word variant; we take low halves of
+    // splitmix's 64-bit outputs as the 4 seed words.  Period 2^128 − 1
+    // (any nonzero state).  Output is uniform 32-bit.
+    var w0 = s[1], w1 = s[3], w2 = s[5], w3 = s[7];
+
+    function next () {
+      var result = mul32(rotl32(mul32(w1, 5), 7), 9);
+      var t = (w1 << 9) >>> 0;
+      w2 = (w2 ^ w0) >>> 0;
+      w3 = (w3 ^ w1) >>> 0;
+      w1 = (w1 ^ w2) >>> 0;
+      w0 = (w0 ^ w3) >>> 0;
+      w2 = (w2 ^ t)  >>> 0;
+      w3 = rotl32(w3, 11);
+      return result;
+    }
+    return next;
+  }
+
+  function seedGrid (byteSeed) {
+    var next = makeXoshiro(byteSeed);
+    var g = new Uint8Array(GRID * GRID);
+    // Pull 4 random cells per 32-bit word (each cell is 2 bits).
+    for (var i = 0; i < g.length; i += 4) {
+      var r = next();
+      g[i]     = r & 3;
+      if (i + 1 < g.length) g[i + 1] = (r >>> 2) & 3;
+      if (i + 2 < g.length) g[i + 2] = (r >>> 4) & 3;
+      if (i + 3 < g.length) g[i + 3] = (r >>> 6) & 3;
+    }
+    return g;
+  }
+
+  // ─── multi-CA state ─────────────────────────────────────────────
+  // 64 components × 256 cells each = 16,384 cell bytes total per
+  // generation.  We store all components flat for cache friendliness.
+  var grids = new Uint8Array(COMPONENTS * GRID * GRID);
+  var swap  = new Uint8Array(COMPONENTS * GRID * GRID);
+
+  function reseed () {
+    for (var c = 0; c < COMPONENTS; c++) {
+      var g = seedGrid(seed[c]);
+      grids.set(g, c * GRID * GRID);
+    }
+    generation = 0;
+    changeHistory.length = 0;
+    sparkHistory.length = 0;
+  }
+
+  // ─── tick ───────────────────────────────────────────────────────
+  // For each component:  next[idx] = rule[(self << 12)
+  //                                       | (n0 << 10) | (n1 << 8)
+  //                                       | (n2 << 6)  | (n3 << 4)
+  //                                       | (n4 << 2)  |  n5 ]
+  // Neighbours under offset-r layout: 0 TR, 1 R, 2 BR, 3 BL, 4 L, 5 TL.
+  function step () {
+    var W = GRID, H = GRID;
+    var totalCells = COMPONENTS * W * H;
+    var changed = 0;
+    var RULE_SIZE = 16384;
+    for (var c = 0; c < COMPONENTS; c++) {
+      var base = c * W * H;
+      var ruleBase = c * RULE_SIZE;
+      for (var y = 0; y < H; y++) {
+        var shift = y & 1;
+        var tlx = -1 + shift;
+        var brx =  0 + shift;
+        // Pre-compute wrapped row indices.
+        var yU = (y - 1 + H) % H;
+        var yD = (y + 1) % H;
+        for (var x = 0; x < W; x++) {
+          var idx = base + y * W + x;
+          var self_ = grids[idx];
+          var xL = (x - 1 + W) % W;
+          var xR = (x + 1) % W;
+          var xTL = (x + tlx + W) % W;
+          var xBR = (x + brx + W) % W;
+          var n0 = grids[base + yU * W + xBR];
+          var n1 = grids[base + y  * W + xR];
+          var n2 = grids[base + yD * W + xBR];
+          var n3 = grids[base + yD * W + xTL];
+          var n4 = grids[base + y  * W + xL];
+          var n5 = grids[base + yU * W + xTL];
+          var key = (self_ << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6)
+                  | (n3 << 4) | (n4 << 2) | n5;
+          var v = rulesFlat[ruleBase + key];
+          swap[idx] = v;
+          if (v !== self_) changed++;
+        }
+      }
+    }
+    var tmp = grids; grids = swap; swap = tmp;
+    generation++;
+    changeHistory.push(changed / totalCells);
+    if (changeHistory.length > 96) changeHistory.shift();
+  }
+
+  // ─── render ─────────────────────────────────────────────────────
+  // 8×8 outer grid of 16×16 hex tiles each.  Hex radius r is chosen
+  // so each component panel fits in TILE_PX pixels.  We use offset-r
+  // (odd rows shifted right by S = r·√3/2).
+  var canvas = document.getElementById('spoeqi-canvas');
+  var ctx = canvas.getContext('2d');
+  // Layout: 8 components horizontally, each gets TILE_PX wide; 4 px
+  // gutter between component tiles.
+  var COMPONENTS_PER_ROW = 8;
+  var GUTTER = 6;
+  var TILE_PX = Math.floor((canvas.width - GUTTER * (COMPONENTS_PER_ROW + 1))
+                            / COMPONENTS_PER_ROW);
+  var HEX_R = TILE_PX / (2 * (GRID + 0.5));
+  var S = HEX_R * Math.sqrt(3) / 2;
+  var H_STEP = 2 * S;
+  var V_STEP = 1.5 * HEX_R;
+
+  // Switch render strategy by hex radius:
+  //   ≥ 1.5 px: hex polygons (Tessera look; readable at 8/16/24 grids)
+  //   < 1.5 px: filled rectangles in offset-r layout (visually a
+  //             pixel grid with odd-row shift; fast enough for 64×64
+  //             on 64 tiles = 262,144 cells in one putImageData-able
+  //             pass via per-tile rect fills).
+  var POLYGON_THRESHOLD = 1.5;
+  // Fleet pacts always show labels (the Det IDs are the point); other
+  // diversity modes hide them when cells get small.
+  var SHOW_LABELS = HEX_R >= 2.0 || payload.rule_diversity === 'fleet';
+
+  function draw () {
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (HEX_R >= POLYGON_THRESHOLD) {
+      drawPolygons();
+    } else {
+      drawPixels();
+    }
+    if (SHOW_LABELS) drawLabels();
+  }
+
+  function drawPolygons () {
+    for (var c = 0; c < COMPONENTS; c++) {
+      var cr = Math.floor(c / COMPONENTS_PER_ROW);
+      var cc = c % COMPONENTS_PER_ROW;
+      var ox = GUTTER + cc * (TILE_PX + GUTTER);
+      var oy = GUTTER + cr * (TILE_PX + GUTTER);
+      var base = c * GRID * GRID;
+      var componentPalette = paletteFor(c);
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(ox, oy, TILE_PX, TILE_PX);
+      for (var y = 0; y < GRID; y++) {
+        var shift = (y & 1) * S;
+        for (var x = 0; x < GRID; x++) {
+          var cx = ox + S + x * H_STEP + shift;
+          var cy = oy + HEX_R + y * V_STEP;
+          var col = componentPalette[grids[base + y * GRID + x]];
+          ctx.fillStyle = 'rgb(' + col[0] + ',' + col[1] + ',' + col[2] + ')';
+          ctx.beginPath();
+          for (var i = 0; i < 6; i++) {
+            var a = -Math.PI / 2 + i * Math.PI / 3;
+            var px = cx + HEX_R * Math.cos(a);
+            var py = cy + HEX_R * Math.sin(a);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  function drawPixels () {
+    // Sub-pixel cell size — divide the whole tile by (GRID + 0.5) so
+    // we fill the entire panel.  fillRect handles fractional bounds.
+    var CELL_W = TILE_PX / (GRID + 0.5);
+    var HALF = CELL_W / 2;
+    function makeStyles (componentPalette) {
+      var s = new Array(4);
+      for (var p = 0; p < 4; p++) {
+        var col = componentPalette[p];
+        s[p] = 'rgb(' + col[0] + ',' + col[1] + ',' + col[2] + ')';
+      }
+      return s;
+    }
+    // Cache styles per-palette so we only recompute the strings when
+    // the palette actually differs (single-palette case computes once).
+    var sharedStyles = isPerComponent(palette) ? null : makeStyles(palette);
+    for (var c = 0; c < COMPONENTS; c++) {
+      var cr = Math.floor(c / COMPONENTS_PER_ROW);
+      var cc = c % COMPONENTS_PER_ROW;
+      var ox = GUTTER + cc * (TILE_PX + GUTTER);
+      var oy = GUTTER + cr * (TILE_PX + GUTTER);
+      var base = c * GRID * GRID;
+      var styles = sharedStyles || makeStyles(paletteFor(c));
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(ox, oy, TILE_PX, TILE_PX);
+      for (var p = 0; p < 4; p++) {
+        ctx.fillStyle = styles[p];
+        ctx.beginPath();
+        for (var y = 0; y < GRID; y++) {
+          var rowShift = (y & 1) ? HALF : 0;
+          var py = oy + y * CELL_W;
+          for (var x = 0; x < GRID; x++) {
+            if (grids[base + y * GRID + x] !== p) continue;
+            var px = ox + x * CELL_W + rowShift;
+            ctx.rect(px, py, CELL_W + 0.5, CELL_W + 0.5);
+          }
+        }
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawLabels () {
+    var fleetIds = payload.fleet_label_ids || [];
+    // Scale font with tile size so labels are legible at 16×16 but
+    // still discreet at larger grids.
+    var fontPx = Math.max(9, Math.min(12, Math.floor(TILE_PX / 14)));
+    ctx.font = fontPx + 'px monospace';
+    ctx.textBaseline = 'top';
+    for (var c = 0; c < COMPONENTS; c++) {
+      var cr = Math.floor(c / COMPONENTS_PER_ROW);
+      var cc = c % COMPONENTS_PER_ROW;
+      var ox = GUTTER + cc * (TILE_PX + GUTTER);
+      var oy = GUTTER + cr * (TILE_PX + GUTTER);
+      // Slight black drop-shadow keeps labels readable over any cell
+      // colour at small font sizes.
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillText(c.toString(16).padStart(2, '0'), ox + 3, oy + 3);
+      ctx.fillStyle = 'rgba(220,220,220,0.85)';
+      ctx.fillText(c.toString(16).padStart(2, '0'), ox + 2, oy + 2);
+      if (fleetIds[c] !== undefined) {
+        var tag = '#' + fleetIds[c];
+        var w = ctx.measureText(tag).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillText(tag, ox + TILE_PX - w - 2, oy + 3);
+        ctx.fillStyle = 'rgba(170,220,170,0.9)';
+        ctx.fillText(tag, ox + TILE_PX - w - 3, oy + 2);
+      }
+    }
+  }
+
+  // ─── clock model ────────────────────────────────────────────────
+  // Synced: tick count derived from (now_ms − launch_ms) / tick_ms,
+  // using SERVER_NOW_MS to anchor wall-clock so the two viewers
+  // measure from the same UTC.
+  // Local:  tick count derived from (now − client_t0) / tick_ms; each
+  // viewer starts from generation 0 at page-load.
+  function expectedGeneration () {
+    var nowEpoch;
+    if (CLOCK_MODE === 'synced') {
+      // Estimate current epoch ms — page anchor + elapsed client ms.
+      nowEpoch = SERVER_NOW_MS + (Date.now() - CLIENT_T0);
+      return Math.max(0, Math.floor((nowEpoch - payload.launch_ms) / TICK_MS));
+    } else {
+      return Math.floor((Date.now() - CLIENT_T0) / TICK_MS);
+    }
+  }
+
+  // ─── loop ───────────────────────────────────────────────────────
+  var running = true;
+  var generation = 0;
+  var changeHistory = [];
+  var sparkHistory = [];
+  var SPARK_CHARS = '▁▂▃▄▅▆▇█';
+
+  // Catch-up on first load (synced clock: rewind to launch by running
+  // step() many times).  Capped to avoid pathological backlogs.
+  function catchUp () {
+    if (CLOCK_MODE !== 'synced') return;
+    var target = expectedGeneration();
+    var cap = Math.min(target, 4000);   // generous; below ~50 ms each
+    while (generation < cap) step();
+    if (target > cap) {
+      // Skip the rest cheaply — just bump generation counter so the
+      // readout reflects "we're caught up" even though we couldn't
+      // afford to run those backlog ticks fully.
+      generation = target;
+    }
+  }
+
+  function tick () {
+    if (!running) return;
+    if (CLOCK_MODE === 'synced') {
+      var target = expectedGeneration();
+      // Run at most a few catch-up ticks per frame so we don't lock
+      // the page on long backlogs.
+      var budget = 6;
+      while (generation < target && budget > 0) { step(); budget--; }
+    } else {
+      step();
+    }
+  }
+
+  function updateReadouts () {
+    document.getElementById('r-gen').textContent = generation;
+    document.getElementById('r-dt').textContent =
+        (Date.now() - CLIENT_T0).toString();
+    if (changeHistory.length >= 4) {
+      var s = 0;
+      for (var i = 0; i < changeHistory.length; i++) s += changeHistory[i];
+      var mean = s / changeHistory.length;
+      document.getElementById('r-chg').textContent = mean.toFixed(3);
+      var edge = 4 * mean * (1 - mean);
+      document.getElementById('r-edge').textContent = edge.toFixed(3);
+      sparkHistory.push(edge);
+      if (sparkHistory.length > 24) sparkHistory.shift();
+      var spark = '';
+      for (var j = 0; j < sparkHistory.length; j++) {
+        var k = Math.max(0, Math.min(SPARK_CHARS.length - 1,
+                    Math.floor(sparkHistory[j] * (SPARK_CHARS.length - 1) + 0.5)));
+        spark += SPARK_CHARS[k];
+      }
+      document.getElementById('r-spark').textContent = spark;
+    }
+  }
+
+  function frame () {
+    tick();
+    draw();
+    updateReadouts();
+    setTimeout(frame, TICK_MS);
+  }
+
+  // ─── controls ──────────────────────────────────────────────────
+  document.getElementById('toggle').addEventListener('click', function () {
+    running = !running;
+    this.textContent = running ? 'pause' : 'play';
+  });
+  document.getElementById('restep').addEventListener('click', function () {
+    reseed();
+    draw();
+    updateReadouts();
+  });
+  document.getElementById('tick-override').addEventListener('change', function () {
+    var v = parseInt(this.value, 10);
+    if (!isNaN(v)) TICK_MS = Math.max(20, Math.min(5000, v));
+  });
+
+  // ─── palette swap (viewer-side; doesn't break determinism) ─────
+  // The Pact itself is sealed; this only changes how local cells get
+  // *coloured*.  The underlying state evolution is unaffected, so two
+  // viewers can each have a different palette without diverging.
+  var sealedPalette = JSON.parse(JSON.stringify(palette));
+  function applyPalette (newPalette) {
+    // Re-assign rather than in-place mutate so we can switch between
+    // single (4 colours) and per-component (64×4) shapes.
+    palette = newPalette;
+    var swatches = document.querySelectorAll('#palette-swatches .palette-cell');
+    var rep = isPerComponent(palette) ? palette[0] : palette;
+    for (var i = 0; i < swatches.length && i < rep.length; i++) {
+      swatches[i].style.background = 'rgb(' + rep[i][0] + ','
+                                   + rep[i][1] + ',' + rep[i][2] + ')';
+    }
+    var tag = document.getElementById('palette-mode-tag');
+    if (tag) {
+      tag.textContent = isPerComponent(palette)
+        ? '(per-tile · tile 00 shown)' : '';
+    }
+    draw();
+  }
+  function hsvToRgb (h, s, v) {
+    var i = Math.floor(h * 6);
+    var f = h * 6 - i;
+    var p = v * (1 - s);
+    var q = v * (1 - f * s);
+    var t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: return [v, t, p];
+      case 1: return [q, v, p];
+      case 2: return [p, v, t];
+      case 3: return [p, q, v];
+      case 4: return [t, p, v];
+      case 5: return [v, p, q];
+    }
+  }
+  function randomPalette () {
+    // Same idea as models.random_palette: 4 hues evenly spaced on the
+    // wheel with a random rotation, then shuffle.
+    var rotation = Math.random();
+    var out = [];
+    for (var i = 0; i < 4; i++) {
+      var h = (rotation + i / 4 + (Math.random() * 0.06 - 0.03)) % 1.0;
+      if (h < 0) h += 1.0;
+      var s = 0.55 + Math.random() * 0.4;
+      var v = 0.55 + Math.random() * 0.4;
+      var rgb = hsvToRgb(h, s, v);
+      out.push([Math.floor(rgb[0] * 255),
+                Math.floor(rgb[1] * 255),
+                Math.floor(rgb[2] * 255)]);
+    }
+    for (var i = out.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = out[i]; out[i] = out[j]; out[j] = tmp;
+    }
+    return out;
+  }
+  function randomPalettePerComponent () {
+    var out = [];
+    for (var i = 0; i < COMPONENTS; i++) out.push(randomPalette());
+    return out;
+  }
+  document.getElementById('palette-random').addEventListener('click', function () {
+    applyPalette(randomPalette());
+  });
+  document.getElementById('palette-random-per').addEventListener('click', function () {
+    applyPalette(randomPalettePerComponent());
+  });
+  document.getElementById('palette-restore').addEventListener('click', function () {
+    applyPalette(JSON.parse(JSON.stringify(sealedPalette)));
+  });
+
+  // ─── click a tile → export its rule + current state to Automaton ─
+  function tileAt (clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    // Account for CSS scaling: the canvas's internal width may differ
+    // from its rendered size on narrow viewports.
+    var sx = canvas.width  / rect.width;
+    var sy = canvas.height / rect.height;
+    var x = (clientX - rect.left) * sx;
+    var y = (clientY - rect.top)  * sy;
+    var step = TILE_PX + GUTTER;
+    var cc = Math.floor((x - GUTTER) / step);
+    var cr = Math.floor((y - GUTTER) / step);
+    if (cc < 0 || cc >= COMPONENTS_PER_ROW
+        || cr < 0 || cr >= COMPONENTS_PER_ROW) return -1;
+    return cr * COMPONENTS_PER_ROW + cc;
+  }
+
+  function getTileGridState (component) {
+    // Snapshot the component's grid as a 2-D array of ints in 0..3.
+    var base = component * GRID * GRID;
+    var rows = new Array(GRID);
+    for (var y = 0; y < GRID; y++) {
+      var row = new Array(GRID);
+      for (var x = 0; x < GRID; x++) {
+        row[x] = grids[base + y * GRID + x];
+      }
+      rows[y] = row;
+    }
+    return rows;
+  }
+
+  function csrfToken () {
+    // The base.html flow uses {% csrf_token %} only inside forms.
+    // The cookie is always set on GET, though, so we read it directly.
+    var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  canvas.style.cursor = 'pointer';
+  canvas.addEventListener('click', function (ev) {
+    var c = tileAt(ev.clientX, ev.clientY);
+    if (c < 0) return;
+    // Pause local rendering so the snapshot we send matches what the
+    // user saw at click time.
+    var wasRunning = running;
+    running = false;
+    var state = getTileGridState(c);
+    var url = '{% url "spoeqi:export_tile" slug=pact.slug component=0 %}';
+    url = url.replace(/\/0\/$/, '/' + c + '/');
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken(),
+      },
+      body: JSON.stringify({grid_state: state}),
+    }).then(function (resp) {
+      return resp.json();
+    }).then(function (data) {
+      running = wasRunning;
+      if (data.ok) {
+        window.open(data.simulation_url, '_blank');
+      } else {
+        alert('Export failed: ' + (data.error || 'unknown'));
+      }
+    }).catch(function (err) {
+      running = wasRunning;
+      alert('Export failed: ' + err.message);
+    });
+  });
+
+  // ─── dump first 256 bytes of component-0 rule + sha256 (full) ───
+  (function dump () {
+    var pre = document.getElementById('dump-rule');
+    var first = [];
+    for (var i = 0; i < 256; i++) first.push(rulesFlat[i]);
+    pre.textContent = first.join(' ');
+    if (window.crypto && window.crypto.subtle) {
+      window.crypto.subtle.digest('SHA-256', rulesFlat).then(function (buf) {
+        var h = '';
+        var v = new Uint8Array(buf);
+        for (var i = 0; i < v.length; i++) {
+          h += (v[i] < 16 ? '0' : '') + v[i].toString(16);
+        }
+        document.getElementById('dump-rulehash').textContent = h;
+      });
+    } else {
+      document.getElementById('dump-rulehash').textContent =
+          '(subtleCrypto unavailable)';
+    }
+  })();
+
+  // ─── go ────────────────────────────────────────────────────────
+  reseed();
+  catchUp();
+  draw();
+  updateReadouts();
+  setTimeout(frame, TICK_MS);
+})();
+</script>
+{% endblock %}
