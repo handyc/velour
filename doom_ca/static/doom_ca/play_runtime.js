@@ -244,15 +244,24 @@
     var pageW = page.clientWidth || window.innerWidth;
     var availW = pageW - 4;
     var availH = window.innerHeight - 280;
-    var edge = Math.max(240, Math.min(availW, availH));
-    edge = Math.floor(edge);
-    canvas.width  = edge;
-    canvas.height = edge;
-    canvas.style.width  = edge + 'px';
-    canvas.style.height = edge + 'px';
-    CELL_PX = Math.floor(edge / VIEW);
+    // Hex-grid natural extent in cells.  Horizontally the odd-row
+    // half-shift adds 0.5 to the rightmost column; vertically the
+    // step is 0.85 × cell, so VIEW rows span (VIEW-1)*0.85 + 1.
+    // Sizing the canvas square (the old behaviour) left a 14% black
+    // bar at the bottom because the drawn area was shorter than tall.
+    var EXTENT_W = VIEW + 0.5;
+    var EXTENT_H = (VIEW - 1) * 0.85 + 1;
+    var cell = Math.min(availW / EXTENT_W, availH / EXTENT_H);
+    cell = Math.max(12, Math.floor(cell));
+    CELL_PX = cell;
     H_STEP  = CELL_PX;
     V_STEP  = CELL_PX * 0.85;
+    var w = Math.ceil(EXTENT_W * cell);
+    var h = Math.ceil(EXTENT_H * cell);
+    canvas.width  = w;
+    canvas.height = h;
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
   }
   recomputeRenderMetrics();
   window.addEventListener('resize', function () {
