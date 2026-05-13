@@ -134,6 +134,40 @@
   <span id="dc-status"></span>
 </div>
 
+<div id="dc-legend" style="display:flex; gap:14px; flex-wrap:wrap;
+                          align-items:center; margin-top:8px;
+                          font-family:monospace; font-size:0.78rem;
+                          color:#aaa; border-top:1px solid #1a1a1a;
+                          padding-top:6px;">
+  <span style="color:#888;">legend ·</span>
+  <span class="leg"><span class="sw" id="leg-c0"
+        style="display:inline-block; width:14px; height:14px;
+               vertical-align:middle; border:1px solid #444; margin-right:4px;"></span>
+        ground (state 0–1)</span>
+  <span class="leg"><span class="sw" id="leg-c2"
+        style="display:inline-block; width:14px; height:14px;
+               vertical-align:middle; border:1px solid #444; margin-right:4px;"></span>
+        wall (state 2)</span>
+  <span class="leg"><span class="sw" id="leg-c3"
+        style="display:inline-block; width:14px; height:14px;
+               vertical-align:middle; border:1px solid #444; margin-right:4px;"></span>
+        wall (state 3)</span>
+  <span class="leg"><span class="sw"
+        style="display:inline-block; width:14px; height:14px;
+               vertical-align:middle; border:1px solid #444;
+               background:#58a6ff; margin-right:4px;"></span>player</span>
+  <span class="leg"><span class="sw"
+        style="display:inline-block; width:14px; height:14px;
+               vertical-align:middle; border:1px solid #444;
+               background:#f85149; margin-right:4px;"></span>monster</span>
+  <span class="leg"><span style="color:#3f3;">✚</span> medkit</span>
+  <span class="leg"><span style="color:#fb6;">●</span> ammo</span>
+  <span class="leg"><span style="color:#ccc;">⌐</span> shotgun</span>
+  <span class="leg"><span style="color:#fd0;">🔑</span> key</span>
+  <span class="leg"><span style="color:#fd0;">🔒</span> locked door</span>
+  <span class="leg"><span style="color:#5fb;">⌂</span> exit</span>
+</div>
+
 <div class="danger-row">
   <a href="{% url 'doom_ca:export' slug=session.slug %}"
      style="background:#0a1a1a; color:#ace; border:1px solid #355;

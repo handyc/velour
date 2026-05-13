@@ -260,6 +260,14 @@
     componentPalette = pal;
     COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
     COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
+    // Update legend swatches so they always match the active palette,
+    // including after a live re-roll via the 🎨 randomise button.
+    var lg0 = document.getElementById('leg-c0');
+    if (lg0) lg0.style.background = '#1a1a1a';
+    var lg2 = document.getElementById('leg-c2');
+    if (lg2) lg2.style.background = COL_WALL_DK;
+    var lg3 = document.getElementById('leg-c3');
+    if (lg3) lg3.style.background = COL_WALL;
   }
   applyPalette(componentPalette);
   var COL_GROUND  = '#1a1a1a';
