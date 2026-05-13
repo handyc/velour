@@ -5,6 +5,7 @@ import json
 
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
@@ -233,12 +234,17 @@ def delete(request, slug):
     return redirect('doom_ca:index')
 
 
+@xframe_options_sameorigin
 @ensure_csrf_cookie
 def evolve(request):
     """Browser-side GA over doom_ca pact configurations.  The page
     embeds engine.js + the GA loop; the server only ships the page +
     handles materialisation of selected winners.  ensure_csrf_cookie
     so the materialise fetch() can read the cookie.
+
+    xframe_options_sameorigin so the metaevolve runner can embed
+    this page in an iframe on the same host (Django's default DENY
+    middleware would otherwise block it).
     """
     return render(request, 'doom_ca/evolve.html', {
         'world_mode_choices': GameSession.WORLD_MODE_CHOICES,
