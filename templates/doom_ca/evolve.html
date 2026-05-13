@@ -3,210 +3,213 @@
 {% block title %}Evolve Doom CA{% endblock %}
 {% block content %}
 <style>
-  .ev-page { max-width: 78em; }
+  /* ── Top-level layout: grid-first, controls below ───────────── */
+  .ev-page { max-width: 100%; padding: 0 8px; }
   .ev-meta { color: #888; font-size: 0.85rem; }
   .ev-meta a { color: #ace; }
-  .config-grid { display: grid; gap: 8px 18px;
-                 grid-template-columns: max-content 1fr; align-items: baseline;
-                 margin: 14px 0; max-width: 50em; }
-  .config-grid label { color: #aaa; font-size: 0.85rem; }
-  .config-grid input[type=number], .config-grid select {
+
+  /* Compact top bar: archetype + run buttons + live readout, one row */
+  .ev-topbar { display: flex; gap: 10px; align-items: center;
+               flex-wrap: wrap; padding: 4px 0 6px;
+               border-bottom: 1px solid #1a1a1a; margin-bottom: 6px; }
+  .ev-topbar .back { color: #888; text-decoration: none; font-size: 1rem;
+                     margin-right: 4px; }
+  .ev-topbar select, .ev-topbar input[type=number] {
     background: #111; color: #ccc; border: 1px solid #333;
-    padding: 2px 6px; font-family: inherit; width: 8em;
+    padding: 2px 6px; font-family: inherit; font-size: 0.85rem;
   }
-  .weights { display: grid; gap: 4px 14px;
-             grid-template-columns: max-content 1fr max-content;
-             max-width: 50em; align-items: center; }
-  .weights label { color: #aaa; font-size: 0.85rem; }
-  .weights input[type=range] { width: 18em; }
-  .weights .vw { color: #cfc; font-family: monospace; min-width: 3em;
-                 text-align: right; font-size: 0.8rem; }
-  .actions button { background: #222; color: #cfc;
-                    border: 1px solid #555; padding: 4px 16px;
-                    font-family: inherit; cursor: pointer; }
-  .actions .primary { background: #1a3a1a; border-color: #2a5a2a; }
-  .live { display: flex; gap: 24px; flex-wrap: wrap;
-          margin-top: 14px; font-family: monospace; font-size: 0.85rem;
-          color: #888; }
-  .live b { color: #cfc; font-weight: normal; }
-  #ev-progress { margin-top: 8px; font-family: monospace;
-                 color: #ace; max-height: 8em; overflow: auto;
-                 background: #0a0a0a; padding: 6px;
-                 border: 1px solid #222; font-size: 0.78rem; }
-  .winners { display: grid; gap: 12px; margin-top: 18px;
-             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  .winner { background: #0a0a0a; border: 1px solid #222;
-            padding: 8px; }
+  .ev-topbar select { max-width: 24em; }
+  .ev-topbar button { background: #222; color: #cfc;
+                      border: 1px solid #555; padding: 3px 12px;
+                      font-family: inherit; cursor: pointer; font-size: 0.85rem; }
+  .ev-topbar .primary { background: #1a3a1a; border-color: #2a5a2a; }
+  .ev-topbar button:disabled { color: #555; border-color: #2a2a2a;
+                                background: #111; cursor: not-allowed; }
+  .ev-topbar label { color: #aaa; font-size: 0.82rem; cursor: pointer;
+                     user-select: none; }
+  .ev-topbar .live { color: #888; font-family: monospace; font-size: 0.82rem;
+                     margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; }
+  .ev-topbar .live b { color: #cfc; font-weight: normal; }
+  .ev-topbar .carryover { color: #777; font-size: 0.78rem; font-style: italic; }
+
+  /* Winners grid is the primary surface — fills viewport. */
+  .winners { display: grid; gap: 8px; margin: 4px 0 8px;
+             grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .winner { background: #0a0a0a; border: 1px solid #1a1a1a;
+            padding: 5px; position: relative; min-height: 220px; }
+  .winner.placeholder { border-style: dashed; border-color: #1f1f1f;
+                        opacity: 0.6; }
+  .winner.placeholder::after {
+    content: "slot " attr(data-idx);
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    color: #2a2a2a; font-family: monospace; font-size: 0.78rem;
+    pointer-events: none;
+  }
   .winner canvas { display: block; background: #050505;
                    image-rendering: pixelated;
-                   border: 1px solid #1a1a1a; margin: 4px auto; }
-  .winner .name { color: #cfc; font-weight: 600; font-size: 0.85rem;
+                   border: 1px solid #1a1a1a; margin: 2px auto;
+                   width: 100%; height: auto; aspect-ratio: 1 / 1; }
+  .winner .name { color: #cfc; font-weight: 600; font-size: 0.78rem;
                   font-family: monospace; }
-  .winner .meta { color: #888; font-size: 0.72rem; margin-top: 4px;
-                  font-family: monospace; line-height: 1.4; }
+  .winner .meta { color: #888; font-size: 0.68rem; margin-top: 3px;
+                  font-family: monospace; line-height: 1.35; }
   .winner button { background: #222; color: #cfc; border: 1px solid #555;
-                   padding: 2px 8px; font-family: inherit; cursor: pointer;
-                   font-size: 0.78rem; margin-top: 4px; }
+                   padding: 2px 7px; font-family: inherit; cursor: pointer;
+                   font-size: 0.72rem; margin-top: 3px; }
   .winner button:disabled { color: #666; }
-  .section-header { color: #ace; margin: 20px 0 6px;
-                    font-size: 0.95rem; font-weight: normal;
-                    border-bottom: 1px solid #1a1a1a; padding-bottom: 4px; }
-  .hint { color: #666; font-size: 0.78rem; }
+
+  /* Collapsible "advanced" panel below the grid. */
+  details.advanced { margin-top: 4px; padding: 4px 8px;
+                     border: 1px solid #1a1a1a; background: #0a0a0a; }
+  details.advanced summary { color: #ace; font-size: 0.85rem;
+                              cursor: pointer; user-select: none; padding: 2px 0; }
+  details.advanced[open] summary { border-bottom: 1px solid #1a1a1a;
+                                    margin-bottom: 6px; padding-bottom: 4px; }
+  .adv-section-header { color: #ace; margin: 8px 0 4px;
+                        font-size: 0.85rem; font-weight: normal; }
+  .config-row { display: flex; flex-wrap: wrap; gap: 4px 12px;
+                font-size: 0.8rem; align-items: center; }
+  .config-row label { color: #aaa; display: inline-flex; align-items: center; gap: 4px; }
+  .config-row input[type=number], .config-row select {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 1px 4px; font-family: inherit; font-size: 0.78rem; width: 5em; }
+  .config-row select { width: auto; }
+  .weights { display: grid; gap: 2px 10px;
+             grid-template-columns: minmax(13em, max-content) 1fr max-content;
+             align-items: center; }
+  .weights label { color: #aaa; font-size: 0.78rem; }
+  .weights input[type=range] { width: 100%; max-width: 22em; }
+  .weights .vw { color: #cfc; font-family: monospace; min-width: 2.6em;
+                 text-align: right; font-size: 0.75rem; }
+
+  #ev-progress { font-family: monospace; color: #ace;
+                 max-height: 5em; overflow: auto;
+                 background: #050505; padding: 4px 6px;
+                 border: 1px solid #1a1a1a; font-size: 0.74rem;
+                 margin: 4px 0; }
+  .hint { color: #666; font-size: 0.76rem; }
 </style>
 
 <div class="ev-page">
-<p class="ev-meta">
-  <a href="{% url 'doom_ca:index' %}" style="color:#888;">←</a>
-  <b style="color:#ddd;">Evolve Doom CA</b>
-</p>
-<p class="ev-meta" style="max-width: 60em;">
-  A GA over doom_ca pact configurations.  Each agent's gene encodes
-  the world rule, seed byte, mode, grid size, monster count, wall
-  threshold, and pure-mode flag.  Fitness is computed by silently
-  simulating short games with a baseline AI player and weighting the
-  metrics you control below.  Pacts are <em>not</em> materialised
-  during evolution — only winners you click "materialise" on become
-  real Pact + GameSession rows.
-</p>
 
-<h3 class="section-header">Archetype</h3>
-<div class="config-grid">
-  <label for="ev-archetype">target game archetype</label>
-  <select id="ev-archetype">
-    <option value="doom" selected>Doom — explore, find exit, fight monsters</option>
-    <option value="pacman">Pacman — open maze, collect items, no weapons</option>
-    <option value="pitfall">Pitfall — linear progression, sparse hazards</option>
-    <option value="blob">Boy &amp; His Blob — companion-ish, sparse monsters</option>
-    <option value="tmnt">TMNT — beat-em-up, lots of monsters + ammo</option>
+<!-- ── Compact top bar: archetype + run controls + live readout ── -->
+<div class="ev-topbar">
+  <a class="back" href="{% url 'doom_ca:index' %}" title="back">←</a>
+  <select id="ev-archetype" title="Archetype preset (loads weights + template)">
+    <option value="doom" selected>Doom — find exit, fight monsters</option>
+    <option value="pacman">Pacman — open maze, no weapons</option>
+    <option value="pitfall">Pitfall — linear, sparse hazards</option>
+    <option value="blob">Boy &amp; His Blob — companion-ish</option>
+    <option value="tmnt">TMNT — lots of monsters + ammo</option>
     <option value="custom">Custom — leave settings as-is</option>
   </select>
-</div>
-<p class="hint" style="margin-top:-6px; max-width: 50em;">
-  Presets load curated fitness weights + gene template defaults.
-  Switching to "Custom" lets you tweak freely without being reset.
-</p>
-
-<h3 class="section-header">Population</h3>
-<div class="config-grid">
-  <label for="ev-pop">population size</label>
-  <input id="ev-pop" type="number" min="4" max="128" value="24">
-
-  <label for="ev-gens">generations</label>
-  <input id="ev-gens" type="number" min="1" max="200" value="20">
-
-  <label for="ev-mut">mutation rate</label>
-  <input id="ev-mut" type="number" min="0" max="1" step="0.01" value="0.04">
-
-  <label for="ev-cross">crossover rate</label>
-  <input id="ev-cross" type="number" min="0" max="1" step="0.05" value="0.5">
-
-  <label for="ev-elite">elitism (top-K kept)</label>
-  <input id="ev-elite" type="number" min="0" max="16" value="3">
-
-  <label for="ev-sims">simulations per agent</label>
-  <input id="ev-sims" type="number" min="1" max="10" value="3">
-
-  <label for="ev-turns">max turns per sim</label>
-  <input id="ev-turns" type="number" min="10" max="200" value="40">
-
-  <label for="ev-grid">component grid (cells/side)</label>
-  <select id="ev-grid">
-    <option value="16">16 × 16 (fastest)</option>
-    <option value="24" selected>24 × 24</option>
-    <option value="32">32 × 32 (slower)</option>
-  </select>
-
-  <label for="ev-modes">allowed modes</label>
-  <select id="ev-modes">
-    <option value="all" selected>all four (let GA pick)</option>
-    <option value="overlay">overlay only</option>
-    <option value="shift">shift only</option>
-    <option value="scent">scent only</option>
-    <option value="evolved">evolved only</option>
-    <option value="pure3">shift / scent / evolved (pure-CA modes)</option>
-  </select>
-</div>
-
-<h3 class="section-header">Fitness weights</h3>
-<div class="weights">
-  <label>playability — penalise sub-3-turn deaths</label>
-  <input type="range" id="w-playability" min="0" max="1" step="0.05" value="1.0">
-  <span class="vw" id="w-playability-v">1.00</span>
-
-  <label>challenge — reward ~50 % survival rate</label>
-  <input type="range" id="w-challenge" min="0" max="1" step="0.05" value="0.6">
-  <span class="vw" id="w-challenge-v">0.60</span>
-
-  <label>engagement — monsters encountered per sim</label>
-  <input type="range" id="w-engagement" min="0" max="1" step="0.05" value="0.4">
-  <span class="vw" id="w-engagement-v">0.40</span>
-
-  <label>navigation — reward fewer wall bumps</label>
-  <input type="range" id="w-navigation" min="0" max="1" step="0.05" value="0.3">
-  <span class="vw" id="w-navigation-v">0.30</span>
-
-  <label>exploration — reward cells visited</label>
-  <input type="range" id="w-exploration" min="0" max="1" step="0.05" value="0.4">
-  <span class="vw" id="w-exploration-v">0.40</span>
-
-  <label>purity — prefer pure-CA modes
-    (scent &gt; shift &gt; evolved &gt; overlay)</label>
-  <input type="range" id="w-purity" min="0" max="1" step="0.05" value="0.3">
-  <span class="vw" id="w-purity-v">0.30</span>
-
-  <label>completion — reward reaching the exit</label>
-  <input type="range" id="w-completion" min="0" max="1" step="0.05" value="1.0">
-  <span class="vw" id="w-completion-v">1.00</span>
-
-  <label>time-to-exit — reward shorter completions</label>
-  <input type="range" id="w-timeexit" min="0" max="1" step="0.05" value="0.3">
-  <span class="vw" id="w-timeexit-v">0.30</span>
-
-  <label>hp-remaining — reward finishing at high HP</label>
-  <input type="range" id="w-hpend" min="0" max="1" step="0.05" value="0.3">
-  <span class="vw" id="w-hpend-v">0.30</span>
-
-  <label>openness — reward maps where most ground is reachable</label>
-  <input type="range" id="w-openness" min="0" max="1" step="0.05" value="0.6">
-  <span class="vw" id="w-openness-v">0.60</span>
-
-  <label>corridor-width — reward wider hallways / open chambers</label>
-  <input type="range" id="w-corridor" min="0" max="1" step="0.05" value="0.5">
-  <span class="vw" id="w-corridor-v">0.50</span>
-</div>
-
-<p class="hint">
-  An agent dying in fewer than 3 turns in every sim scores 0 on
-  playability — that veto rules out the unwinnable.  Set a weight to
-  0 to ignore it entirely.
-</p>
-
-<div class="actions" style="margin-top: 16px;">
-  <button id="ev-start" class="primary">▶ start evolution</button>
+  <button id="ev-start" class="primary">▶ start</button>
   <button id="ev-stop" disabled>■ stop</button>
-  <label style="margin-left: 14px; color:#aaa; font-size:0.85rem;
-                cursor:pointer; user-select:none;"
-         title="When the current run finishes, immediately start another. Carry-over survivors compound across runs, so the GA keeps climbing.">
+  <label title="Auto-restart when each run finishes; survivors compound.">
     <input id="ev-continuous" type="checkbox"> continuous
   </label>
-  <button id="ev-reset" title="Discard carried-over survivors and start fresh"
-          style="margin-left: 18px;">↺ reset lineage</button>
-  <span id="ev-carryover" class="hint" style="margin-left: 12px;"></span>
+  <button id="ev-reset" title="Discard carried-over survivors">↺ reset</button>
+  <span class="live">
+    <span>gen <b id="ev-gen">—</b></span>
+    <span>eval <b id="ev-eval">0</b></span>
+    <span>best <b id="ev-best">—</b></span>
+    <span>med <b id="ev-median">—</b></span>
+    <span><b id="ev-elapsed">—</b>s</span>
+  </span>
+  <span id="ev-carryover" class="carryover"></span>
 </div>
 
-<div class="live">
-  <span>generation <b id="ev-gen">—</b></span>
-  <span>evaluated <b id="ev-eval">0</b></span>
-  <span>best fitness <b id="ev-best">—</b></span>
-  <span>median fitness <b id="ev-median">—</b></span>
-  <span>elapsed <b id="ev-elapsed">—</b> s</span>
-</div>
+<!-- ── Primary surface: winners grid (placeholders before run) ── -->
+<div class="winners" id="ev-winners"></div>
+<!-- Tucked away but still visible during a run -->
+<h3 id="winners-header" style="display:none;"></h3>
+
 <div id="ev-progress"></div>
 
-<h3 class="section-header" id="winners-header" style="display:none;">
-  Top survivors (click to materialise → real Pact + GameSession)
-</h3>
-<div class="winners" id="ev-winners"></div>
+<!-- ── Advanced controls collapsed by default ─────────────────── -->
+<details class="advanced">
+  <summary>Run parameters &amp; fitness weights</summary>
+
+  <div class="adv-section-header">Population</div>
+  <div class="config-row">
+    <label>pop <input id="ev-pop" type="number" min="4" max="128" value="24"></label>
+    <label>gens <input id="ev-gens" type="number" min="1" max="200" value="20"></label>
+    <label>mut <input id="ev-mut" type="number" min="0" max="1" step="0.01" value="0.04"></label>
+    <label>cross <input id="ev-cross" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+    <label>elite <input id="ev-elite" type="number" min="0" max="16" value="3"></label>
+    <label>sims <input id="ev-sims" type="number" min="1" max="10" value="3"></label>
+    <label>turns <input id="ev-turns" type="number" min="10" max="200" value="40"></label>
+    <label>grid
+      <select id="ev-grid">
+        <option value="16">16 × 16</option>
+        <option value="24" selected>24 × 24</option>
+        <option value="32">32 × 32</option>
+      </select>
+    </label>
+    <label>modes
+      <select id="ev-modes">
+        <option value="all" selected>all four</option>
+        <option value="overlay">overlay</option>
+        <option value="shift">shift</option>
+        <option value="scent">scent</option>
+        <option value="evolved">evolved</option>
+        <option value="pure3">shift/scent/evolved</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="adv-section-header">Fitness weights</div>
+  <div class="weights">
+    <label>playability — punish sub-3-turn deaths</label>
+    <input type="range" id="w-playability" min="0" max="1" step="0.05" value="1.0">
+    <span class="vw" id="w-playability-v">1.00</span>
+
+    <label>challenge — ~50% survival rate</label>
+    <input type="range" id="w-challenge" min="0" max="1" step="0.05" value="0.6">
+    <span class="vw" id="w-challenge-v">0.60</span>
+
+    <label>engagement — monsters encountered</label>
+    <input type="range" id="w-engagement" min="0" max="1" step="0.05" value="0.4">
+    <span class="vw" id="w-engagement-v">0.40</span>
+
+    <label>navigation — fewer wall bumps</label>
+    <input type="range" id="w-navigation" min="0" max="1" step="0.05" value="0.3">
+    <span class="vw" id="w-navigation-v">0.30</span>
+
+    <label>exploration — cells visited</label>
+    <input type="range" id="w-exploration" min="0" max="1" step="0.05" value="0.4">
+    <span class="vw" id="w-exploration-v">0.40</span>
+
+    <label>purity — pure-CA modes</label>
+    <input type="range" id="w-purity" min="0" max="1" step="0.05" value="0.3">
+    <span class="vw" id="w-purity-v">0.30</span>
+
+    <label>completion — reach the exit</label>
+    <input type="range" id="w-completion" min="0" max="1" step="0.05" value="1.0">
+    <span class="vw" id="w-completion-v">1.00</span>
+
+    <label>time-to-exit — shorter wins</label>
+    <input type="range" id="w-timeexit" min="0" max="1" step="0.05" value="0.3">
+    <span class="vw" id="w-timeexit-v">0.30</span>
+
+    <label>hp-remaining — finish at high HP</label>
+    <input type="range" id="w-hpend" min="0" max="1" step="0.05" value="0.3">
+    <span class="vw" id="w-hpend-v">0.30</span>
+
+    <label>openness — reachable cells</label>
+    <input type="range" id="w-openness" min="0" max="1" step="0.05" value="0.6">
+    <span class="vw" id="w-openness-v">0.60</span>
+
+    <label>corridor-width — wider hallways</label>
+    <input type="range" id="w-corridor" min="0" max="1" step="0.05" value="0.5">
+    <span class="vw" id="w-corridor-v">0.50</span>
+  </div>
+  <p class="hint">
+    Playability acts as a soft veto — sub-3-turn deaths cap that
+    component at low values, so genes that never survive get pruned.
+  </p>
+</details>
 </div>
 
 <script src="{% static 'doom_ca/engine.js' %}"></script>
@@ -753,18 +756,16 @@
     }
   }
   updateCarryoverIndicator();
-  // If we already have carry-over from a prior session, show them so
-  // the user can see + materialise without re-running.
-  if (bestEverList.length) {
-    setTimeout(function () { renderWinners(bestEverList); }, 0);
-  }
+  // Render slots immediately on load — either carry-over winners
+  // promoted to the front, or an empty grid of placeholders so the
+  // page never sits blank before evolution starts.
+  setTimeout(function () { renderWinners(bestEverList); }, 0);
   document.getElementById('ev-reset').addEventListener('click', function () {
     bestEverList = [];
     try { localStorage.removeItem(BEST_KEY); } catch (e) {}
     updateCarryoverIndicator();
     stopAllPreviews();
-    document.getElementById('ev-winners').innerHTML = '';
-    document.getElementById('winners-header').style.display = 'none';
+    renderWinners(bestEverList);   // re-paint as empty placeholders
   });
 
   // Normalise a carried-over gene to the current run's grid + mode
@@ -798,8 +799,10 @@
     startBtn.disabled = true;
     stopBtn.disabled = false;
     document.getElementById('ev-progress').textContent = '';
-    document.getElementById('ev-winners').innerHTML = '';
-    document.getElementById('winners-header').style.display = 'none';
+    // Repaint grid as placeholders + any carry-over winners; we no
+    // longer wipe — keeping the grid populated avoids a blank-screen
+    // flash at the start of every run.
+    renderWinners(bestEverList);
     // NB: do NOT clear bestEverList here — carry-over from previous
     // sessions seeds this run so evolution accumulates.  The reset
     // button is the only way to wipe.
@@ -885,6 +888,8 @@
       logProgress('gen ' + (gen + 1) + ': best ' + best.toFixed(3)
                 + ', median ' + median.toFixed(3)
                 + ', mode-mix ' + modeMix(population));
+      // Refresh the live grid so the user watches it fill in.
+      renderWinners(bestEverList);
 
       if (stopRequested) break;
       if (gen + 1 >= cfg.gens) break;
@@ -940,12 +945,30 @@
   }
 
   // ─── Render winners ──────────────────────────────────────────
+  // How many slot cards to show.  Grows when bestEverList exceeds it,
+  // shrinks back to BEST_KEEP otherwise.  Empty slots render as dashed
+  // placeholders so the page has shape before any genes are evolved.
+  var SLOT_COUNT = 12;
+
   function renderWinners (list) {
     stopAllPreviews();
     var wrap = document.getElementById('ev-winners');
     wrap.innerHTML = '';
-    document.getElementById('winners-header').style.display = list.length ? '' : 'none';
-    list.forEach(function (a, idx) {
+    // Header is decorative — the grid itself is the surface.
+    var hdr = document.getElementById('winners-header');
+    if (hdr) hdr.style.display = 'none';
+    var nSlots = Math.max(SLOT_COUNT, list.length);
+    for (var i = list.length; i < nSlots; i++) {
+      var ph = document.createElement('div');
+      ph.className = 'winner placeholder';
+      ph.setAttribute('data-idx', i + 1);
+      // Insert real cards first (above), placeholders fill the rest.
+      // Build placeholders in document order — we'll prepend real ones.
+      wrap.appendChild(ph);
+    }
+    // Real cards inserted at the front so they're always before placeholders.
+    list.slice().reverse().forEach(function (a, revIdx) {
+      var idx = list.length - 1 - revIdx;
       var card = document.createElement('div');
       card.className = 'winner';
       var canv = document.createElement('canvas');
@@ -979,7 +1002,8 @@
       btn.textContent = '→ materialise';
       btn.addEventListener('click', function () { materialise(a, btn); });
       card.appendChild(btn);
-      wrap.appendChild(card);
+      // Prepend real cards so they sit before placeholders.
+      wrap.insertBefore(card, wrap.firstChild);
     });
   }
 
