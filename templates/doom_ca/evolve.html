@@ -147,6 +147,9 @@
 <div class="actions" style="margin-top: 16px;">
   <button id="ev-start" class="primary">▶ start evolution</button>
   <button id="ev-stop" disabled>■ stop</button>
+  <button id="ev-reset" title="Discard carried-over survivors and start fresh"
+          style="margin-left: 18px;">↺ reset lineage</button>
+  <span id="ev-carryover" class="hint" style="margin-left: 12px;"></span>
 </div>
 
 <div class="live">
@@ -438,12 +441,100 @@
     };
   }
 
-  var bestEverList = [];
+  // bestEverList is persisted across sessions in localStorage so that
+  // hitting "start evolution" a second time picks up where the first
+  // left off — the GA accumulates toward an ideal game instead of
+  // restarting from random every run.  Reset button clears it.
+  var BEST_KEY = 'doom_ca.evolve.bestEverList.v1';
+  var BEST_KEEP = 12;
+  var bestEverList = loadBestEver();
 
   function recordBest (agent, k) {
     bestEverList.push(agent);
     bestEverList.sort(function (a, b) { return b.fitness - a.fitness; });
     if (bestEverList.length > k) bestEverList.length = k;
+  }
+
+  function serialiseAgent (a) {
+    return {
+      fitness: a.fitness, gen: a.gen,
+      evaln: a.evaln,
+      gene: {
+        rule: Array.from(a.gene.rule),
+        seed_byte: a.gene.seed_byte,
+        component_grid: a.gene.component_grid,
+        world_mode: a.gene.world_mode,
+        monster_count: a.gene.monster_count,
+        wall_threshold: a.gene.wall_threshold,
+        pure_mode: a.gene.pure_mode,
+        palette: a.gene.palette,
+      },
+    };
+  }
+  function deserialiseAgent (o) {
+    return {
+      fitness: o.fitness, gen: o.gen, evaln: o.evaln,
+      gene: {
+        rule: new Uint8Array(o.gene.rule),
+        seed_byte: o.gene.seed_byte,
+        component_grid: o.gene.component_grid,
+        world_mode: o.gene.world_mode,
+        monster_count: o.gene.monster_count,
+        wall_threshold: o.gene.wall_threshold,
+        pure_mode: o.gene.pure_mode,
+        palette: o.gene.palette,
+      },
+    };
+  }
+  function saveBestEver () {
+    try {
+      var raw = JSON.stringify(bestEverList.map(serialiseAgent));
+      localStorage.setItem(BEST_KEY, raw);
+    } catch (e) { /* storage full / disabled — survivors stay in-memory */ }
+  }
+  function loadBestEver () {
+    try {
+      var raw = localStorage.getItem(BEST_KEY);
+      if (!raw) return [];
+      return JSON.parse(raw).map(deserialiseAgent);
+    } catch (e) { return []; }
+  }
+  function updateCarryoverIndicator () {
+    var span = document.getElementById('ev-carryover');
+    if (!span) return;
+    if (bestEverList.length === 0) {
+      span.textContent = 'no carry-over — next run starts from scratch';
+    } else {
+      var best = bestEverList[0].fitness;
+      span.textContent = 'carry-over: ' + bestEverList.length
+        + ' survivor' + (bestEverList.length === 1 ? '' : 's')
+        + ' (best ' + best.toFixed(3) + ') will seed the next run';
+    }
+  }
+  updateCarryoverIndicator();
+  // If we already have carry-over from a prior session, show them so
+  // the user can see + materialise without re-running.
+  if (bestEverList.length) {
+    setTimeout(function () { renderWinners(bestEverList); }, 0);
+  }
+  document.getElementById('ev-reset').addEventListener('click', function () {
+    bestEverList = [];
+    try { localStorage.removeItem(BEST_KEY); } catch (e) {}
+    updateCarryoverIndicator();
+    stopAllPreviews();
+    document.getElementById('ev-winners').innerHTML = '';
+    document.getElementById('winners-header').style.display = 'none';
+  });
+
+  // Normalise a carried-over gene to the current run's grid + mode
+  // constraints so the GA respects the user's new settings.
+  function adoptCarriedGene (oldGene, opts, rng) {
+    var g = cloneGene(oldGene);
+    g.component_grid = opts.gridSide;
+    if (opts.modes.indexOf(g.world_mode) === -1) {
+      g.world_mode = opts.modes[(rng() * opts.modes.length) | 0];
+    }
+    return g;
   }
 
   async function startEvolution () {
@@ -453,17 +544,45 @@
     document.getElementById('ev-progress').textContent = '';
     document.getElementById('ev-winners').innerHTML = '';
     document.getElementById('winners-header').style.display = 'none';
-    bestEverList = [];
+    // NB: do NOT clear bestEverList here — carry-over from previous
+    // sessions seeds this run so evolution accumulates.  The reset
+    // button is the only way to wipe.
 
     var cfg = getConfig();
     var rng = rngFromSeed(Date.now() & 0x7fffffff);
     var t0 = performance.now();
 
-    logProgress('Initialising population of ' + cfg.pop + '…');
     var population = [];
-    for (var i = 0; i < cfg.pop; i++) {
-      var g = randomGene(rng, {modes: cfg.modes, gridSide: cfg.gridSide});
-      population.push({gene: g, fitness: 0, evaln: null});
+    var carried = bestEverList.length;
+    if (carried > 0) {
+      // Slot 1: top N carry-over survivors verbatim (adopted to new
+      // grid/mode constraints).  Slot 2: mutated copies of each.
+      // Slot 3: fresh random fill for diversity.
+      logProgress('Seeding population from ' + carried + ' carry-over survivor'
+        + (carried === 1 ? '' : 's') + ' + mutation + random fill…');
+      var nVerbatim = Math.min(carried, Math.max(1, Math.floor(cfg.pop * 0.25)));
+      var nMutated  = Math.min(cfg.pop - nVerbatim,
+                               Math.max(1, Math.floor(cfg.pop * 0.5)));
+      for (var i = 0; i < nVerbatim; i++) {
+        var g = adoptCarriedGene(bestEverList[i].gene, cfg, rng);
+        population.push({gene: g, fitness: 0, evaln: null});
+      }
+      for (var i = 0; i < nMutated; i++) {
+        var parent = bestEverList[i % carried].gene;
+        var g = adoptCarriedGene(parent, cfg, rng);
+        g = mutate(g, rng, cfg.mut, {modes: cfg.modes});
+        population.push({gene: g, fitness: 0, evaln: null});
+      }
+      while (population.length < cfg.pop) {
+        var g = randomGene(rng, {modes: cfg.modes, gridSide: cfg.gridSide});
+        population.push({gene: g, fitness: 0, evaln: null});
+      }
+    } else {
+      logProgress('Initialising fresh population of ' + cfg.pop + '…');
+      for (var i = 0; i < cfg.pop; i++) {
+        var g = randomGene(rng, {modes: cfg.modes, gridSide: cfg.gridSide});
+        population.push({gene: g, fitness: 0, evaln: null});
+      }
     }
 
     var evalCount = 0;
@@ -490,7 +609,7 @@
         recordBest({gene: cloneGene(population[k].gene),
                     fitness: population[k].fitness,
                     evaln: population[k].evaln,
-                    gen: gen}, 12);
+                    gen: gen}, BEST_KEEP);
       }
 
       document.getElementById('ev-gen').textContent = (gen + 1) + ' / ' + cfg.gens;
@@ -530,7 +649,10 @@
 
     startBtn.disabled = false;
     stopBtn.disabled = true;
-    logProgress('Done.  ' + bestEverList.length + ' top survivors.');
+    saveBestEver();
+    updateCarryoverIndicator();
+    logProgress('Done.  ' + bestEverList.length
+              + ' top survivors carried for next run.');
     renderWinners(bestEverList);
   }
 
