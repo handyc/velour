@@ -1735,22 +1735,37 @@
     // Cell fills.  Walls = solid palette colour; air cells get a faint
     // tint from palette[0]/palette[1] so the slip-ground variant is
     // visible against the sky gradient.
+    var wallsDrawn = 0;
     for (var dy = 0; dy < visRows; dy++) {
       var wy = y0 + dy;
       for (var dx = 0; dx < visCols; dx++) {
         var wx = x0 + dx;
         if (wx < 0 || wx >= GRID) continue;
         var p = screenOf(wx, wy);
-        var raw = get(((wx % GRID) + GRID) % GRID, wy);
+        var rawCell = (wy >= 0 && wy < GRID)
+                      ? get(((wx % GRID) + GRID) % GRID, wy)
+                      : 3;   // outside the grid → render as solid floor/ceiling
         if (platformIsWall(wx, wy)) {
-          ctx.fillStyle = (raw === 3) ? COL_WALL : COL_WALL_DK;
+          ctx.fillStyle = (rawCell === 3) ? COL_WALL : COL_WALL_DK;
           ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
-        } else if (raw === 1) {
+          // Slim darker edge along the top of each wall so platform
+          // tops read as standable surfaces even at sparse densities.
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.fillRect(p[0], p[1], CELL_PX + 0.5, Math.max(2, CELL_PX * 0.12));
+          wallsDrawn++;
+        } else if (rawCell === 1) {
           ctx.fillStyle = 'rgba(' + componentPalette[1].join(',') + ',0.22)';
           ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
         }
       }
     }
+    // Build stamp so a stale browser cache is obvious — if you don't
+    // see this text, the JS is cached; hard-reload (Ctrl+Shift+R).
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('platform · cells: ' + wallsDrawn
+                 + ' · thresh: ' + PLATFORM_WALL_THRESH, 6, H - 6);
     // Door, key, exit
     function drawOverlay (idx, drawFn) {
       if (idx == null || idx < 0) return;
