@@ -210,7 +210,7 @@
     return Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dx + dy));
   }
 
-  var world, swap, generation, turn, player, monsters, gameOver;
+  var world, swap, generation, turn, player, monsters, gameOver, deathCause;
   var items, doorIdx, keyIdx, exitIdx, doorOpen;
   var canvas = document.getElementById('dc-canvas');
   var ctx = canvas.getContext('2d');
@@ -241,12 +241,56 @@
   var palette = payload.palette;
   function isPerComponent (p) { return Array.isArray(p[0][0]); }
   var componentPalette = isPerComponent(palette) ? palette[COMPONENT] : palette;
-  var COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
-  var COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
+  var COL_WALL, COL_WALL_DK;
+  function applyPalette (pal) {
+    componentPalette = pal;
+    COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
+    COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
+  }
+  applyPalette(componentPalette);
   var COL_GROUND  = '#1a1a1a';
   var COL_PLAYER  = '#58a6ff';
   var COL_MONSTER = '#f85149';
   var COL_PLAYER_HALO = 'rgba(88,166,255,0.18)';
+
+  // HSV-spaced random palette generator + shuffle.  Same algorithm as
+  // evolve.html / spoeqi so colour styles feel consistent across the app.
+  function _hsvToRgb (h, s, v) {
+    var i = Math.floor(h * 6);
+    var f = h * 6 - i;
+    var p = v * (1 - s);
+    var q = v * (1 - f * s);
+    var t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: return [v, t, p];
+      case 1: return [q, v, p];
+      case 2: return [p, v, t];
+      case 3: return [p, q, v];
+      case 4: return [t, p, v];
+      case 5: return [v, p, q];
+    }
+  }
+  function randomisePaletteNow () {
+    var rot = Math.random();
+    var out = [];
+    for (var i = 0; i < 4; i++) {
+      var h = (rot + i / 4 + (Math.random() * 0.06 - 0.03)) % 1.0;
+      if (h < 0) h += 1.0;
+      var s = 0.55 + Math.random() * 0.4;
+      var v = 0.55 + Math.random() * 0.4;
+      var rgb = _hsvToRgb(h, s, v);
+      out.push([Math.floor(rgb[0] * 255),
+                Math.floor(rgb[1] * 255),
+                Math.floor(rgb[2] * 255)]);
+    }
+    for (var k = out.length - 1; k > 0; k--) {
+      var j = Math.floor(Math.random() * (k + 1));
+      var tmp = out[k]; out[k] = out[j]; out[j] = tmp;
+    }
+    applyPalette(out);
+    if (typeof draw === 'function' && player) draw();
+  }
+  window.__doomRandomisePalette = randomisePaletteNow;
 
   function get (x, y) {
     return world[((y + GRID) % GRID) * GRID + ((x + GRID) % GRID)];
@@ -363,6 +407,7 @@
     generation = 0;
     turn = 0;
     gameOver = false;
+    deathCause = null;
 
     if (MODE === 'overlay') {
       world = seedGrid(seed[COMPONENT]).slice();
@@ -461,6 +506,15 @@
     return true;
   }
 
+  // Whenever something deals HP damage, set lastHurtBy so that if the
+  // player ends up dying that turn we know what to put in the
+  // "you died — …" message.  String values get used verbatim.
+  var lastHurtBy = null;
+  function hurt (amount, cause) {
+    player.hp -= amount;
+    lastHurtBy = cause;
+  }
+
   function pickupAt (cellIdx) {
     var it = items[cellIdx];
     if (!it) return;
@@ -491,7 +545,7 @@
       var hit = monsters.find(function (m) {
         return m.alive && m.x === nx && m.y === ny; });
       if (hit) {
-        if (!autoFireAt(nx, ny)) player.hp -= 30;
+        if (!autoFireAt(nx, ny)) hurt(30, 'collided with a monster while empty-handed');
         hit.alive = false;
       }
       player.x = nx; player.y = ny;
@@ -508,7 +562,7 @@
       if (occupant === WALL) { afterMove(); return; }
       if (tryEnterDoor(targetIdx)) { afterMove(); return; }
       if (occupant === MONSTER) {
-        if (!autoFireAt(target[0], target[1])) player.hp -= 30;
+        if (!autoFireAt(target[0], target[1])) hurt(30, 'collided with a monster while empty-handed');
         set(target[0], target[1], GROUND);
       }
       tickRule(shiftRules[dirIdx]);
@@ -521,7 +575,7 @@
       if (occupant === WALL) { afterMove(); return; }
       if (tryEnterDoor(targetIdx)) { afterMove(); return; }
       if (occupant === MONSTER) {
-        if (!autoFireAt(target[0], target[1])) player.hp -= 30;
+        if (!autoFireAt(target[0], target[1])) hurt(30, 'collided with a monster while empty-handed');
       }
       set(player.x, player.y, GROUND);
       set(target[0], target[1], PLAYER);
@@ -568,7 +622,7 @@
     for (var d = 0; d < 6; d++) {
       var nb = neighbourCoord(player.x, player.y, d);
       if (get(nb[0], nb[1]) === MONSTER) {
-        if (!autoFireAt(nb[0], nb[1])) player.hp -= 10;
+        if (!autoFireAt(nb[0], nb[1])) hurt(10, 'gnawed on by adjacent monsters');
         set(nb[0], nb[1], GROUND);
       }
     }
@@ -580,7 +634,10 @@
     var rate = paused ? 0 : worldRate;
     if (MODE === 'overlay') {
       for (var t = 0; t < rate; t++) tickPactRule();
-      if (isWallForOverlay(get(player.x, player.y))) gameOver = 'lost';
+      if (isWallForOverlay(get(player.x, player.y))) {
+        gameOver = 'lost';
+        deathCause = 'crushed by a wall that grew under you';
+      }
       moveOverlayMonsters();
     } else if (MODE === 'shift') {
       if (!skipPactTick && !PURE_MODE) {
@@ -601,7 +658,10 @@
       checkGameOver_singleRule();
     }
     meleeAdjacent();
-    if (player.hp <= 0) gameOver = 'lost';
+    if (player.hp <= 0 && !gameOver) {
+      gameOver = 'lost';
+      deathCause = lastHurtBy || 'bled out';
+    }
     if (!gameOver && player.y * GRID + player.x === exitIdx) gameOver = 'won';
     draw(); updateReadouts();
   }
@@ -609,6 +669,7 @@
   function checkGameOver_singleRule () {
     if (get(player.x, player.y) !== PLAYER) {
       gameOver = 'lost';
+      deathCause = 'overwritten by the rule — the world ate you';
     }
   }
 
@@ -643,7 +704,7 @@
         var dest = neighbourCoord(m.x, m.y, pick);
         m.x = dest[0]; m.y = dest[1];
         if (m.x === player.x && m.y === player.y) {
-          if (!autoFireAt(m.x, m.y)) player.hp -= 30;
+          if (!autoFireAt(m.x, m.y)) hurt(30, 'caught by a charging monster');
           m.alive = false;
         }
       }
@@ -842,7 +903,8 @@
     var s = document.getElementById('dc-status');
     if (s) {
       if (gameOver === 'lost') {
-        s.innerHTML = '<span class="game-over">— you died.</span>';
+        var cause = deathCause ? ' — ' + deathCause + '.' : '.';
+        s.innerHTML = '<span class="game-over">— you died' + cause + '</span>';
       } else if (gameOver === 'won') {
         s.innerHTML = '<span class="you-win">— reached the exit. ' + hp + ' HP remaining.</span>';
       } else {
@@ -877,6 +939,9 @@
   });
   var resetEl = document.getElementById('dc-reset');
   if (resetEl) resetEl.addEventListener('click', init);
+
+  var randPalEl = document.getElementById('dc-randpal');
+  if (randPalEl) randPalEl.addEventListener('click', randomisePaletteNow);
 
   document.addEventListener('keydown', function (ev) {
     if (gameOver) {

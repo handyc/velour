@@ -119,6 +119,13 @@
      title="Download as a single self-contained .html file you can drop into any site.">
     ⤓ export standalone
   </a>
+  <button id="dc-randpal" type="button"
+          style="background:#1a0a1a; color:#fcf; border:1px solid #535;
+                 padding:2px 10px; font-family:inherit; cursor:pointer;
+                 margin-right:10px;"
+          title="Re-roll the 4-colour palette (live, no reload).">
+    🎨 randomise palette
+  </button>
   <form method="post" action="{% url 'doom_ca:delete' slug=session.slug %}"
         style="display:inline;">
     {% csrf_token %}
