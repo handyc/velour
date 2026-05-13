@@ -36,6 +36,10 @@ class GameSession(models.Model):
                      'attack-adjacent (illustrative GA target)'),
         ('platform', 'platform — Cartesian side-scroller, gravity + jump, '
                      'wall cells are platforms; enemies walk their tops'),
+        ('ink',      'ink — player IS a state-2 cell inside the CA; '
+                     'movement drips state-2 into target, leaves a state-2 '
+                     'trail the rule evolves; display masks state-2/3 cells '
+                     'as floor (fog of war) until revealed'),
     ]
 
     name        = models.CharField(max_length=80, unique=True)

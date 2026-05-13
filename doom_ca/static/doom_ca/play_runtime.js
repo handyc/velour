@@ -45,6 +45,12 @@
              'side-scroller.  Wall cells are platforms; gravity pulls the ' +
              'player down; A/D = move, Space = jump, F = fire.  Monsters ' +
              'walk along platform tops, reversing at gaps.',
+    ink:     'ink mode — you ARE a state-2 cell inside the K=4 CA.  ' +
+             'Moving drips state-2 into the target cell and leaves the ' +
+             'old one as a silent state-2 trail the rule then evolves.  ' +
+             'State-2/3 cells render as floor unless they\'re the controlled ' +
+             'player (you) or a revealed brush-bot — touching a state-3 ' +
+             'cell reveals it; it then chases you, dripping state-3 ink.',
   };
   var noteEl = document.getElementById('dc-mode-note');
   if (noteEl) {
@@ -276,11 +282,20 @@
     if (lg3) lg3.style.background = COL_WALL;
     // Update legend text so the mechanic-meaningful state is called out.
     var t0 = document.getElementById('leg-c0-text');
-    if (t0) t0.textContent = 'ground (state 0)';
     var t1 = document.getElementById('leg-c1-text');
-    if (t1) t1.textContent = SLIP_ON_1 ? 'slip-ground (state 1)' : 'ground (state 1)';
     var t2 = document.getElementById('leg-c2-text');
-    if (t2) t2.textContent = DESTRUCT_W2 ? 'fragile wall (state 2)' : 'wall (state 2)';
+    var t3 = document.getElementById('leg-c3-text');
+    if (MODE === 'ink') {
+      if (t0) t0.textContent = 'ground (state 0)';
+      if (t1) t1.textContent = 'wall (state 1)';
+      if (t2) t2.textContent = 'player ink (state 2 · only you visible)';
+      if (t3) t3.textContent = 'brush-bot (state 3 · only revealed visible)';
+    } else {
+      if (t0) t0.textContent = 'ground (state 0)';
+      if (t1) t1.textContent = SLIP_ON_1 ? 'slip-ground (state 1)' : 'ground (state 1)';
+      if (t2) t2.textContent = DESTRUCT_W2 ? 'fragile wall (state 2)' : 'wall (state 2)';
+      if (t3) t3.textContent = 'wall (state 3)';
+    }
   }
   applyPalette(componentPalette);
   var COL_GROUND  = '#1a1a1a';
@@ -449,6 +464,11 @@
 
     if (MODE === 'platform') {
       initPlatformMode();
+      return;
+    }
+
+    if (MODE === 'ink') {
+      initInkMode();
       return;
     }
 
@@ -681,6 +701,7 @@
 
   function playerMove (dirIdx) {
     if (gameOver) return;
+    if (MODE === 'ink') { playerMoveInk(dirIdx); return; }
     player.lastDir = dirIdx;
     if (MODE === 'overlay') {
       var nb = neighbourCoord(player.x, player.y, dirIdx);
@@ -752,10 +773,15 @@
     }
   }
 
-  function playerWait () { if (!gameOver) afterMove(); }
+  function playerWait () {
+    if (gameOver) return;
+    if (MODE === 'ink') { afterMoveInk(); return; }
+    afterMove();
+  }
 
   function playerFire () {
     if (gameOver) return;
+    if (MODE === 'ink') { playerFireInk(); return; }
     if (!player.hasShotgun) return;
     if (player.ammo <= 0) return;
     player.ammo--;
@@ -905,7 +931,20 @@
         var screenX = (dx + half) * H_STEP + rowShift;
         var screenY = (dy + half) * V_STEP;
         var fill;
-        if (MODE === 'overlay') {
+        if (MODE === 'ink') {
+          // Fog of war.  Default everything to floor (palette[0]).
+          // Only the controlled player cell and revealed brush-bot
+          // heads break through.
+          if (cell === INK_WALL) fill = COL_S1;
+          else                    fill = COL_S0;
+          if (wx === player.x && wy === player.y) fill = COL_WALL_DK;
+          else if (cell === INK_MONSTER) {
+            for (var bi = 0; bi < brushBots.length; bi++) {
+              var b = brushBots[bi];
+              if (b.alive && b.x === wx && b.y === wy) { fill = COL_WALL; break; }
+            }
+          }
+        } else if (MODE === 'overlay') {
           fill = (cell === 3) ? COL_WALL
                : (cell === 2) ? COL_WALL_DK
                : (cell === 1) ? COL_S1
@@ -987,9 +1026,14 @@
       }; })(it));
     }
 
-    var mDrawList = (MODE === 'overlay')
-      ? monsters.filter(function (m) { return m.alive; })
-      : monsters;
+    // Ink mode is fog-of-war: monsters are drawn via cell-fills
+    // (palette[3] for revealed bot heads) and the player is drawn
+    // via cell-fill (palette[2]).  Skip the JS overlays entirely.
+    var mDrawList = (MODE === 'ink')
+      ? []
+      : (MODE === 'overlay')
+        ? monsters.filter(function (m) { return m.alive; })
+        : monsters;
     for (var i = 0; i < mDrawList.length; i++) {
       var m = mDrawList[i];
       var ddx = m.x - player.x;
@@ -1010,20 +1054,31 @@
     var prs = (player.y & 1) ? CELL_PX * 0.5 : 0;
     var px = half * H_STEP + prs + CELL_PX / 2;
     var py = half * V_STEP + CELL_PX / 2;
-    ctx.fillStyle = COL_PLAYER_HALO;
-    ctx.beginPath();
-    ctx.arc(px, py, CELL_PX * 0.7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = COL_PLAYER;
-    ctx.beginPath();
-    ctx.arc(px, py, CELL_PX * 0.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(88,166,255,0.7)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px - 8, py); ctx.lineTo(px + 8, py);
-    ctx.moveTo(px, py - 8); ctx.lineTo(px, py + 8);
-    ctx.stroke();
+    if (MODE !== 'ink') {
+      ctx.fillStyle = COL_PLAYER_HALO;
+      ctx.beginPath();
+      ctx.arc(px, py, CELL_PX * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = COL_PLAYER;
+      ctx.beginPath();
+      ctx.arc(px, py, CELL_PX * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(88,166,255,0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px - 8, py); ctx.lineTo(px + 8, py);
+      ctx.moveTo(px, py - 8); ctx.lineTo(px, py + 8);
+      ctx.stroke();
+    } else {
+      // Subtle reticule on the controlled cell so the player can
+      // still pick themselves out at a glance, without breaking the
+      // K=4 colour discipline.
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(px, py, CELL_PX * 0.38, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     if (fireFlash && fireFlash.framesLeft > 0) {
       var ff = fireFlash;
       function screenCoord (wx, wy) {
@@ -1060,10 +1115,19 @@
     };
     setText('dc-turn', turn);
     setText('dc-pos', '(' + player.x + ',' + player.y + ')');
-    setText('dc-mleft',
-      (MODE === 'overlay')
-        ? monsters.filter(function (m) { return m.alive; }).length
-        : monsters.length);
+    var monsterDisplay;
+    if (MODE === 'ink') {
+      var revealed = 0;
+      for (var i = 0; i < brushBots.length; i++) {
+        if (brushBots[i].alive) revealed++;
+      }
+      monsterDisplay = revealed + ' revealed';
+    } else if (MODE === 'overlay') {
+      monsterDisplay = monsters.filter(function (m) { return m.alive; }).length;
+    } else {
+      monsterDisplay = monsters.length;
+    }
+    setText('dc-mleft', monsterDisplay);
     setText('dc-gen', generation);
     var hp = Math.max(0, player.hp || 0);
     setText('dc-hp', hp);
@@ -1146,6 +1210,226 @@
   });
   canvas.tabIndex = 0;
   canvas.focus();
+
+  // ─── Ink mode ────────────────────────────────────────────────
+  // Player is one specific state-2 cell inside the K=4 CA.  Moving
+  // writes state-2 into the target cell and leaves state-2 in the
+  // current one — a "drip" the pact rule then evolves.  State-2 and
+  // state-3 cells render as floor unless they're the controlled
+  // player or a revealed brush-bot.  First contact with a state-3
+  // cell reveals it: that cell becomes a brush-bot that chases the
+  // player, dripping state-3 ink the same way.
+  // INK_GROUND/INK_WALL refer to K=4 states with the ink-mode
+  // semantic (0 / 1), not the simplified WALL/GROUND constants from
+  // the engine which collide with state-2/3 in this mode.
+  var INK_GROUND = 0, INK_WALL = 1, INK_PLAYER = 2, INK_MONSTER = 3;
+  var brushBots = [];   // revealed bots: {x, y, lastDir, alive}
+  function inkIsWall (s) { return s === INK_WALL; }
+  function initInkMode () {
+    var raw = seedGrid(seed[COMPONENT]);
+    world = new Uint8Array(GRID * GRID);
+    // Re-derive the K=4 grid: cells below wall_threshold collapse to
+    // state-0/1 based on simple seed-byte parity (so the level still
+    // has structure); cells at-or-above stay as state-1 walls.  This
+    // gives the rule a clean substrate; the player + bots add their
+    // own state-2/3 cells over time.
+    for (var i = 0; i < raw.length; i++) {
+      var r = raw[i];
+      if (r >= WALL_THRESH) world[i] = INK_WALL;
+      else                  world[i] = INK_GROUND;
+    }
+    // Spawn the player near centre, on a state-0 cell.
+    var c = Math.floor(GRID / 2);
+    player = findGroundNear(c, c, inkIsWall);
+    player.hp = 100; player.ammo = 0;
+    player.hasShotgun = false; player.hasKey = false;
+    player.lastDir = 1;
+    set(player.x, player.y, INK_PLAYER);
+
+    // Items + door + exit on top of an overlay-style binary view.
+    var level = placeLevelOnce(world, player.x, player.y);
+    items = level.items; doorIdx = level.doorIdx;
+    keyIdx = level.keyIdx; exitIdx = level.exitIdx; doorOpen = false;
+
+    // Place hidden monsters as state-3 cells in the K=4 grid.  None
+    // are revealed yet → they all display as floor.
+    brushBots = [];
+    monsters = [];
+    tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 32).then(function (bytes) {
+      var bi = 0, placed = 0, attempts = 0;
+      while (placed < MONSTER_COUNT && attempts < MONSTER_COUNT * 30) {
+        attempts++;
+        var mx = bytes[bi % bytes.length] % GRID; bi++;
+        var my = bytes[bi % bytes.length] % GRID; bi++;
+        if (get(mx, my) !== INK_GROUND) continue;
+        var midx = my * GRID + mx;
+        if (midx === exitIdx || midx === doorIdx
+            || midx === keyIdx || items[midx]) continue;
+        if (hexDist(mx, my, player.x, player.y) < 4) continue;
+        set(mx, my, INK_MONSTER);
+        placed++;
+      }
+      tieBreakBytes = bytes;
+      draw(); updateReadouts();
+    });
+  }
+
+  function inkRevealAdjacent () {
+    // Any state-3 cell within 1 hex of the controlled player becomes
+    // a brush-bot.  Idempotent: a bot already in the list isn't
+    // duplicated.
+    for (var d = 0; d < 6; d++) {
+      var nb = neighbourCoord(player.x, player.y, d);
+      if (get(nb[0], nb[1]) !== INK_MONSTER) continue;
+      var already = false;
+      for (var i = 0; i < brushBots.length; i++) {
+        if (brushBots[i].x === nb[0] && brushBots[i].y === nb[1]
+            && brushBots[i].alive) { already = true; break; }
+      }
+      if (!already) brushBots.push({x: nb[0], y: nb[1], lastDir: 0, alive: true});
+    }
+  }
+
+  function inkTickBrushBots () {
+    // Each revealed brush-bot moves one hex toward the player using
+    // greedy hex distance, dripping state-3 the way the player drips
+    // state-2.  Walls block; the bot waits if all 6 neighbours are
+    // walls.  Walking onto the player damages -30 HP.
+    for (var i = 0; i < brushBots.length; i++) {
+      var b = brushBots[i];
+      if (!b.alive) continue;
+      var best = -1, bestDist = hexDist(b.x, b.y, player.x, player.y);
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(b.x, b.y, d);
+        var s = get(nb[0], nb[1]);
+        if (s === INK_WALL) continue;
+        var dd = hexDist(nb[0], nb[1], player.x, player.y);
+        if (dd < bestDist) { bestDist = dd; best = d; }
+      }
+      if (best < 0) continue;
+      var nb = neighbourCoord(b.x, b.y, best);
+      if (nb[0] === player.x && nb[1] === player.y) {
+        // Bite the player.  Bot stays put (since the player is on
+        // the cell); damage taken.
+        hurt(30, 'caught by a brush-bot');
+        continue;
+      }
+      // Drip: target becomes state-3; source stays state-3 (the
+      // trail).  Bot position advances.
+      set(nb[0], nb[1], INK_MONSTER);
+      b.x = nb[0]; b.y = nb[1]; b.lastDir = best;
+    }
+  }
+
+  function playerMoveInk (dirIdx) {
+    if (gameOver) return;
+    player.lastDir = dirIdx;
+    var nb = neighbourCoord(player.x, player.y, dirIdx);
+    var nx = nb[0], ny = nb[1];
+    var targetIdx = ny * GRID + nx;
+    var occ = get(nx, ny);
+    if (occ === INK_WALL) { afterMoveInk(); return; }
+    if (tryEnterDoor(targetIdx)) { afterMoveInk(); return; }
+    if (occ === INK_MONSTER) {
+      // Either a hidden monster cell (first contact → reveal,
+      // no damage) or part of a brush-bot trail.  Check whether
+      // it matches a brush-bot's current head.
+      var head = null;
+      for (var i = 0; i < brushBots.length; i++) {
+        if (brushBots[i].alive
+            && brushBots[i].x === nx && brushBots[i].y === ny) {
+          head = brushBots[i]; break;
+        }
+      }
+      if (head) {
+        // Walking onto a brush-bot head: damage + destroy it.
+        hurt(20, 'crashed into a revealed brush-bot');
+        head.alive = false;
+        set(nx, ny, INK_GROUND);
+      }
+      // Hidden state-3 cell: don't move; reveal is handled below.
+      afterMoveInk();
+      return;
+    }
+    // Drip-move: target ← state-2; source stays state-2.
+    set(nx, ny, INK_PLAYER);
+    if (get(player.x, player.y) !== INK_PLAYER) {
+      // First step: we may have stepped off our spawn before its
+      // cell was set to state-2.  Stamp it now so the trail is
+      // continuous.
+      set(player.x, player.y, INK_PLAYER);
+    }
+    player.x = nx; player.y = ny;
+    if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
+    pickupAt(targetIdx);
+    if (targetIdx === exitIdx) { gameOver = 'won'; }
+    afterMoveInk();
+  }
+
+  function playerFireInk () {
+    if (gameOver) return;
+    if (!player.hasShotgun) return;
+    if (player.ammo <= 0) return;
+    player.ammo--;
+    var x = player.x, y = player.y;
+    var hitX = x, hitY = y;
+    for (var step = 0; step < 4; step++) {
+      var nb = neighbourCoord(x, y, player.lastDir);
+      x = nb[0]; y = nb[1];
+      hitX = x; hitY = y;
+      var s = get(x, y);
+      if (s === INK_WALL) break;
+      // Brush-bot head?
+      var killed = false;
+      for (var i = 0; i < brushBots.length; i++) {
+        var b = brushBots[i];
+        if (b.alive && b.x === x && b.y === y) {
+          b.alive = false; set(x, y, INK_GROUND);
+          killed = true; break;
+        }
+      }
+      if (killed) break;
+      // Hidden state-3 cell: destroy + reveal nothing.
+      if (s === INK_MONSTER) { set(x, y, INK_GROUND); break; }
+      // state-2 (ink trail) and state-0 (ground): pass through.
+    }
+    fireFlash = { fromX: player.x, fromY: player.y,
+                  toX: hitX, toY: hitY, framesLeft: 2 };
+    afterMoveInk();
+  }
+
+  function afterMoveInk () {
+    turn++;
+    var rate = paused ? 0 : worldRate;
+    // Reveal any state-3 cells adjacent to the player BEFORE the bot
+    // tick, so newly-revealed ones immediately get an action.
+    inkRevealAdjacent();
+    // Pact rule ticks normally — it sees the full K=4 grid and may
+    // move state-2/3 cells around.  Brush-bot positions might end up
+    // on a cell the rule turned into something else; we'll re-stamp
+    // each surviving bot's head as state-3 to keep the bot coherent.
+    if (!PURE_MODE) for (var t = 0; t < rate; t++) tickPactRule();
+    // Re-stamp the controlled player cell so the rule can't erase
+    // the player.  (Otherwise the K=4 rule could turn the player
+    // cell into ground/wall.)
+    if (!gameOver) set(player.x, player.y, INK_PLAYER);
+    // Brush-bots act after the rule.
+    inkTickBrushBots();
+    // Re-stamp each alive bot head as state-3.
+    for (var i = 0; i < brushBots.length; i++) {
+      if (brushBots[i].alive) set(brushBots[i].x, brushBots[i].y, INK_MONSTER);
+    }
+    // Reveal anything the bots' trails or rule motion just brought
+    // adjacent to us.
+    inkRevealAdjacent();
+    // Death by player cell becoming a wall (the rule mutating us).
+    if (!gameOver && get(player.x, player.y) === INK_WALL) {
+      gameOver = 'lost';
+      deathCause = 'crushed by a wall that grew under you';
+    }
+    draw();
+    updateReadouts();
+  }
 
   // ─── Platform mode (side-scroller w/ gravity + jump) ─────────
   // Reinterprets the same hex CA grid as a Cartesian level: each

@@ -361,7 +361,12 @@
     // GA fitness — same world layout, just different player physics
     // (gravity vs hex-step) which doesn't change the fitness signals
     // we care about (HP at exit, completion, openness, etc.).
-    if (gene.world_mode === 'platform') {
+    if (gene.world_mode === 'platform' || gene.world_mode === 'ink') {
+      // For headless GA scoring, ink + platform genes are evaluated
+      // with the overlay simulator — the fitness signals (completion,
+      // HP at exit, openness) remain meaningful and the gene's other
+      // fields (rule, palette, monster_count, …) carry through to the
+      // real mode at play-time.
       gene = Object.assign({}, gene, { world_mode: 'overlay' });
     }
     var maxTurns = opts.maxTurns || 60;

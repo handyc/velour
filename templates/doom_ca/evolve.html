@@ -149,12 +149,13 @@
     </label>
     <label>modes
       <select id="ev-modes">
-        <option value="all" selected>all five</option>
+        <option value="all" selected>all six</option>
         <option value="overlay">overlay</option>
         <option value="shift">shift</option>
         <option value="scent">scent</option>
         <option value="evolved">evolved</option>
         <option value="platform">platform (side-scroller)</option>
+        <option value="ink">ink (fog-of-war)</option>
         <option value="pure3">shift/scent/evolved</option>
       </select>
     </label>
@@ -371,18 +372,20 @@
 
   // ─── Gene operations ─────────────────────────────────────────
   var MODE_OPTIONS = {
-    all:      ['overlay','shift','scent','evolved','platform'],
+    all:      ['overlay','shift','scent','evolved','platform','ink'],
     overlay:  ['overlay'],
     shift:    ['shift'],
     scent:    ['scent'],
     evolved:  ['evolved'],
     platform: ['platform'],
+    ink:      ['ink'],
     pure3:    ['shift','scent','evolved'],
   };
   // purity rewards pure-CA play; platform is "novel physics" so it
-  // sits at parity with overlay (0.0) for now — bump if you want the
-  // GA to prefer it.
-  var PURITY_SCORE = { overlay: 0.0, platform: 0.0,
+  // sits at parity with overlay (0.0).  Ink is fully pure-CA (player
+  // and bots live as state-2/3 cells the rule sees) so it gets a
+  // higher purity score than overlay.
+  var PURITY_SCORE = { overlay: 0.0, platform: 0.0, ink: 0.8,
                         evolved: 0.4, shift: 0.7, scent: 1.0 };
 
   // 4-colour palette: HSV-spaced like spoeqi.models.random_palette.
