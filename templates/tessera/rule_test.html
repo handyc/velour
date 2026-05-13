@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}Rule preservation test — {{ ruleset.name }}{% endblock %}
+{% block content %}
+<style>
+  .rt-page  { max-width: 64em; }
+  .rt-meta  { color: #888; font-size: 0.85rem; }
+  .rt-meta a { color: #ace; }
+  .rt-form  { margin-top: 12px; padding: 8px 12px;
+              border: 1px dashed #2a2a2a; border-radius: 4px; }
+  .rt-form input[type="file"] { color: #ccc; }
+  .rt-form select, .rt-form input[type="number"] {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 1px 4px; font-family: inherit;
+  }
+  .rt-controls button {
+    background: #222; color: #cfc; border: 1px solid #555;
+    padding: 2px 12px; font-family: inherit; cursor: pointer;
+  }
+  #rt-canvas { background: #050505; border: 1px solid #222;
+               image-rendering: pixelated; display: block;
+               margin-top: 12px; }
+  .rt-row { display: flex; gap: 16px; align-items: baseline;
+            flex-wrap: wrap; margin-top: 8px; }
+  .pal-row { display: inline-flex; gap: 2px; }
+  .pal-row div { width: 14px; height: 14px; border: 1px solid #333; }
+  .badge { background: #1a1a1a; color: #ace; border: 1px solid #333;
+           padding: 1px 8px; border-radius: 8px;
+           font-family: monospace; font-size: 0.78rem; }
+</style>
+
+<div class="rt-page">
+<p class="rt-meta">
+  <a href="{% url 'tessera:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Rule preservation test</b>
+</p>
+
+{% if error %}
+<p class="rt-meta" style="color:#fcc;">{{ error }}</p>
+{% else %}
+<div class="rt-row" style="margin-top: 0;">
+  <span style="color: #cfc; font-weight: 600;">{{ ruleset.name }}</span>
+  <span class="badge">{{ n_rules }} exact rules</span>
+  <span class="badge">K=4 hex CA</span>
+  {% if ruleset.source_metadata.spoeqi_pact_slug %}
+  <span class="badge">via spoeqi pact
+    "<a href="{% url 'spoeqi:detail' slug=ruleset.source_metadata.spoeqi_pact_slug %}"
+        style="color:#ace;">{{ ruleset.source_metadata.spoeqi_pact_slug }}</a>"
+    tile {{ ruleset.source_metadata.spoeqi_component }}
+  </span>
+  {% endif %}
+  <span>palette
+    <span class="pal-row" style="vertical-align: -3px;">
+      {% for c in palette %}<div style="background: rgb({{ c.0 }}, {{ c.1 }}, {{ c.2 }});"></div>{% endfor %}
+    </span>
+  </span>
+</div>
+
+<p class="rt-meta" style="max-width: 56em;">
+  Upload an image: it's quantised to the rule's 4-colour palette and
+  used as the initial CA state.  The rule then evolves the image.
+  Watch the <b>preserve</b> metric — high values mean the rule is
+  holding the image; falling values mean the dynamics are dissolving
+  it.  Class-4 / edge-of-chaos rules tend to hold local features
+  while still evolving the background.
+</p>
+
+<div class="rt-form">
+  <input type="file" id="rt-image" accept="image/*">
+  <span class="rt-meta" style="margin-left:8px;">grid side</span>
+  <select id="rt-side">
+    <option value="32">32×32</option>
+    <option value="48">48×48</option>
+    <option value="64" selected>64×64</option>
+    <option value="96">96×96</option>
+    <option value="128">128×128</option>
+  </select>
+  <span class="rt-meta" style="margin-left:8px;">tick</span>
+  <input id="rt-tick" type="number" min="40" max="2000" step="20" value="180" style="width:5em;"> ms
+</div>
+
+<div class="rt-row rt-controls">
+  <button id="rt-toggle">pause</button>
+  <button id="rt-reseed-image">re-seed (image)</button>
+  <button id="rt-scramble">scramble</button>
+</div>
+
+<canvas id="rt-canvas" width="640" height="640"></canvas>
+
+<div class="rt-row" style="font-family: monospace; font-size: 0.8rem; color: #888;">
+  <span>generation <b id="rt-gen" style="color:#cfc;">0</b></span>
+  <span>changed/tick <b id="rt-chg" style="color:#cfc;">—</b></span>
+  <span>edge-of-chaos <b id="rt-edge" style="color:#cfc;">—</b> <span id="rt-edge-spark"></span></span>
+  <span>preserve <b id="rt-pres" style="color:#cfc;">—</b> <span id="rt-pres-spark"></span></span>
+</div>
+
+<script>
+(function () {
+  var payload = {{ payload|safe }};
+  var rule = new Uint8Array(payload.rule_table);
+  var palette = payload.palette;
+
+  var sideSel = document.getElementById('rt-side');
+  var tickInput = document.getElementById('rt-tick');
+  var canvas = document.getElementById('rt-canvas');
+  var ctx = canvas.getContext('2d');
+
+  var GRID = parseInt(sideSel.value, 10);
+  var imageState = null;   // initial 4-colour quantisation (preserve baseline)
+  var grid = new Uint8Array(GRID * GRID);
+  var generation = 0;
+  var running = true;
+  var tickMs = 180;
+  var changeHistory = [];
+  var preserveHistory = [];
+  var edgeSpark = [];
+  var presSpark = [];
+  var SPARK_CHARS = '▁▂▃▄▅▆▇█';
+
+  function resize (newSide) {
+    GRID = newSide;
+    grid = new Uint8Array(GRID * GRID);
+    imageState = null;
+    // Rescale canvas to keep cells visible.
+    var cellPx = Math.max(2, Math.floor(640 / GRID));
+    canvas.width = canvas.height = cellPx * GRID;
+  }
+  resize(GRID);
+
+  function quantiseImage (img, side) {
+    // Render to small canvas at `side×side`, then for each pixel pick
+    // the nearest palette colour (RGB squared distance).
+    var off = document.createElement('canvas');
+    off.width = off.height = side;
+    var octx = off.getContext('2d');
+    octx.drawImage(img, 0, 0, side, side);
+    var data = octx.getImageData(0, 0, side, side).data;
+    var out = new Uint8Array(side * side);
+    for (var i = 0; i < side * side; i++) {
+      var r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+      var bestI = 0, bestD = 1e12;
+      for (var p = 0; p < 4; p++) {
+        var pc = palette[p];
+        var dr = r - pc[0], dg = g - pc[1], db = b - pc[2];
+        var d = dr * dr + dg * dg + db * db;
+        if (d < bestD) { bestD = d; bestI = p; }
+      }
+      out[i] = bestI;
+    }
+    return out;
+  }
+
+  function seedFromImage () {
+    if (imageState && imageState.length === grid.length) {
+      grid.set(imageState);
+    } else {
+      seedRandom();
+    }
+    generation = 0;
+    changeHistory.length = 0;
+    preserveHistory.length = 0;
+    edgeSpark.length = 0;
+    presSpark.length = 0;
+  }
+  function seedRandom () {
+    for (var i = 0; i < grid.length; i++) grid[i] = Math.floor(Math.random() * 4);
+    imageState = null;
+    generation = 0;
+    changeHistory.length = 0;
+    preserveHistory.length = 0;
+  }
+
+  function tick () {
+    var W = GRID, H = GRID;
+    var next = new Uint8Array(W * H);
+    var changed = 0;
+    var matchedImage = 0;
+    var hasImage = imageState !== null;
+    for (var y = 0; y < H; y++) {
+      var shift = y & 1;
+      var tlx = -1 + shift;
+      var brx =  0 + shift;
+      var yU = (y - 1 + H) % H;
+      var yD = (y + 1) % H;
+      for (var x = 0; x < W; x++) {
+        var idx = y * W + x;
+        var self_ = grid[idx];
+        var xL = (x - 1 + W) % W;
+        var xR = (x + 1) % W;
+        var xTL = (x + tlx + W) % W;
+        var xBR = (x + brx + W) % W;
+        var n0 = grid[yU * W + xBR];
+        var n1 = grid[y  * W + xR];
+        var n2 = grid[yD * W + xBR];
+        var n3 = grid[yD * W + xTL];
+        var n4 = grid[y  * W + xL];
+        var n5 = grid[yU * W + xTL];
+        var key = (self_ << 12) | (n0 << 10) | (n1 << 8) | (n2 << 6)
+                | (n3 << 4) | (n4 << 2) | n5;
+        var v = rule[key];
+        next[idx] = v;
+        if (v !== self_) changed++;
+        if (hasImage && v === imageState[idx]) matchedImage++;
+      }
+    }
+    grid = next;
+    generation++;
+    var area = W * H;
+    changeHistory.push(changed / area);
+    if (changeHistory.length > 96) changeHistory.shift();
+    if (hasImage) {
+      preserveHistory.push(matchedImage / area);
+      if (preserveHistory.length > 96) preserveHistory.shift();
+    }
+  }
+
+  function draw () {
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var cellPx = canvas.width / GRID;
+    var half = cellPx / 2;
+    for (var p = 0; p < 4; p++) {
+      var c = palette[p];
+      ctx.fillStyle = 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+      ctx.beginPath();
+      for (var y = 0; y < GRID; y++) {
+        var rowShift = (y & 1) ? half : 0;
+        var py = y * cellPx;
+        for (var x = 0; x < GRID; x++) {
+          if (grid[y * GRID + x] !== p) continue;
+          ctx.rect(x * cellPx + rowShift, py, cellPx + 0.5, cellPx + 0.5);
+        }
+      }
+      ctx.fill();
+    }
+  }
+
+  function updateReadouts () {
+    document.getElementById('rt-gen').textContent = generation;
+    if (changeHistory.length >= 4) {
+      var s = 0;
+      for (var i = 0; i < changeHistory.length; i++) s += changeHistory[i];
+      var mean = s / changeHistory.length;
+      document.getElementById('rt-chg').textContent = mean.toFixed(3);
+      var edge = 4 * mean * (1 - mean);
+      document.getElementById('rt-edge').textContent = edge.toFixed(3);
+      edgeSpark.push(edge);
+      if (edgeSpark.length > 32) edgeSpark.shift();
+      document.getElementById('rt-edge-spark').textContent = spark(edgeSpark);
+    }
+    if (preserveHistory.length >= 4) {
+      var s2 = 0;
+      for (var i = 0; i < preserveHistory.length; i++) s2 += preserveHistory[i];
+      var preserveMean = s2 / preserveHistory.length;
+      document.getElementById('rt-pres').textContent = preserveMean.toFixed(3);
+      presSpark.push(preserveMean);
+      if (presSpark.length > 32) presSpark.shift();
+      document.getElementById('rt-pres-spark').textContent = spark(presSpark);
+    } else if (imageState) {
+      document.getElementById('rt-pres').textContent = 'warming…';
+    }
+  }
+  function spark (values) {
+    if (!values.length) return '';
+    var s = '';
+    for (var i = 0; i < values.length; i++) {
+      var idx = Math.max(0, Math.min(SPARK_CHARS.length - 1,
+                  Math.floor(values[i] * (SPARK_CHARS.length - 1) + 0.5)));
+      s += SPARK_CHARS[idx];
+    }
+    return s;
+  }
+
+  function loop () {
+    if (running) tick();
+    draw();
+    updateReadouts();
+    setTimeout(loop, tickMs);
+  }
+
+  // ── controls ──
+  document.getElementById('rt-toggle').addEventListener('click', function () {
+    running = !running;
+    this.textContent = running ? 'pause' : 'play';
+  });
+  document.getElementById('rt-reseed-image').addEventListener('click', seedFromImage);
+  document.getElementById('rt-scramble').addEventListener('click', seedRandom);
+  tickInput.addEventListener('change', function () {
+    var v = parseInt(this.value, 10);
+    if (!isNaN(v)) tickMs = Math.max(40, Math.min(2000, v));
+  });
+  sideSel.addEventListener('change', function () {
+    resize(parseInt(this.value, 10));
+    // If we had an image loaded, re-quantise to the new size on next upload.
+  });
+  document.getElementById('rt-image').addEventListener('change', function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var url = URL.createObjectURL(f);
+    var img = new Image();
+    img.onload = function () {
+      imageState = quantiseImage(img, GRID);
+      grid.set(imageState);
+      generation = 0;
+      changeHistory.length = 0;
+      preserveHistory.length = 0;
+      edgeSpark.length = 0;
+      presSpark.length = 0;
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
+
+  // ── kick off ──
+  seedRandom();
+  draw();
+  setTimeout(loop, tickMs);
+})();
+</script>
+{% endif %}
+</div>
+{% endblock %}

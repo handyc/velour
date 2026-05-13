@@ -404,3 +404,86 @@ def create_set(request):
             obj.upload_a = f
     obj.save()
     return HttpResponseRedirect(reverse('tessera:detail', args=[obj.slug]))
+
+
+def _automaton_ruleset_to_dense_table(exact_rules_in_priority_order):
+    """Compile an iterable of automaton.ExactRule rows (with -1 = any
+    wildcards) into a 16,384-byte dense lookup with the same encoding
+    spoeqi uses: ``key = (self << 12) | (n0 << 10) | … | n5``.
+
+    Identity is the default for unmatched configs.  Rules are applied
+    in REVERSE priority order so the highest-priority rule overwrites
+    last and wins ties — matching automaton.detector.step_exact's
+    "first match wins" semantics.
+    """
+    table = bytearray(16384)
+    for key in range(16384):
+        table[key] = (key >> 12) & 0x03
+    rules = list(exact_rules_in_priority_order)
+    for er in reversed(rules):
+        s_range = range(4) if er.self_color == -1 else [er.self_color & 0x03]
+        n_ranges = []
+        for nb in (er.n0_color, er.n1_color, er.n2_color,
+                   er.n3_color, er.n4_color, er.n5_color):
+            n_ranges.append(range(4) if nb == -1 else [nb & 0x03])
+        out = er.result_color & 0x03
+        for s in s_range:
+            for n0 in n_ranges[0]:
+                for n1 in n_ranges[1]:
+                    for n2 in n_ranges[2]:
+                        for n3 in n_ranges[3]:
+                            for n4 in n_ranges[4]:
+                                for n5 in n_ranges[5]:
+                                    key = ((s << 12) | (n0 << 10) | (n1 << 8)
+                                            | (n2 << 6) | (n3 << 4)
+                                            | (n4 << 2) | n5)
+                                    table[key] = out
+    return bytes(table)
+
+
+def rule_test(request, ruleset_id):
+    """Apply an Automaton RuleSet to arbitrary uploaded images and
+    watch how the dynamics preserve / destroy them.  Mirrors the
+    image-preservation half of bake_ca, but with a pre-existing rule
+    instead of one derived from the image."""
+    import json as _json
+    from automaton.models import RuleSet
+
+    rs = get_object_or_404(RuleSet, pk=ruleset_id)
+    if rs.n_colors != 4:
+        return render(request, 'tessera/rule_test.html', {
+            'error': f'rule-test currently supports K=4 only '
+                     f'(this RuleSet is K={rs.n_colors}).',
+            'ruleset': rs,
+        })
+
+    exact = rs.exact_rules.order_by('priority').all()
+    table = _automaton_ruleset_to_dense_table(exact)
+
+    # Palette: prefer ruleset.palette (CSS hex) → RGB triples.  Fall
+    # back to spoeqi-style defaults if absent.
+    palette = []
+    src_pal = list(rs.palette) if rs.palette else []
+    for entry in src_pal[:4]:
+        if isinstance(entry, str) and entry.startswith('#') and len(entry) == 7:
+            palette.append([int(entry[1:3], 16), int(entry[3:5], 16),
+                            int(entry[5:7], 16)])
+        elif isinstance(entry, (list, tuple)) and len(entry) == 3:
+            palette.append([int(entry[0]), int(entry[1]), int(entry[2])])
+    while len(palette) < 4:
+        palette.append([180, 180, 180])
+
+    payload = {
+        'ruleset_id':    rs.pk,
+        'ruleset_name':  rs.name,
+        'ruleset_slug':  rs.slug,
+        'rule_table':    list(table),     # 16384 ints in {0..3}
+        'palette':       palette,
+        'n_rules':       exact.count(),
+    }
+    return render(request, 'tessera/rule_test.html', {
+        'ruleset': rs,
+        'payload': _json.dumps(payload),
+        'n_rules': payload['n_rules'],
+        'palette': palette,
+    })

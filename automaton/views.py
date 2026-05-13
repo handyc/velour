@@ -814,3 +814,84 @@ def load_image(request, slug):
         f'(quantised to {len(pal_rgb)} palette colours).'
     )
     return redirect('automaton:run', slug=sim.slug)
+
+
+@login_required
+@require_POST
+def export_to_tessera(request, slug):
+    """Render the simulation's grid_state as a tileable PNG and seed a
+    new Tessera tileset (method='upload-1-palette', topology='hex',
+    blend='idw').  The CA's toroidal wrap-around means the output is
+    naturally tileable; Tessera then palette-shifts the single source
+    into 4 edge-colour images and builds 4096 hex Wang tiles via IDW.
+
+    Returns a redirect to the new TessSet's detail page.
+    """
+    from io import BytesIO
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from PIL import Image
+
+    from tessera.models import TessSet
+
+    sim = get_object_or_404(Simulation, slug=slug)
+    grid = sim.grid_state
+    if not grid or not grid[0]:
+        messages.error(request, 'This simulation has no saved grid state. '
+                                'Click Save first.')
+        return redirect('automaton:run', slug=sim.slug)
+
+    H = len(grid)
+    W = len(grid[0])
+    # Resolve palette: prefer simulation, fall back to ruleset, then default.
+    css = list(sim.palette) or list(sim.ruleset.palette) or list(DEFAULT_PALETTE)
+    while len(css) < 4:
+        css.append('#000000')
+    rgb_pal = [hex_to_rgb(c) for c in css[:4]]
+
+    img = Image.new('RGB', (W, H))
+    px = img.load()
+    for y in range(H):
+        row = grid[y]
+        for x in range(W):
+            v = row[x] if 0 <= row[x] < 4 else 0
+            px[x, y] = rgb_pal[v]
+    # Upscale 8× nearest-neighbour so the chunky CA pattern gives IDW
+    # plenty of pixels to sample.  Tessera tilesets read at 128 px tile
+    # size by default, so a 256-px source is a comfortable headroom.
+    upscale = max(1, min(16, 256 // max(W, H)))
+    if upscale > 1:
+        img = img.resize((W * upscale, H * upscale), Image.NEAREST)
+
+    buf = BytesIO()
+    img.save(buf, format='PNG', optimize=False)
+    buf.seek(0)
+
+    # Name + slug: trim if already exists.
+    base_name = f'tessera-from-{sim.slug}'
+    name = base_name
+    n = 2
+    while TessSet.objects.filter(name=name).exists():
+        name = f'{base_name}-{n}'
+        n += 1
+    tess_slug = slugify(name)[:80]
+
+    ts = TessSet(
+        name=name, slug=tess_slug, seed=sim.tick_count or 0,
+        method='upload-1-palette', topology='hex',
+        blend_method='idw',
+        palette=[list(rgb) for rgb in rgb_pal],
+    )
+    ts.upload_a = SimpleUploadedFile(
+        name=f'{tess_slug}.png',
+        content=buf.getvalue(),
+        content_type='image/png',
+    )
+    ts.save()
+
+    messages.success(
+        request,
+        f'Exported "{sim.name}" to Tessera as "{ts.name}". '
+        f'{W}×{H} grid upscaled to {img.size[0]}×{img.size[1]} px.'
+    )
+    return redirect('tessera:detail', slug=ts.slug)

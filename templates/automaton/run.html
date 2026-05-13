@@ -71,6 +71,17 @@
     <a href="{% url 'automaton:export_json' sim.slug %}" class="btn btn-secondary">Export JSON</a>
     <a href="{% url 'automaton:export_genome_bin' sim.slug %}" class="btn btn-secondary" download>Download genome.bin</a>
     <a href="/s3lab/?from={{ sim.slug }}" class="btn btn-secondary" target="_blank" title="Open in s3lab with this ruleset loaded">→ s3lab</a>
+    <form method="post" action="{% url 'automaton:export_to_tessera' sim.slug %}"
+          style="display:inline; margin:0;">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary"
+                title="Render this CA's grid as a tileable PNG and create a new Tessera tileset from it"
+        >→ Tessera</button>
+    </form>
+    <a href="{% url 'tessera:rule_test' ruleset_id=sim.ruleset.id %}"
+       class="btn btn-secondary" target="_blank"
+       title="Open Tessera rule-test: upload images and watch how this ruleset preserves them"
+    >→ Tessera rule-test</a>
     <button class="btn btn-secondary" onclick="document.getElementById('rename-form').style.display='flex'" style="font-size:0.78rem">Rename</button>
     <form id="rename-form" method="post" action="{% url 'automaton:rename' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
         {% csrf_token %}

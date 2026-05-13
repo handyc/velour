@@ -17,6 +17,8 @@ urlpatterns = [
     path('<slug:slug>/data.json',  views.simulation_data_json, name='data_json'),
     path('<slug:slug>/export.json', views.export_simulation_json, name='export_json'),
     path('<slug:slug>/genome.bin', views.export_genome_bin, name='export_genome_bin'),
+    path('<slug:slug>/export-to-tessera/', views.export_to_tessera,
+                                            name='export_to_tessera'),
     path('<slug:slug>/rename/',    views.rename_simulation, name='rename'),
     path('<slug:slug>/resize/',    views.resize_simulation, name='resize'),
     path('<slug:slug>/palette/',   views.update_palette,    name='update_palette'),
