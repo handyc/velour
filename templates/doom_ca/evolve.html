@@ -462,6 +462,8 @@
       door_count:        rng() < 0.7 ? 1 : 0,
       shotgun_count:     opts.allowWeapon === false ? 0 : 1,
       music_style_idx:   (rng() * 16) | 0,
+      slip_ground_1:     rng() < 0.5,
+      destruct_wall_2:   rng() < 0.5,
     };
   }
   function cloneGene (g) {
@@ -479,6 +481,8 @@
       door_count:        g.door_count        != null ? g.door_count        : 1,
       shotgun_count:     g.shotgun_count     != null ? g.shotgun_count     : 1,
       music_style_idx:   g.music_style_idx   != null ? g.music_style_idx   : 0,
+      slip_ground_1:     !!g.slip_ground_1,
+      destruct_wall_2:   !!g.destruct_wall_2,
     };
   }
   function mutate (g, rng, rate, opts) {
@@ -516,6 +520,8 @@
         child.music_style_idx = (rng() * 16) | 0;
       }
     }
+    if (rng() < rate * 2) child.slip_ground_1   = !child.slip_ground_1;
+    if (rng() < rate * 2) child.destruct_wall_2 = !child.destruct_wall_2;
     mutatePalette(child.palette, rng, rate);
     return child;
   }
@@ -548,6 +554,8 @@
       door_count:        (rng() < 0.5) ? a.door_count        : b.door_count,
       shotgun_count:     (rng() < 0.5) ? a.shotgun_count     : b.shotgun_count,
       music_style_idx:   (rng() < 0.5) ? a.music_style_idx   : b.music_style_idx,
+      slip_ground_1:     (rng() < 0.5) ? a.slip_ground_1     : b.slip_ground_1,
+      destruct_wall_2:   (rng() < 0.5) ? a.destruct_wall_2   : b.destruct_wall_2,
     };
   }
 
@@ -796,7 +804,8 @@
   function geneFingerprint (g) {
     var r = g.rule;
     return g.world_mode + '|' + g.monster_count + '|' + g.seed_byte +
-      '|' + g.wall_threshold + '|' + g.pure_mode + '|' +
+      '|' + g.wall_threshold + '|' + g.pure_mode +
+      '|' + (g.slip_ground_1 ? 1 : 0) + (g.destruct_wall_2 ? 1 : 0) + '|' +
       r[0] + ',' + r[4096] + ',' + r[8192] + ',' + r[12288] + ',' + r[16383];
   }
 
@@ -846,6 +855,8 @@
         door_count:        a.gene.door_count,
         shotgun_count:     a.gene.shotgun_count,
         music_style_idx:   a.gene.music_style_idx,
+        slip_ground_1:     !!a.gene.slip_ground_1,
+        destruct_wall_2:   !!a.gene.destruct_wall_2,
       },
     };
   }
@@ -866,6 +877,8 @@
         door_count:        o.gene.door_count        != null ? o.gene.door_count        : 1,
         shotgun_count:     o.gene.shotgun_count     != null ? o.gene.shotgun_count     : 1,
         music_style_idx:   o.gene.music_style_idx   != null ? o.gene.music_style_idx   : 0,
+        slip_ground_1:     !!o.gene.slip_ground_1,
+        destruct_wall_2:   !!o.gene.destruct_wall_2,
       },
     };
   }
@@ -1126,11 +1139,15 @@
       var compRate = (s.completionRate != null)
         ? (100 * s.completionRate).toFixed(0) + '%'
         : '—';
+      var mechBadges = '';
+      if (a.gene.slip_ground_1)   mechBadges += ' <span title="state-1 = slip-ground" style="color:#cfb;">·slip</span>';
+      if (a.gene.destruct_wall_2) mechBadges += ' <span title="shotgun destroys state-2 walls" style="color:#fcb;">·frag</span>';
       m.innerHTML =
         'mode <b style="color:#cfc;">' + a.gene.world_mode + '</b>'
         + (a.gene.pure_mode ? ' (pure)' : '')
         + ' · ' + a.gene.monster_count + ' mons'
         + (a.gene.door_count ? ' + door+key' : '')
+        + mechBadges
         + '<br>items: ' + (a.gene.health_pack_count || 0) + ' med · '
         + (a.gene.ammo_pack_count || 0) + ' ammo'
         + '<br>completion <b style="color:#8f8;">' + compRate + '</b>'
@@ -1287,6 +1304,8 @@
       ammo_pack_count:   agent.gene.ammo_pack_count,
       door_count:        agent.gene.door_count,
       music_style_idx:   agent.gene.music_style_idx,
+      slip_ground_1:     !!agent.gene.slip_ground_1,
+      destruct_wall_2:   !!agent.gene.destruct_wall_2,
     };
     fetch('{% url "doom_ca:materialize" %}', {
       method: 'POST',

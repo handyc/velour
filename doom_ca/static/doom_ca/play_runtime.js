@@ -252,22 +252,35 @@
     if (player) draw();
   });
 
+  var SLIP_ON_1     = !!payload.slip_ground_1;
+  var DESTRUCT_W2   = !!payload.destruct_wall_2;
   var palette = payload.palette;
   function isPerComponent (p) { return Array.isArray(p[0][0]); }
   var componentPalette = isPerComponent(palette) ? palette[COMPONENT] : palette;
-  var COL_WALL, COL_WALL_DK;
+  var COL_S0, COL_S1, COL_WALL, COL_WALL_DK;
   function applyPalette (pal) {
     componentPalette = pal;
-    COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
+    COL_S0      = 'rgb(' + componentPalette[0].join(',') + ')';
+    COL_S1      = 'rgb(' + componentPalette[1].join(',') + ')';
     COL_WALL_DK = 'rgb(' + componentPalette[2].join(',') + ')';
+    COL_WALL    = 'rgb(' + componentPalette[3].join(',') + ')';
     // Update legend swatches so they always match the active palette,
     // including after a live re-roll via the 🎨 randomise button.
     var lg0 = document.getElementById('leg-c0');
-    if (lg0) lg0.style.background = '#1a1a1a';
+    if (lg0) lg0.style.background = COL_S0;
+    var lg1 = document.getElementById('leg-c1');
+    if (lg1) lg1.style.background = COL_S1;
     var lg2 = document.getElementById('leg-c2');
     if (lg2) lg2.style.background = COL_WALL_DK;
     var lg3 = document.getElementById('leg-c3');
     if (lg3) lg3.style.background = COL_WALL;
+    // Update legend text so the mechanic-meaningful state is called out.
+    var t0 = document.getElementById('leg-c0-text');
+    if (t0) t0.textContent = 'ground (state 0)';
+    var t1 = document.getElementById('leg-c1-text');
+    if (t1) t1.textContent = SLIP_ON_1 ? 'slip-ground (state 1)' : 'ground (state 1)';
+    var t2 = document.getElementById('leg-c2-text');
+    if (t2) t2.textContent = DESTRUCT_W2 ? 'fragile wall (state 2)' : 'wall (state 2)';
   }
   applyPalette(componentPalette);
   var COL_GROUND  = '#1a1a1a';
@@ -685,6 +698,24 @@
       if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
       pickupAt(targetIdx);
       if (targetIdx === exitIdx) { gameOver = 'won'; }
+      // Slip-ground: stepping onto a state-1 cell slides you one more
+      // step in the same direction if the destination is open.
+      if (SLIP_ON_1 && get(player.x, player.y) === 1 && !gameOver) {
+        var sn = neighbourCoord(player.x, player.y, dirIdx);
+        if (!isWallForOverlay(get(sn[0], sn[1]))) {
+          var sIdx = sn[1] * GRID + sn[0];
+          if (sIdx !== doorIdx || doorOpen) {
+            var sHit = monsters.find(function (m) {
+              return m.alive && m.x === sn[0] && m.y === sn[1]; });
+            if (!sHit) {
+              player.x = sn[0]; player.y = sn[1];
+              if (sIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
+              pickupAt(sIdx);
+              if (sIdx === exitIdx) { gameOver = 'won'; }
+            }
+          }
+        }
+      }
       afterMove();
       return;
     }
@@ -735,7 +766,13 @@
       x = nb[0]; y = nb[1];
       hitX = x; hitY = y;
       if (MODE === 'overlay') {
-        if (isWallForOverlay(get(x, y))) break;
+        var cellHere = get(x, y);
+        if (isWallForOverlay(cellHere)) {
+          // Fragile wall: state-2 wall yields to a shotgun shell if
+          // DESTRUCT_W2 is on.  State-3 walls always block.
+          if (DESTRUCT_W2 && cellHere === 2) set(x, y, 0);
+          break;
+        }
         var hit = monsters.find(function (m) {
           return m.alive && m.x === x && m.y === y; });
         if (hit) { hit.alive = false; break; }
@@ -869,9 +906,10 @@
         var screenY = (dy + half) * V_STEP;
         var fill;
         if (MODE === 'overlay') {
-          fill = (cell >= WALL_THRESH)
-            ? (cell === 3 ? COL_WALL : COL_WALL_DK)
-            : COL_GROUND;
+          fill = (cell === 3) ? COL_WALL
+               : (cell === 2) ? COL_WALL_DK
+               : (cell === 1) ? COL_S1
+               :                COL_S0;
         } else {
           fill = (cell === WALL) ? COL_WALL
                : (cell === GROUND) ? COL_GROUND
@@ -1327,17 +1365,23 @@
       return [W / 2 + (wx - camX) * CELL_PX,
               H / 2 + (wy - camY) * CELL_PX];
     }
-    // Walls (platforms)
+    // Cell fills.  Walls = solid palette colour; air cells get a faint
+    // tint from palette[0]/palette[1] so the slip-ground variant is
+    // visible against the sky gradient.
     for (var dy = 0; dy < visRows; dy++) {
       var wy = y0 + dy;
       for (var dx = 0; dx < visCols; dx++) {
         var wx = x0 + dx;
         if (wx < 0 || wx >= GRID) continue;
-        if (!platformIsWall(wx, wy)) continue;
         var p = screenOf(wx, wy);
         var raw = get(((wx % GRID) + GRID) % GRID, wy);
-        ctx.fillStyle = (raw === 3) ? COL_WALL : COL_WALL_DK;
-        ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
+        if (platformIsWall(wx, wy)) {
+          ctx.fillStyle = (raw === 3) ? COL_WALL : COL_WALL_DK;
+          ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
+        } else if (raw === 1) {
+          ctx.fillStyle = 'rgba(' + componentPalette[1].join(',') + ',0.22)';
+          ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
+        }
       }
     }
     // Door, key, exit
@@ -1466,7 +1510,13 @@
         for (var step = 1; step <= 4; step++) {
           var xx = Math.floor(player.x + fdir * step);
           var yy = Math.floor(player.y);
-          if (platformIsWall(xx, yy)) { hitX = xx + 0.5; hitY = yy + 0.5; break; }
+          if (platformIsWall(xx, yy)) {
+            if (DESTRUCT_W2) {
+              var cx_ = ((xx % GRID) + GRID) % GRID;
+              if (yy >= 0 && yy < GRID && get(cx_, yy) === 2) set(cx_, yy, 0);
+            }
+            hitX = xx + 0.5; hitY = yy + 0.5; break;
+          }
           for (var i = 0; i < monsters.length; i++) {
             var m = monsters[i];
             if (!m.alive) continue;

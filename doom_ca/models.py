@@ -97,6 +97,20 @@ class GameSession(models.Model):
         help_text='Default music meter (0..15). 0=common, 14=doom-march, '
                   '15=ambient-drift; user can cycle live with V.')
 
+    # Per-state cell-variant mechanics.  Without these the four CA
+    # states still drive the rule's class-4 dynamics, but only two of
+    # them are visible in the play view.  Turning these on gives the
+    # variants real gameplay weight so the four-state CA isn't wasted.
+    slip_ground_1 = models.BooleanField(
+        default=False,
+        help_text='If true, stepping onto a state-1 ground cell makes '
+                  'the player slide one extra cell in their last direction '
+                  '(if the destination is open).')
+    destruct_wall_2 = models.BooleanField(
+        default=False,
+        help_text='If true, shotgun fire destroys state-2 wall cells '
+                  '(turns them into ground).  State-3 walls always block.')
+
     # Aspirational target — which classic game this evolution is aiming
     # toward.  Nullable: most sessions don't target anything specific.
     target_game = models.ForeignKey(

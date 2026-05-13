@@ -564,7 +564,14 @@
         var nb = neighbourCoord(x, y, dir, side);
         x = nb[0]; y = nb[1];
         var cell = get(x, y);
-        if (cell === WALL) return false;
+        if (cell === WALL) {
+          // Fragile wall: state-2 wall yields when DESTRUCT_WALL_2 is on.
+          if (gene.destruct_wall_2 && raw[y * side + x] === 2) {
+            setCell(x, y, GROUND);
+            return true;
+          }
+          return false;
+        }
         if (cell === MONSTER) {
           setCell(x, y, GROUND);
           monstersKilled++;
@@ -690,6 +697,21 @@
             }
             // Item pickup
             pickupAt(targetIdx);
+            // Slip-ground: stepping onto a state-1 cell slides one more
+            // step in the same direction if the next cell is open and
+            // not a monster (a slide into a monster would be suicide).
+            if (gene.slip_ground_1 && raw[targetIdx] === 1) {
+              var sn = neighbourCoord(player.x, player.y, dir, side);
+              var snIdx = sn[1] * side + sn[0];
+              var snOcc = get(sn[0], sn[1]);
+              if (snOcc < gene.wall_threshold && snOcc !== MONSTER
+                  && (snIdx !== doorIdx || doorOpen)) {
+                player.x = sn[0]; player.y = sn[1];
+                groundVisited.add(snIdx);
+                if (snIdx === keyIdx) { player.hasKey = true; keyIdx = null; }
+                pickupAt(snIdx);
+              }
+            }
           }
         } else if (gene.world_mode === 'shift') {
           var occ = get(target[0], target[1]);

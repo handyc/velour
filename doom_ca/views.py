@@ -119,6 +119,8 @@ def play(request, slug):
         'ammo_pack_count':   session.ammo_pack_count,
         'door_count':        session.door_count,
         'music_style_idx':   session.music_style_idx,
+        'slip_ground_1':     session.slip_ground_1,
+        'destruct_wall_2':   session.destruct_wall_2,
         'component_grid': pact.component_grid,
         'rules_hex':      pact.rules_hex,
         'seed_hex':       pact.seed_hex,
@@ -190,6 +192,8 @@ def export(request, slug):
         'ammo_pack_count':   session.ammo_pack_count,
         'door_count':        session.door_count,
         'music_style_idx':   session.music_style_idx,
+        'slip_ground_1':     session.slip_ground_1,
+        'destruct_wall_2':   session.destruct_wall_2,
         'component_grid': pact.component_grid,
         'rules_hex':      rule_one,
         'seed_hex':       seed_one,
@@ -279,6 +283,8 @@ def materialize_agent(request):
     ammo_pack_count   = max(0, min(12, int(gene.get('ammo_pack_count',   3))))
     door_count        = max(0, min(1,  int(gene.get('door_count',        1))))
     music_style_idx   = max(0, min(15, int(gene.get('music_style_idx',   0))))
+    slip_ground_1     = bool(gene.get('slip_ground_1',   False))
+    destruct_wall_2   = bool(gene.get('destruct_wall_2', False))
     base_name    = (gene.get('name') or 'evolved-pact').strip()[:60]
 
     # Validate the optional palette: 4 × [r, g, b], each 0..255
@@ -331,6 +337,8 @@ def materialize_agent(request):
         ammo_pack_count=ammo_pack_count,
         door_count=door_count,
         music_style_idx=music_style_idx,
+        slip_ground_1=slip_ground_1,
+        destruct_wall_2=destruct_wall_2,
         notes=f'Evolved gene (fitness shown in evolve page).',
         created_by=request.user if request.user.is_authenticated else None,
     )
