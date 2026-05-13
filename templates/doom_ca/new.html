@@ -107,6 +107,32 @@
   </div>
 
   <div class="field">
+    <label for="health_pack_count">Health packs (0–12)</label>
+    <input id="health_pack_count" name="health_pack_count" type="number"
+           min="0" max="12" value="{{ form.health_pack_count }}"
+           style="width: 6em;">
+    <div class="hint">Medkits scattered on reachable ground (each +25 HP).</div>
+  </div>
+
+  <div class="field">
+    <label for="ammo_pack_count">Ammo packs (0–12)</label>
+    <input id="ammo_pack_count" name="ammo_pack_count" type="number"
+           min="0" max="12" value="{{ form.ammo_pack_count }}"
+           style="width: 6em;">
+    <div class="hint">Each pack gives +3 ammo for the shotgun.</div>
+  </div>
+
+  <div class="field">
+    <label for="door_count">Locked door</label>
+    <select id="door_count" name="door_count">
+      <option value="1" {% if form.door_count == "1" %}selected{% endif %}>
+        1 — place a locked door + key on the spawn→exit path</option>
+      <option value="0" {% if form.door_count == "0" %}selected{% endif %}>
+        0 — open level (just find the exit)</option>
+    </select>
+  </div>
+
+  <div class="field">
     <label style="display:inline;">
       <input type="checkbox" name="pure_mode" value="1"
              {% if form.pure_mode %}checked{% endif %}>

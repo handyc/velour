@@ -72,6 +72,20 @@ class GameSession(models.Model):
                   'the mode\'s own rule + player moves change the '
                   'world.  Trades atmosphere for predictability.')
 
+    # Phase-1 Doom items.  Item placement is deterministic from the
+    # pact seed + these counts; the cells live on an overlay layer so
+    # they don't disturb the K=4 invariant of the underlying CA.
+    health_pack_count = models.PositiveSmallIntegerField(
+        default=3,
+        help_text='Medkits scattered on reachable ground (each +25 HP).')
+    ammo_pack_count = models.PositiveSmallIntegerField(
+        default=3,
+        help_text='Ammo packs scattered on reachable ground (each +3 ammo).')
+    door_count = models.PositiveSmallIntegerField(
+        default=1,
+        help_text='If 1, a locked door + key are placed on the spawn→exit '
+                  'path (0 = open level, just find the exit).')
+
     notes       = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
     created_by  = models.ForeignKey(

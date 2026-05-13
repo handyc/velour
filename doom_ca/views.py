@@ -31,6 +31,9 @@ def create(request):
         'world_mode': 'overlay',
         'monster_count': '8', 'wall_threshold': '2',
         'pure_mode': '',
+        'health_pack_count': '3',
+        'ammo_pack_count':   '3',
+        'door_count':        '1',
         'notes': '',
     }
 
@@ -52,6 +55,18 @@ def create(request):
             wall_threshold = max(1, min(3, int(form['wall_threshold'])))
         except ValueError:
             wall_threshold = 2
+        try:
+            health_pack_count = max(0, min(12, int(form['health_pack_count'])))
+        except ValueError:
+            health_pack_count = 3
+        try:
+            ammo_pack_count   = max(0, min(12, int(form['ammo_pack_count'])))
+        except ValueError:
+            ammo_pack_count = 3
+        try:
+            door_count        = max(0, min(1, int(form['door_count'])))
+        except ValueError:
+            door_count = 1
         world_mode = form['world_mode'] if form['world_mode'] in valid_modes else 'overlay'
         pure_mode = bool(form['pure_mode'])
         pact = Pact.objects.filter(slug=form['pact_slug']).first()
@@ -67,6 +82,9 @@ def create(request):
                 monster_count=monster_count,
                 wall_threshold=wall_threshold,
                 pure_mode=pure_mode,
+                health_pack_count=health_pack_count,
+                ammo_pack_count=ammo_pack_count,
+                door_count=door_count,
                 notes=form['notes'].strip(),
                 created_by=request.user if request.user.is_authenticated else None,
             )
@@ -97,6 +115,9 @@ def play(request, slug):
         'pure_mode':      session.pure_mode,
         'monster_count':  session.monster_count,
         'wall_threshold': session.wall_threshold,
+        'health_pack_count': session.health_pack_count,
+        'ammo_pack_count':   session.ammo_pack_count,
+        'door_count':        session.door_count,
         'component_grid': pact.component_grid,
         'rules_hex':      pact.rules_hex,
         'seed_hex':       pact.seed_hex,
@@ -170,6 +191,9 @@ def materialize_agent(request):
     monster_count   = max(0, min(64, int(gene.get('monster_count', 8))))
     wall_threshold  = max(1, min(3, int(gene.get('wall_threshold', 2))))
     pure_mode    = bool(gene.get('pure_mode', False))
+    health_pack_count = max(0, min(12, int(gene.get('health_pack_count', 3))))
+    ammo_pack_count   = max(0, min(12, int(gene.get('ammo_pack_count',   3))))
+    door_count        = max(0, min(1,  int(gene.get('door_count',        1))))
     base_name    = (gene.get('name') or 'evolved-pact').strip()[:60]
 
     # Validate the optional palette: 4 × [r, g, b], each 0..255
@@ -218,6 +242,9 @@ def materialize_agent(request):
         name=game_name, pact=pact, component=0,
         world_mode=world_mode, monster_count=monster_count,
         wall_threshold=wall_threshold, pure_mode=pure_mode,
+        health_pack_count=health_pack_count,
+        ammo_pack_count=ammo_pack_count,
+        door_count=door_count,
         notes=f'Evolved gene (fitness shown in evolve page).',
         created_by=request.user if request.user.is_authenticated else None,
     )

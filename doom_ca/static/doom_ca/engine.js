@@ -201,16 +201,143 @@
     };
   }
 
+  // ── Level placement: BFS spawn → exit, door, key, items ───────
+  // Returns {items: Map<cellIdx,{type}>, exitIdx, doorIdx?, keyIdx?}.
+  // Items don't change CA cell values — they live in an overlay
+  // layer (same trick that player+monsters use).  Failure to find
+  // a viable exit returns null and the level is unwinnable.
+  function placeLevel (gene, side, world, spawnX, spawnY, rng) {
+    var n = side * side;
+    function bfs (excludeIdx) {
+      var dist = new Int32Array(n);
+      var parent = new Int32Array(n);
+      for (var i = 0; i < n; i++) { dist[i] = -1; parent[i] = -1; }
+      var queue = [spawnY * side + spawnX];
+      dist[queue[0]] = 0;
+      var qh = 0;
+      while (qh < queue.length) {
+        var idx = queue[qh++];
+        var x = idx % side, y = (idx / side) | 0;
+        for (var dir = 0; dir < 6; dir++) {
+          var nb = neighbourCoord(x, y, dir, side);
+          var nidx = nb[1] * side + nb[0];
+          if (world[nidx] === WALL) continue;
+          if (dist[nidx] !== -1) continue;
+          if (nidx === excludeIdx) continue;
+          dist[nidx] = dist[idx] + 1;
+          parent[nidx] = idx;
+          queue.push(nidx);
+        }
+      }
+      return { dist: dist, parent: parent };
+    }
+    var bfs1 = bfs(-1);
+    var maxD = 0, exitIdx = -1;
+    for (var i = 0; i < n; i++) {
+      if (bfs1.dist[i] > maxD) { maxD = bfs1.dist[i]; exitIdx = i; }
+    }
+    if (exitIdx < 0 || maxD < 4) return null;
+
+    var doorIdx = null, keyIdx = null;
+    if (gene.door_count) {
+      var path = [];
+      var cur = exitIdx;
+      while (cur !== -1) { path.push(cur); cur = bfs1.parent[cur]; }
+      path.reverse();
+      if (path.length >= 6) {
+        doorIdx = path[Math.floor(path.length / 2)];
+        var bfs2 = bfs(doorIdx);
+        var keyMaxD = 0, keyCand = -1;
+        for (var i = 0; i < n; i++) {
+          if (i === doorIdx || i === exitIdx) continue;
+          if (i === spawnY * side + spawnX) continue;
+          if (bfs2.dist[i] > keyMaxD) { keyMaxD = bfs2.dist[i]; keyCand = i; }
+        }
+        if (keyCand >= 0) keyIdx = keyCand;
+        else doorIdx = null;
+      }
+    }
+
+    var items = {};
+    var occupied = {};
+    occupied[exitIdx] = 1; occupied[spawnY * side + spawnX] = 1;
+    if (doorIdx !== null) { occupied[doorIdx] = 1; occupied[keyIdx] = 1; }
+    var candidates = [];
+    for (var i = 0; i < n; i++) {
+      if (bfs1.dist[i] > 1 && !occupied[i]) candidates.push(i);
+    }
+    for (var i = candidates.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var t = candidates[i]; candidates[i] = candidates[j]; candidates[j] = t;
+    }
+    var cIdx = 0;
+    function placeOnce (type, count) {
+      for (var k = 0; k < count && cIdx < candidates.length; k++) {
+        items[candidates[cIdx++]] = { type: type };
+      }
+    }
+    // One shotgun always — without it, fire is impossible.  Skip if
+    // there's not enough room for everything; medkits matter more.
+    placeOnce('shotgun', 1);
+    placeOnce('medkit', gene.health_pack_count || 0);
+    placeOnce('ammo',   gene.ammo_pack_count   || 0);
+    return { items: items, exitIdx: exitIdx,
+             doorIdx: doorIdx, keyIdx: keyIdx };
+  }
+
+  // BFS pathfinder used by the AI to walk toward a goal cell.
+  // Returns the next direction (0..5) to step, or -1 if unreachable.
+  function pathStep (world, side, fromX, fromY, goalIdx, doorIdx, hasKey) {
+    var n = side * side;
+    var goalX = goalIdx % side, goalY = (goalIdx / side) | 0;
+    var dist = new Int32Array(n);
+    var fromDir = new Int8Array(n);
+    for (var i = 0; i < n; i++) { dist[i] = -1; fromDir[i] = -1; }
+    var queue = [goalY * side + goalX];
+    dist[queue[0]] = 0;
+    var qh = 0;
+    while (qh < queue.length) {
+      var idx = queue[qh++];
+      if (idx === fromY * side + fromX) break;
+      var x = idx % side, y = (idx / side) | 0;
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(x, y, d, side);
+        var nidx = nb[1] * side + nb[0];
+        if (dist[nidx] !== -1) continue;
+        var cell = world[nidx];
+        // Walls block unless this is the door cell + AI has key.
+        if (cell === WALL) continue;
+        if (nidx === doorIdx && !hasKey) continue;
+        // Monsters as soft obstacle — pass but penalise (handled at
+        // step-selection time, not here; here we just allow it).
+        dist[nidx] = dist[idx] + 1;
+        // Reverse the direction: from idx we walked direction d to
+        // reach nidx, so when stepping FROM nidx → idx the direction
+        // is (d + 3) % 6 (opposite).
+        fromDir[nidx] = (d + 3) % 6;
+        queue.push(nidx);
+      }
+    }
+    var startIdx = fromY * side + fromX;
+    if (dist[startIdx] < 0) return -1;
+    return fromDir[startIdx];
+  }
+
   // ── Game simulation (headless) ────────────────────────────────
   // Runs maxTurns of a doom_ca config and returns metrics.
-  // Player AI: weighted random valid step, slight bias away from the
-  // nearest visible monster (gives a "reasonable but mortal" agent).
+  // Player AI: pathfinds toward the highest-priority goal (medkit if
+  // low HP, shotgun if unarmed, key if door blocks, exit otherwise);
+  // fires the shotgun at adjacent monsters when ammo + has_shotgun;
+  // falls back to weighted-random retreat if no path or no goal.
   function simulateGame (gene, opts) {
     opts = opts || {};
     var maxTurns = opts.maxTurns || 60;
     var aiSeed   = opts.aiSeed   || 1;
     var side     = gene.component_grid;
     var rng      = makeRng(aiSeed);
+    // Independent RNG for item placement so it's stable per gene
+    // regardless of which sim # this is.  Same seed_byte → same level.
+    var placeRng = makeRng((gene.seed_byte * 2654435761) >>> 0);
 
     // Initialise the grid: pact rule + seed expansion → threshold to
     // ground/wall.  Then stomp centre as PLAYER, scatter monsters.
@@ -220,18 +347,46 @@
       world[i] = (raw[i] >= gene.wall_threshold) ? WALL : GROUND;
     }
     var c = Math.floor(side / 2);
-    world[c * side + c] = PLAYER;
-    var player = {x: c, y: c};
+    world[c * side + c] = GROUND;   // ensure spawn is walkable
+    var player = {x: c, y: c, hp: 100, ammo: 0,
+                  hasShotgun: false, hasKey: false, lastDir: 1};
 
-    // Monsters: scatter via aiRng
+    // Place items + door + exit before stamping player or monsters.
+    var level = placeLevel(gene, side, world, c, c, placeRng);
+    if (!level) {
+      // Unwinnable layout — return early with a hard-fail signal so
+      // GA fitness can give it zero.
+      return {
+        survivedTurns: 0, maxTurns: maxTurns,
+        survived: false, won: false,
+        wallsBumped: 0, monstersSeen: 0, groundVisited: 0,
+        completed: false, timeToExit: 0,
+        hpAtExit: 0, itemsCollected: 0, monstersKilled: 0,
+        unwinnable: true,
+      };
+    }
+    var items = level.items;          // mutable: drop entries on pickup
+    var doorIdx = level.doorIdx;
+    var keyIdx  = level.keyIdx;
+    var exitIdx = level.exitIdx;
+    var doorOpen = false;             // becomes true once unlocked
+
+    world[c * side + c] = PLAYER;
+
+    // Monsters: scatter via aiRng, avoiding spawn + items + exit + key.
     var placed = 0, attempts = 0;
     while (placed < gene.monster_count && attempts < gene.monster_count * 40) {
       attempts++;
       var mx = Math.floor(rng() * side);
       var my = Math.floor(rng() * side);
-      if (world[my * side + mx] !== GROUND) continue;
+      var midx = my * side + mx;
+      if (world[midx] !== GROUND) continue;
       if (hexDist(mx, my, player.x, player.y, side) < 3) continue;
-      world[my * side + mx] = MONSTER;
+      if (midx === exitIdx) continue;
+      if (midx === doorIdx) continue;
+      if (midx === keyIdx)  continue;
+      if (items[midx]) continue;
+      world[midx] = MONSTER;
       placed++;
     }
 
@@ -251,6 +406,7 @@
     var turn = 0, gameOver = null;
     var wallsBumped = 0, monstersSeenSet = new Set();
     var groundVisited = new Set();
+    var monstersKilled = 0, itemsCollected = 0;
     groundVisited.add(player.y * side + player.x);
 
     function get (x, y) { return world[((y + side) % side) * side + ((x + side) % side)]; }
@@ -266,29 +422,83 @@
       return out;
     }
 
+    function chooseGoal () {
+      // Priority: low HP → medkit; no shotgun → shotgun; door+no key
+      // → key; else → exit.  If preferred type isn't on the map any
+      // more, fall through to the next.
+      function nearestOfType (type) {
+        var best = -1, bestD = 1e9;
+        for (var k in items) {
+          if (items[k].type !== type) continue;
+          var ix = (+k) % side, iy = ((+k) / side) | 0;
+          var d = hexDist(player.x, player.y, ix, iy, side);
+          if (d < bestD) { bestD = d; best = +k; }
+        }
+        return best;
+      }
+      if (player.hp <= 50) {
+        var m = nearestOfType('medkit');
+        if (m >= 0) return m;
+      }
+      if (!player.hasShotgun) {
+        var s = nearestOfType('shotgun');
+        if (s >= 0) return s;
+      }
+      if (player.ammo <= 1) {
+        var a = nearestOfType('ammo');
+        if (a >= 0) return a;
+      }
+      if (doorIdx !== null && !doorOpen && !player.hasKey) {
+        return keyIdx;
+      }
+      return exitIdx;
+    }
+
     function aiPickDirection () {
-      // Candidate directions: all that don't lead into wall.  Pick
-      // weighted: prefer increasing distance to nearest monster.
+      // 1) If we have a shotgun + ammo and a monster is adjacent,
+      //    fire instead of stepping (returned via the special action
+      //    code 'F' encoded as -2).
+      if (player.hasShotgun && player.ammo > 0) {
+        for (var d = 0; d < 6; d++) {
+          var nb = neighbourCoord(player.x, player.y, d, side);
+          if (get(nb[0], nb[1]) === MONSTER) {
+            player.lastDir = d;
+            return -2;
+          }
+        }
+      }
+      // 2) Pathfind to current goal.
+      var goal = chooseGoal();
+      var dir = pathStep(world, side, player.x, player.y, goal,
+                         doorOpen ? null : doorIdx, player.hasKey);
+      if (dir >= 0) {
+        // If the step lands us on a monster, refuse — fall back to
+        // weighted random (we want the AI to avoid suicide rushes).
+        var nb = neighbourCoord(player.x, player.y, dir, side);
+        if (get(nb[0], nb[1]) !== MONSTER) return dir;
+      }
+      // 3) Weighted random with monster avoidance (legacy fallback).
       var monsters = countMonsterCells();
       var nearest = null, nearestDist = 1e9;
       for (var m = 0; m < monsters.length; m++) {
-        var d = hexDist(player.x, player.y, monsters[m].x, monsters[m].y, side);
-        if (d < nearestDist) { nearestDist = d; nearest = monsters[m]; }
+        var ds = hexDist(player.x, player.y, monsters[m].x, monsters[m].y, side);
+        if (ds < nearestDist) { nearestDist = ds; nearest = monsters[m]; }
       }
       var candidates = [];
       for (var d = 0; d < 6; d++) {
         var nb = neighbourCoord(player.x, player.y, d, side);
         var cellState = get(nb[0], nb[1]);
         if (cellState === WALL) continue;
-        // Weight: + further from nearest monster, − closer
+        var nidx = nb[1] * side + nb[0];
+        if (nidx === doorIdx && !doorOpen && !player.hasKey) continue;
         var w = 1;
         if (nearest) {
-          var futureDist = hexDist(nb[0], nb[1], nearest.x, nearest.y, side);
-          w += futureDist - nearestDist;
+          var fd = hexDist(nb[0], nb[1], nearest.x, nearest.y, side);
+          w += fd - nearestDist;
         }
         candidates.push({dir: d, weight: Math.max(0.1, w)});
       }
-      if (!candidates.length) return -1;   // forced wait
+      if (!candidates.length) return -1;
       var totalW = 0;
       for (var i = 0; i < candidates.length; i++) totalW += candidates[i].weight;
       var r = rng() * totalW;
@@ -299,8 +509,58 @@
       return candidates[candidates.length - 1].dir;
     }
 
+    function pickupAt (cellIdx) {
+      var it = items[cellIdx];
+      if (!it) return;
+      if (it.type === 'medkit')  player.hp = Math.min(100, player.hp + 25);
+      else if (it.type === 'ammo')    player.ammo += 3;
+      else if (it.type === 'shotgun') player.hasShotgun = true;
+      delete items[cellIdx];
+      itemsCollected++;
+    }
+
+    function fireShotgun (dir) {
+      // Walk up to 4 cells in direction dir; kill the first monster
+      // we hit.  Costs 1 ammo whether or not we hit.
+      if (player.ammo <= 0 || !player.hasShotgun) return false;
+      player.ammo--;
+      var x = player.x, y = player.y;
+      for (var step = 0; step < 4; step++) {
+        var nb = neighbourCoord(x, y, dir, side);
+        x = nb[0]; y = nb[1];
+        var cell = get(x, y);
+        if (cell === WALL) return false;
+        if (cell === MONSTER) {
+          setCell(x, y, GROUND);
+          monstersKilled++;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function meleeAdjacentMonsters () {
+      // After every tick, adjacent monsters in pure-CA modes (scent /
+      // evolved) automatically bite the player — drop 10 HP per
+      // adjacent monster, then those monster cells die (mutual KO).
+      // In overlay mode adjacency is handled by moveOverlayMonsters'
+      // contact code instead.
+      if (gene.world_mode === 'overlay') return;
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(player.x, player.y, d, side);
+        if (get(nb[0], nb[1]) === MONSTER) {
+          player.hp -= 10;
+          setCell(nb[0], nb[1], GROUND);
+          monstersKilled++;
+        }
+      }
+    }
+
     function moveOverlayMonsters () {
-      // Greedy pursuit, same as live overlay mode.
+      // Greedy pursuit, same as live overlay mode.  Walking onto the
+      // player deals damage AND the monster dies in the collision
+      // (mutual close-combat) — solves "monster sits adjacent forever
+      // taking infinite hits" without making contact lethal.
       var monsters = countMonsterCells();
       for (var i = 0; i < monsters.length; i++) {
         var m = monsters[i];
@@ -318,7 +578,9 @@
           var dest = neighbourCoord(m.x, m.y, pick, side);
           setCell(m.x, m.y, GROUND);
           if (dest[0] === player.x && dest[1] === player.y) {
-            gameOver = 'lost';
+            player.hp -= 30;
+            monstersKilled++;
+            // Monster dies in the bite — its cell is already GROUND
           } else {
             setCell(dest[0], dest[1], MONSTER);
           }
@@ -340,48 +602,103 @@
           monstersSeenSet.add(monsters[i].y * side + monsters[i].x);
         }
       }
-      if (monsters.length === 0) { gameOver = 'won'; break; }
+      // Goal-driven exit: if we're standing on the exit, we win.
+      if (player.y * side + player.x === exitIdx) {
+        gameOver = 'won';
+        break;
+      }
 
       var dir = aiPickDirection();
-      if (dir < 0) {
+      if (dir === -2) {
+        // Fire shotgun in player.lastDir (set by aiPickDirection).
+        fireShotgun(player.lastDir);
+      } else if (dir < 0) {
         wallsBumped++;
         // Wait (no movement); still progress world.
       } else {
         var target = neighbourCoord(player.x, player.y, dir, side);
-        if (gene.world_mode === 'overlay') {
+        var targetIdx = target[1] * side + target[0];
+        // Door check: blocked unless key in hand → consume key, open.
+        if (targetIdx === doorIdx && !doorOpen) {
+          if (player.hasKey) {
+            doorOpen = true;
+            player.hasKey = false;
+            player.x = target[0]; player.y = target[1];
+            groundVisited.add(targetIdx);
+            player.lastDir = dir;
+          } else {
+            wallsBumped++;
+          }
+        } else if (gene.world_mode === 'overlay') {
           var occ = get(target[0], target[1]);
           if (occ >= gene.wall_threshold) { wallsBumped++; }
           else {
-            // Check monster collision
             var hit = monsters.find(function (m) {
               return m.x === target[0] && m.y === target[1]; });
-            if (hit) gameOver = 'lost';
+            if (hit) {
+              player.hp -= 30;
+              monstersKilled++;
+              // Bashing the monster — kill it and step onto the tile.
+              // (already not in monster list after we just removed it)
+            }
             player.x = target[0]; player.y = target[1];
-            groundVisited.add(player.y * side + player.x);
+            groundVisited.add(targetIdx);
+            player.lastDir = dir;
+            // Key pickup
+            if (targetIdx === keyIdx) {
+              player.hasKey = true;
+              keyIdx = null;
+            }
+            // Item pickup
+            pickupAt(targetIdx);
           }
         } else if (gene.world_mode === 'shift') {
           var occ = get(target[0], target[1]);
           if (occ === WALL) { wallsBumped++; }
           else {
-            if (occ === MONSTER) gameOver = 'lost';
-            // Apply shift; player stays at centre
+            if (occ === MONSTER) {
+              player.hp -= 30;
+              monstersKilled++;
+              setCell(target[0], target[1], GROUND);
+            }
+            // Apply shift; player stays at centre.  Items + door +
+            // exit are world-anchored; they don't shift with the
+            // visible scroll.  This is a deliberate simplification —
+            // shift-mode levels effectively don't have items.
             var tmp = tickRule(world, swap, side, shiftRules[dir]);
             world = tmp === swap ? swap : world;
             var tmp2 = world; world = swap; swap = tmp2;
             setCell(player.x, player.y, PLAYER);
+            player.lastDir = dir;
           }
         } else {
           // scent / evolved: swap player with target then run rule
           var occ = get(target[0], target[1]);
           if (occ === WALL) { wallsBumped++; }
           else {
-            if (occ === MONSTER) gameOver = 'lost';
+            if (occ === MONSTER) {
+              player.hp -= 30;
+              monstersKilled++;
+            }
             setCell(player.x, player.y, GROUND);
             setCell(target[0], target[1], PLAYER);
             player.x = target[0]; player.y = target[1];
-            groundVisited.add(player.y * side + player.x);
+            groundVisited.add(targetIdx);
+            player.lastDir = dir;
+            if (targetIdx === keyIdx) {
+              player.hasKey = true;
+              keyIdx = null;
+            }
+            pickupAt(targetIdx);
           }
         }
+      }
+      if (player.hp <= 0) { gameOver = 'lost'; break; }
+      // Step onto exit immediately wins (catch case where exit is
+      // reached on the same turn as a fire / item pickup).
+      if (player.y * side + player.x === exitIdx) {
+        gameOver = 'won';
+        break;
       }
       // World tick — mode-specific
       if (gene.world_mode === 'overlay') {
@@ -404,15 +721,15 @@
         tickRule(world, swap, side, evolvedRule);
         var tmp = world; world = swap; swap = tmp;
       }
-      if (gene.world_mode !== 'overlay') {
-        // In single-rule modes, monster_count post-tick is the count
-        // of monster cells in the grid.  If the rule generated >>
-        // monsters, that's a feature of the mode (not a kill metric).
+      // Pure-CA modes: adjacent monsters bite after the tick.
+      if (gene.world_mode === 'scent' || gene.world_mode === 'evolved') {
+        meleeAdjacentMonsters();
       }
-      // Game over detection
-      if (gene.world_mode !== 'overlay') {
+      // Game over detection — player cell overwritten = lost.
+      if (gene.world_mode !== 'overlay' && gene.world_mode !== 'shift') {
         if (get(player.x, player.y) !== PLAYER) gameOver = 'lost';
       }
+      if (player.hp <= 0) gameOver = 'lost';
       turn++;
     }
 
@@ -424,6 +741,13 @@
       wallsBumped: wallsBumped,
       monstersSeen: monstersSeenSet.size,
       groundVisited: groundVisited.size,
+      // Doom-mechanics signals for the GA:
+      completed: gameOver === 'won',
+      timeToExit: gameOver === 'won' ? turn : maxTurns,
+      hpAtExit: gameOver === 'won' ? player.hp : 0,
+      itemsCollected: itemsCollected,
+      monstersKilled: monstersKilled,
+      unwinnable: false,
     };
   }
 
@@ -437,6 +761,8 @@
     buildEvolvedRule: buildEvolvedRule,
     tickRule: tickRule,
     simulateGame: simulateGame,
+    placeLevel: placeLevel,
+    pathStep: pathStep,
     makeRng: makeRng,
     neighbourCoord: neighbourCoord,
     hexDist: hexDist,

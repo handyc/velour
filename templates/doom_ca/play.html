@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{{ session.name }} — Doom CA{% endblock %}
 {% block content %}
 <style>
@@ -38,6 +39,16 @@
   .mode-note { color: #aaa; font-size: 0.82rem; max-width: 60em;
                border-left: 2px solid #2a4a2a; padding: 4px 10px;
                margin: 6px 0; background: #0a120a; }
+  .hud { display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+         margin: 6px 0; font-family: monospace; font-size: 0.85rem;
+         color: #aaa; }
+  .hud .hpbar { width: 12em; height: 0.9em; background: #200;
+                border: 1px solid #511; position: relative; }
+  .hud .hpfill { background: #c33; height: 100%; transition: width 0.2s; }
+  .hud .ammo { color: #fc8; }
+  .hud .keyIcon { color: #fd0; }
+  .hud .keyIcon.dim { color: #553; }
+  .hud .objective { color: #ace; }
 </style>
 
 <div class="dc-page">
@@ -60,6 +71,14 @@
 
 <div class="mode-note" id="dc-mode-note"></div>
 
+<div class="hud">
+  <span>HP <span class="hpbar"><span class="hpfill" id="dc-hpfill"></span></span>
+        <b id="dc-hp" style="color:#fcc;">100</b></span>
+  <span>ammo <b class="ammo" id="dc-ammo">0</b></span>
+  <span class="keyIcon dim" id="dc-key">🔑</span>
+  <span class="objective" id="dc-objective">— find the exit —</span>
+</div>
+
 <p class="keys">
   Move:
   <kbd>W</kbd>/<kbd>↑</kbd> N &nbsp;
@@ -68,7 +87,7 @@
   <kbd>D</kbd>/<kbd>→</kbd> E &nbsp;
   <kbd>Q</kbd> NW &nbsp; <kbd>E</kbd> NE &nbsp;
   <kbd>Z</kbd> SW &nbsp; <kbd>C</kbd> SE &nbsp;
-  <kbd>Space</kbd> wait &nbsp; <kbd>R</kbd> restart
+  <kbd>Space</kbd> fire &nbsp; <kbd>.</kbd> wait &nbsp; <kbd>R</kbd> restart
 </p>
 
 <div class="controls">
@@ -102,6 +121,7 @@
 </div>
 </div>
 
+<script src="{% static 'doom_ca/engine.js' %}"></script>
 <script>
 (function () {
   var payload = {{ payload|safe }};
@@ -113,6 +133,14 @@
   var PURE_MODE = !!payload.pure_mode;
   var RULE_SIZE = 16384;
   var COMPONENTS = payload.components;
+  // Doom Phase-1 fields (defaults preserve old behaviour for legacy
+  // sessions that pre-date the items system).
+  var HEALTH_PACK_COUNT = (payload.health_pack_count != null)
+        ? payload.health_pack_count : 3;
+  var AMMO_PACK_COUNT   = (payload.ammo_pack_count   != null)
+        ? payload.ammo_pack_count   : 3;
+  var DOOR_COUNT        = (payload.door_count        != null)
+        ? payload.door_count        : 1;
 
   var MODE_NOTES = {
     overlay: 'overlay mode — the pact rule runs the CA freely; player + ' +
@@ -345,6 +373,10 @@
 
   // ─── shared world buffers ─────────────────────────────────────
   var world, swap, generation, turn, player, monsters, gameOver;
+  // Doom Phase 1: items, doors, exit are overlay state.  `items` is a
+  // map cellIdx → {type} (medkit/ammo/shotgun).  `doorIdx` / `keyIdx`
+  // are -1 when no door.  `exitIdx` is the win cell.
+  var items, doorIdx, keyIdx, exitIdx, doorOpen;
   var canvas = document.getElementById('dc-canvas');
   var ctx = canvas.getContext('2d');
   var VIEW = 21;
@@ -440,6 +472,39 @@
     });
   }
 
+  // ─── level placement (items / door / exit) ───────────────────
+  // Build a thresholded GROUND/WALL view of the initial world and
+  // hand it to engine.js's BFS-based placer.  The placer doesn't
+  // touch the CA grid — it returns a sparse items map + door + exit
+  // indices that live in their own overlay layer.
+  function placeLevelOnce (worldGrid, spawnX, spawnY) {
+    var E = window.DoomCAEngine;
+    // For overlay mode, the world stores raw 0..3 colours; for the
+    // other modes it stores GROUND/WALL/PLAYER/MONSTER (0..3) already.
+    var gw = new Uint8Array(GRID * GRID);
+    if (MODE === 'overlay') {
+      for (var i = 0; i < worldGrid.length; i++) {
+        gw[i] = (worldGrid[i] >= WALL_THRESH) ? E.WALL : E.GROUND;
+      }
+    } else {
+      for (var i = 0; i < worldGrid.length; i++) {
+        gw[i] = (worldGrid[i] === E.WALL) ? E.WALL : E.GROUND;
+      }
+    }
+    var rng = E.makeRng((seed[COMPONENT] * 2654435761) >>> 0);
+    var fakeGene = {
+      health_pack_count: HEALTH_PACK_COUNT,
+      ammo_pack_count:   AMMO_PACK_COUNT,
+      door_count:        DOOR_COUNT,
+    };
+    var level = E.placeLevel(fakeGene, GRID, gw, spawnX, spawnY, rng);
+    if (!level) {
+      // Unreachable exit — show a fallback so the page isn't broken.
+      return { items: {}, exitIdx: -1, doorIdx: null, keyIdx: null };
+    }
+    return level;
+  }
+
   // ─── initial setup ────────────────────────────────────────────
   function init () {
     swap  = new Uint8Array(GRID * GRID);
@@ -451,6 +516,12 @@
       world = seedGrid(seed[COMPONENT]).slice();
       var c = Math.floor(GRID / 2);
       player = findGroundNear(c, c, isWallForOverlay);
+      player.hp = 100; player.ammo = 0;
+      player.hasShotgun = false; player.hasKey = false;
+      player.lastDir = 1;
+      var level = placeLevelOnce(world, player.x, player.y);
+      items = level.items; doorIdx = level.doorIdx;
+      keyIdx = level.keyIdx; exitIdx = level.exitIdx; doorOpen = false;
       monsters = [];
       tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 32).then(function (bytes) {
         var bi = 0, attempts = 0;
@@ -459,6 +530,9 @@
           var mx = bytes[bi % bytes.length] % GRID; bi++;
           var my = bytes[bi % bytes.length] % GRID; bi++;
           if (isWallForOverlay(get(mx, my))) continue;
+          var midx = my * GRID + mx;
+          if (midx === exitIdx || midx === doorIdx
+              || midx === keyIdx || items[midx]) continue;
           var dx2 = (mx - player.x + GRID + GRID/2) % GRID - GRID/2;
           var dy2 = (my - player.y + GRID + GRID/2) % GRID - GRID/2;
           if (Math.abs(dx2) + Math.abs(dy2) < 3) continue;
@@ -483,8 +557,15 @@
       world = grid;
       var c = Math.floor(GRID / 2);
       // Stomp the centre cell as ground first, then mark as player.
+      world[c * GRID + c] = GROUND;
+      player = {x: c, y: c, hp: 100, ammo: 0,
+                hasShotgun: false, hasKey: false, lastDir: 1};
+      // Place items/door/exit BEFORE stomping player so the placer
+      // sees the spawn cell as ground.
+      var level = placeLevelOnce(world, c, c);
+      items = level.items; doorIdx = level.doorIdx;
+      keyIdx = level.keyIdx; exitIdx = level.exitIdx; doorOpen = false;
       world[c * GRID + c] = PLAYER;
-      player = {x: c, y: c};
       monsters = [];
       tapAsync(COMPONENT, 0, MONSTER_COUNT * 4 + 32).then(function (bytes) {
         var bi = 0, placed = 0, attempts = 0;
@@ -492,8 +573,11 @@
           attempts++;
           var mx = bytes[bi % bytes.length] % GRID; bi++;
           var my = bytes[bi % bytes.length] % GRID; bi++;
+          var midx = my * GRID + mx;
           if (get(mx, my) !== GROUND) continue;
           if (hexDist(mx, my, player.x, player.y) < 3) continue;
+          if (midx === exitIdx || midx === doorIdx
+              || midx === keyIdx || items[midx]) continue;
           set(mx, my, MONSTER);
           placed++;
         }
@@ -522,57 +606,119 @@
   }
 
   // ─── input → game step ────────────────────────────────────────
+  function pickupAt (cellIdx) {
+    var it = items[cellIdx];
+    if (!it) return;
+    if (it.type === 'medkit')       player.hp   = Math.min(100, player.hp + 25);
+    else if (it.type === 'ammo')    player.ammo += 3;
+    else if (it.type === 'shotgun') player.hasShotgun = true;
+    delete items[cellIdx];
+  }
+
+  function tryEnterDoor (targetIdx) {
+    // Returns true if door blocks; caller treats as bumped wall.
+    if (targetIdx !== doorIdx || doorOpen) return false;
+    if (player.hasKey) {
+      doorOpen = true; player.hasKey = false;
+      return false;
+    }
+    return true;
+  }
+
   function playerMove (dirIdx) {
     if (gameOver) return;
+    player.lastDir = dirIdx;
     if (MODE === 'overlay') {
-      // Existing logic: move player position, walk-into-monster = death.
       var nb = neighbourCoord(player.x, player.y, dirIdx);
       var nx = nb[0], ny = nb[1];
       if (isWallForOverlay(get(nx, ny))) return;
+      var targetIdx = ny * GRID + nx;
+      if (tryEnterDoor(targetIdx)) return;     // locked door = bump
       var hit = monsters.find(function (m) {
         return m.alive && m.x === nx && m.y === ny; });
-      if (hit) gameOver = 'lost';
+      if (hit) {
+        player.hp -= 30;
+        hit.alive = false;                     // bash kills the monster
+      }
       player.x = nx; player.y = ny;
+      if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
+      pickupAt(targetIdx);
+      if (targetIdx === exitIdx) { gameOver = 'won'; }
       afterMove();
       return;
     }
-    // shift/scent/evolved: the player cell is anchored at centre.
-    // "Moving" = applying the shift rule in the direction the player
-    // intends, so the world scrolls under the anchored player.
-    // shiftRules[d] makes every cell take its d-direction neighbour
-    // (so the world shifts AWAY from d, and the player feels they
-    // moved IN direction d).  Use dirIdx directly.
     var target = neighbourCoord(player.x, player.y, dirIdx);
+    var targetIdx = target[1] * GRID + target[0];
     var occupant = get(target[0], target[1]);
     if (MODE === 'shift') {
-      // Wall in the intended direction → can't shift; just wait.
       if (occupant === WALL) { afterMove(); return; }
-      if (occupant === MONSTER) { gameOver = 'lost'; }
+      if (tryEnterDoor(targetIdx)) { afterMove(); return; }
+      if (occupant === MONSTER) {
+        player.hp -= 30;
+        set(target[0], target[1], GROUND);
+      }
       tickRule(shiftRules[dirIdx]);
-      // The rule already pins the centre cell; re-mark defensively.
       set(player.x, player.y, PLAYER);
       monsters = countMonsterCells();
       afterMove(/*skipPactTick=*/true);
       return;
     }
     if (MODE === 'scent' || MODE === 'evolved') {
-      // In single-rule modes, the player "presses" a direction by
-      // swapping the centre cell with its neighbour — i.e. the
-      // CA-rule's update will naturally do the right thing on the
-      // next tick because the player is now adjacent to whatever
-      // was there.  Movement happens visually as a swap then tick.
       if (occupant === WALL) { afterMove(); return; }
-      if (occupant === MONSTER) { gameOver = 'lost'; }
-      // Swap: place player at target, ground at old player.
+      if (tryEnterDoor(targetIdx)) { afterMove(); return; }
+      if (occupant === MONSTER) {
+        player.hp -= 30;
+      }
       set(player.x, player.y, GROUND);
       set(target[0], target[1], PLAYER);
       player.x = target[0]; player.y = target[1];
+      if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
+      pickupAt(targetIdx);
+      if (targetIdx === exitIdx) { gameOver = 'won'; }
       afterMove();
       return;
     }
   }
 
   function playerWait () { if (!gameOver) afterMove(); }
+
+  function playerFire () {
+    if (gameOver) return;
+    if (!player.hasShotgun) return;
+    if (player.ammo <= 0) return;
+    player.ammo--;
+    var x = player.x, y = player.y;
+    for (var step = 0; step < 4; step++) {
+      var nb = neighbourCoord(x, y, player.lastDir);
+      x = nb[0]; y = nb[1];
+      if (MODE === 'overlay') {
+        if (isWallForOverlay(get(x, y))) break;
+        var hit = monsters.find(function (m) {
+          return m.alive && m.x === x && m.y === y; });
+        if (hit) { hit.alive = false; break; }
+      } else {
+        var c = get(x, y);
+        if (c === WALL) break;
+        if (c === MONSTER) { set(x, y, GROUND); break; }
+      }
+    }
+    afterMove();
+  }
+
+  function meleeAdjacent () {
+    // In scent / evolved modes, adjacent monster cells bite — 10 HP
+    // each, then those cells die.  Overlay mode handles contact in
+    // moveOverlayMonsters; shift mode is mostly visual scroll.
+    if (MODE !== 'scent' && MODE !== 'evolved') return;
+    for (var d = 0; d < 6; d++) {
+      var nb = neighbourCoord(player.x, player.y, d);
+      if (get(nb[0], nb[1]) === MONSTER) {
+        player.hp -= 10;
+        set(nb[0], nb[1], GROUND);
+      }
+    }
+    monsters = countMonsterCells();
+  }
 
   function afterMove (skipPactTick) {
     turn++;
@@ -582,14 +728,9 @@
       if (isWallForOverlay(get(player.x, player.y))) gameOver = 'lost';
       moveOverlayMonsters();
     } else if (MODE === 'shift') {
-      // The shift was already applied as the "move".  Optionally run
-      // the pact rule on wait ticks for ambient drift; but keep the
-      // player cell pinned.  Pure mode skips this entirely.
       if (!skipPactTick && !PURE_MODE) {
         for (var t = 0; t < rate; t++) {
           tickPactRule();
-          // Protect the player + recreate it
-          // (the pact rule has no notion of "PLAYER colour preservation")
           set(player.x, player.y, PLAYER);
         }
         monsters = countMonsterCells();
@@ -604,7 +745,11 @@
       monsters = countMonsterCells();
       checkGameOver_singleRule();
     }
-    if (monsters.length === 0 && !gameOver) gameOver = 'won';
+    meleeAdjacent();
+    if (player.hp <= 0) gameOver = 'lost';
+    // Standing on the exit at any point = win (after world tick too,
+    // in case a scent rule shuffles us onto an exit cell).
+    if (!gameOver && player.y * GRID + player.x === exitIdx) gameOver = 'won';
     draw(); updateReadouts();
   }
 
@@ -688,6 +833,74 @@
         ctx.fillRect(screenX, screenY, CELL_PX, CELL_PX);
       }
     }
+    // ── Overlay layer: door, exit, key, items ─────────────────────
+    function drawCellAt (cellIdx, drawFn) {
+      var cx = cellIdx % GRID, cy = (cellIdx / GRID) | 0;
+      var ddx = cx - player.x;
+      if (ddx >  GRID / 2) ddx -= GRID;
+      if (ddx < -GRID / 2) ddx += GRID;
+      var ddy = cy - player.y;
+      if (ddy >  GRID / 2) ddy -= GRID;
+      if (ddy < -GRID / 2) ddy += GRID;
+      if (Math.abs(ddx) > half || Math.abs(ddy) > half) return;
+      var rs = (cy & 1) ? CELL_PX * 0.5 : 0;
+      var sx = (ddx + half) * H_STEP + rs;
+      var sy = (ddy + half) * V_STEP;
+      drawFn(sx, sy, sx + CELL_PX / 2, sy + CELL_PX / 2);
+    }
+    if (exitIdx >= 0) {
+      drawCellAt(exitIdx, function (sx, sy, cx2, cy2) {
+        ctx.fillStyle = '#0a3a3a';
+        ctx.fillRect(sx + 1, sy + 1, CELL_PX - 2, CELL_PX - 2);
+        ctx.strokeStyle = '#5fb';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, CELL_PX * 0.32, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#5fb';
+        ctx.font = Math.floor(CELL_PX * 0.55) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('⌂', cx2, cy2 + 1);
+      });
+    }
+    if (doorIdx !== null && doorIdx >= 0) {
+      drawCellAt(doorIdx, function (sx, sy, cx2, cy2) {
+        ctx.fillStyle = doorOpen ? '#3a2a0a' : '#9b6a14';
+        ctx.fillRect(sx + 1, sy + 1, CELL_PX - 2, CELL_PX - 2);
+        if (!doorOpen) {
+          ctx.fillStyle = '#fd0';
+          ctx.font = Math.floor(CELL_PX * 0.5) + 'px monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText('🔒', cx2, cy2 + 1);
+        }
+      });
+    }
+    if (keyIdx !== null && keyIdx >= 0) {
+      drawCellAt(keyIdx, function (sx, sy, cx2, cy2) {
+        ctx.fillStyle = '#fd0';
+        ctx.font = Math.floor(CELL_PX * 0.6) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('🔑', cx2, cy2 + 1);
+      });
+    }
+    for (var k in items) {
+      var it = items[k];
+      drawCellAt(+k, (function (it) { return function (sx, sy, cx2, cy2) {
+        ctx.font = Math.floor(CELL_PX * 0.55) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        if (it.type === 'medkit') {
+          ctx.fillStyle = '#3f3';
+          ctx.fillText('✚', cx2, cy2 + 1);
+        } else if (it.type === 'ammo') {
+          ctx.fillStyle = '#fb6';
+          ctx.fillText('●', cx2, cy2 + 1);
+        } else if (it.type === 'shotgun') {
+          ctx.fillStyle = '#ccc';
+          ctx.fillText('⌐', cx2, cy2 + 1);
+        }
+      }; })(it));
+    }
+
     // Monsters as red circles.
     var mDrawList = (MODE === 'overlay')
       ? monsters.filter(function (m) { return m.alive; })
@@ -733,13 +946,30 @@
     document.getElementById('dc-turn').textContent = turn;
     document.getElementById('dc-pos').textContent =
       '(' + player.x + ',' + player.y + ')';
-    document.getElementById('dc-mleft').textContent = monsters.length;
+    document.getElementById('dc-mleft').textContent =
+      (MODE === 'overlay')
+        ? monsters.filter(function (m) { return m.alive; }).length
+        : monsters.length;
     document.getElementById('dc-gen').textContent = generation;
+    // HP, ammo, key, objective.
+    var hp = Math.max(0, player.hp || 0);
+    document.getElementById('dc-hp').textContent = hp;
+    document.getElementById('dc-hpfill').style.width = hp + '%';
+    document.getElementById('dc-ammo').textContent = player.ammo +
+        (player.hasShotgun ? '' : ' (no weapon)');
+    var ki = document.getElementById('dc-key');
+    ki.className = 'keyIcon' + (player.hasKey ? '' : ' dim');
+    ki.title = player.hasKey ? 'key in hand' : 'no key';
+    var obj = document.getElementById('dc-objective');
+    if (!player.hasShotgun) obj.textContent = '— grab the shotgun —';
+    else if (doorIdx !== null && doorIdx >= 0 && !doorOpen && !player.hasKey)
+      obj.textContent = '— find the key —';
+    else obj.textContent = '— find the exit —';
     var s = document.getElementById('dc-status');
     if (gameOver === 'lost') {
-      s.innerHTML = '<span class="game-over">— caught by a monster.</span>';
+      s.innerHTML = '<span class="game-over">— you died.</span>';
     } else if (gameOver === 'won') {
-      s.innerHTML = '<span class="you-win">— you survived.</span>';
+      s.innerHTML = '<span class="you-win">— reached the exit. ' + hp + ' HP remaining.</span>';
     } else {
       s.textContent = '';
     }
@@ -776,6 +1006,9 @@
       return;
     }
     if (ev.key === ' ' || ev.key === 'Space') {
+      playerFire(); ev.preventDefault(); return;
+    }
+    if (ev.key === '.') {
       playerWait(); ev.preventDefault(); return;
     }
     var k = ev.key.length === 1 ? ev.key.toUpperCase() : ev.key;
