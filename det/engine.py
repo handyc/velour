@@ -71,6 +71,46 @@ def is_uniform(grid):
     return True
 
 
+def horizon_band_score(grid):
+    """How "horizon-like" the grid is — colours running in horizontal
+    bands.
+
+    Computed as P(horizontal-neighbour same colour) - P(vertical-neighbour
+    same colour).  Maps roughly to [-1, 1]; clipped to [0, 1] so it
+    composes additively with other fitness signals.
+
+    Edge cases:
+      uniform grid → 0 (boring class-1, not a band).
+      random grid  → ~0 (h ≈ v ≈ 1/n_colors).
+      pure horizontal bands → 1.
+      pure vertical stripes → 0 (clipped).
+    """
+    H = len(grid)
+    if H < 2:
+        return 0.0
+    W = len(grid[0])
+    if W < 2:
+        return 0.0
+    horiz_same = 0; horiz_total = 0
+    vert_same  = 0; vert_total  = 0
+    for y in range(H):
+        row = grid[y]
+        for x in range(W - 1):
+            horiz_total += 1
+            if row[x] == row[x + 1]:
+                horiz_same += 1
+    for y in range(H - 1):
+        row_a = grid[y]
+        row_b = grid[y + 1]
+        for x in range(W):
+            vert_total += 1
+            if row_a[x] == row_b[x]:
+                vert_same += 1
+    h = horiz_same / horiz_total
+    v = vert_same  / vert_total
+    return max(0.0, h - v)
+
+
 def activity_rate(prev, curr):
     """Fraction of cells that changed between two grids of equal shape.
     Rule-110-like dynamics hover in the range ~0.02-0.25: not frozen,

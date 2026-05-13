@@ -197,6 +197,14 @@
         <input type="number" name="horizon" value="60"
                min="20" max="120">
       </label>
+      <label title="Promotes candidates whose final grid has horizontal bands of colour.">
+        horizon profile
+        <select name="horizon_mode">
+          <option value="off" selected>off</option>
+          <option value="available">available (bonus signal)</option>
+          <option value="use_only">use only (replaces class-4 score)</option>
+        </select>
+      </label>
       <label>label
         <input type="text" name="label" placeholder="optional"
                style="width:9rem">

@@ -73,6 +73,9 @@
     wildcards={{ run.wildcard_pct }}% ·
     grid={{ run.screen_width }}×{{ run.screen_height }} ·
     horizon={{ run.horizon }} · seed="{{ run.seed }}"
+    {% if run.horizon_mode and run.horizon_mode != 'off' %}
+      · <b style="color:#58a6ff">horizon profile: {{ run.horizon_mode }}</b>
+    {% endif %}
     {% if run.error %}<br><span style="color:#f85149">error: {{ run.error }}</span>{% endif %}
   </div>
 

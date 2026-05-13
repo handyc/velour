@@ -109,6 +109,7 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
     block_ent = engine.block_entropy_grid(grid, k=2)
     dens = engine.density_profile(grid, n_colors)
     color_diversity = sum(1 for d in dens if d > 0.01)
+    horizon_band = engine.horizon_band_score(grid)
     # Average activity over the last third of the run — settles into
     # the steady-state rate after initial transients
     tail_slice = activity_samples[-max(1, len(activity_samples) // 3):]
@@ -123,17 +124,32 @@ def _step_and_measure(rules, W, H, n_colors, horizon, grid_seed,
         'block_entropy':   round(block_ent, 4),
         'density_profile': [round(d, 4) for d in dens],
         'color_diversity': color_diversity,
+        'horizon_band':    round(horizon_band, 4),
     }, grid, prev
 
 
-def _score(analysis, n_colors):
+def _score(analysis, n_colors, horizon_mode='off'):
     """Class-4-likeness as a single float. Higher is better.
 
     The five signals and their weights are tuned so a moderate score
     (~3.5-5.0) flags something worth a human look, and the top
     candidates routinely score 5.5+. Weights are deliberate enough
     that dropping any one (e.g. setting block_entropy weight to 0)
-    demonstrably changes the ranking."""
+    demonstrably changes the ranking.
+
+    `horizon_mode` controls how the horizon-band metric participates:
+      'off'       — ignore it (class-4 scoring only, default)
+      'available' — add it as a bonus signal (weight 2.0, same order
+                    as the activity-band component)
+      'use_only'  — score IS the horizon-band metric, scaled to be
+                    comparable to the class-4 score range (×6.0)
+    """
+    hb = analysis.get('horizon_band', 0.0)
+    if horizon_mode == 'use_only':
+        # Bypass the class-4 signals entirely.  Scale so a perfectly-
+        # banded grid scores ~6, in line with top class-4 candidates.
+        s = round(6.0 * hb, 3)
+        return s, {'horizon_band': s}
     score = 0.0
     breakdown = {}
 
@@ -180,6 +196,16 @@ def _score(analysis, n_colors):
         score += bonus
         breakdown['color_diversity'] = round(bonus, 3)
 
+    # 6. Horizon-band bonus — only contributes when the user has
+    # opted in.  Weight 2.0 puts a perfectly-banded grid roughly on
+    # par with the activity-band peak so the metric can compete with
+    # class-4 signals but doesn't dominate them by itself.
+    if horizon_mode == 'available':
+        contrib = 2.0 * analysis.get('horizon_band', 0.0)
+        if contrib > 0:
+            score += contrib
+            breakdown['horizon_band'] = round(contrib, 3)
+
     return round(score, 3), breakdown
 
 
@@ -207,7 +233,8 @@ def _classify(analysis, score, n_colors):
 
 def _score_one(cand_idx: int, run_seed: str, n_colors: int,
                n_rules: int, wildcard_pct: int,
-               W: int, H: int, horizon: int) -> dict:
+               W: int, H: int, horizon: int,
+               horizon_mode: str = 'off') -> dict:
     """Pure-Python worker: deterministically generate and score the
     ruleset at index cand_idx. Picklable for ProcessPoolExecutor.
     Rules are seeded by `{run_seed}-rules-{cand_idx}` (not sequential
@@ -219,9 +246,10 @@ def _score_one(cand_idx: int, run_seed: str, n_colors: int,
     analysis, _final, _prev = _step_and_measure(
         rules, W, H, n_colors, horizon, grid_seed,
     )
-    score, breakdown = _score(analysis, n_colors)
+    score, breakdown = _score(analysis, n_colors, horizon_mode)
     analysis['score_breakdown'] = breakdown
     analysis['grid_seed'] = grid_seed
+    analysis['horizon_mode'] = horizon_mode
     est = _classify(analysis, score, n_colors)
     return {
         'cand_idx':   cand_idx,
@@ -319,6 +347,7 @@ def execute(run, progress_cb=None, n_workers=1, time_limit_seconds=None,
                     i, run.seed, run.n_colors,
                     run.n_rules_per_candidate, run.wildcard_pct,
                     run.screen_width, run.screen_height, run.horizon,
+                    run.horizon_mode,
                 ))
         else:
             window = max(1, n_workers * 4)
@@ -333,6 +362,7 @@ def execute(run, progress_cb=None, n_workers=1, time_limit_seconds=None,
                         next_idx, run.seed, run.n_colors,
                         run.n_rules_per_candidate, run.wildcard_pct,
                         run.screen_width, run.screen_height, run.horizon,
+                        run.horizon_mode,
                     )
                     futures[fut] = next_idx
                     next_idx += 1

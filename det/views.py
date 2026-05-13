@@ -109,6 +109,9 @@ def create_search(request):
         return HttpResponseBadRequest('n_candidates out of range 20-600.')
 
     label = request.POST.get('label', '').strip()
+    horizon_mode = request.POST.get('horizon_mode', 'off')
+    if horizon_mode not in {'off', 'available', 'use_only'}:
+        horizon_mode = 'off'
 
     run = SearchRun.objects.create(
         label=label, n_colors=n_colors,
@@ -117,6 +120,7 @@ def create_search(request):
         wildcard_pct=wildcard_pct,
         screen_width=W, screen_height=H,
         horizon=horizon,
+        horizon_mode=horizon_mode,
     )
     try:
         execute(run)

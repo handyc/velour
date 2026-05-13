@@ -148,6 +148,11 @@
         <dd>{{ cand.analysis.density_profile }}</dd>
         <dt>color diversity</dt>
         <dd>{{ cand.analysis.color_diversity }} of {{ cand.run.n_colors }}</dd>
+        {% if cand.analysis.horizon_band %}
+        <dt>horizon band</dt>
+        <dd>{{ cand.analysis.horizon_band }}
+          <span style="color:#6e7681">(P[horiz-same] − P[vert-same], in [0,1])</span></dd>
+        {% endif %}
         <dt>grid seed</dt>
         <dd>{{ cand.analysis.grid_seed }}</dd>
       </dl>

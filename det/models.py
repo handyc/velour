@@ -58,6 +58,22 @@ class SearchRun(models.Model):
         help_text='Max ticks to step each candidate forward before '
                   'measuring. Needs to be long enough that early '
                   'transients settle — 40 wasn\u2019t.')
+
+    HORIZON_MODE_CHOICES = [
+        ('off',       'off - score only on class-4-likeness'),
+        ('available', 'available - add horizon-band score as a '
+                      'bonus signal alongside class-4 signals'),
+        ('use_only',  'use only - score is the horizon-band score '
+                      'alone, ignore class-4 signals'),
+    ]
+    horizon_mode = models.CharField(
+        max_length=12, choices=HORIZON_MODE_CHOICES, default='off',
+        help_text='How to weight the "horizon profile" metric: rewards '
+                  'final grids whose colours run in horizontal bands '
+                  '(high horizontal-neighbour match, low vertical '
+                  'match). Useful for hunting CAs whose attractors look '
+                  'like landscape strata.')
+
     seed = models.CharField(max_length=64, blank=True,
         help_text='RNG seed for reproducibility. Auto-set from '
                   'timestamp if blank.')
