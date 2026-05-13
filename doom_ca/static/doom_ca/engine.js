@@ -278,11 +278,37 @@
     }
     // One shotgun always — without it, fire is impossible.  Skip if
     // there's not enough room for everything; medkits matter more.
-    placeOnce('shotgun', 1);
+    // Allow gene.shotgun_count to gate weapon presence — archetypes
+    // like Pacman-style want a weaponless level.
+    var shotgunCount = (gene.shotgun_count != null) ? gene.shotgun_count : 1;
+    placeOnce('shotgun', shotgunCount);
     placeOnce('medkit', gene.health_pack_count || 0);
     placeOnce('ammo',   gene.ammo_pack_count   || 0);
+
+    // ── Layout-shape metrics (computed once, surfaced to fitness) ──
+    // openness:    reachable_cells / total_cells.   Larger = more open.
+    // corridorWidth: mean non-wall neighbours per reachable ground
+    //   cell, divided by 6 (max).  Tight tunnels score low, wide
+    //   chambers score high.
+    var reachable = 0;
+    var neighbourSum = 0, neighbourCells = 0;
+    for (var i = 0; i < n; i++) {
+      if (bfs1.dist[i] < 0) continue;
+      reachable++;
+      var x = i % side, y = (i / side) | 0;
+      for (var d = 0; d < 6; d++) {
+        var nb = neighbourCoord(x, y, d, side);
+        if (world[nb[1] * side + nb[0]] !== WALL) neighbourSum++;
+      }
+      neighbourCells++;
+    }
+    var openness = reachable / n;
+    var corridorWidth = neighbourCells > 0
+      ? (neighbourSum / neighbourCells) / 6 : 0;
+
     return { items: items, exitIdx: exitIdx,
-             doorIdx: doorIdx, keyIdx: keyIdx };
+             doorIdx: doorIdx, keyIdx: keyIdx,
+             openness: openness, corridorWidth: corridorWidth };
   }
 
   // BFS pathfinder used by the AI to walk toward a goal cell.
@@ -370,6 +396,8 @@
     var keyIdx  = level.keyIdx;
     var exitIdx = level.exitIdx;
     var doorOpen = false;             // becomes true once unlocked
+    var levelOpenness      = level.openness      || 0;
+    var levelCorridorWidth = level.corridorWidth || 0;
 
     world[c * side + c] = PLAYER;
 
@@ -754,6 +782,9 @@
       itemsCollected: itemsCollected,
       monstersKilled: monstersKilled,
       unwinnable: false,
+      // Layout-shape signals (constant across sims for a given gene).
+      openness:      levelOpenness,
+      corridorWidth: levelCorridorWidth,
     };
   }
 

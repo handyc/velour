@@ -24,6 +24,8 @@
         ? payload.ammo_pack_count   : 3;
   var DOOR_COUNT        = (payload.door_count        != null)
         ? payload.door_count        : 1;
+  var SHOTGUN_COUNT     = (payload.shotgun_count     != null)
+        ? payload.shotgun_count     : 1;
 
   var MODE_NOTES = {
     overlay: 'overlay mode — the pact rule runs the CA freely; player + ' +
@@ -347,6 +349,7 @@
       health_pack_count: HEALTH_PACK_COUNT,
       ammo_pack_count:   AMMO_PACK_COUNT,
       door_count:        DOOR_COUNT,
+      shotgun_count:     SHOTGUN_COUNT,
     };
     var level = E.placeLevel(fakeGene, GRID, gw, spawnX, spawnY, rng);
     if (!level) {
