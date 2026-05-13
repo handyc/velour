@@ -172,6 +172,18 @@ def materialize_agent(request):
     pure_mode    = bool(gene.get('pure_mode', False))
     base_name    = (gene.get('name') or 'evolved-pact').strip()[:60]
 
+    # Validate the optional palette: 4 × [r, g, b], each 0..255
+    palette = None
+    pal_in = gene.get('palette')
+    if isinstance(pal_in, list) and len(pal_in) == 4:
+        try:
+            palette = [[int(c[0]) & 0xFF, int(c[1]) & 0xFF, int(c[2]) & 0xFF]
+                       for c in pal_in if isinstance(c, list) and len(c) == 3]
+            if len(palette) != 4:
+                palette = None
+        except (TypeError, ValueError):
+            palette = None
+
     valid_modes = {k for k, _ in GameSession.WORLD_MODE_CHOICES}
     if world_mode not in valid_modes:
         world_mode = 'overlay'
@@ -198,6 +210,8 @@ def materialize_agent(request):
         notes='Materialised from doom_ca evolve.',
         created_by=request.user if request.user.is_authenticated else None,
     )
+    if palette is not None:
+        pact.palette = palette
     pact.save()
 
     session = GameSession(
