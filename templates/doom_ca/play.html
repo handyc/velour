@@ -99,7 +99,7 @@
   </span>
 </div>
 
-<canvas id="dc-canvas" width="640" height="640"></canvas>
+<canvas id="dc-canvas"></canvas>
 
 <div class="readouts">
   <span>turn <b id="dc-turn">0</b></span>
@@ -380,9 +380,32 @@
   var canvas = document.getElementById('dc-canvas');
   var ctx = canvas.getContext('2d');
   var VIEW = 21;
-  var CELL_PX = Math.floor(canvas.width / VIEW);
-  var H_STEP = CELL_PX;
-  var V_STEP = CELL_PX * 0.85;
+  var CELL_PX, H_STEP, V_STEP;
+
+  // Pick a square canvas edge that fits in min(page-width, viewport-
+  // height-headroom) so the playfield never overflows the window.
+  // Recomputed on every resize.  The headroom budget covers header,
+  // HUD, keys help, readouts, and danger row.
+  function recomputeRenderMetrics () {
+    var page = canvas.parentElement || document.body;
+    var pageW = page.clientWidth || window.innerWidth;
+    var availW = pageW - 4;
+    var availH = window.innerHeight - 280;
+    var edge = Math.max(240, Math.min(availW, availH));
+    edge = Math.floor(edge);
+    canvas.width  = edge;
+    canvas.height = edge;
+    canvas.style.width  = edge + 'px';
+    canvas.style.height = edge + 'px';
+    CELL_PX = Math.floor(edge / VIEW);
+    H_STEP  = CELL_PX;
+    V_STEP  = CELL_PX * 0.85;
+  }
+  recomputeRenderMetrics();
+  window.addEventListener('resize', function () {
+    recomputeRenderMetrics();
+    if (player) draw();
+  });
 
   var palette = payload.palette;
   function isPerComponent (p) { return Array.isArray(p[0][0]); }
