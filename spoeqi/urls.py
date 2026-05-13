@@ -13,4 +13,7 @@ urlpatterns = [
     path('<slug:slug>/export-tile/<int:component>/',
                                 views.export_tile_to_automaton,
                                 name='export_tile'),
+    path('<slug:slug>/tap/<int:component>/<int:generation>/<int:n_bytes>/',
+                                views.keystream_tap,
+                                name='tap'),
 ]

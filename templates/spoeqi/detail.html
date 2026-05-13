@@ -191,90 +191,50 @@
   var CLOCK_MODE = payload.clock_model;
 
   // ─── deterministic seed expansion ───────────────────────────────
-  // splitmix64 → 4 64-bit values → xoshiro128** state.  Then xoshiro
-  // fills the 16×16 grid with 4-state cells.  Both ends share the
-  // same byte → same expansion → identical initial grid.
-  function splitmix64 (state) {
-    // state is [hi, lo] in unsigned 32-bit ints.  splitmix64 with
-    // a single seed input: x = seed; z = (x += 0x9E3779B97F4A7C15);
-    // z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9; ... → 64 bits out.
-    // We keep state in two 32-bit halves to avoid BigInt cost.
-    function add64 (ahi, alo, bhi, blo) {
-      var lo = (alo + blo) >>> 0;
-      var carry = (lo < alo) ? 1 : 0;
-      var hi = (ahi + bhi + carry) >>> 0;
-      return [hi, lo];
-    }
-    function mul64 (ahi, alo, bhi, blo) {
-      // 64×64 → 64 bits (low only)
-      var a0 = alo & 0xFFFF, a1 = alo >>> 16;
-      var a2 = ahi & 0xFFFF, a3 = ahi >>> 16;
-      var b0 = blo & 0xFFFF, b1 = blo >>> 16;
-      var b2 = bhi & 0xFFFF, b3 = bhi >>> 16;
-      var c0 = a0 * b0;
-      var c1 = a1 * b0 + a0 * b1;
-      var c2 = a2 * b0 + a1 * b1 + a0 * b2;
-      var c3 = a3 * b0 + a2 * b1 + a1 * b2 + a0 * b3;
-      var lo = (c0 & 0xFFFF) | ((c1 & 0xFFFF) << 16);
-      var hiPart = (c0 >>> 16) + c1 + ((c2 & 0xFFFF) << 16);
-      var hi = ((hiPart / 0x100000000) >>> 0) + (c2 >>> 16) + c3;
-      // re-add to settle low overflow
-      lo = lo >>> 0;
-      hi = hi >>> 0;
-      return [hi, lo];
-    }
-    function xor64 (ahi, alo, bhi, blo) {
-      return [(ahi ^ bhi) >>> 0, (alo ^ blo) >>> 0];
-    }
-    function shru64 (hi, lo, n) {
-      if (n === 0) return [hi, lo];
-      if (n < 32) return [hi >>> n, ((hi << (32 - n)) | (lo >>> n)) >>> 0];
-      if (n === 32) return [0, hi];
-      return [0, hi >>> (n - 32)];
-    }
-    state = add64(state[0], state[1], 0x9E3779B9, 0x7F4A7C15);
-    var z = state;
-    var zs = shru64(z[0], z[1], 30);
-    z = xor64(z[0], z[1], zs[0], zs[1]);
-    z = mul64(z[0], z[1], 0xBF58476D, 0x1CE4E5B9);
-    zs = shru64(z[0], z[1], 27);
-    z = xor64(z[0], z[1], zs[0], zs[1]);
-    z = mul64(z[0], z[1], 0x94D049BB, 0x133111EB);
-    zs = shru64(z[0], z[1], 31);
-    z = xor64(z[0], z[1], zs[0], zs[1]);
-    return { state: state, out: z };
+  // splitmix64 → 4 64-bit values → xoshiro128** state.  We use BigInt
+  // for splitmix64's 64-bit arithmetic — the JS code originally tried
+  // hand-rolled 32-bit-half math but had a bug that produced incorrect
+  // seeds.  BigInt is one-shot at page load (64 components × 1 seed
+  // byte → 4 calls each) so the perf cost is negligible.  xoshiro
+  // itself stays in 32-bit arithmetic per tick.
+  var SPLITMIX_INC  = 0x9E3779B97F4A7C15n;
+  var SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9n;
+  var SPLITMIX_MUL2 = 0x94D049BB133111EBn;
+  var M64 = 0xFFFFFFFFFFFFFFFFn;
+
+  function splitmix64BigInt (stateBig) {
+    stateBig = (stateBig + SPLITMIX_INC) & M64;
+    var z = stateBig;
+    z = ((z ^ (z >> 30n)) * SPLITMIX_MUL1) & M64;
+    z = ((z ^ (z >> 27n)) * SPLITMIX_MUL2) & M64;
+    z = (z ^ (z >> 31n)) & M64;
+    return { state: stateBig, out: z };
   }
 
   function makeXoshiro (byteSeed) {
-    // Expand 1 byte to 4 × 64-bit xoshiro state words via splitmix64.
-    var sm = [0, byteSeed & 0xFF];
-    var s = new Uint32Array(8);   // 4 × (hi, lo) = 8 × 32-bit
+    // 4 splitmix64 outputs → take low 32 bits of each as xoshiro128**
+    // state words.  This matches the Python mirror in keystream.py.
+    var sm = BigInt(byteSeed & 0xFF);
+    var words = [];
     for (var i = 0; i < 4; i++) {
-      var r = splitmix64(sm);
+      var r = splitmix64BigInt(sm);
       sm = r.state;
-      s[i * 2]     = r.out[0];
-      s[i * 2 + 1] = r.out[1];
+      words.push(Number(r.out & 0xFFFFFFFFn) >>> 0);
     }
-    // Guard against the all-zero state (vanishingly rare but breaks
-    // xoshiro).
-    if ((s[0]|s[1]|s[2]|s[3]|s[4]|s[5]|s[6]|s[7]) === 0) {
-      s[0] = 0x9E3779B9; s[1] = 0x7F4A7C15;
+    if ((words[0]|words[1]|words[2]|words[3]) === 0) {
+      words[0] = 0x9E3779B9; words[1] = 0x7F4A7C15;
     }
 
     function rotl32 (x, k) {
       return ((x << k) | (x >>> (32 - k))) >>> 0;
     }
-    function add32 (a, b) { return ((a + b) | 0) >>> 0; }
     function mul32 (a, b) {
       var a0 = a & 0xFFFF, a1 = a >>> 16;
       var b0 = b & 0xFFFF, b1 = b >>> 16;
       return ((a0 * b0) + (((a1 * b0 + a0 * b1) & 0xFFFF) << 16)) >>> 0;
     }
 
-    // xoshiro128** — 32-bit four-word variant; we take low halves of
-    // splitmix's 64-bit outputs as the 4 seed words.  Period 2^128 − 1
-    // (any nonzero state).  Output is uniform 32-bit.
-    var w0 = s[1], w1 = s[3], w2 = s[5], w3 = s[7];
+    var w0 = words[0], w1 = words[1], w2 = words[2], w3 = words[3];
 
     function next () {
       var result = mul32(rotl32(mul32(w1, 5), 7), 9);
@@ -770,6 +730,20 @@
           '(subtleCrypto unavailable)';
     }
   })();
+
+  // ─── debug surface — keystream test parity ─────────────────────
+  // The Python-side keystream module (spoeqi.keystream) mirrors this
+  // engine bit-for-bit; this hook lets the verification test drive
+  // the same code path the viewer runs.  Always-on (no security
+  // surface — it only reveals what's already in the payload).
+  window.__spoeqi = {
+    get grids () { return grids; },
+    get generation () { return generation; },
+    get gridSide () { return GRID; },
+    reseed: reseed,
+    step:   step,
+    setRunning: function (v) { running = !!v; },
+  };
 
   // ─── go ────────────────────────────────────────────────────────
   reseed();

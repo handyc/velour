@@ -397,6 +397,44 @@ def delete(request, slug):
     return redirect('spoeqi:index')
 
 
+def keystream_tap(request, slug, component, generation, n_bytes):
+    """Return ``n_bytes`` of deterministic keystream from component
+    ``c`` at generation ``g``.  Both Alice and Bob (or any two parties
+    holding the same Pact) get the same bytes back from the same
+    (slug, component, generation, n_bytes) tuple.
+
+    JSON shape::
+
+        {"ok": true, "bytes_hex": "…", "component": c,
+         "generation": g, "n_bytes": n}
+
+    On AdvanceCapExceeded: 503 with ``{"ok": false, "error": "..."}``
+    so callers can poll for the cache to catch up incrementally.
+    """
+    from . import keystream
+
+    pact = get_object_or_404(Pact, slug=slug)
+    if n_bytes <= 0 or n_bytes > 65536:
+        return JsonResponse({'ok': False,
+                              'error': 'n_bytes must be 1..65536'}, status=400)
+    try:
+        out = keystream.tap(pact, component, generation, n_bytes)
+    except keystream.AdvanceCapExceeded as exc:
+        return JsonResponse({'ok': False, 'error': str(exc),
+                              'advance_cap': keystream.ADVANCE_CAP},
+                             status=503)
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+    return JsonResponse({
+        'ok':         True,
+        'slug':       pact.slug,
+        'component':  component,
+        'generation': generation,
+        'n_bytes':    n_bytes,
+        'bytes_hex':  out.hex(),
+    })
+
+
 @require_POST
 def export_tile_to_automaton(request, slug, component):
     """Decompose a tile's 16,384-byte rule into Automaton ExactRules
