@@ -155,6 +155,7 @@ INSTALLED_APPS = [
     'spoeqi',
     'doom_ca',
     'retrogames',
+    'metaevolve',
 ]
 
 MIDDLEWARE = [

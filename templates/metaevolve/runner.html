@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Meta-evolve runner{% endblock %}
+{% block content %}
+<style>
+  .me-runner { max-width: 100%; padding: 0 8px; }
+  .me-runner h2 { margin: 4px 0; }
+  .runner-ctrl { display: flex; gap: 10px; align-items: center;
+                 flex-wrap: wrap; margin: 6px 0; font-size: 0.85rem; color: #aaa; }
+  .runner-ctrl button { background: #1a2a1a; color: #cfc;
+                        border: 1px solid #2a5a2a; padding: 3px 12px;
+                        cursor: pointer; font-family: inherit; }
+  .runner-ctrl button:disabled { background: #111; color: #555; border-color: #222; }
+  .runner-log { background: #0a0a0a; border: 1px solid #222;
+                padding: 6px; max-height: 7em; overflow: auto;
+                font-family: monospace; font-size: 0.78rem; color: #ace; }
+  .runner-frame { width: 100%; height: 80vh; border: 1px solid #222; }
+  .queue { font-family: monospace; font-size: 0.82rem; }
+  .queue .tag { color: #888; }
+  .queue b { color: #cfc; }
+</style>
+<div class="me-runner">
+<h2>Meta-evolve runner</h2>
+<div class="runner-ctrl">
+  <button id="me-start" class="primary">▶ start sweep</button>
+  <button id="me-next" disabled>⏭ skip to next target</button>
+  <button id="me-stop" disabled>■ stop</button>
+  <label><input id="me-loop" type="checkbox"> loop forever</label>
+  <span class="queue">queue: <b id="me-pos">0</b>/<b id="me-len">{{ targets|length }}</b>
+    · current: <b id="me-cur">—</b></span>
+</div>
+<div class="runner-log" id="me-log">idle.</div>
+<iframe id="me-frame" class="runner-frame" src="about:blank"></iframe>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var TARGETS = {{ targets_json|safe }};
+  var pos = 0, running = false, stopRequested = false;
+  var startBtn = document.getElementById('me-start');
+  var nextBtn  = document.getElementById('me-next');
+  var stopBtn  = document.getElementById('me-stop');
+  var loopBox  = document.getElementById('me-loop');
+  var posEl    = document.getElementById('me-pos');
+  var lenEl    = document.getElementById('me-len');
+  var curEl    = document.getElementById('me-cur');
+  var logEl    = document.getElementById('me-log');
+  var frame    = document.getElementById('me-frame');
+
+  function log (msg) {
+    logEl.textContent += msg + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function buildUrl (t) {
+    var p = new URLSearchParams();
+    p.set('archetype',  t.archetype);
+    p.set('autostart',  '1');
+    p.set('autoarchive','1');
+    p.set('target_id',  t.id);
+    p.set('max_runs',   t.runs_per_batch || 3);
+    p.set('archive_top_k', t.archive_top_k || 3);
+    if (t.population_size) p.set('pop',     t.population_size);
+    if (t.generations)     p.set('gens',    t.generations);
+    if (t.max_turns)       p.set('turns',   t.max_turns);
+    if (t.grid_side)       p.set('grid',    t.grid_side);
+    return "{% url 'doom_ca:evolve' %}?" + p.toString();
+  }
+
+  function loadTarget (idx) {
+    if (idx >= TARGETS.length) {
+      if (loopBox.checked && !stopRequested) {
+        log('[loop] queue exhausted — restarting from top');
+        pos = 0;
+        idx = 0;
+      } else {
+        log('[done] queue exhausted');
+        finish();
+        return;
+      }
+    }
+    var t = TARGETS[idx];
+    curEl.textContent = t.name;
+    posEl.textContent = idx + 1;
+    log('▶ ' + (idx + 1) + '/' + TARGETS.length + ' — ' + t.name);
+    frame.src = buildUrl(t);
+  }
+
+  function finish () {
+    running = false;
+    startBtn.disabled = false;
+    stopBtn.disabled  = true;
+    nextBtn.disabled  = true;
+    curEl.textContent = '—';
+  }
+
+  // The embedded evolve page posts back {type:'meta-evolve-done', winners:[...]}
+  // when its (max_runs) sweep finishes.  Advance to next target on receipt.
+  window.addEventListener('message', function (ev) {
+    if (!ev.data || ev.data.type !== 'meta-evolve-done') return;
+    if (!running) return;
+    var winners = ev.data.winners || [];
+    log('  ↳ archived ' + winners.length + ' winner(s)'
+       + (winners.length ? ' · top fitness ' + winners[0].fitness.toFixed(3) : ''));
+    pos++;
+    setTimeout(function () { if (running) loadTarget(pos); }, 300);
+  });
+
+  startBtn.addEventListener('click', function () {
+    if (running) return;
+    running = true; stopRequested = false; pos = 0;
+    startBtn.disabled = true;
+    stopBtn.disabled  = false;
+    nextBtn.disabled  = false;
+    logEl.textContent = '';
+    log('[start] sweeping ' + TARGETS.length + ' target(s)');
+    loadTarget(pos);
+  });
+  nextBtn.addEventListener('click', function () {
+    if (!running) return;
+    log('[skip] forcing advance');
+    pos++;
+    loadTarget(pos);
+  });
+  stopBtn.addEventListener('click', function () {
+    if (!running) return;
+    stopRequested = true;
+    log('[stop] will stop after current target finishes');
+  });
+})();
+</script>
+{% endblock %}

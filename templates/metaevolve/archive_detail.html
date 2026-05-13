@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Archived #{{ w.id }} — Meta Evolution{% endblock %}
+{% block content %}
+<style>
+  .me-page { max-width: 56em; }
+  .me-meta { color: #888; font-size: 0.85rem; }
+  .me-meta a { color: #ace; }
+  .badge { background: #1a1a1a; color: #ace; border: 1px solid #333;
+           padding: 1px 8px; border-radius: 8px; font-size: 0.78rem;
+           font-family: monospace; margin-right: 6px; }
+  pre { background: #0a0a0a; border: 1px solid #222; padding: 8px;
+        max-height: 16em; overflow: auto;
+        font-family: monospace; font-size: 0.78rem; color: #ccc; }
+  .actions { margin: 14px 0; }
+  .actions button { background: #1a2a1a; color: #cfc;
+                    border: 1px solid #2a5a2a; padding: 4px 14px;
+                    cursor: pointer; font-family: inherit; }
+</style>
+<div class="me-page">
+<p class="me-meta">
+  <a href="{% url 'metaevolve:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Archived winner #{{ w.id }}</b>
+</p>
+
+<h2 style="margin: 6px 0;">{{ w.target.name }}</h2>
+<p>
+  <span class="badge">fitness {{ w.fitness|floatformat:3 }}</span>
+  <span class="badge">{{ w.target.get_archetype_display }}</span>
+  <span class="badge">{{ w.created_at|date:"Y-m-d H:i" }}</span>
+  {% if w.materialised_session_slug %}
+    <span class="badge" style="background:#1a2a1a; color:#cfc;">
+      → <a href="{% url 'doom_ca:play' slug=w.materialised_session_slug %}" style="color:#cfc;">play materialised</a></span>
+  {% endif %}
+</p>
+
+{% if w.components_json %}
+<h3>Fitness components</h3>
+<pre>{{ w.components_json|pprint }}</pre>
+{% endif %}
+
+<h3>Gene (truncated)</h3>
+<pre>{{ w.gene_json|pprint|truncatechars:2400 }}</pre>
+
+{% if not w.materialised_session_slug %}
+<div class="actions">
+  <form method="post" action="{% url 'metaevolve:materialize' pk=w.id %}">
+    {% csrf_token %}
+    <button type="submit">→ materialise as doom_ca game</button>
+  </form>
+</div>
+{% endif %}
+</div>
+{% endblock %}

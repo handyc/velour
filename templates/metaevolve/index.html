@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Meta Evolution Engine{% endblock %}
+{% block content %}
+<style>
+  .me-page { max-width: 72em; }
+  .me-meta { color: #888; font-size: 0.85rem; }
+  .me-meta a { color: #ace; }
+  .target-row { padding: 6px 0; border-bottom: 1px solid #1a1a1a;
+                display: flex; gap: 12px; align-items: baseline;
+                flex-wrap: wrap; font-family: monospace; font-size: 0.85rem; }
+  .target-row .name { color: #cfc; font-weight: 600; min-width: 26em; }
+  .target-row .arch { color: #ace; min-width: 8em; }
+  .target-row .stats { color: #888; }
+  .winner-row { padding: 6px 0; border-bottom: 1px solid #1a1a1a;
+                display: flex; gap: 14px; align-items: baseline;
+                font-family: monospace; font-size: 0.82rem; }
+  .winner-row .fit { color: #8f8; min-width: 6em; }
+  .winner-row .tgt { color: #ace; min-width: 18em; }
+  .winner-row .when { color: #888; }
+  .new-btn { display: inline-block; background: #1a2a1a; color: #cfc;
+             border: 1px solid #2a5a2a; padding: 4px 14px;
+             text-decoration: none; font-family: inherit; }
+</style>
+<div class="me-page">
+<h1 style="margin-top: 0;">Meta Evolution Engine</h1>
+<p class="me-meta" style="max-width: 56em;">
+  Orchestrates the <a href="{% url 'doom_ca:evolve' %}">doom_ca</a>
+  evolver: sweeps through pending Targets, runs each in an embedded
+  evolve view, archives top winners.  Run the sweep manually
+  (click-to-advance) or fully automatic (loops the queue forever).
+  <br><br>
+  <a class="new-btn" href="{% url 'metaevolve:runner' %}">▶ open runner</a>
+</p>
+
+<h2>Targets ({{ targets.count }})</h2>
+<div>
+  {% for t in targets %}
+  <div class="target-row">
+    <span class="name">{{ t.name }}</span>
+    <span class="arch">{{ t.get_archetype_display }}</span>
+    <span class="stats">{{ t.winner_count }} winner{{ t.winner_count|pluralize }}
+      · {{ t.total_runs }} run{{ t.total_runs|pluralize }}
+      · pri {{ t.priority }}
+      {% if not t.active %}· <span style="color:#666;">inactive</span>{% endif %}</span>
+  </div>
+  {% empty %}
+  <p class="me-meta">No targets seeded. Run <code>manage.py seed_metaevolve</code>.</p>
+  {% endfor %}
+</div>
+
+<h2 style="margin-top: 28px;">Top archived winners</h2>
+<div>
+  {% for w in top %}
+  <div class="winner-row">
+    <span class="fit">{{ w.fitness|floatformat:3 }}</span>
+    <span class="tgt"><a href="{% url 'metaevolve:archive_detail' pk=w.id %}" style="color:#ace;">{{ w.target.name }}</a></span>
+    <span class="when">{{ w.created_at|date:"Y-m-d H:i" }}</span>
+    {% if w.materialised_session_slug %}<span class="when">→
+      <a href="{% url 'doom_ca:play' slug=w.materialised_session_slug %}" style="color:#ace;">play</a></span>{% endif %}
+  </div>
+  {% empty %}
+  <p class="me-meta">No winners archived yet.  Open the runner.</p>
+  {% endfor %}
+</div>
+</div>
+{% endblock %}
