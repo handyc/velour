@@ -149,11 +149,12 @@
     </label>
     <label>modes
       <select id="ev-modes">
-        <option value="all" selected>all four</option>
+        <option value="all" selected>all five</option>
         <option value="overlay">overlay</option>
         <option value="shift">shift</option>
         <option value="scent">scent</option>
         <option value="evolved">evolved</option>
+        <option value="platform">platform (side-scroller)</option>
         <option value="pure3">shift/scent/evolved</option>
       </select>
     </label>
@@ -370,14 +371,19 @@
 
   // ─── Gene operations ─────────────────────────────────────────
   var MODE_OPTIONS = {
-    all:     ['overlay','shift','scent','evolved'],
-    overlay: ['overlay'],
-    shift:   ['shift'],
-    scent:   ['scent'],
-    evolved: ['evolved'],
-    pure3:   ['shift','scent','evolved'],
+    all:      ['overlay','shift','scent','evolved','platform'],
+    overlay:  ['overlay'],
+    shift:    ['shift'],
+    scent:    ['scent'],
+    evolved:  ['evolved'],
+    platform: ['platform'],
+    pure3:    ['shift','scent','evolved'],
   };
-  var PURITY_SCORE = { overlay: 0.0, evolved: 0.4, shift: 0.7, scent: 1.0 };
+  // purity rewards pure-CA play; platform is "novel physics" so it
+  // sits at parity with overlay (0.0) for now — bump if you want the
+  // GA to prefer it.
+  var PURITY_SCORE = { overlay: 0.0, platform: 0.0,
+                        evolved: 0.4, shift: 0.7, scent: 1.0 };
 
   // 4-colour palette: HSV-spaced like spoeqi.models.random_palette.
   function hsvToRgb (h, s, v) {

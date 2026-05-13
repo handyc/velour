@@ -41,12 +41,26 @@
     evolved: 'evolved mode — the pact rule with per-key patches: player ' +
              'preserved, walls cluster, monsters attack on adjacency.  An ' +
              'illustration of what a GA-evolved Doom-signature rule would look like.',
+    platform:'platform mode — same CA grid reinterpreted as a Cartesian ' +
+             'side-scroller.  Wall cells are platforms; gravity pulls the ' +
+             'player down; A/D = move, Space = jump, F = fire.  Monsters ' +
+             'walk along platform tops, reversing at gaps.',
   };
   var noteEl = document.getElementById('dc-mode-note');
   if (noteEl) {
     noteEl.textContent =
       (MODE_NOTES[MODE] || '') +
       (PURE_MODE ? '  · pure mode (no pact-rule wait ticks).' : '');
+  }
+  // Show the right controls hint for the active mode.
+  var keysHex = document.getElementById('dc-keys-hex');
+  var keysPlat = document.getElementById('dc-keys-platform');
+  if (MODE === 'platform') {
+    if (keysHex)  keysHex.style.display  = 'none';
+    if (keysPlat) keysPlat.style.display = '';
+  } else {
+    if (keysHex)  keysHex.style.display  = '';
+    if (keysPlat) keysPlat.style.display = 'none';
   }
 
   function hex2bytes (h) {
@@ -411,6 +425,11 @@
     deathRuleInfo = null;
     var rbox = document.getElementById('dc-rule-explainer');
     if (rbox) rbox.style.display = 'none';
+
+    if (MODE === 'platform') {
+      initPlatformMode();
+      return;
+    }
 
     if (MODE === 'overlay') {
       world = seedGrid(seed[COMPONENT]).slice();
@@ -1064,6 +1083,7 @@
   if (randPalEl) randPalEl.addEventListener('click', randomisePaletteNow);
 
   document.addEventListener('keydown', function (ev) {
+    if (MODE === 'platform') return;   // platform mode owns its own input
     if (gameOver) {
       if (ev.key === 'r' || ev.key === 'R') { init(); ev.preventDefault(); }
       return;
@@ -1080,6 +1100,392 @@
   });
   canvas.tabIndex = 0;
   canvas.focus();
+
+  // ─── Platform mode (side-scroller w/ gravity + jump) ─────────
+  // Reinterprets the same hex CA grid as a Cartesian level: each
+  // cell is a square at (x, y).  Walls become platforms; player
+  // walks across the tops of them under gravity.  Same overlay
+  // logic for items/door/key/exit/monsters, but movement is
+  // real-time pixel motion instead of turn-based hex steps.
+  var platformState = null;
+  var platformKeys  = { left: false, right: false, jump: false };
+  var platformRaf   = null;
+  var lastFrameT    = 0;
+  var ticksSinceWorld = 0;
+  var jumpPressed   = false;   // edge-triggered
+
+  function platformIsWall (cx, cy) {
+    if (cy < 0 || cy >= GRID) return true;          // ceiling/floor walls
+    var x = ((cx % GRID) + GRID) % GRID;
+    var cell = get(x, cy);
+    return isWallForOverlay(cell);
+  }
+
+  function initPlatformMode () {
+    world = seedGrid(seed[COMPONENT]).slice();
+    // Find a spawn at the top: highest non-wall column, then drop.
+    var spawnCol = (GRID / 2) | 0;
+    var sx = spawnCol, sy = 1;
+    while (sy < GRID - 1 && !platformIsWall(sx, sy + 1)) sy++;
+    sy = Math.max(1, sy - 1);
+    player = {
+      x: sx + 0.5, y: sy - 0.4,             // float coords (cell units)
+      vx: 0, vy: 0, onGround: false,
+      hp: 100, ammo: 0, hasShotgun: false, hasKey: false,
+      lastDir: 1,                           // +1 right, -1 left
+    };
+    // Place items / door / exit using the same overlay-style
+    // GROUND/WALL view of the world.
+    var level = placeLevelOnce(world, spawnCol, sy);
+    items   = level.items;
+    doorIdx = level.doorIdx;
+    keyIdx  = level.keyIdx;
+    exitIdx = level.exitIdx;
+    doorOpen = false;
+    // Spawn monsters on top of platform cells.  Each gets a heading
+    // direction (-1 or +1) and walks the platform top, reversing at
+    // gaps or walls.
+    monsters = [];
+    var rng = E.makeRng((seed[COMPONENT] * 0x9e3779b9) >>> 0);
+    for (var attempt = 0; monsters.length < MONSTER_COUNT && attempt < MONSTER_COUNT * 40; attempt++) {
+      var mx = (rng() * GRID) | 0;
+      var my = (rng() * GRID) | 0;
+      // Want my to be a non-wall cell whose cell BELOW is a wall.
+      if (platformIsWall(mx, my)) continue;
+      if (!platformIsWall(mx, my + 1)) continue;
+      // Don't spawn too close to player or on items.
+      if (Math.abs(mx - spawnCol) + Math.abs(my - sy) < 6) continue;
+      var midx = my * GRID + mx;
+      if (midx === exitIdx || midx === doorIdx
+          || midx === keyIdx || items[midx]) continue;
+      monsters.push({
+        x: mx + 0.5, y: my - 0.4, alive: true,
+        vx: (rng() < 0.5 ? -1 : 1) * 1.2,
+      });
+    }
+    platformState = {
+      camX: player.x, camY: player.y,
+      gravity: 24, jumpSpeed: 9.5,
+      moveSpeed: 5.0, friction: 14, maxFall: 16,
+      worldTickFrames: 30,                  // CA ticks every 30 frames @ ~60fps = 0.5 s
+    };
+    if (window.DoomMusic && rulesFlat && rulesFlat.length) {
+      // Music keeps using the same pact rule slice (already wired
+      // in the main flow); nothing extra to set here.
+    }
+    document.getElementById('dc-canvas').focus();
+    lastFrameT = performance.now();
+    ticksSinceWorld = 0;
+    if (platformRaf) cancelAnimationFrame(platformRaf);
+    platformRaf = requestAnimationFrame(platformFrame);
+  }
+
+  function platformPhysicsStep (dt) {
+    var ps = platformState;
+    // Horizontal velocity: target = -moveSpeed / 0 / +moveSpeed.
+    var target = 0;
+    if (platformKeys.left)  target -= ps.moveSpeed;
+    if (platformKeys.right) target += ps.moveSpeed;
+    if (target !== 0) {
+      player.vx = target;
+      player.lastDir = target > 0 ? 1 : 4;   // 1=right, 4=left in hex dir codes
+    } else {
+      // Friction
+      if (Math.abs(player.vx) < ps.friction * dt) player.vx = 0;
+      else player.vx -= Math.sign(player.vx) * ps.friction * dt;
+    }
+    // Jump: edge-triggered.  Only takes effect on a frame where the
+    // key transitions from up to down (jumpPressed flag is set by
+    // keydown and cleared once consumed).
+    if (jumpPressed && player.onGround) {
+      player.vy = -ps.jumpSpeed;
+      player.onGround = false;
+    }
+    jumpPressed = false;
+    // Gravity
+    player.vy += ps.gravity * dt;
+    if (player.vy > ps.maxFall) player.vy = ps.maxFall;
+    // Integrate position with axis-separated collision.
+    moveAxis('x', player, player.vx * dt);
+    moveAxis('y', player, player.vy * dt);
+    // Re-check onGround: a 0.05-cell probe directly below us.
+    player.onGround = collisionAt(player.x, player.y + 0.05, 0.4, 0.5);
+    // Damage from cells: if our centre is inside a wall (CA grew one
+    // under us in a non-pure CA tick), bleed.
+    var cx = Math.floor(player.x), cy = Math.floor(player.y);
+    if (platformIsWall(cx, cy)) {
+      // Push player upward to escape; also count as damage.
+      hurt(2, 'crushed by a wall that grew under you');
+      player.y -= 0.2; player.vy = -2;
+    }
+    // Move monsters along platform tops.
+    for (var i = 0; i < monsters.length; i++) {
+      var m = monsters[i];
+      if (!m.alive) continue;
+      var newX = m.x + m.vx * dt;
+      var ahead = (m.vx > 0) ? Math.floor(newX + 0.45) : Math.floor(newX - 0.45);
+      var feet = Math.floor(m.y + 0.6);
+      // Reverse at wall ahead OR at gap (no wall below the next cell).
+      if (platformIsWall(ahead, Math.floor(m.y)) ||
+          !platformIsWall(ahead, feet + 1)) {
+        m.vx = -m.vx;
+        newX = m.x + m.vx * dt;
+      }
+      m.x = newX;
+      // Gravity also affects monsters in case a platform vanishes.
+      var below = Math.floor(m.y + 0.5);
+      if (!platformIsWall(Math.floor(m.x), below)) {
+        m.y += 6 * dt;   // fall (slow so it's readable)
+      }
+      // Collision with player.
+      if (Math.abs(m.x - player.x) < 0.7 && Math.abs(m.y - player.y) < 0.8) {
+        if (!autoFireAt(Math.floor(m.x), Math.floor(m.y))) {
+          hurt(30, 'a monster caught up to you');
+        }
+        m.alive = false;
+        monsters.splice(i, 1); i--;
+      }
+    }
+    // Item / door / key / exit overlays.
+    var pidx = Math.floor(player.y) * GRID + Math.floor(player.x);
+    if (pidx === keyIdx) { player.hasKey = true; keyIdx = -1; }
+    if (pidx === doorIdx && !doorOpen) {
+      if (player.hasKey) { doorOpen = true; player.hasKey = false; }
+    }
+    pickupAt(pidx);
+    if (pidx === exitIdx) gameOver = 'won';
+    // Smooth camera follow.
+    ps.camX += (player.x - ps.camX) * Math.min(1, dt * 6);
+    ps.camY += (player.y - ps.camY) * Math.min(1, dt * 6);
+    if (player.hp <= 0 && !gameOver) {
+      gameOver = 'lost';
+      deathCause = lastHurtBy || 'fell';
+    }
+  }
+
+  function collisionAt (cx, cy, hw, hh) {
+    // Axis-aligned hitbox at (cx,cy) with half-width hw, half-height hh.
+    // Returns true if any of the 4 corners are inside a wall cell.
+    var x0 = Math.floor(cx - hw), x1 = Math.floor(cx + hw - 0.001);
+    var y0 = Math.floor(cy - hh), y1 = Math.floor(cy + hh - 0.001);
+    for (var yy = y0; yy <= y1; yy++) {
+      for (var xx = x0; xx <= x1; xx++) {
+        if (platformIsWall(xx, yy)) return true;
+      }
+    }
+    return false;
+  }
+
+  function moveAxis (axis, p, delta) {
+    if (delta === 0) return;
+    var sign = delta > 0 ? 1 : -1;
+    var rem  = Math.abs(delta);
+    var hw = 0.4, hh = 0.5;
+    while (rem > 0) {
+      var step = Math.min(rem, 0.25);
+      var nx = p.x, ny = p.y;
+      if (axis === 'x') nx = p.x + sign * step;
+      else              ny = p.y + sign * step;
+      if (!collisionAt(nx, ny, hw, hh)) {
+        p.x = nx; p.y = ny;
+      } else {
+        // Stop on collision; zero the relevant velocity component.
+        if (axis === 'x') p.vx = 0;
+        else { if (sign > 0) { p.onGround = true; } p.vy = 0; }
+        return;
+      }
+      rem -= step;
+    }
+  }
+
+  function platformDraw () {
+    recomputeRenderMetrics();
+    var W = canvas.width, H = canvas.height;
+    ctx.fillStyle = '#0a0a12';
+    ctx.fillRect(0, 0, W, H);
+    var visCols = Math.ceil(W / CELL_PX) + 2;
+    var visRows = Math.ceil(H / CELL_PX) + 2;
+    var ps = platformState;
+    var camX = ps.camX, camY = ps.camY;
+    var x0 = Math.floor(camX - visCols / 2);
+    var y0 = Math.floor(camY - visRows / 2);
+    // Background gradient hint (sky → floor).
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, '#1a1a2a');
+    grad.addColorStop(1, '#080808');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    function screenOf (wx, wy) {
+      return [W / 2 + (wx - camX) * CELL_PX,
+              H / 2 + (wy - camY) * CELL_PX];
+    }
+    // Walls (platforms)
+    for (var dy = 0; dy < visRows; dy++) {
+      var wy = y0 + dy;
+      for (var dx = 0; dx < visCols; dx++) {
+        var wx = x0 + dx;
+        if (wx < 0 || wx >= GRID) continue;
+        if (!platformIsWall(wx, wy)) continue;
+        var p = screenOf(wx, wy);
+        var raw = get(((wx % GRID) + GRID) % GRID, wy);
+        ctx.fillStyle = (raw === 3) ? COL_WALL : COL_WALL_DK;
+        ctx.fillRect(p[0], p[1], CELL_PX + 0.5, CELL_PX + 0.5);
+      }
+    }
+    // Door, key, exit
+    function drawOverlay (idx, drawFn) {
+      if (idx == null || idx < 0) return;
+      var wx = idx % GRID, wy = Math.floor(idx / GRID);
+      var p = screenOf(wx, wy);
+      drawFn(p[0], p[1]);
+    }
+    drawOverlay(exitIdx, function (sx, sy) {
+      ctx.fillStyle = '#0a3a3a';
+      ctx.fillRect(sx + 1, sy + 1, CELL_PX - 2, CELL_PX - 2);
+      ctx.fillStyle = '#5fb';
+      ctx.font = Math.floor(CELL_PX * 0.6) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⌂', sx + CELL_PX / 2, sy + CELL_PX / 2 + 1);
+    });
+    drawOverlay(doorIdx, function (sx, sy) {
+      ctx.fillStyle = doorOpen ? '#3a2a0a' : '#9b6a14';
+      ctx.fillRect(sx + 1, sy + 1, CELL_PX - 2, CELL_PX - 2);
+      if (!doorOpen) {
+        ctx.fillStyle = '#fd0';
+        ctx.font = Math.floor(CELL_PX * 0.55) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('🔒', sx + CELL_PX / 2, sy + CELL_PX / 2 + 1);
+      }
+    });
+    if (keyIdx != null && keyIdx >= 0) drawOverlay(keyIdx, function (sx, sy) {
+      ctx.fillStyle = '#fd0';
+      ctx.font = Math.floor(CELL_PX * 0.65) + 'px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('🔑', sx + CELL_PX / 2, sy + CELL_PX / 2 + 1);
+    });
+    for (var k in items) {
+      var it = items[k];
+      drawOverlay(+k, (function (it) { return function (sx, sy) {
+        ctx.font = Math.floor(CELL_PX * 0.6) + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        if (it.type === 'medkit')       ctx.fillStyle = '#3f3';
+        else if (it.type === 'ammo')    ctx.fillStyle = '#fb6';
+        else if (it.type === 'shotgun') ctx.fillStyle = '#ccc';
+        var glyph = it.type === 'medkit' ? '✚'
+                  : it.type === 'ammo'   ? '●' : '⌐';
+        ctx.fillText(glyph, sx + CELL_PX / 2, sy + CELL_PX / 2 + 1);
+      }; })(it));
+    }
+    // Monsters (red squares with little eyes)
+    for (var i = 0; i < monsters.length; i++) {
+      var m = monsters[i];
+      if (!m.alive) continue;
+      var p = screenOf(m.x - 0.4, m.y - 0.5);
+      ctx.fillStyle = COL_MONSTER;
+      ctx.fillRect(p[0], p[1], CELL_PX * 0.8, CELL_PX);
+      ctx.fillStyle = '#fff';
+      var eyeX = m.vx > 0 ? p[0] + CELL_PX * 0.55 : p[0] + CELL_PX * 0.15;
+      ctx.fillRect(eyeX, p[1] + CELL_PX * 0.25, CELL_PX * 0.12, CELL_PX * 0.18);
+    }
+    // Player
+    var pp = screenOf(player.x - 0.4, player.y - 0.5);
+    ctx.fillStyle = COL_PLAYER_HALO;
+    ctx.fillRect(pp[0] - 4, pp[1] - 4, CELL_PX * 0.8 + 8, CELL_PX + 8);
+    ctx.fillStyle = COL_PLAYER;
+    ctx.fillRect(pp[0], pp[1], CELL_PX * 0.8, CELL_PX);
+    ctx.fillStyle = '#fff';
+    var peyeX = player.lastDir === 1 ? pp[0] + CELL_PX * 0.55 : pp[0] + CELL_PX * 0.15;
+    ctx.fillRect(peyeX, pp[1] + CELL_PX * 0.2, CELL_PX * 0.12, CELL_PX * 0.18);
+    // Fire flash (reuse hex helper if available, else a quick line)
+    if (fireFlash && fireFlash.framesLeft > 0) {
+      var ff = fireFlash;
+      var a = screenOf(ff.fromX, ff.fromY);
+      var b = screenOf(ff.toX, ff.toY);
+      ctx.strokeStyle = 'rgba(255,220,80,0.95)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(a[0] + CELL_PX/2, a[1] + CELL_PX/2);
+      ctx.lineTo(b[0] + CELL_PX/2, b[1] + CELL_PX/2);
+      ctx.stroke();
+      fireFlash.framesLeft--;
+      if (fireFlash.framesLeft <= 0) fireFlash = null;
+    }
+  }
+
+  function platformFrame (now) {
+    var dt = Math.min(0.05, (now - lastFrameT) / 1000) || 0.016;
+    lastFrameT = now;
+    if (!gameOver) platformPhysicsStep(dt);
+    platformDraw();
+    updateReadouts();
+    // Music signals (HP, monsters etc.)
+    pushMusicSignals();
+    // World tick (CA) — slower than physics, for ambient drift.
+    if (!PURE_MODE && !gameOver) {
+      ticksSinceWorld++;
+      if (ticksSinceWorld >= platformState.worldTickFrames) {
+        ticksSinceWorld = 0;
+        tickPactRule();
+      }
+    }
+    platformRaf = requestAnimationFrame(platformFrame);
+  }
+
+  // Platform-mode input: stateful key tracking + edge-triggered jump.
+  document.addEventListener('keydown', function (ev) {
+    if (MODE !== 'platform') return;
+    if (gameOver) {
+      if (ev.key === 'r' || ev.key === 'R') {
+        if (platformRaf) cancelAnimationFrame(platformRaf);
+        platformRaf = null;
+        init();
+        ev.preventDefault();
+      }
+      return;
+    }
+    if (ev.key === 'a' || ev.key === 'A' || ev.key === 'ArrowLeft')  { platformKeys.left  = true; ev.preventDefault(); }
+    if (ev.key === 'd' || ev.key === 'D' || ev.key === 'ArrowRight') { platformKeys.right = true; ev.preventDefault(); }
+    if (ev.key === ' ' || ev.key === 'Space' || ev.key === 'w' || ev.key === 'W' || ev.key === 'ArrowUp') {
+      if (!platformKeys.jump) jumpPressed = true;
+      platformKeys.jump = true; ev.preventDefault();
+    }
+    if (ev.key === 'f' || ev.key === 'F') {
+      // Fire horizontally in lastDir, range 4 cells.
+      if (player.hasShotgun && player.ammo > 0) {
+        player.ammo--;
+        var fdir = player.lastDir === 1 ? 1 : -1;
+        var hitX = player.x, hitY = player.y;
+        for (var step = 1; step <= 4; step++) {
+          var xx = Math.floor(player.x + fdir * step);
+          var yy = Math.floor(player.y);
+          if (platformIsWall(xx, yy)) { hitX = xx + 0.5; hitY = yy + 0.5; break; }
+          for (var i = 0; i < monsters.length; i++) {
+            var m = monsters[i];
+            if (!m.alive) continue;
+            if (Math.abs(m.x - (xx + 0.5)) < 0.6 && Math.abs(m.y - player.y) < 0.7) {
+              m.alive = false;
+              monsters.splice(i, 1);
+              hitX = m.x; hitY = m.y;
+              i = -1; step = 99;
+              break;
+            }
+          }
+          hitX = xx + 0.5; hitY = yy + 0.5;
+        }
+        fireFlash = { fromX: player.x, fromY: player.y,
+                       toX: hitX, toY: hitY, framesLeft: 8 };
+      }
+      ev.preventDefault();
+    }
+  });
+  document.addEventListener('keyup', function (ev) {
+    if (MODE !== 'platform') return;
+    if (ev.key === 'a' || ev.key === 'A' || ev.key === 'ArrowLeft')  platformKeys.left  = false;
+    if (ev.key === 'd' || ev.key === 'D' || ev.key === 'ArrowRight') platformKeys.right = false;
+    if (ev.key === ' ' || ev.key === 'Space' || ev.key === 'w' || ev.key === 'W' || ev.key === 'ArrowUp') {
+      platformKeys.jump = false;
+    }
+  });
 
   // ─── Music wiring ──────────────────────────────────────────
   // DoomMusic is optional — if music.js wasn't loaded the runtime

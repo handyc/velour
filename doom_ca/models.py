@@ -34,6 +34,8 @@ class GameSession(models.Model):
         ('evolved',  'evolved — pact rule with per-key patches for '
                      'player-preserve, wall-cluster-stability, monster-'
                      'attack-adjacent (illustrative GA target)'),
+        ('platform', 'platform — Cartesian side-scroller, gravity + jump, '
+                     'wall cells are platforms; enemies walk their tops'),
     ]
 
     name        = models.CharField(max_length=80, unique=True)

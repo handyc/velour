@@ -357,6 +357,13 @@
   // falls back to weighted-random retreat if no path or no goal.
   function simulateGame (gene, opts) {
     opts = opts || {};
+    // Platform-mode genes use the overlay simulator for headless
+    // GA fitness — same world layout, just different player physics
+    // (gravity vs hex-step) which doesn't change the fitness signals
+    // we care about (HP at exit, completion, openness, etc.).
+    if (gene.world_mode === 'platform') {
+      gene = Object.assign({}, gene, { world_mode: 'overlay' });
+    }
     var maxTurns = opts.maxTurns || 60;
     var aiSeed   = opts.aiSeed   || 1;
     var side     = gene.component_grid;
