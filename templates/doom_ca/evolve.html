@@ -476,6 +476,7 @@
 
   // ─── Render winners ──────────────────────────────────────────
   function renderWinners (list) {
+    stopAllPreviews();
     var wrap = document.getElementById('ev-winners');
     wrap.innerHTML = '';
     document.getElementById('winners-header').style.display = list.length ? '' : 'none';
@@ -512,43 +513,122 @@
     });
   }
 
+  // Track active preview loops so we can stop them when re-rendering.
+  var activePreviews = [];
+
+  function stopAllPreviews () {
+    while (activePreviews.length) {
+      var p = activePreviews.pop();
+      if (p && p.timer) clearTimeout(p.timer);
+    }
+  }
+
   function drawGenePreview (canvas, gene) {
-    // Tick the gene's CA forward a few steps from the seed and render
-    // a downscaled view of the result.
+    // Animated mini-game: initialise like simulateGame does, tick a
+    // few times, render walls + ground + monsters + player.  Mirror
+    // play.html's visual style.  Capped at MAX_TICKS so CPU stays
+    // bounded with many thumbnails on screen.
     var side = gene.component_grid;
+    var MAX_TICKS = 24;
+    var TICK_MS = 240;
+    var ctx = canvas.getContext('2d');
+
+    // Build the initial state the same way the live game does.
     var raw = E.seedGrid(gene.seed_byte, side);
     var world = new Uint8Array(raw.length);
     for (var i = 0; i < raw.length; i++) {
       world[i] = (raw[i] >= gene.wall_threshold) ? E.WALL : E.GROUND;
     }
-    var c = side >> 1;
-    world[c * side + c] = E.PLAYER;
+    var cx = side >> 1, cy = side >> 1;
+    world[cy * side + cx] = E.PLAYER;
+    var player = {x: cx, y: cy};
+
+    // Place monsters with a deterministic small RNG so the preview
+    // is repeatable for a given gene.
+    var rng = E.makeRng((gene.seed_byte * 16777619) >>> 0);
+    var placed = 0, attempts = 0;
+    while (placed < gene.monster_count && attempts < gene.monster_count * 30) {
+      attempts++;
+      var mx = Math.floor(rng() * side);
+      var my = Math.floor(rng() * side);
+      if (world[my * side + mx] !== E.GROUND) continue;
+      if (E.hexDist(mx, my, player.x, player.y, side) < 3) continue;
+      world[my * side + mx] = E.MONSTER;
+      placed++;
+    }
+
     var swap = new Uint8Array(side * side);
     var rule;
     if (gene.world_mode === 'evolved') rule = E.buildEvolvedRule(gene.rule);
     else if (gene.world_mode === 'scent') rule = E.buildScentRule();
+    else if (gene.world_mode === 'shift') rule = gene.rule;  // pact rule on wait
     else rule = gene.rule;
-    for (var t = 0; t < 8; t++) {
+
+    function renderFrame () {
+      ctx.fillStyle = '#050505';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      var cellW = canvas.width / side;
+      // Walls + ground
+      for (var y = 0; y < side; y++) {
+        var rowShift = (y & 1) ? cellW * 0.5 : 0;
+        for (var x = 0; x < side; x++) {
+          var v = world[y * side + x];
+          var fill;
+          if (v === E.WALL) fill = '#e6c83c';
+          else if (v === E.PLAYER || v === E.MONSTER) fill = '#1a1a1a';
+          else fill = '#1a1a1a';
+          if (v === E.WALL) {
+            ctx.fillStyle = fill;
+            ctx.fillRect(x * cellW + rowShift, y * cellW,
+                          cellW + 0.5, cellW + 0.5);
+          }
+        }
+      }
+      // Monster cells as red dots
+      for (var y = 0; y < side; y++) {
+        var rowShift = (y & 1) ? cellW * 0.5 : 0;
+        for (var x = 0; x < side; x++) {
+          if (world[y * side + x] !== E.MONSTER) continue;
+          var px = x * cellW + rowShift + cellW / 2;
+          var py = y * cellW + cellW / 2;
+          ctx.fillStyle = '#f85149';
+          ctx.beginPath();
+          ctx.arc(px, py, Math.max(1.2, cellW * 0.4), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      // Player at its tracked coord
+      var pRowShift = (player.y & 1) ? cellW * 0.5 : 0;
+      var ppx = player.x * cellW + pRowShift + cellW / 2;
+      var ppy = player.y * cellW + cellW / 2;
+      ctx.fillStyle = 'rgba(88,166,255,0.25)';
+      ctx.beginPath();
+      ctx.arc(ppx, ppy, Math.max(2, cellW * 0.7), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#58a6ff';
+      ctx.beginPath();
+      ctx.arc(ppx, ppy, Math.max(1.4, cellW * 0.4), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    var loopState = {tick: 0, timer: null};
+    function step () {
+      // For overlay mode, no monster-pursuit AI in the preview — the
+      // pact rule alone produces the dynamics that classify the
+      // gene's character.  We re-stamp the player every tick to
+      // resist the pact rule overwriting it.
       E.tickRule(world, swap, side, rule);
       var tmp = world; world = swap; swap = tmp;
-    }
-    var ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#050505';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    var cell = canvas.width / side;
-    for (var y = 0; y < side; y++) {
-      var rowShift = (y & 1) ? cell * 0.5 : 0;
-      for (var x = 0; x < side; x++) {
-        var v = world[y * side + x];
-        var fill;
-        if (v === E.WALL) fill = '#e6c83c';
-        else if (v === E.MONSTER) fill = '#f85149';
-        else if (v === E.PLAYER) fill = '#58a6ff';
-        else fill = '#1a1a1a';
-        ctx.fillStyle = fill;
-        ctx.fillRect(x * cell + rowShift, y * cell, cell + 0.5, cell + 0.5);
+      world[player.y * side + player.x] = E.PLAYER;
+      renderFrame();
+      loopState.tick++;
+      if (loopState.tick < MAX_TICKS) {
+        loopState.timer = setTimeout(step, TICK_MS);
       }
     }
+    renderFrame();
+    loopState.timer = setTimeout(step, TICK_MS);
+    activePreviews.push(loopState);
   }
 
   // ─── Materialise ────────────────────────────────────────────
