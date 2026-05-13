@@ -5,6 +5,7 @@ import json
 
 from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from spoeqi.models import Pact, COMPONENTS
@@ -121,3 +122,98 @@ def delete(request, slug):
     session.delete()
     messages.info(request, f'Game "{name}" deleted.')
     return redirect('doom_ca:index')
+
+
+@ensure_csrf_cookie
+def evolve(request):
+    """Browser-side GA over doom_ca pact configurations.  The page
+    embeds engine.js + the GA loop; the server only ships the page +
+    handles materialisation of selected winners.  ensure_csrf_cookie
+    so the materialise fetch() can read the cookie.
+    """
+    return render(request, 'doom_ca/evolve.html', {
+        'world_mode_choices': GameSession.WORLD_MODE_CHOICES,
+        'components': COMPONENTS,
+    })
+
+
+@require_POST
+def materialize_agent(request):
+    """Create a real Pact + GameSession from a gene posted as JSON.
+    Called when the user clicks 'materialize' on a winning agent in
+    the evolve page.  All other agents stay in the browser only —
+    that's how we keep the DB from bloating with thousands of pacts.
+    """
+    from django.http import JsonResponse
+    from django.utils import timezone
+    import json as _json
+
+    try:
+        gene = _json.loads(request.body.decode())
+    except (ValueError, TypeError) as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+
+    rule_hex = gene.get('rule_hex') or ''
+    if len(rule_hex) != 32768:
+        return JsonResponse({'ok': False,
+            'error': 'rule_hex must be 32768 chars (16384 bytes)'}, status=400)
+    try:
+        rule_bytes = bytes.fromhex(rule_hex)
+        if any(b > 3 for b in rule_bytes):
+            raise ValueError('rule bytes must be in 0..3')
+    except ValueError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=400)
+
+    seed_byte    = int(gene.get('seed_byte', 0)) & 0xFF
+    world_mode   = gene.get('world_mode', 'overlay')
+    component_grid  = int(gene.get('component_grid', 16))
+    monster_count   = max(0, min(64, int(gene.get('monster_count', 8))))
+    wall_threshold  = max(1, min(3, int(gene.get('wall_threshold', 2))))
+    pure_mode    = bool(gene.get('pure_mode', False))
+    base_name    = (gene.get('name') or 'evolved-pact').strip()[:60]
+
+    valid_modes = {k for k, _ in GameSession.WORLD_MODE_CHOICES}
+    if world_mode not in valid_modes:
+        world_mode = 'overlay'
+
+    # Unique names
+    pact_name = f'{base_name}-pact'
+    n = 2
+    while Pact.objects.filter(name=pact_name).exists():
+        pact_name = f'{base_name}-pact-{n}'; n += 1
+    game_name = f'{base_name}-game'
+    n = 2
+    while GameSession.objects.filter(name=game_name).exists():
+        game_name = f'{base_name}-game-{n}'; n += 1
+
+    pact = Pact(
+        name=pact_name,
+        # All 64 components share the seed byte (we only use component 0).
+        seed_matrix=bytes([seed_byte] * COMPONENTS),
+        rule_snapshot=rule_bytes,
+        rule_diversity='shared',
+        component_grid=component_grid,
+        clock_model='synced',
+        launch_time=timezone.now(),
+        notes='Materialised from doom_ca evolve.',
+        created_by=request.user if request.user.is_authenticated else None,
+    )
+    pact.save()
+
+    session = GameSession(
+        name=game_name, pact=pact, component=0,
+        world_mode=world_mode, monster_count=monster_count,
+        wall_threshold=wall_threshold, pure_mode=pure_mode,
+        notes=f'Evolved gene (fitness shown in evolve page).',
+        created_by=request.user if request.user.is_authenticated else None,
+    )
+    session.save()
+
+    return JsonResponse({
+        'ok': True,
+        'play_url':     f'/doom-ca/{session.slug}/',
+        'pact_slug':    pact.slug,
+        'session_slug': session.slug,
+        'pact_name':    pact.name,
+        'session_name': session.name,
+    })

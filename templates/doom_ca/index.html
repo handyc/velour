@@ -40,6 +40,8 @@
   <span class="empty">No spoeqi pacts to source a world from.
     <a href="{% url 'spoeqi:create' %}">Create one first.</a></span>
   {% endif %}
+  <a class="new-btn" href="{% url 'doom_ca:evolve' %}"
+     style="margin-left: 8px;">⚙ evolve a pact</a>
 </p>
 
 {% if sessions %}

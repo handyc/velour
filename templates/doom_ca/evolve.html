@@ -1,0 +1,593 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Evolve Doom CA{% endblock %}
+{% block content %}
+<style>
+  .ev-page { max-width: 78em; }
+  .ev-meta { color: #888; font-size: 0.85rem; }
+  .ev-meta a { color: #ace; }
+  .config-grid { display: grid; gap: 8px 18px;
+                 grid-template-columns: max-content 1fr; align-items: baseline;
+                 margin: 14px 0; max-width: 50em; }
+  .config-grid label { color: #aaa; font-size: 0.85rem; }
+  .config-grid input[type=number], .config-grid select {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 2px 6px; font-family: inherit; width: 8em;
+  }
+  .weights { display: grid; gap: 4px 14px;
+             grid-template-columns: max-content 1fr max-content;
+             max-width: 50em; align-items: center; }
+  .weights label { color: #aaa; font-size: 0.85rem; }
+  .weights input[type=range] { width: 18em; }
+  .weights .vw { color: #cfc; font-family: monospace; min-width: 3em;
+                 text-align: right; font-size: 0.8rem; }
+  .actions button { background: #222; color: #cfc;
+                    border: 1px solid #555; padding: 4px 16px;
+                    font-family: inherit; cursor: pointer; }
+  .actions .primary { background: #1a3a1a; border-color: #2a5a2a; }
+  .live { display: flex; gap: 24px; flex-wrap: wrap;
+          margin-top: 14px; font-family: monospace; font-size: 0.85rem;
+          color: #888; }
+  .live b { color: #cfc; font-weight: normal; }
+  #ev-progress { margin-top: 8px; font-family: monospace;
+                 color: #ace; max-height: 8em; overflow: auto;
+                 background: #0a0a0a; padding: 6px;
+                 border: 1px solid #222; font-size: 0.78rem; }
+  .winners { display: grid; gap: 12px; margin-top: 18px;
+             grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .winner { background: #0a0a0a; border: 1px solid #222;
+            padding: 8px; }
+  .winner canvas { display: block; background: #050505;
+                   image-rendering: pixelated;
+                   border: 1px solid #1a1a1a; margin: 4px auto; }
+  .winner .name { color: #cfc; font-weight: 600; font-size: 0.85rem;
+                  font-family: monospace; }
+  .winner .meta { color: #888; font-size: 0.72rem; margin-top: 4px;
+                  font-family: monospace; line-height: 1.4; }
+  .winner button { background: #222; color: #cfc; border: 1px solid #555;
+                   padding: 2px 8px; font-family: inherit; cursor: pointer;
+                   font-size: 0.78rem; margin-top: 4px; }
+  .winner button:disabled { color: #666; }
+  .section-header { color: #ace; margin: 20px 0 6px;
+                    font-size: 0.95rem; font-weight: normal;
+                    border-bottom: 1px solid #1a1a1a; padding-bottom: 4px; }
+  .hint { color: #666; font-size: 0.78rem; }
+</style>
+
+<div class="ev-page">
+<p class="ev-meta">
+  <a href="{% url 'doom_ca:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Evolve Doom CA</b>
+</p>
+<p class="ev-meta" style="max-width: 60em;">
+  A GA over doom_ca pact configurations.  Each agent's gene encodes
+  the world rule, seed byte, mode, grid size, monster count, wall
+  threshold, and pure-mode flag.  Fitness is computed by silently
+  simulating short games with a baseline AI player and weighting the
+  metrics you control below.  Pacts are <em>not</em> materialised
+  during evolution — only winners you click "materialise" on become
+  real Pact + GameSession rows.
+</p>
+
+<h3 class="section-header">Population</h3>
+<div class="config-grid">
+  <label for="ev-pop">population size</label>
+  <input id="ev-pop" type="number" min="4" max="128" value="24">
+
+  <label for="ev-gens">generations</label>
+  <input id="ev-gens" type="number" min="1" max="200" value="20">
+
+  <label for="ev-mut">mutation rate</label>
+  <input id="ev-mut" type="number" min="0" max="1" step="0.01" value="0.04">
+
+  <label for="ev-cross">crossover rate</label>
+  <input id="ev-cross" type="number" min="0" max="1" step="0.05" value="0.5">
+
+  <label for="ev-elite">elitism (top-K kept)</label>
+  <input id="ev-elite" type="number" min="0" max="16" value="3">
+
+  <label for="ev-sims">simulations per agent</label>
+  <input id="ev-sims" type="number" min="1" max="10" value="3">
+
+  <label for="ev-turns">max turns per sim</label>
+  <input id="ev-turns" type="number" min="10" max="200" value="40">
+
+  <label for="ev-grid">component grid (cells/side)</label>
+  <select id="ev-grid">
+    <option value="16">16 × 16 (fastest)</option>
+    <option value="24" selected>24 × 24</option>
+    <option value="32">32 × 32 (slower)</option>
+  </select>
+
+  <label for="ev-modes">allowed modes</label>
+  <select id="ev-modes">
+    <option value="all" selected>all four (let GA pick)</option>
+    <option value="overlay">overlay only</option>
+    <option value="shift">shift only</option>
+    <option value="scent">scent only</option>
+    <option value="evolved">evolved only</option>
+    <option value="pure3">shift / scent / evolved (pure-CA modes)</option>
+  </select>
+</div>
+
+<h3 class="section-header">Fitness weights</h3>
+<div class="weights">
+  <label>playability — penalise sub-3-turn deaths</label>
+  <input type="range" id="w-playability" min="0" max="1" step="0.05" value="1.0">
+  <span class="vw" id="w-playability-v">1.00</span>
+
+  <label>challenge — reward ~50 % survival rate</label>
+  <input type="range" id="w-challenge" min="0" max="1" step="0.05" value="0.6">
+  <span class="vw" id="w-challenge-v">0.60</span>
+
+  <label>engagement — monsters encountered per sim</label>
+  <input type="range" id="w-engagement" min="0" max="1" step="0.05" value="0.4">
+  <span class="vw" id="w-engagement-v">0.40</span>
+
+  <label>navigation — reward fewer wall bumps</label>
+  <input type="range" id="w-navigation" min="0" max="1" step="0.05" value="0.3">
+  <span class="vw" id="w-navigation-v">0.30</span>
+
+  <label>exploration — reward cells visited</label>
+  <input type="range" id="w-exploration" min="0" max="1" step="0.05" value="0.4">
+  <span class="vw" id="w-exploration-v">0.40</span>
+
+  <label>purity — prefer pure-CA modes
+    (scent &gt; shift &gt; evolved &gt; overlay)</label>
+  <input type="range" id="w-purity" min="0" max="1" step="0.05" value="0.3">
+  <span class="vw" id="w-purity-v">0.30</span>
+</div>
+
+<p class="hint">
+  An agent dying in fewer than 3 turns in every sim scores 0 on
+  playability — that veto rules out the unwinnable.  Set a weight to
+  0 to ignore it entirely.
+</p>
+
+<div class="actions" style="margin-top: 16px;">
+  <button id="ev-start" class="primary">▶ start evolution</button>
+  <button id="ev-stop" disabled>■ stop</button>
+</div>
+
+<div class="live">
+  <span>generation <b id="ev-gen">—</b></span>
+  <span>evaluated <b id="ev-eval">0</b></span>
+  <span>best fitness <b id="ev-best">—</b></span>
+  <span>median fitness <b id="ev-median">—</b></span>
+  <span>elapsed <b id="ev-elapsed">—</b> s</span>
+</div>
+<div id="ev-progress"></div>
+
+<h3 class="section-header" id="winners-header" style="display:none;">
+  Top survivors (click to materialise → real Pact + GameSession)
+</h3>
+<div class="winners" id="ev-winners"></div>
+</div>
+
+<script src="{% static 'doom_ca/engine.js' %}"></script>
+<script>
+(function () {
+  'use strict';
+  var E = window.DoomCAEngine;
+
+  // ─── UI helpers ──────────────────────────────────────────────
+  ['playability','challenge','engagement','navigation','exploration','purity']
+  .forEach(function (k) {
+    var slider = document.getElementById('w-' + k);
+    var vw = document.getElementById('w-' + k + '-v');
+    slider.addEventListener('input', function () {
+      vw.textContent = parseFloat(slider.value).toFixed(2);
+    });
+  });
+
+  function csrfToken () {
+    var m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
+  // Lightweight LCG for gene-level randomness (separate from the
+  // mulberry32 used inside the simulator's AI).
+  function rngFromSeed (seed) {
+    var s = seed >>> 0;
+    return function () {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+  }
+
+  // ─── Gene operations ─────────────────────────────────────────
+  var MODE_OPTIONS = {
+    all:     ['overlay','shift','scent','evolved'],
+    overlay: ['overlay'],
+    shift:   ['shift'],
+    scent:   ['scent'],
+    evolved: ['evolved'],
+    pure3:   ['shift','scent','evolved'],
+  };
+  var PURITY_SCORE = { overlay: 0.0, evolved: 0.4, shift: 0.7, scent: 1.0 };
+
+  function randomGene (rng, opts) {
+    var rule = new Uint8Array(E.RULE_SIZE);
+    for (var i = 0; i < rule.length; i++) rule[i] = (rng() * 4) | 0;
+    var modes = opts.modes;
+    return {
+      rule: rule,
+      seed_byte: (rng() * 256) | 0,
+      component_grid: opts.gridSide,
+      world_mode: modes[(rng() * modes.length) | 0],
+      monster_count: 4 + Math.floor(rng() * 9),    // 4..12
+      wall_threshold: 1 + Math.floor(rng() * 3),   // 1..3
+      pure_mode: rng() < 0.5,
+    };
+  }
+  function cloneGene (g) {
+    return {
+      rule: new Uint8Array(g.rule),
+      seed_byte: g.seed_byte,
+      component_grid: g.component_grid,
+      world_mode: g.world_mode,
+      monster_count: g.monster_count,
+      wall_threshold: g.wall_threshold,
+      pure_mode: g.pure_mode,
+    };
+  }
+  function mutate (g, rng, rate, opts) {
+    var child = cloneGene(g);
+    // Bit-flip rule bytes — rate × RULE_SIZE expected flips
+    var flips = Math.max(1, Math.floor(rate * E.RULE_SIZE));
+    for (var i = 0; i < flips; i++) {
+      var idx = (rng() * E.RULE_SIZE) | 0;
+      child.rule[idx] = (rng() * 4) | 0;
+    }
+    if (rng() < rate * 2) child.seed_byte = (rng() * 256) | 0;
+    if (rng() < rate * 4) child.world_mode = opts.modes[(rng() * opts.modes.length) | 0];
+    if (rng() < rate * 4) child.monster_count = Math.max(0, Math.min(16,
+      child.monster_count + ((rng() * 5) | 0) - 2));
+    if (rng() < rate * 4) child.wall_threshold = 1 + ((rng() * 3) | 0);
+    if (rng() < rate * 4) child.pure_mode = !child.pure_mode;
+    return child;
+  }
+  function crossover (a, b, rng) {
+    // Uniform crossover on the rule + random pick of categorical fields
+    var rule = new Uint8Array(E.RULE_SIZE);
+    var blockSize = 256;
+    var nBlocks = E.RULE_SIZE / blockSize;
+    for (var bi = 0; bi < nBlocks; bi++) {
+      var src = (rng() < 0.5) ? a.rule : b.rule;
+      var off = bi * blockSize;
+      for (var i = 0; i < blockSize; i++) rule[off + i] = src[off + i];
+    }
+    return {
+      rule: rule,
+      seed_byte: (rng() < 0.5) ? a.seed_byte : b.seed_byte,
+      component_grid: a.component_grid,
+      world_mode: (rng() < 0.5) ? a.world_mode : b.world_mode,
+      monster_count: (rng() < 0.5) ? a.monster_count : b.monster_count,
+      wall_threshold: (rng() < 0.5) ? a.wall_threshold : b.wall_threshold,
+      pure_mode: (rng() < 0.5) ? a.pure_mode : b.pure_mode,
+    };
+  }
+
+  // ─── Fitness ──────────────────────────────────────────────────
+  function evaluate (gene, opts) {
+    var n = opts.sims;
+    var max = opts.maxTurns;
+    var results = [];
+    for (var i = 0; i < n; i++) {
+      results.push(E.simulateGame(gene, {maxTurns: max, aiSeed: i + 1}));
+    }
+    var meanSurvival = 0, minSurvival = Infinity, survivedCount = 0;
+    var meanMonsters = 0, meanBumps = 0, meanVisited = 0;
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      meanSurvival += r.survivedTurns;
+      if (r.survivedTurns < minSurvival) minSurvival = r.survivedTurns;
+      if (r.survived) survivedCount++;
+      meanMonsters += r.monstersSeen;
+      meanBumps    += r.wallsBumped;
+      meanVisited  += r.groundVisited;
+    }
+    meanSurvival /= n; meanMonsters /= n; meanBumps /= n; meanVisited /= n;
+    var survivalRate = survivedCount / n;
+
+    // Component scores in [0, 1]
+    var playability = (minSurvival >= 3) ? 1 : (minSurvival / 3);
+    var challenge = 1 - Math.abs(0.5 - survivalRate) * 2;   // peak at 0.5
+    var engagement = Math.min(1, meanMonsters / 8);
+    var navigation = Math.max(0, 1 - meanBumps / max);
+    var exploration = Math.min(1, meanVisited / (max * 0.7));
+    var purity = PURITY_SCORE[gene.world_mode] || 0;
+
+    var w = opts.weights;
+    var totalW = w.playability + w.challenge + w.engagement +
+                 w.navigation + w.exploration + w.purity;
+    if (totalW === 0) totalW = 1;
+    var fitness =
+      (w.playability * playability +
+       w.challenge   * challenge +
+       w.engagement  * engagement +
+       w.navigation  * navigation +
+       w.exploration * exploration +
+       w.purity      * purity) / totalW;
+
+    return {
+      fitness: fitness,
+      components: {
+        playability: playability, challenge: challenge,
+        engagement: engagement, navigation: navigation,
+        exploration: exploration, purity: purity,
+      },
+      stats: {
+        meanSurvival: meanSurvival, survivalRate: survivalRate,
+        minSurvival: minSurvival, meanMonsters: meanMonsters,
+        meanBumps: meanBumps, meanVisited: meanVisited,
+      },
+    };
+  }
+
+  // ─── Tournament select ───────────────────────────────────────
+  function pickTournament (pop, rng, k) {
+    var best = null;
+    for (var i = 0; i < k; i++) {
+      var c = pop[(rng() * pop.length) | 0];
+      if (!best || c.fitness > best.fitness) best = c;
+    }
+    return best;
+  }
+
+  // ─── GA loop ─────────────────────────────────────────────────
+  var stopRequested = false;
+  var startBtn = document.getElementById('ev-start');
+  var stopBtn  = document.getElementById('ev-stop');
+  startBtn.addEventListener('click', startEvolution);
+  stopBtn.addEventListener('click', function () { stopRequested = true; });
+
+  function logProgress (line) {
+    var el = document.getElementById('ev-progress');
+    el.textContent += line + '\n';
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function getConfig () {
+    var modesKey = document.getElementById('ev-modes').value;
+    return {
+      pop:       parseInt(document.getElementById('ev-pop').value, 10) | 0,
+      gens:      parseInt(document.getElementById('ev-gens').value, 10) | 0,
+      mut:       parseFloat(document.getElementById('ev-mut').value),
+      cross:     parseFloat(document.getElementById('ev-cross').value),
+      elite:     parseInt(document.getElementById('ev-elite').value, 10) | 0,
+      sims:      parseInt(document.getElementById('ev-sims').value, 10) | 0,
+      maxTurns:  parseInt(document.getElementById('ev-turns').value, 10) | 0,
+      gridSide:  parseInt(document.getElementById('ev-grid').value, 10) | 0,
+      modes:     MODE_OPTIONS[modesKey] || MODE_OPTIONS.all,
+      weights: {
+        playability: parseFloat(document.getElementById('w-playability').value),
+        challenge:   parseFloat(document.getElementById('w-challenge').value),
+        engagement:  parseFloat(document.getElementById('w-engagement').value),
+        navigation:  parseFloat(document.getElementById('w-navigation').value),
+        exploration: parseFloat(document.getElementById('w-exploration').value),
+        purity:      parseFloat(document.getElementById('w-purity').value),
+      },
+    };
+  }
+
+  var bestEverList = [];
+
+  function recordBest (agent, k) {
+    bestEverList.push(agent);
+    bestEverList.sort(function (a, b) { return b.fitness - a.fitness; });
+    if (bestEverList.length > k) bestEverList.length = k;
+  }
+
+  async function startEvolution () {
+    stopRequested = false;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    document.getElementById('ev-progress').textContent = '';
+    document.getElementById('ev-winners').innerHTML = '';
+    document.getElementById('winners-header').style.display = 'none';
+    bestEverList = [];
+
+    var cfg = getConfig();
+    var rng = rngFromSeed(Date.now() & 0x7fffffff);
+    var t0 = performance.now();
+
+    logProgress('Initialising population of ' + cfg.pop + '…');
+    var population = [];
+    for (var i = 0; i < cfg.pop; i++) {
+      var g = randomGene(rng, {modes: cfg.modes, gridSide: cfg.gridSide});
+      population.push({gene: g, fitness: 0, evaln: null});
+    }
+
+    var evalCount = 0;
+    for (var gen = 0; gen < cfg.gens && !stopRequested; gen++) {
+      // Evaluate (yield to UI every few)
+      for (var i = 0; i < population.length; i++) {
+        var indiv = population[i];
+        indiv.evaln = evaluate(indiv.gene, {
+          sims: cfg.sims, maxTurns: cfg.maxTurns, weights: cfg.weights});
+        indiv.fitness = indiv.evaln.fitness;
+        evalCount++;
+        if ((evalCount & 7) === 0) {
+          document.getElementById('ev-eval').textContent = evalCount;
+          await new Promise(function (r) { setTimeout(r, 0); });
+          if (stopRequested) break;
+        }
+      }
+      population.sort(function (a, b) { return b.fitness - a.fitness; });
+      var best = population[0].fitness;
+      var median = population[(population.length / 2) | 0].fitness;
+
+      // Track top-K ever (snapshot the gene)
+      for (var k = 0; k < Math.min(cfg.elite, population.length); k++) {
+        recordBest({gene: cloneGene(population[k].gene),
+                    fitness: population[k].fitness,
+                    evaln: population[k].evaln,
+                    gen: gen}, 12);
+      }
+
+      document.getElementById('ev-gen').textContent = (gen + 1) + ' / ' + cfg.gens;
+      document.getElementById('ev-best').textContent   = best.toFixed(3);
+      document.getElementById('ev-median').textContent = median.toFixed(3);
+      document.getElementById('ev-elapsed').textContent =
+          ((performance.now() - t0) / 1000).toFixed(1);
+      logProgress('gen ' + (gen + 1) + ': best ' + best.toFixed(3)
+                + ', median ' + median.toFixed(3)
+                + ', mode-mix ' + modeMix(population));
+
+      if (stopRequested) break;
+      if (gen + 1 >= cfg.gens) break;
+
+      // Build next gen
+      var next = [];
+      // Elitism
+      for (var k = 0; k < Math.min(cfg.elite, population.length); k++) {
+        next.push({gene: cloneGene(population[k].gene), fitness: 0, evaln: null});
+      }
+      while (next.length < cfg.pop) {
+        var pa = pickTournament(population, rng, 3);
+        var pb = pickTournament(population, rng, 3);
+        var childGene;
+        if (rng() < cfg.cross) {
+          childGene = crossover(pa.gene, pb.gene, rng);
+        } else {
+          childGene = cloneGene(pa.gene);
+        }
+        childGene = mutate(childGene, rng, cfg.mut, {modes: cfg.modes});
+        next.push({gene: childGene, fitness: 0, evaln: null});
+      }
+      population = next;
+
+      await new Promise(function (r) { setTimeout(r, 0); });
+    }
+
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    logProgress('Done.  ' + bestEverList.length + ' top survivors.');
+    renderWinners(bestEverList);
+  }
+
+  function modeMix (pop) {
+    var c = {overlay:0, shift:0, scent:0, evolved:0};
+    for (var i = 0; i < pop.length; i++) c[pop[i].gene.world_mode]++;
+    return Object.entries(c).filter(function (kv) { return kv[1]; })
+      .map(function (kv) { return kv[0] + '=' + kv[1]; }).join(' ');
+  }
+
+  // ─── Render winners ──────────────────────────────────────────
+  function renderWinners (list) {
+    var wrap = document.getElementById('ev-winners');
+    wrap.innerHTML = '';
+    document.getElementById('winners-header').style.display = list.length ? '' : 'none';
+    list.forEach(function (a, idx) {
+      var card = document.createElement('div');
+      card.className = 'winner';
+      var canv = document.createElement('canvas');
+      canv.width = 200; canv.height = 200;
+      card.appendChild(canv);
+      drawGenePreview(canv, a.gene);
+      var n = document.createElement('div');
+      n.className = 'name';
+      n.textContent = '#' + (idx + 1) + ' · fitness ' + a.fitness.toFixed(3);
+      card.appendChild(n);
+      var m = document.createElement('div');
+      m.className = 'meta';
+      var c = a.evaln.components, s = a.evaln.stats;
+      m.innerHTML =
+        'mode <b style="color:#cfc;">' + a.gene.world_mode + '</b>'
+        + (a.gene.pure_mode ? ' (pure)' : '')
+        + ' · ' + a.gene.monster_count + ' mons, wall ≥ ' + a.gene.wall_threshold
+        + '<br>survive ' + s.meanSurvival.toFixed(1) + '/' + s.minSurvival
+        + ' min, rate ' + (100 * s.survivalRate).toFixed(0) + '%'
+        + '<br>playability ' + c.playability.toFixed(2)
+        + ' · challenge ' + c.challenge.toFixed(2)
+        + '<br>engagement ' + c.engagement.toFixed(2)
+        + ' · purity ' + c.purity.toFixed(2);
+      card.appendChild(m);
+      var btn = document.createElement('button');
+      btn.textContent = '→ materialise';
+      btn.addEventListener('click', function () { materialise(a, btn); });
+      card.appendChild(btn);
+      wrap.appendChild(card);
+    });
+  }
+
+  function drawGenePreview (canvas, gene) {
+    // Tick the gene's CA forward a few steps from the seed and render
+    // a downscaled view of the result.
+    var side = gene.component_grid;
+    var raw = E.seedGrid(gene.seed_byte, side);
+    var world = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) {
+      world[i] = (raw[i] >= gene.wall_threshold) ? E.WALL : E.GROUND;
+    }
+    var c = side >> 1;
+    world[c * side + c] = E.PLAYER;
+    var swap = new Uint8Array(side * side);
+    var rule;
+    if (gene.world_mode === 'evolved') rule = E.buildEvolvedRule(gene.rule);
+    else if (gene.world_mode === 'scent') rule = E.buildScentRule();
+    else rule = gene.rule;
+    for (var t = 0; t < 8; t++) {
+      E.tickRule(world, swap, side, rule);
+      var tmp = world; world = swap; swap = tmp;
+    }
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var cell = canvas.width / side;
+    for (var y = 0; y < side; y++) {
+      var rowShift = (y & 1) ? cell * 0.5 : 0;
+      for (var x = 0; x < side; x++) {
+        var v = world[y * side + x];
+        var fill;
+        if (v === E.WALL) fill = '#e6c83c';
+        else if (v === E.MONSTER) fill = '#f85149';
+        else if (v === E.PLAYER) fill = '#58a6ff';
+        else fill = '#1a1a1a';
+        ctx.fillStyle = fill;
+        ctx.fillRect(x * cell + rowShift, y * cell, cell + 0.5, cell + 0.5);
+      }
+    }
+  }
+
+  // ─── Materialise ────────────────────────────────────────────
+  function materialise (agent, btn) {
+    btn.disabled = true;
+    btn.textContent = 'creating…';
+    var ruleHex = '';
+    for (var i = 0; i < agent.gene.rule.length; i++) {
+      ruleHex += agent.gene.rule[i].toString(16).padStart(2, '0');
+    }
+    var payload = {
+      name: 'evolved-' + Date.now().toString(36),
+      rule_hex: ruleHex,
+      seed_byte: agent.gene.seed_byte,
+      world_mode: agent.gene.world_mode,
+      component_grid: agent.gene.component_grid,
+      monster_count: agent.gene.monster_count,
+      wall_threshold: agent.gene.wall_threshold,
+      pure_mode: agent.gene.pure_mode,
+    };
+    fetch('{% url "doom_ca:materialize" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken()},
+      body: JSON.stringify(payload),
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.ok) {
+        btn.textContent = '✓ open game';
+        btn.disabled = false;
+        btn.onclick = function () { window.open(d.play_url, '_blank'); };
+      } else {
+        btn.textContent = 'failed';
+        btn.title = d.error || '';
+      }
+    }).catch(function (err) {
+      btn.textContent = 'failed';
+      btn.title = err.message;
+    });
+  }
+})();
+</script>
+{% endblock %}
