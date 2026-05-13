@@ -35,9 +35,11 @@
 </div>
 
 {% if total_rulesets %}
-{# Shared datalist: built once, referenced by all three ruleset
-   typeahead inputs below.  Option `value` carries the id so the
-   server can resolve it regardless of how the user typed it. #}
+{% comment %}
+  Shared datalist: built once, referenced by all three ruleset
+  typeahead inputs below.  Option `value` carries the id so the
+  server can resolve it regardless of how the user typed it.
+{% endcomment %}
 <datalist id="ruleset-options">
     {% for rs in rulesets %}
     <option value="#{{ rs.pk }} — {{ rs.name }} ({{ rs.n_colors }}c)"></option>
