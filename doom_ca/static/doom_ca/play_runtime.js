@@ -244,6 +244,21 @@
     var pageW = page.clientWidth || window.innerWidth;
     var availW = pageW - 4;
     var availH = window.innerHeight - 280;
+    if (MODE === 'platform') {
+      // Cartesian side-scroller — keep a square-ish canvas sized to
+      // the smaller available dimension, like the original.  The hex
+      // half-shift / 0.85 vertical step don't apply here.
+      var edge = Math.max(240, Math.min(availW, availH));
+      edge = Math.floor(edge);
+      canvas.width  = edge;
+      canvas.height = edge;
+      canvas.style.width  = edge + 'px';
+      canvas.style.height = edge + 'px';
+      CELL_PX = Math.floor(edge / VIEW);
+      H_STEP  = CELL_PX;
+      V_STEP  = CELL_PX;
+      return;
+    }
     // Hex-grid natural extent in cells.  Horizontally the odd-row
     // half-shift adds 0.5 to the rightmost column; vertically the
     // step is 0.85 × cell, so VIEW rows span (VIEW-1)*0.85 + 1.
