@@ -1,0 +1,424 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Microceramic filter simulator — Naiad{% endblock %}
+{% block content %}
+<style>
+  .cer-page { max-width: 100%; padding: 0 8px; }
+  .cer-meta { color: #888; font-size: 0.85rem; max-width: 60em; }
+  .cer-meta a { color: #ace; }
+  .cer-topbar { display: flex; gap: 10px; align-items: center;
+                flex-wrap: wrap; margin: 6px 0;
+                font-size: 0.85rem; color: #aaa; }
+  .cer-topbar button {
+    background: #1a2a1a; color: #cfc;
+    border: 1px solid #2a5a2a; padding: 3px 12px;
+    font-family: inherit; cursor: pointer; font-size: 0.85rem;
+  }
+  .cer-topbar button.warn { background: #2a0a0a; border-color: #532; color: #fcc; }
+  .cer-topbar button.primary { background: #1a3a1a; }
+  .cer-topbar button:disabled { color: #555; border-color: #2a2a2a;
+                                 background: #111; cursor: not-allowed; }
+  .cer-topbar select, .cer-topbar input[type=number] {
+    background: #111; color: #ccc; border: 1px solid #333;
+    padding: 2px 6px; font-family: inherit; font-size: 0.85rem;
+  }
+  .cer-topbar .live { color: #888; font-family: monospace; font-size: 0.82rem;
+                       margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; }
+  .cer-topbar .live b { color: #cfc; font-weight: normal; }
+  .cer-board { display: flex; gap: 14px; align-items: flex-start;
+               flex-wrap: wrap; margin: 6px 0; }
+  #cer-canvas { background: #050505; border: 1px solid #222;
+                image-rendering: pixelated; display: block;
+                cursor: crosshair; }
+  .cer-side { min-width: 240px; max-width: 280px;
+              background: #0a0a0a; border: 1px solid #1a1a1a;
+              padding: 10px; font-family: monospace; font-size: 0.82rem;
+              color: #aaa; }
+  .cer-side h3 { color: #ace; font-size: 0.88rem; margin: 6px 0 2px;
+                 font-weight: normal; border-bottom: 1px solid #1a1a1a;
+                 padding-bottom: 2px; }
+  .legend-row { display: flex; gap: 6px; align-items: center;
+                font-size: 0.78rem; padding: 2px 0; }
+  .legend-row .swatch { width: 14px; height: 14px;
+                        border: 1px solid #444; }
+  .stats-row { display: flex; gap: 6px; padding: 2px 0; }
+  .stats-row .key { color: #888; min-width: 9em; }
+  .stats-row .val { color: #cfc; font-weight: 600; }
+  .cer-meta .pill {
+    background: #1a1a1a; border: 1px solid #333; color: #ace;
+    padding: 1px 8px; border-radius: 8px; font-size: 0.75rem;
+    font-family: monospace; margin-right: 4px; }
+</style>
+
+<div class="cer-page">
+<p class="cer-meta">
+  <a href="{% url 'naiad:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Naiad · microceramic filter simulator</b>
+</p>
+<p class="cer-meta">
+  Paint a ceramic structure on a 64×64 hex grid; particles flow under
+  a class-4 cellular automaton borrowed from
+  <a href="{% url 'doom_ca:evolve' %}">doom_ca</a>'s scent mode (the
+  one with the eerie fluid-like enemy propagation).  Water particles
+  fall through voids; contaminants get trapped when surrounded by
+  ceramic on ≥3 sides.  Use this to prototype the inner geometry of
+  the microceramic filters you fabricate by hand.
+  <span class="pill">4-state hex CA</span>
+  <span class="pill">16,384-entry rule</span>
+  <span class="pill">offset-r topology</span>
+</p>
+
+<div class="cer-topbar">
+  <button id="cer-run" class="primary">▶ run</button>
+  <button id="cer-stop" disabled>■ stop</button>
+  <button id="cer-step">▷ step</button>
+  <button id="cer-clear" class="warn">🗙 clear ceramic</button>
+  <label>tool
+    <select id="cer-tool">
+      <option value="ceramic" selected>paint ceramic</option>
+      <option value="void">erase (void)</option>
+    </select>
+  </label>
+  <label>brush
+    <input id="cer-brush" type="number" min="1" max="6" value="2">
+  </label>
+  <label>flow rate
+    <input id="cer-rate" type="number" min="1" max="20" value="6">
+  </label>
+  <label>contam %
+    <input id="cer-cpct" type="number" min="0" max="100" value="20">
+  </label>
+  <label><input id="cer-paused" type="checkbox"> pause spawn</label>
+  <span class="live">
+    <span>tick <b id="cer-tick">0</b></span>
+    <span>in <b id="cer-in">0</b></span>
+    <span>out <b id="cer-out">0</b></span>
+    <span>trapped <b id="cer-trap">0</b></span>
+    <span>efficacy <b id="cer-eff">—</b></span>
+  </span>
+</div>
+
+<div class="cer-board">
+  <canvas id="cer-canvas" width="640" height="640"></canvas>
+
+  <div class="cer-side">
+    <h3>Legend</h3>
+    <div class="legend-row"><span class="swatch" style="background:#050505;"></span>void / pore</div>
+    <div class="legend-row"><span class="swatch" style="background:#8d7a5e;"></span>ceramic wall</div>
+    <div class="legend-row"><span class="swatch" style="background:#5db7e8;"></span>water particle</div>
+    <div class="legend-row"><span class="swatch" style="background:#c44848;"></span>contaminant</div>
+
+    <h3>Stats (live)</h3>
+    <div class="stats-row"><span class="key">spawned</span><span class="val" id="s-in">0</span></div>
+    <div class="stats-row"><span class="key">passed through</span><span class="val" id="s-out">0</span></div>
+    <div class="stats-row"><span class="key">trapped (contam.)</span><span class="val" id="s-trap">0</span></div>
+    <div class="stats-row"><span class="key">trapped (water)</span><span class="val" id="s-trap-w">0</span></div>
+    <div class="stats-row"><span class="key">contam. throughput</span><span class="val" id="s-cthru">—</span></div>
+    <div class="stats-row"><span class="key">contam. trapped</span><span class="val" id="s-ctrap">—</span></div>
+
+    <h3>Notes</h3>
+    <div style="color:#888; font-size:0.76rem; line-height:1.5;">
+      Particles spawn at the top edge each tick at the chosen flow rate
+      (a fraction "contam %" of them are red contaminants, the rest are
+      blue water).  Particles that reach the bottom edge are removed
+      from the count and tallied as <em>passed through</em>.  Contaminant
+      cells whose 6 hex neighbours contain ≥3 ceramic walls become
+      <em>trapped</em> and stop moving — that's how the filter cleans
+      water.  Higher contam-trapped / contam-thru ratio = better filter.
+    </div>
+  </div>
+</div>
+</div>
+
+<script src="{% static 'doom_ca/engine.js' %}"></script>
+<script>
+(function () {
+  'use strict';
+  var E = window.DoomCAEngine;
+  var W = 64, H = 64, AREA = W * H;
+
+  // Cell states: 0 void, 1 ceramic, 2 water, 3 contaminant.
+  var VOID = 0, CER = 1, WATER = 2, CON = 3;
+
+  // ── Hand-built porous-flow rule ─────────────────────────────
+  // Encoded the same way as doom_ca's engine.js tickRule expects:
+  //   key = (self<<12) | (n0<<10) | (n1<<8) | (n2<<6) | (n3<<4) |
+  //         (n4<<2) | n5
+  // Neighbour order is doom_ca's:
+  //   0=upper-right-ish  1=right  2=lower-right-ish
+  //   3=lower-left-ish   4=left   5=upper-left-ish
+  // So {0, 5} are upper, {2, 3} are lower, {1, 4} are sides.
+  //
+  // Behaviour designed to look like Stokes-style settling through a
+  // porous medium:
+  //   - ceramic stays ceramic forever
+  //   - void: takes whichever particle is above it (priority water > con)
+  //   - water: if any lower neighbour is void → vacate (fell)
+  //   - contaminant: same as water UNLESS 3+ neighbours are ceramic,
+  //     in which case it's trapped and stays put
+  //
+  // Producing 16,384 entries up-front at page load — ~10 ms.  Reused
+  // by every tick.
+  function buildFlowRule () {
+    var t = new Uint8Array(16384);
+    for (var k = 0; k < 16384; k++) {
+      var self_ = (k >> 12) & 3;
+      var n = [(k >> 10) & 3, (k >> 8) & 3, (k >> 6) & 3,
+               (k >> 4) & 3, (k >> 2) & 3, k & 3];
+      if (self_ === CER) { t[k] = CER; continue; }
+      if (self_ === VOID) {
+        // Particle above falls into me — water wins ties over contam.
+        if (n[0] === WATER || n[5] === WATER) { t[k] = WATER; continue; }
+        if (n[0] === CON   || n[5] === CON)   { t[k] = CON;   continue; }
+        t[k] = VOID; continue;
+      }
+      // Self is water or contaminant.
+      if (self_ === CON) {
+        var ncer = 0;
+        for (var i = 0; i < 6; i++) if (n[i] === CER) ncer++;
+        if (ncer >= 3) { t[k] = CON; continue; }
+      }
+      // Try to fall: any void below?
+      if (n[2] === VOID || n[3] === VOID) { t[k] = VOID; continue; }
+      // Blocked: hold position.
+      t[k] = self_;
+    }
+    return t;
+  }
+
+  var flowRule = buildFlowRule();
+
+  // ── Grid state ──────────────────────────────────────────────
+  var grid = new Uint8Array(AREA);   // current state
+  var swap = new Uint8Array(AREA);   // double buffer for tick
+  var tick = 0;
+  var spawnedCount = 0;
+  var passedThroughCount = 0;
+  var trappedContamCount = 0;
+  var trappedWaterCount  = 0;
+  var contamSpawned = 0, contamThrough = 0, contamTrapped = 0;
+
+  // Default: paint a couple of seed ceramic clusters so the page
+  // isn't empty.  User can clear with the button.
+  (function seedCeramic () {
+    var rng = E.makeRng(0x4c1c1d);
+    var nClusters = 18;
+    for (var c = 0; c < nClusters; c++) {
+      var cx = (rng() * W) | 0;
+      var cy = 6 + (rng() * (H - 12)) | 0;
+      var r = 2 + (rng() * 3) | 0;
+      for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) + Math.abs(dy) > r + 1) continue;
+          var x = cx + dx, y = cy + dy;
+          if (x < 0 || x >= W || y < 4 || y >= H - 4) continue;
+          if (rng() < 0.7) grid[y * W + x] = CER;
+        }
+      }
+    }
+  })();
+
+  // ── Canvas + render ─────────────────────────────────────────
+  var canvas = document.getElementById('cer-canvas');
+  var ctx = canvas.getContext('2d');
+  var CELL_PX, H_STEP, V_STEP;
+  function recompute () {
+    CELL_PX = Math.floor(canvas.width / W);
+    H_STEP  = CELL_PX;
+    V_STEP  = CELL_PX * 0.85;
+  }
+  recompute();
+
+  var COL = {};
+  COL[VOID]  = '#050505';
+  COL[CER]   = '#8d7a5e';
+  COL[WATER] = '#5db7e8';
+  COL[CON]   = '#c44848';
+
+  function draw () {
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (var y = 0; y < H; y++) {
+      var rowShift = (y & 1) ? CELL_PX * 0.5 : 0;
+      for (var x = 0; x < W; x++) {
+        var v = grid[y * W + x];
+        if (v === VOID) continue;
+        ctx.fillStyle = COL[v];
+        ctx.fillRect(x * H_STEP + rowShift, y * V_STEP,
+                     CELL_PX + 0.5, CELL_PX + 0.5);
+      }
+    }
+    // Source line + sink line indicators
+    ctx.strokeStyle = 'rgba(93,183,232,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(0, V_STEP * 1.5); ctx.lineTo(canvas.width, V_STEP * 1.5);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(196,72,72,0.35)';
+    ctx.beginPath();
+    ctx.moveTo(0, V_STEP * (H - 1.5)); ctx.lineTo(canvas.width, V_STEP * (H - 1.5));
+    ctx.stroke();
+  }
+
+  // ── Particle source + sink (overlay layer) ──────────────────
+  // Top edge (rows 0..1): each tick, spawn particles randomly across
+  // X.  Bottom edge (row >= H-2): vacuum — count + remove.
+  function spawnTopEdge (rate, contamPct) {
+    for (var i = 0; i < rate; i++) {
+      var x = (Math.random() * W) | 0;
+      var y = 0;
+      // Only spawn into void cells.
+      if (grid[y * W + x] !== VOID) continue;
+      var isCon = Math.random() * 100 < contamPct;
+      grid[y * W + x] = isCon ? CON : WATER;
+      spawnedCount++;
+      if (isCon) contamSpawned++;
+    }
+  }
+
+  function drainBottomEdge () {
+    for (var x = 0; x < W; x++) {
+      var idx = (H - 1) * W + x;
+      var v = grid[idx];
+      if (v === WATER || v === CON) {
+        passedThroughCount++;
+        if (v === CON) contamThrough++;
+        grid[idx] = VOID;
+      }
+    }
+  }
+
+  function countTrapped () {
+    // A contaminant cell is "trapped" if it has ≥3 ceramic neighbours.
+    // Count them each tick — number-only, no state mutation here.
+    var trC = 0, trW = 0;
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var v = grid[y * W + x];
+        if (v !== CON && v !== WATER) continue;
+        // Count ceramic neighbours via doom_ca ordering.
+        var shift = y & 1;
+        var dx = [shift, 1, shift, -1 + shift, -1, -1 + shift];
+        var dy = [-1, 0, 1, 1, 0, -1];
+        var ncer = 0;
+        for (var k = 0; k < 6; k++) {
+          var nx = (x + dx[k] + W) % W;
+          var ny = (y + dy[k] + H) % H;
+          if (grid[ny * W + nx] === CER) ncer++;
+        }
+        if (ncer >= 3) { if (v === CON) trC++; else trW++; }
+      }
+    }
+    trappedContamCount = trC;
+    trappedWaterCount  = trW;
+    contamTrapped = trC;
+  }
+
+  function step () {
+    var rate     = parseInt(document.getElementById('cer-rate').value, 10) || 6;
+    var contamPct= parseInt(document.getElementById('cer-cpct').value, 10) || 20;
+    var spawnPaused = document.getElementById('cer-paused').checked;
+    if (!spawnPaused) spawnTopEdge(rate, contamPct);
+    E.tickRule(grid, swap, W, flowRule);
+    var tmp = grid; grid = swap; swap = tmp;
+    drainBottomEdge();
+    countTrapped();
+    tick++;
+    draw();
+    updateReadouts();
+  }
+
+  function updateReadouts () {
+    document.getElementById('cer-tick').textContent = tick;
+    document.getElementById('cer-in').textContent   = spawnedCount;
+    document.getElementById('cer-out').textContent  = passedThroughCount;
+    document.getElementById('cer-trap').textContent = trappedContamCount;
+    document.getElementById('s-in').textContent    = spawnedCount;
+    document.getElementById('s-out').textContent   = passedThroughCount;
+    document.getElementById('s-trap').textContent  = trappedContamCount;
+    document.getElementById('s-trap-w').textContent= trappedWaterCount;
+    var thru = contamSpawned ? (100 * contamThrough / contamSpawned) : 0;
+    var trap = contamSpawned ? (100 * contamTrapped / contamSpawned) : 0;
+    document.getElementById('s-cthru').textContent = contamSpawned
+      ? thru.toFixed(1) + '%' : '—';
+    document.getElementById('s-ctrap').textContent = contamSpawned
+      ? trap.toFixed(1) + '%' : '—';
+    var eff = contamSpawned ? (100 * contamTrapped / Math.max(1, contamThrough + contamTrapped)) : null;
+    document.getElementById('cer-eff').textContent = eff != null
+      ? eff.toFixed(0) + '%' : '—';
+  }
+
+  // ── Painting tool ───────────────────────────────────────────
+  function cellFromMouse (ev) {
+    var rect = canvas.getBoundingClientRect();
+    var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+    var y = Math.floor(my / V_STEP);
+    if (y < 0 || y >= H) return null;
+    var rowShift = (y & 1) ? CELL_PX * 0.5 : 0;
+    var x = Math.floor((mx - rowShift) / H_STEP);
+    if (x < 0 || x >= W) return null;
+    return [x, y];
+  }
+
+  function paintAt (x, y) {
+    var tool  = document.getElementById('cer-tool').value;
+    var brush = parseInt(document.getElementById('cer-brush').value, 10) || 1;
+    var fill  = (tool === 'ceramic') ? CER : VOID;
+    for (var dy = -brush + 1; dy < brush; dy++) {
+      for (var dx = -brush + 1; dx < brush; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) >= brush) continue;
+        var nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
+        // Don't paint over the spawn (row 0) or sink (row H-1) ranks.
+        if (ny < 2 || ny >= H - 2) continue;
+        grid[ny * W + nx] = fill;
+      }
+    }
+    draw();
+  }
+
+  var painting = false;
+  canvas.addEventListener('mousedown', function (ev) {
+    painting = true;
+    var c = cellFromMouse(ev);
+    if (c) paintAt(c[0], c[1]);
+  });
+  canvas.addEventListener('mousemove', function (ev) {
+    if (!painting) return;
+    var c = cellFromMouse(ev);
+    if (c) paintAt(c[0], c[1]);
+  });
+  document.addEventListener('mouseup', function () { painting = false; });
+
+  // ── Run loop ────────────────────────────────────────────────
+  var runHandle = null;
+  function runLoop () {
+    step();
+    runHandle = setTimeout(runLoop, 60);
+  }
+  document.getElementById('cer-run').addEventListener('click', function () {
+    if (runHandle) return;
+    this.disabled = true;
+    document.getElementById('cer-stop').disabled = false;
+    runLoop();
+  });
+  document.getElementById('cer-stop').addEventListener('click', function () {
+    if (!runHandle) return;
+    clearTimeout(runHandle); runHandle = null;
+    this.disabled = true;
+    document.getElementById('cer-run').disabled = false;
+  });
+  document.getElementById('cer-step').addEventListener('click', step);
+  document.getElementById('cer-clear').addEventListener('click', function () {
+    for (var i = 0; i < AREA; i++) grid[i] = VOID;
+    tick = 0; spawnedCount = 0; passedThroughCount = 0;
+    trappedContamCount = 0; trappedWaterCount = 0;
+    contamSpawned = 0; contamThrough = 0; contamTrapped = 0;
+    draw();
+    updateReadouts();
+  });
+
+  draw();
+  updateReadouts();
+})();
+</script>
+{% endblock %}

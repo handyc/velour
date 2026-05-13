@@ -526,3 +526,16 @@ def catalog(request):
         'profiles':     profiles,
         'contaminants': CONTAMINANTS,
     })
+
+
+@login_required
+def ceramic(request):
+    """CA-based microceramic-filter simulator.  Paint a ceramic
+    structure on a 64×64 hex grid; particles spawn at the top edge
+    and flow under a hand-built class-4 rule (downward bias through
+    voids, ceramic blocks, contaminant gets trapped in narrow pores).
+    Self-contained client-side; no model rows.  Reuses doom_ca's
+    engine.js tickRule for the CA step so the rule-table format is
+    bit-identical to a doom_ca pact rule — meaning Phase 2 could
+    breed filter designs with the same GA infrastructure."""
+    return render(request, 'naiad/ceramic.html', {})

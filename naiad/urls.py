@@ -8,6 +8,7 @@ app_name = 'naiad'
 urlpatterns = [
     path('',                       views.index,        name='index'),
     path('catalog/',               views.catalog,      name='catalog'),
+    path('ceramic/',               views.ceramic,      name='ceramic'),
     path('new/',                   views.create_system, name='create_system'),
     path('<slug:slug>/',           views.system_detail, name='system_detail'),
     path('<slug:slug>/stage/add/', views.add_stage,    name='add_stage'),
