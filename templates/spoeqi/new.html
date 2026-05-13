@@ -169,8 +169,42 @@
 
   <div class="group">
     <h3>Base CA rule (16,384 entries × {0,1,2,3})</h3>
+    {# Horizon-band preference selector — affects both the Det
+       dropdown below and fleet-mode sampling.  Submits via GET so the
+       candidate list re-renders without clobbering the rest of the
+       form data the user has already typed in. #}
+    <div class="field" style="margin-top: 4px; padding: 6px 10px;
+         background: #0a1a1a; border-left: 2px solid #2a4a4a;
+         display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap;">
+      <span style="color:#ace; font-size: 0.78rem;">
+        Horizon-band search
+      </span>
+      <label class="radio" style="margin: 0;">
+        <input type="radio" name="horizon_pref" value="any"
+               {% if horizon_pref == "any" %}checked{% endif %}
+               onchange="window.location.search='?horizon_pref=any'">
+        off (rank by class-4 score, default)
+      </label>
+      <label class="radio" style="margin: 0;">
+        <input type="radio" name="horizon_pref" value="prefer"
+               {% if horizon_pref == "prefer" %}checked{% endif %}
+               onchange="window.location.search='?horizon_pref=prefer'">
+        prefer (banded candidates float to top)
+      </label>
+      <label class="radio" style="margin: 0;">
+        <input type="radio" name="horizon_pref" value="only"
+               {% if horizon_pref == "only" %}checked{% endif %}
+               onchange="window.location.search='?horizon_pref=only'">
+        only (banded ≥ 0.15)
+      </label>
+      <span class="hint" style="margin-left: auto;">
+        Filter Det candidates by the
+        <a href="{% url 'det:index' %}" style="color:#ace;">horizon-band
+        metric</a> — rewards CAs whose attractors stripe horizontally.
+      </span>
+    </div>
     {% if det_candidates %}
-    <label class="radio">
+    <label class="radio" id="rules">
       <input type="radio" name="rule_mode" value="det"
              {% if form.rule_mode == "det" %}checked{% endif %}>
       <b style="color:#cfc;">Hexhunt class-4</b>
@@ -196,6 +230,12 @@
         score ~6.5–6.8 of a possible ~7.
       </div>
     </div>
+    {% else %}
+    <p class="hint" style="margin-left: 22px;">
+      No Det candidates match the current horizon-band filter —
+      switch to <b>off</b> or run a Det search with horizon scoring
+      at <a href="{% url 'det:index' %}" style="color:#ace;">/det/</a>.
+    </p>
     {% endif %}
     <label class="radio">
       <input type="radio" name="rule_mode" value="random"

@@ -35,48 +35,108 @@ from .models import (
 )
 
 
-def _det_class4_candidates(limit: int = 20):
+# Threshold above which a candidate counts as "banded enough" for the
+# horizon-only filter.  Set from empirical observation: in use_only
+# mode the top of the pile sits around 0.20; values above ~0.15 are
+# clearly striped rather than noise.
+_HORIZON_BAND_THRESHOLD = 0.15
+
+
+def _apply_horizon_pref(qs, horizon_pref: str):
+    """Annotate / filter / sort a Det Candidate queryset by horizon-
+    band preference.
+
+    horizon_pref values:
+      'any'     — no change (default; rank by class-4 score)
+      'prefer'  — annotate horizon_band, sort banded candidates first
+                  then by score (tie-breaker)
+      'only'    — keep only candidates whose horizon_band ≥ threshold
+    """
+    from django.db.models import F, FloatField
+    from django.db.models.functions import Cast
+    # Pull the JSON key into a real float column so we can sort/filter
+    # on it.  Candidates scored before the horizon metric existed have
+    # NULL here — they sort last in DESC and are excluded by 'only'.
+    qs = qs.annotate(
+        horizon_band=Cast(F('analysis__horizon_band'), FloatField()))
+    if horizon_pref == 'prefer':
+        return qs.order_by(F('horizon_band').desc(nulls_last=True),
+                           '-score')
+    if horizon_pref == 'only':
+        return qs.filter(horizon_band__gte=_HORIZON_BAND_THRESHOLD) \
+                 .order_by('-horizon_band', '-score')
+    return qs.order_by('-score')
+
+
+def _det_class4_candidates(limit: int = 20, horizon_pref: str = 'any'):
     """Top class-4 candidates from Det with n_colors=4 — these compile
     directly into the 4-state spoeqi rule table without quantising.
     Returns a list of {id, score, n_rules, source} dicts for the form;
     swallowing import errors so spoeqi still works in environments
-    where Det isn't migrated."""
+    where Det isn't migrated.
+
+    In `only` mode the class-4 label filter is dropped — bands are
+    the user's goal and a 'use_only' Det search produces banded
+    candidates that don't reach the class-4 threshold (their score is
+    the scaled horizon-band value, not the multi-signal class-4 sum).
+    """
     try:
         from det.models import Candidate
-        qs = (Candidate.objects
-              .filter(est_class='class4', run__n_colors=4)
-              .select_related('run')
-              .order_by('-score')[:limit])
-        return [{
-            'id': c.id, 'score': c.score, 'n_rules': c.n_rules,
-            'source': f'Det run {c.run_id}',
-            'label': f'#{c.id}  score {c.score:.2f}  '
-                     f'({c.n_rules} rules, {c.run.wildcard_pct}% wildcard)',
-        } for c in qs]
+        qs = Candidate.objects.filter(run__n_colors=4)
+        if horizon_pref != 'only':
+            qs = qs.filter(est_class='class4')
+        qs = qs.select_related('run')
+        qs = _apply_horizon_pref(qs, horizon_pref)[:limit]
+        out = []
+        for c in qs:
+            hb = getattr(c, 'horizon_band', None)
+            hb_tag = f' · band {hb:.2f}' if hb is not None else ''
+            out.append({
+                'id': c.id, 'score': c.score, 'n_rules': c.n_rules,
+                'source': f'Det run {c.run_id}',
+                'horizon_band': hb,
+                'label': f'#{c.id}  score {c.score:.2f}{hb_tag}  '
+                         f'({c.n_rules} rules, {c.run.wildcard_pct}% wildcard)',
+            })
+        return out
     except Exception:
         return []
 
 
-def _det_class4_pool_size() -> int:
-    """Total class-4 4-color candidates available for fleet sampling."""
+def _det_class4_pool_size(horizon_pref: str = 'any') -> int:
+    """Total candidates available for fleet sampling under the given
+    horizon preference.  'only' drops the class-4 label filter; see
+    `_det_class4_candidates` for why."""
     try:
         from det.models import Candidate
-        return (Candidate.objects
-                .filter(est_class='class4', run__n_colors=4).count())
+        qs = Candidate.objects.filter(run__n_colors=4)
+        if horizon_pref != 'only':
+            qs = qs.filter(est_class='class4')
+        qs = _apply_horizon_pref(qs, horizon_pref)
+        return qs.count()
     except Exception:
         return 0
 
 
-def _sample_fleet_candidate_ids(rng):
-    """Sample exactly COMPONENTS Det Candidate IDs from the class-4
-    4-color pool.  Sampling is with-replacement when the pool is
-    smaller than 64 — better to duplicate a few rules than fail."""
+def _sample_fleet_candidate_ids(rng, horizon_pref: str = 'any'):
+    """Sample exactly COMPONENTS Det Candidate IDs from the matching
+    pool.  Sampling is with-replacement when the pool is smaller than
+    64 — better to duplicate a few rules than fail.
+
+    Under 'prefer' the pool is unchanged (sorting matters at display
+    time, not for an unbiased draw).  Under 'only' the class-4 filter
+    is dropped and only banded candidates remain.
+    """
     from det.models import Candidate
-    pool_ids = list(Candidate.objects
-                    .filter(est_class='class4', run__n_colors=4)
-                    .values_list('id', flat=True))
+    qs = Candidate.objects.filter(run__n_colors=4)
+    if horizon_pref != 'only':
+        qs = qs.filter(est_class='class4')
+    if horizon_pref == 'only':
+        qs = _apply_horizon_pref(qs, 'only')
+    pool_ids = list(qs.values_list('id', flat=True))
     if not pool_ids:
-        raise ValueError('No 4-colour class-4 Det candidates available.')
+        raise ValueError('No 4-colour class-4 Det candidates available '
+                         f'(horizon_pref={horizon_pref}).')
     if len(pool_ids) >= COMPONENTS:
         return rng.sample(pool_ids, COMPONENTS)
     # With-replacement fallback
@@ -161,8 +221,17 @@ def _parse_seed(raw: str) -> bytes | None:
 
 def create(request):
     errors = []
-    det_candidates = _det_class4_candidates()
-    fleet_pool = _det_class4_pool_size()
+    # horizon_pref controls how Det candidates are filtered/ordered.
+    # Read from POST when the user is submitting, otherwise from the
+    # GET query string so the user can change the filter before
+    # picking a candidate.
+    horizon_pref = (request.POST.get('horizon_pref')
+                    or request.GET.get('horizon_pref')
+                    or 'any')
+    if horizon_pref not in {'any', 'prefer', 'only'}:
+        horizon_pref = 'any'
+    det_candidates = _det_class4_candidates(horizon_pref=horizon_pref)
+    fleet_pool = _det_class4_pool_size(horizon_pref=horizon_pref)
     default_mode = 'det' if det_candidates else 'random'
     default_det_id = det_candidates[0]['id'] if det_candidates else ''
     form = {
@@ -177,6 +246,7 @@ def create(request):
         'palette_mode': 'default',
         'palette_text': json.dumps(DEFAULT_PALETTE),
         'notes': '',
+        'horizon_pref': horizon_pref,
     }
 
     if request.method == 'POST':
@@ -274,7 +344,8 @@ def create(request):
                 elif rule_diversity == 'fleet':
                     import random as _r
                     rng = _r.Random(int.from_bytes(seed[:8], 'big'))
-                    cand_ids = _sample_fleet_candidate_ids(rng)
+                    cand_ids = _sample_fleet_candidate_ids(
+                        rng, horizon_pref=horizon_pref)
                     rules_snapshot = synthesise_rules_fleet(cand_ids)
                     fleet_candidate_ids = list(cand_ids)
                     # Bookkeeping: keep rule_snapshot as the first one
@@ -324,6 +395,7 @@ def create(request):
         'rule_table_size': RULE_TABLE_SIZE,
         'det_candidates': det_candidates,
         'fleet_pool': fleet_pool,
+        'horizon_pref': horizon_pref,
     })
 
 
