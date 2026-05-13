@@ -101,7 +101,21 @@
   </span>
 </div>
 
-<canvas id="dc-canvas"></canvas>
+<div class="dc-board" style="display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap;">
+  <canvas id="dc-canvas"></canvas>
+  <div id="dc-rule-explainer"
+       style="display:none; max-width:240px; min-width:200px;
+              background:#0a0a0a; border:1px solid #2a1a1a;
+              padding:10px; font-family:monospace; font-size:0.78rem;
+              color:#fcc;">
+    <div style="color:#f88; font-weight:600; margin-bottom:6px;">
+      ⚰ killing rule
+    </div>
+    <svg id="dc-rule-svg" width="170" height="170"
+         style="display:block; margin: 0 auto 6px;"></svg>
+    <div id="dc-rule-text" style="color:#ccc; line-height:1.55;"></div>
+  </div>
+</div>
 
 <div class="readouts">
   <span>turn <b id="dc-turn">0</b></span>

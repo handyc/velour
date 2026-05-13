@@ -408,6 +408,9 @@
     turn = 0;
     gameOver = false;
     deathCause = null;
+    deathRuleInfo = null;
+    var rbox = document.getElementById('dc-rule-explainer');
+    if (rbox) rbox.style.display = 'none';
 
     if (MODE === 'overlay') {
       world = seedGrid(seed[COMPONENT]).slice();
@@ -513,6 +516,109 @@
   function hurt (amount, cause) {
     player.hp -= amount;
     lastHurtBy = cause;
+  }
+
+  // Pure-CA death inspector — captures the rule-table entry that
+  // killed the player so the UI can render it next to the board.
+  // Captured at the moment of death (after a checkGameOver_singleRule
+  // verdict, or after a melee bite that would zero HP), so the
+  // neighbourhood values are the ones the rule consulted.
+  var deathRuleInfo = null;
+  var STATE_NAMES = ['ground', 'wall', 'player', 'monster'];
+  var STATE_COLORS = ['#1a1a1a', '#888', '#58a6ff', '#f85149'];
+  function captureDeathRule (selfState, neighbours, outputState) {
+    var key = ((selfState & 3) << 12) |
+              ((neighbours[0] & 3) << 10) |
+              ((neighbours[1] & 3) << 8)  |
+              ((neighbours[2] & 3) << 6)  |
+              ((neighbours[3] & 3) << 4)  |
+              ((neighbours[4] & 3) << 2)  |
+              ( neighbours[5] & 3);
+    deathRuleInfo = {
+      self: selfState, neighbours: neighbours.slice(),
+      key: key, output: outputState,
+    };
+  }
+  function captureFromPlayerCell (outputState) {
+    // Re-read the 6 neighbours around (player.x, player.y) on the
+    // current `world` grid.  Caller passes outputState — either the
+    // cell value the rule produced (overwriting PLAYER) or 'bitten'
+    // (when adjacent monsters killed via HP drain).
+    if (!player) return;
+    var n = [];
+    for (var d = 0; d < 6; d++) {
+      var nb = neighbourCoord(player.x, player.y, d);
+      n.push(get(nb[0], nb[1]) & 3);
+    }
+    captureDeathRule(PLAYER, n, outputState);
+  }
+
+  function hexAroundPoint (cx, cy, r, k) {
+    // 6 hex-cell positions around (cx, cy) at radius r, indexed
+    // matching neighbourCoord's direction order (TR-ish, R, BR-ish,
+    // BL-ish, L, TL-ish).  Used only for SVG layout, not gameplay.
+    var deg = [-60, 0, 60, 120, 180, 240][k];
+    var rad = deg * Math.PI / 180;
+    return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
+  }
+
+  function renderDeathRule () {
+    var box = document.getElementById('dc-rule-explainer');
+    if (!box) return;
+    if (!deathRuleInfo) { box.style.display = 'none'; return; }
+    // Only show in pure-CA modes where the rule is the actual killer.
+    if (MODE !== 'scent' && MODE !== 'evolved') {
+      box.style.display = 'none'; return;
+    }
+    box.style.display = 'block';
+    var svg = document.getElementById('dc-rule-svg');
+    if (svg) {
+      var W = 170, R = 38, cx = W/2, cy = W/2;
+      var parts = [];
+      // 6 neighbours
+      for (var k = 0; k < 6; k++) {
+        var p = hexAroundPoint(cx, cy, R, k);
+        var s = deathRuleInfo.neighbours[k];
+        var col = STATE_COLORS[s];
+        parts.push('<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1)
+          + '" r="14" fill="' + col + '" stroke="#444"/>');
+        parts.push('<text x="' + p[0].toFixed(1) + '" y="' + (p[1] + 4).toFixed(1)
+          + '" text-anchor="middle" font-size="9" font-family="monospace" fill="#000">'
+          + STATE_NAMES[s].slice(0, 4) + '</text>');
+      }
+      // Centre (self = PLAYER before rule fired)
+      var selfCol = STATE_COLORS[deathRuleInfo.self];
+      parts.push('<circle cx="' + cx + '" cy="' + cy + '" r="16" fill="'
+        + selfCol + '" stroke="#fff"/>');
+      parts.push('<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle"'
+        + ' font-size="10" font-family="monospace" fill="#000">you</text>');
+      // Outgoing arrow pointing right to the output cell
+      var outX = W - 18;
+      parts.push('<line x1="' + (cx + 18) + '" y1="' + cy + '" x2="' + (outX - 12)
+        + '" y2="' + cy + '" stroke="#f88" stroke-width="2"/>');
+      parts.push('<polygon points="' + (outX - 12) + ',' + (cy - 4) + ' '
+        + (outX - 4) + ',' + cy + ' ' + (outX - 12) + ',' + (cy + 4)
+        + '" fill="#f88"/>');
+      svg.innerHTML = parts.join('');
+    }
+    var t = document.getElementById('dc-rule-text');
+    if (t) {
+      var ns = deathRuleInfo.neighbours.map(function (s) {
+        return STATE_NAMES[s][0];
+      }).join('');
+      var outName = (typeof deathRuleInfo.output === 'number')
+        ? STATE_NAMES[deathRuleInfo.output]
+        : String(deathRuleInfo.output);
+      t.innerHTML =
+        'self <b style="color:' + STATE_COLORS[deathRuleInfo.self] + ';">'
+          + STATE_NAMES[deathRuleInfo.self] + '</b><br>'
+        + 'neighbours <b style="color:#ccc;">' + ns + '</b>'
+        + ' <span style="color:#666;">(TR R BR BL L TL)</span><br>'
+        + 'key <b style="color:#fc8;">0x' + deathRuleInfo.key.toString(16).padStart(4,'0') + '</b>'
+        + ' <span style="color:#666;">(=' + deathRuleInfo.key + ')</span><br>'
+        + '→ output <b style="color:' + (STATE_COLORS[deathRuleInfo.output] || '#f88')
+        + ';">' + outName + '</b>';
+    }
   }
 
   function pickupAt (cellIdx) {
@@ -661,15 +767,26 @@
     if (player.hp <= 0 && !gameOver) {
       gameOver = 'lost';
       deathCause = lastHurtBy || 'bled out';
+      // In pure-CA modes, capture the player's neighbourhood so the
+      // user can see which cells the rule grew into MONSTER against
+      // them.  Output here is "MONSTER" since that's what bit.
+      if (MODE === 'scent' || MODE === 'evolved') {
+        captureFromPlayerCell(MONSTER);
+      }
     }
     if (!gameOver && player.y * GRID + player.x === exitIdx) gameOver = 'won';
     draw(); updateReadouts();
   }
 
   function checkGameOver_singleRule () {
-    if (get(player.x, player.y) !== PLAYER) {
+    var hereNow = get(player.x, player.y);
+    if (hereNow !== PLAYER) {
       gameOver = 'lost';
       deathCause = 'overwritten by the rule — the world ate you';
+      // Capture: self was PLAYER, neighbours are the current cells
+      // around the player position, output is whatever overwrote the
+      // player cell (hereNow).
+      captureFromPlayerCell(hereNow);
     }
   }
 
@@ -911,6 +1028,9 @@
         s.textContent = '';
       }
     }
+    // Show the killing rule cell next to the canvas if we have one,
+    // hide it otherwise (also covers post-restart).
+    renderDeathRule();
   }
 
   function cardinalToHex (k) {
