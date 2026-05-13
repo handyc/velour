@@ -184,6 +184,11 @@
 <div class="actions" style="margin-top: 16px;">
   <button id="ev-start" class="primary">▶ start evolution</button>
   <button id="ev-stop" disabled>■ stop</button>
+  <label style="margin-left: 14px; color:#aaa; font-size:0.85rem;
+                cursor:pointer; user-select:none;"
+         title="When the current run finishes, immediately start another. Carry-over survivors compound across runs, so the GA keeps climbing.">
+    <input id="ev-continuous" type="checkbox"> continuous
+  </label>
   <button id="ev-reset" title="Discard carried-over survivors and start fresh"
           style="margin-left: 18px;">↺ reset lineage</button>
   <span id="ev-carryover" class="hint" style="margin-left: 12px;"></span>
@@ -916,6 +921,15 @@
     logProgress('Done.  ' + bestEverList.length
               + ' top survivors carried for next run.');
     renderWinners(bestEverList);
+    // Continuous mode: if checked AND we weren't manually stopped,
+    // kick off another run after a beat so the UI can settle.
+    var continuousEl = document.getElementById('ev-continuous');
+    if (continuousEl && continuousEl.checked && !stopRequested) {
+      logProgress('Continuous mode — starting next run in 1 s…');
+      setTimeout(function () {
+        if (continuousEl.checked && !stopRequested) startEvolution();
+      }, 1000);
+    }
   }
 
   function modeMix (pop) {
