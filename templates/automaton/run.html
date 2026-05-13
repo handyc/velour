@@ -15,7 +15,25 @@
 {% endblock %}
 
 {% block content %}
-<h1 style="margin-bottom:0.2rem">{{ sim.name }}</h1>
+<h1 id="sim-title" style="margin-bottom:0.2rem;display:flex;align-items:baseline;gap:0.5rem;flex-wrap:wrap">
+    <span>{{ sim.name }}</span>
+    <button type="button" id="sim-rename-toggle"
+            onclick="var f=document.getElementById('sim-rename-form');f.style.display=(f.style.display==='flex'?'none':'flex');if(f.style.display==='flex')document.getElementById('sim-rename-input').focus()"
+            title="Rename this simulation"
+            style="background:none;border:none;color:#6e7681;font-size:0.85rem;cursor:pointer;padding:0">✎ rename</button>
+</h1>
+<form id="sim-rename-form" method="post" action="{% url 'automaton:rename' sim.slug %}"
+      style="display:none;gap:0.3rem;align-items:center;margin:0 0 0.3rem">
+    {% csrf_token %}
+    <input id="sim-rename-input" type="text" name="name" value="{{ sim.name }}"
+           style="width:18rem;font-size:0.85rem;background:#0d1117;color:#c9d1d9;
+                  border:1px solid #30363d;border-radius:3px;padding:0.2rem 0.4rem">
+    <button type="submit" class="btn"
+            style="font-size:0.75rem;background:#238636;border-color:#2ea043">Save</button>
+    <button type="button" class="btn btn-secondary"
+            onclick="document.getElementById('sim-rename-form').style.display='none'"
+            style="font-size:0.75rem">Cancel</button>
+</form>
 <p style="color:#8b949e;font-size:0.75rem">
     {{ sim.ruleset.name }} · {{ sim.width }}×{{ sim.height }} · {{ sim.ruleset.n_colors }} colors
     {% if rule_mode == 'exact' %} · {{ n_exact_rules }} exact 7-tuple rules{% endif %}
@@ -82,12 +100,6 @@
        class="btn btn-secondary" target="_blank"
        title="Open Tessera rule-test: upload images and watch how this ruleset preserves them"
     >→ Tessera rule-test</a>
-    <button class="btn btn-secondary" onclick="document.getElementById('rename-form').style.display='flex'" style="font-size:0.78rem">Rename</button>
-    <form id="rename-form" method="post" action="{% url 'automaton:rename' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
-        {% csrf_token %}
-        <input type="text" name="name" value="{{ sim.name }}" style="width:12rem;font-size:0.75rem">
-        <button type="submit" class="btn" style="font-size:0.75rem;background:#238636;border-color:#2ea043">Save</button>
-    </form>
     <button class="btn btn-secondary" onclick="document.getElementById('resize-form').style.display='flex'" style="font-size:0.78rem">Resize</button>
     <form id="resize-form" method="post" action="{% url 'automaton:resize' sim.slug %}" style="display:none;gap:0.3rem;align-items:center">
         {% csrf_token %}
