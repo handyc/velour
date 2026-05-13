@@ -60,6 +60,56 @@ TRAITS = [
      'Mirror or holy image placed facing the corpse.'),
     ('seeds at the grave',          'apotropaic',
      'Poppy or millet scattered; the revenant must count them all.'),
+
+    # Newer traits for expanded creatures
+    ('haunts grave-mounds',         'behavioural',
+     'Lives in or near its own burial mound; the Norse draugr is the '
+     'classical case.'),
+    ('superhuman strength',         'supernatural',
+     'Lifts boulders, crushes bone, swells to enormous size.'),
+    ('chews its own shroud',        'behavioural',
+     'The Central European nachzehrer eats its grave-clothes (then its '
+     'own body, then drains kin at a distance).  Sound the 18th c. '
+     'rationalists used to "prove" the corpse was still alive.'),
+    ('rides a victim like a horse', 'behavioural',
+     'The Akan asanbosam and various witch-vampires straddle and '
+     'exhaust the sleeper rather than draining blood directly.'),
+    ('iron hooks for feet',         'physical',
+     'The asanbosam hangs from trees by hooked iron feet and drops on '
+     'passing prey.'),
+    ('hops or jumps',               'behavioural',
+     'Cannot walk normally; rigor or anatomy forces hopping.  Jiangshi '
+     'is the canonical case; nachzehrer also.'),
+    ('eats children',               'behavioural',
+     'Specifically devours small children rather than draining blood.'),
+    ('drinks from the toes',        'physical',
+     'The Albanian shtriga sucks blood from the great toe of a sleeper '
+     'rather than the neck.'),
+    ('breathes through the navel',  'physical',
+     'The pricolici and a few other revenants are said to be recognised '
+     'by an unblinking, navel-sourced breath that crosses thresholds.'),
+    ('sweet smell',                 'physical',
+     'A distinctive perfume (often vinegar, jasmine, or rot-sweet) '
+     'announces the creature’s approach.'),
+    ('hairy palms / strange eyes',  'physical',
+     'Folk markers of the secret vampire: hair on the inside of the '
+     'palm, eyes that don’t close in sleep, a tail at the base of '
+     'the spine.'),
+
+    # New apotropaics
+    ('bury face-down',              'apotropaic',
+     'Inverted burial — face into the soil so the revenant chews itself '
+     'free into nothing.'),
+    ('rice or sand to count',       'apotropaic',
+     'Same compulsion as poppy-seeds, scaled up; tropical and East '
+     'Asian variant.'),
+    ('thorny vines at windows',     'apotropaic',
+     'The Malay jeruju vine, Sri Lankan nelli, and others; the trailing '
+     'organs catch and the creature is fixed in place until dawn.'),
+    ('shedding skin marker',        'physical',
+     'Soucouyant, asema, leyak — the daytime shape is recognised by an '
+     'imperfectly-reattached skin (slightly puffy, sweet-smelling, or '
+     'reddened).'),
 ]
 
 
@@ -87,6 +137,18 @@ ORIGINS = [
      'The bastard of forbidden union becomes the creature.'),
     ('willingly became one',
      'A living person who studies the rite and chooses the path.'),
+    ('died in childbirth',
+     'Mother and infant lost together; the Aztec civateteo and many '
+     'Mediterranean spirits arise this way.'),
+    ('greedy in life',
+     'In Norse and West African sources a person who hoarded wealth in '
+     'life rises to guard the grave.'),
+    ('died of plague',
+     'Mass death plus shallow burial — the European 1700s revenant '
+     'panic is essentially plague-driven misreading of decomposition.'),
+    ('sired by a vampire',
+     'A child fathered by a revenant (a dhampir in Balkan lore) is '
+     'born half-vampire and may grow into one.'),
 ]
 
 
@@ -273,6 +335,158 @@ TRADITIONS = [
         'summary': 'A consumption-driven panic: the "Jewett City vampires" '
                    'and Mercy Brown case (1892) saw corpses exhumed and '
                    'organs burned to halt wasting disease in surviving kin.',
+    },
+    {
+        'name': 'Norse',
+        'region': 'Iceland, Norway, the medieval Norse cultural sphere',
+        'era': 'Viking Age and later, c. 9th–13th c.',
+        'summary': 'The draugr / aptrgangr — "again-walker" — is a corpse '
+                   'that resists rest, growing in strength and size with '
+                   'grievance.  Less interested in blood than in violence: '
+                   'it guards its grave-goods, crushes intruders, and '
+                   'walks among the living to wreck what it once owned.',
+    },
+    {
+        'name': 'Germanic & Alpine',
+        'region': 'Germany, Austria, Silesia, parts of Switzerland',
+        'era': '17th–18th c. plague-era',
+        'summary': 'The nachzehrer (corpse who chews its own shroud and '
+                   'drains kin at a distance) and the neuntöter (the '
+                   '"nine-killer", a revenant that takes nine days to '
+                   'incubate in the grave and then kills nine kin in nine '
+                   'days) sit at the heart of the German revenant tradition.',
+    },
+    {
+        'name': 'Albanian',
+        'region': 'Albania, Kosovo, parts of Macedonia',
+        'era': 'oral, attested 19th–20th c.',
+        'summary': 'The shtriga is a witch who detaches her body or her '
+                   'soul at night to drink blood from sleeping children — '
+                   'specifically from the great toe.  Her child, the '
+                   'dhampir, is the canonical vampire-hunter.',
+    },
+    {
+        'name': 'Croatian & Istrian',
+        'region': 'Croatia, Slovenia, parts of Bosnia',
+        'era': 'medieval–modern',
+        'summary': 'A dualistic tradition: the kudlak is the night-walking '
+                   'revenant, but every village also has its kresnik — '
+                   'a child born with a caul who fights kudlaks on '
+                   'behalf of the living, often in the form of an animal.',
+    },
+    {
+        'name': 'Czech & Slovak',
+        'region': 'Bohemia, Moravia, Slovakia',
+        'era': '17th–19th c. (heavily documented by Habsburg officials)',
+        'summary': 'The nelapsi (a name that translates roughly as '
+                   '"the unwearied one") is the local revenant, attested '
+                   'in the 1755 Visum et Repertum that the Empress Maria '
+                   'Theresa commissioned to investigate Moravian '
+                   'exhumations.  Stops at thresholds; counts seeds.',
+    },
+    {
+        'name': 'Portuguese & Galician',
+        'region': 'Portugal, Galicia (Iberian north-west)',
+        'era': 'medieval–modern',
+        'summary': 'The bruxa or bruxsa is a witch-woman who transforms '
+                   'into a bird (often a screech-owl) at night, slips '
+                   'down a chimney, and drinks from the navel of '
+                   'sleeping children.  Children with epileptic fits '
+                   'were said to be bruxa-touched.',
+    },
+    {
+        'name': 'Japanese',
+        'region': 'Japan',
+        'era': 'medieval Heian–Edo and modern yōkai compilations',
+        'summary': 'Japan’s vampire-adjacent yōkai are several: nukekubi '
+                   '(detachable-head); the kappa (river-dwelling '
+                   'blood-and-organ thief); kasha (corpse-stealing '
+                   'cat-demon); plus the gakidō hungry ghosts on the '
+                   'edge of Buddhist cosmology.  Less unified than a '
+                   'single creature category, more a tonal field.',
+    },
+    {
+        'name': 'Akan (Ashanti)',
+        'region': 'Ghana, Côte d’Ivoire',
+        'era': 'traditional, recorded from 19th c.',
+        'summary': 'The asanbosam is a forest vampire that perches in '
+                   'trees on iron hooks where its feet should be, '
+                   'dropping on travellers.  The obayifo is its '
+                   'witch-vampire cousin: a respectable neighbour by '
+                   'day, a glowing light by night, eater of children.',
+    },
+    {
+        'name': 'Sri Lankan',
+        'region': 'Sri Lanka',
+        'era': 'pre-Buddhist substrate, surviving in modern folk practice',
+        'summary': 'The riri yaka (the "blood demon") is one of the '
+                   '18 sanni demons of folk illness — invoked, '
+                   'placated, and exorcised through the elaborate '
+                   'sanni yakuma masked rite.  Distinct from the '
+                   'urban manifestation of vampires arriving with '
+                   'colonial-era literature.',
+    },
+    {
+        'name': 'Aztec & Nahua',
+        'region': 'central Mexico',
+        'era': 'pre-Columbian, surviving in syncretic folk Catholicism',
+        'summary': 'The civateteo were the deified spirits of women '
+                   'who died in childbirth, returning on certain '
+                   'unlucky days to seize children and pregnant women.  '
+                   'Cihuateotl (sing.) shrines marked crossroads where '
+                   'food and copal were left to appease them.',
+    },
+    {
+        'name': 'Mapuche & Chilean',
+        'region': 'south-central Chile, parts of Argentine Patagonia',
+        'era': 'pre-colonial, oral and in regional ufology',
+        'summary': 'The peuchen is a flying serpent that paralyses prey '
+                   'with its gaze and drains them of blood — '
+                   'occasionally adapted in 20th c. Chilean folklore '
+                   'into the "chupacabras" narrative, though the '
+                   'peuchen substantially predates it.',
+    },
+    {
+        'name': 'Australian (Aboriginal)',
+        'region': 'New South Wales and surrounding territories',
+        'era': 'oral, traditional',
+        'summary': 'The yara-ma-yha-who is a small, red-skinned tree '
+                   'creature with suckers on its fingertips and toes, '
+                   'which drops on travellers napping in the shade '
+                   'and drains them — but only enough to weaken, then '
+                   'swallows the victim whole, vomits them up, and '
+                   'leaves them shorter and redder than before.  '
+                   'Repeated encounters turn the victim into one.',
+    },
+    {
+        'name': 'Bulgarian (folk)',
+        'region': 'Bulgaria',
+        'era': '17th–19th c. revenant panics',
+        'summary': 'A dense corpus distinct from the South-Slavic '
+                   'vampir: ustrel (revenant who attacks livestock '
+                   'first, humans later) and krvopijac ("blood-drinker") '
+                   'are the most common variants.  A specialist '
+                   'vampirdzhija could trap one in a bottle.',
+    },
+    {
+        'name': 'Surinamese & Guyanese',
+        'region': 'Suriname, Guyana, eastern Caribbean',
+        'era': 'colonial–modern',
+        'summary': 'The asema (Sranan Tongo) is a person who at night '
+                   'sheds skin and travels as a glowing ball to drink '
+                   'blood.  Closely related to the Caribbean '
+                   'soucouyant, but distinct in its lineage from '
+                   'Akan/Maroon traditions of West African origin.',
+    },
+    {
+        'name': 'Balinese',
+        'region': 'Bali, eastern Java',
+        'era': 'living folk-religious tradition',
+        'summary': 'The leyak is a witch who studies the black art of '
+                   '"pengiwan", learning at night to detach her head '
+                   'with viscera trailing.  Rangda — queen of the '
+                   'leyaks — is enacted as the great mask-villain of '
+                   'the Calon Arang dance-drama.',
     },
 ]
 
@@ -557,6 +771,465 @@ CREATURES = [
         'origins': ['died by violence'],
         'weaknesses': ['cremation', 'iron through the mouth'],
         'sources': ['Vampires, Burial, and Death'],
+    },
+
+    # Additions to existing traditions
+    {
+        'tradition': 'Romanian',
+        'name': 'pricolici',
+        'alt_names': 'pricoliciu',
+        'summary': 'A werewolf–vampire crossover: the soul of an '
+                   'unrighteous Romanian peasant returns as a black '
+                   'wolf with red eyes, sometimes joined by a pack '
+                   'of similar revenants.  Hunts livestock and lone '
+                   'travellers; in some accounts drinks blood from '
+                   'the throat as a wolf and then resumes human form '
+                   'by daylight.',
+        'traits': ['drinks blood', 'shapeshifts',
+                   'returns from the grave',
+                   'breathes through the navel'],
+        'origins': ['died by violence', 'cursed by witchcraft'],
+        'weaknesses': ['decapitation', 'cremation'],
+    },
+    {
+        'tradition': 'Filipino',
+        'name': 'tiyanak',
+        'alt_names': 'patianak; impakto',
+        'summary': 'A vampiric ghost-baby: the soul of an unbaptised '
+                   'infant or stillbirth, taking the form of a '
+                   'crying child by the roadside.  A traveller who '
+                   'picks it up to comfort it discovers fangs and '
+                   'is exsanguinated; some accounts add a long '
+                   'serpentine tongue.',
+        'appearance': 'A perfectly normal newborn until taken up; '
+                      'then features sharpen — red eyes, long fangs, '
+                      'a wrinkled grandfatherly face.',
+        'traits': ['drinks blood', 'shapeshifts',
+                   'preys on sleepers'],
+        'origins': ['died unbaptised', 'died in childbirth'],
+        'weaknesses': ['turn clothing inside-out',
+                       'sunlight', 'crucifix or holy symbol'],
+    },
+    {
+        'tradition': 'Hindu',
+        'name': 'pishacha',
+        'alt_names': 'piśāca',
+        'summary': 'A flesh-eating spirit listed in the Atharvaveda '
+                   'as the lowest order of demons.  Lurks at '
+                   'cremation grounds, crossroads, and empty '
+                   'houses.  Possesses the living to feed through '
+                   'them; can be exorcised with mantras of Rudra.',
+        'traits': ['eats flesh', 'shapeshifts',
+                   'casts no shadow / reflection', 'preys on sleepers'],
+        'origins': ['died by violence', 'died unbaptised',
+                    'cursed by witchcraft'],
+        'weaknesses': ['crucifix or holy symbol',
+                       'cremation', 'sunlight'],
+    },
+    {
+        'tradition': 'Hindu',
+        'name': 'rakshasa (blood-drinking class)',
+        'alt_names': 'rākṣasa; nairṛta',
+        'summary': 'The blood-drinking subset of the great rakshasa '
+                   'order — distinct from the warrior asuras.  A '
+                   'shapeshifter who appears as a beautiful person '
+                   'to deceive; eats human flesh and drinks blood '
+                   'from corpses on the battlefield.  Most powerful '
+                   'at twilight and during the new moon.',
+        'traits': ['drinks blood', 'eats flesh',
+                   'shapeshifts', 'superhuman strength'],
+        'origins': ['cursed by witchcraft', 'willingly became one',
+                    'born of incest'],
+        'weaknesses': ['sunlight', 'crucifix or holy symbol',
+                       'cremation'],
+    },
+    {
+        'tradition': 'Hebrew & post-biblical',
+        'name': 'Lilith',
+        'alt_names': 'Lilītu; al-Karina',
+        'summary': 'The night-demoness of Mesopotamian and post-biblical '
+                   'Hebrew tradition: in the Alphabet of Ben Sira '
+                   'she is Adam’s first wife who refused submission '
+                   'and was banished, returning to take the children '
+                   'of those who would not name her.  Targets newborns '
+                   'specifically, especially in the first eight days.',
+        'appearance': 'Long hair (loose; she cannot fly with it bound), '
+                      'sometimes wings of an owl, sometimes serpentine '
+                      'below the waist.',
+        'traits': ['drinks blood', 'preys on infants',
+                   'flies', 'shapeshifts'],
+        'origins': ['cursed by witchcraft', 'willingly became one'],
+        'weaknesses': ['amulet inscribed with the names of three angels',
+                       'crucifix or holy symbol', 'sunlight'],
+    },
+    {
+        'tradition': 'South Slavic',
+        'name': 'dhampir',
+        'alt_names': 'dhampyr; (Albanian dhampir, "fang-toothed")',
+        'summary': 'The half-vampire son of a male revenant and a '
+                   'living woman.  Looks human and lives among the '
+                   'living, but can see invisible vampires — the '
+                   'professional vampire-hunter of Albanian and '
+                   'Roma communities, summoned for a fee and a '
+                   'meal.  Often dies young.',
+        'traits': ['drinks blood', 'casts no shadow / reflection',
+                   'hairy palms / strange eyes'],
+        'origins': ['sired by a vampire'],
+        'weaknesses': ['return to grave at dawn'],
+    },
+
+    # New entries for new traditions
+    {
+        'tradition': 'Norse',
+        'name': 'draugr',
+        'alt_names': 'haugbúi (mound-dweller); aptrgangr (again-walker)',
+        'summary': 'The corpse that refuses to lie still.  Found '
+                   'in the Eyrbyggja saga and Grettis saga.  '
+                   'Possesses a heavy, smoke-stained, blue-black '
+                   'flesh that grows hard as horn; can grow to '
+                   'giant size; crushes and gnaws.  Guards its '
+                   'grave-goods jealously and may sit on the lintel '
+                   'of its hall doing mischief through the dark months.',
+        'appearance': 'Bloated, blue-black or hel-blár, swollen '
+                      'beyond human size; eyes open and clouded.',
+        'behaviour': 'Crushes intruders to its barrow; rides '
+                     'rooftops; cuts down livestock; sends sendings '
+                     '(detached projections of malice) at distant kin.',
+        'traits': ['returns from the grave', 'superhuman strength',
+                   'haunts grave-mounds', 'bloated and ruddy',
+                   'casts no shadow / reflection'],
+        'origins': ['greedy in life', 'died by violence',
+                    'died excommunicated or cursed'],
+        'weaknesses': ['decapitation', 'cremation',
+                       'iron nails or scissors'],
+    },
+    {
+        'tradition': 'Germanic & Alpine',
+        'name': 'nachzehrer',
+        'alt_names': 'aufhocker; doppelsauger',
+        'summary': 'The corpse that "after-gnaws".  Famously chews '
+                   'its own shroud, then its own limbs; the chewing '
+                   'noise heard at the graveside was 18th c. proof '
+                   'the corpse still lived.  Drains kin at a distance '
+                   '— a wasting illness in the village traces back '
+                   'to a chewing corpse.',
+        'appearance': 'A corpse with a missing thumb or finger '
+                      '(eaten); soaked, mottled shroud half-swallowed.',
+        'traits': ['chews its own shroud', 'drains life-force',
+                   'bloated and ruddy', 'returns from the grave'],
+        'origins': ['died by violence', 'died of plague',
+                    'born with a caul'],
+        'weaknesses': ['mouth filled with brick or stone',
+                       'decapitation', 'iron through the mouth'],
+    },
+    {
+        'tradition': 'Germanic & Alpine',
+        'name': 'neuntöter',
+        'alt_names': 'Nine-killer',
+        'summary': 'A specifically lethal variant of the nachzehrer: '
+                   'spends nine days in the grave maturing, then '
+                   'kills nine kin in nine days — usually starting '
+                   'with the closest relation.  The neuntöter is '
+                   'the typical diagnosis when an entire household '
+                   'is cleared by sequential consumption deaths.',
+        'traits': ['drains life-force', 'returns from the grave',
+                   'preys on sleepers'],
+        'origins': ['died of plague', 'died unbaptised',
+                    'died excommunicated or cursed'],
+        'weaknesses': ['stake through the heart', 'decapitation',
+                       'cremation', 'mouth filled with brick or stone'],
+        'sources': ['Vampires, Burial, and Death'],
+    },
+    {
+        'tradition': 'Albanian',
+        'name': 'shtriga',
+        'alt_names': 'shtrige; štriga (Kosovo)',
+        'summary': 'A witch-vampire who specifically targets '
+                   'children, drinking blood from the great toe '
+                   'while they sleep.  Recognised when the child '
+                   'wakes pale and listless without bite-marks at '
+                   'the neck.  By day she is an old woman in the '
+                   'village; by night her soul leaves her body to '
+                   'fly as a moth or bee.',
+        'traits': ['drinks blood', 'shapeshifts', 'flies',
+                   'preys on infants', 'drinks from the toes',
+                   'hairy palms / strange eyes'],
+        'origins': ['willingly became one',
+                    'cursed by witchcraft'],
+        'weaknesses': ['silver coin under the pillow',
+                       'mustard seeds scattered',
+                       'crucifix or holy symbol'],
+    },
+    {
+        'tradition': 'Croatian & Istrian',
+        'name': 'kudlak',
+        'alt_names': 'kuzlak; vukodlak',
+        'summary': 'The night-walking dead of Istria.  Rises from '
+                   'a grave dug too shallow or with the body '
+                   'improperly composed.  Attacks kin first, then '
+                   'livestock, then strangers.  Each village '
+                   'traditionally has its own kresnik (a person '
+                   'born with a caul) who duels the kudlak in '
+                   'animal form to keep it down.',
+        'traits': ['drinks blood', 'returns from the grave',
+                   'shapeshifts'],
+        'origins': ['born with a caul', 'died by violence',
+                    'died unbaptised'],
+        'weaknesses': ['stake through the heart',
+                       'decapitation', 'cremation'],
+    },
+    {
+        'tradition': 'Czech & Slovak',
+        'name': 'nelapsi',
+        'alt_names': 'nelapsí',
+        'summary': 'The Slovak revenant of the Visum et Repertum '
+                   'reports.  Walks the village by night, opening '
+                   'doors, calling family members by name — '
+                   'whoever answers wastes.  Distinctively unable '
+                   'to cross a threshold over which a sickle has '
+                   'been laid.',
+        'traits': ['drains life-force', 'returns from the grave',
+                   'counts compulsively',
+                   'must be invited'],
+        'origins': ['died unbaptised', 'died by violence'],
+        'weaknesses': ['iron nails or scissors',
+                       'seeds at the grave',
+                       'decapitation'],
+        'sources': ['Dissertation sur les apparitions des esprits'],
+    },
+    {
+        'tradition': 'Portuguese & Galician',
+        'name': 'bruxa',
+        'alt_names': 'bruxsa; coca',
+        'summary': 'A witch-woman who at night becomes a screech '
+                   'owl, slides down the chimney, and drinks from '
+                   'the navel of sleeping infants.  Recognised on '
+                   'the morning after by a bluish bruise the size '
+                   'of a thumbprint at the child’s navel.',
+        'traits': ['drinks blood', 'shapeshifts', 'flies',
+                   'preys on infants'],
+        'origins': ['willingly became one',
+                    'cursed by witchcraft'],
+        'weaknesses': ['salt threshold', 'iron nails or scissors',
+                       'crucifix or holy symbol'],
+    },
+    {
+        'tradition': 'Japanese',
+        'name': 'nukekubi',
+        'alt_names': '抜首; rokurokubi',
+        'summary': 'A person who appears entirely normal by day; '
+                   'at night the head detaches and floats free, '
+                   'biting and drinking from sleepers.  The body '
+                   'remains in bed.  If the body is moved while '
+                   'the head is away — even rotated — the head '
+                   'cannot reattach and dies at dawn.',
+        'appearance': 'Floating head with bared teeth; a red ring '
+                      'sometimes visible around the throat by day.',
+        'traits': ['drinks blood', 'detaches head or organs',
+                   'flies', 'preys on sleepers',
+                   'hairy palms / strange eyes'],
+        'origins': ['cursed by witchcraft', 'willingly became one'],
+        'weaknesses': ['sunlight', 'iron nails or scissors',
+                       'shedding skin marker'],
+    },
+    {
+        'tradition': 'Japanese',
+        'name': 'kasha',
+        'alt_names': '火車 (fiery cart)',
+        'summary': 'A cat-formed yōkai that descends in a storm '
+                   'to steal corpses from funerals — particularly '
+                   'those of the morally compromised — and devours '
+                   'them on the way to hell.  Rural temples carved '
+                   'guard-cats into ridge-tiles to ward against it.',
+        'traits': ['eats flesh', 'shapeshifts',
+                   'returns from the grave'],
+        'origins': ['cursed by witchcraft'],
+        'weaknesses': ['salt threshold', 'iron nails or scissors',
+                       'crucifix or holy symbol'],
+    },
+    {
+        'tradition': 'Akan (Ashanti)',
+        'name': 'asanbosam',
+        'alt_names': 'sasabonsam',
+        'summary': 'A forest spirit that hangs from tree-branches '
+                   'by iron hooks where its feet should be, '
+                   'dropping on travellers and biting through bone '
+                   'with iron teeth.  Distinctively large and '
+                   'long-armed; sometimes covered in matted hair.',
+        'appearance': 'Tall, thin, hairy; iron hooks for feet; '
+                      'iron teeth; bloodshot eyes.',
+        'traits': ['drinks blood', 'iron hooks for feet',
+                   'superhuman strength',
+                   'has long nails or fangs'],
+        'origins': ['cursed by witchcraft'],
+        'weaknesses': ['iron nails or scissors',
+                       'crucifix or holy symbol'],
+    },
+    {
+        'tradition': 'Akan (Ashanti)',
+        'name': 'obayifo',
+        'alt_names': 'obeah-witch',
+        'summary': 'A witch-vampire who lives among the living by '
+                   'day as a respectable neighbour and at night '
+                   'emerges as a flying light to suck blood from '
+                   'children and from cocoa pods (causing the '
+                   'plantation’s slow decline).  An obayifo is '
+                   'usually identified after death by the unusual '
+                   'preservation of the corpse.',
+        'traits': ['drinks blood', 'flies', 'shapeshifts',
+                   'preys on infants',
+                   'shedding skin marker'],
+        'origins': ['cursed by witchcraft', 'willingly became one'],
+        'weaknesses': ['sunlight', 'iron nails or scissors',
+                       'salt threshold'],
+    },
+    {
+        'tradition': 'Sri Lankan',
+        'name': 'riri yaka',
+        'alt_names': 'rīri yaka (the blood demon)',
+        'summary': 'One of the eighteen sanni demons of folk Sri '
+                   'Lankan medicine.  Held responsible for '
+                   'haemorrhagic fevers, vomiting blood, and the '
+                   'delirium of the dying.  Exorcised through the '
+                   'sanni yakuma masked dance-ritual, in which the '
+                   'demon is summoned, named, fed, and dismissed.',
+        'traits': ['drinks blood', 'shapeshifts',
+                   'preys on sleepers'],
+        'origins': ['cursed by witchcraft'],
+        'weaknesses': ['thorny vines at windows',
+                       'crucifix or holy symbol',
+                       'mustard seeds scattered'],
+    },
+    {
+        'tradition': 'Aztec & Nahua',
+        'name': 'civateteo',
+        'alt_names': 'cihuateteo (sing. cihuateotl)',
+        'summary': 'The deified spirits of women who died in '
+                   'childbirth — fallen warriors of the cosmic '
+                   'second front.  On the five unlucky days of '
+                   'each twenty-day veintena they descended from '
+                   'the west to seize children left out at '
+                   'dusk and drive men mad.  Marked crossroads '
+                   'with their offering shrines.',
+        'appearance': 'A pale woman with chalk-white face, '
+                      'unkempt hair, and a bone-skirt; sometimes '
+                      'walking on her knees.',
+        'traits': ['preys on infants', 'preys on sleepers',
+                   'flies', 'pale or bloodless'],
+        'origins': ['died in childbirth'],
+        'weaknesses': ['crucifix or holy symbol',
+                       'sunlight'],
+    },
+    {
+        'tradition': 'Mapuche & Chilean',
+        'name': 'peuchen',
+        'alt_names': 'piuchen; piwüchen',
+        'summary': 'A flying serpent of the Mapuche tradition '
+                   'whose stare paralyses prey before it drains '
+                   'them of blood.  Can change form (toad, bird, '
+                   'small dragon).  Frequently associated with '
+                   'unaccounted livestock deaths — the cultural '
+                   'antecedent of the 20th c. "chupacabras".',
+        'traits': ['drinks blood', 'shapeshifts', 'flies',
+                   'preys on sleepers'],
+        'origins': ['cursed by witchcraft'],
+        'weaknesses': ['salt threshold', 'sunlight',
+                       'mustard seeds scattered'],
+    },
+    {
+        'tradition': 'Australian (Aboriginal)',
+        'name': 'yara-ma-yha-who',
+        'alt_names': 'yara-ma',
+        'summary': 'A small red figure with no teeth but with '
+                   'suction-cup fingertips and toes.  Hides in '
+                   'the canopy of fig trees and drops on whoever '
+                   'rests in the shade.  Drains some blood, '
+                   'swallows the victim whole, regurgitates them '
+                   'shorter and redder than before — and after '
+                   'enough encounters the victim transforms into '
+                   'one.',
+        'appearance': 'A small humanoid, entirely red, with a big '
+                      'head, a soft toothless mouth, and grasping '
+                      'fingers and toes ending in suckers.',
+        'traits': ['drinks blood', 'preys on sleepers',
+                   'shapeshifts'],
+        'origins': ['cursed by witchcraft'],
+        'weaknesses': ['sunlight'],
+    },
+    {
+        'tradition': 'Bulgarian (folk)',
+        'name': 'ustrel',
+        'alt_names': 'ustrelica',
+        'summary': 'A newly-arisen revenant: spends nine days '
+                   'beneath the grave gathering strength, then '
+                   'emerges first on livestock (sheep, cattle) '
+                   'before progressing to humans.  Recognisable '
+                   'because the morning brings dead animals with '
+                   'no obvious wound.',
+        'traits': ['drinks blood', 'returns from the grave',
+                   'preys on infants'],
+        'origins': ['died unbaptised', 'died of plague'],
+        'weaknesses': ['stake through the heart', 'cremation',
+                       'iron through the mouth'],
+    },
+    {
+        'tradition': 'Bulgarian (folk)',
+        'name': 'krvopijac',
+        'alt_names': 'krvopiec (Polish cognate)',
+        'summary': 'The Bulgarian "blood-drinker": a corpse that '
+                   'returns with one nostril missing.  Specialist '
+                   'vampirdzhija (vampire-hunters) could see them '
+                   'and trap one inside a glass bottle baited with '
+                   'a piece of the creature’s favourite food, '
+                   'sealing it with an icon and throwing the bottle '
+                   'into a fire.',
+        'traits': ['drinks blood', 'returns from the grave',
+                   'sweet smell'],
+        'origins': ['died excommunicated or cursed'],
+        'weaknesses': ['cremation', 'crucifix or holy symbol',
+                       'iron nails or scissors',
+                       'seeds at the grave'],
+    },
+    {
+        'tradition': 'Surinamese & Guyanese',
+        'name': 'asema',
+        'alt_names': 'azeman',
+        'summary': 'A person who at night slips out of their skin '
+                   '(folded carefully and hidden in a calabash), '
+                   'becoming a glowing blue or red ball that '
+                   'travels through keyholes to drink blood.  If '
+                   'the skin is salted while she is out she cannot '
+                   'return to it and is found writhing in fire at '
+                   'dawn.',
+        'traits': ['drinks blood', 'flies', 'shapeshifts',
+                   'shedding skin marker',
+                   'preys on sleepers'],
+        'origins': ['willingly became one',
+                    'cursed by witchcraft'],
+        'weaknesses': ['salt threshold', 'salt scattered on shroud',
+                       'rice or sand to count',
+                       'sunlight'],
+    },
+    {
+        'tradition': 'Balinese',
+        'name': 'leyak',
+        'alt_names': 'léak',
+        'summary': 'A witch who at night detaches her head with '
+                   'organs trailing and flies to feed.  Studies '
+                   'the black art "pengiwan" under the queen-leyak '
+                   'Rangda, whose mask plays the great villain of '
+                   'the Calon Arang dance.  Particularly hostile '
+                   'to women in labour.',
+        'appearance': 'A flying head with lungs and intestines '
+                      'streaming behind; long tongue and protruding '
+                      'fangs.  By day, an old woman.',
+        'traits': ['drinks blood', 'detaches head or organs',
+                   'flies', 'preys on infants', 'shapeshifts'],
+        'origins': ['willingly became one',
+                    'cursed by witchcraft'],
+        'weaknesses': ['sunlight', 'thorny vines at windows',
+                       'iron nails or scissors',
+                       'crucifix or holy symbol'],
     },
 ]
 
