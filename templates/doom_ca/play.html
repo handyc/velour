@@ -606,6 +606,22 @@
   }
 
   // ─── input → game step ────────────────────────────────────────
+  // Brief visual: yellow line from player to first-hit cell after
+  // a shot.  Lives for 2 frames then clears (cleared on next draw).
+  var fireFlash = null;   // {fromX, fromY, toX, toY, framesLeft}
+
+  // Returns true if the player auto-fires reflexively at a monster
+  // in the cell they're walking into (or that's walking onto them).
+  // Consumes 1 ammo and shows a flash; caller still removes the
+  // monster.  No HP change.
+  function autoFireAt (mx, my) {
+    if (!player.hasShotgun || player.ammo <= 0) return false;
+    player.ammo--;
+    fireFlash = { fromX: player.x, fromY: player.y,
+                  toX: mx, toY: my, framesLeft: 2 };
+    return true;
+  }
+
   function pickupAt (cellIdx) {
     var it = items[cellIdx];
     if (!it) return;
@@ -637,8 +653,8 @@
       var hit = monsters.find(function (m) {
         return m.alive && m.x === nx && m.y === ny; });
       if (hit) {
-        player.hp -= 30;
-        hit.alive = false;                     // bash kills the monster
+        if (!autoFireAt(nx, ny)) player.hp -= 30;
+        hit.alive = false;
       }
       player.x = nx; player.y = ny;
       if (targetIdx === keyIdx) { player.hasKey = true; keyIdx = -1; }
@@ -654,7 +670,7 @@
       if (occupant === WALL) { afterMove(); return; }
       if (tryEnterDoor(targetIdx)) { afterMove(); return; }
       if (occupant === MONSTER) {
-        player.hp -= 30;
+        if (!autoFireAt(target[0], target[1])) player.hp -= 30;
         set(target[0], target[1], GROUND);
       }
       tickRule(shiftRules[dirIdx]);
@@ -667,7 +683,7 @@
       if (occupant === WALL) { afterMove(); return; }
       if (tryEnterDoor(targetIdx)) { afterMove(); return; }
       if (occupant === MONSTER) {
-        player.hp -= 30;
+        if (!autoFireAt(target[0], target[1])) player.hp -= 30;
       }
       set(player.x, player.y, GROUND);
       set(target[0], target[1], PLAYER);
@@ -688,9 +704,11 @@
     if (player.ammo <= 0) return;
     player.ammo--;
     var x = player.x, y = player.y;
+    var hitX = x, hitY = y;
     for (var step = 0; step < 4; step++) {
       var nb = neighbourCoord(x, y, player.lastDir);
       x = nb[0]; y = nb[1];
+      hitX = x; hitY = y;
       if (MODE === 'overlay') {
         if (isWallForOverlay(get(x, y))) break;
         var hit = monsters.find(function (m) {
@@ -702,18 +720,20 @@
         if (c === MONSTER) { set(x, y, GROUND); break; }
       }
     }
+    fireFlash = { fromX: player.x, fromY: player.y,
+                  toX: hitX, toY: hitY, framesLeft: 2 };
     afterMove();
   }
 
   function meleeAdjacent () {
-    // In scent / evolved modes, adjacent monster cells bite — 10 HP
-    // each, then those cells die.  Overlay mode handles contact in
-    // moveOverlayMonsters; shift mode is mostly visual scroll.
+    // In scent / evolved modes, every adjacent monster cell engages
+    // each turn.  Shotgun + ammo → reflex blast (1 ammo each, no HP
+    // lost).  Empty-handed → -10 HP per bite.
     if (MODE !== 'scent' && MODE !== 'evolved') return;
     for (var d = 0; d < 6; d++) {
       var nb = neighbourCoord(player.x, player.y, d);
       if (get(nb[0], nb[1]) === MONSTER) {
-        player.hp -= 10;
+        if (!autoFireAt(nb[0], nb[1])) player.hp -= 10;
         set(nb[0], nb[1], GROUND);
       }
     }
@@ -800,7 +820,11 @@
         }
         var dest = neighbourCoord(m.x, m.y, pick);
         m.x = dest[0]; m.y = dest[1];
-        if (m.x === player.x && m.y === player.y) gameOver = 'lost';
+        if (m.x === player.x && m.y === player.y) {
+          // Monster bit (or got blasted).  Shotgun + ammo absorbs.
+          if (!autoFireAt(m.x, m.y)) player.hp -= 30;
+          m.alive = false;
+        }
       }
     }
   }
@@ -940,6 +964,34 @@
     ctx.moveTo(px - 8, py); ctx.lineTo(px + 8, py);
     ctx.moveTo(px, py - 8); ctx.lineTo(px, py + 8);
     ctx.stroke();
+    // Fire flash: yellow line from player toward the shot's landing.
+    if (fireFlash && fireFlash.framesLeft > 0) {
+      var ff = fireFlash;
+      function screenCoord (wx, wy) {
+        var ddx = wx - player.x;
+        if (ddx >  GRID / 2) ddx -= GRID;
+        if (ddx < -GRID / 2) ddx += GRID;
+        var ddy = wy - player.y;
+        if (ddy >  GRID / 2) ddy -= GRID;
+        if (ddy < -GRID / 2) ddy += GRID;
+        var rs = (wy & 1) ? CELL_PX * 0.5 : 0;
+        return [(ddx + half) * H_STEP + rs + CELL_PX / 2,
+                (ddy + half) * V_STEP + CELL_PX / 2];
+      }
+      var a = screenCoord(ff.fromX, ff.fromY);
+      var b = screenCoord(ff.toX,   ff.toY);
+      ctx.strokeStyle = 'rgba(255,220,80,0.95)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,240,160,0.8)';
+      ctx.beginPath();
+      ctx.arc(b[0], b[1], CELL_PX * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      fireFlash.framesLeft--;
+      if (fireFlash.framesLeft <= 0) fireFlash = null;
+    }
   }
 
   function updateReadouts () {

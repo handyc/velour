@@ -540,16 +540,20 @@
     }
 
     function meleeAdjacentMonsters () {
-      // After every tick, adjacent monsters in pure-CA modes (scent /
-      // evolved) automatically bite the player — drop 10 HP per
-      // adjacent monster, then those monster cells die (mutual KO).
-      // In overlay mode adjacency is handled by moveOverlayMonsters'
-      // contact code instead.
+      // After every tick, every adjacent monster engages.  Shotgun +
+      // ammo turns this into a reflexive kill (1 ammo each, no HP
+      // lost).  Empty-handed or out of ammo, it's a bite (-10 HP).
+      // In overlay mode, monster-walks-into-player is handled in
+      // moveOverlayMonsters; this only fires in pure-CA modes.
       if (gene.world_mode === 'overlay') return;
       for (var d = 0; d < 6; d++) {
         var nb = neighbourCoord(player.x, player.y, d, side);
         if (get(nb[0], nb[1]) === MONSTER) {
-          player.hp -= 10;
+          if (player.hasShotgun && player.ammo > 0) {
+            player.ammo--;
+          } else {
+            player.hp -= 10;
+          }
           setCell(nb[0], nb[1], GROUND);
           monstersKilled++;
         }
@@ -578,9 +582,10 @@
           var dest = neighbourCoord(m.x, m.y, pick, side);
           setCell(m.x, m.y, GROUND);
           if (dest[0] === player.x && dest[1] === player.y) {
-            player.hp -= 30;
+            // Monster bit (or got blasted) — same point-blank rules.
+            if (player.hasShotgun && player.ammo > 0) player.ammo--;
+            else player.hp -= 30;
             monstersKilled++;
-            // Monster dies in the bite — its cell is already GROUND
           } else {
             setCell(dest[0], dest[1], MONSTER);
           }
@@ -636,10 +641,9 @@
             var hit = monsters.find(function (m) {
               return m.x === target[0] && m.y === target[1]; });
             if (hit) {
-              player.hp -= 30;
+              if (player.hasShotgun && player.ammo > 0) player.ammo--;
+              else player.hp -= 30;
               monstersKilled++;
-              // Bashing the monster — kill it and step onto the tile.
-              // (already not in monster list after we just removed it)
             }
             player.x = target[0]; player.y = target[1];
             groundVisited.add(targetIdx);
@@ -657,7 +661,8 @@
           if (occ === WALL) { wallsBumped++; }
           else {
             if (occ === MONSTER) {
-              player.hp -= 30;
+              if (player.hasShotgun && player.ammo > 0) player.ammo--;
+              else player.hp -= 30;
               monstersKilled++;
               setCell(target[0], target[1], GROUND);
             }
@@ -677,7 +682,8 @@
           if (occ === WALL) { wallsBumped++; }
           else {
             if (occ === MONSTER) {
-              player.hp -= 30;
+              if (player.hasShotgun && player.ammo > 0) player.ammo--;
+              else player.hp -= 30;
               monstersKilled++;
             }
             setCell(player.x, player.y, GROUND);
