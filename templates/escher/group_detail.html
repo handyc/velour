@@ -97,6 +97,9 @@
               padding:0.4rem 0.9rem; cursor:pointer; font-size:0.85rem;">
         Download SVG
       </button>
+      <button type="button" id="print-btn" style="background:#1f6feb;
+              color:#fff; border:0; padding:0.4rem 0.9rem;
+              cursor:pointer; font-size:0.85rem;">Print…</button>
       <a id="gridprint-link" href="#" style="color:#58a6ff;
          text-decoration:none; padding:0.45rem 0; font-size:0.85rem;"
          target="_blank">Open in Gridprint ↗</a>
@@ -121,6 +124,7 @@
   const form = document.getElementById('g');
   const preview = document.getElementById('preview');
   const downloadBtn = document.getElementById('download-btn');
+  const printBtn = document.getElementById('print-btn');
   const gridprintLink = document.getElementById('gridprint-link');
   const motifSel = form.querySelector('[name="motif"]');
 
@@ -151,6 +155,29 @@
     return '{% url "escher:render_svg" %}?' + p.toString();
   }
 
+  // Forward the current form state to gridprint so its Print pipeline
+  // (with the auto-fire print HTML wrapper) renders the same SVG.
+  function buildGridprintParams () {
+    const params = buildParams();
+    const group = params.get('group') || '{{ group.slug }}';
+    const out = new URLSearchParams();
+    out.set('pattern', 'escher');
+    out.set('from_escher', group);
+    // Pass through every escher-side knob the gridprint bridge knows.
+    for (const k of ['motif', 'motif_slug', 'pact', 'component', 'gen',
+                      'tile', 'margin', 'landscape', 'cells', 'orbit']) {
+      const v = params.get(k);
+      if (v !== null && v !== '') out.set(k, v);
+    }
+    return out;
+  }
+  function buildGridprintIndexUrl () {
+    return '{% url "gridprint:index" %}?' + buildGridprintParams().toString();
+  }
+  function buildGridprintPrintUrl () {
+    return '{% url "gridprint:print" %}?' + buildGridprintParams().toString();
+  }
+
   function refresh () {
     preview.src = buildUrl({embed: '1'});
     // Group selector might change the group; reflect that in the URL bar
@@ -165,9 +192,7 @@
     }
     const landscape = form.querySelector('[name="landscape"]').checked;
     preview.style.aspectRatio = landscape ? '297/210' : '210/297';
-    // No native gridprint integration for SVG snippets yet — link
-    // points at gridprint with hex_pointy as a placeholder pattern.
-    gridprintLink.href = '{% url "gridprint:index" %}?pattern=hex_pointy';
+    gridprintLink.href = buildGridprintIndexUrl();
   }
   let timer = null;
   form.addEventListener('input', () => {
@@ -176,6 +201,11 @@
   });
   downloadBtn.addEventListener('click', () => {
     window.location = buildUrl({download: '1'});
+  });
+  printBtn.addEventListener('click', () => {
+    // Open the gridprint print-wrapper page in a new tab; it auto-fires
+    // window.print() once the SVG is laid out.
+    window.open(buildGridprintPrintUrl(), '_blank');
   });
   refresh();
 })();

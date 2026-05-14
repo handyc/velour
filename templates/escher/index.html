@@ -47,19 +47,21 @@
             grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
             gap:8px; margin-top:1.2rem;">
   {% for g in groups %}
-    <a href="{% url 'escher:group_detail' g.slug %}"
-       style="display:block; padding:0.5rem 0.7rem;
-              background:#161b22; border:1px solid #30363d;
-              border-radius:5px; color:#cfa;
-              text-decoration:none;">
-      <div style="font-weight:600; color:#cfa;">{{ g.slug }}</div>
+    <div style="background:#161b22; border:1px solid #30363d;
+                border-radius:5px; padding:0.5rem 0.7rem;">
+      <a href="{% url 'escher:group_detail' g.slug %}"
+         style="color:#cfa; text-decoration:none; font-weight:600;">{{ g.slug }}</a>
       <div style="color:#8b949e; font-size:0.72rem; margin-top:0.15rem;">
         {{ g.note }}
       </div>
       <div style="color:#6e7681; font-size:0.7rem; margin-top:0.25rem;">
         lattice: {{ g.lattice }} · orbit: {{ g.orbit_size }}
       </div>
-    </a>
+      <div style="margin-top:0.4rem; font-size:0.7rem;">
+        <a target="_blank" style="color:#8b949e; text-decoration:none;"
+           href="{% url 'gridprint:index' %}?pattern=escher&amp;from_escher={{ g.slug }}&amp;tile=30">Print →</a>
+      </div>
+    </div>
   {% endfor %}
 </div>
 

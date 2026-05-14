@@ -73,16 +73,23 @@ def grid_svg(request):
     if (request.GET.get('mode') or '').strip() == 'flowers':
         return _flowers_svg(request)
 
-    # Tilesmith mode: a TileSpec drives the pattern.  Triggered by either
-    # ?pattern=tilesmith or by ?from_tilesmith=<slug>; the slug parameter
-    # is what doubles as the deep link from /tilesmith/<slug>/.
-    tile_slug = (request.GET.get('from_tilesmith')
-                  or request.GET.get('tile') or '').strip()
     pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
-    if tile_slug or pattern == 'tilesmith':
-        return _tilesmith_svg(request, tile_slug)
 
-    if pattern not in svg.PATTERNS or pattern == 'tilesmith':
+    # Escher mode: a wallpaper-group composition drives the pattern.
+    # Triggered by ?pattern=escher or by ?from_escher=<group_slug>.
+    # Checked first so its numeric ?tile= mm parameter doesn't get
+    # mistaken for a tilesmith slug.
+    escher_slug = (request.GET.get('from_escher') or '').strip()
+    if escher_slug or pattern == 'escher':
+        return _escher_svg(request, escher_slug)
+
+    # Tilesmith mode: a TileSpec drives the pattern.  Triggered by
+    # ?pattern=tilesmith or ?from_tilesmith=<slug>.
+    tilesmith_slug = (request.GET.get('from_tilesmith') or '').strip()
+    if tilesmith_slug or pattern == 'tilesmith':
+        return _tilesmith_svg(request, tilesmith_slug)
+
+    if pattern not in svg.PATTERNS or pattern in ('tilesmith', 'escher'):
         pattern = 'hex_pointy'
     cell = _float(request, 'cell', 8.0, lo=2.0, hi=80.0)
     margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
@@ -244,6 +251,89 @@ def _tilesmith_svg(request, slug: str):
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
             f'attachment; filename="tilesmith-{spec.slug}.svg"')
+    return resp
+
+
+# ─── Escher mode ───────────────────────────────────────────────────
+
+def _escher_svg(request, slug: str):
+    """Render a wallpaper-group composition through gridprint's
+    print pipeline.
+
+    Query knobs (besides the standard cell/margin/color/...):
+      ``from_escher=<group_slug>`` — required, one of the 17 IUC slugs
+      ``motif=stock|spoeqi_component``
+      ``motif_slug=<stock-slug>``   (when motif=stock)
+      ``pact=<slug>&component=K&gen=N``  (when motif=spoeqi_component)
+      ``tile=30``                   tile spacing in mm
+      ``cells=1``                   overlay unit cells
+      ``orbit=1``                   highlight one orbit
+    """
+    from escher import groups as eg
+    from escher import svg as esvg
+    from escher.views import _resolve_motif
+
+    landscape = request.GET.get('landscape') == '1'
+    margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+    tile = _float(request, 'tile', 30.0, lo=4.0, hi=400.0)
+    page_w = svg.A4_H if landscape else svg.A4_W
+    page_h = svg.A4_W if landscape else svg.A4_H
+
+    def _err(msg: str) -> HttpResponse:
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">escher: {msg}</text></svg>'
+        )
+        return HttpResponse(body,
+                             content_type='image/svg+xml; charset=utf-8')
+
+    if not slug:
+        return _err('provide ?from_escher=&lt;group_slug&gt;')
+    try:
+        group = eg.get(slug)
+    except KeyError:
+        return _err(f'unknown wallpaper group "{slug}"')
+
+    motif_body = _resolve_motif(request)
+    embed = request.GET.get('embed') == '1'
+
+    cfg = esvg.RenderConfig(
+        tile_mm=tile,
+        viewport_w_mm=page_w,
+        viewport_h_mm=page_h,
+        margin_mm=margin,
+        show_unit_cell=request.GET.get('cells') == '1',
+        show_orbit=request.GET.get('orbit') == '1',
+    )
+    body = esvg.render(group, motif_body, cfg, embed=embed)
+
+    # Footer line — name + lattice + tile size — mirroring the
+    # tilesmith branch.  Inserted just before the closing </svg>.
+    motif_kind = (request.GET.get('motif') or 'stock').strip()
+    if motif_kind == 'spoeqi_component':
+        motif_label = (f'spoeqi {request.GET.get("pact") or "?"} '
+                        f'· cmp {request.GET.get("component") or "0"} '
+                        f'· gen {request.GET.get("gen") or "0"}')
+    else:
+        motif_label = (request.GET.get('motif_slug') or 'comma').strip()
+    footer = (
+        f'<text x="{margin:.2f}" y="{page_h - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'escher · {group.slug} ({group.note}) · motif {motif_label} · '
+        f'tile {tile:.1f}mm · orbit ×{group.orbit_size}'
+        f'</text>'
+    )
+    body = body.replace('</svg>', footer + '</svg>')
+
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="escher-{group.slug}.svg"')
     return resp
 
 

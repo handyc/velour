@@ -148,6 +148,75 @@
     <details style="grid-column:1/3;background:#0d1117;border:1px solid #30363d;
             border-radius:4px;padding:0.4rem 0.6rem;">
       <summary style="cursor:pointer;color:#8b949e;font-size:0.78rem;">
+        Escher wallpaper-group tiling
+      </summary>
+      <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;
+           margin-top:0.4rem;font-size:0.78rem;color:#8b949e;">
+        <label>From escher group (slug)
+          <input type="text" name="from_escher"
+                 placeholder="(one of p1 p2 pm pg cm pmm pmg pgg cmm p4 p4m p4g p3 p3m1 p31m p6 p6m)"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem;">
+        </label>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">motif kind
+            <select name="motif" style="width:100%;background:#0d1117;
+                    color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+              <option value="stock" selected>Stock SVG</option>
+              <option value="spoeqi_component">spoeqi component</option>
+            </select>
+          </label>
+          <label style="flex:1;">stock slug
+            <input type="text" name="motif_slug"
+                   placeholder="(comma, p-letter, spiral, ...)"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+        </div>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">spoeqi pact
+            <input type="text" name="pact"
+                   placeholder="(album-xxxx)"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="flex:1;">component
+            <input type="number" name="component" min="0" max="63"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="flex:1;">gen
+            <input type="number" name="gen" value="0" min="0" max="2000"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+        </div>
+        <div style="display:flex;gap:0.4rem;">
+          <label style="flex:1;">tile (mm)
+            <input type="number" name="tile" value="30" min="4" max="200"
+                   style="width:100%;background:#0d1117;color:#c9d1d9;
+                   border:1px solid #30363d;padding:0.25rem;">
+          </label>
+          <label style="font-size:0.78rem;color:#8b949e;">
+            <input type="checkbox" name="cells" value="1"> show cells
+          </label>
+          <label style="font-size:0.78rem;color:#8b949e;">
+            <input type="checkbox" name="orbit" value="1"> show orbit
+          </label>
+        </div>
+        <div style="color:#6e7681;font-size:0.72rem;">
+          Sets <code>?from_escher=&lt;group&gt;</code>.  When motif is
+          <em>spoeqi component</em>, the named pact's component grid
+          at the chosen generation becomes the motif tiled by the
+          group's orbit.  Pair with deep links from
+          <a href="{% url 'escher:index' %}" style="color:#58a6ff;">/escher/</a>.
+        </div>
+      </div>
+    </details>
+
+    <details style="grid-column:1/3;background:#0d1117;border:1px solid #30363d;
+            border-radius:4px;padding:0.4rem 0.6rem;">
+      <summary style="cursor:pointer;color:#8b949e;font-size:0.78rem;">
         Hex flower dump — render a hex-CA rule as 7→1 flowers
       </summary>
       <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;
