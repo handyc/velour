@@ -70,6 +70,10 @@
         {% if w.population_id %} · <a href="?population={{ w.population_id }}"
            style="color:#8b949e;">{{ w.population_id }}</a>{% endif %}
       </div>
+      <div style="margin-top:0.3rem; font-size:0.7rem;">
+        <a target="_blank" style="color:#8b949e; text-decoration:none;"
+           href="{% url 'gridprint:index' %}?pattern=loupe&amp;from_loupe={{ w.slug }}">Print →</a>
+      </div>
     </div>
   {% empty %}
     <p style="color:#6e7681; font-style:italic;">no walks saved yet —

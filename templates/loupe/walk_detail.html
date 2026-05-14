@@ -77,6 +77,18 @@
       <div>end iter <b style="color:#cfa;">{{ walk.end_iter }}</b></div>
     </div>
 
+    <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Print</h3>
+    <a id="btn-print" target="_blank"
+       href="{% url 'gridprint:index' %}?pattern=loupe&amp;from_loupe={{ walk.slug }}"
+       style="display:inline-block; background:#1f6feb; color:#fff;
+              padding:0.4rem 0.8rem; text-decoration:none;
+              font-size:0.8rem;">→ Gridprint (final frame)</a>
+    <div style="color:#888; font-size:0.72rem; margin-top:0.2rem;">
+      uses A4 portrait by default · pass <code>?step=N</code>
+      in the URL to print an earlier step.
+    </div>
+
     <form method="post"
           action="{% url 'loupe:walk_delete' walk.slug %}"
           style="margin-top:0.8rem;"
@@ -107,6 +119,8 @@
   const rfit  = document.getElementById('r-fit');
   const slider = document.getElementById('step-slider');
 
+  const printBtn = document.getElementById('btn-print');
+  const PRINT_BASE = printBtn ? printBtn.getAttribute('href') : null;
   function showStep (k) {
     const s = GENE[Math.max(0, Math.min(GENE.length - 1, k))];
     eng.setView(s.cx, s.cy, s.span);
@@ -117,6 +131,9 @@
     rspan.textContent = s.span.toExponential(3);
     rfit.textContent = (s.fitness ?? 0).toFixed(3);
     slider.value = k;
+    if (printBtn && PRINT_BASE) {
+      printBtn.href = PRINT_BASE + '&step=' + k;
+    }
   }
 
   document.getElementById('btn-play').addEventListener('click', () => {

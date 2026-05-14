@@ -18,6 +18,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from .models import Walk
+from . import render as renderer
 
 
 # ─── interactive viewer ──────────────────────────────────────────────
@@ -180,3 +181,69 @@ def walk_delete(request, slug):
     walk = get_object_or_404(Walk, slug=slug)
     walk.delete()
     return redirect('loupe:walks')
+
+
+# ─── server-side PNG rendering ───────────────────────────────────────
+
+def _float(req, name, default, lo=None, hi=None):
+    try:
+        v = float(req.GET.get(name, default))
+    except (TypeError, ValueError):
+        v = default
+    if lo is not None: v = max(lo, v)
+    if hi is not None: v = min(hi, v)
+    return v
+
+
+def _int(req, name, default, lo=None, hi=None):
+    try:
+        v = int(req.GET.get(name, default))
+    except (TypeError, ValueError):
+        v = default
+    if lo is not None: v = max(lo, v)
+    if hi is not None: v = min(hi, v)
+    return v
+
+
+@login_required
+def mandelbrot_png(request):
+    """Standalone Mandelbrot PNG.  Query: ?cx&cy&span&w&h&iter."""
+    cx = _float(request, 'cx', -0.5, lo=-2.5, hi=2.0)
+    cy = _float(request, 'cy', 0.0,  lo=-2.0, hi=2.0)
+    span = _float(request, 'span', 3.0, lo=1e-12, hi=8.0)
+    w = _int(request, 'w', 1024, lo=16, hi=2000)
+    h = _int(request, 'h', 1024, lo=16, hi=2000)
+    iter_cap = _int(request, 'iter', 0, lo=0, hi=8192)
+    iter_cap = iter_cap or renderer.auto_iter(span)
+    png = renderer.render_mandelbrot_png(cx, cy, span, w, h,
+                                            iter_cap=iter_cap)
+    resp = HttpResponse(png, content_type='image/png')
+    resp['Cache-Control'] = 'public, max-age=3600'
+    return resp
+
+
+@login_required
+def walk_png(request, slug):
+    """Render a saved walk at a chosen step at high resolution.
+
+    Query: ?step=N (default = last), ?w=, ?h= (default 1024).  The
+    walk's gene supplies (cx, cy, span); iter is auto-tuned from
+    span unless ?iter= is provided.
+    """
+    walk = get_object_or_404(Walk, slug=slug)
+    gene = walk.gene_json or []
+    if not gene:
+        return HttpResponse('walk gene empty', status=400)
+    step = _int(request, 'step', len(gene) - 1, lo=0, hi=len(gene) - 1)
+    g = gene[step]
+    w = _int(request, 'w', 1024, lo=16, hi=2000)
+    h = _int(request, 'h', 1024, lo=16, hi=2000)
+    iter_cap = _int(request, 'iter', 0, lo=0, hi=8192)
+    iter_cap = iter_cap or int(g.get('iter') or renderer.auto_iter(g['span']))
+    png = renderer.render_mandelbrot_png(
+        float(g['cx']), float(g['cy']), float(g['span']),
+        w, h, iter_cap=iter_cap,
+    )
+    resp = HttpResponse(png, content_type='image/png')
+    resp['Cache-Control'] = 'public, max-age=86400'
+    return resp

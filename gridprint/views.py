@@ -75,6 +75,12 @@ def grid_svg(request):
 
     pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
 
+    # Loupe mode: a saved Walk drives the pattern.  Triggered by
+    # ?pattern=loupe or ?from_loupe=<walk_slug>.
+    loupe_slug = (request.GET.get('from_loupe') or '').strip()
+    if loupe_slug or pattern == 'loupe':
+        return _loupe_svg(request, loupe_slug)
+
     # Escher mode: a wallpaper-group composition drives the pattern.
     # Triggered by ?pattern=escher or by ?from_escher=<group_slug>.
     # Checked first so its numeric ?tile= mm parameter doesn't get
@@ -89,7 +95,8 @@ def grid_svg(request):
     if tilesmith_slug or pattern == 'tilesmith':
         return _tilesmith_svg(request, tilesmith_slug)
 
-    if pattern not in svg.PATTERNS or pattern in ('tilesmith', 'escher'):
+    if pattern not in svg.PATTERNS or pattern in ('tilesmith', 'escher',
+                                                     'loupe'):
         pattern = 'hex_pointy'
     cell = _float(request, 'cell', 8.0, lo=2.0, hi=80.0)
     margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
@@ -252,6 +259,95 @@ def _tilesmith_svg(request, slug: str):
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
             f'attachment; filename="tilesmith-{spec.slug}.svg"')
+    return resp
+
+
+# ─── Loupe mode ────────────────────────────────────────────────────
+
+def _loupe_svg(request, slug: str):
+    """Render a saved loupe Walk at A4 (or chosen page size) via the
+    server-side numpy Mandelbrot renderer.  The result is wrapped in
+    an SVG so gridprint's existing Print / Download buttons keep
+    working.
+
+    Query knobs:
+      ``from_loupe=<walk_slug>`` — required
+      ``step=N`` (default = last)
+      ``res=1024`` — PNG resolution along the longer axis
+      ``landscape=1``
+      ``margin=10``
+    """
+    import base64
+    from loupe.models import Walk
+    from loupe import render as renderer
+
+    landscape = request.GET.get('landscape') == '1'
+    margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+    page_w = svg.A4_H if landscape else svg.A4_W
+    page_h = svg.A4_W if landscape else svg.A4_H
+
+    def _err(msg: str) -> HttpResponse:
+        import html
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">loupe: {html.escape(msg)}</text></svg>'
+        )
+        return HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+
+    if not slug:
+        return _err('provide ?from_loupe=<walk_slug>')
+    walk = Walk.objects.filter(slug=slug).first()
+    if walk is None:
+        return _err(f'walk "{slug}" not found')
+    gene = walk.gene_json or []
+    if not gene:
+        return _err('walk has empty gene')
+    step = _int(request, 'step', len(gene) - 1, lo=0, hi=len(gene) - 1)
+    g = gene[step]
+    res = _int(request, 'res', 1024, lo=128, hi=2000)
+    # Figure out a square-fit PNG resolution that matches the printable
+    # area's aspect ratio: portrait → taller, landscape → wider.
+    inner_w_mm = page_w - 2 * margin
+    inner_h_mm = page_h - 2 * margin
+    if inner_w_mm >= inner_h_mm:
+        png_w = res
+        png_h = max(16, int(res * inner_h_mm / inner_w_mm))
+    else:
+        png_h = res
+        png_w = max(16, int(res * inner_w_mm / inner_h_mm))
+    iter_cap = int(g.get('iter') or renderer.auto_iter(g['span']))
+    png = renderer.render_mandelbrot_png(
+        float(g['cx']), float(g['cy']), float(g['span']),
+        png_w, png_h, iter_cap=iter_cap,
+    )
+    b64 = base64.b64encode(png).decode('ascii')
+
+    body = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{page_w}mm" height="{page_h}mm" '
+        f'viewBox="0 0 {page_w} {page_h}" '
+        f'preserveAspectRatio="xMidYMid meet">'
+        f'<rect x="0" y="0" width="{page_w}" height="{page_h}" fill="#fff" />'
+        f'<image href="data:image/png;base64,{b64}" '
+        f'x="{margin}" y="{margin}" '
+        f'width="{inner_w_mm}" height="{inner_h_mm}" '
+        f'preserveAspectRatio="xMidYMid meet" />'
+        f'<text x="{margin:.2f}" y="{page_h - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'loupe · {walk.slug} · step {step + 1}/{len(gene)} · '
+        f'cx={g["cx"]:.6g} cy={g["cy"]:.6g} span={g["span"]:.3e}'
+        f'</text>'
+        f'</svg>'
+    )
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="loupe-{walk.slug}-step{step}.svg"')
     return resp
 
 
