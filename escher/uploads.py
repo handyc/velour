@@ -1,14 +1,20 @@
 """Bitmap-upload motif renderer.
 
 Reads an :class:`UploadedMotif` from disk and emits the SVG body
-fragment that places the image, base64-encoded, inside the
-[0, 1]×[0, 1] motif box with its native aspect ratio preserved
-and a small inset on the border.
+fragment that places the image inside the [0, 1]×[0, 1] motif box
+with its native aspect ratio preserved and a small inset on the
+border.
 
-We embed via ``<image href="data:...">`` rather than referencing a
-``/media/`` URL so that downloaded SVG files are self-contained —
-once you save the SVG you can email it / print it without the
-escher server in the loop.
+Modes (controlled by ``embed`` argument):
+
+* ``embed='url'`` (default) — reference the file via its
+  ``MEDIA_URL`` path, e.g. ``/media/escher/motifs/<sha>.jpg``.
+  Reliable for previews loaded inside iframes; downloaded SVGs
+  need network access back to the same server to render.
+* ``embed='base64'`` — encode the file inline as a data URI so the
+  downloaded SVG is self-contained.  Some browsers refuse to load
+  ``<image href="data:...">`` when the SVG is itself loaded as a
+  standalone iframe document, which is why this isn't the default.
 """
 
 from __future__ import annotations
@@ -16,27 +22,35 @@ from __future__ import annotations
 import base64
 
 
-def upload_motif(slug: str, *, inset: float = 0.04) -> str:
+def upload_motif(slug: str, *, inset: float = 0.04,
+                  embed: str = 'url') -> str:
     """Return the SVG body fragment for the uploaded image at ``slug``.
+
     Falls back to a labelled placeholder if the record or file is
-    missing.
+    missing.  See module docstring for ``embed`` modes.
     """
     from .models import UploadedMotif
 
     rec = UploadedMotif.objects.filter(slug=slug).first()
     if rec is None or not rec.file:
         return _placeholder(f'upload "{slug}" not found')
-    try:
-        rec.file.open('rb')
-        raw = rec.file.read()
-    except (FileNotFoundError, OSError) as exc:
-        return _placeholder(f'upload file missing: {exc}')
-    finally:
-        try: rec.file.close()
-        except Exception: pass
 
-    b64 = base64.b64encode(raw).decode('ascii')
-    href = f'data:{rec.content_type};base64,{b64}'
+    if embed == 'base64':
+        try:
+            rec.file.open('rb')
+            raw = rec.file.read()
+        except (FileNotFoundError, OSError) as exc:
+            return _placeholder(f'upload file missing: {exc}')
+        finally:
+            try: rec.file.close()
+            except Exception: pass
+        b64 = base64.b64encode(raw).decode('ascii')
+        href = f'data:{rec.content_type};base64,{b64}'
+    else:
+        # Default: reference the file by its served MEDIA_URL path.
+        # Browsers render <image href="/media/.../file.jpg"> reliably
+        # both inline and inside iframe-loaded SVGs.
+        href = rec.file.url
 
     # Compute fitted (x, y, w, h) within [inset, 1-inset]² preserving
     # the image's aspect ratio.

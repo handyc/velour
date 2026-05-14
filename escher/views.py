@@ -78,7 +78,12 @@ def _resolve_motif(request) -> str:
         slug = (request.GET.get('upload_slug') or '').strip()
         if not slug:
             return uploads_mod._placeholder('missing ?upload_slug=<slug>')
-        return uploads_mod.upload_motif(slug)
+        # Self-contained downloads opt into base64 embedding; previews
+        # (and most other consumers) get the MEDIA_URL reference which
+        # renders reliably inside iframe-loaded SVGs.
+        embed = 'base64' if request.GET.get('embed_image') == 'base64' \
+                else 'url'
+        return uploads_mod.upload_motif(slug, embed=embed)
     # Stock — default branch.
     slug = (request.GET.get('motif_slug') or motifs.DEFAULT_MOTIF).strip()
     try:

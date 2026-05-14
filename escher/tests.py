@@ -260,7 +260,12 @@ class UploadMotifTest(TestCase):
         for rec in UploadedMotif.objects.all():
             rec.file.delete(save=False); rec.delete()
 
-    def test_motif_embeds_data_uri(self):
+    def test_motif_references_media_url_by_default(self):
+        """Default mode points <image> at the served /media/ path so
+        the SVG renders reliably inside iframe previews.  Some
+        browsers refuse to load <image href="data:..."> when the SVG
+        is loaded as a standalone iframe document, so the base64 path
+        is opt-in via ?embed_image=base64."""
         from django.core.files.uploadedfile import SimpleUploadedFile
         from .models import UploadedMotif
         f = SimpleUploadedFile('m.png', self._tiny_png(),
@@ -273,7 +278,26 @@ class UploadMotifTest(TestCase):
         })
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        self.assertIn('<image href="data:image/png;base64,', body)
+        self.assertIn(f'<image href="{rec.file.url}"', body)
+        self.assertNotIn('data:image/png;base64', body)
+        rec.file.delete(save=False); rec.delete()
+
+    def test_motif_embed_base64_opt_in(self):
+        """?embed_image=base64 forces self-contained base64 mode for
+        people who want to email/save the SVG file."""
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import UploadedMotif
+        f = SimpleUploadedFile('m.png', self._tiny_png(),
+                                content_type='image/png')
+        self.client.post(reverse('escher:uploads'), {'image': f})
+        rec = UploadedMotif.objects.first()
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4m', 'motif': 'upload',
+            'upload_slug': rec.slug,
+            'embed_image': 'base64',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'data:image/png;base64,', r.content)
         rec.file.delete(save=False); rec.delete()
 
 

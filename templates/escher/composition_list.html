@@ -45,8 +45,6 @@
         {{ c.group_slug }} · {{ c.motif_label }} · {{ c.tile_mm }}mm
         {% if c.landscape %} · landscape{% endif %}
       </div>
-      <iframe src="{% url 'escher:composition_detail' c.slug %}?embed=1"
-        style="display:none;"></iframe>
       <img alt="preview" loading="lazy"
         src="{% url 'escher:render_svg' %}?group={{ c.group_slug }}&amp;motif={{ c.motif_kind }}{% if c.motif_kind == 'stock' %}&amp;motif_slug={{ c.motif_spec.slug }}{% elif c.motif_kind == 'spoeqi_component' %}&amp;pact={{ c.motif_spec.pact }}&amp;component={{ c.motif_spec.component }}&amp;gen={{ c.motif_spec.generation|default:0 }}{% elif c.motif_kind == 'tilesmith_tile' %}&amp;tile_slug={{ c.motif_spec.tile_slug }}{% elif c.motif_kind == 'upload' %}&amp;upload_slug={{ c.motif_spec.upload_slug }}{% endif %}&amp;tile={{ c.tile_mm }}&amp;w=180&amp;h=180&amp;margin=4&amp;embed=1"
         style="display:block; width:100%; aspect-ratio:1/1;
