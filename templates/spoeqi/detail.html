@@ -59,6 +59,9 @@
   <span class="badge"
         title="Rule diversity across the 64 components">{{ pact.rule_diversity }}</span>
   <span class="badge warn" title="Sealed at launch; identical for every viewer">sealed</span>
+  <a class="badge" style="color:#cfc; text-decoration:none;"
+     href="{% url 'spoeqi:oracle' pact.slug %}"
+     title="Pact-shared deterministic prompt → private external LLM response">oracle →</a>
 </div>
 
 <p class="spoeqi-meta" style="max-width: 64em;">

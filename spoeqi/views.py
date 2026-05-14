@@ -469,6 +469,87 @@ def delete(request, slug):
     return redirect('spoeqi:index')
 
 
+# ────────────────────── Oracle ────────────────────────────────────
+#
+# Pact-shared deterministic prompt → external non-deterministic LLM.
+# GET renders the form; POST runs `ask_oracle` and re-renders with
+# the prompt and (optional) response. Heavy: each POST loads the
+# internal CausalLM and may take 5-30 s.
+
+ORACLE_MODEL_CHOICES = [
+    'distilgpt2',
+    'gpt2',
+    'EleutherAI/pythia-70m',
+    'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+]
+
+
+def oracle(request, slug):
+    pact = get_object_or_404(Pact, slug=slug)
+
+    from .oracle import (
+        ask_oracle,
+        DEFAULT_SEED_PROMPT,
+        DEFAULT_EXTERNAL_SYSTEM_PROMPT,
+    )
+    try:
+        from identity.models import LLMProvider
+        providers = list(LLMProvider.objects.order_by('name'))
+    except Exception:
+        providers = []
+
+    form_defaults = {
+        'provider':                '',
+        'seed_prompt':             DEFAULT_SEED_PROMPT,
+        'external_system_prompt':  DEFAULT_EXTERNAL_SYSTEM_PROMPT,
+        'component':               '0',
+        'generation':              '0',
+        'model':                   'distilgpt2',
+        'scale':                   '0.1',
+        'rank':                    '4',
+        'max_new_tokens':          '60',
+        'max_external_tokens':     '400',
+    }
+    form = dict(form_defaults)
+    result = None
+
+    if request.method == 'POST':
+        for k in form:
+            form[k] = request.POST.get(k, form_defaults[k]).strip()
+
+        try:
+            kwargs = dict(
+                seed_prompt=form['seed_prompt'] or DEFAULT_SEED_PROMPT,
+                component=int(form['component']),
+                generation=int(form['generation']),
+                model_name=form['model'],
+                scale=float(form['scale']),
+                rank=int(form['rank']),
+                max_new_tokens=int(form['max_new_tokens']),
+            )
+            provider_name = form['provider'] or None
+            result = ask_oracle(
+                pact,
+                provider_name=provider_name,
+                external_system_prompt=form['external_system_prompt']
+                                        or DEFAULT_EXTERNAL_SYSTEM_PROMPT,
+                max_external_tokens=int(form['max_external_tokens']),
+                **kwargs,
+            )
+        except (ValueError, TypeError) as e:
+            messages.error(request, f'bad form input: {e}')
+        except Exception as e:  # noqa: BLE001
+            messages.error(request, f'{type(e).__name__}: {e}')
+
+    return render(request, 'spoeqi/oracle.html', {
+        'pact':      pact,
+        'form':      form,
+        'providers': providers,
+        'models':    ORACLE_MODEL_CHOICES,
+        'result':    result,
+    })
+
+
 def keystream_tap(request, slug, component, generation, n_bytes):
     """Return ``n_bytes`` of deterministic keystream from component
     ``c`` at generation ``g``.  Both Alice and Bob (or any two parties

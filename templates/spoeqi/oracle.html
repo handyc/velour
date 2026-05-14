@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}oracle — {{ pact.name }}{% endblock %}
+{% block content %}
+<style>
+  .oracle-page { max-width: 60em; }
+  .oracle-page h1 { margin: 0 0 4px; }
+  .oracle-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .oracle-page .crumbs a { color: #ace; }
+
+  .oracle-page form { display: grid; gap: 10px;
+                      grid-template-columns: 12em 1fr; align-items: start;
+                      padding: 14px 16px; border: 1px solid #1f1f1f;
+                      background: #0a0a0a; }
+  .oracle-page label { color: #ccc; padding-top: 4px; font-size: 0.9rem; }
+  .oracle-page input[type="text"],
+  .oracle-page input[type="number"],
+  .oracle-page select,
+  .oracle-page textarea { background: #111; color: #ddd; border: 1px solid #333;
+                          padding: 4px 6px; font-family: inherit; width: 100%;
+                          box-sizing: border-box; }
+  .oracle-page textarea { min-height: 4em; font-family: inherit; }
+  .oracle-page .row-narrow input { max-width: 8em; }
+  .oracle-page .submit { grid-column: 1 / -1; text-align: right; margin-top: 6px; }
+  .oracle-page button { background: #222; color: #cfc; border: 1px solid #555;
+                        padding: 6px 18px; font-family: inherit; cursor: pointer; }
+  .oracle-page button:hover { border-color: #8b949e; }
+
+  .oracle-page .panel { margin-top: 22px; padding: 14px 16px;
+                        border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .oracle-page .panel h2 { margin: 0 0 8px; font-size: 1rem;
+                           color: #cfc; font-weight: 600; }
+  .oracle-page .panel .meta { color: #888; font-size: 0.8rem; margin-bottom: 8px; }
+  .oracle-page .panel pre { white-space: pre-wrap; margin: 0; color: #ddd;
+                            font-family: inherit; }
+  .oracle-page .err { color: #d97; }
+  .oracle-page .help { color: #777; font-size: 0.8rem;
+                       max-width: 56em; margin: 14px 0 18px; }
+  .oracle-page .help b { color: #aaa; }
+  .oracle-page .messages { margin: 12px 0; }
+  .oracle-page .messages li { color: #d97; }
+</style>
+
+<div class="oracle-page">
+
+<h1>oracle</h1>
+<div class="crumbs">
+  <a href="{% url 'spoeqi:index' %}">spoeqi</a> ·
+  <a href="{% url 'spoeqi:detail' pact.slug %}">{{ pact.name }}</a> ·
+  oracle
+</div>
+
+<p class="help">
+  The pact generates a deterministic prompt via the perturbed internal
+  CausalLM; both parties holding the same pact compute the same prompt.
+  Each party then submits it to their own external (non-deterministic)
+  LLM and gets a private response. The seal is preserved — the external
+  response never feeds back into CA state.
+  <br><br>
+  <b>Echo</b>: leave provider blank to skip the external call and
+  inspect only the shared prompt.
+  Heavy: each submission loads the internal model and may take 5-30 s.
+</p>
+
+{% if messages %}
+  <ul class="messages">{% for m in messages %}<li>{{ m }}</li>{% endfor %}</ul>
+{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+
+  <label for="provider">provider</label>
+  <select name="provider" id="provider">
+    <option value="">— echo (no external call) —</option>
+    {% for p in providers %}
+      <option value="{{ p.name }}" {% if form.provider == p.name %}selected{% endif %}>{{ p.name }} ({{ p.model }})</option>
+    {% endfor %}
+  </select>
+
+  <label for="seed_prompt">seed prompt</label>
+  <textarea name="seed_prompt" id="seed_prompt">{{ form.seed_prompt }}</textarea>
+
+  <label for="external_system_prompt">external system prompt</label>
+  <textarea name="external_system_prompt" id="external_system_prompt">{{ form.external_system_prompt }}</textarea>
+
+  <label for="model">internal model</label>
+  <select name="model" id="model">
+    {% for m in models %}
+      <option value="{{ m }}" {% if form.model == m %}selected{% endif %}>{{ m }}</option>
+    {% endfor %}
+  </select>
+
+  <label for="component">component</label>
+  <div class="row-narrow"><input type="number" name="component" id="component" min="0" max="63" value="{{ form.component }}"></div>
+
+  <label for="generation">generation</label>
+  <div class="row-narrow"><input type="number" name="generation" id="generation" min="0" value="{{ form.generation }}"></div>
+
+  <label for="scale">LoRA scale</label>
+  <div class="row-narrow"><input type="text" name="scale" id="scale" value="{{ form.scale }}"></div>
+
+  <label for="rank">LoRA rank</label>
+  <div class="row-narrow"><input type="number" name="rank" id="rank" min="1" value="{{ form.rank }}"></div>
+
+  <label for="max_new_tokens">internal max-tokens</label>
+  <div class="row-narrow"><input type="number" name="max_new_tokens" id="max_new_tokens" min="1" value="{{ form.max_new_tokens }}"></div>
+
+  <label for="max_external_tokens">external max-tokens</label>
+  <div class="row-narrow"><input type="number" name="max_external_tokens" id="max_external_tokens" min="1" value="{{ form.max_external_tokens }}"></div>
+
+  <div class="submit">
+    <button type="submit">ask</button>
+  </div>
+</form>
+
+{% if result %}
+  <div class="panel">
+    <h2>shared deterministic prompt</h2>
+    <div class="meta">
+      pact={{ pact.slug }} · component={{ form.component }} ·
+      generation={{ form.generation }} · model={{ form.model }} ·
+      scale={{ form.scale }} · rank={{ form.rank }}
+    </div>
+    <pre>{{ result.prompt }}</pre>
+  </div>
+
+  {% if result.response %}
+    <div class="panel">
+      <h2>external response</h2>
+      <div class="meta">
+        provider={{ result.provider }} · model={{ result.model }} ·
+        {{ result.tokens_in }}/{{ result.tokens_out }} tokens ·
+        {{ result.latency_ms }} ms
+      </div>
+      <pre>{{ result.response }}</pre>
+    </div>
+  {% elif result.error %}
+    <div class="panel">
+      <h2>{% if form.provider %}external call failed{% else %}echo mode{% endif %}</h2>
+      <pre class="err">{{ result.error }}</pre>
+    </div>
+  {% endif %}
+{% endif %}
+
+</div>
+{% endblock %}

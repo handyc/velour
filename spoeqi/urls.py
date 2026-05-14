@@ -16,4 +16,5 @@ urlpatterns = [
     path('<slug:slug>/tap/<int:component>/<int:generation>/<int:n_bytes>/',
                                 views.keystream_tap,
                                 name='tap'),
+    path('<slug:slug>/oracle/', views.oracle,    name='oracle'),
 ]
