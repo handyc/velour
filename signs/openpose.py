@@ -196,8 +196,11 @@ def parse_openpose_frame(data: dict, person_index: int = 0
         xyz  = np.concatenate([xy, np.zeros((21, 1))], axis=1)
         return xyz, conf
 
-    if 'hand_left_keypoints_3d' in person:
-        # Rare: 3D variant. Use it if present.
+    # OpenPose writes both `*_2d` and `*_3d` keys whether or not 3D
+    # data is present; the 3D variants are empty lists when the
+    # capture was monocular. Only switch to the 3D path when the
+    # array actually contains data.
+    if person.get('hand_left_keypoints_3d'):
         l = np.asarray(person['hand_left_keypoints_3d'], dtype=np.float64).reshape(21, 4)
         r = np.asarray(person['hand_right_keypoints_3d'], dtype=np.float64).reshape(21, 4)
         return l[:, :3], l[:, 3], r[:, :3], r[:, 3]

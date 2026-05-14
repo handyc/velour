@@ -127,3 +127,10 @@ clone_init.json.applied
 /coder_project.txt
 /coder.db
 /officesuite.conf
+
+# signs/imports/ holds large downloaded corpora (Zenodo zips,
+# unzipped OpenPose dumps, dissertation PDFs etc.) — keep the
+# directory tracked-as-empty via a placeholder, but never commit
+# the contents.
+signs/imports/*
+!signs/imports/.gitkeep
