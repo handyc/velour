@@ -58,6 +58,39 @@
     </div>
 
     <details style="margin-top:0.4rem;">
+      <summary style="cursor:pointer; color:#8b949e;">
+        Palette source
+      </summary>
+      <div style="margin-top:0.3rem; font-size:0.78rem;">
+        <label style="display:block;">spoeqi pact slug
+          <input id="pal-pact" type="text" placeholder="(e.g. album-xxxx)"
+            style="width:100%; box-sizing:border-box; background:#0d1117;
+                   color:#c9d1d9; border:1px solid #30363d;
+                   padding:0.2rem; font-family:inherit;">
+        </label>
+        <label style="display:block; margin-top:0.3rem;">component (per-tile pacts only)
+          <input id="pal-comp" type="number" min="0" max="63"
+            style="width:100%; box-sizing:border-box; background:#0d1117;
+                   color:#c9d1d9; border:1px solid #30363d;
+                   padding:0.2rem; font-family:inherit;">
+        </label>
+        <div style="display:flex; gap:0.3rem; margin-top:0.4rem;">
+          <button id="btn-pal-load" type="button"
+            style="flex:1; background:#21262d; color:#c9d1d9;
+                   border:1px solid #30363d; padding:0.3rem;
+                   cursor:pointer;">Load palette</button>
+          <button id="btn-pal-reset" type="button"
+            style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+                   padding:0.3rem 0.6rem; cursor:pointer;">↻</button>
+        </div>
+        <div id="pal-status" style="margin-top:0.3rem; color:#888;
+             font-size:0.72rem;">default 16-band palette.</div>
+        <div id="pal-swatch" style="display:flex; gap:2px; margin-top:0.3rem;
+             height:14px;"></div>
+      </div>
+    </details>
+
+    <details style="margin-top:0.4rem;">
       <summary style="cursor:pointer; color:#8b949e;">Canonical coords</summary>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;
                   margin-top:0.4rem;">
@@ -331,6 +364,67 @@
     progress.textContent = `done — ${data.created.length} walks saved.`;
     setTimeout(() => { window.location = data.url; }, 600);
   });
+
+  // Palette source: load a spoeqi Pact's palette via AJAX and feed it
+  // into the engine as a short cycling band.  The engine renders
+  // `pal[1 + (e % (pal.length - 1))]` so a 5-entry palette (one
+  // sentinel black + 4 spoeqi colours) cycles cleanly.
+  const palStatus = document.getElementById('pal-status');
+  const palSwatch = document.getElementById('pal-swatch');
+  const DEFAULT_PALETTE = window.LOUPE_DEFAULT_PALETTE;
+
+  function paintSwatch (palette) {
+    palSwatch.innerHTML = '';
+    for (let i = 1; i < palette.length; i++) {
+      const [r, g, b] = palette[i];
+      const d = document.createElement('div');
+      d.style.flex = '1';
+      d.style.background = `rgb(${r},${g},${b})`;
+      palSwatch.appendChild(d);
+    }
+  }
+
+  document.getElementById('btn-pal-load').addEventListener('click', async () => {
+    const slug = document.getElementById('pal-pact').value.trim();
+    const comp = document.getElementById('pal-comp').value.trim();
+    if (!slug) {
+      palStatus.textContent = 'enter a pact slug first.';
+      palStatus.style.color = '#c44';
+      return;
+    }
+    palStatus.style.color = '#888';
+    palStatus.textContent = 'loading…';
+    const url = '/loupe/palette/spoeqi/' + encodeURIComponent(slug) + '/' +
+                (comp !== '' ? '?component=' + encodeURIComponent(comp) : '');
+    try {
+      const r = await fetch(url);
+      const data = await r.json();
+      if (!r.ok || !data.palette) {
+        palStatus.style.color = '#c44';
+        palStatus.textContent = data.error || ('HTTP ' + r.status);
+        return;
+      }
+      eng.palette = data.palette;
+      paintSwatch(data.palette);
+      palStatus.textContent = 'using ' + data.source +
+                                ' (' + (data.palette.length - 1) + ' colours).';
+      redraw(true);
+    } catch (e) {
+      palStatus.style.color = '#c44';
+      palStatus.textContent = 'fetch failed: ' + e.message;
+    }
+  });
+
+  document.getElementById('btn-pal-reset').addEventListener('click', () => {
+    eng.palette = DEFAULT_PALETTE;
+    paintSwatch(DEFAULT_PALETTE);
+    palStatus.textContent = 'default 16-band palette.';
+    palStatus.style.color = '#888';
+    redraw(true);
+  });
+
+  // Initial swatch render.
+  paintSwatch(DEFAULT_PALETTE);
 
   // First paint.
   eng.setView(-0.5, 0.0, 3.0);

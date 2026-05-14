@@ -223,6 +223,46 @@ def mandelbrot_png(request):
 
 
 @login_required
+def spoeqi_palette(request, slug):
+    """JSON {palette: [[r,g,b],...]} from a spoeqi Pact.
+
+    Pacts carry a 4-RGB palette (shared) or 64 per-component
+    palettes (when rule_diversity='fleet' or per-component colours
+    were assigned).  Optional ``?component=N`` selects one when the
+    pact is per-component; otherwise the shared palette is used.
+
+    The first entry returned is always pure black so callers can
+    drop it straight into LoupeEngine.palette without rebuilding.
+    """
+    from spoeqi.models import Pact, is_per_component_palette, COMPONENTS
+
+    pact = Pact.objects.filter(slug=slug).first()
+    if pact is None:
+        return JsonResponse({'error': f'pact "{slug}" not found'},
+                              status=404)
+    palette = pact.palette
+    if not palette:
+        return JsonResponse({'error': 'pact has no palette'}, status=400)
+
+    if is_per_component_palette(palette):
+        comp = _int(request, 'component', 0, lo=0, hi=COMPONENTS - 1)
+        rgbs = palette[comp]
+        source = f'spoeqi:{slug}/component:{comp}'
+    else:
+        rgbs = palette
+        source = f'spoeqi:{slug}'
+
+    # Cast to int + dedupe so the engine palette is a clean list of
+    # length 1 + len(rgbs).
+    cleaned = [[int(r), int(g), int(b)] for r, g, b in rgbs]
+    engine_palette = [[0, 0, 0]] + cleaned
+    return JsonResponse({
+        'palette': engine_palette,
+        'source':  source,
+    })
+
+
+@login_required
 def walk_png(request, slug):
     """Render a saved walk at a chosen step at high resolution.
 

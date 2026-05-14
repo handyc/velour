@@ -162,3 +162,73 @@ class WalkDetailTest(TestCase):
                                        kwargs={'slug': 'test-walk'}))
         self.assertEqual(r.status_code, 302)
         self.assertFalse(Walk.objects.filter(slug='test-walk').exists())
+
+
+class SpoeqiPaletteTest(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='lp-pal', password='x')
+        self.client.force_login(self.user)
+        from spoeqi.models import Pact, RULE_TABLE_SIZE
+        self.shared_pact = Pact(name='shared-pal',
+                                  rule_snapshot=bytes([0] * RULE_TABLE_SIZE),
+                                  palette=[[10, 20, 30],
+                                            [200, 50, 50],
+                                            [50, 200, 50],
+                                            [50, 50, 200]])
+        self.shared_pact.save()
+
+    def test_shared_palette_endpoint(self):
+        r = self.client.get(reverse('loupe:spoeqi_palette',
+                                       kwargs={'slug': self.shared_pact.slug}))
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        # Five entries: 1 sentinel black + 4 pact colours.
+        self.assertEqual(len(data['palette']), 5)
+        self.assertEqual(data['palette'][0], [0, 0, 0])
+        self.assertEqual(data['palette'][1], [10, 20, 30])
+        self.assertEqual(data['palette'][4], [50, 50, 200])
+        self.assertEqual(data['source'], f'spoeqi:{self.shared_pact.slug}')
+
+    def test_404_on_unknown_pact(self):
+        r = self.client.get(reverse('loupe:spoeqi_palette',
+                                       kwargs={'slug': 'no-such-pact'}))
+        self.assertEqual(r.status_code, 404)
+
+    def test_per_component_palette(self):
+        from spoeqi.models import Pact, RULE_TABLE_SIZE, COMPONENTS
+        per_comp = [
+            [[c, c, c], [(c + 10) % 256, 0, 0], [0, c, 0], [0, 0, c]]
+            for c in range(COMPONENTS)
+        ]
+        p = Pact(name='per-comp-pal',
+                  rule_snapshot=bytes([0] * RULE_TABLE_SIZE),
+                  palette=per_comp)
+        p.save()
+        r = self.client.get(reverse('loupe:spoeqi_palette',
+                                       kwargs={'slug': p.slug}),
+                             {'component': '7'})
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(len(data['palette']), 5)
+        self.assertEqual(data['palette'][1], [7, 7, 7])
+        self.assertIn('component:7', data['source'])
+
+    def test_component_clamped_to_valid_range(self):
+        """Out-of-range component values clamp into 0..63 — endpoint
+        doesn't 500 on a bogus number."""
+        from spoeqi.models import Pact, RULE_TABLE_SIZE, COMPONENTS
+        per_comp = [
+            [[c, c, c], [(c + 10) % 256, 0, 0], [0, c, 0], [0, 0, c]]
+            for c in range(COMPONENTS)
+        ]
+        p = Pact(name='clamp-pal',
+                  rule_snapshot=bytes([0] * RULE_TABLE_SIZE),
+                  palette=per_comp)
+        p.save()
+        r = self.client.get(reverse('loupe:spoeqi_palette',
+                                       kwargs={'slug': p.slug}),
+                             {'component': '999'})
+        self.assertEqual(r.status_code, 200)
+        # 999 → clamped to 63.
+        self.assertIn('component:63', r.json()['source'])
