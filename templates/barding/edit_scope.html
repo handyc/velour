@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}claudecode — {{ scope.get_name_display }}{% endblock %}
+{% block title %}barding — {{ scope.get_name_display }}{% endblock %}
 {% block content %}
 <style>
   .cc-page  { max-width: 64em; }
@@ -33,7 +33,7 @@
 </style>
 
 <div class="cc-page">
-<p style="margin: 0 0 6px;"><a class="cc-meta" href="{% url 'claudecode:index' %}">&lsaquo; claudecode</a></p>
+<p style="margin: 0 0 6px;"><a class="cc-meta" href="{% url 'barding:index' %}">&lsaquo; barding</a></p>
 <h1 style="margin-top: 0;">{{ scope.get_name_display }}</h1>
 <p class="cc-meta">
   <code>{{ scope.path }}</code>

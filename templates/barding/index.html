@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}claudecode — Claude Code CLI config{% endblock %}
+{% block title %}barding — Claude Code CLI config{% endblock %}
 {% block content %}
 <style>
   .cc-page  { max-width: 64em; }
@@ -38,7 +38,7 @@
 </style>
 
 <div class="cc-page">
-<h1 style="margin-top: 0;">claudecode</h1>
+<h1 style="margin-top: 0;">barding</h1>
 <p class="cc-meta">
   Centralised view of Claude Code's <code>settings.json</code> across
   scopes, plus an honest record of customisations Anthropic's CLI does
@@ -49,7 +49,7 @@
 
 <div class="cc-section">
   <h2>Installed binary</h2>
-  {% include "claudecode/_version_partial.html" %}
+  {% include "barding/_version_partial.html" %}
 </div>
 
 <div class="cc-section">
@@ -58,7 +58,7 @@
     {% for s in scopes %}
     <div class="cc-scope-row">
       <span class="cc-pill">{{ s.obj.get_name_display }}</span>
-      <a class="name" href="{% url 'claudecode:edit_scope' scope_id=s.obj.id %}">edit</a>
+      <a class="name" href="{% url 'barding:edit_scope' scope_id=s.obj.id %}">edit</a>
       <span class="path">{{ s.obj.path }}</span>
       {% if not s.exists %}<span class="cc-warn">· missing</span>
       {% elif s.parse_error %}<span class="cc-err">· parse error</span>
@@ -72,7 +72,7 @@
   {% else %}
     <p class="cc-meta">
       No scopes seeded.  Run
-      <code>venv/bin/python manage.py claudecode_seed</code>.
+      <code>venv/bin/python manage.py barding_seed</code>.
     </p>
   {% endif %}
 </div>
@@ -98,7 +98,7 @@
     {% endfor %}
   </ul>
   <p>
-    <a class="new-btn" href="{% url 'claudecode:bundle_patches' %}">bundle patch wishlist &rsaquo;</a>
+    <a class="new-btn" href="{% url 'barding:bundle_patches' %}">bundle patch wishlist &rsaquo;</a>
     {% if wishes %}<span class="cc-meta">· {{ wishes|length }} wish{{ wishes|length|pluralize:"es" }} recorded</span>{% endif %}
   </p>
 </div>

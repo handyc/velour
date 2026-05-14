@@ -1,4 +1,4 @@
-"""claudecode views — read & edit settings.json, list bundle-patch
+"""barding views — read & edit settings.json, list bundle-patch
 wishes, surface the installed Claude Code version.
 
 The app never invokes the `claude` binary.  Filesystem writes go
@@ -128,7 +128,7 @@ def index(request):
             'exists': bool(raw) or parsed is not None,
             'parse_error': parsed is None and bool(raw),
         })
-    return render(request, 'claudecode/index.html', {
+    return render(request, 'barding/index.html', {
         'version': _installed_version(),
         'scopes': scopes,
         'sanctioned_bools': SANCTIONED_BOOLS,
@@ -158,7 +158,7 @@ def edit_scope(request, scope_id):
                 try:
                     _atomic_write_json(scope.path, new_data)
                     messages.success(request, f'Wrote {scope.path}.')
-                    return redirect('claudecode:edit_scope', scope_id=scope.id)
+                    return redirect('barding:edit_scope', scope_id=scope.id)
                 except OSError as exc:
                     errors.append(f'Write failed: {exc}')
         else:
@@ -170,7 +170,7 @@ def edit_scope(request, scope_id):
             try:
                 _atomic_write_json(scope.path, data)
                 messages.success(request, f'Wrote {scope.path}.')
-                return redirect('claudecode:edit_scope', scope_id=scope.id)
+                return redirect('barding:edit_scope', scope_id=scope.id)
             except OSError as exc:
                 errors.append(f'Write failed: {exc}')
 
@@ -192,7 +192,7 @@ def edit_scope(request, scope_id):
     permissions_json = (json.dumps(permissions, indent=2)
                         if permissions is not None else None)
 
-    return render(request, 'claudecode/edit_scope.html', {
+    return render(request, 'barding/edit_scope.html', {
         'scope': scope,
         'pretty': pretty,
         'raw': raw,
@@ -230,7 +230,7 @@ def bundle_patches(request):
             wish = get_object_or_404(BundlePatchWish, pk=request.POST.get('id'))
             wish.delete()
             messages.info(request, 'Wish removed.')
-        return redirect('claudecode:bundle_patches')
+        return redirect('barding:bundle_patches')
 
     version = _installed_version()
     binary_path = version.get('resolved') or CLAUDE_BIN_DEFAULT
@@ -241,7 +241,7 @@ def bundle_patches(request):
             'recipe': w.sed_recipe(binary_path),
             'length_ok': w.length_ok,
         })
-    return render(request, 'claudecode/bundle_patches.html', {
+    return render(request, 'barding/bundle_patches.html', {
         'wishes': wishes,
         'version': version,
         'patch_kinds': BundlePatchWish._meta.get_field('kind').choices,
@@ -250,6 +250,6 @@ def bundle_patches(request):
 
 @login_required
 def version_status(request):
-    return render(request, 'claudecode/_version_partial.html', {
+    return render(request, 'barding/_version_partial.html', {
         'version': _installed_version(),
     })

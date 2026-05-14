@@ -1,4 +1,4 @@
-"""claudecode — bookkeeping for Claude Code CLI configuration.
+"""barding — bookkeeping for Claude Code CLI configuration.
 
 settings.json is the source of truth on disk; the SettingsScope rows
 just record which paths we manage from the UI.  BundlePatchWish tracks

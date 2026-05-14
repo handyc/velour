@@ -8,7 +8,7 @@ import os
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from claudecode.models import SettingsScope
+from barding.models import SettingsScope
 
 
 class Command(BaseCommand):

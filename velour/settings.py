@@ -157,7 +157,7 @@ INSTALLED_APPS = [
     'retrogames',
     'metaevolve',
     'vampyrik',
-    'claudecode',
+    'barding',
     'signs',
 ]
 

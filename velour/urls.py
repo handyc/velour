@@ -89,7 +89,7 @@ urlpatterns = [
     path('retrogames/',  include('retrogames.urls')),
     path('metaevolve/',  include('metaevolve.urls')),
     path('vampyrik/',    include('vampyrik.urls')),
-    path('claudecode/',  include('claudecode.urls')),
+    path('barding/',  include('barding.urls')),
     path('signs/',       include('signs.urls')),
 
     path('admin/', admin.site.urls),

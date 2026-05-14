@@ -1,4 +1,4 @@
-"""claudecode tests — focus on atomicity + round-tripping settings."""
+"""barding tests — focus on atomicity + round-tripping settings."""
 
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ class SettingsRoundTripTests(TestCase):
             os.unlink(self.tmp.name)
 
     def test_toggle_spinner_tips_enabled_roundtrip(self):
-        url = reverse('claudecode:edit_scope', args=[self.scope.id])
+        url = reverse('barding:edit_scope', args=[self.scope.id])
         # Initially off.
         r = self.client.post(url, {'mode': 'form',
                                    'spinnerTipsEnabled': 'on'})
@@ -125,6 +125,6 @@ class IndexViewTests(TestCase):
             'size': 12345,
         }
         with mock.patch.object(views, '_installed_version', return_value=fake):
-            r = self.client.get(reverse('claudecode:index'))
+            r = self.client.get(reverse('barding:index'))
         self.assertEqual(r.status_code, 200)
         self.assertContains(r, '9.9.9')
