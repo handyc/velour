@@ -168,6 +168,16 @@ class Sign(models.Model):
     fps = models.PositiveSmallIntegerField(default=30,
         help_text='Frames per second the recording was sampled at.')
 
+    # Fixed-size signature used by the similarity engine: a list of
+    # K_SIGNATURE_KEYFRAMES evenly-spaced frame poses, each flattened
+    # to 90 floats (30 cylinders × [rx, ry, rz]), then L2-normalised
+    # across the whole vector. Stored so /signs/<slug>/similar/ can
+    # rank 1200 candidates without loading every frame. NULL until
+    # the importer or `manage.py compute_sign_signatures` populates it.
+    signature = models.JSONField(null=True, blank=True,
+        help_text='K_SIGNATURE_KEYFRAMES × 90-float pose signature, '
+                  'L2-normalised. Recomputed whenever frames change.')
+
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL,
                                    on_delete=models.SET_NULL,
@@ -203,6 +213,17 @@ class Sign(models.Model):
     @property
     def n_frames(self) -> int:
         return self.frames.count()
+
+    def recompute_signature(self) -> list:
+        """Recompute and persist the pose signature from the current
+        frames. Importers call this after bulk-creating Frame rows.
+        Returns the signature list."""
+        from .similarity import compute_signature
+        rotations = list(self.frames.order_by('index').values_list(
+            'cylinder_rotations', flat=True))
+        self.signature = compute_signature(rotations)
+        Sign.objects.filter(pk=self.pk).update(signature=self.signature)
+        return self.signature
 
 
 class Frame(models.Model):

@@ -113,6 +113,7 @@ def _upsert_sign(lemma, variety, source, frames):
             palm_r_pos=f.get('palm_r_pos', []),
             openpose_joints=[],
         )
+    sign.recompute_signature()
     return sign
 
 

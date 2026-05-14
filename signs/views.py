@@ -15,6 +15,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from .models import Language, Variety, Sign
+from . import similarity
 
 
 PAGE_SIZE = 50
@@ -77,10 +78,35 @@ def detail(request, slug):
         Sign.objects.select_related('lemma', 'variety',
                                     'variety__language', 'source'),
         slug=slug)
+    neighbors = _nearest_neighbors(sign, n=10)
     return render(request, 'signs/detail.html', {
-        'sign':   sign,
-        'frames': sign.frames.order_by('index'),
+        'sign':      sign,
+        'frames':    sign.frames.order_by('index'),
+        'neighbors': neighbors,
     })
+
+
+def _nearest_neighbors(sign: Sign, *, n: int = 10):
+    """Return up to ``n`` Signs nearest to ``sign`` by signature
+    distance, restricted to the same Variety. Each entry is
+    ``(neighbor_sign, distance)``. Empty if ``sign`` has no
+    signature yet."""
+    if not sign.signature:
+        return []
+    candidates = (Sign.objects.filter(variety=sign.variety)
+                              .exclude(pk=sign.pk)
+                              .exclude(signature__isnull=True)
+                              .select_related('lemma', 'variety')
+                              .only('id', 'slug', 'signature',
+                                    'lemma__gloss', 'variety__name'))
+    ranked = similarity.nearest(
+        sign.signature,
+        ((s.id, s.signature) for s in candidates),
+        n=n)
+    by_id = {s.id: s for s in Sign.objects.filter(
+        pk__in=[sid for sid, _ in ranked]
+    ).select_related('lemma', 'variety')}
+    return [(by_id[sid], d) for sid, d in ranked if sid in by_id]
 
 
 def viewer(request, slug):

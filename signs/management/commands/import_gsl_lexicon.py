@@ -86,6 +86,7 @@ def _import_one(zf, sign_name: str, frame_paths: list[str], *,
                              'right': r_xyz.tolist()},
         ))
     Frame.objects.bulk_create(rows, batch_size=200)
+    sign.recompute_signature()
     return sign, len(rows), n_skipped
 
 

@@ -50,6 +50,7 @@ def _import_one_sign(*, sign_dir: Path, lemma_text: str, language: Language,
 
     frame_paths = _iter_openpose_files(sign_dir)
     if not frame_paths:
+        sign.recompute_signature()
         return sign
 
     duration_ms = max(1, int(round(1000 / fps)))
@@ -70,6 +71,7 @@ def _import_one_sign(*, sign_dir: Path, lemma_text: str, language: Language,
             openpose_joints={'left': l_xyz.tolist(),
                              'right': r_xyz.tolist()},
         )
+    sign.recompute_signature()
     return sign
 
 

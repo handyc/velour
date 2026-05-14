@@ -17,6 +17,18 @@
                             font-size: 0.8rem; color: #888; }
   .frames-list .fr { padding: 1px 0; }
   .frames-list .fr b { color: #cfc; font-weight: normal; }
+
+  .neighbors { margin-top: 22px; }
+  .neighbors h2 { color: #cfc; font-size: 1rem; margin: 0 0 4px; font-weight: 600; }
+  .neighbors .hint { color: #888; font-size: 0.8rem; margin-bottom: 10px; }
+  .nb-row { display: flex; gap: 14px; align-items: baseline;
+            padding: 4px 0; border-bottom: 1px solid #161616; }
+  .nb-row .gloss { color: #cfc; min-width: 14em; }
+  .nb-row .dist  { color: #888; font-family: monospace; font-size: 0.85rem; }
+  .nb-row a.go   { color: #ace; margin-left: auto; font-size: 0.85rem; }
+  .nb-row .bar   { background: #1a2a3a; height: 4px; border-radius: 2px; flex: 1;
+                   max-width: 10em; align-self: center; }
+  .nb-row .bar > div { background: #4af; height: 100%; border-radius: 2px; }
 </style>
 
 <div class="sign-page">
@@ -46,6 +58,29 @@
     <div class="fr"><b>#{{ f.index }}</b> · {{ f.duration_ms }} ms</div>
   {% empty %}
     <div class="fr" style="font-style:italic;">no frames</div>
+  {% endfor %}
+</div>
+
+<div class="neighbors">
+  <h2>nearest signs in {{ sign.variety.name }}</h2>
+  <div class="hint">
+    Distance is L2 over an 8-keyframe pose signature
+    (L2-normalised; 0 = identical handshape sequence, √2 ≈ orthogonal).
+    {% if not sign.signature %}
+      <em>This sign has no signature yet — run
+      <code>manage.py compute_sign_signatures</code>.</em>
+    {% endif %}
+  </div>
+  {% for nb, d in neighbors %}
+    <div class="nb-row">
+      <span class="gloss">{{ nb.lemma.gloss }}</span>
+      <div class="bar"><div style="width: {{ d|stringformat:'.0f'|default:'0' }}%;"></div></div>
+      <span class="dist">d = {{ d|stringformat:'.4f' }}</span>
+      <a class="go" href="{% url 'signs:detail' nb.slug %}">detail</a>
+      <a class="go" href="{% url 'signs:viewer' nb.slug %}">view →</a>
+    </div>
+  {% empty %}
+    <div class="hint" style="font-style:italic;">No comparable signs in this variety yet.</div>
   {% endfor %}
 </div>
 
