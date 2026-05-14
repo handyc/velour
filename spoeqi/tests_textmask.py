@@ -114,6 +114,37 @@ class ApplyTest(_TextmaskBase):
                       mapping='attention')
 
 
+class ApplyAllTest(_TextmaskBase):
+    def test_returns_64_results(self):
+        pact = _make_pact()
+        rs = tm.apply_all(pact, text='abcd', generation=0,
+                           mapping='attention')
+        self.assertEqual(len(rs), 64)
+        for i, r in enumerate(rs):
+            self.assertEqual(r.component, i)
+            self.assertEqual(len(r.cells), pact.component_grid ** 2)
+
+    def test_components_diverge(self):
+        # Same input through 64 components — outputs should not all
+        # be identical (the seed expansion gives each component its
+        # own grid pattern).
+        pact = _make_pact()
+        rs = tm.apply_all(pact, text='abcdefghij' * 4, generation=0,
+                           mapping='attention')
+        outs = {r.output_text for r in rs}
+        self.assertGreater(len(outs), 1,
+                            'all 64 components produced identical output')
+
+    def test_determinism(self):
+        pact = _make_pact()
+        a = tm.apply_all(pact, text='hello', generation=3,
+                         mapping='cipher')
+        b = tm.apply_all(pact, text='hello', generation=3,
+                         mapping='cipher')
+        self.assertEqual([r.output_text for r in a],
+                         [r.output_text for r in b])
+
+
 class ViewTest(_TextmaskBase):
     def test_get_renders_form(self):
         pact = _make_pact()
@@ -151,3 +182,20 @@ class ViewTest(_TextmaskBase):
         })
         self.assertEqual(r.status_code, 200)
         self.assertIn('bad input', r.content.decode())
+
+    def test_post_compare_all_renders_64_rows(self):
+        pact = _make_pact()
+        url = reverse('spoeqi:textmask', args=[pact.slug])
+        r = self.client.post(url, {
+            'text':        'attention',
+            'mapping':     'attention',
+            'component':   '0',
+            'generation':  '0',
+            'compare_all': 'on',
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('all 64 components', body)
+        import re
+        rows = re.findall(r'class="tm-c-idx">(\d+)<', body)
+        self.assertEqual(len(rows), 64)

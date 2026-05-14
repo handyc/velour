@@ -571,21 +571,30 @@ def textmask(request, slug):
         'component':  '0',
         'generation': '0',
         'mapping':    'attention',
+        'compare_all': '',   # 'on' when the checkbox is ticked
     }
     form = dict(form_defaults)
     result = None
+    all_results = None
     error = None
 
     if request.method == 'POST':
         for k in form:
             form[k] = request.POST.get(k, form_defaults[k])
         try:
-            result = tm.apply(
-                pact,
-                text=form['text'],
-                component=int(form['component']),
-                generation=int(form['generation']),
-                mapping=form['mapping'])
+            if form['compare_all']:
+                all_results = tm.apply_all(
+                    pact,
+                    text=form['text'],
+                    generation=int(form['generation']),
+                    mapping=form['mapping'])
+            else:
+                result = tm.apply(
+                    pact,
+                    text=form['text'],
+                    component=int(form['component']),
+                    generation=int(form['generation']),
+                    mapping=form['mapping'])
         except (ValueError, TypeError) as e:
             error = f'bad input: {e}'
         except Exception as e:  # noqa: BLE001
@@ -629,17 +638,63 @@ def textmask(request, slug):
             for c in result.cells
         ]
 
+    # Build a compact per-component summary row for the comparison
+    # mode: component index, a 4-colour stacked-bar (counts of each
+    # colour in this component's grid) so the eye can scan vertically
+    # for "mostly red" vs "balanced", and the flattened output text.
+    rendered_rows = None
+    if all_results is not None:
+        rendered_rows = []
+        for r in all_results:
+            counts = [0, 0, 0, 0]
+            for c in r.cells:
+                counts[c.color] += 1
+            total = max(1, sum(counts))
+            bar = [{'pct':   100.0 * counts[i] / total,
+                     'count': counts[i],
+                     'css':   swatches[i]['css']}
+                    for i in range(4)]
+            rendered_rows.append({
+                'component':   r.component,
+                'output_text': r.output_text,
+                'bar':         bar,
+            })
+
+    # Payload for the live JS engine: enough to run the same 64 CAs
+    # the detail page runs, plus the active mapping name and palette.
+    # Only attached when there's a result to display — the empty-form
+    # GET doesn't ship a megabyte of rule bytes.
+    live_payload_json = ''
+    if result is not None or all_results is not None:
+        live_payload = {
+            'seed_hex':      pact.seed_hex,
+            'rules_hex':     pact.rules_hex,
+            'components':    COMPONENTS,
+            'component_grid': pact.component_grid,
+            'tick_ms':       pact.tick_ms,
+            'palette':       pact.palette,
+            'mapping':       form['mapping'],
+            'text':          form['text'],
+            'generation':    int(form['generation']),
+            'compare_all':   bool(form['compare_all']),
+            'component':     int(form['component']) if not form['compare_all'] else 0,
+        }
+        live_payload_json = json.dumps(live_payload)
+
     return render(request, 'spoeqi/textmask.html', {
         'pact':            pact,
         'form':            form,
         'result':          result,
         'rendered_cells':  rendered_cells,
+        'all_results':     all_results,
+        'rendered_rows':   rendered_rows,
         'error':           error,
         'mappings':        mappings,
         'active_labels':   list(active_labels),
         'swatches':        swatches,
         'side':            pact.component_grid,
         'components':      list(range(COMPONENTS)),
+        'live_payload':    live_payload_json,
     })
 
 

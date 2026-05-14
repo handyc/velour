@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
-from .models import Pact
+from .models import Pact, COMPONENTS
 from . import keystream
 
 
@@ -187,3 +187,46 @@ def apply(pact: Pact, *, text: str, component: int, generation: int,
     return MaskResult(side=side, component=component,
                       generation=generation, mapping=mapping,
                       cells=cells, output_text=''.join(chunks))
+
+
+def apply_all(pact: Pact, *, text: str, generation: int,
+              mapping: str) -> List[MaskResult]:
+    """Apply the mask through every one of the 64 components at the
+    same generation.  One CA state read, 64 slices — same cost as a
+    single ``apply()`` call plus 64 cheap loops.  Returns a list of
+    ``MaskResult`` indexed by component (0..63), good for line-by-line
+    comparison in the UI.
+
+    Components share the (text, generation, mapping); only the
+    colour pattern differs.  That's the experiment: "what does the
+    same input look like, masked by 64 different evolving stencils?"
+    """
+    if mapping not in MAPPING_TABLES:
+        raise ValueError(f'unknown mapping {mapping!r}')
+    if generation < 0:
+        raise ValueError('generation must be ≥ 0')
+
+    side = pact.component_grid
+    state = keystream.get_state_at(pact, generation)
+    area = side * side
+    glyphs = tile_text(text, side)
+    table  = MAPPING_TABLES[mapping].table
+
+    results: List[MaskResult] = []
+    for c in range(COMPONENTS):
+        base = c * area
+        grid = state[base:base + area]
+        cells: List[Cell] = []
+        chunks: List[str] = []
+        for idx in range(area):
+            color = grid[idx]
+            ch    = glyphs[idx]
+            out   = table[color](ch)
+            cells.append(Cell(idx=idx, row=idx // side, col=idx % side,
+                              char=ch, color=color, out=out))
+            chunks.append(out)
+        results.append(MaskResult(side=side, component=c,
+                                   generation=generation, mapping=mapping,
+                                   cells=cells,
+                                   output_text=''.join(chunks)))
+    return results
