@@ -452,6 +452,49 @@ def detail(request, slug):
     else:
         swatch_palette = pact.palette or DEFAULT_PALETTE
         palette_is_per_component = False
+
+    # Bottom-out fingerprint: opt-in via ?fingerprint=1 so the default
+    # detail load stays cheap.  When requested, run each component up
+    # to N steps and resolve every "uniform" outcome to its actual RGB
+    # from the pact's palette, so the template just lays out colour
+    # swatches.
+    fingerprint = None
+    if request.GET.get('fingerprint') == '1':
+        from . import analysis
+        try:
+            max_steps = int(request.GET.get('fp_steps') or 128)
+        except (TypeError, ValueError):
+            max_steps = 128
+        max_steps = max(1, min(512, max_steps))
+        fp = analysis.convergence_fingerprint(pact, max_steps=max_steps)
+        # Resolve each component's colour-index to its RGB via the
+        # palette (per-component when available).
+        def _rgb_for(c, idx):
+            if idx is None:
+                return None
+            if palette_is_per_component:
+                pal = pact.palette[c]
+            else:
+                pal = swatch_palette
+            r, g, b = pal[idx]
+            return f'rgb({r}, {g}, {b})'
+        flat = []
+        for entry in fp['components']:
+            flat.append({
+                **entry,
+                'rgb': _rgb_for(entry['component'], entry['colour']),
+            })
+        fingerprint = {
+            'components': flat,
+            'bitmap': [[flat[r * 8 + col] for col in range(8)]
+                        for r in range(8)],
+            'n_uniform': fp['n_uniform'],
+            'n_stable':  fp['n_stable'],
+            'n_cycling': fp['n_cycling'],
+            'max_steps': fp['max_steps'],
+            'uniform_pct': round(100 * fp['n_uniform'] / COMPONENTS, 1),
+        }
+
     return render(request, 'spoeqi/detail.html', {
         'pact':    pact,
         'payload': json.dumps(payload),
@@ -461,6 +504,7 @@ def detail(request, slug):
         'fleet_legend':     fleet_legend,
         'swatch_palette':   swatch_palette,
         'palette_is_per_component': palette_is_per_component,
+        'fingerprint':      fingerprint,
     })
 
 

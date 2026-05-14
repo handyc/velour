@@ -142,6 +142,73 @@
 </details>
 {% endif %}
 
+<details {% if fingerprint %}open{% endif %} style="margin-top:18px;">
+  <summary style="color:#ace;">
+    Bottom-out fingerprint
+    {% if fingerprint %}
+      <span style="color:#cfc;">— {{ fingerprint.n_uniform }}/64 converged
+        ({{ fingerprint.uniform_pct }}%)</span>
+    {% else %}
+      <span style="color:#888;">— click "compute" to evaluate</span>
+    {% endif %}
+  </summary>
+  <p class="spoeqi-meta" style="max-width:64em;">
+    Each of the 64 component CAs runs forward from gen 0 until it
+    either flattens to a single colour, settles into a period-1 fixed
+    point with structure, or runs out of steps.  The 8×8 grid below
+    is the bottom-out colour of every component — a nested image
+    "inside" the full pact.  Cells with no swatch are stable but
+    non-uniform (×) or still cycling (⋯) at the step cap.
+  </p>
+  {% if not fingerprint %}
+    <p style="margin:8px 0;">
+      <a class="badge" style="color:#cfc; text-decoration:none;"
+         href="?fingerprint=1">compute fingerprint (~50ms)</a>
+      <a class="badge" style="color:#cfc; text-decoration:none; margin-left:6px;"
+         href="?fingerprint=1&amp;fp_steps=256">…with 256 steps</a>
+    </p>
+  {% else %}
+    <div style="display:flex; gap:24px; align-items:flex-start;
+                margin-top:10px;">
+      <div style="display:grid;
+                  grid-template-columns:repeat(8, 30px);
+                  grid-template-rows:repeat(8, 30px);
+                  gap:2px; background:#111; padding:4px;
+                  border:1px solid #222;">
+        {% for row in fingerprint.bitmap %}{% for cell in row %}
+          <div title="component {{ cell.component }} · {{ cell.status }} · step {{ cell.step }}{% if cell.colour is not None %} · colour {{ cell.colour }}{% endif %}"
+               style="width:30px; height:30px;
+                      {% if cell.rgb %}background:{{ cell.rgb }};
+                        border:1px solid rgba(255,255,255,0.05);
+                      {% elif cell.status == 'stable' %}background:#1a1a1a;
+                        border:1px dashed #553;
+                        color:#aa8; font-family:monospace;
+                        text-align:center; line-height:30px; font-size:14px;
+                      {% else %}background:#0a0a0a;
+                        border:1px dashed #335;
+                        color:#88a; font-family:monospace;
+                        text-align:center; line-height:30px; font-size:18px;
+                      {% endif %}">{% if not cell.rgb %}{% if cell.status == 'stable' %}×{% else %}⋯{% endif %}{% endif %}</div>
+        {% endfor %}{% endfor %}
+      </div>
+      <div style="font-family:monospace; font-size:0.78rem;
+                  color:#aaa; line-height:1.7;">
+        <div>uniform &nbsp;<b style="color:#cfc;">{{ fingerprint.n_uniform }}</b>/64</div>
+        <div>stable × &nbsp;<b style="color:#ccc;">{{ fingerprint.n_stable }}</b>/64</div>
+        <div>cycling ⋯ <b style="color:#ccc;">{{ fingerprint.n_cycling }}</b>/64</div>
+        <div style="color:#666; margin-top:8px;">
+          step cap = {{ fingerprint.max_steps }}
+        </div>
+        <div style="color:#666; margin-top:14px; max-width:18em;">
+          A pact whose entire bitmap fills with colour swatches is a
+          candidate for the "nested image" GA: its 64 components all
+          bottom out into a single 8×8 image.
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</details>
+
 <details>
   <summary>seed / rule fingerprint (sealed; identical on both ends)</summary>
   <p class="spoeqi-meta">
