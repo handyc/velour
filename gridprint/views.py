@@ -420,6 +420,10 @@ def _escher_svg(request, slug: str):
         motif_label = f'tilesmith {request.GET.get("tile_slug") or "?"}'
     elif motif_kind == 'upload':
         motif_label = f'upload {request.GET.get("upload_slug") or "?"}'
+    elif motif_kind == 'loupe_walk':
+        ls = request.GET.get('loupe_slug') or '?'
+        st = request.GET.get('loupe_step') or 'final'
+        motif_label = f'loupe {ls} step {st}'
     else:
         motif_label = (request.GET.get('motif_slug') or 'comma').strip()
     footer = (

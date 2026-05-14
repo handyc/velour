@@ -32,7 +32,7 @@ from django.utils.text import slugify
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 from django.views.decorators.http import require_POST
 
-from . import groups, motifs, svg, ca_motif, tilesmith_motif, uploads as uploads_mod
+from . import groups, motifs, svg, ca_motif, tilesmith_motif, loupe_motif, uploads as uploads_mod
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -84,6 +84,16 @@ def _resolve_motif(request) -> str:
         embed = 'base64' if request.GET.get('embed_image') == 'base64' \
                 else 'url'
         return uploads_mod.upload_motif(slug, embed=embed)
+    if kind == 'loupe_walk':
+        slug = (request.GET.get('loupe_slug') or '').strip()
+        if not slug:
+            return loupe_motif._placeholder('missing ?loupe_slug=<walk>')
+        step_raw = request.GET.get('loupe_step')
+        step = None
+        if step_raw not in (None, ''):
+            try: step = int(step_raw)
+            except ValueError: step = None
+        return loupe_motif.loupe_walk_motif(slug, step=step)
     # Stock — default branch.
     slug = (request.GET.get('motif_slug') or motifs.DEFAULT_MOTIF).strip()
     try:

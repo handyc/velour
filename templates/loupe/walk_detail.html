@@ -89,6 +89,18 @@
       in the URL to print an earlier step.
     </div>
 
+    <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Tile as motif</h3>
+    <a id="btn-escher" target="_blank"
+       href="{% url 'escher:group_detail' 'p6m' %}?motif=loupe_walk&amp;loupe_slug={{ walk.slug }}"
+       style="display:inline-block; background:#238636; color:#fff;
+              padding:0.4rem 0.8rem; text-decoration:none;
+              font-size:0.8rem;">→ Tile with escher (p6m)</a>
+    <div style="color:#888; font-size:0.72rem; margin-top:0.2rem;">
+      uses this walk's final frame as a motif under one of the 17
+      wallpaper groups (default p6m).
+    </div>
+
     <form method="post"
           action="{% url 'loupe:walk_delete' walk.slug %}"
           style="margin-top:0.8rem;"
@@ -120,7 +132,9 @@
   const slider = document.getElementById('step-slider');
 
   const printBtn = document.getElementById('btn-print');
+  const escherBtn = document.getElementById('btn-escher');
   const PRINT_BASE = printBtn ? printBtn.getAttribute('href') : null;
+  const ESCHER_BASE = escherBtn ? escherBtn.getAttribute('href') : null;
   function showStep (k) {
     const s = GENE[Math.max(0, Math.min(GENE.length - 1, k))];
     eng.setView(s.cx, s.cy, s.span);
@@ -133,6 +147,9 @@
     slider.value = k;
     if (printBtn && PRINT_BASE) {
       printBtn.href = PRINT_BASE + '&step=' + k;
+    }
+    if (escherBtn && ESCHER_BASE) {
+      escherBtn.href = ESCHER_BASE + '&loupe_step=' + k;
     }
   }
 

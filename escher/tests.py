@@ -375,3 +375,58 @@ class CompositionPersistenceTest(TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn(b'listed', r.content)
         self.assertIn(b'cmm', r.content)
+
+
+class LoupeMotifTest(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='esc-lp', password='x')
+        self.client.force_login(self.user)
+        from loupe.models import Walk
+        self.walk = Walk.objects.create(
+            slug='lp-motif', name='lp-motif',
+            gene_json=[{'cx': -0.5, 'cy': 0.0, 'span': 3.0,
+                         'fitness': 1.0, 'iter': 32}],
+            method='manual',
+        )
+
+    def test_loupe_walk_motif_references_walk_png_url(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p3', 'motif': 'loupe_walk',
+            'loupe_slug': self.walk.slug,
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<image href="/loupe/w/lp-motif/render.png?', body)
+        # Same orbit-size assertion as for other motifs: p3 has orbit 3,
+        # so we expect at least many <use> placements.
+        self.assertGreater(body.count('<use href="#motif"'), 20)
+
+    def test_missing_slug_shows_placeholder(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4m', 'motif': 'loupe_walk',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'missing', r.content)
+
+    def test_unknown_slug_shows_placeholder(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4m', 'motif': 'loupe_walk',
+            'loupe_slug': 'no-such-walk',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'not found', r.content)
+
+    def test_step_param_forwards_to_image_url(self):
+        # Add a second step so step=0 is valid (gene length must be ≥ 2).
+        self.walk.gene_json = [
+            {'cx': -0.5, 'cy': 0.0, 'span': 3.0, 'fitness': 1.0},
+            {'cx': -0.4, 'cy': 0.1, 'span': 1.5, 'fitness': 1.5},
+        ]
+        self.walk.save()
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p1', 'motif': 'loupe_walk',
+            'loupe_slug': self.walk.slug, 'loupe_step': '0',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'step=0', r.content)
