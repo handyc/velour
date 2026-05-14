@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}escher — compositions{% endblock %}
+
+{% block content %}
+<div style="max-width:1200px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<p style="font-size:0.85rem; color:#8b949e;">
+  <a href="{% url 'escher:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Compositions</b>
+</p>
+
+<h1 style="margin:0;">Saved compositions
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — every named group × motif pair you've kept
+  </span>
+</h1>
+
+<p style="color:#8b949e; font-size:0.85rem; max-width:60em;">
+  Use the “Save composition” form on any group's detail page to
+  capture the current motif + tile size as a named record.
+</p>
+
+{% if messages %}
+  {% for m in messages %}
+    <div style="margin:0.4rem 0; padding:0.4rem 0.8rem;
+                background:#161b22; border-left:3px solid
+                {% if 'error' in m.tags %}#f85149
+                {% elif 'success' in m.tags %}#3aec74
+                {% else %}#58a6ff{% endif %};
+                color:#cfa; font-size:0.85rem;">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+<div style="display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+            gap:10px; margin-top:1rem;">
+  {% for c in compositions %}
+    <div style="background:#0d1117; border:1px solid #30363d;
+                border-radius:5px; padding:0.6rem 0.7rem;">
+      <a href="{% url 'escher:composition_detail' c.slug %}"
+         style="color:#cfa; text-decoration:none; font-weight:600;
+                display:block;">{{ c.name }}</a>
+      <div style="color:#6e7681; font-size:0.7rem; margin-top:0.2rem;">
+        {{ c.group_slug }} · {{ c.motif_label }} · {{ c.tile_mm }}mm
+        {% if c.landscape %} · landscape{% endif %}
+      </div>
+      <iframe src="{% url 'escher:composition_detail' c.slug %}?embed=1"
+        style="display:none;"></iframe>
+      <img alt="preview" loading="lazy"
+        src="{% url 'escher:render_svg' %}?group={{ c.group_slug }}&amp;motif={{ c.motif_kind }}{% if c.motif_kind == 'stock' %}&amp;motif_slug={{ c.motif_spec.slug }}{% elif c.motif_kind == 'spoeqi_component' %}&amp;pact={{ c.motif_spec.pact }}&amp;component={{ c.motif_spec.component }}&amp;gen={{ c.motif_spec.generation|default:0 }}{% elif c.motif_kind == 'tilesmith_tile' %}&amp;tile_slug={{ c.motif_spec.tile_slug }}{% elif c.motif_kind == 'upload' %}&amp;upload_slug={{ c.motif_spec.upload_slug }}{% endif %}&amp;tile={{ c.tile_mm }}&amp;w=180&amp;h=180&amp;margin=4&amp;embed=1"
+        style="display:block; width:100%; aspect-ratio:1/1;
+               margin-top:0.4rem; background:#fafafa; border-radius:3px;">
+      <div style="margin-top:0.4rem; display:flex; gap:8px; align-items:center;
+                  font-size:0.72rem;">
+        <a target="_blank" style="color:#8b949e; text-decoration:none;"
+           href="{% url 'gridprint:index' %}?pattern=escher&amp;from_escher={{ c.group_slug }}&amp;tile={{ c.tile_mm }}{% if c.landscape %}&amp;landscape=1{% endif %}{% if c.motif_kind == 'stock' %}&amp;motif=stock&amp;motif_slug={{ c.motif_spec.slug }}{% elif c.motif_kind == 'spoeqi_component' %}&amp;motif=spoeqi_component&amp;pact={{ c.motif_spec.pact }}&amp;component={{ c.motif_spec.component }}&amp;gen={{ c.motif_spec.generation|default:0 }}{% elif c.motif_kind == 'tilesmith_tile' %}&amp;motif=tilesmith_tile&amp;tile_slug={{ c.motif_spec.tile_slug }}{% elif c.motif_kind == 'upload' %}&amp;motif=upload&amp;upload_slug={{ c.motif_spec.upload_slug }}{% endif %}">Print →</a>
+        <form method="post"
+              action="{% url 'escher:composition_delete' c.slug %}"
+              style="display:inline; margin-left:auto;"
+              onsubmit="return confirm('Delete composition {{ c.name|escapejs }}?');">
+          {% csrf_token %}
+          <button type="submit" style="background:transparent;
+            color:#f85149; border:0; padding:0; cursor:pointer;
+            font-size:0.72rem; font-family:inherit;">delete</button>
+        </form>
+      </div>
+    </div>
+  {% empty %}
+    <p style="color:#6e7681; font-style:italic;">no compositions saved yet</p>
+  {% endfor %}
+</div>
+
+</div>
+{% endblock %}

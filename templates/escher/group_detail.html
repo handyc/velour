@@ -8,10 +8,17 @@
 <h1 style="margin:0;">
   <a href="{% url 'escher:index' %}" style="color:#888; text-decoration:none;">escher</a>
   <span style="color:#666;">/</span>
-  <span style="color:#cfa;">{{ group.slug }}</span>
-  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
-    — {{ group.note }}
-  </span>
+  {% if composition %}
+    <a href="{% url 'escher:composition_list' %}" style="color:#888; text-decoration:none;">compositions</a>
+    <span style="color:#666;">/</span>
+    <span style="color:#cfa;">{{ composition.name }}</span>
+    <span style="color:#666; font-weight:400; font-size:0.85rem;">({{ composition.slug }})</span>
+  {% else %}
+    <span style="color:#cfa;">{{ group.slug }}</span>
+    <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+      — {{ group.note }}
+    </span>
+  {% endif %}
 </h1>
 
 <p style="color:#8b949e; font-size:0.85rem; margin:0.2rem 0 0.8rem;">
@@ -124,6 +131,24 @@
     </div>
   </form>
 
+  <form id="save-form" method="post" action="{% url 'escher:composition_save' %}"
+        style="grid-column:1; background:#161b22; border:1px solid #30363d;
+               border-radius:6px; padding:0.6rem 0.9rem;
+               display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+    {% csrf_token %}
+    <input type="text" name="name" placeholder="composition name"
+            style="flex:1; background:#0d1117; color:#c9d1d9;
+                   border:1px solid #30363d; padding:0.25rem;
+                   font-family:inherit; font-size:0.8rem;">
+    <button type="submit" style="background:#238636; color:#fff;
+            border:0; padding:0.4rem 0.9rem; cursor:pointer;
+            font-size:0.85rem;">Save composition</button>
+    <a href="{% url 'escher:composition_list' %}"
+       style="color:#8b949e; text-decoration:none; font-size:0.78rem;">
+      browse →
+    </a>
+  </form>
+
   <div id="preview-pane" style="display:flex; flex-direction:column;
        align-items:center;">
     <iframe id="preview" src="" style="display:block; background:#fff;
@@ -144,7 +169,20 @@
   const downloadBtn = document.getElementById('download-btn');
   const printBtn = document.getElementById('print-btn');
   const gridprintLink = document.getElementById('gridprint-link');
+  const saveForm = document.getElementById('save-form');
   const motifSel = form.querySelector('[name="motif"]');
+
+  // Prefill from server-passed initial values (used when loading a
+  // saved Composition).  Stays inert on /escher/g/<slug>/ where the
+  // injected object is empty.
+  const INITIAL = {{ initial_json|safe }};
+  for (const [k, v] of Object.entries(INITIAL)) {
+    if (v === '' || v === null || v === undefined) continue;
+    const el = form.querySelector('[name="' + k + '"]');
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = (v === '1' || v === true);
+    else el.value = v;
+  }
 
   function updateMotifVisibility () {
     const kind = motifSel.value;
@@ -226,6 +264,28 @@
     // window.print() once the SVG is laid out.
     window.open(buildGridprintPrintUrl(), '_blank');
   });
+
+  // Save form: mirror every relevant form value as a hidden input
+  // immediately before submit so the POST carries the live state.
+  if (saveForm) {
+    saveForm.addEventListener('submit', (e) => {
+      // Strip prior hidden mirror inputs (keeps re-submit idempotent).
+      for (const old of saveForm.querySelectorAll('[data-mirror]')) {
+        old.remove();
+      }
+      const params = buildParams();
+      for (const [k, v] of params) {
+        if (k === 'name') continue;
+        const h = document.createElement('input');
+        h.type = 'hidden';
+        h.name = k;
+        h.value = v;
+        h.dataset.mirror = '1';
+        saveForm.appendChild(h);
+      }
+    });
+  }
+
   refresh();
 })();
 </script>

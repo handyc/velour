@@ -275,3 +275,79 @@ class UploadMotifTest(TestCase):
         body = r.content.decode()
         self.assertIn('<image href="data:image/png;base64,', body)
         rec.file.delete(save=False); rec.delete()
+
+
+class CompositionPersistenceTest(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='esc-c', password='x')
+        self.client.force_login(self.user)
+
+    def test_save_then_load_round_trip(self):
+        from escher.models import Composition
+        r = self.client.post(reverse('escher:composition_save'), {
+            'name': 'Cool p6 comp',
+            'group': 'p6',
+            'motif': 'stock',
+            'motif_slug': 'spiral',
+            'tile': '24',
+            'landscape': '1',
+        }, follow=False)
+        self.assertEqual(r.status_code, 302)
+        comp = Composition.objects.get(name='Cool p6 comp')
+        self.assertEqual(comp.group_slug, 'p6')
+        self.assertEqual(comp.motif_kind, 'stock')
+        self.assertEqual(comp.motif_spec, {'slug': 'spiral'})
+        self.assertAlmostEqual(comp.tile_mm, 24.0)
+        self.assertTrue(comp.landscape)
+
+        # Detail page renders with prefilled JSON.
+        r = self.client.get(reverse('escher:composition_detail',
+                                      kwargs={'slug': comp.slug}))
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('"group": "p6"', body)
+        self.assertIn('"motif_slug": "spiral"', body)
+        # The page H1 displays the composition name when one is loaded.
+        self.assertIn('Cool p6 comp', body)
+
+    def test_save_requires_name(self):
+        r = self.client.post(reverse('escher:composition_save'),
+                              {'group': 'p4m'})
+        self.assertEqual(r.status_code, 302)   # bounced back
+        from escher.models import Composition
+        self.assertEqual(Composition.objects.count(), 0)
+
+    def test_spec_captures_motif_kind(self):
+        from escher.models import Composition
+        self.client.post(reverse('escher:composition_save'), {
+            'name': 'spoeqi mosaic',
+            'group': 'p3', 'motif': 'spoeqi_component',
+            'pact': 'p-slug', 'component': '7', 'gen': '12',
+        })
+        comp = Composition.objects.first()
+        self.assertEqual(comp.motif_kind, 'spoeqi_component')
+        self.assertEqual(comp.motif_spec, {
+            'pact': 'p-slug', 'component': 7, 'generation': 12,
+        })
+
+    def test_delete_removes_record(self):
+        from escher.models import Composition
+        self.client.post(reverse('escher:composition_save'), {
+            'name': 'doomed', 'group': 'p2', 'motif': 'stock',
+        })
+        slug = Composition.objects.get(name='doomed').slug
+        r = self.client.post(reverse('escher:composition_delete',
+                                       kwargs={'slug': slug}))
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(Composition.objects.count(), 0)
+
+    def test_list_renders(self):
+        self.client.post(reverse('escher:composition_save'), {
+            'name': 'listed', 'group': 'cmm', 'motif': 'stock',
+            'motif_slug': 'comma',
+        })
+        r = self.client.get(reverse('escher:composition_list'))
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'listed', r.content)
+        self.assertIn(b'cmm', r.content)

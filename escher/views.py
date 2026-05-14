@@ -276,11 +276,137 @@ def group_detail(request, slug):
         g = groups.get(slug)
     except KeyError:
         raise Http404(f'unknown wallpaper group: {slug}')
+    return _render_group_page(request, g, composition=None)
+
+
+def _render_group_page(request, group, *, composition):
+    """Common renderer for the per-group editor.  When ``composition``
+    is set, its stored settings are injected as the initial form
+    values via a JSON blob the template's JS reads on load."""
     from .models import UploadedMotif
+    import json as _json
+    initial = {}
+    if composition is not None:
+        s = composition.motif_spec or {}
+        initial = {
+            'group':         composition.group_slug,
+            'motif':         composition.motif_kind,
+            'motif_slug':    s.get('slug', ''),
+            'pact':          s.get('pact', ''),
+            'component':     s.get('component', ''),
+            'gen':           s.get('generation', ''),
+            'tile_slug':     s.get('tile_slug', ''),
+            'upload_slug':   s.get('upload_slug', ''),
+            'tile':          composition.tile_mm,
+            'landscape':     '1' if composition.landscape else '',
+        }
     return render(request, 'escher/group_detail.html', {
-        'group':   g,
+        'group':   group,
         'groups':  groups.GROUPS,
         'motifs':  list(motifs.STOCK.values()),
         'default_motif': motifs.DEFAULT_MOTIF,
         'uploads': UploadedMotif.objects.all()[:200],
+        'composition': composition,
+        'initial_json': _json.dumps(initial),
     })
+
+
+# ─── Persisted compositions ──────────────────────────────────────────
+
+def _spec_from_request(request) -> dict:
+    """Build the JSONField spec for a Composition from the current
+    POST/GET params.  Different motif kinds carry different keys."""
+    kind = (request.POST.get('motif') or request.GET.get('motif')
+            or 'stock').strip()
+    g = request.POST.get if request.method == 'POST' else request.GET.get
+    if kind == 'spoeqi_component':
+        return {
+            'pact':       (g('pact') or '').strip(),
+            'component':  int(g('component') or 0),
+            'generation': int(g('gen') or 0),
+        }
+    if kind == 'tilesmith_tile':
+        return {'tile_slug': (g('tile_slug') or '').strip()}
+    if kind == 'upload':
+        return {'upload_slug': (g('upload_slug') or '').strip()}
+    return {'slug': (g('motif_slug') or motifs.DEFAULT_MOTIF).strip()}
+
+
+@login_required
+def composition_list(request):
+    from .models import Composition
+    return render(request, 'escher/composition_list.html', {
+        'compositions': Composition.objects.all()[:200],
+        'groups': groups.GROUPS,
+    })
+
+
+@require_POST
+@login_required
+def composition_save(request):
+    from .models import Composition
+    name = (request.POST.get('name') or '').strip()
+    if not name:
+        messages.error(request, 'composition name required')
+        return redirect(request.META.get('HTTP_REFERER',
+                                          reverse('escher:index')))
+    group_slug = (request.POST.get('group') or 'p4m').strip()
+    try:
+        groups.get(group_slug)
+    except KeyError:
+        messages.error(request, f'unknown group: {group_slug}')
+        return redirect(request.META.get('HTTP_REFERER',
+                                          reverse('escher:index')))
+    motif_kind = (request.POST.get('motif') or 'stock').strip()
+    try:
+        tile_mm = float(request.POST.get('tile') or 30.0)
+    except (TypeError, ValueError):
+        tile_mm = 30.0
+    landscape = request.POST.get('landscape') == '1'
+
+    base = slugify(name) or 'composition'
+    slug = base
+    n = 1
+    while Composition.objects.filter(slug=slug).exists():
+        n += 1
+        slug = f'{base}-{n}'
+    comp = Composition(
+        slug=slug, name=name[:160],
+        group_slug=group_slug, motif_kind=motif_kind,
+        motif_spec=_spec_from_request(request),
+        tile_mm=max(4.0, min(400.0, tile_mm)),
+        landscape=landscape,
+    )
+    comp.save()
+    messages.success(request, f'saved composition "{comp.slug}"')
+    return redirect('escher:composition_detail', slug=comp.slug)
+
+
+@login_required
+def composition_detail(request, slug):
+    from .models import Composition
+    comp = Composition.objects.filter(slug=slug).first()
+    if comp is None:
+        raise Http404(f'composition not found: {slug}')
+    try:
+        g = groups.get(comp.group_slug)
+    except KeyError:
+        raise Http404(f'composition references unknown group: '
+                       f'{comp.group_slug}')
+    return _render_group_page(request, g, composition=comp)
+
+
+@require_POST
+@login_required
+def composition_delete(request, slug):
+    from .models import Composition
+    comp = Composition.objects.filter(slug=slug).first()
+    if comp is not None:
+        comp.delete()
+        messages.success(request, f'deleted composition "{slug}"')
+    return redirect('escher:composition_list')
+
+
+# Need reverse() in composition_save; import here to avoid a top-level
+# circular issue with messages flush.
+from django.urls import reverse
