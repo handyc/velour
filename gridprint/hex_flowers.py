@@ -108,6 +108,30 @@ class FlowerStyle:
     key_font_size: float = 1.6        # mm
     label_color: str = '#888888'
 
+    # Geometry-vs-cell positions are stored explicitly so a single
+    # scale factor applied via `scaled()` rescales every part of the
+    # flower coherently (hex sizes + intra-cell offsets + arrow).
+    flower_center_x: float = 5.0      # mm — input flower centre inside the cell
+    result_center_x: float = 15.0     # mm — output hex centre
+
+    def scaled(self, s: float) -> 'FlowerStyle':
+        """Return a copy of self with all mm-valued dimensions scaled
+        by ``s``.  Used by render_flowers_svg's ``size_scale`` arg
+        to pack more flowers per page without leaving the proportions
+        ragged."""
+        return FlowerStyle(
+            palette=self.palette,
+            border_color=self.border_color,
+            border_width=max(0.05, self.border_width * s),
+            cell_r=self.cell_r * s,
+            result_r=self.result_r * s,
+            show_key=self.show_key,
+            key_font_size=self.key_font_size * s,
+            label_color=self.label_color,
+            flower_center_x=self.flower_center_x * s,
+            result_center_x=self.result_center_x * s,
+        )
+
 
 @dataclass(frozen=True)
 class FlowerLayout:
@@ -116,11 +140,30 @@ class FlowerLayout:
     inner_gap_mm: float        # gap between flower and result inside one cell
     cell_padding_mm: float     # margin between flower cells in the grid
 
+    def scaled(self, s: float) -> 'FlowerLayout':
+        return FlowerLayout(
+            cell_w_mm=self.cell_w_mm * s,
+            cell_h_mm=self.cell_h_mm * s,
+            inner_gap_mm=self.inner_gap_mm * s,
+            cell_padding_mm=max(0.3, self.cell_padding_mm * s),
+        )
+
 
 def default_layout() -> FlowerLayout:
     return FlowerLayout(
         cell_w_mm=22.0, cell_h_mm=14.0,
         inner_gap_mm=2.0, cell_padding_mm=1.0)
+
+
+# Named density presets so callers can ask for "small flowers, many
+# per page" without doing the scale-factor maths themselves.
+SIZE_SCALES = {
+    'tiny':    0.36,    # ~1100 / A4 page → ~15 pages for the whole rule
+    'small':   0.50,    # ~580  / A4 page → ~29 pages
+    'medium':  0.70,    # ~290  / A4 page → ~58 pages
+    'large':   1.00,    # ~144  / A4 page → ~114 pages (historical default)
+}
+DEFAULT_SIZE = 'small'
 
 
 def _hex_svg(cx: float, cy: float, r: float, fill: str,
@@ -136,14 +179,17 @@ def _hex_svg(cx: float, cy: float, r: float, fill: str,
 def _flower_svg(x: float, y: float, key: int, output: int,
                  style: FlowerStyle, layout: FlowerLayout) -> str:
     """Render one flower cell at (x, y) top-left.  Lays the input
-    flower on the left half and the result hex on the right."""
+    flower on the left half and the result hex on the right.
+
+    All positions come from ``style`` (flower_center_x, result_center_x,
+    radii, font size) so a single scale factor applied via
+    ``FlowerStyle.scaled()`` rescales every part of the flower
+    coherently.
+    """
     self_, *neighbours = unpack_key(key)
-    # Centre of the input flower — left half of the cell.
-    flower_cx = x + 5.0
+    flower_cx = x + style.flower_center_x
     flower_cy = y + layout.cell_h_mm / 2
-    # Result hex sits to the right.
-    result_cx = x + layout.cell_w_mm - layout.result_r if False else \
-                x + 15.0
+    result_cx = x + style.result_center_x
     result_cy = flower_cy
     pieces: list[str] = []
     # Centre cell first (under the neighbours visually).
@@ -159,21 +205,25 @@ def _flower_svg(x: float, y: float, key: int, output: int,
                                 fill=style.palette[v],
                                 border=style.border_color,
                                 border_w=style.border_width))
-    # Arrow → between flower and result.
-    arrow_x1 = flower_cx + 4.5
-    arrow_x2 = result_cx - style.result_r - 0.6
+    # Arrow → between flower and result.  Start clear of the
+    # neighbours' outer edge (centre+sqrt(3)*r), end clear of the
+    # result hex.
+    arrow_x1 = flower_cx + style.cell_r * (math.sqrt(3) + 0.4)
+    arrow_x2 = result_cx - style.result_r - max(0.3, style.cell_r * 0.4)
     pieces.append(
         f'<line x1="{arrow_x1:.3f}" y1="{flower_cy:.3f}" '
         f'x2="{arrow_x2:.3f}" y2="{flower_cy:.3f}" '
-        f'stroke="#888888" stroke-width="0.20" '
+        f'stroke="#888888" stroke-width="{max(0.1, style.border_width * 1.5):.3f}" '
         f'marker-end="url(#arrow)" />')
     # Result hex.
     pieces.append(_hex_svg(result_cx, result_cy, style.result_r,
                             fill=style.palette[output],
                             border=style.border_color,
                             border_w=style.border_width))
-    # Key label under the flower (optional).
-    if style.show_key:
+    # Key label under the flower (optional).  Skipped when the
+    # font-size shrinks below 0.7mm so we don't litter the page
+    # with unreadable hex tags.
+    if style.show_key and style.key_font_size >= 0.7:
         label = f'{key:04x}'
         pieces.append(
             f'<text x="{x + layout.cell_w_mm / 2:.3f}" '
@@ -198,11 +248,12 @@ def render_flowers_svg(rule_bytes: bytes, *,
                         palette: List[str],
                         page_w_mm: float, page_h_mm: float,
                         margin_mm: float = 10.0,
-                        flowers_per_page: int = DEFAULT_FLOWERS_PER_PAGE,
+                        flowers_per_page: int | None = None,
                         page_index: int = 0,
                         center_filter: int | None = None,
                         style: FlowerStyle | None = None,
                         layout: FlowerLayout | None = None,
+                        size_scale: float = 1.0,
                         title_text: str | None = None
                         ) -> tuple[str, PageSummary]:
     """Render one A4 page of flowers from a hex-CA rule.
@@ -223,14 +274,32 @@ def render_flowers_svg(rule_bytes: bytes, *,
     if len(palette) != N_STATES:
         raise ValueError(f'palette must have {N_STATES} entries; '
                          f'got {len(palette)}')
-    if not 1 <= flowers_per_page <= 1024:
-        raise ValueError('flowers_per_page must be 1..1024')
     if center_filter is not None and not 0 <= center_filter <= 3:
         raise ValueError('center_filter must be in 0..3 or None')
+    if not 0.1 <= size_scale <= 3.0:
+        raise ValueError('size_scale must be in 0.1..3.0')
 
-    style = style or FlowerStyle(palette=palette)
+    base_style = style or FlowerStyle(palette=palette)
+    base_style.palette = palette
+    base_layout = layout or default_layout()
+    style = base_style.scaled(size_scale)
     style.palette = palette
-    layout = layout or default_layout()
+    layout = base_layout.scaled(size_scale)
+
+    # Pre-compute the page grid so we can default flowers_per_page to
+    # whatever the page actually holds at the chosen scale.
+    inner_w_pre = page_w_mm - 2 * margin_mm
+    inner_h_pre = page_h_mm - 2 * margin_mm
+    cw_pre = layout.cell_w_mm + layout.cell_padding_mm
+    ch_pre = layout.cell_h_mm + layout.cell_padding_mm
+    cols_pre = max(1, int(inner_w_pre // cw_pre))
+    rows_pre = max(1, int(inner_h_pre // ch_pre))
+    capacity = cols_pre * rows_pre
+    if flowers_per_page is None:
+        flowers_per_page = capacity
+    if not 1 <= flowers_per_page <= 4096:
+        raise ValueError('flowers_per_page must be 1..4096')
+    flowers_per_page = min(flowers_per_page, capacity)
 
     # Filter keys by centre colour if requested.
     if center_filter is None:

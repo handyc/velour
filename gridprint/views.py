@@ -575,9 +575,26 @@ def _flowers_svg(request):
                                    page_w, page_h, margin)
 
     # ─── Catalog (default — genuine 7→1 flower widgets) ─────────
-    fpage = _int(request, 'fpage', 0, lo=0, hi=64)
-    fper  = _int(request, 'fper', hex_flowers.DEFAULT_FLOWERS_PER_PAGE,
-                  lo=1, hi=1024)
+    fpage = _int(request, 'fpage', 0, lo=0, hi=512)
+    # fsize picks a named density preset; fscale overrides directly.
+    fsize_name = (request.GET.get('fsize')
+                   or hex_flowers.DEFAULT_SIZE).strip().lower()
+    size_scale = hex_flowers.SIZE_SCALES.get(
+        fsize_name, hex_flowers.SIZE_SCALES[hex_flowers.DEFAULT_SIZE])
+    try:
+        size_scale = max(0.1, min(3.0, float(request.GET.get('fscale',
+                                                                 size_scale))))
+    except (TypeError, ValueError):
+        pass
+    # fper defaults to "whatever fits at this size" (None signals
+    # auto-fit inside render_flowers_svg).
+    fper_raw = (request.GET.get('fper') or '').strip()
+    fper = None
+    if fper_raw:
+        try:
+            fper = max(1, min(4096, int(fper_raw)))
+        except ValueError:
+            fper = None
     fcentre_raw = (request.GET.get('fcentre') or '').strip()
     fcentre = None
     if fcentre_raw:
@@ -594,6 +611,7 @@ def _flowers_svg(request):
         flowers_per_page=fper,
         page_index=fpage,
         center_filter=fcentre,
+        size_scale=size_scale,
         title_text=' · '.join(title_bits) if title_bits else None,
     )
     out = hex_flowers.wrap_page(body, page_w, page_h)
