@@ -26,7 +26,7 @@ from django.http import HttpResponse, Http404
 from django.shortcuts import render
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
-from . import groups, motifs, svg, ca_motif
+from . import groups, motifs, svg, ca_motif, tilesmith_motif
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -63,6 +63,11 @@ def _resolve_motif(request) -> str:
         if not pact:
             return ca_motif._placeholder_text('missing ?pact=<slug>')
         return ca_motif.spoeqi_component_motif(pact, comp, gen)
+    if kind == 'tilesmith_tile':
+        tile = (request.GET.get('tile_slug') or '').strip()
+        if not tile:
+            return tilesmith_motif._placeholder('missing ?tile_slug=<slug>')
+        return tilesmith_motif.tilesmith_tile_motif(tile)
     # Stock — default branch.
     slug = (request.GET.get('motif_slug') or motifs.DEFAULT_MOTIF).strip()
     try:

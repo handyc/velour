@@ -171,3 +171,44 @@ class CAMotifTest(TestCase):
         })
         self.assertEqual(r.status_code, 200)
         self.assertIn(b'not found', r.content)
+
+
+class TilesmithMotifTest(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='esc-ts', password='x')
+        self.client.force_login(self.user)
+        from tilesmith.models import TileSpec
+        self.spec = TileSpec.objects.create(
+            slug='esc-bump', name='Esc bump',
+            base_w=64, base_h=64,
+            edges_json=[[{'p': 0.5, 'off': 16}], [], [], [], [], []],
+        )
+
+    def test_tilesmith_motif_renders_polygon(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4', 'motif': 'tilesmith_tile',
+            'tile_slug': self.spec.slug, 'tile': '30',
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # The motif is one filled polygon inside the <symbol>; the
+        # group orbit + lattice produce many <use> placements.
+        self.assertIn('<symbol id="motif"', body)
+        self.assertIn('<polygon', body)
+        self.assertGreater(body.count('<use href="#motif"'), 30)
+
+    def test_missing_tile_slug_shows_placeholder(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4', 'motif': 'tilesmith_tile',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'missing', r.content)
+
+    def test_unknown_tile_slug_shows_placeholder(self):
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p1', 'motif': 'tilesmith_tile',
+            'tile_slug': 'no-such-tile',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'not found', r.content)

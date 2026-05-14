@@ -318,6 +318,8 @@ def _escher_svg(request, slug: str):
         motif_label = (f'spoeqi {request.GET.get("pact") or "?"} '
                         f'· cmp {request.GET.get("component") or "0"} '
                         f'· gen {request.GET.get("gen") or "0"}')
+    elif motif_kind == 'tilesmith_tile':
+        motif_label = f'tilesmith {request.GET.get("tile_slug") or "?"}'
     else:
         motif_label = (request.GET.get('motif_slug') or 'comma').strip()
     footer = (
