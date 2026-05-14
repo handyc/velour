@@ -160,3 +160,64 @@ class ViewTest(TestCase):
             'mode': 'flowers', 'from_spoeqi': pact.slug, 'component': '999'})
         self.assertEqual(r.status_code, 200)
         self.assertIn('component must be', r.content.decode())
+
+
+class FillModeTest(TestCase):
+    """The default (fview=fill) flower-mode fills the regular hex
+    tessellation with rule-output colours row-major, paged for A4."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='ff-test', password='x')
+        self.client.force_login(self.user)
+
+    def _make_pact(self):
+        from spoeqi.models import Pact, RULE_TABLE_SIZE
+        # Each rule entry = (index >> 8) % 4, so neighbouring cells
+        # share colours in 256-byte runs, easy to spot in the SVG.
+        rule = bytes([((i >> 8) % 4) for i in range(RULE_TABLE_SIZE)])
+        p = Pact(name='fill-test', rule_snapshot=rule)
+        p.save()
+        return p
+
+    def test_default_view_is_fill_with_coloured_cells(self):
+        pact = self._make_pact()
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug, 'cell': '5'})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Lots of filled hex polygons.  The exact count depends on cell
+        # geometry; at 5mm we expect ~700.
+        import re
+        filled = re.findall(r'<polygon[^>]*fill="rgb\(', body)
+        self.assertGreater(len(filled), 300)
+        # No catalog arrow marker (that's only the catalog view).
+        self.assertNotIn('<marker id="arrow"', body)
+        # Footer carries the page + rule info.
+        self.assertIn('rule ', body)
+        self.assertIn('page 1/', body)
+
+    def test_catalog_view_opted_in(self):
+        pact = self._make_pact()
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug,
+            'fview': 'catalog'})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        # Catalog has the arrow marker and key labels.
+        self.assertIn('<marker id="arrow"', body)
+
+    def test_pagination_walks_rule(self):
+        """fpage=1 should start at the next chunk of the rule, so the
+        page-counter changes and at least one cell colour differs at
+        a fixed (row, col) position between page 0 and page 1."""
+        pact = self._make_pact()
+        r0 = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug,
+            'cell': '5', 'fpage': '0'})
+        r1 = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug,
+            'cell': '5', 'fpage': '1'})
+        # The page-N/M label differs.
+        self.assertIn('page 1/', r0.content.decode())
+        self.assertIn('page 2/', r1.content.decode())

@@ -312,6 +312,53 @@ def render_flowers_svg(rule_bytes: bytes, *,
     return ''.join(pieces), summary
 
 
+def natural_hex_dims(page_w_mm: float, page_h_mm: float,
+                      margin_mm: float, cell_mm: float,
+                      pointy_top: bool = True) -> tuple[int, int]:
+    """Compute (rows, cols) of hex cells that fit inside one A4 page
+    at the requested cell circumradius.  Matches the bounds used by
+    gridprint.svg.hex_grid so the fill block we hand it lines up
+    with the cells it actually draws.
+    """
+    R = cell_mm
+    if pointy_top:
+        col_step = R * math.sqrt(3)
+        row_step = 1.5 * R
+    else:
+        col_step = 1.5 * R
+        row_step = R * math.sqrt(3)
+    inner_w = page_w_mm - 2 * margin_mm
+    inner_h = page_h_mm - 2 * margin_mm
+    cols = max(1, int(inner_w / col_step))
+    rows = max(1, int(inner_h / row_step))
+    return rows, cols
+
+
+def fill_grid_from_rule(rule_bytes: bytes, palette: List[str],
+                         rows: int, cols: int,
+                         *, start_index: int = 0) -> List[List[str]]:
+    """Build a 2D colour-string array sized (rows, cols) by walking
+    ``rule_bytes`` row-major starting at ``start_index``.  Each cell
+    becomes ``palette[rule[i] & 3]``; entries past the end of the
+    rule table fall back to '' (an empty hex outline).
+    """
+    if len(palette) != N_STATES:
+        raise ValueError(f'palette must have {N_STATES} entries; '
+                         f'got {len(palette)}')
+    out: List[List[str]] = []
+    i = start_index
+    for _ in range(rows):
+        row: List[str] = []
+        for _ in range(cols):
+            if 0 <= i < len(rule_bytes):
+                row.append(palette[rule_bytes[i] & 3])
+            else:
+                row.append('')
+            i += 1
+        out.append(row)
+    return out
+
+
 def wrap_page(body: str, page_w_mm: float, page_h_mm: float,
               with_dimensions: bool = True) -> str:
     dims = (f' width="{page_w_mm}mm" height="{page_h_mm}mm"'

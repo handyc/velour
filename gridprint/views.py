@@ -219,26 +219,26 @@ def _load_rule_and_palette(request) -> tuple[bytes, list, dict] | None:
 
 def _flowers_svg(request):
     """Render a flower-dump page from a hex-CA rule.  Branched off
-    grid_svg via ?mode=flowers."""
+    grid_svg via ?mode=flowers.
+
+    Default behaviour (``fview=fill``, the desired one for printing):
+    paint each cell of the regular hex tessellation with the colour
+    of ``rule[cell_index] & 3`` in row-major order, walking the
+    16,384-byte rule across as many pages as the chosen cell size
+    needs.  ``fpage=N`` chooses which slice starts at row 0.
+
+    Opt-in alternative (``fview=catalog``): the older catalog-widget
+    view where each cell of a custom layout shows a 7-input flower +
+    arrow + result hex + key label.  Useful for inspecting a rule's
+    structure, not for printing.
+    """
     landscape = request.GET.get('landscape') == '1'
     margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
     page_w = svg.A4_H if landscape else svg.A4_W
     page_h = svg.A4_W if landscape else svg.A4_H
+    fview = (request.GET.get('fview') or 'fill').strip()
 
-    fpage = _int(request, 'fpage', 0, lo=0, hi=64)
-    fper  = _int(request, 'fper', hex_flowers.DEFAULT_FLOWERS_PER_PAGE,
-                  lo=1, hi=1024)
-    fcentre_raw = (request.GET.get('fcentre') or '').strip()
-    fcentre = None
-    if fcentre_raw:
-        try:
-            v = int(fcentre_raw)
-            if 0 <= v <= 3:
-                fcentre = v
-        except ValueError:
-            pass
-
-    title = None
+    # Common: resolve the rule source.
     try:
         rule_palette = _load_rule_and_palette(request)
     except ValueError as exc:
@@ -250,7 +250,6 @@ def _flowers_svg(request):
         return HttpResponse(
             hex_flowers.wrap_page(body, page_w, page_h),
             content_type='image/svg+xml; charset=utf-8')
-
     if rule_palette is None:
         body = (
             f'<text x="{margin}" y="{margin + 6}" '
@@ -262,29 +261,96 @@ def _flowers_svg(request):
         return HttpResponse(
             hex_flowers.wrap_page(body, page_w, page_h),
             content_type='image/svg+xml; charset=utf-8')
-
     rule, palette, meta = rule_palette
-    if meta['source'] == 'spoeqi':
-        if 'component' in meta:
-            title = (f'spoeqi pact: {meta["name"]} ({meta["slug"]}) '
-                     f'· component {meta["component"]}')
-        else:
-            title = f'spoeqi pact: {meta["name"]} ({meta["slug"]})'
 
-    body, summary = hex_flowers.render_flowers_svg(
-        rule, palette=palette,
-        page_w_mm=page_w, page_h_mm=page_h,
-        margin_mm=margin,
-        flowers_per_page=fper,
-        page_index=fpage,
-        center_filter=fcentre,
-        title_text=title,
+    title_bits = []
+    if meta.get('source') == 'spoeqi':
+        title_bits.append(f'{meta["name"]} ({meta["slug"]})')
+        if 'component' in meta:
+            title_bits.append(f'component {meta["component"]}')
+
+    # ─── Catalog (old widget view) ──────────────────────────────
+    if fview == 'catalog':
+        fpage = _int(request, 'fpage', 0, lo=0, hi=64)
+        fper  = _int(request, 'fper', hex_flowers.DEFAULT_FLOWERS_PER_PAGE,
+                      lo=1, hi=1024)
+        fcentre_raw = (request.GET.get('fcentre') or '').strip()
+        fcentre = None
+        if fcentre_raw:
+            try:
+                v = int(fcentre_raw)
+                if 0 <= v <= 3:
+                    fcentre = v
+            except ValueError:
+                pass
+        body, summary = hex_flowers.render_flowers_svg(
+            rule, palette=palette,
+            page_w_mm=page_w, page_h_mm=page_h,
+            margin_mm=margin,
+            flowers_per_page=fper,
+            page_index=fpage,
+            center_filter=fcentre,
+            title_text=' · '.join(title_bits) if title_bits else None,
+        )
+        out = hex_flowers.wrap_page(body, page_w, page_h)
+        resp = HttpResponse(out, content_type='image/svg+xml; charset=utf-8')
+        if request.GET.get('download') == '1':
+            resp['Content-Disposition'] = (
+                f'attachment; filename="flowers-{summary.rule_hash_short}-p{fpage}.svg"')
+        return resp
+
+    # ─── Fill (default — colour the print grid by rule) ─────────
+    pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
+    if pattern not in ('hex_pointy', 'hex_flat'):
+        pattern = 'hex_pointy'
+    cell = _float(request, 'cell', 5.0, lo=0.8, hi=80.0)
+    width = _float(request, 'width', 0.20, lo=0.05, hi=2.5)
+    color = (request.GET.get('color') or '#888888').strip() or '#888888'
+    alpha = _float(request, 'alpha', 1.0, lo=0.0, hi=1.0)
+    fill_alpha = _float(request, 'fill_alpha', 0.95, lo=0.0, hi=1.0)
+    fpage = _int(request, 'fpage', 0, lo=0, hi=255)
+
+    page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
+    style = svg.Style(color=color, width_mm=width, alpha=alpha,
+                       fill_alpha=fill_alpha)
+
+    rows, cols = hex_flowers.natural_hex_dims(
+        page_w, page_h, margin, cell,
+        pointy_top=(pattern == 'hex_pointy'))
+    cells_per_page = rows * cols
+    start = fpage * cells_per_page
+    fill = hex_flowers.fill_grid_from_rule(rule, palette, rows, cols,
+                                            start_index=start)
+
+    embed = request.GET.get('embed') == '1'
+    body = svg.render(pattern, page=page, cell_mm=cell, style=style,
+                       fill=fill, with_dimensions=not embed)
+
+    # Footer: rule fingerprint + page counter, like the catalog view
+    # had.  Glued onto the SVG by replacing the closing </svg>.
+    import hashlib
+    rule_hash = hashlib.sha256(rule).hexdigest()[:16]
+    n_pages = (hex_flowers.RULE_TABLE_SIZE + cells_per_page - 1) // cells_per_page
+    title_str = ' · '.join(title_bits)
+    last_idx = min(hex_flowers.RULE_TABLE_SIZE - 1, start + cells_per_page - 1)
+    footer = (
+        f'<g><text x="{margin:.2f}" y="{margin - 1.5:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.6" '
+        f'fill="#666">{title_str}</text>'
+        f'<text x="{margin:.2f}" y="{page_h - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'rule {rule_hash}…   page {fpage + 1}/{n_pages}   '
+        f'entries {start}..{last_idx} of {hex_flowers.RULE_TABLE_SIZE}   '
+        f'grid {cols}×{rows} @ {cell:.1f}mm'
+        f'</text></g>'
     )
-    out = hex_flowers.wrap_page(body, page_w, page_h)
-    resp = HttpResponse(out, content_type='image/svg+xml; charset=utf-8')
+    body = body.replace('</svg>', footer + '</svg>')
+
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
-            f'attachment; filename="flowers-{summary.rule_hash_short}-p{fpage}.svg"')
+            f'attachment; filename="flowers-fill-{rule_hash}-p{fpage}.svg"')
     return resp
 
 
