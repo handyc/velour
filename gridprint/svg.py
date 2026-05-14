@@ -372,6 +372,132 @@ def rhombus_grid(*, page: Page, side_mm: float, style: Style,
 
 
 # ---------------------------------------------------------------------------
+# Tilesmith tile — render an arbitrary deformed-rectangle tile tessellated
+# over the page.  The tile geometry comes straight from
+# `tilesmith.models.TileSpec.edges_json` (a 6-edge list of CP arrays in the
+# same format the editor produces).
+# ---------------------------------------------------------------------------
+
+# Edge geometry mirrors templates/tilesmith/edit.html's EDGE_GEOM.  Each
+# edge maps two tile-corners and an outward unit vector; (p, off) along the
+# edge means: walk fraction p of the corner-to-corner segment, then step
+# off (as a fraction of base_w for horizontal-outward edges / base_h for
+# vertical-outward) along the outward normal.
+_TILESMITH_EDGES = [
+    # startX, startY, endX, endY, outX, outY
+    (0.0, 0.0, 0.5, 0.0,  0, -1),   # 0 top-left half
+    (0.5, 0.0, 1.0, 0.0,  0, -1),   # 1 top-right half
+    (1.0, 0.0, 1.0, 1.0, +1,  0),   # 2 right
+    (1.0, 1.0, 0.5, 1.0,  0, +1),   # 3 bottom-right half
+    (0.5, 1.0, 0.0, 1.0,  0, +1),   # 4 bottom-left half
+    (0.0, 1.0, 0.0, 0.0, -1,  0),   # 5 left
+]
+
+
+def _tilesmith_trace(edges, origin_x: float, origin_y: float,
+                      tile_w: float, tile_h: float,
+                      base_w: float, base_h: float) -> list[tuple[float, float]]:
+    """Walk the 6 edges in order, emitting the polyline that bounds one
+    tile placed at (origin_x, origin_y) with size (tile_w, tile_h).
+
+    ``edges`` is the 6-element list-of-lists (each inner list a sorted
+    sequence of {p, off} dicts); ``base_w``/``base_h`` are the tile's
+    abstract units (cf. TileSpec.base_w/base_h) so we can convert
+    stored "off" fractions to physical mm.
+    """
+    pts: list[tuple[float, float]] = []
+    for i, (sx, sy, ex, ey, ox, oy) in enumerate(_TILESMITH_EDGES):
+        # CPs along this edge, in order.
+        try:
+            cps = edges[i] or []
+        except (IndexError, TypeError):
+            cps = []
+        for cp in cps:
+            if not isinstance(cp, dict):
+                continue
+            try:
+                p = float(cp.get('p', 0.0))
+                off = float(cp.get('off', 0.0))
+            except (TypeError, ValueError):
+                continue
+            tx = sx + p * (ex - sx)
+            ty = sy + p * (ey - sy)
+            # Outward offset: horizontal-outward (outX != 0) scales by
+            # tile_w / base_w; vertical-outward by tile_h / base_h.
+            if ox != 0:
+                dx = ox * off * tile_w / base_w
+                dy = 0.0
+            else:
+                dx = 0.0
+                dy = oy * off * tile_h / base_h
+            pts.append((origin_x + tx * tile_w + dx,
+                         origin_y + ty * tile_h + dy))
+        # End corner of this edge:
+        pts.append((origin_x + ex * tile_w, origin_y + ey * tile_h))
+    return pts
+
+
+def tilesmith_grid(*, page: Page, cell_mm: float, style: Style,
+                   edges, base_w: float, base_h: float,
+                   lattice: str = 'offset-hex',
+                   fill: list[list[str]] | None = None,
+                   with_dimensions: bool = True) -> str:
+    """Tessellate one tilesmith tile across the printable area.
+
+    ``cell_mm`` is the tile width in mm; the height is derived from
+    base_h/base_w so the tile's aspect ratio is preserved.
+
+    ``lattice``:
+      * ``'offset-hex'`` — odd rows shifted by +tile_w/2 (the layout
+        the tilesmith editor previews).
+      * ``'square'`` — no row offset.
+
+    ``fill`` (optional) is a 2D array of CSS colour strings keyed
+    (row, col) over the visible grid; each tile gets its row/col
+    entry as its fill colour ('' = no fill).  Currently row 0 / col 0
+    correspond to the top-left tile of the printable area.
+    """
+    if not isinstance(edges, list) or len(edges) != 6:
+        edges = [[] for _ in range(6)]
+    base_w = max(1.0, float(base_w or 1.0))
+    base_h = max(1.0, float(base_h or 1.0))
+    tile_w = float(cell_mm)
+    tile_h = tile_w * (base_h / base_w)
+
+    # Extend slightly past the page edge so partial tiles fully render;
+    # the SVG clip-path will trim what falls outside.
+    pad_x = tile_w * 1.5
+    pad_y = tile_h * 1.5
+    first_col = math.floor((page.left  - pad_x) / tile_w) - 1
+    last_col  = math.ceil((page.right + pad_x) / tile_w) + 1
+    first_row = math.floor((page.top    - pad_y) / tile_h) - 1
+    last_row  = math.ceil((page.bottom + pad_y) / tile_h) + 1
+
+    pieces: list[str] = []
+    for r in range(first_row, last_row + 1):
+        for c in range(first_col, last_col + 1):
+            shift = (tile_w / 2.0) if (lattice == 'offset-hex' and (r & 1)) else 0.0
+            ox = c * tile_w + shift
+            oy = r * tile_h
+            pts = _tilesmith_trace(edges, ox, oy, tile_w, tile_h, base_w, base_h)
+            color = None
+            if fill:
+                # Map (r, c) into the fill array, accepting None/'' as
+                # "leave blank" and clipping to actual bounds.
+                fr = r - first_row
+                fc = c - first_col
+                if 0 <= fr < len(fill):
+                    row = fill[fr]
+                    if 0 <= fc < len(row) and row[fc]:
+                        color = row[fc]
+            pieces.append(_polygon(pts, color, style))
+
+    title = ('Tilesmith ' + lattice)
+    return _wrap(''.join(pieces), page, title=title,
+                  with_dimensions=with_dimensions)
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -381,13 +507,19 @@ PATTERNS = {
     'hex_flat':      ('Hex (flat-top)',        lambda **kw: hex_grid(pointy_top=False, **kw)),
     'triangle':      ('Triangle',              triangle_grid),
     'rhombus':       ('Rhombus (60°)',         rhombus_grid),
+    'tilesmith':     ('Tilesmith tile',        tilesmith_grid),
 }
 
 
 def render(pattern: str, *, page: Page, cell_mm: float,
            style: Style, fill: list[list[str]] | None = None,
+           tile: dict | None = None,
            with_dimensions: bool = True) -> str:
-    """One-stop entry point used by the view."""
+    """One-stop entry point used by the view.
+
+    ``tile`` is required when ``pattern == 'tilesmith'``: a dict with
+    ``edges``, ``base_w``, ``base_h``, optional ``lattice``.
+    """
     try:
         _, fn = PATTERNS[pattern]
     except KeyError:
@@ -400,4 +532,14 @@ def render(pattern: str, *, page: Page, cell_mm: float,
         return fn(side_mm=cell_mm, **common)
     if pattern == 'square':
         return fn(cell_mm=cell_mm, fill=fill, **common)
+    if pattern == 'tilesmith':
+        if not tile:
+            raise ValueError('tilesmith pattern requires `tile` parameter')
+        return tilesmith_grid(
+            cell_mm=cell_mm,
+            edges=tile.get('edges') or [[] for _ in range(6)],
+            base_w=tile.get('base_w', 64),
+            base_h=tile.get('base_h', 64),
+            lattice=tile.get('lattice', 'offset-hex'),
+            fill=fill, **common)
     return fn(side_mm=cell_mm, fill=fill, **common)

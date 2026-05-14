@@ -18,6 +18,9 @@
   .card:hover { border-color: #58a6ff; }
   .card a { color: #58a6ff; text-decoration: none; font-weight: 500; }
   .card .meta { font-size: 0.72rem; color: #6e7681; margin-top: 4px; }
+  .card .actions { margin-top: 6px; font-size: 0.72rem; }
+  .card .actions a { color: #8b949e; margin-right: 8px; }
+  .card .actions a:hover { color: #58a6ff; }
   .preset-tag { font-size: 0.65rem; padding: 1px 6px; border-radius: 3px;
                 background: #1a2a3a; color: #79c0ff; border: 1px solid #2a4a6a;
                 letter-spacing: 0.04em; }
@@ -61,6 +64,10 @@
         <span class="preset-tag">preset</span>
         <div class="meta">{{ p.base_w }}×{{ p.base_h }} ·
           {{ p.lattice }} · read-only</div>
+        <div class="actions">
+          <a target="_blank"
+            href="{% url 'gridprint:index' %}?pattern=tilesmith&amp;from_tilesmith={{ p.slug }}&amp;cell=24">Print →</a>
+        </div>
       </div>
     {% empty %}
       <p style="color:#6e7681;">no presets — run
@@ -75,6 +82,10 @@
         <a href="{% url 'tilesmith:edit' s.slug %}">{{ s.name }}</a>
         <div class="meta">{{ s.base_w }}×{{ s.base_h }} ·
           {{ s.lattice }} · updated {{ s.updated_at|date:"Y-m-d H:i" }}</div>
+        <div class="actions">
+          <a target="_blank"
+            href="{% url 'gridprint:index' %}?pattern=tilesmith&amp;from_tilesmith={{ s.slug }}&amp;cell=24">Print →</a>
+        </div>
       </div>
     {% empty %}
       <p style="color:#6e7681;font-style:italic;">no custom tiles yet</p>

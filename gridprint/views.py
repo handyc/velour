@@ -73,8 +73,16 @@ def grid_svg(request):
     if (request.GET.get('mode') or '').strip() == 'flowers':
         return _flowers_svg(request)
 
+    # Tilesmith mode: a TileSpec drives the pattern.  Triggered by either
+    # ?pattern=tilesmith or by ?from_tilesmith=<slug>; the slug parameter
+    # is what doubles as the deep link from /tilesmith/<slug>/.
+    tile_slug = (request.GET.get('from_tilesmith')
+                  or request.GET.get('tile') or '').strip()
     pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
-    if pattern not in svg.PATTERNS:
+    if tile_slug or pattern == 'tilesmith':
+        return _tilesmith_svg(request, tile_slug)
+
+    if pattern not in svg.PATTERNS or pattern == 'tilesmith':
         pattern = 'hex_pointy'
     cell = _float(request, 'cell', 8.0, lo=2.0, hi=80.0)
     margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
@@ -149,6 +157,93 @@ def grid_svg(request):
         resp['Content-Disposition'] = (
             f'attachment; filename="gridprint-{pattern}.svg"'
         )
+    return resp
+
+
+# ─── Tilesmith mode ────────────────────────────────────────────────
+
+def _tilesmith_svg(request, slug: str):
+    """Render a Tilesmith tile tessellated across the page.
+
+    Query knobs (in addition to the standard cell/margin/color/...):
+      ``from_tilesmith=<slug>`` (or ``pattern=tilesmith&tile=<slug>``)
+                            — required, picks the TileSpec
+      ``lattice=offset-hex|square``
+                            — override TileSpec.lattice for the print
+    """
+    from tilesmith.models import TileSpec
+
+    landscape = request.GET.get('landscape') == '1'
+    margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+    cell = _float(request, 'cell', 24.0, lo=4.0, hi=160.0)
+    width = _float(request, 'width', 0.30, lo=0.05, hi=2.5)
+    color = (request.GET.get('color') or '#333333').strip() or '#333333'
+    alpha = _float(request, 'alpha', 1.0, lo=0.0, hi=1.0)
+    fill_alpha = _float(request, 'fill_alpha', 0.85, lo=0.0, hi=1.0)
+    border = request.GET.get('border') == '1'
+
+    page_w = svg.A4_H if landscape else svg.A4_W
+    page_h = svg.A4_W if landscape else svg.A4_H
+    page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
+    style = svg.Style(color=color, width_mm=width, alpha=alpha,
+                       fill_alpha=fill_alpha)
+    embed = request.GET.get('embed') == '1'
+
+    def _err(msg: str) -> HttpResponse:
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">tilesmith: {msg}</text></svg>'
+        )
+        return HttpResponse(body,
+                             content_type='image/svg+xml; charset=utf-8')
+
+    if not slug:
+        return _err('provide ?from_tilesmith=&lt;slug&gt;')
+    spec = TileSpec.objects.filter(slug=slug).first()
+    if spec is None:
+        return _err(f'tile "{slug}" not found')
+
+    lattice = (request.GET.get('lattice') or spec.lattice or 'offset-hex').strip()
+    if lattice not in ('offset-hex', 'square'):
+        lattice = 'offset-hex'
+
+    body = svg.render(
+        'tilesmith', page=page, cell_mm=cell, style=style,
+        tile={
+            'edges':   spec.edges_json,
+            'base_w':  spec.base_w,
+            'base_h':  spec.base_h,
+            'lattice': lattice,
+        },
+        with_dimensions=not embed)
+
+    if border:
+        body = body.replace(
+            '</svg>',
+            f'<rect x="{page.left}" y="{page.top}" '
+            f'width="{page.inner_w}" height="{page.inner_h}" '
+            f'fill="none" stroke="#cccccc" stroke-width="0.1" '
+            f'stroke-dasharray="0.6 0.6" /></svg>',
+        )
+    # Footer: tile name + lattice + cell size.
+    footer = (
+        f'<text x="{margin:.2f}" y="{page_h - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'tilesmith · {spec.name} ({spec.slug}) · {lattice} · '
+        f'{cell:.1f}mm wide'
+        f'</text>'
+    )
+    body = body.replace('</svg>', footer + '</svg>')
+
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="tilesmith-{spec.slug}.svg"')
     return resp
 
 

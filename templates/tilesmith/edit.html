@@ -111,6 +111,11 @@
         <button id="presetMenuBtn"
           {% if spec.is_preset %}disabled{% endif %}>Load preset…</button>
         <span style="flex:1"></span>
+        <a class="btn" target="_blank"
+          href="{% url 'gridprint:index' %}?pattern=tilesmith&amp;from_tilesmith={{ spec.slug }}&amp;cell=24"
+          title="Open this tile tessellated on A4 in Gridprint">
+          Print → Gridprint
+        </a>
         <button id="saveBtn" class="primary"
           {% if spec.is_preset %}disabled{% endif %}>Save</button>
         {% if not spec.is_preset %}
