@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}chain — {{ pact.name }}{% endblock %}
+{% block content %}
+<style>
+  .ch-page { max-width: 72em; }
+  .ch-page h1 { margin: 0 0 4px; }
+  .ch-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .ch-page .crumbs a { color: #ace; }
+  .ch-page p { color: #aaa; max-width: 50em; }
+
+  .ch-form { padding: 14px 16px; border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .ch-form textarea { width: 100%; background: #111; color: #ddd;
+                       border: 1px solid #333; padding: 6px;
+                       font-family: monospace; min-height: 3em; box-sizing: border-box; }
+  .ch-form .stage { display: grid;
+                     grid-template-columns: 3em 6em 1fr 5em 5em;
+                     gap: 8px; align-items: center;
+                     padding: 6px 0; border-top: 1px dashed #222; }
+  .ch-form .stage:first-of-type { border-top: none; }
+  .ch-form .stage label { color: #888; font-size: 0.75rem;
+                           text-transform: uppercase; letter-spacing: 0.05em; }
+  .ch-form .stage select, .ch-form .stage input[type=number] {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 100%; box-sizing: border-box;
+  }
+  .ch-form .stage .idx { color: #cfc; font-family: monospace; text-align: right;
+                          font-size: 0.9rem; }
+  .ch-form button { background: #222; color: #cfc; border: 1px solid #555;
+                     padding: 6px 18px; font-family: inherit; cursor: pointer; }
+  .ch-form button:hover { border-color: #8b949e; }
+  .ch-form .submit { text-align: right; margin-top: 10px; }
+
+  .ch-result { margin-top: 22px; padding: 14px 16px;
+                border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .ch-result h2 { margin: 0 0 6px; font-size: 1rem; color: #cfc;
+                   font-weight: normal; letter-spacing: 0.04em; }
+  .ch-stage { padding: 10px 12px; border-left: 3px solid #2a3; margin-bottom: 12px;
+               background: #060606; }
+  .ch-stage .hdr { color: #cfc; font-size: 0.85rem; margin-bottom: 6px; }
+  .ch-stage .hdr code { color: #ffd; padding: 0 4px; background: #1a1a1a; }
+  .ch-stage .body { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .ch-stage .lab  { color: #888; font-size: 0.7rem; text-transform: uppercase;
+                     letter-spacing: 0.05em; margin-bottom: 2px; }
+  .ch-stage .txt  { font-family: monospace; font-size: 0.8rem;
+                     color: #ddd; background: #050505; border: 1px solid #1a1a1a;
+                     padding: 6px 8px; white-space: pre-wrap; word-break: break-word;
+                     min-height: 3em; }
+  .ch-stage.final  { border-left-color: #6f6; }
+  .ch-stage.final .txt.out { color: #fff; background: #061206; }
+  .ch-err { color: #f88; margin-bottom: 12px; padding: 8px 10px;
+             border: 1px solid #4a1d1d; background: #1a0a0a; }
+  .ch-final { margin-top: 14px; padding: 10px 12px;
+               border: 1px solid #2a3; background: #061206; color: #cfc;
+               font-family: monospace; }
+  .ch-final .hdr { color: #6f6; font-size: 0.8rem; text-transform: uppercase;
+                    letter-spacing: 0.07em; margin-bottom: 6px; }
+</style>
+
+<div class="ch-page">
+  <div class="crumbs">
+    <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
+    <a href="{% url 'spoeqi:detail' pact.slug %}">{{ pact.name }}</a> ›
+    <a href="{% url 'spoeqi:textmask' pact.slug %}">text mask</a> ›
+    chain
+  </div>
+  <h1>chain</h1>
+  <p>
+    Run text through a sequence of mask stages.  Stage <code>K</code>'s
+    output becomes stage <code>K+1</code>'s input.  Each stage picks
+    its own mode (char or token), mapping, component and generation;
+    leave a stage's <strong>mode</strong> blank to skip it.  The final
+    output text is the result of all configured stages applied in
+    order — the natural input to the oracle or LoRA pipeline.
+  </p>
+
+  {% if error %}<div class="ch-err">{{ error }}</div>{% endif %}
+
+  <form method="post" class="ch-form">
+    {% csrf_token %}
+    <label style="display:block;color:#cfc;margin-bottom:6px;">input text</label>
+    <textarea name="text" rows="3">{{ form.text }}</textarea>
+
+    <div style="margin-top:10px;">
+      <div class="stage" style="font-weight:600;color:#888;border-top:none;padding-bottom:2px;">
+        <label>#</label>
+        <label>mode</label>
+        <label>mapping</label>
+        <label>comp</label>
+        <label>gen</label>
+      </div>
+      {% for s in slots %}
+        <div class="stage">
+          <span class="idx">{{ s.i }}</span>
+          <select name="mode_{{ s.i }}" class="ch-mode" data-idx="{{ s.i }}">
+            <option value=""      {% if s.mode == '' %}selected{% endif %}>— skip —</option>
+            <option value="char"  {% if s.mode == 'char' %}selected{% endif %}>char</option>
+            <option value="token" {% if s.mode == 'token' %}selected{% endif %}>token</option>
+          </select>
+          <select name="mapping_{{ s.i }}" class="ch-mapping" data-idx="{{ s.i }}">
+            <option value="">(pick mode first)</option>
+          </select>
+          <input  name="component_{{ s.i }}"  type="number" min="0" max="63"
+                  value="{{ s.component }}">
+          <input  name="generation_{{ s.i }}" type="number" min="0"
+                  value="{{ s.generation }}">
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="submit">
+      <button type="submit">run chain</button>
+    </div>
+  </form>
+
+  {% if results %}
+    <div class="ch-result">
+      <h2>chain output · {{ results|length }} stage{{ results|length|pluralize }}</h2>
+      {% for r in results %}
+        <div class="ch-stage {% if forloop.last %}final{% endif %}">
+          <div class="hdr">
+            stage <code>{{ r.stage }}</code> ·
+            <code>{{ r.mode }}</code> /
+            <code>{{ r.mapping }}</code> ·
+            comp <code>{{ r.component }}</code> ·
+            gen <code>{{ r.generation }}</code>
+          </div>
+          <div class="body">
+            <div>
+              <div class="lab">input</div>
+              <div class="txt">{{ r.input_text }}</div>
+            </div>
+            <div>
+              <div class="lab">output</div>
+              <div class="txt out">{{ r.output_text }}</div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+      {% with results|last as final_stage %}
+      <div class="ch-final">
+        <div class="hdr">final output (feed this to oracle / LoRA)</div>
+        {{ final_stage.output_text }}
+      </div>
+      {% endwith %}
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  // Per-mode mapping registries — the client populates each stage's
+  // mapping dropdown when its mode changes.
+  const CHAIN_MAPPINGS = {
+    'char':  [{% for m in char_mappings  %}'{{ m.name|escapejs }}',{% endfor %}],
+    'token': [{% for m in token_mappings %}'{{ m.name|escapejs }}',{% endfor %}],
+  };
+  // Initial selected mapping per slot, from the POST-back.
+  const INITIAL = {
+    {% for s in slots %}{{ s.i }}: {mode: '{{ s.mode|escapejs }}', mapping: '{{ s.mapping|escapejs }}'},{% endfor %}
+  };
+
+  function populate(modeSel, mappingSel, selectedName) {
+    const mode = modeSel.value;
+    mappingSel.innerHTML = '';
+    if (!mode) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = '(skipped)';
+      mappingSel.appendChild(o);
+      return;
+    }
+    const names = CHAIN_MAPPINGS[mode] || [];
+    names.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n; o.textContent = n;
+      if (n === selectedName) o.selected = true;
+      mappingSel.appendChild(o);
+    });
+  }
+
+  document.querySelectorAll('.ch-mode').forEach(modeSel => {
+    const idx = +modeSel.dataset.idx;
+    const mappingSel = document.querySelector('.ch-mapping[data-idx="' + idx + '"]');
+    populate(modeSel, mappingSel, INITIAL[idx].mapping);
+    modeSel.addEventListener('change', () => populate(modeSel, mappingSel, null));
+  });
+</script>
+{% endblock %}

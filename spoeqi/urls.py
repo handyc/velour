@@ -18,4 +18,5 @@ urlpatterns = [
                                 name='tap'),
     path('<slug:slug>/oracle/', views.oracle,    name='oracle'),
     path('<slug:slug>/textmask/', views.textmask, name='textmask'),
+    path('<slug:slug>/chain/',    views.chain,    name='chain'),
 ]

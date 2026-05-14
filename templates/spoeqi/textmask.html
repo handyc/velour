@@ -104,6 +104,8 @@
     <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
     <a href="{% url 'spoeqi:detail' pact.slug %}">{{ pact.name }}</a> ›
     text mask
+    &nbsp;|&nbsp;
+    <a href="{% url 'spoeqi:chain' pact.slug %}">chain →</a>
   </div>
   <h1>text mask</h1>
   <p style="color:#aaa;max-width:46em;">

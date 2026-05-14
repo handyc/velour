@@ -551,6 +551,78 @@ def apply_attention(pact: Pact, *, component: int, generation: int,
                             cells=cells, matrix=matrix)
 
 
+# ─── Chain ─────────────────────────────────────────────────────────
+# Sequential pipeline of textmask stages: stage K's output_text
+# becomes stage K+1's input_text.  Only char + token modes can sit
+# in the middle of a chain — attention produces a matrix, not text,
+# so it can only appear as a leaf (we don't support that yet either,
+# since attention-as-leaf is best handled by the next phase: actually
+# wiring the matrix into LoRA inference).
+
+@dataclass(frozen=True)
+class ChainStage:
+    mode:       str       # 'char' or 'token'
+    mapping:    str
+    component:  int
+    generation: int
+
+
+@dataclass
+class ChainStageResult:
+    stage:       int      # 0-based position in the chain
+    mode:        str
+    mapping:     str
+    component:   int
+    generation:  int
+    input_text:  str
+    output_text: str
+    # The cell breakdown is optional — for char mode it's the same
+    # shape as MaskResult.cells; for token mode TokenMaskResult.cells.
+    # Stored as raw dicts so the template doesn't have to branch on
+    # dataclass type.
+    cells:       List[dict]
+
+
+def apply_chain(pact: Pact, stages: List[ChainStage], text: str
+                ) -> List[ChainStageResult]:
+    """Apply each stage in order; the output_text of stage K becomes
+    the input_text of stage K+1.  Returns one ChainStageResult per
+    stage.  Raises ValueError on invalid stages."""
+    out: List[ChainStageResult] = []
+    current = text
+    for i, st in enumerate(stages):
+        if st.mode == 'char':
+            r = apply(pact, text=current, component=st.component,
+                       generation=st.generation, mapping=st.mapping)
+            cells = [{'char':  c.char, 'color': c.color, 'out': c.out,
+                       'row':   c.row,  'col':   c.col}
+                      for c in r.cells]
+            out.append(ChainStageResult(
+                stage=i, mode='char', mapping=st.mapping,
+                component=st.component, generation=st.generation,
+                input_text=current, output_text=r.output_text,
+                cells=cells))
+            current = r.output_text
+        elif st.mode == 'token':
+            r = apply_tokens(pact, text=current, component=st.component,
+                              generation=st.generation, mapping=st.mapping)
+            cells = [{'token': c.token, 'color': c.color, 'out': c.out,
+                       'row':   c.row,   'col':   c.col}
+                      for c in r.cells]
+            out.append(ChainStageResult(
+                stage=i, mode='token', mapping=st.mapping,
+                component=st.component, generation=st.generation,
+                input_text=current, output_text=r.output_text,
+                cells=cells))
+            current = r.output_text
+        else:
+            raise ValueError(
+                f'chain stage {i}: mode {st.mode!r} not allowed in a '
+                f'chain (only char + token transform text → text). '
+                f'Attention mode produces a matrix and is a leaf op.')
+    return out
+
+
 def apply_attention_all(pact: Pact, *, generation: int,
                          mapping: str) -> List[AttentionResult]:
     """Attention matrices for all 64 components at the same generation."""

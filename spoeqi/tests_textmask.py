@@ -170,6 +170,94 @@ class TokenModeTest(_TextmaskBase):
                              mapping='no-such')
 
 
+class ChainTest(_TextmaskBase):
+    def test_single_stage_chain_matches_direct_apply(self):
+        pact = _make_pact()
+        stages = [tm.ChainStage(mode='char', mapping='attention',
+                                 component=0, generation=0)]
+        chain_r = tm.apply_chain(pact, stages, 'attention is all you need')
+        direct  = tm.apply(pact, text='attention is all you need',
+                            component=0, generation=0, mapping='attention')
+        self.assertEqual(len(chain_r), 1)
+        self.assertEqual(chain_r[0].output_text, direct.output_text)
+
+    def test_two_stages_pipe_output_to_input(self):
+        pact = _make_pact()
+        stages = [
+            tm.ChainStage(mode='token', mapping='denoise',
+                           component=0, generation=0),
+            tm.ChainStage(mode='token', mapping='bert-mlm',
+                           component=2, generation=1),
+        ]
+        results = tm.apply_chain(pact, stages, 'the quick brown fox jumps over the lazy dog')
+        self.assertEqual(len(results), 2)
+        # Stage 1's input is exactly stage 0's output.
+        self.assertEqual(results[1].input_text, results[0].output_text)
+
+    def test_attention_mode_rejected_in_chain(self):
+        pact = _make_pact()
+        stages = [tm.ChainStage(mode='attention', mapping='causal',
+                                 component=0, generation=0)]
+        with self.assertRaises(ValueError):
+            tm.apply_chain(pact, stages, 'x')
+
+    def test_empty_stages_yields_empty_results(self):
+        pact = _make_pact()
+        self.assertEqual(tm.apply_chain(pact, [], 'x'), [])
+
+    def test_chain_is_deterministic(self):
+        pact = _make_pact()
+        stages = [
+            tm.ChainStage(mode='token', mapping='denoise',  component=0, generation=0),
+            tm.ChainStage(mode='char',  mapping='emphasis', component=3, generation=2),
+        ]
+        a = tm.apply_chain(pact, stages, 'attention')
+        b = tm.apply_chain(pact, stages, 'attention')
+        self.assertEqual([r.output_text for r in a],
+                         [r.output_text for r in b])
+
+
+class ChainViewTest(_TextmaskBase):
+    def test_get_renders_form(self):
+        pact = _make_pact()
+        r = self.client.get(reverse('spoeqi:chain', args=[pact.slug]))
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('chain', body)
+        # 4 stage slots — check for the 4th mode select.
+        self.assertIn('name="mode_3"', body)
+
+    def test_post_runs_chain_renders_stages(self):
+        pact = _make_pact()
+        r = self.client.post(reverse('spoeqi:chain', args=[pact.slug]), {
+            'text':         'the quick brown fox',
+            'mode_0':       'token', 'mapping_0':    'denoise',
+            'component_0':  '0',     'generation_0': '0',
+            'mode_1':       'char',  'mapping_1':    'attention',
+            'component_1':  '1',     'generation_1': '1',
+            # stages 2, 3 left blank
+            'mode_2': '', 'mapping_2': '', 'component_2': '2', 'generation_2': '0',
+            'mode_3': '', 'mapping_3': '', 'component_3': '3', 'generation_3': '0',
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('chain output', body)
+        self.assertIn('final output', body)
+
+    def test_post_with_attention_in_chain_errors(self):
+        pact = _make_pact()
+        r = self.client.post(reverse('spoeqi:chain', args=[pact.slug]), {
+            'text':         'x',
+            'mode_0':       'attention', 'mapping_0':    'causal',
+            'component_0':  '0',         'generation_0': '0',
+            'mode_1': '', 'mapping_1': '', 'component_1': '0', 'generation_1': '0',
+            'mode_2': '', 'mapping_2': '', 'component_2': '0', 'generation_2': '0',
+            'mode_3': '', 'mapping_3': '', 'component_3': '0', 'generation_3': '0',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('bad input', r.content.decode())
+
+
 class AttentionModeTest(_TextmaskBase):
     def test_registry_has_starters(self):
         for name in ('causal', 'bert', 'window', 'sparse', 'weights', 'biased'):

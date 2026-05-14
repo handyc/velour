@@ -860,6 +860,90 @@ def textmask(request, slug):
     })
 
 
+def chain(request, slug):
+    """Sequential pipeline of textmask stages.  Stage K's output_text
+    becomes stage K+1's input_text.  All stages share the same Pact;
+    each picks its own (mode, mapping, component, generation).
+    """
+    from . import textmask as tm
+
+    pact = get_object_or_404(Pact, slug=slug)
+
+    # Default chain: a classic IR preprocessing → MLM corruption.
+    default_text = 'The quick brown fox jumps over the lazy dog and runs again into the woods'
+    n_slots = 4   # cap on chain depth — keeps the UI tidy
+
+    form_defaults = {'text': default_text}
+    for i in range(n_slots):
+        form_defaults.update({
+            f'mode_{i}':       'token' if i == 0 else '',
+            f'mapping_{i}':    'denoise' if i == 0 else '',
+            f'component_{i}':  str(i),
+            f'generation_{i}': '0',
+        })
+    form = dict(form_defaults)
+
+    stages: list[tm.ChainStage] = []
+    results = None
+    error = None
+
+    if request.method == 'POST':
+        for k in form:
+            form[k] = request.POST.get(k, form_defaults[k])
+        try:
+            for i in range(n_slots):
+                mode = form[f'mode_{i}']
+                if not mode:                    # empty slot — skip
+                    continue
+                if mode not in ('char', 'token'):
+                    raise ValueError(f'stage {i}: mode {mode!r} not chainable '
+                                     f'(attention produces a matrix, not text)')
+                mapping = form[f'mapping_{i}']
+                comp = int(form[f'component_{i}'])
+                gen  = int(form[f'generation_{i}'])
+                stages.append(tm.ChainStage(
+                    mode=mode, mapping=mapping,
+                    component=comp, generation=gen))
+            if stages:
+                results = tm.apply_chain(pact, stages, form['text'])
+        except (ValueError, TypeError) as e:
+            error = f'bad input: {e}'
+        except Exception as e:  # noqa: BLE001
+            error = f'{type(e).__name__}: {e}'
+
+    char_mappings = [
+        {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
+        for m in tm.MAPPING_TABLES.values()
+    ]
+    token_mappings = [
+        {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
+        for m in tm.TOKEN_MAPPING_TABLES.values()
+    ]
+
+    # Per-stage rendered slots for the form (so the template iterates
+    # over a list rather than juggling N variables).
+    slots = []
+    for i in range(n_slots):
+        slots.append({
+            'i':          i,
+            'mode':       form[f'mode_{i}'],
+            'mapping':    form[f'mapping_{i}'],
+            'component':  form[f'component_{i}'],
+            'generation': form[f'generation_{i}'],
+        })
+
+    return render(request, 'spoeqi/chain.html', {
+        'pact':           pact,
+        'form':           form,
+        'slots':          slots,
+        'results':        results,
+        'error':          error,
+        'char_mappings':  char_mappings,
+        'token_mappings': token_mappings,
+        'components':     list(range(COMPONENTS)),
+    })
+
+
 def keystream_tap(request, slug, component, generation, n_bytes):
     """Return ``n_bytes`` of deterministic keystream from component
     ``c`` at generation ``g``.  Both Alice and Bob (or any two parties
