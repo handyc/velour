@@ -61,7 +61,7 @@ def make_prompt(pact: Pact, *,
 
 
 def ask_oracle(pact: Pact, *,
-               provider_name: Optional[str] = None,
+               provider_slug: Optional[str] = None,
                external_system_prompt: Optional[str] = None,
                max_external_tokens: int = 400,
                **make_prompt_kwargs) -> dict:
@@ -69,7 +69,7 @@ def ask_oracle(pact: Pact, *,
     LLMProvider. Returns a dict with ``prompt``, ``response``,
     ``provider``, ``error``, and timing/token metadata.
 
-    When ``provider_name`` is None the external call is skipped
+    When ``provider_slug`` is None the external call is skipped
     (echo mode) — useful to inspect what both parties would be
     asking before plumbing in credentials.
     """
@@ -78,7 +78,7 @@ def ask_oracle(pact: Pact, *,
     result = {
         'prompt': prompt,
         'response': None,
-        'provider': provider_name,
+        'provider': provider_slug,
         'model': None,
         'tokens_in': 0,
         'tokens_out': 0,
@@ -86,16 +86,16 @@ def ask_oracle(pact: Pact, *,
         'latency_ms': 0,
     }
 
-    if provider_name is None:
+    if provider_slug is None:
         result['error'] = 'echo mode — no provider was queried'
         return result
 
     from identity.models import LLMProvider
     try:
-        provider = LLMProvider.objects.get(name=provider_name)
+        provider = LLMProvider.objects.get(slug=provider_slug)
     except LLMProvider.DoesNotExist:
         result['error'] = (
-            f'no LLMProvider named {provider_name!r}; '
+            f'no LLMProvider with slug {provider_slug!r}; '
             f'add one via the identity admin or pick --provider echo')
         return result
 

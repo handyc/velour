@@ -527,10 +527,10 @@ def oracle(request, slug):
                 rank=int(form['rank']),
                 max_new_tokens=int(form['max_new_tokens']),
             )
-            provider_name = form['provider'] or None
+            provider_slug = form['provider'] or None
             result = ask_oracle(
                 pact,
-                provider_name=provider_name,
+                provider_slug=provider_slug,
                 external_system_prompt=form['external_system_prompt']
                                         or DEFAULT_EXTERNAL_SYSTEM_PROMPT,
                 max_external_tokens=int(form['max_external_tokens']),

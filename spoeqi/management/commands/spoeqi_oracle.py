@@ -79,7 +79,7 @@ class Command(BaseCommand):
 
         result = ask_oracle(
             pact,
-            provider_name=provider,
+            provider_slug=provider,
             external_system_prompt=opts['external_system_prompt']
                                     or DEFAULT_EXTERNAL_SYSTEM_PROMPT,
             max_external_tokens=opts['max_external_tokens'],

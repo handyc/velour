@@ -72,7 +72,7 @@
   <select name="provider" id="provider">
     <option value="">— echo (no external call) —</option>
     {% for p in providers %}
-      <option value="{{ p.name }}" {% if form.provider == p.name %}selected{% endif %}>{{ p.name }} ({{ p.model }})</option>
+      <option value="{{ p.slug }}" {% if form.provider == p.slug %}selected{% endif %}>{{ p.name }} ({{ p.model }})</option>
     {% endfor %}
   </select>
 

@@ -28,7 +28,7 @@ class AskOracleTest(TestCase):
     @mock.patch('spoeqi.oracle.deterministic_generate')
     def test_unknown_provider_returns_helpful_error(self, mocked_gen):
         mocked_gen.return_value = 'X'
-        result = oracle.ask_oracle(self.pact, provider_name='no-such-provider')
+        result = oracle.ask_oracle(self.pact, provider_slug='no-such-provider')
         self.assertEqual(result['prompt'], 'X')
         self.assertIsNone(result['response'])
         self.assertIn('no-such-provider', result['error'])
@@ -38,13 +38,13 @@ class AskOracleTest(TestCase):
         mocked_gen.return_value = 'pact-derived question?'
         from identity.models import LLMProvider
         prov = LLMProvider.objects.create(
-            name='unit-test-provider',
+            name='unit-test-provider', slug='unit-test-provider',
             base_url='http://localhost:9999/v1/chat/completions',
             model='fake-model',
         )
         fake_call = mock.MagicMock(return_value=('external answer', 12, 34, '', 250))
         with mock.patch('identity.llm_client.call_llm', fake_call):
-            result = oracle.ask_oracle(self.pact, provider_name='unit-test-provider')
+            result = oracle.ask_oracle(self.pact, provider_slug='unit-test-provider')
         self.assertEqual(result['prompt'], 'pact-derived question?')
         self.assertEqual(result['response'], 'external answer')
         self.assertEqual(result['tokens_in'], 12)
@@ -61,13 +61,13 @@ class AskOracleTest(TestCase):
         mocked_gen.return_value = 'Q'
         from identity.models import LLMProvider
         LLMProvider.objects.create(
-            name='broken-provider',
+            name='broken-provider', slug='broken-provider',
             base_url='http://does-not-resolve.example/v1/chat/completions',
             model='m',
         )
         fake_call = mock.MagicMock(return_value=(None, 0, 0, 'Network error: name resolution', 1500))
         with mock.patch('identity.llm_client.call_llm', fake_call):
-            result = oracle.ask_oracle(self.pact, provider_name='broken-provider')
+            result = oracle.ask_oracle(self.pact, provider_slug='broken-provider')
         self.assertIsNone(result['response'])
         self.assertIn('Network error', result['error'])
         self.assertEqual(result['latency_ms'], 1500)
