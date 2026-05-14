@@ -9,13 +9,55 @@ from __future__ import annotations
 
 from django.db import models
 
+import hashlib
+
+from django.utils.text import slugify
+
 from . import groups, motifs
 
 
 MOTIF_KIND_CHOICES = [
     ('stock', 'Stock motif'),
     ('spoeqi_component', 'spoeqi component frame'),
+    ('tilesmith_tile', 'tilesmith tile silhouette'),
+    ('upload', 'Uploaded bitmap'),
 ]
+
+
+def _upload_to(instance, filename: str) -> str:
+    """Place uploads under ``MEDIA_ROOT/escher/motifs/<sha256>.<ext>``
+    so the same image content lands at a stable, dedupe-friendly path.
+    The ``instance.content_hash`` is set in ``save()`` before the
+    storage callback fires, but for new uploads we don't yet have it;
+    fall back to the original filename's slug to give Django a path.
+    """
+    ext = (filename.rsplit('.', 1)[-1] if '.' in filename else 'bin').lower()
+    h = getattr(instance, 'content_hash', '') or slugify(filename) or 'image'
+    return f'escher/motifs/{h}.{ext}'
+
+
+class UploadedMotif(models.Model):
+    """A user-uploaded image to be used as an escher motif.
+
+    The image bytes live on disk under MEDIA_ROOT/escher/motifs/ named
+    by their SHA-256 (so two uploads of the same image dedupe).  The
+    escher renderer embeds the raw image as an SVG <image> element
+    sized to fit [0, 1]² with the aspect ratio preserved.
+    """
+    slug = models.SlugField(unique=True, max_length=80)
+    original_name = models.CharField(max_length=200, blank=True)
+    content_hash = models.CharField(max_length=64, db_index=True)
+    file = models.FileField(upload_to=_upload_to)
+    content_type = models.CharField(max_length=80, default='image/png')
+    width  = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'{self.slug} ({self.original_name})'
 
 
 class Composition(models.Model):

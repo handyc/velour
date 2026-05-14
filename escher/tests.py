@@ -212,3 +212,66 @@ class TilesmithMotifTest(TestCase):
         })
         self.assertEqual(r.status_code, 200)
         self.assertIn(b'not found', r.content)
+
+
+class UploadMotifTest(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='esc-up', password='x')
+        self.client.force_login(self.user)
+
+    def _tiny_png(self) -> bytes:
+        """A valid 2×2 PNG so PIL can read its dimensions."""
+        import base64
+        # 2×2 red/blue PNG generated with PIL.  Embedded as base64 so we
+        # don't need PIL at test time to generate it.
+        return base64.b64decode(
+            b'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlE'
+            b'QVR4nGP8//8/AwwwMwACBQEA/H79zAAAAABJRU5ErkJggg=='
+        )
+
+    def test_upload_creates_record(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import UploadedMotif
+        f = SimpleUploadedFile('test.png', self._tiny_png(),
+                                content_type='image/png')
+        r = self.client.post(reverse('escher:uploads'), {'image': f},
+                               follow=False)
+        # Redirects back to the list after upload.
+        self.assertEqual(r.status_code, 302)
+        rec = UploadedMotif.objects.first()
+        self.assertIsNotNone(rec)
+        self.assertEqual(rec.width, 2)
+        self.assertEqual(rec.height, 2)
+        self.assertEqual(len(rec.content_hash), 64)
+        rec.file.delete(save=False)
+        rec.delete()
+
+    def test_dedup_same_content(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import UploadedMotif
+        b = self._tiny_png()
+        f1 = SimpleUploadedFile('a.png', b, content_type='image/png')
+        f2 = SimpleUploadedFile('b.png', b, content_type='image/png')
+        self.client.post(reverse('escher:uploads'), {'image': f1})
+        self.client.post(reverse('escher:uploads'), {'image': f2})
+        # Same content hash → only one record despite two uploads.
+        self.assertEqual(UploadedMotif.objects.count(), 1)
+        for rec in UploadedMotif.objects.all():
+            rec.file.delete(save=False); rec.delete()
+
+    def test_motif_embeds_data_uri(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from .models import UploadedMotif
+        f = SimpleUploadedFile('m.png', self._tiny_png(),
+                                content_type='image/png')
+        self.client.post(reverse('escher:uploads'), {'image': f})
+        rec = UploadedMotif.objects.first()
+        r = self.client.get(reverse('escher:render_svg'), {
+            'group': 'p4m', 'motif': 'upload',
+            'upload_slug': rec.slug,
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('<image href="data:image/png;base64,', body)
+        rec.file.delete(save=False); rec.delete()

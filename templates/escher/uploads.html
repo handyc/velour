@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}escher — uploads{% endblock %}
+
+{% block content %}
+<div style="max-width:1100px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<p style="font-size:0.85rem; color:#8b949e;">
+  <a href="{% url 'escher:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Uploaded motifs</b>
+</p>
+
+<h1 style="margin:0;">Bitmap motifs</h1>
+<p style="color:#8b949e; font-size:0.85rem; max-width:60em;">
+  Upload an image (PNG/JPG/SVG, up to 8 MB).  It becomes available
+  as a motif option on every group's detail page.  The image is
+  embedded directly as a data URI in the SVG so the downloaded
+  output is self-contained.
+</p>
+
+{% if messages %}
+  {% for m in messages %}
+    <div style="margin:0.4rem 0; padding:0.4rem 0.8rem;
+                background:#161b22; border-left:3px solid
+                {% if 'error' in m.tags %}#f85149
+                {% elif 'success' in m.tags %}#3aec74
+                {% else %}#58a6ff{% endif %};
+                color:#cfa; font-size:0.85rem;">{{ m }}</div>
+  {% endfor %}
+{% endif %}
+
+<form method="post" enctype="multipart/form-data"
+      style="margin:1rem 0; padding:0.6rem 0.9rem;
+             background:#161b22; border:1px solid #30363d;
+             border-radius:6px; display:flex; gap:0.6rem;
+             align-items:center; flex-wrap:wrap;">
+  {% csrf_token %}
+  <input type="file" name="image" accept="image/*" required
+         style="color:#c9d1d9; font-family:inherit;">
+  <button type="submit" style="background:#1f6feb; color:#fff;
+          border:0; padding:0.4rem 0.9rem; cursor:pointer;
+          font-size:0.85rem;">Upload</button>
+</form>
+
+<h2 style="font-size:0.95rem; color:#8b949e; text-transform:uppercase;
+           letter-spacing:0.05em; margin-top:1.5rem;">Library</h2>
+<div style="display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));
+            gap:10px; margin-top:8px;">
+  {% for u in uploads %}
+    <div style="background:#0d1117; border:1px solid #30363d;
+                border-radius:5px; padding:0.5rem 0.7rem;">
+      <div style="font-weight:600; color:#cfa; font-size:0.85rem;
+                   overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap;">{{ u.slug }}</div>
+      <div style="color:#6e7681; font-size:0.7rem; margin-top:0.2rem;">
+        {{ u.width }}×{{ u.height }} ·
+        {{ u.uploaded_at|date:"Y-m-d H:i" }}
+      </div>
+      {% if u.file %}
+      <img src="{{ u.file.url }}" alt="{{ u.slug }}"
+           style="display:block; width:100%; max-height:120px;
+                  object-fit:contain; margin-top:0.4rem;
+                  background:#fafafa; border-radius:3px;">
+      {% endif %}
+      <div style="margin-top:0.4rem; font-size:0.7rem;">
+        {% for g in groups %}{% if forloop.counter == 1 or forloop.counter == 11 or forloop.counter == 13 or forloop.counter == 17 %}
+          <a target="_blank" style="color:#8b949e; text-decoration:none;
+              padding-right:0.4rem;"
+            href="{% url 'escher:group_detail' g.slug %}?motif=upload&amp;upload_slug={{ u.slug }}">{{ g.slug }} ↗</a>
+        {% endif %}{% endfor %}
+      </div>
+    </div>
+  {% empty %}
+    <p style="color:#6e7681; font-style:italic;">no uploads yet</p>
+  {% endfor %}
+</div>
+
+</div>
+{% endblock %}

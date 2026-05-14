@@ -21,12 +21,18 @@ The two interesting endpoints:
 
 from __future__ import annotations
 
-from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, Http404
-from django.shortcuts import render
-from django.views.decorators.clickjacking import xframe_options_sameorigin
+import hashlib
 
-from . import groups, motifs, svg, ca_motif, tilesmith_motif
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.core.files.base import ContentFile
+from django.http import HttpResponse, Http404, JsonResponse
+from django.shortcuts import render, redirect
+from django.utils.text import slugify
+from django.views.decorators.clickjacking import xframe_options_sameorigin
+from django.views.decorators.http import require_POST
+
+from . import groups, motifs, svg, ca_motif, tilesmith_motif, uploads as uploads_mod
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -68,6 +74,11 @@ def _resolve_motif(request) -> str:
         if not tile:
             return tilesmith_motif._placeholder('missing ?tile_slug=<slug>')
         return tilesmith_motif.tilesmith_tile_motif(tile)
+    if kind == 'upload':
+        slug = (request.GET.get('upload_slug') or '').strip()
+        if not slug:
+            return uploads_mod._placeholder('missing ?upload_slug=<slug>')
+        return uploads_mod.upload_motif(slug)
     # Stock — default branch.
     slug = (request.GET.get('motif_slug') or motifs.DEFAULT_MOTIF).strip()
     try:
@@ -191,15 +202,85 @@ def render_svg(request):
 
 
 @login_required
+def upload_list(request):
+    """Index of uploaded motifs.  POST = upload a new image.  GET = browse."""
+    from .models import UploadedMotif
+    if request.method == 'POST':
+        return _handle_upload(request)
+    return render(request, 'escher/uploads.html', {
+        'uploads': UploadedMotif.objects.all()[:200],
+        'groups':  groups.GROUPS,
+    })
+
+
+@require_POST
+@login_required
+def _handle_upload(request):
+    from .models import UploadedMotif
+    f = request.FILES.get('image')
+    if f is None:
+        messages.error(request, 'no image file selected')
+        return redirect('escher:uploads')
+    raw = f.read()
+    if not raw:
+        messages.error(request, 'uploaded file is empty')
+        return redirect('escher:uploads')
+    if len(raw) > 8 * 1024 * 1024:
+        messages.error(request, 'upload exceeds 8 MB limit')
+        return redirect('escher:uploads')
+    sha = hashlib.sha256(raw).hexdigest()
+    existing = UploadedMotif.objects.filter(content_hash=sha).first()
+    if existing is not None:
+        messages.info(request, f'dedup: same content already uploaded as '
+                                f'"{existing.slug}".')
+        return redirect('escher:uploads')
+
+    # Try to read dimensions via PIL.  PIL is already a Velour dep
+    # (spoeqi/album.py imports it).  Fall back to 0×0 — the renderer
+    # treats that as a 1:1 square.
+    width = height = 0
+    content_type = (f.content_type or 'image/png')
+    try:
+        from PIL import Image
+        from io import BytesIO
+        with Image.open(BytesIO(raw)) as im:
+            width, height = im.size
+    except Exception:
+        pass
+
+    base = slugify(f.name.rsplit('.', 1)[0]) or 'image'
+    slug = base
+    n = 1
+    while UploadedMotif.objects.filter(slug=slug).exists():
+        n += 1
+        slug = f'{base}-{n}'
+    rec = UploadedMotif(
+        slug=slug,
+        original_name=f.name[:200],
+        content_hash=sha,
+        content_type=content_type,
+        width=width, height=height,
+    )
+    ext = (f.name.rsplit('.', 1)[-1] if '.' in f.name else 'bin').lower()
+    rec.file.save(f'{sha}.{ext}', ContentFile(raw), save=False)
+    rec.save()
+    messages.success(request, f'uploaded "{rec.slug}" '
+                              f'({width}×{height}, {len(raw):,} bytes)')
+    return redirect('escher:uploads')
+
+
+@login_required
 def group_detail(request, slug):
     """Per-group page with the live preview iframe + controls."""
     try:
         g = groups.get(slug)
     except KeyError:
         raise Http404(f'unknown wallpaper group: {slug}')
+    from .models import UploadedMotif
     return render(request, 'escher/group_detail.html', {
         'group':   g,
         'groups':  groups.GROUPS,
         'motifs':  list(motifs.STOCK.values()),
         'default_motif': motifs.DEFAULT_MOTIF,
+        'uploads': UploadedMotif.objects.all()[:200],
     })

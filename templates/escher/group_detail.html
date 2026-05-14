@@ -44,6 +44,7 @@
         <option value="stock" selected>Stock SVG</option>
         <option value="spoeqi_component">spoeqi component frame</option>
         <option value="tilesmith_tile">tilesmith tile silhouette</option>
+        <option value="upload">Uploaded bitmap</option>
       </select>
     </label>
 
@@ -77,6 +78,16 @@
       <input type="text" name="tile_slug" placeholder="(e.g. plain-rect, bump-tile)"
               style="width:100%; background:#0d1117; color:#c9d1d9;
                      border:1px solid #30363d; padding:0.25rem;">
+    </label>
+
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e; display:none;" data-show="upload">uploaded bitmap
+      <select name="upload_slug" style="width:100%; background:#0d1117;
+              color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
+        <option value="">(choose one — see <a href="{% url 'escher:uploads' %}">uploads</a>)</option>
+        {% for u in uploads %}
+          <option value="{{ u.slug }}">{{ u.slug }} ({{ u.width }}×{{ u.height }})</option>
+        {% endfor %}
+      </select>
     </label>
 
     <label style="font-size:0.78rem; color:#8b949e;">Tile (mm)
@@ -172,7 +183,7 @@
     out.set('from_escher', group);
     // Pass through every escher-side knob the gridprint bridge knows.
     for (const k of ['motif', 'motif_slug', 'pact', 'component', 'gen',
-                      'tile_slug',
+                      'tile_slug', 'upload_slug',
                       'tile', 'margin', 'landscape', 'cells', 'orbit']) {
       const v = params.get(k);
       if (v !== null && v !== '') out.set(k, v);
