@@ -266,6 +266,19 @@
                 color:#c9d1d9;">
           <input type="checkbox" name="mode" value="flowers"> flower-dump mode
         </label>
+        <label>View
+          <select name="fview" style="width:100%;background:#0d1117;
+                  color:#c9d1d9;border:1px solid #30363d;padding:0.25rem;">
+            <option value="catalog" selected>catalog — 7→1 flower widgets (default)</option>
+            <option value="fill">fill — colour the print grid by rule[i] (rule-table visualisation)</option>
+            <option value="run">run — simulate the CA for ?ticks generations</option>
+          </select>
+        </label>
+        <label>ticks (only used when view=run)
+          <input type="number" name="ticks" value="32" min="0" max="2000"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem;">
+        </label>
         <label>From spoeqi pact slug
           <input type="text" name="from_spoeqi"
                  placeholder="(e.g. oracul)"

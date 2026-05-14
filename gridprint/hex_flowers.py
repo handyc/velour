@@ -359,6 +359,34 @@ def fill_grid_from_rule(rule_bytes: bytes, palette: List[str],
     return out
 
 
+def fill_grid_from_ca_state(state_bytes: bytes, palette: List[str],
+                              side: int, rows: int, cols: int) -> List[List[str]]:
+    """Tile a single hex-CA component's gen-N state across a
+    ``rows × cols`` grid.
+
+    ``state_bytes`` is a ``side*side`` byte block (cell values 0..3).
+    The CA grid is repeated to fill the larger print grid by modular
+    wrap, so a 16×16 CA component visibly tiles across A4 — adjacent
+    page cells share local CA neighbourhoods rather than reading as
+    a flat rule-table walk.
+    """
+    if len(palette) != N_STATES:
+        raise ValueError(f'palette must have {N_STATES} entries; '
+                         f'got {len(palette)}')
+    if len(state_bytes) != side * side:
+        raise ValueError(f'state_bytes must be {side*side} long; '
+                         f'got {len(state_bytes)}')
+    out: List[List[str]] = []
+    for r in range(rows):
+        sr = r % side
+        row: List[str] = []
+        for c in range(cols):
+            sc = c % side
+            row.append(palette[state_bytes[sr * side + sc] & 3])
+        out.append(row)
+    return out
+
+
 def wrap_page(body: str, page_w_mm: float, page_h_mm: float,
               with_dimensions: bool = True) -> str:
     dims = (f' width="{page_w_mm}mm" height="{page_h_mm}mm"'

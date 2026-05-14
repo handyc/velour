@@ -163,8 +163,8 @@ class ViewTest(TestCase):
 
 
 class FillModeTest(TestCase):
-    """The default (fview=fill) flower-mode fills the regular hex
-    tessellation with rule-output colours row-major, paged for A4."""
+    """``?fview=fill`` (opt-in) paints the hex tessellation with the
+    rule's output colours row-major.  Catalog is the new default."""
 
     def setUp(self):
         User = get_user_model()
@@ -180,44 +180,70 @@ class FillModeTest(TestCase):
         p.save()
         return p
 
-    def test_default_view_is_fill_with_coloured_cells(self):
+    def test_default_view_is_catalog(self):
+        """Default flower mode now serves the 7→1 catalog widgets
+        (matches what "flower dump" semantically means)."""
         pact = self._make_pact()
         r = self.client.get(reverse('gridprint:grid_svg'), {
-            'mode': 'flowers', 'from_spoeqi': pact.slug, 'cell': '5'})
+            'mode': 'flowers', 'from_spoeqi': pact.slug})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        # Lots of filled hex polygons.  The exact count depends on cell
-        # geometry; at 5mm we expect ~700.
-        import re
-        filled = re.findall(r'<polygon[^>]*fill="rgb\(', body)
-        self.assertGreater(len(filled), 300)
-        # No catalog arrow marker (that's only the catalog view).
-        self.assertNotIn('<marker id="arrow"', body)
-        # Footer carries the page + rule info.
-        self.assertIn('rule ', body)
-        self.assertIn('page 1/', body)
+        # Catalog has the arrow marker on each flower.
+        self.assertIn('<marker id="arrow"', body)
 
-    def test_catalog_view_opted_in(self):
+    def test_fill_view_opted_in(self):
         pact = self._make_pact()
         r = self.client.get(reverse('gridprint:grid_svg'), {
             'mode': 'flowers', 'from_spoeqi': pact.slug,
-            'fview': 'catalog'})
+            'fview': 'fill', 'cell': '5'})
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        # Catalog has the arrow marker and key labels.
-        self.assertIn('<marker id="arrow"', body)
+        import re
+        filled = re.findall(r'<polygon[^>]*fill="rgb\(', body)
+        self.assertGreater(len(filled), 300)
+        # The fill mode has no flower-arrow marker.
+        self.assertNotIn('<marker id="arrow"', body)
+        self.assertIn('rule ', body)
+        self.assertIn('page 1/', body)
+
+    def test_run_view_simulates_ca(self):
+        """?fview=run advances the pact's CA the requested number of
+        generations and tiles the result.  Should produce filled
+        cells, no flower-arrows, and a 'CA run' footer line."""
+        pact = self._make_pact()
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug,
+            'fview': 'run', 'ticks': '4', 'cell': '6'})
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        import re
+        filled = re.findall(r'<polygon[^>]*fill="rgb\(', body)
+        self.assertGreater(len(filled), 100)
+        self.assertNotIn('<marker id="arrow"', body)
+        self.assertIn('CA run', body)
+        self.assertIn('gen 4', body)
+
+    def test_run_view_without_pact_prompts(self):
+        """fview=run with a rule_hex (no pact) should print a friendly
+        error rather than 500 — the seed lives on the Pact."""
+        rule_hex = '00' * 16384
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'rule_hex': rule_hex,
+            'fview': 'run'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b'from_spoeqi', r.content)
 
     def test_pagination_walks_rule(self):
         """fpage=1 should start at the next chunk of the rule, so the
         page-counter changes and at least one cell colour differs at
-        a fixed (row, col) position between page 0 and page 1."""
+        a fixed (row, col) position between page 0 and page 1.  Only
+        applies to the fill view (catalog uses its own pagination)."""
         pact = self._make_pact()
         r0 = self.client.get(reverse('gridprint:grid_svg'), {
             'mode': 'flowers', 'from_spoeqi': pact.slug,
-            'cell': '5', 'fpage': '0'})
+            'fview': 'fill', 'cell': '5', 'fpage': '0'})
         r1 = self.client.get(reverse('gridprint:grid_svg'), {
             'mode': 'flowers', 'from_spoeqi': pact.slug,
-            'cell': '5', 'fpage': '1'})
-        # The page-N/M label differs.
+            'fview': 'fill', 'cell': '5', 'fpage': '1'})
         self.assertIn('page 1/', r0.content.decode())
         self.assertIn('page 2/', r1.content.decode())

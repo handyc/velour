@@ -512,22 +512,26 @@ def _flowers_svg(request):
     """Render a flower-dump page from a hex-CA rule.  Branched off
     grid_svg via ?mode=flowers.
 
-    Default behaviour (``fview=fill``, the desired one for printing):
-    paint each cell of the regular hex tessellation with the colour
-    of ``rule[cell_index] & 3`` in row-major order, walking the
-    16,384-byte rule across as many pages as the chosen cell size
-    needs.  ``fpage=N`` chooses which slice starts at row 0.
+    Three sub-views selectable via ``?fview=``:
 
-    Opt-in alternative (``fview=catalog``): the older catalog-widget
-    view where each cell of a custom layout shows a 7-input flower +
-    arrow + result hex + key label.  Useful for inspecting a rule's
-    structure, not for printing.
+    * ``catalog`` (default) — the genuine 7→1 flower display: each
+      widget shows a centre hex + 6 neighbours pointing via an
+      arrow to the rule's single-cell output.  One widget per
+      neighbourhood configuration in the rule's 16,384-entry table.
+    * ``fill`` — opt-in alternative: paint each cell of the regular
+      hex tessellation with ``rule[cell_index] & 3`` row-major.
+      Visualises the rule's *output distribution* across all
+      configurations, but has no spatial CA meaning.
+    * ``run`` — actually simulate the CA: take the pact's seed +
+      rule, advance ``?ticks=N`` generations on the chosen
+      component, and tile the resulting 16×16 grid across the page.
+      Requires ``?from_spoeqi=<slug>`` (the seed lives on the Pact).
     """
     landscape = request.GET.get('landscape') == '1'
     margin = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
     page_w = svg.A4_H if landscape else svg.A4_W
     page_h = svg.A4_W if landscape else svg.A4_H
-    fview = (request.GET.get('fview') or 'fill').strip()
+    fview = (request.GET.get('fview') or 'catalog').strip()
 
     # Common: resolve the rule source.
     try:
@@ -560,37 +564,51 @@ def _flowers_svg(request):
         if 'component' in meta:
             title_bits.append(f'component {meta["component"]}')
 
-    # ─── Catalog (old widget view) ──────────────────────────────
-    if fview == 'catalog':
-        fpage = _int(request, 'fpage', 0, lo=0, hi=64)
-        fper  = _int(request, 'fper', hex_flowers.DEFAULT_FLOWERS_PER_PAGE,
-                      lo=1, hi=1024)
-        fcentre_raw = (request.GET.get('fcentre') or '').strip()
-        fcentre = None
-        if fcentre_raw:
-            try:
-                v = int(fcentre_raw)
-                if 0 <= v <= 3:
-                    fcentre = v
-            except ValueError:
-                pass
-        body, summary = hex_flowers.render_flowers_svg(
-            rule, palette=palette,
-            page_w_mm=page_w, page_h_mm=page_h,
-            margin_mm=margin,
-            flowers_per_page=fper,
-            page_index=fpage,
-            center_filter=fcentre,
-            title_text=' · '.join(title_bits) if title_bits else None,
-        )
-        out = hex_flowers.wrap_page(body, page_w, page_h)
-        resp = HttpResponse(out, content_type='image/svg+xml; charset=utf-8')
-        if request.GET.get('download') == '1':
-            resp['Content-Disposition'] = (
-                f'attachment; filename="flowers-{summary.rule_hash_short}-p{fpage}.svg"')
-        return resp
+    # ─── CA-run view (?fview=run): actually simulate the CA ────
+    if fview == 'run':
+        return _flowers_run_svg(request, rule, palette, meta,
+                                  title_bits, page_w, page_h, margin)
 
-    # ─── Fill (default — colour the print grid by rule) ─────────
+    # ─── Fill view (?fview=fill): colour the print grid by rule ─
+    if fview == 'fill':
+        return _flowers_fill_svg(request, rule, palette, title_bits,
+                                   page_w, page_h, margin)
+
+    # ─── Catalog (default — genuine 7→1 flower widgets) ─────────
+    fpage = _int(request, 'fpage', 0, lo=0, hi=64)
+    fper  = _int(request, 'fper', hex_flowers.DEFAULT_FLOWERS_PER_PAGE,
+                  lo=1, hi=1024)
+    fcentre_raw = (request.GET.get('fcentre') or '').strip()
+    fcentre = None
+    if fcentre_raw:
+        try:
+            v = int(fcentre_raw)
+            if 0 <= v <= 3:
+                fcentre = v
+        except ValueError:
+            pass
+    body, summary = hex_flowers.render_flowers_svg(
+        rule, palette=palette,
+        page_w_mm=page_w, page_h_mm=page_h,
+        margin_mm=margin,
+        flowers_per_page=fper,
+        page_index=fpage,
+        center_filter=fcentre,
+        title_text=' · '.join(title_bits) if title_bits else None,
+    )
+    out = hex_flowers.wrap_page(body, page_w, page_h)
+    resp = HttpResponse(out, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="flowers-{summary.rule_hash_short}-p{fpage}.svg"')
+    return resp
+
+
+def _flowers_fill_svg(request, rule, palette, title_bits,
+                       page_w, page_h, margin):
+    """Rule-output fill view (formerly the default).  Each hex cell
+    in the print tessellation gets ``palette[rule[i] & 3]`` with
+    ``i`` walking the 16,384-byte rule row-major across pages."""
     pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
     if pattern not in ('hex_pointy', 'hex_flat'):
         pattern = 'hex_pointy'
@@ -642,6 +660,102 @@ def _flowers_svg(request):
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
             f'attachment; filename="flowers-fill-{rule_hash}-p{fpage}.svg"')
+    return resp
+
+
+def _flowers_run_svg(request, rule, palette, meta, title_bits,
+                       page_w, page_h, margin):
+    """Actually-simulate-the-CA view (?fview=run).
+
+    Requires a Pact source (we need the seed_matrix).  Steps the
+    pact's chosen component forward ?ticks=N generations and tiles
+    the resulting 16×16 grid across the page so adjacent print
+    cells share local CA neighbourhoods.
+    """
+    if meta.get('source') != 'spoeqi':
+        body = (
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="3.4" '
+            f'fill="#888">flowers · fview=run needs '
+            f'<tspan font-weight="bold">?from_spoeqi=&lt;slug&gt;</tspan> '
+            f'(the seed lives on the Pact).</text>'
+        )
+        return HttpResponse(
+            hex_flowers.wrap_page(body, page_w, page_h),
+            content_type='image/svg+xml; charset=utf-8')
+
+    from spoeqi import keystream
+    from spoeqi.models import Pact, COMPONENTS
+
+    pact = Pact.objects.filter(slug=meta['slug']).first()
+    if pact is None:
+        body = (
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">flowers · pact "{meta["slug"]}" not found</text>'
+        )
+        return HttpResponse(
+            hex_flowers.wrap_page(body, page_w, page_h),
+            content_type='image/svg+xml; charset=utf-8')
+
+    ticks = _int(request, 'ticks', 32, lo=0, hi=2000)
+    component = int(meta.get('component', 0))
+    if not 0 <= component < COMPONENTS:
+        component = 0
+    side = pact.component_grid
+
+    # Step the whole pact forward (keystream.advance operates on the
+    # 64-component state in lockstep) and slice out the component the
+    # caller chose.  Up to 2k ticks at 16×16 stays under a second in
+    # pure Python.
+    state = keystream.initial_multi_grid(pact)
+    state = keystream.advance(state, ticks, pact)
+    base = component * side * side
+    comp_state = state[base : base + side * side]
+
+    pattern = (request.GET.get('pattern') or 'hex_pointy').strip()
+    if pattern not in ('hex_pointy', 'hex_flat'):
+        pattern = 'hex_pointy'
+    cell = _float(request, 'cell', 5.0, lo=0.8, hi=80.0)
+    width = _float(request, 'width', 0.20, lo=0.05, hi=2.5)
+    color = (request.GET.get('color') or '#888888').strip() or '#888888'
+    alpha = _float(request, 'alpha', 1.0, lo=0.0, hi=1.0)
+    fill_alpha = _float(request, 'fill_alpha', 0.95, lo=0.0, hi=1.0)
+
+    page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
+    style = svg.Style(color=color, width_mm=width, alpha=alpha,
+                       fill_alpha=fill_alpha)
+    rows, cols = hex_flowers.natural_hex_dims(
+        page_w, page_h, margin, cell,
+        pointy_top=(pattern == 'hex_pointy'))
+    fill = hex_flowers.fill_grid_from_ca_state(comp_state, palette,
+                                                  side, rows, cols)
+
+    embed = request.GET.get('embed') == '1'
+    body = svg.render(pattern, page=page, cell_mm=cell, style=style,
+                       fill=fill, with_dimensions=not embed)
+
+    import hashlib
+    rule_hash = hashlib.sha256(rule).hexdigest()[:16]
+    title_str = ' · '.join(title_bits)
+    footer = (
+        f'<g><text x="{margin:.2f}" y="{margin - 1.5:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.6" '
+        f'fill="#666">{title_str}</text>'
+        f'<text x="{margin:.2f}" y="{page_h - 2:.2f}" '
+        f'font-family="ui-monospace,monospace" font-size="2.4" '
+        f'fill="#888">'
+        f'rule {rule_hash}…   CA run · component {component} · '
+        f'gen {ticks}   '
+        f'grid {cols}×{rows} @ {cell:.1f}mm (tiles {side}×{side} pact cell)'
+        f'</text></g>'
+    )
+    body = body.replace('</svg>', footer + '</svg>')
+
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="flowers-run-{rule_hash}-c{component}-t{ticks}.svg"')
     return resp
 
 
