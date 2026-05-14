@@ -64,7 +64,7 @@
   <input type="range" id="signs-speed-slider" min="0.1" max="3" step="0.1" value="1">
 
   <label>Cylinder Size</label>
-  <input type="range" id="signs-size-slider" min="0.3" max="3" step="0.1" value="1.6">
+  <input type="range" id="signs-size-slider" min="0.3" max="3" step="0.1" value="1">
 
   <div class="btn-row">
     <button onclick="signsResetCamera()">🎯 Reset View</button>
@@ -115,9 +115,11 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0a0a1a);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-// Brought closer than signtest's default (z=12 → z=7) and aimed at
-// torso height so a hand sign occupies a useful fraction of the canvas.
-camera.position.set(0, 2.5, 7);
+// Placeholder position; the camera is auto-fit to the hand AABB once
+// the first frame's pose has been applied (see fitCameraToHands()
+// below).  The starting position is harmless because the fit
+// recomputes it on the next render.
+camera.position.set(0, 2.5, 4);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -262,13 +264,42 @@ let currentFrame = 0;
 let frameTime = 0;
 let isPlaying = true;
 let playbackSpeed = 1;
-let sizeMultiplier = 1.6;
+let sizeMultiplier = 1;
 let showLabels = false;
 
-// Apply initial cylinder/joint scaling so the hands are visible the
-// instant the page loads, before the user touches the size slider.
-cylinders.forEach(m => m.scale.setScalar(sizeMultiplier));
-joints.forEach(j => j.scale.setScalar(sizeMultiplier));
+// Stash the auto-fit pose so signsResetCamera() can restore it.
+let homeCameraPos    = new THREE.Vector3(0, 2.5, 4);
+let homeCameraTarget = new THREE.Vector3(0, 2.5, 0);
+let cameraFitted = false;
+
+function fitCameraToHands() {
+  // Walk every cylinder mesh's world-space bounding sphere, union them
+  // into one box, then place the camera so the box fits within ~70%
+  // of the viewport.  Called once after the first pose application —
+  // before that the cylinders are stacked at the origin.
+  if (!cylinders.length) return;
+  const box = new THREE.Box3();
+  const tmp = new THREE.Box3();
+  for (const m of cylinders) {
+    m.updateMatrixWorld(true);
+    tmp.setFromObject(m);
+    box.union(tmp);
+  }
+  if (!isFinite(box.min.x)) return;          // empty box → bail
+  const size = new THREE.Vector3();
+  const centre = new THREE.Vector3();
+  box.getSize(size); box.getCenter(centre);
+  // Distance such that the box's bounding sphere fits in 70% of the FOV.
+  const radius = 0.5 * Math.max(size.x, size.y, size.z);
+  const halfFov = (camera.fov * 0.5) * Math.PI / 180;
+  const dist = (radius / Math.sin(halfFov)) / 0.7;
+  homeCameraTarget.copy(centre);
+  homeCameraPos.set(centre.x, centre.y, centre.z + dist);
+  camera.position.copy(homeCameraPos);
+  controls.target.copy(homeCameraTarget);
+  controls.update();
+  cameraFitted = true;
+}
 
 const timelineSlider = document.getElementById('signs-timeline-slider');
 const frameInfoEl   = document.getElementById('signs-frame-info');
@@ -325,7 +356,10 @@ function signsTogglePlay() {
 function signsSkipToStart() { currentFrame = 0; frameTime = 0; updateTimeline(); }
 function signsSkipToEnd()   { currentFrame = Math.max(0, signData.frames.length - 1); frameTime = 0; updateTimeline(); }
 function signsResetCamera() {
-  camera.position.set(0, 2.5, 7); controls.target.set(0, 2.5, 0); controls.update();
+  // Restore the auto-fit pose computed once at first-pose time.
+  camera.position.copy(homeCameraPos);
+  controls.target.copy(homeCameraTarget);
+  controls.update();
 }
 let wireframeMode = false;
 function signsToggleWireframe() {
@@ -377,6 +411,11 @@ function animate(time) {
     } else {
       applyPose(signData.frames[currentFrame].pose, signData.frames[currentFrame].palmOffsets);
     }
+    // First time we have a real pose painted, snap the camera to the
+    // hand bounding-box.  Idempotent: a flag inside fitCameraToHands()
+    // would also work but skipping the function call entirely is
+    // cheaper.
+    if (!cameraFitted) fitCameraToHands();
   }
 
   controls.update();
