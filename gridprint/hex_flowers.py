@@ -206,9 +206,12 @@ def _flower_svg(x: float, y: float, key: int, output: int,
                                 border=style.border_color,
                                 border_w=style.border_width))
     # Arrow → between flower and result.  Start clear of the
-    # neighbours' outer edge (centre+sqrt(3)*r), end clear of the
-    # result hex.
-    arrow_x1 = flower_cx + style.cell_r * (math.sqrt(3) + 0.4)
+    # *outer edge* of the rightmost neighbour, which sits at
+    # ``cell_r * (sqrt(3) + 1)`` from the flower centre — earlier
+    # this used ``sqrt(3) + 0.4`` and the arrow drew straight
+    # through the rightmost neighbour hex.
+    arrow_x1 = flower_cx + style.cell_r * (math.sqrt(3) + 1) \
+               + max(0.2, style.cell_r * 0.2)
     arrow_x2 = result_cx - style.result_r - max(0.3, style.cell_r * 0.4)
     pieces.append(
         f'<line x1="{arrow_x1:.3f}" y1="{flower_cy:.3f}" '
