@@ -171,6 +171,73 @@ def quat_to_euler_xyz(q: np.ndarray) -> Tuple[float, float, float]:
 
 # ─────────────────────── OpenPose parsing ──────────────────────────
 
+# OpenPose BODY_25 joint indices we actually use for hand placement.
+# Reference: openpose/doc/02_output.md
+BODY_NECK         = 1
+BODY_RSHOULDER    = 2
+BODY_LSHOULDER    = 5
+BODY_MIDHIP       = 8
+
+
+def parse_openpose_body(data: dict, person_index: int = 0) -> np.ndarray:
+    """Return the 25 BODY_25 keypoints as a ``(25, 3)`` array with
+    z = 0 (2D OpenPose has no depth). Returns ``np.zeros((25, 3))``
+    if the body data is absent."""
+    people = data.get('people', [])
+    if not people:
+        return np.zeros((25, 3))
+    person = people[person_index]
+    flat = person.get('pose_keypoints_2d', [])
+    if not flat:
+        return np.zeros((25, 3))
+    a = np.asarray(flat, dtype=np.float64).reshape(-1, 3)
+    if a.shape[0] != 25:
+        raise ValueError(f'pose_keypoints_2d: expected 25 keypoints, got {a.shape[0]}')
+    xy = a[:, :2]
+    return np.concatenate([xy, np.zeros((25, 1))], axis=1)
+
+
+def body_frame(body_xyz: np.ndarray) -> Tuple[np.ndarray, float]:
+    """Return ``(origin, shoulder_distance)`` for normalising hand
+    positions relative to the signer's body. Origin = the neck
+    keypoint; scale = ||R-shoulder − L-shoulder||. Returns
+    ``(zeros, 1.0)`` if the body data is missing or degenerate so
+    callers can use a no-op normalisation rather than diving by 0.
+    """
+    if body_xyz.shape != (25, 3):
+        return np.zeros(3), 1.0
+    neck = body_xyz[BODY_NECK]
+    r_sh = body_xyz[BODY_RSHOULDER]
+    l_sh = body_xyz[BODY_LSHOULDER]
+    d = float(np.linalg.norm(r_sh - l_sh))
+    if d < 1e-6 or np.allclose(neck, 0):
+        return np.zeros(3), 1.0
+    return neck, d
+
+
+def palm_offset(wrist_t: np.ndarray, wrist_0: np.ndarray,
+                shoulder_distance: float,
+                scale: float = 1.0,
+                mirror_x: bool = False) -> list:
+    """Per-frame palm offset for the viewer: image-space motion of
+    the wrist between frame 0 and frame t, divided by shoulder
+    distance to get a body-relative unit. y is negated (OpenPose
+    image-y points down, viewer-y points up); x is optionally
+    mirrored.  Returns ``[]`` if the wrist data is degenerate.
+    """
+    if shoulder_distance <= 0:
+        return []
+    delta = wrist_t - wrist_0
+    if np.allclose(delta, 0):
+        return [0.0, 0.0, 0.0]
+    x = delta[0] / shoulder_distance * scale
+    y = -delta[1] / shoulder_distance * scale  # flip image-y → viewer-y
+    z = 0.0
+    if mirror_x:
+        x = -x
+    return [x, y, z]
+
+
 def parse_openpose_frame(data: dict, person_index: int = 0
                          ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Parse a single OpenPose JSON dict.

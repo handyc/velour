@@ -234,6 +234,23 @@ class ParseFrameTest(TestCase):
         with self.assertRaises(ValueError):
             openpose.parse_openpose_frame({'people': []})
 
+    def test_parse_body_returns_25x3(self):
+        flat = []
+        for i in range(25):
+            flat.extend([float(i), float(i * 2), 0.9])
+        frame = {'people': [{'pose_keypoints_2d': flat,
+                             'hand_left_keypoints_2d':  [0.0] * 63,
+                             'hand_right_keypoints_2d': [0.0] * 63}]}
+        body = openpose.parse_openpose_body(frame)
+        self.assertEqual(body.shape, (25, 3))
+        np.testing.assert_allclose(body[0], [0, 0, 0])
+        np.testing.assert_allclose(body[1], [1, 2, 0])
+
+    def test_parse_body_missing_returns_zeros(self):
+        body = openpose.parse_openpose_body({'people': [{}]})
+        self.assertEqual(body.shape, (25, 3))
+        np.testing.assert_array_equal(body, np.zeros((25, 3)))
+
     def test_end_to_end_retarget_from_dict(self):
         # Build a frame where both hands are in the rest pose.
         rest_flat = []
@@ -249,3 +266,52 @@ class ParseFrameTest(TestCase):
         for rxyz in rotations:
             for v in rxyz:
                 self.assertAlmostEqual(v, 0.0, places=5)
+
+
+class BodyFrameTest(TestCase):
+    def test_body_frame_origin_and_scale(self):
+        body = np.zeros((25, 3))
+        body[openpose.BODY_NECK]      = [10.0, 20.0, 0.0]
+        body[openpose.BODY_RSHOULDER] = [15.0, 21.0, 0.0]
+        body[openpose.BODY_LSHOULDER] = [5.0,  21.0, 0.0]
+        origin, dist = openpose.body_frame(body)
+        np.testing.assert_allclose(origin, [10.0, 20.0, 0.0])
+        self.assertAlmostEqual(dist, 10.0)
+
+    def test_body_frame_handles_degenerate(self):
+        # All-zero body (no detection) → identity scale, zero origin.
+        origin, dist = openpose.body_frame(np.zeros((25, 3)))
+        np.testing.assert_array_equal(origin, np.zeros(3))
+        self.assertEqual(dist, 1.0)
+
+
+class PalmOffsetTest(TestCase):
+    def test_zero_delta_returns_zero_triple(self):
+        a = np.array([100.0, 200.0, 0.0])
+        out = openpose.palm_offset(a, a, shoulder_distance=10.0)
+        self.assertEqual(out, [0.0, 0.0, 0.0])
+
+    def test_y_is_flipped(self):
+        wrist_t = np.array([100.0, 110.0, 0.0])  # 10 px down in image
+        wrist_0 = np.array([100.0, 100.0, 0.0])
+        out = openpose.palm_offset(wrist_t, wrist_0,
+                                   shoulder_distance=10.0, scale=1.0)
+        # y should be -1.0 (image-y delta = +10, shoulder = 10,
+        # viewer-y is the negative of image-y).
+        self.assertAlmostEqual(out[1], -1.0)
+        self.assertAlmostEqual(out[0], 0.0)
+
+    def test_mirror_x_negates_x(self):
+        wrist_t = np.array([110.0, 100.0, 0.0])
+        wrist_0 = np.array([100.0, 100.0, 0.0])
+        unmirrored = openpose.palm_offset(wrist_t, wrist_0, 10.0,
+                                          scale=1.0, mirror_x=False)
+        mirrored   = openpose.palm_offset(wrist_t, wrist_0, 10.0,
+                                          scale=1.0, mirror_x=True)
+        self.assertAlmostEqual(unmirrored[0], 1.0)
+        self.assertAlmostEqual(mirrored[0], -1.0)
+
+    def test_bad_shoulder_returns_empty(self):
+        a = np.array([1.0, 2.0, 0.0])
+        b = np.array([3.0, 4.0, 0.0])
+        self.assertEqual(openpose.palm_offset(a, b, 0.0), [])
