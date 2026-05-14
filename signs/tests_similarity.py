@@ -55,7 +55,7 @@ class SignatureTest(TestCase):
     def test_signature_is_unit_length(self):
         frames = [_make_pose(v) for v in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)]
         sig = similarity.compute_signature(frames, k=8)
-        self.assertEqual(len(sig), 720)
+        self.assertEqual(len(sig), similarity.SIGNATURE_DIM)
         # L2 norm ≈ 1
         n = math.sqrt(sum(v * v for v in sig))
         self.assertAlmostEqual(n, 1.0, places=6)
@@ -67,7 +67,7 @@ class SignatureTest(TestCase):
         frames = [_make_pose(0.0) for _ in range(10)]
         sig = similarity.compute_signature(frames, k=8)
         # All-zero signature normalises to all-zero (not unit).
-        self.assertEqual(sig, [0.0] * 720)
+        self.assertEqual(sig, [0.0] * similarity.SIGNATURE_DIM)
 
 
 class DistanceTest(TestCase):
@@ -84,9 +84,9 @@ class DistanceTest(TestCase):
                                math.sqrt(2.0), places=6)
 
     def test_empty_signature_yields_inf(self):
-        self.assertEqual(similarity.distance([], [0.0] * 720), float('inf'))
-        self.assertEqual(similarity.distance([0.0] * 720, []), float('inf'))
-        self.assertEqual(similarity.distance([0.0] * 10, [0.0] * 720),
+        self.assertEqual(similarity.distance([], [0.0] * similarity.SIGNATURE_DIM), float('inf'))
+        self.assertEqual(similarity.distance([0.0] * similarity.SIGNATURE_DIM, []), float('inf'))
+        self.assertEqual(similarity.distance([0.0] * 10, [0.0] * similarity.SIGNATURE_DIM),
                          float('inf'))
 
 

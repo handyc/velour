@@ -216,12 +216,16 @@ class Sign(models.Model):
 
     def recompute_signature(self) -> list:
         """Recompute and persist the pose signature from the current
-        frames. Importers call this after bulk-creating Frame rows.
-        Returns the signature list."""
+        frames. Includes per-frame palm offsets when they're
+        populated. Importers call this after bulk-creating Frame
+        rows. Returns the signature list."""
         from .similarity import compute_signature
-        rotations = list(self.frames.order_by('index').values_list(
-            'cylinder_rotations', flat=True))
-        self.signature = compute_signature(rotations)
+        frame_data = list(self.frames.order_by('index').values_list(
+            'cylinder_rotations', 'palm_l_pos', 'palm_r_pos'))
+        rotations = [r for r, _, _ in frame_data]
+        palm_l    = [pl for _, pl, _ in frame_data]
+        palm_r    = [pr for _, _, pr in frame_data]
+        self.signature = compute_signature(rotations, palm_l, palm_r)
         Sign.objects.filter(pk=self.pk).update(signature=self.signature)
         return self.signature
 

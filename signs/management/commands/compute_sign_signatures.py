@@ -45,10 +45,12 @@ class Command(BaseCommand):
         n_empty = 0
         batch: list[Sign] = []
         for sign in qs.iterator():
-            frame_rotations = list(
-                sign.frames.order_by('index').values_list(
-                    'cylinder_rotations', flat=True))
-            sig = similarity.compute_signature(frame_rotations)
+            frame_data = list(sign.frames.order_by('index').values_list(
+                'cylinder_rotations', 'palm_l_pos', 'palm_r_pos'))
+            rotations = [r for r, _, _ in frame_data]
+            palm_l    = [pl for _, pl, _ in frame_data]
+            palm_r    = [pr for _, _, pr in frame_data]
+            sig = similarity.compute_signature(rotations, palm_l, palm_r)
             if not sig:
                 n_empty += 1
             sign.signature = sig

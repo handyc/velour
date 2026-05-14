@@ -24,8 +24,15 @@ from typing import Iterable, List, Sequence, Tuple
 # lexical signs in the GSL corpus.
 K_SIGNATURE_KEYFRAMES = 8
 
-POSE_DIM = 90  # 30 cylinders × 3 axes
-SIGNATURE_DIM = K_SIGNATURE_KEYFRAMES * POSE_DIM
+# Per-keyframe contribution: 30 cylinder rotations × 3 axes plus
+# both palm offsets × 3 axes (left and right), total 96 floats.
+# Palm offsets enter the signature so the similarity engine
+# distinguishes signs that share a handshape but differ in *where*
+# the hands move (e.g. WATER at the chin vs DRINK at the mouth).
+POSE_DIM = 90
+PALM_DIM = 6
+KEYFRAME_DIM = POSE_DIM + PALM_DIM
+SIGNATURE_DIM = K_SIGNATURE_KEYFRAMES * KEYFRAME_DIM
 
 
 def _flatten_pose(pose: Sequence[Sequence[float]]) -> List[float]:
@@ -59,19 +66,49 @@ def _l2_normalise(vec: List[float]) -> List[float]:
     return [v / norm for v in vec]
 
 
+def _flatten_palm(triple: Sequence[float] | None) -> List[float]:
+    """3-float palm offset, padding zeros for missing/empty input."""
+    if not triple:
+        return [0.0, 0.0, 0.0]
+    out = [float(triple[0]) if len(triple) > 0 else 0.0,
+           float(triple[1]) if len(triple) > 1 else 0.0,
+           float(triple[2]) if len(triple) > 2 else 0.0]
+    return out
+
+
 def compute_signature(frame_rotations: Iterable[Sequence[Sequence[float]]],
+                      frame_palm_l: Iterable[Sequence[float]] | None = None,
+                      frame_palm_r: Iterable[Sequence[float]] | None = None,
                       k: int = K_SIGNATURE_KEYFRAMES) -> List[float]:
-    """Build a unit-length signature from an ordered iterable of
-    per-frame ``cylinder_rotations`` lists. Skipped silently if
-    the iterable yields no frames (returns ``[]``)."""
-    frames = list(frame_rotations)
-    n = len(frames)
+    """Build a unit-length signature from ordered iterables of
+    per-frame ``cylinder_rotations`` and optional per-frame palm
+    offsets. Skipped silently if the rotations iterable is empty
+    (returns ``[]``).
+
+    Each keyframe contributes ``KEYFRAME_DIM`` floats:
+    90 cylinder-rotation floats followed by 3 left-palm floats and
+    3 right-palm floats. Palm offsets default to ``[0, 0, 0]`` when
+    absent (a hand undetected in a given frame contributes no
+    motion signal).
+    """
+    rotations = list(frame_rotations)
+    n = len(rotations)
     if n == 0:
         return []
+    palm_l = list(frame_palm_l) if frame_palm_l is not None else [None] * n
+    palm_r = list(frame_palm_r) if frame_palm_r is not None else [None] * n
+    # Pad / truncate so all three sequences have length n.
+    while len(palm_l) < n: palm_l.append(None)
+    while len(palm_r) < n: palm_r.append(None)
+    palm_l = palm_l[:n]
+    palm_r = palm_r[:n]
+
     indices = _pick_keyframe_indices(n, k)
     sig: List[float] = []
     for i in indices:
-        sig.extend(_flatten_pose(frames[i]))
+        sig.extend(_flatten_pose(rotations[i]))
+        sig.extend(_flatten_palm(palm_l[i]))
+        sig.extend(_flatten_palm(palm_r[i]))
     return _l2_normalise(sig)
 
 
