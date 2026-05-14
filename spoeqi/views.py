@@ -550,6 +550,99 @@ def oracle(request, slug):
     })
 
 
+def textmask(request, slug):
+    """Run a user-supplied text through the CA-as-attention-mask.
+    Tile the text into one component's ``side × side`` grid at the
+    requested generation, look up each cell's CA colour, dispatch
+    through a named 4-entry mapping table, render the tinted grid
+    plus the flattened output text.
+    """
+    from . import textmask as tm
+
+    pact = get_object_or_404(Pact, slug=slug)
+    palette = pact.palette
+    if is_per_component_palette(palette):
+        # Per-component palettes are 64 sub-palettes; we only render
+        # one component at a time so pick the relevant one below.
+        pass
+
+    form_defaults = {
+        'text':       'attention is all you need · 注意力就是一切',
+        'component':  '0',
+        'generation': '0',
+        'mapping':    'attention',
+    }
+    form = dict(form_defaults)
+    result = None
+    error = None
+
+    if request.method == 'POST':
+        for k in form:
+            form[k] = request.POST.get(k, form_defaults[k])
+        try:
+            result = tm.apply(
+                pact,
+                text=form['text'],
+                component=int(form['component']),
+                generation=int(form['generation']),
+                mapping=form['mapping'])
+        except (ValueError, TypeError) as e:
+            error = f'bad input: {e}'
+        except Exception as e:  # noqa: BLE001
+            error = f'{type(e).__name__}: {e}'
+
+    # Pick the palette to render: per-component picks the sub-palette
+    # for the selected component; otherwise the single palette.
+    sel_component = int(form['component']) if form['component'].lstrip('-').isdigit() else 0
+    if is_per_component_palette(palette) and 0 <= sel_component < COMPONENTS:
+        render_palette = palette[sel_component]
+    else:
+        render_palette = palette
+
+    # Build (name, label-tuple, description) tuples for the dropdown +
+    # legend.  We hand the labels straight to the template instead of
+    # re-deriving them there.
+    mappings = [
+        {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
+        for m in tm.MAPPING_TABLES.values()
+    ]
+    active_labels = tm.MAPPING_TABLES[form['mapping']].labels \
+        if form['mapping'] in tm.MAPPING_TABLES else \
+        tm.MAPPING_TABLES['attention'].labels
+
+    # Pre-format the palette as CSS-ready rgb strings so the template
+    # doesn't need an index filter.
+    swatches = [
+        {'color': i, 'css': f'rgb({c[0]},{c[1]},{c[2]})',
+         'label': active_labels[i]}
+        for i, c in enumerate(render_palette)
+    ]
+
+    # Attach the CSS colour to each cell once, in the view, so the
+    # template loop stays trivial.
+    rendered_cells = None
+    if result is not None:
+        rendered_cells = [
+            {'char':  c.char, 'color': c.color, 'out': c.out,
+             'row':   c.row,  'col':   c.col,
+             'css':   swatches[c.color]['css']}
+            for c in result.cells
+        ]
+
+    return render(request, 'spoeqi/textmask.html', {
+        'pact':            pact,
+        'form':            form,
+        'result':          result,
+        'rendered_cells':  rendered_cells,
+        'error':           error,
+        'mappings':        mappings,
+        'active_labels':   list(active_labels),
+        'swatches':        swatches,
+        'side':            pact.component_grid,
+        'components':      list(range(COMPONENTS)),
+    })
+
+
 def keystream_tap(request, slug, component, generation, n_bytes):
     """Return ``n_bytes`` of deterministic keystream from component
     ``c`` at generation ``g``.  Both Alice and Bob (or any two parties
