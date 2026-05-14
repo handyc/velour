@@ -229,8 +229,9 @@ def get_state_at(pact: Pact, target_gen: int) -> bytes:
     return state
 
 
-DOMAIN_DEFAULT = b'spoeqi-tap/1'
-DOMAIN_ROUTER  = b'spoeqi-tap/router/1'
+DOMAIN_DEFAULT  = b'spoeqi-tap/1'
+DOMAIN_ROUTER   = b'spoeqi-tap/router/1'
+DOMAIN_ENVELOPE = b'spoeqi-envelope/1'
 
 
 def tap(pact: Pact, component: int, generation: int, n_bytes: int,
