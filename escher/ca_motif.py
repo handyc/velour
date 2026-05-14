@@ -109,11 +109,17 @@ def spoeqi_component_motif(pact_slug: str, component: int,
 
 def _placeholder_text(msg: str) -> str:
     """Render an error placeholder inside the motif box so the user
-    sees what went wrong without breaking the page."""
+    sees what went wrong without breaking the page.
+
+    ``msg`` is HTML-escaped before insertion so any ``<``/``>`` /
+    ``&`` characters in it (e.g. the literal text ``<slug>``) don't
+    break SVG/XML parsers that consume this fragment.
+    """
+    import html
     return (
         '<rect x="0" y="0" width="1" height="1" '
         'fill="#fee" stroke="#c44" stroke-width="0.01" />'
         '<text x="0.05" y="0.5" '
         'font-family="ui-monospace,monospace" font-size="0.05" '
-        f'fill="#a22">{msg}</text>'
+        f'fill="#a22">{html.escape(msg)}</text>'
     )

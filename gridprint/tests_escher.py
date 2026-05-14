@@ -69,6 +69,23 @@ class EscherBridgeViewTest(TestCase):
         self.assertIn('attachment', r.headers.get('Content-Disposition', ''))
         self.assertIn('escher-p4', r.headers.get('Content-Disposition', ''))
 
+    def test_motif_placeholder_is_well_formed_xml(self):
+        """When a required motif arg is missing, the placeholder text
+        inside the <symbol id="motif"> must not contain raw ``<`` /
+        ``>`` characters — those leaked into the SVG and Firefox
+        refused to render the page (regression report 2026-05-14)."""
+        import xml.etree.ElementTree as ET
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'from_escher': 'p2', 'motif': 'spoeqi_component',
+            # No `pact=` → escher._resolve_motif emits a placeholder.
+        })
+        self.assertEqual(r.status_code, 200)
+        # Parsing must succeed; raw `<slug>` inside <text> used to fail.
+        try:
+            ET.fromstring(r.content)
+        except ET.ParseError as exc:
+            self.fail(f'placeholder SVG is not well-formed XML: {exc}')
+
     def test_print_endpoint_wraps_html(self):
         """gridprint's /print/ endpoint should serve an HTML wrapper
         that includes the escher SVG body and auto-fires

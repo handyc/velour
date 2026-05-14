@@ -74,10 +74,11 @@ def tilesmith_tile_motif(tile_slug: str,
 
 
 def _placeholder(msg: str) -> str:
+    import html
     return (
         '<rect x="0" y="0" width="1" height="1" '
         'fill="#fee" stroke="#c44" stroke-width="0.01" />'
         '<text x="0.05" y="0.5" '
         'font-family="ui-monospace,monospace" font-size="0.05" '
-        f'fill="#a22">{msg}</text>'
+        f'fill="#a22">{html.escape(msg)}</text>'
     )

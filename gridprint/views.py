@@ -197,19 +197,20 @@ def _tilesmith_svg(request, slug: str):
     embed = request.GET.get('embed') == '1'
 
     def _err(msg: str) -> HttpResponse:
+        import html
         body = (
             f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="0 0 {page_w} {page_h}" '
             f'preserveAspectRatio="xMidYMid meet">'
             f'<text x="{margin}" y="{margin + 6}" '
             f'font-family="ui-monospace,monospace" font-size="4" '
-            f'fill="#c04a4a">tilesmith: {msg}</text></svg>'
+            f'fill="#c04a4a">tilesmith: {html.escape(msg)}</text></svg>'
         )
         return HttpResponse(body,
                              content_type='image/svg+xml; charset=utf-8')
 
     if not slug:
-        return _err('provide ?from_tilesmith=&lt;slug&gt;')
+        return _err('provide ?from_tilesmith=<slug>')
     spec = TileSpec.objects.filter(slug=slug).first()
     if spec is None:
         return _err(f'tile "{slug}" not found')
@@ -280,19 +281,20 @@ def _escher_svg(request, slug: str):
     page_h = svg.A4_W if landscape else svg.A4_H
 
     def _err(msg: str) -> HttpResponse:
+        import html
         body = (
             f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'viewBox="0 0 {page_w} {page_h}" '
             f'preserveAspectRatio="xMidYMid meet">'
             f'<text x="{margin}" y="{margin + 6}" '
             f'font-family="ui-monospace,monospace" font-size="4" '
-            f'fill="#c04a4a">escher: {msg}</text></svg>'
+            f'fill="#c04a4a">escher: {html.escape(msg)}</text></svg>'
         )
         return HttpResponse(body,
                              content_type='image/svg+xml; charset=utf-8')
 
     if not slug:
-        return _err('provide ?from_escher=&lt;group_slug&gt;')
+        return _err('provide ?from_escher=<group_slug>')
     try:
         group = eg.get(slug)
     except KeyError:
