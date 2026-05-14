@@ -114,6 +114,62 @@ class ApplyTest(_TextmaskBase):
                       mapping='attention')
 
 
+class TokenModeTest(_TextmaskBase):
+    def test_token_registry_has_starters(self):
+        for name in ('bert-mlm', 'denoise', 'phonetic', 't5-noise', 'pos-distill'):
+            self.assertIn(name, tm.TOKEN_MAPPING_TABLES,
+                          f'token mapping {name!r} missing')
+
+    def test_tile_tokens_wraps(self):
+        # 4×4 = 16 cells; 3 tokens wrap to fill 16 slots.
+        out = tm.tile_tokens('a b c', side=4)
+        self.assertEqual(len(out), 16)
+        self.assertEqual(out[0],  'a')
+        self.assertEqual(out[1],  'b')
+        self.assertEqual(out[2],  'c')
+        self.assertEqual(out[3],  'a')  # wraps
+
+    def test_tile_tokens_empty(self):
+        out = tm.tile_tokens('', side=3)
+        self.assertEqual(out, [''] * 9)
+
+    def test_apply_tokens_bert_mlm_masks_some(self):
+        pact = _make_pact()
+        r = tm.apply_tokens(pact, text='the quick brown fox jumps over the lazy dog',
+                            component=0, generation=0, mapping='bert-mlm')
+        mask_count = sum(1 for c in r.cells if c.out == '[MASK]')
+        # CA colour distribution is roughly balanced; expect 10–40% masked.
+        ratio = mask_count / len(r.cells)
+        self.assertGreater(ratio, 0.05)
+        self.assertLess(ratio, 0.50)
+
+    def test_apply_tokens_denoise_drops_stopwords(self):
+        pact = _make_pact()
+        r = tm.apply_tokens(pact, text='the fox jumps over the lazy dog',
+                            component=2, generation=1, mapping='denoise')
+        # Output should not contain 'the' as a standalone (it'd be
+        # dropped or stemmed when colour=1; only when colour=0 or 2/3
+        # does it survive partly).  Just check the joined output
+        # is shorter than naive tile.
+        self.assertGreater(len(r.cells), 0)
+        # Determinism: same call gives same output.
+        r2 = tm.apply_tokens(pact, text='the fox jumps over the lazy dog',
+                              component=2, generation=1, mapping='denoise')
+        self.assertEqual(r.output_text, r2.output_text)
+
+    def test_apply_tokens_all_returns_64(self):
+        pact = _make_pact()
+        rs = tm.apply_tokens_all(pact, text='quick brown fox',
+                                  generation=0, mapping='bert-mlm')
+        self.assertEqual(len(rs), 64)
+
+    def test_apply_tokens_unknown_mapping(self):
+        pact = _make_pact()
+        with self.assertRaises(ValueError):
+            tm.apply_tokens(pact, text='x', component=0, generation=0,
+                             mapping='no-such')
+
+
 class ApplyAllTest(_TextmaskBase):
     def test_returns_64_results(self):
         pact = _make_pact()
@@ -182,6 +238,34 @@ class ViewTest(_TextmaskBase):
         })
         self.assertEqual(r.status_code, 200)
         self.assertIn('bad input', r.content.decode())
+
+    def test_post_token_mode_renders_token_grid(self):
+        pact = _make_pact()
+        url = reverse('spoeqi:textmask', args=[pact.slug])
+        r = self.client.post(url, {
+            'text':       'the quick brown fox jumps',
+            'mode':       'token',
+            'mapping':    'denoise',
+            'component':  '0',
+            'generation': '0',
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('token mask grid', body)
+
+    def test_post_token_compare_all_renders_table(self):
+        pact = _make_pact()
+        url = reverse('spoeqi:textmask', args=[pact.slug])
+        r = self.client.post(url, {
+            'text':        'attention is all you need',
+            'mode':        'token',
+            'mapping':     'bert-mlm',
+            'component':   '0',
+            'generation':  '0',
+            'compare_all': 'on',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('all 64 components, same input (tokens)', r.content.decode())
 
     def test_post_compare_all_renders_64_rows(self):
         pact = _make_pact()

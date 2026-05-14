@@ -71,6 +71,19 @@
              overflow: hidden; vertical-align: middle; }
   .tm-bar-seg { display: inline-block; height: 100%;
                  vertical-align: top; }
+
+  /* Token grid: each cell holds a small input token + transformed
+     output below it.  Cells size themselves to fit the longest token
+     in their column; we keep them readable rather than perfectly
+     uniform. */
+  .tm-tokens { display: grid; gap: 2px; padding: 2px; background: #000;
+                font-family: monospace; }
+  .tm-tokens .tcell { padding: 3px 4px; min-height: 32px;
+                       display: flex; flex-direction: column; justify-content: center;
+                       color: #000; font-size: 0.7rem; line-height: 1.1;
+                       border-radius: 2px; overflow: hidden; }
+  .tm-tokens .ttok { font-weight: 600; opacity: 0.65; }
+  .tm-tokens .tout { color: #000; font-weight: 700; }
 </style>
 
 <div class="tm-page">
@@ -95,6 +108,18 @@
 
     <label for="tm-text">input text</label>
     <textarea id="tm-text" name="text" rows="2">{{ form.text }}</textarea>
+
+    <label for="tm-mode">mode</label>
+    <div class="row-narrow">
+      <select id="tm-mode" name="mode">
+        <option value="char"  {% if form.mode == 'char' %}selected{% endif %}>char — 1 glyph per cell</option>
+        <option value="token" {% if form.mode == 'token' %}selected{% endif %}>token — 1 word per cell · BERT/IR-style preprocessing</option>
+      </select>
+      <div class="tm-desc">
+        char: glyph-per-cell transforms · token: whole-word transforms (stem, stopwords, MLM, POS).
+        Switching modes refreshes the mapping list.
+      </div>
+    </div>
 
     <label for="tm-mapping">mapping</label>
     <div class="row-narrow">
@@ -188,6 +213,82 @@
     </div>
   {% endif %}
 
+  {% if token_result %}
+    <div class="panel">
+      <h2>token mask grid</h2>
+      <div class="tm-legend">
+        {% for sw in swatches %}
+          <div class="key">
+            <span class="swatch" style="background: {{ sw.css }};"></span>
+            <span><b style="color:#fff;">{{ sw.color }}</b> &middot; {{ sw.label }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="tm-tokens" style="grid-template-columns: repeat({{ token_result.side }}, minmax(40px, 1fr));">
+        {% for cell in rendered_token_cells %}
+          <div class="tcell"
+                title="row={{ cell.row }} col={{ cell.col }} colour={{ cell.color }} · {{ cell.token|default:'∅' }} → {{ cell.out|default:'(drop)' }}"
+                style="background: {{ cell.css }};">
+            <span class="ttok">{{ cell.token|default:'·' }}</span>
+            <span class="tout">{{ cell.out|default:'∅' }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="tm-meta">
+        component <code>{{ token_result.component }}</code> ·
+        generation <code>{{ token_result.generation }}</code> ·
+        mapping <code>{{ token_result.mapping }}</code> ·
+        {{ token_result.cells|length }} cells →
+        {{ token_result.output_text|wordcount }} tokens out
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>output text</h2>
+      <div class="tm-output">{{ token_result.output_text }}</div>
+    </div>
+  {% endif %}
+
+  {% if token_all_results %}
+    <div class="panel">
+      <h2>all 64 components, same input (tokens)</h2>
+      <div class="tm-legend">
+        {% for sw in swatches %}
+          <div class="key">
+            <span class="swatch" style="background: {{ sw.css }};"></span>
+            <span><b style="color:#fff;">{{ sw.color }}</b> &middot; {{ sw.label }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      <table class="tm-table">
+        <thead>
+          <tr>
+            <th class="tm-c-idx">#</th>
+            <th class="tm-c-bar">colour mix</th>
+            <th class="tm-c-out">output tokens</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rendered_token_rows %}
+            <tr>
+              <td class="tm-c-idx">{{ row.component }}</td>
+              <td class="tm-c-bar">
+                <span class="tm-bar">
+                  {% for b in row.bar %}<span class="tm-bar-seg"
+                       style="width: {{ b.pct }}%; background: {{ b.css }};"></span>{% endfor %}
+                </span>
+              </td>
+              <td class="tm-c-out">{{ row.output_text }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="tm-meta">
+        same text · same generation · same mapping · 64 stencils
+      </div>
+    </div>
+  {% endif %}
+
   {% if all_results %}
     <div class="panel">
       <h2>all 64 components, same input</h2>
@@ -231,16 +332,39 @@
 </div>
 
 <script>
-  // Show the description of the currently selected mapping under the
-  // dropdown, refreshed on change.
-  const MAPPING_DESCRIPTIONS = {
-    {% for m in mappings %}'{{ m.name|escapejs }}': '{{ m.description|escapejs }}',
+  // Two mapping registries (one per mode); swap the dropdown options
+  // when the user changes mode so they don't see incompatible entries.
+  const CHAR_MAPPINGS = [
+    {% for m in char_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},
     {% endfor %}
-  };
-  const sel = document.getElementById('tm-mapping');
-  const desc = document.getElementById('tm-desc');
-  function updateDesc() { desc.textContent = MAPPING_DESCRIPTIONS[sel.value] || ''; }
-  sel.addEventListener('change', updateDesc);
+  ];
+  const TOKEN_MAPPINGS = [
+    {% for m in token_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},
+    {% endfor %}
+  ];
+  const modeSel    = document.getElementById('tm-mode');
+  const mappingSel = document.getElementById('tm-mapping');
+  const desc       = document.getElementById('tm-desc');
+
+  function populate(mode, selectedName) {
+    const list = (mode === 'token') ? TOKEN_MAPPINGS : CHAR_MAPPINGS;
+    mappingSel.innerHTML = '';
+    list.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.name;
+      opt.textContent = `${m.name} — ${m.labels.join(' / ')}`;
+      if (m.name === selectedName) opt.selected = true;
+      mappingSel.appendChild(opt);
+    });
+    updateDesc();
+  }
+  function updateDesc() {
+    const list = (modeSel.value === 'token') ? TOKEN_MAPPINGS : CHAR_MAPPINGS;
+    const m = list.find(x => x.name === mappingSel.value);
+    desc.textContent = m ? m.desc : '';
+  }
+  modeSel.addEventListener('change', () => populate(modeSel.value, mappingSel.value));
+  mappingSel.addEventListener('change', updateDesc);
   updateDesc();
 </script>
 

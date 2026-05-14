@@ -112,6 +112,67 @@ register('emphasis',
     labels=('lower', 'pass',   'UPPER', 'xx'))
 
 
+# ─── Token-mode registry ────────────────────────────────────────────
+# Token-level mappings: each function takes a token, returns a token
+# (or '' to drop).  Lifted into a separate dict so the char-mode
+# registry stays one-glyph-in / one-glyph-out for the live JS engine.
+
+from . import tokens as _tokens
+
+@dataclass(frozen=True)
+class _TokenMapping:
+    name:        str
+    description: str
+    table:       tuple  # 4 callables (str -> str)
+    labels:      tuple  # 4 short ui labels
+
+
+TOKEN_MAPPING_TABLES: Dict[str, _TokenMapping] = {}
+
+
+def register_token(name: str, *, description: str,
+                   table: tuple, labels: tuple) -> None:
+    if name in TOKEN_MAPPING_TABLES:
+        raise ValueError(f'token mapping {name!r} already registered')
+    if len(table) != 4 or len(labels) != 4:
+        raise ValueError('token mapping needs exactly 4 functions and 4 labels')
+    TOKEN_MAPPING_TABLES[name] = _TokenMapping(
+        name=name, description=description, table=tuple(table), labels=tuple(labels))
+
+
+# Starter token tables.  pos and lemma trigger a one-shot spaCy load
+# the first time they fire, so they're tagged in the description.
+
+register_token('bert-mlm',
+    description='BERT pretraining: ~15 % of tokens become [MASK]; rest pass',
+    table=(_tokens.passthrough, _tokens.mask, _tokens.passthrough, _tokens.passthrough),
+    labels=('pass', '[MASK]', 'pass', 'pass'))
+
+register_token('denoise',
+    description='IR-style: pass / drop stopwords / Porter stem / lowercase',
+    table=(_tokens.passthrough, _tokens.drop_stopword,
+           _tokens.porter_stem, _tokens.lowercase),
+    labels=('pass', '−stop', 'stem', 'lower'))
+
+register_token('phonetic',
+    description='pass / Soundex / Metaphone / mask — dialect-tolerant fingerprints',
+    table=(_tokens.passthrough, _tokens.soundex,
+           _tokens.metaphone, _tokens.mask),
+    labels=('pass', 'soundex', 'meta', 'mask'))
+
+register_token('t5-noise',
+    description='T5 span-corruption analogue: 1/4 tokens become a sentinel',
+    table=(_tokens.passthrough, _tokens.sentinel,
+           _tokens.passthrough, _tokens.passthrough),
+    labels=('pass', '<extra_id>', 'pass', 'pass'))
+
+register_token('pos-distill',
+    description='Reduce to a semantic skeleton: pass / POS tag / lemma / stem (spaCy load on first use)',
+    table=(_tokens.passthrough, _tokens.pos_tag,
+           _tokens.lemmatize, _tokens.porter_stem),
+    labels=('pass', 'POS', 'lemma', 'stem'))
+
+
 # ─── Tiling ─────────────────────────────────────────────────────────
 
 def tile_text(text: str, side: int) -> List[str]:
@@ -230,3 +291,108 @@ def apply_all(pact: Pact, *, text: str, generation: int,
                                    cells=cells,
                                    output_text=''.join(chunks)))
     return results
+
+
+# ─── Token mode ────────────────────────────────────────────────────
+# Same grid, but each cell holds an entire token (or '') instead of
+# a single character.  Token-mode tables operate on whole tokens so
+# we can do real preprocessing: stop-word removal, Porter stemming,
+# Soundex / Metaphone, POS / lemma, BERT-style MLM masking.
+
+def tile_tokens(text: str, side: int) -> List[str]:
+    """Tile the *tokens* of ``text`` (regex word-tokenizer) into the
+    ``side × side`` grid in row-major order, wrapping if the token
+    count is less than the cell count.  Empty input → list of empty
+    strings."""
+    n = side * side
+    toks = _tokens.tokenize(text or '')
+    if not toks:
+        return [''] * n
+    out = []
+    L = len(toks)
+    for i in range(n):
+        out.append(toks[i % L])
+    return out
+
+
+@dataclass
+class TokenCell:
+    idx:   int
+    row:   int
+    col:   int
+    token: str   # the token tiled into this cell
+    color: int   # CA colour 0..3
+    out:   str   # token after the chosen primitive
+
+
+@dataclass
+class TokenMaskResult:
+    side:         int
+    component:    int
+    generation:   int
+    mapping:      str
+    cells:        List[TokenCell]
+    output_text:  str   # space-joined non-empty outputs
+
+
+def _token_apply_grid(glyphs: List[str], grid: bytes, side: int,
+                       component: int, generation: int, mapping_name: str,
+                       table: tuple) -> TokenMaskResult:
+    area = side * side
+    cells: List[TokenCell] = []
+    chunks: List[str] = []
+    for idx in range(area):
+        color = grid[idx]
+        tok   = glyphs[idx]
+        out   = table[color](tok) if tok else ''
+        cells.append(TokenCell(idx=idx, row=idx // side, col=idx % side,
+                                token=tok, color=color, out=out))
+        if out: chunks.append(out)
+    return TokenMaskResult(side=side, component=component,
+                            generation=generation, mapping=mapping_name,
+                            cells=cells, output_text=' '.join(chunks))
+
+
+def apply_tokens(pact: Pact, *, text: str, component: int, generation: int,
+                  mapping: str) -> TokenMaskResult:
+    """Token-mode mask: tile tokens into one component's grid, apply
+    the per-colour token primitive, return cells + space-joined output."""
+    if mapping not in TOKEN_MAPPING_TABLES:
+        raise ValueError(f'unknown token mapping {mapping!r}')
+    if not (0 <= component < 64):
+        raise ValueError(f'component must be 0..63, got {component}')
+    if generation < 0:
+        raise ValueError('generation must be ≥ 0')
+
+    side = pact.component_grid
+    state = keystream.get_state_at(pact, generation)
+    area = side * side
+    base = component * area
+    grid = state[base:base + area]
+    glyphs = tile_tokens(text, side)
+    table = TOKEN_MAPPING_TABLES[mapping].table
+    return _token_apply_grid(glyphs, grid, side, component, generation,
+                              mapping, table)
+
+
+def apply_tokens_all(pact: Pact, *, text: str, generation: int,
+                     mapping: str) -> List[TokenMaskResult]:
+    """Token-mode mask across all 64 components — same input, 64
+    stencils.  Same shape as ``apply_all`` but with tokens."""
+    if mapping not in TOKEN_MAPPING_TABLES:
+        raise ValueError(f'unknown token mapping {mapping!r}')
+    if generation < 0:
+        raise ValueError('generation must be ≥ 0')
+
+    side = pact.component_grid
+    state = keystream.get_state_at(pact, generation)
+    area = side * side
+    glyphs = tile_tokens(text, side)
+    table = TOKEN_MAPPING_TABLES[mapping].table
+    out: List[TokenMaskResult] = []
+    for c in range(COMPONENTS):
+        base = c * area
+        grid = state[base:base + area]
+        out.append(_token_apply_grid(glyphs, grid, side, c, generation,
+                                      mapping, table))
+    return out

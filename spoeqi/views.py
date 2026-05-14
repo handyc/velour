@@ -571,30 +571,59 @@ def textmask(request, slug):
         'component':  '0',
         'generation': '0',
         'mapping':    'attention',
-        'compare_all': '',   # 'on' when the checkbox is ticked
+        'mode':       'char',   # 'char' | 'token'  (attention mode coming)
+        'compare_all': '',
     }
     form = dict(form_defaults)
     result = None
     all_results = None
+    token_result = None
+    token_all_results = None
     error = None
+
+    # The mapping dropdown content depends on mode — if the POST'd
+    # mapping doesn't belong to the chosen mode, fall back to that
+    # mode's first table.
+    def _default_mapping(mode):
+        if mode == 'token':
+            return next(iter(tm.TOKEN_MAPPING_TABLES))
+        return next(iter(tm.MAPPING_TABLES))
 
     if request.method == 'POST':
         for k in form:
             form[k] = request.POST.get(k, form_defaults[k])
+        mode = form['mode'] if form['mode'] in ('char','token') else 'char'
+        form['mode'] = mode
+        # Snap mapping into the right registry if the user just
+        # switched modes.
+        registry = tm.TOKEN_MAPPING_TABLES if mode == 'token' else tm.MAPPING_TABLES
+        if form['mapping'] not in registry:
+            form['mapping'] = _default_mapping(mode)
         try:
-            if form['compare_all']:
-                all_results = tm.apply_all(
-                    pact,
-                    text=form['text'],
-                    generation=int(form['generation']),
-                    mapping=form['mapping'])
+            if mode == 'token':
+                if form['compare_all']:
+                    token_all_results = tm.apply_tokens_all(
+                        pact, text=form['text'],
+                        generation=int(form['generation']),
+                        mapping=form['mapping'])
+                else:
+                    token_result = tm.apply_tokens(
+                        pact, text=form['text'],
+                        component=int(form['component']),
+                        generation=int(form['generation']),
+                        mapping=form['mapping'])
             else:
-                result = tm.apply(
-                    pact,
-                    text=form['text'],
-                    component=int(form['component']),
-                    generation=int(form['generation']),
-                    mapping=form['mapping'])
+                if form['compare_all']:
+                    all_results = tm.apply_all(
+                        pact, text=form['text'],
+                        generation=int(form['generation']),
+                        mapping=form['mapping'])
+                else:
+                    result = tm.apply(
+                        pact, text=form['text'],
+                        component=int(form['component']),
+                        generation=int(form['generation']),
+                        mapping=form['mapping'])
         except (ValueError, TypeError) as e:
             error = f'bad input: {e}'
         except Exception as e:  # noqa: BLE001
@@ -608,16 +637,25 @@ def textmask(request, slug):
     else:
         render_palette = palette
 
-    # Build (name, label-tuple, description) tuples for the dropdown +
-    # legend.  We hand the labels straight to the template instead of
-    # re-deriving them there.
-    mappings = [
+    # Build (name, label-tuple, description) tuples for the dropdowns.
+    # Both registries are surfaced so the client-side script can
+    # repopulate the mapping dropdown when the mode flips, without an
+    # extra round-trip.
+    char_mappings = [
         {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
         for m in tm.MAPPING_TABLES.values()
     ]
-    active_labels = tm.MAPPING_TABLES[form['mapping']].labels \
-        if form['mapping'] in tm.MAPPING_TABLES else \
-        tm.MAPPING_TABLES['attention'].labels
+    token_mappings = [
+        {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
+        for m in tm.TOKEN_MAPPING_TABLES.values()
+    ]
+    mode = form.get('mode', 'char')
+    mappings = token_mappings if mode == 'token' else char_mappings
+    registry = tm.TOKEN_MAPPING_TABLES if mode == 'token' else tm.MAPPING_TABLES
+    if form['mapping'] in registry:
+        active_labels = registry[form['mapping']].labels
+    else:
+        active_labels = next(iter(registry.values())).labels
 
     # Pre-format the palette as CSS-ready rgb strings so the template
     # doesn't need an index filter.
@@ -636,6 +674,14 @@ def textmask(request, slug):
              'row':   c.row,  'col':   c.col,
              'css':   swatches[c.color]['css']}
             for c in result.cells
+        ]
+    rendered_token_cells = None
+    if token_result is not None:
+        rendered_token_cells = [
+            {'token': c.token, 'color': c.color, 'out': c.out,
+             'row':   c.row,   'col':   c.col,
+             'css':   swatches[c.color]['css']}
+            for c in token_result.cells
         ]
 
     # Build a compact per-component summary row for the comparison
@@ -659,13 +705,37 @@ def textmask(request, slug):
                 'output_text': r.output_text,
                 'bar':         bar,
             })
+    # Same shape for token compare-all.
+    rendered_token_rows = None
+    if token_all_results is not None:
+        rendered_token_rows = []
+        for r in token_all_results:
+            counts = [0, 0, 0, 0]
+            for c in r.cells:
+                counts[c.color] += 1
+            total = max(1, sum(counts))
+            bar = [{'pct':   100.0 * counts[i] / total,
+                     'count': counts[i],
+                     'css':   swatches[i]['css']}
+                    for i in range(4)]
+            rendered_token_rows.append({
+                'component':   r.component,
+                'output_text': r.output_text,
+                'bar':         bar,
+            })
 
     # Payload for the live JS engine: enough to run the same 64 CAs
     # the detail page runs, plus the active mapping name and palette.
     # Only attached when there's a result to display — the empty-form
     # GET doesn't ship a megabyte of rule bytes.
+    # Live JS engine only runs in char mode — token primitives (Porter
+    # stem, spaCy POS, Soundex) can't realistically be mirrored in JS.
+    # In token mode we still ship payload metadata for the mode/
+    # mapping dropdown UI but skip the engine boot.
     live_payload_json = ''
-    if result is not None or all_results is not None:
+    has_any_result = (result is not None or all_results is not None or
+                       token_result is not None or token_all_results is not None)
+    if has_any_result and form['mode'] == 'char':
         live_payload = {
             'seed_hex':      pact.seed_hex,
             'rules_hex':     pact.rules_hex,
@@ -688,8 +758,14 @@ def textmask(request, slug):
         'rendered_cells':  rendered_cells,
         'all_results':     all_results,
         'rendered_rows':   rendered_rows,
+        'token_result':         token_result,
+        'rendered_token_cells': rendered_token_cells,
+        'token_all_results':    token_all_results,
+        'rendered_token_rows':  rendered_token_rows,
         'error':           error,
         'mappings':        mappings,
+        'char_mappings':   char_mappings,
+        'token_mappings':  token_mappings,
         'active_labels':   list(active_labels),
         'swatches':        swatches,
         'side':            pact.component_grid,
