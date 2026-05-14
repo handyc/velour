@@ -91,6 +91,7 @@ urlpatterns = [
     path('vampyrik/',    include('vampyrik.urls')),
     path('barding/',  include('barding.urls')),
     path('signs/',       include('signs.urls')),
+    path('escher/',      include('escher.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

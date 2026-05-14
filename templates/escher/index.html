@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}escher — 17 wallpaper groups{% endblock %}
+
+{% block content %}
+<div style="max-width:1200px; margin:1.2rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<h1 style="margin:0;">escher
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — the 17 plane symmetry groups, applied to a chosen motif
+  </span>
+</h1>
+
+<p style="color:#8b949e; font-size:0.86rem; max-width:60em;">
+  Each of the 17 wallpaper groups is a distinct way of repeating a
+  motif across the plane.  Pick a motif below to see how every group
+  reshuffles it; click any group's slug to open the live tiling
+  editor for that group.
+</p>
+
+<div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;
+            margin:0.8rem 0 0.6rem;">
+  <label style="font-size:0.78rem; color:#8b949e;">motif
+    <select id="motif-select"
+      style="background:#0d1117; color:#c9d1d9;
+             border:1px solid #30363d; padding:0.2rem 0.4rem;
+             font-family:inherit;">
+      {% for m in motifs %}
+        <option value="{{ m.slug }}"
+          {% if m.slug == default_motif %}selected{% endif %}>{{ m.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <span style="color:#6e7681; font-size:0.78rem;">
+    Click a group below to dig in.
+  </span>
+</div>
+
+<img id="thumb-sheet"
+  src="{% url 'escher:groups_grid' %}?motif_slug={{ default_motif }}"
+  alt="17 wallpaper groups thumbnail sheet"
+  style="display:block; width:100%; max-width:900px;
+         background:#0d1117; border:1px solid #30363d;
+         border-radius:6px;">
+
+<div style="display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+            gap:8px; margin-top:1.2rem;">
+  {% for g in groups %}
+    <a href="{% url 'escher:group_detail' g.slug %}"
+       style="display:block; padding:0.5rem 0.7rem;
+              background:#161b22; border:1px solid #30363d;
+              border-radius:5px; color:#cfa;
+              text-decoration:none;">
+      <div style="font-weight:600; color:#cfa;">{{ g.slug }}</div>
+      <div style="color:#8b949e; font-size:0.72rem; margin-top:0.15rem;">
+        {{ g.note }}
+      </div>
+      <div style="color:#6e7681; font-size:0.7rem; margin-top:0.25rem;">
+        lattice: {{ g.lattice }} · orbit: {{ g.orbit_size }}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<script>
+(function () {
+  const sel = document.getElementById('motif-select');
+  const img = document.getElementById('thumb-sheet');
+  sel.addEventListener('change', () => {
+    img.src = '{% url "escher:groups_grid" %}?motif_slug=' +
+              encodeURIComponent(sel.value);
+  });
+})();
+</script>
+
+</div>
+{% endblock %}

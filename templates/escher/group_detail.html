@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}escher — {{ group.slug }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<h1 style="margin:0;">
+  <a href="{% url 'escher:index' %}" style="color:#888; text-decoration:none;">escher</a>
+  <span style="color:#666;">/</span>
+  <span style="color:#cfa;">{{ group.slug }}</span>
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — {{ group.note }}
+  </span>
+</h1>
+
+<p style="color:#8b949e; font-size:0.85rem; margin:0.2rem 0 0.8rem;">
+  Lattice: <code>{{ group.lattice }}</code> · orbit size:
+  <code>{{ group.orbit_size }}</code>.  Each unit cell receives
+  {{ group.orbit_size }} copies of the motif under the group's
+  in-cell transforms; the lattice tiles the plane.
+</p>
+
+<div style="display:grid; grid-template-columns:320px 1fr; gap:1rem;">
+
+  <form id="g" style="background:#161b22; border:1px solid #30363d;
+                       border-radius:6px; padding:0.7rem 0.9rem;
+                       display:grid; grid-template-columns:1fr 1fr;
+                       gap:0.5rem 0.7rem;">
+
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e;">Group
+      <select name="group" style="width:100%; background:#0d1117;
+              color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
+        {% for g in groups %}
+          <option value="{{ g.slug }}"
+            {% if g.slug == group.slug %}selected{% endif %}>{{ g.slug }} — {{ g.note }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e;">Motif source
+      <select name="motif" style="width:100%; background:#0d1117;
+              color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
+        <option value="stock" selected>Stock SVG</option>
+        <option value="spoeqi_component">spoeqi component frame</option>
+      </select>
+    </label>
+
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e;" data-show="stock">Stock motif
+      <select name="motif_slug" style="width:100%; background:#0d1117;
+              color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
+        {% for m in motifs %}
+          <option value="{{ m.slug }}"
+            {% if m.slug == default_motif %}selected{% endif %}>{{ m.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e; display:none;" data-show="spoeqi_component">spoeqi pact slug
+      <input type="text" name="pact" placeholder="(e.g. album-xxxx)"
+              style="width:100%; background:#0d1117; color:#c9d1d9;
+                     border:1px solid #30363d; padding:0.25rem;">
+    </label>
+    <label style="font-size:0.78rem; color:#8b949e; display:none;" data-show="spoeqi_component">component
+      <input type="number" name="component" value="0" min="0" max="63"
+              style="width:100%; background:#0d1117; color:#c9d1d9;
+                     border:1px solid #30363d; padding:0.25rem;">
+    </label>
+    <label style="font-size:0.78rem; color:#8b949e; display:none;" data-show="spoeqi_component">generation
+      <input type="number" name="gen" value="0" min="0" max="2000" step="1"
+              style="width:100%; background:#0d1117; color:#c9d1d9;
+                     border:1px solid #30363d; padding:0.25rem;">
+    </label>
+
+    <label style="font-size:0.78rem; color:#8b949e;">Tile (mm)
+      <input type="number" name="tile" value="30" step="2" min="4" max="200"
+              style="width:100%; background:#0d1117; color:#c9d1d9;
+                     border:1px solid #30363d; padding:0.25rem;">
+    </label>
+    <label style="font-size:0.78rem; color:#8b949e;">Margin (mm)
+      <input type="number" name="margin" value="10" step="1" min="0" max="40"
+              style="width:100%; background:#0d1117; color:#c9d1d9;
+                     border:1px solid #30363d; padding:0.25rem;">
+    </label>
+
+    <label style="font-size:0.78rem; color:#8b949e;">
+      <input type="checkbox" name="landscape" value="1"> landscape
+    </label>
+    <label style="font-size:0.78rem; color:#8b949e;">
+      <input type="checkbox" name="cells" value="1"> show unit cells
+    </label>
+
+    <div style="grid-column:1/3; display:flex; gap:0.4rem; flex-wrap:wrap;
+                margin-top:0.3rem;">
+      <button type="button" id="download-btn" style="background:#21262d;
+              color:#c9d1d9; border:1px solid #30363d;
+              padding:0.4rem 0.9rem; cursor:pointer; font-size:0.85rem;">
+        Download SVG
+      </button>
+      <a id="gridprint-link" href="#" style="color:#58a6ff;
+         text-decoration:none; padding:0.45rem 0; font-size:0.85rem;"
+         target="_blank">Open in Gridprint ↗</a>
+    </div>
+  </form>
+
+  <div id="preview-pane" style="display:flex; flex-direction:column;
+       align-items:center;">
+    <iframe id="preview" src="" style="display:block; background:#fff;
+            border:1px solid #30363d; border-radius:6px;
+            aspect-ratio:210/297; height:min(85vh, 1100px);
+            max-width:100%; width:auto;"></iframe>
+    <p style="font-size:0.72rem; color:#6e7681; margin:0.3rem 0 0;">
+      Preview tiles the full A4 page scaled to fit.  Save the SVG to
+      print or laser-cut at physical scale.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const form = document.getElementById('g');
+  const preview = document.getElementById('preview');
+  const downloadBtn = document.getElementById('download-btn');
+  const gridprintLink = document.getElementById('gridprint-link');
+  const motifSel = form.querySelector('[name="motif"]');
+
+  function updateMotifVisibility () {
+    const kind = motifSel.value;
+    for (const el of form.querySelectorAll('[data-show]')) {
+      el.style.display = (el.dataset.show === kind) ? '' : 'none';
+    }
+  }
+  motifSel.addEventListener('change', updateMotifVisibility);
+  updateMotifVisibility();
+
+  function buildParams () {
+    const p = new URLSearchParams();
+    for (const el of form.querySelectorAll('[name]')) {
+      if (el.type === 'checkbox') {
+        if (el.checked) p.set(el.name, '1');
+      } else {
+        const v = (el.value || '').trim();
+        if (v !== '') p.set(el.name, v);
+      }
+    }
+    return p;
+  }
+  function buildUrl (extras) {
+    const p = buildParams();
+    if (extras) for (const [k, v] of Object.entries(extras)) p.set(k, v);
+    return '{% url "escher:render_svg" %}?' + p.toString();
+  }
+
+  function refresh () {
+    preview.src = buildUrl({embed: '1'});
+    // Group selector might change the group; reflect that in the URL bar
+    // so the browser remembers the active group on reload.
+    const sel = form.querySelector('[name="group"]');
+    if (sel && sel.value) {
+      const url = new URL(window.location.href);
+      const want = '/escher/g/' + sel.value + '/';
+      if (url.pathname !== want) {
+        window.history.replaceState({}, '', want + window.location.search);
+      }
+    }
+    const landscape = form.querySelector('[name="landscape"]').checked;
+    preview.style.aspectRatio = landscape ? '297/210' : '210/297';
+    // No native gridprint integration for SVG snippets yet — link
+    // points at gridprint with hex_pointy as a placeholder pattern.
+    gridprintLink.href = '{% url "gridprint:index" %}?pattern=hex_pointy';
+  }
+  let timer = null;
+  form.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 200);
+  });
+  downloadBtn.addEventListener('click', () => {
+    window.location = buildUrl({download: '1'});
+  });
+  refresh();
+})();
+</script>
+
+</div>
+{% endblock %}

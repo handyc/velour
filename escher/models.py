@@ -1,0 +1,60 @@
+"""Persisted escher compositions.
+
+A Composition records "which group + which motif + which physical
+size".  Stock motifs are referenced by slug; CA-frame motifs carry
+a tiny spec dict pointing at the source pact/component/generation.
+"""
+
+from __future__ import annotations
+
+from django.db import models
+
+from . import groups, motifs
+
+
+MOTIF_KIND_CHOICES = [
+    ('stock', 'Stock motif'),
+    ('spoeqi_component', 'spoeqi component frame'),
+]
+
+
+class Composition(models.Model):
+    slug = models.SlugField(unique=True, max_length=80)
+    name = models.CharField(max_length=160)
+    group_slug = models.CharField(max_length=8, default='p4m')
+    motif_kind = models.CharField(
+        max_length=24, choices=MOTIF_KIND_CHOICES, default='stock')
+    motif_spec = models.JSONField(
+        default=dict,
+        help_text='Stock: {"slug": "comma"}.  '
+                  'spoeqi_component: {"pact": "<slug>", "component": K, '
+                  '"generation": N}.')
+    tile_mm = models.FloatField(default=30.0)
+    landscape = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.name} ({self.group_slug})'
+
+    @property
+    def group(self):
+        return groups.get(self.group_slug)
+
+    def motif_label(self) -> str:
+        if self.motif_kind == 'stock':
+            slug = (self.motif_spec or {}).get('slug') or motifs.DEFAULT_MOTIF
+            try:
+                return motifs.get(slug).name
+            except KeyError:
+                return slug
+        if self.motif_kind == 'spoeqi_component':
+            s = self.motif_spec or {}
+            return (f'spoeqi {s.get("pact", "?")} '
+                    f'· cmp {s.get("component", 0)} '
+                    f'· gen {s.get("generation", 0)}')
+        return self.motif_kind

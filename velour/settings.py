@@ -159,6 +159,7 @@ INSTALLED_APPS = [
     'vampyrik',
     'barding',
     'signs',
+    'escher',
 ]
 
 MIDDLEWARE = [
