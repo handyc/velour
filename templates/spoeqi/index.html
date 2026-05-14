@@ -38,6 +38,8 @@
 
 <p style="margin: 18px 0 14px;">
   <a class="new-btn" href="{% url 'spoeqi:create' %}">+ new Pact</a>
+  <a class="new-btn" href="{% url 'spoeqi:album_new' %}" style="margin-left:8px;"
+     title="Create a pact whose seed and rule are derived from a holiday-album of cover images">+ from album</a>
 </p>
 
 {% if pacts %}

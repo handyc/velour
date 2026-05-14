@@ -547,8 +547,18 @@
   let generation = 0;
 
   function reseedTo(gen) {
-    for (let c = 0; c < COMPONENTS; c++)
-      grids.set(seedGrid(seed[c]), c * AREA);
+    // Honor album-seeded pacts' explicit gen-0 grids when present.
+    const ig = payload.initial_grids;
+    if (ig && ig.length === COMPONENTS) {
+      for (let c = 0; c < COMPONENTS; c++) {
+        const src = ig[c];
+        const base = c * AREA;
+        for (let i = 0; i < src.length; i++) grids[base + i] = src[i] & 3;
+      }
+    } else {
+      for (let c = 0; c < COMPONENTS; c++)
+        grids.set(seedGrid(seed[c]), c * AREA);
+    }
     generation = 0;
     while (generation < gen) step();
   }

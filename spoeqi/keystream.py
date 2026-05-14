@@ -105,10 +105,35 @@ def seed_grid(byte_seed: int, grid_side: int) -> bytes:
 # ───────────────────── CA tick ─────────────────────────────────────
 
 def initial_multi_grid(pact: Pact) -> bytes:
-    """64 × side² bytes — the seed-expanded state of every component
-    at generation 0.  Identical to what the JS viewer paints on first
-    load (before any ticks)."""
+    """64 × side² bytes — the state of every component at generation
+    0.  Two paths:
+
+    - Default: expand each ``seed_matrix[c]`` byte into ``side²`` cells
+      via xoshiro128**.  This is what the JS viewer paints on first
+      load.
+    - Album-seeded pact: ``pact.initial_grids`` carries the explicit
+      gen-0 cell state for each component (a list of 64 lists of
+      ``side²`` ints in 0..3).  Used when the pact was created from
+      a cover-image album so gen 0 literally renders as the album.
+    """
     side = pact.component_grid
+    area = side * side
+    if pact.initial_grids:
+        ig = pact.initial_grids
+        if len(ig) != COMPONENTS:
+            raise ValueError(
+                f'initial_grids has {len(ig)} components, expected {COMPONENTS}')
+        out = bytearray()
+        for c, grid in enumerate(ig):
+            if len(grid) != area:
+                raise ValueError(
+                    f'initial_grids[{c}] has {len(grid)} cells, expected {area}')
+            for v in grid:
+                if not 0 <= v < 4:
+                    raise ValueError(
+                        f'initial_grids[{c}] contains {v}; expected 0..3')
+            out += bytes(grid)
+        return bytes(out)
     seed = bytes(pact.seed_matrix)
     out = bytearray()
     for c in range(COMPONENTS):

@@ -259,6 +259,29 @@ class Pact(models.Model):
 
     notes       = models.TextField(blank=True)
 
+    # ─── Album / image-seeded pacts ──────────────────────────────────
+    # When the pact was created from a holiday-album of cover images,
+    # ``initial_grids`` carries the 64 quantized tile-grids that
+    # replace the xoshiro128**-expansion of seed_matrix at gen 0.  The
+    # pact's gen-0 render then shows the cover images literally.
+    # ``album_hash`` is the SHA-256 of the canonicalised concatenation
+    # of normalised image bytes — both parties can recompute it from
+    # the same album to verify they have the same seal.
+    initial_grids = models.JSONField(
+        null=True, blank=True, default=None,
+        help_text='Optional override of the initial CA state.  When set, '
+                  'this is a list of 64 lists, each of side² ints in 0..3 '
+                  '(row-major).  Lets a pact start from an image-derived '
+                  'state instead of the xoshiro expansion of seed_matrix.')
+    album_hash = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='SHA-256 hex of the normalized album bytes (when this '
+                  'pact was created from an image album).  Empty for '
+                  'non-album pacts.')
+    album_n_images = models.PositiveSmallIntegerField(
+        null=True, blank=True, default=None,
+        help_text='Number of images in the cover album (2, 4, 8, or 16).')
+
     # Soft provenance — which Det Candidate (if any) the rule was
     # compiled from.  on_delete=SET_NULL because rule_snapshot is a
     # full copy; the Pact remains playable even after Det is purged.

@@ -19,4 +19,5 @@ urlpatterns = [
     path('<slug:slug>/oracle/', views.oracle,    name='oracle'),
     path('<slug:slug>/textmask/', views.textmask, name='textmask'),
     path('<slug:slug>/chain/',    views.chain,    name='chain'),
+    path('album/new/',            views.album_new, name='album_new'),
 ]

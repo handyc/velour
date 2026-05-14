@@ -280,9 +280,22 @@
   var swap  = new Uint8Array(COMPONENTS * GRID * GRID);
 
   function reseed () {
-    for (var c = 0; c < COMPONENTS; c++) {
-      var g = seedGrid(seed[c]);
-      grids.set(g, c * GRID * GRID);
+    // Album-seeded pacts ship their gen-0 cells explicitly in
+    // payload.initial_grids (list of 64 arrays of GRID*GRID ints in
+    // 0..3) — when present, skip the xoshiro expansion and use the
+    // stored grids directly so gen 0 paints as the cover album.
+    var ig = payload.initial_grids;
+    if (ig && ig.length === COMPONENTS) {
+      for (var c = 0; c < COMPONENTS; c++) {
+        var src = ig[c];
+        var base = c * GRID * GRID;
+        for (var i = 0; i < src.length; i++) grids[base + i] = src[i] & 3;
+      }
+    } else {
+      for (var c = 0; c < COMPONENTS; c++) {
+        var g = seedGrid(seed[c]);
+        grids.set(g, c * GRID * GRID);
+      }
     }
     generation = 0;
     changeHistory.length = 0;

@@ -440,6 +440,10 @@ def detail(request, slug):
         'components':  COMPONENTS,
         'component_grid': pact.component_grid,
         'fleet_label_ids': fleet_label_ids,
+        # Album-seeded pacts override gen-0 cells with explicit grids
+        # instead of xoshiro expansion.  None on non-album pacts.
+        'initial_grids': pact.initial_grids,
+        'album_hash':    pact.album_hash or None,
     }
     cells_per_tile = pact.component_grid * pact.component_grid
     if is_per_component_palette(pact.palette):
@@ -822,6 +826,7 @@ def textmask(request, slug):
             'generation':    int(form['generation']),
             'compare_all':   bool(form['compare_all']),
             'component':     int(form['component']) if not form['compare_all'] else 0,
+            'initial_grids': pact.initial_grids,
         }
         if form['mode'] == 'token':
             tmap = tm.TOKEN_MAPPING_TABLES[form['mapping']]
@@ -857,6 +862,81 @@ def textmask(request, slug):
         'side':            pact.component_grid,
         'components':      list(range(COMPONENTS)),
         'live_payload':    live_payload_json,
+    })
+
+
+def album_new(request, slug=None):
+    """Create a pact from a cover-image album.
+
+    The user uploads N ∈ {2, 4, 8, 16} images.  Each image is
+    quantized to 4 states under a single album-wide palette, then
+    split into 64//N tiles which become the gen-0 cell grids of
+    individual components.  The album's SHA-256 hash deterministically
+    derives the seed_matrix and rule_snapshot via domain-separated
+    KDF.  Two parties with the same album get bit-identical pacts.
+    """
+    from . import album as _album
+
+    form_defaults = {
+        'name':        '',
+        'party_a':     'Alice',
+        'party_b':     'Bob',
+        'n_images':    '4',
+        'clock_model': 'synced',
+        'tick_ms':     '180',
+    }
+    form = dict(form_defaults)
+    errors: list[str] = []
+
+    if request.method == 'POST':
+        for k in form:
+            form[k] = request.POST.get(k, form_defaults[k]).strip()
+        try:
+            n = int(form['n_images'])
+            if n not in _album.VALID_N:
+                raise ValueError(f'n_images must be one of {_album.VALID_N}')
+            files = request.FILES.getlist('images')
+            if len(files) != n:
+                raise ValueError(
+                    f'expected exactly {n} images, got {len(files)}')
+            images_bytes = [f.read() for f in files]
+            targets = _album.quantize_album(images_bytes,
+                                             side=COMPONENT_GRID)
+            seed, rule = _album.derive_seed_and_rule(targets.album_hash)
+            palette = _album.palette_to_pact_palette(targets.palette_rgb)
+            initial_grids = _album.targets_to_initial_grids(targets)
+
+            pact = Pact(
+                name=form['name'] or f'album-{targets.album_hash[:8]}',
+                party_a=form['party_a'],
+                party_b=form['party_b'],
+                clock_model=form['clock_model'],
+                tick_ms=int(form['tick_ms']),
+                component_grid=COMPONENT_GRID,
+                seed_matrix=seed,
+                rule_snapshot=rule,
+                rule_diversity='shared',
+                palette=palette,
+                initial_grids=initial_grids,
+                album_hash=targets.album_hash,
+                album_n_images=n,
+                launch_time=timezone.now(),
+            )
+            pact.save()
+            messages.success(request,
+                f'Album-seeded pact "{pact.name}" created '
+                f'({n} images → 64 components, album hash '
+                f'{targets.album_hash[:12]}…).')
+            return redirect('spoeqi:detail', slug=pact.slug)
+        except ValueError as e:
+            errors.append(str(e))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f'{type(e).__name__}: {e}')
+
+    return render(request, 'spoeqi/album_new.html', {
+        'form':    form,
+        'errors':  errors,
+        'valid_n': list(_album.VALID_N),
     })
 
 

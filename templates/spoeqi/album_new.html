@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}new album-seeded pact{% endblock %}
+{% block content %}
+<style>
+  .alb-page { max-width: 56em; }
+  .alb-page h1 { margin: 0 0 4px; }
+  .alb-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .alb-page .crumbs a { color: #ace; }
+  .alb-page p { color: #aaa; max-width: 46em; }
+
+  .alb-form { padding: 14px 16px; border: 1px solid #1f1f1f; background: #0a0a0a;
+               display: grid; grid-template-columns: 12em 1fr; gap: 10px; }
+  .alb-form label { color: #ccc; padding-top: 4px; font-size: 0.9rem; }
+  .alb-form input[type="text"],
+  .alb-form input[type="number"],
+  .alb-form select { background: #111; color: #ddd; border: 1px solid #333;
+                      padding: 4px 6px; font-family: inherit; width: 100%;
+                      box-sizing: border-box; }
+  .alb-form input[type="file"] { color: #ccc; font-family: monospace;
+                                  font-size: 0.85rem; }
+  .alb-form .row-narrow input { max-width: 10em; }
+  .alb-form .submit { grid-column: 1 / -1; text-align: right; margin-top: 6px; }
+  .alb-form button { background: #222; color: #cfc; border: 1px solid #555;
+                     padding: 6px 18px; font-family: inherit; cursor: pointer; }
+  .alb-form button:hover { border-color: #8b949e; }
+  .alb-form .hint { color: #888; font-size: 0.8rem; padding-top: 2px; }
+  .alb-err { color: #f88; margin-bottom: 12px; padding: 8px 10px;
+              border: 1px solid #4a1d1d; background: #1a0a0a; }
+</style>
+
+<div class="alb-page">
+  <div class="crumbs">
+    <a href="{% url 'spoeqi:index' %}">spoeqi</a> ›
+    new album pact
+  </div>
+  <h1>new album-seeded pact</h1>
+  <p>
+    Upload a <strong>holiday album</strong> of 2 / 4 / 8 / 16 cover
+    images.  Each image is quantized to 4 colours and split into
+    <code>64 / N</code> tiles that become the gen-0 cell grids of the
+    pact's components.  The album's SHA-256 deterministically derives
+    the seed and rule, so Alice and Bob get bit-identical pacts from
+    the same album.  The cover images <em>are</em> the seal — render
+    the pact at generation 0 and you literally see the album.
+  </p>
+
+  {% if errors %}
+    {% for e in errors %}<div class="alb-err">{{ e }}</div>{% endfor %}
+  {% endif %}
+
+  <form method="post" class="alb-form" enctype="multipart/form-data">
+    {% csrf_token %}
+
+    <label for="alb-name">name</label>
+    <div>
+      <input id="alb-name" name="name" type="text" maxlength="80"
+              value="{{ form.name }}" placeholder="(auto-derived from album hash if blank)">
+      <div class="hint">A label only; nothing in the seal depends on it.</div>
+    </div>
+
+    <label for="alb-party-a">party A</label>
+    <div class="row-narrow"><input id="alb-party-a" name="party_a" type="text" value="{{ form.party_a }}"></div>
+    <label for="alb-party-b">party B</label>
+    <div class="row-narrow"><input id="alb-party-b" name="party_b" type="text" value="{{ form.party_b }}"></div>
+
+    <label for="alb-n">album size</label>
+    <div class="row-narrow">
+      <select id="alb-n" name="n_images">
+        {% for n in valid_n %}
+          <option value="{{ n }}" {% if form.n_images == n|stringformat:"s" %}selected{% endif %}>
+            {{ n }} {% if n == 4 %}— diptych+ default{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+      <div class="hint">N images → each owns 64/N components.</div>
+    </div>
+
+    <label for="alb-files">images</label>
+    <div>
+      <input id="alb-files" name="images" type="file" multiple accept="image/*">
+      <div class="hint">Select exactly as many files as the album size above. PNG / JPEG / WebP / GIF all accepted.</div>
+    </div>
+
+    <label for="alb-tick">tick</label>
+    <div class="row-narrow">
+      <input id="alb-tick" name="tick_ms" type="number" min="30" max="60000" value="{{ form.tick_ms }}">
+      <div class="hint">ms per generation. 180 ≈ 5.5 fps.</div>
+    </div>
+
+    <label for="alb-clock">clock</label>
+    <div class="row-narrow">
+      <select id="alb-clock" name="clock_model">
+        <option value="synced" {% if form.clock_model == 'synced' %}selected{% endif %}>synced (wall-clock)</option>
+        <option value="local"  {% if form.clock_model == 'local' %}selected{% endif %}>local (per-viewer)</option>
+      </select>
+    </div>
+
+    <div class="submit">
+      <button type="submit">forge album pact</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
