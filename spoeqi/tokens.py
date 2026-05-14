@@ -203,21 +203,30 @@ def porter_stem(tok: str) -> str:
 
 # ─── Soundex ────────────────────────────────────────────────────────
 
-_SX_TABLE = str.maketrans('BFPVCGJKQSXZDTLMNR', '111122222222334556')
+_SX_MAP = {
+    'B':'1','F':'1','P':'1','V':'1',
+    'C':'2','G':'2','J':'2','K':'2','Q':'2','S':'2','X':'2','Z':'2',
+    'D':'3','T':'3', 'L':'4', 'M':'5','N':'5', 'R':'6',
+}
 
 def soundex(tok: str) -> str:
-    """4-character Soundex code (Russell & Odell 1918, modern variant)."""
+    """4-character Soundex (NARA-correct: vowels separate same-coded
+    consonants instead of being stripped, so e.g. Tymczak → T522 and
+    not T520 — the M / C / Z / K coding survives because the A
+    between Z and K acts as a separator).
+    """
     if not tok or not tok[0].isalpha(): return tok
     s = tok.upper()
-    first = s[0]
-    body = s[1:].translate(_SX_TABLE)
-    # Strip non-digits, collapse runs.
-    body = ''.join(c for c in body if c.isdigit())
-    out = first
-    prev = ''
-    for c in body:
-        if c != prev: out += c
-        prev = c
+    out = s[0]
+    prev = ''   # last *appended* digit; reset to '' on vowels/H/W/Y
+    for c in s[1:]:
+        code = _SX_MAP.get(c, '')
+        if code == '':
+            prev = ''           # vowel-like — collapse resets
+            continue
+        if code != prev:
+            out += code
+        prev = code
         if len(out) >= 4: break
     return (out + '000')[:4]
 

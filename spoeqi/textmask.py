@@ -119,57 +119,71 @@ register('emphasis',
 
 from . import tokens as _tokens
 
+# Primitives that have a JS mirror in the live engine.  Tables built
+# from only these primitives can run live on the client without a
+# server round-trip per CA tick.  POS / lemma need spaCy and so a
+# table that uses them is flagged ``live_capable=False`` and the JS
+# engine skips its boot.
+_CLIENT_FEASIBLE_PRIMITIVES = frozenset({
+    'pass', 'drop', 'lower', 'upper', 'mask', 'sentinel',
+    'stopdrop', 'stopkeep', 'stem', 'soundex', 'metaphone',
+})
+
+
 @dataclass(frozen=True)
 class _TokenMapping:
-    name:        str
-    description: str
-    table:       tuple  # 4 callables (str -> str)
-    labels:      tuple  # 4 short ui labels
+    name:           str
+    description:    str
+    table:          tuple   # 4 callables (str -> str)
+    primitives:     tuple   # 4 primitive *names* (used by the JS engine)
+    labels:         tuple   # 4 short ui labels
+    live_capable:   bool    # all 4 primitives have JS mirrors?
 
 
 TOKEN_MAPPING_TABLES: Dict[str, _TokenMapping] = {}
 
 
 def register_token(name: str, *, description: str,
-                   table: tuple, labels: tuple) -> None:
+                   primitives: tuple, labels: tuple) -> None:
     if name in TOKEN_MAPPING_TABLES:
         raise ValueError(f'token mapping {name!r} already registered')
-    if len(table) != 4 or len(labels) != 4:
-        raise ValueError('token mapping needs exactly 4 functions and 4 labels')
+    if len(primitives) != 4 or len(labels) != 4:
+        raise ValueError('token mapping needs exactly 4 primitives and 4 labels')
+    for p in primitives:
+        if p not in _tokens.PRIMITIVES:
+            raise ValueError(f'unknown primitive {p!r}; '
+                              f'register it in tokens.PRIMITIVES first')
+    table = tuple(_tokens.PRIMITIVES[p] for p in primitives)
+    live_capable = all(p in _CLIENT_FEASIBLE_PRIMITIVES for p in primitives)
     TOKEN_MAPPING_TABLES[name] = _TokenMapping(
-        name=name, description=description, table=tuple(table), labels=tuple(labels))
+        name=name, description=description,
+        table=table, primitives=tuple(primitives),
+        labels=tuple(labels), live_capable=live_capable)
 
-
-# Starter token tables.  pos and lemma trigger a one-shot spaCy load
-# the first time they fire, so they're tagged in the description.
 
 register_token('bert-mlm',
     description='BERT pretraining: ~15 % of tokens become [MASK]; rest pass',
-    table=(_tokens.passthrough, _tokens.mask, _tokens.passthrough, _tokens.passthrough),
+    primitives=('pass', 'mask', 'pass', 'pass'),
     labels=('pass', '[MASK]', 'pass', 'pass'))
 
 register_token('denoise',
     description='IR-style: pass / drop stopwords / Porter stem / lowercase',
-    table=(_tokens.passthrough, _tokens.drop_stopword,
-           _tokens.porter_stem, _tokens.lowercase),
+    primitives=('pass', 'stopdrop', 'stem', 'lower'),
     labels=('pass', '−stop', 'stem', 'lower'))
 
 register_token('phonetic',
     description='pass / Soundex / Metaphone / mask — dialect-tolerant fingerprints',
-    table=(_tokens.passthrough, _tokens.soundex,
-           _tokens.metaphone, _tokens.mask),
+    primitives=('pass', 'soundex', 'metaphone', 'mask'),
     labels=('pass', 'soundex', 'meta', 'mask'))
 
 register_token('t5-noise',
     description='T5 span-corruption analogue: 1/4 tokens become a sentinel',
-    table=(_tokens.passthrough, _tokens.sentinel,
-           _tokens.passthrough, _tokens.passthrough),
+    primitives=('pass', 'sentinel', 'pass', 'pass'),
     labels=('pass', '<extra_id>', 'pass', 'pass'))
 
 register_token('pos-distill',
-    description='Reduce to a semantic skeleton: pass / POS tag / lemma / stem (spaCy load on first use)',
-    table=(_tokens.passthrough, _tokens.pos_tag,
-           _tokens.lemmatize, _tokens.porter_stem),
+    description='Server-only (spaCy): pass / POS tag / lemma / stem — live disabled',
+    primitives=('pass', 'pos', 'lemma', 'stem'),
     labels=('pass', 'POS', 'lemma', 'stem'))
 
 

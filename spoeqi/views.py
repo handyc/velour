@@ -792,15 +792,23 @@ def textmask(request, slug):
     # the detail page runs, plus the active mapping name and palette.
     # Only attached when there's a result to display — the empty-form
     # GET doesn't ship a megabyte of rule bytes.
-    # Live JS engine only runs in char mode — token primitives (Porter
-    # stem, spaCy POS, Soundex) can't realistically be mirrored in JS.
-    # In token mode we still ship payload metadata for the mode/
-    # mapping dropdown UI but skip the engine boot.
+    # Live JS engine runs in char mode and in token mode IF the
+    # selected token table only uses primitives we have JS mirrors
+    # for (everything except spaCy's POS/lemma).  For pos-distill or
+    # any future server-only table the page renders the initial
+    # result and stays static.
     live_payload_json = ''
     has_any_result = (result is not None or all_results is not None or
                        token_result is not None or token_all_results is not None or
                        attn_result is not None or attn_all_results is not None)
-    if has_any_result and form['mode'] == 'char':
+    live_capable = False
+    if has_any_result:
+        if form['mode'] == 'char':
+            live_capable = True
+        elif form['mode'] == 'token':
+            tmap = tm.TOKEN_MAPPING_TABLES.get(form['mapping'])
+            live_capable = bool(tmap and tmap.live_capable)
+    if live_capable:
         live_payload = {
             'seed_hex':      pact.seed_hex,
             'rules_hex':     pact.rules_hex,
@@ -808,12 +816,18 @@ def textmask(request, slug):
             'component_grid': pact.component_grid,
             'tick_ms':       pact.tick_ms,
             'palette':       pact.palette,
+            'mode':          form['mode'],
             'mapping':       form['mapping'],
             'text':          form['text'],
             'generation':    int(form['generation']),
             'compare_all':   bool(form['compare_all']),
             'component':     int(form['component']) if not form['compare_all'] else 0,
         }
+        if form['mode'] == 'token':
+            tmap = tm.TOKEN_MAPPING_TABLES[form['mapping']]
+            side = pact.component_grid
+            live_payload['tokens']     = tm.tile_tokens(form['text'], side)
+            live_payload['primitives'] = list(tmap.primitives)
         live_payload_json = json.dumps(live_payload)
 
     return render(request, 'spoeqi/textmask.html', {
@@ -832,6 +846,7 @@ def textmask(request, slug):
         'attn_matrix_json':     attn_matrix_json,
         'attn_all_results':     attn_all_results,
         'rendered_attn_rows':   rendered_attn_rows,
+        'live_capable':         live_capable,
         'error':           error,
         'mappings':        mappings,
         'char_mappings':   char_mappings,

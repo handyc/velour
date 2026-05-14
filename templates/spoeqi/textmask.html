@@ -176,20 +176,29 @@
     </div>
   </form>
 
-  {% if result or all_results %}
+  {% if result or all_results or token_result or token_all_results %}
     <div class="panel" id="tm-live-panel" style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
       <strong style="color:#cfc;">live</strong>
-      <button id="tm-play"  type="button">▶ play</button>
-      <button id="tm-pause" type="button" disabled>⏸ pause</button>
-      <button id="tm-step1" type="button">↻ step 1</button>
-      <span class="tm-meta">
-        gen <code id="tm-gen">{{ form.generation }}</code> ·
-        tick
-        <input id="tm-tick-ms" type="number" min="50" max="5000" step="10"
-                value="{{ pact.tick_ms }}" style="width:5em;background:#111;color:#ddd;border:1px solid #333;">
-        ms ·
-        ticks/s <code id="tm-tps">0.0</code>
-      </span>
+      {% if live_capable %}
+        <button id="tm-play"  type="button">▶ play</button>
+        <button id="tm-pause" type="button" disabled>⏸ pause</button>
+        <button id="tm-step1" type="button">↻ step 1</button>
+        <span class="tm-meta">
+          gen <code id="tm-gen">{{ form.generation }}</code> ·
+          tick
+          <input id="tm-tick-ms" type="number" min="50" max="5000" step="10"
+                  value="{{ pact.tick_ms }}" style="width:5em;background:#111;color:#ddd;border:1px solid #333;">
+          ms ·
+          ticks/s <code id="tm-tps">0.0</code>
+        </span>
+      {% else %}
+        <span class="tm-meta" style="color:#fa8;">
+          live disabled — this mapping uses server-only primitives
+          (e.g. spaCy POS/lemma).  Switch to a mapping like
+          <code>denoise</code> or <code>bert-mlm</code> for live updates,
+          or re-submit the form to step generations server-side.
+        </span>
+      {% endif %}
     </div>
   {% endif %}
 
@@ -260,7 +269,7 @@
 
     <div class="panel">
       <h2>output text</h2>
-      <div class="tm-output">{{ token_result.output_text }}</div>
+      <div class="tm-output" id="tm-single-output">{{ token_result.output_text }}</div>
     </div>
   {% endif %}
 
@@ -275,7 +284,7 @@
           </div>
         {% endfor %}
       </div>
-      <table class="tm-table">
+      <table class="tm-table" id="tm-compare-token-table">
         <thead>
           <tr>
             <th class="tm-c-idx">#</th>
@@ -285,11 +294,11 @@
         </thead>
         <tbody>
           {% for row in rendered_token_rows %}
-            <tr>
+            <tr data-component="{{ row.component }}">
               <td class="tm-c-idx">{{ row.component }}</td>
               <td class="tm-c-bar">
                 <span class="tm-bar">
-                  {% for b in row.bar %}<span class="tm-bar-seg"
+                  {% for b in row.bar %}<span class="tm-bar-seg" data-color="{{ forloop.counter0 }}"
                        style="width: {{ b.pct }}%; background: {{ b.css }};"></span>{% endfor %}
                 </span>
               </td>
@@ -570,7 +579,7 @@
     generation++;
   }
 
-  // ─── mapping table registry (matches Python textmask.py) ─────────
+  // ─── char-mode mapping tables ────────────────────────────────────
   const MAPPING_TABLES = {
     'attention': [(c)=>c, (_)=>'·', (c)=>c.toUpperCase(), (c)=>c.toLowerCase()],
     'drop':      [(c)=>c, (_)=>'',  (c)=>c.toUpperCase(), (c)=>c.toLowerCase()],
@@ -587,6 +596,201 @@
     'emphasis':  [(c)=>c.toLowerCase(), (c)=>c, (c)=>c.toUpperCase(), (c)=>c+c],
   };
 
+  // ─── token-mode primitives (JS mirror of spoeqi/tokens.py) ───────
+  // Compact set of stopwords (case-insensitive lookup).
+  const STOPWORDS = new Set(("a about above after again against all am an and any are as at be because been before being below between both but by can did do does doing don down during each few for from further had has have having he her here hers herself him himself his how i if in into is it its itself just me more most my myself no nor not now of off on once only or other our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up very was we were what when where which while who whom why will with you your yours yourself yourselves").split(' '));
+
+  // Porter (1980) stem — line-for-line port of tokens.py._porter().
+  const VOWS = new Set(['a','e','i','o','u']);
+  function isV(s, i) {
+    const c = s[i];
+    if (VOWS.has(c)) return true;
+    if (c === 'y' && i > 0 && !isV(s, i-1)) return true;
+    return false;
+  }
+  function measure(s) {
+    let n = 0, i = 0;
+    while (i < s.length && !isV(s, i)) i++;
+    while (i < s.length) {
+      while (i < s.length && isV(s, i)) i++;
+      n++;
+      while (i < s.length && !isV(s, i)) i++;
+    }
+    return n;
+  }
+  function hasV(s) { for (let i = 0; i < s.length; i++) if (isV(s, i)) return true; return false; }
+  function endsDouble(s) {
+    return s.length >= 2 && s[s.length-1] === s[s.length-2] && !isV(s, s.length-1);
+  }
+  function endsCVC(s) {
+    if (s.length < 3) return false;
+    const c = s[s.length-1];
+    if ('wxy'.includes(c)) return false;
+    return !isV(s, s.length-3) && isV(s, s.length-2) && !isV(s, s.length-1);
+  }
+  function step1a(s) {
+    for (const [suf, rep] of [['sses','ss'],['ies','i'],['ss','ss'],['s','']])
+      if (s.endsWith(suf)) return s.slice(0, -suf.length) + rep;
+    return s;
+  }
+  function step1b(s) {
+    if (s.endsWith('eed'))
+      return measure(s.slice(0, -3)) > 0 ? s.slice(0, -3) + 'ee' : s;
+    let flag = false;
+    if (s.endsWith('ed') && hasV(s.slice(0, -2))) { s = s.slice(0, -2); flag = true; }
+    else if (s.endsWith('ing') && hasV(s.slice(0, -3))) { s = s.slice(0, -3); flag = true; }
+    if (flag) {
+      if (['at','bl','iz'].some(x => s.endsWith(x))) return s + 'e';
+      if (endsDouble(s) && !'lsz'.includes(s[s.length-1])) return s.slice(0, -1);
+      if (measure(s) === 1 && endsCVC(s)) return s + 'e';
+    }
+    return s;
+  }
+  function step1c(s) {
+    return (s.endsWith('y') && hasV(s.slice(0, -1))) ? s.slice(0, -1) + 'i' : s;
+  }
+  const STEP2 = [['ational','ate'],['tional','tion'],['enci','ence'],['anci','ance'],
+                  ['izer','ize'],['abli','able'],['alli','al'],['entli','ent'],['eli','e'],
+                  ['ousli','ous'],['ization','ize'],['ation','ate'],['ator','ate'],
+                  ['alism','al'],['iveness','ive'],['fulness','ful'],['ousness','ous'],
+                  ['aliti','al'],['iviti','ive'],['biliti','ble']];
+  function step2(s) {
+    for (const [suf, rep] of STEP2)
+      if (s.endsWith(suf) && measure(s.slice(0, -suf.length)) > 0)
+        return s.slice(0, -suf.length) + rep;
+    return s;
+  }
+  const STEP3 = [['icate','ic'],['ative',''],['alize','al'],['iciti','ic'],
+                  ['ical','ic'],['ful',''],['ness','']];
+  function step3(s) {
+    for (const [suf, rep] of STEP3)
+      if (s.endsWith(suf) && measure(s.slice(0, -suf.length)) > 0)
+        return s.slice(0, -suf.length) + rep;
+    return s;
+  }
+  const STEP4 = ['al','ance','ence','er','ic','able','ible','ant','ement','ment','ent',
+                  'ou','ism','ate','iti','ous','ive','ize'];
+  function step4(s) {
+    if (s.endsWith('ion')) {
+      if (measure(s.slice(0, -3)) > 1 && ['s','t'].includes(s[s.length-4]))
+        return s.slice(0, -3);
+      return s;
+    }
+    for (const suf of STEP4)
+      if (s.endsWith(suf) && measure(s.slice(0, -suf.length)) > 1)
+        return s.slice(0, -suf.length);
+    return s;
+  }
+  function step5(s) {
+    if (s.endsWith('e')) {
+      const m = measure(s.slice(0, -1));
+      if (m > 1 || (m === 1 && !endsCVC(s.slice(0, -1)))) s = s.slice(0, -1);
+    }
+    if (s.endsWith('ll') && measure(s) > 1) return s.slice(0, -1);
+    return s;
+  }
+  const _porterCache = new Map();
+  function porter(word) {
+    if (word.length <= 2) return word;
+    if (_porterCache.has(word)) return _porterCache.get(word);
+    let s = word.toLowerCase();
+    s = step1a(s); s = step1b(s); s = step1c(s);
+    s = step2(s); s = step3(s); s = step4(s); s = step5(s);
+    _porterCache.set(word, s);
+    return s;
+  }
+
+  // Soundex — Russell-Odell with the corrected DTLMNR mapping.
+  const SX = {B:'1',F:'1',P:'1',V:'1',
+               C:'2',G:'2',J:'2',K:'2',Q:'2',S:'2',X:'2',Z:'2',
+               D:'3',T:'3', L:'4', M:'5',N:'5', R:'6'};
+  function soundex(tok) {
+    if (!tok || !/[a-zA-Z]/.test(tok[0])) return tok;
+    const s = tok.toUpperCase();
+    let out = s[0], prev = '';
+    for (let i = 1; i < s.length; i++) {
+      const code = SX[s[i]] || '';
+      if (code && code !== prev) out += code;
+      prev = code;
+      if (out.length >= 4) break;
+    }
+    return (out + '000').slice(0, 4);
+  }
+
+  // Metaphone — trimmed (matches tokens.py.metaphone).
+  function metaphone(tok) {
+    if (!/^[a-zA-Z]+$/.test(tok)) return tok;
+    let s = tok.toUpperCase();
+    if (['AE','GN','KN','PN','WR'].includes(s.slice(0, 2))) s = s.slice(1);
+    if (s.startsWith('X')) s = 'S' + s.slice(1);
+    const out = []; let i = 0;
+    while (i < s.length) {
+      const c = s[i], nxt = s[i+1] || '';
+      if ('AEIOU'.includes(c)) { if (i === 0) out.push(c); }
+      else if (c === 'B') out.push('B');
+      else if (c === 'C') {
+        if (nxt === 'H') { out.push('X'); i++; }
+        else if ('IEY'.includes(nxt)) out.push('S');
+        else out.push('K');
+      }
+      else if (c === 'D') {
+        if (nxt === 'G' && i+2 < s.length && 'IEY'.includes(s[i+2])) {
+          out.push('J'); i += 2;
+        } else out.push('T');
+      }
+      else if (c === 'F') out.push('F');
+      else if (c === 'G') {
+        if (nxt === 'H') i++;
+        else if ('IEY'.includes(nxt)) out.push('J');
+        else out.push('K');
+      }
+      else if (c === 'H') {
+        if (!(i === 0 || !'AEIOU'.includes(s[i-1]) || (nxt && !'AEIOU'.includes(nxt))))
+          out.push('H');
+      }
+      else if (c === 'J') out.push('J');
+      else if (c === 'K') { if (i === 0 || s[i-1] !== 'C') out.push('K'); }
+      else if (c === 'L') out.push('L');
+      else if (c === 'M') out.push('M');
+      else if (c === 'N') out.push('N');
+      else if (c === 'P') {
+        if (nxt === 'H') { out.push('F'); i++; } else out.push('P');
+      }
+      else if (c === 'Q') out.push('K');
+      else if (c === 'R') out.push('R');
+      else if (c === 'S') {
+        if (nxt === 'H') { out.push('X'); i++; } else out.push('S');
+      }
+      else if (c === 'T') {
+        if (nxt === 'H') { out.push('0'); i++; } else out.push('T');
+      }
+      else if (c === 'V') out.push('F');
+      else if (c === 'W' || c === 'Y') {
+        if (nxt && 'AEIOU'.includes(nxt)) out.push(c);
+      }
+      else if (c === 'X') { out.push('K'); out.push('S'); }
+      else if (c === 'Z') out.push('S');
+      i++;
+    }
+    return out.join('');
+  }
+
+  const TOKEN_PRIMITIVES = {
+    pass:      (t) => t,
+    drop:      (_) => '',
+    lower:     (t) => t.toLowerCase(),
+    upper:     (t) => t.toUpperCase(),
+    mask:      (_) => '[MASK]',
+    sentinel:  (_) => '<extra_id_0>',
+    stopdrop:  (t) => STOPWORDS.has(t.toLowerCase()) ? '' : t,
+    stopkeep:  (t) => STOPWORDS.has(t.toLowerCase()) ? t  : '',
+    stem:      (t) => (!t || !/^[A-Za-z]+$/.test(t)) ? t : porter(t),
+    soundex:   soundex,
+    metaphone: metaphone,
+  };
+  // Expose for the cross-check harness.
+  window.__tmTokenPrim = TOKEN_PRIMITIVES;
+
   function tileText(text, n) {
     if (!text) return new Array(n).fill(' ');
     const out = new Array(n);
@@ -595,8 +799,20 @@
     return out;
   }
 
-  const glyphs = tileText(payload.text, AREA);
-  const table  = MAPPING_TABLES[payload.mapping] || MAPPING_TABLES['attention'];
+  // ─── mode-aware dispatch ─────────────────────────────────────────
+  const MODE = payload.mode || 'char';
+  let glyphs, table, tokens, primFns;
+  if (MODE === 'token') {
+    tokens  = payload.tokens || [];
+    primFns = (payload.primitives || []).map(n => TOKEN_PRIMITIVES[n] || ((t)=>t));
+  } else {
+    glyphs = tileText(payload.text, AREA);
+    table  = MAPPING_TABLES[payload.mapping] || MAPPING_TABLES['attention'];
+  }
+  function cellOutput(color, idx) {
+    return (MODE === 'token') ? primFns[color](tokens[idx])
+                               : table[color](glyphs[idx]);
+  }
 
   function rgbOf(c, color) {
     const p = palFor(c);
@@ -604,13 +820,23 @@
   }
 
   // ─── DOM patchers ────────────────────────────────────────────────
-  const singleGridEl = document.getElementById('tm-single-grid');
-  const singleOutEl  = document.getElementById('tm-single-output');
-  const compareTbl   = document.getElementById('tm-compare-table');
+  // Char mode reads/writes #tm-single-grid; token mode reads/writes the
+  // .tm-tokens grid.  We bind whichever is present in the DOM.
+  const singleGridEl   = document.getElementById('tm-single-grid');
+  const singleTokensEl = document.querySelector('.tm-tokens');
+  const singleOutEl    = document.getElementById('tm-single-output')
+                          || document.querySelector('#tm-single-output, .panel .tm-output');
+  // Char compare-all and token compare-all both use .tm-table, but the
+  // token table has no #id — disambiguate by mode.
+  const compareTbl   = (MODE === 'token')
+    ? document.getElementById('tm-compare-token-table')
+    : document.getElementById('tm-compare-table');
 
-  // Cache cell elements once; we'll only mutate their bg + title.
+  // Cache cell elements once; we'll only mutate bg + title (+ .tout in token mode).
   let singleCells = [];
-  if (singleGridEl) {
+  if (MODE === 'token' && singleTokensEl) {
+    singleCells = Array.from(singleTokensEl.children);
+  } else if (singleGridEl) {
     singleCells = Array.from(singleGridEl.children);
   }
   // Cache compare rows + their bar segments.
@@ -626,37 +852,44 @@
 
   function renderSingle() {
     const base = SINGLE_COMP * AREA;
-    let buf = '';
+    const parts = [];   // token-mode: non-empty outputs (space-joined)
+    let charBuf = '';   // char-mode: everything concatenated
     for (let i = 0; i < AREA; i++) {
       const color = grids[base + i];
-      const ch    = glyphs[i];
-      const o     = table[color](ch);
-      buf += o;
+      const o     = cellOutput(color, i);
+      if (MODE === 'token') { if (o) parts.push(o); }
+      else                   { charBuf += o; }
       const el = singleCells[i];
-      if (el) {
-        el.style.background = rgbOf(SINGLE_COMP, color);
+      if (!el) continue;
+      el.style.background = rgbOf(SINGLE_COMP, color);
+      if (MODE === 'token') {
+        const outSpan = el.querySelector('.tout');
+        if (outSpan) outSpan.textContent = o || '∅';
+        el.title = 'colour=' + color + ' · ' + (tokens[i] || '∅') + ' → ' + (o || '(drop)');
+      } else {
         el.title = 'colour=' + color + ' → ' + (o || '(drop)');
       }
     }
-    if (singleOutEl) singleOutEl.textContent = buf;
+    if (singleOutEl) singleOutEl.textContent = (MODE === 'token') ? parts.join(' ') : charBuf;
   }
 
   function renderCompare() {
     for (let r = 0; r < compareRows.length; r++) {
       const row = compareRows[r];
       const base = row.comp * AREA;
-      let buf = '';
+      const parts = [];
+      let charBuf = '';
       const counts = [0, 0, 0, 0];
       for (let i = 0; i < AREA; i++) {
         const color = grids[base + i];
         counts[color]++;
-        buf += table[color](glyphs[i]);
+        const o = cellOutput(color, i);
+        if (MODE === 'token') { if (o) parts.push(o); }
+        else                   { charBuf += o; }
       }
-      row.out.textContent = buf;
+      row.out.textContent = (MODE === 'token') ? parts.join(' ') : charBuf;
       const total = counts[0] + counts[1] + counts[2] + counts[3] || 1;
-      for (let k = 0; k < 4; k++) {
-        row.segs[k].style.width = (100 * counts[k] / total) + '%';
-      }
+      for (let k = 0; k < 4; k++) row.segs[k].style.width = (100 * counts[k] / total) + '%';
     }
   }
 

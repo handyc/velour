@@ -44,11 +44,13 @@ class PorterStemTest(SimpleTestCase):
 
 class SoundexTest(SimpleTestCase):
     def test_known_codes(self):
-        # Soundex collisions (canonical Russell & Odell examples)
+        # NARA-Soundex canonical examples — Tymczak → T522 (the A
+        # between Z and K is a vowel separator that prevents the
+        # 22 collapse from continuing past it).
         self.assertEqual(t.soundex('Robert'),  'R163')
         self.assertEqual(t.soundex('Rupert'),  'R163')
         self.assertEqual(t.soundex('Rubin'),   'R150')
-        self.assertEqual(t.soundex('Tymczak'), 'T520')
+        self.assertEqual(t.soundex('Tymczak'), 'T522')
 
     def test_pads_to_4_chars(self):
         self.assertEqual(len(t.soundex('Lee')), 4)
