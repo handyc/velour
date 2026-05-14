@@ -253,3 +253,85 @@ def version_status(request):
     return render(request, 'barding/_version_partial.html', {
         'version': _installed_version(),
     })
+
+
+# ─── Binary inspector ───────────────────────────────────────────────
+
+@login_required
+def binary_index(request):
+    """Summary page: where the binary is, how big it is, what shape it
+    has (ELF class / machine / sections / dynamic libs / build ID).
+    Read-only; never mutates the file."""
+    from . import binary as _bin
+
+    error = None
+    summary = None
+    elf = None
+    try:
+        summary = _bin.file_summary()
+        elf = _bin.elf_summary()
+    except FileNotFoundError as e:
+        error = str(e)
+    except Exception as e:                              # noqa: BLE001
+        error = f'{type(e).__name__}: {e}'
+
+    hits = None
+    needle = (request.GET.get('q') or '').strip()
+    if needle and not error:
+        try:
+            hits = _bin.search_bytes(needle, max_hits=24)
+        except ValueError as e:
+            error = str(e)
+
+    return render(request, 'barding/binary_index.html', {
+        'error':   error,
+        'summary': summary,
+        'elf':     elf,
+        'needle':  needle,
+        'hits':    hits,
+    })
+
+
+@login_required
+def binary_hex(request):
+    """Paged hex view of the binary.  Querystring: offset (int, hex
+    or decimal), length (int, bytes per page, 256..65536)."""
+    from . import binary as _bin
+
+    def _parse_int(s, default):
+        s = (s or '').strip()
+        if not s: return default
+        try:
+            return int(s, 16) if s.lower().startswith('0x') else int(s)
+        except ValueError:
+            return default
+
+    error = None
+    summary = None
+    rows = None
+    offset = _parse_int(request.GET.get('offset'), 0)
+    length = _parse_int(request.GET.get('length'), _bin.DEFAULT_PAGE_BYTES)
+    length = max(64, min(length, 65536))
+    try:
+        summary = _bin.file_summary()
+        rows = _bin.hex_page(offset, length)
+    except FileNotFoundError as e:
+        error = str(e)
+    except ValueError as e:
+        error = str(e)
+    except Exception as e:                              # noqa: BLE001
+        error = f'{type(e).__name__}: {e}'
+
+    file_size = summary.size_bytes if summary else 0
+    prev_offset = max(0, offset - length)
+    next_offset = min(max(0, file_size - 1), offset + length)
+    return render(request, 'barding/binary_hex.html', {
+        'error':       error,
+        'summary':     summary,
+        'rows':        rows,
+        'offset':      offset,
+        'length':      length,
+        'prev_offset': prev_offset,
+        'next_offset': next_offset,
+        'offset_hex':  f'0x{offset:08x}',
+    })

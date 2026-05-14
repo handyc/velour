@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}barding — hex {{ offset_hex }}{% endblock %}
+{% block content %}
+<style>
+  .bd-page { max-width: 78em; }
+  .bd-page h1 { margin: 0 0 4px; }
+  .bd-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .bd-page .crumbs a { color: #ace; }
+  .bd-err { color: #f88; padding: 10px 12px;
+              border: 1px solid #4a1d1d; background: #1a0a0a; margin-bottom: 14px; }
+
+  .bd-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+              margin-bottom: 12px; }
+  .bd-nav input[type=text], .bd-nav input[type=number] {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: monospace; }
+  .bd-nav input[name=offset] { width: 11em; }
+  .bd-nav input[name=length] { width: 6em; }
+  .bd-nav button, .bd-nav a.btn {
+    background: #222; color: #cfc; border: 1px solid #555;
+    padding: 4px 10px; cursor: pointer; font-family: inherit;
+    text-decoration: none;
+  }
+
+  .bd-hex { font-family: monospace; font-size: 0.78rem;
+              background: #050505; color: #ddd;
+              border: 1px solid #1a1a1a; padding: 8px 10px;
+              overflow-x: auto;
+              line-height: 1.35; }
+  .bd-hex .row { display: grid;
+                  grid-template-columns: 11em 1fr 17em;
+                  gap: 1em; }
+  .bd-hex .ofs    { color: #cfc; }
+  .bd-hex .bytes  { color: #ddd; letter-spacing: 0.06em; }
+  .bd-hex .bytes b { color: #fff; }
+  .bd-hex .ascii_ { color: #8c8; }
+  .bd-hex .ascii_ b { color: #afa; }
+  .bd-meta { color: #888; font-size: 0.8rem; margin-top: 8px; }
+</style>
+
+<div class="bd-page">
+  <div class="crumbs">
+    <a href="{% url 'barding:index' %}">barding</a> ›
+    <a href="{% url 'barding:binary_index' %}">binary</a> ›
+    hex
+  </div>
+  <h1>hex viewer · {{ offset_hex }}</h1>
+
+  {% if error %}<div class="bd-err">{{ error }}</div>{% endif %}
+
+  <form method="get" class="bd-nav">
+    <label style="color:#888;">offset</label>
+    <input type="text" name="offset" value="{{ offset_hex }}"
+            placeholder="0x… or decimal">
+    <label style="color:#888;">length</label>
+    <input type="number" name="length" value="{{ length }}" min="64" max="65536" step="64">
+    <button type="submit">jump</button>
+    <span style="margin-left:auto;">
+      <a class="btn" href="?offset={{ prev_offset }}&amp;length={{ length }}">← prev</a>
+      <a class="btn" href="?offset={{ next_offset }}&amp;length={{ length }}">next →</a>
+    </span>
+  </form>
+
+  {% if rows %}
+    <div class="bd-hex">
+      {% for r in rows %}
+        <div class="row">
+          <span class="ofs">{{ r.offset|stringformat:"#010x" }}  ({{ r.offset|stringformat:",d" }})</span>
+          <span class="bytes">{% for h in r.hex_pairs %}{{ h }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+          <span class="ascii_">|{{ r.ascii_ }}|</span>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="bd-meta">
+      showing bytes
+      <code>{{ offset_hex }}</code>…<code>{{ next_offset|stringformat:"#010x" }}</code>
+      of <code>{{ summary.size_bytes|stringformat:"," }}</code>
+      ({{ rows|length }} rows × 16 bytes)
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

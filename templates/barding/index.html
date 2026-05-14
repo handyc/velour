@@ -99,6 +99,7 @@
   </ul>
   <p>
     <a class="new-btn" href="{% url 'barding:bundle_patches' %}">bundle patch wishlist &rsaquo;</a>
+    <a class="new-btn" href="{% url 'barding:binary_index' %}" style="margin-left:8px;">binary inspector &rsaquo;</a>
     {% if wishes %}<span class="cc-meta">· {{ wishes|length }} wish{{ wishes|length|pluralize:"es" }} recorded</span>{% endif %}
   </p>
 </div>

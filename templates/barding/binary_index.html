@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}barding — binary{% endblock %}
+{% block content %}
+<style>
+  .bd-page { max-width: 64em; }
+  .bd-page h1 { margin: 0 0 4px; }
+  .bd-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .bd-page .crumbs a { color: #ace; }
+  .bd-page p { color: #aaa; max-width: 50em; }
+  .bd-card { padding: 12px 14px; border: 1px solid #1f1f1f; background: #0a0a0a;
+              margin-bottom: 14px; }
+  .bd-card h2 { margin: 0 0 8px; font-size: 0.95rem; color: #cfc;
+                  font-weight: normal; letter-spacing: 0.04em; }
+  .bd-card .kv { display: grid; grid-template-columns: 11em 1fr; gap: 4px 12px;
+                   color: #ccc; font-family: monospace; font-size: 0.85rem; }
+  .bd-card .kv .k { color: #888; }
+  .bd-card .kv .v { color: #ddd; word-break: break-all; }
+  .bd-table { width: 100%; border-collapse: collapse;
+                font-family: monospace; font-size: 0.82rem; }
+  .bd-table th, .bd-table td { padding: 2px 8px; border-bottom: 1px solid #1a1a1a;
+                                  vertical-align: top; text-align: left; }
+  .bd-table th { color: #888; font-weight: normal; font-size: 0.72rem;
+                   text-transform: uppercase; letter-spacing: 0.05em; }
+  .bd-table .ofs, .bd-table .num { color: #cca; text-align: right; }
+  .bd-table .flagsX { color: #6f6; }
+  .bd-table .flagsW { color: #fc6; }
+  .bd-pill { display: inline-block; padding: 1px 6px; border-radius: 2px;
+               background: #1a1a1a; color: #cfc; font-size: 0.8rem; }
+  .bd-err { color: #f88; padding: 10px 12px;
+              border: 1px solid #4a1d1d; background: #1a0a0a; margin-bottom: 14px; }
+  .bd-form { display: flex; gap: 10px; align-items: center; }
+  .bd-form input[type=text] { background: #111; color: #ddd; border: 1px solid #333;
+                                padding: 4px 8px; font-family: monospace;
+                                width: 24em; }
+  .bd-form button { background: #222; color: #cfc; border: 1px solid #555;
+                      padding: 4px 12px; cursor: pointer; font-family: inherit; }
+  .bd-hits a { color: #ace; }
+</style>
+
+<div class="bd-page">
+  <div class="crumbs">
+    <a href="{% url 'barding:index' %}">barding</a> ›
+    binary
+    &nbsp;|&nbsp;
+    <a href="{% url 'barding:binary_hex' %}?offset=0">hex viewer →</a>
+  </div>
+  <h1>claude binary</h1>
+  <p>
+    Read-only inspection of the on-disk binary the running
+    <code>claude</code> interpreter is loaded from.
+    No writes, no <code>exec</code>, no live-process memory poking
+    — just the file as stored.
+  </p>
+
+  {% if error %}<div class="bd-err">{{ error }}</div>{% endif %}
+
+  {% if summary %}
+    <div class="bd-card">
+      <h2>file</h2>
+      <div class="kv">
+        <span class="k">path</span>           <span class="v">{{ summary.path }}</span>
+        <span class="k">resolves to</span>    <span class="v">{{ summary.realpath }}</span>
+        <span class="k">symlink?</span>       <span class="v">{{ summary.is_symlink|yesno:"yes,no" }}</span>
+        <span class="k">size</span>           <span class="v">{{ summary.size_bytes|stringformat:"," }} bytes</span>
+        <span class="k">modified</span>       <span class="v">{{ summary.mtime_iso }}</span>
+        <span class="k">SHA-256</span>        <span class="v">{{ summary.sha256_hex }}</span>
+        <span class="k">hash method</span>    <span class="v">{{ summary.sha256_method }}</span>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if elf %}
+    <div class="bd-card">
+      <h2>ELF header</h2>
+      <div class="kv">
+        <span class="k">class</span>          <span class="v">{{ elf.elf_class }} ({{ elf.endian }}-endian)</span>
+        <span class="k">os/abi</span>         <span class="v">{{ elf.os_abi }}</span>
+        <span class="k">machine</span>        <span class="v">{{ elf.machine }}</span>
+        <span class="k">file type</span>      <span class="v">{{ elf.file_type }}</span>
+        <span class="k">entry point</span>    <span class="v">{{ elf.entry_point|stringformat:"#x" }}</span>
+        <span class="k">sections</span>       <span class="v">{{ elf.n_sections }}</span>
+        <span class="k">segments</span>       <span class="v">{{ elf.n_segments }}</span>
+        <span class="k">interpreter</span>    <span class="v">{{ elf.interpreter|default:"(none)" }}</span>
+        <span class="k">build ID</span>       <span class="v">{{ elf.build_id_hex|default:"(none)" }}</span>
+      </div>
+    </div>
+
+    <div class="bd-card">
+      <h2>dynamic libraries (DT_NEEDED)</h2>
+      {% for lib in elf.needed_libs %}<span class="bd-pill">{{ lib }}</span> {% endfor %}
+      {% if not elf.needed_libs %}<span style="color:#888;">(none — statically linked or stripped)</span>{% endif %}
+    </div>
+
+    <div class="bd-card">
+      <h2>sections · {{ elf.sections|length }}</h2>
+      <table class="bd-table">
+        <thead>
+          <tr>
+            <th>#</th><th>name</th><th>type</th>
+            <th class="num">addr</th><th class="num">offset</th><th class="num">size</th>
+            <th>flags</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in elf.sections %}
+            <tr>
+              <td class="num">{{ forloop.counter0 }}</td>
+              <td>{{ s.name }}</td>
+              <td><span style="color:#888;">{{ s.sh_type }}</span></td>
+              <td class="ofs">{{ s.addr|stringformat:"#x" }}</td>
+              <td class="ofs">{{ s.offset|stringformat:"#x" }}</td>
+              <td class="ofs">{{ s.size|stringformat:"," }}</td>
+              <td>
+                {% if 'X' in s.flags_str %}<span class="flagsX">X</span>{% endif %}
+                {% if 'A' in s.flags_str %}A{% endif %}
+                {% if 'W' in s.flags_str %}<span class="flagsW">W</span>{% endif %}
+              </td>
+              <td>
+                {% if s.size > 0 %}
+                  <a href="{% url 'barding:binary_hex' %}?offset={{ s.offset }}&amp;length=4096">hex →</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bd-card">
+      <h2>.rodata strings sample (24 max)</h2>
+      <div style="font-family:monospace;font-size:0.82rem;color:#cfc;
+                   white-space:pre-wrap; word-break:break-all;">{% for s in elf.strings_sample %}{{ s }}
+{% endfor %}{% if not elf.strings_sample %}<span style="color:#888;">(none found in first 64 KiB of .rodata)</span>{% endif %}</div>
+    </div>
+  {% endif %}
+
+  <div class="bd-card">
+    <h2>search bytes</h2>
+    <form method="get" class="bd-form">
+      <input type="text" name="q" value="{{ needle }}"
+              placeholder='text or hex (0xDEADBEEF)'>
+      <button type="submit">find</button>
+    </form>
+    {% if hits is not None %}
+      <div style="margin-top:8px;color:#888;font-size:0.85rem;">
+        {{ hits|length }} hit{{ hits|length|pluralize }} for <code>{{ needle }}</code>{% if hits|length == 24 %} (capped at 24){% endif %}
+      </div>
+      <div class="bd-hits" style="font-family:monospace;font-size:0.85rem;margin-top:4px;">
+        {% for h in hits %}
+          <a href="{% url 'barding:binary_hex' %}?offset={{ h }}">{{ h|stringformat:"#010x" }}</a>{% if not forloop.last %} · {% endif %}
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
