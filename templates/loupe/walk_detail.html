@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}loupe — {{ walk.slug }}{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<p style="font-size:0.85rem; color:#8b949e;">
+  <a href="{% url 'loupe:walks' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">{{ walk.name|default:walk.slug }}</b>
+  <span style="color:#666;">·</span>
+  <span style="color:#888;">{{ walk.method }} · {{ walk.n_steps }} steps</span>
+</p>
+
+<h1 style="margin:0;">{{ walk.name|default:walk.slug }}
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — H<sub>final</sub> = {{ walk.fitness_final|floatformat:3 }},
+    H<sub>max</sub> = {{ walk.fitness_max|floatformat:3 }}
+  </span>
+</h1>
+
+<div style="display:grid; grid-template-columns:1fr 320px; gap:1rem;
+            margin-top:0.8rem;">
+
+  <div>
+    <canvas id="loupe-canvas" width="700" height="500"
+            style="background:#000; display:block; width:100%;
+                   max-width:900px; border:1px solid #30363d;
+                   border-radius:6px;"></canvas>
+    <div style="display:flex; gap:1rem; flex-wrap:wrap;
+         font-size:0.78rem; color:#888; margin-top:0.4rem;">
+      <span>step <b id="r-step" style="color:#cfa;">0</b>/{{ walk.n_steps }}</span>
+      <span>cx <b id="r-cx" style="color:#cfa;">—</b></span>
+      <span>cy <b id="r-cy" style="color:#cfa;">—</b></span>
+      <span>span <b id="r-span" style="color:#cfa;">—</b></span>
+      <span>fitness <b id="r-fit" style="color:#cfa;">—</b></span>
+    </div>
+  </div>
+
+  <div style="background:#161b22; border:1px solid #30363d;
+              border-radius:6px; padding:0.6rem 0.8rem;
+              font-size:0.85rem;">
+
+    <h3 style="margin:0 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Replay</h3>
+    <div style="display:flex; gap:0.3rem;">
+      <button id="btn-play" type="button"
+        style="flex:1; background:#1f6feb; color:#fff; border:0;
+               padding:0.4rem 0.6rem; cursor:pointer;">▶ Play</button>
+      <button id="btn-step-back" type="button"
+        style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.4rem 0.6rem; cursor:pointer;">⏮</button>
+      <button id="btn-step-fwd" type="button"
+        style="background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.4rem 0.6rem; cursor:pointer;">⏭</button>
+    </div>
+    <input id="step-slider" type="range" min="0" max="{{ walk.n_steps }}"
+      value="{{ walk.n_steps }}" step="1"
+      style="width:100%; margin-top:0.5rem;">
+
+    <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Fitness</h3>
+    <canvas id="fitness-chart" width="280" height="60"
+            style="display:block; width:100%; background:#0d1117;
+                   border:1px solid #30363d; border-radius:3px;"></canvas>
+
+    <h3 style="margin:0.8rem 0 0.4rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Details</h3>
+    <div style="font-size:0.78rem; color:#aaa; line-height:1.6;">
+      <div>created {{ walk.created_at|date:"Y-m-d H:i" }}</div>
+      {% if walk.population_id %}
+        <div>population <a href="{% url 'loupe:walks' %}?population={{ walk.population_id }}"
+              style="color:#58a6ff;">{{ walk.population_id }}</a></div>
+      {% endif %}
+      <div>end span <b style="color:#cfa;">{{ walk.end_span|floatformat:-6 }}</b></div>
+      <div>end iter <b style="color:#cfa;">{{ walk.end_iter }}</b></div>
+    </div>
+
+    <form method="post"
+          action="{% url 'loupe:walk_delete' walk.slug %}"
+          style="margin-top:0.8rem;"
+          onsubmit="return confirm('Delete this walk?');">
+      {% csrf_token %}
+      <button type="submit"
+        style="background:#21262d; color:#f85149; border:1px solid #532;
+               padding:0.3rem 0.7rem; cursor:pointer; font-family:inherit;
+               font-size:0.78rem;">delete walk</button>
+    </form>
+  </div>
+</div>
+
+</div>
+
+<script src="{% static 'loupe/loupe.js' %}"></script>
+<script>
+'use strict';
+(function () {
+  const GENE = {{ gene_json|safe }};
+  const canvas = document.getElementById('loupe-canvas');
+  const eng = new LoupeEngine(canvas, {iter: 256});
+
+  const rstep = document.getElementById('r-step');
+  const rcx   = document.getElementById('r-cx');
+  const rcy   = document.getElementById('r-cy');
+  const rspan = document.getElementById('r-span');
+  const rfit  = document.getElementById('r-fit');
+  const slider = document.getElementById('step-slider');
+
+  function showStep (k) {
+    const s = GENE[Math.max(0, Math.min(GENE.length - 1, k))];
+    eng.setView(s.cx, s.cy, s.span);
+    eng.render();
+    rstep.textContent = k;
+    rcx.textContent = s.cx.toExponential(4);
+    rcy.textContent = s.cy.toExponential(4);
+    rspan.textContent = s.span.toExponential(3);
+    rfit.textContent = (s.fitness ?? 0).toFixed(3);
+    slider.value = k;
+  }
+
+  document.getElementById('btn-play').addEventListener('click', () => {
+    let k = parseInt(slider.value, 10) || 0;
+    if (k >= GENE.length - 1) k = 0;
+    function tick () {
+      showStep(k);
+      if (k < GENE.length - 1) {
+        k++;
+        setTimeout(tick, 220);
+      }
+    }
+    tick();
+  });
+  document.getElementById('btn-step-back').addEventListener('click', () => {
+    showStep(Math.max(0, parseInt(slider.value, 10) - 1));
+  });
+  document.getElementById('btn-step-fwd').addEventListener('click', () => {
+    showStep(Math.min(GENE.length - 1, parseInt(slider.value, 10) + 1));
+  });
+  slider.addEventListener('input', () => {
+    showStep(parseInt(slider.value, 10));
+  });
+
+  // Fitness sparkline.
+  (function drawFitness () {
+    const cv = document.getElementById('fitness-chart');
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    if (!GENE.length) return;
+    const fits = GENE.map(s => s.fitness ?? 0);
+    const min = Math.min(...fits), max = Math.max(...fits);
+    const range = (max - min) || 1;
+    ctx.strokeStyle = '#cfa';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < fits.length; i++) {
+      const x = (i / Math.max(1, fits.length - 1)) * (cv.width - 4) + 2;
+      const y = cv.height - 2 - ((fits[i] - min) / range) * (cv.height - 4);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  })();
+
+  // Land on the final step initially (matches the thumbnail).
+  showStep(GENE.length - 1);
+})();
+</script>
+{% endblock %}

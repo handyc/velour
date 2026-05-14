@@ -160,6 +160,7 @@ INSTALLED_APPS = [
     'barding',
     'signs',
     'escher',
+    'loupe',
 ]
 
 MIDDLEWARE = [

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}loupe — walks library{% endblock %}
+
+{% block content %}
+<div style="max-width:1300px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<p style="font-size:0.85rem; color:#8b949e;">
+  <a href="{% url 'loupe:index' %}" style="color:#888;">←</a>
+  <b style="color:#ddd;">Walks library</b>
+</p>
+
+<h1 style="margin:0;">Walks
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — every saved viewport + agent trajectory
+  </span>
+</h1>
+
+<div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;
+            margin:0.8rem 0; font-size:0.8rem;">
+  <label>method
+    <select onchange="window.location='?method=' + this.value;"
+      style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+             padding:0.2rem;">
+      <option value="" {% if not method %}selected{% endif %}>all</option>
+      <option value="manual" {% if method == 'manual' %}selected{% endif %}>manual</option>
+      <option value="agent"  {% if method == 'agent' %}selected{% endif %}>agent</option>
+      <option value="replay" {% if method == 'replay' %}selected{% endif %}>replay</option>
+    </select>
+  </label>
+  {% if populations %}
+    <label>population
+      <select onchange="window.location='?population=' + this.value;"
+        style="background:#0d1117; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.2rem;">
+        <option value="" {% if not population %}selected{% endif %}>all</option>
+        {% for p in populations %}
+          <option value="{{ p }}" {% if p == population %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  {% endif %}
+  <span style="color:#6e7681; font-size:0.78rem;">
+    {{ walks|length }} walk{{ walks|length|pluralize }} shown.
+  </span>
+</div>
+
+<div style="display:grid;
+            grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+            gap:10px;">
+  {% for w in walks %}
+    <div style="background:#0d1117; border:1px solid #30363d;
+                border-radius:5px; padding:0.4rem 0.5rem;">
+      <a href="{% url 'loupe:walk_detail' w.slug %}" style="display:block;
+         text-decoration:none;">
+        {% if w.thumbnail_b64 %}
+          <img src="data:image/png;base64,{{ w.thumbnail_b64 }}" alt="{{ w.slug }}"
+            style="display:block; width:100%; aspect-ratio:1;
+                   object-fit:cover; background:#000; border-radius:3px;">
+        {% else %}
+          <div style="display:block; width:100%; aspect-ratio:1;
+                      background:#222; border-radius:3px;"></div>
+        {% endif %}
+        <div style="color:#cfa; font-size:0.75rem; margin-top:0.3rem;
+                     overflow:hidden; text-overflow:ellipsis;
+                     white-space:nowrap;">{{ w.name|default:w.slug }}</div>
+      </a>
+      <div style="font-size:0.66rem; color:#888; margin-top:0.15rem;">
+        {{ w.method }} · {{ w.n_steps }} steps · H={{ w.fitness_final|floatformat:2 }}
+        {% if w.population_id %} · <a href="?population={{ w.population_id }}"
+           style="color:#8b949e;">{{ w.population_id }}</a>{% endif %}
+      </div>
+    </div>
+  {% empty %}
+    <p style="color:#6e7681; font-style:italic;">no walks saved yet —
+      head to <a href="{% url 'loupe:index' %}">/loupe/</a> and try one.</p>
+  {% endfor %}
+</div>
+
+</div>
+{% endblock %}

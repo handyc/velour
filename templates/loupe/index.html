@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}loupe — Mandelbrot zoom + agent walks{% endblock %}
+
+{% block content %}
+<div style="max-width:1400px; margin:1rem auto; padding:0 1rem;
+            color:#c9d1d9; font-family:ui-monospace,Menlo,monospace;">
+
+<h1 style="margin:0;">loupe
+  <span style="color:#8b949e; font-weight:400; font-size:0.85rem;">
+    — Mandelbrot zoom + directed walks
+  </span>
+</h1>
+
+<p style="color:#8b949e; font-size:0.85rem; max-width:60em;">
+  Drag to pan, scroll to zoom.  "Save view" snapshots the current
+  viewport as a one-step walk; "Spawn population" runs N agents from
+  the current viewport, each taking an epsilon-greedy walk that
+  maximises the Shannon entropy of escape-time histograms.  Walks
+  are stored as replayable JSON genes.
+</p>
+
+<div style="display:grid; grid-template-columns:1fr 320px; gap:1rem;
+            margin-top:0.8rem;">
+
+  <!-- ── Canvas + readouts ─────────────────────────────────────── -->
+  <div>
+    <canvas id="loupe-canvas" width="700" height="500"
+            style="background:#000; display:block; width:100%;
+                   max-width:900px; border:1px solid #30363d;
+                   border-radius:6px; cursor:grab;"></canvas>
+    <div id="readouts" style="display:flex; gap:1rem; flex-wrap:wrap;
+         font-size:0.78rem; color:#888; margin-top:0.4rem;">
+      <span>cx <b id="r-cx" style="color:#cfa;">−0.5</b></span>
+      <span>cy <b id="r-cy" style="color:#cfa;">0.0</b></span>
+      <span>span <b id="r-span" style="color:#cfa;">3.0</b></span>
+      <span>iter <b id="r-iter" style="color:#cfa;">192</b></span>
+      <span>fitness <b id="r-fit" style="color:#cfa;">—</b></span>
+      <span>render <b id="r-ms" style="color:#888;">—</b> ms</span>
+    </div>
+  </div>
+
+  <!-- ── Controls ──────────────────────────────────────────────── -->
+  <div style="background:#161b22; border:1px solid #30363d;
+              border-radius:6px; padding:0.6rem 0.8rem;
+              font-size:0.85rem;">
+
+    <h3 style="margin:0 0 0.5rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">View</h3>
+
+    <div style="display:flex; gap:0.4rem; margin-bottom:0.4rem;">
+      <button id="btn-reset" type="button"
+        style="flex:1; background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.35rem 0.6rem; cursor:pointer;">↻ Reset</button>
+      <button id="btn-render" type="button"
+        style="flex:1; background:#21262d; color:#c9d1d9; border:1px solid #30363d;
+               padding:0.35rem 0.6rem; cursor:pointer;">▶ Redraw</button>
+    </div>
+
+    <details style="margin-top:0.4rem;">
+      <summary style="cursor:pointer; color:#8b949e;">Canonical coords</summary>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;
+                  margin-top:0.4rem;">
+        <button class="loupe-preset" data-cx="-0.5" data-cy="0" data-span="3.0"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">whole</button>
+        <button class="loupe-preset" data-cx="-0.75" data-cy="0.11" data-span="0.16"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">seahorse</button>
+        <button class="loupe-preset" data-cx="0.275" data-cy="0" data-span="0.07"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">elephant</button>
+        <button class="loupe-preset" data-cx="-0.7453" data-cy="0.1127" data-span="0.0034"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">triple</button>
+        <button class="loupe-preset" data-cx="-1.768" data-cy="0" data-span="0.04"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">minibrot</button>
+        <button class="loupe-preset" data-cx="-1.99975" data-cy="0" data-span="0.001"
+          type="button" style="background:#21262d; color:#c9d1d9;
+          border:1px solid #30363d; padding:0.25rem; cursor:pointer;
+          font-family:inherit; font-size:0.78rem;">lightning</button>
+      </div>
+    </details>
+
+    <h3 style="margin:0.8rem 0 0.5rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Save current view</h3>
+
+    <input id="walk-name" type="text" placeholder="optional name"
+      style="width:100%; box-sizing:border-box; background:#0d1117;
+             color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;
+             font-family:inherit;">
+    <button id="btn-save" type="button"
+      style="margin-top:0.4rem; width:100%; background:#238636;
+             color:#fff; border:0; padding:0.4rem 0.6rem;
+             cursor:pointer;">💾 Save view</button>
+
+    <h3 style="margin:0.8rem 0 0.5rem; font-size:0.85rem; color:#8b949e;
+               text-transform:uppercase; letter-spacing:0.05em;">Spawn agent population</h3>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.3rem;
+         font-size:0.78rem;">
+      <label>agents
+        <input id="p-n" type="number" value="6" min="1" max="32"
+          style="width:100%; box-sizing:border-box; background:#0d1117;
+                 color:#c9d1d9; border:1px solid #30363d; padding:0.2rem;">
+      </label>
+      <label>steps each
+        <input id="p-steps" type="number" value="24" min="2" max="80"
+          style="width:100%; box-sizing:border-box; background:#0d1117;
+                 color:#c9d1d9; border:1px solid #30363d; padding:0.2rem;">
+      </label>
+      <label>candidates / step
+        <input id="p-k" type="number" value="6" min="2" max="20"
+          style="width:100%; box-sizing:border-box; background:#0d1117;
+                 color:#c9d1d9; border:1px solid #30363d; padding:0.2rem;">
+      </label>
+      <label>ε (explore)
+        <input id="p-eps" type="number" value="0.15" min="0" max="1" step="0.05"
+          style="width:100%; box-sizing:border-box; background:#0d1117;
+                 color:#c9d1d9; border:1px solid #30363d; padding:0.2rem;">
+      </label>
+    </div>
+
+    <button id="btn-spawn" type="button"
+      style="margin-top:0.5rem; width:100%; background:#1f6feb;
+             color:#fff; border:0; padding:0.4rem 0.6rem;
+             cursor:pointer;">🚶 Spawn population</button>
+    <div id="spawn-progress" style="margin-top:0.4rem; font-size:0.78rem;
+         color:#aaa;">idle.</div>
+
+    <div style="margin-top:0.8rem; padding-top:0.4rem;
+         border-top:1px solid #30363d; font-size:0.78rem;">
+      <a href="{% url 'loupe:walks' %}" style="color:#58a6ff;
+        text-decoration:none;">Browse all walks →</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Recent walks strip ───────────────────────────────────────── -->
+{% if recent_walks %}
+<h2 style="font-size:0.95rem; color:#8b949e; text-transform:uppercase;
+           letter-spacing:0.05em; margin-top:1.5rem;">Recent walks</h2>
+<div style="display:flex; gap:8px; overflow-x:auto; padding:6px 0;">
+  {% for w in recent_walks %}
+    <a href="{% url 'loupe:walk_detail' w.slug %}"
+       style="flex:0 0 auto; width:120px; background:#0d1117;
+              border:1px solid #30363d; border-radius:5px;
+              padding:0.4rem 0.5rem; text-decoration:none;">
+      {% if w.thumbnail_b64 %}
+        <img src="data:image/png;base64,{{ w.thumbnail_b64 }}"
+          style="display:block; width:100%; aspect-ratio:1; object-fit:cover;
+                 background:#000; border-radius:3px;">
+      {% else %}
+        <div style="display:block; width:100%; aspect-ratio:1; background:#000;
+                    border-radius:3px;"></div>
+      {% endif %}
+      <div style="font-size:0.7rem; color:#cfa; margin-top:0.25rem;
+                   overflow:hidden; text-overflow:ellipsis;
+                   white-space:nowrap;">{{ w.slug }}</div>
+      <div style="font-size:0.66rem; color:#888;">
+        {{ w.method }} · {{ w.n_steps }} steps · H={{ w.fitness_final|floatformat:2 }}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+</div>
+
+<script src="{% static 'loupe/loupe.js' %}"></script>
+<script>
+'use strict';
+(function () {
+  const canvas = document.getElementById('loupe-canvas');
+  const eng = new LoupeEngine(canvas, {iter: 256});
+
+  const rcx = document.getElementById('r-cx');
+  const rcy = document.getElementById('r-cy');
+  const rspan = document.getElementById('r-span');
+  const riter = document.getElementById('r-iter');
+  const rfit = document.getElementById('r-fit');
+  const rms = document.getElementById('r-ms');
+
+  function refreshReadouts (fitness) {
+    rcx.textContent = eng.cx.toExponential(4);
+    rcy.textContent = eng.cy.toExponential(4);
+    rspan.textContent = eng.span.toExponential(3);
+    riter.textContent = eng.iter;
+    rfit.textContent = (fitness == null) ? '—' : fitness.toFixed(3);
+  }
+
+  function redraw (showFitness = false) {
+    const t0 = performance.now();
+    eng.render();
+    rms.textContent = Math.round(performance.now() - t0);
+    let f = null;
+    if (showFitness) {
+      f = eng.fitness({cx: eng.cx, cy: eng.cy, span: eng.span}, 48, 48);
+    }
+    refreshReadouts(f);
+  }
+
+  // Drag-to-pan.
+  let dragging = false, drag_px = 0, drag_py = 0;
+  canvas.addEventListener('mousedown', (e) => {
+    dragging = true;
+    drag_px = e.clientX; drag_py = e.clientY;
+    canvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+    const dx = (e.clientX - drag_px) * scale;
+    const dy = (e.clientY - drag_py) * scale;
+    drag_px = e.clientX; drag_py = e.clientY;
+    eng.pan(dx, dy);
+    redraw(false);
+  });
+  window.addEventListener('mouseup', () => {
+    dragging = false; canvas.style.cursor = 'grab';
+    redraw(true);   // recompute fitness on release
+  });
+
+  // Wheel zoom.
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const scale = canvas.width / rect.width;
+    const px = (e.clientX - rect.left) * scale;
+    const py = (e.clientY - rect.top)  * scale;
+    const f = e.deltaY > 0 ? 1.25 : 0.8;
+    eng.zoomAt(px, py, f);
+    redraw(true);
+  }, {passive: false});
+
+  // Reset / redraw / presets.
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    eng.setView(-0.5, 0.0, 3.0);
+    redraw(true);
+  });
+  document.getElementById('btn-render').addEventListener('click', () => {
+    redraw(true);
+  });
+  for (const btn of document.querySelectorAll('.loupe-preset')) {
+    btn.addEventListener('click', () => {
+      eng.setView(parseFloat(btn.dataset.cx),
+                   parseFloat(btn.dataset.cy),
+                   parseFloat(btn.dataset.span));
+      redraw(true);
+    });
+  }
+
+  // CSRF cookie helper.
+  function getCookie (name) {
+    const m = document.cookie.match('(^|; )' + name + '=([^;]+)');
+    return m ? decodeURIComponent(m[2]) : '';
+  }
+
+  // Save current view.
+  document.getElementById('btn-save').addEventListener('click', async () => {
+    const name = document.getElementById('walk-name').value.trim();
+    const fitness = eng.fitness({cx: eng.cx, cy: eng.cy, span: eng.span}, 64, 64);
+    const thumb = eng.thumbnail(128, 128).replace(/^data:image\/png;base64,/, '');
+    const body = {
+      name: name,
+      method: 'manual',
+      gene: [{cx: eng.cx, cy: eng.cy, span: eng.span,
+               iter: eng.iter, fitness: fitness}],
+      thumbnail_b64: thumb,
+      thumbnail_w: 128, thumbnail_h: 128,
+    };
+    const r = await fetch('{% url "loupe:save_walk" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json',
+                 'X-CSRFToken': getCookie('csrftoken')},
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) { alert('save failed: ' + r.status); return; }
+    const data = await r.json();
+    window.location = data.url;
+  });
+
+  // Spawn population.
+  const spawnBtn = document.getElementById('btn-spawn');
+  const progress = document.getElementById('spawn-progress');
+  spawnBtn.addEventListener('click', async () => {
+    spawnBtn.disabled = true;
+    const N = Math.max(1, Math.min(32, +document.getElementById('p-n').value));
+    const steps = Math.max(2, Math.min(80, +document.getElementById('p-steps').value));
+    const k = Math.max(2, Math.min(20, +document.getElementById('p-k').value));
+    const eps = Math.max(0, Math.min(1, +document.getElementById('p-eps').value));
+    const start = {cx: eng.cx, cy: eng.cy, span: eng.span};
+    const walks = [];
+    for (let i = 0; i < N; i++) {
+      progress.textContent = `running agent ${i+1}/${N}…`;
+      // Yield to the event loop so the progress label paints.
+      await new Promise(r => setTimeout(r, 0));
+      const agent = new LoupeAgent(eng, {
+        start, n_steps: steps, k_candidates: k, epsilon: eps,
+        sample_w: 40, sample_h: 40,
+      });
+      const gene = agent.run();
+      // Generate a thumbnail of the final state.
+      const finalView = gene[gene.length - 1];
+      eng.setView(finalView.cx, finalView.cy, finalView.span);
+      const thumb = eng.thumbnail(128, 128)
+                       .replace(/^data:image\/png;base64,/, '');
+      walks.push({
+        gene: gene,
+        thumbnail_b64: thumb,
+        thumbnail_w: 128, thumbnail_h: 128,
+      });
+    }
+    progress.textContent = `saving ${walks.length} walks…`;
+    const r = await fetch('{% url "loupe:save_walks" %}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json',
+                 'X-CSRFToken': getCookie('csrftoken')},
+      body: JSON.stringify({walks: walks, name_prefix: 'agent'}),
+    });
+    spawnBtn.disabled = false;
+    if (!r.ok) { progress.textContent = 'save failed.'; return; }
+    const data = await r.json();
+    progress.textContent = `done — ${data.created.length} walks saved.`;
+    setTimeout(() => { window.location = data.url; }, 600);
+  });
+
+  // First paint.
+  eng.setView(-0.5, 0.0, 3.0);
+  redraw(true);
+})();
+</script>
+{% endblock %}
