@@ -269,6 +269,10 @@
     clearTimeout(timer);
     timer = setTimeout(refresh, 200);
   });
+  // Initial draw: the iframe defaults to empty src, so without this
+  // a fresh page (and worse, a deep link with prefilled params)
+  // shows a blank preview until the user touches a control.
+  refresh();
 
   printBtn.addEventListener('click', () => {
     // Open the dedicated print HTML in a new tab; that page auto-fires
