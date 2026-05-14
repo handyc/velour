@@ -35,10 +35,11 @@
   </div>
   <h1>new album-seeded pact</h1>
   <p>
-    Upload a <strong>holiday album</strong> of 2 / 4 / 8 / 16 cover
+    Upload a <strong>holiday album</strong> of 1 / 2 / 4 / 8 / 16 cover
     images.  Each image is quantized to 4 colours and split into
     <code>64 / N</code> tiles that become the gen-0 cell grids of the
-    pact's components.  The album's SHA-256 deterministically derives
+    pact's components.  Single-image albums fan one cover across all
+    64 components via an 8×8 split.  The album's SHA-256 deterministically derives
     the seed and rule, so Alice and Bob get bit-identical pacts from
     the same album.  The cover images <em>are</em> the seal — render
     the pact at generation 0 and you literally see the album.
@@ -68,7 +69,7 @@
       <select id="alb-n" name="n_images">
         {% for n in valid_n %}
           <option value="{{ n }}" {% if form.n_images == n|stringformat:"s" %}selected{% endif %}>
-            {{ n }} {% if n == 4 %}— diptych+ default{% endif %}
+            {{ n }}{% if n == 1 %} — one image fans all 64 components{% endif %}{% if n == 4 %} — diptych+ default{% endif %}
           </option>
         {% endfor %}
       </select>

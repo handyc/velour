@@ -65,8 +65,19 @@ class QuantizeAlbumTest(TestCase):
         self.assertNotEqual(a.album_hash, b.album_hash)
 
     def test_invalid_count_raises(self):
+        # N=3 isn't a power-of-two divisor of 64, so the album layout
+        # has no clean split — must raise.
         with self.assertRaises(ValueError):
-            album.quantize_album([_synth((255, 0, 0))], side=16)   # N=1 not valid
+            album.quantize_album(
+                [_synth((255, 0, 0)), _synth((0, 255, 0)),
+                 _synth((0, 0, 255))], side=16)
+
+    def test_single_image_fans_all_64_components(self):
+        """N=1 splits one image into 8×8 = 64 tiles."""
+        r = album.quantize_album([_synth((128, 200, 80))], side=16)
+        self.assertEqual(r.n_images, 1)
+        self.assertEqual(r.components_per_image, 64)
+        self.assertEqual(len(r.target_grids), 64)
 
 
 class DeriveSeedAndRuleTest(TestCase):

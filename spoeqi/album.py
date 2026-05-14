@@ -37,7 +37,7 @@ from PIL import Image
 
 # ─── Tile layout ─────────────────────────────────────────────────────
 
-VALID_N = (2, 4, 8, 16)
+VALID_N = (1, 2, 4, 8, 16)
 
 
 def album_layout(n: int) -> Tuple[int, int, int]:
@@ -49,6 +49,7 @@ def album_layout(n: int) -> Tuple[int, int, int]:
         raise ValueError(f'album size must be one of {VALID_N}, got {n}')
     cpi = 64 // n
     # Prefer square-ish layouts.
+    if cpi == 64: return (64, 8, 8)   # n=1 → one image owns all 64 components
     if cpi == 32: return (32, 4, 8)
     if cpi == 16: return (16, 4, 4)
     if cpi ==  8: return ( 8, 2, 4)
