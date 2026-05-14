@@ -376,7 +376,15 @@
     const params = new URLSearchParams();
     for (const el of form.querySelectorAll('[name]')) {
       if (el.type === 'checkbox') {
-        if (el.checked) params.set(el.name, '1');
+        // Preserve the checkbox's own `value` attribute when one is
+        // set (e.g. `<input name="mode" value="flowers">` must serialise
+        // as `mode=flowers`, not the generic `mode=1`).  Default-value
+        // ("on") and empty boxes still emit `1` so dual-state flags
+        // like `landscape` / `border` keep their old shape.
+        if (el.checked) {
+          const v = (el.value && el.value !== 'on') ? el.value : '1';
+          params.set(el.name, v);
+        }
       } else {
         const v = (el.value || '').trim();
         if (v !== '') params.set(el.name, v);
