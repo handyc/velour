@@ -116,3 +116,47 @@ class ViewTest(TestCase):
                              {'mode': 'flowers', 'rule_hex': 'deadbeef'})
         self.assertEqual(r.status_code, 200)
         self.assertIn('expected exactly', r.content.decode())
+
+    def test_spoeqi_per_component_slice_changes_rule(self):
+        """Component-sliced flowers must use bytes specific to that
+        component, not the pact's broadcast rule_snapshot.  Build a
+        pact with rule_diversity='fleet' so different components have
+        different rules, then confirm components 0 and 3 produce
+        different rule fingerprints in the rendered SVG."""
+        from spoeqi.models import Pact, RULE_TABLE_SIZE, COMPONENTS
+        # Fleet diversity needs a rules_snapshot blob.  Stuff each
+        # component with a distinctive bit-pattern; mask to 4-state.
+        per_comp = bytearray()
+        for c in range(COMPONENTS):
+            tile = bytes([(c + i) & 3 for i in range(RULE_TABLE_SIZE)])
+            per_comp.extend(tile)
+        pact = Pact(name='fleet-test', rule_diversity='fleet',
+                     rules_snapshot=bytes(per_comp),
+                     rule_snapshot=bytes([0] * RULE_TABLE_SIZE))
+        pact.save()
+        # Render flowers for component 0 and component 3.
+        r0 = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug, 'component': '0'})
+        r3 = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug, 'component': '3'})
+        self.assertEqual(r0.status_code, 200)
+        self.assertEqual(r3.status_code, 200)
+        # Extract the "rule ..." footer fingerprint from each.
+        import re
+        m0 = re.search(r'rule ([0-9a-f]+)', r0.content.decode())
+        m3 = re.search(r'rule ([0-9a-f]+)', r3.content.decode())
+        self.assertIsNotNone(m0)
+        self.assertIsNotNone(m3)
+        self.assertNotEqual(m0.group(1), m3.group(1),
+                              'components 0 and 3 produced the same rule '
+                              'fingerprint despite fleet-mode pact')
+
+    def test_bad_component_rejected(self):
+        from spoeqi.models import Pact, RULE_TABLE_SIZE
+        pact = Pact(name='comp-bound-test',
+                     rule_snapshot=bytes([0] * RULE_TABLE_SIZE))
+        pact.save()
+        r = self.client.get(reverse('gridprint:grid_svg'), {
+            'mode': 'flowers', 'from_spoeqi': pact.slug, 'component': '999'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('component must be', r.content.decode())

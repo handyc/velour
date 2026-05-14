@@ -131,6 +131,12 @@
                  style="width:100%;background:#0d1117;color:#c9d1d9;
                  border:1px solid #30363d;padding:0.25rem;">
         </label>
+        <label>Component 0–63 (optional — slices that component's rule)
+          <input type="number" name="component" min="0" max="63"
+                 placeholder="(blank = pact.rule_snapshot, shared)"
+                 style="width:100%;background:#0d1117;color:#c9d1d9;
+                 border:1px solid #30363d;padding:0.25rem;">
+        </label>
         <div style="display:flex;gap:0.4rem;">
           <label style="flex:1;">page
             <input type="number" name="fpage" value="0" min="0" max="64"
@@ -198,6 +204,32 @@
   const printBtn = document.getElementById('print-btn');
   const downloadBtn = document.getElementById('download-btn');
   const rawLink = document.getElementById('raw-link');
+
+  // Pre-fill the form from incoming URL params so deep links (e.g.
+  // from doom-ca's "export to flowers" button) land in the right
+  // mode with the right pact/component pre-selected.  If we see a
+  // known form name, set it; for checkboxes "1"/"true"/the value
+  // attr count as checked.  Open the enclosing <details> panel so
+  // the user can see what got filled.
+  (function applyIncomingParams(){
+    const incoming = new URLSearchParams(window.location.search);
+    if (![...incoming.keys()].length) return;
+    for (const el of form.querySelectorAll('[name]')) {
+      const v = incoming.get(el.name);
+      if (v === null) continue;
+      if (el.type === 'checkbox') {
+        el.checked = (v === '1' || v === 'true' || v === el.value);
+      } else {
+        el.value = v;
+      }
+      // Open the <details> that contains the prefilled field.
+      let p = el.parentElement;
+      while (p && p !== form) {
+        if (p.tagName === 'DETAILS') p.open = true;
+        p = p.parentElement;
+      }
+    }
+  })();
 
   function buildParams(){
     const params = new URLSearchParams();

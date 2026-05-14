@@ -160,20 +160,49 @@ def _load_rule_and_palette(request) -> tuple[bytes, list, dict] | None:
     inputs.
 
     Sources:
-      ?from_spoeqi=<slug>    — pull rule_snapshot + palette from the Pact
-      ?rule_hex=<hex>        — explicit 32,768-char hex; palette default
+      ?from_spoeqi=<slug>             — pull rule_snapshot + palette from the Pact
+      ?from_spoeqi=<slug>&component=K — slice the per-component rule + palette
+      ?rule_hex=<hex>                 — explicit 32,768-char hex; palette default
     """
     slug = (request.GET.get('from_spoeqi') or '').strip()
     rule_hex = (request.GET.get('rule_hex') or '').strip()
+    comp_raw = (request.GET.get('component') or '').strip()
     if slug:
         from spoeqi.models import Pact
+        from spoeqi.models import COMPONENTS as N_COMPONENTS
         pact = Pact.objects.filter(slug=slug).first()
         if pact is None:
             raise ValueError(f'spoeqi pact "{slug}" not found')
-        rule = bytes(pact.rule_snapshot)
-        palette = [f'rgb({r},{g},{b})' for r, g, b in pact.palette]
-        return rule, palette, {'source': 'spoeqi', 'slug': pact.slug,
-                                'name': pact.name}
+        component = None
+        if comp_raw:
+            try:
+                component = int(comp_raw)
+            except ValueError:
+                raise ValueError(f'component must be 0..{N_COMPONENTS - 1}; '
+                                  f'got {comp_raw!r}')
+            if not 0 <= component < N_COMPONENTS:
+                raise ValueError(f'component must be 0..{N_COMPONENTS - 1}; '
+                                  f'got {component}')
+        if component is None:
+            rule = bytes(pact.rule_snapshot)
+        else:
+            base = component * hex_flowers.RULE_TABLE_SIZE
+            rule = pact.per_component_rules()[
+                base : base + hex_flowers.RULE_TABLE_SIZE]
+        # Palette: per-component when the pact has one, otherwise the shared.
+        palette_raw = pact.palette or []
+        if component is not None and palette_raw and isinstance(palette_raw[0][0], list):
+            pal_rgb = palette_raw[component]
+        elif palette_raw and isinstance(palette_raw[0][0], list):
+            pal_rgb = palette_raw[0]   # shared-default to first when caller
+                                        # didn't pick a component
+        else:
+            pal_rgb = palette_raw
+        palette = [f'rgb({r},{g},{b})' for r, g, b in pal_rgb]
+        meta = {'source': 'spoeqi', 'slug': pact.slug, 'name': pact.name}
+        if component is not None:
+            meta['component'] = component
+        return rule, palette, meta
     if rule_hex:
         try:
             rule = bytes.fromhex(rule_hex)
@@ -236,7 +265,11 @@ def _flowers_svg(request):
 
     rule, palette, meta = rule_palette
     if meta['source'] == 'spoeqi':
-        title = f'spoeqi pact: {meta["name"]} ({meta["slug"]})'
+        if 'component' in meta:
+            title = (f'spoeqi pact: {meta["name"]} ({meta["slug"]}) '
+                     f'· component {meta["component"]}')
+        else:
+            title = f'spoeqi pact: {meta["name"]} ({meta["slug"]})'
 
     body, summary = hex_flowers.render_flowers_svg(
         rule, palette=palette,
