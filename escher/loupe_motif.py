@@ -39,7 +39,9 @@ def loupe_walk_motif(walk_slug: str, *, step: int | None = None,
     qs = [f'w={resolution}', f'h={resolution}']
     if step is not None and 0 <= int(step) < len(gene):
         qs.append(f'step={int(step)}')
-    href += '?' + '&'.join(qs)
+    # Use &amp; — SVG is XML, so a literal '&' in an attribute breaks
+    # the parser ("not well-formed").
+    href += '?' + '&amp;'.join(qs)
 
     # The Mandelbrot render is always square, so fit it square into
     # [inset, 1-inset]² with the same xMidYMid-meet preservation we

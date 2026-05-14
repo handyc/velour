@@ -300,6 +300,11 @@ def _render_group_page(request, group, *, composition):
     values via a JSON blob the template's JS reads on load."""
     from .models import UploadedMotif
     import json as _json
+    try:
+        from loupe.models import Walk
+        walks = list(Walk.objects.all()[:200])
+    except Exception:
+        walks = []
     initial = {}
     if composition is not None:
         s = composition.motif_spec or {}
@@ -312,6 +317,8 @@ def _render_group_page(request, group, *, composition):
             'gen':           s.get('generation', ''),
             'tile_slug':     s.get('tile_slug', ''),
             'upload_slug':   s.get('upload_slug', ''),
+            'loupe_slug':    s.get('loupe_slug', ''),
+            'loupe_step':    s.get('loupe_step', ''),
             'tile':          composition.tile_mm,
             'landscape':     '1' if composition.landscape else '',
         }
@@ -321,6 +328,7 @@ def _render_group_page(request, group, *, composition):
         'motifs':  list(motifs.STOCK.values()),
         'default_motif': motifs.DEFAULT_MOTIF,
         'uploads': UploadedMotif.objects.all()[:200],
+        'walks':   walks,
         'composition': composition,
         'initial_json': _json.dumps(initial),
     })
@@ -344,6 +352,13 @@ def _spec_from_request(request) -> dict:
         return {'tile_slug': (g('tile_slug') or '').strip()}
     if kind == 'upload':
         return {'upload_slug': (g('upload_slug') or '').strip()}
+    if kind == 'loupe_walk':
+        spec = {'loupe_slug': (g('loupe_slug') or '').strip()}
+        step = (g('loupe_step') or '').strip()
+        if step:
+            try: spec['loupe_step'] = int(step)
+            except ValueError: pass
+        return spec
     return {'slug': (g('motif_slug') or motifs.DEFAULT_MOTIF).strip()}
 
 

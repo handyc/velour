@@ -91,18 +91,27 @@
     <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e; display:none;" data-show="upload">uploaded bitmap
       <select name="upload_slug" style="width:100%; background:#0d1117;
               color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
-        <option value="">(choose one — see <a href="{% url 'escher:uploads' %}">uploads</a>)</option>
-        {% for u in uploads %}
-          <option value="{{ u.slug }}">{{ u.slug }} ({{ u.width }}×{{ u.height }})</option>
-        {% endfor %}
+        {% if uploads %}
+          {% for u in uploads %}
+            <option value="{{ u.slug }}"{% if forloop.first %} selected{% endif %}>{{ u.slug }} ({{ u.width }}×{{ u.height }})</option>
+          {% endfor %}
+        {% else %}
+          <option value="">(no uploads yet — visit /escher/uploads/ first)</option>
+        {% endif %}
       </select>
     </label>
 
-    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e; display:none;" data-show="loupe_walk">loupe walk slug
-      <input type="text" name="loupe_slug"
-              placeholder="(see /loupe/walks/)"
-              style="width:100%; background:#0d1117; color:#c9d1d9;
-                     border:1px solid #30363d; padding:0.25rem;">
+    <label style="grid-column:1/3; font-size:0.78rem; color:#8b949e; display:none;" data-show="loupe_walk">loupe walk
+      <select name="loupe_slug" style="width:100%; background:#0d1117;
+              color:#c9d1d9; border:1px solid #30363d; padding:0.25rem;">
+        {% if walks %}
+          {% for w in walks %}
+            <option value="{{ w.slug }}"{% if forloop.first %} selected{% endif %}>{{ w.slug }}{% if w.name %} — {{ w.name }}{% endif %} ({{ w.n_steps }} steps)</option>
+          {% endfor %}
+        {% else %}
+          <option value="">(no walks yet — visit /loupe/ to grow some)</option>
+        {% endif %}
+      </select>
     </label>
     <label style="font-size:0.78rem; color:#8b949e; display:none;" data-show="loupe_walk">walk step (blank = final)
       <input type="number" name="loupe_step" min="0" max="200"
@@ -196,6 +205,19 @@
     if (el.type === 'checkbox') el.checked = (v === '1' || v === true);
     else el.value = v;
   }
+  // Also prefill from URL query params so deep links like
+  // /escher/p4m/?motif=upload&upload_slug=foo (from /escher/uploads/)
+  // land on the right motif kind with the right upload pre-selected.
+  (function applyURLParams () {
+    const incoming = new URLSearchParams(window.location.search);
+    if (![...incoming.keys()].length) return;
+    for (const el of form.querySelectorAll('[name]')) {
+      const v = incoming.get(el.name);
+      if (v === null) continue;
+      if (el.type === 'checkbox') el.checked = (v === '1' || v === true || v === el.value);
+      else el.value = v;
+    }
+  })();
 
   function updateMotifVisibility () {
     const kind = motifSel.value;

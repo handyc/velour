@@ -67,7 +67,7 @@ def grid_svg(request):
         ?mode=flowers&from_spoeqi=<slug>
         ?mode=flowers&rule_hex=<32768-char-hex>
         ?fpage=0                   (page index, 0-based)
-        ?fper=128                  (flowers per page, 1..1024)
+        ?fper=                     (flowers per page; omit to fill the page)
         ?fcentre=0..3              (filter to one centre colour)
     """
     if (request.GET.get('mode') or '').strip() == 'flowers':
