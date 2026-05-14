@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}signs — sign-language corpus{% endblock %}
+{% block content %}
+<style>
+  .signs-page  { max-width: 64em; }
+  .signs-page .meta  { color: #888; font-size: 0.85rem; max-width: 56em; }
+  .signs-page h1  { margin: 0 0 4px; }
+  .signs-page h2  { color: #cfc; font-size: 1rem; margin: 18px 0 6px; }
+  .sign-row     { padding: 6px 0; border-bottom: 1px solid #1a1a1a;
+                  display: flex; gap: 14px; align-items: baseline; }
+  .sign-row .gloss { color: #cfc; font-weight: 600; min-width: 9em; }
+  .sign-row .variety { color: #aaa; font-family: monospace; font-size: 0.85rem; }
+  .sign-row .frames  { color: #888; font-size: 0.8rem; }
+  .sign-row a.viewer { color: #ace; margin-left: auto; font-size: 0.85rem; }
+  .empty { color: #666; padding: 20px 0; font-style: italic; }
+  .lang-block { margin: 18px 0 8px; }
+  .lang-block .langhead { color: #ddd; font-weight: 600; }
+  .lang-block .varhead  { color: #888; font-size: 0.85rem; padding-left: 10px; }
+</style>
+
+<div class="signs-page">
+
+<h1>signs</h1>
+<p class="meta">
+  A general-purpose corpus of lexical signs across human signed
+  languages. Each Sign is one (Lemma × Variety) realisation: a
+  sequence of frames, each frame a 30-cylinder hand pose
+  (10 fingers × 3 phalanges) plus optional OpenPose-derived body
+  context. Hand pose stored in the same form the in-Velour viewer
+  consumes natively.
+</p>
+
+<h2>Languages</h2>
+{% for lang in languages %}
+  <div class="lang-block">
+    <div class="langhead">{{ lang.name }}{% if lang.iso639_3 %} <span style="color:#888;font-family:monospace;font-size:0.85rem;">[{{ lang.iso639_3 }}]</span>{% endif %}{% if lang.region %} · <span class="meta">{{ lang.region }}</span>{% endif %}</div>
+    {% for v in lang.varieties.all %}
+      <div class="varhead">→ {{ v.name }} ({{ v.signs.count }} sign{{ v.signs.count|pluralize }})</div>
+    {% endfor %}
+  </div>
+{% empty %}
+  <div class="empty">No languages yet. Run <code>manage.py seed_signtest_demo</code> for the demo set.</div>
+{% endfor %}
+
+<h2>All signs</h2>
+{% for s in signs %}
+  <div class="sign-row">
+    <span class="gloss">{{ s.lemma.gloss }}</span>
+    <span class="variety">{{ s.variety.language.name }} / {{ s.variety.name }}</span>
+    <span class="frames">{{ s.n_frames }} fr · {{ s.fps }} fps</span>
+    <a class="viewer" href="{% url 'signs:viewer' s.slug %}">view →</a>
+  </div>
+{% empty %}
+  <div class="empty">No signs yet.</div>
+{% endfor %}
+
+</div>
+{% endblock %}

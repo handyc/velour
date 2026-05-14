@@ -90,6 +90,7 @@ urlpatterns = [
     path('metaevolve/',  include('metaevolve.urls')),
     path('vampyrik/',    include('vampyrik.urls')),
     path('claudecode/',  include('claudecode.urls')),
+    path('signs/',       include('signs.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

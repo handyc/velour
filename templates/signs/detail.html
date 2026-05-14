@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ sign.lemma.gloss }} — {{ sign.variety.language.name }} signs{% endblock %}
+{% block content %}
+<style>
+  .sign-page { max-width: 64em; }
+  .sign-page .meta { color: #888; font-size: 0.85rem; }
+  .sign-page .meta a { color: #ace; }
+  .sign-page h1 { margin: 0 0 4px; color: #cfc; }
+  .sign-page .langline { color: #aaa; font-family: monospace; margin-bottom: 14px; }
+  .sign-page .kv { display: grid; grid-template-columns: 10em 1fr; gap: 6px 14px;
+                   padding: 12px 14px; border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .sign-page .kv dt { color: #888; }
+  .sign-page .kv dd { color: #ddd; margin: 0; }
+  .sign-page .frames-list { margin-top: 18px; max-height: 18em; overflow: auto;
+                            border: 1px solid #1f1f1f; padding: 8px 12px;
+                            background: #0a0a0a; font-family: monospace;
+                            font-size: 0.8rem; color: #888; }
+  .frames-list .fr { padding: 1px 0; }
+  .frames-list .fr b { color: #cfc; font-weight: normal; }
+</style>
+
+<div class="sign-page">
+<p class="meta"><a href="{% url 'signs:index' %}">←</a> <b style="color:#ddd;">Sign</b></p>
+
+<h1>{{ sign.lemma.gloss }}</h1>
+<div class="langline">{{ sign.variety.language.name }} / {{ sign.variety.name }}</div>
+
+<dl class="kv">
+  <dt>lemma</dt>     <dd>{{ sign.lemma.gloss }}{% if sign.lemma.semantic_field %} · {{ sign.lemma.semantic_field }}{% endif %}</dd>
+  <dt>variety</dt>   <dd>{{ sign.variety.name }} ({{ sign.variety.language.name }})</dd>
+  <dt>signer</dt>    <dd>{{ sign.signer|default:"—" }}</dd>
+  <dt>recorded</dt>  <dd>{{ sign.recorded_at|default:"—" }}</dd>
+  <dt>frames</dt>    <dd>{{ sign.n_frames }} @ {{ sign.fps }} fps</dd>
+  <dt>source</dt>    <dd>{% if sign.source %}{{ sign.source.name }}{% if sign.source.doi %} · <code>{{ sign.source.doi }}</code>{% endif %}{% else %}—{% endif %}</dd>
+  <dt>media</dt>     <dd>{% if sign.media_url %}<a href="{{ sign.media_url }}">{{ sign.media_url }}</a>{% else %}—{% endif %}</dd>
+</dl>
+
+<p style="margin-top:14px;"><a href="{% url 'signs:viewer' sign.slug %}" style="color:#ace;">open in 3D viewer →</a> · <a href="{% url 'signs:frames_json' sign.slug %}" style="color:#888;">frames.json</a></p>
+
+{% if sign.notes %}
+  <p class="meta" style="margin-top:14px;">{{ sign.notes }}</p>
+{% endif %}
+
+<div class="frames-list">
+  {% for f in frames %}
+    <div class="fr"><b>#{{ f.index }}</b> · {{ f.duration_ms }} ms</div>
+  {% empty %}
+    <div class="fr" style="font-style:italic;">no frames</div>
+  {% endfor %}
+</div>
+
+</div>
+{% endblock %}

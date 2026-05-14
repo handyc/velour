@@ -158,6 +158,7 @@ INSTALLED_APPS = [
     'metaevolve',
     'vampyrik',
     'claudecode',
+    'signs',
 ]
 
 MIDDLEWARE = [

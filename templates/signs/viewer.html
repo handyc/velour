@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+{% block title %}{{ sign.lemma.gloss }} — sign viewer{% endblock %}
+{% block content %}
+<style>
+  /* Single-sign viewer ported from signtest.games.h4ks.com.
+     Drops the in-page sign picker (one sign per URL); keeps
+     the speed/size/wireframe/labels/export-pose controls and the
+     timeline + play controls. Loads frame data via fetch from
+     {% url 'signs:frames_json' sign.slug %}. */
+  body.signs-viewer { background: #0a0a1a; color: #e0e0e0; overflow: hidden; margin: 0; }
+  #signs-canvas-container { position: fixed; inset: 0; }
+  .signs-ui-panel {
+    position: fixed; top: 10px; left: 10px;
+    background: rgba(15,15,30,0.92); border: 1px solid #333;
+    border-radius: 12px; padding: 14px; width: 280px;
+    max-height: calc(100vh - 20px); overflow-y: auto;
+    font-size: 13px; z-index: 100;
+  }
+  .signs-ui-panel h2 { margin: 0 0 10px; color: #7af; font-size: 16px; }
+  .signs-ui-panel .crumbs { color: #888; font-size: 11px; margin: -4px 0 10px; }
+  .signs-ui-panel .crumbs a { color: #ace; }
+  .signs-ui-panel label { display: block; margin-top: 8px; color: #aaa;
+                          font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .signs-ui-panel input[type="range"],
+  .signs-ui-panel button {
+    width: 100%; padding: 6px 8px; margin-top: 3px;
+    background: #1a1a2e; border: 1px solid #444; border-radius: 6px;
+    color: #ddd; font-size: 13px; cursor: pointer;
+  }
+  .signs-ui-panel button { background: #2a4a7a; border-color: #5a8acf; font-weight: 600; margin-top: 10px; transition: all 0.2s; }
+  .signs-ui-panel button:hover { background: #3a6aaa; transform: translateY(-1px); }
+  .signs-ui-panel .btn-row { display: flex; gap: 6px; }
+  .signs-ui-panel .btn-row button { flex: 1; }
+  .signs-timeline-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 60px; background: rgba(15,15,30,0.95);
+    border-top: 1px solid #333; display: flex;
+    align-items: center; padding: 0 20px; gap: 15px; z-index: 100;
+  }
+  .signs-timeline-bar label { color: #888; font-size: 11px; white-space: nowrap; }
+  #signs-timeline-slider { flex: 1; accent-color: #7af; height: 6px; }
+  #signs-frame-info { min-width: 80px; text-align: right; color: #7af; font-family: monospace; font-size: 14px; }
+  .signs-play-controls { display: flex; gap: 6px; align-items: center; }
+  .signs-play-btn { width: 36px; height: 36px; padding: 0; font-size: 16px; border-radius: 50%; }
+  .signs-info-badge {
+    position: fixed; top: 10px; right: 10px;
+    background: rgba(15,15,30,0.9); border: 1px solid #333;
+    border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 100;
+  }
+  .signs-info-badge span { color: #7af; }
+  .signs-help-text { color: #666; font-size: 10px; margin-top: 10px; line-height: 1.5; }
+</style>
+
+<script>document.body.classList.add('signs-viewer');</script>
+
+<div class="signs-ui-panel">
+  <h2>✋ {{ sign.lemma.gloss }}</h2>
+  <div class="crumbs">
+    <a href="{% url 'signs:index' %}">signs</a> ·
+    <a href="{% url 'signs:detail' sign.slug %}">{{ sign.variety.language.name }} / {{ sign.variety.name }}</a>
+  </div>
+
+  <label>Animation Speed</label>
+  <input type="range" id="signs-speed-slider" min="0.1" max="3" step="0.1" value="1">
+
+  <label>Cylinder Size</label>
+  <input type="range" id="signs-size-slider" min="0.3" max="2" step="0.1" value="1">
+
+  <div class="btn-row">
+    <button onclick="signsResetCamera()">🎯 Reset View</button>
+    <button onclick="signsToggleWireframe()">📐 Wire</button>
+  </div>
+  <div class="btn-row">
+    <button onclick="signsExportPose()">💾 Export Pose</button>
+    <button onclick="signsToggleLabels()">🏷️ Labels</button>
+  </div>
+
+  <div class="signs-help-text">
+    🖱️ Drag to rotate · Scroll to zoom · Right-drag to pan<br>
+    30 cylinders = 10 fingers × 3 phalanges<br>
+    Data: <a href="{% url 'signs:frames_json' sign.slug %}" style="color:#7af;">frames.json</a>
+  </div>
+</div>
+
+<div class="signs-info-badge">
+  Segments: <span>30</span> | Hands: <span>2</span><br>
+  FPS: <span id="signs-fps">--</span>
+</div>
+
+<div class="signs-timeline-bar">
+  <div class="signs-play-controls">
+    <button class="signs-play-btn" onclick="signsSkipToStart()">⏮</button>
+    <button class="signs-play-btn" onclick="signsTogglePlay()" id="signs-play-btn">▶</button>
+    <button class="signs-play-btn" onclick="signsSkipToEnd()">⏭</button>
+  </div>
+  <label>Frame:</label>
+  <input type="range" id="signs-timeline-slider" min="0" max="0" value="0" step="1">
+  <span id="signs-frame-info">0 / 0</span>
+</div>
+
+<div id="signs-canvas-container"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// Ported from signtest.games.h4ks.com; sign data loaded via fetch
+// from {% url 'signs:frames_json' sign.slug %}. Pose storage
+// converts the API's array-of-arrays `[[rx,ry,rz], ...]` into the
+// signtest internal shape `[{rx,ry,rz}, ...]` on receipt.
+
+const FRAMES_URL = "{% url 'signs:frames_json' sign.slug %}";
+
+const container = document.getElementById('signs-canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0a1a);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 12);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+container.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.target.set(0, 1, 0);
+
+scene.add(new THREE.AmbientLight(0x404070, 0.6));
+const keyLight = new THREE.DirectionalLight(0xffffff, 0.8);
+keyLight.position.set(5, 10, 7); keyLight.castShadow = true; scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0x6688ff, 0.3);
+fillLight.position.set(-5, 5, -5); scene.add(fillLight);
+
+const gridHelper = new THREE.GridHelper(20, 20, 0x222244, 0x161630);
+gridHelper.position.y = -2; scene.add(gridHelper);
+
+// Hand structure — 30 segments in canonical order.
+const HAND_STRUCTURE = [
+  { name: 'L_Thumb_1',  hand: 'left',  finger: 'thumb',  segment: 0, parent: 'palm_L',     len: 0.35, radius: 0.12  },
+  { name: 'L_Thumb_2',  hand: 'left',  finger: 'thumb',  segment: 1, parent: 'L_Thumb_1',  len: 0.3,  radius: 0.1   },
+  { name: 'L_Thumb_3',  hand: 'left',  finger: 'thumb',  segment: 2, parent: 'L_Thumb_2',  len: 0.25, radius: 0.08  },
+  { name: 'L_Index_1',  hand: 'left',  finger: 'index',  segment: 0, parent: 'palm_L',     len: 0.38, radius: 0.1   },
+  { name: 'L_Index_2',  hand: 'left',  finger: 'index',  segment: 1, parent: 'L_Index_1',  len: 0.32, radius: 0.085 },
+  { name: 'L_Index_3',  hand: 'left',  finger: 'index',  segment: 2, parent: 'L_Index_2',  len: 0.28, radius: 0.07  },
+  { name: 'L_Middle_1', hand: 'left',  finger: 'middle', segment: 0, parent: 'palm_L',     len: 0.42, radius: 0.105 },
+  { name: 'L_Middle_2', hand: 'left',  finger: 'middle', segment: 1, parent: 'L_Middle_1', len: 0.36, radius: 0.09  },
+  { name: 'L_Middle_3', hand: 'left',  finger: 'middle', segment: 2, parent: 'L_Middle_2', len: 0.3,  radius: 0.075 },
+  { name: 'L_Ring_1',   hand: 'left',  finger: 'ring',   segment: 0, parent: 'palm_L',     len: 0.39, radius: 0.1   },
+  { name: 'L_Ring_2',   hand: 'left',  finger: 'ring',   segment: 1, parent: 'L_Ring_1',   len: 0.33, radius: 0.085 },
+  { name: 'L_Ring_3',   hand: 'left',  finger: 'ring',   segment: 2, parent: 'L_Ring_2',   len: 0.27, radius: 0.07  },
+  { name: 'L_Pinky_1',  hand: 'left',  finger: 'pinky',  segment: 0, parent: 'palm_L',     len: 0.3,  radius: 0.085 },
+  { name: 'L_Pinky_2',  hand: 'left',  finger: 'pinky',  segment: 1, parent: 'L_Pinky_1',  len: 0.24, radius: 0.07  },
+  { name: 'L_Pinky_3',  hand: 'left',  finger: 'pinky',  segment: 2, parent: 'L_Pinky_2',  len: 0.2,  radius: 0.06  },
+  { name: 'R_Thumb_1',  hand: 'right', finger: 'thumb',  segment: 0, parent: 'palm_R',     len: 0.35, radius: 0.12  },
+  { name: 'R_Thumb_2',  hand: 'right', finger: 'thumb',  segment: 1, parent: 'R_Thumb_1',  len: 0.3,  radius: 0.1   },
+  { name: 'R_Thumb_3',  hand: 'right', finger: 'thumb',  segment: 2, parent: 'R_Thumb_2',  len: 0.25, radius: 0.08  },
+  { name: 'R_Index_1',  hand: 'right', finger: 'index',  segment: 0, parent: 'palm_R',     len: 0.38, radius: 0.1   },
+  { name: 'R_Index_2',  hand: 'right', finger: 'index',  segment: 1, parent: 'R_Index_1',  len: 0.32, radius: 0.085 },
+  { name: 'R_Index_3',  hand: 'right', finger: 'index',  segment: 2, parent: 'R_Index_2',  len: 0.28, radius: 0.07  },
+  { name: 'R_Middle_1', hand: 'right', finger: 'middle', segment: 0, parent: 'palm_R',     len: 0.42, radius: 0.105 },
+  { name: 'R_Middle_2', hand: 'right', finger: 'middle', segment: 1, parent: 'R_Middle_1', len: 0.36, radius: 0.09  },
+  { name: 'R_Middle_3', hand: 'right', finger: 'middle', segment: 2, parent: 'R_Middle_2', len: 0.3,  radius: 0.075 },
+  { name: 'R_Ring_1',   hand: 'right', finger: 'ring',   segment: 0, parent: 'palm_R',     len: 0.39, radius: 0.1   },
+  { name: 'R_Ring_2',   hand: 'right', finger: 'ring',   segment: 1, parent: 'R_Ring_1',   len: 0.33, radius: 0.085 },
+  { name: 'R_Ring_3',   hand: 'right', finger: 'ring',   segment: 2, parent: 'R_Ring_2',   len: 0.27, radius: 0.07  },
+  { name: 'R_Pinky_1',  hand: 'right', finger: 'pinky',  segment: 0, parent: 'palm_R',     len: 0.3,  radius: 0.085 },
+  { name: 'R_Pinky_2',  hand: 'right', finger: 'pinky',  segment: 1, parent: 'R_Pinky_1',  len: 0.24, radius: 0.07  },
+  { name: 'R_Pinky_3',  hand: 'right', finger: 'pinky',  segment: 2, parent: 'R_Pinky_2',  len: 0.2,  radius: 0.06  },
+];
+
+const PALM_ATTACHMENTS = {
+  L_Thumb_1:  { offset: [-1.05, 2.25, 0.15], baseRot: [0, 0, 0.4]   },
+  L_Index_1:  { offset: [-0.95, 2.55, 0],    baseRot: [0, 0, 0.05]  },
+  L_Middle_1: { offset: [-0.8,  2.58, 0],    baseRot: [0, 0, 0]     },
+  L_Ring_1:   { offset: [-0.65, 2.55, 0],    baseRot: [0, 0, -0.05] },
+  L_Pinky_1:  { offset: [-0.52, 2.48, 0],    baseRot: [0, 0, -0.15] },
+  R_Thumb_1:  { offset: [ 1.05, 2.25, 0.15], baseRot: [0, 0, -0.4]  },
+  R_Index_1:  { offset: [ 0.95, 2.55, 0],    baseRot: [0, 0, -0.05] },
+  R_Middle_1: { offset: [ 0.8,  2.58, 0],    baseRot: [0, 0, 0]     },
+  R_Ring_1:   { offset: [ 0.65, 2.55, 0],    baseRot: [0, 0, 0.05]  },
+  R_Pinky_1:  { offset: [ 0.52, 2.48, 0],    baseRot: [0, 0, 0.15]  },
+};
+
+const COLORS = {
+  thumb: 0xff9966, index: 0x99ff99, middle: 0xffff66,
+  ring: 0xff99ff, pinky: 0x99ffff, joint: 0xddaa77,
+};
+
+const cylinders = [];
+const joints = [];
+const jointGeo = new THREE.SphereGeometry(0.06, 8, 8);
+
+HAND_STRUCTURE.forEach((seg, i) => {
+  const color = [COLORS.thumb, COLORS.index, COLORS.middle, COLORS.ring, COLORS.pinky]
+                [['thumb','index','middle','ring','pinky'].indexOf(seg.finger)];
+  const mat = new THREE.MeshPhongMaterial({ color, shininess: 30, specular: 0x444444 });
+  const geo = new THREE.CylinderGeometry(seg.radius, seg.radius, seg.len, 10);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.userData = { segIndex: i, ...seg };
+  scene.add(mesh);
+  cylinders.push(mesh);
+  const joint = new THREE.Mesh(jointGeo, new THREE.MeshPhongMaterial({ color: COLORS.joint, shininess: 20 }));
+  scene.add(joint);
+  joints.push(joint);
+});
+
+function defaultPose() {
+  return HAND_STRUCTURE.map(() => ({ rx: 0, ry: 0, rz: 0 }));
+}
+
+function lerpPose(a, b, t) {
+  return a.map((v, i) => ({
+    rx: v.rx + (b[i].rx - v.rx) * t,
+    ry: v.ry + (b[i].ry - v.ry) * t,
+    rz: v.rz + (b[i].rz - v.rz) * t,
+  }));
+}
+
+function applyPose(pose, palmOffsets) {
+  const worldInfo = [];
+  for (let i = 0; i < 30; i++) {
+    const seg = HAND_STRUCTURE[i];
+    const p = pose[i];
+    const mesh = cylinders[i];
+    const joint = joints[i];
+    let parentPos, parentRotQ;
+
+    if (seg.segment === 0) {
+      const attach = PALM_ATTACHMENTS[seg.name];
+      const off = palmOffsets[seg.hand] || [0, 0, 0];
+      parentPos = new THREE.Vector3(
+        attach.offset[0] + off[0],
+        attach.offset[1] + off[1],
+        attach.offset[2] + off[2]);
+      parentRotQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        attach.baseRot[0], attach.baseRot[1], attach.baseRot[2]));
+    } else {
+      parentPos  = worldInfo[i - 1].pos.clone();
+      parentRotQ = worldInfo[i - 1].rot.clone();
+    }
+
+    const localRot = new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rx, p.ry, p.rz, 'XYZ'));
+    const totalRot = parentRotQ.clone().multiply(localRot);
+    mesh.quaternion.copy(totalRot);
+
+    const halfLen = seg.len / 2;
+    mesh.position.copy(parentPos).add(new THREE.Vector3(0, halfLen, 0).applyQuaternion(totalRot));
+    const tipPos = parentPos.clone().add(new THREE.Vector3(0, seg.len, 0).applyQuaternion(totalRot));
+    worldInfo[i] = { pos: tipPos, rot: totalRot.clone() };
+    joint.position.copy(parentPos);
+  }
+}
+
+// State
+let signData = { name: '', fps: 30, frames: [] };
+let currentFrame = 0;
+let frameTime = 0;
+let isPlaying = true;
+let playbackSpeed = 1;
+let sizeMultiplier = 1;
+let showLabels = false;
+
+const timelineSlider = document.getElementById('signs-timeline-slider');
+const frameInfoEl   = document.getElementById('signs-frame-info');
+const fpsEl         = document.getElementById('signs-fps');
+
+function updateTimeline() {
+  if (!signData.frames.length) return;
+  const maxFrame = signData.frames.length - 1;
+  timelineSlider.max = maxFrame;
+  timelineSlider.value = currentFrame;
+  frameInfoEl.textContent = `${currentFrame} / ${maxFrame}`;
+}
+
+// Fetch frames from server. Convert pose arrays-of-arrays into
+// the {rx, ry, rz} object form the renderer wants.
+fetch(FRAMES_URL).then(r => r.json()).then(data => {
+  signData = {
+    name: data.name,
+    fps:  data.fps,
+    frames: data.frames.map(f => ({
+      pose: f.pose.map(p => ({ rx: p[0], ry: p[1], rz: p[2] })),
+      duration: f.duration,
+      palmOffsets: {
+        left:  (f.palm_l && f.palm_l.length) ? f.palm_l : [0, 0, 0],
+        right: (f.palm_r && f.palm_r.length) ? f.palm_r : [0, 0, 0],
+      },
+    })),
+  };
+  // If no frames, paint a default rest pose so the viewer isn't blank.
+  if (!signData.frames.length) {
+    signData.frames = [{ pose: defaultPose(), duration: 1000,
+                         palmOffsets: { left: [0,0,0], right: [0,0,0] } }];
+  }
+  updateTimeline();
+});
+
+document.getElementById('signs-speed-slider').addEventListener('input', e => {
+  playbackSpeed = parseFloat(e.target.value);
+});
+document.getElementById('signs-size-slider').addEventListener('input', e => {
+  sizeMultiplier = parseFloat(e.target.value);
+  cylinders.forEach(m => m.scale.setScalar(sizeMultiplier));
+  joints.forEach(j => j.scale.setScalar(sizeMultiplier));
+});
+timelineSlider.addEventListener('input', e => {
+  currentFrame = parseInt(e.target.value, 10);
+  frameTime = 0; updateTimeline();
+});
+
+function signsTogglePlay() {
+  isPlaying = !isPlaying;
+  document.getElementById('signs-play-btn').textContent = isPlaying ? '⏸' : '▶';
+}
+function signsSkipToStart() { currentFrame = 0; frameTime = 0; updateTimeline(); }
+function signsSkipToEnd()   { currentFrame = Math.max(0, signData.frames.length - 1); frameTime = 0; updateTimeline(); }
+function signsResetCamera() {
+  camera.position.set(0, 2, 12); controls.target.set(0, 1, 0); controls.update();
+}
+let wireframeMode = false;
+function signsToggleWireframe() {
+  wireframeMode = !wireframeMode;
+  cylinders.forEach(m => m.material.wireframe = wireframeMode);
+}
+function signsToggleLabels() { showLabels = !showLabels; }
+function signsExportPose() {
+  if (!signData.frames.length) return;
+  const pose = signData.frames[currentFrame].pose;
+  const out = JSON.stringify(pose.map((p, i) => ({
+    segment: HAND_STRUCTURE[i].name,
+    rx: (p.rx * 180/Math.PI).toFixed(1) + '°',
+    ry: (p.ry * 180/Math.PI).toFixed(1) + '°',
+    rz: (p.rz * 180/Math.PI).toFixed(1) + '°',
+  })), null, 2);
+  const blob = new Blob([out], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = `${signData.name}_f${currentFrame}.json`; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Render loop
+let lastTime = performance.now();
+let frameCount = 0, fpsTime = 0;
+function easeOut(t) { return 1 - Math.pow(1 - t, 2); }
+function animate(time) {
+  requestAnimationFrame(animate);
+  const dt = time - lastTime;
+  lastTime = time;
+  frameCount++;
+  fpsTime += dt;
+  if (fpsTime >= 1000) { fpsEl.textContent = frameCount; frameCount = 0; fpsTime = 0; }
+
+  if (signData.frames.length > 0) {
+    if (isPlaying) {
+      frameTime += dt * playbackSpeed * 0.001;
+      const fr = signData.frames[currentFrame];
+      const target = (fr.duration || 50) / 1000;
+      if (frameTime >= target) {
+        frameTime = 0;
+        currentFrame = (currentFrame + 1) % signData.frames.length;
+        updateTimeline();
+      }
+      const t = target > 0 ? Math.min(frameTime / target, 1) : 1;
+      const fromPose = signData.frames[currentFrame].pose;
+      const nextPose = signData.frames[(currentFrame + 1) % signData.frames.length].pose;
+      applyPose(lerpPose(fromPose, nextPose, easeOut(t)), signData.frames[currentFrame].palmOffsets);
+    } else {
+      applyPose(signData.frames[currentFrame].pose, signData.frames[currentFrame].palmOffsets);
+    }
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate(performance.now());
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+{% endblock %}
