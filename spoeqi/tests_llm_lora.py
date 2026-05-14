@@ -131,6 +131,45 @@ class ApplyLoraInplaceTest(TestCase):
         torch.testing.assert_close(W, W0)
 
 
+class DefaultTargetWeightTest(TestCase):
+    def test_known_models(self):
+        self.assertEqual(
+            llm_lora.default_target_weight('distilgpt2'),
+            'transformer.h.5.attn.c_proj.weight')
+        self.assertEqual(
+            llm_lora.default_target_weight('TinyLlama/TinyLlama-1.1B-Chat-v1.0'),
+            'model.layers.21.self_attn.o_proj.weight')
+
+    def test_tinyllama_prefix_fallback(self):
+        # Unlisted TinyLlama variant should still get a default.
+        self.assertEqual(
+            llm_lora.default_target_weight('TinyLlama/some-future-variant'),
+            'model.layers.21.self_attn.o_proj.weight')
+
+    def test_unknown_raises(self):
+        with self.assertRaises(ValueError):
+            llm_lora.default_target_weight('made-up/never-existed')
+
+
+class KeystreamDomainTest(TestCase):
+    def test_different_domains_produce_different_bytes(self):
+        from spoeqi import keystream
+        pact = _make_pact()
+        a = keystream.tap(pact, 0, 0, 64)  # default domain
+        b = keystream.tap(pact, 0, 0, 64, domain=keystream.DOMAIN_ROUTER)
+        self.assertNotEqual(a, b)
+
+    def test_default_domain_preserves_legacy_bytes(self):
+        # The existing tap endpoint (and any saved test fixtures) rely on
+        # the historical b'spoeqi-tap/1' domain. Make sure that's still
+        # what you get when no domain is passed.
+        from spoeqi import keystream
+        pact = _make_pact()
+        a = keystream.tap(pact, 0, 0, 64)
+        b = keystream.tap(pact, 0, 0, 64, domain=keystream.DOMAIN_DEFAULT)
+        self.assertEqual(a, b)
+
+
 class FindWeightTest(TestCase):
     def test_dotted_path_resolves(self):
         m = torch.nn.Sequential(

@@ -229,7 +229,12 @@ def get_state_at(pact: Pact, target_gen: int) -> bytes:
     return state
 
 
-def tap(pact: Pact, component: int, generation: int, n_bytes: int) -> bytes:
+DOMAIN_DEFAULT = b'spoeqi-tap/1'
+DOMAIN_ROUTER  = b'spoeqi-tap/router/1'
+
+
+def tap(pact: Pact, component: int, generation: int, n_bytes: int,
+        domain: bytes = DOMAIN_DEFAULT) -> bytes:
     """Return `n_bytes` of deterministic keystream from component `c`
     at generation `g`.
 
@@ -238,9 +243,10 @@ def tap(pact: Pact, component: int, generation: int, n_bytes: int) -> bytes:
                      || counter(LE u32) || grid[component] )
         keystream = h_0 || h_1 || …  (truncated to n_bytes)
 
-    Domain separator (``b'spoeqi-tap/1'``) lets us reserve room for
-    alternative tap constructions later (rolling XOF, fewer bytes per
-    tick, etc.) without colliding output spaces.
+    Domains let callers carve disjoint output spaces from the same
+    (component, generation) — e.g. ``DOMAIN_ROUTER`` for MoE router
+    weights so they don't overlap with an expert's LoRA bytes when
+    the router and the expert share a component index.
     """
     if not (0 <= component < COMPONENTS):
         raise ValueError(f'component must be 0..{COMPONENTS - 1}')
@@ -255,10 +261,9 @@ def tap(pact: Pact, component: int, generation: int, n_bytes: int) -> bytes:
 
     out = bytearray()
     counter = 0
-    DOMAIN = b'spoeqi-tap/1'
     while len(out) < n_bytes:
         h = hashlib.sha256()
-        h.update(DOMAIN)
+        h.update(domain)
         h.update(struct.pack('<IQI', component, generation, counter))
         h.update(grid_slice)
         out.extend(h.digest())

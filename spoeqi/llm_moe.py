@@ -23,6 +23,7 @@ import torch
 
 from . import keystream
 from .llm_lora import (
+    default_target_weight,
     derive_lora,
     find_weight,
     keystream_gaussians,
@@ -45,13 +46,19 @@ def derive_router_weights(pact: Pact,
                           routing_component: int,
                           generation: int,
                           n_tokens: int,
-                          n_experts: int) -> np.ndarray:
+                          n_experts: int,
+                          domain: bytes = keystream.DOMAIN_ROUTER,
+                          ) -> np.ndarray:
     """``(n_tokens, n_experts)`` softmax weights per token, drawn
-    deterministically from the routing component's keystream."""
+    deterministically from the routing component's keystream.
+
+    Uses the router domain by default so router bytes don't overlap
+    with expert-LoRA bytes when the router component is also an
+    expert (needed when all 64 components are experts)."""
     if n_tokens <= 0 or n_experts <= 0:
         return np.empty((0, n_experts), dtype=np.float64)
     z = keystream_gaussians(pact, routing_component, generation,
-                            n_tokens * n_experts)
+                            n_tokens * n_experts, domain=domain)
     logits = z.reshape(n_tokens, n_experts)
     # Standard softmax with max-subtraction for numerical stability.
     e = np.exp(logits - logits.max(axis=1, keepdims=True))
@@ -76,11 +83,13 @@ def generate_moe(pact: Pact, prompt: str, *,
                  rank: int = 4,
                  scale: float = 0.1,
                  max_new_tokens: int = 40,
-                 target_weight: str = 'transformer.h.5.attn.c_proj.weight',
+                 target_weight: str | None = None,
                  device: str | None = None) -> str:
     """Greedy-decode ``prompt`` with per-token softmax-mixed expert
     LoRA deltas. Returns the decoded string (prompt + tail).
     """
+    if target_weight is None:
+        target_weight = default_target_weight(model_name)
     from transformers import AutoTokenizer, AutoModelForCausalLM
     tok = AutoTokenizer.from_pretrained(model_name)
     if tok.pad_token_id is None:

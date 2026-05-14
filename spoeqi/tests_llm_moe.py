@@ -84,6 +84,20 @@ class DeriveRouterWeightsTest(TestCase):
         w1 = llm_moe.derive_router_weights(pact, 5, 0, 10, 4)
         self.assertFalse(np.array_equal(w0, w1))
 
+    def test_router_domain_disjoint_from_expert_bytes(self):
+        # When the routing component is also an expert (e.g. 64-expert
+        # mode), router bytes must not collide with expert-LoRA bytes.
+        # Verify by deriving with the default (router) domain vs the
+        # default-tap domain on the same (component, generation).
+        from spoeqi import keystream
+        pact = _make_pact()
+        n_floats = 100
+        router_bytes = keystream.tap(pact, 0, 0, 4 * n_floats,
+                                     domain=keystream.DOMAIN_ROUTER)
+        expert_bytes = keystream.tap(pact, 0, 0, 4 * n_floats,
+                                     domain=keystream.DOMAIN_DEFAULT)
+        self.assertNotEqual(router_bytes, expert_bytes)
+
 
 class MixedDeltaTest(TestCase):
     def test_one_hot_equals_single_expert(self):

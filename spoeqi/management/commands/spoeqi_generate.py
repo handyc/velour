@@ -29,9 +29,9 @@ class Command(BaseCommand):
         parser.add_argument('--scale', type=float, default=1e-3)
         parser.add_argument('--max-new-tokens', type=int, default=40)
         parser.add_argument(
-            '--target',
-            default='transformer.h.5.attn.c_proj.weight',
-            help='Dotted path to the Parameter to perturb.')
+            '--target', default=None,
+            help='Dotted path to the Parameter to perturb. '
+                 'Default: model-aware (see llm_lora.DEFAULT_TARGETS).')
         parser.add_argument(
             '--verify-determinism', action='store_true',
             help='Run generation twice; report whether outputs are byte-identical.')

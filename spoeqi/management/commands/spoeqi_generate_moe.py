@@ -23,6 +23,8 @@ class Command(BaseCommand):
         parser.add_argument('--prompt', required=True)
         parser.add_argument('--experts', default='0,1,2,3',
                             help='Comma-separated CA component indices for the experts.')
+        parser.add_argument('--all-experts', action='store_true',
+                            help='Use all 64 components as experts (overrides --experts).')
         parser.add_argument('--routing-component', type=int, default=4)
         parser.add_argument('--generation', type=int, default=0)
         parser.add_argument('--model', default='distilgpt2')
@@ -30,9 +32,9 @@ class Command(BaseCommand):
         parser.add_argument('--scale', type=float, default=0.1)
         parser.add_argument('--max-new-tokens', type=int, default=40)
         parser.add_argument(
-            '--target',
-            default='transformer.h.5.attn.c_proj.weight',
-            help='Dotted path to the Parameter to perturb.')
+            '--target', default=None,
+            help='Dotted path to the Parameter to perturb. '
+                 'Default: model-aware (see llm_lora.DEFAULT_TARGETS).')
         parser.add_argument(
             '--verify-determinism', action='store_true',
             help='Run generation twice; report whether outputs are byte-identical.')
@@ -43,7 +45,10 @@ class Command(BaseCommand):
         except Pact.DoesNotExist:
             raise CommandError(f"No pact with slug {opts['pact_slug']!r}")
 
-        experts = tuple(int(x) for x in opts['experts'].split(','))
+        if opts['all_experts']:
+            experts = tuple(range(64))
+        else:
+            experts = tuple(int(x) for x in opts['experts'].split(','))
 
         from spoeqi.llm_moe import generate_moe
 

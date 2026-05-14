@@ -32,7 +32,8 @@ from .models import Pact
 
 
 def keystream_uniforms(pact: Pact, component: int, generation: int,
-                       n: int) -> np.ndarray:
+                       n: int,
+                       domain: bytes = keystream.DOMAIN_DEFAULT) -> np.ndarray:
     """`n` uniform floats in [0, 1) drawn from the pact's keystream.
 
     Consumes 4 bytes per float (one little-endian u32 each). The
@@ -41,19 +42,20 @@ def keystream_uniforms(pact: Pact, component: int, generation: int,
     """
     if n <= 0:
         return np.empty(0, dtype=np.float64)
-    raw = keystream.tap(pact, component, generation, 4 * n)
+    raw = keystream.tap(pact, component, generation, 4 * n, domain=domain)
     u32 = np.frombuffer(raw, dtype='<u4')
     return u32.astype(np.float64) / float(1 << 32)
 
 
 def keystream_gaussians(pact: Pact, component: int, generation: int,
-                        n: int) -> np.ndarray:
+                        n: int,
+                        domain: bytes = keystream.DOMAIN_DEFAULT) -> np.ndarray:
     """`n` floats from Box-Muller: pair (u1, u2) uniforms → pair
     (cos, sin) standard normals."""
     if n <= 0:
         return np.empty(0, dtype=np.float64)
     pairs = (n + 1) // 2
-    u = keystream_uniforms(pact, component, generation, 2 * pairs)
+    u = keystream_uniforms(pact, component, generation, 2 * pairs, domain=domain)
     # u1 == 0 would blow up log(); the smallest non-zero u32 maps to
     # 2^-32 ≈ 2.3e-10, so the clip only matters if a u32 sample is 0.
     u1 = np.clip(u[0::2], 1e-300, None)
@@ -91,6 +93,38 @@ def apply_lora_inplace(weight: torch.Tensor, A: torch.Tensor,
         weight.data.add_(delta, alpha=scale)
 
 
+# Last-block attention output projection for each model we know about.
+# Picked because it's a plain 2D Linear/Conv1D weight that strongly
+# affects token logits without being tied to the embedding (which
+# would cascade into both input and output). Override with --target.
+DEFAULT_TARGETS = {
+    'distilgpt2':                                      'transformer.h.5.attn.c_proj.weight',
+    'gpt2':                                            'transformer.h.11.attn.c_proj.weight',
+    'EleutherAI/pythia-70m':                           'gpt_neox.layers.5.attention.dense.weight',
+    'EleutherAI/pythia-160m':                          'gpt_neox.layers.11.attention.dense.weight',
+    'TinyLlama/TinyLlama-1.1B-Chat-v1.0':              'model.layers.21.self_attn.o_proj.weight',
+    'TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T':
+                                                       'model.layers.21.self_attn.o_proj.weight',
+}
+
+
+def default_target_weight(model_name: str) -> str:
+    """Best-guess `target_weight` for a model name. Exact match in
+    DEFAULT_TARGETS, then a few prefix rules. Raises if it can't
+    pick — the user should then pass `--target` explicitly."""
+    if model_name in DEFAULT_TARGETS:
+        return DEFAULT_TARGETS[model_name]
+    if model_name.startswith('TinyLlama/'):
+        return 'model.layers.21.self_attn.o_proj.weight'
+    if model_name.startswith('EleutherAI/pythia-'):
+        # Pythia layer counts: 70m→6, 160m→12, 410m→24, 1b→16, 1.4b→24.
+        # No safe guess without loading the config; defer to the user.
+        pass
+    raise ValueError(
+        f'no default target_weight known for {model_name!r}; '
+        f'pass --target / target_weight= explicitly')
+
+
 def find_weight(model: torch.nn.Module, dotted_name: str) -> torch.Tensor:
     """Resolve a dotted attribute path to a Tensor parameter."""
     obj = model
@@ -109,15 +143,16 @@ def generate(pact: Pact, prompt: str, *,
              rank: int = 4,
              scale: float = 1e-3,
              max_new_tokens: int = 40,
-             target_weight: str = 'transformer.h.5.attn.c_proj.weight',
+             target_weight: str | None = None,
              device: str | None = None) -> str:
     """Load ``model_name``, perturb ``target_weight`` with a CA-derived
     LoRA, greedy-decode ``prompt``. Returns the decoded string.
 
-    ``target_weight`` defaults to distilgpt2's last-block attention
-    output projection. Override for other architectures (e.g.
-    ``'lm_head.weight'`` or a specific MLP).
+    ``target_weight=None`` looks up a sensible per-model default via
+    ``default_target_weight``; pass an explicit dotted path to override.
     """
+    if target_weight is None:
+        target_weight = default_target_weight(model_name)
     from transformers import AutoTokenizer, AutoModelForCausalLM
     tok = AutoTokenizer.from_pretrained(model_name)
     if tok.pad_token_id is None:
