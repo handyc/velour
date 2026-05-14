@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}claudecode — Claude Code CLI config{% endblock %}
+{% block content %}
+<style>
+  .cc-page  { max-width: 64em; }
+  .cc-meta  { color: #888; font-size: 0.85rem; }
+  .cc-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .cc-section h2 { margin: 0 0 8px; font-size: 1.05rem;
+                   color: #cfc; font-weight: 600; }
+  .cc-table { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+              font-size: 0.85rem; color: #cdd; }
+  .cc-table .key   { color: #8b949e; padding-right: 1.5em; }
+  .cc-table .val   { color: #cfc; }
+  .cc-json  { background: #0d1117; border: 1px solid #1a1a1a;
+              padding: 10px 12px; font-family: ui-monospace, SFMono-Regular,
+              Menlo, monospace; font-size: 0.78rem;
+              color: #c9d1d9; white-space: pre; overflow-x: auto;
+              max-height: 36em; }
+  .cc-scope-row { display: flex; gap: 14px; align-items: baseline;
+                  margin: 4px 0; }
+  .cc-scope-row .name  { color: #cfc; font-weight: 600; }
+  .cc-scope-row .path  { color: #888; font-family: monospace;
+                         font-size: 0.8rem; }
+  .cc-warn { color: #d29922; }
+  .cc-err  { color: #f85149; }
+  .cc-ok   { color: #2ea043; }
+  .cc-pill { display: inline-block; padding: 1px 6px;
+             border: 1px solid #30363d; border-radius: 3px;
+             font-size: 0.7rem; color: #8b949e; margin-right: 6px; }
+  .new-btn { display: inline-block; background: #222; color: #cfc;
+             border: 1px solid #555; padding: 3px 10px;
+             text-decoration: none; font-family: inherit;
+             font-size: 0.85rem; }
+  .new-btn:hover { border-color: #8b949e; }
+  .cc-unsupported li { margin: 6px 0; }
+  .cc-unsupported li b { color: #d29922; }
+</style>
+
+<div class="cc-page">
+<h1 style="margin-top: 0;">claudecode</h1>
+<p class="cc-meta">
+  Centralised view of Claude Code's <code>settings.json</code> across
+  scopes, plus an honest record of customisations Anthropic's CLI does
+  not officially support.  This app never invokes the <code>claude</code>
+  binary &mdash; it only reads &amp; writes settings files and reports
+  the installed version.
+</p>
+
+<div class="cc-section">
+  <h2>Installed binary</h2>
+  {% include "claudecode/_version_partial.html" %}
+</div>
+
+<div class="cc-section">
+  <h2>Scopes</h2>
+  {% if scopes %}
+    {% for s in scopes %}
+    <div class="cc-scope-row">
+      <span class="cc-pill">{{ s.obj.get_name_display }}</span>
+      <a class="name" href="{% url 'claudecode:edit_scope' scope_id=s.obj.id %}">edit</a>
+      <span class="path">{{ s.obj.path }}</span>
+      {% if not s.exists %}<span class="cc-warn">· missing</span>
+      {% elif s.parse_error %}<span class="cc-err">· parse error</span>
+      {% else %}<span class="cc-ok">· ok</span>
+      {% endif %}
+    </div>
+    {% if s.exists %}
+    <pre class="cc-json">{{ s.pretty }}</pre>
+    {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="cc-meta">
+      No scopes seeded.  Run
+      <code>venv/bin/python manage.py claudecode_seed</code>.
+    </p>
+  {% endif %}
+</div>
+
+<div class="cc-section">
+  <h2>Sanctioned settings</h2>
+  <p class="cc-meta">
+    Boolean keys verified by grep in the 2.1.141 binary.  Use any
+    scope's edit page to toggle them; raw JSON edit available there too.
+  </p>
+  <table class="cc-table"><tbody>
+    {% for key, label in sanctioned_bools %}
+    <tr><td class="key">{{ key }}</td><td class="val">{{ label }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+</div>
+
+<div class="cc-section">
+  <h2>Unsupported customisations</h2>
+  <ul class="cc-unsupported cc-meta">
+    {% for label, body in unsupported_notes %}
+    <li><b>{{ label }}.</b> {{ body }}</li>
+    {% endfor %}
+  </ul>
+  <p>
+    <a class="new-btn" href="{% url 'claudecode:bundle_patches' %}">bundle patch wishlist &rsaquo;</a>
+    {% if wishes %}<span class="cc-meta">· {{ wishes|length }} wish{{ wishes|length|pluralize:"es" }} recorded</span>{% endif %}
+  </p>
+</div>
+
+</div>
+{% endblock %}

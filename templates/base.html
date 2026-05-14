@@ -96,6 +96,7 @@
                 {% if 'dashboard' in accessible_app_slugs %}<a href="{% url 'dashboard:home' %}">Dashboard</a>{% endif %}
                 {% if 'terminal' in accessible_app_slugs %}<a href="{% url 'terminal:terminal' %}">Terminal</a>{% endif %}
                 {% if 'app_factory' in accessible_app_slugs %}<a href="{% url 'app_factory:list' %}">App Factory</a>{% endif %}
+                {% if 'claudecode' in accessible_app_slugs %}<a href="{% url 'claudecode:index' %}">Claude Code</a>{% endif %}
                 {% if 'sysinfo' in accessible_app_slugs %}<a href="{% url 'sysinfo:home' %}">System Info</a>{% endif %}
                 {% if 'graphs' in accessible_app_slugs %}<a href="{% url 'graphs:home' %}">Graphs</a>{% endif %}
                 {% if 'services' in accessible_app_slugs %}<a href="{% url 'services:home' %}">Services</a>{% endif %}

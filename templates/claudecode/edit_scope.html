@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}claudecode — {{ scope.get_name_display }}{% endblock %}
+{% block content %}
+<style>
+  .cc-page  { max-width: 64em; }
+  .cc-meta  { color: #888; font-size: 0.85rem; }
+  .cc-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .cc-section h2 { margin: 0 0 8px; font-size: 1.05rem;
+                   color: #cfc; font-weight: 600; }
+  .cc-json  { background: #0d1117; border: 1px solid #1a1a1a;
+              padding: 10px 12px; font-family: ui-monospace, SFMono-Regular,
+              Menlo, monospace; font-size: 0.78rem;
+              color: #c9d1d9; white-space: pre; overflow-x: auto;
+              max-height: 36em; width: 100%; box-sizing: border-box; }
+  textarea.cc-json { white-space: pre; min-height: 22em; }
+  .cc-row { margin: 8px 0; }
+  .cc-row label { color: #cdd; font-family: ui-monospace, monospace;
+                  font-size: 0.85rem; }
+  .cc-row .help { color: #888; font-size: 0.78rem; margin-left: 1.5em;
+                  display: block; }
+  .cc-err  { color: #f85149; }
+  .new-btn { display: inline-block; background: #222; color: #cfc;
+             border: 1px solid #555; padding: 3px 10px;
+             text-decoration: none; font-family: inherit;
+             font-size: 0.85rem; cursor: pointer; }
+  .new-btn:hover { border-color: #8b949e; }
+  .cc-form { background: #0d1117; padding: 14px; border: 1px solid #1a1a1a; }
+  .cc-readonly { color: #cdd; }
+  .cc-pill { display: inline-block; padding: 1px 6px;
+             border: 1px solid #30363d; border-radius: 3px;
+             font-size: 0.7rem; color: #8b949e; margin-right: 6px; }
+</style>
+
+<div class="cc-page">
+<p style="margin: 0 0 6px;"><a class="cc-meta" href="{% url 'claudecode:index' %}">&lsaquo; claudecode</a></p>
+<h1 style="margin-top: 0;">{{ scope.get_name_display }}</h1>
+<p class="cc-meta">
+  <code>{{ scope.path }}</code>
+  &middot; {% if exists %}{% if parsed_ok %}parsed{% else %}<span class="cc-err">parse error</span>{% endif %}{% else %}<span class="cc-meta">file missing — saving will create it</span>{% endif %}
+</p>
+
+{% if errors %}
+  {% for e in errors %}<p class="cc-err">{{ e }}</p>{% endfor %}
+{% endif %}
+
+<div class="cc-section">
+  <h2>Sanctioned booleans</h2>
+  <form method="post" class="cc-form">
+    {% csrf_token %}
+    <input type="hidden" name="mode" value="form">
+    {% for key, label, checked in bool_rows %}
+    <div class="cc-row">
+      <label>
+        <input type="checkbox" name="{{ key }}" {% if checked %}checked{% endif %}>
+        {{ key }}
+      </label>
+      <span class="help">{{ label }}</span>
+    </div>
+    {% endfor %}
+    <p><button type="submit" class="new-btn">Save sanctioned values</button>
+       <span class="cc-meta" style="margin-left: 1em;">
+         Other keys in the file are preserved.
+       </span>
+    </p>
+  </form>
+</div>
+
+<div class="cc-section">
+  <h2>Raw JSON</h2>
+  <form method="post" class="cc-form">
+    {% csrf_token %}
+    <input type="hidden" name="mode" value="raw_json">
+    <textarea name="raw_json" class="cc-json" spellcheck="false"
+              id="raw-json-area">{{ pretty }}</textarea>
+    <p style="margin-top: 8px;">
+      <button type="button" class="new-btn" id="validate-btn">Validate JSON</button>
+      <button type="submit" class="new-btn">Save raw JSON</button>
+      <span class="cc-meta" id="validate-msg" style="margin-left: 1em;"></span>
+    </p>
+  </form>
+  <p class="cc-meta">
+    Writes are atomic (tmp + rename) &mdash; an interrupted save will
+    not truncate the existing file.
+  </p>
+</div>
+
+{% if hooks_json %}
+<div class="cc-section">
+  <h2>Hooks (read-only)</h2>
+  <pre class="cc-json">{{ hooks_json }}</pre>
+  <p class="cc-meta">Edit hook scripts in your shell of choice; this MVP doesn't write them.</p>
+</div>
+{% endif %}
+
+{% if permissions_json %}
+<div class="cc-section">
+  <h2>Permissions (read-only)</h2>
+  <pre class="cc-json">{{ permissions_json }}</pre>
+  <p class="cc-meta">Use the raw-JSON textarea above to edit allowlists for now.</p>
+</div>
+{% endif %}
+
+</div>
+
+<script>
+(function () {
+  // Tiny client-side validator — no syntax highlighter, just parse.
+  var btn = document.getElementById('validate-btn');
+  var area = document.getElementById('raw-json-area');
+  var msg  = document.getElementById('validate-msg');
+  if (!btn || !area || !msg) return;
+  btn.addEventListener('click', function () {
+    try {
+      JSON.parse(area.value || '{}');
+      msg.textContent = 'OK';
+      msg.style.color = '#2ea043';
+    } catch (e) {
+      msg.textContent = 'invalid: ' + e.message;
+      msg.style.color = '#f85149';
+    }
+  });
+})();
+</script>
+
+{% endblock %}

@@ -1,0 +1,17 @@
+<table class="cc-table" style="font-family: ui-monospace, monospace; font-size: 0.85rem;"><tbody>
+  <tr><td class="key" style="color:#8b949e; padding-right:1.5em;">bin path</td>
+      <td class="val" style="color:#cdd;">{{ version.bin_path }}</td></tr>
+  {% if version.exists %}
+  <tr><td class="key" style="color:#8b949e; padding-right:1.5em;">resolves to</td>
+      <td class="val" style="color:#cdd;">{{ version.resolved }}</td></tr>
+  <tr><td class="key" style="color:#8b949e; padding-right:1.5em;">version</td>
+      <td class="val" style="color:#cfc; font-weight:600;">{{ version.version }}</td></tr>
+  <tr><td class="key" style="color:#8b949e; padding-right:1.5em;">size</td>
+      <td class="val" style="color:#cdd;">{{ version.size }} bytes</td></tr>
+  <tr><td class="key" style="color:#8b949e; padding-right:1.5em;">mtime</td>
+      <td class="val" style="color:#cdd;">{{ version.mtime }}</td></tr>
+  {% else %}
+  <tr><td class="key" style="color:#8b949e;">status</td>
+      <td class="val" style="color:#f85149;">not installed at this path</td></tr>
+  {% endif %}
+</tbody></table>

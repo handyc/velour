@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}claudecode — bundle patch wishlist{% endblock %}
+{% block content %}
+<style>
+  .cc-page  { max-width: 64em; }
+  .cc-meta  { color: #888; font-size: 0.85rem; }
+  .cc-section { margin: 22px 0; padding-top: 14px;
+                border-top: 1px solid #1a1a1a; }
+  .cc-section h2 { margin: 0 0 8px; font-size: 1.05rem;
+                   color: #cfc; font-weight: 600; }
+  .cc-disclaimer { background: #2b1e0e; border: 1px solid #5e4214;
+                   padding: 10px 14px; color: #d29922; font-size: 0.85rem; }
+  .cc-disclaimer b { color: #ffc77d; }
+  .cc-json  { background: #0d1117; border: 1px solid #1a1a1a;
+              padding: 10px 12px; font-family: ui-monospace, SFMono-Regular,
+              Menlo, monospace; font-size: 0.78rem;
+              color: #c9d1d9; white-space: pre; overflow-x: auto; }
+  .cc-form { background: #0d1117; padding: 14px; border: 1px solid #1a1a1a;
+             margin-bottom: 18px; }
+  .cc-form input[type=text], .cc-form textarea, .cc-form select {
+      width: 100%; box-sizing: border-box;
+      background: #0d1117; color: #c9d1d9;
+      border: 1px solid #30363d; padding: 4px 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85rem; }
+  .cc-form label { display: block; margin: 8px 0 2px;
+                   color: #cdd; font-size: 0.82rem; }
+  .new-btn { display: inline-block; background: #222; color: #cfc;
+             border: 1px solid #555; padding: 3px 10px;
+             text-decoration: none; font-family: inherit;
+             font-size: 0.85rem; cursor: pointer; }
+  .new-btn:hover { border-color: #8b949e; }
+  .wish-row { padding: 12px 0; border-bottom: 1px solid #1a1a1a; }
+  .wish-row .head { display: flex; gap: 12px; align-items: baseline;
+                    flex-wrap: wrap; }
+  .wish-row .kind { color: #8b949e; font-size: 0.78rem; }
+  .wish-row .target { color: #cfc; font-family: monospace;
+                      font-size: 0.85rem; }
+  .wish-row .arrow { color: #666; }
+  .wish-row .replacement { color: #58a6ff; font-family: monospace;
+                           font-size: 0.85rem; }
+  .wish-row .notes { color: #888; font-size: 0.82rem; margin: 4px 0; }
+  .wish-row .meta { color: #6e7681; font-size: 0.75rem; }
+  .cc-warn { color: #d29922; }
+  .cc-err  { color: #f85149; }
+  .inline-form { display: inline; }
+</style>
+
+<div class="cc-page">
+<p style="margin: 0 0 6px;"><a class="cc-meta" href="{% url 'claudecode:index' %}">&lsaquo; claudecode</a></p>
+<h1 style="margin-top: 0;">Bundle patch wishlist</h1>
+
+<div class="cc-disclaimer">
+  <b>These patches are unsupported.</b>  Anthropic does not document or
+  warrant editing strings inside the <code>claude</code> ELF binary.  The
+  binary is replaced on every upgrade &mdash; any patch you apply will be
+  lost the next time <code>claude</code> updates itself.  Use these recipes
+  manually, after backing the binary up.  Nothing here is run automatically.
+</div>
+
+<div class="cc-section">
+  <h2>Current binary</h2>
+  {% include "claudecode/_version_partial.html" %}
+</div>
+
+<div class="cc-section">
+  <h2>Add a wish</h2>
+  <form method="post" class="cc-form">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create">
+    <label for="kind">Kind</label>
+    <select name="kind" id="kind">
+      {% for slug, label in patch_kinds %}
+      <option value="{{ slug }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+    <label for="target">Target string (currently in binary, exact bytes)</label>
+    <input type="text" name="target" id="target" required>
+    <label for="replacement">Replacement (≤ target bytes; longer needs relocation)</label>
+    <input type="text" name="replacement" id="replacement" required>
+    <label for="notes">Notes</label>
+    <textarea name="notes" id="notes" rows="2"></textarea>
+    <p style="margin-top: 10px;">
+      <button type="submit" class="new-btn">Record wish</button>
+    </p>
+  </form>
+</div>
+
+<div class="cc-section">
+  <h2>Wishes</h2>
+  {% if wishes %}
+    {% for w in wishes %}
+    <div class="wish-row">
+      <div class="head">
+        <span class="kind">{{ w.obj.get_kind_display }}</span>
+        <span class="target">{{ w.obj.target }}</span>
+        <span class="arrow">&rarr;</span>
+        <span class="replacement">{{ w.obj.replacement }}</span>
+        {% if not w.length_ok %}<span class="cc-err">· replacement longer than target</span>{% endif %}
+        {% if w.obj.applied %}<span class="cc-warn">· marked applied</span>{% endif %}
+      </div>
+      {% if w.obj.notes %}<div class="notes">{{ w.obj.notes }}</div>{% endif %}
+      <div class="meta">recorded {{ w.obj.created_at|date:"Y-m-d H:i" }}</div>
+      <details style="margin-top: 6px;">
+        <summary class="cc-meta" style="cursor: pointer;">recipe</summary>
+        <pre class="cc-json">{{ w.recipe }}</pre>
+      </details>
+      <form method="post" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="toggle">
+        <input type="hidden" name="id" value="{{ w.obj.id }}">
+        <button type="submit" class="new-btn">{% if w.obj.applied %}mark not applied{% else %}mark applied{% endif %}</button>
+      </form>
+      <form method="post" class="inline-form" onsubmit="return true;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" value="{{ w.obj.id }}">
+        <button type="submit" class="new-btn">delete</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="cc-meta">No wishes recorded yet.</p>
+  {% endif %}
+</div>
+
+</div>
+{% endblock %}

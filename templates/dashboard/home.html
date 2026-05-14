@@ -223,9 +223,9 @@
 </div>
 
 {# System & Ops — default open (most-used utilities) #}
-{% if 'app_factory' in accessible_app_slugs or 'conduit' in accessible_app_slugs or 'databases' in accessible_app_slugs or 'graphs' in accessible_app_slugs or 'hosts' in accessible_app_slugs or 'hpc' in accessible_app_slugs or 'logs' in accessible_app_slugs or 'maintenance' in accessible_app_slugs or 'security' in accessible_app_slugs or 'services' in accessible_app_slugs or 'sysinfo' in accessible_app_slugs or 'terminal' in accessible_app_slugs or 'winctl' in accessible_app_slugs %}
+{% if 'app_factory' in accessible_app_slugs or 'claudecode' in accessible_app_slugs or 'conduit' in accessible_app_slugs or 'databases' in accessible_app_slugs or 'graphs' in accessible_app_slugs or 'hosts' in accessible_app_slugs or 'hpc' in accessible_app_slugs or 'logs' in accessible_app_slugs or 'maintenance' in accessible_app_slugs or 'security' in accessible_app_slugs or 'services' in accessible_app_slugs or 'sysinfo' in accessible_app_slugs or 'terminal' in accessible_app_slugs or 'winctl' in accessible_app_slugs %}
 <details class="cat-group" open>
-    <summary>System &amp; Ops <span class="cat-count">· 13</span></summary>
+    <summary>System &amp; Ops <span class="cat-count">· 14</span></summary>
     <div class="tools-grid">
         {% if 'terminal' in accessible_app_slugs %}<a class="card" href="{% url 'terminal:terminal' %}" title="Interactive shell session on the host"><h3>Terminal</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'sysinfo' in accessible_app_slugs %}<a class="card" href="{% url 'sysinfo:home' %}" title="{{ system_info.hostname }} · Load {{ system_info.load }}"><h3>System Info</h3><span class="open-arrow">›</span></a>{% endif %}
@@ -240,6 +240,7 @@
         {% if 'hpc' in accessible_app_slugs %}<a class="card" href="{% url 'hpc:list' %}" title="High-performance computing clusters"><h3>HPC</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'app_factory' in accessible_app_slugs %}<a class="card" href="{% url 'app_factory:list' %}" title="Create + deploy Django apps"><h3>App Factory</h3><span class="open-arrow">›</span></a>{% endif %}
         {% if 'conduit' in accessible_app_slugs %}<a class="card" href="{% url 'conduit:index' %}" title="Job routing — local/VPS/HPC/Pi/ESP/ATtiny/code-agents"><h3>Conduit</h3><span class="open-arrow">›</span></a>{% endif %}
+        {% if 'claudecode' in accessible_app_slugs %}<a class="card" href="{% url 'claudecode:index' %}" title="Claude Code CLI config — settings.json scopes, version, bundle-patch wishlist"><h3>Claude Code</h3><span class="open-arrow">›</span></a>{% endif %}
     </div>
 </details>
 {% endif %}
