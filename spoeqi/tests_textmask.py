@@ -170,6 +170,62 @@ class TokenModeTest(_TextmaskBase):
                              mapping='no-such')
 
 
+class AttentionModeTest(_TextmaskBase):
+    def test_registry_has_starters(self):
+        for name in ('causal', 'bert', 'window', 'sparse', 'weights', 'biased'):
+            self.assertIn(name, tm.ATTENTION_TABLES,
+                          f'attention mapping {name!r} missing')
+
+    def test_apply_attention_matrix_shape(self):
+        pact = _make_pact()
+        r = tm.apply_attention(pact, component=0, generation=0,
+                                mapping='causal')
+        side = pact.component_grid
+        self.assertEqual(r.side, side)
+        self.assertEqual(len(r.matrix), side)
+        self.assertEqual(len(r.matrix[0]), side)
+        self.assertEqual(len(r.cells), side * side)
+
+    def test_weights_table_yields_known_values(self):
+        # 'weights' table: colours 0..3 → (1.0, 0.0, 0.3, 1.5).
+        # Every cell's weight must be in this set.
+        pact = _make_pact()
+        r = tm.apply_attention(pact, component=0, generation=0,
+                                mapping='weights')
+        allowed = {1.0, 0.0, 0.3, 1.5}
+        for c in r.cells:
+            self.assertIn(round(c.weight, 2), allowed,
+                          f'unexpected weight {c.weight} for colour {c.color}')
+
+    def test_biased_can_emit_negative(self):
+        pact = _make_pact()
+        rs = tm.apply_attention_all(pact, generation=0, mapping='biased')
+        # At least *some* of the 64 components should produce a cell with
+        # weight < 0 (the 'biased' table's colour 3 = -1.0).
+        any_neg = any(c.weight < 0 for r in rs for c in r.cells)
+        self.assertTrue(any_neg,
+                        'biased table never produced a negative weight')
+
+    def test_determinism(self):
+        pact = _make_pact()
+        a = tm.apply_attention(pact, component=4, generation=3, mapping='window')
+        b = tm.apply_attention(pact, component=4, generation=3, mapping='window')
+        self.assertEqual(a.matrix, b.matrix)
+
+    def test_apply_attention_all_returns_64(self):
+        pact = _make_pact()
+        rs = tm.apply_attention_all(pact, generation=2, mapping='sparse')
+        self.assertEqual(len(rs), 64)
+        for i, r in enumerate(rs):
+            self.assertEqual(r.component, i)
+
+    def test_unknown_mapping_raises(self):
+        pact = _make_pact()
+        with self.assertRaises(ValueError):
+            tm.apply_attention(pact, component=0, generation=0,
+                                mapping='no-such')
+
+
 class ApplyAllTest(_TextmaskBase):
     def test_returns_64_results(self):
         pact = _make_pact()
@@ -266,6 +322,37 @@ class ViewTest(_TextmaskBase):
         })
         self.assertEqual(r.status_code, 200)
         self.assertIn('all 64 components, same input (tokens)', r.content.decode())
+
+    def test_post_attention_mode_renders_heatmap(self):
+        pact = _make_pact()
+        url = reverse('spoeqi:textmask', args=[pact.slug])
+        r = self.client.post(url, {
+            'text':       '',
+            'mode':       'attention',
+            'mapping':    'causal',
+            'component':  '0',
+            'generation': '0',
+        })
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode()
+        self.assertIn('attention matrix', body)
+        self.assertIn('tm-heatmap', body)
+        # The JSON download link is present.
+        self.assertIn('download JSON matrix', body)
+
+    def test_post_attention_compare_all(self):
+        pact = _make_pact()
+        url = reverse('spoeqi:textmask', args=[pact.slug])
+        r = self.client.post(url, {
+            'text':        '',
+            'mode':        'attention',
+            'mapping':     'sparse',
+            'component':   '0',
+            'generation':  '0',
+            'compare_all': 'on',
+        })
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('64 attention matrices', r.content.decode())
 
     def test_post_compare_all_renders_64_rows(self):
         pact = _make_pact()

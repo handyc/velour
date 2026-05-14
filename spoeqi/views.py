@@ -571,7 +571,7 @@ def textmask(request, slug):
         'component':  '0',
         'generation': '0',
         'mapping':    'attention',
-        'mode':       'char',   # 'char' | 'token'  (attention mode coming)
+        'mode':       'char',   # 'char' | 'token' | 'attention'
         'compare_all': '',
     }
     form = dict(form_defaults)
@@ -579,24 +579,24 @@ def textmask(request, slug):
     all_results = None
     token_result = None
     token_all_results = None
+    attn_result = None
+    attn_all_results = None
     error = None
 
-    # The mapping dropdown content depends on mode — if the POST'd
-    # mapping doesn't belong to the chosen mode, fall back to that
-    # mode's first table.
+    def _registry_for(mode):
+        if mode == 'token':     return tm.TOKEN_MAPPING_TABLES
+        if mode == 'attention': return tm.ATTENTION_TABLES
+        return tm.MAPPING_TABLES
+
     def _default_mapping(mode):
-        if mode == 'token':
-            return next(iter(tm.TOKEN_MAPPING_TABLES))
-        return next(iter(tm.MAPPING_TABLES))
+        return next(iter(_registry_for(mode)))
 
     if request.method == 'POST':
         for k in form:
             form[k] = request.POST.get(k, form_defaults[k])
-        mode = form['mode'] if form['mode'] in ('char','token') else 'char'
+        mode = form['mode'] if form['mode'] in ('char','token','attention') else 'char'
         form['mode'] = mode
-        # Snap mapping into the right registry if the user just
-        # switched modes.
-        registry = tm.TOKEN_MAPPING_TABLES if mode == 'token' else tm.MAPPING_TABLES
+        registry = _registry_for(mode)
         if form['mapping'] not in registry:
             form['mapping'] = _default_mapping(mode)
         try:
@@ -612,7 +612,17 @@ def textmask(request, slug):
                         component=int(form['component']),
                         generation=int(form['generation']),
                         mapping=form['mapping'])
-            else:
+            elif mode == 'attention':
+                if form['compare_all']:
+                    attn_all_results = tm.apply_attention_all(
+                        pact, generation=int(form['generation']),
+                        mapping=form['mapping'])
+                else:
+                    attn_result = tm.apply_attention(
+                        pact, component=int(form['component']),
+                        generation=int(form['generation']),
+                        mapping=form['mapping'])
+            else:  # char
                 if form['compare_all']:
                     all_results = tm.apply_all(
                         pact, text=form['text'],
@@ -649,9 +659,15 @@ def textmask(request, slug):
         {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
         for m in tm.TOKEN_MAPPING_TABLES.values()
     ]
+    attn_mappings = [
+        {'name': m.name, 'description': m.description, 'labels': list(m.labels)}
+        for m in tm.ATTENTION_TABLES.values()
+    ]
     mode = form.get('mode', 'char')
-    mappings = token_mappings if mode == 'token' else char_mappings
-    registry = tm.TOKEN_MAPPING_TABLES if mode == 'token' else tm.MAPPING_TABLES
+    if mode == 'token':       mappings = token_mappings
+    elif mode == 'attention': mappings = attn_mappings
+    else:                      mappings = char_mappings
+    registry = _registry_for(mode)
     if form['mapping'] in registry:
         active_labels = registry[form['mapping']].labels
     else:
@@ -724,6 +740,54 @@ def textmask(request, slug):
                 'bar':         bar,
             })
 
+    # Attention render data — flat list of cells with their CSS background
+    # colour mixed by weight: positive weights tint green, zero is black,
+    # negative weights tint red.  The eye reads the matrix as a heatmap.
+    def _att_css(w):
+        # Clip to [-1.5, 1.5] for colour-mapping purposes.
+        x = max(-1.5, min(1.5, w))
+        if x >= 0:
+            g = int(round(255 * (x / 1.5)))
+            return f'rgb(0,{g},{g // 2})'   # green/teal
+        r = int(round(255 * (-x / 1.5)))
+        return f'rgb({r},0,{r // 3})'        # red/magenta
+    rendered_attn_cells = None
+    attn_matrix_json = ''
+    if attn_result is not None:
+        rendered_attn_cells = [
+            {'row': c.row, 'col': c.col, 'color': c.color,
+             'weight': round(c.weight, 3),
+             'css': _att_css(c.weight),
+             'palette_css': swatches[c.color]['css']}
+            for c in attn_result.cells
+        ]
+        attn_matrix_json = json.dumps(attn_result.matrix)
+
+    rendered_attn_rows = None
+    if attn_all_results is not None:
+        rendered_attn_rows = []
+        for r in attn_all_results:
+            counts = [0, 0, 0, 0]
+            density = 0.0
+            for c in r.cells:
+                counts[c.color] += 1
+                density += max(0.0, c.weight)
+            total = max(1, sum(counts))
+            density /= total
+            bar = [{'pct':   100.0 * counts[i] / total,
+                     'count': counts[i],
+                     'css':   swatches[i]['css']}
+                    for i in range(4)]
+            # Tiny inline heatmap of the matrix — 16 small cells per row,
+            # rendered as CSS background colours.
+            heat = [_att_css(w) for row in r.matrix for w in row]
+            rendered_attn_rows.append({
+                'component': r.component,
+                'density':   round(density, 2),
+                'bar':       bar,
+                'heat':      heat,
+            })
+
     # Payload for the live JS engine: enough to run the same 64 CAs
     # the detail page runs, plus the active mapping name and palette.
     # Only attached when there's a result to display — the empty-form
@@ -734,7 +798,8 @@ def textmask(request, slug):
     # mapping dropdown UI but skip the engine boot.
     live_payload_json = ''
     has_any_result = (result is not None or all_results is not None or
-                       token_result is not None or token_all_results is not None)
+                       token_result is not None or token_all_results is not None or
+                       attn_result is not None or attn_all_results is not None)
     if has_any_result and form['mode'] == 'char':
         live_payload = {
             'seed_hex':      pact.seed_hex,
@@ -762,10 +827,16 @@ def textmask(request, slug):
         'rendered_token_cells': rendered_token_cells,
         'token_all_results':    token_all_results,
         'rendered_token_rows':  rendered_token_rows,
+        'attn_result':          attn_result,
+        'rendered_attn_cells':  rendered_attn_cells,
+        'attn_matrix_json':     attn_matrix_json,
+        'attn_all_results':     attn_all_results,
+        'rendered_attn_rows':   rendered_attn_rows,
         'error':           error,
         'mappings':        mappings,
         'char_mappings':   char_mappings,
         'token_mappings':  token_mappings,
+        'attn_mappings':   attn_mappings,
         'active_labels':   list(active_labels),
         'swatches':        swatches,
         'side':            pact.component_grid,

@@ -84,6 +84,19 @@
                        border-radius: 2px; overflow: hidden; }
   .tm-tokens .ttok { font-weight: 600; opacity: 0.65; }
   .tm-tokens .tout { color: #000; font-weight: 700; }
+
+  /* Attention heatmap: each cell is the weight, inner shadow shows
+     the CA colour that produced it. */
+  .tm-heatmap { display: inline-grid; gap: 1px; padding: 1px;
+                 background: #000; font-family: monospace; }
+  .tm-heatmap .hcell { width: 24px; height: 24px; position: relative;
+                        display: flex; align-items: center; justify-content: center; }
+  .tm-heatmap .hw { color: #fff; font-size: 0.55rem; text-shadow: 0 0 2px #000; }
+
+  /* Tiny inline heatmap for the compare-all-64 row, 4 px cells. */
+  .tm-mini-heat { display: inline-grid; gap: 0; line-height: 0;
+                   border: 1px solid #1a1a1a; }
+  .tm-mini-heat span { display: inline-block; width: 4px; height: 4px; }
 </style>
 
 <div class="tm-page">
@@ -112,12 +125,14 @@
     <label for="tm-mode">mode</label>
     <div class="row-narrow">
       <select id="tm-mode" name="mode">
-        <option value="char"  {% if form.mode == 'char' %}selected{% endif %}>char — 1 glyph per cell</option>
-        <option value="token" {% if form.mode == 'token' %}selected{% endif %}>token — 1 word per cell · BERT/IR-style preprocessing</option>
+        <option value="char"      {% if form.mode == 'char' %}selected{% endif %}>char — 1 glyph per cell</option>
+        <option value="token"     {% if form.mode == 'token' %}selected{% endif %}>token — 1 word per cell · BERT/IR-style preprocessing</option>
+        <option value="attention" {% if form.mode == 'attention' %}selected{% endif %}>attention — grid IS the attention matrix · GPT/BERT/sparse</option>
       </select>
       <div class="tm-desc">
-        char: glyph-per-cell transforms · token: whole-word transforms (stem, stopwords, MLM, POS).
-        Switching modes refreshes the mapping list.
+        char: glyph-per-cell transforms · token: whole-word transforms (stem, stopwords, MLM, POS) ·
+        attention: cells become matrix entries, output is a real (side × side) weight matrix
+        ready to multiply into a transformer layer.
       </div>
     </div>
 
@@ -289,6 +304,80 @@
     </div>
   {% endif %}
 
+  {% if attn_result %}
+    <div class="panel">
+      <h2>attention matrix · {{ attn_result.side }} × {{ attn_result.side }}</h2>
+      <div class="tm-legend">
+        {% for sw in swatches %}
+          <div class="key">
+            <span class="swatch" style="background: {{ sw.css }};"></span>
+            <span><b style="color:#fff;">{{ sw.color }}</b> &middot; {{ sw.label }}</span>
+          </div>
+        {% endfor %}
+        <span style="margin-left:18px; color:#888; font-size:0.85rem;">
+          cell colour ⇒ weight: red = negative · black = 0 · green = positive
+        </span>
+      </div>
+      <div class="tm-heatmap" style="grid-template-columns: repeat({{ attn_result.side }}, 24px);">
+        {% for cell in rendered_attn_cells %}
+          <div class="hcell"
+                title="(row={{ cell.row }}, col={{ cell.col }}) · colour={{ cell.color }} · w={{ cell.weight }}"
+                style="background: {{ cell.css }};
+                       box-shadow: inset 0 0 0 1px {{ cell.palette_css }};">
+            <span class="hw">{{ cell.weight }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="tm-meta">
+        component <code>{{ attn_result.component }}</code> ·
+        generation <code>{{ attn_result.generation }}</code> ·
+        mapping <code>{{ attn_result.mapping }}</code>
+        &nbsp;|&nbsp;
+        <a href="data:application/json,{{ attn_matrix_json|urlencode }}"
+            download="attention-{{ pact.slug }}-c{{ attn_result.component }}-g{{ attn_result.generation }}.json"
+            style="color:#cfc;">download JSON matrix ↓</a>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if attn_all_results %}
+    <div class="panel">
+      <h2>all 64 attention matrices, same generation</h2>
+      <table class="tm-table">
+        <thead>
+          <tr>
+            <th class="tm-c-idx">#</th>
+            <th class="tm-c-bar">colour mix</th>
+            <th>density</th>
+            <th>matrix</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rendered_attn_rows %}
+            <tr>
+              <td class="tm-c-idx">{{ row.component }}</td>
+              <td class="tm-c-bar">
+                <span class="tm-bar">
+                  {% for b in row.bar %}<span class="tm-bar-seg"
+                       style="width: {{ b.pct }}%; background: {{ b.css }};"></span>{% endfor %}
+                </span>
+              </td>
+              <td><code>{{ row.density }}</code></td>
+              <td>
+                <span class="tm-mini-heat" style="grid-template-columns: repeat({{ side }}, 4px);">
+                  {% for css in row.heat %}<span style="background: {{ css }};"></span>{% endfor %}
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="tm-meta">
+        density = mean positive weight per cell · matrix = inline {{ side }}×{{ side }} heatmap
+      </div>
+    </div>
+  {% endif %}
+
   {% if all_results %}
     <div class="panel">
       <h2>all 64 components, same input</h2>
@@ -334,20 +423,18 @@
 <script>
   // Two mapping registries (one per mode); swap the dropdown options
   // when the user changes mode so they don't see incompatible entries.
-  const CHAR_MAPPINGS = [
-    {% for m in char_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},
-    {% endfor %}
-  ];
-  const TOKEN_MAPPINGS = [
-    {% for m in token_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},
-    {% endfor %}
-  ];
+  const MAPPING_REGISTRY = {
+    'char':      [{% for m in char_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},{% endfor %}],
+    'token':     [{% for m in token_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},{% endfor %}],
+    'attention': [{% for m in attn_mappings %}{name:'{{ m.name|escapejs }}', desc:'{{ m.description|escapejs }}', labels:['{{ m.labels.0|escapejs }}','{{ m.labels.1|escapejs }}','{{ m.labels.2|escapejs }}','{{ m.labels.3|escapejs }}']},{% endfor %}],
+  };
   const modeSel    = document.getElementById('tm-mode');
   const mappingSel = document.getElementById('tm-mapping');
   const desc       = document.getElementById('tm-desc');
 
+  function listFor(mode) { return MAPPING_REGISTRY[mode] || MAPPING_REGISTRY['char']; }
   function populate(mode, selectedName) {
-    const list = (mode === 'token') ? TOKEN_MAPPINGS : CHAR_MAPPINGS;
+    const list = listFor(mode);
     mappingSel.innerHTML = '';
     list.forEach(m => {
       const opt = document.createElement('option');
@@ -359,8 +446,7 @@
     updateDesc();
   }
   function updateDesc() {
-    const list = (modeSel.value === 'token') ? TOKEN_MAPPINGS : CHAR_MAPPINGS;
-    const m = list.find(x => x.name === mappingSel.value);
+    const m = listFor(modeSel.value).find(x => x.name === mappingSel.value);
     desc.textContent = m ? m.desc : '';
   }
   modeSel.addEventListener('change', () => populate(modeSel.value, mappingSel.value));

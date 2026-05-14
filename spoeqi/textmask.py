@@ -396,3 +396,173 @@ def apply_tokens_all(pact: Pact, *, text: str, generation: int,
         out.append(_token_apply_grid(glyphs, grid, side, c, generation,
                                       mapping, table))
     return out
+
+
+# ─── Attention mode ────────────────────────────────────────────────
+# The component's side×side cell grid IS the attention matrix:
+# rows = query positions (tokens), cols = key positions (tokens).
+# Each cell's CA colour selects an attention-pattern primitive that
+# decides the cell's weight given (row, col).  Output is the matrix
+# of float weights — ready to multiply against attention logits.
+
+# An attention primitive: float fn(row, col, color, side) -> float.
+# Returns the *weight contribution* for that cell.
+
+@dataclass(frozen=True)
+class _AttentionMapping:
+    name:        str
+    description: str
+    # 4 primitives, one per colour 0..3.  Each is f(row, col, side) -> float.
+    table:       tuple
+    labels:      tuple
+
+
+ATTENTION_TABLES: Dict[str, _AttentionMapping] = {}
+
+
+def register_attention(name: str, *, description: str,
+                       table: tuple, labels: tuple) -> None:
+    if name in ATTENTION_TABLES:
+        raise ValueError(f'attention mapping {name!r} already registered')
+    if len(table) != 4 or len(labels) != 4:
+        raise ValueError('attention mapping needs 4 functions + 4 labels')
+    ATTENTION_TABLES[name] = _AttentionMapping(
+        name=name, description=description,
+        table=tuple(table), labels=tuple(labels))
+
+
+# Primitives.  All take (row, col, side) and return a weight 0..1.
+
+def _att_attend(_r, _c, _s):  return 1.0
+def _att_mask  (_r, _c, _s):  return 0.0
+def _att_causal(r, c, _s):    return 1.0 if c <= r else 0.0
+def _att_anti_causal(r, c, _s): return 1.0 if c >= r else 0.0
+def _att_diag  (r, c, _s):    return 1.0 if r == c else 0.0
+def _att_neighbours(r, c, s):
+    """Sliding window: attend within ±2 along the diagonal."""
+    return 1.0 if abs(r - c) <= 2 else 0.0
+def _att_global_row(_r, c, _s):
+    """A single column attends to everything (column 0 = [CLS])."""
+    return 1.0 if c == 0 else 0.0
+def _att_random_keep(r, c, s):
+    """Sparse: keep ~10 % of cells, deterministically via (r,c)."""
+    return 1.0 if ((r * 31 + c) * 17) % 10 == 0 else 0.0
+def _att_weak(_r, _c, _s):   return 0.3
+def _att_strong(_r, _c, _s): return 1.5
+def _att_negative(_r, _c, _s): return -1.0    # attention-bias style
+
+
+register_attention('causal',
+    description='GPT-style causal: 0=attend / 1=mask / 2=causal-only / 3=mask — texture-by-CA',
+    table=(_att_attend, _att_mask, _att_causal, _att_mask),
+    labels=('attend', 'mask', 'causal', 'mask'))
+
+register_attention('bert',
+    description='Bidirectional: 0/1=attend, 2/3=mask — fully visible but CA picks cells',
+    table=(_att_attend, _att_attend, _att_mask, _att_mask),
+    labels=('attend', 'attend', 'mask', 'mask'))
+
+register_attention('window',
+    description='Longformer sliding window + global col 0: 0=window / 1=global col / 2=mask / 3=window',
+    table=(_att_neighbours, _att_global_row, _att_mask, _att_neighbours),
+    labels=('window', 'global₀', 'mask', 'window'))
+
+register_attention('sparse',
+    description='BigBird-style sparse: 0=attend / 1=random 10% / 2=causal / 3=mask',
+    table=(_att_attend, _att_random_keep, _att_causal, _att_mask),
+    labels=('attend', 'rnd10%', 'causal', 'mask'))
+
+register_attention('weights',
+    description='4 colours → 4 weights: (1.0, 0.0, +0.3, +1.5) — ready to multiply into logits',
+    table=(_att_attend, _att_mask, _att_weak, _att_strong),
+    labels=('×1.0', '×0.0', '×0.3', '×1.5'))
+
+register_attention('biased',
+    description='Like weights, but colour 3 emits a NEGATIVE bias (attention suppression)',
+    table=(_att_attend, _att_mask, _att_strong, _att_negative),
+    labels=('×1.0', '×0.0', '×1.5', '×−1'))
+
+
+@dataclass
+class AttentionCell:
+    idx:   int
+    row:   int
+    col:   int
+    color: int
+    weight: float
+
+
+@dataclass
+class AttentionResult:
+    side:       int
+    component:  int
+    generation: int
+    mapping:    str
+    cells:      List[AttentionCell]
+    # Convenience: row-major flat list of weights for JSON export.
+    matrix:     List[List[float]]
+
+
+def apply_attention(pact: Pact, *, component: int, generation: int,
+                    mapping: str) -> AttentionResult:
+    """Build the attention matrix for one component at one generation.
+    The grid IS the attention matrix; we don't tile any text — the
+    output is a (side × side) float matrix the caller can pipe into
+    a real attention layer."""
+    if mapping not in ATTENTION_TABLES:
+        raise ValueError(f'unknown attention mapping {mapping!r}')
+    if not (0 <= component < 64):
+        raise ValueError(f'component must be 0..63, got {component}')
+    if generation < 0:
+        raise ValueError('generation must be ≥ 0')
+
+    side = pact.component_grid
+    state = keystream.get_state_at(pact, generation)
+    area = side * side
+    base = component * area
+    grid = state[base:base + area]
+    table = ATTENTION_TABLES[mapping].table
+
+    cells: List[AttentionCell] = []
+    matrix: List[List[float]] = [[0.0] * side for _ in range(side)]
+    for idx in range(area):
+        r, c = idx // side, idx % side
+        color = grid[idx]
+        w = float(table[color](r, c, side))
+        matrix[r][c] = w
+        cells.append(AttentionCell(idx=idx, row=r, col=c,
+                                    color=color, weight=w))
+    return AttentionResult(side=side, component=component,
+                            generation=generation, mapping=mapping,
+                            cells=cells, matrix=matrix)
+
+
+def apply_attention_all(pact: Pact, *, generation: int,
+                         mapping: str) -> List[AttentionResult]:
+    """Attention matrices for all 64 components at the same generation."""
+    if mapping not in ATTENTION_TABLES:
+        raise ValueError(f'unknown attention mapping {mapping!r}')
+    if generation < 0:
+        raise ValueError('generation must be ≥ 0')
+
+    side = pact.component_grid
+    state = keystream.get_state_at(pact, generation)
+    area = side * side
+    table = ATTENTION_TABLES[mapping].table
+    out: List[AttentionResult] = []
+    for cnum in range(COMPONENTS):
+        base = cnum * area
+        grid = state[base:base + area]
+        cells: List[AttentionCell] = []
+        matrix = [[0.0] * side for _ in range(side)]
+        for idx in range(area):
+            r, c = idx // side, idx % side
+            color = grid[idx]
+            w = float(table[color](r, c, side))
+            matrix[r][c] = w
+            cells.append(AttentionCell(idx=idx, row=r, col=c,
+                                        color=color, weight=w))
+        out.append(AttentionResult(side=side, component=cnum,
+                                    generation=generation, mapping=mapping,
+                                    cells=cells, matrix=matrix))
+    return out
