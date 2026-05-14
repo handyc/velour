@@ -6,16 +6,40 @@
   .signs-page .meta  { color: #888; font-size: 0.85rem; max-width: 56em; }
   .signs-page h1  { margin: 0 0 4px; }
   .signs-page h2  { color: #cfc; font-size: 1rem; margin: 18px 0 6px; }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+              padding: 10px 12px; border: 1px solid #1f1f1f; background: #0a0a0a;
+              margin: 14px 0 10px; }
+  .controls input[type="text"], .controls select {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 8px; font-family: inherit; font-size: 0.9rem;
+  }
+  .controls input[type="text"] { width: 14em; }
+  .controls button, .controls a.btn {
+    background: #222; color: #cfc; border: 1px solid #555;
+    padding: 4px 12px; font-family: inherit; font-size: 0.9rem;
+    cursor: pointer; text-decoration: none;
+  }
+  .controls a.btn:hover, .controls button:hover { border-color: #8b949e; }
+  .controls .spacer { flex: 1; }
+  .controls .stats  { color: #888; font-size: 0.85rem; font-family: monospace; }
+
   .sign-row     { padding: 6px 0; border-bottom: 1px solid #1a1a1a;
                   display: flex; gap: 14px; align-items: baseline; }
-  .sign-row .gloss { color: #cfc; font-weight: 600; min-width: 9em; }
+  .sign-row .gloss { color: #cfc; font-weight: 600; min-width: 12em; }
   .sign-row .variety { color: #aaa; font-family: monospace; font-size: 0.85rem; }
   .sign-row .frames  { color: #888; font-size: 0.8rem; }
   .sign-row a.viewer { color: #ace; margin-left: auto; font-size: 0.85rem; }
   .empty { color: #666; padding: 20px 0; font-style: italic; }
-  .lang-block { margin: 18px 0 8px; }
-  .lang-block .langhead { color: #ddd; font-weight: 600; }
-  .lang-block .varhead  { color: #888; font-size: 0.85rem; padding-left: 10px; }
+
+  .pager { display: flex; gap: 6px; align-items: center; margin: 14px 0;
+           color: #888; font-size: 0.85rem; flex-wrap: wrap; }
+  .pager a, .pager span.current, .pager span.gap {
+    padding: 3px 9px; border: 1px solid #2a2a2a; border-radius: 4px;
+    color: #ace; text-decoration: none; font-family: monospace;
+  }
+  .pager span.current { color: #cfc; border-color: #555; background: #1a1a1a; }
+  .pager span.gap   { color: #555; border-style: dashed; }
+  .pager a:hover { border-color: #555; }
 </style>
 
 <div class="signs-page">
@@ -30,20 +54,28 @@
   consumes natively.
 </p>
 
-<h2>Languages</h2>
-{% for lang in languages %}
-  <div class="lang-block">
-    <div class="langhead">{{ lang.name }}{% if lang.iso639_3 %} <span style="color:#888;font-family:monospace;font-size:0.85rem;">[{{ lang.iso639_3 }}]</span>{% endif %}{% if lang.region %} · <span class="meta">{{ lang.region }}</span>{% endif %}</div>
-    {% for v in lang.varieties.all %}
-      <div class="varhead">→ {{ v.name }} ({{ v.signs.count }} sign{{ v.signs.count|pluralize }})</div>
-    {% endfor %}
-  </div>
-{% empty %}
-  <div class="empty">No languages yet. Run <code>manage.py seed_signtest_demo</code> for the demo set.</div>
-{% endfor %}
+<form class="controls" method="get" action="">
+  <label style="color:#888;">search</label>
+  <input type="text" name="q" value="{{ q }}" placeholder="gloss (e.g. WATER)">
 
-<h2>All signs</h2>
-{% for s in signs %}
+  <label style="color:#888;">variety</label>
+  <select name="v">
+    <option value="">— all varieties —</option>
+    {% for v in varieties %}
+      <option value="{{ v.slug }}" {% if chosen_variety and chosen_variety.id == v.id %}selected{% endif %}>{{ v.language.name }} / {{ v.name }} ({{ v.signs.count }})</option>
+    {% endfor %}
+  </select>
+
+  <button type="submit">apply</button>
+  <a class="btn" href="{% url 'signs:index' %}">clear</a>
+
+  <span class="spacer"></span>
+
+  <a class="btn" href="{% url 'signs:random' %}{% if chosen_variety %}?v={{ chosen_variety.slug }}{% endif %}">🎲 random</a>
+  <span class="stats">{{ total }} match{{ total|pluralize:"es" }} · page {{ page.number }} of {{ page.paginator.num_pages|default:1 }}</span>
+</form>
+
+{% for s in page.object_list %}
   <div class="sign-row">
     <span class="gloss">{{ s.lemma.gloss }}</span>
     <span class="variety">{{ s.variety.language.name }} / {{ s.variety.name }}</span>
@@ -51,8 +83,28 @@
     <a class="viewer" href="{% url 'signs:viewer' s.slug %}">view →</a>
   </div>
 {% empty %}
-  <div class="empty">No signs yet.</div>
+  <div class="empty">No signs match. Try a different search or run <code>manage.py seed_signtest_demo</code> for the demo set.</div>
 {% endfor %}
+
+{% if page.paginator.num_pages > 1 %}
+  <div class="pager">
+    {% if page.has_previous %}
+      <a href="?{% if q %}q={{ q }}&{% endif %}{% if chosen_variety %}v={{ chosen_variety.slug }}&{% endif %}page={{ page.previous_page_number }}">←</a>
+    {% endif %}
+    {% for n in page.paginator.page_range %}
+      {% if n == page.number %}
+        <span class="current">{{ n }}</span>
+      {% elif n == 1 or n == page.paginator.num_pages or n|add:"-2" <= page.number and n|add:"2" >= page.number %}
+        <a href="?{% if q %}q={{ q }}&{% endif %}{% if chosen_variety %}v={{ chosen_variety.slug }}&{% endif %}page={{ n }}">{{ n }}</a>
+      {% elif n == 2 or n == page.paginator.num_pages|add:"-1" %}
+        <span class="gap">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if page.has_next %}
+      <a href="?{% if q %}q={{ q }}&{% endif %}{% if chosen_variety %}v={{ chosen_variety.slug }}&{% endif %}page={{ page.next_page_number }}">→</a>
+    {% endif %}
+  </div>
+{% endif %}
 
 </div>
 {% endblock %}

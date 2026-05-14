@@ -20,13 +20,16 @@ class SchemaTest(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             Variety.objects.create(language=lang, name='dialect-1')
 
-    def test_sign_slug_includes_lemma_and_variety(self):
+    def test_sign_slug_includes_lemma_and_variety_name(self):
         lang = Language.objects.create(name='Test SL')
         v = Variety.objects.create(language=lang, name='v1')
         l = Lemma.objects.create(gloss='WATER')
         s = Sign.objects.create(lemma=l, variety=v)
         self.assertIn('water', s.slug)
-        self.assertIn(v.slug, s.slug)
+        # Slug uses variety *name* (v1), not slug (test-sl-v1), so
+        # the language name doesn't appear twice in URLs.
+        self.assertIn('v1', s.slug)
+        self.assertNotIn('test-sl', s.slug)
 
     def test_frame_unique_index_per_sign(self):
         lang = Language.objects.create(name='Test SL')
@@ -98,3 +101,68 @@ class IndexAndDetailTest(TestCase):
         self.assertEqual(r.status_code, 200)
         # The viewer fetches /signs/<slug>/frames.json
         self.assertContains(r, reverse('signs:frames_json', args=[self.sign.slug]))
+
+
+class SlugShapeTest(TestCase):
+    """The post-Phase-1c slug should be `<lemma>-<variety-name>`,
+    not `<lemma>-<variety-slug>` (which redundantly included the
+    language name)."""
+
+    def test_sign_slug_does_not_include_language_name(self):
+        lang = Language.objects.create(name='Ghanaian Sign Language')
+        v = Variety.objects.create(language=lang, name='gsl-lexicon-2021')
+        l = Lemma.objects.create(gloss='WATER')
+        s = Sign.objects.create(lemma=l, variety=v)
+        self.assertEqual(s.slug, 'water-gsl-lexicon-2021')
+
+    def test_collision_appends_numeric_tail(self):
+        lang = Language.objects.create(name='L')
+        v = Variety.objects.create(language=lang, name='v')
+        l = Lemma.objects.create(gloss='HELLO')
+        a = Sign.objects.create(lemma=l, variety=v)
+        # Second Sign with same (lemma, variety) — protocol allows
+        # multiple recordings — should get a -2 suffix.
+        b = Sign.objects.create(lemma=l, variety=v)
+        self.assertEqual(a.slug, 'hello-v')
+        self.assertEqual(b.slug, 'hello-v-2')
+
+
+class IndexFilteringAndPaginationTest(TestCase):
+    def setUp(self):
+        lang = Language.objects.create(name='Test SL')
+        self.v1 = Variety.objects.create(language=lang, name='v1')
+        self.v2 = Variety.objects.create(language=lang, name='v2')
+        for g in ('WATER', 'WIND', 'WOOD', 'WALK', 'WORM'):
+            Sign.objects.create(lemma=Lemma.objects.create(gloss=g),
+                                variety=self.v1)
+        Sign.objects.create(lemma=Lemma.objects.create(gloss='FIRE'),
+                            variety=self.v2)
+
+    def test_search_by_lemma(self):
+        r = Client().get(reverse('signs:index') + '?q=WAL')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'WALK')
+        self.assertNotContains(r, '<span class="gloss">FIRE</span>', html=False)
+        self.assertNotContains(r, '<span class="gloss">WATER</span>', html=False)
+
+    def test_filter_by_variety(self):
+        r = Client().get(reverse('signs:index') + f'?v={self.v2.slug}')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'FIRE')
+        self.assertNotContains(r, '>WATER<')
+
+    def test_random_redirects_to_a_viewer(self):
+        r = Client().get(reverse('signs:random'), follow=False)
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('/signs/view/', r['Location'])
+
+    def test_random_respects_variety_filter(self):
+        r = Client().get(reverse('signs:random') + f'?v={self.v2.slug}', follow=False)
+        self.assertEqual(r.status_code, 302)
+        # Only one sign in v2 → must redirect to fire viewer
+        self.assertIn('fire-v2', r['Location'])
+
+    def test_random_404s_when_empty(self):
+        Sign.objects.all().delete()
+        r = Client().get(reverse('signs:random'))
+        self.assertEqual(r.status_code, 404)

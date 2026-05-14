@@ -7,23 +7,69 @@ matching the signtest.html data model.
 
 from __future__ import annotations
 import json
+import random
 
-from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.core.paginator import Paginator
+from django.http import JsonResponse, Http404
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
-from .models import Language, Sign
+from .models import Language, Variety, Sign
+
+
+PAGE_SIZE = 50
 
 
 def index(request):
     languages = Language.objects.prefetch_related('varieties').order_by('name')
-    signs = (Sign.objects.select_related('lemma', 'variety', 'variety__language')
-                          .order_by('variety__language__name',
-                                    'variety__name',
-                                    'lemma__gloss'))
+
+    qs = (Sign.objects.select_related('lemma', 'variety', 'variety__language')
+                      .order_by('lemma__gloss',
+                                'variety__language__name',
+                                'variety__name'))
+
+    q = (request.GET.get('q') or '').strip()
+    if q:
+        qs = qs.filter(lemma__gloss__icontains=q)
+
+    v_slug = (request.GET.get('v') or '').strip()
+    chosen_variety = None
+    if v_slug:
+        chosen_variety = Variety.objects.filter(slug=v_slug).first()
+        if chosen_variety:
+            qs = qs.filter(variety=chosen_variety)
+
+    total = qs.count()
+    paginator = Paginator(qs, PAGE_SIZE)
+    page_num = max(1, int(request.GET.get('page') or 1))
+    page = paginator.get_page(page_num)
+
+    varieties = Variety.objects.select_related('language').order_by(
+        'language__name', 'name')
+
     return render(request, 'signs/index.html', {
-        'languages': languages,
-        'signs':     signs,
+        'languages':       languages,
+        'varieties':       varieties,
+        'page':            page,
+        'total':           total,
+        'q':               q,
+        'chosen_variety':  chosen_variety,
+        'page_size':       PAGE_SIZE,
     })
+
+
+def random_sign(request):
+    """Redirect to the viewer of a random Sign. Respects the ``?v=``
+    variety filter if present."""
+    qs = Sign.objects.all()
+    v_slug = (request.GET.get('v') or '').strip()
+    if v_slug:
+        qs = qs.filter(variety__slug=v_slug)
+    n = qs.count()
+    if n == 0:
+        raise Http404('no signs available')
+    pick = qs[random.randrange(n)]
+    return redirect(reverse('signs:viewer', args=[pick.slug]))
 
 
 def detail(request, slug):

@@ -182,15 +182,23 @@ class Sign(models.Model):
 
     def save(self, *a, **kw):
         if not self.slug:
-            base = slugify(
-                f'{self.lemma.gloss}-{self.variety.slug}')[:200] or 'sign'
-            self.slug = base
-            i = 2
-            while type(self).objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
-                tail = f'-{i}'
-                self.slug = base[:200 - len(tail)] + tail
-                i += 1
+            self.slug = self.derive_slug()
         super().save(*a, **kw)
+
+    def derive_slug(self) -> str:
+        """``<lemma>-<variety-name>`` slugified, with a numeric tail
+        on collision. Variety's *name* (not slug) is used because
+        the variety slug already contains the language name and
+        would yield duplicated segments like
+        ``water-ghanaian-sign-language-gsl-lexicon-2021``."""
+        base = slugify(f'{self.lemma.gloss}-{self.variety.name}')[:200] or 'sign'
+        slug = base
+        i = 2
+        while type(self).objects.filter(slug=slug).exclude(pk=self.pk).exists():
+            tail = f'-{i}'
+            slug = base[:200 - len(tail)] + tail
+            i += 1
+        return slug
 
     @property
     def n_frames(self) -> int:
