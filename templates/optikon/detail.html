@@ -92,7 +92,13 @@
       </button>
       <input type="hidden" name="pattern"      value="optikon">
       <input type="hidden" name="from_optikon" value="{{ illusion.SLUG }}">
-      <input type="hidden" name="cell"         value="4.0">
+      {% comment %}
+        cell mm: takes the illusion's per-illusion default so an
+        autostereogram (1.4 mm) prints with hundreds of cells across
+        A4 while a Café-wall (6 mm) stays at a comfortable size.
+      {% endcomment %}
+      <input type="hidden" name="cell"
+             value="{{ illusion.DEFAULT_CELL_MM|default:'4.0' }}">
     </form>
 
     <div class="ok-preview">

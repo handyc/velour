@@ -474,7 +474,6 @@ def _optikon_svg(request, slug: str):
 
     landscape = request.GET.get('landscape') == '1'
     margin    = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
-    cell      = _float(request, 'cell',    4.0, lo=2.0, hi=20.0)
     border    = request.GET.get('border') == '1'
     page_w    = svg.A4_H if landscape else svg.A4_W
     page_h    = svg.A4_W if landscape else svg.A4_H
@@ -493,6 +492,12 @@ def _optikon_svg(request, slug: str):
     if not slug: return _err('provide ?from_optikon=<illusion_slug>')
     illusion = ill.get(slug)
     if illusion is None: return _err(f'unknown illusion {slug!r}')
+    # Per-illusion default: small for autostereogram (~1.4 mm), larger
+    # for the geometric / colour illusions (~4 mm).  Lower bound is
+    # 0.5 mm so a busy stereogram can pack ~190 / (0.5*sqrt(3)) ≈ 220
+    # columns across A4 if needed.
+    cell_default = float(getattr(illusion, 'DEFAULT_CELL_MM', 4.0))
+    cell = _float(request, 'cell', cell_default, lo=0.5, hi=20.0)
 
     raw = {p.key: request.GET[p.key]
            for p in illusion.PARAMS if p.key in request.GET}

@@ -55,24 +55,27 @@ def detail(request, slug):
     illusion = ill.get(slug)
     if illusion is None: raise Http404(f'unknown illusion {slug!r}')
     params = _resolve_params(illusion, request)
-    # Preview parameters: a screen-friendly grid size (smaller than
-    # A4 so it loads fast and reads well in a browser).
-    grid_w = max(8, min(int(request.GET.get('grid_w', 28)), 80))
-    grid_h = max(8, min(int(request.GET.get('grid_h', 22)), 80))
-    side_mm = float(request.GET.get('side_mm', 6.0))
+    # Per-illusion defaults: an autostereogram needs many small
+    # cells; a Café-wall reads better at 6 mm hexes.
+    def_cell = float(getattr(illusion, 'DEFAULT_CELL_MM', 6.0))
+    def_gw   = int(getattr(illusion, 'DEFAULT_GRID_W', 28))
+    def_gh   = int(getattr(illusion, 'DEFAULT_GRID_H', 22))
+    grid_w   = max(8, min(int(request.GET.get('grid_w', def_gw)), 200))
+    grid_h   = max(8, min(int(request.GET.get('grid_h', def_gh)), 200))
+    side_mm  = float(request.GET.get('side_mm', def_cell))
     page = gp_svg.Page(w_mm=grid_w * side_mm * 2.0,
                        h_mm=grid_h * side_mm * 1.6,
                        margin_mm=2.0)
     svg_str = _render_illusion_svg(illusion, params,
                                     grid_w=grid_w, grid_h=grid_h,
                                     page=page, side_mm=side_mm)
-    # Hand-off to gridprint: same illusion params + a hex side in mm
-    # that's smaller than the on-screen preview so the printed page
-    # fills with rich detail.
+    # Hand-off to gridprint: pass the illusion's small print default
+    # so the A4 fills with detail without the user having to retype it.
+    print_cell = float(getattr(illusion, 'DEFAULT_CELL_MM', 4.0))
     print_qs = urlencode({'from_optikon': illusion.SLUG,
-                           'cell':         4.0,
+                           'cell':         print_cell,
                            **params})
-    raw_qs = urlencode({**params, 'side_mm': 6.0})
+    raw_qs = urlencode({**params, 'side_mm': side_mm})
     field_rows = []
     for p in illusion.PARAMS:
         field_rows.append({**p.as_dict(), 'value': params.get(p.key, p.default)})
@@ -119,9 +122,11 @@ def print_view(request, slug):
     illusion = ill.get(slug)
     if illusion is None: raise Http404(f'unknown illusion {slug!r}')
     params = _resolve_params(illusion, request)
+    cell = request.GET.get('cell',
+                            getattr(illusion, 'DEFAULT_CELL_MM', 4.0))
     qs = urlencode({'pattern': 'optikon',
                      'from_optikon': illusion.SLUG,
-                     'cell': request.GET.get('cell', 4.0),
+                     'cell': cell,
                      **params})
     from django.shortcuts import redirect
     return redirect(f'/gridprint/print/?{qs}')

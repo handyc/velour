@@ -10,13 +10,23 @@ Single-image-random-dot-stereograms (SIRDS) normally use random
 pixels; here we use a deterministic hex-color pattern seeded from
 `pattern_seed` so the result is reproducible and printable.
 
-Depth-map shapes are built-in primitives so no upload is needed:
-  - 'circle'    : a centred filled circle pops out by `amplitude`
-  - 'square'    : centred square
-  - 'ring'      : annulus
-  - 'plus'      : 5-cell plus sign
-  - 'gradient_x': linear depth ramp left→right
-  - 'gradient_y': linear depth ramp top→bottom
+Depth shapes:
+
+  Geometric primitives:
+    'circle', 'square', 'ring', 'plus', 'gradient_x', 'gradient_y'
+
+  Classic-image silhouettes (encoded as ASCII bitmaps below):
+    'heart', 'hand', 'dolphin', 'star', 'fish', 'mountain'
+
+The classic-image shapes scale to fit `shape_size` × shape_size
+hexes centred on the grid, so the autostereogram contains a
+recognisable figure when fused.
+
+For printing big stereograms on A4 we want lots of cells, so this
+illusion sets a small DEFAULT_CELL_MM (≈ 1.4 mm side) and a wide
+DEFAULT_GRID_W/H — the playground preview shows enough cells for
+the depth shape to be readable, and the gridprint hand-off fills
+A4 at the same hex size for a print-grade rendering.
 """
 
 from __future__ import annotations
@@ -26,7 +36,16 @@ SLUG        = 'autostereogram'
 NAME        = 'Autostereogram'
 DESCRIPTION = ('Magic-Eye-style hex stereogram. Cross or diverge '
                 'your eyes by one period (the configured pattern '
-                'width) and the depth shape pops out of the page.')
+                'width) and the depth shape pops out of the page. '
+                'Default hex size is small (~1.4 mm) so an A4 print '
+                'fills with ~110 columns of useful resolution.')
+
+# Tighter default than the geometric illusions: small hexes give
+# enough columns that the silhouette shapes read as recognisable
+# figures.
+DEFAULT_CELL_MM = 1.4
+DEFAULT_GRID_W  = 90
+DEFAULT_GRID_H  = 60
 
 PALETTE = [
     '#202020', '#5a3a1a', '#a07020',
@@ -34,19 +53,112 @@ PALETTE = [
     '#c0a040', '#e0e0e0',
 ]
 
+
+# ── Classic-image silhouette bitmaps ─────────────────────────────────
+# '#' = "in shape" (depth = amplitude); '.' = background (depth 0).
+# Sized at module import; the rasteriser scales whatever bitmap it
+# gets to fit the requested shape_size square centred on the grid.
+
+SILHOUETTES: dict[str, list[str]] = {
+    'heart': [
+        ".###....###.",
+        "############",
+        "############",
+        "############",
+        ".##########.",
+        "..########..",
+        "...######...",
+        "....####....",
+        ".....##.....",
+    ],
+    'hand': [
+        ".....##.........",
+        ".#...##...##....",
+        ".#.#.##.#.##.#..",
+        ".#.#.##.#.##.#..",
+        ".#.#.##.#.##.#..",
+        "##.#.##.#.##.##.",
+        "################",
+        "################",
+        ".##############.",
+        "..############..",
+        "...##########...",
+        "....########....",
+    ],
+    'dolphin': [
+        "...........####.",
+        "..........#####.",
+        "....#####.#####.",
+        "...#######.####.",
+        "..########.####.",
+        ".###############",
+        "################",
+        ".##############.",
+        "..############..",
+        "...##.######....",
+        "...##....##.....",
+    ],
+    'star': [
+        ".......##.......",
+        ".......##.......",
+        "......####......",
+        "......####......",
+        "################",
+        ".##############.",
+        "..############..",
+        "...##########...",
+        "....########....",
+        "...##########...",
+        "..####....####..",
+        ".####......####.",
+        "###..........###",
+    ],
+    'fish': [
+        "............###.",
+        "..........#####.",
+        ".####....#####..",
+        "########.######.",
+        "##############..",
+        "########.#####..",
+        ".####....#####..",
+        "..........#####.",
+        "............###.",
+    ],
+    'mountain': [
+        "................",
+        ".......##.......",
+        "......####......",
+        "......####......",
+        ".....######.....",
+        ".....######.....",
+        "....########....",
+        "....########....",
+        "...####.#####...",
+        "...##########...",
+        "..############..",
+        ".##############.",
+        "################",
+        "################",
+    ],
+}
+
+
 PARAMS = [
     Param('period',     'pattern period (hex columns)', 'int', 8,  4, 32, 1,
            help='Horizontal repeat period.  Cross-eyed fusion at this '
                 'width gives the depth illusion.'),
     Param('amplitude',  'depth amplitude (hexes)',       'int', 2,  1, 6, 1,
-           help='How many hexes columns the depth shape pops out by.  '
+           help='How many hex columns the depth shape pops out by.  '
                 'Larger = more dramatic but harder to fuse.'),
     Param('shape',      'depth shape',                   'choice',
-                        'circle', None, None, None,
-                        ['circle','square','ring','plus','gradient_x','gradient_y'],
-           help='Shape of the depth map (the thing that pops out).'),
-    Param('shape_size', 'shape size (hex radius)',       'int', 6,  2, 30, 1,
-           help='Half-extent of the shape in hex cells.'),
+                        'heart', None, None, None,
+                        ['heart','hand','dolphin','star','fish','mountain',
+                          'circle','square','ring','plus','gradient_x','gradient_y'],
+           help='What the depth map looks like.  Silhouettes (heart, '
+                'hand, …) read as recognisable figures when fused.'),
+    Param('shape_size', 'shape size (hex radius)',       'int', 28,  4, 60, 1,
+           help='Half-extent of the shape in hex cells.  For silhouettes '
+                'this is the bounding-box half-side.'),
     Param('palette_n',  'palette size',                  'int', 6,  2, 8, 1,
            help='How many distinct colours the repeating pattern uses.  '
                 'Smaller is easier to fuse; 4-6 is the sweet spot.'),
@@ -63,8 +175,7 @@ def _rng_step(state: int) -> tuple[int, int]:
 
 def _build_pattern_row(period: int, n_colors: int, seed: int) -> list[int]:
     """One period worth of palette indices, deterministic in (period,
-    n_colors, seed).  Different seeds produce different background
-    textures; same seed always reproduces."""
+    n_colors, seed)."""
     state = (seed if seed != 0 else 1) & 0xFFFFFFFF
     out = []
     for _ in range(period):
@@ -73,9 +184,36 @@ def _build_pattern_row(period: int, n_colors: int, seed: int) -> list[int]:
     return out
 
 
+def _silhouette_depth(name: str, r: int, c: int, gw: int, gh: int,
+                       size: int, amp: int) -> int:
+    """Sample a named silhouette bitmap centred on the grid, scaled to
+    fit a (2*size) × (2*size) hex region.  Returns `amp` if the
+    bitmap cell at this position is filled, else 0."""
+    bitmap = SILHOUETTES.get(name)
+    if not bitmap:
+        return 0
+    bh = len(bitmap)
+    bw = max(len(row) for row in bitmap)
+    cx, cy = gw / 2.0, gh / 2.0
+    half = max(1, size)
+    # Map (r, c) → bitmap (by, bx).  Outside the bounding box → 0.
+    if not (cx - half <= c < cx + half and cy - half <= r < cy + half):
+        return 0
+    bx = int((c - (cx - half)) / (2 * half) * bw)
+    by = int((r - (cy - half)) / (2 * half) * bh)
+    if not (0 <= bx < bw and 0 <= by < bh):
+        return 0
+    row = bitmap[by]
+    if bx < len(row) and row[bx] == '#':
+        return amp
+    return 0
+
+
 def _depth(shape: str, r: int, c: int, gw: int, gh: int, size: int,
            amp: int) -> int:
     """Return depth shift in hexes (0 = background) for the cell."""
+    if shape in SILHOUETTES:
+        return _silhouette_depth(shape, r, c, gw, gh, size, amp)
     cx, cy = gw / 2.0, gh / 2.0
     dx, dy = c - cx, r - cy
     if shape == 'circle':
@@ -94,7 +232,6 @@ def _depth(shape: str, r: int, c: int, gw: int, gh: int, size: int,
             return amp
         return 0
     if shape == 'gradient_x':
-        # 0..amp linearly across the width
         return int(round(amp * (c / max(1, gw - 1))))
     if shape == 'gradient_y':
         return int(round(amp * (r / max(1, gh - 1))))
@@ -104,22 +241,15 @@ def _depth(shape: str, r: int, c: int, gw: int, gh: int, size: int,
 def render(grid_w: int, grid_h: int, params: dict) -> list[list[int]]:
     period   = max(2, int(params.get('period', 8)))
     amp      = max(1, int(params.get('amplitude', 2)))
-    shape    = str(params.get('shape', 'circle'))
-    size     = max(1, int(params.get('shape_size', 6)))
+    shape    = str(params.get('shape', 'heart'))
+    size     = max(1, int(params.get('shape_size', 28)))
     n_cols   = max(2, min(len(PALETTE), int(params.get('palette_n', 6))))
     seed     = int(params.get('pattern_seed', 42)) & 0xFFFFFFFF
 
-    # Per-row pattern seeded from (seed, row) so vertical neighbours
-    # share the same horizontal repeat-class but the random texture
-    # varies enough that the depth shape doesn't read as a colour
-    # block on its own.
     out = [[0] * grid_w for _ in range(grid_h)]
     for r in range(grid_h):
-        row_pattern = _build_pattern_row(period, n_cols, (seed * 2654435761 + r) & 0xFFFFFFFF)
-        # Walk left-to-right; the first `period` cells are the seed
-        # texture, then each subsequent column copies from `c-period`
-        # in the OUTPUT (so depth-shifted cells propagate forward),
-        # adjusted by depth shift.
+        row_pattern = _build_pattern_row(
+            period, n_cols, (seed * 2654435761 + r) & 0xFFFFFFFF)
         for c in range(grid_w):
             if c < period:
                 out[r][c] = row_pattern[c]
