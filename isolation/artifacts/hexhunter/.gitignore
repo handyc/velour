@@ -1,0 +1,7 @@
+# Build artefacts produced by `make`. Source-only commits.
+*.o
+*.a
+hh_cli
+test_hexhunter
+__pycache__/
+winner*.bin
