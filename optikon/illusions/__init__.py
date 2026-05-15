@@ -46,6 +46,10 @@ class Param:
         if self.kind == 'choice':
             s = str(raw)
             return s if (self.choices and s in self.choices) else self.default
+        if self.kind == 'text':
+            s = str(raw)
+            if self.max is not None: s = s[:int(self.max)]
+            return s
         # color / fallback
         return str(raw)
 

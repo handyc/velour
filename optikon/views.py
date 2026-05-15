@@ -110,6 +110,55 @@ def svg(request, slug):
     return HttpResponse(body, content_type='image/svg+xml')
 
 
+from django.views.decorators.http import require_POST
+from django.http import JsonResponse
+from . import depth_cache
+
+
+@login_required
+@require_POST
+def depth_upload(request):
+    """Accept an image file, convert to a discretised depth map,
+    cache it under MEDIA_ROOT/optikon/depth/<sha>.json, return the
+    sha so the caller can pass ?depth_image_hash=<sha> in subsequent
+    render URLs.
+
+    Form fields:
+      image      — the file (jpg/png/gif/webp/anything PIL handles)
+      n_levels   — how many distinct depth levels (2..8, default 4)
+      invert     — '1' to flip light/dark
+      max_dim    — max greyscale dimension (default 128, capped at 256)
+    """
+    f = request.FILES.get('image')
+    if not f:
+        return JsonResponse({'ok': False, 'error': 'no image file'},
+                             status=400)
+    if f.size > 8 * 1024 * 1024:
+        return JsonResponse({'ok': False, 'error': 'image too large (>8 MB)'},
+                             status=400)
+    try:
+        n_levels = int(request.POST.get('n_levels', 4))
+    except ValueError:
+        n_levels = 4
+    try:
+        max_dim  = int(request.POST.get('max_dim',  128))
+    except ValueError:
+        max_dim = 128
+    max_dim = max(16, min(256, max_dim))
+    invert   = request.POST.get('invert') == '1'
+
+    try:
+        meta = depth_cache.store(f.read(),
+                                  max_dim=max_dim,
+                                  n_levels=n_levels,
+                                  invert=invert)
+    except Exception as exc:  # noqa: BLE001
+        return JsonResponse({'ok': False,
+                              'error': f'{type(exc).__name__}: {exc}'},
+                             status=400)
+    return JsonResponse({'ok': True, **meta})
+
+
 @login_required
 def print_view(request, slug):
     """Hand off to gridprint's standard print flow, which renders the

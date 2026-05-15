@@ -5,6 +5,7 @@ app_name = 'optikon'
 
 urlpatterns = [
     path('',                  views.index,        name='index'),
+    path('depth/upload/',     views.depth_upload, name='depth_upload'),
     path('<slug:slug>/',      views.detail,       name='detail'),
     path('<slug:slug>/svg',   views.svg,          name='svg'),
     path('<slug:slug>/print', views.print_view,   name='print'),

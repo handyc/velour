@@ -79,6 +79,23 @@
         <input type="text" name="side_mm" value="{{ side_mm }}">
       </div>
 
+      {% if illusion.SUPPORTS_CUSTOM_IMAGE %}
+        <div class="field" style="border-top:1px dashed #2a2a3a; padding-top:8px;">
+          <label>upload depth image</label>
+          <input type="file" id="depth-upload" accept="image/*"
+                 style="background:#111; color:#ddd; border:1px solid #333;
+                         padding:4px 6px; font-family:inherit; width:100%;
+                         box-sizing:border-box;">
+          <div class="help">
+            Any image. Greyscale + downsample → discrete depth levels.
+            On upload, sets shape = <code>custom-image</code> and pins
+            the file's hash so prints reuse the same depth map.
+          </div>
+          <div id="depth-status" style="font-size:0.8rem; margin-top:4px;
+                                          color:#888;"></div>
+        </div>
+      {% endif %}
+
       <button type="submit">re-render</button>
       {% comment %}
         Print button: submits the current form values to gridprint's
@@ -100,6 +117,60 @@
       <input type="hidden" name="cell"
              value="{{ illusion.DEFAULT_CELL_MM|default:'4.0' }}">
     </form>
+
+    {% if illusion.SUPPORTS_CUSTOM_IMAGE %}
+    <script>
+    (function () {
+      const form     = document.querySelector('.ok-form');
+      const fileInp  = document.getElementById('depth-upload');
+      const status   = document.getElementById('depth-status');
+      if (!fileInp) return;
+
+      function getCsrf() {
+        // CSRF token from the cookie (Django's standard place for it
+        // when the page didn't render a {% csrf_token %} hidden input).
+        const m = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+      }
+
+      fileInp.addEventListener('change', async () => {
+        const f = fileInp.files[0];
+        if (!f) return;
+        status.textContent = 'uploading ' + f.name + ' (' +
+                              Math.round(f.size / 1024) + ' KB)…';
+        const fd = new FormData();
+        fd.append('image', f);
+        fd.append('n_levels', '4');
+        fd.append('max_dim',  '128');
+        try {
+          const r = await fetch('{% url "optikon:depth_upload" %}', {
+            method: 'POST', body: fd,
+            headers: { 'X-CSRFToken': getCsrf() },
+            credentials: 'same-origin',
+          });
+          const j = await r.json();
+          if (!j.ok) throw new Error(j.error || 'upload failed');
+          // Pin the form to use this depth map.
+          const shapeSel = form.querySelector('select[name="shape"]');
+          if (shapeSel) shapeSel.value = 'custom-image';
+          const hashInp = form.querySelector('input[name="depth_image_hash"]');
+          if (hashInp) hashInp.value = j.sha;
+          status.innerHTML = 'cached ' + j.w + '×' + j.h +
+            ' depth map · sha <code style="color:#cfc;">' +
+            j.sha.slice(0, 12) + '…</code> · click ' +
+            '<a href="#" id="depth-rerender" style="color:#ace;">re-render</a> ' +
+            'to use it';
+          const rrl = document.getElementById('depth-rerender');
+          if (rrl) rrl.addEventListener('click', e => {
+            e.preventDefault(); form.submit();
+          });
+        } catch (e) {
+          status.textContent = 'error: ' + (e.message || e);
+        }
+      });
+    })();
+    </script>
+    {% endif %}
 
     <div class="ok-preview">
       {{ svg|safe }}

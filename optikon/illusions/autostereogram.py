@@ -152,19 +152,32 @@ PARAMS = [
                 'Larger = more dramatic but harder to fuse.'),
     Param('shape',      'depth shape',                   'choice',
                         'heart', None, None, None,
-                        ['heart','hand','dolphin','star','fish','mountain',
+                        ['custom-image',
+                          'heart','hand','dolphin','star','fish','mountain',
                           'circle','square','ring','plus','gradient_x','gradient_y'],
            help='What the depth map looks like.  Silhouettes (heart, '
-                'hand, …) read as recognisable figures when fused.'),
-    Param('shape_size', 'shape size (hex radius)',       'int', 28,  4, 60, 1,
+                'hand, …) read as recognisable figures when fused.  '
+                'Pick "custom-image" and use the upload widget to '
+                'supply your own depth map from any image.'),
+    Param('shape_size', 'shape size (hex radius)',       'int', 28,  4, 80, 1,
            help='Half-extent of the shape in hex cells.  For silhouettes '
-                'this is the bounding-box half-side.'),
+                'and custom images this is the bounding-box half-side.'),
     Param('palette_n',  'palette size',                  'int', 6,  2, 8, 1,
            help='How many distinct colours the repeating pattern uses.  '
                 'Smaller is easier to fuse; 4-6 is the sweet spot.'),
     Param('pattern_seed','pattern seed',                 'int', 42, 0, 1<<30, 1,
            help='Deterministic seed for the in-period colour pattern.'),
+    Param('depth_image_hash', 'depth image hash',         'text', '',
+                              None, 64, None, None,
+           help='SHA-256 of an uploaded depth-map image.  Set '
+                'automatically by the upload widget; leave blank to '
+                'use a built-in shape.'),
 ]
+
+
+# Tells the optikon detail template to surface the upload widget for
+# this illusion (other illusions don't accept custom depth maps).
+SUPPORTS_CUSTOM_IMAGE = True
 
 
 # ── deterministic LCG (matches hexhunter.c so users can predict it) ──
@@ -209,9 +222,48 @@ def _silhouette_depth(name: str, r: int, c: int, gw: int, gh: int,
     return 0
 
 
+# Cached depth maps keyed by (sha, max_n_levels) so render() doesn't
+# re-load the same JSON for every cell.  Cleared between calls by
+# render() itself; lives in module scope so a single render reuses.
+_RENDER_CACHE: dict = {}
+
+
+def _custom_image_depth(sha: str, r: int, c: int, gw: int, gh: int,
+                         size: int, amp: int) -> int:
+    """Sample an uploaded depth map by hash.  The cached map carries
+    its own (w, h, n_levels); we scale to fit (2*size) × (2*size)
+    centred on the grid and rescale per-pixel depth to amplitude."""
+    payload = _RENDER_CACHE.get(('depth', sha))
+    if payload is None:
+        from optikon import depth_cache
+        payload = depth_cache.load(sha)
+        if payload is None:
+            return 0
+        _RENDER_CACHE[('depth', sha)] = payload
+    bw, bh = int(payload['w']), int(payload['h'])
+    if bw <= 0 or bh <= 0:
+        return 0
+    n_levels = max(1, int(payload.get('n_levels', 4)))
+    cx, cy = gw / 2.0, gh / 2.0
+    half = max(1, size)
+    if not (cx - half <= c < cx + half and cy - half <= r < cy + half):
+        return 0
+    bx = int((c - (cx - half)) / (2 * half) * bw)
+    by = int((r - (cy - half)) / (2 * half) * bh)
+    if not (0 <= bx < bw and 0 <= by < bh):
+        return 0
+    d = int(payload['depths'][by][bx])
+    # Map cached level (0..n_levels-1) onto requested amplitude.
+    if n_levels <= 1:
+        return amp if d > 0 else 0
+    return int(round(d * amp / (n_levels - 1)))
+
+
 def _depth(shape: str, r: int, c: int, gw: int, gh: int, size: int,
-           amp: int) -> int:
+           amp: int, depth_image_hash: str = '') -> int:
     """Return depth shift in hexes (0 = background) for the cell."""
+    if shape == 'custom-image' and depth_image_hash:
+        return _custom_image_depth(depth_image_hash, r, c, gw, gh, size, amp)
     if shape in SILHOUETTES:
         return _silhouette_depth(shape, r, c, gw, gh, size, amp)
     cx, cy = gw / 2.0, gh / 2.0
@@ -245,6 +297,12 @@ def render(grid_w: int, grid_h: int, params: dict) -> list[list[int]]:
     size     = max(1, int(params.get('shape_size', 28)))
     n_cols   = max(2, min(len(PALETTE), int(params.get('palette_n', 6))))
     seed     = int(params.get('pattern_seed', 42)) & 0xFFFFFFFF
+    depth_h  = str(params.get('depth_image_hash', ''))
+
+    # Drop the cached depth-map look-up between renders so an updated
+    # upload (same hash → fine, different hash → loaded fresh) is
+    # picked up correctly.
+    _RENDER_CACHE.clear()
 
     out = [[0] * grid_w for _ in range(grid_h)]
     for r in range(grid_h):
@@ -254,7 +312,7 @@ def render(grid_w: int, grid_h: int, params: dict) -> list[list[int]]:
             if c < period:
                 out[r][c] = row_pattern[c]
             else:
-                d = _depth(shape, r, c, grid_w, grid_h, size, amp)
+                d = _depth(shape, r, c, grid_w, grid_h, size, amp, depth_h)
                 src = c - period + d
                 if src < 0:
                     src = 0
