@@ -20,4 +20,16 @@ urlpatterns = [
                                    views.scan_track_json, name='scan_track_json'),
     path('scans/<slug:slug>/progress.json',
                                    views.scan_progress_json, name='scan_progress_json'),
+
+    # ── Standalone hexhunter library + multi-language ports ──
+    path('lib/',                   views.lib_index,        name='lib_index'),
+    path('lib/algorithm/',         views.lib_algorithm,    name='lib_algorithm'),
+    path('lib/run/',               views.lib_run,          name='lib_run'),
+    path('lib/refine/',            views.lib_refine,       name='lib_refine'),
+    path('lib/assemble/',          views.lib_assemble,     name='lib_assemble'),
+    path('lib/ports/',             views.lib_ports,        name='lib_ports'),
+    path('lib/ports/<slug:slug>/', views.lib_port_detail,  name='lib_port_detail'),
+    path('lib/ports/<slug:slug>/download/',
+                                   views.lib_port_download, name='lib_port_download'),
+    path('lib/hexhunter.js',       views.lib_js_port,      name='lib_js_port'),
 ]

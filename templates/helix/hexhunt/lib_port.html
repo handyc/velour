@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — {{ port.filename }}{% endblock %}
+{% block content %}
+<style>
+  .pp-page { max-width: 76em; }
+  .pp-page h1 { margin: 0 0 4px; font-family: monospace; }
+  .pp-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .pp-page .crumbs a { color: #ace; }
+  .pp-meta { color: #888; font-size: 0.85rem; margin-bottom: 12px;
+              display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .pp-meta code { color: #ddd; padding: 0 4px; background: #161616;
+                   border-radius: 2px; }
+  .pp-meta .dl { padding: 4px 12px; background: #1a3a1a; color: #cfc;
+                  border: 1px solid #4a6; text-decoration: none;
+                  font-family: inherit; }
+  .pp-meta .dl:hover { background: #2a4a2a; }
+  .pp-page p.desc { color: #aaa; max-width: 46em; }
+  .pp-source { background: #050505; border: 1px solid #1a1a1a;
+                padding: 0; margin: 0; overflow-x: auto;
+                font-size: 0.78rem; line-height: 1.45;
+                color: #ddd; font-family: monospace; }
+  .pp-source pre { margin: 0; padding: 12px 14px;
+                    color: inherit; background: inherit;
+                    white-space: pre; }
+</style>
+
+<div class="pp-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    <a href="{% url 'helix:hexhunt:lib_index' %}">library</a> ›
+    <a href="{% url 'helix:hexhunt:lib_ports' %}">ports</a> ›
+    {{ port.filename }}
+  </div>
+  <h1>{{ port.filename }}</h1>
+  <div class="pp-meta">
+    <span><code>{{ port.label }}</code></span>
+    <span>{{ port.size_bytes }} B</span>
+    <span>{{ lines }} lines</span>
+    <a class="dl" href="{% url 'helix:hexhunt:lib_port_download' slug=port.slug %}">
+      ↓ download {{ port.filename }}
+    </a>
+  </div>
+  <p class="desc">{{ port.description }}</p>
+
+  <div class="pp-source"><pre>{{ source }}</pre></div>
+</div>
+{% endblock %}

@@ -1,0 +1,1003 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — assemble 64 KiB{% endblock %}
+{% block content %}
+<style>
+  .ha-page { max-width: 64em; }
+  .ha-page h1 { margin: 0 0 4px; }
+  .ha-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .ha-page .crumbs a { color: #ace; }
+  .ha-page p.intro { color: #aaa; max-width: 50em; }
+  .ha-page p.intro code { color: #ddd; padding: 0 4px; background: #1a1a1a; }
+
+  .ha-controls { padding: 12px 14px; border: 1px solid #1f1f1f;
+                  background: #0a0a0a; margin-bottom: 14px;
+                  display: flex; flex-wrap: wrap; gap: 14px; align-items: end; }
+  .ha-controls .field { display: flex; flex-direction: column; }
+  .ha-controls label { color: #888; font-size: 0.7rem;
+                        text-transform: uppercase; letter-spacing: 0.06em;
+                        margin-bottom: 2px; }
+  .ha-controls input[type=number], .ha-controls input[type=text] {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 8em; box-sizing: border-box;
+  }
+  .ha-controls .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .ha-controls button { background: #222; color: #cfc; border: 1px solid #555;
+                         padding: 6px 14px; font-family: inherit; cursor: pointer; }
+  .ha-controls button:hover { border-color: #8b949e; }
+  .ha-controls button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .ha-controls .download { background: #1a3a1a; border-color: #4a6; }
+  .ha-controls .download:hover { background: #2a4a2a; }
+  .ha-controls .chain    { background: #1a1a3a; border-color: #66c; color: #ace; }
+  .ha-controls .chain:hover { background: #2a2a4a; }
+  .ha-controls .cross    { background: #2a1a3a; border-color: #94c; color: #d8c; }
+  .ha-controls .cross:hover { background: #3a2a4a; }
+  .ha-controls .cross.active { background: #642a82; color: #fff; }
+
+  .ha-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .ha-slot { padding: 8px 10px; border: 1px solid #1f1f1f; background: #0a0a0a;
+              display: flex; flex-direction: column; gap: 4px;
+              font-family: monospace; font-size: 0.78rem; min-height: 8em; }
+  .ha-slot.full   { border-color: #2a3; background: #061206; }
+  .ha-slot.busy   { border-color: #663; background: #161306; }
+  .ha-slot.bad    { border-color: #4a1d1d; background: #1a0a0a; }
+  .ha-slot.cx-a   { box-shadow: 0 0 0 2px #94c inset; }
+  .ha-slot.cx-target { box-shadow: 0 0 0 2px #c6f inset; }
+  .ha-slot .idx { color: #cfc; font-weight: 600; }
+  .ha-slot.full .idx { color: #6f6; }
+  .ha-slot.bad  .idx { color: #f88; }
+  .ha-slot .info { color: #aaa; flex-grow: 1; }
+  .ha-slot .info .ok    { color: #cfc; }
+  .ha-slot .info .err   { color: #f88; }
+  .ha-slot .info .small { color: #888; font-size: 0.75rem; }
+  .ha-slot .name-input { background: #050505; border: 1px solid #1f1f1f;
+                          color: #ddd; padding: 1px 4px; width: 100%;
+                          box-sizing: border-box;
+                          font-family: monospace; font-size: 0.78rem; }
+  .ha-slot .name-input:focus { border-color: #555; outline: none; }
+  .ha-slot .row { display: flex; gap: 4px; }
+  .ha-slot button { background: #1a1a1a; color: #ddd; border: 1px solid #333;
+                     padding: 2px 6px; font-family: inherit; cursor: pointer;
+                     font-size: 0.72rem; flex: 1; }
+  .ha-slot button:hover { border-color: #8b949e; }
+  .ha-slot input[type=file] { display: none; }
+  .ha-slot .clear { color: #f88; padding: 2px 6px; }
+
+  /* CRUD category strip — always visible row of 4 letter toggles. */
+  .ha-cat { display: flex; gap: 2px; margin-top: 2px; }
+  .ha-cat button { flex: 1; padding: 1px 0; font-size: 0.72rem;
+                    font-family: monospace; cursor: pointer;
+                    background: #0a0a0a; color: #555;
+                    border: 1px solid #2a2a2a; }
+  .ha-cat button:hover { color: #ddd; border-color: #555; }
+  .ha-cat button.on.c { background: #0c2a14; color: #6f6; border-color: #2a3; }
+  .ha-cat button.on.r { background: #0c1c2c; color: #6cc; border-color: #246; }
+  .ha-cat button.on.u { background: #2a2812; color: #fc6; border-color: #663; }
+  .ha-cat button.on.d { background: #2a0c0c; color: #f88; border-color: #622; }
+  .ha-slot .idx .cat-chip { float: right; font-size: 0.72rem;
+                              padding: 0 5px; border-radius: 2px;
+                              border: 1px solid #2a2a2a; color: #888; }
+  .ha-slot .idx .cat-chip.c { color: #6f6; border-color: #2a3; }
+  .ha-slot .idx .cat-chip.r { color: #6cc; border-color: #246; }
+  .ha-slot .idx .cat-chip.u { color: #fc6; border-color: #663; }
+  .ha-slot .idx .cat-chip.d { color: #f88; border-color: #622; }
+
+  .ha-status { margin-top: 12px; padding: 10px 12px;
+                border: 1px solid #1f1f1f; background: #050505;
+                font-family: monospace; font-size: 0.85rem;
+                color: #cfc; }
+  .ha-status .filled { color: #6f6; }
+  .ha-status .empty  { color: #888; }
+  .ha-status .err    { color: #f88; margin-top: 6px; }
+  .ha-status .cat-counts { color: #aaa; margin-top: 4px; }
+  .ha-status .cat-counts .c { color: #6f6; }
+  .ha-status .cat-counts .r { color: #6cc; }
+  .ha-status .cat-counts .u { color: #fc6; }
+  .ha-status .cat-counts .d { color: #f88; }
+  .ha-status .chain-log { margin-top: 6px; color: #ace; font-size: 0.8rem;
+                            max-height: 8em; overflow: auto;
+                            border-top: 1px dashed #1f1f1f; padding-top: 4px; }
+  .ha-status .chain-log .row { padding: 1px 0; }
+  .ha-status .cx-prompt { color: #d8c; margin-top: 4px; }
+</style>
+
+<div class="ha-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    <a href="{% url 'helix:hexhunt:lib_index' %}">library</a> ›
+    assemble
+  </div>
+  <h1>assemble — 16 self-describing blocks → 64 KiB</h1>
+  <p class="intro">
+    16 slots × 4096 B = 64 KiB.  Each slot is <em>self-describing</em>:
+    bytes <code>0..3968</code> are the genome (truncated K=4 hex-CA
+    lookup with identity defaults for the high 1/8 of <code>self=3</code>
+    situations) and bytes <code>3968..4096</code> are a trailer carrying
+    the slot's name, fitness, RNG seed, GA params, creation timestamp,
+    CRUD role, and the magic <code>HXHS0001</code>.  Re-uploading a
+    downloaded blob restores every slot's metadata.
+  </p>
+  <p class="intro" style="margin-top:6px;">
+    <strong>CRUD role</strong> per slot —
+    <span style="color:#6f6;">creator</span> /
+    <span style="color:#6cc;">reader</span> /
+    <span style="color:#fc6;">updater</span> /
+    <span style="color:#f88;">deleter</span> — click the
+    <code>C R U D</code> strip in a slot to set it.
+    <strong>Per-slot ops:</strong> <code>upload</code>, <code>evolve</code>,
+    <code>refine</code> (continue GA), <code>mutate</code> (small refine
+    from current bytes).
+    <strong>Chain ops:</strong> <em>cross</em> two slots into a child;
+    <em>evolve chain</em> runs a tournament across all 16 slots.
+  </p>
+
+  <div class="ha-controls">
+    <div class="field">
+      <label>population</label>
+      <input type="number" id="population" min="2" max="256" value="{{ spec.population }}">
+    </div>
+    <div class="field">
+      <label>generations</label>
+      <input type="number" id="generations" min="1" max="200" value="{{ spec.generations }}">
+    </div>
+    <div class="field">
+      <label>init mut rate</label>
+      <input type="text" id="init_mutation_rate" value="{{ spec.init_mutation_rate }}">
+    </div>
+    <div class="field">
+      <label>breed mut rate</label>
+      <input type="text" id="breed_mutation_rate" value="{{ spec.breed_mutation_rate }}">
+    </div>
+    <div class="field">
+      <label>base rng seed</label>
+      <input type="number" id="rng_seed_base" min="0" value="{{ spec.rng_seed }}">
+    </div>
+    <div class="field">
+      <label>chain gens</label>
+      <input type="number" id="chain_gens" min="1" max="20" value="3">
+    </div>
+    <div class="actions">
+      <button id="evolve-all-btn" type="button">evolve empty slots</button>
+      <button id="cross-btn"      type="button" class="cross">cross…</button>
+      <button id="chain-ga-btn"   type="button" class="chain">evolve chain</button>
+      <button id="clear-all-btn"  type="button">clear all</button>
+      <button id="manifest-btn"   type="button" disabled>download manifest</button>
+      <button id="download-btn"   type="button" class="download" disabled>
+        download 64 KiB
+      </button>
+    </div>
+  </div>
+
+  <div class="ha-grid" id="grid"></div>
+
+  <div class="ha-status" id="status">
+    <span class="filled">0</span> / 16 slots filled
+  </div>
+</div>
+
+<script src="{% url 'helix:hexhunt:lib_js_port' %}"></script>
+<script>
+(function () {
+  const HH = window.hexhunter_lib;
+  const N_SLOTS    = {{ n_slots }};
+  const BLOCK_SIZE = {{ block_size }};
+  const TOTAL_SIZE = {{ total_size }};
+  const TRAILER_SIZE = 128;
+  const GENOME_SIZE  = BLOCK_SIZE - TRAILER_SIZE;   /* 3968 */
+  const TRAILER_MAGIC = 'HXHS0001';
+
+  const grid       = document.getElementById('grid');
+  const statusEl   = document.getElementById('status');
+  const dlBtn      = document.getElementById('download-btn');
+  const manifestBtn= document.getElementById('manifest-btn');
+  const evolveAll  = document.getElementById('evolve-all-btn');
+  const clearAll   = document.getElementById('clear-all-btn');
+  const crossBtn   = document.getElementById('cross-btn');
+  const chainGABtn = document.getElementById('chain-ga-btn');
+
+  if (!HH) {
+    statusEl.innerHTML = '<span class="err">JS port failed to load</span>';
+    return;
+  }
+
+  const CATEGORIES = {
+    c: 'creator', r: 'reader', u: 'updater', d: 'deleter',
+  };
+  const CAT_ORDER = ['c', 'r', 'u', 'd'];
+  /* type field in the trailer: A=evolve, R=refine, M=mutate, X=cross,
+   * U=upload (file or chain-GA reseed), I=identity-fallback */
+  const TYPE_NAMES = { A:'evolved', R:'refined', M:'mutated', X:'crossed',
+                        U:'uploaded', I:'identity' };
+
+  /* ── Trailer codec (128 bytes, magic HXHS0001) ────────────────── */
+  /* Layout:
+   *   [  0.. 27] name (UTF-8, null-padded)               28 B
+   *   [ 28.. 35] fitness (f64 LE)                         8 B
+   *   [ 36.. 39] rng_seed (u32 LE)                        4 B
+   *   [ 40.. 41] generations (u16 LE)                     2 B
+   *   [ 42.. 43] population (u16 LE)                      2 B
+   *   [ 44.. 51] created_unix (u64 LE)                    8 B
+   *   [ 52..]    crud(1)  type(1)                         2 B
+   *   [ 54..119] reserved (zero)                         66 B
+   *   [120..127] magic 'HXHS0001'                         8 B
+   */
+  function encodeTrailer(meta) {
+    const buf = new Uint8Array(TRAILER_SIZE);
+    const dv  = new DataView(buf.buffer);
+    /* name */
+    const name = (meta.name || '').slice(0, 28);
+    for (let i = 0; i < name.length; i++) buf[i] = name.charCodeAt(i) & 0xff;
+    dv.setFloat64( 28, meta.fitness != null ? meta.fitness : 0, true);
+    dv.setUint32 ( 36, (meta.rng_seed >>> 0) || 0,             true);
+    dv.setUint16 ( 40, Math.min(65535, meta.generations  || 0),true);
+    dv.setUint16 ( 42, Math.min(65535, meta.population   || 0),true);
+    /* JS u64: split high/low. Math.floor(secs) easily fits in 32 bits
+     * for the next ~80 years; use BigInt-free split. */
+    const t = Math.floor(meta.created_unix || (Date.now() / 1000));
+    dv.setUint32 ( 44, t >>> 0, true);
+    dv.setUint32 ( 48, Math.floor(t / 0x100000000) >>> 0, true);
+    buf[52] = (meta.crud || 'c').charCodeAt(0) & 0xff;
+    buf[53] = (meta.type || 'A').charCodeAt(0) & 0xff;
+    /* reserved [54..119] stays zero */
+    for (let i = 0; i < 8; i++) buf[120 + i] = TRAILER_MAGIC.charCodeAt(i);
+    return buf;
+  }
+  function decodeTrailer(bytes128) {
+    if (!bytes128 || bytes128.length !== TRAILER_SIZE) return null;
+    /* magic check */
+    for (let i = 0; i < 8; i++) {
+      if (bytes128[120 + i] !== TRAILER_MAGIC.charCodeAt(i)) return null;
+    }
+    const dv = new DataView(bytes128.buffer, bytes128.byteOffset, TRAILER_SIZE);
+    let nameLen = 0;
+    while (nameLen < 28 && bytes128[nameLen] !== 0) nameLen++;
+    const name = new TextDecoder('utf-8', {fatal: false})
+      .decode(bytes128.subarray(0, nameLen));
+    const lo = dv.getUint32(44, true), hi = dv.getUint32(48, true);
+    const created_unix = hi * 0x100000000 + lo;
+    const crud = String.fromCharCode(bytes128[52]);
+    const type = String.fromCharCode(bytes128[53]);
+    return {
+      name,
+      fitness:      dv.getFloat64(28, true),
+      rng_seed:     dv.getUint32 (36, true),
+      generations:  dv.getUint16 (40, true),
+      population:   dv.getUint16 (42, true),
+      created_unix,
+      crud:         CATEGORIES[crud] ? crud : 'c',
+      type:         TYPE_NAMES[type] ? type : 'A',
+    };
+  }
+
+  /* Identity defaults for the truncated tail (situations 15872..16383).
+   * In the full K=4 packing those are all 'self=3 → self' i.e. 0xFF in
+   * the packed genome.  When we replace the trailer with metadata we
+   * effectively delegate those situations to identity. */
+  function identityTailBytes() {
+    const t = new Uint8Array(TRAILER_SIZE);
+    t.fill(0xFF);
+    return t;
+  }
+
+  /* genome+trailer composition + decomposition */
+  function packSlot(genome3968, meta) {
+    const full = new Uint8Array(BLOCK_SIZE);
+    full.set(genome3968.subarray(0, GENOME_SIZE), 0);
+    full.set(encodeTrailer(meta), GENOME_SIZE);
+    return full;
+  }
+  function splitSlot(block4096) {
+    return {
+      genome:  block4096.subarray(0, GENOME_SIZE),
+      trailer: block4096.subarray(GENOME_SIZE),
+    };
+  }
+
+  /* Honest fitness: replace bytes 3968..4096 with identity defaults,
+   * then score under the full K=4 lookup.  This reports what the slot
+   * would *actually* compute on the truncated genome at runtime. */
+  function honestFitness(block4096, rng_seed) {
+    const g = new Uint8Array(BLOCK_SIZE);
+    g.set(block4096.subarray(0, GENOME_SIZE));
+    g.set(identityTailBytes(), GENOME_SIZE);
+    return HH.hexhunter_fitness(g, {rng_seed: rng_seed});
+  }
+
+  /* SHA-256 helper used by the manifest. */
+  async function sha256Hex(bytes) {
+    if (!bytes) return null;
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(hash))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function readCfg() {
+    return {
+      population:          parseInt(document.getElementById('population').value, 10),
+      generations:         parseInt(document.getElementById('generations').value, 10),
+      init_mutation_rate:  parseFloat(document.getElementById('init_mutation_rate').value),
+      breed_mutation_rate: parseFloat(document.getElementById('breed_mutation_rate').value),
+      rng_seed_base:       parseInt(document.getElementById('rng_seed_base').value, 10),
+    };
+  }
+
+  /* ── Slot state ──────────────────────────────────────────────── */
+  /* slots[i] = {state, bytes, name, fitness, rng_seed_used,
+                 generations, population, origin_type, category, err} */
+  function emptySlot(i) {
+    return { state: 'empty', bytes: null,
+              name: defaultName(i),
+              fitness: null, rng_seed_used: null,
+              generations: null, population: null,
+              origin_type: null,    /* 'A','R','M','X','U','I' */
+              category: 'c', err: null };
+  }
+  function defaultName(i) {
+    return 'slot-' + (i < 10 ? '0' + i : i);
+  }
+  function setSlot(i, patch) { Object.assign(slots[i], patch); }
+  function resetSlot(i)      { slots[i] = emptySlot(i); }
+  const slots = Array.from({length: N_SLOTS}, (_, i) => emptySlot(i));
+
+  /* Chain GA / cross UI state */
+  let crossMode = null;     /* null | {phase:'pick-a'} | {phase:'pick-b', a} | {phase:'pick-target', a, b} */
+  const chainLog = [];
+
+  /* ── Rendering ───────────────────────────────────────────────── */
+
+  function renderSlot(i) {
+    const s   = slots[i];
+    const div = document.querySelector('#slot-' + i);
+    let cls = 'ha-slot ' + s.state;
+    if (crossMode) {
+      if (crossMode.phase === 'pick-a' && s.state === 'full') cls += '';
+      if ((crossMode.a === i) || (crossMode.b === i)) cls += ' cx-a';
+      if (crossMode.phase === 'pick-target' && s.state !== 'busy') cls += ' cx-target';
+    }
+    div.className = cls;
+
+    let body;
+    if (s.state === 'empty') {
+      body = '<div class="info"><span class="small">— empty —</span></div>';
+    } else if (s.state === 'busy') {
+      body = '<div class="info"><span class="small">' +
+              (s.busy_msg || 'evolving…') + '</span></div>';
+    } else if (s.state === 'bad') {
+      body = '<div class="info"><span class="err">' + (s.err || 'error') + '</span></div>';
+    } else {  // full
+      const seedTxt = (s.rng_seed_used == null) ? '' :
+                      (' · seed ' + s.rng_seed_used);
+      const popGen = (s.population && s.generations) ?
+                      (' · P' + s.population + 'G' + s.generations) : '';
+      const originTxt = s.origin_type ? TYPE_NAMES[s.origin_type] || s.origin_type
+                                       : '?';
+      body =
+        '<div class="info">' +
+          '<span class="ok">fit ' +
+                (s.fitness != null ? s.fitness.toFixed(3) : '?') +
+          '</span>' +
+          '<div class="small">' + originTxt + seedTxt + popGen + '</div>' +
+        '</div>';
+    }
+
+    const catRow = '<div class="ha-cat">' +
+      CAT_ORDER.map(k =>
+        '<button data-cat="' + k + '"' +
+          (s.category === k ? ' class="on ' + k + '"' : '') +
+          ' title="' + CATEGORIES[k] + '">' + k.toUpperCase() + '</button>'
+      ).join('') + '</div>';
+
+    const nameField =
+      '<input type="text" class="name-input" maxlength="28"' +
+        ' data-i="' + i + '" value="' + escapeHtml(s.name) +
+        '" title="slot name (28 chars max, persisted into the trailer)">';
+
+    /* Per-slot action buttons:
+        - empty:    upload, evolve
+        - full:     upload, evolve, refine, mutate, × */
+    let opsRow;
+    if (s.state === 'full') {
+      opsRow =
+        '<div class="row">' +
+          '<button data-act="evolve">evolve</button>' +
+          '<button data-act="refine">refine</button>' +
+          '<button data-act="mutate">mutate</button>' +
+          '<button data-act="clear"  class="clear">×</button>' +
+        '</div>' +
+        '<div class="row">' +
+          '<button data-act="upload">upload</button>' +
+        '</div>';
+    } else {
+      opsRow =
+        '<div class="row">' +
+          '<button data-act="upload">upload</button>' +
+          '<button data-act="evolve">evolve</button>' +
+        '</div>';
+    }
+
+    div.innerHTML =
+      '<div class="idx">slot ' + (i < 10 ? '0' : '') + i +
+        '<span class="cat-chip ' + s.category + '" title="' +
+          CATEGORIES[s.category] + '">' + s.category.toUpperCase() + '</span>' +
+      '</div>' +
+      nameField +
+      body +
+      catRow +
+      opsRow +
+      '<input type="file" data-i="' + i + '" accept=".bin,application/octet-stream">';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, ch => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[ch]));
+  }
+
+  function renderStatus() {
+    const filled = slots.filter(s => s.state === 'full').length;
+    const errs   = slots.filter(s => s.state === 'bad');
+    let html = '<span class="' + (filled === N_SLOTS ? 'filled' : 'empty') + '">' +
+                  filled + '</span> / ' + N_SLOTS + ' slots filled';
+    if (filled === N_SLOTS) {
+      html += ' &nbsp;·&nbsp; total ' + (filled * BLOCK_SIZE) + ' B';
+    }
+    const counts = {c: 0, r: 0, u: 0, d: 0};
+    for (const s of slots) counts[s.category]++;
+    html += '<div class="cat-counts">' +
+      CAT_ORDER.map(k =>
+        '<span class="' + k + '">' + k.toUpperCase() + ':' + counts[k] + '</span>'
+      ).join(' &nbsp; ') +
+      ' &nbsp;=&nbsp; ' + N_SLOTS;
+    if (filled > 0) {
+      let sumFit = 0;
+      for (const s of slots) if (s.state === 'full' && s.fitness != null) sumFit += s.fitness;
+      html += ' &nbsp; · &nbsp; Σfit ' + sumFit.toFixed(2);
+    }
+    html += '</div>';
+    if (crossMode) {
+      const msg = (crossMode.phase === 'pick-a') ?
+                    'cross: click slot A (must be filled)' :
+                  (crossMode.phase === 'pick-b') ?
+                    'cross: click slot B (must be filled)' :
+                    'cross: click target slot to write the child';
+      html += '<div class="cx-prompt">' + msg + ' &nbsp; <a href="#" id="cx-cancel" style="color:#888;">cancel</a></div>';
+    }
+    if (errs.length) {
+      html += '<div class="err">' + errs.length + ' slot(s) with errors</div>';
+    }
+    if (chainLog.length) {
+      const tail = chainLog.slice(-10);
+      html += '<div class="chain-log">' +
+        tail.map(r => '<div class="row">' + escapeHtml(r) + '</div>').join('') +
+        '</div>';
+    }
+    statusEl.innerHTML = html;
+    dlBtn.disabled       = (filled !== N_SLOTS);
+    manifestBtn.disabled = (filled === 0);
+    crossBtn.classList.toggle('active', !!crossMode);
+    chainGABtn.disabled  = (filled < 2);
+    const cancelEl = document.getElementById('cx-cancel');
+    if (cancelEl) cancelEl.addEventListener('click', e => { e.preventDefault(); cancelCross(); });
+  }
+  function rerender(i) {
+    if (i === undefined) { for (let k = 0; k < N_SLOTS; k++) renderSlot(k); }
+    else renderSlot(i);
+    renderStatus();
+  }
+
+  function buildGrid() {
+    grid.innerHTML = '';
+    for (let i = 0; i < N_SLOTS; i++) {
+      const div = document.createElement('div');
+      div.id = 'slot-' + i;
+      grid.appendChild(div);
+      renderSlot(i);
+    }
+    grid.addEventListener('click', onSlotClick);
+    grid.addEventListener('change', onFileChange);
+    grid.addEventListener('input',  onNameInput);
+  }
+
+  function onNameInput(e) {
+    const inp = e.target;
+    if (!inp.classList || !inp.classList.contains('name-input')) return;
+    const i = parseInt(inp.dataset.i, 10);
+    const v = inp.value.slice(0, 28);
+    setSlot(i, {name: v});
+    /* Don't re-render the whole slot (would steal focus); just update
+       the trailer in s.bytes if the slot is full. */
+    if (slots[i].state === 'full' && slots[i].bytes) {
+      const meta = slotMeta(i);
+      slots[i].bytes.set(encodeTrailer(meta), GENOME_SIZE);
+    }
+    renderStatus();
+  }
+
+  function slotMeta(i) {
+    const s = slots[i];
+    return {
+      name:         s.name,
+      fitness:      s.fitness,
+      rng_seed:     s.rng_seed_used,
+      generations:  s.generations,
+      population:   s.population,
+      crud:         s.category,
+      type:         s.origin_type || 'A',
+      created_unix: Math.floor(Date.now() / 1000),
+    };
+  }
+
+  function onSlotClick(e) {
+    const slotEl = e.target.closest('.ha-slot');
+    if (!slotEl) return;
+    const i = parseInt(slotEl.id.replace('slot-', ''), 10);
+
+    /* Cross mode intercepts all slot clicks. */
+    if (crossMode) {
+      const interesting = e.target.tagName !== 'INPUT';
+      if (interesting) {
+        handleCrossClick(i);
+        return;
+      }
+    }
+
+    const catBtn = e.target.closest('button[data-cat]');
+    if (catBtn) {
+      const k = catBtn.dataset.cat;
+      if (k in CATEGORIES) {
+        setSlot(i, {category: k});
+        if (slots[i].state === 'full' && slots[i].bytes) {
+          slots[i].bytes.set(encodeTrailer(slotMeta(i)), GENOME_SIZE);
+        }
+        rerender(i);
+      }
+      return;
+    }
+    const actBtn = e.target.closest('button[data-act]');
+    if (!actBtn) return;
+    const act = actBtn.dataset.act;
+    if (act === 'upload')      slotEl.querySelector('input[type=file]').click();
+    else if (act === 'clear')  {
+      setSlot(i, {state: 'empty', bytes: null, fitness: null,
+                   rng_seed_used: null, generations: null,
+                   population: null, origin_type: null, err: null});
+      rerender(i);
+    }
+    else if (act === 'evolve') evolveSlot(i, 'A');
+    else if (act === 'refine') refineSlot(i);
+    else if (act === 'mutate') mutateSlot(i);
+  }
+
+  function onFileChange(e) {
+    const inp = e.target;
+    if (inp.tagName !== 'INPUT' || inp.type !== 'file') return;
+    const i = parseInt(inp.dataset.i, 10);
+    const f = inp.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result);
+      if (bytes.length !== BLOCK_SIZE) {
+        setSlot(i, {state: 'bad', bytes: null, err:
+          'wrong size: ' + bytes.length + ' B (need ' + BLOCK_SIZE + ')'});
+      } else {
+        const parts = splitSlot(bytes);
+        const meta  = decodeTrailer(new Uint8Array(parts.trailer));
+        if (meta) {
+          /* Self-describing upload: restore metadata. */
+          setSlot(i, {
+            state: 'full', bytes: bytes,
+            name: meta.name || defaultName(i),
+            fitness: meta.fitness,
+            rng_seed_used: meta.rng_seed,
+            generations: meta.generations,
+            population: meta.population,
+            origin_type: 'U',
+            category: meta.crud in CATEGORIES ? meta.crud : 'c',
+            err: null,
+          });
+        } else {
+          /* Raw 4096-byte upload: treat last 128 B as data, score
+             honestly with identity-tail fitness so the reported number
+             matches what the truncated slot actually computes. */
+          let fit = null;
+          const cfg = readCfg();
+          try { fit = honestFitness(bytes, cfg.rng_seed_base); } catch (_e) {}
+          /* Stamp a fresh trailer over it so this slot is now
+             self-describing on next download. */
+          const meta = { name: slots[i].name, fitness: fit,
+                          rng_seed: cfg.rng_seed_base,
+                          generations: 0, population: 0,
+                          crud: slots[i].category, type: 'U',
+                          created_unix: Math.floor(Date.now()/1000) };
+          bytes.set(encodeTrailer(meta), GENOME_SIZE);
+          setSlot(i, {state: 'full', bytes: bytes, fitness: fit,
+                       rng_seed_used: cfg.rng_seed_base, generations: 0,
+                       population: 0, origin_type: 'U', err: null});
+        }
+      }
+      rerender(i);
+      inp.value = '';
+    };
+    reader.onerror = () => {
+      setSlot(i, {state: 'bad', bytes: null, err: 'read failed'});
+      rerender(i);
+    };
+    reader.readAsArrayBuffer(f);
+  }
+
+  /* ── Per-slot GA operations ──────────────────────────────────── */
+
+  async function evolveSlot(i, type='A') {
+    if (slots[i].state === 'busy') return;
+    const cfg = readCfg();
+    const seed = (cfg.rng_seed_base + i) >>> 0;
+    setSlot(i, {state: 'busy', err: null, busy_msg: 'evolving…'});
+    rerender(i);
+    try {
+      const raw = await HH.hexhunter_async({
+        population:          cfg.population,
+        generations:         cfg.generations,
+        init_mutation_rate:  cfg.init_mutation_rate,
+        breed_mutation_rate: cfg.breed_mutation_rate,
+        rng_seed:            seed,
+      });
+      const block = packSlotFromGenome(raw, {
+        name: slots[i].name, rng_seed: seed,
+        generations: cfg.generations, population: cfg.population,
+        crud: slots[i].category, type: type,
+      });
+      const fit = honestFitness(block, seed);
+      block.set(encodeTrailer({
+        name: slots[i].name, fitness: fit, rng_seed: seed,
+        generations: cfg.generations, population: cfg.population,
+        crud: slots[i].category, type: type,
+        created_unix: Math.floor(Date.now()/1000),
+      }), GENOME_SIZE);
+      setSlot(i, {state:'full', bytes:block, fitness:fit,
+                   rng_seed_used:seed, generations:cfg.generations,
+                   population:cfg.population, origin_type: type, err:null});
+    } catch (e) {
+      setSlot(i, {state:'bad', bytes:null,
+                   err: e.message || String(e)});
+    }
+    rerender(i);
+  }
+
+  async function refineSlot(i) {
+    if (slots[i].state !== 'full') return;
+    const cfg = readCfg();
+    const seed = ((slots[i].rng_seed_used || cfg.rng_seed_base) + 7919) >>> 0;
+    setSlot(i, {state:'busy', err:null, busy_msg:'refining…'});
+    rerender(i);
+    try {
+      /* Pad the slot to a full 4096-byte K=4 genome for the GA
+         (replace trailer with identity defaults), refine, then
+         re-attach the trailer. */
+      const padded = new Uint8Array(BLOCK_SIZE);
+      padded.set(slots[i].bytes.subarray(0, GENOME_SIZE), 0);
+      padded.set(identityTailBytes(), GENOME_SIZE);
+      const raw = await HH.hexhunter_refine_async(padded, {
+        population:          cfg.population,
+        generations:         cfg.generations,
+        init_mutation_rate:  cfg.init_mutation_rate,
+        breed_mutation_rate: cfg.breed_mutation_rate,
+        rng_seed:            seed,
+      });
+      const fit = honestFitness(raw, seed);
+      const out = new Uint8Array(BLOCK_SIZE);
+      out.set(raw.subarray(0, GENOME_SIZE), 0);
+      out.set(encodeTrailer({
+        name: slots[i].name, fitness: fit, rng_seed: seed,
+        generations: cfg.generations, population: cfg.population,
+        crud: slots[i].category, type: 'R',
+        created_unix: Math.floor(Date.now()/1000),
+      }), GENOME_SIZE);
+      setSlot(i, {state:'full', bytes:out, fitness:fit,
+                   rng_seed_used:seed, generations:cfg.generations,
+                   population:cfg.population, origin_type:'R', err:null});
+    } catch (e) {
+      setSlot(i, {state:'bad', err: e.message || String(e)});
+    }
+    rerender(i);
+  }
+
+  async function mutateSlot(i) {
+    if (slots[i].state !== 'full') return;
+    const cfg = readCfg();
+    /* "mutate" = a tiny refine — population/generations bumped down. */
+    const seed = ((slots[i].rng_seed_used || cfg.rng_seed_base) + 1) >>> 0;
+    const tinyPop  = Math.min(cfg.population, 6);
+    const tinyGens = Math.min(cfg.generations, 3);
+    setSlot(i, {state:'busy', err:null, busy_msg:'mutating…'});
+    rerender(i);
+    try {
+      const padded = new Uint8Array(BLOCK_SIZE);
+      padded.set(slots[i].bytes.subarray(0, GENOME_SIZE), 0);
+      padded.set(identityTailBytes(), GENOME_SIZE);
+      const raw = await HH.hexhunter_refine_async(padded, {
+        population: tinyPop, generations: tinyGens,
+        init_mutation_rate: cfg.init_mutation_rate,
+        breed_mutation_rate: cfg.breed_mutation_rate,
+        rng_seed: seed,
+      });
+      const fit = honestFitness(raw, seed);
+      const out = new Uint8Array(BLOCK_SIZE);
+      out.set(raw.subarray(0, GENOME_SIZE), 0);
+      out.set(encodeTrailer({
+        name: slots[i].name, fitness: fit, rng_seed: seed,
+        generations: tinyGens, population: tinyPop,
+        crud: slots[i].category, type: 'M',
+        created_unix: Math.floor(Date.now()/1000),
+      }), GENOME_SIZE);
+      setSlot(i, {state:'full', bytes:out, fitness:fit,
+                   rng_seed_used:seed, generations:tinyGens,
+                   population:tinyPop, origin_type:'M', err:null});
+    } catch (e) {
+      setSlot(i, {state:'bad', err: e.message || String(e)});
+    }
+    rerender(i);
+  }
+
+  function packSlotFromGenome(raw4096, meta) {
+    const out = new Uint8Array(BLOCK_SIZE);
+    out.set(raw4096.subarray(0, GENOME_SIZE), 0);
+    out.set(encodeTrailer({...meta, fitness: 0,
+                            created_unix: Math.floor(Date.now()/1000)}),
+            GENOME_SIZE);
+    return out;
+  }
+
+  /* ── Cross mode ─────────────────────────────────────────────── */
+
+  function startCross() {
+    crossMode = {phase: 'pick-a'};
+    chainLog.push('cross: pick slot A');
+    rerender();
+  }
+  function cancelCross() {
+    crossMode = null;
+    chainLog.push('cross: cancelled');
+    rerender();
+  }
+  function handleCrossClick(i) {
+    const s = slots[i];
+    if (crossMode.phase === 'pick-a') {
+      if (s.state !== 'full') {
+        chainLog.push('cross: slot ' + i + ' is empty, pick a filled slot');
+        rerender();
+        return;
+      }
+      crossMode = {phase: 'pick-b', a: i};
+      chainLog.push('cross: A = slot ' + i + ' (' + s.name + '); pick B');
+      rerender();
+      return;
+    }
+    if (crossMode.phase === 'pick-b') {
+      if (i === crossMode.a) {
+        chainLog.push('cross: B must differ from A');
+        rerender(); return;
+      }
+      if (s.state !== 'full') {
+        chainLog.push('cross: slot ' + i + ' empty; pick filled B');
+        rerender(); return;
+      }
+      crossMode = {phase: 'pick-target', a: crossMode.a, b: i};
+      chainLog.push('cross: B = slot ' + i + ' (' + s.name + '); pick target');
+      rerender();
+      return;
+    }
+    /* pick-target — write the child here */
+    doCross(crossMode.a, crossMode.b, i);
+  }
+  function doCross(a, b, t) {
+    const sa = slots[a], sb = slots[b];
+    if (sa.state !== 'full' || sb.state !== 'full') {
+      chainLog.push('cross: aborted (parents must be full)');
+      crossMode = null; rerender(); return;
+    }
+    /* Random 1-point crossover over the genome region (not the
+       trailer).  Use the RNG seed of parent A advanced by 1 so the
+       cut is deterministic per (a,b). */
+    const cfg = readCfg();
+    const seed = ((sa.rng_seed_used || cfg.rng_seed_base) ^ (sb.rng_seed_used || 0)) >>> 0;
+    const cut = 1 + ((seed * 2654435761) >>> 0) % (GENOME_SIZE - 1);
+    const child = new Uint8Array(BLOCK_SIZE);
+    child.set(sa.bytes.subarray(0, cut), 0);
+    child.set(sb.bytes.subarray(cut, GENOME_SIZE), cut);
+    const fit = honestFitness(child, seed);
+    const name = (sa.name.slice(0,8) + 'x' + sb.name.slice(0,8)).slice(0,28);
+    const cat = slots[t].category;
+    child.set(encodeTrailer({
+      name: name, fitness: fit, rng_seed: seed,
+      generations: 0, population: 0,
+      crud: cat, type: 'X',
+      created_unix: Math.floor(Date.now()/1000),
+    }), GENOME_SIZE);
+    setSlot(t, {state:'full', bytes:child, name:name, fitness:fit,
+                 rng_seed_used:seed, generations:0, population:0,
+                 origin_type:'X', err:null});
+    chainLog.push('cross: target = slot ' + t + ' → ' + name +
+                   ' (cut=' + cut + ', fit=' + fit.toFixed(3) + ')');
+    crossMode = null;
+    rerender();
+  }
+  crossBtn.addEventListener('click', () => {
+    if (crossMode) cancelCross(); else startCross();
+  });
+
+  /* ── Chain-level GA ─────────────────────────────────────────── */
+
+  async function evolveChain() {
+    const chainGens = parseInt(document.getElementById('chain_gens').value, 10) || 3;
+    chainGABtn.disabled = true;
+    const cfg = readCfg();
+    /* Strategy: per chain-gen, rank filled slots by fitness; the
+       bottom half (filled) get replaced by a 1-point crossover child
+       of two random top-half slots, followed by a tiny refine. */
+    try {
+      for (let gen = 1; gen <= chainGens; gen++) {
+        const filledIdx = [];
+        for (let i = 0; i < N_SLOTS; i++) if (slots[i].state === 'full') filledIdx.push(i);
+        if (filledIdx.length < 2) {
+          chainLog.push('chain-GA gen ' + gen + ': < 2 filled slots, stop');
+          break;
+        }
+        filledIdx.sort((x, y) => (slots[y].fitness || 0) - (slots[x].fitness || 0));
+        const half = Math.max(1, Math.floor(filledIdx.length / 2));
+        const top  = filledIdx.slice(0, half);
+        const bot  = filledIdx.slice(half);
+        let bestF = slots[top[0]].fitness;
+        let meanF = filledIdx.reduce((s,i)=>s+(slots[i].fitness||0),0) / filledIdx.length;
+        chainLog.push('chain-GA gen ' + gen + ': top fit=' + bestF.toFixed(3) +
+                       ' mean=' + meanF.toFixed(3) +
+                       ' top=[' + top.join(',') + '] bot=[' + bot.join(',') + ']');
+        rerender();
+        for (const t of bot) {
+          /* Pick two distinct parents from top */
+          const pa = top[Math.floor(Math.random() * top.length)];
+          let pb = top[Math.floor(Math.random() * top.length)];
+          if (pb === pa && top.length > 1) {
+            pb = top[(top.indexOf(pa) + 1) % top.length];
+          }
+          await crossAndMutate(pa, pb, t, gen, cfg);
+        }
+      }
+      const filled = slots.filter(s => s.state === 'full');
+      const sumF = filled.reduce((s,sl)=>s+(sl.fitness||0),0);
+      chainLog.push('chain-GA done · Σfit=' + sumF.toFixed(2));
+    } finally {
+      chainGABtn.disabled = false;
+      rerender();
+    }
+  }
+  async function crossAndMutate(a, b, t, gen, cfg) {
+    const sa = slots[a], sb = slots[b];
+    /* deterministic cut from the two parent seeds + gen number */
+    const seed = (((sa.rng_seed_used||0) ^ (sb.rng_seed_used||0)) + gen * 1009) >>> 0;
+    const cut = 1 + ((seed * 2654435761) >>> 0) % (GENOME_SIZE - 1);
+    const child = new Uint8Array(BLOCK_SIZE);
+    child.set(sa.bytes.subarray(0, cut), 0);
+    child.set(sb.bytes.subarray(cut, GENOME_SIZE), cut);
+    /* Quick refine the child to settle the crossover seam. */
+    const padded = new Uint8Array(BLOCK_SIZE);
+    padded.set(child.subarray(0, GENOME_SIZE), 0);
+    padded.set(identityTailBytes(), GENOME_SIZE);
+    setSlot(t, {state:'busy', err:null, busy_msg:'chain-GA gen '+gen});
+    rerender(t);
+    try {
+      const raw = await HH.hexhunter_refine_async(padded, {
+        population: Math.min(cfg.population, 6),
+        generations: Math.min(cfg.generations, 3),
+        init_mutation_rate: cfg.init_mutation_rate,
+        breed_mutation_rate: cfg.breed_mutation_rate,
+        rng_seed: seed,
+      });
+      const fit = honestFitness(raw, seed);
+      const name = (sa.name.slice(0,6) + 'x' + sb.name.slice(0,6) + '-' + gen).slice(0,28);
+      const out = new Uint8Array(BLOCK_SIZE);
+      out.set(raw.subarray(0, GENOME_SIZE), 0);
+      out.set(encodeTrailer({
+        name: name, fitness: fit, rng_seed: seed,
+        generations: Math.min(cfg.generations, 3),
+        population:  Math.min(cfg.population, 6),
+        crud: slots[t].category, type: 'X',
+        created_unix: Math.floor(Date.now()/1000),
+      }), GENOME_SIZE);
+      setSlot(t, {state:'full', bytes:out, name:name, fitness:fit,
+                   rng_seed_used:seed,
+                   generations: Math.min(cfg.generations, 3),
+                   population:  Math.min(cfg.population, 6),
+                   origin_type:'X', err:null});
+    } catch (e) {
+      setSlot(t, {state:'bad', err: e.message || String(e)});
+    }
+    rerender(t);
+  }
+  chainGABtn.addEventListener('click', evolveChain);
+
+  /* ── Bulk operations ─────────────────────────────────────────── */
+
+  evolveAll.addEventListener('click', async () => {
+    evolveAll.disabled = true;
+    try {
+      for (let i = 0; i < N_SLOTS; i++) {
+        if (slots[i].state === 'empty') await evolveSlot(i, 'A');
+      }
+    } finally {
+      evolveAll.disabled = false;
+    }
+  });
+
+  clearAll.addEventListener('click', () => {
+    for (let i = 0; i < N_SLOTS; i++) { resetSlot(i); renderSlot(i); }
+    renderStatus();
+  });
+
+  function downloadBlob(bytes, filename, mime) {
+    const blob = new Blob([bytes], {type: mime});
+    const url  = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+  }
+
+  dlBtn.addEventListener('click', () => {
+    const out = new Uint8Array(TOTAL_SIZE);
+    for (let i = 0; i < N_SLOTS; i++) out.set(slots[i].bytes, i * BLOCK_SIZE);
+    const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    downloadBlob(out, 'hexhunter-64k-' + ts + '.bin',
+                 'application/octet-stream');
+  });
+
+  manifestBtn.addEventListener('click', async () => {
+    const ts = new Date().toISOString();
+    const counts = {c: 0, r: 0, u: 0, d: 0};
+    for (const s of slots) counts[s.category]++;
+    const entries = [];
+    for (let i = 0; i < N_SLOTS; i++) {
+      const s = slots[i];
+      entries.push({
+        slot:          i,
+        offset:        i * BLOCK_SIZE,
+        size:          s.state === 'full' ? s.bytes.length : 0,
+        state:         s.state,
+        name:          s.name,
+        category:      s.category,
+        category_name: CATEGORIES[s.category],
+        origin_type:   s.origin_type,
+        origin_name:   s.origin_type ? TYPE_NAMES[s.origin_type] : null,
+        rng_seed:      s.rng_seed_used,
+        generations:   s.generations,
+        population:    s.population,
+        fitness:       s.fitness,
+        sha256:        s.state === 'full' ? await sha256Hex(s.bytes) : null,
+        err:           s.err || null,
+      });
+    }
+    const manifest = {
+      kind:        'hexhunter-64k-manifest',
+      version:     2,
+      trailer_magic: TRAILER_MAGIC,
+      genome_size: GENOME_SIZE,
+      trailer_size: TRAILER_SIZE,
+      created_at:  ts,
+      n_slots:     N_SLOTS,
+      block_size:  BLOCK_SIZE,
+      total_size:  TOTAL_SIZE,
+      categories:  CATEGORIES,
+      crud_counts: counts,
+      slots:       entries,
+    };
+    const tsf = ts.replace(/[:.]/g,'-').slice(0,19);
+    downloadBlob(JSON.stringify(manifest, null, 2),
+                 'hexhunter-64k-' + tsf + '.manifest.json',
+                 'application/json');
+  });
+
+  buildGrid();
+  renderStatus();
+})();
+</script>
+{% endblock %}

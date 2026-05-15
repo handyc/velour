@@ -724,3 +724,111 @@ def run_progress_json(request, slug):
         'finished_at':       run.finished_at.isoformat()       if run.finished_at       else None,
         'last_heartbeat_at': run.last_heartbeat_at.isoformat() if run.last_heartbeat_at else None,
     })
+
+
+# ── /helix/hexhunt/lib/ — standalone hexhunter algorithm + ports ──
+#
+# These views surface the algorithm itself (independent of the helix
+# DNA-corpus hunt above) and the C / Python / JS ports of it. The
+# run + refine pages execute entirely client-side via the bundled JS
+# port; the views here just serve the form and the worker payload.
+
+from . import lib as hh_lib
+
+
+@login_required
+@require_GET
+def lib_index(request):
+    return render(request, 'helix/hexhunt/lib_index.html', {
+        'ports': list(hh_lib.PORTS.values()),
+    })
+
+
+@login_required
+@require_GET
+def lib_algorithm(request):
+    return render(request, 'helix/hexhunt/lib_algorithm.html', {})
+
+
+@login_required
+@require_GET
+def lib_run(request):
+    return render(request, 'helix/hexhunt/lib_run.html', {
+        'spec': hh_lib.RunSpec.defaults(),
+        'mode': 'run',
+    })
+
+
+@login_required
+@require_GET
+def lib_refine(request):
+    return render(request, 'helix/hexhunt/lib_run.html', {
+        'spec': hh_lib.RunSpec.defaults(),
+        'mode': 'refine',
+    })
+
+
+@login_required
+@require_GET
+def lib_assemble(request):
+    """Assemble 16 × 4096-byte rulesets into a single 64 KiB binary.
+
+    Pure client-side: 16 numbered slots each filled by upload or by a
+    fresh in-browser GA via the bundled JS port.  When all 16 are
+    filled, the download button concatenates them in slot order and
+    serves a 65,536-byte blob.
+    """
+    return render(request, 'helix/hexhunt/lib_assemble.html', {
+        'spec':       hh_lib.RunSpec.defaults(),
+        'n_slots':    16,
+        'block_size': 4096,
+        'total_size': 16 * 4096,
+    })
+
+
+@login_required
+@require_GET
+def lib_ports(request):
+    return render(request, 'helix/hexhunt/lib_ports.html', {
+        'ports': list(hh_lib.PORTS.values()),
+    })
+
+
+@login_required
+@require_GET
+def lib_port_detail(request, slug):
+    port = hh_lib.PORTS.get(slug)
+    if port is None or not port.exists:
+        raise Http404(f'unknown port {slug!r}')
+    source = port.path.read_text()
+    return render(request, 'helix/hexhunt/lib_port.html', {
+        'port':   port,
+        'source': source,
+        'lines':  source.count('\n') + 1,
+    })
+
+
+@login_required
+@require_GET
+def lib_port_download(request, slug):
+    """Raw download of one of the port files."""
+    from django.http import FileResponse
+    port = hh_lib.PORTS.get(slug)
+    if port is None or not port.exists:
+        raise Http404(f'unknown port {slug!r}')
+    return FileResponse(port.path.open('rb'),
+                        as_attachment=True, filename=port.filename)
+
+
+@require_GET
+def lib_js_port(request):
+    """Serve the bundled JS port for the run + refine pages to
+    <script src=…> it.  Login NOT required so it can be loaded by a
+    Web Worker spawned from the (logged-in) parent page without an
+    extra round-trip cookie dance."""
+    from django.http import HttpResponse
+    js_path = hh_lib.LIB_DIR / 'hexhunter.js'
+    if not js_path.is_file():
+        raise Http404('hexhunter.js not found')
+    return HttpResponse(js_path.read_text(),
+                        content_type='application/javascript')

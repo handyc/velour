@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — library{% endblock %}
+{% block content %}
+<style>
+  .hh-page { max-width: 60em; }
+  .hh-page h1 { margin: 0 0 4px; }
+  .hh-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .hh-page .crumbs a { color: #ace; }
+  .hh-card { display: block; padding: 12px 14px; margin: 10px 0;
+              border: 1px solid #1f1f1f; background: #0a0a0a;
+              text-decoration: none; color: inherit; }
+  .hh-card:hover { border-color: #335; background: #0a0a14; }
+  .hh-card h2 { margin: 0 0 4px; font-size: 1rem; color: #cfc;
+                 font-weight: normal; }
+  .hh-card p  { margin: 0; color: #aaa; font-size: 0.85rem; }
+  .hh-card .arr { float: right; color: #6c6; }
+  .hh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hh-grid .hh-card { margin: 0; }
+</style>
+
+<div class="hh-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    library
+  </div>
+  <h1>hexhunter — standalone library</h1>
+  <p style="color:#aaa;max-width:46em;">
+    The class-4 hex-CA hunter, repackaged as a reusable library.
+    Pure algorithm: no DNA corpus, no Velour models, no I/O.
+    Drop the source into any project; same behaviour from C, Python,
+    or JavaScript thanks to a deterministic 32-bit LCG threaded through
+    every call.
+  </p>
+
+  <a class="hh-card" href="{% url 'helix:hexhunt:lib_algorithm' %}">
+    <span class="arr">→</span>
+    <h2>algorithm</h2>
+    <p>What the GA does, the smooth-tent fitness, the 4-bit hex
+       lookup, the packed 4096-byte genome layout.</p>
+  </a>
+
+  <div class="hh-grid">
+    <a class="hh-card" href="{% url 'helix:hexhunt:lib_run' %}">
+      <span class="arr">→</span>
+      <h2>run</h2>
+      <p>Evolve from scratch in your browser; download the winning
+         4096-byte ruleset.</p>
+    </a>
+    <a class="hh-card" href="{% url 'helix:hexhunt:lib_refine' %}">
+      <span class="arr">→</span>
+      <h2>refine</h2>
+      <p>Upload an existing ruleset; the GA continues around it and
+         returns the new best.</p>
+    </a>
+  </div>
+
+  <a class="hh-card" href="{% url 'helix:hexhunt:lib_assemble' %}">
+    <span class="arr">→</span>
+    <h2>assemble — 16 × 4096 B → 64 KiB</h2>
+    <p>Drop or evolve 16 rulesets into a 4×4 grid; concatenate them
+       in slot order into a single 65,536-byte file. Useful for
+       fleet-style packets, ESP firmware tails, or any consumer that
+       wants a fixed 64 KiB region of rule data.</p>
+  </a>
+
+  <a class="hh-card" href="{% url 'helix:hexhunt:lib_ports' %}">
+    <span class="arr">→</span>
+    <h2>ports</h2>
+    <p>{{ ports|length }} files: C library + header + CLI + tests +
+       Makefile + Python port + JavaScript port + README.  All
+       byte-identical for the same (population, generations, seed).</p>
+  </a>
+</div>
+{% endblock %}

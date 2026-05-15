@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — algorithm{% endblock %}
+{% block content %}
+<style>
+  .ha-page { max-width: 56em; }
+  .ha-page h1 { margin: 0 0 4px; }
+  .ha-page h2 { margin: 1.6rem 0 0.4rem; font-size: 1rem; color: #cfc;
+                 font-weight: normal; letter-spacing: 0.04em;
+                 border-bottom: 1px solid #1f1f1f; padding-bottom: 4px; }
+  .ha-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .ha-page .crumbs a { color: #ace; }
+  .ha-page p, .ha-page li { color: #ccc; line-height: 1.55; }
+  .ha-page code { color: #ffd; background: #161616; padding: 1px 4px;
+                   border-radius: 2px; }
+  .ha-page pre { background: #050505; border: 1px solid #1a1a1a;
+                  padding: 10px 12px; color: #ddd; overflow-x: auto;
+                  font-size: 0.82rem; line-height: 1.4; }
+  .ha-fig { background: #0a0a0a; border: 1px solid #1f1f1f;
+             padding: 12px 14px; margin: 12px 0;
+             font-family: monospace; font-size: 0.78rem; color: #ddd;
+             white-space: pre; }
+  .ha-fig .lab { color: #888; font-size: 0.75rem; margin-bottom: 6px;
+                  text-transform: uppercase; letter-spacing: 0.05em;
+                  font-family: inherit; }
+  .ha-tent { display: block; margin: 8px 0; }
+</style>
+
+<div class="ha-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    <a href="{% url 'helix:hexhunt:lib_index' %}">library</a> ›
+    algorithm
+  </div>
+  <h1>algorithm</h1>
+  <p>
+    The hexhunter searches the space of <strong>4-state hex cellular
+    automata</strong> for class-4 dynamics &mdash; rules that are neither
+    flat (class&nbsp;1/2) nor noisy (class&nbsp;3), but live on the
+    edge-of-chaos band where structures form, drift, and interact.
+    The search is a small, deliberately stupid genetic algorithm; the
+    interesting part is the <em>fitness</em>.
+  </p>
+
+  <h2>genome</h2>
+  <p>
+    A hex CA cell has 6 neighbours plus itself &mdash; 7 cells, each
+    in one of <code>K=4</code> states.  That's <code>K&#8311; = 16,384</code>
+    distinct local <em>situations</em>, and a complete rule maps each
+    one to the next colour of the centre cell.  Each entry needs only
+    2 bits, so the rule packs into:
+  </p>
+
+  <pre>K&#8311; situations &times; 2 bits / 8 = 4096 bytes</pre>
+
+  <p>
+    The packing convention is <code>(self &lt;&lt; 12) | (n0 &lt;&lt; 10) |
+    ... | n5</code>, with neighbours <code>n0..n5</code> in
+    row-parity-sensitive offset order.  The same indexing scheme is
+    used by the main automaton app, by spoeqi, and by every port of
+    this library.
+  </p>
+
+  <h2>identity seed</h2>
+  <p>
+    Every run starts from the <em>identity</em> rule &mdash; every
+    situation maps the centre to its current colour.  This gives the
+    GA a flat zero-activity floor to climb from:
+  </p>
+  <pre>genome[0..1024)    = 0x00   // self=0 → next=0
+genome[1024..2048) = 0x55   // self=1 → next=1
+genome[2048..3072) = 0xAA   // self=2 → next=2
+genome[3072..4096) = 0xFF   // self=3 → next=3</pre>
+
+  <h2>fitness — smooth tent on activity</h2>
+  <p>
+    For each candidate genome, run a deterministic 14&times;14 hex grid
+    for <code>HORIZON=25</code> ticks and look at the last third of
+    its activity history (fraction of cells that flipped per tick).
+    Score is the sum of:
+  </p>
+  <ul>
+    <li><strong>+1.0</strong> if the final grid is not uniform</li>
+    <li><strong>+1.5</strong> if the activity tail never fell to zero (aperiodic proxy)</li>
+    <li><strong>+2.0&times;activity_reward</strong> &mdash; smooth tent peaking at activity=0.12</li>
+    <li><strong>+0.25&times;diversity</strong> if &ge;2 colours each occupy &ge;1% of the final grid</li>
+  </ul>
+
+  <p>The activity reward is the load-bearing piece:</p>
+  <pre>if avg &le; 0.12: reward = avg / 0.12          // 0 → 1
+else:           reward = (0.75 - avg) / 0.63  // 1 → 0 at avg=0.75</pre>
+
+  <div class="ha-fig">
+<span class="lab">activity reward (peak at 0.12)</span>
+1.0 │             /\
+    │            /  \____
+0.5 │           /        \____
+    │          /              \____
+0.0 │_________/                    \________
+    └─────────┬─────┬──────┬──────┬─────────
+            0.0  0.12   0.25   0.50    0.75
+                    avg activity</div>
+
+  <p>
+    No hard cutoff: a near-dead genome with avg=0.005 still gets a
+    tiny non-zero pull toward the band, so the GA always has a
+    gradient to climb.  The original cutoff version stalled at
+    fitness ~3.5 because every barely-interesting genome scored
+    identically.
+  </p>
+
+  <h2>GA</h2>
+  <p>
+    Trivially small: tournament breeding from the top half of a
+    sorted population.
+  </p>
+  <pre>1. seed pool[0] = identity, pool[1..POP-1] = mutants of identity at init_rate (0.05)
+2. for GENS generations:
+     - score every genome on the same grid_seed
+     - sort descending by fitness
+     - bottom half ← cross(top[a], top[b]) then mutate at breed_rate (0.005)
+3. final sort, return pool[0]</pre>
+
+  <p>
+    Selection is implicit (top half always survives), crossover is
+    one-point random, mutation flips each of the 16384 entries with
+    probability <code>rate</code> to a new uniform colour.  Defaults
+    are <code>POP=30</code>, <code>GENS=40</code>, the same as the
+    original <code>./hunter</code> program.
+  </p>
+
+  <h2>determinism</h2>
+  <p>
+    All randomness comes from a single Park-Miller LCG
+    (<code>state*1103515245 + 12345</code>) seeded from
+    <code>rng_seed</code>.  Two runs with the same configuration produce
+    the same 4096-byte ruleset &mdash; in C, in Python, in JavaScript.
+    The library was rebuilt from the original
+    <code>oneclick_class4/hunter.c</code> specifically to remove the
+    libc <code>rand()</code> dependency that broke this guarantee
+    across platforms.
+  </p>
+
+  <p style="margin-top: 1.5rem;">
+    See the source ports →
+    <a href="{% url 'helix:hexhunt:lib_ports' %}" style="color:#ace;">library code</a>
+    or run it →
+    <a href="{% url 'helix:hexhunt:lib_run' %}" style="color:#ace;">run page</a>.
+  </p>
+</div>
+{% endblock %}

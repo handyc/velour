@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — {{ mode }}{% endblock %}
+{% block content %}
+<style>
+  .hr-page { max-width: 56em; }
+  .hr-page h1 { margin: 0 0 4px; }
+  .hr-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .hr-page .crumbs a { color: #ace; }
+  .hr-page p.intro { color: #aaa; max-width: 46em; }
+  .hr-page p.intro code { color: #ddd; padding: 0 4px; background: #1a1a1a; }
+
+  .hr-form { padding: 14px 16px; border: 1px solid #1f1f1f; background: #0a0a0a; }
+  .hr-form .grid { display: grid;
+                    grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
+  .hr-form .grid label { display: block; color: #888; font-size: 0.7rem;
+                          text-transform: uppercase; letter-spacing: 0.06em;
+                          margin-bottom: 2px; }
+  .hr-form input[type=text], .hr-form input[type=number],
+  .hr-form input[type=file] {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 100%; box-sizing: border-box;
+  }
+  .hr-form .upload { margin-top: 14px; }
+  .hr-form .controls { margin-top: 12px; display: flex; gap: 8px;
+                        align-items: center; }
+  .hr-form button { background: #222; color: #cfc; border: 1px solid #555;
+                     padding: 6px 18px; font-family: inherit; cursor: pointer; }
+  .hr-form button:hover { border-color: #8b949e; }
+  .hr-form button[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .hr-form .ws { color: #888; font-size: 0.85rem; }
+
+  .hr-progress { margin-top: 18px; padding: 12px 14px;
+                  border: 1px solid #1f1f1f; background: #050505; min-height: 2em;
+                  font-family: monospace; font-size: 0.82rem; }
+  .hr-progress h2 { margin: 0 0 6px; font-size: 0.9rem; color: #cfc;
+                     font-weight: normal; letter-spacing: 0.04em;
+                     font-family: inherit; }
+  .hr-progress .row { display: grid;
+                       grid-template-columns: 4em 6em 6em 9em 1fr;
+                       gap: 6px; padding: 1px 0; color: #ddd; }
+  .hr-progress .row .gen { color: #cfc; }
+  .hr-progress .row .num { color: #fff; }
+
+  .hr-result { margin-top: 16px; padding: 12px 14px;
+                border: 1px solid #2a3; background: #061206; }
+  .hr-result h2 { margin: 0 0 6px; font-size: 0.9rem; color: #6f6;
+                   font-weight: normal; letter-spacing: 0.05em; }
+  .hr-result .stat { color: #cfc; font-family: monospace; font-size: 0.85rem; }
+  .hr-result a.dl { display: inline-block; margin-top: 8px;
+                     padding: 6px 14px; background: #1a3a1a; color: #cfc;
+                     border: 1px solid #4a6; text-decoration: none; }
+  .hr-result a.dl:hover { background: #2a4a2a; }
+  .hr-err { color: #f88; margin-top: 12px; padding: 8px 10px;
+             border: 1px solid #4a1d1d; background: #1a0a0a; }
+</style>
+
+<div class="hr-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    <a href="{% url 'helix:hexhunt:lib_index' %}">library</a> ›
+    {{ mode }}
+    &nbsp;|&nbsp;
+    {% if mode == 'run' %}
+      <a href="{% url 'helix:hexhunt:lib_refine' %}">refine an existing ruleset →</a>
+    {% else %}
+      <a href="{% url 'helix:hexhunt:lib_run' %}">run from scratch →</a>
+    {% endif %}
+    &nbsp;|&nbsp;
+    <a href="{% url 'helix:hexhunt:lib_assemble' %}">assemble 16 → 64 KiB →</a>
+  </div>
+  <h1>{{ mode }}</h1>
+  <p class="intro">
+    {% if mode == 'run' %}
+      Evolve a class-4 hex-CA ruleset from the identity seed, entirely
+      in your browser via the bundled <a href="{% url 'helix:hexhunt:lib_port_detail' slug='js' %}" style="color:#ace;">JS port</a>.
+    {% else %}
+      Upload a 4096-byte ruleset; the GA continues around it for
+      <code>generations</code> more generations and returns the new
+      best.  Same JS port, same byte-equivalent results across C, Python
+      and JavaScript.
+    {% endif %}
+    The default settings reproduce the original
+    <code>./hunter POP GENS [SEED]</code> command-line tool.
+  </p>
+
+  <form id="hr-form" class="hr-form" onsubmit="return false;">
+    <div class="grid">
+      <div>
+        <label>population</label>
+        <input type="number" id="population" min="2" max="256" value="{{ spec.population }}">
+      </div>
+      <div>
+        <label>generations</label>
+        <input type="number" id="generations" min="1" max="200" value="{{ spec.generations }}">
+      </div>
+      <div>
+        <label>rng seed</label>
+        <input type="number" id="rng_seed" min="0" value="{{ spec.rng_seed }}">
+      </div>
+      <div>
+        <label>init mutation rate</label>
+        <input type="text" id="init_mutation_rate" value="{{ spec.init_mutation_rate }}">
+      </div>
+      <div>
+        <label>breed mutation rate</label>
+        <input type="text" id="breed_mutation_rate" value="{{ spec.breed_mutation_rate }}">
+      </div>
+      <div></div>
+    </div>
+
+    {% if mode == 'refine' %}
+      <div class="upload">
+        <label style="color:#cfc;font-size:0.85rem;">existing ruleset (4096 bytes)</label>
+        <input type="file" id="seed_file" accept=".bin,application/octet-stream">
+      </div>
+    {% endif %}
+
+    <div class="controls">
+      <button id="run-btn" type="submit">{{ mode }}</button>
+      <button id="cancel-btn" type="button" disabled>cancel</button>
+      <span class="ws" id="status">idle</span>
+    </div>
+  </form>
+
+  <div class="hr-progress" id="progress">
+    <h2>progress</h2>
+    <div class="row" style="color:#888;">
+      <span>gen</span><span>best</span><span>mean</span>
+      <span>activity tail</span><span></span>
+    </div>
+    <div id="rows"></div>
+  </div>
+
+  <div id="result"></div>
+</div>
+
+<script src="{% url 'helix:hexhunt:lib_js_port' %}"></script>
+<script>
+(function () {
+  const MODE = "{{ mode }}";
+  const HH = window.hexhunter_lib;
+  if (!HH) {
+    document.getElementById('status').textContent =
+      'failed to load JS port (window.hexhunter_lib missing)';
+    return;
+  }
+
+  const form     = document.getElementById('hr-form');
+  const runBtn   = document.getElementById('run-btn');
+  const cancelBtn= document.getElementById('cancel-btn');
+  const statusEl = document.getElementById('status');
+  const rowsEl   = document.getElementById('rows');
+  const resultEl = document.getElementById('result');
+
+  let cancelled = false;
+  cancelBtn.addEventListener('click', () => { cancelled = true; });
+
+  function setRunning(on) {
+    runBtn.disabled    = on;
+    cancelBtn.disabled = !on;
+    cancelled = false;
+  }
+  function pushRow(gen, total, best, mean, tail) {
+    const div = document.createElement('div');
+    div.className = 'row';
+    div.innerHTML =
+      '<span class="gen">' + gen + '/' + total + '</span>' +
+      '<span class="num">' + best.toFixed(3) + '</span>' +
+      '<span>' + mean.toFixed(3) + '</span>' +
+      '<span>' + tail.toFixed(3) + '</span>' +
+      '<span></span>';
+    rowsEl.appendChild(div);
+    div.scrollIntoView({block: 'nearest'});
+  }
+  function clearRows() {
+    rowsEl.innerHTML = '';
+    resultEl.innerHTML = '';
+  }
+  function showError(msg) {
+    const e = document.createElement('div');
+    e.className = 'hr-err';
+    e.textContent = msg;
+    resultEl.appendChild(e);
+  }
+  function showResult(genome, fit, ms) {
+    const blob = new Blob([genome], {type: 'application/octet-stream'});
+    const url  = URL.createObjectURL(blob);
+    const ts   = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    const el = document.createElement('div');
+    el.className = 'hr-result';
+    el.innerHTML =
+      '<h2>winner</h2>' +
+      '<div class="stat">'+
+        'fitness = ' + fit.toFixed(3) +
+        ' &nbsp;|&nbsp; '+ genome.length +' bytes' +
+        ' &nbsp;|&nbsp; ran in '+ ms +' ms'+
+      '</div>'+
+      '<a class="dl" download="hexhunter-'+ts+'.bin" href="'+url+'">'+
+      'download winner.bin</a>';
+    resultEl.appendChild(el);
+  }
+
+  function readSeedFile() {
+    return new Promise((resolve, reject) => {
+      const file = document.getElementById('seed_file').files[0];
+      if (!file) { reject(new Error('pick a 4096-byte .bin file first')); return; }
+      const reader = new FileReader();
+      reader.onload  = () => resolve(new Uint8Array(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  async function runOne() {
+    clearRows();
+    setRunning(true);
+    statusEl.textContent = 'running';
+    const cfg = {
+      population:          parseInt(document.getElementById('population').value, 10),
+      generations:         parseInt(document.getElementById('generations').value, 10),
+      init_mutation_rate:  parseFloat(document.getElementById('init_mutation_rate').value),
+      breed_mutation_rate: parseFloat(document.getElementById('breed_mutation_rate').value),
+      rng_seed:            parseInt(document.getElementById('rng_seed').value, 10),
+      progress: function (gen, total, best, mean, tail) {
+        if (cancelled) throw new Error('cancelled');
+        pushRow(gen, total, best, mean, tail);
+      },
+    };
+    const t0 = performance.now();
+    try {
+      let out;
+      if (MODE === 'refine') {
+        const seed = await readSeedFile();
+        if (seed.length !== HH.GENOME_BYTES) {
+          throw new Error('seed file must be ' + HH.GENOME_BYTES + ' bytes; got ' + seed.length);
+        }
+        out = await HH.hexhunter_refine_async(seed, cfg);
+      } else {
+        out = await HH.hexhunter_async(cfg);
+      }
+      const ms = (performance.now() - t0).toFixed(0);
+      const fit = HH.hexhunter_fitness(out, cfg);
+      showResult(out, fit, ms);
+      statusEl.textContent = 'done';
+    } catch (e) {
+      statusEl.textContent = e.message === 'cancelled' ? 'cancelled' : 'error';
+      if (e.message !== 'cancelled') showError(e.message || String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  runBtn.addEventListener('click', runOne);
+  form.addEventListener('submit', runOne);
+})();
+</script>
+{% endblock %}

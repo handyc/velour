@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}hexhunter — ports{% endblock %}
+{% block content %}
+<style>
+  .hp-page { max-width: 60em; }
+  .hp-page h1 { margin: 0 0 4px; }
+  .hp-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 18px; }
+  .hp-page .crumbs a { color: #ace; }
+  .hp-table { width: 100%; border-collapse: collapse;
+                font-family: monospace; font-size: 0.85rem;
+                margin-top: 16px; }
+  .hp-table th, .hp-table td { padding: 6px 10px; vertical-align: top;
+                                  border-bottom: 1px solid #1a1a1a; }
+  .hp-table th { text-align: left; color: #888; font-weight: normal;
+                  font-size: 0.7rem; letter-spacing: 0.05em;
+                  text-transform: uppercase; }
+  .hp-table tr:hover { background: #0a0a14; }
+  .hp-table .lang { color: #cfc; }
+  .hp-table .name a { color: #ace; text-decoration: none; }
+  .hp-table .name a:hover { text-decoration: underline; }
+  .hp-table .desc { color: #ccc; max-width: 28em; }
+  .hp-table .size { color: #888; text-align: right; white-space: nowrap; }
+  .hp-table .dl   { white-space: nowrap; }
+  .hp-table .dl a { color: #6c6; text-decoration: none; }
+  .hp-table .dl a:hover { text-decoration: underline; }
+</style>
+
+<div class="hp-page">
+  <div class="crumbs">
+    <a href="{% url 'helix:list' %}">helix</a> ›
+    <a href="{% url 'helix:hexhunt:list' %}">hex hunt</a> ›
+    <a href="{% url 'helix:hexhunt:lib_index' %}">library</a> ›
+    ports
+  </div>
+  <h1>ports</h1>
+  <p style="color:#aaa;max-width:46em;">
+    The standalone hexhunter library lives at
+    <code style="color:#ddd;">isolation/artifacts/hexhunter/</code>.
+    Every port produces byte-identical 4096-byte rulesets for the same
+    <code>(population, generations, rng_seed)</code> &mdash; verified
+    by running C, Python and JS through the same fixtures.
+  </p>
+
+  <table class="hp-table">
+    <thead>
+      <tr>
+        <th>language</th>
+        <th>file</th>
+        <th>description</th>
+        <th>size</th>
+        <th>download</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in ports %}
+        <tr>
+          <td class="lang">{{ p.label }}</td>
+          <td class="name">
+            <a href="{% url 'helix:hexhunt:lib_port_detail' slug=p.slug %}">{{ p.filename }}</a>
+          </td>
+          <td class="desc">{{ p.description }}</td>
+          <td class="size">{% if p.exists %}{{ p.size_bytes }} B{% else %}—{% endif %}</td>
+          <td class="dl">
+            {% if p.exists %}
+              <a href="{% url 'helix:hexhunt:lib_port_download' slug=p.slug %}">↓</a>
+            {% else %}
+              <span style="color:#666;">missing</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p style="color:#888;font-size:0.8rem;margin-top:16px;">
+    Build the C library in place: <code style="color:#ddd;">cd isolation/artifacts/hexhunter &amp;&amp; make</code>.
+    Run the Python port: <code style="color:#ddd;">python3 hexhunter.py 30 40 42 winner.bin</code>.
+    The JS port is loaded in-page on the
+    <a href="{% url 'helix:hexhunt:lib_run' %}" style="color:#ace;">run</a> and
+    <a href="{% url 'helix:hexhunt:lib_refine' %}" style="color:#ace;">refine</a>
+    pages.
+  </p>
+</div>
+{% endblock %}
