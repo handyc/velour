@@ -161,6 +161,7 @@ INSTALLED_APPS = [
     'signs',
     'escher',
     'loupe',
+    'scriptorium',
 ]
 
 MIDDLEWARE = [
@@ -313,3 +314,29 @@ if _apps_prod_parent.is_dir():
     )
 else:
     APP_OUTPUT_DIR = os.environ.get('APP_OUTPUT_DIR', str(BASE_DIR.parent))
+
+
+# ---------------------------------------------------------------------------
+# Scriptorium · optional embedded philology project (e.g. DANWSI)
+# ---------------------------------------------------------------------------
+# Project-specific paths and ingestion data are intentionally kept OUT of
+# this repo. Scriptorium reads them from the environment so a fresh
+# checkout has no DANWSI-specific (or any other tenant-specific) state
+# baked in. If DANWSI_LOCAL_PATH isn't set, scriptorium still loads —
+# its UI just shows "not configured" instead of registering the
+# external app + db.
+import sys as _sys
+_DANWSI_LOCAL_PATH = os.environ.get('DANWSI_LOCAL_PATH', '').strip()
+if _DANWSI_LOCAL_PATH and Path(_DANWSI_LOCAL_PATH).is_dir():
+    if _DANWSI_LOCAL_PATH not in _sys.path:
+        _sys.path.insert(0, _DANWSI_LOCAL_PATH)
+    if 'inscriptions' not in INSTALLED_APPS:
+        INSTALLED_APPS.append('inscriptions')
+    _DANWSI_DB_PATH = os.environ.get(
+        'DANWSI_DB_PATH', str(Path(_DANWSI_LOCAL_PATH) / 'db.sqlite3'),
+    )
+    DATABASES['danwsi'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': _DANWSI_DB_PATH,
+    }
+    DATABASE_ROUTERS = ['scriptorium.routers.InscriptionsRouter']

@@ -1,0 +1,100 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}{{ project.name }} — Scriptorium{% endblock %}
+
+{% block scriptorium %}
+<div class="breadcrumb">
+  <a href="{% url 'scriptorium:home' %}">Scriptorium</a> / {{ project.name }}
+</div>
+<h1>{{ project.name }}</h1>
+<p class="tagline">
+  {{ project.get_kind_display }}.
+  Local: <code>{{ project.local_path }}</code>.
+  {% if project.remote_host %}
+    Remote: <code>{{ project.remote_user|default:"" }}@{{ project.remote_host }}:{{ project.remote_path }}</code>.
+  {% endif %}
+  {% if project.public_url %}<a href="{{ project.public_url }}" target="_blank">↗ public site</a>{% endif %}
+</p>
+
+<h2>Status</h2>
+<div class="grid">
+  {% if local.error %}
+  <div class="card"><span class="label">Local counts</span>
+    <span class="val status-failed">!</span>
+    <span class="sub">{{ local.error }}</span>
+  </div>
+  {% else %}
+  <div class="card"><span class="label">Inscriptions (local)</span>
+    <span class="val">{{ local.inscriptions }}</span>
+    <span class="sub">{{ local.palmyrene }} Palmyrene · {{ local.old_syriac }} OS{% if local.hebrew %} · {{ local.hebrew }} Heb{% endif %}</span>
+  </div>
+  <div class="card"><span class="label">Words (local)</span>
+    <span class="val">{{ local.words }}</span></div>
+  <div class="card"><span class="label">Content data (local)</span>
+    <span class="val">{{ local.content }}</span></div>
+  {% endif %}
+
+  {% if remote %}
+    {% if remote.error %}
+    <div class="card"><span class="label">Remote counts</span>
+      <span class="val status-failed">!</span>
+      <span class="sub">{{ remote.error }}</span>
+    </div>
+    {% else %}
+    <div class="card"><span class="label">Inscriptions (remote)</span>
+      <span class="val">{{ remote.inscriptions }}</span>
+      <span class="sub">{{ remote.palmyrene }} Palmyrene · {{ remote.old_syriac }} OS{% if remote.hebrew %} · {{ remote.hebrew }} Heb{% endif %}</span></div>
+    <div class="card"><span class="label">Words (remote)</span>
+      <span class="val">{{ remote.words }}</span></div>
+    <div class="card"><span class="label">Content data (remote)</span>
+      <span class="val">{{ remote.content }}</span></div>
+    {% endif %}
+  {% endif %}
+</div>
+
+<h2>Actions</h2>
+<p>
+  <a href="{% url 'scriptorium:ingest' project.slug %}">📥 Ingest a data drop (local)</a> ·
+  <a href="{% url 'scriptorium:deploy' project.slug %}">🚀 Deploy + remote ingest</a> ·
+  <a href="{% url 'scriptorium:backups' project.slug %}">💾 Backups</a>
+</p>
+
+<h2>Data drops on disk</h2>
+{% if data_drops %}
+<table>
+  <thead><tr><th>Name</th><th class="num">.xlsx files</th><th>Last modified</th></tr></thead>
+  <tbody>
+    {% for d in data_drops %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td class="num">{{ d.xlsx_count }}</td>
+      <td class="dim">{{ d.last_modified|date:"Y-m-d H:i" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No data drops found at <code>{{ project.local_path }}/{{ project.data_dir_glob }}</code>.</p>
+{% endif %}
+
+<h2>Recent runs</h2>
+{% if recent_runs %}
+<table>
+  <thead><tr><th>Started</th><th>Op</th><th>Status</th><th>Data drop</th><th>Duration</th><th></th></tr></thead>
+  <tbody>
+    {% for run in recent_runs %}
+    <tr>
+      <td class="dim">{{ run.started_at|date:"Y-m-d H:i:s" }}</td>
+      <td>{{ run.get_op_display }}</td>
+      <td><span class="status-{{ run.status }}">{{ run.get_status_display }}</span></td>
+      <td class="dim">{{ run.data_dir|default:"—" }}</td>
+      <td class="dim num">{{ run.duration_seconds|default_if_none:"—" }}s</td>
+      <td><a href="{% url 'scriptorium:run_detail' run.id %}">detail →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">No runs yet.</p>
+{% endif %}
+{% endblock %}

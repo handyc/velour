@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+<style>
+  .scr-wrap { max-width: 1200px; margin: 1.25rem auto; padding: 0 1rem;
+              color: #c9d1d9; }
+  .scr-wrap h1 { margin: 0 0 0.2rem; font-size: 1.3rem; }
+  .scr-wrap h2 { font-size: 0.95rem; margin: 1.3rem 0 0.4rem; color: #c9d1d9; }
+  .scr-wrap h3 { font-size: 0.82rem; margin: 0.9rem 0 0.3rem; color: #8b949e;
+                 text-transform: uppercase; letter-spacing: 0.06em; }
+  .scr-wrap .tagline { color: #8b949e; font-size: 0.8rem; margin: 0 0 0.7rem;
+                       max-width: 78ch; line-height: 1.5; }
+  .scr-wrap a { color: #58a6ff; text-decoration: none; }
+  .scr-wrap a:hover { text-decoration: underline; }
+
+  .scr-wrap table { border-collapse: collapse; font-size: 0.76rem;
+                    font-family: ui-monospace, Menlo, monospace;
+                    width: 100%; margin: 0.2rem 0 0.6rem; }
+  .scr-wrap th, .scr-wrap td { padding: 0.25rem 0.5rem;
+                               border-bottom: 1px solid #21262d;
+                               text-align: left; vertical-align: top; }
+  .scr-wrap th { color: #8b949e; font-weight: normal;
+                 background: #0d1117; text-transform: uppercase;
+                 font-size: 0.68rem; letter-spacing: 0.04em; }
+  .scr-wrap td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scr-wrap td.dim { color: #6e7681; }
+
+  .scr-wrap .panel { background: #0d1117; border: 1px solid #30363d;
+                     border-radius: 3px; padding: 0.6rem 0.8rem;
+                     margin: 0.4rem 0 0.8rem; }
+  .scr-wrap .panel.warn   { border-color: #d29922; background: #1a1810; }
+  .scr-wrap .panel.error  { border-color: #f85149; background: #1a1010; }
+  .scr-wrap .panel.ok     { border-color: #2ea043; background: #0f1a11; }
+
+  .scr-wrap .grid { display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                    gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+  .scr-wrap .card { background: #161b22; border: 1px solid #30363d;
+                    border-radius: 3px; padding: 0.55rem 0.8rem;
+                    font-size: 0.8rem; }
+  .scr-wrap .card .label { display: block; color: #8b949e;
+                           text-transform: uppercase; letter-spacing: 0.05em;
+                           font-size: 0.66rem; margin-bottom: 0.15rem; }
+  .scr-wrap .card .val { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .scr-wrap .card .sub { color: #6e7681; font-size: 0.7rem; }
+
+  .scr-wrap form.inline { display: inline; }
+  .scr-wrap button, .scr-wrap input[type=submit] {
+    background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.3rem 0.7rem; border-radius: 3px;
+    font: inherit; font-size: 0.78rem; cursor: pointer;
+  }
+  .scr-wrap button:hover { background: #30363d; border-color: #58a6ff; }
+  .scr-wrap button.danger { border-color: #6e2626; color: #f85149; }
+  .scr-wrap button.danger:hover { background: #1a1010; border-color: #f85149; }
+  .scr-wrap button.primary { border-color: #2ea043; }
+  .scr-wrap button.primary:hover { background: #0f1a11; border-color: #3fb950; }
+
+  .scr-wrap input[type=text], .scr-wrap select, .scr-wrap textarea {
+    background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+    padding: 0.25rem 0.5rem; border-radius: 3px;
+    font: inherit; font-size: 0.78rem;
+  }
+
+  .scr-wrap .breadcrumb { color: #6e7681; font-size: 0.72rem;
+                          margin-bottom: 0.6rem; }
+
+  .scr-wrap .status-ok      { color: #2ea043; }
+  .scr-wrap .status-failed  { color: #f85149; }
+  .scr-wrap .status-running { color: #d29922; }
+  .scr-wrap .status-pending { color: #8b949e; }
+
+  .scr-wrap pre.console {
+    background: #0d1117; border: 1px solid #30363d; padding: 0.5rem;
+    font-size: 0.72rem; line-height: 1.4; max-height: 480px;
+    overflow: auto; white-space: pre-wrap; word-break: break-word;
+  }
+
+  .scr-wrap .messages { margin: 0.4rem 0; }
+  .scr-wrap .messages .msg { padding: 0.4rem 0.7rem; margin: 0.2rem 0;
+                              border-radius: 3px; font-size: 0.78rem; }
+  .scr-wrap .messages .msg.success { background: #0f1a11; border: 1px solid #2ea043; }
+  .scr-wrap .messages .msg.error   { background: #1a1010; border: 1px solid #f85149; }
+  .scr-wrap .messages .msg.warning { background: #1a1810; border: 1px solid #d29922; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scr-wrap">
+  {% if messages %}
+  <div class="messages">
+    {% for m in messages %}
+      <div class="msg {{ m.tags }}">{{ m }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% block scriptorium %}{% endblock %}
+</div>
+{% endblock %}

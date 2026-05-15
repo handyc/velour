@@ -1,0 +1,78 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}Scriptorium{% endblock %}
+
+{% block scriptorium %}
+<h1>Scriptorium</h1>
+<p class="tagline">
+  A workbench for analyzing, repairing, and extending Excel-fed philology
+  databases — sync, ingest, deploy, back up. Phase 1 ships against DANWSI;
+  the same model accepts other Django + Excel projects.
+</p>
+
+{% if not projects %}
+<div class="panel warn">
+  <strong>No projects configured.</strong>
+  Set <code>DANWSI_LOCAL_PATH</code> in your environment and run
+  <code>python manage.py scriptorium_init</code>, or add a row in the
+  <a href="/admin/scriptorium/philologyproject/add/">admin</a>.
+  {% if env_help.DANWSI_LOCAL_PATH %}
+    <div>Currently <code>DANWSI_LOCAL_PATH</code>={{ env_help.DANWSI_LOCAL_PATH }}</div>
+  {% endif %}
+</div>
+{% else %}
+<table>
+  <thead>
+    <tr>
+      <th>Project</th>
+      <th>Kind</th>
+      <th>Local path</th>
+      <th>Remote</th>
+      <th>Last local ingest</th>
+      <th>Last remote ingest</th>
+      <th>Last deploy</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in projects %}
+    <tr>
+      <td><a href="{% url 'scriptorium:project' r.p.slug %}">{{ r.p.name }}</a></td>
+      <td class="dim">{{ r.p.get_kind_display }}</td>
+      <td class="dim" title="{{ r.p.local_path }}">{{ r.p.local_path|truncatechars:42 }}</td>
+      <td class="dim">{{ r.p.remote_host|default:"—" }}</td>
+      <td>
+        {% if r.last_local_ingest %}
+          <span class="status-{{ r.last_local_ingest.status }}">{{ r.last_local_ingest.started_at|date:"Y-m-d H:i" }}</span>
+        {% else %}<span class="dim">—</span>{% endif %}
+      </td>
+      <td>
+        {% if r.last_remote_ingest %}
+          <span class="status-{{ r.last_remote_ingest.status }}">{{ r.last_remote_ingest.started_at|date:"Y-m-d H:i" }}</span>
+        {% else %}<span class="dim">—</span>{% endif %}
+      </td>
+      <td>
+        {% if r.last_deploy %}
+          <span class="status-{{ r.last_deploy.status }}">{{ r.last_deploy.started_at|date:"Y-m-d H:i" }}</span>
+        {% else %}<span class="dim">—</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h3>Configuration</h3>
+<div class="panel">
+  Project paths live in environment variables and the Velour database, not in
+  this repo. Set them per-host:
+  <pre class="console">export DANWSI_LOCAL_PATH=/path/to/danwsi
+export DANWSI_DB_PATH=$DANWSI_LOCAL_PATH/db.sqlite3
+# Optional remote / staging:
+export DANWSI_REMOTE_HOST=...
+export DANWSI_REMOTE_USER=...
+export DANWSI_REMOTE_PATH=...
+export DANWSI_REMOTE_PYTHON=...
+export DANWSI_SSH_KEY_PATH=$DANWSI_LOCAL_PATH/deploy/.ssh/deploy_key
+</pre>
+</div>
+{% endblock %}

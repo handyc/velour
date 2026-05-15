@@ -1,0 +1,63 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}Ingest — {{ project.name }}{% endblock %}
+
+{% block scriptorium %}
+<div class="breadcrumb">
+  <a href="{% url 'scriptorium:home' %}">Scriptorium</a> /
+  <a href="{% url 'scriptorium:project' project.slug %}">{{ project.name }}</a> /
+  Ingest (local)
+</div>
+<h1>Ingest a data drop — local</h1>
+<p class="tagline">
+  Pick a data-drop directory. Scriptorium takes a DB backup, then runs
+  <code>{{ project.venv_python }} manage.py {{ project.ingest_command }}</code>
+  with <code>{{ project.data_files_dir_env }}=&lt;drop&gt;</code>.
+</p>
+
+<form method="post" action="{% url 'scriptorium:ingest_run' project.slug %}">
+  {% csrf_token %}
+  <h2>Choose a drop</h2>
+  {% if data_drops %}
+  <table>
+    <thead><tr><th></th><th>Name</th><th class="num">.xlsx</th><th>Last modified</th></tr></thead>
+    <tbody>
+      {% for d in data_drops %}
+      <tr>
+        <td><input type="radio" name="data_drop" value="{{ d.name }}" {% if forloop.last %}checked{% endif %}></td>
+        <td>{{ d.name }}</td>
+        <td class="num">{{ d.xlsx_count }}</td>
+        <td class="dim">{{ d.last_modified|date:"Y-m-d H:i" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p>
+    <label><input type="checkbox" name="take_backup" checked> Take DB backup first (recommended)</label>
+  </p>
+  <p><button type="submit" class="primary">Run ingest</button></p>
+  {% else %}
+  <div class="panel warn">No data drops at <code>{{ project.local_path }}/{{ project.data_dir_glob }}</code>.</div>
+  {% endif %}
+</form>
+
+<h2>Recent ingest runs</h2>
+{% if recent_runs %}
+<table>
+  <thead><tr><th>Started</th><th>Op</th><th>Status</th><th>Data drop</th><th class="num">Inscriptions</th><th class="num">Words</th><th></th></tr></thead>
+  <tbody>
+    {% for run in recent_runs %}
+    <tr>
+      <td class="dim">{{ run.started_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ run.get_op_display }}</td>
+      <td><span class="status-{{ run.status }}">{{ run.get_status_display }}</span></td>
+      <td class="dim">{{ run.data_dir|default:"—" }}</td>
+      <td class="num">{{ run.summary.totals.inscriptions|default:"—" }}</td>
+      <td class="num">{{ run.summary.totals.words|default:"—" }}</td>
+      <td><a href="{% url 'scriptorium:run_detail' run.id %}">detail →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

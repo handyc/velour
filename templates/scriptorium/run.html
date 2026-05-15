@@ -1,0 +1,57 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}Run #{{ run.id }} — Scriptorium{% endblock %}
+
+{% block scriptorium %}
+<div class="breadcrumb">
+  <a href="{% url 'scriptorium:home' %}">Scriptorium</a> /
+  <a href="{% url 'scriptorium:project' run.project.slug %}">{{ run.project.name }}</a> /
+  Run #{{ run.id }}
+</div>
+<h1>{{ run.get_op_display }} — <span class="status-{{ run.status }}">{{ run.get_status_display }}</span></h1>
+<p class="tagline">
+  Started {{ run.started_at|date:"Y-m-d H:i:s" }}
+  {% if run.finished_at %}· finished {{ run.finished_at|date:"H:i:s" }} ({{ run.duration_seconds }}s){% endif %}
+  · exit code {{ run.exit_code|default_if_none:"—" }}
+  {% if run.data_dir %}· data drop <code>{{ run.data_dir }}</code>{% endif %}
+  {% if run.backup_path %}· backup <code>{{ run.backup_path }}</code>{% endif %}
+</p>
+
+{% if run.summary.totals %}
+<h2>Summary</h2>
+<div class="grid">
+  <div class="card"><span class="label">Inscriptions</span>
+    <span class="val">{{ run.summary.totals.inscriptions|default:"—" }}</span></div>
+  <div class="card"><span class="label">Words</span>
+    <span class="val">{{ run.summary.totals.words|default:"—" }}</span></div>
+  <div class="card"><span class="label">Content data</span>
+    <span class="val">{{ run.summary.totals.content|default:"—" }}</span></div>
+</div>
+{% if run.summary.per_corpus %}
+<h3>Per corpus</h3>
+<table>
+  <thead><tr><th>Corpus</th><th class="num">Created</th><th class="num">Updated</th></tr></thead>
+  <tbody>
+    {% for corpus, n in run.summary.per_corpus.items %}
+    <tr><td>{{ corpus }}</td><td class="num">{{ n.created }}</td><td class="num">{{ n.updated }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if run.summary.skipped %}
+<h3>Skipped files ({{ run.summary.skipped|length }})</h3>
+<ul class="dim">
+  {% for s in run.summary.skipped %}<li>{{ s }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% endif %}
+
+{% if run.stdout %}
+<h2>stdout</h2>
+<pre class="console">{{ run.stdout }}</pre>
+{% endif %}
+{% if run.stderr %}
+<h2>stderr</h2>
+<pre class="console">{{ run.stderr }}</pre>
+{% endif %}
+{% endblock %}

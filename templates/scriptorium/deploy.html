@@ -1,0 +1,73 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}Deploy — {{ project.name }}{% endblock %}
+
+{% block scriptorium %}
+<div class="breadcrumb">
+  <a href="{% url 'scriptorium:home' %}">Scriptorium</a> /
+  <a href="{% url 'scriptorium:project' project.slug %}">{{ project.name }}</a> /
+  Deploy + remote ingest
+</div>
+<h1>Deploy + remote ingest</h1>
+<p class="tagline">
+  Push code & data drops to <code>{{ project.remote_user }}@{{ project.remote_host }}:{{ project.remote_path }}</code>
+  by running <code>{{ project.deploy_script }}</code>, then optionally re-ingest on the staging host.
+  {% if project.public_url %}<br>Public: <a href="{{ project.public_url }}" target="_blank">{{ project.public_url }}</a>{% endif %}
+</p>
+
+<h2>Push code (rsync + gunicorn restart)</h2>
+<form method="post" action="{% url 'scriptorium:deploy_run' project.slug %}">
+  {% csrf_token %}
+  <p>
+    <button type="submit" class="primary">Run {{ project.deploy_script }}</button>
+  </p>
+</form>
+
+<h2>Remote ingest</h2>
+{% if not project.remote_host %}
+<div class="panel warn">No remote host configured.</div>
+{% else %}
+<form method="post" action="{% url 'scriptorium:remote_ingest_run' project.slug %}">
+  {% csrf_token %}
+  {% if data_drops %}
+  <table>
+    <thead><tr><th></th><th>Name</th><th class="num">.xlsx</th><th>Last modified</th></tr></thead>
+    <tbody>
+      {% for d in data_drops %}
+      <tr>
+        <td><input type="radio" name="data_drop" value="{{ d.name }}" {% if forloop.last %}checked{% endif %}></td>
+        <td>{{ d.name }}</td>
+        <td class="num">{{ d.xlsx_count }}</td>
+        <td class="dim">{{ d.last_modified|date:"Y-m-d H:i" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p>
+    <label><input type="checkbox" name="take_backup" checked> Take remote DB backup first (recommended)</label>
+  </p>
+  <p><button type="submit" class="primary">Run remote ingest with selected drop</button></p>
+  {% else %}
+  <div class="panel warn">No data drops on local disk to push.</div>
+  {% endif %}
+</form>
+{% endif %}
+
+<h2>Recent runs</h2>
+{% if recent_runs %}
+<table>
+  <thead><tr><th>Started</th><th>Op</th><th>Status</th><th>Data drop</th><th></th></tr></thead>
+  <tbody>
+    {% for run in recent_runs %}
+    <tr>
+      <td class="dim">{{ run.started_at|date:"Y-m-d H:i" }}</td>
+      <td>{{ run.get_op_display }}</td>
+      <td><span class="status-{{ run.status }}">{{ run.get_status_display }}</span></td>
+      <td class="dim">{{ run.data_dir|default:"—" }}</td>
+      <td><a href="{% url 'scriptorium:run_detail' run.id %}">detail →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

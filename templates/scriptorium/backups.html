@@ -1,0 +1,79 @@
+{% extends "scriptorium/_base.html" %}
+
+{% block title %}Backups — {{ project.name }}{% endblock %}
+
+{% block scriptorium %}
+<div class="breadcrumb">
+  <a href="{% url 'scriptorium:home' %}">Scriptorium</a> /
+  <a href="{% url 'scriptorium:project' project.slug %}">{{ project.name }}</a> /
+  Backups
+</div>
+<h1>Backups</h1>
+<p class="tagline">
+  Local backups live in <code>{{ project.local_backup_dir|default:"&lt;project&gt;/backups" }}</code>
+  (intentionally outside the source repo). Remote backups sit next to
+  <code>{{ project.db_filename }}</code> on the staging host.
+</p>
+
+<h2>Local backups</h2>
+<form method="post" action="{% url 'scriptorium:local_backup_now' project.slug %}" class="inline">
+  {% csrf_token %}
+  <button type="submit">+ Take local backup now</button>
+</form>
+{% if local_backups %}
+<table>
+  <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th><th></th><th></th></tr></thead>
+  <tbody>
+    {% for b in local_backups %}
+    <tr>
+      <td>{{ b.name }}</td>
+      <td class="num">{{ b.size_bytes|filesizeformat }}</td>
+      <td class="dim">{{ b.modified|date:"Y-m-d H:i:s" }}</td>
+      <td><a href="{% url 'scriptorium:download_backup' project.slug b.name %}">download</a></td>
+      <td>
+        <form method="post" action="{% url 'scriptorium:restore_backup' project.slug %}" class="inline"
+              onsubmit="this.querySelector('[name=confirm_text]').value = prompt('Type RESTORE to overwrite current db.sqlite3 with {{ b.name }}.') || '';">
+          {% csrf_token %}
+          <input type="hidden" name="location" value="local">
+          <input type="hidden" name="backup_name" value="{{ b.name }}">
+          <input type="hidden" name="confirm_text" value="">
+          <button type="submit" class="danger">restore</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="dim">None yet.</p>
+{% endif %}
+
+<h2>Remote backups</h2>
+{% if not project.remote_host %}
+<p class="dim">No remote host configured.</p>
+{% else %}
+<form method="post" action="{% url 'scriptorium:remote_backup_now' project.slug %}" class="inline">
+  {% csrf_token %}
+  <button type="submit">+ Take remote backup now</button>
+</form>
+{% if remote_error %}
+<div class="panel error">Couldn't list remote backups: {{ remote_error }}</div>
+{% elif remote_backups %}
+<table>
+  <thead><tr><th>Name</th><th class="num">Size</th><th>Modified</th></tr></thead>
+  <tbody>
+    {% for b in remote_backups %}
+    <tr>
+      <td>{{ b.name }}</td>
+      <td class="num">{{ b.size_bytes|filesizeformat }}</td>
+      <td class="dim">{{ b.modified|date:"Y-m-d H:i:s" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="dim">Remote restore is intentionally not exposed as a button — restore by hand on the staging host.</p>
+{% else %}
+<p class="dim">None yet.</p>
+{% endif %}
+{% endif %}
+{% endblock %}
