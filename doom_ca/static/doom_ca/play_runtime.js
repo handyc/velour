@@ -1534,13 +1534,136 @@
     return cell >= PLATFORM_WALL_THRESH;
   }
 
+  // Drop from row 1 down `col` until the cell directly below is a
+  // wall.  Returns the standing y (the cell the player will occupy)
+  // or -1 if the column is fully open (no floor anywhere).
+  function platformDropFromTop (col) {
+    if (col < 0 || col >= GRID) return -1;
+    var sy = 1;
+    while (sy < GRID - 1 && !platformIsWall(col, sy + 1)) sy++;
+    if (sy <= 0)            return -1;
+    if (platformIsWall(col, sy)) return -1;
+    return sy;
+  }
+
+  // Spiral outward from the centre column looking for a spawn that
+  // (a) has standing room and (b) has at least one walkable
+  // horizontal neighbour.  Centre column ignores the freedom check
+  // first time round so legacy behaviour wins when the centre is
+  // already fine.
+  function findSafePlatformSpawn () {
+    var cx = (GRID / 2) | 0;
+    var centre_sy = platformDropFromTop(cx);
+    if (centre_sy >= 0
+        && (!platformIsWall(cx - 1, centre_sy)
+         || !platformIsWall(cx + 1, centre_sy))) {
+      return { x: cx, y: centre_sy, source: 'centre' };
+    }
+    for (var r = 1; r < GRID; r++) {
+      for (var sign = -1; sign <= 1; sign += 2) {
+        var col = cx + r * sign;
+        if (col < 1 || col >= GRID - 1) continue;
+        var sy = platformDropFromTop(col);
+        if (sy < 0) continue;
+        var leftOK  = !platformIsWall(col - 1, sy);
+        var rightOK = !platformIsWall(col + 1, sy);
+        if (leftOK || rightOK) {
+          return { x: col, y: sy, source: 'spiral@r=' + r };
+        }
+      }
+    }
+    // Last resort: any column with standing room, even if hemmed in.
+    for (var col2 = 1; col2 < GRID - 1; col2++) {
+      var sy2 = platformDropFromTop(col2);
+      if (sy2 >= 0) return { x: col2, y: sy2, source: 'fallback' };
+    }
+    // Truly hopeless map: spawn dead-centre, the player will bleed
+    // out from the wall-crush damage code.
+    return { x: cx, y: 1, source: 'crushed' };
+  }
+
+  // Flood-fill reachability with platform-physics constraints.  From
+  // the spawn cell, BFS to every cell reachable by:
+  //   - walking left/right one cell at a time (target cell non-wall)
+  //   - jumping up to PLATFORM_JUMP_H cells if the destination column
+  //     allows it (no wall along the rise)
+  //   - free fall (any number of cells down to the next floor).
+  // Returns { reachable, open, ratio }.  ratio < 0.15 → unplayable.
+  var PLATFORM_JUMP_H = 3;
+  function platformReachableCells (spawnX, spawnY) {
+    var visited = new Uint8Array(GRID * GRID);
+    var queue = [];
+    var sx = spawnX | 0, sy = spawnY | 0;
+    if (sy < 0 || sy >= GRID || sx < 0 || sx >= GRID) {
+      return { reachable: 0, open: 0, ratio: 0 };
+    }
+    var sIdx = sy * GRID + sx;
+    visited[sIdx] = 1;
+    queue.push([sx, sy]);
+    var reachable = 1;
+    while (queue.length) {
+      var p = queue.pop();
+      var x = p[0], y = p[1];
+      // Free-fall down to the next floor.
+      var fy = y;
+      while (fy < GRID - 1 && !platformIsWall(x, fy + 1)) {
+        fy++;
+        var idx = fy * GRID + x;
+        if (!visited[idx] && !platformIsWall(x, fy)) {
+          visited[idx] = 1; reachable++; queue.push([x, fy]);
+        }
+      }
+      var standing_y = fy;       // the cell the player rests on
+      // Walk + jump in each direction.
+      for (var dx = -1; dx <= 1; dx += 2) {
+        var nx = x + dx;
+        if (nx < 0 || nx >= GRID) continue;
+        for (var jy = -PLATFORM_JUMP_H; jy <= 0; jy++) {
+          // jy=0 is straight walk; jy=-1..-3 simulate jumping up
+          var ny = standing_y + jy;
+          if (ny < 0 || ny >= GRID) continue;
+          if (platformIsWall(nx, ny)) continue;
+          // For jumps we also need the column above the source to be
+          // clear so the player has headroom.
+          var headroomBlocked = false;
+          for (var hy = standing_y + jy; hy < standing_y; hy++) {
+            if (platformIsWall(x, hy)) { headroomBlocked = true; break; }
+          }
+          if (headroomBlocked) continue;
+          var nidx = ny * GRID + nx;
+          if (visited[nidx]) continue;
+          visited[nidx] = 1; reachable++; queue.push([nx, ny]);
+        }
+      }
+    }
+    var open = 0;
+    for (var i = 0; i < GRID * GRID; i++) {
+      var rr = (i / GRID) | 0, cc = i % GRID;
+      if (!platformIsWall(cc, rr)) open++;
+    }
+    return { reachable: reachable, open: open,
+              ratio: open > 0 ? reachable / open : 0 };
+  }
+
+  // Most-recent playability metric, surfaced in the HUD so the user
+  // can see when a level is cramped (ratio < ~30 %).
+  var platformPlayInfo = null;
+
   function initPlatformMode () {
     world = seedGrid(seed[COMPONENT]).slice();
-    // Find a spawn at the top: highest non-wall column, then drop.
-    var spawnCol = (GRID / 2) | 0;
-    var sx = spawnCol, sy = 1;
-    while (sy < GRID - 1 && !platformIsWall(sx, sy + 1)) sy++;
-    sy = Math.max(1, sy - 1);
+    var spawn = findSafePlatformSpawn();
+    var spawnCol = spawn.x, sx = spawn.x, sy = spawn.y;
+    var play = platformReachableCells(sx, sy);
+    platformPlayInfo = {
+      spawnX: sx, spawnY: sy, source: spawn.source,
+      reachable: play.reachable, open: play.open, ratio: play.ratio,
+    };
+    if (window.console && console.log) {
+      console.log('[doom-ca platform] spawn (' + sx + ',' + sy +
+                   ') via ' + spawn.source +
+                   ' · reachable ' + play.reachable + '/' + play.open +
+                   ' (' + Math.round(100 * play.ratio) + '%)');
+    }
     player = {
       x: sx + 0.5, y: sy - 0.4,             // float coords (cell units)
       vx: 0, vy: 0, onGround: false,
@@ -1764,8 +1887,18 @@
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.font = '10px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('platform · cells: ' + wallsDrawn
-                 + ' · thresh: ' + PLATFORM_WALL_THRESH, 6, H - 6);
+    var hud = 'platform · cells: ' + wallsDrawn
+              + ' · thresh: ' + PLATFORM_WALL_THRESH;
+    if (platformPlayInfo) {
+      var pct = Math.round(100 * platformPlayInfo.ratio);
+      hud += ' · play: ' + pct + '%';
+      if (pct < 30) {
+        ctx.fillStyle = 'rgba(255,160,80,0.85)';
+        hud += ' (cramped — try a different pact)';
+      }
+      hud += ' · spawn: ' + platformPlayInfo.source;
+    }
+    ctx.fillText(hud, 6, H - 6);
     // Door, key, exit
     function drawOverlay (idx, drawFn) {
       if (idx == null || idx < 0) return;
