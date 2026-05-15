@@ -32,7 +32,9 @@ def _render_illusion_svg(illusion, params, *,
     """Run the illusion → 2D color-index array → CSS-color array →
     gridprint hex_grid SVG.  Pure: same inputs always → same SVG."""
     indices = illusion.render(grid_w, grid_h, params)
-    palette = illusion.PALETTE
+    palette = (illusion.get_palette(params)
+               if hasattr(illusion, 'get_palette')
+               else illusion.PALETTE)
     fill = [
         [palette[ix % len(palette)] for ix in row]
         for row in indices

@@ -40,18 +40,61 @@ DESCRIPTION = ('Magic-Eye-style hex stereogram. Cross or diverge '
                 'Default hex size is small (~1.4 mm) so an A4 print '
                 'fills with ~110 columns of useful resolution.')
 
-# Tighter default than the geometric illusions: small hexes give
-# enough columns that the silhouette shapes read as recognisable
-# figures.
-DEFAULT_CELL_MM = 1.4
-DEFAULT_GRID_W  = 90
-DEFAULT_GRID_H  = 60
+# Half the previous default → much higher cell count.  At 0.7 mm
+# hex side an A4 sheet packs ~155 columns × ~265 rows ≈ 41,000
+# hexes — enough resolution that an uploaded image reads like a
+# real photo when the eyes fuse.
+DEFAULT_CELL_MM = 0.7
+DEFAULT_GRID_W  = 140
+DEFAULT_GRID_H  = 90
 
+# The baked default palette.  Used when palette_seed = 0; otherwise
+# get_palette() generates an HSV-spread set deterministic in seed.
 PALETTE = [
     '#202020', '#5a3a1a', '#a07020',
     '#306030', '#3070a0', '#a03060',
     '#c0a040', '#e0e0e0',
 ]
+
+
+def _hsv_to_hex(h: float, s: float, v: float) -> str:
+    """Compact HSV → '#rrggbb' (avoids importing colorsys at module
+    top so the file still loads cleanly without it)."""
+    import colorsys
+    r, g, b = colorsys.hsv_to_rgb(h % 1.0, max(0.0, min(1.0, s)),
+                                    max(0.0, min(1.0, v)))
+    return '#{:02x}{:02x}{:02x}'.format(int(r*255), int(g*255), int(b*255))
+
+
+def _palette_from_seed(seed: int, n: int = 8) -> list[str]:
+    """Generate `n` distinct HSV-spread CSS colours deterministic in
+    `seed`.  Hues are spaced evenly around the wheel with small per-
+    swatch jitter; saturation + value are sampled from comfortable
+    print-friendly ranges.  Same seed → same colours every time."""
+    state = seed & 0xFFFFFFFF
+    if state == 0: state = 1
+    def step():
+        nonlocal state
+        state = (state * 1103515245 + 12345) & 0xFFFFFFFF
+        return state >> 16
+    base_hue = (step() & 0xFF) / 255.0
+    out = []
+    for i in range(n):
+        h = (base_hue + i / n + (step() & 0x3F) / 4096.0) % 1.0
+        s = 0.5 + (step() & 0xFF) / 511.0
+        v = 0.40 + (step() & 0xFF) / 511.0
+        out.append(_hsv_to_hex(h, s, v))
+    return out
+
+
+def get_palette(params: dict) -> list[str]:
+    """Resolved palette for a render call: defaults to PALETTE; with
+    palette_seed > 0, returns a deterministic HSV-spread palette."""
+    try: seed = int(params.get('palette_seed', 0)) & 0xFFFFFFFF
+    except (TypeError, ValueError): seed = 0
+    if not seed:
+        return PALETTE
+    return _palette_from_seed(seed, n=len(PALETTE))
 
 
 # ── Classic-image silhouette bitmaps ─────────────────────────────────
@@ -159,12 +202,16 @@ PARAMS = [
                 'hand, …) read as recognisable figures when fused.  '
                 'Pick "custom-image" and use the upload widget to '
                 'supply your own depth map from any image.'),
-    Param('shape_size', 'shape size (hex radius)',       'int', 28,  4, 80, 1,
+    Param('shape_size', 'shape size (hex radius)',       'int', 56,  4,160, 1,
            help='Half-extent of the shape in hex cells.  For silhouettes '
                 'and custom images this is the bounding-box half-side.'),
     Param('palette_n',  'palette size',                  'int', 6,  2, 8, 1,
            help='How many distinct colours the repeating pattern uses.  '
                 'Smaller is easier to fuse; 4-6 is the sweet spot.'),
+    Param('palette_seed','palette seed (0 = default)',    'int', 0,  0, 1<<30, 1,
+           help='Non-zero overrides the baked palette with an HSV-spread '
+                'set deterministic in this seed.  Use the 🎨 reroll '
+                'button next to it to pick a fresh random one.'),
     Param('pattern_seed','pattern seed',                 'int', 42, 0, 1<<30, 1,
            help='Deterministic seed for the in-period colour pattern.'),
     Param('depth_image_hash', 'depth image hash',         'text', '',

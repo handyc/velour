@@ -510,7 +510,9 @@ def _optikon_svg(request, slug: str):
     grid_h = max(8, int(page.inner_h / (cell * 1.5))   + 2)
 
     indices = illusion.render(grid_w, grid_h, params)
-    palette = illusion.PALETTE
+    palette = (illusion.get_palette(params)
+               if hasattr(illusion, 'get_palette')
+               else illusion.PALETTE)
     fill = [
         [palette[ix % len(palette)] for ix in row]
         for row in indices

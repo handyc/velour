@@ -61,7 +61,28 @@
                    value="{{ f.value }}"
                    {% if f.min is not None %}min="{{ f.min }}"{% endif %}
                    {% if f.max is not None %}max="{{ f.max }}"{% endif %}
-                   {% if f.step %}step="{{ f.step }}"{% endif %}>
+                   {% if f.step %}step="{{ f.step }}"{% endif %}
+                   {% if f.kind == 'text' %}type="text"{% endif %}>
+            {% if f.key == 'palette_seed' %}
+              <button type="button"
+                      onclick="var s=document.getElementById('p-palette_seed');s.value=Math.floor(Math.random()*2147483647);s.form.submit();"
+                      style="margin-top:4px; padding:2px 8px; font-size:0.78rem;
+                              background:#222; color:#fc6; border:1px solid #663;
+                              cursor:pointer;"
+                      title="Pick a fresh random palette and re-render">
+                🎨 reroll palette
+              </button>
+            {% endif %}
+            {% if f.key == 'pattern_seed' %}
+              <button type="button"
+                      onclick="var s=document.getElementById('p-pattern_seed');s.value=Math.floor(Math.random()*2147483647);s.form.submit();"
+                      style="margin-top:4px; padding:2px 8px; font-size:0.78rem;
+                              background:#222; color:#cfc; border:1px solid #555;
+                              cursor:pointer;"
+                      title="Pick a fresh random pattern and re-render">
+                🎲 reroll pattern
+              </button>
+            {% endif %}
           {% endif %}
           {% if f.help %}<div class="help">{{ f.help }}</div>{% endif %}
         </div>
