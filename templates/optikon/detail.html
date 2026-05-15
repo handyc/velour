@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}optikon — {{ illusion.NAME }}{% endblock %}
+{% block content %}
+<style>
+  .ok-page { max-width: 80em; }
+  .ok-page h1 { margin: 0 0 4px; }
+  .ok-page .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 12px; }
+  .ok-page .crumbs a { color: #ace; }
+  .ok-page p.intro { color: #aaa; max-width: 46em; }
+  .ok-layout { display: grid; grid-template-columns: 18em 1fr; gap: 16px;
+                margin-top: 14px; }
+  .ok-form { padding: 12px 14px; border: 1px solid #1f1f1f;
+              background: #0a0a0a; }
+  .ok-form .field { margin-bottom: 8px; }
+  .ok-form label { display: block; color: #888; font-size: 0.7rem;
+                    text-transform: uppercase; letter-spacing: 0.06em;
+                    margin-bottom: 2px; }
+  .ok-form input[type=number], .ok-form input[type=text],
+  .ok-form select {
+    background: #111; color: #ddd; border: 1px solid #333;
+    padding: 4px 6px; font-family: inherit; width: 100%;
+    box-sizing: border-box;
+  }
+  .ok-form .help { color: #777; font-size: 0.72rem; margin-top: 2px; }
+  .ok-form button { background: #1a3a1a; color: #cfc;
+                     border: 1px solid #4a6; padding: 6px 16px;
+                     font-family: inherit; cursor: pointer;
+                     width: 100%; margin-top: 8px; }
+  .ok-form button:hover { background: #2a4a2a; }
+  .ok-form .print { background: #2a1a3a; border-color: #94c; color: #d8c; }
+  .ok-form .print:hover { background: #3a2a4a; }
+  .ok-preview { padding: 12px 14px; border: 1px solid #1f1f1f;
+                 background: #0a0a0a; }
+  .ok-preview svg { max-width: 100%; height: auto; display: block; }
+  .ok-meta { color: #888; font-size: 0.78rem; margin-top: 8px; }
+  .ok-meta code { color: #ddd; }
+</style>
+
+<div class="ok-page">
+  <div class="crumbs">
+    <a href="{% url 'optikon:index' %}">optikon</a> ›
+    {{ illusion.NAME }}
+  </div>
+  <h1>{{ illusion.NAME }}</h1>
+  <p class="intro">{{ illusion.DESCRIPTION }}</p>
+
+  <div class="ok-layout">
+    <form method="get" class="ok-form">
+      {% for f in field_rows %}
+        <div class="field">
+          <label for="p-{{ f.key }}">{{ f.label }}</label>
+          {% if f.kind == 'choice' %}
+            <select id="p-{{ f.key }}" name="{{ f.key }}">
+              {% for c in f.choices %}
+                <option value="{{ c }}"
+                  {% if c == f.value %}selected{% endif %}>{{ c }}</option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <input type="number" id="p-{{ f.key }}" name="{{ f.key }}"
+                   value="{{ f.value }}"
+                   {% if f.min is not None %}min="{{ f.min }}"{% endif %}
+                   {% if f.max is not None %}max="{{ f.max }}"{% endif %}
+                   {% if f.step %}step="{{ f.step }}"{% endif %}>
+          {% endif %}
+          {% if f.help %}<div class="help">{{ f.help }}</div>{% endif %}
+        </div>
+      {% endfor %}
+
+      <div class="field">
+        <label>preview grid (hexes)</label>
+        <input type="text" name="grid_w" value="{{ grid_w }}"
+               style="width:5em;display:inline-block;"> ×
+        <input type="text" name="grid_h" value="{{ grid_h }}"
+               style="width:5em;display:inline-block;">
+      </div>
+      <div class="field">
+        <label>hex size (mm)</label>
+        <input type="text" name="side_mm" value="{{ side_mm }}">
+      </div>
+
+      <button type="submit">re-render</button>
+      <button type="submit" class="print"
+              formaction="{% url 'optikon:print' slug=illusion.SLUG %}"
+              formmethod="get">→ print at A4</button>
+    </form>
+
+    <div class="ok-preview">
+      {{ svg|safe }}
+      <div class="ok-meta">
+        rendered as <code>{{ grid_w }} × {{ grid_h }}</code> hexes
+        at <code>{{ side_mm }}</code> mm side ·
+        <a href="{% url 'optikon:svg' slug=illusion.SLUG %}?{{ print_qs }}"
+           style="color:#ace;">view raw SVG</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

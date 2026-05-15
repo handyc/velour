@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}optikon — print {{ illusion.NAME }}{% endblock %}
+{% block content %}
+<style>
+  .op-print { max-width: 64em; }
+  .op-print .crumbs { color: #888; font-size: 0.85rem; margin-bottom: 12px; }
+  .op-print .crumbs a { color: #ace; }
+  .op-print h1 { margin: 0 0 4px; }
+  .op-print .meta { color: #888; font-size: 0.85rem; margin: 6px 0 14px; }
+  .op-print .sheet { border: 1px solid #1f1f1f; background: #fff;
+                      padding: 0; display: inline-block; margin-top: 8px; }
+  .op-print svg { display: block; }
+  @media print {
+    body, .op-print { background: #fff !important; }
+    .crumbs, .meta, h1 { display: none !important; }
+    .op-print .sheet { border: 0 !important; }
+  }
+</style>
+<div class="op-print">
+  <div class="crumbs">
+    <a href="{% url 'optikon:index' %}">optikon</a> ›
+    <a href="{% url 'optikon:detail' slug=illusion.SLUG %}">{{ illusion.NAME }}</a> ›
+    print
+  </div>
+  <h1>{{ illusion.NAME }} — A4 print</h1>
+  <div class="meta">
+    {{ grid_w }} × {{ grid_h }} hexes at {{ side_mm }} mm side ·
+    Use your browser's <strong>Print</strong> command (Ctrl/Cmd-P)
+    and pick "actual size" so the hex side prints at the configured
+    millimetres.
+  </div>
+  <div class="sheet">{{ svg|safe }}</div>
+</div>
+{% endblock %}

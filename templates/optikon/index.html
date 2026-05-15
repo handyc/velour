@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}optikon — illusion catalogue{% endblock %}
+{% block content %}
+<style>
+  .ok-page { max-width: 60em; }
+  .ok-page h1 { margin: 0 0 4px; }
+  .ok-page p.intro { color: #aaa; max-width: 46em; }
+  .ok-page p.intro code { color: #ddd; padding: 0 4px; background: #1a1a1a; }
+  .ok-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+              margin-top: 16px; }
+  .ok-card { display: block; padding: 12px 14px;
+              border: 1px solid #1f1f1f; background: #0a0a0a;
+              text-decoration: none; color: inherit; }
+  .ok-card:hover { border-color: #335; background: #0a0a14; }
+  .ok-card h2 { margin: 0 0 4px; font-size: 1rem; color: #cfc;
+                 font-weight: normal; }
+  .ok-card p  { margin: 0; color: #aaa; font-size: 0.85rem; }
+  .ok-card .arr { float: right; color: #6c6; }
+</style>
+
+<div class="ok-page">
+  <h1>optikon — hex-grid optical illusions</h1>
+  <p class="intro">
+    Classic optical illusions rendered onto our standard hexagonal
+    grid &mdash; every illusion is a function
+    <code>(row, col, params) → palette index</code>, so each hex
+    holds exactly one solid colour.  Same hex topology as Tessera,
+    Escher, Spoeqi, and Hexhunter.  Print at A4 via Gridprint.
+  </p>
+
+  <div class="ok-list">
+    {% for ill in illusions %}
+      <a class="ok-card" href="{% url 'optikon:detail' slug=ill.SLUG %}">
+        <span class="arr">→</span>
+        <h2>{{ ill.NAME }}</h2>
+        <p>{{ ill.DESCRIPTION }}</p>
+      </a>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

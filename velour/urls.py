@@ -94,6 +94,7 @@ urlpatterns = [
     path('escher/',      include('escher.urls')),
     path('loupe/',       include('loupe.urls')),
     path('scriptorium/', include('scriptorium.urls')),
+    path('optikon/',     include('optikon.urls')),
 
     path('admin/', admin.site.urls),
     path('accounts/login/', auth_views.LoginView.as_view(), name='login'),

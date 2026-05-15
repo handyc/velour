@@ -162,6 +162,7 @@ INSTALLED_APPS = [
     'escher',
     'loupe',
     'scriptorium',
+    'optikon',
 ]
 
 MIDDLEWARE = [
