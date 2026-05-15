@@ -6,6 +6,8 @@ just hit the same SVG URL.
 """
 from __future__ import annotations
 
+import math
+
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import render
@@ -94,6 +96,14 @@ def grid_svg(request):
     tilesmith_slug = (request.GET.get('from_tilesmith') or '').strip()
     if tilesmith_slug or pattern == 'tilesmith':
         return _tilesmith_svg(request, tilesmith_slug)
+
+    # Optikon mode: an optical-illusion slug drives the fill.
+    # Triggered by ?pattern=optikon or ?from_optikon=<illusion_slug>.
+    # The illusion's params travel as ordinary query string params
+    # (the same names the optikon playground form uses).
+    optikon_slug = (request.GET.get('from_optikon') or '').strip()
+    if optikon_slug or pattern == 'optikon':
+        return _optikon_svg(request, optikon_slug)
 
     if pattern not in svg.PATTERNS or pattern in ('tilesmith', 'escher',
                                                      'loupe'):
@@ -440,6 +450,84 @@ def _escher_svg(request, slug: str):
     if request.GET.get('download') == '1':
         resp['Content-Disposition'] = (
             f'attachment; filename="escher-{group.slug}.svg"')
+    return resp
+
+
+# ─── Optikon mode ──────────────────────────────────────────────────
+
+def _optikon_svg(request, slug: str):
+    """Render an optikon optical illusion at A4 by computing its
+    color-index grid through the optikon library and feeding the
+    fill array to gridprint's standard hex_grid().
+
+    Query knobs (in addition to the usual cell/margin/landscape):
+      ``from_optikon=<illusion_slug>`` — required
+      ``cell=<mm>``                    — hex side in mm (default 4)
+      ``margin=<mm>``                  — page margin (default 10)
+      ``landscape=1``
+      ``border=1``
+      ``download=1``                   — content-disposition attachment
+      <illusion-specific params>       — same names as the optikon form
+    """
+    import html
+    from optikon import illusions as ill
+
+    landscape = request.GET.get('landscape') == '1'
+    margin    = _float(request, 'margin', 10.0, lo=0.0, hi=40.0)
+    cell      = _float(request, 'cell',    4.0, lo=2.0, hi=20.0)
+    border    = request.GET.get('border') == '1'
+    page_w    = svg.A4_H if landscape else svg.A4_W
+    page_h    = svg.A4_W if landscape else svg.A4_H
+
+    def _err(msg: str):
+        body = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" '
+            f'viewBox="0 0 {page_w} {page_h}" '
+            f'preserveAspectRatio="xMidYMid meet">'
+            f'<text x="{margin}" y="{margin + 6}" '
+            f'font-family="ui-monospace,monospace" font-size="4" '
+            f'fill="#c04a4a">optikon: {html.escape(msg)}</text></svg>'
+        )
+        return HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+
+    if not slug: return _err('provide ?from_optikon=<illusion_slug>')
+    illusion = ill.get(slug)
+    if illusion is None: return _err(f'unknown illusion {slug!r}')
+
+    raw = {p.key: request.GET[p.key]
+           for p in illusion.PARAMS if p.key in request.GET}
+    params = ill.parse_params(illusion.PARAMS, raw)
+
+    page = svg.Page(w_mm=page_w, h_mm=page_h, margin_mm=margin)
+    # Fill the printable area at the requested hex side.
+    sqrt3 = math.sqrt(3)
+    grid_w = max(8, int(page.inner_w / (cell * sqrt3)) + 2)
+    grid_h = max(8, int(page.inner_h / (cell * 1.5))   + 2)
+
+    indices = illusion.render(grid_w, grid_h, params)
+    palette = illusion.PALETTE
+    fill = [
+        [palette[ix % len(palette)] for ix in row]
+        for row in indices
+    ]
+    style = svg.Style(color='#222222', width_mm=0.05, alpha=1.0)
+    body  = svg.hex_grid(page=page, side_mm=cell, style=style,
+                          pointy_top=True, fill=fill,
+                          with_dimensions=False)
+
+    if border:
+        body = body.replace(
+            '</svg>',
+            f'<rect x="{page.left}" y="{page.top}" '
+            f'width="{page.inner_w}" height="{page.inner_h}" '
+            f'fill="none" stroke="#cccccc" stroke-width="0.1" '
+            f'stroke-dasharray="0.6 0.6" /></svg>',
+        )
+
+    resp = HttpResponse(body, content_type='image/svg+xml; charset=utf-8')
+    if request.GET.get('download') == '1':
+        resp['Content-Disposition'] = (
+            f'attachment; filename="optikon-{slug}.svg"')
     return resp
 
 

@@ -66,9 +66,13 @@ def detail(request, slug):
     svg_str = _render_illusion_svg(illusion, params,
                                     grid_w=grid_w, grid_h=grid_h,
                                     page=page, side_mm=side_mm)
-    print_qs = urlencode({**params, 'side_mm': 4.0})
-    # Pre-zip each spec with its current value so the template doesn't
-    # need a custom dict-lookup filter.
+    # Hand-off to gridprint: same illusion params + a hex side in mm
+    # that's smaller than the on-screen preview so the printed page
+    # fills with rich detail.
+    print_qs = urlencode({'from_optikon': illusion.SLUG,
+                           'cell':         4.0,
+                           **params})
+    raw_qs = urlencode({**params, 'side_mm': 6.0})
     field_rows = []
     for p in illusion.PARAMS:
         field_rows.append({**p.as_dict(), 'value': params.get(p.key, p.default)})
@@ -81,6 +85,7 @@ def detail(request, slug):
         'side_mm':    side_mm,
         'svg':        svg_str,
         'print_qs':   print_qs,
+        'raw_qs':     raw_qs,
     })
 
 
@@ -104,29 +109,19 @@ def svg(request, slug):
 
 @login_required
 def print_view(request, slug):
-    """A4 printable rendering — fills the printable area with the
-    illusion at the requested hex side_mm.  Reuses gridprint's page
-    geometry (210x297 mm, margin 10 mm)."""
+    """Hand off to gridprint's standard print flow, which renders the
+    illusion at A4 by calling back into optikon via from_optikon=...
+    and reuses gridprint's iframe-based Print + Download SVG buttons.
+
+    Kept as a redirect so old bookmarks of /optikon/<slug>/print keep
+    working; new links go straight to /gridprint/print/.
+    """
     illusion = ill.get(slug)
     if illusion is None: raise Http404(f'unknown illusion {slug!r}')
     params = _resolve_params(illusion, request)
-    side_mm = max(2.0, min(float(request.GET.get('side_mm', 4.0)), 20.0))
-    page = gp_svg.Page()    # default A4 portrait, margin 10 mm
-    # Compute the grid size that fills the printable area at this hex size.
-    import math
-    sqrt3 = math.sqrt(3)
-    grid_w = max(8, int(page.inner_w / (side_mm * sqrt3)) + 2)
-    grid_h = max(8, int(page.inner_h / (side_mm * 1.5))   + 2)
-    body = _render_illusion_svg(illusion, params,
-                                 grid_w=grid_w, grid_h=grid_h,
-                                 page=page, side_mm=side_mm)
-    if request.GET.get('format') == 'svg':
-        return HttpResponse(body, content_type='image/svg+xml')
-    return render(request, 'optikon/print.html', {
-        'illusion': illusion,
-        'svg':      body,
-        'params':   params,
-        'side_mm':  side_mm,
-        'grid_w':   grid_w,
-        'grid_h':   grid_h,
-    })
+    qs = urlencode({'pattern': 'optikon',
+                     'from_optikon': illusion.SLUG,
+                     'cell': request.GET.get('cell', 4.0),
+                     **params})
+    from django.shortcuts import redirect
+    return redirect(f'/gridprint/print/?{qs}')

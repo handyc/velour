@@ -80,9 +80,19 @@
       </div>
 
       <button type="submit">re-render</button>
+      {% comment %}
+        Print button: submits the current form values to gridprint's
+        print view, which iframes /gridprint/grid.svg?pattern=optikon
+        &from_optikon=<slug>&...  Hidden inputs steer pattern + slug;
+        the user's typed-in illusion params ride along automatically.
+      {% endcomment %}
       <button type="submit" class="print"
-              formaction="{% url 'optikon:print' slug=illusion.SLUG %}"
-              formmethod="get">→ print at A4</button>
+              formaction="/gridprint/print/" formmethod="get">
+        → print at A4 via gridprint
+      </button>
+      <input type="hidden" name="pattern"      value="optikon">
+      <input type="hidden" name="from_optikon" value="{{ illusion.SLUG }}">
+      <input type="hidden" name="cell"         value="4.0">
     </form>
 
     <div class="ok-preview">
